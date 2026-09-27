@@ -12,6 +12,7 @@ import type {
   RegionRecord,
   SketchReferenceImageRecord,
   SketchDefinition,
+  SketchDerivedValidity,
   SketchEntityDefinition,
   SketchStyleDefinition,
   SketchStyleRecord,
@@ -156,19 +157,21 @@ export function getStableSketchSessionDisplayRenderables(
     ),
   );
   const derivedValidity = getSketchSessionDerivedValidity(session);
-  const regionRenderables = session.solvedRegions.flatMap((region, index) => {
-    const renderable = createDisplayRenderableForRegion(
-      session,
-      displayDefinition,
-      region,
-      index,
-      regionStyleLookup.get(region.regionId),
-      derivedValidity.state,
-    );
-    return renderable
-      ? [withSketchConstraintDisplay(renderable, constraintDisplaySummary)]
-      : [];
-  });
+  const regionRenderables = session.liveRegions.regions.flatMap(
+    (region, index) => {
+      const renderable = createDisplayRenderableForRegion(
+        session,
+        displayDefinition,
+        region,
+        index,
+        regionStyleLookup.get(region.regionId),
+        derivedValidity.state,
+      );
+      return renderable
+        ? [withSketchConstraintDisplay(renderable, constraintDisplaySummary)]
+        : [];
+    },
+  );
   const pointRenderables = displayDefinition.points.map((point) => {
     const style = pointStyleLookup.get(point.pointId);
     const isVisibleReferenceImageAnchor =
@@ -393,9 +396,8 @@ export function getStableSketchSessionDisplayKey(
     objectIdentity(session.definition),
     objectIdentity(session.projectedReferences),
     objectIdentity(session.projectionDiagnostics),
-    objectIdentity(session.solvedRegions),
-    session.liveRegionState?.freshness ?? "no-live-regions",
-    session.liveRegionState?.pendingSinceSequence ?? "no-pending-regions",
+    objectIdentity(session.liveRegions),
+    session.liveSolve ? objectIdentity(session.liveSolve) : "no-live-solve",
     session.activeSpecialMode
       ? [
           session.activeSpecialMode.modeId,
@@ -484,7 +486,7 @@ export function createDisplayRenderableForRegion(
   region: RegionRecord,
   index: number,
   style: SketchEntityDisplayStyle | undefined,
-  validity: SketchSessionState["derivedValidity"]["state"] = "current",
+  validity: SketchDerivedValidity["state"] = "current",
 ): SketchSessionDisplayRenderable | null {
   const triangulated = triangulateSketchRegionLoops(definition, region);
   if (!triangulated) {
@@ -507,6 +509,7 @@ export function createDisplayRenderableForRegion(
     linePattern: "solid",
     role: "local",
     semanticClass: "region",
+    regionValidity: validity,
     paintStyle: style?.paintStyle,
     strokeStyle: style?.strokeStyle,
   };

@@ -13,9 +13,14 @@ import {
   beginSketchTool,
   createNewSketchSessionFromSupport,
   deleteSelectedSketchGeometry,
+  getSketchSessionLiveRegionBasis,
   startSketchDraw,
 } from "@/domain/editor/sketch-session";
-import { createModelingServiceEditorEffectRuntime } from "./effect-registry";
+import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
+import {
+  createModelingServiceEditorEffectRuntime,
+  runEditorEffect,
+} from "./effect-registry";
 import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
 
 test("commits the current authored sketch after deletion without resurrecting a history tail", async () => {
@@ -159,4 +164,103 @@ test("sketch reference projection uses the live session's document tolerance pol
   ).toEqual([
     { coincidence: 0.02, angleRadians: 0.003, minimumSegmentLength: 0.02 },
   ]);
+});
+
+test("live region derivation goes through the modeling service sketch solver boundary and completes as sketchRegionsDerived", async () => {
+  let session = createNewSketchSessionFromSupport(
+    { kind: "construction", constructionId: "construction_plane-xy" },
+    OCC_KERNEL_SETTINGS,
+  );
+  session = acceptSketchDraw(
+    startSketchDraw(beginSketchTool(session, "rectangle"), [0, 0]),
+    [2, 1],
+  );
+  const basis = getSketchSessionLiveRegionBasis(session);
+  expect(basis, "An edited session carries a live solve basis.").toBeTruthy();
+  const requests: unknown[] = [];
+  const unused = () => {
+    throw new Error("Only live region derivation is exercised here.");
+  };
+  const runtime = createModelingServiceEditorEffectRuntime({
+    getCurrentDocumentSnapshot: unused,
+    projectSketchExternalReferences: unused,
+    sketchSolver: {
+      async deriveSketchRegions(input) {
+        requests.push(input);
+        return { regions: [], diagnostics: [] };
+      },
+      createCommitCorrelation: unused,
+      projectExternalReferences: unused,
+    },
+    commitSketch: unused,
+    evaluatePreview: unused,
+    createFeature: unused,
+    updateFeature: unused,
+    setFeatureCursor: unused,
+  });
+
+  const event = await runEditorEffect(
+    {
+      type: "sketch.deriveRegions",
+      background: true,
+      requestId: "request_live_regions-1" as RequestId,
+      commandSessionId: "command_sketch-1",
+      documentId: "doc_fixture" as DocumentId,
+      baseRevisionId: "rev_0001" as RevisionId,
+      generation: 7,
+      basis: basis!,
+    },
+    runtime,
+  );
+
+  expect(requests).toEqual([
+    {
+      solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+      requestId: "request_live_regions-1",
+      documentId: "doc_fixture",
+      revisionId: "rev_0001",
+      sketchId: basis!.sketchId,
+      definition: basis!.definition,
+      solvedSnapshot: basis!.solvedSnapshot,
+      projectedReferences: basis!.projectedReferences,
+    },
+  ]);
+  expect(event).toEqual({
+    type: "effect.sketchRegionsDerived",
+    requestId: "request_live_regions-1",
+    documentId: "doc_fixture",
+    commandSessionId: "command_sketch-1",
+    baseRevisionId: "rev_0001",
+    generation: 7,
+    regions: [],
+    diagnostics: [],
+  });
+
+  await expect(
+    runEditorEffect(
+      {
+        type: "sketch.deriveRegions",
+        background: true,
+        requestId: "request_live_regions-2" as RequestId,
+        commandSessionId: "command_sketch-1",
+        documentId: "doc_fixture" as DocumentId,
+        baseRevisionId: "rev_0001" as RevisionId,
+        generation: 8,
+        basis: basis!,
+      },
+      createModelingServiceEditorEffectRuntime({
+        getCurrentDocumentSnapshot: unused,
+        projectSketchExternalReferences: unused,
+        sketchSolver: null,
+        commitSketch: unused,
+        evaluatePreview: unused,
+        createFeature: unused,
+        updateFeature: unused,
+        setFeatureCursor: unused,
+      }),
+    ),
+    "A missing solver rejects so the event loop reports it; it is never swallowed.",
+  ).rejects.toThrow(
+    "Live sketch regions require the modeling service sketch solver.",
+  );
 });

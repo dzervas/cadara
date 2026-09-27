@@ -71,7 +71,7 @@ import {
   createPointId,
   createProfileTextEntityDefinition,
   createSplineEntityDefinition,
-  deriveSolvedRegionsForSession,
+  withLiveSolveBasis,
   getSessionSketchId,
   getSketchSessionRegionDiagnostics,
   getTargetKey,
@@ -981,29 +981,31 @@ export function toggleSketchConstructionTarget(
 
   const definition = nextFullDefinition;
 
-  return {
-    ...session,
-    activeTool: null,
-    status: "idle",
-    constructionTargetPicking: false,
-    referenceTargetPicking: false,
-    constructionModifierActive: false,
-    pointerDownPoint: null,
-    livePoint: null,
-    toolPlacedPoints: [],
-    toolSettings: {},
-    toolPresentation: null,
-    constraintAuthoring: null,
-    activeAnnotationEdit: null,
-    selectedAnnotation: null,
-    activeEditTarget: null,
-    activeDrag: null,
+  return withLiveSolveBasis(
+    {
+      ...session,
+      activeTool: null,
+      status: "idle",
+      constructionTargetPicking: false,
+      referenceTargetPicking: false,
+      constructionModifierActive: false,
+      pointerDownPoint: null,
+      livePoint: null,
+      toolPlacedPoints: [],
+      toolSettings: {},
+      toolPresentation: null,
+      constraintAuthoring: null,
+      activeAnnotationEdit: null,
+      selectedAnnotation: null,
+      activeEditTarget: null,
+      activeDrag: null,
+      definition,
+      toolStagedEntities: [],
+      commitRequest: rebuildSessionCommitRequest(session, definition),
+      validationMessage: null,
+    },
     definition,
-    toolStagedEntities: [],
-    commitRequest: rebuildSessionCommitRequest(session, definition),
-    solvedRegions: deriveSolvedRegionsForSession(session, definition),
-    validationMessage: null,
-  };
+  );
 }
 
 export function createReferenceId(
@@ -1136,29 +1138,31 @@ export function selectSketchReferenceTarget(
 
   const definition = appendReferenceDefinition(session.definition, reference);
 
-  return {
-    ...session,
-    activeTool: null,
-    status: "idle",
-    constructionTargetPicking: false,
-    referenceTargetPicking: false,
-    constructionModifierActive: false,
-    pointerDownPoint: null,
-    livePoint: null,
-    toolPlacedPoints: [],
-    toolSettings: {},
-    toolPresentation: null,
-    constraintAuthoring: null,
-    activeAnnotationEdit: null,
-    selectedAnnotation: null,
-    activeEditTarget: null,
-    activeDrag: null,
-    sequence: nextSequence,
+  return withLiveSolveBasis(
+    {
+      ...session,
+      activeTool: null,
+      status: "idle",
+      constructionTargetPicking: false,
+      referenceTargetPicking: false,
+      constructionModifierActive: false,
+      pointerDownPoint: null,
+      livePoint: null,
+      toolPlacedPoints: [],
+      toolSettings: {},
+      toolPresentation: null,
+      constraintAuthoring: null,
+      activeAnnotationEdit: null,
+      selectedAnnotation: null,
+      activeEditTarget: null,
+      activeDrag: null,
+      sequence: nextSequence,
+      definition,
+      commitRequest: rebuildSessionCommitRequest(session, definition),
+      validationMessage: null,
+    },
     definition,
-    commitRequest: rebuildSessionCommitRequest(session, definition),
-    solvedRegions: deriveSolvedRegionsForSession(session, definition),
-    validationMessage: null,
-  };
+  );
 }
 
 export function deleteSketchReferenceTarget(
@@ -1191,25 +1195,19 @@ export function deleteSketchReferenceTarget(
 
   const definition = removeFromDefinition(session.definition);
 
-  return {
-    ...session,
-    definition,
-    projectedReferences: session.projectedReferences.filter(
-      (reference) => reference.referenceId !== target.referenceId,
-    ),
-    projectionDiagnostics: session.projectionDiagnostics,
-    commitRequest: rebuildSessionCommitRequest(session, definition),
-    solvedRegions: deriveSolvedRegionsForSession(
-      {
-        ...session,
-        projectedReferences: session.projectedReferences.filter(
-          (reference) => reference.referenceId !== target.referenceId,
-        ),
-      },
+  return withLiveSolveBasis(
+    {
+      ...session,
       definition,
-    ),
-    validationMessage: null,
-  };
+      projectedReferences: session.projectedReferences.filter(
+        (reference) => reference.referenceId !== target.referenceId,
+      ),
+      projectionDiagnostics: session.projectionDiagnostics,
+      commitRequest: rebuildSessionCommitRequest(session, definition),
+      validationMessage: null,
+    },
+    definition,
+  );
 }
 
 export function toggleConstructionTargetInDefinition(
@@ -2356,39 +2354,41 @@ export function acceptSketchDraw(
     ...definitionPatch,
   });
 
-  return {
-    ...session,
-    toolStagedEntities: [],
-    definition: history.definition,
-    status: result.state.status,
-    pointerDownPoint: result.state.pointerDownPoint,
-    livePoint: result.state.livePoint,
-    toolPlacedPoints:
-      result.state.status === "idle"
-        ? []
-        : (result.state.placedPoints ?? session.toolPlacedPoints),
-    toolSettings:
-      result.state.status === "idle"
-        ? {}
-        : (result.state.settings ?? session.toolSettings),
-    sequence: nextSequence,
-    commitRequest: buildCommitRequest({
-      sketchId: session.sketchId,
-      sketchLabel: session.sketchLabel,
-      plane: session.plane,
+  return withLiveSolveBasis(
+    {
+      ...session,
+      toolStagedEntities: [],
       definition: history.definition,
-    }),
-    solvedRegions: deriveSolvedRegionsForSession(session, history.definition),
-    validationMessage: null,
-    toolPresentation: result.presentation,
-    activeAnnotationEdit: null,
-    selectedAnnotation: null,
-    activeEditTool: null,
-    activeEditTarget: null,
-    activeDrag: null,
-    activeSnap: null,
-    drawStartSnap: null,
-  };
+      status: result.state.status,
+      pointerDownPoint: result.state.pointerDownPoint,
+      livePoint: result.state.livePoint,
+      toolPlacedPoints:
+        result.state.status === "idle"
+          ? []
+          : (result.state.placedPoints ?? session.toolPlacedPoints),
+      toolSettings:
+        result.state.status === "idle"
+          ? {}
+          : (result.state.settings ?? session.toolSettings),
+      sequence: nextSequence,
+      commitRequest: buildCommitRequest({
+        sketchId: session.sketchId,
+        sketchLabel: session.sketchLabel,
+        plane: session.plane,
+        definition: history.definition,
+      }),
+      validationMessage: null,
+      toolPresentation: result.presentation,
+      activeAnnotationEdit: null,
+      selectedAnnotation: null,
+      activeEditTool: null,
+      activeEditTarget: null,
+      activeDrag: null,
+      activeSnap: null,
+      drawStartSnap: null,
+    },
+    history.definition,
+  );
 }
 
 export function resolveSessionSnap(

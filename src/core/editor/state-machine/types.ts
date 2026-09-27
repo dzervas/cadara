@@ -15,7 +15,10 @@ import type {
   SelectionTargetCatalog,
 } from "@/core/editor/schema";
 import type { SectionViewSession, Vec3 } from "@/core/section-view/session";
-import type { SketchSessionState } from "@/domain/editor/sketch-session";
+import type {
+  SketchLiveRegionBasis,
+  SketchSessionState,
+} from "@/domain/editor/sketch-session";
 import type { SketchPlaneEditSessionState } from "@/domain/editor/sketch-plane-editing";
 import type {
   DocumentFeatureCursor,
@@ -38,6 +41,10 @@ import type {
   SketchAuthoringOperationId,
 } from "@/contracts/shared/ids";
 import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
+import type {
+  RegionRecord,
+  SketchSolveDiagnostic,
+} from "@/contracts/sketch/schema";
 import type { AppErrorContextEntry } from "@/contracts/errors";
 import type { DocumentHistoryOrderEntry } from "@/domain/modeling/document-history";
 
@@ -159,6 +166,8 @@ export interface SketchEditorState extends EditorStateBase {
   pendingProjectionRequestId: RequestId | null;
   /** Explicit correlation ID for an in-flight sketch reference-image import request. */
   pendingImportRequestId: RequestId | null;
+  /** The single in-flight live region derivation, and the generation it derives. */
+  pendingRegionRequest: { requestId: RequestId; generation: number } | null;
 }
 
 /**
@@ -823,6 +832,26 @@ export type EditorEvent =
       message: string;
     }
   | {
+      type: "effect.sketchRegionsDerived";
+      requestId: RequestId;
+      documentId: DocumentId;
+      commandSessionId: CommandSessionId;
+      baseRevisionId: RevisionId;
+      /** Live region generation whose basis produced these regions. */
+      generation: number;
+      regions: RegionRecord[];
+      diagnostics: SketchSolveDiagnostic[];
+    }
+  | {
+      type: "effect.sketchRegionDerivationFailed";
+      requestId: RequestId;
+      documentId: DocumentId;
+      commandSessionId: CommandSessionId;
+      baseRevisionId: RevisionId;
+      generation: number;
+      message: string;
+    }
+  | {
       type: "effect.sketchReferenceImageImportCompleted";
       requestId: RequestId;
       documentId: DocumentId;
@@ -1048,6 +1077,17 @@ export type EditorEffect =
       session: SketchSessionState;
     }
   | {
+      type: "sketch.deriveRegions";
+      /** Detached: runs off the serial effect queue (U11). */
+      background: true;
+      requestId: RequestId;
+      commandSessionId: CommandSessionId;
+      documentId: DocumentId;
+      baseRevisionId: RevisionId;
+      generation: number;
+      basis: SketchLiveRegionBasis;
+    }
+  | {
       type: "sketch.importReferenceImages";
       requestId: RequestId;
       commandSessionId: CommandSessionId;
@@ -1143,6 +1183,16 @@ export interface EditorEffectRuntime {
   }): Promise<{
     projectedReferences: ProjectedSketchReferenceRecord[];
     diagnostics: ProjectedSketchReferenceRecord["diagnostics"];
+  }>;
+  /** Derives display-only live sketch regions through the async solver boundary. */
+  deriveSketchRegions?(input: {
+    requestId: RequestId;
+    documentId: DocumentId;
+    baseRevisionId: RevisionId;
+    basis: SketchLiveRegionBasis;
+  }): Promise<{
+    regions: RegionRecord[];
+    diagnostics: SketchSolveDiagnostic[];
   }>;
   /** Imports one or more reference images into the active sketch workflow. */
   importSketchReferenceImages?(input: {

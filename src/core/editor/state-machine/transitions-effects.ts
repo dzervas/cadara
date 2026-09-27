@@ -6,8 +6,11 @@ import {
   featurePreviewSupportsAutomaticBooleanTargetPreselection,
 } from "@/domain/editor/feature-boolean-target-preselection";
 import {
+  failSketchLiveRegions,
   getSketchSessionPreviewLabel,
+  publishSketchLiveRegions,
   updateSketchReferenceProjection,
+  type SketchSessionState,
 } from "@/domain/editor/sketch-session";
 import { getSketchPlaneEditSelectionTarget } from "@/domain/editor/sketch-plane-editing";
 import {
@@ -822,6 +825,90 @@ export function handleEffectSketchReferenceProjectionFailed(
   };
 }
 
+function isPendingSketchRegionResult(
+  state: EditorState,
+  event: Extract<
+    EditorEvent,
+    {
+      type:
+        | "effect.sketchRegionsDerived"
+        | "effect.sketchRegionDerivationFailed";
+    }
+  >,
+): state is SketchEditorState {
+  return (
+    state.kind === "editingSketch" &&
+    state.command.commandSessionId === event.commandSessionId &&
+    state.pendingRegionRequest?.requestId === event.requestId
+  );
+}
+
+function withLiveRegionSession(
+  state: SketchEditorState,
+  session: SketchSessionState,
+): SketchEditorState {
+  return {
+    ...state,
+    pendingRegionRequest: null,
+    session,
+    preview:
+      state.command.phase === "editing" && state.preview?.kind === "sketch"
+        ? {
+            kind: "sketch",
+            label: getSketchSessionPreviewLabel(session),
+            target: session.planeTarget,
+          }
+        : state.preview,
+  };
+}
+
+/**
+ * Publishes live regions only for the pending request of the same command
+ * session and only when they were derived for the current generation. A stale
+ * generation is discarded; the post-transition hook re-emits for the latest.
+ */
+export function handleEffectSketchRegionsDerived(
+  state: EditorState,
+  event: Extract<EditorEvent, { type: "effect.sketchRegionsDerived" }>,
+): EditorTransitionResult {
+  if (!isPendingSketchRegionResult(state, event)) {
+    return { state, effects: [] };
+  }
+
+  if (event.generation !== state.session.liveRegions.generation) {
+    return { state: { ...state, pendingRegionRequest: null }, effects: [] };
+  }
+
+  return {
+    state: withLiveRegionSession(
+      state,
+      publishSketchLiveRegions(state.session, event.regions, event.diagnostics),
+    ),
+    effects: [],
+  };
+}
+
+export function handleEffectSketchRegionDerivationFailed(
+  state: EditorState,
+  event: Extract<EditorEvent, { type: "effect.sketchRegionDerivationFailed" }>,
+): EditorTransitionResult {
+  if (!isPendingSketchRegionResult(state, event)) {
+    return { state, effects: [] };
+  }
+
+  if (event.generation !== state.session.liveRegions.generation) {
+    return { state: { ...state, pendingRegionRequest: null }, effects: [] };
+  }
+
+  return {
+    state: withLiveRegionSession(
+      state,
+      failSketchLiveRegions(state.session, event.message),
+    ),
+    effects: [],
+  };
+}
+
 export function handleEffectSketchReferenceImageImportCompleted(
   state: EditorState,
   event: Extract<
@@ -887,6 +974,7 @@ export function handleEffectSketchReferenceImageImportCompleted(
       session: event.session,
       pendingProjectionRequestId: null,
       pendingImportRequestId: null,
+      pendingRegionRequest: null,
     },
     event.session,
   );

@@ -515,6 +515,7 @@ export function handleSketchReferenceImagePayloadsPicked(
       pendingCommitRequestId: null,
       pendingProjectionRequestId: null,
       pendingImportRequestId: null,
+      pendingRegionRequest: null,
     };
 
     return !event.payloads || event.payloads.length === 0
@@ -629,6 +630,7 @@ export function handleSketchSpecialModeEntered(
       pendingCommitRequestId: null,
       pendingProjectionRequestId: null,
       pendingImportRequestId: null,
+      pendingRegionRequest: null,
     };
 
     return transitionEditorState(nextState, event);

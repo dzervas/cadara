@@ -6,6 +6,7 @@ import {
 import {
   createEditorEffectFailureEvent,
   defaultEditorExtensionDependencies,
+  emitPendingSketchRegionDerivation,
   initialEditorState,
   transitionEditorState,
   type EditorExtensionDependencies,
@@ -38,11 +39,17 @@ export class EditorEventLoop {
   private readonly sketchActions: SketchAuthoredActions;
 
   private transition(event: EditorEvent) {
-    return this.sketchActions.transition(this.state, event, (state) =>
-      transitionEditorState(state, event, this.dependencies),
+    // Authored-action restores (undo/redo, gesture exits) happen after the
+    // reducer, so the live region hook runs again on the final result.
+    return emitPendingSketchRegionDerivation(
+      this.sketchActions.transition(this.state, event, (state) =>
+        transitionEditorState(state, event, this.dependencies),
+      ),
     );
   }
   private readonly effectQueue: EditorEffect[] = [];
+  /** Detached effects (U11) waiting to start off the serial queue. */
+  private readonly backgroundEffects: EditorEffect[] = [];
   private readonly listeners = new Set<EditorEventLoopListener>();
   private readonly traceListeners = new Set<EditorEventLoopTraceListener>();
   private processing = false;
@@ -127,14 +134,27 @@ export class EditorEventLoop {
     this.running = false;
     this.runToken += 1;
     this.effectQueue.length = 0;
+    this.backgroundEffects.length = 0;
+    // The run token drops in-flight derivation results; release the request so
+    // the post-transition hook re-derives after a restart.
+    if (
+      this.state.kind === "editingSketch" &&
+      this.state.pendingRegionRequest !== null
+    ) {
+      this.state = { ...this.state, pendingRegionRequest: null };
+    }
   }
 
   private applyTransitionResult(
     result: ReturnType<typeof transitionEditorState>,
   ) {
     this.state = result.state;
-    if (result.effects.length > 0) {
-      this.effectQueue.push(...result.effects);
+    for (const effect of result.effects) {
+      if ("background" in effect && effect.background) {
+        this.backgroundEffects.push(effect);
+      } else {
+        this.effectQueue.push(effect);
+      }
     }
 
     for (const listener of this.listeners) {
@@ -143,11 +163,33 @@ export class EditorEventLoop {
   }
 
   private scheduleDrain() {
+    this.startBackgroundEffects();
+
     if (this.processing || !this.running || this.effectQueue.length === 0) {
       return;
     }
 
     void this.drainEffects(this.runToken);
+  }
+
+  /**
+   * Starts detached effects without awaiting them, so a slow derivation never
+   * delays Finish or projection effects queued behind it. Completion and
+   * rejection go through the same guarded path as serial effects.
+   */
+  private startBackgroundEffects() {
+    if (!this.running) {
+      return;
+    }
+
+    const runToken = this.runToken;
+    for (const effect of this.backgroundEffects.splice(0)) {
+      void this.runEffect(effect, runToken).then(() => {
+        if (this.running && runToken === this.runToken) {
+          this.scheduleDrain();
+        }
+      });
+    }
   }
 
   private async drainEffects(runToken: number) {
@@ -165,71 +207,11 @@ export class EditorEventLoop {
           break;
         }
 
-        this.emitTrace(
-          createEffectStartedTraceEntry({
-            sequence: this.nextTraceSequence(),
-            effect,
-            queueDepthAfterStart: this.effectQueue.length,
-          }),
-        );
-
-        try {
-          const effectEvent = await this.executeEffect(effect, this.runtime);
-
-          if (!this.running || runToken !== this.runToken) {
-            break;
-          }
-
-          const result = this.transition(effectEvent);
-          this.applyTransitionResult(result);
-          this.emitTrace(
-            createEffectCompletedTraceEntry({
-              sequence: this.nextTraceSequence(),
-              effect,
-              completion: effectEvent,
-              state: this.state,
-              emittedEffects: result.effects,
-            }),
-          );
-        } catch (error: unknown) {
-          if (!this.running || runToken !== this.runToken) {
-            break;
-          }
-
-          const appError = normalizeUnknownError(error, {
-            code: "editor/invocation-failed",
-            fallbackMessage: "Editor runtime invocation failed.",
-            context: [
-              { key: "operation", value: effect.type },
-              { key: "requestId", value: effect.requestId },
-            ],
-            requestId: effect.requestId,
-          });
-
-          this.errorReporter.report(appError, {
-            source: "editor-runtime",
-            visibility: "user",
-            dedupeKey: `${effect.type}:${appError.requestId ?? appError.message}`,
-          });
-
-          const failureEvent = createEditorEffectFailureEvent(
-            effect,
-            appError,
-            "Editor runtime invocation failed.",
-          );
-          const result = this.transition(failureEvent);
-          this.applyTransitionResult(result);
-          this.emitTrace(
-            createEffectFailedTraceEntry({
-              sequence: this.nextTraceSequence(),
-              effect,
-              failureEvent,
-              error: appError,
-              state: this.state,
-              emittedEffects: result.effects,
-            }),
-          );
+        const completed = await this.runEffect(effect, runToken);
+        if (!completed) {
+          break;
         }
+        this.startBackgroundEffects();
       }
     } finally {
       this.processing = false;
@@ -237,6 +219,77 @@ export class EditorEventLoop {
         this.scheduleDrain();
       }
     }
+  }
+
+  /** Runs one effect and applies its completion; false once the run is stopped. */
+  private async runEffect(effect: EditorEffect, runToken: number) {
+    this.emitTrace(
+      createEffectStartedTraceEntry({
+        sequence: this.nextTraceSequence(),
+        effect,
+        queueDepthAfterStart: this.effectQueue.length,
+      }),
+    );
+
+    try {
+      const effectEvent = await this.executeEffect(effect, this.runtime);
+
+      if (!this.running || runToken !== this.runToken) {
+        return false;
+      }
+
+      const result = this.transition(effectEvent);
+      this.applyTransitionResult(result);
+      this.emitTrace(
+        createEffectCompletedTraceEntry({
+          sequence: this.nextTraceSequence(),
+          effect,
+          completion: effectEvent,
+          state: this.state,
+          emittedEffects: result.effects,
+        }),
+      );
+    } catch (error: unknown) {
+      if (!this.running || runToken !== this.runToken) {
+        return false;
+      }
+
+      const appError = normalizeUnknownError(error, {
+        code: "editor/invocation-failed",
+        fallbackMessage: "Editor runtime invocation failed.",
+        context: [
+          { key: "operation", value: effect.type },
+          { key: "requestId", value: effect.requestId },
+        ],
+        requestId: effect.requestId,
+      });
+
+      this.errorReporter.report(appError, {
+        source: "editor-runtime",
+        visibility: "user",
+        dedupeKey: `${effect.type}:${appError.requestId ?? appError.message}`,
+      });
+
+      const failureEvent = createEditorEffectFailureEvent(
+        effect,
+        appError,
+        "Editor runtime invocation failed.",
+      );
+      const result = this.transition(failureEvent);
+      this.applyTransitionResult(result);
+      this.emitTrace(
+        createEffectFailedTraceEntry({
+          sequence: this.nextTraceSequence(),
+          effect,
+          failureEvent,
+          error: appError,
+          state: this.state,
+          emittedEffects: result.effects,
+        }),
+      );
+    }
+
+    return true;
   }
 
   private nextTraceSequence() {

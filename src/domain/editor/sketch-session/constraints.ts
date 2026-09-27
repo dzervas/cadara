@@ -42,7 +42,7 @@ import {
   createConstraintId,
   createDimensionId,
   createSketchDimensionRef,
-  deriveSolvedRegionsForSession,
+  withLiveSolveBasis,
   resolveSketchDefinitionForSolve,
   getSessionSketchId,
   getTargetKey,
@@ -600,13 +600,15 @@ export function patchSketchDimensionAnnotationPlacement(
 
   const nextDefinition = nextFullDefinition;
 
-  return {
-    ...session,
-    definition: nextDefinition,
-    toolPresentation: null,
-    commitRequest: rebuildSessionCommitRequest(session, nextDefinition),
-    solvedRegions: deriveSolvedRegionsForSession(session, nextDefinition),
-  };
+  return withLiveSolveBasis(
+    {
+      ...session,
+      definition: nextDefinition,
+      toolPresentation: null,
+      commitRequest: rebuildSessionCommitRequest(session, nextDefinition),
+    },
+    nextDefinition,
+  );
 }
 
 export function solveCommittedConstraintDefinition(
@@ -687,27 +689,26 @@ export function commitSketchConstraintAuthoring(
     session.documentVariables,
   );
 
-  return {
-    ...session,
-    toolStagedEntities: [],
-    definition: solvedDefinition.definition,
-    sequence: session.sequence + 1,
-    status: "idle",
-    constraintAuthoring: null,
-    activeAnnotationEdit: null,
-    commitRequest: rebuildSessionCommitRequest(
-      session,
-      solvedDefinition.definition,
-    ),
-    solvedRegions: deriveSolvedRegionsForSession(
-      session,
-      solvedDefinition.definition,
-      solvedDefinition.solvedSnapshot,
-    ),
-    selectedAnnotation: null,
-    toolPresentation: null,
-    activeTool: null,
-    activeEditTarget: null,
-    activeDrag: null,
-  };
+  return withLiveSolveBasis(
+    {
+      ...session,
+      toolStagedEntities: [],
+      definition: solvedDefinition.definition,
+      sequence: session.sequence + 1,
+      status: "idle",
+      constraintAuthoring: null,
+      activeAnnotationEdit: null,
+      commitRequest: rebuildSessionCommitRequest(
+        session,
+        solvedDefinition.definition,
+      ),
+      selectedAnnotation: null,
+      toolPresentation: null,
+      activeTool: null,
+      activeEditTarget: null,
+      activeDrag: null,
+    },
+    solvedDefinition.definition,
+    solvedDefinition.solvedSnapshot,
+  );
 }

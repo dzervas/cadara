@@ -28,9 +28,14 @@ import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
 import { resolveSketchDerivationDistances } from "@/domain/modeling/sketch-dimension-expressions";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import type {
+  DeriveSketchRegionsRequest,
   ProjectedSketchReferenceRecord,
   SolverTolerancePolicy,
 } from "@/contracts/solver/schema";
+import type {
+  RegionRecord,
+  SketchSolveDiagnostic,
+} from "@/contracts/sketch/schema";
 import type { AppResultAsync } from "@/contracts/errors";
 import type { RenderableEntityRecord } from "@/contracts/render/schema";
 import { hydrateFeatureSessionFromSnapshot } from "@/core/editor/state-machine";
@@ -302,6 +307,31 @@ export function createEffectExecutor(runtime: EditorEffectRuntime) {
           );
         }
       }
+      case "sketch.deriveRegions": {
+        // No catch: a rejection must reach the event loop's error reporting,
+        // which then dispatches the standard failure event for this effect.
+        if (!runtime.deriveSketchRegions) {
+          throw new Error("Live sketch region derivation is not available.");
+        }
+
+        const result = await runtime.deriveSketchRegions({
+          requestId: effect.requestId,
+          documentId: effect.documentId,
+          baseRevisionId: effect.baseRevisionId,
+          basis: effect.basis,
+        });
+
+        return {
+          type: "effect.sketchRegionsDerived",
+          requestId: effect.requestId,
+          documentId: effect.documentId,
+          commandSessionId: effect.commandSessionId,
+          baseRevisionId: effect.baseRevisionId,
+          generation: effect.generation,
+          regions: result.regions,
+          diagnostics: result.diagnostics,
+        };
+      }
       case "sketch.importReferenceImages": {
         try {
           if (!runtime.importSketchReferenceImages) {
@@ -453,6 +483,12 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
     diagnostics: ProjectedSketchReferenceRecord["diagnostics"];
   }>;
   sketchSolver: {
+    deriveSketchRegions(
+      input: Omit<DeriveSketchRegionsRequest, "contractVersion">,
+    ): Promise<{
+      regions: RegionRecord[];
+      diagnostics: SketchSolveDiagnostic[];
+    }>;
     createCommitCorrelation(requestId: RequestId): {
       requestId: RequestId;
       projectionRequestId: RequestId;
@@ -705,6 +741,30 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
           reference,
         })),
       });
+    },
+    async deriveSketchRegions(input) {
+      if (!modelingService.sketchSolver) {
+        throw new Error(
+          "Live sketch regions require the modeling service sketch solver.",
+        );
+      }
+
+      // Same async boundary the kernel uses; T09e adds modelingTolerance here.
+      const result = await modelingService.sketchSolver.deriveSketchRegions({
+        solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+        requestId: input.requestId,
+        documentId: input.documentId,
+        revisionId: input.baseRevisionId,
+        sketchId: input.basis.sketchId,
+        definition: input.basis.definition,
+        solvedSnapshot: input.basis.solvedSnapshot,
+        projectedReferences: input.basis.projectedReferences,
+      });
+
+      return {
+        regions: result.regions,
+        diagnostics: result.diagnostics,
+      };
     },
     async runSketchSpecialModeEffect() {
       throw new Error("No sketch special mode runtime has been registered.");

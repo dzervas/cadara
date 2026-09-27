@@ -13,6 +13,7 @@ import {
 } from "./state-machine";
 import { createEditorEventLoop } from "@/application/editor/editor-event-loop";
 import {
+  deriveSketchRegionsForTest,
   replayEditorEvents,
   replayEditorEventsWithRuntime,
 } from "@/domain/editor/state-machine-test-builder";
@@ -791,6 +792,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
         projectedReferences: [],
         diagnostics: [],
       }),
+      deriveSketchRegions: deriveSketchRegionsForTest,
       evaluatePreview: async (input) => {
         previewCalls.push({
           baseRevisionId: input.baseRevisionId,

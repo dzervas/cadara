@@ -123,8 +123,16 @@ export function createSketchSessionFromSnapshot(
     activeSnap: null,
     drawStartSnap: null,
     sequence: getNextDefinitionSequence(sketch.sketch.definition),
-    solvedRegions: [...sketch.sketch.regions],
-    derivedValidity: structuredClone(sketch.sketch.derivedValidity),
+    liveSolve: null,
+    liveRegions: {
+      generation: 0,
+      status:
+        sketch.sketch.derivedValidity.state === "current"
+          ? "current"
+          : "unavailable",
+      regions: [...sketch.sketch.regions],
+      diagnostics: structuredClone(sketch.sketch.derivedValidity.diagnostics),
+    },
     projectedReferences,
     projectionDiagnostics: projectedReferences.flatMap(
       (reference) => reference.diagnostics,
@@ -137,6 +145,7 @@ export function createSketchSessionFromSnapshot(
     }),
     documentVariables: [],
     solverTolerances: createDocumentSolverTolerances(settings),
+    modelingTolerance: settings.modelingTolerance,
     validationMessage:
       sketch.sketch.derivedValidity.state === "current"
         ? null
@@ -184,13 +193,19 @@ export function createNewSketchSession(
     activeSnap: null,
     drawStartSnap: null,
     sequence: 0,
-    solvedRegions: [],
-    derivedValidity: { state: "current", diagnostics: [] },
+    liveSolve: null,
+    liveRegions: {
+      generation: 0,
+      status: "current",
+      regions: [],
+      diagnostics: [],
+    },
     projectedReferences: [],
     projectionDiagnostics: [],
     commitRequest: null,
     documentVariables: [],
     solverTolerances: createDocumentSolverTolerances(settings),
+    modelingTolerance: settings.modelingTolerance,
     validationMessage: null,
   };
 }

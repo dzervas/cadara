@@ -10,7 +10,7 @@ import {
 } from "@/domain/sketch-styles/definition";
 import type { SketchSessionState } from "./types";
 import {
-  deriveSolvedRegionsForSession,
+  withLiveSolveBasis,
   getSessionSketchId,
   rebuildSessionCommitRequest,
 } from "./internals";
@@ -140,7 +140,7 @@ export function getFirstSketchStyleTarget(
 
   if (toolId === "fill") {
     return target.kind === "region" &&
-      session.solvedRegions.some(
+      session.liveRegions.regions.some(
         (region) => region.target.regionId === target.regionId,
       )
       ? target
@@ -205,7 +205,7 @@ export function patchSketchStyleValue(
 
   const nextFullDefinition = applyStylePatchToDefinition(
     session.definition,
-    session.solvedRegions,
+    session.liveRegions.regions,
     localTargets,
     parsedPatch,
     toolId,
@@ -217,10 +217,12 @@ export function patchSketchStyleValue(
 
   const nextDefinition = nextFullDefinition;
 
-  return {
-    ...session,
-    definition: nextDefinition,
-    commitRequest: rebuildSessionCommitRequest(session, nextDefinition),
-    solvedRegions: deriveSolvedRegionsForSession(session, nextDefinition),
-  };
+  return withLiveSolveBasis(
+    {
+      ...session,
+      definition: nextDefinition,
+      commitRequest: rebuildSessionCommitRequest(session, nextDefinition),
+    },
+    nextDefinition,
+  );
 }

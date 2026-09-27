@@ -17,6 +17,9 @@ export type {
   SketchDimensionAnnotationDragHandle,
   SketchAnnotationGlyphKind,
   SketchGeometryDragState,
+  SketchLiveRegionBasis,
+  SketchLiveRegions,
+  SketchLiveSolve,
   SketchEditToolState,
   SketchSessionState,
   SketchSessionDisplayRenderable,
@@ -92,10 +95,12 @@ export {
 export { buildCommitRequest, getSketchHistoryItems } from "./history";
 
 export {
+  failSketchLiveRegions,
   getSketchSessionDerivedValidity,
+  getSketchSessionLiveRegionBasis,
   getSketchSessionRegionDiagnostics,
-  refreshLiveRegionsAfterDebounce,
-  withLiveSolvedRegions,
+  publishSketchLiveRegions,
+  withLiveSolveBasis,
 } from "./internals";
 
 export {

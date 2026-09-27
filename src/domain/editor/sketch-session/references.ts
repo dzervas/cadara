@@ -12,7 +12,7 @@ import {
   appendDefinition,
   mergeDerivedProjectedReferences,
   rebuildSessionCommitRequest,
-  withLiveSolvedRegions,
+  withLiveSolveBasis,
 } from "./internals";
 
 export function appendReferenceImageOperations(
@@ -27,12 +27,15 @@ export function appendReferenceImageOperations(
       ...records,
     ],
   };
-  return withLiveSolvedRegions({
-    ...session,
+  return withLiveSolveBasis(
+    {
+      ...session,
+      definition,
+      sequence: session.sequence + 1,
+      commitRequest: rebuildSessionCommitRequest(session, definition),
+    },
     definition,
-    sequence: session.sequence + 1,
-    commitRequest: rebuildSessionCommitRequest(session, definition),
-  });
+  );
 }
 
 export function updateReferenceImageOperationStates(input: {
@@ -84,12 +87,15 @@ export function updateReferenceImageOperationStates(input: {
       ),
     };
   }
-  return withLiveSolvedRegions({
-    ...input.session,
+  return withLiveSolveBasis(
+    {
+      ...input.session,
+      definition,
+      sequence: input.session.sequence + 1,
+      commitRequest: rebuildSessionCommitRequest(input.session, definition),
+    },
     definition,
-    sequence: input.session.sequence + 1,
-    commitRequest: rebuildSessionCommitRequest(input.session, definition),
-  });
+  );
 }
 
 export function updateSketchReferenceProjection(
@@ -117,12 +123,16 @@ export function updateSketchReferenceProjection(
     ],
   );
   const projectionDiagnostics = [...diagnostics, ...referenceDiagnostics];
-  return withLiveSolvedRegions({
-    ...session,
-    projectedReferences: mergedProjectedReferences,
-    projectionDiagnostics,
-    validationMessage:
-      projectionDiagnostics.find((diagnostic) => diagnostic.severity !== "info")
-        ?.message ?? null,
-  });
+  return withLiveSolveBasis(
+    {
+      ...session,
+      projectedReferences: mergedProjectedReferences,
+      projectionDiagnostics,
+      validationMessage:
+        projectionDiagnostics.find(
+          (diagnostic) => diagnostic.severity !== "info",
+        )?.message ?? null,
+    },
+    session.definition,
+  );
 }

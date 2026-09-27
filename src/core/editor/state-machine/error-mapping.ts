@@ -60,6 +60,11 @@ export function getEditorEffectContext(
     context.push({ key: "sketchId", value: effect.session.sketchId });
   }
 
+  if (effect.type === "sketch.deriveRegions") {
+    context.push({ key: "sketchId", value: effect.basis.sketchId });
+    context.push({ key: "generation", value: effect.generation });
+  }
+
   if (effect.type === "sketch.specialModeEffect") {
     context.push({ key: "modeId", value: effect.modeId });
     context.push({ key: "effectId", value: effect.effectId });
@@ -151,6 +156,16 @@ export function createEditorEffectFailureEvent(
         documentId: effect.documentId,
         commandSessionId: effect.commandSessionId,
         baseRevisionId: effect.baseRevisionId,
+        message: appError.message,
+      };
+    case "sketch.deriveRegions":
+      return {
+        type: "effect.sketchRegionDerivationFailed",
+        requestId: effect.requestId,
+        documentId: effect.documentId,
+        commandSessionId: effect.commandSessionId,
+        baseRevisionId: effect.baseRevisionId,
+        generation: effect.generation,
         message: appError.message,
       };
     case "sketch.importReferenceImages":

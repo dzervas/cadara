@@ -252,6 +252,84 @@ test("src/components/cad/three-cad-viewport-style.spec.ts", () => {
     "Sketch-owned region fills should be biased toward the camera to avoid coplanar flicker.",
   ).toBeTruthy();
 
+  const invalidRegionConfig = getSketchDisplayMeshMaterialConfig(
+    {
+      ...gradientMeshRenderable,
+      semanticClass: "region",
+      regionValidity: "invalid",
+    },
+    true,
+    palette,
+  );
+  expect(
+    invalidRegionConfig.fill,
+    "An invalid (unavailable or failed) live region fill should render the theme danger red tint instead of its authored style.",
+  ).toEqual({ kind: "solid", color: palette.overconstrained, opacity: 0.22 });
+  expect(invalidRegionConfig.color).toBe(palette.overconstrained);
+
+  for (const [renderable, applyStyles] of [
+    [gradientMeshRenderable, true],
+    [styledMeshRenderable, true],
+    [styledMeshRenderable, false],
+  ] as const) {
+    const pendingRegionConfig = getSketchDisplayMeshMaterialConfig(
+      { ...renderable, semanticClass: "region", regionValidity: "stale" },
+      applyStyles,
+      palette,
+    );
+    expect(
+      pendingRegionConfig,
+      "A pending (stale) live region keeps the normal fill, identical to a current region.",
+    ).toEqual(
+      getSketchDisplayMeshMaterialConfig(
+        { ...renderable, semanticClass: "region", regionValidity: "current" },
+        applyStyles,
+        palette,
+      ),
+    );
+    expect(
+      pendingRegionConfig.color,
+      "A pending live region is never tinted red.",
+    ).not.toBe(palette.overconstrained);
+  }
+  expect(
+    getSketchDisplayMeshMaterialConfig(
+      {
+        ...styledMeshRenderable,
+        semanticClass: "region",
+        regionValidity: "stale",
+      },
+      true,
+      palette,
+    ).fill,
+    "A pending live region keeps its authored fill.",
+  ).toEqual({ kind: "solid", color: 0xaa33ff, opacity: 0.44 });
+  const currentRegionConfig = getSketchDisplayMeshMaterialConfig(
+    {
+      ...styledMeshRenderable,
+      semanticClass: "region",
+      regionValidity: "current",
+    },
+    true,
+    palette,
+  );
+  expect(
+    currentRegionConfig.fill,
+    "A current live region keeps its authored fill unchanged.",
+  ).toEqual({ kind: "solid", color: 0xaa33ff, opacity: 0.44 });
+  expect(
+    getSketchDisplayMeshMaterialConfig(
+      {
+        ...styledMeshRenderable,
+        semanticClass: "region",
+        regionValidity: "current",
+      },
+      false,
+      palette,
+    ).color,
+    "A current live region keeps the default region fill when styles are off.",
+  ).toBe(palette.regionFill);
+
   expect(
     getSketchRenderingPaletteToken("constrained") ===
       "--workbench-tooltip-description" &&

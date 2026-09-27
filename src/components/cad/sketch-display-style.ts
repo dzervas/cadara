@@ -105,14 +105,25 @@ export function getSketchDisplayMeshMaterialConfig(
         ? SURFACE_COLORS.sketchReference
         : getDefaultSketchConstraintColor(renderable, palette);
   const defaultOpacity = renderable.semanticClass === "region" ? 0.22 : 0.24;
-  const color = applyStyles
-    ? (renderable.paintStyle?.color ?? defaultColor)
-    : defaultColor;
-  const opacity = applyStyles
-    ? (renderable.paintStyle?.opacity ?? defaultOpacity)
-    : defaultOpacity;
+  // Invalid live regions (solve not accepted, or derivation failed) are tinted
+  // with the palette danger red (the overconstraint color). Pending (stale)
+  // regions keep the normal fill; they are non-selectable either way.
+  const isInvalidRegion =
+    renderable.semanticClass === "region" &&
+    renderable.regionValidity === "invalid";
+  const color = isInvalidRegion
+    ? palette.overconstrained
+    : applyStyles
+      ? (renderable.paintStyle?.color ?? defaultColor)
+      : defaultColor;
+  const opacity =
+    applyStyles && !isInvalidRegion
+      ? (renderable.paintStyle?.opacity ?? defaultOpacity)
+      : defaultOpacity;
   const fill =
-    applyStyles && renderable.paintStyle?.kind === "linearGradient"
+    applyStyles &&
+    !isInvalidRegion &&
+    renderable.paintStyle?.kind === "linearGradient"
       ? {
           kind: "linearGradient" as const,
           startColor: renderable.paintStyle.startColor,
