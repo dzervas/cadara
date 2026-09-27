@@ -156,7 +156,15 @@ export interface NeutralCurvePointWitness {
           | "circleCubic"
           | "cubicCubic"
           | "cubicSelf";
-        /** Multiplicity in the exact support polynomial when applicable. */
+        /**
+         * Multiplicity in the exact support polynomial when applicable. For
+         * `circleCubic` that polynomial is the circle's implicit equation
+         * along the cubic. For `circlePair` it is the first circle's implicit
+         * equation along the two circles' radical line, which meets the first
+         * circle exactly in their common points. In both, a multiple root
+         * proves a shared tangent line (see `neutralCurveWitnessProvesTangency`).
+         * Absence means unknown, never simple.
+         */
         readonly rootMultiplicity?: number;
         /** Outward-containing dyadic enclosures of the exact source parameters. */
         readonly firstParameterBounds: readonly [number, number];
@@ -937,6 +945,44 @@ function curveEvaluationScaleInFrame(
     return Math.max(1, coordinateScale(curve.center), curve.radius);
   }
   return Math.max(1, ...curve.poles.map(coordinateScale));
+}
+
+/**
+ * The witness proves the two curves share their tangent line there. This is
+ * part of the capability contract: every producer must honour these proof
+ * meanings. `unclassified` alone proves nothing: an endpoint, stationary or boundary
+ * contact may be a shallow crossing.
+ * - `tangent`: even multiplicity at a regular point, or a single circle-pair root.
+ * - A structural same-support cubic correspondence end.
+ * - A multiple root of the exact support polynomial of a pair with a line or
+ *   circle side (line/circle, line/cubic, circle/cubic, circle pair).
+ *   - Line/circle, line/cubic and circle/cubic: the polynomial is the
+ *     circle's implicit equation along the line, the line's along the cubic,
+ *     or the circle's along the cubic. A multiple root is a zero of its
+ *     derivative, so the moving curve's tangent lies along the line or
+ *     circle there, unless that curve's derivative vanishes. The order step
+ *     certifies a nonzero derivative on every half-edge at the vertex before
+ *     it sorts.
+ *   - Circle pair: the polynomial is the first circle's implicit equation
+ *     along the two circles' radical line, not along the other circle. That
+ *     line meets the first circle exactly in the common points, so a double
+ *     root means the circles meet once, and they are tangent.
+ *   This holds at a full circle's seam or an active end too, which the
+ *   certifier leaves `unclassified`.
+ * Cubic/cubic and cubic self roots are excluded: their multiplicity lives in
+ * a resultant, where a transversal crossing can be multiple.
+ */
+export function neutralCurveWitnessProvesTangency(
+  point: NeutralCurvePointWitness,
+): boolean {
+  if (point.classification === "tangent") return true;
+  const proof = point.proof;
+  if (proof.kind === "exactStructuralCubicCorrespondenceEndpoint") return true;
+  const lineOrCircleSide =
+    (proof.kind === "exactAlgebraicCurveRootSet" &&
+      (proof.family === "circlePair" || proof.family === "circleCubic")) ||
+    proof.kind === "exactImplicitLineRootSet";
+  return lineOrCircleSide && (proof.rootMultiplicity ?? 1) >= 2;
 }
 
 export function checkNeutralCurvePointConsistency(
