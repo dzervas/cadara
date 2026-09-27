@@ -10,6 +10,8 @@ import type { MaybeAuthoredValue } from "@/contracts/modeling/authored-values";
 import type {
   SketchReferenceImageRecord,
   SketchDefinition,
+  SketchSolveDiagnostic,
+  SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
 import type {
   SketchConstraintRef,
@@ -140,10 +142,37 @@ export interface SketchGeometryDragState {
     | null;
 }
 
-export interface SketchLiveRegionState {
-  freshness: "current" | "stale";
-  pendingSinceSequence: number | null;
-  debounceMs: number;
+/** Synchronous, kernel-free live solve that is the basis of live regions. */
+export interface SketchLiveSolve {
+  /** Evaluated definition used for the solve. */
+  definition: SketchDefinition;
+  projectedReferences: ProjectedSketchReferenceRecord[];
+  solvedSnapshot: SolvedSketchSnapshot;
+  /** Solved, with every constraint satisfied. */
+  accepted: boolean;
+}
+
+/**
+ * Display-only live regions. Features consume committed regions, never these.
+ * `regions` are the last published (accepted) regions; they are retained, as
+ * stale display, while a derivation is pending or the solve is not accepted.
+ */
+export interface SketchLiveRegions {
+  /** Incremented on every new live solve basis. */
+  generation: number;
+  status: "current" | "pending" | "unavailable" | "failed";
+  regions: RegionRecord[];
+  diagnostics: SketchSolveDiagnostic[];
+}
+
+/** Input of one async live region derivation, captured from the live solve. */
+export interface SketchLiveRegionBasis {
+  sketchId: SketchId;
+  definition: SketchDefinition;
+  projectedReferences: ProjectedSketchReferenceRecord[];
+  solvedSnapshot: SolvedSketchSnapshot;
+  /** Document modeling tolerance; carried now, sent on the request from T09e. */
+  modelingTolerance: number;
 }
 
 export interface SketchEditToolState {
@@ -181,6 +210,8 @@ export interface SketchSessionState {
   documentVariables: readonly DocumentVariableRecord[];
   /** Document tolerance policy judging every live solve and projection. */
   solverTolerances: SolverTolerancePolicy;
+  /** The document's settings.modelingTolerance. */
+  modelingTolerance: number;
   activeTool: SketchAuthoringToolId | null;
   status: SketchSessionStatus;
   constructionTargetPicking: boolean;
@@ -202,9 +233,9 @@ export interface SketchSessionState {
   activeSnap: SketchSnapCandidate | null;
   drawStartSnap: SketchSnapCandidate | null;
   sequence: number;
-  solvedRegions: RegionRecord[];
-  derivedValidity: SketchDerivedValidity;
-  liveRegionState?: SketchLiveRegionState;
+  /** Null until the session first solves; opened sessions show committed regions. */
+  liveSolve: SketchLiveSolve | null;
+  liveRegions: SketchLiveRegions;
   projectedReferences: ProjectedSketchReferenceRecord[];
   projectionDiagnostics: ProjectedSketchReferenceRecord["diagnostics"];
   commitRequest: Omit<
@@ -230,6 +261,8 @@ export interface SketchSessionDisplayRenderable {
   strokeStyle?: SketchDisplayStrokeStyle;
   constraintDisplay?: SketchConstraintDisplayTargetState;
   diagnosticStyle?: SketchDisplayDiagnosticStyle;
+  /** Live region validity; non-current region fill renders with a red tint. */
+  regionValidity?: SketchDerivedValidity["state"];
   sketchPlaneFrame?: SketchPlaneFrame;
   textureFill?: {
     kind: "inlineImage";

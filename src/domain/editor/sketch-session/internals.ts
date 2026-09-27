@@ -10,8 +10,6 @@ import type { ReferenceImageOperationState } from "@/contracts/reference-image/s
 import type {
   ConstraintId,
   DimensionId,
-  DocumentId,
-  RevisionId,
   SketchAuthoringOperationId,
   SketchEntityId,
   SketchId,
@@ -25,10 +23,11 @@ import type {
   SketchPointRef,
 } from "@/contracts/shared/references";
 import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
-import { deriveSketchRegionsCore } from "@/contracts/sketch/region-extraction";
 import {
   type RegionRecord,
   type SketchDefinition,
+  type SketchDerivedValidity,
+  type SketchSolveDiagnostic,
   type SketchEntityDefinition,
   type SketchPointDefinition,
   type SolvedSketchSnapshot,
@@ -40,7 +39,10 @@ import {
   sampleSplineGeometry,
 } from "@/contracts/sketch/spline-geometry";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
-import { deriveSketchValidity } from "@/contracts/sketch/derived-validity";
+import {
+  deriveSketchValidity,
+  mergeSketchSolveDiagnostics,
+} from "@/contracts/sketch/derived-validity";
 import {
   resolveSketchDerivationDistances,
   resolveSketchDimensionValues,
@@ -67,7 +69,11 @@ import type {
   SketchToolId,
 } from "@/core/sketch-tools/definition";
 import { sampleArcPoints } from "@/core/sketch-tools/geometry";
-import type { SketchAuthoringToolId, SketchSessionState } from "./types";
+import type {
+  SketchAuthoringToolId,
+  SketchLiveRegionBasis,
+  SketchSessionState,
+} from "./types";
 import { buildCommitRequest } from "./history";
 
 export const CONSTRAINED_DRAG_BLOCKED_MESSAGE =
@@ -82,24 +88,9 @@ export const CONSTRAINED_DRAG_REQUEST_EPSILON = 1e-3;
 export const CONSTRAINED_DRAG_MOVE_FRACTION = 0.01;
 export const ANNOTATION_EDIT_SOLVE_BLOCKED_MESSAGE =
   "Could not solve the edited constraint value.";
-export const LIVE_REGION_DOCUMENT_ID = "doc_live_sketch" as DocumentId;
-export const LIVE_REGION_REVISION_ID = "rev_live_sketch" as RevisionId;
 export const REFERENCE_IMAGE_ANCHOR_MARKER_RADIUS = 0.28;
 export const REFERENCE_IMAGE_ANCHOR_OVERLAY_RADIUS = 0.4;
 export const REFERENCE_IMAGE_ANCHOR_MARKER_COLOR = 0xf6c453;
-export const liveRegionDiagnosticsByRegions = new WeakMap<
-  RegionRecord[],
-  ReturnType<typeof deriveSketchRegionsCore>["diagnostics"]
->();
-export const liveRegionSolvedSnapshotByRegions = new WeakMap<
-  RegionRecord[],
-  SolvedSketchSnapshot
->();
-export const liveRegionValidityByRegions = new WeakMap<
-  RegionRecord[],
-  SketchSessionState["derivedValidity"]
->();
-
 export function createPointId(sequence: number, suffix: string): SketchPointId {
   return `sketch_point_${sequence}_${suffix}_${crypto.randomUUID()}` as SketchPointId;
 }
@@ -379,18 +370,37 @@ export function resolveSketchDefinitionForSolve(
   return resolved.ok ? resolved.definition : withDerivationDistances;
 }
 
-export function deriveSolvedRegionsForSession(
-  session: Pick<
-    SketchSessionState,
-    | "projectedReferences"
-    | "sketchId"
-    | "documentVariables"
-    | "solverTolerances"
-  >,
+const LIVE_REGIONS_UNAVAILABLE_DIAGNOSTIC: SketchSolveDiagnostic = {
+  code: "regions-unavailable",
+  severity: "warning",
+  message:
+    "Sketch profiles are unavailable until every sketch constraint is solved.",
+  target: null,
+};
+
+const LIVE_REGIONS_DERIVATION_FAILED_CODE = "regions-derivation-failed";
+
+function isAcceptedLiveSolve(solvedSnapshot: SolvedSketchSnapshot) {
+  return (
+    solvedSnapshot.status.solveState === "solved" &&
+    solvedSnapshot.constraintStatuses.every(
+      (entry) => entry.status === "satisfied",
+    )
+  );
+}
+
+/**
+ * Establishes a new live solve basis: solves synchronously and kernel-free
+ * (reusing the cached solve), bumps the live region generation and marks the
+ * regions pending (accepted solve) or unavailable. Regions are derived
+ * asynchronously by the editor's `sketch.deriveRegions` effect; the last
+ * published regions stay as stale display until then.
+ */
+export function withLiveSolveBasis(
+  session: SketchSessionState,
   definition: SketchDefinition,
   solvedSnapshot?: SolvedSketchSnapshot,
-): RegionRecord[] {
-  const sketchId = session.sketchId ?? ("sketch_draft" as SketchId);
+): SketchSessionState {
   const evaluatedDefinition = evaluateSketchDerivations(
     resolveSketchDefinitionForSolve(definition, session.documentVariables),
   ).definition;
@@ -417,24 +427,91 @@ export function deriveSolvedRegionsForSession(
     }
   }
 
-  const derived = deriveSketchRegionsCore({
-    documentId: LIVE_REGION_DOCUMENT_ID,
-    revisionId: LIVE_REGION_REVISION_ID,
-    sketchId,
-    definition: evaluatedDefinition,
-    solvedSnapshot: usableSolvedSnapshot,
-    projectedReferences: session.projectedReferences,
-  });
-  liveRegionDiagnosticsByRegions.set(derived.regions, derived.diagnostics);
-  liveRegionSolvedSnapshotByRegions.set(derived.regions, usableSolvedSnapshot);
-  liveRegionValidityByRegions.set(
-    derived.regions,
-    deriveSketchValidity({
+  const accepted = isAcceptedLiveSolve(usableSolvedSnapshot);
+  const generation = session.liveRegions.generation + 1;
+  return {
+    ...session,
+    liveSolve: {
+      definition: evaluatedDefinition,
+      projectedReferences: session.projectedReferences,
       solvedSnapshot: usableSolvedSnapshot,
-      diagnostics: derived.diagnostics,
-    }),
-  );
-  return derived.regions;
+      accepted,
+    },
+    liveRegions: accepted
+      ? {
+          ...session.liveRegions,
+          generation,
+          status: "pending",
+          // Synthetic unavailable/failed diagnostics describe the prior status only.
+          diagnostics: session.liveRegions.diagnostics.filter(
+            (diagnostic) =>
+              diagnostic.code !== LIVE_REGIONS_UNAVAILABLE_DIAGNOSTIC.code &&
+              diagnostic.code !== LIVE_REGIONS_DERIVATION_FAILED_CODE,
+          ),
+        }
+      : {
+          generation,
+          status: "unavailable",
+          regions: session.liveRegions.regions,
+          diagnostics: [LIVE_REGIONS_UNAVAILABLE_DIAGNOSTIC],
+        },
+  };
+}
+
+/** Basis for the async live region derivation, or null before the first live solve. */
+export function getSketchSessionLiveRegionBasis(
+  session: SketchSessionState,
+): SketchLiveRegionBasis | null {
+  if (!session.liveSolve) {
+    return null;
+  }
+
+  return {
+    sketchId: session.sketchId ?? ("sketch_draft" as SketchId),
+    definition: session.liveSolve.definition,
+    projectedReferences: session.liveSolve.projectedReferences,
+    solvedSnapshot: session.liveSolve.solvedSnapshot,
+    modelingTolerance: session.modelingTolerance,
+  };
+}
+
+/** Publishes regions derived for the session's current generation. */
+export function publishSketchLiveRegions(
+  session: SketchSessionState,
+  regions: RegionRecord[],
+  diagnostics: SketchSolveDiagnostic[],
+): SketchSessionState {
+  return {
+    ...session,
+    liveRegions: {
+      generation: session.liveRegions.generation,
+      status: "current",
+      regions,
+      diagnostics,
+    },
+  };
+}
+
+/** Records a failed live derivation; the last regions stay as invalid display. */
+export function failSketchLiveRegions(
+  session: SketchSessionState,
+  message: string,
+): SketchSessionState {
+  return {
+    ...session,
+    liveRegions: {
+      ...session.liveRegions,
+      status: "failed",
+      diagnostics: [
+        {
+          code: LIVE_REGIONS_DERIVATION_FAILED_CODE,
+          severity: "error",
+          message,
+          target: null,
+        },
+      ],
+    },
+  };
 }
 
 export function getSketchSessionRegionDiagnostics(session: SketchSessionState) {
@@ -444,49 +521,33 @@ export function getSketchSessionRegionDiagnostics(session: SketchSessionState) {
 export function getSketchSessionSolvedSnapshot(
   session: SketchSessionState,
 ): SolvedSketchSnapshot | null {
-  return liveRegionSolvedSnapshotByRegions.get(session.solvedRegions) ?? null;
+  return session.liveSolve?.solvedSnapshot ?? null;
 }
 
+/**
+ * Display validity of the session's live regions: pending is stale; not
+ * accepted, unavailable or failed is invalid. Never a consumption gate.
+ */
 export function getSketchSessionDerivedValidity(
   session: SketchSessionState,
-): SketchSessionState["derivedValidity"] {
-  const validity =
-    liveRegionValidityByRegions.get(session.solvedRegions) ??
-    session.derivedValidity;
-  return session.liveRegionState?.freshness === "stale"
-    ? { state: "stale", diagnostics: validity.diagnostics }
-    : validity;
-}
-
-export function withLiveSolvedRegions(
-  session: SketchSessionState,
-): SketchSessionState {
-  const solvedRegions = deriveSolvedRegionsForSession(
-    session,
-    session.definition,
-  );
-  return {
-    ...session,
-    solvedRegions,
-    derivedValidity:
-      liveRegionValidityByRegions.get(solvedRegions) ?? session.derivedValidity,
-    liveRegionState: {
-      freshness: "current",
-      pendingSinceSequence: null,
-      debounceMs: session.liveRegionState?.debounceMs ?? 100,
-    },
-  };
-}
-
-export function refreshLiveRegionsAfterDebounce(
-  session: SketchSessionState,
-  elapsedMs: number,
-): SketchSessionState {
-  const state = session.liveRegionState;
-  if (!state || state.freshness === "current" || elapsedMs < state.debounceMs) {
-    return session;
+): SketchDerivedValidity {
+  const { liveRegions, liveSolve } = session;
+  if (liveRegions.status === "current") {
+    return liveSolve
+      ? deriveSketchValidity({
+          solvedSnapshot: liveSolve.solvedSnapshot,
+          diagnostics: liveRegions.diagnostics,
+        })
+      : { state: "current", diagnostics: liveRegions.diagnostics };
   }
-  return withLiveSolvedRegions(session);
+
+  const diagnostics = mergeSketchSolveDiagnostics(
+    liveSolve?.solvedSnapshot.diagnostics ?? [],
+    liveRegions.diagnostics,
+  );
+  return liveRegions.status === "pending"
+    ? { state: "stale", diagnostics }
+    : { state: "invalid", diagnostics };
 }
 
 export function getHistorySequence(id: string) {
@@ -1312,31 +1373,32 @@ export function rebuildSessionForDefinition(
   input: { definition: SketchDefinition },
 ): SketchSessionState {
   const definition = cloneDefinition(input.definition);
-  const solvedRegions = deriveSolvedRegionsForSession(session, definition);
-  const derivedValidity =
-    liveRegionValidityByRegions.get(solvedRegions) ?? session.derivedValidity;
-  return {
-    ...session,
-    definition,
-    projectedReferences: mergeDerivedProjectedReferences(
+  const rebuilt = withLiveSolveBasis(
+    {
+      ...session,
       definition,
-      session.projectedReferences,
-    ),
-    toolStagedEntities: [],
-    activeAnnotationEdit: null,
-    selectedAnnotation: null,
-    activeEditTarget: null,
-    activeDrag: null,
+      projectedReferences: mergeDerivedProjectedReferences(
+        definition,
+        session.projectedReferences,
+      ),
+      toolStagedEntities: [],
+      activeAnnotationEdit: null,
+      selectedAnnotation: null,
+      activeEditTarget: null,
+      activeDrag: null,
+      commitRequest: rebuildSessionCommitRequest(session, definition),
+    },
+    definition,
+  );
+  return {
+    ...rebuilt,
     validationMessage:
-      derivedValidity.state === "current"
-        ? null
-        : (derivedValidity.diagnostics.find(
+      rebuilt.liveRegions.status === "unavailable"
+        ? (getSketchSessionDerivedValidity(rebuilt).diagnostics.find(
             (diagnostic) => diagnostic.severity !== "info",
           )?.message ??
-          "Sketch profiles are unavailable until the sketch is corrected."),
-    commitRequest: rebuildSessionCommitRequest(session, definition),
-    solvedRegions,
-    derivedValidity,
+          "Sketch profiles are unavailable until the sketch is corrected.")
+        : null,
   };
 }
 

@@ -23,7 +23,8 @@ import {
   isSketchSvgRenderingEnabled,
   patchSketchStyleValue,
   patchSketchEditToolValue,
-  refreshLiveRegionsAfterDebounce,
+  getSketchSessionLiveRegionBasis,
+  publishSketchLiveRegions,
   selectSketchConstraintTarget,
   selectSketchEditToolTarget,
   startSketchDraw,
@@ -554,6 +555,47 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
     }).regions;
   }
 
+  function withCommittedRegions(
+    session: ReturnType<typeof createSessionFromDefinition>,
+  ) {
+    return {
+      ...session,
+      liveRegions: {
+        ...session.liveRegions,
+        regions: deriveRegionsForDefinition(session.definition),
+      },
+    };
+  }
+
+  // Stands in for the editor's async `sketch.deriveRegions` effect at the
+  // session seam: derives for the session's own pending basis and publishes.
+  function publishPendingLiveRegions(
+    session: ReturnType<typeof createSessionFromDefinition>,
+  ) {
+    expect(
+      session.liveRegions.status,
+      "A new live solve basis should leave live regions pending until derived.",
+    ).toBe("pending");
+    const basis = getSketchSessionLiveRegionBasis(session);
+    expect(
+      basis,
+      "A pending session should expose its live basis.",
+    ).toBeTruthy();
+    const derived = deriveSketchRegionsCore({
+      documentId: "doc_workspace",
+      revisionId: "rev_0001",
+      sketchId: basis.sketchId,
+      definition: basis.definition,
+      solvedSnapshot: basis.solvedSnapshot,
+      projectedReferences: basis.projectedReferences,
+    });
+    return publishSketchLiveRegions(
+      session,
+      derived.regions,
+      derived.diagnostics,
+    );
+  }
+
   function getRegionRenderableBounds(
     session: ReturnType<typeof createSessionFromDefinition>,
   ) {
@@ -974,17 +1016,14 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
 
   function testLiveRegionRenderableTracksJiggledSketchDrag() {
     let session = createSessionFromDefinition(createSquareDefinition(false));
-    session = {
-      ...session,
-      solvedRegions: deriveRegionsForDefinition(session.definition),
-    };
+    session = withCommittedRegions(session);
     const target = session.definition.points.find(
       (point) => point.pointId === "sketch_point_b",
     )?.target;
     expect(target, "Expected square vertex B.").toBeTruthy();
 
     const initialBounds = getRegionRenderableBounds(session);
-    const initialRegionId = session.solvedRegions[0]?.regionId;
+    const initialRegionId = session.liveRegions.regions[0]?.regionId;
     expect(
       initialRegionId,
       "Initial square should derive a live region id.",
@@ -1002,13 +1041,18 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
 
     session = beginSketchGeometryDrag(session, target, [1, 0]);
     session = finishSketchGeometryDrag(session, [4, 3]);
+    expect(
+      getSketchSessionDerivedValidity(session).state,
+      "A completed drag should show the retained regions as stale until derived.",
+    ).toBe("stale");
+    session = publishPendingLiveRegions(session);
 
     expect(
-      session.solvedRegions.length,
+      session.liveRegions.regions.length,
       "Dragging the square should keep one live derived region.",
     ).toBe(1);
     expect(
-      session.solvedRegions[0]?.regionId,
+      session.liveRegions.regions[0]?.regionId,
       "Dragging the square should keep the live region identity stable.",
     ).toBe(initialRegionId);
 
@@ -1069,10 +1113,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
       ],
     });
     let session = createSessionFromDefinition(definition);
-    session = {
-      ...session,
-      solvedRegions: deriveRegionsForDefinition(session.definition),
-    };
+    session = withCommittedRegions(session);
 
     const geometry = getLiveRegionMesh(session);
     expect(
@@ -1121,10 +1162,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
       ],
     });
     let session = createSessionFromDefinition(definition);
-    session = {
-      ...session,
-      solvedRegions: deriveRegionsForDefinition(session.definition),
-    };
+    session = withCommittedRegions(session);
 
     const geometry = getLiveRegionMesh(session);
     expect(
@@ -1163,14 +1201,15 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
     session = updateSketchGeometryDrag(session, [2.25, 0]);
 
     expect(
-      session.liveRegionState?.freshness,
-      "Accepted drag movement should defer live region extraction until the debounce interval settles.",
-    ).toBe("stale");
+      session.liveRegions.status,
+      "Accepted drag movement should defer live region derivation until the drag completes.",
+    ).toBe("pending");
     expect(
       getSketchSessionDerivedValidity(session).state,
       "Deferred profile output must be explicitly stale.",
     ).toBe("stale");
-    session = refreshLiveRegionsAfterDebounce(session, 100);
+    session = finishSketchGeometryDrag(session, [2.25, 0]);
+    session = publishPendingLiveRegions(session);
     expect(
       getSketchSessionRegionDiagnostics(session).some(
         (diagnostic) => diagnostic.code === "profile-open-segment",
@@ -1182,10 +1221,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
   function testConstrainedDragRegionDerivationBenchmark() {
     const definition = createSquareDefinition(false);
     let session = createSessionFromDefinition(definition);
-    session = {
-      ...session,
-      solvedRegions: deriveRegionsForDefinition(session.definition),
-    };
+    session = withCommittedRegions(session);
     const target = session.definition.points.find(
       (point) => point.pointId === "sketch_point_b",
     )?.target;
@@ -1199,7 +1235,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
       const previous = session;
       session = updateSketchGeometryDrag(session, [1 + t * 3, t * 2]);
       expect(
-        session.solvedRegions.length,
+        session.liveRegions.regions.length,
         "Drag-frame updates should keep the previous constrained square profile visible.",
       ).toBe(1);
       if (index === 0) {
@@ -1209,9 +1245,9 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
         ).toBe(previous);
       } else {
         expect(
-          session.liveRegionState?.freshness,
-          "Moving drag frames should defer live region extraction.",
-        ).toBe("stale");
+          session.liveRegions.status,
+          "Moving drag frames should defer live region derivation.",
+        ).toBe("pending");
         expect(
           getSketchSessionDisplayRenderables(session)
             .filter((renderable) => renderable.semanticClass === "region")
@@ -1296,14 +1332,11 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
 
   function testImmovableConstrainedDragBlocksWithoutChangingDraft() {
     let session = createSessionFromDefinition(createSquareDefinition(true));
-    session = {
-      ...session,
-      solvedRegions: deriveRegionsForDefinition(session.definition),
-    };
+    session = withCommittedRegions(session);
     const before = new Map(
       session.definition.points.map((point) => [point.pointId, point.position]),
     );
-    const beforeRegionIds = session.solvedRegions
+    const beforeRegionIds = session.liveRegions.regions
       .map((region) => region.regionId)
       .join(",");
     const target = session.definition.points.find(
@@ -1328,7 +1361,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
       "Blocked drag should leave B unchanged.",
     );
     expect(
-      session.solvedRegions.map((region) => region.regionId).join(","),
+      session.liveRegions.regions.map((region) => region.regionId).join(","),
       "Blocked drag should leave current live regions unchanged.",
     ).toBe(beforeRegionIds);
     expect(
@@ -1587,13 +1620,10 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
     let session = toggleSketchSvgRendering(
       createSessionFromDefinition(createSquareDefinition(false)),
     );
-    session = {
-      ...session,
-      solvedRegions: deriveRegionsForDefinition(session.definition),
-    };
+    session = withCommittedRegions(session);
     const entityTarget = session.definition.entities[0]?.target;
     const pointTarget = session.definition.points[0]?.target;
-    const regionTarget = session.solvedRegions[0]?.target;
+    const regionTarget = session.liveRegions.regions[0]?.target;
     expect(
       entityTarget && pointTarget && regionTarget,
       "Style patch fixture should create local edge, point, and region targets.",
@@ -1741,12 +1771,9 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
     let session = toggleSketchSvgRendering(
       createSessionFromDefinition(createSquareDefinition(false)),
     );
-    session = {
-      ...session,
-      solvedRegions: deriveRegionsForDefinition(session.definition),
-    };
+    session = withCommittedRegions(session);
     const entityTarget = session.definition.entities[0]?.target;
-    const regionTarget = session.solvedRegions[0]?.target;
+    const regionTarget = session.liveRegions.regions[0]?.target;
     expect(
       entityTarget && regionTarget,
       "SVG rendering fixture should expose edge and region targets.",
@@ -1772,6 +1799,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
       field: "strokeWidth",
       value: 2,
     });
+    session = publishPendingLiveRegions(session);
 
     const styledRenderables = getSketchSessionDisplayRenderables(session);
     expect(

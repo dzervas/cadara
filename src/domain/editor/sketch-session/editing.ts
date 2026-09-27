@@ -55,7 +55,7 @@ import {
   createPointId,
   createSessionCommitFactories,
   createSplineEntityDefinition,
-  deriveSolvedRegionsForSession,
+  withLiveSolveBasis,
   getEntityPointIds,
   isDrawingSketchTool,
   rebuildSessionCommitRequest,
@@ -535,7 +535,6 @@ export function applySketchEditOperationResult(
       definition: result.definition,
       sequence: nextSequence,
       commitRequest: rebuildSessionCommitRequest(session, result.definition),
-      solvedRegions: deriveSolvedRegionsForSession(session, result.definition),
     };
   }
 
@@ -545,7 +544,6 @@ export function applySketchEditOperationResult(
       definition: history.definition,
       sequence: nextSequence,
       commitRequest: rebuildSessionCommitRequest(session, history.definition),
-      solvedRegions: deriveSolvedRegionsForSession(session, history.definition),
     };
   }
 
@@ -653,18 +651,20 @@ export function selectSketchEditToolTarget(
       };
     }
 
-    return {
-      ...session,
-      definition: result.definition,
-      toolStagedEntities: [],
-      sequence: nextSequence,
-      validationMessage: null,
-      commitRequest: rebuildSessionCommitRequest(session, result.definition),
-      solvedRegions: deriveSolvedRegionsForSession(session, result.definition),
-      toolPresentation: buildSketchEditToolPresentation(activeEditTool),
-      activeEditTarget: null,
-      activeDrag: null,
-    };
+    return withLiveSolveBasis(
+      {
+        ...session,
+        definition: result.definition,
+        toolStagedEntities: [],
+        sequence: nextSequence,
+        validationMessage: null,
+        commitRequest: rebuildSessionCommitRequest(session, result.definition),
+        toolPresentation: buildSketchEditToolPresentation(activeEditTool),
+        activeEditTarget: null,
+        activeDrag: null,
+      },
+      result.definition,
+    );
   }
 
   if (
@@ -751,16 +751,19 @@ export function selectSketchEditToolTarget(
         selectedTarget: null,
         selectedTargets: [],
       };
-      return {
-        ...session,
-        ...applied,
-        activeEditTool: resetEditTool,
-        toolStagedEntities: [],
-        validationMessage: null,
-        toolPresentation: buildSketchEditToolPresentation(resetEditTool),
-        activeEditTarget: null,
-        activeDrag: null,
-      };
+      return withLiveSolveBasis(
+        {
+          ...session,
+          ...applied,
+          activeEditTool: resetEditTool,
+          toolStagedEntities: [],
+          validationMessage: null,
+          toolPresentation: buildSketchEditToolPresentation(resetEditTool),
+          activeEditTarget: null,
+          activeDrag: null,
+        },
+        applied.definition,
+      );
     }
   }
 
@@ -861,17 +864,19 @@ export function patchSketchEditToolValue(
     selectedTargets: [],
   };
 
-  return {
-    ...session,
-    activeEditTool: nextEditTool,
-    toolStagedEntities: [],
-    definition: history.definition,
-    sequence: nextSequence,
-    commitRequest: rebuildSessionCommitRequest(session, history.definition),
-    solvedRegions: deriveSolvedRegionsForSession(session, history.definition),
-    validationMessage: null,
-    toolPresentation: buildSketchEditToolPresentation(nextEditTool),
-  };
+  return withLiveSolveBasis(
+    {
+      ...session,
+      activeEditTool: nextEditTool,
+      toolStagedEntities: [],
+      definition: history.definition,
+      sequence: nextSequence,
+      commitRequest: rebuildSessionCommitRequest(session, history.definition),
+      validationMessage: null,
+      toolPresentation: buildSketchEditToolPresentation(nextEditTool),
+    },
+    history.definition,
+  );
 }
 
 export function patchSketchEditOperatorValue(
@@ -943,16 +948,19 @@ export function patchSketchEditOperatorValue(
     selectedTargets: [],
   };
 
-  return {
-    ...session,
-    ...applied,
-    activeEditTool: nextEditTool,
-    toolStagedEntities: [],
-    validationMessage: null,
-    toolPresentation: buildSketchEditToolPresentation(nextEditTool),
-    activeEditTarget: null,
-    activeDrag: null,
-  };
+  return withLiveSolveBasis(
+    {
+      ...session,
+      ...applied,
+      activeEditTool: nextEditTool,
+      toolStagedEntities: [],
+      validationMessage: null,
+      toolPresentation: buildSketchEditToolPresentation(nextEditTool),
+      activeEditTarget: null,
+      activeDrag: null,
+    },
+    applied.definition,
+  );
 }
 
 export function beginSketchGeometryDrag(
@@ -1085,30 +1093,28 @@ export function applySketchGeometryDrag(
 
   const definition = edit.definition;
 
-  return {
-    ...session,
-    definition,
-    toolStagedEntities: [],
-    activeDrag: complete
-      ? null
-      : {
-          ...drag,
-          currentPoint: point,
-          status: "dragging",
-          message: null,
-          interactiveSolveSession: edit.interactiveSolveSession,
-        },
-    commitRequest: rebuildSessionCommitRequest(session, definition),
-    solvedRegions: complete
-      ? deriveSolvedRegionsForSession(session, definition, edit.solvedSnapshot)
-      : session.solvedRegions,
-    liveRegionState: {
-      freshness: complete ? "current" : "stale",
-      pendingSinceSequence: complete ? null : session.sequence,
-      debounceMs: 100,
+  // Every accepted frame is a new live solve basis; regions stay stale while
+  // the drag is active and are derived once it completes (no active drag).
+  return withLiveSolveBasis(
+    {
+      ...session,
+      definition,
+      toolStagedEntities: [],
+      activeDrag: complete
+        ? null
+        : {
+            ...drag,
+            currentPoint: point,
+            status: "dragging",
+            message: null,
+            interactiveSolveSession: edit.interactiveSolveSession,
+          },
+      commitRequest: rebuildSessionCommitRequest(session, definition),
+      validationMessage: null,
     },
-    validationMessage: null,
-  };
+    definition,
+    edit.solvedSnapshot,
+  );
 }
 
 export function solveDraggedPointEdit(

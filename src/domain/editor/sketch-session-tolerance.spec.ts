@@ -19,9 +19,13 @@ import {
   createEmptyDefinition,
   createLineEntityDefinition,
   createPointDefinition,
+  getSketchSessionDerivedValidity,
+  getSketchSessionLiveRegionBasis,
   getSketchSessionSolvedSnapshot,
+  publishSketchLiveRegions,
   rebuildSessionForDefinition,
 } from "@/domain/editor/sketch-session/internals";
+import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 
@@ -139,12 +143,11 @@ function makeToleranceProbeDefinition(): SketchDefinition {
  * document keeps its default tolerances.
  */
 async function openToleranceHarness(settings?: typeof DOCUMENT_SETTINGS) {
-  const adapter = new MockKernelAdapter({
-    solverAdapter: new SketchConstraintSolverAdapter({
-      documentId: "doc_workspace",
-      revisionId: null,
-    }),
+  const solverAdapter = new SketchConstraintSolverAdapter({
+    documentId: "doc_workspace",
+    revisionId: null,
   });
+  const adapter = new MockKernelAdapter({ solverAdapter });
   const readSnapshot = async () =>
     (
       await adapter.getDocumentSnapshot({
@@ -171,7 +174,32 @@ async function openToleranceHarness(settings?: typeof DOCUMENT_SETTINGS) {
   }
 
   const liveAndCommit = async (definition: SketchDefinition, name: string) => {
-    const liveSession = rebuildSessionForDefinition(opened, { definition });
+    // Live regions arrive through the same async solver boundary the
+    // editor's `sketch.deriveRegions` effect uses.
+    const rebuilt = rebuildSessionForDefinition(opened, { definition });
+    const basis = getSketchSessionLiveRegionBasis(rebuilt);
+    const liveSession =
+      rebuilt.liveRegions.status === "pending" && basis
+        ? await solverAdapter
+            .deriveSketchRegions({
+              contractVersion: "modeling-contract/v1alpha1",
+              solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+              requestId: `request_${name}:live-regions` as const,
+              documentId: "doc_workspace",
+              revisionId: (await readSnapshot()).document.revisionId,
+              sketchId: basis.sketchId,
+              definition: basis.definition,
+              solvedSnapshot: basis.solvedSnapshot,
+              projectedReferences: basis.projectedReferences,
+            })
+            .then((derived) =>
+              publishSketchLiveRegions(
+                rebuilt,
+                derived.regions,
+                derived.diagnostics,
+              ),
+            )
+        : rebuilt;
     const live = getSketchSessionSolvedSnapshot(liveSession);
     if (!live) {
       throw new Error("A live rebuild must publish its solved snapshot.");
@@ -419,8 +447,8 @@ test("at the default document tolerance, sketches whose requirements all hold ar
         solveState: live.status.solveState,
         constraints: [...new Set(live.constraintStatuses.map((s) => s.status))],
         dimensions: [...new Set(live.dimensionStatuses.map((s) => s.status))],
-        validity: liveSession.derivedValidity.state,
-        regions: liveSession.solvedRegions.length,
+        validity: getSketchSessionDerivedValidity(liveSession).state,
+        regions: liveSession.liveRegions.regions.length,
       },
       commit: {
         solveState: committed.solvedSnapshot.status.solveState,
@@ -457,7 +485,7 @@ test("at the default document tolerance, sketches whose requirements all hold ar
   expect(
     {
       live: live.status.solveState,
-      liveValidity: liveSession.derivedValidity.state,
+      liveValidity: getSketchSessionDerivedValidity(liveSession).state,
       commit: committed.solvedSnapshot.status.solveState,
       commitValidity: committed.derivedValidity.state,
       commitRegions: committed.regions.length,

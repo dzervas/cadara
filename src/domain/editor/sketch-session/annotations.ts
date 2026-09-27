@@ -57,7 +57,7 @@ import type {
 } from "./types";
 import {
   ANNOTATION_EDIT_SOLVE_BLOCKED_MESSAGE,
-  deriveSolvedRegionsForSession,
+  withLiveSolveBasis,
   resolveSketchDefinitionForSolve,
   getTargetKey,
   normalizeConstraintValue,
@@ -554,23 +554,22 @@ export function commitSketchAnnotationEditValue(
   const nextFullDefinition = solved.definition;
   const nextDefinition = nextFullDefinition;
 
-  return {
-    ...session,
-    definition: nextDefinition,
-    toolStagedEntities: [],
-    status: "idle",
-    toolPresentation: null,
-    activeAnnotationEdit: null,
-    activeEditTarget: null,
-    activeDrag: null,
-    validationMessage: null,
-    commitRequest: rebuildSessionCommitRequest(session, nextDefinition),
-    solvedRegions: deriveSolvedRegionsForSession(
-      session,
-      nextDefinition,
-      solved.solvedSnapshot,
-    ),
-  };
+  return withLiveSolveBasis(
+    {
+      ...session,
+      definition: nextDefinition,
+      toolStagedEntities: [],
+      status: "idle",
+      toolPresentation: null,
+      activeAnnotationEdit: null,
+      activeEditTarget: null,
+      activeDrag: null,
+      validationMessage: null,
+      commitRequest: rebuildSessionCommitRequest(session, nextDefinition),
+    },
+    nextDefinition,
+    solved.solvedSnapshot,
+  );
 }
 
 export function solveEditedAnnotationDefinition(
@@ -1142,20 +1141,22 @@ export function deleteSelectedSketchAnnotation(
         };
   const nextDefinition = nextFullDefinition;
 
-  return {
-    ...session,
-    definition: nextDefinition,
-    sequence: session.sequence + 1,
-    toolStagedEntities: [],
-    activeAnnotationEdit: null,
-    selectedAnnotation: null,
-    activeEditTarget: null,
-    activeSpecialMode: null,
-    activeDrag: null,
-    validationMessage: null,
-    commitRequest: rebuildSessionCommitRequest(session, nextDefinition),
-    solvedRegions: deriveSolvedRegionsForSession(session, nextDefinition),
-  };
+  return withLiveSolveBasis(
+    {
+      ...session,
+      definition: nextDefinition,
+      sequence: session.sequence + 1,
+      toolStagedEntities: [],
+      activeAnnotationEdit: null,
+      selectedAnnotation: null,
+      activeEditTarget: null,
+      activeSpecialMode: null,
+      activeDrag: null,
+      validationMessage: null,
+      commitRequest: rebuildSessionCommitRequest(session, nextDefinition),
+    },
+    nextDefinition,
+  );
 }
 
 function resolveDimensionEffectiveValues(

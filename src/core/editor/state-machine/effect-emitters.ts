@@ -5,6 +5,7 @@ import {
   type FeatureEditSessionState,
 } from "@/domain/editor/feature-editing";
 import {
+  getSketchSessionLiveRegionBasis,
   updateSketchReferenceProjection,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
@@ -522,6 +523,57 @@ export function emitSketchReferenceProjection(
         documentId: state.document.documentId,
         baseRevisionId: state.document.revisionId,
         session,
+      },
+    ],
+  };
+}
+
+/**
+ * Post-transition hook: emits the single live region derivation for a pending
+ * live solve basis. Drags stay stale until they complete, and at most one
+ * request is in flight; a discarded stale result re-enters here for the latest
+ * generation. Idempotent, so nested and repeated applications are safe.
+ */
+export function emitPendingSketchRegionDerivation(
+  result: EditorTransitionResult,
+): EditorTransitionResult {
+  const state = result.state;
+  if (
+    state.kind !== "editingSketch" ||
+    state.pendingRegionRequest ||
+    state.session.liveRegions.status !== "pending" ||
+    state.session.activeDrag !== null ||
+    state.document.documentId === null ||
+    state.document.revisionId === null
+  ) {
+    return result;
+  }
+
+  const basis = getSketchSessionLiveRegionBasis(state.session);
+  if (!basis) {
+    return result;
+  }
+
+  const requestId = nextRequestId(state, "sketch-region-derivation");
+  const generation = state.session.liveRegions.generation;
+
+  return {
+    state: {
+      ...state,
+      nextRequestSequence: state.nextRequestSequence + 1,
+      pendingRegionRequest: { requestId, generation },
+    },
+    effects: [
+      ...result.effects,
+      {
+        type: "sketch.deriveRegions",
+        background: true,
+        requestId,
+        commandSessionId: state.command.commandSessionId,
+        documentId: state.document.documentId,
+        baseRevisionId: state.document.revisionId,
+        generation,
+        basis,
       },
     ],
   };

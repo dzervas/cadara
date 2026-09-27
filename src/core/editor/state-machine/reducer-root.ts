@@ -54,6 +54,7 @@ import {
   emitDocumentCursorMove,
   emitEditSessionCursorRestore,
   emitFeaturePreview,
+  emitPendingSketchRegionDerivation,
   emitSketchOpen,
   emitSketchPlaneCommit,
   emitSnapshotFetch,
@@ -94,6 +95,8 @@ import {
   handleEffectSketchPlaneCommitFailed,
   handleEffectSketchReferencesProjected,
   handleEffectSketchReferenceProjectionFailed,
+  handleEffectSketchRegionsDerived,
+  handleEffectSketchRegionDerivationFailed,
   handleEffectSketchReferenceImageImportCompleted,
   handleEffectSketchReferenceImageImportFailed,
   handleEffectSketchSpecialModeEffectCompleted,
@@ -633,6 +636,10 @@ function handleSharedEvent(
       return handleEffectSketchReferencesProjected(state, event);
     case "effect.sketchReferenceProjectionFailed":
       return handleEffectSketchReferenceProjectionFailed(state, event);
+    case "effect.sketchRegionsDerived":
+      return handleEffectSketchRegionsDerived(state, event);
+    case "effect.sketchRegionDerivationFailed":
+      return handleEffectSketchRegionDerivationFailed(state, event);
     case "effect.sketchReferenceImageImportCompleted":
       return handleEffectSketchReferenceImageImportCompleted(state, event);
     case "effect.sketchReferenceImageImportFailed":
@@ -659,11 +666,9 @@ export function transitionEditorState(
   event: EditorEvent,
   dependencies: EditorExtensionDependencies = defaultEditorExtensionDependencies,
 ): EditorTransitionResult {
-  const workflowResult = routeToWorkflow(state, event, dependencies);
+  const result =
+    routeToWorkflow(state, event, dependencies) ??
+    handleSharedEvent(state, event, dependencies);
 
-  if (workflowResult) {
-    return workflowResult;
-  }
-
-  return handleSharedEvent(state, event, dependencies);
+  return emitPendingSketchRegionDerivation(result);
 }

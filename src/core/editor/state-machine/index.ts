@@ -76,6 +76,7 @@ export { createEditorEffectFailureEvent } from "./error-mapping";
 export type { EditorExtensionDependencies } from "./dependencies";
 export { defaultEditorExtensionDependencies } from "./dependencies";
 export { transitionEditorState } from "./reducer-root";
+export { emitPendingSketchRegionDerivation } from "./effect-emitters";
 export {
   getEditorHistoryAvailability,
   getEditorSelectionKey,

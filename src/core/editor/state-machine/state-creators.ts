@@ -343,6 +343,7 @@ export function enterSketchEditing(
     pendingCommitRequestId: null,
     pendingProjectionRequestId: null,
     pendingImportRequestId: null,
+    pendingRegionRequest: null,
   };
 
   if (
