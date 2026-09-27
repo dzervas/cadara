@@ -32,7 +32,10 @@ import {
   updateSketchPointer,
   acceptSketchDraw,
 } from "@/domain/editor/sketch-session";
-import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
+import {
+  createStandardPlaneDefinition,
+  OCC_KERNEL_SETTINGS,
+} from "@/domain/modeling/opencascade-kernel-seed";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import { deriveSketchRegionsCore } from "@/contracts/sketch/region-extraction";
 import { toolDefinitions } from "@/core/tools/tool-registry";
@@ -500,18 +503,8 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
       partialSolvePolicy: "bestEffort",
     });
 
-    return createSketchSessionFromSnapshot({
-      ownerDocumentId: "doc_workspace",
-      ownerRevisionId: "rev_0001",
-      ownerFeatureId: null,
-      ownerSketchId: "sketch_primary",
-      ownerBodyId: null,
-      sketchId: "sketch_primary",
-      label: "Sketch",
-      plane,
-      planeTarget: plane.support,
-      planeKey: "xy",
-      sketch: {
+    return createSketchSessionFromSnapshot(
+      {
         ownerDocumentId: "doc_workspace",
         ownerRevisionId: "rev_0001",
         ownerFeatureId: null,
@@ -519,13 +512,26 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
         ownerBodyId: null,
         sketchId: "sketch_primary",
         label: "Sketch",
-        planeSupport: plane.support,
-        definition,
-        solvedSnapshot: solved.solvedSnapshot,
-        derivedValidity: { state: "current", diagnostics: [] },
-        regions: [],
-      },
-    } satisfies SketchSnapshotRecord);
+        plane,
+        planeTarget: plane.support,
+        planeKey: "xy",
+        sketch: {
+          ownerDocumentId: "doc_workspace",
+          ownerRevisionId: "rev_0001",
+          ownerFeatureId: null,
+          ownerSketchId: "sketch_primary",
+          ownerBodyId: null,
+          sketchId: "sketch_primary",
+          label: "Sketch",
+          planeSupport: plane.support,
+          definition,
+          solvedSnapshot: solved.solvedSnapshot,
+          derivedValidity: { state: "current", diagnostics: [] },
+          regions: [],
+        },
+      } satisfies SketchSnapshotRecord,
+      OCC_KERNEL_SETTINGS,
+    );
   }
 
   function deriveRegionsForDefinition(definition: SketchDefinition) {
@@ -782,10 +788,13 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
   }
 
   function testUnconstrainedPointDragUpdatesAuthoredDefinition() {
-    let session = createNewSketchSessionFromSupport({
-      kind: "construction",
-      constructionId: "construction_plane-xy",
-    });
+    let session = createNewSketchSessionFromSupport(
+      {
+        kind: "construction",
+        constructionId: "construction_plane-xy",
+      },
+      OCC_KERNEL_SETTINGS,
+    );
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [0, 0]);
     session = acceptSketchDraw(session, [1, 0]);
@@ -1219,10 +1228,13 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
   }
 
   function testRectangleToolDragTranslatesWholeRectangle() {
-    let session = createNewSketchSessionFromSupport({
-      kind: "construction",
-      constructionId: "construction_plane-xy",
-    });
+    let session = createNewSketchSessionFromSupport(
+      {
+        kind: "construction",
+        constructionId: "construction_plane-xy",
+      },
+      OCC_KERNEL_SETTINGS,
+    );
     session = beginSketchTool(session, "rectangle");
     session = startSketchDraw(session, [0, 0]);
     session = acceptSketchDraw(session, [4, 3]);
@@ -2054,10 +2066,13 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
   }
 
   function testOffsetAddsLineCopyAndRejectsInvalidDistance() {
-    let session = createNewSketchSessionFromSupport({
-      kind: "construction",
-      constructionId: "construction_plane-xy",
-    });
+    let session = createNewSketchSessionFromSupport(
+      {
+        kind: "construction",
+        constructionId: "construction_plane-xy",
+      },
+      OCC_KERNEL_SETTINGS,
+    );
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [0, 0]);
     session = acceptSketchDraw(session, [2, 0]);
@@ -3254,18 +3269,8 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
       },
       partialSolvePolicy: "bestEffort",
     });
-    let session = createSketchSessionFromSnapshot({
-      ownerDocumentId: parsed.document.documentId,
-      ownerRevisionId: parsed.document.revisionId,
-      ownerFeatureId: null,
-      ownerSketchId: sketch.sketchId,
-      ownerBodyId: null,
-      sketchId: sketch.sketchId,
-      label: sketch.label,
-      plane: sketch.plane,
-      planeTarget: sketch.plane.support,
-      planeKey: sketch.plane.key,
-      sketch: {
+    let session = createSketchSessionFromSnapshot(
+      {
         ownerDocumentId: parsed.document.documentId,
         ownerRevisionId: parsed.document.revisionId,
         ownerFeatureId: null,
@@ -3273,13 +3278,26 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
         ownerBodyId: null,
         sketchId: sketch.sketchId,
         label: sketch.label,
-        planeSupport: sketch.plane.support,
-        definition: sketch.definition,
-        solvedSnapshot: solved.solvedSnapshot,
-        derivedValidity: { state: "current", diagnostics: [] },
-        regions: [],
-      },
-    } satisfies SketchSnapshotRecord);
+        plane: sketch.plane,
+        planeTarget: sketch.plane.support,
+        planeKey: sketch.plane.key,
+        sketch: {
+          ownerDocumentId: parsed.document.documentId,
+          ownerRevisionId: parsed.document.revisionId,
+          ownerFeatureId: null,
+          ownerSketchId: sketch.sketchId,
+          ownerBodyId: null,
+          sketchId: sketch.sketchId,
+          label: sketch.label,
+          planeSupport: sketch.plane.support,
+          definition: sketch.definition,
+          solvedSnapshot: solved.solvedSnapshot,
+          derivedValidity: { state: "current", diagnostics: [] },
+          regions: [],
+        },
+      } satisfies SketchSnapshotRecord,
+      OCC_KERNEL_SETTINGS,
+    );
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [0, 0]);
 

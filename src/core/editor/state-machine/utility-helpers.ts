@@ -16,12 +16,6 @@ export function nextRequestId(state: EditorState, scope: string) {
   return `request_${scope}-${state.nextRequestSequence}` as RequestId;
 }
 
-export const EDITOR_SKETCH_REFERENCE_PROJECTION_TOLERANCES = {
-  coincidence: 1e-6,
-  angleRadians: 1e-6,
-  minimumSegmentLength: 1e-6,
-} as const;
-
 export function deriveSketchPointFromWorld(
   _plane: SketchSessionState["plane"],
   point: readonly [number, number],

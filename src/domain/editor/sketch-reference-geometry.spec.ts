@@ -14,7 +14,10 @@ import {
   toggleSketchConstructionTarget,
   updateSketchReferenceProjection,
 } from "@/domain/editor/sketch-session";
-import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
+import {
+  createStandardPlaneDefinition,
+  OCC_KERNEL_SETTINGS,
+} from "@/domain/modeling/opencascade-kernel-seed";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import { validateSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import {
@@ -90,18 +93,8 @@ test("src/domain/editor/sketch-reference-geometry.spec.ts", () => {
       partialSolvePolicy: "bestEffort",
     });
 
-    return createSketchSessionFromSnapshot({
-      ownerDocumentId: "doc_workspace",
-      ownerRevisionId: "rev_0001",
-      ownerFeatureId: null,
-      ownerSketchId: "sketch_primary",
-      ownerBodyId: null,
-      sketchId: "sketch_primary",
-      label: "Sketch",
-      plane,
-      planeTarget: plane.support,
-      planeKey: "xy",
-      sketch: {
+    return createSketchSessionFromSnapshot(
+      {
         ownerDocumentId: "doc_workspace",
         ownerRevisionId: "rev_0001",
         ownerFeatureId: null,
@@ -109,13 +102,26 @@ test("src/domain/editor/sketch-reference-geometry.spec.ts", () => {
         ownerBodyId: null,
         sketchId: "sketch_primary",
         label: "Sketch",
-        planeSupport: plane.support,
-        definition,
-        solvedSnapshot: solved.solvedSnapshot,
-        derivedValidity: { state: "current", diagnostics: [] },
-        regions: [],
-      },
-    } satisfies SketchSnapshotRecord);
+        plane,
+        planeTarget: plane.support,
+        planeKey: "xy",
+        sketch: {
+          ownerDocumentId: "doc_workspace",
+          ownerRevisionId: "rev_0001",
+          ownerFeatureId: null,
+          ownerSketchId: "sketch_primary",
+          ownerBodyId: null,
+          sketchId: "sketch_primary",
+          label: "Sketch",
+          planeSupport: plane.support,
+          definition,
+          solvedSnapshot: solved.solvedSnapshot,
+          derivedValidity: { state: "current", diagnostics: [] },
+          regions: [],
+        },
+      } satisfies SketchSnapshotRecord,
+      OCC_KERNEL_SETTINGS,
+    );
   }
 
   function testReferenceAuthoringPersistsInCommitRequest() {
@@ -165,16 +171,8 @@ test("src/domain/editor/sketch-reference-geometry.spec.ts", () => {
       },
       partialSolvePolicy: "bestEffort",
     });
-    const session = createSketchSessionFromSnapshot({
-      ownerDocumentId: "doc_workspace",
-      ownerRevisionId: "rev_0001",
-      ownerFeatureId: null,
-      ownerSketchId: "sketch_face",
-      ownerBodyId: null,
-      sketchId: "sketch_face",
-      label: "Face Sketch",
-      plane,
-      sketch: {
+    const session = createSketchSessionFromSnapshot(
+      {
         ownerDocumentId: "doc_workspace",
         ownerRevisionId: "rev_0001",
         ownerFeatureId: null,
@@ -182,13 +180,24 @@ test("src/domain/editor/sketch-reference-geometry.spec.ts", () => {
         ownerBodyId: null,
         sketchId: "sketch_face",
         label: "Face Sketch",
-        planeSupport: plane.support,
-        definition: createDefinition(),
-        solvedSnapshot: solved.solvedSnapshot,
-        derivedValidity: { state: "current", diagnostics: [] },
-        regions: [],
-      },
-    } satisfies SketchSnapshotRecord);
+        plane,
+        sketch: {
+          ownerDocumentId: "doc_workspace",
+          ownerRevisionId: "rev_0001",
+          ownerFeatureId: null,
+          ownerSketchId: "sketch_face",
+          ownerBodyId: null,
+          sketchId: "sketch_face",
+          label: "Face Sketch",
+          planeSupport: plane.support,
+          definition: createDefinition(),
+          solvedSnapshot: solved.solvedSnapshot,
+          derivedValidity: { state: "current", diagnostics: [] },
+          regions: [],
+        },
+      } satisfies SketchSnapshotRecord,
+      OCC_KERNEL_SETTINGS,
+    );
 
     expect(
       session.plane.key,

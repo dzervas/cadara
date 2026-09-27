@@ -14,7 +14,10 @@ import {
   deleteSelectedSketchGeometry,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
-import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
+import {
+  createStandardPlaneDefinition,
+  OCC_KERNEL_SETTINGS,
+} from "@/domain/modeling/opencascade-kernel-seed";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
 import { encodeAuthoredActionState } from "@/domain/modeling/authored-action-history";
 import {
@@ -58,7 +61,10 @@ function remapTestSketchIds<T>(value: T, nextSketchId: string): T {
 async function fixture(constrained = false) {
   const owner = new SketchAuthoredActions();
   const session = line(
-    createNewSketchSession(createStandardPlaneDefinition("xy")),
+    createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
   );
   if (!constrained)
     session.definition = {
@@ -346,8 +352,18 @@ test("compensation restores every authored sketch field captured by the owner", 
 });
 
 test("creation IDs do not collide in independent drafts with identical counters", () => {
-  const a = line(createNewSketchSession(createStandardPlaneDefinition("xy")));
-  const b = line(createNewSketchSession(createStandardPlaneDefinition("xy")));
+  const a = line(
+    createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
+  );
+  const b = line(
+    createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
+  );
   const ids = new Set([
     ...a.definition.pointIds,
     ...a.definition.entityIds,

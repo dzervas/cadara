@@ -17,7 +17,10 @@ import {
   updateSketchReferenceProjection,
   updateSketchPointer,
 } from "@/domain/editor/sketch-session";
-import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
+import {
+  createStandardPlaneDefinition,
+  OCC_KERNEL_SETTINGS,
+} from "@/domain/modeling/opencascade-kernel-seed";
 import { toolIconAssetFileNames } from "@/core/tools/tool-icons";
 import {
   getSketchConstraintDefinition,
@@ -34,10 +37,13 @@ import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
 
 test("src/domain/sketch-constraints/registry.spec.ts", async () => {
   function createSessionWithTwoLines() {
-    let session = createNewSketchSessionFromSupport({
-      kind: "construction",
-      constructionId: "construction_plane-xy",
-    });
+    let session = createNewSketchSessionFromSupport(
+      {
+        kind: "construction",
+        constructionId: "construction_plane-xy",
+      },
+      OCC_KERNEL_SETTINGS,
+    );
 
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [0, 0]);
@@ -51,10 +57,13 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
   }
 
   function createSessionWithTwoCircles() {
-    let session = createNewSketchSessionFromSupport({
-      kind: "construction",
-      constructionId: "construction_plane-xy",
-    });
+    let session = createNewSketchSessionFromSupport(
+      {
+        kind: "construction",
+        constructionId: "construction_plane-xy",
+      },
+      OCC_KERNEL_SETTINGS,
+    );
 
     session = beginSketchTool(session, "circle");
     session = startSketchDraw(session, [0, 0]);
@@ -68,10 +77,13 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
   }
 
   function createSessionWithLineAndCircle() {
-    let session = createNewSketchSessionFromSupport({
-      kind: "construction",
-      constructionId: "construction_plane-xy",
-    });
+    let session = createNewSketchSessionFromSupport(
+      {
+        kind: "construction",
+        constructionId: "construction_plane-xy",
+      },
+      OCC_KERNEL_SETTINGS,
+    );
 
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [1, 4]);
@@ -89,10 +101,13 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     points: readonly [number, number][],
   ) {
     let session = beginSketchTool(
-      createNewSketchSessionFromSupport({
-        kind: "construction",
-        constructionId: "construction_plane-xy",
-      }),
+      createNewSketchSessionFromSupport(
+        {
+          kind: "construction",
+          constructionId: "construction_plane-xy",
+        },
+        OCC_KERNEL_SETTINGS,
+      ),
       toolId,
     );
     session = startSketchDraw(session, points[0]!);
@@ -344,6 +359,7 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
   function testHorizontalAndVerticalUseSketchPlaneAxes() {
     let horizontalSession = createNewSketchSession(
       createStandardPlaneDefinition("yz"),
+      OCC_KERNEL_SETTINGS,
     );
     horizontalSession = beginSketchTool(horizontalSession, "line");
     horizontalSession = startSketchDraw(horizontalSession, [2, 1]);
@@ -403,6 +419,7 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
 
     let verticalSession = createNewSketchSession(
       createStandardPlaneDefinition("xz"),
+      OCC_KERNEL_SETTINGS,
     );
     verticalSession = beginSketchTool(verticalSession, "line");
     verticalSession = startSketchDraw(verticalSession, [1, 2]);
@@ -1249,10 +1266,13 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
   }
 
   function testProjectedCoincidentAuthoringCanConstrainCircleCenter() {
-    let session = createNewSketchSessionFromSupport({
-      kind: "construction",
-      constructionId: "construction_plane-xy",
-    });
+    let session = createNewSketchSessionFromSupport(
+      {
+        kind: "construction",
+        constructionId: "construction_plane-xy",
+      },
+      OCC_KERNEL_SETTINGS,
+    );
 
     session = beginSketchTool(session, "circle");
     session = startSketchDraw(session, [0, 0]);
@@ -1613,10 +1633,13 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       "Point-to-origin distance authoring should commit a durable datum-point dimension.",
     ).toBeTruthy();
 
-    let lineSession = createNewSketchSessionFromSupport({
-      kind: "construction",
-      constructionId: "construction_plane-xy",
-    });
+    let lineSession = createNewSketchSessionFromSupport(
+      {
+        kind: "construction",
+        constructionId: "construction_plane-xy",
+      },
+      OCC_KERNEL_SETTINGS,
+    );
     lineSession = beginSketchTool(lineSession, "line");
     lineSession = startSketchDraw(lineSession, [0, 2]);
     lineSession = acceptSketchDraw(lineSession, [10, 2]);
@@ -1915,10 +1938,13 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
   }
 
   function testCommittedRectangleWidthEditSolvesDraftGeometry() {
-    let session = createNewSketchSessionFromSupport({
-      kind: "construction",
-      constructionId: "construction_plane-xy",
-    });
+    let session = createNewSketchSessionFromSupport(
+      {
+        kind: "construction",
+        constructionId: "construction_plane-xy",
+      },
+      OCC_KERNEL_SETTINGS,
+    );
 
     session = beginSketchTool(session, "rectangle");
     session = startSketchDraw(session, [0, 0]);
@@ -1996,10 +2022,13 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
   }
 
   function testCommittedCircleRadiusEditUpdatesEntityRadius() {
-    let session = createNewSketchSessionFromSupport({
-      kind: "construction",
-      constructionId: "construction_plane-xy",
-    });
+    let session = createNewSketchSessionFromSupport(
+      {
+        kind: "construction",
+        constructionId: "construction_plane-xy",
+      },
+      OCC_KERNEL_SETTINGS,
+    );
 
     session = beginSketchTool(session, "circle");
     session = startSketchDraw(session, [0, 0]);
@@ -2047,10 +2076,13 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
   }
 
   function testCommittedDimensionEditAcceptsDocumentVariableExpression() {
-    let baseSession = createNewSketchSessionFromSupport({
-      kind: "construction",
-      constructionId: "construction_plane-xy",
-    });
+    let baseSession = createNewSketchSessionFromSupport(
+      {
+        kind: "construction",
+        constructionId: "construction_plane-xy",
+      },
+      OCC_KERNEL_SETTINGS,
+    );
     baseSession = beginSketchTool(baseSession, "circle");
     baseSession = startSketchDraw(baseSession, [0, 0]);
     baseSession = acceptSketchDraw(baseSession, [10, 0]);
@@ -2126,10 +2158,13 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
   }
 
   function testExpandedDimensionAuthoringCommitsDurablePayloads() {
-    let circleSession = createNewSketchSessionFromSupport({
-      kind: "construction",
-      constructionId: "construction_plane-xy",
-    });
+    let circleSession = createNewSketchSessionFromSupport(
+      {
+        kind: "construction",
+        constructionId: "construction_plane-xy",
+      },
+      OCC_KERNEL_SETTINGS,
+    );
     circleSession = beginSketchTool(circleSession, "circle");
     circleSession = startSketchDraw(circleSession, [0, 0]);
     circleSession = acceptSketchDraw(circleSession, [5, 0]);
@@ -2307,10 +2342,13 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       "Line and point targets should commit a durable line-to-point distance dimension in either selection order.",
     ).toBeTruthy();
 
-    let angleSession = createNewSketchSessionFromSupport({
-      kind: "construction",
-      constructionId: "construction_plane-xy",
-    });
+    let angleSession = createNewSketchSessionFromSupport(
+      {
+        kind: "construction",
+        constructionId: "construction_plane-xy",
+      },
+      OCC_KERNEL_SETTINGS,
+    );
     angleSession = beginSketchTool(angleSession, "line");
     angleSession = startSketchDraw(angleSession, [0, 0]);
     angleSession = acceptSketchDraw(angleSession, [10, 0]);
@@ -2362,10 +2400,13 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       "Pinned non-parallel line dimensions should open degree-based angle value entry.",
     ).toBeTruthy();
 
-    let angleHandleSession = createNewSketchSessionFromSupport({
-      kind: "construction",
-      constructionId: "construction_plane-xy",
-    });
+    let angleHandleSession = createNewSketchSessionFromSupport(
+      {
+        kind: "construction",
+        constructionId: "construction_plane-xy",
+      },
+      OCC_KERNEL_SETTINGS,
+    );
     angleHandleSession = beginSketchTool(angleHandleSession, "line");
     angleHandleSession = startSketchDraw(angleHandleSession, [0, 0]);
     angleHandleSession = acceptSketchDraw(angleHandleSession, [10, 0]);
@@ -2520,10 +2561,13 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
   }
 
   function testAngleWitnessLinesAppearForOffSegmentIntersections() {
-    let session = createNewSketchSessionFromSupport({
-      kind: "construction",
-      constructionId: "construction_plane-xy",
-    });
+    let session = createNewSketchSessionFromSupport(
+      {
+        kind: "construction",
+        constructionId: "construction_plane-xy",
+      },
+      OCC_KERNEL_SETTINGS,
+    );
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [0, 0]);
     session = acceptSketchDraw(session, [4, 0]);

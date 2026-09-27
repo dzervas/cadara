@@ -20,7 +20,10 @@ import type {
   ProjectSketchExternalReferencesResponse,
   SolverTolerancePolicy,
 } from "@/contracts/solver/schema";
-import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
+import {
+  SOLVER_SCHEMA_VERSION,
+  createDocumentSolverTolerances,
+} from "@/contracts/solver/schema";
 import type {
   CommitSketchRequest,
   CommitSketchResponse,
@@ -224,11 +227,8 @@ interface WorkerRestoredAuthoredDocument {
   assets: readonly GeometryAssetBlobInput[];
 }
 
-const DEFAULT_SOLVER_TOLERANCES: SolverTolerancePolicy = {
-  coincidence: OCC_KERNEL_SETTINGS.modelingTolerance,
-  angleRadians: OCC_KERNEL_SETTINGS.angularToleranceRadians,
-  minimumSegmentLength: OCC_KERNEL_SETTINGS.modelingTolerance,
-};
+const DEFAULT_SOLVER_TOLERANCES: SolverTolerancePolicy =
+  createDocumentSolverTolerances(OCC_KERNEL_SETTINGS);
 
 const OCC_REVISION_CONFLICT_CODE = "occ-revision-conflict";
 const OCC_VALIDATION_ERROR_CODE = "occ-validation-error";
@@ -869,19 +869,6 @@ function createRestoreSolverCorrelation(
     validationRequestId: `${requestId}_validate` as RequestId,
     solveRequestId: `${requestId}_solve` as RequestId,
     regionRequestId: `${requestId}_regions` as RequestId,
-  };
-}
-
-function createDocumentSolverTolerances(
-  settings: Pick<
-    AuthoredModelDocument["settings"],
-    "modelingTolerance" | "angularToleranceRadians"
-  >,
-): SolverTolerancePolicy {
-  return {
-    coincidence: settings.modelingTolerance,
-    angleRadians: settings.angularToleranceRadians,
-    minimumSegmentLength: settings.modelingTolerance,
   };
 }
 

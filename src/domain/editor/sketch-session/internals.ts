@@ -70,12 +70,6 @@ import { sampleArcPoints } from "@/core/sketch-tools/geometry";
 import type { SketchAuthoringToolId, SketchSessionState } from "./types";
 import { buildCommitRequest } from "./history";
 
-export const SKETCH_DIRECT_EDIT_TOLERANCES = {
-  coincidence: 1e-6,
-  angleRadians: 1e-6,
-  minimumSegmentLength: 1e-6,
-} as const;
-
 export const CONSTRAINED_DRAG_BLOCKED_MESSAGE =
   "Geometry is constrained and cannot move to that position.";
 // D6 constrained-drag feedback gate (minimum-motion-sketch-drag). A drag frame
@@ -361,6 +355,7 @@ export function getSketchSessionDisplayProjectedReferences(
 
 let cachedSolveDefinition: SketchDefinition | null = null;
 let cachedSolveProjectedRefs: ProjectedSketchReferenceRecord[] | null = null;
+let cachedSolveTolerances: SketchSessionState["solverTolerances"] | null = null;
 let cachedSolveResult: SolvedSketchSnapshot | null = null;
 
 /**
@@ -387,7 +382,10 @@ export function resolveSketchDefinitionForSolve(
 export function deriveSolvedRegionsForSession(
   session: Pick<
     SketchSessionState,
-    "projectedReferences" | "sketchId" | "documentVariables"
+    | "projectedReferences"
+    | "sketchId"
+    | "documentVariables"
+    | "solverTolerances"
   >,
   definition: SketchDefinition,
   solvedSnapshot?: SolvedSketchSnapshot,
@@ -401,6 +399,7 @@ export function deriveSolvedRegionsForSession(
     if (
       cachedSolveDefinition === evaluatedDefinition &&
       cachedSolveProjectedRefs === session.projectedReferences &&
+      cachedSolveTolerances === session.solverTolerances &&
       cachedSolveResult
     ) {
       usableSolvedSnapshot = cachedSolveResult;
@@ -408,11 +407,12 @@ export function deriveSolvedRegionsForSession(
       usableSolvedSnapshot = solveSketchDefinitionCore({
         definition: evaluatedDefinition,
         projectedReferences: session.projectedReferences,
-        tolerances: SKETCH_DIRECT_EDIT_TOLERANCES,
+        tolerances: session.solverTolerances,
         partialSolvePolicy: "bestEffort",
       }).solvedSnapshot;
       cachedSolveDefinition = evaluatedDefinition;
       cachedSolveProjectedRefs = session.projectedReferences;
+      cachedSolveTolerances = session.solverTolerances;
       cachedSolveResult = usableSolvedSnapshot;
     }
   }

@@ -18,7 +18,10 @@ import {
   CONTRACT_VERSION,
   OPERATION_HISTORY_SCHEMA_VERSION,
 } from "@/contracts/shared/versioning";
-import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
+import {
+  createStandardPlaneDefinition,
+  OCC_KERNEL_SETTINGS,
+} from "@/domain/modeling/opencascade-kernel-seed";
 import {
   createNewSketchSession,
   getSketchSessionDisplayRenderables,
@@ -367,7 +370,7 @@ test("src/contracts/sketch/advanced-entities.spec.ts", () => {
   ).toBeTruthy();
 
   const session = {
-    ...createNewSketchSession(plane),
+    ...createNewSketchSession(plane, OCC_KERNEL_SETTINGS),
     sketchId,
     definition,
   };

@@ -18,6 +18,7 @@ import type {
   SketchRef,
 } from "@/contracts/shared/references";
 import type { ContractVersion } from "@/contracts/shared/versioning";
+import type { ModelingDocumentSettings } from "@/contracts/modeling/schema";
 import type { SketchPlaneFrame } from "@/contracts/shared/sketch-plane";
 import type {
   RegionRecord,
@@ -62,6 +63,23 @@ export interface SolverTolerancePolicy {
   angleRadians: number;
   /** Minimum non-zero segment length considered valid in sketch-plane units. */
   minimumSegmentLength: number;
+}
+
+/**
+ * Derives the solver tolerance policy from the document's authored modeling
+ * settings so every solve, projection, and status judgment shares one limit.
+ */
+export function createDocumentSolverTolerances(
+  settings: Pick<
+    ModelingDocumentSettings,
+    "modelingTolerance" | "angularToleranceRadians"
+  >,
+): SolverTolerancePolicy {
+  return {
+    coincidence: settings.modelingTolerance,
+    angleRadians: settings.angularToleranceRadians,
+    minimumSegmentLength: settings.modelingTolerance,
+  };
 }
 
 /**

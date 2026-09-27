@@ -1,8 +1,10 @@
 import type {
+  ModelingDocumentSettings,
   SketchPlaneKey,
   SketchPoint,
   SketchSnapshotRecord,
 } from "@/contracts/modeling/schema";
+import { createDocumentSolverTolerances } from "@/contracts/solver/schema";
 import type {
   SketchEntityId,
   SketchId,
@@ -73,6 +75,7 @@ export function normalizeSketchConstraintDisplayState(
 
 export function createSketchSessionFromSnapshot(
   sketch: SketchSnapshotRecord,
+  settings: ModelingDocumentSettings,
 ): SketchSessionState {
   const sketchId = sketch.sketchId;
   const fullDefinition = cloneDefinition(sketch.sketch.definition);
@@ -133,6 +136,7 @@ export function createSketchSessionFromSnapshot(
       definition,
     }),
     documentVariables: [],
+    solverTolerances: createDocumentSolverTolerances(settings),
     validationMessage:
       sketch.sketch.derivedValidity.state === "current"
         ? null
@@ -145,6 +149,7 @@ export function createSketchSessionFromSnapshot(
 
 export function createNewSketchSession(
   plane: SketchPlaneDefinition,
+  settings: ModelingDocumentSettings,
 ): SketchSessionState {
   const planeKey = plane.key;
   const definition = createEmptyDefinition();
@@ -185,6 +190,7 @@ export function createNewSketchSession(
     projectionDiagnostics: [],
     commitRequest: null,
     documentVariables: [],
+    solverTolerances: createDocumentSolverTolerances(settings),
     validationMessage: null,
   };
 }
@@ -214,6 +220,7 @@ export function deriveSketchDisplayEntities(
 
 export function createNewSketchSessionFromSupport(
   planeTarget: SketchPlaneSupportRef,
+  settings: ModelingDocumentSettings,
 ): SketchSessionState {
   const planeKey = derivePlaneKeyFromTarget(planeTarget);
   const plane =
@@ -225,7 +232,7 @@ export function createNewSketchSessionFromSupport(
           key: planeKey,
         };
 
-  return createNewSketchSession(plane);
+  return createNewSketchSession(plane, settings);
 }
 
 export function isEditableSketchGeometrySelection(

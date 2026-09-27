@@ -24,7 +24,10 @@ import {
   createNewSketchSession,
   type SketchSessionDisplayRenderable,
 } from "@/domain/editor/sketch-session";
-import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
+import {
+  createStandardPlaneDefinition,
+  OCC_KERNEL_SETTINGS,
+} from "@/domain/modeling/opencascade-kernel-seed";
 import {
   collectProjectedSketchCurveCandidates,
   collectProjectedSketchDisplayPointCandidates,
@@ -142,7 +145,10 @@ test("src/components/cad/three-cad-viewport-pick-candidates.spec.ts", () => {
     camera,
     viewportRect,
     sketchSession: {
-      ...createNewSketchSession(createStandardPlaneDefinition("xy")),
+      ...createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
       sketchId: "sketch_primary",
     },
     acceptsTarget: () => true,
@@ -164,7 +170,10 @@ test("src/components/cad/three-cad-viewport-pick-candidates.spec.ts", () => {
     clientY: viewportRect.top + 100,
     camera,
     viewportRect,
-    sketchSession: createNewSketchSession(createStandardPlaneDefinition("xy")),
+    sketchSession: createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
     acceptsTarget: () => true,
     currentHoverTarget: null,
   });
@@ -358,7 +367,10 @@ function makeCurveSession(sketchId: SketchId) {
     [points[7]!.pointId, points[8]!.pointId, points[9]!.pointId],
   );
   const definition: SketchDefinition = {
-    ...createNewSketchSession(createStandardPlaneDefinition("xy")).definition,
+    ...createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ).definition,
     pointIds: points.map((entry) => entry.pointId),
     points,
     entityIds: [
@@ -372,7 +384,10 @@ function makeCurveSession(sketchId: SketchId) {
   };
 
   return {
-    ...createNewSketchSession(createStandardPlaneDefinition("xy")),
+    ...createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
     sketchId,
     definition,
   };

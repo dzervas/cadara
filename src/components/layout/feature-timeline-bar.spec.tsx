@@ -30,6 +30,7 @@ import { createSketchSessionFromSnapshot } from "@/domain/editor/sketch-session"
 import { EditorContext } from "@/hooks/editor-context";
 import { workbenchTheme } from "@/theme/workbench-theme";
 import type { FeatureId, RegionId, SketchId } from "@/contracts/shared/ids";
+import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
 
 function createTimelinePreferenceStorage() {
   const map = new Map<string, string>();
@@ -913,6 +914,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
 
   const sketchSession = createSketchSessionFromSnapshot(
     snapshot.document.sketches[0]!,
+    OCC_KERNEL_SETTINGS,
   );
   const sketchHistoryMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">

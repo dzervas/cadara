@@ -12,7 +12,10 @@ import type {
   SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
-import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
+import type {
+  ProjectedSketchReferenceRecord,
+  SolverTolerancePolicy,
+} from "@/contracts/solver/schema";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import type {
   SketchConstraintTargetRecord,
@@ -35,7 +38,6 @@ import type {
   SketchSessionState,
 } from "./types";
 import {
-  SKETCH_DIRECT_EDIT_TOLERANCES,
   applySketchContribution,
   createConstraintId,
   createDimensionId,
@@ -610,12 +612,13 @@ export function patchSketchDimensionAnnotationPlacement(
 export function solveCommittedConstraintDefinition(
   definition: SketchDefinition,
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
+  tolerances: SolverTolerancePolicy,
   documentVariables: readonly DocumentVariableRecord[] = [],
 ): { definition: SketchDefinition; solvedSnapshot?: SolvedSketchSnapshot } {
   const solved = solveSketchDefinitionCore({
     definition: resolveSketchDefinitionForSolve(definition, documentVariables),
     projectedReferences,
-    tolerances: SKETCH_DIRECT_EDIT_TOLERANCES,
+    tolerances,
     partialSolvePolicy: "bestEffort",
   });
   const constraintsSatisfied = solved.solvedSnapshot.constraintStatuses.every(
@@ -680,6 +683,7 @@ export function commitSketchConstraintAuthoring(
   const solvedDefinition = solveCommittedConstraintDefinition(
     history.definition,
     session.projectedReferences,
+    session.solverTolerances,
     session.documentVariables,
   );
 

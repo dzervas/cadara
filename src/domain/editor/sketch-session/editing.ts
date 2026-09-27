@@ -16,7 +16,10 @@ import {
   updateCompiledSketchSolveSession,
   type SketchCompiledSolveSession,
 } from "@/contracts/sketch/solver-core";
-import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
+import type {
+  ProjectedSketchReferenceRecord,
+  SolverTolerancePolicy,
+} from "@/contracts/solver/schema";
 import { type PrimitiveRef, primitiveRefEquals } from "@/core/editor/schema";
 import { collectActiveReferenceImageOperations } from "@/domain/reference-image/operations";
 import { getSketchEditToolDefinition } from "@/core/sketch-edit-tools/registry";
@@ -43,7 +46,6 @@ import {
   CONSTRAINED_DRAG_BLOCKED_MESSAGE,
   CONSTRAINED_DRAG_MOVE_FRACTION,
   CONSTRAINED_DRAG_REQUEST_EPSILON,
-  SKETCH_DIRECT_EDIT_TOLERANCES,
   applySketchContribution,
   cloneDefinition,
   createArcEntityDefinition,
@@ -999,6 +1001,7 @@ export function beginSketchGeometryDrag(
       interactiveSolveSession: createInteractiveSolveSessionForDrag(
         selected.definition,
         selected.projectedReferences,
+        selected.solverTolerances,
         target.pointId,
       ),
     },
@@ -1059,6 +1062,7 @@ export function applySketchGeometryDrag(
   const edit = solveDraggedPointEdit(
     session.definition,
     session.projectedReferences,
+    session.solverTolerances,
     drag.target.pointId,
     point,
     drag.interactiveSolveSession,
@@ -1110,6 +1114,7 @@ export function applySketchGeometryDrag(
 export function solveDraggedPointEdit(
   definition: SketchDefinition,
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
+  tolerances: SolverTolerancePolicy,
   pointId: SketchPointId,
   position: SketchPoint,
   interactiveSolveSession: SketchCompiledSolveSession | null = null,
@@ -1143,6 +1148,7 @@ export function solveDraggedPointEdit(
     createInteractiveSolveSessionForDrag(
       definition,
       projectedReferences,
+      tolerances,
       pointId,
     );
   const solved = solveSession
@@ -1163,7 +1169,7 @@ export function solveDraggedPointEdit(
           pointId,
           position,
         },
-        tolerances: SKETCH_DIRECT_EDIT_TOLERANCES,
+        tolerances,
         partialSolvePolicy: "failOnConflict",
         targetTolerance: 1e-4,
       });
@@ -1221,6 +1227,7 @@ export function solveDraggedPointEdit(
 function createInteractiveSolveSessionForDrag(
   definition: SketchDefinition,
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
+  tolerances: SolverTolerancePolicy,
   pointId: SketchPointId,
 ): SketchCompiledSolveSession | null {
   if (
@@ -1233,7 +1240,7 @@ function createInteractiveSolveSessionForDrag(
   const program = compileSketchSolveProgram({
     definition,
     projectedReferences,
-    tolerances: SKETCH_DIRECT_EDIT_TOLERANCES,
+    tolerances,
     partialSolvePolicy: "failOnConflict",
   });
   return createCompiledSketchSolveSession({

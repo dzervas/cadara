@@ -36,6 +36,7 @@ import { resolveSketchDimensionValues } from "@/domain/modeling/sketch-dimension
 import {
   projectedSplineDisplayPoints,
   type ProjectedSketchReferenceRecord,
+  type SolverTolerancePolicy,
 } from "@/contracts/solver/schema";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import type {
@@ -56,7 +57,6 @@ import type {
 } from "./types";
 import {
   ANNOTATION_EDIT_SOLVE_BLOCKED_MESSAGE,
-  SKETCH_DIRECT_EDIT_TOLERANCES,
   deriveSolvedRegionsForSession,
   resolveSketchDefinitionForSolve,
   getTargetKey,
@@ -535,6 +535,7 @@ export function commitSketchAnnotationEditValue(
   const solved = solveEditedAnnotationDefinition(
     updatedFullDefinition,
     session.projectedReferences,
+    session.solverTolerances,
     session.documentVariables,
   );
 
@@ -575,6 +576,7 @@ export function commitSketchAnnotationEditValue(
 export function solveEditedAnnotationDefinition(
   definition: SketchDefinition,
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
+  tolerances: SolverTolerancePolicy,
   documentVariables: readonly DocumentVariableRecord[] = [],
 ) {
   const resolvedDefinition = resolveSketchDimensionValues({
@@ -593,7 +595,7 @@ export function solveEditedAnnotationDefinition(
   const solved = solveSketchDefinitionCore({
     definition: resolvedDefinition.definition,
     projectedReferences,
-    tolerances: SKETCH_DIRECT_EDIT_TOLERANCES,
+    tolerances,
     partialSolvePolicy: "failOnConflict",
   });
   const constraintsSatisfied = solved.solvedSnapshot.constraintStatuses.every(
@@ -1190,7 +1192,7 @@ export function getSketchAnnotationDescriptors(
       session.documentVariables,
     ),
     projectedReferences: session.projectedReferences,
-    tolerances: SKETCH_DIRECT_EDIT_TOLERANCES,
+    tolerances: session.solverTolerances,
     partialSolvePolicy: "bestEffort",
   });
   const constraintDisplaySummary = getSketchConstraintDisplaySummary({

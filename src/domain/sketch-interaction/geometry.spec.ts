@@ -12,7 +12,10 @@ import type {
   SketchId,
   SketchPointId,
 } from "@/contracts/shared/ids";
-import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
+import {
+  createStandardPlaneDefinition,
+  OCC_KERNEL_SETTINGS,
+} from "@/domain/modeling/opencascade-kernel-seed";
 import {
   createArcEntityDefinition,
   createBezierCurveEntityDefinition,
@@ -150,14 +153,20 @@ test("collectSketchInteractionGeometry preserves local, projected, datum, and ad
   ];
   const projectedReference = makeProjectedReference();
   const definition: SketchDefinition = {
-    ...createNewSketchSession(createStandardPlaneDefinition("xy")).definition,
+    ...createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ).definition,
     pointIds: points.map((entry) => entry.pointId),
     points,
     entityIds: entities.map((entity) => entity.entityId),
     entities,
   };
   const session = {
-    ...createNewSketchSession(createStandardPlaneDefinition("xy")),
+    ...createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
     sketchId,
     definition,
     projectedReferences: [projectedReference],
@@ -255,14 +264,20 @@ test("flattenSketchInteractionCurve respects arc sweeps and closes closed curves
     "sketch_point_missing" as SketchPointId,
   );
   const definition: SketchDefinition = {
-    ...createNewSketchSession(createStandardPlaneDefinition("xy")).definition,
+    ...createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ).definition,
     pointIds: points.map((entry) => entry.pointId),
     points,
     entityIds: [arc.entityId, circle.entityId, missingLine.entityId],
     entities: [arc, circle, missingLine],
   };
   const session = {
-    ...createNewSketchSession(createStandardPlaneDefinition("xy")),
+    ...createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
     sketchId,
     definition,
   };

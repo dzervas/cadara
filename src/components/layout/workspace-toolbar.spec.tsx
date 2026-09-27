@@ -17,7 +17,10 @@ import {
   startSketchDraw,
   toggleSketchSvgRendering,
 } from "@/domain/editor/sketch-session";
-import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
+import {
+  createStandardPlaneDefinition,
+  OCC_KERNEL_SETTINGS,
+} from "@/domain/modeling/opencascade-kernel-seed";
 import { EditorContext } from "@/hooks/editor-context";
 import { WorkbenchCommandProvider } from "@/hooks/workbench-command-provider";
 import { workbenchTheme } from "@/theme/workbench-theme";
@@ -198,6 +201,7 @@ test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
       },
       sketchSession: createNewSketchSession(
         createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
       ),
     },
   });
@@ -248,7 +252,10 @@ test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
   ).toBeTruthy();
 
   let styledSession = toggleSketchSvgRendering(
-    createNewSketchSession(createStandardPlaneDefinition("xy")),
+    createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
   );
   styledSession = beginSketchTool(styledSession, "line");
   styledSession = startSketchDraw(styledSession, [0, 0]);
@@ -288,6 +295,7 @@ test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
 
   const baseSvgDisabledSession = createNewSketchSession(
     createStandardPlaneDefinition("xy"),
+    OCC_KERNEL_SETTINGS,
   );
   const svgDisabledSession = {
     ...baseSvgDisabledSession,
@@ -322,7 +330,10 @@ test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
   ).toBeTruthy();
 
   const constructionSession = {
-    ...createNewSketchSession(createStandardPlaneDefinition("xy")),
+    ...createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
     constructionModifierActive: true,
   };
   const constructionToolbarMarkup = renderToolbar({

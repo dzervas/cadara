@@ -17,7 +17,10 @@ import {
 } from "@/domain/modeling/modeling-service";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
-import { OCC_KERNEL_DOCUMENT_ID } from "@/domain/modeling/opencascade-kernel-seed";
+import {
+  OCC_KERNEL_DOCUMENT_ID,
+  OCC_KERNEL_SETTINGS,
+} from "@/domain/modeling/opencascade-kernel-seed";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 
 test("src/app/cad-workbench-sketch-image-import.spec.ts", async () => {
@@ -31,7 +34,10 @@ test("src/app/cad-workbench-sketch-image-import.spec.ts", async () => {
     "Seed sketch should exist for sketch image-import coverage.",
   ).toBeTruthy();
 
-  const session = createSketchSessionFromSnapshot(sourceSketch);
+  const session = createSketchSessionFromSnapshot(
+    sourceSketch,
+    OCC_KERNEL_SETTINGS,
+  );
   expect(
     session.commitRequest,
     "Active sketch sessions should expose a commit request.",
@@ -235,10 +241,13 @@ test("src/app/cad-workbench-sketch-image-import.spec.ts imports into a new draft
     }),
   });
   const snapshot = await service.getCurrentDocumentSnapshot();
-  const session = createNewSketchSessionFromSupport({
-    kind: "construction",
-    constructionId: "construction_plane-xy",
-  });
+  const session = createNewSketchSessionFromSupport(
+    {
+      kind: "construction",
+      constructionId: "construction_plane-xy",
+    },
+    OCC_KERNEL_SETTINGS,
+  );
 
   const result = await runSketchImageImportFlow({
     requestId: "request_sketch-reference-image-import-test" as const,
@@ -289,10 +298,13 @@ test("src/app/cad-workbench-sketch-image-import.spec.ts imports image-only draft
     sketchSolver: createSolver(null),
   });
   const snapshot = await service.getCurrentDocumentSnapshot();
-  const session = createNewSketchSessionFromSupport({
-    kind: "construction",
-    constructionId: "construction_plane-xy",
-  });
+  const session = createNewSketchSessionFromSupport(
+    {
+      kind: "construction",
+      constructionId: "construction_plane-xy",
+    },
+    OCC_KERNEL_SETTINGS,
+  );
 
   const result = await runSketchImageImportFlow({
     requestId: "request_sketch-reference-image-import-occ-test" as const,
@@ -363,7 +375,10 @@ test("src/app/cad-workbench-sketch-image-import.spec.ts refreshes stale revision
     "Seed sketch should exist for stale-basis import coverage.",
   ).toBeTruthy();
 
-  const session = createSketchSessionFromSnapshot(sourceSketch);
+  const session = createSketchSessionFromSnapshot(
+    sourceSketch,
+    OCC_KERNEL_SETTINGS,
+  );
   const importedPayload: ReferenceImagePayload = {
     mediaType: "image/png",
     fileName: "reference.png",

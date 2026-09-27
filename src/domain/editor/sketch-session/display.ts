@@ -45,7 +45,6 @@ import {
   REFERENCE_IMAGE_ANCHOR_MARKER_COLOR,
   REFERENCE_IMAGE_ANCHOR_MARKER_RADIUS,
   REFERENCE_IMAGE_ANCHOR_OVERLAY_RADIUS,
-  SKETCH_DIRECT_EDIT_TOLERANCES,
   collectVisibleReferenceImageAnchorLabels,
   collectVisibleReferenceImageAnchorPointIds,
   createSketchEntityRef,
@@ -143,7 +142,7 @@ export function getStableSketchSessionDisplayRenderables(
           session.documentVariables,
         ),
         projectedReferences: displayProjectedReferences,
-        tolerances: SKETCH_DIRECT_EDIT_TOLERANCES,
+        tolerances: session.solverTolerances,
         partialSolvePolicy: "bestEffort",
       });
   const constraintDisplaySummary = getSketchConstraintDisplaySummary({
