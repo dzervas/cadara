@@ -3,6 +3,7 @@ import type {
   ModelingKernelAdapter,
 } from "@/contracts/modeling/adapter";
 import type {
+  NeutralCurveJoinRequest,
   NeutralCurveQueryCapability,
   NeutralCurveQueryRequest,
   NeutralCurveSelfIntersectionRequest,
@@ -1805,6 +1806,10 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     request: NeutralCurveSelfIntersectionRequest,
   ) {
     return this.neutralCurveQueries.queryNeutralCurveSelfIntersections(request);
+  }
+
+  queryNeutralCurveJoin(request: NeutralCurveJoinRequest) {
+    return this.neutralCurveQueries.queryNeutralCurveJoin(request);
   }
 
   dispose(): void {

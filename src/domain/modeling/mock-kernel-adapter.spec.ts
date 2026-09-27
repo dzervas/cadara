@@ -1,6 +1,7 @@
 import { test, expect } from "vitest";
 import { createAuthoredModelDocumentFromSnapshot } from "@/contracts/modeling/authored-document";
 import { MockKernelAdapter } from "./mock-kernel-adapter";
+import { createCertifiedNeutralCurveQuery } from "@/domain/modeling/neutral-curve-certification/query";
 import {
   createModelingService,
   modelingRuntimeValidators,
@@ -4402,9 +4403,12 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
   await testSketchCommitRejectsUnresolvableConstructionSupport();
 });
 
-test("mock kernel reports neutral curve queries unsupported instead of pretending native exactness", async () => {
+// U3 (T09 decision 2026-09-28): the mock kernel now delegates every neutral
+// query to the kernel-free certifier instead of reporting `unsupported`.
+test("mock kernel delegates neutral curve queries to the kernel-free certifier", async () => {
   const adapter = new MockKernelAdapter();
-  const result = await adapter.queryNeutralCurves({
+  const certified = createCertifiedNeutralCurveQuery();
+  const pair = {
     modelingTolerance: 1e-6,
     first: {
       curveId: "first",
@@ -4424,12 +4428,14 @@ test("mock kernel reports neutral curve queries unsupported instead of pretendin
       sourceDomain: { kind: "fullTurn", seam: 0 },
       provenance: { sourceEntityId: "second", sourceSpanId: "full" },
     },
-  });
+  } as const;
+  const result = await adapter.queryNeutralCurves(pair);
+  expect(result).toEqual(certified.queryPair(pair));
   expect(result).toMatchObject({
-    kind: "unsupported",
-    code: "mock-neutral-curve-query-unsupported",
+    kind: "verified",
+    completenessProof: { family: "circlePair", distinctRootCount: 1 },
   });
-  const self = await adapter.queryNeutralCurveSelfIntersections({
+  const selfRequest = {
     modelingTolerance: 1e-6,
     curve: {
       curveId: "self",
@@ -4443,9 +4449,40 @@ test("mock kernel reports neutral curve queries unsupported instead of pretendin
       sourceDomain: [0, 1],
       provenance: { sourceEntityId: "self", sourceSpanId: "full" },
     },
-  });
+  } as const;
+  const self = await adapter.queryNeutralCurveSelfIntersections(selfRequest);
+  expect(self).toEqual(certified.querySelf(selfRequest));
   expect(self).toMatchObject({
-    kind: "unsupported",
-    code: "mock-neutral-curve-self-intersection-unsupported",
+    kind: "verified",
+    completenessProof: { family: "cubicSelf", distinctRootCount: 1 },
+  });
+  const joinRequest = {
+    modelingTolerance: 1e-3,
+    first: {
+      curveId: "stem",
+      kind: "line",
+      form: "endpointSegment",
+      start: [0.5, -1],
+      end: [0.5, 0],
+      sourceDomain: [0, 1],
+      provenance: { sourceEntityId: "stem", sourceSpanId: "full" },
+    },
+    second: {
+      curveId: "bar",
+      kind: "line",
+      form: "endpointSegment",
+      start: [0, 0],
+      end: [1, 0],
+      sourceDomain: [0, 1],
+      provenance: { sourceEntityId: "bar", sourceSpanId: "full" },
+    },
+    joins: [{ first: "end", second: { interior: 0.5 } }],
+  } as const;
+  const joined = await adapter.queryNeutralCurveJoin(joinRequest);
+  expect(joined).toEqual(certified.queryJoin(joinRequest));
+  expect(joined).toMatchObject({
+    kind: "verified",
+    joins: [{ realization: "declaredEnds", position: [0.5, 0] }],
+    points: [],
   });
 });

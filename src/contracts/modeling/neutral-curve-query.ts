@@ -248,6 +248,86 @@ export interface CertifiedNeutralCurveQuery {
   ): NeutralCurveQueryResult;
 }
 
+/** Where a declared join sits on one curve. `interior` carries the solver's representative host parameter. */
+export type NeutralCurveJoinLocation =
+  | "start"
+  | "end"
+  | { readonly interior: number };
+
+export interface NeutralCurveJoinRequest {
+  /** The consuming document's settings.modelingTolerance. Also bounds every join ball. */
+  readonly modelingTolerance: number;
+  /** Whole source curves: a join query rejects `queryDomain`. */
+  readonly first: NeutralCurve;
+  readonly second: NeutralCurve;
+  /** One or two declared joins between these two curves (a D-shape, a two-span closed spline). */
+  readonly joins: readonly {
+    readonly first: NeutralCurveJoinLocation;
+    readonly second: NeutralCurveJoinLocation;
+  }[];
+}
+
+export interface NeutralCurveJoinWitness {
+  /** Realized join parameters: the declared locations, or the unique contact inside the ball. */
+  readonly firstParameter: number;
+  readonly secondParameter: number;
+  /**
+   * Outward source-parameter bounds holding the realized parameters and the
+   * at most one contact of the two near pieces, when that contact exists.
+   */
+  readonly firstParameterBounds: readonly [number, number];
+  readonly secondParameterBounds: readonly [number, number];
+  /** Realized join position; also the centre of the join ball. */
+  readonly position: SplineVector;
+  /** Certified radius (≤ modelingTolerance) of the ball around the join that holds both near pieces. */
+  readonly ballRadius: number;
+  /**
+   * `declaredEnds`: the near pieces meet at most once, and never outside the
+   * reported bounds (no contact, the exact shared declared point, or an
+   * unresolved contact enclosed together with the declared locations). For a
+   * join on a reported exact overlap the near pieces instead coincide along
+   * that overlap, and the bounds are the declared parameters.
+   * `uniqueContactInBall`: exactly one proven contact away from the declared
+   * locations (for example a 1e-9 overshoot corner).
+   */
+  readonly realization: "declaredEnds" | "uniqueContactInBall";
+}
+
+export type NeutralCurveJoinResult =
+  | {
+      readonly kind: "verified";
+      /** One witness per declared join, in request order. */
+      readonly joins: readonly NeutralCurveJoinWitness[];
+      /**
+       * Apart from the declared joins, the complete contact set is
+       * `points ∪ overlaps`, in the ordinary witness forms. Every point lies
+       * outside every join ball.
+       */
+      readonly points: readonly NeutralCurvePointWitness[];
+      /**
+       * Non-empty only for the two exact structural families the ordinary
+       * owner proves on the whole pair (`exactCollinearLineOverlap`,
+       * `structuralCubicPoleIdentity`), passed through unchanged, and only
+       * when every declared join lies on the overlap.
+       */
+      readonly overlaps: readonly NeutralCurveOverlapWitness[];
+      readonly completenessProof: {
+        readonly kind: "completeOutsideDeclaredJoins";
+        readonly joinCount: number;
+        readonly distinctRootCount: number;
+      };
+    }
+  | {
+      readonly kind: "unsupported" | "uncertain";
+      readonly code: string;
+      readonly message: string;
+    };
+
+/** The kernel-free dispatcher plus its declared-join operation. */
+export interface CertifiedNeutralCurveJoinQuery extends CertifiedNeutralCurveQuery {
+  queryJoin(request: NeutralCurveJoinRequest): NeutralCurveJoinResult;
+}
+
 /**
  * One emitted cubic of a certified tube chain plus the owner proof metadata
  * it was emitted with. The certifier trusts that every field comes from one
@@ -496,6 +576,26 @@ export interface NeutralCurveQueryCapability {
   queryNeutralCurveSelfIntersections(
     request: NeutralCurveSelfIntersectionRequest,
   ): Promise<NeutralCurveQueryResult>;
+  /**
+   * Declared-join pairs; ordinary pair queries on joined curves are
+   * pathological (T09 probe). Documented limits, all failing closed:
+   * - a join on a full-turn circle is `unsupported`;
+   * - tangential cubic/cubic joins without a bitwise-shared point are
+   *   `uncertain`;
+   * - exact overlaps are admitted only for collinear line pairs (numeric lines
+   *   and endpoint segments) and structural same-support cubics (identical
+   *   poles) with every join on the overlap;
+   *   same-support arcs/circles and other cubic overlaps are `uncertain`;
+   * - a contact on a boundary between two certificate pieces is `uncertain`
+   *   `join-contact-not-distinct`;
+   * - the join ball radius is modelingTolerance / 2, so a contact between
+   *   that and modelingTolerance from a join is reported in `points`;
+   * - a whole-request subdivision visit safeguard beside the proof budget
+   *   returns `uncertain` `join-separation-unresolved`.
+   */
+  queryNeutralCurveJoin(
+    request: NeutralCurveJoinRequest,
+  ): Promise<NeutralCurveJoinResult>;
 }
 
 const ZERO_POLES: SplinePoles = [
@@ -642,6 +742,65 @@ export function validateNeutralCurveQueryRequest(
         code: "invalid-neutral-curve-query",
         message:
           "Neutral queries require finite geometry, unit directions or exact distinct segment endpoints, positive radii and tolerance, and finite increasing bounded domains.",
+      };
+}
+
+/**
+ * The source parameter of one declared join location, or null when the
+ * location is invalid: a full turn has no ends, and an interior location must
+ * be finite and strictly inside the source domain.
+ */
+export function getNeutralCurveJoinParameter(
+  curve: NeutralCurve,
+  location: NeutralCurveJoinLocation,
+): number | null {
+  const domain =
+    curve.kind !== "circle"
+      ? curve.sourceDomain
+      : curve.sourceDomain.kind === "arc"
+        ? curve.sourceDomain.interval
+        : null;
+  if (location === "start") return domain ? domain[0] : null;
+  if (location === "end") return domain ? domain[1] : null;
+  if (
+    typeof location !== "object" ||
+    location === null ||
+    !Number.isFinite(location.interior)
+  )
+    return null;
+  if (!domain) {
+    return neutralCurveSourceParameterInside(curve, location.interior)
+      ? location.interior
+      : null;
+  }
+  return location.interior > domain[0] && location.interior < domain[1]
+    ? location.interior
+    : null;
+}
+
+export function validateNeutralCurveJoinRequest(
+  request: NeutralCurveJoinRequest,
+): NeutralCurveJoinResult | null {
+  const valid =
+    validateNeutralCurveQueryRequest(request) === null &&
+    request.first.queryDomain === undefined &&
+    request.second.queryDomain === undefined &&
+    Array.isArray(request.joins) &&
+    (request.joins.length === 1 || request.joins.length === 2) &&
+    request.joins.every(
+      (join) =>
+        typeof join === "object" &&
+        join !== null &&
+        getNeutralCurveJoinParameter(request.first, join.first) !== null &&
+        getNeutralCurveJoinParameter(request.second, join.second) !== null,
+    );
+  return valid
+    ? null
+    : {
+        kind: "uncertain",
+        code: "invalid-neutral-curve-join-query",
+        message:
+          "Join queries require a valid neutral pair without query domains, a positive finite tolerance, and one or two joins at curve ends or strictly interior source parameters.",
       };
 }
 

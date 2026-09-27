@@ -6,6 +6,8 @@ import {
 import {
   checkNeutralCurvePointConsistency,
   evaluateNeutralCurve,
+  getNeutralCurveJoinParameter,
+  validateNeutralCurveJoinRequest,
   validateNeutralCurveQueryRequest,
   type EndpointNeutralSegment,
   type NeutralCurve,
@@ -388,4 +390,62 @@ test("endpoint segment evaluation returns the stored pairs exactly at 0 and 1", 
   expect(() =>
     evaluateNeutralCurve(segment("clip", [0, 0], [1, 0], [0.5, 1]), 0.25),
   ).toThrow(RangeError);
+});
+
+test("join requests validate tolerance, whole curves, join count and locations", () => {
+  const segment: EndpointNeutralSegment = {
+    curveId: "segment",
+    kind: "line",
+    form: "endpointSegment",
+    start: [0, 0],
+    end: [1, 0],
+    sourceDomain: [0, 1],
+    provenance: { sourceEntityId: "segment", sourceSpanId: "segment:full" },
+  };
+  const arc = circle("arc", [0, 1], {
+    sourceDomain: { kind: "arc", interval: [-Math.PI / 2, 0] },
+  });
+  const fullTurn = circle("full", [3, 0]);
+  const valid = {
+    modelingTolerance: 1e-3,
+    first: segment,
+    second: arc,
+    joins: [{ first: "start" as const, second: "start" as const }],
+  };
+  expect(validateNeutralCurveJoinRequest(valid)).toBeNull();
+  expect(
+    validateNeutralCurveJoinRequest({
+      ...valid,
+      joins: [
+        { first: "start", second: "start" },
+        { first: "end", second: { interior: -0.5 } },
+      ],
+    }),
+  ).toBeNull();
+  const invalid = {
+    kind: "uncertain",
+    code: "invalid-neutral-curve-join-query",
+  };
+  for (const request of [
+    { ...valid, modelingTolerance: 0 },
+    { ...valid, modelingTolerance: Number.POSITIVE_INFINITY },
+    { ...valid, joins: [] },
+    { ...valid, joins: [...valid.joins, ...valid.joins, ...valid.joins] },
+    { ...valid, first: { ...segment, queryDomain: [0, 0.5] as const } },
+    { ...valid, joins: [{ first: { interior: 0 }, second: "start" as const }] },
+    { ...valid, joins: [{ first: { interior: 1 }, second: "start" as const }] },
+    {
+      ...valid,
+      joins: [{ first: { interior: Number.NaN }, second: "start" as const }],
+    },
+    { ...valid, second: fullTurn },
+  ]) {
+    expect(validateNeutralCurveJoinRequest(request)).toMatchObject(invalid);
+  }
+  expect(getNeutralCurveJoinParameter(arc, "start")).toBe(-Math.PI / 2);
+  expect(getNeutralCurveJoinParameter(arc, "end")).toBe(0);
+  expect(getNeutralCurveJoinParameter(segment, { interior: 0.25 })).toBe(0.25);
+  expect(getNeutralCurveJoinParameter(fullTurn, "end")).toBeNull();
+  expect(getNeutralCurveJoinParameter(fullTurn, { interior: 1 })).toBe(1);
+  expect(getNeutralCurveJoinParameter(fullTurn, { interior: 7 })).toBeNull();
 });

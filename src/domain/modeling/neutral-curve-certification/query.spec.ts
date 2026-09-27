@@ -9,6 +9,7 @@ import { reconstructSpline } from "@/contracts/sketch/spline-geometry";
 import { approximateSplineOffset } from "@/contracts/sketch/spline-offset-geometry";
 import {
   createCertifiedNeutralCurveQuery,
+  createCertifiedNeutralCurveQueryCapabilityForTest,
   createCertifiedNeutralCurveQueryWithBudgetObserverForTest,
   createCertifiedNeutralCurveQueryWithLowerBudgetForTest,
 } from "@/domain/modeling/neutral-curve-certification/query";
@@ -1229,5 +1230,39 @@ describe("endpoint segments at the constructive dispatcher (not a T09 conversion
         });
       }
     }
+  });
+});
+
+test("the async test capability composes the dispatcher's pair, self and join operations", async () => {
+  const capability = await createCertifiedNeutralCurveQueryCapabilityForTest();
+  const horizontal = line("cap-h", [0, 0], [1, 0], [0, 1]);
+  const vertical = line("cap-v", [1, 0], [0, 1], [0, 1]);
+  const crossing = line("cap-x", [0.5, -1], [0, 1], [0, 2]);
+  const loop = cubic("cap-loop", [
+    [0, 0],
+    [3, 2],
+    [-1, 2],
+    [2, 0],
+  ]);
+  const pair = request(horizontal, crossing);
+  expect(await capability.queryNeutralCurves(pair)).toEqual(
+    query.queryPair(pair),
+  );
+  const self = { modelingTolerance: 1e-7, curve: loop };
+  expect(await capability.queryNeutralCurveSelfIntersections(self)).toEqual(
+    query.querySelf(self),
+  );
+  const join = {
+    modelingTolerance: 1e-3,
+    first: horizontal,
+    second: vertical,
+    joins: [{ first: "end", second: "start" }] as const,
+  };
+  const joined = await capability.queryNeutralCurveJoin(join);
+  expect(joined).toEqual(query.queryJoin(join));
+  expect(joined).toMatchObject({
+    kind: "verified",
+    joins: [{ realization: "declaredEnds", position: [1, 0] }],
+    points: [],
   });
 });

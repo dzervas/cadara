@@ -9,6 +9,7 @@ import {
   validateNeutralCurveQueryRequest,
   type EndpointNeutralSegment,
   type NeutralCurve,
+  type NeutralCurveJoinRequest,
   type NeutralCurveQueryCapability,
   type NeutralCurveQueryRequest,
   type NeutralCurveQueryResult,
@@ -35,6 +36,7 @@ import {
   ExactProofBudget,
   type ExactProofBudgetSnapshot,
 } from "@/domain/modeling/neutral-curve-certification/fixed-degree-primitives";
+import { certifyNeutralCurveJoinOnBudget } from "@/domain/modeling/neutral-curve-certification/query";
 import { parseNativeNeutralCurveQueryPayload } from "@/domain/modeling/occ/native-neutral-curve-query.runtime-schema";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 
@@ -618,6 +620,27 @@ function createCapability(
             "exact-query-proof-budget-exhausted",
             "The deterministic exact-query arithmetic budget was exhausted.",
           );
+        }
+        throw error;
+      } finally {
+        observeBudget?.(budget.snapshot());
+      }
+    },
+
+    // Declared joins have one kernel-free verifier and never load OCC.
+    async queryNeutralCurveJoin(request: NeutralCurveJoinRequest) {
+      const budget = new ExactProofBudget(lowerLimits);
+      try {
+        budget.operation(64);
+        return certifyNeutralCurveJoinOnBudget(request, budget);
+      } catch (error) {
+        if (error instanceof ExactQueryProofBudgetExceeded) {
+          return {
+            kind: "uncertain" as const,
+            code: "exact-query-proof-budget-exhausted",
+            message:
+              "The deterministic exact-query arithmetic budget was exhausted.",
+          };
         }
         throw error;
       } finally {
