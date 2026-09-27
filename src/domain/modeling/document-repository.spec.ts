@@ -94,7 +94,7 @@ for (const [name, make] of [
       sketchId: "sketch_provenance",
       label: "Retained provenance",
       plane,
-      definition: createNewSketchSession(plane).definition,
+      definition: createNewSketchSession(plane, OCC_KERNEL_SETTINGS).definition,
       regionSlots: [],
     };
     const document = {
@@ -596,6 +596,7 @@ import type {
   AutomergeRepositoryLike,
   AutomergeHandleLike,
 } from "@/infrastructure/persistence/indexeddb-automerge-document-repository";
+import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
 
 export class RealAutomergeHandle<T> implements AutomergeHandleLike<T> {
   readonly documentId = crypto.randomUUID();

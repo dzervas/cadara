@@ -24,7 +24,7 @@ const FACE_PLANE_TOLERANCE = 1e-9;
 
 export function openSketchSessionFromSelection(
   selection: PrimitiveRef[],
-  snapshot: WorkspaceSnapshot | null,
+  snapshot: WorkspaceSnapshot,
 ): SketchSessionState | null {
   const session = createSketchSessionForSelection(selection, snapshot);
   if (!session) {
@@ -33,42 +33,43 @@ export function openSketchSessionFromSelection(
 
   return {
     ...session,
-    documentVariables: snapshot?.document.variables ?? [],
+    documentVariables: snapshot.document.variables,
   };
 }
 
 function createSketchSessionForSelection(
   selection: PrimitiveRef[],
-  snapshot: WorkspaceSnapshot | null,
+  snapshot: WorkspaceSnapshot,
 ): SketchSessionState | null {
   const primary = selection[0];
+  const settings = snapshot.document.settings;
 
   if (!primary) {
     return null;
   }
 
-  if (primary.kind === "sketch" && snapshot) {
+  if (primary.kind === "sketch") {
     const sketch = snapshot.document.sketches.find(
       (entry) => entry.sketchId === primary.sketchId,
     );
-    return sketch ? createSketchSessionFromSnapshot(sketch) : null;
+    return sketch ? createSketchSessionFromSnapshot(sketch, settings) : null;
   }
 
   if (primary.kind === "construction") {
-    const construction = snapshot?.document.constructions.find(
+    const construction = snapshot.document.constructions.find(
       (entry) => entry.constructionId === primary.constructionId,
     );
 
     if (construction) {
-      return createNewSketchSession(construction.plane);
+      return createNewSketchSession(construction.plane, settings);
     }
 
-    return createNewSketchSessionFromSupport(primary);
+    return createNewSketchSessionFromSupport(primary, settings);
   }
 
-  if (primary.kind === "face" && snapshot) {
+  if (primary.kind === "face") {
     const plane = createFaceBackedSketchPlane(snapshot, primary);
-    return plane ? createNewSketchSession(plane) : null;
+    return plane ? createNewSketchSession(plane, settings) : null;
   }
 
   return null;

@@ -12,9 +12,9 @@ import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
 import type { SketchSolverAdapter } from "@/contracts/solver/adapter";
 import {
   SOLVER_SCHEMA_VERSION,
+  createDocumentSolverTolerances,
   type ProjectSketchExternalReferencesRequest,
   type ProjectSketchExternalReferencesResponse,
-  type SolverTolerancePolicy,
 } from "@/contracts/solver/schema";
 import type { SketchPlaneDefinition } from "@/contracts/shared/sketch-plane";
 import { validateSketchPlaneFrameInvariants } from "@/contracts/shared/sketch-plane-frame-invariants";
@@ -167,19 +167,6 @@ const MOCK_DOCUMENT_SETTINGS = {
   modelingTolerance: 0.001,
   angularToleranceRadians: 0.0001,
 } as const;
-
-function createDocumentSolverTolerances(
-  settings: Pick<
-    WorkspaceSnapshot["document"]["settings"],
-    "modelingTolerance" | "angularToleranceRadians"
-  >,
-): SolverTolerancePolicy {
-  return {
-    coincidence: settings.modelingTolerance,
-    angleRadians: settings.angularToleranceRadians,
-    minimumSegmentLength: settings.modelingTolerance,
-  };
-}
 
 function allocateMockSketchId(
   _sketches: readonly { sketchId: SketchId }[],

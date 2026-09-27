@@ -9,7 +9,10 @@ import {
   type EditorState,
 } from "@/domain/editor/state-machine";
 
-import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
+import {
+  createStandardPlaneDefinition,
+  OCC_KERNEL_SETTINGS,
+} from "@/domain/modeling/opencascade-kernel-seed";
 import {
   appendReferenceImageOperations,
   createNewSketchSession,
@@ -169,7 +172,7 @@ test("src/contracts/editor/sketch-special-mode.spec.ts", async () => {
   {
     const plane = createStandardPlaneDefinition("xy");
     const session = appendReferenceImageOperations(
-      createNewSketchSession(plane),
+      createNewSketchSession(plane, OCC_KERNEL_SETTINGS),
       [
         createReferenceImageOperation({
           sequence: 1,
@@ -424,7 +427,10 @@ test("src/contracts/editor/sketch-special-mode.spec.ts", async () => {
   }
 
   const builtinSession = appendReferenceImageOperations(
-    createNewSketchSession(createStandardPlaneDefinition("xy")),
+    createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
     [
       createReferenceImageOperation({
         sequence: 1,

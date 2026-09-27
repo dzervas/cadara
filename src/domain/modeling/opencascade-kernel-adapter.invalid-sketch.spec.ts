@@ -12,6 +12,7 @@ import {
   createSketchSessionFromSnapshot,
   getSketchSessionPreviewLabel,
 } from "@/domain/editor/sketch-session";
+import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
 
 type OpenCascadeModule = new (
   module: Record<string, unknown>,
@@ -299,7 +300,10 @@ test("OCC retains nonconverged and degenerate known geometry but rejects every f
     ),
   ).toBe(true);
   expect(conflicting.sketch.regions).toEqual([]);
-  const conflictingSession = createSketchSessionFromSnapshot(conflicting);
+  const conflictingSession = createSketchSessionFromSnapshot(
+    conflicting,
+    OCC_KERNEL_SETTINGS,
+  );
   expect(getSketchSessionPreviewLabel(conflictingSession)).toBe(
     conflicting.sketch.derivedValidity.diagnostics.find(
       (diagnostic) => diagnostic.severity !== "info",

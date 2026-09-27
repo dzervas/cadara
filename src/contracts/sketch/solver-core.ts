@@ -168,6 +168,7 @@ type BuildSystemResult = {
 interface BuildSystemOptions {
   dragTarget?: SketchDraggedPointTarget | null;
   projectedReferences?: readonly ProjectedSketchReferenceRecord[];
+  tolerances: SketchSolveTolerancePolicy;
 }
 
 export interface SketchCompiledSolveComponent {
@@ -252,11 +253,12 @@ function zeroVector(length: number) {
   return new Float64Array(length);
 }
 
+// Scalar residuals are half-squared errors (0.5·r²), so this is |r| ≤ tolerance.
 function isConstraintResidualWithinTolerance(
   residual: number,
   tolerance: number,
 ) {
-  return residual <= tolerance * tolerance;
+  return residual <= 0.5 * tolerance * tolerance;
 }
 
 function addScaled(target: Float64Array, scale: number, source: Float64Array) {
@@ -534,6 +536,22 @@ function unitVector(
     : [delta[0] / norm, delta[1] / norm];
 }
 
+// Sine of the angle between a line and the radial direction at the contact.
+function lineNormalDirectionResidual(
+  lineStart: SketchPoint2D,
+  lineEnd: SketchPoint2D,
+  contactPoint: SketchPoint2D,
+  center: SketchPoint2D,
+) {
+  const lineUnit = unitVector(lineStart, lineEnd);
+  const radialUnit = unitVector(center, contactPoint);
+  if (!lineUnit || !radialUnit) {
+    return 0;
+  }
+
+  return lineUnit[0] * radialUnit[1] - lineUnit[1] * radialUnit[0];
+}
+
 function pointLineSignedDistance(
   point: SketchPoint2D,
   start: SketchPoint2D,
@@ -563,6 +581,27 @@ function lineParallelResidual(
   }
 
   return firstUnit[0] * secondUnit[1] - firstUnit[1] * secondUnit[0];
+}
+
+/**
+ * Line-distance prerequisite: both operands are parallel (or antiparallel)
+ * within the policy's angular tolerance. Degenerate operands never qualify.
+ */
+function linesParallelWithinTolerance(
+  first: { start: SketchPoint2D; end: SketchPoint2D },
+  second: { start: SketchPoint2D; end: SketchPoint2D },
+  tolerance: SketchSolveTolerancePolicy,
+) {
+  const residual = lineParallelResidual(
+    first.start,
+    first.end,
+    second.start,
+    second.end,
+  );
+  return (
+    Number.isFinite(residual) &&
+    Math.asin(Math.min(1, Math.abs(residual))) <= tolerance.angleRadians
+  );
 }
 
 function lineAngleRadians(
@@ -1553,7 +1592,7 @@ function createNumericalScalarConstraint(input: {
 
 function buildSystem(
   definition: SketchDefinition,
-  options: BuildSystemOptions = {},
+  options: BuildSystemOptions,
 ): BuildSystemResult {
   const pointRecords = new Map<SketchPointId, SolverPointRecord>();
   const entityStates = new Map<SketchEntityId, SolverEntityState>();
@@ -1924,13 +1963,12 @@ function buildSystem(
       return 0;
     }
 
-    const lineUnit = unitVector(getPoint(values, start), getPoint(values, end));
-    const radialUnit = unitVector(center, contactPoint);
-    if (!lineUnit || !radialUnit) {
-      return 0;
-    }
-
-    return lineUnit[0] * radialUnit[1] - lineUnit[1] * radialUnit[0];
+    return lineNormalDirectionResidual(
+      getPoint(values, start),
+      getPoint(values, end),
+      contactPoint,
+      center,
+    );
   };
 
   const lineContactResidual = (
@@ -3688,14 +3726,11 @@ function buildSystem(
       if (
         !initialFirst ||
         !initialSecond ||
-        Math.abs(
-          lineParallelResidual(
-            initialFirst.start,
-            initialFirst.end,
-            initialSecond.start,
-            initialSecond.end,
-          ),
-        ) > 1e-4
+        !linesParallelWithinTolerance(
+          initialFirst,
+          initialSecond,
+          options.tolerances,
+        )
       ) {
         continue;
       }
@@ -5822,12 +5857,17 @@ function solveGaussNewtonLike(
   return { values, loss: state.loss, perConstraint: state.perConstraint };
 }
 
+type SolvedSystemValues = ReturnType<typeof solveBfgs>;
+
 function solveBfgsWithGaussNewtonFallback(
   initialValues: Float64Array,
   constraints: ScalarConstraintRecord[],
+  isAccepted: (solved: SolvedSystemValues) => boolean,
 ) {
   const bfgs = solveBfgs(initialValues, constraints);
-  if (bfgs.loss < SOLVED_LOSS_THRESHOLD) {
+  // A low total loss is not acceptance: each requirement is judged against
+  // its own document tolerance, which can be tighter than this threshold.
+  if (bfgs.loss < SOLVED_LOSS_THRESHOLD && isAccepted(bfgs)) {
     return bfgs;
   }
 
@@ -5845,6 +5885,7 @@ function solveSystemValues(
   initialValues: Float64Array,
   constraints: ScalarConstraintRecord[],
   strategy: SketchSolveStrategy,
+  isAccepted: (solved: SolvedSystemValues) => boolean = () => true,
 ) {
   return strategy === "gradientDescent"
     ? solveGradientDescent(initialValues, constraints)
@@ -5864,7 +5905,11 @@ function solveSystemValues(
             damping: 1e-5,
             pseudoInverseEpsilon: 1e-6,
           })
-        : solveBfgsWithGaussNewtonFallback(initialValues, constraints);
+        : solveBfgsWithGaussNewtonFallback(
+            initialValues,
+            constraints,
+            isAccepted,
+          );
 }
 
 function createStableHash(value: string) {
@@ -6488,6 +6533,7 @@ export function compileSketchSolveProgram(input: {
   const system = buildSystem(definition, {
     dragTarget: null,
     projectedReferences,
+    tolerances: input.tolerances,
   });
   const strategy = input.strategy ?? "bfgs";
   const compatibilityKey = createSketchSolveCompatibilityKey({
@@ -6701,6 +6747,7 @@ function materializeSolveResult(
   const constraintStatuses = buildConstraintStatuses(
     definition,
     program.system.pointRecords,
+    program.system.entityStates,
     projectedValues,
     program.tolerances,
     solved.perConstraint,
@@ -6739,7 +6786,9 @@ function materializeSolveResult(
       constraintState:
         definition.entities.length === 0 ? "unknown" : "underConstrained",
     };
-  } else if (solved.loss < SOLVED_LOSS_THRESHOLD && requirementsSatisfied) {
+  } else if (Number.isFinite(solved.loss) && requirementsSatisfied) {
+    // Every hard term is already judged against the document policy by the
+    // statuses above; an absolute loss gate would override that policy.
     status = {
       solveState: "solved",
       constraintState: "wellConstrained",
@@ -6803,8 +6852,18 @@ export function solveCompiledSketchProgram(
     preconditionedValues,
     program.system.scalarConstraints,
     program.strategy,
+    (candidate) => isAcceptableSolvedValues(program, candidate),
   );
   return materializeSolveResult(program, solved.values, solved);
+}
+
+function isAcceptableSolvedValues(
+  program: SketchCompiledSolveProgram,
+  solved: SolvedSystemValues,
+) {
+  return isAcceptableSolvedSnapshot(
+    materializeSolveResult(program, solved.values, solved).solvedSnapshot,
+  );
 }
 
 function isAcceptableSolvedSnapshot(snapshot: SolvedSketchSnapshot) {
@@ -6905,7 +6964,9 @@ export function createCompiledSketchSolveSession(input: {
       input.program,
       input.program.system.parameterProjection.projectValues(initialValues),
     ).length === 0;
-  const solvedValues =
+  const isAccepted = (candidate: SolvedSystemValues) =>
+    isAcceptableSolvedValues(input.program, candidate);
+  const initialCandidate =
     initialCommonCircleValid &&
     (initialState.loss < SOLVED_LOSS_THRESHOLD ||
       uniformNorm(initialState.gradient) < 1e-8)
@@ -6914,10 +6975,17 @@ export function createCompiledSketchSolveSession(input: {
           loss: initialState.loss,
           perConstraint: initialState.perConstraint,
         }
+      : null;
+  // Skip the solve only when the start already meets every requirement; a
+  // low total loss can still leave one outside its document tolerance.
+  const solvedValues =
+    initialCandidate && isAccepted(initialCandidate)
+      ? initialCandidate
       : solveSystemValues(
           initialValues,
           input.program.system.scalarConstraints,
           input.program.strategy,
+          isAccepted,
         );
   const solved = materializeSolveResult(
     input.program,
@@ -7780,6 +7848,7 @@ function buildSolvedEntities(
 function buildConstraintStatuses(
   definition: SketchDefinition,
   pointRecords: Map<SketchPointId, SolverPointRecord>,
+  entityStates: Map<SketchEntityId, SolverEntityState>,
   values: Float64Array,
   tolerance: SketchSolveTolerancePolicy,
   perConstraint: Map<string, number>,
@@ -7800,10 +7869,44 @@ function buildConstraintStatuses(
     let status: ConstraintStatusRecord["status"] = "satisfied";
     const residual = perConstraint.get(constraint.constraintId) ?? 0;
     const residualTolerance =
+      constraint.kind === "parallel" ||
+      constraint.kind === "perpendicular" ||
+      constraint.kind === "angle" ||
       constraint.kind === "parallelProjectedLine" ||
       constraint.kind === "perpendicularProjectedLine"
         ? tolerance.angleRadians
         : tolerance.coincidence;
+    // The normal residual is 0.5·(curve² + direction² + contact²); its
+    // dimensionless direction sine is judged against the angle and the two
+    // length terms against the coincidence tolerance.
+    const isNormalWithinTolerance = (
+      line: Extract<SketchEntityDefinition, { kind: "lineSegment" }>,
+      point: SolverPointRecord,
+      center: SketchPoint2D,
+    ) => {
+      const start = pointRecords.get(line.startPointId);
+      const end = pointRecords.get(line.endPointId);
+      const direction =
+        start && end
+          ? lineNormalDirectionResidual(
+              getPoint(values, start),
+              getPoint(values, end),
+              getPoint(values, point),
+              center,
+            )
+          : 0;
+      const directionResidual = 0.5 * direction * direction;
+      return (
+        isConstraintResidualWithinTolerance(
+          directionResidual,
+          tolerance.angleRadians,
+        ) &&
+        isConstraintResidualWithinTolerance(
+          residual - directionResidual,
+          tolerance.coincidence,
+        )
+      );
+    };
 
     if (constraint.kind === "equalOffset") {
       const pairPrimitives = constraint.pairs.map((pair) => {
@@ -8101,12 +8204,18 @@ function buildConstraintStatuses(
         (candidate) => candidate.entityId === constraint.curve.entityId,
       );
       const point = pointRecords.get(constraint.point.pointId);
+      const circleLike =
+        curve && (curve.kind === "circle" || curve.kind === "arc")
+          ? getLocalCircleLikeGeometry(
+              values,
+              curve,
+              pointRecords,
+              entityStates,
+            )
+          : null;
       status =
-        line &&
-        point &&
-        curve &&
-        (curve.kind === "circle" || curve.kind === "arc")
-          ? isConstraintResidualWithinTolerance(residual, residualTolerance)
+        line && point && circleLike
+          ? isNormalWithinTolerance(line, point, circleLike.center)
             ? "satisfied"
             : "unsatisfied"
           : "conflicting";
@@ -8117,12 +8226,12 @@ function buildConstraintStatuses(
         constraint.projectedCurve.reference,
       );
       const point = pointRecords.get(constraint.point.pointId);
+      const projectedCircle = projected
+        ? projectedCircleLikeGeometry(projected)
+        : null;
       status =
-        line &&
-        point &&
-        projected &&
-        projectedCircleLikeGeometry(projected) !== null
-          ? isConstraintResidualWithinTolerance(residual, residualTolerance)
+        line && point && projectedCircle
+          ? isNormalWithinTolerance(line, point, projectedCircle.center)
             ? "satisfied"
             : "unsatisfied"
           : "conflicting";
@@ -8272,14 +8381,7 @@ function buildDimensionStatuses(
       solvedValue =
         first &&
         second &&
-        Math.abs(
-          lineParallelResidual(
-            first.start,
-            first.end,
-            second.start,
-            second.end,
-          ),
-        ) <= 1e-4
+        linesParallelWithinTolerance(first, second, tolerance)
           ? Math.abs(
               pointLineSignedDistance(second.start, first.start, first.end),
             )
@@ -8332,10 +8434,13 @@ function buildDimensionStatuses(
       dimension.kind === "lineAngle"
         ? tolerance.angleRadians
         : tolerance.coincidence;
+    // Line-distance and line-angle admission is judged at the initial values,
+    // so a dimension that never entered the solver must not read as zero error.
     return {
       dimensionId: dimension.dimensionId,
       status:
         solvedValue === null ||
+        !perConstraint.has(dimension.dimensionId) ||
         !isConstraintResidualWithinTolerance(
           perConstraint.get(dimension.dimensionId) ?? 0,
           residualTolerance,
@@ -8478,8 +8583,9 @@ export function validateSketchDefinitionCore(input: {
 
 export function getSketchSolveInitialValuesForTest(
   definition: SketchDefinition,
+  tolerances: SketchSolveTolerancePolicy,
 ) {
-  return buildSystem(definition).initialValues;
+  return buildSystem(definition, { tolerances }).initialValues;
 }
 
 export function evaluateSketchScalarConstraintForTest(input: {
@@ -8487,9 +8593,11 @@ export function evaluateSketchScalarConstraintForTest(input: {
   projectedReferences?: readonly ProjectedSketchReferenceRecord[];
   constraintId: ConstraintId | DimensionId;
   values: Float64Array;
+  tolerances: SketchSolveTolerancePolicy;
 }): SketchScalarConstraintEvaluationForTest {
   const system = buildSystem(input.definition, {
     projectedReferences: input.projectedReferences ?? [],
+    tolerances: input.tolerances,
   });
   const constraint = system.scalarConstraints.find(
     (candidate) => candidate.id === input.constraintId,

@@ -13,6 +13,7 @@ import {
   isModelingMutationError,
   modelingMutationErrorToDiagnostic,
 } from "./error-mapping";
+import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
 
 function makeFeatureSession() {
   return createFeatureEditSession({
@@ -22,10 +23,13 @@ function makeFeatureSession() {
 }
 
 function makeSketchSession() {
-  return createNewSketchSessionFromSupport({
-    kind: "construction",
-    constructionId: "construction_plane-xy",
-  });
+  return createNewSketchSessionFromSupport(
+    {
+      kind: "construction",
+      constructionId: "construction_plane-xy",
+    },
+    OCC_KERNEL_SETTINGS,
+  );
 }
 
 test("error-mapping.ts extracts effect context for feature, sketch, and special-mode effects", () => {

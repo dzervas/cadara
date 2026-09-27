@@ -13,11 +13,15 @@ import {
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
 import { createNewSketchSession } from "@/domain/editor/sketch-session";
 import { createStandardPlaneDefinition } from "./opencascade-kernel-seed";
+import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
 
 async function fixture() {
   const seed = await createSeedAuthoredModelDocument();
   const plane = createStandardPlaneDefinition("xy");
-  const definition = createNewSketchSession(plane).definition;
+  const definition = createNewSketchSession(
+    plane,
+    OCC_KERNEL_SETTINGS,
+  ).definition;
   definition.points = ["p", "q"].map((pointId) => ({
     pointId,
     label: pointId,

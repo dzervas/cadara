@@ -897,6 +897,7 @@ export function handleAuthoringReopenRequested(
     );
 
     if (
+      state.snapshot &&
       canReopenSketchDirectlyFromCurrentCursor(state.snapshot, event.target)
     ) {
       const session = openSketchSessionFromSelection(

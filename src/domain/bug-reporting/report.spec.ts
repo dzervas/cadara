@@ -29,7 +29,10 @@ import {
   MODELING_OPERATION_HISTORY_STORAGE_KEY,
   type StorageLike,
 } from "@/domain/modeling/modeling-history-persistence";
-import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
+import {
+  createStandardPlaneDefinition,
+  OCC_KERNEL_SETTINGS,
+} from "@/domain/modeling/opencascade-kernel-seed";
 import { createDeterministicGeometryAsset } from "@/domain/modeling/geometry-asset-test-helpers";
 
 test("src/domain/bug-reporting/report.spec.ts", async () => {
@@ -100,6 +103,7 @@ test("src/domain/bug-reporting/report.spec.ts", async () => {
       activeReferencePickerFieldId: "profiles",
       sketchSession: createNewSketchSession(
         createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
       ),
     },
     snapshot,

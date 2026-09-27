@@ -59,8 +59,9 @@ import { appendInferredSnapConstraints } from "@/domain/editor/sketch-session/to
 import {
   createSessionCommitFactories,
   createSketchPointRef,
-  SKETCH_DIRECT_EDIT_TOLERANCES,
 } from "@/domain/editor/sketch-session/internals";
+import { createDocumentSolverTolerances } from "@/contracts/solver/schema";
+import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
 import { extractDeclaredOffsetChainConnectivity } from "@/contracts/sketch/offset-chain-connectivity";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import {
@@ -90,6 +91,9 @@ import {
   createCertifiedNeutralCurveQuery,
   createCertifiedNeutralCurveQueryWithLowerBudgetForTest,
 } from "@/domain/modeling/neutral-curve-certification/query";
+
+const SKETCH_DIRECT_EDIT_TOLERANCES =
+  createDocumentSolverTolerances(OCC_KERNEL_SETTINGS);
 
 type Point = readonly [number, number];
 const codes = OFFSET_DIAGNOSTIC_CODES;
@@ -2437,7 +2441,11 @@ describe("declared multi-piece tube stability (L1b, bounded helper, not live)", 
   const acceptedEdit = (
     ...edit: Parameters<typeof commitTool>
   ): AcceptedPair => {
-    const solved = solveCommittedConstraintDefinition(commitTool(...edit), []);
+    const solved = solveCommittedConstraintDefinition(
+      commitTool(...edit),
+      [],
+      SKETCH_DIRECT_EDIT_TOLERANCES,
+    );
     if (!solved.solvedSnapshot)
       throw new Error(`${edit[1]} edit was not solver-accepted`);
     return solved as AcceptedPair;
@@ -2846,6 +2854,7 @@ describe("declared multi-piece tube stability (L1b, bounded helper, not live)", 
         lineEnds(second)[0],
       ),
       [],
+      SKETCH_DIRECT_EDIT_TOLERANCES,
     );
     if (!solved.solvedSnapshot) throw new Error("not accepted in place");
     const pair = solved as AcceptedPair;
@@ -2899,7 +2908,22 @@ describe("declared multi-piece tube stability (L1b, bounded helper, not live)", 
         tolerances: { ...SKETCH_DIRECT_EDIT_TOLERANCES, coincidence },
         partialSolvePolicy: "bestEffort",
       });
-      const snapshot = solved.solvedSnapshot;
+      // N3b: with every requirement within the document tolerance the solver
+      // now reports the frame solved, so the partiallySolved adversary is the
+      // solved frame with only its solveState changed.
+      if (statuses === "satisfied") {
+        expect(solved.solvedSnapshot.status.solveState).toBe("solved");
+      }
+      const snapshot: SolvedSketchSnapshot =
+        statuses === "satisfied"
+          ? {
+              ...solved.solvedSnapshot,
+              status: {
+                ...solved.solvedSnapshot.status,
+                solveState: "partiallySolved",
+              },
+            }
+          : solved.solvedSnapshot;
       expect(snapshot.status.solveState).toBe("partiallySolved");
       expect(snapshot.constraintStatuses.map((item) => item.status)).toEqual(
         definition.constraints.map(() => statuses),
@@ -2985,7 +3009,11 @@ describe("declared multi-piece tube stability (L1b, bounded helper, not live)", 
       1.7,
     );
     expect(
-      solveCommittedConstraintDefinition(rejectedDefinition, []).solvedSnapshot,
+      solveCommittedConstraintDefinition(
+        rejectedDefinition,
+        [],
+        SKETCH_DIRECT_EDIT_TOLERANCES,
+      ).solvedSnapshot,
     ).toBeUndefined();
     expectAdapterRejects(
       adaptRecorded(
@@ -3120,6 +3148,7 @@ describe("declared multi-piece tube stability (L1b, bounded helper, not live)", 
         ),
       },
       [],
+      SKETCH_DIRECT_EDIT_TOLERANCES,
     );
     if (!authored.solvedSnapshot) throw new Error("authored tangent rejected");
     const pair = authored as AcceptedPair;
@@ -3163,6 +3192,7 @@ describe("declared multi-piece tube stability (L1b, bounded helper, not live)", 
         constraints: [],
       },
       [],
+      SKETCH_DIRECT_EDIT_TOLERANCES,
     );
     if (!without.solvedSnapshot) throw new Error("re-solve rejected");
     expectAdapterRejects(

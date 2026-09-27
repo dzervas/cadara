@@ -5,7 +5,10 @@ import {
 } from "@/domain/editor/state-machine";
 import { createNewSketchSession } from "@/domain/editor/sketch-session";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
-import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
+import {
+  createStandardPlaneDefinition,
+  OCC_KERNEL_SETTINGS,
+} from "@/domain/modeling/opencascade-kernel-seed";
 
 import {
   getEscapeEvent,
@@ -67,7 +70,10 @@ test("src/domain/editor/workbench-interactions.spec.ts", async () => {
       activeReferencePickerFieldId: "shell-faces",
       selection: [{ kind: "body", bodyId: "body_a" }],
       sketchSession: {
-        ...createNewSketchSession(createStandardPlaneDefinition("xy")),
+        ...createNewSketchSession(
+          createStandardPlaneDefinition("xy"),
+          OCC_KERNEL_SETTINGS,
+        ),
         activeTool: "line",
       },
     });
@@ -88,7 +94,10 @@ test("src/domain/editor/workbench-interactions.spec.ts", async () => {
       activeReferencePickerFieldId: null,
       selection: [{ kind: "body", bodyId: "body_a" }],
       sketchSession: {
-        ...createNewSketchSession(createStandardPlaneDefinition("xy")),
+        ...createNewSketchSession(
+          createStandardPlaneDefinition("xy"),
+          OCC_KERNEL_SETTINGS,
+        ),
         activeTool: "line",
       },
     });
@@ -115,7 +124,10 @@ test("src/domain/editor/workbench-interactions.spec.ts", async () => {
         },
       ],
       sketchSession: {
-        ...createNewSketchSession(createStandardPlaneDefinition("xy")),
+        ...createNewSketchSession(
+          createStandardPlaneDefinition("xy"),
+          OCC_KERNEL_SETTINGS,
+        ),
         activeTool: null,
         activeStyleFocus: {
           toolId: "stroke",
@@ -144,7 +156,10 @@ test("src/domain/editor/workbench-interactions.spec.ts", async () => {
       activeReferencePickerFieldId: null,
       selection: [],
       sketchSession: {
-        ...createNewSketchSession(createStandardPlaneDefinition("xy")),
+        ...createNewSketchSession(
+          createStandardPlaneDefinition("xy"),
+          OCC_KERNEL_SETTINGS,
+        ),
         activeTool: null,
       },
     });

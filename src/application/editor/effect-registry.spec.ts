@@ -1,7 +1,13 @@
 import { test, expect } from "vitest";
 
 import { ResultAsync, type AppError } from "@/contracts/errors";
-import type { DocumentId, RequestId, RevisionId } from "@/contracts/shared/ids";
+import type {
+  ConstructionId,
+  DocumentId,
+  ReferenceId,
+  RequestId,
+  RevisionId,
+} from "@/contracts/shared/ids";
 import {
   acceptSketchDraw,
   beginSketchTool,
@@ -10,6 +16,7 @@ import {
   startSketchDraw,
 } from "@/domain/editor/sketch-session";
 import { createModelingServiceEditorEffectRuntime } from "./effect-registry";
+import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
 
 test("commits the current authored sketch after deletion without resurrecting a history tail", async () => {
   function addLine(
@@ -21,10 +28,13 @@ test("commits the current authored sketch after deletion without resurrecting a 
     return acceptSketchDraw(startSketchDraw(withTool, start), end);
   }
 
-  let session = createNewSketchSessionFromSupport({
-    kind: "construction",
-    constructionId: "construction_plane-xy",
-  });
+  let session = createNewSketchSessionFromSupport(
+    {
+      kind: "construction",
+      constructionId: "construction_plane-xy",
+    },
+    OCC_KERNEL_SETTINGS,
+  );
   session = addLine(session, [0, 0], [1, 0]);
   session = addLine(session, [0, 1], [1, 1]);
 
@@ -88,4 +98,65 @@ test("commits the current authored sketch after deletion without resurrecting a 
     committedEntityCount,
     "Deleted geometry must stay absent from the published candidate.",
   ).toBe(1);
+});
+
+test("sketch reference projection uses the live session's document tolerance policy", async () => {
+  const session = createNewSketchSessionFromSupport(
+    { kind: "construction", constructionId: "construction_plane-xy" },
+    {
+      linearUnit: "millimeter",
+      modelingTolerance: 0.02,
+      angularToleranceRadians: 0.003,
+    },
+  );
+  const referenced = {
+    ...session,
+    definition: {
+      ...session.definition,
+      referenceIds: ["reference_projection_policy" as ReferenceId],
+      references: [
+        {
+          referenceId: "reference_projection_policy" as ReferenceId,
+          kind: "constructionPlane" as const,
+          label: "XZ",
+          source: {
+            kind: "construction" as const,
+            constructionId: "construction_plane-xz" as ConstructionId,
+          },
+          projectionMode: "coplanar" as const,
+        },
+      ],
+    },
+  };
+  const projectionTolerances: unknown[] = [];
+  const unused = () => {
+    throw new Error("Only reference projection is exercised here.");
+  };
+  const runtime = createModelingServiceEditorEffectRuntime({
+    getCurrentDocumentSnapshot: unused,
+    async projectSketchExternalReferences(input) {
+      projectionTolerances.push(input.tolerances);
+      return { projectedReferences: [], diagnostics: [] };
+    },
+    sketchSolver: null,
+    commitSketch: unused,
+    evaluatePreview: unused,
+    createFeature: unused,
+    updateFeature: unused,
+    setFeatureCursor: unused,
+  });
+
+  await runtime.projectSketchReferences({
+    requestId: "request_projection_policy" as RequestId,
+    documentId: "doc_fixture" as DocumentId,
+    baseRevisionId: "rev_0001" as RevisionId,
+    session: referenced,
+  });
+
+  expect(
+    projectionTolerances,
+    "Live reference projection must use the session's document tolerance, like commit projection.",
+  ).toEqual([
+    { coincidence: 0.02, angleRadians: 0.003, minimumSegmentLength: 0.02 },
+  ]);
 });

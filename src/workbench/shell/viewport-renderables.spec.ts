@@ -11,7 +11,10 @@ import {
   createNewSketchSessionFromSupport,
   startSketchDraw,
 } from "@/domain/editor/sketch-session";
-import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
+import {
+  createStandardPlaneDefinition,
+  OCC_KERNEL_SETTINGS,
+} from "@/domain/modeling/opencascade-kernel-seed";
 
 test("src/app/viewport-renderables.spec.ts", async () => {
   function assertEqual<T>(
@@ -228,10 +231,13 @@ test("src/app/viewport-renderables.spec.ts", async () => {
 
   {
     const activeSession = {
-      ...createNewSketchSessionFromSupport({
-        kind: "construction",
-        constructionId: "construction_plane-xy",
-      }),
+      ...createNewSketchSessionFromSupport(
+        {
+          kind: "construction",
+          constructionId: "construction_plane-xy",
+        },
+        OCC_KERNEL_SETTINGS,
+      ),
       sketchId: "sketch_a",
     };
     const activeSketchRegion = createCommittedRegion("sketch_a", "region_a");
@@ -382,10 +388,13 @@ test("src/app/viewport-renderables.spec.ts", async () => {
 
   {
     let session = beginSketchTool(
-      createNewSketchSessionFromSupport({
-        kind: "construction",
-        constructionId: "construction_plane-xy",
-      }),
+      createNewSketchSessionFromSupport(
+        {
+          kind: "construction",
+          constructionId: "construction_plane-xy",
+        },
+        OCC_KERNEL_SETTINGS,
+      ),
       "spline",
     );
     session = startSketchDraw(session, [0, 0]);

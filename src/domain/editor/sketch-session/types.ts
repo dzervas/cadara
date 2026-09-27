@@ -30,7 +30,10 @@ import type {
 } from "@/contracts/modeling/schema";
 import type { RenderableEntityRecord } from "@/contracts/render/schema";
 import type { PrimitiveRef } from "@/core/editor/schema";
-import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
+import type {
+  ProjectedSketchReferenceRecord,
+  SolverTolerancePolicy,
+} from "@/contracts/solver/schema";
 import type {
   SketchToolAnchorDescriptor,
   SketchToolControlValue,
@@ -176,6 +179,8 @@ export interface SketchSessionState {
   toolStagedEntities: readonly import("@/core/sketch-tools/definition").SketchDraftEntity[];
   definition: SketchDefinition;
   documentVariables: readonly DocumentVariableRecord[];
+  /** Document tolerance policy judging every live solve and projection. */
+  solverTolerances: SolverTolerancePolicy;
   activeTool: SketchAuthoringToolId | null;
   status: SketchSessionStatus;
   constructionTargetPicking: boolean;

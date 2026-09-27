@@ -10,6 +10,7 @@ import {
   startSketchDraw,
   updateSketchPointer,
 } from "@/domain/editor/sketch-session";
+import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
 
 test("src/domain/editor/sketch-snapping.spec.ts", () => {
   function assertClosePoint(
@@ -29,10 +30,13 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
   }
 
   function createSketchLineSession() {
-    let session = createNewSketchSessionFromSupport({
-      kind: "construction",
-      constructionId: "construction_plane-xy",
-    });
+    let session = createNewSketchSessionFromSupport(
+      {
+        kind: "construction",
+        constructionId: "construction_plane-xy",
+      },
+      OCC_KERNEL_SETTINGS,
+    );
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [0, 0]);
     session = acceptSketchDraw(session, [2, 0]);
@@ -207,10 +211,13 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
         diagnostics: [],
       },
     ];
-    let session = createNewSketchSessionFromSupport({
-      kind: "construction",
-      constructionId: "construction_plane-xy",
-    });
+    let session = createNewSketchSessionFromSupport(
+      {
+        kind: "construction",
+        constructionId: "construction_plane-xy",
+      },
+      OCC_KERNEL_SETTINGS,
+    );
     session = {
       ...session,
       projectedReferences,
@@ -266,10 +273,13 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
       source: { kind: "edge" as const, bodyId: "body_1", edgeId: "edge_1" },
       projectionMode: "projectAlongPlaneNormal" as const,
     };
-    let session = createNewSketchSessionFromSupport({
-      kind: "construction",
-      constructionId: "construction_plane-xy",
-    });
+    let session = createNewSketchSessionFromSupport(
+      {
+        kind: "construction",
+        constructionId: "construction_plane-xy",
+      },
+      OCC_KERNEL_SETTINGS,
+    );
     session = {
       ...session,
       definition: {
@@ -297,10 +307,13 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
   }
 
   function testBothEndpointsSnappedToSameLineUseUniqueConstraintIds() {
-    let session = createNewSketchSessionFromSupport({
-      kind: "construction",
-      constructionId: "construction_plane-xy",
-    });
+    let session = createNewSketchSessionFromSupport(
+      {
+        kind: "construction",
+        constructionId: "construction_plane-xy",
+      },
+      OCC_KERNEL_SETTINGS,
+    );
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [0, 0]);
     session = acceptSketchDraw(session, [2, 1]);
@@ -360,10 +373,13 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
       },
     ];
     let session = addProjectedLineReference(
-      createNewSketchSessionFromSupport({
-        kind: "construction",
-        constructionId: "construction_plane-xy",
-      }),
+      createNewSketchSessionFromSupport(
+        {
+          kind: "construction",
+          constructionId: "construction_plane-xy",
+        },
+        OCC_KERNEL_SETTINGS,
+      ),
       projectedReferences,
     );
 
@@ -401,10 +417,13 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
       },
     ];
     let session = addProjectedLineReference(
-      createNewSketchSessionFromSupport({
-        kind: "construction",
-        constructionId: "construction_plane-xy",
-      }),
+      createNewSketchSessionFromSupport(
+        {
+          kind: "construction",
+          constructionId: "construction_plane-xy",
+        },
+        OCC_KERNEL_SETTINGS,
+      ),
       projectedReferences,
     );
 
@@ -441,10 +460,13 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
       },
     ];
     let session = addProjectedLineReference(
-      createNewSketchSessionFromSupport({
-        kind: "construction",
-        constructionId: "construction_plane-xy",
-      }),
+      createNewSketchSessionFromSupport(
+        {
+          kind: "construction",
+          constructionId: "construction_plane-xy",
+        },
+        OCC_KERNEL_SETTINGS,
+      ),
       projectedReferences,
     );
 
@@ -466,10 +488,13 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
   }
 
   function testSketchDatumSnapsCommitDerivedReferenceConstraints() {
-    let originSession = createNewSketchSessionFromSupport({
-      kind: "construction",
-      constructionId: "construction_plane-xy",
-    });
+    let originSession = createNewSketchSessionFromSupport(
+      {
+        kind: "construction",
+        constructionId: "construction_plane-xy",
+      },
+      OCC_KERNEL_SETTINGS,
+    );
     originSession = beginSketchTool(originSession, "line");
     originSession = startSketchDraw(originSession, [0.04, 0.03]);
     expect(
@@ -495,10 +520,13 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
       "Accepted datum-origin snap should constrain the authored endpoint to the sketch origin.",
     ).toBeTruthy();
 
-    let axisSession = createNewSketchSessionFromSupport({
-      kind: "construction",
-      constructionId: "construction_plane-xy",
-    });
+    let axisSession = createNewSketchSessionFromSupport(
+      {
+        kind: "construction",
+        constructionId: "construction_plane-xy",
+      },
+      OCC_KERNEL_SETTINGS,
+    );
     axisSession = beginSketchTool(axisSession, "line");
     axisSession = startSketchDraw(axisSession, [2, 1]);
     axisSession = updateSketchPointer(axisSession, [4, 0.04]);
@@ -542,10 +570,13 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
       },
     ];
     let perpendicularSession = addProjectedLineReference(
-      createNewSketchSessionFromSupport({
-        kind: "construction",
-        constructionId: "construction_plane-xy",
-      }),
+      createNewSketchSessionFromSupport(
+        {
+          kind: "construction",
+          constructionId: "construction_plane-xy",
+        },
+        OCC_KERNEL_SETTINGS,
+      ),
       projectedLineReferences,
     );
 
@@ -587,10 +618,13 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
       },
     ];
     let tangentSession = addProjectedLineReference(
-      createNewSketchSessionFromSupport({
-        kind: "construction",
-        constructionId: "construction_plane-xy",
-      }),
+      createNewSketchSessionFromSupport(
+        {
+          kind: "construction",
+          constructionId: "construction_plane-xy",
+        },
+        OCC_KERNEL_SETTINGS,
+      ),
       projectedCircleReferences,
     );
 

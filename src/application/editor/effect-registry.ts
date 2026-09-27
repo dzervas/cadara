@@ -27,13 +27,13 @@ import type { AuthoredActionSketch } from "@/contracts/modeling/authored-actions
 import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
 import { resolveSketchDerivationDistances } from "@/domain/modeling/sketch-dimension-expressions";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
-import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
+import type {
+  ProjectedSketchReferenceRecord,
+  SolverTolerancePolicy,
+} from "@/contracts/solver/schema";
 import type { AppResultAsync } from "@/contracts/errors";
 import type { RenderableEntityRecord } from "@/contracts/render/schema";
-import {
-  EDITOR_SKETCH_REFERENCE_PROJECTION_TOLERANCES,
-  hydrateFeatureSessionFromSnapshot,
-} from "@/core/editor/state-machine";
+import { hydrateFeatureSessionFromSnapshot } from "@/core/editor/state-machine";
 import type {
   EditorEffect,
   EditorEffectRuntime,
@@ -443,7 +443,7 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
     revisionId: RevisionId;
     sketchId: NonNullable<SketchSessionState["sketchId"]>;
     plane: SketchPlaneDefinition["frame"];
-    tolerances: typeof EDITOR_SKETCH_REFERENCE_PROJECTION_TOLERANCES;
+    tolerances: SolverTolerancePolicy;
     references: {
       referenceId: SketchSessionState["definition"]["referenceIds"][number];
       reference: SketchSessionState["definition"]["references"][number];
@@ -467,7 +467,7 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
       revisionId: RevisionId;
       sketchId: NonNullable<SketchSessionState["sketchId"]>;
       plane: SketchPlaneDefinition["frame"];
-      tolerances: typeof EDITOR_SKETCH_REFERENCE_PROJECTION_TOLERANCES;
+      tolerances: SolverTolerancePolicy;
       references: {
         referenceId: SketchSessionState["definition"]["referenceIds"][number];
         reference: SketchSessionState["definition"]["references"][number];
@@ -699,7 +699,7 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
         revisionId: input.baseRevisionId,
         sketchId,
         plane: input.session.plane.frame,
-        tolerances: EDITOR_SKETCH_REFERENCE_PROJECTION_TOLERANCES,
+        tolerances: input.session.solverTolerances,
         references: externalReferences.map((reference) => ({
           referenceId: reference.referenceId,
           reference,

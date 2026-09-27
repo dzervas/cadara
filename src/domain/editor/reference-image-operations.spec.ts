@@ -13,7 +13,10 @@ import {
   startSketchDraw,
   updateReferenceImageOperationStates,
 } from "@/domain/editor/sketch-session";
-import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
+import {
+  createStandardPlaneDefinition,
+  OCC_KERNEL_SETTINGS,
+} from "@/domain/modeling/opencascade-kernel-seed";
 import {
   REFERENCE_IMAGE_CALIBRATION_MODE_ID,
   type ReferenceImageCalibrationModeState,
@@ -208,7 +211,7 @@ function loadCapturedReferenceImageSketchFixture() {
 test("src/domain/editor/reference-image-operations.spec.ts keeps reference-image state authored while rendering the latest payload", () => {
   const plane = createStandardPlaneDefinition("xy");
   const session = appendReferenceImageOperations(
-    createNewSketchSession(plane),
+    createNewSketchSession(plane, OCC_KERNEL_SETTINGS),
     [
       createReferenceImageOperation({
         sequence: 1,
@@ -343,7 +346,10 @@ test("src/domain/editor/reference-image-operations.spec.ts keeps reference-image
 test("src/domain/editor/reference-image-operations.spec.ts removes anchor bindings when a bound sketch point is deleted", () => {
   const session = updateReferenceImageOperationStates({
     session: appendReferenceImageOperations(
-      createNewSketchSession(createStandardPlaneDefinition("xy")),
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
       [
         createReferenceImageOperation({
           sequence: 1,
@@ -430,7 +436,7 @@ test("src/domain/editor/reference-image-operations.spec.ts renders draft referen
   const plane = createStandardPlaneDefinition("xy");
   const operationId = "sketch_operation_1_reference-image";
   const committed = appendReferenceImageOperations(
-    createNewSketchSession(plane),
+    createNewSketchSession(plane, OCC_KERNEL_SETTINGS),
     [
       createReferenceImageOperation({
         sequence: 1,
@@ -666,6 +672,7 @@ test("src/domain/editor/reference-image-operations.spec.ts lets bound anchor poi
 test("src/domain/editor/reference-image-operations.spec.ts reuses bound anchor point ids when drawing snapped lines", () => {
   let session = createSketchSessionFromSnapshot(
     loadCapturedReferenceImageSketchFixture(),
+    OCC_KERNEL_SETTINGS,
   );
   const anchorPointIds =
     session.definition.referenceImages?.[0]?.ownedState?.kind ===
@@ -713,6 +720,7 @@ test("src/domain/editor/reference-image-operations.spec.ts reuses bound anchor p
 test("src/domain/editor/reference-image-operations.spec.ts keeps captured debug-state anchors visible in normal sketch mode", () => {
   const session = createSketchSessionFromSnapshot(
     loadCapturedReferenceImageSketchFixture(),
+    OCC_KERNEL_SETTINGS,
   );
   const renderables = getSketchSessionDisplayRenderables(session);
 
@@ -785,7 +793,10 @@ test("src/domain/editor/reference-image-operations.spec.ts deletes only image-ow
     pointId: boundPoint.pointId,
   };
   const imported = appendReferenceImageOperations(
-    createNewSketchSession(createStandardPlaneDefinition("xy")),
+    createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
     [
       createReferenceImageOperation({
         sequence: 1,

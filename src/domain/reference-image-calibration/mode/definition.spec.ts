@@ -11,7 +11,10 @@ import {
   createNewSketchSession,
   getSketchSessionPreviewLabel,
 } from "@/domain/editor/sketch-session";
-import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
+import {
+  createStandardPlaneDefinition,
+  OCC_KERNEL_SETTINGS,
+} from "@/domain/modeling/opencascade-kernel-seed";
 import {
   REFERENCE_IMAGE_CALIBRATION_MODE_ID,
   type ReferenceImageCalibrationModeState,
@@ -19,7 +22,10 @@ import {
 
 function createEditingSketchState(): SketchEditorState {
   const session = appendReferenceImageOperations(
-    createNewSketchSession(createStandardPlaneDefinition("xy")),
+    createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
     [
       createReferenceImageOperation({
         sequence: 1,

@@ -9,7 +9,10 @@ import { createNewSketchSession } from "@/domain/editor/sketch-session";
 import { createAuthoredModelDocumentFromSnapshot } from "@/contracts/modeling/authored-document";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
-import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
+import {
+  createStandardPlaneDefinition,
+  OCC_KERNEL_SETTINGS,
+} from "@/domain/modeling/opencascade-kernel-seed";
 
 const identity: AuthoredActionIdentity = {
   actorId: "actor-a",
@@ -18,7 +21,7 @@ const identity: AuthoredActionIdentity = {
 };
 function seed(): AuthoredActionState {
   const plane = createStandardPlaneDefinition("xy");
-  const session = createNewSketchSession(plane);
+  const session = createNewSketchSession(plane, OCC_KERNEL_SETTINGS);
   return {
     documentId: "doc-a",
     context: { kind: "sketch", sketchId: "sketch-a" },

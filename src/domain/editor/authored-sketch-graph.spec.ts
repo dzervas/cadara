@@ -12,12 +12,16 @@ import {
   selectSketchConstraintTarget,
   startSketchDraw,
 } from "@/domain/editor/sketch-session";
+import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
 
 function rectangle() {
-  const session = createNewSketchSessionFromSupport({
-    kind: "construction",
-    constructionId: "construction_plane-xy",
-  });
+  const session = createNewSketchSessionFromSupport(
+    {
+      kind: "construction",
+      constructionId: "construction_plane-xy",
+    },
+    OCC_KERNEL_SETTINGS,
+  );
   return acceptSketchDraw(
     startSketchDraw(beginSketchTool(session, "rectangle"), [0, 0]),
     [4, 2],
