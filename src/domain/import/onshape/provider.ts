@@ -149,14 +149,36 @@ import { isTopologyApplyRematchError } from "@/domain/import/orchestrator";
 import {
   IMPORT_VERIFICATION_DOCUMENT_ID,
   IMPORT_VERIFICATION_REVISION_ID,
+  type ImportProfileVerifier,
 } from "@/domain/import/onshape/profile-resolver";
 
 const ACCEPTED_EXTENSION = ".onshape-capture.json";
-/** Region derivation boundary for import-time sketch-profile verification. */
-const profileVerificationSolver = new SketchConstraintSolverAdapter({
-  documentId: IMPORT_VERIFICATION_DOCUMENT_ID,
-  revisionId: IMPORT_VERIFICATION_REVISION_ID,
-});
+const profileVerifiers = new WeakMap<
+  ImportCapabilities["modeling"],
+  ImportProfileVerifier
+>();
+
+/**
+ * Solve and region derivation boundary for import-time sketch-profile
+ * verification: the target kernel's queries at the target document's
+ * tolerances. One solver per modeling capability keeps its exact query cache
+ * across plans.
+ */
+function profileVerifierFor(capabilities: ImportCapabilities): ImportProfileVerifier {
+  const existing = profileVerifiers.get(capabilities.modeling);
+  if (existing) return existing;
+  const verifier: ImportProfileVerifier = {
+    sketchSolver: new SketchConstraintSolverAdapter({
+      documentId: IMPORT_VERIFICATION_DOCUMENT_ID,
+      revisionId: IMPORT_VERIFICATION_REVISION_ID,
+      neutralCurveQueries: capabilities.modeling.neutralCurveQueries,
+    }),
+    modelingTolerance: capabilities.modeling.modelingTolerance,
+    angularToleranceRadians: capabilities.modeling.angularToleranceRadians,
+  };
+  profileVerifiers.set(capabilities.modeling, verifier);
+  return verifier;
+}
 
 type ContainmentResult =
   | { kind: "contained" }
@@ -662,6 +684,7 @@ function planToLiveSketchMap(
 async function replanDependentFeatures(input: {
   read: ReturnType<typeof readPartStudio>;
   featurePlans: readonly FeaturePlan[];
+  profileVerifier: ImportProfileVerifier;
 }): Promise<FeaturePlan[]> {
   const plansByFeatureId = new Map(
     input.featurePlans.map((plan) => [plan.onshapeFeatureId, plan]),
@@ -698,7 +721,7 @@ async function replanDependentFeatures(input: {
       read: input.read,
       references,
       state,
-      sketchSolver: profileVerificationSolver,
+      profileVerifier: input.profileVerifier,
     };
     const replaySourcesAreLive = currentPlan.plannedFeatureReplay?.sourceFeatureIds.every(
       (sourceFeatureId) => plansByFeatureId.get(sourceFeatureId)?.tier === "parametric",
@@ -721,7 +744,7 @@ async function replanDependentFeatures(input: {
               solvedSketchesByFeatureId: input.read.solvedSketchesByFeatureId,
               referencedSketchesByFeatureId: state.sketchPlansByFeatureId,
               priorBodyProducingFeatureIds: state.bodyProducingFeatureIds,
-              sketchSolver: profileVerificationSolver,
+              profileVerifier: input.profileVerifier,
             })))) ||
       (currentPlan.reasonCodes.includes("downstream-of-baked") && replaySourcesAreLive);
     if (replan) {
@@ -742,6 +765,7 @@ async function replanDependentFeatures(input: {
 async function activateCapturedFrameTranslation(input: {
   read: ReturnType<typeof readPartStudio>;
   plan: OnshapeStudioPlan;
+  profileVerifier: ImportProfileVerifier;
 }): Promise<OnshapeStudioPlan> {
   const references = new Map(
     input.read.studio.resolvedReferences.map((reference) => [
@@ -877,7 +901,7 @@ async function activateCapturedFrameTranslation(input: {
         sketchPlansByFeatureId,
         bodyProducingFeatureIds: [],
       },
-      sketchSolver: profileVerificationSolver,
+      profileVerifier: input.profileVerifier,
     }));
   }
   return recomputePlanWithFeaturePlans(
@@ -1179,6 +1203,7 @@ async function activateProbeBackedPlanning(input: {
           input.plan,
           await replanDependentFeatures({
             read: input.read,
+            profileVerifier: profileVerifierFor(input.capabilities),
             featurePlans: input.plan.featurePlans.map((plan) =>
               forcedBakeFeatureIds.has(plan.onshapeFeatureId)
                 ? {
@@ -1385,6 +1410,7 @@ async function activateProbeBackedPlanning(input: {
         workingPlan,
         await replanDependentFeatures({
           read: input.read,
+          profileVerifier: profileVerifierFor(input.capabilities),
           featurePlans: cascadeUnavailableActionConsumers(
             workingPlan.featurePlans.map((plan) =>
               plan.onshapeFeatureId === failedFeatureId
@@ -2206,7 +2232,11 @@ async function activateProbeBackedPlanning(input: {
 
     workingPlan = recomputePlanWithFeaturePlans(
       workingPlan,
-      await replanDependentFeatures({ read: input.read, featurePlans: nextPlans }),
+      await replanDependentFeatures({
+        read: input.read,
+        featurePlans: nextPlans,
+        profileVerifier: profileVerifierFor(input.capabilities),
+      }),
       input.read.studio.groundTruth.hasBodies,
       input.read,
     );
@@ -2225,7 +2255,11 @@ async function activateProbeBackedPlanning(input: {
   if (swept.some((plan, index) => plan !== workingPlan.featurePlans[index])) {
     workingPlan = recomputePlanWithFeaturePlans(
       workingPlan,
-      await replanDependentFeatures({ read: input.read, featurePlans: swept }),
+      await replanDependentFeatures({
+        read: input.read,
+        featurePlans: swept,
+        profileVerifier: profileVerifierFor(input.capabilities),
+      }),
       input.read.studio.groundTruth.hasBodies,
       input.read,
     );
@@ -2328,7 +2362,7 @@ async function reviewStudio(
   const planned = await planStudioFidelity(read, {
     captureFormatVersion: bundle.formatVersion,
     historyProbeAvailable: capabilities.history != null,
-    sketchSolver: profileVerificationSolver,
+    profileVerifier: profileVerifierFor(capabilities),
   });
   const basePlan =
     bundle.formatVersion === 1 || read.studio.rollbackSnapshots === null
@@ -2354,7 +2388,11 @@ async function reviewStudio(
   // validates the plane→sketch chain against the real kernel and demotes it back
   // to baked if it does not resolve, so we only translate when a probe exists.
   const capturedFramePlan = capabilities.history
-    ? await activateCapturedFrameTranslation({ read, plan: basePlan })
+    ? await activateCapturedFrameTranslation({
+        read,
+        plan: basePlan,
+        profileVerifier: profileVerifierFor(capabilities),
+      })
     : basePlan;
   // Contain apply-time topology rematch failures at the feature level. A feature
   // the review promoted parametrically can still be rejected when a probe applies
@@ -3436,6 +3474,7 @@ async function buildPreparedActions(input: {
   const solveConsistencySolver = new SketchConstraintSolverAdapter({
     documentId: context.documentId,
     revisionId: context.baseRevisionId,
+    neutralCurveQueries: input.capabilities.modeling.neutralCurveQueries,
   });
   const addDocumentVariables: AddDocumentVariableRequest[] = [];
   const commitSketches: ImportCommitSketchRequest[] = [];
@@ -5097,7 +5136,7 @@ export const onshapeImportProvider: ImportProvider<
           // whose extent/scope topology never resolved; bake it closed so
           // `resolvedExtrudeExtent` cannot abort the whole studio at prepare.
           const fallback = await planStudioFidelity(read, {
-            sketchSolver: profileVerificationSolver,
+            profileVerifier: profileVerifierFor(capabilities),
           });
           return {
             ...fallback,

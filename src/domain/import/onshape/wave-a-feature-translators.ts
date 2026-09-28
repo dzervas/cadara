@@ -300,7 +300,7 @@ async function planSweep(
     profileEvidence: context.read.studio.profileEvidence ?? [],
     solvedSketchesByFeatureId: context.read.solvedSketchesByFeatureId,
     referencedSketchesByFeatureId: context.state.sketchPlansByFeatureId,
-    sketchSolver: context.sketchSolver,
+    profileVerifier: context.profileVerifier,
   });
   if (profiles.tier !== "resolved") return null;
   const sketchProfiles = profiles.profiles.filter(
@@ -434,7 +434,7 @@ async function planLoft(
       profileEvidence: context.read.studio.profileEvidence ?? [],
       solvedSketchesByFeatureId: context.read.solvedSketchesByFeatureId,
       referencedSketchesByFeatureId: context.state.sketchPlansByFeatureId,
-      sketchSolver: context.sketchSolver,
+      profileVerifier: context.profileVerifier,
     });
     if (
       resolved.tier !== "resolved" ||
@@ -537,7 +537,7 @@ async function planRevolve(
     profileEvidence: context.read.studio.profileEvidence ?? [],
     solvedSketchesByFeatureId: context.read.solvedSketchesByFeatureId,
     referencedSketchesByFeatureId: context.state.sketchPlansByFeatureId,
-    sketchSolver: context.sketchSolver,
+    profileVerifier: context.profileVerifier,
   });
   if (profiles.tier !== "resolved") {
     return { kind: "baked", reason: "revolve-profile-unresolved", inputFeatureIds: sketchIds };

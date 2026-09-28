@@ -1,3 +1,5 @@
+import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { expect, test } from "vitest";
 
 import type { ImportCapabilities } from "@/contracts/import/capabilities";
@@ -31,10 +33,15 @@ import {
 } from "@/domain/import/onshape/profile-resolver";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 
-const sketchSolver = new SketchConstraintSolverAdapter({
-  documentId: IMPORT_VERIFICATION_DOCUMENT_ID,
-  revisionId: IMPORT_VERIFICATION_REVISION_ID,
-});
+const profileVerifier = {
+  sketchSolver: new SketchConstraintSolverAdapter({
+    neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+    documentId: IMPORT_VERIFICATION_DOCUMENT_ID,
+    revisionId: IMPORT_VERIFICATION_REVISION_ID,
+  }),
+  modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+  angularToleranceRadians: OCC_KERNEL_SETTINGS.angularToleranceRadians,
+};
 
 function parsedRead(bundle: unknown, elementId?: string) {
   const parsed = validateOnshapeCaptureBundle(bundle);
@@ -73,6 +80,9 @@ const capabilities: ImportCapabilities = {
     async reconstructMeshToBrep() {
       throw new Error("not used");
     },
+    neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+    modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+    angularToleranceRadians: OCC_KERNEL_SETTINGS.angularToleranceRadians,
   },
   sketch: {
     async convertVectorToSketch() {
@@ -92,7 +102,7 @@ const capabilities: ImportCapabilities = {
 async function revolvePlan(
   bundle: ReturnType<typeof makeWaveARevolveBreadthCaptureBundle>,
 ) {
-  return (await planStudioFidelity(parsedRead(bundle), { sketchSolver })).featurePlans.find(
+  return (await planStudioFidelity(parsedRead(bundle), { profileVerifier })).featurePlans.find(
     (plan) => plan.featureType === "revolve",
   )!;
 }
@@ -119,7 +129,7 @@ test("Wave A FULL revolve resolves qNthElement to the same-sketch construction l
     parameterId: "fullRevolve",
     value: true,
   });
-  const plan = (await planStudioFidelity(parsedRead(bundle), { sketchSolver }))
+  const plan = (await planStudioFidelity(parsedRead(bundle), { profileVerifier }))
     .featurePlans.find((candidate) => candidate.featureType === "revolve")!;
 
   expect(plan).toMatchObject({ tier: "parametric", reasonCodes: [] });
@@ -233,7 +243,7 @@ function fallbackPlan(featureType: "sweep" | "loft") {
     loft: loftFeatureTranslator,
   }[featureType];
   return translator.plan({
-    sketchSolver,
+    profileVerifier,
     feature: read.features[0]!,
     label: featureType,
     onshapeSuppressed: false,
@@ -250,7 +260,7 @@ function waveTLoftTranslatorPlan() {
   const read = parsedRead(makeWaveTLoftCaptureBundle());
   const feature = read.features.find((candidate) => candidate.featureType === "loft")!;
   return loftFeatureTranslator.plan({
-    sketchSolver,
+    profileVerifier,
     feature,
     label: feature.name ?? feature.featureId,
     onshapeSuppressed: false,
@@ -296,7 +306,7 @@ test("Wave T loft accepts the ordered wireProfilesArray spelling", async () => {
   const read = parsedRead(bundle);
   const feature = read.features.find((candidate) => candidate.featureType === "loft")!;
   const plan = await loftFeatureTranslator.plan({
-    sketchSolver,
+    profileVerifier,
     feature,
     label: feature.name ?? feature.featureId,
     onshapeSuppressed: false,
@@ -328,7 +338,7 @@ test("Wave T loft rejects an array entry that resolves to multiple regions", asy
   const read = parsedRead(bundle);
   const feature = read.features.find((candidate) => candidate.featureType === "loft")!;
   const plan = await loftFeatureTranslator.plan({
-    sketchSolver,
+    profileVerifier,
     feature,
     label: feature.name ?? feature.featureId,
     onshapeSuppressed: false,
@@ -372,7 +382,7 @@ test.each([
   const read = parsedRead(bundle);
   const feature = read.features.find((candidate) => candidate.featureType === "loft")!;
   const plan = await loftFeatureTranslator.plan({
-    sketchSolver,
+    profileVerifier,
     feature,
     label: feature.name ?? feature.featureId,
     onshapeSuppressed: false,
@@ -440,7 +450,7 @@ test("Wave T provider promotes the captured cPlane sketch and emits ordered defe
 });
 
 test("Wave T sweep resolves one region profile and one solved sketch curve", async () => {
-  const plan = (await planStudioFidelity(parsedRead(makeWaveTSweepCaptureBundle()), { sketchSolver }))
+  const plan = (await planStudioFidelity(parsedRead(makeWaveTSweepCaptureBundle()), { profileVerifier }))
     .featurePlans.find((candidate) => candidate.featureType === "sweep")!;
 
   expect(plan).toMatchObject({
@@ -466,7 +476,7 @@ test("Wave T sweep keeps a multi-curve sketch path baked", async () => {
     isConstruction: false,
   });
 
-  const plan = (await planStudioFidelity(parsedRead(bundle), { sketchSolver })).featurePlans.find(
+  const plan = (await planStudioFidelity(parsedRead(bundle), { profileVerifier })).featurePlans.find(
     (candidate) => candidate.featureType === "sweep",
   )!;
   expect(plan).toMatchObject({

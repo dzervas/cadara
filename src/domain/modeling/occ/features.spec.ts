@@ -10,6 +10,7 @@ import {
   type OccFeatureExecutionContext,
 } from "@/domain/modeling/occ/features";
 import { requireRegion } from "@/domain/modeling/occ/features/shared";
+import { lineLoopSegmentsForTest } from "@/contracts/sketch/region-record.fixtures";
 import {
   createOccAuthoringState,
   rebuildOccAuthoringState,
@@ -296,6 +297,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       ownerSketchId: sketchId,
       ownerBodyId: null,
       regionId,
+      signature: `hand-built ${regionId}`,
       label: regionId,
       target: { kind: "region", sketchId, regionId },
       sourceSketch: { kind: "sketch", sketchId },
@@ -304,11 +306,13 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
           loopId: `region_loop_${sketchId}_outer` as const,
           role: "outer",
           orientation: "counterClockwise",
-          segments: entities.map((entity, index) => ({
-            source: { kind: "entity" as const, entityId: entity.entityId },
-            startPointId: points[index]!.id,
-            endPointId: points[(index + 1) % points.length]!.id,
-          })),
+          segments: lineLoopSegmentsForTest(
+            points.map((point) => ({
+              pointId: point.id,
+              position: point.position,
+            })),
+            entities.map((entity) => entity.entityId),
+          ),
           boundaryPointIds: points.map((point) => point.id),
           isClosed: true,
         },
@@ -351,7 +355,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
     return { sketch, region };
   }
 
-  async function testRegionResolutionAcceptsLegacyTraversalLabel() {
+  async function testRegionResolutionRequiresExactIdentity() {
     const sketchId = "sketch_legacy_region" as SketchId;
     const plane = createStandardPlaneDefinition("xy");
     const { sketch, region } = createRectangleSketch(sketchId, plane);
@@ -360,15 +364,21 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
     region.regionId = canonicalRegionId;
     region.target = { kind: "region", sketchId, regionId: canonicalRegionId };
 
-    const resolved = requireRegion(
-      sketch,
-      "region_legacy_region-sketch_entity_z_bottom-3h5wtq1po7fut" as RegionRecord["regionId"],
-    );
-
     expect(
-      resolved.regionId,
-      "Persisted pre-canonical region references should resolve by their unchanged stable boundary hash.",
+      requireRegion(sketch, canonicalRegionId).regionId,
+      "An exact region id resolves.",
     ).toBe(canonicalRegionId);
+    // U5: there is no hash-suffix fallback; a stale id asks for reselection.
+    expect(
+      () =>
+        requireRegion(
+          sketch,
+          "region_legacy_region-sketch_entity_z_bottom-3h5wtq1po7fut" as RegionRecord["regionId"],
+        ),
+      "A pre-canonical region id sharing only the old hash suffix no longer resolves.",
+    ).toThrow(
+      `Sketch region region_legacy_region-sketch_entity_z_bottom-3h5wtq1po7fut does not resolve on sketch ${sketchId}; it requires reselection or correction of ${sketch.label} diagnostics.`,
+    );
   }
 
   async function makeBoxBody(
@@ -5553,7 +5563,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
     testPlaneFeatureDuplicatesConstructionGeometryAndProducesPresentationArtifacts,
     testPlaneFeatureBuildsFaceBackedConstructionPlane,
     testPlaneFeatureBuildsExplicitFrameConstructionPlane,
-    testRegionResolutionAcceptsLegacyTraversalLabel,
+    testRegionResolutionRequiresExactIdentity,
     testExtrudeFeatureCreatesStandaloneBodyFromRegion,
     testSurfaceExtrudeRevolveAndThickenUseSheetBodies,
     testExtrudePublishesSemanticPrismHistoryProvenance,

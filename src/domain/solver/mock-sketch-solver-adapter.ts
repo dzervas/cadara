@@ -27,7 +27,12 @@ import {
   type ValidateSketchResponse,
 } from "@/contracts/solver/schema";
 import { validateSketchSolverEnvelope } from "@/contracts/solver/runtime-schema";
-import { deriveSketchRegionsCore } from "@/contracts/sketch/region-extraction";
+import type { NeutralCurveQueryCapability } from "@/contracts/modeling/neutral-curve-query";
+import {
+  createSketchArrangementDeriver,
+  type SketchArrangementDeriver,
+} from "@/contracts/sketch/region-extraction";
+import { assertDocumentModelingTolerance } from "@/domain/solver/sketch-constraint-solver-adapter";
 import {
   orderedSplineOccurrences,
   reconstructSplineAggregate,
@@ -54,10 +59,8 @@ import type {
   DimensionId,
   DocumentId,
   ReferenceId,
-  RequestId,
   RevisionId,
   SketchEntityId,
-  SketchId,
   SketchPointId,
 } from "@/contracts/shared/ids";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
@@ -67,6 +70,8 @@ export interface MockSketchSolverAdapterOptions {
   documentId: DocumentId;
   /** Current committed revision identity the mock solver accepts. */
   revisionId: RevisionId;
+  /** The selected kernel's neutral curve queries; only `deriveSketchRegions` uses them. */
+  neutralCurveQueries: NeutralCurveQueryCapability;
 }
 
 interface StoredInteractiveSolveSession {
@@ -76,38 +81,10 @@ interface StoredInteractiveSolveSession {
   sketchId: StartInteractiveSketchSolveSessionRequest["sketchId"];
 }
 
-export interface MockSketchSolverEvaluationContext {
-  /** Durable document identity used to stamp solver-owned outputs. */
-  documentId: DocumentId;
-  /** Revision basis used to stamp solver-owned outputs. */
-  revisionId: RevisionId;
-  /** Durable sketch identity being evaluated. */
-  sketchId: SketchId;
-  /** Sketch-plane frame used for projection and validation. */
-  plane: SketchPlaneFrame;
-  /** Tolerance policy used by the mock solver. */
-  tolerances: SolverTolerancePolicy;
-  /** Durable authored sketch definition being evaluated. */
-  definition: SketchDefinition;
-  /** Correlation identifier for the synthetic mock workflow. */
-  requestId: RequestId;
-}
-
-export interface MockSketchSolverEvaluation {
-  /** Explicit external-reference projection output. */
-  projectedReferences: ProjectedSketchReferenceRecord[];
-  /** Validation result for the authored sketch definition. */
-  validation: ValidateSketchResponse;
-  /** Solve result for the authored sketch definition. */
-  solve: SolveSketchResponse;
-  /** Region-derivation result for the solved sketch snapshot. */
-  regions: DeriveSketchRegionsResponse;
-}
-
-const DEFAULT_SOLVER_OPTIONS: MockSketchSolverAdapterOptions = {
+const DEFAULT_SOLVER_OPTIONS = {
   documentId: "doc_workspace",
   revisionId: "rev_0001",
-};
+} satisfies Partial<MockSketchSolverAdapterOptions>;
 
 function makeResponseBase(
   request:
@@ -1271,24 +1248,6 @@ function solveDefinition(
   };
 }
 
-function deriveRegions(
-  documentId: DocumentId,
-  revisionId: RevisionId,
-  sketchId: SketchId,
-  solvedSnapshot: SolvedSketchSnapshot,
-  definition: SketchDefinition,
-  projectedReferences: readonly ProjectedSketchReferenceRecord[] = [],
-) {
-  return deriveSketchRegionsCore({
-    documentId,
-    revisionId,
-    sketchId,
-    solvedSnapshot,
-    definition,
-    projectedReferences,
-  });
-}
-
 export const DEFAULT_MOCK_SKETCH_PLANE_FRAME: SketchPlaneFrame = {
   origin: [0, 0, 0],
   xAxis: [1, 0, 0],
@@ -1304,82 +1263,6 @@ export const DEFAULT_MOCK_SOLVER_TOLERANCES: SolverTolerancePolicy = {
   minimumSegmentLength: 1e-6,
 };
 
-export function evaluateMockSketchDefinition(
-  context: MockSketchSolverEvaluationContext,
-): MockSketchSolverEvaluation {
-  const projectionRequest: ProjectSketchExternalReferencesRequest = {
-    contractVersion: CONTRACT_VERSION,
-    solverSchemaVersion: SOLVER_SCHEMA_VERSION,
-    requestId: context.requestId,
-    documentId: context.documentId,
-    revisionId: context.revisionId,
-    sketchId: context.sketchId,
-    plane: context.plane,
-    tolerances: context.tolerances,
-    references: context.definition.references.map((reference) => ({
-      referenceId: reference.referenceId,
-      reference,
-    })),
-  };
-  const projectedReferences = projectionRequest.references.map((reference) => ({
-    referenceId: reference.referenceId,
-    ...projectedGeometryForReference(reference),
-  }));
-  const validationState = validateDefinition(
-    context.definition,
-    projectedReferences,
-    context.tolerances,
-  );
-  const validation: ValidateSketchResponse = {
-    ...makeResponseBase(projectionRequest),
-    isValid: validationState.isValid,
-    diagnostics: validationState.diagnostics,
-  };
-  const solveRequest: SolveSketchRequest = {
-    ...projectionRequest,
-    partialSolvePolicy: "bestEffort",
-    definition: context.definition,
-    projectedReferences,
-    includeRegions: true,
-  };
-  const solvedState = solveDefinition(
-    context.definition,
-    projectedReferences,
-    validationState.diagnostics,
-    solveRequest.partialSolvePolicy,
-  );
-  const derivedState = deriveRegions(
-    context.documentId,
-    context.revisionId,
-    context.sketchId,
-    solvedState.solvedSnapshot,
-    context.definition,
-    projectedReferences,
-  );
-  const solve: SolveSketchResponse = {
-    ...makeResponseBase(solveRequest),
-    status: solvedState.status,
-    solvedSnapshot: solvedState.solvedSnapshot,
-    diagnostics: [...solvedState.diagnostics, ...derivedState.diagnostics],
-    regionResult: {
-      regions: derivedState.regions,
-      diagnostics: derivedState.diagnostics,
-    },
-  };
-  const regions: DeriveSketchRegionsResponse = {
-    ...makeResponseBase(solveRequest),
-    regions: derivedState.regions,
-    diagnostics: derivedState.diagnostics,
-  };
-
-  return {
-    projectedReferences,
-    validation,
-    solve,
-    regions,
-  };
-}
-
 export class MockSketchSolverAdapter implements SketchSolverAdapter {
   private readonly options: MockSketchSolverAdapterOptions;
   private readonly interactiveSessions = new Map<
@@ -1388,11 +1271,21 @@ export class MockSketchSolverAdapter implements SketchSolverAdapter {
   >();
   private nextInteractiveSessionSequence = 1;
 
-  constructor(options: Partial<MockSketchSolverAdapterOptions> = {}) {
+  private readonly regionDeriver: SketchArrangementDeriver;
+
+  constructor(
+    options: Partial<
+      Omit<MockSketchSolverAdapterOptions, "neutralCurveQueries">
+    > &
+      Pick<MockSketchSolverAdapterOptions, "neutralCurveQueries">,
+  ) {
     this.options = {
       ...DEFAULT_SOLVER_OPTIONS,
       ...options,
     };
+    this.regionDeriver = createSketchArrangementDeriver(
+      options.neutralCurveQueries,
+    );
   }
 
   async projectExternalReferences(
@@ -1442,29 +1335,11 @@ export class MockSketchSolverAdapter implements SketchSolverAdapter {
       validation.diagnostics,
       request.partialSolvePolicy,
     );
-    const derived = request.includeRegions
-      ? deriveRegions(
-          request.documentId,
-          request.revisionId,
-          request.sketchId,
-          solved.solvedSnapshot,
-          request.definition,
-          request.projectedReferences,
-        )
-      : null;
     return {
       ...base,
       status: solved.status,
       solvedSnapshot: solved.solvedSnapshot,
       diagnostics: solved.diagnostics,
-      ...(derived
-        ? {
-            regionResult: {
-              regions: derived.regions,
-              diagnostics: derived.diagnostics,
-            },
-          }
-        : {}),
     };
   }
 
@@ -1677,15 +1552,17 @@ export class MockSketchSolverAdapter implements SketchSolverAdapter {
     request: DeriveSketchRegionsRequest,
   ): Promise<DeriveSketchRegionsResponse> {
     assertSupportedRequest(request, this.options);
+    assertDocumentModelingTolerance(request.modelingTolerance);
     const base = makeResponseBase(request);
-    const derived = deriveRegions(
-      request.documentId,
-      request.revisionId,
-      request.sketchId,
-      request.solvedSnapshot,
-      request.definition,
-      request.projectedReferences,
-    );
+    const derived = await this.regionDeriver.derive({
+      documentId: request.documentId,
+      revisionId: request.revisionId,
+      sketchId: request.sketchId,
+      solvedSnapshot: request.solvedSnapshot,
+      definition: request.definition,
+      projectedReferences: request.projectedReferences,
+      modelingTolerance: request.modelingTolerance,
+    });
     return {
       ...base,
       regions: derived.regions,

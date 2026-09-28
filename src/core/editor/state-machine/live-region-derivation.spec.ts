@@ -7,10 +7,14 @@ import {
   getSketchSessionDerivedValidity,
   getSketchSessionDisplayRenderables,
   getSketchSessionPreviewLabel,
+  patchSketchDimensionAnnotationPlacement,
+  patchSketchStyleValue,
+  toggleSketchSvgRendering,
   withLiveSolveBasis,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
 import { openSketchSessionFromSelection } from "@/domain/editor/sketch-session-controller";
+import { getFirstSketchStyleTarget } from "@/domain/editor/sketch-session/styles";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
 import { emitPendingSketchRegionDerivation } from "./effect-emitters";
 import { transitionEditorState } from "./reducer-root";
@@ -400,4 +404,58 @@ test("an accepted edit after an unavailable or failed state drops the stale synt
     "Region derivation exploded.",
   );
   expectClean(withLiveSolveBasis(failedSession, definition), "failed");
+});
+
+// Seam: sketch-session style and annotation-placement edits (T09b review
+// A6(a) then A4). Styles and label placements never change region records, so
+// they keep the live solve basis and the published regions; fill styling
+// targets only current live regions, whose ids are stable.
+test("style patches and label moves keep live regions; fill targets require current regions", async () => {
+  const { sketch, state } = await makeSketchState();
+  const session = toggleSketchSvgRendering(state.session);
+  const region = sketch.sketch.regions[0]!;
+  expect(session.liveRegions.status).toBe("current");
+  const regionTarget = region.target;
+  expect(
+    getFirstSketchStyleTarget(session, [regionTarget], "fill"),
+    "A current live region is a fill target.",
+  ).toEqual(regionTarget);
+
+  const styled = patchSketchStyleValue(session, [regionTarget], {
+    intent: "patchSketchStyle",
+    field: "fillMode",
+    value: "solid",
+  });
+  expect(styled.definition).not.toBe(session.definition);
+  expect(styled.liveSolve, "A style patch keeps the live solve basis.").toBe(
+    session.liveSolve,
+  );
+  expect(
+    styled.liveRegions,
+    "A style patch keeps the published live regions current.",
+  ).toBe(session.liveRegions);
+
+  const dimension = session.definition.dimensions[0]!;
+  const moved = patchSketchDimensionAnnotationPlacement(session, {
+    intent: "setDimensionAnnotationPlacement",
+    dimensionId: dimension.dimensionId,
+    point: [20, 10],
+    gesturePhase: "move",
+    clientPoint: [20, 10],
+  });
+  expect(moved.definition).not.toBe(session.definition);
+  expect(moved.liveSolve, "A label move keeps the live solve basis.").toBe(
+    session.liveSolve,
+  );
+  expect(
+    moved.liveRegions,
+    "A label move keeps the published live regions current.",
+  ).toBe(session.liveRegions);
+
+  const pending = withLiveSolveBasis(session, session.definition);
+  expect(pending.liveRegions.status).toBe("pending");
+  expect(
+    getFirstSketchStyleTarget(pending, [regionTarget], "fill"),
+    "Pending (stale) live regions are not fill targets.",
+  ).toBe(null);
 });

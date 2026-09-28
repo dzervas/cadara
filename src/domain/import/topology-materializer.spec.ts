@@ -28,11 +28,12 @@ function region(regionId: string, entityId = "boundary"): RegionRecord {
       isClosed: true,
       boundaryPointIds: [],
       segments: [{
-        source: { kind: "entity", entityId },
+        branch: { source: { kind: "entity", entityId }, spanId: "whole" },
+        sourceParameterInterval: [0, 2 * Math.PI],
         sourceSegmentOrdinal: 0,
         traversalDirection: "forward",
-        startPointId: null,
-        endPointId: null,
+        start: null,
+        end: null,
       }],
     }],
   } as RegionRecord;

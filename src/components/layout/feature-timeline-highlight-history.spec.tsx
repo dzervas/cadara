@@ -1,4 +1,5 @@
 import { test, expect } from "vitest";
+import { lineLoopSegmentsForTest } from "@/contracts/sketch/region-record.fixtures";
 import { MantineProvider } from "@mantine/core";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -212,6 +213,7 @@ test("src/components/layout/feature-timeline-highlight-history.spec.tsx", async 
             ownerSketchId: sketchId,
             ownerBodyId: null,
             regionId,
+            signature: `hand-built ${regionId}`,
             label: regionId,
             target: { kind: "region", sketchId, regionId },
             sourceSketch: { kind: "sketch", sketchId },
@@ -220,14 +222,13 @@ test("src/components/layout/feature-timeline-highlight-history.spec.tsx", async 
                 loopId: `region_loop_${sketchId}_outer` as const,
                 role: "outer",
                 orientation: "counterClockwise",
-                segments: entities.map((entity, index) => ({
-                  source: {
-                    kind: "entity" as const,
-                    entityId: entity.entityId,
-                  },
-                  startPointId: points[index]!.id,
-                  endPointId: points[(index + 1) % points.length]!.id,
-                })),
+                segments: lineLoopSegmentsForTest(
+                  points.map((point) => ({
+                    pointId: point.id,
+                    position: point.position,
+                  })),
+                  entities.map((entity) => entity.entityId),
+                ),
                 boundaryPointIds: points.map((point) => point.id),
                 isClosed: true,
               },

@@ -5,6 +5,7 @@
 // binding patches make Handle_TNaming_NamedShape deletes throw before deleting, and
 // an independent ledger records, at every TDocStd_Document delete, whether a failed
 // attribute handle of that document is still live.
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { readFile } from "node:fs/promises";
 import { expect, test } from "vitest";
 
@@ -192,10 +193,12 @@ async function makeAdapterWithNamedBody() {
   const oc = await loadOc();
   const ledger = makeNamingLedger(oc);
   const createSolver = (revisionId: RevisionId | null) =>
-    new SketchConstraintSolverAdapter({ revisionId });
+    new SketchConstraintSolverAdapter({
+      neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+      revisionId,
+    });
   const adapter = new OpenCascadeKernelAdapter({
-    solverAdapter: createSolver(null),
-    solverAdapterFactory: createSolver,
+    createSolverAdapter: createSolver,
     getOpenCascadeInstance: async () => oc,
   });
   const seed = await new MockKernelAdapter().getDocumentSnapshot(req);

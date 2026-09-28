@@ -37,6 +37,11 @@ import type {
   UpdateFeatureRequest,
 } from "@/contracts/modeling/schema";
 import type { ProjectSketchExternalReferencesRequest } from "@/contracts/solver/schema";
+import type {
+  NeutralCurveJoinRequest,
+  NeutralCurveQueryRequest,
+  NeutralCurveSelfIntersectionRequest,
+} from "@/contracts/modeling/neutral-curve-query";
 import type { OccTessellationTierId } from "@/domain/modeling/occ/tessellation";
 import type { OccWorkerAssetConfig } from "@/domain/modeling/occ/worker-protocol";
 import type { OccWorkerSnapshotClient } from "@/domain/modeling/occ/worker-client";
@@ -115,6 +120,26 @@ class InstrumentedOccWorkerClient implements OccWorkerSnapshotClient {
       "projectSketchExternalReferences",
       () => this.inner.projectSketchExternalReferences(request),
       diagnosticResultAttributes,
+    );
+  }
+
+  queryNeutralCurves(request: NeutralCurveQueryRequest) {
+    return this.measure("queryNeutralCurves", () =>
+      this.inner.queryNeutralCurves(request),
+    );
+  }
+
+  queryNeutralCurveSelfIntersections(
+    request: NeutralCurveSelfIntersectionRequest,
+  ) {
+    return this.measure("queryNeutralCurveSelfIntersections", () =>
+      this.inner.queryNeutralCurveSelfIntersections(request),
+    );
+  }
+
+  queryNeutralCurveJoin(request: NeutralCurveJoinRequest) {
+    return this.measure("queryNeutralCurveJoin", () =>
+      this.inner.queryNeutralCurveJoin(request),
     );
   }
 

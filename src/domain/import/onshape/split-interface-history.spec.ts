@@ -1,3 +1,4 @@
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { expect, test } from "vitest";
@@ -98,10 +99,13 @@ test.skipIf(!existsSync(CAPTURE_9841))(
     const { assetStore, resolver } = createGeometryAssetComposition(createMemoryGeometryAssetStore());
     const createService = (documentId: DocumentId) => {
       const createSolver = (revisionId: RevisionId | null) =>
-        new SketchConstraintSolverAdapter({ documentId, revisionId });
+        new SketchConstraintSolverAdapter({
+          neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+          documentId,
+          revisionId,
+        });
       const adapter = new OpenCascadeKernelAdapter({
-        solverAdapter: createSolver(null),
-        solverAdapterFactory: createSolver,
+        createSolverAdapter: createSolver,
         getOpenCascadeInstance: async () => oc,
         documentId,
         assetResolver: resolver,

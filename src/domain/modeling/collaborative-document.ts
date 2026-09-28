@@ -56,14 +56,6 @@ function provenance(document: AuthoredModelDocument) {
       document.sketches.map((sketch) => [
         sketch.sketchId,
         {
-          ...(sketch.regionSlots
-            ? {
-                regionSlots: keyed(
-                  plain(sketch.regionSlots) as unknown as Fields[],
-                  "regionId",
-                ),
-              }
-            : {}),
           // NOT-YET-replaced replay metadata. Its order remains meaningful until T03 removes the seam.
         },
       ]),
@@ -113,13 +105,6 @@ export function materializeCollaborativeDocument(
   }
   document.topologyLineage =
     lineage as unknown as AuthoredModelDocument["topologyLineage"];
-  for (const sketch of document.sketches) {
-    const metadata = storage.provenance[sketch.sketchId];
-    if (metadata?.regionSlots)
-      sketch.regionSlots = Object.values(
-        plain(metadata.regionSlots) as Fields,
-      ) as unknown as NonNullable<typeof sketch.regionSlots>;
-  }
   return document;
 }
 /** LCS edit script preserves every unchanged interior list element, not just prefix/suffix.

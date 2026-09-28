@@ -1,3 +1,4 @@
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { test, expect } from "vitest";
 
 import { isExpressionAuthoredValue } from "@/contracts/modeling/authored-values";
@@ -490,6 +491,7 @@ test("remaps captured pattern helper axes into the probed face frame without dro
   });
 
   const delegate = new SketchConstraintSolverAdapter({
+    neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
     documentId: "doc_pattern_frame",
     revisionId: "rev_pattern_frame",
   });
@@ -779,6 +781,7 @@ test("solve-consistency verifies complete mixed local/projected semantics", asyn
   const sketchId = translation.definition.points[0]!.target.sketchId;
   const seenProjectedReferenceCounts: number[] = [];
   const delegate = new SketchConstraintSolverAdapter({
+    neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
     documentId: "doc_projected_verification",
     revisionId: "rev_projected_verification",
   });
@@ -841,6 +844,7 @@ test("solve-consistency verification isolates and drops a bad translated relatio
 
   const verified = await verifySketchTranslationSolveConsistency({
     solver: new SketchConstraintSolverAdapter({
+      neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
       documentId: "doc_solve_consistency",
       revisionId: "rev_solve_consistency",
     }),
@@ -884,6 +888,7 @@ test("solve-consistency verifies equal-offset constraints with every other sourc
 
   const verified = await verifySketchTranslationSolveConsistency({
     solver: new SketchConstraintSolverAdapter({
+      neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
       documentId: "doc_equal_offset_verification",
       revisionId: "rev_equal_offset_verification",
     }),
@@ -932,6 +937,7 @@ test("grounds disconnected rigid components independently", async () => {
 
   const verified = await verifySketchTranslationSolveConsistency({
     solver: new SketchConstraintSolverAdapter({
+      neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
       documentId: "doc_disconnected_rigid_grounding",
       revisionId: "rev_disconnected_rigid_grounding",
     }),
@@ -1002,6 +1008,7 @@ test("grounds a free rigid component without anchoring projected-authority geome
 
   const verified = await verifySketchTranslationSolveConsistency({
     solver: new SketchConstraintSolverAdapter({
+      neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
       documentId: "doc_mixed_authority_grounding",
       revisionId: "rev_mixed_authority_grounding",
     }),
@@ -1042,6 +1049,7 @@ test("treats an unconstrained line as one deformable component without fixing bo
 
   const verified = await verifySketchTranslationSolveConsistency({
     solver: new SketchConstraintSolverAdapter({
+      neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
       documentId: "doc_unconstrained_line_grounding",
       revisionId: "rev_unconstrained_line_grounding",
     }),
@@ -1086,6 +1094,7 @@ test("grounds only rigid translation and leaves variable-driven shape freedom un
 
   const verified = await verifySketchTranslationSolveConsistency({
     solver: new SketchConstraintSolverAdapter({
+      neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
       documentId: "doc_variable_shape_grounding",
       revisionId: "rev_variable_shape_grounding",
     }),
@@ -1139,6 +1148,7 @@ test("grounds residual rigid motion from dropped external anchors on a WELL_DEFI
 
   const verified = await verifySketchTranslationSolveConsistency({
     solver: new SketchConstraintSolverAdapter({
+      neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
       documentId: "doc_well_defined_anchor",
       revisionId: "rev_well_defined_anchor",
     }),

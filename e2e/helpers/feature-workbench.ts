@@ -10,9 +10,15 @@ import {
   createTwoExtrudeBodiesOperationHistory,
   FEATURE_FIXTURE,
   OPEN_CURVE_FIXTURE,
+  SECONDARY_EXTRUDE_FIXTURE,
 } from "./modeling-fixtures";
 
 export { FEATURE_FIXTURE, OPEN_CURVE_FIXTURE } from "./modeling-fixtures";
+
+/** Region ids are signature hashes (T09 U5): profiles are matched exactly. */
+function exactTarget(targetId: string) {
+  return new RegExp(`^${targetId.replaceAll(".", "\\.")}$`);
+}
 
 type FeatureKind =
   | "extrude"
@@ -58,7 +64,7 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
 
     return {
       profileTarget: await this.requireSingleSelectableTarget(
-        /^sketch_[^.]+\.region_[^.]*-sketch_entity_1_rect-bottom-[^.]+$/,
+        exactTarget(FEATURE_FIXTURE.profile),
         "primary rectangle profile",
       ),
     };
@@ -69,7 +75,7 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
 
     return {
       profileTarget: await this.requireSingleSelectableTarget(
-        /^sketch_[^.]+\.region_[^.]*-sketch_entity_1_rect-bottom-[^.]+$/,
+        exactTarget(FEATURE_FIXTURE.profile),
         "primary rectangle profile",
       ),
       bodyTarget: FEATURE_FIXTURE.body,
@@ -110,11 +116,11 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
 
     return {
       firstProfileTarget: await this.requireSingleSelectableTarget(
-        /^sketch_[^.]+\.region_[^.]*-sketch_entity_1_rect-bottom-[^.]+$/,
+        exactTarget(FEATURE_FIXTURE.profile),
         "first rectangle profile",
       ),
       secondProfileTarget: await this.requireSingleSelectableTarget(
-        /^sketch_[^.]+\.region_[^.]*-sketch_entity_2_rect-bottom-[^.]+$/,
+        exactTarget(SECONDARY_EXTRUDE_FIXTURE.profile),
         "second rectangle profile",
       ),
       targetBody: "body_feature_extrude-1",

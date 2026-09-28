@@ -191,7 +191,38 @@ test("spline normalization rejects unknown fields without changing authored orde
 // contract boundary with no UI or browser dependency).
 // Seam: normalizeShellFeatureParameters distinguishes legacy open-face shells,
 // closed cavities, and whole-solid offsets before OCC execution.
-test("normalizes split-boundary positions without accepting partial positions", () => {
+test("normalizes split-boundary vertex records without accepting partial or legacy segments", () => {
+  const circleBranch = {
+    source: { kind: "entity", entityId: "sketch_entity_circle" },
+    spanId: "whole",
+  };
+  const chordBranch = {
+    source: { kind: "entity", entityId: "sketch_entity_chord" },
+    spanId: "whole",
+  };
+  const crossing = (position: [number, number], key: string) => ({
+    kind: "verifiedIntersection",
+    key,
+    position,
+    witness: {
+      first: { branch: chordBranch, parameter: 0, parameterBounds: [0, 0] },
+      second: {
+        branch: circleBranch,
+        parameter: Math.PI,
+        parameterBounds: [Math.PI, Math.PI],
+      },
+      classification: "crossing",
+      proof: "exactImplicitLineRootSet",
+    },
+  });
+  const segment = {
+    branch: circleBranch,
+    sourceParameterInterval: [0, Math.PI],
+    traversalDirection: "forward",
+    start: crossing([2, 0], "x-right"),
+    end: crossing([-2, 0], "x-left"),
+    sourceSegmentOrdinal: 1,
+  };
   const payload = [
     {
       ownerDocumentId: "doc_workspace",
@@ -200,6 +231,7 @@ test("normalizes split-boundary positions without accepting partial positions", 
       ownerSketchId: "sketch_split",
       ownerBodyId: null,
       regionId: "region_split",
+      signature: "split region signature",
       label: "Split region",
       target: {
         kind: "region",
@@ -212,16 +244,7 @@ test("normalizes split-boundary positions without accepting partial positions", 
           loopId: "region_loop_split_0",
           role: "outer",
           orientation: "counterClockwise",
-          segments: [
-            {
-              source: { kind: "entity", entityId: "sketch_entity_circle" },
-              startPointId: null,
-              endPointId: null,
-              sourceSegmentOrdinal: 1,
-              startPosition: [2, 0],
-              endPosition: [-2, 0],
-            },
-          ],
+          segments: [segment],
           boundaryPointIds: [],
           isClosed: true,
         },
@@ -229,25 +252,31 @@ test("normalizes split-boundary positions without accepting partial positions", 
       isClosed: true,
     },
   ];
+  const withSegment = (replacement: Record<string, unknown>) => [
+    {
+      ...payload[0],
+      loops: [{ ...payload[0]!.loops[0], segments: [replacement] }],
+    },
+  ];
   const normalized = normalizeRegionRecords(payload);
-  expect(normalized[0]?.loops[0]?.segments[0]?.startPosition).toEqual([2, 0]);
-  expect(normalized[0]?.loops[0]?.segments[0]?.endPosition).toEqual([-2, 0]);
+  expect(normalized[0]?.loops[0]?.segments[0]?.start?.position).toEqual([2, 0]);
+  expect(normalized[0]?.loops[0]?.segments[0]?.end?.position).toEqual([-2, 0]);
   expect(normalized[0]?.loops[0]?.segments[0]?.sourceSegmentOrdinal).toBe(1);
-  expect(() =>
-    normalizeRegionRecords([
-      {
-        ...payload[0],
-        loops: [
-          {
-            ...payload[0]!.loops[0],
-            segments: [
-              { ...payload[0]!.loops[0]!.segments[0], endPosition: undefined },
-            ],
-          },
-        ],
-      },
-    ]),
-  ).toThrow("Invalid region boundary segment payload");
+  expect(
+    () => normalizeRegionRecords(withSegment({ ...segment, end: undefined })),
+    "A split boundary segment without its end vertex is rejected.",
+  ).toThrow("Invalid region record payload");
+  expect(
+    () =>
+      normalizeRegionRecords(
+        withSegment({
+          ...segment,
+          startPosition: [2, 0],
+          endPosition: [-2, 0],
+        }),
+      ),
+    "The removed position fields are rejected: there is no dual representation.",
+  ).toThrow("Invalid region record payload");
 });
 
 test("normalizes shell closedHollow and offsetAllFaces without weakening open-face validation", () => {

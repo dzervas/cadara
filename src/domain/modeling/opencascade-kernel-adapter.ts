@@ -65,10 +65,6 @@ import type {
 import { type AuthoredModelDocument } from "@/contracts/modeling/authored-document";
 import { parseAuthoredModelDocument } from "@/contracts/modeling/authored-document.runtime-schema";
 import { resolveSketchDimensionValues } from "@/domain/modeling/sketch-dimension-expressions";
-import {
-  createAuthoredSketchRegionSlots,
-  reassociateAuthoredSketchRegionSlots,
-} from "@/contracts/sketch/authored-region-slots";
 import type {
   BakedGeometryAssetReference,
   GeometryAssetBlobInput,
@@ -131,7 +127,6 @@ import {
   type OpenCascadeInstance,
 } from "@/domain/modeling/occ/runtime";
 import {
-  resolveCompatibleRegion,
   getRebuildSlot,
   type RebuildSlot,
 } from "@/domain/modeling/occ/features/shared";
@@ -200,8 +195,15 @@ import { getOccTessellationTier } from "@/domain/modeling/occ/tessellation";
 import { createOpenCascadeNeutralCurveQueryCapability } from "@/domain/modeling/occ/neutral-curve-query";
 
 interface OpenCascadeKernelAdapterOptions {
-  solverAdapter: SketchSolverAdapter;
-  solverAdapterFactory?: (revisionId: RevisionId) => SketchSolverAdapter;
+  /**
+   * Builds the sketch solver for one revision. The adapter passes its own
+   * neutral curve queries (worker-delegating when a worker client is present),
+   * which the solver uses only for region derivation.
+   */
+  createSolverAdapter: (
+    revisionId: RevisionId,
+    neutralCurveQueries: NeutralCurveQueryCapability,
+  ) => SketchSolverAdapter;
   getOpenCascadeInstance?: () => Promise<OpenCascadeInstance>;
   initialSnapshotRequiresRuntime?: boolean;
   workerSnapshotClient?: OccWorkerSnapshotClient | null;
@@ -311,7 +313,6 @@ function createAuthoredModelDocumentFromAuthoringState(
       label: sketch.label,
       plane: structuredClone(sketch.plane),
       definition: structuredClone(sketch.sketch.definition),
-      regionSlots: createAuthoredSketchRegionSlots(sketch.sketch.regions),
     })),
     features: state.features.map((feature) => ({
       featureId: feature.featureId,
@@ -1698,8 +1699,9 @@ function collectInvalidConsumedTargetDiagnostics(
       }
       if (
         target.kind === "region" &&
-        sketch &&
-        resolveCompatibleRegion(sketch.sketch.regions, target.regionId)
+        sketch?.sketch.regions.some(
+          (region) => region.regionId === target.regionId,
+        )
       ) {
         continue;
       }
@@ -1747,10 +1749,7 @@ type OccOwnerGraph = Parameters<
 >[0];
 
 export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
-  private readonly solverAdapter: SketchSolverAdapter;
-  private readonly solverAdapterFactory?: (
-    revisionId: RevisionId,
-  ) => SketchSolverAdapter;
+  private readonly createSolverAdapter: OpenCascadeKernelAdapterOptions["createSolverAdapter"];
   private readonly loadOpenCascadeInstance: () => Promise<OpenCascadeInstance>;
   private readonly initialSnapshotRequiresRuntime: boolean;
   private readonly workerSnapshotClient: OccWorkerSnapshotClient | null;
@@ -1778,8 +1777,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   >();
 
   constructor(options: OpenCascadeKernelAdapterOptions) {
-    this.solverAdapter = options.solverAdapter;
-    this.solverAdapterFactory = options.solverAdapterFactory;
+    this.createSolverAdapter = options.createSolverAdapter;
     this.loadOpenCascadeInstance =
       options.getOpenCascadeInstance ?? getOpenCascadeInstance;
     this.neutralCurveQueries = createOpenCascadeNeutralCurveQueryCapability(
@@ -1798,17 +1796,29 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     };
   }
 
+  /** With a worker client, queries run in the worker so the main thread never loads OCC for them. */
   queryNeutralCurves(request: NeutralCurveQueryRequest) {
+    if (this.workerSnapshotClient) {
+      return this.workerSnapshotClient.queryNeutralCurves(request);
+    }
     return this.neutralCurveQueries.queryNeutralCurves(request);
   }
 
   queryNeutralCurveSelfIntersections(
     request: NeutralCurveSelfIntersectionRequest,
   ) {
+    if (this.workerSnapshotClient) {
+      return this.workerSnapshotClient.queryNeutralCurveSelfIntersections(
+        request,
+      );
+    }
     return this.neutralCurveQueries.queryNeutralCurveSelfIntersections(request);
   }
 
   queryNeutralCurveJoin(request: NeutralCurveJoinRequest) {
+    if (this.workerSnapshotClient) {
+      return this.workerSnapshotClient.queryNeutralCurveJoin(request);
+    }
     return this.neutralCurveQueries.queryNeutralCurveJoin(request);
   }
 
@@ -2155,11 +2165,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   }
 
   private getSolverAdapter(revisionId: RevisionId) {
-    if (this.solverAdapterFactory) {
-      return this.solverAdapterFactory(revisionId);
-    }
-
-    return this.solverAdapter;
+    return this.createSolverAdapter(revisionId, this);
   }
 
   private async getRuntimeState() {
@@ -2343,6 +2349,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       solvedSnapshot: solved.solvedSnapshot,
       definition: resolvedDefinition.definition,
       projectedReferences: projection.projectedReferences,
+      modelingTolerance: document.settings.modelingTolerance,
     });
 
     const derivedDiagnostics = mergeSketchSolveDiagnostics(
@@ -2372,14 +2379,11 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       document.revisionId,
       definition,
       derivedValidity.state === "current"
-        ? reassociateAuthoredSketchRegionSlots({
-            slots: sketch.regionSlots,
-            regions: normalizeDerivedRegionsForSketchId(
-              regions.regions,
-              sketchId,
-              document.revisionId,
-            ),
-          })
+        ? normalizeDerivedRegionsForSketchId(
+            regions.regions,
+            sketchId,
+            document.revisionId,
+          )
         : [],
       {
         ...solved.solvedSnapshot,
@@ -4160,6 +4164,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         solvedSnapshot: solved.solvedSnapshot,
         definition: solverDefinition,
         projectedReferences,
+        modelingTolerance: runtimeState.authoringState.modelingTolerance,
       });
       validationIsValid = validation.isValid;
       solvedSnapshot = solved.solvedSnapshot;

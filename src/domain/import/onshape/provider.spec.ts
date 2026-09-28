@@ -1,3 +1,8 @@
+import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+import {
+  createCertifiedNeutralCurveQueryCapabilityForTest,
+  createRecordingNeutralCurveQueryCapabilityForTest,
+} from "@/domain/modeling/neutral-curve-certification/query";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { test, expect } from "vitest";
@@ -33,6 +38,7 @@ import { makeWaveARevolveCaptureBundle } from "@/domain/import/onshape/wave-a-ca
 import { makeWaveWPatternCaptureBundle } from "@/domain/import/onshape/wave-w-pattern-capture-fixtures";
 import {
   makeWaveXClosedHollowShellCaptureBundle,
+  makeWaveXRegionSelectionCaptureBundle,
   makeWaveXSurfaceExtrudeCaptureBundle,
 } from "@/domain/import/onshape/wave-x-capture-fixtures";
 import {
@@ -425,6 +431,9 @@ const capabilities: ImportCapabilities = {
     async reconstructMeshToBrep() {
       throw new Error("not used");
     },
+    neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+    modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+    angularToleranceRadians: OCC_KERNEL_SETTINGS.angularToleranceRadians,
   },
   sketch: {
     async convertVectorToSketch() {
@@ -447,6 +456,7 @@ function createRevisionAgnosticRealSolver(): SketchSolverAdapter {
     get(_target, property) {
       return (request: { documentId: DocumentId; revisionId: RevisionId }) => {
         const adapter = new SketchConstraintSolverAdapter({
+          neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
           documentId: request.documentId,
           revisionId: request.revisionId,
         });
@@ -481,13 +491,13 @@ function loadRealOccForImportTest() {
 function createRealOccModelingService(oc: OpenCascadeInstance) {
   const createSolver = (revisionId: RevisionId | null) =>
     new SketchConstraintSolverAdapter({
+      neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
       documentId: "doc_workspace" as DocumentId,
       revisionId,
     });
   const service = createModelingService(
     new OpenCascadeKernelAdapter({
-      solverAdapter: createSolver(null),
-      solverAdapterFactory: createSolver,
+      createSolverAdapter: createSolver,
       getOpenCascadeInstance: async () => oc,
     }),
     { currentDocumentId: "doc_workspace" },
@@ -2983,9 +2993,13 @@ test("src/domain/import/onshape/provider.spec.ts studio bake emits a baked body 
   const assetStore = createMemoryGeometryAssetStore();
 
   const bakeCapabilities = createImportCapabilities(
-    {} as never,
+    { neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest() } as never,
     {
-      document: { documentId: "doc_workspace", revisionId: "rev_1" },
+      document: {
+        documentId: "doc_workspace",
+        revisionId: "rev_1",
+        settings: { modelingTolerance: 1e-3, angularToleranceRadians: 1e-4 },
+      },
     } as never,
     { assetStore },
   );
@@ -3064,9 +3078,13 @@ test("src/domain/import/onshape/provider.spec.ts keeps omitted final geometry un
   };
   const source = sourceFromBundle(bundle);
   const capabilities = createImportCapabilities(
-    {} as never,
+    { neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest() } as never,
     {
-      document: { documentId: "doc_workspace", revisionId: "rev_1" },
+      document: {
+        documentId: "doc_workspace",
+        revisionId: "rev_1",
+        settings: { modelingTolerance: 1e-3, angularToleranceRadians: 1e-4 },
+      },
     } as never,
     { assetStore: createMemoryGeometryAssetStore() },
   );
@@ -3094,9 +3112,13 @@ test("src/domain/import/onshape/provider.spec.ts emits selective segment checkpo
   const assetStore = createMemoryGeometryAssetStore();
   const segmentedCapabilities: ImportCapabilities = {
     ...createImportCapabilities(
-      {} as never,
+      { neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest() } as never,
       {
-        document: { documentId: "doc_workspace", revisionId: "rev_1" },
+        document: {
+          documentId: "doc_workspace",
+          revisionId: "rev_1",
+          settings: { modelingTolerance: 1e-3, angularToleranceRadians: 1e-4 },
+        },
       } as never,
       { assetStore },
     ),
@@ -3324,9 +3346,13 @@ test("src/domain/import/onshape/provider.spec.ts promotes a captured-frame sketc
   const assetStore = createMemoryGeometryAssetStore();
   const checkpointCapabilities: ImportCapabilities = {
     ...createImportCapabilities(
-      {} as never,
+      { neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest() } as never,
       {
-        document: { documentId: "doc_workspace", revisionId: "rev_1" },
+        document: {
+          documentId: "doc_workspace",
+          revisionId: "rev_1",
+          settings: { modelingTolerance: 1e-3, angularToleranceRadians: 1e-4 },
+        },
       } as never,
       { assetStore },
     ),
@@ -3549,4 +3575,31 @@ test("src/domain/import/onshape/provider.spec.ts leaves an unrecoverable cPlane 
     ),
     "An unrecoverable cPlane must not leave a dangling constructionOf sketch support.",
   ).toBeTruthy();
+});
+
+// Seam: import-time region verification uses the target kernel's queries at
+// the target document's modelingTolerance (ImportModelingCapabilities).
+test("provider.spec.ts import verification reaches the target queries with each target document's modelingTolerance", async () => {
+  for (const modelingTolerance of [OCC_KERNEL_SETTINGS.modelingTolerance, 0.02]) {
+    const recording = createRecordingNeutralCurveQueryCapabilityForTest();
+    await onshapeImportProvider.review({
+      source: sourceFromBundle(makeWaveXRegionSelectionCaptureBundle()),
+      capabilities: {
+        ...capabilities,
+        modeling: {
+          ...capabilities.modeling,
+          neutralCurveQueries: recording.capability,
+          modelingTolerance,
+        },
+      },
+    });
+    expect(
+      recording.modelingTolerances.length,
+      "Import review verifies sketch regions through the target kernel's queries.",
+    ).toBeGreaterThan(0);
+    expect(
+      new Set(recording.modelingTolerances),
+      `Every import verification query carries the target tolerance ${modelingTolerance}.`,
+    ).toEqual(new Set([modelingTolerance]));
+  }
 });

@@ -751,12 +751,7 @@ export function createModelingService(
         `Published sketch ${input.result.sketchId} is missing from the normalized kernel candidate.`,
       );
     const expectedSketch = input.expectedSketch
-      ? {
-          ...structuredClone(input.expectedSketch),
-          regionSlots: input.latestShared.sketches.find(
-            (sketch) => sketch.sketchId === input.expectedSketch?.sketchId,
-          )?.regionSlots,
-        }
+      ? structuredClone(input.expectedSketch)
       : null;
     const expected = publicationDocument(
       input.latestShared,
@@ -1400,6 +1395,7 @@ export function createModelingService(
   return {
     currentDocumentId,
     sketchSolver,
+    neutralCurveQueries: adapter,
     dispose() {
       if (disposed) return;
       disposed = true;

@@ -203,7 +203,7 @@ function normalizeCoincidentPointTopology<T extends ImportDeferredSketchDefiniti
 }
 
 export interface SketchSolveConsistencyInput {
-  solver: SketchSolverAdapter;
+  solver: Pick<SketchSolverAdapter, "solveSketch">;
   contractVersion: ContractVersion;
   documentId: DocumentId;
   revisionId: RevisionId;
@@ -1146,7 +1146,9 @@ function dimensionForSolve(dimension: DimensionDefinition): DimensionDefinition 
   return null;
 }
 
-function verifiableRelationships(definition: ImportDeferredSketchDefinition): VerifiableRelationship[] {
+function verifiableRelationships(
+  definition: Pick<SketchDefinition, "constraints" | "dimensions">,
+): VerifiableRelationship[] {
   return [
     ...definition.constraints.map((constraint) => ({
       kind: "constraint" as const,
@@ -1170,10 +1172,30 @@ function verifiableRelationships(definition: ImportDeferredSketchDefinition): Ve
   ];
 }
 
-function definitionWithRelationships(
-  definition: ImportDeferredSketchDefinition,
-  relationships: readonly VerifiableRelationship[],
-): ImportDeferredSketchDefinition {
+/**
+ * The translated sketch a pre-commit verification solve can evaluate: every
+ * constraint, plus every dimension whose authored value is numeric without the
+ * document's variables. This is the relationship set solve-consistency
+ * verification solves; a variable-driven dimension is evaluated only at commit.
+ */
+export function definitionForVerificationSolve<
+  T extends Pick<
+    SketchDefinition,
+    "constraintIds" | "constraints" | "dimensionIds" | "dimensions"
+  >,
+>(definition: T): T {
+  return definitionWithRelationships(
+    definition,
+    verifiableRelationships(definition),
+  );
+}
+
+function definitionWithRelationships<
+  T extends Pick<
+    SketchDefinition,
+    "constraintIds" | "constraints" | "dimensionIds" | "dimensions"
+  >,
+>(definition: T, relationships: readonly VerifiableRelationship[]): T {
   const constraints = relationships
     .filter((relationship): relationship is Extract<VerifiableRelationship, { kind: "constraint" }> => relationship.kind === "constraint")
     .map((relationship) => relationship.constraint);

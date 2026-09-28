@@ -9,11 +9,7 @@ import {
   parseSketchStylePatch,
 } from "@/domain/sketch-styles/definition";
 import type { SketchSessionState } from "./types";
-import {
-  withLiveSolveBasis,
-  getSessionSketchId,
-  rebuildSessionCommitRequest,
-} from "./internals";
+import { getSessionSketchId, rebuildSessionCommitRequest } from "./internals";
 import {
   applyStylePatchToDefinition,
   isFillStylePatch,
@@ -139,7 +135,10 @@ export function getFirstSketchStyleTarget(
   }
 
   if (toolId === "fill") {
+    // Only current live regions are stable fill targets (T09b review A4):
+    // a stale or invalid region id may not survive the next publication.
     return target.kind === "region" &&
+      session.liveRegions.status === "current" &&
       session.liveRegions.regions.some(
         (region) => region.target.regionId === target.regionId,
       )
@@ -217,12 +216,11 @@ export function patchSketchStyleValue(
 
   const nextDefinition = nextFullDefinition;
 
-  return withLiveSolveBasis(
-    {
-      ...session,
-      definition: nextDefinition,
-      commitRequest: rebuildSessionCommitRequest(session, nextDefinition),
-    },
-    nextDefinition,
-  );
+  // Styles never affect the solve or region records (T09b review A6(a)), so
+  // the live solve basis and the published live regions stay as they are.
+  return {
+    ...session,
+    definition: nextDefinition,
+    commitRequest: rebuildSessionCommitRequest(session, nextDefinition),
+  };
 }

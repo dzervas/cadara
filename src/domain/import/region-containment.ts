@@ -17,7 +17,35 @@ import type {
   SketchDefinition,
   SketchPoint2D,
 } from "@/contracts/sketch/schema";
-import { getClosedCurveSampleCount } from "@/contracts/sketch/region-geometry";
+
+// Importer-owned post-T18 debt (T09 U7): interior-point selection samples arc
+// and circle boundaries into polygons. Region topology never samples; this
+// sampler lives here only for the importer's selector verification.
+const CONTAINMENT_MIN_SAMPLE_COUNT = 32;
+const CONTAINMENT_MAX_SAMPLE_COUNT = 256;
+const CONTAINMENT_TARGET_SAGITTA = 0.05;
+const CONTAINMENT_MIN_RADIUS = 1e-6;
+
+function containmentSampleCount(radius: number) {
+  if (!Number.isFinite(radius) || radius <= CONTAINMENT_MIN_RADIUS) {
+    return CONTAINMENT_MIN_SAMPLE_COUNT;
+  }
+
+  const targetSagitta = Math.max(
+    CONTAINMENT_MIN_RADIUS * 10,
+    Math.min(CONTAINMENT_TARGET_SAGITTA, radius * 0.01),
+  );
+  const angle =
+    2 * Math.acos(Math.max(-1, 1 - Math.min(targetSagitta / radius, 1)));
+  if (!Number.isFinite(angle) || angle <= 0) {
+    return CONTAINMENT_MIN_SAMPLE_COUNT;
+  }
+
+  return Math.min(
+    CONTAINMENT_MAX_SAMPLE_COUNT,
+    Math.max(CONTAINMENT_MIN_SAMPLE_COUNT, Math.ceil((Math.PI * 2) / angle)),
+  );
+}
 
 /**
  * Minimal solved-sketch projection the selection math needs. `regions` are the
@@ -59,7 +87,7 @@ function circleLoopContainsPoint(
   if (loop.segments.length !== 1) {
     return false;
   }
-  const source = loop.segments[0]?.source;
+  const source = loop.segments[0]?.branch.source;
   if (!source || source.kind !== "entity") {
     return false;
   }
@@ -95,19 +123,16 @@ function loopPolygon(
   );
   const points: SketchPoint2D[] = [];
   for (const segment of loop.segments) {
-    if (segment.source.kind !== "entity") return [];
-    const entity = entityById.get(segment.source.entityId);
+    if ((segment.start === null) !== (segment.end === null)) {
+      throw new Error(
+        `Region loop ${loop.loopId} has a boundary segment with exactly one null end; only an unsplit closed branch has no boundary vertices.`,
+      );
+    }
+    if (segment.branch.source.kind !== "entity") return [];
+    const entity = entityById.get(segment.branch.source.entityId);
     if (!entity) return [];
-    const start =
-      segment.startPosition ??
-      (segment.startPointId
-        ? sketch.solvedPoints.get(segment.startPointId)
-        : undefined);
-    const end =
-      segment.endPosition ??
-      (segment.endPointId
-        ? sketch.solvedPoints.get(segment.endPointId)
-        : undefined);
+    const start = segment.start?.position;
+    const end = segment.end?.position;
     if (entity.kind === "lineSegment") {
       if (!start || !end) return [];
       appendLoopSegmentPoints(points, [start, end]);
@@ -122,22 +147,21 @@ function loopPolygon(
     );
     const curveStart = start ?? [center[0] + radius, center[1]] as SketchPoint2D;
     const curveEnd = end ?? curveStart;
+    // Arc and circle traversal is relative to increasing (counter-clockwise) angle.
     const direction =
-      entity.kind === "circle"
-        ? segment.traversalDirection === "reverse" ? "clockwise" : "counterClockwise"
-        : segment.traversalDirection === "reverse"
-          ? entity.sweepDirection === "clockwise" ? "counterClockwise" : "clockwise"
-          : entity.sweepDirection;
+      segment.traversalDirection === "reverse" ? "clockwise" : "counterClockwise";
+    const fullTurn =
+      !segment.start || !segment.end || segment.start.key === segment.end.key;
     const startAngle = Math.atan2(curveStart[1] - center[1], curveStart[0] - center[0]);
     const endAngle = Math.atan2(curveEnd[1] - center[1], curveEnd[0] - center[0]);
-    const sweep = !start && !end
+    const sweep = fullTurn
       ? Math.PI * 2
       : direction === "counterClockwise"
         ? (endAngle - startAngle + Math.PI * 2) % (Math.PI * 2)
         : (startAngle - endAngle + Math.PI * 2) % (Math.PI * 2);
     const count = Math.max(
       3,
-      Math.ceil(getClosedCurveSampleCount(radius) * (sweep / (Math.PI * 2))),
+      Math.ceil(containmentSampleCount(radius) * (sweep / (Math.PI * 2))),
     );
     appendLoopSegmentPoints(
       points,
@@ -163,7 +187,7 @@ function estimateRegionArea(sketch: RegionSelectionSketch, region: RegionRecord)
   if (polygon.length < 3) {
     // Circle-only regions carry no boundary polygon; approximate from radius.
     const outerLoop = region.loops.find((loop) => loop.role === "outer");
-    const segment = outerLoop?.segments[0]?.source;
+    const segment = outerLoop?.segments[0]?.branch.source;
     if (segment && segment.kind === "entity") {
       const entity = sketch.definition.entities.find(
         (candidate) => candidate.entityId === segment.entityId,

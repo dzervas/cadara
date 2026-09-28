@@ -51,6 +51,13 @@ import type { SketchVectorExportModel } from "@/contracts/export/sketch-vector";
 import type { DocumentExportDiagnostic } from "@/contracts/modeling/export";
 import type { DurableRef } from "@/contracts/shared/references";
 import type {
+  NeutralCurveJoinRequest,
+  NeutralCurveJoinResult,
+  NeutralCurveQueryRequest,
+  NeutralCurveQueryResult,
+  NeutralCurveSelfIntersectionRequest,
+} from "@/contracts/modeling/neutral-curve-query";
+import type {
   ProjectSketchExternalReferencesRequest,
   ProjectSketchExternalReferencesResponse,
 } from "@/contracts/solver/schema";
@@ -138,6 +145,18 @@ export type OccWorkerOperation =
   | {
       kind: "projectSketchExternalReferences";
       request: ProjectSketchExternalReferencesRequest;
+    }
+  | {
+      kind: "queryNeutralCurves";
+      request: NeutralCurveQueryRequest;
+    }
+  | {
+      kind: "queryNeutralCurveSelfIntersections";
+      request: NeutralCurveSelfIntersectionRequest;
+    }
+  | {
+      kind: "queryNeutralCurveJoin";
+      request: NeutralCurveJoinRequest;
     }
   | {
       kind: "commitSketch";
@@ -234,6 +253,8 @@ export type OccWorkerOperationResult =
   | AuthoredModelDocument
   | GetDocumentSnapshotResponse
   | ProjectSketchExternalReferencesResponse
+  | NeutralCurveQueryResult
+  | NeutralCurveJoinResult
   | CommitSketchResponse
   | CreateFeatureResponse
   | UpdateFeatureResponse

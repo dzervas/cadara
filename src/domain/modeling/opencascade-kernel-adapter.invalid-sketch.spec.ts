@@ -1,3 +1,4 @@
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { readFile } from "node:fs/promises";
 import { expect, test } from "vitest";
 
@@ -30,10 +31,12 @@ async function loadOcc() {
 
 function createAdapter(oc: OpenCascadeInstance) {
   const createSolver = (revisionId: string | null) =>
-    new SketchConstraintSolverAdapter({ revisionId });
+    new SketchConstraintSolverAdapter({
+      neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+      revisionId,
+    });
   return new OpenCascadeKernelAdapter({
-    solverAdapter: createSolver(null),
-    solverAdapterFactory: createSolver,
+    createSolverAdapter: createSolver,
     getOpenCascadeInstance: async () => oc,
   });
 }

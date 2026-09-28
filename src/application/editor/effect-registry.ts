@@ -749,7 +749,7 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
         );
       }
 
-      // Same async boundary the kernel uses; T09e adds modelingTolerance here.
+      // Same async boundary the kernel uses, at the session's document tolerance.
       const result = await modelingService.sketchSolver.deriveSketchRegions({
         solverSchemaVersion: SOLVER_SCHEMA_VERSION,
         requestId: input.requestId,
@@ -759,6 +759,7 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
         definition: input.basis.definition,
         solvedSnapshot: input.basis.solvedSnapshot,
         projectedReferences: input.basis.projectedReferences,
+        modelingTolerance: input.basis.modelingTolerance,
       });
 
       return {

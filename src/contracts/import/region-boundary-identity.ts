@@ -1,4 +1,5 @@
 import type {
+  RegionBoundaryBranch,
   RegionBoundarySegmentRecord,
   RegionRecord,
 } from "@/contracts/sketch/schema";
@@ -12,14 +13,15 @@ import type {
 export type ImportRegionBoundaryIdentity =
   `import-region-boundary/v1:${string}`;
 
-type BoundarySource = RegionBoundarySegmentRecord["source"];
-
 type Orientation = "forward" | "reverse";
 
-function sourceKey(source: BoundarySource): string {
-  return source.kind === "entity"
-    ? `entity:${source.entityId}`
-    : `projected:${source.reference.referenceId}:${source.reference.geometryId}`;
+function sourceKey(branch: RegionBoundaryBranch): string {
+  const source = branch.source;
+  const key =
+    source.kind === "entity"
+      ? `entity:${source.entityId}`
+      : `projected:${source.reference.referenceId}:${source.reference.geometryId}`;
+  return branch.spanId === "whole" ? key : `${key}:${branch.spanId}`;
 }
 
 function flip(orientation: Orientation): Orientation {
@@ -33,8 +35,8 @@ function pieceCounts(
   for (const region of regions) {
     for (const loop of region.loops) {
       for (const segment of loop.segments) {
-        const key = sourceKey(segment.source);
-        const count = (segment.sourceSegmentOrdinal ?? 0) + 1;
+        const key = sourceKey(segment.branch);
+        const count = segment.sourceSegmentOrdinal + 1;
         counts.set(key, Math.max(counts.get(key) ?? 0, count));
       }
     }
@@ -58,17 +60,17 @@ function segmentIdentity(input: {
   reverseSourceOrientation: boolean;
   reverseTraversal: boolean;
 }): string {
-  const key = sourceKey(input.segment.source);
+  const key = sourceKey(input.segment.branch);
   const pieceCount = input.counts.get(key) ?? 1;
-  const ordinal = input.segment.sourceSegmentOrdinal ?? 0;
+  const ordinal = input.segment.sourceSegmentOrdinal;
   const sourceReversedOrdinal = input.reverseSourceOrientation
     ? pieceCount - 1 - ordinal
     : ordinal;
-  const sourceDirection = input.segment.traversalDirection ?? "forward";
+  const sourceDirection = input.segment.traversalDirection;
   const direction = input.reverseTraversal
     ? flip(sourceDirection)
     : sourceDirection;
-  const coincident = (input.segment.coincidentSources ?? [])
+  const coincident = (input.segment.coincidentBranches ?? [])
     .map(sourceKey)
     .sort();
   return JSON.stringify([key, sourceReversedOrdinal, direction, coincident]);

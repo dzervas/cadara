@@ -152,7 +152,6 @@ import type { ModelingCommitSketchCorrelation } from "@/domain/modeling/modeling
 import {
   DEFAULT_MOCK_SKETCH_PLANE_FRAME,
   MockSketchSolverAdapter,
-  evaluateMockSketchDefinition,
 } from "@/domain/solver/mock-sketch-solver-adapter";
 import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
 import { projectSketchExternalReferencesFromSnapshot } from "@/domain/modeling/sketch-reference-projection";
@@ -3508,7 +3507,7 @@ function createSketchPlaneDefinition(input: {
 }
 
 async function buildSketchRecord(
-  _solverAdapter: SketchSolverAdapter,
+  solverAdapter: SketchSolverAdapter,
   input: {
     documentId: typeof DOCUMENT_ID;
     revisionId: typeof REVISION_ID;
@@ -3518,20 +3517,56 @@ async function buildSketchRecord(
     settings: WorkspaceSnapshot["document"]["settings"];
   },
 ): Promise<SketchRecord> {
-  const evaluation = evaluateMockSketchDefinition({
+  const plane = createSketchReferenceFrame({
+    planeTarget: {
+      kind: "construction",
+      constructionId: "construction_plane-xy",
+    },
+    planeKey: "xy",
+  });
+  const tolerances = createDocumentSolverTolerances(input.settings);
+  const base = {
+    contractVersion: CONTRACT_VERSION,
+    solverSchemaVersion: SOLVER_SCHEMA_VERSION,
     documentId: input.documentId,
     revisionId: input.revisionId,
     sketchId: input.sketchId,
-    plane: createSketchReferenceFrame({
-      planeTarget: {
-        kind: "construction",
-        constructionId: "construction_plane-xy",
-      },
-      planeKey: "xy",
-    }),
-    tolerances: createDocumentSolverTolerances(input.settings),
+  } as const;
+  const requestId = "request_mock-snapshot-bootstrap";
+  const projection = await solverAdapter.projectExternalReferences({
+    ...base,
+    requestId: `${requestId}:project` as RequestId,
+    plane,
+    tolerances,
+    references: input.definition.references.map((reference) => ({
+      referenceId: reference.referenceId,
+      reference,
+    })),
+  });
+  const validation = await solverAdapter.validateSketch({
+    ...base,
+    requestId: `${requestId}:validate` as RequestId,
+    plane,
+    tolerances,
     definition: input.definition,
-    requestId: "request_mock-snapshot-bootstrap",
+    projectedReferences: projection.projectedReferences,
+  });
+  const solved = await solverAdapter.solveSketch({
+    ...base,
+    requestId: `${requestId}:solve` as RequestId,
+    plane,
+    tolerances,
+    partialSolvePolicy: "bestEffort",
+    definition: input.definition,
+    projectedReferences: projection.projectedReferences,
+  });
+  const regions = await solverAdapter.deriveSketchRegions({
+    ...base,
+    requestId: `${requestId}:regions` as RequestId,
+    solvedSnapshot: solved.solvedSnapshot,
+    definition: input.definition,
+    projectedReferences: projection.projectedReferences,
+    modelingTolerance: input.settings.modelingTolerance,
   });
 
   return {
@@ -3547,17 +3582,17 @@ async function buildSketchRecord(
       constructionId: "construction_plane-xy",
     },
     definition: input.definition,
-    solvedSnapshot: evaluation.solve.solvedSnapshot,
+    solvedSnapshot: solved.solvedSnapshot,
     derivedValidity: deriveSketchValidity({
-      solvedSnapshot: evaluation.solve.solvedSnapshot,
+      solvedSnapshot: solved.solvedSnapshot,
       diagnostics: mergeSketchSolveDiagnostics(
-        evaluation.validation.diagnostics,
-        evaluation.solve.diagnostics,
-        evaluation.regions.diagnostics,
+        validation.diagnostics,
+        solved.diagnostics,
+        regions.diagnostics,
       ),
     }),
-    projectedReferences: evaluation.projectedReferences,
-    regions: evaluation.validation.isValid ? evaluation.regions.regions : [],
+    projectedReferences: projection.projectedReferences,
+    regions: validation.isValid ? regions.regions : [],
   };
 }
 
@@ -3672,6 +3707,7 @@ async function rebuildSketchesForDocumentVariables(input: {
       solvedSnapshot: solved.solvedSnapshot,
       definition: resolvedDefinition.definition,
       projectedReferences: projection.projectedReferences,
+      modelingTolerance: input.snapshot.document.settings.modelingTolerance,
     });
 
     const sketchDiagnostics = [
@@ -5051,7 +5087,8 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
   }) {
     this.ownsSolverAdapter = options?.solverAdapter === undefined;
     this.solverAdapter =
-      options?.solverAdapter ?? new MockSketchSolverAdapter();
+      options?.solverAdapter ??
+      new MockSketchSolverAdapter({ neutralCurveQueries: this });
     this.assetResolver = options?.assetResolver;
   }
 
@@ -5060,7 +5097,11 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
     revisionId: RevisionId,
   ) {
     return this.ownsSolverAdapter
-      ? new MockSketchSolverAdapter({ documentId, revisionId })
+      ? new MockSketchSolverAdapter({
+          documentId,
+          revisionId,
+          neutralCurveQueries: this,
+        })
       : this.solverAdapter;
   }
 
@@ -5081,7 +5122,15 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
 
   private async getSnapshot() {
     if (!this.snapshotPromise) {
-      this.snapshotPromise = buildSnapshot(this.solverAdapter);
+      // The bootstrap document is always the mock workspace at its initial
+      // revision, whatever solver a spec injected for later operations.
+      this.snapshotPromise = buildSnapshot(
+        new MockSketchSolverAdapter({
+          documentId: DOCUMENT_ID,
+          revisionId: REVISION_ID,
+          neutralCurveQueries: this,
+        }),
+      );
     }
 
     return this.snapshotPromise;
@@ -5203,6 +5252,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
                 solvedSnapshot: solve.solvedSnapshot,
                 definition: resolvedDefinition.definition,
                 projectedReferences: projected.projectedReferences,
+                modelingTolerance: document.settings.modelingTolerance,
               });
               return {
                 projectedReferences: projected.projectedReferences,
@@ -5965,6 +6015,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
         solvedSnapshot: solved.solvedSnapshot,
         definition: resolvedDefinition.definition,
         projectedReferences,
+        modelingTolerance: snapshot.document.settings.modelingTolerance,
       });
       solvedSnapshot = solved.solvedSnapshot;
       derivedRegions = regions.regions;

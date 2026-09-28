@@ -91,7 +91,10 @@ import type {
 } from "@/contracts/solver/schema";
 import type { DurableRef } from "@/contracts/shared/references";
 import type { RegionId } from "@/contracts/shared/ids";
-import { requireSketchDefinition } from "@/contracts/sketch/runtime-schema";
+import {
+  requireSketchDefinition,
+  validateSolverRegionRecord,
+} from "@/contracts/sketch/runtime-schema";
 import type { SketchPlaneDefinition } from "@/contracts/shared/sketch-plane";
 import {
   normalizeConstraintDefinitionCore,
@@ -3465,155 +3468,13 @@ export function normalizeRegionRecords(value: unknown): RegionRecord[] {
   }
 
   return value.map((region) => {
-    if (
-      !isRecord(region) ||
-      !isString(region.regionId) ||
-      !isString(region.label) ||
-      !isRecord(region.target) ||
-      !isRecord(region.sourceSketch) ||
-      !Array.isArray(region.loops) ||
-      typeof region.isClosed !== "boolean"
-    ) {
-      throw new Error("Invalid region record payload.");
+    const validated = validateSolverRegionRecord(region);
+    if (!validated.success) {
+      throw new Error(
+        `Invalid region record payload: ${validated.issues[0]?.message ?? "unknown issue"}`,
+      );
     }
-
-    return {
-      ...normalizeOwnership(region),
-      regionId: assertRegionId(region.regionId),
-      label: region.label,
-      target: assertPrimitiveRef(region.target) as RegionRecord["target"],
-      sourceSketch: assertPrimitiveRef(
-        region.sourceSketch,
-      ) as RegionRecord["sourceSketch"],
-      loops: region.loops.map((loop) => {
-        if (
-          !isRecord(loop) ||
-          !isString(loop.loopId) ||
-          (loop.role !== "outer" && loop.role !== "inner") ||
-          (loop.orientation !== "clockwise" &&
-            loop.orientation !== "counterClockwise") ||
-          !Array.isArray(loop.segments) ||
-          !Array.isArray(loop.boundaryPointIds) ||
-          typeof loop.isClosed !== "boolean"
-        ) {
-          throw new Error("Invalid region loop payload.");
-        }
-
-        return {
-          loopId: loop.loopId as RegionRecord["loops"][number]["loopId"],
-          role: loop.role,
-          orientation: loop.orientation,
-          segments: loop.segments.map((segment) => {
-            if (
-              !isRecord(segment) ||
-              !isRecord(segment.source) ||
-              !isString(segment.source.kind) ||
-              (segment.startPosition === undefined) !==
-                (segment.endPosition === undefined)
-            ) {
-              throw new Error("Invalid region boundary segment payload.");
-            }
-
-            return {
-              source:
-                segment.source.kind === "entity"
-                  ? {
-                      kind: "entity" as const,
-                      entityId: assertSketchEntityId(segment.source.entityId),
-                    }
-                  : segment.source.kind === "projectedGeometry"
-                    ? {
-                        kind: "projectedGeometry" as const,
-                        reference: {
-                          kind:
-                            isRecord(segment.source.reference) &&
-                            (segment.source.reference.kind ===
-                              "projectedPoint" ||
-                              segment.source.reference.kind ===
-                                "projectedLineSegment" ||
-                              segment.source.reference.kind ===
-                                "projectedCircle" ||
-                              segment.source.reference.kind ===
-                                "projectedArc" ||
-                              segment.source.reference.kind ===
-                                "projectedSpline")
-                              ? segment.source.reference.kind
-                              : undefined,
-                          referenceId:
-                            isRecord(segment.source.reference) &&
-                            isString(segment.source.reference.referenceId)
-                              ? (segment.source.reference
-                                  .referenceId as import("@/contracts/shared/ids").ReferenceId)
-                              : (() => {
-                                  throw new Error(
-                                    "Invalid projected geometry reference ID payload.",
-                                  );
-                                })(),
-                          geometryId:
-                            isRecord(segment.source.reference) &&
-                            isString(segment.source.reference.geometryId)
-                              ? (segment.source.reference
-                                  .geometryId as import("@/contracts/shared/ids").ProjectedGeometryId)
-                              : (() => {
-                                  throw new Error(
-                                    "Invalid projected geometry geometry ID payload.",
-                                  );
-                                })(),
-                        },
-                      }
-                    : (() => {
-                        throw new Error(
-                          "Invalid region boundary source payload.",
-                        );
-                      })(),
-              startPointId:
-                segment.startPointId === null
-                  ? null
-                  : assertSketchPointId(segment.startPointId),
-              endPointId:
-                segment.endPointId === null
-                  ? null
-                  : assertSketchPointId(segment.endPointId),
-              traversalDirection:
-                segment.traversalDirection === "reverse"
-                  ? ("reverse" as const)
-                  : undefined,
-              sourceSegmentOrdinal:
-                segment.sourceSegmentOrdinal === undefined
-                  ? undefined
-                  : typeof segment.sourceSegmentOrdinal === "number" &&
-                      Number.isInteger(segment.sourceSegmentOrdinal) &&
-                      segment.sourceSegmentOrdinal >= 0
-                    ? segment.sourceSegmentOrdinal
-                    : (() => {
-                        throw new Error(
-                          "Invalid region boundary source segment ordinal payload.",
-                        );
-                      })(),
-              startPosition:
-                segment.startPosition === undefined
-                  ? undefined
-                  : normalizePoint2D(
-                      segment.startPosition,
-                      "Invalid region boundary start position payload.",
-                    ),
-              endPosition:
-                segment.endPosition === undefined
-                  ? undefined
-                  : normalizePoint2D(
-                      segment.endPosition,
-                      "Invalid region boundary end position payload.",
-                    ),
-            };
-          }),
-          boundaryPointIds: loop.boundaryPointIds.map((pointId) =>
-            assertSketchPointId(pointId),
-          ),
-          isClosed: loop.isClosed,
-        };
-      }),
-      isClosed: region.isClosed,
-    };
+    return validated.data;
   });
 }
 

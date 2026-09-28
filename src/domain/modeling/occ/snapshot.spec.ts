@@ -1,3 +1,5 @@
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { lineLoopSegmentsForTest } from "@/contracts/sketch/region-record.fixtures";
 import { test, expect } from "vitest";
 import type { ModelingKernelAdapter } from "@/contracts/modeling/adapter";
 import {
@@ -53,6 +55,7 @@ import {
 } from "@/domain/modeling/opencascade-kernel-seed";
 
 const regionSolver = new SketchConstraintSolverAdapter({
+  neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
   documentId: OCC_KERNEL_DOCUMENT_ID,
   revisionId: OCC_KERNEL_INITIAL_REVISION_ID,
 });
@@ -231,6 +234,7 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
       ownerSketchId: sketchId,
       ownerBodyId: null,
       regionId,
+      signature: `hand-built ${regionId}`,
       label: regionId,
       target: { kind: "region", sketchId, regionId },
       sourceSketch: { kind: "sketch", sketchId },
@@ -239,11 +243,13 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
           loopId: `region_loop_${sketchId}_outer` as const,
           role: "outer",
           orientation: "counterClockwise",
-          segments: entities.map((entity, index) => ({
-            source: { kind: "entity" as const, entityId: entity.entityId },
-            startPointId: points[index]!.id,
-            endPointId: points[(index + 1) % points.length]!.id,
-          })),
+          segments: lineLoopSegmentsForTest(
+            points.map((point) => ({
+              pointId: point.id,
+              position: point.position,
+            })),
+            entities.map((entity) => entity.entityId),
+          ),
           boundaryPointIds: points.map((point) => point.id),
           isClosed: true,
         },
@@ -1125,6 +1131,7 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
         diagnostics: [],
       },
       projectedReferences: [],
+      modelingTolerance: 1e-3,
     });
 
     const state = createOccAuthoringState(oc, {
@@ -1414,6 +1421,7 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
       ownerSketchId: sketchId,
       ownerBodyId: null,
       regionId,
+      signature: `hand-built ${regionId}`,
       label: regionId,
       target: { kind: "region", sketchId, regionId },
       sourceSketch: { kind: "sketch", sketchId },
@@ -1424,16 +1432,22 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
           orientation: "counterClockwise",
           segments: [
             {
-              source: {
-                kind: "projectedGeometry",
-                reference: {
-                  kind: "projectedLineSegment",
-                  referenceId,
-                  geometryId,
+              branch: {
+                source: {
+                  kind: "projectedGeometry",
+                  reference: {
+                    kind: "projectedLineSegment",
+                    referenceId,
+                    geometryId,
+                  },
                 },
+                spanId: "whole",
               },
-              startPointId: null,
-              endPointId: null,
+              sourceParameterInterval: [0, 1],
+              traversalDirection: "forward",
+              start: null,
+              end: null,
+              sourceSegmentOrdinal: 0,
             },
           ],
           boundaryPointIds: [],

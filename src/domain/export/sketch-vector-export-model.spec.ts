@@ -1,5 +1,6 @@
 import { test, expect } from "vitest";
 
+import { lineLoopSegmentsForTest } from "@/contracts/sketch/region-record.fixtures";
 import type { SketchVectorExportModel } from "@/contracts/export/sketch-vector";
 import type { SketchSnapshotRecord } from "@/contracts/modeling/schema";
 import type {
@@ -345,6 +346,7 @@ function createRegion(): RegionRecord {
     ownerSketchId: "sketch_profile",
     ownerBodyId: null,
     regionId: "region_square",
+    signature: "hand-built square",
     label: "Square region",
     target: {
       kind: "region",
@@ -360,32 +362,15 @@ function createRegion(): RegionRecord {
         orientation: "counterClockwise",
         isClosed: true,
         boundaryPointIds: ["point_a", "point_b", "point_c", "point_d"],
-        segments: [
-          {
-            source: { kind: "entity", entityId: "entity_ab" },
-            startPointId: "point_a",
-            endPointId: "point_b",
-            traversalDirection: "forward",
-          },
-          {
-            source: { kind: "entity", entityId: "entity_bc" },
-            startPointId: "point_b",
-            endPointId: "point_c",
-            traversalDirection: "forward",
-          },
-          {
-            source: { kind: "entity", entityId: "entity_cd" },
-            startPointId: "point_c",
-            endPointId: "point_d",
-            traversalDirection: "forward",
-          },
-          {
-            source: { kind: "entity", entityId: "entity_da" },
-            startPointId: "point_d",
-            endPointId: "point_a",
-            traversalDirection: "forward",
-          },
-        ],
+        segments: lineLoopSegmentsForTest(
+          [
+            { pointId: "point_a", position: [0, 0] },
+            { pointId: "point_b", position: [5.19, 0] },
+            { pointId: "point_c", position: [5.19, 9.48] },
+            { pointId: "point_d", position: [0, 9.48] },
+          ] as never,
+          ["entity_ab", "entity_bc", "entity_cd", "entity_da"] as never,
+        ),
       },
     ],
   };

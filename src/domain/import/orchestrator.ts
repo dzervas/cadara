@@ -160,7 +160,7 @@ function mediaTypeForGeometryFormat(format: GeometryAssetFormat) {
 }
 
 export function createImportCapabilities(
-  _modelingService: ModelingService,
+  modelingService: ModelingService,
   snapshot: WorkspaceSnapshot,
   options: {
     history?: ImportHistoryProbeCapabilities;
@@ -239,6 +239,10 @@ export function createImportCapabilities(
       async reconstructMeshToBrep() {
         throw new Error("Mesh-to-B-rep reconstruction is not implemented yet.");
       },
+      neutralCurveQueries: modelingService.neutralCurveQueries,
+      modelingTolerance: snapshot.document.settings.modelingTolerance,
+      angularToleranceRadians:
+        snapshot.document.settings.angularToleranceRadians,
     },
     sketch: {
       async convertVectorToSketch() {

@@ -1,3 +1,4 @@
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { expect, test } from "vitest";
 import { createAuthoredModelDocumentFromSnapshot } from "@/contracts/modeling/authored-document";
 import type {
@@ -144,6 +145,7 @@ function makeToleranceProbeDefinition(): SketchDefinition {
  */
 async function openToleranceHarness(settings?: typeof DOCUMENT_SETTINGS) {
   const solverAdapter = new SketchConstraintSolverAdapter({
+    neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
     documentId: "doc_workspace",
     revisionId: null,
   });
@@ -191,6 +193,7 @@ async function openToleranceHarness(settings?: typeof DOCUMENT_SETTINGS) {
               definition: basis.definition,
               solvedSnapshot: basis.solvedSnapshot,
               projectedReferences: basis.projectedReferences,
+              modelingTolerance: basis.modelingTolerance,
             })
             .then((derived) =>
               publishSketchLiveRegions(

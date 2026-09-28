@@ -9,12 +9,16 @@ import {
 
 test.setTimeout(90_000);
 
-test("persisted legacy region labels resolve after canonical region rebuild", async ({
+// T09 U5: region ids are the SHA-256 identity of the canonical boundary
+// signature, and the former hash-suffix fallback is deleted. A persisted
+// pre-canonical region label no longer resolves; the feature asks for
+// reselection instead of silently binding to a lookalike region.
+test("persisted legacy region labels require reselection after canonical region identity", async ({
   page,
 }) => {
   const canonicalRegionId = FEATURE_FIXTURE.regionId;
-  const stableHash = canonicalRegionId.slice(canonicalRegionId.lastIndexOf("-"));
-  const legacyRegionId = `region_primary-sketch_entity_legacy_start${stableHash}`;
+  const legacyRegionId =
+    "region_primary-sketch_entity_legacy_start-3h5wtq1po7fut";
   const history = JSON.parse(
     JSON.stringify(createBaseExtrudeOperationHistory()).replaceAll(
       canonicalRegionId,
@@ -25,8 +29,11 @@ test("persisted legacy region labels resolve after canonical region rebuild", as
 
   await workbench.openWithOperationHistory(history);
 
-  await workbench.expectBodyPresent(FEATURE_FIXTURE.body);
   await expect(
-    page.getByRole("alert").filter({ hasText: /does not resolve on sketch/i }),
-  ).toHaveCount(0);
+    page.getByRole("treeitem", {
+      name: /Repair Extrude 1\. Edit Extrude 1 and choose a valid profile selection\./,
+    }),
+    "The feature whose legacy region no longer resolves asks for reselection.",
+  ).toBeVisible({ timeout: 30_000 });
+  await workbench.expectBodyAbsent(FEATURE_FIXTURE.body);
 });

@@ -1,3 +1,4 @@
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { test, expect } from "vitest";
 
 import type { AuthoredSketchRecord } from "@/contracts/modeling/authored-document";
@@ -9,7 +10,7 @@ import {
 } from "@/contracts/sketch/solver-benchmark";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 
-const sketchSolver = new SketchConstraintSolverAdapter(SKETCH_SOLVER_BENCHMARK_DOCUMENT);
+const sketchSolver = new SketchConstraintSolverAdapter({ ...SKETCH_SOLVER_BENCHMARK_DOCUMENT, neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest() });
 
 test("src/contracts/sketch/solver-benchmark.spec.ts", async () => {
   function assertAuthoredSketchRecord(sketch: AuthoredSketchRecord) {

@@ -1,3 +1,4 @@
+import type { NeutralCurveQueryCapability } from "@/contracts/modeling/neutral-curve-query";
 import type {
   DocumentExportRequest,
   DocumentExportResult,
@@ -41,6 +42,8 @@ import type { OccNativeTopologyWorkerResult } from "@/domain/modeling/occ/worker
 export interface ModelingService {
   readonly currentDocumentId: DocumentId;
   readonly sketchSolver: SketchSolverService | null;
+  /** The kernel's neutral curve queries, for callers that build their own region solver (import verification). */
+  readonly neutralCurveQueries: NeutralCurveQueryCapability;
   dispose(): void;
   subscribeToDocumentChanges(
     listener: (event: ModelingServiceDocumentChangeEvent) => void,

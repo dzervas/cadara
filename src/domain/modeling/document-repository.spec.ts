@@ -95,7 +95,6 @@ for (const [name, make] of [
       label: "Retained provenance",
       plane,
       definition: createNewSketchSession(plane, OCC_KERNEL_SETTINGS).definition,
-      regionSlots: [],
     };
     const document = {
       ...seed,
@@ -124,9 +123,9 @@ for (const [name, make] of [
     const undo = await repository.undoDurableHistory(seed.documentId);
     expect(
       undo?.ok &&
-        undo.document.sketches.find((s) => s.sketchId === sketch.sketchId)
-          ?.regionSlots,
-    ).toEqual([]);
+        undo.document.sketches.find((s) => s.sketchId === sketch.sketchId),
+      "Undoing the deletion restores the sketch with its authored fields.",
+    ).toEqual(sketch);
   });
   test(`${name}: asset errors do not create document actions`, async () => {
     const seed = await createSeedAuthoredModelDocument(),

@@ -1,3 +1,5 @@
+import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { expect, test } from "vitest";
 
 import type { OnshapeProfileEvidence } from "@/contracts/import/onshape-capture-bundle";
@@ -11,10 +13,15 @@ import {
 } from "@/domain/import/onshape/profile-resolver";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 
-const sketchSolver = new SketchConstraintSolverAdapter({
-  documentId: IMPORT_VERIFICATION_DOCUMENT_ID,
-  revisionId: IMPORT_VERIFICATION_REVISION_ID,
-});
+const profileVerifier = {
+  sketchSolver: new SketchConstraintSolverAdapter({
+    neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+    documentId: IMPORT_VERIFICATION_DOCUMENT_ID,
+    revisionId: IMPORT_VERIFICATION_REVISION_ID,
+  }),
+  modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+  angularToleranceRadians: OCC_KERNEL_SETTINGS.angularToleranceRadians,
+};
 
 const frame = {
   tier: "parametric",
@@ -68,7 +75,7 @@ function resolve(input: {
   solved: OnshapeSolvedSketch[];
 }) {
   return resolveOnshapeSketchProfiles({
-    sketchSolver,
+    profileVerifier,
     profileParameter: input.parameter,
     consumerFeatureId: "E_PROFILE",
     featureLabel: "Profile consumer",
@@ -318,6 +325,106 @@ test("profile resolver verifies a witness in a line-circle cell", async () => {
   });
 });
 
+// Lane: logic (docs/testing.md). Seam: the resolver's exported boundary, with
+// a recording wrapper around the real verifier solver port. Import verification
+// solves the translated sketch, so a declared point-on-curve closing corner is
+// honoured exactly as the committed sketch's solve honours it (review B1).
+test("profile resolver closes a rectangle whose closing corner is a point-on-curve T-junction", async () => {
+  const regionResponses: Awaited<
+    ReturnType<typeof profileVerifier.sketchSolver.deriveSketchRegions>
+  >[] = [];
+  const recordingVerifier = {
+    ...profileVerifier,
+    sketchSolver: {
+      solveSketch: (
+        request: Parameters<typeof profileVerifier.sketchSolver.solveSketch>[0],
+      ) => profileVerifier.sketchSolver.solveSketch(request),
+      deriveSketchRegions: async (
+        request: Parameters<
+          typeof profileVerifier.sketchSolver.deriveSketchRegions
+        >[0],
+      ) => {
+        const response =
+          await profileVerifier.sketchSolver.deriveSketchRegions(request);
+        regionResponses.push(response);
+        return response;
+      },
+    },
+  };
+  const line = (
+    name: string,
+    start: [number, number, number],
+    end: [number, number, number],
+  ) => ({
+    entityId: name,
+    entityType: "lineSegment" as const,
+    onshapeEntityType: "skLineSegment",
+    isConstruction: false,
+    start3d: start,
+    end3d: end,
+  });
+  const coincident = (id: string, first: string, second: string) => ({
+    constraintType: "COINCIDENT",
+    entityId: id,
+    parameters: [
+      { parameterId: "localFirst", value: first, hasExternalQuery: false },
+      { parameterId: "localSecond", value: second, hasExternalQuery: false },
+    ],
+  });
+  // The bottom side overshoots the closing corner; the left side's end is
+  // declared on the bottom side's body (a T-junction), not a shared point. Its
+  // captured position carries a 2e-7 mm residual off the host, as captured
+  // Onshape geometry does, so only the declaration can close the corner.
+  const solved: OnshapeSolvedSketch = {
+    featureId: "S_T_CORNER",
+    entities: [
+      line("bottom", [-0.003, 0, 0], [0.01, 0, 0]),
+      line("right", [0.01, 0, 0], [0.01, 0.006, 0]),
+      line("top", [0.01, 0.006, 0], [0, 0.006, 0]),
+      line("left", [0, 0.006, 0], [0, 2e-10, 0]),
+    ],
+    constraints: [
+      coincident("c_br", "bottom.end", "right.start"),
+      coincident("c_rt", "right.end", "top.start"),
+      coincident("c_tl", "top.end", "left.start"),
+      coincident("c_lb", "left.end", "bottom"),
+    ],
+  };
+  const result = await resolveOnshapeSketchProfiles({
+    profileVerifier: recordingVerifier,
+    profileParameter: profileParameter("S_T_CORNER"),
+    consumerFeatureId: "E_PROFILE",
+    featureLabel: "Profile consumer",
+    featureKind: "extrude",
+    profileEvidence: [
+      {
+        consumingFeatureId: "E_PROFILE",
+        parameterId: "entities",
+        queryIndex: 0,
+        evaluatedAt: "historyPoint",
+        kind: "sketchRegionSet",
+        sourceSketchFeatureId: "S_T_CORNER",
+        filterInnerLoops: true,
+      },
+    ],
+    solvedSketchesByFeatureId: new Map([[solved.featureId, solved]]),
+    referencedSketchesByFeatureId: new Map([[solved.featureId, frame]]),
+  });
+
+  expect(
+    regionResponses.map((response) => ({
+      regions: response.regions.filter((region) => region.isClosed).length,
+      diagnostics: response.diagnostics.map((diagnostic) => diagnostic.code),
+    })),
+    "Verification derives the one rectangle region through the declared closing corner.",
+  ).toEqual([{ regions: 1, diagnostics: [] }]);
+  expect(result).toMatchObject({
+    tier: "resolved",
+    profiles: [{ kind: "sketchRegion", sketchFeatureId: "S_T_CORNER" }],
+  });
+  expect(result.tier === "resolved" && result.profiles).toHaveLength(1);
+});
+
 test("profile resolver ignores open lines that cross a standalone circle", async () => {
   const result = await resolve({
     parameter: profileParameter("S_OPEN_LINES"),
@@ -482,7 +589,7 @@ function resolveOpenCurves(input: {
   tier?: string;
 }) {
   return resolveOnshapeOpenSketchCurveProfiles({
-    sketchSolver,
+    profileVerifier,
     profileParameter: { parameterId: "surfaceEntities", queries: input.queries },
     featureKind: "surface extrude",
     featureLabel: "Extrude 4",

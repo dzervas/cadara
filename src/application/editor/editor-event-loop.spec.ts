@@ -1,3 +1,4 @@
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { test, expect } from "vitest";
 
 import type {
@@ -28,6 +29,7 @@ function createRuntime(
   snapshot: Awaited<ReturnType<typeof createSeedDocumentSnapshot>>,
 ): EditorEffectRuntime {
   const solver = new SketchConstraintSolverAdapter({
+    neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
     documentId: snapshot.document.documentId,
     revisionId: null,
   });
@@ -47,6 +49,7 @@ function createRuntime(
         definition: input.basis.definition,
         solvedSnapshot: input.basis.solvedSnapshot,
         projectedReferences: input.basis.projectedReferences,
+        modelingTolerance: input.basis.modelingTolerance,
       });
     },
     async commitSketch() {
@@ -873,20 +876,27 @@ test("EditorEventLoop derives live regions in the background, discards stale gen
     opened.session.liveSolve!.definition,
   );
 
-  const dimension = opened.session.definition.dimensions[0]!;
-  const movePlacement = (point: readonly [number, number]) =>
+  // Geometry edits establish new live solve bases. (Dimension label moves no
+  // longer do: placements never affect regions, T09b review A6(a).)
+  const point = opened.session.definition.points[0]!;
+  const movePoint = (offset: number) => {
+    const current = currentSketch().session.definition.points.find(
+      (candidate) => candidate.pointId === point.pointId,
+    )!;
     loop.dispatch({
-      type: "sketch.toolPatched",
-      patch: {
-        intent: "setDimensionAnnotationPlacement",
-        dimensionId: dimension.dimensionId,
-        point,
-        gesturePhase: "move",
-        clientPoint: point,
-      },
+      type: "sketch.geometryDragStarted",
+      target: current.target,
+      point: current.position,
     });
-  movePlacement([20, 10]);
-  movePlacement([30, 15]);
+    const to: [number, number] = [
+      current.position[0] + offset,
+      current.position[1],
+    ];
+    loop.dispatch({ type: "sketch.geometryDragMoved", point: to });
+    loop.dispatch({ type: "sketch.geometryDragEnded", point: to });
+  };
+  movePoint(0.25);
+  movePoint(0.25);
   const latestGeneration = currentSketch().session.liveRegions.generation;
   expect(latestGeneration).toBeGreaterThan(
     opened.session.liveRegions.generation,
@@ -926,7 +936,7 @@ test("EditorEventLoop derives live regions in the background, discards stale gen
   ).toEqual(["latest generation"]);
   expect(currentSketch().pendingRegionRequest).toBe(null);
 
-  movePlacement([40, 20]);
+  movePoint(0.25);
   await waitForCondition(() => derivations.length === 3);
   loop.dispatch({ type: "tool.activated", toolId: "finishSketch" });
   await waitForCondition(() => commits.length === 1);

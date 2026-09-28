@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 
 import type { DocumentRepository } from "@/domain/modeling/document-repository";
 import { createMemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";
@@ -99,7 +99,10 @@ test("disposing during initialization unsubscribes once and never resubscribes",
   expect(counted.unsubscribeCalls()).toBe(1);
 
   releaseLoad();
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  // The mock bootstrap derives region ids through async SHA-256 (T09 U5), so
+  // initialization settles after more than one macrotask; the deferred
+  // dispose runs exactly once when it does.
+  await vi.waitFor(() => expect(adapter.disposeCalls).toBe(1));
   expect(counted.subscribeCalls()).toBe(1);
   expect(counted.unsubscribeCalls()).toBe(1);
   expect(adapter.disposeCalls).toBe(1);

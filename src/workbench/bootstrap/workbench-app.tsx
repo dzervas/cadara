@@ -130,44 +130,42 @@ export function WorkbenchApp({
       runtimeExtensionRegistries.sketchSpecialModes,
     ],
   );
-  const modelingService = useMemo(
-    () =>
-      createInstrumentedModelingService(
-        createModelingService(
-          createKernelAdapter(tabsState.activeDocumentId, performanceTelemetry),
-          {
-            currentDocumentId: tabsState.activeDocumentId,
-            sketchSolver: createInstrumentedSketchSolverAdapter(
-              new SketchConstraintSolverAdapter({
-                documentId: tabsState.activeDocumentId,
-                revisionId: null,
-              }),
-              performanceTelemetry,
-            ),
-            exportProviders: runtimeExtensionRegistries.exportProviders,
-            operationHistoryStore:
-              typeof window === "undefined"
-                ? null
-                : createLocalStorageOperationHistoryStore(
-                    window.localStorage,
-                    createWorkbenchOperationHistoryKey(
-                      tabsState.activeDocumentId,
-                    ),
-                  ),
-            documentRepositoryPersistence: "background",
-            documentRepository,
-          },
-        ),
-        performanceTelemetry,
-      ),
-    [
-      createKernelAdapter,
-      documentRepository,
-      performanceTelemetry,
-      runtimeExtensionRegistries.exportProviders,
+  const modelingService = useMemo(() => {
+    const kernelAdapter = createKernelAdapter(
       tabsState.activeDocumentId,
-    ],
-  );
+      performanceTelemetry,
+    );
+    return createInstrumentedModelingService(
+      createModelingService(kernelAdapter, {
+        currentDocumentId: tabsState.activeDocumentId,
+        sketchSolver: createInstrumentedSketchSolverAdapter(
+          new SketchConstraintSolverAdapter({
+            documentId: tabsState.activeDocumentId,
+            revisionId: null,
+            neutralCurveQueries: kernelAdapter,
+          }),
+          performanceTelemetry,
+        ),
+        exportProviders: runtimeExtensionRegistries.exportProviders,
+        operationHistoryStore:
+          typeof window === "undefined"
+            ? null
+            : createLocalStorageOperationHistoryStore(
+                window.localStorage,
+                createWorkbenchOperationHistoryKey(tabsState.activeDocumentId),
+              ),
+        documentRepositoryPersistence: "background",
+        documentRepository,
+      }),
+      performanceTelemetry,
+    );
+  }, [
+    createKernelAdapter,
+    documentRepository,
+    performanceTelemetry,
+    runtimeExtensionRegistries.exportProviders,
+    tabsState.activeDocumentId,
+  ]);
   const durableHistory = useMemo(
     () =>
       createDurableHistoryService({

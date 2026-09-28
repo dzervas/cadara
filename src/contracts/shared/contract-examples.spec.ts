@@ -11,6 +11,7 @@ import type {
 } from "@/contracts/modeling/schema";
 import type { RenderExport } from "@/contracts/render/schema";
 import type {
+  DeriveSketchRegionsResponse,
   ProjectSketchExternalReferencesRequest,
   SolveSketchResponse,
   SolveSketchRequest,
@@ -18,6 +19,7 @@ import type {
 import {
   SOLVED_SKETCH_SCHEMA_VERSION,
   SKETCH_SCHEMA_VERSION,
+  type RegionBoundaryVertex,
   type SketchDefinition,
 } from "@/contracts/sketch/schema";
 import {
@@ -200,7 +202,6 @@ test("src/contracts/shared/contract-examples.spec.ts", async () => {
     partialSolvePolicy: "bestEffort",
     definition: sketchDefinition,
     projectedReferences: [],
-    includeRegions: true,
   };
 
   const solveSketchResponse: SolveSketchResponse = {
@@ -288,8 +289,29 @@ test("src/contracts/shared/contract-examples.spec.ts", async () => {
       dimensionStatuses: [],
       diagnostics: [],
     },
-    regionResult: {
-      diagnostics: [],
+    diagnostics: [],
+  };
+
+  const vertex = (
+    pointId: `sketch_point_${string}`,
+    position: [number, number],
+  ): RegionBoundaryVertex => ({
+    kind: "declaredJoin",
+    key: JSON.stringify(["j", [`p:${pointId}`]]),
+    pointIds: [pointId],
+    portPointId: pointId,
+    position,
+    ballRadius: 5e-4,
+  });
+
+  const deriveSketchRegionsResponse: DeriveSketchRegionsResponse = {
+    contractVersion: CONTRACT_VERSION,
+    solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+    requestId: "request_regions_profile",
+    documentId: solveSketchRequest.documentId,
+    revisionId: solveSketchRequest.revisionId,
+    sketchId: solveSketchRequest.sketchId,
+    diagnostics: [],
       regions: [
         {
           ownerDocumentId: "doc_workspace",
@@ -298,6 +320,7 @@ test("src/contracts/shared/contract-examples.spec.ts", async () => {
           ownerSketchId: "sketch_profile",
           ownerBodyId: null,
           regionId: "region_outer",
+          signature: "example outer profile signature",
           label: "Outer profile",
           target: {
             kind: "region",
@@ -315,24 +338,48 @@ test("src/contracts/shared/contract-examples.spec.ts", async () => {
               orientation: "counterClockwise",
               segments: [
                 {
-                  source: { kind: "entity", entityId: "sketch_entity_bottom" },
-                  startPointId: "sketch_point_a",
-                  endPointId: "sketch_point_b",
+                  branch: {
+                    source: { kind: "entity", entityId: "sketch_entity_bottom" },
+                    spanId: "whole",
+                  },
+                  sourceParameterInterval: [0, 1],
+                  traversalDirection: "forward",
+                  start: vertex("sketch_point_a", [0, 0]),
+                  end: vertex("sketch_point_b", [4, 0]),
+                  sourceSegmentOrdinal: 0,
                 },
                 {
-                  source: { kind: "entity", entityId: "sketch_entity_right" },
-                  startPointId: "sketch_point_b",
-                  endPointId: "sketch_point_c",
+                  branch: {
+                    source: { kind: "entity", entityId: "sketch_entity_right" },
+                    spanId: "whole",
+                  },
+                  sourceParameterInterval: [0, 1],
+                  traversalDirection: "forward",
+                  start: vertex("sketch_point_b", [4, 0]),
+                  end: vertex("sketch_point_c", [4, 3]),
+                  sourceSegmentOrdinal: 0,
                 },
                 {
-                  source: { kind: "entity", entityId: "sketch_entity_top" },
-                  startPointId: "sketch_point_c",
-                  endPointId: "sketch_point_d",
+                  branch: {
+                    source: { kind: "entity", entityId: "sketch_entity_top" },
+                    spanId: "whole",
+                  },
+                  sourceParameterInterval: [0, 1],
+                  traversalDirection: "forward",
+                  start: vertex("sketch_point_c", [4, 3]),
+                  end: vertex("sketch_point_d", [0, 3]),
+                  sourceSegmentOrdinal: 0,
                 },
                 {
-                  source: { kind: "entity", entityId: "sketch_entity_left" },
-                  startPointId: "sketch_point_d",
-                  endPointId: "sketch_point_a",
+                  branch: {
+                    source: { kind: "entity", entityId: "sketch_entity_left" },
+                    spanId: "whole",
+                  },
+                  sourceParameterInterval: [0, 1],
+                  traversalDirection: "forward",
+                  start: vertex("sketch_point_d", [0, 3]),
+                  end: vertex("sketch_point_a", [0, 0]),
+                  sourceSegmentOrdinal: 0,
                 },
               ],
               boundaryPointIds: [
@@ -347,8 +394,6 @@ test("src/contracts/shared/contract-examples.spec.ts", async () => {
           isClosed: true,
         },
       ],
-    },
-    diagnostics: [],
   };
 
   const createExtrudeRequest: CreateFeatureRequest = {
@@ -651,9 +696,9 @@ test("src/contracts/shared/contract-examples.spec.ts", async () => {
       "Solve-sketch response must echo the request correlation ID.",
     ).toBe(solveSketchRequest.requestId);
     expect(
-      solveSketchResponse.regionResult?.regions[0]?.ownerRevisionId,
-      "Solve-sketch optional region result must carry explicit ownership at the solved revision.",
-    ).toBe(solveSketchResponse.revisionId);
+      deriveSketchRegionsResponse.regions[0]?.ownerRevisionId,
+      "Derived region examples must carry explicit ownership at the solved revision.",
+    ).toBe(deriveSketchRegionsResponse.revisionId);
   }
 
   function testCreateExtrudeExampleUsesTypedProfileRef() {

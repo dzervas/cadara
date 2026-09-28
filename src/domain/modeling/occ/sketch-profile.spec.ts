@@ -3,10 +3,19 @@ import {
   SOLVED_SKETCH_SCHEMA_VERSION,
   SKETCH_SCHEMA_VERSION,
   type RegionBoundarySegmentRecord,
+  type RegionBoundarySource,
   type RegionRecord,
   type SketchDefinition,
   type SketchRecord,
 } from "@/contracts/sketch/schema";
+import { createSketchArrangementDeriver } from "@/contracts/sketch/region-extraction";
+import {
+  addRectangle,
+  FIXTURE_TOLERANCE,
+  makeSketchFixture,
+  type SketchFixture,
+} from "@/contracts/sketch/region-extraction.fixtures";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import type {
   ConstructionId,
   ProjectedGeometryId,
@@ -19,7 +28,10 @@ import type {
 } from "@/contracts/shared/ids";
 import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
 import type { SketchPlaneDefinition } from "@/contracts/shared/sketch-plane";
-import { buildRegionProfileFace } from "@/domain/modeling/occ/sketch-profile";
+import {
+  buildRegionProfileFace,
+  releaseBuiltSketchProfileFace,
+} from "@/domain/modeling/occ/sketch-profile";
 import { getDefaultOpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 
 test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
@@ -168,6 +180,7 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
       ownerSketchId: sketchId,
       ownerBodyId: null,
       regionId: regionId(name),
+      signature: `hand-built ${name}`,
       label: name,
       target: {
         kind: "region",
@@ -180,6 +193,75 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
       },
       loops,
       isClosed: true,
+    };
+  }
+
+  const deriver = createSketchArrangementDeriver(
+    createCertifiedNeutralCurveQueryCapabilityForTest(),
+  );
+
+  /** Profiles consume the arrangement owner's records (T09e cutover). */
+  async function deriveRegions(sketch: SketchRecord) {
+    const result = await deriver.derive({
+      documentId: "doc_workspace",
+      revisionId: "rev_0001",
+      sketchId: sketch.sketchId,
+      definition: sketch.definition,
+      solvedSnapshot: sketch.solvedSnapshot,
+      projectedReferences: sketch.projectedReferences ?? [],
+      modelingTolerance: 1e-3,
+    });
+    return result.regions;
+  }
+
+  function boundarySources(region: RegionRecord) {
+    return [
+      ...new Set(
+        region.loops.flatMap((loop) =>
+          loop.segments.map((segment) =>
+            segment.branch.source.kind === "entity"
+              ? segment.branch.source.entityId
+              : `projected:${segment.branch.source.reference.geometryId}`,
+          ),
+        ),
+      ),
+    ].sort();
+  }
+
+  function regionBoundedBy(regions: readonly RegionRecord[], sources: string[]) {
+    const expected = [...sources].sort();
+    const matches = regions.filter(
+      (region) =>
+        JSON.stringify(boundarySources(region)) === JSON.stringify(expected),
+    );
+    expect(matches, `exactly one region is bounded by ${expected}`).toHaveLength(
+      1,
+    );
+    return matches[0]!;
+  }
+
+  /** Loop records start at an arbitrary vertex; traversal order is cyclic. */
+  function expectCyclic<T>(actual: readonly T[], expected: readonly T[], message: string) {
+    const start = actual.indexOf(expected[0]!);
+    expect(
+      start >= 0
+        ? [...actual.slice(start), ...actual.slice(0, start)]
+        : actual,
+      message,
+    ).toEqual(expected);
+  }
+
+  /** A hand-built closed-branch record, for inputs the owner never publishes. */
+  function closedBranchSegment(
+    source: RegionBoundarySource,
+  ): RegionBoundarySegmentRecord {
+    return {
+      branch: { source, spanId: "whole" },
+      sourceParameterInterval: [0, 2 * Math.PI],
+      traversalDirection: "forward",
+      start: null,
+      end: null,
+      sourceSegmentOrdinal: 0,
     };
   }
 
@@ -274,37 +356,8 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
         endPosition: [0, 0],
       },
     ]);
-    const region = createRegion(sketchId, "rectangle", [
-      {
-        loopId: loopId("rectangle_outer"),
-        role: "outer",
-        orientation: "counterClockwise",
-        segments: [
-          {
-            source: { kind: "entity", entityId: entityId("bottom") },
-            startPointId: pointId("bottom_left"),
-            endPointId: pointId("bottom_right"),
-          },
-          {
-            source: { kind: "entity", entityId: entityId("right") },
-            startPointId: pointId("bottom_right"),
-            endPointId: pointId("top_right"),
-          },
-          {
-            source: { kind: "entity", entityId: entityId("top") },
-            startPointId: pointId("top_right"),
-            endPointId: pointId("top_left"),
-          },
-          {
-            source: { kind: "entity", entityId: entityId("left") },
-            startPointId: pointId("top_left"),
-            endPointId: pointId("bottom_left"),
-          },
-        ],
-        boundaryPointIds: points.map((point) => point.id),
-        isClosed: true,
-      },
-    ]);
+    const [region, ...others] = await deriveRegions(sketch);
+    expect(others, "A rectangle derives exactly one region.").toEqual([]);
 
     const profile = buildRegionProfileFace(oc, { plane, sketch }, region);
     assertClose(
@@ -313,14 +366,15 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
       1e-6,
       "Rectangle profile should build the expected area",
     );
-    expect([...profile.provenance.edges.keys()]).toEqual([
-      entityId("bottom"),
-      entityId("right"),
-      entityId("top"),
-      entityId("left"),
-    ]);
-    expect([...profile.provenance.vertices.keys()]).toEqual(
+    expectCyclic(
+      [...profile.provenance.edges.keys()],
+      [entityId("bottom"), entityId("right"), entityId("top"), entityId("left")],
+      "Profile edges follow the counter-clockwise loop traversal.",
+    );
+    expectCyclic(
+      [...profile.provenance.vertices.keys()],
       points.map((point) => point.id),
+      "One provenance vertex per boundary vertex, keyed by its authored point.",
     );
     const bottomEdge = profile.provenance.edges.get(entityId("bottom"))!;
     const rightEdge = profile.provenance.edges.get(entityId("right"))!;
@@ -336,7 +390,6 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
       bottomLast.delete();
       rightFirst.delete();
     }
-    expect(profile.provenance.unsupportedSources).toEqual([]);
 
     const diagonalId = entityId("diagonal_after_edit");
     const editedDefinition = createSketchDefinition(
@@ -364,37 +417,17 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
         endPosition: [0, 0],
       },
     ]);
-    const editedRegion = createRegion(sketchId, "triangle_after_edit", [
-      {
-        loopId: loopId("triangle_after_edit_outer"),
-        role: "outer",
-        orientation: "counterClockwise",
-        segments: [
-          ...region.loops[0]!.segments.slice(0, 2),
-          {
-            source: { kind: "entity", entityId: diagonalId },
-            startPointId: pointId("top_right"),
-            endPointId: pointId("bottom_left"),
-          },
-        ],
-        boundaryPointIds: [
-          pointId("bottom_left"),
-          pointId("bottom_right"),
-          pointId("top_right"),
-        ],
-        isClosed: true,
-      },
-    ]);
+    const [editedRegion] = await deriveRegions(editedSketch);
     const editedProfile = buildRegionProfileFace(
       oc,
       { plane, sketch: editedSketch },
       editedRegion,
     );
-    expect([...editedProfile.provenance.edges.keys()]).toEqual([
-      entityId("bottom"),
-      entityId("right"),
-      diagonalId,
-    ]);
+    expectCyclic(
+      [...editedProfile.provenance.edges.keys()],
+      [entityId("bottom"), entityId("right"), diagonalId],
+      "The edited triangle's edges follow its loop traversal.",
+    );
     expect(editedProfile.provenance.edges.has(entityId("top"))).toBeFalsy();
     expect(editedProfile.provenance.edges.has(entityId("left"))).toBeFalsy();
     expect(
@@ -432,22 +465,7 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
         solvedRadius: 2,
       },
     ]);
-    const region = createRegion(sketchId, "circle", [
-      {
-        loopId: loopId("circle_outer"),
-        role: "outer",
-        orientation: "counterClockwise",
-        segments: [
-          {
-            source: { kind: "entity", entityId: entityId("circle") },
-            startPointId: null,
-            endPointId: null,
-          },
-        ],
-        boundaryPointIds: [],
-        isClosed: true,
-      },
-    ]);
+    const [region] = await deriveRegions(sketch);
 
     const profile = buildRegionProfileFace(oc, { plane, sketch }, region);
     assertClose(
@@ -520,43 +538,32 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
         endPosition: [1, 0],
       },
     ]);
-    const region = createRegion(sketchId, "arc_cap", [
-      {
-        loopId: loopId("arc_outer"),
-        role: "outer",
-        orientation: "counterClockwise",
-        segments: [
-          {
-            source: { kind: "entity", entityId: entityId("upper_arc") },
-            startPointId: pointId("arc_right"),
-            endPointId: pointId("arc_left"),
-          },
-          {
-            source: { kind: "entity", entityId: entityId("diameter") },
-            startPointId: pointId("arc_left"),
-            endPointId: pointId("arc_right"),
-          },
-        ],
-        boundaryPointIds: [pointId("arc_right"), pointId("arc_left")],
-        isClosed: true,
-      },
-    ]);
+    const [region, ...others] = await deriveRegions(sketch);
+    expect(others, "An arc and its chord derive exactly one region.").toEqual([]);
 
     const profile = buildRegionProfileFace(oc, { plane, sketch }, region);
     assertClose(
       await faceArea(profile.face),
       Math.PI / 2,
       1e-5,
-      "Arc profile should support reversed loop traversal via boundary point IDs",
+      "Arc profile should support a clockwise arc as a reversed traversal of its counter-clockwise interval",
     );
-    expect([...profile.provenance.edges.keys()]).toEqual([
-      entityId("upper_arc"),
-      entityId("diameter"),
-    ]);
-    expect([...profile.provenance.vertices.keys()]).toEqual([
-      pointId("arc_left"),
-      pointId("arc_right"),
-    ]);
+    expect(
+      region!.loops[0]!.segments.find(
+        (segment) =>
+          segment.branch.source.kind === "entity" &&
+          segment.branch.source.entityId === entityId("upper_arc"),
+      )?.traversalDirection,
+      "The clockwise-authored arc left→right is the counter-clockwise interval right→left, which the counter-clockwise outer loop traverses forward.",
+    ).toBe("forward");
+    expectCyclic(
+      [...profile.provenance.edges.keys()],
+      [entityId("upper_arc"), entityId("diameter")],
+      "Arc cap edges follow the loop traversal.",
+    );
+    expect([...profile.provenance.vertices.keys()].sort()).toEqual(
+      [pointId("arc_left"), pointId("arc_right")].sort(),
+    );
   }
 
   async function testInnerLoopHoleReducesFaceArea() {
@@ -741,53 +748,11 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
         endPosition: [2, 2],
       },
     ]);
-    const segment = (
-      name: string,
-      start: string,
-      end: string,
-    ): RegionBoundarySegmentRecord => ({
-      source: { kind: "entity", entityId: entityId(name) },
-      startPointId: pointId(start),
-      endPointId: pointId(end),
-    });
-    const region = createRegion(sketchId, "holed_rectangle", [
-      {
-        loopId: loopId("outer"),
-        role: "outer",
-        orientation: "counterClockwise",
-        segments: [
-          segment("outer_bottom", "outer_bl", "outer_br"),
-          segment("outer_right", "outer_br", "outer_tr"),
-          segment("outer_top", "outer_tr", "outer_tl"),
-          segment("outer_left", "outer_tl", "outer_bl"),
-        ],
-        boundaryPointIds: [
-          pointId("outer_bl"),
-          pointId("outer_br"),
-          pointId("outer_tr"),
-          pointId("outer_tl"),
-        ],
-        isClosed: true,
-      },
-      {
-        loopId: loopId("inner"),
-        role: "inner",
-        orientation: "clockwise",
-        segments: [
-          segment("inner_left", "inner_bl", "inner_tl"),
-          segment("inner_top", "inner_tl", "inner_tr"),
-          segment("inner_right", "inner_tr", "inner_br"),
-          segment("inner_bottom", "inner_br", "inner_bl"),
-        ],
-        boundaryPointIds: [
-          pointId("inner_bl"),
-          pointId("inner_tl"),
-          pointId("inner_tr"),
-          pointId("inner_br"),
-        ],
-        isClosed: true,
-      },
-    ]);
+    const regions = await deriveRegions(sketch);
+    expect(regions, "A square with a square hole derives two cells.").toHaveLength(2);
+    const region = regions.find((candidate) =>
+      candidate.loops.some((loop) => loop.role === "inner"),
+    )!;
 
     const profile = buildRegionProfileFace(oc, { plane, sketch }, region);
     assertClose(
@@ -908,58 +873,12 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
         solvedRadius: 1,
       },
     ]);
-    const segment = (
-      name: string,
-      start: string,
-      end: string,
-    ): RegionBoundarySegmentRecord => ({
-      source: { kind: "entity", entityId: entityId(name) },
-      startPointId: pointId(start),
-      endPointId: pointId(end),
-    });
-    const circleSegment: RegionBoundarySegmentRecord = {
-      source: { kind: "entity", entityId: entityId("circle") },
-      startPointId: null,
-      endPointId: null,
-    };
-    const outerCell = createRegion(sketchId, "outer_with_circle_hole", [
-      {
-        loopId: loopId("outer"),
-        role: "outer",
-        orientation: "counterClockwise",
-        segments: [
-          segment("outer_bottom", "outer_bl", "outer_br"),
-          segment("outer_right", "outer_br", "outer_tr"),
-          segment("outer_top", "outer_tr", "outer_tl"),
-          segment("outer_left", "outer_tl", "outer_bl"),
-        ],
-        boundaryPointIds: [
-          pointId("outer_bl"),
-          pointId("outer_br"),
-          pointId("outer_tr"),
-          pointId("outer_tl"),
-        ],
-        isClosed: true,
-      },
-      {
-        loopId: loopId("circle_hole"),
-        role: "inner",
-        orientation: "clockwise",
-        segments: [circleSegment],
-        boundaryPointIds: [],
-        isClosed: true,
-      },
-    ]);
-    const innerCell = createRegion(sketchId, "inner_circle", [
-      {
-        loopId: loopId("circle_outer"),
-        role: "outer",
-        orientation: "counterClockwise",
-        segments: [circleSegment],
-        boundaryPointIds: [],
-        isClosed: true,
-      },
-    ]);
+    const cells = await deriveRegions(sketch);
+    expect(cells, "A circle inside a rectangle derives two cells.").toHaveLength(2);
+    const outerCell = cells.find((cell) =>
+      cell.loops.some((loop) => loop.role === "inner"),
+    )!;
+    const innerCell = regionBoundedBy(cells, [entityId("circle")]);
 
     const outerProfile = buildRegionProfileFace(
       oc,
@@ -1079,49 +998,8 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
       [],
       projectedReferences,
     );
-    const region = createRegion(sketchId, "projected_rectangle", [
-      {
-        loopId: loopId("projected_rectangle_outer"),
-        role: "outer",
-        orientation: "counterClockwise",
-        segments: [
-          {
-            source: { kind: "entity", entityId: entityId("bottom") },
-            startPointId: pointId("bottom_left"),
-            endPointId: pointId("bottom_right"),
-          },
-          {
-            source: { kind: "entity", entityId: entityId("right") },
-            startPointId: pointId("bottom_right"),
-            endPointId: pointId("top_right"),
-          },
-          {
-            source: { kind: "entity", entityId: entityId("top") },
-            startPointId: pointId("top_right"),
-            endPointId: pointId("top_left"),
-          },
-          {
-            source: {
-              kind: "projectedGeometry",
-              reference: {
-                kind: "projectedLineSegment",
-                referenceId,
-                geometryId,
-              },
-            },
-            startPointId: null,
-            endPointId: null,
-          },
-        ],
-        boundaryPointIds: [
-          pointId("bottom_left"),
-          pointId("bottom_right"),
-          pointId("top_right"),
-          pointId("top_left"),
-        ],
-        isClosed: true,
-      },
-    ]);
+    const [region, ...others] = await deriveRegions(sketch);
+    expect(others, "The mixed local/projected loop derives one region.").toEqual([]);
 
     const profile = buildRegionProfileFace(oc, { plane, sketch }, region);
     assertClose(
@@ -1171,25 +1049,7 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
         },
       ],
     );
-    const region = createRegion(sketchId, "projected_circle", [
-      {
-        loopId: loopId("projected_circle_outer"),
-        role: "outer",
-        orientation: "counterClockwise",
-        segments: [
-          {
-            source: {
-              kind: "projectedGeometry",
-              reference: { kind: "projectedCircle", referenceId, geometryId },
-            },
-            startPointId: null,
-            endPointId: null,
-          },
-        ],
-        boundaryPointIds: [],
-        isClosed: true,
-      },
-    ]);
+    const [region] = await deriveRegions(sketch);
 
     const profile = buildRegionProfileFace(oc, { plane, sketch }, region);
     assertClose(
@@ -1222,14 +1082,10 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
         role: "outer",
         orientation: "counterClockwise",
         segments: [
-          {
-            source: {
-              kind: "projectedGeometry",
-              reference: { kind: "projectedCircle", referenceId, geometryId },
-            },
-            startPointId: null,
-            endPointId: null,
-          },
+          closedBranchSegment({
+            kind: "projectedGeometry",
+            reference: { kind: "projectedCircle", referenceId, geometryId },
+          }),
         ],
         boundaryPointIds: [],
         isClosed: true,
@@ -1287,14 +1143,10 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
         role: "outer",
         orientation: "counterClockwise",
         segments: [
-          {
-            source: {
-              kind: "projectedGeometry",
-              reference: { kind: "projectedCircle", referenceId, geometryId },
-            },
-            startPointId: null,
-            endPointId: null,
-          },
+          closedBranchSegment({
+            kind: "projectedGeometry",
+            reference: { kind: "projectedCircle", referenceId, geometryId },
+          }),
         ],
         boundaryPointIds: [],
         isClosed: true,
@@ -1324,7 +1176,7 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
     ).toBeTruthy();
   }
 
-  async function testApproximationProvenanceIsExplicit() {
+  async function testEllipseBoundaryIsUnsupported() {
     const oc = await getDefaultOpenCascadeInstance();
     const plane = createSketchPlane();
     const sketchId = "sketch_approximated_ellipse" as SketchId;
@@ -1357,28 +1209,28 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
         minorRadius: 1,
       },
     ]);
+    // U4: ellipses are unsupported region curves; there is no sampled
+    // polyline profile any more.
+    expect(
+      await deriveRegions(sketch),
+      "An ellipse derives no region (region-unsupported-curve).",
+    ).toEqual([]);
     const region = createRegion(sketchId, "approximated_ellipse", [
       {
         loopId: loopId("approximated_ellipse_outer"),
         role: "outer",
         orientation: "counterClockwise",
-        segments: [
-          {
-            source: { kind: "entity", entityId: ellipseId },
-            startPointId: null,
-            endPointId: null,
-          },
-        ],
+        segments: [closedBranchSegment({ kind: "entity", entityId: ellipseId })],
         boundaryPointIds: [],
         isClosed: true,
       },
     ]);
-
-    const profile = buildRegionProfileFace(oc, { plane, sketch }, region);
-    expect(profile.provenance.edges.has(ellipseId)).toBeFalsy();
-    expect(profile.provenance.unsupportedSources).toEqual([
-      { sourceKey: ellipseId, reason: "approximated" },
-    ]);
+    expect(
+      () => buildRegionProfileFace(oc, { plane, sketch }, region),
+      "The profile builder rejects an ellipse boundary explicitly.",
+    ).toThrow(
+      `Sketch entity ${ellipseId} of kind ellipse cannot define a profile boundary in this OCC profile builder.`,
+    );
   }
 
   async function testSplitCircleChordCellsBuildAsBoundedArcs() {
@@ -1406,25 +1258,12 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
     }, {
       kind: "lineSegment", entityId: chord, startPosition: [-2, 0], endPosition: [2, 0],
     }]);
-    const circleSegment = (startPosition: [number, number], endPosition: [number, number], traversalDirection?: "reverse"): RegionBoundarySegmentRecord => ({
-      source: { kind: "entity", entityId: circle }, startPointId: null, endPointId: null,
-      startPosition, endPosition, traversalDirection,
-    });
-    const chordSegment = (startPointId: SketchPointId, endPointId: SketchPointId): RegionBoundarySegmentRecord => ({
-      source: { kind: "entity", entityId: chord }, startPointId, endPointId,
-    });
-    const top = createRegion(sketchId, "split_circle_top", [{
-      loopId: loopId("split_circle_top"), role: "outer", orientation: "counterClockwise",
-      segments: [circleSegment([2, 0], [-2, 0]), chordSegment(left, right)], boundaryPointIds: [left, right], isClosed: true,
-    }]);
-    const bottom = createRegion(sketchId, "split_circle_bottom", [{
-      loopId: loopId("split_circle_bottom"), role: "outer", orientation: "counterClockwise",
-      segments: [circleSegment([-2, 0], [2, 0]), chordSegment(right, left)], boundaryPointIds: [right, left], isClosed: true,
-    }]);
-
-    assertClose(await faceArea(buildRegionProfileFace(oc, { plane, sketch }, top).face), Math.PI * 2, 1e-5,
+    const halves = await deriveRegions(sketch);
+    expect(halves, "A circle split by its diameter derives two cells.").toHaveLength(2);
+    const [top, bottom] = halves;
+    assertClose(await faceArea(buildRegionProfileFace(oc, { plane, sketch }, top!).face), Math.PI * 2, 1e-5,
       "The upper split-circle cell must build as a bounded circle arc and chord.");
-    assertClose(await faceArea(buildRegionProfileFace(oc, { plane, sketch }, bottom).face), Math.PI * 2, 1e-5,
+    assertClose(await faceArea(buildRegionProfileFace(oc, { plane, sketch }, bottom!).face), Math.PI * 2, 1e-5,
       "The lower split-circle cell must build as a bounded circle arc and chord.");
   }
 
@@ -1555,46 +1394,8 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
         endPosition: [0, -2],
       },
     ]);
-    const region = createRegion(sketchId, "mixed_trimmed_authored", [
-      {
-        loopId: loopId("mixed_trimmed_authored_outer"),
-        role: "outer",
-        orientation: "counterClockwise",
-        segments: [
-          {
-            source: { kind: "entity", entityId: entityId("mixed_bottom") },
-            startPointId: pointId("mixed_bottom_left"),
-            endPointId: pointId("mixed_bottom_right"),
-          },
-          {
-            source: { kind: "entity", entityId: entityId("mixed_right_rail") },
-            startPointId: null,
-            endPointId: null,
-            startPosition: [4, 0],
-            endPosition: [4, 3],
-          },
-          {
-            source: { kind: "entity", entityId: entityId("mixed_top") },
-            startPointId: pointId("mixed_top_right"),
-            endPointId: pointId("mixed_top_left"),
-          },
-          {
-            source: { kind: "entity", entityId: entityId("mixed_left_rail") },
-            startPointId: null,
-            endPointId: null,
-            startPosition: [0, 3],
-            endPosition: [0, 0],
-          },
-        ],
-        boundaryPointIds: [
-          pointId("mixed_bottom_left"),
-          pointId("mixed_bottom_right"),
-          pointId("mixed_top_right"),
-          pointId("mixed_top_left"),
-        ],
-        isClosed: true,
-      },
-    ]);
+    const [region, ...others] = await deriveRegions(sketch);
+    expect(others, "The rails and chords bound exactly one cell.").toEqual([]);
 
     const profile = buildRegionProfileFace(oc, { plane, sketch }, region);
 
@@ -1667,7 +1468,7 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
   await testProjectedCircleProfileBuildsFromLiveProjection();
   await testProjectedBoundaryInvalidationReportsStructuredCode();
   await testUnauthoredProjectedBoundaryInvalidatesEvenWithProjectionData();
-  await testApproximationProvenanceIsExplicit();
+  await testEllipseBoundaryIsUnsupported();
   async function testMultiPieceSourceCurveKeysEachSplitSegmentDistinctly() {
     const oc = await getDefaultOpenCascadeInstance();
     const plane = createSketchPlane();
@@ -1683,10 +1484,12 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
     const chordBottom = entityId("band_chord_bottom");
     const definition = createSketchDefinition(sketchId, [
       { id: center, position: [0, 0] },
-      { id: topLeft, position: [-sqrt3, 1] },
-      { id: topRight, position: [sqrt3, 1] },
-      { id: bottomLeft, position: [-sqrt3, -1] },
-      { id: bottomRight, position: [sqrt3, -1] },
+      // The chords cross the circle: an undeclared chord end exactly on the
+      // circle is no join (no proximity closure, U2).
+      { id: topLeft, position: [-3, 1] },
+      { id: topRight, position: [3, 1] },
+      { id: bottomLeft, position: [-3, -1] },
+      { id: bottomRight, position: [3, -1] },
     ], [{
       kind: "circle", entityId: circle, label: "band circle",
       target: { kind: "sketchEntity", sketchId, entityId: circle }, isConstruction: false,
@@ -1703,39 +1506,26 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
     const sketch = createSketchRecord(sketchId, definition, [{
       kind: "circle", entityId: circle, centerPosition: [0, 0], solvedRadius: 2,
     }, {
-      kind: "lineSegment", entityId: chordTop, startPosition: [-sqrt3, 1], endPosition: [sqrt3, 1],
+      kind: "lineSegment", entityId: chordTop, startPosition: [-3, 1], endPosition: [3, 1],
     }, {
-      kind: "lineSegment", entityId: chordBottom, startPosition: [-sqrt3, -1], endPosition: [sqrt3, -1],
+      kind: "lineSegment", entityId: chordBottom, startPosition: [-3, -1], endPosition: [3, -1],
     }]);
-    const arcSegment = (
-      startPosition: [number, number],
-      endPosition: [number, number],
-      sourceSegmentOrdinal?: number,
-    ): RegionBoundarySegmentRecord => ({
-      source: { kind: "entity", entityId: circle }, startPointId: null, endPointId: null,
-      startPosition, endPosition,
-      ...(sourceSegmentOrdinal === undefined ? {} : { sourceSegmentOrdinal }),
-    });
-    const chordSegment = (
-      entity: SketchEntityId,
-      startPointId: SketchPointId,
-      endPointId: SketchPointId,
-    ): RegionBoundarySegmentRecord => ({
-      source: { kind: "entity", entityId: entity }, startPointId, endPointId,
-    });
-    const bandLoops = (withOrdinals: boolean): RegionRecord["loops"] => [{
-      loopId: loopId("band"), role: "outer", orientation: "counterClockwise",
-      segments: [
-        arcSegment([sqrt3, -1], [sqrt3, 1], withOrdinals ? 0 : undefined),
-        chordSegment(chordTop, topRight, topLeft),
-        arcSegment([-sqrt3, 1], [-sqrt3, -1], withOrdinals ? 1 : undefined),
-        chordSegment(chordBottom, bottomLeft, bottomRight),
-      ],
-      boundaryPointIds: [topLeft, topRight, bottomLeft, bottomRight],
-      isClosed: true,
-    }];
-
-    const band = createRegion(sketchId, "band", bandLoops(true));
+    const band = regionBoundedBy(await deriveRegions(sketch), [
+      chordBottom,
+      chordTop,
+      circle,
+    ]);
+    const circleOrdinals = band.loops[0]!.segments
+      .filter(
+        (segment) =>
+          segment.branch.source.kind === "entity" &&
+          segment.branch.source.entityId === circle,
+      )
+      .map((segment) => segment.sourceSegmentOrdinal);
+    expect(
+      new Set(circleOrdinals).size,
+      "The band uses two distinct split pieces of the circle.",
+    ).toBe(2);
     const profile = buildRegionProfileFace(oc, { plane, sketch }, band);
     assertClose(
       await faceArea(profile.face),
@@ -1746,36 +1536,344 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
     expect(
       [...profile.provenance.edges.keys()].sort(),
       "Each split piece of the circle must carry its own ordinal-keyed provenance edge.",
-    ).toEqual([chordBottom, chordTop, `${circle}#0`, `${circle}#1`].sort());
-    expect(
-      profile.provenance.unsupportedSources,
-      "Ordinal-keyed split pieces are exact, never unsupported.",
-    ).toEqual([]);
+    ).toEqual(
+      [
+        chordBottom,
+        chordTop,
+        ...circleOrdinals.map((ordinal) => `${circle}#${ordinal}`),
+      ].sort(),
+    );
 
-    const bandWithoutOrdinals = createRegion(
-      sketchId,
-      "band_no_ordinals",
-      bandLoops(false),
-    );
-    const degraded = buildRegionProfileFace(
-      oc,
-      { plane, sketch },
-      bandWithoutOrdinals,
-    );
-    expect(
-      [...degraded.provenance.edges.keys()].sort(),
-      "A multi-piece source without ordinals must not claim any of its edges.",
-    ).toEqual([chordBottom, chordTop].sort());
-    expect(
-      degraded.provenance.unsupportedSources,
-      "Each unnameable split piece fails closed as an unsupported source.",
-    ).toEqual([
-      { sourceKey: circle, reason: "ambiguous-split-segment" },
-      { sourceKey: circle, reason: "ambiguous-split-segment" },
-    ]);
   }
 
+  async function testSplineBoundaryFailsClosedUntilT10() {
+    const oc = await getDefaultOpenCascadeInstance();
+    const fixture = makeSketchFixture();
+    fixture.point("s0", 0, 0);
+    fixture.point("s1", 4, 0);
+    fixture.point("s2", 4, 3);
+    fixture.point("s3", 0, 3);
+    fixture.spline("loop", ["s0", "s1", "s2", "s3"], "smooth");
+    const input = fixture.build();
+    const sketch = createSketchRecord(
+      input.sketchId,
+      input.definition,
+      input.solvedSnapshot.solvedEntities,
+      input.solvedSnapshot.solvedPoints,
+    );
+    const regions = await deriveRegions(sketch);
+    expect(
+      regions,
+      "A closed spline derives one selectable region (U9).",
+    ).toHaveLength(1);
+    expect(
+      () =>
+        buildRegionProfileFace(
+          oc,
+          { plane: createSketchPlane(), sketch },
+          regions[0]!,
+        ),
+      "OCC rejects spline-bounded regions explicitly until exact span trimming lands (U9 tracked gap).",
+    ).toThrow(/^Spline profile boundary sketch entity .* is not yet supported by the OCC profile builder\.$/);
+  }
+
+  /** A sketch record carrying the fixture's solve, including its satisfied statuses. */
+  function fixtureSketchRecord(fixture: SketchFixture): SketchRecord {
+    const input = fixture.build();
+    return {
+      ...createSketchRecord(input.sketchId, input.definition, []),
+      solvedSnapshot: input.solvedSnapshot,
+      projectedReferences: input.projectedReferences,
+    };
+  }
+
+  /**
+   * OCC-seam checks for a profile built from owner records (review R1): a valid
+   * face, one wire per loop, every loop vertex one `TopoDS_Vertex` shared by
+   * exactly its two edges, and the area within τ·perimeter of the analytic area.
+   */
+  async function expectValidProfile(
+    region: RegionRecord,
+    profile: ReturnType<typeof buildRegionProfileFace>,
+    expected: { area: number; perimeter: number },
+    label: string,
+  ) {
+    const oc = await getDefaultOpenCascadeInstance();
+    const analyzer = new oc.BRepCheck_Analyzer(profile.face, true, false);
+    try {
+      expect(
+        analyzer.IsValid_2(),
+        `${label}: BRepCheck_Analyzer accepts the face.`,
+      ).toBe(true);
+    } finally {
+      analyzer.delete();
+    }
+    const children = (shape: object, kind: unknown) => {
+      const explorer = new oc.TopExp_Explorer_2(
+        shape as never,
+        kind as never,
+        oc.TopAbs_ShapeEnum.TopAbs_SHAPE as never,
+      );
+      const found: InstanceType<typeof oc.TopoDS_Shape>[] = [];
+      while (explorer.More()) {
+        found.push(explorer.Current());
+        explorer.Next();
+      }
+      explorer.delete();
+      return found;
+    };
+    const wires = children(profile.face, oc.TopAbs_ShapeEnum.TopAbs_WIRE);
+    expect(wires, `${label}: one wire per region loop.`).toHaveLength(
+      region.loops.length,
+    );
+    for (const [index, wire] of wires.entries()) {
+      const edges = children(wire, oc.TopAbs_ShapeEnum.TopAbs_EDGE).map(
+        (edge) => oc.TopoDS.Edge_1(edge),
+      );
+      const ends = edges.flatMap((edge) => [
+        oc.TopExp.FirstVertex(edge, true),
+        oc.TopExp.LastVertex(edge, true),
+      ]);
+      const groups: (typeof ends)[] = [];
+      for (const end of ends) {
+        const group = groups.find((candidate) => candidate[0]!.IsSame(end));
+        if (group) group.push(end);
+        else groups.push([end]);
+      }
+      expect(
+        groups.map((group) => group.length),
+        `${label}: every vertex of wire ${index} is one TopoDS_Vertex shared by exactly two edge ends.`,
+      ).toEqual(edges.map(() => 2));
+      for (const end of ends) end.delete();
+      for (const edge of edges) edge.delete();
+    }
+    const faceVertices = children(
+      profile.face,
+      oc.TopAbs_ShapeEnum.TopAbs_VERTEX,
+    );
+    expect(
+      [...profile.provenance.vertices.entries()]
+        .filter(
+          ([, vertex]) =>
+            !faceVertices.some((candidate) => candidate.IsSame(vertex)),
+        )
+        .map(([key]) => key),
+      `${label}: every provenance vertex is a vertex of the face.`,
+    ).toEqual([]);
+    const area = await faceArea(profile.face);
+    expect(
+      Math.abs(area - expected.area),
+      `${label}: area ${area} is within τ·perimeter of the analytic ${expected.area}.`,
+    ).toBeLessThanOrEqual(FIXTURE_TOLERANCE * expected.perimeter);
+  }
+
+  async function testNonBitwiseDeclaredJoinsBuildValidFaces() {
+    const oc = await getDefaultOpenCascadeInstance();
+    const plane = createSketchPlane();
+    const build = async (fixture: SketchFixture) => {
+      const sketch = fixtureSketchRecord(fixture);
+      const regions = await deriveRegions(sketch);
+      return {
+        regions,
+        profiles: regions.map((region) =>
+          buildRegionProfileFace(oc, { plane, sketch }, region),
+        ),
+      };
+    };
+
+    // Coincident corners whose side-0 end carries a residual: a 1e-8 and a
+    // 0.3·τ overshoot, and a 0.9·τ undershoot (owner rows in region-extraction).
+    for (const offset of [
+      1e-8,
+      0.3 * FIXTURE_TOLERANCE,
+      -0.9 * FIXTURE_TOLERANCE,
+    ]) {
+      const fixture = makeSketchFixture();
+      addRectangle(fixture, "r", [0, 0, 10, 5], "coincident", offset);
+      const { regions, profiles } = await build(fixture);
+      expect(regions, `offset ${offset}: one region`).toHaveLength(1);
+      const [profile] = profiles;
+      await expectValidProfile(
+        regions[0]!,
+        profile!,
+        { area: 50, perimeter: 30 },
+        `coincident corner Δ=${offset}`,
+      );
+      const corner = profile!.provenance.vertices.get(pointId("r0e"));
+      expect(
+        corner &&
+          profile!.provenance.vertices.get(pointId("r1s"))?.IsSame(corner),
+        `Δ=${offset}: both joined corner points name one TopoDS_Vertex.`,
+      ).toBe(true);
+      for (const built of profiles) releaseBuiltSketchProfileFace(built);
+    }
+
+    // Rounded rectangle: line/arc joins, arcs built through the join vertices.
+    const rounded = makeSketchFixture();
+    const [w, h, r] = [10, 6, 1];
+    for (const [name, x, y] of [
+      ["a", r, 0],
+      ["b", w - r, 0],
+      ["c", w, r],
+      ["d", w, h - r],
+      ["e", w - r, h],
+      ["f", r, h],
+      ["g", 0, h - r],
+      ["h", 0, r],
+      ["k1", w - r, r],
+      ["k2", w - r, h - r],
+      ["k3", r, h - r],
+      ["k4", r, r],
+    ] as const)
+      rounded.point(name, x, y);
+    rounded.line("l1", "a", "b");
+    rounded.arc("a1", "k1", "b", "c");
+    rounded.line("l2", "c", "d");
+    rounded.arc("a2", "k2", "d", "e");
+    rounded.line("l3", "e", "f");
+    rounded.arc("a3", "k3", "f", "g");
+    rounded.line("l4", "g", "h");
+    rounded.arc("a4", "k4", "h", "a");
+    const roundedBuilt = await build(rounded);
+    expect(roundedBuilt.regions).toHaveLength(1);
+    await expectValidProfile(
+      roundedBuilt.regions[0]!,
+      roundedBuilt.profiles[0]!,
+      {
+        area: w * h - (4 - Math.PI) * r * r,
+        perimeter: 2 * (w - 2 * r) + 2 * (h - 2 * r) + 2 * Math.PI * r,
+      },
+      "rounded rectangle",
+    );
+    for (const built of roundedBuilt.profiles)
+      releaseBuiltSketchProfileFace(built);
+
+    // T-junction on an arc: the stem end is declared on the arc at 30°, whose
+    // binary64 representative is not bitwise on the circle.
+    const onArc = makeSketchFixture();
+    onArc.point("a", 0, -2);
+    onArc.point("b", 0, 2);
+    onArc.point("k", 0, 0);
+    onArc.line("l", "b", "a");
+    onArc.arc("arc", "k", "a", "b");
+    onArc.point("m", 0, 0);
+    onArc.point("q", 2 * Math.cos(Math.PI / 6), 2 * Math.sin(Math.PI / 6));
+    onArc.line("stem", "m", "q");
+    onArc.midpoint("m", "l");
+    onArc.pointOnCurve("q", "arc");
+    const arcBuilt = await build(onArc);
+    expect(
+      arcBuilt.regions,
+      "the stem splits the D-shape into two cells",
+    ).toHaveLength(2);
+    const sectors = arcBuilt.profiles.map((profile, index) => ({
+      profile,
+      region: arcBuilt.regions[index]!,
+    }));
+    // Sectors of 120° and 60° of the radius-2 half disk.
+    const expectedSectors = [(2 * Math.PI) / 3, Math.PI / 3].map((angle) => ({
+      area: 2 * angle,
+      perimeter: 2 + 2 + 2 * angle,
+    }));
+    const areas = await Promise.all(
+      sectors.map(({ profile }) => faceArea(profile.face)),
+    );
+    for (const [index, { profile, region }] of sectors.entries()) {
+      const expected =
+        areas[index]! > Math.PI ? expectedSectors[0]! : expectedSectors[1]!;
+      await expectValidProfile(
+        region,
+        profile,
+        expected,
+        `arc T-junction cell ${index}`,
+      );
+      const junction = profile.provenance.vertices.get(pointId("q"));
+      expect(
+        junction !== undefined,
+        `arc T-junction cell ${index}: the declared stem end names the junction vertex.`,
+      ).toBe(true);
+    }
+    for (const built of arcBuilt.profiles) releaseBuiltSketchProfileFace(built);
+  }
+
+  async function testPointTouchingLoopsFailClosed() {
+    const oc = await getDefaultOpenCascadeInstance();
+    const plane = createSketchPlane();
+    // A diamond hole whose bottom corner is declared on the square's bottom
+    // side: the owner publishes outer and inner loops sharing that vertex.
+    const fixture = makeSketchFixture();
+    addRectangle(fixture, "r", [0, 0, 10, 10]);
+    for (const [name, x, y] of [
+      ["d0", 5, 0],
+      ["d1", 7, 3],
+      ["d2", 5, 6],
+      ["d3", 3, 3],
+    ] as const)
+      fixture.point(name, x, y);
+    for (let index = 0; index < 4; index += 1)
+      fixture.line(`e${index}`, `d${index}`, `d${(index + 1) % 4}`);
+    fixture.pointOnCurve("d0", "r_s0");
+    const sketch = fixtureSketchRecord(fixture);
+    const regions = await deriveRegions(sketch);
+    const touching = regions.find((region) => region.loops.length === 2);
+    const diamond = regions.find((region) => region.loops.length === 1);
+    expect(
+      touching && diamond,
+      "the owner derives the touching band and the diamond",
+    ).toBeTruthy();
+    expect(
+      () => buildRegionProfileFace(oc, { plane, sketch }, touching!),
+      "A face whose loops share a boundary vertex fails closed explicitly (review A2).",
+    ).toThrow(
+      /^Region .* loops .* and .* share boundary vertex j\["sketch_point_d0"\]; profiles with point-touching loops are not yet supported by the OCC profile builder\.$/,
+    );
+    const built = buildRegionProfileFace(oc, { plane, sketch }, diamond!);
+    await expectValidProfile(
+      diamond!,
+      built,
+      { area: 12, perimeter: 4 * Math.hypot(2, 3) },
+      "touching diamond",
+    );
+    releaseBuiltSketchProfileFace(built);
+
+    // Exactly one null end is no full turn (review A3).
+    const circle = makeSketchFixture();
+    circle.point("c", 0, 0);
+    circle.circle("disk", "c", 2);
+    const circleSketch = fixtureSketchRecord(circle);
+    const [disk] = await deriveRegions(circleSketch);
+    const [segment] = disk!.loops[0]!.segments;
+    const vertex = {
+      kind: "declaredJoin" as const,
+      key: "j[half-open]",
+      pointIds: [],
+      portPointId: null,
+      position: [2, 0] as const,
+      ballRadius: 0,
+    };
+    for (const halfOpen of [
+      { ...segment!, start: null, end: vertex },
+      { ...segment!, start: vertex, end: null },
+    ]) {
+      expect(
+        () =>
+          buildRegionProfileFace(
+            oc,
+            { plane, sketch: circleSketch },
+            {
+              ...disk!,
+              loops: [{ ...disk!.loops[0]!, segments: [halfOpen] }],
+            },
+          ),
+        "A single boundary segment with exactly one null end is rejected, not built as a full circle.",
+      ).toThrow(/does not close back onto its starting vertex/);
+    }
+  }
+
+  await testNonBitwiseDeclaredJoinsBuildValidFaces();
+  await testPointTouchingLoopsFailClosed();
   await testSplitCircleChordCellsBuildAsBoundedArcs();
+  await testSplineBoundaryFailsClosedUntilT10();
   await testMultiPieceSourceCurveKeysEachSplitSegmentDistinctly();
   await testRejectsMultipleOuterLoops();
   await testMixedTrimmedAndAuthoredLoopSharesCornerVertices();

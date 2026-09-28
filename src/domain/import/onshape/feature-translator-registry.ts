@@ -1,6 +1,6 @@
 import type { OnshapeResolvedReference } from "@/contracts/import/onshape-capture-bundle";
 import type { SketchPlaneFrame, SketchPlaneKey } from "@/contracts/shared/sketch-plane";
-import type { SketchSolverAdapter } from "@/contracts/solver/adapter";
+import type { ImportProfileVerifier } from "@/domain/import/onshape/profile-resolver";
 import type { OnshapeFeatureNode, StudioReadResult } from "@/domain/import/onshape/bundle-reader";
 import type { FeaturePlan, FidelityTier, PlanReasonCode } from "@/domain/import/onshape/fidelity-planner";
 
@@ -29,8 +29,8 @@ export interface FeaturePlanningContext {
   read: StudioReadResult;
   references: ReadonlyMap<string, readonly OnshapeResolvedReference[]>;
   state: FidelityPlanningState;
-  /** Region derivation boundary used to verify sketch profiles. */
-  sketchSolver: Pick<SketchSolverAdapter, "deriveSketchRegions">;
+  /** Region derivation boundary and target-document tolerance used to verify sketch profiles. */
+  profileVerifier: ImportProfileVerifier;
 }
 
 export interface FeatureApplicationContext {

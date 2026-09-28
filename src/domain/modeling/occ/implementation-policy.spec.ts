@@ -6,7 +6,7 @@ import type {
 import {
   SOLVED_SKETCH_SCHEMA_VERSION,
   SKETCH_SCHEMA_VERSION,
-  type RegionBoundarySegmentRecord,
+  type RegionBoundarySource,
   type RegionRecord,
   type SketchDefinition,
   type SketchRecord,
@@ -61,11 +61,11 @@ test("src/domain/modeling/occ/implementation-policy.spec.ts", async () => {
   }
 
   function testProjectedRegionLoopsRequireLiveProjectionData() {
-    const entitySource: RegionBoundarySegmentRecord["source"] = {
+    const entitySource: RegionBoundarySource = {
       kind: "entity",
       entityId: "sketch_entity_profile",
     };
-    const projectedSource: RegionBoundarySegmentRecord["source"] = {
+    const projectedSource: RegionBoundarySource = {
       kind: "projectedGeometry",
       reference: {
         referenceId: "ref_model_edge",
@@ -232,7 +232,7 @@ test("src/domain/modeling/occ/implementation-policy.spec.ts", async () => {
   }
 
   function createProjectedRegionLoopSegment(): Extract<
-    RegionBoundarySegmentRecord["source"],
+    RegionBoundarySource,
     { kind: "projectedGeometry" }
   > {
     return {
@@ -285,6 +285,7 @@ test("src/domain/modeling/occ/implementation-policy.spec.ts", async () => {
       ownerSketchId: "sketch_phase0",
       ownerBodyId: null,
       regionId: "region_phase0",
+      signature: "hand-built projected region",
       label: "Projected Region",
       target: {
         kind: "region",
@@ -302,9 +303,15 @@ test("src/domain/modeling/occ/implementation-policy.spec.ts", async () => {
           orientation: "counterClockwise",
           segments: [
             {
-              source: createProjectedRegionLoopSegment(),
-              startPointId: null,
-              endPointId: null,
+              branch: {
+                source: createProjectedRegionLoopSegment(),
+                spanId: "whole",
+              },
+              sourceParameterInterval: [0, 1],
+              traversalDirection: "forward",
+              start: null,
+              end: null,
+              sourceSegmentOrdinal: 0,
             },
           ],
           boundaryPointIds: [],

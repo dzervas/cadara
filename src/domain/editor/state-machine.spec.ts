@@ -1,3 +1,4 @@
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { test, expect } from "vitest";
 import {
   getEditorHistoryAvailability,
@@ -652,6 +653,9 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
           async reconstructMeshToBrep() {
             throw new Error("Not used in image import session tests.");
           },
+          neutralCurveQueries:
+            createCertifiedNeutralCurveQueryCapabilityForTest(),
+          modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
         },
         sketch: {
           async convertVectorToSketch() {

@@ -13,6 +13,7 @@ function makeSnapshot() {
     document: {
       documentId: "doc_workspace" as DocumentId,
       revisionId: "rev_0001" as RevisionId,
+      settings: { modelingTolerance: 1e-3 },
     },
   } as never;
 }

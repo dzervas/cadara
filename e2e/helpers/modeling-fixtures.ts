@@ -8,10 +8,10 @@ import type {
   CommitSketchRequest,
   CreateFeatureRequest,
 } from "../../src/contracts/modeling/schema";
-import {
-  deriveSketchRegionsCore,
-  solveSketchDefinitionCore,
-} from "../../src/contracts/sketch";
+import { createSketchArrangementDeriver } from "../../src/contracts/sketch/region-extraction";
+import { solveSketchDefinitionCore } from "../../src/contracts/sketch/solver-core";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "../../src/domain/modeling/neutral-curve-certification/query";
+import { OCC_KERNEL_SETTINGS } from "../../src/domain/modeling/opencascade-kernel-seed";
 import { SKETCH_SCHEMA_VERSION } from "../../src/contracts/sketch/schema";
 import { EXTRUDE_FEATURE_SCHEMA_VERSION } from "../../src/contracts/shared/versioning";
 
@@ -184,7 +184,14 @@ function createRectangleSketchDefinition(
   };
 }
 
-function deriveFixtureRegionId(
+// The fixture documents are the default OCC workspace document; region
+// identity comes from the same owner the kernel uses, with the kernel-free
+// certified queries (no OCC load in the Playwright runner).
+const fixtureRegionDeriver = createSketchArrangementDeriver(
+  createCertifiedNeutralCurveQueryCapabilityForTest(),
+);
+
+async function deriveFixtureRegionId(
   sketchId: `sketch_${string}`,
   idPrefix: `${number}`,
   bounds: RectangleBounds,
@@ -203,13 +210,17 @@ function deriveFixtureRegionId(
     },
     partialSolvePolicy: "bestEffort",
   });
-  const region = deriveSketchRegionsCore({
-    documentId: DOCUMENT_ID,
-    revisionId: BASE_REVISION_ID,
-    sketchId,
-    definition,
-    solvedSnapshot: solved.solvedSnapshot,
-  }).regions[0];
+  const region = (
+    await fixtureRegionDeriver.derive({
+      documentId: DOCUMENT_ID,
+      revisionId: BASE_REVISION_ID,
+      sketchId,
+      definition,
+      solvedSnapshot: solved.solvedSnapshot,
+      projectedReferences: [],
+      modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+    })
+  ).regions[0];
 
   if (!region) {
     throw new Error(
@@ -220,19 +231,27 @@ function deriveFixtureRegionId(
   return region.regionId;
 }
 
-const PRIMARY_PROFILE_REGION_ID = deriveFixtureRegionId("sketch_primary", "1", {
-  minX: -15.5,
-  minY: -5,
-  maxX: -5,
-  maxY: 4.5,
-});
+const PRIMARY_PROFILE_REGION_ID = await deriveFixtureRegionId(
+  "sketch_primary",
+  "1",
+  {
+    minX: -15.5,
+    minY: -5,
+    maxX: -5,
+    maxY: 4.5,
+  },
+);
 
-const SECONDARY_PROFILE_REGION_ID = deriveFixtureRegionId("sketch_2", "2", {
-  minX: -10.5,
-  minY: -5,
-  maxX: 0,
-  maxY: 4.5,
-});
+const SECONDARY_PROFILE_REGION_ID = await deriveFixtureRegionId(
+  "sketch_2",
+  "2",
+  {
+    minX: -10.5,
+    minY: -5,
+    maxX: 0,
+    maxY: 4.5,
+  },
+);
 
 export const FEATURE_FIXTURE = {
   profile: `sketch_primary.${PRIMARY_PROFILE_REGION_ID}`,

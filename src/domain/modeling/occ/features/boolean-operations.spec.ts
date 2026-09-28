@@ -383,7 +383,7 @@ test("committed native topology snapshots reuse body-owned transaction payloads"
       );
     };
   const adapter = new OpenCascadeKernelAdapter({
-    solverAdapter: {} as never,
+    createSolverAdapter: () => ({}) as never,
     getOpenCascadeInstance: async () => oc,
   });
   const state = createOccAuthoringState(oc, { bodies: [body] });
@@ -478,7 +478,7 @@ test("native transaction replacements retain rewritten committed payloads after 
       );
     };
   const adapter = new OpenCascadeKernelAdapter({
-    solverAdapter: {} as never,
+    createSolverAdapter: () => ({}) as never,
     getOpenCascadeInstance: async () => oc,
   });
   const buildCommittedSnapshot = (

@@ -75,6 +75,11 @@ export interface OnshapeSolvedSketch {
   /** Captured solved-sketch placement, recovered from Onshape `sketchMatrix`. */
   sketchFrame?: SketchPlaneFrame;
   entities: OnshapeSolvedCurve[];
+  /**
+   * The same sketch feature's captured constraints, so region verification
+   * translates the declared joins the committed sketch will carry.
+   */
+  constraints: OnshapeSketchConstraint[];
 }
 
 interface RawSolvedSketchPayload {
@@ -396,11 +401,20 @@ export function readPartStudio(
         }
       }
       const sketchFrame = sketchFrameFromMatrix(solved.sketchMatrix);
+      const feature = features.find(
+        (candidate) => candidate.featureId === solved.featureId,
+      );
+      // Solved sketches are consumed only through their own feature. A solved
+      // sketch whose feature is not in the feature list (for example a
+      // history-prefix capture) can never be planned, so it is not published
+      // rather than published without its constraints.
+      if (!feature) continue;
       solvedSketchesByFeatureId.set(solved.featureId, {
         featureId: solved.featureId,
         sketchSolveStatus: solved.sketchSolveStatus,
         ...(sketchFrame ? { sketchFrame } : {}),
         entities,
+        constraints: feature.constraints,
       });
     }
   } else {

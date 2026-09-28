@@ -150,7 +150,6 @@ function splineOccurrences(definition: Fields, encode: boolean) {
   }
 }
 function sketch(data: Fields, encode: boolean) {
-  delete data.regionSlots;
   const definition = data.definition as Fields;
   if (encode) splineOccurrences(definition, true);
   collections(definition, sketchCollections, encode);

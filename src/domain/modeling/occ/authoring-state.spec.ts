@@ -1,3 +1,4 @@
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { readFile } from "node:fs/promises";
 import { expect, test, vi } from "vitest";
 
@@ -273,10 +274,12 @@ test("each accepted extrude update releases the naming state dropped by semantic
   const oc = await loadOpenCascade();
   const ledger = observeNaming(oc);
   const createSolver = (revisionId: string | null) =>
-    new SketchConstraintSolverAdapter({ revisionId });
+    new SketchConstraintSolverAdapter({
+      neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+      revisionId,
+    });
   const adapter = new OpenCascadeKernelAdapter({
-    solverAdapter: createSolver(null),
-    solverAdapterFactory: createSolver,
+    createSolverAdapter: createSolver,
     getOpenCascadeInstance: async () => oc,
   });
   const request = {

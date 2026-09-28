@@ -1,3 +1,6 @@
+import { declaredCornerForTest } from "@/contracts/sketch/region-record.fixtures";
+import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { test, expect } from "vitest";
@@ -88,6 +91,7 @@ function createRevisionAgnosticRealSolver(): SketchSolverAdapter {
     get(_target, property) {
       return (request: { documentId: DocumentId; revisionId: RevisionId }) => {
         const adapter = new SketchConstraintSolverAdapter({
+          neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
           documentId: request.documentId,
           revisionId: request.revisionId,
         });
@@ -198,12 +202,12 @@ function loadRealOccForImportTest() {
 function createRealOccModelingService(oc: OpenCascadeInstance) {
   const createSolver = (revisionId: RevisionId | null) =>
     new SketchConstraintSolverAdapter({
+      neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
       documentId: "doc_workspace" as DocumentId,
       revisionId,
     });
   const adapter = new OpenCascadeKernelAdapter({
-    solverAdapter: createSolver(null),
-    solverAdapterFactory: createSolver,
+    createSolverAdapter: createSolver,
     getOpenCascadeInstance: async () => oc,
   });
   const service = createModelingService(adapter, {
@@ -1866,7 +1870,11 @@ test("segmented provider actions apply two checkpoints with rematch, closure, fa
   const source = sourceFromBundle(bundle);
   const assetStore = createMemoryGeometryAssetStore();
   const emptySnapshot = {
-    document: { documentId: "doc_workspace", revisionId: "rev_segment_0" },
+    document: {
+      documentId: "doc_workspace",
+      revisionId: "rev_segment_0",
+      settings: { modelingTolerance: 1e-3, angularToleranceRadians: 1e-4 },
+    },
   } as never;
   const signature = (
     bodyId: string,
@@ -1883,7 +1891,10 @@ test("segmented provider actions apply two checkpoints with rematch, closure, fa
     ] as [number, number, number],
     reference: { kind: "body" as const, bodyId: bodyId as never },
   });
-  const capabilities = createImportCapabilities({} as never, emptySnapshot, {
+  const modelingService = {
+    neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+  } as never;
+  const capabilities = createImportCapabilities(modelingService, emptySnapshot, {
     assetStore,
     history: {
       async evaluateHistoryProbe(input) {
@@ -2301,6 +2312,7 @@ test("compact v2 checkpoint replaces an apply-ambiguous consumer at the same pos
       documentId: "doc_workspace",
       revisionId: "rev_v2",
       bodies: [],
+      settings: { modelingTolerance: 1e-3, angularToleranceRadians: 1e-4 },
     },
   } as never;
   const service = {
@@ -3960,6 +3972,7 @@ test("applyImportPreparedActions uses innermost containment for nested region se
         >;
       const makeRegion = (regionId: string, labels: string[]) => ({
         regionId,
+        signature: `hand-built ${regionId}`,
         label: regionId,
         target: { kind: "region", sketchId: sketch.sketchId, regionId },
         sourceSketch: { kind: "sketch", sketchId: sketch.sketchId },
@@ -3968,11 +3981,26 @@ test("applyImportPreparedActions uses innermost containment for nested region se
             loopId: `${regionId}_loop`,
             role: "outer",
             orientation: "counterClockwise",
-            segments: labels.map((label) => ({
-              source: { kind: "entity", entityId: line(label).entityId },
-              startPointId: line(label).startPointId,
-              endPointId: line(label).endPointId,
-            })),
+            segments: labels.map((label) => {
+              const corner = (pointId: SketchPointId) =>
+                declaredCornerForTest(
+                  pointId,
+                  definition.points.find(
+                    (point: { pointId: string }) => point.pointId === pointId,
+                  )!.position,
+                );
+              return {
+                branch: {
+                  source: { kind: "entity", entityId: line(label).entityId },
+                  spanId: "whole",
+                },
+                sourceParameterInterval: [0, 1],
+                traversalDirection: "forward",
+                start: corner(line(label).startPointId),
+                end: corner(line(label).endPointId),
+                sourceSegmentOrdinal: 0,
+              };
+            }),
             boundaryPointIds: labels.map((label) => line(label).startPointId),
             isClosed: true,
           },
@@ -4461,6 +4489,9 @@ function probeCapabilities(
       async reconstructMeshToBrep() {
         throw new Error("not used");
       },
+      neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+      modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+      angularToleranceRadians: OCC_KERNEL_SETTINGS.angularToleranceRadians,
     },
     sketch: {
       async convertVectorToSketch() {
@@ -5261,11 +5292,14 @@ test.skipIf(!existsSync(LAPTOP_STAND_CAPTURE_FIXTURE))(
       probeOrdinal += 1;
       const documentId = `doc_occ_history_probe_${probeOrdinal}` as DocumentId;
       const createSolver = (revisionId: RevisionId | null) =>
-        new SketchConstraintSolverAdapter({ documentId, revisionId });
+        new SketchConstraintSolverAdapter({
+          neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+          documentId,
+          revisionId,
+        });
       return createModelingService(
         new OpenCascadeKernelAdapter({
-          solverAdapter: createSolver(null),
-          solverAdapterFactory: createSolver,
+          createSolverAdapter: createSolver,
           getOpenCascadeInstance: async () => oc,
           documentId,
           assetResolver: resolver,
@@ -5275,13 +5309,13 @@ test.skipIf(!existsSync(LAPTOP_STAND_CAPTURE_FIXTURE))(
     };
     const createWorkspaceSolver = (revisionId: RevisionId | null) =>
       new SketchConstraintSolverAdapter({
+        neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
         documentId: "doc_workspace" as DocumentId,
         revisionId,
       });
     const service = createModelingService(
       new OpenCascadeKernelAdapter({
-        solverAdapter: createWorkspaceSolver(null),
-        solverAdapterFactory: createWorkspaceSolver,
+        createSolverAdapter: createWorkspaceSolver,
         getOpenCascadeInstance: async () => oc,
         assetResolver: resolver,
       }),
@@ -5631,11 +5665,14 @@ test.skipIf(!existsSync(PART_STUDIO_9841_CAPTURE_FIXTURE))(
       probeOrdinal += 1;
       const documentId = `doc_9841_history_probe_${probeOrdinal}` as DocumentId;
       const createSolver = (revisionId: RevisionId | null) =>
-        new SketchConstraintSolverAdapter({ documentId, revisionId });
+        new SketchConstraintSolverAdapter({
+          neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+          documentId,
+          revisionId,
+        });
       return createModelingService(
         new OpenCascadeKernelAdapter({
-          solverAdapter: createSolver(null),
-          solverAdapterFactory: createSolver,
+          createSolverAdapter: createSolver,
           getOpenCascadeInstance: async () => oc,
           documentId,
           assetResolver: resolver,
@@ -5646,12 +5683,12 @@ test.skipIf(!existsSync(PART_STUDIO_9841_CAPTURE_FIXTURE))(
     const workspaceDocumentId = "doc_9841_workspace" as DocumentId;
     const createWorkspaceSolver = (revisionId: RevisionId | null) =>
       new SketchConstraintSolverAdapter({
+        neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
         documentId: workspaceDocumentId,
         revisionId,
       });
     const adapter = new OpenCascadeKernelAdapter({
-      solverAdapter: createWorkspaceSolver(null),
-      solverAdapterFactory: createWorkspaceSolver,
+      createSolverAdapter: createWorkspaceSolver,
       getOpenCascadeInstance: async () => oc,
       documentId: workspaceDocumentId,
       assetResolver: resolver,
@@ -5957,11 +5994,14 @@ test.skipIf(!existsSync(D3_CAPTURE_FIXTURE))(
       probeOrdinal += 1;
       const documentId = `doc_occ_history_probe_${probeOrdinal}` as DocumentId;
       const createSolver = (revisionId: RevisionId | null) =>
-        new SketchConstraintSolverAdapter({ documentId, revisionId });
+        new SketchConstraintSolverAdapter({
+          neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+          documentId,
+          revisionId,
+        });
       return createModelingService(
         new OpenCascadeKernelAdapter({
-          solverAdapter: createSolver(null),
-          solverAdapterFactory: createSolver,
+          createSolverAdapter: createSolver,
           getOpenCascadeInstance: async () => oc,
           documentId,
         }),

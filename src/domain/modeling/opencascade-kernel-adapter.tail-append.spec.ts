@@ -1,3 +1,4 @@
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { readFile } from "node:fs/promises";
 import { expect, test, vi } from "vitest";
 
@@ -108,10 +109,12 @@ async function loadOpenCascade() {
 async function createAdapter() {
   const oc = await loadOpenCascade();
   const createSolver = (revisionId: string | null) =>
-    new SketchConstraintSolverAdapter({ revisionId });
+    new SketchConstraintSolverAdapter({
+      neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+      revisionId,
+    });
   return new OpenCascadeKernelAdapter({
-    solverAdapter: createSolver(null),
-    solverAdapterFactory: createSolver,
+    createSolverAdapter: createSolver,
     getOpenCascadeInstance: async () => oc,
   });
 }
@@ -714,10 +717,12 @@ test("restore releases successful and asynchronously rejected projection ownersh
     );
     return new module.default({ wasmBinary });
   })();
-  const rejectingSolver = new RejectingSolverAdapter({ revisionId: null });
+  const rejectingSolver = new RejectingSolverAdapter({
+    neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+    revisionId: null,
+  });
   const rejected = new OpenCascadeKernelAdapter({
-    solverAdapter: rejectingSolver,
-    solverAdapterFactory: () => rejectingSolver,
+    createSolverAdapter: () => rejectingSolver,
     getOpenCascadeInstance: async () => oc,
   });
   const bodyDocument = structuredClone(document);
@@ -920,9 +925,12 @@ test.each([
     const firstLoad = createDeferred<OpenCascadeInstance>();
     let loads = 0;
     const adapter = new OpenCascadeKernelAdapter({
-      solverAdapter: new SketchConstraintSolverAdapter({ revisionId: null }),
-      solverAdapterFactory: (revisionId) =>
-        new SketchConstraintSolverAdapter({ revisionId }),
+      createSolverAdapter: (revisionId) =>
+        new SketchConstraintSolverAdapter({
+          neutralCurveQueries:
+            createCertifiedNeutralCurveQueryCapabilityForTest(),
+          revisionId,
+        }),
       getOpenCascadeInstance: () => {
         loads += 1;
         return loads === 1 ? firstLoad.promise : Promise.resolve(oc);
@@ -1006,10 +1014,12 @@ test("serialized restore prevents a deferred solver from racing a competing repl
     "doc_workspace",
   );
   const oc = await loadOpenCascade();
-  const solver = new DeferredSolverAdapter({ revisionId: null });
+  const solver = new DeferredSolverAdapter({
+    neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+    revisionId: null,
+  });
   const adapter = new OpenCascadeKernelAdapter({
-    solverAdapter: solver,
-    solverAdapterFactory: () => solver,
+    createSolverAdapter: () => solver,
     getOpenCascadeInstance: async () => oc,
   });
   await adapter.restoreAuthoredModelDocument(document);
@@ -1064,7 +1074,12 @@ test("serialized restore prevents a deferred solver from racing a competing repl
 
 test("dispose is final while initialization and restore are suspended", async () => {
   const retrying = new OpenCascadeKernelAdapter({
-    solverAdapter: new SketchConstraintSolverAdapter({ revisionId: null }),
+    createSolverAdapter: () =>
+      new SketchConstraintSolverAdapter({
+        neutralCurveQueries:
+          createCertifiedNeutralCurveQueryCapabilityForTest(),
+        revisionId: null,
+      }),
     getOpenCascadeInstance: async () => {
       throw new Error("runtime should not initialize");
     },
@@ -1110,7 +1125,12 @@ test("dispose is final while initialization and restore are suspended", async ()
   const oc = await loadOpenCascade();
   const deferredOc = createDeferred<OpenCascadeInstance>();
   const initializing = new OpenCascadeKernelAdapter({
-    solverAdapter: new SketchConstraintSolverAdapter({ revisionId: null }),
+    createSolverAdapter: () =>
+      new SketchConstraintSolverAdapter({
+        neutralCurveQueries:
+          createCertifiedNeutralCurveQueryCapabilityForTest(),
+        revisionId: null,
+      }),
     getOpenCascadeInstance: () => deferredOc.promise,
   });
   releaseAllSpy.mockClear();
@@ -1162,10 +1182,12 @@ test("dispose is final while initialization and restore are suspended", async ()
   const document = await new MockKernelAdapter().exportAuthoredModelDocument(
     "doc_workspace",
   );
-  const restoreSolver = new DeferredRestoreSolver({ revisionId: null });
+  const restoreSolver = new DeferredRestoreSolver({
+    neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+    revisionId: null,
+  });
   const restoringAdapter = new OpenCascadeKernelAdapter({
-    solverAdapter: restoreSolver,
-    solverAdapterFactory: () => restoreSolver,
+    createSolverAdapter: () => restoreSolver,
     getOpenCascadeInstance: async () => oc,
   });
   const restoring = restoringAdapter.restoreAuthoredModelDocument(document);

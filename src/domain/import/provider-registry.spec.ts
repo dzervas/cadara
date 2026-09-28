@@ -1,3 +1,5 @@
+import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { test, expect } from "vitest";
 
 import type { ImportProvider } from "@/contracts/import/provider";
@@ -119,6 +121,10 @@ test("src/domain/import/provider-registry.spec.ts", async () => {
         async reconstructMeshToBrep() {
           throw new Error("Not used in provider-registry coverage.");
         },
+        neutralCurveQueries:
+          createCertifiedNeutralCurveQueryCapabilityForTest(),
+        modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+        angularToleranceRadians: OCC_KERNEL_SETTINGS.angularToleranceRadians,
       },
       sketch: {
         async convertVectorToSketch() {

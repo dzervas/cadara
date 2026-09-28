@@ -1,3 +1,7 @@
+import {
+  createCertifiedNeutralCurveQueryCapabilityForTest,
+  createRecordingNeutralCurveQueryCapabilityForTest,
+} from "@/domain/modeling/neutral-curve-certification/query";
 import { readFile } from "node:fs/promises";
 import { expect, test } from "vitest";
 
@@ -139,11 +143,16 @@ test("OCC preserves document tolerance through variable rebuild, snapshot, expor
   document.bodyLabels = [];
 
   let fakeOccInitializations = 0;
+  // Region queries record the tolerance they receive: restore and commit of
+  // this 0.02 document and of a fresh default document must each reach the
+  // queries with their own document modelingTolerance, unchanged.
+  const restoredQueries = createRecordingNeutralCurveQueryCapabilityForTest();
   const solverAdapter = new CapturingToleranceSolverAdapter({
+    neutralCurveQueries: restoredQueries.capability,
     revisionId: null,
   });
   const adapter = new CapturingProjectionOpenCascadeKernelAdapter({
-    solverAdapter,
+    createSolverAdapter: () => solverAdapter,
     getOpenCascadeInstance: async () => {
       fakeOccInitializations += 1;
       return {} as OpenCascadeInstance;
@@ -159,6 +168,15 @@ test("OCC preserves document tolerance through variable rebuild, snapshot, expor
     modelingTolerance: expected.coincidence,
     angularToleranceRadians: expected.angleRadians,
   });
+  expect(
+    restoredQueries.modelingTolerances.length,
+    "OCC restore derives regions through the injected queries.",
+  ).toBeGreaterThan(0);
+  expect(
+    new Set(restoredQueries.modelingTolerances),
+    "OCC restore passes document.settings.modelingTolerance to every query.",
+  ).toEqual(new Set([expected.coincidence]));
+  restoredQueries.modelingTolerances.length = 0;
 
   solverAdapter.requests.length = 0;
   adapter.projectionRequests.length = 0;
@@ -211,6 +229,14 @@ test("OCC preserves document tolerance through variable rebuild, snapshot, expor
   });
   expect(committed.revisionState.kind).toBe("accepted");
   expect(
+    restoredQueries.modelingTolerances.length,
+    "OCC commit derives regions through the injected queries.",
+  ).toBeGreaterThan(0);
+  expect(
+    new Set(restoredQueries.modelingTolerances),
+    "OCC commit passes the runtime authoring-state modelingTolerance to every query.",
+  ).toEqual(new Set([expected.coincidence]));
+  expect(
     adapter.projectionRequests.map((request) => request.tolerances),
   ).toEqual([expected]);
   expect(
@@ -220,9 +246,13 @@ test("OCC preserves document tolerance through variable rebuild, snapshot, expor
     ["solve", expected],
   ]);
 
-  const freshSolver = new CapturingToleranceSolverAdapter({ revisionId: null });
+  const freshQueries = createRecordingNeutralCurveQueryCapabilityForTest();
+  const freshSolver = new CapturingToleranceSolverAdapter({
+    neutralCurveQueries: freshQueries.capability,
+    revisionId: null,
+  });
   const fresh = new CapturingProjectionOpenCascadeKernelAdapter({
-    solverAdapter: freshSolver,
+    createSolverAdapter: () => freshSolver,
     getOpenCascadeInstance: async () => {
       fakeOccInitializations += 1;
       return {} as OpenCascadeInstance;
@@ -264,6 +294,15 @@ test("OCC preserves document tolerance through variable rebuild, snapshot, expor
     ["validate", freshExpected],
     ["solve", freshExpected],
   ]);
+  expect(
+    freshQueries.modelingTolerances.length,
+    "The fresh document's commit derives regions through the injected queries.",
+  ).toBeGreaterThan(0);
+  expect(
+    new Set(freshQueries.modelingTolerances),
+    "A second document with a different tolerance reaches the queries with its own value.",
+  ).toEqual(new Set([freshExpected.coincidence]));
+  expect(freshExpected.coincidence).not.toBe(expected.coincidence);
   expect(fakeOccInitializations).toBeGreaterThan(0);
   fresh.dispose();
   adapter.dispose();
@@ -301,9 +340,12 @@ test("OCC restore/update rebuilds persisted expression-backed sketch and solid",
 
   const oc = await loadCustomOpenCascadeForTest();
   const adapter = new OpenCascadeKernelAdapter({
-    solverAdapter: new PartiallySolvedRestoreSolverAdapter({
-      revisionId: null,
-    }),
+    createSolverAdapter: () =>
+      new PartiallySolvedRestoreSolverAdapter({
+        neutralCurveQueries:
+          createCertifiedNeutralCurveQueryCapabilityForTest(),
+        revisionId: null,
+      }),
     getOpenCascadeInstance: async () => oc,
   });
 

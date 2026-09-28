@@ -13,6 +13,7 @@ import type { RequestId } from "../src/contracts/shared/ids.ts";
 import { CONTRACT_VERSION } from "../src/contracts/shared/versioning.ts";
 import { SOLVER_SCHEMA_VERSION } from "../src/contracts/solver/schema.ts";
 import { SketchConstraintSolverAdapter } from "../src/domain/solver/sketch-constraint-solver-adapter.ts";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "../src/domain/modeling/neutral-curve-certification/query.ts";
 import {
   compileSketchSolveProgram,
   createCompiledSketchSolveSession,
@@ -21,9 +22,10 @@ import {
   type SketchCompiledSolveSession,
 } from "../src/contracts/sketch/solver-core.ts";
 
-const sketchSolver = new SketchConstraintSolverAdapter(
-  SKETCH_SOLVER_BENCHMARK_DOCUMENT,
-);
+const sketchSolver = new SketchConstraintSolverAdapter({
+  ...SKETCH_SOLVER_BENCHMARK_DOCUMENT,
+  neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+});
 let benchmarkSink: { solveState: string } | null = null;
 let interactiveSink: ReturnType<
   typeof updateCompiledSketchSolveSession
@@ -114,6 +116,7 @@ async function evaluateFullSolveAndRegions(fixture: SketchSolverBenchmarkFixture
     definition: fixture.sketch.definition,
     solvedSnapshot: solved.solvedSnapshot,
     projectedReferences: [],
+    modelingTolerance: SKETCH_SOLVER_BENCHMARK_TOLERANCES.coincidence,
   });
   return {
     solveState: solved.status.solveState,

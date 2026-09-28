@@ -398,8 +398,6 @@ export interface SolveSketchRequest extends SketchSolverRequestBase {
   definition: SketchDefinition;
   /** Explicit projected external references available to the solver. */
   projectedReferences: ProjectedSketchReferenceRecord[];
-  /** Optional caller-selected region extraction for workflows that need profiles immediately. */
-  includeRegions?: boolean;
 }
 
 /**
@@ -413,11 +411,6 @@ export interface SolveSketchResponse extends SketchSolverResponseBase {
   solvedSnapshot: SolvedSketchSnapshot;
   /** Diagnostics emitted during validation or solving. */
   diagnostics: SketchSolveDiagnostic[];
-  /** Caller-selected region extraction result when `includeRegions` was requested. */
-  regionResult?: {
-    regions: RegionRecord[];
-    diagnostics: SketchSolveDiagnostic[];
-  };
 }
 
 /**
@@ -558,6 +551,8 @@ export interface DeriveSketchRegionsRequest extends SketchSolverRequestBase {
   definition: SketchDefinition;
   /** Explicit projected external references available to region derivation. */
   projectedReferences: ProjectedSketchReferenceRecord[];
+  /** The document's settings.modelingTolerance (finite, > 0); never a default. */
+  modelingTolerance: number;
 }
 
 /**

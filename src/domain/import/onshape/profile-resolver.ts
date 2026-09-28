@@ -12,19 +12,18 @@ import type {
   SketchId,
 } from "@/contracts/shared/ids";
 import type { SketchPlaneFrame, SketchPlaneKey } from "@/contracts/shared/sketch-plane";
-import {
-  SOLVED_SKETCH_SCHEMA_VERSION,
-  type RegionRecord,
-  type SketchDefinition,
-  type SketchPoint2D,
-  type SolvedSketchEntityGeometryRecord,
-  type SolvedSketchPointRecord,
-  type SolvedSketchSnapshot,
+import type {
+  RegionRecord,
+  SketchDefinition,
+  SketchPoint2D,
+  SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
-import { REGION_POINT_TOLERANCE } from "@/contracts/sketch/region-geometry";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import type { SketchSolverAdapter } from "@/contracts/solver/adapter";
-import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
+import {
+  createDocumentSolverTolerances,
+  SOLVER_SCHEMA_VERSION,
+} from "@/contracts/solver/schema";
 import {
   countContainingRegions,
   selectInnermostContainingRegion,
@@ -33,7 +32,13 @@ import {
 import type { OnshapeSolvedSketch } from "@/domain/import/onshape/bundle-reader";
 import { DEFAULT_MATCH_TOLERANCE } from "@/domain/import/onshape/signature-matcher";
 import { readSketchEntityEdgeQuery } from "@/domain/import/onshape/sketch-point-query-reader";
-import { projectPointToPlane, projectPointToSketchPlaneFrame } from "@/domain/import/onshape/sketch-translator";
+import {
+  definitionForVerificationSolve,
+  projectPointToPlane,
+  projectPointToSketchPlaneFrame,
+  type SketchTranslationResult,
+  verifySketchTranslationSolveConsistency,
+} from "@/domain/import/onshape/sketch-translator";
 import { translateSolvedSketch } from "@/domain/import/onshape/solved-sketch-projection";
 
 export interface ExactProfileEvidenceIdentity {
@@ -108,8 +113,23 @@ export interface ProfileResolutionInput {
     string,
     { tier: string; planeKey: SketchPlaneKey; planeFrame?: SketchPlaneFrame }
   >;
-  /** Region derivation boundary configured for the import verification document. */
-  sketchSolver: Pick<SketchSolverAdapter, "deriveSketchRegions">;
+  /** Region derivation boundary and target-document tolerance for verification. */
+  profileVerifier: ImportProfileVerifier;
+}
+
+/**
+ * Solve and region derivation boundary configured for the import verification
+ * document, plus the target document's `settings.modelingTolerance` and
+ * `settings.angularToleranceRadians`. Verification solves the translated sketch
+ * with the same document tolerance policy a commit uses, so the owner sees the
+ * solver's real constraint statuses; the modeling tolerance also drives every
+ * verification region request and the resolver's own coincidence checks
+ * (T09 U7).
+ */
+export interface ImportProfileVerifier {
+  sketchSolver: Pick<SketchSolverAdapter, "solveSketch" | "deriveSketchRegions">;
+  modelingTolerance: number;
+  angularToleranceRadians: number;
 }
 
 const SKETCH_REGION_REFERENCE =
@@ -141,97 +161,103 @@ function queryCount(profileParameter: unknown): number {
   return Array.isArray(queries) ? queries.length : 0;
 }
 
-function buildSolvedSnapshot(definition: SketchDefinition): SolvedSketchSnapshot {
-  const positionByPointId = new Map(
-    definition.points.map((point) => [point.pointId, point.position] as const),
-  );
-  const solvedEntities: SolvedSketchEntityGeometryRecord[] = [];
-  for (const entity of definition.entities) {
-    if (entity.kind === "lineSegment") {
-      const start = positionByPointId.get(entity.startPointId);
-      const end = positionByPointId.get(entity.endPointId);
-      if (start && end) {
-        solvedEntities.push({
-          entityId: entity.entityId,
-          kind: "lineSegment",
-          startPosition: start,
-          endPosition: end,
-        });
-      }
-    } else if (entity.kind === "circle") {
-      const center = positionByPointId.get(entity.centerPointId);
-      if (center) {
-        solvedEntities.push({
-          entityId: entity.entityId,
-          kind: "circle",
-          centerPosition: center,
-          solvedRadius: entity.radius,
-        });
-      }
-    } else if (entity.kind === "arc") {
-      const center = positionByPointId.get(entity.centerPointId);
-      const start = positionByPointId.get(entity.startPointId);
-      const end = positionByPointId.get(entity.endPointId);
-      if (center && start && end) {
-        solvedEntities.push({
-          entityId: entity.entityId,
-          kind: "arc",
-          centerPosition: center,
-          startPosition: start,
-          endPosition: end,
-          sweepDirection: entity.sweepDirection,
-        });
-      }
-    } else if (entity.kind === "point") {
-      const position = positionByPointId.get(entity.pointId);
-      if (position) {
-        solvedEntities.push({
-          entityId: entity.entityId,
-          kind: "point",
-          solvedPosition: position,
-        });
-      }
-    }
-  }
-
-  const solvedPoints: SolvedSketchPointRecord[] = definition.points.map((point) => ({
-    pointId: point.pointId,
-    target: point.target,
-    solvedPosition: point.position,
-  }));
-
-  return {
-    schemaVersion: SOLVED_SKETCH_SCHEMA_VERSION,
-    status: { solveState: "solved", constraintState: "wellConstrained" },
-    solvedEntities,
-    solvedPoints,
-    constraintStatuses: [],
-    dimensionStatuses: [],
-    diagnostics: [],
-  };
-}
-
 const VERIFICATION_SKETCH_ID = "sketch_import_verification" as SketchId;
 export const IMPORT_VERIFICATION_DOCUMENT_ID = "doc_import_verification" as DocumentId;
 export const IMPORT_VERIFICATION_REVISION_ID = "rev_import_verification" as RevisionId;
 
-async function deriveVerificationRegions(
-  sketchSolver: Pick<SketchSolverAdapter, "deriveSketchRegions">,
-  solvedSnapshot: SolvedSketchSnapshot,
-  definition: SketchDefinition,
-): Promise<RegionRecord[]> {
-  const { regions } = await sketchSolver.deriveSketchRegions({
+type VerificationSketch =
+  | {
+      kind: "derived";
+      solvedSnapshot: SolvedSketchSnapshot;
+      regions: RegionRecord[];
+    }
+  | { kind: "unverifiable"; diagnostic: ProfileResolutionDiagnostic };
+
+function namesProjectedGeometry(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(namesProjectedGeometry);
+  if (typeof value !== "object" || value === null) return false;
+  return (
+    (value as { kind?: unknown }).kind === "projectedGeometry" ||
+    Object.values(value).some(namesProjectedGeometry)
+  );
+}
+
+/**
+ * Solve the translated sketch through the verifier's solver and derive its
+ * regions from the solver's own snapshot and constraint statuses, as a commit
+ * does. The definition first passes the same solve-consistency verification the
+ * provider applies before commit (dropping relationships the captured geometry
+ * does not satisfy and grounding residual rigid mobility), so verification
+ * solves the relationship set the committed sketch carries. Dimensions whose
+ * value needs the document's variables are evaluated only at commit and are
+ * left out of this solve; the captured geometry already satisfies them.
+ * Verification has no projected references, so a sketch that authors a
+ * reference or a relationship on projected geometry (for example
+ * `coincidentProjectedPoint` or `pointOnProjectedCurve`) cannot be evaluated
+ * here and fails closed with an explicit diagnostic.
+ */
+async function deriveVerificationSketch(
+  verifier: ImportProfileVerifier,
+  translation: SketchTranslationResult,
+  sketchFeatureId: string,
+): Promise<VerificationSketch> {
+  const projectedRelationships = [
+    ...translation.definition.constraints
+      .filter(namesProjectedGeometry)
+      .map((constraint) => constraint.constraintId as string),
+    ...translation.definition.dimensions
+      .filter(namesProjectedGeometry)
+      .map((dimension) => dimension.dimensionId as string),
+  ];
+  const referenceCount = translation.definition.references.length;
+  if (referenceCount > 0 || projectedRelationships.length > 0) {
+    return {
+      kind: "unverifiable",
+      diagnostic: {
+        code: "onshape-region-verification-projection-unavailable",
+        message: `Region verification of sketch ${sketchFeatureId} has no projected references, so its ${referenceCount} reference(s) and projected-geometry relationships [${projectedRelationships.join(", ")}] cannot be evaluated.`,
+      },
+    };
+  }
+  const verified = await verifySketchTranslationSolveConsistency({
+    solver: verifier.sketchSolver,
     contractVersion: CONTRACT_VERSION,
-    solverSchemaVersion: SOLVER_SCHEMA_VERSION,
-    requestId: "request_import_verification_regions" as RequestId,
     documentId: IMPORT_VERIFICATION_DOCUMENT_ID,
     revisionId: IMPORT_VERIFICATION_REVISION_ID,
     sketchId: VERIFICATION_SKETCH_ID,
-    solvedSnapshot,
+    plane: translation.plane,
+    definition: translation.definition,
+    projectedReferences: [],
+    relationshipSummary: translation.relationshipSummary,
+    sourceSolveStatus: translation.sourceSolveStatus,
+  });
+  const definition: SketchDefinition = {
+    ...definitionForVerificationSolve(verified.definition),
+    references: [],
+  };
+  const base = {
+    contractVersion: CONTRACT_VERSION,
+    solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+    documentId: IMPORT_VERIFICATION_DOCUMENT_ID,
+    revisionId: IMPORT_VERIFICATION_REVISION_ID,
+    sketchId: VERIFICATION_SKETCH_ID,
     definition,
     projectedReferences: [],
+  };
+  const solved = await verifier.sketchSolver.solveSketch({
+    ...base,
+    requestId: "request_import_verification_solve" as RequestId,
+    plane: translation.plane.frame,
+    tolerances: createDocumentSolverTolerances(verifier),
+    partialSolvePolicy: "bestEffort",
   });
-  return regions;
+  const { regions } = await verifier.sketchSolver.deriveSketchRegions({
+    ...base,
+    requestId: "request_import_verification_regions" as RequestId,
+    solvedSnapshot: solved.solvedSnapshot,
+    modelingTolerance: verifier.modelingTolerance,
+  });
+  return { kind: "derived", solvedSnapshot: solved.solvedSnapshot, regions };
 }
 
 function* legacyInteriorPoint(selectionSketch: RegionSelectionSketch) {
@@ -252,7 +278,7 @@ function* legacyInteriorPoint(selectionSketch: RegionSelectionSketch) {
       }
       continue;
     }
-    const source = outer.segments[0]?.source;
+    const source = outer.segments[0]?.branch.source;
     const entity = source?.kind === "entity"
       ? selectionSketch.definition.entities.find((candidate) => candidate.entityId === source.entityId)
       : undefined;
@@ -284,13 +310,21 @@ async function resolveLegacyNonExtrudeProfiles(
     label: sketchFeatureId,
     planeKey: referencedSketch.planeKey,
     planeFrame: referencedSketch.planeFrame,
+    constraints: solved.constraints,
   });
-  const solvedSnapshot = buildSolvedSnapshot(translation.definition);
-  const regions = await deriveVerificationRegions(
-    input.sketchSolver,
-    solvedSnapshot,
-    translation.definition,
+  const verification = await deriveVerificationSketch(
+    input.profileVerifier,
+    translation,
+    sketchFeatureId,
   );
+  if (verification.kind === "unverifiable") {
+    return {
+      tier: "unresolved",
+      reason: "needs-region-resolution",
+      diagnostics: [verification.diagnostic],
+    };
+  }
+  const { solvedSnapshot, regions } = verification;
   const selectionSketch: RegionSelectionSketch = {
     regions: regions.filter((region) => region.isClosed),
     solvedPoints: new Map(
@@ -310,7 +344,7 @@ async function resolveLegacyNonExtrudeProfiles(
 }
 
 function loopIdentity(loop: RegionRecord["loops"][number]): string {
-  return JSON.stringify(loop.segments.map((segment) => segment.source));
+  return JSON.stringify(loop.segments.map((segment) => segment.branch.source));
 }
 
 /**
@@ -333,7 +367,7 @@ function circleLoopGeometry(
   loop: RegionRecord["loops"][number],
 ): { center: SketchPoint2D; radius: number } | null {
   if (loop.segments.length !== 1) return null;
-  const source = loop.segments[0]?.source;
+  const source = loop.segments[0]?.branch.source;
   if (source?.kind !== "entity") return null;
   const entity = sketch.definition.entities.find(
     (candidate) => candidate.entityId === source.entityId,
@@ -346,6 +380,7 @@ function circleLoopGeometry(
 function concentricAnnulusCandidates(
   sketch: RegionSelectionSketch,
   region: RegionRecord,
+  modelingTolerance: number,
 ): SketchPoint2D[] {
   const outerLoop = region.loops.find((loop) => loop.role === "outer");
   const innerLoops = region.loops.filter((loop) => loop.role === "inner");
@@ -358,8 +393,8 @@ function concentricAnnulusCandidates(
     Math.hypot(
       outer.center[0] - inner.center[0],
       outer.center[1] - inner.center[1],
-    ) > REGION_POINT_TOLERANCE ||
-    outer.radius - inner.radius <= REGION_POINT_TOLERANCE
+    ) > modelingTolerance ||
+    outer.radius - inner.radius <= modelingTolerance
   ) return [];
   const radius = (outer.radius + inner.radius) / 2;
   return ([[1, 0], [0, 1], [-1, 0], [0, -1]] as const).map(
@@ -370,13 +405,18 @@ function concentricAnnulusCandidates(
 function verifiedRegionSelector(
   sketch: RegionSelectionSketch,
   region: RegionRecord,
+  modelingTolerance: number,
 ): SketchPoint2D | null {
   const candidates = new Map<string, SketchPoint2D>();
   const add = (point: SketchPoint2D) => {
     const key = `${point[0]},${point[1]}`;
     candidates.set(key, point);
   };
-  for (const point of concentricAnnulusCandidates(sketch, region)) add(point);
+  for (const point of concentricAnnulusCandidates(
+    sketch,
+    region,
+    modelingTolerance,
+  )) add(point);
   const points = [...sketch.solvedPoints.values()];
   for (const point of points) add([point[0], point[1]]);
   for (const entity of sketch.definition.entities) {
@@ -446,13 +486,18 @@ async function resolveSketchRegionSet(input: {
     label: sketchFeatureId,
     planeKey: referencedSketch.planeKey,
     planeFrame: referencedSketch.planeFrame,
+    constraints: solved.constraints,
   });
-  const solvedSnapshot = buildSolvedSnapshot(translation.definition);
-  const regions = await deriveVerificationRegions(
-    input.resolution.sketchSolver,
-    solvedSnapshot,
-    translation.definition,
+  const verification = await deriveVerificationSketch(
+    input.resolution.profileVerifier,
+    translation,
+    sketchFeatureId,
   );
+  if (verification.kind === "unverifiable") {
+    input.diagnostics.push(verification.diagnostic);
+    return null;
+  }
+  const { solvedSnapshot, regions } = verification;
   const selectionSketch: RegionSelectionSketch = {
     regions: regions.filter((region) => region.isClosed),
     solvedPoints: new Map(
@@ -475,7 +520,11 @@ async function resolveSketchRegionSet(input: {
     : selectionSketch.regions;
   const selectors = targetRegions.map((region) => ({
     region,
-    interiorPoint: verifiedRegionSelector(selectionSketch, region),
+    interiorPoint: verifiedRegionSelector(
+      selectionSketch,
+      region,
+      input.resolution.profileVerifier.modelingTolerance,
+    ),
   }));
   if (
     targetRegions.length === 0 ||
@@ -523,13 +572,18 @@ async function resolveSketchProfile(input: {
     label: sketchFeatureId,
     planeKey: referencedSketch.planeKey,
     planeFrame: referencedSketch.planeFrame,
+    constraints: solved.constraints,
   });
-  const solvedSnapshot = buildSolvedSnapshot(translation.definition);
-  const regions = await deriveVerificationRegions(
-    input.resolution.sketchSolver,
-    solvedSnapshot,
-    translation.definition,
+  const verification = await deriveVerificationSketch(
+    input.resolution.profileVerifier,
+    translation,
+    sketchFeatureId,
   );
+  if (verification.kind === "unverifiable") {
+    input.diagnostics.push(verification.diagnostic);
+    return null;
+  }
+  const { solvedSnapshot, regions } = verification;
   const selectionSketch: RegionSelectionSketch = {
     regions: regions.filter((region) => region.isClosed),
     solvedPoints: new Map(
@@ -714,10 +768,14 @@ function entityEndpoints(
   });
 }
 
-function arePointsCoincident(left: SketchPoint2D, right: SketchPoint2D): boolean {
+function arePointsCoincident(
+  left: SketchPoint2D,
+  right: SketchPoint2D,
+  modelingTolerance: number,
+): boolean {
   return (
-    Math.abs(left[0] - right[0]) <= REGION_POINT_TOLERANCE &&
-    Math.abs(left[1] - right[1]) <= REGION_POINT_TOLERANCE
+    Math.abs(left[0] - right[0]) <= modelingTolerance &&
+    Math.abs(left[1] - right[1]) <= modelingTolerance
   );
 }
 
@@ -731,6 +789,7 @@ function arePointsCoincident(left: SketchPoint2D, right: SketchPoint2D): boolean
 function formsOneConnectedChain(
   entities: readonly SketchDefinition["entities"][number][],
   definition: SketchDefinition,
+  modelingTolerance: number,
 ): boolean {
   if (entities.length === 0) return false;
   if (entities.length === 1) return true;
@@ -741,7 +800,9 @@ function formsOneConnectedChain(
   const nodes: Array<{ position: SketchPoint2D; degree: number }> = [];
   const nodeIndexes = endpointsByEntity.map((endpoints) =>
     endpoints.map((position) => {
-      const existing = nodes.findIndex((node) => arePointsCoincident(node.position, position));
+      const existing = nodes.findIndex((node) =>
+        arePointsCoincident(node.position, position, modelingTolerance),
+      );
       if (existing >= 0) {
         nodes[existing]!.degree += 1;
         return existing;
@@ -800,7 +861,7 @@ export async function resolveOnshapeOpenSketchCurveProfiles(input: {
     string,
     { tier: string; planeKey: SketchPlaneKey; planeFrame?: SketchPlaneFrame }
   >;
-  sketchSolver: Pick<SketchSolverAdapter, "deriveSketchRegions">;
+  profileVerifier: ImportProfileVerifier;
 }): Promise<OpenSketchCurveResolutionResult> {
   const diagnostics: ProfileResolutionDiagnostic[] = [];
   const label = `${input.featureKind} "${input.featureLabel}"`;
@@ -857,18 +918,22 @@ export async function resolveOnshapeOpenSketchCurveProfiles(input: {
     label: sketchFeatureId,
     planeKey: referencedSketch.planeKey,
     planeFrame: referencedSketch.planeFrame,
+    constraints: solved.constraints,
   });
 
   const selected: SketchDefinition["entities"][number][] = [];
   for (const entry of readable) {
     if (entry.form === "wholeSketchWire") {
-      const solvedSnapshot = buildSolvedSnapshot(translation.definition);
-      const regions = await deriveVerificationRegions(
-        input.sketchSolver,
-        solvedSnapshot,
-        translation.definition,
+      const verification = await deriveVerificationSketch(
+        input.profileVerifier,
+        translation,
+        sketchFeatureId,
       );
-      if (regions.some((region) => region.isClosed)) {
+      if (verification.kind === "unverifiable") {
+        diagnostics.push(verification.diagnostic);
+        return { tier: "unresolved", diagnostics };
+      }
+      if (verification.regions.some((region) => region.isClosed)) {
         return unresolved(
           "onshape-surface-profile-wire-filter-ambiguous",
           `The whole-sketch wire query for ${label} names sketch ${sketchFeatureId}, which derives closed regions; the exact BodyType.WIRE selection cannot be read from the capture.`,
@@ -896,7 +961,13 @@ export async function resolveOnshapeOpenSketchCurveProfiles(input: {
   const unique = [
     ...new Map(selected.map((entity) => [entity.entityId, entity])).values(),
   ];
-  if (!formsOneConnectedChain(unique, translation.definition)) {
+  if (
+    !formsOneConnectedChain(
+      unique,
+      translation.definition,
+      input.profileVerifier.modelingTolerance,
+    )
+  ) {
     return unresolved(
       "onshape-surface-profile-chain-disconnected",
       `The surface profile entities for ${label} do not form exactly one connected chain.`,

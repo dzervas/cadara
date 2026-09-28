@@ -24,13 +24,15 @@ import {
   type ValidateSketchResponse,
 } from "@/contracts/solver/schema";
 import { validateSketchSolverEnvelope } from "@/contracts/solver/runtime-schema";
+import type { NeutralCurveQueryCapability } from "@/contracts/modeling/neutral-curve-query";
 import {
   compileSketchSolveProgram,
   createCompiledSketchSolveSession,
-  deriveSketchRegionsCore,
+  createSketchArrangementDeriver,
   solveSketchDefinitionCore,
   updateCompiledSketchSolveSession,
   validateSketchDefinitionCore,
+  type SketchArrangementDeriver,
   type SketchCompiledSolveSession,
   type ProjectedSketchGeometryRef,
   type SketchSolveDiagnostic,
@@ -41,6 +43,8 @@ import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 export interface SketchConstraintSolverAdapterOptions {
   documentId: DocumentId;
   revisionId: RevisionId | null;
+  /** The selected kernel's neutral curve queries; only `deriveSketchRegions` uses them. */
+  neutralCurveQueries: NeutralCurveQueryCapability;
 }
 
 interface StoredInteractiveSolveSession {
@@ -50,10 +54,10 @@ interface StoredInteractiveSolveSession {
   sketchId: StartInteractiveSketchSolveSessionRequest["sketchId"];
 }
 
-const DEFAULT_OPTIONS: SketchConstraintSolverAdapterOptions = {
+const DEFAULT_OPTIONS = {
   documentId: "doc_workspace",
   revisionId: "rev_0001",
-};
+} satisfies Partial<SketchConstraintSolverAdapterOptions>;
 
 function makeResponseBase(
   request:
@@ -160,6 +164,19 @@ function assertSupportedRequest(
   }
 }
 
+/** Region requests carry the document's modeling tolerance; there is no default. */
+export function assertDocumentModelingTolerance(modelingTolerance: unknown) {
+  if (
+    typeof modelingTolerance !== "number" ||
+    !Number.isFinite(modelingTolerance) ||
+    modelingTolerance <= 0
+  ) {
+    throw new RangeError(
+      `Region derivation requires the document modelingTolerance as a positive finite number; received ${String(modelingTolerance)}.`,
+    );
+  }
+}
+
 export class SketchConstraintSolverAdapter implements SketchSolverAdapter {
   private readonly options: SketchConstraintSolverAdapterOptions;
   private readonly interactiveSessions = new Map<
@@ -167,9 +184,16 @@ export class SketchConstraintSolverAdapter implements SketchSolverAdapter {
     StoredInteractiveSolveSession
   >();
   private nextInteractiveSessionSequence = 1;
+  private readonly regionDeriver: SketchArrangementDeriver;
 
-  constructor(options: Partial<SketchConstraintSolverAdapterOptions> = {}) {
+  constructor(
+    options: Partial<Omit<SketchConstraintSolverAdapterOptions, "neutralCurveQueries">> &
+      Pick<SketchConstraintSolverAdapterOptions, "neutralCurveQueries">,
+  ) {
     this.options = { ...DEFAULT_OPTIONS, ...options };
+    this.regionDeriver = createSketchArrangementDeriver(
+      options.neutralCurveQueries,
+    );
   }
 
   async projectExternalReferences(
@@ -210,30 +234,12 @@ export class SketchConstraintSolverAdapter implements SketchSolverAdapter {
       tolerances: request.tolerances,
       partialSolvePolicy: request.partialSolvePolicy,
     });
-    const regionResult = request.includeRegions
-      ? deriveSketchRegionsCore({
-          documentId: request.documentId,
-          revisionId: request.revisionId,
-          sketchId: request.sketchId,
-          solvedSnapshot: solved.solvedSnapshot,
-          definition: request.definition,
-          projectedReferences: request.projectedReferences,
-        })
-      : null;
 
     return {
       ...makeResponseBase(request),
       status: solved.status,
       solvedSnapshot: solved.solvedSnapshot,
       diagnostics: solved.diagnostics,
-      ...(regionResult
-        ? {
-            regionResult: {
-              regions: regionResult.regions,
-              diagnostics: regionResult.diagnostics,
-            },
-          }
-        : {}),
     };
   }
 
@@ -447,13 +453,15 @@ export class SketchConstraintSolverAdapter implements SketchSolverAdapter {
     request: DeriveSketchRegionsRequest,
   ): Promise<DeriveSketchRegionsResponse> {
     assertSupportedRequest(request, this.options);
-    const derived = deriveSketchRegionsCore({
+    assertDocumentModelingTolerance(request.modelingTolerance);
+    const derived = await this.regionDeriver.derive({
       documentId: request.documentId,
       revisionId: request.revisionId,
       sketchId: request.sketchId,
       solvedSnapshot: request.solvedSnapshot,
       definition: request.definition,
       projectedReferences: request.projectedReferences,
+      modelingTolerance: request.modelingTolerance,
     });
     return {
       ...makeResponseBase(request),

@@ -168,14 +168,43 @@ export function createCertifiedNeutralCurveQuery(): CertifiedNeutralCurveJoinQue
   return createQuery();
 }
 
-/** Test-only async capability over the kernel-free dispatcher (all three operations). */
-export async function createCertifiedNeutralCurveQueryCapabilityForTest(): Promise<NeutralCurveQueryCapability> {
+/** Test-only capability over the kernel-free dispatcher (all three operations, each async). */
+export function createCertifiedNeutralCurveQueryCapabilityForTest(): NeutralCurveQueryCapability {
   const query = createQuery();
   return {
     queryNeutralCurves: async (request) => query.queryPair(request),
     queryNeutralCurveSelfIntersections: async (request) =>
       query.querySelf(request),
     queryNeutralCurveJoin: async (request) => query.queryJoin(request),
+  };
+}
+
+/**
+ * Test-only certified capability that records the `modelingTolerance` of every
+ * request it answers, for proving document-tolerance threading end to end.
+ */
+export function createRecordingNeutralCurveQueryCapabilityForTest(): {
+  capability: NeutralCurveQueryCapability;
+  modelingTolerances: number[];
+} {
+  const inner = createCertifiedNeutralCurveQueryCapabilityForTest();
+  const modelingTolerances: number[] = [];
+  return {
+    modelingTolerances,
+    capability: {
+      queryNeutralCurves: (request) => {
+        modelingTolerances.push(request.modelingTolerance);
+        return inner.queryNeutralCurves(request);
+      },
+      queryNeutralCurveSelfIntersections: (request) => {
+        modelingTolerances.push(request.modelingTolerance);
+        return inner.queryNeutralCurveSelfIntersections(request);
+      },
+      queryNeutralCurveJoin: (request) => {
+        modelingTolerances.push(request.modelingTolerance);
+        return inner.queryNeutralCurveJoin(request);
+      },
+    },
   };
 }
 
