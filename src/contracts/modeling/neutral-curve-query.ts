@@ -423,11 +423,19 @@ export type CubicTubeChainJoin =
 
 /** Per-emitted-cubic J2′ report; never conflates the three quantities. */
 export interface CubicTubeChainLeaf {
-  /** ε* = ε + both end corrections (sum). NOT the full bound on a convex-END leaf. */
+  /**
+   * ε* = ε + both end corrections (sum). NOT the full bound on a convex-END
+   * leaf. On a leaf of a `graph-trim` it is instead the S2 max-form sup bound
+   * up(max(ε + c_far, G_own, w_other)): the far-end corrected error, the glue
+   * bound of its own side and the OTHER side's vertical deviation (switch-
+   * region points map onto the other piece). Rounded up, it may exceed the
+   * leaf's displacementBound = τ by an ulp; both are valid upper bounds.
+   */
   readonly baseErrorStar: number;
   /**
    * Proved sup |E − Φ| against the declared-join-corrected reference O*: exactly
-   * the modeling tolerance on a convex-END leaf (arc reserve, slack 0), else ε*.
+   * the modeling tolerance on a convex-END leaf (arc reserve, slack 0) and on
+   * a `graph-trim` leaf (strict glue reserve), else ε*.
    */
   readonly displacementBound: number;
   /** K3 radius r = ε + δ⁺ of each convex end (concave tails are never added). */
@@ -552,7 +560,34 @@ export interface TubeChainTrimJoin {
   readonly tail: number;
 }
 
-export type TubePieceChainJoin = CubicTubeChainJoin | TubeChainTrimJoin;
+/**
+ * S2 graph trim at a concave cubic↔cubic joint (terminal leaves only). Both
+ * terminal leaves are e-graphs (emitted hodograph and true O′ box strictly
+ * e-positive); the certificate concerns ONLY the abstract chain trimmed at the
+ * exact (unknown) witnessed root of `jointIndex`, against the two pieces' true
+ * offsets each trimmed at their unique common point. Bounds enclose the TRUE-
+ * offset root, outward, in each leaf's natural Bézier τ. No representative
+ * parameter or position is claimed; rounded emitted ends are NOT claimed to
+ * connect (emitted representation and JVP remain a later batch's obligation).
+ */
+export interface TubeChainGraphTrimJoin {
+  readonly kind: "graph-trim";
+  readonly jointIndex: number;
+  /** Flattened leaf indices (traversal-first piece's terminal leaf first). */
+  readonly first: number;
+  readonly second: number;
+  /** Binary64 graph direction e (sum of the two traversal chords). */
+  readonly direction: SplineVector;
+  readonly firstRootBounds: readonly [number, number];
+  readonly secondRootBounds: readonly [number, number];
+  /** σ, outward down: the proved true-slope separation on the vertex windows. */
+  readonly separation: number;
+}
+
+export type TubePieceChainJoin =
+  | CubicTubeChainJoin
+  | TubeChainTrimJoin
+  | TubeChainGraphTrimJoin;
 
 /** Leaves are flattened per piece in traversal order, natural order inside a piece. */
 export type TubePieceChainResult =

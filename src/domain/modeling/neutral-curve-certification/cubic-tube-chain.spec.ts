@@ -2293,7 +2293,7 @@ describe("piece tube chain (L1b): Lemma-T trims under one meter", () => {
     });
   });
 
-  test("a trim between two cubic pieces is not covered by the line-curve lemma", () => {
+  test("a cubic↔cubic trim is no longer unsupported: a collinear pair fails the H2 side gate", () => {
     const tube = pieceTube(straight(0, 1), LINE_SOURCE, POSITIVE_X, 0.125);
     expect(
       certifier.certifyPieceChain(
@@ -2305,7 +2305,11 @@ describe("piece tube chain (L1b): Lemma-T trims under one meter", () => {
           },
         ),
       ),
-    ).toMatchObject({ code: "trim-pair-unsupported" });
+    ).toMatchObject({
+      kind: "uncertain",
+      code: "trim-side-unproven",
+      message: expect.stringContaining("not concave"),
+    });
   });
   // Literal whole-chain meters, measured once on the baseline implementation
   // (evidence piece-meter-measurement.log) and pinned: a per-piece, per-trim
@@ -2528,6 +2532,785 @@ describe("piece tube chain (L1b): Lemma-T trims under one meter", () => {
       first: 0,
     });
   });
+});
+
+describe("piece tube chain (S2): cubic↔cubic graph trims (certifier-input fixtures, not owner-reachable)", () => {
+  type Vector = readonly [number, number];
+  const H = 1 / 16;
+  /** Straight source leg: poles start + i·step (exact for dyadic data). */
+  const legPoles = (start: Vector, step: Vector): SplinePoles =>
+    [0, 1, 2, 3].map((index) => [
+      start[0] + index * step[0],
+      start[1] + index * step[1],
+    ]) as unknown as SplinePoles;
+  /** Exact hodograph hull 3·(Pᵢ₊₁ − Pᵢ) of a dyadic source (O′ = S′ when straight). */
+  const hodographBox = (poles: SplinePoles): Box =>
+    ([0, 1] as const).map((axis) => {
+      const steps = [0, 1, 2].map(
+        (index) => 3 * (poles[index + 1]![axis] - poles[index]![axis]),
+      );
+      return [Math.min(...steps), Math.max(...steps)] as const;
+    }) as unknown as Box;
+  interface Leg {
+    readonly source: SplinePoles;
+    /** d·N of the natural source, exact where dyadic. */
+    readonly offset: Vector;
+    readonly error: number;
+    readonly box?: Box;
+    readonly emitted?: SplinePoles;
+  }
+  const tubeOf = (
+    leg: Leg,
+    ownerDistance: number,
+    splineId: string,
+  ): NeutralCubicPieceTube => ({
+    poles:
+      leg.emitted ??
+      (leg.source.map(([x, y]) => [
+        x + leg.offset[0],
+        y + leg.offset[1],
+      ]) as unknown as SplinePoles),
+    certifiedError: leg.error,
+    reference: {
+      derivative: leg.box ?? hodographBox(leg.source),
+      sourcePoles: leg.source,
+      distance: ownerDistance,
+    },
+    source: {
+      splineId,
+      spanIndex: 0,
+      startOccurrenceId: `${splineId}-o0`,
+      endOccurrenceId: `${splineId}-o1`,
+    },
+    sourceLocalInterval: [0, 1],
+    queryDomain: [0, 1],
+  });
+  const bezier = (poles: SplinePoles, u: number): Vector => {
+    const w = [(1 - u) ** 3, 3 * u * (1 - u) ** 2, 3 * u * u * (1 - u), u ** 3];
+    return [0, 1].map((axis) =>
+      poles.reduce((sum, pole, index) => sum + w[index]! * pole[axis]!, 0),
+    ) as unknown as Vector;
+  };
+  const bezierDerivative = (poles: SplinePoles, u: number): Vector => {
+    const w = [(1 - u) ** 2, 2 * u * (1 - u), u * u];
+    return [0, 1].map(
+      (axis) =>
+        3 *
+        [0, 1, 2].reduce(
+          (sum, index) =>
+            sum + w[index]! * (poles[index + 1]![axis]! - poles[index]![axis]!),
+          0,
+        ),
+    ) as unknown as Vector;
+  };
+  /** Float Newton for the emitted crossing (natural τ), test oracle only. */
+  const emittedCrossing = (
+    first: SplinePoles,
+    second: SplinePoles,
+    start: Vector,
+  ): Vector => {
+    let [u, v] = start;
+    for (let step = 0; step < 60; step += 1) {
+      const p = bezier(first, u);
+      const q = bezier(second, v);
+      const a = bezierDerivative(first, u);
+      const b = bezierDerivative(second, v);
+      const r = [p[0] - q[0], p[1] - q[1]];
+      const det = -a[0] * b[1] + a[1] * b[0];
+      u -= (-r[0] * b[1] + r[1] * b[0]) / det;
+      v -= (a[0] * r[1] - a[1] * r[0]) / det;
+    }
+    return [u, v];
+  };
+  const PAD = 1e-9;
+  /**
+   * Two one-leaf cubic pieces P → Q meeting at a declared vertex; the stored
+   * trim bounds enclose the float emitted crossing ± PAD. `reversed` flips a
+   * piece's natural data (poles reversed, owner distance −d, same geometry).
+   */
+  const graphRequest = ({
+    first,
+    second,
+    distance,
+    modelingTolerance = TOLERANCE,
+    reversed = [false, false],
+    guess = [0.9, 0.1],
+    bounds,
+  }: {
+    first: Leg;
+    second: Leg;
+    distance: number;
+    modelingTolerance?: number;
+    reversed?: readonly [boolean, boolean];
+    guess?: Vector;
+    bounds?: readonly [Vector, Vector];
+  }): PieceTubeChainRequest => {
+    const natural = (leg: Leg, flip: boolean): Leg =>
+      flip
+        ? {
+            ...leg,
+            source: [...leg.source].reverse() as unknown as SplinePoles,
+            ...(leg.emitted
+              ? {
+                  emitted: [...leg.emitted].reverse() as unknown as SplinePoles,
+                }
+              : {}),
+            ...(leg.box
+              ? {
+                  box: leg.box.map(
+                    ([low, high]) => [-high, -low] as const,
+                  ) as unknown as Box,
+                }
+              : {}),
+          }
+        : leg;
+    const tubes = [first, second].map((leg, index) =>
+      tubeOf(
+        natural(leg, reversed[index]!),
+        reversed[index] ? -distance : distance,
+        index === 0 ? "P" : "Q",
+      ),
+    );
+    const traversal = (value: number, index: number) =>
+      reversed[index] ? 1 - value : value;
+    const [u, v] = emittedCrossing(tubes[0]!.poles, tubes[1]!.poles, [
+      traversal(guess[0], 0),
+      traversal(guess[1], 1),
+    ]);
+    return {
+      modelingTolerance,
+      closed: false,
+      distance,
+      pieces: tubes.map((tube, index) => ({
+        kind: "cubic" as const,
+        reversed: reversed[index]!,
+        tubes: [tube],
+      })),
+      trims: [
+        {
+          jointIndex: 0,
+          firstParameterBounds: bounds?.[0] ?? [u! - PAD, u! + PAD],
+          secondParameterBounds: bounds?.[1] ?? [v! - PAD, v! + PAD],
+        },
+      ],
+    };
+  };
+  /**
+   * Straight 3-4-5 legs into and out of the origin: P along (4, −3), Q along
+   * (4, 3), a left turn of 2·atan(3/4), concave at d > 0. d = 5/64 makes
+   * d·N = (±3/64, 1/16) exact, so the emitted legs ARE the true offsets and
+   * the true slopes are exactly ∓3/4 and 3/4 against e = (24h, 0).
+   */
+  const D = 5 / 64;
+  const P_LEG = (h = H): Leg => ({
+    source: legPoles([-12 * h, 9 * h], [4 * h, -3 * h]),
+    offset: [3 / 64, 1 / 16],
+    error: 2 ** -11,
+  });
+  const Q_LEG = (h = H): Leg => ({
+    source: legPoles([0, 0], [4 * h, 3 * h]),
+    offset: [-3 / 64, 1 / 16],
+    error: 2 ** -30,
+  });
+  const graphVerified = (request: PieceTubeChainRequest) => {
+    const result = certifier.certifyPieceChain(request);
+    if (result.kind !== "verified")
+      throw new Error(`${result.kind} ${result.code}: ${result.message}`);
+    return result.certificate;
+  };
+
+  test("baseline and T1: a concave straight-leg pair verifies; the ASYMMETRIC star of B₀ carries w_A (A1)", () => {
+    const request = graphRequest({
+      first: P_LEG(),
+      second: Q_LEG(),
+      distance: D,
+    });
+    const certificate = graphVerified(request);
+    expect(certificate.joins).toHaveLength(1);
+    const join = certificate.joins[0]!;
+    if (join.kind !== "graph-trim") throw new Error("graph trim");
+    expect(Object.keys(join).sort()).toEqual([
+      "direction",
+      "first",
+      "firstRootBounds",
+      "jointIndex",
+      "kind",
+      "second",
+      "secondRootBounds",
+      "separation",
+    ]);
+    expect(join).toMatchObject({
+      jointIndex: 0,
+      first: 0,
+      second: 1,
+      direction: [24 * H, 0],
+    });
+    // True slopes ∓3/4 and 3/4 exactly: σ = 3/2 (outward down).
+    expect(join.separation).toBe(1.5);
+    // The exact true crossing (0, 5d/4) is at u* = 15/16, v* = 1/16.
+    expect(join.firstRootBounds[0]).toBeLessThan(15 / 16);
+    expect(join.firstRootBounds[1]).toBeGreaterThan(15 / 16);
+    expect(join.secondRootBounds[0]).toBeLessThan(1 / 16);
+    expect(join.secondRootBounds[1]).toBeGreaterThan(1 / 16);
+    for (const leaf of certificate.leaves)
+      expect(leaf.displacementBound).toBe(TOLERANCE);
+    // T1 (A1): ε_B ≪ ε_A; B₀'s switch-region points map onto the TRUE P, so
+    // its star is at least w_A = ε_A·√(1 + (3/4)²) = (5/4)·2⁻¹¹, not its own G.
+    const wA = (5 / 4) * 2 ** -11;
+    expect(certificate.leaves[1]!.baseErrorStar).toBeGreaterThanOrEqual(wA);
+    expect(certificate.leaves[0]!.baseErrorStar).toBeGreaterThanOrEqual(wA);
+    expect(certificate.clearedPairs).toEqual([]);
+  });
+
+  test("exact reversal and mirror: a reversed P and the mirrored d < 0 pair verify with the same record", () => {
+    const reversed = graphVerified(
+      graphRequest({
+        first: P_LEG(),
+        second: Q_LEG(),
+        distance: D,
+        reversed: [true, false],
+      }),
+    );
+    expect(reversed.joins[0]).toMatchObject({
+      kind: "graph-trim",
+      first: 0,
+      second: 1,
+      direction: [24 * H, 0],
+      separation: 1.5,
+    });
+    const mirror = (leg: Leg): Leg => ({
+      ...leg,
+      source: leg.source.map(([x, y]) => [x, -y]) as unknown as SplinePoles,
+      offset: [leg.offset[0], -leg.offset[1]],
+    });
+    const mirrored = graphVerified(
+      graphRequest({
+        first: mirror(P_LEG()),
+        second: mirror(Q_LEG()),
+        distance: -D,
+        reversed: [false, true],
+      }),
+    );
+    expect(mirrored.joins[0]).toMatchObject({
+      kind: "graph-trim",
+      direction: [24 * H, 0],
+      separation: 1.5,
+    });
+  });
+
+  test("§8-1 strict glue: G = w = τ exactly (L = 3/4, ε = 2⁻¹⁰, τ = 5·2⁻¹²) is rejected; one ulp more τ verifies", () => {
+    const first = { ...P_LEG(), error: 2 ** -10 };
+    const tau = 5 * 2 ** -12;
+    expect(
+      certifier.certifyPieceChain(
+        graphRequest({
+          first,
+          second: Q_LEG(),
+          distance: D,
+          modelingTolerance: tau,
+        }),
+      ),
+    ).toMatchObject({
+      kind: "uncertain",
+      code: "trim-composition-unproven",
+      message: expect.stringContaining("glue bound is not strictly below"),
+      first: 0,
+    });
+    graphVerified(
+      graphRequest({
+        first,
+        second: Q_LEG(),
+        distance: D,
+        modelingTolerance: nextBinary64(tau, "up", new ExactProofBudget()),
+      }),
+    );
+  });
+
+  test("glue ΔS term: a loose honest P box (slopes [−5/4, 5/8]) keeps w < τ but w + ΔS·ε/4 ≥ τ", () => {
+    const first: Leg = {
+      ...P_LEG(),
+      box: [
+        [0.5, 1],
+        [-0.625, 0.3125],
+      ],
+    };
+    expect(
+      certifier.certifyPieceChain(
+        graphRequest({
+          first,
+          second: Q_LEG(),
+          distance: D,
+          modelingTolerance: 2 ** -10,
+        }),
+      ),
+    ).toMatchObject({
+      code: "trim-composition-unproven",
+      message: expect.stringContaining("glue bound"),
+      first: 0,
+    });
+  });
+
+  test("§8-4 Lemma X: a δ-window reaching the true domain end is trim-existence-unproven", () => {
+    const small = 5 * 2 ** -12;
+    expect(
+      certifier.certifyPieceChain(
+        graphRequest({
+          first: { ...P_LEG(), offset: [3 * 2 ** -12, 2 ** -10] },
+          second: {
+            ...Q_LEG(),
+            offset: [-3 * 2 ** -12, 2 ** -10],
+            error: 2 ** -11,
+          },
+          distance: small,
+        }),
+      ),
+    ).toMatchObject({
+      code: "trim-existence-unproven",
+      message: expect.stringContaining(
+        "cross once inside both terminal leaves",
+      ),
+    });
+  });
+
+  test("§8-5 G2: a B₀ derivative box reaching e·v ≤ 0 is trim-window-unproven", () => {
+    expect(
+      certifier.certifyPieceChain(
+        graphRequest({
+          first: P_LEG(),
+          second: {
+            ...Q_LEG(),
+            box: [
+              [-0.125, 1],
+              [0.5, 0.625],
+            ],
+          },
+          distance: D,
+        }),
+      ),
+    ).toMatchObject({
+      code: "trim-window-unproven",
+      message: expect.stringContaining("(G2)"),
+      first: 0,
+      second: 1,
+    });
+  });
+
+  test("§8-6 Lemma P necessity: box slopes overlap Q's but the refined source slopes separate, so it verifies", () => {
+    // P's loose box reaches slope 1 > 3/4 (Q); the exact source restriction
+    // keeps −3/4, so σ = 3/2 only through Lemma P.
+    const certificate = graphVerified(
+      graphRequest({
+        first: {
+          ...P_LEG(),
+          error: 2 ** -14,
+          box: [
+            [0.5, 1],
+            [-0.625, 0.5],
+          ],
+        },
+        second: Q_LEG(),
+        distance: D,
+      }),
+    );
+    expect(certificate.joins[0]).toMatchObject({
+      kind: "graph-trim",
+      separation: 1.5,
+    });
+  });
+
+  test("§8-7 source cone: a source hodograph not e-positive on the vertex window is trim-classification-unproven", () => {
+    // Certifier input only: P's source bends back inside the window (P₂ − P₁ =
+    // (−30h, 0)) while its vertex tangent, emitted leg and box are unchanged.
+    const straightP = P_LEG();
+    const source = [
+      straightP.source[0]!,
+      [26 * H, 3 * H],
+      straightP.source[2]!,
+      straightP.source[3]!,
+    ] as unknown as SplinePoles;
+    expect(
+      certifier.certifyPieceChain(
+        graphRequest({
+          first: {
+            ...straightP,
+            source,
+            emitted: straightP.source.map(([x, y]) => [
+              x + 3 / 64,
+              y + 1 / 16,
+            ]) as unknown as SplinePoles,
+            box: hodographBox(straightP.source),
+          },
+          second: Q_LEG(),
+          distance: D,
+        }),
+      ),
+    ).toMatchObject({
+      code: "trim-classification-unproven",
+      message: expect.stringContaining("source hodograph"),
+    });
+  });
+
+  test("§8-2 overlapping true slopes: an e-positive source window whose slopes reach P's is trim-classification-unproven", () => {
+    // Certifier input only (the source is not the emitted/box source): Q's
+    // source keeps its vertex tangent (4, 3) but dives to slope < −3/4 inside
+    // its vertex window, so σ ≤ 0 although H2, G1, G2 and t < 1 hold (the
+    // loose box admits those slopes too).
+    const straightQ = Q_LEG();
+    const source = [
+      [0, 0],
+      [4 * H, 3 * H],
+      [0.45, -1.3125],
+      [0.75, -1.0125],
+    ] as unknown as SplinePoles;
+    expect(
+      certifier.certifyPieceChain(
+        graphRequest({
+          first: P_LEG(),
+          second: {
+            ...straightQ,
+            source,
+            emitted: straightQ.source.map(([x, y]) => [
+              x - 3 / 64,
+              y + 1 / 16,
+            ]) as unknown as SplinePoles,
+            // Loose box containing O′ = (3/4, 9/16), corner slopes [−1, 6/5].
+            box: [
+              [0.5, 1],
+              [-0.5, 0.6],
+            ],
+          },
+          distance: D,
+        }),
+      ),
+    ).toMatchObject({
+      code: "trim-classification-unproven",
+      message: expect.stringContaining("slopes are not proved separated"),
+    });
+  });
+
+  test("§8-3 emitted orientation: H2 and the true slopes pass but the emitted legs cross the wrong way round", () => {
+    // Premise-violating certifier input (Q's declared ε is not a bound of its
+    // emitted leg): pins the emitted-orientation gate as the rejecting check.
+    expect(
+      certifier.certifyPieceChain(
+        graphRequest({
+          first: P_LEG(),
+          second: {
+            ...Q_LEG(),
+            emitted: legPoles([-3 / 64, 1 / 16], [4 * H, -4 * H]),
+          },
+          distance: D,
+          bounds: [
+            [0.9, 0.9 + 2 ** -20],
+            [0.1, 0.1 + 2 ** -20],
+          ],
+        }),
+      ),
+    ).toMatchObject({
+      code: "trim-classification-unproven",
+      message: expect.stringContaining("emitted crossing orientation"),
+    });
+  });
+
+  test("T2 collar: a leg just long enough for t < 1 puts E(½) within |e|ε* of the switch region", () => {
+    const h = 33 * 2 ** -12;
+    expect(
+      certifier.certifyPieceChain(
+        graphRequest({
+          first: { ...P_LEG(h), error: 2 ** -10 },
+          second: { ...Q_LEG(h), error: 2 ** -10 },
+          distance: D,
+          modelingTolerance: 2 ** -9,
+          guess: [0.5, 0.5],
+        }),
+      ),
+    ).toMatchObject({
+      code: "trim-window-unproven",
+      message: expect.stringContaining("glue collar"),
+      first: 0,
+    });
+  });
+
+  test("T3 G1: an emitted hodograph step that points backwards is trim-window-unproven although E is a monotone graph", () => {
+    // ε = 2⁻¹⁰, h = ε, d = 5ε: P₁, P₂ move ±3.125ε ALONG the leg, so
+    // |E − O| ≤ 0.29·3.125ε ≤ ε, E′ > 0 everywhere, but P₂ − P₁ is e-negative.
+    const e = 2 ** -10;
+    const straightP = P_LEG(e);
+    const offset: Vector = [3 * e, 4 * e];
+    const shift: Vector = [2.5 * e, -1.875 * e];
+    const emitted = straightP.source.map(([x, y], index) => [
+      x + offset[0] + (index === 1 ? shift[0] : index === 2 ? -shift[0] : 0),
+      y + offset[1] + (index === 1 ? shift[1] : index === 2 ? -shift[1] : 0),
+    ]) as unknown as SplinePoles;
+    expect(
+      certifier.certifyPieceChain(
+        graphRequest({
+          first: { ...straightP, offset, error: e, emitted },
+          second: { ...Q_LEG(e), offset: [-3 * e, 4 * e] },
+          distance: 5 * e,
+          modelingTolerance: 2 ** -7,
+          guess: [0.6, 0.4],
+        }),
+      ),
+    ).toMatchObject({
+      code: "trim-window-unproven",
+      message: expect.stringContaining("(G1)"),
+      first: 0,
+      second: 1,
+    });
+  });
+
+  test("T4 reversed curved piece (real owner): the vertex window is the NATURAL start [0, t]; the far end turns", () => {
+    // Owner output of a reversed P whose natural END (the traversal far
+    // start) turns to slope ≈ 1; its terminal leaf is the natural FIRST leaf.
+    // Only the natural-start window separates the slopes enough for Lemma X.
+    const d = 0.02;
+    const tolerance = 1e-2;
+    const owner = (poles: SplinePoles, distance: number, id: string) => {
+      const result = approximateSplineOffset({
+        spans: [
+          {
+            source: {
+              splineId: id,
+              spanIndex: 0,
+              startPointId: `${id}0`,
+              endPointId: `${id}1`,
+              startOccurrenceId: `${id}o0`,
+              endOccurrenceId: `${id}o1`,
+            },
+            orientation: "forward",
+            interval: [0, 1],
+            poles,
+            validity: "valid",
+            differential: {
+              interval: [0, 0],
+              poles: [
+                [0, 0],
+                [0, 0],
+                [0, 0],
+                [0, 0],
+              ],
+            },
+          },
+        ],
+        distance,
+        modelingTolerance: tolerance,
+      });
+      if (!result.ok) throw new Error(result.code);
+      return result.spans.map((span) => ({
+        ...span,
+        queryDomain: span.sourceInterval,
+      }));
+    };
+    const first = owner(
+      [
+        [0, 0],
+        [-4 * H, 3 * H],
+        [-8 * H, 6 * H],
+        [-8 * H - 0.2, 6 * H - 0.2],
+      ],
+      -d,
+      "P",
+    );
+    const second = owner(
+      legPoles([0, 0], [4 * H, 3 * H]) as SplinePoles,
+      d,
+      "Q",
+    );
+    const [A, B] = [first[0]!, second[0]!];
+    const [u, v] = emittedCrossing(A.poles, B.poles, [0.05, 0.05]);
+    const at = (domain: readonly [number, number], value: number) =>
+      domain[0] + value * (domain[1] - domain[0]);
+    const request: PieceTubeChainRequest = {
+      modelingTolerance: tolerance,
+      closed: false,
+      distance: d,
+      pieces: [
+        { kind: "cubic", reversed: true, tubes: first },
+        { kind: "cubic", reversed: false, tubes: second },
+      ],
+      trims: [
+        {
+          jointIndex: 0,
+          firstParameterBounds: [
+            at(A.queryDomain, u!) - PAD,
+            at(A.queryDomain, u!) + PAD,
+          ],
+          secondParameterBounds: [
+            at(B.queryDomain, v!) - PAD,
+            at(B.queryDomain, v!) + PAD,
+          ],
+        },
+      ],
+    };
+    // Premise: the terminal leaf's box reaches slopes of both signs (it turns).
+    expect(
+      A.reference.derivative[1][1] - A.reference.derivative[1][0],
+    ).toBeGreaterThan(0.25);
+    const certificate = graphVerified(request);
+    expect(certificate.joins.at(-1)).toMatchObject({
+      kind: "graph-trim",
+      first: 0,
+      second: first.length,
+    });
+  });
+
+  test("T5 a single-leaf piece with graph trims at both ends is trim-window-unproven (retained ½ + ½ ≥ 1)", () => {
+    // P (4, −3) → Q (4, 3) → R (−3, 4): two concave left turns at d > 0.
+    const r: Leg = {
+      source: legPoles([12 * H, 9 * H], [-3 * H, 4 * H]),
+      offset: [-1 / 16, -3 / 64],
+      error: 2 ** -30,
+    };
+    const legs = [P_LEG(), Q_LEG(), r];
+    const tubes = legs.map((leg, index) => tubeOf(leg, D, `S${index}`));
+    const crossings = [0, 1].map((index) =>
+      emittedCrossing(tubes[index]!.poles, tubes[index + 1]!.poles, [0.9, 0.1]),
+    );
+    expect(
+      certifier.certifyPieceChain({
+        modelingTolerance: TOLERANCE,
+        closed: false,
+        distance: D,
+        pieces: tubes.map((tube) => ({
+          kind: "cubic" as const,
+          reversed: false,
+          tubes: [tube],
+        })),
+        trims: crossings.map(([u, v], jointIndex) => ({
+          jointIndex,
+          firstParameterBounds: [u! - PAD, u! + PAD],
+          secondParameterBounds: [v! - PAD, v! + PAD],
+        })),
+      }),
+    ).toMatchObject({
+      code: "trim-window-unproven",
+      message: expect.stringContaining("retained domain"),
+      first: 1,
+    });
+  });
+
+  test("T6 nonzero source gap: Q's source shifted by (0, 9/1024) verifies (the proof never reads P₃ − Q₀)", () => {
+    const shifted = Q_LEG();
+    const gap = 9 / 1024;
+    const certificate = graphVerified(
+      graphRequest({
+        first: P_LEG(),
+        second: {
+          ...shifted,
+          source: shifted.source.map(([x, y]) => [
+            x,
+            y + gap,
+          ]) as unknown as SplinePoles,
+        },
+        distance: D,
+      }),
+    );
+    const join = certificate.joins[0]!;
+    if (join.kind !== "graph-trim") throw new Error("graph trim");
+    // Exact true crossing at u* = 119/128, v* = 7/128.
+    expect(join.firstRootBounds[0]).toBeLessThan(119 / 128);
+    expect(join.firstRootBounds[1]).toBeGreaterThan(119 / 128);
+    expect(join.secondRootBounds[0]).toBeLessThan(7 / 128);
+    expect(join.secondRootBounds[1]).toBeGreaterThan(7 / 128);
+  });
+
+  test("T7 t ≥ 1 only through the ±|e|ε widening of H against the TRUE advance (loose honest box)", () => {
+    // 1.2d < adv_O = 0.9·12h ≤ 1.2d + ε_A + ε_B < adv_E = 12h.
+    const h = 36 * 2 ** -12;
+    const first: Leg = {
+      ...P_LEG(h),
+      error: 2 ** -10,
+      box: [
+        [0.9 * 12 * h, 1.1 * 12 * h],
+        [-9 * h, -9 * h],
+      ],
+    };
+    expect(
+      certifier.certifyPieceChain(
+        graphRequest({
+          first,
+          second: { ...Q_LEG(h), error: 2 ** -10 },
+          distance: D,
+          modelingTolerance: 2 ** -9,
+          guess: [0.5, 0.5],
+        }),
+      ),
+    ).toMatchObject({
+      code: "trim-window-unproven",
+      message: expect.stringContaining("(t ≥ 1)"),
+    });
+  });
+
+  // Whole-request literal of the fabricated baseline, measured on this
+  // implementation (T08b-b evidence) and pinned on operations, Euclid and
+  // integerBits; the staged caps land INSIDE the S2 stage (stage probe:
+  // operations [2 785, 40 257], Euclid [205, 5 943] of the total); the 0.97
+  // caps land in the Lemma-C glue stage (leaf loop). These staged rows and the
+  // bits count − 1 row are load-bearing exhaustion-swallow killers: keep them.
+  const GRAPH_METER = {
+    operations: 42_018,
+    euclideanSteps: 6_202,
+    integerBits: 187,
+  };
+  const baseline = () =>
+    graphRequest({ first: P_LEG(), second: Q_LEG(), distance: D });
+
+  test("fabricated graph-trim whole-request literal (observer)", () => {
+    let snapshot: ExactProofBudgetSnapshot | undefined;
+    expect(
+      createCertifiedCubicTubeChainWithBudgetObserverForTest((value) => {
+        snapshot = value;
+      }).certifyPieceChain(baseline()).kind,
+    ).toBe("verified");
+    expect({
+      operations: snapshot!.operations,
+      euclideanSteps: snapshot!.euclideanSteps,
+      integerBits: Math.max(
+        snapshot!.maxStoredBits,
+        snapshot!.maxPreProductBits,
+      ),
+    }).toEqual(GRAPH_METER);
+  });
+
+  test.each(
+    (["operations", "euclideanSteps", "integerBits"] as const).map(
+      (kind) => [kind] as const,
+    ),
+  )(
+    "fabricated graph trim: the literal %s count passes and count − 1 exhausts the whole request with no partial certificate",
+    (kind) => {
+      const total = GRAPH_METER[kind];
+      expect(
+        createCertifiedCubicTubeChainWithLowerBudgetForTest({
+          [kind]: total,
+        }).certifyPieceChain(baseline()).kind,
+      ).toBe("verified");
+      expect(
+        createCertifiedCubicTubeChainWithLowerBudgetForTest({
+          [kind]: total - 1,
+        }).certifyPieceChain(baseline()),
+      ).toEqual(EXHAUSTED_RESULT);
+    },
+  );
+
+  test.each([
+    ["operations", 0.5],
+    ["operations", 0.9],
+    ["euclideanSteps", 0.5],
+    ["euclideanSteps", 0.9],
+    ["operations", 0.97],
+    ["euclideanSteps", 0.97],
+  ] as const)(
+    "staged cap inside the S2 stage (%s at %s of the literal) exhausts the request, never an S2 failure code",
+    (kind, fraction) => {
+      expect(
+        createCertifiedCubicTubeChainWithLowerBudgetForTest({
+          [kind]: Math.floor(GRAPH_METER[kind] * fraction),
+        }).certifyPieceChain(baseline()),
+      ).toEqual(EXHAUSTED_RESULT);
+    },
+  );
 });
 
 const KNOT_UNPROVEN_CODE = "cubic-tube-knot-incidence-unproven";

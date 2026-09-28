@@ -8,6 +8,7 @@ import type {
   NeutralCubicTube,
   NeutralLineTube,
   PieceTubeChainRequest,
+  TubeChainGraphTrimJoin,
   TubeChainTrimJoin,
   TubePieceChainJoin,
   TubePieceChainResult,
@@ -103,15 +104,63 @@ import {
  * tubes (same-parameter ε from the literal emitted ends against O = A + dν,
  * ν boxed by rot(a)/[L_lo, L_hi]); Lemma T at every inter-piece trim with
  * the exact source-tangent concavity gate sgn(d)·cross(u_in, u_out) > 0
- * fixing s, W = the whole terminal leaf (leaf-wide cone m′ > 0, which is also
- * that leaf's injectivity cone), δ = (ε_A + ε_B)L_hi/m′ on the curve root
+ * fixing s, W = the whole terminal leaf (leaf-wide cone m′ > 0 of the TRUE
+ * offset derivative O′: it makes O, not the emitted E, injective on that
+ * leaf; E's injectivity comes from K1 or the S2 G1 cone, never from m′),
+ * δ = (ε_A + ε_B)L_hi/m′ on the curve root
  * through the STORED query-domain map, η/L_lo with η = ε_A + ε_B + Mδ on the
  * line root, both strictly interior and ordered against the leaf's other end
  * (trim or J2′); cubic leaves add Mδ per trim end, lines take the larger end
  * displacement; K3 covers every pair outside the explicit adjacency set.
  * The trim certificate concerns only the abstract chain trimmed at the exact
  * witnessed roots (premises: stored bounds, ε, sources); it never claims the
- * rounded emitted ends connect. Cubic↔cubic trims are unsupported.
+ * rounded emitted ends connect.
+ *
+ * S2 graph trims (cubic↔cubic, terminal leaves A₀ of P and B₀ of Q only;
+ * reference R_C′: at a declared coincident or shared-point cubic↔cubic join
+ * that passes H2 in a solver-accepted frame, O* is the two pieces' true
+ * offsets, each trimmed at their unique common point). One fixed precharge,
+ * then the same H2 gate. e = binary64 sum of the two traversal emitted chords;
+ * x = e·p, slope s(v) = cross(e, v)/(e·v), every check exact on it.
+ * - G1/G2: the traversal emitted hodograph and the e-signed O′ box corner of
+ *   both leaves are strictly e-positive (both are e-graphs; G1 is E's cone).
+ * - Lemma P window: H = [x(Ê_Q(vtx)) − |e|ε_B, x(Ê_P(vtx)) + |e|ε_A] ⊇
+ *   [α_Q, β_P]; t = |H|/adv_O (adv_O = leaf-wide min e·dO/dτ from the box),
+ *   rounded UP to binary64, t < 1. The source is restricted exactly to the
+ *   vertex-end sub-window ([1 − t, 1] or [0, t] by the NATURAL vertex side),
+ *   must be e-positive there, and its slope hull ∩ the box slopes bounds the
+ *   true slopes (O′ = λS′, λ > 0). σ = separation in the sgn(d) order > 0.
+ * - Emitted orientation: exact restrictions of both emitted leaves to the
+ *   stored witness bounds (stored query-domain map) are e-positive and their
+ *   slopes are separated in the sgn(d) order; x̂ ∈ the met x-hulls.
+ * - Lemma V: w = ε√(1 + L²) with L the leaf-wide box |slope|; w² ≤ τ² on
+ *   both sides (chain claim max(w_P, w_Q) ≤ τ).
+ * - Lemma X: δ = |e|(w_P + w_Q)/σ (upper √); x̂_hi + δ < x(Ê_P(vtx)) − |e|ε_A
+ *   and x̂_lo − δ > x(Ê_Q(vtx)) + |e|ε_B, so the true offsets cross exactly
+ *   once on [α_Q, β_P], inside both vertex windows, and both true terminal
+ *   points are removed; root enclosures (δ + |x̂| + |e|ε)/adv_O, outward.
+ * - Lemma C (after every trim wrote its corrections): the far map is the
+ *   leaf's existing map with ρ₁ = ½ fixed (J2′ shift ≤ t_s, Lemma T ≤ δ),
+ *   ε* = ε + c_far. Collar x(E(½)) + |e|ε* < Σ_lo (P; mirrored for Q) with
+ *   Σ = [x̂_lo − δ, x̂_hi + δ], and Σ_lo < min(b_P, β_P) by Lemma X, so the
+ *   stall exists: it compares x(O(ρ₁)) with x(E(½)) and the vertical map
+ *   starts at x_L = max of the two. G = max(ε*, w) + ΔS·ε*·¼ < τ STRICTLY
+ *   (ΔS = leaf-wide true ∪ emitted slope spread), exact, sqrt-free.
+ * - Writes trim ½ at the natural vertex side (t_s + t_e < 1 then keeps the
+ *   far end below ½); no correction joins the ε sum. Leaf report:
+ *   baseErrorStar = up(max(ε*, G_own, w_other)), displacementBound = τ; K3
+ *   radii unchanged, (A₀, B₀) joins the adjacency set.
+ * The emitted chain trimmed at the exact witnessed root is simple WITHOUT any
+ * resolver-side global gate (M0): each emitted cubic leaf is injective by K1
+ * (intra-piece joins, isolated span) or, on S2 terminal leaves, by G1 (a
+ * one-leaf piece with no graph end has neither and is excluded only by the
+ * wrapper's one-leaf gate, `certifyOffsetChainTubeStability`); the
+ * joint pair meets only at X̂ (the resolver's complete joint query: exactly
+ * one transverse interior root of the FULL terminal supports); every other
+ * leaf pair is K3-disjoint on full emitted leaves. O* is simple by G2 on the
+ * joint pair (retained parts on either side of x*) and K3 with r ≥ ε
+ * elsewhere, so the concatenated monotone couplings (far map, glue stall,
+ * vertical map of Lemma GM) perturb to a homeomorphism under strict G < τ.
  */
 
 type ExactPoint = readonly [ExactFraction, ExactFraction];
@@ -134,6 +183,8 @@ const EXHAUSTED: Failure = {
 };
 
 const KNOT_UNPROVEN = "cubic-tube-knot-incidence-unproven";
+/** Fixed per-graph-trim precharge (constant-size S2 work), before H2. */
+const GRAPH_TRIM_PRECHARGE = 256;
 const J2_MESSAGES = {
   cone: "The source tangents and leaf hodographs are not proved inside the join cone.",
   root: "A verified square-root bound is not finite and positive.",
@@ -766,6 +817,25 @@ function certifyChain(
 
   // Exactly restricted source leaf R: hodograph R′ and R″ control points in
   // leaf τ-units, then (concave only) the e-independent κ-only λ enclosure.
+  // Source span poles and leaf interval, converted once per leaf (S2 reuses).
+  const sources = new Map<
+    number,
+    { poles: ExactCubic; low: ExactFraction; high: ExactFraction }
+  >();
+  const leafSource = (index: number) => {
+    const cached = sources.get(index);
+    if (cached) return cached;
+    const tube = tubes[index]!;
+    const source = {
+      poles: tube.reference.sourcePoles.map(
+        exactPoint,
+      ) as unknown as ExactCubic,
+      low: exactFromNumber(tube.sourceLocalInterval[0], budget),
+      high: exactFromNumber(tube.sourceLocalInterval[1], budget),
+    };
+    sources.set(index, source);
+    return source;
+  };
   const shapes = new Map<
     number,
     { first: ExactPoint[]; second: ExactPoint[] }
@@ -773,12 +843,8 @@ function certifyChain(
   const leafShape = (index: number) => {
     const cached = shapes.get(index);
     if (cached) return cached;
-    const tube = tubes[index]!;
-    const restricted = restrict(
-      tube.reference.sourcePoles.map(exactPoint) as unknown as ExactCubic,
-      exactFromNumber(tube.sourceLocalInterval[0], budget),
-      exactFromNumber(tube.sourceLocalInterval[1], budget),
-    );
+    const source = leafSource(index);
+    const restricted = restrict(source.poles, source.low, source.high);
     const scaled = (vector: ExactPoint, factor: ExactFraction): ExactPoint => [
       multiplyExact(vector[0], factor, budget),
       multiplyExact(vector[1], factor, budget),
@@ -1043,8 +1109,24 @@ function certifyChain(
 
   // Lemma T at every inter-piece trim (piece path only). W is the WHOLE
   // terminal leaf; s is fixed by the exact source-tangent concavity gate.
-  const trimReports: TubeChainTrimJoin[] = [];
+  const trimReports: (TubeChainTrimJoin | TubeChainGraphTrimJoin)[] = [];
   const trimmedLeaves = new Set<number>();
+  /** S2 glue data per graph-trimmed leaf, checked once every correction is known. */
+  const graphSides = new Map<
+    number,
+    {
+      /** True on P's leaf A₀ (the switch region lies at larger x). */
+      readonly exiting: boolean;
+      readonly middle: ExactFraction;
+      /** Σ_lo on P, Σ_hi on Q. */
+      readonly limit: ExactFraction;
+      readonly eUpper: ExactFraction;
+      readonly spread: ExactFraction;
+      readonly ownSquared: ExactFraction;
+      readonly ownUpper: ExactFraction;
+      readonly otherUpper: ExactFraction;
+    }[]
+  >();
   const lineJointStart: (ExactFraction | undefined)[] = [];
   const lineJointEnd: (ExactFraction | undefined)[] = [];
   if (general) {
@@ -1090,6 +1172,338 @@ function certifyChain(
       }
       return end.reversed ? negated(natural) : natural;
     };
+    /**
+     * S2 terminal-window certificate of one concave cubic↔cubic trim (header,
+     * after H2). Exactly four exact restrictions, each of a once-converted
+     * cubic with binary64-derived ends; no exhaustion is caught here. The
+     * Lemma-C glue runs in the leaf loop, once every far-end correction is
+     * written. Returns a failure, or null after recording the trim.
+     */
+    const graphTrim = (
+      declaration: PieceTubeChainRequest["trims"][number],
+      firstEnd: Terminal,
+      secondEnd: Terminal,
+      fail: (code: string, message: string) => Failure,
+    ): Failure | null => {
+      const WINDOW = "trim-window-unproven";
+      const CLASSIFICATION = "trim-classification-unproven";
+      const EXISTENCE = "trim-existence-unproven";
+      const COMPOSITION = "trim-composition-unproven";
+      // e: binary64 sum of both traversal emitted chords (uncharged, as K1).
+      const direction: [number, number] = [0, 0];
+      for (const end of [firstEnd, secondEnd]) {
+        const cubic = tubes[end.leaf]!.poles;
+        const sign = end.reversed ? -1 : 1;
+        direction[0] += sign * (cubic[3]![0] - cubic[0]![0]);
+        direction[1] += sign * (cubic[3]![1] - cubic[0]![1]);
+      }
+      if (!direction.every(Number.isFinite))
+        return fail(WINDOW, "The graph direction e is not finite.");
+      const e = exactPoint(direction);
+      const eUpper = squareRootUpper(dot(e, e));
+      if (!eUpper)
+        return fail(WINDOW, "A verified square-root bound is not finite.");
+      /** Slope s(v) = n·v / e·v, only for vectors proved e-signed nonzero. */
+      const slope = (vector: ExactPoint) =>
+        divideExact(crossExact(e, vector, budget), dot(e, vector), budget);
+      const terminalData = (end: Terminal) => {
+        const leaf = end.leaf;
+        // Traversal e-positivity on natural data: eₗ = reversed ? −e : e.
+        const signed = end.reversed ? negated(e) : e;
+        if (!hodographs[leaf]!.every((step) => positive(dot(signed, step))))
+          return "The emitted terminal hodograph is not proved inside the graph cone e (G1).";
+        const box = derivatives[leaf]!;
+        const corner: ExactPoint = [
+          box[0]![positive(signed[0]) ? 0 : 1]!,
+          box[1]![positive(signed[1]) ? 0 : 1]!,
+        ];
+        const along = dot(signed, corner);
+        if (!positive(along))
+          return "The true offset derivative box is not proved inside the graph cone e (G2).";
+        const source = leafSource(leaf);
+        const width = subtractExact(source.high, source.low, budget);
+        const corners = box[0]!.flatMap((x) =>
+          box[1]!.map((y): ExactPoint => [x, y]),
+        );
+        return {
+          end,
+          signed,
+          source,
+          width,
+          // Leaf-wide min e·dO/dτ (traversal τ-units).
+          advance: multiplyExact(along, width, budget),
+          // Leaf-wide true (box corners, mediant) and emitted slope hulls.
+          trueSlopes: hull(corners.map(slope)),
+          emittedSlopes: hull(hodographs[leaf]!.map(slope)),
+          vertex: dot(e, poles[leaf]![end.side === "end" ? 3 : 0]!),
+          error: errors[leaf]!,
+        };
+      };
+      const first = terminalData(firstEnd);
+      if (typeof first === "string") return fail(WINDOW, first);
+      const second = terminalData(secondEnd);
+      if (typeof second === "string") return fail(WINDOW, second);
+      type Side = typeof first;
+
+      // Lemma P window: H ⊇ [α_Q, β_P]; t = |H|/adv_O rounded up, t < 1.
+      const hullLow = subtractExact(
+        second.vertex,
+        multiplyExact(eUpper, second.error, budget),
+        budget,
+      );
+      const hullHigh = addExact(
+        first.vertex,
+        multiplyExact(eUpper, first.error, budget),
+        budget,
+      );
+      const hullWidth = subtractExact(hullHigh, hullLow, budget);
+      if (!positive(hullWidth))
+        return fail(
+          EXISTENCE,
+          "The true terminal offsets are not proved to overlap at the vertex.",
+        );
+      const fractions = [first, second].map((side) =>
+        up(divideExact(hullWidth, side.advance, budget)),
+      );
+      if (!fractions.every((fraction) => fraction < 1))
+        return fail(
+          WINDOW,
+          "The vertex window of a terminal leaf is not proved inside it (t ≥ 1).",
+        );
+      /** Lemma P: exact source restriction to the natural vertex-end window. */
+      const trueWindow = (side: Side, fraction: number) => {
+        const t = exactFromNumber(fraction, budget);
+        const [from, to] =
+          side.end.side === "end"
+            ? [subtractExact(one, t, budget), one]
+            : [zero, t];
+        const at = (value: ExactFraction) =>
+          addExact(
+            side.source.low,
+            multiplyExact(value, side.width, budget),
+            budget,
+          );
+        const restricted = restrict(side.source.poles, at(from), at(to));
+        const steps = [0, 1, 2].map((index) =>
+          difference(restricted[index + 1]!, restricted[index]!),
+        );
+        if (!steps.every((step) => positive(dot(side.signed, step))))
+          return null;
+        const refined = hull(steps.map(slope));
+        return [
+          maximum([refined[0], side.trueSlopes[0]]),
+          minimum([refined[1], side.trueSlopes[1]]),
+        ] as const;
+      };
+      const firstTrue = trueWindow(first, fractions[0]!);
+      const secondTrue = firstTrue && trueWindow(second, fractions[1]!);
+      if (!firstTrue || !secondTrue)
+        return fail(
+          CLASSIFICATION,
+          "The source hodograph is not proved inside the graph cone on a vertex window.",
+        );
+      // d > 0: the outgoing (Q) slopes exceed the incoming (P) ones; mirrored.
+      const leftTurn = positive(distance);
+      const separation = leftTurn
+        ? subtractExact(secondTrue[0], firstTrue[1], budget)
+        : subtractExact(firstTrue[0], secondTrue[1], budget);
+      if (!positive(separation))
+        return fail(
+          CLASSIFICATION,
+          "The true terminal slopes are not proved separated on the vertex windows.",
+        );
+
+      // Emitted witness: stored bounds through the stored query-domain map.
+      const witness = (side: Side, bounds: readonly [number, number]) => {
+        const domain = (tubes[side.end.leaf] as NeutralCubicPieceTube)
+          .queryDomain;
+        const from = normalizedExact(bounds[0], domain, budget);
+        const to = normalizedExact(bounds[1], domain, budget);
+        const restricted = restrict(poles[side.end.leaf]!, from, to);
+        const steps = [0, 1, 2].map((index) =>
+          difference(restricted[index + 1]!, restricted[index]!),
+        );
+        if (!steps.every((step) => positive(dot(side.signed, step))))
+          return null;
+        return {
+          from,
+          to,
+          x: hull(restricted.map((pole) => dot(e, pole))),
+          slopes: hull(steps.map(slope)),
+        };
+      };
+      const firstWitness = witness(first, declaration.firstParameterBounds);
+      const secondWitness =
+        firstWitness && witness(second, declaration.secondParameterBounds);
+      const orientation =
+        firstWitness &&
+        secondWitness &&
+        (leftTurn
+          ? subtractExact(
+              secondWitness.slopes[0],
+              firstWitness.slopes[1],
+              budget,
+            )
+          : subtractExact(
+              firstWitness.slopes[0],
+              secondWitness.slopes[1],
+              budget,
+            ));
+      if (
+        !firstWitness ||
+        !secondWitness ||
+        !orientation ||
+        !positive(orientation)
+      )
+        return fail(
+          CLASSIFICATION,
+          "The emitted crossing orientation is not proved on the witness bounds.",
+        );
+      const crossingLow = maximum([firstWitness.x[0], secondWitness.x[0]]);
+      const crossingHigh = minimum([firstWitness.x[1], secondWitness.x[1]]);
+      if (compareExact(crossingLow, crossingHigh, budget) > 0)
+        return fail(EXISTENCE, "The two witness enclosures do not meet in x.");
+
+      // Lemma V: w² = ε²(1 + L²), L the leaf-wide box |slope|; w ≤ τ each side.
+      const deviationSquared = (side: Side) => {
+        const bound = maximum([
+          side.trueSlopes[1],
+          negateExact(side.trueSlopes[0], budget),
+        ]);
+        return multiplyExact(
+          multiplyExact(side.error, side.error, budget),
+          addExact(one, multiplyExact(bound, bound, budget), budget),
+          budget,
+        );
+      };
+      const toleranceSquared = multiplyExact(tolerance, tolerance, budget);
+      const firstSquared = deviationSquared(first);
+      const secondSquared = deviationSquared(second);
+      if (
+        compareExact(firstSquared, toleranceSquared, budget) > 0 ||
+        compareExact(secondSquared, toleranceSquared, budget) > 0
+      )
+        return fail(
+          COMPOSITION,
+          "The vertical graph deviation exceeds the modeling tolerance.",
+        );
+      const firstUpper = squareRootUpper(firstSquared);
+      const secondUpper = firstUpper && squareRootUpper(secondSquared);
+      if (!firstUpper || !secondUpper)
+        return fail(COMPOSITION, "A verified square-root bound is not finite.");
+
+      // Lemma X (E-emit): the true crossing is unique, inside both windows.
+      const shift = divideExact(
+        multiplyExact(
+          eUpper,
+          addExact(firstUpper, secondUpper, budget),
+          budget,
+        ),
+        separation,
+        budget,
+      );
+      const switchLow = subtractExact(crossingLow, shift, budget);
+      const switchHigh = addExact(crossingHigh, shift, budget);
+      if (
+        compareExact(
+          switchHigh,
+          subtractExact(
+            first.vertex,
+            multiplyExact(eUpper, first.error, budget),
+            budget,
+          ),
+          budget,
+        ) >= 0 ||
+        compareExact(
+          switchLow,
+          addExact(
+            second.vertex,
+            multiplyExact(eUpper, second.error, budget),
+            budget,
+          ),
+          budget,
+        ) <= 0
+      )
+        return fail(
+          EXISTENCE,
+          "The true terminal offsets are not proved to cross once inside both terminal leaves.",
+        );
+      const rootBounds = (
+        side: Side,
+        found: NonNullable<typeof firstWitness>,
+      ): [number, number] => {
+        const reach = divideExact(
+          addExact(
+            addExact(
+              shift,
+              subtractExact(crossingHigh, crossingLow, budget),
+              budget,
+            ),
+            multiplyExact(eUpper, side.error, budget),
+            budget,
+          ),
+          side.advance,
+          budget,
+        );
+        return [
+          down(subtractExact(found.from, reach, budget)),
+          up(addExact(found.to, reach, budget)),
+        ];
+      };
+      const firstRootBounds = rootBounds(first, firstWitness);
+      const secondRootBounds = rootBounds(second, secondWitness);
+
+      // Retention ½ at the natural vertex side; glue data for Lemma C.
+      const eight = exact(8n, 1n, budget);
+      for (const [side, exiting, ownSquared, ownUpper, otherUpper] of [
+        [first, true, firstSquared, firstUpper, secondUpper],
+        [second, false, secondSquared, secondUpper, firstUpper],
+      ] as const) {
+        const leaf = side.end.leaf;
+        trimmedLeaves.add(leaf);
+        if (side.end.side === "start") trimStart[leaf] = half;
+        else trimEnd[leaf] = half;
+        const x = poles[leaf]!.map((pole) => dot(e, pole));
+        const middle = divideExact(
+          addExact(
+            addExact(x[0]!, multiplyExact(three, x[1]!, budget), budget),
+            addExact(multiplyExact(three, x[2]!, budget), x[3]!, budget),
+            budget,
+          ),
+          eight,
+          budget,
+        );
+        const spread = subtractExact(
+          maximum([side.trueSlopes[1], side.emittedSlopes[1]]),
+          minimum([side.trueSlopes[0], side.emittedSlopes[0]]),
+          budget,
+        );
+        const entry = {
+          exiting,
+          middle,
+          limit: exiting ? switchLow : switchHigh,
+          eUpper,
+          spread,
+          ownSquared,
+          ownUpper,
+          otherUpper,
+        };
+        const existing = graphSides.get(leaf);
+        if (existing) existing.push(entry);
+        else graphSides.set(leaf, [entry]);
+      }
+      trimReports.push({
+        kind: "graph-trim",
+        jointIndex: declaration.jointIndex,
+        first: first.end.leaf,
+        second: second.end.leaf,
+        direction: [direction[0], direction[1]],
+        firstRootBounds,
+        secondRootBounds,
+        separation: down(separation),
+      });
+      return null;
+    };
     for (const [jointIndex, declaration] of general.trims.entries()) {
       budget.operation(64);
       const firstEnd = terminal(jointIndex, true);
@@ -1097,11 +1511,9 @@ function certifyChain(
       const fail = (code: string, message: string) =>
         uncertain(code, message, firstEnd.leaf, secondEnd.leaf);
       const firstIsLine = lineData.has(firstEnd.leaf);
-      if (!firstIsLine && !lineData.has(secondEnd.leaf))
-        return fail(
-          "trim-pair-unsupported",
-          "A trim between two cubic pieces is not covered by the line-curve trim lemma.",
-        );
+      const graph = !firstIsLine && !lineData.has(secondEnd.leaf);
+      // S2 cubic↔cubic: one fixed precharge before H2 or any conversion.
+      if (graph) budget.operation(GRAPH_TRIM_PRECHARGE);
       // H2 gate: sgn(d)·cross(u_in, u_out) > 0 on exact source tangents.
       const incoming = vertexTangent(firstEnd);
       const outgoing = vertexTangent(secondEnd);
@@ -1116,6 +1528,11 @@ function certifyChain(
           "trim-side-unproven",
           "The exact source-tangent turn is not concave toward the offset side.",
         );
+      if (graph) {
+        const failure = graphTrim(declaration, firstEnd, secondEnd, fail);
+        if (failure) return failure;
+        continue;
+      }
       const lineEnd = firstIsLine ? firstEnd : secondEnd;
       const curveEnd = firstIsLine ? secondEnd : firstEnd;
       const line = lineData.get(lineEnd.leaf)!;
@@ -1293,14 +1710,69 @@ function certifyChain(
       star =
         compareExact(startValue, endValue, budget) >= 0 ? startValue : endValue;
     }
-    const convex = arcStart[index] !== undefined || arcEnd[index] !== undefined;
-    const comparison = compareExact(star, tolerance, budget);
-    if (convex ? comparison >= 0 : comparison > 0)
-      return leafFailure(
-        convex
-          ? "corrected base error is not below the modeling tolerance at a convex end"
-          : "corrected base error exceeds the modeling tolerance",
-      );
+    const graphs = graphSides.get(index);
+    if (graphs) {
+      // S2 Lemma C: ε* = ε + c_far (the graph end adds no correction); the
+      // collar makes the stall exist; G < τ strictly; A1 max-form star.
+      const base = star;
+      const candidates: ExactFraction[] = [];
+      for (const side of graphs) {
+        const reach = multiplyExact(side.eUpper, base, budget);
+        const collared = side.exiting
+          ? compareExact(
+              addExact(side.middle, reach, budget),
+              side.limit,
+              budget,
+            ) < 0
+          : compareExact(
+              subtractExact(side.middle, reach, budget),
+              side.limit,
+              budget,
+            ) > 0;
+        if (!collared)
+          return uncertain(
+            "trim-window-unproven",
+            `Leaf ${index}: the graph-trim glue collar at τ = ½ does not clear the switch region.`,
+            index,
+          );
+        const correction = divideExact(
+          multiplyExact(side.spread, base, budget),
+          exact(4n, 1n, budget),
+          budget,
+        );
+        const room = subtractExact(tolerance, correction, budget);
+        const roomSquared = multiplyExact(room, room, budget);
+        if (
+          !positive(room) ||
+          compareExact(
+            roomSquared,
+            multiplyExact(base, base, budget),
+            budget,
+          ) <= 0 ||
+          compareExact(roomSquared, side.ownSquared, budget) <= 0
+        )
+          return uncertain(
+            "trim-composition-unproven",
+            `Leaf ${index}: the graph-trim glue bound is not strictly below the modeling tolerance.`,
+            index,
+          );
+        candidates.push(
+          addExact(maximum([base, side.ownUpper]), correction, budget),
+          side.otherUpper,
+        );
+      }
+      star = maximum(candidates);
+    } else {
+      const convex =
+        arcStart[index] !== undefined || arcEnd[index] !== undefined;
+      const comparison = compareExact(star, tolerance, budget);
+      if (convex ? comparison >= 0 : comparison > 0)
+        return leafFailure(
+          convex
+            ? "corrected base error is not below the modeling tolerance at a convex end"
+            : "corrected base error exceeds the modeling tolerance",
+        );
+    }
     let radius = errors[index]!;
     for (const arc of [arcStart[index], arcEnd[index]])
       if (arc) radius = addExact(radius, arc, budget);
@@ -1416,8 +1888,11 @@ function certifyChain(
     const baseErrorStar = unchanged(stars[index]!);
     return {
       baseErrorStar,
+      // τ on convex-END leaves (arc reserve) and graph-trim leaves (glue reserve).
       displacementBound:
-        arcEnd[index] === undefined ? baseErrorStar : modelingTolerance,
+        arcEnd[index] === undefined && !graphSides.has(index)
+          ? baseErrorStar
+          : modelingTolerance,
       clearanceRadius: unchanged(radii[index]!),
     };
   });
@@ -1479,7 +1954,8 @@ const invalidPieceChain = (message: string): Failure =>
  * UNSOUND on its own for a one-leaf cubic piece in a multi-piece chain:
  * K1 cone-checks emitted hodographs only at intra-piece joins, and Lemma T's
  * m′ is a cone of the TRUE offset derivative, so that leaf's emitted
- * self-injectivity is never checked and a looped emitted cubic can verify.
+ * self-injectivity is never checked and a looped emitted cubic can verify
+ * (an S2 graph-trim end does check the emitted G1 cone; a Lemma-T end does not).
  * Callers must reject such pieces (the offset-chain wrapper does) until the
  * emitted-cone fix for single-leaf pieces lands here.
  */

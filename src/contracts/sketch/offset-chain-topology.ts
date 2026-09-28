@@ -45,9 +45,11 @@ import {
  * trim placement. The chain is certified simple, with these trim placements,
  * only by a verified `certifyOffsetChainTubeStability` result (K1 on adjacent
  * leaves, K3 on every other leaf pair, the joint query plus Lemma T at every
- * trim). Chains outside the certifier's scope are `topologyStabilityUnsupported`,
- * never valid without a certificate. Fallback arcs and tangent-continuous
- * joints with a spline side are temporarily unsupported.
+ * line trim or the S2 graph trim, with its emitted G1 cone, at every
+ * cubic↔cubic trim). Chains outside the certifier's scope are
+ * `topologyStabilityUnsupported`, never valid without a certificate. Fallback
+ * arcs and tangent-continuous joints with a spline side are temporarily
+ * unsupported.
  */
 
 /** One whole-request pair meter: every query of the request draws on it. */
@@ -889,7 +891,25 @@ export type OffsetChainTubeStabilityResult =
  * chain trimmed at exact witnessed roots only (never rounded ends). In a
  * multi-piece chain a one-leaf cubic piece is unsupported: K1 cone-checks
  * emitted hodographs only at intra-piece joins, so its emitted self-
- * injectivity would be uncertified (routed to a later certifier slice).
+ * injectivity would be uncertified (routed to a later certifier slice). The
+ * gate stays even though an S2 graph-trim end checks the emitted G1 cone:
+ * Lemma T's m′ is a TRUE-O′ cone and does not count.
+ *
+ * Cubic↔cubic trims (S2, terminal leaves only) are certified under R_C′: at a
+ * declared coincident or shared-point cubic↔cubic join that passes H2 in a
+ * solver-accepted frame, O* is the two pieces' true offsets, each trimmed at
+ * their unique common point. The premises are the same as R_C: the adapter's
+ * E1–E4 accepted pair, H2 on exact source tangents, the stored joint bounds
+ * through the stored query-domain map, and the owner's ε/O′/source metadata;
+ * the proof never reads the source gap P₃ − Q₀, so a nonzero declared gap is
+ * neither bridged nor required. The certificate records one `graph-trim` per
+ * such joint (direction e, outward true-root bounds, separation σ), and its
+ * two leaves carry displacementBound = τ and the max-form baseErrorStar.
+ * Simplicity is re-based on M0 (no resolver-side global gate): K1 on
+ * intra-piece joins, K3 on every other pair, the resolver's complete joint
+ * query for the joint pair and S2's G1 on the two terminal leaves.
+ * `resolved.joints` is trusted; the certifier never re-derives its one-root
+ * premise.
  */
 export function certifyOffsetChainTubeStability(
   resolved: OffsetChainTopologySuccess,
