@@ -42,6 +42,7 @@ import {
   selfIntersectionVertexKey,
 } from "@/contracts/sketch/region-identity";
 import {
+  boxDiameterBound,
   boxesOverlap,
   boxHull,
   boxOfIntervalPoint,
@@ -65,12 +66,16 @@ import {
   ivSub,
   nextDown,
   nextUp,
+  shiftInterval,
+  sortLeavingDirections,
   TAU,
+  widenByJoinBoxes,
   type Box,
   type CircleCurve,
   type CubicCurve,
   type Interval,
   type IntervalPoint,
+  type LeavingDirection,
   type OwnedCurve,
   type SegmentCurve,
   certifyNeutralCurvePieceSignedArea,
@@ -1650,6 +1655,8 @@ interface BuiltComponent {
   outerCycles: number[][];
   openBranches: number[];
   box: Box;
+  /** Join vertices whose rotation is their certified exit order from the ball box. */
+  exitOrdered: string[];
 }
 
 type ComponentOutcome =
@@ -1675,8 +1682,6 @@ const ivSqrt = (a: Interval): Interval => [
   Math.max(0, nextDown(Math.sqrt(Math.max(0, a[0])))),
   nextUp(Math.sqrt(a[1])),
 ];
-const shiftInterval = (a: Interval, turns: number): Interval =>
-  turns === 0 ? a : ivAdd(a, iv(turns * TAU, turns * TAU));
 
 /** Certified polar-angle interval of a direction box, or null when it may vanish. */
 function angleInterval(direction: IntervalPoint): Interval | null {
@@ -1701,17 +1706,11 @@ function angleInterval(direction: IntervalPoint): Interval | null {
   ];
 }
 
-interface Leaving {
-  half: number;
-  angle: Interval;
-  curvature: Interval;
-}
-
 function leavingDirection(
   curve: OwnedCurve,
   enclosure: Interval,
   forward: boolean,
-): Omit<Leaving, "half"> | null {
+): Omit<LeavingDirection, "half"> | null {
   const { first, second } = curveDerivatives(curve, enclosure);
   const direction: IntervalPoint = forward
     ? first
@@ -1725,89 +1724,11 @@ function leavingDirection(
     ivMul(squared, ivSqrt(squared)),
   );
   if (!curvature) return null;
-  return { angle, curvature: forward ? curvature : ivNeg(curvature) };
-}
-
-/**
- * Counter-clockwise order of the half-edges leaving one vertex. Overlapping
- * direction intervals are a tangent contact; they are ordered by certified
- * signed curvature (a path turning left lies counter-clockwise of one turning
- * less), otherwise the order is uncertain.
- *
- * `flipRadius` (joins only): two tied paths from one point whose tangents
- * differ by δ, not resolved by the angle intervals, can swap sides again at
- * s ≈ 2δ/Δκ. Each tied pair must bound that flip point below the smallest
- * join ball radius, where T09a excludes a second contact of the near pieces
- * (re-review 2 advisory 5).
- */
-function sortLeaving(
-  items: Leaving[],
-  allowCurvatureTieBreak: boolean,
-  flipRadius: number | null,
-): Leaving[] | null {
-  // Two half-edges have one cyclic order: no direction or tie-break decides it.
-  if (items.length <= 2) return items;
-  const normalized = items
-    .map((item) => ({
-      ...item,
-      angle: shiftInterval(item.angle, -Math.floor(item.angle[0] / TAU)),
-    }))
-    .sort((left, right) => ivMid(left.angle) - ivMid(right.angle));
-  const count = normalized.length;
-  const angleAt = (index: number) =>
-    index < count
-      ? normalized[index]!.angle
-      : shiftInterval(normalized[index - count]!.angle, 1);
-  let gap = -1;
-  for (let index = 0; index < count; index += 1) {
-    if (!ivOverlap(angleAt(index), angleAt(index + 1))) {
-      gap = index;
-      break;
-    }
-  }
-  if (gap < 0) return null;
-  const rotated = [...Array(count).keys()].map((offset) => {
-    const index = gap + 1 + offset;
-    return {
-      item: index < count ? normalized[index]! : normalized[index - count]!,
-      angle: angleAt(index),
-    };
-  });
-  const result: Leaving[] = [];
-  let cluster = [rotated[0]!];
-  const flush = () => {
-    if (cluster.length > 1 && !allowCurvatureTieBreak) return false;
-    for (let a = 0; a < cluster.length; a += 1) {
-      for (let b = a + 1; b < cluster.length; b += 1) {
-        if (!ivOverlap(cluster[a]!.angle, cluster[b]!.angle)) return false;
-        const left = cluster[a]!.item.curvature;
-        const right = cluster[b]!.item.curvature;
-        if (ivOverlap(left, right)) return false;
-        if (flipRadius === null) continue;
-        const angles = ivHull(cluster[a]!.angle, cluster[b]!.angle);
-        const width = nextUp(angles[1] - angles[0]);
-        const gap = nextDown(
-          left[0] > right[1] ? left[0] - right[1] : right[0] - left[1],
-        );
-        if (!(gap > 0 && nextUp((2 * width) / gap) < flipRadius)) return false;
-      }
-    }
-    result.push(
-      ...[...cluster]
-        .sort((l, r) => l.item.curvature[0] - r.item.curvature[0])
-        .map((entry) => entry.item),
-    );
-    return true;
+  return {
+    angle,
+    curvature: forward ? curvature : ivNeg(curvature),
+    cubic: curve.kind === "cubicBezier",
   };
-  for (let index = 1; index < count; index += 1) {
-    if (ivOverlap(rotated[index - 1]!.angle, rotated[index]!.angle)) {
-      cluster.push(rotated[index]!);
-      continue;
-    }
-    if (!flush()) return null;
-    cluster = [rotated[index]!];
-  }
-  return flush() ? result : null;
 }
 
 /** Removes bridge traversals, then splits at repeated vertices into simple cycles. */
@@ -1846,13 +1767,15 @@ function splitWalk(
   return [[...walk]];
 }
 
-function buildComponent(
+async function buildComponent(
+  queries: CachedQueries,
+  modelingTolerance: number,
   root: number,
   componentBranches: number[],
   branches: readonly Branch[],
   events: ArrangementEvents,
   classOf: (member: string) => string,
-): ComponentOutcome {
+): Promise<ComponentOutcome> {
   const members = new Set(componentBranches);
   const byBranch = new Map<number, Occurrence[]>();
   for (const index of componentBranches) byBranch.set(index, []);
@@ -2046,7 +1969,7 @@ function buildComponent(
   const live = groups.filter((group) => alive[group.id]);
 
   // §3.6.2–3 certified counter-clockwise order at every vertex.
-  const leavingAt = new Map<string, Leaving[]>();
+  const leavingAt = new Map<string, LeavingDirection[]>();
   for (const group of live) {
     if (group.start === null) continue;
     const canonical = group.members[0]!.edge;
@@ -2072,44 +1995,80 @@ function buildComponent(
     }
   }
   const order = new Map<string, number[]>();
+  const exitOrdered: string[] = [];
+  // A2: a wrong rotation that is caught only by the area or walk backstops
+  // surfaces as a nesting or zero-area block; say that the order may be at fault.
+  let orderSensitive = false;
   for (const [vertex, items] of leavingAt) {
     // Curvature orders tangent curves only when their tangents are proven
     // equal; otherwise a tangent difference below the interval width decides
     // the order and curvature may contradict it (re-review 2). The tie-break
     // is allowed only where `VertexInfo.tieBreak` holds: joins at a bitwise
-    // shared point (with the flip-radius bound), contacts whose witness
-    // proves tangency, and exact overlap ends.
+    // shared point (with the curvature-dominance bound), contacts whose
+    // witness proves tangency, and exact overlap ends.
     const info = events.vertices.get(vertex)!;
-    const sorted = sortLeaving(
+    if (items.length > 2 && (info.classRoot !== null || info.tieBreak))
+      orderSensitive = true;
+    const blockedAt = (
+      reason: string,
+    ): Extract<ComponentOutcome, { kind: "blocked" }> => ({
+      kind: "blocked",
+      code: "region-vertex-order-uncertain",
+      reason: `the curves meeting at vertex ${info.key} ${reason}`,
+      // A join names its members; the whole component is blocked either way.
+      branches:
+        info.classRoot === null
+          ? componentBranches
+          : [
+              ...new Set(
+                items.flatMap((item) =>
+                  groups[item.half >> 1]!.members.map(
+                    (member) => member.edge.branch,
+                  ),
+                ),
+              ),
+            ],
+    });
+    const sorted = sortLeavingDirections(
       items,
       info.tieBreak,
       info.classRoot === null
         ? null
-        : Math.min(...info.balls.map((ball) => ball.radius)),
+        : {
+            eta: realizedEndSpread(vertex, branches, events),
+            ballRadius: Math.min(...info.balls.map((ball) => ball.radius)),
+          },
     );
     if (!sorted)
-      return {
-        kind: "blocked",
-        code: "region-vertex-order-uncertain",
-        reason: `the curves meeting at vertex ${info.key} cannot be ordered by certified direction and curvature`,
-        // A join names its members; the whole component is blocked either way.
-        branches:
-          info.classRoot === null
-            ? componentBranches
-            : [
-                ...new Set(
-                  items.flatMap((item) =>
-                    groups[item.half >> 1]!.members.map(
-                      (member) => member.edge.branch,
-                    ),
-                  ),
-                ),
-              ],
-      };
-    order.set(
-      vertex,
-      sorted.map((item) => item.half),
-    );
+      return blockedAt(
+        "cannot be ordered by certified direction and curvature",
+      );
+    const halves = sorted.map((item) => item.half);
+    // B1 (T09d math review): a join's members leave from realized ends that
+    // need not coincide, so the rotation of the contracted join vertex is
+    // the members' exit order on the boundary of its contraction box, not
+    // their tangent order. It must be certified and must agree.
+    if (info.classRoot !== null && items.length > 2) {
+      const exits = await joinExitOrder(
+        queries,
+        modelingTolerance,
+        branches,
+        groups,
+        halves,
+        info.ballBox!,
+      );
+      if (!exits)
+        return blockedAt(
+          "have no certified exit order from the join's contraction box",
+        );
+      const offset = exits.indexOf(halves[0]!);
+      if (halves.some((half, k) => exits[(offset + k) % exits.length] !== half))
+        return blockedAt(
+          "leave the join's contraction box in an order that disagrees with their certified direction and curvature",
+        );
+      exitOrdered.push(vertex);
+    }
+    order.set(vertex, halves);
   }
 
   // §3.6.4 face walk: the next edge is the one before the reversed edge in counter-clockwise order.
@@ -2147,6 +2106,25 @@ function buildComponent(
       to: forward ? canonical.toEnclosure : canonical.fromEnclosure,
     };
   };
+  // REQ-3: every visit of a join widens the area by k times its contraction
+  // box. The visit's lobe (the incoming and outgoing pieces, the connector
+  // and the two radial segments to the box centre) lies in the box, and
+  // almost every line meets it at most M = m_in + m_out + 3 times (m = 1 for
+  // a line, 2 for an arc, 3 for a cubic), so its winding number is at most
+  // k = ⌊M/2⌋. One box per visit is not a bound (T09f math re-review N1).
+  const lineCrossings = (half: number) => {
+    const kind = piece(half).curve.kind;
+    return kind === "line" ? 1 : kind === "circle" ? 2 : 3;
+  };
+  const joinBoxes = (cycle: readonly number[]) =>
+    cycle.flatMap((half, index) => {
+      const vertex = halfStart(half);
+      const box = vertex === null ? null : events.vertices.get(vertex)!.ballBox;
+      if (!box) return [];
+      const incoming = cycle[(index - 1 + cycle.length) % cycle.length]!;
+      const crossings = lineCrossings(incoming) + lineCrossings(half) + 3;
+      return [{ box, multiplier: Math.floor(crossings / 2) }];
+    });
   const cycleArea = (cycle: readonly number[]): Interval => {
     const first = piece(cycle[0]!);
     const originPoint = curvePoint(first.curve, first.from);
@@ -2170,8 +2148,11 @@ function buildComponent(
       const start = ivPointSub(curvePoint(following.curve, following.from), o);
       total = ivAdd(total, ivMul(exact(0.5), ivCross(end, start)));
     });
-    return total;
+    return widenByJoinBoxes(total, joinBoxes(cycle));
   };
+  const orderHint = orderSensitive
+    ? "; the certified vertex order at a declared join or tangent contact may be at fault"
+    : "";
   const cycleBox = (cycle: readonly number[]) =>
     cycle
       .map((half) => branches[groups[half >> 1]!.members[0]!.edge.branch]!.box)
@@ -2179,7 +2160,13 @@ function buildComponent(
   const zeroArea = (cycle: readonly number[]): ComponentOutcome => ({
     kind: "blocked",
     code: "region-degenerate-curve",
-    reason: "a zero-area cell (its certified area interval contains zero)",
+    // N2: an exit-certified order is not at fault when the cell lies within
+    // the join-contraction area allowance of the boxes it visits.
+    reason: `a zero-area cell (its certified area interval contains zero)${orderHint}${
+      joinBoxes(cycle).length === 0
+        ? ""
+        : `${orderHint ? ", or" : ";"} the cell may be within its join-contraction area allowance`
+    }`,
     branches: [
       ...new Set(
         cycle.map((half) => groups[half >> 1]!.members[0]!.edge.branch),
@@ -2201,8 +2188,7 @@ function buildComponent(
         return {
           kind: "blocked",
           code: "region-nesting-uncertain",
-          reason:
-            "the component does not have exactly one certified unbounded face",
+          reason: `the component does not have exactly one certified unbounded face${orderHint}`,
           branches: componentBranches,
         };
       outerCycles = cycles;
@@ -2215,8 +2201,7 @@ function buildComponent(
       return {
         kind: "blocked",
         code: "region-nesting-uncertain",
-        reason:
-          "a bounded face does not have exactly one certified outer cycle",
+        reason: `a bounded face does not have exactly one certified outer cycle${orderHint}`,
         branches: componentBranches,
       };
     const outer = cycles[positive[0]!]!;
@@ -2231,7 +2216,7 @@ function buildComponent(
     return {
       kind: "blocked",
       code: "region-nesting-uncertain",
-      reason: "the component does not have a certified unbounded face",
+      reason: `the component does not have a certified unbounded face${orderHint}`,
       branches: componentBranches,
     };
 
@@ -2239,6 +2224,7 @@ function buildComponent(
   return {
     kind: "built",
     component: {
+      exitOrdered,
       root,
       branches: componentBranches,
       groups,
@@ -2565,6 +2551,96 @@ async function boxBoundaryContacts(
     contacts.push(...result.points);
   }
   return contacts;
+}
+
+/**
+ * The realized-end spread η of a join vertex (T09d math review B1): an upper
+ * bound of the distance between any two realized member ends, i.e. of the
+ * diameter of the hull of every occurrence enclosure's interval point.
+ */
+function realizedEndSpread(
+  vertex: string,
+  branches: readonly Branch[],
+  events: ArrangementEvents,
+): number {
+  let hull: Box | null = null;
+  for (const occurrence of events.occurrences.values()) {
+    if (occurrence.vertex !== vertex) continue;
+    const point = boxOfIntervalPoint(
+      curvePoint(branches[occurrence.branch]!.curve, occurrence.enclosure),
+    );
+    hull = hull ? boxHull(hull, point) : point;
+  }
+  return hull ? boxDiameterBound(hull) : 0;
+}
+
+/**
+ * The certified counter-clockwise exit order of a join's half-edges from its
+ * ball box (T09d math review B1), or null. The box is the join's contraction
+ * region: non-members are proven clear of it and every member is proven to
+ * meet it in one piece (`provenSingleEntry`, run with the box for these
+ * vertices). Every boundary contact along a half-edge's own sub-edge must
+ * lie strictly between the join occurrence and the sub-edge's far vertex, so
+ * no other vertex lies on its piece in the box:
+ * - a segment starts inside the convex box, so it meets the boundary in
+ *   exactly one point; every report (two at a corner) encloses that point;
+ * - any other member must report exactly one verified `crossing`.
+ * Exits are ordered by the certified angle of their enclosure about the box
+ * centre: seen from an interior point, the boundary of a convex region is
+ * swept counter-clockwise exactly once, so disjoint angle intervals give the
+ * boundary order. Outside the box the arrangement is exact, so contracting
+ * the box to the join point gives the vertex exactly this rotation, whatever
+ * the members do inside it.
+ */
+async function joinExitOrder(
+  queries: CachedQueries,
+  modelingTolerance: number,
+  branches: readonly Branch[],
+  groups: readonly EdgeGroup[],
+  halves: readonly number[],
+  box: Box,
+): Promise<number[] | null> {
+  const center: IntervalPoint = [exact(ivMid(box.x)), exact(ivMid(box.y))];
+  const exits: LeavingDirection[] = [];
+  for (const half of halves) {
+    const edge = groups[half >> 1]!.members[0]!.edge;
+    const branch = branches[edge.branch]!;
+    if (branch.closed) return null;
+    const contacts = await boxBoundaryContacts(
+      queries,
+      modelingTolerance,
+      branch,
+      box,
+    );
+    if (!contacts) return null;
+    const span: Interval = [edge.fromEnclosure[0], edge.toEnclosure[1]];
+    const along = contacts.filter((point) =>
+      ivOverlap(widenOnBranch(branch, point.proof.secondParameterBounds), span),
+    );
+    const segment = branch.curve.kind === "line";
+    if (along.length === 0 || (!segment && along.length !== 1)) return null;
+    let exit: Box | null = null;
+    for (const point of along) {
+      const onBranch = widenOnBranch(branch, point.proof.secondParameterBounds);
+      if (
+        (!segment && point.classification !== "crossing") ||
+        !(
+          edge.fromEnclosure[1] < onBranch[0] &&
+          onBranch[1] < edge.toEnclosure[0]
+        )
+      )
+        return null;
+      const enclosure = boxOfIntervalPoint(curvePoint(branch.curve, onBranch));
+      exit = exit ? boxHull(exit, enclosure) : enclosure;
+    }
+    const angle = angleInterval(ivPointSub([exit!.x, exit!.y], center));
+    if (!angle) return null;
+    exits.push({ half, angle, curvature: exact(0), cubic: false });
+  }
+  // Without a tie-break this is the certified cyclic order of disjoint angles.
+  return (
+    sortLeavingDirections(exits, false, null)?.map((exit) => exit.half) ?? null
+  );
 }
 
 /** The certified point of `branch` at `parameter` lies strictly outside the closed box. */
@@ -2935,7 +3011,15 @@ async function deriveArrangement(
       states.push({ root, branches: list, box, built: null });
       continue;
     }
-    const outcome = buildComponent(root, list, branches, events, classOf);
+    const outcome = await buildComponent(
+      queries,
+      input.modelingTolerance,
+      root,
+      list,
+      branches,
+      events,
+      classOf,
+    );
     if (outcome.kind === "blocked") {
       blocked.add(root);
       emitForBranches(
@@ -2976,13 +3060,18 @@ async function deriveArrangement(
       memberLocation.set(`${join.classRoot}@${second}`, join.second);
     }
   }
+  const exitOrdered = new Set(
+    states.flatMap((state) => state.built?.exitOrdered ?? []),
+  );
   for (const vertex of events.vertices.values()) {
     if (vertex.ballBox === null) continue;
     const joined = new Set(joinedAt.get(vertex.id) ?? []);
     const joinedRoot = components.find([...joined][0]!);
     // One ball contracts only a two-member class without a cubic member: a
-    // cubic is proven against the box, so its class contracts the box.
+    // cubic is proven against the box, so its class contracts the box. A
+    // rotation certified by exit order from the box contracts the box too.
     const ballContraction =
+      !exitOrdered.has(vertex.id) &&
       vertex.balls.length === 1 &&
       [...joined].every(
         (member) => branches[member]!.curve.kind !== "cubicBezier",

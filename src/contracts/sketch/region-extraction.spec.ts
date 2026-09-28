@@ -736,6 +736,214 @@ describe("region arrangement owner: declared joins and closure", () => {
     ]);
   }, 30_000);
 
+  test("a join is ordered by its certified exit order, not by tangents from distinct realized ends (math review B1, REQ-1)", async () => {
+    // Triangle A = J(0, 0), X, Y with a1 = J→X and a2 = Y→J. Two clockwise
+    // arcs b1 (R = 1) and b3 (R = 0.5) leave K at tangent angles π/2 + δ and
+    // bend into A; a line top closes the sliver B. K is J (g = 0) or declared
+    // coincident with J at (g, g). Truth: A has the hole B touching at J, plus B.
+    const shapes = (regions: RegionRecord[]) =>
+      regions.map((region) =>
+        region.loops.map(
+          (loop) => `${loop.role}(${loop.segments.map(entityOf).join(",")})`,
+        ),
+      );
+    const arcSliver = (
+      [jx, jy]: readonly [number, number],
+      g: number,
+      [d1, d2]: readonly [number, number],
+    ) => {
+      const sketch = makeSketchFixture();
+      sketch.point("J", jx, jy);
+      sketch.point("X", jx + 1, jy);
+      sketch.point("Y", jx, jy + 1);
+      sketch.line("a1", "J", "X");
+      sketch.line("hyp", "X", "Y");
+      sketch.line("a2", "Y", "J");
+      const k = g === 0 ? "J" : "K";
+      if (g !== 0) {
+        sketch.point("K", jx + g, jy + g);
+        sketch.coincident("J", "K");
+      }
+      const arc = (
+        name: string,
+        radius: number,
+        delta: number,
+        sweep: number,
+      ) => {
+        const cx = jx + g + radius * Math.cos(delta);
+        const cy = jy + g + radius * Math.sin(delta);
+        const end = Math.PI + delta - sweep;
+        sketch.point(`${name}c`, cx, cy);
+        sketch.point(
+          `${name}e`,
+          cx + radius * Math.cos(end),
+          cy + radius * Math.sin(end),
+        );
+        sketch.arc(name, `${name}c`, k, `${name}e`, "clockwise");
+      };
+      arc("b1", 1, d1, 0.4);
+      arc("b3", 0.5, d2, 0.6);
+      sketch.line("top", "b1e", "b3e");
+      addRectangle(sketch, "q", [30, 0, 40, 10]);
+      return sketch;
+    };
+
+    // (i) Gapped: the tangents point out of A past a2 with disjoint certified
+    // intervals, but the offset g keeps B inside A up to the box exit. The
+    // tangent order used to move B into A's reflex wedge and publish A
+    // without its hole, overlapping B.
+    // (ii) Exact point J = (0.3, 0.7): the arcs' realized ends differ from J by
+    // rounding, and b3's angle interval overlaps both a2′ and b1 while a2′
+    // and b1 are disjoint: one overlap component, not two tie clusters
+    // (REQ-1). It used to reach only the zero-area backstop.
+    for (const [base, g, deltas] of [
+      [[0, 0], 1e-5, [2e-6, 1e-6]],
+      [[0.3, 0.7], 0, [2e-9, 1e-9]],
+    ] as const) {
+      const result = await derive(arcSliver(base, g, deltas));
+      expect(
+        shapes(result.regions),
+        "A is never published without the hole B",
+      ).toEqual([["outer(q_s0,q_s1,q_s2,q_s3)"]]);
+      expect(codes(result)).toEqual(["region-vertex-order-uncertain"]);
+      expect(targetsOf(result, "region-vertex-order-uncertain")).toEqual([
+        "a1",
+        "a2",
+        "b1",
+        "b3",
+      ]);
+      expect(result.diagnostics[0]!.message).toContain("vertex j[");
+    }
+    expect(
+      (await derive(arcSliver([0, 0], 1e-5, [2e-6, 1e-6]))).diagnostics[0]!
+        .message,
+    ).toContain("contraction box in an order that disagrees");
+
+    // (iii) Controls: tangents into A agree with the exit order, gapped and exact.
+    for (const g of [1e-4, 0]) {
+      const control = await derive(arcSliver([0, 0], g, [-1e-5, -2e-5]));
+      expect(control.diagnostics).toEqual([]);
+      expect(shapes(control.regions)).toEqual([
+        ["outer(q_s0,q_s1,q_s2,q_s3)"],
+        ["outer(a1,hyp,a2)", "inner(b1,top,b3)"],
+        ["outer(b1,b3,top)"],
+      ]);
+    }
+  }, 30_000);
+
+  test("a cubic in a tied cluster at an exact-point join fails closed (math review REQ-2)", async () => {
+    // Line a leaves J east; the cubic c leaves J at a tangent angle of about
+    // −1.2e-14 (tied with a) with curvature ≈ 1.8e-10 > 0 at J that changes
+    // sign ≈ 1e-11 along. Its lateral offset 3y1·u + 3(y2 − 2y1)·u² + c3·u³
+    // (c3 ≈ −3) has no root in (0, 1]: c lies below a, while the curvature
+    // at J orders it counter-clockwise of a. T09a verifies every join.
+    const [y1, y2, y3] = [-4e-15, 3e-11, -3];
+    const sketch = makeSketchFixture();
+    sketch.point("J", 0, 0);
+    sketch.point("X", 1, 0);
+    sketch.point("Y", 0, 1);
+    sketch.point("Q", 1, y3);
+    sketch.line("a", "J", "X");
+    sketch.line("hyp", "X", "Y");
+    sketch.line("b", "Y", "J");
+    sketch.line("e", "X", "Q");
+    sketch.spline("c", ["J", "Q"], "open", [
+      [1 / 3, y1],
+      [1 / 3, y3 - y2],
+    ]);
+    addRectangle(sketch, "q", [30, 0, 40, 10]);
+    const result = await derive(sketch);
+    expect(result.regions.map(boundaryEntities)).toEqual([
+      ["q_s0", "q_s1", "q_s2", "q_s3"],
+    ]);
+    expect(codes(result)).toEqual(["region-vertex-order-uncertain"]);
+    expect(targetsOf(result, "region-vertex-order-uncertain")).toEqual([
+      "a",
+      "b",
+      "c",
+    ]);
+  }, 30_000);
+
+  test("a lens smaller than its join's contraction box fails closed (math review REQ-3)", async () => {
+    // Two arcs leave the gapped join j1 ~ j2 horizontally and cross again at
+    // s ≈ 2√g outside the ball. The lens between them has area ≈ (4/3)·g^1.5:
+    // 4.2e-8 at g = 1e-5 and 1.3e-6 at g = 1e-4, both below the arc/arc
+    // allowance of k = 3 ball boxes (≈ 3e-6, math re-review N1), where the
+    // connector lobe can decide its sign; 1.07e-5 at g = 4e-4, still certified.
+    const lens = (g: number) => {
+      const sketch = makeSketchFixture();
+      sketch.point("k1", 0, 1);
+      sketch.point("j1", 0, 0);
+      sketch.point("A1", Math.sin(1), 1 - Math.cos(1));
+      sketch.arc("arc1", "k1", "j1", "A1");
+      sketch.point("k2", 0, 2 + g);
+      sketch.point("j2", 0, g);
+      sketch.point("A2", 2 * Math.sin(0.5), 2 + g - 2 * Math.cos(0.5));
+      sketch.arc("arc2", "k2", "j2", "A2");
+      sketch.line("close", "A1", "A2");
+      sketch.coincident("j1", "j2");
+      addRectangle(sketch, "q", [30, 0, 40, 10]);
+      return sketch;
+    };
+    for (const g of [1e-5, 1e-4]) {
+      const small = await derive(lens(g));
+      expect(small.regions.map(boundaryEntities)).toEqual([
+        ["q_s0", "q_s1", "q_s2", "q_s3"],
+      ]);
+      expect(codes(small)).toEqual(["region-degenerate-curve"]);
+      expect(targetsOf(small, "region-degenerate-curve")).toEqual([
+        "arc1",
+        "arc2",
+      ]);
+      expect(small.diagnostics[0]!.message).toContain("zero-area cell");
+      expect(small.diagnostics[0]!.message).toContain(
+        "within its join-contraction area allowance",
+      );
+    }
+
+    const large = await derive(lens(4e-4));
+    expect(large.diagnostics).toEqual([]);
+    expect(large.regions.map(boundaryEntities).sort()).toEqual([
+      ["arc1", "arc2"],
+      ["arc1", "arc2", "close"],
+      ["q_s0", "q_s1", "q_s2", "q_s3"],
+    ]);
+  }, 30_000);
+
+  test("a zero-area block at an exit-certified join names the contraction area allowance (math re-review N2)", async () => {
+    // The line sliver B = K→U→W tilts into triangle A at the gapped join
+    // J ~ K (g = 1e-4): its exit order agrees with its tangents, but its true
+    // area 8e-7 lies within the join's line/line allowance of two ball boxes.
+    const g = 1e-4;
+    const sketch = makeSketchFixture();
+    sketch.point("J", 0, 0);
+    sketch.point("X", 1, 0);
+    sketch.point("Y", 0, 1);
+    sketch.line("a1", "J", "X");
+    sketch.line("hyp", "X", "Y");
+    sketch.line("a2", "Y", "J");
+    sketch.point("K", g, g);
+    sketch.point("U", g + 0.4e-5, 0.4);
+    sketch.point("W", g + 0.8e-5, 0.4);
+    sketch.line("b1", "K", "U");
+    sketch.line("top", "U", "W");
+    sketch.line("b3", "W", "K");
+    sketch.coincident("J", "K");
+    addRectangle(sketch, "q", [30, 0, 40, 10]);
+    const result = await derive(sketch);
+    expect(result.regions.map(boundaryEntities)).toEqual([
+      ["q_s0", "q_s1", "q_s2", "q_s3"],
+    ]);
+    expect(codes(result)).toEqual(["region-degenerate-curve"]);
+    expect(targetsOf(result, "region-degenerate-curve")).toEqual([
+      "b1",
+      "b3",
+      "top",
+    ]);
+    expect(result.diagnostics[0]!.message).toContain("zero-area cell");
+    expect(result.diagnostics[0]!.message).toContain("contraction");
+  }, 30_000);
+
   test("a declared incidence on a full circle fails closed (T09a full-turn join limit)", async () => {
     const sketch = makeSketchFixture();
     sketch.point("c", 0, 0);

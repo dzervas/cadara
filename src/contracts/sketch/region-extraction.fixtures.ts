@@ -66,10 +66,12 @@ export interface SketchFixture {
     radius: number,
     construction?: boolean,
   ): SketchEntityId;
+  /** `tangents[i]`, when given, is occurrence i's authored handle vector. */
   spline(
     name: string,
     points: readonly string[],
     closure: SplineClosure,
+    tangents?: readonly (SplineVector | null)[],
   ): SketchEntityId;
   ellipse(
     name: string,
@@ -244,7 +246,7 @@ export function makeSketchFixture(): SketchFixture {
       });
       return entityId(name);
     },
-    spline(name, names, closure) {
+    spline(name, names, closure, tangents = []) {
       entities.push({
         kind: "spline",
         entityId: entityId(name),
@@ -255,7 +257,9 @@ export function makeSketchFixture(): SketchFixture {
         pointOccurrences: names.map((point, index) => ({
           occurrenceId: `${name}_o${index}`,
           pointId: pointId(point),
-          tangent: { kind: "automatic" },
+          tangent: tangents[index]
+            ? { kind: "authored" as const, vector: tangents[index] }
+            : { kind: "automatic" as const },
         })),
         closure,
         interpolationPolicy: "centripetal-mean-arm-v1",

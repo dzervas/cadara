@@ -59,6 +59,8 @@ export const ivContainsZero = (a: Interval) => a[0] <= 0 && a[1] >= 0;
 export const ivOverlap = (a: Interval, b: Interval) =>
   a[0] <= b[1] && b[0] <= a[1];
 export const ivMid = (a: Interval) => a[0] + (a[1] - a[0]) / 2;
+export const shiftInterval = (a: Interval, turns: number): Interval =>
+  turns === 0 ? a : ivAdd(a, iv(turns * TAU, turns * TAU));
 
 /** sin/cos over an interval: the midpoint value ± half-width (Lipschitz 1) ± evaluation error. */
 function ivTrig(range: Interval, trig: (value: number) => number): Interval {
@@ -99,6 +101,202 @@ export const boxOfIntervalPoint = (point: IntervalPoint): Box => ({
   x: point[0],
   y: point[1],
 });
+
+/** Upper bound of the distance between any two points of the box. */
+export function boxDiameterBound(box: Box): number {
+  const width = nextUp(box.x[1] - box.x[0]);
+  const height = nextUp(box.y[1] - box.y[0]);
+  return nextUp(
+    Math.sqrt(nextUp(nextUp(width * width) + nextUp(height * height))),
+  );
+}
+
+/** Upper bound of the box's area. */
+export const boxAreaBound = (box: Box): number =>
+  nextUp(nextUp(box.x[1] - box.x[0]) * nextUp(box.y[1] - box.y[0]));
+
+/**
+ * The signed area of a cycle through join vertices, widened by `multiplier`
+ * times the area of each join's contraction box it visits (T09d math review
+ * REQ-3). Inside a contraction box the realized boundary (member pieces plus
+ * the straight connector) may differ from any other in-box completion by a
+ * lobe that lies in the box, so only this widened interval bounds the
+ * contracted face. The lobe's winding number may exceed 1 (T09f math
+ * re-review N1), so the multiplier bounds it per visit.
+ */
+export function widenByJoinBoxes(
+  area: Interval,
+  boxes: readonly { box: Box; multiplier: number }[],
+): Interval {
+  let allowance = 0;
+  for (const { box, multiplier } of boxes)
+    allowance = nextUp(allowance + nextUp(multiplier * boxAreaBound(box)));
+  return allowance === 0 ? area : iv(area[0] - allowance, area[1] + allowance);
+}
+
+// ---------------------------------------------------------------------------
+// Certified counter-clockwise order of the half-edges leaving one vertex
+// ---------------------------------------------------------------------------
+
+export interface LeavingDirection {
+  half: number;
+  /** Certified polar angle of the leaving tangent. */
+  angle: Interval;
+  /** Certified signed curvature along the leaving direction. */
+  curvature: Interval;
+  /** The half-edge runs along a cubic: its curvature is enclosed only at the vertex. */
+  cubic: boolean;
+}
+
+/**
+ * Upper bound of the distance s_c beyond which curvature, not the tangent
+ * difference or the realized-end offset, separates two tied paths (T09d math
+ * review REQ-2): with lateral separation d(s) ≥ Δκ·s²/2 − w·s − η, d cannot
+ * vanish for s > (w + √(w² + 2ηΔκ))/Δκ. `width` bounds the tangent
+ * difference, `eta` the realized-end spread and `gap` is a lower bound of Δκ.
+ * Infinity when `gap` is not positive.
+ */
+export function curvatureDominanceRadius(
+  width: number,
+  eta: number,
+  gap: number,
+): number {
+  if (!(gap > 0)) return Number.POSITIVE_INFINITY;
+  const radicand = nextUp(
+    nextUp(width * width) + nextUp(nextUp(2 * eta) * gap),
+  );
+  return nextUp(nextUp(width + nextUp(Math.sqrt(radicand))) / gap);
+}
+
+/**
+ * Whether a + turns·2π overlaps b: exact at zero turns, and null when the
+ * rounding of the shift cannot decide it (T09f math re-review N3: an outward
+ * shift must not merge intervals certified disjoint).
+ */
+function turnOverlap(a: Interval, b: Interval, turns: number): boolean | null {
+  if (turns === 0) return ivOverlap(a, b);
+  const shift = iv(turns * TAU, turns * TAU);
+  if (!ivOverlap(ivAdd(a, shift), b)) return false;
+  return nextUp(a[0] + shift[1]) <= b[1] && b[0] <= nextDown(a[1] + shift[0])
+    ? true
+    : null;
+}
+
+/**
+ * Counter-clockwise order of the half-edges leaving one vertex, or null when
+ * it is not certified. Overlapping direction intervals are a tangent contact:
+ * each tie cluster is a connected component of the overlap graph over all
+ * pairs (T09d math review REQ-1), must overlap pairwise, and is ordered by
+ * disjoint certified curvature intervals (a path turning left lies
+ * counter-clockwise of one turning less), only where `tieBreak` allows it.
+ *
+ * `join` (declared joins only): tied members leave from realized ends up to
+ * `eta` apart with tangents up to the hull width apart, so each tied pair
+ * must bound its curvature-dominance radius below the smallest join ball
+ * radius, where T09a excludes a second contact (REQ-2). A cubic's curvature
+ * is enclosed only at the vertex and may change within that radius, so a
+ * tied cluster with a cubic member at a join is never ordered.
+ */
+export function sortLeavingDirections(
+  items: readonly LeavingDirection[],
+  tieBreak: boolean,
+  join: { eta: number; ballRadius: number } | null,
+): LeavingDirection[] | null {
+  // Two half-edges have one cyclic order: no direction or tie-break decides it.
+  if (items.length <= 2) return [...items];
+  // Each entry keeps its certified angle and the whole turns it is shifted
+  // by; the shifted angle only sorts and bounds widths, while overlaps are
+  // decided on the unshifted intervals (N3).
+  type Entry = { item: LeavingDirection; turns: number; angle: Interval };
+  const normalized = items
+    .map((item) => {
+      const turns = -Math.floor(item.angle[0] / TAU);
+      return { item, turns, angle: shiftInterval(item.angle, turns) };
+    })
+    .sort((left, right) => ivMid(left.angle) - ivMid(right.angle));
+  const count = normalized.length;
+  const entryAt = (index: number): Entry =>
+    index < count
+      ? normalized[index]!
+      : {
+          item: normalized[index - count]!.item,
+          turns: normalized[index - count]!.turns + 1,
+          angle: shiftInterval(normalized[index - count]!.angle, 1),
+        };
+  const overlap = (a: Entry, b: Entry, extraTurns = 0) =>
+    turnOverlap(a.item.angle, b.item.angle, a.turns - b.turns + extraTurns);
+  let gap = -1;
+  for (let index = 0; index < count; index += 1) {
+    if (overlap(entryAt(index), entryAt(index + 1)) === false) {
+      gap = index;
+      break;
+    }
+  }
+  if (gap < 0) return null;
+  const rotated = [...Array(count).keys()].map((offset) =>
+    entryAt(gap + 1 + offset),
+  );
+  const result: LeavingDirection[] = [];
+  const clusterOf: number[] = [];
+  let cluster = [rotated[0]!];
+  const flush = () => {
+    clusterOf.push(...cluster.map(() => result.length));
+    if (cluster.length > 1) {
+      if (!tieBreak) return false;
+      if (join && cluster.some((entry) => entry.item.cubic)) return false;
+    }
+    for (let a = 0; a < cluster.length; a += 1) {
+      for (let b = a + 1; b < cluster.length; b += 1) {
+        if (overlap(cluster[a]!, cluster[b]!) !== true) return false;
+        const left = cluster[a]!.item.curvature;
+        const right = cluster[b]!.item.curvature;
+        if (ivOverlap(left, right)) return false;
+        if (join === null) continue;
+        const angles = ivHull(cluster[a]!.angle, cluster[b]!.angle);
+        const width = nextUp(angles[1] - angles[0]);
+        const curvatureGap = nextDown(
+          left[0] > right[1] ? left[0] - right[1] : right[0] - left[1],
+        );
+        if (
+          !(
+            curvatureDominanceRadius(width, join.eta, curvatureGap) <
+            join.ballRadius
+          )
+        )
+          return false;
+      }
+    }
+    result.push(
+      ...[...cluster]
+        .sort((l, r) => l.item.curvature[0] - r.item.curvature[0])
+        .map((entry) => entry.item),
+    );
+    return true;
+  };
+  for (let index = 1; index < count; index += 1) {
+    const tied = overlap(rotated[index - 1]!, rotated[index]!);
+    if (tied === null) return null;
+    if (tied) {
+      cluster.push(rotated[index]!);
+      continue;
+    }
+    if (!flush()) return null;
+    cluster = [rotated[index]!];
+  }
+  if (!flush()) return null;
+  // Clusters are runs of consecutive overlaps: an overlap between two runs
+  // would join them into one component, whose order is then not certified.
+  for (let a = 0; a < count; a += 1)
+    for (let b = a + 1; b < count; b += 1)
+      if (
+        clusterOf[a] !== clusterOf[b] &&
+        [0, 1, -1].some(
+          (turns) => overlap(rotated[a]!, rotated[b]!, turns) !== false,
+        )
+      )
+        return null;
+  return result;
+}
 
 // ---------------------------------------------------------------------------
 // Interval evaluation of the three neutral forms the owner builds
