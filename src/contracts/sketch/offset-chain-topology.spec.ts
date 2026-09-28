@@ -45,7 +45,6 @@ import type {
   SketchDefinition,
   SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
-import type { SketchToolCommitContribution } from "@/core/sketch-tools/definition";
 import type { SketchConstraintToolId } from "@/core/sketch-constraints/definition";
 import {
   getSketchConstraintDefinition,
@@ -65,18 +64,33 @@ import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
 import { extractDeclaredOffsetChainConnectivity } from "@/contracts/sketch/offset-chain-connectivity";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import {
+  ARCH_POINTS,
+  CORNER_MATRIX_SOLVE_TOLERANCES,
+  cornerMatrixRows,
+  createNativeOffsetChainHarness,
+  type AcceptedPair,
+  type Authored,
+  type EndpointSnaps,
+  type NativeToolAuthoring,
+  type Vector,
+} from "@/contracts/sketch/offset-chain.fixtures";
+import {
   certifyOffsetChainTubeStability,
   declaredOffsetChainPieces,
   offsetChainRootEnclosure,
   resolveOffsetChainTopology,
   resolveOffsetChainTopologyJvp,
+  type CertifiedNeutralCurveRequestQuery,
   type DeclaredOffsetChainPieces,
   type OffsetChainPiece,
   type OffsetChainPieceVariation,
   type OffsetChainTopologyInput,
   type OffsetChainTopologySuccess,
 } from "@/contracts/sketch/offset-chain-topology";
-import { OFFSET_DIAGNOSTIC_CODES } from "@/contracts/sketch/offset-geometry";
+import {
+  OFFSET_DIAGNOSTIC_CODES,
+  offsetLinePoints,
+} from "@/contracts/sketch/offset-geometry";
 import {
   reconstructSpline,
   type SplinePoles,
@@ -88,16 +102,121 @@ import {
 } from "@/contracts/sketch/spline-offset-geometry";
 import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
 import {
-  createCertifiedNeutralCurveQuery,
-  createCertifiedNeutralCurveQueryWithLowerBudgetForTest,
+  createCertifiedNeutralCurveRequestQuery,
+  createCertifiedNeutralCurveRequestQueryWithBudgetObserverForTest,
+  createCertifiedNeutralCurveRequestQueryWithLowerBudgetForTest,
 } from "@/domain/modeling/neutral-curve-certification/query";
+import type { ExactProofBudgetSnapshot } from "@/domain/modeling/neutral-curve-certification/fixed-degree-primitives";
 
 const SKETCH_DIRECT_EDIT_TOLERANCES =
   createDocumentSolverTolerances(OCC_KERNEL_SETTINGS);
 
 type Point = readonly [number, number];
 const codes = OFFSET_DIAGNOSTIC_CODES;
-const query = createCertifiedNeutralCurveQuery();
+const query = createCertifiedNeutralCurveRequestQuery();
+
+/**
+ * The native authoring seam of the shared harness: the line/spline tools'
+ * commit contribution plus the session's endpoint-snap inference.
+ */
+function createNativeToolAuthoring(sketchId: string): NativeToolAuthoring {
+  const factories = createSessionCommitFactories(1, sketchId as never);
+  const endpointSnap = (pointId: SketchPointId, point: Vector) => ({
+    key: `endpoint:${pointId}`,
+    kind: "endpoint" as const,
+    point,
+    rawPointer: point,
+    distance: 0,
+    priority: 0,
+    sources: [{ kind: "localPoint" as const, pointId }],
+    preview: { label: "endpoint", glyph: "endpoint" as const },
+  });
+  const infer = (
+    previousDefinition: SketchDefinition,
+    activeTool: "line" | "spline",
+    patch: ReturnType<typeof lineSketchToolDefinition.createCommitContribution>,
+    sequence: number,
+    start: Vector,
+    end: Vector,
+    snaps: EndpointSnaps,
+  ) =>
+    appendInferredSnapConstraints({
+      previousDefinition,
+      patch,
+      activeTool,
+      startSnap: snaps.start ? endpointSnap(snaps.start, start) : null,
+      endSnap: snaps.end ? endpointSnap(snaps.end, end) : null,
+      sequence,
+      createConstraintId: (name: string) => `constraint_${name}` as never,
+    });
+  return {
+    line: ({ previousDefinition, sequence, start, end, snaps }) =>
+      infer(
+        previousDefinition,
+        "line",
+        lineSketchToolDefinition.createCommitContribution({
+          sequence,
+          start,
+          end,
+          isConstruction: false,
+          factories,
+        }),
+        sequence,
+        start,
+        end,
+        snaps,
+      ),
+    spline: ({ previousDefinition, sequence, points, snaps }) =>
+      infer(
+        previousDefinition,
+        "spline",
+        splineSketchToolDefinition.createCommitContribution({
+          sequence,
+          start: points[0]!,
+          end: points.at(-1)!,
+          points: points as [number, number][],
+          isConstruction: false,
+          factories,
+        }),
+        sequence,
+        points[0]!,
+        points.at(-1)!,
+        snaps,
+      ),
+  };
+}
+
+/** Seam fake: every request of the resolver answers pair queries with `fake`. */
+const perRequest = (
+  fake: Pick<CertifiedNeutralCurveQuery, "queryPair">,
+): CertifiedNeutralCurveRequestQuery => ({
+  openRequest: () => ({ queryPair: (request) => fake.queryPair(request) }),
+});
+
+/** Pass-through recorder of the resolver's requests (sizes) and pair queries. */
+const recordingRequests = (
+  inner: CertifiedNeutralCurveRequestQuery = query,
+  onPair: (
+    request: Parameters<CertifiedNeutralCurveQuery["queryPair"]>[0],
+    result: ReturnType<CertifiedNeutralCurveQuery["queryPair"]>,
+  ) => void = () => {},
+) => {
+  const sizes: number[] = [];
+  const recorded: CertifiedNeutralCurveRequestQuery = {
+    openRequest: (queryCount) => {
+      sizes.push(queryCount);
+      const request = inner.openRequest(queryCount);
+      return {
+        queryPair: (pair) => {
+          const result = request.queryPair(pair);
+          onPair(pair, result);
+          return result;
+        },
+      };
+    },
+  };
+  return { sizes, query: recorded };
+};
 const ZERO_POLES: SplinePoles = [
   [0, 0],
   [0, 0],
@@ -118,7 +237,7 @@ function makeOffsetChainFixture(
   options: {
     closed?: boolean;
     modelingTolerance?: number;
-    query?: CertifiedNeutralCurveQuery;
+    query?: CertifiedNeutralCurveRequestQuery;
   } = {},
 ): OffsetChainTopologyInput {
   return {
@@ -506,17 +625,13 @@ describe("offset chain line pieces are exact endpoint segments", () => {
     Object.is(actual[0], expected[0]) && Object.is(actual[1], expected[1]);
   const recordingSegments = () => {
     const segments: EndpointNeutralSegment[] = [];
-    const recorded: CertifiedNeutralCurveQuery = {
-      queryPair: (request) => {
-        for (const curve of [request.first, request.second]) {
-          if (curve.kind === "line" && curve.form === "endpointSegment") {
-            segments.push(curve);
-          }
+    const { query: recorded } = recordingRequests(query, (request) => {
+      for (const curve of [request.first, request.second]) {
+        if (curve.kind === "line" && curve.form === "endpointSegment") {
+          segments.push(curve);
         }
-        return query.queryPair(request);
-      },
-      querySelf: (request) => query.querySelf(request),
-    };
+      }
+    });
     return { segments, query: recorded };
   };
 
@@ -731,7 +846,7 @@ describe("offset chain joints fail closed", () => {
     expect(
       resolveOffsetChainTopology(
         makeOffsetChainFixture([archPiece, line("l", [2.5, 1], [2.5, -1])], {
-          query: createCertifiedNeutralCurveQueryWithLowerBudgetForTest({
+          query: createCertifiedNeutralCurveRequestQueryWithLowerBudgetForTest({
             operations: 1000,
           }),
         }),
@@ -786,7 +901,7 @@ describe("offset chain joints fail closed", () => {
         failed(
           makeOffsetChainFixture(
             [archPiece, cubic("other", [fabricatedSpan(ARCH)])],
-            { query: fake },
+            { query: perRequest(fake) },
           ),
         ).code,
         proof.kind,
@@ -795,7 +910,7 @@ describe("offset chain joints fail closed", () => {
   });
 });
 
-describe("offset chain adjacency and global validity", () => {
+describe("offset chain adjacency and global validity (M0: the certificate is the only global gate)", () => {
   const knotted = [
     fabricatedSpan(ARCH),
     fabricatedSpan([
@@ -805,6 +920,37 @@ describe("offset chain adjacency and global validity", () => {
       [6, 0],
     ]),
   ];
+  const chainCertifier = createCertifiedCubicTubeChain();
+  /** Resolver, then the certificate: the only claim of global validity. */
+  const certifiedChain = (input: OffsetChainTopologyInput) => {
+    const resolution = resolveOffsetChainTopology(input);
+    return resolution.ok
+      ? certifyOffsetChainTubeStability(resolution, chainCertifier)
+      : resolution;
+  };
+  /**
+   * Former global-gate adversary: the resolver no longer rejects it (it only
+   * places trims, with no non-joint query), and the chain still fails closed
+   * at the certificate.
+   */
+  const expectRejectedOnlyByCertificate = (
+    input: OffsetChainTopologyInput,
+    expected: { code: string; message?: string },
+  ) => {
+    const { sizes, query: recorded } = recordingRequests(input.query);
+    const withRecording = { ...input, query: recorded };
+    expect(resolveOffsetChainTopology(withRecording).ok).toBe(true);
+    expect(sizes, "one request, joint queries only").toEqual([
+      input.closed ? input.pieces.length : input.pieces.length - 1,
+    ]);
+    expect(certifiedChain(input)).toMatchObject({
+      ok: false,
+      code: expected.code,
+      ...(expected.message
+        ? { message: expect.stringContaining(expected.message) }
+        : {}),
+    });
+  };
 
   test("a bitwise-shared owner knot is the single declared incidence", () => {
     const result = resolved(makeOffsetChainFixture([cubic("s", knotted)]));
@@ -849,97 +995,79 @@ describe("offset chain adjacency and global validity", () => {
     ).toMatchObject({ code: codes.topologyUncertain, seedEntityId: id("s") });
   });
 
-  test("an extra crossing between knot-sharing spans cannot be ignored", () => {
-    expect(
-      failed(
-        makeOffsetChainFixture([
-          cubic("s", [
-            fabricatedSpan([
-              [0, 0],
-              [1, 0],
-              [2, 0],
-              [3, 0],
-            ]),
-            fabricatedSpan([
-              [3, 0],
-              [4, 1],
-              [1, 1],
-              [1.5, -1],
-            ]),
+  test("an extra crossing between knot-sharing spans cannot be ignored (now by the certificate)", () => {
+    expectRejectedOnlyByCertificate(
+      makeOffsetChainFixture([
+        cubic("s", [
+          fabricatedSpan([
+            [0, 0],
+            [1, 0],
+            [2, 0],
+            [3, 0],
+          ]),
+          fabricatedSpan([
+            [3, 0],
+            [4, 1],
+            [1, 1],
+            [1.5, -1],
           ]),
         ]),
-      ).code,
-    ).toBe(codes.selfIntersection);
+      ]),
+      // Fabricated spans share one source span, so J1 already fails.
+      { code: codes.knotIncidenceUnproven },
+    );
   });
 
-  test("seam: a witness at the knot position whose box misses the knot parameters is not the incidence", () => {
-    const fake: CertifiedNeutralCurveQuery = {
-      queryPair: () => ({
-        kind: "verified",
-        points: [
-          {
-            classification: "unclassified",
-            firstParameter: 0.5,
-            secondParameter: 0.5,
-            position: [3, 0],
-            proof: {
-              kind: "exactCubicPairRootSet",
-              firstParameterBounds: [0.5, 0.5],
-              secondParameterBounds: [0.5, 0.5],
-            },
-          },
-        ],
-        overlaps: [],
-        completenessProof: {
-          kind: "completeIsolatedRootSet",
-          family: "cubicCubic",
-          distinctRootCount: 1,
+  test("the resolver never queries knot incidence: an injected knot witness is never consulted", () => {
+    const { sizes, query: recorded } = recordingRequests(
+      perRequest({
+        queryPair: () => {
+          throw new Error("no pair query without a joint");
         },
       }),
-      querySelf: verifiedEmptySelf,
-    };
+    );
     expect(
-      failed(makeOffsetChainFixture([cubic("s", knotted)], { query: fake }))
-        .code,
-    ).toBe(codes.topologyUncertain);
+      resolved(
+        makeOffsetChainFixture([cubic("s", knotted)], { query: recorded }),
+      ).joints,
+    ).toEqual([]);
+    expect(sizes).toEqual([0]);
   });
 
-  test("non-adjacent crossings are self-intersections within one output and across pieces", () => {
-    expect(
-      failed(
-        makeOffsetChainFixture([
-          cubic("s", [
-            fabricatedSpan([
-              [0, 0],
-              [1, 0],
-              [2, 0],
-              [3, 0],
-            ]),
-            fabricatedSpan([
-              [3, 0],
-              [4, 0],
-              [4, 1],
-              [3, 1],
-            ]),
-            fabricatedSpan([
-              [3, 1],
-              [2, 1],
-              [1.5, 1],
-              [1.5, -1],
-            ]),
+  test("non-adjacent crossings within one output and across pieces are rejected by the certificate", () => {
+    expectRejectedOnlyByCertificate(
+      makeOffsetChainFixture([
+        cubic("s", [
+          fabricatedSpan([
+            [0, 0],
+            [1, 0],
+            [2, 0],
+            [3, 0],
+          ]),
+          fabricatedSpan([
+            [3, 0],
+            [4, 0],
+            [4, 1],
+            [3, 1],
+          ]),
+          fabricatedSpan([
+            [3, 1],
+            [2, 1],
+            [1.5, 1],
+            [1.5, -1],
           ]),
         ]),
-      ).code,
-    ).toBe(codes.selfIntersection);
-    expect(
-      failed(
-        makeOffsetChainFixture([
-          cubic("arch", [fabricatedSpan(ARCH)]),
-          line("drop", [2.5, 1], [2.5, -1]),
-          line("back", [3, -0.5], [0.5, 2]),
-        ]),
-      ),
-    ).toMatchObject({ code: codes.selfIntersection, seedEntityId: id("arch") });
+      ]),
+      { code: codes.knotIncidenceUnproven },
+    );
+    expectRejectedOnlyByCertificate(
+      makeOffsetChainFixture([
+        cubic("arch", [fabricatedSpan(ARCH)]),
+        line("drop", [2.5, 1], [2.5, -1]),
+        line("back", [3, -0.5], [0.5, 2]),
+      ]),
+      { code: codes.topologyStabilityUnsupported },
+    );
   });
 
   test("a crossing proved on the trimmed-away side on one curve is excluded", () => {
@@ -954,99 +1082,40 @@ describe("offset chain adjacency and global validity", () => {
     ).toHaveLength(2);
   });
 
-  test("a root whose enclosure overlaps a trim root enclosure fails closed", () => {
+  test("a non-adjacent curve through a trim root is rejected by the certificate", () => {
     // The non-adjacent cubic passes exactly through the horizontal/vertical joint point (1, 0).
-    expect(
-      failed(
-        makeOffsetChainFixture([
-          line("horizontal", [0, 0], [3, 0]),
-          line("vertical", [1, -1], [1, 3]),
-          line("top", [0, 2.5], [3, 2.5]),
-          cubic("through", [
-            fabricatedSpan([
-              [2.5, 3],
-              [1.5, 1],
-              [0.5, -1],
-              [-0.5, -3],
-            ]),
+    expectRejectedOnlyByCertificate(
+      makeOffsetChainFixture([
+        line("horizontal", [0, 0], [3, 0]),
+        line("vertical", [1, -1], [1, 3]),
+        line("top", [0, 2.5], [3, 2.5]),
+        cubic("through", [
+          fabricatedSpan([
+            [2.5, 3],
+            [1.5, 1],
+            [0.5, -1],
+            [-0.5, -3],
           ]),
         ]),
-      ),
-    ).toMatchObject({
-      code: codes.topologyUncertain,
-      message: expect.stringContaining("offset trim"),
-    });
+      ]),
+      { code: codes.topologyStabilityUnsupported },
+    );
   });
 
-  test("a cubic self-loop is found by the self query", () => {
-    expect(
-      failed(
-        makeOffsetChainFixture([
-          cubic("loop", [
-            fabricatedSpan([
-              [0, 0],
-              [3, 3],
-              [-2, 3],
-              [1, 0],
-            ]),
+  test("a cubic self-loop is rejected by the certificate's K1 cone", () => {
+    expectRejectedOnlyByCertificate(
+      makeOffsetChainFixture([
+        cubic("loop", [
+          fabricatedSpan([
+            [0, 0],
+            [3, 3],
+            [-2, 3],
+            [1, 0],
           ]),
         ]),
-      ).code,
-    ).toBe(codes.selfIntersection);
-  });
-
-  test("the pole-box prefilter skips only strictly disjoint cubic pairs", () => {
-    const counted = (first: SplinePoles) => {
-      const pairs: string[] = [];
-      const counting: CertifiedNeutralCurveQuery = {
-        queryPair: (request) => {
-          pairs.push(`${request.first.curveId}|${request.second.curveId}`);
-          return query.queryPair(request);
-        },
-        querySelf: (request) => query.querySelf(request),
-      };
-      resolved(
-        makeOffsetChainFixture(
-          [
-            cubic("s", [
-              fabricatedSpan(first),
-              fabricatedSpan([
-                [1, 0],
-                [1.25, 0.25],
-                [1.25, 0.75],
-                [1, 1],
-              ]),
-              fabricatedSpan([
-                [1, 1],
-                [1.25, 1.25],
-                [1.75, 1.25],
-                [2, 1],
-              ]),
-            ]),
-          ],
-          { query: counting },
-        ),
-      );
-      return pairs;
-    };
-    const s = (index: number) => `${id("s")}:${index}`;
-    expect(
-      counted([
-        [0, 0],
-        [0.25, 0.5],
-        [0.75, 0.5],
-        [1, 0],
       ]),
-    ).toEqual([`${s(0)}|${s(1)}`, `${s(1)}|${s(2)}`]);
-    expect(
-      counted([
-        [0, 0],
-        [0.25, 1],
-        [0.75, 1],
-        [1, 0],
-      ]),
-      "touching boxes are queried",
-    ).toContain(`${s(0)}|${s(2)}`);
+      { code: codes.topologyUncertain, message: "cubic-tube-cone-unproven" },
+    );
   });
 
   /** Real four-span owner output: (0,0),(1,0.1),(2,0), offset 0.2, tolerance 1e-3. */
@@ -1077,27 +1146,14 @@ describe("offset chain adjacency and global validity", () => {
     if (!owner.ok) throw new Error(owner.code);
     return owner.spans;
   };
-  const recordingQuery = (inner: CertifiedNeutralCurveQuery) => {
-    const outcomes: string[] = [];
-    const recorded: CertifiedNeutralCurveQuery = {
-      queryPair: (request) => {
-        const result = inner.queryPair(request);
-        outcomes.push(result.kind);
-        return result;
-      },
-      querySelf: (request) => {
-        const result = inner.querySelf(request);
-        outcomes.push(result.kind);
-        return result;
-      },
-    };
-    return { outcomes, query: recorded };
-  };
 
-  test("real multi-span owner output resolves under the unchanged production caps", () => {
+  test("real multi-span owner output resolves with no query and is certified by the tube certificate", () => {
     const spans = realMultiSpanOwner();
     expect(spans).toHaveLength(4);
-    const { outcomes, query: recorded } = recordingQuery(query);
+    const outcomes: string[] = [];
+    const { sizes, query: recorded } = recordingRequests(query, (_, result) =>
+      outcomes.push(result.kind),
+    );
     const result = resolved(
       makeOffsetChainFixture([cubic("s", spans)], { query: recorded }),
     );
@@ -1105,38 +1161,11 @@ describe("offset chain adjacency and global validity", () => {
     expect(
       result.cubics.get(id("s"))!.map((span) => [span.start, span.end]),
     ).toEqual(spans.map(() => [{ kind: "source" }, { kind: "source" }]));
-    expect(outcomes).toHaveLength(7);
-    expect(outcomes.every((kind) => kind === "verified")).toBe(true);
-  }, 60_000);
-
-  test("real multi-span owner output fails closed when a later query exhausts an injected lower budget", () => {
-    // Receipt-backed literal: above the two adjacent pairs 0-1 (3,997,928)
-    // and 1-2 (3,700,096) operations, below pair 2-3 (4,412,250).
-    const { outcomes, query: recorded } = recordingQuery(
-      createCertifiedNeutralCurveQueryWithLowerBudgetForTest({
-        operations: 4_200_000,
-      }),
-    );
-    expect(
-      resolveOffsetChainTopology(
-        makeOffsetChainFixture([cubic("s", realMultiSpanOwner())], {
-          query: recorded,
-        }),
-      ),
-    ).toEqual({
-      ok: false,
-      code: codes.topologyUncertain,
-      message: expect.stringContaining("exact-query-proof-budget-exhausted"),
-      seedEntityId: id("s"),
-    });
-    expect(outcomes.at(-1)).toBe("uncertain");
-    expect(outcomes.slice(0, -1)).toEqual([
-      "verified",
-      "verified",
-      "verified",
-      "verified",
-    ]);
-  }, 60_000);
+    expect(sizes).toEqual([0]);
+    expect(outcomes, "formerly 7 global queries").toEqual([]);
+    const certified = certifyOffsetChainTubeStability(result, chainCertifier);
+    expect(certified).toMatchObject({ ok: true, resolved: result });
+  });
 });
 
 describe("offset chain seam contracts", () => {
@@ -1145,25 +1174,14 @@ describe("offset chain seam contracts", () => {
       const distance = -0.25;
       const spans = ownerSpans({ distance, modelingTolerance });
       const seen: { tolerance: number; poles: unknown }[] = [];
-      const recording: CertifiedNeutralCurveQuery = {
-        queryPair: (request) => {
-          for (const curve of [request.first, request.second]) {
-            seen.push({
-              tolerance: request.modelingTolerance,
-              poles: curve.kind === "cubicBezier" ? curve.poles : null,
-            });
-          }
-          return query.queryPair(request);
-        },
-        querySelf: (request) => {
+      const { query: recording } = recordingRequests(query, (request) => {
+        for (const curve of [request.first, request.second]) {
           seen.push({
             tolerance: request.modelingTolerance,
-            poles:
-              request.curve.kind === "cubicBezier" ? request.curve.poles : null,
+            poles: curve.kind === "cubicBezier" ? curve.poles : null,
           });
-          return query.querySelf(request);
-        },
-      };
+        }
+      });
       resolved(
         makeOffsetChainFixture(ownerLineCubicLine(distance, spans), {
           modelingTolerance,
@@ -1196,7 +1214,7 @@ describe("offset chain seam contracts", () => {
             cubic("arch", [fabricatedSpan(ARCH)]),
             line("l", [2.5, 1], [2.5, -1]),
           ],
-          { query: throwing },
+          { query: perRequest(throwing) },
         ),
       );
     } catch (caught) {
@@ -1525,7 +1543,7 @@ describe("offset chain fixed-topology JVP", () => {
     };
     const input = makeOffsetChainFixture(
       [line("a", [0, 0], [2, 0]), line("b", [0, 1], [2, 1])],
-      { query: parallel },
+      { query: perRequest(parallel) },
     );
     expect(resolveOffsetChainTopology(input)).toMatchObject({
       ok: false,
@@ -1577,48 +1595,6 @@ describe("offset chain tube-stability mapping (bounded helper, not live)", () =>
     [1, 0.1],
     [2, 0],
   ];
-  /**
-   * Mapping-seam fake only, never topology evidence: reports exactly the
-   * bitwise-shared knot of each owner span pair as its single root so the
-   * resolver accepts untrimmed owner chains without the slow exact queries.
-   */
-  const knotOnlyQuery: CertifiedNeutralCurveQuery = {
-    queryPair: ({ first, second }) => {
-      if (first.kind !== "cubicBezier" || second.kind !== "cubicBezier") {
-        throw new Error("knot-only fake admits owner cubics only");
-      }
-      const at = samePointForTest(first.poles[3], second.poles[0])
-        ? ([first.sourceDomain[1], second.sourceDomain[0]] as const)
-        : samePointForTest(second.poles[3], first.poles[0])
-          ? ([first.sourceDomain[0], second.sourceDomain[1]] as const)
-          : null;
-      return {
-        kind: "verified",
-        points: at
-          ? [
-              {
-                classification: "unclassified",
-                firstParameter: at[0],
-                secondParameter: at[1],
-                position: first.poles[at[0] === first.sourceDomain[1] ? 3 : 0],
-                proof: {
-                  kind: "exactCubicPairRootSet",
-                  firstParameterBounds: [at[0], at[0]],
-                  secondParameterBounds: [at[1], at[1]],
-                },
-              },
-            ]
-          : [],
-        overlaps: [],
-        completenessProof: {
-          kind: "completeIsolatedRootSet",
-          family: "cubicCubic",
-          distinctRootCount: at ? 1 : 0,
-        },
-      };
-    },
-    querySelf: verifiedEmptySelf,
-  };
   const recordingCertifier = () => {
     const requests: CubicTubeChainRequest[] = [];
     const certifier: CertifiedCubicTubeChain = {
@@ -1658,7 +1634,6 @@ describe("offset chain tube-stability mapping (bounded helper, not live)", () =>
         const accepted = resolved(
           makeOffsetChainFixture([cubic("s", spans, reversed)], {
             modelingTolerance,
-            query: knotOnlyQuery,
           }),
         );
         expect(certifyOffsetChainTubeStability(accepted, certifier).ok).toBe(
@@ -1697,7 +1672,6 @@ describe("offset chain tube-stability mapping (bounded helper, not live)", () =>
       resolved(
         makeOffsetChainFixture([cubic("diamond", spans)], {
           closed: true,
-          query: knotOnlyQuery,
         }),
       ),
       tubeCertifier,
@@ -1752,9 +1726,7 @@ describe("offset chain tube-stability mapping (bounded helper, not live)", () =>
 
   test("certifier outcomes map to clearance, knot-incidence and topology-uncertain codes", () => {
     const accepted = resolved(
-      makeOffsetChainFixture([cubic("s", ownerChain(F1_POINTS, 0.2))], {
-        query: knotOnlyQuery,
-      }),
+      makeOffsetChainFixture([cubic("s", ownerChain(F1_POINTS, 0.2))]),
     );
     const answering = (
       code: string,
@@ -1795,22 +1767,19 @@ describe("offset chain tube-stability mapping (bounded helper, not live)", () =>
       });
     }
     const asymmetric = resolved(
-      makeOffsetChainFixture(
-        [
-          cubic(
-            "s",
-            ownerChain(
-              [
-                [0, 0],
-                [1, 0.1],
-                [2.5, 0],
-              ],
-              0.2,
-            ),
+      makeOffsetChainFixture([
+        cubic(
+          "s",
+          ownerChain(
+            [
+              [0, 0],
+              [1, 0.1],
+              [2.5, 0],
+            ],
+            0.2,
           ),
-        ],
-        { query: knotOnlyQuery },
-      ),
+        ),
+      ]),
     );
     // Formerly knot-incidence-unproven; J2′ now certifies its concave knot.
     const certified = certifyOffsetChainTubeStability(
@@ -1830,9 +1799,7 @@ describe("offset chain tube-stability mapping (bounded helper, not live)", () =>
   test("certifier exceptions propagate by identity", () => {
     const error = new Error("ordinary failure");
     const accepted = resolved(
-      makeOffsetChainFixture([cubic("s", ownerChain(F1_POINTS, 0.2))], {
-        query: knotOnlyQuery,
-      }),
+      makeOffsetChainFixture([cubic("s", ownerChain(F1_POINTS, 0.2))]),
     );
     let thrown: unknown;
     try {
@@ -1855,193 +1822,21 @@ function samePointForTest(first: Point, second: Point) {
 describe("declared multi-piece tube stability (L1b, bounded helper, not live)", () => {
   const TOLERANCE = 1e-3;
   const pieceCertifier = createCertifiedCubicTubeChain();
-  type Vector = readonly [number, number];
-  type Authored = SketchToolCommitContribution;
-  let sequence = 0;
-  const factory = createSessionCommitFactories(1, "sketch_l1b" as never);
-  /** Full authored definition of native commit contributions. */
-  const sketch = (patches: readonly Authored[]): SketchDefinition => {
-    const points = patches.flatMap((patch) => patch.points);
-    const entities = patches.flatMap((patch) => patch.entities);
-    const constraints = patches.flatMap((patch) => patch.constraints ?? []);
-    return {
-      schemaVersion: "sketch-definition/v1alpha1",
-      referenceIds: [],
-      references: [],
-      pointIds: points.map((point) => point.pointId),
-      points,
-      entityIds: entities.map((entity) => entity.entityId),
-      entities,
-      constraintIds: constraints.map((constraint) => constraint.constraintId),
-      constraints,
-      dimensionIds: [],
-      dimensions: [],
-    } as SketchDefinition;
-  };
-  const endpointSnap = (pointId: SketchPointId, point: Vector) => ({
-    key: `endpoint:${pointId}`,
-    kind: "endpoint" as const,
-    point,
-    rawPointer: point,
-    distance: 0,
-    priority: 0,
-    sources: [{ kind: "localPoint" as const, pointId }],
-    preview: { label: "endpoint", glyph: "endpoint" as const },
+  const harness = createNativeOffsetChainHarness({
+    authoring: createNativeToolAuthoring("sketch_l1b"),
+    query,
+    modelingTolerance: TOLERANCE,
   });
-  /** Native tool commit plus the session's endpoint-snap inference. */
-  const author = (
-    previous: readonly Authored[],
-    activeTool: "line" | "spline",
-    patch: Authored,
-    start: Vector,
-    end: Vector,
-    snaps: { start?: SketchPointId; end?: SketchPointId } = {},
-  ) =>
-    appendInferredSnapConstraints({
-      previousDefinition: sketch(previous),
-      patch,
-      activeTool,
-      startSnap: snaps.start ? endpointSnap(snaps.start, start) : null,
-      endSnap: snaps.end ? endpointSnap(snaps.end, end) : null,
-      sequence,
-      createConstraintId: (name: string) => `constraint_${name}` as never,
-    });
-  const drawLine = (
-    previous: readonly Authored[],
-    start: Vector,
-    end: Vector,
-    snaps: { start?: SketchPointId; end?: SketchPointId } = {},
-  ) => {
-    sequence += 1;
-    return author(
-      previous,
-      "line",
-      lineSketchToolDefinition.createCommitContribution({
-        sequence,
-        start,
-        end,
-        isConstruction: false,
-        factories: factory,
-      }),
-      start,
-      end,
-      snaps,
-    );
-  };
-  const drawSpline = (
-    previous: readonly Authored[],
-    points: readonly Vector[],
-    snaps: { start?: SketchPointId } = {},
-  ) => {
-    sequence += 1;
-    return author(
-      previous,
-      "spline",
-      splineSketchToolDefinition.createCommitContribution({
-        sequence,
-        start: points[0]!,
-        end: points.at(-1)!,
-        points: points as [number, number][],
-        isConstruction: false,
-        factories: factory,
-      }),
-      points[0]!,
-      points.at(-1)!,
-      snaps,
-    );
-  };
-  const lineEnds = (patch: Authored) => {
-    const entity = patch.entities[0]!;
-    if (entity.kind !== "lineSegment") throw new Error("not a line");
-    return [entity.startPointId, entity.endPointId] as const;
-  };
-  const splineEnds = (patch: Authored) => {
-    const entity = patch.entities[0]!;
-    if (entity.kind !== "spline") throw new Error("not a spline");
-    return [
-      entity.pointOccurrences[0]!.pointId,
-      entity.pointOccurrences.at(-1)!.pointId,
-    ] as const;
-  };
-  const ARCH_POINTS: readonly Vector[] = [
-    [0, 0],
-    [1, 0.1],
-    [2, 0],
-  ];
-
-  /** commit → solve → N2 → fresh adapter → N1 resolver (real query). */
-  const nativeChain = (patches: readonly Authored[], distance: number) => {
-    const definition = sketch(patches);
-    const solved = solveSketchDefinitionCore({
-      definition,
-      tolerances: {
-        coincidence: 1e-6,
-        angleRadians: 1e-6,
-        minimumSegmentLength: 1e-6,
-      },
-      partialSolvePolicy: "bestEffort",
-    });
-    expect(solved.status.solveState).toBe("solved");
-    const positions = new Map(
-      solved.solvedSnapshot.solvedPoints.map((point) => [
-        point.pointId,
-        point.solvedPosition,
-      ]),
-    );
-    const solvedDefinition = {
-      ...definition,
-      points: definition.points.map((point) => ({
-        ...point,
-        position: positions.get(point.pointId)!,
-      })),
-    };
-    return pairChain(
-      { definition: solvedDefinition, solvedSnapshot: solved.solvedSnapshot },
-      distance,
-    );
-  };
-  interface AcceptedPair {
-    readonly definition: SketchDefinition;
-    readonly solvedSnapshot: SolvedSketchSnapshot;
-  }
-  /** One accepted (definition, solvedSnapshot) pair → N2 → fresh adapter → N1 resolver. */
-  const pairChain = (
-    pair: AcceptedPair,
-    distance: number,
-    seedIds: readonly SketchEntityId[] = pair.definition.entities.map(
-      (entity) => entity.entityId,
-    ),
-  ) => {
-    const connectivity = extractDeclaredOffsetChainConnectivity({
-      definition: pair.definition,
-      seedIds,
-    });
-    if (!connectivity.ok) throw new Error(connectivity.message);
-    const adapt = () => {
-      const declared = declaredOffsetChainPieces({
-        definition: pair.definition,
-        solvedSnapshot: pair.solvedSnapshot,
-        connectivity,
-        distance,
-        modelingTolerance: TOLERANCE,
-      });
-      if (!declared.ok) throw new Error(declared.message);
-      return declared;
-    };
-    const declared = adapt();
-    const resolution = resolveOffsetChainTopology({
-      pieces: declared.pieces,
-      closed: connectivity.closed,
-      modelingTolerance: TOLERANCE,
-      query,
-    });
-    return { connectivity, declared, resolution, adapt, pair };
-  };
-  const accepted = (chain: ReturnType<typeof nativeChain>) => {
-    if (!chain.resolution.ok)
-      throw new Error(`${chain.resolution.code}: ${chain.resolution.message}`);
-    return chain.resolution;
-  };
+  const {
+    sketch,
+    drawLine,
+    drawSpline,
+    lineEnds,
+    splineEnds,
+    pairChain,
+    nativeChain,
+    accepted,
+  } = harness;
   const recording = () => {
     const requests: PieceTubeChainRequest[] = [];
     const certifier: CertifiedTubePieceChain = {
@@ -2398,8 +2193,7 @@ describe("declared multi-piece tube stability (L1b, bounded helper, not live)", 
     targets: readonly ToolTarget[],
     value: number | null = null,
   ): SketchDefinition => {
-    sequence += 1;
-    const step = sequence;
+    const step = harness.nextSequence();
     const contribution = getSketchConstraintDefinition(
       toolId,
     ).createCommitContribution({
@@ -2658,12 +2452,13 @@ describe("declared multi-piece tube stability (L1b, bounded helper, not live)", 
     expect(adapted.calls).toEqual(["reconstruct", "owner"]);
   }, 300_000);
 
-  // Concave side of every C1 orientation; the other side is convex. Two of the
-  // eight concave cases exhaust the unchanged global exact-query budget and
-  // fail closed in the resolver: disclosed, not waived, no cap change.
+  // Concave side of every C1 orientation; the other side is convex. Before
+  // T08b-a two of the eight concave cases (bulge 0.1, spline not from the
+  // join) exhausted the removed global gate's per-query budget in the
+  // resolver; with joint queries only they now verify through the certificate.
   test.each([
     [0.1, true, true, 0.01, [false, false], { line: "first", orientation: 1 }],
-    [0.1, true, false, 0.01, null, "budget"],
+    [0.1, true, false, 0.01, [false, true], { line: "first", orientation: -1 }],
     [
       0.1,
       false,
@@ -2672,7 +2467,14 @@ describe("declared multi-piece tube stability (L1b, bounded helper, not live)", 
       [true, false],
       { line: "second", orientation: -1 },
     ],
-    [0.1, false, false, -0.01, null, "budget"],
+    [
+      0.1,
+      false,
+      false,
+      -0.01,
+      [false, false],
+      { line: "second", orientation: 1 },
+    ],
     [-0.1, true, true, 0.01, [false, false], { line: "first", orientation: 1 }],
     [
       -0.1,
@@ -2710,16 +2512,6 @@ describe("declared multi-piece tube stability (L1b, bounded helper, not live)", 
         ok: false,
         code: codes.splineJointUnsupported,
       });
-      if (expected === "budget") {
-        expect(pairChain(pair, distance).resolution).toMatchObject({
-          ok: false,
-          code: codes.topologyUncertain,
-          message: expect.stringContaining(
-            "exact-query-proof-budget-exhausted",
-          ),
-        });
-        return;
-      }
       const { chain } = expectVerifiedCoincidentTrim(
         pair,
         distance,
@@ -3344,4 +3136,492 @@ describe("declared multi-piece tube stability (L1b, bounded helper, not live)", 
       message: expect.stringContaining("shared traversal terminal"),
     });
   }, 120_000);
+});
+
+describe("T08b-a capacity: joint queries only on one whole-request meter (M0/M7)", () => {
+  const TOLERANCE = 1e-3;
+  const pieceCertifier = createCertifiedCubicTubeChain();
+  const harness = createNativeOffsetChainHarness({
+    authoring: createNativeToolAuthoring("sketch_t08ba"),
+    query,
+    modelingTolerance: TOLERANCE,
+  });
+  const matrixHarness = createNativeOffsetChainHarness({
+    authoring: createNativeToolAuthoring("sketch_t08b"),
+    query,
+    modelingTolerance: TOLERANCE,
+    solveTolerances: CORNER_MATRIX_SOLVE_TOLERANCES,
+  });
+  const refusing: CertifiedTubePieceChain = {
+    certifyPieceChain: () => {
+      throw new Error("the certifier must not be reached");
+    },
+  };
+  /** Final verdict: the resolver's failure code, else the certificate's. */
+  const verdict = (chain: ReturnType<typeof harness.nativeChain>) => {
+    if (!chain.resolution.ok) return chain.resolution.code;
+    const result = certifyOffsetChainTubeStability(
+      chain.resolution,
+      pieceCertifier,
+      chain.declared,
+    );
+    if (result.ok) return "verified";
+    const inner = /: (?:uncertain|unsupported) ([a-z0-9-]+):/.exec(
+      result.message,
+    );
+    return inner ? `${result.code} / ${inner[1]}` : result.code;
+  };
+  const splitLeaf = (chain: ReturnType<typeof harness.nativeChain>) =>
+    chain.declared.pieces.map((piece) =>
+      piece.kind === "derivedCubic" ? piece.spans.length : 0,
+    );
+
+  // Design §1.5 verdicts at 5fe2b17d (T08b-a-evidence/corner-matrix-before);
+  // only S2pt changes (the removed cubic self query rejected it).
+  const MATRIX_VERDICTS: Record<string, string> = {
+    "S1 0.01": "verified",
+    "S1 -0.01": "verified",
+    "S1 0.2": "verified",
+    "S1b 0.01": "verified",
+    "S1b -0.05": "verified",
+    "SL-90 0.01": "verified",
+    "SL-90 -0.01": codes.splineJointUnsupported,
+    "SL-90 0.2": "verified",
+    "SL-90 -0.2": codes.splineJointUnsupported,
+    "SL-90 0.5": codes.splineJointUnsupported,
+    "SL-shallow 0.01": codes.splineJointUnsupported,
+    "SL-shallow -0.01": `${codes.topologyUncertain} / trim-window-unproven`,
+    "SL-tiny 0.01": codes.jointUnsatisfied,
+    "SL-tiny -0.01": codes.jointUnsatisfied,
+    "LS-90 0.01": "verified",
+    "LS-90 -0.01": codes.splineJointUnsupported,
+    "SS-60 0.01": `${codes.topologyUncertain} / trim-pair-unsupported`,
+    "SS-60 -0.01": codes.splineJointUnsupported,
+    "SS-60 0.2": `${codes.topologyUncertain} / trim-pair-unsupported`,
+    "SS-tiny 0.01": codes.jointUnsatisfied,
+    "SS-tiny -0.01": codes.jointUnsatisfied,
+    "LL-90 0.01": "verified",
+    "LL-90 -0.01": codes.splineJointUnsupported,
+    "SL-loop 0.01": codes.splineJointUnsupported,
+    "SL-loop -0.01": `${codes.topologyUncertain} / trim-composition-unproven`,
+    "S2pt 0.01": "verified",
+  };
+
+  test("native corner matrix: every row keeps its verdict, S2pt now verifies, and each request is sized by its joints", () => {
+    const rows = cornerMatrixRows();
+    expect(rows.map((row) => `${row.row} ${row.distance}`)).toEqual(
+      Object.keys(MATRIX_VERDICTS),
+    );
+    for (const row of rows) {
+      matrixHarness.resetSequence();
+      const pairs: number[] = [];
+      const { sizes, query: recorded } = recordingRequests(query, () =>
+        pairs.push(1),
+      );
+      const chain = matrixHarness.nativeChain(
+        row.build(matrixHarness),
+        row.distance,
+        { query: recorded },
+      );
+      const label = `${row.row} ${row.distance}`;
+      expect(verdict(chain), label).toBe(MATRIX_VERDICTS[label]);
+      const joints = chain.connectivity.joins.length;
+      expect(sizes, label).toEqual([joints]);
+      expect(pairs.length, label).toBeLessThanOrEqual(joints);
+    }
+  }, 120_000);
+
+  test("S1 issues no query and SL-90 exactly its one joint query (formerly 3 and 5)", () => {
+    for (const [label, expectedPairs] of [
+      ["S1 0.01", 0],
+      ["SL-90 0.01", 1],
+    ] as const) {
+      const row = cornerMatrixRows().find(
+        (item) => `${item.row} ${item.distance}` === label,
+      )!;
+      matrixHarness.resetSequence();
+      let pairs = 0;
+      const { query: recorded } = recordingRequests(query, () => (pairs += 1));
+      const chain = matrixHarness.nativeChain(
+        row.build(matrixHarness),
+        row.distance,
+        { query: recorded },
+      );
+      expect(verdict(chain), label).toBe("verified");
+      expect(pairs, label).toBe(expectedPairs);
+    }
+  });
+
+  test("K3 adversaries: native chains whose non-adjacent emitted pieces cross resolve but fail closed at the certificate", () => {
+    const { drawLine, drawSpline, lineEnds, splineEnds } = harness;
+    // Across pieces: spline → line down → line back through the arch.
+    const spline = drawSpline([], ARCH_POINTS);
+    const down = drawLine([spline], [2, 0], [2, -1], {
+      start: splineEnds(spline)[1],
+    });
+    const back = drawLine([spline, down], [2, -1], [0.5, 0.5], {
+      start: lineEnds(down)[1],
+    });
+    // All lines: the third segment crosses the first.
+    const first = drawLine([], [0, 0], [2, 0]);
+    const second = drawLine([first], [2, 0], [2, 1], {
+      start: lineEnds(first)[1],
+    });
+    const third = drawLine([first, second], [2, 1], [1, -1], {
+      start: lineEnds(second)[1],
+    });
+    for (const [label, patches, distance] of [
+      ["spline → line → crossing line", [spline, down, back], -0.01],
+      ["three lines, third crosses first", [first, second, third], 0.01],
+    ] as const) {
+      const chain = harness.nativeChain(patches, distance);
+      expect(chain.resolution.ok, label).toBe(true);
+      const result = certifyOffsetChainTubeStability(
+        harness.accepted(chain),
+        pieceCertifier,
+        chain.declared,
+      );
+      expect(result, label).toMatchObject({
+        ok: false,
+        code: codes.topologyClearanceUnproven,
+        message: expect.stringContaining("cubic-tube-clearance-unproven"),
+      });
+    }
+    // Within one output (labelled: the native spline tool authors at most
+    // three fit points, so this source is reconstructed directly): a real
+    // owner offset of a self-crossing five-point source.
+    const geometry = reconstructSpline({
+      id: "seed",
+      policy: "centripetal-mean-arm-v1",
+      closure: "open",
+      points: (
+        [
+          [0, 0],
+          [2, 0],
+          [2, 1],
+          [1, 1],
+          [1, -1],
+        ] as const
+      ).map((position, index) => ({
+        occurrenceId: `o${index}`,
+        id: `p${index}`,
+        position,
+        tangent: { kind: "automatic" as const },
+      })),
+    });
+    if (geometry.validity !== "valid") throw new Error("invalid fixture");
+    for (const distance of [0.01, -0.01]) {
+      const owner = approximateSplineOffset({
+        spans: geometry.spans,
+        distance,
+        modelingTolerance: TOLERANCE,
+      });
+      if (!owner.ok) throw new Error(owner.code);
+      const { sizes, query: recorded } = recordingRequests();
+      const resolution = resolved(
+        makeOffsetChainFixture([cubic("loop", owner.spans)], {
+          query: recorded,
+        }),
+      );
+      expect(sizes, "no joint, no query").toEqual([0]);
+      expect(
+        certifyOffsetChainTubeStability(
+          resolution,
+          createCertifiedCubicTubeChain(),
+        ),
+        `self-crossing source, d = ${distance}`,
+      ).toMatchObject({
+        ok: false,
+        code: codes.topologyClearanceUnproven,
+        message: expect.stringContaining("cubic-tube-clearance-unproven"),
+      });
+    }
+  });
+
+  test("a one-leaf spline piece in a multi-piece chain is topology-stability-unsupported before the certifier", () => {
+    const { drawLine, drawSpline, splineEnds } = harness;
+    const straight = drawSpline(
+      [],
+      [
+        [0, 0],
+        [1, 0],
+      ],
+    );
+    const up = drawLine([straight], [1, 0], [1, 1], {
+      start: splineEnds(straight)[1],
+    });
+    const chain = harness.nativeChain([straight, up], 0.01);
+    expect(splitLeaf(chain)).toEqual([1, 0]);
+    expect(chain.resolution.ok).toBe(true);
+    expect(
+      certifyOffsetChainTubeStability(
+        harness.accepted(chain),
+        refusing,
+        chain.declared,
+      ),
+    ).toEqual({
+      ok: false,
+      code: codes.topologyStabilityUnsupported,
+      message: expect.stringContaining("one-leaf spline piece"),
+      seedEntityId: straight.entities[0]!.entityId,
+    });
+    // Alone, the same one-leaf piece is the isolated-span certificate.
+    const alone = harness.nativeChain([straight], 0.01);
+    expect(verdict(alone)).toBe("verified");
+  });
+
+  test("a one-leaf cubic whose emitted curve loops inside its kept part, joined to a line, is topology-stability-unsupported (math review row E)", () => {
+    // Fabricated honest tube (τ = 1e-3): straight source S(t) = (x0 + μt, 0),
+    // true offset O = S + (0, d) exactly, so O′ = (μ, 0); emitted
+    // E = O + (A·T₃(2t − 1), k(t − ½)²), so |E − O| ≤ ε ≈ 4e-4, and E crosses
+    // itself at t = ½ ± s. Without the gate the real certifier verifies this
+    // non-simple chain (T08b-a-math-review-evidence/one-leaf-loop.result.json).
+    const [mu, A, k, d, x0, x1] = [2e-3, 4e-4, 1e-6, 9.6e-4, 0.499, 0.501];
+    // Bernstein poles of the cubic polynomial Σ aᵢ tⁱ.
+    const bernstein = (a: readonly [number, number, number, number]) => [
+      a[0],
+      a[0] + a[1] / 3,
+      a[0] + (2 * a[1]) / 3 + a[2] / 3,
+      a[0] + a[1] + a[2] + a[3],
+    ];
+    const sx = bernstein([x0, mu, 0, 0]);
+    // A·T₃(2t − 1) = A(−1 + 18t − 48t² + 32t³); k(t − ½)² = k(¼ − t + t²).
+    const ax = bernstein([-A, 18 * A, -48 * A, 32 * A]);
+    const by = bernstein([k / 4, -k, k, 0]);
+    const poles = sx.map(
+      (x, index) => [x + ax[index]!, d + by[index]!] as const,
+    ) as unknown as SplinePoles;
+    const span: SplineOffsetCubicSpan = {
+      source: {
+        splineId: "loop",
+        spanIndex: 0,
+        startPointId: "pS",
+        endPointId: "pJ",
+        startOccurrenceId: "oS",
+        endOccurrenceId: "oJ",
+      },
+      sourceInterval: [0, 1],
+      sourceLocalInterval: [0, 1],
+      poles,
+      differential: { sourceInterval: [0, 1], poles: ZERO_POLES },
+      certifiedError: Math.sqrt(A * A + (k / 4) ** 2) * (1 + 1e-9) + 1e-15,
+      reference: {
+        // O′ = (μ, 0) exactly, in an outward box.
+        derivative: [
+          [mu * (1 - 1e-12), mu * (1 + 1e-12)],
+          [0, 0],
+        ],
+        sourcePoles: sx.map((x) => [x, 0] as const) as unknown as SplinePoles,
+        distance: d,
+      },
+    };
+    const lineSource: readonly [Point, Point] = [
+      [x1, 0],
+      [x1, 1],
+    ];
+    const emitted = offsetLinePoints(lineSource[0], lineSource[1], d)!;
+    // One spans array: the adapter source is the resolver piece's own.
+    const spans = [span];
+    const pieces = [
+      cubic("loop", spans),
+      line("up", emitted.start, emitted.end),
+    ];
+    const resolution = resolved(makeOffsetChainFixture(pieces));
+    // Premise: the emitted cubic crosses itself inside the part the trim keeps.
+    const at = (t: number) => {
+      let points: readonly Point[] = poles;
+      while (points.length > 1)
+        points = points
+          .slice(1)
+          .map(
+            (point, index): Point => [
+              points[index]![0] + t * (point[0] - points[index]![0]),
+              points[index]![1] + t * (point[1] - points[index]![1]),
+            ],
+          );
+      return points[0]!;
+    };
+    const s = Math.sqrt((6 * A - mu) / (32 * A));
+    const [left, right] = [at(0.5 - s), at(0.5 + s)];
+    expect(Math.hypot(left[0] - right[0], left[1] - right[1])).toBeLessThan(
+      1e-12,
+    );
+    expect(resolution.joints).toHaveLength(1);
+    expect(resolution.joints[0]!.firstParameterBounds[0]).toBeGreaterThan(
+      0.5 + s,
+    );
+    const declared: DeclaredOffsetChainPieces = {
+      ok: true,
+      connectivity: {
+        ok: true,
+        closed: false,
+        pieces: pieces.map(({ seedEntityId, reversed }) => ({
+          seedEntityId,
+          reversed,
+        })),
+        joins: [{ kind: "sharedPoint", pointId: "pJ" as SketchPointId }],
+      },
+      distance: d,
+      modelingTolerance: TOLERANCE,
+      pieces,
+      sources: [
+        { kind: "spline", distance: d, spans },
+        {
+          kind: "line",
+          source: lineSource,
+          distance: d,
+          startPointId: "pJ" as SketchPointId,
+          endPointId: "pE" as SketchPointId,
+        },
+      ],
+    };
+    expect(
+      certifyOffsetChainTubeStability(resolution, pieceCertifier, declared),
+    ).toEqual({
+      ok: false,
+      code: codes.topologyStabilityUnsupported,
+      message: expect.stringContaining("one-leaf spline piece"),
+      seedEntityId: id("loop"),
+    });
+  });
+
+  /** One authored native chain; every resolution reuses its accepted pair. */
+  const nativePair = (build: () => readonly Authored[]) =>
+    harness.nativeChain(build(), 0.01).pair;
+  const sl90 = nativePair(() => {
+    const spline = harness.drawSpline([], ARCH_POINTS);
+    return [
+      spline,
+      harness.drawLine([spline], [2, 0], [2, 1], {
+        start: harness.splineEnds(spline)[1],
+      }),
+    ];
+  });
+  const ls90 = nativePair(() => {
+    const line = harness.drawLine([], [-1, 1], [0, 0]);
+    return [
+      line,
+      harness.drawSpline([line], ARCH_POINTS, {
+        start: harness.lineEnds(line)[1],
+      }),
+    ];
+  });
+  const ownerDistance = -0.25;
+  const ownerChainSpans = ownerSpans({ distance: ownerDistance });
+  const REQUEST_ROWS: readonly (readonly [
+    string,
+    (
+      requestQuery: CertifiedNeutralCurveRequestQuery,
+    ) => ReturnType<typeof resolveOffsetChainTopology>,
+    readonly ("line" | "cubicBezier")[],
+    { operations: number; euclideanSteps: number; bits: number },
+  ])[] = [
+    [
+      "native SL-90 (cubic, line)",
+      (requestQuery) =>
+        harness.pairChain(sl90, 0.01, undefined, requestQuery).resolution,
+      ["cubicBezier"],
+      { operations: 126_651, euclideanSteps: 17_194, bits: 537 },
+    ],
+    [
+      "native LS-90 (line, cubic)",
+      (requestQuery) =>
+        harness.pairChain(ls90, 0.01, undefined, requestQuery).resolution,
+      ["line"],
+      { operations: 160_021, euclideanSteps: 25_907, bits: 582 },
+    ],
+    [
+      "owner line/cubic/line, forward: (first line, cubic) then (cubic, last line)",
+      (requestQuery) =>
+        resolveOffsetChainTopology(
+          makeOffsetChainFixture(
+            ownerLineCubicLine(ownerDistance, ownerChainSpans),
+            { query: requestQuery },
+          ),
+        ),
+      ["line", "cubicBezier"],
+      { operations: 239_058, euclideanSteps: 29_510, bits: 280 },
+    ],
+    [
+      "owner line/cubic/line, reversed traversal: each pair in the swapped argument order",
+      (requestQuery) =>
+        resolveOffsetChainTopology(
+          makeOffsetChainFixture(
+            ownerLineCubicLine(ownerDistance, ownerChainSpans, true),
+            { query: requestQuery },
+          ),
+        ),
+      ["line", "cubicBezier"],
+      { operations: 239_058, euclideanSteps: 29_510, bits: 280 },
+    ],
+  ];
+
+  test.each(REQUEST_ROWS)(
+    "%s: exact whole-request literals; count − 1 exhausts on operations, Euclid and bits",
+    (_label, resolveWith, firstKinds, literal) => {
+      const snapshots: ExactProofBudgetSnapshot[] = [];
+      const resolution = resolveWith(
+        createCertifiedNeutralCurveRequestQueryWithBudgetObserverForTest(
+          (snapshot) => snapshots.push(snapshot),
+        ),
+      );
+      if (!resolution.ok) throw new Error(resolution.message);
+      const joints = resolution.joints.length;
+      expect(
+        resolution.joints.map((joint) => joint.request.first.kind),
+        "request argument order",
+      ).toEqual(firstKinds);
+      // One precharge of 64 per joint, then exactly one snapshot per joint query.
+      expect(snapshots).toHaveLength(joints + 1);
+      expect(snapshots[0]!.operations).toBe(64 * joints);
+      const last = snapshots.at(-1)!;
+      const bits = Math.max(last.maxStoredBits, last.maxPreProductBits);
+      expect({
+        operations: last.operations,
+        euclideanSteps: last.euclideanSteps,
+        bits,
+      }).toEqual(literal);
+      const metric = {
+        operations: (snapshot: ExactProofBudgetSnapshot) => snapshot.operations,
+        euclideanSteps: (snapshot: ExactProofBudgetSnapshot) =>
+          snapshot.euclideanSteps,
+        integerBits: (snapshot: ExactProofBudgetSnapshot) =>
+          Math.max(snapshot.maxStoredBits, snapshot.maxPreProductBits),
+      };
+      for (const [key, value] of [
+        ["operations", literal.operations],
+        ["euclideanSteps", literal.euclideanSteps],
+        ["integerBits", literal.bits],
+      ] as const) {
+        // Additive meters bind on the request total (the last joint for
+        // operations/Euclid); bits bind on the query that attains the maximum.
+        const binding = snapshots.findIndex(
+          (snapshot) => metric[key](snapshot) >= value,
+        );
+        expect(binding, key).toBeGreaterThan(0);
+        if (key !== "integerBits") expect(binding, key).toBe(joints);
+        const seed = resolution.joints[binding - 1]!.firstSeedEntityId;
+        const under = (limit: number) =>
+          resolveWith(
+            createCertifiedNeutralCurveRequestQueryWithLowerBudgetForTest({
+              [key]: limit,
+            }),
+          );
+        expect(under(value).ok, `${key} = count`).toBe(true);
+        const exhausted = under(value - 1);
+        expect(exhausted, `${key} = count − 1`).toMatchObject({
+          ok: false,
+          code: codes.topologyUncertain,
+          message: expect.stringContaining(
+            "exact-query-proof-budget-exhausted",
+          ),
+        });
+        expect(exhausted.ok ? null : exhausted.seedEntityId).toBe(seed);
+        // Blame is not local: the message names the pooled request budget.
+        expect(exhausted.ok ? null : exhausted.message).toContain(
+          `the whole-request budget of all ${joints} joint queries is exhausted`,
+        );
+      }
+    },
+  );
 });

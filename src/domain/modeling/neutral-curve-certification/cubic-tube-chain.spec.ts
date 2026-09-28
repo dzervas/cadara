@@ -2493,6 +2493,41 @@ describe("piece tube chain (L1b): Lemma-T trims under one meter", () => {
       ).toMatchObject({ code: "invalid-cubic-tube-chain", first: 0 });
     }
   });
+
+  test("a line tube whose two emitted ends are bitwise equal is not admitted, even as a lone piece (math review A1)", () => {
+    // Formerly verified: a lone line piece is never joint-queried, so admission
+    // is the only guard (T08b-a-math-review-evidence/zero-length-line.result.json).
+    expect(
+      certifier.certifyPieceChain({
+        modelingTolerance: 1e-3,
+        closed: false,
+        distance: 0.5,
+        pieces: [
+          {
+            kind: "line",
+            reversed: false,
+            tube: {
+              emitted: [
+                [0, 0],
+                [0, 0],
+              ],
+              source: [
+                [0, -0.5],
+                [1e-4, -0.5],
+              ],
+              distance: 0.5,
+            },
+          },
+        ],
+        trims: [],
+      }),
+    ).toMatchObject({
+      kind: "uncertain",
+      code: "invalid-cubic-tube-chain",
+      message: "Tube 0: coincident emitted line ends.",
+      first: 0,
+    });
+  });
 });
 
 const KNOT_UNPROVEN_CODE = "cubic-tube-knot-incidence-unproven";
