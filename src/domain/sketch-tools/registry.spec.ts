@@ -1,3 +1,4 @@
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { test, expect } from "vitest";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
@@ -31,7 +32,9 @@ import {
 } from "@/core/tools/tool-registry";
 import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
 
-const regionSolver = new SketchConstraintSolverAdapter();
+const regionSolver = new SketchConstraintSolverAdapter({
+  neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+});
 
 test("src/domain/sketch-tools/registry.spec.ts", async () => {
   function testRegistryContainsCurrentSketchToolSet() {
@@ -819,12 +822,13 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
       definition: conic.definition,
       solvedSnapshot: solvedConic.solvedSnapshot,
       projectedReferences: [],
+      modelingTolerance: 1e-6,
     });
     expect(
       conicRegions.diagnostics.some(
-        (diagnostic) => diagnostic.code === "unsupported-profile-entity",
+        (diagnostic) => diagnostic.code === "region-unsupported-curve",
       ),
-      "Valid advanced curves that are not profile-capable yet should emit unsupported-case diagnostics.",
+      "Valid advanced curves that are not profile-capable yet should emit region-unsupported-curve diagnostics.",
     ).toBeTruthy();
 
     const bezier = drawSketchTool("bezierCurve", [
@@ -965,23 +969,23 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
       definition: session.definition,
       solvedSnapshot: solved.solvedSnapshot,
       projectedReferences: [],
+      modelingTolerance: 1e-6,
     });
 
+    // U4: profile text has no exact neutral boundary yet; it is an
+    // unsupported region curve with a targeted diagnostic, not a sampled box.
     expect(
-      regions.regions.length >= 1,
-      "Supported profile-generating text should expose downstream profile regions.",
-    ).toBeTruthy();
+      regions.regions,
+      "Profile text derives no region until an exact text boundary exists (U4).",
+    ).toEqual([]);
     expect(
-      regions.regions.some((region) =>
-        region.loops.some((loop) =>
-          loop.segments.some(
-            (segment) =>
-              segment.source.kind === "entity" &&
-              segment.source.entityId === textEntity.entityId,
-          ),
-        ),
+      regions.diagnostics.some(
+        (diagnostic) =>
+          diagnostic.code === "region-unsupported-curve" &&
+          diagnostic.target?.kind === "entity" &&
+          diagnostic.target.entityId === textEntity.entityId,
       ),
-      "Derived text profile should preserve the text entity as its selectable boundary source.",
+      "Profile text reports region-unsupported-curve targeted at the text entity.",
     ).toBeTruthy();
   }
 

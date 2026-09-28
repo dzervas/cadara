@@ -13,7 +13,7 @@ import type {
   RegionBoundarySegmentRecord,
   RegionBoundaryVertex,
   RegionLoopRecord,
-} from "@/contracts/sketch/sketch-arrangement";
+} from "@/contracts/sketch/schema";
 
 const branch = (name: string): RegionBoundaryBranch => ({
   source: { kind: "entity", entityId: `sketch_entity_${name}` },

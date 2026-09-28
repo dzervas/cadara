@@ -14,12 +14,9 @@ import { createBrowserOccWorkerClient } from "@/domain/modeling/occ/worker-runti
 import {
   getBrowserGeometryAssetComposition,
 } from "@/infrastructure/modeling/browser-geometry-asset-store";
-import {
-  OCC_KERNEL_DOCUMENT_ID,
-  OCC_KERNEL_INITIAL_REVISION_ID,
-} from "@/domain/modeling/opencascade-kernel-seed";
+import { OCC_KERNEL_DOCUMENT_ID } from "@/domain/modeling/opencascade-kernel-seed";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
-import type { DocumentId, RevisionId } from "@/contracts/shared/ids";
+import type { DocumentId } from "@/contracts/shared/ids";
 
 const browserGeometryAssetResolver =
   getBrowserGeometryAssetComposition().resolver;
@@ -33,15 +30,6 @@ let browserOccKernelAdapter: OpenCascadeKernelAdapter | null = null;
 let browserOccWarmupController: OccPreloadController | null = null;
 let browserOccWarmupPromise: Promise<void> | null = null;
 
-function createKernelSketchSolver(
-  documentId: DocumentId,
-  revisionId: RevisionId | null,
-) {
-  return new SketchConstraintSolverAdapter({
-    documentId,
-    revisionId,
-  });
-}
 
 function updateBrowserOccPerf(
   patch: Partial<NonNullable<Window["__cadOccPerf"]>>,
@@ -67,12 +55,13 @@ export function createBrowserOccKernelAdapter(
   assetResolver: GeometryAssetResolver = browserGeometryAssetResolver,
 ) {
   return new OpenCascadeKernelAdapter({
-    solverAdapter: createKernelSketchSolver(
-      documentId,
-      OCC_KERNEL_INITIAL_REVISION_ID,
-    ),
-    solverAdapterFactory: (revisionId) =>
-      createKernelSketchSolver(documentId, revisionId),
+    // Used only without a worker client; the adapter's queries are its own.
+    createSolverAdapter: (revisionId, neutralCurveQueries) =>
+      new SketchConstraintSolverAdapter({
+        documentId,
+        revisionId,
+        neutralCurveQueries,
+      }),
     initialSnapshotRequiresRuntime: typeof window !== "undefined",
     workerSnapshotClient: createInstrumentedOccWorkerClient(
       browserOccWorkerClient,

@@ -101,7 +101,7 @@ export const extrudeFeatureTranslator: OnshapeFeatureTranslator = {
         feature,
         context,
       ),
-      sketchSolver: context.sketchSolver,
+      profileVerifier: context.profileVerifier,
     });
 
     if (extrudePlan.tier !== "baked") {

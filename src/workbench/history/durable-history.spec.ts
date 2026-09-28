@@ -1,3 +1,4 @@
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { test, expect } from "vitest";
 
 import {
@@ -63,6 +64,8 @@ test("src/workbench/history/durable-history.spec.ts", async () => {
     const modelingService = createModelingService(new MockKernelAdapter(), {
       currentDocumentId: "doc_workspace",
       sketchSolver: new SketchConstraintSolverAdapter({
+        neutralCurveQueries:
+          createCertifiedNeutralCurveQueryCapabilityForTest(),
         documentId: "doc_workspace",
         revisionId: null,
       }),

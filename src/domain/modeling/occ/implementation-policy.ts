@@ -3,7 +3,7 @@ import type {
   FeatureBooleanScope,
   RevolveAxisRef,
 } from "@/contracts/modeling/schema";
-import type { RegionBoundarySegmentRecord } from "@/contracts/sketch/schema";
+import type { RegionBoundarySource } from "@/contracts/sketch/schema";
 import type { ProjectedGeometryId } from "@/contracts/shared/ids";
 
 /**
@@ -89,7 +89,7 @@ export function getConstructionBackedRevolveAxisRejectionReason() {
 }
 
 export function isProjectedRegionSegmentSourceSupported(
-  source: RegionBoundarySegmentRecord["source"],
+  source: RegionBoundarySource,
 ) {
   return source.kind === "entity" || source.kind === "projectedGeometry";
 }
@@ -106,10 +106,7 @@ function formatProjectedRegionLoopRejectionMessage(
 }
 
 export function createProjectedRegionLoopRejection(
-  source: Extract<
-    RegionBoundarySegmentRecord["source"],
-    { kind: "projectedGeometry" }
-  >,
+  source: Extract<RegionBoundarySource, { kind: "projectedGeometry" }>,
 ): OccProjectedRegionLoopRejection {
   return {
     code: OCC_CONTRACT_GAP_CODES.projectedRegionGeometryUnavailable,
@@ -122,10 +119,7 @@ export function createProjectedRegionLoopRejection(
 }
 
 export function getProjectedRegionLoopRejectionMessage(
-  source: Extract<
-    RegionBoundarySegmentRecord["source"],
-    { kind: "projectedGeometry" }
-  >,
+  source: Extract<RegionBoundarySource, { kind: "projectedGeometry" }>,
 ) {
   return createProjectedRegionLoopRejection(source).message;
 }

@@ -11,6 +11,7 @@ import {
 import { runEditorEffect } from "@/application/editor/effect-registry";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 
 /**
  * Fake-runtime `deriveSketchRegions` backed by the production solver adapter,
@@ -22,6 +23,7 @@ export const deriveSketchRegionsForTest: NonNullable<
   new SketchConstraintSolverAdapter({
     documentId: input.documentId,
     revisionId: null,
+    neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
   }).deriveSketchRegions({
     contractVersion: "modeling-contract/v1alpha1",
     solverSchemaVersion: SOLVER_SCHEMA_VERSION,
@@ -32,6 +34,7 @@ export const deriveSketchRegionsForTest: NonNullable<
     definition: input.basis.definition,
     solvedSnapshot: input.basis.solvedSnapshot,
     projectedReferences: input.basis.projectedReferences,
+    modelingTolerance: input.basis.modelingTolerance,
   });
 
 export function replayEditorEvents(

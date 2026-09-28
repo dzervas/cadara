@@ -1,3 +1,4 @@
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { test, expect } from "vitest";
 import { readFile } from "node:fs/promises";
 
@@ -299,10 +300,13 @@ test("src/domain/modeling/occ/snapshot-native-render.spec.ts", async () => {
     oc: CustomOpenCascadeForTest,
   ) {
     const createSolver = (revisionId: RevisionId | null) =>
-      new SketchConstraintSolverAdapter({ revisionId });
+      new SketchConstraintSolverAdapter({
+        neutralCurveQueries:
+          createCertifiedNeutralCurveQueryCapabilityForTest(),
+        revisionId,
+      });
     const adapter = new OpenCascadeKernelAdapter({
-      solverAdapter: createSolver(null),
-      solverAdapterFactory: createSolver,
+      createSolverAdapter: createSolver,
       getOpenCascadeInstance: async () => oc,
     });
     const seed = await new MockKernelAdapter().getDocumentSnapshot({
@@ -557,7 +561,6 @@ test("src/domain/modeling/occ/snapshot-native-render.spec.ts", async () => {
           ["vertex-a", shared],
           ["vertex-b", failsOnce],
         ]),
-        unsupportedSources: [],
       },
     } as unknown as BuiltSketchProfileFace;
 

@@ -1,6 +1,7 @@
 // Lane: logic (docs/testing.md).
 // Seam: exported OpenCascadeKernelAdapter / ModelingService commit, projection,
 // and disposal use real OCC wrappers; runtime binding patches inject cleanup failures.
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { test, expect } from "vitest";
 import { readFile } from "node:fs/promises";
 
@@ -173,10 +174,12 @@ const req = {
 
 async function adapterWithExtrudedBody(oc: OC) {
   const createSolver = (revisionId: RevisionId | null) =>
-    new SketchConstraintSolverAdapter({ revisionId });
+    new SketchConstraintSolverAdapter({
+      neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+      revisionId,
+    });
   const adapter = new OpenCascadeKernelAdapter({
-    solverAdapter: createSolver(null),
-    solverAdapterFactory: createSolver,
+    createSolverAdapter: createSolver,
     getOpenCascadeInstance: async () => oc,
   });
   const seed = await new MockKernelAdapter().getDocumentSnapshot(req);

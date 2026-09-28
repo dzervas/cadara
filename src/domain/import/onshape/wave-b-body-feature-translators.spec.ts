@@ -1,3 +1,5 @@
+import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { describe, expect, test } from "vitest";
 import type { ImportCapabilities } from "@/contracts/import/capabilities";
 import type { ResolvedImportSource } from "@/contracts/import/source";
@@ -209,6 +211,9 @@ const providerCapabilities: ImportCapabilities = {
   modeling: {
     async bakeGeometry() { throw new Error("not used"); },
     async reconstructMeshToBrep() { throw new Error("not used"); },
+    neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+    modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+    angularToleranceRadians: OCC_KERNEL_SETTINGS.angularToleranceRadians,
   },
   sketch: {
     async convertVectorToSketch() { throw new Error("not used"); },

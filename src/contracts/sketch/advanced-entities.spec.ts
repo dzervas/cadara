@@ -1,3 +1,4 @@
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { test, expect } from "vitest";
 
 import type { SketchDefinition, SketchRecord } from "@/contracts/sketch/schema";
@@ -31,7 +32,9 @@ import { buildOccRenderExport } from "@/domain/modeling/occ/snapshot";
 import { createOccAuthoringState } from "@/domain/modeling/occ/authoring-state";
 import type { SketchSnapshotRecord } from "@/contracts/modeling/schema";
 
-const regionSolver = new SketchConstraintSolverAdapter();
+const regionSolver = new SketchConstraintSolverAdapter({
+  neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+});
 
 test("src/contracts/sketch/advanced-entities.spec.ts", async () => {
   const sketchId = "sketch_advanced" as const;
@@ -364,17 +367,38 @@ test("src/contracts/sketch/advanced-entities.spec.ts", async () => {
     definition,
     solvedSnapshot: solved.solvedSnapshot,
     projectedReferences: [],
+    modelingTolerance: tolerances.coincidence,
   });
+  // U4: ellipse and profile text have no exact neutral curve yet, so they are
+  // unsupported region curves (no sampled regions), like the other advanced kinds.
   expect(
-    derived.regions.length >= 2,
-    "Ellipse and profile text should derive selectable closed regions.",
-  ).toBeTruthy();
+    derived.regions,
+    "Ellipse and profile text derive no region until an exact neutral form exists (U4).",
+  ).toEqual([]);
   expect(
-    derived.diagnostics.some(
-      (diagnostic) => diagnostic.code === "unsupported-profile-entity",
-    ),
-    "Unsupported advanced profile conversion should produce a structured diagnostic.",
-  ).toBeTruthy();
+    [
+      ...new Set(
+        derived.diagnostics
+          .filter(
+            (diagnostic) => diagnostic.code === "region-unsupported-curve",
+          )
+          .flatMap((diagnostic) =>
+            diagnostic.target?.kind === "entity"
+              ? [diagnostic.target.entityId]
+              : [],
+          ),
+      ),
+    ].sort(),
+    "Every advanced profile curve gets a targeted region-unsupported-curve diagnostic.",
+  ).toEqual(
+    expect.arrayContaining([
+      "sketch_entity_bezier",
+      "sketch_entity_conic",
+      "sketch_entity_elliptical_arc",
+      "sketch_entity_ellipse",
+      "sketch_entity_text",
+    ]),
+  );
 
   const session = {
     ...createNewSketchSession(plane, OCC_KERNEL_SETTINGS),

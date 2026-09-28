@@ -1,3 +1,4 @@
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { test, expect } from "vitest";
 
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
@@ -12,6 +13,9 @@ import {
   OCC_KERNEL_INITIAL_REVISION_ID,
 } from "@/domain/modeling/opencascade-kernel-seed";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { makeSketchFixture } from "@/contracts/sketch/region-extraction.fixtures";
+import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
+import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 
 test("src/domain/modeling/opencascade-kernel-adapter.worker-owner.spec.ts", async () => {
   async function testWorkerOwnedWarmupAndMutationsBypassLocalOcc() {
@@ -154,7 +158,8 @@ test("src/domain/modeling/opencascade-kernel-adapter.worker-owner.spec.ts", asyn
     };
 
     const adapter = new OpenCascadeKernelAdapter({
-      solverAdapter: new SketchConstraintSolverAdapter({
+      createSolverAdapter: () => new SketchConstraintSolverAdapter({
+        neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
         documentId: OCC_KERNEL_DOCUMENT_ID,
         revisionId: OCC_KERNEL_INITIAL_REVISION_ID,
       }),
@@ -253,7 +258,8 @@ test("src/domain/modeling/opencascade-kernel-adapter.worker-owner.spec.ts", asyn
 
   async function testEmptySnapshotsDoNotRequireNativeSolidTopologySupport() {
     const adapter = new OpenCascadeKernelAdapter({
-      solverAdapter: new SketchConstraintSolverAdapter({
+      createSolverAdapter: () => new SketchConstraintSolverAdapter({
+        neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
         documentId: OCC_KERNEL_DOCUMENT_ID,
         revisionId: OCC_KERNEL_INITIAL_REVISION_ID,
       }),
@@ -292,10 +298,12 @@ test("src/domain/modeling/opencascade-kernel-adapter.worker-owner.spec.ts", asyn
     }
 
     const adapter = new AdapterWithRejectedPublicRestore({
-      solverAdapter: new SketchConstraintSolverAdapter({
-        documentId: OCC_KERNEL_DOCUMENT_ID,
-        revisionId: OCC_KERNEL_INITIAL_REVISION_ID,
-      }),
+      createSolverAdapter: (_revisionId, neutralCurveQueries) =>
+        new SketchConstraintSolverAdapter({
+          documentId: OCC_KERNEL_DOCUMENT_ID,
+          revisionId: OCC_KERNEL_INITIAL_REVISION_ID,
+          neutralCurveQueries,
+        }),
       getOpenCascadeInstance: async () => ({}) as never,
       initialSnapshotRequiresRuntime: true,
     });
@@ -332,7 +340,123 @@ test("src/domain/modeling/opencascade-kernel-adapter.worker-owner.spec.ts", asyn
     ).toBe("nativeTopologyUnavailable");
   }
 
+  // Seam: with a worker client, the main-thread adapter answers every
+  // neutral-curve query through the worker and never loads OCC for queries.
+  async function testNeutralCurveQueriesDelegateToTheWorker() {
+    let localOccLoads = 0;
+    const forwarded: string[] = [];
+    const result = { kind: "uncertain", code: "from-worker", message: "worker" } as const;
+    const workerClient = new Proxy({} as OccWorkerSnapshotClient, {
+      get(_target, property) {
+        if (
+          property === "queryNeutralCurves" ||
+          property === "queryNeutralCurveSelfIntersections" ||
+          property === "queryNeutralCurveJoin"
+        ) {
+          return async (request: { modelingTolerance: number }) => {
+            forwarded.push(`${String(property)}@${request.modelingTolerance}`);
+            return result;
+          };
+        }
+        return undefined;
+      },
+    });
+    const adapter = new OpenCascadeKernelAdapter({
+      createSolverAdapter: (revisionId, neutralCurveQueries) =>
+        new SketchConstraintSolverAdapter({
+          documentId: OCC_KERNEL_DOCUMENT_ID,
+          revisionId,
+          neutralCurveQueries,
+        }),
+      workerSnapshotClient: workerClient,
+      getOpenCascadeInstance: async () => {
+        localOccLoads += 1;
+        throw new Error("local OCC should not load for queries");
+      },
+    });
+    const circle = {
+      curveId: "c",
+      provenance: { sourceEntityId: "c", sourceSpanId: "whole" },
+      kind: "circle",
+      center: [0, 0],
+      radius: 1,
+      xAxis: [1, 0],
+      sourceDomain: { kind: "fullTurn", seam: 0 },
+    } as const;
+    const other = { ...circle, curveId: "d", center: [1, 0] } as const;
+    expect(
+      await adapter.queryNeutralCurves({
+        modelingTolerance: 0.003,
+        first: circle,
+        second: other,
+      }),
+    ).toBe(result);
+    expect(
+      await adapter.queryNeutralCurveSelfIntersections({
+        modelingTolerance: 0.003,
+        curve: circle,
+      }),
+    ).toBe(result);
+    expect(
+      await adapter.queryNeutralCurveJoin({
+        modelingTolerance: 0.003,
+        first: circle,
+        second: other,
+        joins: [{ first: { interior: 1 }, second: { interior: 2 } }],
+      }),
+    ).toBe(result);
+    expect(
+      forwarded,
+      "All three query operations reach the worker with the request unchanged.",
+    ).toEqual([
+      "queryNeutralCurves@0.003",
+      "queryNeutralCurveSelfIntersections@0.003",
+      "queryNeutralCurveJoin@0.003",
+    ]);
+    expect(
+      localOccLoads,
+      "Queries on the main thread never initialize a local OCC runtime.",
+    ).toBe(0);
+
+    // The production composition (workbench-app): the modeling service's
+    // solver takes the kernel adapter as its queries, so a live region
+    // derivation reaches the worker through solver -> adapter.
+    forwarded.length = 0;
+    const solver = new SketchConstraintSolverAdapter({
+      documentId: OCC_KERNEL_DOCUMENT_ID,
+      revisionId: null,
+      neutralCurveQueries: adapter,
+    });
+    const sketch = makeSketchFixture();
+    sketch.point("p", 0, 0);
+    sketch.point("q", 1, 0);
+    sketch.circle("c", "p", 1);
+    sketch.circle("d", "q", 1);
+    const input = sketch.build({ modelingTolerance: 0.003 });
+    await solver.deriveSketchRegions({
+      contractVersion: CONTRACT_VERSION,
+      solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+      requestId: "request_worker_owner_regions" as never,
+      documentId: OCC_KERNEL_DOCUMENT_ID,
+      revisionId: OCC_KERNEL_INITIAL_REVISION_ID,
+      sketchId: input.sketchId as never,
+      solvedSnapshot: input.solvedSnapshot,
+      definition: input.definition,
+      projectedReferences: input.projectedReferences,
+      modelingTolerance: input.modelingTolerance,
+    });
+    expect(
+      forwarded,
+      "deriveSketchRegions through the solver reaches the worker's pair query.",
+    ).toContain("queryNeutralCurves@0.003");
+    expect(
+      localOccLoads,
+      "A live region derivation through the solver never loads a local OCC runtime.",
+    ).toBe(0);
+  }
+
   await testWorkerOwnedWarmupAndMutationsBypassLocalOcc();
   await testEmptySnapshotsDoNotRequireNativeSolidTopologySupport();
+  await testNeutralCurveQueriesDelegateToTheWorker();
   await testNativeFeatureHistoryRebuildDoesNotCallPublicRestore();
 });

@@ -515,7 +515,8 @@ function createConstraintChainFixture(
       }),
     ),
     0,
-    points.length,
+    // One profile-open-segment per unclosed line branch.
+    entities.length,
   );
 }
 
@@ -571,7 +572,8 @@ function createIndependentComponentFixture(): SketchSolverBenchmarkFixture {
       }),
     ),
     0,
-    first.points.length + second.points.length,
+    // One profile-open-segment per unclosed line branch.
+    first.entities.length + second.entities.length,
   );
 }
 
@@ -825,6 +827,8 @@ export async function evaluateSketchSolverBenchmarkFixture(
     definition,
     solvedSnapshot: solved.solvedSnapshot,
     projectedReferences: [],
+    // The benchmark document's modeling tolerance is its coincidence tolerance.
+    modelingTolerance: SKETCH_SOLVER_BENCHMARK_TOLERANCES.coincidence,
   });
   const dragPoint = fixture.interactiveDragTarget
     ? definition.points.find(

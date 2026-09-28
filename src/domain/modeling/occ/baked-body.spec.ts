@@ -1,3 +1,4 @@
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { expect, test } from "vitest";
 import { readFile } from "node:fs/promises";
 
@@ -544,7 +545,8 @@ test("OCC adapter rebuilds a reopened bakedBody document from the persisted asse
   // A COMPLETELY FRESH adapter/resolver: it holds only the persisted store and
   // resolves strictly from the definition-carried reference — no shared registry.
   const adapter = new OpenCascadeKernelAdapter({
-    solverAdapter: new SketchConstraintSolverAdapter({
+    createSolverAdapter: () => new SketchConstraintSolverAdapter({
+      neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
       documentId: OCC_KERNEL_DOCUMENT_ID,
       revisionId: document.revisionId,
     }),
@@ -633,7 +635,8 @@ test("OCC preview pre-resolves a persistent baked asset when editing upstream hi
     embeddedBinaryAssets: [],
   };
   const adapter = new OpenCascadeKernelAdapter({
-    solverAdapter: new SketchConstraintSolverAdapter({
+    createSolverAdapter: () => new SketchConstraintSolverAdapter({
+      neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
       documentId: OCC_KERNEL_DOCUMENT_ID,
       revisionId: document.revisionId,
     }),

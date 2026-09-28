@@ -35,15 +35,16 @@ function region(input: {
           sourceSegmentOrdinal = 0,
           traversalDirection = "forward",
         ]) => ({
-          source: { kind: "entity", entityId },
+          branch: { source: { kind: "entity", entityId }, spanId: "whole" },
+          sourceParameterInterval: [0, 1],
           sourceSegmentOrdinal,
           traversalDirection,
-          startPointId: null,
-          endPointId: null,
+          start: null,
+          end: null,
         }),
       ),
     })),
-  } as RegionRecord;
+  } as unknown as RegionRecord;
 }
 
 function reverseSourceOrientations(
@@ -54,12 +55,13 @@ function reverseSourceOrientations(
   for (const candidate of universe) {
     for (const loop of candidate.loops) {
       for (const segment of loop.segments) {
-        if (segment.source.kind !== "entity") continue;
+        const source = segment.branch.source;
+        if (source.kind !== "entity") continue;
         counts.set(
-          segment.source.entityId,
+          source.entityId,
           Math.max(
-            counts.get(segment.source.entityId) ?? 0,
-            (segment.sourceSegmentOrdinal ?? 0) + 1,
+            counts.get(source.entityId) ?? 0,
+            segment.sourceSegmentOrdinal + 1,
           ),
         );
       }
@@ -70,13 +72,12 @@ function reverseSourceOrientations(
     loops: regionRecord.loops.map((loop) => ({
       ...loop,
       segments: loop.segments.map((segment) => {
+        const source = segment.branch.source;
         const count =
-          segment.source.kind === "entity"
-            ? (counts.get(segment.source.entityId) ?? 1)
-            : 1;
+          source.kind === "entity" ? (counts.get(source.entityId) ?? 1) : 1;
         return {
           ...segment,
-          sourceSegmentOrdinal: count - 1 - (segment.sourceSegmentOrdinal ?? 0),
+          sourceSegmentOrdinal: count - 1 - segment.sourceSegmentOrdinal,
           traversalDirection:
             segment.traversalDirection === "reverse" ? "forward" : "reverse",
         };

@@ -54,6 +54,10 @@ class InstrumentedModelingService implements ModelingService {
     return this.inner.sketchSolver;
   }
 
+  get neutralCurveQueries() {
+    return this.inner.neutralCurveQueries;
+  }
+
   dispose() {
     this.inner.dispose();
   }

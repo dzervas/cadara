@@ -2,11 +2,6 @@
  * Canonical topological region signatures and SHA-256 region identity
  * (T09 design §2.5 plus the U6 identity amendment).
  *
- * Standalone first (T09d): the record types live in `sketch-arrangement.ts`
- * until T09e moves them into `schema.ts`, cuts the arrangement owner over and
- * deletes `authored-region-slots.ts` and the old FNV region ids. This landing
- * is allowed only because T09e performs that cutover and deletion.
- *
  * Identity never uses coordinates or floating parameters. A signature is built
  * only from branch keys, vertex keys and traversal signs. Every key component
  * is JSON-encoded, so the encoding is injective for arbitrary id strings.
@@ -17,7 +12,7 @@ import type {
   RegionBoundarySegmentRecord,
   RegionBoundaryVertex,
   RegionRecord,
-} from "@/contracts/sketch/sketch-arrangement";
+} from "@/contracts/sketch/schema";
 
 export function regionBranchKey(branch: RegionBoundaryBranch): string {
   const source =

@@ -424,15 +424,15 @@ function buildRegionLoop(
     segments: loop.segments
       .filter(
         (segment) =>
-          segment.source.kind === "entity" &&
-          entityIds.has(segment.source.entityId),
+          segment.branch.source.kind === "entity" &&
+          entityIds.has(segment.branch.source.entityId),
       )
       .map((segment) => ({
         entityId:
-          segment.source.kind === "entity"
-            ? segment.source.entityId
+          segment.branch.source.kind === "entity"
+            ? segment.branch.source.entityId
             : ("" as SketchEntityId),
-        traversalDirection: segment.traversalDirection ?? "forward",
+        traversalDirection: segment.traversalDirection,
       })),
   };
 }

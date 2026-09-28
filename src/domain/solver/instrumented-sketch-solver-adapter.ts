@@ -80,9 +80,7 @@ class InstrumentedSketchSolverAdapter implements SketchSolverAdapter {
         "cadara.projected_reference_count": request.projectedReferences.length,
         "cadara.solve_state": result.status.solveState,
         "cadara.constraint_state": result.status.constraintState,
-        "cadara.diagnostic_count":
-          result.diagnostics.length +
-          (result.regionResult?.diagnostics.length ?? 0),
+        "cadara.diagnostic_count": result.diagnostics.length,
       }),
     );
   }

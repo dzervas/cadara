@@ -1,3 +1,4 @@
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { test, expect } from "vitest";
 import {
   createCreateFeatureHistoryEntry,
@@ -26,7 +27,10 @@ import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 
-const regionSolver = new SketchConstraintSolverAdapter({ revisionId: null });
+const regionSolver = new SketchConstraintSolverAdapter({
+  neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+  revisionId: null,
+});
 
 test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", async () => {
   async function unwrapModelingResult<T>(
@@ -244,6 +248,7 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
       definition,
       solvedSnapshot: solved.solvedSnapshot,
       projectedReferences: [],
+      modelingTolerance: 1e-6,
     })).regions;
     const regionId = regions[0]?.regionId;
     expect(
@@ -562,6 +567,7 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
           definition: normalizedDefinition,
           solvedSnapshot,
           projectedReferences: [],
+          modelingTolerance: 1e-6,
         })).regions;
         const sketch: SketchSnapshotRecord = {
           ownerDocumentId: "doc_workspace",

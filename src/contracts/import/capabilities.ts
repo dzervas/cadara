@@ -1,4 +1,5 @@
 import type { CommitSketchRequest } from "@/contracts/modeling/schema";
+import type { NeutralCurveQueryCapability } from "@/contracts/modeling/neutral-curve-query";
 import type {
   BakedGeometryAssetReference,
   GeometryAssetFormat,
@@ -50,6 +51,13 @@ export interface ImportModelingCapabilities {
     assetId: GeometryAssetId;
     options?: Record<string, unknown>;
   }): Promise<GeometryAssetId>;
+
+  /** The target kernel's neutral curve queries, for import-time region verification. */
+  readonly neutralCurveQueries: NeutralCurveQueryCapability;
+  /** The target document's `settings.modelingTolerance`. */
+  readonly modelingTolerance: number;
+  /** The target document's `settings.angularToleranceRadians`. */
+  readonly angularToleranceRadians: number;
 }
 
 export interface ImportSketchCapabilities {

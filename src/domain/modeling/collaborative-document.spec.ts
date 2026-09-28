@@ -110,7 +110,6 @@ test("separated list deletions retain interior CRDT identities across a peer del
 
 test("stale-base provenance writes preserve peer lineage records and untouched sketch fields", async () => {
   const seed = await fixture();
-  seed.sketches[0]!.regionSlots = [];
   seed.sketches[0]!.definition.svgRenderingEnabled = false;
   const base = Automerge.from(createCollaborativeDocument(seed));
   const peer = structuredClone(seed);
@@ -124,9 +123,6 @@ test("stale-base provenance writes preserve peer lineage records and untouched s
   );
   const local = structuredClone(seed);
   local.topologyLineage = [{ featureId: "feature_local", outputs: [] }];
-  local.sketches[0]!.regionSlots = [
-    { regionId: "region_local", boundaryWitnesses: ["local-witness"] },
-  ];
   const after = Automerge.change(current, (storage) =>
     updateDocumentProvenance(storage, local, seed),
   );
@@ -136,9 +132,6 @@ test("stale-base provenance writes preserve peer lineage records and untouched s
   ).toEqual(["feature_local", "feature_peer"]);
   expect(materialized.sketches[0]!.definition.svgRenderingEnabled).toEqual(
     peer.sketches[0]!.definition.svgRenderingEnabled,
-  );
-  expect(materialized.sketches[0]!.regionSlots).toEqual(
-    local.sketches[0]!.regionSlots,
   );
   // The same disjoint metadata also survives genuine concurrent branch merging.
   const branch = Automerge.change(Automerge.clone(base), (storage) =>
@@ -154,18 +147,32 @@ test("stale-base provenance writes preserve peer lineage records and untouched s
 
 test("conflicting provenance requires recomputation and aborts all authored and metadata writes", async () => {
   const seed = await fixture();
-  seed.sketches[0]!.regionSlots = [
-    { regionId: "region_shared", boundaryWitnesses: ["original"] },
+  const lineage = (topologyToken: string) => [
+    {
+      featureId: "feature_shared" as const,
+      outputs: [
+        {
+          outputSlot: "body_shared" as const,
+          topologyToken,
+          topology: { faceIds: [], edgeIds: [], vertexIds: [] },
+          sourceTargets: [],
+          unsupportedSourceKeys: [],
+        },
+      ],
+    },
   ];
+  seed.topologyLineage = lineage("original");
   const base = Automerge.from(createCollaborativeDocument(seed));
   const peer = structuredClone(seed);
-  peer.sketches[0]!.regionSlots![0]!.boundaryWitnesses = ["peer"];
+  peer.topologyLineage = lineage("peer");
   const current = Automerge.change(base, (storage) =>
     updateDocumentProvenance(storage, peer, seed),
   );
   const local = structuredClone(seed);
-  local.sketches[0]!.regionSlots![0]!.boundaryWitnesses = ["local"];
-  local.topologyLineage = [{ featureId: "feature_not_written", outputs: [] }];
+  local.topologyLineage = [
+    ...lineage("local"),
+    { featureId: "feature_not_written", outputs: [] },
+  ];
   expect(() =>
     Automerge.change(current, (storage) => {
       storage.authored.name = "Must not persist";
@@ -174,8 +181,7 @@ test("conflicting provenance requires recomputation and aborts all authored and 
   ).toThrow(/recompute against the current document/);
   const after = materializeCollaborativeDocument(current);
   expect(after.name).toBe(seed.name);
-  expect(after.topologyLineage).toEqual([]);
-  expect(after.sketches[0]!.regionSlots).toEqual(peer.sketches[0]!.regionSlots);
+  expect(after.topologyLineage).toEqual(peer.topologyLineage);
 });
 
 test("real Automerge merges disjoint fields on the same point and independent records", async () => {

@@ -1,3 +1,5 @@
+import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 
@@ -22,10 +24,15 @@ import {
 } from "@/domain/import/onshape/profile-resolver";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 
-const sketchSolver = new SketchConstraintSolverAdapter({
-  documentId: IMPORT_VERIFICATION_DOCUMENT_ID,
-  revisionId: IMPORT_VERIFICATION_REVISION_ID,
-});
+const profileVerifier = {
+  sketchSolver: new SketchConstraintSolverAdapter({
+    neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+    documentId: IMPORT_VERIFICATION_DOCUMENT_ID,
+    revisionId: IMPORT_VERIFICATION_REVISION_ID,
+  }),
+  modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+  angularToleranceRadians: OCC_KERNEL_SETTINGS.angularToleranceRadians,
+};
 
 const ELEMENT_ID = "wave-t-extrude-extents";
 
@@ -87,7 +94,7 @@ test("plans two-side extents and active draft angles", async () => {
   ensureParameter(input.feature, "draftAngle").expression = "5 deg";
 
   const result = await planExtrudeFeature({
-    sketchSolver,
+    profileVerifier,
     feature: input.feature,
     ...profileInput(input),
     priorBodyProducingFeatureIds: ["WT_EXTENT_BASE"],
@@ -120,7 +127,7 @@ test("plans UP_TO_NEXT with rollback-inferred default scope and compressed profi
   }];
 
   const result = await planExtrudeFeature({
-    sketchSolver,
+    profileVerifier,
     feature: input.feature,
     ...profileInput(input),
     priorBodyProducingFeatureIds: ["WT_EXTENT_BASE", "WT_TWO_SIDE"],
@@ -147,7 +154,7 @@ test("plans UP_TO_NEXT with rollback-inferred default scope and compressed profi
 test("keeps ambiguous default-scope multi-body extrudes honest", async () => {
   const input = fixtureInput("WT_UP_TO_NEXT");
   const result = await planExtrudeFeature({
-    sketchSolver,
+    profileVerifier,
     feature: input.feature,
     ...profileInput(input),
     priorBodyProducingFeatureIds: ["WT_EXTENT_BASE", "WT_TWO_SIDE"],
@@ -172,7 +179,7 @@ test("declares and resolves exact-prefix slots for up-to-face and explicit body 
   }];
 
   const result = await planExtrudeFeature({
-    sketchSolver,
+    profileVerifier,
     feature: input.feature,
     ...profileInput(input),
     priorBodyProducingFeatureIds: ["WT_EXTENT_BASE", "WT_TWO_SIDE"],
@@ -254,7 +261,7 @@ test("binds an ENTITY start bound over live body topology to a resolved start en
   }];
 
   const result = await planExtrudeFeature({
-    sketchSolver,
+    profileVerifier,
     feature: input.feature,
     ...profileInput(input),
     priorBodyProducingFeatureIds: ["WT_EXTENT_BASE"],
@@ -335,7 +342,7 @@ test("translates a capture-pinned BLIND start offset and refuses the undiscrimin
     ensureParameter(input.feature, "oppositeDirection").value = opposite;
 
     const result = await planExtrudeFeature({
-      sketchSolver,
+      profileVerifier,
       feature: input.feature,
       ...profileInput(input),
       priorBodyProducingFeatureIds: ["WT_EXTENT_BASE"],
@@ -364,7 +371,7 @@ test("translates a capture-pinned BLIND start offset and refuses the undiscrimin
 
   expect(
     await planExtrudeFeature({
-      sketchSolver,
+      profileVerifier,
       feature: mismatched.feature,
       ...profileInput(mismatched),
       priorBodyProducingFeatureIds: ["WT_EXTENT_BASE"],
@@ -408,7 +415,7 @@ test.skipIf(!existsSync(BLIND_START_BUNDLE))(
       );
 
       const result = await planExtrudeFeature({
-        sketchSolver,
+        profileVerifier,
         feature,
         profileEvidence: [],
         solvedSketchesByFeatureId: new Map(),
@@ -440,7 +447,7 @@ function surfaceInput(elementId: "wave-x-9841" | "wave-x-d3cd9") {
       ["S_SURFACE", { tier: "parametric", planeKey: "xy" as const }],
     ]),
     priorBodyProducingFeatureIds: [],
-    sketchSolver,
+    profileVerifier,
   };
 }
 

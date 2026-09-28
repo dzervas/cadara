@@ -37,6 +37,13 @@ import type { AuthoredModelDocument } from "@/contracts/modeling/authored-docume
 import type { GeometryAssetBlobInput } from "@/contracts/modeling/geometry-assets";
 import type { BodyId, RequestId, RevisionId } from "@/contracts/shared/ids";
 import type {
+  NeutralCurveJoinRequest,
+  NeutralCurveJoinResult,
+  NeutralCurveQueryRequest,
+  NeutralCurveQueryResult,
+  NeutralCurveSelfIntersectionRequest,
+} from "@/contracts/modeling/neutral-curve-query";
+import type {
   ProjectSketchExternalReferencesRequest,
   ProjectSketchExternalReferencesResponse,
 } from "@/contracts/solver/schema";
@@ -123,6 +130,15 @@ export interface OccWorkerSnapshotClient {
   projectSketchExternalReferences(
     request: ProjectSketchExternalReferencesRequest,
   ): Promise<ProjectSketchExternalReferencesResponse>;
+  queryNeutralCurves(
+    request: NeutralCurveQueryRequest,
+  ): Promise<NeutralCurveQueryResult>;
+  queryNeutralCurveSelfIntersections(
+    request: NeutralCurveSelfIntersectionRequest,
+  ): Promise<NeutralCurveQueryResult>;
+  queryNeutralCurveJoin(
+    request: NeutralCurveJoinRequest,
+  ): Promise<NeutralCurveJoinResult>;
   commitSketch(request: CommitSketchRequest): Promise<CommitSketchResponse>;
   createFeature(request: CreateFeatureRequest): Promise<CreateFeatureResponse>;
   updateFeature(request: UpdateFeatureRequest): Promise<UpdateFeatureResponse>;
@@ -273,6 +289,29 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
   ) {
     return this.invoke<ProjectSketchExternalReferencesResponse>({
       kind: "projectSketchExternalReferences",
+      request,
+    });
+  }
+
+  queryNeutralCurves(request: NeutralCurveQueryRequest) {
+    return this.invoke<NeutralCurveQueryResult>({
+      kind: "queryNeutralCurves",
+      request,
+    });
+  }
+
+  queryNeutralCurveSelfIntersections(
+    request: NeutralCurveSelfIntersectionRequest,
+  ) {
+    return this.invoke<NeutralCurveQueryResult>({
+      kind: "queryNeutralCurveSelfIntersections",
+      request,
+    });
+  }
+
+  queryNeutralCurveJoin(request: NeutralCurveJoinRequest) {
+    return this.invoke<NeutralCurveJoinResult>({
+      kind: "queryNeutralCurveJoin",
       request,
     });
   }

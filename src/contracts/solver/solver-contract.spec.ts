@@ -8,6 +8,7 @@ import {
   type ValidateSketchRequest,
 } from "./schema";
 import {
+  validateDeriveSketchRegionsRequest,
   validateDisposeInteractiveSketchSolveSessionRequest,
   validateFinalizeInteractiveSketchSolveSessionRequest,
   validateSolveSketchRequest,
@@ -20,8 +21,11 @@ import {
   MockSketchSolverAdapter,
 } from "@/domain/solver/mock-sketch-solver-adapter";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
+
+const neutralCurveQueries = createCertifiedNeutralCurveQueryCapabilityForTest();
 
 test("src/contracts/solver/solver-contract.spec.ts", async () => {
   const sketchDefinition: SketchDefinition = {
@@ -223,7 +227,7 @@ test("src/contracts/solver/solver-contract.spec.ts", async () => {
   }
 
   async function testProjectionAndSolveFlow() {
-    const adapter = new SketchConstraintSolverAdapter();
+    const adapter = new SketchConstraintSolverAdapter({ neutralCurveQueries });
     const projection = await adapter.projectExternalReferences(
       createProjectRequest(),
     );
@@ -271,29 +275,22 @@ test("src/contracts/solver/solver-contract.spec.ts", async () => {
       "Solve should return solved entity geometry.",
     ).toBe(4);
     expect(
-      solved.regionResult,
-      "Normal solve responses should not derive regions unless the caller requests them.",
-    ).toBeFalsy();
+      "regionResult" in solved,
+      "Solve responses never derive regions; regions come only from deriveSketchRegions.",
+    ).toBe(false);
     expect(
       validateSolveSketchRequest(
         createSolveRequest(projection.projectedReferences),
       ).success,
-      "Solve request runtime schema should accept solve-without-regions requests.",
+      "Solve request runtime schema should accept solve requests.",
     ).toBeTruthy();
-
-    const solvedWithRegions = await adapter.solveSketch({
-      ...createSolveRequest(projection.projectedReferences),
-      requestId: "request_solve_with_regions_1",
-      includeRegions: true,
-    });
     expect(
-      solvedWithRegions.regionResult?.regions.length,
-      "Caller-selected solve region extraction should return regions explicitly.",
-    ).toBe(1);
-    expect(
-      solvedWithRegions.diagnostics.length,
-      "Caller-selected region extraction diagnostics should stay scoped to the region result.",
-    ).toBe(solved.diagnostics.length);
+      validateSolveSketchRequest({
+        ...createSolveRequest(projection.projectedReferences),
+        includeRegions: true,
+      }).success,
+      "The removed includeRegions solve option is rejected at the runtime boundary.",
+    ).toBe(false);
 
     const regions = await adapter.deriveSketchRegions({
       contractVersion: CONTRACT_VERSION,
@@ -305,12 +302,35 @@ test("src/contracts/solver/solver-contract.spec.ts", async () => {
       definition: sketchDefinition,
       solvedSnapshot: solved.solvedSnapshot,
       projectedReferences: projection.projectedReferences,
+      modelingTolerance: 1e-3,
     });
 
     expect(
       regions.regions.length,
       "Region derivation should return an explicit derived region.",
     ).toBe(1);
+
+    const regionRequest = {
+      contractVersion: CONTRACT_VERSION,
+      solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+      requestId: "request_regions_tolerance",
+      documentId: "doc_workspace",
+      revisionId: "rev_0001",
+      sketchId: "sketch_primary",
+      definition: sketchDefinition,
+      solvedSnapshot: solved.solvedSnapshot,
+      projectedReferences: projection.projectedReferences,
+    } as const;
+    expect(
+      validateDeriveSketchRegionsRequest(regionRequest).success,
+      "Region requests without the document modelingTolerance are rejected at the runtime boundary.",
+    ).toBe(false);
+    for (const modelingTolerance of [0, -1e-3, Number.NaN, Infinity]) {
+      await expect(
+        adapter.deriveSketchRegions({ ...regionRequest, modelingTolerance }),
+        `The adapter rejects a non-positive or non-finite modelingTolerance (${modelingTolerance}).`,
+      ).rejects.toThrow(RangeError);
+    }
 
     const resolutionRequest: ResolveSketchReferenceRequest = {
       contractVersion: CONTRACT_VERSION,
@@ -367,7 +387,10 @@ test("src/contracts/solver/solver-contract.spec.ts", async () => {
   }
 
   async function testInteractiveSolveLifecycleIsExplicit() {
-    const adapter = new SketchConstraintSolverAdapter({ revisionId: null });
+    const adapter = new SketchConstraintSolverAdapter({
+      revisionId: null,
+      neutralCurveQueries,
+    });
     const projection = await adapter.projectExternalReferences(
       createProjectRequest(),
     );
@@ -510,7 +533,7 @@ test("src/contracts/solver/solver-contract.spec.ts", async () => {
   }
 
   async function testRevisionDiagnosticsAreExplicit() {
-    const adapter = new SketchConstraintSolverAdapter();
+    const adapter = new SketchConstraintSolverAdapter({ neutralCurveQueries });
     let didThrow = false;
     try {
       await adapter.validateSketch({
@@ -530,7 +553,7 @@ test("src/contracts/solver/solver-contract.spec.ts", async () => {
   }
 
   async function testMockProjectionDoesNotFabricateExternalGeometry() {
-    const adapter = new MockSketchSolverAdapter();
+    const adapter = new MockSketchSolverAdapter({ neutralCurveQueries });
     const projection = await adapter.projectExternalReferences(
       createProjectRequest(),
     );
@@ -550,7 +573,7 @@ test("src/contracts/solver/solver-contract.spec.ts", async () => {
   }
 
   async function testVersioningAndIdBijectionAreEnforced() {
-    const adapter = new SketchConstraintSolverAdapter();
+    const adapter = new SketchConstraintSolverAdapter({ neutralCurveQueries });
     let versionRejected = false;
 
     try {

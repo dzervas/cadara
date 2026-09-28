@@ -153,6 +153,7 @@ test("src/domain/modeling/occ/topology.spec.ts", async () => {
       ownerSketchId: sketchId,
       ownerBodyId: null,
       regionId,
+      signature: `hand-built ${regionId}`,
       label: regionId,
       target: { kind: "region", sketchId, regionId },
       sourceSketch: { kind: "sketch", sketchId },

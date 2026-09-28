@@ -29,9 +29,9 @@ import {
 } from "@/domain/modeling/occ/worker-protocol";
 import {
   OCC_KERNEL_DOCUMENT_ID,
-  OCC_KERNEL_INITIAL_REVISION_ID,
 } from "@/domain/modeling/opencascade-kernel-seed";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { createOpenCascadeNeutralCurveQueryCapability } from "@/domain/modeling/occ/neutral-curve-query";
 
 let openCascadePromise: Promise<OpenCascadeInstance> | null = null;
 let lastAssets: OccWorkerAssetConfig | undefined;
@@ -95,6 +95,11 @@ async function probeWorkerNativeTopologyKernelCapabilities(
   return probeOpenCascadeNativeTopologyKernelCapabilities(oc);
 }
 
+/** The worker's own OCC query capability, answering main-thread query requests. */
+const workerNeutralCurveQueries = createOpenCascadeNeutralCurveQueryCapability(
+  () => getWorkerOpenCascadeInstance(),
+);
+
 function getWorkerAdapter(documentId: DocumentId) {
   const existing = adapters.get(documentId);
   if (existing) {
@@ -103,14 +108,11 @@ function getWorkerAdapter(documentId: DocumentId) {
 
   const adapter = new OpenCascadeKernelAdapter({
     documentId,
-    solverAdapter: new SketchConstraintSolverAdapter({
-      documentId,
-      revisionId: OCC_KERNEL_INITIAL_REVISION_ID,
-    }),
-    solverAdapterFactory: (revisionId) =>
+    createSolverAdapter: (revisionId, neutralCurveQueries) =>
       new SketchConstraintSolverAdapter({
         documentId,
         revisionId,
+        neutralCurveQueries,
       }),
     getOpenCascadeInstance: () => getWorkerOpenCascadeInstance(),
     initialSnapshotRequiresRuntime: true,
@@ -280,6 +282,14 @@ async function handleWorkerOperation(operation: OccWorkerOperation) {
       return getWorkerAdapter(
         operation.request.documentId,
       ).projectSketchExternalReferences(operation.request);
+    case "queryNeutralCurves":
+      return workerNeutralCurveQueries.queryNeutralCurves(operation.request);
+    case "queryNeutralCurveSelfIntersections":
+      return workerNeutralCurveQueries.queryNeutralCurveSelfIntersections(
+        operation.request,
+      );
+    case "queryNeutralCurveJoin":
+      return workerNeutralCurveQueries.queryNeutralCurveJoin(operation.request);
     case "commitSketch":
       return getWorkerAdapter(operation.request.documentId).commitSketch(
         operation.request,

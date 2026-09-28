@@ -958,11 +958,6 @@ function registerSurfaceExtrudeProvenance(
       registerSourceShape(sourceShapes, `${prefix}:first-vertex`, input.prism.FirstShape_2(vertex));
       registerSourceShape(sourceShapes, `${prefix}:last-vertex`, input.prism.LastShape_2(vertex));
     }
-    for (const unsupported of input.sketchProvenance.unsupportedSources) {
-      unsupportedSourceKeys.add(
-        `${slotPrefix}:sketch-source:${input.sketchId}:${unsupported.sourceKey}:unsupported-profile-history`,
-      );
-    }
   } else if (input.faceProfileKey) {
     unsupportedSourceKeys.add(
       `${slotPrefix}:face-profile:${input.faceProfileKey}:unsupported-profile-history`,
@@ -1445,12 +1440,6 @@ function buildExtrudeEndShape(
         sourceShapes,
         `${prefix}:last-vertex`,
         prism.LastShape_2(vertex),
-      );
-    }
-
-    for (const unsupported of sketchProvenance.unsupportedSources) {
-      unsupportedSourceKeys.add(
-        `${slotPrefix}:sketch-source:${input.sketchId}:${unsupported.sourceKey}:unsupported-profile-history`,
       );
     }
   } else if (input.faceProfileKey) {

@@ -1,3 +1,5 @@
+import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { expect, test } from "vitest";
@@ -11,10 +13,15 @@ import {
 } from "@/domain/import/onshape/profile-resolver";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 
-const sketchSolver = new SketchConstraintSolverAdapter({
-  documentId: IMPORT_VERIFICATION_DOCUMENT_ID,
-  revisionId: IMPORT_VERIFICATION_REVISION_ID,
-});
+const profileVerifier = {
+  sketchSolver: new SketchConstraintSolverAdapter({
+    neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+    documentId: IMPORT_VERIFICATION_DOCUMENT_ID,
+    revisionId: IMPORT_VERIFICATION_REVISION_ID,
+  }),
+  modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+  angularToleranceRadians: OCC_KERNEL_SETTINGS.angularToleranceRadians,
+};
 
 const BUNDLE_PATH =
   "test/fixtures/onshape-captures/405fa226bb150016d09afc09.onshape-capture.json";
@@ -29,7 +36,7 @@ test.skipIf(!existsSync(BUNDLE_PATH))(
     expect(validation.success).toBe(true);
     if (!validation.success) return;
 
-    const plan = await planStudioFidelity(readPartStudio(validation.data, ELEMENT_ID), { sketchSolver });
+    const plan = await planStudioFidelity(readPartStudio(validation.data, ELEMENT_ID), { profileVerifier });
     expect(plan.tierCounts).toEqual({ parametric: 6, baked: 0, geometryOnly: 0 });
 
     const twoSide = plan.featurePlans.find(

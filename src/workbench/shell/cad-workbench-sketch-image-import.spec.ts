@@ -1,3 +1,4 @@
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { test, expect } from "vitest";
 
 import { runSketchImageImportFlow } from "@/domain/reference-image/import-flow";
@@ -236,6 +237,7 @@ test("src/app/cad-workbench-sketch-image-import.spec.ts imports into a new draft
   const service = createModelingService(new MockKernelAdapter(), {
     currentDocumentId: "doc_workspace",
     sketchSolver: new SketchConstraintSolverAdapter({
+      neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
       documentId: "doc_workspace",
       revisionId: null,
     }),
@@ -285,13 +287,13 @@ test("src/app/cad-workbench-sketch-image-import.spec.ts imports into a new draft
 test("src/app/cad-workbench-sketch-image-import.spec.ts imports image-only draft sketches through OpenCascade", async () => {
   const createSolver = (revisionId: RevisionId | null) =>
     new SketchConstraintSolverAdapter({
+      neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
       documentId: OCC_KERNEL_DOCUMENT_ID,
       revisionId,
     });
   const createAdapter = () =>
     new OpenCascadeKernelAdapter({
-      solverAdapter: createSolver(null),
-      solverAdapterFactory: createSolver,
+      createSolverAdapter: createSolver,
     });
   const service = createModelingService(createAdapter(), {
     currentDocumentId: OCC_KERNEL_DOCUMENT_ID,

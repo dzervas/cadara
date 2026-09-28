@@ -22,6 +22,8 @@ import {
   runEditorEffect,
 } from "./effect-registry";
 import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+import { createRecordingNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 
 test("commits the current authored sketch after deletion without resurrecting a history tail", async () => {
   function addLine(
@@ -223,6 +225,7 @@ test("live region derivation goes through the modeling service sketch solver bou
       definition: basis!.definition,
       solvedSnapshot: basis!.solvedSnapshot,
       projectedReferences: basis!.projectedReferences,
+      modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
     },
   ]);
   expect(event).toEqual({
@@ -263,4 +266,79 @@ test("live region derivation goes through the modeling service sketch solver bou
   ).rejects.toThrow(
     "Live sketch regions require the modeling service sketch solver.",
   );
+});
+
+// Seam: live region requests carry the session's document tolerance through
+// the modeling-service solver boundary unchanged, down to every query.
+test("two documents with different tolerances reach the live region queries with their own modelingTolerance", async () => {
+  for (const modelingTolerance of [
+    OCC_KERNEL_SETTINGS.modelingTolerance,
+    0.02,
+  ]) {
+    const recording = createRecordingNeutralCurveQueryCapabilityForTest();
+    const solver = new SketchConstraintSolverAdapter({
+      documentId: "doc_fixture" as DocumentId,
+      revisionId: null,
+      neutralCurveQueries: recording.capability,
+    });
+    const unused = () => {
+      throw new Error("Only live region derivation is exercised here.");
+    };
+    const runtime = createModelingServiceEditorEffectRuntime({
+      getCurrentDocumentSnapshot: unused,
+      projectSketchExternalReferences: unused,
+      sketchSolver: {
+        deriveSketchRegions: (input) =>
+          solver.deriveSketchRegions({
+            ...input,
+            contractVersion: "modeling-contract/v1alpha1",
+          }),
+        createCommitCorrelation: unused,
+        projectExternalReferences: unused,
+      },
+      commitSketch: unused,
+      evaluatePreview: unused,
+      createFeature: unused,
+      updateFeature: unused,
+      setFeatureCursor: unused,
+    });
+    const session = acceptSketchDraw(
+      startSketchDraw(
+        beginSketchTool(
+          createNewSketchSessionFromSupport(
+            { kind: "construction", constructionId: "construction_plane-xy" },
+            { ...OCC_KERNEL_SETTINGS, modelingTolerance },
+          ),
+          "rectangle",
+        ),
+        [0, 0],
+      ),
+      [2, 1],
+    );
+    const event = await runEditorEffect(
+      {
+        type: "sketch.deriveRegions",
+        background: true,
+        requestId: "request_live_regions_tolerance" as RequestId,
+        commandSessionId: "command_sketch-1",
+        documentId: "doc_fixture" as DocumentId,
+        baseRevisionId: "rev_0001" as RevisionId,
+        generation: 1,
+        basis: getSketchSessionLiveRegionBasis(session)!,
+      },
+      runtime,
+    );
+    expect(
+      event.type === "effect.sketchRegionsDerived" && event.regions.length,
+      "The drawn rectangle derives one live region.",
+    ).toBe(1);
+    expect(
+      recording.modelingTolerances.length,
+      "Live derivation reaches the injected queries.",
+    ).toBeGreaterThan(0);
+    expect(
+      new Set(recording.modelingTolerances),
+      `Every live query carries the document tolerance ${modelingTolerance} unchanged.`,
+    ).toEqual(new Set([modelingTolerance]));
+  }
 });

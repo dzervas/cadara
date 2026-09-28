@@ -211,26 +211,6 @@ function validateAuthoredModelDocumentInvariants(
           "Authored sketch definition is invalid.",
       );
     }
-
-    const slotRegionIds = new Set<string>();
-    const slotWitnesses = new Set<string>();
-    for (const slot of sketch.regionSlots ?? []) {
-      const witnessKey = JSON.stringify([...slot.boundaryWitnesses].sort());
-      if (
-        slotRegionIds.has(slot.regionId) ||
-        slotWitnesses.has(witnessKey) ||
-        slot.boundaryWitnesses.length === 0 ||
-        new Set(slot.boundaryWitnesses).size !== slot.boundaryWitnesses.length ||
-        slot.boundaryWitnesses.some((witness) => witness.trim().length === 0)
-      ) {
-        return createDiagnostic(
-          "invalid-authored-document",
-          "Authored sketch region slots must have unique ids and exact non-empty witness sets.",
-        );
-      }
-      slotRegionIds.add(slot.regionId);
-      slotWitnesses.add(witnessKey);
-    }
   }
 
   for (const item of document.historyOrder) {

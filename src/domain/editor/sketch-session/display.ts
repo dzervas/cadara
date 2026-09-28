@@ -618,7 +618,7 @@ export function getRegionLoopSketchPoints(
     return [];
   }
 
-  const source = loop.segments[0]?.source;
+  const source = loop.segments[0]?.branch.source;
   if (!source || source.kind !== "entity") {
     return [];
   }

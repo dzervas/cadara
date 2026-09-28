@@ -795,11 +795,6 @@ function buildSurfaceRevolveEndShape(
       registerSourceShape(sourceShapes, `${prefix}:first-vertex`, revol.FirstShape_2(vertex));
       registerSourceShape(sourceShapes, `${prefix}:last-vertex`, revol.LastShape_2(vertex));
     }
-    for (const unsupported of profile.sketchProvenance.unsupportedSources) {
-      unsupportedSourceKeys.add(
-        `${slotPrefix}:sketch-source:${profile.sketchId}:${unsupported.sourceKey}:unsupported-profile-history`,
-      );
-    }
   } else if (profile.faceProfileKey) {
     unsupportedSourceKeys.add(
       `${slotPrefix}:face-profile:${profile.faceProfileKey}:unsupported-profile-history`,
@@ -961,12 +956,6 @@ function buildRevolveEndShape(
         sourceShapes,
         `${prefix}:last-vertex`,
         revol.LastShape_2(vertex),
-      );
-    }
-
-    for (const unsupported of profile.sketchProvenance.unsupportedSources) {
-      unsupportedSourceKeys.add(
-        `${slotPrefix}:sketch-source:${profile.sketchId}:${unsupported.sourceKey}:unsupported-profile-history`,
       );
     }
   } else if (profile.faceProfileKey) {

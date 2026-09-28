@@ -11,7 +11,11 @@ import type {
   OccWorkerRequest,
   OccWorkerResponse,
 } from "@/domain/modeling/occ/worker-protocol";
-import { normalizeOccWorkerFailure } from "@/domain/modeling/occ/worker-protocol";
+import {
+  normalizeOccWorkerFailure,
+  validateOccWorkerRequestEnvelope,
+} from "@/domain/modeling/occ/worker-protocol";
+import type { NeutralCurve } from "@/contracts/modeling/neutral-curve-query";
 
 class FakeOccWorker implements OccWorkerLike {
   private messageListener:
@@ -424,7 +428,85 @@ test("src/domain/modeling/occ/worker-client.spec.ts", async () => {
     ).toBe("DataCloneError: render snapshot is too large.");
   }
 
+  // Seam: the three neutral-curve query operations are worker-protocol
+  // requests, so a main-thread kernel adapter can answer them without OCC.
+  async function testNeutralCurveQueriesRoundTripThroughTheWorker() {
+    const worker = new FakeOccWorker();
+    const client = new OccWorkerClient({ worker });
+    const segment = (id: string, end: [number, number]): NeutralCurve => ({
+      curveId: id,
+      provenance: { sourceEntityId: id, sourceSpanId: "whole" },
+      kind: "line",
+      form: "endpointSegment",
+      start: [0, 0],
+      end,
+      sourceDomain: [0, 1],
+    });
+    const pair = {
+      modelingTolerance: 0.004,
+      first: segment("a", [1, 0]),
+      second: segment("b", [0, 1]),
+    };
+    const verified = {
+      kind: "verified",
+      points: [],
+      overlaps: [],
+      completenessProof: { kind: "noContacts" },
+    } as never;
+    const calls = [
+      {
+        kind: "queryNeutralCurves",
+        request: pair,
+        run: () => client.queryNeutralCurves(pair),
+      },
+      {
+        kind: "queryNeutralCurveSelfIntersections",
+        request: { modelingTolerance: 0.004, curve: pair.first },
+        run: () =>
+          client.queryNeutralCurveSelfIntersections({
+            modelingTolerance: 0.004,
+            curve: pair.first,
+          }),
+      },
+      {
+        kind: "queryNeutralCurveJoin",
+        request: {
+          ...pair,
+          joins: [{ first: "start", second: "start" }],
+        },
+        run: () =>
+          client.queryNeutralCurveJoin({
+            ...pair,
+            joins: [{ first: "start", second: "start" }],
+          }),
+      },
+    ] as const;
+    for (const [index, call] of calls.entries()) {
+      const promise = call.run();
+      const posted = worker.posted[index]!;
+      expect(
+        posted.kind === "invoke" && posted.operation,
+        `${call.kind} posts its request unchanged as a worker operation.`,
+      ).toEqual({ kind: call.kind, request: call.request });
+      expect(
+        validateOccWorkerRequestEnvelope(posted).success,
+        `The worker accepts the ${call.kind} request envelope.`,
+      ).toBe(true);
+      worker.emit({
+        kind: "invoked",
+        requestId: posted.requestId,
+        operation: call.kind,
+        payload: verified,
+      });
+      expect(
+        await promise,
+        `${call.kind} resolves with the worker's result.`,
+      ).toBe(verified);
+    }
+  }
+
   await testWarmupInvokesWorkerOperation();
+  await testNeutralCurveQueriesRoundTripThroughTheWorker();
   await testSnapshotResponsesAreUnpacked();
   await testWarmupFailuresSurfaceToCaller();
   await testExportCapabilitiesCreateCloneSafeWorkerRequests();

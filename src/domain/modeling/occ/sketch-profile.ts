@@ -1,6 +1,7 @@
 import type {
+  RegionBoundarySource,
+  RegionBoundaryVertex,
   RegionRecord,
-  RegionBoundarySegmentRecord,
   SolvedSketchEntityGeometryRecord,
   SketchRecord,
   SketchPoint2D,
@@ -25,7 +26,6 @@ import {
   negate,
   toGpDir,
   toGpPnt,
-  toVec3FromGpPoint,
   type Vec3,
 } from "@/domain/modeling/occ/geometry";
 import {
@@ -33,7 +33,6 @@ import {
   getProjectedRegionLoopRejectionMessage,
   isProjectedRegionSegmentSourceSupported,
 } from "@/domain/modeling/occ/implementation-policy";
-import { getClosedCurveSampleCount } from "@/contracts/sketch/region-geometry";
 import {
   combineOccCleanupError,
   deleteOccObject,
@@ -63,11 +62,6 @@ export type SketchProfileVertexSourceKey =
   | SketchPointId
   | ProjectedSketchProfileVertexKey;
 
-export interface UnsupportedSketchProfileSource {
-  sourceKey: SketchProfileEdgeSourceKey;
-  reason: "approximated" | "ambiguous-split-segment";
-}
-
 export interface SketchProfileProvenance {
   edges: ReadonlyMap<
     SketchProfileEdgeSourceKey,
@@ -77,7 +71,6 @@ export interface SketchProfileProvenance {
     SketchProfileVertexSourceKey,
     InstanceType<OpenCascadeInstance["TopoDS_Vertex"]>
   >;
-  unsupportedSources: readonly UnsupportedSketchProfileSource[];
 }
 
 export interface BuiltSketchProfileFace {
@@ -105,47 +98,29 @@ interface MutableSketchProfileProvenance {
     SketchProfileVertexSourceKey,
     InstanceType<OpenCascadeInstance["TopoDS_Vertex"]>
   >;
-  unsupportedSources: UnsupportedSketchProfileSource[];
 }
-
 type OccProfileVertex = InstanceType<OpenCascadeInstance["TopoDS_Vertex"]>;
-// Resolves a profile-loop corner to a single shared TopoDS_Vertex. Authored
-// corners pass their provenance source key; trimmed corners pass none and are
-// matched by exact coincidence against the same pool, so a corner shared by a
-// trimmed and an authored segment reuses one vertex instead of two coincident
-// ones (which would make BRepBuilderAPI_MakeWire copy and orphan provenance
-// edges, breaking downstream lineage).
+// Resolves an open-curve chain endpoint to a single shared TopoDS_Vertex, so
+// consecutive open surface-profile curves share one vertex.
 type ProfileVertexResolver = (
   position: Vec3,
   sourceKey?: SketchProfileVertexSourceKey,
 ) => OccProfileVertex;
 
-const PROFILE_LOOP_TOLERANCE = 1e-6;
+/**
+ * Endpoint chaining of *open* surface-profile curves only
+ * (`buildOpenSketchCurveWire`). Region profiles never use it: their vertices
+ * are the arrangement's topological boundary vertices.
+ */
+const OPEN_CURVE_CHAIN_TOLERANCE = 1e-6;
 
-interface OpenBoundarySegmentGeometry {
-  kind: "open";
-  segmentId: string;
-  start: Vec3;
-  end: Vec3;
+function areOpenCurveEndpointsCoincident(left: Vec3, right: Vec3) {
+  return (
+    Math.abs(left[0] - right[0]) <= OPEN_CURVE_CHAIN_TOLERANCE &&
+    Math.abs(left[1] - right[1]) <= OPEN_CURVE_CHAIN_TOLERANCE &&
+    Math.abs(left[2] - right[2]) <= OPEN_CURVE_CHAIN_TOLERANCE
+  );
 }
-
-interface ClosedBoundarySegmentGeometry {
-  kind: "closed";
-  segmentId: string;
-}
-
-interface ClosedPolylineBoundarySegmentGeometry {
-  kind: "closedPolyline";
-  segmentId: string;
-  points: Vec3[];
-}
-
-type BoundarySegmentGeometry =
-  | OpenBoundarySegmentGeometry
-  | ClosedBoundarySegmentGeometry
-  | ClosedPolylineBoundarySegmentGeometry;
-
-const PROFILE_TEXT_WIDTH_FACTOR = 0.6;
 
 function getSolvedEntityGeometry(
   sketch: SketchRecord,
@@ -213,6 +188,7 @@ function assertBoundaryPointExists(sketch: SketchRecord, pointId: string) {
   }
 }
 
+/** Closure is structural: consecutive segments share boundary-vertex keys. */
 function assertLoopCanBuildProfile(
   sketch: SketchRecord,
   region: RegionRecord,
@@ -232,220 +208,35 @@ function assertLoopCanBuildProfile(
     );
   }
 
-  for (const segment of loop.segments) {
-    if (
-      (segment.startPosition === undefined) !==
-      (segment.endPosition === undefined)
-    ) {
+  if (loop.segments.length === 1) {
+    const [only] = loop.segments;
+    const closesOnItself =
+      (only!.start === null && only!.end === null) ||
+      (only!.start !== null &&
+        only!.end !== null &&
+        only!.start.key === only!.end.key);
+    if (!closesOnItself) {
       throw new Error(
-        `Region loop ${loop.loopId} has an incomplete bounded segment.`,
+        `Region loop ${loop.loopId} does not close back onto its starting vertex.`,
       );
     }
+  } else {
+    loop.segments.forEach((current, index) => {
+      const next = loop.segments[(index + 1) % loop.segments.length]!;
+      if (
+        current.end === null ||
+        next.start === null ||
+        current.end.key !== next.start.key
+      ) {
+        throw new Error(
+          `Region loop ${loop.loopId} is not closed between segments ${index} and ${(index + 1) % loop.segments.length}.`,
+        );
+      }
+    });
   }
 
   for (const pointId of loop.boundaryPointIds) {
     assertBoundaryPointExists(sketch, pointId);
-  }
-}
-
-function toBoundarySegmentGeometry(
-  plane: SketchPlaneDefinition,
-  geometry: SolvedSketchEntityGeometryRecord,
-): BoundarySegmentGeometry {
-  switch (geometry.kind) {
-    case "lineSegment":
-      return {
-        kind: "open",
-        segmentId: geometry.entityId,
-        start: mapSketchPointToWorld(plane, geometry.startPosition),
-        end: mapSketchPointToWorld(plane, geometry.endPosition),
-      };
-    case "arc":
-      return {
-        kind: "open",
-        segmentId: geometry.entityId,
-        start: mapSketchPointToWorld(plane, geometry.startPosition),
-        end: mapSketchPointToWorld(plane, geometry.endPosition),
-      };
-    case "circle":
-      return {
-        kind: "closed",
-        segmentId: geometry.entityId,
-      };
-    case "ellipse": {
-      const majorRadius = Math.hypot(
-        geometry.majorAxisEndpointPosition[0] - geometry.centerPosition[0],
-        geometry.majorAxisEndpointPosition[1] - geometry.centerPosition[1],
-      );
-      const points = sampleEllipsePoints(
-        geometry.centerPosition,
-        geometry.majorAxisEndpointPosition,
-        geometry.minorRadius,
-        getClosedCurveSampleCount(Math.max(majorRadius, geometry.minorRadius)),
-      );
-      return {
-        kind: "closedPolyline",
-        segmentId: geometry.entityId,
-        points: points.map((point) => mapSketchPointToWorld(plane, point)),
-      };
-    }
-    case "profileText":
-      return {
-        kind: "closedPolyline",
-        segmentId: geometry.entityId,
-        points: getProfileTextOutlinePoints(geometry).map((point) =>
-          mapSketchPointToWorld(plane, point),
-        ),
-      };
-    case "point":
-      throw new Error(
-        `Point entity ${geometry.entityId} cannot define a profile boundary.`,
-      );
-    case "spline":
-      throw new Error(
-        `Spline entity ${geometry.entityId} cannot define a profile boundary.`,
-      );
-    case "ellipticalArc":
-      throw new Error(
-        `Elliptical arc entity ${geometry.entityId} cannot define a profile boundary in this OCC profile builder.`,
-      );
-    case "conic":
-      throw new Error(
-        `Conic entity ${geometry.entityId} cannot define a profile boundary in this OCC profile builder.`,
-      );
-    case "bezierCurve":
-      throw new Error(
-        `Bezier curve entity ${geometry.entityId} cannot define a profile boundary in this OCC profile builder.`,
-      );
-  }
-}
-
-function sampleEllipsePoints(
-  center: SketchPoint2D,
-  majorAxisEndpoint: SketchPoint2D,
-  minorRadius: number,
-  sampleCount: number,
-): SketchPoint2D[] {
-  const major = [
-    majorAxisEndpoint[0] - center[0],
-    majorAxisEndpoint[1] - center[1],
-  ] as const;
-  const majorRadius = Math.hypot(major[0], major[1]);
-  if (majorRadius <= Number.EPSILON || minorRadius <= 0) {
-    return [];
-  }
-
-  const majorUnit = [major[0] / majorRadius, major[1] / majorRadius] as const;
-  const minorUnit = [-majorUnit[1], majorUnit[0]] as const;
-
-  return Array.from({ length: sampleCount }, (_, index) => {
-    const angle = (Math.PI * 2 * index) / sampleCount;
-    return [
-      center[0] +
-        Math.cos(angle) * majorRadius * majorUnit[0] +
-        Math.sin(angle) * minorRadius * minorUnit[0],
-      center[1] +
-        Math.cos(angle) * majorRadius * majorUnit[1] +
-        Math.sin(angle) * minorRadius * minorUnit[1],
-    ];
-  });
-}
-
-function getProfileTextOutlinePoints(
-  entity: Extract<SolvedSketchEntityGeometryRecord, { kind: "profileText" }>,
-): SketchPoint2D[] {
-  const width = Math.max(
-    entity.height * PROFILE_TEXT_WIDTH_FACTOR,
-    entity.text.trim().length * entity.height * PROFILE_TEXT_WIDTH_FACTOR,
-  );
-  const x =
-    entity.horizontalAlign === "center"
-      ? -width / 2
-      : entity.horizontalAlign === "right"
-        ? -width
-        : 0;
-  const y =
-    entity.verticalAlign === "middle"
-      ? -entity.height / 2
-      : entity.verticalAlign === "top"
-        ? -entity.height
-        : entity.verticalAlign === "baseline"
-          ? -entity.height * 0.2
-          : 0;
-  const cos = Math.cos(entity.rotationRadians);
-  const sin = Math.sin(entity.rotationRadians);
-
-  return [
-    [x, y],
-    [x + width, y],
-    [x + width, y + entity.height],
-    [x, y + entity.height],
-  ].map((point) => [
-    entity.anchorPosition[0] + point[0]! * cos - point[1]! * sin,
-    entity.anchorPosition[1] + point[0]! * sin + point[1]! * cos,
-  ]);
-}
-
-function arePointsCoincident(left: Vec3, right: Vec3) {
-  return (
-    Math.abs(left[0] - right[0]) <= PROFILE_LOOP_TOLERANCE &&
-    Math.abs(left[1] - right[1]) <= PROFILE_LOOP_TOLERANCE &&
-    Math.abs(left[2] - right[2]) <= PROFILE_LOOP_TOLERANCE
-  );
-}
-
-function assertLoopGeometryIsClosed(
-  loop: RegionRecord["loops"][number],
-  segments: BoundarySegmentGeometry[],
-) {
-  if (segments.length === 1) {
-    const [onlySegment] = segments;
-
-    if (onlySegment.kind === "closed") {
-      return;
-    }
-
-    if (onlySegment.kind === "closedPolyline") {
-      if (onlySegment.points.length >= 3) {
-        return;
-      }
-      throw new Error(
-        `Region loop ${loop.loopId} does not contain enough sampled profile points.`,
-      );
-    }
-
-    if (arePointsCoincident(onlySegment.start, onlySegment.end)) {
-      return;
-    }
-
-    throw new Error(
-      `Region loop ${loop.loopId} does not close back onto its starting point.`,
-    );
-  }
-
-  for (const segment of segments) {
-    if (segment.kind === "closed" || segment.kind === "closedPolyline") {
-      throw new Error(
-        `Closed curve segment ${segment.segmentId} cannot participate in multi-segment loop ${loop.loopId}.`,
-      );
-    }
-  }
-
-  for (let index = 0; index < segments.length; index += 1) {
-    const current = segments[index];
-    const next = segments[(index + 1) % segments.length];
-
-    if (current.kind !== "open" || next.kind !== "open") {
-      throw new Error(
-        `Region loop ${loop.loopId} contains unsupported mixed segment topology.`,
-      );
-    }
-
-    if (!arePointsCoincident(current.end, next.start)) {
-      throw new Error(
-        `Region loop ${loop.loopId} is not geometrically closed between segments ${current.segmentId} and ${next.segmentId}.`,
-      );
-    }
   }
 }
 
@@ -486,23 +277,6 @@ function createProfileVertex(
   } finally {
     deleteOccObject(builder);
     deleteOccObject(point);
-  }
-}
-
-function buildLineEdgeFromWorld(
-  oc: OpenCascadeInstance,
-  startPosition: Vec3,
-  endPosition: Vec3,
-) {
-  const start = toGpPnt(oc, startPosition);
-  const end = toGpPnt(oc, endPosition);
-  const builder = new oc.BRepBuilderAPI_MakeEdge_3(start, end);
-  try {
-    return builder.Edge();
-  } finally {
-    deleteOccObject(builder);
-    deleteOccObject(start);
-    deleteOccObject(end);
   }
 }
 
@@ -628,28 +402,8 @@ function buildArcEdgeFromSketchGeometry(
   }
 }
 
-function addClosedPolylineEdges(
-  oc: OpenCascadeInstance,
-  wireBuilder: { Add_1(edge: unknown): void },
-  geometry: ClosedPolylineBoundarySegmentGeometry,
-) {
-  for (let index = 0; index < geometry.points.length; index += 1) {
-    const start = geometry.points[index]!;
-    const end = geometry.points[(index + 1) % geometry.points.length]!;
-    const edge = buildLineEdgeFromWorld(oc, start, end);
-    try {
-      wireBuilder.Add_1(edge);
-    } finally {
-      deleteOccObject(edge);
-    }
-  }
-}
-
 function getProjectedSegmentId(
-  source: Extract<
-    RegionBoundarySegmentRecord["source"],
-    { kind: "projectedGeometry" }
-  >,
+  source: Extract<RegionBoundarySource, { kind: "projectedGeometry" }>,
 ): ProjectedSketchProfileEdgeKey {
   return `projected:${source.reference.referenceId}/${source.reference.geometryId}`;
 }
@@ -685,10 +439,7 @@ function isAuthoredProjectedReference(
 function resolveProjectedBoundaryGeometry(
   sketch: SketchRecord,
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
-  source: Extract<
-    RegionBoundarySegmentRecord["source"],
-    { kind: "projectedGeometry" }
-  >,
+  source: Extract<RegionBoundarySource, { kind: "projectedGeometry" }>,
 ) {
   if (!isAuthoredProjectedReference(sketch, source.reference.referenceId)) {
     const rejection = createProjectedRegionLoopRejection(source);
@@ -739,160 +490,6 @@ function resolveProjectedBoundaryGeometry(
   return geometry;
 }
 
-function toProjectedBoundarySegmentGeometry(
-  plane: SketchPlaneDefinition,
-  source: Extract<
-    RegionBoundarySegmentRecord["source"],
-    { kind: "projectedGeometry" }
-  >,
-  geometry: ProjectedSketchReferenceGeometry,
-  segment: RegionBoundarySegmentRecord,
-): BoundarySegmentGeometry {
-  const segmentId = getProjectedSegmentId(source);
-  const hasBounds = Boolean(segment.startPosition && segment.endPosition);
-
-  if (geometry.kind === "lineSegment") {
-    const base = {
-      kind: "open" as const,
-      segmentId,
-      start: mapSketchPointToWorld(
-        plane,
-        segment.startPosition ?? geometry.startPosition,
-      ),
-      end: mapSketchPointToWorld(
-        plane,
-        segment.endPosition ?? geometry.endPosition,
-      ),
-    };
-    return !hasBounds && segment.traversalDirection === "reverse"
-      ? { ...base, start: base.end, end: base.start }
-      : base;
-  }
-
-  if (geometry.kind === "arc") {
-    const base = {
-      kind: "open" as const,
-      segmentId,
-      start: mapSketchPointToWorld(
-        plane,
-        segment.startPosition ?? geometry.startPosition,
-      ),
-      end: mapSketchPointToWorld(
-        plane,
-        segment.endPosition ?? geometry.endPosition,
-      ),
-    };
-    return !hasBounds && segment.traversalDirection === "reverse"
-      ? { ...base, start: base.end, end: base.start }
-      : base;
-  }
-
-  if (geometry.kind === "circle") {
-    return hasBounds
-      ? {
-          kind: "open",
-          segmentId,
-          start: mapSketchPointToWorld(plane, segment.startPosition!),
-          end: mapSketchPointToWorld(plane, segment.endPosition!),
-        }
-      : {
-          kind: "closed",
-          segmentId,
-        };
-  }
-
-  const rejection = createProjectedRegionLoopRejection(source);
-  const error = new Error(
-    `Projected ${geometry.kind} geometry ${source.reference.geometryId} cannot define a profile boundary.`,
-  ) as Error & {
-    code?: string;
-  };
-  error.code = rejection.code;
-  throw error;
-}
-
-// A boundary segment is only "trimmed" (a partial span of its source curve)
-// when at least one endpoint is an arrangement intersection rather than an
-// authored sketch point. Region extraction records solved start/end positions
-// for every segment, so a segment that still resolves to both authored points
-// is the full entity and must build through the authored-point path to preserve
-// shared-vertex profile provenance (and therefore downstream side-edge lineage).
-function isTrimmedEntitySegment(
-  segment: RegionBoundarySegmentRecord,
-): segment is RegionBoundarySegmentRecord & {
-  startPosition: SketchPoint2D;
-  endPosition: SketchPoint2D;
-} {
-  return (
-    segment.startPosition !== undefined &&
-    segment.endPosition !== undefined &&
-    (segment.startPointId === null || segment.endPointId === null)
-  );
-}
-
-function getLoopSegmentTraversal(
-  plane: SketchPlaneDefinition,
-  sketch: SketchRecord,
-  segment: RegionBoundarySegmentRecord,
-  geometry: SolvedSketchEntityGeometryRecord,
-): BoundarySegmentGeometry {
-  const baseGeometry = toBoundarySegmentGeometry(plane, geometry);
-
-  if (isTrimmedEntitySegment(segment)) {
-    return {
-      kind: "open",
-      segmentId: baseGeometry.segmentId,
-      start: mapSketchPointToWorld(plane, segment.startPosition),
-      end: mapSketchPointToWorld(plane, segment.endPosition),
-    };
-  }
-
-  if (
-    baseGeometry.kind === "closed" ||
-    baseGeometry.kind === "closedPolyline"
-  ) {
-    return baseGeometry;
-  }
-
-  if (segment.startPointId === null || segment.endPointId === null) {
-    return baseGeometry;
-  }
-
-  const startPoint = getSolvedBoundaryPointPosition(
-    plane,
-    sketch,
-    segment.startPointId,
-  );
-  const endPoint = getSolvedBoundaryPointPosition(
-    plane,
-    sketch,
-    segment.endPointId,
-  );
-
-  if (
-    arePointsCoincident(baseGeometry.start, startPoint) &&
-    arePointsCoincident(baseGeometry.end, endPoint)
-  ) {
-    return baseGeometry;
-  }
-
-  if (
-    arePointsCoincident(baseGeometry.start, endPoint) &&
-    arePointsCoincident(baseGeometry.end, startPoint)
-  ) {
-    return {
-      kind: "open",
-      segmentId: baseGeometry.segmentId,
-      start: baseGeometry.end,
-      end: baseGeometry.start,
-    };
-  }
-
-  throw new Error(
-    `Region loop segment for entity ${geometry.entityId} does not match authored traversal endpoints.`,
-  );
-}
-
 function getSolvedBoundaryPointPosition(
   plane: SketchPlaneDefinition,
   sketch: SketchRecord,
@@ -919,51 +516,6 @@ function getSolvedBoundaryPointPosition(
   return mapSketchPointToWorld(plane, authoredPoint.position);
 }
 
-function orientEdgeForLoop(
-  oc: OpenCascadeInstance,
-  edge: InstanceType<OpenCascadeInstance["TopoDS_Edge"]>,
-  loopGeometry: BoundarySegmentGeometry,
-  segment: RegionBoundarySegmentRecord,
-) {
-  if (
-    loopGeometry.kind !== "open" ||
-    segment.startPointId === null ||
-    segment.endPointId === null
-  ) {
-    return edge;
-  }
-
-  const curve = new oc.BRepAdaptor_Curve_2(edge);
-  const first = curve.Value(curve.FirstParameter());
-  const last = curve.Value(curve.LastParameter());
-  try {
-    const currentStart = toVec3FromGpPoint(first);
-    const currentEnd = toVec3FromGpPoint(last);
-
-    if (
-      arePointsCoincident(currentStart, loopGeometry.start) &&
-      arePointsCoincident(currentEnd, loopGeometry.end)
-    ) {
-      return edge;
-    }
-
-    if (
-      arePointsCoincident(currentStart, loopGeometry.end) &&
-      arePointsCoincident(currentEnd, loopGeometry.start)
-    ) {
-      return reverseEdge(oc, edge);
-    }
-  } finally {
-    deleteOccObject(first);
-    deleteOccObject(last);
-    deleteOccObject(curve);
-  }
-
-  throw new Error(
-    `Built OCC edge for segment ${loopGeometry.segmentId} does not match loop traversal geometry.`,
-  );
-}
-
 function reverseEdge(
   oc: OpenCascadeInstance,
   edge: InstanceType<OpenCascadeInstance["TopoDS_Edge"]>,
@@ -976,146 +528,15 @@ function reverseEdge(
   }
 }
 
-function buildProjectedBoundaryEdge(
-  oc: OpenCascadeInstance,
-  plane: SketchPlaneDefinition,
-  source: Extract<
-    RegionBoundarySegmentRecord["source"],
-    { kind: "projectedGeometry" }
-  >,
-  geometry: ProjectedSketchReferenceGeometry,
-  loopGeometry: BoundarySegmentGeometry,
-  loopRole: RegionRecord["loops"][number]["role"],
-  segment: RegionBoundarySegmentRecord,
-  resolveProfileVertex: ProfileVertexResolver,
-) {
-  const sourceKey = getProjectedSegmentId(source);
-
-  switch (geometry.kind) {
-    case "lineSegment": {
-      if (segment.startPosition && segment.endPosition) {
-        if (loopGeometry.kind !== "open") {
-          throw new Error(
-            `Projected line ${source.reference.geometryId} did not resolve to open loop geometry.`,
-          );
-        }
-        return buildLineEdgeFromWorld(oc, loopGeometry.start, loopGeometry.end);
-      }
-      if (loopGeometry.kind !== "open") {
-        throw new Error(
-          `Projected line ${source.reference.geometryId} did not resolve to open loop geometry.`,
-        );
-      }
-      const startVertex = resolveProfileVertex(
-        mapSketchPointToWorld(plane, geometry.startPosition),
-        `${sourceKey}:start`,
-      );
-      const endVertex = resolveProfileVertex(
-        mapSketchPointToWorld(plane, geometry.endPosition),
-        `${sourceKey}:end`,
-      );
-      const baseEdge = buildLineEdge(oc, startVertex, endVertex);
-      if (segment.traversalDirection !== "reverse") {
-        return baseEdge;
-      }
-      try {
-        return reverseEdge(oc, baseEdge);
-      } finally {
-        deleteOccObject(baseEdge);
-      }
-    }
-    case "circle": {
-      if (segment.startPosition && segment.endPosition) {
-        return buildArcEdgeFromSketchGeometry(
-          oc,
-          plane,
-          segment.startPosition,
-          segment.endPosition,
-          geometry.centerPosition,
-          segment.traversalDirection === "reverse"
-            ? "clockwise"
-            : "counterClockwise",
-          `projected circle ${source.reference.geometryId}`,
-        );
-      }
-      const edge = buildCircleEdgeFromSketchGeometry(
-        oc,
-        plane,
-        geometry.centerPosition,
-        geometry.radius,
-      );
-      if (loopRole !== "inner") {
-        return edge;
-      }
-      try {
-        return reverseEdge(oc, edge);
-      } finally {
-        deleteOccObject(edge);
-      }
-    }
-    case "arc": {
-      if (segment.startPosition && segment.endPosition) {
-        return buildArcEdgeFromSketchGeometry(
-          oc,
-          plane,
-          segment.startPosition,
-          segment.endPosition,
-          geometry.centerPosition,
-          segment.traversalDirection === "reverse"
-            ? geometry.sweepDirection === "clockwise"
-              ? "counterClockwise"
-              : "clockwise"
-            : geometry.sweepDirection,
-          `projected geometry ${source.reference.geometryId}`,
-        );
-      }
-      const startVertex = resolveProfileVertex(
-        mapSketchPointToWorld(plane, geometry.startPosition),
-        `${sourceKey}:start`,
-      );
-      const endVertex = resolveProfileVertex(
-        mapSketchPointToWorld(plane, geometry.endPosition),
-        `${sourceKey}:end`,
-      );
-      const edge = buildArcEdgeFromSketchGeometry(
-        oc,
-        plane,
-        geometry.startPosition,
-        geometry.endPosition,
-        geometry.centerPosition,
-        geometry.sweepDirection,
-        `projected geometry ${source.reference.geometryId}`,
-        startVertex,
-        endVertex,
-      );
-      if (segment.traversalDirection !== "reverse") {
-        return edge;
-      }
-      try {
-        return reverseEdge(oc, edge);
-      } finally {
-        deleteOccObject(edge);
-      }
-    }
-    case "point":
-      throw new Error(
-        `Projected point geometry ${source.reference.geometryId} cannot define a profile boundary.`,
-      );
-    case "spline":
-      throw new Error(
-        `Projected spline geometry ${source.reference.geometryId} cannot define a profile boundary.`,
-      );
-  }
-}
-
 type RegionBoundarySegment = RegionRecord["loops"][number]["segments"][number];
 
 function getRegionSegmentBaseEdgeKey(
   segment: RegionBoundarySegment,
 ): SketchProfileBaseEdgeSourceKey {
-  return segment.source.kind === "projectedGeometry"
-    ? getProjectedSegmentId(segment.source)
-    : segment.source.entityId;
+  const source = segment.branch.source;
+  return source.kind === "projectedGeometry"
+    ? getProjectedSegmentId(source)
+    : source.entityId;
 }
 
 /**
@@ -1125,8 +546,7 @@ function getRegionSegmentBaseEdgeKey(
  * SEVERAL wire edges. Keying them all by the bare source id silently
  * overwrites every edge but the last, so the earlier edges' swept faces reach
  * later features with no lineage at all. Each split piece therefore keys on
- * its persisted `sourceSegmentOrdinal`; a multi-piece source without ordinals
- * cannot be named exactly and fails closed as an unsupported source.
+ * its `sourceSegmentOrdinal` (split-piece position in source-parameter order).
  */
 function createRegionSegmentEdgeKeyResolver(
   loops: readonly RegionRecord["loops"][number][],
@@ -1138,18 +558,248 @@ function createRegionSegmentEdgeKeyResolver(
       segmentCounts.set(baseKey, (segmentCounts.get(baseKey) ?? 0) + 1);
     }
   }
-  return (
-    segment: RegionBoundarySegment,
-  ): SketchProfileEdgeSourceKey | null => {
+  return (segment: RegionBoundarySegment): SketchProfileEdgeSourceKey => {
     const baseKey = getRegionSegmentBaseEdgeKey(segment);
     if ((segmentCounts.get(baseKey) ?? 0) <= 1) {
       return baseKey;
     }
-    if (segment.sourceSegmentOrdinal === undefined) {
-      return null;
-    }
     return `${baseKey}#${segment.sourceSegmentOrdinal}` as SplitSketchProfileEdgeKey;
   };
+}
+
+/** Support geometry of one boundary branch; the edge runs through the boundary vertices. */
+type RegionBranchSupport =
+  | { kind: "line" }
+  | { kind: "circle"; center: SketchPoint2D; radius: number };
+
+function describeRegionBoundarySource(source: RegionBoundarySource) {
+  return source.kind === "entity"
+    ? `sketch entity ${source.entityId}`
+    : `projected geometry ${source.reference.referenceId}/${source.reference.geometryId}`;
+}
+
+function resolveRegionBranchSupport(
+  sketch: SketchRecord,
+  projectedReferences: readonly ProjectedSketchReferenceRecord[],
+  segment: RegionBoundarySegment,
+): RegionBranchSupport {
+  const source = segment.branch.source;
+  if (!isProjectedRegionSegmentSourceSupported(source)) {
+    throw new Error("Unsupported region segment source.");
+  }
+  if (segment.branch.spanId !== "whole") {
+    // U9 tracked gap: spline-bounded regions are derived and selectable, but
+    // exact span trimming for OCC lands in T10.
+    throw new Error(
+      `Spline profile boundary ${describeRegionBoundarySource(source)} span ${segment.branch.spanId} is not yet supported by the OCC profile builder.`,
+    );
+  }
+
+  if (source.kind === "projectedGeometry") {
+    const geometry = resolveProjectedBoundaryGeometry(
+      sketch,
+      projectedReferences,
+      source,
+    );
+    switch (geometry.kind) {
+      case "lineSegment":
+        return { kind: "line" };
+      case "arc":
+        return {
+          kind: "circle",
+          center: geometry.centerPosition,
+          radius: Math.hypot(
+            geometry.startPosition[0] - geometry.centerPosition[0],
+            geometry.startPosition[1] - geometry.centerPosition[1],
+          ),
+        };
+      case "circle":
+        return {
+          kind: "circle",
+          center: geometry.centerPosition,
+          radius: geometry.radius,
+        };
+      case "spline":
+        throw new Error(
+          `Spline profile boundary ${describeRegionBoundarySource(source)} is not yet supported by the OCC profile builder.`,
+        );
+      case "point":
+        throw new Error(
+          `Projected point geometry ${source.reference.geometryId} cannot define a profile boundary.`,
+        );
+    }
+  }
+
+  const geometry = getSolvedEntityGeometry(sketch, source.entityId);
+  assertLoopSegmentOwnership(sketch, geometry);
+  switch (geometry.kind) {
+    case "lineSegment":
+      return { kind: "line" };
+    case "arc":
+      return {
+        kind: "circle",
+        center: geometry.centerPosition,
+        radius: Math.hypot(
+          geometry.startPosition[0] - geometry.centerPosition[0],
+          geometry.startPosition[1] - geometry.centerPosition[1],
+        ),
+      };
+    case "circle":
+      return {
+        kind: "circle",
+        center: geometry.centerPosition,
+        radius: geometry.solvedRadius,
+      };
+    case "spline":
+      throw new Error(
+        `Spline profile boundary ${describeRegionBoundarySource(source)} is not yet supported by the OCC profile builder.`,
+      );
+    default:
+      throw new Error(
+        `Sketch entity ${geometry.entityId} of kind ${geometry.kind} cannot define a profile boundary in this OCC profile builder.`,
+      );
+  }
+}
+
+/**
+ * One OCC vertex per boundary-vertex key, positioned at the vertex
+ * representative (a declared join's realization; never identity). Declared
+ * joins register the vertex under every joined authored point id, so side-edge
+ * lineage keeps naming it by its sketch points.
+ */
+function createRegionVertexResolver(
+  oc: OpenCascadeInstance,
+  plane: SketchPlaneDefinition,
+  provenance: MutableSketchProfileProvenance,
+) {
+  const byKey = new Map<string, OccProfileVertex>();
+  const unregistered = new Set<OccProfileVertex>();
+  const resolve = (
+    vertex: RegionBoundaryVertex,
+    endpointKey: SketchProfileVertexSourceKey | null,
+  ): OccProfileVertex => {
+    let occVertex = byKey.get(vertex.key);
+    if (!occVertex) {
+      occVertex = createProfileVertex(
+        oc,
+        mapSketchPointToWorld(plane, vertex.position),
+      );
+      byKey.set(vertex.key, occVertex);
+      unregistered.add(occVertex);
+    }
+    const keys: SketchProfileVertexSourceKey[] = [
+      ...(vertex.kind === "declaredJoin" ? vertex.pointIds : []),
+      ...(endpointKey ? [endpointKey] : []),
+    ];
+    for (const key of keys) {
+      provenance.vertices.set(key, occVertex);
+      unregistered.delete(occVertex);
+    }
+    return occVertex;
+  };
+  return { resolve, unregistered };
+}
+
+/**
+ * Provenance keys of a line branch's own endpoints at this segment's ends:
+ * an end whose source parameter is exactly the branch domain end (0 or 1) is
+ * that line's authored (or projected) endpoint. Structural, never proximity.
+ */
+function lineEndpointKeys(
+  sketch: SketchRecord,
+  segment: RegionBoundarySegment,
+): {
+  start: SketchProfileVertexSourceKey | null;
+  end: SketchProfileVertexSourceKey | null;
+} {
+  const source = segment.branch.source;
+  let atZero: SketchProfileVertexSourceKey | null = null;
+  let atOne: SketchProfileVertexSourceKey | null = null;
+  if (source.kind === "projectedGeometry") {
+    const key = getProjectedSegmentId(source);
+    atZero = `${key}:start`;
+    atOne = `${key}:end`;
+  } else {
+    const entity = getSketchEntityDefinition(sketch, source.entityId);
+    if (entity.kind !== "lineSegment") return { start: null, end: null };
+    atZero = entity.startPointId;
+    atOne = entity.endPointId;
+  }
+  const [low, high] = segment.sourceParameterInterval;
+  const lowKey = low === 0 ? atZero : null;
+  const highKey = high === 1 ? atOne : null;
+  return segment.traversalDirection === "reverse"
+    ? { start: highKey, end: lowKey }
+    : { start: lowKey, end: highKey };
+}
+
+function buildRegionSegmentEdge(
+  oc: OpenCascadeInstance,
+  plane: SketchPlaneDefinition,
+  sketch: SketchRecord,
+  segment: RegionBoundarySegment,
+  support: RegionBranchSupport,
+  resolve: (
+    vertex: RegionBoundaryVertex,
+    endpointKey: SketchProfileVertexSourceKey | null,
+  ) => OccProfileVertex,
+) {
+  const label = describeRegionBoundarySource(segment.branch.source);
+  if ((segment.start === null) !== (segment.end === null)) {
+    throw new Error(
+      `Boundary segment of ${label} has exactly one null end; only an unsplit closed branch has no boundary vertices.`,
+    );
+  }
+  // Arcs and circles use increasing (counter-clockwise) source angle; a
+  // reverse traversal runs clockwise.
+  const sweep =
+    segment.traversalDirection === "reverse" ? "clockwise" : "counterClockwise";
+
+  if (support.kind === "line") {
+    if (segment.start === null || segment.end === null) {
+      throw new Error(`Line boundary ${label} has no boundary vertices.`);
+    }
+    const endpointKeys = lineEndpointKeys(sketch, segment);
+    return buildLineEdge(
+      oc,
+      resolve(segment.start, endpointKeys.start),
+      resolve(segment.end, endpointKeys.end),
+    );
+  }
+
+  const closesOnItself =
+    segment.start === null ||
+    segment.end === null ||
+    segment.start.key === segment.end.key;
+  if (closesOnItself) {
+    // An unsplit full circle, or a full turn through one touch vertex.
+    const edge = buildCircleEdgeFromSketchGeometry(
+      oc,
+      plane,
+      support.center,
+      support.radius,
+    );
+    if (segment.traversalDirection !== "reverse") {
+      return edge;
+    }
+    try {
+      return reverseEdge(oc, edge);
+    } finally {
+      deleteOccObject(edge);
+    }
+  }
+
+  return buildArcEdgeFromSketchGeometry(
+    oc,
+    plane,
+    segment.start!.position,
+    segment.end!.position,
+    support.center,
+    sweep,
+    label,
+    resolve(segment.start!, null),
+    resolve(segment.end!, null),
+  );
 }
 
 function buildLoopWire(
@@ -1161,292 +811,29 @@ function buildLoopWire(
   provenance: MutableSketchProfileProvenance,
   resolveSegmentEdgeKey: (
     segment: RegionBoundarySegment,
-  ) => SketchProfileEdgeSourceKey | null,
+  ) => SketchProfileEdgeSourceKey,
 ) {
-  const loopGeometry: BoundarySegmentGeometry[] = [];
-  // `owned` vertices are loop-local and released with the loop; the rest are
-  // registered in `provenance` and released by the profile builder.
-  const loopVertices: Array<{
-    position: Vec3;
-    vertex: OccProfileVertex;
-    owned: boolean;
-  }> = [];
-  const resolveProfileVertex: ProfileVertexResolver = (position, sourceKey) => {
-    const registered = sourceKey
-      ? provenance.vertices.get(sourceKey)
-      : undefined;
-    if (registered) {
-      if (!loopVertices.some((entry) => entry.vertex === registered)) {
-        loopVertices.push({ position, vertex: registered, owned: false });
-      }
-      return registered;
-    }
-
-    const coincident = loopVertices.find((entry) =>
-      arePointsCoincident(entry.position, position),
-    );
-    if (coincident) {
-      if (sourceKey) {
-        provenance.vertices.set(sourceKey, coincident.vertex);
-        coincident.owned = false;
-      }
-      return coincident.vertex;
-    }
-
-    const vertex = createProfileVertex(oc, position);
-    loopVertices.push({ position, vertex, owned: !sourceKey });
-    if (sourceKey) {
-      provenance.vertices.set(sourceKey, vertex);
-    }
-    return vertex;
-  };
+  const vertices = createRegionVertexResolver(oc, plane, provenance);
   const wireBuilder = new oc.BRepBuilderAPI_MakeWire_1();
-  const registerSegmentEdge = (
-    segment: RegionBoundarySegment,
-    edge: InstanceType<OpenCascadeInstance["TopoDS_Edge"]>,
-  ) => {
-    const edgeKey = resolveSegmentEdgeKey(segment);
-    if (edgeKey === null) {
-      provenance.unsupportedSources.push({
-        sourceKey: getRegionSegmentBaseEdgeKey(segment),
-        reason: "ambiguous-split-segment",
-      });
-      deleteOccObject(edge);
-      return;
-    }
-    provenance.edges.set(edgeKey, edge);
-  };
 
   try {
     for (const segment of loop.segments) {
-      if (!isProjectedRegionSegmentSourceSupported(segment.source)) {
-        throw new Error("Unsupported region segment source.");
-      }
-
-      if (segment.source.kind === "projectedGeometry") {
-        const projectedGeometry = resolveProjectedBoundaryGeometry(
-          sketch,
-          projectedReferences,
-          segment.source,
-        );
-        const segmentGeometry = toProjectedBoundarySegmentGeometry(
-          plane,
-          segment.source,
-          projectedGeometry,
-          segment,
-        );
-        loopGeometry.push(segmentGeometry);
-        const edge = buildProjectedBoundaryEdge(
-          oc,
-          plane,
-          segment.source,
-          projectedGeometry,
-          segmentGeometry,
-          loop.role,
-          segment,
-          resolveProfileVertex,
-        );
-        wireBuilder.Add_1(edge);
-        registerSegmentEdge(segment, edge);
-      } else {
-        const geometry = getSolvedEntityGeometry(
-          sketch,
-          segment.source.entityId,
-        );
-        assertLoopSegmentOwnership(sketch, geometry);
-        const segmentGeometry = getLoopSegmentTraversal(
-          plane,
-          sketch,
-          segment,
-          geometry,
-        );
-        loopGeometry.push(segmentGeometry);
-
-        switch (geometry.kind) {
-          case "lineSegment": {
-            if (isTrimmedEntitySegment(segment)) {
-              if (segmentGeometry.kind !== "open") {
-                throw new Error(
-                  `Line ${geometry.entityId} did not resolve to open loop geometry.`,
-                );
-              }
-              const edge = buildLineEdge(
-                oc,
-                resolveProfileVertex(segmentGeometry.start),
-                resolveProfileVertex(segmentGeometry.end),
-              );
-              wireBuilder.Add_1(edge);
-              registerSegmentEdge(segment, edge);
-              break;
-            }
-            const entity = getSketchEntityDefinition(sketch, geometry.entityId);
-            if (entity.kind !== "lineSegment") {
-              throw new Error(
-                `Solved line ${geometry.entityId} does not match its authored entity kind.`,
-              );
-            }
-            const startVertex = resolveProfileVertex(
-              getSolvedBoundaryPointPosition(
-                plane,
-                sketch,
-                entity.startPointId,
-              ),
-              entity.startPointId,
-            );
-            const endVertex = resolveProfileVertex(
-              getSolvedBoundaryPointPosition(plane, sketch, entity.endPointId),
-              entity.endPointId,
-            );
-            const baseEdge = buildLineEdge(oc, startVertex, endVertex);
-            const edge = orientEdgeForLoop(
-              oc,
-              baseEdge,
-              segmentGeometry,
-              segment,
-            );
-            if (edge !== baseEdge) {
-              deleteOccObject(baseEdge);
-            }
-            wireBuilder.Add_1(edge);
-            registerSegmentEdge(segment, edge);
-            break;
-          }
-          case "circle": {
-            if (isTrimmedEntitySegment(segment)) {
-              if (segmentGeometry.kind !== "open") {
-                throw new Error(
-                  `Circle ${geometry.entityId} did not resolve to open loop geometry.`,
-                );
-              }
-              const edge = buildArcEdgeFromSketchGeometry(
-                oc,
-                plane,
-                segment.startPosition,
-                segment.endPosition,
-                geometry.centerPosition,
-                segment.traversalDirection === "reverse"
-                  ? "clockwise"
-                  : "counterClockwise",
-                `circle segment ${geometry.entityId}`,
-                resolveProfileVertex(segmentGeometry.start),
-                resolveProfileVertex(segmentGeometry.end),
-              );
-              wireBuilder.Add_1(edge);
-              registerSegmentEdge(segment, edge);
-              break;
-            }
-            const baseEdge = buildCircleEdge(oc, plane, geometry);
-            const edge =
-              loop.role === "inner" ? reverseEdge(oc, baseEdge) : baseEdge;
-            if (edge !== baseEdge) {
-              deleteOccObject(baseEdge);
-            }
-            wireBuilder.Add_1(edge);
-            registerSegmentEdge(segment, edge);
-            break;
-          }
-          case "arc": {
-            if (isTrimmedEntitySegment(segment)) {
-              if (segmentGeometry.kind !== "open") {
-                throw new Error(
-                  `Arc ${geometry.entityId} did not resolve to open loop geometry.`,
-                );
-              }
-              const edge = buildArcEdgeFromSketchGeometry(
-                oc,
-                plane,
-                segment.startPosition,
-                segment.endPosition,
-                geometry.centerPosition,
-                segment.traversalDirection === "reverse"
-                  ? geometry.sweepDirection === "clockwise"
-                    ? "counterClockwise"
-                    : "clockwise"
-                  : geometry.sweepDirection,
-                `arc segment ${geometry.entityId}`,
-                resolveProfileVertex(segmentGeometry.start),
-                resolveProfileVertex(segmentGeometry.end),
-              );
-              wireBuilder.Add_1(edge);
-              registerSegmentEdge(segment, edge);
-              break;
-            }
-            const entity = getSketchEntityDefinition(sketch, geometry.entityId);
-            if (entity.kind !== "arc") {
-              throw new Error(
-                `Solved arc ${geometry.entityId} does not match its authored entity kind.`,
-              );
-            }
-            const startVertex = resolveProfileVertex(
-              getSolvedBoundaryPointPosition(
-                plane,
-                sketch,
-                entity.startPointId,
-              ),
-              entity.startPointId,
-            );
-            const endVertex = resolveProfileVertex(
-              getSolvedBoundaryPointPosition(plane, sketch, entity.endPointId),
-              entity.endPointId,
-            );
-            const baseEdge = buildArcEdge(
-              oc,
-              plane,
-              geometry,
-              startVertex,
-              endVertex,
-            );
-            const edge = orientEdgeForLoop(
-              oc,
-              baseEdge,
-              segmentGeometry,
-              segment,
-            );
-            if (edge !== baseEdge) {
-              deleteOccObject(baseEdge);
-            }
-            wireBuilder.Add_1(edge);
-            registerSegmentEdge(segment, edge);
-            break;
-          }
-          case "ellipse":
-          case "profileText":
-            if (segmentGeometry.kind !== "closedPolyline") {
-              throw new Error(
-                `Advanced entity ${geometry.entityId} did not resolve to closed profile geometry.`,
-              );
-            }
-            addClosedPolylineEdges(oc, wireBuilder, segmentGeometry);
-            provenance.unsupportedSources.push({
-              sourceKey: geometry.entityId,
-              reason: "approximated",
-            });
-            break;
-          case "point":
-            throw new Error(
-              `Point entity ${geometry.entityId} cannot define a profile boundary.`,
-            );
-          case "spline":
-            throw new Error(
-              `Spline entity ${geometry.entityId} cannot define a profile boundary.`,
-            );
-          case "ellipticalArc":
-            throw new Error(
-              `Elliptical arc entity ${geometry.entityId} cannot define a profile boundary in this OCC profile builder.`,
-            );
-          case "conic":
-            throw new Error(
-              `Conic entity ${geometry.entityId} cannot define a profile boundary in this OCC profile builder.`,
-            );
-          case "bezierCurve":
-            throw new Error(
-              `Bezier curve entity ${geometry.entityId} cannot define a profile boundary in this OCC profile builder.`,
-            );
-        }
-      }
+      const support = resolveRegionBranchSupport(
+        sketch,
+        projectedReferences,
+        segment,
+      );
+      const edge = buildRegionSegmentEdge(
+        oc,
+        plane,
+        sketch,
+        segment,
+        support,
+        vertices.resolve,
+      );
+      wireBuilder.Add_1(edge);
+      provenance.edges.set(resolveSegmentEdgeKey(segment), edge);
     }
-
-    assertLoopGeometryIsClosed(loop, loopGeometry);
 
     if (!wireBuilder.IsDone()) {
       throw new Error(
@@ -1457,8 +844,36 @@ function buildLoopWire(
     return wireBuilder.Wire();
   } finally {
     deleteOccObject(wireBuilder);
-    for (const { vertex, owned } of loopVertices) {
-      if (owned) deleteOccObject(vertex);
+    // Unregistered vertices are loop-local; registered ones are released with
+    // the profile provenance.
+    for (const vertex of vertices.unregistered) deleteOccObject(vertex);
+  }
+}
+
+/**
+ * Each loop's wire gets its own OCC vertices, so a boundary vertex shared by
+ * two loops of one face (point-touching loops) would become two coincident
+ * OCC vertices and two provenance registrations. That face is rejected
+ * explicitly until T10 proves touching-loop faces.
+ */
+function assertLoopsShareNoBoundaryVertex(region: RegionRecord) {
+  const loopByVertexKey = new Map<string, string>();
+  for (const loop of region.loops) {
+    const keys = new Set(
+      loop.segments.flatMap((segment) =>
+        [segment.start, segment.end].flatMap((vertex) =>
+          vertex ? [vertex.key] : [],
+        ),
+      ),
+    );
+    for (const key of keys) {
+      const other = loopByVertexKey.get(key);
+      if (other !== undefined) {
+        throw new Error(
+          `Region ${region.regionId} loops ${other} and ${loop.loopId} share boundary vertex ${key}; profiles with point-touching loops are not yet supported by the OCC profile builder.`,
+        );
+      }
+      loopByVertexKey.set(key, loop.loopId);
     }
   }
 }
@@ -1485,6 +900,7 @@ export function buildRegionProfileFace(
   const [outerLoop] = outerLoops;
 
   assertLoopCanBuildProfile(snapshotSketch.sketch, region, outerLoop);
+  assertLoopsShareNoBoundaryVertex(region);
 
   const plane = snapshotSketch.plane;
   const projectedReferences =
@@ -1494,7 +910,6 @@ export function buildRegionProfileFace(
   const provenance: MutableSketchProfileProvenance = {
     edges: new Map(),
     vertices: new Map(),
-    unsupportedSources: [],
   };
   const resolveSegmentEdgeKey = createRegionSegmentEdgeKeyResolver(
     region.loops.filter(
@@ -1635,7 +1050,6 @@ export function buildRegionProfileWire(
   const provenance: MutableSketchProfileProvenance = {
     edges: new Map(),
     vertices: new Map(),
-    unsupportedSources: [],
   };
 
   try {
@@ -1714,7 +1128,7 @@ function assertOpenCurveSegmentsFormChain(
   for (const segment of segments) {
     for (const position of [segment.start, segment.end]) {
       const endpoint = endpoints.find((candidate) =>
-        arePointsCoincident(candidate.position, position),
+        areOpenCurveEndpointsCoincident(candidate.position, position),
       );
       if (endpoint) {
         endpoint.degree += 1;
@@ -1763,8 +1177,8 @@ function orderConnectedOpenCurveSegments(
         !segment.closed &&
         endpoints.some(
           (endpoint) =>
-            arePointsCoincident(endpoint, segment.start) ||
-            arePointsCoincident(endpoint, segment.end),
+            areOpenCurveEndpointsCoincident(endpoint, segment.start) ||
+            areOpenCurveEndpointsCoincident(endpoint, segment.end),
         ),
     );
 
@@ -1827,7 +1241,6 @@ export function buildOpenSketchCurveWire(
   const provenance: MutableSketchProfileProvenance = {
     edges: new Map(),
     vertices: new Map(),
-    unsupportedSources: [],
   };
   const vertexPool: Array<{ position: Vec3; vertex: OccProfileVertex }> = [];
   const resolveProfileVertex: ProfileVertexResolver = (position, sourceKey) => {
@@ -1839,7 +1252,7 @@ export function buildOpenSketchCurveWire(
     }
 
     const coincident = vertexPool.find((entry) =>
-      arePointsCoincident(entry.position, position),
+      areOpenCurveEndpointsCoincident(entry.position, position),
     );
     if (coincident) {
       if (sourceKey) {

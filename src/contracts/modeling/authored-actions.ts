@@ -13,10 +13,7 @@ export interface AuthoredActionIdentity {
   documentId: DocumentId;
   context: AuthoredActionContext;
 }
-export type AuthoredActionSketch = Omit<
-  AuthoredSketchRecord,
-  "regionSlots" | "definition"
-> & {
+export type AuthoredActionSketch = Omit<AuthoredSketchRecord, "definition"> & {
   definition: AuthoredSketchRecord["definition"];
 };
 export type AuthoredActionDocument = Omit<

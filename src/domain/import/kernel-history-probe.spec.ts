@@ -1,3 +1,4 @@
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { err, ok } from "neverthrow";
 import { expect, test } from "vitest";
 
@@ -30,6 +31,7 @@ function makeSnapshot(revisionId: RevisionId, bodies: readonly { bodyId: BodyId 
     document: {
       documentId: "doc_probe" as DocumentId,
       revisionId,
+      settings: { modelingTolerance: 1e-3, angularToleranceRadians: 1e-4 },
       bodies: bodies.map((body) => {
         const derived = deriveKernelTopologySignaturesFromExactBrepPayload(
           makeExactPayload(body.bodyId),
@@ -69,6 +71,7 @@ function createRevisionAgnosticRealSolver(): SketchSolverAdapter {
     get(_target, property) {
       return (request: { documentId: DocumentId; revisionId: RevisionId }) => {
         const adapter = new SketchConstraintSolverAdapter({
+          neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
           documentId: request.documentId,
           revisionId: request.revisionId,
         });

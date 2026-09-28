@@ -21,7 +21,6 @@ import type {
 } from "@/contracts/modeling/schema";
 import type { SketchPlaneFrame, SketchPlaneKey } from "@/contracts/shared/sketch-plane";
 import type { SketchPointId } from "@/contracts/shared/ids";
-import type { SketchSolverAdapter } from "@/contracts/solver/adapter";
 import type {
   OnshapeFeatureNode,
   OnshapeSolvedSketch,
@@ -33,6 +32,7 @@ import {
   resolveOnshapeOpenSketchCurveProfiles,
   type DeferredOnshapeProfile,
   type DeferredOpenSketchCurveProfile,
+  type ImportProfileVerifier,
   type ProfileResolutionDiagnostic,
 } from "@/domain/import/onshape/profile-resolver";
 import type { TopologyResolutionBinding } from "@/domain/import/onshape/topology-reference-resolver";
@@ -181,8 +181,8 @@ export interface ExtrudePlanInput {
   priorBodyProducingFeatureIds: readonly string[];
   /** Unique target lineage inferred from rollback body identity for default scope. */
   inferredDefaultScopeFeatureIds?: readonly string[];
-  /** Region derivation boundary used to verify sketch profiles. */
-  sketchSolver: Pick<SketchSolverAdapter, "deriveSketchRegions">;
+  /** Region derivation boundary and target-document tolerance used to verify sketch profiles. */
+  profileVerifier: ImportProfileVerifier;
 }
 
 function findParameter(
@@ -648,7 +648,7 @@ async function planSurfaceExtrude(
     featureLabel: feature.name ?? feature.featureId,
     solvedSketchesByFeatureId: input.solvedSketchesByFeatureId,
     referencedSketchesByFeatureId: input.referencedSketchesByFeatureId,
-    sketchSolver: input.sketchSolver,
+    profileVerifier: input.profileVerifier,
   });
   diagnostics.push(...profileResolution.diagnostics);
   if (profileResolution.tier === "unresolved") {
@@ -721,7 +721,7 @@ export async function planExtrudeFeature(
     profileEvidence: input.profileEvidence,
     solvedSketchesByFeatureId: input.solvedSketchesByFeatureId,
     referencedSketchesByFeatureId: input.referencedSketchesByFeatureId,
-    sketchSolver: input.sketchSolver,
+    profileVerifier: input.profileVerifier,
   });
   diagnostics.push(...profileResolution.diagnostics);
   if (profileResolution.tier === "unresolved") {

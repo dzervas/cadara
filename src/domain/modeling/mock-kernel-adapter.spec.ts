@@ -1,3 +1,4 @@
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { test, expect } from "vitest";
 import { createAuthoredModelDocumentFromSnapshot } from "@/contracts/modeling/authored-document";
 import { MockKernelAdapter } from "./mock-kernel-adapter";
@@ -262,6 +263,8 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
           tolerances: structuredClone(request.tolerances),
         });
         return new MockSketchSolverAdapter({
+          neutralCurveQueries:
+            createCertifiedNeutralCurveQueryCapabilityForTest(),
           documentId: request.documentId,
           revisionId: request.revisionId,
         }).projectExternalReferences(request);
@@ -276,6 +279,8 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
           tolerances: structuredClone(request.tolerances),
         });
         return new MockSketchSolverAdapter({
+          neutralCurveQueries:
+            createCertifiedNeutralCurveQueryCapabilityForTest(),
           documentId: request.documentId,
           revisionId: request.revisionId,
         }).validateSketch(request);
@@ -290,6 +295,8 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
           tolerances: structuredClone(request.tolerances),
         });
         return new MockSketchSolverAdapter({
+          neutralCurveQueries:
+            createCertifiedNeutralCurveQueryCapabilityForTest(),
           documentId: request.documentId,
           revisionId: request.revisionId,
         }).solveSketch(request);
@@ -299,6 +306,8 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
         request: Parameters<MockSketchSolverAdapter["deriveSketchRegions"]>[0],
       ) {
         return new MockSketchSolverAdapter({
+          neutralCurveQueries:
+            createCertifiedNeutralCurveQueryCapabilityForTest(),
           documentId: request.documentId,
           revisionId: request.revisionId,
         }).deriveSketchRegions(request);
@@ -327,7 +336,9 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
       angleRadians: 0.003,
       minimumSegmentLength: 0.025,
     };
-    const solverAdapter = new CapturingSolverAdapter();
+    const solverAdapter = new CapturingSolverAdapter({
+      neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+    });
     const adapter = new CapturingMockKernelAdapter({ solverAdapter });
     const initial = await adapter.getDocumentSnapshot({
       contractVersion: "modeling-contract/v1alpha1",
@@ -437,7 +448,9 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
       ["solve", expectedAuthored],
     ]);
 
-    const freshSolver = new CapturingSolverAdapter();
+    const freshSolver = new CapturingSolverAdapter({
+      neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+    });
     const freshAdapter = new CapturingMockKernelAdapter({
       solverAdapter: freshSolver,
     });
@@ -1175,7 +1188,10 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
     }
 
     const adapter = new MockKernelAdapter({
-      solverAdapter: new ProjectingSolverAdapter(),
+      solverAdapter: new ProjectingSolverAdapter({
+        neutralCurveQueries:
+          createCertifiedNeutralCurveQueryCapabilityForTest(),
+      }),
     });
     const before = await adapter.getDocumentSnapshot({
       contractVersion: "modeling-contract/v1alpha1",
@@ -1405,6 +1421,8 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
     ).toBeTruthy();
     const replacementAdapter = new MockKernelAdapter({
       solverAdapter: new MockSketchSolverAdapter({
+        neutralCurveQueries:
+          createCertifiedNeutralCurveQueryCapabilityForTest(),
         documentId: "doc_workspace",
         revisionId: afterSketchDelete.snapshot.document.revisionId,
       }),
@@ -3859,7 +3877,9 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
       }
     }
 
-    const solverAdapter = new VariableRebuildSolverAdapter();
+    const solverAdapter = new VariableRebuildSolverAdapter({
+      neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+    });
     const adapter = new MockKernelAdapter({ solverAdapter });
     const imported = await adapter.exportAuthoredModelDocument("doc_workspace");
     const variableId = "variable_import_width" as const;
@@ -4485,4 +4505,87 @@ test("mock kernel delegates neutral curve queries to the kernel-free certifier",
     joins: [{ realization: "declaredEnds", position: [0.5, 0] }],
     points: [],
   });
+});
+
+// Seam: the mock kernel threads document settings.modelingTolerance into
+// every region query on bootstrap, restore and commit (its own queries).
+test("mock kernel bootstrap, restore and commit reach the queries with each document's modelingTolerance", async () => {
+  class RecordingMockKernelAdapter extends MockKernelAdapter {
+    readonly tolerances: number[] = [];
+    override async queryNeutralCurves(
+      request: Parameters<MockKernelAdapter["queryNeutralCurves"]>[0],
+    ) {
+      this.tolerances.push(request.modelingTolerance);
+      return super.queryNeutralCurves(request);
+    }
+    override async queryNeutralCurveSelfIntersections(
+      request: Parameters<
+        MockKernelAdapter["queryNeutralCurveSelfIntersections"]
+      >[0],
+    ) {
+      this.tolerances.push(request.modelingTolerance);
+      return super.queryNeutralCurveSelfIntersections(request);
+    }
+    override async queryNeutralCurveJoin(
+      request: Parameters<MockKernelAdapter["queryNeutralCurveJoin"]>[0],
+    ) {
+      this.tolerances.push(request.modelingTolerance);
+      return super.queryNeutralCurveJoin(request);
+    }
+  }
+  const adapter = new RecordingMockKernelAdapter();
+  const exported = await adapter.exportAuthoredModelDocument("doc_workspace");
+  expect(
+    new Set(adapter.tolerances),
+    "Bootstrap derives regions at the bootstrap document settings.",
+  ).toEqual(new Set([exported.settings.modelingTolerance]));
+
+  const restoredTolerance = 0.02;
+  expect(restoredTolerance).not.toBe(exported.settings.modelingTolerance);
+  adapter.tolerances.length = 0;
+  await adapter.restoreAuthoredModelDocument({
+    ...exported,
+    settings: { ...exported.settings, modelingTolerance: restoredTolerance },
+  });
+  expect(adapter.tolerances.length).toBeGreaterThan(0);
+  expect(
+    new Set(adapter.tolerances),
+    "Restore derives regions at the restored document's settings.",
+  ).toEqual(new Set([restoredTolerance]));
+
+  adapter.tolerances.length = 0;
+  const sketch = exported.sketches[0]!;
+  const snapshot = await adapter.getDocumentSnapshot({
+    contractVersion: "modeling-contract/v1alpha1",
+    documentId: "doc_workspace",
+  });
+  await adapter.commitSketch({
+    contractVersion: "modeling-contract/v1alpha1",
+    documentId: "doc_workspace",
+    baseRevisionId: snapshot.snapshot.document.revisionId,
+    solverCorrelation: {
+      requestId: "request_mock_tolerance_commit",
+      projectionRequestId: "request_mock_tolerance_commit:project",
+      validationRequestId: "request_mock_tolerance_commit:validate",
+      solveRequestId: "request_mock_tolerance_commit:solve",
+      regionRequestId: "request_mock_tolerance_commit:regions",
+    },
+    sketchId: sketch.sketchId,
+    sketchLabel: sketch.label,
+    plane: sketch.plane,
+    // Moved geometry: identical requests would be answered from the owner's
+    // exact query cache without reaching the capability.
+    definition: {
+      ...sketch.definition,
+      points: sketch.definition.points.map((point) => ({
+        ...point,
+        position: [point.position[0] + 1, point.position[1]] as const,
+      })),
+    },
+  });
+  expect(adapter.tolerances.length).toBeGreaterThan(0);
+  expect(
+    new Set(adapter.tolerances),
+    "Commit derives regions at the active document's settings.",
+  ).toEqual(new Set([restoredTolerance]));
 });

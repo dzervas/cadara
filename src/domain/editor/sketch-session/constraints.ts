@@ -600,15 +600,14 @@ export function patchSketchDimensionAnnotationPlacement(
 
   const nextDefinition = nextFullDefinition;
 
-  return withLiveSolveBasis(
-    {
-      ...session,
-      definition: nextDefinition,
-      toolPresentation: null,
-      commitRequest: rebuildSessionCommitRequest(session, nextDefinition),
-    },
-    nextDefinition,
-  );
+  // A label placement never affects the solve or region records (T09b review
+  // A6(a)), so the live solve basis and the published live regions are kept.
+  return {
+    ...session,
+    definition: nextDefinition,
+    toolPresentation: null,
+    commitRequest: rebuildSessionCommitRequest(session, nextDefinition),
+  };
 }
 
 export function solveCommittedConstraintDefinition(

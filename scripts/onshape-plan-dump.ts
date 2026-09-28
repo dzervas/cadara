@@ -22,6 +22,8 @@ import {
   IMPORT_VERIFICATION_REVISION_ID,
 } from "../src/domain/import/onshape/profile-resolver.ts";
 import { SketchConstraintSolverAdapter } from "../src/domain/solver/sketch-constraint-solver-adapter.ts";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "../src/domain/modeling/neutral-curve-certification/query.ts";
+import { OCC_KERNEL_SETTINGS } from "../src/domain/modeling/opencascade-kernel-seed.ts";
 import { normalizeOnshapeTopologySignature } from "../src/domain/import/onshape/topology-signature-normalizer.ts";
 import {
   computeCaptureFrameToWorld,
@@ -291,6 +293,9 @@ function createLogicLaneReviewCapabilities(
       async reconstructMeshToBrep() {
         throw new Error("Plan review does not reconstruct geometry.");
       },
+      neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+      modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+      angularToleranceRadians: OCC_KERNEL_SETTINGS.angularToleranceRadians,
     },
     sketch: {
       async convertVectorToSketch() {
@@ -383,10 +388,16 @@ async function main() {
   const plan = await planStudioFidelity(read, {
     captureFormatVersion: bundle.formatVersion,
     historyProbeAvailable: true,
-    sketchSolver: new SketchConstraintSolverAdapter({
-      documentId: IMPORT_VERIFICATION_DOCUMENT_ID,
-      revisionId: IMPORT_VERIFICATION_REVISION_ID,
-    }),
+    profileVerifier: {
+      sketchSolver: new SketchConstraintSolverAdapter({
+        documentId: IMPORT_VERIFICATION_DOCUMENT_ID,
+        revisionId: IMPORT_VERIFICATION_REVISION_ID,
+        neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+      }),
+      // A fresh default document is the import target.
+      modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+      angularToleranceRadians: OCC_KERNEL_SETTINGS.angularToleranceRadians,
+    },
   });
   console.log(`formatVersion: ${bundle.formatVersion}`);
   console.log(`studio: ${read.studio.name} (${read.studio.elementId})`);

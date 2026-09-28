@@ -3,6 +3,7 @@ import type {
   FeatureDefinition,
   SketchSnapshotRecord,
 } from "@/contracts/modeling/schema";
+import { lineLoopSegmentsForTest } from "@/contracts/sketch/region-record.fixtures";
 import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION } from "@/contracts/modeling/advanced-solid";
 import type {
   BodyId,
@@ -259,6 +260,7 @@ function createRectangleSketch(
     ownerSketchId: sketchId,
     ownerBodyId: null,
     regionId,
+    signature: `hand-built ${regionId}`,
     label: regionId,
     target: { kind: "region", sketchId, regionId },
     sourceSketch: { kind: "sketch", sketchId },
@@ -267,11 +269,13 @@ function createRectangleSketch(
         loopId: `region_loop_${sketchId}_outer` as const,
         role: "outer",
         orientation: "counterClockwise",
-        segments: entities.map((entity, index) => ({
-          source: { kind: "entity" as const, entityId: entity.entityId },
-          startPointId: points[index]!.id,
-          endPointId: points[(index + 1) % points.length]!.id,
-        })),
+        segments: lineLoopSegmentsForTest(
+          points.map((point) => ({
+            pointId: point.id,
+            position: point.position,
+          })),
+          entities.map((entity) => entity.entityId),
+        ),
         boundaryPointIds: points.map((point) => point.id),
         isClosed: true,
       },
@@ -411,6 +415,7 @@ function createTriangleTopologyEdit(
     ownerSketchId: sketchId,
     ownerBodyId: null,
     regionId,
+    signature: `hand-built ${regionId}`,
     label: regionId,
     target: { kind: "region", sketchId, regionId },
     sourceSketch: { kind: "sketch", sketchId },
@@ -419,11 +424,13 @@ function createTriangleTopologyEdit(
         loopId: `region_loop_${sketchId}_outer` as const,
         role: "outer",
         orientation: "counterClockwise",
-        segments: entities.map((entity, index) => ({
-          source: { kind: "entity" as const, entityId: entity.entityId },
-          startPointId: points[index]!.id,
-          endPointId: points[(index + 1) % points.length]!.id,
-        })),
+        segments: lineLoopSegmentsForTest(
+          points.map((point) => ({
+            pointId: point.id,
+            position: point.position,
+          })),
+          entities.map((entity) => entity.entityId),
+        ),
         boundaryPointIds: points.map((point) => point.id),
         isClosed: true,
       },

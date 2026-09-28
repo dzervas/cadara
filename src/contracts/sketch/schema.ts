@@ -25,6 +25,7 @@ import type {
 } from "@/contracts/shared/references";
 import type { SketchPlaneSupportRef } from "@/contracts/shared/sketch-plane";
 import type { ReferenceImageOperationState } from "@/contracts/reference-image/schema";
+import type { NeutralCurvePointWitness } from "@/contracts/modeling/neutral-curve-query";
 import type {
   SplineClosure,
   SplineGeometry,
@@ -1327,28 +1328,72 @@ export interface ProjectedSketchGeometryRef {
   geometryId: ProjectedGeometryId;
 }
 
+/** Boundary entity or projected geometry that owns one region boundary branch. */
+export type RegionBoundarySource =
+  | { kind: "entity"; entityId: SketchEntityId }
+  | { kind: "projectedGeometry"; reference: ProjectedSketchGeometryRef };
+
+/** Stable source branch: one line/arc/circle, or one neutral cubic span. */
+export interface RegionBoundaryBranch {
+  source: RegionBoundarySource;
+  /** "whole" | `${startOccurrenceId}>${endOccurrenceId}` (authored span) | `span${index}` (projected neutral span). */
+  spanId: string;
+}
+
+/** Verified capability witness of one boundary intersection vertex. */
+export interface RegionIntersectionWitness {
+  first: {
+    branch: RegionBoundaryBranch;
+    parameter: number;
+    parameterBounds: readonly [number, number];
+  };
+  /** Equal branch for a cubic self-intersection (two distinct ports). */
+  second: {
+    branch: RegionBoundaryBranch;
+    parameter: number;
+    parameterBounds: readonly [number, number];
+  };
+  classification: "crossing" | "tangent" | "unclassified";
+  proof: NeutralCurvePointWitness["proof"]["kind"] | "overlapEndpoint";
+}
+
+/** Topological region boundary vertex: a declared join or a verified intersection. */
+export type RegionBoundaryVertex =
+  | {
+      kind: "declaredJoin";
+      /** Canonical topological key: sorted join-class member keys. */
+      key: string;
+      pointIds: SketchPointId[];
+      /** This curve end's own authored point, if the end is an authored endpoint (null on a T-junction host). */
+      portPointId: SketchPointId | null;
+      /** Representative used for display/OCC realization; never identity. */
+      position: SketchPoint2D;
+      ballRadius: number;
+    }
+  | {
+      kind: "verifiedIntersection";
+      /** Canonical family key; no coordinates or floating parameters. */
+      key: string;
+      witness: RegionIntersectionWitness;
+      position: SketchPoint2D;
+    };
+
 /**
  * Region boundary segment record in traversal order around one loop.
  */
 export interface RegionBoundarySegmentRecord {
-  /** Boundary entity or projected geometry used for this loop segment. */
-  source:
-    | { kind: "entity"; entityId: SketchEntityId }
-    | { kind: "projectedGeometry"; reference: ProjectedSketchGeometryRef };
-  /** Additional authored/projected sources exactly coincident with this span. */
-  coincidentSources?: Array<RegionBoundarySegmentRecord["source"]>;
-  /** Boundary start point when the segment starts at an authored point. */
-  startPointId: SketchPointId | null;
-  /** Boundary end point when the segment ends at an authored point. */
-  endPointId: SketchPointId | null;
-  /** Traversal direction relative to the source geometry's live-derived orientation. */
-  traversalDirection?: "forward" | "reverse";
-  /** Stable ordinal of this source's split piece in its source-curve order. */
-  sourceSegmentOrdinal?: number;
-  /** Solved boundary start when an arrangement intersection is not an authored point. */
-  startPosition?: SketchPoint2D;
-  /** Solved boundary end when an arrangement intersection is not an authored point. */
-  endPosition?: SketchPoint2D;
+  branch: RegionBoundaryBranch;
+  /** Branches exactly overlapping this sub-edge (verified overlap, U6). */
+  coincidentBranches?: RegionBoundaryBranch[];
+  /** Increasing interval in the branch's neutral source units (circle: radians in the seam-0 winding; may end past 2π). */
+  sourceParameterInterval: readonly [number, number];
+  /** Relative to increasing source parameter. */
+  traversalDirection: "forward" | "reverse";
+  /** Traversal-order ends; both null only for an unsplit closed branch (a full circle). */
+  start: RegionBoundaryVertex | null;
+  end: RegionBoundaryVertex | null;
+  /** Index among the branch's sub-edges in parameter order; OCC provenance naming only, never identity. */
+  sourceSegmentOrdinal: number;
 }
 
 /**
@@ -1363,7 +1408,7 @@ export interface RegionLoopRecord {
   orientation: "clockwise" | "counterClockwise";
   /** Ordered boundary segments around the loop perimeter. */
   segments: RegionBoundarySegmentRecord[];
-  /** Ordered authored boundary points visited by the loop when available. */
+  /** `portPointId` of each segment's start, when present (consumer polygons until T10). */
   boundaryPointIds: SketchPointId[];
   /** False when the producer is reporting an incomplete loop candidate. */
   isClosed: boolean;
@@ -1395,8 +1440,10 @@ export interface SolvedSketchSnapshot {
  * The editor must never author or persist these as primary sketch input.
  */
 export interface RegionRecord extends OwnershipRecord {
-  /** Durable derived region identity owned by the solver/kernel layer. */
+  /** Durable derived region identity: the SHA-256 identity of `signature`. */
   regionId: RegionId;
+  /** Canonical topological signature of the region's boundary loops. */
+  signature: string;
   /** Human-readable label owned by the solver/kernel producer. */
   label: string;
   /** Durable region reference for downstream feature authoring. */

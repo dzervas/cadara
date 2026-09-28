@@ -17,6 +17,7 @@ function makeSnapshot() {
     document: {
       documentId: "doc_import_bake" as DocumentId,
       revisionId: "rev_import_bake" as RevisionId,
+      settings: { modelingTolerance: 1e-3, angularToleranceRadians: 1e-4 },
     },
   } as never;
 }
@@ -129,4 +130,34 @@ test("bakeGeometry rejects unsupported geometry formats with a structured capabi
     code: "import-capability-unsupported-format",
     format: "step",
   } satisfies Partial<ImportCapabilityError>);
+});
+
+// Lane: logic (docs/testing.md). Seam: the exported capability factory hands
+// import verification the modeling service's kernel queries and the target
+// document's own tolerances (T09e review A8).
+test("createImportCapabilities fills region verification from the modeling service and the target document", () => {
+  const neutralCurveQueries = { name: "target kernel queries" };
+  const snapshot = {
+    document: {
+      documentId: "doc_import_tolerance" as DocumentId,
+      revisionId: "rev_import_tolerance" as RevisionId,
+      settings: { modelingTolerance: 0.02, angularToleranceRadians: 3e-4 },
+    },
+  } as never;
+  const capabilities = createImportCapabilities(
+    { neutralCurveQueries } as never,
+    snapshot,
+  );
+
+  expect(
+    capabilities.modeling.neutralCurveQueries,
+    "Verification queries are the modeling service's kernel queries.",
+  ).toBe(neutralCurveQueries);
+  expect(
+    {
+      modelingTolerance: capabilities.modeling.modelingTolerance,
+      angularToleranceRadians: capabilities.modeling.angularToleranceRadians,
+    },
+    "Verification tolerances are the target document's settings.",
+  ).toEqual({ modelingTolerance: 0.02, angularToleranceRadians: 3e-4 });
 });
