@@ -68,6 +68,7 @@ import {
   CORNER_MATRIX_SOLVE_TOLERANCES,
   cornerMatrixRows,
   createNativeOffsetChainHarness,
+  splineSplineCornerRows,
   type AcceptedPair,
   type Authored,
   type EndpointSnaps,
@@ -100,7 +101,11 @@ import {
   approximateSplineOffset,
   type SplineOffsetCubicSpan,
 } from "@/contracts/sketch/spline-offset-geometry";
-import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
+import {
+  createCertifiedCubicTubeChain,
+  createCertifiedCubicTubeChainWithBudgetObserverForTest,
+  createCertifiedCubicTubeChainWithLowerBudgetForTest,
+} from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
 import {
   createCertifiedNeutralCurveRequestQuery,
   createCertifiedNeutralCurveRequestQueryWithBudgetObserverForTest,
@@ -3138,6 +3143,57 @@ describe("declared multi-piece tube stability (L1b, bounded helper, not live)", 
   }, 120_000);
 });
 
+/**
+ * Math review row E: a fabricated honest one-leaf tube (τ = 1e-3). Straight
+ * source S(t) = (x0 + μt, 0), true offset O = S + (0, d) exactly, so
+ * O′ = (μ, 0); emitted E = O + (A·T₃(2t − 1), k(t − ½)²), so |E − O| ≤ ε ≈
+ * 4e-4, and E crosses itself at t = ½ ± s inside the part a trim near x1 − d
+ * keeps (T08b-a-math-review-evidence/one-leaf-loop.result.json).
+ */
+function rowELoopSpan() {
+  const [mu, A, k, d, x0, x1] = [2e-3, 4e-4, 1e-6, 9.6e-4, 0.499, 0.501];
+  // Bernstein poles of the cubic polynomial Σ aᵢ tⁱ.
+  const bernstein = (a: readonly [number, number, number, number]) => [
+    a[0],
+    a[0] + a[1] / 3,
+    a[0] + (2 * a[1]) / 3 + a[2] / 3,
+    a[0] + a[1] + a[2] + a[3],
+  ];
+  const sx = bernstein([x0, mu, 0, 0]);
+  // A·T₃(2t − 1) = A(−1 + 18t − 48t² + 32t³); k(t − ½)² = k(¼ − t + t²).
+  const ax = bernstein([-A, 18 * A, -48 * A, 32 * A]);
+  const by = bernstein([k / 4, -k, k, 0]);
+  const poles = sx.map(
+    (x, index) => [x + ax[index]!, d + by[index]!] as const,
+  ) as unknown as SplinePoles;
+  const span: SplineOffsetCubicSpan = {
+    source: {
+      splineId: "loop",
+      spanIndex: 0,
+      startPointId: "pS",
+      endPointId: "pJ",
+      startOccurrenceId: "oS",
+      endOccurrenceId: "oJ",
+    },
+    sourceInterval: [0, 1],
+    sourceLocalInterval: [0, 1],
+    poles,
+    differential: { sourceInterval: [0, 1], poles: ZERO_POLES },
+    certifiedError: Math.sqrt(A * A + (k / 4) ** 2) * (1 + 1e-9) + 1e-15,
+    reference: {
+      // O′ = (μ, 0) exactly, in an outward box.
+      derivative: [
+        [mu * (1 - 1e-12), mu * (1 + 1e-12)],
+        [0, 0],
+      ],
+      sourcePoles: sx.map((x) => [x, 0] as const) as unknown as SplinePoles,
+      distance: d,
+    },
+  };
+  const s = Math.sqrt((6 * A - mu) / (32 * A));
+  return { span, poles, d, x1, s };
+}
+
 describe("T08b-a capacity: joint queries only on one whole-request meter (M0/M7)", () => {
   const TOLERANCE = 1e-3;
   const pieceCertifier = createCertifiedCubicTubeChain();
@@ -3177,7 +3233,9 @@ describe("T08b-a capacity: joint queries only on one whole-request meter (M0/M7)
     );
 
   // Design §1.5 verdicts at 5fe2b17d (T08b-a-evidence/corner-matrix-before);
-  // only S2pt changes (the removed cubic self query rejected it).
+  // only S2pt changes (the removed cubic self query rejected it), and since
+  // T08b-b SS-60 d = 0.01/0.2 verify through the S2 graph trim (formerly
+  // trim-pair-unsupported; T08b-b-evidence/corner-matrix-{before,after}).
   const MATRIX_VERDICTS: Record<string, string> = {
     "S1 0.01": "verified",
     "S1 -0.01": "verified",
@@ -3195,9 +3253,9 @@ describe("T08b-a capacity: joint queries only on one whole-request meter (M0/M7)
     "SL-tiny -0.01": codes.jointUnsatisfied,
     "LS-90 0.01": "verified",
     "LS-90 -0.01": codes.splineJointUnsupported,
-    "SS-60 0.01": `${codes.topologyUncertain} / trim-pair-unsupported`,
+    "SS-60 0.01": "verified",
     "SS-60 -0.01": codes.splineJointUnsupported,
-    "SS-60 0.2": `${codes.topologyUncertain} / trim-pair-unsupported`,
+    "SS-60 0.2": "verified",
     "SS-tiny 0.01": codes.jointUnsatisfied,
     "SS-tiny -0.01": codes.jointUnsatisfied,
     "LL-90 0.01": "verified",
@@ -3207,7 +3265,7 @@ describe("T08b-a capacity: joint queries only on one whole-request meter (M0/M7)
     "S2pt 0.01": "verified",
   };
 
-  test("native corner matrix: every row keeps its verdict, S2pt now verifies, and each request is sized by its joints", () => {
+  test("native corner matrix: every row keeps its verdict, S2pt and SS-60 (d > 0) now verify, and each request is sized by its joints", () => {
     const rows = cornerMatrixRows();
     expect(rows.map((row) => `${row.row} ${row.distance}`)).toEqual(
       Object.keys(MATRIX_VERDICTS),
@@ -3376,45 +3434,7 @@ describe("T08b-a capacity: joint queries only on one whole-request meter (M0/M7)
     // E = O + (A·T₃(2t − 1), k(t − ½)²), so |E − O| ≤ ε ≈ 4e-4, and E crosses
     // itself at t = ½ ± s. Without the gate the real certifier verifies this
     // non-simple chain (T08b-a-math-review-evidence/one-leaf-loop.result.json).
-    const [mu, A, k, d, x0, x1] = [2e-3, 4e-4, 1e-6, 9.6e-4, 0.499, 0.501];
-    // Bernstein poles of the cubic polynomial Σ aᵢ tⁱ.
-    const bernstein = (a: readonly [number, number, number, number]) => [
-      a[0],
-      a[0] + a[1] / 3,
-      a[0] + (2 * a[1]) / 3 + a[2] / 3,
-      a[0] + a[1] + a[2] + a[3],
-    ];
-    const sx = bernstein([x0, mu, 0, 0]);
-    // A·T₃(2t − 1) = A(−1 + 18t − 48t² + 32t³); k(t − ½)² = k(¼ − t + t²).
-    const ax = bernstein([-A, 18 * A, -48 * A, 32 * A]);
-    const by = bernstein([k / 4, -k, k, 0]);
-    const poles = sx.map(
-      (x, index) => [x + ax[index]!, d + by[index]!] as const,
-    ) as unknown as SplinePoles;
-    const span: SplineOffsetCubicSpan = {
-      source: {
-        splineId: "loop",
-        spanIndex: 0,
-        startPointId: "pS",
-        endPointId: "pJ",
-        startOccurrenceId: "oS",
-        endOccurrenceId: "oJ",
-      },
-      sourceInterval: [0, 1],
-      sourceLocalInterval: [0, 1],
-      poles,
-      differential: { sourceInterval: [0, 1], poles: ZERO_POLES },
-      certifiedError: Math.sqrt(A * A + (k / 4) ** 2) * (1 + 1e-9) + 1e-15,
-      reference: {
-        // O′ = (μ, 0) exactly, in an outward box.
-        derivative: [
-          [mu * (1 - 1e-12), mu * (1 + 1e-12)],
-          [0, 0],
-        ],
-        sourcePoles: sx.map((x) => [x, 0] as const) as unknown as SplinePoles,
-        distance: d,
-      },
-    };
+    const { span, poles, d, x1, s } = rowELoopSpan();
     const lineSource: readonly [Point, Point] = [
       [x1, 0],
       [x1, 1],
@@ -3441,7 +3461,6 @@ describe("T08b-a capacity: joint queries only on one whole-request meter (M0/M7)
           );
       return points[0]!;
     };
-    const s = Math.sqrt((6 * A - mu) / (32 * A));
     const [left, right] = [at(0.5 - s), at(0.5 + s)];
     expect(Math.hypot(left[0] - right[0], left[1] - right[1])).toBeLessThan(
       1e-12,
@@ -3624,4 +3643,431 @@ describe("T08b-a capacity: joint queries only on one whole-request meter (M0/M7)
       }
     },
   );
+});
+
+// Logic lane (docs/testing.md): the exported resolver → wrapper seam with the
+// real kernel-free request query and the real certifier, every chain authored
+// only by native tools (commit → solve → N2 → adapter). S2 terminal-leaf
+// cubic↔cubic graph trims under R_C′ (T08b-b). The full native C/R/SS-60 row
+// set, with meters and timings, is in T08b-b-evidence/native-s2.result.jsonl;
+// a representative subset is pinned here to keep the lane's runtime bounded
+// (each cubic↔cubic joint query costs ≈ 4 s).
+describe("T08b-b S2: native spline→spline graph trims under R_C′ (terminal leaves)", () => {
+  const TOLERANCE = 1e-3;
+  const pieceCertifier = createCertifiedCubicTubeChain();
+  const harness = createNativeOffsetChainHarness({
+    authoring: createNativeToolAuthoring("sketch_s2"),
+    query,
+    modelingTolerance: TOLERANCE,
+  });
+  const matrixHarness = createNativeOffsetChainHarness({
+    authoring: createNativeToolAuthoring("sketch_t08b"),
+    query,
+    modelingTolerance: TOLERANCE,
+    solveTolerances: CORNER_MATRIX_SOLVE_TOLERANCES,
+  });
+  type Chain = ReturnType<typeof harness.nativeChain>;
+  const splineRow = (label: string) => {
+    const row = splineSplineCornerRows().find(
+      (item) => `${item.row} ${item.distance}` === label,
+    );
+    if (!row) throw new Error(`no row ${label}`);
+    harness.resetSequence();
+    return harness.nativeChain(row.build(harness), row.distance);
+  };
+  const matrixRow = (label: string) => {
+    const row = cornerMatrixRows().find(
+      (item) => `${item.row} ${item.distance}` === label,
+    );
+    if (!row) throw new Error(`no row ${label}`);
+    matrixHarness.resetSequence();
+    return matrixHarness.nativeChain(row.build(matrixHarness), row.distance);
+  };
+  /** Flattened terminal leaves of the single joint (P's exit, Q's entry). */
+  const terminalLeaves = (chain: Chain) => {
+    const [first, second] = chain.declared.pieces;
+    if (first?.kind !== "derivedCubic" || second?.kind !== "derivedCubic")
+      throw new Error("spline→spline chain");
+    return [
+      first.reversed ? 0 : first.spans.length - 1,
+      first.spans.length + (second.reversed ? second.spans.length - 1 : 0),
+    ] as const;
+  };
+  /**
+   * Common native S2 positive: a direct coincident join between distinct
+   * IDs, exactly one real certifier call, the `graph-trim` record at the
+   * joint, every displacementBound ≤ τ (exactly τ on both graph leaves).
+   */
+  const expectVerifiedGraphTrim = (chain: Chain) => {
+    expect(chain.connectivity.joins.map((join) => join.kind)).toEqual([
+      "coincidentConstraint",
+    ]);
+    const join = chain.connectivity.joins[0]!;
+    if (join.kind !== "coincidentConstraint") throw new Error("coincidence");
+    expect(join.pointIds[0]).not.toBe(join.pointIds[1]);
+    const requests: PieceTubeChainRequest[] = [];
+    const result = certifyOffsetChainTubeStability(
+      harness.accepted(chain),
+      {
+        certifyPieceChain: (request) => {
+          requests.push(request);
+          return pieceCertifier.certifyPieceChain(request);
+        },
+      },
+      chain.declared,
+    );
+    if (!result.ok) throw new Error(`${result.code}: ${result.message}`);
+    expect(requests).toHaveLength(1);
+    const [first, second] = terminalLeaves(chain);
+    const graphTrims = result.certificate.joins.filter(
+      (item) => item.kind === "graph-trim",
+    );
+    expect(graphTrims).toEqual([
+      expect.objectContaining({
+        kind: "graph-trim",
+        jointIndex: 0,
+        first,
+        second,
+      }),
+    ]);
+    const [record] = graphTrims;
+    if (record?.kind !== "graph-trim") throw new Error("graph trim");
+    expect(record.separation).toBeGreaterThan(0);
+    for (const leaf of result.certificate.leaves)
+      expect(leaf.displacementBound).toBeLessThanOrEqual(TOLERANCE);
+    expect(result.certificate.leaves[first]!.displacementBound).toBe(TOLERANCE);
+    expect(result.certificate.leaves[second]!.displacementBound).toBe(
+      TOLERANCE,
+    );
+    return result;
+  };
+
+  test.each([
+    "C φ=1.571 0.01",
+    "C φ=0.500 0.2",
+    "C φ=0.050 0.2",
+    "R φ=0.5 -0.01",
+    "R φ=0.2 -0.2",
+  ])(
+    "native %s: the spline drawn from the other's end verifies as one graph trim",
+    (label) => {
+      const chain = splineRow(label);
+      const result = expectVerifiedGraphTrim(chain);
+      // R rows traverse the first spline backwards (its START is the join).
+      expect(chain.connectivity.pieces.map((piece) => piece.reversed)).toEqual([
+        label.startsWith("R"),
+        false,
+      ]);
+      expect(result.ok).toBe(true);
+    },
+    120_000,
+  );
+
+  test.each(["SS-60 0.01", "SS-60 0.2"])(
+    "native corner-matrix %s (formerly trim-pair-unsupported) verifies as one graph trim",
+    (label) => {
+      expectVerifiedGraphTrim(matrixRow(label));
+    },
+    120_000,
+  );
+
+  test("native NONZERO gap: Fix / Fix / Coincident on the spline ends is accepted in place and verifies (gap independence)", () => {
+    const SKETCH_ID = "sketch_s2" as SketchId;
+    const pointTool = (
+      definition: SketchDefinition,
+      toolId: SketchConstraintToolId,
+      pointIds: readonly SketchPointId[],
+    ): SketchDefinition => {
+      const step = harness.nextSequence();
+      const contribution = getSketchConstraintDefinition(
+        toolId,
+      ).createCommitContribution({
+        sequence: step,
+        selectedTargets: pointIds.map((pointId) => {
+          const record = resolveSketchConstraintTarget(
+            toolId,
+            definition,
+            createSketchPointRef(SKETCH_ID, pointId),
+          );
+          if (!record) throw new Error(`${toolId} rejected ${pointId}`);
+          return record;
+        }),
+        pointer: null,
+        value: null,
+        annotationPlacement: null,
+        createConstraintId: (suffix) => `constraint_${step}_${suffix}` as const,
+        createDimensionId: (suffix) => `dimension_${step}_${suffix}` as const,
+      });
+      const constraints = contribution.constraints ?? [];
+      return {
+        ...definition,
+        constraintIds: [
+          ...definition.constraintIds,
+          ...constraints.map((constraint) => constraint.constraintId),
+        ],
+        constraints: [...definition.constraints, ...constraints],
+      };
+    };
+    harness.resetSequence();
+    const row = splineSplineCornerRows().find(
+      (item) => `${item.row} ${item.distance}` === "C φ=0.500 0.01",
+    )!;
+    // The same C φ = 0.5 outgoing spline, started 3e-4/2e-4 off the arch end.
+    const [first, drawn] = row.build(harness);
+    const entity = drawn!.entities[0]!;
+    if (entity.kind !== "spline") throw new Error("spline");
+    const fitPoints = entity.pointOccurrences.map(
+      (occurrence) =>
+        drawn!.points.find((point) => point.pointId === occurrence.pointId)
+          ?.position ??
+        first!.points.find((point) => point.pointId === occurrence.pointId)!
+          .position,
+    );
+    const second = harness.drawSpline(
+      [first!],
+      [[2 + 3e-4, 2e-4] as const, ...fitPoints.slice(1)],
+    );
+    const end = harness.splineEnds(first!)[1];
+    const start = harness.splineEnds(second)[0];
+    const definition = pointTool(
+      pointTool(
+        pointTool(harness.sketch([first!, second]), "constraintFix", [end]),
+        "constraintFix",
+        [start],
+      ),
+      "constraintCoincident",
+      [end, start],
+    );
+    const solved = solveCommittedConstraintDefinition(
+      definition,
+      [],
+      SKETCH_DIRECT_EDIT_TOLERANCES,
+    );
+    if (!solved.solvedSnapshot) throw new Error("not accepted in place");
+    const pair = solved as AcceptedPair;
+    expect(pair.solvedSnapshot.status.solveState).toBe("solved");
+    expect(
+      pair.solvedSnapshot.constraintStatuses.map((status) => status.status),
+    ).toEqual(definition.constraints.map(() => "satisfied"));
+    const position = (pointId: SketchPointId) =>
+      pair.definition.points.find((point) => point.pointId === pointId)!
+        .position;
+    const [p, q] = [position(end), position(start)];
+    expect(Object.is(p[0], q[0]) && Object.is(p[1], q[1])).toBe(false);
+    expectVerifiedGraphTrim(harness.pairChain(pair, 0.01));
+  }, 120_000);
+
+  test("native fail-closed: C φ = 0.1 d = 0.01 is trim-existence-unproven (E-emit band) and C φ = π/2 d = 0.2 is trim-window-unproven (t ≥ 1)", () => {
+    for (const [label, inner, detail] of [
+      [
+        "C φ=0.100 0.01",
+        "trim-existence-unproven",
+        "cross once inside both terminal leaves",
+      ],
+      ["C φ=1.571 0.2", "trim-window-unproven", "(t ≥ 1)"],
+    ] as const) {
+      const chain = splineRow(label);
+      expect(chain.resolution.ok, label).toBe(true);
+      const result = certifyOffsetChainTubeStability(
+        harness.accepted(chain),
+        pieceCertifier,
+        chain.declared,
+      );
+      expect(result, label).toMatchObject({
+        ok: false,
+        code: codes.topologyUncertain,
+        message: expect.stringContaining(inner),
+      });
+      expect(result, label).toMatchObject({
+        message: expect.stringContaining(detail),
+      });
+    }
+  }, 120_000);
+
+  test("native convex sides fail in the resolver with splineJointUnsupported; the certifier is never reached", () => {
+    for (const chain of [splineRow("R φ=0.5 0.01"), matrixRow("SS-60 -0.01")])
+      expect(chain.resolution).toMatchObject({
+        ok: false,
+        code: codes.splineJointUnsupported,
+      });
+  }, 120_000);
+
+  // Native whole-request certifier literal via the wrapper (SS-60 d = 0.01),
+  // measured on this implementation (T08b-b-evidence/native-s2.result.jsonl).
+  // integerBits 722 of 16 384 (4.4 %) here; the same chain's resolver request
+  // uses 14 756 bits (90.1 %), which stays the binding meter.
+  const NATIVE_GRAPH_METER = {
+    operations: 245_596,
+    euclideanSteps: 68_158,
+    integerBits: 722,
+  };
+  test("native SS-60 d = 0.01 via the wrapper: exact whole-request literal on operations, Euclid and bits; count − 1 and staged caps inside S2 exhaust", () => {
+    const chain = matrixRow("SS-60 0.01");
+    const resolution = matrixHarness.accepted(chain);
+    let snapshot: ExactProofBudgetSnapshot | undefined;
+    expect(
+      certifyOffsetChainTubeStability(
+        resolution,
+        createCertifiedCubicTubeChainWithBudgetObserverForTest((value) => {
+          snapshot = value;
+        }),
+        chain.declared,
+      ).ok,
+    ).toBe(true);
+    expect({
+      operations: snapshot!.operations,
+      euclideanSteps: snapshot!.euclideanSteps,
+      integerBits: Math.max(
+        snapshot!.maxStoredBits,
+        snapshot!.maxPreProductBits,
+      ),
+    }).toEqual(NATIVE_GRAPH_METER);
+    const under = (limits: Record<string, number>) =>
+      certifyOffsetChainTubeStability(
+        resolution,
+        createCertifiedCubicTubeChainWithLowerBudgetForTest(limits),
+        chain.declared,
+      );
+    const exhausted = {
+      ok: false,
+      code: codes.topologyUncertain,
+      message:
+        "Tube stability is not certified: uncertain exact-query-proof-budget-exhausted: The deterministic exact-query arithmetic budget was exhausted.",
+      seedEntityId: chain.declared.pieces[0]!.seedEntityId,
+    };
+    for (const kind of [
+      "operations",
+      "euclideanSteps",
+      "integerBits",
+    ] as const) {
+      expect(under({ [kind]: NATIVE_GRAPH_METER[kind] }).ok, kind).toBe(true);
+      expect(under({ [kind]: NATIVE_GRAPH_METER[kind] - 1 }), kind).toEqual(
+        exhausted,
+      );
+    }
+    // Staged caps inside the S2 stage (stage probe: operations
+    // [42 843, 221 475], Euclid [10 230, 61 708]) and 0.92 inside the Lemma-C
+    // glue stage: exhaustion propagates. Load-bearing swallow killers: keep.
+    for (const kind of ["operations", "euclideanSteps"] as const)
+      for (const fraction of [0.5, 0.85, 0.92])
+        expect(
+          under({ [kind]: Math.floor(NATIVE_GRAPH_METER[kind] * fraction) }),
+          `${kind} ${fraction}`,
+        ).toEqual(exhausted);
+  }, 120_000);
+
+  test("row E, cubic↔cubic variant: the one-leaf looped cubic joined to a spline piece is still rejected by the wrapper's one-leaf gate", () => {
+    const { span, poles, d, x1, s } = rowELoopSpan();
+    // Second piece: a real-shaped straight vertical offset cubic x = x1 − d.
+    const up: SplineOffsetCubicSpan = {
+      source: {
+        splineId: "up",
+        spanIndex: 0,
+        startPointId: "pJ",
+        endPointId: "pE",
+        startOccurrenceId: "oJ2",
+        endOccurrenceId: "oE",
+      },
+      sourceInterval: [0, 1],
+      sourceLocalInterval: [0, 1],
+      poles: [0, 1, 2, 3].map(
+        (index) => [x1 - d, index / 3] as const,
+      ) as unknown as SplinePoles,
+      differential: { sourceInterval: [0, 1], poles: ZERO_POLES },
+      certifiedError: 1e-15,
+      reference: {
+        derivative: [
+          [0, 0],
+          [1 - 1e-12, 1 + 1e-12],
+        ],
+        sourcePoles: [0, 1, 2, 3].map(
+          (index) => [x1, index / 3] as const,
+        ) as unknown as SplinePoles,
+        distance: d,
+      },
+    };
+    const [loopSpans, upSpans] = [[span], [up]];
+    const pieces = [cubic("loop", loopSpans), cubic("up", upSpans)];
+    const resolution = resolved(makeOffsetChainFixture(pieces));
+    // Premise: the joint root is past the loop, so the trim keeps it.
+    expect(resolution.joints).toHaveLength(1);
+    expect(resolution.joints[0]!.firstParameterBounds[0]).toBeGreaterThan(
+      0.5 + s,
+    );
+    const at = (t: number) => {
+      let points: readonly Point[] = poles;
+      while (points.length > 1)
+        points = points
+          .slice(1)
+          .map(
+            (point, index): Point => [
+              points[index]![0] + t * (point[0] - points[index]![0]),
+              points[index]![1] + t * (point[1] - points[index]![1]),
+            ],
+          );
+      return points[0]!;
+    };
+    const [left, right] = [at(0.5 - s), at(0.5 + s)];
+    expect(Math.hypot(left[0] - right[0], left[1] - right[1])).toBeLessThan(
+      1e-12,
+    );
+    const declared: DeclaredOffsetChainPieces = {
+      ok: true,
+      connectivity: {
+        ok: true,
+        closed: false,
+        pieces: pieces.map(({ seedEntityId, reversed }) => ({
+          seedEntityId,
+          reversed,
+        })),
+        joins: [{ kind: "sharedPoint", pointId: "pJ" as SketchPointId }],
+      },
+      distance: d,
+      modelingTolerance: TOLERANCE,
+      pieces,
+      sources: [
+        { kind: "spline", distance: d, spans: loopSpans },
+        { kind: "spline", distance: d, spans: upSpans },
+      ],
+    };
+    expect(
+      certifyOffsetChainTubeStability(resolution, pieceCertifier, declared),
+    ).toEqual({
+      ok: false,
+      code: codes.topologyStabilityUnsupported,
+      message: expect.stringContaining("one-leaf spline piece"),
+      seedEntityId: id("loop"),
+    });
+    // Behind the gate, the same request's S2 G1 cone rejects the looped
+    // emitted leaf (its hodograph is not e-positive); informative only.
+    expect(
+      pieceCertifier.certifyPieceChain({
+        modelingTolerance: TOLERANCE,
+        closed: false,
+        distance: d,
+        pieces: [loopSpans, upSpans].map((spans) => ({
+          kind: "cubic" as const,
+          reversed: false,
+          tubes: spans.map((item) => ({
+            poles: item.poles,
+            certifiedError: item.certifiedError,
+            reference: item.reference,
+            source: item.source,
+            sourceLocalInterval: item.sourceLocalInterval,
+            queryDomain: item.sourceInterval,
+          })),
+        })),
+        trims: [
+          {
+            jointIndex: 0,
+            firstParameterBounds: resolution.joints[0]!.firstParameterBounds,
+            secondParameterBounds: resolution.joints[0]!.secondParameterBounds,
+          },
+        ],
+      }),
+    ).toMatchObject({
+      code: "trim-window-unproven",
+      message: expect.stringContaining("(G1)"),
+    });
+  }, 120_000);
 });

@@ -259,6 +259,55 @@ export interface CornerMatrixRow {
 }
 
 /**
+ * The S2 design §7 native spline→spline rows (τ = 1e-3), built exactly as the
+ * design probe builds them: `C` draws the second spline from the arch's end
+ * (endpoint snap ⇒ a direct coincidence between distinct IDs) at a left turn
+ * φ; `R` authors the arch backwards so its START is the join (the first piece
+ * is traversed reversed). Rows are labelled `C φ=<φ to 3 places>` / `R φ=<φ>`.
+ */
+export function splineSplineCornerRows(): readonly CornerMatrixRow[] {
+  const rotate = (vector: Vector, angle: number): Vector => [
+    vector[0] * Math.cos(angle) - vector[1] * Math.sin(angle),
+    vector[0] * Math.sin(angle) + vector[1] * Math.cos(angle),
+  ];
+  const length = Math.hypot(1, -0.1);
+  const archEnd: Vector = [1 / length, -0.1 / length];
+  const outgoing = (phi: number): readonly Vector[] => {
+    const first = rotate(archEnd, phi);
+    const second = rotate(archEnd, phi + 0.05);
+    return [
+      [2, 0],
+      [2 + first[0], first[1]],
+      [2 + first[0] + second[0], first[1] + second[1]],
+    ];
+  };
+  const rows: CornerMatrixRow[] = [];
+  for (const phi of [Math.PI / 2, 0.5, 0.2, 0.1, 0.05])
+    for (const distance of [0.01, 0.2])
+      rows.push({
+        row: `C φ=${phi.toFixed(3)}`,
+        distance,
+        build: (h) => {
+          const first = h.drawSpline([], ARCH_POINTS);
+          const [, end] = h.splineEnds(first);
+          return [first, h.drawSpline([first], outgoing(phi), { start: end })];
+        },
+      });
+  for (const phi of [0.5, 0.2])
+    for (const distance of [-0.01, -0.2, 0.01, 0.2])
+      rows.push({
+        row: `R φ=${phi}`,
+        distance,
+        build: (h) => {
+          const first = h.drawSpline([], [...ARCH_POINTS].reverse());
+          const [start] = h.splineEnds(first);
+          return [first, h.drawSpline([first], outgoing(phi), { start })];
+        },
+      });
+  return rows;
+}
+
+/**
  * The T08b design §1.5 native corner matrix (τ = 1e-3), one entry per
  * (row, d), built exactly as the design probe builds it.
  */
