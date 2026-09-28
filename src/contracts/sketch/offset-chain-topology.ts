@@ -1,6 +1,5 @@
 import type {
   CertifiedCubicTubeChain,
-  CertifiedNeutralCurveQuery,
   CertifiedTubePieceChain,
   CubicTubeChainResult,
   NeutralCurve,
@@ -36,15 +35,34 @@ import {
 /**
  * Certified topology of one offset chain's emitted approximant.
  *
- * Every joint and the global validity gate are decided only by the injected
- * certified neutral query on the unchanged raw supports (owner poles, raw
- * line/arc supports). The trim authority is the joint's request plus its
- * proof-bearing witness bounds; numeric parameters are representatives only.
+ * The resolver decides every joint only by the injected certified neutral
+ * query on the unchanged raw supports (owner poles, raw line/arc supports),
+ * all on ONE whole-request meter. The trim authority is the joint's request
+ * plus its proof-bearing witness bounds; numeric parameters are
+ * representatives only.
  *
- * Not proved here (C6): stability of these decisions under the owner's
- * certificate tubes, i.e. topology of the true analytic offset. Fallback arcs
- * and tangent-continuous joints with a spline side are temporarily unsupported.
+ * Global validity (M0) is NOT decided by the resolver: a resolution is only a
+ * trim placement. The chain is certified simple, with these trim placements,
+ * only by a verified `certifyOffsetChainTubeStability` result (K1 on adjacent
+ * leaves, K3 on every other leaf pair, the joint query plus Lemma T at every
+ * trim). Chains outside the certifier's scope are `topologyStabilityUnsupported`,
+ * never valid without a certificate. Fallback arcs and tangent-continuous
+ * joints with a spline side are temporarily unsupported.
  */
+
+/** One whole-request pair meter: every query of the request draws on it. */
+export interface CertifiedNeutralCurvePairRequest {
+  queryPair(request: NeutralCurveQueryRequest): NeutralCurveQueryResult;
+}
+
+/**
+ * Opens whole-request pair meters. The implementation sizes each request's
+ * single budget structurally from `queryCount` (the exact number of pair
+ * queries the request will issue) and precharges it; it is never reset.
+ */
+export interface CertifiedNeutralCurveRequestQuery {
+  openRequest(queryCount: number): CertifiedNeutralCurvePairRequest;
+}
 
 /** Raw (untrimmed) offset pieces in traversal order, each in its natural order. */
 export type OffsetChainPiece =
@@ -78,7 +96,7 @@ export interface OffsetChainTopologyInput {
   readonly closed: boolean;
   /** The document's settings.modelingTolerance, forwarded unchanged. */
   readonly modelingTolerance: number;
-  readonly query: CertifiedNeutralCurveQuery;
+  readonly query: CertifiedNeutralCurveRequestQuery;
 }
 
 /** Where an active domain ends: the exact raw source end, or a joint root. */
@@ -385,54 +403,15 @@ function describe(result: NeutralCurveQueryResult) {
     : `${result.kind} ${result.code}: ${result.message}`;
 }
 
-type Placement = "inside" | "outside" | "unresolved";
-
-function placeOnCurve(
-  curve: ChainCurve,
-  enclosure: readonly [number, number] | null,
-  joints: readonly JointRecord[],
-  curveIndex: number,
-): Placement {
-  if (!enclosure) return "unresolved";
-  let placement: Placement = "inside";
-  for (const side of ["low", "high"] as const) {
-    const end = curve[side];
-    if (end.kind === "source") continue;
-    const record = joints[end.jointIndex]!;
-    const trim =
-      record.firstCurve === curveIndex
-        ? record.joint.firstParameterBounds
-        : record.joint.secondParameterBounds;
-    const kept =
-      side === "low" ? enclosure[0] > trim[1] : enclosure[1] < trim[0];
-    const removed =
-      side === "low" ? enclosure[1] < trim[0] : enclosure[0] > trim[1];
-    if (removed) return "outside";
-    if (!kept) placement = "unresolved";
-  }
-  return placement;
-}
-
-function bboxesStrictlyDisjoint(first: NeutralCurve, second: NeutralCurve) {
-  if (first.kind !== "cubicBezier" || second.kind !== "cubicBezier") {
-    return false;
-  }
-  for (const axis of [0, 1] as const) {
-    const a = first.poles.map((pole) => pole[axis]);
-    const b = second.poles.map((pole) => pole[axis]);
-    if (Math.max(...a) < Math.min(...b) || Math.max(...b) < Math.min(...a)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 function samePoint(first: SketchPoint2D, second: SketchPoint2D) {
   return Object.is(first[0], second[0]) && Object.is(first[1], second[1]);
 }
 
 /**
- * Resolves trim joints and certifies global validity of the emitted chain.
+ * Resolves the trim joints of the emitted chain: joint queries only, on one
+ * whole-request meter opened for exactly the joint count. It proves each
+ * joint's single transverse interior crossing and the order of two trims on
+ * one curve; it does NOT prove global validity (see the module note).
  * Ordinary exceptions from the query propagate unchanged.
  */
 export function resolveOffsetChainTopology(
@@ -452,7 +431,7 @@ export function resolveOffsetChainTopology(
   });
 
   // Declared intra-output incidences: bitwise-shared owner knots only.
-  const knots: (readonly [number, number])[] = [];
+  let wrapIsKnot = false;
   const singleClosedPiece = closed && pieces.length === 1;
   for (const [pieceIndex, piece] of pieces.entries()) {
     if (piece.kind !== "derivedCubic") continue;
@@ -467,21 +446,22 @@ export function resolveOffsetChainTopology(
           piece.seedEntityId,
         );
       }
-      knots.push([curve, curve + 1]);
     }
-    if (
+    wrapIsKnot ||=
       singleClosedPiece &&
       last > first &&
-      samePoint(piece.spans.at(-1)!.poles[3], piece.spans[0]!.poles[0])
-    ) {
-      knots.push([last, first]);
-    }
+      samePoint(piece.spans.at(-1)!.poles[3], piece.spans[0]!.poles[0]);
   }
 
   const jointRecords: JointRecord[] = [];
-  const jointCount = closed ? pieces.length : pieces.length - 1;
-  const wrapIsKnot = singleClosedPiece && knots.some(([a, b]) => a > b);
-  for (let index = 0; index < (wrapIsKnot ? 0 : jointCount); index += 1) {
+  const jointCount = wrapIsKnot
+    ? 0
+    : closed
+      ? pieces.length
+      : pieces.length - 1;
+  // M7: one precharged whole-request meter for exactly these joint queries.
+  const jointRequest = query.openRequest(jointCount);
+  for (let index = 0; index < jointCount; index += 1) {
     const next = (index + 1) % pieces.length;
     const end = terminal(pieces, pieceCurves, curves, index, "traversalEnd");
     const start = terminal(pieces, pieceCurves, curves, next, "traversalStart");
@@ -494,11 +474,13 @@ export function resolveOffsetChainTopology(
       );
     }
     const request = pair(end.curve, start.curve);
-    const result = query.queryPair(request);
+    const result = jointRequest.queryPair(request);
     if (result.kind !== "verified") {
       return failure(
         codes.topologyUncertain,
-        `Joint query is not verified (${describe(result)}).`,
+        result.code === "exact-query-proof-budget-exhausted"
+          ? `Joint query is not verified (${describe(result)}): the whole-request budget of all ${jointCount} joint queries is exhausted, not necessarily by this joint.`
+          : `Joint query is not verified (${describe(result)}).`,
         firstSeed,
       );
     }
@@ -583,128 +565,6 @@ export function resolveOffsetChainTopology(
         : "Both trims of one offset curve have unordered root enclosures.",
       seedOf(curveIndex),
     );
-  }
-
-  const jointPairs = new Set(
-    jointRecords.map(
-      ({ firstCurve, secondCurve }) =>
-        `${Math.min(firstCurve, secondCurve)}:${Math.max(firstCurve, secondCurve)}`,
-    ),
-  );
-  const classify = (
-    witness: NeutralCurvePointWitness,
-    firstCurve: number,
-    secondCurve: number,
-  ): OffsetChainFailure | null => {
-    const first = placeOnCurve(
-      curves[firstCurve]!,
-      offsetChainRootEnclosure(witness, "first"),
-      jointRecords,
-      firstCurve,
-    );
-    const second = placeOnCurve(
-      curves[secondCurve]!,
-      offsetChainRootEnclosure(witness, "second"),
-      jointRecords,
-      secondCurve,
-    );
-    if (first === "outside" || second === "outside") return null;
-    if (first === "unresolved" || second === "unresolved") {
-      return failure(
-        codes.topologyUncertain,
-        "A contact cannot be proved inside or outside an offset trim.",
-        seedOf(firstCurve),
-      );
-    }
-    return witness.classification === "crossing"
-      ? failure(
-          codes.selfIntersection,
-          "The offset chain intersects itself.",
-          seedOf(firstCurve),
-        )
-      : failure(
-          codes.topologyUncertain,
-          `The offset chain has an unresolved ${witness.classification} contact.`,
-          seedOf(firstCurve),
-        );
-  };
-
-  for (let first = 0; first < curves.length; first += 1) {
-    for (let second = first + 1; second < curves.length; second += 1) {
-      if (jointPairs.has(`${first}:${second}`)) continue;
-      const request = pair(first, second);
-      if (bboxesStrictlyDisjoint(request.first, request.second)) continue;
-      const result = query.queryPair(request);
-      if (result.kind !== "verified" || result.overlaps.length !== 0) {
-        return failure(
-          codes.topologyUncertain,
-          `Global offset validity is not certified (${describe(result)}).`,
-          seedOf(first),
-        );
-      }
-      // Exact knot parameters (owner endpoints at u = 1 and u = 0) in request order.
-      const pairKnots = knots
-        .filter(
-          ([a, b]) =>
-            (a === first && b === second) || (a === second && b === first),
-        )
-        .map(([left, right]) => {
-          const leftParameter = curves[left]!.bounds[1];
-          const rightParameter = curves[right]!.bounds[0];
-          return left === first
-            ? ([leftParameter, rightParameter] as const)
-            : ([rightParameter, leftParameter] as const);
-        });
-      const incidences = pairKnots.map(() => 0);
-      for (const witness of result.points) {
-        const firstBounds = witness.proof.firstParameterBounds;
-        const secondBounds = witness.proof.secondParameterBounds;
-        const contained = pairKnots.flatMap(([firstKnot, secondKnot], index) =>
-          firstBounds[0] <= firstKnot &&
-          firstKnot <= firstBounds[1] &&
-          secondBounds[0] <= secondKnot &&
-          secondKnot <= secondBounds[1]
-            ? [index]
-            : [],
-        );
-        if (contained.length === 1) {
-          incidences[contained[0]!]! += 1;
-          continue;
-        }
-        if (contained.length > 1) {
-          return failure(
-            codes.topologyUncertain,
-            "One certified root box contains two shared owner knots.",
-            seedOf(first),
-          );
-        }
-        const violation = classify(witness, first, second);
-        if (violation) return violation;
-      }
-      if (incidences.some((count) => count !== 1)) {
-        return failure(
-          codes.topologyUncertain,
-          "The shared owner knot is not isolated by exactly one certified root.",
-          seedOf(first),
-        );
-      }
-    }
-    if (curves[first]!.neutral.kind !== "cubicBezier") continue;
-    const self = query.querySelf({
-      modelingTolerance,
-      curve: curves[first]!.neutral,
-    });
-    if (self.kind !== "verified" || self.overlaps.length !== 0) {
-      return failure(
-        codes.topologyUncertain,
-        `Offset cubic self validity is not certified (${describe(self)}).`,
-        seedOf(first),
-      );
-    }
-    for (const witness of self.points) {
-      const violation = classify(witness, first, first);
-      if (violation) return violation;
-    }
   }
 
   const joints = jointRecords.map(({ joint }) => joint);
@@ -813,8 +673,9 @@ function sameSpanGeometry(first: SplineSpan, second: SplineSpan) {
  * entities, and each direct coincident declaration. `satisfied` is relative to
  * that producer's solve policy. This does not detect same-ID parameter edits,
  * changes to unselected entities, or forged snapshots; a future consumer must
- * bind inside `deriveSolvedRegionsForSession`'s accepted-pair scope, never a
- * session definition with a cached incomplete-drag snapshot.
+ * bind inside the accepted `session.liveSolve` pair's scope (its definition
+ * with its own solved snapshot), never a session definition with a cached
+ * incomplete-drag snapshot.
  *
  * Per declared piece, d_i = reversed ? −d : d. A line is
  * `offsetLinePoints` of its positions; a spline is ONE reconstruction and ONE
@@ -1003,10 +864,13 @@ export type OffsetChainTubeStabilityResult =
   | OffsetChainFailure;
 
 /**
- * C6-S1′/J2′ bounded helper, not wired into any frame: certifies that an
- * accepted resolution's emitted cubics carry the topology of the declared-join-
- * corrected true offset under the owner's error tubes. Scope is one untrimmed spline offset piece with no
- * joints; everything else is unsupported, never assumed stable.
+ * C6-S1′/J2′ bounded helper, not wired into any frame, and the SOLE global
+ * validity gate of an offset chain (M0): an ok result returns the certified
+ * resolution, whose emitted chain with the resolver's trim placements is
+ * simple and carries the topology of the declared-join-corrected true offset
+ * under the owner's error tubes. Without `declared` the scope is one untrimmed
+ * spline offset piece with no joints; everything else is
+ * `topologyStabilityUnsupported`, never assumed valid.
  *
  * Owner spans are forwarded unchanged in natural source order, whatever the
  * traversal direction: reversing poles would pair them with the owner's
@@ -1020,9 +884,12 @@ export type OffsetChainTubeStabilityResult =
  * Coincident certification is conditional on R_C/H2 and the adapter's trusted
  * E1–E4 `(definition, solvedSnapshot)` premise. Those checks do not detect
  * same-ID parameter edits or forged snapshots; a future consumer must bind the
- * accepted pair inside `deriveSolvedRegionsForSession`, never combine a session
- * definition with a cached incomplete-drag snapshot. The certificate concerns
- * the abstract chain trimmed at exact witnessed roots only (never rounded ends).
+ * accepted `session.liveSolve` pair, never combine a session definition with
+ * a cached incomplete-drag snapshot. The certificate concerns the abstract
+ * chain trimmed at exact witnessed roots only (never rounded ends). In a
+ * multi-piece chain a one-leaf cubic piece is unsupported: K1 cone-checks
+ * emitted hodographs only at intra-piece joins, so its emitted self-
+ * injectivity would be uncertified (routed to a later certifier slice).
  */
 export function certifyOffsetChainTubeStability(
   resolved: OffsetChainTopologySuccess,
@@ -1245,6 +1112,12 @@ function certifyDeclaredTubeStability(
       )
     )
       return mismatch("The resolution does not describe its own owner spans.");
+    if (count > 1 && piece.spans.length === 1)
+      return failure(
+        codes.topologyStabilityUnsupported,
+        "A one-leaf spline piece in a multi-piece chain has no certified emitted injectivity (K1) yet.",
+        piece.seedEntityId,
+      );
     requestPieces.push({
       kind: "cubic",
       reversed: piece.reversed,

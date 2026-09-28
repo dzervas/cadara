@@ -13,7 +13,11 @@ import {
   createCertifiedNeutralCurveQueryCapabilityForTest,
   createCertifiedNeutralCurveQueryWithBudgetObserverForTest,
   createCertifiedNeutralCurveQueryWithLowerBudgetForTest,
+  createCertifiedNeutralCurveRequestQuery,
+  createCertifiedNeutralCurveRequestQueryWithBudgetObserverForTest,
+  createCertifiedNeutralCurveRequestQueryWithLowerBudgetForTest,
 } from "@/domain/modeling/neutral-curve-certification/query";
+import type { ExactProofBudgetSnapshot } from "@/domain/modeling/neutral-curve-certification/fixed-degree-primitives";
 
 const provenance = (id: string) => ({
   sourceEntityId: id,
@@ -1308,5 +1312,167 @@ test("the async test capability composes the dispatcher's pair, self and join op
     kind: "verified",
     joins: [{ realization: "declaredEnds", position: [1, 0] }],
     points: [],
+  });
+});
+
+describe("whole-request pair meter (T08b-a, M7)", () => {
+  const crossing = request(
+    cubic("arch", [
+      [0, 0],
+      [1, 1],
+      [2, 1],
+      [3, 0],
+    ]),
+    line("drop", [2.5, 1], [0, -1], [0, 2]),
+  );
+
+  test("one precharged budget: 64 per sized query, then each query's unchanged cost summed", () => {
+    const single: ExactProofBudgetSnapshot[] = [];
+    createCertifiedNeutralCurveQueryWithBudgetObserverForTest((snapshot) =>
+      single.push(snapshot),
+    ).queryPair(crossing);
+    const perQuery = single[0]!.operations - 64;
+    const snapshots: ExactProofBudgetSnapshot[] = [];
+    const meter =
+      createCertifiedNeutralCurveRequestQueryWithBudgetObserverForTest(
+        (snapshot) => snapshots.push(snapshot),
+      ).openRequest(2);
+    expect(snapshots.map((snapshot) => snapshot.operations)).toEqual([128]);
+    expect(verified(meter.queryPair(crossing)).points).toHaveLength(1);
+    expect(verified(meter.queryPair(crossing)).points).toHaveLength(1);
+    expect(snapshots.map((snapshot) => snapshot.operations)).toEqual([
+      128,
+      128 + perQuery,
+      128 + 2 * perQuery,
+    ]);
+    expect(snapshots[2]!.euclideanSteps).toBe(2 * single[0]!.euclideanSteps);
+    expect(() => meter.queryPair(crossing)).toThrow(RangeError);
+  });
+
+  test("exhaustion is sticky for the rest of the request and never reset", () => {
+    const single: ExactProofBudgetSnapshot[] = [];
+    createCertifiedNeutralCurveQueryWithBudgetObserverForTest((snapshot) =>
+      single.push(snapshot),
+    ).queryPair(crossing);
+    const total = 2 * 64 + 2 * (single[0]!.operations - 64);
+    const exhausted = {
+      kind: "uncertain",
+      code: "exact-query-proof-budget-exhausted",
+      message: "The deterministic exact-query arithmetic budget was exhausted.",
+    };
+    const passing =
+      createCertifiedNeutralCurveRequestQueryWithLowerBudgetForTest({
+        operations: total,
+      }).openRequest(2);
+    verified(passing.queryPair(crossing));
+    verified(passing.queryPair(crossing));
+    const failing =
+      createCertifiedNeutralCurveRequestQueryWithLowerBudgetForTest({
+        operations: total - 1,
+      }).openRequest(2);
+    verified(failing.queryPair(crossing));
+    expect(failing.queryPair(crossing)).toEqual(exhausted);
+    const precharge =
+      createCertifiedNeutralCurveRequestQueryWithLowerBudgetForTest({
+        operations: 127,
+      }).openRequest(2);
+    expect(precharge.queryPair(crossing)).toEqual(exhausted);
+    expect(precharge.queryPair(crossing)).toEqual(exhausted);
+  });
+
+  // Native §1.5 corner-matrix joint requests (T08b-a meter review,
+  // captured-joint-requests.json; exact binary64 literals, tolerance 1e-3).
+  const native = (first: NeutralCurve, second: NeutralCurve) => ({
+    ...request(first, second),
+    modelingTolerance: 1e-3,
+  });
+  const archTail = cubic(
+    "native-arch:1",
+    [
+      [1, 0.11],
+      [1.3346666666666667, 0.11],
+      [1.668318494081438, 0.04321802621297712],
+      [2.00099503719021, 0.009950371902099893],
+    ],
+    { sourceDomain: [1.0024906793143211, 2.0049813586286422] },
+  );
+  const ssTiny = native(
+    archTail,
+    cubic(
+      "native-tiny:0",
+      [
+        [2.00099503719021, 0.009950371902099893],
+        [2.3343283705235436, -0.02338296143123344],
+        [2.6676617038568766, -0.056716294764566785],
+        [3.00099503719021, -0.09004962809790011],
+      ],
+      { sourceDomain: [0, 1.0024906793143211] },
+    ),
+  );
+  const sl90 = native(archTail, segment("native-up", [1.99, 0], [1.99, 1]));
+  const ll90 = native(
+    segment("native-across", [0, 0.01], [1, 0.01]),
+    segment("native-rise", [0.99, 0], [0.99, 1]),
+  );
+  const alone = (input: NeutralCurveQueryRequest) => {
+    const snapshots: ExactProofBudgetSnapshot[] = [];
+    const result = createCertifiedNeutralCurveQueryWithBudgetObserverForTest(
+      (snapshot) => snapshots.push(snapshot),
+    ).queryPair(input);
+    const snapshot = snapshots[0]!;
+    return {
+      result,
+      snapshot,
+      bits: Math.max(snapshot.maxStoredBits, snapshot.maxPreProductBits),
+    };
+  };
+
+  test("D5 cap: two native SS-tiny joint queries exceed one per-query Euclid cap yet fit the (n + 1)-scaled request cap", () => {
+    const single = alone(ssTiny);
+    expect(single.result.kind).not.toBe("uncertain");
+    // Premise: together they exceed one production per-query Euclid cap.
+    expect(2 * single.snapshot.euclideanSteps).toBeGreaterThan(1_500_000);
+    const pooled = createCertifiedNeutralCurveRequestQuery().openRequest(2);
+    expect(pooled.queryPair(ssTiny)).toEqual(single.result);
+    expect(pooled.queryPair(ssTiny)).toEqual(single.result);
+  }, 60_000);
+
+  test("a per-value integerBits exhaustion stays sticky for a later low-bit query of the same request", () => {
+    const high = alone(sl90);
+    const low = alone(ll90);
+    verified(high.result);
+    verified(low.result);
+    expect(low.bits).toBeLessThan(high.bits);
+    const exhausted = {
+      kind: "uncertain",
+      code: "exact-query-proof-budget-exhausted",
+      message: "The deterministic exact-query arithmetic budget was exhausted.",
+    };
+    const request =
+      createCertifiedNeutralCurveRequestQueryWithLowerBudgetForTest({
+        integerBits: low.bits,
+      }).openRequest(2);
+    expect(request.queryPair(sl90)).toEqual(exhausted);
+    // Additive counters are far from their caps: only stickiness fails this.
+    expect(request.queryPair(ll90)).toEqual(exhausted);
+    // Control: the low-bit query alone fits that ceiling.
+    expect(
+      createCertifiedNeutralCurveRequestQueryWithLowerBudgetForTest({
+        integerBits: low.bits,
+      })
+        .openRequest(1)
+        .queryPair(ll90),
+    ).toEqual(low.result);
+  });
+
+  test("the query count must be a nonnegative integer, and a zero-query request answers nothing", () => {
+    const requests = createCertifiedNeutralCurveRequestQuery();
+    for (const count of [-1, 0.5, Number.NaN])
+      expect(() => requests.openRequest(count), String(count)).toThrow(
+        RangeError,
+      );
+    expect(() => requests.openRequest(0).queryPair(crossing)).toThrow(
+      RangeError,
+    );
   });
 });

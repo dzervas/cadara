@@ -64,31 +64,50 @@ export class ExactProofBudget {
   #maxStoredBits = 0;
   #maxPreProductBits = 0;
 
-  constructor(lowerLimits: Partial<ExactProofLimits> = {}) {
+  /**
+   * `requestMultiplier` (default 1) scales the additive production ceilings
+   * (operations, determinant terms, Euclidean, refinement and projection
+   * steps) for one whole-request meter spanning several queries. The
+   * per-value `integerBits` ceiling is never scaled. Lower limits clamp to
+   * the scaled ceilings.
+   */
+  constructor(
+    lowerLimits: Partial<ExactProofLimits> = {},
+    requestMultiplier = 1,
+  ) {
+    if (!Number.isSafeInteger(requestMultiplier) || requestMultiplier < 1) {
+      throw new RangeError(
+        "The exact proof request multiplier must be a positive integer.",
+      );
+    }
+    const ceiling = (limit: number) => limit * requestMultiplier;
     this.#limits = {
       operations: Math.min(
-        PRODUCTION_LIMITS.operations,
-        lowerLimits.operations ?? PRODUCTION_LIMITS.operations,
+        ceiling(PRODUCTION_LIMITS.operations),
+        lowerLimits.operations ?? ceiling(PRODUCTION_LIMITS.operations),
       ),
       integerBits: Math.min(
         PRODUCTION_LIMITS.integerBits,
         lowerLimits.integerBits ?? PRODUCTION_LIMITS.integerBits,
       ),
       determinantTerms: Math.min(
-        PRODUCTION_LIMITS.determinantTerms,
-        lowerLimits.determinantTerms ?? PRODUCTION_LIMITS.determinantTerms,
+        ceiling(PRODUCTION_LIMITS.determinantTerms),
+        lowerLimits.determinantTerms ??
+          ceiling(PRODUCTION_LIMITS.determinantTerms),
       ),
       euclideanSteps: Math.min(
-        PRODUCTION_LIMITS.euclideanSteps,
-        lowerLimits.euclideanSteps ?? PRODUCTION_LIMITS.euclideanSteps,
+        ceiling(PRODUCTION_LIMITS.euclideanSteps),
+        lowerLimits.euclideanSteps ?? ceiling(PRODUCTION_LIMITS.euclideanSteps),
       ),
       refinementSteps: Math.min(
-        PRODUCTION_LIMITS.refinementSteps,
-        lowerLimits.refinementSteps ?? PRODUCTION_LIMITS.refinementSteps,
+        ceiling(PRODUCTION_LIMITS.refinementSteps),
+        lowerLimits.refinementSteps ??
+          ceiling(PRODUCTION_LIMITS.refinementSteps),
       ),
       projectionAttempts: Math.min(
-        PRODUCTION_LIMITS.projectionAttempts,
-        lowerLimits.projectionAttempts ?? PRODUCTION_LIMITS.projectionAttempts,
+        ceiling(PRODUCTION_LIMITS.projectionAttempts),
+        lowerLimits.projectionAttempts ??
+          ceiling(PRODUCTION_LIMITS.projectionAttempts),
       ),
     };
     if (

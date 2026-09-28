@@ -515,3 +515,49 @@ test("proof meters are reentrant and do not share mutable counters", () => {
   expect(first.snapshot()).toMatchObject({ operations: 4 });
   expect(second.snapshot()).toMatchObject({ operations: 4 });
 });
+
+describe("whole-request proof budget multiplier", () => {
+  const exhausts = (charge: () => void) => {
+    expect(charge).toThrow(ExactQueryProofBudgetExceeded);
+  };
+
+  test("the default multiplier keeps the production ceilings exactly", () => {
+    const budget = new ExactProofBudget();
+    budget.operation(10_000_000);
+    exhausts(() => budget.operation());
+    const euclid = new ExactProofBudget({}, 1);
+    for (let step = 0; step < 1_500_000; step += 1) euclid.euclideanStep();
+    exhausts(() => euclid.euclideanStep());
+  });
+
+  test("a multiplier scales every additive ceiling but never integerBits", () => {
+    const budget = new ExactProofBudget({}, 3);
+    budget.operation(30_000_000);
+    exhausts(() => budget.operation());
+    for (let step = 0; step < 3 * 1_536; step += 1) budget.determinantTerm();
+    exhausts(() => budget.determinantTerm());
+    for (let step = 0; step < 3 * 4_096; step += 1) budget.refinementStep();
+    exhausts(() => budget.refinementStep());
+    for (let step = 0; step < 3 * 2; step += 1) budget.projectionAttempt();
+    exhausts(() => budget.projectionAttempt());
+    for (let step = 0; step < 3 * 1_500_000; step += 1) budget.euclideanStep();
+    exhausts(() => budget.euclideanStep());
+    const bits = new ExactProofBudget({}, 3);
+    bits.stored((1n << 16_383n) | 1n);
+    exhausts(() => bits.stored(1n << 16_384n));
+  });
+
+  test("lower limits clamp to the scaled ceiling, and the multiplier must be a positive integer", () => {
+    const clamped = new ExactProofBudget({ operations: 50_000_000 }, 2);
+    clamped.operation(20_000_000);
+    exhausts(() => clamped.operation());
+    const lowered = new ExactProofBudget({ operations: 5 }, 2);
+    lowered.operation(5);
+    exhausts(() => lowered.operation());
+    for (const multiplier of [0, -1, 1.5, Number.NaN, 2 ** 53])
+      expect(
+        () => new ExactProofBudget({}, multiplier),
+        String(multiplier),
+      ).toThrow(RangeError);
+  });
+});

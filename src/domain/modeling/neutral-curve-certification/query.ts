@@ -24,6 +24,7 @@ import {
   ExactQueryProofBudgetExceeded,
   type ExactProofBudgetSnapshot,
 } from "@/domain/modeling/neutral-curve-certification/fixed-degree-primitives";
+import type { CertifiedNeutralCurveRequestQuery } from "@/contracts/sketch/offset-chain-topology";
 import { certifyNeutralCurveJoin } from "@/domain/modeling/neutral-curve-certification/joined-pair";
 
 function exhausted() {
@@ -161,6 +162,77 @@ function createQuery(
       }
     },
   };
+}
+
+/** Entry charge of one pair query; the request meter precharges it per query. */
+const PAIR_QUERY_ENTRY_CHARGE = 64;
+
+function createRequestQuery(
+  lowerLimits?: LowerProofLimits,
+  observeBudget?: (snapshot: ExactProofBudgetSnapshot) => void,
+): CertifiedNeutralCurveRequestQuery {
+  return {
+    openRequest(queryCount) {
+      if (!Number.isSafeInteger(queryCount) || queryCount < 0) {
+        throw new RangeError("A request query count must be a count.");
+      }
+      // Structural cap (M7/D5): the per-query ceilings × (queryCount + 1),
+      // on ONE budget that is never reset, replaced or topped up.
+      const budget = new ExactProofBudget(lowerLimits, queryCount + 1);
+      let issued = 0;
+      let spent = false;
+      try {
+        budget.operation(PAIR_QUERY_ENTRY_CHARGE * queryCount);
+      } catch (error) {
+        if (!(error instanceof ExactQueryProofBudgetExceeded)) throw error;
+        spent = true;
+      } finally {
+        observeBudget?.(budget.snapshot());
+      }
+      return {
+        queryPair(request) {
+          if (issued === queryCount) {
+            throw new RangeError(
+              "The request issued more pair queries than it was sized for.",
+            );
+          }
+          issued += 1;
+          if (spent) return exhausted();
+          try {
+            return certifyNeutralCurvePairOnBudget(request, budget);
+          } catch (error) {
+            if (!(error instanceof ExactQueryProofBudgetExceeded)) throw error;
+            spent = true;
+            return exhausted();
+          } finally {
+            observeBudget?.(budget.snapshot());
+          }
+        },
+      };
+    },
+  };
+}
+
+/** Production whole-request pair meter under the structural request ceilings. */
+export function createCertifiedNeutralCurveRequestQuery(): CertifiedNeutralCurveRequestQuery {
+  return createRequestQuery();
+}
+
+/** Test-only lower whole-request ceilings; clamped to the structural cap. */
+export function createCertifiedNeutralCurveRequestQueryWithLowerBudgetForTest(
+  lowerLimits: LowerProofLimits,
+): CertifiedNeutralCurveRequestQuery {
+  return createRequestQuery(lowerLimits);
+}
+
+/**
+ * Test-only observation of the cumulative whole-request meter: once after the
+ * precharge and after every query, so the last snapshot is the request total.
+ */
+export function createCertifiedNeutralCurveRequestQueryWithBudgetObserverForTest(
+  observeBudget: (snapshot: ExactProofBudgetSnapshot) => void,
+): CertifiedNeutralCurveRequestQuery {
+  return createRequestQuery(undefined, observeBudget);
 }
 
 /** Kernel-free constructive dispatcher for the admitted numeric neutral curves. */

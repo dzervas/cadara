@@ -294,6 +294,9 @@ function lineAdmissionDefect(line: NeutralLineTube): string | null {
     ![...line.emitted, ...line.source].every(finitePoint)
   )
     return "non-finite line tube ends";
+  // An affine leaf is injective only with distinct ends (M0 leaf injectivity).
+  if (samePoint(line.emitted[0], line.emitted[1]))
+    return "coincident emitted line ends";
   if (!Number.isFinite(line.distance))
     return "missing or non-finite owner offset distance";
   return null;
@@ -1472,6 +1475,13 @@ const invalidPieceChain = (message: string): Failure =>
  * a constant-time bitwise distance binding on its first tube (uncharged) and
  * then exactly the legacy sequence. Otherwise pieces + trims are precharged
  * BEFORE any enumeration, then the flattened admission cost in the core.
+ *
+ * UNSOUND on its own for a one-leaf cubic piece in a multi-piece chain:
+ * K1 cone-checks emitted hodographs only at intra-piece joins, and Lemma T's
+ * m′ is a cone of the TRUE offset derivative, so that leaf's emitted
+ * self-injectivity is never checked and a looped emitted cubic can verify.
+ * Callers must reject such pieces (the offset-chain wrapper does) until the
+ * emitted-cone fix for single-leaf pieces lands here.
  */
 function certifyPieceChain(
   request: PieceTubeChainRequest,
@@ -1574,7 +1584,11 @@ function createCertifier(
   };
 }
 
-/** Production certifier under the unchanged exact-proof ceilings. */
+/**
+ * Production certifier under the unchanged exact-proof ceilings. Its
+ * `certifyPieceChain` is unsound on its own for one-leaf cubic pieces in a
+ * multi-piece chain (see `certifyPieceChain`).
+ */
 export function createCertifiedCubicTubeChain(): CertifiedCubicTubeChain &
   CertifiedTubePieceChain {
   return createCertifier();
