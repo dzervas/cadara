@@ -30,6 +30,7 @@ export interface SplineOffsetCubicSpan {
    * derivative d/du (S + distance·N) over `sourceLocalInterval`, in source-local
    * units. `sourcePoles` is the source span's pole array itself (a reference).
    * `distance` is this owner call's signed input `distance`, bitwise (−0 kept).
+   * `localError` is the endpoint-local split of `certifiedError` (Q4-E1).
    * Binding to one fresh owner result is the caller's obligation: the presence
    * of this metadata never validates provenance.
    */
@@ -37,7 +38,27 @@ export interface SplineOffsetCubicSpan {
     readonly derivative: IntervalVector;
     readonly sourcePoles: SplinePoles;
     readonly distance: number;
+    readonly localError: SplineOffsetLocalError;
   };
+}
+
+/**
+ * The two terms `certifiedError` = up(R + max πᵢ) is made of, as the outward
+ * (upper) binary64 values the owner already computed. With E the emitted
+ * cubic, τ its Bézier parameter, [a, b] = `sourceLocalInterval`, Bᵢ the cubic
+ * Bernstein basis and O = S + d·N the true offset in source-local u:
+ *
+ *   |E(τ) − O(a + τ(b − a))| ≤ Σᵢ Bᵢ(τ)·πᵢ + 16·R·τ²(1 − τ)²  for τ ∈ [0, 1].
+ *
+ * R ≥ (b − a)⁴·‖(max|O⁽⁴⁾ₓ|, max|O⁽⁴⁾ᵧ|)‖/384 over the leaf, so the
+ * componentwise Hermite remainder of the ideal Hermite cubic H is
+ * ≤ 16R·τ²(1 − τ)²; πᵢ ≥ |Eᵢ − Hᵢ| (distance of emitted pole i to the
+ * outward enclosure of its ideal Hermite pole). Both are 0 on the d = 0
+ * branch, whose emitted cubic is the source itself.
+ */
+export interface SplineOffsetLocalError {
+  readonly hermiteRemainder: number;
+  readonly polePerturbations: readonly [number, number, number, number];
 }
 
 export type SplineOffsetFailureCode =
@@ -598,11 +619,10 @@ function makeOutput(
     addV(intervalEnd[0], scaleV(multiplyVS(intervalEnd[1], thirdWidth), -1)),
     intervalEnd[0],
   ];
-  const polePerturbation = Math.max(
-    ...poles.map((pole, index) =>
-      upperVectorDistance(pole, idealPoles[index]!),
-    ),
-  );
+  const polePerturbations = poles.map((pole, index) =>
+    upperVectorDistance(pole, idealPoles[index]!),
+  ) as unknown as SplineOffsetLocalError["polePerturbations"];
+  const polePerturbation = Math.max(...polePerturbations);
   const certifiedError = addI(
     exact(hermiteRemainder),
     exact(polePerturbation),
@@ -625,6 +645,10 @@ function makeOutput(
       ] as const),
       sourcePoles: span.poles,
       distance,
+      localError: Object.freeze({
+        hermiteRemainder,
+        polePerturbations: Object.freeze(polePerturbations),
+      }),
     }),
   };
 }
@@ -735,10 +759,16 @@ export function approximateSplineOffset(
                 : analytic.differential.poles,
           },
           certifiedError: 0,
-          // The analytic branch computes with a literal 0; record the call's bitwise d.
+          // The analytic branch computes with a literal 0; record the call's
+          // bitwise d. The emitted cubic IS the source (= O), so its local
+          // error terms are exactly 0, as `certifiedError` is.
           reference: Object.freeze({
             ...analytic.reference,
             distance: input.distance,
+            localError: Object.freeze({
+              hermiteRemainder: 0,
+              polePerturbations: Object.freeze([0, 0, 0, 0] as const),
+            }),
           }),
         });
         continue;

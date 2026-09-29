@@ -1144,6 +1144,7 @@ function certifyDeclaredTubeStability(
       tubes: piece.spans.map((span) => ({
         poles: span.poles,
         certifiedError: span.certifiedError,
+        // Owner metadata by reference, including its Q4-E1 `localError` split.
         reference: span.reference,
         source: span.source,
         sourceLocalInterval: span.sourceLocalInterval,

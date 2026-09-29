@@ -161,6 +161,25 @@ import {
  * joint pair (retained parts on either side of x*) and K3 with r ≥ ε
  * elsewhere, so the concatenated monotone couplings (far map, glue stall,
  * vertical map of Lemma GM) perturb to a homeomorphism under strict G < τ.
+ *
+ * Q4-E1 endpoint-local ε (owner `localError`, only after the leaf-wide check
+ * failed with the band's code; one fixed precharge at entry; absent or
+ * inadmissible metadata keeps the leaf-wide failure). The owner's
+ * same-parameter bound refines pointwise to |E(τ) − O(τ)| ≤ λ(τ) =
+ * Σ Bᵢ(τ)πᵢ + 16Rτ²(1 − τ)² (πᵢ bound the emitted poles' distance to the ideal
+ * Hermite poles; the componentwise Hermite remainder is ≤ 16Rτ²(1 − τ)²).
+ * On the vertex-anchored window of fraction s at the NATURAL vertex side,
+ * sup λ ≤ π_v + 3sπ_a + 3s²π_b + s³π_f + 16Rs², capped by ε (exact).
+ * - S2 (after a Lemma-X margin failure): Lemma P and Lemma X are re-run with
+ *   ε at each vertex pole replaced by π_v (H, t, σ, the margins) and ε at
+ *   each emitted witness parameter by the window bound reaching the far
+ *   stored witness bound (Lemma V at x̂ for δ, the root reach). Lemma V's
+ *   leaf-wide w ≤ τ (Lemma GM), Lemma C and the stars keep the leaf-wide ε.
+ * - Lemma T (after the root-interior window check, or a trimmed leaf's
+ *   composition check, failed): ε_B at τ̂ is replaced by the window bound
+ *   reaching the far stored bound of U in δ, the line widening and the line
+ *   end displacement; the cubic star keeps ε_B + Mδ (its far map is
+ *   leaf-wide). Each trim is upgraded at most once.
  */
 
 type ExactPoint = readonly [ExactFraction, ExactFraction];
@@ -185,6 +204,11 @@ const EXHAUSTED: Failure = {
 const KNOT_UNPROVEN = "cubic-tube-knot-incidence-unproven";
 /** Fixed per-graph-trim precharge (constant-size S2 work), before H2. */
 const GRAPH_TRIM_PRECHARGE = 256;
+/**
+ * Fixed precharge of one Q4-E1 local-ε attempt (one S2 graph trim or one
+ * Lemma-T trim), at its entry before any metadata conversion.
+ */
+const LOCAL_ERROR_PRECHARGE = 128;
 const J2_MESSAGES = {
   cone: "The source tangents and leaf hodographs are not proved inside the join cone.",
   root: "A verified square-root bound is not finite and positive.",
@@ -836,6 +860,82 @@ function certifyChain(
     sources.set(index, source);
     return source;
   };
+  // Q4-E1 owner metadata (R, π₀..π₃) of a cubic leaf, converted once per
+  // leaf; null when absent or not finite and nonnegative (fails closed).
+  const localErrors = new Map<
+    number,
+    { remainder: ExactFraction; poles: readonly ExactFraction[] } | null
+  >();
+  const leafLocalError = (index: number) => {
+    const cached = localErrors.get(index);
+    if (cached !== undefined) return cached;
+    const local = tubes[index]?.reference.localError as
+      | NeutralCubicTube["reference"]["localError"]
+      | undefined;
+    const result =
+      !lineData.has(index) &&
+      local &&
+      Array.isArray(local.polePerturbations) &&
+      local.polePerturbations.length === 4 &&
+      [local.hermiteRemainder, ...local.polePerturbations].every(
+        (value) => Number.isFinite(value) && value >= 0,
+      )
+        ? {
+            remainder: exactFromNumber(local.hermiteRemainder, budget),
+            poles: local.polePerturbations.map((value) =>
+              exactFromNumber(value, budget),
+            ),
+          }
+        : null;
+    localErrors.set(index, result);
+    return result;
+  };
+  /**
+   * Local tube bound (header Q4-E1) on the vertex-anchored sub-window of
+   * leaf fraction s ≥ 0 at the NATURAL vertex side: [1 − s, 1] at "end",
+   * [0, s] at "start"; s = null is the vertex itself. With v the vertex pole
+   * and a, b, f the next ones inward, every τ there has
+   * Σ Bᵢ(τ)πᵢ + 16Rτ²(1 − τ)² ≤ π_v + 3sπ_a + 3s²π_b + s³π_f + 16Rs² (exact),
+   * capped by the leaf-wide ε (both are bounds). Null without metadata.
+   */
+  const localBound = (
+    index: number,
+    side: "start" | "end",
+    fraction: ExactFraction | null,
+  ): ExactFraction | null => {
+    const local = leafLocalError(index);
+    if (!local) return null;
+    const [v, a, b, f] = side === "end" ? [3, 2, 1, 0] : [0, 1, 2, 3];
+    let bound = local.poles[v]!;
+    if (fraction) {
+      const square = multiplyExact(fraction, fraction, budget);
+      const three = exact(3n, 1n, budget);
+      const terms = [
+        multiplyExact(
+          three,
+          multiplyExact(fraction, local.poles[a]!, budget),
+          budget,
+        ),
+        multiplyExact(
+          three,
+          multiplyExact(square, local.poles[b]!, budget),
+          budget,
+        ),
+        multiplyExact(
+          multiplyExact(square, fraction, budget),
+          local.poles[f]!,
+          budget,
+        ),
+        multiplyExact(
+          multiplyExact(exact(16n, 1n, budget), local.remainder, budget),
+          square,
+          budget,
+        ),
+      ];
+      for (const term of terms) bound = addExact(bound, term, budget);
+    }
+    return minimum([errors[index]!, bound]);
+  };
   const shapes = new Map<
     number,
     { first: ExactPoint[]; second: ExactPoint[] }
@@ -1127,6 +1227,11 @@ function certifyChain(
       readonly otherUpper: ExactFraction;
     }[]
   >();
+  /** Lemma-T trims with their one-shot Q4-E1 local upgrade (leaf loop). */
+  const lemmaTrims: {
+    readonly leaves: readonly [number, number];
+    readonly upgrade: () => boolean;
+  }[] = [];
   const lineJointStart: (ExactFraction | undefined)[] = [];
   const lineJointEnd: (ExactFraction | undefined)[] = [];
   if (general) {
@@ -1244,32 +1349,10 @@ function certifyChain(
       const second = terminalData(secondEnd);
       if (typeof second === "string") return fail(WINDOW, second);
       type Side = typeof first;
+      /** Per-side [P, Q] bounds of |E − O| at one point or sub-window. */
+      type Pair = readonly [ExactFraction, ExactFraction];
+      const leafWide: Pair = [first.error, second.error];
 
-      // Lemma P window: H ⊇ [α_Q, β_P]; t = |H|/adv_O rounded up, t < 1.
-      const hullLow = subtractExact(
-        second.vertex,
-        multiplyExact(eUpper, second.error, budget),
-        budget,
-      );
-      const hullHigh = addExact(
-        first.vertex,
-        multiplyExact(eUpper, first.error, budget),
-        budget,
-      );
-      const hullWidth = subtractExact(hullHigh, hullLow, budget);
-      if (!positive(hullWidth))
-        return fail(
-          EXISTENCE,
-          "The true terminal offsets are not proved to overlap at the vertex.",
-        );
-      const fractions = [first, second].map((side) =>
-        up(divideExact(hullWidth, side.advance, budget)),
-      );
-      if (!fractions.every((fraction) => fraction < 1))
-        return fail(
-          WINDOW,
-          "The vertex window of a terminal leaf is not proved inside it (t ≥ 1).",
-        );
       /** Lemma P: exact source restriction to the natural vertex-end window. */
       const trueWindow = (side: Side, fraction: number) => {
         const t = exactFromNumber(fraction, budget);
@@ -1295,23 +1378,64 @@ function certifyChain(
           minimum([refined[1], side.trueSlopes[1]]),
         ] as const;
       };
-      const firstTrue = trueWindow(first, fractions[0]!);
-      const secondTrue = firstTrue && trueWindow(second, fractions[1]!);
-      if (!firstTrue || !secondTrue)
-        return fail(
-          CLASSIFICATION,
-          "The source hodograph is not proved inside the graph cone on a vertex window.",
+      /**
+       * Lemma P window from the vertex errors: H ⊇ [α_Q, β_P]; t = |H|/adv_O
+       * rounded up, t < 1; σ > 0 on the exact vertex-end source windows.
+       */
+      const lemmaP = (
+        vertex: Pair,
+      ):
+        | Failure
+        | {
+            readonly separation: ExactFraction;
+            readonly leftTurn: boolean;
+          } => {
+        const hullLow = subtractExact(
+          second.vertex,
+          multiplyExact(eUpper, vertex[1], budget),
+          budget,
         );
-      // d > 0: the outgoing (Q) slopes exceed the incoming (P) ones; mirrored.
-      const leftTurn = positive(distance);
-      const separation = leftTurn
-        ? subtractExact(secondTrue[0], firstTrue[1], budget)
-        : subtractExact(firstTrue[0], secondTrue[1], budget);
-      if (!positive(separation))
-        return fail(
-          CLASSIFICATION,
-          "The true terminal slopes are not proved separated on the vertex windows.",
+        const hullHigh = addExact(
+          first.vertex,
+          multiplyExact(eUpper, vertex[0], budget),
+          budget,
         );
+        const hullWidth = subtractExact(hullHigh, hullLow, budget);
+        if (!positive(hullWidth))
+          return fail(
+            EXISTENCE,
+            "The true terminal offsets are not proved to overlap at the vertex.",
+          );
+        const fractions = [first, second].map((side) =>
+          up(divideExact(hullWidth, side.advance, budget)),
+        );
+        if (!fractions.every((fraction) => fraction < 1))
+          return fail(
+            WINDOW,
+            "The vertex window of a terminal leaf is not proved inside it (t ≥ 1).",
+          );
+        const firstTrue = trueWindow(first, fractions[0]!);
+        const secondTrue = firstTrue && trueWindow(second, fractions[1]!);
+        if (!firstTrue || !secondTrue)
+          return fail(
+            CLASSIFICATION,
+            "The source hodograph is not proved inside the graph cone on a vertex window.",
+          );
+        // d > 0: the outgoing (Q) slopes exceed the incoming (P) ones; mirrored.
+        const leftTurn = positive(distance);
+        const separation = leftTurn
+          ? subtractExact(secondTrue[0], firstTrue[1], budget)
+          : subtractExact(firstTrue[0], secondTrue[1], budget);
+        if (!positive(separation))
+          return fail(
+            CLASSIFICATION,
+            "The true terminal slopes are not proved separated on the vertex windows.",
+          );
+        return { separation, leftTurn };
+      };
+      const window = lemmaP(leafWide);
+      if ("code" in window) return window;
+      const { leftTurn } = window;
 
       // Emitted witness: stored bounds through the stored query-domain map.
       const witness = (side: Side, bounds: readonly [number, number]) => {
@@ -1370,15 +1494,22 @@ function certifyChain(
           side.trueSlopes[1],
           negateExact(side.trueSlopes[0], budget),
         ]);
-        return multiplyExact(
-          multiplyExact(side.error, side.error, budget),
-          addExact(one, multiplyExact(bound, bound, budget), budget),
+        const errorSquared = multiplyExact(side.error, side.error, budget);
+        const factor = addExact(
+          one,
+          multiplyExact(bound, bound, budget),
           budget,
         );
+        return {
+          squared: multiplyExact(errorSquared, factor, budget),
+          factor,
+        };
       };
       const toleranceSquared = multiplyExact(tolerance, tolerance, budget);
-      const firstSquared = deviationSquared(first);
-      const secondSquared = deviationSquared(second);
+      const firstDeviation = deviationSquared(first);
+      const secondDeviation = deviationSquared(second);
+      const firstSquared = firstDeviation.squared;
+      const secondSquared = secondDeviation.squared;
       if (
         compareExact(firstSquared, toleranceSquared, budget) > 0 ||
         compareExact(secondSquared, toleranceSquared, budget) > 0
@@ -1392,66 +1523,153 @@ function certifyChain(
       if (!firstUpper || !secondUpper)
         return fail(COMPOSITION, "A verified square-root bound is not finite.");
 
-      // Lemma X (E-emit): the true crossing is unique, inside both windows.
-      const shift = divideExact(
-        multiplyExact(
-          eUpper,
-          addExact(firstUpper, secondUpper, budget),
+      /**
+       * Lemma X (E-emit): the true crossing is unique, inside both windows.
+       * `vertex` bounds |E − O| at each vertex pole, `witness` on each
+       * emitted witness parameter (Lemma V at x̂, root reach), `upper` the
+       * verified upper √ of the witness-point w. Null when a margin fails.
+       */
+      const lemmaX = (
+        vertex: Pair,
+        witness: Pair,
+        upper: Pair,
+        separation: ExactFraction,
+      ) => {
+        const shift = divideExact(
+          multiplyExact(eUpper, addExact(upper[0], upper[1], budget), budget),
+          separation,
           budget,
-        ),
-        separation,
-        budget,
-      );
-      const switchLow = subtractExact(crossingLow, shift, budget);
-      const switchHigh = addExact(crossingHigh, shift, budget);
-      if (
-        compareExact(
-          switchHigh,
-          subtractExact(
-            first.vertex,
-            multiplyExact(eUpper, first.error, budget),
+        );
+        const switchLow = subtractExact(crossingLow, shift, budget);
+        const switchHigh = addExact(crossingHigh, shift, budget);
+        if (
+          compareExact(
+            switchHigh,
+            subtractExact(
+              first.vertex,
+              multiplyExact(eUpper, vertex[0], budget),
+              budget,
+            ),
             budget,
-          ),
-          budget,
-        ) >= 0 ||
-        compareExact(
+          ) >= 0 ||
+          compareExact(
+            switchLow,
+            addExact(
+              second.vertex,
+              multiplyExact(eUpper, vertex[1], budget),
+              budget,
+            ),
+            budget,
+          ) <= 0
+        )
+          return null;
+        const rootBounds = (
+          side: Side,
+          found: NonNullable<typeof firstWitness>,
+          error: ExactFraction,
+        ): [number, number] => {
+          const reach = divideExact(
+            addExact(
+              addExact(
+                shift,
+                subtractExact(crossingHigh, crossingLow, budget),
+                budget,
+              ),
+              multiplyExact(eUpper, error, budget),
+              budget,
+            ),
+            side.advance,
+            budget,
+          );
+          return [
+            down(subtractExact(found.from, reach, budget)),
+            up(addExact(found.to, reach, budget)),
+          ];
+        };
+        return {
           switchLow,
-          addExact(
-            second.vertex,
-            multiplyExact(eUpper, second.error, budget),
-            budget,
-          ),
-          budget,
-        ) <= 0
-      )
+          switchHigh,
+          firstRootBounds: rootBounds(first, firstWitness, witness[0]),
+          secondRootBounds: rootBounds(second, secondWitness, witness[1]),
+        };
+      };
+      /**
+       * Q4-E1 local branch (only after the leaf-wide Lemma X failed): the same
+       * Lemma P and Lemma X with ε replaced, at each vertex pole, by π_v, and
+       * on each witness parameter by the local bound on the vertex-anchored
+       * sub-window reaching the far stored witness bound. Lemma V's leaf-wide
+       * w ≤ τ (Lemma GM), Lemma C and the stars keep the leaf-wide ε.
+       * Exactly two more restrictions (the local Lemma-P source windows).
+       */
+      const localLemmaX = () => {
+        budget.operation(LOCAL_ERROR_PRECHARGE);
+        const vertexError = (side: Side) =>
+          localBound(side.end.leaf, side.end.side, null);
+        const firstVertex = vertexError(first);
+        const secondVertex = firstVertex && vertexError(second);
+        if (!firstVertex || !secondVertex) return null;
+        const vertex: Pair = [firstVertex, secondVertex];
+        const localWindow = lemmaP(vertex);
+        if ("code" in localWindow) return null;
+        const witnessError = (
+          side: Side,
+          found: NonNullable<typeof firstWitness>,
+        ) => {
+          const reach =
+            side.end.side === "end"
+              ? subtractExact(one, found.from, budget)
+              : found.to;
+          return negative(reach)
+            ? null
+            : localBound(side.end.leaf, side.end.side, reach);
+        };
+        const firstLocal = witnessError(first, firstWitness);
+        const secondLocal = firstLocal && witnessError(second, secondWitness);
+        if (!firstLocal || !secondLocal) return null;
+        const deviationUpper = (
+          error: ExactFraction,
+          deviation: typeof firstDeviation,
+        ) =>
+          squareRootUpper(
+            multiplyExact(
+              multiplyExact(error, error, budget),
+              deviation.factor,
+              budget,
+            ),
+          );
+        const firstLocalUpper = deviationUpper(firstLocal, firstDeviation);
+        const secondLocalUpper =
+          firstLocalUpper && deviationUpper(secondLocal, secondDeviation);
+        if (!firstLocalUpper || !secondLocalUpper) return null;
+        const located = lemmaX(
+          vertex,
+          [firstLocal, secondLocal],
+          [firstLocalUpper, secondLocalUpper],
+          localWindow.separation,
+        );
+        return located && { ...located, separation: localWindow.separation };
+      };
+      const leafWideLocated = lemmaX(
+        leafWide,
+        leafWide,
+        [firstUpper, secondUpper],
+        window.separation,
+      );
+      const located = leafWideLocated
+        ? { ...leafWideLocated, separation: window.separation }
+        : localLemmaX();
+      if (!located)
         return fail(
           EXISTENCE,
           "The true terminal offsets are not proved to cross once inside both terminal leaves.",
         );
-      const rootBounds = (
-        side: Side,
-        found: NonNullable<typeof firstWitness>,
-      ): [number, number] => {
-        const reach = divideExact(
-          addExact(
-            addExact(
-              shift,
-              subtractExact(crossingHigh, crossingLow, budget),
-              budget,
-            ),
-            multiplyExact(eUpper, side.error, budget),
-            budget,
-          ),
-          side.advance,
-          budget,
-        );
-        return [
-          down(subtractExact(found.from, reach, budget)),
-          up(addExact(found.to, reach, budget)),
-        ];
-      };
-      const firstRootBounds = rootBounds(first, firstWitness);
-      const secondRootBounds = rootBounds(second, secondWitness);
+      const {
+        switchLow,
+        switchHigh,
+        firstRootBounds,
+        secondRootBounds,
+        separation,
+      } = located;
 
       // Retention ½ at the natural vertex side; glue data for Lemma C.
       const eight = exact(8n, 1n, budget);
@@ -1598,11 +1816,7 @@ function certifyChain(
           "trim-window-unproven",
           "A verified square-root bound is not finite.",
         );
-      const tail = multiplyExact(
-        multiplyExact(speed, width, budget),
-        shift,
-        budget,
-      );
+      const speedWidth = multiplyExact(speed, width, budget);
       // Curve side: stored bounds through the stored query-domain map, ±δ.
       const curveBounds = firstIsLine
         ? declaration.secondParameterBounds
@@ -1615,60 +1829,116 @@ function certifyChain(
               (tubes[curveEnd.leaf] as NeutralCubicPieceTube).queryDomain,
               budget,
             );
-      const curveRoot: ExactRange = [
-        subtractExact(toLeaf(curveBounds[0]), shift, budget),
-        addExact(toLeaf(curveBounds[1]), shift, budget),
+      const curveLeaf: ExactRange = [
+        toLeaf(curveBounds[0]),
+        toLeaf(curveBounds[1]),
       ];
-      // Line side (H1 of the review): |t* − t̂| ≤ η/L_lo, η = ε_A + ε_B + Mδ.
-      const widen = divideExact(
-        addExact(addExact(lineError, curveError, budget), tail, budget),
-        line.length[0],
-        budget,
-      );
       const lineBounds = firstIsLine
         ? declaration.firstParameterBounds
         : declaration.secondParameterBounds;
-      const lineRoot: ExactRange = [
-        subtractExact(exactFromNumber(lineBounds[0], budget), widen, budget),
-        addExact(exactFromNumber(lineBounds[1], budget), widen, budget),
+      const lineLeaf: ExactRange = [
+        exactFromNumber(lineBounds[0], budget),
+        exactFromNumber(lineBounds[1], budget),
       ];
-      const jointDisplacement = addExact(curveError, tail, budget);
-      for (const [end, root] of [
-        [curveEnd, curveRoot],
-        [lineEnd, lineRoot],
-      ] as const) {
+      const reportIndex = trimReports.length;
+      /**
+       * Places the trim from the bound `atWitness` of |B̂ − B| at τ̂ and its
+       * δ; false (nothing written) when a root enclosure is not strictly
+       * interior. Cubic stars keep the leaf-wide ε plus the tail Mδ.
+       */
+      const place = (atWitness: ExactFraction, delta: ExactFraction) => {
+        const tail = multiplyExact(speedWidth, delta, budget);
+        const curveRoot: ExactRange = [
+          subtractExact(curveLeaf[0], delta, budget),
+          addExact(curveLeaf[1], delta, budget),
+        ];
+        // Line side (H1 of the review): |t* − t̂| ≤ η/L_lo, η = ε_A + ε_B(τ̂) + Mδ.
+        const widen = divideExact(
+          addExact(addExact(lineError, atWitness, budget), tail, budget),
+          line.length[0],
+          budget,
+        );
+        const lineRoot: ExactRange = [
+          subtractExact(lineLeaf[0], widen, budget),
+          addExact(lineLeaf[1], widen, budget),
+        ];
+        const jointDisplacement = addExact(atWitness, tail, budget);
+        const ends = [
+          [curveEnd, curveRoot],
+          [lineEnd, lineRoot],
+        ] as const;
         // Strictly interior: the true terminal point is removed and the far
         // end retained; ordering against the other end is the leaf check.
-        if (!positive(root[0]) || compareExact(root[1], one, budget) >= 0)
-          return fail(
-            "trim-window-unproven",
-            "A true-root enclosure is not strictly inside its terminal leaf.",
-          );
-        trimmedLeaves.add(end.leaf);
-        const isLine = lineData.has(end.leaf);
-        if (end.side === "start") {
-          trimStart[end.leaf] = root[1];
-          if (isLine) lineJointStart[end.leaf] = jointDisplacement;
-          else correctionStart[end.leaf] = tail;
-        } else {
-          trimEnd[end.leaf] = subtractExact(one, root[0], budget);
-          if (isLine) lineJointEnd[end.leaf] = jointDisplacement;
-          else correctionEnd[end.leaf] = tail;
+        for (const [, root] of ends)
+          if (!positive(root[0]) || compareExact(root[1], one, budget) >= 0)
+            return false;
+        for (const [end, root] of ends) {
+          trimmedLeaves.add(end.leaf);
+          const isLine = lineData.has(end.leaf);
+          if (end.side === "start") {
+            trimStart[end.leaf] = root[1];
+            if (isLine) lineJointStart[end.leaf] = jointDisplacement;
+            else correctionStart[end.leaf] = tail;
+          } else {
+            trimEnd[end.leaf] = subtractExact(one, root[0], budget);
+            if (isLine) lineJointEnd[end.leaf] = jointDisplacement;
+            else correctionEnd[end.leaf] = tail;
+          }
         }
-      }
-      const firstRoot = firstIsLine ? lineRoot : curveRoot;
-      const secondRoot = firstIsLine ? curveRoot : lineRoot;
-      trimReports.push({
-        kind: "trim",
-        jointIndex: declaration.jointIndex,
-        first: firstEnd.leaf,
-        second: secondEnd.leaf,
-        line: firstIsLine ? "first" : "second",
-        orientation,
-        firstRootBounds: [down(firstRoot[0]), up(firstRoot[1])],
-        secondRootBounds: [down(secondRoot[0]), up(secondRoot[1])],
-        tail: up(tail),
-      });
+        const firstRoot = firstIsLine ? lineRoot : curveRoot;
+        const secondRoot = firstIsLine ? curveRoot : lineRoot;
+        trimReports[reportIndex] = {
+          kind: "trim",
+          jointIndex: declaration.jointIndex,
+          first: firstEnd.leaf,
+          second: secondEnd.leaf,
+          line: firstIsLine ? "first" : "second",
+          orientation,
+          firstRootBounds: [down(firstRoot[0]), up(firstRoot[1])],
+          secondRootBounds: [down(secondRoot[0]), up(secondRoot[1])],
+          tail: up(tail),
+        };
+        return true;
+      };
+      const trim = {
+        leaves: [curveEnd.leaf, lineEnd.leaf] as const,
+        local: false,
+        /**
+         * Q4-E1 local branch, at most once per trim and only after a
+         * leaf-wide window or composition failure: ε_B at τ̂ is replaced by
+         * the local bound on the vertex-anchored sub-window reaching the far
+         * stored bound of U; δ and every δ-derived quantity are recomputed.
+         */
+        upgrade: () => {
+          if (trim.local) return false;
+          trim.local = true;
+          budget.operation(LOCAL_ERROR_PRECHARGE);
+          if (curveLine) return false;
+          const reach =
+            curveEnd.side === "end"
+              ? subtractExact(one, curveLeaf[0], budget)
+              : curveLeaf[1];
+          const atWitness =
+            !negative(reach) && localBound(curveEnd.leaf, curveEnd.side, reach);
+          if (!atWitness) return false;
+          const delta = divideExact(
+            multiplyExact(
+              addExact(lineError, atWitness, budget),
+              line.length[1],
+              budget,
+            ),
+            advance,
+            budget,
+          );
+          return place(atWitness, delta);
+        },
+      };
+      lemmaTrims.push(trim);
+      if (!place(curveError, shift) && !trim.upgrade())
+        return fail(
+          "trim-window-unproven",
+          "A true-root enclosure is not strictly inside its terminal leaf.",
+        );
     }
   }
 
@@ -1699,17 +1969,20 @@ function certifyChain(
       ) >= 0
     )
       return leafFailure("retained domain not proved nonempty");
-    let star = errors[index]!;
-    for (const correction of [correctionStart[index], correctionEnd[index]])
-      if (correction) star = addExact(star, correction, budget);
-    const line = lineData.get(index);
-    if (line) {
+    const composed = () => {
+      let sum = errors[index]!;
+      for (const correction of [correctionStart[index], correctionEnd[index]])
+        if (correction) sum = addExact(sum, correction, budget);
+      const line = lineData.get(index);
+      if (!line) return sum;
       // Affine map of the retained segment: the larger end displacement.
       const startValue = lineJointStart[index] ?? line.endErrors[0];
       const endValue = lineJointEnd[index] ?? line.endErrors[1];
-      star =
-        compareExact(startValue, endValue, budget) >= 0 ? startValue : endValue;
-    }
+      return compareExact(startValue, endValue, budget) >= 0
+        ? startValue
+        : endValue;
+    };
+    let star = composed();
     const graphs = graphSides.get(index);
     if (graphs) {
       // S2 Lemma C: ε* = ε + c_far (the graph end adds no correction); the
@@ -1765,8 +2038,27 @@ function certifyChain(
     } else {
       const convex =
         arcStart[index] !== undefined || arcEnd[index] !== undefined;
-      const comparison = compareExact(star, tolerance, budget);
-      if (convex ? comparison >= 0 : comparison > 0)
+      const exceeds = (value: ExactFraction) => {
+        const comparison = compareExact(value, tolerance, budget);
+        return convex ? comparison >= 0 : comparison > 0;
+      };
+      let failed = exceeds(star);
+      if (failed && trimmed) {
+        // Q4-E1: upgrade this leaf's Lemma-T trims to the local ε at τ̂ (the
+        // star keeps the leaf-wide ε; only the tails Mδ shrink), recompose.
+        // Leaves composed earlier in this loop keep the stars and
+        // displacement bounds built from the pre-upgrade (larger) tails and
+        // joint displacements: still valid upper bounds (sound, conservative),
+        // just not re-tightened; the trim record reports the upgraded values.
+        let upgraded = false;
+        for (const trim of lemmaTrims)
+          if (trim.leaves.includes(index) && trim.upgrade()) upgraded = true;
+        if (upgraded) {
+          star = composed();
+          failed = exceeds(star);
+        }
+      }
+      if (failed)
         return leafFailure(
           convex
             ? "corrected base error is not below the modeling tolerance at a convex end"
