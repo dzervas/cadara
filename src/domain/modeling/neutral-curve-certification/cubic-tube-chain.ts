@@ -9,6 +9,9 @@ import type {
   NeutralCubicTube,
   NeutralLineTube,
   PieceTubeChainRequest,
+  TubeChainArcDeclaration,
+  TubeChainArcJoin,
+  TubeChainArcRecord,
   TubeChainGraphTrimJoin,
   TubeChainTrimJoin,
   TubeChainVertexAuthority,
@@ -35,6 +38,7 @@ import {
   divideExact,
   exact,
   exactFromNumber,
+  exactToNumber,
   multiplyExact,
   negateExact,
   outwardExactNumber,
@@ -236,6 +240,62 @@ import {
  *   meet only at Z by strict monotonicity).
  * - Failures of trim codes carry `magnitude: true` exactly when the failed
  *   check is a bound-versus-budget comparison (review R1 as briefed).
+ *
+ * T08b-e F1 arcs (`arcs`, piece path only; the same index space; user
+ * decision U2): at a convex declared vertex the chain may carry a true arc
+ * of centre V = P_v (bitwise), the GIVEN radius ρ (finite, > 0, certified as
+ * given [TECH E9]) and the exact turn orientation σ, from A′ to B′, the two
+ * neighbours' own free emitted terminal poles. Reference O* = O_P (untrimmed)
+ * ∪ arc(P_v, |d|; A → B°) ∪ [B°, B] ∪ O_Q (untrimmed) (R7 with the arc
+ * macroscopic); emitted E_v = [A′, Â] ∪ Ĉ ∪ [B̂, B′] with never-drawn radial
+ * connectors (consumers join by point identity and draw from rounded
+ * `atan2` angles, which are not certified). One fixed precharge per arc
+ * before authorization. With a = A′ − V, b = B′ − V and the exact reference
+ * directions nᵢ = sign(d)·rot(uᵢ), all exact on binary64 inputs, no angle:
+ * - Admission: C5 authority as a vertex; X ≠ 0, sign(d)·X < 0 (convex),
+ *   d ≠ 0, the sweep is σ; (A1) σ(a×b) > 0 (no zero-length arc, rule Z);
+ *   a·n₁ > 0 and b·n₂ > 0 (each end shift < π/2, review A2). Split rule
+ *   (R1): one sub-arc iff a·b > 0 ∧ a·n₂ > 0 ∧ b·n₁ > 0, else two at s = a +
+ *   b with σ(a×s), σ(s×b), a·s, s·b, σ(n₁×s), σ(s×n₂) > 0 (A4); every
+ *   emitted sub-arc sweep is then < π/2 and every reference sub-arc sweep
+ *   < π (only its σ-orientation is checked; Lemma A needs < π, R2 nothing
+ *   more).
+ * - Lemma A: the emitted and reference arcs are concentric (radii ρ, |d|);
+ *   with π_A, π_B the endpoint-local end bounds (owner π₀/π₃ capped by ε,
+ *   a line's exact end error), δ_a = ||a|² − d²|/|d|, u_A = |ρ² − |a|²|/ρ,
+ *   ε_in = max(|ρ − |d|| + δ_a + π_A, u_A + π_A), ε_out = |ρ − |d|| + δ_b +
+ *   π_B + |g|⁺ (|g|⁺ the only √), one sub-arc max(ε_in, ε_out). Every arc
+ *   leaf has a collapsed connector, so ε < τ STRICTLY and its
+ *   displacementBound is τ (the η-perturbed homeomorphism, review R3).
+ *   This holds on EVERY arc leaf, not only where the connectors collapse
+ *   with g = 0: when g ≠ 0 and ρ = |b| exactly, the exit connector has zero
+ *   length while its reference image, the bridge [B°, B], does not, so the
+ *   affine leaf map cannot be onto and only the η reparametrization (strict
+ *   ε, τ reserve) makes the Fréchet claim hold. Do not narrow the rule to
+ *   "collapsed connectors only".
+ * - Lemma E: e_in = σ·rot(a) makes [A′, Â] e-vertical; the incoming
+ *   terminal leaf's traversal emitted hodograph and O′ box corner (a line's
+ *   emitted step AND source direction, R7) are strictly e_in-positive, the
+ *   sub-arc wedges are e-positive by the split rule, so both E and O* are
+ *   locally simple at the entry; symmetrically e_out = σ·rot(b) at the exit
+ *   with e_out·g ≥ 0 (E4′). The bridge against the adjacent reference (R2):
+ *   one sub-arc needs e_out·(O′_P box) > 0 or e_in·g ≥ 0; two need
+ *   σrot(s)·g ≥ 0.
+ * - Composition: P and Q keep their own ε (no correction, reserve or
+ *   inflation at an arc end; each maps same-parameter onto its untrimmed
+ *   true offset). Arc leaves follow every piece leaf in adjacency order
+ *   [TECH E3]; K3 radius r = ε_k; K3 runs on every non-adjacent pair,
+ *   including the arc's (P, Q) leaves, with exact wedge boxes V + ρ·U (U the
+ *   verified unit-direction hull, ±1 at contained axis directions) hulled
+ *   with the connector end each carries, bisected at exactly admitted
+ *   binary64 near-bisectors; the connector end stays with its child (R8).
+ *   Closed chains need at least five leaves, arc leaves included.
+ * - A verified certificate carries exactly one record, one arc-entry and
+ *   one arc-exit join per declared arc, in declaration order; anything else
+ *   fails closed (a skipped arc would leave its adjacency uncertified).
+ * - G1 [TECH E4]: tan α = |a·h|/|a×h| is reported, never gated.
+ * - Failures of the arc stage and K3 failures of its leaves or its (P, Q)
+ *   pair carry `arcJoints` (never produced from the request).
  */
 
 type ExactPoint = readonly [ExactFraction, ExactFraction];
@@ -269,6 +329,8 @@ const LOCAL_ERROR_PRECHARGE = 128;
 const VERTEX_PRECHARGE = 64;
 /** Fixed entry charge of every staged retry k ≥ 2, before any work. */
 const RETRY_ENTRY_CHARGE = 64;
+/** Fixed per-declared-arc precharge (T08b-e), before its authorization. */
+const ARC_PRECHARGE = 64;
 const J2_MESSAGES = {
   cone: "The source tangents and leaf hodographs are not proved inside the join cone.",
   root: "A verified square-root bound is not finite and positive.",
@@ -386,6 +448,25 @@ interface KnotCandidate {
   readonly cross: ExactFraction;
 }
 
+/**
+ * One F1 sub-arc wedge (T08b-e, K3 geometry): the points V + ρ·w/|w| for w
+ * in the exact wedge [from, to] of sweep < π/2 and orientation σ, plus the
+ * radial connector to the exact emitted end it carries at `from` (A′) or at
+ * `to` (B′). A bisected wedge keeps each connector with the child that
+ * contains its end direction (review R8).
+ */
+interface ArcWedge {
+  readonly kind: "arc";
+  readonly jointIndex: number;
+  readonly center: ExactPoint;
+  readonly radius: ExactFraction;
+  readonly sigma: 1 | -1;
+  readonly from: ExactPoint;
+  readonly to: ExactPoint;
+  readonly start?: ExactPoint;
+  readonly end?: ExactPoint;
+}
+
 type J2Report =
   | {
       readonly side: "concave";
@@ -405,6 +486,7 @@ interface GeneralChain {
   readonly pieces: PieceTubeChainRequest["pieces"];
   readonly trims: PieceTubeChainRequest["trims"];
   readonly vertices: readonly TubeChainVertexDeclaration[];
+  readonly arcs: readonly TubeChainArcDeclaration[];
   readonly firstLeaf: readonly number[];
   readonly pieceOf: readonly number[];
   readonly lines: readonly (NeutralLineTube | undefined)[];
@@ -1357,6 +1439,16 @@ function certifyChain(
   }[] = [];
   const lineJointStart: (ExactFraction | undefined)[] = [];
   const lineJointEnd: (ExactFraction | undefined)[] = [];
+  // F1 arcs (T08b-e): arc leaf k is flattened after every piece leaf, at
+  // count + k [TECH E3]; each is one sub-arc wedge [from, to] (sweep < π/2)
+  // of centre V and the given radius ρ, hulled with the radial connector end
+  // it carries (A′ on the entry leaf, B′ on the exit leaf).
+  const arcLeaves: ArcWedge[] = [];
+  const arcStars: ExactFraction[] = [];
+  const arcReports: TubeChainArcJoin[] = [];
+  const arcRecords: TubeChainArcRecord[] = [];
+  /** Arc attribution of K3 pairs: arc leaf → jointIndex, and (P, Q) pairs. */
+  const arcNeighbours = new Map<string, number>();
   if (general) {
     const pieceCount = general.pieces.length;
     const down = (value: ExactFraction) =>
@@ -2471,6 +2563,351 @@ function certifyChain(
           true,
         );
     }
+
+    /**
+     * One F1 arc (header T08b-e): admission, the R1 split, Lemma A ε (strict,
+     * R3), the arc-entry/exit cones (Lemma E, R7), the bridge gates (E4′,
+     * R2), G1 and the records. Writes nothing into the neighbours' ends.
+     * Every failure is tagged with its `arcJoints`. Returns a failure, or null.
+     */
+    const certifyArc = (
+      declaration: TubeChainArcDeclaration,
+    ): Failure | null => {
+      budget.operation(ARC_PRECHARGE);
+      const index = declaration.jointIndex;
+      const firstPiece = index;
+      const secondPiece = (index + 1) % pieceCount;
+      const firstEnd = terminal(firstPiece, true);
+      const secondEnd = terminal(secondPiece, false);
+      const entryLeaf = count + arcLeaves.length;
+      const tagged = (failure: Failure): Failure => ({
+        ...failure,
+        arcJoints: [index],
+      });
+      const fail = (message: string) =>
+        tagged(
+          uncertain(
+            KNOT_UNPROVEN,
+            `Declared arc ${index}: ${message}`,
+            firstEnd.leaf,
+            secondEnd.leaf,
+          ),
+        );
+      const defect = authorityDefect(
+        declaration.authority,
+        firstPiece,
+        secondPiece,
+        firstEnd,
+        secondEnd,
+      );
+      if (defect) return fail(`${defect}.`);
+      const p = endData(firstEnd);
+      const q = endData(secondEnd);
+      if (!samePoint(declaration.center, p.vertex))
+        return fail(
+          "the centre is not bitwise the incoming terminal source vertex.",
+        );
+      if (!Number.isFinite(declaration.radius) || !(declaration.radius > 0))
+        return fail("the radius is not finite and positive.");
+      if (distanceValue === 0) return fail("zero offset distance (no side).");
+      // Exact classification on the traversal source tangents.
+      const incoming = vertexTangent(firstEnd);
+      const outgoing = vertexTangent(secondEnd);
+      if (!incoming || !outgoing)
+        return fail("the traversal source tangents are not proved nonzero.");
+      const turnSign = compareExact(
+        crossExact(incoming, outgoing, budget),
+        zero,
+        budget,
+      );
+      if (turnSign === 0)
+        return fail("exactly parallel source tangents have no arc.");
+      const sigma: 1 | -1 = turnSign > 0 ? 1 : -1;
+      if (positive(distance) === sigma > 0)
+        return fail("the vertex is not convex (sign(d)·X > 0).");
+      if (declaration.sweep !== (sigma > 0 ? "counterClockwise" : "clockwise"))
+        return fail("the sweep is not the exact source turn.");
+
+      // Exact arc data: a = A′ − V, b = B′ − V, reference directions
+      // nᵢ ∝ sign(d)·rot(uᵢ) (A − V = dN₁, B° − V = dN₂).
+      const oriented = (value: ExactFraction) =>
+        sigma > 0 ? value : negateExact(value, budget);
+      const turn = (u: ExactPoint, v: ExactPoint) =>
+        oriented(crossExact(u, v, budget));
+      const rotated = (v: ExactPoint): ExactPoint => [
+        negateExact(v[1], budget),
+        v[0],
+      ];
+      const center = exactPoint(declaration.center);
+      const radius = exactFromNumber(declaration.radius, budget);
+      const start = exactPoint(p.emitted);
+      const end = exactPoint(q.emitted);
+      const a = difference(start, center);
+      const b = difference(end, center);
+      // (A1) orientation: excludes zero length, zero sweep and reversal.
+      if (!positive(turn(a, b)))
+        return fail(
+          "the emitted arc ends are not in the exact turn orientation (zero length, zero sweep or reversed).",
+        );
+      const reference = (u: ExactPoint) =>
+        positive(distance) ? rotated(u) : negated(rotated(u));
+      const n1 = reference(incoming);
+      const n2 = reference(outgoing);
+      // (A2)/(A3) as exact direction signs (review A2): each end shift < π/2.
+      if (!positive(dot(a, n1)) || !positive(dot(b, n2)))
+        return fail(
+          "an emitted arc end direction is not within a quarter turn of its reference normal.",
+        );
+      // Split rule (R1): one sub-arc iff a·b > 0 ∧ a·n₂ > 0 ∧ b·n₁ > 0.
+      let split: ExactPoint | undefined;
+      if (
+        !positive(dot(a, b)) ||
+        !positive(dot(a, n2)) ||
+        !positive(dot(b, n1))
+      ) {
+        const s: ExactPoint = [
+          addExact(a[0], b[0], budget),
+          addExact(a[1], b[1], budget),
+        ];
+        // (A4): s inside the emitted wedge (both sub-sweeps < π/2) and the
+        // reference wedge W(n₁, n₂).
+        if (
+          !positive(turn(a, s)) ||
+          !positive(turn(s, b)) ||
+          !positive(dot(a, s)) ||
+          !positive(dot(s, b)) ||
+          !positive(turn(n1, s)) ||
+          !positive(turn(s, n2))
+        )
+          return fail(
+            "the sub-arc split a + b is not inside both the emitted and the reference wedges.",
+          );
+        split = s;
+      }
+
+      // End bounds π ≥ |A′ − A|, |B′ − B| (T08b-c local split, capped by ε).
+      const endBound = (end: Terminal) =>
+        lineData.get(end.leaf)?.endErrors[end.side === "end" ? 1 : 0] ??
+        localBound(end.leaf, end.side, null) ??
+        errors[end.leaf]!;
+      const entryBound = endBound(firstEnd);
+      const exitBound = endBound(secondEnd);
+      const gap = difference(exactPoint(q.vertex), exactPoint(p.vertex));
+      const gapZero =
+        compareExact(gap[0], zero, budget) === 0 &&
+        compareExact(gap[1], zero, budget) === 0;
+      let bridge = zero;
+      if (!gapZero) {
+        const norm = squareRootUpper(dot(gap, gap));
+        if (!norm) return fail(J2_MESSAGES.root);
+        bridge = norm;
+      }
+
+      // Lemma A (exact, √-free but |g|⁺): concentric emitted and reference arcs.
+      const absolute = (value: ExactFraction) =>
+        negative(value) ? negateExact(value, budget) : value;
+      const radiusAbs = absolute(distance);
+      const distanceSquared = multiplyExact(distance, distance, budget);
+      const radiusSquared = multiplyExact(radius, radius, budget);
+      const aSquared = dot(a, a);
+      const bSquared = dot(b, b);
+      const radiusGap = absolute(subtractExact(radius, radiusAbs, budget));
+      const shift = (squared: ExactFraction) =>
+        divideExact(
+          absolute(subtractExact(squared, distanceSquared, budget)),
+          radiusAbs,
+          budget,
+        );
+      const connector = (squared: ExactFraction) =>
+        divideExact(
+          absolute(subtractExact(radiusSquared, squared, budget)),
+          radius,
+          budget,
+        );
+      const entryConnector = connector(aSquared);
+      const exitConnector = connector(bSquared);
+      const entryError = maximum([
+        addExact(
+          addExact(radiusGap, shift(aSquared), budget),
+          entryBound,
+          budget,
+        ),
+        addExact(entryConnector, entryBound, budget),
+      ]);
+      const exitError = addExact(
+        addExact(
+          addExact(radiusGap, shift(bSquared), budget),
+          exitBound,
+          budget,
+        ),
+        bridge,
+        budget,
+      );
+      const epsilon = split
+        ? [entryError, exitError]
+        : [maximum([entryError, exitError])];
+      // R3: every arc leaf carries a collapsed radial connector, so its ε is
+      // strictly below τ (the η reserve) and displacementBound = τ.
+      for (const value of epsilon)
+        if (compareExact(value, tolerance, budget) >= 0)
+          return fail(
+            "an arc leaf's Lemma-A error is not strictly below the modeling tolerance.",
+          );
+
+      // Lemma E cones (E1/E1′, R7): e_in = σ·rot(a), e_out = σ·rot(b); each
+      // neighbour leaf's traversal emitted hodograph and O′ box corner (a
+      // line's emitted step AND source direction) are strictly e-positive.
+      const cone = (value: ExactPoint): ExactPoint =>
+        sigma > 0 ? rotated(value) : negated(rotated(value));
+      const entryCone = cone(a);
+      const exitCone = cone(b);
+      const boxAlong = (end: Terminal, e: ExactPoint) => {
+        const signed = end.reversed ? negated(e) : e;
+        const box = derivatives[end.leaf]!;
+        const corner: ExactPoint = [
+          box[0]![positive(signed[0]) ? 0 : 1]!,
+          box[1]![positive(signed[1]) ? 0 : 1]!,
+        ];
+        return dot(signed, corner);
+      };
+      const insideCone = (end: Terminal, e: ExactPoint) => {
+        const signed = end.reversed ? negated(e) : e;
+        return (
+          hodographs[end.leaf]!.every((step) => positive(dot(signed, step))) &&
+          positive(boxAlong(end, e))
+        );
+      };
+      const exitLeaf = entryLeaf + (split ? 1 : 0);
+      const coneFailure = (message: string, first: number, second: number) =>
+        tagged(
+          uncertain(
+            "cubic-tube-cone-unproven",
+            `Declared arc ${index}: ${message}`,
+            first,
+            second,
+          ),
+        );
+      if (!insideCone(firstEnd, entryCone))
+        return coneFailure(
+          "the incoming terminal leaf is not proved inside the arc-entry cone.",
+          firstEnd.leaf,
+          entryLeaf,
+        );
+      if (!insideCone(secondEnd, exitCone))
+        return coneFailure(
+          "the outgoing terminal leaf is not proved inside the arc-exit cone.",
+          exitLeaf,
+          secondEnd.leaf,
+        );
+      // The bridge [B°, B]: e_out·g ≥ 0 (E4′), and against the reference parts
+      // adjacent to its arc leaf (R2): O_P for one sub-arc, R₀ for two.
+      if (!gapZero) {
+        if (negative(dot(exitCone, gap)))
+          return coneFailure(
+            "backward declared gap at the arc exit (e_out·g < 0).",
+            exitLeaf,
+            secondEnd.leaf,
+          );
+        const covered = split
+          ? !negative(dot(cone(split), gap))
+          : positive(boxAlong(firstEnd, exitCone)) ||
+            !negative(dot(entryCone, gap));
+        if (!covered)
+          return coneFailure(
+            "the declared-gap bridge is not proved apart from the reference before it.",
+            firstEnd.leaf,
+            exitLeaf,
+          );
+      }
+
+      // G1 [TECH E4]: tan α = |w·h|/|w×h| at each end (w×h ≠ 0 by the cones).
+      const control = (end: Terminal, entering: boolean) => {
+        const steps = hodographs[end.leaf]!;
+        const natural = entering === end.reversed ? steps[2]! : steps[0]!;
+        return end.reversed ? negated(natural) : natural;
+      };
+      const deviation = (w: ExactPoint, h: ExactPoint) =>
+        up(
+          divideExact(
+            absolute(dot(w, h)),
+            absolute(crossExact(w, h, budget)),
+            budget,
+          ),
+        );
+      const nearest = (value: ExactPoint): SplineVector => [
+        exactToNumber(value[0], budget),
+        exactToNumber(value[1], budget),
+      ];
+      const leaves = split ? [entryLeaf, entryLeaf + 1] : [entryLeaf];
+      const wedge = { kind: "arc" as const, jointIndex: index, center, radius };
+      if (split)
+        arcLeaves.push(
+          { ...wedge, sigma, from: a, to: split, start },
+          { ...wedge, sigma, from: split, to: b, end },
+        );
+      else arcLeaves.push({ ...wedge, sigma, from: a, to: b, start, end });
+      arcStars.push(...epsilon);
+      arcNeighbours.set(
+        `${Math.min(firstEnd.leaf, secondEnd.leaf)}:${Math.max(firstEnd.leaf, secondEnd.leaf)}`,
+        index,
+      );
+      arcReports.push({
+        kind: "arc-entry",
+        jointIndex: index,
+        first: firstEnd.leaf,
+        second: entryLeaf,
+        direction: nearest(entryCone),
+        tangentDeviation: deviation(a, control(firstEnd, false)),
+      });
+      if (split)
+        arcReports.push({
+          kind: "arc-knot",
+          jointIndex: index,
+          first: entryLeaf,
+          second: exitLeaf,
+          direction: nearest(cone(split)),
+        });
+      arcReports.push({
+        kind: "arc-exit",
+        jointIndex: index,
+        first: exitLeaf,
+        second: secondEnd.leaf,
+        direction: nearest(exitCone),
+        tangentDeviation: deviation(b, control(secondEnd, true)),
+        bridge: gapZero ? 0 : up(bridge),
+      });
+      arcRecords.push({
+        jointIndex: index,
+        authority: declaration.authority.kind,
+        leaves,
+        center: [declaration.center[0], declaration.center[1]],
+        radius: declaration.radius,
+        sweep: declaration.sweep,
+        epsilon: epsilon.map(up),
+        entryConnector: up(entryConnector),
+        exitConnector: up(exitConnector),
+      });
+      return null;
+    };
+    for (const declaration of general.arcs) {
+      const failure = certifyArc(declaration);
+      if (failure) return failure;
+    }
+    // Closed chains need at least five leaves, arc leaves included (M0).
+    // Conservative, not needed for soundness (T08b-e math review §3): when
+    // every join's reference tangent set lies in an open half-plane
+    // (vertices, natural joins, arcs), the four adjacent pairs of a closed
+    // 4-leaf cycle turn by < 4π in total, while a simple closed O* turns by
+    // ±2π and the pair sum counts each leaf twice (≥ 4π); such a chain is
+    // therefore non-simple and K3 rejects it anyway (trims not covered).
+    if (closed && general.arcs.length > 0 && count + arcLeaves.length < 5)
+      return {
+        ...uncertain(
+          KNOT_UNPROVEN,
+          "A closed chain with a declared arc needs at least five leaves, arc leaves included.",
+        ),
+        arcJoints: general.arcs.map((arc) => arc.jointIndex),
+      };
   }
 
   // Per-leaf composition (sums of both ends) and the K3 radii.
@@ -2616,15 +3053,21 @@ function certifyChain(
     stars.push(star);
     radii.push(radius);
   }
+  // F1 arc leaves: star = K3 radius = the Lemma-A ε (no neighbour inflation).
+  for (const star of arcStars) {
+    stars.push(star);
+    radii.push(star);
+  }
 
   // K3: exact hull clearance of every non-join pair.
-  // Piece path: explicit adjacency (intra-piece natural joins, trims, wrap).
+  // Piece path: explicit adjacency (intra-piece natural joins, trims, wrap,
+  // vertex pairs, arc-entry/knot/exit; never an arc's (P, Q) leaf pair).
   const adjacency =
     general &&
     new Set(
       [
         ...joins,
-        ...[...trimReports, ...vertexReports].map((join) => [
+        ...[...trimReports, ...vertexReports, ...arcReports].map((join) => [
           join.first,
           join.second,
         ]),
@@ -2639,22 +3082,137 @@ function certifyChain(
       const values = cubic.map((point) => point[axis]);
       return [minimum(values), maximum(values)] as const;
     });
+  type K3Item = ExactCubic | ArcWedge;
+  const isArc = (item: K3Item): item is ArcWedge => !Array.isArray(item);
+  // Exact unit-direction enclosure per axis, one verified √ per distinct
+  // wedge direction (cached by identity; bisection children share them).
+  const units = new Map<ExactPoint, readonly ExactRange[] | null>();
+  const unitOf = (direction: ExactPoint) => {
+    const cached = units.get(direction);
+    if (cached !== undefined) return cached;
+    const length = squareRoot(dot(direction, direction));
+    const result =
+      length &&
+      ([0, 1] as const).map((axis): ExactRange => {
+        const near = divideExact(direction[axis], length[1], budget);
+        const far = divideExact(direction[axis], length[0], budget);
+        return compareExact(near, far, budget) <= 0 ? [near, far] : [far, near];
+      });
+    units.set(direction, result);
+    return result;
+  };
+  const orientedCross = (wedge: ArcWedge, u: ExactPoint, v: ExactPoint) => {
+    const value = crossExact(u, v, budget);
+    return wedge.sigma > 0 ? value : negateExact(value, budget);
+  };
+  /** Strictly inside the σ-oriented wedge [from, to] (sweep < π). */
+  const insideWedge = (wedge: ArcWedge, direction: ExactPoint) =>
+    positive(orientedCross(wedge, wedge.from, direction)) &&
+    positive(orientedCross(wedge, direction, wedge.to));
+  /**
+   * Exact box of a sub-arc wedge (sweep < π): V + ρ·U, U the per-axis hull
+   * of both end-direction enclosures and ±1 wherever ±e_k lies inside the
+   * wedge (each unit component is monotone there otherwise), hulled with
+   * the connector end it carries. Null when a √ bound is not positive.
+   */
+  const arcBox = (wedge: ArcWedge) => {
+    const from = unitOf(wedge.from);
+    const to = from && unitOf(wedge.to);
+    if (!from || !to) return null;
+    return ([0, 1] as const).map((axis) => {
+      const minusOne = negateExact(one, budget);
+      const unit: ExactPoint = axis === 0 ? [one, zero] : [zero, one];
+      const opposite: ExactPoint =
+        axis === 0 ? [minusOne, zero] : [zero, minusOne];
+      let low = minimum([from[axis]![0], to[axis]![0]]);
+      let high = maximum([from[axis]![1], to[axis]![1]]);
+      if (insideWedge(wedge, unit)) high = one;
+      if (insideWedge(wedge, opposite)) low = minusOne;
+      const values = [
+        addExact(
+          wedge.center[axis],
+          multiplyExact(wedge.radius, low, budget),
+          budget,
+        ),
+        addExact(
+          wedge.center[axis],
+          multiplyExact(wedge.radius, high, budget),
+          budget,
+        ),
+        ...[wedge.start, wedge.end].flatMap((point) =>
+          point ? [point[axis]] : [],
+        ),
+      ];
+      return [minimum(values), maximum(values)] as const;
+    });
+  };
+  /**
+   * Binary64 near-bisector m of a wedge, admitted only when exactly inside
+   * it; each connector end stays with the child containing its direction.
+   */
+  const splitArc = (wedge: ArcWedge) => {
+    const approximate = (value: ExactPoint) => {
+      const x = exactToNumber(value[0], budget);
+      const y = exactToNumber(value[1], budget);
+      const length = Math.hypot(x, y);
+      return [x / length, y / length] as const;
+    };
+    const from = approximate(wedge.from);
+    const to = approximate(wedge.to);
+    const middle: SplineVector = [from[0] + to[0], from[1] + to[1]];
+    if (!middle.every(Number.isFinite)) return null;
+    const direction = exactPoint(middle);
+    if (!insideWedge(wedge, direction)) return null;
+    const base = {
+      kind: "arc" as const,
+      jointIndex: wedge.jointIndex,
+      center: wedge.center,
+      radius: wedge.radius,
+      sigma: wedge.sigma,
+    };
+    return [
+      { ...base, from: wedge.from, to: direction, start: wedge.start },
+      { ...base, from: direction, to: wedge.to, end: wedge.end },
+    ] as const;
+  };
+  /** Arc attribution of a K3 pair: its arc leaves' arcs and (P, Q) pairs. */
+  const arcTag = (first: number, second: number) => {
+    const joints = new Set<number>();
+    for (const leaf of [first, second])
+      if (leaf >= count) joints.add(arcLeaves[leaf - count]!.jointIndex);
+    const neighbours = arcNeighbours.get(`${first}:${second}`);
+    if (neighbours !== undefined) joints.add(neighbours);
+    return joints.size > 0
+      ? { arcJoints: [...joints].sort((left, right) => left - right) }
+      : {};
+  };
   const squaredLength = (vector: ExactPoint) => dot(vector, vector);
   const clearedPairs: (readonly [number, number])[] = [];
   let maxSplits = 0;
-  for (let first = 0; first < count; first += 1) {
-    for (let second = first + 1; second < count; second += 1) {
+  const total = count + arcLeaves.length;
+  const itemOf = (leaf: number): K3Item =>
+    leaf < count ? poles[leaf]! : arcLeaves[leaf - count]!;
+  for (let first = 0; first < total; first += 1) {
+    for (let second = first + 1; second < total; second += 1) {
       if (isJoin(first, second)) continue;
       const radius = addExact(radii[first]!, radii[second]!, budget);
       const radiusSquared = multiplyExact(radius, radius, budget);
-      const stack: (readonly [ExactCubic, ExactCubic])[] = [
-        [poles[first]!, poles[second]!],
+      const stack: (readonly [K3Item, K3Item])[] = [
+        [itemOf(first), itemOf(second)],
       ];
+      const unproven = (message: string) => ({
+        ...uncertain("cubic-tube-clearance-unproven", message, first, second),
+        ...arcTag(first, second),
+      });
       let splits = 0;
       while (stack.length > 0) {
         const [left, right] = stack.pop()!;
-        const leftBox = box(left);
-        const rightBox = box(right);
+        const leftBox = isArc(left) ? arcBox(left) : box(left);
+        const rightBox = isArc(right) ? arcBox(right) : box(right);
+        if (!leftBox || !rightBox)
+          return unproven(
+            "An arc wedge box has no verified positive square-root bound.",
+          );
         const gap = (axis: 0 | 1) => {
           const above = subtractExact(
             rightBox[axis]![0],
@@ -2677,8 +3235,16 @@ function certifyChain(
         // Diagnostic and cost shortcut only: exact on-curve endpoints within
         // r_i + r_j cannot be separated by this certificate. Soundness never
         // depends on it; without it the loop fails closed on the budget.
-        for (const u of [left[0], left[3]])
-          for (const v of [right[0], right[3]])
+        // Arc wedges: only their exact connector ends (A′, B′) are exact
+        // on-curve points.
+        const ends = (item: K3Item) =>
+          isArc(item)
+            ? [item.start, item.end].filter(
+                (point): point is ExactPoint => point !== undefined,
+              )
+            : [item[0], item[3]];
+        for (const u of ends(left))
+          for (const v of ends(right))
             if (
               compareExact(
                 squaredLength(difference(u, v)),
@@ -2686,29 +3252,32 @@ function certifyChain(
                 budget,
               ) <= 0
             )
-              return uncertain(
-                "cubic-tube-clearance-unproven",
+              return unproven(
                 "Certified error tubes overlap; true-offset separation not proved.",
-                first,
-                second,
               );
         budget.refinementStep();
         splits += 1;
-        const width = (bounds: typeof leftBox) => {
+        const width = (bounds: NonNullable<typeof leftBox>) => {
           const x = subtractExact(bounds[0]![1], bounds[0]![0], budget);
           const y = subtractExact(bounds[1]![1], bounds[1]![0], budget);
           return compareExact(x, y, budget) > 0 ? x : y;
         };
-        if (compareExact(width(leftBox), width(rightBox), budget) >= 0)
-          stack.push(
-            [restrict(left, zero, half), right],
-            [restrict(left, half, one), right],
+        const halves = (item: K3Item) =>
+          isArc(item)
+            ? splitArc(item)
+            : ([
+                restrict(item, zero, half),
+                restrict(item, half, one),
+              ] as const);
+        const splitLeft =
+          compareExact(width(leftBox), width(rightBox), budget) >= 0;
+        const parts = halves(splitLeft ? left : right);
+        if (!parts)
+          return unproven(
+            "An arc wedge has no exactly admitted binary64 bisector.",
           );
-        else
-          stack.push(
-            [left, restrict(right, zero, half)],
-            [left, restrict(right, half, one)],
-          );
+        if (splitLeft) stack.push([parts[0], right], [parts[1], right]);
+        else stack.push([left, parts[0]], [left, parts[1]]);
       }
       maxSplits = Math.max(maxSplits, splits);
       clearedPairs.push([first, second]);
@@ -2742,6 +3311,17 @@ function certifyChain(
       clearanceRadius: unchanged(radii[index]!),
     };
   });
+  if (arcLeaves.length > 0) {
+    // F1 arc leaves (their records were bounded in their own metered step):
+    // strict ε < τ with collapsed connectors, so displacementBound = τ (R3).
+    budget.operation(3 * arcLeaves.length);
+    for (let index = count; index < total; index += 1)
+      leaves.push({
+        baseErrorStar: up(stars[index]!),
+        displacementBound: modelingTolerance,
+        clearanceRadius: up(radii[index]!),
+      });
+  }
   const certifiedJoins: TubePieceChainJoin[] = joins.map(
     ([first, second], index): CubicTubeChainJoin => {
       const direction = directions[index]!;
@@ -2775,7 +3355,28 @@ function certifyChain(
     },
   );
   // Trim records were bounded outward in their own metered step.
-  certifiedJoins.push(...trimReports, ...vertexReports);
+  certifiedJoins.push(...trimReports, ...vertexReports, ...arcReports);
+  // Every declared arc produced its record and its one entry/exit join pair
+  // (math review F2; uncharged). A skipped arc fails closed here.
+  if (general) {
+    const once = (kind: TubeChainArcJoin["kind"]) =>
+      arcReports
+        .filter((join) => join.kind === kind)
+        .map((join) => join.jointIndex);
+    const declared = general.arcs.map((arc) => arc.jointIndex);
+    const matches = (indices: readonly number[]) =>
+      indices.length === declared.length &&
+      indices.every((value, position) => value === declared[position]);
+    if (
+      !matches(arcRecords.map((record) => record.jointIndex)) ||
+      !matches(once("arc-entry")) ||
+      !matches(once("arc-exit"))
+    )
+      return uncertain(
+        "invalid-cubic-tube-chain",
+        "A declared arc has no certified record or join: every declared arc needs exactly one.",
+      );
+  }
   return {
     kind: "verified",
     certificate: {
@@ -2784,6 +3385,7 @@ function certifyChain(
       leaves,
       clearedPairs,
       maxSplits,
+      ...(arcRecords.length > 0 ? { arcs: arcRecords } : {}),
     },
   };
 }
@@ -2803,7 +3405,8 @@ const invalidPieceChain = (message: string): Failure =>
  * TRUE offset derivative, so such a leaf's emitted self-injectivity is never
  * checked and a looped emitted cubic can verify (an S2 graph-trim end does
  * check the emitted G1 cone; a Lemma-T end does not). A vertex end runs K1 on
- * the whole emitted leaf. Callers must reject the other one-leaf pieces (the
+ * the whole emitted leaf, and so does an F1 arc end (T08b-e). Callers must
+ * reject the other one-leaf pieces (the
  * offset-chain wrapper does) until the emitted-cone fix for single-leaf
  * pieces lands here.
  */
@@ -2813,8 +3416,14 @@ function certifyPieceChain(
 ): TubePieceChainResult {
   const { pieces, trims, closed, modelingTolerance, distance } = request;
   const vertices = request.vertices ?? [];
+  const arcs = request.arcs ?? [];
   const only = pieces.length === 1 ? pieces[0] : undefined;
-  if (only?.kind === "cubic" && trims.length === 0 && vertices.length === 0) {
+  if (
+    only?.kind === "cubic" &&
+    trims.length === 0 &&
+    vertices.length === 0 &&
+    arcs.length === 0
+  ) {
     const owner = only.tubes[0]?.reference?.distance;
     if (
       owner !== undefined &&
@@ -2828,7 +3437,9 @@ function certifyPieceChain(
       budget,
     );
   }
-  budget.operation(pieces.length + trims.length + vertices.length);
+  budget.operation(
+    pieces.length + trims.length + vertices.length + arcs.length,
+  );
   if (pieces.length === 0)
     return {
       kind: "unsupported",
@@ -2838,13 +3449,16 @@ function certifyPieceChain(
   if (!Number.isFinite(distance))
     return invalidPieceChain("The chain distance must be finite.");
   // One index space (review R5): every declared adjacency is covered exactly
-  // once by a trim or a vertex; each list strictly increasing.
+  // once by a trim, a vertex or an arc; each list strictly increasing.
   const adjacencies = closed ? pieces.length : pieces.length - 1;
-  if (trims.length + vertices.length !== adjacencies)
+  const declaredOnly = vertices.length === 0 && arcs.length === 0;
+  if (trims.length + vertices.length + arcs.length !== adjacencies)
     return invalidPieceChain(
-      vertices.length === 0
+      declaredOnly
         ? "One trim declaration is required per inter-piece adjacency."
-        : "One trim or vertex declaration is required per adjacency.",
+        : arcs.length === 0
+          ? "One trim or vertex declaration is required per adjacency."
+          : "One trim, vertex or arc declaration is required per adjacency.",
     );
   const covered = new Set<number>();
   const admissibleIndex = (value: number, previous: number) =>
@@ -2855,7 +3469,7 @@ function certifyPieceChain(
   for (const [index, trim] of trims.entries()) {
     if (
       !admissibleIndex(trim.jointIndex, trims[index - 1]?.jointIndex ?? -1) ||
-      (vertices.length === 0 && trim.jointIndex !== index) ||
+      (declaredOnly && trim.jointIndex !== index) ||
       !orderedFinite(trim.firstParameterBounds) ||
       !orderedFinite(trim.secondParameterBounds)
     )
@@ -2872,6 +3486,15 @@ function certifyPieceChain(
     )
       return invalidPieceChain(`Vertex ${index}: invalid declaration.`);
     covered.add(vertex.jointIndex);
+  }
+  for (const [index, arc] of arcs.entries()) {
+    if (
+      !admissibleIndex(arc.jointIndex, arcs[index - 1]?.jointIndex ?? -1) ||
+      !Array.isArray(arc.center) ||
+      !finitePoint(arc.center)
+    )
+      return invalidPieceChain(`Arc ${index}: invalid declaration.`);
+    covered.add(arc.jointIndex);
   }
   const tubes: (NeutralCubicPieceTube | undefined)[] = [];
   const lines: (NeutralLineTube | undefined)[] = [];
@@ -2902,7 +3525,7 @@ function certifyPieceChain(
       tubes: tubes as readonly NeutralCubicTube[],
     },
     budget,
-    { distance, pieces, trims, vertices, firstLeaf, pieceOf, lines },
+    { distance, pieces, trims, vertices, arcs, firstLeaf, pieceOf, lines },
   );
 }
 

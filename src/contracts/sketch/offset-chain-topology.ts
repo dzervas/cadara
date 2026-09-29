@@ -8,6 +8,7 @@ import type {
   NeutralCurveQueryRequest,
   NeutralCurveQueryResult,
   PieceTubeChainRequest,
+  TubeChainArcDeclaration,
   TubeChainPiece,
   TubeChainTrimDeclaration,
   TubeChainVertexAuthority,
@@ -15,6 +16,10 @@ import type {
   TubePieceChainResult,
 } from "@/contracts/modeling/neutral-curve-query";
 import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
+import {
+  canonicalArcSupport,
+  type CanonicalArcSupport,
+} from "@/contracts/sketch/canonical-arc-support";
 import type { DeclaredOffsetChainConnectivity } from "@/contracts/sketch/offset-chain-connectivity";
 import {
   OFFSET_DIAGNOSTIC_CODES,
@@ -53,9 +58,10 @@ import {
  * leaves, K3 on every other leaf pair, the joint query plus Lemma T at every
  * line trim or the S2 graph trim, with its emitted G1 cone, at every
  * cubic↔cubic trim). Chains outside the certifier's scope are
- * `topologyStabilityUnsupported`, never valid without a certificate. Fallback
- * arcs and tangent-continuous joints with a spline side are temporarily
- * unsupported.
+ * `topologyStabilityUnsupported`, never valid without a certificate. Without
+ * declared vertices, fallback arcs and tangent-continuous joints with a
+ * spline side are unsupported; with them (T08b-d/e) a convex declared vertex
+ * is absorbed or joined by an F1 arc, never queried.
  */
 
 /** One whole-request pair meter: every query of the request draws on it. */
@@ -109,9 +115,16 @@ export interface OffsetChainTopologyInput {
    * Declared vertices (T08b-d), one per declared adjacency in order: built
    * only from the fresh adapter's source data (`declaredOffsetChainVertices`).
    * Absent: every adjacency is a joint query, as before. Present: each is
-   * classified exactly first (parallel issues no query).
+   * classified exactly first (parallel issues no query; T08b-e: nor does a
+   * convex nonparallel one, [TECH E1]).
    */
   readonly vertices?: readonly OffsetChainVertex[];
+  /**
+   * The chain distance d (T08b-e). Required with `vertices` as soon as one is
+   * nonparallel: its exact side sign(d)·(u₁ × u₂) decides whether it is
+   * queried (concave) or absorbed / joined by an F1 arc (convex).
+   */
+  readonly distance?: number;
 }
 
 /** Declared authority of one adjacency: point IDs and the closure flag only. */
@@ -170,16 +183,35 @@ export interface ResolvedOffsetVertex {
    * certify (review R6).
    */
   readonly trigger?: {
-    readonly step: "query" | "flip";
+    /**
+     * `convex` (T08b-e): a convex vertex absorbed with no arc left to try,
+     * reporting its failed arc (E2 fallback, E8 pre-test) or its missing
+     * admissible arc (rule Z).
+     */
+    readonly step: "query" | "flip" | "convex";
     readonly failure: OffsetChainFailure;
   };
 }
 
-/** Where an active domain ends: the exact raw source end, a joint root, or a declared vertex. */
+/**
+ * An F1 arc at a convex declared vertex (T08b-e, U2): exactly what a
+ * consumer publishes. Centre = the incoming terminal SOURCE vertex P_v
+ * bitwise, start = the incoming piece's own emitted terminal pole A′, end =
+ * the outgoing piece's own emitted terminal pole B′ (bitwise; no adoption at
+ * an arc vertex), radius = `canonicalArcSupport` (hypot(A′ − V)), sweep =
+ * the exact source turn. The tube certificate certifies this radius as
+ * given; consumers must derive theirs with the same helper.
+ */
+export interface ResolvedOffsetArc extends CanonicalArcSupport {
+  readonly jointIndex: number;
+}
+
+/** Where an active domain ends: the exact raw source end, a joint root, a declared vertex or an F1 arc. */
 export type OffsetChainDomainEnd =
   | { readonly kind: "source" }
   | { readonly kind: "joint"; readonly jointIndex: number }
-  | { readonly kind: "vertex"; readonly vertexIndex: number };
+  | { readonly kind: "vertex"; readonly vertexIndex: number }
+  | { readonly kind: "arc"; readonly jointIndex: number };
 
 export interface ResolvedOffsetTrimJoint {
   /** The declared adjacency index (one index space with `vertices`, R5). */
@@ -232,6 +264,8 @@ export interface OffsetChainTopologySuccess {
   readonly joints: readonly ResolvedOffsetTrimJoint[];
   /** Declared vertices without a trim, in adjacency order (empty without `vertices`). */
   readonly vertices: readonly ResolvedOffsetVertex[];
+  /** F1 arcs at convex declared vertices, in adjacency order (T08b-e). */
+  readonly arcs: readonly ResolvedOffsetArc[];
 }
 
 export type OffsetChainTopologyResult =
@@ -265,6 +299,18 @@ export type OffsetChainTopologyJvp =
         SketchEntityId,
         { readonly start: SketchPoint2D; readonly end: SketchPoint2D }
       >;
+      /**
+       * Point variations of each F1 arc (T08b-e): the centre's declared
+       * source point and both neighbours' OWN terminal pole variations (no
+       * adoption at an arc vertex). The radius and angle variations are the
+       * point-defined arc's (`derived-geometry.ts`), never recomputed here.
+       */
+      readonly arcs: readonly {
+        readonly jointIndex: number;
+        readonly center: SketchPoint2D;
+        readonly start: SketchPoint2D;
+        readonly end: SketchPoint2D;
+      }[];
     }
   | OffsetChainFailure;
 
@@ -512,14 +558,7 @@ export function classifyOffsetChainVertex(vertex: OffsetChainVertex): {
   /** D = u₁·u₂ > 0 exactly. */
   readonly forward: boolean;
 } {
-  const tangent = (side: OffsetChainVertexSide) =>
-    [0, 1].map(
-      (axis) =>
-        scaledExact(side.tangent[1][axis]!) -
-        scaledExact(side.tangent[0][axis]!),
-    ) as [bigint, bigint];
-  const u = tangent(vertex.first);
-  const v = tangent(vertex.second);
+  const [u, v] = exactTangents(vertex);
   const zero = (w: readonly [bigint, bigint]) => w[0] === 0n && w[1] === 0n;
   if (zero(u) || zero(v)) return { class: "degenerate", forward: false };
   const cross = exactSign(u[0] * v[1] - u[1] * v[0]);
@@ -528,6 +567,128 @@ export function classifyOffsetChainVertex(vertex: OffsetChainVertex): {
     class: cross !== 0 ? "nonparallel" : forward ? "parallel" : "antiparallel",
     forward,
   };
+}
+
+/** The exact traversal tangents u₁, u₂ scaled by 2^1074 (BigInt). */
+function exactTangents(vertex: OffsetChainVertex) {
+  const tangent = (side: OffsetChainVertexSide) =>
+    [0, 1].map(
+      (axis) =>
+        scaledExact(side.tangent[1][axis]!) -
+        scaledExact(side.tangent[0][axis]!),
+    ) as [bigint, bigint];
+  return [tangent(vertex.first), tangent(vertex.second)] as const;
+}
+
+/** σ = sign(u₁ × u₂), exact. */
+function sourceTurn(vertex: OffsetChainVertex) {
+  const [u, v] = exactTangents(vertex);
+  return exactSign(u[0] * v[1] - u[1] * v[0]);
+}
+
+/** ⌈√n⌉ of a nonnegative integer (exact Newton iteration from above). */
+function ceilingSquareRoot(value: bigint) {
+  if (value < 2n) return value;
+  let root = 1n << BigInt((value.toString(2).length + 1) >> 1);
+  for (;;) {
+    const next = (root + value / root) >> 1n;
+    if (next >= root) break;
+    root = next;
+  }
+  return root * root === value ? root : root + 1n;
+}
+
+/** The exact T08b-e plan of one convex nonparallel declared vertex. */
+interface ConvexVertexPlan {
+  /** D = u₁·u₂ > 0: absorbable (U1), so an arc may fall back to absorption. */
+  readonly forward: boolean;
+  /** Rule Z (T6): A′ = B′ bitwise or σ·(a × b) ≤ 0, so no arc is admissible. */
+  readonly zero: boolean;
+  /** U-E: G⁺ = δ⁺ + |g|⁺ < τ, the corner is proved to fit within τ. */
+  readonly fits: boolean;
+}
+
+/**
+ * Exact plan of a declared vertex whose side sign(d)·(u₁ × u₂) is convex
+ * (< 0); null for every other vertex (parallel, antiparallel, degenerate,
+ * concave, or d = 0: no side). Bounded BigInt arithmetic on binary64 inputs
+ * (unmetered, the T4 pattern): A′ and B′ are the two pieces' own emitted
+ * terminal poles, V = P_v. `fits` is user decision U-E's absorption
+ * precondition, Lemma G's G = δ + |g| (δ = |d|·|N₁ − N₂|, g = Q_v − P_v)
+ * PROVED below τ with exact integer-square-root upper bounds: G⁺ < τ is
+ * necessary for the keeper's strict composition, and the certifier re-proves
+ * it with its own bounds either way. No new tolerance.
+ */
+function convexVertexPlan(
+  pieces: readonly OffsetChainPiece[],
+  vertex: OffsetChainVertex,
+  distance: number,
+  modelingTolerance: number,
+): ConvexVertexPlan | null {
+  const [u, v] = exactTangents(vertex);
+  const cross = exactSign(u[0] * v[1] - u[1] * v[0]);
+  const side = Math.sign(distance) * cross;
+  if (cross === 0 || !(side < 0)) return null;
+  const product = u[0] * v[0] + u[1] * v[1];
+  const forward = product > 0n;
+  const count = pieces.length;
+  const start = emittedTerminal(pieceTerminal(pieces, vertex.jointIndex, true));
+  const end = emittedTerminal(
+    pieceTerminal(pieces, (vertex.jointIndex + 1) % count, false),
+  );
+  const scaled = (point: SketchPoint2D) =>
+    [scaledExact(point[0]), scaledExact(point[1])] as const;
+  const center = scaled(vertex.first.vertex);
+  let zero = !start || !end || samePoint(start.position, end.position);
+  if (!zero) {
+    const a = scaled(start!.position).map(
+      (value, axis) => value - center[axis]!,
+    );
+    const b = scaled(end!.position).map((value, axis) => value - center[axis]!);
+    zero = cross * exactSign(a[0]! * b[1]! - a[1]! * b[0]!) <= 0;
+  }
+  if (!forward) return { forward, zero, fits: false };
+  // Values scaled by S = 2^1074: δ² = 2d²(1 − D/W), W = |u₁||u₂| ≤ R =
+  // ⌈√(U₁U₂)⌉, so δ ≤ ⌈√(N·R)⌉/(S·R) with N = 2d²(R − D); |g| ≤ ⌈√(g·g)⌉/S.
+  const root = ceilingSquareRoot(
+    (u[0] * u[0] + u[1] * u[1]) * (v[0] * v[0] + v[1] * v[1]),
+  );
+  const d = scaledExact(distance);
+  const normals = ceilingSquareRoot(2n * d * d * (root - product) * root);
+  const gap = scaled(vertex.second.vertex).map(
+    (value, axis) => value - center[axis]!,
+  );
+  const bridge = ceilingSquareRoot(gap[0]! * gap[0]! + gap[1]! * gap[1]!);
+  return {
+    forward,
+    zero,
+    fits: normals + root * bridge < root * scaledExact(modelingTolerance),
+  };
+}
+
+/** The convex plan of every declared adjacency (null where not convex). */
+function convexVertexPlans(
+  input: OffsetChainTopologyInput,
+): readonly (ConvexVertexPlan | null)[] {
+  const { vertices, pieces, distance, modelingTolerance } = input;
+  if (!vertices) return [];
+  return vertices.map((vertex) => {
+    if (classifyOffsetChainVertex(vertex).class !== "nonparallel") return null;
+    if (distance === undefined)
+      throw new RangeError(
+        "A nonparallel declared offset vertex needs the chain distance",
+      );
+    return convexVertexPlan(pieces, vertex, distance, modelingTolerance);
+  });
+}
+
+/** Rule-Z / D ≤ 0 diagnostic of a convex vertex with no admissible arc. */
+function noArcFailure(seedEntityId: SketchEntityId) {
+  return failure(
+    codes.splineJointUnsupported,
+    "The convex declared vertex has no admissible arc (zero length, zero sweep or reversed ends).",
+    seedEntityId,
+  );
 }
 
 /** One adjacency's resolver decision (review R5: the adjacency index space). */
@@ -542,7 +703,50 @@ type AdjacencyDecision =
       /** Nonparallel with D > 0: may flip to absorption (SEL step 5). */
       readonly flippable: boolean;
     }
-  | { readonly kind: "vertex"; readonly vertex: ResolvedOffsetVertex };
+  | { readonly kind: "vertex"; readonly vertex: ResolvedOffsetVertex }
+  /** An F1 arc at a convex declared vertex (T08b-e); never queried. */
+  | { readonly kind: "arc"; readonly jointIndex: number };
+
+const decisionIndex = (decision: AdjacencyDecision) =>
+  decision.kind === "trim" || decision.kind === "arc"
+    ? decision.jointIndex
+    : decision.vertex.jointIndex;
+
+/**
+ * The initial decision of a convex declared vertex (T08b-e SEL step 3, user
+ * decision U-E): D > 0 and the corner proved within τ (or no admissible arc)
+ * ⇒ an absorption candidate; otherwise an F1 arc; D ≤ 0 without an
+ * admissible arc fails closed. `absorptionFirst` is false only on the
+ * test-only policy seam.
+ */
+function convexDecision(
+  plan: ConvexVertexPlan,
+  jointIndex: number,
+  keeper: "first" | "second",
+  seedEntityId: SketchEntityId,
+  absorptionFirst: boolean,
+): AdjacencyDecision | OffsetChainFailure {
+  if (plan.forward && (plan.zero || (absorptionFirst && plan.fits)))
+    return {
+      kind: "vertex",
+      vertex: {
+        jointIndex,
+        kind: "absorbed",
+        class: "nonparallel",
+        keeper,
+        ...(plan.zero
+          ? {
+              trigger: {
+                step: "convex" as const,
+                failure: noArcFailure(seedEntityId),
+              },
+            }
+          : {}),
+      },
+    };
+  if (plan.zero) return noArcFailure(seedEntityId);
+  return { kind: "arc", jointIndex };
+}
 
 /** The T2 structural keeper of a declared vertex (never geometry). */
 function ruleKeeper(
@@ -572,7 +776,12 @@ function ruleKeeper(
  * classified exactly: parallel issues no query; antiparallel fails closed; a
  * nonparallel vertex with D > 0 whose query is verified but inadmissible is
  * an absorption candidate (certified later, never here); an unverified query
- * always fails closed. Ordinary exceptions from the query propagate unchanged.
+ * always fails closed. T08b-e: a convex nonparallel vertex (exact side
+ * sign(d)·X < 0, `distance` required) issues no query [TECH E1]; it is an
+ * absorption candidate when D > 0 and its corner is proved within τ (U-E) or
+ * it has no admissible arc (rule Z), else an F1 arc (`arcs`, the canonical
+ * support of the input pieces). Ordinary exceptions from the query propagate
+ * unchanged.
  */
 export function resolveOffsetChainTopology(
   input: OffsetChainTopologyInput,
@@ -615,9 +824,10 @@ function firstTrigger(
 
 function decideOffsetChainAdjacencies(
   input: OffsetChainTopologyInput,
+  absorptionFirst = true,
 ): AdjacencyDecisions {
   const decisions: AdjacencyDecision[] = [];
-  const decided = decideAdjacencies(input, decisions);
+  const decided = decideAdjacencies(input, decisions, absorptionFirst);
   if (decided.ok) return decided;
   if ("exhausted" in decided) return decided.exhausted;
   return (
@@ -629,6 +839,7 @@ function decideOffsetChainAdjacencies(
 function decideAdjacencies(
   input: OffsetChainTopologyInput,
   decisions: AdjacencyDecision[],
+  absorptionFirst: boolean,
 ): AdjacencyDecisions | QueryBudgetExhausted {
   const { pieces, closed, modelingTolerance, query, vertices } = input;
   if (pieces.length === 0) {
@@ -694,7 +905,10 @@ function decideAdjacencies(
       "A declared vertex has exactly antiparallel traversal source tangents (a cusp): it is not absorbable.",
       pieces[antiparallel]!.seedEntityId,
     );
-  const queried = (index: number) => classes?.[index]?.class !== "parallel";
+  // [TECH E1]: a convex nonparallel vertex issues no query.
+  const plans = convexVertexPlans(input);
+  const queried = (index: number) =>
+    classes?.[index]?.class !== "parallel" && !plans[index];
   let jointCount = 0;
   for (let index = 0; index < adjacencyCount; index += 1)
     if (queried(index)) jointCount += 1;
@@ -704,6 +918,19 @@ function decideAdjacencies(
     const next = (index + 1) % pieces.length;
     const firstSeed = pieces[index]!.seedEntityId;
     const keeper = ruleKeeper(pieces, closed, index);
+    const plan = plans[index];
+    if (plan) {
+      const decision = convexDecision(
+        plan,
+        index,
+        keeper,
+        firstSeed,
+        absorptionFirst,
+      );
+      if ("ok" in decision) return decision;
+      decisions.push(decision);
+      continue;
+    }
     if (!queried(index)) {
       decisions.push({
         kind: "vertex",
@@ -855,14 +1082,38 @@ function assembleOffsetChainResolution(
     pieces[curves[curve]!.pieceIndex]!.seedEntityId;
   const jointRecords = new Map<number, JointRecord>();
   const vertices: ResolvedOffsetVertex[] = [];
+  const arcs: ResolvedOffsetArc[] = [];
   for (const decision of decisions) {
-    const index =
-      decision.kind === "trim"
-        ? decision.jointIndex
-        : decision.vertex.jointIndex;
+    const index = decisionIndex(decision);
     const next = (index + 1) % pieces.length;
     const end = terminal(pieces, pieceCurves, curves, index, "traversalEnd");
     const start = terminal(pieces, pieceCurves, curves, next, "traversalStart");
+    if (decision.kind === "arc") {
+      // The published arc [TECH E7]: centre P_v, the neighbours' own emitted
+      // terminal poles (after any adoption elsewhere), the canonical radius.
+      const vertex = input.vertices![index]!;
+      const from = emittedTerminal(pieceTerminal(pieces, index, true));
+      const to = emittedTerminal(pieceTerminal(pieces, next, false));
+      if (!from || !to)
+        return failure(
+          codes.topologyStabilityUnsupported,
+          "An F1 arc joins declared line and spline pieces only.",
+          pieces[index]!.seedEntityId,
+        );
+      arcs.push({
+        jointIndex: index,
+        ...canonicalArcSupport(
+          vertex.first.vertex,
+          from.position,
+          to.position,
+          sourceTurn(vertex) > 0 ? "counterClockwise" : "clockwise",
+        ),
+      });
+      const arcEnd = { kind: "arc", jointIndex: index } as const;
+      curves[end.curve]![end.side] = arcEnd;
+      curves[start.curve]![start.side] = arcEnd;
+      continue;
+    }
     if (decision.kind === "vertex") {
       vertices.push(decision.vertex);
       const vertexEnd = { kind: "vertex", vertexIndex: index } as const;
@@ -981,7 +1232,7 @@ function assembleOffsetChainResolution(
       endDomainEnd: endEnd,
     });
   }
-  return { ok: true, input, cubics, lineArcEndpoints, joints, vertices };
+  return { ok: true, input, cubics, lineArcEndpoints, joints, vertices, arcs };
 }
 
 export type OffsetChainTubeStabilityCertificate = Extract<
@@ -1547,11 +1798,12 @@ function declaredTubeRequest(
   const adjacencies = vertexAware
     ? declared.vertices.length
     : connectivity.joins.length;
-  const adjacencyKind: ("trim" | "vertex")[] = [];
+  const adjacencyKind: ("trim" | "vertex" | "arc")[] = [];
   if (vertexAware) {
     const expected = wrap ? count : count - 1;
     let trim = 0;
     let vertex = 0;
+    let arc = 0;
     for (let index = 0; index < adjacencies; index += 1) {
       if (resolved.joints[trim]?.jointIndex === index) {
         adjacencyKind.push("trim");
@@ -1559,16 +1811,49 @@ function declaredTubeRequest(
       } else if (resolved.vertices[vertex]?.jointIndex === index) {
         adjacencyKind.push("vertex");
         vertex += 1;
+      } else if (resolved.arcs[arc]?.jointIndex === index) {
+        adjacencyKind.push("arc");
+        arc += 1;
       } else return mismatch("The resolved joints are not the declared joins.");
     }
     if (
       trim !== resolved.joints.length ||
       vertex !== resolved.vertices.length ||
+      arc !== resolved.arcs.length ||
       (count > 1 && adjacencies !== expected) ||
       (count === 1 && adjacencies > (closed ? 1 : 0))
     )
       return mismatch("The resolved joints are not the declared joins.");
+    // Each arc is exactly the declared pieces' canonical arc (what a
+    // consumer publishes): centre P_v, the own emitted terminal poles.
+    for (const arc of resolved.arcs) {
+      const next = (arc.jointIndex + 1) % count;
+      const from = emittedTerminal(pieceTerminal(pieces, arc.jointIndex, true));
+      const to = emittedTerminal(pieceTerminal(pieces, next, false));
+      const vertex = declared.vertices[arc.jointIndex]!;
+      const canonical =
+        from &&
+        to &&
+        canonicalArcSupport(
+          vertex.first.vertex,
+          from.position,
+          to.position,
+          sourceTurn(vertex) > 0 ? "counterClockwise" : "clockwise",
+        );
+      if (
+        !canonical ||
+        !samePoint(arc.center, canonical.center) ||
+        !samePoint(arc.start, canonical.start) ||
+        !samePoint(arc.end, canonical.end) ||
+        !Object.is(arc.radius, canonical.radius) ||
+        arc.sweepDirection !== canonical.sweepDirection
+      )
+        return mismatch(
+          "A resolved arc is not the declared pieces' canonical arc.",
+        );
+    }
   } else if (
+    resolved.arcs.length !== 0 ||
     resolved.joints.length !== connectivity.joins.length ||
     connectivity.joins.length !== (wrap ? count : count - 1)
   )
@@ -1623,7 +1908,9 @@ function declaredTubeRequest(
       ? end.kind === "source"
       : adjacencyKind[expected] === "vertex"
         ? end.kind === "vertex" && end.vertexIndex === expected
-        : end.kind === "joint" && end.jointIndex === expected;
+        : adjacencyKind[expected] === "arc"
+          ? end.kind === "arc" && end.jointIndex === expected
+          : end.kind === "joint" && end.jointIndex === expected;
   const requestPieces: TubeChainPiece[] = [];
   for (const [index, piece] of pieces.entries()) {
     const source = sources[index]!;
@@ -1671,9 +1958,12 @@ function declaredTubeRequest(
       )
     )
       return mismatch("The resolution does not describe its own owner spans.");
-    // A vertex end runs K1 on the whole emitted leaf (R8, after adoption).
+    // A vertex or F1 arc end runs K1 on the whole emitted leaf (R8, after
+    // adoption; T08b-e arc-entry/exit cones).
     const vertexEnd = [low, high].some(
-      (end) => end !== null && adjacencyKind[end] === "vertex",
+      (end) =>
+        end !== null &&
+        (adjacencyKind[end] === "vertex" || adjacencyKind[end] === "arc"),
     );
     if (count > 1 && piece.spans.length === 1 && !vertexEnd)
       return failure(
@@ -1723,6 +2013,21 @@ function declaredTubeRequest(
                 declared.vertices[vertex.jointIndex]!.authority,
               ),
               keeper: vertex.keeper,
+            }),
+          ),
+        }
+      : {}),
+    ...(resolved.arcs.length > 0
+      ? {
+          arcs: resolved.arcs.map(
+            (arc): TubeChainArcDeclaration => ({
+              jointIndex: arc.jointIndex,
+              authority: certifierAuthority(
+                declared.vertices[arc.jointIndex]!.authority,
+              ),
+              center: arc.center,
+              radius: arc.radius,
+              sweep: arc.sweepDirection,
             }),
           ),
         }
@@ -1796,12 +2101,7 @@ function adoptDeclaredVertices(
   const count = pieces.length;
   const kinds = new Map<number, AdjacencyDecision["kind"]>();
   for (const decision of decisions)
-    kinds.set(
-      decision.kind === "trim"
-        ? decision.jointIndex
-        : decision.vertex.jointIndex,
-      decision.kind,
-    );
+    kinds.set(decisionIndex(decision), decision.kind);
   /** The adjacency kind at the OTHER traversal end of piece `index`. */
   const otherAdjacency = (index: number, exitingHere: boolean) => {
     if (count === 1) return undefined;
@@ -1846,7 +2146,8 @@ function adoptDeclaredVertices(
     const updated: AdjacencyDecision[] = [];
     const swappable = new Map<number, "first" | "second">();
     for (const decision of decisions) {
-      if (decision.kind === "trim") {
+      // An F1 arc end keeps its own emitted pole (no adoption there).
+      if (decision.kind !== "vertex") {
         updated.push(decision);
         continue;
       }
@@ -2043,23 +2344,36 @@ const MAGNITUDE_CODES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * SEL (T08b-d design §7 as amended; the declared-vertex chain entry, not
- * wired into any frame). One resolver request (steps 1–2, the joint queries
- * on one meter), then adoption (step 3) and ONE staged certifier request of
- * 1 + J_flip attempts (J_flip = trims with D > 0), never re-querying:
- * - Step 4: certify the adopted chain; verified ⇒ done.
- * - Step 5 flip, the only retry: when the certificate fails with a trim code
- *   whose check is genuinely a magnitude failure (`magnitude`, review R1 as
- *   briefed: a bound-versus-budget comparison; cone/sign, side,
- *   classification, structural, square-root and budget failures never flip),
- *   the lowest-index unflipped trim with D > 0 incident to a reported leaf
- *   becomes an absorption candidate. The flip is justified only by the
- *   independent re-certification of the absorbed, adopted chain.
- * - Failure precedence (review R6): a step-2(b) vertex that does not certify
- *   reports its step-2 resolver failure with "absorption not certified: …"
- *   appended; after a flip the original trim failure is reported. Budget
- *   exhaustion is always reported as itself. Every path ends in a verified
- *   certificate of the emitted chain or a diagnostic.
+ * SEL (T08b-d design §7, T08b-e design §7 as amended by user decision U-E;
+ * the declared-vertex chain entry, not wired into any frame). One resolver
+ * request (the joint queries on one meter; a convex vertex issues none,
+ * [TECH E1]), then adoption and ONE staged certifier request of 1 + J_flip +
+ * J_convex attempts (J_flip = trims with D > 0, J_convex = convex vertices
+ * with D > 0 and an admissible arc), never re-querying:
+ * - Convex vertex (U-E): with D > 0 and the corner proved within τ (G⁺ < τ)
+ *   it is an absorption candidate first, and an F1 arc if that absorption
+ *   does not build or certify with a failure at its terminal leaves;
+ *   otherwise an F1 arc first, falling back to absorption (D > 0 only,
+ *   [TECH E2], M4 amendment: "absorption after an arc failure with an
+ *   `arcJoints`-tagged code (cone, clearance, admission, ε), justified by
+ *   independent re-certification"). Rule Z (no admissible arc) absorbs
+ *   (D > 0) or fails closed. [TECH E8]: an arc whose neighbours' certified
+ *   errors already cover its chord (|A′ − B′| ≤ ε_P + ε_Q, the certifier's
+ *   own cubic errors, 0 for lines; exact) cannot clear K3, so it goes to
+ *   absorption without an attempt. Each convex vertex switches at most once.
+ * - Certify the adopted chain; verified ⇒ done. Otherwise, in this order:
+ *   the lowest arc of `arcJoints` that may still fall back; the T08b-d flip
+ *   (a magnitude-tagged trim code at the lowest-index unflipped D > 0 trim
+ *   incident to a reported leaf); the lowest absorbed convex vertex that may
+ *   still take its arc and whose terminal leaf is reported. Every retry is
+ *   justified only by the independent re-certification of the new chain.
+ * - Failure precedence (review R6): a convex vertex that tried both reports
+ *   its ARC failure with "Absorption not certified: …" appended; a step-2(b)
+ *   vertex its step-2 resolver failure, a rule-Z vertex its missing arc,
+ *   each with the absorption reason appended (the absorbed vertex whose
+ *   terminal leaves were reported, else the lowest); after a flip the
+ *   original trim failure. Budget exhaustion is always reported as itself. Every path ends
+ *   in a verified certificate of the emitted chain or a diagnostic.
  * Exceptions (queries, owner misuse, certifier) propagate unchanged.
  */
 export function certifyDeclaredOffsetChain(
@@ -2067,20 +2381,137 @@ export function certifyDeclaredOffsetChain(
   query: CertifiedNeutralCurveRequestQuery,
   certifier: CertifiedTubePieceChainRequests,
 ): OffsetChainTubeStabilityResult {
+  return selectDeclaredOffsetChain(declared, query, certifier, SEL_POLICY);
+}
+
+/** The SEL's two U-E routing choices; production always uses both. */
+export interface DeclaredOffsetChainPolicy {
+  /** U-E: absorb a convex D > 0 corner proved within τ before any arc. */
+  readonly absorptionFirst: boolean;
+  /** [TECH E8]: skip an arc attempt that cannot clear K3. */
+  readonly shortArcPretest: boolean;
+}
+
+const SEL_POLICY: DeclaredOffsetChainPolicy = {
+  absorptionFirst: true,
+  shortArcPretest: true,
+};
+
+/**
+ * Test-only policy seam (never production): `certifyDeclaredOffsetChain`
+ * with U-E's absorption-first order and/or the E8 pre-test switched off, so
+ * a native arc → absorption fallback is reachable (review R6(b)). Every
+ * result is still a certificate of the emitted chain or a diagnostic.
+ */
+export function certifyDeclaredOffsetChainWithPolicyForTest(
+  declared: DeclaredOffsetChainPieces,
+  query: CertifiedNeutralCurveRequestQuery,
+  certifier: CertifiedTubePieceChainRequests,
+  policy: DeclaredOffsetChainPolicy,
+): OffsetChainTubeStabilityResult {
+  return selectDeclaredOffsetChain(declared, query, certifier, policy);
+}
+
+/** Exact E8: |A′ − B′|² ≤ (ε_P + ε_Q)² on binary64 inputs (BigInt). */
+function shortArc(pieces: readonly OffsetChainPiece[], arc: ResolvedOffsetArc) {
+  const error = (index: number, exiting: boolean) => {
+    const { piece, side } = pieceTerminal(pieces, index, exiting);
+    if (piece.kind !== "derivedCubic") return 0n;
+    return scaledExact(
+      (side === "end" ? piece.spans.at(-1)! : piece.spans[0]!).certifiedError,
+    );
+  };
+  const reach =
+    error(arc.jointIndex, true) +
+    error((arc.jointIndex + 1) % pieces.length, false);
+  const chord = [0, 1].map(
+    (axis) => scaledExact(arc.end[axis]!) - scaledExact(arc.start[axis]!),
+  );
+  return chord[0]! * chord[0]! + chord[1]! * chord[1]! <= reach * reach;
+}
+
+function selectDeclaredOffsetChain(
+  declared: DeclaredOffsetChainPieces,
+  query: CertifiedNeutralCurveRequestQuery,
+  certifier: CertifiedTubePieceChainRequests,
+  policy: DeclaredOffsetChainPolicy,
+): OffsetChainTubeStabilityResult {
   const input: OffsetChainTopologyInput = {
     pieces: declared.pieces,
     closed: declared.connectivity.closed,
     modelingTolerance: declared.modelingTolerance,
     query,
     vertices: declared.vertices,
+    distance: declared.distance,
   };
-  const decided = decideOffsetChainAdjacencies(input);
+  const decided = decideOffsetChainAdjacencies(input, policy.absorptionFirst);
   if (!decided.ok) return decided;
   let decisions = decided.decisions;
+  // Convex vertices (T08b-e): the one switch each may still make.
+  const plans = convexVertexPlans(input);
+  const convex = new Map<
+    number,
+    {
+      readonly switchable: boolean;
+      absorptionTried: boolean;
+      arcTried: boolean;
+      absorptionReason?: string;
+    }
+  >();
+  plans.forEach((plan, index) => {
+    if (plan)
+      convex.set(index, {
+        switchable: plan.forward && !plan.zero,
+        absorptionTried: false,
+        arcTried: false,
+      });
+  });
   const flippable = decisions.filter(
     (decision) => decision.kind === "trim" && decision.flippable,
   ).length;
-  const request = certifier.openRequest(1 + flippable);
+  const switchable = [...convex.values()].filter(
+    (state) => state.switchable,
+  ).length;
+  const request = certifier.openRequest(1 + flippable + switchable);
+  const modeOf = (jointIndex: number) =>
+    decisions.find((decision) => decisionIndex(decision) === jointIndex)?.kind;
+  /** Switches one convex vertex to absorption (with its arc's failure) or to its arc. */
+  const switchTo = (
+    jointIndex: number,
+    mode: "absorbed" | "arc",
+    arcFailure?: OffsetChainFailure,
+  ) => {
+    decisions = decisions.map((decision) =>
+      decisionIndex(decision) !== jointIndex
+        ? decision
+        : mode === "arc"
+          ? { kind: "arc", jointIndex }
+          : {
+              kind: "vertex",
+              vertex: {
+                jointIndex,
+                kind: "absorbed",
+                class: "nonparallel",
+                keeper: ruleKeeper(declared.pieces, input.closed, jointIndex),
+                trigger: { step: "convex", failure: arcFailure! },
+              },
+            },
+    );
+  };
+  /** An absorbed convex vertex that may still take its arc. */
+  const mayTakeArc = (jointIndex: number) => {
+    const state = convex.get(jointIndex);
+    return (
+      state !== undefined &&
+      state.switchable &&
+      !state.arcTried &&
+      modeOf(jointIndex) === "vertex"
+    );
+  };
+  const withAbsorption = (failed: OffsetChainFailure, reason: string) => ({
+    ...failed,
+    message: `${failed.message} Absorption not certified: ${reason}`,
+  });
   let original: OffsetChainFailure | undefined;
   const flipped = new Set<number>();
   for (;;) {
@@ -2094,11 +2525,7 @@ export function certifyDeclaredOffsetChain(
       const trigger =
         vertex?.kind === "vertex" ? vertex.vertex.trigger : undefined;
       if (trigger?.step === "flip" && original) return original;
-      if (trigger)
-        return {
-          ...trigger.failure,
-          message: `${trigger.failure.message} Absorption not certified: ${reason}`,
-        };
+      if (trigger) return withAbsorption(trigger.failure, reason);
       return failure(
         codes.knotIncidenceUnproven,
         `Declared parallel vertex ${jointIndex} is not certified: ${reason}`,
@@ -2106,8 +2533,17 @@ export function certifyDeclaredOffsetChain(
       );
     };
     const adopted = adoptDeclaredVertices(declared, decisions);
-    if (!adopted.ok)
+    if (!adopted.ok) {
+      // U-E: an absorption-first corner whose adoption fails takes its arc.
+      if (mayTakeArc(adopted.jointIndex)) {
+        const state = convex.get(adopted.jointIndex)!;
+        state.absorptionTried = true;
+        state.absorptionReason = adopted.reason;
+        switchTo(adopted.jointIndex, "arc");
+        continue;
+      }
       return absorptionFailure(adopted.jointIndex, adopted.reason);
+    }
     const adoptedInput: OffsetChainTopologyInput = {
       ...input,
       pieces: adopted.declared.pieces,
@@ -2121,9 +2557,35 @@ export function certifyDeclaredOffsetChain(
         firstTrigger(adopted.decisions, resolved.message) ??
         (original && flipped.size > 0 ? original : resolved)
       );
+    // [TECH E8] on the adopted pieces: an arc that cannot clear K3 falls
+    // back to absorption without an attempt.
+    const short = policy.shortArcPretest
+      ? resolved.arcs.find(
+          (arc) =>
+            convex.get(arc.jointIndex)!.switchable &&
+            !convex.get(arc.jointIndex)!.absorptionTried &&
+            shortArc(adopted.declared.pieces, arc),
+        )
+      : undefined;
+    if (short) {
+      convex.get(short.jointIndex)!.arcTried = true;
+      switchTo(
+        short.jointIndex,
+        "absorbed",
+        failure(
+          codes.splineJointUnsupported,
+          "The convex declared vertex's arc chord is covered by its neighbours' certified errors (|A′ − B′| ≤ ε_P + ε_Q): its arc cannot be certified apart.",
+          declared.pieces[short.jointIndex]!.seedEntityId,
+        ),
+      );
+      continue;
+    }
     const pieceRequest = declaredTubeRequest(resolved, adopted.declared);
     if ("ok" in pieceRequest) return pieceRequest;
     const raw = request.certifyPieceChain(pieceRequest);
+    for (const [jointIndex, state] of convex)
+      if (modeOf(jointIndex) === "arc") state.arcTried = true;
+      else state.absorptionTried = true;
     const mapped = tubeStabilityResult(
       resolved,
       adopted.declared.pieces[0]!.seedEntityId,
@@ -2135,6 +2597,21 @@ export function certifyDeclaredOffsetChain(
     // Budget exhaustion is never folded into an R6 trigger: it is reported
     // as itself (one staged budget, sticky; no exhaustion swallow).
     if (raw.code === "exact-query-proof-budget-exhausted") return mapped;
+    // [TECH E2]: the lowest tagged arc that may still fall back.
+    const arcs = raw.arcJoints ?? [];
+    const fallback = arcs.find((jointIndex) => {
+      const state = convex.get(jointIndex);
+      return (
+        state !== undefined &&
+        state.switchable &&
+        !state.absorptionTried &&
+        modeOf(jointIndex) === "arc"
+      );
+    });
+    if (fallback !== undefined) {
+      switchTo(fallback, "absorbed", mapped);
+      continue;
+    }
     // SEL step 5: the lowest-index unflipped D > 0 trim at a reported leaf.
     const leaves = [raw.first, raw.second].filter(
       (leaf): leaf is number => leaf !== undefined,
@@ -2154,6 +2631,11 @@ export function certifyDeclaredOffsetChain(
       const size = piece.kind === "derivedCubic" ? piece.spans.length : 1;
       return firstLeaf[index]! + (side === "end" ? size - 1 : 0);
     };
+    const incident = (jointIndex: number) =>
+      [
+        terminalLeaf(jointIndex, true),
+        terminalLeaf((jointIndex + 1) % adopted.declared.pieces.length, false),
+      ].some((leaf) => leaves.includes(leaf));
     const target =
       raw.kind === "uncertain" &&
       raw.magnitude === true &&
@@ -2163,48 +2645,67 @@ export function certifyDeclaredOffsetChain(
               decision.kind === "trim" &&
               decision.flippable &&
               !flipped.has(decision.jointIndex) &&
-              [
-                terminalLeaf(decision.jointIndex, true),
-                terminalLeaf(
-                  (decision.jointIndex + 1) % adopted.declared.pieces.length,
-                  false,
-                ),
-              ].some((leaf) => leaves.includes(leaf)),
+              incident(decision.jointIndex),
           )
         : undefined;
-    // Any other failure is final: a failed absorption keeps its trigger.
-    if (!target || target.kind !== "trim") {
-      const absorbed = adopted.decisions.find(
-        (decision) =>
-          decision.kind === "vertex" && decision.vertex.trigger !== undefined,
+    if (target?.kind === "trim") {
+      original ??= mapped;
+      flipped.add(target.jointIndex);
+      decisions = decisions.map((decision) =>
+        decision.kind === "trim" && decision.jointIndex === target.jointIndex
+          ? {
+              kind: "vertex",
+              vertex: {
+                jointIndex: decision.jointIndex,
+                kind: "absorbed",
+                class: "nonparallel",
+                keeper: ruleKeeper(
+                  declared.pieces,
+                  input.closed,
+                  decision.jointIndex,
+                ),
+                trigger: { step: "flip", failure: mapped },
+              },
+            }
+          : decision,
       );
-      if (absorbed?.kind === "vertex")
-        return absorptionFailure(
-          absorbed.vertex.jointIndex,
-          `${raw.code}: ${raw.message}`,
-        );
-      return original ?? mapped;
+      continue;
     }
-    original ??= mapped;
-    flipped.add(target.jointIndex);
-    decisions = decisions.map((decision) =>
-      decision.kind === "trim" && decision.jointIndex === target.jointIndex
-        ? {
-            kind: "vertex",
-            vertex: {
-              jointIndex: decision.jointIndex,
-              kind: "absorbed",
-              class: "nonparallel",
-              keeper: ruleKeeper(
-                declared.pieces,
-                input.closed,
-                decision.jointIndex,
-              ),
-              trigger: { step: "flip", failure: mapped },
-            },
-          }
-        : decision,
+    // U-E: an absorbed corner failing at its terminal leaves takes its arc.
+    const arcTarget = [...convex.keys()]
+      .sort((left, right) => left - right)
+      .find((jointIndex) => mayTakeArc(jointIndex) && incident(jointIndex));
+    if (arcTarget !== undefined) {
+      convex.get(arcTarget)!.absorptionReason = `${raw.code}: ${raw.message}`;
+      switchTo(arcTarget, "arc");
+      continue;
+    }
+    // Any other failure is final. A tagged arc that already tried its
+    // absorption reports the arc failure with the absorption's reason.
+    const tried = arcs.find(
+      (jointIndex) =>
+        modeOf(jointIndex) === "arc" &&
+        convex.get(jointIndex)?.absorptionReason !== undefined,
     );
+    if (tried !== undefined)
+      return withAbsorption(mapped, convex.get(tried)!.absorptionReason!);
+    // A failed absorption keeps its trigger: the one whose terminal leaves
+    // were reported (math review A4), else the lowest.
+    const triggered = adopted.decisions.filter(
+      (decision) =>
+        decision.kind === "vertex" && decision.vertex.trigger !== undefined,
+    );
+    const absorbed =
+      triggered.find(
+        (decision) =>
+          decision.kind === "vertex" && incident(decision.vertex.jointIndex),
+      ) ?? triggered[0];
+    if (absorbed?.kind === "vertex")
+      return absorptionFailure(
+        absorbed.vertex.jointIndex,
+        `${raw.code}: ${raw.message}`,
+      );
+    return original ?? mapped;
   }
 }
 
@@ -2342,11 +2843,18 @@ function curveJet(
  * A finite nonzero joint determinant does not make arbitrary supplied
  * variations representable: their arithmetic can still overflow. Batch 2 must
  * not publish or consume a frame until every required JVP evaluation succeeds.
+ *
+ * An F1 arc (T08b-e) is point-defined: its centre varies with its declared
+ * source point (`sourcePointVariations`, by the vertex's first point ID,
+ * required when the resolution has arcs), its ends with the neighbours' OWN
+ * terminal variations (never adopted). Its radius and angle variations are
+ * the point-defined arc's (`derived-geometry.ts`).
  */
 export function resolveOffsetChainTopologyJvp(
   input: OffsetChainTopologyInput,
   resolved: OffsetChainTopologySuccess,
   variations: ReadonlyMap<SketchEntityId, OffsetChainPieceVariation>,
+  sourcePointVariations?: ReadonlyMap<SketchPointId, SketchPoint2D>,
 ): OffsetChainTopologyJvp {
   if (resolved.input !== input) {
     throw new RangeError(
@@ -2494,10 +3002,38 @@ export function resolveOffsetChainTopologyJvp(
       end: endpoint(endpoints.endDomainEnd, variation.end),
     });
   }
+  /** A piece's own terminal pole variation (an arc end is never adopted). */
+  const ownTerminal = (index: number, exiting: boolean) => {
+    const end = pieceTerminal(input.pieces, index, exiting);
+    if (end.piece.kind === "derivedCubic")
+      return emittedTerminal(end)!.differential!;
+    const variation = variations.get(end.piece.seedEntityId);
+    if (!variation || variation.kind !== end.piece.kind)
+      throw new RangeError(
+        `Missing variation for offset chain piece ${end.piece.seedEntityId}`,
+      );
+    return end.side === "end" ? variation.end : variation.start;
+  };
+  const arcs = resolved.arcs.map((arc) => {
+    const pointId = input.vertices![arc.jointIndex]!.first.pointId;
+    const center =
+      pointId === undefined ? undefined : sourcePointVariations?.get(pointId);
+    if (!center)
+      throw new RangeError(
+        `Missing source point variation for offset arc ${arc.jointIndex}`,
+      );
+    return {
+      jointIndex: arc.jointIndex,
+      center,
+      start: ownTerminal(arc.jointIndex, true),
+      end: ownTerminal((arc.jointIndex + 1) % input.pieces.length, false),
+    };
+  });
   return {
     ok: true,
     representativeQueryDomains,
     jointPositions,
     lineArcEndpoints,
+    arcs,
   };
 }
