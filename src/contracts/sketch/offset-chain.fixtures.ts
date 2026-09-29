@@ -265,22 +265,24 @@ export interface CornerMatrixRow {
  * φ; `R` authors the arch backwards so its START is the join (the first piece
  * is traversed reversed). Rows are labelled `C φ=<φ to 3 places>` / `R φ=<φ>`.
  */
-export function splineSplineCornerRows(): readonly CornerMatrixRow[] {
+function archOutgoing(phi: number): readonly Vector[] {
   const rotate = (vector: Vector, angle: number): Vector => [
     vector[0] * Math.cos(angle) - vector[1] * Math.sin(angle),
     vector[0] * Math.sin(angle) + vector[1] * Math.cos(angle),
   ];
   const length = Math.hypot(1, -0.1);
   const archEnd: Vector = [1 / length, -0.1 / length];
-  const outgoing = (phi: number): readonly Vector[] => {
-    const first = rotate(archEnd, phi);
-    const second = rotate(archEnd, phi + 0.05);
-    return [
-      [2, 0],
-      [2 + first[0], first[1]],
-      [2 + first[0] + second[0], first[1] + second[1]],
-    ];
-  };
+  const first = rotate(archEnd, phi);
+  const second = rotate(archEnd, phi + 0.05);
+  return [
+    [2, 0],
+    [2 + first[0], first[1]],
+    [2 + first[0] + second[0], first[1] + second[1]],
+  ];
+}
+
+export function splineSplineCornerRows(): readonly CornerMatrixRow[] {
+  const outgoing = archOutgoing;
   const rows: CornerMatrixRow[] = [];
   for (const phi of [Math.PI / 2, 0.5, 0.2, 0.1, 0.05])
     for (const distance of [0.01, 0.2])
@@ -458,6 +460,106 @@ export function cornerMatrixRows(): readonly CornerMatrixRow[] {
   );
   return rows;
 }
+
+/**
+ * The T08b-e convex arc rows on the corner-matrix harness (τ = 1e-3): the
+ * §1.5 convex corners LS-90, SS-60 and LL-90 at d = −0.2 (SL-90 −0.2 is
+ * already a matrix row), built exactly as the design probe builds them.
+ */
+export function convexArcMatrixRows(): readonly CornerMatrixRow[] {
+  return cornerMatrixRows()
+    .filter(
+      (row) =>
+        ["LS-90", "SS-60", "LL-90"].includes(row.row) && row.distance === -0.01,
+    )
+    .map((row) => ({ ...row, distance: -0.2 }));
+}
+
+/**
+ * The T08b-e convex rows on the editor-tolerance harness (τ = 1e-3), built
+ * exactly as the T08b-d / T08b-e probes build them: the arch-then-spline
+ * `C φ` corners at d = −0.01 (φ = 0.1: sub-τ but absorption infeasible, so
+ * U-E takes the arc; φ = 0.005: absorbed, its arc too short for K3), and the
+ * nearly straight line↔line `LL-phi1e-12` (a 1e-14 arc, absorbed under U-E).
+ */
+export function convexArcNativeRows(): readonly CornerMatrixRow[] {
+  const archThen =
+    (phi: number): CornerMatrixRow["build"] =>
+    (h) => {
+      const first = h.drawSpline([], ARCH_POINTS);
+      const [, end] = h.splineEnds(first);
+      return [first, h.drawSpline([first], archOutgoing(phi), { start: end })];
+    };
+  return [
+    { row: "C φ=0.1", distance: -0.01, build: archThen(0.1) },
+    { row: "C φ=0.005", distance: -0.01, build: archThen(0.005) },
+    {
+      row: "LL-phi1e-12",
+      distance: -0.01,
+      build: (h) => {
+        const a = h.drawLine([], [0, 0], [1, 0]);
+        const [, end] = h.lineEnds(a);
+        return [a, h.drawLine([a], [1, 0], [2, 1e-12], { start: end })];
+      },
+    },
+  ];
+}
+
+/**
+ * A closed native U-slot polygon (T08b-e), lines only, drawn with endpoint
+ * snaps and rotated by `angle` so that no box is axis-aligned: at an outward
+ * d = −0.48 (τ = 1e-3) its six convex corners take F1 arcs and its two reflex
+ * corners are concave trims, and the prong-tip arcs face the opposite
+ * prong's offset wall across a 0.04 gap, so K3 bisects arc wedges. Another
+ * `outline` (the same polygon convention) replaces the U-slot's corners.
+ */
+export function uSlotPolygon(
+  harness: NativeOffsetChainHarness,
+  angle: number,
+  outline: readonly Vector[] = [
+    [0, 0],
+    [3, 0],
+    [3, 2],
+    [2, 2],
+    [2, 1],
+    [1, 1],
+    [1, 2],
+    [0, 2],
+  ],
+): readonly Authored[] {
+  const rotate = (point: Vector): Vector => [
+    point[0] * Math.cos(angle) - point[1] * Math.sin(angle),
+    point[0] * Math.sin(angle) + point[1] * Math.cos(angle),
+  ];
+  const corners = outline.map(rotate);
+  const patches: Authored[] = [];
+  let first: SketchPointId | undefined;
+  let previous: SketchPointId | undefined;
+  corners.forEach((corner, index) => {
+    const last = index === corners.length - 1;
+    const patch = harness.drawLine(
+      patches,
+      corner,
+      corners[(index + 1) % corners.length]!,
+      {
+        ...(previous ? { start: previous } : {}),
+        ...(last && first ? { end: first } : {}),
+      },
+    );
+    patches.push(patch);
+    const [start, end] = harness.lineEnds(patch);
+    first ??= start;
+    previous = end;
+  });
+  return patches;
+}
+
+/** SS-60's outgoing spline fit points (the §1.5 matrix row). */ /** SS-60's outgoing spline fit points (the §1.5 matrix row). */
+export const SS_60_OUTGOING: readonly Vector[] = [
+  [2, 0],
+  [2.5, 0.7],
+  [3, 1.6],
+];
 
 /**
  * Positional-closure wrap (T08b-d), labelled "native commit + closure edit":

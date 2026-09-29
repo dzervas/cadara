@@ -15,6 +15,7 @@ import {
   type SplineSpan,
   type SplineVector,
 } from "@/contracts/sketch/spline-geometry";
+import { canonicalArcSupport } from "@/contracts/sketch/canonical-arc-support";
 import {
   approximateSplineOffset,
   type AdoptedEndpoint,
@@ -5127,4 +5128,983 @@ describe("piece tube chain (T08b-d): declared vertices (certifier-input fixtures
       ]);
     },
   );
+});
+
+describe("piece tube chain (T08b-e): F1 arcs at convex declared vertices (certifier-input fixtures, not owner-reachable)", () => {
+  type Vector = readonly [number, number];
+  const D = 1 / 64;
+  const TAU = 2 ** -10;
+  /** Line tube with point IDs; emitted = source + d·ν unless overridden. */
+  const line = (
+    start: Vector,
+    end: Vector,
+    ids: readonly [string, string],
+    {
+      distance = -D,
+      emitted,
+      reversed = false,
+    }: {
+      distance?: number;
+      emitted?: readonly [Vector, Vector];
+      reversed?: boolean;
+    } = {},
+  ): TubeChainPiece => {
+    const owner = reversed ? -distance : distance;
+    const length = Math.hypot(end[0] - start[0], end[1] - start[1]);
+    const normal: Vector = [
+      -(end[1] - start[1]) / length,
+      (end[0] - start[0]) / length,
+    ];
+    const offset = (point: Vector): Vector => [
+      point[0] + owner * normal[0],
+      point[1] + owner * normal[1],
+    ];
+    return {
+      kind: "line",
+      reversed,
+      tube: {
+        emitted: emitted ?? [offset(start), offset(end)],
+        source: [start, end],
+        distance: owner,
+        startPointId: ids[0],
+        endPointId: ids[1],
+      },
+    };
+  };
+  const emittedOf = (piece: TubeChainPiece) =>
+    (piece as Extract<TubeChainPiece, { kind: "line" }>).tube.emitted;
+  type Arc = NonNullable<PieceTubeChainRequest["arcs"]>[number];
+  const shared = (pointId = "v") =>
+    ({ kind: "shared-point", pointId }) as const;
+  const coincident = (a = "v", b = "w") =>
+    ({ kind: "coincident", pointIds: [a, b] }) as const;
+  const arcRequest = (
+    pieces: readonly TubeChainPiece[],
+    arcs: readonly Arc[],
+    {
+      distance = -D,
+      modelingTolerance = TAU,
+      closed = false,
+      trims = [],
+      vertices,
+    }: {
+      distance?: number;
+      modelingTolerance?: number;
+      closed?: boolean;
+      trims?: PieceTubeChainRequest["trims"];
+      vertices?: PieceTubeChainRequest["vertices"];
+    } = {},
+  ): PieceTubeChainRequest => ({
+    modelingTolerance,
+    closed,
+    distance,
+    pieces,
+    trims,
+    ...(vertices ? { vertices } : {}),
+    arcs,
+  });
+  const arcAt = (
+    center: Vector,
+    radius: number,
+    sweep: Arc["sweep"],
+    authority: Arc["authority"] = shared(),
+  ): Arc => ({ jointIndex: 0, authority, center, radius, sweep });
+  const certificateOf = (result: TubePieceChainResult) => {
+    if (result.kind !== "verified")
+      throw new Error(`${result.kind} ${result.code}: ${result.message}`);
+    return result.certificate;
+  };
+  /**
+   * Exact LL-90 corner (D = 0): P along +x into V = 0, Q up along +y, d = −D
+   * (a left turn offset to the right: convex). A′ = (0, −D), B′ = (D, 0),
+   * ρ = D exactly; a·b = 0, so the arc splits at s = a + b (R1).
+   */
+  const rightAngle = ({ gap = [0, 0] as Vector } = {}) => {
+    const p = line([-1, 0], [0, 0], ["p", "v"]);
+    const q = line(
+      gap,
+      [gap[0], gap[1] + 1],
+      [gap[0] === 0 && gap[1] === 0 ? "v" : "w", "q"],
+    );
+    return [p, q] as const;
+  };
+  const rightAngleArc = (overrides: Partial<Arc> = {}): Arc => ({
+    ...arcAt([0, 0], D, "counterClockwise"),
+    ...overrides,
+  });
+  /**
+   * Single-sub-arc corner (7-24-25): P along (7, 24) into V = 0, Q along +x,
+   * d = +D (a right turn offset to the left: convex, σ = −1), turn ≈ 73.7°.
+   */
+  const acute = () => {
+    const p = line([-7 / 32, -24 / 32], [0, 0], ["p", "v"], { distance: D });
+    const q = line([0, 0], [1, 0], ["v", "q"], { distance: D });
+    const a = emittedOf(p)[1];
+    return {
+      pieces: [p, q] as const,
+      arc: arcAt([0, 0], Math.hypot(a[0], a[1]), "clockwise"),
+    };
+  };
+  const failureOf = (result: TubePieceChainResult) => {
+    if (result.kind === "verified") throw new Error("verified");
+    return result;
+  };
+
+  test("exact LL-90 corner (D = 0): two sub-arcs split at a + b, flattened after the pieces; records bitwise; the (P, Q) pair is K3-cleared", () => {
+    const certificate = certificateOf(
+      certifier.certifyPieceChain(arcRequest(rightAngle(), [rightAngleArc()])),
+    );
+    expect(certificate.arcs).toEqual([
+      {
+        jointIndex: 0,
+        authority: "shared-point",
+        leaves: [2, 3],
+        center: [0, 0],
+        radius: D,
+        sweep: "counterClockwise",
+        epsilon: [expect.any(Number), expect.any(Number)],
+        entryConnector: 0,
+        exitConnector: 0,
+      },
+    ]);
+    // Lemma A: the only nonzero terms are the lines' outward end errors.
+    for (const value of certificate.arcs![0]!.epsilon)
+      expect(value).toBeLessThan(1e-16);
+    expect(certificate.joins).toEqual([
+      {
+        kind: "arc-entry",
+        jointIndex: 0,
+        first: 0,
+        second: 2,
+        direction: [D, 0],
+        tangentDeviation: 0,
+      },
+      {
+        kind: "arc-knot",
+        jointIndex: 0,
+        first: 2,
+        second: 3,
+        direction: [D, D],
+      },
+      {
+        kind: "arc-exit",
+        jointIndex: 0,
+        first: 3,
+        second: 1,
+        direction: [0, D],
+        tangentDeviation: 0,
+        bridge: 0,
+      },
+    ]);
+    // Arc leaves: collapsed connectors, strict ε < τ, displacementBound = τ.
+    expect(certificate.leaves).toHaveLength(4);
+    for (const leaf of certificate.leaves.slice(2)) {
+      expect(leaf.displacementBound).toBe(TAU);
+      expect(leaf.clearanceRadius).toBe(leaf.baseErrorStar);
+    }
+    // The neighbours keep their own ε: no correction, reserve or inflation.
+    for (const leaf of certificate.leaves.slice(0, 2)) {
+      expect(leaf.displacementBound).toBe(leaf.baseErrorStar);
+      expect(leaf.clearanceRadius).toBe(leaf.baseErrorStar);
+    }
+    // Every non-adjacent pair, including the arc's (P, Q) leaves.
+    expect(certificate.clearedPairs).toEqual([
+      [0, 1],
+      [0, 3],
+      [1, 2],
+    ]);
+  });
+
+  test("single sub-arc (7-24-25, σ = −1): one arc leaf, clockwise; G1 at rounding; the helper radius is certified as given", () => {
+    const { pieces, arc } = acute();
+    const certificate = certificateOf(
+      certifier.certifyPieceChain(arcRequest(pieces, [arc], { distance: D })),
+    );
+    expect(certificate.arcs).toEqual([
+      expect.objectContaining({
+        leaves: [2],
+        radius: arc.radius,
+        sweep: "clockwise",
+      }),
+    ]);
+    const kinds = certificate.joins.map((join) => join.kind);
+    expect(kinds).toEqual(["arc-entry", "arc-exit"]);
+    for (const join of certificate.joins)
+      if ("tangentDeviation" in join)
+        expect(join.tangentDeviation).toBeLessThan(1e-14);
+    expect(certificate.clearedPairs).toEqual([[0, 1]]);
+    expect(certificate.arcs![0]!.epsilon[0]).toBeLessThan(1e-16);
+  });
+
+  /**
+   * Exact straight cubic neighbours of the LL-90 corner (E = O + (0, −D)
+   * translated exactly, so ε = π is honest) with Q4-E1 metadata π₃ = π₀ = π:
+   * every Lemma-A term but π vanishes, so the arc's ε is exactly π.
+   */
+  const cubicCorner = (pi: number) => {
+    const tube = (
+      splineId: string,
+      source: SplinePoles,
+      shift: Vector,
+      ids: readonly [string, string],
+      derivative: NeutralCubicPieceTube["reference"]["derivative"],
+    ): NeutralCubicPieceTube => ({
+      poles: source.map(([x, y]) => [
+        x + shift[0],
+        y + shift[1],
+      ]) as unknown as SplinePoles,
+      certifiedError: pi,
+      reference: {
+        derivative,
+        sourcePoles: source,
+        distance: -D,
+        localError: { hermiteRemainder: 0, polePerturbations: [pi, 0, 0, pi] },
+      },
+      source: {
+        splineId,
+        spanIndex: 0,
+        startOccurrenceId: `${splineId}0`,
+        endOccurrenceId: `${splineId}1`,
+        startPointId: ids[0],
+        endPointId: ids[1],
+      },
+      sourceLocalInterval: [0, 1],
+      queryDomain: [0, 1],
+    });
+    const vertical = straight(0, 1).map(([x, y]) => [
+      y,
+      x,
+    ]) as unknown as SplinePoles;
+    return [
+      {
+        kind: "cubic",
+        reversed: false,
+        tubes: [
+          tube(
+            "P",
+            straight(-1, 0),
+            [0, -D],
+            ["p", "v"],
+            [
+              [0.75, 1.5],
+              [0, 0],
+            ],
+          ),
+        ],
+      },
+      {
+        kind: "cubic",
+        reversed: false,
+        tubes: [
+          tube(
+            "Q",
+            vertical,
+            [D, 0],
+            ["v", "q"],
+            [
+              [0, 0],
+              [0.75, 1.5],
+            ],
+          ),
+        ],
+      },
+    ] as const satisfies readonly TubeChainPiece[];
+  };
+
+  test("R3 strict ε: an arc leaf whose Lemma-A ε equals τ exactly is not certified; one ulp more τ verifies", () => {
+    const pi = 2 ** -12;
+    const request = (modelingTolerance: number) =>
+      arcRequest(cubicCorner(pi), [rightAngleArc()], { modelingTolerance });
+    expect(failureOf(certifier.certifyPieceChain(request(pi)))).toMatchObject({
+      code: "cubic-tube-knot-incidence-unproven",
+      message: expect.stringContaining(
+        "not strictly below the modeling tolerance",
+      ),
+      arcJoints: [0],
+    });
+    const certificate = certificateOf(
+      certifier.certifyPieceChain(request(pi + 2 ** -64)),
+    );
+    expect(certificate.arcs![0]!.epsilon).toEqual([pi, pi]);
+    // The neighbours at ε = π ≤ τ keep their non-strict own bound.
+    expect(certificate.leaves[0]!.displacementBound).toBe(pi);
+  });
+
+  test("R1: at D ≈ 0 a rounded a·b > 0 with a·n₂ < 0 still splits at a + b (two sub-arcs; the reference wedge W(n₁, n₂) is not a·-positive)", () => {
+    const eta = 2 ** -20;
+    const p = line([-1, 0], [0, 0], ["p", "v"], {
+      emitted: [
+        [-1, -D],
+        [-eta, -D],
+      ],
+    });
+    const q = line([0, 0], [0, 1], ["v", "q"], {
+      emitted: [
+        [D, -2 * eta],
+        [D, 1],
+      ],
+    });
+    const a: Vector = [-eta, -D];
+    const b: Vector = [D, -2 * eta];
+    // The review's rounding case: a·b > 0 but a·n₂ = a_x < 0 (n₂ = (1, 0)).
+    expect(a[0] * b[0] + a[1] * b[1]).toBeGreaterThan(0);
+    expect(a[0]).toBeLessThan(0);
+    const certificate = certificateOf(
+      certifier.certifyPieceChain(
+        arcRequest([p, q], [rightAngleArc({ radius: Math.hypot(...a) })]),
+      ),
+    );
+    expect(certificate.arcs![0]!.leaves).toEqual([2, 3]);
+    expect(certificate.joins.map((join) => join.kind)).toContain("arc-knot");
+  });
+
+  test("R2 one sub-arc with a gap: the bridge needs e_out·(O′_P box) > 0 or e_in·g ≥ 0; a loose honest P box with e_in·g < 0 fails, either branch alone verifies", () => {
+    // P: exact straight cubic along +x into V = 0 (E = O + (0, −D) exactly),
+    // Q: a line along (7, 24)/25 from the coincident gap g (73.7° left turn,
+    // d = −D convex, one sub-arc).
+    const pOf = (
+      derivative: NeutralCubicPieceTube["reference"]["derivative"],
+    ) =>
+      ({
+        kind: "cubic",
+        reversed: false,
+        tubes: [
+          {
+            poles: straight(-1, 0).map(([x, y]) => [
+              x,
+              y - D,
+            ]) as unknown as SplinePoles,
+            certifiedError: 2 ** -20,
+            reference: {
+              derivative,
+              sourcePoles: straight(-1, 0),
+              distance: -D,
+            },
+            source: {
+              splineId: "P",
+              spanIndex: 0,
+              startOccurrenceId: "P0",
+              endOccurrenceId: "P1",
+              startPointId: "p",
+              endPointId: "v",
+            },
+            sourceLocalInterval: [0, 1],
+            queryDomain: [0, 1],
+          },
+        ],
+      }) as const satisfies TubeChainPiece;
+    const tight: NeutralCubicPieceTube["reference"]["derivative"] = [
+      [0.75, 1.5],
+      [0, 0],
+    ];
+    // Honest (it contains the true O′ = S′) but reaches e_out·v < 0.
+    const loose: NeutralCubicPieceTube["reference"]["derivative"] = [
+      [0.75, 1.5],
+      [-0.5, 0],
+    ];
+    const request = (
+      derivative: NeutralCubicPieceTube["reference"]["derivative"],
+      g: Vector,
+    ) =>
+      arcRequest(
+        [pOf(derivative), line(g, [g[0] + 7 / 25, g[1] + 24 / 25], ["w", "q"])],
+        [rightAngleArc({ authority: coincident(), radius: D })],
+        { modelingTolerance: 2 ** -8 },
+      );
+    const backward: Vector = [-(2 ** -12), 2 ** -11];
+    const forward: Vector = [2 ** -12, 2 ** -11];
+    expect(
+      failureOf(certifier.certifyPieceChain(request(loose, backward))),
+    ).toMatchObject({
+      code: "cubic-tube-cone-unproven",
+      message: expect.stringContaining("bridge is not proved apart"),
+      arcJoints: [0],
+    });
+    for (const [derivative, g] of [
+      [tight, backward],
+      [loose, forward],
+    ] as const) {
+      const certificate = certificateOf(
+        certifier.certifyPieceChain(request(derivative, g)),
+      );
+      expect(certificate.arcs![0]!.leaves).toEqual([2]);
+    }
+  });
+
+  test("Lemma E (E1) on a cubic neighbour: an honest O′ box not e_in-positive fails the arc-entry cone (the hodograph alone passes)", () => {
+    const [p, q] = cubicCorner(2 ** -20);
+    const tube = p.tubes[0]!;
+    const loose: TubeChainPiece = {
+      ...p,
+      tubes: [
+        {
+          ...tube,
+          reference: {
+            ...tube.reference,
+            derivative: [
+              [-0.25, 1.5],
+              [0, 0],
+            ],
+          },
+        },
+      ],
+    };
+    expect(
+      failureOf(
+        certifier.certifyPieceChain(arcRequest([loose, q], [rightAngleArc()])),
+      ),
+    ).toMatchObject({
+      code: "cubic-tube-cone-unproven",
+      message: expect.stringContaining("arc-entry cone"),
+      first: 0,
+      second: 2,
+      arcJoints: [0],
+    });
+  });
+
+  test("K3 on the arc's (P, Q) pair: an arc shorter than the neighbours' honest tubes is clearance-unproven, tagged with its arc (never a join)", () => {
+    // A 2⁻¹⁰-radian turn: chord ≈ D·2⁻¹⁰ ≈ 1.5e-5, below P's honest far-end
+    // error 2⁻¹² (its K3 radius).
+    const turn = 2 ** -10;
+    const p = line([-1, 0], [0, 0], ["p", "v"], {
+      emitted: [
+        [-1, -D + 2 ** -12],
+        [0, -D],
+      ],
+    });
+    const q = line([0, 0], [1, turn], ["v", "q"]);
+    const a = emittedOf(p)[1];
+    expect(
+      failureOf(
+        certifier.certifyPieceChain(
+          arcRequest(
+            [p, q],
+            [arcAt([0, 0], Math.hypot(a[0], a[1]), "counterClockwise")],
+          ),
+        ),
+      ),
+    ).toMatchObject({
+      code: "cubic-tube-clearance-unproven",
+      first: 0,
+      second: 1,
+      arcJoints: [0],
+    });
+  });
+
+  test("Lemma A is load-bearing (δ_a): A′ displaced radially by δ with ρ = |a| gives ε_in ≈ 4δ; τ = 3δ fails, τ = 5δ verifies", () => {
+    const delta = 2 ** -12;
+    const p = line([-1, 0], [0, 0], ["p", "v"], {
+      emitted: [
+        [-1, -D],
+        [0, -D - delta],
+      ],
+    });
+    const request = (modelingTolerance: number) =>
+      arcRequest([p, rightAngle()[1]], [rightAngleArc({ radius: D + delta })], {
+        modelingTolerance,
+      });
+    expect(
+      failureOf(certifier.certifyPieceChain(request(3 * delta))),
+    ).toMatchObject({
+      message: expect.stringContaining(
+        "not strictly below the modeling tolerance",
+      ),
+      arcJoints: [0],
+    });
+    const certificate = certificateOf(
+      certifier.certifyPieceChain(request(5 * delta)),
+    );
+    // |ρ − |d|| = δ, δ_a = (2Dδ + δ²)/D, π_A ≥ δ: ε_in > 3δ.
+    expect(certificate.arcs![0]!.epsilon[0]).toBeGreaterThan(3 * delta);
+  });
+
+  test("the bridge |g|⁺ is load-bearing in ε_out: a coincident gap g = (γ, 0) gives ε_out ≈ 3γ (δ_b ≈ 2γ plus |g|); τ = 2.5γ fails, τ = 4γ verifies", () => {
+    const gamma = 2 ** -12;
+    const request = (modelingTolerance: number) =>
+      arcRequest(
+        rightAngle({ gap: [gamma, 0] }),
+        [rightAngleArc({ authority: coincident() })],
+        { modelingTolerance },
+      );
+    expect(
+      failureOf(certifier.certifyPieceChain(request(2.5 * gamma))),
+    ).toMatchObject({
+      message: expect.stringContaining(
+        "not strictly below the modeling tolerance",
+      ),
+      arcJoints: [0],
+    });
+    const certificate = certificateOf(
+      certifier.certifyPieceChain(request(4 * gamma)),
+    );
+    expect(certificate.arcs![0]!.epsilon[1]).toBeGreaterThan(2.5 * gamma);
+    const exit = certificate.joins.at(-1);
+    if (exit?.kind !== "arc-exit") throw new Error("exit");
+    expect(exit.bridge).toBeGreaterThanOrEqual(gamma);
+    expect(exit.bridge).toBeLessThan(gamma * (1 + 1e-12));
+    // The exit connector is |ρ² − |b|²|/ρ ≥ γ (B′ = g + (D, 0), ρ = D).
+    expect(certificate.arcs![0]!.exitConnector).toBeGreaterThan(gamma);
+  });
+
+  test("one index space: an arc and a vertex covering one adjacency, an arc index out of range or unordered arcs are invalid", () => {
+    const pieces = rightAngle();
+    const vertex = {
+      jointIndex: 0,
+      authority: shared(),
+      keeper: "first" as const,
+    };
+    for (const request of [
+      arcRequest(pieces, [rightAngleArc()], { vertices: [vertex] }),
+      arcRequest(pieces, [rightAngleArc({ jointIndex: 1 })]),
+      arcRequest(pieces, [rightAngleArc(), rightAngleArc()]),
+    ])
+      expect(certifier.certifyPieceChain(request)).toMatchObject({
+        kind: "uncertain",
+        code: "invalid-cubic-tube-chain",
+      });
+  });
+
+  // Whole-request literal of the fabricated exact LL-90 arc row (observer):
+  // count passes; count − 1 exhausts on operations, Euclid and bits.
+  const ARC_PIN = {
+    operations: 17_213,
+    euclideanSteps: 1_671,
+    integerBits: 426,
+  };
+  test("fabricated arc whole-request literal (observer), count / count − 1 on all three meters; staged caps inside the arc stages exhaust as themselves", () => {
+    const requestOf = () => arcRequest(rightAngle(), [rightAngleArc()]);
+    let snapshot: ExactProofBudgetSnapshot | undefined;
+    certificateOf(
+      createCertifiedCubicTubeChainWithBudgetObserverForTest((value) => {
+        snapshot = value;
+      }).certifyPieceChain(requestOf()),
+    );
+    expect({
+      operations: snapshot!.operations,
+      euclideanSteps: snapshot!.euclideanSteps,
+      integerBits: Math.max(
+        snapshot!.maxStoredBits,
+        snapshot!.maxPreProductBits,
+      ),
+    }).toEqual(ARC_PIN);
+    for (const kind of [
+      "operations",
+      "euclideanSteps",
+      "integerBits",
+    ] as const) {
+      expect(
+        createCertifiedCubicTubeChainWithLowerBudgetForTest({
+          [kind]: ARC_PIN[kind],
+        }).certifyPieceChain(requestOf()).kind,
+        kind,
+      ).toBe("verified");
+      expect(
+        createCertifiedCubicTubeChainWithLowerBudgetForTest({
+          [kind]: ARC_PIN[kind] - 1,
+        }).certifyPieceChain(requestOf()),
+        kind,
+      ).toEqual(EXHAUSTED_RESULT);
+    }
+    // Stage map (T08b-e-evidence/stages/): arc precharged 4 945 ops →
+    // admitted 6 053 → ε 6 584 → cones 7 296 → records 7 636 → K3 7 896 …
+    // 16 638; Euclid admitted 308 → ε 314.
+    for (const [kind, cap] of [
+      ["operations", 4_946],
+      ["operations", 5_500],
+      ["operations", 6_300],
+      ["operations", 7_000],
+      ["operations", 7_500],
+      ["operations", 12_000],
+      ["euclideanSteps", 305],
+      ["euclideanSteps", 311],
+    ] as const)
+      expect(
+        createCertifiedCubicTubeChainWithLowerBudgetForTest({
+          [kind]: cap,
+        }).certifyPieceChain(requestOf()),
+        `${kind} ${cap}`,
+      ).toEqual(EXHAUSTED_RESULT);
+  });
+
+  test("the arc precharge is paid BEFORE authorization: an authority-rejected arc costs exactly its admission ops; one fewer exhausts", () => {
+    const rejected = () =>
+      arcRequest(rightAngle(), [rightAngleArc({ authority: shared("zz") })]);
+    let spent = 0;
+    const observed = createCertifiedCubicTubeChainWithBudgetObserverForTest(
+      (snapshot) => {
+        spent = snapshot.operations;
+      },
+    ).certifyPieceChain(rejected());
+    const lower = (operations: number) =>
+      createCertifiedCubicTubeChainWithLowerBudgetForTest({
+        operations,
+      }).certifyPieceChain(rejected());
+    expect(observed).toEqual({
+      kind: "uncertain",
+      code: "cubic-tube-knot-incidence-unproven",
+      message:
+        "Declared arc 0: a shared point needs one terminal point ID and a bitwise source vertex.",
+      first: 0,
+      second: 1,
+      arcJoints: [0],
+    });
+    expect(spent).toBe(4_945);
+    expect(lower(spent)).toEqual(observed);
+    expect(lower(spent - 1)).toEqual(EXHAUSTED_RESULT);
+  });
+
+  test.each([
+    [
+      "centre ≠ P_v bitwise",
+      () =>
+        arcRequest(rightAngle(), [
+          rightAngleArc({ center: [Number.MIN_VALUE, 0] }),
+        ]),
+      "knot",
+      "centre is not bitwise",
+    ],
+    [
+      "ρ = 0",
+      () => arcRequest(rightAngle(), [rightAngleArc({ radius: 0 })]),
+      "knot",
+      "radius is not finite and positive",
+    ],
+    [
+      "ρ < 0",
+      () => arcRequest(rightAngle(), [rightAngleArc({ radius: -D })]),
+      "knot",
+      "radius is not finite and positive",
+    ],
+    [
+      "ρ = NaN",
+      () => arcRequest(rightAngle(), [rightAngleArc({ radius: Number.NaN })]),
+      "knot",
+      "radius is not finite and positive",
+    ],
+    [
+      "ρ = ∞",
+      () => arcRequest(rightAngle(), [rightAngleArc({ radius: Infinity })]),
+      "knot",
+      "radius is not finite and positive",
+    ],
+    [
+      "ρ so far off that ε > τ",
+      () => arcRequest(rightAngle(), [rightAngleArc({ radius: 2 * D })]),
+      "knot",
+      "not strictly below the modeling tolerance",
+    ],
+    [
+      "wrong sweep",
+      () => arcRequest(rightAngle(), [rightAngleArc({ sweep: "clockwise" })]),
+      "knot",
+      "sweep is not the exact source turn",
+    ],
+    [
+      "an arc on a concave vertex (d = +D)",
+      () =>
+        arcRequest(
+          [
+            line([-1, 0], [0, 0], ["p", "v"], { distance: D }),
+            line([0, 0], [0, 1], ["v", "q"], { distance: D }),
+          ],
+          [rightAngleArc()],
+          { distance: D },
+        ),
+      "knot",
+      "not convex",
+    ],
+    [
+      "d = 0",
+      () =>
+        arcRequest(
+          [
+            line([-1, 0], [0, 0], ["p", "v"], { distance: 0 }),
+            line([0, 0], [0, 1], ["v", "q"], { distance: 0 }),
+          ],
+          [rightAngleArc()],
+          { distance: 0 },
+        ),
+      "knot",
+      "zero offset distance",
+    ],
+    [
+      "A′ = B′ (zero-length arc, rule Z)",
+      () => {
+        const [p, q] = rightAngle();
+        const pinned = line([-1, 0], [0, 0], ["p", "v"], {
+          emitted: [emittedOf(p)[0], emittedOf(q)[0]],
+          distance: -D,
+        });
+        return arcRequest([pinned, q], [rightAngleArc()], {
+          modelingTolerance: 1 / 16,
+        });
+      },
+      "knot",
+      "not in the exact turn orientation",
+    ],
+    [
+      "(A2) an end direction a quarter turn or more from its normal (|d| < τ)",
+      () => {
+        const d = 2 ** -12;
+        const r = 2 ** -13;
+        const angle = (degrees: number) => (degrees * Math.PI) / 180;
+        const p = line([-1, 0], [0, 0], ["p", "v"], {
+          distance: -d,
+          emitted: [
+            [-1, -d],
+            [r * Math.cos(angle(170)), r * Math.sin(angle(170))],
+          ],
+        });
+        const q = line([0, 0], [0, 1], ["v", "q"], {
+          distance: -d,
+          emitted: [
+            [d * Math.cos(angle(-15)), d * Math.sin(angle(-15))],
+            [d, 1],
+          ],
+        });
+        return arcRequest([p, q], [arcAt([0, 0], r, "counterClockwise")], {
+          distance: -d,
+        });
+      },
+      "knot",
+      "within a quarter turn of its reference normal",
+    ],
+    [
+      "(A4) the split a + b outside the wedges (|a| ≪ |b|, b past n₂)",
+      () => {
+        const angle = (20 * Math.PI) / 180;
+        const p = line([-1, 0], [0, 0], ["p", "v"], {
+          emitted: [
+            [-1, -D],
+            [0, -D / 8],
+          ],
+        });
+        const q = line([0, 0], [0, 1], ["v", "q"], {
+          emitted: [
+            [D * Math.cos(angle), D * Math.sin(angle)],
+            [D, 1],
+          ],
+        });
+        return arcRequest([p, q], [rightAngleArc({ radius: D / 8 })], {
+          modelingTolerance: 1 / 16,
+        });
+      },
+      "knot",
+      "split a + b is not inside",
+    ],
+    [
+      "e_out·g < 0 (backward declared gap at the arc exit)",
+      () =>
+        arcRequest(rightAngle({ gap: [0, -(2 ** -12)] }), [
+          rightAngleArc({ authority: coincident() }),
+        ]),
+      "cone",
+      "backward declared gap at the arc exit",
+    ],
+    [
+      "R2 two sub-arcs: σrot(s)·g < 0 (the bridge meets the reference sub-arc 0)",
+      () =>
+        arcRequest(rightAngle({ gap: [-(2 ** -12), 0] }), [
+          rightAngleArc({ authority: coincident() }),
+        ]),
+      "cone",
+      "bridge is not proved apart",
+    ],
+    [
+      "R7 a line neighbour whose emitted step leaves the arc-entry cone (its source direction does not)",
+      () => {
+        const length = 2 ** -11;
+        const p = line([-length, 0], [0, 0], ["p", "v"], {
+          emitted: [
+            [length / 4, -D],
+            [0, -D],
+          ],
+        });
+        return arcRequest([p, rightAngle()[1]], [rightAngleArc()]);
+      },
+      "cone",
+      "incoming terminal leaf is not proved inside the arc-entry cone",
+    ],
+  ] as const)(
+    "fabricated adversary: %s fails closed, tagged with its arc",
+    (_label, requestOf, kind, message) => {
+      expect(failureOf(certifier.certifyPieceChain(requestOf()))).toMatchObject(
+        {
+          kind: "uncertain",
+          code:
+            kind === "knot"
+              ? "cubic-tube-knot-incidence-unproven"
+              : "cubic-tube-cone-unproven",
+          message: expect.stringContaining(message),
+          arcJoints: [0],
+        },
+      );
+    },
+  );
+
+  /**
+   * Honest cubic↔cubic arc corner (real owner, τ = 1e-3, d = 0.01, P
+   * reversed; T08b-e math review F1 row): P ends and Q starts at V = 0, Q
+   * leaves at φ = −2.7456; the arc is the resolver's canonical support.
+   */
+  const cubicArcCorner = (): PieceTubeChainRequest => {
+    const tolerance = 1e-3;
+    const d = 0.01;
+    const a = 0.37257013670168815 / 3;
+    const [b1, b2, b3, b4] = [
+      -0.02459265496581793, -0.19457978894934058, -0.028773711994290352,
+      -0.06853010701015592,
+    ];
+    const phi = -2.745622824016027;
+    const dir: Vector = [Math.cos(phi), Math.sin(phi)];
+    const n: Vector = [-dir[1], dir[0]];
+    const owner = (
+      poles: SplinePoles,
+      splineId: string,
+      ids: readonly [string, string],
+      distance: number,
+    ) => {
+      const result = approximateSplineOffset({
+        spans: [
+          {
+            source: {
+              splineId,
+              spanIndex: 0,
+              startPointId: ids[0],
+              endPointId: ids[1],
+              startOccurrenceId: `${splineId}o0`,
+              endOccurrenceId: `${splineId}o1`,
+            },
+            orientation: "forward",
+            interval: [0, 1],
+            poles,
+            validity: "valid",
+            differential: {
+              interval: [0, 0],
+              poles: [
+                [0, 0],
+                [0, 0],
+                [0, 0],
+                [0, 0],
+              ],
+            },
+          },
+        ],
+        distance,
+        modelingTolerance: tolerance,
+      });
+      if (!result.ok) throw new Error(result.code);
+      return result.spans.map((span) => ({
+        ...span,
+        queryDomain: span.sourceInterval,
+      }));
+    };
+    // P's natural poles run from V (its traversal is reversed).
+    const first = owner(
+      [
+        [0, 0],
+        [-a, 0],
+        [-2 * a, b1 * a],
+        [-3 * a, b2 * a],
+      ],
+      "P",
+      ["v", "p"],
+      -d,
+    );
+    const second = owner(
+      [
+        [0, 0],
+        [a * dir[0], a * dir[1]],
+        [2 * a * dir[0] + b3 * a * n[0], 2 * a * dir[1] + b3 * a * n[1]],
+        [3 * a * dir[0] + b4 * a * n[0], 3 * a * dir[1] + b4 * a * n[1]],
+      ],
+      "Q",
+      ["v", "q"],
+      d,
+    );
+    const support = canonicalArcSupport(
+      [0, 0],
+      first[0]!.poles[0],
+      second[0]!.poles[0],
+      "clockwise",
+    );
+    return {
+      modelingTolerance: tolerance,
+      closed: false,
+      distance: d,
+      pieces: [
+        { kind: "cubic", reversed: true, tubes: first },
+        { kind: "cubic", reversed: false, tubes: second },
+      ],
+      trims: [],
+      arcs: [
+        {
+          jointIndex: 0,
+          authority: shared(),
+          center: [0, 0],
+          radius: support.radius,
+          sweep: support.sweepDirection,
+        },
+      ],
+    };
+  };
+
+  test("no exhaustion swallow in the arc stage (math review F1): an integerBits cap first tripped INSIDE the arc stage of an honest cubic↔cubic corner is reported as exhaustion, never as an arc-less certificate", () => {
+    const full = certificateOf(certifier.certifyPieceChain(cubicArcCorner()));
+    expect(full.arcs?.map((arc) => arc.leaves.length)).toEqual([2]);
+    expect(
+      createCertifiedCubicTubeChainWithLowerBudgetForTest({
+        integerBits: 151,
+      }).certifyPieceChain(cubicArcCorner()),
+    ).toEqual(EXHAUSTED_RESULT);
+  });
+
+  // Whole-request literal of a gapped fabricated arc (meter review R2): the
+  // arc-exit bridge |g|⁺ is a verified, charged √.
+  const GAP_ARC_PIN = {
+    operations: 18_787,
+    euclideanSteps: 1_929,
+    integerBits: 432,
+  };
+  test("gapped fabricated arc whole-request literal (observer): the bridge |g|⁺ is a verified √; count / count − 1 on all three meters", () => {
+    const requestOf = () =>
+      arcRequest(rightAngle({ gap: [2 ** -12, 0] }), [
+        rightAngleArc({ authority: coincident() }),
+      ]);
+    let snapshot: ExactProofBudgetSnapshot | undefined;
+    const certificate = certificateOf(
+      createCertifiedCubicTubeChainWithBudgetObserverForTest((value) => {
+        snapshot = value;
+      }).certifyPieceChain(requestOf()),
+    );
+    const exit = certificate.joins.at(-1);
+    if (exit?.kind !== "arc-exit") throw new Error("exit");
+    expect(exit.bridge).toBeGreaterThanOrEqual(2 ** -12);
+    expect({
+      operations: snapshot!.operations,
+      euclideanSteps: snapshot!.euclideanSteps,
+      integerBits: Math.max(
+        snapshot!.maxStoredBits,
+        snapshot!.maxPreProductBits,
+      ),
+    }).toEqual(GAP_ARC_PIN);
+    for (const kind of [
+      "operations",
+      "euclideanSteps",
+      "integerBits",
+    ] as const) {
+      expect(
+        createCertifiedCubicTubeChainWithLowerBudgetForTest({
+          [kind]: GAP_ARC_PIN[kind],
+        }).certifyPieceChain(requestOf()).kind,
+        kind,
+      ).toBe("verified");
+      expect(
+        createCertifiedCubicTubeChainWithLowerBudgetForTest({
+          [kind]: GAP_ARC_PIN[kind] - 1,
+        }).certifyPieceChain(requestOf()),
+        kind,
+      ).toEqual(EXHAUSTED_RESULT);
+    }
+  });
 });

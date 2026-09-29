@@ -455,8 +455,9 @@ export interface CubicTubeChainLeaf {
   readonly baseErrorStar: number;
   /**
    * Proved sup |E − Φ| against the declared-join-corrected reference O*: exactly
-   * the modeling tolerance on a convex-END leaf (arc reserve, slack 0) and on
-   * a `graph-trim` leaf (strict glue reserve), else ε*.
+   * the modeling tolerance on a convex-END leaf (arc reserve, slack 0), on
+   * a `graph-trim` leaf (strict glue reserve) and on an F1 arc leaf (its
+   * collapsed radial connectors: strict ε < τ plus the η reserve), else ε*.
    */
   readonly displacementBound: number;
   /** K3 radius r = ε + δ⁺ of each convex end (concave tails are never added). */
@@ -498,6 +499,15 @@ export type CubicTubeChainResult =
        * absorbed chain, never by this flag.
        */
       readonly magnitude?: true;
+      /**
+       * Piece path only (T08b-e [TECH E2]): the declared arcs this failure is
+       * attributable to, ascending (arc admission, Lemma-A ε, the arc-entry
+       * / arc-exit / bridge cones, or K3 clearance of a pair containing one
+       * of its arc leaves or its two neighbour leaves). Produced by the
+       * certifier only; a missing or wrong tag can only prevent the SEL's
+       * absorption fallback, which is independently re-certified.
+       */
+      readonly arcJoints?: readonly number[];
     };
 
 /**
@@ -594,6 +604,26 @@ export interface TubeChainVertexDeclaration {
   readonly keeper: "first" | "second";
 }
 
+/**
+ * F1 arc join at a convex declared vertex (T08b-e, user decision U2): a true
+ * offset arc about the incoming terminal source vertex P_v from A′ to B′,
+ * the two neighbours' OWN free emitted terminal poles (read by the certifier
+ * from the terminal leaves, never supplied, so J0 holds by construction).
+ * The certifier checks the authority exactly as a vertex's (C5), the centre
+ * bitwise, the sweep against the exact turn and certifies the arc with the
+ * radius AS GIVEN (finite, > 0; the trust model of ε [TECH E9]): consumer
+ * agreement with it is the caller's obligation (`canonicalArcSupport`).
+ */
+export interface TubeChainArcDeclaration {
+  readonly jointIndex: number;
+  readonly authority: TubeChainVertexAuthority;
+  /** Must be bitwise the traversal-incoming piece's terminal source vertex. */
+  readonly center: SplineVector;
+  readonly radius: number;
+  /** The exact source turn σ = sign(u₁ × u₂): counter-clockwise iff σ > 0. */
+  readonly sweep: "clockwise" | "counterClockwise";
+}
+
 export interface PieceTubeChainRequest {
   /** The consuming document's authored settings.modelingTolerance. */
   readonly modelingTolerance: number;
@@ -602,13 +632,15 @@ export interface PieceTubeChainRequest {
   readonly distance: number;
   readonly pieces: readonly TubeChainPiece[];
   /**
-   * Trims and `vertices` share ONE index space, the declared adjacency index
-   * (0 … n − 2 open, the wrap n − 1 when closed; a single closed piece has
-   * the one adjacency 0): every adjacency is covered exactly once, each list
-   * strictly increasing. Without `vertices` every adjacency is a trim.
+   * Trims, `vertices` and `arcs` share ONE index space, the declared
+   * adjacency index (0 … n − 2 open, the wrap n − 1 when closed; a single
+   * closed piece has the one adjacency 0): every adjacency is covered
+   * exactly once, each list strictly increasing. Without `vertices` and
+   * `arcs` every adjacency is a trim.
    */
   readonly trims: readonly TubeChainTrimDeclaration[];
   readonly vertices?: readonly TubeChainVertexDeclaration[];
+  readonly arcs?: readonly TubeChainArcDeclaration[];
 }
 
 /**
@@ -705,13 +737,89 @@ export type TubeChainVertexJoin =
       readonly trim: readonly [number, number];
     });
 
+/**
+ * The joins of one F1 arc (T08b-e). Reference O* at the convex vertex (R7
+ * with the arc macroscopic): O_P (untrimmed) ∪ arc(P_v, |d|; A → B°,
+ * orientation σ) ∪ [B°, B] ∪ O_Q (untrimmed), A = P_v + dN₁, B = Q_v + dN₂,
+ * B° = B − g, g = Q_v − P_v the exact declared gap (the bridge is empty when
+ * g = 0). Every point lies on a declared piece's true offset, on K + d·n
+ * about the source vertex K = P_v, or on the bridge of vector g.
+ *
+ * The certified emitted piece is E_v = [A′, Â] ∪ Ĉ ∪ [B̂, B′], Ĉ the arc of
+ * centre V = P_v and the GIVEN radius ρ over the exact end directions â =
+ * (A′ − V)/|A′ − V| and b̂ (Â = V + ρâ, B̂ = V + ρb̂). The radial connectors
+ * (lengths ≤ `entryConnector`, `exitConnector`) are never drawn: consumers
+ * realize the joins by point identity (the arc's start and end ARE the
+ * neighbours' end points), as for every point-defined arc. Consumers draw
+ * the arc from binary64 `atan2` angles of A′ − V and B′ − V, whose end
+ * directions differ from â and b̂ by implementation-approximated ulps: that
+ * is NOT certified (the trust model of every binary64 arc).
+ *
+ * `direction` is the binary64 nearest of the exact cone e (informational):
+ * σ·rot(A′ − V) at the entry, σ·rot(s) at the knot, σ·rot(B′ − V) at the
+ * exit. `tangentDeviation` is up(tan α) of the angle α between the arc's end
+ * tangent and the neighbour's emitted end control (exact |a·h|/|a×h|): G1 to
+ * rounding at gap-free joins, ≈ |g|/|d| at a coincident join with gap g.
+ * Reported only, never gated (no tangency is claimed).
+ */
+export type TubeChainArcJoin =
+  | {
+      readonly kind: "arc-entry";
+      readonly jointIndex: number;
+      /** The incoming piece's terminal leaf, then the first arc leaf. */
+      readonly first: number;
+      readonly second: number;
+      readonly direction: SplineVector;
+      readonly tangentDeviation: number;
+    }
+  | {
+      /** The exact split s = a + b of a two-sub-arc arc. */
+      readonly kind: "arc-knot";
+      readonly jointIndex: number;
+      readonly first: number;
+      readonly second: number;
+      readonly direction: SplineVector;
+    }
+  | {
+      readonly kind: "arc-exit";
+      readonly jointIndex: number;
+      /** The last arc leaf, then the outgoing piece's terminal leaf. */
+      readonly first: number;
+      readonly second: number;
+      readonly direction: SplineVector;
+      readonly tangentDeviation: number;
+      /** |g|⁺ outward; exactly 0 when g = 0. */
+      readonly bridge: number;
+    };
+
+/** One certified F1 arc (T08b-e); see `TubeChainArcJoin` for its meaning. */
+export interface TubeChainArcRecord {
+  readonly jointIndex: number;
+  readonly authority: TubeChainVertexAuthority["kind"];
+  /** Flattened arc leaves (after every piece leaf, in adjacency order). */
+  readonly leaves: readonly number[];
+  readonly center: SplineVector;
+  readonly radius: number;
+  readonly sweep: "clockwise" | "counterClockwise";
+  /** Lemma-A ε per arc leaf, outward up (each strictly below τ). */
+  readonly epsilon: readonly number[];
+  /** u_A⁺ = up(|ρ² − |A′ − V|²|/ρ) ≥ the entry connector length. */
+  readonly entryConnector: number;
+  /** γ_B⁺ = up(|ρ² − |B′ − V|²|/ρ) ≥ the exit connector length. */
+  readonly exitConnector: number;
+}
+
 export type TubePieceChainJoin =
   | CubicTubeChainJoin
   | TubeChainTrimJoin
   | TubeChainGraphTrimJoin
-  | TubeChainVertexJoin;
+  | TubeChainVertexJoin
+  | TubeChainArcJoin;
 
-/** Leaves are flattened per piece in traversal order, natural order inside a piece. */
+/**
+ * Leaves are flattened per piece in traversal order, natural order inside a
+ * piece; arc leaves follow every piece leaf, in adjacency order ([TECH E3]).
+ */
 export type TubePieceChainResult =
   | {
       readonly kind: "verified";
@@ -721,6 +829,8 @@ export type TubePieceChainResult =
         readonly leaves: readonly CubicTubeChainLeaf[];
         readonly clearedPairs: readonly (readonly [number, number])[];
         readonly maxSplits: number;
+        /** Present only when the request declared arcs. */
+        readonly arcs?: readonly TubeChainArcRecord[];
       };
     }
   | Exclude<CubicTubeChainResult, { readonly kind: "verified" }>;
