@@ -1238,3 +1238,385 @@ function nextAfter(value: number) {
   view.setBigUint64(0, view.getBigUint64(0) + (value >= 0 ? 1n : -1n));
   return view.getFloat64(0);
 }
+
+// Logic lane (docs/testing.md): the exported owner seam `sharedEndpoints`
+// (T08b-d declared-vertex adoption, design §4). Real reconstructions only.
+describe("declared-vertex adoption seam (sharedEndpoints)", () => {
+  const view = new DataView(new ArrayBuffer(8));
+  /** Every number by its binary64 bit pattern (−0 kept). */
+  const bitwise = (value: unknown) =>
+    JSON.stringify(value, (_key, item: unknown) => {
+      if (typeof item !== "number") return item;
+      view.setFloat64(0, item);
+      return `f64:${view.getBigUint64(0).toString(16)}`;
+    });
+  // Four fit points: three smooth source spans sharing points p1, p2.
+  const sources = realSpans([
+    [0, 0],
+    [1, 1],
+    [2, -3],
+    [3.5, -2],
+  ]);
+  const distance = 0.05;
+  const tolerance = 1e-3;
+  const incoming = () =>
+    successful({
+      spans: [sources[0]!],
+      distance,
+      modelingTolerance: tolerance,
+    }).spans;
+  const endLeaf = () => incoming().at(-1)!;
+  const outgoingInput = (
+    sharedEndpoints?: Parameters<
+      typeof approximateSplineOffset
+    >[0]["sharedEndpoints"],
+  ) => ({
+    spans: sources.slice(1),
+    distance,
+    modelingTolerance: tolerance,
+    ...(sharedEndpoints === undefined ? {} : { sharedEndpoints }),
+  });
+
+  test("absent or empty seam is byte-identical to a call without the field", () => {
+    const plain = approximateSplineOffset(outgoingInput());
+    expect(bitwise(approximateSplineOffset(outgoingInput({})))).toBe(
+      bitwise(plain),
+    );
+    expect(
+      bitwise(
+        approximateSplineOffset({
+          ...outgoingInput(),
+          sharedEndpoints: undefined,
+        }),
+      ),
+    ).toBe(bitwise(plain));
+  });
+
+  test("a start adoption reuses the keeper's pole and JVP verbatim, recertifies π₀ and ε, and leaves later source spans bitwise unchanged", () => {
+    // The keeper's emitted end pole and JVP moved off the free pole (as a
+    // neighbour's own owner call would place them; same source vertex).
+    const leaf = endLeaf();
+    const keeper: SplineOffsetCubicSpan = {
+      ...leaf,
+      poles: [
+        leaf.poles[0],
+        leaf.poles[1],
+        leaf.poles[2],
+        [leaf.poles[3][0] + 1e-5, leaf.poles[3][1] - 2e-5],
+      ],
+      differential: {
+        ...leaf.differential,
+        poles: [
+          leaf.differential.poles[0],
+          leaf.differential.poles[1],
+          leaf.differential.poles[2],
+          [0.5, 0.25],
+        ],
+      },
+    };
+    const free = successful(outgoingInput()).spans;
+    expect(bitwise(free[0]!.poles[0])).not.toBe(bitwise(keeper.poles[3]));
+    const adopted = successful(
+      outgoingInput({
+        start: {
+          neighbour: keeper,
+          neighbourEnd: "end",
+          authority: { kind: "sharedPoint" },
+        },
+      }),
+    ).spans;
+    expect(bitwise(adopted[0]!.poles[0])).toBe(bitwise(keeper.poles[3]));
+    expect(bitwise(adopted[0]!.differential.poles[0])).toBe(
+      bitwise(keeper.differential.poles[3]),
+    );
+    // ε is up(R + max π) of the RECOMPUTED metadata of the adopted leaf.
+    const { hermiteRemainder, polePerturbations } =
+      adopted[0]!.reference.localError;
+    expect(adopted[0]!.certifiedError).toBeGreaterThanOrEqual(
+      hermiteRemainder + Math.max(...polePerturbations),
+    );
+    const shift = Math.hypot(
+      keeper.poles[3][0] - free[0]!.poles[0][0],
+      keeper.poles[3][1] - free[0]!.poles[0][1],
+    );
+    expect(polePerturbations[0]).toBeGreaterThanOrEqual(shift / 2);
+    // Only source span 0's leaves may change.
+    const later = (spans: readonly SplineOffsetCubicSpan[]) =>
+      spans.filter((span) => span.source.spanIndex !== 1);
+    expect(bitwise(later(adopted))).toBe(bitwise(later(free)));
+  });
+
+  test("the adopted pole is honestly recertified: a far adopted pole raises π₀ and ε by at least its distance (never the ideal ε)", () => {
+    const keeper = endLeaf();
+    const far: SplineOffsetCubicSpan = {
+      ...keeper,
+      poles: [
+        keeper.poles[0],
+        keeper.poles[1],
+        keeper.poles[2],
+        [keeper.poles[3][0] + 4e-4, keeper.poles[3][1]],
+      ],
+    };
+    const free = successful(outgoingInput()).spans[0]!;
+    const adopted = successful(
+      outgoingInput({
+        start: {
+          neighbour: far,
+          neighbourEnd: "end",
+          authority: { kind: "sharedPoint" },
+        },
+      }),
+    ).spans[0]!;
+    expect(adopted.reference.localError.polePerturbations[0]).toBeGreaterThan(
+      3.9e-4,
+    );
+    expect(adopted.certifiedError).toBeGreaterThan(3.9e-4);
+    expect(adopted.certifiedError).toBeGreaterThan(free.certifiedError);
+  });
+
+  test("the seam applies to the FIRST source span only: a later disconnected span keeps its own start pole", () => {
+    // Two spans that do not share a knot (reversed order): span 1 has no
+    // predecessor share either, and must not take the adopted pole.
+    const spans = [sources[1]!, sources[0]!];
+    const free = successful({
+      spans,
+      distance,
+      modelingTolerance: tolerance,
+    }).spans;
+    const keeper = endLeaf();
+    const adopted = successful({
+      spans,
+      distance,
+      modelingTolerance: tolerance,
+      sharedEndpoints: {
+        start: {
+          neighbour: {
+            ...keeper,
+            poles: [
+              keeper.poles[0],
+              keeper.poles[1],
+              keeper.poles[2],
+              [keeper.poles[3][0] + 1e-5, keeper.poles[3][1]],
+            ],
+          },
+          neighbourEnd: "end",
+          authority: { kind: "sharedPoint" },
+        },
+      },
+    }).spans;
+    const later = (list: readonly SplineOffsetCubicSpan[]) =>
+      list.filter((span) => span.source.spanIndex === 0);
+    expect(bitwise(later(adopted))).toBe(bitwise(later(free)));
+  });
+
+  test("an end adoption changes only the last source span's leaves", () => {
+    const first = successful({
+      spans: sources.slice(0, 2),
+      distance,
+      modelingTolerance: tolerance,
+    }).spans;
+    const next = successful({
+      spans: [sources[2]!],
+      distance,
+      modelingTolerance: tolerance,
+    }).spans;
+    const adopted = successful({
+      spans: sources.slice(0, 2),
+      distance,
+      modelingTolerance: tolerance,
+      sharedEndpoints: {
+        end: {
+          neighbour: next[0]!,
+          neighbourEnd: "start",
+          authority: { kind: "sharedPoint" },
+        },
+      },
+    }).spans;
+    expect(bitwise(adopted.at(-1)!.poles[3])).toBe(bitwise(next[0]!.poles[0]));
+    const early = (spans: readonly SplineOffsetCubicSpan[]) =>
+      spans.filter((span) => span.source.spanIndex === 0);
+    expect(bitwise(early(adopted))).toBe(bitwise(early(first)));
+  });
+
+  test("positional closure: the second pass adopts the first pass's first leaf at its end; spans 0 … n − 2 stay bitwise", () => {
+    const loop = realSpans(
+      [
+        [0, 0],
+        [1, 0],
+        [0, 1.5],
+        [-1, 0.001],
+        [0, 0],
+      ],
+      "positional",
+      {},
+      {},
+      { 4: 0 },
+    );
+    const pass = successful({
+      spans: loop,
+      distance: -0.01,
+      modelingTolerance: tolerance,
+    }).spans;
+    const second = successful({
+      spans: loop,
+      distance: -0.01,
+      modelingTolerance: tolerance,
+      sharedEndpoints: {
+        end: {
+          neighbour: pass[0]!,
+          neighbourEnd: "start",
+          authority: { kind: "positionalClosure" },
+        },
+      },
+    }).spans;
+    expect(bitwise(second.at(-1)!.poles[3])).toBe(bitwise(pass[0]!.poles[0]));
+    const closing = loop.length - 1;
+    const early = (spans: readonly SplineOffsetCubicSpan[]) =>
+      spans.filter((span) => span.source.spanIndex !== closing);
+    expect(bitwise(early(second))).toBe(bitwise(early(pass)));
+  });
+
+  test("caller misuse is a RangeError before any work", () => {
+    const keeper = endLeaf();
+    const adopt =
+      (
+        start: NonNullable<
+          Parameters<typeof approximateSplineOffset>[0]["sharedEndpoints"]
+        >["start"],
+        input = outgoingInput(),
+      ) =>
+      () =>
+        approximateSplineOffset({ ...input, sharedEndpoints: { start } });
+    const shared = { kind: "sharedPoint" } as const;
+    // Relative orientation: head-to-tail needs the same owner distance.
+    expect(
+      adopt({
+        neighbour: {
+          ...keeper,
+          reference: { ...keeper.reference, distance: -distance },
+        },
+        neighbourEnd: "end",
+        authority: shared,
+      }),
+    ).toThrow(/relative orientation/);
+    // Head-to-head needs the opposite one.
+    expect(
+      adopt({
+        neighbour: incoming()[0]!,
+        neighbourEnd: "start",
+        authority: shared,
+      }),
+    ).toThrow(RangeError);
+    // Authority: a coincident declaration must name the two distinct IDs.
+    expect(
+      adopt({
+        neighbour: keeper,
+        neighbourEnd: "end",
+        authority: { kind: "coincident", pointIds: ["p1", "p9"] },
+      }),
+    ).toThrow(/coincident/);
+    expect(
+      adopt({
+        neighbour: keeper,
+        neighbourEnd: "end",
+        authority: { kind: "coincident", pointIds: ["p1", "p1"] },
+      }),
+    ).toThrow(/coincident/);
+    // Shared point: a non-bitwise source vertex is rejected.
+    expect(
+      adopt({
+        neighbour: {
+          ...keeper,
+          reference: {
+            ...keeper.reference,
+            sourcePoles: [
+              keeper.reference.sourcePoles[0],
+              keeper.reference.sourcePoles[1],
+              keeper.reference.sourcePoles[2],
+              [
+                keeper.reference.sourcePoles[3][0] + 1e-12,
+                keeper.reference.sourcePoles[3][1],
+              ],
+            ],
+          },
+        },
+        neighbourEnd: "end",
+        authority: shared,
+      }),
+    ).toThrow(/shared point/);
+    // A non-terminal leaf.
+    expect(
+      adopt({
+        neighbour: { ...keeper, sourceLocalInterval: [0, 0.5] },
+        neighbourEnd: "end",
+        authority: shared,
+      }),
+    ).toThrow(/terminal/);
+    // A non-finite pole.
+    expect(
+      adopt({
+        neighbour: {
+          ...keeper,
+          poles: [
+            keeper.poles[0],
+            keeper.poles[1],
+            keeper.poles[2],
+            [Number.NaN, 0],
+          ],
+        },
+        neighbourEnd: "end",
+        authority: shared,
+      }),
+    ).toThrow(/finite/);
+    // d = 0: the analytic branch would overwrite the adopted pole.
+    expect(
+      adopt(
+        { neighbour: keeper, neighbourEnd: "end", authority: shared },
+        { ...outgoingInput(), distance: 0 },
+      ),
+    ).toThrow(/d = 0/);
+    // A smooth closed wrap already shares its end.
+    const smooth = realSpans(DIAMOND_POINTS, "smooth");
+    const wrapped = successful({
+      spans: smooth,
+      distance,
+      modelingTolerance: tolerance,
+    }).spans;
+    expect(() =>
+      approximateSplineOffset({
+        spans: smooth,
+        distance,
+        modelingTolerance: tolerance,
+        sharedEndpoints: {
+          end: {
+            neighbour: wrapped[0]!,
+            neighbourEnd: "start",
+            authority: { kind: "positionalClosure" },
+          },
+        },
+      }),
+    ).toThrow(/smooth closed wrap/);
+    // A positional closure with a foreign leaf.
+    expect(() =>
+      approximateSplineOffset({
+        spans: sources.slice(1),
+        distance,
+        modelingTolerance: tolerance,
+        sharedEndpoints: {
+          end: {
+            neighbour: keeper,
+            neighbourEnd: "start",
+            authority: { kind: "positionalClosure" },
+          },
+        },
+      }),
+    ).toThrow(RangeError);
+  });
+});
+
+const DIAMOND_POINTS: readonly SplineVector[] = [
+  [1, 0],
+  [0, 1],
+  [-1, 0],
+  [0, -1],
+];

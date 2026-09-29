@@ -458,3 +458,86 @@ export function cornerMatrixRows(): readonly CornerMatrixRow[] {
   );
   return rows;
 }
+
+/**
+ * Positional-closure wrap (T08b-d), labelled "native commit + closure edit":
+ * no native tool authors positional closure (`spline.ts` / session
+ * internals), so this is a native 3-point spline commit whose closure field
+ * is edited to "positional" with a closing occurrence of its first point;
+ * points after the third are appended fit points cloned from the commit's
+ * own point record shape. Nothing else is changed.
+ */
+export function positionalClosureSpline(
+  harness: NativeOffsetChainHarness,
+  points: readonly Vector[],
+): Authored {
+  const patch = harness.drawSpline([], points.slice(0, 3));
+  const entity = patch.entities[0]!;
+  if (entity.kind !== "spline") throw new Error("not a spline");
+  const template = patch.points[0]!;
+  const extraPoints = points.slice(3).map((position, index) => ({
+    ...template,
+    pointId: `${template.pointId}_extra${index}` as typeof template.pointId,
+    label: `${template.label} extra ${index}`,
+    position: position as typeof template.position,
+  }));
+  const first = entity.pointOccurrences[0]!;
+  const occurrences = [
+    ...entity.pointOccurrences,
+    ...extraPoints.map((point, index) => ({
+      occurrenceId: `${first.occurrenceId}_extra${index}`,
+      pointId: point.pointId,
+      tangent: { kind: "automatic" as const },
+    })),
+    {
+      occurrenceId: `${first.occurrenceId}_close`,
+      pointId: first.pointId,
+      tangent: { kind: "automatic" as const },
+    },
+  ];
+  return {
+    ...patch,
+    points: [...patch.points, ...extraPoints],
+    entities: [
+      {
+        ...entity,
+        closure: "positional",
+        pointOccurrences: occurrences,
+        pointOccurrenceIds: occurrences.map(
+          (occurrence) => occurrence.occurrenceId,
+        ),
+      } as typeof entity,
+    ],
+  };
+}
+
+/** The positional-closure wraps of the T08b-d design (τ = 1e-3). */
+export const POSITIONAL_WRAPS = {
+  /** Exactly parallel closure tangents (cross 0). */
+  "wrap-flat4": [
+    [0, 0],
+    [1, 0],
+    [0, 1.5],
+    [-1, 0],
+  ],
+  /** Near-parallel closure (cross ≈ 1.1e-4). */
+  "wrap-near4 1e-3": [
+    [0, 0],
+    [1, 0],
+    [0, 1.5],
+    [-1, 0.001],
+  ],
+  /** The smaller loops (fewer leaves, lower K3 cost). */
+  "wrap-flat4s": [
+    [0, 0],
+    [0.5, 0],
+    [0, 0.6],
+    [-0.5, 0],
+  ],
+  "wrap-near4s 1e-3": [
+    [0, 0],
+    [0.5, 0],
+    [0, 0.6],
+    [-0.5, 0.0005],
+  ],
+} as const satisfies Record<string, readonly Vector[]>;

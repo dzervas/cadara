@@ -15,7 +15,10 @@ import {
   type SplineSpan,
   type SplineVector,
 } from "@/contracts/sketch/spline-geometry";
-import { approximateSplineOffset } from "@/contracts/sketch/spline-offset-geometry";
+import {
+  approximateSplineOffset,
+  type AdoptedEndpoint,
+} from "@/contracts/sketch/spline-offset-geometry";
 import {
   createCertifiedCubicTubeChain,
   createCertifiedCubicTubeChainWithBudgetObserverForTest,
@@ -2042,22 +2045,23 @@ describe("piece tube chain (L1b): Lemma-T trims under one meter", () => {
 
   test("X2/CX2 convex gap: a coincident-style convex line↔line corner is never a trim", () => {
     // Right turn of 1e-6 rad with a 1e-3 source gap; d > 0 (convex).
-    expect(
-      certifier.certifyPieceChain(
-        pieceRequest(
-          [
-            linePiece([-1, 0], [0, 0], 0.01),
-            linePiece([-0.001, 5e-13], [0.999, 5e-13 - 1e-6], 0.01),
-          ],
-          [[at(0.999), at(0.0005)]],
-          { distance: 0.01 },
-        ),
+    const result = certifier.certifyPieceChain(
+      pieceRequest(
+        [
+          linePiece([-1, 0], [0, 0], 0.01),
+          linePiece([-0.001, 5e-13], [0.999, 5e-13 - 1e-6], 0.01),
+        ],
+        [[at(0.999), at(0.0005)]],
+        { distance: 0.01 },
       ),
-    ).toMatchObject({
+    );
+    expect(result).toMatchObject({
       kind: "uncertain",
       code: "trim-side-unproven",
       message: expect.stringContaining("not concave"),
     });
+    // T08b-d R1: a side failure is never a magnitude failure (never flips).
+    expect(result).not.toHaveProperty("magnitude");
   });
 
   test("X3 convex shared vertex with λ < 0 on the terminal leaf: the gate, not a free sign, decides", () => {
@@ -3325,30 +3329,31 @@ describe("piece tube chain (S2): cubic↔cubic graph trims (certifier-input fixt
       [0.45, -1.3125],
       [0.75, -1.0125],
     ] as unknown as SplinePoles;
-    expect(
-      certifier.certifyPieceChain(
-        graphRequest({
-          first: P_LEG(),
-          second: {
-            ...straightQ,
-            source,
-            emitted: straightQ.source.map(([x, y]) => [
-              x - 3 / 64,
-              y + 1 / 16,
-            ]) as unknown as SplinePoles,
-            // Loose box containing O′ = (3/4, 9/16), corner slopes [−1, 6/5].
-            box: [
-              [0.5, 1],
-              [-0.5, 0.6],
-            ],
-          },
-          distance: D,
-        }),
-      ),
-    ).toMatchObject({
+    const result = certifier.certifyPieceChain(
+      graphRequest({
+        first: P_LEG(),
+        second: {
+          ...straightQ,
+          source,
+          emitted: straightQ.source.map(([x, y]) => [
+            x - 3 / 64,
+            y + 1 / 16,
+          ]) as unknown as SplinePoles,
+          // Loose box containing O′ = (3/4, 9/16), corner slopes [−1, 6/5].
+          box: [
+            [0.5, 1],
+            [-0.5, 0.6],
+          ],
+        },
+        distance: D,
+      }),
+    );
+    expect(result).toMatchObject({
       code: "trim-classification-unproven",
       message: expect.stringContaining("slopes are not proved separated"),
     });
+    // T08b-d R1: a classification failure is never tagged `magnitude`.
+    expect(result).not.toHaveProperty("magnitude");
   });
 
   test("§8-3 emitted orientation: H2 and the true slopes pass but the emitted legs cross the wrong way round", () => {
@@ -3728,6 +3733,8 @@ describe("piece tube chain (S2): cubic↔cubic graph trims (certifier-input fixt
         "The true terminal offsets are not proved to cross once inside both terminal leaves.",
       first: 0,
       second: 1,
+      // A Lemma-X margin failure is a bound-versus-budget (magnitude) failure.
+      magnitude: true,
     };
 
     test("the leaf-wide band row fails Lemma X; owner-like metadata (R = ε, π = 0) verifies it through the local branch", () => {
@@ -3959,3 +3966,1165 @@ describe("piece tube chain (S2): cubic↔cubic graph trims (certifier-input fixt
 });
 
 const KNOT_UNPROVEN_CODE = "cubic-tube-knot-incidence-unproven";
+
+// Logic lane (docs/testing.md): the exported certifier seam
+// `certifyPieceChain` / `openRequest` with declared vertices (T08b-d).
+// Line fixtures are certifier-input, not owner-reachable; their true offsets
+// are exact and every ε is computed by the certifier from the literal ends.
+describe("piece tube chain (T08b-d): declared vertices (certifier-input fixtures, not owner-reachable)", () => {
+  type Vector = readonly [number, number];
+  const D = 1 / 64;
+  const TAU = 2 ** -10;
+  /** Line tube with point IDs; emitted = source + d·ν unless overridden. */
+  const line = (
+    start: Vector,
+    end: Vector,
+    ids: readonly [string, string],
+    {
+      distance = D,
+      emitted,
+      reversed = false,
+    }: {
+      distance?: number;
+      emitted?: readonly [Vector, Vector];
+      reversed?: boolean;
+    } = {},
+  ): TubeChainPiece => {
+    const owner = reversed ? -distance : distance;
+    const length = Math.hypot(end[0] - start[0], end[1] - start[1]);
+    const normal: Vector = [
+      -(end[1] - start[1]) / length,
+      (end[0] - start[0]) / length,
+    ];
+    const offset = (point: Vector): Vector => [
+      point[0] + owner * normal[0],
+      point[1] + owner * normal[1],
+    ];
+    return {
+      kind: "line",
+      reversed,
+      tube: {
+        emitted: emitted ?? [offset(start), offset(end)],
+        source: [start, end],
+        distance: owner,
+        startPointId: ids[0],
+        endPointId: ids[1],
+      },
+    };
+  };
+  const endOf = (piece: TubeChainPiece): Vector =>
+    piece.kind === "line" ? piece.tube.emitted[1] : [0, 0];
+  const vertexRequest = (
+    pieces: readonly TubeChainPiece[],
+    vertices: PieceTubeChainRequest["vertices"],
+    {
+      distance = D,
+      modelingTolerance = TAU,
+      closed = false,
+      trims = [],
+    }: {
+      distance?: number;
+      modelingTolerance?: number;
+      closed?: boolean;
+      trims?: PieceTubeChainRequest["trims"];
+    } = {},
+  ): PieceTubeChainRequest => ({
+    modelingTolerance,
+    closed,
+    distance,
+    pieces,
+    trims,
+    vertices,
+  });
+  const shared = (pointId = "v") =>
+    ({ kind: "shared-point", pointId }) as const;
+  const coincident = (a = "v", b = "w") =>
+    ({ kind: "coincident", pointIds: [a, b] }) as const;
+  const at0 = (
+    authority: NonNullable<
+      PieceTubeChainRequest["vertices"]
+    >[number]["authority"],
+    keeper: "first" | "second" = "first",
+  ) => [{ jointIndex: 0, authority, keeper }];
+  const certificateOf = (result: TubePieceChainResult) => {
+    if (result.kind !== "verified")
+      throw new Error(`${result.kind} ${result.code}: ${result.message}`);
+    return result.certificate;
+  };
+  const vertexJoin = (result: TubePieceChainResult) => {
+    const join = certificateOf(result).joins.find(
+      (item) =>
+        item.kind === "parallel-vertex" || item.kind === "nonparallel-vertex",
+    );
+    if (!join) throw new Error("no vertex record");
+    return join as Extract<
+      typeof join,
+      { kind: "parallel-vertex" | "nonparallel-vertex" }
+    >;
+  };
+  /** Straight source along x with a gap g at the vertex; Q adopts Z = P's end. */
+  const parallelPair = (
+    gap: Vector,
+    { shift = 0, ids = ["v", "w"] as readonly [string, string] } = {},
+  ) => {
+    const p = line([-1, 0], [0, 0], ["p", ids[0]], {
+      emitted: [
+        [-1, D + shift],
+        [0, D + shift],
+      ],
+    });
+    const q = line(gap, [1, gap[1]], [ids[1], "q"], {
+      emitted: [endOf(p), [1, gap[1] + D]],
+    });
+    return [p, q] as const;
+  };
+
+  test("parallel g = 0 at one shared point: parallel-vertex, zero bridge, no reserve, no inflation", () => {
+    const certificate = certificateOf(
+      certifier.certifyPieceChain(
+        vertexRequest(parallelPair([0, 0], { ids: ["v", "v"] }), at0(shared())),
+      ),
+    );
+    expect(certificate.joins).toEqual([
+      expect.objectContaining({
+        kind: "parallel-vertex",
+        jointIndex: 0,
+        first: 0,
+        second: 1,
+        authority: "shared-point",
+        keeper: "first",
+        bridge: 0,
+      }),
+    ]);
+    for (const leaf of certificate.leaves) {
+      expect(leaf.displacementBound).toBe(leaf.baseErrorStar);
+      expect(leaf.clearanceRadius).toBe(leaf.baseErrorStar);
+    }
+  });
+
+  test("parallel coincident gap: the keeper carries the bridge |g|⁺ strictly (displacementBound = τ), both radii carry |g|⁺, the adopter keeps ε", () => {
+    const g = 2 ** -11;
+    const certificate = certificateOf(
+      certifier.certifyPieceChain(
+        vertexRequest(parallelPair([g, 0]), at0(coincident())),
+      ),
+    );
+    const join = vertexJoin({ kind: "verified", certificate });
+    expect(join).toMatchObject({
+      kind: "parallel-vertex",
+      authority: "coincident",
+    });
+    // |g|⁺ is the verified outward √ bound of the exact g·g.
+    expect(join.bridge).toBeGreaterThanOrEqual(g);
+    expect(join.bridge).toBeLessThan(g * (1 + 1e-15));
+    const [keeper, adopter] = certificate.leaves;
+    // Keeper: its literal end error (≈ 0) plus the bridge, strict: τ reported.
+    expect(keeper!.baseErrorStar).toBeGreaterThanOrEqual(join.bridge);
+    expect(keeper!.baseErrorStar).toBeLessThan(g * (1 + 1e-14));
+    expect(keeper!.displacementBound).toBe(TAU);
+    expect(keeper!.clearanceRadius).toBeGreaterThanOrEqual(join.bridge);
+    // Adopter: its own ε (the adopted pole's distance to its true end) only.
+    expect(adopter!.baseErrorStar).toBeGreaterThanOrEqual(g);
+    expect(adopter!.baseErrorStar).toBeLessThan(g * (1 + 1e-14));
+    expect(adopter!.displacementBound).toBe(adopter!.baseErrorStar);
+    expect(adopter!.clearanceRadius).toBeGreaterThanOrEqual(2 * g);
+  });
+
+  test("strict at the bridge end: ε* = |g|⁺ = τ exactly is not certified (the adopter's own ε = τ is)", () => {
+    const pair = parallelPair([2 ** -11, 0]);
+    const bridge = vertexJoin(
+      certifier.certifyPieceChain(vertexRequest(pair, at0(coincident()))),
+    ).bridge;
+    expect(
+      certifier.certifyPieceChain(
+        vertexRequest(pair, at0(coincident()), { modelingTolerance: bridge }),
+      ),
+    ).toMatchObject({
+      kind: "uncertain",
+      code: "cubic-tube-knot-incidence-unproven",
+      message: expect.stringContaining("declared-vertex reserve end"),
+    });
+  });
+
+  /**
+   * Exact straight cubic keeper (E = O, so any ε ≥ 0 is honest) ending at the
+   * origin, and a line adopter with source gap g taking its end pole.
+   */
+  const cubicKeeperPair = (
+    gap: Vector,
+    certifiedError: number,
+    leaf: readonly [number, number] = [0, 1],
+  ) => {
+    const source = straight(-1, 0);
+    const keeper: NeutralCubicPieceTube = {
+      poles: source.map(([x, y]) => [x, y + D]) as unknown as SplinePoles,
+      certifiedError,
+      reference: {
+        derivative: [
+          [0.75, 1.5],
+          [0, 0],
+        ],
+        sourcePoles: source,
+        distance: D,
+      },
+      source: {
+        splineId: "keeper",
+        spanIndex: 0,
+        startOccurrenceId: "o0",
+        endOccurrenceId: "o1",
+        startPointId: "p",
+        endPointId: "v",
+      },
+      sourceLocalInterval: leaf,
+      queryDomain: [0, 1],
+    };
+    const adopter = line(gap, [gap[0] + 1, gap[1]], ["w", "q"], {
+      emitted: [
+        [0, D],
+        [gap[0] + 1, gap[1] + D],
+      ],
+    });
+    return [
+      { kind: "cubic", reversed: false, tubes: [keeper] },
+      adopter,
+    ] as const;
+  };
+
+  test("strict at the bridge end, exactly: a cubic keeper with ε + |g|⁺ = τ in exact arithmetic is not certified; one ulp less ε verifies", () => {
+    const g = 2 ** -11;
+    // |g|⁺ = nextUp(2⁻¹¹) = 2⁻¹¹ + 2⁻⁶³; ε = 2⁻¹¹ − 2⁻⁶³ (two ulps below
+    // 2⁻¹¹, exactly representable) makes the EXACT sum 2⁻¹⁰ = τ.
+    const bridge = g + 2 ** -63;
+    const epsilon = g - 2 ** -63;
+    expect(bridge - g).toBe(2 ** -63);
+    expect(g - epsilon).toBe(2 ** -63);
+    const at = (error: number) =>
+      certifier.certifyPieceChain(
+        vertexRequest(cubicKeeperPair([g, 0], error), at0(coincident())),
+      );
+    expect(at(epsilon)).toMatchObject({
+      code: "cubic-tube-knot-incidence-unproven",
+      message: expect.stringContaining("declared-vertex reserve end"),
+    });
+    // One ulp (2⁻⁶⁴) less ε is strictly below τ and verifies.
+    const certificate = certificateOf(at(epsilon - 2 ** -64));
+    expect(vertexJoin({ kind: "verified", certificate })).toMatchObject({
+      kind: "parallel-vertex",
+      bridge,
+    });
+    expect(certificate.leaves[0]!.displacementBound).toBe(TAU);
+  });
+
+  test("C5-3: a vertex leaf that does not reach its natural source end is not admitted", () => {
+    expect(
+      certifier.certifyPieceChain(
+        vertexRequest(cubicKeeperPair([0, 0], 0, [0, 0.5]), at0(coincident())),
+      ),
+    ).toMatchObject({
+      code: "cubic-tube-knot-incidence-unproven",
+      message: expect.stringContaining("natural source end"),
+    });
+  });
+
+  test("the bridge is load-bearing: keeper ε = 3τ/4 plus |g| = τ/2 fails; |g| = τ/8 verifies", () => {
+    const shift = 3 * 2 ** -12;
+    expect(
+      certifier.certifyPieceChain(
+        vertexRequest(
+          parallelPair([2 ** -11, 0], { shift }),
+          at0(coincident()),
+        ),
+      ),
+    ).toMatchObject({
+      code: "cubic-tube-knot-incidence-unproven",
+      message: expect.stringContaining("reserve end"),
+    });
+    const certificate = certificateOf(
+      certifier.certifyPieceChain(
+        vertexRequest(
+          parallelPair([2 ** -13, 0], { shift }),
+          at0(coincident()),
+        ),
+      ),
+    );
+    expect(certificate.leaves[0]!.baseErrorStar).toBeGreaterThanOrEqual(
+      shift + 2 ** -13,
+    );
+    expect(certificate.leaves[0]!.baseErrorStar).toBeLessThan(
+      (shift + 2 ** -13) * (1 + 1e-14),
+    );
+  });
+
+  test("backward declared gap (e·g < 0) fails closed: parallel, and the review's convex counterexample whose true offsets cross", () => {
+    expect(
+      certifier.certifyPieceChain(
+        vertexRequest(parallelPair([-(2 ** -11), 0]), at0(coincident())),
+      ),
+    ).toMatchObject({
+      code: "cubic-tube-knot-incidence-unproven",
+      message: expect.stringContaining("backward declared gap"),
+    });
+    // T08b-d-design-review-evidence/eg-gate-counterexample.py: d = −0.01,
+    // u₂ = (9999, 200)/10001, g = (−6e-4, −5e-6); O_P and O_Q cross.
+    const d = -0.01;
+    const g: Vector = [-6e-4, -5e-6];
+    const p = line([-1, 0], [0, 0], ["p", "v"], { distance: d });
+    const q = line(g, [g[0] + 9999 / 10001, g[1] + 200 / 10001], ["w", "q"], {
+      distance: d,
+    });
+    const adopted: TubeChainPiece = {
+      ...q,
+      tube: {
+        ...(q as Extract<TubeChainPiece, { kind: "line" }>).tube,
+        emitted: [
+          endOf(p),
+          (q as Extract<TubeChainPiece, { kind: "line" }>).tube.emitted[1],
+        ],
+      },
+    } as TubeChainPiece;
+    expect(
+      certifier.certifyPieceChain(
+        vertexRequest([p, adopted], at0(coincident()), {
+          distance: d,
+          modelingTolerance: 1e-3,
+        }),
+      ),
+    ).toMatchObject({
+      code: "cubic-tube-knot-incidence-unproven",
+      message: expect.stringContaining("backward declared gap"),
+    });
+  });
+
+  // Convex corner of exact 7-24-25 geometry: u₁ = (7, 24)/32, u₂ = (1, 0),
+  // d = 1/64, so |N₁ − N₂| = 6/5 and δ = 6d/5 = 3/160 (the tight G2 form is
+  // exact here: c₋ = 7/25).
+  const convexCorner = ({
+    keeper = "first" as "first" | "second",
+    adopterEndShift = 0,
+  } = {}) => {
+    const p = line([-7 / 32, -24 / 32], [0, 0], ["p", "v"]);
+    const qFree = line([0, 0], [1, 0], ["v", "q"]);
+    const pEnd = endOf(p);
+    const qStart = (qFree as Extract<TubeChainPiece, { kind: "line" }>).tube
+      .emitted[0];
+    // The adopter takes the keeper's pole; the keeper keeps its own.
+    const [first, second] =
+      keeper === "first"
+        ? [
+            p,
+            line([0, 0], [1, 0], ["v", "q"], {
+              emitted: [pEnd, [1, D + adopterEndShift]],
+            }),
+          ]
+        : [
+            line([-7 / 32, -24 / 32], [0, 0], ["p", "v"], {
+              emitted: [
+                (p as Extract<TubeChainPiece, { kind: "line" }>).tube
+                  .emitted[0],
+                qStart,
+              ],
+            }),
+            qFree,
+          ];
+    return [first, second] as const;
+  };
+
+  test("convex keeper-only rule: the adopter's ε = τ exactly passes (no correction, no strictness on the adopter)", () => {
+    const pieces = convexCorner({ adopterEndShift: 1 / 32 });
+    // τ := the adopter's own certified ε (its far end error |shift|⁺).
+    const tau = certificateOf(
+      certifier.certifyPieceChain(
+        vertexRequest(pieces, at0(shared()), { modelingTolerance: 1 / 16 }),
+      ),
+    ).leaves[1]!.baseErrorStar;
+    expect(tau).toBeGreaterThanOrEqual(1 / 32);
+    const result = certifier.certifyPieceChain(
+      vertexRequest(pieces, at0(shared()), { modelingTolerance: tau }),
+    );
+    const join = vertexJoin(result);
+    expect(join).toMatchObject({ kind: "nonparallel-vertex", side: "convex" });
+    if (join.kind !== "nonparallel-vertex" || join.side !== "convex")
+      throw new Error("convex");
+    // δ⁺ is the tight Lemma-G2 bound: ≥ 3/160 and within one ulp-scale of it.
+    expect(join.arcDeviation).toBeGreaterThanOrEqual(3 / 160);
+    expect(join.arcDeviation).toBeLessThan((3 / 160) * (1 + 1e-12));
+    const [keeper, adopter] = certificateOf(result).leaves;
+    expect(adopter!.baseErrorStar).toBe(tau);
+    expect(adopter!.displacementBound).toBe(tau);
+    expect(keeper!.displacementBound).toBe(tau);
+    expect(keeper!.baseErrorStar).toBeLessThan(tau);
+    // Both leaves carry G⁺ in their K3 radius.
+    expect(adopter!.clearanceRadius).toBeGreaterThanOrEqual(
+      tau + join.arcDeviation,
+    );
+    expect(keeper!.clearanceRadius).toBeGreaterThanOrEqual(join.arcDeviation);
+  });
+
+  test("outgoing keeper: the correction and the reserve sit on the keeper's START, so its displacementBound is τ", () => {
+    const tau = 1 / 16;
+    const certificate = certificateOf(
+      certifier.certifyPieceChain(
+        vertexRequest(
+          convexCorner({ keeper: "second" }),
+          at0(shared(), "second"),
+          {
+            modelingTolerance: tau,
+          },
+        ),
+      ),
+    );
+    const [adopter, keeper] = certificate.leaves;
+    // Keeper Q: its own start error (≈ 0) plus δ⁺ at its START, strict.
+    expect(keeper!.displacementBound).toBe(tau);
+    expect(keeper!.baseErrorStar).toBeGreaterThanOrEqual(3 / 160);
+    expect(keeper!.baseErrorStar).toBeLessThan((3 / 160) * (1 + 1e-9));
+    // Adopter P: its ε is the adopted pole's distance |Z − A| ≤ δ, no reserve.
+    expect(adopter!.displacementBound).toBe(adopter!.baseErrorStar);
+    expect(adopter!.baseErrorStar).toBeLessThan((3 / 160) * (1 + 1e-9));
+  });
+
+  test("a one-leaf keeper at BOTH ends reserves both ends strictly (line max-form)", () => {
+    const tau = 1 / 32;
+    const middle = line([0, 0], [1, 0], ["v", "w"]);
+    const [, qFree] = convexCorner({ keeper: "second" });
+    void qFree;
+    const incoming = line([-7 / 32, -24 / 32], [0, 0], ["p", "v"]);
+    const outgoingFree = line([1, 0], [1 + 7 / 32, -24 / 32], ["w", "r"]);
+    const withEnd = (
+      piece: TubeChainPiece,
+      index: 0 | 1,
+      value: Vector,
+    ): TubeChainPiece => {
+      const tube = (piece as Extract<TubeChainPiece, { kind: "line" }>).tube;
+      const emitted = [...tube.emitted] as [Vector, Vector];
+      emitted[index] = value;
+      return { ...piece, tube: { ...tube, emitted } } as TubeChainPiece;
+    };
+    const [mStart, mEnd] = (middle as Extract<TubeChainPiece, { kind: "line" }>)
+      .tube.emitted;
+    const pieces = [
+      withEnd(incoming, 1, mStart),
+      middle,
+      withEnd(outgoingFree, 0, mEnd),
+    ];
+    const vertices = [
+      { jointIndex: 0, authority: shared("v"), keeper: "second" as const },
+      { jointIndex: 1, authority: shared("w"), keeper: "first" as const },
+    ];
+    const certificate = certificateOf(
+      certifier.certifyPieceChain(
+        vertexRequest(pieces, vertices, { modelingTolerance: tau }),
+      ),
+    );
+    expect(certificate.leaves[1]!.displacementBound).toBe(tau);
+    expect(certificate.leaves[1]!.baseErrorStar).toBeGreaterThanOrEqual(
+      3 / 160,
+    );
+    expect(certificate.clearedPairs).toEqual([[0, 2]]);
+    // The adopters at either end carry no reserve.
+    for (const index of [0, 2])
+      expect(certificate.leaves[index]!.displacementBound).toBe(
+        certificate.leaves[index]!.baseErrorStar,
+      );
+    // The keeper's two end corrections are both in its K3 radius (G⁺ each).
+    expect(certificate.leaves[1]!.clearanceRadius).toBeGreaterThanOrEqual(
+      2 * (3 / 160),
+    );
+  });
+
+  test("concave line↔line vertex with a gap: J2′ trims both lines, the line tail is |a|·t from the SOURCE direction a (never the adopted emitted step)", () => {
+    const g: Vector = [2 ** -9, 2 ** -10];
+    const a: Vector = [1, 1 / 64];
+    const p = line([-1, 0], [0, 0], ["p", "v"]);
+    const qFree = line(g, [g[0] + a[0], g[1] + a[1]], ["w", "q"]);
+    const qEmitted = (qFree as Extract<TubeChainPiece, { kind: "line" }>).tube
+      .emitted;
+    const q = line(g, [g[0] + a[0], g[1] + a[1]], ["w", "q"], {
+      emitted: [endOf(p), qEmitted[1]],
+    });
+    const result = certifier.certifyPieceChain(
+      vertexRequest([p, q], at0(coincident()), { modelingTolerance: 1 / 64 }),
+    );
+    const join = vertexJoin(result);
+    if (join.kind !== "nonparallel-vertex" || join.side !== "concave")
+      throw new Error(`expected concave, got ${JSON.stringify(join)}`);
+    expect(join.retainedCrossing).toBe(true);
+    expect(join.bridge).toBeGreaterThan(Math.hypot(...g) * (1 - 1e-12));
+    // λ = 1 and |R′| = |a| on a line: tail/trim is exactly |a| (up to the
+    // two outward roundings), P's |a| = 1.
+    expect(join.tail[0] / join.trim[0]).toBeCloseTo(1, 12);
+    expect(join.tail[1] / join.trim[1]).toBeCloseTo(Math.hypot(...a), 12);
+    const step = Math.hypot(
+      qEmitted[1][0] - endOf(p)[0],
+      qEmitted[1][1] - endOf(p)[1],
+    );
+    expect(Math.abs(step - Math.hypot(...a))).toBeGreaterThan(1e-5);
+    const [keeper, adopter] = certificateOf(result).leaves;
+    expect(keeper!.displacementBound).toBe(1 / 64);
+    expect(adopter!.displacementBound).toBe(adopter!.baseErrorStar);
+  });
+
+  test("C5 adversaries on lines: no authority by coordinates, one ID needs a bitwise vertex, coincident names two distinct terminal IDs, Z is bitwise", () => {
+    const knot = (message: string) => ({
+      kind: "uncertain",
+      code: "cubic-tube-knot-incidence-unproven",
+      message: expect.stringContaining(message),
+    });
+    // Equal coordinates, different IDs, declared as one shared point.
+    expect(
+      certifier.certifyPieceChain(
+        vertexRequest(parallelPair([0, 0]), at0(shared())),
+      ),
+    ).toMatchObject(knot("shared point"));
+    // One ID with a non-bitwise source vertex (a coincident gap is not shared).
+    expect(
+      certifier.certifyPieceChain(
+        vertexRequest(
+          parallelPair([2 ** -30, 0], { ids: ["v", "v"] }),
+          at0(shared()),
+        ),
+      ),
+    ).toMatchObject(knot("shared point"));
+    // Coincident naming a non-terminal ID, and with equal IDs.
+    expect(
+      certifier.certifyPieceChain(
+        vertexRequest(parallelPair([0, 0]), at0(coincident("v", "x"))),
+      ),
+    ).toMatchObject(knot("coincident"));
+    expect(
+      certifier.certifyPieceChain(
+        vertexRequest(
+          parallelPair([0, 0], { ids: ["v", "v"] }),
+          at0(coincident("v", "v")),
+        ),
+      ),
+    ).toMatchObject(knot("coincident"));
+    // No authority at all.
+    expect(
+      certifier.certifyPieceChain(
+        vertexRequest(parallelPair([0, 0], { ids: ["v", "v"] }), [
+          { jointIndex: 0, authority: undefined as never, keeper: "first" },
+        ]),
+      ),
+    ).toMatchObject(knot("no declared authority"));
+    // Z not bitwise shared.
+    const [p, q] = parallelPair([0, 0], { ids: ["v", "v"] });
+    const moved = {
+      ...q,
+      tube: {
+        ...(q as Extract<TubeChainPiece, { kind: "line" }>).tube,
+        emitted: [
+          [2 ** -40, D],
+          [1, D],
+        ],
+      },
+    } as TubeChainPiece;
+    expect(
+      certifier.certifyPieceChain(vertexRequest([p, moved], at0(shared()))),
+    ).toMatchObject(knot("bitwise emitted pole"));
+    // Positional closure is never admitted between two pieces.
+    expect(
+      certifier.certifyPieceChain(
+        vertexRequest(
+          parallelPair([0, 0], { ids: ["v", "v"] }),
+          at0({
+            kind: "positional-closure",
+            pointId: "v",
+          }),
+        ),
+      ),
+    ).toMatchObject(knot("positional closure"));
+  });
+
+  test("R5 one index space: every adjacency is covered exactly once by a trim or a vertex", () => {
+    const pieces = [
+      ...parallelPair([0, 0], { ids: ["v", "v"] }),
+      line([1, 0], [2, 0], ["q", "r"], {
+        emitted: [
+          [1, D],
+          [2, D],
+        ],
+      }),
+    ];
+    const bounds = {
+      firstParameterBounds: [0.5, 0.5],
+      secondParameterBounds: [0.5, 0.5],
+    } as const;
+    const invalid = (message: string) => ({
+      kind: "uncertain",
+      code: "invalid-cubic-tube-chain",
+      message: expect.stringContaining(message),
+    });
+    // Missing adjacency 1.
+    expect(
+      certifier.certifyPieceChain(vertexRequest(pieces, at0(shared()))),
+    ).toMatchObject(invalid("per adjacency"));
+    // Adjacency 0 twice (trim and vertex).
+    expect(
+      certifier.certifyPieceChain(
+        vertexRequest(pieces, at0(shared()), {
+          trims: [{ jointIndex: 0, ...bounds }],
+        }),
+      ),
+    ).toMatchObject(invalid("Vertex 0"));
+    // Out of order / out of range.
+    expect(
+      certifier.certifyPieceChain(
+        vertexRequest(pieces, [
+          { jointIndex: 1, authority: shared("q"), keeper: "first" },
+          { jointIndex: 0, authority: shared(), keeper: "first" },
+        ]),
+      ),
+    ).toMatchObject(invalid("Vertex 1"));
+    expect(
+      certifier.certifyPieceChain(
+        vertexRequest(pieces, [
+          { jointIndex: 0, authority: shared(), keeper: "first" },
+          { jointIndex: 2, authority: shared("q"), keeper: "first" },
+        ]),
+      ),
+    ).toMatchObject(invalid("Vertex 1"));
+    // Both as vertices: verified, the index names each adjacency.
+    const certificate = certificateOf(
+      certifier.certifyPieceChain(
+        vertexRequest(pieces, [
+          { jointIndex: 0, authority: shared(), keeper: "first" },
+          { jointIndex: 1, authority: shared("q"), keeper: "first" },
+        ]),
+      ),
+    );
+    expect(
+      certificate.joins.map((join) =>
+        "jointIndex" in join ? [join.jointIndex, join.first, join.second] : [],
+      ),
+    ).toEqual([
+      [0, 0, 1],
+      [1, 1, 2],
+    ]);
+  });
+
+  test("reversed line pieces: the traversal-signed K1 and J2′ read traversal tangents (lines drawn toward the vertex, starts meeting)", () => {
+    // Traversal P: (0,0) → (−1,0) reversed; Q: (0,0) → (−1, 1/64)... both
+    // natural STARTS at the shared vertex, the first traversed backwards.
+    const p = line([0, 0], [-1, 0], ["v", "p"], { reversed: true });
+    const q = line([0, 0], [1, 1 / 64], ["v", "q"]);
+    const pTube = (p as Extract<TubeChainPiece, { kind: "line" }>).tube;
+    const qTube = (q as Extract<TubeChainPiece, { kind: "line" }>).tube;
+    const adopted = {
+      ...q,
+      tube: { ...qTube, emitted: [pTube.emitted[0], qTube.emitted[1]] },
+    } as TubeChainPiece;
+    const result = certifier.certifyPieceChain(
+      vertexRequest([p, adopted], at0(shared())),
+    );
+    expect(vertexJoin(result)).toMatchObject({
+      kind: "nonparallel-vertex",
+      side: "concave",
+    });
+    // The natural-sign cone (unsigned sum) cancels here: the traversal chord
+    // sum is ≈ (2, 1/64), the natural one ≈ (0, 1/64).
+    expect(vertexJoin(result).direction[0]).toBeGreaterThan(1.9);
+  });
+
+  /** Real owner output of a positional closure (closing occurrence of `closeId`). */
+  const positionalTubes = (closeId: string, distance: number) => {
+    const points: readonly Vector[] = [
+      [0, 0],
+      [1, 0],
+      [0, 1.5],
+      [-1, 0],
+      [0, 0],
+    ];
+    const geometry = reconstructSpline({
+      id: "loop",
+      policy: "centripetal-mean-arm-v1",
+      closure: "positional",
+      points: points.map((position, index) => ({
+        occurrenceId: `o${index}`,
+        id: index === 4 ? closeId : `p${index}`,
+        position,
+        tangent: { kind: "automatic" as const },
+      })),
+    });
+    if (geometry.validity !== "valid") throw new Error("invalid fixture");
+    const free = approximateSplineOffset({
+      spans: geometry.spans,
+      distance,
+      modelingTolerance: TOLERANCE,
+    });
+    if (!free.ok) throw new Error(free.code);
+    const second = approximateSplineOffset({
+      spans: geometry.spans,
+      distance,
+      modelingTolerance: TOLERANCE,
+      ...(closeId === "p0"
+        ? {
+            sharedEndpoints: {
+              end: {
+                neighbour: free.spans[0]!,
+                neighbourEnd: "start" as const,
+                authority: { kind: "positionalClosure" as const },
+              },
+            },
+          }
+        : {}),
+    });
+    if (!second.ok) throw new Error(second.code);
+    return second.spans.map((span) => ({
+      ...span,
+      queryDomain: span.sourceInterval,
+    }));
+  };
+  const closedPiece = (tubes: readonly NeutralCubicPieceTube[]) =>
+    ({ kind: "cubic", reversed: false, tubes }) as const;
+  const positional = (pointId = "p0") =>
+    ({ kind: "positional-closure", pointId }) as const;
+
+  test("positional closure (real owner, two passes): the closure is a parallel vertex; distinct IDs, a split of one spline and an unauthorized closure trim fail closed", () => {
+    const distance = 0.01;
+    const tubes = positionalTubes("p0", distance);
+    const closed = (
+      vertices: PieceTubeChainRequest["vertices"],
+      trims: PieceTubeChainRequest["trims"] = [],
+    ) =>
+      vertexRequest([closedPiece(tubes)], vertices, {
+        distance,
+        modelingTolerance: TOLERANCE,
+        closed: true,
+        trims,
+      });
+    const certificate = certificateOf(
+      certifier.certifyPieceChain(closed(at0(positional(), "second"))),
+    );
+    expect(vertexJoin({ kind: "verified", certificate })).toMatchObject({
+      kind: "parallel-vertex",
+      authority: "positional-closure",
+      first: tubes.length - 1,
+      second: 0,
+    });
+    const knot = (message: string) => ({
+      code: "cubic-tube-knot-incidence-unproven",
+      message: expect.stringContaining(message),
+    });
+    // The closing occurrence of a DIFFERENT point ID: no positional authority.
+    const distinct = positionalTubes("p9", distance);
+    expect(
+      certifier.certifyPieceChain(
+        vertexRequest([closedPiece(distinct)], at0(positional(), "second"), {
+          distance,
+          modelingTolerance: TOLERANCE,
+          closed: true,
+        }),
+      ),
+    ).toMatchObject(knot("positional closure needs"));
+    // Two pieces of ONE spline joined by a shared point (intra-spline).
+    const cut = tubes.findIndex((tube) => tube.source.spanIndex === 2);
+    expect(
+      certifier.certifyPieceChain(
+        vertexRequest(
+          [closedPiece(tubes.slice(0, cut)), closedPiece(tubes.slice(cut))],
+          at0(shared(tubes[cut]!.source.startPointId!)),
+          { distance, modelingTolerance: TOLERANCE },
+        ),
+      ),
+    ).toMatchObject(knot("two pieces of one spline"));
+    // T7: a trim inside one closed piece without its positional authority.
+    const bounds = {
+      firstParameterBounds: [0.5, 0.5],
+      secondParameterBounds: [0.5, 0.5],
+    } as const;
+    expect(
+      certifier.certifyPieceChain(closed([], [{ jointIndex: 0, ...bounds }])),
+    ).toMatchObject(knot("Trim 0: no declared authority"));
+    expect(
+      certifier.certifyPieceChain(
+        closed([], [{ jointIndex: 0, ...bounds, authority: shared("p0") }]),
+      ),
+    ).toMatchObject(knot("Trim 0: no declared authority"));
+  });
+
+  test("R8: a looped one-leaf cubic with a VERTEX end is rejected by the vertex K1 (the lifted one-leaf case is covered by the certificate)", () => {
+    const loop: SplinePoles = [
+      [0, 0],
+      [3, 3],
+      [-2, 3],
+      [1, 0],
+    ];
+    const tube: NeutralCubicPieceTube = {
+      poles: loop,
+      certifiedError: 0,
+      reference: {
+        derivative: [
+          [-15, 9],
+          [-9, 9],
+        ],
+        sourcePoles: loop,
+        distance: D,
+      },
+      source: {
+        splineId: "loop",
+        spanIndex: 0,
+        startOccurrenceId: "o0",
+        endOccurrenceId: "o1",
+        startPointId: "p",
+        endPointId: "v",
+      },
+      sourceLocalInterval: [0, 1],
+      queryDomain: [0, 1],
+    };
+    const exit = line([1, 0], [2, 0], ["v", "q"], {
+      emitted: [
+        [1, 0],
+        [2, D],
+      ],
+    });
+    expect(
+      certifier.certifyPieceChain(
+        vertexRequest([closedPiece([tube]), exit], at0(shared()), {
+          modelingTolerance: 1 / 32,
+        }),
+      ),
+    ).toMatchObject({
+      kind: "uncertain",
+      code: "cubic-tube-cone-unproven",
+      message: expect.stringContaining("Declared vertex 0"),
+    });
+  });
+
+  test("openRequest: one budget, attempt k ≥ 2 pays a fixed 64 before any work, exhaustion is sticky, over-issue and bad sizes throw", () => {
+    const requestOf = () =>
+      vertexRequest(parallelPair([2 ** -11, 0]), at0(coincident()));
+    const snapshots: ExactProofBudgetSnapshot[] = [];
+    const single = createCertifiedCubicTubeChainWithBudgetObserverForTest(
+      (snapshot) => snapshots.push(snapshot),
+    );
+    certificateOf(single.certifyPieceChain(requestOf()));
+    const once = snapshots.at(-1)!;
+    snapshots.length = 0;
+    const staged = single.openRequest(2);
+    certificateOf(staged.certifyPieceChain(requestOf()));
+    certificateOf(staged.certifyPieceChain(requestOf()));
+    expect(snapshots).toHaveLength(2);
+    expect(snapshots[0]).toEqual(once);
+    expect(snapshots[1]!.operations).toBe(2 * once.operations + 64);
+    expect(snapshots[1]!.euclideanSteps).toBe(2 * once.euclideanSteps);
+    expect(() => staged.certifyPieceChain(requestOf())).toThrow(RangeError);
+    expect(() => single.openRequest(0)).toThrow(RangeError);
+    expect(() => single.openRequest(1.5)).toThrow(RangeError);
+    // Count / count − 1 over the whole staged request (ops is additive).
+    const total = snapshots[1]!.operations;
+    const lower = (operations: number) =>
+      createCertifiedCubicTubeChainWithLowerBudgetForTest({
+        operations,
+      }).openRequest(2);
+    const exact = lower(total);
+    expect(exact.certifyPieceChain(requestOf()).kind).toBe("verified");
+    expect(exact.certifyPieceChain(requestOf()).kind).toBe("verified");
+    const short = lower(total - 1);
+    expect(short.certifyPieceChain(requestOf()).kind).toBe("verified");
+    expect(short.certifyPieceChain(requestOf())).toEqual(EXHAUSTED_RESULT);
+    // Sticky: an attempt exhausted inside attempt 1 never lets attempt 2 work.
+    snapshots.length = 0;
+    const tiny = createCertifiedCubicTubeChainWithLowerBudgetForTest({
+      operations: once.operations - 1,
+    }).openRequest(2);
+    expect(tiny.certifyPieceChain(requestOf())).toEqual(EXHAUSTED_RESULT);
+    expect(tiny.certifyPieceChain(requestOf())).toEqual(EXHAUSTED_RESULT);
+  });
+
+  test("R9 sticky: a per-value bits exhaustion of attempt 1 never lets a smaller-bits attempt 2 (or 3) work on the same staged request", () => {
+    // The convex corner reaches 378 stored bits, the parallel coincident gap
+    // 276 (observer, meter review): bits are per value, not cumulative, so
+    // only the sticky flag stops the small request after the big one.
+    const big = () =>
+      vertexRequest(convexCorner(), at0(shared()), {
+        modelingTolerance: 1 / 16,
+      });
+    const small = () =>
+      vertexRequest(parallelPair([2 ** -11, 0]), at0(coincident()));
+    const lower = () =>
+      createCertifiedCubicTubeChainWithLowerBudgetForTest({
+        integerBits: 276,
+      });
+    // Controls: alone, the small request verifies and the big one exhausts.
+    expect(lower().certifyPieceChain(small()).kind).toBe("verified");
+    expect(lower().certifyPieceChain(big())).toEqual(EXHAUSTED_RESULT);
+    const two = lower().openRequest(2);
+    expect(two.certifyPieceChain(big())).toEqual(EXHAUSTED_RESULT);
+    expect(two.certifyPieceChain(small()), "sticky").toEqual(EXHAUSTED_RESULT);
+    const three = lower().openRequest(3);
+    expect(three.certifyPieceChain(small()).kind).toBe("verified");
+    expect(three.certifyPieceChain(big())).toEqual(EXHAUSTED_RESULT);
+    expect(three.certifyPieceChain(small()), "sticky after attempt 2").toEqual(
+      EXHAUSTED_RESULT,
+    );
+  });
+
+  // Whole-request literal of one fabricated vertex row (parallel coincident
+  // gap, the only kind that charges the bridge √): observer exact; count
+  // passes; count − 1 exhausts on operations, Euclid and bits.
+  const VERTEX_PIN = {
+    operations: 8_053,
+    euclideanSteps: 716,
+    integerBits: 276,
+  };
+  test("fabricated vertex whole-request literal (observer), count / count − 1 on all three meters", () => {
+    const requestOf = () =>
+      vertexRequest(parallelPair([2 ** -11, 0]), at0(coincident()));
+    let snapshot: ExactProofBudgetSnapshot | undefined;
+    certificateOf(
+      createCertifiedCubicTubeChainWithBudgetObserverForTest((value) => {
+        snapshot = value;
+      }).certifyPieceChain(requestOf()),
+    );
+    const measured = {
+      operations: snapshot!.operations,
+      euclideanSteps: snapshot!.euclideanSteps,
+      integerBits: Math.max(
+        snapshot!.maxStoredBits,
+        snapshot!.maxPreProductBits,
+      ),
+    };
+    expect(measured).toEqual(VERTEX_PIN);
+    for (const kind of [
+      "operations",
+      "euclideanSteps",
+      "integerBits",
+    ] as const) {
+      expect(
+        createCertifiedCubicTubeChainWithLowerBudgetForTest({
+          [kind]: VERTEX_PIN[kind],
+        }).certifyPieceChain(requestOf()).kind,
+        kind,
+      ).toBe("verified");
+      expect(
+        createCertifiedCubicTubeChainWithLowerBudgetForTest({
+          [kind]: VERTEX_PIN[kind] - 1,
+        }).certifyPieceChain(requestOf()),
+        kind,
+      ).toEqual(EXHAUSTED_RESULT);
+    }
+  });
+
+  test("vertex sub-stage caps: K1, classification, the bridge √, the convex G2 √ and the vertex output exhaust as themselves", () => {
+    const parallel = () =>
+      vertexRequest(parallelPair([2 ** -11, 0]), at0(coincident()));
+    const convex = () =>
+      vertexRequest(convexCorner(), at0(shared()), {
+        modelingTolerance: 1 / 16,
+      });
+    // Stage map (meter review, instrumented copy): parallel gap V-precharged
+    // 5 890 → V-K1 6 644 → V-class 6 832 → V-gap (bridge √) 7 153 → V-exit
+    // 7 279, Euclid V-class 581 → V-gap 592; convex V-J2-cones 14 931 →
+    // V-convex-done 16 103, Euclid 2 557 → 2 734.
+    for (const [request, kind, cap] of [
+      [parallel, "operations", 6_300],
+      [parallel, "operations", 6_700],
+      [parallel, "operations", 7_000],
+      [parallel, "euclideanSteps", 590],
+      [parallel, "operations", 7_200],
+      [convex, "operations", 15_500],
+      [convex, "euclideanSteps", 2_650],
+    ] as const)
+      expect(
+        createCertifiedCubicTubeChainWithLowerBudgetForTest({
+          [kind]: cap,
+        }).certifyPieceChain(request()),
+        `${kind} ${cap}`,
+      ).toEqual(EXHAUSTED_RESULT);
+  });
+
+  test("the vertex precharge is paid BEFORE authorization: an authority-rejected vertex costs exactly 4 840 ops; 4 839 exhausts", () => {
+    const rejected = () =>
+      vertexRequest(
+        parallelPair([0, 0], { ids: ["v", "v"] }),
+        at0(shared("zz")),
+      );
+    const lower = (operations: number) =>
+      createCertifiedCubicTubeChainWithLowerBudgetForTest({
+        operations,
+      }).certifyPieceChain(rejected());
+    expect(lower(4_840)).toEqual({
+      kind: "uncertain",
+      code: "cubic-tube-knot-incidence-unproven",
+      message:
+        "Declared vertex 0: a shared point needs one terminal point ID and a bitwise source vertex.",
+      first: 0,
+      second: 1,
+    });
+    expect(lower(4_839)).toEqual(EXHAUSTED_RESULT);
+  });
+
+  /** Real owner of one fabricated source span (point IDs, optional adoption). */
+  const ownerPiece = (
+    poles: SplinePoles,
+    id: string,
+    [startPointId, endPointId]: readonly [string, string],
+    distance: number,
+    sharedEndpoints?: {
+      start?: AdoptedEndpoint;
+      end?: AdoptedEndpoint;
+    },
+  ) => {
+    const result = approximateSplineOffset({
+      spans: [
+        {
+          source: {
+            splineId: id,
+            spanIndex: 0,
+            startPointId,
+            endPointId,
+            startOccurrenceId: `${id}o0`,
+            endOccurrenceId: `${id}o1`,
+          },
+          orientation: "forward",
+          interval: [0, 1],
+          poles,
+          validity: "valid",
+          differential: {
+            interval: [0, 0],
+            poles: [
+              [0, 0],
+              [0, 0],
+              [0, 0],
+              [0, 0],
+            ],
+          },
+        },
+      ],
+      distance,
+      modelingTolerance: TOLERANCE,
+      ...(sharedEndpoints ? { sharedEndpoints } : {}),
+    });
+    if (!result.ok) throw new Error(result.code);
+    return result.spans;
+  };
+  const tubesOf = (spans: ReturnType<typeof ownerPiece>) =>
+    spans.map((span) => ({ ...span, queryDomain: span.sourceInterval }));
+  /** Straight cubic source from `from` to `to` (uniform poles, exact ends). */
+  const straightSource = (from: Vector, to: Vector) =>
+    [
+      from,
+      [from[0] + (to[0] - from[0]) / 3, from[1] + (to[1] - from[1]) / 3],
+      [
+        from[0] + (2 * (to[0] - from[0])) / 3,
+        from[1] + (2 * (to[1] - from[1])) / 3,
+      ],
+      to,
+    ] as unknown as SplinePoles;
+  /** Cubic arc of radius R from `start` at direction φ, sweep θ (left if θ > 0). */
+  const arcSource = (
+    start: Vector,
+    phi: number,
+    radius: number,
+    theta: number,
+  ) => {
+    const k = (4 / 3) * Math.tan(theta / 4);
+    const t0: Vector = [Math.cos(phi), Math.sin(phi)];
+    const t1: Vector = [Math.cos(phi + theta), Math.sin(phi + theta)];
+    const center: Vector = [
+      start[0] - radius * t0[1],
+      start[1] + radius * t0[0],
+    ];
+    const end: Vector = [
+      center[0] + radius * Math.sin(phi + theta),
+      center[1] - radius * Math.cos(phi + theta),
+    ];
+    return [
+      [start[0], start[1]],
+      [start[0] + k * radius * t0[0], start[1] + k * radius * t0[1]],
+      [end[0] - k * radius * t1[0], end[1] - k * radius * t1[1]],
+      end,
+    ] as unknown as SplinePoles;
+  };
+  const reversedSource = (poles: SplinePoles) =>
+    [poles[3], poles[2], poles[1], poles[0]] as unknown as SplinePoles;
+  /** Q (traversal reversed) curls inward and adopts P's end pole (shared point). */
+  const qReversedRow = (): PieceTubeChainRequest => {
+    const d = 0.01;
+    const p = ownerPiece(straightSource([-0.3, 0], [0, 0]), "P", ["p", "v"], d);
+    const q = ownerPiece(
+      reversedSource(
+        arcSource(
+          [0, 0],
+          0.007911509979516267,
+          0.027146307589486243,
+          1.3016902776435018,
+        ),
+      ),
+      "Q",
+      ["q", "v"],
+      -d,
+      {
+        end: {
+          neighbour: p.at(-1)!,
+          neighbourEnd: "end",
+          authority: { kind: "sharedPoint" },
+        },
+      },
+    );
+    return vertexRequest(
+      [
+        { kind: "cubic", reversed: false, tubes: tubesOf(p) },
+        { kind: "cubic", reversed: true, tubes: tubesOf(q) },
+      ],
+      at0(shared()),
+      { distance: d, modelingTolerance: TOLERANCE },
+    );
+  };
+  /** P (traversal reversed) curls inward; Q adopts P's natural start pole. */
+  const pReversedRow = (): PieceTubeChainRequest => {
+    const d = -0.01;
+    const phi = -0.00558565815538168;
+    const p = ownerPiece(
+      arcSource([0, 0], Math.PI, 0.028079077823553233, 0.6997285035438836),
+      "P",
+      ["v", "p"],
+      -d,
+    );
+    const q = ownerPiece(
+      straightSource([0, 0], [0.3 * Math.cos(phi), 0.3 * Math.sin(phi)]),
+      "Q",
+      ["v", "q"],
+      d,
+      {
+        start: {
+          neighbour: p[0]!,
+          neighbourEnd: "start",
+          authority: { kind: "sharedPoint" },
+        },
+      },
+    );
+    return vertexRequest(
+      [
+        { kind: "cubic", reversed: true, tubes: tubesOf(p) },
+        { kind: "cubic", reversed: false, tubes: tubesOf(q) },
+      ],
+      at0(shared()),
+      { distance: d, modelingTolerance: TOLERANCE },
+    );
+  };
+  test.each([
+    ["Q reversed (outgoing curls inward)", qReversedRow],
+    ["P reversed (incoming curls inward)", pReversedRow],
+  ] as const)(
+    "reversed-leaf slope rate (math review M-R3; real owner, certifier input, not owner-reachable through a native chain): %s at |d|κ ≈ 0.4–0.6 verifies as one concave vertex only with the traversal-signed rate",
+    (_label, requestOf) => {
+      // An unsigned rate (natural cross over the signed cone) fails J2′
+      // uniqueness here: "not proved to cross only once".
+      expect(
+        certificateOf(certifier.certifyPieceChain(requestOf())).joins.filter(
+          (join) => join.kind === "nonparallel-vertex",
+        ),
+      ).toEqual([
+        expect.objectContaining({
+          kind: "nonparallel-vertex",
+          side: "concave",
+          authority: "shared-point",
+          jointIndex: 0,
+          keeper: "first",
+        }),
+      ]);
+    },
+  );
+});
