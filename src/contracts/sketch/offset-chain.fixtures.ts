@@ -308,6 +308,40 @@ export function splineSplineCornerRows(): readonly CornerMatrixRow[] {
 }
 
 /**
+ * The S2 design §7 native `B` rows (τ = 1e-3), built exactly as the design
+ * probe builds them: a line drawn from the arch's end (shared point ID) at a
+ * shallow left turn φ from the arch's end chord, concave for d > 0. They are
+ * Lemma-T (line↔cubic) trims. Rows are labelled `B φ=<φ>`.
+ */
+export function splineLineShallowRows(): readonly CornerMatrixRow[] {
+  const rotate = (vector: Vector, angle: number): Vector => [
+    vector[0] * Math.cos(angle) - vector[1] * Math.sin(angle),
+    vector[0] * Math.sin(angle) + vector[1] * Math.cos(angle),
+  ];
+  const length = Math.hypot(1, -0.1);
+  const archEnd: Vector = [1 / length, -0.1 / length];
+  const rows: CornerMatrixRow[] = [];
+  for (const phi of [0.5, 0.2, 0.1, 0.05, 0.02])
+    for (const distance of [0.01, 0.2])
+      rows.push({
+        row: `B φ=${phi}`,
+        distance,
+        build: (h) => {
+          const spline = h.drawSpline([], ARCH_POINTS);
+          const [, end] = h.splineEnds(spline);
+          const direction = rotate(archEnd, phi);
+          return [
+            spline,
+            h.drawLine([spline], [2, 0], [2 + direction[0], direction[1]], {
+              start: end,
+            }),
+          ];
+        },
+      });
+  return rows;
+}
+
+/**
  * The T08b design §1.5 native corner matrix (τ = 1e-3), one entry per
  * (row, d), built exactly as the design probe builds it.
  */

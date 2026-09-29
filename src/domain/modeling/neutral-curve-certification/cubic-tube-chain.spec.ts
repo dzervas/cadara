@@ -6,6 +6,7 @@ import type {
   NeutralCubicTube,
   PieceTubeChainRequest,
   TubeChainPiece,
+  TubeChainTrimJoin,
   TubePieceChainResult,
 } from "@/contracts/modeling/neutral-curve-query";
 import {
@@ -2126,6 +2127,342 @@ describe("piece tube chain (L1b): Lemma-T trims under one meter", () => {
     );
   };
 
+  describe("Q4-E1 local ε at Lemma-T trims (certifier-input fixtures, not owner-reachable)", () => {
+    // The uChain geometry with both crossings 1/64 of the cubic from its
+    // vertices (d = h/64): E = O exactly, so any nonnegative metadata is an
+    // honest bound; "owner-like" is R = ε, π = 0. Leaf-wide, each tail M·δ is
+    // ≈ ε_A + ε, so the cubic star ε + 2(ε_A + ε) exceeds τ = 2ε.
+    const H = 3 / 256;
+    const DL = H / 64;
+    const UP: SplinePoles = [
+      [0, 0],
+      [0, 1 / 256],
+      [0, 2 / 256],
+      [0, 3 / 256],
+    ];
+    const BOX: Box = [
+      [0, 0],
+      [H, H],
+    ];
+    type Local = {
+      readonly hermiteRemainder: number;
+      readonly polePerturbations: readonly [number, number, number, number];
+    };
+    const ownerLike = (error: number): Local => ({
+      hermiteRemainder: error,
+      polePerturbations: [0, 0, 0, 0],
+    });
+    const withLocal = (
+      tube: NeutralCubicPieceTube,
+      local: Local | undefined,
+    ): NeutralCubicPieceTube =>
+      local
+        ? { ...tube, reference: { ...tube.reference, localError: local } }
+        : tube;
+    const localU = (
+      curveError: number,
+      modelingTolerance: number,
+      local: Local | undefined,
+    ) =>
+      pieceRequest(
+        [
+          linePiece([-1, 0], [0, 0], DL),
+          cubicPiece([
+            withLocal(
+              pieceTube(
+                UP.map(([, y]) => [-DL, y]) as unknown as SplinePoles,
+                UP,
+                BOX,
+                DL,
+                { certifiedError: curveError },
+              ),
+              local,
+            ),
+          ]),
+          linePiece([0, H], [-1, H], DL),
+        ],
+        [
+          [at(1 - DL), at(1 / 64)],
+          [at(63 / 64), at(DL)],
+        ],
+        { distance: DL, modelingTolerance },
+      );
+    /** Line → cubic only; `reversed` traverses the cubic downward (natural data flipped). */
+    const localL = (
+      reversed: boolean,
+      curveError: number,
+      modelingTolerance: number,
+      local: Local,
+    ) => {
+      const natural = reversed
+        ? ([...UP].reverse() as unknown as SplinePoles)
+        : UP;
+      const ownerDistance = reversed ? -DL : DL;
+      const box: Box = reversed
+        ? [
+            [0, 0],
+            [-H, -H],
+          ]
+        : BOX;
+      return pieceRequest(
+        [
+          linePiece([-1, 0], [0, 0], DL),
+          cubicPiece(
+            [
+              withLocal(
+                pieceTube(
+                  natural.map(([, y]) => [-DL, y]) as unknown as SplinePoles,
+                  natural,
+                  box,
+                  ownerDistance,
+                  { certifiedError: curveError },
+                ),
+                local,
+              ),
+            ],
+            reversed,
+          ),
+        ],
+        [[at(1 - DL), at(reversed ? 63 / 64 : 1 / 64)]],
+        { distance: DL, modelingTolerance },
+      );
+    };
+    const EPS = 2 ** -17;
+
+    test("composition band: leaf-wide ε + 2(ε_A + ε) > τ = 2ε; owner-like metadata upgrades both trims and verifies", () => {
+      expect(
+        certifier.certifyPieceChain(localU(EPS, 2 * EPS, undefined)),
+      ).toMatchObject({
+        kind: "uncertain",
+        code: "trim-composition-unproven",
+        message: expect.stringContaining("corrected base error exceeds"),
+      });
+      const certificate = pieceVerified(
+        certifier.certifyPieceChain(localU(EPS, 2 * EPS, ownerLike(EPS))),
+      );
+      const trims = certificate.joins.filter((join) => join.kind === "trim");
+      expect(trims).toHaveLength(2);
+      for (const trim of trims) {
+        if (trim.kind !== "trim") throw new Error("trim");
+        // Local tail M·δ = ε_A + R/256 (s = 1/64): far below the leaf-wide ε.
+        expect(trim.tail).toBeLessThan(EPS / 64);
+      }
+      // The exact true roots: 1/64 and 63/64 on the cubic, 1 − d and d on the lines.
+      const [first, second] = trims as TubeChainTrimJoin[];
+      expect(first!.secondRootBounds[0]).toBeLessThan(1 / 64);
+      expect(first!.secondRootBounds[1]).toBeGreaterThan(1 / 64);
+      expect(second!.firstRootBounds[0]).toBeLessThan(63 / 64);
+      expect(second!.firstRootBounds[1]).toBeGreaterThan(63 / 64);
+      // The cubic star keeps the leaf-wide ε plus both local tails.
+      expect(certificate.leaves[1]!.baseErrorStar).toBeGreaterThan(EPS);
+      for (const leaf of certificate.leaves)
+        expect(leaf.displacementBound).toBeLessThanOrEqual(2 * EPS);
+    });
+
+    test("the cubic star keeps the leaf-wide ε: ε = τ exactly stays trim-composition-unproven after the upgrade", () => {
+      expect(
+        certifier.certifyPieceChain(localU(EPS, EPS, ownerLike(EPS))),
+      ).toMatchObject({
+        kind: "uncertain",
+        code: "trim-composition-unproven",
+        message: expect.stringContaining("corrected base error exceeds"),
+        first: 1,
+      });
+    });
+
+    test("window band: leaf-wide δ = (ε_A + ε)/h ≥ 1/64 pushes the curve root past the vertex; the local δ keeps it interior", () => {
+      const error = 2 ** -12;
+      expect(
+        certifier.certifyPieceChain(localU(error, 2 ** -10, undefined)),
+      ).toMatchObject({
+        kind: "uncertain",
+        code: "trim-window-unproven",
+        message: expect.stringContaining(
+          "not strictly inside its terminal leaf",
+        ),
+      });
+      pieceVerified(
+        certifier.certifyPieceChain(localU(error, 2 ** -10, ownerLike(error))),
+      );
+    });
+
+    test("honest π on the FAR natural pole: forward and reversed cubics verify; on the vertex pole there is no gain", () => {
+      // Forward: the vertex is natural pole 0; reversed: natural pole 3.
+      for (const reversed of [false, true]) {
+        const far: Local = {
+          hermiteRemainder: 0,
+          polePerturbations: reversed ? [EPS, 0, 0, 0] : [0, 0, 0, EPS],
+        };
+        const vertex: Local = {
+          hermiteRemainder: 0,
+          polePerturbations: reversed ? [0, 0, 0, EPS] : [EPS, 0, 0, 0],
+        };
+        pieceVerified(
+          certifier.certifyPieceChain(localL(reversed, EPS, 2 * EPS, far)),
+        );
+        expect(
+          certifier.certifyPieceChain(localL(reversed, EPS, 2 * EPS, vertex)),
+          `reversed ${reversed}`,
+        ).toMatchObject({
+          kind: "uncertain",
+          code: "trim-composition-unproven",
+        });
+      }
+    });
+
+    test("MR1 stays composition-unproven: its crossing at s = 0.45 has 16R·s² > ε, so the local bound is the leaf-wide ε", () => {
+      const base = uChain(1e-5, 1e-5);
+      const cubic = base.pieces[1] as Extract<
+        TubeChainPiece,
+        { kind: "cubic" }
+      >;
+      expect(
+        certifier.certifyPieceChain({
+          ...base,
+          pieces: [
+            base.pieces[0]!,
+            { ...cubic, tubes: [withLocal(cubic.tubes[0]!, ownerLike(1e-5))] },
+            base.pieces[2]!,
+          ],
+        }),
+      ).toMatchObject({
+        kind: "uncertain",
+        code: "trim-composition-unproven",
+      });
+    });
+
+    /** Every trim's cubic-side stored bounds widened by `width` around the true root. */
+    const widened = (
+      request: PieceTubeChainRequest,
+      width: number,
+    ): PieceTubeChainRequest => ({
+      ...request,
+      trims: request.trims.map((trim) => {
+        const side =
+          trim.jointIndex === 0
+            ? "secondParameterBounds"
+            : "firstParameterBounds";
+        const [low, high] = trim[side];
+        return { ...trim, [side]: [low - width, high + width] as const };
+      }),
+    });
+    test.each([
+      ["composition band", EPS, 2 * EPS, "trim-composition-unproven"],
+      ["window band", 2 ** -12, 2 ** -10, "trim-window-unproven"],
+    ] as const)(
+      "wide stored curve bounds (not owner-reachable): the local ε reaches the FAR stored bound of U, so R = 128ε rejects the %s",
+      (_label, error, tau, code) => {
+        // Honest for any R (E = O exactly). With bounds 1/64 ± 2⁻⁷ the far
+        // reach is 3/128 and the near one 1/128 (s² ratio 9). Review-fixes
+        // probe: the far-bound (current) window rejects from R ≈ 64ε /
+        // 48ε, a NEAR-bound window would verify up to R ≥ 192ε / 256ε.
+        // Semantic killer of the near-bound mutant (math review A1).
+        const request = (remainder: number) =>
+          widened(localU(error, tau, ownerLike(remainder)), 2 ** -7);
+        pieceVerified(certifier.certifyPieceChain(request(32 * error)));
+        expect(certifier.certifyPieceChain(request(128 * error))).toMatchObject(
+          { kind: "uncertain", code },
+        );
+      },
+    );
+
+    // Whole-request literals of the two owner-like band rows (T08b-c meter
+    // review R1, two processes, re-measured in the review fixes) pinned on
+    // operations, Euclid and integerBits. The staged caps land INSIDE the
+    // Lemma-T upgrade (instrumented stage map): precharge, δ, `place` (roots
+    // and outputs) and the leaf-loop recomposition. The composition row
+    // upgrades in the leaf loop, the window row at the trim stage.
+    // Load-bearing exhaustion-swallow, once-guard and precharge killers.
+    const LOCAL_PINS = [
+      [
+        "composition band (leaf-loop upgrades)",
+        () => localU(EPS, 2 * EPS, ownerLike(EPS)),
+        { operations: 19_455, euclideanSteps: 2_337, integerBits: 286 },
+        // Upgrade 1 ops [11 967, 14 317], upgrade 2 [14 863, 17 606].
+        [
+          ["operations", 12_000], // precharge
+          ["operations", 12_500], // δ
+          ["operations", 13_500], // place, upgrade 1
+          ["operations", 16_500], // place, upgrade 2
+          ["operations", 17_400], // recomposition
+          ["euclideanSteps", 1_300], // place, upgrade 1
+          ["euclideanSteps", 1_800], // place, upgrade 2
+          ["euclideanSteps", 2_050], // recomposition
+        ],
+      ],
+      [
+        "window band (trim-stage upgrades)",
+        () => localU(2 ** -12, 2 ** -10, ownerLike(2 ** -12)),
+        { operations: 16_535, euclideanSteps: 1_744, integerBits: 286 },
+        // Trim 1 ops [7 917, 10 001], trim 2 [11 889, 14 107].
+        [
+          ["operations", 7_950], // precharge, trim 1
+          ["operations", 8_450], // δ, trim 1
+          ["operations", 9_000], // place, trim 1
+          ["operations", 13_000], // place, trim 2
+          ["euclideanSteps", 800], // place, trim 1
+          ["euclideanSteps", 1_200], // place, trim 2
+        ],
+      ],
+    ] as const;
+    const METERS = ["operations", "euclideanSteps", "integerBits"] as const;
+
+    test.each(LOCAL_PINS)(
+      "fabricated Lemma-T local literal, %s (observer)",
+      (_label, request, literal) => {
+        let snapshot: ExactProofBudgetSnapshot | undefined;
+        expect(
+          createCertifiedCubicTubeChainWithBudgetObserverForTest((value) => {
+            snapshot = value;
+          }).certifyPieceChain(request()).kind,
+        ).toBe("verified");
+        expect({
+          operations: snapshot!.operations,
+          euclideanSteps: snapshot!.euclideanSteps,
+          integerBits: Math.max(
+            snapshot!.maxStoredBits,
+            snapshot!.maxPreProductBits,
+          ),
+        }).toEqual(literal);
+      },
+    );
+
+    test.each(
+      LOCAL_PINS.flatMap(([label, request, literal]) =>
+        METERS.map((kind) => [label, kind, request, literal[kind]] as const),
+      ),
+    )(
+      "fabricated Lemma-T local, %s: the literal %s count passes and count − 1 exhausts the whole request",
+      (_label, kind, request, total) => {
+        expect(
+          createCertifiedCubicTubeChainWithLowerBudgetForTest({
+            [kind]: total,
+          }).certifyPieceChain(request()).kind,
+        ).toBe("verified");
+        expect(
+          createCertifiedCubicTubeChainWithLowerBudgetForTest({
+            [kind]: total - 1,
+          }).certifyPieceChain(request()),
+        ).toEqual(EXHAUSTED_RESULT);
+      },
+    );
+
+    test.each(
+      LOCAL_PINS.flatMap(([label, request, , staged]) =>
+        staged.map(([kind, cap]) => [label, kind, cap, request] as const),
+      ),
+    )(
+      "staged cap inside the Lemma-T upgrade (%s, %s = %s) exhausts the request, never a window or composition failure code",
+      (_label, kind, cap, request) => {
+        expect(
+          createCertifiedCubicTubeChainWithLowerBudgetForTest({
+            [kind]: cap,
+          }).certifyPieceChain(request()),
+        ).toEqual(EXHAUSTED_RESULT);
+      },
+    );
+  });
+
   test("MR1 trim composition: both Mδ tails are included in the corrected error", () => {
     expect(certifier.certifyPieceChain(uChain(1e-5, 1e-5))).toMatchObject({
       kind: "uncertain",
@@ -2558,6 +2895,11 @@ describe("piece tube chain (S2): cubic↔cubic graph trims (certifier-input fixt
     readonly error: number;
     readonly box?: Box;
     readonly emitted?: SplinePoles;
+    /** Q4-E1 metadata (R, πᵢ in TRAVERSAL pole order); absent = none. */
+    readonly local?: {
+      readonly remainder: number;
+      readonly poles: readonly [number, number, number, number];
+    };
   }
   const tubeOf = (
     leg: Leg,
@@ -2575,6 +2917,14 @@ describe("piece tube chain (S2): cubic↔cubic graph trims (certifier-input fixt
       derivative: leg.box ?? hodographBox(leg.source),
       sourcePoles: leg.source,
       distance: ownerDistance,
+      ...(leg.local
+        ? {
+            localError: {
+              hermiteRemainder: leg.local.remainder,
+              polePerturbations: leg.local.poles,
+            },
+          }
+        : {}),
     },
     source: {
       splineId,
@@ -2660,6 +3010,19 @@ describe("piece tube chain (S2): cubic↔cubic graph trims (certifier-input fixt
                   box: leg.box.map(
                     ([low, high]) => [-high, -low] as const,
                   ) as unknown as Box,
+                }
+              : {}),
+            ...(leg.local
+              ? {
+                  local: {
+                    ...leg.local,
+                    poles: [...leg.local.poles].reverse() as unknown as [
+                      number,
+                      number,
+                      number,
+                      number,
+                    ],
+                  },
                 }
               : {}),
           }
@@ -3311,6 +3674,288 @@ describe("piece tube chain (S2): cubic↔cubic graph trims (certifier-input fixt
       ).toEqual(EXHAUSTED_RESULT);
     },
   );
+
+  describe("Q4-E1 local ε on the S2 vertex sub-windows", () => {
+    // The §8-4 geometry: d = 5·2⁻¹², the true offsets cross 2⁻¹⁰ of a leg
+    // before the vertex, so the leaf-wide ε = 2⁻¹¹ fails Lemma X. Emitted =
+    // true offsets exactly unless a pole is shifted, so metadata that bounds
+    // the actual |E − O| is honest; "owner-like" is R = ε, π = 0.
+    const SMALL = 5 * 2 ** -12;
+    const EPS = 2 ** -11;
+    const OWNER_LIKE = { remainder: EPS, poles: [0, 0, 0, 0] } as const;
+    const bandP = (overrides: Partial<Leg> = {}): Leg => ({
+      ...P_LEG(),
+      offset: [3 * 2 ** -12, 2 ** -10],
+      error: EPS,
+      ...overrides,
+    });
+    const bandQ = (overrides: Partial<Leg> = {}): Leg => ({
+      ...Q_LEG(),
+      offset: [-3 * 2 ** -12, 2 ** -10],
+      error: EPS,
+      ...overrides,
+    });
+    /** Emitted = true offset + `shift` on traversal pole `pole` (|E − O| = |shift|·B_pole). */
+    const shifted = (leg: Leg, pole: number, shift: Vector): SplinePoles =>
+      leg.source.map(([x, y], index) => [
+        x + leg.offset[0] + (index === pole ? shift[0] : 0),
+        y + leg.offset[1] + (index === pole ? shift[1] : 0),
+      ]) as unknown as SplinePoles;
+    const band = (
+      first: Leg,
+      second: Leg,
+      options: { reversed?: readonly [boolean, boolean]; tau?: number } = {},
+    ) =>
+      graphRequest({
+        first,
+        second,
+        distance: SMALL,
+        ...(options.reversed ? { reversed: options.reversed } : {}),
+        ...(options.tau ? { modelingTolerance: options.tau } : {}),
+      });
+
+    const verifiedLocal = (request: PieceTubeChainRequest) => {
+      const certificate = graphVerified(request);
+      expect(certificate.joins[0]).toMatchObject({ kind: "graph-trim" });
+      for (const leaf of certificate.leaves)
+        expect(leaf.displacementBound).toBe(TOLERANCE);
+      return certificate;
+    };
+    const EXISTENCE_FAILURE = {
+      kind: "uncertain",
+      code: "trim-existence-unproven",
+      message:
+        "The true terminal offsets are not proved to cross once inside both terminal leaves.",
+      first: 0,
+      second: 1,
+    };
+
+    test("the leaf-wide band row fails Lemma X; owner-like metadata (R = ε, π = 0) verifies it through the local branch", () => {
+      expect(certifier.certifyPieceChain(band(bandP(), bandQ()))).toEqual(
+        EXISTENCE_FAILURE,
+      );
+      const certificate = verifiedLocal(
+        band(bandP({ local: OWNER_LIKE }), bandQ({ local: OWNER_LIKE })),
+      );
+      const join = certificate.joins[0]!;
+      if (join.kind !== "graph-trim") throw new Error("graph trim");
+      // The exact true crossing is at u* = 1 − 2⁻¹⁰ on P and v* = 2⁻¹⁰ on Q.
+      expect(join.firstRootBounds[0]).toBeLessThan(1 - 2 ** -10);
+      expect(join.firstRootBounds[1]).toBeGreaterThan(1 - 2 ** -10);
+      expect(join.secondRootBounds[0]).toBeLessThan(2 ** -10);
+      expect(join.secondRootBounds[1]).toBeGreaterThan(2 ** -10);
+      expect(join.separation).toBe(1.5);
+      // The stars keep the leaf-wide ε (and the other side's leaf-wide w).
+      for (const leaf of certificate.leaves)
+        expect(leaf.baseErrorStar).toBeGreaterThanOrEqual((5 / 4) * EPS);
+      // Metadata on one side only is not enough: the other side keeps ε.
+      expect(
+        certifier.certifyPieceChain(
+          band(bandP({ local: OWNER_LIKE }), bandQ()),
+        ),
+      ).toEqual(EXISTENCE_FAILURE);
+    });
+
+    test("true error concentrated at the VERTEX pole (honest π₃ = ε) leaves no local gain and is rejected", () => {
+      // |E − O| = 2⁻¹¹·B₃(τ): not ≤ the vanishing profile a far error would
+      // allow, and within ε; its honest metadata carries it at pole 3.
+      const shift: Vector = [0, EPS];
+      const first = bandP({
+        emitted: shifted(bandP(), 3, shift),
+        local: { remainder: 0, poles: [0, 0, 0, EPS] },
+      });
+      expect(
+        certifier.certifyPieceChain(band(first, bandQ({ local: OWNER_LIKE }))),
+      ).toEqual(EXISTENCE_FAILURE);
+    });
+
+    test("true error at the FAR pole (honest π₀ = ε) weighs (1 − τ)³ at the vertex and verifies", () => {
+      const first = bandP({
+        emitted: shifted(bandP(), 0, [0, EPS]),
+        local: { remainder: 0, poles: [EPS, 0, 0, 0] },
+      });
+      verifiedLocal(band(first, bandQ({ local: OWNER_LIKE })));
+    });
+
+    test("reversed P: the far error is on NATURAL pole 3 and the vertex window is the natural start [0, s]", () => {
+      // Traversal pole 0 (far) shifted; natural() reverses poles and π.
+      const first = bandP({
+        emitted: shifted(bandP(), 0, [0, EPS]),
+        local: { remainder: 0, poles: [EPS, 0, 0, 0] },
+      });
+      verifiedLocal(
+        band(first, bandQ({ local: OWNER_LIKE }), { reversed: [true, false] }),
+      );
+      // The same metadata on the vertex pole is rejected under reversal too.
+      const vertex = bandP({
+        emitted: shifted(bandP(), 3, [0, EPS]),
+        local: { remainder: 0, poles: [0, 0, 0, EPS] },
+      });
+      expect(
+        certifier.certifyPieceChain(
+          band(vertex, bandQ({ local: OWNER_LIKE }), {
+            reversed: [true, false],
+          }),
+        ),
+      ).toEqual(EXISTENCE_FAILURE);
+    });
+
+    test("tightness of 16R·s²: R = 30 is rejected and R = 15 verifies (threshold R* ∈ (28.5, 29), uncapped by ε)", () => {
+      // Honest for any R (E = O exactly). At the witness s ≈ 2⁻¹⁰, 16·30·s²
+      // ≈ 4.6e-4 < ε: the remainder term, not the ε cap, decides.
+      const at = (remainder: number) =>
+        certifier.certifyPieceChain(
+          band(
+            bandP({ local: { remainder, poles: [0, 0, 0, 0] } }),
+            bandQ({ local: { remainder, poles: [0, 0, 0, 0] } }),
+          ),
+        );
+      expect(at(30)).toEqual(EXISTENCE_FAILURE);
+      expect(at(15).kind).toBe("verified");
+    });
+
+    test("wide stored witness bounds (not owner-reachable): the local ε reaches the FAR stored bound, so R = 20 rejects", () => {
+      // Honest for any R (E = O exactly). Both stored bounds widened by
+      // 2⁻¹² around the true crossing: far reach ≈ 1.25·2⁻¹⁰, near ≈
+      // 0.75·2⁻¹⁰. Review-fixes probe: the far-bound (current) window
+      // rejects from R = 15, a NEAR-bound window would verify up to R = 30.
+      // Semantic killer of the near-bound mutant (math review A1).
+      const WIDTH = 2 ** -12;
+      const request = (remainder: number, width: number) => {
+        const local = { remainder, poles: [0, 0, 0, 0] } as const;
+        const base = band(bandP({ local }), bandQ({ local }));
+        return {
+          ...base,
+          trims: base.trims.map((trim) => ({
+            ...trim,
+            firstParameterBounds: [
+              trim.firstParameterBounds[0] - width,
+              trim.firstParameterBounds[1] + width,
+            ] as const,
+            secondParameterBounds: [
+              trim.secondParameterBounds[0] - width,
+              trim.secondParameterBounds[1] + width,
+            ] as const,
+          })),
+        };
+      };
+      expect(certifier.certifyPieceChain(request(20, 0)).kind).toBe("verified");
+      expect(certifier.certifyPieceChain(request(10, WIDTH)).kind).toBe(
+        "verified",
+      );
+      expect(certifier.certifyPieceChain(request(20, WIDTH))).toEqual(
+        EXISTENCE_FAILURE,
+      );
+    });
+
+    test("the glue keeps the leaf-wide ε: w_P = τ exactly passes Lemma V, the local Lemma X, and fails the strict glue", () => {
+      // ε_P = 2⁻¹⁰, τ = 5·2⁻¹²: w_P = (5/4)ε_P = τ.
+      const tau = 5 * 2 ** -12;
+      const first = bandP({
+        error: 2 ** -10,
+        local: { remainder: 2 ** -10, poles: [0, 0, 0, 0] },
+      });
+      expect(
+        certifier.certifyPieceChain(
+          band(first, bandQ({ local: OWNER_LIKE }), { tau }),
+        ),
+      ).toMatchObject({
+        kind: "uncertain",
+        code: "trim-composition-unproven",
+        message: expect.stringContaining("glue bound is not strictly below"),
+        first: 0,
+      });
+    });
+
+    test.each([
+      ["absent", undefined],
+      ["negative R", { remainder: -1, poles: [0, 0, 0, 0] }],
+      ["NaN π", { remainder: 0, poles: [0, Number.NaN, 0, 0] }],
+      ["three poles", { remainder: 0, poles: [0, 0, 0] }],
+    ] as const)(
+      "inadmissible local metadata (%s) fails closed with the leaf-wide result",
+      (_label, local) => {
+        expect(
+          certifier.certifyPieceChain(
+            band(
+              bandP({ local: local as Leg["local"] }),
+              bandQ({ local: OWNER_LIKE }),
+            ),
+          ),
+        ).toEqual(EXISTENCE_FAILURE);
+      },
+    );
+
+    // Whole-request literal of the owner-like local row, measured on this
+    // implementation (T08b-c evidence) and pinned on operations, Euclid and
+    // integerBits; the staged caps land INSIDE the local branch (stage probe).
+    // Load-bearing exhaustion-swallow and precharge killers: keep them.
+    const LOCAL_METER = {
+      operations: 53_764,
+      euclideanSteps: 7_678,
+      integerBits: 315,
+    };
+    // Local branch window (stage probe): operations [35 844, 51 003], Euclid
+    // [5 056, 7 370]; the leaf-wide attempt ends at the window's start.
+    const LOCAL_STAGED = [
+      ["operations", 35_845],
+      ["operations", 43_423],
+      ["operations", 49_487],
+      ["euclideanSteps", 6_213],
+      ["euclideanSteps", 7_139],
+    ] as const;
+    const localRow = () =>
+      band(bandP({ local: OWNER_LIKE }), bandQ({ local: OWNER_LIKE }));
+
+    test("fabricated local-branch whole-request literal (observer)", () => {
+      let snapshot: ExactProofBudgetSnapshot | undefined;
+      expect(
+        createCertifiedCubicTubeChainWithBudgetObserverForTest((value) => {
+          snapshot = value;
+        }).certifyPieceChain(localRow()).kind,
+      ).toBe("verified");
+      expect({
+        operations: snapshot!.operations,
+        euclideanSteps: snapshot!.euclideanSteps,
+        integerBits: Math.max(
+          snapshot!.maxStoredBits,
+          snapshot!.maxPreProductBits,
+        ),
+      }).toEqual(LOCAL_METER);
+    });
+
+    test.each(
+      (["operations", "euclideanSteps", "integerBits"] as const).map(
+        (kind) => [kind] as const,
+      ),
+    )(
+      "fabricated local branch: the literal %s count passes and count − 1 exhausts the whole request",
+      (kind) => {
+        const total = LOCAL_METER[kind];
+        expect(
+          createCertifiedCubicTubeChainWithLowerBudgetForTest({
+            [kind]: total,
+          }).certifyPieceChain(localRow()).kind,
+        ).toBe("verified");
+        expect(
+          createCertifiedCubicTubeChainWithLowerBudgetForTest({
+            [kind]: total - 1,
+          }).certifyPieceChain(localRow()),
+        ).toEqual(EXHAUSTED_RESULT);
+      },
+    );
+
+    test.each(LOCAL_STAGED)(
+      "staged cap inside the local branch (%s = %s) exhausts the request, never a local or leaf-wide failure code",
+      (kind, cap) => {
+        expect(
+          createCertifiedCubicTubeChainWithLowerBudgetForTest({
+            [kind]: cap,
+          }).certifyPieceChain(localRow()),
+        ).toEqual(EXHAUSTED_RESULT);
+      },
+    );
+  });
 });
 
 const KNOT_UNPROVEN_CODE = "cubic-tube-knot-incidence-unproven";

@@ -68,6 +68,7 @@ import {
   CORNER_MATRIX_SOLVE_TOLERANCES,
   cornerMatrixRows,
   createNativeOffsetChainHarness,
+  splineLineShallowRows,
   splineSplineCornerRows,
   type AcceptedPair,
   type Authored,
@@ -281,6 +282,7 @@ function fabricatedSpan(
       ],
       sourcePoles: ZERO_POLES,
       distance: 0,
+      localError: { hermiteRemainder: 0, polePerturbations: [0, 0, 0, 0] },
     },
   };
 }
@@ -3166,6 +3168,7 @@ function rowELoopSpan() {
   const poles = sx.map(
     (x, index) => [x + ax[index]!, d + by[index]!] as const,
   ) as unknown as SplinePoles;
+  const error = Math.sqrt(A * A + (k / 4) ** 2) * (1 + 1e-9) + 1e-15;
   const span: SplineOffsetCubicSpan = {
     source: {
       splineId: "loop",
@@ -3179,7 +3182,7 @@ function rowELoopSpan() {
     sourceLocalInterval: [0, 1],
     poles,
     differential: { sourceInterval: [0, 1], poles: ZERO_POLES },
-    certifiedError: Math.sqrt(A * A + (k / 4) ** 2) * (1 + 1e-9) + 1e-15,
+    certifiedError: error,
     reference: {
       // O′ = (μ, 0) exactly, in an outward box.
       derivative: [
@@ -3188,6 +3191,11 @@ function rowELoopSpan() {
       ],
       sourcePoles: sx.map((x) => [x, 0] as const) as unknown as SplinePoles,
       distance: d,
+      // Neutral profile: Σ Bᵢ·ε ≡ ε, no endpoint-local refinement.
+      localError: {
+        hermiteRemainder: 0,
+        polePerturbations: [error, error, error, error],
+      },
     },
   };
   const s = Math.sqrt((6 * A - mu) / (32 * A));
@@ -3236,6 +3244,10 @@ describe("T08b-a capacity: joint queries only on one whole-request meter (M0/M7)
   // only S2pt changes (the removed cubic self query rejected it), and since
   // T08b-b SS-60 d = 0.01/0.2 verify through the S2 graph trim (formerly
   // trim-pair-unsupported; T08b-b-evidence/corner-matrix-{before,after}).
+  // Since T08b-c the Lemma-T band rows SL-shallow d = −0.01 (formerly
+  // trim-window-unproven) and SL-loop d = −0.01 (formerly
+  // trim-composition-unproven) verify through the Q4-E1 local ε
+  // (T08b-c-evidence/matrix-{before,after}); every other row is unchanged.
   const MATRIX_VERDICTS: Record<string, string> = {
     "S1 0.01": "verified",
     "S1 -0.01": "verified",
@@ -3248,7 +3260,7 @@ describe("T08b-a capacity: joint queries only on one whole-request meter (M0/M7)
     "SL-90 -0.2": codes.splineJointUnsupported,
     "SL-90 0.5": codes.splineJointUnsupported,
     "SL-shallow 0.01": codes.splineJointUnsupported,
-    "SL-shallow -0.01": `${codes.topologyUncertain} / trim-window-unproven`,
+    "SL-shallow -0.01": "verified",
     "SL-tiny 0.01": codes.jointUnsatisfied,
     "SL-tiny -0.01": codes.jointUnsatisfied,
     "LS-90 0.01": "verified",
@@ -3261,11 +3273,11 @@ describe("T08b-a capacity: joint queries only on one whole-request meter (M0/M7)
     "LL-90 0.01": "verified",
     "LL-90 -0.01": codes.splineJointUnsupported,
     "SL-loop 0.01": codes.splineJointUnsupported,
-    "SL-loop -0.01": `${codes.topologyUncertain} / trim-composition-unproven`,
+    "SL-loop -0.01": "verified",
     "S2pt 0.01": "verified",
   };
 
-  test("native corner matrix: every row keeps its verdict, S2pt and SS-60 (d > 0) now verify, and each request is sized by its joints", () => {
+  test("native corner matrix: every row keeps its verdict, S2pt, SS-60 (d > 0) and the Lemma-T band rows now verify, and each request is sized by its joints", () => {
     const rows = cornerMatrixRows();
     expect(rows.map((row) => `${row.row} ${row.distance}`)).toEqual(
       Object.keys(MATRIX_VERDICTS),
@@ -3857,13 +3869,10 @@ describe("T08b-b S2: native spline→spline graph trims under R_C′ (terminal l
     expectVerifiedGraphTrim(harness.pairChain(pair, 0.01));
   }, 120_000);
 
-  test("native fail-closed: C φ = 0.1 d = 0.01 is trim-existence-unproven (E-emit band) and C φ = π/2 d = 0.2 is trim-window-unproven (t ≥ 1)", () => {
+  // C φ = 0.1 d = 0.01 (formerly trim-existence-unproven, the E-emit band)
+  // verifies since T08b-c through the Q4-E1 local ε; see the T08b-c block.
+  test("native fail-closed: C φ = π/2 d = 0.2 is trim-window-unproven (t ≥ 1, needs multi-leaf windows)", () => {
     for (const [label, inner, detail] of [
-      [
-        "C φ=0.100 0.01",
-        "trim-existence-unproven",
-        "cross once inside both terminal leaves",
-      ],
       ["C φ=1.571 0.2", "trim-window-unproven", "(t ≥ 1)"],
     ] as const) {
       const chain = splineRow(label);
@@ -3984,6 +3993,10 @@ describe("T08b-b S2: native spline→spline graph trims under R_C′ (terminal l
           (index) => [x1, index / 3] as const,
         ) as unknown as SplinePoles,
         distance: d,
+        localError: {
+          hermiteRemainder: 0,
+          polePerturbations: [1e-15, 1e-15, 1e-15, 1e-15],
+        },
       },
     };
     const [loopSpans, upSpans] = [[span], [up]];
@@ -4070,4 +4083,216 @@ describe("T08b-b S2: native spline→spline graph trims under R_C′ (terminal l
       message: expect.stringContaining("(G1)"),
     });
   }, 120_000);
+});
+
+// Logic lane (docs/testing.md): the exported resolver → wrapper seam with the
+// real kernel-free request query and the real certifier, every chain authored
+// only by native tools (commit → solve → N2 → adapter). T08b-c Q4-E1: the
+// owner's endpoint-local metadata (R, πᵢ) and the certifier's local-ε branch
+// on the terminal vertex sub-windows (S2 Lemma X, Lemma-T δ). Full before /
+// after tables with meters: T08b-c-evidence/matrix-{before,after}.result.jsonl.
+describe("T08b-c Q4-E1: native band rows through the endpoint-local ε", () => {
+  const TOLERANCE = 1e-3;
+  const pieceCertifier = createCertifiedCubicTubeChain();
+  const harnesses = {
+    s2: createNativeOffsetChainHarness({
+      authoring: createNativeToolAuthoring("sketch_s2"),
+      query,
+      modelingTolerance: TOLERANCE,
+    }),
+    matrix: createNativeOffsetChainHarness({
+      authoring: createNativeToolAuthoring("sketch_t08b"),
+      query,
+      modelingTolerance: TOLERANCE,
+      solveTolerances: CORNER_MATRIX_SOLVE_TOLERANCES,
+    }),
+    B: createNativeOffsetChainHarness({
+      authoring: createNativeToolAuthoring("sketch_b"),
+      query,
+      modelingTolerance: TOLERANCE,
+    }),
+  };
+  const rows = {
+    s2: splineSplineCornerRows,
+    matrix: cornerMatrixRows,
+    B: splineLineShallowRows,
+  };
+  type Family = keyof typeof harnesses;
+  const nativeRow = (family: Family, label: string) => {
+    const harness = harnesses[family];
+    const row = rows[family]().find(
+      (item) => `${item.row} ${item.distance}` === label,
+    );
+    if (!row) throw new Error(`no row ${label}`);
+    harness.resetSequence();
+    const chain = harness.nativeChain(row.build(harness), row.distance);
+    return { chain, resolution: harness.accepted(chain) };
+  };
+  /** The same requests with every owner `localError` removed (leaf-wide ε only). */
+  const leafWideOnly: CertifiedTubePieceChain = {
+    certifyPieceChain: (request) =>
+      pieceCertifier.certifyPieceChain({
+        ...request,
+        pieces: request.pieces.map((piece) =>
+          piece.kind === "cubic"
+            ? {
+                ...piece,
+                tubes: piece.tubes.map((tube) => {
+                  const { localError, ...reference } = tube.reference;
+                  expect(localError, "owner metadata present").toBeDefined();
+                  return { ...tube, reference };
+                }),
+              }
+            : piece,
+        ),
+      }),
+  };
+
+  test.each([
+    ["s2", "C φ=0.100 0.01", "graph-trim", "trim-existence-unproven"],
+    ["s2", "C φ=0.050 0.01", "graph-trim", "trim-existence-unproven"],
+    ["matrix", "SL-shallow -0.01", "trim", "trim-window-unproven"],
+    ["matrix", "SL-loop -0.01", "trim", "trim-composition-unproven"],
+    ["B", "B φ=0.05 0.2", "trim", "trim-composition-unproven"],
+    ["B", "B φ=0.02 0.2", "trim", "trim-window-unproven"],
+  ] as const)(
+    "native %s %s verifies with a %s record; with the leaf-wide ε only it is %s",
+    (family, label, kind, leafWide) => {
+      const { chain, resolution } = nativeRow(family, label);
+      const requests: PieceTubeChainRequest[] = [];
+      const result = certifyOffsetChainTubeStability(
+        resolution,
+        {
+          certifyPieceChain: (request) => {
+            requests.push(request);
+            return pieceCertifier.certifyPieceChain(request);
+          },
+        },
+        chain.declared,
+      );
+      if (!result.ok) throw new Error(`${result.code}: ${result.message}`);
+      expect(requests).toHaveLength(1);
+      expect(
+        result.certificate.joins.filter((join) => join.kind === kind),
+      ).toHaveLength(chain.connectivity.joins.length);
+      for (const leaf of result.certificate.leaves)
+        expect(leaf.displacementBound).toBeLessThanOrEqual(TOLERANCE);
+      // The owner metadata is load-bearing: the leaf-wide certificate fails
+      // with the band code (the T08b-b / T08b-a verdict of this row).
+      expect(
+        certifyOffsetChainTubeStability(
+          resolution,
+          leafWideOnly,
+          chain.declared,
+        ),
+      ).toMatchObject({
+        ok: false,
+        code: codes.topologyUncertain,
+        message: expect.stringContaining(leafWide),
+      });
+    },
+    120_000,
+  );
+
+  test.each(["B φ=0.1 0.01", "B φ=0.05 0.01", "B φ=0.02 0.01"])(
+    "listed: native %s stays trim-window-unproven at the leaf-wide TRUE-derivative cone (local ε bounds position, not O′)",
+    (label) => {
+      const { chain, resolution } = nativeRow("B", label);
+      expect(
+        certifyOffsetChainTubeStability(
+          resolution,
+          pieceCertifier,
+          chain.declared,
+        ),
+      ).toMatchObject({
+        ok: false,
+        code: codes.topologyUncertain,
+        message: expect.stringContaining(
+          "trim-window-unproven: The leaf-wide cone s·rot(a)·B′ > 0",
+        ),
+      });
+    },
+  );
+
+  // Native whole-request certifier literals via the wrapper, measured on this
+  // implementation (T08b-c-evidence): C φ = 0.05 d = 0.01 (S2 local branch) and
+  // SL-loop d = −0.01 (Lemma-T local upgrade in the leaf loop). The staged caps
+  // land inside the local branch (T08b-c-evidence/stages). Load-bearing
+  // precharge, charging and exhaustion-swallow killers: keep them.
+  test.each([
+    [
+      "s2",
+      "C φ=0.050 0.01",
+      { operations: 289_303, euclideanSteps: 81_779, integerBits: 838 },
+      // S2 local window: operations [189 124, 259 997], Euclid [53 534, 73 872].
+      [
+        ["operations", 189_125],
+        ["operations", 224_560],
+        ["operations", 252_909],
+        ["euclideanSteps", 63_703],
+        ["euclideanSteps", 71_838],
+      ],
+    ],
+    [
+      "matrix",
+      "SL-loop -0.01",
+      { operations: 124_145, euclideanSteps: 30_300, integerBits: 424 },
+      // Two Lemma-T upgrades in the leaf loop: operations [54 844, 63 019] and
+      // [64 164, 72 218], Euclid [13 125, 15 316] and [15 600, 17 744].
+      [
+        ["operations", 54_845],
+        ["operations", 58_931],
+        ["operations", 68_191],
+        ["euclideanSteps", 14_220],
+        ["euclideanSteps", 16_672],
+      ],
+    ],
+  ] as const)(
+    "native %s %s via the wrapper: exact whole-request literal; count − 1 and staged caps inside the local branch exhaust",
+    (family, label, literal, staged) => {
+      const { chain, resolution } = nativeRow(family, label);
+      let snapshot: ExactProofBudgetSnapshot | undefined;
+      expect(
+        certifyOffsetChainTubeStability(
+          resolution,
+          createCertifiedCubicTubeChainWithBudgetObserverForTest((value) => {
+            snapshot = value;
+          }),
+          chain.declared,
+        ).ok,
+      ).toBe(true);
+      expect({
+        operations: snapshot!.operations,
+        euclideanSteps: snapshot!.euclideanSteps,
+        integerBits: Math.max(
+          snapshot!.maxStoredBits,
+          snapshot!.maxPreProductBits,
+        ),
+      }).toEqual(literal);
+      const under = (limits: Record<string, number>) =>
+        certifyOffsetChainTubeStability(
+          resolution,
+          createCertifiedCubicTubeChainWithLowerBudgetForTest(limits),
+          chain.declared,
+        );
+      const exhausted = {
+        ok: false,
+        code: codes.topologyUncertain,
+        message:
+          "Tube stability is not certified: uncertain exact-query-proof-budget-exhausted: The deterministic exact-query arithmetic budget was exhausted.",
+        seedEntityId: chain.declared.pieces[0]!.seedEntityId,
+      };
+      for (const kind of [
+        "operations",
+        "euclideanSteps",
+        "integerBits",
+      ] as const) {
+        expect(under({ [kind]: literal[kind] }).ok, kind).toBe(true);
+        expect(under({ [kind]: literal[kind] - 1 }), kind).toEqual(exhausted);
+      }
+      for (const [kind, cap] of staged)
+        expect(under({ [kind]: cap }), `${kind} ${cap}`).toEqual(exhausted);
+    },
+    120_000,
+  );
 });

@@ -360,6 +360,21 @@ export interface NeutralCubicTube {
     readonly sourcePoles: SplinePoles;
     /** The owner call's signed offset distance d; bitwise equal across one chain. */
     readonly distance: number;
+    /**
+     * Endpoint-local split of `certifiedError` (owner Q4-E1 metadata), outward
+     * binary64 upper bounds R = `hermiteRemainder` and πᵢ = `polePerturbations`
+     * (natural pole order) with, in the emitted Bézier parameter τ ∈ [0, 1]
+     * and Bᵢ the cubic Bernstein basis, the same-parameter bound
+     * |E(τ) − O(a + τ(b − a))| ≤ Σᵢ Bᵢ(τ)·πᵢ + 16R·τ²(1 − τ)² on the leaf
+     * [a, b]. It refines `certifiedError` pointwise and never replaces it:
+     * the certifier uses it only on a vertex sub-window of a terminal leaf.
+     * Absent on persisted, projected or fabricated spans; the local branch
+     * then fails closed with the leaf-wide result.
+     */
+    readonly localError?: {
+      readonly hermiteRemainder: number;
+      readonly polePerturbations: readonly [number, number, number, number];
+    };
   };
   readonly source: {
     readonly splineId: string;

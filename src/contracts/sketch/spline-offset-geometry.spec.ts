@@ -946,10 +946,15 @@ describe("owner proof metadata for the tube-stability certificate", () => {
           expect(Object.keys(output.reference).sort()).toEqual([
             "derivative",
             "distance",
+            "localError",
             "sourcePoles",
           ]);
           expect(Object.is(output.reference.distance, distance)).toBe(true);
           expect(Object.isFrozen(output.reference)).toBe(true);
+          expect(Object.isFrozen(output.reference.localError)).toBe(true);
+          expect(
+            Object.isFrozen(output.reference.localError.polePerturbations),
+          ).toBe(true);
         }
       }
     }
@@ -979,6 +984,253 @@ describe("owner proof metadata for the tube-stability certificate", () => {
     }
   });
 });
+
+// Logic lane (docs/testing.md), exported owner seam: the Q4-E1 endpoint-local
+// metadata. Byte-identity of every other field against the pre-metadata owner
+// is a private HEAD-copy comparison (T08b-c-evidence/identity).
+describe("owner Q4-E1 endpoint-local metadata (R, πᵢ)", () => {
+  const ARCH_FIT: readonly SplineVector[] = [
+    [0, 0],
+    [1, 0.1],
+    [2, 0],
+  ];
+  const FIXTURES = [
+    [ARCH_FIT, 0.01],
+    [ARCH_FIT, -0.01],
+    [ARCH_FIT, 0.2],
+    [
+      [
+        [0, 0],
+        [1, 0.6],
+        [2, 0],
+      ],
+      -0.01,
+    ],
+    [
+      [
+        [0, 0],
+        [1, 1],
+        [2, 0],
+        [3, 1],
+      ],
+      0.1,
+    ],
+    [knotFixture, 1],
+    // Straight two-point sources: R ≈ 0, so ε = up(R + max π) pins max π.
+    [
+      [
+        [0, 0],
+        [1, 0.3],
+      ],
+      0.01,
+    ],
+    [
+      [
+        [0, 0],
+        [0.7, -1.1],
+      ],
+      -0.02,
+    ],
+  ] as const;
+  const outputs = () =>
+    FIXTURES.flatMap(([points, distance]) => {
+      const spans = realSpans(points);
+      return successful({ spans, distance, modelingTolerance: 1e-3 }).spans.map(
+        (output) => ({ output, source: spans[output.source.spanIndex]! }),
+      );
+    });
+
+  test("ε is exactly up(R + max πᵢ) of the exported terms, and ε bounds the local bound at τ ∈ {0, 1}", () => {
+    const all = outputs();
+    expect(all.length).toBeGreaterThan(20);
+    // Premise of the π pin: some leaf's ε is dominated by its pole term.
+    expect(
+      all.some(
+        ({ output }) =>
+          Math.max(...output.reference.localError.polePerturbations) >
+          1e6 * output.reference.localError.hermiteRemainder,
+      ),
+    ).toBe(true);
+    for (const { output } of all) {
+      const { hermiteRemainder, polePerturbations } =
+        output.reference.localError;
+      for (const value of [hermiteRemainder, ...polePerturbations]) {
+        expect(Number.isFinite(value)).toBe(true);
+        expect(value).toBeGreaterThanOrEqual(0);
+      }
+      expect(output.certifiedError).toBe(
+        nextAfter(hermiteRemainder + Math.max(...polePerturbations)),
+      );
+      // At τ = 0 and 1 the local bound is π₀ and π₃ (u²(1 − u)² = 0).
+      expect(polePerturbations[0]).toBeLessThanOrEqual(output.certifiedError);
+      expect(polePerturbations[3]).toBeLessThanOrEqual(output.certifiedError);
+    }
+  });
+
+  test("the d = 0 branch (emitted cubic = source) exports exactly zero terms", () => {
+    const [output] = successful({
+      spans: [curved],
+      distance: 0,
+      modelingTolerance: 1e-3,
+    }).spans;
+    expect(output!.reference.localError).toEqual({
+      hermiteRemainder: 0,
+      polePerturbations: [0, 0, 0, 0],
+    });
+  });
+
+  test("test oracle for (a): exact dyadic |E(τ) − O(a + τ(b − a))| ≤ Σ Bᵢ(τ)πᵢ + 16Rτ²(1 − τ)² at dense and vertex-near τ on real leaves", () => {
+    // Oracle only (never a certificate): every quantity is an exact dyadic
+    // except 1/√g, enclosed to 2⁻⁴⁰⁰ relative by a BigInt integer square root.
+    const taus: Dyadic[] = [dyadic(0n, 0), dyadic(1n, 0)];
+    for (let j = 1; j <= 40; j += 1)
+      taus.push(dyadic(1n, -j), subtractD(dyadic(1n, 0), dyadic(1n, -j)));
+    for (let k = 1; k < 64; k += 1) taus.push(dyadic(BigInt(k), -6));
+    let checked = 0;
+    let vertexNearTight = 0;
+    for (const { output, source } of outputs()) {
+      const [a, b] = output.sourceLocalInterval.map(fromNumber);
+      const d = fromNumber(output.reference.distance);
+      const { hermiteRemainder, polePerturbations } =
+        output.reference.localError;
+      const sourcePoles = source.poles.map((pole) => pole.map(fromNumber));
+      const emittedPoles = output.poles.map((pole) => pole.map(fromNumber));
+      const pi = polePerturbations.map(fromNumber);
+      const remainder = fromNumber(hermiteRemainder);
+      for (const tau of taus) {
+        const u = addD(a!, multiplyD(tau, subtractD(b!, a!)));
+        const [s, sPrime] = bernsteinD(sourcePoles, u);
+        const [e] = bernsteinD(emittedPoles, tau);
+        const v = [subtractD(e[0]!, s[0]!), subtractD(e[1]!, s[1]!)];
+        const n = [negateD(sPrime[1]!), sPrime[0]!];
+        const g = addD(
+          multiplyD(sPrime[0]!, sPrime[0]!),
+          multiplyD(sPrime[1]!, sPrime[1]!),
+        );
+        // |V − d·n/√g|² = |V|² + d² + c/√g with c = −2d(V·n) (|n|² = g).
+        const squaredA = addD(
+          addD(multiplyD(v[0]!, v[0]!), multiplyD(v[1]!, v[1]!)),
+          multiplyD(d, d),
+        );
+        const c = multiplyD(
+          dyadic(-2n, 0),
+          multiplyD(d, addD(multiplyD(v[0]!, n[0]!), multiplyD(v[1]!, n[1]!))),
+        );
+        const complement = subtractD(dyadic(1n, 0), tau);
+        const weights = [
+          multiplyD(complement, multiplyD(complement, complement)),
+          multiplyD(
+            dyadic(3n, 0),
+            multiplyD(tau, multiplyD(complement, complement)),
+          ),
+          multiplyD(dyadic(3n, 0), multiplyD(multiplyD(tau, tau), complement)),
+          multiplyD(tau, multiplyD(tau, tau)),
+        ];
+        let bound = multiplyD(
+          multiplyD(dyadic(16n, 0), remainder),
+          multiplyD(multiplyD(tau, tau), multiplyD(complement, complement)),
+        );
+        for (const [index, weight] of weights.entries())
+          bound = addD(bound, multiplyD(weight, pi[index]!));
+        const room = subtractD(multiplyD(bound, bound), squaredA);
+        const [rootLow, rootHigh] = sqrtBoundsD(g);
+        // Sufficient: c ≤ room·√g, using the side of √g that is conservative.
+        const holds =
+          compareD(c, multiplyD(room, signD(c) >= 0 ? rootLow : rootHigh)) <= 0;
+        expect(
+          holds,
+          `leaf ${output.sourceLocalInterval} τ ${toNumber(tau)}`,
+        ).toBe(true);
+        checked += 1;
+        if (
+          compareD(tau, dyadic(1n, -20)) <= 0 &&
+          toNumber(bound) < 1e-9 * output.certifiedError
+        )
+          vertexNearTight += 1;
+      }
+    }
+    expect(checked).toBeGreaterThan(3000);
+    // The native premise of the band closure: the bound vanishes near vertices.
+    expect(vertexNearTight).toBeGreaterThan(0);
+  });
+});
+
+interface Dyadic {
+  readonly m: bigint;
+  readonly e: number;
+}
+const dyadic = (m: bigint, e: number): Dyadic => ({ m, e });
+function fromNumber(value: number): Dyadic {
+  if (value === 0) return dyadic(0n, 0);
+  const view = new DataView(new ArrayBuffer(8));
+  view.setFloat64(0, value);
+  const bits = view.getBigUint64(0);
+  const sign = bits >> 63n ? -1n : 1n;
+  const exponent = Number((bits >> 52n) & 0x7ffn);
+  const fraction = bits & ((1n << 52n) - 1n);
+  return exponent === 0
+    ? dyadic(sign * fraction, -1074)
+    : dyadic(sign * ((1n << 52n) | fraction), exponent - 1075);
+}
+const toNumber = (value: Dyadic) => Number(value.m) * 2 ** value.e;
+function align(left: Dyadic, right: Dyadic) {
+  const e = Math.min(left.e, right.e);
+  return [
+    left.m << BigInt(left.e - e),
+    right.m << BigInt(right.e - e),
+    e,
+  ] as const;
+}
+function addD(left: Dyadic, right: Dyadic): Dyadic {
+  const [l, r, e] = align(left, right);
+  return dyadic(l + r, e);
+}
+const negateD = (value: Dyadic) => dyadic(-value.m, value.e);
+const subtractD = (left: Dyadic, right: Dyadic) => addD(left, negateD(right));
+const multiplyD = (left: Dyadic, right: Dyadic) =>
+  dyadic(left.m * right.m, left.e + right.e);
+const signD = (value: Dyadic) => (value.m > 0n ? 1 : value.m < 0n ? -1 : 0);
+function compareD(left: Dyadic, right: Dyadic) {
+  const [l, r] = align(left, right);
+  return l < r ? -1 : l > r ? 1 : 0;
+}
+function isqrt(value: bigint) {
+  if (value < 2n) return value;
+  let x = 1n << BigInt(Math.ceil(value.toString(2).length / 2));
+  for (;;) {
+    const y = (x + value / x) >> 1n;
+    if (y >= x) return x;
+    x = y;
+  }
+}
+/** [lower, upper] dyadic bounds of √g for g > 0, 400 extra bits. */
+function sqrtBoundsD(value: Dyadic): readonly [Dyadic, Dyadic] {
+  let { m, e } = value;
+  if (e % 2 !== 0) {
+    m <<= 1n;
+    e -= 1;
+  }
+  const q = isqrt(m << 800n);
+  return [dyadic(q, e / 2 - 400), dyadic(q + 1n, e / 2 - 400)];
+}
+/** Exact point and derivative of a dyadic cubic Bézier at dyadic t. */
+function bernsteinD(poles: readonly (readonly Dyadic[])[], t: Dyadic) {
+  const complement = subtractD(dyadic(1n, 0), t);
+  const lerp = (p: readonly Dyadic[], q: readonly Dyadic[]) =>
+    [0, 1].map((axis) =>
+      addD(multiplyD(complement, p[axis]!), multiplyD(t, q[axis]!)),
+    );
+  let level = poles.map((pole) => [...pole]);
+  let derivative: Dyadic[] = [];
+  while (level.length > 1) {
+    if (level.length === 2)
+      derivative = [0, 1].map((axis) =>
+        multiplyD(dyadic(3n, 0), subtractD(level[1]![axis]!, level[0]![axis]!)),
+      );
+    level = level.slice(1).map((pole, index) => lerp(level[index]!, pole));
+  }
+  return [level[0]!, derivative] as const;
+}
 
 function nextAfter(value: number) {
   const view = new DataView(new ArrayBuffer(8));
