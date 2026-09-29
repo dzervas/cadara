@@ -1,12 +1,17 @@
 import type {
   CertifiedCubicTubeChain,
   CertifiedTubePieceChain,
+  CertifiedTubePieceChainRequests,
   CubicTubeChainResult,
   NeutralCurve,
   NeutralCurvePointWitness,
   NeutralCurveQueryRequest,
   NeutralCurveQueryResult,
+  PieceTubeChainRequest,
   TubeChainPiece,
+  TubeChainTrimDeclaration,
+  TubeChainVertexAuthority,
+  TubeChainVertexDeclaration,
   TubePieceChainResult,
 } from "@/contracts/modeling/neutral-curve-query";
 import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
@@ -29,6 +34,7 @@ import {
 } from "@/contracts/sketch/spline-geometry";
 import {
   approximateSplineOffset,
+  type AdoptedEndpoint,
   type SplineOffsetCubicSpan,
 } from "@/contracts/sketch/spline-offset-geometry";
 
@@ -99,14 +105,85 @@ export interface OffsetChainTopologyInput {
   /** The document's settings.modelingTolerance, forwarded unchanged. */
   readonly modelingTolerance: number;
   readonly query: CertifiedNeutralCurveRequestQuery;
+  /**
+   * Declared vertices (T08b-d), one per declared adjacency in order: built
+   * only from the fresh adapter's source data (`declaredOffsetChainVertices`).
+   * Absent: every adjacency is a joint query, as before. Present: each is
+   * classified exactly first (parallel issues no query).
+   */
+  readonly vertices?: readonly OffsetChainVertex[];
 }
 
-/** Where an active domain ends: the exact raw source end, or a joint root. */
+/** Declared authority of one adjacency: point IDs and the closure flag only. */
+export type OffsetChainVertexAuthority =
+  | { readonly kind: "sharedPoint"; readonly pointId: SketchPointId }
+  | {
+      readonly kind: "coincident";
+      readonly pointIds: readonly [SketchPointId, SketchPointId];
+    }
+  | { readonly kind: "positionalClosure"; readonly pointId: SketchPointId };
+
+/**
+ * One traversal side of a declared vertex: its binary64 source vertex and its
+ * exact traversal source tangent `tangent[1] − tangent[0]` (a difference of
+ * binary64 points, never rounded).
+ */
+export interface OffsetChainVertexSide {
+  readonly pointId: SketchPointId | undefined;
+  readonly vertex: SketchPoint2D;
+  readonly tangent: readonly [SketchPoint2D, SketchPoint2D];
+}
+
+/** A declared adjacency between traversal pieces `jointIndex` and the next. */
+export interface OffsetChainVertex {
+  readonly jointIndex: number;
+  readonly authority: OffsetChainVertexAuthority;
+  /** The traversal-exiting (first) and -entering (second) terminals. */
+  readonly first: OffsetChainVertexSide;
+  readonly second: OffsetChainVertexSide;
+}
+
+/**
+ * Exact class of a declared vertex [TECH T4] on its traversal tangents u₁,
+ * u₂ (X = u₁×u₂, D = u₁·u₂): parallel X = 0 ∧ D > 0; antiparallel X = 0 ∧
+ * D < 0; nonparallel X ≠ 0 (absorbable only with D > 0); degenerate when a
+ * tangent is exactly zero. The certifier re-derives it authoritatively.
+ */
+export type OffsetChainVertexClass =
+  | "parallel"
+  | "antiparallel"
+  | "nonparallel"
+  | "degenerate";
+
+/** A declared vertex resolved without a trim (no witness, no root). */
+export interface ResolvedOffsetVertex {
+  readonly jointIndex: number;
+  /** `parallel`: no query; `absorbed`: an absorption candidate (SEL). */
+  readonly kind: "parallel" | "absorbed";
+  readonly class: OffsetChainVertexClass;
+  /** Whose emitted terminal pole is the shared pole (T2 rule). */
+  readonly keeper: "first" | "second";
+  /**
+   * The resolver failure this vertex would have been before T08b-d (SEL step
+   * 2(b), its query was verified but inadmissible), or the original trim
+   * failure (SEL step 5 flip). Reported unchanged when absorption does not
+   * certify (review R6).
+   */
+  readonly trigger?: {
+    readonly step: "query" | "flip";
+    readonly failure: OffsetChainFailure;
+  };
+}
+
+/** Where an active domain ends: the exact raw source end, a joint root, or a declared vertex. */
 export type OffsetChainDomainEnd =
   | { readonly kind: "source" }
-  | { readonly kind: "joint"; readonly jointIndex: number };
+  | { readonly kind: "joint"; readonly jointIndex: number }
+  | { readonly kind: "vertex"; readonly vertexIndex: number };
 
 export interface ResolvedOffsetTrimJoint {
+  /** The declared adjacency index (one index space with `vertices`, R5). */
+  readonly jointIndex: number;
   readonly firstSeedEntityId: SketchEntityId;
   readonly secondSeedEntityId: SketchEntityId;
   /** Trim authority: the unchanged raw-support request and its single witness. */
@@ -151,7 +228,10 @@ export interface OffsetChainTopologySuccess {
     SketchEntityId,
     ResolvedOffsetLineArcEndpoints
   >;
+  /** Trims only, in adjacency order; each carries its adjacency index. */
   readonly joints: readonly ResolvedOffsetTrimJoint[];
+  /** Declared vertices without a trim, in adjacency order (empty without `vertices`). */
+  readonly vertices: readonly ResolvedOffsetVertex[];
 }
 
 export type OffsetChainTopologyResult =
@@ -409,23 +489,152 @@ function samePoint(first: SketchPoint2D, second: SketchPoint2D) {
   return Object.is(first[0], second[0]) && Object.is(first[1], second[1]);
 }
 
+/** Exact binary64 → BigInt scaled by 2^1074 (every finite binary64 is an integer there). */
+function scaledExact(value: number) {
+  bits.setFloat64(0, value);
+  const raw = bits.getBigUint64(0);
+  const exponent = Number((raw >> 52n) & 0x7ffn);
+  const fraction = raw & ((1n << 52n) - 1n);
+  const significand = exponent === 0 ? fraction : fraction | (1n << 52n);
+  const magnitude = significand << BigInt(Math.max(exponent, 1) - 1);
+  return raw >> 63n ? -magnitude : magnitude;
+}
+
+const exactSign = (value: bigint) => (value > 0n ? 1 : value < 0n ? -1 : 0);
+
+/**
+ * Exact class of a declared vertex [TECH T4]: bounded 2×53-bit BigInt
+ * products on the binary64 tangent endpoints (O(1), unmetered; contracts may
+ * not import the domain meter). The certifier re-derives it authoritatively.
+ */
+export function classifyOffsetChainVertex(vertex: OffsetChainVertex): {
+  readonly class: OffsetChainVertexClass;
+  /** D = u₁·u₂ > 0 exactly. */
+  readonly forward: boolean;
+} {
+  const tangent = (side: OffsetChainVertexSide) =>
+    [0, 1].map(
+      (axis) =>
+        scaledExact(side.tangent[1][axis]!) -
+        scaledExact(side.tangent[0][axis]!),
+    ) as [bigint, bigint];
+  const u = tangent(vertex.first);
+  const v = tangent(vertex.second);
+  const zero = (w: readonly [bigint, bigint]) => w[0] === 0n && w[1] === 0n;
+  if (zero(u) || zero(v)) return { class: "degenerate", forward: false };
+  const cross = exactSign(u[0] * v[1] - u[1] * v[0]);
+  const forward = exactSign(u[0] * v[0] + u[1] * v[1]) > 0;
+  return {
+    class: cross !== 0 ? "nonparallel" : forward ? "parallel" : "antiparallel",
+    forward,
+  };
+}
+
+/** One adjacency's resolver decision (review R5: the adjacency index space). */
+type AdjacencyDecision =
+  | {
+      readonly kind: "trim";
+      readonly jointIndex: number;
+      readonly request: NeutralCurveQueryRequest;
+      readonly witness: NeutralCurvePointWitness;
+      readonly firstParameterBounds: readonly [number, number];
+      readonly secondParameterBounds: readonly [number, number];
+      /** Nonparallel with D > 0: may flip to absorption (SEL step 5). */
+      readonly flippable: boolean;
+    }
+  | { readonly kind: "vertex"; readonly vertex: ResolvedOffsetVertex };
+
+/** The T2 structural keeper of a declared vertex (never geometry). */
+function ruleKeeper(
+  pieces: readonly OffsetChainPiece[],
+  closed: boolean,
+  jointIndex: number,
+): "first" | "second" {
+  const first = pieces[jointIndex]!;
+  const second = pieces[(jointIndex + 1) % pieces.length]!;
+  // Positional closure: the last leaf adopts the first pass's first leaf.
+  if (pieces.length === 1) return "second";
+  const firstLine = first.kind === "lineSegment";
+  const secondLine = second.kind === "lineSegment";
+  // Line–spline: the line adopts.
+  if (firstLine !== secondLine) return firstLine ? "second" : "first";
+  // Spline–spline / line–line: the traversal-outgoing piece adopts, except at
+  // the closing vertex of a closed chain, where the incoming piece does.
+  return closed && jointIndex === pieces.length - 1 ? "second" : "first";
+}
+
 /**
  * Resolves the trim joints of the emitted chain: joint queries only, on one
- * whole-request meter opened for exactly the joint count. It proves each
+ * whole-request meter opened for exactly the query count. It proves each
  * joint's single transverse interior crossing and the order of two trims on
  * one curve; it does NOT prove global validity (see the module note).
- * Ordinary exceptions from the query propagate unchanged.
+ * With declared `vertices` (T08b-d SEL steps 1–2), each adjacency is first
+ * classified exactly: parallel issues no query; antiparallel fails closed; a
+ * nonparallel vertex with D > 0 whose query is verified but inadmissible is
+ * an absorption candidate (certified later, never here); an unverified query
+ * always fails closed. Ordinary exceptions from the query propagate unchanged.
  */
 export function resolveOffsetChainTopology(
   input: OffsetChainTopologyInput,
 ): OffsetChainTopologyResult {
-  const { pieces, closed, modelingTolerance, query } = input;
+  const decided = decideOffsetChainAdjacencies(input);
+  return decided.ok
+    ? assembleOffsetChainResolution(input, decided.decisions)
+    : decided;
+}
+
+type AdjacencyDecisions =
+  | { readonly ok: true; readonly decisions: readonly AdjacencyDecision[] }
+  | OffsetChainFailure;
+
+/** A joint-query budget exhaustion: always reported as itself (never an R6 trigger). */
+interface QueryBudgetExhausted {
+  readonly ok: false;
+  readonly exhausted: OffsetChainFailure;
+}
+
+/**
+ * The first step-2(b) absorption candidate's pre-T08b-d failure, if any: the
+ * legacy resolver failed at the first inadmissible joint in adjacency order,
+ * so a failure found later (at a later joint, the trim order check or the
+ * certificate) keeps that verdict, with the later reason appended (R6). A
+ * joint-query budget exhaustion never reaches here: it is reported as itself.
+ */
+function firstTrigger(
+  decisions: readonly AdjacencyDecision[],
+  reason: string,
+): OffsetChainFailure | null {
+  for (const decision of decisions)
+    if (decision.kind === "vertex" && decision.vertex.trigger?.step === "query")
+      return {
+        ...decision.vertex.trigger.failure,
+        message: `${decision.vertex.trigger.failure.message} Absorption not certified: ${reason}`,
+      };
+  return null;
+}
+
+function decideOffsetChainAdjacencies(
+  input: OffsetChainTopologyInput,
+): AdjacencyDecisions {
+  const decisions: AdjacencyDecision[] = [];
+  const decided = decideAdjacencies(input, decisions);
+  if (decided.ok) return decided;
+  if ("exhausted" in decided) return decided.exhausted;
+  return (
+    firstTrigger(decisions, `a later adjacency fails: ${decided.message}`) ??
+    decided
+  );
+}
+
+function decideAdjacencies(
+  input: OffsetChainTopologyInput,
+  decisions: AdjacencyDecision[],
+): AdjacencyDecisions | QueryBudgetExhausted {
+  const { pieces, closed, modelingTolerance, query, vertices } = input;
   if (pieces.length === 0) {
     throw new RangeError("An offset chain needs at least one piece");
   }
   const { curves, pieceCurves } = buildCurves(pieces);
-  const seedOf = (curve: number) =>
-    pieces[curves[curve]!.pieceIndex]!.seedEntityId;
   const pair = (first: number, second: number): NeutralCurveQueryRequest => ({
     modelingTolerance,
     first: curves[first]!.neutral,
@@ -455,19 +664,77 @@ export function resolveOffsetChainTopology(
       samePoint(piece.spans.at(-1)!.poles[3], piece.spans[0]!.poles[0]);
   }
 
-  const jointRecords: JointRecord[] = [];
-  const jointCount = wrapIsKnot
-    ? 0
-    : closed
-      ? pieces.length
-      : pieces.length - 1;
+  // Declared vertices replace the bitwise wrap heuristic (a smooth wrap is an
+  // owner knot, not a declared vertex); every adjacency is covered in order.
+  const adjacencyCount = vertices
+    ? vertices.length
+    : wrapIsKnot
+      ? 0
+      : closed
+        ? pieces.length
+        : pieces.length - 1;
+  if (
+    vertices &&
+    (vertices.length > (closed ? pieces.length : pieces.length - 1) ||
+      (pieces.length > 1 &&
+        vertices.length !== (closed ? pieces.length : pieces.length - 1)) ||
+      vertices.some((vertex, index) => vertex.jointIndex !== index))
+  ) {
+    throw new RangeError(
+      "Declared offset vertices must cover every adjacency in order",
+    );
+  }
+  const classes = vertices?.map(classifyOffsetChainVertex);
+  const antiparallel = classes?.findIndex(
+    (item) => item.class === "antiparallel",
+  );
+  if (antiparallel !== undefined && antiparallel >= 0)
+    return failure(
+      codes.knotIncidenceUnproven,
+      "A declared vertex has exactly antiparallel traversal source tangents (a cusp): it is not absorbable.",
+      pieces[antiparallel]!.seedEntityId,
+    );
+  const queried = (index: number) => classes?.[index]?.class !== "parallel";
+  let jointCount = 0;
+  for (let index = 0; index < adjacencyCount; index += 1)
+    if (queried(index)) jointCount += 1;
   // M7: one precharged whole-request meter for exactly these joint queries.
   const jointRequest = query.openRequest(jointCount);
-  for (let index = 0; index < jointCount; index += 1) {
+  for (let index = 0; index < adjacencyCount; index += 1) {
     const next = (index + 1) % pieces.length;
+    const firstSeed = pieces[index]!.seedEntityId;
+    const keeper = ruleKeeper(pieces, closed, index);
+    if (!queried(index)) {
+      decisions.push({
+        kind: "vertex",
+        vertex: {
+          jointIndex: index,
+          kind: "parallel",
+          class: "parallel",
+          keeper,
+        },
+      });
+      continue;
+    }
+    const vertexClass = classes?.[index];
+    const absorbable =
+      vertexClass?.class === "nonparallel" && vertexClass.forward;
+    /** SEL step 2(b): a verified but inadmissible query, D > 0 only. */
+    const inadmissible = (inadmissibleFailure: OffsetChainFailure) =>
+      absorbable
+        ? ({
+            kind: "vertex",
+            vertex: {
+              jointIndex: index,
+              kind: "absorbed",
+              class: "nonparallel",
+              keeper,
+              trigger: { step: "query", failure: inadmissibleFailure },
+            },
+          } as const)
+        : inadmissibleFailure;
     const end = terminal(pieces, pieceCurves, curves, index, "traversalEnd");
     const start = terminal(pieces, pieceCurves, curves, next, "traversalStart");
-    const firstSeed = pieces[index]!.seedEntityId;
     if (end.curve === start.curve) {
       return failure(
         codes.splineJointUnsupported,
@@ -478,20 +745,32 @@ export function resolveOffsetChainTopology(
     const request = pair(end.curve, start.curve);
     const result = jointRequest.queryPair(request);
     if (result.kind !== "verified") {
+      if (result.code === "exact-query-proof-budget-exhausted")
+        return {
+          ok: false,
+          exhausted: failure(
+            codes.topologyUncertain,
+            `Joint query is not verified (${describe(result)}): the whole-request budget of all ${jointCount} joint queries is exhausted, not necessarily by this joint.`,
+            firstSeed,
+          ),
+        };
       return failure(
         codes.topologyUncertain,
-        result.code === "exact-query-proof-budget-exhausted"
-          ? `Joint query is not verified (${describe(result)}): the whole-request budget of all ${jointCount} joint queries is exhausted, not necessarily by this joint.`
-          : `Joint query is not verified (${describe(result)}).`,
+        `Joint query is not verified (${describe(result)}).`,
         firstSeed,
       );
     }
     if (result.points.length === 0 && result.overlaps.length === 0) {
-      return failure(
-        codes.splineJointUnsupported,
-        "Offset joint needs a fallback arc or tangent-continuous join, which is not supported yet for spline chains.",
-        firstSeed,
+      const empty = inadmissible(
+        failure(
+          codes.splineJointUnsupported,
+          "Offset joint needs a fallback arc or tangent-continuous join, which is not supported yet for spline chains.",
+          firstSeed,
+        ),
       );
+      if ("ok" in empty) return empty;
+      decisions.push(empty);
+      continue;
     }
     const witness = result.points[0];
     const firstBounds = witness && offsetChainRootEnclosure(witness, "first");
@@ -506,11 +785,16 @@ export function resolveOffsetChainTopology(
       !strictlyInside(secondBounds, curves[start.curve]!.bounds) ||
       !transverseCrossing(witness)
     ) {
-      return failure(
-        codes.jointUnsatisfied,
-        "Offset joint has no single certified transverse interior crossing.",
-        firstSeed,
+      const single = inadmissible(
+        failure(
+          codes.jointUnsatisfied,
+          "Offset joint has no single certified transverse interior crossing.",
+          firstSeed,
+        ),
       );
+      if ("ok" in single) return single;
+      decisions.push(single);
+      continue;
     }
     if (
       jointTangentDeterminant(
@@ -528,31 +812,110 @@ export function resolveOffsetChainTopology(
         firstSeed,
       );
     }
-    const jointIndex = jointRecords.length;
-    jointRecords.push({
+    decisions.push({
+      kind: "trim",
+      jointIndex: index,
+      request,
+      witness,
+      firstParameterBounds: firstBounds,
+      secondParameterBounds: secondBounds,
+      flippable: absorbable,
+    });
+  }
+  return { ok: true, decisions };
+}
+
+/** Bitwise neutral-curve geometry equality, ignoring only curve labels. */
+function sameCurveGeometry(first: NeutralCurve, second: NeutralCurve) {
+  const encode = (curve: NeutralCurve) =>
+    JSON.stringify(
+      { ...curve, curveId: undefined, provenance: undefined },
+      (_key, value: unknown) => {
+        if (typeof value !== "number") return value;
+        bits.setFloat64(0, value);
+        return `f64:${bits.getBigUint64(0).toString(16)}`;
+      },
+    );
+  return encode(first) === encode(second);
+}
+
+/**
+ * Builds the resolution of `input` from per-adjacency decisions without any
+ * query (SEL flips and adoption never re-query). A trim's request is the
+ * queried one; after an adoption the recomputed request must have bitwise
+ * the same geometry (only its leaf labels may move), else it fails closed.
+ */
+function assembleOffsetChainResolution(
+  input: OffsetChainTopologyInput,
+  decisions: readonly AdjacencyDecision[],
+): OffsetChainTopologyResult {
+  const { pieces, modelingTolerance } = input;
+  const { curves, pieceCurves } = buildCurves(pieces);
+  const seedOf = (curve: number) =>
+    pieces[curves[curve]!.pieceIndex]!.seedEntityId;
+  const jointRecords = new Map<number, JointRecord>();
+  const vertices: ResolvedOffsetVertex[] = [];
+  for (const decision of decisions) {
+    const index =
+      decision.kind === "trim"
+        ? decision.jointIndex
+        : decision.vertex.jointIndex;
+    const next = (index + 1) % pieces.length;
+    const end = terminal(pieces, pieceCurves, curves, index, "traversalEnd");
+    const start = terminal(pieces, pieceCurves, curves, next, "traversalStart");
+    if (decision.kind === "vertex") {
+      vertices.push(decision.vertex);
+      const vertexEnd = { kind: "vertex", vertexIndex: index } as const;
+      curves[end.curve]![end.side] = vertexEnd;
+      curves[start.curve]![start.side] = vertexEnd;
+      continue;
+    }
+    let request = decision.request;
+    const current: NeutralCurveQueryRequest = {
+      modelingTolerance,
+      first: curves[end.curve]!.neutral,
+      second: curves[start.curve]!.neutral,
+    };
+    if (current.first !== request.first || current.second !== request.second) {
+      if (
+        !sameCurveGeometry(current.first, request.first) ||
+        !sameCurveGeometry(current.second, request.second)
+      )
+        return failure(
+          codes.topologyUncertain,
+          "An adopted declared vertex changed the queried geometry of a trim at the adopter's other end.",
+          pieces[index]!.seedEntityId,
+        );
+      // Same geometry bitwise; only the leaf labels moved with the adoption.
+      request = current;
+    }
+    const { witness } = decision;
+    jointRecords.set(index, {
       firstCurve: end.curve,
       secondCurve: start.curve,
       joint: {
-        firstSeedEntityId: firstSeed,
+        jointIndex: index,
+        firstSeedEntityId: pieces[index]!.seedEntityId,
         secondSeedEntityId: pieces[next]!.seedEntityId,
         request,
         witness,
-        firstParameterBounds: firstBounds,
-        secondParameterBounds: secondBounds,
+        firstParameterBounds: decision.firstParameterBounds,
+        secondParameterBounds: decision.secondParameterBounds,
         firstParameter: witness.firstParameter,
         secondParameter: witness.secondParameter,
         position: witness.position,
       },
     });
-    curves[end.curve]![end.side] = { kind: "joint", jointIndex };
-    curves[start.curve]![start.side] = { kind: "joint", jointIndex };
+    const jointEnd = { kind: "joint", jointIndex: index } as const;
+    curves[end.curve]![end.side] = jointEnd;
+    curves[start.curve]![start.side] = jointEnd;
   }
 
   // Two trims on one curve must be ordered by disjoint root enclosures.
   for (const [curveIndex, curve] of curves.entries()) {
     if (curve.low.kind !== "joint" || curve.high.kind !== "joint") continue;
     const bounds = (jointIndex: number) => {
-      const record = jointRecords[jointIndex]!;
+      const record = jointRecords.get(jointIndex)!;
       return record.firstCurve === curveIndex
         ? record.joint.firstParameterBounds
         : record.joint.secondParameterBounds;
@@ -569,10 +932,10 @@ export function resolveOffsetChainTopology(
     );
   }
 
-  const joints = jointRecords.map(({ joint }) => joint);
+  const joints = [...jointRecords.values()].map(({ joint }) => joint);
   const jointParameter = (end: OffsetChainDomainEnd, curveIndex: number) => {
-    if (end.kind === "source") return null;
-    const record = jointRecords[end.jointIndex]!;
+    if (end.kind !== "joint") return null;
+    const record = jointRecords.get(end.jointIndex)!;
     return record.firstCurve === curveIndex
       ? record.joint.firstParameter
       : record.joint.secondParameter;
@@ -606,8 +969,11 @@ export function resolveOffsetChainTopology(
     const curve = curves[last]!;
     const startEnd = curve.startIsLow ? curve.low : curve.high;
     const endEnd = curve.startIsLow ? curve.high : curve.low;
+    // A vertex end keeps the raw (adopted) emitted end: no root.
     const position = (end: OffsetChainDomainEnd, source: SketchPoint2D) =>
-      end.kind === "joint" ? joints[end.jointIndex]!.position : source;
+      end.kind === "joint"
+        ? jointRecords.get(end.jointIndex)!.joint.position
+        : source;
     lineArcEndpoints.set(piece.seedEntityId, {
       start: position(startEnd, piece.start),
       end: position(endEnd, piece.end),
@@ -615,7 +981,7 @@ export function resolveOffsetChainTopology(
       endDomainEnd: endEnd,
     });
   }
-  return { ok: true, input, cubics, lineArcEndpoints, joints };
+  return { ok: true, input, cubics, lineArcEndpoints, joints, vertices };
 }
 
 export type OffsetChainTubeStabilityCertificate = Extract<
@@ -638,6 +1004,11 @@ export type DeclaredOffsetPieceSource =
       readonly distance: number;
       /** The single owner call's spans (the resolver piece holds this array). */
       readonly spans: readonly SplineOffsetCubicSpan[];
+      /**
+       * The one fresh reconstruction's spans that owner call consumed; an
+       * adoption re-call [TECH T1] uses exactly these (same frame).
+       */
+      readonly sourceSpans: readonly SplineSpan[];
     };
 
 export interface DeclaredOffsetChainPieces {
@@ -648,6 +1019,12 @@ export interface DeclaredOffsetChainPieces {
   /** Raw resolver pieces in declared traversal order, forwarded by reference. */
   readonly pieces: readonly OffsetChainPiece[];
   readonly sources: readonly DeclaredOffsetPieceSource[];
+  /**
+   * Every declared adjacency as a declared vertex (T08b-d), in order: the
+   * N2 joins, or the intrinsic positional closure of one closed spline (a
+   * smooth closure is an owner knot and has none). Source data only.
+   */
+  readonly vertices: readonly OffsetChainVertex[];
 }
 
 function sameVector(first: SketchPoint2D, second: SketchPoint2D) {
@@ -843,7 +1220,12 @@ export function declaredOffsetChainPieces(input: {
       reversed,
       spans: owner.spans,
     });
-    sources.push({ kind: "spline", distance: effective, spans: owner.spans });
+    sources.push({
+      kind: "spline",
+      distance: effective,
+      spans: owner.spans,
+      sourceSpans: geometry.spans,
+    });
   }
   return {
     ok: true,
@@ -852,7 +1234,90 @@ export function declaredOffsetChainPieces(input: {
     modelingTolerance,
     pieces,
     sources,
+    vertices: declaredOffsetChainVertices(connectivity, pieces, sources),
   };
+}
+
+/**
+ * One traversal terminal of a declared piece from its SOURCE data only: the
+ * canonical point ID, the binary64 source vertex and the exact traversal
+ * tangent as a pair of binary64 points (a line's ends; a spline terminal
+ * span's first or last pole pair), reversed with the traversal.
+ */
+function declaredVertexSide(
+  piece: OffsetChainPiece,
+  source: DeclaredOffsetPieceSource,
+  exiting: boolean,
+): OffsetChainVertexSide {
+  const naturalEnd = exiting !== piece.reversed;
+  const orient = (from: SketchPoint2D, to: SketchPoint2D) =>
+    (piece.reversed ? [to, from] : [from, to]) as readonly [
+      SketchPoint2D,
+      SketchPoint2D,
+    ];
+  if (source.kind === "line") {
+    const [start, end] = source.source;
+    return {
+      pointId: naturalEnd ? source.endPointId : source.startPointId,
+      vertex: naturalEnd ? end : start,
+      tangent: orient(start, end),
+    };
+  }
+  const span = naturalEnd ? source.sourceSpans.at(-1)! : source.sourceSpans[0]!;
+  const poles = span.poles;
+  return {
+    pointId: (naturalEnd
+      ? span.source.endPointId
+      : span.source.startPointId) as SketchPointId,
+    vertex: naturalEnd ? poles[3] : poles[0],
+    tangent: naturalEnd
+      ? orient(poles[2], poles[3])
+      : orient(poles[0], poles[1]),
+  };
+}
+
+/** The declared vertices of one adapter output (see `DeclaredOffsetChainPieces`). */
+function declaredOffsetChainVertices(
+  connectivity: DeclaredOffsetChainConnectivity,
+  pieces: readonly OffsetChainPiece[],
+  sources: readonly DeclaredOffsetPieceSource[],
+): OffsetChainVertex[] {
+  const side = (index: number, exiting: boolean) =>
+    declaredVertexSide(pieces[index]!, sources[index]!, exiting);
+  if (pieces.length === 1) {
+    const source = sources[0]!;
+    const spans = source.kind === "spline" ? source.sourceSpans : [];
+    // Positional closure: distinct first/last occurrences (a smooth closure
+    // shares one occurrence and is the owner's wrap knot). One authority
+    // point ID; distinct IDs are rejected by the certifier's C5 check.
+    if (
+      !connectivity.closed ||
+      spans.length === 0 ||
+      spans.at(-1)!.source.endOccurrenceId ===
+        spans[0]!.source.startOccurrenceId
+    )
+      return [];
+    return [
+      {
+        jointIndex: 0,
+        authority: {
+          kind: "positionalClosure",
+          pointId: spans[0]!.source.startPointId as SketchPointId,
+        },
+        first: side(0, true),
+        second: side(0, false),
+      },
+    ];
+  }
+  return connectivity.joins.map((join, index) => ({
+    jointIndex: index,
+    authority:
+      join.kind === "sharedPoint"
+        ? { kind: "sharedPoint", pointId: join.pointId }
+        : { kind: "coincident", pointIds: join.pointIds },
+    first: side(index, true),
+    second: side((index + 1) % pieces.length, false),
+  }));
 }
 
 export type OffsetChainTubeStabilityResult =
@@ -1015,12 +1480,48 @@ function certifyDeclaredTubeStability(
   certifier: CertifiedTubePieceChain,
   declared: DeclaredOffsetChainPieces,
 ): OffsetChainTubeStabilityResult {
+  const request = declaredTubeRequest(resolved, declared);
+  if ("ok" in request) return request;
+  return tubeStabilityResult(
+    resolved,
+    resolved.input.pieces[0]!.seedEntityId,
+    certifier.certifyPieceChain(request),
+    "leaves",
+  );
+}
+
+/** The certifier's form of a declared vertex authority (IDs only). */
+function certifierAuthority(
+  authority: OffsetChainVertexAuthority,
+): TubeChainVertexAuthority {
+  switch (authority.kind) {
+    case "sharedPoint":
+      return { kind: "shared-point", pointId: authority.pointId };
+    case "coincident":
+      return { kind: "coincident", pointIds: authority.pointIds };
+    case "positionalClosure":
+      return { kind: "positional-closure", pointId: authority.pointId };
+  }
+}
+
+/**
+ * Binds a resolution to exactly this adapter output and builds the piece
+ * request, or fails closed. A resolution with declared `vertices` (the SEL
+ * entry's) is bound per adjacency in one index space (review R5): each is
+ * exactly one resolved trim or one resolved vertex, and every domain end
+ * names it. Without them this is the unchanged L1b/R_C binding.
+ */
+function declaredTubeRequest(
+  resolved: OffsetChainTopologySuccess,
+  declared: DeclaredOffsetChainPieces,
+): PieceTubeChainRequest | OffsetChainFailure {
   const { pieces, closed, modelingTolerance } = resolved.input;
   const { connectivity, sources } = declared;
   const count = pieces.length;
   const seedEntityId = pieces[0]?.seedEntityId ?? null;
   const mismatch = (message: string) =>
     failure(codes.topologyUncertain, message, seedEntityId);
+  const vertexAware = resolved.input.vertices !== undefined;
   // Identity binding: the resolution is of exactly this adapter output.
   if (
     count === 0 ||
@@ -1029,6 +1530,7 @@ function certifyDeclaredTubeStability(
     count !== connectivity.pieces.length ||
     closed !== connectivity.closed ||
     !Object.is(modelingTolerance, declared.modelingTolerance) ||
+    (vertexAware && resolved.input.vertices !== declared.vertices) ||
     pieces.some(
       (piece, index) =>
         piece !== declared.pieces[index] ||
@@ -1039,9 +1541,34 @@ function certifyDeclaredTubeStability(
     return mismatch(
       "The resolution was not resolved from this declared adapter output.",
     );
-  // A single closed piece closes through its own bitwise owner knot.
+  // A single closed piece closes through its own bitwise owner knot, or
+  // (declared vertices only) through its positional-closure vertex.
   const wrap = closed && count > 1;
-  if (
+  const adjacencies = vertexAware
+    ? declared.vertices.length
+    : connectivity.joins.length;
+  const adjacencyKind: ("trim" | "vertex")[] = [];
+  if (vertexAware) {
+    const expected = wrap ? count : count - 1;
+    let trim = 0;
+    let vertex = 0;
+    for (let index = 0; index < adjacencies; index += 1) {
+      if (resolved.joints[trim]?.jointIndex === index) {
+        adjacencyKind.push("trim");
+        trim += 1;
+      } else if (resolved.vertices[vertex]?.jointIndex === index) {
+        adjacencyKind.push("vertex");
+        vertex += 1;
+      } else return mismatch("The resolved joints are not the declared joins.");
+    }
+    if (
+      trim !== resolved.joints.length ||
+      vertex !== resolved.vertices.length ||
+      (count > 1 && adjacencies !== expected) ||
+      (count === 1 && adjacencies > (closed ? 1 : 0))
+    )
+      return mismatch("The resolved joints are not the declared joins.");
+  } else if (
     resolved.joints.length !== connectivity.joins.length ||
     connectivity.joins.length !== (wrap ? count : count - 1)
   )
@@ -1059,7 +1586,6 @@ function certifyDeclaredTubeStability(
   };
   for (const [index, join] of connectivity.joins.entries()) {
     const next = (index + 1) % count;
-    const joint = resolved.joints[index]!;
     const exiting = terminalPoint(index, true);
     const entering = terminalPoint(next, false);
     const declaredTerminal =
@@ -1068,25 +1594,36 @@ function certifyDeclaredTubeStability(
         : join.pointIds[0] !== join.pointIds[1] &&
           ((join.pointIds[0] === exiting && join.pointIds[1] === entering) ||
             (join.pointIds[1] === exiting && join.pointIds[0] === entering));
+    const joint = vertexAware
+      ? resolved.joints.find((item) => item.jointIndex === index)
+      : resolved.joints[index]!;
     if (
       !declaredTerminal ||
-      joint.firstSeedEntityId !== pieces[index]!.seedEntityId ||
-      joint.secondSeedEntityId !== pieces[next]!.seedEntityId
+      (joint &&
+        (joint.firstSeedEntityId !== pieces[index]!.seedEntityId ||
+          joint.secondSeedEntityId !== pieces[next]!.seedEntityId))
     )
       return mismatch(
         `Declared join ${index} is not the shared traversal terminal of its pieces.`,
       );
   }
 
-  // Domain ends bind resolver joint indices to the declared adjacencies.
+  // Domain ends bind resolver adjacency indices to the declared adjacencies.
   const expectedEnd = (index: number, exiting: boolean) => {
+    if (vertexAware) {
+      if (exiting) return index < adjacencies ? index : null;
+      const previous = (index - 1 + count) % count;
+      return previous < adjacencies && (closed || index > 0) ? previous : null;
+    }
     if (exiting) return wrap || index < count - 1 ? index : null;
     return wrap || index > 0 ? (index - 1 + count) % count : null;
   };
   const isEnd = (end: OffsetChainDomainEnd, expected: number | null) =>
     expected === null
       ? end.kind === "source"
-      : end.kind === "joint" && end.jointIndex === expected;
+      : adjacencyKind[expected] === "vertex"
+        ? end.kind === "vertex" && end.vertexIndex === expected
+        : end.kind === "joint" && end.jointIndex === expected;
   const requestPieces: TubeChainPiece[] = [];
   for (const [index, piece] of pieces.entries()) {
     const source = sources[index]!;
@@ -1109,6 +1646,8 @@ function certifyDeclaredTubeStability(
           emitted: [piece.start, piece.end],
           source: source.source,
           distance: source.distance,
+          startPointId: source.startPointId,
+          endPointId: source.endPointId,
         },
       });
       continue;
@@ -1132,7 +1671,11 @@ function certifyDeclaredTubeStability(
       )
     )
       return mismatch("The resolution does not describe its own owner spans.");
-    if (count > 1 && piece.spans.length === 1)
+    // A vertex end runs K1 on the whole emitted leaf (R8, after adoption).
+    const vertexEnd = [low, high].some(
+      (end) => end !== null && adjacencyKind[end] === "vertex",
+    );
+    if (count > 1 && piece.spans.length === 1 && !vertexEnd)
       return failure(
         codes.topologyStabilityUnsupported,
         "A one-leaf spline piece in a multi-piece chain has no certified emitted injectivity (K1) yet.",
@@ -1153,18 +1696,516 @@ function certifyDeclaredTubeStability(
       })),
     });
   }
-  const result = certifier.certifyPieceChain({
+  const positional =
+    vertexAware && count === 1 ? declared.vertices[0] : undefined;
+  return {
     modelingTolerance,
     closed,
     distance: declared.distance,
     pieces: requestPieces,
-    trims: resolved.joints.map((joint, jointIndex) => ({
-      jointIndex,
-      firstParameterBounds: joint.firstParameterBounds,
-      secondParameterBounds: joint.secondParameterBounds,
-    })),
-  });
-  return tubeStabilityResult(resolved, seedEntityId!, result, "leaves");
+    trims: resolved.joints.map(
+      (joint, position): TubeChainTrimDeclaration => ({
+        jointIndex: vertexAware ? joint.jointIndex : position,
+        firstParameterBounds: joint.firstParameterBounds,
+        secondParameterBounds: joint.secondParameterBounds,
+        // T7: a trim at a positional closure carries its authority.
+        ...(positional
+          ? { authority: certifierAuthority(positional.authority) }
+          : {}),
+      }),
+    ),
+    ...(vertexAware
+      ? {
+          vertices: resolved.vertices.map(
+            (vertex): TubeChainVertexDeclaration => ({
+              jointIndex: vertex.jointIndex,
+              authority: certifierAuthority(
+                declared.vertices[vertex.jointIndex]!.authority,
+              ),
+              keeper: vertex.keeper,
+            }),
+          ),
+        }
+      : {}),
+  };
+}
+
+/** Traversal terminal of piece `index` at an adjacency: its natural side. */
+function pieceTerminal(
+  pieces: readonly OffsetChainPiece[],
+  index: number,
+  exiting: boolean,
+) {
+  const piece = pieces[index]!;
+  return {
+    index,
+    piece,
+    side: exiting !== piece.reversed ? ("end" as const) : ("start" as const),
+  };
+}
+
+type PieceTerminal = ReturnType<typeof pieceTerminal>;
+
+/** The emitted terminal pole (and its JVP) of one piece at one natural side. */
+function emittedTerminal(terminal: PieceTerminal) {
+  const { piece, side } = terminal;
+  if (piece.kind === "lineSegment")
+    return {
+      position: side === "end" ? piece.end : piece.start,
+      differential: undefined,
+    };
+  if (piece.kind !== "derivedCubic") return null;
+  const span = side === "end" ? piece.spans.at(-1)! : piece.spans[0]!;
+  const pole = side === "end" ? 3 : 0;
+  return {
+    position: span.poles[pole],
+    differential: span.differential.poles[pole],
+  };
+}
+
+type AdoptionOutcome =
+  | {
+      readonly ok: true;
+      readonly declared: DeclaredOffsetChainPieces;
+      readonly decisions: readonly AdjacencyDecision[];
+    }
+  | {
+      readonly ok: false;
+      /** The declared vertex whose absorption could not be built. */
+      readonly jointIndex: number;
+      readonly reason: string;
+    };
+
+/**
+ * SEL step 3 (design §4.4, [TECH T1/T2]): for every declared vertex whose
+ * terminal poles (or pole JVPs) are not already bitwise equal, the adopter
+ * takes the keeper's emitted pole verbatim: a line by construction, a spline
+ * by at most ONE owner re-call covering both its ends, with the same
+ * reconstruction and distance. The rule keeper is tried first, then the
+ * swap. An adopter whose other end is a trim must leave that trim's queried
+ * geometry unchanged (a line never; a spline with ≥ 2 source spans). A
+ * positional closure re-calls with the first pass's first leaf at its end
+ * and requires its source spans 0 … n − 2 bitwise unchanged.
+ */
+function adoptDeclaredVertices(
+  declared: DeclaredOffsetChainPieces,
+  decisions: readonly AdjacencyDecision[],
+): AdoptionOutcome {
+  const { pieces } = declared;
+  const closed = declared.connectivity.closed;
+  const count = pieces.length;
+  const kinds = new Map<number, AdjacencyDecision["kind"]>();
+  for (const decision of decisions)
+    kinds.set(
+      decision.kind === "trim"
+        ? decision.jointIndex
+        : decision.vertex.jointIndex,
+      decision.kind,
+    );
+  /** The adjacency kind at the OTHER traversal end of piece `index`. */
+  const otherAdjacency = (index: number, exitingHere: boolean) => {
+    if (count === 1) return undefined;
+    if (!closed && (exitingHere ? index === 0 : index === count - 1))
+      return undefined;
+    return kinds.get(exitingHere ? (index - 1 + count) % count : index);
+  };
+  /** T2 eligibility of the keeper choice at one vertex. */
+  const eligible = (
+    keeper: "first" | "second",
+    first: PieceTerminal,
+    second: PieceTerminal,
+  ) => {
+    if (count === 1) return keeper === "second";
+    const [keep, adopt] =
+      keeper === "first" ? [first, second] : [second, first];
+    const other = otherAdjacency(adopt.index, adopt === first);
+    if (adopt.piece.kind === "lineSegment") return other !== "trim";
+    // A spline adopts only another spline's emitted leaf (owner seam).
+    if (keep.piece.kind !== "derivedCubic") return false;
+    const source = declared.sources[adopt.index]!;
+    return (
+      other !== "trim" ||
+      (source.kind === "spline" && source.sourceSpans.length >= 2)
+    );
+  };
+  // [TECH T2]: the rule keeper first, the swap once more when the rule
+  // adopter is ineligible or its owner re-call fails (review A4).
+  const forced = new Map<number, "first" | "second">();
+  for (;;) {
+    const plans = new Map<
+      number,
+      {
+        ends: { start?: AdoptedEndpoint; end?: AdoptedEndpoint };
+        vertices: number[];
+      }
+    >();
+    const lineEnds = new Map<
+      number,
+      { start?: SketchPoint2D; end?: SketchPoint2D }
+    >();
+    const updated: AdjacencyDecision[] = [];
+    const swappable = new Map<number, "first" | "second">();
+    for (const decision of decisions) {
+      if (decision.kind === "trim") {
+        updated.push(decision);
+        continue;
+      }
+      const { vertex } = decision;
+      const index = vertex.jointIndex;
+      const first = pieceTerminal(pieces, index, true);
+      const second = pieceTerminal(pieces, (index + 1) % count, false);
+      const firstPole = emittedTerminal(first);
+      const secondPole = emittedTerminal(second);
+      if (!firstPole || !secondPole)
+        return {
+          ok: false,
+          jointIndex: index,
+          reason: "unsupported piece kind",
+        };
+      const same =
+        samePoint(firstPole.position, secondPole.position) &&
+        (!firstPole.differential ||
+          !secondPole.differential ||
+          samePoint(firstPole.differential, secondPole.differential));
+      if (same) {
+        updated.push(decision);
+        continue;
+      }
+      const other = vertex.keeper === "first" ? "second" : "first";
+      const keeper =
+        forced.get(index) ??
+        (eligible(vertex.keeper, first, second)
+          ? vertex.keeper
+          : eligible(other, first, second)
+            ? other
+            : undefined);
+      if (!keeper)
+        return {
+          ok: false,
+          jointIndex: index,
+          reason: "absorbed vertex adopter is trimmed at its other end",
+        };
+      if (!forced.has(index) && keeper === vertex.keeper) {
+        const swap = keeper === "first" ? "second" : "first";
+        if (eligible(swap, first, second)) swappable.set(index, swap);
+      }
+      const [keep, adopt] =
+        keeper === "first" ? [first, second] : [second, first];
+      const keepPole = keeper === "first" ? firstPole : secondPole;
+      if (adopt.piece.kind === "lineSegment") {
+        const ends = lineEnds.get(adopt.index) ?? {};
+        ends[adopt.side] = keepPole.position;
+        lineEnds.set(adopt.index, ends);
+      } else {
+        const keepPiece = keep.piece as Extract<
+          OffsetChainPiece,
+          { kind: "derivedCubic" }
+        >;
+        const join = declared.vertices[index]!.authority;
+        const plan = plans.get(adopt.index) ?? { ends: {}, vertices: [] };
+        plan.ends[adopt.side] = {
+          neighbour:
+            keep.side === "end" ? keepPiece.spans.at(-1)! : keepPiece.spans[0]!,
+          neighbourEnd: keep.side,
+          authority:
+            join.kind === "sharedPoint"
+              ? { kind: "sharedPoint" }
+              : join.kind === "coincident"
+                ? { kind: "coincident", pointIds: join.pointIds }
+                : { kind: "positionalClosure" },
+        };
+        plan.vertices.push(index);
+        plans.set(adopt.index, plan);
+      }
+      updated.push({ kind: "vertex", vertex: { ...vertex, keeper } });
+    }
+    const nextPieces = [...pieces];
+    const nextSources = [...declared.sources];
+    for (const [index, ends] of lineEnds) {
+      const piece = pieces[index] as Extract<
+        OffsetChainPiece,
+        { kind: "lineSegment" }
+      >;
+      nextPieces[index] = {
+        ...piece,
+        start: ends.start ?? piece.start,
+        end: ends.end ?? piece.end,
+      };
+    }
+    let ownerFailure: { vertex: number; code: string } | undefined;
+    let restart = false;
+    for (const [index, plan] of plans) {
+      const piece = pieces[index] as Extract<
+        OffsetChainPiece,
+        { kind: "derivedCubic" }
+      >;
+      const source = declared.sources[index] as Extract<
+        DeclaredOffsetPieceSource,
+        { kind: "spline" }
+      >;
+      // The owner seam rejects adoption at d = ±0 (its analytic branch would
+      // overwrite it) as caller misuse: fail closed before calling it.
+      if (source.distance === 0)
+        return {
+          ok: false,
+          jointIndex: Math.min(...plan.vertices),
+          reason:
+            "a spline cannot adopt a declared vertex pole at d = 0 (owner seam precondition)",
+        };
+      // [TECH T1]: at most one re-call per adopting piece, both ends at once.
+      const owner = approximateSplineOffset({
+        spans: source.sourceSpans,
+        distance: source.distance,
+        modelingTolerance: declared.modelingTolerance,
+        sharedEndpoints: plan.ends,
+      });
+      if (!owner.ok) {
+        ownerFailure = { vertex: Math.min(...plan.vertices), code: owner.code };
+        const swap = plan.vertices.find((vertex) => swappable.has(vertex));
+        if (swap !== undefined) {
+          forced.set(swap, swappable.get(swap)!);
+          ownerFailure = undefined;
+          restart = true;
+        }
+        break;
+      }
+      // Positional closure: only the closing source span's leaves may change.
+      if (count === 1) {
+        const closing = source.sourceSpans.length - 1;
+        const kept = piece.spans.filter(
+          (span) => span.source.spanIndex !== closing,
+        );
+        const again = owner.spans.filter(
+          (span) => span.source.spanIndex !== closing,
+        );
+        if (
+          kept.length !== again.length ||
+          kept.some((span, offset) => !sameOwnerSpan(span, again[offset]!))
+        )
+          return {
+            ok: false,
+            jointIndex: 0,
+            reason:
+              "the second pass changed source spans before the closing one",
+          };
+      }
+      nextPieces[index] = { ...piece, spans: owner.spans };
+      nextSources[index] = { ...source, spans: owner.spans };
+    }
+    if (ownerFailure)
+      return {
+        ok: false,
+        jointIndex: ownerFailure.vertex,
+        reason: `owner ${ownerFailure.code}`,
+      };
+    if (restart) continue; // a swap was forced: rebuild the plan
+    // Every vertex of the adopted chain now shares its emitted pole bitwise.
+    for (const decision of updated) {
+      if (decision.kind !== "vertex") continue;
+      const index = decision.vertex.jointIndex;
+      const a = emittedTerminal(pieceTerminal(nextPieces, index, true));
+      const b = emittedTerminal(
+        pieceTerminal(nextPieces, (index + 1) % count, false),
+      );
+      if (!a || !b || !samePoint(a.position, b.position))
+        return {
+          ok: false,
+          jointIndex: index,
+          reason: "the adopted chain does not share its vertex pole bitwise",
+        };
+    }
+    return {
+      ok: true,
+      declared: { ...declared, pieces: nextPieces, sources: nextSources },
+      decisions: updated,
+    };
+  }
+}
+
+/** Bitwise equality of two owner leaves (poles, JVP poles, ε, intervals, metadata). */
+function sameOwnerSpan(
+  first: SplineOffsetCubicSpan,
+  second: SplineOffsetCubicSpan,
+) {
+  const encode = (span: SplineOffsetCubicSpan) =>
+    JSON.stringify(span, (_key, value: unknown) => {
+      if (typeof value !== "number") return value;
+      bits.setFloat64(0, value);
+      return `f64:${bits.getBigUint64(0).toString(16)}`;
+    });
+  return encode(first) === encode(second);
+}
+
+const MAGNITUDE_CODES: ReadonlySet<string> = new Set([
+  "trim-window-unproven",
+  "trim-composition-unproven",
+  "trim-existence-unproven",
+]);
+
+/**
+ * SEL (T08b-d design §7 as amended; the declared-vertex chain entry, not
+ * wired into any frame). One resolver request (steps 1–2, the joint queries
+ * on one meter), then adoption (step 3) and ONE staged certifier request of
+ * 1 + J_flip attempts (J_flip = trims with D > 0), never re-querying:
+ * - Step 4: certify the adopted chain; verified ⇒ done.
+ * - Step 5 flip, the only retry: when the certificate fails with a trim code
+ *   whose check is genuinely a magnitude failure (`magnitude`, review R1 as
+ *   briefed: a bound-versus-budget comparison; cone/sign, side,
+ *   classification, structural, square-root and budget failures never flip),
+ *   the lowest-index unflipped trim with D > 0 incident to a reported leaf
+ *   becomes an absorption candidate. The flip is justified only by the
+ *   independent re-certification of the absorbed, adopted chain.
+ * - Failure precedence (review R6): a step-2(b) vertex that does not certify
+ *   reports its step-2 resolver failure with "absorption not certified: …"
+ *   appended; after a flip the original trim failure is reported. Budget
+ *   exhaustion is always reported as itself. Every path ends in a verified
+ *   certificate of the emitted chain or a diagnostic.
+ * Exceptions (queries, owner misuse, certifier) propagate unchanged.
+ */
+export function certifyDeclaredOffsetChain(
+  declared: DeclaredOffsetChainPieces,
+  query: CertifiedNeutralCurveRequestQuery,
+  certifier: CertifiedTubePieceChainRequests,
+): OffsetChainTubeStabilityResult {
+  const input: OffsetChainTopologyInput = {
+    pieces: declared.pieces,
+    closed: declared.connectivity.closed,
+    modelingTolerance: declared.modelingTolerance,
+    query,
+    vertices: declared.vertices,
+  };
+  const decided = decideOffsetChainAdjacencies(input);
+  if (!decided.ok) return decided;
+  let decisions = decided.decisions;
+  const flippable = decisions.filter(
+    (decision) => decision.kind === "trim" && decision.flippable,
+  ).length;
+  const request = certifier.openRequest(1 + flippable);
+  let original: OffsetChainFailure | undefined;
+  const flipped = new Set<number>();
+  for (;;) {
+    // R6: a failed absorption keeps the pre-absorption verdict.
+    const absorptionFailure = (jointIndex: number, reason: string) => {
+      const vertex = decisions.find(
+        (decision) =>
+          decision.kind === "vertex" &&
+          decision.vertex.jointIndex === jointIndex,
+      );
+      const trigger =
+        vertex?.kind === "vertex" ? vertex.vertex.trigger : undefined;
+      if (trigger?.step === "flip" && original) return original;
+      if (trigger)
+        return {
+          ...trigger.failure,
+          message: `${trigger.failure.message} Absorption not certified: ${reason}`,
+        };
+      return failure(
+        codes.knotIncidenceUnproven,
+        `Declared parallel vertex ${jointIndex} is not certified: ${reason}`,
+        declared.pieces[jointIndex]!.seedEntityId,
+      );
+    };
+    const adopted = adoptDeclaredVertices(declared, decisions);
+    if (!adopted.ok)
+      return absorptionFailure(adopted.jointIndex, adopted.reason);
+    const adoptedInput: OffsetChainTopologyInput = {
+      ...input,
+      pieces: adopted.declared.pieces,
+    };
+    const resolved = assembleOffsetChainResolution(
+      adoptedInput,
+      adopted.decisions,
+    );
+    if (!resolved.ok)
+      return (
+        firstTrigger(adopted.decisions, resolved.message) ??
+        (original && flipped.size > 0 ? original : resolved)
+      );
+    const pieceRequest = declaredTubeRequest(resolved, adopted.declared);
+    if ("ok" in pieceRequest) return pieceRequest;
+    const raw = request.certifyPieceChain(pieceRequest);
+    const mapped = tubeStabilityResult(
+      resolved,
+      adopted.declared.pieces[0]!.seedEntityId,
+      raw,
+      "leaves",
+    );
+    if (raw.kind === "verified") return mapped;
+    if (mapped.ok) return mapped;
+    // Budget exhaustion is never folded into an R6 trigger: it is reported
+    // as itself (one staged budget, sticky; no exhaustion swallow).
+    if (raw.code === "exact-query-proof-budget-exhausted") return mapped;
+    // SEL step 5: the lowest-index unflipped D > 0 trim at a reported leaf.
+    const leaves = [raw.first, raw.second].filter(
+      (leaf): leaf is number => leaf !== undefined,
+    );
+    const firstLeaf: number[] = [];
+    let total = 0;
+    for (const piece of adopted.declared.pieces) {
+      firstLeaf.push(total);
+      total += piece.kind === "derivedCubic" ? piece.spans.length : 1;
+    }
+    const terminalLeaf = (index: number, exiting: boolean) => {
+      const { piece, side } = pieceTerminal(
+        adopted.declared.pieces,
+        index,
+        exiting,
+      );
+      const size = piece.kind === "derivedCubic" ? piece.spans.length : 1;
+      return firstLeaf[index]! + (side === "end" ? size - 1 : 0);
+    };
+    const target =
+      raw.kind === "uncertain" &&
+      raw.magnitude === true &&
+      MAGNITUDE_CODES.has(raw.code)
+        ? adopted.decisions.find(
+            (decision) =>
+              decision.kind === "trim" &&
+              decision.flippable &&
+              !flipped.has(decision.jointIndex) &&
+              [
+                terminalLeaf(decision.jointIndex, true),
+                terminalLeaf(
+                  (decision.jointIndex + 1) % adopted.declared.pieces.length,
+                  false,
+                ),
+              ].some((leaf) => leaves.includes(leaf)),
+          )
+        : undefined;
+    // Any other failure is final: a failed absorption keeps its trigger.
+    if (!target || target.kind !== "trim") {
+      const absorbed = adopted.decisions.find(
+        (decision) =>
+          decision.kind === "vertex" && decision.vertex.trigger !== undefined,
+      );
+      if (absorbed?.kind === "vertex")
+        return absorptionFailure(
+          absorbed.vertex.jointIndex,
+          `${raw.code}: ${raw.message}`,
+        );
+      return original ?? mapped;
+    }
+    original ??= mapped;
+    flipped.add(target.jointIndex);
+    decisions = decisions.map((decision) =>
+      decision.kind === "trim" && decision.jointIndex === target.jointIndex
+        ? {
+            kind: "vertex",
+            vertex: {
+              jointIndex: decision.jointIndex,
+              kind: "absorbed",
+              class: "nonparallel",
+              keeper: ruleKeeper(
+                declared.pieces,
+                input.closed,
+                decision.jointIndex,
+              ),
+              trigger: { step: "flip", failure: mapped },
+            },
+          }
+        : decision,
+    );
+  }
 }
 
 interface CurveFrame {
@@ -1368,14 +2409,20 @@ export function resolveOffsetChainTopologyJvp(
     jointParameterDifferentials.push([ds, dt]);
     jointPositions.push(position);
   }
+  // Domain ends name adjacency indices (review R5); joints are dense.
+  const jointPosition = new Map(
+    resolved.joints.map((joint, position) => [joint.jointIndex, position]),
+  );
   const jointDifferential = (
     end: OffsetChainDomainEnd,
     seed: SketchEntityId,
     spanIndex: number,
   ) => {
-    if (end.kind === "source") return null;
-    const joint = resolved.joints[end.jointIndex]!;
-    const [ds, dt] = jointParameterDifferentials[end.jointIndex]!;
+    // A vertex end is the source end: the span's own (adopted) differential.
+    if (end.kind !== "joint") return null;
+    const position = jointPosition.get(end.jointIndex)!;
+    const joint = resolved.joints[position]!;
+    const [ds, dt] = jointParameterDifferentials[position]!;
     return joint.firstSeedEntityId === seed &&
       Number(joint.request.first.provenance.sourceSpanId) === spanIndex
       ? ds
@@ -1396,6 +2443,37 @@ export function resolveOffsetChainTopologyJvp(
       ]),
     );
   }
+  /**
+   * A line end at a declared vertex is the keeper's emitted pole verbatim
+   * (adoption, T08b-d), so its variation is the keeper's pole variation:
+   * a keeper spline's terminal pole differential, a keeper line's own end
+   * variation. Null when this line is the keeper (its own variation).
+   */
+  const vertexEndVariation = (
+    jointIndex: number,
+    seed: SketchEntityId,
+  ): SketchPoint2D | null => {
+    const vertex = resolved.vertices.find(
+      (item) => item.jointIndex === jointIndex,
+    )!;
+    const count = input.pieces.length;
+    const keeperIndex =
+      vertex.keeper === "first" ? jointIndex : (jointIndex + 1) % count;
+    const keeper = pieceTerminal(
+      input.pieces,
+      keeperIndex,
+      vertex.keeper === "first",
+    );
+    if (keeper.piece.seedEntityId === seed) return null;
+    if (keeper.piece.kind === "derivedCubic")
+      return emittedTerminal(keeper)!.differential!;
+    const variation = variations.get(keeper.piece.seedEntityId);
+    if (!variation || variation.kind !== keeper.piece.kind)
+      throw new RangeError(
+        `Missing variation for offset chain piece ${keeper.piece.seedEntityId}`,
+      );
+    return keeper.side === "end" ? variation.end : variation.start;
+  };
   const lineArcEndpoints = new Map<
     SketchEntityId,
     { start: SketchPoint2D; end: SketchPoint2D }
@@ -1406,7 +2484,11 @@ export function resolveOffsetChainTopologyJvp(
       throw new RangeError(`Missing variation for offset chain piece ${seed}`);
     }
     const endpoint = (end: OffsetChainDomainEnd, source: SketchPoint2D) =>
-      end.kind === "joint" ? jointPositions[end.jointIndex]! : source;
+      end.kind === "joint"
+        ? jointPositions[jointPosition.get(end.jointIndex)!]!
+        : end.kind === "vertex"
+          ? (vertexEndVariation(end.vertexIndex, seed) ?? source)
+          : source;
     lineArcEndpoints.set(seed, {
       start: endpoint(endpoints.startDomainEnd, variation.start),
       end: endpoint(endpoints.endDomainEnd, variation.end),

@@ -66,18 +66,23 @@ import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import {
   ARCH_POINTS,
   CORNER_MATRIX_SOLVE_TOLERANCES,
+  POSITIONAL_WRAPS,
   cornerMatrixRows,
   createNativeOffsetChainHarness,
+  positionalClosureSpline,
   splineLineShallowRows,
   splineSplineCornerRows,
   type AcceptedPair,
   type Authored,
   type EndpointSnaps,
+  type NativeOffsetChainHarness,
   type NativeToolAuthoring,
   type Vector,
 } from "@/contracts/sketch/offset-chain.fixtures";
 import {
+  certifyDeclaredOffsetChain,
   certifyOffsetChainTubeStability,
+  classifyOffsetChainVertex,
   declaredOffsetChainPieces,
   offsetChainRootEnclosure,
   resolveOffsetChainTopology,
@@ -88,6 +93,8 @@ import {
   type OffsetChainPieceVariation,
   type OffsetChainTopologyInput,
   type OffsetChainTopologySuccess,
+  type OffsetChainTubeStabilityCertificate,
+  type OffsetChainVertex,
 } from "@/contracts/sketch/offset-chain-topology";
 import {
   OFFSET_DIAGNOSTIC_CODES,
@@ -2674,6 +2681,23 @@ describe("declared multi-piece tube stability (L1b, bounded helper, not live)", 
       message: expect.stringContaining("trim-side-unproven"),
     });
     expect(requests).toHaveLength(1);
+    // SEL (R1): trim-side-unproven never flips, although this trim has D > 0
+    // and the staged request was sized for a flip.
+    const snapshots: ExactProofBudgetSnapshot[] = [];
+    expect(
+      certifyDeclaredOffsetChain(
+        convex.declared,
+        query,
+        createCertifiedCubicTubeChainWithBudgetObserverForTest((snapshot) =>
+          snapshots.push(snapshot),
+        ),
+      ),
+    ).toMatchObject({
+      ok: false,
+      code: codes.topologyUncertain,
+      message: expect.stringContaining("trim-side-unproven"),
+    });
+    expect(snapshots, "one certifier attempt").toHaveLength(1);
     // The same accepted pair is concave at −d and verifies.
     expectVerifiedCoincidentTrim(pair, -0.01, 0, {
       line: "first",
@@ -3495,8 +3519,9 @@ describe("T08b-a capacity: joint queries only on one whole-request meter (M0/M7)
       distance: d,
       modelingTolerance: TOLERANCE,
       pieces,
+      vertices: [],
       sources: [
-        { kind: "spline", distance: d, spans },
+        { kind: "spline", distance: d, spans, sourceSpans: [] },
         {
           kind: "line",
           source: lineSource,
@@ -4038,9 +4063,10 @@ describe("T08b-b S2: native spline→spline graph trims under R_C′ (terminal l
       distance: d,
       modelingTolerance: TOLERANCE,
       pieces,
+      vertices: [],
       sources: [
-        { kind: "spline", distance: d, spans: loopSpans },
-        { kind: "spline", distance: d, spans: upSpans },
+        { kind: "spline", distance: d, spans: loopSpans, sourceSpans: [] },
+        { kind: "spline", distance: d, spans: upSpans, sourceSpans: [] },
       ],
     };
     expect(
@@ -4296,3 +4322,1350 @@ describe("T08b-c Q4-E1: native band rows through the endpoint-local ε", () => {
     120_000,
   );
 });
+
+// Logic lane (docs/testing.md): the exported SEL entry
+// `certifyDeclaredOffsetChain` (T08b-d, not live) over native tool authoring
+// (commit → solve → N2 → fresh adapter), the real kernel-free request query,
+// the real owner for adoption re-calls and the real staged certifier. Full
+// before/after table: T08b-d-evidence/matrix-{before,after}.jsonl.
+describe("T08b-d SEL: declared vertices, adoption, U1 absorption", () => {
+  const TOLERANCE = 1e-3;
+  const pieceCertifier = createCertifiedCubicTubeChain();
+  const harnesses = {
+    matrix: createNativeOffsetChainHarness({
+      authoring: createNativeToolAuthoring("sketch_t08b"),
+      query,
+      modelingTolerance: TOLERANCE,
+      solveTolerances: CORNER_MATRIX_SOLVE_TOLERANCES,
+    }),
+    s2: createNativeOffsetChainHarness({
+      authoring: createNativeToolAuthoring("sketch_s2"),
+      query,
+      modelingTolerance: TOLERANCE,
+    }),
+    native: createNativeOffsetChainHarness({
+      authoring: createNativeToolAuthoring("sketch_t08bd"),
+      query,
+      modelingTolerance: TOLERANCE,
+    }),
+  };
+  type Family = keyof typeof harnesses;
+  const rowsOf = { matrix: cornerMatrixRows, s2: splineSplineCornerRows };
+  const nativeRow = (family: "matrix" | "s2", label: string) => {
+    const harness = harnesses[family];
+    const row = rowsOf[family]().find(
+      (item) => `${item.row} ${item.distance}` === label,
+    );
+    if (!row) throw new Error(`no row ${label}`);
+    harness.resetSequence();
+    return harness.nativeChain(row.build(harness), row.distance);
+  };
+  const built = (
+    family: Family,
+    distance: number,
+    build: (harness: NativeOffsetChainHarness) => readonly Authored[],
+  ) => {
+    const harness = harnesses[family];
+    harness.resetSequence();
+    return harness.nativeChain(build(harness), distance);
+  };
+  const wrap = (name: keyof typeof POSITIONAL_WRAPS, distance: number) =>
+    built("native", distance, (harness) => [
+      positionalClosureSpline(harness, POSITIONAL_WRAPS[name]),
+    ]);
+  /** One SEL run with its request sizes, owner re-calls and certifier snapshots. */
+  const sel = (declared: DeclaredOffsetChainPieces) => {
+    const { sizes, query: recorded } = recordingRequests();
+    const snapshots: ExactProofBudgetSnapshot[] = [];
+    splineSeamCalls.log = [];
+    const result = certifyDeclaredOffsetChain(
+      declared,
+      recorded,
+      createCertifiedCubicTubeChainWithBudgetObserverForTest((snapshot) =>
+        snapshots.push(snapshot),
+      ),
+    );
+    const reCalls = splineSeamCalls.log.filter(
+      (call) => call === "owner",
+    ).length;
+    splineSeamCalls.log = null;
+    return { result, sizes, reCalls, snapshots };
+  };
+  const verifiedOf = (run: ReturnType<typeof sel>) => {
+    if (!run.result.ok)
+      throw new Error(`${run.result.code}: ${run.result.message}`);
+    return run.result.certificate;
+  };
+  const vertexJoins = (certificate: OffsetChainTubeStabilityCertificate) =>
+    certificate.joins.filter(
+      (join) =>
+        join.kind === "parallel-vertex" || join.kind === "nonparallel-vertex",
+    );
+  const meterOf = (snapshot: ExactProofBudgetSnapshot) => ({
+    operations: snapshot.operations,
+    euclideanSteps: snapshot.euclideanSteps,
+    integerBits: Math.max(snapshot.maxStoredBits, snapshot.maxPreProductBits),
+  });
+  /** T4 agreement: the resolver's exact class is the certificate's kind. */
+  const expectAgreement = (
+    declared: DeclaredOffsetChainPieces,
+    certificate: OffsetChainTubeStabilityCertificate,
+  ) => {
+    for (const join of vertexJoins(certificate)) {
+      if (!("jointIndex" in join)) continue;
+      const exact = classifyOffsetChainVertex(
+        declared.vertices[join.jointIndex]!,
+      );
+      expect(join.kind, `vertex ${join.jointIndex}`).toBe(
+        exact.class === "parallel" ? "parallel-vertex" : "nonparallel-vertex",
+      );
+    }
+  };
+
+  test.each([
+    ["SL-tiny 0.01", "concave", "shared-point"],
+    ["SL-tiny -0.01", "convex", "shared-point"],
+    ["SS-tiny 0.01", "concave", "coincident"],
+    ["SS-tiny -0.01", "convex", "coincident"],
+  ] as const)(
+    "native %s (formerly jointUnsatisfied) verifies as one %s nonparallel vertex, %s, g = 0, no adoption, one query",
+    (label, side, authority) => {
+      const chain = nativeRow("matrix", label);
+      // Pre-T08b-d path: the legacy resolver still fails here.
+      expect(chain.resolution).toMatchObject({
+        ok: false,
+        code: codes.jointUnsatisfied,
+      });
+      const run = sel(chain.declared);
+      const certificate = verifiedOf(run);
+      // Exact classification queried it: a FLOAT class (cross ≈ 5e-18 < ulp)
+      // would call it parallel and open a request of 0 (review T4 mutant).
+      expect(run.sizes, "one query").toEqual([1]);
+      expect(run.reCalls, "emitted poles already bitwise: no re-call").toBe(0);
+      expect(run.snapshots).toHaveLength(1);
+      expect(vertexJoins(certificate)).toEqual([
+        expect.objectContaining({
+          kind: "nonparallel-vertex",
+          side,
+          authority,
+          jointIndex: 0,
+          keeper: "first",
+          bridge: 0,
+        }),
+      ]);
+      expectAgreement(chain.declared, certificate);
+      for (const leaf of certificate.leaves)
+        expect(leaf.displacementBound).toBeLessThanOrEqual(TOLERANCE);
+    },
+    120_000,
+  );
+
+  test("native two natural STARTS meeting (R4): the arch authored backwards and SS-tiny's spline drawn from its start; N2 traverses SS-tiny's spline reversed into the arch, so the sides swap and both verify", () => {
+    // Traversal: SS-tiny's second spline backwards ((4, −0.2) → (2, 0)), then
+    // the arch from its natural start (2, 0): the opposite direction of
+    // SS-tiny, hence convex at d = +0.01 and concave at d = −0.01.
+    for (const [distance, side] of [
+      [0.01, "convex"],
+      [-0.01, "concave"],
+    ] as const) {
+      const chain = built("matrix", distance, (harness) => {
+        const first = harness.drawSpline([], [...ARCH_POINTS].reverse());
+        return [
+          first,
+          harness.drawSpline(
+            [first],
+            [
+              [2, 0],
+              [3, -0.1],
+              [4, -0.2],
+            ],
+            { start: harness.splineEnds(first)[0] },
+          ),
+        ];
+      });
+      expect(chain.connectivity.pieces.map((piece) => piece.reversed)).toEqual([
+        true,
+        false,
+      ]);
+      const certificate = verifiedOf(sel(chain.declared));
+      expect(vertexJoins(certificate), `d = ${distance}`).toEqual([
+        expect.objectContaining({ kind: "nonparallel-vertex", side }),
+      ]);
+    }
+  }, 120_000);
+
+  // Native whole-request certifier literal of the vertex path (SL-tiny
+  // d = 0.01, measured on this implementation): count passes; count − 1 and
+  // staged caps inside the vertex stage exhaust (T08b-d-evidence/stages).
+  const SL_TINY_METER = {
+    operations: 155_461,
+    euclideanSteps: 43_400,
+    integerBits: 1_007,
+  };
+  test("native SL-tiny d = 0.01 via SEL: exact certifier literal; count − 1 and staged caps exhaust on one budget", () => {
+    const chain = nativeRow("matrix", "SL-tiny 0.01");
+    const run = sel(chain.declared);
+    verifiedOf(run);
+    expect(meterOf(run.snapshots.at(-1)!)).toEqual(SL_TINY_METER);
+    const under = (limits: Record<string, number>) =>
+      certifyDeclaredOffsetChain(
+        chain.declared,
+        query,
+        createCertifiedCubicTubeChainWithLowerBudgetForTest(limits),
+      );
+    // Exhaustion is reported as itself, never as the R6 step-2 code.
+    const exhausted = {
+      ok: false,
+      code: codes.topologyUncertain,
+      message:
+        "Tube stability is not certified: uncertain exact-query-proof-budget-exhausted: The deterministic exact-query arithmetic budget was exhausted.",
+    };
+    for (const kind of [
+      "operations",
+      "euclideanSteps",
+      "integerBits",
+    ] as const) {
+      expect(under({ [kind]: SL_TINY_METER[kind] }).ok, kind).toBe(true);
+      expect(under({ [kind]: SL_TINY_METER[kind] - 1 }), kind).toMatchObject(
+        exhausted,
+      );
+    }
+    for (const [kind, cap] of SL_TINY_STAGED)
+      expect(under({ [kind]: cap }), `${kind} ${cap}`).toMatchObject(exhausted);
+  });
+
+  // The resolver's whole-request literal of SL-tiny d = 0.01 under SEL (one
+  // nonparallel vertex query): the precharge 64, then one query.
+  const SL_TINY_REQUEST = {
+    operations: 116_928,
+    euclideanSteps: 18_072,
+    integerBits: 536,
+  };
+  test("native SL-tiny d = 0.01: the resolver request is sized 1 with an exact literal; count − 1 exhausts before any certifier", () => {
+    const chain = nativeRow("matrix", "SL-tiny 0.01");
+    const snapshots: ExactProofBudgetSnapshot[] = [];
+    verifiedOf({
+      ...sel(chain.declared),
+      result: certifyDeclaredOffsetChain(
+        chain.declared,
+        createCertifiedNeutralCurveRequestQueryWithBudgetObserverForTest(
+          (snapshot) => snapshots.push(snapshot),
+        ),
+        pieceCertifier,
+      ),
+    });
+    expect(snapshots).toHaveLength(2);
+    expect(snapshots[0]!.operations).toBe(64);
+    expect(meterOf(snapshots[1]!)).toEqual(SL_TINY_REQUEST);
+    for (const kind of ["operations", "euclideanSteps", "integerBits"] as const)
+      expect(
+        certifyDeclaredOffsetChain(
+          chain.declared,
+          createCertifiedNeutralCurveRequestQueryWithLowerBudgetForTest({
+            [kind]: SL_TINY_REQUEST[kind] - 1,
+          }),
+          {
+            openRequest: () => {
+              throw new Error("the certifier must not be reached");
+            },
+          },
+        ),
+        kind,
+      ).toMatchObject({
+        ok: false,
+        code: codes.topologyUncertain,
+        message: expect.stringContaining(
+          "the whole-request budget of all 1 joint queries is exhausted",
+        ),
+      });
+  }, 120_000);
+
+  // wrap-near4 1e-3 d = −0.01 certifier literal (40 leaves; K3-bound, Euclid
+  // 72 % of one cap): count passes, count − 1 exhausts (operations).
+  const WRAP_NEAR_METER = {
+    operations: 4_143_742,
+    euclideanSteps: 1_085_975,
+    integerBits: 398,
+  };
+  test("native wrap-near4 1e-3 d = −0.01: exact certifier literal of the absorbed positional vertex; count − 1 exhausts", () => {
+    const chain = wrap("wrap-near4 1e-3", -0.01);
+    const run = sel(chain.declared);
+    verifiedOf(run);
+    expect(meterOf(run.snapshots.at(-1)!)).toEqual(WRAP_NEAR_METER);
+    for (const kind of ["operations"] as const) {
+      const under = (limit: number) =>
+        certifyDeclaredOffsetChain(
+          chain.declared,
+          query,
+          createCertifiedCubicTubeChainWithLowerBudgetForTest({
+            [kind]: limit,
+          }),
+        );
+      expect(under(WRAP_NEAR_METER[kind]).ok, kind).toBe(true);
+      expect(under(WRAP_NEAR_METER[kind] - 1), kind).toMatchObject({
+        ok: false,
+        message: expect.stringContaining("exact-query-proof-budget-exhausted"),
+      });
+    }
+  }, 300_000);
+
+  test("positional closure: wrap-flat4 is a parallel vertex with ZERO queries at both sides of d; its legacy route stays J1-unproven", () => {
+    for (const distance of [0.01, -0.01]) {
+      const chain = wrap("wrap-flat4", distance);
+      expect(chain.connectivity.joins).toEqual([]);
+      const run = sel(chain.declared);
+      const certificate = verifiedOf(run);
+      expect(run.sizes, "a parallel vertex is never queried").toEqual([0]);
+      expect(vertexJoins(certificate)).toEqual([
+        expect.objectContaining({
+          kind: "parallel-vertex",
+          authority: "positional-closure",
+          bridge: 0,
+          keeper: "second",
+        }),
+      ]);
+      expectAgreement(chain.declared, certificate);
+    }
+  }, 120_000);
+
+  test("positional closure: wrap-near4 1e-3 d = −0.01 (formerly splineJointUnsupported) is absorbed convex with ONE end-adoption re-call", () => {
+    const chain = wrap("wrap-near4 1e-3", -0.01);
+    expect(chain.resolution).toMatchObject({
+      ok: false,
+      code: codes.splineJointUnsupported,
+    });
+    const run = sel(chain.declared);
+    const certificate = verifiedOf(run);
+    expect(run.sizes).toEqual([1]);
+    expect(run.reCalls, "one second-pass owner call").toBe(1);
+    const [join] = vertexJoins(certificate);
+    expect(join).toMatchObject({
+      kind: "nonparallel-vertex",
+      side: "convex",
+      authority: "positional-closure",
+      keeper: "second",
+    });
+    // The keeper is the first leaf: its START is the reserve end.
+    expect(certificate.leaves[0]!.displacementBound).toBe(TOLERANCE);
+  }, 120_000);
+
+  test("T7/R11 named: wrap-near4 1e-3 d = +0.01 queries a trim at the positional closure, carries its authority to the certifier and fails ONLY as trim-classification-unproven (never flipped)", () => {
+    const chain = wrap("wrap-near4 1e-3", 0.01);
+    const requests: PieceTubeChainRequest[] = [];
+    splineSeamCalls.log = [];
+    const run = (() => {
+      const snapshots: ExactProofBudgetSnapshot[] = [];
+      const inner = createCertifiedCubicTubeChainWithBudgetObserverForTest(
+        (snapshot) => snapshots.push(snapshot),
+      );
+      const result = certifyDeclaredOffsetChain(chain.declared, query, {
+        openRequest: (attempts) => {
+          const request = inner.openRequest(attempts);
+          return {
+            certifyPieceChain: (item) => {
+              requests.push(item);
+              return request.certifyPieceChain(item);
+            },
+          };
+        },
+      });
+      return { result, snapshots };
+    })();
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.trims).toEqual([
+      expect.objectContaining({
+        jointIndex: 0,
+        authority: expect.objectContaining({ kind: "positional-closure" }),
+      }),
+    ]);
+    expect(run.result).toMatchObject({
+      ok: false,
+      code: codes.topologyUncertain,
+      message: expect.stringContaining(
+        "trim-classification-unproven: The true terminal slopes are not proved separated",
+      ),
+    });
+    expect(run.snapshots, "classification never flips").toHaveLength(1);
+    expect(splineSeamCalls.log, "no flip ⇒ no adoption re-call").toEqual([]);
+    splineSeamCalls.log = null;
+  }, 120_000);
+
+  const nativeId = "sketch_t08bd" as SketchId;
+  /** Native constraint/dimension tool commit contribution (no solve). */
+  const commitTool = (
+    definition: SketchDefinition,
+    toolId: SketchConstraintToolId,
+    targets: readonly (
+      | readonly ["point", SketchPointId]
+      | readonly ["entity", SketchEntityId]
+    )[],
+    value: number | null = null,
+  ): SketchDefinition => {
+    const step = harnesses.native.nextSequence();
+    const contribution = getSketchConstraintDefinition(
+      toolId,
+    ).createCommitContribution({
+      sequence: step,
+      selectedTargets: targets.map(([kind, targetId]) => {
+        const record = resolveSketchConstraintTarget(
+          toolId,
+          definition,
+          kind === "point"
+            ? createSketchPointRef(nativeId, targetId)
+            : { kind: "sketchEntity", sketchId: nativeId, entityId: targetId },
+        );
+        if (!record) throw new Error(`${toolId} rejected ${targetId}`);
+        return record;
+      }),
+      pointer: null,
+      value,
+      annotationPlacement: null,
+      createConstraintId: (suffix) => `constraint_${step}_${suffix}` as const,
+      createDimensionId: (suffix) => `dimension_${step}_${suffix}` as const,
+    });
+    const constraints = contribution.constraints ?? [];
+    const dimensions = contribution.dimensions ?? [];
+    return {
+      ...definition,
+      constraintIds: [
+        ...definition.constraintIds,
+        ...constraints.map((constraint) => constraint.constraintId),
+      ],
+      constraints: [...definition.constraints, ...constraints],
+      dimensionIds: [
+        ...definition.dimensionIds,
+        ...dimensions.map((dimension) => dimension.dimensionId),
+      ],
+      dimensions: [...definition.dimensions, ...dimensions],
+    };
+  };
+  const acceptedEdit = (definition: SketchDefinition): AcceptedPair => {
+    const solved = solveCommittedConstraintDefinition(
+      definition,
+      [],
+      SKETCH_DIRECT_EDIT_TOLERANCES,
+    );
+    if (!solved.solvedSnapshot) throw new Error("not accepted in place");
+    return solved as AcceptedPair;
+  };
+  /** SS-tiny's outgoing spline started off the arch end, then Fix/Fix/Coincident. */
+  const ssTinyGap = (offset: Vector, distance: number) => {
+    const harness = harnesses.native;
+    harness.resetSequence();
+    const first = harness.drawSpline([], ARCH_POINTS);
+    const second = harness.drawSpline(
+      [first],
+      [
+        [2 + offset[0], offset[1]],
+        [3, -0.1],
+        [4, -0.2],
+      ],
+    );
+    const end = harness.splineEnds(first)[1];
+    const start = harness.splineEnds(second)[0];
+    let definition = harness.sketch([first, second]);
+    definition = commitTool(definition, "constraintFix", [["point", end]]);
+    definition = commitTool(definition, "constraintFix", [["point", start]]);
+    definition = commitTool(definition, "constraintCoincident", [
+      ["point", end],
+      ["point", start],
+    ]);
+    return harness.pairChain(acceptedEdit(definition), distance);
+  };
+  /** Native snapped line → near-tangent spline, then a Distance edit on the line. */
+  const lineSplineGap = (distance: number) => {
+    const harness = harnesses.native;
+    harness.resetSequence();
+    const line = harness.drawLine([], [-1, 0], [0, 0]);
+    const spline = harness.drawSpline(
+      [line],
+      [
+        [0, 0],
+        [1, 0.001],
+        [2, 0.003],
+      ],
+      { start: harness.lineEnds(line)[1] },
+    );
+    return harness.pairChain(
+      acceptedEdit(
+        commitTool(
+          harness.sketch([line, spline]),
+          "dimensionDistance",
+          [["entity", line.entities[0]!.entityId]],
+          1.3,
+        ),
+      ),
+      distance,
+    );
+  };
+  const gapOf = (chain: { declared: DeclaredOffsetChainPieces }) => {
+    const vertex = chain.declared.vertices[0]!;
+    return Math.hypot(
+      vertex.second.vertex[0] - vertex.first.vertex[0],
+      vertex.second.vertex[1] - vertex.first.vertex[1],
+    );
+  };
+
+  test.each([
+    [0.01, "convex"],
+    [-0.01, "concave"],
+  ] as const)(
+    "native SS-tiny Fix/Fix/Coincident (3e-4, 2e-4) d = %s (formerly splineJointUnsupported) verifies with the Lemma-B bridge |g|⁺ > 0 on the keeper",
+    (distance, side) => {
+      const chain = ssTinyGap([3e-4, 2e-4], distance);
+      expect(chain.resolution).toMatchObject({
+        ok: false,
+        code: codes.splineJointUnsupported,
+      });
+      const g = gapOf(chain);
+      expect(g).toBeGreaterThan(1e-4);
+      const run = sel(chain.declared);
+      const certificate = verifiedOf(run);
+      expect(run.reCalls, "the outgoing spline adopts once").toBe(1);
+      const [join] = vertexJoins(certificate);
+      expect(join).toMatchObject({
+        kind: "nonparallel-vertex",
+        side,
+        authority: "coincident",
+        keeper: "first",
+      });
+      if (!join || !("bridge" in join)) throw new Error("vertex");
+      expect(join.bridge).toBeGreaterThanOrEqual(g);
+      expect(join.bridge).toBeLessThan(g * (1 + 1e-12));
+      // The keeper's reserve end (its natural end) makes it τ-bounded.
+      expect(certificate.leaves[join.first]!.displacementBound).toBe(TOLERANCE);
+    },
+    120_000,
+  );
+
+  test("native backward declared gap: SS-tiny Fix/Fix/Coincident (−3e-4, 2e-4) keeps its step-2 code with 'absorption not certified: backward declared gap' (R6)", () => {
+    for (const distance of [0.01, -0.01]) {
+      const run = sel(ssTinyGap([-3e-4, 2e-4], distance).declared);
+      expect(run.result, `d = ${distance}`).toMatchObject({
+        ok: false,
+        code: codes.splineJointUnsupported,
+        message: expect.stringContaining(
+          "Absorption not certified: cubic-tube-knot-incidence-unproven: Declared vertex 0: backward declared gap (e·g < 0)",
+        ),
+      });
+    }
+  }, 120_000);
+
+  test("M-R1: native SS-tiny Fix/Fix/Coincident (3e-4, 2e-4) at d = 0 fails closed with a source-linked diagnostic; the owner seam (which rejects adoption at d = 0) is never called", () => {
+    const chain = ssTinyGap([3e-4, 2e-4], 0);
+    const run = sel(chain.declared);
+    expect(run.reCalls, "no owner re-call at d = 0").toBe(0);
+    expect(run.snapshots, "the certifier is not reached").toEqual([]);
+    expect(run.result).toEqual({
+      ok: false,
+      code: codes.splineJointUnsupported,
+      message:
+        "Offset joint needs a fallback arc or tangent-continuous join, which is not supported yet for spline chains. Absorption not certified: a spline cannot adopt a declared vertex pole at d = 0 (owner seam precondition)",
+      seedEntityId: chain.declared.pieces[0]!.seedEntityId,
+    });
+  }, 120_000);
+
+  test("native near-tangent line → spline + Distance (g ≈ 1.0e-8): d = +0.01 fails on the Lemma-T CONE (a sign test) and never flips; d = −0.01 is absorbed with an OUTGOING keeper whose strict start reserve reports τ", () => {
+    const plus = sel(lineSplineGap(0.01).declared);
+    expect(plus.result).toMatchObject({
+      ok: false,
+      code: codes.topologyUncertain,
+      message: expect.stringContaining(
+        "trim-window-unproven: The leaf-wide cone s·rot(a)·B′ > 0",
+      ),
+    });
+    expect(plus.snapshots, "a sign failure is never flipped (R1)").toHaveLength(
+      1,
+    );
+    const minusChain = lineSplineGap(-0.01);
+    const minus = sel(minusChain.declared);
+    const certificate = verifiedOf(minus);
+    expect(minus.reCalls, "the line adopts by construction").toBe(0);
+    const [join] = vertexJoins(certificate);
+    expect(join).toMatchObject({
+      kind: "nonparallel-vertex",
+      side: "convex",
+      authority: "coincident",
+      keeper: "second",
+    });
+    if (!join || !("bridge" in join)) throw new Error("vertex");
+    const g = gapOf(minusChain);
+    expect(g).toBeGreaterThan(1e-8);
+    expect(join.bridge).toBeGreaterThanOrEqual(g);
+    // Leaf 0 is the adopting line; leaf 1 the keeper spline's first leaf,
+    // whose natural START carries the correction path (review R2).
+    expect(join.second).toBe(1);
+    expect(certificate.leaves[1]!.displacementBound).toBe(TOLERANCE);
+    expect(certificate.leaves[0]!.displacementBound).toBe(
+      certificate.leaves[0]!.baseErrorStar,
+    );
+  }, 120_000);
+
+  test("controls: trims keep their verdicts and literals through SEL; C φ = 0.05 d = −0.01 is now absorbed; failed absorptions keep their step-2 code (R6)", () => {
+    // SL-loop d = −0.01 (two Lemma-T trims, T08b-c pin): unchanged
+    // whole-request certifier literal through SEL (attempts sized 1 + 2).
+    const loop = sel(nativeRow("matrix", "SL-loop -0.01").declared);
+    verifiedOf(loop);
+    expect(meterOf(loop.snapshots.at(-1)!)).toEqual({
+      operations: 124_145,
+      euclideanSteps: 30_300,
+      integerBits: 424,
+    });
+    for (const label of ["SL-90 0.01", "LS-90 0.01", "SL-shallow -0.01"]) {
+      const certificate = verifiedOf(sel(nativeRow("matrix", label).declared));
+      expect(vertexJoins(certificate), label).toEqual([]);
+    }
+    // C φ = 0.05 d = −0.01 (formerly splineJointUnsupported): keeper-only.
+    const convexC = built("s2", -0.01, (harness) => {
+      const row = splineSplineCornerRows().find(
+        (item) => `${item.row} ${item.distance}` === "C φ=0.050 0.01",
+      )!;
+      return row.build(harness);
+    });
+    const convexRun = sel(convexC.declared);
+    expect(vertexJoins(verifiedOf(convexRun))).toEqual([
+      expect.objectContaining({ kind: "nonparallel-vertex", side: "convex" }),
+    ]);
+    expect(convexRun.reCalls).toBe(1);
+    // R6: owner infeasible (G ≫ τ) at SS-60 d = −0.01 after the swap too.
+    expect(sel(nativeRow("matrix", "SS-60 -0.01").declared)).toMatchObject({
+      reCalls: 2,
+      result: {
+        ok: false,
+        code: codes.splineJointUnsupported,
+        message: expect.stringContaining(
+          "Absorption not certified: owner refinement-budget-exceeded",
+        ),
+      },
+    });
+    // R6: the owner succeeds but the absorption certificate does not.
+    const shallow = sel(nativeRow("matrix", "SL-shallow 0.01").declared);
+    expect(shallow.result).toMatchObject({
+      ok: false,
+      code: codes.splineJointUnsupported,
+      message: expect.stringMatching(
+        /^Offset joint needs a fallback arc .* Absorption not certified: /,
+      ),
+    });
+  }, 300_000);
+
+  test("R6 native: C φ = 0.1 d = −0.01 keeps splineJointUnsupported; the flip at C φ = π/2 d = 0.2 (t ≥ 1, a magnitude failure) is tried and reports the ORIGINAL trim failure", () => {
+    const c01 = built("s2", -0.01, (harness) =>
+      splineSplineCornerRows()
+        .find((item) => `${item.row} ${item.distance}` === "C φ=0.100 0.01")!
+        .build(harness),
+    );
+    expect(sel(c01.declared).result).toMatchObject({
+      ok: false,
+      code: codes.splineJointUnsupported,
+      message: expect.stringContaining("Absorption not certified: "),
+    });
+    const sharp = sel(nativeRow("s2", "C φ=1.571 0.2").declared);
+    expect(sharp.reCalls, "flip → adoption tried, and the swap").toBe(2);
+    expect(sharp.snapshots, "the owner failed: no second attempt").toHaveLength(
+      1,
+    );
+    expect(sharp.result).toMatchObject({
+      ok: false,
+      code: codes.topologyUncertain,
+      message: expect.stringContaining(
+        "trim-window-unproven: The vertex window of a terminal leaf is not proved inside it (t ≥ 1).",
+      ),
+    });
+  }, 300_000);
+
+  test("R8 native one-leaf rows: a 2-point spline absorbed near-tangentially into a line verifies (vertex end); with a trim end it stays gated", () => {
+    const chainAt = (distance: number) =>
+      built("native", distance, (harness) => {
+        const spline = harness.drawSpline(
+          [],
+          [
+            [0, 0],
+            [1, 0],
+          ],
+        );
+        return [
+          spline,
+          harness.drawLine([spline], [1, 0], [2, 0.001], {
+            start: harness.splineEnds(spline)[1],
+          }),
+        ];
+      });
+    const vertexEnd = chainAt(-0.01);
+    expect(
+      vertexEnd.declared.pieces.map((piece) =>
+        piece.kind === "derivedCubic" ? piece.spans.length : 0,
+      ),
+    ).toEqual([1, 0]);
+    expect(vertexJoins(verifiedOf(sel(vertexEnd.declared)))).toEqual([
+      expect.objectContaining({ kind: "nonparallel-vertex", side: "convex" }),
+    ]);
+    expect(sel(chainAt(0.01).declared).result).toMatchObject({
+      ok: false,
+      code: codes.topologyStabilityUnsupported,
+      message: expect.stringContaining("one-leaf spline piece"),
+    });
+  }, 120_000);
+
+  /** SL-tiny's vertex (a step-2(b) candidate at d = −0.01), then a later convex line corner. */
+  const vertexThenFailChain = () =>
+    built("matrix", -0.01, (harness) => {
+      const spline = harness.drawSpline([], ARCH_POINTS);
+      const line = harness.drawLine([spline], [2, 0], [3, -0.1], {
+        start: harness.splineEnds(spline)[1],
+      });
+      return [
+        spline,
+        line,
+        harness.drawLine([spline, line], [3, -0.1], [3, 1], {
+          start: harness.lineEnds(line)[1],
+        }),
+      ];
+    });
+
+  test("R5 native mixed chains: a vertex and a trim share one adjacency index space in either order", () => {
+    const vertexThenTrim = built("matrix", 0.01, (harness) => {
+      const spline = harness.drawSpline([], ARCH_POINTS);
+      const line = harness.drawLine([spline], [2, 0], [3, -0.1], {
+        start: harness.splineEnds(spline)[1],
+      });
+      return [
+        spline,
+        line,
+        harness.drawLine([spline, line], [3, -0.1], [3, 1], {
+          start: harness.lineEnds(line)[1],
+        }),
+      ];
+    });
+    const first = verifiedOf(sel(vertexThenTrim.declared));
+    expect(
+      first.joins
+        .filter((join) => "jointIndex" in join)
+        .map((join) => [
+          join.kind,
+          (join as { jointIndex: number }).jointIndex,
+        ]),
+    ).toEqual([
+      ["trim", 1],
+      ["nonparallel-vertex", 0],
+    ]);
+    const trimThenVertex = built("matrix", 0.01, (harness) => {
+      const up = harness.drawLine([], [-1, 1], [-1, -0.1]);
+      const line = harness.drawLine([up], [-1, -0.1], [0, 0], {
+        start: harness.lineEnds(up)[1],
+      });
+      return [
+        up,
+        line,
+        harness.drawSpline([up, line], ARCH_POINTS, {
+          start: harness.lineEnds(line)[1],
+        }),
+      ];
+    });
+    // R6: at d = −0.01 the tiny vertex is an absorption candidate and the
+    // LATER convex line corner fails in the resolver; the pre-T08b-d verdict
+    // (the tiny vertex's jointUnsatisfied) is kept, the reason appended.
+    const vertexThenFail = vertexThenFailChain();
+    expect(vertexThenFail.resolution).toMatchObject({
+      ok: false,
+      code: codes.jointUnsatisfied,
+    });
+    expect(sel(vertexThenFail.declared).result).toMatchObject({
+      ok: false,
+      code: codes.jointUnsatisfied,
+      message: expect.stringContaining(
+        "Absorption not certified: a later adjacency fails: Offset joint needs a fallback arc",
+      ),
+    });
+    const second = verifiedOf(sel(trimThenVertex.declared));
+    expect(
+      second.joins
+        .filter((join) => "jointIndex" in join)
+        .map((join) => [
+          join.kind,
+          (join as { jointIndex: number }).jointIndex,
+        ]),
+    ).toEqual([
+      ["trim", 0],
+      ["nonparallel-vertex", 1],
+    ]);
+  }, 120_000);
+
+  test("M-R2: a joint-query budget exhaustion AFTER a step-2(b) candidate is reported as itself (topologyUncertain), never under the candidate's jointUnsatisfied", () => {
+    const chain = vertexThenFailChain();
+    const snapshots: number[] = [];
+    expect(
+      certifyDeclaredOffsetChain(
+        chain.declared,
+        createCertifiedNeutralCurveRequestQueryWithBudgetObserverForTest(
+          (snapshot) => snapshots.push(snapshot.operations),
+        ),
+        pieceCertifier,
+      ),
+      "control: the R6 trigger",
+    ).toMatchObject({ ok: false, code: codes.jointUnsatisfied });
+    // Precharge 2 × 64, then after query 1 and after query 2.
+    expect(snapshots).toEqual([128, 102_317, 104_682]);
+    // Capped one operation above query 1: query 2 exhausts the request.
+    expect(
+      certifyDeclaredOffsetChain(
+        chain.declared,
+        createCertifiedNeutralCurveRequestQueryWithLowerBudgetForTest({
+          operations: snapshots[1]! + 1,
+        }),
+        {
+          openRequest: () => {
+            throw new Error("the certifier must not be reached");
+          },
+        },
+      ),
+    ).toEqual({
+      ok: false,
+      code: codes.topologyUncertain,
+      message:
+        "Joint query is not verified (uncertain exact-query-proof-budget-exhausted: The deterministic exact-query arithmetic budget was exhausted.): the whole-request budget of all 2 joint queries is exhausted, not necessarily by this joint.",
+      seedEntityId: chain.declared.pieces[1]!.seedEntityId,
+    });
+  }, 120_000);
+
+  test("SEL adversaries: an unverified query never absorbs; an antiparallel vertex fails before any query; without declared vertices the resolver infers nothing from bitwise poles", () => {
+    const chain = nativeRow("matrix", "SS-tiny 0.01");
+    splineSeamCalls.log = [];
+    const uncertain = certifyDeclaredOffsetChain(
+      chain.declared,
+      perRequest({
+        queryPair: () => ({
+          kind: "uncertain",
+          code: "fake-uncertain",
+          message: "seam fake",
+        }),
+      }),
+      {
+        openRequest: () => {
+          throw new Error("the certifier must not be reached");
+        },
+      },
+    );
+    expect(splineSeamCalls.log, "no adoption re-call").toEqual([]);
+    splineSeamCalls.log = null;
+    expect(uncertain).toMatchObject({
+      ok: false,
+      code: codes.topologyUncertain,
+      message: expect.stringContaining("fake-uncertain"),
+    });
+    // Antiparallel (exact X = 0, D < 0): a forged cusp vertex.
+    const vertex = chain.declared.vertices[0]!;
+    const cusp: OffsetChainVertex = {
+      ...vertex,
+      second: {
+        ...vertex.second,
+        tangent: [vertex.first.tangent[1], vertex.first.tangent[0]],
+      },
+    };
+    expect(classifyOffsetChainVertex(cusp).class).toBe("antiparallel");
+    // T4: exact, not float: (1 + 2⁻⁵²)(1 − 2⁻⁵²) − 1·1 = −2⁻¹⁰⁴ ≠ 0, which a
+    // binary64 cross rounds to 0 (and would call parallel, skipping the query).
+    const epsilon = 2 ** -52;
+    const nearly: OffsetChainVertex = {
+      ...vertex,
+      first: {
+        ...vertex.first,
+        tangent: [
+          [0, 0],
+          [1 + epsilon, 1],
+        ],
+      },
+      second: {
+        ...vertex.second,
+        tangent: [
+          [0, 0],
+          [1, 1 - epsilon],
+        ],
+      },
+    };
+    expect((1 + epsilon) * (1 - epsilon) - 1).toBe(0);
+    expect(classifyOffsetChainVertex(nearly)).toEqual({
+      class: "nonparallel",
+      forward: true,
+    });
+    const { sizes, query: recorded } = recordingRequests();
+    expect(
+      certifyDeclaredOffsetChain(
+        { ...chain.declared, vertices: [cusp] },
+        recorded,
+        pieceCertifier,
+      ),
+    ).toMatchObject({ ok: false, code: codes.knotIncidenceUnproven });
+    expect(sizes).toEqual([]);
+    // M4: the same bitwise-shared poles without vertices are just queried.
+    const legacy = recordingRequests();
+    expect(
+      resolveOffsetChainTopology({
+        pieces: chain.declared.pieces,
+        closed: false,
+        modelingTolerance: TOLERANCE,
+        query: legacy.query,
+      }),
+    ).toMatchObject({ ok: false, code: codes.jointUnsatisfied });
+    expect(legacy.sizes).toEqual([1]);
+  }, 120_000);
+
+  /**
+   * Fabricated resolver/certifier input (not owner-reachable): a near-tangent
+   * concave line↔line join whose emitted incoming line is tilted by `shift`
+   * at its end (an honest line error). The query finds a single interior
+   * crossing (a trim); Lemma T's root reach then exceeds the leaf (a genuine
+   * magnitude failure) and the SEL flip absorbs the vertex.
+   */
+  const flipChain = (shift: number): DeclaredOffsetChainPieces => {
+    const d = 1 / 64;
+    const a = [1, 1 / 32] as const;
+    const length = Math.hypot(a[0], a[1]);
+    const normal = [-a[1] / length, a[0] / length] as const;
+    const pieces: OffsetChainPiece[] = [
+      {
+        kind: "lineSegment",
+        seedEntityId: id("p"),
+        reversed: false,
+        start: [-1, d],
+        end: [0, d - shift],
+      },
+      {
+        kind: "lineSegment",
+        seedEntityId: id("q"),
+        reversed: false,
+        start: [d * normal[0], d * normal[1]],
+        end: [a[0] + d * normal[0], a[1] + d * normal[1]],
+      },
+    ];
+    const v = "pv" as SketchPointId;
+    return {
+      ok: true,
+      connectivity: {
+        ok: true,
+        closed: false,
+        pieces: pieces.map(({ seedEntityId, reversed }) => ({
+          seedEntityId,
+          reversed,
+        })),
+        joins: [{ kind: "sharedPoint", pointId: v }],
+      },
+      distance: d,
+      modelingTolerance: 2 ** -10,
+      pieces,
+      sources: [
+        {
+          kind: "line",
+          source: [
+            [-1, 0],
+            [0, 0],
+          ],
+          distance: d,
+          startPointId: "pp" as SketchPointId,
+          endPointId: v,
+        },
+        {
+          kind: "line",
+          source: [[0, 0], a],
+          distance: d,
+          startPointId: v,
+          endPointId: "pq" as SketchPointId,
+        },
+      ],
+      vertices: [
+        {
+          jointIndex: 0,
+          authority: { kind: "sharedPoint", pointId: v },
+          first: {
+            pointId: v,
+            vertex: [0, 0],
+            tangent: [
+              [-1, 0],
+              [0, 0],
+            ],
+          },
+          second: { pointId: v, vertex: [0, 0], tangent: [[0, 0], a] },
+        },
+      ],
+    };
+  };
+  // Flip whole-request certifier literal (two attempts, ONE staged budget).
+  const FLIP_METER = {
+    operations: 63_357,
+    euclideanSteps: 13_544,
+    integerBits: 380,
+  };
+  test("fabricated magnitude flip: a Lemma-T root-reach failure flips the trim to an absorbed vertex on attempt 2 of ONE staged budget; the control verifies as a trim", () => {
+    const control = sel(flipChain(1e-6));
+    expect(verifiedOf(control).joins).toEqual([
+      expect.objectContaining({ kind: "trim", jointIndex: 0 }),
+    ]);
+    expect(control.snapshots).toHaveLength(1);
+    // The first attempt alone (legacy route): a magnitude trim failure.
+    const flip = flipChain(5e-6);
+    const first = certifyOffsetChainTubeStability(
+      resolved({
+        pieces: flip.pieces,
+        closed: false,
+        modelingTolerance: 2 ** -10,
+        query,
+      }),
+      pieceCertifier,
+      flip,
+    );
+    expect(first).toMatchObject({
+      ok: false,
+      message: expect.stringContaining(
+        "trim-window-unproven: A true-root enclosure is not strictly inside its terminal leaf.",
+      ),
+    });
+    const run = sel(flipChain(5e-6));
+    const certificate = verifiedOf(run);
+    expect(run.snapshots, "attempt 2 verified").toHaveLength(2);
+    expect(run.sizes, "the flip never re-queries").toEqual([1]);
+    expect(vertexJoins(certificate)).toEqual([
+      expect.objectContaining({
+        kind: "nonparallel-vertex",
+        side: "concave",
+        keeper: "first",
+      }),
+    ]);
+    expect(meterOf(run.snapshots.at(-1)!)).toEqual(FLIP_METER);
+    const under = (limits: Record<string, number>) =>
+      certifyDeclaredOffsetChain(
+        flipChain(5e-6),
+        query,
+        createCertifiedCubicTubeChainWithLowerBudgetForTest(limits),
+      );
+    // count passes; count − 1 exhausts (a fresh budget per attempt would not).
+    for (const kind of [
+      "operations",
+      "euclideanSteps",
+      "integerBits",
+    ] as const) {
+      expect(under({ [kind]: FLIP_METER[kind] }).ok, kind).toBe(true);
+      expect(under({ [kind]: FLIP_METER[kind] - 1 }), kind).toMatchObject({
+        ok: false,
+        message: expect.stringContaining("exact-query-proof-budget-exhausted"),
+      });
+    }
+    // Staged caps in the flip retry: inside its fixed entry charge, then
+    // inside its vertex stage (T08b-d-evidence/stages: operations
+    // [28 061, 61 799], Euclid [5 771, 13 198]). Attempt 1 alone uses 15 615.
+    const firstTotal = run.snapshots[0]!.operations;
+    expect(firstTotal).toBe(15_615);
+    for (const [kind, cap] of [
+      ["operations", firstTotal + 32],
+      ["operations", 28_062],
+      ["operations", 45_000],
+      ["operations", 61_000],
+      ["euclideanSteps", 6_000],
+      ["euclideanSteps", 12_000],
+    ] as const)
+      expect(under({ [kind]: cap }), `${kind} ${cap}`).toMatchObject({
+        ok: false,
+        code: codes.topologyUncertain,
+        message: expect.stringContaining("exact-query-proof-budget-exhausted"),
+      });
+  });
+
+  /** Three exact concave near-tangent lines: two flippable trims (D > 0). */
+  const twoTrimChain = (): DeclaredOffsetChainPieces => {
+    const d = 1 / 64;
+    const sources: readonly (readonly [Point, Point])[] = [
+      [
+        [-1, 0],
+        [0, 0],
+      ],
+      [
+        [0, 0],
+        [1, 1 / 32],
+      ],
+      [
+        [1, 1 / 32],
+        [2, 3 / 32],
+      ],
+    ];
+    const ids = ["pa", "pb", "pc", "pd"] as unknown as SketchPointId[];
+    const pieces: OffsetChainPiece[] = sources.map(([start, end], index) => {
+      const offset = offsetLinePoints(start, end, d)!;
+      return line(`seg${index}`, offset.start, offset.end);
+    });
+    const tangent = (index: number) => sources[index]!;
+    return {
+      ok: true,
+      connectivity: {
+        ok: true,
+        closed: false,
+        pieces: pieces.map(({ seedEntityId, reversed }) => ({
+          seedEntityId,
+          reversed,
+        })),
+        joins: [
+          { kind: "sharedPoint", pointId: ids[1]! },
+          { kind: "sharedPoint", pointId: ids[2]! },
+        ],
+      },
+      distance: d,
+      modelingTolerance: 2 ** -10,
+      pieces,
+      sources: sources.map((source, index) => ({
+        kind: "line" as const,
+        source,
+        distance: d,
+        startPointId: ids[index]!,
+        endPointId: ids[index + 1]!,
+      })),
+      vertices: [0, 1].map((index) => ({
+        jointIndex: index,
+        authority: { kind: "sharedPoint" as const, pointId: ids[index + 1]! },
+        first: {
+          pointId: ids[index + 1]!,
+          vertex: sources[index]![1],
+          tangent: tangent(index),
+        },
+        second: {
+          pointId: ids[index + 1]!,
+          vertex: sources[index + 1]![0],
+          tangent: tangent(index + 1),
+        },
+      })),
+    };
+  };
+  /** Seam fake for attempt 1 only; later attempts use the real certifier. */
+  const firstAttempt = (
+    failure: Exclude<
+      ReturnType<CertifiedTubePieceChain["certifyPieceChain"]>,
+      { kind: "verified" }
+    >,
+  ) => {
+    const requests: PieceTubeChainRequest[] = [];
+    return {
+      requests,
+      certifier: {
+        openRequest: (attempts: number) => {
+          const real = pieceCertifier.openRequest(attempts);
+          return {
+            certifyPieceChain: (request: PieceTubeChainRequest) => {
+              requests.push(request);
+              return requests.length === 1
+                ? failure
+                : real.certifyPieceChain(request);
+            },
+          };
+        },
+      },
+    };
+  };
+  test("SEL tie-break and code gate (seam fake for attempt 1): a magnitude failure on the MIDDLE leaf flips the LOWEST incident trim; a non-magnitude trim code or an untagged failure never flips", () => {
+    const declared = twoTrimChain();
+    const plain = verifiedOf(sel(declared));
+    expect(plain.joins.map((join) => join.kind)).toEqual(["trim", "trim"]);
+    const flip = firstAttempt({
+      kind: "uncertain",
+      code: "trim-composition-unproven",
+      message: "fake",
+      first: 1,
+      magnitude: true,
+    });
+    const flipped = certifyDeclaredOffsetChain(declared, query, flip.certifier);
+    expect(flipped.ok).toBe(true);
+    expect(flip.requests).toHaveLength(2);
+    expect(flip.requests[1]!.vertices).toEqual([
+      expect.objectContaining({ jointIndex: 0 }),
+    ]);
+    expect(flip.requests[1]!.trims.map((trim) => trim.jointIndex)).toEqual([1]);
+    for (const failure of [
+      { code: "trim-classification-unproven", magnitude: true as const },
+      { code: "trim-side-unproven", magnitude: true as const },
+      { code: "trim-composition-unproven" },
+    ]) {
+      const fake = firstAttempt({
+        kind: "uncertain",
+        message: "fake",
+        first: 1,
+        ...failure,
+      });
+      expect(
+        certifyDeclaredOffsetChain(declared, query, fake.certifier),
+        failure.code,
+      ).toMatchObject({ ok: false, message: expect.stringContaining("fake") });
+      expect(fake.requests, failure.code).toHaveLength(1);
+    }
+  });
+
+  test("JVP at a vertex end: the adopting line's end varies with the keeper spline's pole (finite-difference oracle of the adoption recipe)", () => {
+    const d = 0.125;
+    // Exactly parallel at the vertex: the line ends along +x, the spline starts along +x.
+    const poles: SplinePoles = [
+      [0, 0],
+      [1, 0],
+      [2, 0.25],
+      [3, 0],
+    ];
+    const variation: SplinePoles = [
+      [0, 0],
+      [0.25, 0],
+      [-0.25, 0.125],
+      [0, 0],
+    ];
+    const lineVariation = {
+      kind: "lineSegment" as const,
+      start: [0.5, -0.25] as Point,
+      // The line's OWN end variation is ignored at an adopted vertex end.
+      end: [5, 5] as Point,
+    };
+    const build = (epsilon: number) => {
+      const spans = ownerSpans({
+        distance: d + epsilon,
+        distanceDifferential: 1,
+        poles: poles.map((pole, index) => [
+          pole[0] + epsilon * variation[index]![0],
+          pole[1] + epsilon * variation[index]![1],
+        ]) as unknown as SplinePoles,
+        poleVariation: variation,
+      });
+      // The adoption recipe: the line's end IS the spline's start pole.
+      const lineStart: Point = [
+        -1 + epsilon * lineVariation.start[0],
+        d + epsilon + epsilon * lineVariation.start[1],
+      ];
+      const vertices: OffsetChainVertex[] = [
+        {
+          jointIndex: 0,
+          authority: { kind: "sharedPoint", pointId: "p0" as SketchPointId },
+          first: {
+            pointId: "p0" as SketchPointId,
+            vertex: [0, 0],
+            tangent: [
+              [-1, 0],
+              [0, 0],
+            ],
+          },
+          second: {
+            pointId: "p0" as SketchPointId,
+            vertex: [0, 0],
+            tangent: [
+              [0, 0],
+              [1, 0],
+            ],
+          },
+        },
+      ];
+      return {
+        input: {
+          ...makeOffsetChainFixture([
+            line("in", lineStart, spans[0]!.poles[0]),
+            cubic("spline", spans),
+          ]),
+          vertices,
+        },
+        variations: new Map<SketchEntityId, OffsetChainPieceVariation>([
+          [id("in"), lineVariation],
+        ]),
+      };
+    };
+    const base = build(0);
+    const primal = resolved(base.input);
+    expect(primal.vertices).toEqual([
+      // Line–spline: the line adopts, the spline keeps (T2).
+      expect.objectContaining({ kind: "parallel", keeper: "second" }),
+    ]);
+    // A parallel vertex is not queried and domain ends name the vertex.
+    expect(primal.joints).toEqual([]);
+    const jvp = resolveOffsetChainTopologyJvp(
+      base.input,
+      primal,
+      base.variations,
+    );
+    if (!jvp.ok) throw new Error(jvp.code);
+    const h = 2 ** -20;
+    const end = (epsilon: number) =>
+      resolved(build(epsilon).input).lineArcEndpoints.get(id("in"))!.end;
+    const measured = [0, 1].map(
+      (axis) => (end(h)[axis]! - end(-h)[axis]!) / (2 * h),
+    );
+    const predicted = jvp.lineArcEndpoints.get(id("in"))!.end;
+    for (const axis of [0, 1])
+      expect(Math.abs(predicted[axis]! - measured[axis]!)).toBeLessThanOrEqual(
+        1e-6,
+      );
+    // It is the keeper's pole differential, not the line's own end variation.
+    expect(predicted).toEqual(
+      base.input.pieces[1]!.kind === "derivedCubic"
+        ? base.input.pieces[1]!.spans[0]!.differential.poles[0]
+        : null,
+    );
+  });
+
+  test("R9 staged cap (native, zero queries): wrap-flat4 d = +0.05 exceeds ONE production Euclid ceiling, so attempt 1 of a 2-attempt request exhausts exactly as today, stays exhausted, and attempt k may use k·C", () => {
+    /** SEL with the real certifier; returns the verdict and the piece request. */
+    const capture = (distance: number) => {
+      const requests: PieceTubeChainRequest[] = [];
+      const real = createCertifiedCubicTubeChain();
+      const result = certifyDeclaredOffsetChain(
+        wrap("wrap-flat4", distance).declared,
+        query,
+        {
+          openRequest: (attempts) => {
+            expect(attempts, "a parallel vertex is not flippable").toBe(1);
+            const request = real.openRequest(attempts);
+            return {
+              certifyPieceChain: (item) => {
+                requests.push(item);
+                return request.certifyPieceChain(item);
+              },
+            };
+          },
+        },
+      );
+      return { result, request: requests[0]! };
+    };
+    const exhausted = {
+      kind: "uncertain",
+      code: "exact-query-proof-budget-exhausted",
+    };
+    // Today (attempts = 1): the 50-leaf wrap needs ≈ 1.73M Euclid > 1.5M.
+    const heavy = capture(0.05);
+    expect(heavy.result).toMatchObject({
+      ok: false,
+      code: codes.topologyUncertain,
+      message: expect.stringContaining("exact-query-proof-budget-exhausted"),
+    });
+    // Stage 1 of a 2-attempt request behaves exactly like one request.
+    const staged = createCertifiedCubicTubeChain().openRequest(2);
+    expect(
+      staged.certifyPieceChain(heavy.request),
+      "attempt 1 capped at 1·C",
+    ).toMatchObject(exhausted);
+    // Sticky: a cheap second attempt (the 40-leaf d = −0.01 wrap, ≈ 1.04M
+    // Euclid, verifies alone) never works after an exhausted attempt.
+    const light = capture(-0.01);
+    expect(light.result.ok).toBe(true);
+    expect(staged.certifyPieceChain(light.request), "sticky").toMatchObject(
+      exhausted,
+    );
+    // Stage k is k·C: two light attempts (≈ 2.08M Euclid cumulative) verify.
+    const twice = createCertifiedCubicTubeChain().openRequest(2);
+    expect(twice.certifyPieceChain(light.request).kind).toBe("verified");
+    expect(twice.certifyPieceChain(light.request).kind, "stage 2 = 2·C").toBe(
+      "verified",
+    );
+  }, 120_000);
+});
+
+/**
+ * Staged caps inside the SL-tiny vertex stage (T08b-d-evidence/stages:
+ * operations [18 450, 150 532], Euclid [4 396, 42 257]); the first sits
+ * right after the vertex precharge. Load-bearing swallow killers: keep.
+ */
+const SL_TINY_STAGED: readonly (readonly [
+  "operations" | "euclideanSteps",
+  number,
+])[] = [
+  ["operations", 18_451],
+  ["operations", 80_000],
+  ["operations", 150_000],
+  ["euclideanSteps", 10_000],
+  ["euclideanSteps", 40_000],
+];

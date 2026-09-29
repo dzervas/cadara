@@ -381,6 +381,12 @@ export interface NeutralCubicTube {
     readonly spanIndex: number;
     readonly startOccurrenceId: string;
     readonly endOccurrenceId: string;
+    /**
+     * Canonical point IDs of the source span's ends (`SplineSpan.source`).
+     * Read only by declared-vertex admission; absent ⇒ no vertex is admitted.
+     */
+    readonly startPointId?: string;
+    readonly endPointId?: string;
   };
   /** The leaf [a, b] ⊆ [0, 1] in the source span's local parameter. */
   readonly sourceLocalInterval: readonly [number, number];
@@ -481,6 +487,17 @@ export type CubicTubeChainResult =
       readonly message: string;
       readonly first?: number;
       readonly second?: number;
+      /**
+       * Present (true) only on a trim failure (`trim-window-unproven`,
+       * `trim-composition-unproven`, `trim-existence-unproven`) raised by a
+       * bound-versus-budget comparison (root reach, retained domain, t < 1,
+       * vertical deviation, Lemma-X margins, collar, glue, corrected error).
+       * Never on a sign, cone, side, classification, structural, square-root
+       * or budget failure. The offset-chain SEL flips only on it (R1); the
+       * flip is justified by the independent re-certification of the
+       * absorbed chain, never by this flag.
+       */
+      readonly magnitude?: true;
     };
 
 /**
@@ -508,6 +525,9 @@ export interface NeutralLineTube {
   readonly source: readonly [SplineVector, SplineVector];
   /** Owner signed distance of this piece's natural direction (left positive). */
   readonly distance: number;
+  /** Canonical point IDs of the source ends (declared-vertex admission only). */
+  readonly startPointId?: string;
+  readonly endPointId?: string;
 }
 
 /** A cubic tube plus the stored binary64 query domain its witnesses use. */
@@ -538,6 +558,40 @@ export interface TubeChainTrimDeclaration {
   readonly jointIndex: number;
   readonly firstParameterBounds: readonly [number, number];
   readonly secondParameterBounds: readonly [number, number];
+  /**
+   * Required (and checked like a vertex's) only when both terminals belong to
+   * ONE closed piece: the intrinsic positional closure (T08b-d T7).
+   */
+  readonly authority?: TubeChainVertexAuthority;
+}
+
+/**
+ * Declared authority of one adjacency, checked by the certifier itself on
+ * point IDs, bitwise source vertices and structure only (never coordinates
+ * proximity): one shared canonical point, a direct coincident constraint
+ * between two distinct terminal IDs, or the intrinsic positional closure of
+ * one spline (same point ID, distinct occurrences, spans n − 1 → 0).
+ */
+export type TubeChainVertexAuthority =
+  | { readonly kind: "shared-point"; readonly pointId: string }
+  | {
+      readonly kind: "coincident";
+      readonly pointIds: readonly [string, string];
+    }
+  | { readonly kind: "positional-closure"; readonly pointId: string };
+
+/**
+ * A declared vertex at adjacency `jointIndex` (T08b-d): the two traversal
+ * terminal leaves share one emitted pole bitwise. `keeper` names the piece
+ * whose own emitted pole it is and which carries the whole correction path;
+ * soundness does not depend on the label (each leaf's ε is an honest bound
+ * of its own emitted leaf, ending at the shared pole), so a forged label can
+ * only make verification fail.
+ */
+export interface TubeChainVertexDeclaration {
+  readonly jointIndex: number;
+  readonly authority: TubeChainVertexAuthority;
+  readonly keeper: "first" | "second";
 }
 
 export interface PieceTubeChainRequest {
@@ -547,8 +601,14 @@ export interface PieceTubeChainRequest {
   /** Chain distance d; piece i's owner distance is bitwise reversed ? −d : d. */
   readonly distance: number;
   readonly pieces: readonly TubeChainPiece[];
-  /** One per inter-piece adjacency (n − 1 open, n closed), in traversal order. */
+  /**
+   * Trims and `vertices` share ONE index space, the declared adjacency index
+   * (0 … n − 2 open, the wrap n − 1 when closed; a single closed piece has
+   * the one adjacency 0): every adjacency is covered exactly once, each list
+   * strictly increasing. Without `vertices` every adjacency is a trim.
+   */
   readonly trims: readonly TubeChainTrimDeclaration[];
+  readonly vertices?: readonly TubeChainVertexDeclaration[];
 }
 
 /**
@@ -599,10 +659,57 @@ export interface TubeChainGraphTrimJoin {
   readonly separation: number;
 }
 
+interface TubeChainVertexJoinBase {
+  readonly jointIndex: number;
+  /** Flattened traversal terminal leaves (traversal-first piece's first). */
+  readonly first: number;
+  readonly second: number;
+  /** Binary64 K1 cone e of the vertex pair (traversal-signed chord sum). */
+  readonly direction: SplineVector;
+  readonly authority: TubeChainVertexAuthority["kind"];
+  readonly keeper: "first" | "second";
+  /** |g|⁺ outward, g = Q_v − P_v the declared source gap; exactly 0 when g = 0. */
+  readonly bridge: number;
+}
+
+/**
+ * Declared vertex (T08b-d, U1 absorption), reference O* per the [TECH] R7
+ * record: the gap-free reference (Q translated by −g, Lemma B) plus a
+ * straight bridge of the exact declared source gap g at the declared join.
+ * This realizes a declared join within τ under the standing declared-joins
+ * decision; it requires e·g ≥ 0 and Lemma G's bound, and fails closed
+ * otherwise. Exact contact structure at declared joins, a certified bridge of
+ * the declared residual, separation elsewhere. Every point of O* lies on a
+ * true offset of a declared piece, on K + d·n about the source vertex K (the
+ * convex arc), or on the bridge of vector g. Both emitted terminal leaves
+ * end at one bitwise pole and are K1 e-graphs meeting only there.
+ */
+export type TubeChainVertexJoin =
+  | (TubeChainVertexJoinBase & {
+      /** Exactly parallel traversal tangents (X = 0, D > 0): O_P(1) + g = O_Q(0). */
+      readonly kind: "parallel-vertex";
+    })
+  | (TubeChainVertexJoinBase & {
+      readonly kind: "nonparallel-vertex";
+      readonly side: "convex";
+      /** δ⁺ ≥ |A − A′| (tight Lemma-G normal term), the arc part of the path. */
+      readonly arcDeviation: number;
+    })
+  | (TubeChainVertexJoinBase & {
+      readonly kind: "nonparallel-vertex";
+      readonly side: "concave";
+      readonly retainedCrossing: true;
+      /** Upper bounds on the removed tails' displacement [first, second]. */
+      readonly tail: readonly [number, number];
+      /** Upper bounds on the removed leaf-parameter fractions [first, second]. */
+      readonly trim: readonly [number, number];
+    });
+
 export type TubePieceChainJoin =
   | CubicTubeChainJoin
   | TubeChainTrimJoin
-  | TubeChainGraphTrimJoin;
+  | TubeChainGraphTrimJoin
+  | TubeChainVertexJoin;
 
 /** Leaves are flattened per piece in traversal order, natural order inside a piece. */
 export type TubePieceChainResult =
@@ -624,6 +731,18 @@ export type TubePieceChainResult =
  */
 export interface CertifiedTubePieceChain {
   certifyPieceChain(request: PieceTubeChainRequest): TubePieceChainResult;
+}
+
+/**
+ * Staged whole-request certifier meter (T08b-d SEL, review R9): ONE budget
+ * for at most `attempts` certifications of one offset chain, never reset,
+ * replaced or topped up. Attempt k may use at most k times the production
+ * ceilings in total (so attempt 1 behaves exactly as `certifyPieceChain`);
+ * every retry k ≥ 2 is charged a fixed entry before any work; exhaustion is
+ * sticky; issuing more than `attempts` requests is a `RangeError`.
+ */
+export interface CertifiedTubePieceChainRequests {
+  openRequest(attempts: number): CertifiedTubePieceChain;
 }
 
 export interface NeutralCurveQueryCapability {

@@ -1,6 +1,7 @@
 import type {
   CertifiedCubicTubeChain,
   CertifiedTubePieceChain,
+  CertifiedTubePieceChainRequests,
   CubicTubeChainJoin,
   CubicTubeChainRequest,
   CubicTubeChainResult,
@@ -10,6 +11,9 @@ import type {
   PieceTubeChainRequest,
   TubeChainGraphTrimJoin,
   TubeChainTrimJoin,
+  TubeChainVertexAuthority,
+  TubeChainVertexDeclaration,
+  TubeChainVertexJoin,
   TubePieceChainJoin,
   TubePieceChainResult,
 } from "@/contracts/modeling/neutral-curve-query";
@@ -180,6 +184,58 @@ import {
  *   reaching the far stored bound of U in δ, the line widening and the line
  *   end displacement; the cubic star keeps ε_B + Mδ (its far map is
  *   leaf-wide). Each trim is upgraded at most once.
+ *
+ * T08b-d declared vertices (`vertices`, piece path only; one index space with
+ * the trims, every adjacency covered exactly once). Reference [TECH R7]: at a
+ * declared vertex O* is the gap-free reference (Q translated by −g, Lemma B)
+ * plus a straight bridge of vector g = Q_v − P_v at the declared join; this
+ * realizes a declared join within τ under the standing declared-joins
+ * decision, requires e·g ≥ 0 and Lemma G's bound, and fails closed
+ * otherwise. One fixed precharge per vertex before authorization.
+ * - Admission (C5, exact/bitwise, else knot-incidence-unproven): natural
+ *   terminal leaves; shared-point = one ID on both terminals AND a bitwise
+ *   source vertex; coincident = two distinct terminal IDs equal to the
+ *   unordered pair; positional-closure = one closed piece, its natural
+ *   last → first leaves, one spline, spans from 0, one point ID, distinct
+ *   occurrences, bitwise vertex; distinct pieces of one spline never; the
+ *   shared emitted pole Z is bitwise (traversal terminals).
+ * - K1 at the vertex pair with the TRAVERSAL-signed cone (each leaf's
+ *   hodographs and O′ box corner against eₗ = reversed ? −e : e; lines use
+ *   their elevated emitted segment and exact direction box): both terminal
+ *   leaves are injective e-graphs meeting only at Z. This is also the
+ *   emitted cone of a one-leaf piece with a vertex end.
+ * - Exact classification on traversal source tangents u₁, u₂: D = u₁·u₂ > 0
+ *   or fail; X = u₁×u₂ = 0 is parallel (B − A = g exactly, Lemma G3).
+ *   g is exact; |g|⁺ is one verified upper √; g ≠ 0 needs e·g ≥ 0 exactly
+ *   ("backward declared gap" otherwise: O* need not be simple).
+ * - Nonparallel: J2′'s local block with the join's e on TRAVERSAL data and
+ *   the chain d (Lemma B: it reads only differences, so it is the approved
+ *   certificate of (P, Q − g)); a line leaf's source hodograph is its source
+ *   direction a (R′ = a, R″ = 0, κ = 0, λ = 1), never its emitted step; a
+ *   reversed leaf's slope rate is negated (cross(R′, R″) flips, e·R′ is the
+ *   signed cone). Convex: δ⁺ = √⁺(2d²X²/(U₁U₂(1 + c₋))), c₋ = D/√⁺(U₁U₂)
+ *   (Lemma G2, tight). d = 0 fails; closed chains need n ≥ 5 when the
+ *   vertex has a correction path (convex, or g ≠ 0).
+ * - Keeper-only composition (review R2, §3.4): the whole correction path
+ *   (arc, then bridge) goes to the keeper's vertex end: c_K = |g|⁺
+ *   (parallel), δ⁺ + |g|⁺ (convex), tail_K + |g|⁺ (concave); the adopter
+ *   adds tail_A (concave) or nothing (its ε already bounds its adopted
+ *   pole). Four separate roles: the correction into ε* (cubic sum; a line's
+ *   vertex end value is endError + c, max-form), strictness (< τ at the
+ *   keeper's reserve end whenever the path is nonempty), the K3 inflation
+ *   (both leaves: G⁺ or |g|⁺, concave tail + |g|⁺ when g ≠ 0) and
+ *   displacementBound = τ on a leaf with a reserve at EITHER end. With a
+ *   reserve at the leaf START the reserve interval is [0, η] and E maps it
+ *   onto the path; with reserves at both ends η_s + η_e < 1 exists because
+ *   ε* < τ strictly (the middle maps onto O with shift ≤ M(η_s + η_e)/(1 −
+ *   η_s − η_e) → 0), also next to a trim fraction or an S2 far end (whose
+ *   G < τ already gives ε* < τ). A line keeper's reserve end maps [1 − η, 1]
+ *   (or [0, η]) onto the path and the rest affinely onto its O: its bound is
+ *   max(ends) with the vertex end endError + c, strict. Vertex pairs join the
+ *   explicit K3 adjacency set; they have no witness (M0: the two e-graphs
+ *   meet only at Z by strict monotonicity).
+ * - Failures of trim codes carry `magnitude: true` exactly when the failed
+ *   check is a bound-versus-budget comparison (review R1 as briefed).
  */
 
 type ExactPoint = readonly [ExactFraction, ExactFraction];
@@ -209,6 +265,10 @@ const GRAPH_TRIM_PRECHARGE = 256;
  * Lemma-T trim), at its entry before any metadata conversion.
  */
 const LOCAL_ERROR_PRECHARGE = 128;
+/** Fixed per-declared-vertex precharge, before its authorization. */
+const VERTEX_PRECHARGE = 64;
+/** Fixed entry charge of every staged retry k ≥ 2, before any work. */
+const RETRY_ENTRY_CHARGE = 64;
 const J2_MESSAGES = {
   cone: "The source tangents and leaf hodographs are not proved inside the join cone.",
   root: "A verified square-root bound is not finite and positive.",
@@ -344,6 +404,7 @@ interface GeneralChain {
   readonly distance: number;
   readonly pieces: PieceTubeChainRequest["pieces"];
   readonly trims: PieceTubeChainRequest["trims"];
+  readonly vertices: readonly TubeChainVertexDeclaration[];
   readonly firstLeaf: readonly number[];
   readonly pieceOf: readonly number[];
   readonly lines: readonly (NeutralLineTube | undefined)[];
@@ -943,6 +1004,17 @@ function certifyChain(
   const leafShape = (index: number) => {
     const cached = shapes.get(index);
     if (cached) return cached;
+    // A line leaf (vertex path only): R(τ) = s₀ + τa exactly, so R′ = a on
+    // every control and R″ = 0: its SOURCE direction, never the emitted step.
+    const line = lineData.get(index);
+    if (line) {
+      const shape = {
+        first: [line.direction, line.direction, line.direction],
+        second: [[zero, zero] as ExactPoint, [zero, zero] as ExactPoint],
+      };
+      shapes.set(index, shape);
+      return shape;
+    }
     const source = leafSource(index);
     const restricted = restrict(source.poles, source.low, source.high);
     const scaled = (vector: ExactPoint, factor: ExactFraction): ExactPoint => [
@@ -1004,7 +1076,197 @@ function certifyChain(
   const trimEnd: (ExactFraction | undefined)[] = [];
   const arcStart: (ExactFraction | undefined)[] = [];
   const arcEnd: (ExactFraction | undefined)[] = [];
+  // Declared vertices (T08b-d), decoupled roles: the keeper's reserve end
+  // (strictness and displacementBound = τ) and each leaf's K3 inflation.
+  const reserveStart: boolean[] = [];
+  const reserveEnd: boolean[] = [];
+  const inflation: (ExactFraction | undefined)[] = [];
+  const vertexReports: TubeChainVertexJoin[] = [];
   const reports = new Map<number, J2Report>();
+  /**
+   * J2′ concave local certificate on one consistent frame: the knot's natural
+   * data with its piece's owner distance, or a declared vertex's traversal
+   * data with the chain d (Lemma B). `reversedLeaves` (vertex path only)
+   * negates the slope rate of a leaf traversed against its natural order.
+   * Returns the trim fractions and tails, or the failed J2′ reason.
+   */
+  const concaveJ2 = (
+    first: number,
+    second: number,
+    incoming: ExactPoint,
+    outgoing: ExactPoint,
+    cross: ExactFraction,
+    e: ExactPoint,
+    distance: ExactFraction,
+    alongIncoming: ExactFraction,
+    alongOutgoing: ExactFraction,
+    coneFirst: ExactRange,
+    coneSecond: ExactRange,
+    incomingSquared: ExactFraction,
+    outgoingSquared: ExactFraction,
+    reversedLeaves?: ReadonlySet<number>,
+  ):
+    | { readonly trim: ExactRange; readonly tail: ExactRange }
+    | keyof typeof J2_MESSAGES => {
+    const eSquared = dot(e, e);
+    const concaveLeaf = (index: number, cone: ExactRange) => {
+      const curvature = leafCurvature(index);
+      if (typeof curvature === "string") return curvature;
+      const slopeRate = rangeDividePositive(
+        rangeMultiply(point(eSquared), curvature.cross),
+        rangeMultiply(
+          rangeMultiply(rangeMultiply(cone, cone), cone),
+          curvature.lambda,
+        ),
+      );
+      if (!slopeRate) return "lambda" as const;
+      return {
+        // Traversal slope rate: a reversed leaf's cross(R′, R″) flips while
+        // e·R′ is its signed cone (vertex path only; knots are natural).
+        rate: reversedLeaves?.has(index) ? rangeNegate(slopeRate) : slopeRate,
+        // Leaf-wide min dx/dτ and max |dO/dτ|, both in leaf τ-units.
+        minimumAdvance: multiplyExact(cone[0], curvature.lambda[0], budget),
+        maximumSpeed: multiplyExact(
+          curvature.speed[1],
+          curvature.lambda[1],
+          budget,
+        ),
+      };
+    };
+    const leafFirst = concaveLeaf(first, coneFirst);
+    if (typeof leafFirst === "string") return leafFirst;
+    const leafSecond = concaveLeaf(second, coneSecond);
+    if (typeof leafSecond === "string") return leafSecond;
+    const alpha = crossExact(incoming, e, budget);
+    const beta = crossExact(outgoing, e, budget);
+    const rootIncoming = squareRoot(incomingSquared);
+    const rootOutgoing = rootIncoming && squareRoot(outgoingSquared);
+    if (!rootIncoming || !rootOutgoing) return "root" as const;
+    const alphaPositive = positive(alpha);
+    const alphaNegative = !alphaPositive && negative(alpha);
+    const sameSign =
+      (alphaPositive && positive(beta)) || (alphaNegative && negative(beta));
+    let unitGap: ExactRange | null;
+    if (sameSign) {
+      // Rationalised, cancellation-free; sign(α) is mandatory.
+      const rootProduct = squareRoot(
+        multiplyExact(incomingSquared, outgoingSquared, budget),
+      );
+      if (!rootProduct) return "root" as const;
+      const absolute = (value: ExactFraction) =>
+        alphaPositive ? value : negateExact(value, budget);
+      const quotient = rangeDividePositive(
+        point(
+          subtractExact(
+            multiplyExact(
+              multiplyExact(alpha, alpha, budget),
+              outgoingSquared,
+              budget,
+            ),
+            multiplyExact(
+              multiplyExact(beta, beta, budget),
+              incomingSquared,
+              budget,
+            ),
+            budget,
+          ),
+        ),
+        rangeMultiply(
+          rootProduct,
+          rangeAdd(
+            rangeMultiply(point(absolute(alpha)), rootOutgoing),
+            rangeMultiply(point(absolute(beta)), rootIncoming),
+          ),
+        ),
+      );
+      unitGap = quotient && (alphaPositive ? quotient : rangeNegate(quotient));
+    } else {
+      const normalIncoming = rangeDividePositive(point(alpha), rootIncoming);
+      const normalOutgoing = rangeDividePositive(point(beta), rootOutgoing);
+      unitGap =
+        normalIncoming &&
+        normalOutgoing &&
+        rangeSubtract(normalIncoming, normalOutgoing);
+    }
+    if (!unitGap) return "root" as const;
+    const overlap = rangeMultiply(point(distance), unitGap);
+    if (
+      !positive(overlap[0]) ||
+      compareExact(overlap[1], leafFirst.minimumAdvance, budget) >= 0 ||
+      compareExact(overlap[1], leafSecond.minimumAdvance, budget) >= 0
+    )
+      return "window" as const;
+    const slope = (vector: ExactPoint, along: ExactFraction) =>
+      divideExact(crossExact(e, vector, budget), along, budget);
+    const slopeGap = subtractExact(
+      slope(incoming, alongIncoming),
+      slope(outgoing, alongOutgoing),
+      budget,
+    );
+    const ratio = squareRoot(
+      divideExact(outgoingSquared, incomingSquared, budget),
+    );
+    const inverseRatio =
+      ratio &&
+      squareRoot(divideExact(incomingSquared, outgoingSquared, budget));
+    if (!ratio || !inverseRatio) return "root" as const;
+    const scaledCross = point(multiplyExact(eSquared, cross, budget));
+    const chordFromIncoming = rangeDividePositive(
+      scaledCross,
+      rangeMultiply(
+        point(alongIncoming),
+        rangeAdd(
+          rangeMultiply(ratio, point(alongIncoming)),
+          point(alongOutgoing),
+        ),
+      ),
+    );
+    const chordToOutgoing = rangeDividePositive(
+      scaledCross,
+      rangeMultiply(
+        point(alongOutgoing),
+        rangeAdd(
+          point(alongIncoming),
+          rangeMultiply(inverseRatio, point(alongOutgoing)),
+        ),
+      ),
+    );
+    if (!chordFromIncoming || !chordToOutgoing) return "root" as const;
+    const rateHull: ExactRange = [
+      minimum([leafFirst.rate[0], leafSecond.rate[0]]),
+      maximum([leafFirst.rate[1], leafSecond.rate[1]]),
+    ];
+    if (
+      !excludesZero(
+        rangeSubtract(point(slopeGap), rangeMultiply(overlap, rateHull)),
+      )
+    )
+      return "unique" as const;
+    const halfOverlap = rangeMultiply(overlap, point(half));
+    const atB = rangeAdd(
+      chordFromIncoming,
+      rangeMultiply(halfOverlap, leafFirst.rate),
+    );
+    const atA = rangeSubtract(
+      rangeNegate(chordToOutgoing),
+      rangeMultiply(halfOverlap, leafSecond.rate),
+    );
+    if (
+      !excludesZero(atB) ||
+      !excludesZero(atA) ||
+      positive(atB[0]) === positive(atA[0])
+    )
+      return "exists" as const;
+    const trim: ExactRange = [
+      divideExact(overlap[1], leafFirst.minimumAdvance, budget),
+      divideExact(overlap[1], leafSecond.minimumAdvance, budget),
+    ];
+    const tail: ExactRange = [
+      multiplyExact(leafFirst.maximumSpeed, trim[0], budget),
+      multiplyExact(leafSecond.maximumSpeed, trim[1], budget),
+    ];
+    return { trim, tail };
+  };
   for (const { join, first, second, incoming, outgoing, cross } of candidates) {
     const fail = (reason: keyof typeof J2_MESSAGES) =>
       uncertain(KNOT_UNPROVEN, J2_MESSAGES[reason], first, second);
@@ -1044,162 +1306,23 @@ function certifyChain(
       continue;
     }
 
-    // Concave: correlated leaf-wide curvature certificate.
-    const eSquared = dot(e, e);
-    const concaveLeaf = (index: number, cone: ExactRange) => {
-      const curvature = leafCurvature(index);
-      if (typeof curvature === "string") return curvature;
-      const slopeRate = rangeDividePositive(
-        rangeMultiply(point(eSquared), curvature.cross),
-        rangeMultiply(
-          rangeMultiply(rangeMultiply(cone, cone), cone),
-          curvature.lambda,
-        ),
-      );
-      if (!slopeRate) return "lambda" as const;
-      return {
-        rate: slopeRate,
-        // Leaf-wide min dx/dτ and max |dO/dτ|, both in leaf τ-units.
-        minimumAdvance: multiplyExact(cone[0], curvature.lambda[0], budget),
-        maximumSpeed: multiplyExact(
-          curvature.speed[1],
-          curvature.lambda[1],
-          budget,
-        ),
-      };
-    };
-    const leafFirst = concaveLeaf(first, coneFirst);
-    if (typeof leafFirst === "string") return fail(leafFirst);
-    const leafSecond = concaveLeaf(second, coneSecond);
-    if (typeof leafSecond === "string") return fail(leafSecond);
-    const alpha = crossExact(incoming, e, budget);
-    const beta = crossExact(outgoing, e, budget);
-    const rootIncoming = squareRoot(incomingSquared);
-    const rootOutgoing = rootIncoming && squareRoot(outgoingSquared);
-    if (!rootIncoming || !rootOutgoing) return fail("root");
-    const alphaPositive = positive(alpha);
-    const alphaNegative = !alphaPositive && negative(alpha);
-    const sameSign =
-      (alphaPositive && positive(beta)) || (alphaNegative && negative(beta));
-    let unitGap: ExactRange | null;
-    if (sameSign) {
-      // Rationalised, cancellation-free; sign(α) is mandatory.
-      const rootProduct = squareRoot(
-        multiplyExact(incomingSquared, outgoingSquared, budget),
-      );
-      if (!rootProduct) return fail("root");
-      const absolute = (value: ExactFraction) =>
-        alphaPositive ? value : negateExact(value, budget);
-      const quotient = rangeDividePositive(
-        point(
-          subtractExact(
-            multiplyExact(
-              multiplyExact(alpha, alpha, budget),
-              outgoingSquared,
-              budget,
-            ),
-            multiplyExact(
-              multiplyExact(beta, beta, budget),
-              incomingSquared,
-              budget,
-            ),
-            budget,
-          ),
-        ),
-        rangeMultiply(
-          rootProduct,
-          rangeAdd(
-            rangeMultiply(point(absolute(alpha)), rootOutgoing),
-            rangeMultiply(point(absolute(beta)), rootIncoming),
-          ),
-        ),
-      );
-      unitGap = quotient && (alphaPositive ? quotient : rangeNegate(quotient));
-    } else {
-      const normalIncoming = rangeDividePositive(point(alpha), rootIncoming);
-      const normalOutgoing = rangeDividePositive(point(beta), rootOutgoing);
-      unitGap =
-        normalIncoming &&
-        normalOutgoing &&
-        rangeSubtract(normalIncoming, normalOutgoing);
-    }
-    if (!unitGap) return fail("root");
-    const overlap = rangeMultiply(point(distance), unitGap);
-    if (
-      !positive(overlap[0]) ||
-      compareExact(overlap[1], leafFirst.minimumAdvance, budget) >= 0 ||
-      compareExact(overlap[1], leafSecond.minimumAdvance, budget) >= 0
-    )
-      return fail("window");
-    const slope = (vector: ExactPoint, along: ExactFraction) =>
-      divideExact(crossExact(e, vector, budget), along, budget);
-    const slopeGap = subtractExact(
-      slope(incoming, alongIncoming),
-      slope(outgoing, alongOutgoing),
-      budget,
+    const concave = concaveJ2(
+      first,
+      second,
+      incoming,
+      outgoing,
+      cross,
+      e,
+      distance,
+      alongIncoming,
+      alongOutgoing,
+      coneFirst,
+      coneSecond,
+      incomingSquared,
+      outgoingSquared,
     );
-    const ratio = squareRoot(
-      divideExact(outgoingSquared, incomingSquared, budget),
-    );
-    const inverseRatio =
-      ratio &&
-      squareRoot(divideExact(incomingSquared, outgoingSquared, budget));
-    if (!ratio || !inverseRatio) return fail("root");
-    const scaledCross = point(multiplyExact(eSquared, cross, budget));
-    const chordFromIncoming = rangeDividePositive(
-      scaledCross,
-      rangeMultiply(
-        point(alongIncoming),
-        rangeAdd(
-          rangeMultiply(ratio, point(alongIncoming)),
-          point(alongOutgoing),
-        ),
-      ),
-    );
-    const chordToOutgoing = rangeDividePositive(
-      scaledCross,
-      rangeMultiply(
-        point(alongOutgoing),
-        rangeAdd(
-          point(alongIncoming),
-          rangeMultiply(inverseRatio, point(alongOutgoing)),
-        ),
-      ),
-    );
-    if (!chordFromIncoming || !chordToOutgoing) return fail("root");
-    const rateHull: ExactRange = [
-      minimum([leafFirst.rate[0], leafSecond.rate[0]]),
-      maximum([leafFirst.rate[1], leafSecond.rate[1]]),
-    ];
-    if (
-      !excludesZero(
-        rangeSubtract(point(slopeGap), rangeMultiply(overlap, rateHull)),
-      )
-    )
-      return fail("unique");
-    const halfOverlap = rangeMultiply(overlap, point(half));
-    const atB = rangeAdd(
-      chordFromIncoming,
-      rangeMultiply(halfOverlap, leafFirst.rate),
-    );
-    const atA = rangeSubtract(
-      rangeNegate(chordToOutgoing),
-      rangeMultiply(halfOverlap, leafSecond.rate),
-    );
-    if (
-      !excludesZero(atB) ||
-      !excludesZero(atA) ||
-      positive(atB[0]) === positive(atA[0])
-    )
-      return fail("exists");
-    const trim: ExactRange = [
-      divideExact(overlap[1], leafFirst.minimumAdvance, budget),
-      divideExact(overlap[1], leafSecond.minimumAdvance, budget),
-    ];
-    const tail: ExactRange = [
-      multiplyExact(leafFirst.maximumSpeed, trim[0], budget),
-      multiplyExact(leafSecond.maximumSpeed, trim[1], budget),
-    ];
+    if (typeof concave === "string") return fail(concave);
+    const { trim, tail } = concave;
     correctionEnd[first] = tail[0];
     correctionStart[second] = tail[1];
     trimEnd[first] = trim[0];
@@ -1288,7 +1411,7 @@ function certifyChain(
       declaration: PieceTubeChainRequest["trims"][number],
       firstEnd: Terminal,
       secondEnd: Terminal,
-      fail: (code: string, message: string) => Failure,
+      fail: (code: string, message: string, magnitude?: true) => Failure,
     ): Failure | null => {
       const WINDOW = "trim-window-unproven";
       const CLASSIFICATION = "trim-classification-unproven";
@@ -1413,6 +1536,7 @@ function certifyChain(
           return fail(
             WINDOW,
             "The vertex window of a terminal leaf is not proved inside it (t ≥ 1).",
+            true,
           );
         const firstTrue = trueWindow(first, fractions[0]!);
         const secondTrue = firstTrue && trueWindow(second, fractions[1]!);
@@ -1517,6 +1641,7 @@ function certifyChain(
         return fail(
           COMPOSITION,
           "The vertical graph deviation exceeds the modeling tolerance.",
+          true,
         );
       const firstUpper = squareRootUpper(firstSquared);
       const secondUpper = firstUpper && squareRootUpper(secondSquared);
@@ -1662,6 +1787,7 @@ function certifyChain(
         return fail(
           EXISTENCE,
           "The true terminal offsets are not proved to cross once inside both terminal leaves.",
+          true,
         );
       const {
         switchLow,
@@ -1722,12 +1848,416 @@ function certifyChain(
       });
       return null;
     };
-    for (const [jointIndex, declaration] of general.trims.entries()) {
+    /** Natural terminal data of one traversal end (cubic leaf or line). */
+    const endData = (end: Terminal) => {
+      const atEnd = end.side === "end";
+      const line = general.lines[end.leaf];
+      if (line)
+        return {
+          terminal: true,
+          pointId: atEnd ? line.endPointId : line.startPointId,
+          vertex: line.source[atEnd ? 1 : 0],
+          emitted: line.emitted[atEnd ? 1 : 0],
+          splineId: undefined as string | undefined,
+          occurrence: undefined as string | undefined,
+        };
+      const tube = tubes[end.leaf]!;
+      return {
+        terminal: atEnd
+          ? tube.sourceLocalInterval[1] === 1
+          : tube.sourceLocalInterval[0] === 0,
+        pointId: atEnd ? tube.source.endPointId : tube.source.startPointId,
+        vertex: tube.reference.sourcePoles[atEnd ? 3 : 0],
+        emitted: tube.poles[atEnd ? 3 : 0],
+        splineId: tube.source.splineId as string | undefined,
+        occurrence: (atEnd
+          ? tube.source.endOccurrenceId
+          : tube.source.startOccurrenceId) as string | undefined,
+      };
+    };
+    /**
+     * C5 authority of one adjacency (design §6.2): point IDs, structure and
+     * bitwise source vertices only, never coordinates proximity (string
+     * compares are uncharged). Null when admitted, else the defect.
+     */
+    const authorityDefect = (
+      authority: TubeChainVertexAuthority | undefined,
+      firstPiece: number,
+      secondPiece: number,
+      firstEnd: Terminal,
+      secondEnd: Terminal,
+    ): string | null => {
+      const a = endData(firstEnd);
+      const b = endData(secondEnd);
+      if (!a.terminal || !b.terminal)
+        return "a terminal leaf does not reach its natural source end";
+      const sameVertex = samePoint(a.vertex, b.vertex);
+      switch (authority?.kind) {
+        case "shared-point":
+        case "coincident": {
+          if (firstPiece === secondPiece)
+            return "one piece closes only through its positional closure";
+          if (a.splineId !== undefined && a.splineId === b.splineId)
+            return "two pieces of one spline are never a declared vertex";
+          if (typeof a.pointId !== "string" || typeof b.pointId !== "string")
+            return "a terminal point ID is missing";
+          if (authority.kind === "shared-point")
+            return a.pointId === authority.pointId &&
+              b.pointId === authority.pointId &&
+              sameVertex
+              ? null
+              : "a shared point needs one terminal point ID and a bitwise source vertex";
+          const [p, q] = authority.pointIds;
+          return p !== q &&
+            ((a.pointId === p && b.pointId === q) ||
+              (a.pointId === q && b.pointId === p))
+            ? null
+            : "a coincident join needs the two distinct terminal point IDs";
+        }
+        case "positional-closure": {
+          const piece = general.pieces[firstPiece]!;
+          if (
+            general.pieces.length !== 1 ||
+            !closed ||
+            firstPiece !== secondPiece ||
+            piece.kind !== "cubic"
+          )
+            return "a positional closure is the closure of one closed spline piece";
+          // Natural last leaf's end and first leaf's start of ONE spline
+          // whose leaves run through consecutive spans from span 0.
+          const leaves = piece.tubes;
+          const spans = leaves.every(
+            (tube, index) =>
+              tube.source.splineId === leaves[0]!.source.splineId &&
+              (index === 0
+                ? tube.source.spanIndex === 0
+                : tube.source.spanIndex - leaves[index - 1]!.source.spanIndex >=
+                    0 &&
+                  tube.source.spanIndex - leaves[index - 1]!.source.spanIndex <=
+                    1),
+          );
+          const [last, first] = firstEnd.side === "end" ? [a, b] : [b, a];
+          return spans &&
+            last.pointId === authority.pointId &&
+            first.pointId === authority.pointId &&
+            last.occurrence !== first.occurrence &&
+            sameVertex
+            ? null
+            : "a positional closure needs one spline from span 0, one point ID, distinct occurrences and a bitwise vertex";
+        }
+        default:
+          return "no declared authority";
+      }
+    };
+    /**
+     * One declared vertex (header T08b-d): admission, traversal-signed K1,
+     * exact classification, the Lemma-B/G J2′ local block and the
+     * keeper-only composition writes. Returns a failure, or null.
+     */
+    const certifyVertex = (
+      declaration: TubeChainVertexDeclaration,
+    ): Failure | null => {
+      budget.operation(VERTEX_PRECHARGE);
+      const index = declaration.jointIndex;
+      const firstPiece = index;
+      const secondPiece = (index + 1) % pieceCount;
+      const firstEnd = terminal(firstPiece, true);
+      const secondEnd = terminal(secondPiece, false);
+      const fail = (message: string) =>
+        uncertain(
+          KNOT_UNPROVEN,
+          `Declared vertex ${index}: ${message}`,
+          firstEnd.leaf,
+          secondEnd.leaf,
+        );
+      const defect = authorityDefect(
+        declaration.authority,
+        firstPiece,
+        secondPiece,
+        firstEnd,
+        secondEnd,
+      );
+      if (defect) return fail(`${defect}.`);
+      const a = endData(firstEnd);
+      const b = endData(secondEnd);
+      if (!samePoint(a.emitted, b.emitted))
+        return fail("the terminals do not share one bitwise emitted pole.");
+
+      // K1 at the vertex pair: e = binary64 traversal-signed chord sum
+      // (uncharged, as K1); exact e-positivity of every emitted hodograph
+      // step and O′ box corner against e_l = reversed ? −e : e.
+      const direction: [number, number] = [0, 0];
+      for (const end of [firstEnd, secondEnd]) {
+        const sign = end.reversed ? -1 : 1;
+        const line = general.lines[end.leaf];
+        if (line) {
+          direction[0] += sign * (line.emitted[1][0] - line.emitted[0][0]);
+          direction[1] += sign * (line.emitted[1][1] - line.emitted[0][1]);
+          continue;
+        }
+        const cubic = tubes[end.leaf]!.poles;
+        for (let pole = 0; pole < 3; pole += 1) {
+          direction[0] += sign * (cubic[pole + 1]![0] - cubic[pole]![0]);
+          direction[1] += sign * (cubic[pole + 1]![1] - cubic[pole]![1]);
+        }
+      }
+      const coneFailure = () =>
+        uncertain(
+          "cubic-tube-cone-unproven",
+          `Declared vertex ${index}: the emitted and true offset derivatives are not proved inside one open half-plane.`,
+          firstEnd.leaf,
+          secondEnd.leaf,
+        );
+      if (!direction.every(Number.isFinite)) return coneFailure();
+      const e = exactPoint(direction);
+      for (const end of [firstEnd, secondEnd]) {
+        const signed = end.reversed ? negated(e) : e;
+        if (!hodographs[end.leaf]!.every((step) => positive(dot(signed, step))))
+          return coneFailure();
+        const box = derivatives[end.leaf]!;
+        const corner: ExactPoint = [
+          box[0]![positive(signed[0]) ? 0 : 1]!,
+          box[1]![positive(signed[1]) ? 0 : 1]!,
+        ];
+        if (!positive(dot(signed, corner))) return coneFailure();
+      }
+
+      // Exact classification on the traversal source tangents (authoritative).
+      const incoming = vertexTangent(firstEnd);
+      const outgoing = vertexTangent(secondEnd);
+      if (!incoming || !outgoing)
+        return fail("the traversal source tangents are not proved nonzero.");
+      const cross = crossExact(incoming, outgoing, budget);
+      if (!positive(dot(incoming, outgoing)))
+        return fail(
+          "the traversal source tangents have no positive dot (D ≤ 0).",
+        );
+      const parallel = compareExact(cross, zero, budget) === 0;
+      // Declared source gap g = Q_v − P_v, exact; |g|⁺ outward (Lemma G).
+      const gap = difference(exactPoint(b.vertex), exactPoint(a.vertex));
+      const gapZero =
+        compareExact(gap[0], zero, budget) === 0 &&
+        compareExact(gap[1], zero, budget) === 0;
+      let bridge = zero;
+      if (!gapZero) {
+        const norm = squareRootUpper(dot(gap, gap));
+        if (!norm) return fail(J2_MESSAGES.root);
+        bridge = norm;
+        if (negative(dot(e, gap)))
+          return fail(
+            "backward declared gap (e·g < 0): the bridged reference is not proved simple.",
+          );
+      }
+      const convex = !parallel && positive(distance) !== positive(cross);
+      const pathful = convex || !gapZero;
+      if (!parallel && distanceValue === 0)
+        return fail("zero offset distance at a non-parallel vertex (no side).");
+      if (closed && pathful && count < 5)
+        return fail(
+          "a closed chain with a declared-vertex correction path needs at least five leaves.",
+        );
+
+      // Nonparallel: the J2′ local block on traversal data (Lemma B).
+      let arc: ExactFraction | undefined;
+      let concave:
+        | { readonly trim: ExactRange; readonly tail: ExactRange }
+        | undefined;
+      if (!parallel) {
+        budget.operation(16);
+        const alongIncoming = dot(e, incoming);
+        const alongOutgoing = dot(e, outgoing);
+        if (!positive(alongIncoming) || !positive(alongOutgoing))
+          return fail(J2_MESSAGES.cone);
+        const sourceCone = (end: Terminal) => {
+          const signed = end.reversed ? negated(e) : e;
+          return hull(
+            leafShape(end.leaf).first.map((vector) => dot(signed, vector)),
+          );
+        };
+        const coneFirst = sourceCone(firstEnd);
+        const coneSecond = sourceCone(secondEnd);
+        if (!positive(coneFirst[0]) || !positive(coneSecond[0]))
+          return fail(J2_MESSAGES.cone);
+        const incomingSquared = dot(incoming, incoming);
+        const outgoingSquared = dot(outgoing, outgoing);
+        if (convex) {
+          // Lemma G2, tight [TECH T3]: |A − A′|² = 2d²X²/(U₁U₂(1 + c)) with
+          // c = D/√(U₁U₂) ≥ c₋ = D/√⁺(U₁U₂) > 0.
+          const product = multiplyExact(
+            incomingSquared,
+            outgoingSquared,
+            budget,
+          );
+          const rootProduct = squareRootUpper(product);
+          if (!rootProduct) return fail(J2_MESSAGES.root);
+          const cosineLow = divideExact(
+            dot(incoming, outgoing),
+            rootProduct,
+            budget,
+          );
+          const chord = squareRootUpper(
+            divideExact(
+              multiplyExact(
+                multiplyExact(
+                  two,
+                  multiplyExact(distance, distance, budget),
+                  budget,
+                ),
+                multiplyExact(cross, cross, budget),
+                budget,
+              ),
+              multiplyExact(product, addExact(one, cosineLow, budget), budget),
+              budget,
+            ),
+          );
+          if (!chord) return fail(J2_MESSAGES.root);
+          arc = chord;
+        } else {
+          const result = concaveJ2(
+            firstEnd.leaf,
+            secondEnd.leaf,
+            incoming,
+            outgoing,
+            cross,
+            e,
+            distance,
+            alongIncoming,
+            alongOutgoing,
+            coneFirst,
+            coneSecond,
+            incomingSquared,
+            outgoingSquared,
+            new Set(
+              [firstEnd, secondEnd]
+                .filter((end) => end.reversed)
+                .map((end) => end.leaf),
+            ),
+          );
+          if (typeof result === "string") return fail(J2_MESSAGES[result]);
+          concave = result;
+        }
+      }
+
+      // Keeper-only composition (§3.4): the correction path (arc, then the
+      // bridge) goes wholly to the keeper's vertex end; the adopter adds its
+      // concave tail only. Four roles are written separately.
+      const [keeperEnd, adopterEnd] =
+        declaration.keeper === "first"
+          ? [firstEnd, secondEnd]
+          : [secondEnd, firstEnd];
+      const tailOf = (end: Terminal) =>
+        concave && (end === firstEnd ? concave.tail[0] : concave.tail[1]);
+      const withBridge = (value: ExactFraction | undefined) =>
+        gapZero ? value : value ? addExact(value, bridge, budget) : bridge;
+      const keeperCorrection = withBridge(arc ?? tailOf(keeperEnd));
+      const adopterCorrection = tailOf(adopterEnd);
+      const correct = (end: Terminal, value: ExactFraction | undefined) => {
+        if (!value) return;
+        const line = lineData.get(end.leaf);
+        // A line's vertex-end displacement is its literal end error plus c.
+        if (line) {
+          const at = end.side === "end" ? 1 : 0;
+          const total = addExact(line.endErrors[at], value, budget);
+          if (at === 1) lineJointEnd[end.leaf] = total;
+          else lineJointStart[end.leaf] = total;
+        } else if (end.side === "end") correctionEnd[end.leaf] = value;
+        else correctionStart[end.leaf] = value;
+      };
+      correct(keeperEnd, keeperCorrection);
+      correct(adopterEnd, adopterCorrection);
+      if (pathful) {
+        if (keeperEnd.side === "end") reserveEnd[keeperEnd.leaf] = true;
+        else reserveStart[keeperEnd.leaf] = true;
+      }
+      const inflate = (end: Terminal, value: ExactFraction | undefined) => {
+        if (!value) return;
+        const existing = inflation[end.leaf];
+        inflation[end.leaf] = existing
+          ? addExact(existing, value, budget)
+          : value;
+      };
+      if (!concave) {
+        // Parallel |g|⁺ or convex G⁺ on BOTH leaves (neighbour of neighbour).
+        inflate(keeperEnd, keeperCorrection);
+        inflate(adopterEnd, keeperCorrection);
+      } else if (!gapZero) {
+        inflate(keeperEnd, keeperCorrection);
+        inflate(adopterEnd, withBridge(adopterCorrection));
+      }
+      if (concave)
+        for (const [end, fraction] of [
+          [firstEnd, concave.trim[0]],
+          [secondEnd, concave.trim[1]],
+        ] as const)
+          if (end.side === "end") trimEnd[end.leaf] = fraction;
+          else trimStart[end.leaf] = fraction;
+
+      const base = {
+        jointIndex: index,
+        first: firstEnd.leaf,
+        second: secondEnd.leaf,
+        direction: [direction[0], direction[1]] as SplineVector,
+        authority: declaration.authority.kind,
+        keeper: declaration.keeper,
+        bridge: gapZero ? 0 : up(bridge),
+      };
+      vertexReports.push(
+        parallel
+          ? { ...base, kind: "parallel-vertex" }
+          : concave
+            ? {
+                ...base,
+                kind: "nonparallel-vertex",
+                side: "concave",
+                retainedCrossing: true,
+                tail: [up(concave.tail[0]), up(concave.tail[1])],
+                trim: [up(concave.trim[0]), up(concave.trim[1])],
+              }
+            : {
+                ...base,
+                kind: "nonparallel-vertex",
+                side: "convex",
+                arcDeviation: up(arc!),
+              },
+      );
+      return null;
+    };
+    for (const declaration of general.vertices) {
+      const failure = certifyVertex(declaration);
+      if (failure) return failure;
+    }
+    for (const declaration of general.trims) {
       budget.operation(64);
+      // One index space (review R5): the declared adjacency index.
+      const { jointIndex } = declaration;
       const firstEnd = terminal(jointIndex, true);
       const secondEnd = terminal((jointIndex + 1) % pieceCount, false);
-      const fail = (code: string, message: string) =>
-        uncertain(code, message, firstEnd.leaf, secondEnd.leaf);
+      const fail = (code: string, message: string, magnitude?: true) =>
+        magnitude
+          ? {
+              ...uncertain(code, message, firstEnd.leaf, secondEnd.leaf),
+              magnitude,
+            }
+          : uncertain(code, message, firstEnd.leaf, secondEnd.leaf);
+      // T7: a trim inside ONE closed piece needs its positional closure.
+      if (jointIndex === (jointIndex + 1) % pieceCount) {
+        const defect = authorityDefect(
+          declaration.authority?.kind === "positional-closure"
+            ? declaration.authority
+            : undefined,
+          jointIndex,
+          jointIndex,
+          firstEnd,
+          secondEnd,
+        );
+        if (defect)
+          return uncertain(
+            KNOT_UNPROVEN,
+            `Trim ${jointIndex}: ${defect}.`,
+            firstEnd.leaf,
+            secondEnd.leaf,
+          );
+      }
       const firstIsLine = lineData.has(firstEnd.leaf);
       const graph = !firstIsLine && !lineData.has(secondEnd.leaf);
       // S2 cubic↔cubic: one fixed precharge before H2 or any conversion.
@@ -1938,6 +2468,7 @@ function certifyChain(
         return fail(
           "trim-window-unproven",
           "A true-root enclosure is not strictly inside its terminal leaf.",
+          true,
         );
     }
   }
@@ -1948,16 +2479,19 @@ function certifyChain(
   const radii: ExactFraction[] = [];
   for (let index = 0; index < count; index += 1) {
     const trimmed = trimmedLeaves.has(index);
-    const leafFailure = (reason: string) =>
-      uncertain(
-        trimmed
-          ? reason.startsWith("retained")
-            ? "trim-window-unproven"
-            : "trim-composition-unproven"
-          : KNOT_UNPROVEN,
-        `Leaf ${index}: ${reason}.`,
-        index,
-      );
+    const leafFailure = (reason: string): Failure =>
+      trimmed
+        ? {
+            ...uncertain(
+              reason.startsWith("retained")
+                ? "trim-window-unproven"
+                : "trim-composition-unproven",
+              `Leaf ${index}: ${reason}.`,
+              index,
+            ),
+            magnitude: true,
+          }
+        : uncertain(KNOT_UNPROVEN, `Leaf ${index}: ${reason}.`, index);
     const startTrim = trimStart[index];
     const endTrim = trimEnd[index];
     if (
@@ -2003,11 +2537,14 @@ function certifyChain(
               budget,
             ) > 0;
         if (!collared)
-          return uncertain(
-            "trim-window-unproven",
-            `Leaf ${index}: the graph-trim glue collar at τ = ½ does not clear the switch region.`,
-            index,
-          );
+          return {
+            ...uncertain(
+              "trim-window-unproven",
+              `Leaf ${index}: the graph-trim glue collar at τ = ½ does not clear the switch region.`,
+              index,
+            ),
+            magnitude: true,
+          };
         const correction = divideExact(
           multiplyExact(side.spread, base, budget),
           exact(4n, 1n, budget),
@@ -2024,11 +2561,14 @@ function certifyChain(
           ) <= 0 ||
           compareExact(roomSquared, side.ownSquared, budget) <= 0
         )
-          return uncertain(
-            "trim-composition-unproven",
-            `Leaf ${index}: the graph-trim glue bound is not strictly below the modeling tolerance.`,
-            index,
-          );
+          return {
+            ...uncertain(
+              "trim-composition-unproven",
+              `Leaf ${index}: the graph-trim glue bound is not strictly below the modeling tolerance.`,
+              index,
+            ),
+            magnitude: true,
+          };
         candidates.push(
           addExact(maximum([base, side.ownUpper]), correction, budget),
           side.otherUpper,
@@ -2038,9 +2578,12 @@ function certifyChain(
     } else {
       const convex =
         arcStart[index] !== undefined || arcEnd[index] !== undefined;
+      // Strict at a J2′ convex end and at a declared-vertex reserve end.
+      const reserve =
+        reserveStart[index] === true || reserveEnd[index] === true;
       const exceeds = (value: ExactFraction) => {
         const comparison = compareExact(value, tolerance, budget);
-        return convex ? comparison >= 0 : comparison > 0;
+        return convex || reserve ? comparison >= 0 : comparison > 0;
       };
       let failed = exceeds(star);
       if (failed && trimmed) {
@@ -2062,11 +2605,13 @@ function certifyChain(
         return leafFailure(
           convex
             ? "corrected base error is not below the modeling tolerance at a convex end"
-            : "corrected base error exceeds the modeling tolerance",
+            : reserve
+              ? "corrected base error is not below the modeling tolerance at a declared-vertex reserve end"
+              : "corrected base error exceeds the modeling tolerance",
         );
     }
     let radius = errors[index]!;
-    for (const arc of [arcStart[index], arcEnd[index]])
+    for (const arc of [arcStart[index], arcEnd[index], inflation[index]])
       if (arc) radius = addExact(radius, arc, budget);
     stars.push(star);
     radii.push(radius);
@@ -2077,9 +2622,13 @@ function certifyChain(
   const adjacency =
     general &&
     new Set(
-      [...joins, ...trimReports.map((trim) => [trim.first, trim.second])].map(
-        ([a, b]) => `${Math.min(a!, b!)}:${Math.max(a!, b!)}`,
-      ),
+      [
+        ...joins,
+        ...[...trimReports, ...vertexReports].map((join) => [
+          join.first,
+          join.second,
+        ]),
+      ].map(([a, b]) => `${Math.min(a!, b!)}:${Math.max(a!, b!)}`),
     );
   const isJoin = (first: number, second: number) =>
     adjacency
@@ -2171,6 +2720,7 @@ function certifyChain(
   budget.operation(
     8 + joins.length + clearedPairs.length + 3 * count + 4 * reports.size,
   );
+  // Vertex records were bounded outward in their own metered step.
   const up = (value: ExactFraction) => outwardExactNumber(value, "up", budget);
   const leaves = tubes.map((tube, index) => {
     const unchanged = (value: ExactFraction) =>
@@ -2180,9 +2730,13 @@ function certifyChain(
     const baseErrorStar = unchanged(stars[index]!);
     return {
       baseErrorStar,
-      // τ on convex-END leaves (arc reserve) and graph-trim leaves (glue reserve).
+      // τ on convex-END leaves (arc reserve), graph-trim leaves (glue
+      // reserve) and leaves with a declared-vertex reserve at EITHER end.
       displacementBound:
-        arcEnd[index] === undefined && !graphSides.has(index)
+        arcEnd[index] === undefined &&
+        !graphSides.has(index) &&
+        reserveStart[index] !== true &&
+        reserveEnd[index] !== true
           ? baseErrorStar
           : modelingTolerance,
       clearanceRadius: unchanged(radii[index]!),
@@ -2221,7 +2775,7 @@ function certifyChain(
     },
   );
   // Trim records were bounded outward in their own metered step.
-  certifiedJoins.push(...trimReports);
+  certifiedJoins.push(...trimReports, ...vertexReports);
   return {
     kind: "verified",
     certificate: {
@@ -2243,21 +2797,24 @@ const invalidPieceChain = (message: string): Failure =>
  * then exactly the legacy sequence. Otherwise pieces + trims are precharged
  * BEFORE any enumeration, then the flattened admission cost in the core.
  *
- * UNSOUND on its own for a one-leaf cubic piece in a multi-piece chain:
- * K1 cone-checks emitted hodographs only at intra-piece joins, and Lemma T's
- * m′ is a cone of the TRUE offset derivative, so that leaf's emitted
- * self-injectivity is never checked and a looped emitted cubic can verify
- * (an S2 graph-trim end does check the emitted G1 cone; a Lemma-T end does not).
- * Callers must reject such pieces (the offset-chain wrapper does) until the
- * emitted-cone fix for single-leaf pieces lands here.
+ * UNSOUND on its own for a one-leaf cubic piece in a multi-piece chain
+ * WITHOUT a declared-vertex end: K1 cone-checks emitted hodographs only at
+ * intra-piece joins and at vertex pairs, and Lemma T's m′ is a cone of the
+ * TRUE offset derivative, so such a leaf's emitted self-injectivity is never
+ * checked and a looped emitted cubic can verify (an S2 graph-trim end does
+ * check the emitted G1 cone; a Lemma-T end does not). A vertex end runs K1 on
+ * the whole emitted leaf. Callers must reject the other one-leaf pieces (the
+ * offset-chain wrapper does) until the emitted-cone fix for single-leaf
+ * pieces lands here.
  */
 function certifyPieceChain(
   request: PieceTubeChainRequest,
   budget: ExactProofBudget,
 ): TubePieceChainResult {
   const { pieces, trims, closed, modelingTolerance, distance } = request;
+  const vertices = request.vertices ?? [];
   const only = pieces.length === 1 ? pieces[0] : undefined;
-  if (only?.kind === "cubic" && trims.length === 0) {
+  if (only?.kind === "cubic" && trims.length === 0 && vertices.length === 0) {
     const owner = only.tubes[0]?.reference?.distance;
     if (
       owner !== undefined &&
@@ -2271,7 +2828,7 @@ function certifyPieceChain(
       budget,
     );
   }
-  budget.operation(pieces.length + trims.length);
+  budget.operation(pieces.length + trims.length + vertices.length);
   if (pieces.length === 0)
     return {
       kind: "unsupported",
@@ -2280,17 +2837,42 @@ function certifyPieceChain(
     };
   if (!Number.isFinite(distance))
     return invalidPieceChain("The chain distance must be finite.");
-  if (trims.length !== (closed ? pieces.length : pieces.length - 1))
+  // One index space (review R5): every declared adjacency is covered exactly
+  // once by a trim or a vertex; each list strictly increasing.
+  const adjacencies = closed ? pieces.length : pieces.length - 1;
+  if (trims.length + vertices.length !== adjacencies)
     return invalidPieceChain(
-      "One trim declaration is required per inter-piece adjacency.",
+      vertices.length === 0
+        ? "One trim declaration is required per inter-piece adjacency."
+        : "One trim or vertex declaration is required per adjacency.",
     );
-  for (const [index, trim] of trims.entries())
+  const covered = new Set<number>();
+  const admissibleIndex = (value: number, previous: number) =>
+    Number.isSafeInteger(value) &&
+    value > previous &&
+    value < adjacencies &&
+    !covered.has(value);
+  for (const [index, trim] of trims.entries()) {
     if (
-      trim.jointIndex !== index ||
+      !admissibleIndex(trim.jointIndex, trims[index - 1]?.jointIndex ?? -1) ||
+      (vertices.length === 0 && trim.jointIndex !== index) ||
       !orderedFinite(trim.firstParameterBounds) ||
       !orderedFinite(trim.secondParameterBounds)
     )
       return invalidPieceChain(`Trim ${index}: invalid joint bounds.`);
+    covered.add(trim.jointIndex);
+  }
+  for (const [index, vertex] of vertices.entries()) {
+    if (
+      !admissibleIndex(
+        vertex.jointIndex,
+        vertices[index - 1]?.jointIndex ?? -1,
+      ) ||
+      (vertex.keeper !== "first" && vertex.keeper !== "second")
+    )
+      return invalidPieceChain(`Vertex ${index}: invalid declaration.`);
+    covered.add(vertex.jointIndex);
+  }
   const tubes: (NeutralCubicPieceTube | undefined)[] = [];
   const lines: (NeutralLineTube | undefined)[] = [];
   const firstLeaf: number[] = [];
@@ -2320,14 +2902,87 @@ function certifyPieceChain(
       tubes: tubes as readonly NeutralCubicTube[],
     },
     budget,
-    { distance, pieces, trims, firstLeaf, pieceOf, lines },
+    { distance, pieces, trims, vertices, firstLeaf, pieceOf, lines },
   );
+}
+
+/**
+ * The production additive ceilings of `ExactProofBudget` (one request), per
+ * attempt stage: the staged whole-request meter lets attempt k use at most
+ * k times these in total (review R9). `integerBits` is per value, unscaled.
+ */
+const STAGE_CEILINGS = {
+  operations: 10_000_000,
+  determinantTerms: 1_536,
+  euclideanSteps: 1_500_000,
+  refinementSteps: 4_096,
+  projectionAttempts: 2,
+} as const;
+
+/**
+ * ONE budget over `attempts` certifications (ceilings × attempts, lower
+ * limits absolute) whose cumulative additive meters are also capped at
+ * stage k × the production ceilings while attempt k runs. Never reset,
+ * replaced or topped up; the stage only moves forward.
+ */
+class StagedProofBudget extends ExactProofBudget {
+  #stage = 1;
+  #operations = 0;
+  #determinantTerms = 0;
+  #euclideanSteps = 0;
+  #refinementSteps = 0;
+  #projectionAttempts = 0;
+
+  constructor(lowerLimits: LowerProofLimits | undefined, attempts: number) {
+    super(lowerLimits, attempts);
+  }
+
+  advance() {
+    this.#stage += 1;
+  }
+
+  #check(total: number, ceiling: number) {
+    if (total > this.#stage * ceiling)
+      throw new ExactQueryProofBudgetExceeded();
+  }
+
+  override operation(count = 1) {
+    super.operation(count);
+    this.#operations += count;
+    this.#check(this.#operations, STAGE_CEILINGS.operations);
+  }
+
+  override determinantTerm() {
+    super.determinantTerm();
+    this.#determinantTerms += 1;
+    this.#check(this.#determinantTerms, STAGE_CEILINGS.determinantTerms);
+  }
+
+  override euclideanStep() {
+    super.euclideanStep();
+    this.#euclideanSteps += 1;
+    this.#check(this.#euclideanSteps, STAGE_CEILINGS.euclideanSteps);
+  }
+
+  override refinementStep() {
+    super.refinementStep();
+    this.#refinementSteps += 1;
+    this.#check(this.#refinementSteps, STAGE_CEILINGS.refinementSteps);
+  }
+
+  override projectionAttempt() {
+    super.projectionAttempt();
+    this.#projectionAttempts += 1;
+    this.#check(this.#projectionAttempts, STAGE_CEILINGS.projectionAttempts);
+  }
 }
 
 function createCertifier(
   lowerLimits?: LowerProofLimits,
   observeBudget?: (snapshot: ExactProofBudgetSnapshot) => void,
-): CertifiedCubicTubeChain & CertifiedTubePieceChain {
+): CertifiedCubicTubeChain &
+  CertifiedTubePieceChain &
+  CertifiedTubePieceChainRequests {
   // One budget for the whole request: admission, conversion, every join,
   // knot, trim, leaf, pair, split and the certificate. Never reset or replaced.
   const run = <T>(
@@ -2349,6 +3004,43 @@ function createCertifier(
       run((budget) => certifyChain(request, budget) as CubicTubeChainResult),
     certifyPieceChain: (request) =>
       run((budget) => certifyPieceChain(request, budget)),
+    openRequest: (attempts) => {
+      if (!Number.isSafeInteger(attempts) || attempts < 1)
+        throw new RangeError(
+          "A staged certifier request needs a positive integer attempt count.",
+        );
+      // attempts = 1 is exactly the single-request meter.
+      const budget =
+        attempts === 1
+          ? new ExactProofBudget(lowerLimits)
+          : new StagedProofBudget(lowerLimits, attempts);
+      let issued = 0;
+      let spent = false;
+      return {
+        certifyPieceChain(request) {
+          if (issued === attempts)
+            throw new RangeError(
+              "The staged certifier request issued more attempts than it was sized for.",
+            );
+          issued += 1;
+          // Sticky: an exhausted attempt never lets a later one work.
+          if (spent) return EXHAUSTED;
+          try {
+            if (issued > 1) {
+              (budget as StagedProofBudget).advance();
+              budget.operation(RETRY_ENTRY_CHARGE);
+            }
+            return certifyPieceChain(request, budget);
+          } catch (error) {
+            if (!(error instanceof ExactQueryProofBudgetExceeded)) throw error;
+            spent = true;
+            return EXHAUSTED;
+          } finally {
+            observeBudget?.(budget.snapshot());
+          }
+        },
+      };
+    },
   };
 }
 
@@ -2358,20 +3050,28 @@ function createCertifier(
  * multi-piece chain (see `certifyPieceChain`).
  */
 export function createCertifiedCubicTubeChain(): CertifiedCubicTubeChain &
-  CertifiedTubePieceChain {
+  CertifiedTubePieceChain &
+  CertifiedTubePieceChainRequests {
   return createCertifier();
 }
 
 /** Test-only lower ceilings; construction clamps every value to production. */
 export function createCertifiedCubicTubeChainWithLowerBudgetForTest(
   lowerLimits: LowerProofLimits,
-): CertifiedCubicTubeChain & CertifiedTubePieceChain {
+): CertifiedCubicTubeChain &
+  CertifiedTubePieceChain &
+  CertifiedTubePieceChainRequests {
   return createCertifier(lowerLimits);
 }
 
-/** Test-only whole-request meter observation under production ceilings. */
+/**
+ * Test-only whole-request meter observation under production ceilings: once
+ * per request, and once after every attempt of a staged request.
+ */
 export function createCertifiedCubicTubeChainWithBudgetObserverForTest(
   observeBudget: (snapshot: ExactProofBudgetSnapshot) => void,
-): CertifiedCubicTubeChain & CertifiedTubePieceChain {
+): CertifiedCubicTubeChain &
+  CertifiedTubePieceChain &
+  CertifiedTubePieceChainRequests {
   return createCertifier(undefined, observeBudget);
 }

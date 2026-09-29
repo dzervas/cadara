@@ -84,6 +84,30 @@ export type SplineOffsetResult =
     }
   | SplineOffsetFailure;
 
+/**
+ * A declared neighbour's emitted terminal leaf whose terminal pole and pole
+ * differential this call adopts verbatim at one of its own terminal ends
+ * (T08b-d declared-vertex adoption). The neighbour must come from the SAME
+ * frame and reconstruction (caller obligation). The owner checks the
+ * declaration and never infers it: any mismatch below is a caller error
+ * (`RangeError`, thrown before any work). The adopted pole is recertified
+ * like any other emitted pole: π₀ / π₃ and ε measure it against THIS call's
+ * own ideal endpoint enclosure, so ε stays an honest same-parameter bound.
+ */
+export interface AdoptedEndpoint {
+  /** The neighbour's emitted terminal leaf, verbatim. */
+  readonly neighbour: SplineOffsetCubicSpan;
+  /** Which natural end of `neighbour` is the shared vertex. */
+  readonly neighbourEnd: "start" | "end";
+  readonly authority:
+    | { readonly kind: "sharedPoint" }
+    | {
+        readonly kind: "coincident";
+        readonly pointIds: readonly [string, string];
+      }
+    | { readonly kind: "positionalClosure" };
+}
+
 export interface SplineOffsetInput {
   /** Ordered spans (or a contiguous subset) from one fresh, valid reconstruction; never persisted, projected, or mixed across revisions. */
   readonly spans: readonly SplineSpan[];
@@ -94,6 +118,16 @@ export interface SplineOffsetInput {
   readonly maxOutputSpans?: number;
   /** Prior accepted partition. A mismatch fails instead of remapping identities. */
   readonly expectedTopology?: readonly SplineOffsetSourceInterval[];
+  /**
+   * Declared-vertex adoption (T08b-d): `start` replaces the first emitted
+   * leaf's start pole and differential, `end` the last emitted leaf's end
+   * pole and differential, by the neighbour's terminal ones. Absent (or
+   * empty) keeps the output byte-identical to a call without the field.
+   */
+  readonly sharedEndpoints?: {
+    readonly start?: AdoptedEndpoint;
+    readonly end?: AdoptedEndpoint;
+  };
 }
 
 const buffer = new ArrayBuffer(8);
@@ -569,6 +603,108 @@ interface SharedEndpoint {
   readonly differential: SplineVector;
 }
 
+const sameVector = (left: SplineVector, right: SplineVector) =>
+  Object.is(left[0], right[0]) && Object.is(left[1], right[1]);
+
+/**
+ * Checks one adopted endpoint declaration (design §4.1) and returns the
+ * pole to reuse; throws `RangeError` on caller misuse. Only point IDs, the
+ * declared authority, bitwise source vertices and the relative orientation
+ * (owner distance sign) are read; no coordinate proximity.
+ */
+function adoptedEndpoint(
+  input: SplineOffsetInput,
+  side: "start" | "end",
+  adopted: AdoptedEndpoint,
+  wrap: boolean,
+): SharedEndpoint {
+  const { neighbour, neighbourEnd, authority } = adopted;
+  const fail = (reason: string): never => {
+    throw new RangeError(`sharedEndpoints.${side}: ${reason}`);
+  };
+  if (input.distance === 0)
+    fail("adoption at d = 0 would be overwritten by the analytic branch");
+  if (side === "end" && wrap) fail("conflicts with a smooth closed wrap");
+  const pole = neighbourEnd === "end" ? 3 : 0;
+  const position = neighbour.poles[pole];
+  const differential = neighbour.differential.poles[pole];
+  if (
+    !position ||
+    !differential ||
+    !finiteVector(position) ||
+    !finiteVector(differential)
+  )
+    fail("the neighbour's terminal pole is not finite");
+  if (
+    neighbourEnd === "end"
+      ? neighbour.sourceLocalInterval[1] !== 1
+      : neighbour.sourceLocalInterval[0] !== 0
+  )
+    fail("the neighbour leaf is not terminal at the declared end");
+  // Head-to-tail shares an orientation; head-to-head / tail-to-tail reverses.
+  const headToTail = (side === "start") === (neighbourEnd === "end");
+  if (
+    !Object.is(
+      neighbour.reference.distance,
+      headToTail ? input.distance : -input.distance,
+    )
+  )
+    fail("the neighbour's owner distance is not the relative orientation's");
+  const own = side === "start" ? input.spans[0] : input.spans.at(-1);
+  if (!own) return fail("no source span");
+  const ownPointId =
+    side === "start" ? own.source.startPointId : own.source.endPointId;
+  const ownVertex = own.poles[side === "start" ? 0 : 3];
+  const neighbourPointId =
+    neighbourEnd === "end"
+      ? neighbour.source.endPointId
+      : neighbour.source.startPointId;
+  const neighbourVertex = neighbour.reference.sourcePoles[pole];
+  switch (authority.kind) {
+    case "sharedPoint":
+      if (
+        neighbourPointId !== ownPointId ||
+        !sameVector(neighbourVertex, ownVertex)
+      )
+        fail("a shared point needs one point ID and a bitwise vertex");
+      break;
+    case "coincident": {
+      const [a, b] = authority.pointIds;
+      if (
+        a === b ||
+        neighbourPointId === ownPointId ||
+        !(
+          (a === neighbourPointId && b === ownPointId) ||
+          (b === neighbourPointId && a === ownPointId)
+        )
+      )
+        fail("a coincident join needs the two distinct terminal point IDs");
+      break;
+    }
+    case "positionalClosure": {
+      const first = input.spans[0]!;
+      if (
+        side !== "end" ||
+        neighbourEnd !== "start" ||
+        neighbour.source.splineId !== own.source.splineId ||
+        neighbour.source.splineId !== first.source.splineId ||
+        neighbour.source.spanIndex !== 0 ||
+        first.source.spanIndex !== 0 ||
+        own.source.spanIndex !== input.spans.length - 1 ||
+        neighbour.source.startOccurrenceId !== first.source.startOccurrenceId ||
+        neighbourPointId !== ownPointId ||
+        neighbour.source.startOccurrenceId === own.source.endOccurrenceId ||
+        !sameVector(neighbourVertex, ownVertex)
+      )
+        fail(
+          "a positional closure adopts this spline's own first leaf at its end",
+        );
+      break;
+    }
+  }
+  return { position, differential };
+}
+
 function makeOutput(
   span: SplineSpan,
   local: readonly [number, number],
@@ -688,6 +824,14 @@ export function approximateSplineOffset(
       sourceSpanIndex: knots.sourceSpanIndex,
       sourceLocalInterval: [0, 1],
     };
+  // Declared-vertex adoption: checked before any work; absent ⇒ undefined,
+  // exactly the values the two terminal reads below produced before.
+  const adoptedStart =
+    input.sharedEndpoints?.start &&
+    adoptedEndpoint(input, "start", input.sharedEndpoints.start, knots.wrap);
+  const adoptedEnd =
+    input.sharedEndpoints?.end &&
+    adoptedEndpoint(input, "end", input.sharedEndpoints.end, knots.wrap);
 
   const output: SplineOffsetCubicSpan[] = [];
   for (
@@ -701,16 +845,22 @@ export function approximateSplineOffset(
         position: item.poles[3],
         differential: item.differential.poles[3],
       };
+    // Span 0 never shares a knot start (no predecessor): the seam is read
+    // there, and at the last span only without a smooth wrap.
     const sharedStart = knots.sharesStart[sourceSpanIndex]
       ? emittedEnd(output.at(-1))
-      : undefined;
+      : sourceSpanIndex === 0
+        ? adoptedStart
+        : undefined;
     const sharedEnd =
       knots.wrap && sourceSpanIndex === input.spans.length - 1
         ? output[0] && {
             position: output[0].poles[0],
             differential: output[0].differential.poles[0],
           }
-        : undefined;
+        : sourceSpanIndex === input.spans.length - 1
+          ? adoptedEnd
+          : undefined;
     const sharedFor = (local: readonly [number, number]) => ({
       start: local[0] === 0 ? sharedStart : undefined,
       end: local[1] === 1 ? sharedEnd : undefined,
