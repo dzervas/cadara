@@ -14,6 +14,12 @@ import type {
   RegionRecord,
 } from "@/contracts/sketch/schema";
 
+/**
+ * A branch's key: its source and `spanId`. A derived shell sub-span's record
+ * is its output span (`outputEntityId`, `outputSpanId`) (T08b-g3), so every
+ * sub-span of one output span has one key and the degree-2 collapse below
+ * removes the owner's sub-partition knots: region ids survive refinement.
+ */
 export function regionBranchKey(branch: RegionBoundaryBranch): string {
   const source =
     branch.source.kind === "entity"

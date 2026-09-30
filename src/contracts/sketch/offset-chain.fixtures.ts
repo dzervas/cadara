@@ -1815,3 +1815,64 @@ export function offsetFrameDerivativeRows(): readonly OffsetFrameDerivativeRow[]
     selfTrimWrapRow("wrap-near4s 1e-3"),
   ];
 }
+
+/** One T08b-g3 probe-drag row: a committed outline and its fit-point drag. */
+export interface OffsetPartitionDragRow extends CornerMatrixRow {
+  /** The dragged fit point's heights along the drag. */
+  readonly heights: readonly number[];
+  /** The committed outline with the dragged fit point at `height` (ids unchanged). */
+  readonly drag: (
+    patches: readonly Authored[],
+    height: number,
+  ) => readonly Authored[];
+}
+
+/**
+ * The T08b-g3 probe drag (T08b design §0.3, `partition-stability.probe.ts`),
+ * labelled "native commit + point drag": the SL-loop outline (a native
+ * 3-point arch closed by a native line with endpoint snaps), whose middle fit
+ * point is moved to each height by an edit of that one point's position (a
+ * drag keeps every id). The owner's sub-partition of the arch offset has 4,
+ * 6, 6, 8 and 10 sub-spans at these heights (T08b-g3 evidence
+ * `partition-heights.result.txt`); its source spans never change.
+ */
+export function offsetPartitionDragRows(): readonly OffsetPartitionDragRow[] {
+  const heights = [0.4, 0.5, 0.6, 0.7, 0.85];
+  return [0.01, -0.01].map((distance) => ({
+    row: "SL-loop probe drag",
+    distance,
+    heights,
+    build: (h) => {
+      const spline = h.drawSpline(
+        [],
+        [
+          [0, 0],
+          [1, heights[0]!],
+          [2, 0],
+        ],
+      );
+      const [start, end] = h.splineEnds(spline);
+      return [
+        spline,
+        h.drawLine([spline], [2, 0], [0, 0], { start: end, end: start }),
+      ];
+    },
+    drag: (patches, height) => {
+      const spline = patches[0]!.entities[0]!;
+      if (spline.kind !== "spline") throw new Error("not a spline");
+      const middle = spline.pointOccurrences[1]!.pointId;
+      return patches.map((patch, index) =>
+        index !== 0
+          ? patch
+          : {
+              ...patch,
+              points: patch.points.map((point) =>
+                point.pointId === middle
+                  ? { ...point, position: [1, height] as const }
+                  : point,
+              ),
+            },
+      );
+    },
+  }));
+}

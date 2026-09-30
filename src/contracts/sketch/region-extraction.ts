@@ -115,6 +115,52 @@ export interface SketchArrangementInput {
   projectedReferences: readonly ProjectedSketchReferenceRecord[];
   /** The document's settings.modelingTolerance: the only semantic linear tolerance. */
   modelingTolerance: number;
+  /**
+   * T08b-g3 (dark: no production caller before T08b-g5): the published
+   * derived piecewise-cubic offset shells of this accepted pair, one entry
+   * per shell. Contracts-local and never persisted. Absent: the arrangement
+   * is exactly the one without derived curves. The caller passes only
+   * certified publications of non-construction shells ([TECH] G7).
+   */
+  derivedCurves?: readonly SketchArrangementDerivedCurve[];
+}
+
+/**
+ * One published derived shell (T08b slice design §2.7, [TECH] G14): the
+ * owner's UNTRIMMED sub-span poles on `sourceDomain` (the join query rejects
+ * `queryDomain`), with the trims only in `queryDomain`.
+ * - An untrimmed terminal end is a port of its driven terminal point.
+ * - An interior knot is a port of the derived key
+ *   `derived:<outputEntityId>:<outputSpanId>:<subIndex>` of the sub-span
+ *   that starts there.
+ * - A trimmed terminal end (its sub-span's `queryDomain` end strictly inside
+ *   `sourceDomain`) has no port: its driven terminal point's class is an
+ *   interior membership at the representative trim parameter (the
+ *   `queryDomain` end, bitwise), as a `pointOnCurve` T-junction is, and the
+ *   trimmed-off tail beyond it is dangling. Any other arrangement event on
+ *   the tail fails the branch closed with `region-derived-tail-crossing`,
+ *   so undrawn geometry never bounds a face.
+ * Branch identity is `(outputEntityId, outputSpanId)`: every sub-span of one
+ * output span has that one branch record, so the owner's sub-partition is
+ * revision data and region ids survive a partition refinement.
+ */
+export interface SketchArrangementDerivedCurve {
+  readonly outputEntityId: SketchEntityId;
+  /** The driven terminal points at the shell's natural start and end. */
+  readonly startPointId: SketchPointId;
+  readonly endPointId: SketchPointId;
+  /** Every sub-span in natural source order. */
+  readonly spans: readonly {
+    /** The stable identity of the source span this sub-span lies in. */
+    readonly outputSpanId: string;
+    /** Its index inside that output span (revision data, never identity). */
+    readonly subIndex: number;
+    readonly poles: SplinePoles;
+    /** Increasing sub-interval of the source spline parameter. */
+    readonly sourceDomain: readonly [number, number];
+    /** The published active domain: `sourceDomain` except at trimmed terminal ends. */
+    readonly queryDomain: readonly [number, number];
+  }[];
 }
 
 export interface SketchArrangementResult {
@@ -149,6 +195,18 @@ interface Branch {
   entityId: SketchEntityId | null;
   description: string;
   box: Box;
+  /**
+   * A derived shell sub-span (T08b-g3): its index in its output span and,
+   * at each trimmed terminal end, the driven terminal point whose class is
+   * the end's interior membership at `parameter`.
+   */
+  derived?: {
+    subIndex: number;
+    tails: {
+      start: { pointId: SketchPointId; parameter: number } | null;
+      end: { pointId: SketchPointId; parameter: number } | null;
+    };
+  };
 }
 
 /** An unsupported or degenerate curve: it blocks everything its box meets. */
@@ -319,6 +377,47 @@ function spanDraft(
   };
 }
 
+/**
+ * Why a published shell is not a derived-curve input, or null. The knot keys
+ * and the tail memberships rest on this shape: finite data; contiguous
+ * increasing sub-span domains; sub-spans of one output span consecutive with
+ * sub-indices 0, 1, …; `queryDomain` equal to `sourceDomain` except at a
+ * trimmed terminal end, which lies strictly inside its sub-span (a deeper
+ * trim is not a publication this input represents).
+ */
+function derivedShellInvalidity(
+  shell: SketchArrangementDerivedCurve,
+): string | null {
+  const { spans } = shell;
+  if (spans.length === 0) return "a derived curve without sub-spans";
+  const seen = new Set<string>();
+  for (const [index, span] of spans.entries()) {
+    const [s0, s1] = span.sourceDomain;
+    const [q0, q1] = span.queryDomain;
+    if (
+      ![s0, s1, q0, q1, ...span.poles.flat()].every(Number.isFinite) ||
+      !(s0 < s1)
+    )
+      return "a derived sub-span with a non-finite or empty domain";
+    const previous = spans[index - 1];
+    if (previous && previous.sourceDomain[1] !== s0)
+      return "derived sub-span domains that are not contiguous";
+    const continues = previous?.outputSpanId === span.outputSpanId;
+    if (!continues && seen.has(span.outputSpanId))
+      return "a derived output span whose sub-spans are not consecutive";
+    seen.add(span.outputSpanId);
+    if (span.subIndex !== (continues ? previous.subIndex + 1 : 0))
+      return "derived sub-span indices that are not 0, 1, … in each output span";
+    if (
+      (index > 0 && q0 !== s0) ||
+      (index < spans.length - 1 && q1 !== s1) ||
+      !(s0 <= q0 && q0 < q1 && q1 <= s1)
+    )
+      return "a derived trim that is not strictly inside a terminal sub-span";
+  }
+  return null;
+}
+
 function outwardBox(center: SplineVector, radius: number): Box {
   return {
     x: iv(center[0] - radius, center[0] + radius),
@@ -363,6 +462,7 @@ function collectArrangementBranches(
   definition: SketchDefinition,
   solved: SolvedSketchSnapshot,
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
+  derivedCurves: readonly SketchArrangementDerivedCurve[],
 ): { branches: Branch[]; obstacles: Obstacle[] } {
   const drafts: BranchDraft[] = [];
   const obstacles: Obstacle[] = [];
@@ -633,6 +733,92 @@ function collectArrangementBranches(
           break;
       }
     }
+  }
+
+  const shellIds = derivedCurves.map((shell) => shell.outputEntityId);
+  // A branch key is (source, spanId) and a shell's source is its entity id,
+  // so a shell key can collide with an ordinary branch's only through that id.
+  const ordinaryEntityIds = new Set(
+    drafts.flatMap((draft) =>
+      draft.record.source.kind === "entity"
+        ? [draft.record.source.entityId]
+        : [],
+    ),
+  );
+  for (const shell of derivedCurves) {
+    const source: RegionBoundarySource = {
+      kind: "entity",
+      entityId: shell.outputEntityId,
+    };
+    // Knot keys are scoped by the shell id: a repeated id would join knots,
+    // and an id naming ordinary geometry would share its branch keys and its
+    // records. Both fail closed before any key is used.
+    const invalid =
+      shellIds.indexOf(shell.outputEntityId) !==
+      shellIds.lastIndexOf(shell.outputEntityId)
+        ? "two derived curves with one entity id"
+        : ordinaryEntityIds.has(shell.outputEntityId)
+          ? "a derived curve id that names ordinary sketch geometry"
+          : derivedShellInvalidity(shell);
+    if (invalid !== null) {
+      obstacles.push({
+        box:
+          shell.spans.length > 0
+            ? boxOfPoints(shell.spans.flatMap((span) => [...span.poles]))
+            : { x: [-Infinity, Infinity], y: [-Infinity, Infinity] },
+        code: "region-degenerate-curve",
+        entityId: shell.outputEntityId,
+        description: sourceDescription(source),
+        reason: invalid,
+      });
+      continue;
+    }
+    const last = shell.spans.length - 1;
+    const knot = (index: number) => {
+      const span = shell.spans[index]!;
+      return `derived:${shell.outputEntityId}:${span.outputSpanId}:${span.subIndex}`;
+    };
+    shell.spans.forEach((span, index) => {
+      const startTrimmed =
+        index === 0 && span.queryDomain[0] !== span.sourceDomain[0];
+      const endTrimmed =
+        index === last && span.queryDomain[1] !== span.sourceDomain[1];
+      const startPort =
+        index > 0 ? knot(index) : startTrimmed ? null : shell.startPointId;
+      const endPort =
+        index < last ? knot(index + 1) : endTrimmed ? null : shell.endPointId;
+      const record = { source, spanId: span.outputSpanId };
+      drafts.push({
+        record,
+        curve: {
+          kind: "cubicBezier",
+          provenance: provenanceOf(record),
+          poles: span.poles,
+          sourceDomain: span.sourceDomain,
+        },
+        closed: false,
+        domain: span.sourceDomain,
+        ports: { start: startPort, end: endPort },
+        portPointIds: {
+          start: index === 0 && !startTrimmed ? shell.startPointId : null,
+          end: index === last && !endTrimmed ? shell.endPointId : null,
+        },
+        portPositions: { start: span.poles[0], end: span.poles[3] },
+        entityId: shell.outputEntityId,
+        description: `${sourceDescription(source)} span ${span.outputSpanId} sub-span ${span.subIndex}`,
+        derived: {
+          subIndex: span.subIndex,
+          tails: {
+            start: startTrimmed
+              ? { pointId: shell.startPointId, parameter: span.queryDomain[0] }
+              : null,
+            end: endTrimmed
+              ? { pointId: shell.endPointId, parameter: span.queryDomain[1] }
+              : null,
+          },
+        },
+      });
+    });
   }
 
   const branches = drafts.map((draft, index): Branch => {
@@ -906,6 +1092,21 @@ function collectDeclarations(
       location: locationOnBranch(host, parameter),
       port: false,
     });
+  }
+  // T08b-g3: a trimmed derived end is its driven point's interior membership
+  // at the published representative trim parameter, bitwise (never re-located).
+  for (const branch of branches) {
+    for (const tail of [
+      branch.derived?.tails.start,
+      branch.derived?.tails.end,
+    ]) {
+      if (!tail) continue;
+      add(classes.find(tail.pointId), {
+        branch: branch.index,
+        location: { interior: tail.parameter },
+        port: false,
+      });
+    }
   }
 
   const classMembers = new Map<string, string[]>();
@@ -1326,6 +1527,116 @@ function collectEvents(
     position[1],
   ];
 
+  /*
+   * T08b-g3 family census. A family is the unordered pair of branch keys.
+   * The sub-spans of one derived output span share its key, so one family
+   * can hold several branch pairs; its count and ranks then run over all of
+   * them along each key's one source parameter (the sub-span domains are
+   * contiguous and increasing), so a partition refinement keeps every key.
+   * A one-pair family of two distinct keys (every family without derived
+   * curves) keeps the per-pair census unchanged.
+   */
+  type Verified = Extract<PairOutcome, { kind: "verified" }>;
+  const familyKey = (pair: Verified) => {
+    const a = branches[pair.first]!.key;
+    const b = branches[pair.second]!.key;
+    return JSON.stringify(a < b ? [a, b] : [b, a]);
+  };
+  const families = new Map<string, Verified[]>();
+  for (const pair of pairs)
+    if (pair.kind === "verified")
+      families.set(familyKey(pair), [
+        ...(families.get(familyKey(pair)) ?? []),
+        pair,
+      ]);
+  type Census = { count: number; first: number[]; second: number[] };
+  const censuses = new Map<string, Map<Verified, Census>>();
+  const familyCensus = (pair: Verified): Census | null => {
+    const key = familyKey(pair);
+    const members = families.get(key)!;
+    const [low, high] = JSON.parse(key) as [string, string];
+    if (members.length === 1 && low !== high) return null;
+    const known = censuses.get(key);
+    if (known) return known.get(pair)!;
+    const census = new Map<Verified, Census>();
+    const unrankable = (reason: string) => {
+      unranked.push({
+        branches: members.flatMap((member) => [member.first, member.second]),
+        reason,
+      });
+      for (const member of members)
+        census.set(member, {
+          count: member.points.length,
+          first: member.points.map(() => -1),
+          second: member.points.map(() => -1),
+        });
+    };
+    const first = branches[members[0]!.first]!;
+    const contacts = members.some(
+      (member) => member.points.length > 0 || member.overlaps.length > 0,
+    );
+    if (low === high && contacts)
+      unrankable(
+        `${first.description} meets another sub-span of its own derived output span away from their knots`,
+      );
+    else if (members.some((member) => member.overlaps.length > 0))
+      unrankable(
+        `the exact overlaps of ${first.description} and ${branches[members[0]!.second]!.description} span several derived sub-spans`,
+      );
+    else {
+      const entries = members.flatMap((member) => {
+        const lowFirst = branches[member.first]!.key === low;
+        return member.points.map((point) => ({
+          member,
+          lowFirst,
+          low: lowFirst ? point.firstParameter : point.secondParameter,
+          high: lowFirst ? point.secondParameter : point.firstParameter,
+        }));
+      });
+      const total = entries.length;
+      const rankBy = (select: (entry: (typeof entries)[number]) => number) => {
+        const rank = new Array<number>(total);
+        entries
+          .map((_, index) => index)
+          .sort((l, r) => select(entries[l]!) - select(entries[r]!))
+          .forEach((index, position) => (rank[index] = position));
+        return rank;
+      };
+      let lowRank = rankBy((entry) => entry.low);
+      let highRank = rankBy((entry) => entry.high);
+      // A derived key is never closed, so at most one side is a full circle.
+      const closedKey = (side: string) =>
+        members.some(
+          (member) =>
+            (branches[member.first]!.key === side &&
+              branches[member.first]!.closed) ||
+            (branches[member.second]!.key === side &&
+              branches[member.second]!.closed),
+        );
+      const cyclic = (ranks: number[], anchor: number) =>
+        ranks.map((rank) => (rank - ranks[anchor]! + total) % total);
+      if (closedKey(low)) lowRank = cyclic(lowRank, highRank.indexOf(0));
+      else if (closedKey(high)) highRank = cyclic(highRank, lowRank.indexOf(0));
+      let cursor = 0;
+      for (const member of members) {
+        const own = entries.slice(cursor, cursor + member.points.length);
+        const ranks = own.map((entry, offset) => ({
+          low: lowRank[cursor + offset]!,
+          high: highRank[cursor + offset]!,
+          lowFirst: entry.lowFirst,
+        }));
+        census.set(member, {
+          count: total,
+          first: ranks.map((rank) => (rank.lowFirst ? rank.low : rank.high)),
+          second: ranks.map((rank) => (rank.lowFirst ? rank.high : rank.low)),
+        });
+        cursor += member.points.length;
+      }
+    }
+    censuses.set(key, census);
+    return census.get(pair)!;
+  };
+
   for (const pair of pairs) {
     if (pair.kind !== "verified") continue;
     const a = branches[pair.first]!;
@@ -1360,7 +1671,7 @@ function collectEvents(
       joinOccurrence.push({ first: firstKey, second: secondKey, witness });
     }
 
-    const count = pair.points.length;
+    let count = pair.points.length;
     const rankAlong = (select: (point: NeutralCurvePointWitness) => number) => {
       const order = pair.points
         .map((_, index) => index)
@@ -1395,6 +1706,8 @@ function collectEvents(
     } else if (b.closed) {
       secondRank = cyclicFrom(secondRank, firstRank.indexOf(0));
     }
+    const family = familyCensus(pair);
+    if (family) ({ count, first: firstRank, second: secondRank } = family);
     pair.points.forEach((point, index) => {
       const id = `x:${a.index}:${b.index}:${index}`;
       const firstBounds = widenOnBranch(a, point.proof.firstParameterBounds);
@@ -1534,9 +1847,14 @@ function collectEvents(
     });
   }
 
+  // Self contacts are indexed per key: a derived output span's sub-spans
+  // continue one index sequence (every other key has one branch).
+  const selfOffsets = new Map<string, number>();
   for (const { branch: index, result } of selves) {
     if (result.kind !== "verified") continue;
     const branch = branches[index]!;
+    const offset = selfOffsets.get(branch.key) ?? 0;
+    selfOffsets.set(branch.key, offset + result.points.length);
     result.points.forEach((point, pointIndex) => {
       const id = `s:${index}:${pointIndex}`;
       const firstBounds = widenOnBranch(
@@ -1550,7 +1868,7 @@ function collectEvents(
       vertices.set(id, {
         id,
         classRoot: null,
-        key: selfIntersectionVertexKey(branch.key, pointIndex),
+        key: selfIntersectionVertexKey(branch.key, offset + pointIndex),
         position: toPoint(point.position),
         ballRadius: 0,
         ballBox: null,
@@ -1666,7 +1984,8 @@ type ComponentOutcome =
       code:
         | "region-vertex-order-uncertain"
         | "region-nesting-uncertain"
-        | "region-degenerate-curve";
+        | "region-degenerate-curve"
+        | "region-derived-tail-crossing";
       reason: string;
       branches: number[];
     };
@@ -1813,6 +2132,32 @@ async function buildComponent(
     ordered.set(index, sorted);
   }
 
+  // [TECH] G14 tail guard (T08b-g3): the membership of each trimmed derived
+  // end must be its branch's extreme occurrence on the tail side. The tail
+  // beyond it is then an open tail ending at a free branch end, dangling by
+  // construction and never built (below). Any other event on the tail (a
+  // crossing, a touch, another join, a self contact) fails the branch closed:
+  // undrawn geometry never bounds a face.
+  for (const index of componentBranches) {
+    const branch = branches[index]!;
+    const tails = branch.derived?.tails;
+    if (!tails) continue;
+    const list = ordered.get(index)!;
+    const at = (occurrence: Occurrence | undefined, pointId: SketchPointId) =>
+      occurrence?.key === `c:${classOf(pointId)}@${index}`;
+    if (
+      (tails.start && !at(list[0], tails.start.pointId)) ||
+      (tails.end && !at(list.at(-1), tails.end.pointId)) ||
+      (tails.start && tails.end && list.length < 2)
+    )
+      return {
+        kind: "blocked",
+        code: "region-derived-tail-crossing",
+        reason: `the trimmed-off tail of ${branch.description} meets other geometry beyond its published trim, where the curve is not drawn`,
+        branches: [index],
+      };
+  }
+
   // Sub-edges between consecutive vertices. Open tails end at a free branch end
   // (degree 1) and are dangling by construction, so they are not built.
   const edges: SubEdge[] = [];
@@ -1899,8 +2244,14 @@ async function buildComponent(
   }
   const groups: EdgeGroup[] = [];
   const grouped = new Set<number>();
-  const edgeOrder = (edge: SubEdge) =>
-    `${branches[edge.branch]!.key}\u0000${String(edge.ordinal).padStart(12, "0")}`;
+  // Sub-spans of one derived output span share its key: they order by sub-index.
+  const edgeOrder = (edge: SubEdge) => {
+    const branch = branches[edge.branch]!;
+    const sub = branch.derived
+      ? `${String(branch.derived.subIndex).padStart(12, "0")}\u0000`
+      : "";
+    return `${branch.key}\u0000${sub}${String(edge.ordinal).padStart(12, "0")}`;
+  };
   for (const seed of [...edges].sort((l, r) =>
     edgeOrder(l) < edgeOrder(r) ? -1 : 1,
   )) {
@@ -2883,6 +3234,7 @@ async function deriveArrangement(
     input.definition,
     input.solvedSnapshot,
     input.projectedReferences,
+    input.derivedCurves ?? [],
   );
   const emitForBranches = (
     code: string,
@@ -3311,6 +3663,25 @@ async function publishRegions(
       ballRadius: info.ballRadius,
     };
   };
+  /**
+   * A derived sub-span's sub-edges continue its output span's ordinals: the
+   * record's branch is the output span, and the ordinal indexes that
+   * branch's sub-edges in parameter order (every other branch: 0).
+   */
+  const derivedOrdinalOffset = (built: BuiltComponent, branch: Branch) =>
+    branch.derived
+      ? built.branches
+          .filter(
+            (index) =>
+              branches[index]!.key === branch.key &&
+              branches[index]!.derived!.subIndex < branch.derived!.subIndex,
+          )
+          .reduce(
+            (total, index) =>
+              total + Math.max(0, built.ordered.get(index)!.length - 1),
+            0,
+          )
+      : 0;
   const segment = (
     built: BuiltComponent,
     half: number,
@@ -3346,7 +3717,8 @@ async function publishRegions(
         primary.edge,
         forward ? "to" : "from",
       ),
-      sourceSegmentOrdinal: primary.edge.ordinal,
+      sourceSegmentOrdinal:
+        primary.edge.ordinal + derivedOrdinalOffset(built, branch),
     };
   };
 
