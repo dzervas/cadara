@@ -93,6 +93,7 @@ import {
   splineLineShallowRows,
   splineSplineCornerRows,
   regularPolygonOutline,
+  seedArcCapacityRows,
   uSlotPolygon,
   type AcceptedPair,
   type Authored,
@@ -5660,11 +5661,14 @@ describe("T08b-d SEL: declared vertices, adoption, U1 absorption", () => {
     );
   });
 
-  test("R9 staged cap (native, zero queries): wrap-zig34 d = +0.05 exceeds ONE production Euclid ceiling, so attempt 1 of a 2-attempt request exhausts exactly as today, stays exhausted, and attempt k may use k·C", () => {
+  test("R9 staged cap under [TECH] F12 (native, zero queries): wrap-zig34 d = +0.05 needs more than ONE production Euclid ceiling but its 378 leaves give m = 12, so it verifies alone and as attempt 1 of a 2-attempt request (stage 1 = m·C); an exhausted attempt stays sticky; attempt k may use k·m·C", () => {
     /** SEL with the real certifier; returns the verdict and the piece request. */
     const capture = (distance: number) => {
       const requests: PieceTubeChainRequest[] = [];
-      const real = createCertifiedCubicTubeChain();
+      const snapshots: ExactProofBudgetSnapshot[] = [];
+      const real = createCertifiedCubicTubeChainWithBudgetObserverForTest(
+        (snapshot) => snapshots.push(snapshot),
+      );
       const result = certifyDeclaredOffsetChain(
         wrap("wrap-zig34", distance).declared,
         query,
@@ -5681,36 +5685,40 @@ describe("T08b-d SEL: declared vertices, adoption, U1 absorption", () => {
           },
         },
       );
-      return { result, request: requests[0]! };
+      return { result, request: requests[0]!, snapshots };
     };
     const exhausted = {
       kind: "uncertain",
       code: "exact-query-proof-budget-exhausted",
     };
-    // Today (attempts = 1): the 378-leaf wrap needs ≈ 2.16M Euclid > 1.5M.
+    // The 378-leaf wrap needs ≈ 2.16M Euclid > 1.5M = C; before F12 it
+    // exhausted here. One cubic piece, so a piece-count multiplier is 1.
     const heavy = capture(0.05);
-    expect(heavy.result).toMatchObject({
-      ok: false,
-      code: codes.topologyUncertain,
-      message: expect.stringContaining("exact-query-proof-budget-exhausted"),
-    });
-    // Stage 1 of a 2-attempt request behaves exactly like one request.
+    expect(heavy.request.pieces).toHaveLength(1);
+    expect(heavy.snapshots.at(-1)!.euclideanSteps).toBe(2_162_698);
+    expect(heavy.result.ok, "m = ⌈378 / 32⌉ = 12").toBe(true);
+    // Stage 1 of a 2-attempt request is m·C, not C.
     const staged = createCertifiedCubicTubeChain().openRequest(2);
     expect(
-      staged.certifyPieceChain(heavy.request),
-      "attempt 1 capped at 1·C",
-    ).toMatchObject(exhausted);
-    // Sticky: a cheap second attempt (the 204-leaf d = −0.01 wrap, ≈ 1.09M
-    // Euclid, verifies alone) never works after an exhausted attempt.
+      staged.certifyPieceChain(heavy.request).kind,
+      "attempt 1 capped at m·C",
+    ).toBe("verified");
+    // Sticky, with an absolute lower Euclid limit of one C: attempt 1
+    // exhausts, and a cheap second attempt (the 204-leaf d = −0.01 wrap,
+    // ≈ 1.09M Euclid, verifies alone) never works after it.
     const light = capture(-0.01);
     expect(light.result.ok).toBe(true);
-    expect(staged.certifyPieceChain(light.request), "sticky").toMatchObject(
+    const lowered = createCertifiedCubicTubeChainWithLowerBudgetForTest({
+      euclideanSteps: 1_500_000,
+    }).openRequest(2);
+    expect(lowered.certifyPieceChain(heavy.request)).toMatchObject(exhausted);
+    expect(lowered.certifyPieceChain(light.request), "sticky").toMatchObject(
       exhausted,
     );
-    // Stage k is k·C: two light attempts (≈ 2.18M Euclid cumulative) verify.
+    // Stage k is k·m·C: two light attempts (≈ 2.18M Euclid cumulative) verify.
     const twice = createCertifiedCubicTubeChain().openRequest(2);
     expect(twice.certifyPieceChain(light.request).kind).toBe("verified");
-    expect(twice.certifyPieceChain(light.request).kind, "stage 2 = 2·C").toBe(
+    expect(twice.certifyPieceChain(light.request).kind, "stage 2").toBe(
       "verified",
     );
   }, 120_000);
@@ -8473,4 +8481,243 @@ describe("T08b-f seed-arc JVP (design §7) against a central finite difference (
       }
     },
   );
+});
+
+describe("T08b-f1 [TECH] F12: the certifier's whole-request ceiling scales with the leaf count (m = min(⌈leaves / 32⌉, 128) from the charged flattened leaves, charges unchanged, integerBits unscaled)", () => {
+  const C_EUCLID = 1_500_000;
+  const arcHarness = createNativeArcOffsetHarness({
+    authoring: createNativeArcAuthoring("sketch_t08bf"),
+    modelingTolerance: 1e-3,
+    solveTolerances: SKETCH_DIRECT_EDIT_TOLERANCES,
+  });
+  const splineHarness = createNativeOffsetChainHarness({
+    authoring: createNativeToolAuthoring("sketch_t08bd"),
+    query,
+    modelingTolerance: 1e-3,
+  });
+  const exhausted = {
+    kind: "uncertain",
+    code: "exact-query-proof-budget-exhausted",
+  };
+  const declaredOf = (label: string) => {
+    const row = seedArcCapacityRows().find(
+      (item) => `${item.row} ${item.distance}` === label,
+    );
+    if (!row) throw new Error(`no row ${label}`);
+    const { declared } = arcHarness.adapt(row.build(arcHarness), row.distance);
+    if (!declared.ok) throw new Error(`${declared.code}: ${declared.message}`);
+    return declared;
+  };
+  /** One production SEL run: its verdict, piece requests and snapshots. */
+  const capture = (declared: DeclaredOffsetChainPieces) => {
+    const requests: PieceTubeChainRequest[] = [];
+    const snapshots: ExactProofBudgetSnapshot[] = [];
+    const real = createCertifiedCubicTubeChainWithBudgetObserverForTest(
+      (snapshot) => snapshots.push(snapshot),
+    );
+    const result = certifyDeclaredOffsetChain(declared, query, {
+      openRequest: (attempts) => {
+        const request = real.openRequest(attempts);
+        return {
+          certifyPieceChain: (item) => {
+            requests.push(item);
+            return request.certifyPieceChain(item);
+          },
+        };
+      },
+    });
+    if (!result.ok) throw new Error(`${result.code}: ${result.message}`);
+    return { certificate: result.certificate, requests, snapshots };
+  };
+  /** wrap-zig34 d = +0.05: one cubic piece, 378 leaves, ≈ 1.44 C Euclid. */
+  const heavyWrap = () => {
+    splineHarness.resetSequence();
+    const run = capture(
+      splineHarness.nativeChain(
+        [
+          positionalClosureSpline(
+            splineHarness,
+            POSITIONAL_WRAPS["wrap-zig34"],
+          ),
+        ],
+        0.05,
+      ).declared,
+    );
+    expect(run.requests).toHaveLength(1);
+    expect(run.certificate.leaves).toHaveLength(378);
+    return run;
+  };
+  const meterOf = (snapshot: ExactProofBudgetSnapshot) => ({
+    operations: snapshot.operations,
+    euclideanSteps: snapshot.euclideanSteps,
+    integerBits: Math.max(snapshot.maxStoredBits, snapshot.maxPreProductBits),
+  });
+
+  // Capacity row: exhausted before F12 (≈ 120 % of one Euclid ceiling);
+  // 64 leaves give m = 2. Lower limits are absolute, so count / count − 1
+  // pin the unchanged charges.
+  const POLYGON_32_METER = {
+    operations: 6_881_306,
+    euclideanSteps: 1_798_813,
+    integerBits: 413,
+  };
+  test("native rounded 32-gon d = −0.01 (32 lines + 32 fillets, 64 leaves, m = 2) needs more than one production Euclid ceiling and verifies; count / count − 1 on operations, Euclid and bits", () => {
+    const declared = declaredOf("rounded 32-gon -0.01");
+    const run = capture(declared);
+    expect(run.certificate.leaves).toHaveLength(64);
+    expect(run.snapshots).toHaveLength(1);
+    const meter = meterOf(run.snapshots[0]!);
+    expect(meter.euclideanSteps, "premise: above one ceiling").toBeGreaterThan(
+      C_EUCLID,
+    );
+    expect(meter).toEqual(POLYGON_32_METER);
+    const under = (limits: Record<string, number>) =>
+      certifyDeclaredOffsetChain(
+        declared,
+        query,
+        createCertifiedCubicTubeChainWithLowerBudgetForTest(limits),
+      );
+    for (const kind of [
+      "operations",
+      "euclideanSteps",
+      "integerBits",
+    ] as const) {
+      expect(under({ [kind]: POLYGON_32_METER[kind] }).ok, kind).toBe(true);
+      expect(under({ [kind]: POLYGON_32_METER[kind] - 1 }), kind).toMatchObject(
+        {
+          ok: false,
+          code: codes.topologyUncertain,
+          message: expect.stringContaining(
+            "exact-query-proof-budget-exhausted",
+          ),
+        },
+      );
+    }
+  }, 300_000);
+
+  test("the 32 / 33 leaf boundary (m = 1 / m = 2; a declared F1 arc counts one leaf) is fixed by attempt 1 for the whole staged request: a heavy 378-leaf attempt 2 is never rescaled", () => {
+    // 31 piece leaves + 1 F1 arc (the unfilleted outward corner) = 32.
+    const at32 = capture(declaredOf("16-gon with 15 fillets -0.01"));
+    expect(at32.certificate.leaves).toHaveLength(32);
+    expect(at32.certificate.arcs).toHaveLength(1);
+    const at33 = capture(declaredOf("17-gon with 16 fillets 0.01"));
+    expect(at33.certificate.leaves).toHaveLength(33);
+    expect(at33.certificate.arcs ?? []).toHaveLength(0);
+    const heavy = heavyWrap();
+    const euclid = (run: { snapshots: ExactProofBudgetSnapshot[] }) =>
+      run.snapshots.at(-1)!.euclideanSteps;
+    // Premises: 32 + heavy exceeds 2·C; 33 + heavy fits 2·2·C.
+    expect(euclid(at32) + euclid(heavy)).toBeGreaterThan(2 * C_EUCLID);
+    expect(euclid(at33) + euclid(heavy)).toBeLessThanOrEqual(4 * C_EUCLID);
+    const staged = (first: PieceTubeChainRequest) => {
+      const request = createCertifiedCubicTubeChain().openRequest(2);
+      return [
+        request.certifyPieceChain(first),
+        request.certifyPieceChain(heavy.requests[0]!),
+      ];
+    };
+    const [first32, second32] = staged(at32.requests[0]!);
+    expect(first32!.kind).toBe("verified");
+    expect(second32, "m = 1: stage 2 is 2·C").toMatchObject(exhausted);
+    const [first33, second33] = staged(at33.requests[0]!);
+    expect(first33!.kind).toBe("verified");
+    expect(second33!.kind, "m = 2: stage 2 is 4·C").toBe("verified");
+  }, 300_000);
+
+  test("the legacy path scales too: the heavy wrap's 378 cubic leaves as ONE open legacy chain reach their clearance verdict at m = 12, and exhaust under one absolute Euclid ceiling", () => {
+    const heavy = heavyWrap();
+    const piece = heavy.requests[0]!.pieces[0]!;
+    if (piece.kind !== "cubic") throw new Error("not a cubic piece");
+    const legacy = {
+      modelingTolerance: heavy.requests[0]!.modelingTolerance,
+      closed: false,
+      tubes: piece.tubes,
+    };
+    // The cut-open wrap's ends overlap: an honest clearance failure.
+    expect(createCertifiedCubicTubeChain().certifyChain(legacy)).toMatchObject({
+      kind: "uncertain",
+      code: "cubic-tube-clearance-unproven",
+    });
+    expect(
+      createCertifiedCubicTubeChainWithLowerBudgetForTest({
+        euclideanSteps: C_EUCLID,
+      }).certifyChain(legacy),
+    ).toMatchObject(exhausted);
+  }, 120_000);
+
+  // Review R2: the single-piece delegate of `certifyPieceChain` scales too.
+  test("the single-piece delegate scales too: the heavy wrap's 378 leaves as ONE open cubic piece reach their clearance verdict, and exhaust under one absolute Euclid ceiling", () => {
+    const request = heavyWrap().requests[0]!;
+    const piece = request.pieces[0]!;
+    if (piece.kind !== "cubic") throw new Error("not a cubic piece");
+    expect(piece.tubes).toHaveLength(378);
+    const single: PieceTubeChainRequest = {
+      modelingTolerance: request.modelingTolerance,
+      distance: request.distance,
+      closed: false,
+      pieces: [piece],
+      trims: [],
+    };
+    // The cut-open wrap's ends overlap: an honest clearance failure.
+    expect(
+      createCertifiedCubicTubeChain().certifyPieceChain(single),
+    ).toMatchObject({
+      kind: "uncertain",
+      code: "cubic-tube-clearance-unproven",
+    });
+    expect(
+      createCertifiedCubicTubeChainWithLowerBudgetForTest({
+        euclideanSteps: C_EUCLID,
+      }).certifyPieceChain(single),
+    ).toMatchObject(exhausted);
+  }, 120_000);
+
+  // Review R3: the multiplier's magnitude well above 2. A mirror-symmetric
+  // closed zig-zag spline with 28 teeth per side (62 points) at +0.05 has
+  // 1 386 leaves (m = 44) and needs > 10 Euclid ceilings. Lower limits are
+  // absolute, so count / count − 1 pin the unchanged charge. ≈ 17 s.
+  test("a 1 386-leaf zig-zag spline (m = 44) needs more than ten production Euclid ceilings and verifies; count / count − 1 on Euclid", () => {
+    const zig = (teeth: number): Vector[] => {
+      const right: Vector[] = [];
+      for (let j = 0; j <= 2 * teeth; j += 1)
+        right.push([j % 2 === 0 ? 2 : 1.3, 0.5 + 0.7 * j]);
+      const top: Vector = [0, right.at(-1)![1] + 1.4];
+      return [
+        [0, 0],
+        [1, 0],
+        ...right,
+        top,
+        ...right
+          .slice()
+          .reverse()
+          .map(([x, y]): Vector => [-x, y]),
+        [-1, 0],
+      ];
+    };
+    splineHarness.resetSequence();
+    const { declared } = splineHarness.nativeChain(
+      [positionalClosureSpline(splineHarness, zig(28))],
+      0.05,
+    );
+    const run = capture(declared);
+    expect(run.requests).toHaveLength(1);
+    expect(run.certificate.leaves).toHaveLength(1_386);
+    const euclid = run.snapshots.at(-1)!.euclideanSteps;
+    expect(euclid, "premise: above ten ceilings").toBeGreaterThan(
+      10 * C_EUCLID,
+    );
+    expect(euclid).toBe(15_646_822);
+    const under = (euclideanSteps: number) =>
+      certifyDeclaredOffsetChain(
+        declared,
+        query,
+        createCertifiedCubicTubeChainWithLowerBudgetForTest({ euclideanSteps }),
+      );
+    expect(under(euclid).ok).toBe(true);
+    expect(under(euclid - 1)).toMatchObject({
+      ok: false,
+      code: codes.topologyUncertain,
+      message: expect.stringContaining("exact-query-proof-budget-exhausted"),
+    });
+  }, 300_000);
 });

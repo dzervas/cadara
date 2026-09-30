@@ -2852,6 +2852,95 @@ describe("piece tube chain (L1b): Lemma-T trims under one meter", () => {
     ]);
   });
 
+  // [TECH] F12 (T08b-f1): the leaf multiplier is applied only once the
+  // leaves are charged. On the legacy path (and the single-piece delegate)
+  // that is right after the 64 + 16·count precharge, so 700 000 unread tube
+  // holes (11 200 064 ops > one ceiling) still exhaust at m = 1 instead of
+  // reaching admission under m = ⌈7e5 / 32⌉.
+  test("[TECH] F12: the legacy chain and the single-piece delegate apply the leaf multiplier only after the 64 + 16·count precharge", () => {
+    const snapshots: ExactProofBudgetSnapshot[] = [];
+    const chain = createCertifiedCubicTubeChainWithBudgetObserverForTest(
+      (value) => snapshots.push(value),
+    );
+    const holes = new Array(700_000) as NeutralCubicTube[];
+    expect(chain.certifyChain(request(holes))).toEqual(EXHAUSTED_RESULT);
+    expect(
+      chain.certifyPieceChain(
+        pieceRequest([cubicPiece(holes as NeutralCubicPieceTube[])], [], {
+          distance: 0.2,
+        }),
+      ),
+    ).toEqual(EXHAUSTED_RESULT);
+    expect(snapshots.map(({ operations }) => operations)).toEqual([
+      11_200_064, 11_200_064,
+    ]);
+  });
+
+  // [TECH] F12 review R1: on the piece path too, m is applied only after the
+  // core's own 64 + 16·count precharge, so an oversized (here: holey)
+  // flattened chain still exhausts at m = 1 before any tube is read, exactly
+  // as before F12 (700 005 flattening precharge + the core's 11 200 096).
+  test("[TECH] F12: a 700 000-leaf piece chain exhausts at the core's 64 + 16·count precharge before the leaf multiplier applies", () => {
+    const base = uChain(1e-5);
+    const cubic = base.pieces[1] as Extract<TubeChainPiece, { kind: "cubic" }>;
+    const snapshots: ExactProofBudgetSnapshot[] = [];
+    const chain = createCertifiedCubicTubeChainWithBudgetObserverForTest(
+      (value) => snapshots.push(value),
+    );
+    expect(
+      chain.certifyPieceChain({
+        ...base,
+        pieces: [
+          base.pieces[0]!,
+          { ...cubic, tubes: new Array(700_000) },
+          base.pieces[2]!,
+        ],
+      }),
+    ).toEqual(EXHAUSTED_RESULT);
+    expect(snapshots.map(({ operations }) => operations)).toEqual([11_900_101]);
+  });
+
+  // [TECH] F12a: m = min(⌈leaves / 32⌉, 128). Attempt 1 of a staged request
+  // (N₁ unread holes, invalid tolerance: precharged, scaled, then rejected)
+  // fixes m; attempt 2's precharge (64 retry + 64 + 16·N₂) then meets the
+  // stage-2 ceiling 2·m·C. With 16·(N₁ + N₂) + 192 = 2·128·C it passes
+  // exactly; 16 more ops exhaust. 4 096 leaves are m = 128 uncapped; 4 097
+  // and 600 000 leaves (⌈·/32⌉ = 129, 18 750) are capped at 128.
+  test("[TECH] F12a: the leaf multiplier is capped at 128: a staged request's stage-2 ceiling is 2·128·C for any attempt 1 of ≥ 4 096 leaves; larger requests fail closed by exhaustion", () => {
+    const CAPPED_STAGE_2 = 2 * 128 * 10_000_000;
+    const holes = (count: number) =>
+      pieceRequest(
+        [cubicPiece(new Array(count) as NeutralCubicPieceTube[])],
+        [],
+        { distance: 0.2, modelingTolerance: Number.NaN },
+      );
+    const invalid = {
+      kind: "uncertain",
+      code: "invalid-cubic-tube-chain",
+    };
+    for (const first of [4_096, 4_097, 600_000]) {
+      const second = (CAPPED_STAGE_2 - 192) / 16 - first;
+      for (const [extra, result] of [
+        [0, invalid],
+        [1, EXHAUSTED_RESULT],
+      ] as const) {
+        const snapshots: ExactProofBudgetSnapshot[] = [];
+        const staged = createCertifiedCubicTubeChainWithBudgetObserverForTest(
+          (value) => snapshots.push(value),
+        ).openRequest(2);
+        expect(staged.certifyPieceChain(holes(first))).toMatchObject(invalid);
+        expect(
+          staged.certifyPieceChain(holes(second + extra)),
+          `${first} + ${second + extra}`,
+        ).toMatchObject(result);
+        expect(snapshots.map(({ operations }) => operations)).toEqual([
+          64 + 16 * first,
+          CAPPED_STAGE_2 + 16 * extra,
+        ]);
+      }
+    }
+  });
+
   test("a line tube needs exactly two emitted and two source ends", () => {
     const base = uChain(1e-5);
     const line = base.pieces[0] as Extract<TubeChainPiece, { kind: "line" }>;
