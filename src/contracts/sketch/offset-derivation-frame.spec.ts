@@ -1,0 +1,1476 @@
+import { describe, expect, test } from "vitest";
+import type {
+  CertifiedTubePieceChainRequests,
+  NeutralCurveQueryRequest,
+  NeutralCurveQueryResult,
+  PieceTubeChainRequest,
+  TubePieceChainResult,
+} from "@/contracts/modeling/neutral-curve-query";
+import type {
+  SketchEntityId,
+  SketchId,
+  SketchPointId,
+} from "@/contracts/shared/ids";
+import type { SketchDefinition } from "@/contracts/sketch/schema";
+import type { SketchConstraintToolId } from "@/core/sketch-constraints/definition";
+import {
+  getSketchConstraintDefinition,
+  resolveSketchConstraintTarget,
+} from "@/core/sketch-constraints/registry";
+import { lineSketchToolDefinition } from "@/core/sketch-tools/tools/line";
+import { splineSketchToolDefinition } from "@/core/sketch-tools/tools/spline";
+import { centerPointArcSketchToolDefinition } from "@/core/sketch-tools/tools/center-point-arc";
+import { circleSketchToolDefinition } from "@/core/sketch-tools/tools/circle";
+import { rectangleSketchToolDefinition } from "@/core/sketch-tools/tools/rectangle";
+import {
+  createSketchFilletMutation,
+  createSketchOffsetDerivationContribution,
+  createSketchSlotContribution,
+} from "@/domain/sketch-editing/operations";
+import { appendInferredSnapConstraints } from "@/domain/editor/sketch-session/tools";
+import { createSessionCommitFactories } from "@/domain/editor/sketch-session/internals";
+import { createDocumentSolverTolerances } from "@/contracts/solver/schema";
+import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+import { extractDeclaredOffsetChainConnectivity } from "@/contracts/sketch/offset-chain-connectivity";
+import {
+  CORNER_MATRIX_SOLVE_TOLERANCES,
+  createNativeArcOffsetHarness,
+  createNativeOffsetChainHarness,
+  microSeedArcRows,
+  nearCollinearCornerRow,
+  offsetFrameChainRows,
+  seedArcRows,
+  type AcceptedPair,
+  type Authored,
+  type EndpointSnaps,
+  type NativeArcAuthoring,
+  type NativeToolAuthoring,
+  type Vector,
+} from "@/contracts/sketch/offset-chain.fixtures";
+import {
+  certifyDeclaredOffsetChain,
+  declaredOffsetChainPieces,
+  offsetArcSweepAdmissible,
+  uncheckedDeclaredOffsetChainPieces,
+  type CertifiedNeutralCurveRequestQuery,
+  type CertifiedOffsetChainTubeStability,
+  type DeclaredOffsetChainPieces,
+} from "@/contracts/sketch/offset-chain-topology";
+import {
+  publishOffsetFrame,
+  solveOffsetFrame,
+  type CertifiedOffsetFramePublication,
+  type OffsetFramePlan,
+  type OffsetFramePublication,
+  type OffsetFrameRelationship,
+  type OffsetSolveFrame,
+  type OffsetSolveFrameResult,
+} from "@/contracts/sketch/offset-derivation-frame";
+import { OFFSET_DIAGNOSTIC_CODES } from "@/contracts/sketch/offset-geometry";
+import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
+import { createCertifiedNeutralCurveRequestQuery } from "@/domain/modeling/neutral-curve-certification/query";
+
+/*
+ * The native authoring seams below are the offset-chain topology spec's own
+ * (verbatim): contracts fixtures may not import implementation layers
+ * (static guard), so each spec injects them.
+ */
+
+function createNativeToolAuthoring(sketchId: string): NativeToolAuthoring {
+  const factories = createSessionCommitFactories(1, sketchId as never);
+  const endpointSnap = (pointId: SketchPointId, point: Vector) => ({
+    key: `endpoint:${pointId}`,
+    kind: "endpoint" as const,
+    point,
+    rawPointer: point,
+    distance: 0,
+    priority: 0,
+    sources: [{ kind: "localPoint" as const, pointId }],
+    preview: { label: "endpoint", glyph: "endpoint" as const },
+  });
+  const infer = (
+    previousDefinition: SketchDefinition,
+    activeTool: "line" | "spline",
+    patch: ReturnType<typeof lineSketchToolDefinition.createCommitContribution>,
+    sequence: number,
+    start: Vector,
+    end: Vector,
+    snaps: EndpointSnaps,
+  ) =>
+    appendInferredSnapConstraints({
+      previousDefinition,
+      patch,
+      activeTool,
+      startSnap: snaps.start ? endpointSnap(snaps.start, start) : null,
+      endSnap: snaps.end ? endpointSnap(snaps.end, end) : null,
+      sequence,
+      createConstraintId: (name: string) => `constraint_${name}` as never,
+    });
+  return {
+    line: ({ previousDefinition, sequence, start, end, snaps }) =>
+      infer(
+        previousDefinition,
+        "line",
+        lineSketchToolDefinition.createCommitContribution({
+          sequence,
+          start,
+          end,
+          isConstruction: false,
+          factories,
+        }),
+        sequence,
+        start,
+        end,
+        snaps,
+      ),
+    spline: ({ previousDefinition, sequence, points, snaps }) =>
+      infer(
+        previousDefinition,
+        "spline",
+        splineSketchToolDefinition.createCommitContribution({
+          sequence,
+          start: points[0]!,
+          end: points.at(-1)!,
+          points: points as [number, number][],
+          isConstruction: false,
+          factories,
+        }),
+        sequence,
+        points[0]!,
+        points.at(-1)!,
+        snaps,
+      ),
+  };
+}
+
+function createNativeArcAuthoring(sketchId: string): NativeArcAuthoring {
+  const factoriesOf = (sequence: number) =>
+    createSessionCommitFactories(sequence, sketchId as never);
+  const endpointSnap = (pointId: SketchPointId, point: Vector) => ({
+    key: `endpoint:${pointId}`,
+    kind: "endpoint" as const,
+    point,
+    rawPointer: point,
+    distance: 0,
+    priority: 0,
+    sources: [{ kind: "localPoint" as const, pointId }],
+    preview: { label: "endpoint", glyph: "endpoint" as const },
+  });
+  const infer = (
+    previousDefinition: SketchDefinition,
+    activeTool: "line" | "spline" | "centerPointArc",
+    patch: Authored,
+    sequence: number,
+    start: Vector,
+    end: Vector,
+    snaps: EndpointSnaps,
+  ) =>
+    appendInferredSnapConstraints({
+      previousDefinition,
+      patch: patch as never,
+      activeTool: activeTool as never,
+      startSnap: snaps.start ? endpointSnap(snaps.start, start) : null,
+      endSnap: snaps.end ? endpointSnap(snaps.end, end) : null,
+      sequence,
+      createConstraintId: (name: string) =>
+        `constraint_${sequence}_${name}` as never,
+    }) as Authored;
+  return {
+    line: ({ previousDefinition, sequence, start, end, snaps }) =>
+      infer(
+        previousDefinition,
+        "line",
+        lineSketchToolDefinition.createCommitContribution({
+          sequence,
+          start,
+          end,
+          isConstruction: false,
+          factories: factoriesOf(sequence),
+        }) as Authored,
+        sequence,
+        start,
+        end,
+        snaps,
+      ),
+    arc: ({ previousDefinition, sequence, center, start, end, snaps }) =>
+      infer(
+        previousDefinition,
+        "centerPointArc",
+        centerPointArcSketchToolDefinition.createCommitContribution({
+          sequence,
+          points: [center, start, end],
+          isConstruction: false,
+          factories: factoriesOf(sequence),
+        } as never) as Authored,
+        sequence,
+        start,
+        end,
+        snaps,
+      ),
+    spline: ({ previousDefinition, sequence, points, snaps }) =>
+      infer(
+        previousDefinition,
+        "spline",
+        splineSketchToolDefinition.createCommitContribution({
+          sequence,
+          start: points[0]!,
+          end: points.at(-1)!,
+          points: points as [number, number][],
+          isConstruction: false,
+          factories: factoriesOf(sequence),
+        }) as Authored,
+        sequence,
+        points[0]!,
+        points.at(-1)!,
+        snaps,
+      ),
+    circle: ({ sequence, center, rim }) =>
+      circleSketchToolDefinition.createCommitContribution({
+        sequence,
+        start: center,
+        end: rim,
+        isConstruction: false,
+        factories: factoriesOf(sequence),
+      } as never) as Authored,
+    rectangle: ({ sequence, start, end }) =>
+      rectangleSketchToolDefinition.createCommitContribution({
+        sequence,
+        start,
+        end,
+        isConstruction: false,
+        factories: factoriesOf(sequence),
+      } as never) as Authored,
+    fillet: ({ definition, sequence, entityIds, radius }) => {
+      const result = createSketchFilletMutation({
+        definition,
+        entityIds,
+        radius,
+        sequence,
+        factories: factoriesOf(sequence),
+      } as never);
+      if (!result.valid || !result.definition)
+        throw new Error(`fillet: ${result.message}`);
+      return result.definition;
+    },
+    slot: ({ definition, sequence, lineId, width }) => {
+      const result = createSketchSlotContribution({
+        definition,
+        entityIds: [lineId],
+        width,
+        sequence,
+        factories: factoriesOf(sequence),
+      } as never);
+      if (!result.valid || !result.contribution)
+        throw new Error(`slot: ${result.message}`);
+      return result.contribution as Authored;
+    },
+    constraint: ({ definition, sequence, toolId, entityIds }) => {
+      const tool = toolId as SketchConstraintToolId;
+      const contribution = getSketchConstraintDefinition(
+        tool,
+      ).createCommitContribution({
+        sequence,
+        selectedTargets: entityIds.map((entityId) => {
+          const record = resolveSketchConstraintTarget(tool, definition, {
+            kind: "sketchEntity",
+            sketchId: sketchId as SketchId,
+            entityId,
+          });
+          if (!record) throw new Error(`${toolId} rejected ${entityId}`);
+          return record;
+        }),
+        pointer: null,
+        value: null,
+        annotationPlacement: null,
+        createConstraintId: (suffix) =>
+          `constraint_${sequence}_${suffix}` as const,
+        createDimensionId: (suffix) =>
+          `dimension_${sequence}_${suffix}` as const,
+      });
+      const constraints = contribution.constraints ?? [];
+      const dimensions = contribution.dimensions ?? [];
+      return {
+        ...definition,
+        constraintIds: [
+          ...definition.constraintIds,
+          ...constraints.map((constraint) => constraint.constraintId),
+        ],
+        constraints: [...definition.constraints, ...constraints],
+        dimensionIds: [
+          ...definition.dimensionIds,
+          ...dimensions.map((dimension) => dimension.dimensionId),
+        ],
+        dimensions: [...definition.dimensions, ...dimensions],
+      };
+    },
+    offset: ({ definition, sequence, entityIds, distance }) => {
+      const result = createSketchOffsetDerivationContribution({
+        definition,
+        entityIds,
+        distance: Math.abs(distance),
+        side: distance >= 0 ? "left" : "right",
+        sequence,
+        factories: factoriesOf(sequence),
+      } as never);
+      return result.valid && result.contribution
+        ? (result.contribution as never)
+        : null;
+    },
+  };
+}
+
+const TOLERANCE = 1e-3;
+const codes = OFFSET_DIAGNOSTIC_CODES;
+const query = createCertifiedNeutralCurveRequestQuery();
+const certifier = createCertifiedCubicTubeChain();
+const SKETCH_DIRECT_EDIT_TOLERANCES =
+  createDocumentSolverTolerances(OCC_KERNEL_SETTINGS);
+
+const bits = new DataView(new ArrayBuffer(8));
+/** Bitwise encoding (every number by its binary64 bits). */
+const encode = (value: unknown) =>
+  JSON.stringify(value, (_key, item: unknown) => {
+    if (typeof item !== "number") return item;
+    bits.setFloat64(0, item);
+    return `f64:${bits.getBigUint64(0).toString(16)}`;
+  });
+
+/** The adjacent binary64 value (finite, nonzero inputs). */
+const nextUp = (value: number, steps = 1) => {
+  bits.setFloat64(0, value);
+  const raw = bits.getBigUint64(0);
+  bits.setBigUint64(0, value > 0 ? raw + BigInt(steps) : raw - BigInt(steps));
+  return bits.getFloat64(0);
+};
+
+const relationshipOf = (
+  seedEntityIds: readonly SketchEntityId[],
+  distance: number,
+  arcJoints?: readonly number[],
+): OffsetFrameRelationship => ({
+  derivationId: "derivation_g1",
+  seedEntityIds,
+  distance,
+  ...(arcJoints ? { arcJoints } : {}),
+});
+
+interface Ports {
+  readonly query: CertifiedNeutralCurveRequestQuery;
+  readonly certifier: CertifiedTubePieceChainRequests;
+}
+
+/**
+ * Replaying ports (spec-only, runtime): the real whole-request query and the
+ * real staged certifier are deterministic functions of their request
+ * sequence, so an identical sequence (the SEL inside publish, run in full on
+ * the same adapter output) replays the first run's results; the first
+ * divergent request re-issues its prefix on a fresh real request and
+ * continues live. Results are therefore exactly the real ports'.
+ */
+function replaying<Request, Result>(
+  open: (size: number) => (request: Request) => Result,
+) {
+  const memo = new Map<string, Result>();
+  return (size: number) => {
+    const prefix: Request[] = [];
+    let live: ((request: Request) => Result) | null = null;
+    let key = `${size}`;
+    return (request: Request) => {
+      key += `|${encode(request)}`;
+      prefix.push(request);
+      const hit = live ? undefined : memo.get(key);
+      if (hit !== undefined) return hit;
+      if (!live) {
+        const opened = open(size);
+        for (const earlier of prefix.slice(0, -1)) opened(earlier);
+        live = opened;
+      }
+      const result = live(request);
+      memo.set(key, result);
+      return result;
+    };
+  };
+}
+
+/** Fresh replaying ports over the real query and certifier, with an attempt count. */
+function createReplayPorts(
+  inner: Ports = { query, certifier },
+): Ports & { readonly certifications: () => number } {
+  const pairs = replaying<NeutralCurveQueryRequest, NeutralCurveQueryResult>(
+    (size) => {
+      const request = inner.query.openRequest(size);
+      return (pair) => request.queryPair(pair);
+    },
+  );
+  const chains = replaying<PieceTubeChainRequest, TubePieceChainResult>(
+    (attempts) => {
+      const request = inner.certifier.openRequest(attempts);
+      return (chain) => request.certifyPieceChain(chain);
+    },
+  );
+  let certifications = 0;
+  return {
+    query: { openRequest: (size) => ({ queryPair: pairs(size) }) },
+    certifier: {
+      openRequest: (attempts) => {
+        const certify = chains(attempts);
+        return {
+          certifyPieceChain: (chain) => {
+            certifications += 1;
+            return certify(chain);
+          },
+        };
+      },
+    },
+    certifications: () => certifications,
+  };
+}
+
+const solveOf = (
+  relationship: OffsetFrameRelationship,
+  definition: AcceptedPair["definition"],
+  plan?: OffsetFramePlan,
+) =>
+  solveOffsetFrame(
+    { relationship, definition, modelingTolerance: TOLERANCE },
+    plan,
+  );
+
+const publishOf = (
+  relationship: OffsetFrameRelationship,
+  pair: AcceptedPair,
+  solveFrame: OffsetSolveFrame,
+  ports: Ports = { query, certifier },
+) =>
+  publishOffsetFrame({
+    relationship,
+    pair,
+    modelingTolerance: TOLERANCE,
+    ...ports,
+    solveFrame,
+  });
+
+const solvedFrame = (result: OffsetSolveFrameResult): OffsetSolveFrame => {
+  if (!result.ok) throw new Error(`solve frame: ${result.failure.message}`);
+  return result;
+};
+
+/**
+ * The orchestrator's contract (T08b-g plan §3.1): solve, publish, and on
+ * `planChanged` ONE re-solve with the certifier's plan and one more publish.
+ */
+function publishCycle(
+  relationship: OffsetFrameRelationship,
+  pair: AcceptedPair,
+  ports: Ports = { query, certifier },
+) {
+  const solves: OffsetSolveFrameResult[] = [];
+  const publications: OffsetFramePublication[] = [];
+  const solve = (plan?: OffsetFramePlan) => {
+    const frame = solveOf(relationship, pair.definition, plan);
+    solves.push(frame);
+    return frame;
+  };
+  const publish = (frame: OffsetSolveFrame) => {
+    const publication = publishOf(relationship, pair, frame, ports);
+    publications.push(publication);
+    return publication;
+  };
+  let frame = solve();
+  if (!frame.ok) return { solves, publications, final: frame } as const;
+  let publication = publish(frame);
+  if (publication.status === "planChanged") {
+    frame = solve(publication.plan);
+    if (!frame.ok) return { solves, publications, final: frame } as const;
+    publication = publish(frame);
+  }
+  return { solves, publications, final: publication } as const;
+}
+
+type Cycle = ReturnType<typeof publishCycle>;
+
+const certifiedOf = (cycle: Cycle): CertifiedOffsetFramePublication => {
+  const { final } = cycle;
+  if ("ok" in final)
+    throw new Error(`solve frame failed: ${final.failure.message}`);
+  if (final.status !== "certified")
+    throw new Error(
+      `${final.status}: ${final.status === "failed" ? final.failure.message : ""}`,
+    );
+  return final;
+};
+
+const failedOf = (publication: OffsetFramePublication) => {
+  if (publication.status !== "failed")
+    throw new Error(`expected a failed publication, got ${publication.status}`);
+  return publication;
+};
+
+/** Checked adapter output of one accepted pair (the SEL input). */
+function checkedOf(
+  pair: AcceptedPair,
+  seeds: readonly SketchEntityId[],
+  distance: number,
+) {
+  const connectivity = extractDeclaredOffsetChainConnectivity({
+    definition: pair.definition,
+    seedIds: seeds,
+  });
+  if (!connectivity.ok) throw new Error(connectivity.message);
+  return {
+    connectivity,
+    declared: declaredOffsetChainPieces({
+      definition: pair.definition,
+      solvedSnapshot: pair.solvedSnapshot,
+      connectivity,
+      distance,
+      modelingTolerance: TOLERANCE,
+    }),
+  };
+}
+
+/**
+ * G3 geometry agreement of a verified row: the published (solve-frame)
+ * pieces are the certified pieces bitwise (poles included), and every
+ * published representative lies in its witness bounds.
+ */
+function expectCertifiedGeometry(
+  publication: CertifiedOffsetFramePublication,
+  direct: CertifiedOffsetChainTubeStability,
+) {
+  const { frame } = publication;
+  expect(encode(frame.pieces), "pieces bitwise").toBe(
+    encode(direct.resolved.input.pieces),
+  );
+  for (const [index, piece] of frame.pieces.entries()) {
+    const certified = direct.resolved.input.pieces[index]!;
+    if (piece.kind !== "derivedCubic" || certified.kind !== "derivedCubic")
+      continue;
+    piece.spans.forEach((span, offset) =>
+      span.poles.forEach((pole, k) => {
+        const other = certified.spans[offset]!.poles[k]!;
+        expect(
+          Object.is(pole[0], other[0]) && Object.is(pole[1], other[1]),
+        ).toBe(true);
+      }),
+    );
+  }
+  expect(frame.trims).toHaveLength(direct.resolved.joints.length);
+  direct.resolved.joints.forEach((joint, position) => {
+    const trim = frame.trims[position]!;
+    expect(trim.jointIndex).toBe(joint.jointIndex);
+    const [a, b] = joint.firstParameterBounds;
+    const [c, d] = joint.secondParameterBounds;
+    expect(trim.first.parameter >= a && trim.first.parameter <= b).toBe(true);
+    expect(trim.second.parameter >= c && trim.second.parameter <= d).toBe(true);
+  });
+  expect(encode(publication.certified.resolved.input.pieces)).toBe(
+    encode(direct.resolved.input.pieces),
+  );
+}
+
+/**
+ * Publish ≡ SEL on one native row, through the orchestrator's cycle:
+ * - the unchecked piece builder is bitwise the checked adapter (G4);
+ * - verified ⇒ certified within one hinted re-solve, with the certified
+ *   geometry; SEL retries ⇒ `planChanged` first;
+ * - not verified ⇒ never certified, and a publish that ran reports the
+ *   SEL's own failure.
+ */
+function expectPublishMatchesSel(
+  pair: AcceptedPair,
+  seeds: readonly SketchEntityId[],
+  distance: number,
+) {
+  const ports = createReplayPorts();
+  const { connectivity, declared } = checkedOf(pair, seeds, distance);
+  const unchecked = uncheckedDeclaredOffsetChainPieces({
+    definition: pair.definition,
+    connectivity,
+    distance,
+    modelingTolerance: TOLERANCE,
+  });
+  expect(unchecked.ok).toBe(declared.ok);
+  if (declared.ok && unchecked.ok)
+    expect(
+      encode([unchecked.pieces, unchecked.sources, unchecked.vertices]),
+      "G4: unchecked = checked bitwise on the accepted pair",
+    ).toBe(encode([declared.pieces, declared.sources, declared.vertices]));
+  const direct = declared.ok
+    ? certifyDeclaredOffsetChain(declared, ports.query, ports.certifier)
+    : declared;
+  const attempts = ports.certifications();
+  const cycle = publishCycle(relationshipOf(seeds, distance), pair, ports);
+  if (direct.ok) {
+    const publication = certifiedOf(cycle);
+    expectCertifiedGeometry(publication, direct);
+    expect(publication.frame).toBe(cycle.solves.at(-1));
+    expect(publication.plan.origin).toBe("published");
+    if (attempts > 1)
+      expect(cycle.publications[0]!.status, "an SEL retry").toBe("planChanged");
+    // The planChanged reason: an SEL retry changes the plan; a first-attempt
+    // SEL plan is the first choice, so only representatives can miss.
+    const first = cycle.publications[0]!;
+    if (first.status === "planChanged")
+      expect(first.reason, "planChanged reason").toBe(
+        attempts > 1 ? "plan" : "representatives",
+      );
+    return { cycle, direct, attempts };
+  }
+  const last = cycle.publications.at(-1);
+  expect(last?.status ?? "not published").not.toBe("certified");
+  if (last?.status === "failed") expect(last.failure).toEqual(direct);
+  return { cycle, direct, attempts };
+}
+
+const matrixHarnesses = {
+  matrix: createNativeOffsetChainHarness({
+    authoring: createNativeToolAuthoring("sketch_g1m"),
+    query,
+    modelingTolerance: TOLERANCE,
+    solveTolerances: CORNER_MATRIX_SOLVE_TOLERANCES,
+  }),
+  native: createNativeOffsetChainHarness({
+    authoring: createNativeToolAuthoring("sketch_g1n"),
+    query,
+    modelingTolerance: TOLERANCE,
+  }),
+};
+const chainRows = offsetFrameChainRows();
+/** One native chain row's accepted pair and seeds (every entity is a seed). */
+const chainRow = (label: string) => {
+  const row = chainRows.find(
+    (item) => `${item.family} ${item.row} ${item.distance}` === label,
+  );
+  if (!row) throw new Error(`no row ${label}`);
+  const harness = matrixHarnesses[row.harness];
+  harness.resetSequence();
+  const pair = harness.solvedPair(row.build(harness));
+  const seeds = pair.definition.entities.map((entity) => entity.entityId);
+  return { pair, seeds, distance: row.distance };
+};
+
+const arcHarness = createNativeArcOffsetHarness({
+  authoring: createNativeArcAuthoring("sketch_g1f"),
+  modelingTolerance: TOLERANCE,
+  solveTolerances: SKETCH_DIRECT_EDIT_TOLERANCES,
+});
+const d3Rows = [...seedArcRows(), ...microSeedArcRows()];
+/** One native D3 row's accepted pair (Offset relationship authored) and seeds. */
+const d3Row = (label: string) => {
+  const row = d3Rows.find((item) => `${item.row} ${item.distance}` === label);
+  if (!row) throw new Error(`no row ${label}`);
+  const sketch = row.build(arcHarness);
+  const { pair } = arcHarness.adapt(sketch, row.distance);
+  return { pair, seeds: sketch.seeds, distance: row.distance };
+};
+
+describe("T08b-g1 frame owner: publish ≡ certifyDeclaredOffsetChain on every native row (corner matrix, convex arc, S2, positional wrap)", () => {
+  test.each(
+    chainRows.map((row) => [row.family, row.row, row.distance] as const),
+  )(
+    "%s %s d = %s",
+    (family, row, distance) => {
+      const { pair, seeds } = chainRow(`${family} ${row} ${distance}`);
+      expectPublishMatchesSel(pair, seeds, distance);
+    },
+    120_000,
+  );
+});
+
+describe("T08b-g1 frame owner: publish ≡ certifyDeclaredOffsetChain on every native D3 row (Offset relationship, seed arcs, micro arcs)", () => {
+  test.each(d3Rows.map((row) => [row.row, row.distance] as const))(
+    "D3 %s d = %s",
+    (row, distance) => {
+      const { pair, seeds } = d3Row(`${row} ${distance}`);
+      expectPublishMatchesSel(pair, seeds, distance);
+    },
+    60_000,
+  );
+});
+
+describe("T08b-g1 frame owner: [TECH] G3 plan agreement, one hinted re-solve", () => {
+  test("a first-choice row (LL-90 d = 0.01, one concave trim) verifies with no re-solve; the published plan seeds the next frame", () => {
+    const { pair, seeds, distance } = chainRow("corner matrix LL-90 0.01");
+    const relationship = relationshipOf(seeds, distance);
+    const cycle = publishCycle(relationship, pair);
+    expect(cycle.publications.map((item) => item.status)).toEqual([
+      "certified",
+    ]);
+    const publication = certifiedOf(cycle);
+    expect(publication.frame.plan.origin).toBe("firstChoice");
+    expect(publication.plan).toEqual({
+      origin: "published",
+      adjacencies: [
+        {
+          kind: "trim",
+          leaves: [0, 0],
+          representatives: [
+            publication.frame.trims[0]!.first.parameter,
+            publication.frame.trims[0]!.second.parameter,
+          ],
+        },
+      ],
+    });
+    // The published plan is a converged seed: the next frame keeps it bitwise.
+    const next = solvedFrame(
+      solveOf(relationship, pair.definition, publication.plan),
+    );
+    expect(encode(next.trims)).toBe(encode(publication.frame.trims));
+    expect(publishOf(relationship, pair, next).status).toBe("certified");
+  });
+
+  test("an SEL-retry row (convex arc C φ=0.1 d = −0.01: U-E absorption does not certify, the arc does) gives planChanged with the certifier's plan; the hinted re-solve verifies", () => {
+    const { pair, seeds, distance } = chainRow("convex arc C φ=0.1 -0.01");
+    const ports = createReplayPorts();
+    const { declared } = checkedOf(pair, seeds, distance);
+    if (!declared.ok) throw new Error(declared.message);
+    const direct = certifyDeclaredOffsetChain(
+      declared,
+      ports.query,
+      ports.certifier,
+    );
+    expect(direct.ok).toBe(true);
+    expect(ports.certifications(), "SEL attempts").toBe(2);
+    const cycle = publishCycle(relationshipOf(seeds, distance), pair, ports);
+    const [first, second] = cycle.solves.map(solvedFrame);
+    expect(first!.plan).toEqual({
+      origin: "firstChoice",
+      adjacencies: [{ kind: "absorbed", keeper: "first" }],
+    });
+    expect(cycle.publications[0]).toEqual({
+      status: "planChanged",
+      derivationId: "derivation_g1",
+      reason: "plan",
+      plan: { origin: "certified", adjacencies: [{ kind: "arc" }] },
+    });
+    expect(second!.plan).toEqual({
+      origin: "certified",
+      adjacencies: [{ kind: "arc" }],
+    });
+    expect(cycle.publications[1]!.status).toBe("certified");
+    if (!direct.ok) throw new Error(direct.message);
+    expectCertifiedGeometry(certifiedOf(cycle), direct);
+  });
+
+  test("a representative-only disagreement (line–arc–line semicircle d = −0.1: same plan, pieces bitwise, one Newton representative 9 ulps outside its witness bounds) is planChanged; the re-solve keeps the witness representatives bitwise and verifies", () => {
+    const { pair, seeds, distance } = d3Row("line-arc-line semicircle -0.1");
+    const cycle = publishCycle(relationshipOf(seeds, distance), pair);
+    const [first, second] = cycle.solves.map(solvedFrame);
+    const changed = cycle.publications[0]!;
+    if (changed.status !== "planChanged") throw new Error(changed.status);
+    expect(changed.reason).toBe("representatives");
+    const kinds = (plan: OffsetFramePlan) =>
+      plan.adjacencies.map((entry) =>
+        entry.kind === "trim" ? [entry.kind, entry.leaves] : [entry.kind],
+      );
+    expect(kinds(first!.plan)).toEqual(kinds(changed.plan));
+    const publication = certifiedOf(cycle);
+    expect(encode(first!.pieces)).toBe(encode(publication.frame.pieces));
+    const witnesses = publication.certified.resolved.joints;
+    expect(
+      second!.trims.map((trim) => [
+        trim.first.parameter,
+        trim.second.parameter,
+      ]),
+    ).toEqual(
+      witnesses.map((joint) => [joint.firstParameter, joint.secondParameter]),
+    );
+    const outside = first!.trims.filter((trim, index) => {
+      const joint = witnesses[index]!;
+      const within = (value: number, [low, high]: readonly [number, number]) =>
+        value >= low && value <= high;
+      return !(
+        within(trim.first.parameter, joint.firstParameterBounds) &&
+        within(trim.second.parameter, joint.secondParameterBounds)
+      );
+    });
+    expect(outside.length).toBeGreaterThan(0);
+  });
+
+  test("a forced second mismatch fails closed: a certified-origin hint that is not the certifier's plan (fabricated: C φ=0.1's arc flipped back to absorption) is never re-solved again", () => {
+    const { pair, seeds, distance } = chainRow("convex arc C φ=0.1 -0.01");
+    const relationship = relationshipOf(seeds, distance);
+    const hint = (origin: OffsetFramePlan["origin"]): OffsetFramePlan => ({
+      origin,
+      adjacencies: [{ kind: "absorbed", keeper: "first" }],
+    });
+    const hinted = solvedFrame(
+      solveOf(relationship, pair.definition, hint("certified")),
+    );
+    expect(hinted.plan).toEqual(hint("certified"));
+    const publication = failedOf(publishOf(relationship, pair, hinted));
+    expect(publication.failure).toEqual({
+      ok: false,
+      code: codes.topologyUncertain,
+      message: "The certified corner plan does not match the solved frame.",
+      seedEntityId: hinted.pieces[0]!.seedEntityId,
+    });
+    // Control: the same frame from a published (stale) plan is a first mismatch.
+    const stale = solvedFrame(
+      solveOf(relationship, pair.definition, hint("published")),
+    );
+    expect(publishOf(relationship, pair, stale)).toMatchObject({
+      status: "planChanged",
+      reason: "plan",
+    });
+  });
+
+  test("bitwise, not a tolerance: a solve frame of another definition iterate (fabricated pairing: one source point 1 ulp off the accepted pair) has the same plan and nearly the same pieces, and is planChanged, then fails closed as a hinted re-solve", () => {
+    const { pair, seeds, distance } = chainRow("corner matrix LL-90 -0.01");
+    const relationship = relationshipOf(seeds, distance);
+    const moved = pair.definition.points[1]!;
+    const iterate = {
+      ...pair.definition,
+      points: pair.definition.points.map((point) =>
+        point === moved
+          ? {
+              ...point,
+              position: [nextUp(point.position[0] || 1), point.position[1]],
+            }
+          : point,
+      ),
+    } as SketchDefinition;
+    const genuine = solvedFrame(solveOf(relationship, pair.definition));
+    const other = solvedFrame(solveOf(relationship, iterate));
+    expect(other.plan).toEqual(genuine.plan);
+    expect(encode(other.pieces)).not.toBe(encode(genuine.pieces));
+    expect(publishOf(relationship, pair, genuine).status).toBe("certified");
+    expect(publishOf(relationship, pair, other)).toMatchObject({
+      status: "planChanged",
+      reason: "plan",
+    });
+    const rehinted = solvedFrame(
+      solveOf(relationship, iterate, { ...other.plan, origin: "certified" }),
+    );
+    expect(
+      failedOf(publishOf(relationship, pair, rehinted)).failure.message,
+    ).toBe("The certified corner plan does not match the solved frame.");
+  });
+
+  test("representatives must lie in the witness bounds: a published plan 64 ulps off the certified roots is a converged seed the frame keeps bitwise, and publish returns planChanged", () => {
+    const { pair, seeds, distance } = chainRow("corner matrix LL-90 0.01");
+    const relationship = relationshipOf(seeds, distance);
+    const publication = certifiedOf(publishCycle(relationship, pair));
+    const [trim] = publication.frame.trims;
+    const shifted: readonly [number, number] = [
+      nextUp(trim!.first.parameter, 64),
+      trim!.second.parameter,
+    ];
+    const stale = solvedFrame(
+      solveOf(relationship, pair.definition, {
+        origin: "published",
+        adjacencies: [
+          { kind: "trim", leaves: [0, 0], representatives: shifted },
+        ],
+      }),
+    );
+    expect([
+      stale.trims[0]!.first.parameter,
+      stale.trims[0]!.second.parameter,
+    ]).toEqual(shifted);
+    expect(encode(stale.pieces)).toBe(encode(publication.frame.pieces));
+    expect(publishOf(relationship, pair, stale)).toEqual({
+      status: "planChanged",
+      derivationId: "derivation_g1",
+      reason: "representatives",
+      plan: {
+        origin: "certified",
+        adjacencies: [
+          {
+            kind: "trim",
+            leaves: [0, 0],
+            representatives: [
+              publication.certified.resolved.joints[0]!.firstParameter,
+              publication.certified.resolved.joints[0]!.secondParameter,
+            ],
+          },
+        ],
+      },
+    });
+  });
+});
+
+describe("T08b-g1 frame owner: every published datum is bound to the certified pieces", () => {
+  test("a solve frame whose published trim point is not the evaluation of its representative (fabricated frame, not solveOffsetFrame output: the point moved 1e-9) is planChanged", () => {
+    const { pair, seeds, distance } = chainRow("corner matrix LL-90 0.01");
+    const relationship = relationshipOf(seeds, distance);
+    const genuine = solvedFrame(solveOf(relationship, pair.definition));
+    expect(publishOf(relationship, pair, genuine).status).toBe("certified");
+    const [trim] = genuine.trims;
+    const position: readonly [number, number] = [
+      trim!.position[0] + 1e-9,
+      trim!.position[1],
+    ];
+    const lineArcEndpoints = new Map(
+      [...genuine.lineArcEndpoints].map(([seed, ends]) => [
+        seed,
+        {
+          ...ends,
+          start: ends.startDomainEnd.kind === "joint" ? position : ends.start,
+          end: ends.endDomainEnd.kind === "joint" ? position : ends.end,
+        },
+      ]),
+    );
+    const forged: OffsetSolveFrame = {
+      ...genuine,
+      trims: [{ ...trim!, position }],
+      lineArcEndpoints,
+    };
+    expect(publishOf(relationship, pair, forged)).toMatchObject({
+      status: "planChanged",
+      reason: "plan",
+    });
+  });
+});
+
+describe("T08b-g1 frame owner: §2.1 published seed-arc checks (R12 family, 0/2π wrap guard, R7 removed leaves, micro arcs)", () => {
+  /** A certifier port rewriting every verified seed-arc record (fabricated, not owner-reachable). */
+  const rewritingCertifier = (
+    rewrite: (
+      record: NonNullable<
+        Extract<
+          TubePieceChainResult,
+          { kind: "verified" }
+        >["certificate"]["seedArcs"]
+      >[number],
+    ) => object,
+    request: (chain: PieceTubeChainRequest) => PieceTubeChainRequest = (
+      chain,
+    ) => chain,
+  ): CertifiedTubePieceChainRequests => ({
+    openRequest: (attempts) => {
+      const inner = certifier.openRequest(attempts);
+      return {
+        certifyPieceChain: (chain) => {
+          const result = inner.certifyPieceChain(request(chain));
+          if (result.kind !== "verified") return result;
+          return {
+            ...result,
+            certificate: {
+              ...result.certificate,
+              seedArcs: result.certificate.seedArcs?.map((record) => ({
+                ...record,
+                ...rewrite(record),
+              })),
+            },
+          };
+        },
+      };
+    },
+  });
+
+  test("R12 is load-bearing natively: a trimmed-start seed arc (half-disc d = 0.1) publishes hypot(X_rep − C), bitwise off the certified ρ_o but inside the certified family", () => {
+    const { pair, seeds, distance } = d3Row("half-disc 0.1");
+    const publication = certifiedOf(
+      publishCycle(relationshipOf(seeds, distance), pair),
+    );
+    const { frame } = publication;
+    const trimmed = publication.certified.certificate.seedArcs!.filter(
+      (record) => {
+        const piece = frame.pieces[record.piece]!;
+        return (
+          frame.lineArcEndpoints.get(piece.seedEntityId)?.startDomainEnd
+            .kind === "joint"
+        );
+      },
+    );
+    expect(trimmed).toHaveLength(1);
+    const record = trimmed[0]!;
+    const piece = frame.pieces[record.piece]!;
+    if (piece.kind !== "arc") throw new Error("not a seed arc");
+    const ends = frame.lineArcEndpoints.get(piece.seedEntityId)!;
+    const radius = Math.hypot(
+      ends.start[0] - piece.center[0],
+      ends.start[1] - piece.center[1],
+    );
+    expect(radius).not.toBe(record.radius);
+    expect(radius).toBeGreaterThanOrEqual(record.radiusFamily[0]);
+    expect(radius).toBeLessThanOrEqual(record.radiusFamily[1]);
+  });
+
+  test("R12 adversary (fabricated certificate, not owner-reachable): a radius family that excludes the published radius fails closed", () => {
+    const { pair, seeds, distance } = d3Row("line-arc-line semicircle -0.1");
+    const cycle = publishCycle(relationshipOf(seeds, distance), pair, {
+      query,
+      certifier: rewritingCertifier((record) => ({
+        radiusFamily: [record.radius + 2 ** -20, record.radius + 2 ** -20],
+      })),
+    });
+    expect(failedOf(cycle.final as OffsetFramePublication).failure).toEqual({
+      ok: false,
+      code: codes.topologyUncertain,
+      message:
+        "The published seed-arc radius lies outside the certified radius family.",
+      seedEntityId: seeds[1],
+    });
+  });
+
+  test("wrap-guard adversary (fabricated query bounds, certificate family and solve frame, not owner-reachable): published trimmed ends one ulp apart whose binary64 atan2 sweep wraps to a full turn fail closed", () => {
+    // The flat 37° cap: ONE leaf trimmed at both natural ends (joints 0, 1).
+    const { pair, seeds, distance } = d3Row("line-arc-line flat cap -0.1");
+    const relationship = relationshipOf(seeds, distance);
+    const genuine = certifiedOf(publishCycle(relationship, pair));
+    const arc = genuine.frame.pieces[1]!;
+    if (arc.kind !== "arc") throw new Error("not a seed arc");
+    const point = (angle: number): readonly [number, number] => [
+      arc.center[0] + arc.radius * Math.cos(angle),
+      arc.center[1] + arc.radius * Math.sin(angle),
+    ];
+    // Two angles one ulp apart inside the retained cap whose points wrap
+    // under the consumer's binary64 atan2 (a tie): searched, deterministic.
+    const joints = genuine.certified.resolved.joints;
+    expect(arc.sweepDirection).toBe("counterClockwise");
+    const low = joints[0]!.secondParameter;
+    const high = joints[1]!.firstParameter;
+    let angles: readonly [number, number] | undefined;
+    for (let sample = 1; sample <= 200 && !angles; sample += 1)
+      for (let step = 0; step < 2000 && !angles; step += 1) {
+        const start = nextUp(low + ((high - low) * sample) / 201, step);
+        const end = nextUp(start);
+        if (
+          !offsetArcSweepAdmissible(
+            arc.center,
+            point(start),
+            point(end),
+            arc.sweepDirection,
+          )
+        )
+          angles = [start, end];
+      }
+    if (!angles) throw new Error("no wrapping angle pair in the cap");
+    const [startAngle, endAngle] = angles;
+    expect(startAngle).toBeLessThan(endAngle);
+    // Fabricated query: the arc-side witness bounds stretched into the
+    // cap, still ordered (joint 0 up to the start angle, joint 1 down from
+    // the end angle), so the resolver's trim-order check still holds.
+    const widen = (
+      bounds: readonly [number, number],
+      side: "first" | "second",
+    ) =>
+      side === "second"
+        ? ([bounds[0], Math.max(bounds[1], startAngle)] as const)
+        : ([Math.min(bounds[0], endAngle), bounds[1]] as const);
+    const fabricatedQuery: CertifiedNeutralCurveRequestQuery = {
+      openRequest: (size) => {
+        const inner = query.openRequest(size);
+        return {
+          queryPair: (request) => {
+            const result = inner.queryPair(request);
+            if (result.kind !== "verified" || result.points.length !== 1)
+              return result;
+            const arcSide =
+              request.first.kind === "circle" ? "first" : "second";
+            const [witness] = result.points;
+            const proof = witness!.proof;
+            return {
+              ...result,
+              points: [
+                {
+                  ...witness!,
+                  proof: {
+                    ...proof,
+                    ...(arcSide === "first"
+                      ? {
+                          firstParameterBounds: widen(
+                            proof.firstParameterBounds,
+                            "first",
+                          ),
+                        }
+                      : {
+                          secondParameterBounds: widen(
+                            proof.secondParameterBounds,
+                            "second",
+                          ),
+                        }),
+                  },
+                },
+              ],
+            } as NeutralCurveQueryResult;
+          },
+        };
+      },
+    };
+    // Fabricated certifier: certifies the genuine (unwidened) trims and
+    // reports an unbounded radius family, so only the wrap guard remains.
+    const genuineTrims = new Map(
+      joints.map((joint) => [
+        joint.jointIndex,
+        [joint.firstParameterBounds, joint.secondParameterBounds] as const,
+      ]),
+    );
+    const fabricatedCertifier = rewritingCertifier(
+      () => ({ radiusFamily: [0, Number.POSITIVE_INFINITY] }),
+      (chain) => ({
+        ...chain,
+        trims: chain.trims.map((trim) => ({
+          ...trim,
+          firstParameterBounds: genuineTrims.get(trim.jointIndex)![0],
+          secondParameterBounds: genuineTrims.get(trim.jointIndex)![1],
+        })),
+      }),
+    );
+    // Fabricated frame: the arc-side representatives moved to the angles.
+    const moved = (trim: OffsetSolveFrame["trims"][number]) =>
+      trim.jointIndex === 0
+        ? {
+            ...trim,
+            second: { ...trim.second, parameter: startAngle },
+            position: point(startAngle),
+          }
+        : {
+            ...trim,
+            first: { ...trim.first, parameter: endAngle },
+            position: point(endAngle),
+          };
+    const trims = genuine.frame.trims.map(moved);
+    const lineArcEndpoints = new Map(
+      [...genuine.frame.lineArcEndpoints].map(([seed, ends]) => {
+        const position = (
+          end: typeof ends.startDomainEnd,
+          own: readonly [number, number],
+        ) => (end.kind === "joint" ? trims[end.jointIndex]!.position : own);
+        return [
+          seed,
+          {
+            ...ends,
+            start: position(ends.startDomainEnd, ends.start),
+            end: position(ends.endDomainEnd, ends.end),
+          },
+        ] as const;
+      }),
+    );
+    const frame: OffsetSolveFrame = {
+      ...genuine.frame,
+      plan: {
+        origin: "certified",
+        adjacencies: genuine.frame.plan.adjacencies.map((entry, index) =>
+          entry.kind === "trim"
+            ? {
+                ...entry,
+                representatives: [
+                  trims[index]!.first.parameter,
+                  trims[index]!.second.parameter,
+                ],
+              }
+            : entry,
+        ),
+      },
+      trims,
+      lineArcEndpoints,
+    };
+    const publication = publishOf(relationship, pair, frame, {
+      query: fabricatedQuery,
+      certifier: fabricatedCertifier,
+    });
+    expect(failedOf(publication).failure).toEqual({
+      ok: false,
+      code: codes.topologyUncertain,
+      message:
+        "A published seed-arc end wraps across 0/2π against its exact sweep.",
+      seedEntityId: arc.seedEntityId,
+    });
+  });
+
+  test("joint-arc wrap-guard adversary (review R2; fabricated certifier port, not owner-reachable: the real SEL absorbs this corner): a native near-collinear convex line↔line corner with its arc authored, whose published F1 arc's binary64 atan2 sweep wraps, fails closed; one ulp more turn certifies (control)", () => {
+    /** Fabricated: rejects the absorbed corner at its two terminal leaves, verifies any chain declaring an arc. */
+    const arcOnlyCertifier: CertifiedTubePieceChainRequests = {
+      openRequest: () => ({
+        certifyPieceChain: (chain) =>
+          (chain.arcs ?? []).length > 0
+            ? {
+                kind: "verified",
+                certificate: {
+                  joins: [],
+                  leaves: [],
+                  clearedPairs: [],
+                  maxSplits: 0,
+                },
+              }
+            : {
+                kind: "uncertain",
+                code: "cubic-tube-clearance-unproven",
+                message: "fabricated: the absorbed corner is not certified",
+                first: 0,
+                second: 1,
+              },
+      }),
+    };
+    const corner = (ulps: number) => {
+      const row = nearCollinearCornerRow(ulps);
+      const harness = matrixHarnesses.native;
+      harness.resetSequence();
+      const pair = harness.solvedPair(row.build(harness));
+      const seeds = pair.definition.entities.map((entity) => entity.entityId);
+      return {
+        pair,
+        seeds,
+        relationship: relationshipOf(seeds, row.distance, [0]),
+      };
+    };
+    const wrapped = corner(1);
+    // Natively the SEL absorbs the corner, so the authored arc is topologyChanged.
+    const { declared } = checkedOf(wrapped.pair, wrapped.seeds, 0.25);
+    if (!declared.ok) throw new Error(declared.message);
+    const real = certifyDeclaredOffsetChain(declared, query, certifier);
+    if (!real.ok) throw new Error(real.message);
+    expect(real.resolved.arcs).toEqual([]);
+    // The solve frame's arc (the SEL's F1 construction) wraps under atan2.
+    const frame = solvedFrame(
+      solveOf(wrapped.relationship, wrapped.pair.definition),
+    );
+    const [arc] = frame.arcs;
+    expect(
+      arc &&
+        offsetArcSweepAdmissible(
+          arc.center,
+          arc.start,
+          arc.end,
+          arc.sweepDirection,
+        ),
+    ).toBe(false);
+    const cycle = publishCycle(wrapped.relationship, wrapped.pair, {
+      query,
+      certifier: arcOnlyCertifier,
+    });
+    expect(cycle.publications).toHaveLength(1);
+    expect(failedOf(cycle.final as OffsetFramePublication).failure).toEqual({
+      ok: false,
+      code: codes.topologyUncertain,
+      message:
+        "A published joint-arc end wraps across 0/2π against its exact sweep.",
+      seedEntityId: wrapped.seeds[0],
+    });
+    // Control: the same fabricated port on an admissible arc certifies it.
+    const admissible = corner(2);
+    const control = certifiedOf(
+      publishCycle(admissible.relationship, admissible.pair, {
+        query,
+        certifier: arcOnlyCertifier,
+      }),
+    );
+    expect(control.frame.arcs).toHaveLength(1);
+  });
+
+  test("R7: a deep arc-leaf trim publishes its removed leaves, the certificate's own", () => {
+    const { pair, seeds, distance } = d3Row(
+      "line-arc-line semicircle long (R7) -2",
+    );
+    const publication = certifiedOf(
+      publishCycle(relationshipOf(seeds, distance), pair),
+    );
+    const arc = publication.frame.pieces[1]!;
+    expect(
+      publication.frame.lineArcEndpoints.get(arc.seedEntityId)?.removedLeaves,
+    ).toEqual([1, 1]);
+    expect(publication.certified.certificate.seedArcs![0]!.removed).toEqual([
+      1, 1,
+    ]);
+  });
+
+  test("[TECH] G10: a micro seed arc (native quarter arc, certified R ≈ 4.8e-7 < 1e-6) is published as certified with no new threshold", () => {
+    const { pair, seeds, distance } = d3Row(
+      `quarter arc micro ${1 - 2 ** -21}`,
+    );
+    const publication = certifiedOf(
+      publishCycle(relationshipOf(seeds, distance), pair),
+    );
+    const [record] = publication.certified.certificate.seedArcs!;
+    expect(record!.radius).toBeGreaterThan(0);
+    expect(record!.radius).toBeLessThan(1e-6);
+  });
+});
+
+describe("T08b-g1 frame owner: [TECH] G5/G6/G16 relationship-scoped results, authored arc presence, diagnostics", () => {
+  test("G6: authored arc presence is intent: the arc authored at C φ=0.1 publishes with no re-solve; authored without it, the certified arc is topologyChanged", () => {
+    const { pair, seeds, distance } = chainRow("convex arc C φ=0.1 -0.01");
+    const withArc = publishCycle(relationshipOf(seeds, distance, [0]), pair);
+    expect(withArc.publications.map((item) => item.status)).toEqual([
+      "certified",
+    ]);
+    const withoutArc = publishCycle(relationshipOf(seeds, distance, []), pair);
+    expect(withoutArc.solves.map((item) => item.ok)).toEqual([true]);
+    expect(
+      failedOf(withoutArc.final as OffsetFramePublication).failure,
+    ).toMatchObject({
+      code: codes.topologyChanged,
+      message: "The certified corner plan changes the authored arc set.",
+    });
+  });
+
+  test("G5/G16: two relationships in one accepted sketch publish independently; a failure is a source-linked relationship diagnostic and never touches the solve's diagnostics", () => {
+    const polygon = arcHarness.polygon(arcHarness.empty(), [
+      [0, 0],
+      [2, 0],
+      [2, 1],
+      [0, 1],
+    ]);
+    const circle = arcHarness.circle(polygon.definition, [5, 0], [6, 0]);
+    const withOffsets = arcHarness.withOffset(
+      arcHarness.withOffset(circle.definition, polygon.ids, 0.01).definition,
+      [circle.id],
+      0.01,
+    ).definition;
+    const pair = arcHarness.solved(withOffsets);
+    const before = encode(pair.solvedSnapshot);
+    const square = relationshipOf(polygon.ids, 0.01);
+    const collapsed = {
+      ...relationshipOf([circle.id], 1.5),
+      derivationId: "derivation_g1_circle",
+    };
+    expect(certifiedOf(publishCycle(square, pair)).derivationId).toBe(
+      "derivation_g1",
+    );
+    // The collapsing circle fails in the solve frame (a projection
+    // diagnostic) and, published against its frame's twin, in publish.
+    const solved = solveOf(collapsed, pair.definition);
+    expect(solved.ok).toBe(false);
+    const frame = solvedFrame(
+      solveOf({ ...collapsed, distance: 0.01 }, pair.definition),
+    );
+    const publication = failedOf(publishOf(collapsed, pair, frame));
+    expect(publication).toEqual({
+      status: "failed",
+      derivationId: "derivation_g1_circle",
+      failure: {
+        ok: false,
+        code: codes.arcCollapse,
+        message: "Offset distance collapses the circle radius.",
+        seedEntityId: circle.id,
+      },
+      diagnostic: {
+        code: codes.arcCollapse,
+        severity: "error",
+        message:
+          "Offset relationship derivation_g1_circle: Offset distance collapses the circle radius.",
+        target: { kind: "entity", entityId: circle.id },
+      },
+    });
+    expect(encode(pair.solvedSnapshot)).toBe(before);
+  });
+
+  test("G4: the unchecked builder runs on a definition iterate the checked adapter rejects (no accepted pair), with the checked adapter's construction", () => {
+    const { pair, seeds, distance } = chainRow("corner matrix LL-90 0.01");
+    const { connectivity, declared } = checkedOf(pair, seeds, distance);
+    if (!declared.ok) throw new Error(declared.message);
+    const moved = pair.definition.points[0]!;
+    const iterate = {
+      ...pair.definition,
+      points: pair.definition.points.map((point) =>
+        point === moved
+          ? { ...point, position: [point.position[0] + 0.5, point.position[1]] }
+          : point,
+      ),
+    } as SketchDefinition;
+    expect(
+      declaredOffsetChainPieces({
+        definition: iterate,
+        solvedSnapshot: pair.solvedSnapshot,
+        connectivity,
+        distance,
+        modelingTolerance: TOLERANCE,
+      }),
+    ).toMatchObject({
+      ok: false,
+      message: "The line seed geometry does not match the solve frame.",
+    });
+    const unchecked = uncheckedDeclaredOffsetChainPieces({
+      definition: iterate,
+      connectivity,
+      distance,
+      modelingTolerance: TOLERANCE,
+    });
+    expect(unchecked).toMatchObject({ ok: true, checked: false });
+    if (!unchecked.ok) throw new Error(unchecked.message);
+    const owner = pair.definition.entities.find(
+      (entity) =>
+        entity.kind === "lineSegment" && entity.startPointId === moved.pointId,
+    )!.entityId;
+    unchecked.pieces.forEach((piece, index) =>
+      expect(
+        encode(piece) === encode(declared.pieces[index]),
+        piece.seedEntityId,
+      ).toBe(piece.seedEntityId !== owner),
+    );
+  });
+});
+
+describe("T08b-g1 frame owner: brands (type-level, tsc)", () => {
+  test("only the certifying entries construct the branded results; the unchecked builder's output is no SEL input", () => {
+    const { pair, seeds, distance } = chainRow("corner matrix LL-90 -0.01");
+    const publication = certifiedOf(
+      publishCycle(relationshipOf(seeds, distance), pair),
+    );
+    const { certified, frame, plan } = publication;
+    // @ts-expect-error the verified tube result is branded (T08b-a math A2)
+    const forgedResult: CertifiedOffsetChainTubeStability = {
+      ok: true,
+      resolved: certified.resolved,
+      seedEntityId: certified.seedEntityId,
+      certificate: certified.certificate,
+    };
+    // @ts-expect-error only publishOffsetFrame constructs a certified publication
+    const forgedPublication: CertifiedOffsetFramePublication = {
+      status: "certified",
+      derivationId: "derivation_g1",
+      frame,
+      certified,
+      plan,
+    };
+    const { connectivity } = checkedOf(pair, seeds, distance);
+    const unchecked = uncheckedDeclaredOffsetChainPieces({
+      definition: pair.definition,
+      connectivity,
+      distance,
+      modelingTolerance: TOLERANCE,
+    });
+    if (!unchecked.ok) throw new Error(unchecked.message);
+    // @ts-expect-error the unchecked solve-frame pieces are never an SEL input
+    const selInput: DeclaredOffsetChainPieces = unchecked;
+    expect([forgedResult.ok, forgedPublication.status, selInput.ok]).toEqual([
+      true,
+      "certified",
+      true,
+    ]);
+  });
+
+  test("review R1: spreading or destructuring a genuine value does not forge a brand", () => {
+    const { pair, seeds, distance } = chainRow("corner matrix LL-90 -0.01");
+    const relationship = relationshipOf(seeds, distance);
+    const publication = certifiedOf(publishCycle(relationship, pair));
+    const other = certifiedOf(
+      publishCycle(relationshipOf(seeds, -distance), pair),
+    );
+    // @ts-expect-error a spread of a genuine publication with another frame is no publication
+    const forgedPublication: CertifiedOffsetFramePublication = {
+      ...publication,
+      frame: other.frame,
+    };
+    // @ts-expect-error a spread of a genuine tube result with another resolution is no tube result
+    const forgedResult: CertifiedOffsetChainTubeStability = {
+      ...publication.certified,
+      resolved: other.certified.resolved,
+    };
+    const { connectivity } = checkedOf(pair, seeds, distance);
+    const unchecked = uncheckedDeclaredOffsetChainPieces({
+      definition: pair.definition,
+      connectivity,
+      distance,
+      modelingTolerance: TOLERANCE,
+    });
+    if (!unchecked.ok) throw new Error(unchecked.message);
+    const { checked, ...rest } = unchecked;
+    // @ts-expect-error unchecked pieces with the marker destructured away are still no SEL input
+    const selInput: DeclaredOffsetChainPieces = rest;
+    // Runtime: the forgeries are plain copies, the genuine values are not.
+    expect([
+      checked,
+      forgedPublication.frame === other.frame,
+      forgedResult.resolved === other.certified.resolved,
+      selInput.pieces === unchecked.pieces,
+      Object.getPrototypeOf(forgedPublication) === Object.prototype,
+      Object.getPrototypeOf(publication) === Object.prototype,
+      Object.getPrototypeOf(publication.certified) === Object.prototype,
+    ]).toEqual([false, true, true, true, true, false, false]);
+  });
+});

@@ -74,6 +74,13 @@ import {
  * side proved within τ is absorbed first with no query ([TECH F6]); its
  * query is deferred to the SEL's fallback. Arcs adopt as the T2 rank rule
  * says (line < arc < spline) and are eligible swap adopters (review R6).
+ *
+ * T08b-g1: the solve / publish frame (`offset-derivation-frame.ts`, whose
+ * JSDoc carries the T08b-g plan §2.5 trust note) builds its uncertified
+ * pieces with `uncheckedDeclaredOffsetChainPieces`, plans with
+ * `firstChoiceOffsetChainPlan` and adopts with `adoptOffsetChainPlan`, the
+ * SEL's own construction; only the branded result of this module's
+ * certifying entries publishes.
  */
 
 /** One whole-request pair meter: every query of the request draws on it. */
@@ -818,7 +825,16 @@ type AdjacencyDecision =
   /** An F1 arc at a convex declared vertex (T08b-e); never queried. */
   | { readonly kind: "arc"; readonly jointIndex: number };
 
-const decisionIndex = (decision: AdjacencyDecision) =>
+/**
+ * What adoption reads of a decision: its kind and adjacency index, and a
+ * vertex's keeper (a trim's authority is never read there).
+ */
+type AdoptionDecision =
+  | { readonly kind: "trim"; readonly jointIndex: number }
+  | { readonly kind: "arc"; readonly jointIndex: number }
+  | { readonly kind: "vertex"; readonly vertex: ResolvedOffsetVertex };
+
+const decisionIndex = (decision: AdoptionDecision) =>
   decision.kind === "trim" || decision.kind === "arc"
     ? decision.jointIndex
     : decision.vertex.jointIndex;
@@ -1518,7 +1534,35 @@ export interface DeclaredOffsetChainPieces {
    * smooth closure is an owner knot and has none). Source data only.
    */
   readonly vertices: readonly OffsetChainVertex[];
+  /**
+   * [TECH] G4 type guard, never set at runtime: the E1–E4-checked adapter
+   * output (the only SEL input) carries no marker, the unchecked solve-frame
+   * builder's `checked: false`, so the latter is not assignable here.
+   */
+  readonly checked?: true;
+  /** [TECH] G4: the SEL input never carries the unchecked brand. */
+  readonly [uncheckedOffsetChainPieces]?: never;
 }
+
+/**
+ * Module-private compile-time brand of the unchecked builder's output
+ * ([TECH] G4). Callers cannot name it, so neither destructuring (`{ checked,
+ * ...rest }`) nor spreading (`{ ...unchecked, checked: undefined }`) sheds
+ * it: an unchecked output never becomes an SEL input.
+ */
+declare const uncheckedOffsetChainPieces: unique symbol;
+
+/** [TECH] G4: the unchecked solve-frame builder's output (never an SEL input). */
+export interface UncheckedDeclaredOffsetChainPieces extends AdoptablePieces {
+  readonly checked: false;
+  readonly [uncheckedOffsetChainPieces]: true;
+}
+
+/** The pieces both adapters build and adoption reads (no G4 marker). */
+type AdoptablePieces = Omit<
+  DeclaredOffsetChainPieces,
+  "checked" | typeof uncheckedOffsetChainPieces
+>;
 
 function sameVector(first: SketchPoint2D, second: SketchPoint2D) {
   return Object.is(first[0], second[0]) && Object.is(first[1], second[1]);
@@ -1563,13 +1607,7 @@ export function declaredOffsetChainPieces(input: {
   readonly distance: number;
   readonly modelingTolerance: number;
 }): DeclaredOffsetChainPieces | OffsetChainFailure {
-  const {
-    definition,
-    solvedSnapshot,
-    connectivity,
-    distance,
-    modelingTolerance,
-  } = input;
+  const { definition, solvedSnapshot, connectivity } = input;
   const uncertain = (
     message: string,
     seedEntityId: SketchEntityId | null = null,
@@ -1621,6 +1659,64 @@ export function declaredOffsetChainPieces(input: {
         "The declared coincident join is not a direct constraint of this definition.",
       );
   }
+  return buildDeclaredOffsetChainPieces(input, solvedSnapshot);
+}
+
+/**
+ * [TECH] G4: the solve frame's piece builder. It is the SAME construction
+ * as `declaredOffsetChainPieces` (one shared code path, per seed in declared
+ * order: a line is `offsetLinePoints` of its positions, a point-defined seed
+ * arc `seedArcPiece`, a circle r − d, a spline ONE reconstruction and ONE
+ * owner call) without the E1–E4 accepted-pair checks, so it runs on any
+ * definition iterate (the solver's mid-iteration projection has no solved
+ * snapshot). On an accepted pair whose definition is this one it returns
+ * bitwise the checked adapter's pieces, sources and vertices: the checks
+ * only reject, and a circle's checked radius is `Object.is` its entity
+ * radius. Its output is typed apart (`checked: false` and a module-private
+ * brand that neither destructuring nor spreading sheds) so it can never be
+ * an SEL input: certification needs the checked adapter's premise.
+ */
+export function uncheckedDeclaredOffsetChainPieces(input: {
+  readonly definition: Pick<SketchDefinition, "points" | "entities">;
+  readonly connectivity: DeclaredOffsetChainConnectivity;
+  readonly distance: number;
+  readonly modelingTolerance: number;
+}): UncheckedDeclaredOffsetChainPieces | OffsetChainFailure {
+  const built = buildDeclaredOffsetChainPieces(input, undefined);
+  // The only construction of the unchecked brand (a phantom: never set).
+  return built.ok
+    ? ({ ...built, checked: false } as UncheckedDeclaredOffsetChainPieces)
+    : built;
+}
+
+/**
+ * The shared piece construction of both adapters (G4). With `solvedSnapshot`
+ * each seed is first checked against its solved entity (E3, the checked
+ * adapter's unchanged per-seed order); without it only the point positions
+ * the construction reads must exist.
+ */
+function buildDeclaredOffsetChainPieces(
+  input: {
+    readonly definition: Pick<SketchDefinition, "points" | "entities">;
+    readonly connectivity: DeclaredOffsetChainConnectivity;
+    readonly distance: number;
+    readonly modelingTolerance: number;
+  },
+  solvedSnapshot: SolvedSketchSnapshot | undefined,
+): AdoptablePieces | OffsetChainFailure {
+  const { definition, connectivity, distance, modelingTolerance } = input;
+  const checked = solvedSnapshot !== undefined;
+  const uncertain = (
+    message: string,
+    seedEntityId: SketchEntityId | null = null,
+  ) => failure(codes.topologyUncertain, message, seedEntityId);
+  const mismatch = (kind: string, seedEntityId: SketchEntityId) =>
+    uncertain(
+      checked
+        ? `The ${kind} seed geometry does not match the solve frame.`
+        : `The ${kind} seed has no valid point-defined geometry.`,
+      seedEntityId,
+    );
   const positions: Record<string, SplineVector> = {};
   for (const point of definition.points)
     positions[point.pointId] = point.position;
@@ -1630,7 +1726,7 @@ export function declaredOffsetChainPieces(input: {
     const entity = definition.entities.find(
       (candidate) => candidate.entityId === seedEntityId,
     );
-    const solvedEntities = solvedSnapshot.solvedEntities.filter(
+    const solvedEntities = (solvedSnapshot?.solvedEntities ?? []).filter(
       (candidate) => candidate.entityId === seedEntityId,
     );
     const effective = reversed ? -distance : distance;
@@ -1639,17 +1735,15 @@ export function declaredOffsetChainPieces(input: {
       const start = positions[entity.startPointId];
       const end = positions[entity.endPointId];
       if (
-        solvedEntities.length !== 1 ||
-        solved?.kind !== "lineSegment" ||
         !start ||
         !end ||
-        !sameVector(start, solved.startPosition) ||
-        !sameVector(end, solved.endPosition)
+        (checked &&
+          (solvedEntities.length !== 1 ||
+            solved?.kind !== "lineSegment" ||
+            !sameVector(start, solved.startPosition) ||
+            !sameVector(end, solved.endPosition)))
       )
-        return uncertain(
-          "The line seed geometry does not match the solve frame.",
-          seedEntityId,
-        );
+        return mismatch("line", seedEntityId);
       const offset = offsetLinePoints(start, end, effective);
       if (!offset)
         return failure(
@@ -1679,23 +1773,23 @@ export function declaredOffsetChainPieces(input: {
       const start = positions[entity.startPointId];
       const end = positions[entity.endPointId];
       if (
-        solvedEntities.length !== 1 ||
-        solved?.kind !== "arc" ||
         !center ||
         !start ||
         !end ||
-        solved.sweepDirection !== entity.sweepDirection
+        (checked &&
+          (solvedEntities.length !== 1 ||
+            solved?.kind !== "arc" ||
+            solved.sweepDirection !== entity.sweepDirection))
       )
-        return uncertain(
-          "The arc seed geometry does not match the solve frame.",
-          seedEntityId,
-        );
+        return mismatch("arc", seedEntityId);
       // E3 / review R8: a point-defined seed (all three solved positions
       // bitwise its point positions); a state-driven arc is not a seed.
       if (
-        !sameVector(center, solved.centerPosition) ||
-        !sameVector(start, solved.startPosition) ||
-        !sameVector(end, solved.endPosition)
+        checked &&
+        solved?.kind === "arc" &&
+        (!sameVector(center, solved.centerPosition) ||
+          !sameVector(start, solved.startPosition) ||
+          !sameVector(end, solved.endPosition))
       )
         return failure(
           codes.unsupportedSeed,
@@ -1728,18 +1822,18 @@ export function declaredOffsetChainPieces(input: {
       const solved = solvedEntities[0];
       const center = positions[entity.centerPointId];
       if (
-        solvedEntities.length !== 1 ||
-        solved?.kind !== "circle" ||
         !center ||
-        !sameVector(center, solved.centerPosition) ||
-        !Object.is(entity.radius, solved.solvedRadius)
+        (checked &&
+          (solvedEntities.length !== 1 ||
+            solved?.kind !== "circle" ||
+            !sameVector(center, solved.centerPosition) ||
+            !Object.is(entity.radius, solved.solvedRadius)))
       )
-        return uncertain(
-          "The circle seed geometry does not match the solve frame.",
-          seedEntityId,
-        );
+        return mismatch("circle", seedEntityId);
       // [TECH F11]: counter-clockwise traversal, so left is inward: r − d.
-      const radius = solved.solvedRadius - effective;
+      // The checked radius is `Object.is` the solved one (E3), so both
+      // adapters read the entity radius.
+      const radius = entity.radius - effective;
       if (!(radius > 0))
         return failure(
           codes.arcCollapse,
@@ -1756,7 +1850,7 @@ export function declaredOffsetChainPieces(input: {
       sources.push({
         kind: "circle",
         center,
-        sourceRadius: solved.solvedRadius,
+        sourceRadius: entity.radius,
         distance: effective,
       });
       continue;
@@ -1770,20 +1864,18 @@ export function declaredOffsetChainPieces(input: {
     const geometry = reconstructSplineAggregate(entity, positions);
     const solved = solvedEntities[0];
     if (
-      solvedEntities.length !== 1 ||
-      solved?.kind !== "spline" ||
       geometry.validity !== "valid" ||
-      solved.reconstruction.validity !== "valid" ||
-      geometry.spans.length !== solved.reconstruction.spans.length ||
-      geometry.spans.some(
-        (span, index) =>
-          !sameSpanGeometry(span, solved.reconstruction.spans[index]!),
-      )
+      (checked &&
+        (solvedEntities.length !== 1 ||
+          solved?.kind !== "spline" ||
+          solved.reconstruction.validity !== "valid" ||
+          geometry.spans.length !== solved.reconstruction.spans.length ||
+          geometry.spans.some(
+            (span, index) =>
+              !sameSpanGeometry(span, solved.reconstruction.spans[index]!),
+          )))
     )
-      return uncertain(
-        "The spline seed geometry does not match the solve frame.",
-        seedEntityId,
-      );
+      return mismatch("spline", seedEntityId);
     const owner = approximateSplineOffset({
       spans: geometry.spans,
       distance: effective,
@@ -1912,10 +2004,31 @@ function seedArcAt(
     minimumLeaves,
   );
   if (!splits) return null;
-  // [TECH F10]: the consumer's binary64 atan2 sweep must not wrap across
-  // 0/2π against the exact wedge (σ(a × b) > 0 minor, < 0 major): a minor
-  // arc drawn above 3π/2, or a major one below π/2, is rejected. Rounding
-  // across π is harmless (both halves are drawn alike) and is accepted.
+  if (!offsetArcSweepAdmissible(center, start, end, sweepDirection))
+    return null;
+  return {
+    kind: "arc",
+    ...arc,
+    radius: canonicalArcSupport(center, start, end, sweepDirection).radius,
+    splits,
+  };
+}
+
+/**
+ * [TECH F10] wrap guard of a point-defined arc (center, start, end, sweep):
+ * the consumer's binary64 atan2 sweep must not wrap across 0/2π against the
+ * exact wedge (σ(a × b) > 0 minor, < 0 major): a minor arc drawn above
+ * 3π/2, or a major one below π/2, is rejected. Rounding across π is
+ * harmless (both halves are drawn alike) and is accepted. Reject-only; the
+ * seed-arc builder applies it to S′/E′ after every adoption, a publisher to
+ * the published ends (trim representatives included, T08b-f math A3).
+ */
+export function offsetArcSweepAdmissible(
+  center: SketchPoint2D,
+  start: SketchPoint2D,
+  end: SketchPoint2D,
+  sweepDirection: "clockwise" | "counterClockwise",
+): boolean {
   const angle = (point: SketchPoint2D) =>
     Math.atan2(point[1] - center[1], point[0] - center[0]);
   const ccw = sweepDirection === "counterClockwise";
@@ -1930,18 +2043,11 @@ function seedArcAt(
     (axis) => scaledExact(end[axis]!) - scaledExact(center[axis]!),
   );
   const turn = (ccw ? 1 : -1) * exactSign(a[0]! * b[1]! - a[1]! * b[0]!);
-  if (
+  return !(
     !(sweep > 0 && sweep < 2 * Math.PI) ||
     (turn > 0 && !(sweep < 1.5 * Math.PI)) ||
     (turn < 0 && !(sweep > 0.5 * Math.PI))
-  )
-    return null;
-  return {
-    kind: "arc",
-    ...arc,
-    radius: canonicalArcSupport(center, start, end, sweepDirection).radius,
-    splits,
-  };
+  );
 }
 
 /**
@@ -2046,14 +2152,43 @@ function declaredOffsetChainVertices(
   }));
 }
 
+/**
+ * A verified tube-stability result (T08b-a math A2). A class instance whose
+ * private nominal member makes it unforgeable at type level: a literal, a
+ * spread (`{ ...tube, resolved: other }`) or a destructured copy is not
+ * this type. The class is exported as a type only, so only this module's
+ * certifying entries (`certifyOffsetChainTubeStability`,
+ * `certifyDeclaredOffsetChain` and its test-only policy seam) construct it,
+ * from a `verified` certifier result; a publisher accepts only this type.
+ * The check is compile-time (a cast still forges it): across a process
+ * boundary a transported publication is a separate plain type, trusted as
+ * transported regions are.
+ */
+class CertifiedOffsetChainTubeStability {
+  /** Nominal brand (T08b-a math A2): no runtime field. */
+  declare private readonly brand: true;
+  readonly ok: true;
+  readonly resolved: OffsetChainTopologySuccess;
+  readonly seedEntityId: SketchEntityId;
+  /** Join and pair indices are the owner's natural span order. */
+  readonly certificate: OffsetChainTubeStabilityCertificate;
+
+  constructor(
+    resolved: OffsetChainTopologySuccess,
+    seedEntityId: SketchEntityId,
+    certificate: OffsetChainTubeStabilityCertificate,
+  ) {
+    this.ok = true;
+    this.resolved = resolved;
+    this.seedEntityId = seedEntityId;
+    this.certificate = certificate;
+  }
+}
+
+export type { CertifiedOffsetChainTubeStability };
+
 export type OffsetChainTubeStabilityResult =
-  | {
-      readonly ok: true;
-      readonly resolved: OffsetChainTopologySuccess;
-      readonly seedEntityId: SketchEntityId;
-      /** Join and pair indices are the owner's natural span order. */
-      readonly certificate: OffsetChainTubeStabilityCertificate;
-    }
+  | CertifiedOffsetChainTubeStability
   | OffsetChainFailure;
 
 /**
@@ -2175,12 +2310,12 @@ function tubeStabilityResult(
   indices: "spans" | "leaves",
 ): OffsetChainTubeStabilityResult {
   if (result.kind === "verified") {
-    return {
-      ok: true,
+    // The only construction of the branded verified result.
+    return new CertifiedOffsetChainTubeStability(
       resolved,
       seedEntityId,
-      certificate: result.certificate,
-    };
+      result.certificate,
+    );
   }
   const code =
     result.kind === "unsupported"
@@ -2600,11 +2735,14 @@ function emittedTerminal(terminal: PieceTerminal) {
   };
 }
 
-type AdoptionOutcome =
+type AdoptionOutcome<D extends AdoptionDecision> =
   | {
       readonly ok: true;
-      readonly declared: DeclaredOffsetChainPieces;
-      readonly decisions: readonly AdjacencyDecision[];
+      readonly declared: AdoptablePieces;
+      readonly decisions: readonly (
+        | D
+        | { readonly kind: "vertex"; readonly vertex: ResolvedOffsetVertex }
+      )[];
     }
   | {
       readonly ok: false;
@@ -2624,14 +2762,14 @@ type AdoptionOutcome =
  * positional closure re-calls with the first pass's first leaf at its end
  * and requires its source spans 0 … n − 2 bitwise unchanged.
  */
-function adoptDeclaredVertices(
-  declared: DeclaredOffsetChainPieces,
-  decisions: readonly AdjacencyDecision[],
-): AdoptionOutcome {
+function adoptDeclaredVertices<D extends AdoptionDecision>(
+  declared: AdoptablePieces,
+  decisions: readonly D[],
+): AdoptionOutcome<D> {
   const { pieces } = declared;
   const closed = declared.connectivity.closed;
   const count = pieces.length;
-  const kinds = new Map<number, AdjacencyDecision["kind"]>();
+  const kinds = new Map<number, AdoptionDecision["kind"]>();
   for (const decision of decisions)
     kinds.set(decisionIndex(decision), decision.kind);
   /** The adjacency kind at the OTHER traversal end of piece `index`. */
@@ -2702,7 +2840,10 @@ function adoptDeclaredVertices(
       number,
       { start?: SketchPoint2D; end?: SketchPoint2D }
     >();
-    const updated: AdjacencyDecision[] = [];
+    const updated: (
+      | D
+      | { readonly kind: "vertex"; readonly vertex: ResolvedOffsetVertex }
+    )[] = [];
     const swappable = new Map<number, "first" | "second">();
     for (const decision of decisions) {
       // An F1 arc end keeps its own emitted pole (no adoption there).
@@ -3365,6 +3506,306 @@ function selectDeclaredOffsetChain(
       );
     return original ?? mapped;
   }
+}
+
+/**
+ * [TECH] G3 plan of one declared adjacency: the SEL's per-vertex choice as
+ * revision data (G6: trim, parallel and absorbed map to one shared driven
+ * point; only arc presence is authored). A vertex's keeper is the EFFECTIVE
+ * one (after any T2 swap), so adopting per a certified plan repeats the
+ * SEL's adoption bitwise (the same eligibility, the same owner re-calls).
+ */
+export type OffsetChainAdjacencyPlan =
+  | { readonly kind: "trim" }
+  | {
+      readonly kind: "parallel" | "absorbed";
+      readonly keeper: "first" | "second";
+    }
+  | { readonly kind: "arc" };
+
+/**
+ * One adjacency of the SEL's deterministic first choice (G3), with the
+ * certifier-free fallback the SEL itself would take there.
+ */
+export type OffsetChainFirstChoice = OffsetChainAdjacencyPlan & {
+  /**
+   * The absorption (rule keeper) a trim falls back to when its trim is not
+   * admissible (SEL step 2(b), D > 0 only), or a convex arc when its chord
+   * cannot clear K3 ([TECH E8]).
+   */
+  readonly absorbable?: "first" | "second";
+  /**
+   * An absorption-first vertex whose adoption does not build: a convex
+   * U-E corner takes its arc, a T08b-f [TECH F6] concave arc-side corner
+   * its deferred trim.
+   */
+  readonly fallback?: "arc" | "trim";
+};
+
+/** The first-choice plan never queries: any query request is a misuse. */
+const NO_QUERY: CertifiedNeutralCurveRequestQuery = {
+  openRequest: () => {
+    throw new RangeError("An offset chain plan issues no joint query");
+  },
+};
+
+/**
+ * [TECH] G3: the SEL's deterministic first choice per declared adjacency,
+ * certifier- and query-free: the exact vertex class (parallel issues no
+ * query, antiparallel fails closed), U-E's `fits` and rule Z at convex
+ * vertices ([TECH E1]: never queried), [TECH F6] at concave seed-arc-side
+ * vertices, and a trim wherever the SEL would query (the query decides
+ * admissibility; here the solve frame's trim does). The same exact helpers
+ * as the resolver, so every non-queried adjacency is the SEL's own first
+ * decision; the SEL remains the only authority (publish compares).
+ */
+export function firstChoiceOffsetChainPlan(
+  declared: AdoptablePieces,
+): readonly OffsetChainFirstChoice[] | OffsetChainFailure {
+  const { pieces, vertices } = declared;
+  const closed = declared.connectivity.closed;
+  if (pieces.length === 0) {
+    throw new RangeError("An offset chain needs at least one piece");
+  }
+  const { curves, pieceCurves } = buildCurves(pieces);
+  // Declared intra-output incidences: bitwise-shared owner knots only.
+  for (const [pieceIndex, piece] of pieces.entries()) {
+    if (piece.kind !== "derivedCubic") continue;
+    const [first, last] = pieceCurves[pieceIndex]!;
+    for (let curve = first; curve < last; curve += 1) {
+      const left = piece.spans[curve - first]!;
+      const right = piece.spans[curve - first + 1]!;
+      if (!samePoint(left.poles[3], right.poles[0])) {
+        return failure(
+          codes.topologyUncertain,
+          `Derived cubic spans ${curve - first} and ${curve - first + 1} do not share a bitwise owner knot.`,
+          piece.seedEntityId,
+        );
+      }
+    }
+  }
+  if (
+    vertices.length > (closed ? pieces.length : pieces.length - 1) ||
+    (pieces.length > 1 &&
+      vertices.length !== (closed ? pieces.length : pieces.length - 1)) ||
+    vertices.some((vertex, index) => vertex.jointIndex !== index)
+  ) {
+    throw new RangeError(
+      "Declared offset vertices must cover every adjacency in order",
+    );
+  }
+  const classes = vertices.map(classifyOffsetChainVertex);
+  const antiparallel = classes.findIndex(
+    (item) => item.class === "antiparallel",
+  );
+  if (antiparallel >= 0)
+    return failure(
+      codes.knotIncidenceUnproven,
+      "A declared vertex has exactly antiparallel traversal source tangents (a cusp): it is not absorbable.",
+      pieces[antiparallel]!.seedEntityId,
+    );
+  const input: OffsetChainTopologyInput = {
+    pieces,
+    closed,
+    modelingTolerance: declared.modelingTolerance,
+    query: NO_QUERY,
+    vertices,
+    distance: declared.distance,
+  };
+  const plans = convexVertexPlans(input);
+  const concave = concaveArcPlans(input);
+  const choices: OffsetChainFirstChoice[] = [];
+  for (const [index, vertex] of vertices.entries()) {
+    const seed = pieces[index]!.seedEntityId;
+    const keeper = ruleKeeper(pieces, closed, index);
+    const plan = plans[index];
+    if (plan) {
+      const decision = convexDecision(plan, index, keeper, seed, true);
+      if ("ok" in decision) return decision;
+      const switchable = plan.forward && !plan.zero;
+      choices.push(
+        decision.kind === "vertex"
+          ? {
+              kind: "absorbed",
+              keeper,
+              ...(switchable ? { fallback: "arc" as const } : {}),
+            }
+          : { kind: "arc", ...(switchable ? { absorbable: keeper } : {}) },
+      );
+      continue;
+    }
+    if (concave[index] === true) {
+      choices.push({ kind: "absorbed", keeper, fallback: "trim" });
+      continue;
+    }
+    const vertexClass = classes[index]!;
+    if (vertexClass.class === "parallel") {
+      choices.push({ kind: "parallel", keeper });
+      continue;
+    }
+    const next = (vertex.jointIndex + 1) % pieces.length;
+    const end = terminal(pieces, pieceCurves, curves, index, "traversalEnd");
+    const start = terminal(pieces, pieceCurves, curves, next, "traversalStart");
+    if (end.curve === start.curve)
+      return failure(
+        codes.splineJointUnsupported,
+        "A closed single-curve offset whose only curve joins itself is not supported yet.",
+        seed,
+      );
+    choices.push({
+      kind: "trim",
+      ...(vertexClass.class === "nonparallel" && vertexClass.forward
+        ? { absorbable: keeper }
+        : {}),
+    });
+  }
+  return choices;
+}
+
+/**
+ * [TECH] G3/G4: SEL step 3 per a given plan, never querying or certifying:
+ * the SEL's own `adoptDeclaredVertices` (every declared vertex takes its
+ * keeper's emitted pole verbatim; the T2 swap when the plan's keeper is
+ * ineligible or its owner re-call fails) and the F1 arcs of the adopted
+ * pieces exactly as the resolution builds them (centre P_v, the neighbours'
+ * own emitted terminal poles, `canonicalArcSupport`). On a certified plan of
+ * the same adapter output the pieces are bitwise the certified ones. The
+ * returned plan carries the effective keepers; `shortArcs` lists the arcs
+ * the SEL's [TECH E8] pre-test would send to absorption.
+ */
+export function adoptOffsetChainPlan(
+  declared: AdoptablePieces,
+  plan: readonly OffsetChainAdjacencyPlan[],
+):
+  | {
+      readonly ok: true;
+      readonly pieces: readonly OffsetChainPiece[];
+      readonly sources: readonly DeclaredOffsetPieceSource[];
+      readonly plan: readonly OffsetChainAdjacencyPlan[];
+      readonly arcs: readonly ResolvedOffsetArc[];
+      readonly shortArcs: readonly number[];
+    }
+  | {
+      readonly ok: false;
+      readonly jointIndex: number;
+      readonly reason: string;
+    } {
+  if (plan.length !== declared.vertices.length)
+    throw new RangeError(
+      "An offset chain plan must cover every declared adjacency in order",
+    );
+  const decisions = plan.map((entry, jointIndex): AdoptionDecision => {
+    if (entry.kind === "trim") return { kind: "trim", jointIndex };
+    if (entry.kind === "arc") return { kind: "arc", jointIndex };
+    return {
+      kind: "vertex",
+      vertex: {
+        jointIndex,
+        kind: entry.kind,
+        class: classifyOffsetChainVertex(declared.vertices[jointIndex]!).class,
+        keeper: entry.keeper,
+      },
+    };
+  });
+  const adopted = adoptDeclaredVertices(declared, decisions);
+  if (!adopted.ok) return adopted;
+  const { pieces, sources } = adopted.declared;
+  const arcs: ResolvedOffsetArc[] = [];
+  for (const [jointIndex, entry] of plan.entries()) {
+    if (entry.kind !== "arc") continue;
+    const vertex = declared.vertices[jointIndex]!;
+    const from = emittedTerminal(pieceTerminal(pieces, jointIndex, true));
+    const to = emittedTerminal(
+      pieceTerminal(pieces, (jointIndex + 1) % pieces.length, false),
+    );
+    if (!from || !to)
+      return {
+        ok: false,
+        jointIndex,
+        reason: "An F1 arc joins declared line and spline pieces only.",
+      };
+    arcs.push({
+      jointIndex,
+      ...canonicalArcSupport(
+        vertex.first.vertex,
+        from.position,
+        to.position,
+        sourceTurn(vertex) > 0 ? "counterClockwise" : "clockwise",
+      ),
+    });
+  }
+  return {
+    ok: true,
+    pieces,
+    sources,
+    plan: adopted.decisions.map(
+      (decision): OffsetChainAdjacencyPlan =>
+        decision.kind === "vertex"
+          ? { kind: decision.vertex.kind, keeper: decision.vertex.keeper }
+          : { kind: decision.kind },
+    ),
+    arcs,
+    shortArcs: arcs
+      .filter((arc) => shortArc(pieces, arc))
+      .map((arc) => arc.jointIndex),
+  };
+}
+
+/** One query curve (leaf) of a trim, exactly as the resolver queries it. */
+export interface OffsetChainJointLeaf {
+  /** Leaf index within its piece: its `provenance.sourceSpanId`. */
+  readonly leaf: number;
+  readonly curve: NeutralCurve;
+  /** The curve's source-domain bounds (witness parameters lie in them). */
+  readonly bounds: readonly [number, number];
+  /** The domain end at the declared vertex. */
+  readonly vertexSide: "low" | "high";
+}
+
+/**
+ * The candidate trim leaves of declared adjacency `jointIndex`, from the
+ * vertex inward, exactly as the resolver builds and scans them: the
+ * traversal-terminal curve of each side, then (a seed arc only, review R7)
+ * its inner leaves in order.
+ */
+export function offsetChainJointLeaves(
+  pieces: readonly OffsetChainPiece[],
+  jointIndex: number,
+): {
+  readonly first: readonly OffsetChainJointLeaf[];
+  readonly second: readonly OffsetChainJointLeaf[];
+} {
+  const { curves, pieceCurves } = buildCurves(pieces);
+  const next = (jointIndex + 1) % pieces.length;
+  const end = terminal(pieces, pieceCurves, curves, jointIndex, "traversalEnd");
+  const start = terminal(pieces, pieceCurves, curves, next, "traversalStart");
+  const leaves = (
+    terminalCurve: number,
+    pieceIndex: number,
+    side: Side,
+  ): OffsetChainJointLeaf[] => {
+    const order = [terminalCurve];
+    if (pieces[pieceIndex]!.kind === "arc") {
+      const [first, last] = pieceCurves[pieceIndex]!;
+      const step = terminalCurve === first ? 1 : -1;
+      for (
+        let curve = terminalCurve + step;
+        curve >= first && curve <= last;
+        curve += step
+      )
+        order.push(curve);
+    }
+    return order.map((curve) => ({
+      leaf: curves[curve]!.spanIndex,
+      curve: curves[curve]!.neutral,
+      bounds: curves[curve]!.bounds,
+      vertexSide: side,
+    }));
+  };
+  return {
+    first: leaves(end.curve, jointIndex, end.side),
+    second: leaves(start.curve, next, start.side),
+  };
 }
 
 interface CurveFrame {
