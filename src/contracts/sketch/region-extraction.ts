@@ -3052,6 +3052,32 @@ async function provenClearOfBox(
 }
 
 /**
+ * The side of the trimmed derived tail (T08b-g3b) whose membership is
+ * `location` on `branch` in the join class `classRoot`, or null: bitwise the
+ * published trim parameter, in the class of the trim's driven point. Any
+ * other membership (ordinary or derived) is null.
+ */
+function trimmedTailAt(
+  branch: Branch,
+  location: NeutralCurveJoinLocation,
+  classRoot: string,
+  classOf: (member: string) => string,
+): "start" | "end" | null {
+  const tails = branch.derived?.tails;
+  if (!tails || typeof location !== "object") return null;
+  for (const side of ["start", "end"] as const) {
+    const tail = tails[side];
+    if (
+      tail &&
+      Object.is(location.interior, tail.parameter) &&
+      classOf(tail.pointId) === classRoot
+    )
+      return side;
+  }
+  return null;
+}
+
+/**
  * Proves that a join member meets the join's contraction region in one
  * connected piece (re-review 1). T09a separates each member only from the
  * other member's pieces, so a member's own far part could re-enter the region
@@ -3075,6 +3101,14 @@ async function provenClearOfBox(
  *   verified crossings interior to a side, and its free end(s) are certified
  *   outside the box. The join end lies in the box, so the parameters inside
  *   the closed box form one interval.
+ * - [THM] T08b-g3b: a derived sub-span's own trim membership (`tail`) whose
+ *   trimmed-off free end is not certified outside the box. Its kept free end
+ *   must be certified outside and its only box-boundary contact exactly one
+ *   verified crossing interior to a side. The curve then changes side once,
+ *   so the in-box parameters are one interval from the tail end to that
+ *   crossing (parity). It holds the membership, whose declared point T09a
+ *   certifies in the ball, so the whole tail lies in the box. Every other
+ *   membership keeps the rules above.
  */
 async function provenSingleEntry(
   queries: CachedQueries,
@@ -3083,6 +3117,7 @@ async function provenSingleEntry(
   location: NeutralCurveJoinLocation,
   vertex: VertexInfo,
   ballContraction: boolean,
+  tail: "start" | "end" | null,
 ): Promise<boolean> {
   if (branch.curve.kind === "line") return true;
   if (branch.closed) return false;
@@ -3097,7 +3132,12 @@ async function provenSingleEntry(
       provenOutsideBall(branch, parameter, vertex.balls[0]!),
     );
   const box = vertex.ballBox!;
-  if (!freeEnds.every((parameter) => provenOutsideBox(branch, parameter, box)))
+  const ends =
+    tail !== null &&
+    !provenOutsideBox(branch, branch.domain[tail === "start" ? 0 : 1], box)
+      ? [branch.domain[tail === "start" ? 1 : 0]]
+      : freeEnds;
+  if (!ends.every((parameter) => provenOutsideBox(branch, parameter, box)))
     return false;
   const contacts = await boxBoundaryContacts(
     queries,
@@ -3107,7 +3147,7 @@ async function provenSingleEntry(
   );
   return (
     contacts !== null &&
-    contacts.length === freeEnds.length &&
+    contacts.length === ends.length &&
     contacts.every((contact) => {
       // Strictly inside the side: no corner contact, which two sides share.
       const bounds = contact.proof.firstParameterBounds;
@@ -3430,14 +3470,21 @@ async function deriveArrangement(
       );
     for (const member of joined) {
       if (blocked.has(joinedRoot)) break;
+      const location = memberLocation.get(`${vertex.classRoot}@${member}`)!;
       if (
         await provenSingleEntry(
           queries,
           input.modelingTolerance,
           branches[member]!,
-          memberLocation.get(`${vertex.classRoot}@${member}`)!,
+          location,
           vertex,
           ballContraction,
+          trimmedTailAt(
+            branches[member]!,
+            location,
+            vertex.classRoot!,
+            classOf,
+          ),
         )
       )
         continue;
