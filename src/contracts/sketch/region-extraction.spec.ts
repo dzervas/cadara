@@ -1,7 +1,8 @@
 import { beforeAll, describe, expect, test } from "vitest";
-import type {
-  NeutralCurve,
-  NeutralCurveQueryCapability,
+import {
+  evaluateNeutralCurve,
+  type NeutralCurve,
+  type NeutralCurveQueryCapability,
 } from "@/contracts/modeling/neutral-curve-query";
 import {
   addOffsetFramePublication,
@@ -26,7 +27,11 @@ import {
   type SketchArrangementInput,
   type SketchArrangementResult,
 } from "@/contracts/sketch/region-extraction";
-import { certifyNeutralCurvePieceSignedArea } from "@/contracts/sketch/region-interval-geometry";
+import {
+  certifyNeutralCurvePieceSignedArea,
+  nextDown,
+  nextUp,
+} from "@/contracts/sketch/region-interval-geometry";
 import type {
   RegionBoundarySegmentRecord,
   RegionRecord,
@@ -34,6 +39,7 @@ import type {
 import { regionBranchKey } from "@/contracts/sketch/region-identity";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import type {
+  SplinePoles,
   SplineSpan,
   SplineVector,
 } from "@/contracts/sketch/spline-geometry";
@@ -3358,4 +3364,576 @@ describe("T08b-g3 derived offset shells as region input", () => {
       ).toBe(true);
     }
   }, 120_000);
+});
+
+// ---------------------------------------------------------------------------
+// T08b-g3b: single-entry clearance for short trimmed tails (dark)
+// ---------------------------------------------------------------------------
+
+describe("T08b-g3b single-entry clearance for short trimmed tails", () => {
+  const ballRadius = FIXTURE_TOLERANCE / 2;
+
+  test.each(["C φ=0.200 0.01", "C φ=0.100 0.01", "C φ=0.050 0.01"])(
+    "S2 %s closed by a line: the φ=0.2 shape, its region areas checked against the published loop",
+    async (label) => {
+      const row = nativeChainRow(label, "S2");
+      const offset = offsetSketch(row.publication, "line");
+      const shells = offset.outputs.derivedCurves;
+      // The row's premise (T08b-g3 R-g1), measured on the tail ends against
+      // the τ/2 box around the trim: at φ = 0.2 both tails end outside it
+      // (the T09 rule), at φ = 0.05 both inside, and at φ = 0.1 the first
+      // shell's inside (0.995ρ) and the second's just outside (1.0015ρ).
+      const trim = row.publication.frame.trims[0]!.position;
+      const tailEnds = shells.flatMap((shell) =>
+        shell.spans.flatMap((span, index) => [
+          ...(index === 0 && span.queryDomain[0] !== span.sourceDomain[0]
+            ? [span.poles[0]]
+            : []),
+          ...(index === shell.spans.length - 1 &&
+          span.queryDomain[1] !== span.sourceDomain[1]
+            ? [span.poles[3]]
+            : []),
+        ]),
+      );
+      expect(tailEnds, label).toHaveLength(2);
+      const inBox = tailEnds.map(
+        (end) =>
+          Math.max(Math.abs(end[0] - trim[0]), Math.abs(end[1] - trim[1])) <
+          ballRadius,
+      );
+      expect(inBox, label).toEqual(
+        {
+          "C φ=0.200 0.01": [false, false],
+          "C φ=0.100 0.01": [true, false],
+          "C φ=0.050 0.01": [true, true],
+        }[label],
+      );
+
+      const result = await deriveOffset(offset);
+      expect(codes(result), label).toEqual([]);
+      // The φ = 0.2 shape: the closing line crosses the chain once, so two
+      // cells: one bounded by the line and both shells, and one lobe bounded
+      // by the line and one shell.
+      const shape = result.regions
+        .map((region) => ({
+          roles: region.loops.map((loop) => loop.role),
+          segments: region.loops[0]!.segments.length,
+          entities: boundaryEntities(region),
+        }))
+        .sort((l, r) => l.segments - r.segments);
+      expect(
+        shape.map((cell) => [cell.roles, cell.segments]),
+        label,
+      ).toEqual([
+        [["outer"], 3],
+        [["outer"], 4],
+      ]);
+      expect(shape[1]!.entities, label).toEqual(["close", "off_p0", "off_p1"]);
+      expect(shape[0]!.entities, label).toHaveLength(2);
+      expect(shape[0]!.entities, label).toContain("close");
+
+      // Areas: each region's own loop through the independent quadrature
+      // oracle; the published loop's signed area is their sum weighted by
+      // winding, +1 for the cell that runs the closing line forward (the
+      // line's other side is outside both cells).
+      const input = offset.sketch.build({ derivedCurves: shells });
+      const published = closedCurvesSignedArea([
+        ...publishedOracleCurves(offset.outputs.pieces),
+        ...offset.closing,
+      ]);
+      let weighted = 0;
+      for (const region of result.regions) {
+        const loop = region.loops[0]!;
+        const area = closedCurvesSignedArea(regionLoopCurves(loop, input));
+        expect(area, `${label}: counter-clockwise outer loop`).toBeGreaterThan(
+          0,
+        );
+        const closing = loop.segments.filter(
+          (segment) => entityOf(segment) === "close",
+        );
+        expect(closing, label).toHaveLength(1);
+        weighted += closing[0]!.traversalDirection === "forward" ? area : -area;
+      }
+      expect(
+        Math.abs(weighted - published),
+        `${label}: winding-weighted region areas ${weighted} = published loop area ${published}`,
+      ).toBeLessThanOrEqual(1e-9 * Math.max(1, Math.abs(published)));
+
+      // No region runs on a tail, and each trim is a region vertex bitwise.
+      for (const shell of shells)
+        shell.spans.forEach((span, index) => {
+          const intervals = result.regions.flatMap((region) =>
+            region.loops[0]!.segments.filter(
+              (segment) =>
+                segment.branch.source.kind === "entity" &&
+                segment.branch.source.entityId === shell.outputEntityId &&
+                segment.branch.spanId === span.outputSpanId &&
+                span.sourceDomain[0] <= segment.sourceParameterInterval[0] &&
+                segment.sourceParameterInterval[1] <= span.sourceDomain[1],
+            ),
+          );
+          const where = `${label}: ${shell.outputEntityId} sub-span ${index}`;
+          for (const segment of intervals) {
+            const [lo, hi] = segment.sourceParameterInterval;
+            expect(
+              span.queryDomain[0] <= lo && hi <= span.queryDomain[1],
+              `${where} lies in the published domain`,
+            ).toBe(true);
+          }
+          for (const side of [0, 1] as const)
+            if (span.queryDomain[side] !== span.sourceDomain[side])
+              expect(
+                intervals.some((segment) =>
+                  Object.is(
+                    segment.sourceParameterInterval[side],
+                    span.queryDomain[side],
+                  ),
+                ),
+                `${where} ends bitwise at its trim`,
+              ).toBe(true);
+        });
+    },
+    120_000,
+  );
+
+  /*
+   * Fabricated arrangement inputs (not produced by the offset owner): one
+   * derived shell of one sub-span, trimmed at its start at `q0`. Its trim
+   * point T = shell(q0) (bitwise the owner's evaluation, so the join ball is
+   * centred on T) starts a line L of length 20ρ along `direction`; the
+   * shell's end point E has no other geometry. Poles are given in units of
+   * ρ = τ/2 around (3, 2).
+   */
+  const unitPoles = (unit: readonly (readonly [number, number])[]) =>
+    unit.map(([x, y]) => [
+      3 + ballRadius * x,
+      2 + ballRadius * y,
+    ]) as unknown as SplinePoles;
+  const onShell = (poles: SplinePoles, parameter: number) =>
+    evaluateNeutralCurve(
+      {
+        kind: "cubicBezier",
+        curveId: "fabricated",
+        provenance: { sourceEntityId: "fabricated", sourceSpanId: "s" },
+        poles,
+        sourceDomain: [0, 1],
+      },
+      parameter,
+    );
+  const deriveTail = (
+    poles: SplinePoles,
+    q0: number,
+    direction: readonly [number, number],
+    rho = ballRadius,
+  ) => {
+    const sketch = makeSketchFixture();
+    const join = onShell(poles, q0);
+    const length = Math.hypot(direction[0], direction[1]);
+    sketch.point("T", join[0], join[1]);
+    sketch.point(
+      "F",
+      join[0] + (20 * rho * direction[0]) / length,
+      join[1] + (20 * rho * direction[1]) / length,
+    );
+    sketch.point("E", poles[3][0], poles[3][1]);
+    sketch.line("L", "T", "F");
+    return derive(sketch, {
+      modelingTolerance: 2 * rho,
+      derivedCurves: [
+        {
+          outputEntityId: "sketch_entity_shell" as SketchEntityId,
+          startPointId: "sketch_point_T" as SketchPointId,
+          endPointId: "sketch_point_E" as SketchPointId,
+          spans: [
+            {
+              outputSpanId: "s",
+              subIndex: 0,
+              poles,
+              sourceDomain: [0, 1],
+              queryDomain: [q0, 1],
+            },
+          ],
+        },
+      ],
+    });
+  };
+  const notEnteredOnce = (result: SketchArrangementResult) => {
+    expect(result.regions).toEqual([]);
+    expect(codes(result)).toContain("region-join-uncertain");
+    expect(targetsOf(result, "region-join-uncertain")).toEqual(["L", "shell"]);
+    expect(
+      result.diagnostics.find((d) => d.code === "region-join-uncertain")!
+        .message,
+    ).toContain("entered once by entity sketch_entity_shell");
+  };
+  // Its tail runs from P0 (inside the box) to T, and its kept part leaves
+  // the box once.
+  const hook = unitPoles([
+    [0, 0],
+    [0.2, 2],
+    [-1.6, -3.5],
+    [-3, -0.5],
+  ]);
+
+  test("a tail inside the join box whose kept part leaves it once is entered once (fabricated control)", async () => {
+    // L points away from the tail: nothing else meets the box.
+    const result = await deriveTail(hook, 0.48, [-1, 1]);
+    expect(result.regions).toEqual([]);
+    expect(codes(result)).toEqual(["profile-open-segment"]);
+    expect(targetsOf(result, "profile-open-segment")).toEqual(["L", "shell"]);
+  }, 60_000);
+
+  test("a tail that leaves and re-enters the join box fails closed (fabricated, two box crossings)", async () => {
+    // P0 is inside the box; the tail leaves it through the top and comes
+    // back before T, then the kept part leaves once: three crossings.
+    const poles = unitPoles([
+      [0.5, 0.5],
+      [1, 5],
+      [-1.5, 3],
+      [-0.5, -25],
+    ]);
+    notEnteredOnce(await deriveTail(poles, 0.45, [-1, 1]));
+  }, 60_000);
+
+  test("a tail whose kept end is inside the join box fails closed (fabricated, tail end one ulp outside the box)", async () => {
+    // The kept part ends at E inside the box, and the tail starts one ulp
+    // beyond the box's right side x = nextUp(T.x + ρ), so the certified
+    // point test cannot prove it outside, and the tail crosses into the box
+    // once. P0.x is iterated to that fixed point (T moves with P0).
+    let poles = unitPoles([
+      [1, 0.3],
+      [0.3, 0.4],
+      [-0.3, 0.1],
+      [-0.6, -0.3],
+    ]);
+    const q0 = 0.53;
+    for (let step = 0; step < 40; step += 1) {
+      const target = nextUp(nextUp(onShell(poles, q0)[0] + ballRadius));
+      if (poles[0][0] === target) break;
+      poles = [[target, poles[0][1]], poles[1], poles[2], poles[3]];
+    }
+    const join = onShell(poles, q0);
+    expect(poles[0][0]).toBe(nextUp(nextUp(join[0] + ballRadius)));
+    const kept = poles[3].map(
+      (value, axis) => (value - join[axis]!) / ballRadius,
+    );
+    expect(Math.max(...kept.map(Math.abs))).toBeLessThan(0.99);
+    notEnteredOnce(await deriveTail(poles, q0, [0, -1]));
+  }, 60_000);
+
+  test("a tail contact in the join box outside the ball is seen by the G14 guard (fabricated)", async () => {
+    // L runs from T along (1, 1) and the tail crosses it at X with
+    // ρ < |X − T| and X inside the box (checked on the oracle below).
+    const q0 = 0.48;
+    const join = onShell(hook, q0);
+    const tail = cubicOracle(hook, [0, 1], 0, q0);
+    const side = (t: number) => {
+      const [x, y] = tail.point(t);
+      return y - join[1] - (x - join[0]);
+    };
+    let [lo, hi] = [0, 0.2];
+    expect(Math.sign(side(lo))).toBe(-Math.sign(side(hi)));
+    for (let step = 0; step < 60; step += 1) {
+      const mid = (lo + hi) / 2;
+      if (Math.sign(side(mid)) === Math.sign(side(lo))) lo = mid;
+      else hi = mid;
+    }
+    const contact = tail.point(lo);
+    const offset = [contact[0] - join[0], contact[1] - join[1]];
+    expect(Math.hypot(offset[0]!, offset[1]!)).toBeGreaterThan(
+      1.1 * ballRadius,
+    );
+    expect(Math.max(...offset.map(Math.abs))).toBeLessThan(0.95 * ballRadius);
+    const result = await deriveTail(hook, q0, [1, 1]);
+    expect(result.regions).toEqual([]);
+    expect(codes(result)).toEqual(["region-derived-tail-crossing"]);
+    expect(targetsOf(result, "region-derived-tail-crossing")).toEqual([
+      "shell",
+    ]);
+  }, 60_000);
+
+  test("an ordinary interior membership whose free end is inside the join box still fails closed (the T09 rule, unchanged)", async () => {
+    // A line starts on an authored spline 3e-4 from the spline's start: the
+    // spline's free end lies in the join box. Only derived trimmed tails
+    // take the one-crossing rule.
+    const sketch = makeSketchFixture();
+    sketch.point("a", 0, 0);
+    sketch.point("b", 1, 0.5);
+    sketch.point("c", 2, 0);
+    sketch.spline("S", ["a", "b", "c"], "open");
+    const spline = sketch
+      .build()
+      .solvedSnapshot.solvedEntities.find(
+        (entity) => entity.entityId === "sketch_entity_S",
+      )!;
+    if (spline.kind !== "spline") throw new Error("no spline");
+    const span = spline.reconstruction.spans[0]!;
+    const speed = Math.hypot(
+      span.poles[1][0] - span.poles[0][0],
+      span.poles[1][1] - span.poles[0][1],
+    );
+    const [s0, s1] = span.interval;
+    const at = evaluateNeutralCurve(
+      {
+        kind: "cubicBezier",
+        curveId: "S",
+        provenance: { sourceEntityId: "S", sourceSpanId: "0" },
+        poles: span.poles,
+        sourceDomain: span.interval,
+      },
+      s0 + ((s1 - s0) * 3e-4) / (3 * speed),
+    );
+    expect(Math.max(Math.abs(at[0]), Math.abs(at[1]))).toBeLessThan(
+      0.8 * ballRadius,
+    );
+    sketch.point("p", at[0], at[1]);
+    sketch.point("q", at[0] - 0.5, at[1] + 1);
+    sketch.line("M", "p", "q");
+    sketch.pointOnCurve("p", "S");
+    const result = await derive(sketch);
+    expect(result.regions).toEqual([]);
+    expect(codes(result)).toContain("region-join-uncertain");
+    expect(targetsOf(result, "region-join-uncertain")).toEqual(["M", "S"]);
+    expect(
+      result.diagnostics.find((d) => d.code === "region-join-uncertain")!
+        .message,
+    ).toContain("entered once by entity sketch_entity_S");
+  }, 60_000);
+
+  /*
+   * Exact box-side constructions (T08b-g3b review, advisory 2; fabricated,
+   * not owner-reachable). The join box is centred on T = shell(q0), so its
+   * right side is nextUp(fl(T.x + ρ)). Choosing ρ = nextDown(X) − T.x
+   * (exact by Sterbenz) makes that side bitwise the X = 3 the poles are
+   * built around, in units u = 2⁻¹² (so the pole offsets are exact).
+   */
+  const u = 2 ** -12;
+  const exactRightSide = (
+    unit: readonly (readonly [number, number])[],
+    q0: number,
+  ) => {
+    const X = 3;
+    const poles = unit.map(([x, y]) => [
+      X + x * u,
+      2.5 + y * u,
+    ]) as unknown as SplinePoles;
+    const join = onShell(poles, q0);
+    const rho = nextDown(X) - join[0];
+    expect(nextUp(join[0] + rho), "the box's right side is exactly X").toBe(X);
+    return { poles, rho };
+  };
+
+  test("a tail tangent to its join box from inside fails closed (fabricated, not owner-reachable)", async () => {
+    // x(t) − X = −48u (t − 1/4)² exactly: the tail touches the box's right
+    // side at t = 1/4 from inside (a tangent contact, not a crossing), and
+    // the kept part leaves the box once.
+    const { poles, rho } = exactRightSide(
+      [
+        [-3, -2],
+        [5, -1],
+        [-3, 0],
+        [-27, 1],
+      ],
+      0.5,
+    );
+    const result = await deriveTail(poles, 0.5, [0, 1], rho);
+    expect(codes(result)).toEqual([
+      "profile-open-segment",
+      "region-join-uncertain",
+    ]);
+    notEnteredOnce(result);
+  }, 60_000);
+
+  test("a tail ending exactly on its join box fails closed (fabricated, not owner-reachable)", async () => {
+    // x(t) = X − 9u t exactly: the tail end x(0) = X lies on the box's right
+    // side (an endpoint contact), and the kept part leaves the box once.
+    const { poles, rho } = exactRightSide(
+      [
+        [0, -1],
+        [-3, 0],
+        [-6, 0],
+        [-9, 1],
+      ],
+      1 / 3,
+    );
+    const result = await deriveTail(poles, 1 / 3, [0, 1], rho);
+    expect(codes(result)).toEqual([
+      "profile-open-segment",
+      "region-join-uncertain",
+    ]);
+    notEnteredOnce(result);
+  }, 60_000);
+
+  test("a straight tail whose kept part leaves through a side's interior is entered once (fabricated, not owner-reachable; control for the exact-side rows)", async () => {
+    const poles = [
+      [-2, -1],
+      [-1, -0.5],
+      [0, 0],
+      [1, 0.5],
+    ].map(([x, y]) => [3 + x! * u, 2.5 + y! * u]) as unknown as SplinePoles;
+    const result = await deriveTail(poles, 1 / 4, [-1, 1], 1.25 * u);
+    expect(result.regions).toEqual([]);
+    expect(codes(result)).toEqual(["profile-open-segment"]);
+    expect(targetsOf(result, "profile-open-segment")).toEqual(["L", "shell"]);
+  }, 60_000);
+
+  const maxOffset = (
+    point: readonly [number, number],
+    center: readonly [number, number],
+  ) => Math.max(Math.abs(point[0] - center[0]), Math.abs(point[1] - center[1]));
+
+  test("a sub-span trimmed at both ends, tails in overlapping join boxes of distinct classes, publishes the exact loop (fabricated, not owner-reachable)", async () => {
+    // T08b-g3b review, advisory 1: trims at 0.2 and 0.8 driven by distinct
+    // points T0 and T1. Each tail ends inside its own trim's box, the two
+    // boxes overlap, and two lines close the kept arch at F. Each vertex
+    // takes the one-crossing rule on its own.
+    const poles = unitPoles([
+      [-1.2, -0.3],
+      [-0.5, 0.6],
+      [0.5, 0.6],
+      [1.2, -0.3],
+    ]);
+    const q: [number, number] = [0.2, 0.8];
+    const T0 = onShell(poles, q[0]) as SplineVector;
+    const T1 = onShell(poles, q[1]) as SplineVector;
+    const F: SplineVector = [3, 3];
+    expect(maxOffset(poles[0], T0), "start tail ends in its box").toBeLessThan(
+      ballRadius,
+    );
+    expect(maxOffset(poles[3], T1), "end tail ends in its box").toBeLessThan(
+      ballRadius,
+    );
+    expect(maxOffset(T0, T1), "the two join boxes overlap").toBeLessThan(
+      2 * ballRadius,
+    );
+    const sketch = makeSketchFixture();
+    sketch.point("T0", T0[0], T0[1]);
+    sketch.point("T1", T1[0], T1[1]);
+    sketch.point("F", F[0], F[1]);
+    sketch.line("L0", "T0", "F");
+    sketch.line("L1", "T1", "F");
+    const options = {
+      derivedCurves: [
+        {
+          outputEntityId: "sketch_entity_shell" as SketchEntityId,
+          startPointId: "sketch_point_T0" as SketchPointId,
+          endPointId: "sketch_point_T1" as SketchPointId,
+          spans: [
+            {
+              outputSpanId: "s",
+              subIndex: 0,
+              poles,
+              sourceDomain: [0, 1] as [number, number],
+              queryDomain: q,
+            },
+          ],
+        },
+      ],
+    };
+    const result = await derive(sketch, options);
+    expect(codes(result)).toEqual([]);
+    expect(result.regions).toHaveLength(1);
+    const region = result.regions[0]!;
+    expect(region.loops.map((loop) => loop.role)).toEqual(["outer"]);
+    const loop = region.loops[0]!;
+    expect(cyclicFrom(loop.segments.map(entityOf), "shell")).toEqual([
+      "shell",
+      "L1",
+      "L0",
+    ]);
+    const shell = loop.segments.find(
+      (segment) => entityOf(segment) === "shell",
+    )!;
+    expect(shell.traversalDirection).toBe("forward");
+    expect(
+      Object.is(shell.sourceParameterInterval[0], q[0]) &&
+        Object.is(shell.sourceParameterInterval[1], q[1]),
+      `the shell segment ${shell.sourceParameterInterval} is bitwise the published domain`,
+    ).toBe(true);
+    const area = closedCurvesSignedArea(
+      regionLoopCurves(loop, sketch.build(options)),
+    );
+    const oracle = closedCurvesSignedArea([
+      cubicOracle(poles, [0, 1], q[0], q[1]),
+      lineOracle(T1, F),
+      lineOracle(F, T0),
+    ]);
+    expect(oracle).toBeGreaterThan(0);
+    expect(
+      Math.abs(area - oracle),
+      `region loop area ${area} = oracle loop area ${oracle}`,
+    ).toBeLessThanOrEqual(1e-9 * Math.max(1, Math.abs(oracle)));
+  }, 120_000);
+
+  /*
+   * A sub-span trimmed at both ends by one point T (a self-loop): both trim
+   * memberships are one occurrence, so the G14 guard (which needs the trim
+   * to be both the first and the last of at least two occurrences) blocks
+   * it before clearance. Both tails end 0.3ρ from T.
+   */
+  const deriveSelfLoop = (withLine: boolean) => {
+    const poles = unitPoles([
+      [-0.3, 0],
+      [40, 40],
+      [-40, 40],
+      [0.3, 0],
+    ]);
+    // The self crossing x = 3 on t < 1/4 by bisection; its partner is 1 − t.
+    const x = (t: number) => onShell(poles, t)[0] - 3;
+    let [lo, hi] = [0, 0.25];
+    for (let step = 0; step < 80; step += 1) {
+      const mid = (lo + hi) / 2;
+      if (Math.sign(x(mid)) === Math.sign(x(lo))) lo = mid;
+      else hi = mid;
+    }
+    const join = onShell(poles, lo);
+    expect(maxOffset(poles[0], join)).toBeLessThan(ballRadius);
+    expect(maxOffset(poles[3], join)).toBeLessThan(ballRadius);
+    const sketch = makeSketchFixture();
+    sketch.point("T", join[0], join[1]);
+    if (withLine) {
+      sketch.point("F", join[0], join[1] - 20 * ballRadius);
+      sketch.line("L", "T", "F");
+    }
+    return derive(sketch, {
+      derivedCurves: [
+        {
+          outputEntityId: "sketch_entity_shell" as SketchEntityId,
+          startPointId: "sketch_point_T" as SketchPointId,
+          endPointId: "sketch_point_T" as SketchPointId,
+          spans: [
+            {
+              outputSpanId: "s",
+              subIndex: 0,
+              poles,
+              sourceDomain: [0, 1],
+              queryDomain: [lo, 1 - lo],
+            },
+          ],
+        },
+      ],
+    });
+  };
+
+  test("a sub-span trimmed at both ends by one point is blocked by the G14 guard (fabricated, not owner-reachable)", async () => {
+    const result = await deriveSelfLoop(false);
+    expect(result.regions).toEqual([]);
+    expect(codes(result)).toEqual(["region-derived-tail-crossing"]);
+    expect(targetsOf(result, "region-derived-tail-crossing")).toEqual([
+      "shell",
+    ]);
+  }, 60_000);
+
+  test("a sub-span trimmed at both ends by one point that also starts a line fails closed before clearance (fabricated, not owner-reachable)", async () => {
+    // The line's contacts at T cannot be ordered against the shell's own
+    // occurrences, so the component is blocked by the vertex order check
+    // that runs just before the G14 guard.
+    const result = await deriveSelfLoop(true);
+    expect(result.regions).toEqual([]);
+    expect(codes(result)).toEqual(["region-vertex-order-uncertain"]);
+    expect(targetsOf(result, "region-vertex-order-uncertain")).toEqual([
+      "L",
+      "shell",
+    ]);
+  }, 60_000);
 });
