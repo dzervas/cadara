@@ -581,6 +581,65 @@ describe("neutral spline reconstruction owner", () => {
     expect(acrossSpans?.u).toBeCloseTo(0.73, 9);
   });
 
+  test("T08b-g2: domains restrict the search to each span's local sub-interval (a trimmed tail never binds); the default domains are the unrestricted search", () => {
+    const points: V[] = [
+      [0, 0],
+      [1, -0.28642033599317074],
+      [2, -0.8654971411451697],
+    ];
+    const geometry = build(
+      input(points, "open", {
+        0: [3.0955284759402275, -3.686498027294874],
+        1: [7.648204565048218, 7.480724450200796],
+        2: [0.6425580456852913, 5.708081874996424],
+      }),
+    );
+    const query: V = [0.3154072277247906, -1.2599992523901165];
+    const free = closestSplineSpanLocation(query, geometry.spans);
+    expect(
+      closestSplineSpanLocation(query, geometry.spans, [
+        [0, 1],
+        [0, 1],
+      ]),
+    ).toEqual(free);
+    // Span 0's minimum (u ≈ 0.959) lies beyond a trim at u = 0.5: the
+    // restricted search binds at the domain end or on span 1, never the tail.
+    const restricted = closestSplineSpanLocation(query, geometry.spans, [
+      [0, 0.5],
+      [0, 1],
+    ]);
+    expect(restricted).not.toBeNull();
+    expect(
+      restricted!.spanIndex === 1 ||
+        (restricted!.spanIndex === 0 && restricted!.u <= 0.5),
+    ).toBe(true);
+    const spanOnly = closestSplineSpanLocation(query, geometry.spans, [
+      [0, 0.5],
+      undefined,
+    ]);
+    expect(spanOnly?.spanIndex).toBe(0);
+    expect(spanOnly!.u).toBeLessThanOrEqual(0.5);
+    expect(spanOnly!.distanceSquared).toBeGreaterThan(free!.distanceSquared);
+    // An interior stationary point inside the domain is still found.
+    const inside = evaluateSplineSpan(geometry.spans[1], {
+      kind: "local",
+      value: 0.73,
+    }).position;
+    expect(
+      closestSplineSpanLocation(inside, geometry.spans, [
+        [0, 1],
+        [0.25, 0.9],
+      ])?.u,
+    ).toBeCloseTo(0.73, 9);
+    // An empty or inverted domain skips its span.
+    expect(
+      closestSplineSpanLocation(inside, geometry.spans, [
+        undefined,
+        [0.9, 0.2],
+      ]),
+    ).toBeNull();
+  });
+
   test("closest location preserves representably distinct roots beside endpoints", () => {
     const zeroDifferential = {
       interval: [0, 0] as const,

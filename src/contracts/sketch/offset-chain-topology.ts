@@ -35,6 +35,7 @@ import type {
 } from "@/contracts/sketch/schema";
 import {
   evaluateSplineSpan,
+  orderedSplineOccurrences,
   reconstructSplineAggregate,
   type SplineSpan,
   type SplineVector,
@@ -43,6 +44,7 @@ import {
   approximateSplineOffset,
   type AdoptedEndpoint,
   type SplineOffsetCubicSpan,
+  type SplineOffsetDirection,
 } from "@/contracts/sketch/spline-offset-geometry";
 
 /**
@@ -1518,7 +1520,26 @@ export type DeclaredOffsetPieceSource =
        * adoption re-call [TECH T1] uses exactly these (same frame).
        */
       readonly sourceSpans: readonly SplineSpan[];
+      /**
+       * T08b-g2 [TECH] G8a (solve-frame JVP only): the batched owner
+       * directions that call carried (and an adoption re-call carries), one
+       * source-span differential per span per direction. Absent without
+       * `directions`.
+       */
+      readonly directions?: readonly SplineOffsetDirection[];
     };
+
+/**
+ * T08b-g2 [TECH] G8a: one source direction of the solve-frame JVP, as the
+ * reconstruction's `SplineVariation`: point variations by point ID and
+ * authored-tangent variations by spline entity and occurrence ID.
+ */
+export interface OffsetChainSourceDirection {
+  readonly points?: Readonly<Record<string, SplineVector>>;
+  readonly splineTangents?: Readonly<
+    Record<string, Readonly<Record<string, SplineVector>>>
+  >;
+}
 
 export interface DeclaredOffsetChainPieces {
   readonly ok: true;
@@ -1681,6 +1702,12 @@ export function uncheckedDeclaredOffsetChainPieces(input: {
   readonly connectivity: DeclaredOffsetChainConnectivity;
   readonly distance: number;
   readonly modelingTolerance: number;
+  /**
+   * T08b-g2 [TECH] G8a (the solve-frame JVP): each spline's ONE owner call
+   * (and its adoption re-call) carries these directions batched; geometry
+   * is byte-identical to the call without them. Absent: unchanged.
+   */
+  readonly directions?: readonly OffsetChainSourceDirection[];
 }): UncheckedDeclaredOffsetChainPieces | OffsetChainFailure {
   const built = buildDeclaredOffsetChainPieces(input, undefined);
   // The only construction of the unchecked brand (a phantom: never set).
@@ -1701,6 +1728,7 @@ function buildDeclaredOffsetChainPieces(
     readonly connectivity: DeclaredOffsetChainConnectivity;
     readonly distance: number;
     readonly modelingTolerance: number;
+    readonly directions?: readonly OffsetChainSourceDirection[];
   },
   solvedSnapshot: SolvedSketchSnapshot | undefined,
 ): AdoptablePieces | OffsetChainFailure {
@@ -1876,10 +1904,14 @@ function buildDeclaredOffsetChainPieces(
           )))
     )
       return mismatch("spline", seedEntityId);
+    const directions = input.directions?.map((direction) =>
+      splineOffsetDirection(entity, positions, direction, geometry.spans),
+    );
     const owner = approximateSplineOffset({
       spans: geometry.spans,
       distance: effective,
       modelingTolerance,
+      ...(directions ? { directions } : {}),
     });
     if (!owner.ok)
       return failure(
@@ -1898,6 +1930,7 @@ function buildDeclaredOffsetChainPieces(
       distance: effective,
       spans: owner.spans,
       sourceSpans: geometry.spans,
+      ...(directions ? { directions } : {}),
     });
   }
   return {
@@ -1909,6 +1942,43 @@ function buildDeclaredOffsetChainPieces(
     sources,
     vertices: declaredOffsetChainVertices(connectivity, pieces, sources),
   };
+}
+
+/**
+ * T08b-g2 [TECH] G8a: the owner direction of one source direction: the
+ * span differentials of a reconstruction with that variation (its poles are
+ * the base reconstruction's: variations never enter them). A variation the
+ * reconstruction rejects (non-finite) becomes non-finite differentials, so
+ * the owner marks that direction unavailable.
+ */
+function splineOffsetDirection(
+  entity: Extract<SketchDefinition["entities"][number], { kind: "spline" }>,
+  positions: Readonly<Record<string, SplineVector>>,
+  direction: OffsetChainSourceDirection,
+  spans: readonly SplineSpan[],
+): SplineOffsetDirection {
+  const tangents = direction.splineTangents?.[entity.entityId];
+  const occurrences = orderedSplineOccurrences(entity) ?? [];
+  const varied = reconstructSplineAggregate(entity, positions, {
+    ...(direction.points ? { points: direction.points } : {}),
+    ...(tangents
+      ? {
+          tangents: Object.fromEntries(
+            occurrences.flatMap((occurrence, index) => {
+              const value = tangents[occurrence.occurrenceId];
+              return value ? [[index, value] as const] : [];
+            }),
+          ),
+        }
+      : {}),
+  });
+  if (varied.validity === "valid")
+    return varied.spans.map((span) => span.differential);
+  const unavailable: SplineVector = [Number.NaN, Number.NaN];
+  return spans.map(() => ({
+    interval: [Number.NaN, Number.NaN] as const,
+    poles: [unavailable, unavailable, unavailable, unavailable] as const,
+  }));
 }
 
 /**
@@ -2985,6 +3055,7 @@ function adoptDeclaredVertices<D extends AdoptionDecision>(
         distance: source.distance,
         modelingTolerance: declared.modelingTolerance,
         sharedEndpoints: plan.ends,
+        ...(source.directions ? { directions: source.directions } : {}),
       });
       if (!owner.ok) {
         ownerFailure = { vertex: Math.min(...plan.vertices), code: owner.code };

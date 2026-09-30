@@ -1620,3 +1620,261 @@ const DIAMOND_POINTS: readonly SplineVector[] = [
   [-1, 0],
   [0, -1],
 ];
+
+describe("T08b-g2 [TECH] G8a: batched multi-direction differential", () => {
+  const view = new DataView(new ArrayBuffer(8));
+  const bitwise = (value: unknown) =>
+    JSON.stringify(value, (_key, item: unknown) => {
+      if (typeof item !== "number") return item;
+      view.setFloat64(0, item);
+      return `f64:${view.getBigUint64(0).toString(16)}`;
+    });
+  const tolerance = 1e-3;
+  const points: readonly SplineVector[] = [
+    [0, 0],
+    [1, 1],
+    [2, -3],
+    [3.5, -2],
+  ];
+  /** The source differentials of one reconstruction with `variation`. */
+  const directionOf = (
+    variation: SplineVariation,
+    list: readonly SplineVector[] = points,
+    closure: "open" | "smooth" | "positional" = "open",
+    handles: Readonly<Record<number, SplineVector>> = {},
+    aliases: Readonly<Record<number, number>> = {},
+  ) =>
+    realSpans(list, closure, handles, variation, aliases).map(
+      (item) => item.differential,
+    );
+  const strip = (result: ReturnType<typeof approximateSplineOffset>) =>
+    result.ok
+      ? {
+          ...result,
+          spans: result.spans.map(
+            ({ directions: _directions, ...rest }) => rest,
+          ),
+        }
+      : result;
+  const variations: readonly SplineVariation[] = [
+    { points: { p1: [1, 0] } },
+    { points: { p2: [0, 1], p0: [0.3, -0.2] } },
+    { tangents: { 1: [0.5, 0.25] } },
+  ];
+  /** Owner inputs covering the branches: plain, shared knots, d = 0, handles, a smooth wrap, a positional closure. */
+  const cases = () => {
+    const handles = { 1: [0.8, -0.4] as SplineVector };
+    const loopPoints: readonly SplineVector[] = [
+      [0, 0],
+      [1, 0],
+      [0, 1.5],
+      [-1, 0.001],
+      [0, 0],
+    ];
+    return [
+      {
+        label: "open, shared knots",
+        input: {
+          spans: realSpans(points),
+          distance: 0.05,
+          modelingTolerance: tolerance,
+        },
+        directions: variations.map((variation) => directionOf(variation)),
+      },
+      {
+        label: "authored handle",
+        input: {
+          spans: realSpans(points, "open", handles),
+          distance: -0.2,
+          modelingTolerance: tolerance,
+        },
+        directions: variations.map((variation) =>
+          directionOf(variation, points, "open", handles),
+        ),
+      },
+      {
+        label: "d = 0 analytic branch",
+        input: {
+          spans: realSpans(points),
+          distance: 0,
+          modelingTolerance: tolerance,
+        },
+        directions: variations.map((variation) => directionOf(variation)),
+      },
+      {
+        label: "smooth wrap",
+        input: {
+          spans: realSpans(DIAMOND_POINTS, "smooth"),
+          distance: 0.05,
+          modelingTolerance: tolerance,
+        },
+        directions: variations.map((variation) =>
+          directionOf(variation, DIAMOND_POINTS, "smooth"),
+        ),
+      },
+      {
+        label: "positional closure",
+        input: {
+          spans: realSpans(loopPoints, "positional", {}, {}, { 4: 0 }),
+          distance: -0.01,
+          modelingTolerance: tolerance,
+        },
+        directions: variations.map((variation) =>
+          directionOf(variation, loopPoints, "positional", {}, { 4: 0 }),
+        ),
+      },
+    ];
+  };
+
+  test("an absent field is today's output exactly (no `directions` key); with k directions every other field is byte-identical", () => {
+    for (const { label, input, directions } of cases()) {
+      const plain = approximateSplineOffset(input);
+      expect(plain.ok, label).toBe(true);
+      if (plain.ok)
+        expect(
+          plain.spans.every((item) => !("directions" in item)),
+          label,
+        ).toBe(true);
+      const batched = approximateSplineOffset({ ...input, directions });
+      expect(bitwise(strip(batched)), label).toBe(bitwise(plain));
+      if (!batched.ok) continue;
+      for (const item of batched.spans)
+        expect(item.directions, label).toHaveLength(directions.length);
+      // k = 0 is also geometry-identical, with an empty list per leaf.
+      const none = approximateSplineOffset({ ...input, directions: [] });
+      expect(bitwise(strip(none)), label).toBe(bitwise(plain));
+    }
+  });
+
+  test("each direction is its own single-direction differential: direction i is bitwise the `differential` of a call whose source carries direction i (k = 1 expressed)", () => {
+    for (const { label, input, directions } of cases()) {
+      const batched = successful({ ...input, directions });
+      directions.forEach((direction, index) => {
+        const single = successful({
+          ...input,
+          spans: input.spans.map((item, spanIndex) => ({
+            ...item,
+            differential: direction[spanIndex]!,
+          })),
+        });
+        expect(
+          bitwise(batched.spans.map((item) => item.directions![index])),
+          `${label} direction ${index}`,
+        ).toBe(bitwise(single.spans.map((item) => item.differential)));
+      });
+      // Directions are independent of their batch neighbours and order.
+      const reversed = successful({
+        ...input,
+        directions: [...directions].reverse(),
+      });
+      expect(
+        bitwise(batched.spans.map((item) => item.directions!.at(-1))),
+        label,
+      ).toBe(bitwise(reversed.spans.map((item) => item.directions![0])));
+    }
+  });
+
+  test("adoption: a start adoption reuses the keeper's pole differential of the SAME direction", () => {
+    const sources = realSpans(points);
+    const keeperDirections = variations.map((variation) =>
+      directionOf(variation).slice(0, 1),
+    );
+    const keeper = successful({
+      spans: [sources[0]!],
+      distance: 0.05,
+      modelingTolerance: tolerance,
+      directions: keeperDirections,
+    }).spans.at(-1)!;
+    const adopted = successful({
+      spans: sources.slice(1),
+      distance: 0.05,
+      modelingTolerance: tolerance,
+      sharedEndpoints: {
+        start: {
+          neighbour: keeper,
+          neighbourEnd: "end",
+          authority: { kind: "sharedPoint" },
+        },
+      },
+      directions: variations.map((variation) =>
+        directionOf(variation).slice(1),
+      ),
+    }).spans[0]!;
+    variations.forEach((_, index) =>
+      expect(bitwise(adopted.directions![index]!.poles[0])).toBe(
+        bitwise(keeper.directions![index]!.poles[3]),
+      ),
+    );
+    // A neighbour without matching directions is caller misuse.
+    const bare = (({ directions: _directions, ...rest }) => rest)(keeper);
+    expect(() =>
+      approximateSplineOffset({
+        spans: sources.slice(1),
+        distance: 0.05,
+        modelingTolerance: tolerance,
+        sharedEndpoints: {
+          start: {
+            neighbour: bare,
+            neighbourEnd: "end",
+            authority: { kind: "sharedPoint" },
+          },
+        },
+        directions: [directionOf({}).slice(1)],
+      }),
+    ).toThrow(/directions/);
+  });
+
+  test("a non-finite direction marks only that direction unavailable (null); geometry, certification and the other directions are unchanged", () => {
+    const input = {
+      spans: realSpans(points),
+      distance: 0.05,
+      modelingTolerance: tolerance,
+    };
+    const good = directionOf({ points: { p1: [1, 0] } });
+    const bad = good.map((item, index) =>
+      index === 1
+        ? {
+            ...item,
+            poles: [
+              item.poles[0],
+              [Number.NaN, 0],
+              item.poles[2],
+              item.poles[3],
+            ] as const,
+          }
+        : item,
+    );
+    const huge = directionOf({ points: { p2: [1e308, 1e308] } });
+    const result = successful({ ...input, directions: [good, bad, huge] });
+    expect(bitwise(strip(result))).toBe(
+      bitwise(approximateSplineOffset(input)),
+    );
+    const alone = successful({ ...input, directions: [good] });
+    expect(bitwise(result.spans.map((item) => item.directions![0]))).toBe(
+      bitwise(alone.spans.map((item) => item.directions![0])),
+    );
+    // Direction 1 is null exactly on source span 1's leaves and on the
+    // knot-sharing leaf after it (the shared pole is that direction's).
+    const nulls = result.spans.map((item) => item.directions![1] === null);
+    expect(nulls.some(Boolean)).toBe(true);
+    result.spans.forEach((item, index) => {
+      if (item.source.spanIndex === 1) expect(nulls[index]).toBe(true);
+      if (item.source.spanIndex === 0) expect(nulls[index]).toBe(false);
+    });
+    expect(
+      result.spans.some((item) => item.directions![2] === null),
+      "an overflowing direction is unavailable, never a failure",
+    ).toBe(true);
+  });
+
+  test("a direction whose length is not the span count is a RangeError before any work", () => {
+    expect(() =>
+      approximateSplineOffset({
+        spans: realSpans(points),
+        distance: 0.05,
+        modelingTolerance: tolerance,
+        directions: [directionOf({}).slice(1)],
+      }),
+    ).toThrow(/one differential per input span/);
+  });
+});

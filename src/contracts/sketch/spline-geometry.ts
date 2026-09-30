@@ -565,10 +565,17 @@ function splineCandidateDistance(
  * independent scale, preserving physical gaps that a dominant span or axis
  * would erase. Distances remain unsquared until the public result is formed.
  * Numerical root isolation does not constitute a symbolic global-minimum proof.
+ *
+ * `domains` (T08b-g2) restricts each span to a local sub-interval [u₀, u₁]
+ * of [0, 1] (a derived curve's active query domain): only its ends and the
+ * stationary candidates strictly inside are compared, and the refinement is
+ * clamped to it; a span whose domain is absent, empty or not finite is
+ * skipped. Without `domains` the search is exactly the unrestricted one.
  */
 export function closestSplineSpanLocation(
   position: SplineVector,
   spans: readonly Pick<SplineSpan, "interval" | "poles" | "differential">[],
+  domains?: readonly (readonly [number, number] | undefined)[],
 ): ClosestSplineSpanLocation | null {
   let best: {
     spanIndex: number;
@@ -578,6 +585,13 @@ export function closestSplineSpanLocation(
   } | null = null;
   for (let spanIndex = 0; spanIndex < spans.length; spanIndex += 1) {
     const span = spans[spanIndex]!;
+    const domain = domains ? domains[spanIndex] : ([0, 1] as const);
+    if (
+      !domain ||
+      !(domain[0] >= 0 && domain[0] <= domain[1] && domain[1] <= 1)
+    )
+      continue;
+    const [low, high] = domain;
     const relativePoles = span.poles.map(
       (pole) => [pole[0] - position[0], pole[1] - position[1]] as SplineVector,
     ) as unknown as SplinePoles;
@@ -626,7 +640,10 @@ export function closestSplineSpanLocation(
         }),
       );
     }
-    const candidates = [0, ...unitIntervalPolynomialRoots(stationary), 1];
+    const roots = unitIntervalPolynomialRoots(stationary);
+    const candidates = domains
+      ? [low, ...roots.filter((root) => root > low && root < high), high]
+      : [0, ...roots, 1];
     const relativeSpan = {
       ...span,
       poles,
@@ -652,7 +669,7 @@ export function closestSplineSpanLocation(
           evaluated.position[0] * evaluated.second[0] +
           evaluated.position[1] * evaluated.second[1];
         if (curvature === 0 || !Number.isFinite(curvature)) break;
-        const nextU = Math.max(0, Math.min(1, u - slope / curvature));
+        const nextU = Math.max(low, Math.min(high, u - slope / curvature));
         if (nextU === u) break;
         const next = evaluateSplineSpan(relativeSpan, {
           kind: "local",
