@@ -4,15 +4,26 @@ import type {
   NeutralCurveQueryCapability,
 } from "@/contracts/modeling/neutral-curve-query";
 import {
+  addOffsetFramePublication,
   addRectangle,
+  arcOracle,
+  closedCurvesSignedArea,
+  curvesLength,
+  cubicOracle,
   FIXTURE_TOLERANCE,
+  lineOracle,
   makeSketchFixture,
   neutralSpan,
   projectedSpline,
+  publishedOracleCurves,
+  type OffsetPublicationOutputs,
+  type OracleCurve,
   type SketchFixture,
 } from "@/contracts/sketch/region-extraction.fixtures";
 import {
   createSketchArrangementDeriver,
+  type SketchArrangementDerivedCurve,
+  type SketchArrangementInput,
   type SketchArrangementResult,
 } from "@/contracts/sketch/region-extraction";
 import { certifyNeutralCurvePieceSignedArea } from "@/contracts/sketch/region-interval-geometry";
@@ -26,7 +37,57 @@ import type {
   SplineSpan,
   SplineVector,
 } from "@/contracts/sketch/spline-geometry";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import {
+  createCertifiedNeutralCurveQueryCapabilityForTest,
+  createCertifiedNeutralCurveRequestQuery,
+} from "@/domain/modeling/neutral-curve-certification/query";
+import type {
+  SketchEntityId,
+  SketchId,
+  SketchPointId,
+} from "@/contracts/shared/ids";
+import type { SketchDefinition } from "@/contracts/sketch/schema";
+import type { SketchConstraintToolId } from "@/core/sketch-constraints/definition";
+import {
+  getSketchConstraintDefinition,
+  resolveSketchConstraintTarget,
+} from "@/core/sketch-constraints/registry";
+import { lineSketchToolDefinition } from "@/core/sketch-tools/tools/line";
+import { splineSketchToolDefinition } from "@/core/sketch-tools/tools/spline";
+import { centerPointArcSketchToolDefinition } from "@/core/sketch-tools/tools/center-point-arc";
+import { circleSketchToolDefinition } from "@/core/sketch-tools/tools/circle";
+import { rectangleSketchToolDefinition } from "@/core/sketch-tools/tools/rectangle";
+import {
+  createSketchFilletMutation,
+  createSketchOffsetDerivationContribution,
+  createSketchSlotContribution,
+} from "@/domain/sketch-editing/operations";
+import { appendInferredSnapConstraints } from "@/domain/editor/sketch-session/tools";
+import { createSessionCommitFactories } from "@/domain/editor/sketch-session/internals";
+import { createDocumentSolverTolerances } from "@/contracts/solver/schema";
+import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
+import {
+  CORNER_MATRIX_SOLVE_TOLERANCES,
+  createNativeArcOffsetHarness,
+  createNativeOffsetChainHarness,
+  offsetFrameChainRows,
+  offsetPartitionDragRows,
+  seedArcRows,
+  type AcceptedPair,
+  type Authored,
+  type EndpointSnaps,
+  type NativeArcAuthoring,
+  type NativeToolAuthoring,
+  type Vector,
+} from "@/contracts/sketch/offset-chain.fixtures";
+import {
+  publishOffsetFrame,
+  solveOffsetFrame,
+  type CertifiedOffsetFramePublication,
+  type OffsetFramePlan,
+  type OffsetFrameRelationship,
+} from "@/contracts/sketch/offset-derivation-frame";
 
 let capability: NeutralCurveQueryCapability;
 beforeAll(async () => {
@@ -2245,4 +2306,1056 @@ describe("query routing through the injected capability", () => {
       ),
     ).rejects.toThrow(RangeError);
   });
+});
+
+// ---------------------------------------------------------------------------
+// T08b-g3: published derived offset shells as region input (dark)
+// ---------------------------------------------------------------------------
+
+/*
+ * The native authoring seams below are the offset-chain topology spec's own
+ * (verbatim, as `offset-derivation-frame.spec.ts` carries them): contracts
+ * fixtures may not import implementation layers (static guard), so each spec
+ * injects them.
+ */
+
+function createNativeToolAuthoring(sketchId: string): NativeToolAuthoring {
+  const factories = createSessionCommitFactories(1, sketchId as never);
+  const endpointSnap = (pointId: SketchPointId, point: Vector) => ({
+    key: `endpoint:${pointId}`,
+    kind: "endpoint" as const,
+    point,
+    rawPointer: point,
+    distance: 0,
+    priority: 0,
+    sources: [{ kind: "localPoint" as const, pointId }],
+    preview: { label: "endpoint", glyph: "endpoint" as const },
+  });
+  const infer = (
+    previousDefinition: SketchDefinition,
+    activeTool: "line" | "spline",
+    patch: ReturnType<typeof lineSketchToolDefinition.createCommitContribution>,
+    sequence: number,
+    start: Vector,
+    end: Vector,
+    snaps: EndpointSnaps,
+  ) =>
+    appendInferredSnapConstraints({
+      previousDefinition,
+      patch,
+      activeTool,
+      startSnap: snaps.start ? endpointSnap(snaps.start, start) : null,
+      endSnap: snaps.end ? endpointSnap(snaps.end, end) : null,
+      sequence,
+      createConstraintId: (name: string) => `constraint_${name}` as never,
+    });
+  return {
+    line: ({ previousDefinition, sequence, start, end, snaps }) =>
+      infer(
+        previousDefinition,
+        "line",
+        lineSketchToolDefinition.createCommitContribution({
+          sequence,
+          start,
+          end,
+          isConstruction: false,
+          factories,
+        }),
+        sequence,
+        start,
+        end,
+        snaps,
+      ),
+    spline: ({ previousDefinition, sequence, points, snaps }) =>
+      infer(
+        previousDefinition,
+        "spline",
+        splineSketchToolDefinition.createCommitContribution({
+          sequence,
+          start: points[0]!,
+          end: points.at(-1)!,
+          points: points as [number, number][],
+          isConstruction: false,
+          factories,
+        }),
+        sequence,
+        points[0]!,
+        points.at(-1)!,
+        snaps,
+      ),
+  };
+}
+
+function createNativeArcAuthoring(sketchId: string): NativeArcAuthoring {
+  const factoriesOf = (sequence: number) =>
+    createSessionCommitFactories(sequence, sketchId as never);
+  const endpointSnap = (pointId: SketchPointId, point: Vector) => ({
+    key: `endpoint:${pointId}`,
+    kind: "endpoint" as const,
+    point,
+    rawPointer: point,
+    distance: 0,
+    priority: 0,
+    sources: [{ kind: "localPoint" as const, pointId }],
+    preview: { label: "endpoint", glyph: "endpoint" as const },
+  });
+  const infer = (
+    previousDefinition: SketchDefinition,
+    activeTool: "line" | "spline" | "centerPointArc",
+    patch: Authored,
+    sequence: number,
+    start: Vector,
+    end: Vector,
+    snaps: EndpointSnaps,
+  ) =>
+    appendInferredSnapConstraints({
+      previousDefinition,
+      patch: patch as never,
+      activeTool: activeTool as never,
+      startSnap: snaps.start ? endpointSnap(snaps.start, start) : null,
+      endSnap: snaps.end ? endpointSnap(snaps.end, end) : null,
+      sequence,
+      createConstraintId: (name: string) =>
+        `constraint_${sequence}_${name}` as never,
+    }) as Authored;
+  return {
+    line: ({ previousDefinition, sequence, start, end, snaps }) =>
+      infer(
+        previousDefinition,
+        "line",
+        lineSketchToolDefinition.createCommitContribution({
+          sequence,
+          start,
+          end,
+          isConstruction: false,
+          factories: factoriesOf(sequence),
+        }) as Authored,
+        sequence,
+        start,
+        end,
+        snaps,
+      ),
+    arc: ({ previousDefinition, sequence, center, start, end, snaps }) =>
+      infer(
+        previousDefinition,
+        "centerPointArc",
+        centerPointArcSketchToolDefinition.createCommitContribution({
+          sequence,
+          points: [center, start, end],
+          isConstruction: false,
+          factories: factoriesOf(sequence),
+        } as never) as Authored,
+        sequence,
+        start,
+        end,
+        snaps,
+      ),
+    spline: ({ previousDefinition, sequence, points, snaps }) =>
+      infer(
+        previousDefinition,
+        "spline",
+        splineSketchToolDefinition.createCommitContribution({
+          sequence,
+          start: points[0]!,
+          end: points.at(-1)!,
+          points: points as [number, number][],
+          isConstruction: false,
+          factories: factoriesOf(sequence),
+        }) as Authored,
+        sequence,
+        points[0]!,
+        points.at(-1)!,
+        snaps,
+      ),
+    circle: ({ sequence, center, rim }) =>
+      circleSketchToolDefinition.createCommitContribution({
+        sequence,
+        start: center,
+        end: rim,
+        isConstruction: false,
+        factories: factoriesOf(sequence),
+      } as never) as Authored,
+    rectangle: ({ sequence, start, end }) =>
+      rectangleSketchToolDefinition.createCommitContribution({
+        sequence,
+        start,
+        end,
+        isConstruction: false,
+        factories: factoriesOf(sequence),
+      } as never) as Authored,
+    fillet: ({ definition, sequence, entityIds, radius }) => {
+      const result = createSketchFilletMutation({
+        definition,
+        entityIds,
+        radius,
+        sequence,
+        factories: factoriesOf(sequence),
+      } as never);
+      if (!result.valid || !result.definition)
+        throw new Error(`fillet: ${result.message}`);
+      return result.definition;
+    },
+    slot: ({ definition, sequence, lineId, width }) => {
+      const result = createSketchSlotContribution({
+        definition,
+        entityIds: [lineId],
+        width,
+        sequence,
+        factories: factoriesOf(sequence),
+      } as never);
+      if (!result.valid || !result.contribution)
+        throw new Error(`slot: ${result.message}`);
+      return result.contribution as Authored;
+    },
+    constraint: ({ definition, sequence, toolId, entityIds }) => {
+      const tool = toolId as SketchConstraintToolId;
+      const contribution = getSketchConstraintDefinition(
+        tool,
+      ).createCommitContribution({
+        sequence,
+        selectedTargets: entityIds.map((entityId) => {
+          const record = resolveSketchConstraintTarget(tool, definition, {
+            kind: "sketchEntity",
+            sketchId: sketchId as SketchId,
+            entityId,
+          });
+          if (!record) throw new Error(`${toolId} rejected ${entityId}`);
+          return record;
+        }),
+        pointer: null,
+        value: null,
+        annotationPlacement: null,
+        createConstraintId: (suffix) =>
+          `constraint_${sequence}_${suffix}` as const,
+        createDimensionId: (suffix) =>
+          `dimension_${sequence}_${suffix}` as const,
+      });
+      const constraints = contribution.constraints ?? [];
+      const dimensions = contribution.dimensions ?? [];
+      return {
+        ...definition,
+        constraintIds: [
+          ...definition.constraintIds,
+          ...constraints.map((constraint) => constraint.constraintId),
+        ],
+        constraints: [...definition.constraints, ...constraints],
+        dimensionIds: [
+          ...definition.dimensionIds,
+          ...dimensions.map((dimension) => dimension.dimensionId),
+        ],
+        dimensions: [...definition.dimensions, ...dimensions],
+      };
+    },
+    offset: ({ definition, sequence, entityIds, distance }) => {
+      const result = createSketchOffsetDerivationContribution({
+        definition,
+        entityIds,
+        distance: Math.abs(distance),
+        side: distance >= 0 ? "left" : "right",
+        sequence,
+        factories: factoriesOf(sequence),
+      } as never);
+      return result.valid && result.contribution
+        ? (result.contribution as never)
+        : null;
+    },
+  };
+}
+
+const offsetQuery = createCertifiedNeutralCurveRequestQuery();
+const offsetCertifier = createCertifiedCubicTubeChain();
+const chainHarnesses = {
+  matrix: createNativeOffsetChainHarness({
+    authoring: createNativeToolAuthoring("sketch_g3m"),
+    query: offsetQuery,
+    modelingTolerance: FIXTURE_TOLERANCE,
+    solveTolerances: CORNER_MATRIX_SOLVE_TOLERANCES,
+  }),
+  native: createNativeOffsetChainHarness({
+    authoring: createNativeToolAuthoring("sketch_g3n"),
+    query: offsetQuery,
+    modelingTolerance: FIXTURE_TOLERANCE,
+  }),
+};
+const offsetArcHarness = createNativeArcOffsetHarness({
+  authoring: createNativeArcAuthoring("sketch_g3f"),
+  modelingTolerance: FIXTURE_TOLERANCE,
+  solveTolerances: createDocumentSolverTolerances(OCC_KERNEL_SETTINGS),
+});
+
+interface OffsetRow {
+  pair: AcceptedPair;
+  seeds: readonly SketchEntityId[];
+  distance: number;
+  publication: CertifiedOffsetFramePublication;
+}
+
+/** The T08b-g plan §3.1 publish cycle: solve, publish, at most one hinted re-solve. */
+function certifiedPublication(
+  pair: AcceptedPair,
+  seeds: readonly SketchEntityId[],
+  distance: number,
+): CertifiedOffsetFramePublication {
+  const relationship: OffsetFrameRelationship = {
+    derivationId: "derivation_g3",
+    seedEntityIds: seeds,
+    distance,
+  };
+  const solve = (plan?: OffsetFramePlan) => {
+    const frame = solveOffsetFrame(
+      {
+        relationship,
+        definition: pair.definition,
+        modelingTolerance: FIXTURE_TOLERANCE,
+      },
+      plan,
+    );
+    if (!frame.ok) throw new Error(`solve frame: ${frame.failure.message}`);
+    return frame;
+  };
+  const publish = (solveFrame: ReturnType<typeof solve>) =>
+    publishOffsetFrame({
+      relationship,
+      pair,
+      modelingTolerance: FIXTURE_TOLERANCE,
+      query: offsetQuery,
+      certifier: offsetCertifier,
+      solveFrame,
+    });
+  let publication = publish(solve());
+  if (publication.status === "planChanged")
+    publication = publish(solve(publication.plan));
+  if (publication.status !== "certified")
+    throw new Error(
+      `publish: ${publication.status === "failed" ? publication.failure.message : publication.status}`,
+    );
+  return publication;
+}
+
+/** A chain row (`${row} ${distance}`, corner matrix by default) through native commit, solve and publish. */
+function nativeChainRow(label: string, family = "corner matrix"): OffsetRow {
+  const row = offsetFrameChainRows().find(
+    (item) =>
+      item.family === family && `${item.row} ${item.distance}` === label,
+  );
+  if (!row) throw new Error(`no row ${label}`);
+  const harness = chainHarnesses[row.harness];
+  harness.resetSequence();
+  const pair = harness.solvedPair(row.build(harness));
+  const seeds = pair.definition.entities.map((entity) => entity.entityId);
+  return {
+    pair,
+    seeds,
+    distance: row.distance,
+    publication: certifiedPublication(pair, seeds, row.distance),
+  };
+}
+
+/** A D3 row (`${row} ${distance}`) through native tools, Offset, solve and publish. */
+function nativeD3Row(label: string): OffsetRow {
+  const row = seedArcRows().find(
+    (item) => `${item.row} ${item.distance}` === label,
+  );
+  if (!row) throw new Error(`no row ${label}`);
+  const sketch = row.build(offsetArcHarness);
+  const { pair } = offsetArcHarness.adapt(sketch, row.distance);
+  return {
+    pair,
+    seeds: sketch.seeds,
+    distance: row.distance,
+    publication: certifiedPublication(pair, sketch.seeds, row.distance),
+  };
+}
+
+const positionOf = (sketch: SketchFixture, name: string): SplineVector =>
+  sketch
+    .definition()
+    .points.find((point) => point.pointId === `sketch_point_${name}`)!
+    .position as SplineVector;
+
+interface OffsetSketch {
+  sketch: SketchFixture;
+  outputs: OffsetPublicationOutputs;
+  /** Oracle curves of the closing lines, after the published chain. */
+  closing: OracleCurve[];
+}
+
+/**
+ * The publication's outputs in a fresh fixture; an open chain is closed by
+ * one line (end → start) or by two axis-parallel lines through a corner.
+ */
+function offsetSketch(
+  publication: CertifiedOffsetFramePublication,
+  close?: "line" | "lines",
+): OffsetSketch {
+  const sketch = makeSketchFixture();
+  const outputs = addOffsetFramePublication(sketch, publication.frame);
+  const closing: OracleCurve[] = [];
+  if (close) {
+    const start = positionOf(sketch, outputs.start!);
+    const end = positionOf(sketch, outputs.end!);
+    if (close === "line") {
+      sketch.line("close", outputs.end!, outputs.start!);
+      closing.push(lineOracle(end, start));
+    } else {
+      const corner: SplineVector = [start[0], end[1]];
+      sketch.point("closeQ", corner[0], corner[1]);
+      sketch.line("close0", outputs.end!, "closeQ");
+      sketch.line("close1", "closeQ", outputs.start!);
+      closing.push(lineOracle(end, corner), lineOracle(corner, start));
+    }
+  }
+  return { sketch, outputs, closing };
+}
+
+/** The arrangement of an offset sketch, with its derived curves. */
+const deriveOffset = (offset: OffsetSketch) =>
+  derive(offset.sketch, { derivedCurves: offset.outputs.derivedCurves });
+
+/** Oracle curves of one region loop, read back from its segment records. */
+function regionLoopCurves(
+  loop: RegionRecord["loops"][number],
+  input: SketchArrangementInput,
+): OracleCurve[] {
+  const solved = new Map(
+    input.solvedSnapshot.solvedEntities.map((entity) => [
+      entity.entityId,
+      entity,
+    ]),
+  );
+  return loop.segments.map((segment): OracleCurve => {
+    const [lo, hi] = segment.sourceParameterInterval;
+    const [from, to] =
+      segment.traversalDirection === "forward" ? [lo, hi] : [hi, lo];
+    const source = segment.branch.source;
+    if (source.kind !== "entity") throw new Error("a projected segment");
+    const shell = input.derivedCurves?.find(
+      (curve) => curve.outputEntityId === source.entityId,
+    );
+    if (shell) {
+      const span = shell.spans.find(
+        (candidate) =>
+          candidate.outputSpanId === segment.branch.spanId &&
+          candidate.sourceDomain[0] <= lo &&
+          hi <= candidate.sourceDomain[1],
+      )!;
+      return cubicOracle(span.poles, span.sourceDomain, from, to);
+    }
+    const geometry = solved.get(source.entityId)!;
+    if (geometry.kind === "lineSegment")
+      return {
+        ...lineOracle(geometry.startPosition, geometry.endPosition),
+        from,
+        to,
+      };
+    if (geometry.kind === "spline") {
+      const span = geometry.reconstruction.spans.find(
+        (candidate) =>
+          `${candidate.source.startOccurrenceId}>${candidate.source.endOccurrenceId}` ===
+          segment.branch.spanId,
+      )!;
+      return cubicOracle(span.poles, span.interval, from, to);
+    }
+    if (geometry.kind !== "arc" && geometry.kind !== "circle")
+      throw new Error(`no oracle for ${geometry.kind}`);
+    const center = geometry.centerPosition;
+    const radius =
+      geometry.kind === "circle"
+        ? geometry.solvedRadius
+        : Math.hypot(
+            geometry.startPosition[0] - center[0],
+            geometry.startPosition[1] - center[1],
+          );
+    return {
+      point: (t) => [
+        center[0] + radius * Math.cos(t),
+        center[1] + radius * Math.sin(t),
+      ],
+      derivative: (t) => [-radius * Math.sin(t), radius * Math.cos(t)],
+      from,
+      to,
+    };
+  });
+}
+
+/**
+ * The region is exactly the published (trimmed) loop: its one outer loop's
+ * area equals the published loop's area (the independent quadrature oracle
+ * over the publication), and on every derived sub-span its segments tile the
+ * published `queryDomain` exactly, ending bitwise at the trim parameters.
+ */
+function expectPublishedRegion(
+  region: RegionRecord,
+  input: SketchArrangementInput,
+  offset: OffsetSketch,
+  label: string,
+) {
+  expect(
+    region.loops.map((loop) => loop.role),
+    label,
+  ).toEqual(["outer"]);
+  const area = closedCurvesSignedArea(
+    regionLoopCurves(region.loops[0]!, input),
+  );
+  const published = Math.abs(
+    closedCurvesSignedArea([
+      ...publishedOracleCurves(offset.outputs.pieces),
+      ...offset.closing,
+    ]),
+  );
+  expect(area, `${label}: counter-clockwise outer loop`).toBeGreaterThan(0);
+  expect(
+    Math.abs(area - published),
+    `${label}: region area ${area} = published loop area ${published}`,
+  ).toBeLessThanOrEqual(1e-9 * Math.max(1, published));
+  for (const shell of offset.outputs.derivedCurves)
+    for (const span of shell.spans) {
+      const intervals = region.loops[0]!.segments.filter(
+        (segment) =>
+          segment.branch.source.kind === "entity" &&
+          segment.branch.source.entityId === shell.outputEntityId &&
+          segment.branch.spanId === span.outputSpanId &&
+          span.sourceDomain[0] <= segment.sourceParameterInterval[0] &&
+          segment.sourceParameterInterval[1] <= span.sourceDomain[1],
+      )
+        .map((segment) => segment.sourceParameterInterval)
+        .sort((l, r) => l[0] - r[0]);
+      const where = `${label}: sub-span ${span.outputSpanId}.${span.subIndex}`;
+      expect(intervals.length, `${where} bounds the region`).toBeGreaterThan(0);
+      expect(
+        Object.is(intervals[0]![0], span.queryDomain[0]) &&
+          Object.is(intervals.at(-1)![1], span.queryDomain[1]),
+        `${where}: its segments end bitwise at the published domain`,
+      ).toBe(true);
+      for (let k = 0; k + 1 < intervals.length; k += 1)
+        expect(intervals[k]![1], where).toBe(intervals[k + 1]![0]);
+    }
+}
+
+/** Source loop curves in the frame's traversal order (for the Steiner oracle). */
+function sourceLoopCurves(row: OffsetRow): OracleCurve[] {
+  const solved = new Map(
+    row.pair.solvedSnapshot.solvedEntities.map((entity) => [
+      entity.entityId,
+      entity,
+    ]),
+  );
+  return row.publication.frame.pieces.flatMap((piece) => {
+    const geometry = solved.get(piece.seedEntityId)!;
+    const curves: OracleCurve[] =
+      geometry.kind === "lineSegment"
+        ? [lineOracle(geometry.startPosition, geometry.endPosition)]
+        : geometry.kind === "arc"
+          ? [
+              arcOracle(
+                geometry.centerPosition,
+                geometry.startPosition,
+                geometry.endPosition,
+                geometry.sweepDirection,
+              ),
+            ]
+          : geometry.kind === "spline"
+            ? geometry.reconstruction.spans.map((span) =>
+                cubicOracle(span.poles, span.interval, ...span.interval),
+              )
+            : [];
+    return piece.reversed
+      ? curves.reverse().map((curve) => ({
+          ...curve,
+          from: curve.to,
+          to: curve.from,
+        }))
+      : curves;
+  });
+}
+
+describe("T08b-g3 derived offset shells as region input", () => {
+  const acceptance: {
+    label: string;
+    row: () => OffsetRow;
+    close?: "line" | "lines";
+    /** The offset is a parallel body of a convex source (Steiner's formula holds). */
+    steiner: boolean;
+  }[] = [
+    {
+      label: "SL-loop 0.01",
+      row: () => nativeChainRow("SL-loop 0.01"),
+      steiner: true,
+    },
+    {
+      label: "SL-loop -0.01",
+      row: () => nativeChainRow("SL-loop -0.01"),
+      steiner: false,
+    },
+    {
+      label: "rounded rect 0.01",
+      row: () => nativeD3Row("rounded rect 0.01"),
+      steiner: true,
+    },
+    {
+      label: "rounded rect -0.01",
+      row: () => nativeD3Row("rounded rect -0.01"),
+      steiner: true,
+    },
+    {
+      label: "rounded rect -0.1",
+      row: () => nativeD3Row("rounded rect -0.1"),
+      steiner: true,
+    },
+    { label: "slot 0.01", row: () => nativeD3Row("slot 0.01"), steiner: true },
+    {
+      label: "slot -0.01",
+      row: () => nativeD3Row("slot -0.01"),
+      steiner: true,
+    },
+    { label: "slot 0.1", row: () => nativeD3Row("slot 0.1"), steiner: true },
+    { label: "lens 0.01", row: () => nativeD3Row("lens 0.01"), steiner: false },
+    {
+      label: "lens -0.01",
+      row: () => nativeD3Row("lens -0.01"),
+      steiner: true,
+    },
+    { label: "lens -0.1", row: () => nativeD3Row("lens -0.1"), steiner: true },
+    {
+      label: "SS-60 -0.01 closed by a line",
+      row: () => nativeChainRow("SS-60 -0.01"),
+      close: "line",
+      steiner: false,
+    },
+    {
+      label: "trimmed SL-90 0.01 closed by lines",
+      row: () => nativeChainRow("SL-90 0.01"),
+      close: "lines",
+      steiner: false,
+    },
+    {
+      label: "trimmed SL-90 0.2 closed by lines",
+      row: () => nativeChainRow("SL-90 0.2"),
+      close: "lines",
+      steiner: false,
+    },
+  ];
+
+  test.each(acceptance.map((entry) => [entry.label, entry] as const))(
+    "%s: the published loop gives one closed region, its area checked against an independent oracle",
+    async (label, entry) => {
+      const row = entry.row();
+      const offset = offsetSketch(row.publication, entry.close);
+      const result = await deriveOffset(offset);
+      expect(codes(result), label).toEqual([]);
+      expect(result.regions, label).toHaveLength(1);
+      expectPublishedRegion(
+        result.regions[0]!,
+        offset.sketch.build({ derivedCurves: offset.outputs.derivedCurves }),
+        offset,
+        label,
+      );
+      if (!entry.steiner) return;
+      // Steiner: a parallel body of a convex source at |d| has area
+      // A0 ± L0·|d| + π·d² (outward +; inward exact while every curvature
+      // radius is at least |d|), up to the owner's certified cubic error.
+      const source = sourceLoopCurves(row);
+      const signed = closedCurvesSignedArea(source);
+      const length = curvesLength(source);
+      const outward = Math.sign(signed) * row.distance < 0 ? 1 : -1;
+      const d = Math.abs(row.distance);
+      const steiner = Math.abs(signed) + outward * length * d + Math.PI * d * d;
+      const error = Math.max(
+        0,
+        ...row.publication.frame.pieces.flatMap((piece) =>
+          piece.kind === "derivedCubic"
+            ? piece.spans.map((span) => span.certifiedError)
+            : [],
+        ),
+      );
+      const area = Math.abs(
+        closedCurvesSignedArea(publishedOracleCurves(offset.outputs.pieces)),
+      );
+      expect(
+        Math.abs(area - steiner),
+        `${label}: published area ${area} against Steiner ${steiner}`,
+      ).toBeLessThanOrEqual(length * error + 1e-9 * Math.max(1, steiner));
+      expect(result.regions[0]!.label).toBe("Outer region");
+    },
+    120_000,
+  );
+
+  test("an offset loop nests with its source outline: annulus plus inner disk (SL-loop 0.01)", async () => {
+    const row = nativeChainRow("SL-loop 0.01");
+    const offset = offsetSketch(row.publication);
+    const names = new Map(
+      row.pair.definition.points.map((point, index) => [
+        point.pointId,
+        `src${index}`,
+      ]),
+    );
+    const name = (pointId: SketchPointId) => names.get(pointId)!;
+    for (const point of row.pair.definition.points)
+      offset.sketch.point(name(point.pointId), ...point.position);
+    row.pair.definition.entities.forEach((entity, index) => {
+      if (entity.kind === "lineSegment")
+        offset.sketch.line(
+          `src_${index}`,
+          name(entity.startPointId),
+          name(entity.endPointId),
+        );
+      else if (entity.kind === "spline")
+        offset.sketch.spline(
+          `src_${index}`,
+          entity.pointOccurrences.map((occurrence) => name(occurrence.pointId)),
+          entity.closure,
+        );
+      else throw new Error(`unexpected source ${entity.kind}`);
+    });
+    for (const constraint of row.pair.definition.constraints)
+      if (constraint.kind === "coincident")
+        offset.sketch.coincident(
+          name(constraint.pointIds[0]),
+          name(constraint.pointIds[1]),
+        );
+    const result = await deriveOffset(offset);
+    expect(codes(result)).toEqual([]);
+    expect(result.regions.map((region) => region.loops.length)).toEqual([2, 1]);
+    const input = offset.sketch.build({
+      derivedCurves: offset.outputs.derivedCurves,
+    });
+    const loopArea = (loop: RegionRecord["loops"][number]) =>
+      closedCurvesSignedArea(regionLoopCurves(loop, input));
+    const [annulus, disk] = result.regions as [RegionRecord, RegionRecord];
+    const published = Math.abs(
+      closedCurvesSignedArea(publishedOracleCurves(offset.outputs.pieces)),
+    );
+    const source = Math.abs(closedCurvesSignedArea(sourceLoopCurves(row)));
+    expect(loopArea(annulus.loops[0]!)).toBeCloseTo(published, 9);
+    expect(-loopArea(annulus.loops[1]!)).toBeCloseTo(source, 9);
+    expect(loopArea(disk.loops[0]!)).toBeCloseTo(source, 9);
+    expect(boundaryEntities(disk)).toEqual(["src_0", "src_1"]);
+  }, 120_000);
+
+  test.each(
+    offsetPartitionDragRows().map((row) => [row.distance, row] as const),
+  )(
+    "region ids survive the owner's partition refinement along the probe drag (SL-loop, d = %s)",
+    async (_distance, row) => {
+      const harness = chainHarnesses.matrix;
+      harness.resetSequence();
+      const committed = row.build(harness);
+      const steps = [];
+      for (const height of row.heights) {
+        const pair = harness.solvedPair(row.drag(committed, height));
+        const seeds = pair.definition.entities.map((entity) => entity.entityId);
+        const offset = offsetSketch(
+          certifiedPublication(pair, seeds, row.distance),
+        );
+        const result = await deriveOffset(offset);
+        expect(codes(result), `height ${height}`).toEqual([]);
+        const shell = offset.outputs.derivedCurves[0]!;
+        steps.push({
+          height,
+          partition: shell.spans
+            .map((span) => `${span.outputSpanId}.${span.subIndex}`)
+            .join("|"),
+          subSpans: shell.spans.length,
+          segments: result.regions[0]!.loops[0]!.segments.length,
+          ids: ids(result),
+        });
+      }
+      // The drag refines the sub-partition (4, 6, 6, 8, 10 sub-spans) and the
+      // loop records follow it, while every region id stays the same.
+      expect(steps.map((step) => step.subSpans)).toEqual([4, 6, 6, 8, 10]);
+      expect(new Set(steps.map((step) => step.segments)).size).toBe(4);
+      expect(steps.every((step) => step.ids.length === 1)).toBe(true);
+      expect(new Set(steps.map((step) => step.ids[0])).size).toBe(1);
+    },
+    300_000,
+  );
+
+  test.each(
+    offsetPartitionDragRows().map((row) => [row.distance, row] as const),
+  )(
+    "a circle crossing one output span twice, in two sub-spans, keeps two distinct crossing keys and the region ids along the probe drag (shared-key census, SL-loop, d = %s)",
+    async (_distance, row) => {
+      const harness = chainHarnesses.matrix;
+      harness.resetSequence();
+      const committed = row.build(harness);
+      const steps = [];
+      for (const height of row.heights) {
+        const pair = harness.solvedPair(row.drag(committed, height));
+        const seeds = pair.definition.entities.map((entity) => entity.entityId);
+        const offset = offsetSketch(
+          certifiedPublication(pair, seeds, row.distance),
+        );
+        const shell = offset.outputs.derivedCurves[0]!;
+        // A circle (r = 0.05) centred on output span 0 at its mid-parameter.
+        const spanId = shell.spans[0]!.outputSpanId;
+        const own = shell.spans.filter((span) => span.outputSpanId === spanId);
+        const [lo, hi] = [own[0]!.sourceDomain[0], own.at(-1)!.sourceDomain[1]];
+        const t = (lo + hi) / 2;
+        const host = own.find(
+          (span) => span.sourceDomain[0] <= t && t <= span.sourceDomain[1],
+        )!;
+        const center = cubicOracle(
+          host.poles,
+          host.sourceDomain,
+          ...host.sourceDomain,
+        ).point(t);
+        offset.sketch.point("hc", center[0], center[1]);
+        offset.sketch.circle("h", "hc", 0.05);
+        const result = await deriveOffset(offset);
+        expect(codes(result), `height ${height}`).toEqual([]);
+        // Every crossing vertex on the shell and the sub-span it lies in.
+        const crossings = new Map<string, Set<string>>();
+        for (const region of result.regions)
+          for (const loop of region.loops)
+            for (const segment of loop.segments) {
+              if (
+                segment.branch.source.kind !== "entity" ||
+                segment.branch.source.entityId !== shell.outputEntityId
+              )
+                continue;
+              const [a, b] = segment.sourceParameterInterval;
+              const ends =
+                segment.traversalDirection === "forward"
+                  ? [
+                      [segment.start, a],
+                      [segment.end, b],
+                    ]
+                  : [
+                      [segment.start, b],
+                      [segment.end, a],
+                    ];
+              for (const [vertex, at] of ends as [
+                RegionRecord["loops"][number]["segments"][number]["start"],
+                number,
+              ][]) {
+                if (!vertex?.key.startsWith("x")) continue;
+                const sub = shell.spans.find(
+                  (span) =>
+                    span.outputSpanId === segment.branch.spanId &&
+                    span.sourceDomain[0] < at &&
+                    at < span.sourceDomain[1],
+                )!;
+                const entry = crossings.get(vertex.key) ?? new Set<string>();
+                entry.add(`${sub.outputSpanId}.${sub.subIndex}`);
+                crossings.set(vertex.key, entry);
+              }
+            }
+        steps.push({
+          height,
+          subSpans: shell.spans.length,
+          regions: result.regions.length,
+          keys: [...crossings.keys()].sort(),
+          hosts: [...crossings.values()].flatMap((entry) => [...entry]),
+          ids: ids(result),
+        });
+      }
+      expect(steps.map((step) => step.subSpans)).toEqual([4, 6, 6, 8, 10]);
+      for (const step of steps) {
+        const at = `height ${step.height}`;
+        // The circle splits the loop's region into three cells.
+        expect(step.regions, at).toBe(3);
+        // Two crossings of the one output span, each in its own sub-span.
+        expect(step.keys, at).toHaveLength(2);
+        expect(step.hosts, at).toHaveLength(2);
+        expect(new Set(step.hosts).size, at).toBe(2);
+      }
+      // Crossing keys and region ids do not depend on the sub-partition.
+      expect(new Set(steps.map((step) => JSON.stringify(step.keys))).size).toBe(
+        1,
+      );
+      expect(new Set(steps.map((step) => JSON.stringify(step.ids))).size).toBe(
+        1,
+      );
+    },
+    300_000,
+  );
+
+  test("a forged crossing of the trimmed-off tail fails closed (fabricated arrangement input, not produced by the offset owner) (G14)", async () => {
+    // SL-90 0.01 closed by lines: the shell is trimmed at T and its
+    // untrimmed terminal sub-span runs on, undrawn, to the pole E. A line
+    // through the line output and that tail would close a small cell whose
+    // boundary is the undrawn tail.
+    const row = nativeChainRow("SL-90 0.01");
+    const plain = offsetSketch(row.publication, "lines");
+    const plainIds = ids(await deriveOffset(plain));
+    expect(plainIds).toHaveLength(1);
+    const trim = row.publication.frame.trims[0]!.position;
+    const withLine = async (from: SplineVector, to: SplineVector) => {
+      const offset = offsetSketch(row.publication, "lines");
+      offset.sketch.point("x0", from[0], from[1]);
+      offset.sketch.point("x1", to[0], to[1]);
+      offset.sketch.line("x", "x0", "x1");
+      return deriveOffset(offset);
+    };
+    const [x, y] = trim;
+    const forged = await withLine(
+      [x - 0.005, y + 0.019],
+      [x + 0.01, y - 0.011],
+    );
+    expect(forged.regions).toEqual([]);
+    expect(codes(forged)).toContain("region-derived-tail-crossing");
+    expect(targetsOf(forged, "region-derived-tail-crossing")).toEqual([
+      "off_p0",
+    ]);
+    // Controls: the same line across the drawn shell instead. Dangling, it is
+    // pruned and the region keeps its id; spanning the drawn corner, it
+    // splits the region in two.
+    const dangling = await withLine([x - 0.015, y + 0.019], [x, y - 0.011]);
+    expect(codes(dangling)).toEqual(["profile-open-segment"]);
+    expect(ids(dangling)).toEqual(plainIds);
+    const split = await withLine([x + 0.005, y + 0.019], [x - 0.01, y - 0.011]);
+    expect(codes(split)).toEqual([]);
+    expect(split.regions).toHaveLength(2);
+  }, 120_000);
+
+  test.each(["SL-90 0.01", "SL-90 0.2"])(
+    "%s outputs alone: an open trimmed chain is open on every shell sub-span, the trimmed one included (its tail is pruned)",
+    async (label) => {
+      const row = nativeChainRow(label);
+      const offset = offsetSketch(row.publication);
+      const result = await deriveOffset(offset);
+      expect(result.regions, label).toEqual([]);
+      expect(codes(result), label).toEqual(["profile-open-segment"]);
+      const opens = result.diagnostics.map((d) => d.message);
+      const spans = offset.outputs.derivedCurves.flatMap((shell) =>
+        shell.spans.map((span, index) => ({
+          key: `span ${span.outputSpanId} sub-span ${span.subIndex}.`,
+          trimmed:
+            (index === 0 && span.queryDomain[0] !== span.sourceDomain[0]) ||
+            (index === shell.spans.length - 1 &&
+              span.queryDomain[1] !== span.sourceDomain[1]),
+        })),
+      );
+      expect(
+        spans.some((span) => span.trimmed),
+        `${label} has a trimmed sub-span`,
+      ).toBe(true);
+      for (const span of spans)
+        expect(
+          opens.some((message) => message.includes(span.key)),
+          `${label} ${span.key} (trimmed: ${span.trimmed}) is reported open`,
+        ).toBe(true);
+    },
+    120_000,
+  );
+
+  test.each(["wrap-flat4 0.01", "wrap-flat4 -0.01"])(
+    "%s: one closed shell whose two ends are one driven point (no joint arc, no trim) gives one closed region, its area checked against an independent oracle",
+    async (label) => {
+      // The native self-trimmed wraps (wrap-near4(s) 1e-3 0.01) are not
+      // certified (derived-offset-topology-uncertain), so no native row has a
+      // closed shell trimmed on itself; this is the closed single-shell row.
+      const row = nativeChainRow(label, "positional wrap");
+      expect(row.publication.frame.trims, label).toEqual([]);
+      const offset = offsetSketch(row.publication);
+      const [shell, ...others] = offset.outputs.derivedCurves;
+      expect(others, label).toEqual([]);
+      expect(shell!.startPointId, label).toBe(shell!.endPointId);
+      const result = await deriveOffset(offset);
+      expect(codes(result), label).toEqual([]);
+      expect(result.regions, label).toHaveLength(1);
+      expectPublishedRegion(
+        result.regions[0]!,
+        offset.sketch.build({ derivedCurves: offset.outputs.derivedCurves }),
+        offset,
+        label,
+      );
+    },
+    120_000,
+  );
+
+  test("a publication that is not a terminal-sub-span trim is no derived-curve input: it fails closed (fabricated)", async () => {
+    const row = nativeChainRow("SL-90 0.01");
+    const variants: [
+      string,
+      (shell: SketchArrangementDerivedCurve) => SketchArrangementDerivedCurve,
+    ][] = [
+      [
+        "a trim inside a non-terminal sub-span",
+        (shell) => ({
+          ...shell,
+          spans: shell.spans.map((span, index) =>
+            index === 0
+              ? {
+                  ...span,
+                  queryDomain: [
+                    span.queryDomain[0],
+                    (span.sourceDomain[0] + span.sourceDomain[1]) / 2,
+                  ] as const,
+                }
+              : span,
+          ),
+        }),
+      ],
+      [
+        "a repeated sub-index",
+        (shell) => ({
+          ...shell,
+          spans: shell.spans.map((span) => ({
+            ...span,
+            outputSpanId: "one",
+            subIndex: 0,
+          })),
+        }),
+      ],
+    ];
+    for (const [label, edit] of variants) {
+      const offset = offsetSketch(row.publication, "lines");
+      const result = await derive(offset.sketch, {
+        derivedCurves: offset.outputs.derivedCurves.map(edit),
+      });
+      expect(result.regions, label).toEqual([]);
+      expect(targetsOf(result, "region-degenerate-curve"), label).toContain(
+        "off_p0",
+      );
+    }
+  }, 120_000);
+
+  test("a derived curve whose id names ordinary sketch geometry fails closed without throwing (fabricated)", async () => {
+    const row = nativeChainRow("SL-90 0.01");
+    const variants: [
+      string,
+      (shell: SketchArrangementDerivedCurve) => SketchArrangementDerivedCurve,
+    ][] = [
+      [
+        "its branch keys collide: the close0 line's id and every outputSpanId 'whole'",
+        (shell) => ({
+          ...shell,
+          outputEntityId: "sketch_entity_close0" as SketchEntityId,
+          spans: shell.spans.map((span, index) => ({
+            ...span,
+            outputSpanId: "whole",
+            subIndex: index,
+          })),
+        }),
+      ],
+      [
+        "only its entity id collides: the close0 line's id, span ids kept",
+        (shell) => ({
+          ...shell,
+          outputEntityId: "sketch_entity_close0" as SketchEntityId,
+        }),
+      ],
+    ];
+    for (const [label, edit] of variants) {
+      const offset = offsetSketch(row.publication, "lines");
+      const result = await derive(offset.sketch, {
+        derivedCurves: offset.outputs.derivedCurves.map(edit),
+      });
+      expect(result.regions, label).toEqual([]);
+      expect(codes(result), label).toEqual(["region-degenerate-curve"]);
+      // The shell's obstacle blocks the lines' component too.
+      expect(targetsOf(result, "region-degenerate-curve"), label).toContain(
+        "close0",
+      );
+      expect(
+        result.diagnostics.some((d) =>
+          d.message.includes(
+            "a derived curve id that names ordinary sketch geometry",
+          ),
+        ),
+        label,
+      ).toBe(true);
+    }
+  }, 120_000);
 });

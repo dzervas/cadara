@@ -136,6 +136,67 @@ describe("canonical region signature", () => {
     );
   });
 
+  test("a derived output span's sub-partition knots collapse; a source-span knot does not (T08b-g3)", () => {
+    // One offset shell: output span A in 1 or 3 sub-spans, then span B.
+    const shell = (
+      spanId: string,
+      start: RegionBoundaryVertex,
+      end: RegionBoundaryVertex,
+    ): RegionBoundarySegmentRecord => ({
+      ...segment("shell", start, end),
+      branch: {
+        source: { kind: "entity", entityId: "sketch_entity_shell" },
+        spanId,
+      },
+    });
+    const knot = (key: string): RegionBoundaryVertex => ({
+      kind: "declaredJoin",
+      key: declaredJoinVertexKey([key]),
+      pointIds: [],
+      portPointId: null,
+      position: [0, 0],
+      ballRadius: 0,
+    });
+    const [k1, k2, source] = [
+      "derived:shell:A:1",
+      "derived:shell:A:2",
+      "derived:shell:B:0",
+    ].map(knot) as [
+      RegionBoundaryVertex,
+      RegionBoundaryVertex,
+      RegionBoundaryVertex,
+    ];
+    const coarse = [
+      shell("A", a, source),
+      shell("B", source, b),
+      ...square.slice(1),
+    ];
+    const refined = [
+      shell("A", a, k1),
+      shell("A", k1, k2),
+      shell("A", k2, source),
+      shell("B", source, b),
+      ...square.slice(1),
+    ];
+    const degrees = new Map([
+      ...degree(3),
+      [k1.key, 2],
+      [k2.key, 2],
+      [source.key, 2],
+    ]);
+    const coarseSignature = canonicalRegionSignature(
+      { loops: [loop("outer", coarse)] },
+      degrees,
+    );
+    expect(
+      canonicalRegionSignature({ loops: [loop("outer", refined)] }, degrees),
+    ).toBe(coarseSignature);
+    expect(coarseSignature, "the source-span knot stays significant").toContain(
+      "derived:shell:B:0",
+    );
+    expect(coarseSignature).not.toContain("derived:shell:A:1");
+  });
+
   test("a loop that collapses completely onto one closed branch is that branch", () => {
     const x: RegionBoundaryVertex = { ...join("x"), key: "x-noise" };
     const circle = [segment("c", x, x)];
