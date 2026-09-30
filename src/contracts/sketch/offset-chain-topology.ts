@@ -18,12 +18,14 @@ import type {
 import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
 import {
   canonicalArcSupport,
+  seedArcLeafSplits,
   type CanonicalArcSupport,
 } from "@/contracts/sketch/canonical-arc-support";
 import type { DeclaredOffsetChainConnectivity } from "@/contracts/sketch/offset-chain-connectivity";
 import {
   OFFSET_DIAGNOSTIC_CODES,
   offsetLinePoints,
+  scalePointFromCenter,
   type OffsetChainFailure,
 } from "@/contracts/sketch/offset-geometry";
 import type {
@@ -62,6 +64,16 @@ import {
  * declared vertices, fallback arcs and tangent-continuous joints with a
  * spline side are unsupported; with them (T08b-d/e) a convex declared vertex
  * is absorbed or joined by an F1 arc, never queried.
+ *
+ * T08b-f: point-defined seed arcs and circles are pieces. A seed arc's
+ * emitted ends are the legacy ray-scaled S′, E′ (radius hypot(S′ − C)) and
+ * it is queried one neutral circle per rule-B′ leaf (`seedArcLeafSplits`,
+ * two leaves at least in a two-piece closed chain); a joint whose terminal
+ * leaves do not cross queries the inner leaves in order (review R7, the
+ * earlier leaves then being removed). A concave D > 0 vertex with a seed-arc
+ * side proved within τ is absorbed first with no query ([TECH F6]); its
+ * query is deferred to the SEL's fallback. Arcs adopt as the T2 rank rule
+ * says (line < arc < spline) and are eligible swap adopters (review R6).
  */
 
 /** One whole-request pair meter: every query of the request draws on it. */
@@ -96,6 +108,21 @@ export type OffsetChainPiece =
       readonly start: SketchPoint2D;
       readonly end: SketchPoint2D;
       readonly sweepDirection: "clockwise" | "counterClockwise";
+      /**
+       * T08b-f: the seed arc's rule-B′ interior split directions
+       * (`seedArcLeafSplits`), one query curve per leaf. Absent: one curve
+       * for the whole arc (a raw arc piece without a declared seed).
+       */
+      readonly splits?: readonly SketchPoint2D[];
+    }
+  | {
+      /** T08b-f [TECH F11]: a closed circle offset (8 fixed leaves, no joins). */
+      readonly kind: "circle";
+      readonly seedEntityId: SketchEntityId;
+      /** Always false (a circle is traversed counter-clockwise). */
+      readonly reversed: boolean;
+      readonly center: SketchPoint2D;
+      readonly radius: number;
     }
   | {
       readonly kind: "derivedCubic";
@@ -246,6 +273,11 @@ export interface ResolvedOffsetLineArcEndpoints {
   readonly end: SketchPoint2D;
   readonly startDomainEnd: OffsetChainDomainEnd;
   readonly endDomainEnd: OffsetChainDomainEnd;
+  /**
+   * T08b-f review R7 (seed arcs only): leaves wholly removed at the natural
+   * [start, end] because the joint root lies on a deeper leaf.
+   */
+  readonly removedLeaves?: readonly [number, number];
 }
 
 export interface OffsetChainTopologySuccess {
@@ -394,6 +426,18 @@ function neutralBase(seedEntityId: SketchEntityId, spanIndex: number) {
   };
 }
 
+/** The eight fixed circle leaf directions (T08b-f [TECH F11]). */
+const CIRCLE_LEAF_DIRECTIONS: readonly SketchPoint2D[] = [
+  [1, 0],
+  [1, 1],
+  [0, 1],
+  [-1, 1],
+  [-1, 0],
+  [-1, -1],
+  [0, -1],
+  [1, -1],
+];
+
 function buildCurves(pieces: readonly OffsetChainPiece[]) {
   const curves: ChainCurve[] = [];
   const pieceCurves: (readonly [number, number])[] = [];
@@ -452,25 +496,42 @@ function buildCurves(pieces: readonly OffsetChainPiece[]) {
         [0, 1],
       );
     } else {
-      const angle = (point: SketchPoint2D) =>
-        Math.atan2(point[1] - piece.center[1], point[0] - piece.center[0]);
-      const ccw = piece.sweepDirection === "counterClockwise";
-      const low = angle(ccw ? piece.start : piece.end);
-      let high = angle(ccw ? piece.end : piece.start);
-      while (high <= low) high += 2 * Math.PI;
-      push(
-        0,
-        {
-          kind: "circle",
-          ...neutralBase(piece.seedEntityId, 0),
-          center: piece.center,
-          radius: piece.radius,
-          xAxis: [1, 0],
-          sourceDomain: { kind: "arc", interval: [low, high] },
-        },
-        ccw,
-        [low, high],
-      );
+      // One neutral circle per leaf (T08b-f [TECH F2]: whole arcs would give
+      // a lens two crossings), its domain the binary64 atan2 of the leaf's
+      // boundary directions; natural leaf order from the start.
+      const ccw =
+        piece.kind === "circle" || piece.sweepDirection === "counterClockwise";
+      const relative = (point: SketchPoint2D): SketchPoint2D => [
+        point[0] - piece.center[0],
+        point[1] - piece.center[1],
+      ];
+      const boundaries: readonly SketchPoint2D[] =
+        piece.kind === "circle"
+          ? [...CIRCLE_LEAF_DIRECTIONS, CIRCLE_LEAF_DIRECTIONS[0]!]
+          : [
+              relative(piece.start),
+              ...(piece.splits ?? []),
+              relative(piece.end),
+            ];
+      const angle = (vector: SketchPoint2D) => Math.atan2(vector[1], vector[0]);
+      for (let leaf = 0; leaf + 1 < boundaries.length; leaf += 1) {
+        const low = angle(boundaries[ccw ? leaf : leaf + 1]!);
+        let high = angle(boundaries[ccw ? leaf + 1 : leaf]!);
+        while (high <= low) high += 2 * Math.PI;
+        push(
+          leaf,
+          {
+            kind: "circle",
+            ...neutralBase(piece.seedEntityId, leaf),
+            center: piece.center,
+            radius: piece.radius,
+            xAxis: [1, 0],
+            sourceDomain: { kind: "arc", interval: [low, high] },
+          },
+          ccw,
+          [low, high],
+        );
+      }
     }
     pieceCurves.push([first, curves.length - 1]);
   });
@@ -648,6 +709,29 @@ function convexVertexPlan(
     zero = cross * exactSign(a[0]! * b[1]! - a[1]! * b[0]!) <= 0;
   }
   if (!forward) return { forward, zero, fits: false };
+  return {
+    forward,
+    zero,
+    fits: vertexFits(vertex, distance, modelingTolerance),
+  };
+}
+
+/**
+ * U-E's `fits` of a declared vertex with D > 0: Lemma G's G = δ + |g| (δ =
+ * |d|·|N₁ − N₂|, g = Q_v − P_v) PROVED below τ with exact integer-square-
+ * root upper bounds (bounded BigInt, unmetered). Shared by the convex plan
+ * and the T08b-f [TECH F6] concave arc-side plan.
+ */
+function vertexFits(
+  vertex: OffsetChainVertex,
+  distance: number,
+  modelingTolerance: number,
+) {
+  const [u, v] = exactTangents(vertex);
+  const product = u[0] * v[0] + u[1] * v[1];
+  const scaled = (point: SketchPoint2D) =>
+    [scaledExact(point[0]), scaledExact(point[1])] as const;
+  const center = scaled(vertex.first.vertex);
   // Values scaled by S = 2^1074: δ² = 2d²(1 − D/W), W = |u₁||u₂| ≤ R =
   // ⌈√(U₁U₂)⌉, so δ ≤ ⌈√(N·R)⌉/(S·R) with N = 2d²(R − D); |g| ≤ ⌈√(g·g)⌉/S.
   const root = ceilingSquareRoot(
@@ -659,11 +743,32 @@ function convexVertexPlan(
     (value, axis) => value - center[axis]!,
   );
   const bridge = ceilingSquareRoot(gap[0]! * gap[0]! + gap[1]! * gap[1]!);
-  return {
-    forward,
-    zero,
-    fits: normals + root * bridge < root * scaledExact(modelingTolerance),
-  };
+  return normals + root * bridge < root * scaledExact(modelingTolerance);
+}
+
+/**
+ * T08b-f [TECH F6]: per declared adjacency, true for a concave nonparallel
+ * vertex (exact side sign(d)·X > 0) with D > 0, a seed-arc side and U-E's
+ * `fits` (absorbed first with no query), false when it does not fit, null
+ * for every other vertex. Rows without an arc side are untouched.
+ */
+function concaveArcPlans(
+  input: OffsetChainTopologyInput,
+): readonly (boolean | null)[] {
+  const { vertices, pieces, distance, modelingTolerance } = input;
+  if (!vertices || distance === undefined) return [];
+  return vertices.map((vertex) => {
+    const next = (vertex.jointIndex + 1) % pieces.length;
+    if (
+      pieces[vertex.jointIndex]!.kind !== "arc" &&
+      pieces[next]!.kind !== "arc"
+    )
+      return null;
+    const classified = classifyOffsetChainVertex(vertex);
+    if (classified.class !== "nonparallel" || !classified.forward) return null;
+    if (!(Math.sign(distance) * sourceTurn(vertex) > 0)) return null;
+    return vertexFits(vertex, distance, modelingTolerance);
+  });
 }
 
 /** The convex plan of every declared adjacency (null where not convex). */
@@ -702,6 +807,12 @@ type AdjacencyDecision =
       readonly secondParameterBounds: readonly [number, number];
       /** Nonparallel with D > 0: may flip to absorption (SEL step 5). */
       readonly flippable: boolean;
+      /**
+       * T08b-f review R7: the queried inner seed-arc leaf curves when the
+       * joint root lies beyond a terminal leaf (absent: the terminals).
+       */
+      readonly firstCurve?: number;
+      readonly secondCurve?: number;
     }
   | { readonly kind: "vertex"; readonly vertex: ResolvedOffsetVertex }
   /** An F1 arc at a convex declared vertex (T08b-e); never queried. */
@@ -758,10 +869,12 @@ function ruleKeeper(
   const second = pieces[(jointIndex + 1) % pieces.length]!;
   // Positional closure: the last leaf adopts the first pass's first leaf.
   if (pieces.length === 1) return "second";
-  const firstLine = first.kind === "lineSegment";
-  const secondLine = second.kind === "lineSegment";
-  // Line–spline: the line adopts.
-  if (firstLine !== secondLine) return firstLine ? "second" : "first";
+  // Line–spline: the line adopts; T08b-f [TECH F4]: line–arc the line,
+  // arc–spline the arc (rank line < arc < spline; the lower rank adopts).
+  const rank = (piece: OffsetChainPiece) =>
+    piece.kind === "lineSegment" ? 0 : piece.kind === "arc" ? 1 : 2;
+  if (rank(first) !== rank(second))
+    return rank(first) < rank(second) ? "second" : "first";
   // Spline–spline / line–line: the traversal-outgoing piece adopts, except at
   // the closing vertex of a closed chain, where the incoming piece does.
   return closed && jointIndex === pieces.length - 1 ? "second" : "first";
@@ -793,7 +906,17 @@ export function resolveOffsetChainTopology(
 }
 
 type AdjacencyDecisions =
-  | { readonly ok: true; readonly decisions: readonly AdjacencyDecision[] }
+  | {
+      readonly ok: true;
+      readonly decisions: readonly AdjacencyDecision[];
+      /**
+       * T08b-f [TECH F6]: the deferred joint query of a concave arc-side
+       * vertex absorbed first (the SEL's fallback), on the same meter.
+       */
+      readonly requery?: (
+        index: number,
+      ) => AdjacencyDecision | OffsetChainFailure | QueryBudgetExhausted;
+    }
   | OffsetChainFailure;
 
 /** A joint-query budget exhaustion: always reported as itself (never an R6 trigger). */
@@ -907,42 +1030,36 @@ function decideAdjacencies(
     );
   // [TECH E1]: a convex nonparallel vertex issues no query.
   const plans = convexVertexPlans(input);
+  // T08b-f [TECH F6]: a concave D > 0 vertex with a seed-arc side proved
+  // within τ is absorbed first; its query is deferred to the SEL fallback.
+  const concave = absorptionFirst ? concaveArcPlans(input) : [];
+  const deferred = (index: number) => concave[index] === true;
   const queried = (index: number) =>
-    classes?.[index]?.class !== "parallel" && !plans[index];
+    classes?.[index]?.class !== "parallel" && !plans[index] && !deferred(index);
+  // T08b-f review R7: a joint with a seed-arc side may query inner leaves.
+  const innerLeaves = (pieceIndex: number) => {
+    const [first, last] = pieceCurves[pieceIndex]!;
+    return pieces[pieceIndex]!.kind === "arc" ? last - first : 0;
+  };
+  const queryCount = (index: number) =>
+    1 + innerLeaves(index) + innerLeaves((index + 1) % pieces.length);
   let jointCount = 0;
   for (let index = 0; index < adjacencyCount; index += 1)
-    if (queried(index)) jointCount += 1;
+    if (queried(index) || deferred(index)) jointCount += queryCount(index);
   // M7: one precharged whole-request meter for exactly these joint queries.
   const jointRequest = query.openRequest(jointCount);
-  for (let index = 0; index < adjacencyCount; index += 1) {
+  /**
+   * The joint query of one adjacency (SEL steps 1–2): a trim decision, a
+   * step-2(b) absorption candidate or a failure. With a seed-arc side whose
+   * terminal-leaf query is empty, the inner leaves are queried in order from
+   * the vertex (review R7), so the trim may name an inner leaf.
+   */
+  const queryAdjacency = (
+    index: number,
+  ): AdjacencyDecision | OffsetChainFailure | QueryBudgetExhausted => {
     const next = (index + 1) % pieces.length;
     const firstSeed = pieces[index]!.seedEntityId;
     const keeper = ruleKeeper(pieces, closed, index);
-    const plan = plans[index];
-    if (plan) {
-      const decision = convexDecision(
-        plan,
-        index,
-        keeper,
-        firstSeed,
-        absorptionFirst,
-      );
-      if ("ok" in decision) return decision;
-      decisions.push(decision);
-      continue;
-    }
-    if (!queried(index)) {
-      decisions.push({
-        kind: "vertex",
-        vertex: {
-          jointIndex: index,
-          kind: "parallel",
-          class: "parallel",
-          keeper,
-        },
-      });
-      continue;
-    }
     const vertexClass = classes?.[index];
     const absorbable =
       vertexClass?.class === "nonparallel" && vertexClass.forward;
@@ -969,8 +1086,42 @@ function decideAdjacencies(
         firstSeed,
       );
     }
-    const request = pair(end.curve, start.curve);
-    const result = jointRequest.queryPair(request);
+    const issue = (endCurve: number, startCurve: number) => {
+      const request = pair(endCurve, startCurve);
+      return { request, result: jointRequest.queryPair(request) };
+    };
+    let endCurve = end.curve;
+    let startCurve = start.curve;
+    let { request, result } = issue(endCurve, startCurve);
+    // Review R7 (T08b-f): inner seed-arc leaves, from the vertex inward.
+    const inward = (terminalCurve: number, pieceIndex: number) => {
+      if (pieces[pieceIndex]!.kind !== "arc") return [];
+      const [first, last] = pieceCurves[pieceIndex]!;
+      const step = terminalCurve === first ? 1 : -1;
+      const inner: number[] = [];
+      for (
+        let curve = terminalCurve + step;
+        curve >= first && curve <= last;
+        curve += step
+      )
+        inner.push(curve);
+      return inner;
+    };
+    const scans = [
+      ...inward(end.curve, index).map((curve) => [curve, start.curve] as const),
+      ...inward(start.curve, next).map((curve) => [end.curve, curve] as const),
+    ];
+    for (const [deepEnd, deepStart] of scans) {
+      if (
+        result.kind !== "verified" ||
+        result.points.length !== 0 ||
+        result.overlaps.length !== 0
+      )
+        break;
+      endCurve = deepEnd;
+      startCurve = deepStart;
+      ({ request, result } = issue(endCurve, startCurve));
+    }
     if (result.kind !== "verified") {
       if (result.code === "exact-query-proof-budget-exhausted")
         return {
@@ -988,16 +1139,15 @@ function decideAdjacencies(
       );
     }
     if (result.points.length === 0 && result.overlaps.length === 0) {
-      const empty = inadmissible(
+      return inadmissible(
         failure(
           codes.splineJointUnsupported,
-          "Offset joint needs a fallback arc or tangent-continuous join, which is not supported yet for spline chains.",
+          scans.length > 0
+            ? "Offset joint has no crossing on any seed-arc leaf of the joint (the offset curves do not meet there; the offset may be empty or the arc collapses)."
+            : "Offset joint needs a fallback arc or tangent-continuous join, which is not supported yet for spline chains.",
           firstSeed,
         ),
       );
-      if ("ok" in empty) return empty;
-      decisions.push(empty);
-      continue;
     }
     const witness = result.points[0];
     const firstBounds = witness && offsetChainRootEnclosure(witness, "first");
@@ -1008,28 +1158,25 @@ function decideAdjacencies(
       !witness ||
       !firstBounds ||
       !secondBounds ||
-      !strictlyInside(firstBounds, curves[end.curve]!.bounds) ||
-      !strictlyInside(secondBounds, curves[start.curve]!.bounds) ||
+      !strictlyInside(firstBounds, curves[endCurve]!.bounds) ||
+      !strictlyInside(secondBounds, curves[startCurve]!.bounds) ||
       !transverseCrossing(witness)
     ) {
-      const single = inadmissible(
+      return inadmissible(
         failure(
           codes.jointUnsatisfied,
           "Offset joint has no single certified transverse interior crossing.",
           firstSeed,
         ),
       );
-      if ("ok" in single) return single;
-      decisions.push(single);
-      continue;
     }
     if (
       jointTangentDeterminant(
-        pieces[curves[end.curve]!.pieceIndex]!,
-        curves[end.curve]!.spanIndex,
+        pieces[curves[endCurve]!.pieceIndex]!,
+        curves[endCurve]!.spanIndex,
         witness.firstParameter,
-        pieces[curves[start.curve]!.pieceIndex]!,
-        curves[start.curve]!.spanIndex,
+        pieces[curves[startCurve]!.pieceIndex]!,
+        curves[startCurve]!.spanIndex,
         witness.secondParameter,
       ) === null
     ) {
@@ -1039,7 +1186,7 @@ function decideAdjacencies(
         firstSeed,
       );
     }
-    decisions.push({
+    return {
       kind: "trim",
       jointIndex: index,
       request,
@@ -1047,9 +1194,55 @@ function decideAdjacencies(
       firstParameterBounds: firstBounds,
       secondParameterBounds: secondBounds,
       flippable: absorbable,
-    });
+      ...(endCurve !== end.curve ? { firstCurve: endCurve } : {}),
+      ...(startCurve !== start.curve ? { secondCurve: startCurve } : {}),
+    };
+  };
+  for (let index = 0; index < adjacencyCount; index += 1) {
+    const firstSeed = pieces[index]!.seedEntityId;
+    const keeper = ruleKeeper(pieces, closed, index);
+    const plan = plans[index];
+    if (plan) {
+      const decision = convexDecision(
+        plan,
+        index,
+        keeper,
+        firstSeed,
+        absorptionFirst,
+      );
+      if ("ok" in decision) return decision;
+      decisions.push(decision);
+      continue;
+    }
+    if (deferred(index)) {
+      decisions.push({
+        kind: "vertex",
+        vertex: {
+          jointIndex: index,
+          kind: "absorbed",
+          class: "nonparallel",
+          keeper,
+        },
+      });
+      continue;
+    }
+    if (!queried(index)) {
+      decisions.push({
+        kind: "vertex",
+        vertex: {
+          jointIndex: index,
+          kind: "parallel",
+          class: "parallel",
+          keeper,
+        },
+      });
+      continue;
+    }
+    const decision = queryAdjacency(index);
+    if ("ok" in decision) return decision;
+    decisions.push(decision);
   }
-  return { ok: true, decisions };
+  return { ok: true, decisions, requery: queryAdjacency };
 }
 
 /** Bitwise neutral-curve geometry equality, ignoring only curve labels. */
@@ -1083,6 +1276,7 @@ function assembleOffsetChainResolution(
   const jointRecords = new Map<number, JointRecord>();
   const vertices: ResolvedOffsetVertex[] = [];
   const arcs: ResolvedOffsetArc[] = [];
+  const removedLeaves = new Map<number, readonly [number, number]>();
   for (const decision of decisions) {
     const index = decisionIndex(decision);
     const next = (index + 1) % pieces.length;
@@ -1121,11 +1315,31 @@ function assembleOffsetChainResolution(
       curves[start.curve]![start.side] = vertexEnd;
       continue;
     }
+    // T08b-f review R7: a deep arc-leaf trim names its own (inner) leaves;
+    // the leaves before them on that piece are wholly removed.
+    const endCurve = decision.firstCurve ?? end.curve;
+    const startCurve = decision.secondCurve ?? start.curve;
+    if (endCurve !== end.curve) {
+      const removed = removedLeaves.get(index) ?? [0, 0];
+      const count = Math.abs(endCurve - end.curve);
+      removedLeaves.set(
+        index,
+        pieces[index]!.reversed ? [count, removed[1]] : [removed[0], count],
+      );
+    }
+    if (startCurve !== start.curve) {
+      const removed = removedLeaves.get(next) ?? [0, 0];
+      const count = Math.abs(startCurve - start.curve);
+      removedLeaves.set(
+        next,
+        pieces[next]!.reversed ? [removed[0], count] : [count, removed[1]],
+      );
+    }
     let request = decision.request;
     const current: NeutralCurveQueryRequest = {
       modelingTolerance,
-      first: curves[end.curve]!.neutral,
-      second: curves[start.curve]!.neutral,
+      first: curves[endCurve]!.neutral,
+      second: curves[startCurve]!.neutral,
     };
     if (current.first !== request.first || current.second !== request.second) {
       if (
@@ -1142,8 +1356,8 @@ function assembleOffsetChainResolution(
     }
     const { witness } = decision;
     jointRecords.set(index, {
-      firstCurve: end.curve,
-      secondCurve: start.curve,
+      firstCurve: endCurve,
+      secondCurve: startCurve,
       joint: {
         jointIndex: index,
         firstSeedEntityId: pieces[index]!.seedEntityId,
@@ -1158,8 +1372,8 @@ function assembleOffsetChainResolution(
       },
     });
     const jointEnd = { kind: "joint", jointIndex: index } as const;
-    curves[end.curve]![end.side] = jointEnd;
-    curves[start.curve]![start.side] = jointEnd;
+    curves[endCurve]![end.side] = jointEnd;
+    curves[startCurve]![start.side] = jointEnd;
   }
 
   // Two trims on one curve must be ordered by disjoint root enclosures.
@@ -1217,9 +1431,14 @@ function assembleOffsetChainResolution(
       );
       continue;
     }
-    const curve = curves[last]!;
-    const startEnd = curve.startIsLow ? curve.low : curve.high;
-    const endEnd = curve.startIsLow ? curve.high : curve.low;
+    if (piece.kind === "circle") continue;
+    // A seed arc's natural ends are its first and last retained leaves
+    // (T08b-f); a line has one curve.
+    const [head, tail] = removedLeaves.get(pieceIndex) ?? [0, 0];
+    const startCurve = curves[first + head]!;
+    const endCurve = curves[last - tail]!;
+    const startEnd = startCurve.startIsLow ? startCurve.low : startCurve.high;
+    const endEnd = endCurve.startIsLow ? endCurve.high : endCurve.low;
     // A vertex end keeps the raw (adopted) emitted end: no root.
     const position = (end: OffsetChainDomainEnd, source: SketchPoint2D) =>
       end.kind === "joint"
@@ -1230,6 +1449,9 @@ function assembleOffsetChainResolution(
       end: position(endEnd, piece.end),
       startDomainEnd: startEnd,
       endDomainEnd: endEnd,
+      ...(piece.kind === "arc" && (head > 0 || tail > 0)
+        ? { removedLeaves: [head, tail] as const }
+        : {}),
     });
   }
   return { ok: true, input, cubics, lineArcEndpoints, joints, vertices, arcs };
@@ -1249,6 +1471,26 @@ export type DeclaredOffsetPieceSource =
       readonly distance: number;
       readonly startPointId: SketchPointId;
       readonly endPointId: SketchPointId;
+    }
+  | {
+      /**
+       * T08b-f: a point-defined seed arc (E3/R8): centre and source ends are
+       * bitwise its solved point positions, ρ_s = hypot(S − C) (E7).
+       */
+      readonly kind: "arc";
+      readonly center: SketchPoint2D;
+      readonly source: readonly [SketchPoint2D, SketchPoint2D];
+      readonly sourceRadius: number;
+      readonly distance: number;
+      readonly startPointId: SketchPointId;
+      readonly endPointId: SketchPointId;
+    }
+  | {
+      /** T08b-f [TECH F11]: a circle seed (solved centre and radius). */
+      readonly kind: "circle";
+      readonly center: SketchPoint2D;
+      readonly sourceRadius: number;
+      readonly distance: number;
     }
   | {
       readonly kind: "spline";
@@ -1431,10 +1673,98 @@ export function declaredOffsetChainPieces(input: {
       });
       continue;
     }
+    if (entity?.kind === "arc") {
+      const solved = solvedEntities[0];
+      const center = positions[entity.centerPointId];
+      const start = positions[entity.startPointId];
+      const end = positions[entity.endPointId];
+      if (
+        solvedEntities.length !== 1 ||
+        solved?.kind !== "arc" ||
+        !center ||
+        !start ||
+        !end ||
+        solved.sweepDirection !== entity.sweepDirection
+      )
+        return uncertain(
+          "The arc seed geometry does not match the solve frame.",
+          seedEntityId,
+        );
+      // E3 / review R8: a point-defined seed (all three solved positions
+      // bitwise its point positions); a state-driven arc is not a seed.
+      if (
+        !sameVector(center, solved.centerPosition) ||
+        !sameVector(start, solved.startPosition) ||
+        !sameVector(end, solved.endPosition)
+      )
+        return failure(
+          codes.unsupportedSeed,
+          "The arc seed is not point-defined in the solve frame (its solved ends are not its point positions).",
+          seedEntityId,
+        );
+      const arc = seedArcPiece(
+        seedEntityId,
+        reversed,
+        center,
+        [start, end],
+        entity.sweepDirection,
+        effective,
+        seedArcMinimumLeaves(connectivity),
+      );
+      if ("ok" in arc) return arc;
+      pieces.push(arc.piece);
+      sources.push({
+        kind: "arc",
+        center,
+        source: [start, end],
+        sourceRadius: arc.sourceRadius,
+        distance: effective,
+        startPointId: entity.startPointId,
+        endPointId: entity.endPointId,
+      });
+      continue;
+    }
+    if (entity?.kind === "circle") {
+      const solved = solvedEntities[0];
+      const center = positions[entity.centerPointId];
+      if (
+        solvedEntities.length !== 1 ||
+        solved?.kind !== "circle" ||
+        !center ||
+        !sameVector(center, solved.centerPosition) ||
+        !Object.is(entity.radius, solved.solvedRadius)
+      )
+        return uncertain(
+          "The circle seed geometry does not match the solve frame.",
+          seedEntityId,
+        );
+      // [TECH F11]: counter-clockwise traversal, so left is inward: r − d.
+      const radius = solved.solvedRadius - effective;
+      if (!(radius > 0))
+        return failure(
+          codes.arcCollapse,
+          "Offset distance collapses the circle radius.",
+          seedEntityId,
+        );
+      pieces.push({
+        kind: "circle",
+        seedEntityId,
+        reversed: false,
+        center,
+        radius,
+      });
+      sources.push({
+        kind: "circle",
+        center,
+        sourceRadius: solved.solvedRadius,
+        distance: effective,
+      });
+      continue;
+    }
     if (entity?.kind !== "spline")
       return failure(
         codes.topologyStabilityUnsupported,
-        "Tube stability supports declared line and spline pieces only.",
+        "Tube stability supports declared line, arc, circle and spline pieces only.",
         seedEntityId,
       );
     const geometry = reconstructSplineAggregate(entity, positions);
@@ -1490,6 +1820,131 @@ export function declaredOffsetChainPieces(input: {
 }
 
 /**
+ * The emitted seed-arc piece of a point-defined arc (T08b-f design §2.1):
+ * ρ_s = hypot(S − C) (E7), R̃ = fl(ρ_s − σ_s·d_i) (R̃ ≤ 0 collapses), the
+ * legacy ray-scaled ends S′, E′ (so untrimmed ends are legacy-identical),
+ * ρ_o = hypot(S′ − C) and the rule-B′ split directions. Fails closed on a
+ * degenerate seed, a full turn or a consumer sweep-class disagreement
+ * ([TECH F10], reject-only guards).
+ */
+function seedArcPiece(
+  seedEntityId: SketchEntityId,
+  reversed: boolean,
+  center: SketchPoint2D,
+  source: readonly [SketchPoint2D, SketchPoint2D],
+  sweepDirection: "clockwise" | "counterClockwise",
+  distance: number,
+  minimumLeaves: 1 | 2,
+):
+  | {
+      readonly piece: Extract<OffsetChainPiece, { kind: "arc" }>;
+      readonly sourceRadius: number;
+    }
+  | OffsetChainFailure {
+  const sigma = sweepDirection === "counterClockwise" ? 1 : -1;
+  const sourceRadius = canonicalArcSupport(
+    center,
+    source[0],
+    source[1],
+    sweepDirection,
+  ).radius;
+  const shifted = sourceRadius - sigma * distance;
+  if (!(shifted > 0))
+    return failure(
+      codes.arcCollapse,
+      "Offset distance collapses the arc radius.",
+      seedEntityId,
+    );
+  const start = scalePointFromCenter(center, source[0], shifted);
+  const end = scalePointFromCenter(center, source[1], shifted);
+  if (!start || !end)
+    return failure(
+      codes.unsupportedSeed,
+      "Offset seed arc has degenerate geometry.",
+      seedEntityId,
+    );
+  const piece = seedArcAt(
+    { seedEntityId, reversed, center, start, end, sweepDirection },
+    source,
+    minimumLeaves,
+  );
+  return piece
+    ? { piece, sourceRadius }
+    : failure(
+        codes.unsupportedSeed,
+        "The offset seed arc has no admissible leaf partition (a full turn, a zero radius vector or a consumer sweep-class disagreement).",
+        seedEntityId,
+      );
+}
+
+/**
+ * The arcs of a two-piece closed chain take at least two rule-B′ leaves
+ * (the certifier re-derives the same rule from its request): every terminal
+ * leaf then reaches only its own corner.
+ */
+function seedArcMinimumLeaves(
+  connectivity: Pick<DeclaredOffsetChainConnectivity, "closed" | "pieces">,
+): 1 | 2 {
+  return connectivity.closed && connectivity.pieces.length === 2 ? 2 : 1;
+}
+
+/**
+ * A seed-arc resolver piece with its canonical radius (hypot of the start)
+ * and its rule-B′ partition re-derived for these ends (review A9: after
+ * every adoption), or null on the [TECH F10] guards.
+ */
+function seedArcAt(
+  arc: Pick<
+    Extract<OffsetChainPiece, { kind: "arc" }>,
+    "seedEntityId" | "reversed" | "center" | "start" | "end" | "sweepDirection"
+  >,
+  source: readonly [SketchPoint2D, SketchPoint2D],
+  minimumLeaves: 1 | 2,
+): Extract<OffsetChainPiece, { kind: "arc" }> | null {
+  const { center, start, end, sweepDirection } = arc;
+  const splits = seedArcLeafSplits(
+    center,
+    start,
+    end,
+    sweepDirection,
+    source[0],
+    source[1],
+    minimumLeaves,
+  );
+  if (!splits) return null;
+  // [TECH F10]: the consumer's binary64 atan2 sweep must not wrap across
+  // 0/2π against the exact wedge (σ(a × b) > 0 minor, < 0 major): a minor
+  // arc drawn above 3π/2, or a major one below π/2, is rejected. Rounding
+  // across π is harmless (both halves are drawn alike) and is accepted.
+  const angle = (point: SketchPoint2D) =>
+    Math.atan2(point[1] - center[1], point[0] - center[0]);
+  const ccw = sweepDirection === "counterClockwise";
+  const low = angle(ccw ? start : end);
+  let high = angle(ccw ? end : start);
+  while (high <= low) high += 2 * Math.PI;
+  const sweep = high - low;
+  const a = [0, 1].map(
+    (axis) => scaledExact(start[axis]!) - scaledExact(center[axis]!),
+  );
+  const b = [0, 1].map(
+    (axis) => scaledExact(end[axis]!) - scaledExact(center[axis]!),
+  );
+  const turn = (ccw ? 1 : -1) * exactSign(a[0]! * b[1]! - a[1]! * b[0]!);
+  if (
+    !(sweep > 0 && sweep < 2 * Math.PI) ||
+    (turn > 0 && !(sweep < 1.5 * Math.PI)) ||
+    (turn < 0 && !(sweep > 0.5 * Math.PI))
+  )
+    return null;
+  return {
+    kind: "arc",
+    ...arc,
+    radius: canonicalArcSupport(center, start, end, sweepDirection).radius,
+    splits,
+  };
+}
+
+/**
  * One traversal terminal of a declared piece from its SOURCE data only: the
  * canonical point ID, the binary64 source vertex and the exact traversal
  * tangent as a pair of binary64 points (a line's ends; a spline terminal
@@ -1514,6 +1969,26 @@ function declaredVertexSide(
       tangent: orient(start, end),
     };
   }
+  if (source.kind === "arc" && piece.kind === "arc") {
+    // [TECH F3]: the exact reference tangent σ_trav·rot(V − C) encoded as
+    // the binary64 pair [(V_y, C_x), (C_y, V_x)] (difference rot(V − C)),
+    // swapped for σ_trav < 0; `classifyOffsetChainVertex` reads it exactly.
+    const vertex = naturalEnd ? source.source[1] : source.source[0];
+    const center = source.center;
+    const pair: readonly [SketchPoint2D, SketchPoint2D] = [
+      [vertex[1], center[0]],
+      [center[1], vertex[0]],
+    ];
+    const positiveTurn =
+      (piece.sweepDirection === "counterClockwise") !== piece.reversed;
+    return {
+      pointId: naturalEnd ? source.endPointId : source.startPointId,
+      vertex,
+      tangent: positiveTurn ? pair : [pair[1], pair[0]],
+    };
+  }
+  if (source.kind !== "spline")
+    throw new RangeError("A circle offset piece has no declared vertex.");
   const span = naturalEnd ? source.sourceSpans.at(-1)! : source.sourceSpans[0]!;
   const poles = span.poles;
   return {
@@ -1714,7 +2189,9 @@ function tubeStabilityResult(
         ? codes.topologyClearanceUnproven
         : result.code === "cubic-tube-knot-incidence-unproven"
           ? codes.knotIncidenceUnproven
-          : codes.topologyUncertain;
+          : result.code === "arc-tube-collapse"
+            ? codes.arcCollapse
+            : codes.topologyUncertain;
   const where =
     result.first === undefined
       ? ""
@@ -1863,8 +2340,9 @@ function declaredTubeRequest(
   const terminalPoint = (index: number, exiting: boolean) => {
     const source = sources[index]!;
     const naturalEnd = exiting !== pieces[index]!.reversed;
-    if (source.kind === "line")
+    if (source.kind === "line" || source.kind === "arc")
       return naturalEnd ? source.endPointId : source.startPointId;
+    if (source.kind === "circle") return undefined;
     return naturalEnd
       ? source.spans.at(-1)?.source.endPointId
       : source.spans[0]?.source.startPointId;
@@ -1939,10 +2417,64 @@ function declaredTubeRequest(
       });
       continue;
     }
+    if (piece.kind === "arc" && source.kind === "arc") {
+      // T08b-f: the seed arc's own raw support, bound to its canonical
+      // radius (E7) and its point-defined source (E3); R7 removals from the
+      // resolution's domain ends.
+      const ends = resolved.lineArcEndpoints.get(piece.seedEntityId);
+      if (
+        !ends ||
+        !isEnd(ends.startDomainEnd, low) ||
+        !isEnd(ends.endDomainEnd, high) ||
+        !samePoint(piece.center, source.center) ||
+        !Object.is(
+          piece.radius,
+          canonicalArcSupport(
+            piece.center,
+            piece.start,
+            piece.end,
+            piece.sweepDirection,
+          ).radius,
+        )
+      )
+        return mismatch("The resolution does not describe its own seed arc.");
+      requestPieces.push({
+        kind: "arc",
+        reversed: piece.reversed,
+        tube: {
+          center: piece.center,
+          radius: piece.radius,
+          emitted: [piece.start, piece.end],
+          source: source.source,
+          sourceRadius: source.sourceRadius,
+          sweep: piece.sweepDirection,
+          distance: source.distance,
+          startPointId: source.startPointId,
+          endPointId: source.endPointId,
+          ...(ends.removedLeaves ? { removed: ends.removedLeaves } : {}),
+        },
+      });
+      continue;
+    }
+    if (piece.kind === "circle" && source.kind === "circle") {
+      if (count !== 1 || !closed || !samePoint(piece.center, source.center))
+        return mismatch("The resolution does not describe its own circle.");
+      requestPieces.push({
+        kind: "circle",
+        reversed: false,
+        tube: {
+          center: piece.center,
+          radius: piece.radius,
+          sourceRadius: source.sourceRadius,
+          distance: source.distance,
+        },
+      });
+      continue;
+    }
     if (piece.kind !== "derivedCubic" || source.kind !== "spline")
       return failure(
         codes.topologyStabilityUnsupported,
-        "Tube stability supports declared line and spline pieces only.",
+        "Tube stability supports declared line, arc, circle and spline pieces only.",
         piece.seedEntityId,
       );
     const spans = resolved.cubics.get(piece.seedEntityId);
@@ -2054,7 +2586,7 @@ type PieceTerminal = ReturnType<typeof pieceTerminal>;
 /** The emitted terminal pole (and its JVP) of one piece at one natural side. */
 function emittedTerminal(terminal: PieceTerminal) {
   const { piece, side } = terminal;
-  if (piece.kind === "lineSegment")
+  if (piece.kind === "lineSegment" || piece.kind === "arc")
     return {
       position: side === "end" ? piece.end : piece.start,
       differential: undefined,
@@ -2120,6 +2652,29 @@ function adoptDeclaredVertices(
       keeper === "first" ? [first, second] : [second, first];
     const other = otherAdjacency(adopt.index, adopt === first);
     if (adopt.piece.kind === "lineSegment") return other !== "trim";
+    // T08b-f review R6: an arc is an eligible (swap) adopter of any
+    // neighbour's pole. Next to a trim it may adopt only at its natural END
+    // with its first leaf bitwise unchanged (the trim's queried support);
+    // a start adoption re-derives ρ_o and is never next to a trim.
+    if (adopt.piece.kind === "arc") {
+      if (other !== "trim") return true;
+      if (adopt.side !== "end") return false;
+      const source = declared.sources[adopt.index]!;
+      const pole = emittedTerminal(keep);
+      if (source.kind !== "arc" || !pole) return false;
+      const again = seedArcAt(
+        { ...adopt.piece, end: pole.position },
+        source.source,
+        seedArcMinimumLeaves(declared.connectivity),
+      );
+      const before = adopt.piece.splits ?? [];
+      return (
+        again !== null &&
+        before.length > 0 &&
+        again.splits!.length > 0 &&
+        samePoint(before[0]!, again.splits![0]!)
+      );
+    }
     // A spline adopts only another spline's emitted leaf (owner seam).
     if (keep.piece.kind !== "derivedCubic") return false;
     const source = declared.sources[adopt.index]!;
@@ -2140,6 +2695,10 @@ function adoptDeclaredVertices(
       }
     >();
     const lineEnds = new Map<
+      number,
+      { start?: SketchPoint2D; end?: SketchPoint2D }
+    >();
+    const arcEnds = new Map<
       number,
       { start?: SketchPoint2D; end?: SketchPoint2D }
     >();
@@ -2193,10 +2752,11 @@ function adoptDeclaredVertices(
       const [keep, adopt] =
         keeper === "first" ? [first, second] : [second, first];
       const keepPole = keeper === "first" ? firstPole : secondPole;
-      if (adopt.piece.kind === "lineSegment") {
-        const ends = lineEnds.get(adopt.index) ?? {};
+      if (adopt.piece.kind === "lineSegment" || adopt.piece.kind === "arc") {
+        const map = adopt.piece.kind === "arc" ? arcEnds : lineEnds;
+        const ends = map.get(adopt.index) ?? {};
         ends[adopt.side] = keepPole.position;
-        lineEnds.set(adopt.index, ends);
+        map.set(adopt.index, ends);
       } else {
         const keepPiece = keep.piece as Extract<
           OffsetChainPiece,
@@ -2232,6 +2792,31 @@ function adoptDeclaredVertices(
         start: ends.start ?? piece.start,
         end: ends.end ?? piece.end,
       };
+    }
+    // T08b-f: an adopting arc takes the pole verbatim; its canonical radius
+    // and rule-B′ partition are re-derived from the adopted ends (A9).
+    for (const [index, ends] of arcEnds) {
+      const piece = pieces[index] as Extract<OffsetChainPiece, { kind: "arc" }>;
+      const source = declared.sources[index]!;
+      const adopted =
+        source.kind === "arc"
+          ? seedArcAt(
+              {
+                ...piece,
+                start: ends.start ?? piece.start,
+                end: ends.end ?? piece.end,
+              },
+              source.source,
+              seedArcMinimumLeaves(declared.connectivity),
+            )
+          : null;
+      if (!adopted)
+        return {
+          ok: false,
+          jointIndex: index,
+          reason: "the adopted seed arc has no admissible leaf partition",
+        };
+      nextPieces[index] = adopted;
     }
     let ownerFailure: { vertex: number; code: string } | undefined;
     let restart = false;
@@ -2365,8 +2950,12 @@ const MAGNITUDE_CODES: ReadonlySet<string> = new Set([
  *   the lowest arc of `arcJoints` that may still fall back; the T08b-d flip
  *   (a magnitude-tagged trim code at the lowest-index unflipped D > 0 trim
  *   incident to a reported leaf); the lowest absorbed convex vertex that may
- *   still take its arc and whose terminal leaf is reported. Every retry is
- *   justified only by the independent re-certification of the new chain.
+ *   still take its arc and whose terminal leaf is reported; T08b-f [TECH F6]
+ *   the lowest concave seed-arc vertex absorbed first (also when its
+ *   adoption fails) that may still take its deferred joint query, whose
+ *   trim is never flipped back. Every retry is justified only by the
+ *   independent re-certification of the new chain. Attempts add one per F6
+ *   vertex.
  * - Failure precedence (review R6): a convex vertex that tried both reports
  *   its ARC failure with "Absorption not certified: …" appended; a step-2(b)
  *   vertex its step-2 resolver failure, a rule-Z vertex its missing arc,
@@ -2472,7 +3061,17 @@ function selectDeclaredOffsetChain(
   const switchable = [...convex.values()].filter(
     (state) => state.switchable,
   ).length;
-  const request = certifier.openRequest(1 + flippable + switchable);
+  // T08b-f [TECH F6]: concave arc-side vertices absorbed first, each of
+  // which may still take its (deferred) joint query and trim once.
+  const concaveState = new Map<number, { queried: boolean }>();
+  (policy.absorptionFirst ? concaveArcPlans(input) : []).forEach(
+    (fits, index) => {
+      if (fits === true) concaveState.set(index, { queried: false });
+    },
+  );
+  const request = certifier.openRequest(
+    1 + flippable + switchable + concaveState.size,
+  );
   const modeOf = (jointIndex: number) =>
     decisions.find((decision) => decisionIndex(decision) === jointIndex)?.kind;
   /** Switches one convex vertex to absorption (with its arc's failure) or to its arc. */
@@ -2514,6 +3113,40 @@ function selectDeclaredOffsetChain(
   });
   let original: OffsetChainFailure | undefined;
   const flipped = new Set<number>();
+  /** An F6 vertex still absorbed that may take its deferred query. */
+  const mayQuery = (jointIndex: number) =>
+    concaveState.get(jointIndex)?.queried === false &&
+    modeOf(jointIndex) === "vertex";
+  /**
+   * F6 fallback (U-E's switch mirrored): the deferred joint query on the
+   * resolver's meter; a trim replaces the absorption (never flipped back),
+   * anything else is final with the absorption's reason.
+   */
+  const takeQuery = (
+    jointIndex: number,
+    reason: string,
+  ): OffsetChainTubeStabilityResult | null => {
+    concaveState.get(jointIndex)!.queried = true;
+    const decision = decided.requery!(jointIndex);
+    if ("exhausted" in decision) return decision.exhausted;
+    if ("ok" in decision) return withAbsorption(decision, reason);
+    if (decision.kind !== "trim")
+      return withAbsorption(
+        decision.kind === "vertex" && decision.vertex.trigger
+          ? decision.vertex.trigger.failure
+          : failure(
+              codes.splineJointUnsupported,
+              "The concave seed-arc vertex's joint query is not admissible.",
+              declared.pieces[jointIndex]!.seedEntityId,
+            ),
+        reason,
+      );
+    flipped.add(jointIndex);
+    decisions = decisions.map((item) =>
+      decisionIndex(item) === jointIndex ? decision : item,
+    );
+    return null;
+  };
   for (;;) {
     // R6: a failed absorption keeps the pre-absorption verdict.
     const absorptionFailure = (jointIndex: number, reason: string) => {
@@ -2528,7 +3161,7 @@ function selectDeclaredOffsetChain(
       if (trigger) return withAbsorption(trigger.failure, reason);
       return failure(
         codes.knotIncidenceUnproven,
-        `Declared parallel vertex ${jointIndex} is not certified: ${reason}`,
+        `Declared ${concaveState.has(jointIndex) ? "concave seed-arc" : "parallel"} vertex ${jointIndex} is not certified: ${reason}`,
         declared.pieces[jointIndex]!.seedEntityId,
       );
     };
@@ -2540,6 +3173,11 @@ function selectDeclaredOffsetChain(
         state.absorptionTried = true;
         state.absorptionReason = adopted.reason;
         switchTo(adopted.jointIndex, "arc");
+        continue;
+      }
+      if (mayQuery(adopted.jointIndex)) {
+        const final = takeQuery(adopted.jointIndex, adopted.reason);
+        if (final) return final;
         continue;
       }
       return absorptionFailure(adopted.jointIndex, adopted.reason);
@@ -2618,9 +3256,19 @@ function selectDeclaredOffsetChain(
     );
     const firstLeaf: number[] = [];
     let total = 0;
+    // Certifier leaves per piece: owner spans, one per line, the retained
+    // rule-B′ leaves of a seed arc (T08b-f), eight per circle.
+    const leafCount = (piece: OffsetChainPiece) => {
+      if (piece.kind === "derivedCubic") return piece.spans.length;
+      if (piece.kind === "circle") return CIRCLE_LEAF_DIRECTIONS.length;
+      if (piece.kind === "lineSegment") return 1;
+      const removed = resolved.lineArcEndpoints.get(piece.seedEntityId)
+        ?.removedLeaves ?? [0, 0];
+      return (piece.splits?.length ?? 0) + 1 - removed[0] - removed[1];
+    };
     for (const piece of adopted.declared.pieces) {
       firstLeaf.push(total);
-      total += piece.kind === "derivedCubic" ? piece.spans.length : 1;
+      total += leafCount(piece);
     }
     const terminalLeaf = (index: number, exiting: boolean) => {
       const { piece, side } = pieceTerminal(
@@ -2628,7 +3276,7 @@ function selectDeclaredOffsetChain(
         index,
         exiting,
       );
-      const size = piece.kind === "derivedCubic" ? piece.spans.length : 1;
+      const size = leafCount(piece);
       return firstLeaf[index]! + (side === "end" ? size - 1 : 0);
     };
     const incident = (jointIndex: number) =>
@@ -2678,6 +3326,16 @@ function selectDeclaredOffsetChain(
     if (arcTarget !== undefined) {
       convex.get(arcTarget)!.absorptionReason = `${raw.code}: ${raw.message}`;
       switchTo(arcTarget, "arc");
+      continue;
+    }
+    // F6: an absorbed concave arc-side corner failing at its terminal
+    // leaves takes its deferred joint query (at most once).
+    const queryTarget = [...concaveState.keys()]
+      .sort((left, right) => left - right)
+      .find((jointIndex) => mayQuery(jointIndex) && incident(jointIndex));
+    if (queryTarget !== undefined) {
+      const final = takeQuery(queryTarget, `${raw.code}: ${raw.message}`);
+      if (final) return final;
       continue;
     }
     // Any other failure is final. A tagged arc that already tried its

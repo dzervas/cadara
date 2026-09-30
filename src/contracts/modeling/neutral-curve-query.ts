@@ -456,8 +456,9 @@ export interface CubicTubeChainLeaf {
   /**
    * Proved sup |E − Φ| against the declared-join-corrected reference O*: exactly
    * the modeling tolerance on a convex-END leaf (arc reserve, slack 0), on
-   * a `graph-trim` leaf (strict glue reserve) and on an F1 arc leaf (its
-   * collapsed radial connectors: strict ε < τ plus the η reserve), else ε*.
+   * a `graph-trim` leaf (strict glue reserve), on an F1 arc leaf (its
+   * collapsed radial connectors: strict ε < τ plus the η reserve) and on
+   * every T08b-f seed-arc or circle leaf (the same convention), else ε*.
    */
   readonly displacementBound: number;
   /** K3 radius r = ε + δ⁺ of each convex end (concave tails are never added). */
@@ -546,6 +547,75 @@ export interface NeutralCubicPieceTube extends NeutralCubicTube {
   readonly queryDomain: readonly [number, number];
 }
 
+/**
+ * One emitted seed-arc offset piece (T08b-f), natural order. The certifier
+ * trusts that `emitted` are the literal resolver supports (the legacy
+ * ray-scaled ends S′, E′, or an adopted neighbour pole) and that `source`,
+ * `center` and `distance` come from the same fresh adapter call, bitwise the
+ * solve frame's POINT-DEFINED seed arc (E3 / review R8); it checks
+ * `radius` = hypot(S′ − C) and `sourceRadius` = hypot(S − C) bitwise (the
+ * canonical support formula, E7) and certifies both as given (E9).
+ *
+ * Reference R′ ([TECH] F1, review R10 wording, binding): "At a point-defined
+ * seed arc, O* is the true offset of the circle through each end's radius
+ * r_V (|V − C| at a declared-join end, the canonical ρ_s at a trimmed or
+ * chain-terminal end), joined at one interior sub-arc knot by a radial step
+ * of length |r_E − r_S|. It realizes the arc's declared end incidences
+ * within τ, is measured exactly, and fails closed unless ε < τ." (Ledger:
+ * circles through the arc's declared ends with r_V = |V − C| at declared-join
+ * ends and ρ_s at trimmed or chain-terminal ends, plus a vertical radial step
+ * of length |r_E − r_S| at an interior knot; it realizes the arc's own
+ * declared end-point incidence within τ, measured exactly, and is not
+ * undeclared healing.)
+ *
+ * Emitted: the circle (C, ρ_o) over the exact wedge from a = S′ − C to b =
+ * E′ − C, split by rule B′ (`seedArcLeafSplits`, recomputed by the
+ * certifier), plus a never-drawn straight realization segment at every
+ * untrimmed end: radial [S′, Ŝ] to its own pole, or, next to another seed arc
+ * or an F1 arc, the direct segment between the two consumer ends (Lemma W).
+ * Consumers join by point identity and draw from rounded `atan2` angles,
+ * which are NOT certified (the T08b-e R4 non-claim).
+ */
+export interface NeutralArcTube {
+  /** Bitwise the seed arc's solved centre point C. */
+  readonly center: SplineVector;
+  /** Emitted radius ρ_o = hypot(S′ − C) (checked bitwise; E7/E9). */
+  readonly radius: number;
+  /** Emitted natural ends S′, E′ (the published arc's start and end). */
+  readonly emitted: readonly [SplineVector, SplineVector];
+  /** Source natural ends S, E (the seed's point positions). */
+  readonly source: readonly [SplineVector, SplineVector];
+  /** Canonical source radius ρ_s = hypot(S − C) (checked bitwise). */
+  readonly sourceRadius: number;
+  /** Natural sweep σ_s of the seed arc (left offset radius r − σ_s·d). */
+  readonly sweep: "clockwise" | "counterClockwise";
+  /** Owner signed distance of this piece's natural direction (left positive). */
+  readonly distance: number;
+  /** Canonical point IDs of the source ends (declared-vertex admission only). */
+  readonly startPointId?: string;
+  readonly endPointId?: string;
+  /**
+   * Review R7: leaves [at the natural start, at the natural end] wholly
+   * removed because the joint root lies beyond them; nonzero only at a
+   * trimmed end, whose first retained leaf then starts at a split direction.
+   */
+  readonly removed?: readonly [number, number];
+}
+
+/**
+ * One closed emitted circle offset piece ([TECH] F11): the circle entity
+ * (C, r) offset to the reference radius r − d (counter-clockwise traversal,
+ * so left is inward) and emitted with radius fl(r − d), checked bitwise and
+ * certified as given. Eight fixed exact leaves; no ends, no joins.
+ */
+export interface NeutralCircleTube {
+  readonly center: SplineVector;
+  /** fl(sourceRadius − distance), the published circle radius. */
+  readonly radius: number;
+  readonly sourceRadius: number;
+  readonly distance: number;
+}
+
 /** One traversal piece, always in natural data order (never re-ordered). */
 export type TubeChainPiece =
   | {
@@ -557,6 +627,17 @@ export type TubeChainPiece =
       readonly kind: "line";
       readonly reversed: boolean;
       readonly tube: NeutralLineTube;
+    }
+  | {
+      readonly kind: "arc";
+      readonly reversed: boolean;
+      readonly tube: NeutralArcTube;
+    }
+  | {
+      readonly kind: "circle";
+      /** Must be false (checked): a circle is traversed counter-clockwise. */
+      readonly reversed: boolean;
+      readonly tube: NeutralCircleTube;
     };
 
 /**
@@ -702,6 +783,13 @@ interface TubeChainVertexJoinBase {
   readonly keeper: "first" | "second";
   /** |g|⁺ outward, g = Q_v − P_v the declared source gap; exactly 0 when g = 0. */
   readonly bridge: number;
+  /**
+   * T08b-f, present only with a seed-arc side: the emitted realization
+   * segment between the two consumer ends. `vertical` (e·v = 0 exactly: the
+   * radial connector on the ray C → Z, [TECH] F5, or two ends on one exact
+   * line through Z) or `steep` (Lemma W1/W2 on the rationalized segment).
+   */
+  readonly realization?: "vertical" | "steep";
 }
 
 /**
@@ -771,6 +859,8 @@ export type TubeChainArcJoin =
       readonly second: number;
       readonly direction: SplineVector;
       readonly tangentDeviation: number;
+      /** T08b-f: `steep` when the neighbour is a seed arc (Lemma W junction). */
+      readonly realization?: "steep" | "vertical";
     }
   | {
       /** The exact split s = a + b of a two-sub-arc arc. */
@@ -790,6 +880,8 @@ export type TubeChainArcJoin =
       readonly tangentDeviation: number;
       /** |g|⁺ outward; exactly 0 when g = 0. */
       readonly bridge: number;
+      /** T08b-f: `steep` when the neighbour is a seed arc (Lemma W junction). */
+      readonly realization?: "steep" | "vertical";
     };
 
 /** One certified F1 arc (T08b-e); see `TubeChainArcJoin` for its meaning. */
@@ -809,16 +901,88 @@ export interface TubeChainArcRecord {
   readonly exitConnector: number;
 }
 
+/**
+ * Lemma-T° trim (T08b-f) at a concave joint with a seed-arc terminal leaf:
+ * the `circle` side's reference circle K = (C, R) is the implicit side, the
+ * other terminal leaf B (line, cubic or seed-arc leaf) the explicit one. The
+ * certificate concerns ONLY the abstract chain trimmed at the exact
+ * (unknown) witnessed roots, against the two pieces' true offsets each
+ * trimmed at their unique common point (unique against the FULL circle K and
+ * the full emitted circle, R3), never the binary64 angle domain of the query.
+ */
+export interface TubeChainArcTrimJoin {
+  readonly kind: "arc-trim";
+  readonly jointIndex: number;
+  /** Flattened leaf indices (traversal-first piece's terminal leaf first). */
+  readonly first: number;
+  readonly second: number;
+  /** Which side's reference circle is the implicit side. */
+  readonly circle: "first" | "second";
+  /**
+   * Outward true-root bounds in the natural parameter of each non-arc side
+   * (segment t or Bézier τ); absent on a seed-arc side, whose cut is `cut`.
+   */
+  readonly firstRootBounds?: readonly [number, number];
+  readonly secondRootBounds?: readonly [number, number];
+  /**
+   * Per side, the chord bound R⁺·c of the arc cut, c ≥ the unit-direction
+   * distance between the emitted and the true root seen from the arc centre
+   * (hull of both cut wedges); 0 on a non-arc side.
+   */
+  readonly cut: readonly [number, number];
+  /** Upper bound on the non-arc side's removed-tail displacement (0 if none). */
+  readonly tail: number;
+}
+
+/** A natural join between consecutive leaves of one seed arc or circle (F7). */
+export interface TubeChainSeedKnotJoin {
+  readonly kind: "seed-arc-knot";
+  readonly piece: number;
+  readonly first: number;
+  readonly second: number;
+}
+
+/** One certified seed-arc or circle piece (T08b-f). */
+export interface TubeChainSeedArcRecord {
+  readonly piece: number;
+  readonly kind: "arc" | "circle";
+  /** Flattened retained leaves, natural order. */
+  readonly leaves: readonly number[];
+  readonly center: SplineVector;
+  readonly radius: number;
+  /**
+   * Review R12 (option c): every emitted radius in [lo, hi] is certified;
+   * [radius, radius] unless the natural start is trimmed, where hi − radius
+   * and radius − lo bound |hypot(X − C) − ρ_o| over binary64 X one ulp
+   * around the stored emitted root box (a publisher must check its radius
+   * lies inside).
+   */
+  readonly radiusFamily: readonly [number, number];
+  /** Lemma A-R ε per retained leaf, outward (each strictly below τ). */
+  readonly epsilon: readonly number[];
+  /** |r_E − r_S|⁺, the reference step's length (0 when r_S = r_E exactly). */
+  readonly step: number;
+  /** √-free |λ_S|⁺, |λ_E|⁺ of the radial gaps |V − C| − ρ_s (0 on a circle). */
+  readonly radialGaps: readonly [number, number];
+  /** u⁺ of the radial realization connectors at the natural ends (0 if none). */
+  readonly connectors: readonly [number, number];
+  /** Leaves removed by deep trims [natural start, natural end] (R7). */
+  readonly removed: readonly [number, number];
+}
+
 export type TubePieceChainJoin =
   | CubicTubeChainJoin
   | TubeChainTrimJoin
   | TubeChainGraphTrimJoin
   | TubeChainVertexJoin
-  | TubeChainArcJoin;
+  | TubeChainArcJoin
+  | TubeChainArcTrimJoin
+  | TubeChainSeedKnotJoin;
 
 /**
  * Leaves are flattened per piece in traversal order, natural order inside a
- * piece; arc leaves follow every piece leaf, in adjacency order ([TECH E3]).
+ * piece (a seed arc's retained rule-B′ leaves, a circle's eight); F1 arc
+ * leaves follow every piece leaf, in adjacency order ([TECH E3]).
  */
 export type TubePieceChainResult =
   | {
@@ -831,6 +995,8 @@ export type TubePieceChainResult =
         readonly maxSplits: number;
         /** Present only when the request declared arcs. */
         readonly arcs?: readonly TubeChainArcRecord[];
+        /** Present only when the request has seed-arc or circle pieces. */
+        readonly seedArcs?: readonly TubeChainSeedArcRecord[];
       };
     }
   | Exclude<CubicTubeChainResult, { readonly kind: "verified" }>;

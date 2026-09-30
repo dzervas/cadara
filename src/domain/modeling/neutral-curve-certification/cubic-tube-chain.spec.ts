@@ -15,7 +15,10 @@ import {
   type SplineSpan,
   type SplineVector,
 } from "@/contracts/sketch/spline-geometry";
-import { canonicalArcSupport } from "@/contracts/sketch/canonical-arc-support";
+import {
+  canonicalArcSupport,
+  seedArcLeafSplits,
+} from "@/contracts/sketch/canonical-arc-support";
 import {
   approximateSplineOffset,
   type AdoptedEndpoint,
@@ -6165,3 +6168,816 @@ describe("piece tube chain (T08b-e): F1 arcs at convex declared vertices (certif
     });
   });
 });
+
+describe("piece tube chain (T08b-f): seed arcs and circles (certifier-input fixtures, not owner-reachable)", () => {
+  type Vector = readonly [number, number];
+  type ArcTube = Extract<TubeChainPiece, { kind: "arc" }>["tube"];
+  const TAU = 1e-3;
+  const hypot = (point: Vector, center: Vector) =>
+    Math.hypot(point[0] - center[0], point[1] - center[1]);
+  /** Ray scaling of the legacy offset (`scalePointFromCenter`). */
+  const scale = (center: Vector, point: Vector, radius: number): Vector => {
+    const length = hypot(point, center);
+    return [
+      center[0] + ((point[0] - center[0]) / length) * radius,
+      center[1] + ((point[1] - center[1]) / length) * radius,
+    ];
+  };
+  /**
+   * A seed arc piece exactly as the adapter builds it (design §2.1): ρ_s =
+   * hypot(S − C), R̃ = fl(ρ_s − σ·d_i), the ray-scaled ends, ρ_o = hypot(S′
+   * − C); `tube` overrides forge single fields.
+   */
+  const seedArc = (
+    center: Vector,
+    source: readonly [Vector, Vector],
+    sweep: ArcTube["sweep"],
+    {
+      distance = 0.01,
+      reversed = false,
+      ids = ["s", "e"] as const,
+      tube = {},
+    }: {
+      distance?: number;
+      reversed?: boolean;
+      ids?: readonly [string, string];
+      tube?: Partial<ArcTube>;
+    } = {},
+  ): TubeChainPiece => {
+    const owner = reversed ? -distance : distance;
+    const sigma = sweep === "counterClockwise" ? 1 : -1;
+    const sourceRadius = hypot(source[0], center);
+    const shifted = sourceRadius - sigma * owner;
+    const emitted = [
+      scale(center, source[0], shifted),
+      scale(center, source[1], shifted),
+    ] as const;
+    const base: ArcTube = {
+      center,
+      radius: hypot(emitted[0], center),
+      emitted,
+      source,
+      sourceRadius,
+      sweep,
+      distance: owner,
+      startPointId: ids[0],
+      endPointId: ids[1],
+    };
+    const merged = { ...base, ...tube };
+    return {
+      kind: "arc",
+      reversed,
+      tube: {
+        ...merged,
+        radius:
+          tube.radius ??
+          (tube.emitted ? hypot(merged.emitted[0], center) : base.radius),
+      },
+    };
+  };
+  /** A line tube; emitted = source + d·ν unless overridden. */
+  const line = (
+    start: Vector,
+    end: Vector,
+    ids: readonly [string, string],
+    {
+      distance = 0.01,
+      emitted,
+    }: { distance?: number; emitted?: readonly [Vector, Vector] } = {},
+  ): TubeChainPiece => {
+    const length = hypot(end, start);
+    const normal: Vector = [
+      -(end[1] - start[1]) / length,
+      (end[0] - start[0]) / length,
+    ];
+    const offset = (point: Vector): Vector => [
+      point[0] + distance * normal[0],
+      point[1] + distance * normal[1],
+    ];
+    return {
+      kind: "line",
+      reversed: false,
+      tube: {
+        emitted: emitted ?? [offset(start), offset(end)],
+        source: [start, end],
+        distance,
+        startPointId: ids[0],
+        endPointId: ids[1],
+      },
+    };
+  };
+  const circle = (
+    center: Vector,
+    radius: number,
+    distance = 0.01,
+  ): TubeChainPiece => ({
+    kind: "circle",
+    reversed: false,
+    tube: { center, radius: radius - distance, sourceRadius: radius, distance },
+  });
+  const request = (
+    pieces: readonly TubeChainPiece[],
+    {
+      distance = 0.01,
+      closed = false,
+      modelingTolerance = TAU,
+      trims = [],
+      vertices,
+    }: {
+      distance?: number;
+      closed?: boolean;
+      modelingTolerance?: number;
+      trims?: PieceTubeChainRequest["trims"];
+      vertices?: PieceTubeChainRequest["vertices"];
+    } = {},
+  ): PieceTubeChainRequest => ({
+    modelingTolerance,
+    closed,
+    distance,
+    pieces,
+    trims,
+    ...(vertices ? { vertices } : {}),
+  });
+  const certificateOf = (result: TubePieceChainResult) => {
+    if (result.kind !== "verified")
+      throw new Error(`${result.kind} ${result.code}: ${result.message}`);
+    return result.certificate;
+  };
+  const quarter = (tube: Partial<ArcTube> = {}, distance = 0.01) =>
+    seedArc(
+      [0, 0],
+      [
+        [1, 0],
+        [0, 1],
+      ],
+      "counterClockwise",
+      { distance, tube },
+    );
+  /**
+   * Line → quarter arc → line through two exactly parallel shared-point
+   * vertices (axis-aligned tangents), the arc's end point displaced radially
+   * by λ (a declared-join end: r_E = |E − C| = 1 + λ, r_S = ρ_s = 1): the R′
+   * step |r_E − r_S| = λ. The arc adopted line 2's pole at its end (an end
+   * adoption keeps ρ_o), as the SEL does.
+   */
+  const stepped = (lambda: number, modelingTolerance = TAU) => {
+    const first = line([1, -1], [1, 0], ["p", "s"]);
+    const last = line([0, 1 + lambda], [-1, 1 + lambda], ["e", "q"]);
+    const lastPole = (last as Extract<TubeChainPiece, { kind: "line" }>).tube
+      .emitted[0];
+    const arc = seedArc(
+      [0, 0],
+      [
+        [1, 0],
+        [0, 1 + lambda],
+      ],
+      "counterClockwise",
+    );
+    const arcTube = (arc as Extract<TubeChainPiece, { kind: "arc" }>).tube;
+    const adopted: TubeChainPiece = {
+      kind: "arc",
+      reversed: false,
+      tube: { ...arcTube, emitted: [arcTube.emitted[0], lastPole] },
+    };
+    return request([first, adopted, last], {
+      modelingTolerance,
+      vertices: [
+        {
+          jointIndex: 0,
+          authority: { kind: "shared-point", pointId: "s" },
+          keeper: "first",
+        },
+        {
+          jointIndex: 1,
+          authority: { kind: "shared-point", pointId: "e" },
+          keeper: "second",
+        },
+      ],
+    });
+  };
+
+  test("a lone quarter arc verifies on two rule-B′ leaves joined by one seed knot, every leaf with ε < τ strictly and displacementBound = τ (F7: no intra-piece K3 pair)", () => {
+    const certificate = certificateOf(
+      certifier.certifyPieceChain(request([quarter()])),
+    );
+    expect(certificate.joins).toEqual([
+      { kind: "seed-arc-knot", piece: 0, first: 0, second: 1 },
+    ]);
+    expect(certificate.clearedPairs).toEqual([]);
+    expect(certificate.leaves).toHaveLength(2);
+    for (const leaf of certificate.leaves) {
+      expect(leaf.displacementBound).toBe(TAU);
+      expect(leaf.baseErrorStar).toBeLessThan(TAU);
+    }
+    const [record] = certificate.seedArcs!;
+    expect(record).toMatchObject({
+      piece: 0,
+      kind: "arc",
+      leaves: [0, 1],
+      center: [0, 0],
+      radius: 0.99,
+      radiusFamily: [0.99, 0.99],
+      step: 0,
+      radialGaps: [0, 0],
+      removed: [0, 0],
+    });
+    for (const value of record!.epsilon) expect(value).toBeLessThan(1e-15);
+  });
+
+  test("a circle ([TECH F11]) verifies as one closed piece of eight fixed leaves and eight knots, with no K3 pair (F7) and ε = |fl(r − d) − (r − d)| < τ", () => {
+    const certificate = certificateOf(
+      certifier.certifyPieceChain(
+        request([circle([0.25, -0.5], 1)], { closed: true }),
+      ),
+    );
+    expect(certificate.leaves).toHaveLength(8);
+    expect(certificate.joins.map((join) => join.kind)).toEqual(
+      new Array(8).fill("seed-arc-knot"),
+    );
+    expect(certificate.joins.at(-1)).toMatchObject({ first: 7, second: 0 });
+    expect(certificate.clearedPairs).toEqual([]);
+    expect(certificate.seedArcs).toEqual([
+      expect.objectContaining({
+        kind: "circle",
+        radius: 0.99,
+        leaves: [0, 1, 2, 3, 4, 5, 6, 7],
+      }),
+    ]);
+  });
+
+  test("a 3/4 arc needs eight rule-B′ leaves (sweep ≥ π splits by balanced near-bisection, every leaf below atan 2)", () => {
+    const certificate = certificateOf(
+      certifier.certifyPieceChain(
+        request([
+          seedArc(
+            [0, 0],
+            [
+              [1, 0],
+              [0, -1],
+            ],
+            "counterClockwise",
+          ),
+        ]),
+      ),
+    );
+    expect(certificate.seedArcs![0]!.leaves).toHaveLength(8);
+  });
+
+  const up = (value: number) =>
+    nextBinary64(value, "up", new ExactProofBudget());
+  test.each([
+    [
+      "ρ_o not the canonical hypot(S′ − C)",
+      () => quarter({ radius: up(0.99) }),
+      "arc-tube-admission-unproven",
+    ],
+    [
+      "ρ_s not the canonical hypot(S − C)",
+      () => quarter({ sourceRadius: up(1) }),
+      "arc-tube-admission-unproven",
+    ],
+    [
+      "the centre moved (the given radius no longer canonical; the bitwise seed-centre binding itself is the adapter's E3)",
+      () => quarter({ center: [1e-9, 0] }),
+      "arc-tube-admission-unproven",
+    ],
+    [
+      "the sweep flipped (the offset radius is then r + d: |ρ_o − R| = 2|d| ≥ τ)",
+      () => quarter({ sweep: "clockwise" }),
+      "arc-tube-error-unproven",
+    ],
+    [
+      "an emitted end direction more than a quarter turn from its source end (no rule-B′ partition shares the reference wedge)",
+      () =>
+        quarter({
+          emitted: [
+            [0, 0.99],
+            [-0.99, 0],
+          ],
+        }),
+      "arc-tube-partition-unproven",
+    ],
+    [
+      "leaves removed at an end that is not a trim (R7 removal is trim-only)",
+      () => quarter({ removed: [1, 0] }),
+      "arc-tube-admission-unproven",
+    ],
+    [
+      "an exactly minor wedge whose binary64 atan2 ends round equal, so a consumer would draw 2π ([TECH F10] wrap guard)",
+      () =>
+        seedArc(
+          [0, 0],
+          [
+            [0.594, 0.792],
+            [0.5940000000000001, 0.7920000000000003],
+          ],
+          "counterClockwise",
+          {
+            distance: 0,
+            tube: {
+              emitted: [
+                [0.594, 0.792],
+                [0.5940000000000001, 0.7920000000000003],
+              ],
+            },
+          },
+        ),
+      "arc-tube-admission-unproven",
+    ],
+  ] as const)("seed-arc adversary: %s fails closed", (_label, piece, code) => {
+    const built = piece();
+    const result = certifier.certifyPieceChain(
+      request([built], {
+        distance: (built as Extract<TubeChainPiece, { kind: "arc" }>).tube
+          .distance,
+      }),
+    );
+    expect(result).toMatchObject({ kind: "uncertain", code });
+  });
+
+  test("inward past the centre (R = ρ_s − σd ≤ 0 at a terminal end, with emitted ends forged on the near side) fails closed as a collapse", () => {
+    expect(
+      certifier.certifyPieceChain(
+        request(
+          [
+            quarter(
+              {
+                emitted: [
+                  [1e-3, 0],
+                  [0, 1e-3],
+                ],
+              },
+              1.2,
+            ),
+          ],
+          { distance: 1.2 },
+        ),
+      ),
+    ).toMatchObject({ kind: "uncertain", code: "arc-tube-collapse" });
+  });
+
+  test("an exactly full-turn point-defined arc has no rule-B′ partition and fails closed ([TECH F10])", () => {
+    const result = certifier.certifyPieceChain(
+      request([
+        quarter({
+          source: [
+            [1, 0],
+            [1, 0],
+          ],
+          emitted: [
+            [0.99, 0],
+            [0.99, 0],
+          ],
+        }),
+      ]),
+    );
+    expect(result).toMatchObject({
+      kind: "uncertain",
+      code: "arc-tube-partition-unproven",
+    });
+  });
+
+  test("circle adversaries: an emitted radius that is not fl(r − d) fails admission; r − d ≤ 0 has no positive emitted radius", () => {
+    const forged = circle([0, 0], 1);
+    const tube = (forged as Extract<TubeChainPiece, { kind: "circle" }>).tube;
+    const wrong: TubeChainPiece = {
+      kind: "circle",
+      reversed: false,
+      tube: { ...tube, radius: up(tube.radius) },
+    };
+    expect(
+      certifier.certifyPieceChain(request([wrong], { closed: true })),
+    ).toMatchObject({ kind: "uncertain", code: "arc-tube-admission-unproven" });
+    expect(
+      certifier.certifyPieceChain(
+        request([circle([0, 0], 1, 1.5)], { closed: true, distance: 1.5 }),
+      ),
+    ).toMatchObject({
+      kind: "uncertain",
+      code: "arc-tube-admission-unproven",
+      message: "Seed arc 0: the emitted radius is not positive.",
+    });
+  });
+
+  test("the R′ step is measured, never assumed: a radial end gap λ < τ verifies and reports step ≥ λ; λ > τ fails arc-tube-error-unproven; the lowered-τ bracket around the reported ε verifies above and fails below (review A8)", () => {
+    const lambda = 2 ** -12;
+    const certificate = certificateOf(
+      certifier.certifyPieceChain(stepped(lambda)),
+    );
+    const record = certificate.seedArcs![0]!;
+    expect(record.step).toBeGreaterThanOrEqual(lambda);
+    expect(record.radialGaps[1]).toBeGreaterThanOrEqual(lambda);
+    expect(
+      certificate.joins.filter((join) => join.kind === "parallel-vertex"),
+    ).toHaveLength(2);
+    expect(
+      certificate.joins.find((join) => join.kind === "parallel-vertex"),
+    ).toMatchObject({ realization: "vertical" });
+    const epsilon = Math.max(...record.epsilon);
+    expect(epsilon).toBeGreaterThanOrEqual(lambda);
+    expect(certifier.certifyPieceChain(stepped(2 ** -9))).toMatchObject({
+      kind: "uncertain",
+      code: "arc-tube-error-unproven",
+    });
+    expect(
+      certifier.certifyPieceChain(stepped(lambda, epsilon * (1 + 2 ** -20)))
+        .kind,
+    ).toBe("verified");
+    expect(
+      certifier.certifyPieceChain(stepped(lambda, epsilon * (1 - 2 ** -20))),
+    ).toMatchObject({ kind: "uncertain", code: "arc-tube-error-unproven" });
+  });
+
+  const degrees = Math.PI / 180;
+  const polar = (center: Vector, radius: number, angle: number): Vector => [
+    center[0] + radius * Math.cos(angle),
+    center[1] + radius * Math.sin(angle),
+  ];
+
+  test("review Q1 adversary: a circle↔circle trim whose carried R7 removal sits on the EXPLICIT arc, over a leaf that meets K on A's terminal leaf, fails closed (the removed leaf is never trusted)", () => {
+    // A: C_A = 0, r = 1.05, ccw −80° → 26° (two leaves, split at −27°); B:
+    // C_B = (1.74, 0) through V, ccw 160° from V (four 40° leaves); d = 0.05.
+    // The offset circles meet at X⁺ (A ≈ 20°, B leaf 0) and X⁻ (A ≈ −20°,
+    // B leaf 1), both on A's terminal leaf. The request carries removed
+    // [1, 0] on B and brackets X⁻, skipping X⁺, the crossing nearest V.
+    const d = 0.05;
+    const centerB: Vector = [1.74, 0];
+    const vertex = polar([0, 0], 1.05, 26 * degrees);
+    const toVertex = Math.atan2(vertex[1], vertex[0] - centerB[0]);
+    const first = seedArc(
+      [0, 0],
+      [polar([0, 0], 1.05, -80 * degrees), vertex],
+      "counterClockwise",
+      { distance: d, ids: ["s", "v"] },
+    );
+    const second = seedArc(
+      centerB,
+      [
+        vertex,
+        polar(centerB, hypot(vertex, centerB), toVertex + 160 * degrees),
+      ],
+      "counterClockwise",
+      { distance: d, ids: ["v", "e"], tube: { removed: [1, 0] } },
+    );
+    const [a, b] = [first, second].map(
+      (piece) => (piece as Extract<TubeChainPiece, { kind: "arc" }>).tube,
+    ) as [ArcTube, ArcTube];
+    const along = (point: Vector) =>
+      Math.atan2(point[1] - centerB[1], point[0] - centerB[0]);
+    const x =
+      (centerB[0] ** 2 + a.radius ** 2 - b.radius ** 2) / (2 * centerB[0]);
+    const y = Math.sqrt(a.radius ** 2 - x ** 2);
+    // The skipped crossing X⁺ is strictly inside B's removed leaf 0 and A's
+    // terminal leaf (the one that holds the bracketed X⁻ too).
+    const [bSplit] = seedArcLeafSplits(
+      b.center,
+      b.emitted[0],
+      b.emitted[1],
+      b.sweep,
+      b.source[0],
+      b.source[1],
+    )!;
+    const [aSplit] = seedArcLeafSplits(
+      a.center,
+      a.emitted[0],
+      a.emitted[1],
+      a.sweep,
+      a.source[0],
+      a.source[1],
+    )!;
+    /** ccw turn from V about C_B, in [0, 2π). */
+    const fromVertex = (angle: number) =>
+      (((angle - toVertex) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+    expect(fromVertex(along([x, y]))).toBeGreaterThan(0);
+    expect(fromVertex(along([x, y]))).toBeLessThan(
+      fromVertex(Math.atan2(bSplit![1], bSplit![0])),
+    );
+    expect(Math.atan2(-y, x)).toBeGreaterThan(
+      Math.atan2(aSplit![1], aSplit![0]),
+    );
+    expect(Math.atan2(y, x)).toBeLessThan(26 * degrees);
+    const result = certifier.certifyPieceChain(
+      request([first, second], {
+        distance: d,
+        trims: [
+          {
+            jointIndex: 0,
+            firstParameterBounds: [
+              Math.atan2(-y, x) - 1e-12,
+              Math.atan2(-y, x) + 1e-12,
+            ],
+            secondParameterBounds: [
+              along([x, -y]) - 1e-12,
+              along([x, -y]) + 1e-12,
+            ],
+          },
+        ],
+      }),
+    );
+    expect(result).toMatchObject({
+      kind: "uncertain",
+      code: "trim-classification-unproven",
+      message: expect.stringContaining(
+        "removed leaf 0 of the explicit arc (R7) is not proved off the implicit circle",
+      ),
+    });
+  });
+
+  test("review Q2 A1 (math review; certifier input, not owner-reachable): a line whose other monotone half re-crosses the retained terminal arc leaf is not the root of its other-end trim, so the T°2 pairing fails closed", () => {
+    // Arc −100° … 0° (two rule-B′ leaves), then a concave line from V along
+    // (−½, −√3/2), d = 0.05: the offset line meets the emitted circle at
+    // t₁ ≈ 0.276 (the trim) and t₂ ≈ 0.835 (X₂ ≈ −45°, on the retained
+    // terminal leaf). The two leaves are trim-adjacent, so K3 never looks.
+    const d = 0.05;
+    const vertex: Vector = [1, 0];
+    const arc = seedArc(
+      [0, 0],
+      [polar([0, 0], 1, -100 * degrees), vertex],
+      "counterClockwise",
+      { distance: d, ids: ["s", "v"] },
+    );
+    const rho = (arc as Extract<TubeChainPiece, { kind: "arc" }>).tube.radius;
+    const u: Vector = [-Math.sin(Math.PI / 6), -Math.cos(Math.PI / 6)];
+    const far: Vector = [vertex[0] + 0.9 * u[0], vertex[1] + 0.9 * u[1]];
+    const shift = (point: Vector): Vector => [
+      point[0] - d * u[1],
+      point[1] + d * u[0],
+    ];
+    const [e0, e1] = [shift(vertex), shift(far)];
+    const step: Vector = [e1[0] - e0[0], e1[1] - e0[1]];
+    const qa = step[0] ** 2 + step[1] ** 2;
+    const qb = 2 * (e0[0] * step[0] + e0[1] * step[1]);
+    const qc = e0[0] ** 2 + e0[1] ** 2 - rho ** 2;
+    const root = Math.sqrt(qb * qb - 4 * qa * qc);
+    const [t1, t2] = [(-qb - root) / (2 * qa), (-qb + root) / (2 * qa)];
+    const x1: Vector = [e0[0] + t1 * step[0], e0[1] + t1 * step[1]];
+    const x2: Vector = [e0[0] + t2 * step[0], e0[1] + t2 * step[1]];
+    // X₂ is a genuine second crossing inside the retained arc.
+    expect(t2).toBeLessThan(1);
+    expect(Math.atan2(x2[1], x2[0])).toBeGreaterThan(-100 * degrees);
+    expect(Math.atan2(x2[1], x2[0])).toBeLessThan(Math.atan2(x1[1], x1[0]));
+    const angle = Math.atan2(x1[1], x1[0]);
+    const result = certifier.certifyPieceChain(
+      request(
+        [
+          arc,
+          line(vertex, far, ["v", "w"], { distance: d, emitted: [e0, e1] }),
+        ],
+        {
+          distance: d,
+          trims: [
+            {
+              jointIndex: 0,
+              firstParameterBounds: [angle - 1e-12, angle + 1e-12],
+              secondParameterBounds: [t1 - 1e-12, t1 + 1e-12],
+            },
+          ],
+        },
+      ),
+    );
+    expect(result).toMatchObject({
+      kind: "uncertain",
+      code: "trim-classification-unproven",
+      message: expect.stringContaining(
+        "that side is not the root of its other-end trim against the same circle (T°2)",
+      ),
+    });
+  });
+
+  test("review Q2 A2 (math review; certifier input, not owner-reachable): a forged shared pole whose two emitted terminal leaves cross is rejected by Lemma W steepness, never verified", () => {
+    // Arc 1: C₁ = 0 ccw (0, −1) → V = (1, 0); arc 2: C₂ = (½, 0) natural cw
+    // 60° → V, traversed reversed; parallel vertex at V. Arc 2's emitted
+    // start is forged 2e−9 outward and both emitted ends meet at a pole Z
+    // on the rays C₁ → a₁ + η and C₂ → a₂ − η (η = 1e−12), where X (the
+    // emitted circles' upper crossing) is at a₁ from C₁ and a₂ from C₂: X
+    // lies strictly inside BOTH emitted terminal wedges, so they cross.
+    const d = 0.01;
+    const vertex: Vector = [1, 0];
+    const c1: Vector = [0, 0];
+    const c2: Vector = [0.5, 0];
+    const s1: Vector = [0, -1];
+    const s2: Vector = [
+      0.5 + 0.5 * Math.cos(Math.PI / 3),
+      0.5 * Math.sin(Math.PI / 3),
+    ];
+    const start1 = scale(c1, s1, hypot(s1, c1) - d);
+    const start2 = scale(c2, s2, hypot(s2, c2) - d + 2e-9);
+    const [rho1, rho2] = [hypot(start1, c1), hypot(start2, c2)];
+    const x = rho1 ** 2 - rho2 ** 2 + 0.25;
+    const crossing: Vector = [x, Math.sqrt(rho1 ** 2 - x ** 2)];
+    const a1 = Math.atan2(crossing[1], crossing[0]);
+    const a2 = Math.atan2(crossing[1], crossing[0] - 0.5);
+    const r1: Vector = [Math.cos(a1 + 1e-12), Math.sin(a1 + 1e-12)];
+    const r2: Vector = [Math.cos(a2 - 1e-12), Math.sin(a2 - 1e-12)];
+    const t = (0.5 * -r2[1]) / (r1[0] * -r2[1] - r1[1] * -r2[0]);
+    const pole: Vector = [t * r1[0], t * r1[1]];
+    expect(Math.atan2(pole[1], pole[0])).toBeGreaterThan(a1);
+    expect(Math.atan2(pole[1], pole[0] - 0.5)).toBeLessThan(a2);
+    const result = certifier.certifyPieceChain(
+      request(
+        [
+          seedArc(c1, [s1, vertex], "counterClockwise", {
+            distance: d,
+            ids: ["s1", "v"],
+            tube: { emitted: [start1, pole] },
+          }),
+          seedArc(c2, [s2, vertex], "clockwise", {
+            distance: d,
+            reversed: true,
+            ids: ["s2", "v"],
+            tube: { emitted: [start2, pole] },
+          }),
+        ],
+        {
+          distance: d,
+          vertices: [
+            {
+              jointIndex: 0,
+              authority: { kind: "shared-point", pointId: "v" },
+              keeper: "first",
+            },
+          ],
+        },
+      ),
+    );
+    expect(result).toMatchObject({
+      kind: "uncertain",
+      code: "cubic-tube-cone-unproven",
+      message: expect.stringContaining("not proved steep (Lemma W)"),
+    });
+  });
+
+  test("review Q2 A3 (math review): ε < τ is strict on seed leaves — τ equal to the reported (outward) ε is an exact tie and fails; one ulp above verifies", () => {
+    const piece = seedArc(
+      [0, 0],
+      [
+        [1, 0],
+        [0, 1 + 2 ** -12],
+      ],
+      "counterClockwise",
+    );
+    const epsilon = Math.max(
+      ...certificateOf(certifier.certifyPieceChain(request([piece])))
+        .seedArcs![0]!.epsilon,
+    );
+    expect(
+      certifier.certifyPieceChain(
+        request([piece], { modelingTolerance: epsilon }),
+      ),
+    ).toMatchObject({ kind: "uncertain", code: "arc-tube-error-unproven" });
+    expect(
+      certifier.certifyPieceChain(
+        request([piece], { modelingTolerance: up(epsilon) }),
+      ).kind,
+    ).toBe("verified");
+  });
+
+  test("meter A4: a seed arc trimmed at its natural start whose review-R12 radius family overflows binary64 (centres at x = MAX_VALUE) fails closed, never keeping a zero-width family", () => {
+    const max = Number.MAX_VALUE;
+    const first = seedArc(
+      [max, 0],
+      [
+        [max, -1],
+        [max, 1],
+      ],
+      "counterClockwise",
+      { ids: ["s", "v"] },
+    );
+    const second = seedArc(
+      [max, 2],
+      [
+        [max, 1],
+        [max, 3],
+      ],
+      "counterClockwise",
+      { ids: ["v", "e"] },
+    );
+    expect(
+      certifier.certifyPieceChain(
+        request([first, second], {
+          trims: [
+            {
+              jointIndex: 0,
+              firstParameterBounds: [Math.PI / 2 - 1e-12, Math.PI / 2 + 1e-12],
+              secondParameterBounds: [
+                -Math.PI / 2 - 1e-12,
+                -Math.PI / 2 + 1e-12,
+              ],
+            },
+          ],
+        }),
+      ),
+    ).toEqual({
+      kind: "uncertain",
+      code: "arc-tube-error-unproven",
+      message:
+        "Seed arc 1: the review-R12 radius family of its trimmed start is not computable (a binary64 bound overflows).",
+      // Arc 1's four rule-B′ leaves (each semicircle has four).
+      first: 4,
+      second: 7,
+    });
+  });
+
+  test("the seed-arc precharge is paid before its partition is chosen or any tube field is read", () => {
+    const read = new Error("tube read");
+    const piece = quarter();
+    const untouchable = {
+      ...piece,
+      tube: new Proxy(
+        (piece as Extract<TubeChainPiece, { kind: "arc" }>).tube,
+        {
+          get() {
+            throw read;
+          },
+        },
+      ),
+    } as TubeChainPiece;
+    const run = (operations: number) => {
+      try {
+        return createCertifiedCubicTubeChainWithLowerBudgetForTest({
+          operations,
+        }).certifyPieceChain(request([untouchable]));
+      } catch (error) {
+        return error;
+      }
+    };
+    // 1 (pieces + declarations) + ARC_SEED_PRECHARGE = 64 + 16·16.
+    expect(run(320)).toEqual(EXHAUSTED_RESULT);
+    expect(run(321)).toBe(read);
+  });
+
+  test("a lowered integerBits whose first trip is inside the seed-arc stage exhausts as itself (no swallow)", () => {
+    expect(
+      createCertifiedCubicTubeChainWithLowerBudgetForTest({
+        integerBits: SEED_STAGE_BITS,
+      }).certifyPieceChain(request([quarter()])),
+    ).toEqual(EXHAUSTED_RESULT);
+  });
+
+  test.each([
+    ["quarter arc", () => request([quarter()]), QUARTER_PIN],
+    [
+      "circle",
+      () => request([circle([0.25, -0.5], 1)], { closed: true }),
+      CIRCLE_PIN,
+    ],
+    ["stepped line–arc–line (λ = 2⁻¹²)", () => stepped(2 ** -12), STEPPED_PIN],
+  ] as const)(
+    "%s whole-request literal: count verifies, count − 1 exhausts on operations, Euclid and bits",
+    (_label, requestOf, pin) => {
+      let snapshot: ExactProofBudgetSnapshot | undefined;
+      certificateOf(
+        createCertifiedCubicTubeChainWithBudgetObserverForTest((value) => {
+          snapshot = value;
+        }).certifyPieceChain(requestOf()),
+      );
+      expect({
+        operations: snapshot!.operations,
+        euclideanSteps: snapshot!.euclideanSteps,
+        integerBits: Math.max(
+          snapshot!.maxStoredBits,
+          snapshot!.maxPreProductBits,
+        ),
+      }).toEqual(pin);
+      for (const kind of [
+        "operations",
+        "euclideanSteps",
+        "integerBits",
+      ] as const) {
+        expect(
+          createCertifiedCubicTubeChainWithLowerBudgetForTest({
+            [kind]: pin[kind],
+          }).certifyPieceChain(requestOf()).kind,
+          kind,
+        ).toBe("verified");
+        expect(
+          createCertifiedCubicTubeChainWithLowerBudgetForTest({
+            [kind]: pin[kind] - 1,
+          }).certifyPieceChain(requestOf()),
+          kind,
+        ).toEqual(EXHAUSTED_RESULT);
+      }
+    },
+  );
+});
+/**
+ * The lone quarter arc reaches its per-value bit peak (1 186) inside the
+ * seed-arc stage (64 bits at its entry; instrumented stage map in
+ * T08b-f-evidence/): one bit fewer trips there first.
+ */
+const SEED_STAGE_BITS = 1_185;
+const QUARTER_PIN = {
+  operations: 17_106,
+  euclideanSteps: 2_637,
+  integerBits: 1_186,
+};
+const CIRCLE_PIN = {
+  operations: 27_896,
+  euclideanSteps: 4_699,
+  integerBits: 165,
+};
+const STEPPED_PIN = {
+  operations: 38_778,
+  euclideanSteps: 6_621,
+  integerBits: 1_186,
+};

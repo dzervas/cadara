@@ -696,3 +696,746 @@ export const POSITIONAL_WRAPS = {
     [-1, 0],
   ],
 } as const satisfies Record<string, readonly Vector[]>;
+
+/**
+ * T08b-f native arc authoring seam (injected by the spec, as the line/spline
+ * seam is): the line, centre-point arc, circle and rectangle tools with the
+ * session's endpoint-snap inference, the Fillet and Slot edit operations,
+ * a constraint tool commit on entity targets, and the native Offset tool's
+ * relationship contribution (review R8: the certified seeds are the
+ * point-defined arcs of a real offset relationship).
+ */
+export interface NativeArcAuthoring {
+  line(input: {
+    readonly previousDefinition: SketchDefinition;
+    readonly sequence: number;
+    readonly start: Vector;
+    readonly end: Vector;
+    readonly snaps: EndpointSnaps;
+  }): Authored;
+  arc(input: {
+    readonly previousDefinition: SketchDefinition;
+    readonly sequence: number;
+    readonly center: Vector;
+    readonly start: Vector;
+    readonly end: Vector;
+    readonly snaps: EndpointSnaps;
+  }): Authored;
+  spline(input: {
+    readonly previousDefinition: SketchDefinition;
+    readonly sequence: number;
+    readonly points: readonly Vector[];
+    readonly snaps: EndpointSnaps;
+  }): Authored;
+  circle(input: {
+    readonly previousDefinition: SketchDefinition;
+    readonly sequence: number;
+    readonly center: Vector;
+    readonly rim: Vector;
+  }): Authored;
+  rectangle(input: {
+    readonly previousDefinition: SketchDefinition;
+    readonly sequence: number;
+    readonly start: Vector;
+    readonly end: Vector;
+  }): Authored;
+  /** The Fillet edit operation: the whole edited definition. */
+  fillet(input: {
+    readonly definition: SketchDefinition;
+    readonly sequence: number;
+    readonly entityIds: readonly [SketchEntityId, SketchEntityId];
+    readonly radius: number;
+  }): SketchDefinition;
+  /** The Slot edit operation's contribution on one line. */
+  slot(input: {
+    readonly definition: SketchDefinition;
+    readonly sequence: number;
+    readonly lineId: SketchEntityId;
+    readonly width: number;
+  }): Authored;
+  /** A constraint tool commit on entity targets (e.g. `constraintTangent`). */
+  constraint(input: {
+    readonly definition: SketchDefinition;
+    readonly sequence: number;
+    readonly toolId: string;
+    readonly entityIds: readonly SketchEntityId[];
+  }): SketchDefinition;
+  /** The native Offset tool's contribution, or null when it rejects. */
+  offset(input: {
+    readonly definition: SketchDefinition;
+    readonly sequence: number;
+    readonly entityIds: readonly SketchEntityId[];
+    readonly distance: number;
+  }):
+    | (Authored & {
+        readonly derivedRelationships: NonNullable<
+          SketchDefinition["derivedRelationships"]
+        >;
+      })
+    | null;
+}
+
+/** One authored arc-harness sketch and its offset seeds, natural order. */
+export interface SeedArcSketch {
+  readonly definition: SketchDefinition;
+  readonly seeds: readonly SketchEntityId[];
+}
+
+/**
+ * The T08b-f native arc harness: definitions are edited in place by native
+ * tools and edit operations (Fillet edits whole definitions), then the
+ * native Offset relationship is authored on the seeds so the solve is the
+ * point-defined frame T08b-g will feed (review R8), solved, and adapted.
+ */
+export function createNativeArcOffsetHarness(options: {
+  readonly authoring: NativeArcAuthoring;
+  readonly modelingTolerance: number;
+  readonly solveTolerances: typeof NATIVE_SOLVE_TOLERANCES;
+}) {
+  const { authoring, modelingTolerance, solveTolerances } = options;
+  let sequence = 100;
+  const next = () => (sequence += 1);
+  const empty = (): SketchDefinition =>
+    ({
+      schemaVersion: "sketch-definition/v1alpha1",
+      referenceIds: [],
+      references: [],
+      pointIds: [],
+      points: [],
+      entityIds: [],
+      entities: [],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+      dimensions: [],
+    }) as unknown as SketchDefinition;
+  const merge = (
+    definition: SketchDefinition,
+    patch: Authored & {
+      readonly derivedRelationships?: SketchDefinition["derivedRelationships"];
+    },
+  ): SketchDefinition => {
+    const points = [...definition.points, ...patch.points];
+    const entities = [...definition.entities, ...patch.entities];
+    const constraints = [
+      ...definition.constraints,
+      ...(patch.constraints ?? []),
+    ];
+    return {
+      ...definition,
+      pointIds: points.map((point) => point.pointId),
+      points,
+      entityIds: entities.map((entity) => entity.entityId),
+      entities,
+      constraintIds: constraints.map((constraint) => constraint.constraintId),
+      constraints,
+      ...(patch.derivedRelationships
+        ? {
+            derivedRelationships: [
+              ...(definition.derivedRelationships ?? []),
+              ...patch.derivedRelationships,
+            ],
+          }
+        : {}),
+    };
+  };
+  const ends = (definition: SketchDefinition) => {
+    const entity = definition.entities.at(-1)!;
+    if (entity.kind !== "lineSegment" && entity.kind !== "arc")
+      throw new Error("not a line or an arc");
+    return {
+      definition,
+      id: entity.entityId,
+      start: entity.startPointId,
+      end: entity.endPointId,
+    };
+  };
+  const line = (
+    definition: SketchDefinition,
+    start: Vector,
+    end: Vector,
+    snaps: EndpointSnaps = {},
+  ) =>
+    ends(
+      merge(
+        definition,
+        authoring.line({
+          previousDefinition: definition,
+          sequence: next(),
+          start,
+          end,
+          snaps,
+        }),
+      ),
+    );
+  const arc = (
+    definition: SketchDefinition,
+    center: Vector,
+    start: Vector,
+    end: Vector,
+    snaps: EndpointSnaps = {},
+  ) =>
+    ends(
+      merge(
+        definition,
+        authoring.arc({
+          previousDefinition: definition,
+          sequence: next(),
+          center,
+          start,
+          end,
+          snaps,
+        }),
+      ),
+    );
+  const spline = (
+    definition: SketchDefinition,
+    points: readonly Vector[],
+    snaps: EndpointSnaps = {},
+  ) => {
+    const merged = merge(
+      definition,
+      authoring.spline({
+        previousDefinition: definition,
+        sequence: next(),
+        points,
+        snaps,
+      }),
+    );
+    return { definition: merged, id: merged.entities.at(-1)!.entityId };
+  };
+  const circle = (
+    definition: SketchDefinition,
+    center: Vector,
+    rim: Vector,
+  ) => {
+    const merged = merge(
+      definition,
+      authoring.circle({
+        previousDefinition: definition,
+        sequence: next(),
+        center,
+        rim,
+      }),
+    );
+    return { definition: merged, id: merged.entities.at(-1)!.entityId };
+  };
+  const rectangle = (
+    definition: SketchDefinition,
+    start: Vector,
+    end: Vector,
+  ) =>
+    merge(
+      definition,
+      authoring.rectangle({
+        previousDefinition: definition,
+        sequence: next(),
+        start,
+        end,
+      }),
+    );
+  /** A closed line polygon drawn with endpoint snaps. */
+  const polygon = (
+    definition: SketchDefinition,
+    corners: readonly Vector[],
+  ) => {
+    let current = definition;
+    const ids: SketchEntityId[] = [];
+    let first: SketchPointId | undefined;
+    let previous: SketchPointId | undefined;
+    corners.forEach((corner, index) => {
+      const last = index === corners.length - 1;
+      const drawn = line(
+        current,
+        corner,
+        corners[(index + 1) % corners.length]!,
+        {
+          ...(previous ? { start: previous } : {}),
+          ...(last && first ? { end: first } : {}),
+        },
+      );
+      current = drawn.definition;
+      ids.push(drawn.id);
+      first ??= drawn.start;
+      previous = drawn.end;
+    });
+    return { definition: current, ids };
+  };
+  const fillet = (
+    definition: SketchDefinition,
+    first: SketchEntityId,
+    second: SketchEntityId,
+    radius: number,
+  ) =>
+    authoring.fillet({
+      definition,
+      sequence: next(),
+      entityIds: [first, second],
+      radius,
+    });
+  const slot = (
+    definition: SketchDefinition,
+    lineId: SketchEntityId,
+    width: number,
+  ) => {
+    const contribution = authoring.slot({
+      definition,
+      sequence: next(),
+      lineId,
+      width,
+    });
+    return {
+      definition: merge(definition, contribution),
+      ids: contribution.entities.map((entity) => entity.entityId),
+    };
+  };
+  const constraint = (
+    definition: SketchDefinition,
+    toolId: string,
+    entityIds: readonly SketchEntityId[],
+  ) =>
+    authoring.constraint({ definition, sequence: next(), toolId, entityIds });
+  /**
+   * The native Offset relationship on the seeds (R8). The tool is driven by
+   * the legacy offset, so where legacy rejects the row distance (arc
+   * collapse) it is authored at d = ±0.01 (labelled): the seeds' point-
+   * defined solve does not depend on the relationship's distance.
+   */
+  const withOffset = (
+    definition: SketchDefinition,
+    seeds: readonly SketchEntityId[],
+    distance: number,
+  ) => {
+    for (const value of [distance, Math.sign(distance || 1) * 0.01]) {
+      const contribution = authoring.offset({
+        definition,
+        sequence: next(),
+        entityIds: seeds,
+        distance: value,
+      });
+      if (contribution)
+        return {
+          definition: merge(definition, contribution),
+          relationshipDistance: value,
+        };
+    }
+    throw new Error("the native Offset tool rejected the seeds");
+  };
+  /** Solve (must be solved) with solved point positions written back. */
+  const solved = (definition: SketchDefinition): AcceptedPair => {
+    const result = solveSketchDefinitionCore({
+      definition,
+      tolerances: solveTolerances,
+      partialSolvePolicy: "bestEffort",
+    });
+    if (result.status.solveState !== "solved")
+      throw new Error(`native arc sketch solve is ${result.status.solveState}`);
+    const positions = new Map(
+      result.solvedSnapshot.solvedPoints.map((point) => [
+        point.pointId,
+        point.solvedPosition,
+      ]),
+    );
+    return {
+      definition: {
+        ...definition,
+        points: definition.points.map((point) => ({
+          ...point,
+          position: positions.get(point.pointId)!,
+        })),
+      },
+      solvedSnapshot: result.solvedSnapshot,
+    };
+  };
+  /** Authored sketch → Offset relationship → solve → N2 → fresh adapter. */
+  const adapt = (sketch: SeedArcSketch, distance: number) => {
+    let { definition, relationshipDistance } = withOffset(
+      sketch.definition,
+      sketch.seeds,
+      distance,
+    );
+    let pair: AcceptedPair;
+    try {
+      pair = solved(definition);
+    } catch {
+      // The solver may not accept the frame with the relationship at the
+      // row distance (its derived outputs join the solve): the seeds'
+      // point-defined solve is then taken with the nominal relationship.
+      ({ definition, relationshipDistance } = withOffset(
+        sketch.definition,
+        sketch.seeds,
+        Math.sign(distance || 1) * 0.01,
+      ));
+      pair = solved(definition);
+    }
+    const connectivity = extractDeclaredOffsetChainConnectivity({
+      definition: pair.definition,
+      seedIds: sketch.seeds,
+    });
+    if (!connectivity.ok) throw new Error(connectivity.message);
+    const declared = declaredOffsetChainPieces({
+      definition: pair.definition,
+      solvedSnapshot: pair.solvedSnapshot,
+      connectivity,
+      distance,
+      modelingTolerance,
+    });
+    return { pair, connectivity, declared, relationshipDistance };
+  };
+  return {
+    empty,
+    merge,
+    line,
+    arc,
+    spline,
+    circle,
+    rectangle,
+    polygon,
+    fillet,
+    slot,
+    constraint,
+    withOffset,
+    solved,
+    adapt,
+    /** The seed entities (lines and arcs) of a filleted / slotted sketch. */
+    lineArcSeeds: (definition: SketchDefinition) =>
+      definition.entities
+        .filter(
+          (entity) => entity.kind === "lineSegment" || entity.kind === "arc",
+        )
+        .map((entity) => entity.entityId),
+  };
+}
+
+export type NativeArcOffsetHarness = ReturnType<
+  typeof createNativeArcOffsetHarness
+>;
+
+/** One T08b-f native D3 row: a sketch builder and its offset distance. */
+export interface SeedArcRow {
+  readonly row: string;
+  readonly distance: number;
+  readonly build: (harness: NativeArcOffsetHarness) => SeedArcSketch;
+}
+
+/**
+ * The T08b-f design §5 native D3 rows as amended by review R6/R7 (τ = 1e-3),
+ * built with native tools and edit operations only, exactly as the design
+ * probe builds them (rotations by 0.3 rad; Fillet r = 0.2 on rectangles,
+ * 0.15 on n-gons; Slot w = 0.4), plus the partially filleted rectangles and
+ * polygons (R6) and the deep arc-leaf trims at |d| = r, 2r, 4r, 9r (R7, on a
+ * semicircle between long lines so only the arc side is deep).
+ */
+export function seedArcRows(): readonly SeedArcRow[] {
+  const rows: SeedArcRow[] = [];
+  const add = (
+    row: string,
+    build: SeedArcRow["build"],
+    distances: readonly number[],
+  ) => {
+    for (const distance of distances) rows.push({ row, distance, build });
+  };
+  const rotate =
+    (angle: number) =>
+    (point: Vector): Vector => [
+      point[0] * Math.cos(angle) - point[1] * Math.sin(angle),
+      point[0] * Math.sin(angle) + point[1] * Math.cos(angle),
+    ];
+  const RECT: readonly Vector[] = [
+    [0, 0],
+    [2, 0],
+    [2, 1],
+    [0, 1],
+  ];
+  const filleted =
+    (
+      angle: number,
+      radius: number,
+      corners: readonly number[] = [0, 1, 2, 3],
+    ) =>
+    (h: NativeArcOffsetHarness): SeedArcSketch => {
+      let definition =
+        angle === 0
+          ? h.rectangle(h.empty(), [0, 0], [2, 1])
+          : h.polygon(h.empty(), RECT.map(rotate(angle))).definition;
+      const lines = definition.entities
+        .filter((entity) => entity.kind === "lineSegment")
+        .map((entity) => entity.entityId);
+      for (const corner of corners)
+        definition = h.fillet(
+          definition,
+          lines[corner]!,
+          lines[(corner + 1) % lines.length]!,
+          radius,
+        );
+      return { definition, seeds: h.lineArcSeeds(definition) };
+    };
+  const regular = (n: number, side: number): Vector[] => {
+    const radius = side / (2 * Math.sin(Math.PI / n));
+    return Array.from({ length: n }, (_, k): Vector => {
+      const angle = (2 * Math.PI * k) / n + 0.1;
+      return [radius * Math.cos(angle), radius * Math.sin(angle)];
+    });
+  };
+  const roundedPolygon =
+    (n: number, corners?: readonly number[]) =>
+    (h: NativeArcOffsetHarness): SeedArcSketch => {
+      const drawn = h.polygon(h.empty(), regular(n, 1));
+      let definition = drawn.definition;
+      for (const corner of corners ?? Array.from({ length: n }, (_, k) => k))
+        definition = h.fillet(
+          definition,
+          drawn.ids[corner]!,
+          drawn.ids[(corner + 1) % n]!,
+          0.15,
+        );
+      return { definition, seeds: h.lineArcSeeds(definition) };
+    };
+  const slot = (angle: number) => (h: NativeArcOffsetHarness) => {
+    const base = h.line(
+      h.empty(),
+      rotate(angle)([0, 0]),
+      rotate(angle)([2, 0]),
+    );
+    const slotted = h.slot(base.definition, base.id, 0.4);
+    return { definition: slotted.definition, seeds: slotted.ids };
+  };
+  const semicircles = (angle: number) => (h: NativeArcOffsetHarness) => {
+    const r = rotate(angle);
+    const a = h.arc(h.empty(), [0, 0], r([1, 0]), r([-1, 0]));
+    const b = h.arc(a.definition, [0, 0], r([-1, 0]), r([1, 0]), {
+      start: a.end,
+      end: a.start,
+    });
+    return { definition: b.definition, seeds: [a.id, b.id] };
+  };
+  const lens = (h: NativeArcOffsetHarness) => {
+    const a = h.arc(h.empty(), [0, -0.6], [1, 0], [-1, 0]);
+    const b = h.arc(a.definition, [0, 0.6], [-1, 0], [1, 0], {
+      start: a.end,
+      end: a.start,
+    });
+    return { definition: b.definition, seeds: [a.id, b.id] };
+  };
+  const lineArcLine =
+    (centerY: number, length = 1) =>
+    (h: NativeArcOffsetHarness) => {
+      const first = h.line(h.empty(), [-length, 0], [0, 0]);
+      const arc = h.arc(first.definition, [0.5, centerY], [0, 0], [1, 0], {
+        start: first.end,
+      });
+      const last = h.line(arc.definition, [1, 0], [1 + length, 0], {
+        start: arc.end,
+      });
+      return {
+        definition: last.definition,
+        seeds: [first.id, arc.id, last.id],
+      };
+    };
+  const arcSpline =
+    (points: readonly Vector[]) => (h: NativeArcOffsetHarness) => {
+      const a = h.arc(h.empty(), [0, 0], [1, 0], [0, 1]);
+      const spline = h.spline(a.definition, points, { start: a.end });
+      return { definition: spline.definition, seeds: [a.id, spline.id] };
+    };
+  add("rect", filleted(0, 0, []), [0.01, -0.01, 0.2, -0.2]);
+  add("rect rotated 0.3", filleted(0.3, 0, []), [0.01, -0.01, 0.2, -0.2]);
+  add("rounded rect", filleted(0, 0.2), [0.01, -0.01, 0.1, -0.1, 0.25]);
+  add(
+    "rounded rect rotated 0.3",
+    filleted(0.3, 0.2),
+    [0.01, -0.01, 0.1, -0.1, 0.25],
+  );
+  add("rect + 1 fillet", filleted(0, 0.2, [0]), [0.01, -0.01, 0.1, -0.1]);
+  add(
+    "rect rotated 0.3 + 2 fillets",
+    filleted(0.3, 0.2, [0, 2]),
+    [0.01, -0.01, 0.1, -0.1],
+  );
+  add("slot", slot(0), [0.01, -0.01, 0.1, -0.1, 0.25]);
+  add("slot rotated 0.3", slot(0.3), [0.01, -0.01, 0.1, -0.1, 0.25]);
+  add(
+    "circle",
+    (h) => {
+      const drawn = h.circle(h.empty(), [0, 0], [1, 0]);
+      return { definition: drawn.definition, seeds: [drawn.id] };
+    },
+    [0.01, -0.01, 0.5, 1.5],
+  );
+  add("two semicircles", semicircles(0), [0.01, -0.01, 0.2, -0.2]);
+  add("two semicircles rotated 0.3", semicircles(0.3), [0.01, -0.01]);
+  add("lens", lens, [0.01, -0.01, 0.1, -0.1, 0.2, 0.3, -0.5]);
+  // A thin lens: two flat arcs (centres (0, ±3), sweep ≈ 37° < atan 2, one
+  // leaf each), so each arc's single leaf holds BOTH corners' roots.
+  add(
+    "thin lens",
+    (h) => {
+      const a = h.arc(h.empty(), [0, -3], [1, 0], [-1, 0]);
+      const b = h.arc(a.definition, [0, 3], [-1, 0], [1, 0], {
+        start: a.end,
+        end: a.start,
+      });
+      return { definition: b.definition, seeds: [a.id, b.id] };
+    },
+    [0.01, -0.01, 0.1, -0.1],
+  );
+  add(
+    "line-arc-line semicircle",
+    lineArcLine(0),
+    [0.01, -0.01, 0.1, -0.1, -0.3, -0.6, 0.3, 0.45, 0.6],
+  );
+  add(
+    "line-arc-line cap",
+    lineArcLine(0.5),
+    [0.01, -0.01, 0.1, -0.1, -0.3, -0.6, 0.3, 0.6, 0.8],
+  );
+  add(
+    "line-arc-line semicircle long (R7)",
+    lineArcLine(0, 6),
+    [-0.5, -1, -2, -4.5],
+  );
+  // A flat 37° cap: ONE rule-B′ leaf, trimmed at both ends inward.
+  add("line-arc-line flat cap", lineArcLine(1.5), [0.01, -0.01, 0.1, -0.1]);
+  add(
+    "arc→spline corner",
+    arcSpline([
+      [0, 1],
+      [-0.5, 1.6],
+      [-1, 2.4],
+    ]),
+    [0.01, -0.01],
+  );
+  add(
+    "arc→spline near-tangent",
+    arcSpline([
+      [0, 1],
+      [-0.5, 1.02],
+      [-1, 1.1],
+    ]),
+    [0.01, -0.01],
+  );
+  add(
+    "quarter arc",
+    (h) => {
+      const drawn = h.arc(h.empty(), [0, 0], [1, 0], [0, 1]);
+      return { definition: drawn.definition, seeds: [drawn.id] };
+    },
+    [0.01, -0.01, 0.99, 1.2],
+  );
+  add(
+    "3/4 arc",
+    (h) => {
+      const drawn = h.arc(h.empty(), [0, 0], [1, 0], [0, -1]);
+      return { definition: drawn.definition, seeds: [drawn.id] };
+    },
+    [0.01, -0.01],
+  );
+  // Review R9: a 300° arc closed by its chord ("D"); outward, F1 arcs with
+  // Lemma-W junctions sit at both ends of a near-full seed arc.
+  add(
+    "D (300° arc + chord)",
+    (h) => {
+      const start: Vector = [Math.cos(-Math.PI / 3), Math.sin(-Math.PI / 3)];
+      const end: Vector = [
+        Math.cos((4 * Math.PI) / 3),
+        Math.sin((4 * Math.PI) / 3),
+      ];
+      const arc = h.arc(h.empty(), [0, 0], start, end);
+      const chord = h.line(arc.definition, end, start, {
+        start: arc.end,
+        end: arc.start,
+      });
+      return { definition: chord.definition, seeds: [arc.id, chord.id] };
+    },
+    [0.01, -0.01, 0.1, -0.1],
+  );
+  // A half-disc (semicircle + diameter): inward, both corners are Lemma-T°
+  // trims of ONE line leaf against one circle (the T°2 pair).
+  add(
+    "half-disc",
+    (h) => {
+      const arc = h.arc(h.empty(), [0, 0], [1, 0], [-1, 0]);
+      const diameter = h.line(arc.definition, [-1, 0], [1, 0], {
+        start: arc.end,
+        end: arc.start,
+      });
+      return { definition: diameter.definition, seeds: [arc.id, diameter.id] };
+    },
+    [0.01, -0.01, 0.1, -0.1, 0.3],
+  );
+  add(
+    "thin D (37° arc + chord)",
+    (h) => {
+      const arc = h.arc(h.empty(), [0, -3], [1, 0], [-1, 0]);
+      const chord = h.line(arc.definition, [-1, 0], [1, 0], {
+        start: arc.end,
+        end: arc.start,
+      });
+      return { definition: chord.definition, seeds: [arc.id, chord.id] };
+    },
+    // d = 0.1 exceeds half its height (0.162): the true inward offset is
+    // empty (the spec checks that it fails closed where legacy draws an
+    // inverted loop).
+    [0.01, -0.01, 0.05, -0.1],
+  );
+  add(
+    "S-curve",
+    (h) => {
+      const a = h.arc(h.empty(), [0, 0], [0, -1], [1, 0]);
+      const b = h.arc(a.definition, [2, 0], [2, 1], [1, 0], { end: a.end });
+      return { definition: b.definition, seeds: [a.id, b.id] };
+    },
+    [0.01, -0.01],
+  );
+  for (const n of [6, 12])
+    add(`rounded ${n}-gon`, roundedPolygon(n), [0.01, -0.01]);
+  add(
+    "hexagon + 2 fillets",
+    roundedPolygon(6, [0, 3]),
+    [0.01, -0.01, 0.1, -0.1],
+  );
+  add(
+    "rounded rect rotated + Tangent, dragged 1e-4",
+    (h) => {
+      let { definition } = filleted(0.3, 0.2)(h);
+      const arcs = definition.entities.filter(
+        (entity) => entity.kind === "arc",
+      );
+      const lines = definition.entities.filter(
+        (entity) => entity.kind === "lineSegment",
+      );
+      for (const arc of arcs)
+        for (const line of lines)
+          if (
+            arc.kind === "arc" &&
+            line.kind === "lineSegment" &&
+            [line.startPointId, line.endPointId].some(
+              (point) => point === arc.startPointId || point === arc.endPointId,
+            )
+          )
+            definition = h.constraint(definition, "constraintTangent", [
+              arc.entityId,
+              line.entityId,
+            ]);
+      const first = arcs[0]!;
+      if (first.kind !== "arc") throw new Error("not an arc");
+      definition = {
+        ...definition,
+        points: definition.points.map((point) =>
+          point.pointId === first.centerPointId
+            ? {
+                ...point,
+                position: [
+                  point.position[0] + 1e-4,
+                  point.position[1],
+                ] as const,
+              }
+            : point,
+        ),
+      } as SketchDefinition;
+      return { definition, seeds: h.lineArcSeeds(definition) };
+    },
+    [0.01, -0.01, 0.1, -0.1],
+  );
+  return rows;
+}
