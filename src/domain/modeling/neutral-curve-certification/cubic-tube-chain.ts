@@ -5,14 +5,20 @@ import type {
   CubicTubeChainJoin,
   CubicTubeChainRequest,
   CubicTubeChainResult,
+  NeutralArcTube,
+  NeutralCircleTube,
   NeutralCubicPieceTube,
   NeutralCubicTube,
   NeutralLineTube,
   PieceTubeChainRequest,
+  TubeChainPiece,
   TubeChainArcDeclaration,
   TubeChainArcJoin,
   TubeChainArcRecord,
+  TubeChainArcTrimJoin,
   TubeChainGraphTrimJoin,
+  TubeChainSeedArcRecord,
+  TubeChainSeedKnotJoin,
   TubeChainTrimJoin,
   TubeChainVertexAuthority,
   TubeChainVertexDeclaration,
@@ -20,6 +26,7 @@ import type {
   TubePieceChainJoin,
   TubePieceChainResult,
 } from "@/contracts/modeling/neutral-curve-query";
+import { seedArcLeafSplits } from "@/contracts/sketch/canonical-arc-support";
 import type {
   SplinePoles,
   SplineVector,
@@ -41,6 +48,7 @@ import {
   exactToNumber,
   multiplyExact,
   negateExact,
+  nextBinary64,
   outwardExactNumber,
   subtractExact,
   type ExactFraction,
@@ -298,6 +306,72 @@ import {
  * - G1 [TECH E4]: tan α = |a·h|/|a×h| is reported, never gated.
  * - Failures of the arc stage and K3 failures of its leaves or its (P, Q)
  *   pair carry `arcJoints` (never produced from the request).
+ *
+ * T08b-f seed arcs and circles (`{kind: "arc" | "circle"}` pieces, piece
+ * path only; never entered without them, so arc-free charge sequences are
+ * unchanged). Reference R′ ([TECH F1], the R10 wording in
+ * `NeutralArcTube`): the offset of the circle through each end's r_V
+ * (|V − C| at a declared-join end, ρ_s at a trimmed or chain-terminal end)
+ * with one radial step |r_E − r_S| at the middle retained knot (inside a
+ * single retained leaf), exactly vertical in that knot's cone.
+ * - Precharge 64 + 16·16 per arc (8 fixed leaves: 64 + 16·8 per circle)
+ *   BEFORE its partition is chosen or any tube field is read. The rule-B′
+ *   partition (review R1) is recomputed with `seedArcLeafSplits` (A6; two
+ *   leaves at least in a two-piece closed chain) and re-proved: every leaf
+ *   of BOTH the emitted (a … b) and the reference (s … e) wedge has σ(u×v)
+ *   > 0 and 2u·v > σ(u×v) exactly, the half-plane sequence never returns
+ *   (total < 2π), a·s > 0 and b·e > 0. Admission: ρ_o = hypot(S′ − C), ρ_s
+ *   = hypot(S − C) bitwise (E7), no exact full turn, and [TECH F10] the
+ *   binary64 atan2 sweep must not wrap across 0/2π (minor above 3π/2,
+ *   major below π/2; rounding across π is accepted). R7 removals only at
+ *   trims. R_V ≤ 0 is `arc-tube-collapse`.
+ * - Lemma A-R per retained leaf: ε = max|ρ_o − R| over its radii (|v|
+ *   rationalized, review A1) + R⁺·(end chord) + u⁺ (connector), strictly
+ *   below τ; displacementBound = τ on every seed leaf (R3 convention).
+ *   Bounds are rounded outward to binary64 (sound; small operands).
+ * - Vertices with a seed side: [TECH F5] cone e = σ_trav·rot(Z − C) (the
+ *   radial connector [Ẑ, Z] exactly vertical, Lemma E), K1-wedge on each
+ *   seed leaf's emitted and reference wedges, (Z − C)·(V − C) > 0; two seed
+ *   arcs join by ONE rationalized segment (Lemma W, review R4: v = α₁x₁ −
+ *   α₂x₂, α = (|x|² − ρ²)/(|x|(|x| + ρ))), structural vertical when x₁ ∥
+ *   x₂ ⊥ e. J2′ reads exact κ = σ/r_V, λ = R_V/r_V (review R5) on a
+ *   vertex-anchored 1/8 sub-wedge (rate e²σ/(R c³), advance R Δ_lo c_lo,
+ *   speed R Δ_hi; c's hull takes the interior maximum |e|), its fractions
+ *   bounding the leaf's; seed vertices round the J2′ intervals outward.
+ * - F1 arcs at a seed end: π_V from the rationalized ||p| − r_V + σd| +
+ *   R_V⁺c_V; the arc-entry/-exit connectors are replaced by one Lemma-W
+ *   segment between the consumer ends.
+ * - Lemma T° at a trim with a seed side (precharge 256 before H2): the
+ *   implicit circle K = (C_A, R_A) of a seed leaf (R_A exact at a trimmed
+ *   end; never a stepped leaf, and never a trimmed leaf with a realization
+ *   segment at its other end). (T°1/T°2, review R2) a monotone window W
+ *   of (O_B − C_A)·O_B′ holding the bracket: on a line split at the exact
+ *   foot t₀ (the other side excluded, or PAIRED with the line's other-end
+ *   T° trim against the same K: a line meets a circle at most twice); on
+ *   an arc split at ±(C_B − C_A) exactly, the rest excluded by bisected
+ *   wedge boxes; on a cubic by dyadic windows (O′ = λS′ on the restricted
+ *   source). (T°3) φ = η(2R⁺ + η) with η = ε_B(τ̂) (owner Q4-E1 local
+ *   bound) + |ρ_o − R| + w, δ = φ/(2m°); on an arc B, exact sign-bracketing
+ *   candidate directions. (R3) the same monotone/exclusion/bracket tests on
+ *   the EMITTED supports against the emitted circle (radius family): the
+ *   joint pair meets once on the full circle, never read from the query's
+ *   angle domain. (T°4) both root boxes strictly inside A's reference /
+ *   emitted leaf wedges; cut chord R⁺|X̂ − X*|/min(ρ_lo, R_A). Composition:
+ *   B takes M(δ + Δ) (cubic tail, line end), both cut arcs their chords;
+ *   a one-leaf arc cut at both ends needs the cuts σ-ordered. R7 removals
+ *   are never trusted: on the implicit side T° already runs on the full
+ *   circles; on an explicit arc every removed leaf at the joint is
+ *   excluded by T°2 on both wedges (review Q1), else fail closed.
+ * - Review R12 (option c): a seed arc whose natural START is a trim
+ *   certifies the radius family [lo, hi] (record `radiusFamily`) computed
+ *   before any trim; w is added to every leaf's ε, star and K3 radius and
+ *   to T°'s φ; T° runs on the family; Lemma W is not attempted on it.
+ * - K3: seed leaves are exact wedge items hulled with their pole
+ *   connectors and Lemma-W far-end boxes; [TECH F7] intra-piece pairs are
+ *   exempt except (review R9) the (first, last) pair when a non-radial
+ *   segment is attached and the retained sweep is at least π.
+ * - Records `seedArcs`; completeness (uncharged): one record per seed piece
+ *   and every adjacency covered exactly once, else invalid-cubic-tube-chain.
  */
 
 type ExactPoint = readonly [ExactFraction, ExactFraction];
@@ -337,6 +411,30 @@ const ARC_PRECHARGE = 64;
 const K3_LEAF_BOX_PRECHARGE = 16;
 /** Fixed per-leaf precharge of the K3 broad-phase sweep, before it. */
 const K3_SWEEP_PRECHARGE = 16;
+/**
+ * Fixed per-seed-arc precharge (T08b-f), before its partition is chosen or
+ * any of its data is read: 64 + 16 per leaf at the partition cap of 16.
+ */
+const ARC_SEED_PRECHARGE = 64 + 16 * 16;
+/** Fixed per-circle-piece precharge (8 fixed leaves), before its data. */
+const CIRCLE_SEED_PRECHARGE = 64 + 16 * 8;
+/** Fixed per-Lemma-T° trim precharge (the S2 pattern), before H2. */
+const ARC_TRIM_PRECHARGE = 256;
+/** Fixed precharge of one Lemma-W realization-segment test, before it. */
+const JUNCTION_PRECHARGE = 32;
+/** Bisection depth of the Lemma-T° window / exclusion subdivision. */
+const SEED_TRIM_DEPTH = 5;
+/** The eight exact circle leaf directions ([TECH] F11), counter-clockwise. */
+const CIRCLE_DIRECTIONS: readonly SplineVector[] = [
+  [1, 0],
+  [1, 1],
+  [0, 1],
+  [-1, 1],
+  [-1, 0],
+  [-1, -1],
+  [0, -1],
+  [1, -1],
+];
 const J2_MESSAGES = {
   cone: "The source tangents and leaf hodographs are not proved inside the join cone.",
   root: "A verified square-root bound is not finite and positive.",
@@ -483,6 +581,7 @@ interface KnotCandidate {
  */
 interface ArcWedge {
   readonly kind: "arc";
+  /** The F1 arc's adjacency, or −1 on a seed-arc leaf (T08b-f). */
   readonly jointIndex: number;
   readonly center: ExactPoint;
   readonly radius: ExactFraction;
@@ -491,6 +590,97 @@ interface ArcWedge {
   readonly to: ExactPoint;
   readonly start?: ExactPoint;
   readonly end?: ExactPoint;
+  /**
+   * T08b-f: exact boxes hulled into the wedge box with the end they belong
+   * to (the far consumer end of a Lemma-W realization segment); never an
+   * on-curve point.
+   */
+  readonly startHull?: readonly ExactRange[];
+  readonly endHull?: readonly ExactRange[];
+}
+
+/** One natural end of a seed arc (T08b-f), exact on binary64 inputs. */
+interface SeedEnd {
+  /** `join`: a declared vertex or F1 arc (r_V = |V − C|); else r_V = ρ_s. */
+  readonly kind: "trim" | "join" | "terminal";
+  /** Its end leaves are removed by a deep trim (R7). */
+  readonly removed: boolean;
+  /** v = V − C (source end) and p = pole − C (emitted end). */
+  readonly vertex: ExactPoint;
+  readonly relative: ExactPoint;
+  readonly pole: ExactPoint;
+  readonly vertexSquared: ExactFraction;
+  /** The reference radius R_V = r_V − σd, enclosed (exact when r_V = ρ_s). */
+  readonly reference: ExactRange;
+  /** |ρ_o − R_V|⁺ (rationalized). */
+  readonly gap: ExactFraction;
+  /** √-free |λ_V|⁺ = ||v|² − ρ_s²|/ρ_s (recorded). */
+  readonly lambda: ExactFraction;
+  /** c_V ≥ |p̂ − v̂| and u⁺ ≥ |ρ_o − |p|| (0 when removed). */
+  readonly chord: ExactFraction;
+  readonly connector: ExactFraction;
+  /** π_V ≥ |pole − (V + d·N(V))| (declared-join ends; F1 Lemma A). */
+  readonly bound?: ExactFraction;
+}
+
+/** One admitted seed-arc or circle piece (T08b-f). */
+interface SeedArc {
+  readonly piece: number;
+  readonly kind: "arc" | "circle";
+  readonly center: ExactPoint;
+  readonly centerValue: SplineVector;
+  /** ρ_o, exact of the given binary64. */
+  readonly radius: ExactFraction;
+  readonly radiusValue: number;
+  /** Natural orientation σ_s (circles +1). */
+  readonly sigma: 1 | -1;
+  readonly reversed: boolean;
+  /** σ·d_i (circles: d). */
+  readonly signedDistance: ExactFraction;
+  /** Boundary directions of the whole partition, natural order (m + 1). */
+  readonly emitted: readonly ExactPoint[];
+  readonly reference: readonly ExactPoint[];
+  readonly start?: SeedEnd;
+  readonly end?: SeedEnd;
+  /** Flattened retained leaves, natural order. */
+  readonly leaves: number[];
+  readonly step: ExactFraction;
+  readonly gaps: readonly [ExactFraction, ExactFraction];
+  readonly removed: readonly [number, number];
+  /** Review R12: the certified emitted radius family (w = 0 unless set by a trim). */
+  family: { width: ExactFraction; range: readonly [number, number] };
+  /** A non-radial (Lemma W) realization segment is attached (review R9). */
+  nonRadial: boolean;
+}
+
+/** One flattened seed leaf. */
+interface SeedLeaf {
+  readonly arc: SeedArc;
+  /** Index in the whole partition. */
+  readonly index: number;
+  /** The reference radius ranges the leaf's reference touches (2 with a step inside). */
+  readonly radii: readonly ExactRange[];
+  readonly stepInside: boolean;
+  /** Lemma A-R ε (without the R12 family width). */
+  readonly epsilon: ExactFraction;
+  readonly startEnd?: SeedEnd;
+  readonly endEnd?: SeedEnd;
+}
+
+/** A flattened seed-arc or circle leaf (T08b-f): its piece and partition index. */
+interface SeedLeafRef {
+  readonly piece: number;
+  readonly leaf: number;
+}
+
+/** The recomputed rule-B′ partition of one seed-arc or circle piece. */
+interface SeedPartition {
+  readonly kind: "arc" | "circle";
+  /** Interior split directions (arc) or the eight fixed directions (circle). */
+  readonly splits: readonly SplineVector[];
+  /** Leaves of the whole partition. */
+  readonly count: number;
+  readonly removed: readonly [number, number];
 }
 
 type J2Report =
@@ -516,6 +706,11 @@ interface GeneralChain {
   readonly firstLeaf: readonly number[];
   readonly pieceOf: readonly number[];
   readonly lines: readonly (NeutralLineTube | undefined)[];
+  /** Retained leaves per piece. */
+  readonly sizes: readonly number[];
+  /** Seed-arc / circle leaves (T08b-f); `tubes[k]` is absent there. */
+  readonly seeds: readonly (SeedLeafRef | undefined)[];
+  readonly partitions: ReadonlyMap<number, SeedPartition>;
 }
 
 const finitePoint = (point: SplineVector | undefined) =>
@@ -574,6 +769,8 @@ function certifyChain(
     );
   for (const [index, tube] of tubes.entries()) {
     const line = general?.lines[index];
+    // Seed-arc / circle leaves are admitted by their own stage (T08b-f).
+    if (general?.seeds[index]) continue;
     const defect = !general
       ? admissionDefect(tube, modelingTolerance)
       : line
@@ -597,8 +794,12 @@ function certifyChain(
   if (general) {
     // Piece i's owner distance is bitwise reversed ? −d : d (−0 visible).
     for (let index = 0; index < count; index += 1) {
+      const seed = general.seeds[index];
       const owner =
-        general.lines[index]?.distance ?? tubes[index]!.reference.distance;
+        general.lines[index]?.distance ??
+        (seed
+          ? seedTubeOf(general.pieces[seed.piece]!).distance
+          : tubes[index]!.reference.distance);
       const reversed = general.pieces[general.pieceOf[index]!]!.reversed;
       if (!Object.is(owner, reversed ? -distanceValue : distanceValue))
         return uncertain(
@@ -790,24 +991,536 @@ function certifyChain(
     }
   }
 
-  const poles: ExactCubic[] = tubes.map(
-    (tube, index) =>
-      lineData.get(index)?.poles ??
-      (tube.poles.map(exactPoint) as unknown as ExactCubic),
+  // T08b-f seed arcs and circles (piece path only; never entered without
+  // them, so every arc-free charge sequence is unchanged).
+  const seedArcs = new Map<number, SeedArc>();
+  const seedLeaves = new Map<number, SeedLeaf>();
+  if (general && general.partitions.size > 0) {
+    const failure = seedStage(general);
+    if (failure) return failure;
+  }
+  /**
+   * Seed stage (header T08b-f): admission, the rule-B′ partition re-proved
+   * leaf by leaf on BOTH the emitted and the reference wedges, the R′
+   * reference radii by end kind, the step, and Lemma A-R per leaf (strict
+   * ε < τ). Every exact step charges the one request budget.
+   */
+  function seedStage(chain: GeneralChain): Failure | null {
+    const pieceCount = chain.pieces.length;
+    const seedTolerance = exactFromNumber(modelingTolerance, budget);
+    const seedOne = exact(1n, 1n, budget);
+    const seedTwo = exact(2n, 1n, budget);
+    // Every seed bound is rounded up to binary64 (sound; small operands).
+    const up = (value: ExactFraction) =>
+      exactFromNumber(outwardExactNumber(value, "up", budget), budget);
+    const negate = (value: ExactFraction) => negateExact(value, budget);
+    const absolute = (value: ExactFraction) =>
+      compareExact(value, zero, budget) < 0 ? negate(value) : value;
+    const larger = (left: ExactFraction, right: ExactFraction) =>
+      compareExact(left, right, budget) >= 0 ? left : right;
+    const cross = (u: ExactPoint, v: ExactPoint) => crossExact(u, v, budget);
+    const down = (value: ExactFraction) =>
+      exactFromNumber(outwardExactNumber(value, "down", budget), budget);
+    /**
+     * c ≥ |û − v̂| for u·v > 0, from c² = 2(u×v)²/(|u|²|v|²(1 + c₋)) with
+     * c₋ = u·v/√⁺(|u|²|v|²) (the tight T3 form), every factor rounded
+     * outward to binary64 (numerator up, denominator factors down); null
+     * without a positive verified √ bound.
+     */
+    function seedChord(u: ExactPoint, v: ExactPoint) {
+      const along = dot(u, v);
+      if (!positive(along)) return null;
+      const product = multiplyExact(dot(u, u), dot(v, v), budget);
+      const rootProduct = squareRootUpper(product);
+      if (!rootProduct) return null;
+      const skew = cross(u, v);
+      return squareRootUpper(
+        divideExact(
+          up(multiplyExact(seedTwo, multiplyExact(skew, skew, budget), budget)),
+          multiplyExact(
+            down(product),
+            addExact(
+              seedOne,
+              down(divideExact(along, rootProduct, budget)),
+              budget,
+            ),
+            budget,
+          ),
+          budget,
+        ),
+      );
+    }
+    const kindOf = (jointIndex: number | null): SeedEnd["kind"] => {
+      if (jointIndex === null) return "terminal";
+      if (chain.trims.some((trim) => trim.jointIndex === jointIndex))
+        return "trim";
+      return "join";
+    };
+    const adjacencyCount = closed ? pieceCount : pieceCount - 1;
+    for (const [pieceIndex, partition] of chain.partitions) {
+      const piece = chain.pieces[pieceIndex]!;
+      const first = chain.firstLeaf[pieceIndex]!;
+      const last = first + chain.sizes[pieceIndex]! - 1;
+      const fail = (code: string, message: string) =>
+        uncertain(code, `Seed arc ${pieceIndex}: ${message}`, first, last);
+      const admission = (message: string) =>
+        fail("arc-tube-admission-unproven", message);
+      const tube = seedTubeOf(piece);
+      const center = exactPoint(tube.center);
+      const radius = exactFromNumber(tube.radius, budget);
+      const distance = exactFromNumber(tube.distance, budget);
+      if (!(tube.radius > 0))
+        return admission("the emitted radius is not positive.");
+      if (partition.kind === "circle") {
+        // [TECH] F11: reference radius r − d, emitted fl(r − d) as given.
+        if (!Object.is(tube.radius, tube.sourceRadius - tube.distance))
+          return admission("the emitted radius is not fl(r − d).");
+        const reference = subtractExact(
+          exactFromNumber(tube.sourceRadius, budget),
+          distance,
+          budget,
+        );
+        if (!positive(reference))
+          return fail(
+            "arc-tube-collapse",
+            "the offset radius r − d is not positive.",
+          );
+        const epsilon = absolute(subtractExact(radius, reference, budget));
+        if (compareExact(epsilon, seedTolerance, budget) >= 0)
+          return fail(
+            "arc-tube-error-unproven",
+            "the circle's emitted radius error is not strictly below the modeling tolerance.",
+          );
+        const directions = partition.splits.map(exactPoint);
+        const arc: SeedArc = {
+          piece: pieceIndex,
+          kind: "circle",
+          center,
+          centerValue: tube.center,
+          radius,
+          radiusValue: tube.radius,
+          sigma: 1,
+          reversed: false,
+          signedDistance: distance,
+          emitted: [...directions, directions[0]!],
+          reference: [...directions, directions[0]!],
+          leaves: [],
+          step: zero,
+          gaps: [zero, zero],
+          removed: [0, 0],
+          family: { width: zero, range: [tube.radius, tube.radius] },
+          nonRadial: false,
+        };
+        seedArcs.set(pieceIndex, arc);
+        for (let leaf = 0; leaf < partition.count; leaf += 1) {
+          arc.leaves.push(first + leaf);
+          seedLeaves.set(first + leaf, {
+            arc,
+            index: leaf,
+            radii: [[reference, reference]],
+            stepInside: false,
+            epsilon,
+          });
+        }
+        continue;
+      }
+      // Admission (bitwise / float, reject-only): the canonical supports.
+      const [startPole, endPole] = tube.emitted;
+      const [startSource, endSource] = tube.source;
+      const hypot = (point: SplineVector) =>
+        Math.hypot(point[0] - tube.center[0], point[1] - tube.center[1]);
+      if (!Object.is(tube.radius, hypot(startPole)))
+        return admission(
+          "the emitted radius is not the canonical hypot(S′ − C) (E7).",
+        );
+      if (!Object.is(tube.sourceRadius, hypot(startSource)))
+        return admission(
+          "the source radius is not the canonical hypot(S − C) (E7).",
+        );
+      const sigma: 1 | -1 = tube.sweep === "counterClockwise" ? 1 : -1;
+      const oriented = (value: ExactFraction) =>
+        sigma > 0 ? value : negate(value);
+      const turn = (u: ExactPoint, v: ExactPoint) => oriented(cross(u, v));
+      const a = difference(exactPoint(startPole), center);
+      const b = difference(exactPoint(endPole), center);
+      const s = difference(exactPoint(startSource), center);
+      const e = difference(exactPoint(endSource), center);
+      // [TECH] F10: an exactly full turn (a ∥ b, same sense) is never a seed.
+      const abTurn = turn(a, b);
+      const abZero = compareExact(abTurn, zero, budget) === 0;
+      if (abZero && positive(dot(a, b)))
+        return admission("a full-turn point-defined arc is not a seed.");
+      // [TECH] F10: the consumer's binary64 atan2 sweep must not wrap across
+      // 0/2π against the exact wedge (reject-only; never a tolerance): a
+      // minor wedge drawn above 3π/2 or a major one below π/2 fails.
+      // Rounding across π is harmless and accepted.
+      const angle = (point: SplineVector) =>
+        Math.atan2(point[1] - tube.center[1], point[0] - tube.center[0]);
+      const low = angle(sigma > 0 ? startPole : endPole);
+      let high = angle(sigma > 0 ? endPole : startPole);
+      while (high <= low) high += 2 * Math.PI;
+      const floatSweep = high - low;
+      const minor = positive(abTurn);
+      if (
+        !(floatSweep > 0 && floatSweep < 2 * Math.PI) ||
+        (minor && !(floatSweep < 1.5 * Math.PI)) ||
+        (!minor && !abZero && !(floatSweep > 0.5 * Math.PI))
+      )
+        return admission(
+          "the consumer's binary64 sweep class disagrees with the exact wedge.",
+        );
+      // Each end shift < π/2 (fixes the lift of the end map, Lemma A-R).
+      if (!positive(dot(a, s)) || !positive(dot(b, e)))
+        return admission(
+          "an emitted end direction is not within a quarter turn of its source end.",
+        );
+      // Review R1 (rule B′): every leaf of BOTH wedges has σ(u × v) > 0 and
+      // 2u·v > σ(u × v); the half-plane sequence about the first direction
+      // never returns (total sweep < 2π).
+      const splits = partition.splits.map(exactPoint);
+      const emitted = [a, ...splits, b];
+      const reference = [s, ...splits, e];
+      for (const directions of [emitted, reference]) {
+        let half = 0;
+        for (let leaf = 0; leaf < partition.count; leaf += 1) {
+          const u = directions[leaf]!;
+          const v = directions[leaf + 1]!;
+          const leafTurn = turn(u, v);
+          if (
+            !positive(leafTurn) ||
+            !positive(
+              subtractExact(
+                multiplyExact(seedTwo, dot(u, v), budget),
+                leafTurn,
+                budget,
+              ),
+            )
+          )
+            return fail(
+              "arc-tube-partition-unproven",
+              `leaf ${leaf} is not a rule-B′ leaf of both the emitted and the reference wedges.`,
+            );
+          const baseTurn = turn(directions[0]!, v);
+          const next =
+            positive(baseTurn) ||
+            (compareExact(baseTurn, zero, budget) === 0 &&
+              positive(dot(directions[0]!, v)))
+              ? 0
+              : 1;
+          if (next < half)
+            return fail(
+              "arc-tube-partition-unproven",
+              "the leaf wedges wind past a full turn.",
+            );
+          half = next;
+        }
+      }
+      // End kinds (natural start / end) and R7 removal only at trims.
+      const entry = closed
+        ? (pieceIndex - 1 + pieceCount) % pieceCount
+        : pieceIndex > 0
+          ? pieceIndex - 1
+          : null;
+      const exit = pieceIndex < adjacencyCount ? pieceIndex : null;
+      const [startKind, endKind] = piece.reversed
+        ? [kindOf(exit), kindOf(entry)]
+        : [kindOf(entry), kindOf(exit)];
+      const [headRemoved, tailRemoved] = partition.removed;
+      if (
+        (headRemoved > 0 && startKind !== "trim") ||
+        (tailRemoved > 0 && endKind !== "trim")
+      )
+        return admission("leaves are removed at an end that is not a trim.");
+      // R′ radii (header): r_V = |V − C| at a declared-join end, ρ_s at a
+      // trimmed or chain-terminal end; R_V = r_V − σd > 0 or collapse.
+      const sourceRadius = exactFromNumber(tube.sourceRadius, budget);
+      const signedDistance = sigma > 0 ? distance : negate(distance);
+      const sourceSquared = multiplyExact(sourceRadius, sourceRadius, budget);
+      const radiusSquared = multiplyExact(radius, radius, budget);
+      const shifted = addExact(radius, signedDistance, budget);
+      const endData = (
+        kind: SeedEnd["kind"],
+        removed: boolean,
+        source: ExactPoint,
+        pole: SplineVector,
+        relative: ExactPoint,
+        f1: boolean,
+      ): SeedEnd | string => {
+        const vertexSquared = dot(source, source);
+        const lambda = up(
+          divideExact(
+            absolute(subtractExact(vertexSquared, sourceSquared, budget)),
+            sourceRadius,
+            budget,
+          ),
+        );
+        let reference: ExactRange;
+        let gap: ExactFraction;
+        if (kind === "join") {
+          if (
+            positive(signedDistance) &&
+            compareExact(
+              multiplyExact(distance, distance, budget),
+              vertexSquared,
+              budget,
+            ) >= 0
+          )
+            return "collapse";
+          const root = squareRoot(vertexSquared);
+          if (!root) return "root";
+          reference = [
+            subtractExact(root[0], signedDistance, budget),
+            subtractExact(root[1], signedDistance, budget),
+          ];
+          // Review A1: |ρ_o − R_V| = |(ρ_o + σd)² − |v|²| / ((ρ_o + σd) + |v|),
+          // the only √ in a positive denominator.
+          gap = up(
+            positive(shifted)
+              ? divideExact(
+                  absolute(
+                    subtractExact(
+                      multiplyExact(shifted, shifted, budget),
+                      vertexSquared,
+                      budget,
+                    ),
+                  ),
+                  addExact(shifted, root[0], budget),
+                  budget,
+                )
+              : larger(
+                  absolute(subtractExact(radius, reference[0], budget)),
+                  absolute(subtractExact(radius, reference[1], budget)),
+                ),
+          );
+        } else {
+          const exactReference = subtractExact(
+            sourceRadius,
+            signedDistance,
+            budget,
+          );
+          if (!positive(exactReference)) return "collapse";
+          reference = [exactReference, exactReference];
+          gap = absolute(subtractExact(radius, exactReference, budget));
+        }
+        const base = {
+          kind,
+          removed,
+          vertex: source,
+          relative,
+          pole: exactPoint(pole),
+          reference,
+          gap,
+          lambda,
+        };
+        if (removed)
+          return { ...base, chord: zero, connector: zero, vertexSquared };
+        // End shift c_V ≥ |p̂ − v̂| (tight T08b-d T3 form) and the radial
+        // connector u⁺ = |ρ_o² − |p|²|/ρ_o ≥ |ρ_o − |p||.
+        const relativeSquared = dot(relative, relative);
+        const chord = seedChord(relative, source);
+        if (!chord) return "root";
+        const connector = up(
+          divideExact(
+            absolute(subtractExact(radiusSquared, relativeSquared, budget)),
+            radius,
+            budget,
+          ),
+        );
+        let bound: ExactFraction | undefined;
+        if (kind === "join" && f1) {
+          // π_V ≥ |pole − (C + R_V v̂)| ≤ ||p| − r_V + σd| + R_V⁺ c_V, with
+          // |p| − |v| = (|p|² − |v|²)/(|p| + |v|) (√ only in the denominator).
+          const pRoot = squareRoot(relativeSquared);
+          const vRoot = squareRoot(vertexSquared);
+          if (!pRoot || !vRoot) return "root";
+          const numerator = subtractExact(
+            relativeSquared,
+            vertexSquared,
+            budget,
+          );
+          const quotients = [
+            divideExact(
+              numerator,
+              addExact(pRoot[0], vRoot[0], budget),
+              budget,
+            ),
+            divideExact(
+              numerator,
+              addExact(pRoot[1], vRoot[1], budget),
+              budget,
+            ),
+          ].map((value) => absolute(addExact(value, signedDistance, budget)));
+          bound = up(
+            addExact(
+              larger(quotients[0]!, quotients[1]!),
+              multiplyExact(reference[1], chord, budget),
+              budget,
+            ),
+          );
+        }
+        return {
+          ...base,
+          chord,
+          connector,
+          vertexSquared,
+          ...(bound ? { bound } : {}),
+        };
+      };
+      // π_V is read only by an F1 arc at that end (T08b-e Lemma A).
+      const isArc = (jointIndex: number | null) =>
+        jointIndex !== null &&
+        chain.arcs.some((arc) => arc.jointIndex === jointIndex);
+      const [startArc, endArc] = piece.reversed
+        ? [isArc(exit), isArc(entry)]
+        : [isArc(entry), isArc(exit)];
+      const ends = [
+        endData(startKind, headRemoved > 0, s, startPole, a, startArc),
+        endData(endKind, tailRemoved > 0, e, endPole, b, endArc),
+      ] as const;
+      for (const end of ends) {
+        if (end === "collapse")
+          return fail(
+            "arc-tube-collapse",
+            "an offset reference radius r_V − σd is not positive.",
+          );
+        if (end === "root")
+          return admission("a verified square-root bound is not positive.");
+      }
+      const [start, end] = ends as readonly [SeedEnd, SeedEnd];
+      // The step (R′): r_S = r_E exactly, else a radial step of length
+      // |r_E − r_S| at one interior knot of the retained leaves.
+      const radiusOf = (data: SeedEnd) =>
+        data.kind === "join" ? data.vertexSquared : sourceSquared;
+      const stepped =
+        compareExact(radiusOf(start), radiusOf(end), budget) !== 0;
+      const retained = partition.count - headRemoved - tailRemoved;
+      const stepInside = stepped && retained === 1;
+      const stepBoundary = stepped
+        ? headRemoved + Math.ceil(retained / 2)
+        : Number.POSITIVE_INFINITY;
+      // Recorded only: |r_E − r_S| ≤ |r_E² − r_S²| / (√⁻r_S² + √⁻r_E²).
+      const startRoot = stepped ? squareRoot(radiusOf(start)) : null;
+      const endRoot = startRoot && squareRoot(radiusOf(end));
+      if (stepped && !endRoot)
+        return admission("a verified square-root bound is not positive.");
+      const step = endRoot
+        ? divideExact(
+            absolute(subtractExact(radiusOf(end), radiusOf(start), budget)),
+            addExact(startRoot![0], endRoot[0], budget),
+            budget,
+          )
+        : zero;
+      const arc: SeedArc = {
+        piece: pieceIndex,
+        kind: "arc",
+        center,
+        centerValue: tube.center,
+        radius,
+        radiusValue: tube.radius,
+        sigma,
+        reversed: piece.reversed,
+        signedDistance,
+        emitted,
+        reference,
+        start,
+        end,
+        leaves: [],
+        step,
+        gaps: [start.lambda, end.lambda],
+        removed: [headRemoved, tailRemoved],
+        family: { width: zero, range: [tube.radius, tube.radius] },
+        nonRadial: false,
+      };
+      seedArcs.set(pieceIndex, arc);
+      // Lemma A-R per retained leaf (header): ε_k = max |ρ_o − R| over the
+      // leaf's reference radii + R⁺·(end shift) + (radial connector).
+      for (
+        let leaf = headRemoved;
+        leaf < partition.count - tailRemoved;
+        leaf += 1
+      ) {
+        const flattened = first + leaf - headRemoved;
+        arc.leaves.push(flattened);
+        const radii = stepInside
+          ? [start.reference, end.reference]
+          : [leaf < stepBoundary ? start.reference : end.reference];
+        const gaps = stepInside
+          ? [start.gap, end.gap]
+          : [leaf < stepBoundary ? start.gap : end.gap];
+        let epsilon = gaps.reduce(larger);
+        const upper = radii.map((range) => range[1]).reduce(larger);
+        const carried = [
+          ...(leaf === 0 && !start.removed ? [start] : []),
+          ...(leaf === partition.count - 1 && !end.removed ? [end] : []),
+        ];
+        if (carried.length > 0) {
+          epsilon = addExact(
+            epsilon,
+            addExact(
+              multiplyExact(
+                upper,
+                carried.map((data) => data.chord).reduce(larger),
+                budget,
+              ),
+              carried.map((data) => data.connector).reduce(larger),
+              budget,
+            ),
+            budget,
+          );
+        }
+        epsilon = up(epsilon);
+        if (compareExact(epsilon, seedTolerance, budget) >= 0)
+          return fail(
+            "arc-tube-error-unproven",
+            `leaf ${leaf}: the Lemma A-R error (radial gap, step, end shift, connector) is not strictly below the modeling tolerance.`,
+          );
+        seedLeaves.set(flattened, {
+          arc,
+          index: leaf,
+          radii,
+          stepInside,
+          epsilon,
+          ...(leaf === 0 && !start.removed ? { startEnd: start } : {}),
+          ...(leaf === partition.count - 1 && !end.removed
+            ? { endEnd: end }
+            : {}),
+        });
+      }
+    }
+    return null;
+  }
+  const seedDummy: ExactCubic = [
+    [zero, zero],
+    [zero, zero],
+    [zero, zero],
+    [zero, zero],
+  ];
+  const poles: ExactCubic[] = tubes.map((tube, index) =>
+    seedLeaves.has(index)
+      ? seedDummy
+      : (lineData.get(index)?.poles ??
+        (tube.poles.map(exactPoint) as unknown as ExactCubic)),
   );
-  const hodographs = poles.map((cubic) =>
-    [0, 1, 2].map((index) => difference(cubic[index + 1]!, cubic[index]!)),
+  const hodographs = poles.map((cubic, index) =>
+    seedLeaves.has(index)
+      ? []
+      : [0, 1, 2].map((pole) => difference(cubic[pole + 1]!, cubic[pole]!)),
   );
-  const derivatives = tubes.map(
-    (tube, index) =>
-      lineData.get(index)?.box ??
-      tube.reference.derivative.map((axis) => [
-        exactFromNumber(axis[0], budget),
-        exactFromNumber(axis[1], budget),
-      ]),
+  const derivatives = tubes.map((tube, index) =>
+    seedLeaves.has(index)
+      ? [
+          [zero, zero],
+          [zero, zero],
+        ]
+      : (lineData.get(index)?.box ??
+        tube.reference.derivative.map((axis) => [
+          exactFromNumber(axis[0], budget),
+          exactFromNumber(axis[1], budget),
+        ])),
   );
   const errors = tubes.map(
     (tube, index) =>
+      seedLeaves.get(index)?.epsilon ??
       lineData.get(index)?.error ??
       exactFromNumber(tube.certifiedError, budget),
   );
@@ -1191,6 +1904,15 @@ function certifyChain(
   const inflation: (ExactFraction | undefined)[] = [];
   const vertexReports: TubeChainVertexJoin[] = [];
   const reports = new Map<number, J2Report>();
+  /** T08b-f: review-R5 J2′ data of a seed terminal leaf (vertex path). */
+  const seedJ2Data = new Map<
+    number,
+    {
+      readonly rate: ExactRange;
+      readonly minimumAdvance: ExactFraction;
+      readonly maximumSpeed: ExactFraction;
+    }
+  >();
   /**
    * J2′ concave local certificate on one consistent frame: the knot's natural
    * data with its piece's owner distance, or a declared vertex's traversal
@@ -1213,11 +1935,31 @@ function certifyChain(
     incomingSquared: ExactFraction,
     outgoingSquared: ExactFraction,
     reversedLeaves?: ReadonlySet<number>,
+    /**
+     * T08b-f seed vertices only: outward binary64 rounding of interval
+     * bounds (`range`) and of upper bounds (`up`). Sound; absent on every
+     * arc-free vertex and knot, whose charge sequences are unchanged.
+     */
+    round?: {
+      readonly range: (value: ExactRange) => ExactRange;
+      readonly up: (value: ExactFraction) => ExactFraction;
+    },
   ):
     | { readonly trim: ExactRange; readonly tail: ExactRange }
     | keyof typeof J2_MESSAGES => {
+    const tight = (value: ExactRange) => (round ? round.range(value) : value);
     const eSquared = dot(e, e);
     const concaveLeaf = (index: number, cone: ExactRange) => {
+      // A seed leaf reads its exact κ/λ data (R5), not the cubic enclosure.
+      const seedData = seedJ2Data.get(index);
+      if (seedData)
+        return {
+          rate: reversedLeaves?.has(index)
+            ? rangeNegate(seedData.rate)
+            : seedData.rate,
+          minimumAdvance: seedData.minimumAdvance,
+          maximumSpeed: seedData.maximumSpeed,
+        };
       const curvature = leafCurvature(index);
       if (typeof curvature === "string") return curvature;
       const slopeRate = rangeDividePositive(
@@ -1228,10 +1970,11 @@ function certifyChain(
         ),
       );
       if (!slopeRate) return "lambda" as const;
+      const rateValue = tight(slopeRate);
       return {
         // Traversal slope rate: a reversed leaf's cross(R′, R″) flips while
         // e·R′ is its signed cone (vertex path only; knots are natural).
-        rate: reversedLeaves?.has(index) ? rangeNegate(slopeRate) : slopeRate,
+        rate: reversedLeaves?.has(index) ? rangeNegate(rateValue) : rateValue,
         // Leaf-wide min dx/dτ and max |dO/dτ|, both in leaf τ-units.
         minimumAdvance: multiplyExact(cone[0], curvature.lambda[0], budget),
         maximumSpeed: multiplyExact(
@@ -1297,7 +2040,7 @@ function certifyChain(
         rangeSubtract(normalIncoming, normalOutgoing);
     }
     if (!unitGap) return "root" as const;
-    const overlap = rangeMultiply(point(distance), unitGap);
+    const overlap = tight(rangeMultiply(point(distance), tight(unitGap)));
     if (
       !positive(overlap[0]) ||
       compareExact(overlap[1], leafFirst.minimumAdvance, budget) >= 0 ||
@@ -1306,11 +2049,12 @@ function certifyChain(
       return "window" as const;
     const slope = (vector: ExactPoint, along: ExactFraction) =>
       divideExact(crossExact(e, vector, budget), along, budget);
-    const slopeGap = subtractExact(
+    const slopeGapValue = subtractExact(
       slope(incoming, alongIncoming),
       slope(outgoing, alongOutgoing),
       budget,
     );
+    const slopeGap = tight(point(slopeGapValue));
     const ratio = squareRoot(
       divideExact(outgoingSquared, incomingSquared, budget),
     );
@@ -1319,7 +2063,7 @@ function certifyChain(
       squareRoot(divideExact(incomingSquared, outgoingSquared, budget));
     if (!ratio || !inverseRatio) return "root" as const;
     const scaledCross = point(multiplyExact(eSquared, cross, budget));
-    const chordFromIncoming = rangeDividePositive(
+    const chordFromIncomingRaw = rangeDividePositive(
       scaledCross,
       rangeMultiply(
         point(alongIncoming),
@@ -1329,7 +2073,7 @@ function certifyChain(
         ),
       ),
     );
-    const chordToOutgoing = rangeDividePositive(
+    const chordToOutgoingRaw = rangeDividePositive(
       scaledCross,
       rangeMultiply(
         point(alongOutgoing),
@@ -1339,25 +2083,31 @@ function certifyChain(
         ),
       ),
     );
-    if (!chordFromIncoming || !chordToOutgoing) return "root" as const;
+    if (!chordFromIncomingRaw || !chordToOutgoingRaw) return "root" as const;
+    const chordFromIncoming = tight(chordFromIncomingRaw);
+    const chordToOutgoing = tight(chordToOutgoingRaw);
     const rateHull: ExactRange = [
       minimum([leafFirst.rate[0], leafSecond.rate[0]]),
       maximum([leafFirst.rate[1], leafSecond.rate[1]]),
     ];
     if (
       !excludesZero(
-        rangeSubtract(point(slopeGap), rangeMultiply(overlap, rateHull)),
+        tight(rangeSubtract(slopeGap, tight(rangeMultiply(overlap, rateHull)))),
       )
     )
       return "unique" as const;
-    const halfOverlap = rangeMultiply(overlap, point(half));
-    const atB = rangeAdd(
-      chordFromIncoming,
-      rangeMultiply(halfOverlap, leafFirst.rate),
+    const halfOverlap = tight(rangeMultiply(overlap, point(half)));
+    const atB = tight(
+      rangeAdd(
+        chordFromIncoming,
+        tight(rangeMultiply(halfOverlap, leafFirst.rate)),
+      ),
     );
-    const atA = rangeSubtract(
-      rangeNegate(chordToOutgoing),
-      rangeMultiply(halfOverlap, leafSecond.rate),
+    const atA = tight(
+      rangeSubtract(
+        rangeNegate(chordToOutgoing),
+        tight(rangeMultiply(halfOverlap, leafSecond.rate)),
+      ),
     );
     if (
       !excludesZero(atB) ||
@@ -1365,13 +2115,14 @@ function certifyChain(
       positive(atB[0]) === positive(atA[0])
     )
       return "exists" as const;
+    const roundUp = (value: ExactFraction) => (round ? round.up(value) : value);
     const trim: ExactRange = [
-      divideExact(overlap[1], leafFirst.minimumAdvance, budget),
-      divideExact(overlap[1], leafSecond.minimumAdvance, budget),
+      roundUp(divideExact(overlap[1], leafFirst.minimumAdvance, budget)),
+      roundUp(divideExact(overlap[1], leafSecond.minimumAdvance, budget)),
     ];
     const tail: ExactRange = [
-      multiplyExact(leafFirst.maximumSpeed, trim[0], budget),
-      multiplyExact(leafSecond.maximumSpeed, trim[1], budget),
+      roundUp(multiplyExact(leafFirst.maximumSpeed, trim[0], budget)),
+      roundUp(multiplyExact(leafSecond.maximumSpeed, trim[1], budget)),
     ];
     return { trim, tail };
   };
@@ -1475,6 +2226,31 @@ function certifyChain(
   const arcRecords: TubeChainArcRecord[] = [];
   /** Arc attribution of K3 pairs: arc leaf → jointIndex, and (P, Q) pairs. */
   const arcNeighbours = new Map<string, number>();
+  /** T08b-f: far-end boxes of Lemma-W segments, per seed leaf and natural side. */
+  const seedHulls = new Map<
+    number,
+    { start?: readonly ExactRange[]; end?: readonly ExactRange[] }
+  >();
+  /** T08b-f Lemma-T° cut per seed leaf and natural side (composition). */
+  const seedCuts = new Map<
+    number,
+    {
+      start?: {
+        chord: ExactFraction;
+        wedge: readonly [ExactPoint, ExactPoint];
+      };
+      end?: { chord: ExactFraction; wedge: readonly [ExactPoint, ExactPoint] };
+    }
+  >();
+  const seedTrimReports: TubeChainArcTrimJoin[] = [];
+  /** Lemma-T° line trims whose other monotone side is not excluded (T°2 pairs). */
+  const linePairs: {
+    readonly leaf: number;
+    readonly side: "start" | "end";
+    readonly piece: number;
+    readonly radius: ExactFraction;
+    readonly low: readonly (boolean | undefined)[];
+  }[] = [];
   if (general) {
     const pieceCount = general.pieces.length;
     const down = (value: ExactFraction) =>
@@ -1489,7 +2265,7 @@ function certifyChain(
     const terminal = (pieceIndex: number, exiting: boolean) => {
       const piece = general.pieces[pieceIndex]!;
       const first = general.firstLeaf[pieceIndex]!;
-      const size = piece.kind === "cubic" ? piece.tubes.length : 1;
+      const size = general.sizes[pieceIndex]!;
       const naturalEnd = exiting !== piece.reversed;
       return {
         leaf: naturalEnd ? first + size - 1 : first,
@@ -1498,8 +2274,377 @@ function certifyChain(
       };
     };
     type Terminal = ReturnType<typeof terminal>;
+    const rotate = (vector: ExactPoint): ExactPoint => [
+      negateExact(vector[1], budget),
+      vector[0],
+    ];
+    const nearestValue = (value: ExactPoint): SplineVector => [
+      exactToNumber(value[0], budget),
+      exactToNumber(value[1], budget),
+    ];
+    // T08b-f: seed-only bounds are rounded outward to binary64 (lower bounds
+    // down, upper bounds up): sound, and it keeps every operand small.
+    const lower = (value: ExactFraction) =>
+      exactFromNumber(outwardExactNumber(value, "down", budget), budget);
+    const upper = (value: ExactFraction) =>
+      exactFromNumber(outwardExactNumber(value, "up", budget), budget);
+    const outward = (range: ExactRange): ExactRange => [
+      lower(range[0]),
+      upper(range[1]),
+    ];
+    /** The natural seed end (T08b-f) a traversal terminal reaches. */
+    const seedEndOf = (end: Terminal) => {
+      const seed = seedLeaves.get(end.leaf);
+      return seed && (end.side === "end" ? seed.arc.end : seed.arc.start);
+    };
+    /**
+     * T08b-f natural wedge boundaries of a seed leaf: the emitted and the
+     * reference [from, to] (shared split directions inside the arc).
+     */
+    const seedWedges = (seed: SeedLeaf) =>
+      [
+        [seed.arc.emitted[seed.index]!, seed.arc.emitted[seed.index + 1]!],
+        [seed.arc.reference[seed.index]!, seed.arc.reference[seed.index + 1]!],
+      ] as const;
+    /** e_l·σrot(w) = σ·(w × e_l): the natural tangent's e-dot (unnormalized). */
+    const seedAlong = (seed: SeedLeaf, w: ExactPoint, signed: ExactPoint) => {
+      const value = crossExact(w, signed, budget);
+      return seed.arc.sigma > 0 ? value : negateExact(value, budget);
+    };
+    /**
+     * K1-wedge (header T08b-f): the seed leaf is a strict traversal e-graph
+     * on BOTH its emitted and reference wedges iff e_l·σrot(w) > 0 at the
+     * four exact boundary directions (linear in w, sweep < π).
+     */
+    const seedInsideCone = (end: Terminal, e: ExactPoint) => {
+      const seed = seedLeaves.get(end.leaf)!;
+      const signed = end.reversed ? negated(e) : e;
+      return seedWedges(seed).every((pair) =>
+        pair.every((w) => positive(seedAlong(seed, w, signed))),
+      );
+    };
+    /** The reference wedge's minimum of e_l·σrot(w) (sign only; T08b-e R2). */
+    const seedReferenceAlong = (end: Terminal, e: ExactPoint) => {
+      const seed = seedLeaves.get(end.leaf)!;
+      const signed = end.reversed ? negated(e) : e;
+      return minimum(
+        seedWedges(seed)[1].map((w) => seedAlong(seed, w, signed)),
+      );
+    };
+    // Unit-direction enclosures (one verified √ per direction, cached).
+    const seedUnits = new Map<ExactPoint, readonly ExactRange[] | null>();
+    const seedUnit = (direction: ExactPoint) => {
+      const cached = seedUnits.get(direction);
+      if (cached !== undefined) return cached;
+      const length = squareRoot(dot(direction, direction));
+      const result =
+        length &&
+        ([0, 1] as const).map((axis): ExactRange => {
+          const near = divideExact(direction[axis], length[1], budget);
+          const far = divideExact(direction[axis], length[0], budget);
+          return outward(
+            compareExact(near, far, budget) <= 0 ? [near, far] : [far, near],
+          );
+        });
+      seedUnits.set(direction, result);
+      return result;
+    };
+    /** Exact box of C + ρ·x/|x| (ρ exact), or null without a √ bound. */
+    const seedPointBox = (
+      center: ExactPoint,
+      radius: ExactFraction,
+      direction: ExactPoint,
+    ): ExactRange[] | null => {
+      const unit = seedUnit(direction);
+      return (
+        unit &&
+        ([0, 1] as const).map(
+          (axis): ExactRange => [
+            addExact(
+              center[axis],
+              multiplyExact(radius, unit[axis]![0], budget),
+              budget,
+            ),
+            addExact(
+              center[axis],
+              multiplyExact(radius, unit[axis]![1], budget),
+              budget,
+            ),
+          ],
+        )
+      );
+    };
+    /**
+     * Review R5 J2′ data of a seed terminal leaf at a vertex end (header):
+     * the reference circle through V (source radius r = r_V, offset R = R_V)
+     * over the reference wedge [u, w] in the linear-angle parameter; exact
+     * κ = σ/r and λ = R/r (never from the cross/speed³ interval), Δ ∈
+     * [sin Δ, tan Δ], e·R′ = rΔ·c with c = e_l·σrot(ŵ) whose hull takes the
+     * interior maximum |e| (the arcBox trick), Δ_lo for minimumAdvance and
+     * Δ_hi for maximumSpeed; slope rate e²κ/(λc³) = e²σ/(R c³).
+     */
+    const seedJ2 = (
+      end: Terminal,
+      e: ExactPoint,
+      concave: boolean,
+    ):
+      | {
+          readonly cone: ExactRange;
+          readonly rate: ExactRange;
+          readonly minimumAdvance: ExactFraction;
+          readonly maximumSpeed: ExactFraction;
+        }
+      | "root"
+      | "cone" => {
+      const seed = seedLeaves.get(end.leaf)!;
+      const data = seedEndOf(end)!;
+      const signed = end.reversed ? negated(e) : e;
+      const radius = squareRoot(data.vertexSquared);
+      if (!radius) return "root";
+      const orientedTurn = (x: ExactPoint, y: ExactPoint) =>
+        seed.arc.sigma > 0
+          ? crossExact(x, y, budget)
+          : negateExact(crossExact(x, y, budget), budget);
+      const along = (unit: readonly ExactRange[]) => {
+        const value = rangeSubtract(
+          rangeMultiply(unit[0]!, point(signed[1])),
+          rangeMultiply(unit[1]!, point(signed[0])),
+        );
+        return seed.arc.sigma > 0 ? value : rangeNegate(value);
+      };
+      /**
+       * Δ ∈ [sin Δ, tan Δ] and the hull of c = e_l·σrot(ŵ) over one exact
+       * wedge [u, w] of sweep < π/2 (min at an end; max |e| when the peak
+       * direction σ·(e_y, −e_x) is inside, else at an end).
+       */
+      const wedgeData = (u: ExactPoint, w: ExactPoint) => {
+        const turn = orientedTurn(u, w);
+        const rootProduct = squareRootUpper(
+          multiplyExact(dot(u, u), dot(w, w), budget),
+        );
+        const unitFrom = seedUnit(u);
+        const unitTo = seedUnit(w);
+        if (!rootProduct || !unitFrom || !unitTo) return null;
+        const ends = [along(unitFrom), along(unitTo)];
+        const coneLow = minimum(ends.map((range) => range[0]));
+        const peakBase: ExactPoint = [
+          signed[1],
+          negateExact(signed[0], budget),
+        ];
+        const peak = seed.arc.sigma > 0 ? peakBase : negated(peakBase);
+        const peakInside =
+          positive(orientedTurn(u, peak)) && positive(orientedTurn(peak, w));
+        const norm = peakInside ? squareRootUpper(dot(signed, signed)) : null;
+        if (peakInside && !norm) return null;
+        return {
+          low: lower(divideExact(turn, rootProduct, budget)),
+          high: upper(divideExact(turn, dot(u, w), budget)),
+          coneLow: lower(coneLow),
+          coneHigh: upper(norm ?? maximum(ends.map((range) => range[1]))),
+        };
+      };
+      const [u, w] = seedWedges(seed)[1];
+      const leafWide = wedgeData(u, w);
+      if (!leafWide) return "root";
+      if (!positive(leafWide.coneLow)) return "cone";
+      const cone: ExactRange = outward([
+        multiplyExact(
+          multiplyExact(radius[0], leafWide.low, budget),
+          leafWide.coneLow,
+          budget,
+        ),
+        multiplyExact(
+          multiplyExact(radius[1], leafWide.high, budget),
+          leafWide.coneHigh,
+          budget,
+        ),
+      ]);
+      // A convex vertex reads only the cone (Lemma G2).
+      if (!concave)
+        return { cone, rate: cone, minimumAdvance: zero, maximumSpeed: zero };
+      // Only the overlap window next to V matters: the rate, advance and
+      // speed are taken on the vertex-anchored sub-wedge of 1/8 of the leaf
+      // (three exactly admitted near-bisections), a leaf of its own in the
+      // sub-wedge's linear-angle parameter; concaveJ2 checks the window
+      // lies inside it (overlap < its advance), and its fractions bound
+      // the leaf's from above.
+      let near: readonly [ExactPoint, ExactPoint] = [u, w];
+      for (let step = 0; step < 3; step += 1) {
+        const approximate = (value: ExactPoint) => {
+          const x = exactToNumber(value[0], budget);
+          const y = exactToNumber(value[1], budget);
+          const length = Math.hypot(x, y);
+          return [x / length, y / length] as const;
+        };
+        const from = approximate(near[0]);
+        const to = approximate(near[1]);
+        const middle: SplineVector = [from[0] + to[0], from[1] + to[1]];
+        if (!middle.every(Number.isFinite)) return "root";
+        const direction = exactPoint(middle);
+        if (
+          !positive(orientedTurn(near[0], direction)) ||
+          !positive(orientedTurn(direction, near[1]))
+        )
+          return "root";
+        near =
+          end.side === "start" ? [near[0], direction] : [direction, near[1]];
+      }
+      const window = wedgeData(near[0], near[1]);
+      if (!window) return "root";
+      const reference = data.reference;
+      const eSquared = dot(signed, signed);
+      const cube = (value: ExactFraction) =>
+        multiplyExact(multiplyExact(value, value, budget), value, budget);
+      const rate: ExactRange = outward([
+        divideExact(
+          eSquared,
+          multiplyExact(reference[1], cube(window.coneHigh), budget),
+          budget,
+        ),
+        divideExact(
+          eSquared,
+          multiplyExact(reference[0], cube(window.coneLow), budget),
+          budget,
+        ),
+      ]);
+      return {
+        cone,
+        rate: seed.arc.sigma > 0 ? rate : rangeNegate(rate),
+        minimumAdvance: lower(
+          multiplyExact(
+            multiplyExact(reference[0], window.low, budget),
+            window.coneLow,
+            budget,
+          ),
+        ),
+        maximumSpeed: upper(multiplyExact(reference[1], window.high, budget)),
+      };
+    };
+    /** Traversal slope hull of a circle leaf's tangents over its wedge in e. */
+    const wedgeSlopes = (
+      sigma: 1 | -1,
+      reversed: boolean,
+      wedge: readonly [ExactPoint, ExactPoint],
+      e: ExactPoint,
+    ): ExactRange | null => {
+      const values: ExactFraction[] = [];
+      for (const w of wedge) {
+        const tangentBase = rotate(w);
+        const tangent =
+          sigma > 0 !== reversed ? tangentBase : negated(tangentBase);
+        const along = dot(e, tangent);
+        if (!positive(along)) return null;
+        values.push(divideExact(crossExact(e, tangent, budget), along, budget));
+      }
+      return hull(values);
+    };
+    /**
+     * Lemma W (header T08b-f) on the realization segment between two consumer
+     * ends of circles (Cᵢ, ρᵢ) through one shared pole Z, rationalized (review
+     * R4): Êᵢ = Z − αᵢxᵢ with xᵢ = Z − Cᵢ exact and αᵢ = (|xᵢ|² − ρᵢ²) /
+     * (|xᵢ|(|xᵢ| + ρᵢ)) (√ only in a positive denominator), so v = α₁x₁ −
+     * α₂x₂; two irrational points are never subtracted. Exactly collinear
+     * x₁, x₂ ⊥ e is the structural vertical. Returns the kind, or null.
+     */
+    const junction = (
+      pole: ExactPoint,
+      ends: readonly (readonly [ExactPoint, ExactFraction])[],
+      e: ExactPoint,
+      slopes: readonly [ExactRange, ExactRange],
+    ): {
+      readonly kind: "vertical" | "steep";
+      /** x₁ ∥ x₂ ⊥ e exactly: vertical for every radius (structural). */
+      readonly radial: boolean;
+    } | null => {
+      budget.operation(JUNCTION_PRECHARGE);
+      const [x1, x2] = ends.map(([center]) => difference(pole, center)) as [
+        ExactPoint,
+        ExactPoint,
+      ];
+      const alphas: ExactRange[] = [];
+      for (const [index, x] of [x1, x2].entries()) {
+        const radius = ends[index]![1];
+        const squared = dot(x, x);
+        const length = squareRoot(squared);
+        if (!length) return null;
+        const numerator = subtractExact(
+          squared,
+          multiplyExact(radius, radius, budget),
+          budget,
+        );
+        const denominators = length.map((value) =>
+          multiplyExact(value, addExact(value, radius, budget), budget),
+        );
+        const quotients = denominators.map((value) =>
+          divideExact(numerator, value, budget),
+        );
+        alphas.push(hull(quotients));
+      }
+      const along = (x: ExactPoint) => point(dot(e, x));
+      const across = (x: ExactPoint) => point(crossExact(e, x, budget));
+      const eDot = rangeSubtract(
+        rangeMultiply(alphas[0]!, along(x1)),
+        rangeMultiply(alphas[1]!, along(x2)),
+      );
+      const eCross = rangeSubtract(
+        rangeMultiply(alphas[0]!, across(x1)),
+        rangeMultiply(alphas[1]!, across(x2)),
+      );
+      const collinear =
+        compareExact(crossExact(x1, x2, budget), zero, budget) === 0 &&
+        compareExact(dot(e, x1), zero, budget) === 0;
+      if (collinear) return { kind: "vertical", radial: true };
+      if (
+        compareExact(eDot[0], zero, budget) === 0 &&
+        compareExact(eDot[1], zero, budget) === 0
+      )
+        return { kind: "vertical", radial: false };
+      // (W0) e·v ≥ 0 throughout.
+      if (!negative(eDot[0])) return { kind: "steep", radial: false };
+      const smallest = minimum([slopes[0][0], slopes[1][0]]);
+      const largest = maximum([slopes[0][1], slopes[1][1]]);
+      // (W1) e×v > 0 and (e×v)/(e·v) < min α wherever e·v < 0.
+      if (
+        positive(eCross[0]) &&
+        compareExact(
+          eCross[0],
+          maximum([multiplyExact(smallest, eDot[0], budget), zero]),
+          budget,
+        ) > 0
+      )
+        return { kind: "steep", radial: false };
+      // (W2) e×v < 0 and (e×v)/(e·v) > max β wherever e·v < 0.
+      if (
+        negative(eCross[1]) &&
+        compareExact(
+          eCross[1],
+          minimum([multiplyExact(largest, eDot[0], budget), zero]),
+          budget,
+        ) < 0
+      )
+        return { kind: "steep", radial: false };
+      return null;
+    };
+    const seedHull = (
+      leaf: number,
+      side: "start" | "end",
+      box: readonly ExactRange[],
+    ) => {
+      const entry = seedHulls.get(leaf) ?? {};
+      entry[side] = box;
+      seedHulls.set(leaf, entry);
+    };
     /** Exact traversal source tangent at the vertex; null when not proved. */
     const vertexTangent = (end: Terminal): ExactPoint | null => {
+      const seedEnd = seedEndOf(end);
+      if (seedEnd) {
+        // A seed arc's reference circle at V: σ_s·rot(V − C) (F3), exact.
+        const tangent =
+          seedLeaves.get(end.leaf)!.arc.sigma > 0
+            ? rotate(seedEnd.vertex)
+            : negated(rotate(seedEnd.vertex));
+        return end.reversed ? negated(tangent) : tangent;
+      }
       let natural = lineData.get(end.leaf)?.direction;
       if (!natural) {
         const tube = tubes[end.leaf]!;
@@ -1969,6 +3114,22 @@ function certifyChain(
     /** Natural terminal data of one traversal end (cubic leaf or line). */
     const endData = (end: Terminal) => {
       const atEnd = end.side === "end";
+      const seed = seedLeaves.get(end.leaf);
+      if (seed) {
+        const tube = seedTubeOf(general.pieces[seed.arc.piece]!);
+        const reached = atEnd
+          ? seed.endEnd !== undefined
+          : seed.startEnd !== undefined;
+        return {
+          // A circle has no ends; a deep-trimmed end is not reached.
+          terminal: seed.arc.kind === "arc" && reached,
+          pointId: atEnd ? tube.endPointId : tube.startPointId,
+          vertex: tube.source?.[atEnd ? 1 : 0] ?? tube.center,
+          emitted: tube.emitted?.[atEnd ? 1 : 0] ?? tube.center,
+          splineId: undefined as string | undefined,
+          occurrence: undefined as string | undefined,
+        };
+      }
       const line = general.lines[end.leaf];
       if (line)
         return {
@@ -2104,21 +3265,6 @@ function certifyChain(
       // K1 at the vertex pair: e = binary64 traversal-signed chord sum
       // (uncharged, as K1); exact e-positivity of every emitted hodograph
       // step and O′ box corner against e_l = reversed ? −e : e.
-      const direction: [number, number] = [0, 0];
-      for (const end of [firstEnd, secondEnd]) {
-        const sign = end.reversed ? -1 : 1;
-        const line = general.lines[end.leaf];
-        if (line) {
-          direction[0] += sign * (line.emitted[1][0] - line.emitted[0][0]);
-          direction[1] += sign * (line.emitted[1][1] - line.emitted[0][1]);
-          continue;
-        }
-        const cubic = tubes[end.leaf]!.poles;
-        for (let pole = 0; pole < 3; pole += 1) {
-          direction[0] += sign * (cubic[pole + 1]![0] - cubic[pole]![0]);
-          direction[1] += sign * (cubic[pole + 1]![1] - cubic[pole]![1]);
-        }
-      }
       const coneFailure = () =>
         uncertain(
           "cubic-tube-cone-unproven",
@@ -2126,9 +3272,115 @@ function certifyChain(
           firstEnd.leaf,
           secondEnd.leaf,
         );
-      if (!direction.every(Number.isFinite)) return coneFailure();
-      const e = exactPoint(direction);
+      const firstSeed = seedLeaves.get(firstEnd.leaf);
+      const secondSeed = seedLeaves.get(secondEnd.leaf);
+      let direction: [number, number] = [0, 0];
+      let e: ExactPoint;
+      let realization: "vertical" | "steep" | undefined;
+      if (firstSeed || secondSeed) {
+        // T08b-f [TECH F5]: e = σ_trav·rot(Z − C) of the (first) seed side, so
+        // its radial realization connector [Ẑ, Z] is exactly vertical
+        // (T08b-e Lemma E verbatim); K1-wedge on each seed leaf's emitted
+        // and reference wedges, the existing K1 on a line or cubic leaf.
+        const [keyEnd, keySeed] = firstSeed
+          ? [firstEnd, firstSeed]
+          : [secondEnd, secondSeed!];
+        const pole = exactPoint(a.emitted);
+        const radial = difference(pole, keySeed.arc.center);
+        e =
+          keySeed.arc.sigma > 0 !== keyEnd.reversed
+            ? rotate(radial)
+            : negated(rotate(radial));
+        direction = [...nearestValue(e)];
+        for (const [end, seed] of [
+          [firstEnd, firstSeed],
+          [secondEnd, secondSeed],
+        ] as const) {
+          if (!seed) continue;
+          if (seed.arc.kind !== "arc" || !seedInsideCone(end, e))
+            return coneFailure();
+          // (Z − C)·(V − C) > 0: the pole and the vertex share a half-ray side.
+          if (
+            !positive(
+              dot(difference(pole, seed.arc.center), seedEndOf(end)!.vertex),
+            )
+          )
+            return coneFailure();
+        }
+        if (firstSeed && secondSeed) {
+          // Two seed arcs: one segment between both consumer ends (Lemma W).
+          const slopesFirst = wedgeSlopes(
+            firstSeed.arc.sigma,
+            firstEnd.reversed,
+            seedWedges(firstSeed)[0],
+            e,
+          );
+          const slopesSecond = wedgeSlopes(
+            secondSeed.arc.sigma,
+            secondEnd.reversed,
+            seedWedges(secondSeed)[0],
+            e,
+          );
+          const kind =
+            slopesFirst &&
+            slopesSecond &&
+            junction(
+              pole,
+              [
+                [firstSeed.arc.center, firstSeed.arc.radius],
+                [secondSeed.arc.center, secondSeed.arc.radius],
+              ],
+              e,
+              [slopesFirst, slopesSecond],
+            );
+          // A radius-dependent segment on an R12 radius family (a trimmed
+          // natural start) is not certified: fail closed.
+          if (
+            !kind ||
+            (!kind.radial &&
+              [firstSeed, secondSeed].some(
+                (seed) => seed.arc.start?.kind === "trim",
+              ))
+          )
+            return uncertain(
+              "cubic-tube-cone-unproven",
+              `Declared vertex ${index}: the realization segment between the two seed-arc ends is not proved steep (Lemma W).`,
+              firstEnd.leaf,
+              secondEnd.leaf,
+            );
+          realization = kind.kind;
+          if (!kind.radial) {
+            firstSeed.arc.nonRadial = true;
+            secondSeed.arc.nonRadial = true;
+            const far = seedPointBox(
+              secondSeed.arc.center,
+              secondSeed.arc.radius,
+              difference(pole, secondSeed.arc.center),
+            );
+            if (!far) return coneFailure();
+            seedHull(firstEnd.leaf, firstEnd.side, far);
+          }
+        } else realization = "vertical";
+      } else {
+        for (const end of [firstEnd, secondEnd]) {
+          const sign = end.reversed ? -1 : 1;
+          const line = general.lines[end.leaf];
+          if (line) {
+            direction[0] += sign * (line.emitted[1][0] - line.emitted[0][0]);
+            direction[1] += sign * (line.emitted[1][1] - line.emitted[0][1]);
+            continue;
+          }
+          const cubic = tubes[end.leaf]!.poles;
+          for (let pole = 0; pole < 3; pole += 1) {
+            direction[0] += sign * (cubic[pole + 1]![0] - cubic[pole]![0]);
+            direction[1] += sign * (cubic[pole + 1]![1] - cubic[pole]![1]);
+          }
+        }
+        if (!direction.every(Number.isFinite)) return coneFailure();
+        e = exactPoint(direction);
+      }
       for (const end of [firstEnd, secondEnd]) {
+        if (seedLeaves.has(end.leaf)) continue;
         const signed = end.reversed ? negated(e) : e;
         if (!hodographs[end.leaf]!.every((step) => positive(dot(signed, step))))
           return coneFailure();
@@ -2186,14 +3438,27 @@ function certifyChain(
         const alongOutgoing = dot(e, outgoing);
         if (!positive(alongIncoming) || !positive(alongOutgoing))
           return fail(J2_MESSAGES.cone);
-        const sourceCone = (end: Terminal) => {
+        seedJ2Data.clear();
+        const sourceCone = (
+          end: Terminal,
+        ): ExactRange | keyof typeof J2_MESSAGES => {
+          // T08b-f: a seed leaf's exact R5 data (its e·R′ hull is the cone).
+          if (seedLeaves.has(end.leaf)) {
+            const data = seedJ2(end, e, !convex);
+            if (typeof data === "string") return data;
+            seedJ2Data.set(end.leaf, data);
+            return data.cone;
+          }
           const signed = end.reversed ? negated(e) : e;
           return hull(
             leafShape(end.leaf).first.map((vector) => dot(signed, vector)),
           );
         };
         const coneFirst = sourceCone(firstEnd);
+        if (typeof coneFirst === "string") return fail(J2_MESSAGES[coneFirst]);
         const coneSecond = sourceCone(secondEnd);
+        if (typeof coneSecond === "string")
+          return fail(J2_MESSAGES[coneSecond]);
         if (!positive(coneFirst[0]) || !positive(coneSecond[0]))
           return fail(J2_MESSAGES.cone);
         const incomingSquared = dot(incoming, incoming);
@@ -2213,20 +3478,37 @@ function certifyChain(
             rootProduct,
             budget,
           );
-          const chord = squareRootUpper(
-            divideExact(
-              multiplyExact(
-                multiplyExact(
-                  two,
-                  multiplyExact(distance, distance, budget),
-                  budget,
-                ),
-                multiplyExact(cross, cross, budget),
-                budget,
-              ),
-              multiplyExact(product, addExact(one, cosineLow, budget), budget),
+          const seeded = firstSeed || secondSeed;
+          // T08b-f seed vertices: numerator up, denominator factors down.
+          const numerator = multiplyExact(
+            multiplyExact(
+              two,
+              multiplyExact(distance, distance, budget),
               budget,
             ),
+            multiplyExact(cross, cross, budget),
+            budget,
+          );
+          const chord = squareRootUpper(
+            seeded
+              ? divideExact(
+                  upper(numerator),
+                  multiplyExact(
+                    lower(product),
+                    addExact(one, lower(cosineLow), budget),
+                    budget,
+                  ),
+                  budget,
+                )
+              : divideExact(
+                  numerator,
+                  multiplyExact(
+                    product,
+                    addExact(one, cosineLow, budget),
+                    budget,
+                  ),
+                  budget,
+                ),
           );
           if (!chord) return fail(J2_MESSAGES.root);
           arc = chord;
@@ -2250,6 +3532,7 @@ function certifyChain(
                 .filter((end) => end.reversed)
                 .map((end) => end.leaf),
             ),
+            firstSeed || secondSeed ? { range: outward, up: upper } : undefined,
           );
           if (typeof result === "string") return fail(J2_MESSAGES[result]);
           concave = result;
@@ -2318,6 +3601,7 @@ function certifyChain(
         authority: declaration.authority.kind,
         keeper: declaration.keeper,
         bridge: gapZero ? 0 : up(bridge),
+        ...(realization ? { realization } : {}),
       };
       vertexReports.push(
         parallel
@@ -2343,6 +3627,1162 @@ function certifyChain(
     for (const declaration of general.vertices) {
       const failure = certifyVertex(declaration);
       if (failure) return failure;
+    }
+    /**
+     * Review R12 (option c): the certified radius family of a seed arc
+     * whose natural START is a trim. w bounds ||X − C| − ρ_o| over binary64
+     * X one ulp around the emitted root box; the family is that widened by
+     * two ulps each way for the consumer's binary64 difference and
+     * `Math.hypot` (a publisher must still check containment).
+     */
+    const seedFamily = (arc: SeedArc, rootBox: readonly ExactRange[]) => {
+      // Null (fail closed) whenever a binary64 bound overflows (meter A4).
+      const ulpBox: ExactRange[] = [];
+      for (const [low, high] of rootBox) {
+        const lowValue = nextBinary64(down(low), "down", budget);
+        if (!Number.isFinite(lowValue)) return null;
+        const lowBound = exactFromNumber(lowValue, budget);
+        const highValue = nextBinary64(up(high), "up", budget);
+        if (!Number.isFinite(highValue)) return null;
+        ulpBox.push([lowBound, exactFromNumber(highValue, budget)]);
+      }
+      let distanceRange: ExactRange = [zero, zero];
+      for (const axis of [0, 1] as const) {
+        const low = subtractExact(ulpBox[axis]![0], arc.center[axis], budget);
+        const high = subtractExact(ulpBox[axis]![1], arc.center[axis], budget);
+        const squares = [
+          multiplyExact(low, low, budget),
+          multiplyExact(high, high, budget),
+        ];
+        const straddles = !positive(low) && !negative(high);
+        distanceRange = rangeAdd(distanceRange, [
+          straddles ? zero : minimum(squares),
+          maximum(squares),
+        ]);
+      }
+      const near = positive(distanceRange[0])
+        ? squareRoot(distanceRange[0])
+        : null;
+      const far = squareRootUpper(distanceRange[1]);
+      if (!far) return null;
+      const inward = near
+        ? subtractExact(arc.radius, near[0], budget)
+        : arc.radius;
+      const outward = subtractExact(far, arc.radius, budget);
+      const width = maximum([inward, outward, zero]);
+      const lowValue = nextBinary64(
+        nextBinary64(
+          down(subtractExact(arc.radius, width, budget)),
+          "down",
+          budget,
+        ),
+        "down",
+        budget,
+      );
+      const highValue = nextBinary64(
+        nextBinary64(up(addExact(arc.radius, width, budget)), "up", budget),
+        "up",
+        budget,
+      );
+      if (!Number.isFinite(lowValue) || !Number.isFinite(highValue))
+        return null;
+      const low = exactFromNumber(lowValue, budget);
+      const high = exactFromNumber(highValue, budget);
+      return {
+        width: maximum([
+          subtractExact(high, arc.radius, budget),
+          subtractExact(arc.radius, low, budget),
+        ]),
+        range: [lowValue, highValue] as const,
+      };
+    };
+    /**
+     * Lemma T° (header T08b-f, review R2/R3/R12) at one concave trim with a
+     * seed-arc terminal leaf, after H2. The implicit side A is a seed leaf
+     * whose reference circle K = (C_A, R_A) is exact at the trimmed end; B
+     * is the other terminal leaf. Tried with the first seed side implicit,
+     * then (circle↔circle) the second. Returns a failure, or null after
+     * recording the trim.
+     */
+    const seedTrim = (
+      declaration: PieceTubeChainRequest["trims"][number],
+      firstEnd: Terminal,
+      secondEnd: Terminal,
+      fail: (code: string, message: string, magnitude?: true) => Failure,
+    ): Failure | null => {
+      const WINDOW = "trim-window-unproven";
+      const CLASSIFICATION = "trim-classification-unproven";
+      const EXISTENCE = "trim-existence-unproven";
+      const ends = [firstEnd, secondEnd] as const;
+      const storedBounds = [
+        declaration.firstParameterBounds,
+        declaration.secondParameterBounds,
+      ] as const;
+      for (const end of ends) {
+        const seed = seedLeaves.get(end.leaf);
+        if (!seed) continue;
+        if (seed.arc.kind !== "arc" || seed.stepInside)
+          return fail(
+            CLASSIFICATION,
+            "A trimmed seed-arc leaf carries the reference step (a one-leaf stepped arc): Lemma T° is not attempted.",
+          );
+        // M0: the joint pair must meet only on the full emitted circle, so a
+        // trimmed leaf carries no realization segment at its other end (a
+        // trimmed other end has none).
+        const other = end.side === "start" ? seed.endEnd : seed.startEnd;
+        if (other && other.kind !== "trim")
+          return fail(
+            CLASSIFICATION,
+            "A trimmed one-leaf seed arc carries a realization segment at its other end: Lemma T° is not attempted.",
+          );
+      }
+      const negate = (value: ExactFraction) => negateExact(value, budget);
+      const absolute = (value: ExactFraction) =>
+        negative(value) ? negate(value) : value;
+      const square = (value: ExactFraction) =>
+        multiplyExact(value, value, budget);
+      const rangeSquarePositive = (value: ExactRange): ExactRange => [
+        square(value[0]),
+        square(value[1]),
+      ];
+      /** σ-oriented cross of a seed arc (natural orientation). */
+      const turnOf = (arc: SeedArc) => (u: ExactPoint, v: ExactPoint) => {
+        const value = crossExact(u, v, budget);
+        return arc.sigma > 0 ? value : negate(value);
+      };
+      const strictlyInside = (
+        arc: SeedArc,
+        wedge: readonly [ExactPoint, ExactPoint],
+        direction: ExactPoint,
+      ) =>
+        positive(turnOf(arc)(wedge[0], direction)) &&
+        positive(turnOf(arc)(direction, wedge[1]));
+      /** Binary64 near-bisector of a wedge, admitted exactly (the K3 rule). */
+      const bisectWedge = (
+        arc: SeedArc,
+        wedge: readonly [ExactPoint, ExactPoint],
+      ) => {
+        const approximate = (value: ExactPoint) => {
+          const x = exactToNumber(value[0], budget);
+          const y = exactToNumber(value[1], budget);
+          const length = Math.hypot(x, y);
+          return [x / length, y / length] as const;
+        };
+        const from = approximate(wedge[0]);
+        const to = approximate(wedge[1]);
+        const middle: SplineVector = [from[0] + to[0], from[1] + to[1]];
+        if (!middle.every(Number.isFinite)) return null;
+        const direction = exactPoint(middle);
+        if (!strictlyInside(arc, wedge, direction)) return null;
+        return [
+          [wedge[0], direction],
+          [direction, wedge[1]],
+        ] as const;
+      };
+      /** Chord bound c ≥ |û − v̂| (tight T3 form), u·v > 0; null otherwise. */
+      const chordBound = (u: ExactPoint, v: ExactPoint) => {
+        const along = dot(u, v);
+        if (!positive(along)) return null;
+        const product = multiplyExact(dot(u, u), dot(v, v), budget);
+        const root = squareRootUpper(product);
+        if (!root) return null;
+        const skew = crossExact(u, v, budget);
+        return squareRootUpper(
+          divideExact(
+            upper(multiplyExact(two, square(skew), budget)),
+            multiplyExact(
+              lower(product),
+              addExact(one, lower(divideExact(along, root, budget)), budget),
+              budget,
+            ),
+            budget,
+          ),
+        );
+      };
+      /** Exact box of every point of a circle wedge with radius range ρ. */
+      const wedgeBox = (
+        arc: SeedArc,
+        center: ExactPoint,
+        radius: ExactRange,
+        wedge: readonly [ExactPoint, ExactPoint],
+      ): ExactRange[] | null => {
+        const from = seedUnit(wedge[0]);
+        const to = from && seedUnit(wedge[1]);
+        if (!from || !to) return null;
+        return ([0, 1] as const).map((axis): ExactRange => {
+          const unit: ExactPoint = axis === 0 ? [one, zero] : [zero, one];
+          let low = minimum([from[axis]![0], to[axis]![0]]);
+          let high = maximum([from[axis]![1], to[axis]![1]]);
+          if (strictlyInside(arc, wedge, unit)) high = one;
+          if (strictlyInside(arc, wedge, negated(unit))) low = negate(one);
+          const product = rangeMultiply(radius, [low, high]);
+          return [
+            addExact(center[axis], product[0], budget),
+            addExact(center[axis], product[1], budget),
+          ];
+        });
+      };
+      /** |P − C|² over a box (exact interval). */
+      const boxDistance = (
+        box: readonly ExactRange[],
+        center: ExactPoint,
+      ): ExactRange => {
+        let result: ExactRange = [zero, zero];
+        for (const axis of [0, 1] as const)
+          result = rangeAdd(
+            result,
+            rangeSquare([
+              subtractExact(box[axis]![0], center[axis], budget),
+              subtractExact(box[axis]![1], center[axis], budget),
+            ]),
+          );
+        return result;
+      };
+      /** The two σ-extreme corner directions of a box seen from C (span < π). */
+      const boxDirections = (
+        arc: SeedArc,
+        box: readonly ExactRange[],
+        center: ExactPoint,
+      ): readonly [ExactPoint, ExactPoint] | null => {
+        const inside = ([0, 1] as const).every(
+          (axis) =>
+            compareExact(box[axis]![0], center[axis], budget) <= 0 &&
+            compareExact(center[axis], box[axis]![1], budget) <= 0,
+        );
+        if (inside) return null;
+        const corners = box[0]!.flatMap((x) =>
+          box[1]!.map(
+            (y): ExactPoint => [
+              subtractExact(x, center[0], budget),
+              subtractExact(y, center[1], budget),
+            ],
+          ),
+        );
+        const turn = turnOf(arc);
+        let low = corners[0]!;
+        let high = corners[0]!;
+        for (const corner of corners.slice(1)) {
+          if (positive(turn(corner, low))) low = corner;
+          if (positive(turn(high, corner))) high = corner;
+        }
+        if (negative(turn(low, high))) return null;
+        return [low, high];
+      };
+      const attempt = (implicit: 0 | 1): Failure | null => {
+        const aEnd = ends[implicit];
+        const bEnd = ends[1 - implicit]!;
+        const aSeed = seedLeaves.get(aEnd.leaf)!;
+        const aArc = aSeed.arc;
+        const aData = aEnd.side === "start" ? aArc.start! : aArc.end!;
+        const aReference = aData.reference;
+        const bSeed = seedLeaves.get(bEnd.leaf);
+        const bLine = lineData.get(bEnd.leaf);
+        const bBounds = storedBounds[1 - implicit]!;
+        const aWedges = seedWedges(aSeed);
+        const center = aArc.center;
+        const pointRadius = (arc: SeedArc): ExactRange => [
+          arc.radius,
+          arc.radius,
+        ];
+        // B's seed-arc bracket (circle↔circle): candidate directions from the
+        // stored angle bounds, admitted inside the window and sign-proved.
+        type Bracket = {
+          readonly wedge: readonly [ExactPoint, ExactPoint];
+        };
+        const familyRange = (arc: SeedArc): ExactRange => [
+          subtractExact(arc.radius, arc.family.width, budget),
+          addExact(arc.radius, arc.family.width, budget),
+        ];
+        const aFamily = positive(aArc.family.width) ? aArc.family : null;
+        const bFamily =
+          bSeed && positive(bSeed.arc.family.width) ? bSeed.arc.family : null;
+        const radiusRange = (arc: SeedArc, family: typeof aFamily) =>
+          family ? familyRange(arc) : pointRadius(arc);
+
+        let referenceBox: ExactRange[] | null = null;
+        let emittedBox: ExactRange[] | null = null;
+        let bRootBounds: readonly [number, number] | undefined;
+        let bTail = zero;
+        /** η ≥ |X̂ − X*|, the emitted-to-true root distance. */
+        let rootDistance = zero;
+        let bCut: {
+          chord: ExactFraction;
+          wedge: readonly [ExactPoint, ExactPoint];
+        } | null = null;
+        const aSquaredReference = rangeSquarePositive(aReference);
+
+        if (bSeed) {
+          // ---- arc B: exact reference and emitted brackets on directions.
+          if (bSeed.arc.kind !== "arc")
+            return fail(CLASSIFICATION, "A circle piece is never trimmed.");
+          const bArc = bSeed.arc;
+          const bData = bEnd.side === "start" ? bArc.start! : bArc.end!;
+          const bReference = bData.reference;
+          const bWedges = seedWedges(bSeed);
+          const offset = difference(bArc.center, center);
+          const turnB = turnOf(bArc);
+          // g′ sign on B: σ_B·(C_B − C_A)·rot(w) = σ_B·(w × (C_B − C_A)).
+          const rateSign = (w: ExactPoint) => {
+            const value = crossExact(w, offset, budget);
+            return bArc.sigma > 0 ? value : negate(value);
+          };
+          /** (T°2): f = |P − C_A|² − R² excludes 0 on a wedge of B, bisected. */
+          const excludesOn = (
+            radius: ExactRange,
+            circleSquared: ExactRange,
+          ) => {
+            const excludes = (
+              wedge: readonly [ExactPoint, ExactPoint],
+              depth: number,
+            ): boolean => {
+              const box = wedgeBox(bArc, bArc.center, radius, wedge);
+              if (box) {
+                const f = rangeSubtract(
+                  boxDistance(box, center),
+                  circleSquared,
+                );
+                if (excludesZero(f)) return true;
+              }
+              if (depth >= SEED_TRIM_DEPTH) return false;
+              budget.refinementStep();
+              const children = bisectWedge(bArc, wedge);
+              return (
+                children !== null &&
+                excludes(children[0], depth + 1) &&
+                excludes(children[1], depth + 1)
+              );
+            };
+            return excludes;
+          };
+          // The zero direction of g′ is ±(C_B − C_A), exactly.
+          const windowOf = (
+            wedge: readonly [ExactPoint, ExactPoint],
+          ): {
+            readonly window: readonly [ExactPoint, ExactPoint];
+            readonly rest: readonly (readonly [ExactPoint, ExactPoint])[];
+          } | null => {
+            const s0 = compareExact(rateSign(wedge[0]), zero, budget);
+            const s1 = compareExact(rateSign(wedge[1]), zero, budget);
+            if (s0 !== 0 && s0 === s1) return { window: wedge, rest: [] };
+            const split = [offset, negated(offset)].find((z) =>
+              strictlyInside(bArc, wedge, z),
+            );
+            if (!split) return null;
+            return {
+              window: wedge,
+              rest: [
+                [wedge[0], split],
+                [split, wedge[1]],
+              ],
+            };
+          };
+          // Candidate bracket directions from the stored angle bounds.
+          const angleOf = (value: number): ExactPoint =>
+            exactPoint([Math.cos(value), Math.sin(value)]);
+          const referenceSign = (direction: ExactPoint) => {
+            // sign |C_B + R_B d̂ − C_A|² − R_A² (exact, √-free by squaring).
+            const radiusB = bReference[0];
+            const radiusA = aReference[0];
+            const k = subtractExact(
+              square(radiusA),
+              addExact(dot(offset, offset), square(radiusB), budget),
+              budget,
+            );
+            const x = multiplyExact(
+              multiplyExact(two, radiusB, budget),
+              dot(offset, direction),
+              budget,
+            );
+            const xSign = compareExact(x, zero, budget);
+            const kSign = compareExact(k, zero, budget);
+            if (xSign !== kSign || xSign === 0)
+              return xSign > kSign ? 1 : xSign < kSign ? -1 : 0;
+            const difference_ = compareExact(
+              square(x),
+              multiplyExact(square(k), dot(direction, direction), budget),
+              budget,
+            );
+            return xSign > 0 ? difference_ : -difference_;
+          };
+          const emittedSign = (
+            direction: ExactPoint,
+            radiusA: ExactRange,
+            radiusB: ExactRange,
+          ) => {
+            const unit = seedUnit(direction);
+            if (!unit) return 0;
+            let value: ExactRange = [zero, zero];
+            for (const axis of [0, 1] as const)
+              value = rangeAdd(
+                value,
+                rangeSquare(
+                  rangeAdd(
+                    point(offset[axis]),
+                    rangeMultiply(radiusB, unit[axis]!),
+                  ),
+                ),
+              );
+            const f = rangeSubtract(value, rangeSquarePositive(radiusA));
+            return positive(f[0]) ? 1 : negative(f[1]) ? -1 : 0;
+          };
+          const bracketAt = (
+            radiusA: ExactRange,
+            radiusB: ExactRange,
+          ): Bracket | null => {
+            // The margin ladder only seeds binary64 candidate directions; the
+            // exact signs below decide. It is not a tolerance.
+            for (const margin of [0, 2 ** -40, 2 ** -30, 2 ** -20]) {
+              const low = angleOf(
+                bBounds[0] - margin * (1 + Math.abs(bBounds[0])),
+              );
+              const high = angleOf(
+                bBounds[1] + margin * (1 + Math.abs(bBounds[1])),
+              );
+              const wedge: readonly [ExactPoint, ExactPoint] =
+                bArc.sigma > 0 ? [low, high] : [high, low];
+              if (!positive(turnB(wedge[0], wedge[1]))) continue;
+              if (
+                !bWedges.every(
+                  (leafWedge) =>
+                    strictlyInside(bArc, leafWedge, wedge[0]) &&
+                    strictlyInside(bArc, leafWedge, wedge[1]),
+                )
+              )
+                continue;
+              const r0 = referenceSign(wedge[0]);
+              const r1 = referenceSign(wedge[1]);
+              const e0 = emittedSign(wedge[0], radiusA, radiusB);
+              const e1 = emittedSign(wedge[1], radiusA, radiusB);
+              if (r0 !== 0 && r0 === -r1 && e0 !== 0 && e0 === -e1)
+                return { wedge };
+            }
+            return null;
+          };
+          const radiusA = radiusRange(aArc, aFamily);
+          const radiusB = radiusRange(bArc, bFamily);
+          const bracket = bracketAt(radiusA, radiusB);
+          if (!bracket)
+            return fail(
+              EXISTENCE,
+              "The seed-arc joint root of the radius family is not bracketed on the explicit arc.",
+              true,
+            );
+          // (T°1/T°2) on the reference and (R3) on the emitted wedge: the
+          // monotone window holds the bracket; the rest excludes f exactly.
+          for (const [which, leafWedge] of bWedges.entries()) {
+            const reference = which === 1;
+            const split = windowOf(leafWedge);
+            if (!split)
+              return fail(
+                CLASSIFICATION,
+                `The ${reference ? "true" : "emitted"} offset of the explicit arc is not proved monotone about the implicit circle (T°1).`,
+              );
+            if (split.rest.length === 0) continue;
+            const [left, right] = split.rest as readonly [
+              readonly [ExactPoint, ExactPoint],
+              readonly [ExactPoint, ExactPoint],
+            ];
+            const window =
+              strictlyInside(bArc, left, bracket.wedge[0]) &&
+              strictlyInside(bArc, left, bracket.wedge[1])
+                ? left
+                : strictlyInside(bArc, right, bracket.wedge[0]) &&
+                    strictlyInside(bArc, right, bracket.wedge[1])
+                  ? right
+                  : null;
+            if (!window)
+              return fail(
+                WINDOW,
+                "The joint bracket is not inside one monotone sub-window of the explicit arc (T°1).",
+                true,
+              );
+            const excluded = window === left ? right : left;
+            // (T°2): f excludes 0 on the rest, bisected if needed.
+            const radius = reference ? bReference : radiusB;
+            const circleSquared = reference
+              ? aSquaredReference
+              : rangeSquarePositive(radiusA);
+            if (!excludesOn(radius, circleSquared)(excluded, 0))
+              return fail(
+                CLASSIFICATION,
+                `The ${reference ? "true" : "emitted"} offset of the explicit arc is not proved off the implicit circle outside its monotone window (T°2).`,
+              );
+          }
+          // Review Q1 (R7 on the explicit side): the carried `removed` count
+          // is request data, never trusted. Every leaf of B between its
+          // terminal leaf and this natural end (the removed ones) must be
+          // proved off K on its reference wedge and off the emitted family
+          // on its emitted wedge (R3), by the same T°2 exclusion; else a
+          // crossing nearer the vertex could be skipped. Fail closed.
+          const count = bArc.emitted.length - 1;
+          const [from, to] =
+            bEnd.side === "start" ? [0, bSeed.index] : [bSeed.index + 1, count];
+          for (let leaf = from; leaf < to; leaf += 1)
+            for (const reference of [false, true]) {
+              const directions = reference ? bArc.reference : bArc.emitted;
+              const clear = excludesOn(
+                reference ? bReference : radiusB,
+                reference ? aSquaredReference : rangeSquarePositive(radiusA),
+              )([directions[leaf]!, directions[leaf + 1]!], 0);
+              if (!clear)
+                return fail(
+                  CLASSIFICATION,
+                  `The ${reference ? "true" : "emitted"} offset of removed leaf ${leaf} of the explicit arc (R7) is not proved off the implicit circle (T°2).`,
+                );
+            }
+          referenceBox = wedgeBox(
+            bArc,
+            bArc.center,
+            [bReference[0], bReference[1]],
+            bracket.wedge,
+          );
+          emittedBox = wedgeBox(bArc, bArc.center, radiusB, bracket.wedge);
+          const chord = chordBound(bracket.wedge[0], bracket.wedge[1]);
+          if (!referenceBox || !emittedBox || !chord)
+            return fail(EXISTENCE, J2_MESSAGES.root, true);
+          bCut = {
+            chord: multiplyExact(bReference[1], chord, budget),
+            wedge: bracket.wedge,
+          };
+          // |X̂ − X*| ≤ |ρ_B − R_B| + R_B⁺·chord (both on B's cut wedge).
+          rootDistance = addExact(
+            addExact(bData.gap, bFamily ? bFamily.width : zero, budget),
+            bCut.chord,
+            budget,
+          );
+        } else {
+          // ---- line or cubic B: φ-located reference root, R3 on B̂.
+          const lineTube = general.lines[bEnd.leaf];
+          const errorB = errors[bEnd.leaf]!;
+          const cubicDomain = lineTube
+            ? null
+            : (tubes[bEnd.leaf] as NeutralCubicPieceTube).queryDomain;
+          const toLeaf = (value: number) =>
+            cubicDomain
+              ? normalizedExact(value, cubicDomain, budget)
+              : exactFromNumber(value, budget);
+          const stored: ExactRange = [toLeaf(bBounds[0]), toLeaf(bBounds[1])];
+          const radiusA = radiusRange(aArc, aFamily);
+          const familyShift = (rate: ExactFraction) => {
+            if (!aFamily) return zero;
+            const high = subtractExact(
+              square(radiusA[1]),
+              square(aArc.radius),
+              budget,
+            );
+            const low = subtractExact(
+              square(aArc.radius),
+              square(radiusA[0]),
+              budget,
+            );
+            return divideExact(
+              maximum([high, low]),
+              multiplyExact(two, rate, budget),
+              budget,
+            );
+          };
+          let referenceRate: ExactFraction;
+          let emittedRate: ExactFraction;
+          let referenceWindow: ExactRange;
+          let emittedWindow: ExactRange;
+          let referencePosition: (
+            from: ExactFraction,
+            to: ExactFraction,
+          ) => ExactRange[];
+          let emittedPosition: (
+            from: ExactFraction,
+            to: ExactFraction,
+          ) => ExactRange[];
+          let speed: ExactFraction;
+          const lineSplits: {
+            reference?: { rest: ExactRange | null; low?: boolean };
+            emitted?: { rest: ExactRange | null; low?: boolean };
+          } = {};
+          if (bLine) {
+            const tube = lineTube!;
+            const source = exactPoint(tube.source[0]);
+            const emitted = tube.emitted.map(exactPoint);
+            const a = bLine.direction;
+            const step = difference(emitted[1]!, emitted[0]!);
+            /**
+             * (T°1) on a line: g′/2 = v(t) = v₀ + t|a|² is linear, so it is
+             * monotone on each side of its exact zero t₀ = −v₀/|a|². W is the
+             * whole leaf when t₀ ∉ (0, 1); otherwise the side holding the
+             * stored bracket, cut at t_c halfway to t₀ (the rate is bounded
+             * away from t₀; [t_c, t₀] is root-free by monotonicity), and the
+             * other side is `rest`, excluded below or paired (T°2).
+             */
+            const lineWindow = (base: ExactFraction, slope: ExactFraction) => {
+              const values = [base, addExact(base, slope, budget)];
+              if (values.every(positive) || values.every(negative))
+                return {
+                  window: [zero, one] as ExactRange,
+                  rate: minimum(values.map(absolute)),
+                  rest: null,
+                };
+              if (!values.every((value) => positive(value) || negative(value)))
+                return null;
+              const foot = divideExact(negate(base), slope, budget);
+              const at = (t: ExactFraction) =>
+                absolute(
+                  addExact(base, multiplyExact(t, slope, budget), budget),
+                );
+              if (compareExact(stored[1], foot, budget) < 0) {
+                const cut = multiplyExact(
+                  addExact(stored[1], foot, budget),
+                  half,
+                  budget,
+                );
+                return {
+                  window: [zero, cut] as ExactRange,
+                  rate: minimum([at(zero), at(cut)]),
+                  rest: [foot, one] as ExactRange,
+                  low: true,
+                };
+              }
+              if (compareExact(stored[0], foot, budget) > 0) {
+                const cut = multiplyExact(
+                  addExact(stored[0], foot, budget),
+                  half,
+                  budget,
+                );
+                return {
+                  window: [cut, one] as ExactRange,
+                  rate: minimum([at(cut), at(one)]),
+                  rest: [zero, foot] as ExactRange,
+                  low: false,
+                };
+              }
+              return null;
+            };
+            const referenceSplit = lineWindow(
+              dot(difference(source, center), a),
+              dot(a, a),
+            );
+            if (!referenceSplit)
+              return fail(
+                CLASSIFICATION,
+                "The true offset line is not proved monotone about the implicit circle on a window holding the joint bracket (T°1).",
+              );
+            const emittedSplit = lineWindow(
+              dot(difference(emitted[0]!, center), step),
+              dot(step, step),
+            );
+            if (!emittedSplit)
+              return fail(
+                CLASSIFICATION,
+                "The emitted line is not proved monotone about the emitted circle on a window holding the joint bracket (R3).",
+              );
+            lineSplits.reference = referenceSplit;
+            lineSplits.emitted = emittedSplit;
+            referenceRate = referenceSplit.rate;
+            referenceWindow = referenceSplit.window;
+            emittedRate = emittedSplit.rate;
+            emittedWindow = emittedSplit.window;
+            const distanceB = exactFromNumber(tube.distance, budget);
+            const rotated: ExactPoint = [negateExact(a[1], budget), a[0]];
+            const normal = rotated.map((value) =>
+              hull([
+                divideExact(value, bLine.length[1], budget),
+                divideExact(value, bLine.length[0], budget),
+              ]),
+            );
+            const at = (
+              base: ExactPoint,
+              vector: ExactPoint,
+              t: ExactFraction,
+            ): ExactPoint => [
+              addExact(base[0], multiplyExact(vector[0], t, budget), budget),
+              addExact(base[1], multiplyExact(vector[1], t, budget), budget),
+            ];
+            referencePosition = (from, to) =>
+              ([0, 1] as const).map((axis) => {
+                const range = hull([
+                  at(source, a, from)[axis],
+                  at(source, a, to)[axis],
+                ]);
+                return rangeAdd(
+                  range,
+                  rangeMultiply(point(distanceB), normal[axis]!),
+                );
+              });
+            emittedPosition = (from, to) =>
+              ([0, 1] as const).map((axis) =>
+                hull([
+                  at(emitted[0]!, step, from)[axis],
+                  at(emitted[0]!, step, to)[axis],
+                ]),
+              );
+            speed = bLine.length[1];
+          } else {
+            const curvature = leafCurvature(bEnd.leaf);
+            if (typeof curvature === "string")
+              return fail(CLASSIFICATION, J2_MESSAGES[curvature]);
+            const source = leafSource(bEnd.leaf);
+            const width = subtractExact(source.high, source.low, budget);
+            const inflate = (box: ExactRange[]): ExactRange[] =>
+              box.map(
+                ([low, high]): ExactRange => [
+                  subtractExact(low, errorB, budget),
+                  addExact(high, errorB, budget),
+                ],
+              );
+            const cubicBox = (cubic: ExactCubic): ExactRange[] =>
+              ([0, 1] as const).map((axis) =>
+                hull(cubic.map((pole) => pole[axis])),
+              );
+            const hodographBox = (
+              cubic: ExactCubic,
+              span: ExactFraction,
+            ): ExactRange[] =>
+              ([0, 1] as const).map((axis) =>
+                hull(
+                  [0, 1, 2].map((index) =>
+                    divideExact(
+                      multiplyExact(
+                        three,
+                        subtractExact(
+                          cubic[index + 1]![axis],
+                          cubic[index]![axis],
+                          budget,
+                        ),
+                        budget,
+                      ),
+                      span,
+                      budget,
+                    ),
+                  ),
+                ),
+              );
+            referencePosition = (from, to) =>
+              inflate(cubicBox(restrict(poles[bEnd.leaf]!, from, to)));
+            emittedPosition = (from, to) =>
+              cubicBox(restrict(poles[bEnd.leaf]!, from, to));
+            const productRange = (
+              position: ExactRange[],
+              derivative: ExactRange[],
+            ) =>
+              rangeAdd(
+                rangeMultiply(
+                  [
+                    subtractExact(position[0]![0], center[0], budget),
+                    subtractExact(position[0]![1], center[0], budget),
+                  ],
+                  derivative[0]!,
+                ),
+                rangeMultiply(
+                  [
+                    subtractExact(position[1]![0], center[1], budget),
+                    subtractExact(position[1]![1], center[1], budget),
+                  ],
+                  derivative[1]!,
+                ),
+              );
+            /**
+             * (T°1/T°2) by dyadic subdivision of the leaf τ: every window is
+             * monotone (the witness windows, one sign, contiguous) or
+             * excludes f; returns the monotone run and its rate bound.
+             */
+            const monotoneRun = (
+              reference: boolean,
+            ): {
+              window: ExactRange;
+              rate: ExactFraction;
+              sign: number;
+            } | null => {
+              const labelled: {
+                low: ExactFraction;
+                high: ExactFraction;
+                sign: number;
+                rate: ExactFraction;
+                excluded: boolean;
+              }[] = [];
+              const circleSquared = reference
+                ? aSquaredReference
+                : rangeSquarePositive(radiusA);
+              const visit = (
+                low: ExactFraction,
+                high: ExactFraction,
+                depth: number,
+              ): boolean => {
+                const position = reference
+                  ? referencePosition(low, high)
+                  : emittedPosition(low, high);
+                const span = subtractExact(high, low, budget);
+                const derivative = reference
+                  ? hodographBox(
+                      restrict(
+                        source.poles,
+                        addExact(
+                          source.low,
+                          multiplyExact(low, width, budget),
+                          budget,
+                        ),
+                        addExact(
+                          source.low,
+                          multiplyExact(high, width, budget),
+                          budget,
+                        ),
+                      ),
+                      span,
+                    )
+                  : hodographBox(restrict(poles[bEnd.leaf]!, low, high), span);
+                const product = productRange(position, derivative);
+                const sign = positive(product[0])
+                  ? 1
+                  : negative(product[1])
+                    ? -1
+                    : 0;
+                const excluded = excludesZero(
+                  rangeSubtract(boxDistance(position, center), circleSquared),
+                );
+                const touches =
+                  compareExact(low, stored[1], budget) <= 0 &&
+                  compareExact(stored[0], high, budget) <= 0;
+                if (
+                  (sign !== 0 && (touches || !excluded)) ||
+                  (!touches && excluded)
+                ) {
+                  labelled.push({
+                    low,
+                    high,
+                    sign,
+                    rate:
+                      sign > 0
+                        ? product[0]
+                        : sign < 0
+                          ? negate(product[1])
+                          : zero,
+                    excluded,
+                  });
+                  return true;
+                }
+                if (depth >= SEED_TRIM_DEPTH) return false;
+                budget.refinementStep();
+                const middle = multiplyExact(
+                  addExact(low, high, budget),
+                  half,
+                  budget,
+                );
+                return (
+                  visit(low, middle, depth + 1) &&
+                  visit(middle, high, depth + 1)
+                );
+              };
+              if (!visit(zero, one, 0)) return null;
+              const witness = labelled.filter(
+                (item) =>
+                  compareExact(item.low, stored[1], budget) <= 0 &&
+                  compareExact(stored[0], item.high, budget) <= 0,
+              );
+              const sign = witness[0]?.sign ?? 0;
+              if (sign === 0 || witness.some((item) => item.sign !== sign))
+                return null;
+              let from = labelled.indexOf(witness[0]!);
+              let to = labelled.indexOf(witness.at(-1)!);
+              while (from > 0 && labelled[from - 1]!.sign === sign) from -= 1;
+              while (
+                to + 1 < labelled.length &&
+                labelled[to + 1]!.sign === sign
+              )
+                to += 1;
+              if (
+                labelled.some(
+                  (item, index) =>
+                    (index < from || index > to) && !item.excluded,
+                )
+              )
+                return null;
+              const run = labelled.slice(from, to + 1);
+              return {
+                window: [run[0]!.low, run.at(-1)!.high],
+                rate: minimum(run.map((item) => item.rate)),
+                sign,
+              };
+            };
+            const referenceRun = monotoneRun(true);
+            if (!referenceRun)
+              return fail(
+                CLASSIFICATION,
+                "The true offset cubic is not proved monotone about the implicit circle on a window, and off it elsewhere (T°1/T°2).",
+              );
+            const emittedRun = monotoneRun(false);
+            if (!emittedRun)
+              return fail(
+                CLASSIFICATION,
+                "The emitted cubic is not proved monotone about the emitted circle on a window, and off it elsewhere (R3).",
+              );
+            // |g′| ≥ 2λ_lo·min|(O − C)·S′_τ| on the true side (O′ = λS′).
+            referenceRate = multiplyExact(
+              curvature.lambda[0],
+              referenceRun.rate,
+              budget,
+            );
+            emittedRate = emittedRun.rate;
+            referenceWindow = referenceRun.window;
+            emittedWindow = emittedRun.window;
+            let speedSquared = zero;
+            for (const axis of derivatives[bEnd.leaf]!) {
+              const low = multiplyExact(axis[0]!, axis[0]!, budget);
+              const high = multiplyExact(axis[1]!, axis[1]!, budget);
+              speedSquared = addExact(
+                speedSquared,
+                compareExact(low, high, budget) >= 0 ? low : high,
+                budget,
+              );
+            }
+            const root = squareRootUpper(speedSquared);
+            if (!root) return fail(WINDOW, J2_MESSAGES.root, true);
+            speed = multiplyExact(root, width, budget);
+          }
+          if (!positive(referenceRate) || !positive(emittedRate))
+            return fail(
+              CLASSIFICATION,
+              "The monotone rate about the implicit circle is not proved positive (T°1).",
+            );
+          const shift = familyShift(emittedRate);
+          const emittedRoot: ExactRange = [
+            subtractExact(stored[0], shift, budget),
+            addExact(stored[1], shift, budget),
+          ];
+          // ε_B at the emitted roots: the owner's Q4-E1 local bound on the
+          // vertex-anchored window reaching the far emitted root bound
+          // (capped by ε; the leaf-wide ε without metadata, or on a line).
+          let witnessError = errorB;
+          if (!bLine) {
+            budget.operation(LOCAL_ERROR_PRECHARGE);
+            const reach =
+              bEnd.side === "end"
+                ? subtractExact(one, emittedRoot[0], budget)
+                : emittedRoot[1];
+            const local =
+              !negative(reach) && localBound(bEnd.leaf, bEnd.side, reach);
+            if (local) witnessError = local;
+          }
+          // (T°3) |f(O_B(τ̂*))| ≤ φ = η(2R⁺ + η), η = ε_B(τ̂*) + |ρ_o − R| + w.
+          const eta = addExact(
+            addExact(witnessError, aData.gap, budget),
+            aFamily ? aFamily.width : zero,
+            budget,
+          );
+          const phi = multiplyExact(
+            eta,
+            addExact(multiplyExact(two, aReference[1], budget), eta, budget),
+            budget,
+          );
+          const delta = divideExact(
+            phi,
+            multiplyExact(two, referenceRate, budget),
+            budget,
+          );
+          const referenceRoot: ExactRange = [
+            subtractExact(stored[0], delta, budget),
+            addExact(stored[1], delta, budget),
+          ];
+          const strictlyWithin = (range: ExactRange, window: ExactRange) =>
+            compareExact(range[0], window[0], budget) > 0 &&
+            compareExact(range[1], window[1], budget) < 0 &&
+            positive(range[0]) &&
+            compareExact(range[1], one, budget) < 0;
+          if (
+            !strictlyWithin(referenceRoot, referenceWindow) ||
+            !strictlyWithin(emittedRoot, emittedWindow)
+          )
+            return fail(
+              WINDOW,
+              "A Lemma-T° root enclosure is not strictly inside the monotone window of the terminal leaf.",
+              true,
+            );
+          // (T°2) on a line's other monotone side: f excludes 0 there, or it
+          // holds the root of this line's OTHER-end trim against the same
+          // exact circle K (paired after every trim: a line meets a circle
+          // at most twice, so the retained segment meets K only at its ends).
+          if (bLine) {
+            const splits = [
+              [lineSplits.reference, aSquaredReference],
+              [lineSplits.emitted, rangeSquarePositive(radiusA)],
+            ] as const;
+            let paired = false;
+            for (const [split, circleSquared] of splits) {
+              if (!split?.rest) continue;
+              const box = (
+                split === lineSplits.reference
+                  ? referencePosition
+                  : emittedPosition
+              )(split.rest[0], split.rest[1]);
+              if (
+                !excludesZero(
+                  rangeSubtract(boxDistance(box, center), circleSquared),
+                )
+              )
+                paired = true;
+            }
+            if (paired)
+              linePairs.push({
+                leaf: bEnd.leaf,
+                side: bEnd.side,
+                piece: aArc.piece,
+                radius: aReference[0],
+                low: [lineSplits.reference?.low, lineSplits.emitted?.low],
+              });
+          }
+          referenceBox = referencePosition(referenceRoot[0], referenceRoot[1]);
+          emittedBox = emittedPosition(emittedRoot[0], emittedRoot[1]);
+          // Composition of B: the hull of both root enclosures.
+          const joint: ExactRange = [
+            minimum([referenceRoot[0], emittedRoot[0]]),
+            maximum([referenceRoot[1], emittedRoot[1]]),
+          ];
+          // Both roots are measured from the one emitted root τ̂_o ∈ stored:
+          // |τ̂_ρ − τ*| ≤ Δ + δ, so the removed-tail shift is M(δ + Δ) and
+          // |X̂ − X*| ≤ ε_B(τ̂) + M(δ + Δ).
+          bTail = multiplyExact(speed, addExact(delta, shift, budget), budget);
+          const displacement = addExact(errorB, bTail, budget);
+          rootDistance = addExact(witnessError, bTail, budget);
+          trimmedLeaves.add(bEnd.leaf);
+          if (bEnd.side === "start") {
+            trimStart[bEnd.leaf] = joint[1];
+            if (bLine) lineJointStart[bEnd.leaf] = displacement;
+            else correctionStart[bEnd.leaf] = bTail;
+          } else {
+            trimEnd[bEnd.leaf] = subtractExact(one, joint[0], budget);
+            if (bLine) lineJointEnd[bEnd.leaf] = displacement;
+            else correctionEnd[bEnd.leaf] = bTail;
+          }
+          bRootBounds = [down(referenceRoot[0]), up(referenceRoot[1])];
+        }
+        // (T°4) the cut on A: both root boxes seen from C_A strictly inside
+        // A's reference / emitted leaf wedges; the cut chord hulls both.
+        const referenceDirections = boxDirections(aArc, referenceBox!, center);
+        const emittedDirections = boxDirections(aArc, emittedBox!, center);
+        if (
+          !referenceDirections ||
+          !emittedDirections ||
+          !referenceDirections.every((direction) =>
+            strictlyInside(aArc, aWedges[1], direction),
+          ) ||
+          !emittedDirections.every((direction) =>
+            strictlyInside(aArc, aWedges[0], direction),
+          )
+        )
+          return fail(
+            WINDOW,
+            "The Lemma-T° cut is not proved strictly inside the implicit arc's terminal leaf.",
+            true,
+          );
+        const turnA = turnOf(aArc);
+        const cutLow = positive(
+          turnA(emittedDirections[0], referenceDirections[0]),
+        )
+          ? emittedDirections[0]
+          : referenceDirections[0];
+        const cutHigh = positive(
+          turnA(emittedDirections[1], referenceDirections[1]),
+        )
+          ? referenceDirections[1]
+          : emittedDirections[1];
+        // |dir X̂ − dir X*| ≤ |X̂ − X*| / min(|X̂ − C_A|, |X* − C_A|): the
+        // radial projection onto the smaller sphere is 1-Lipschitz, with
+        // |X̂ − C_A| ≥ ρ_lo (emitted circle) and |X* − C_A| = R_A.
+        const nearest = minimum([radiusRange(aArc, aFamily)[0], aReference[0]]);
+        if (!positive(nearest)) return fail(WINDOW, J2_MESSAGES.root, true);
+        const aCut = {
+          chord: divideExact(
+            multiplyExact(aReference[1], rootDistance, budget),
+            nearest,
+            budget,
+          ),
+          wedge: [cutLow, cutHigh] as const,
+        };
+        // Commit: cuts, families, the record.
+        for (const [end, cut] of [
+          [aEnd, aCut],
+          [bEnd, bCut],
+        ] as const) {
+          if (!cut) continue;
+          trimmedLeaves.add(end.leaf);
+          const entry = seedCuts.get(end.leaf) ?? {};
+          entry[end.side] = cut;
+          seedCuts.set(end.leaf, entry);
+        }
+        const cutOf = (end: Terminal) =>
+          end === aEnd
+            ? up(aCut.chord)
+            : bCut && end === bEnd
+              ? up(bCut.chord)
+              : 0;
+        seedTrimReports.push({
+          kind: "arc-trim",
+          jointIndex: declaration.jointIndex,
+          first: firstEnd.leaf,
+          second: secondEnd.leaf,
+          circle: implicit === 0 ? "first" : "second",
+          ...(bRootBounds && implicit === 0
+            ? { secondRootBounds: bRootBounds }
+            : {}),
+          ...(bRootBounds && implicit === 1
+            ? { firstRootBounds: bRootBounds }
+            : {}),
+          cut: [cutOf(firstEnd), cutOf(secondEnd)],
+          tail: up(bTail),
+        });
+        return null;
+      };
+      const tries: (0 | 1)[] = [];
+      if (seedLeaves.has(firstEnd.leaf)) tries.push(0);
+      if (seedLeaves.has(secondEnd.leaf)) tries.push(1);
+      let first: Failure | null = null;
+      for (const implicit of tries) {
+        const failure = attempt(implicit);
+        if (!failure) return null;
+        first ??= failure;
+      }
+      return first;
+    };
+    // Review R12 (option c), before any trim: the radius family of every
+    // seed arc whose natural START is a trim, from that trim's stored root
+    // bounds on the arc itself (angles; binary64 cos/sin one ulp outward),
+    // so every Lemma-T° test at either end runs on the whole family.
+    for (const arc of seedArcs.values()) {
+      if (arc.kind !== "arc" || arc.start?.kind !== "trim") continue;
+      const piece = general.pieces[arc.piece]!;
+      const jointIndex = piece.reversed
+        ? arc.piece
+        : (arc.piece - 1 + pieceCount) % pieceCount;
+      const declaration = general.trims.find(
+        (trim) => trim.jointIndex === jointIndex,
+      );
+      // Meter A4: a family that cannot be computed fails closed (never a
+      // silent zero-width family at a trimmed start).
+      const noFamily = () =>
+        uncertain(
+          "arc-tube-error-unproven",
+          `Seed arc ${arc.piece}: the review-R12 radius family of its trimmed start is not computable (a binary64 bound overflows).`,
+          arc.leaves[0],
+          arc.leaves.at(-1),
+        );
+      if (!declaration) return noFamily();
+      // The arc is the traversal-first side iff it exits into this joint.
+      const bounds =
+        jointIndex === arc.piece
+          ? declaration.firstParameterBounds
+          : declaration.secondParameterBounds;
+      const corners = bounds.map((angle) => [
+        arc.centerValue[0] + arc.radiusValue * Math.cos(angle),
+        arc.centerValue[1] + arc.radiusValue * Math.sin(angle),
+      ]);
+      if (!corners.flat().every(Number.isFinite)) return noFamily();
+      const box: ExactRange[] = [];
+      for (const axis of [0, 1] as const) {
+        const values = corners.map((corner) => corner[axis]!);
+        const low = nextBinary64(Math.min(...values), "down", budget);
+        const high = nextBinary64(Math.max(...values), "up", budget);
+        if (!Number.isFinite(low) || !Number.isFinite(high)) return noFamily();
+        box.push([exactFromNumber(low, budget), exactFromNumber(high, budget)]);
+      }
+      const family = seedFamily(arc, box);
+      if (!family) return noFamily();
+      arc.family = family;
     }
     for (const declaration of general.trims) {
       budget.operation(64);
@@ -2377,7 +4817,11 @@ function certifyChain(
           );
       }
       const firstIsLine = lineData.has(firstEnd.leaf);
-      const graph = !firstIsLine && !lineData.has(secondEnd.leaf);
+      // T08b-f Lemma T°: a seed-arc terminal on either side (own precharge).
+      const seeded =
+        seedLeaves.has(firstEnd.leaf) || seedLeaves.has(secondEnd.leaf);
+      const graph = !seeded && !firstIsLine && !lineData.has(secondEnd.leaf);
+      if (seeded) budget.operation(ARC_TRIM_PRECHARGE);
       // S2 cubic↔cubic: one fixed precharge before H2 or any conversion.
       if (graph) budget.operation(GRAPH_TRIM_PRECHARGE);
       // H2 gate: sgn(d)·cross(u_in, u_out) > 0 on exact source tangents.
@@ -2394,6 +4838,11 @@ function certifyChain(
           "trim-side-unproven",
           "The exact source-tangent turn is not concave toward the offset side.",
         );
+      if (seeded) {
+        const failure = seedTrim(declaration, firstEnd, secondEnd, fail);
+        if (failure) return failure;
+        continue;
+      }
       if (graph) {
         const failure = graphTrim(declaration, firstEnd, secondEnd, fail);
         if (failure) return failure;
@@ -2590,6 +5039,37 @@ function certifyChain(
         );
     }
 
+    // T°2 pairs (T08b-f): each line with an unexcluded other side must be
+    // trimmed at BOTH ends against the same seed arc's exact circle K, the
+    // two brackets on opposite sides of the foot (reference and emitted).
+    for (const pair of linePairs) {
+      const partner = linePairs.find(
+        (other) =>
+          other.leaf === pair.leaf &&
+          other.side !== pair.side &&
+          other.piece === pair.piece &&
+          compareExact(other.radius, pair.radius, budget) === 0,
+      );
+      const opposite =
+        partner &&
+        pair.low.every(
+          (low, index) =>
+            low === undefined ||
+            partner.low[index] === undefined ||
+            low !== partner.low[index],
+        );
+      if (!opposite) {
+        const [firstLeaf, secondLeaf] = [pair.leaf, pair.leaf];
+        return {
+          ...uncertain(
+            "trim-classification-unproven",
+            "A Lemma-T° line meets the implicit circle on its other monotone side, and that side is not the root of its other-end trim against the same circle (T°2).",
+            firstLeaf,
+            secondLeaf,
+          ),
+        };
+      }
+    }
     /**
      * One F1 arc (header T08b-e): admission, the R1 split, Lemma A ε (strict,
      * R3), the arc-entry/exit cones (Lemma E, R7), the bridge gates (E4′,
@@ -2713,6 +5193,7 @@ function certifyChain(
 
       // End bounds π ≥ |A′ − A|, |B′ − B| (T08b-c local split, capped by ε).
       const endBound = (end: Terminal) =>
+        seedEndOf(end)?.bound ??
         lineData.get(end.leaf)?.endErrors[end.side === "end" ? 1 : 0] ??
         localBound(end.leaf, end.side, null) ??
         errors[end.leaf]!;
@@ -2788,6 +5269,7 @@ function certifyChain(
       const entryCone = cone(a);
       const exitCone = cone(b);
       const boxAlong = (end: Terminal, e: ExactPoint) => {
+        if (seedLeaves.has(end.leaf)) return seedReferenceAlong(end, e);
         const signed = end.reversed ? negated(e) : e;
         const box = derivatives[end.leaf]!;
         const corner: ExactPoint = [
@@ -2797,6 +5279,8 @@ function certifyChain(
         return dot(signed, corner);
       };
       const insideCone = (end: Terminal, e: ExactPoint) => {
+        // T08b-f: a seed leaf's K1-wedge (emitted and reference wedges).
+        if (seedLeaves.has(end.leaf)) return seedInsideCone(end, e);
         const signed = end.reversed ? negated(e) : e;
         return (
           hodographs[end.leaf]!.every((step) => positive(dot(signed, step))) &&
@@ -2845,9 +5329,76 @@ function certifyChain(
             exitLeaf,
           );
       }
+      // T08b-f Lemma W: next to a seed arc the two never-drawn connectors
+      // are replaced by ONE segment between the consumer ends, rationalized
+      // on the shared pole (review R4); steep in the arc-entry/-exit cone.
+      const seedJunction = (
+        terminalEnd: Terminal,
+        entering: boolean,
+      ): "vertical" | "steep" | Failure | undefined => {
+        const seed = seedLeaves.get(terminalEnd.leaf);
+        if (!seed) return undefined;
+        const pole = entering ? start : end;
+        const cone_ = entering ? entryCone : exitCone;
+        const own: readonly [ExactPoint, ExactFraction] = [
+          seed.arc.center,
+          seed.arc.radius,
+        ];
+        const arc_: readonly [ExactPoint, ExactFraction] = [center, radius];
+        const seedSlopes = wedgeSlopes(
+          seed.arc.sigma,
+          terminalEnd.reversed,
+          seedWedges(seed)[0],
+          cone_,
+        );
+        const arcWedge: readonly [ExactPoint, ExactPoint] = entering
+          ? [a, split ?? b]
+          : [split ?? a, b];
+        const arcSlopes = wedgeSlopes(sigma, false, arcWedge, cone_);
+        const kind =
+          seedSlopes &&
+          arcSlopes &&
+          junction(
+            pole,
+            entering ? [own, arc_] : [arc_, own],
+            cone_,
+            entering ? [seedSlopes, arcSlopes] : [arcSlopes, seedSlopes],
+          );
+        if (!kind || (!kind.radial && seed.arc.start?.kind === "trim"))
+          return coneFailure(
+            `the realization segment between the seed arc and the arc ${entering ? "entry" : "exit"} is not proved steep (Lemma W).`,
+            entering ? firstEnd.leaf : exitLeaf,
+            entering ? entryLeaf : secondEnd.leaf,
+          );
+        if (!kind.radial) {
+          seed.arc.nonRadial = true;
+          const far = seedPointBox(center, radius, entering ? a : b);
+          if (!far)
+            return coneFailure(
+              J2_MESSAGES.root,
+              terminalEnd.leaf,
+              terminalEnd.leaf,
+            );
+          seedHull(terminalEnd.leaf, terminalEnd.side, far);
+        }
+        return kind.kind;
+      };
+      const entryRealization = seedJunction(firstEnd, true);
+      if (typeof entryRealization === "object") return entryRealization;
+      const exitRealization = seedJunction(secondEnd, false);
+      if (typeof exitRealization === "object") return exitRealization;
 
       // G1 [TECH E4]: tan α = |w·h|/|w×h| at each end (w×h ≠ 0 by the cones).
       const control = (end: Terminal, entering: boolean) => {
+        const seedEnd = seedEndOf(end);
+        if (seedEnd) {
+          // The seed arc's traversal tangent at its emitted end direction.
+          const natural =
+            seedLeaves.get(end.leaf)!.arc.sigma > 0
+              ? rotate(seedEnd.relative)
+              : negated(rotate(seedEnd.relative));
+          return end.reversed ? negated(natural) : natural;
+        }
         const steps = hodographs[end.leaf]!;
         const natural = entering === end.reversed ? steps[2]! : steps[0]!;
         return end.reversed ? negated(natural) : natural;
@@ -2884,6 +5435,7 @@ function certifyChain(
         second: entryLeaf,
         direction: nearest(entryCone),
         tangentDeviation: deviation(a, control(firstEnd, false)),
+        ...(entryRealization ? { realization: entryRealization } : {}),
       });
       if (split)
         arcReports.push({
@@ -2901,6 +5453,7 @@ function certifyChain(
         direction: nearest(exitCone),
         tangentDeviation: deviation(b, control(secondEnd, true)),
         bridge: gapZero ? 0 : up(bridge),
+        ...(exitRealization ? { realization: exitRealization } : {}),
       });
       arcRecords.push({
         jointIndex: index,
@@ -2966,6 +5519,53 @@ function certifyChain(
       ) >= 0
     )
       return leafFailure("retained domain not proved nonempty");
+    const seed = seedLeaves.get(index);
+    if (seed) {
+      // T08b-f: ε (Lemma A-R) + vertex tails / correction paths + Lemma-T°
+      // cut chords + the R12 family width, strictly below τ; every seed
+      // leaf reports displacementBound = τ (its collapsed connectors and
+      // step need the η reserve, T08b-e R3).
+      const cuts = seedCuts.get(index);
+      const oriented = (u: ExactPoint, v: ExactPoint) => {
+        const value = crossExact(u, v, budget);
+        return seed.arc.sigma > 0 ? value : negateExact(value, budget);
+      };
+      if (
+        seed.stepInside &&
+        [startTrim, endTrim].some(
+          (fraction) => fraction && compareExact(fraction, half, budget) >= 0,
+        )
+      )
+        return leafFailure(
+          "retained domain does not keep the reference step inside the leaf",
+        );
+      if (
+        cuts?.start &&
+        cuts.end &&
+        !positive(oriented(cuts.start.wedge[1], cuts.end.wedge[0]))
+      )
+        return leafFailure(
+          "retained domain not proved nonempty between the two arc cuts",
+        );
+      let star = addExact(errors[index]!, seed.arc.family.width, budget);
+      for (const correction of [
+        correctionStart[index],
+        correctionEnd[index],
+        cuts?.start?.chord,
+        cuts?.end?.chord,
+      ])
+        if (correction) star = addExact(star, correction, budget);
+      if (compareExact(star, tolerance, budget) >= 0)
+        return leafFailure(
+          "corrected base error is not strictly below the modeling tolerance on a seed-arc leaf",
+        );
+      let radius = addExact(errors[index]!, seed.arc.family.width, budget);
+      if (inflation[index])
+        radius = addExact(radius, inflation[index]!, budget);
+      stars.push(star);
+      radii.push(radius);
+      continue;
+    }
     const composed = () => {
       let sum = errors[index]!;
       for (const correction of [correctionStart[index], correctionEnd[index]])
@@ -3088,17 +5688,77 @@ function certifyChain(
   // K3: exact hull clearance of every non-join pair.
   // Piece path: explicit adjacency (intra-piece natural joins, trims, wrap,
   // vertex pairs, arc-entry/knot/exit; never an arc's (P, Q) leaf pair).
+  // T08b-f seed leaves: wedge items (with Lemma-W far-end hulls), their
+  // natural knots and the F7 polar-graph exemption (review R9: the (first,
+  // last) pair is still checked when a non-radial realization segment is
+  // attached and the retained sweep is at least π).
+  const seedWedgeItems = new Map<number, ArcWedge>();
+  const seedKnots: TubeChainSeedKnotJoin[] = [];
+  const exempt: string[] = [];
+  for (const arc of seedArcs.values()) {
+    const leaves = arc.leaves;
+    for (const [position, leaf] of leaves.entries()) {
+      const seed = seedLeaves.get(leaf)!;
+      const hulls = seedHulls.get(leaf);
+      seedWedgeItems.set(leaf, {
+        kind: "arc",
+        jointIndex: -1,
+        center: arc.center,
+        radius: arc.radius,
+        sigma: arc.sigma,
+        from: arc.emitted[seed.index]!,
+        to: arc.emitted[seed.index + 1]!,
+        ...(seed.startEnd && seed.startEnd.kind !== "trim"
+          ? { start: seed.startEnd.pole }
+          : {}),
+        ...(seed.endEnd && seed.endEnd.kind !== "trim"
+          ? { end: seed.endEnd.pole }
+          : {}),
+        ...(hulls?.start ? { startHull: hulls.start } : {}),
+        ...(hulls?.end ? { endHull: hulls.end } : {}),
+      });
+      if (position > 0)
+        seedKnots.push({
+          kind: "seed-arc-knot",
+          piece: arc.piece,
+          first: leaves[position - 1]!,
+          second: leaf,
+        });
+    }
+    if (arc.kind === "circle")
+      seedKnots.push({
+        kind: "seed-arc-knot",
+        piece: arc.piece,
+        first: leaves.at(-1)!,
+        second: leaves[0]!,
+      });
+    const from = arc.emitted[seedLeaves.get(leaves[0]!)!.index]!;
+    const to = arc.emitted[seedLeaves.get(leaves.at(-1)!)!.index + 1]!;
+    const turn = crossExact(from, to, budget);
+    const wide =
+      arc.kind === "arc" &&
+      arc.nonRadial &&
+      !positive(arc.sigma > 0 ? turn : negateExact(turn, budget));
+    for (let i = 0; i < leaves.length; i += 1)
+      for (let j = i + 1; j < leaves.length; j += 1)
+        if (!(wide && i === 0 && j === leaves.length - 1))
+          exempt.push(`${leaves[i]!}:${leaves[j]!}`);
+  }
   const adjacency =
     general &&
-    new Set(
-      [
+    new Set([
+      ...[
         ...joins,
-        ...[...trimReports, ...vertexReports, ...arcReports].map((join) => [
-          join.first,
-          join.second,
-        ]),
+        ...[
+          ...trimReports,
+          ...vertexReports,
+          ...arcReports,
+          ...seedTrimReports,
+          ...seedKnots,
+        ].map((join) => [join.first, join.second]),
       ].map(([a, b]) => `${Math.min(a!, b!)}:${Math.max(a!, b!)}`),
-    );
+      ...exempt,
+    ]);
   const isJoin = (first: number, second: number) =>
     adjacency
       ? adjacency.has(`${first}:${second}`)
@@ -3168,6 +5828,9 @@ function certifyChain(
         ...[wedge.start, wedge.end].flatMap((point) =>
           point ? [point[axis]] : [],
         ),
+        ...[wedge.startHull, wedge.endHull].flatMap((box) =>
+          box ? [box[axis]![0], box[axis]![1]] : [],
+        ),
       ];
       return [minimum(values), maximum(values)] as const;
     });
@@ -3197,8 +5860,20 @@ function certifyChain(
       sigma: wedge.sigma,
     };
     return [
-      { ...base, from: wedge.from, to: direction, start: wedge.start },
-      { ...base, from: direction, to: wedge.to, end: wedge.end },
+      {
+        ...base,
+        from: wedge.from,
+        to: direction,
+        start: wedge.start,
+        startHull: wedge.startHull,
+      },
+      {
+        ...base,
+        from: direction,
+        to: wedge.to,
+        end: wedge.end,
+        endHull: wedge.endHull,
+      },
     ] as const;
   };
   /** Arc attribution of a K3 pair: its arc leaves' arcs and (P, Q) pairs. */
@@ -3217,7 +5892,9 @@ function certifyChain(
   let maxSplits = 0;
   const total = count + arcLeaves.length;
   const itemOf = (leaf: number): K3Item =>
-    leaf < count ? poles[leaf]! : arcLeaves[leaf - count]!;
+    leaf < count
+      ? (seedWedgeItems.get(leaf) ?? poles[leaf]!)
+      : arcLeaves[leaf - count]!;
   // F9 (T08b-f0): each leaf's top-level exact box once per attempt, charged
   // before its work; the bisection's pops read it (pure memoization), and
   // its r-inflation [lo − r, hi + r] per axis feeds the broad phase. A leaf
@@ -3388,15 +6065,17 @@ function certifyChain(
   const up = (value: ExactFraction) => outwardExactNumber(value, "up", budget);
   const leaves = tubes.map((tube, index) => {
     const unchanged = (value: ExactFraction) =>
-      value === errors[index] && !lineData.has(index)
+      value === errors[index] && !lineData.has(index) && !seedLeaves.has(index)
         ? tube.certifiedError
         : up(value);
     const baseErrorStar = unchanged(stars[index]!);
     return {
       baseErrorStar,
       // τ on convex-END leaves (arc reserve), graph-trim leaves (glue
-      // reserve) and leaves with a declared-vertex reserve at EITHER end.
+      // reserve), leaves with a declared-vertex reserve at EITHER end and
+      // every seed-arc leaf (T08b-f).
       displacementBound:
+        !seedLeaves.has(index) &&
         arcEnd[index] === undefined &&
         !graphSides.has(index) &&
         reserveStart[index] !== true &&
@@ -3451,6 +6130,31 @@ function certifyChain(
   );
   // Trim records were bounded outward in their own metered step.
   certifiedJoins.push(...trimReports, ...vertexReports, ...arcReports);
+  // T08b-f seed records (charged before they are built) and joins.
+  const seedRecords: TubeChainSeedArcRecord[] = [];
+  if (seedArcs.size > 0) {
+    budget.operation(8 * seedArcs.size + 2 * seedLeaves.size);
+    certifiedJoins.push(...seedTrimReports, ...seedKnots);
+    for (const arc of seedArcs.values()) {
+      const connector = (end: SeedEnd | undefined) =>
+        end && !end.removed && end.kind !== "trim" ? up(end.connector) : 0;
+      seedRecords.push({
+        piece: arc.piece,
+        kind: arc.kind,
+        leaves: [...arc.leaves],
+        center: [arc.centerValue[0], arc.centerValue[1]],
+        radius: arc.radiusValue,
+        radiusFamily: [arc.family.range[0], arc.family.range[1]],
+        epsilon: arc.leaves.map((leaf) =>
+          up(addExact(errors[leaf]!, arc.family.width, budget)),
+        ),
+        step: up(arc.step),
+        radialGaps: [up(arc.gaps[0]), up(arc.gaps[1])],
+        connectors: [connector(arc.start), connector(arc.end)],
+        removed: [arc.removed[0], arc.removed[1]],
+      });
+    }
+  }
   // Every declared arc produced its record and its one entry/exit join pair
   // (math review F2; uncharged). A skipped arc fails closed here.
   if (general) {
@@ -3471,6 +6175,37 @@ function certifyChain(
         "invalid-cubic-tube-chain",
         "A declared arc has no certified record or join: every declared arc needs exactly one.",
       );
+    // T08b-f (F2-style, uncharged): every seed piece has exactly one record,
+    // and every declared adjacency is covered by exactly one trim, vertex
+    // or arc join.
+    if (general.partitions.size > 0) {
+      const pieces = [...general.partitions.keys()].sort((x, y) => x - y);
+      const recorded = seedRecords.map((record) => record.piece);
+      const adjacencyCount =
+        general.pieces.length === 1 && general.pieces[0]!.kind === "circle"
+          ? 0
+          : closed
+            ? general.pieces.length
+            : general.pieces.length - 1;
+      const covered = [
+        ...trimReports,
+        ...seedTrimReports,
+        ...vertexReports,
+        ...arcReports.filter((join) => join.kind === "arc-entry"),
+      ]
+        .map((join) => join.jointIndex)
+        .sort((x, y) => x - y);
+      if (
+        recorded.length !== pieces.length ||
+        recorded.some((piece, position) => piece !== pieces[position]) ||
+        covered.length !== adjacencyCount ||
+        covered.some((jointIndex, position) => jointIndex !== position)
+      )
+        return uncertain(
+          "invalid-cubic-tube-chain",
+          "A seed-arc record or a declared adjacency is missing or repeated: every seed piece and every adjacency needs exactly one.",
+        );
+    }
   }
   return {
     kind: "verified",
@@ -3481,6 +6216,7 @@ function certifyChain(
       clearedPairs,
       maxSplits,
       ...(arcRecords.length > 0 ? { arcs: arcRecords } : {}),
+      ...(seedRecords.length > 0 ? { seedArcs: seedRecords } : {}),
     },
   };
 }
@@ -3544,8 +6280,14 @@ function certifyPieceChain(
   if (!Number.isFinite(distance))
     return invalidPieceChain("The chain distance must be finite.");
   // One index space (review R5): every declared adjacency is covered exactly
-  // once by a trim, a vertex or an arc; each list strictly increasing.
-  const adjacencies = closed ? pieces.length : pieces.length - 1;
+  // once by a trim, a vertex or an arc; each list strictly increasing. A
+  // lone circle closes intrinsically (T08b-f [TECH] F11): no adjacency.
+  const intrinsicCircle = pieces.length === 1 && pieces[0]!.kind === "circle";
+  const adjacencies = intrinsicCircle
+    ? 0
+    : closed
+      ? pieces.length
+      : pieces.length - 1;
   const declaredOnly = vertices.length === 0 && arcs.length === 0;
   if (trims.length + vertices.length + arcs.length !== adjacencies)
     return invalidPieceChain(
@@ -3595,12 +6337,46 @@ function certifyPieceChain(
   const lines: (NeutralLineTube | undefined)[] = [];
   const firstLeaf: number[] = [];
   const pieceOf: number[] = [];
+  const sizes: number[] = [];
+  const seeds: (SeedLeafRef | undefined)[] = [];
+  const partitions = new Map<number, SeedPartition>();
   for (const [pieceIndex, piece] of pieces.entries()) {
     firstLeaf.push(tubes.length);
+    const before = tubes.length;
     if (piece.kind === "line") {
       tubes.push(undefined);
       lines.push(piece.tube);
+      seeds.push(undefined);
       pieceOf.push(pieceIndex);
+      sizes.push(1);
+      continue;
+    }
+    if (piece.kind === "arc" || piece.kind === "circle") {
+      // T08b-f: precharged before the partition is chosen or data is read.
+      budget.operation(
+        piece.kind === "arc" ? ARC_SEED_PRECHARGE : CIRCLE_SEED_PRECHARGE,
+      );
+      // The arcs of a two-piece closed chain take at least two leaves.
+      const partition = seedPartition(
+        piece,
+        closed && pieces.length === 2 ? 2 : 1,
+      );
+      if (typeof partition === "string")
+        return partition === "invalid"
+          ? invalidPieceChain(`Piece ${pieceIndex}: invalid seed-arc tube.`)
+          : uncertain(
+              "arc-tube-partition-unproven",
+              `Seed arc ${pieceIndex}: ${partition}.`,
+            );
+      partitions.set(pieceIndex, partition);
+      const [head, tail] = partition.removed;
+      for (let leaf = head; leaf < partition.count - tail; leaf += 1) {
+        tubes.push(undefined);
+        lines.push(undefined);
+        seeds.push({ piece: pieceIndex, leaf });
+        pieceOf.push(pieceIndex);
+      }
+      sizes.push(tubes.length - before);
       continue;
     }
     if (piece.kind !== "cubic" || piece.tubes.length === 0)
@@ -3609,19 +6385,95 @@ function certifyPieceChain(
     for (const tube of piece.tubes) {
       tubes.push(tube);
       lines.push(undefined);
+      seeds.push(undefined);
       pieceOf.push(pieceIndex);
     }
+    sizes.push(piece.tubes.length);
   }
   return certifyChain(
     {
       modelingTolerance,
       closed,
-      // Line leaves have no cubic tube; the core reads them through `lines`.
+      // Line and seed leaves have no cubic tube; the core reads them
+      // through `lines` / `seeds`.
       tubes: tubes as readonly NeutralCubicTube[],
     },
     budget,
-    { distance, pieces, trims, vertices, arcs, firstLeaf, pieceOf, lines },
+    {
+      distance,
+      pieces,
+      trims,
+      vertices,
+      arcs,
+      firstLeaf,
+      pieceOf,
+      lines,
+      sizes,
+      seeds,
+      partitions,
+    },
   );
+}
+
+/** The seed tube of an arc or circle piece (T08b-f); only called on those. */
+function seedTubeOf(piece: TubeChainPiece): NeutralArcTube & NeutralCircleTube {
+  return (piece as { readonly tube: unknown }).tube as NeutralArcTube &
+    NeutralCircleTube;
+}
+
+/**
+ * The partition of one seed piece (T08b-f), recomputed from its binary64
+ * data by the shared rule-B′ helper (review A6: nothing carried is trusted;
+ * the core re-proves every leaf). Bounded float and BigInt work covered by
+ * the piece's precharge. "invalid" on malformed data, else a failure reason.
+ */
+function seedPartition(
+  piece: Extract<TubeChainPiece, { kind: "arc" | "circle" }>,
+  minimumLeaves: 1 | 2,
+): SeedPartition | string {
+  const tube = piece.tube as Partial<NeutralArcTube & NeutralCircleTube>;
+  if (piece.kind === "circle")
+    return piece.reversed === false &&
+      finitePoint(tube.center) &&
+      [tube.radius, tube.sourceRadius, tube.distance].every(Number.isFinite)
+      ? {
+          kind: "circle",
+          splits: CIRCLE_DIRECTIONS,
+          count: CIRCLE_DIRECTIONS.length,
+          removed: [0, 0],
+        }
+      : "invalid";
+  const arc = piece.tube;
+  if (
+    !finitePoint(arc.center) ||
+    !Array.isArray(arc.emitted) ||
+    !Array.isArray(arc.source) ||
+    ![...arc.emitted, ...arc.source].every(finitePoint) ||
+    ![arc.radius, arc.sourceRadius, arc.distance].every(Number.isFinite) ||
+    (arc.sweep !== "clockwise" && arc.sweep !== "counterClockwise")
+  )
+    return "invalid";
+  const splits = seedArcLeafSplits(
+    arc.center,
+    arc.emitted[0],
+    arc.emitted[1],
+    arc.sweep,
+    arc.source[0],
+    arc.source[1],
+    minimumLeaves,
+  );
+  if (!splits)
+    return "no rule-B′ partition of the arc is admitted (zero vector, full turn or no admitted bisector)";
+  const count = splits.length + 1;
+  const removed = arc.removed ?? [0, 0];
+  if (
+    !Array.isArray(removed) ||
+    removed.length !== 2 ||
+    !removed.every((value) => Number.isSafeInteger(value) && value >= 0) ||
+    removed[0] + removed[1] >= count
+  )
+    return "invalid";
+  return { kind: "arc", splits, count, removed: [removed[0], removed[1]] };
 }
 
 /**

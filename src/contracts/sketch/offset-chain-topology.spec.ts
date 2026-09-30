@@ -45,6 +45,7 @@ import type {
 } from "@/contracts/shared/ids";
 import type {
   SketchDefinition,
+  SketchPoint2D,
   SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
 import type { SketchConstraintToolId } from "@/core/sketch-constraints/definition";
@@ -56,6 +57,14 @@ import { solveCommittedConstraintDefinition } from "@/domain/editor/sketch-sessi
 import { applySolvedSketchToDefinition } from "@/domain/editor/sketch-session/definition-patches";
 import { lineSketchToolDefinition } from "@/core/sketch-tools/tools/line";
 import { splineSketchToolDefinition } from "@/core/sketch-tools/tools/spline";
+import { centerPointArcSketchToolDefinition } from "@/core/sketch-tools/tools/center-point-arc";
+import { circleSketchToolDefinition } from "@/core/sketch-tools/tools/circle";
+import { rectangleSketchToolDefinition } from "@/core/sketch-tools/tools/rectangle";
+import {
+  createSketchFilletMutation,
+  createSketchOffsetDerivationContribution,
+  createSketchSlotContribution,
+} from "@/domain/sketch-editing/operations";
 import { appendInferredSnapConstraints } from "@/domain/editor/sketch-session/tools";
 import {
   createSessionCommitFactories,
@@ -63,7 +72,10 @@ import {
 } from "@/domain/editor/sketch-session/internals";
 import { createDocumentSolverTolerances } from "@/contracts/solver/schema";
 import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
-import { canonicalArcSupport } from "@/contracts/sketch/canonical-arc-support";
+import {
+  canonicalArcSupport,
+  seedArcLeafSplits,
+} from "@/contracts/sketch/canonical-arc-support";
 import { extractDeclaredOffsetChainConnectivity } from "@/contracts/sketch/offset-chain-connectivity";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import {
@@ -74,7 +86,9 @@ import {
   convexArcMatrixRows,
   convexArcNativeRows,
   cornerMatrixRows,
+  createNativeArcOffsetHarness,
   createNativeOffsetChainHarness,
+  seedArcRows,
   positionalClosureSpline,
   splineLineShallowRows,
   splineSplineCornerRows,
@@ -83,6 +97,7 @@ import {
   type AcceptedPair,
   type Authored,
   type EndpointSnaps,
+  type NativeArcAuthoring,
   type NativeOffsetChainHarness,
   type NativeToolAuthoring,
   type Vector,
@@ -109,7 +124,10 @@ import {
 } from "@/contracts/sketch/offset-chain-topology";
 import {
   OFFSET_DIAGNOSTIC_CODES,
+  computeOffsetChain,
   offsetLinePoints,
+  offsetSeedCurveFromEntity,
+  scalePointFromCenter,
 } from "@/contracts/sketch/offset-geometry";
 import {
   reconstructSpline,
@@ -7458,3 +7476,1001 @@ const SL_TINY_STAGED: readonly (readonly [
   ["euclideanSteps", 10_000],
   ["euclideanSteps", 40_000],
 ];
+
+/**
+ * The T08b-f native arc authoring seam: the line, centre-point arc, spline,
+ * circle and rectangle tools with the session's endpoint-snap inference, the
+ * Fillet and Slot edit operations, constraint tool commits on entities and
+ * the native Offset tool's relationship contribution (review R8).
+ */
+function createNativeArcAuthoring(sketchId: string): NativeArcAuthoring {
+  const factoriesOf = (sequence: number) =>
+    createSessionCommitFactories(sequence, sketchId as never);
+  const endpointSnap = (pointId: SketchPointId, point: Vector) => ({
+    key: `endpoint:${pointId}`,
+    kind: "endpoint" as const,
+    point,
+    rawPointer: point,
+    distance: 0,
+    priority: 0,
+    sources: [{ kind: "localPoint" as const, pointId }],
+    preview: { label: "endpoint", glyph: "endpoint" as const },
+  });
+  const infer = (
+    previousDefinition: SketchDefinition,
+    activeTool: "line" | "spline" | "centerPointArc",
+    patch: Authored,
+    sequence: number,
+    start: Vector,
+    end: Vector,
+    snaps: EndpointSnaps,
+  ) =>
+    appendInferredSnapConstraints({
+      previousDefinition,
+      patch: patch as never,
+      activeTool: activeTool as never,
+      startSnap: snaps.start ? endpointSnap(snaps.start, start) : null,
+      endSnap: snaps.end ? endpointSnap(snaps.end, end) : null,
+      sequence,
+      createConstraintId: (name: string) =>
+        `constraint_${sequence}_${name}` as never,
+    }) as Authored;
+  return {
+    line: ({ previousDefinition, sequence, start, end, snaps }) =>
+      infer(
+        previousDefinition,
+        "line",
+        lineSketchToolDefinition.createCommitContribution({
+          sequence,
+          start,
+          end,
+          isConstruction: false,
+          factories: factoriesOf(sequence),
+        }) as Authored,
+        sequence,
+        start,
+        end,
+        snaps,
+      ),
+    arc: ({ previousDefinition, sequence, center, start, end, snaps }) =>
+      infer(
+        previousDefinition,
+        "centerPointArc",
+        centerPointArcSketchToolDefinition.createCommitContribution({
+          sequence,
+          points: [center, start, end],
+          isConstruction: false,
+          factories: factoriesOf(sequence),
+        } as never) as Authored,
+        sequence,
+        start,
+        end,
+        snaps,
+      ),
+    spline: ({ previousDefinition, sequence, points, snaps }) =>
+      infer(
+        previousDefinition,
+        "spline",
+        splineSketchToolDefinition.createCommitContribution({
+          sequence,
+          start: points[0]!,
+          end: points.at(-1)!,
+          points: points as [number, number][],
+          isConstruction: false,
+          factories: factoriesOf(sequence),
+        }) as Authored,
+        sequence,
+        points[0]!,
+        points.at(-1)!,
+        snaps,
+      ),
+    circle: ({ sequence, center, rim }) =>
+      circleSketchToolDefinition.createCommitContribution({
+        sequence,
+        start: center,
+        end: rim,
+        isConstruction: false,
+        factories: factoriesOf(sequence),
+      } as never) as Authored,
+    rectangle: ({ sequence, start, end }) =>
+      rectangleSketchToolDefinition.createCommitContribution({
+        sequence,
+        start,
+        end,
+        isConstruction: false,
+        factories: factoriesOf(sequence),
+      } as never) as Authored,
+    fillet: ({ definition, sequence, entityIds, radius }) => {
+      const result = createSketchFilletMutation({
+        definition,
+        entityIds,
+        radius,
+        sequence,
+        factories: factoriesOf(sequence),
+      } as never);
+      if (!result.valid || !result.definition)
+        throw new Error(`fillet: ${result.message}`);
+      return result.definition;
+    },
+    slot: ({ definition, sequence, lineId, width }) => {
+      const result = createSketchSlotContribution({
+        definition,
+        entityIds: [lineId],
+        width,
+        sequence,
+        factories: factoriesOf(sequence),
+      } as never);
+      if (!result.valid || !result.contribution)
+        throw new Error(`slot: ${result.message}`);
+      return result.contribution as Authored;
+    },
+    constraint: ({ definition, sequence, toolId, entityIds }) => {
+      const tool = toolId as SketchConstraintToolId;
+      const contribution = getSketchConstraintDefinition(
+        tool,
+      ).createCommitContribution({
+        sequence,
+        selectedTargets: entityIds.map((entityId) => {
+          const record = resolveSketchConstraintTarget(tool, definition, {
+            kind: "sketchEntity",
+            sketchId: sketchId as SketchId,
+            entityId,
+          });
+          if (!record) throw new Error(`${toolId} rejected ${entityId}`);
+          return record;
+        }),
+        pointer: null,
+        value: null,
+        annotationPlacement: null,
+        createConstraintId: (suffix) =>
+          `constraint_${sequence}_${suffix}` as const,
+        createDimensionId: (suffix) =>
+          `dimension_${sequence}_${suffix}` as const,
+      });
+      const constraints = contribution.constraints ?? [];
+      const dimensions = contribution.dimensions ?? [];
+      return {
+        ...definition,
+        constraintIds: [
+          ...definition.constraintIds,
+          ...constraints.map((constraint) => constraint.constraintId),
+        ],
+        constraints: [...definition.constraints, ...constraints],
+        dimensionIds: [
+          ...definition.dimensionIds,
+          ...dimensions.map((dimension) => dimension.dimensionId),
+        ],
+        dimensions: [...definition.dimensions, ...dimensions],
+      };
+    },
+    offset: ({ definition, sequence, entityIds, distance }) => {
+      const result = createSketchOffsetDerivationContribution({
+        definition,
+        entityIds,
+        distance: Math.abs(distance),
+        side: distance >= 0 ? "left" : "right",
+        sequence,
+        factories: factoriesOf(sequence),
+      } as never);
+      return result.valid && result.contribution
+        ? (result.contribution as never)
+        : null;
+    },
+  };
+}
+
+describe("T08b-f seed arcs: native line/arc chains through the SEL (Offset relationship, real query, owner and certifier)", () => {
+  const harness = createNativeArcOffsetHarness({
+    authoring: createNativeArcAuthoring("sketch_t08bf"),
+    modelingTolerance: 1e-3,
+    solveTolerances: SKETCH_DIRECT_EDIT_TOLERANCES,
+  });
+  const rows = seedArcRows();
+  const rowOf = (label: string) => {
+    const row = rows.find((item) => `${item.row} ${item.distance}` === label);
+    if (!row) throw new Error(`no row ${label}`);
+    return row;
+  };
+  const built = new Map<string, ReturnType<NativeArcOffsetHarnessAdapt>>();
+  type NativeArcOffsetHarnessAdapt = typeof harness.adapt;
+  const adapted = (label: string) => {
+    const cached = built.get(label);
+    if (cached) return cached;
+    const row = rowOf(label);
+    const result = harness.adapt(row.build(harness), row.distance);
+    built.set(label, result);
+    return result;
+  };
+  const declaredOf = (label: string) => {
+    const { declared } = adapted(label);
+    if (!declared.ok) throw new Error(`${declared.code}: ${declared.message}`);
+    return declared;
+  };
+  const run = (label: string) => {
+    const snapshots: ExactProofBudgetSnapshot[] = [];
+    const pairs: unknown[] = [];
+    const { query: recorded } = recordingRequests(query, (pair) =>
+      pairs.push(pair),
+    );
+    const result = certifyDeclaredOffsetChain(
+      declaredOf(label),
+      recorded,
+      createCertifiedCubicTubeChainWithBudgetObserverForTest((snapshot) =>
+        snapshots.push(snapshot),
+      ),
+    );
+    return { result, snapshots, pairs };
+  };
+  const certificateOf = (label: string) => {
+    const { result } = run(label);
+    if (!result.ok) throw new Error(`${result.code}: ${result.message}`);
+    return result;
+  };
+  const kinds = (certificate: OffsetChainTubeStabilityCertificate) => {
+    const counts: Record<string, number> = {};
+    for (const join of certificate.joins) {
+      const kind =
+        join.kind === "nonparallel-vertex"
+          ? `${join.kind}/${join.side}`
+          : join.kind;
+      counts[kind] = (counts[kind] ?? 0) + 1;
+    }
+    return counts;
+  };
+  const meterOf = (snapshot: ExactProofBudgetSnapshot) => ({
+    operations: snapshot.operations,
+    euclideanSteps: snapshot.euclideanSteps,
+    integerBits: Math.max(snapshot.maxStoredBits, snapshot.maxPreProductBits),
+  });
+
+  // D3 against legacy (design §5 as amended): every row legacy draws must
+  // verify; the legacy arc collapses fail as derived-offset-arc-collapse.
+  test.each(rows.map((row) => [row.row, row.distance, row] as const))(
+    "D3 %s d = %s: the certified verdict matches the legacy offset (verified where legacy draws, arc collapse where it collapses)",
+    (_label, distance, row) => {
+      const sketch = row.build(harness);
+      const pre = harness.solved(sketch.definition);
+      const position = (pointId: string) =>
+        pre.definition.points.find((point) => point.pointId === pointId)!
+          .position;
+      const legacy = computeOffsetChain({
+        curves: sketch.seeds.map(
+          (seed) =>
+            offsetSeedCurveFromEntity(
+              pre.definition.entities.find(
+                (entity) => entity.entityId === seed,
+              )!,
+              position as never,
+            )!,
+        ),
+        distance,
+      });
+      const { declared } = harness.adapt(sketch, distance);
+      if (!legacy.ok) {
+        expect(legacy.code).toBe(codes.arcCollapse);
+        expect(declared).toMatchObject({ ok: false, code: codes.arcCollapse });
+        return;
+      }
+      if (!declared.ok)
+        throw new Error(`${declared.code}: ${declared.message}`);
+      const result = certifyDeclaredOffsetChain(
+        declared,
+        query,
+        createCertifiedCubicTubeChain(),
+      );
+      if (!result.ok) throw new Error(`${result.code}: ${result.message}`);
+      // Every seed-arc record is the resolver's canonical support: centre
+      // bitwise the point-defined seed centre, radius hypot(start − centre).
+      for (const record of result.certificate.seedArcs ?? []) {
+        const piece = result.resolved.input.pieces[record.piece]!;
+        if (piece.kind === "circle") {
+          expect(record.radius).toBe(piece.radius);
+          continue;
+        }
+        if (piece.kind !== "arc") throw new Error("not a seed arc");
+        expect(record.center).toEqual(piece.center);
+        expect(record.radius).toBe(
+          Math.hypot(
+            piece.start[0] - piece.center[0],
+            piece.start[1] - piece.center[1],
+          ),
+        );
+        for (const value of record.epsilon) expect(value).toBeLessThan(1e-3);
+        expect(record.radiusFamily[0]).toBeLessThanOrEqual(record.radius);
+        expect(record.radiusFamily[1]).toBeGreaterThanOrEqual(record.radius);
+      }
+    },
+    60_000,
+  );
+
+  test.each([
+    [
+      "rounded rect 0.01",
+      {
+        "parallel-vertex": 2,
+        "nonparallel-vertex/convex": 6,
+        "seed-arc-knot": 4,
+      },
+    ],
+    [
+      "rounded rect -0.01",
+      {
+        "parallel-vertex": 2,
+        "nonparallel-vertex/concave": 6,
+        "seed-arc-knot": 4,
+      },
+    ],
+    ["slot 0.1", { "parallel-vertex": 4, "seed-arc-knot": 6 }],
+    ["circle 0.01", { "seed-arc-knot": 8 }],
+    ["two semicircles 0.01", { "parallel-vertex": 2, "seed-arc-knot": 6 }],
+    ["lens 0.01", { "arc-trim": 2, "seed-arc-knot": 2 }],
+    ["lens -0.01", { "arc-entry": 2, "arc-exit": 2, "seed-arc-knot": 2 }],
+    ["line-arc-line semicircle -0.1", { "arc-trim": 2, "seed-arc-knot": 3 }],
+    [
+      "line-arc-line semicircle 0.01",
+      { "arc-entry": 2, "arc-knot": 2, "arc-exit": 2, "seed-arc-knot": 3 },
+    ],
+    [
+      "line-arc-line semicircle long (R7) -2",
+      { "arc-trim": 2, "seed-arc-knot": 1 },
+    ],
+    ["half-disc 0.1", { "arc-trim": 2, "seed-arc-knot": 3 }],
+    [
+      "rect + 1 fillet 0.01",
+      {
+        trim: 3,
+        "parallel-vertex": 1,
+        "nonparallel-vertex/convex": 1,
+        "seed-arc-knot": 1,
+      },
+    ],
+    ["S-curve 0.01", { "parallel-vertex": 1, "seed-arc-knot": 2 }],
+  ] as const)("%s takes the design route: joins %j", (label, expected) => {
+    expect(kinds(certificateOf(label).certificate)).toEqual(expected);
+  });
+
+  test("the concave near-tangent arc vertices are absorbed first with no joint query ([TECH F6]); legacy-identical untrimmed ends S′, E′ are published at every unadopted end", () => {
+    const { result, pairs } = run("rounded rect -0.01");
+    if (!result.ok) throw new Error(result.message);
+    expect(pairs).toEqual([]);
+    const declared = declaredOf("rounded rect -0.01");
+    for (const [index, piece] of declared.pieces.entries()) {
+      if (piece.kind !== "arc") continue;
+      const source = declared.sources[index]!;
+      if (source.kind !== "arc") throw new Error("not an arc source");
+      const sigma = piece.sweepDirection === "counterClockwise" ? 1 : -1;
+      const shifted = source.sourceRadius - sigma * source.distance;
+      expect(piece.start).toEqual(
+        scalePointFromCenter(source.center, source.source[0], shifted),
+      );
+      expect(piece.end).toEqual(
+        scalePointFromCenter(source.center, source.source[1], shifted),
+      );
+    }
+  });
+
+  test("review R4: next to a seed arc every F1 junction is one rationalized realization segment, steep (W1/W2) on the lens and exactly vertical on the axis-aligned semicircle", () => {
+    const lens = certificateOf("lens -0.01").certificate;
+    const junctions = lens.joins.filter(
+      (join) => join.kind === "arc-entry" || join.kind === "arc-exit",
+    );
+    expect(
+      junctions.map((join) => "realization" in join && join.realization),
+    ).toEqual(["steep", "steep", "steep", "steep"]);
+    // Only the junctions next to the seed arc carry a realization segment.
+    const semicircle = certificateOf(
+      "line-arc-line semicircle 0.01",
+    ).certificate;
+    expect(
+      semicircle.joins.flatMap((join) =>
+        (join.kind === "arc-entry" || join.kind === "arc-exit") &&
+        join.realization
+          ? [[join.kind, join.realization]]
+          : [],
+      ),
+    ).toEqual([
+      ["arc-exit", "vertical"],
+      ["arc-entry", "vertical"],
+    ]);
+  });
+
+  test("review R12: a seed arc trimmed at its natural start certifies a radius family [ρ_o − w, ρ_o + w] with w > 0; untrimmed starts keep [ρ_o, ρ_o]", () => {
+    const trimmed = certificateOf("line-arc-line semicircle -0.1").certificate
+      .seedArcs![0]!;
+    expect(trimmed.radiusFamily[0]).toBeLessThan(trimmed.radius);
+    expect(trimmed.radiusFamily[1]).toBeGreaterThan(trimmed.radius);
+    const vertex = certificateOf("rounded rect 0.01").certificate.seedArcs!;
+    for (const record of vertex)
+      expect(record.radiusFamily).toEqual([record.radius, record.radius]);
+  });
+
+  test("review R7: a joint root beyond the terminal 45° leaf is proved within the arc on an inner leaf; the leaves before it are removed", () => {
+    const { result } = run("line-arc-line semicircle long (R7) -2");
+    if (!result.ok) throw new Error(result.message);
+    expect(result.certificate.seedArcs![0]).toMatchObject({ removed: [1, 1] });
+    const arc = result.resolved.input.pieces[1]!;
+    expect(
+      result.resolved.lineArcEndpoints.get(arc.seedEntityId),
+    ).toMatchObject({
+      removedLeaves: [1, 1],
+    });
+  });
+
+  test("review Q1 control: an asymmetric lens (flat cap centred (0, −3) over a deep four-leaf cap centred (0, 0.2)) at d = 0.45 trims deep on the EXPLICIT arc (removed [1, 1]); its removed leaves are proved off K and it verifies", () => {
+    const sketch = (() => {
+      const a = harness.arc(harness.empty(), [0, -3], [1, 0], [-1, 0]);
+      const b = harness.arc(a.definition, [0, 0.2], [-1, 0], [1, 0], {
+        start: a.end,
+        end: a.start,
+      });
+      return { definition: b.definition, seeds: [a.id, b.id] };
+    })();
+    const { declared } = harness.adapt(sketch, 0.45);
+    if (!declared.ok) throw new Error(`${declared.code}: ${declared.message}`);
+    const result = certifyDeclaredOffsetChain(
+      declared,
+      query,
+      createCertifiedCubicTubeChain(),
+    );
+    if (!result.ok) throw new Error(`${result.code}: ${result.message}`);
+    // Joint 0 (flat cap → deep cap): the flat cap is implicit ("first"),
+    // so the deep cap is the explicit side and carries the removal.
+    expect(
+      result.certificate.joins.flatMap((join) =>
+        join.kind === "arc-trim" ? [[join.jointIndex, join.circle]] : [],
+      ),
+    ).toEqual([
+      [0, "first"],
+      [1, "first"],
+    ]);
+    expect(
+      result.certificate.seedArcs!.map((record) => record.removed),
+    ).toEqual([
+      [0, 0],
+      [1, 1],
+    ]);
+  });
+
+  test("review R6: on a partially filleted rectangle the arc is the swap adopter of the line whose other end is a trim", () => {
+    const { result } = run("rect + 1 fillet 0.01");
+    if (!result.ok) throw new Error(result.message);
+    const pieces = result.resolved.input.pieces;
+    const arcIndex = pieces.findIndex((piece) => piece.kind === "arc");
+    const arc = pieces[arcIndex]!;
+    if (arc.kind !== "arc") throw new Error("no arc");
+    const neighbours = [
+      pieces[(arcIndex - 1 + pieces.length) % pieces.length]!,
+      pieces[(arcIndex + 1) % pieces.length]!,
+    ];
+    // At least one arc end IS a neighbouring line's own pole (adopted).
+    const poles = neighbours.flatMap((piece) =>
+      piece.kind === "lineSegment" ? [piece.start, piece.end] : [],
+    );
+    expect(
+      [arc.start, arc.end].some((end) =>
+        poles.some(
+          (pole) => Object.is(pole[0], end[0]) && Object.is(pole[1], end[1]),
+        ),
+      ),
+    ).toBe(true);
+    expect(arc.radius).toBe(
+      Math.hypot(arc.start[0] - arc.center[0], arc.start[1] - arc.center[1]),
+    );
+  });
+
+  test("review R9: next to a non-radial realization segment a seed arc of sweep ≥ π keeps its (first, last) leaf pair in K3", () => {
+    const { result } = run("D (300° arc + chord) -0.01");
+    if (!result.ok) throw new Error(result.message);
+    const record = result.certificate.seedArcs![0]!;
+    const pair = [record.leaves[0]!, record.leaves.at(-1)!];
+    expect(result.certificate.clearedPairs).toContainEqual(pair);
+    // Other intra-arc pairs stay exempt (F7).
+    expect(result.certificate.clearedPairs).not.toContainEqual([
+      record.leaves[0]!,
+      record.leaves[2]!,
+    ]);
+  });
+
+  test("a thin D (37° arc + chord, height 0.162) at d = 0.1 > height/2 has no inward offset: the certified path fails closed (no crossing on any arc leaf), where legacy draws an inverted, self-crossing loop", () => {
+    const row = rows.find((item) => item.row.startsWith("thin D"))!;
+    const sketch = row.build(harness);
+    const { declared } = harness.adapt(sketch, 0.1);
+    if (!declared.ok) throw new Error(declared.message);
+    expect(
+      certifyDeclaredOffsetChain(
+        declared,
+        query,
+        createCertifiedCubicTubeChain(),
+      ),
+    ).toMatchObject({
+      ok: false,
+      code: codes.splineJointUnsupported,
+      message: expect.stringContaining(
+        "no crossing on any seed-arc leaf of the joint (the offset curves do not meet there; the offset may be empty or the arc collapses)",
+      ),
+    });
+    const pre = harness.solved(sketch.definition);
+    const position = (pointId: string) =>
+      pre.definition.points.find((point) => point.pointId === pointId)!
+        .position;
+    const legacy = computeOffsetChain({
+      curves: sketch.seeds.map(
+        (seed) =>
+          offsetSeedCurveFromEntity(
+            pre.definition.entities.find((entity) => entity.entityId === seed)!,
+            position as never,
+          )!,
+      ),
+      distance: 0.1,
+    });
+    if (!legacy.ok) throw new Error("legacy no longer draws it");
+    // Legacy's offset arc ends BELOW its offset chord (y = 0.1): inverted.
+    const arc = legacy.segments.find((segment) => segment.kind === "arc")!;
+    expect(arc.kind === "arc" && arc.start[1]).toBeLessThan(0.1);
+  });
+
+  test("Lemma T° adversary (certifier input, not owner-reachable): a line bracket forged to straddle the chord's exact foot t₀ fails T°1 as a SIGN failure (never magnitude-tagged, so never flipped)", () => {
+    let captured: PieceTubeChainRequest | undefined;
+    const real = createCertifiedCubicTubeChain();
+    const port = {
+      openRequest: () => ({
+        certifyPieceChain: (request: PieceTubeChainRequest) => {
+          captured = request;
+          return real.certifyPieceChain(request);
+        },
+      }),
+    };
+    expect(
+      certifyDeclaredOffsetChain(declaredOf("half-disc 0.1"), query, port).ok,
+    ).toBe(true);
+    const request = captured!;
+    // The chord is piece 1 (natural t ∈ [0, 1]); its foot about C is t₀ = ½.
+    const trims = request.trims.map((trim) => {
+      const lineFirst = request.pieces[trim.jointIndex]!.kind === "line";
+      return lineFirst
+        ? { ...trim, firstParameterBounds: [0.4, 0.6] as const }
+        : { ...trim, secondParameterBounds: [0.4, 0.6] as const };
+    });
+    const result = real.certifyPieceChain({ ...request, trims });
+    expect(result).toMatchObject({
+      kind: "uncertain",
+      code: "trim-classification-unproven",
+    });
+    expect("magnitude" in result).toBe(false);
+  });
+
+  test("review R8: a state-driven arc (no offset relationship in the solve) is not a seed: its solved ends are not its point positions", () => {
+    const row = rowOf("lens 0.01");
+    const sketch = row.build(harness);
+    const pair = harness.solved(sketch.definition);
+    const connectivity = extractDeclaredOffsetChainConnectivity({
+      definition: pair.definition,
+      seedIds: sketch.seeds,
+    });
+    if (!connectivity.ok) throw new Error(connectivity.message);
+    expect(
+      declaredOffsetChainPieces({
+        definition: pair.definition,
+        solvedSnapshot: pair.solvedSnapshot,
+        connectivity,
+        distance: row.distance,
+        modelingTolerance: 1e-3,
+      }),
+    ).toMatchObject({ ok: false, code: codes.unsupportedSeed });
+  });
+
+  /** Distinct arbitrary first-order variations of every resolved piece. */
+  const variationsOf = (pieces: readonly OffsetChainPiece[]) =>
+    new Map<SketchEntityId, OffsetChainPieceVariation>(
+      pieces.map(
+        (piece, index): [SketchEntityId, OffsetChainPieceVariation] => {
+          const v = (k: number): SketchPoint2D => [
+            0.1 * index + 0.01 * k,
+            0.2 - 0.03 * k,
+          ];
+          return [
+            piece.seedEntityId,
+            piece.kind === "arc"
+              ? {
+                  kind: "arc",
+                  center: v(1),
+                  radius: 0.05 * index,
+                  start: v(2),
+                  end: v(3),
+                }
+              : { kind: "lineSegment", start: v(4), end: v(5) },
+          ];
+        },
+      ),
+    );
+  test("JVP (design §7): an arc end adopted from a line pole varies as the keeper line's own end; an F1 arc at a seed-arc end takes the seed arc's own end variation and its source point's centre variation", () => {
+    const adopted = certificateOf("rect + 1 fillet 0.01").resolved;
+    const pieces = adopted.input.pieces;
+    const variations = variationsOf(pieces);
+    const jvp = resolveOffsetChainTopologyJvp(
+      adopted.input,
+      adopted,
+      variations,
+    );
+    if (!jvp.ok) throw new Error(jvp.message);
+    let checked = 0;
+    for (const vertex of adopted.vertices) {
+      const index = vertex.jointIndex;
+      const next = (index + 1) % pieces.length;
+      const [keeperIndex, adopterIndex] =
+        vertex.keeper === "first" ? [index, next] : [next, index];
+      const adopter = pieces[adopterIndex]!;
+      const keeper = pieces[keeperIndex]!;
+      if (adopter.kind !== "arc" || keeper.kind !== "lineSegment") continue;
+      const keeperSide =
+        (vertex.keeper === "first") !== keeper.reversed ? "end" : "start";
+      const adopterSide =
+        (vertex.keeper === "first") === adopter.reversed ? "end" : "start";
+      expect(
+        jvp.lineArcEndpoints.get(adopter.seedEntityId)![adopterSide],
+      ).toEqual(
+        (
+          variations.get(keeper.seedEntityId) as {
+            start: SketchPoint2D;
+            end: SketchPoint2D;
+          }
+        )[keeperSide],
+      );
+      checked += 1;
+    }
+    expect(checked).toBeGreaterThan(0);
+
+    const f1 = certificateOf("line-arc-line semicircle 0.01").resolved;
+    const f1Variations = variationsOf(f1.input.pieces);
+    const centre: SketchPoint2D = [0.7, -0.3];
+    const sourcePoints = new Map<SketchPointId, SketchPoint2D>(
+      f1.input.vertices!.map((vertex) => [vertex.first.pointId!, centre]),
+    );
+    const f1Jvp = resolveOffsetChainTopologyJvp(
+      f1.input,
+      f1,
+      f1Variations,
+      sourcePoints,
+    );
+    if (!f1Jvp.ok) throw new Error(f1Jvp.message);
+    const seedArc = f1.input.pieces[1]!;
+    const seedVariation = f1Variations.get(seedArc.seedEntityId) as {
+      start: SketchPoint2D;
+      end: SketchPoint2D;
+    };
+    expect(f1Jvp.arcs).toHaveLength(2);
+    expect(f1Jvp.arcs[0]!.end).toEqual(seedVariation.start);
+    expect(f1Jvp.arcs[1]!.start).toEqual(seedVariation.end);
+    expect(f1Jvp.arcs.map((arc) => arc.center)).toEqual([centre, centre]);
+  });
+
+  const PINS = {
+    "rounded rect 0.01": {
+      operations: 309_320,
+      euclideanSteps: 63_857,
+      integerBits: 1_186,
+    },
+    "rounded rect -0.01": {
+      operations: 644_816,
+      euclideanSteps: 145_556,
+      integerBits: 1_186,
+    },
+    "rounded rect rotated 0.3 -0.01": {
+      operations: 825_234,
+      euclideanSteps: 212_511,
+      integerBits: 427,
+    },
+    "slot 0.1": {
+      operations: 85_777,
+      euclideanSteps: 14_181,
+      integerBits: 1_179,
+    },
+    "line-arc-line semicircle -0.1": {
+      operations: 84_625,
+      euclideanSteps: 15_897,
+      integerBits: 1_182,
+    },
+    "lens 0.01": {
+      operations: 400_176,
+      euclideanSteps: 103_953,
+      integerBits: 404,
+    },
+    "lens -0.01": {
+      operations: 266_175,
+      euclideanSteps: 67_183,
+      integerBits: 317,
+    },
+    "circle 0.01": {
+      operations: 26_886,
+      euclideanSteps: 4_469,
+      integerBits: 164,
+    },
+    "line-arc-line semicircle 0.01": {
+      operations: 96_159,
+      euclideanSteps: 17_625,
+      integerBits: 1_239,
+    },
+    "rounded rect rotated + Tangent, dragged 1e-4 -0.01": {
+      operations: 1_012_471,
+      euclideanSteps: 265_257,
+      integerBits: 482,
+    },
+    "rect + 1 fillet 0.01": {
+      operations: 93_682,
+      euclideanSteps: 18_318,
+      integerBits: 1_186,
+    },
+    "line-arc-line semicircle long (R7) -2": {
+      operations: 57_845,
+      euclideanSteps: 9_291,
+      integerBits: 316,
+    },
+    "half-disc 0.1": {
+      operations: 97_204,
+      euclideanSteps: 19_586,
+      integerBits: 1_182,
+    },
+    // Meter review R1: the only row through the circle↔cubic Lemma T°
+    // (cubic dyadic windows, the Q4-E1 witness precharge, the cubic root
+    // restriction); its per-value bit peak lies inside T°.
+    "arc→spline corner -0.01": {
+      operations: 526_796,
+      euclideanSteps: 160_123,
+      integerBits: 4_364,
+    },
+  } as const;
+  test.each(Object.entries(PINS))(
+    "native %s certifier literal through SEL: count passes, count − 1 exhausts on operations, Euclid and bits",
+    (label, pin) => {
+      const { result, snapshots } = run(label);
+      expect(result.ok).toBe(true);
+      expect(meterOf(snapshots.at(-1)!)).toEqual(pin);
+      for (const kind of [
+        "operations",
+        "euclideanSteps",
+        "integerBits",
+      ] as const) {
+        const under = (limit: number) =>
+          certifyDeclaredOffsetChain(
+            declaredOf(label),
+            query,
+            createCertifiedCubicTubeChainWithLowerBudgetForTest({
+              [kind]: limit,
+            }),
+          );
+        expect(under(pin[kind]).ok, kind).toBe(true);
+        expect(under(pin[kind] - 1), kind).toMatchObject({
+          ok: false,
+          code: codes.topologyUncertain,
+          message: expect.stringContaining(
+            "exact-query-proof-budget-exhausted",
+          ),
+        });
+      }
+    },
+    120_000,
+  );
+
+  // Staged caps inside every new stage (instrumented stage maps in
+  // T08b-f-evidence/stages/): each exhausts as itself.
+  test.each([
+    // LAL semicircle −0.1: seed stage admission 7 023 → radii 16 287 → A-R
+    // 19 920 → family 21 639 → T° 26 787 / 45 209 → K3 64 581 … 84 625.
+    ["line-arc-line semicircle -0.1", "operations", 12_000],
+    ["line-arc-line semicircle -0.1", "operations", 18_000],
+    ["line-arc-line semicircle -0.1", "operations", 20_500],
+    ["line-arc-line semicircle -0.1", "operations", 24_000],
+    ["line-arc-line semicircle -0.1", "operations", 35_000],
+    ["line-arc-line semicircle -0.1", "euclideanSteps", 6_000],
+    // Lens −0.01: the first Lemma-W junction starts at 93 544 ops / 23 067.
+    ["lens -0.01", "operations", 93_600],
+    ["lens -0.01", "euclideanSteps", 23_200],
+    // Rotated rounded rect −0.01: vertex 0 K1-wedge 209 666 → J2′-arc
+    // 219 059 … 330 679 (meter review A3: exhaustion-stack frames).
+    // Ops 214 000 trips in the LINE leaf's K1 cone under the F5 seed-vertex
+    // e (seed-vertex path, not the seed leaf's own K1-wedge).
+    ["rounded rect rotated 0.3 -0.01", "operations", 214_000],
+    // Ops 250 000 trips in seedJ2 (J2′-arc data).
+    ["rounded rect rotated 0.3 -0.01", "operations", 250_000],
+    // Euclid 70 000 trips in the SHARED concave J2′ block fed seed data.
+    ["rounded rect rotated 0.3 -0.01", "euclideanSteps", 70_000],
+    // Meter review R1, arc→spline corner −0.01: ops 100 000 lands in the
+    // cubic dyadic T°1/T°2 windows (monotoneRun → visit); bits 2 000 in the
+    // cubic root-position restriction.
+    ["arc→spline corner -0.01", "operations", 100_000],
+    ["arc→spline corner -0.01", "integerBits", 2_000],
+  ] as const)(
+    "native %s: a staged %s cap of %d inside a seed-arc stage exhausts as itself",
+    (label, kind, cap) => {
+      expect(
+        certifyDeclaredOffsetChain(
+          declaredOf(label),
+          query,
+          createCertifiedCubicTubeChainWithLowerBudgetForTest({ [kind]: cap }),
+        ),
+      ).toMatchObject({
+        ok: false,
+        code: codes.topologyUncertain,
+        message: expect.stringContaining("exact-query-proof-budget-exhausted"),
+      });
+    },
+    60_000,
+  );
+});
+
+describe("T08b-f seed-arc JVP (design §7) against a central finite difference (fabricated sources, the real resolver)", () => {
+  type Point2 = readonly [number, number];
+  /** The adapter's seed-arc piece of (C, S, E) at d (ray scaling, B′ splits). */
+  const seedArc = (
+    C: Point2,
+    S: Point2,
+    E: Point2,
+    d: number,
+  ): OffsetChainPiece => {
+    const rho = Math.hypot(S[0] - C[0], S[1] - C[1]);
+    const shifted = rho - d;
+    const start = scalePointFromCenter(C, S, shifted)!;
+    const end = scalePointFromCenter(C, E, shifted)!;
+    return {
+      kind: "arc",
+      seedEntityId: id("arc"),
+      reversed: false,
+      center: C,
+      radius: Math.hypot(start[0] - C[0], start[1] - C[1]),
+      start,
+      end,
+      sweepDirection: "counterClockwise",
+      splits: seedArcLeafSplits(C, start, end, "counterClockwise", S, E)!,
+    };
+  };
+  /** Design §7 variation: δS′ = δC + δR·ŝ + R·(I − ŝŝᵀ)(δS − δC)/|s|, δρ_o = ŝ·(δS′ − δC). */
+  const seedArcVariation = (
+    C: Point2,
+    S: Point2,
+    E: Point2,
+    d: number,
+    dC: Point2,
+    dS: Point2,
+    dE: Point2,
+  ): OffsetChainPieceVariation => {
+    const unit = (v: Point2) => {
+      const n = Math.hypot(v[0], v[1]);
+      return { u: [v[0] / n, v[1] / n] as Point2, n };
+    };
+    const s = unit([S[0] - C[0], S[1] - C[1]]);
+    const e = unit([E[0] - C[0], E[1] - C[1]]);
+    const ds: Point2 = [dS[0] - dC[0], dS[1] - dC[1]];
+    const de: Point2 = [dE[0] - dC[0], dE[1] - dC[1]];
+    const dR = s.u[0] * ds[0] + s.u[1] * ds[1];
+    const R = s.n - d;
+    const tangential = (u: Point2, n: number, dv: Point2): Point2 => {
+      const along = u[0] * dv[0] + u[1] * dv[1];
+      return [(dv[0] - along * u[0]) / n, (dv[1] - along * u[1]) / n];
+    };
+    const dus = tangential(s.u, s.n, ds);
+    const due = tangential(e.u, e.n, de);
+    return {
+      kind: "arc",
+      center: dC,
+      radius: dR,
+      start: [
+        dC[0] + dR * s.u[0] + R * dus[0],
+        dC[1] + dR * s.u[1] + R * dus[1],
+      ],
+      end: [dC[0] + dR * e.u[0] + R * due[0], dC[1] + dR * e.u[1] + R * due[1]],
+    };
+  };
+  const lineVariation = (
+    a: Point2,
+    b: Point2,
+    da: Point2,
+    db: Point2,
+    d: number,
+  ): OffsetChainPieceVariation => {
+    const t: Point2 = [b[0] - a[0], b[1] - a[1]];
+    const L = Math.hypot(t[0], t[1]);
+    const dt: Point2 = [db[0] - da[0], db[1] - da[1]];
+    const along = (t[0] * dt[0] + t[1] * dt[1]) / L;
+    const du: Point2 = [
+      (dt[0] - (along * t[0]) / L) / L,
+      (dt[1] - (along * t[1]) / L) / L,
+    ];
+    const dn: Point2 = [-du[1] * d, du[0] * d];
+    return {
+      kind: "lineSegment",
+      start: [da[0] + dn[0], da[1] + dn[1]],
+      end: [db[0] + dn[0], db[1] + dn[1]],
+    };
+  };
+  const d = -0.1;
+  test.each([
+    ["semicircle", 0],
+    ["45° cap", 0.5],
+  ] as const)(
+    "line–arc–line (%s) at d = −0.1: both Lemma-T° trim roots vary as the whole-recipe FD in δC, δS and δE (≤ 1e-6 relative)",
+    (_label, centerY) => {
+      const C0: Point2 = [0.5, centerY];
+      const S0: Point2 = [0, 0];
+      const E0: Point2 = [1, 0];
+      const build = (dC: Point2, dS: Point2, dE: Point2, h: number) => {
+        const C: Point2 = [C0[0] + h * dC[0], C0[1] + h * dC[1]];
+        const S: Point2 = [S0[0] + h * dS[0], S0[1] + h * dS[1]];
+        const E: Point2 = [E0[0] + h * dE[0], E0[1] + h * dE[1]];
+        const first = offsetLinePoints([-1, 0], S, d)!;
+        const last = offsetLinePoints(E, [2, 0], d)!;
+        const pieces: OffsetChainPiece[] = [
+          {
+            kind: "lineSegment",
+            seedEntityId: id("l1"),
+            reversed: false,
+            start: first.start,
+            end: first.end,
+          },
+          seedArc(C, S, E, d),
+          {
+            kind: "lineSegment",
+            seedEntityId: id("l2"),
+            reversed: false,
+            start: last.start,
+            end: last.end,
+          },
+        ];
+        const input: OffsetChainTopologyInput = {
+          pieces,
+          closed: false,
+          modelingTolerance: 1e-3,
+          query,
+        };
+        return { input, resolved: resolveOffsetChainTopology(input) };
+      };
+      for (const [dC, dS, dE] of [
+        [
+          [1, 0.3],
+          [0, 0],
+          [0, 0],
+        ],
+        [
+          [0, 0],
+          [0.2, 0.7],
+          [0, 0],
+        ],
+        [
+          [0, 0],
+          [0, 0],
+          [-0.4, 0.5],
+        ],
+      ] as const) {
+        const base = build([0, 0], [0, 0], [0, 0], 0);
+        if (!base.resolved.ok) throw new Error(base.resolved.message);
+        expect(base.resolved.joints).toHaveLength(2);
+        const variations = new Map<SketchEntityId, OffsetChainPieceVariation>([
+          [id("l1"), lineVariation([-1, 0], S0, [0, 0], dS, d)],
+          [id("arc"), seedArcVariation(C0, S0, E0, d, dC, dS, dE)],
+          [id("l2"), lineVariation(E0, [2, 0], dE, [0, 0], d)],
+        ]);
+        const jvp = resolveOffsetChainTopologyJvp(
+          base.input,
+          base.resolved,
+          variations,
+        );
+        if (!jvp.ok) throw new Error(jvp.message);
+        const h = 1e-6;
+        const plus = build(dC, dS, dE, h).resolved;
+        const minus = build(dC, dS, dE, -h).resolved;
+        if (!plus.ok || !minus.ok) throw new Error("FD resolution failed");
+        plus.joints.forEach((joint, index) => {
+          const fd = [0, 1].map(
+            (axis) =>
+              (joint.position[axis]! - minus.joints[index]!.position[axis]!) /
+              (2 * h),
+          );
+          const scale = Math.max(1, ...fd.map(Math.abs));
+          for (const axis of [0, 1])
+            expect(
+              Math.abs(jvp.jointPositions[index]![axis]! - fd[axis]!) / scale,
+            ).toBeLessThan(1e-6);
+        });
+      }
+    },
+  );
+});
