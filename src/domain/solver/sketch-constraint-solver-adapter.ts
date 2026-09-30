@@ -40,11 +40,46 @@ import {
 import type { DocumentId, RevisionId } from "@/contracts/shared/ids";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 
+/**
+ * Answers `deriveSketchRegions` elsewhere, e.g. the dedicated sketch-derivation
+ * worker. It may reject a request with `SketchRegionDerivationSupersededError`
+ * when a newer request for the same document replaced it; any other rejection
+ * is a real failure.
+ */
+export type SketchRegionDerivationDelegate = Pick<
+  SketchSolverAdapter,
+  "deriveSketchRegions"
+>;
+
+/** A live region derivation cancelled because a newer one for its document started. */
+export class SketchRegionDerivationSupersededError extends Error {
+  override readonly name = "SketchRegionDerivationSupersededError";
+  readonly requestId: DeriveSketchRegionsRequest["requestId"];
+  readonly supersededBy: DeriveSketchRegionsRequest["requestId"];
+
+  constructor(
+    request: DeriveSketchRegionsRequest,
+    supersededBy: DeriveSketchRegionsRequest,
+  ) {
+    super(
+      `Sketch region derivation ${request.requestId} was superseded by ${supersededBy.requestId} for document ${request.documentId}.`,
+    );
+    this.requestId = request.requestId;
+    this.supersededBy = supersededBy.requestId;
+  }
+}
+
 export interface SketchConstraintSolverAdapterOptions {
   documentId: DocumentId;
   revisionId: RevisionId | null;
   /** The selected kernel's neutral curve queries; only `deriveSketchRegions` uses them. */
   neutralCurveQueries: NeutralCurveQueryCapability;
+  /**
+   * When present, `deriveSketchRegions` forwards the validated request here
+   * unchanged instead of deriving on this thread; the delegate recomputes the
+   * result from the plain request.
+   */
+  regionDerivation?: SketchRegionDerivationDelegate;
 }
 
 interface StoredInteractiveSolveSession {
@@ -454,6 +489,9 @@ export class SketchConstraintSolverAdapter implements SketchSolverAdapter {
   ): Promise<DeriveSketchRegionsResponse> {
     assertSupportedRequest(request, this.options);
     assertDocumentModelingTolerance(request.modelingTolerance);
+    if (this.options.regionDerivation) {
+      return this.options.regionDerivation.deriveSketchRegions(request);
+    }
     const derived = await this.regionDeriver.derive({
       documentId: request.documentId,
       revisionId: request.revisionId,

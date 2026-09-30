@@ -16,6 +16,16 @@ import {
   validateOccWorkerRequestEnvelope,
 } from "@/domain/modeling/occ/worker-protocol";
 import type { NeutralCurve } from "@/contracts/modeling/neutral-curve-query";
+import {
+  addRectangle,
+  makeSketchFixture,
+} from "@/contracts/sketch/region-extraction.fixtures";
+import {
+  SOLVER_SCHEMA_VERSION,
+  type DeriveSketchRegionsRequest,
+  type DeriveSketchRegionsResponse,
+} from "@/contracts/solver/schema";
+import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 
 class FakeOccWorker implements OccWorkerLike {
   private messageListener:
@@ -505,8 +515,112 @@ test("src/domain/modeling/occ/worker-client.spec.ts", async () => {
     }
   }
 
+  // Seam: live region derivation is a worker-protocol request carrying the
+  // plain definition, solved snapshot and tolerance; the envelope the worker
+  // validates is exactly what the client posts, and failures reject.
+  async function testDeriveSketchRegionsRoundTripsThroughTheWorker() {
+    const sketch = makeSketchFixture();
+    addRectangle(sketch, "r", [0, 0, 10, 5]);
+    sketch.point("c", 5, 2.5);
+    sketch.circle("c1", "c", 1);
+    sketch.point("s0", 1, 1);
+    sketch.point("s1", 2, 3);
+    sketch.point("s2", 3, 1);
+    sketch.spline("open", ["s0", "s1", "s2"], "open");
+    const input = sketch.build({ modelingTolerance: 0.002 });
+    const request = {
+      contractVersion: CONTRACT_VERSION,
+      solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+      requestId: "request_live_regions",
+      documentId: input.documentId,
+      revisionId: input.revisionId,
+      sketchId: input.sketchId,
+      definition: input.definition,
+      solvedSnapshot: input.solvedSnapshot,
+      projectedReferences: [...input.projectedReferences],
+      modelingTolerance: input.modelingTolerance,
+    } as DeriveSketchRegionsRequest;
+    const response = {
+      contractVersion: CONTRACT_VERSION,
+      solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+      requestId: request.requestId,
+      documentId: request.documentId,
+      revisionId: request.revisionId,
+      sketchId: request.sketchId,
+      regions: [],
+      diagnostics: [],
+    } as DeriveSketchRegionsResponse;
+
+    const worker = new FakeOccWorker();
+    const client = new OccWorkerClient({ worker });
+    const promise = client.deriveSketchRegions(request);
+    const posted = worker.posted[0]!;
+    expect(
+      posted.kind === "invoke" && posted.operation,
+      "deriveSketchRegions posts its request unchanged as a worker operation.",
+    ).toEqual({ kind: "deriveSketchRegions", request });
+    expect(
+      posted.kind === "invoke" &&
+        posted.operation.kind === "deriveSketchRegions"
+        ? posted.operation.request
+        : null,
+      "The posted request is the caller's object (no copy or projection before postMessage).",
+    ).toBe(request);
+    const validation = validateOccWorkerRequestEnvelope(
+      structuredClone(posted),
+    );
+    expect(
+      validation.success ? [] : validation.errors,
+      "The worker accepts the structured-cloned deriveSketchRegions envelope.",
+    ).toEqual([]);
+    worker.emit({
+      kind: "invoked",
+      requestId: posted.requestId,
+      operation: "deriveSketchRegions",
+      payload: response,
+    });
+    expect(
+      await promise,
+      "deriveSketchRegions resolves with the worker's response.",
+    ).toBe(response);
+
+    const unknownField = structuredClone(posted) as unknown as {
+      operation: { request: Record<string, unknown> };
+    };
+    unknownField.operation.request.cachedRegions = [];
+    expect(
+      validateOccWorkerRequestEnvelope(unknownField).success,
+      "The worker rejects a deriveSketchRegions request with fields outside the contract.",
+    ).toBe(false);
+
+    const failing = client.deriveSketchRegions(request);
+    const failingRequest = worker.posted[1]!;
+    worker.emit(
+      normalizeOccWorkerFailure(
+        failingRequest.requestId,
+        new Error("Region derivation requires the document modelingTolerance"),
+      ),
+    );
+    await expect(
+      failing,
+      "A worker-side derivation error rejects the caller with the worker's message.",
+    ).rejects.toThrow(
+      "Region derivation requires the document modelingTolerance",
+    );
+
+    const cloneFailingWorker = new FakeOccWorker();
+    cloneFailingWorker.postMessageError = new Error("DataCloneError");
+    await expect(
+      new OccWorkerClient({ worker: cloneFailingWorker }).deriveSketchRegions(
+        request,
+      ),
+      "A non-serializable request rejects the caller instead of being dropped.",
+    ).rejects.toThrow("OCC worker postMessage failed: DataCloneError");
+  }
+
   await testWarmupInvokesWorkerOperation();
   await testNeutralCurveQueriesRoundTripThroughTheWorker();
+  await testDeriveSketchRegionsRoundTripsThroughTheWorker();
   await testSnapshotResponsesAreUnpacked();
   await testWarmupFailuresSurfaceToCaller();
   await testExportCapabilitiesCreateCloneSafeWorkerRequests();

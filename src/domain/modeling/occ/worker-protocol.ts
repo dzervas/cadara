@@ -58,6 +58,8 @@ import type {
   NeutralCurveSelfIntersectionRequest,
 } from "@/contracts/modeling/neutral-curve-query";
 import type {
+  DeriveSketchRegionsRequest,
+  DeriveSketchRegionsResponse,
   ProjectSketchExternalReferencesRequest,
   ProjectSketchExternalReferencesResponse,
 } from "@/contracts/solver/schema";
@@ -159,6 +161,10 @@ export type OccWorkerOperation =
       request: NeutralCurveJoinRequest;
     }
   | {
+      kind: "deriveSketchRegions";
+      request: DeriveSketchRegionsRequest;
+    }
+  | {
       kind: "commitSketch";
       request: CommitSketchRequest;
     }
@@ -255,6 +261,7 @@ export type OccWorkerOperationResult =
   | ProjectSketchExternalReferencesResponse
   | NeutralCurveQueryResult
   | NeutralCurveJoinResult
+  | DeriveSketchRegionsResponse
   | CommitSketchResponse
   | CreateFeatureResponse
   | UpdateFeatureResponse

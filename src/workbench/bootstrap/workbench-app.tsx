@@ -12,6 +12,7 @@ import { createInstrumentedDocumentRepository } from "@/domain/modeling/instrume
 import type { RuntimeExtensionRegistryComposition } from "@/domain/extensions/runtime-registry-composition";
 import { OCC_KERNEL_DOCUMENT_ID } from "@/domain/modeling/opencascade-kernel-seed";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { getBrowserSketchRegionDerivation } from "@/domain/modeling/occ/sketch-derivation-worker-runtime";
 import { createInstrumentedSketchSolverAdapter } from "@/domain/solver/instrumented-sketch-solver-adapter";
 import {
   createInitialWorkbenchTabsState,
@@ -143,6 +144,9 @@ export function WorkbenchApp({
             documentId: tabsState.activeDocumentId,
             revisionId: null,
             neutralCurveQueries: kernelAdapter,
+            // Live regions derive in a dedicated worker, never behind the
+            // OCC kernel worker's feature preview/commit queue.
+            regionDerivation: getBrowserSketchRegionDerivation() ?? undefined,
           }),
           performanceTelemetry,
         ),

@@ -44,6 +44,8 @@ import type {
   NeutralCurveSelfIntersectionRequest,
 } from "@/contracts/modeling/neutral-curve-query";
 import type {
+  DeriveSketchRegionsRequest,
+  DeriveSketchRegionsResponse,
   ProjectSketchExternalReferencesRequest,
   ProjectSketchExternalReferencesResponse,
 } from "@/contracts/solver/schema";
@@ -312,6 +314,17 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
   queryNeutralCurveJoin(request: NeutralCurveJoinRequest) {
     return this.invoke<NeutralCurveJoinResult>({
       kind: "queryNeutralCurveJoin",
+      request,
+    });
+  }
+
+  /**
+   * Posts to whichever worker this client wraps; only the dedicated
+   * sketch-derivation worker answers it (the OCC kernel worker rejects it).
+   */
+  deriveSketchRegions(request: DeriveSketchRegionsRequest) {
+    return this.invoke<DeriveSketchRegionsResponse>({
+      kind: "deriveSketchRegions",
       request,
     });
   }
