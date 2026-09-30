@@ -1118,6 +1118,31 @@ export interface SeedArcRow {
   readonly build: (harness: NativeArcOffsetHarness) => SeedArcSketch;
 }
 
+/** A regular n-gon of the given side (first corner at angle 0.1). */
+const regularSeedPolygon = (n: number, side: number): Vector[] => {
+  const radius = side / (2 * Math.sin(Math.PI / n));
+  return Array.from({ length: n }, (_, k): Vector => {
+    const angle = (2 * Math.PI * k) / n + 0.1;
+    return [radius * Math.cos(angle), radius * Math.sin(angle)];
+  });
+};
+
+/** A native n-gon (side 1) with Fillet r = 0.15 at the given corners (default all). */
+const roundedPolygon =
+  (n: number, corners?: readonly number[]) =>
+  (h: NativeArcOffsetHarness): SeedArcSketch => {
+    const drawn = h.polygon(h.empty(), regularSeedPolygon(n, 1));
+    let definition = drawn.definition;
+    for (const corner of corners ?? Array.from({ length: n }, (_, k) => k))
+      definition = h.fillet(
+        definition,
+        drawn.ids[corner]!,
+        drawn.ids[(corner + 1) % n]!,
+        0.15,
+      );
+    return { definition, seeds: h.lineArcSeeds(definition) };
+  };
+
 /**
  * The T08b-f design §5 native D3 rows as amended by review R6/R7 (τ = 1e-3),
  * built with native tools and edit operations only, exactly as the design
@@ -1167,27 +1192,6 @@ export function seedArcRows(): readonly SeedArcRow[] {
           lines[corner]!,
           lines[(corner + 1) % lines.length]!,
           radius,
-        );
-      return { definition, seeds: h.lineArcSeeds(definition) };
-    };
-  const regular = (n: number, side: number): Vector[] => {
-    const radius = side / (2 * Math.sin(Math.PI / n));
-    return Array.from({ length: n }, (_, k): Vector => {
-      const angle = (2 * Math.PI * k) / n + 0.1;
-      return [radius * Math.cos(angle), radius * Math.sin(angle)];
-    });
-  };
-  const roundedPolygon =
-    (n: number, corners?: readonly number[]) =>
-    (h: NativeArcOffsetHarness): SeedArcSketch => {
-      const drawn = h.polygon(h.empty(), regular(n, 1));
-      let definition = drawn.definition;
-      for (const corner of corners ?? Array.from({ length: n }, (_, k) => k))
-        definition = h.fillet(
-          definition,
-          drawn.ids[corner]!,
-          drawn.ids[(corner + 1) % n]!,
-          0.15,
         );
       return { definition, seeds: h.lineArcSeeds(definition) };
     };
@@ -1438,4 +1442,28 @@ export function seedArcRows(): readonly SeedArcRow[] {
     [0.01, -0.01, 0.1, -0.1],
   );
   return rows;
+}
+
+/**
+ * T08b-f1 capacity rows ([TECH] F12, the leaf-scaled ceiling), kept out of
+ * the D3 table (their adapter solves take seconds): the rounded 32-gon (64
+ * leaves, m = 2; it needs more than one production Euclid ceiling), and the
+ * leaf boundary pair: 16 lines + 15 fillets outward (31 piece leaves + 1 F1
+ * arc = 32, m = 1) and 17 lines + 16 fillets inward (33 leaves, m = 2).
+ */
+export function seedArcCapacityRows(): readonly SeedArcRow[] {
+  const corners = (count: number) => Array.from({ length: count }, (_, k) => k);
+  return [
+    { row: "rounded 32-gon", distance: -0.01, build: roundedPolygon(32) },
+    {
+      row: "16-gon with 15 fillets",
+      distance: -0.01,
+      build: roundedPolygon(16, corners(15)),
+    },
+    {
+      row: "17-gon with 16 fillets",
+      distance: 0.01,
+      build: roundedPolygon(17, corners(16)),
+    },
+  ];
 }

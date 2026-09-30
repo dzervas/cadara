@@ -386,6 +386,11 @@ type ExactScalarCubic = readonly [
 type ExactRange = readonly [ExactFraction, ExactFraction];
 type Failure = Exclude<CubicTubeChainResult, { kind: "verified" }>;
 type LowerProofLimits = ConstructorParameters<typeof ExactProofBudget>[0];
+/**
+ * [TECH] F12: applies the leaf multiplier of a request once its flattened
+ * leaf count is known and charged (see `leafMultiplier`).
+ */
+type LeafScale = (leaves: number) => void;
 
 const EXHAUSTED: Failure = {
   kind: "uncertain",
@@ -745,11 +750,16 @@ function certifyChain(
   request: CubicTubeChainRequest,
   budget: ExactProofBudget,
   general?: GeneralChain,
+  scale?: LeafScale,
 ): TubePieceChainResult {
   const { tubes, closed, modelingTolerance } = request;
   const count = tubes.length;
   // Admission and preallocation guard: charged before any per-tube work.
   budget.operation(64 + 16 * count);
+  // [TECH] F12: every leaf is charged (legacy: exactly `count`; a piece
+  // chain: its flattened leaves + 1 per declared F1 arc, see
+  // `certifyPieceChain`) and so is this precharge; no core work yet.
+  scale?.(count + (general?.arcs.length ?? 0));
   if (count === 0)
     return {
       kind: "unsupported",
@@ -6244,6 +6254,7 @@ const invalidPieceChain = (message: string): Failure =>
 function certifyPieceChain(
   request: PieceTubeChainRequest,
   budget: ExactProofBudget,
+  scale?: LeafScale,
 ): TubePieceChainResult {
   const { pieces, trims, closed, modelingTolerance, distance } = request;
   const vertices = request.vertices ?? [];
@@ -6266,6 +6277,8 @@ function certifyPieceChain(
     return certifyChain(
       { modelingTolerance, closed, tubes: only.tubes },
       budget,
+      undefined,
+      scale,
     );
   }
   budget.operation(
@@ -6390,6 +6403,10 @@ function certifyPieceChain(
     }
     sizes.push(piece.tubes.length);
   }
+  // [TECH] F12: every leaf above (and every declaration) is charged and
+  // flattened; the core scales right after its own 64 + 16·count
+  // precharge. Declared F1 arcs count one leaf each (their sub-arc split is
+  // decided later by metered work).
   return certifyChain(
     {
       modelingTolerance,
@@ -6412,6 +6429,7 @@ function certifyPieceChain(
       seeds,
       partitions,
     },
+    scale,
   );
 }
 
@@ -6476,10 +6494,64 @@ function seedPartition(
   return { kind: "arc", splits, count, removed: [removed[0], removed[1]] };
 }
 
+/** Flattened leaves per production ceiling of one request ([TECH] F12). */
+const LEAVES_PER_CEILING = 32;
+/**
+ * The cap on the leaf multiplier ([TECH] F12a): 128 = the adapter's
+ * 4 096-leaf limit of one spline / 32. Larger requests get 128 × C and fail
+ * closed by exhaustion if they need more.
+ */
+const MAX_LEAF_MULTIPLIER = 128;
+
+/**
+ * The leaf multiplier m = min(max(1, ⌈leaves / 32⌉), 128) of one request
+ * ([TECH] F12, the D5 analogue; the cap is [TECH] F12a): the whole-request
+ * additive ceilings (operations,
+ * determinant terms, Euclidean, refinement and projection steps) become m ×
+ * the production ceilings through `ExactProofBudget.raise`; the per-value
+ * `integerBits` ceiling is never scaled and test lower limits stay absolute.
+ * Charges are unchanged, so a request of ≤ 32 leaves (m = 1) is metered
+ * exactly as before, and m can only turn an exhaustion into a result.
+ *
+ * m is applied ONCE, from counts charged before use, at the same point on
+ * every path: in the core `certifyChain`, right after its `64 + 16·count`
+ * admission precharge (no core work yet). On the legacy path (and the
+ * single-piece delegate) leaves = count; on the piece path the precharged
+ * flattening loop of `certifyPieceChain` has already run, and leaves = the
+ * flattened leaves (cubic tubes, 1 per line, the 8 circle leaves, each seed
+ * arc's rule-B′ partition minus its removed leaves) + 1 per declared F1 arc
+ * (a lower bound: its sub-arc split is decided later by metered work).
+ * Everything before that point, the core precharge included, runs under
+ * m = 1 exactly as today, so a request that exhausts there (an oversized or
+ * holey array, a precharge) exhausts as before, and a request failing
+ * validation before it is never scaled. A staged request is scaled by its
+ * attempt 1 only; later attempts are never rescaled (fail closed), and
+ * m = 1 if attempt 1 stops before its scaling point.
+ *
+ * Worst-case fail-closed latency: a request may spend m × C ≤ 128 × C
+ * before it exhausts, and a staged request attempts × m × C ≤ attempts ×
+ * 128 × C (the SEL sizes attempts = 1 + flippable + switchable joints +
+ * concave arc-side vertices, so the staged bound grows with the sketch).
+ * At the T08b-a measured
+ * rates (≈ 1.05 ops/µs, ≈ 0.30 Euclid/µs on adversarial cubic work) one C is
+ * ≈ 5 s (Euclid-bound) to ≈ 9.5 s (ops-bound): ≈ 5–10 s per 32 leaves per
+ * attempt, at most ≈ 11–20 min per attempt at the cap. Native chains
+ * certify far faster (≈ 0.5–0.9 s per C measured on native zig-zag
+ * splines, so ≈ 1–2 min per attempt at the cap; ≈ 2.2 s at 96 rounded
+ * corners, 192 leaves, m = 6, where the adapter's solve dominates).
+ */
+function leafMultiplier(leaves: number): number {
+  return Math.min(
+    MAX_LEAF_MULTIPLIER,
+    Math.max(1, Math.ceil(leaves / LEAVES_PER_CEILING)),
+  );
+}
+
 /**
  * The production additive ceilings of `ExactProofBudget` (one request), per
  * attempt stage: the staged whole-request meter lets attempt k use at most
- * k times these in total (review R9). `integerBits` is per value, unscaled.
+ * k × m times these in total (review R9; [TECH] F12, m fixed by attempt 1).
+ * `integerBits` is per value, unscaled.
  */
 const STAGE_CEILINGS = {
   operations: 10_000_000,
@@ -6490,12 +6562,14 @@ const STAGE_CEILINGS = {
 } as const;
 
 /**
- * ONE budget over `attempts` certifications (ceilings × attempts, lower
+ * ONE budget over `attempts` certifications (ceilings × attempts × m, lower
  * limits absolute) whose cumulative additive meters are also capped at
- * stage k × the production ceilings while attempt k runs. Never reset,
- * replaced or topped up; the stage only moves forward.
+ * stage k × m × the production ceilings while attempt k runs (m = 1 until
+ * `scale`). Never reset, replaced or topped up; the stage only moves forward.
  */
 class StagedProofBudget extends ExactProofBudget {
+  readonly #attempts: number;
+  #multiplier = 1;
   #stage = 1;
   #operations = 0;
   #determinantTerms = 0;
@@ -6505,6 +6579,13 @@ class StagedProofBudget extends ExactProofBudget {
 
   constructor(lowerLimits: LowerProofLimits | undefined, attempts: number) {
     super(lowerLimits, attempts);
+    this.#attempts = attempts;
+  }
+
+  /** [TECH] F12: the one-shot leaf multiplier of the whole staged request. */
+  scale(multiplier: number) {
+    this.raise(this.#attempts * multiplier);
+    this.#multiplier = multiplier;
   }
 
   advance() {
@@ -6512,7 +6593,7 @@ class StagedProofBudget extends ExactProofBudget {
   }
 
   #check(total: number, ceiling: number) {
-    if (total > this.#stage * ceiling)
+    if (total > this.#stage * this.#multiplier * ceiling)
       throw new ExactQueryProofBudgetExceeded();
   }
 
@@ -6547,6 +6628,15 @@ class StagedProofBudget extends ExactProofBudget {
   }
 }
 
+/** The one-shot F12 scaling of a certifier budget (staged or single). */
+function scaleOf(budget: ExactProofBudget): LeafScale {
+  return (leaves) => {
+    const multiplier = leafMultiplier(leaves);
+    if (budget instanceof StagedProofBudget) budget.scale(multiplier);
+    else budget.raise(multiplier);
+  };
+}
+
 function createCertifier(
   lowerLimits?: LowerProofLimits,
   observeBudget?: (snapshot: ExactProofBudgetSnapshot) => void,
@@ -6556,11 +6646,11 @@ function createCertifier(
   // One budget for the whole request: admission, conversion, every join,
   // knot, trim, leaf, pair, split and the certificate. Never reset or replaced.
   const run = <T>(
-    certify: (budget: ExactProofBudget) => T,
+    certify: (budget: ExactProofBudget, scale: LeafScale) => T,
   ): T | typeof EXHAUSTED => {
     const budget = new ExactProofBudget(lowerLimits);
     try {
-      return certify(budget);
+      return certify(budget, scaleOf(budget));
     } catch (error) {
       if (error instanceof ExactQueryProofBudgetExceeded) return EXHAUSTED;
       throw error;
@@ -6571,15 +6661,23 @@ function createCertifier(
   return {
     certifyChain: (request) =>
       // Without a piece chain the core never emits trim joins.
-      run((budget) => certifyChain(request, budget) as CubicTubeChainResult),
+      run(
+        (budget, scale) =>
+          certifyChain(
+            request,
+            budget,
+            undefined,
+            scale,
+          ) as CubicTubeChainResult,
+      ),
     certifyPieceChain: (request) =>
-      run((budget) => certifyPieceChain(request, budget)),
+      run((budget, scale) => certifyPieceChain(request, budget, scale)),
     openRequest: (attempts) => {
       if (!Number.isSafeInteger(attempts) || attempts < 1)
         throw new RangeError(
           "A staged certifier request needs a positive integer attempt count.",
         );
-      // attempts = 1 is exactly the single-request meter.
+      // attempts = 1 is exactly the single-request meter (scaled by m).
       const budget =
         attempts === 1
           ? new ExactProofBudget(lowerLimits)
@@ -6600,7 +6698,12 @@ function createCertifier(
               (budget as StagedProofBudget).advance();
               budget.operation(RETRY_ENTRY_CHARGE);
             }
-            return certifyPieceChain(request, budget);
+            // [TECH] F12: only attempt 1 scales the staged request.
+            return certifyPieceChain(
+              request,
+              budget,
+              issued === 1 ? scaleOf(budget) : undefined,
+            );
           } catch (error) {
             if (!(error instanceof ExactQueryProofBudgetExceeded)) throw error;
             spent = true;
@@ -6615,7 +6718,8 @@ function createCertifier(
 }
 
 /**
- * Production certifier under the unchanged exact-proof ceilings. Its
+ * Production certifier under the unchanged exact-proof ceilings, scaled per
+ * request by the leaf multiplier ([TECH] F12, `leafMultiplier`). Its
  * `certifyPieceChain` is unsound on its own for one-leaf cubic pieces in a
  * multi-piece chain (see `certifyPieceChain`).
  */
@@ -6625,7 +6729,10 @@ export function createCertifiedCubicTubeChain(): CertifiedCubicTubeChain &
   return createCertifier();
 }
 
-/** Test-only lower ceilings; construction clamps every value to production. */
+/**
+ * Test-only lower ceilings; construction clamps every value to the (leaf-
+ * scaled) production ceilings, so lower limits are absolute.
+ */
 export function createCertifiedCubicTubeChainWithLowerBudgetForTest(
   lowerLimits: LowerProofLimits,
 ): CertifiedCubicTubeChain &

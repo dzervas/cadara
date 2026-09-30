@@ -55,7 +55,10 @@ export class ExactQueryProofBudgetExceeded extends Error {
 }
 
 export class ExactProofBudget {
-  readonly #limits: ExactProofLimits;
+  readonly #lowerLimits: Partial<ExactProofLimits>;
+  #limits: ExactProofLimits;
+  #multiplier: number;
+  #raised = false;
   #operations = 0;
   #determinantTerms = 0;
   #euclideanSteps = 0;
@@ -80,43 +83,30 @@ export class ExactProofBudget {
         "The exact proof request multiplier must be a positive integer.",
       );
     }
-    const ceiling = (limit: number) => limit * requestMultiplier;
-    this.#limits = {
-      operations: Math.min(
-        ceiling(PRODUCTION_LIMITS.operations),
-        lowerLimits.operations ?? ceiling(PRODUCTION_LIMITS.operations),
-      ),
-      integerBits: Math.min(
-        PRODUCTION_LIMITS.integerBits,
-        lowerLimits.integerBits ?? PRODUCTION_LIMITS.integerBits,
-      ),
-      determinantTerms: Math.min(
-        ceiling(PRODUCTION_LIMITS.determinantTerms),
-        lowerLimits.determinantTerms ??
-          ceiling(PRODUCTION_LIMITS.determinantTerms),
-      ),
-      euclideanSteps: Math.min(
-        ceiling(PRODUCTION_LIMITS.euclideanSteps),
-        lowerLimits.euclideanSteps ?? ceiling(PRODUCTION_LIMITS.euclideanSteps),
-      ),
-      refinementSteps: Math.min(
-        ceiling(PRODUCTION_LIMITS.refinementSteps),
-        lowerLimits.refinementSteps ??
-          ceiling(PRODUCTION_LIMITS.refinementSteps),
-      ),
-      projectionAttempts: Math.min(
-        ceiling(PRODUCTION_LIMITS.projectionAttempts),
-        lowerLimits.projectionAttempts ??
-          ceiling(PRODUCTION_LIMITS.projectionAttempts),
-      ),
-    };
-    if (
-      Object.values(this.#limits).some(
-        (limit) => !Number.isSafeInteger(limit) || limit < 0,
-      )
-    ) {
-      throw new RangeError("Exact proof limits must be nonnegative integers.");
-    }
+    this.#lowerLimits = { ...lowerLimits };
+    this.#multiplier = requestMultiplier;
+    this.#limits = limitsFor(lowerLimits, requestMultiplier);
+  }
+
+  /**
+   * One-shot raise of the request multiplier (T08b-f1 [TECH] F12): the
+   * additive ceilings become `multiplier` × production, with lower limits
+   * clamped to them exactly as in the constructor (so they stay absolute);
+   * `integerBits` is never scaled. Charges nothing. At most one call per
+   * budget, with a positive safe integer not below the current multiplier;
+   * otherwise, or if a scaled ceiling is not a safe integer, a RangeError
+   * leaves the budget unchanged.
+   */
+  raise(multiplier: number) {
+    if (this.#raised)
+      throw new RangeError("An exact proof budget may be raised only once.");
+    if (!Number.isSafeInteger(multiplier) || multiplier < this.#multiplier)
+      throw new RangeError(
+        "The raised exact proof multiplier must be a safe integer not below the current one.",
+      );
+    this.#limits = limitsFor(this.#lowerLimits, multiplier);
+    this.#multiplier = multiplier;
+    this.#raised = true;
   }
 
   operation(count = 1) {
@@ -198,6 +188,50 @@ export class ExactProofBudget {
   #fail(): never {
     throw new ExactQueryProofBudgetExceeded();
   }
+}
+
+/** The clamped limits of one multiplier; a RangeError unless safe integers. */
+function limitsFor(
+  lowerLimits: Partial<ExactProofLimits>,
+  requestMultiplier: number,
+): ExactProofLimits {
+  const ceiling = (limit: number) => limit * requestMultiplier;
+  const limits = {
+    operations: Math.min(
+      ceiling(PRODUCTION_LIMITS.operations),
+      lowerLimits.operations ?? ceiling(PRODUCTION_LIMITS.operations),
+    ),
+    integerBits: Math.min(
+      PRODUCTION_LIMITS.integerBits,
+      lowerLimits.integerBits ?? PRODUCTION_LIMITS.integerBits,
+    ),
+    determinantTerms: Math.min(
+      ceiling(PRODUCTION_LIMITS.determinantTerms),
+      lowerLimits.determinantTerms ??
+        ceiling(PRODUCTION_LIMITS.determinantTerms),
+    ),
+    euclideanSteps: Math.min(
+      ceiling(PRODUCTION_LIMITS.euclideanSteps),
+      lowerLimits.euclideanSteps ?? ceiling(PRODUCTION_LIMITS.euclideanSteps),
+    ),
+    refinementSteps: Math.min(
+      ceiling(PRODUCTION_LIMITS.refinementSteps),
+      lowerLimits.refinementSteps ?? ceiling(PRODUCTION_LIMITS.refinementSteps),
+    ),
+    projectionAttempts: Math.min(
+      ceiling(PRODUCTION_LIMITS.projectionAttempts),
+      lowerLimits.projectionAttempts ??
+        ceiling(PRODUCTION_LIMITS.projectionAttempts),
+    ),
+  };
+  if (
+    Object.values(limits).some(
+      (limit) => !Number.isSafeInteger(limit) || limit < 0,
+    )
+  ) {
+    throw new RangeError("Exact proof limits must be nonnegative integers.");
+  }
+  return limits;
 }
 
 const budgetOf = (budget?: ExactProofBudget): ExactProofBudget => {

@@ -1012,8 +1012,10 @@ export interface CertifiedTubePieceChain {
 /**
  * Staged whole-request certifier meter (T08b-d SEL, review R9): ONE budget
  * for at most `attempts` certifications of one offset chain, never reset,
- * replaced or topped up. Attempt k may use at most k times the production
- * ceilings in total (so attempt 1 behaves exactly as `certifyPieceChain`);
+ * replaced or topped up. Attempt k may use at most k·m times the production
+ * ceilings in total, where m = min(⌈leaves/32⌉, 128) is fixed by attempt 1
+ * (T08b-f1 [TECH] F12, cap F12a; so attempt 1 behaves exactly as
+ * `certifyPieceChain`);
  * every retry k ≥ 2 is charged a fixed entry before any work; exhaustion is
  * sticky; issuing more than `attempts` requests is a `RangeError`.
  */

@@ -561,3 +561,86 @@ describe("whole-request proof budget multiplier", () => {
       ).toThrow(RangeError);
   });
 });
+
+describe("one-shot request multiplier raise (T08b-f1 [TECH] F12)", () => {
+  const exhausts = (charge: () => void) => {
+    expect(charge).toThrow(ExactQueryProofBudgetExceeded);
+  };
+
+  test("raise charges nothing and scales every additive ceiling from the current counters, never integerBits", () => {
+    const budget = new ExactProofBudget();
+    budget.operation(10_000_000);
+    const before = budget.snapshot();
+    budget.raise(3);
+    expect(budget.snapshot(), "raise charges nothing").toEqual(before);
+    budget.operation(20_000_000);
+    exhausts(() => budget.operation());
+    for (let step = 0; step < 3 * 1_536; step += 1) budget.determinantTerm();
+    exhausts(() => budget.determinantTerm());
+    for (let step = 0; step < 3 * 4_096; step += 1) budget.refinementStep();
+    exhausts(() => budget.refinementStep());
+    for (let step = 0; step < 3 * 2; step += 1) budget.projectionAttempt();
+    exhausts(() => budget.projectionAttempt());
+    for (let step = 0; step < 3 * 1_500_000; step += 1) budget.euclideanStep();
+    exhausts(() => budget.euclideanStep());
+    const bits = new ExactProofBudget();
+    bits.raise(3);
+    bits.stored((1n << 16_383n) | 1n);
+    exhausts(() => bits.stored(1n << 16_384n));
+    const product = new ExactProofBudget({}, 2);
+    product.raise(4);
+    exhausts(() => product.product(1n << 8_191n, 1n << 8_192n));
+  });
+
+  test("a raise from a scaled budget uses the new multiplier, not a product", () => {
+    const budget = new ExactProofBudget({}, 2);
+    budget.raise(3);
+    budget.operation(30_000_000);
+    exhausts(() => budget.operation());
+  });
+
+  test("lower limits stay absolute: a raise clamps them exactly as the constructor does", () => {
+    const lowered = new ExactProofBudget({ operations: 5, integerBits: 8 });
+    lowered.raise(4);
+    lowered.operation(5);
+    exhausts(() => lowered.operation());
+    const narrow = new ExactProofBudget({ integerBits: 8 });
+    narrow.raise(4);
+    narrow.stored(255n);
+    exhausts(() => narrow.stored(256n));
+    const clamped = new ExactProofBudget({ euclideanSteps: 4_000_000 });
+    for (let step = 0; step < 1_500_000; step += 1) clamped.euclideanStep();
+    exhausts(() => clamped.euclideanStep());
+    const raised = new ExactProofBudget({ euclideanSteps: 4_000_000 });
+    raised.raise(2);
+    for (let step = 0; step < 3_000_000; step += 1) raised.euclideanStep();
+    exhausts(() => raised.euclideanStep());
+  });
+
+  test("at most one raise, never below the current multiplier, only to safe-integer ceilings; a rejected raise leaves the budget unchanged", () => {
+    const twice = new ExactProofBudget();
+    twice.raise(1);
+    expect(() => twice.raise(2), "second raise").toThrow(RangeError);
+    twice.operation(10_000_000);
+    exhausts(() => twice.operation());
+    const scaled = new ExactProofBudget({}, 3);
+    expect(() => scaled.raise(2), "below the current multiplier").toThrow(
+      RangeError,
+    );
+    scaled.operation(30_000_000);
+    exhausts(() => scaled.operation());
+    for (const multiplier of [0, -1, 1.5, Number.NaN, 2 ** 53, 2 ** 30]) {
+      const budget = new ExactProofBudget();
+      expect(() => budget.raise(multiplier), String(multiplier)).toThrow(
+        RangeError,
+      );
+      budget.operation(10_000_000);
+      exhausts(() => budget.operation());
+      const retry = new ExactProofBudget();
+      expect(() => retry.raise(multiplier)).toThrow(RangeError);
+      retry.raise(2);
+      retry.operation(20_000_000);
+      exhausts(() => retry.operation());
+    }
+  });
+});
