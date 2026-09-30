@@ -239,6 +239,8 @@ export function createNativeOffsetChainHarness(options: {
     splineEnds,
     pairChain,
     nativeChain,
+    /** Native commit → solve (must be solved) → the accepted pair only (T08b-g1 frame rows). */
+    solvedPair,
     accepted,
     /** Advances the shared native commit sequence (constraint tool commits). */
     nextSequence: () => (sequence += 1),
@@ -696,6 +698,80 @@ export const POSITIONAL_WRAPS = {
     [-1, 0],
   ],
 } as const satisfies Record<string, readonly Vector[]>;
+
+/** The positional-closure wraps as rows (T08b-g1 frame rows), d = ±0.01. */
+export function positionalWrapRows(): readonly CornerMatrixRow[] {
+  return Object.entries(POSITIONAL_WRAPS).flatMap(([name, points]) =>
+    [0.01, -0.01].map(
+      (distance): CornerMatrixRow => ({
+        row: name,
+        distance,
+        build: (h) => [positionalClosureSpline(h, points)],
+      }),
+    ),
+  );
+}
+
+/** One T08b-g1 frame row on the offset-chain harness of its family. */
+export interface OffsetFrameChainRow extends CornerMatrixRow {
+  /**
+   * `matrix`: the corner-matrix solve tolerances; `native`: the editor
+   * tolerances (S2, convex-arc native and positional-wrap rows).
+   */
+  readonly harness: "matrix" | "native";
+  readonly family:
+    | "corner matrix"
+    | "convex arc"
+    | "S2"
+    | "S2 B"
+    | "positional wrap";
+}
+
+/**
+ * Every native offset-chain row of the corner-matrix, convex-arc, S2 and
+ * positional-wrap families (T08b-g1 plan agreement), on the harness each
+ * row is measured on (the D3 rows are `seedArcRows`).
+ */
+export function offsetFrameChainRows(): readonly OffsetFrameChainRow[] {
+  const tag = (
+    rows: readonly CornerMatrixRow[],
+    family: OffsetFrameChainRow["family"],
+    harness: OffsetFrameChainRow["harness"],
+  ) => rows.map((row): OffsetFrameChainRow => ({ ...row, family, harness }));
+  return [
+    ...tag(cornerMatrixRows(), "corner matrix", "matrix"),
+    ...tag(convexArcMatrixRows(), "convex arc", "matrix"),
+    ...tag(convexArcNativeRows(), "convex arc", "native"),
+    ...tag(splineSplineCornerRows(), "S2", "native"),
+    ...tag(splineLineShallowRows(), "S2 B", "native"),
+    ...tag(positionalWrapRows(), "positional wrap", "native"),
+  ];
+}
+
+/**
+ * T08b-g1 review R2: a native line↔line corner through V = (0, 0), from
+ * (−1, −1) to (1 + k·2⁻⁵², 1 − k·2⁻⁵²) (a right turn of about k ulps),
+ * left offset d = 0.25 (convex). With its F1 arc, at k = 1 the arc's
+ * binary64 atan2 sweep wraps across 0/2π; at k = 2 it does not (found by a
+ * deterministic search, `T08b-g1-evidence/review-fixes/probes`). The SEL
+ * absorbs this corner natively.
+ */
+export function nearCollinearCornerRow(ulps: number): CornerMatrixRow {
+  return {
+    row: `LL-ulp${ulps}`,
+    distance: 0.25,
+    build: (h) => {
+      const a = h.drawLine([], [-1, -1], [0, 0]);
+      const [, end] = h.lineEnds(a);
+      return [
+        a,
+        h.drawLine([a], [0, 0], [1 + ulps * 2 ** -52, 1 - ulps * 2 ** -52], {
+          start: end,
+        }),
+      ];
+    },
+  };
+}
 
 /**
  * T08b-f native arc authoring seam (injected by the spec, as the line/spline
@@ -1442,6 +1518,19 @@ export function seedArcRows(): readonly SeedArcRow[] {
     [0.01, -0.01, 0.1, -0.1],
   );
   return rows;
+}
+
+/**
+ * T08b-g1 micro seed arcs ([TECH] G10): a native quarter arc (r = 1) offset
+ * inward to a certified radius below 1e-6 (0 < R < 1e-6, the range T08b-f
+ * newly accepts); published as certified with no new threshold.
+ */
+export function microSeedArcRows(): readonly SeedArcRow[] {
+  const quarter = (h: NativeArcOffsetHarness): SeedArcSketch => {
+    const drawn = h.arc(h.empty(), [0, 0], [1, 0], [0, 1]);
+    return { definition: drawn.definition, seeds: [drawn.id] };
+  };
+  return [{ row: "quarter arc micro", distance: 1 - 2 ** -21, build: quarter }];
 }
 
 /**
