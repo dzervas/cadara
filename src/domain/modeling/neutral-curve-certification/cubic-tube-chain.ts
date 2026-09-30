@@ -88,7 +88,9 @@ import {
  *   ε* = ε + c_s + c_e ≤ τ, strictly < τ when either end is convex; K3 radius
  *   r = ε + δ⁺ of each convex end, inflating BOTH leaves of a convex knot.
  * - K3 clearance of every non-join pair: exact control-polygon boxes farther
- *   apart than r_i + r_j, by exact dyadic de Casteljau subdivision.
+ *   apart than r_i + r_j, by exact dyadic de Casteljau subdivision. An exact
+ *   broad phase (T08b-f0) skips only pairs whose r-inflated top-level boxes
+ *   are strictly disjoint on an axis, which the first exact test rejects.
  *
  * The corrected reference O* concatenates the retained one-sided offsets
  * (between the ACTUAL unique crossing parameters τ_s* ≤ t_s, 1 − τ_e* ≤ t_e,
@@ -331,6 +333,10 @@ const VERTEX_PRECHARGE = 64;
 const RETRY_ENTRY_CHARGE = 64;
 /** Fixed per-declared-arc precharge (T08b-e), before its authorization. */
 const ARC_PRECHARGE = 64;
+/** Fixed per-leaf precharge of its top-level K3 box (T08b-f0), before it. */
+const K3_LEAF_BOX_PRECHARGE = 16;
+/** Fixed per-leaf precharge of the K3 broad-phase sweep, before it. */
+const K3_SWEEP_PRECHARGE = 16;
 const J2_MESSAGES = {
   cone: "The source tangents and leaf hodographs are not proved inside the join cone.",
   root: "A verified square-root bound is not finite and positive.",
@@ -341,6 +347,26 @@ const J2_MESSAGES = {
   unique: "The concave one-sided offsets are not proved to cross only once.",
   exists: "The concave one-sided offsets are not proved to cross.",
 } as const;
+
+/**
+ * Deterministic stable merge sort; `ordered(a, b)` keeps a before b. The
+ * comparison count depends on the input only, never on the engine's sort.
+ */
+function mergeSort<T>(
+  items: readonly T[],
+  ordered: (first: T, second: T) => boolean,
+): T[] {
+  if (items.length < 2) return [...items];
+  const middle = items.length >> 1;
+  const left = mergeSort(items.slice(0, middle), ordered);
+  const right = mergeSort(items.slice(middle), ordered);
+  const merged: T[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < left.length && j < right.length)
+    merged.push(ordered(left[i]!, right[j]!) ? left[i++]! : right[j++]!);
+  return [...merged, ...left.slice(i), ...right.slice(j)];
+}
 
 function uncertain(
   code: string,
@@ -3192,9 +3218,78 @@ function certifyChain(
   const total = count + arcLeaves.length;
   const itemOf = (leaf: number): K3Item =>
     leaf < count ? poles[leaf]! : arcLeaves[leaf - count]!;
+  // F9 (T08b-f0): each leaf's top-level exact box once per attempt, charged
+  // before its work; the bisection's pops read it (pure memoization), and
+  // its r-inflation [lo − r, hi + r] per axis feeds the broad phase. A leaf
+  // without a box or with r < 0 stays out of the broad phase.
+  const leafBoxes = new Map<K3Item, ReturnType<typeof arcBox>>();
+  const inflated: (readonly ExactRange[] | null)[] = [];
+  for (let leaf = 0; leaf < total; leaf += 1) {
+    budget.operation(K3_LEAF_BOX_PRECHARGE);
+    const item = itemOf(leaf);
+    const bounds = isArc(item) ? arcBox(item) : box(item);
+    leafBoxes.set(item, bounds);
+    const radius = radii[leaf]!;
+    inflated.push(
+      bounds && compareExact(radius, zero, budget) >= 0
+        ? bounds.map(
+            ([low, high]): ExactRange => [
+              subtractExact(low, radius, budget),
+              addExact(high, radius, budget),
+            ],
+          )
+        : null,
+    );
+  }
+  const boxOf = (item: K3Item) => {
+    const cached = leafBoxes.get(item);
+    return cached !== undefined
+      ? cached
+      : isArc(item)
+        ? arcBox(item)
+        : box(item);
+  };
+  // Exact sweep over the inflated x-extents (sorted by exact lower end): a
+  // non-join pair is a candidate iff its inflated boxes overlap (closed) on
+  // both axes. Every other boxed pair is strictly disjoint on some axis.
+  budget.operation(K3_SWEEP_PRECHARGE * total);
+  const broadPairs = new Set<string>();
+  let active: number[] = [];
+  for (const leaf of mergeSort(
+    [...inflated.keys()].filter((index) => inflated[index]),
+    (a, b) =>
+      compareExact(inflated[a]![0]![0], inflated[b]![0]![0], budget) <= 0,
+  )) {
+    const [x, y] = inflated[leaf]!;
+    active = active.filter(
+      (other) => compareExact(inflated[other]![0]![1], x![0], budget) >= 0,
+    );
+    for (const other of active) {
+      const first = Math.min(leaf, other);
+      const second = Math.max(leaf, other);
+      if (isJoin(first, second)) continue;
+      const otherY = inflated[other]![1]!;
+      if (
+        compareExact(otherY[1], y![0], budget) >= 0 &&
+        compareExact(y![1], otherY[0], budget) >= 0
+      )
+        broadPairs.add(`${first}:${second}`);
+    }
+    active.push(leaf);
+  }
   for (let first = 0; first < total; first += 1) {
+    // This row's pair enumeration (join lookups, skipped pairs' records).
+    budget.operation(total - first - 1);
     for (let second = first + 1; second < total; second += 1) {
       if (isJoin(first, second)) continue;
+      if (
+        inflated[first] &&
+        inflated[second] &&
+        !broadPairs.has(`${first}:${second}`)
+      ) {
+        clearedPairs.push([first, second]);
+        continue;
+      }
       const radius = addExact(radii[first]!, radii[second]!, budget);
       const radiusSquared = multiplyExact(radius, radius, budget);
       const stack: (readonly [K3Item, K3Item])[] = [
@@ -3207,8 +3302,8 @@ function certifyChain(
       let splits = 0;
       while (stack.length > 0) {
         const [left, right] = stack.pop()!;
-        const leftBox = isArc(left) ? arcBox(left) : box(left);
-        const rightBox = isArc(right) ? arcBox(right) : box(right);
+        const leftBox = boxOf(left);
+        const rightBox = boxOf(right);
         if (!leftBox || !rightBox)
           return unproven(
             "An arc wedge box has no verified positive square-root bound.",

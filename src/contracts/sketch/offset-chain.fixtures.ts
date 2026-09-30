@@ -554,7 +554,19 @@ export function uSlotPolygon(
   return patches;
 }
 
-/** SS-60's outgoing spline fit points (the §1.5 matrix row). */ /** SS-60's outgoing spline fit points (the §1.5 matrix row). */
+/**
+ * Outline of a regular n-gon of circumradius `radius` (counter-clockwise from
+ * the +x axis), for `uSlotPolygon` capacity rows: an outward offset gives
+ * every corner a T08b-e joint arc (a rounded n-gon).
+ */
+export function regularPolygonOutline(n: number, radius = 2): Vector[] {
+  return Array.from({ length: n }, (_, k): Vector => {
+    const angle = (2 * Math.PI * k) / n;
+    return [radius * Math.cos(angle), radius * Math.sin(angle)];
+  });
+}
+
+/** SS-60's outgoing spline fit points (the §1.5 matrix row). */
 export const SS_60_OUTGOING: readonly Vector[] = [
   [2, 0],
   [2.5, 0.7],
@@ -641,5 +653,46 @@ export const POSITIONAL_WRAPS = {
     [0.5, 0],
     [0, 0.6],
     [-0.5, 0.0005],
+  ],
+  /**
+   * A mirror-symmetric 34-point zig-zag (parallel closure, SEL sized 1): the
+   * heavy staged-cap row after the T08b-f0 broad phase (378 leaves at
+   * d = 0.05, 204 at d = −0.01).
+   */
+  "wrap-zig34": [
+    [0, 0],
+    [1, 0],
+    [2, 0.5],
+    [1.3, 1.2],
+    [2, 1.9],
+    [1.3, 2.6],
+    [2, 3.3],
+    [1.3, 4],
+    [2, 4.7],
+    [1.3, 5.4],
+    [2, 6.1],
+    [1.3, 6.8],
+    [2, 7.5],
+    [1.3, 8.2],
+    [2, 8.9],
+    [1.3, 9.6],
+    [2, 10.3],
+    [0, 11.7],
+    [-2, 10.3],
+    [-1.3, 9.6],
+    [-2, 8.9],
+    [-1.3, 8.2],
+    [-2, 7.5],
+    [-1.3, 6.8],
+    [-2, 6.1],
+    [-1.3, 5.4],
+    [-2, 4.7],
+    [-1.3, 4],
+    [-2, 3.3],
+    [-1.3, 2.6],
+    [-2, 1.9],
+    [-1.3, 1.2],
+    [-2, 0.5],
+    [-1, 0],
   ],
 } as const satisfies Record<string, readonly Vector[]>;
