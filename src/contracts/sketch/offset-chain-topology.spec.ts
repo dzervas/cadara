@@ -78,6 +78,7 @@ import {
   positionalClosureSpline,
   splineLineShallowRows,
   splineSplineCornerRows,
+  regularPolygonOutline,
   uSlotPolygon,
   type AcceptedPair,
   type Authored,
@@ -3946,8 +3947,8 @@ describe("T08b-b S2: native spline→spline graph trims under R_C′ (terminal l
   // integerBits 722 of 16 384 (4.4 %) here; the same chain's resolver request
   // uses 14 756 bits (90.1 %), which stays the binding meter.
   const NATIVE_GRAPH_METER = {
-    operations: 245_596,
-    euclideanSteps: 68_158,
+    operations: 240_522,
+    euclideanSteps: 66_762,
     integerBits: 722,
   };
   test("native SS-60 d = 0.01 via the wrapper: exact whole-request literal on operations, Euclid and bits; count − 1 and staged caps inside S2 exhaust", () => {
@@ -3995,10 +3996,10 @@ describe("T08b-b S2: native spline→spline graph trims under R_C′ (terminal l
       );
     }
     // Staged caps inside the S2 stage (stage probe: operations
-    // [42 843, 221 475], Euclid [10 230, 61 708]) and 0.92 inside the Lemma-C
+    // [42 843, 221 475], Euclid [10 230, 61 708]) and 0.94 inside the Lemma-C
     // glue stage: exhaustion propagates. Load-bearing swallow killers: keep.
     for (const kind of ["operations", "euclideanSteps"] as const)
-      for (const fraction of [0.5, 0.85, 0.92])
+      for (const fraction of [0.5, 0.85, 0.94])
         expect(
           under({ [kind]: Math.floor(NATIVE_GRAPH_METER[kind] * fraction) }),
           `${kind} ${fraction}`,
@@ -4264,7 +4265,7 @@ describe("T08b-c Q4-E1: native band rows through the endpoint-local ε", () => {
     [
       "s2",
       "C φ=0.050 0.01",
-      { operations: 289_303, euclideanSteps: 81_779, integerBits: 838 },
+      { operations: 284_523, euclideanSteps: 80_477, integerBits: 838 },
       // S2 local window: operations [189 124, 259 997], Euclid [53 534, 73 872].
       [
         ["operations", 189_125],
@@ -4277,7 +4278,7 @@ describe("T08b-c Q4-E1: native band rows through the endpoint-local ε", () => {
     [
       "matrix",
       "SL-loop -0.01",
-      { operations: 124_145, euclideanSteps: 30_300, integerBits: 424 },
+      { operations: 89_681, euclideanSteps: 21_970, integerBits: 424 },
       // Two Lemma-T upgrades in the leaf loop: operations [54 844, 63 019] and
       // [64 164, 72 218], Euclid [13 125, 15 316] and [15 600, 17 744].
       [
@@ -4514,8 +4515,8 @@ describe("T08b-d SEL: declared vertices, adoption, U1 absorption", () => {
   // d = 0.01, measured on this implementation): count passes; count − 1 and
   // staged caps inside the vertex stage exhaust (T08b-d-evidence/stages).
   const SL_TINY_METER = {
-    operations: 155_461,
-    euclideanSteps: 43_400,
+    operations: 157_219,
+    euclideanSteps: 43_768,
     integerBits: 1_007,
   };
   test("native SL-tiny d = 0.01 via SEL: exact certifier literal; count − 1 and staged caps exhaust on one budget", () => {
@@ -4596,11 +4597,12 @@ describe("T08b-d SEL: declared vertices, adoption, U1 absorption", () => {
       });
   }, 120_000);
 
-  // wrap-near4 1e-3 d = −0.01 certifier literal (40 leaves; K3-bound, Euclid
-  // 72 % of one cap): count passes, count − 1 exhausts (operations).
+  // wrap-near4 1e-3 d = −0.01 certifier literal (40 leaves; Euclid 9.8 % of
+  // one cap after the T08b-f0 broad phase, 72 % before): count passes,
+  // count − 1 exhausts (operations).
   const WRAP_NEAR_METER = {
-    operations: 4_143_742,
-    euclideanSteps: 1_085_975,
+    operations: 565_323,
+    euclideanSteps: 146_824,
     integerBits: 398,
   };
   test("native wrap-near4 1e-3 d = −0.01: exact certifier literal of the absorbed positional vertex; count − 1 exhausts", () => {
@@ -4937,8 +4939,8 @@ describe("T08b-d SEL: declared vertices, adoption, U1 absorption", () => {
     const loop = sel(nativeRow("matrix", "SL-loop -0.01").declared);
     verifiedOf(loop);
     expect(meterOf(loop.snapshots.at(-1)!)).toEqual({
-      operations: 124_145,
-      euclideanSteps: 30_300,
+      operations: 89_681,
+      euclideanSteps: 21_970,
       integerBits: 424,
     });
     for (const label of ["SL-90 0.01", "LS-90 0.01", "SL-shallow -0.01"]) {
@@ -5333,8 +5335,8 @@ describe("T08b-d SEL: declared vertices, adoption, U1 absorption", () => {
   };
   // Flip whole-request certifier literal (two attempts, ONE staged budget).
   const FLIP_METER = {
-    operations: 63_357,
-    euclideanSteps: 13_544,
+    operations: 65_932,
+    euclideanSteps: 14_045,
     integerBits: 380,
   };
   test("fabricated magnitude flip: a Lemma-T root-reach failure flips the trim to an absorbed vertex on attempt 2 of ONE staged budget; the control verifies as a trim", () => {
@@ -5640,13 +5642,13 @@ describe("T08b-d SEL: declared vertices, adoption, U1 absorption", () => {
     );
   });
 
-  test("R9 staged cap (native, zero queries): wrap-flat4 d = +0.05 exceeds ONE production Euclid ceiling, so attempt 1 of a 2-attempt request exhausts exactly as today, stays exhausted, and attempt k may use k·C", () => {
+  test("R9 staged cap (native, zero queries): wrap-zig34 d = +0.05 exceeds ONE production Euclid ceiling, so attempt 1 of a 2-attempt request exhausts exactly as today, stays exhausted, and attempt k may use k·C", () => {
     /** SEL with the real certifier; returns the verdict and the piece request. */
     const capture = (distance: number) => {
       const requests: PieceTubeChainRequest[] = [];
       const real = createCertifiedCubicTubeChain();
       const result = certifyDeclaredOffsetChain(
-        wrap("wrap-flat4", distance).declared,
+        wrap("wrap-zig34", distance).declared,
         query,
         {
           openRequest: (attempts) => {
@@ -5667,7 +5669,7 @@ describe("T08b-d SEL: declared vertices, adoption, U1 absorption", () => {
       kind: "uncertain",
       code: "exact-query-proof-budget-exhausted",
     };
-    // Today (attempts = 1): the 50-leaf wrap needs ≈ 1.73M Euclid > 1.5M.
+    // Today (attempts = 1): the 378-leaf wrap needs ≈ 2.16M Euclid > 1.5M.
     const heavy = capture(0.05);
     expect(heavy.result).toMatchObject({
       ok: false,
@@ -5680,14 +5682,14 @@ describe("T08b-d SEL: declared vertices, adoption, U1 absorption", () => {
       staged.certifyPieceChain(heavy.request),
       "attempt 1 capped at 1·C",
     ).toMatchObject(exhausted);
-    // Sticky: a cheap second attempt (the 40-leaf d = −0.01 wrap, ≈ 1.04M
+    // Sticky: a cheap second attempt (the 204-leaf d = −0.01 wrap, ≈ 1.09M
     // Euclid, verifies alone) never works after an exhausted attempt.
     const light = capture(-0.01);
     expect(light.result.ok).toBe(true);
     expect(staged.certifyPieceChain(light.request), "sticky").toMatchObject(
       exhausted,
     );
-    // Stage k is k·C: two light attempts (≈ 2.08M Euclid cumulative) verify.
+    // Stage k is k·C: two light attempts (≈ 2.18M Euclid cumulative) verify.
     const twice = createCertifiedCubicTubeChain().openRequest(2);
     expect(twice.certifyPieceChain(light.request).kind).toBe("verified");
     expect(twice.certifyPieceChain(light.request).kind, "stage 2 = 2·C").toBe(
@@ -5930,8 +5932,8 @@ describe("T08b-d SEL: declared vertices, adoption, U1 absorption", () => {
     // absorption verifies, both on ONE staged budget (count / count − 1).
     const ARC_FIRST = { absorptionFirst: false, shortArcPretest: false };
     const FALLBACK_METER = {
-      operations: 131_747,
-      euclideanSteps: 32_527,
+      operations: 122_088,
+      euclideanSteps: 29_884,
       integerBits: 432,
     };
     test("verified after fallback (test-only policy, arc first): C φ = 0.005 d = −0.01's arc fails K3 tagged, attempt 2 absorbs and verifies on ONE staged budget; count / count − 1 and staged caps in the retry", () => {
@@ -5992,15 +5994,15 @@ describe("T08b-d SEL: declared vertices, adoption, U1 absorption", () => {
         );
       }
       // Staged caps inside the fallback retry: its fixed entry charge, its
-      // vertex/composition stage and its K3 (stages/: attempt 1 = 68 854 ops,
-      // attempt-2 K3 from 117 990 ops / 29 064 Euclid).
-      expect(snapshots[0]!.operations).toBe(68_854);
+      // vertex/composition stage and its K3 (stages/: attempt 1 = 63 943 ops,
+      // attempt-2 K3 from 113 079 ops / 27 716 Euclid).
+      expect(snapshots[0]!.operations).toBe(63_943);
       for (const [kind, cap] of [
-        ["operations", 68_854 + 32],
+        ["operations", 63_943 + 32],
         ["operations", 90_000],
-        ["operations", 125_000],
+        ["operations", 117_000],
         ["euclideanSteps", 25_000],
-        ["euclideanSteps", 31_000],
+        ["euclideanSteps", 28_500],
       ] as const)
         expect(under({ [kind]: cap }), `${kind} ${cap}`).toMatchObject({
           ok: false,
@@ -6140,9 +6142,9 @@ describe("T08b-d SEL: declared vertices, adoption, U1 absorption", () => {
       };
     };
     const MIXED_METER = {
-      operations: 181_925,
-      euclideanSteps: 40_076,
-      integerBits: 424,
+      operations: 181_736,
+      euclideanSteps: 39_960,
+      integerBits: 380,
     };
     test("mixed flip + arc fallback on ONE staged budget (fabricated, test-only arc-first policy): attempt 1 flips the trim, attempt 2's arc fails K3 tagged, attempt 3 absorbs both and verifies; count / count − 1, staged cap in the fallback retry", () => {
       const declared = flipThenArcChain();
@@ -6639,13 +6641,13 @@ describe("T08b-d SEL: declared vertices, adoption, U1 absorption", () => {
       expect(jvp.arcs.map((arc) => arc.jointIndex)).toEqual([1]);
     }, 120_000);
 
-    // Native U-slot certifier literal (closed, 8 lines, 19 leaves; K3 is 90 %
+    // Native U-slot certifier literal (closed, 8 lines, 19 leaves; K3 is 84 %
     // of its operations; stages/: K3 from 242 649 ops, first arc-wedge split
-    // at 2 273 216 ops / 570 451 Euclid).
+    // at 1 345 825 ops / 336 171 Euclid).
     const U_SLOT_METER = {
-      operations: 2_635_660,
-      euclideanSteps: 660_756,
-      integerBits: 835,
+      operations: 1_536_143,
+      euclideanSteps: 383_905,
+      integerBits: 518,
     };
     test("native closed U-slot (rotated 0.5, d = −0.48): six F1 arcs and two concave trims verify; K3 bisects arc wedges; count / count − 1 on operations and a staged cap inside the first arc split", () => {
       const harness = harnesses.matrix;
@@ -6682,7 +6684,7 @@ describe("T08b-d SEL: declared vertices, adoption, U1 absorption", () => {
           }),
         );
       expect(under(U_SLOT_METER.operations).ok).toBe(true);
-      for (const limit of [U_SLOT_METER.operations - 1, 2_273_217])
+      for (const limit of [U_SLOT_METER.operations - 1, 1_345_826])
         expect(under(limit), `operations ${limit}`).toMatchObject({
           ok: false,
           code: codes.topologyUncertain,
@@ -6690,6 +6692,54 @@ describe("T08b-d SEL: declared vertices, adoption, U1 absorption", () => {
             "exact-query-proof-budget-exhausted",
           ),
         });
+    }, 120_000);
+
+    // Capacity row (T08b-f0 broad phase): the closed native 24-gon offset
+    // outward (24 lines, 24 F1 arcs, 48 leaves, 1 080 K3 pairs) exhausted one
+    // Euclid ceiling before (≈ 2.25M, 150 %); it now needs 21 % of it.
+    const POLYGON_24_METER = {
+      operations: 1_219_935,
+      euclideanSteps: 316_937,
+      integerBits: 470,
+    };
+    test("native closed 24-gon offset outward (d = −0.1): 24 F1 arcs verify within one production ceiling; count / count − 1 on operations, Euclid and bits", () => {
+      const harness = harnesses.matrix;
+      harness.resetSequence();
+      const chain = harness.nativeChain(
+        uSlotPolygon(harness, 0, regularPolygonOutline(24)),
+        -0.1,
+      );
+      const run = sel(chain.declared);
+      const certificate = expectCanonicalArcs(chain.declared, run);
+      expect(run.sizes, "no concave corner").toEqual([0]);
+      expect(run.snapshots).toHaveLength(1);
+      expect(certificate.arcs).toHaveLength(24);
+      expect(certificate.leaves).toHaveLength(48);
+      expect(certificate.clearedPairs).toHaveLength(1_080);
+      expect(meterOf(run.snapshots.at(-1)!)).toEqual(POLYGON_24_METER);
+      const under = (limits: Record<string, number>) =>
+        certifyDeclaredOffsetChain(
+          chain.declared,
+          query,
+          createCertifiedCubicTubeChainWithLowerBudgetForTest(limits),
+        );
+      for (const kind of [
+        "operations",
+        "euclideanSteps",
+        "integerBits",
+      ] as const) {
+        expect(under({ [kind]: POLYGON_24_METER[kind] }).ok, kind).toBe(true);
+        expect(
+          under({ [kind]: POLYGON_24_METER[kind] - 1 }),
+          kind,
+        ).toMatchObject({
+          ok: false,
+          code: codes.topologyUncertain,
+          message: expect.stringContaining(
+            "exact-query-proof-budget-exhausted",
+          ),
+        });
+      }
     }, 120_000);
 
     test("rule Z (T6) under the test-only arc-first policy: SL-tiny d = −0.01's zero-length arc (A′ = B′ bitwise) is never attempted; the vertex is absorbed in ONE attempt", () => {
@@ -7312,14 +7362,14 @@ describe("T08b-d SEL: declared vertices, adoption, U1 absorption", () => {
     // Native certifier literals through SEL (measured on this implementation;
     // stage map in T08b-e-evidence/stages/).
     const SL_90_METER = {
-      operations: 62_503,
-      euclideanSteps: 14_283,
-      integerBits: 513,
+      operations: 46_417,
+      euclideanSteps: 10_355,
+      integerBits: 309,
     };
     const LL_90_METER = {
-      operations: 28_822,
-      euclideanSteps: 5_265,
-      integerBits: 533,
+      operations: 25_754,
+      euclideanSteps: 4_429,
+      integerBits: 329,
     };
     test.each([
       ["matrix", "SL-90 -0.01", SL_90_METER],
@@ -7360,7 +7410,7 @@ describe("T08b-d SEL: declared vertices, adoption, U1 absorption", () => {
     test("native SL-90 d = −0.01: staged caps inside the arc stages (precharge/authority, admission, ε, K1, records) exhaust as themselves", () => {
       const declared = arcRow("matrix", "SL-90 -0.01").declared;
       // Stage map (stages/): arc precharged 12 591 ops → admitted 16 855 →
-      // ε 20 918 → cones 23 479 → records 25 740 → K3 27 262 … 61 135;
+      // ε 20 918 → cones 23 479 → records 25 740 → K3 27 262 … 45 049;
       // Euclid admitted 3 532 → ε 4 486 → cones 5 066.
       for (const [kind, cap] of [
         ["operations", 12_592],

@@ -815,6 +815,39 @@ describe("cubic tube chain: exact boundaries and adversaries", () => {
     ).toEqual([[0, 2]]);
   });
 
+  test("K3 broad phase (T08b-f0): r-inflated boxes that only touch are sent to the exact test on either axis, never skipped", () => {
+    // The same boundary pair transposed onto the y axis: its inflated boxes
+    // touch exactly at y = 1 + 2⁻¹¹ (the x-axis case is the row above).
+    const transposed = (error: number) =>
+      gapChain(error).map((tube) => ({
+        ...tube,
+        poles: tube.poles.map(([x, y]) => [y, x]) as unknown as SplinePoles,
+        reference: {
+          ...tube.reference,
+          derivative: [
+            tube.reference.derivative[1],
+            tube.reference.derivative[0],
+          ] as Box,
+          sourcePoles: tube.reference.sourcePoles.map(([x, y]) => [
+            y,
+            x,
+          ]) as unknown as SplinePoles,
+        },
+      }));
+    expect(certifier.certifyChain(request(transposed(2 ** -11)))).toMatchObject(
+      {
+        kind: "uncertain",
+        code: "cubic-tube-clearance-unproven",
+        first: 0,
+        second: 2,
+      },
+    );
+    expect(
+      verified(certifier.certifyChain(request(transposed(2 ** -11 - 2 ** -60))))
+        .clearedPairs,
+    ).toEqual([[0, 2]]);
+  });
+
   test("diagnostic only: the endpoint early exit names the overlap instead of exhausting the budget", () => {
     // Soundness never depends on this exit; without it the boundary case
     // subdivides until the shared budget fails closed as exhausted.
@@ -1595,13 +1628,13 @@ describe("cubic tube chain: one shared proof budget per request", () => {
       "F1 (S1′ joins only)",
       F1,
       0.2,
-      { operations: 33_173, euclideanSteps: 8_248 },
+      { operations: 29_524, euclideanSteps: 7_273 },
     ],
     [
       "asymmetric F1 (one concave J2′ knot)",
       F1_ASYM,
       0.2,
-      { operations: 316_931, euclideanSteps: 91_109 },
+      { operations: 282_643, euclideanSteps: 82_064 },
     ],
   ] as const;
 
@@ -2382,7 +2415,7 @@ describe("piece tube chain (L1b): Lemma-T trims under one meter", () => {
       [
         "composition band (leaf-loop upgrades)",
         () => localU(EPS, 2 * EPS, ownerLike(EPS)),
-        { operations: 19_455, euclideanSteps: 2_337, integerBits: 286 },
+        { operations: 20_139, euclideanSteps: 2_364, integerBits: 286 },
         // Upgrade 1 ops [11 967, 14 317], upgrade 2 [14 863, 17 606].
         [
           ["operations", 12_000], // precharge
@@ -2398,7 +2431,7 @@ describe("piece tube chain (L1b): Lemma-T trims under one meter", () => {
       [
         "window band (trim-stage upgrades)",
         () => localU(2 ** -12, 2 ** -10, ownerLike(2 ** -12)),
-        { operations: 16_535, euclideanSteps: 1_744, integerBits: 286 },
+        { operations: 17_187, euclideanSteps: 1_761, integerBits: 286 },
         // Trim 1 ops [7 917, 10 001], trim 2 [11 889, 14 107].
         [
           ["operations", 7_950], // precharge, trim 1
@@ -2661,16 +2694,16 @@ describe("piece tube chain (L1b): Lemma-T trims under one meter", () => {
       "reversed rise (same-leaf + trim)",
       () => reversedRise(),
       {
-        operations: 8_638,
-        euclideanSteps: 607,
+        operations: 9_236,
+        euclideanSteps: 621,
       },
     ],
     [
       "U chain (two trims on one leaf)",
       () => uChain(1e-5),
       {
-        operations: 21_155,
-        euclideanSteps: 3_822,
+        operations: 22_220,
+        euclideanSteps: 3_976,
       },
     ],
   ] as const;
@@ -2699,8 +2732,8 @@ describe("piece tube chain (L1b): Lemma-T trims under one meter", () => {
 
   test("a single cubic piece without trims is the legacy chain: identical receipt-pinned meter", () => {
     for (const [points, meter] of [
-      [F1, { operations: 33_173, euclideanSteps: 8_248 }],
-      [F1_ASYM, { operations: 316_931, euclideanSteps: 91_109 }],
+      [F1, { operations: 29_524, euclideanSteps: 7_273 }],
+      [F1_ASYM, { operations: 282_643, euclideanSteps: 82_064 }],
     ] as const) {
       const tubes = ownerTubes(points, 0.2).map((tube) => ({
         ...tube,
@@ -2812,7 +2845,7 @@ describe("piece tube chain (L1b): Lemma-T trims under one meter", () => {
       }),
     ).toEqual(EXHAUSTED_RESULT);
     expect(snapshots.map(({ operations }) => operations)).toEqual([
-      21_155, 33_173, 10_000_005,
+      22_220, 29_524, 10_000_005,
     ]);
   });
 
@@ -3614,12 +3647,12 @@ describe("piece tube chain (S2): cubic↔cubic graph trims (certifier-input fixt
   // Whole-request literal of the fabricated baseline, measured on this
   // implementation (T08b-b evidence) and pinned on operations, Euclid and
   // integerBits; the staged caps land INSIDE the S2 stage (stage probe:
-  // operations [2 785, 40 257], Euclid [205, 5 943] of the total); the 0.97
+  // operations [2 785, 40 257], Euclid [205, 5 943] of the total); the 0.95
   // caps land in the Lemma-C glue stage (leaf loop). These staged rows and the
   // bits count − 1 row are load-bearing exhaustion-swallow killers: keep them.
   const GRAPH_METER = {
-    operations: 42_018,
-    euclideanSteps: 6_202,
+    operations: 43_447,
+    euclideanSteps: 6_332,
     integerBits: 187,
   };
   const baseline = () =>
@@ -3668,8 +3701,8 @@ describe("piece tube chain (S2): cubic↔cubic graph trims (certifier-input fixt
     ["operations", 0.9],
     ["euclideanSteps", 0.5],
     ["euclideanSteps", 0.9],
-    ["operations", 0.97],
-    ["euclideanSteps", 0.97],
+    ["operations", 0.95],
+    ["euclideanSteps", 0.95],
   ] as const)(
     "staged cap inside the S2 stage (%s at %s of the literal) exhausts the request, never an S2 failure code",
     (kind, fraction) => {
@@ -3899,8 +3932,8 @@ describe("piece tube chain (S2): cubic↔cubic graph trims (certifier-input fixt
     // integerBits; the staged caps land INSIDE the local branch (stage probe).
     // Load-bearing exhaustion-swallow and precharge killers: keep them.
     const LOCAL_METER = {
-      operations: 53_764,
-      euclideanSteps: 7_678,
+      operations: 55_082,
+      euclideanSteps: 7_802,
       integerBits: 315,
     };
     // Local branch window (stage probe): operations [35 844, 51 003], Euclid
@@ -4865,8 +4898,8 @@ describe("piece tube chain (T08b-d): declared vertices (certifier-input fixtures
   // gap, the only kind that charges the bridge √): observer exact; count
   // passes; count − 1 exhausts on operations, Euclid and bits.
   const VERTEX_PIN = {
-    operations: 8_053,
-    euclideanSteps: 716,
+    operations: 8_945,
+    euclideanSteps: 758,
     integerBits: 276,
   };
   test("fabricated vertex whole-request literal (observer), count / count − 1 on all three meters", () => {
@@ -5667,9 +5700,9 @@ describe("piece tube chain (T08b-e): F1 arcs at convex declared vertices (certif
   // Whole-request literal of the fabricated exact LL-90 arc row (observer):
   // count passes; count − 1 exhausts on operations, Euclid and bits.
   const ARC_PIN = {
-    operations: 17_213,
-    euclideanSteps: 1_671,
-    integerBits: 426,
+    operations: 15_853,
+    euclideanSteps: 1_398,
+    integerBits: 273,
   };
   test("fabricated arc whole-request literal (observer), count / count − 1 on all three meters; staged caps inside the arc stages exhaust as themselves", () => {
     const requestOf = () => arcRequest(rightAngle(), [rightAngleArc()]);
@@ -5707,7 +5740,7 @@ describe("piece tube chain (T08b-e): F1 arcs at convex declared vertices (certif
     }
     // Stage map (T08b-e-evidence/stages/): arc precharged 4 945 ops →
     // admitted 6 053 → ε 6 584 → cones 7 296 → records 7 636 → K3 7 896 …
-    // 16 638; Euclid admitted 308 → ε 314.
+    // 15 278; Euclid admitted 308 → ε 314.
     for (const [kind, cap] of [
       ["operations", 4_946],
       ["operations", 5_500],
@@ -6062,9 +6095,9 @@ describe("piece tube chain (T08b-e): F1 arcs at convex declared vertices (certif
   // Whole-request literal of a gapped fabricated arc (meter review R2): the
   // arc-exit bridge |g|⁺ is a verified, charged √.
   const GAP_ARC_PIN = {
-    operations: 18_787,
-    euclideanSteps: 1_929,
-    integerBits: 432,
+    operations: 17_397,
+    euclideanSteps: 1_651,
+    integerBits: 273,
   };
   test("gapped fabricated arc whole-request literal (observer): the bridge |g|⁺ is a verified √; count / count − 1 on all three meters", () => {
     const requestOf = () =>
@@ -6106,5 +6139,29 @@ describe("piece tube chain (T08b-e): F1 arcs at convex declared vertices (certif
         kind,
       ).toEqual(EXHAUSTED_RESULT);
     }
+  });
+
+  // T08b-f0 review R1: a skipped-pair broad phase must never skip a pair whose
+  // arc wedge box is null (no verified positive √ bound, here because
+  // |a|² = 10³¹⁰ overflows binary64 at τ = 10¹⁵⁰); the pair must reach the
+  // exact test and fail closed.
+  test("an arc wedge with no positive verified √ bound fails its first K3 pair with the √ message, never skipped by the broad phase", () => {
+    const T = 1e155;
+    const p = line([-1, 0], [0, 0], ["p", "v"], { distance: -T });
+    const q = line([0, 0], [0, 1], ["v", "q"], { distance: -T });
+    const result = certifier.certifyPieceChain(
+      arcRequest([p, q], [arcAt([0, 0], T, "counterClockwise")], {
+        distance: -T,
+        modelingTolerance: 1e150,
+      }),
+    );
+    expect(result).toMatchObject({
+      kind: "uncertain",
+      code: "cubic-tube-clearance-unproven",
+      message: "An arc wedge box has no verified positive square-root bound.",
+      first: 0,
+      second: 3,
+      arcJoints: [0],
+    });
   });
 });
