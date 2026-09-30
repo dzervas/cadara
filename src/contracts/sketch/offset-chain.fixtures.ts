@@ -1556,3 +1556,262 @@ export function seedArcCapacityRows(): readonly SeedArcRow[] {
     },
   ];
 }
+
+/**
+ * T08b-g2, labelled "native commit + appended fit points": the native
+ * spline tool commits only its first three fit points (`MIN_SPLINE_POINTS`),
+ * so a longer open spline is a native 3-point commit whose later fit points
+ * are appended as `positionalClosureSpline` appends them (point records
+ * cloned from the commit's own shape, automatic tangents). Nothing else is
+ * changed.
+ */
+export function appendedFitPointsSpline(
+  harness: NativeOffsetChainHarness,
+  points: readonly Vector[],
+  snaps: EndpointSnaps = {},
+): Authored {
+  const patch = harness.drawSpline([], points.slice(0, 3), snaps);
+  const entity = patch.entities[0]!;
+  if (entity.kind !== "spline") throw new Error("not a spline");
+  const template = patch.points[0]!;
+  const extraPoints = points.slice(3).map((position, index) => ({
+    ...template,
+    pointId: `${template.pointId}_extra${index}` as typeof template.pointId,
+    label: `${template.label} extra ${index}`,
+    position: position as typeof template.position,
+  }));
+  const first = entity.pointOccurrences[0]!;
+  const occurrences = [
+    ...entity.pointOccurrences,
+    ...extraPoints.map((point, index) => ({
+      occurrenceId: `${first.occurrenceId}_extra${index}`,
+      pointId: point.pointId,
+      tangent: { kind: "automatic" as const },
+    })),
+  ];
+  return {
+    ...patch,
+    points: [...patch.points, ...extraPoints],
+    entities: [
+      {
+        ...entity,
+        pointOccurrences: occurrences,
+        pointOccurrenceIds: occurrences.map(
+          (occurrence) => occurrence.occurrenceId,
+        ),
+      } as typeof entity,
+    ],
+  };
+}
+
+/**
+ * T08b-g2, labelled "native commit + tangent edit": native commits carry
+ * automatic tangents only, so an authored tangent is an edit of one
+ * occurrence's `tangent` to `{ kind: "authored", vector }` on a native
+ * spline commit. Nothing else is changed.
+ */
+export function tangentEdit(
+  patch: Authored,
+  edits: readonly { readonly occurrence: number; readonly vector: Vector }[],
+): Authored {
+  return {
+    ...patch,
+    entities: patch.entities.map((entity) =>
+      entity.kind !== "spline"
+        ? entity
+        : ({
+            ...entity,
+            pointOccurrences: entity.pointOccurrences.map(
+              (occurrence, index) => {
+                const edit = edits.find((item) => item.occurrence === index);
+                return edit
+                  ? {
+                      ...occurrence,
+                      tangent: {
+                        kind: "authored" as const,
+                        vector: edit.vector,
+                      },
+                    }
+                  : occurrence;
+              },
+            ),
+          } as typeof entity),
+    ),
+  };
+}
+
+/** One T08b-g2 derivative row on the offset-chain harness of its kind. */
+export interface OffsetFrameDerivativeRow extends CornerMatrixRow {
+  readonly harness: "matrix" | "native";
+  /** Why the row is in the FD table (the brief's acceptance row it covers). */
+  readonly covers: string;
+}
+
+/** The S1b fit points (the native tool commits only the first three). */
+const S1B_POINTS: readonly Vector[] = [
+  [0, 0],
+  [1, 0.4],
+  [2, -0.2],
+  [3, 0.3],
+  [4, 0],
+];
+
+/** An 8-point open wave (T08b-g2 G8 row). */
+const WAVE8_POINTS: readonly Vector[] = [
+  [0, 0],
+  [1, 0.4],
+  [2, 0],
+  [3, -0.4],
+  [4, 0],
+  [5, 0.4],
+  [6, 0],
+  [7, -0.4],
+];
+
+/**
+ * T08b-g2 frame-derivative rows on the offset-chain harness: the brief's FD
+ * table rows that are not D3 rows (those are `seedArcRows` by label), the
+ * G8 5- / 8-point splines, the authored-tangent rows and the self-trim
+ * positional wraps at d = +0.01 (T08b-g2 review R1), each labelled.
+ */
+export function offsetFrameDerivativeRows(): readonly OffsetFrameDerivativeRow[] {
+  const matrixRow = (label: string, distance: number, covers: string) => {
+    const row = cornerMatrixRows().find(
+      (item) => item.row === label && item.distance === distance,
+    )!;
+    return { ...row, harness: "matrix" as const, covers };
+  };
+  const selfTrimWrapRow = (label: keyof typeof POSITIONAL_WRAPS) => ({
+    ...positionalWrapRows().find(
+      (item) => item.row === label && item.distance === 0.01,
+    )!,
+    harness: "native" as const,
+    covers:
+      "self-trim queryDomain (T08b-g2 review R1: one positional-closure piece trimmed against itself)",
+  });
+  const archThenTangentEdit = (h: NativeOffsetChainHarness) =>
+    tangentEdit(h.drawSpline([], ARCH_POINTS), [
+      { occurrence: 1, vector: [0.4, 0.05] },
+    ]);
+  return [
+    matrixRow("S1", 0.01, "S1"),
+    matrixRow("S1b", 0.01, "S1b (the native commit keeps 3 fit points)"),
+    {
+      row: "5-point spline (native commit + appended fit points)",
+      distance: 0.01,
+      harness: "matrix",
+      covers: "G8 5-point row",
+      build: (h) => [appendedFitPointsSpline(h, S1B_POINTS)],
+    },
+    {
+      row: "8-point spline (native commit + appended fit points)",
+      distance: 0.01,
+      harness: "matrix",
+      covers: "G8 8-point row",
+      build: (h) => [appendedFitPointsSpline(h, WAVE8_POINTS)],
+    },
+    matrixRow("SL-90", 0.01, "SL-90 +"),
+    matrixRow("SL-90", -0.01, "SL-90 −"),
+    matrixRow("LS-90", 0.01, "LS-90"),
+    matrixRow("SS-60", 0.01, "G8 SS-60 trim row"),
+    matrixRow("SS-60", -0.01, "SS-60 −"),
+    matrixRow("SL-loop", 0.01, "SL-loop +"),
+    matrixRow("SL-loop", -0.01, "SL-loop −"),
+    matrixRow("SL-tiny", 0.01, "step-2(b) absorbed vertex, line adopter"),
+    {
+      row: "SL-tiny then a 165° return (absorbed vertex + F1 arc at the adopting line's other end)",
+      distance: -0.01,
+      harness: "matrix",
+      covers: "absorbed + arc-end row (line adopter)",
+      build: (h) => {
+        const spline = h.drawSpline([], ARCH_POINTS);
+        const line = h.drawLine([spline], [2, 0], [3, -0.1], {
+          start: h.splineEnds(spline)[1],
+        });
+        return [
+          spline,
+          line,
+          h.drawLine([spline, line], [3, -0.1], [2.95, -0.085], {
+            start: h.lineEnds(line)[1],
+          }),
+        ];
+      },
+    },
+    {
+      row: "arch → 2-point spline (C φ=0.005 turn) → line (absorbed vertex + F1 arc at the one-span spline adopter's other end)",
+      distance: -0.01,
+      harness: "native",
+      covers:
+        "absorbed + arc-end row (T08b-e review §7: one-span spline adopter)",
+      build: (h) => {
+        const length = Math.hypot(1, -0.1);
+        const phi = 0.005;
+        const direction: Vector = [
+          (Math.cos(phi) * 1 + Math.sin(phi) * 0.1) / length,
+          (Math.sin(phi) * 1 - Math.cos(phi) * 0.1) / length,
+        ];
+        const first = h.drawSpline([], ARCH_POINTS);
+        const end: Vector = [2 + direction[0], direction[1]];
+        const second = h.drawSpline([first], [[2, 0], end], {
+          start: h.splineEnds(first)[1],
+        });
+        return [
+          first,
+          second,
+          h.drawLine(
+            [first, second],
+            end,
+            [end[0] - direction[1], end[1] + direction[0]],
+            { start: h.splineEnds(second)[1] },
+          ),
+        ];
+      },
+    },
+    {
+      row: "horizontal-ended arch → line → line (native commit + tangent edit): a bitwise-shared parallel vertex (no re-call; the line is the non-keeper) and a trim at the line's other end",
+      distance: 0.01,
+      harness: "matrix",
+      covers: "d math A3 (a line with a vertex end and a trim end)",
+      build: (h) => {
+        const spline = tangentEdit(h.drawSpline([], ARCH_POINTS), [
+          { occurrence: 2, vector: [0.5, 0] },
+        ]);
+        const line = h.drawLine([spline], [2, 0], [3, 0], {
+          start: h.splineEnds(spline)[1],
+        });
+        return [
+          spline,
+          line,
+          h.drawLine([spline, line], [3, 0], [3, 1], {
+            start: h.lineEnds(line)[1],
+          }),
+        ];
+      },
+    },
+    {
+      row: "arch with an authored interior tangent (native commit + tangent edit)",
+      distance: 0.01,
+      harness: "matrix",
+      covers: "tangent authority (interior occurrence)",
+      build: (h) => [archThenTangentEdit(h)],
+    },
+    {
+      row: "SL-90 with an authored tangent at the joined spline end (native commit + tangent edit)",
+      distance: 0.01,
+      harness: "matrix",
+      covers: "tangent authority (trimmed end)",
+      build: (h) => {
+        const spline = tangentEdit(h.drawSpline([], ARCH_POINTS), [
+          { occurrence: 2, vector: [0.35, -0.12] },
+        ]);
+        const [, splineEnd] = h.splineEnds(spline);
+        return [
+          spline,
+          h.drawLine([spline], [2, 0], [2, 1], { start: splineEnd }),
+        ];
+      },
+    },
+    selfTrimWrapRow("wrap-near4 1e-3"),
+    selfTrimWrapRow("wrap-near4s 1e-3"),
+  ];
+}

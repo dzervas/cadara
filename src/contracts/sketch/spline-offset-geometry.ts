@@ -40,7 +40,30 @@ export interface SplineOffsetCubicSpan {
     readonly distance: number;
     readonly localError: SplineOffsetLocalError;
   };
+  /**
+   * T08b-g2 [TECH] G8a: present iff the call had `directions` (in the same
+   * order): this leaf's differential along each direction, computed by the
+   * same formulas as `differential` (with no distance variation), or null
+   * where that direction is unavailable here. See `SplineOffsetInput.directions`.
+   */
+  readonly directions?: readonly SplineOffsetDirectionalDifferential[];
 }
+
+/**
+ * T08b-g2 [TECH] G8a: one directional variation of an owner call's input,
+ * one source-span differential (`SplineSpan.differential` of a fresh
+ * reconstruction with that variation) per input span, in input order.
+ */
+export type SplineOffsetDirection = readonly SplineSpan["differential"][];
+
+/**
+ * One direction's emitted-leaf differential, or null: that direction is
+ * unavailable at this leaf (a non-finite input or derivative, or an
+ * unavailable shared or adopted endpoint pole of that direction).
+ */
+export type SplineOffsetDirectionalDifferential =
+  | SplineOffsetCubicSpan["differential"]
+  | null;
 
 /**
  * The two terms `certifiedError` = up(R + max πᵢ) is made of, as the outward
@@ -128,6 +151,24 @@ export interface SplineOffsetInput {
     readonly start?: AdoptedEndpoint;
     readonly end?: AdoptedEndpoint;
   };
+  /**
+   * T08b-g2 [TECH] G8a: a batched multi-direction differential. Each
+   * emitted leaf then carries `directions`, one entry per direction, from
+   * this ONE call's partition: the same `offsetEndpoint` formulas as
+   * `differential` (the directions never vary the distance), the same knot
+   * and adoption reuse (a shared or adopted pole reuses the neighbour's
+   * pole differential of the same direction, which `sharedEndpoints`
+   * neighbours must then carry for every direction). Geometry and
+   * certification never read a direction: poles, partition, knots, ε, R/πᵢ,
+   * `reference`, `differential`, adoption checks and failures are
+   * byte-identical to the call without the field, and an absent field
+   * yields exactly today's output (no `directions` key). A non-finite
+   * direction (input or derivative) marks only that direction null at the
+   * affected leaves; it never fails the call. A direction whose length is
+   * not the span count, or an adopted neighbour without matching
+   * `directions`, is caller misuse (`RangeError`, before any work).
+   */
+  readonly directions?: readonly SplineOffsetDirection[];
 }
 
 const buffer = new ArrayBuffer(8);
@@ -601,7 +642,18 @@ function sharedSourceKnots(
 interface SharedEndpoint {
   readonly position: SplineVector;
   readonly differential: SplineVector;
+  /** Per direction ([TECH] G8a), present iff the call has `directions`. */
+  readonly directions?: readonly (SplineVector | null)[];
 }
+
+/** A direction's pole differential, null where unavailable or non-finite. */
+const directionalPole = (
+  value: SplineOffsetDirectionalDifferential | undefined,
+  pole: 0 | 3,
+): SplineVector | null => {
+  const differential = value?.poles[pole];
+  return differential && finiteVector(differential) ? differential : null;
+};
 
 const sameVector = (left: SplineVector, right: SplineVector) =>
   Object.is(left[0], right[0]) && Object.is(left[1], right[1]);
@@ -702,7 +754,16 @@ function adoptedEndpoint(
       break;
     }
   }
-  return { position, differential };
+  if (!input.directions) return { position, differential };
+  if (neighbour.directions?.length !== input.directions.length)
+    fail("the neighbour does not carry this call's directions");
+  return {
+    position,
+    differential,
+    directions: neighbour.directions!.map((value) =>
+      directionalPole(value, pole),
+    ),
+  };
 }
 
 function makeOutput(
@@ -713,6 +774,7 @@ function makeOutput(
   hermiteRemainder: number,
   shared: { start?: SharedEndpoint; end?: SharedEndpoint },
   offsetFirst: IntervalVector,
+  directions?: readonly SplineSpan["differential"][],
 ): SplineOffsetCubicSpan | null {
   const start = offsetEndpoint(span, local[0], distance, distanceDifferential);
   const end = offsetEndpoint(span, local[1], distance, distanceDifferential);
@@ -764,6 +826,38 @@ function makeOutput(
     exact(polePerturbation),
   )[1];
   if (!Number.isFinite(certifiedError)) return null;
+  /**
+   * [TECH] G8a: one direction's leaf differential by the same formulas as
+   * `differentialPoles` (no distance variation); reject-only: null when
+   * anything it reads is not finite.
+   */
+  const directional = (
+    source: SplineSpan["differential"],
+    index: number,
+  ): SplineOffsetDirectionalDifferential => {
+    const varied = { ...span, differential: source };
+    if (
+      !source.poles.every(finiteVector) ||
+      !source.interval.every(Number.isFinite)
+    )
+      return null;
+    const from = offsetEndpoint(varied, local[0], distance, 0);
+    const to = offsetEndpoint(varied, local[1], distance, 0);
+    const sharedStart = shared.start && shared.start.directions?.[index];
+    const sharedEnd = shared.end && shared.end.directions?.[index];
+    if (!from || !to || sharedStart === null || sharedEnd === null) return null;
+    const directionalPoles: SplinePoles = [
+      sharedStart ?? from[2],
+      add(from[2], scale(from[3], width / 3)),
+      subtract(to[2], scale(to[3], width / 3)),
+      sharedEnd ?? to[2],
+    ];
+    const sourceInterval = map(source.interval);
+    return directionalPoles.every(finiteVector) &&
+      sourceInterval.every(Number.isFinite)
+      ? { sourceInterval, poles: directionalPoles }
+      : null;
+  };
   return {
     source: span.source,
     sourceInterval: map(span.interval),
@@ -786,6 +880,7 @@ function makeOutput(
         polePerturbations: Object.freeze(polePerturbations),
       }),
     }),
+    ...(directions ? { directions: directions.map(directional) } : {}),
   };
 }
 
@@ -816,6 +911,14 @@ export function approximateSplineOffset(
       sourceLocalInterval: null,
     };
 
+  if (
+    input.directions?.some(
+      (direction) => direction.length !== input.spans.length,
+    )
+  )
+    throw new RangeError(
+      "directions: every direction needs one differential per input span",
+    );
   const knots = sharedSourceKnots(input.spans);
   if (!knots.ok)
     return {
@@ -840,10 +943,20 @@ export function approximateSplineOffset(
     sourceSpanIndex += 1
   ) {
     const span = input.spans[sourceSpanIndex]!;
+    const spanDirections = input.directions?.map(
+      (direction) => direction[sourceSpanIndex]!,
+    );
     const emittedEnd = (item: SplineOffsetCubicSpan | undefined) =>
       item && {
         position: item.poles[3],
         differential: item.differential.poles[3],
+        ...(item.directions
+          ? {
+              directions: item.directions.map((value) =>
+                directionalPole(value, 3),
+              ),
+            }
+          : {}),
       };
     // Span 0 never shares a knot start (no predecessor): the seam is read
     // there, and at the last span only without a smooth wrap.
@@ -857,6 +970,13 @@ export function approximateSplineOffset(
         ? output[0] && {
             position: output[0].poles[0],
             differential: output[0].differential.poles[0],
+            ...(output[0].directions
+              ? {
+                  directions: output[0].directions.map((value) =>
+                    directionalPole(value, 0),
+                  ),
+                }
+              : {}),
           }
         : sourceSpanIndex === input.spans.length - 1
           ? adoptedEnd
@@ -890,6 +1010,7 @@ export function approximateSplineOffset(
           0,
           sharedFor([0, 1]),
           regular.offsetFirst,
+          spanDirections,
         );
         if (!analytic)
           return {
@@ -920,6 +1041,19 @@ export function approximateSplineOffset(
               polePerturbations: Object.freeze([0, 0, 0, 0] as const),
             }),
           }),
+          // [TECH] G8a: as `differential` with no distance variation, each
+          // direction's emitted differential IS its source differential.
+          ...(analytic.directions
+            ? {
+                directions: analytic.directions.map(
+                  (value, index) =>
+                    value && {
+                      ...value,
+                      poles: spanDirections![index]!.poles,
+                    },
+                ),
+              }
+            : {}),
         });
         continue;
       }
@@ -939,6 +1073,7 @@ export function approximateSplineOffset(
             certificate.error,
             sharedFor(local),
             certificate.offsetFirst,
+            spanDirections,
           )
         : null;
       if (certificate.ok && !result)

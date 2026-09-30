@@ -28,17 +28,23 @@ import {
   createSketchSlotContribution,
 } from "@/domain/sketch-editing/operations";
 import { appendInferredSnapConstraints } from "@/domain/editor/sketch-session/tools";
-import { createSessionCommitFactories } from "@/domain/editor/sketch-session/internals";
+import {
+  createSessionCommitFactories,
+  createSketchPointRef,
+} from "@/domain/editor/sketch-session/internals";
 import { createDocumentSolverTolerances } from "@/contracts/solver/schema";
 import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
 import { extractDeclaredOffsetChainConnectivity } from "@/contracts/sketch/offset-chain-connectivity";
 import {
+  ARCH_POINTS,
   CORNER_MATRIX_SOLVE_TOLERANCES,
+  SS_60_OUTGOING,
   createNativeArcOffsetHarness,
   createNativeOffsetChainHarness,
   microSeedArcRows,
   nearCollinearCornerRow,
   offsetFrameChainRows,
+  offsetFrameDerivativeRows,
   seedArcRows,
   type AcceptedPair,
   type Authored,
@@ -57,8 +63,16 @@ import {
   type DeclaredOffsetChainPieces,
 } from "@/contracts/sketch/offset-chain-topology";
 import {
+  offsetFrameCurveResidual,
+  prepareOffsetFrameDerivatives,
   publishOffsetFrame,
   solveOffsetFrame,
+  type OffsetFrameArcVariation,
+  type OffsetFrameCubicSpan,
+  type OffsetFrameCotangent,
+  type OffsetFrameJvp,
+  type OffsetFrameSourceDof,
+  type OffsetFrameVariation,
   type CertifiedOffsetFramePublication,
   type OffsetFramePlan,
   type OffsetFramePublication,
@@ -66,7 +80,16 @@ import {
   type OffsetSolveFrame,
   type OffsetSolveFrameResult,
 } from "@/contracts/sketch/offset-derivation-frame";
-import { OFFSET_DIAGNOSTIC_CODES } from "@/contracts/sketch/offset-geometry";
+import {
+  OFFSET_DIAGNOSTIC_CODES,
+  offsetLinePoints,
+  type OffsetChainFailure,
+} from "@/contracts/sketch/offset-geometry";
+import {
+  closestSplineSpanLocation,
+  evaluateSplineSpan,
+} from "@/contracts/sketch/spline-geometry";
+import { solveCommittedConstraintDefinition } from "@/domain/editor/sketch-session/constraints";
 import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
 import { createCertifiedNeutralCurveRequestQuery } from "@/domain/modeling/neutral-curve-certification/query";
 
@@ -1472,5 +1495,937 @@ describe("T08b-g1 frame owner: brands (type-level, tsc)", () => {
       Object.getPrototypeOf(publication) === Object.prototype,
       Object.getPrototypeOf(publication.certified) === Object.prototype,
     ]).toEqual([false, true, true, true, true, false, false]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T08b-g2: frame derivatives, pullback and residual helper
+// ---------------------------------------------------------------------------
+
+type V2 = readonly [number, number];
+const angleOf = (center: V2, point: V2) =>
+  Math.atan2(point[1] - center[1], point[0] - center[0]);
+
+/**
+ * Test-only flattening of every published datum of a frame (the FD side),
+ * keyed as `flattenJvp` keys the JVP.
+ */
+function flattenFrame(frame: OffsetSolveFrame) {
+  const out = new Map<string, number>();
+  const vec = (key: string, value: V2) => {
+    out.set(`${key}.x`, value[0]);
+    out.set(`${key}.y`, value[1]);
+  };
+  for (const [seed, spans] of frame.cubics)
+    spans.forEach((span, leaf) => {
+      span.span.poles.forEach((pole, k) =>
+        vec(`c:${seed}:${leaf}:p${k}`, pole),
+      );
+      out.set(`c:${seed}:${leaf}:q0`, span.representativeQueryDomain[0]);
+      out.set(`c:${seed}:${leaf}:q1`, span.representativeQueryDomain[1]);
+    });
+  for (const [seed, ends] of frame.lineArcEndpoints) {
+    vec(`e:${seed}:s`, ends.start);
+    vec(`e:${seed}:e`, ends.end);
+  }
+  for (const piece of frame.pieces) {
+    const seed = piece.seedEntityId;
+    if (piece.kind === "arc") {
+      const ends = frame.lineArcEndpoints.get(seed)!;
+      vec(`a:${seed}:c`, piece.center);
+      out.set(
+        `a:${seed}:r`,
+        Math.hypot(
+          ends.start[0] - piece.center[0],
+          ends.start[1] - piece.center[1],
+        ),
+      );
+      out.set(`a:${seed}:t0`, angleOf(piece.center, ends.start));
+      out.set(`a:${seed}:t1`, angleOf(piece.center, ends.end));
+      vec(`a:${seed}:s`, ends.start);
+      vec(`a:${seed}:e`, ends.end);
+    }
+    if (piece.kind === "circle") {
+      vec(`o:${seed}:c`, piece.center);
+      out.set(`o:${seed}:r`, piece.radius);
+    }
+  }
+  for (const trim of frame.trims) {
+    vec(`t:${trim.jointIndex}:p`, trim.position);
+    out.set(`t:${trim.jointIndex}:s`, trim.first.parameter);
+    out.set(`t:${trim.jointIndex}:t`, trim.second.parameter);
+  }
+  for (const arc of frame.arcs) {
+    vec(`j:${arc.jointIndex}:c`, arc.center);
+    vec(`j:${arc.jointIndex}:s`, arc.start);
+    vec(`j:${arc.jointIndex}:e`, arc.end);
+    out.set(`j:${arc.jointIndex}:r`, arc.radius);
+    out.set(`j:${arc.jointIndex}:t0`, angleOf(arc.center, arc.start));
+    out.set(`j:${arc.jointIndex}:t1`, angleOf(arc.center, arc.end));
+  }
+  return out;
+}
+
+function flattenJvp(jvp: OffsetFrameJvp) {
+  const out = new Map<string, number>();
+  const vec = (key: string, value: V2) => {
+    out.set(`${key}.x`, value[0]);
+    out.set(`${key}.y`, value[1]);
+  };
+  const arc = (key: string, value: OffsetFrameArcVariation) => {
+    vec(`${key}:c`, value.center);
+    out.set(`${key}:r`, value.radius);
+    out.set(`${key}:t0`, value.startAngle);
+    out.set(`${key}:t1`, value.endAngle);
+    vec(`${key}:s`, value.start);
+    vec(`${key}:e`, value.end);
+  };
+  for (const [seed, spans] of jvp.cubics)
+    spans.forEach((span, leaf) => {
+      span.poles.forEach((pole, k) => vec(`c:${seed}:${leaf}:p${k}`, pole));
+      out.set(`c:${seed}:${leaf}:q0`, span.queryDomain[0]);
+      out.set(`c:${seed}:${leaf}:q1`, span.queryDomain[1]);
+    });
+  for (const [seed, ends] of jvp.lineArcEndpoints) {
+    vec(`e:${seed}:s`, ends.start);
+    vec(`e:${seed}:e`, ends.end);
+  }
+  for (const [seed, value] of jvp.seedArcs) arc(`a:${seed}`, value);
+  for (const [seed, value] of jvp.circles) {
+    vec(`o:${seed}:c`, value.center);
+    out.set(`o:${seed}:r`, value.radius);
+  }
+  for (const trim of jvp.trims) {
+    vec(`t:${trim.jointIndex}:p`, trim.position);
+    out.set(`t:${trim.jointIndex}:s`, trim.first);
+    out.set(`t:${trim.jointIndex}:t`, trim.second);
+  }
+  for (const value of jvp.arcs) arc(`j:${value.jointIndex}`, value);
+  return out;
+}
+
+/** The definition moved by h·v (points, authored tangents, circle radii). */
+function perturbed(
+  definition: SketchDefinition,
+  variation: OffsetFrameVariation,
+  h: number,
+): SketchDefinition {
+  const moved = (value: V2, by: V2 | undefined): V2 =>
+    by ? [value[0] + h * by[0], value[1] + h * by[1]] : value;
+  return {
+    ...definition,
+    points: definition.points.map((point) =>
+      variation.points?.[point.pointId]
+        ? {
+            ...point,
+            position: moved(point.position, variation.points[point.pointId]),
+          }
+        : point,
+    ),
+    entities: definition.entities.map((entity) => {
+      if (
+        entity.kind === "circle" &&
+        variation.circleRadii?.[entity.entityId] !== undefined
+      )
+        return {
+          ...entity,
+          radius: entity.radius + h * variation.circleRadii[entity.entityId]!,
+        };
+      const tangents = variation.splineTangents?.[entity.entityId];
+      if (entity.kind !== "spline" || !tangents) return entity;
+      return {
+        ...entity,
+        pointOccurrences: entity.pointOccurrences.map((occurrence) =>
+          occurrence.tangent.kind === "authored" &&
+          tangents[occurrence.occurrenceId]
+            ? {
+                ...occurrence,
+                tangent: {
+                  kind: "authored" as const,
+                  vector: moved(
+                    occurrence.tangent.vector,
+                    tangents[occurrence.occurrenceId],
+                  ),
+                },
+              }
+            : occurrence,
+        ),
+      };
+    }),
+  } as SketchDefinition;
+}
+
+/** Deterministic pseudo-random numbers in (−1, 1). */
+function prng(seed: number) {
+  let state = seed;
+  return () => {
+    state = (state * 1103515245 + 12345) % 2 ** 31;
+    return (state / 2 ** 31) * 2 - 1;
+  };
+}
+
+/** A random direction over a frame's source DOFs (optionally one DOF kind only). */
+function randomVariation(
+  dofs: readonly OffsetFrameSourceDof[],
+  random: () => number,
+  only?: OffsetFrameSourceDof["kind"],
+): OffsetFrameVariation {
+  const points: Record<string, [number, number]> = {};
+  const splineTangents: Record<string, Record<string, [number, number]>> = {};
+  const circleRadii: Record<string, number> = {};
+  for (const dof of dofs) {
+    if (only && dof.kind !== only) continue;
+    if (dof.kind === "point")
+      (points[dof.pointId] ??= [0, 0])[dof.axis] = random();
+    else if (dof.kind === "tangent")
+      ((splineTangents[dof.entityId] ??= {})[dof.occurrenceId] ??= [0, 0])[
+        dof.axis
+      ] = random();
+    else circleRadii[dof.entityId] = random();
+  }
+  return { points, splineTangents, circleRadii };
+}
+
+/** A random cotangent on every datum of a JVP (same shape). */
+function randomCotangent(
+  jvp: OffsetFrameJvp,
+  random: () => number,
+): OffsetFrameCotangent {
+  const vec = (): V2 => [random(), random()];
+  const arc = () => ({
+    center: vec(),
+    start: vec(),
+    end: vec(),
+    radius: random(),
+    startAngle: random(),
+    endAngle: random(),
+  });
+  return {
+    cubics: new Map(
+      [...jvp.cubics].map(([seed, spans]) => [
+        seed,
+        spans.map(() => ({
+          poles: [vec(), vec(), vec(), vec()] as const,
+          queryDomain: vec(),
+        })),
+      ]),
+    ),
+    lineArcEndpoints: new Map(
+      [...jvp.lineArcEndpoints.keys()].map((seed) => [
+        seed,
+        { start: vec(), end: vec() },
+      ]),
+    ),
+    seedArcs: new Map([...jvp.seedArcs.keys()].map((seed) => [seed, arc()])),
+    circles: new Map(
+      [...jvp.circles.keys()].map((seed) => [
+        seed,
+        { center: vec(), radius: random() },
+      ]),
+    ),
+    trims: jvp.trims.map((trim) => ({
+      jointIndex: trim.jointIndex,
+      position: vec(),
+      first: random(),
+      second: random(),
+    })),
+    arcs: jvp.arcs.map((value) => ({ jointIndex: value.jointIndex, ...arc() })),
+  };
+}
+
+/** ⟨v, u⟩ over the source space. */
+function sourcePairing(v: OffsetFrameVariation, u: OffsetFrameVariation) {
+  let sum = 0;
+  for (const [id, value] of Object.entries(v.points ?? {}))
+    sum +=
+      value[0] * (u.points?.[id]?.[0] ?? 0) +
+      value[1] * (u.points?.[id]?.[1] ?? 0);
+  for (const [entity, occurrences] of Object.entries(v.splineTangents ?? {}))
+    for (const [id, value] of Object.entries(occurrences))
+      sum +=
+        value[0] * (u.splineTangents?.[entity]?.[id]?.[0] ?? 0) +
+        value[1] * (u.splineTangents?.[entity]?.[id]?.[1] ?? 0);
+  for (const [id, value] of Object.entries(v.circleRadii ?? {}))
+    sum += value * (u.circleRadii?.[id] ?? 0);
+  return sum;
+}
+
+/** ⟨jvp, w⟩ over the published data (test-only, flattened). */
+function outputPairing(jvp: OffsetFrameJvp, w: OffsetFrameCotangent) {
+  const cotangentJvp: OffsetFrameJvp = {
+    cubics: new Map(
+      [...(w.cubics ?? [])].map(([seed, spans]) => [
+        seed,
+        spans.map((span) => ({
+          poles: span!.poles!,
+          queryDomain: span!.queryDomain!,
+        })),
+      ]),
+    ),
+    lineArcEndpoints: new Map(
+      [...(w.lineArcEndpoints ?? [])].map(([seed, ends]) => [
+        seed,
+        { start: ends.start!, end: ends.end! },
+      ]),
+    ),
+    seedArcs: new Map(
+      [...(w.seedArcs ?? [])].map(([seed, value]) => [
+        seed,
+        value as OffsetFrameArcVariation,
+      ]),
+    ),
+    circles: new Map(
+      [...(w.circles ?? [])].map(([seed, value]) => [
+        seed,
+        { center: value.center!, radius: value.radius! },
+      ]),
+    ),
+    trims: (w.trims ?? []) as OffsetFrameJvp["trims"],
+    arcs: (w.arcs ?? []) as OffsetFrameJvp["arcs"],
+  };
+  const a = flattenJvp(jvp);
+  const b = flattenJvp(cotangentJvp);
+  let sum = 0;
+  for (const [key, value] of b) sum += value * (a.get(key) ?? Number.NaN);
+  return sum;
+}
+
+/**
+ * The d-A3 row's FD direction: x-only point and tangent moves keep its
+ * vertex exactly parallel with bitwise-shared poles, so the perturbed
+ * frames keep the plan (a generic direction breaks the bitwise sharing and
+ * the line, trimmed at its other end, cannot adopt: FD is undefined there).
+ */
+const horizontal = (variation: OffsetFrameVariation): OffsetFrameVariation => ({
+  points: Object.fromEntries(
+    Object.entries(variation.points ?? {}).map(([id, value]) => [
+      id,
+      [value[0], 0] as const,
+    ]),
+  ),
+  splineTangents: Object.fromEntries(
+    Object.entries(variation.splineTangents ?? {}).map(([id, occurrences]) => [
+      id,
+      Object.fromEntries(
+        Object.entries(occurrences).map(([occurrence, value]) => [
+          occurrence,
+          [value[0], 0] as const,
+        ]),
+      ),
+    ]),
+  ),
+});
+
+const FD_STEP = 1e-6;
+/**
+ * FD bound: truncation O(h²·|f‴|) plus rounding O(ε·|f|/h) plus the Newton
+ * trims' convergence (to the step's rounding fixpoint) at h = 1e-6 are
+ * about 1e-9 relative on these rows (measured worst 9.5e-9); the bound is
+ * 1e-7·max(1, |JVP|). The mutants move the affected entries by O(1).
+ */
+const FD_BOUND = 1e-7;
+
+interface DerivativeRow {
+  readonly label: string;
+  readonly pair: AcceptedPair;
+  readonly seeds: readonly SketchEntityId[];
+  readonly distance: number;
+}
+
+const derivativeRows = offsetFrameDerivativeRows();
+const derivativeRow = (label: string): DerivativeRow => {
+  const row = derivativeRows.find(
+    (item) => `${item.row} ${item.distance}` === label,
+  );
+  if (!row) throw new Error(`no row ${label}`);
+  const harness = matrixHarnesses[row.harness];
+  harness.resetSequence();
+  const pair = harness.solvedPair(row.build(harness));
+  return {
+    label,
+    pair,
+    seeds: pair.definition.entities.map((entity) => entity.entityId),
+    distance: row.distance,
+  };
+};
+const d3DerivativeRow = (label: string): DerivativeRow => ({
+  label,
+  ...d3Row(label),
+});
+
+/** Native SS-60 with a Fix / Fix / Coincident source gap (3e-4, 2e-4) at its vertex (the T08b-e gapped row). */
+function gappedSs60Row(distance: number): DerivativeRow {
+  const harness = matrixHarnesses.native;
+  harness.resetSequence();
+  const first = harness.drawSpline([], ARCH_POINTS);
+  const second = harness.drawSpline(
+    [first],
+    [[2 + 3e-4, 2e-4], ...SS_60_OUTGOING.slice(1)],
+  );
+  const end = harness.splineEnds(first)[1];
+  const start = harness.splineEnds(second)[0];
+  let definition = harness.sketch([first, second]);
+  const commit = (
+    toolId: SketchConstraintToolId,
+    points: readonly SketchPointId[],
+  ) => {
+    const step = harness.nextSequence();
+    const contribution = getSketchConstraintDefinition(
+      toolId,
+    ).createCommitContribution({
+      sequence: step,
+      selectedTargets: points.map((pointId) => {
+        const record = resolveSketchConstraintTarget(
+          toolId,
+          definition,
+          createSketchPointRef("sketch_g1n" as SketchId, pointId),
+        );
+        if (!record) throw new Error(`${toolId} rejected ${pointId}`);
+        return record;
+      }),
+      pointer: null,
+      value: null,
+      annotationPlacement: null,
+      createConstraintId: (suffix) => `constraint_${step}_${suffix}` as const,
+      createDimensionId: (suffix) => `dimension_${step}_${suffix}` as const,
+    });
+    const constraints = contribution.constraints ?? [];
+    definition = {
+      ...definition,
+      constraintIds: [
+        ...definition.constraintIds,
+        ...constraints.map((item) => item.constraintId),
+      ],
+      constraints: [...definition.constraints, ...constraints],
+    };
+  };
+  commit("constraintFix", [end]);
+  commit("constraintFix", [start]);
+  commit("constraintCoincident", [end, start]);
+  const solved = solveCommittedConstraintDefinition(
+    definition,
+    [],
+    SKETCH_DIRECT_EDIT_TOLERANCES,
+  );
+  if (!solved.solvedSnapshot)
+    throw new Error("gapped SS-60 was not solver-accepted");
+  const pair = solved as AcceptedPair;
+  return {
+    label: `gapped coincident SS-60 (3e-4, 2e-4) ${distance}`,
+    pair,
+    seeds: pair.definition.entities.map((entity) => entity.entityId),
+    distance,
+  };
+}
+
+function frameAndDerivatives(row: DerivativeRow) {
+  const relationship = relationshipOf(row.seeds, row.distance);
+  const input = {
+    relationship,
+    definition: row.pair.definition,
+    modelingTolerance: TOLERANCE,
+  };
+  const frame = solvedFrame(solveOffsetFrame(input));
+  return {
+    relationship,
+    input,
+    frame,
+    derivatives: prepareOffsetFrameDerivatives(input, frame),
+  };
+}
+
+const jvpOf = (
+  result: OffsetFrameJvp | OffsetChainFailure | undefined,
+): OffsetFrameJvp => {
+  if (!result || "ok" in result)
+    throw new Error(`JVP unavailable: ${result?.message}`);
+  return result;
+};
+
+/** Central FD of every published datum along v (fixed plan: the frame's own, as a published hint). */
+function expectJvpMatchesFd(
+  row: DerivativeRow,
+  variation: OffsetFrameVariation,
+) {
+  const { relationship, frame, derivatives } = frameAndDerivatives(row);
+  const jvp = flattenJvp(jvpOf(derivatives.jvp([variation])[0]));
+  const plan: OffsetFramePlan = {
+    origin: "published",
+    adjacencies: frame.plan.adjacencies,
+  };
+  const side = (h: number) =>
+    flattenFrame(
+      solvedFrame(
+        solveOffsetFrame(
+          {
+            relationship,
+            definition: perturbed(row.pair.definition, variation, h),
+            modelingTolerance: TOLERANCE,
+          },
+          plan,
+        ),
+      ),
+    );
+  const plus = side(FD_STEP);
+  const minus = side(-FD_STEP);
+  expect(
+    [...jvp.keys()].sort(),
+    `${row.label}: the JVP covers every published datum`,
+  ).toEqual([...flattenFrame(frame).keys()].sort());
+  let worst = 0;
+  for (const [key, value] of jvp) {
+    let difference = plus.get(key)! - minus.get(key)!;
+    // Angles and circle-leaf trim parameters are compared modulo 2π.
+    if (/:t[01]$|^t:\d+:[st]$/.test(key))
+      difference = Math.atan2(Math.sin(difference), Math.cos(difference));
+    const fd = difference / (2 * FD_STEP);
+    const error = Math.abs(fd - value) / Math.max(1, Math.abs(value));
+    worst = Math.max(worst, error);
+    expect(
+      error,
+      `${row.label} ${key}: FD ${fd} vs JVP ${value}`,
+    ).toBeLessThanOrEqual(FD_BOUND);
+  }
+  return { worst, keys: jvp.size, frame, jvp };
+}
+
+const D3_DERIVATIVE_ROWS = [
+  "rounded rect 0.1",
+  "rounded rect -0.1",
+  "rounded rect 0.01",
+  "line-arc-line semicircle long (R7) -2",
+  "lens 0.1",
+  "lens -0.1",
+  "half-disc 0.1",
+  "circle 0.5",
+  "line-arc-line cap 0.1",
+  "two semicircles 0.01",
+  "two semicircles -0.01",
+  "S-curve 0.01",
+  "arc→spline corner 0.01",
+  "arc→spline corner -0.01",
+] as const;
+
+describe("T08b-g2 frame derivatives: JVP vs a test-only central FD on native rows (h = 1e-6, bound 1e-7·max(1, |JVP|))", () => {
+  test.each(
+    derivativeRows.map((row) => [row.covers, row.row, row.distance] as const),
+  )(
+    "%s: %s d = %s",
+    (_covers, row, distance) => {
+      const target = derivativeRow(`${row} ${distance}`);
+      const { derivatives } = frameAndDerivatives(target);
+      const variation = randomVariation(derivatives.sourceDofs, prng(17));
+      expectJvpMatchesFd(
+        target,
+        _covers.startsWith("d math A3") ? horizontal(variation) : variation,
+      );
+    },
+    60_000,
+  );
+  test.each(D3_DERIVATIVE_ROWS)(
+    "D3 %s",
+    (label) => {
+      const target = d3DerivativeRow(label);
+      const { derivatives } = frameAndDerivatives(target);
+      expectJvpMatchesFd(
+        target,
+        randomVariation(derivatives.sourceDofs, prng(29)),
+      );
+    },
+    60_000,
+  );
+  test("gapped vertex: native Fix / Fix / Coincident SS-60 (3e-4, 2e-4) at d = ±0.01", () => {
+    for (const distance of [-0.01, 0.01]) {
+      const target = gappedSs60Row(distance);
+      const { derivatives, frame } = frameAndDerivatives(target);
+      const vertex = frame.vertices[0]!;
+      expect(
+        Math.hypot(
+          vertex.second.vertex[0] - vertex.first.vertex[0],
+          vertex.second.vertex[1] - vertex.first.vertex[1],
+        ),
+        "a real source gap",
+      ).toBeGreaterThan(1e-4);
+      expectJvpMatchesFd(
+        target,
+        randomVariation(derivatives.sourceDofs, prng(41)),
+      );
+    }
+  }, 60_000);
+});
+
+describe("T08b-g2 frame derivatives: adjoint identity ⟨Jv, w⟩ = ⟨v, Jᵀw⟩ (random v, w; the pullback by basis application)", () => {
+  test.each([
+    ...derivativeRows.map((row) => `${row.row} ${row.distance}`),
+    ...D3_DERIVATIVE_ROWS,
+  ])(
+    "%s",
+    (label) => {
+      const target = (D3_DERIVATIVE_ROWS as readonly string[]).includes(label)
+        ? d3DerivativeRow(label)
+        : derivativeRow(label);
+      const { derivatives } = frameAndDerivatives(target);
+      const random = prng(7);
+      for (let trial = 0; trial < 3; trial += 1) {
+        const v = randomVariation(derivatives.sourceDofs, random);
+        const jvp = jvpOf(derivatives.jvp([v])[0]);
+        const w = randomCotangent(jvp, random);
+        const pulled = derivatives.pullback(w);
+        if ("ok" in pulled) throw new Error(pulled.message);
+        const left = outputPairing(jvp, w);
+        const right = sourcePairing(v, pulled);
+        expect(
+          Math.abs(left - right),
+          `${label}: ${left} vs ${right}`,
+        ).toBeLessThanOrEqual(1e-10 * Math.max(1, Math.abs(left)));
+      }
+    },
+    60_000,
+  );
+
+  test("the pullback cache: one batched JVP per frame fills every column; a batch is bitwise its single directions", () => {
+    const target = derivativeRow("SS-60 -0.01");
+    const { derivatives } = frameAndDerivatives(target);
+    const random = prng(3);
+    const a = randomVariation(derivatives.sourceDofs, random);
+    const b = randomVariation(derivatives.sourceDofs, random);
+    const [batchA, batchB] = derivatives.jvp([a, b]);
+    expect(encode([...flattenJvp(jvpOf(batchB))])).toBe(
+      encode([...flattenJvp(jvpOf(derivatives.jvp([b])[0]))]),
+    );
+    expect(encode([...flattenJvp(jvpOf(batchA))])).toBe(
+      encode([...flattenJvp(jvpOf(derivatives.jvp([a])[0]))]),
+    );
+    // Two pullbacks of one frame reuse its columns: bitwise equal results.
+    const w = randomCotangent(jvpOf(batchA), random);
+    expect(encode(derivatives.pullback(w))).toBe(
+      encode(derivatives.pullback(w)),
+    );
+  });
+});
+
+describe("T08b-g2 frame derivatives: unavailable directions, tangent authority, d math A3", () => {
+  test("a singular joint (fabricated: a vertical half-disc diameter trim moved to the circle's tangency angle θ = 0, not owner-reachable) is derivativeUnavailable in every direction and in the pullback", () => {
+    const a = arcHarness.arc(arcHarness.empty(), [0, 0], [0, -1], [0, 1]);
+    const diameter = arcHarness.line(a.definition, [0, 1], [0, -1], {
+      start: a.end,
+      end: a.start,
+    });
+    const { pair } = arcHarness.adapt(
+      { definition: diameter.definition, seeds: [a.id, diameter.id] },
+      0.1,
+    );
+    const row: DerivativeRow = {
+      label: "vertical half-disc 0.1",
+      pair,
+      seeds: [a.id, diameter.id],
+      distance: 0.1,
+    };
+    const { input, frame, derivatives } = frameAndDerivatives(row);
+    expect(frame.trims).toHaveLength(2);
+    // Control: the native frame's JVP is available.
+    const v = randomVariation(derivatives.sourceDofs, prng(5));
+    jvpOf(derivatives.jvp([v])[0]);
+    const arcIndex = frame.pieces.findIndex((piece) => piece.kind === "arc");
+    const fabricated: OffsetSolveFrame = {
+      ...frame,
+      trims: frame.trims.map((trim, index) =>
+        index !== 0
+          ? trim
+          : trim.jointIndex === arcIndex
+            ? { ...trim, first: { ...trim.first, parameter: 0 } }
+            : { ...trim, second: { ...trim.second, parameter: 0 } },
+      ),
+    };
+    const singular = prepareOffsetFrameDerivatives(input, fabricated);
+    for (const result of singular.jvp([
+      v,
+      randomVariation(singular.sourceDofs, prng(6)),
+    ]))
+      expect(result).toMatchObject({
+        ok: false,
+        code: codes.derivativeUnavailable,
+      });
+    expect(
+      singular.pullback({
+        lineArcEndpoints: new Map([[diameter.id, { start: [1, 0] as const }]]),
+      }),
+    ).toMatchObject({ ok: false, code: codes.derivativeUnavailable });
+  });
+
+  test("a non-finite direction is unavailable alone; the batch's other directions are bitwise unchanged", () => {
+    const target = derivativeRow("SL-90 0.01");
+    const { derivatives } = frameAndDerivatives(target);
+    const good = randomVariation(derivatives.sourceDofs, prng(9));
+    const [pointId] = Object.keys(good.points!);
+    const bad: OffsetFrameVariation = {
+      points: { [pointId!]: [Number.NaN, 0] },
+    };
+    const [first, second] = derivatives.jvp([good, bad]);
+    expect(second).toMatchObject({
+      ok: false,
+      code: codes.derivativeUnavailable,
+    });
+    expect(encode([...flattenJvp(jvpOf(first))])).toBe(
+      encode([...flattenJvp(jvpOf(derivatives.jvp([good])[0]))]),
+    );
+  });
+
+  test("tangent authority: authored-tangent directions move the derived output (FD-checked) and the pullback returns their cotangent", () => {
+    for (const label of [
+      "arch with an authored interior tangent (native commit + tangent edit) 0.01",
+      "SL-90 with an authored tangent at the joined spline end (native commit + tangent edit) 0.01",
+    ]) {
+      const target = derivativeRow(label);
+      const { derivatives, frame } = frameAndDerivatives(target);
+      const tangentDofs = derivatives.sourceDofs.filter(
+        (dof) => dof.kind === "tangent",
+      );
+      expect(tangentDofs, label).toHaveLength(2);
+      const variation = randomVariation(
+        derivatives.sourceDofs,
+        prng(11),
+        "tangent",
+      );
+      const { jvp } = expectJvpMatchesFd(target, variation);
+      expect(
+        Math.max(...[...jvp.values()].map(Math.abs)),
+        `${label}: nonzero`,
+      ).toBeGreaterThan(0.01);
+      // A residual-like cotangent on the first leaf's poles pulls back onto
+      // the authored tangent.
+      const [seed] = [...frame.cubics.keys()];
+      const pulled = derivatives.pullback({
+        cubics: new Map([
+          [
+            seed!,
+            frame.cubics.get(seed!)!.map(() => ({
+              poles: [
+                [1, 1],
+                [1, 1],
+                [1, 1],
+                [1, 1],
+              ] as const,
+            })),
+          ],
+        ]),
+      });
+      if ("ok" in pulled) throw new Error(pulled.message);
+      const tangent = Object.values(pulled.splineTangents![seed!]!)[0]!;
+      expect(Math.hypot(...tangent), label).toBeGreaterThan(1e-3);
+    }
+  }, 60_000);
+
+  test("d math A3: at a line with a (bitwise-shared, no re-call) vertex end and a trim end, the trim JVP uses the line's adopted end variation", () => {
+    const target = derivativeRow(
+      "horizontal-ended arch → line → line (native commit + tangent edit): a bitwise-shared parallel vertex (no re-call; the line is the non-keeper) and a trim at the line's other end 0.01",
+    );
+    const { frame, derivatives } = frameAndDerivatives(target);
+    expect(frame.plan.adjacencies.map((entry) => entry.kind)).toEqual([
+      "parallel",
+      "trim",
+    ]);
+    expect(frame.plan.adjacencies[0]).toMatchObject({ keeper: "first" });
+    const spline = frame.pieces[0]!;
+    const line = frame.pieces[1]!;
+    if (spline.kind !== "derivedCubic" || line.kind !== "lineSegment")
+      throw new Error("shape");
+    expect(encode(line.start), "the poles are already bitwise shared").toBe(
+      encode(spline.spans.at(-1)!.poles[3]),
+    );
+    const random = prng(13);
+    for (let trial = 0; trial < 3; trial += 1) {
+      const variation = randomVariation(derivatives.sourceDofs, random);
+      const jvp = jvpOf(derivatives.jvp([variation])[0]);
+      const ends = jvp.lineArcEndpoints.get(line.seedEntityId)!;
+      // The shared driven point moves with the keeper's pole variation.
+      expect(encode(ends.start)).toBe(
+        encode(jvp.cubics.get(spline.seedEntityId)!.at(-1)!.poles[3]),
+      );
+      // The trim's parameter JVP is the parameter derivative on the PUBLISHED
+      // (adopted) line: with A its adopted start and B its raw end (the
+      // `offsetLinePoints` end, differentiated here by FD),
+      // δX = δA + t(δB − δA) + (B − A)·δt.
+      const trim = frame.trims[0]!;
+      const t = trim.first.parameter;
+      const dt = jvp.trims[0]!.first;
+      const entity = target.pair.definition.entities.find(
+        (item) => item.entityId === line.seedEntityId,
+      );
+      if (entity?.kind !== "lineSegment") throw new Error("line");
+      const position = (pointId: SketchPointId, h: number): V2 => {
+        const base = target.pair.definition.points.find(
+          (item) => item.pointId === pointId,
+        )!;
+        const by = variation.points?.[pointId] ?? [0, 0];
+        return [base.position[0] + h * by[0], base.position[1] + h * by[1]];
+      };
+      const rawEnd = (h: number) =>
+        offsetLinePoints(
+          position(entity.startPointId, h),
+          position(entity.endPointId, h),
+          line.reversed ? -target.distance : target.distance,
+        )!.end;
+      const dB: V2 = [
+        (rawEnd(FD_STEP)[0] - rawEnd(-FD_STEP)[0]) / (2 * FD_STEP),
+        (rawEnd(FD_STEP)[1] - rawEnd(-FD_STEP)[1]) / (2 * FD_STEP),
+      ];
+      const dA = ends.start;
+      const dX = jvp.trims[0]!.position;
+      for (const axis of [0, 1] as const)
+        expect(
+          Math.abs(
+            dA[axis] +
+              t * (dB[axis] - dA[axis]) +
+              (line.end[axis] - line.start[axis]) * dt -
+              dX[axis],
+          ),
+          "the trim parameter is differentiated on the published line",
+        ).toBeLessThanOrEqual(FD_BOUND);
+      expect(trim.jointIndex).toBe(1);
+    }
+  });
+});
+
+describe("T08b-g2 point-on-derived-curve residual helper", () => {
+  const row = () => derivativeRow("SL-90 0.01");
+  const splineOf = (frame: OffsetSolveFrame) => [...frame.cubics.keys()][0]!;
+  const zeroDifferential = {
+    interval: [0, 0] as const,
+    poles: [
+      [0, 0],
+      [0, 0],
+      [0, 0],
+      [0, 0],
+    ] as const,
+  };
+  const local = (span: OffsetFrameCubicSpan, u: number) =>
+    evaluateSplineSpan(
+      {
+        interval: span.sourceDomain,
+        poles: span.span.poles,
+        differential: zeroDifferential,
+      },
+      { kind: "local", value: u },
+    );
+
+  test("value and gradient (span and parameter held fixed) match a central FD along random source directions and the point", () => {
+    const target = row();
+    const { relationship, frame, derivatives } = frameAndDerivatives(target);
+    const seed = splineOf(frame);
+    const leaves = frame.cubics.get(seed)!;
+    const at = local(leaves[0]!, 0.4);
+    const speed = Math.hypot(...at.first);
+    const point: V2 = [
+      at.position[0] - (0.05 * at.first[1]) / speed,
+      at.position[1] + (0.05 * at.first[0]) / speed,
+    ];
+    const base = offsetFrameCurveResidual({
+      frame,
+      derivatives,
+      seedEntityId: seed,
+      point,
+    });
+    if (!base.ok) throw new Error(base.message);
+    expect(base.location.leaf).toBe(0);
+    const plan: OffsetFramePlan = {
+      origin: "published",
+      adjacencies: frame.plan.adjacencies,
+    };
+    const random = prng(19);
+    for (let trial = 0; trial < 3; trial += 1) {
+      const variation = randomVariation(derivatives.sourceDofs, random);
+      const valueAt = (h: number) => {
+        const input = {
+          relationship,
+          definition: perturbed(target.pair.definition, variation, h),
+          modelingTolerance: TOLERANCE,
+        };
+        const moved = solvedFrame(solveOffsetFrame(input, plan));
+        expect(moved.cubics.get(seed)).toHaveLength(leaves.length);
+        const result = offsetFrameCurveResidual({
+          frame: moved,
+          derivatives: prepareOffsetFrameDerivatives(input, moved),
+          seedEntityId: seed,
+          point,
+          location: base.location,
+        });
+        if (!result.ok) throw new Error(result.message);
+        return result.value;
+      };
+      const plus = valueAt(FD_STEP);
+      const minus = valueAt(-FD_STEP);
+      for (const axis of [0, 1] as const) {
+        const fd = (plus[axis] - minus[axis]) / (2 * FD_STEP);
+        const analytic = sourcePairing(variation, base.gradient.source[axis]);
+        expect(
+          Math.abs(fd - analytic),
+          `r_${axis}: FD ${fd} vs ${analytic}`,
+        ).toBeLessThanOrEqual(FD_BOUND * Math.max(1, Math.abs(analytic)));
+      }
+    }
+    // ∂r/∂P = I (the point enters linearly).
+    for (const axis of [0, 1] as const) {
+      const moved: V2 =
+        axis === 0
+          ? [point[0] + FD_STEP, point[1]]
+          : [point[0], point[1] + FD_STEP];
+      const shifted = offsetFrameCurveResidual({
+        frame,
+        derivatives,
+        seedEntityId: seed,
+        point: moved,
+        location: base.location,
+      });
+      if (!shifted.ok) throw new Error(shifted.message);
+      const fd: V2 = [
+        (shifted.value[0] - base.value[0]) / FD_STEP,
+        (shifted.value[1] - base.value[1]) / FD_STEP,
+      ];
+      for (const component of [0, 1] as const)
+        expect(
+          Math.abs(fd[component] - base.gradient.point[component]![axis]),
+        ).toBeLessThan(1e-6);
+    }
+  }, 60_000);
+
+  test("a point outside the query domain never binds to the trimmed tail (the search is restricted to queryDomain)", () => {
+    const { frame, derivatives } = frameAndDerivatives(row());
+    const seed = splineOf(frame);
+    const leaves = frame.cubics.get(seed)!;
+    const last = leaves.length - 1;
+    const tail = leaves[last]!;
+    const [, domainEnd] = tail.representativeQueryDomain;
+    expect(domainEnd, "the spline end is trimmed").toBeLessThan(
+      tail.sourceDomain[1],
+    );
+    const localEnd =
+      (domainEnd - tail.sourceDomain[0]) /
+      (tail.sourceDomain[1] - tail.sourceDomain[0]);
+    // The untrimmed end pole: ON the tail, off the published curve.
+    const point = tail.span.poles[3];
+    const unrestricted = closestSplineSpanLocation(
+      point,
+      leaves.map((leaf) => ({
+        interval: leaf.sourceDomain,
+        poles: leaf.span.poles,
+        differential: zeroDifferential,
+      })),
+    );
+    expect(unrestricted).toMatchObject({
+      spanIndex: last,
+      u: 1,
+      distanceSquared: 0,
+    });
+    const result = offsetFrameCurveResidual({
+      frame,
+      derivatives,
+      seedEntityId: seed,
+      point,
+    });
+    if (!result.ok) throw new Error(result.message);
+    expect(result.location.leaf).toBe(last);
+    expect(result.location.u).toBeLessThanOrEqual(localEnd);
+    expect(Math.hypot(...result.value)).toBeGreaterThan(1e-4);
   });
 });

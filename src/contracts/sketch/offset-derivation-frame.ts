@@ -19,6 +19,7 @@ import {
   uncheckedDeclaredOffsetChainPieces,
   type CertifiedNeutralCurveRequestQuery,
   type CertifiedOffsetChainTubeStability,
+  type DeclaredOffsetPieceSource,
   type OffsetChainAdjacencyPlan,
   type OffsetChainDomainEnd,
   type OffsetChainFirstChoice,
@@ -41,6 +42,7 @@ import type {
   SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
 import {
+  closestSplineSpanLocation,
   evaluateSplineSpan,
   type SplinePoles,
 } from "@/contracts/sketch/spline-geometry";
@@ -84,6 +86,12 @@ import type { SplineOffsetCubicSpan } from "@/contracts/sketch/spline-offset-geo
  * - [TECH] G6: trim, parallel and absorbed are revision data (a change among
  *   them is `planChanged`); arc presence, when authored (`arcJoints`), is
  *   intent: a certified arc set that differs is `topologyChanged`.
+ * - T08b-g2 (dark): `prepareOffsetFrameDerivatives` gives a solve frame's
+ *   fixed-topology JVP (the owner's batched multi-direction differential,
+ *   [TECH] G8a) and its pullback by basis application with a per-frame
+ *   cache; `offsetFrameCurveResidual` is the point-on-derived-curve
+ *   residual (closest point restricted to the query domain, location held
+ *   fixed for the gradient). No finite differences at runtime.
  *
  * Trust note (T08b-g plan §2.5, verbatim):
  *
@@ -1297,4 +1305,867 @@ export function publishOffsetFrame(input: {
     certified,
     { origin: "published", adjacencies: solveFrame.plan.adjacencies },
   );
+}
+
+// ---------------------------------------------------------------------------
+// Frame derivatives (T08b-g2, dark)
+// ---------------------------------------------------------------------------
+
+/**
+ * One source direction of a solve frame: point variations by point ID,
+ * authored-tangent variations by spline seed and occurrence ID, circle seed
+ * radius variations by entity ID. Also the shape of a pulled-back source
+ * cotangent.
+ */
+export interface OffsetFrameVariation {
+  readonly points?: Readonly<Record<string, SketchPoint2D>>;
+  readonly splineTangents?: Readonly<
+    Record<string, Readonly<Record<string, SketchPoint2D>>>
+  >;
+  readonly circleRadii?: Readonly<Record<string, number>>;
+}
+
+/** Point-defined arc variation (the solver's arc state: radius and end angles). */
+export interface OffsetFrameArcVariation {
+  readonly center: SketchPoint2D;
+  readonly start: SketchPoint2D;
+  readonly end: SketchPoint2D;
+  readonly radius: number;
+  readonly startAngle: number;
+  readonly endAngle: number;
+}
+
+/**
+ * The fixed-topology JVP of every published datum of one solve frame along
+ * one source direction (T08b-g plan §2.6; keyed as the frame is):
+ * - `cubics`: per spline seed, per owner leaf (the frame's `cubics` order),
+ *   the pole variations and the representative query-domain variation;
+ * - `lineArcEndpoints`: the published natural-order ends of line and seed-arc
+ *   outputs; `seedArcs`: their point-defined arc variation; `circles`:
+ *   centre and radius;
+ * - `trims`: the trim point and both representative-parameter variations
+ *   (frame order); `arcs`: each F1 arc's point-defined variation.
+ * A pulled-back cotangent (`OffsetFrameCotangent`) has the same shape.
+ */
+export interface OffsetFrameJvp {
+  readonly cubics: ReadonlyMap<
+    SketchEntityId,
+    readonly {
+      readonly poles: SplinePoles;
+      readonly queryDomain: readonly [number, number];
+    }[]
+  >;
+  readonly lineArcEndpoints: ReadonlyMap<
+    SketchEntityId,
+    { readonly start: SketchPoint2D; readonly end: SketchPoint2D }
+  >;
+  readonly seedArcs: ReadonlyMap<SketchEntityId, OffsetFrameArcVariation>;
+  readonly circles: ReadonlyMap<
+    SketchEntityId,
+    { readonly center: SketchPoint2D; readonly radius: number }
+  >;
+  readonly trims: readonly {
+    readonly jointIndex: number;
+    readonly position: SketchPoint2D;
+    readonly first: number;
+    readonly second: number;
+  }[];
+  readonly arcs: readonly (OffsetFrameArcVariation & {
+    readonly jointIndex: number;
+  })[];
+}
+
+type Partialized<T> = {
+  readonly [K in keyof T]?: T[K];
+};
+
+/** A cotangent on (any subset of) a frame's published data (`OffsetFrameJvp` shape). */
+export interface OffsetFrameCotangent {
+  readonly cubics?: ReadonlyMap<
+    SketchEntityId,
+    readonly (
+      | Partialized<{
+          poles: SplinePoles;
+          queryDomain: readonly [number, number];
+        }>
+      | undefined
+    )[]
+  >;
+  readonly lineArcEndpoints?: ReadonlyMap<
+    SketchEntityId,
+    Partialized<{ start: SketchPoint2D; end: SketchPoint2D }>
+  >;
+  readonly seedArcs?: ReadonlyMap<
+    SketchEntityId,
+    Partialized<OffsetFrameArcVariation>
+  >;
+  readonly circles?: ReadonlyMap<
+    SketchEntityId,
+    Partialized<{ center: SketchPoint2D; radius: number }>
+  >;
+  readonly trims?: readonly (Partialized<
+    Omit<OffsetFrameJvp["trims"][number], "jointIndex">
+  > & { readonly jointIndex: number })[];
+  readonly arcs?: readonly (Partialized<OffsetFrameArcVariation> & {
+    readonly jointIndex: number;
+  })[];
+}
+
+/** One source degree of freedom of a frame (a pullback basis direction). */
+export type OffsetFrameSourceDof =
+  | { readonly kind: "point"; readonly pointId: string; readonly axis: 0 | 1 }
+  | {
+      readonly kind: "tangent";
+      readonly entityId: SketchEntityId;
+      readonly occurrenceId: string;
+      readonly axis: 0 | 1;
+    }
+  | { readonly kind: "circleRadius"; readonly entityId: SketchEntityId };
+
+/**
+ * The derivatives of ONE solve frame (T08b-g2): the batched fixed-topology
+ * JVP and the pullback by basis application with a per-frame cache.
+ */
+export interface OffsetFrameDerivatives {
+  /** The frame's source degrees of freedom (points, authored tangents, circle radii). */
+  readonly sourceDofs: readonly OffsetFrameSourceDof[];
+  /**
+   * The JVP along each direction, from ONE batched owner call per spline
+   * seed (plus one per adopting piece). A direction whose derivative is not
+   * available (a singular or non-finite joint, a non-finite owner
+   * direction) is a `derivativeUnavailable` failure; the others are
+   * unaffected.
+   */
+  jvp(
+    variations: readonly OffsetFrameVariation[],
+  ): readonly (OffsetFrameJvp | OffsetChainFailure)[];
+  /**
+   * Jᵀw by basis application: ⟨J eᵢ, w⟩ per source DOF. The basis columns
+   * are computed once per frame (one batched JVP over every DOF) and
+   * cached. `derivativeUnavailable` when any column is unavailable.
+   */
+  pullback(
+    cotangent: OffsetFrameCotangent,
+  ): OffsetFrameVariation | OffsetChainFailure;
+}
+
+type Vec = SketchPoint2D;
+const ZERO: Vec = [0, 0];
+const plus = (a: Vec, b: Vec): Vec => [a[0] + b[0], a[1] + b[1]];
+const minus = (a: Vec, b: Vec): Vec => [a[0] - b[0], a[1] - b[1]];
+const times = (a: Vec, s: number): Vec => [a[0] * s, a[1] * s];
+const dotVec = (a: Vec, b: Vec) => a[0] * b[0] + a[1] * b[1];
+const crossVec = (a: Vec, b: Vec) => a[0] * b[1] - a[1] * b[0];
+
+/** d(v/|v|) for dv (v ≠ 0). */
+function unitDifferential(vector: Vec, differential: Vec): Vec {
+  const length = Math.hypot(vector[0], vector[1]);
+  const unit = times(vector, 1 / length);
+  return times(
+    minus(differential, times(unit, dotVec(unit, differential))),
+    1 / length,
+  );
+}
+
+/**
+ * The point-defined arc variation of (C, S, E): radius hypot(S − C) (the
+ * published / `canonicalArcSupport` radius, never the rounded certified ρ),
+ * angles atan2 of S − C and E − C. Analytic; fails closed only when not
+ * finite ([TECH] G10: no threshold).
+ */
+function pointDefinedArcVariation(
+  center: Vec,
+  start: Vec,
+  end: Vec,
+  variation: { center: Vec; start: Vec; end: Vec },
+): OffsetFrameArcVariation {
+  const s = minus(start, center);
+  const e = minus(end, center);
+  const ds = minus(variation.start, variation.center);
+  const de = minus(variation.end, variation.center);
+  const radius = Math.hypot(s[0], s[1]);
+  return {
+    ...variation,
+    radius: dotVec(s, ds) / radius,
+    startAngle: crossVec(s, ds) / dotVec(s, s),
+    endAngle: crossVec(e, de) / dotVec(e, e),
+  };
+}
+
+/** Every number reachable in plain arrays / objects is finite. */
+const finiteNumbers = (value: unknown): boolean =>
+  typeof value === "number"
+    ? Number.isFinite(value)
+    : typeof value !== "object" || value === null
+      ? true
+      : Object.values(value).every(finiteNumbers);
+
+/** The source DOFs of a relationship's seeds, in seed order (points deduplicated). */
+function frameSourceDofs(
+  definition: Pick<SketchDefinition, "entities">,
+  seeds: readonly SketchEntityId[],
+): OffsetFrameSourceDof[] {
+  const dofs: OffsetFrameSourceDof[] = [];
+  const seen = new Set<string>();
+  const point = (pointId: string) => {
+    if (seen.has(pointId)) return;
+    seen.add(pointId);
+    dofs.push({ kind: "point", pointId, axis: 0 });
+    dofs.push({ kind: "point", pointId, axis: 1 });
+  };
+  for (const seed of seeds) {
+    const entity = definition.entities.find((item) => item.entityId === seed);
+    if (entity?.kind === "lineSegment") {
+      point(entity.startPointId);
+      point(entity.endPointId);
+    } else if (entity?.kind === "arc") {
+      point(entity.centerPointId);
+      point(entity.startPointId);
+      point(entity.endPointId);
+    } else if (entity?.kind === "circle") {
+      point(entity.centerPointId);
+      dofs.push({ kind: "circleRadius", entityId: seed });
+    } else if (entity?.kind === "spline") {
+      for (const occurrence of entity.pointOccurrences)
+        point(occurrence.pointId);
+      for (const occurrence of entity.pointOccurrences)
+        if (occurrence.tangent.kind === "authored")
+          for (const axis of [0, 1] as const)
+            dofs.push({
+              kind: "tangent",
+              entityId: seed,
+              occurrenceId: occurrence.occurrenceId,
+              axis,
+            });
+    }
+  }
+  return dofs;
+}
+
+/** The basis direction of one source DOF. */
+function basisVariation(dof: OffsetFrameSourceDof): OffsetFrameVariation {
+  const unit: Vec =
+    dof.kind === "circleRadius" || dof.axis === 0 ? [1, 0] : [0, 1];
+  if (dof.kind === "point") return { points: { [dof.pointId]: unit } };
+  if (dof.kind === "tangent")
+    return { splineTangents: { [dof.entityId]: { [dof.occurrenceId]: unit } } };
+  return { circleRadii: { [dof.entityId]: 1 } };
+}
+
+/** ⟨jvp, cotangent⟩ over every datum the cotangent names. */
+function pairing(jvp: OffsetFrameJvp, cotangent: OffsetFrameCotangent) {
+  const vec = (a: Vec, b: Vec | undefined) => (b ? dotVec(a, b) : 0);
+  const num = (a: number, b: number | undefined) =>
+    b === undefined ? 0 : a * b;
+  const arc = (
+    a: OffsetFrameArcVariation,
+    b: Partialized<OffsetFrameArcVariation>,
+  ) =>
+    vec(a.center, b.center) +
+    vec(a.start, b.start) +
+    vec(a.end, b.end) +
+    num(a.radius, b.radius) +
+    num(a.startAngle, b.startAngle) +
+    num(a.endAngle, b.endAngle);
+  const missing = (what: string): never => {
+    throw new RangeError(
+      `The cotangent names a ${what} the frame does not publish.`,
+    );
+  };
+  let sum = 0;
+  for (const [seed, leaves] of cotangent.cubics ?? []) {
+    const own = jvp.cubics.get(seed) ?? missing("cubic output");
+    leaves.forEach((leaf, index) => {
+      if (!leaf) return;
+      const value = own[index] ?? missing("cubic leaf");
+      if (leaf.poles)
+        value.poles.forEach((pole, k) => (sum += vec(pole, leaf.poles![k])));
+      if (leaf.queryDomain)
+        sum +=
+          value.queryDomain[0] * leaf.queryDomain[0] +
+          value.queryDomain[1] * leaf.queryDomain[1];
+    });
+  }
+  for (const [seed, ends] of cotangent.lineArcEndpoints ?? []) {
+    const own = jvp.lineArcEndpoints.get(seed) ?? missing("line/arc output");
+    sum += vec(own.start, ends.start) + vec(own.end, ends.end);
+  }
+  for (const [seed, value] of cotangent.seedArcs ?? [])
+    sum += arc(jvp.seedArcs.get(seed) ?? missing("seed arc"), value);
+  for (const [seed, value] of cotangent.circles ?? []) {
+    const own = jvp.circles.get(seed) ?? missing("circle");
+    sum += vec(own.center, value.center) + num(own.radius, value.radius);
+  }
+  for (const value of cotangent.trims ?? []) {
+    const own =
+      jvp.trims.find((trim) => trim.jointIndex === value.jointIndex) ??
+      missing("trim");
+    sum +=
+      vec(own.position, value.position) +
+      num(own.first, value.first) +
+      num(own.second, value.second);
+  }
+  for (const value of cotangent.arcs ?? [])
+    sum += arc(
+      jvp.arcs.find((item) => item.jointIndex === value.jointIndex) ??
+        missing("joint arc"),
+      value,
+    );
+  return sum;
+}
+
+/** The frame's pieces without the batched owner directions (for the bitwise reproduction check). */
+function withoutDirections(pieces: readonly OffsetChainPiece[]) {
+  return pieces.map((piece) =>
+    piece.kind === "derivedCubic"
+      ? {
+          ...piece,
+          spans: piece.spans.map(
+            ({ directions: _directions, ...rest }) => rest,
+          ),
+        }
+      : piece,
+  );
+}
+
+/**
+ * The derivatives of one solve frame (T08b-g2; dark). Fixed topology: the
+ * frame's plan, adoption (effective keepers), trim leaves and
+ * representatives; every datum is differentiated as `assembleFrameGeometry`
+ * publishes it:
+ * - spline poles: the owner's batched `directions` (T08b-g2 [TECH] G8a),
+ *   from ONE reconstruction + owner call per spline seed carrying every
+ *   direction (seed points AND authored tangents, fixing the legacy
+ *   omission) plus the adoption re-call, whose poles must reproduce the
+ *   frame bitwise;
+ * - line / seed-arc / circle pieces: analytic (`offsetLinePoints`, the
+ *   ray-scaled S′/E′ with R̃ = ρ_s − σd, r − d);
+ * - declared vertices (parallel / absorbed): both terminals move with the
+ *   KEEPER's terminal variation, the adopted pole (also where the poles were
+ *   already bitwise equal and no re-call ran), and each piece's effective
+ *   end variation is used both by its trim jets and its published ends
+ *   (d math A3). At a d-A3 plan boundary (poles already bitwise shared, no
+ *   re-call, the adopter trimmed at its other end) a generic direction
+ *   leaves the plan: the JVP is then the one-sided derivative that assumes
+ *   the line start stays on the spline's shared pole, correct along
+ *   pole-preserving directions;
+ * - trims: the implicit joint-parameter JVP of P(s) = Q(t) at the frame's
+ *   representatives (the resolver's 2×2 solve); a singular or non-finite
+ *   joint is `derivativeUnavailable` for that direction;
+ * - query domains: a trim end's parameter JVP, else the moving source-span
+ *   end (`differential.sourceInterval`);
+ * - arcs (F1 and seed arcs): the point-defined variation of their published
+ *   centre and ends (radius = hypot(S − C)); the review-R12 radius family is
+ *   a publish check only and has no effect here.
+ * No finite differences at runtime.
+ */
+export function prepareOffsetFrameDerivatives(
+  input: {
+    readonly relationship: OffsetFrameRelationship;
+    readonly definition: Pick<
+      SketchDefinition,
+      "points" | "entities" | "constraints"
+    >;
+    readonly modelingTolerance: number;
+  },
+  frame: OffsetSolveFrame,
+): OffsetFrameDerivatives {
+  const { relationship, definition, modelingTolerance } = input;
+  const seeds = frame.connectivity.pieces.map((piece) => piece.seedEntityId);
+  const sourceDofs = frameSourceDofs(definition, seeds);
+  const unavailable = (message: string, seed: SketchEntityId | null) =>
+    chainFailure(codes.derivativeUnavailable, message, seed);
+
+  const jvp = (
+    variations: readonly OffsetFrameVariation[],
+  ): readonly (OffsetFrameJvp | OffsetChainFailure)[] => {
+    if (variations.length === 0) return [];
+    const declared = uncheckedDeclaredOffsetChainPieces({
+      definition,
+      connectivity: frame.connectivity,
+      distance: relationship.distance,
+      modelingTolerance,
+      directions: variations.map((variation) => ({
+        ...(variation.points ? { points: variation.points } : {}),
+        ...(variation.splineTangents
+          ? { splineTangents: variation.splineTangents }
+          : {}),
+      })),
+    });
+    if (!declared.ok)
+      throw new RangeError(
+        `The solve frame is not reproduced by its definition: ${declared.message}`,
+      );
+    const adopted = adoptOffsetChainPlan(declared, frame.plan.adjacencies);
+    if (
+      !adopted.ok ||
+      adopted.plan.some((entry, index) => {
+        const planned = frame.plan.adjacencies[index]!;
+        return (
+          entry.kind !== planned.kind ||
+          ("keeper" in entry &&
+            "keeper" in planned &&
+            entry.keeper !== planned.keeper)
+        );
+      }) ||
+      encode(withoutDirections(adopted.pieces)) !== encode(frame.pieces)
+    )
+      throw new RangeError(
+        "The solve frame is not reproduced by its definition (pieces differ).",
+      );
+    return variations.map(
+      (variation, index) =>
+        directionJvp(
+          frame,
+          adopted.pieces,
+          adopted.sources,
+          definition,
+          variation,
+          index,
+        ) ??
+        unavailable(
+          "The offset frame derivative is singular or non-finite in this direction.",
+          seeds[0] ?? null,
+        ),
+    );
+  };
+
+  let columns: readonly (OffsetFrameJvp | OffsetChainFailure)[] | undefined;
+  const pullback = (
+    cotangent: OffsetFrameCotangent,
+  ): OffsetFrameVariation | OffsetChainFailure => {
+    columns ??= jvp(sourceDofs.map(basisVariation));
+    const points: Record<string, [number, number]> = {};
+    const splineTangents: Record<string, Record<string, [number, number]>> = {};
+    const circleRadii: Record<string, number> = {};
+    for (const [index, dof] of sourceDofs.entries()) {
+      const column = columns[index]!;
+      if ("ok" in column) return column;
+      const value = pairing(column, cotangent);
+      if (dof.kind === "point")
+        (points[dof.pointId] ??= [0, 0])[dof.axis] = value;
+      else if (dof.kind === "tangent")
+        ((splineTangents[dof.entityId] ??= {})[dof.occurrenceId] ??= [0, 0])[
+          dof.axis
+        ] = value;
+      else circleRadii[dof.entityId] = value;
+    }
+    return { points, splineTangents, circleRadii };
+  };
+  return { sourceDofs, jvp, pullback };
+}
+
+/**
+ * One direction's JVP of the frame (see `prepareOffsetFrameDerivatives`),
+ * from the batched pieces; null when not available (singular, non-finite).
+ */
+function directionJvp(
+  frame: OffsetSolveFrame,
+  pieces: readonly OffsetChainPiece[],
+  sources: readonly DeclaredOffsetPieceSource[],
+  definition: Pick<SketchDefinition, "entities">,
+  variation: OffsetFrameVariation,
+  direction: number,
+): OffsetFrameJvp | null {
+  const count = pieces.length;
+  const pointVariation = (pointId: string | undefined) =>
+    (pointId === undefined ? undefined : variation.points?.[pointId]) ?? ZERO;
+  const entityOf = (seed: SketchEntityId) =>
+    definition.entities.find((entity) => entity.entityId === seed);
+  // Own (unadopted) piece variations, natural order.
+  interface PieceVariation {
+    start: Vec;
+    end: Vec;
+    center?: Vec;
+    radius?: number;
+    /** Cubic leaves' directional differentials (poles copied, may be overridden). */
+    leaves?: { sourceInterval: readonly [number, number]; poles: Vec[] }[];
+  }
+  const own: PieceVariation[] = [];
+  for (const [index, piece] of pieces.entries()) {
+    const source = sources[index]!;
+    const entity = entityOf(piece.seedEntityId);
+    if (piece.kind === "derivedCubic") {
+      const leaves: NonNullable<PieceVariation["leaves"]> = [];
+      for (const span of piece.spans) {
+        const value = span.directions?.[direction];
+        if (!value) return null;
+        leaves.push({
+          sourceInterval: value.sourceInterval,
+          poles: [...value.poles],
+        });
+      }
+      own.push({
+        start: leaves[0]!.poles[0]!,
+        end: leaves.at(-1)!.poles[3]!,
+        leaves,
+      });
+      continue;
+    }
+    if (piece.kind === "lineSegment" && source.kind === "line") {
+      // offsetLinePoints: P + d·rot(û), û = (E − S)/|E − S|.
+      const dStart = pointVariation(source.startPointId);
+      const dEnd = pointVariation(source.endPointId);
+      const du = unitDifferential(
+        minus(source.source[1], source.source[0]),
+        minus(dEnd, dStart),
+      );
+      const dNormal = times([-du[1], du[0]], source.distance);
+      own.push({ start: plus(dStart, dNormal), end: plus(dEnd, dNormal) });
+      continue;
+    }
+    if (
+      piece.kind === "arc" &&
+      source.kind === "arc" &&
+      entity?.kind === "arc"
+    ) {
+      // S′ = C + R̃·(S − C)/|S − C|, E′ likewise, R̃ = ρ_s − σd, ρ_s = |S − C|.
+      const dCenter = pointVariation(entity.centerPointId);
+      const [start, end] = source.source;
+      const shifted =
+        source.sourceRadius -
+        (entity.sweepDirection === "counterClockwise" ? 1 : -1) *
+          source.distance;
+      const ws = minus(start, source.center);
+      const dws = minus(pointVariation(source.startPointId), dCenter);
+      const dRho = dotVec(ws, dws) / Math.hypot(ws[0], ws[1]);
+      const scaled = (point: Vec, dPoint: Vec) => {
+        const w = minus(point, source.center);
+        const unit = times(w, 1 / Math.hypot(w[0], w[1]));
+        return plus(
+          dCenter,
+          plus(
+            times(unitDifferential(w, minus(dPoint, dCenter)), shifted),
+            times(unit, dRho),
+          ),
+        );
+      };
+      own.push({
+        center: dCenter,
+        start: scaled(start, pointVariation(source.startPointId)),
+        end: scaled(end, pointVariation(source.endPointId)),
+      });
+      continue;
+    }
+    if (piece.kind === "circle" && entity?.kind === "circle") {
+      own.push({
+        start: ZERO,
+        end: ZERO,
+        center: pointVariation(entity.centerPointId),
+        radius: variation.circleRadii?.[entity.entityId] ?? 0,
+      });
+      continue;
+    }
+    throw new RangeError(
+      `Unsupported offset frame piece ${piece.seedEntityId}`,
+    );
+  }
+  // Declared vertices: the non-keeper terminal takes the keeper's (adoption).
+  const terminal = (index: number, exiting: boolean) =>
+    exiting !== pieces[index]!.reversed ? ("end" as const) : ("start" as const);
+  const setTerminal = (index: number, side: "start" | "end", value: Vec) => {
+    const piece = own[index]!;
+    piece[side] = value;
+    if (piece.leaves) {
+      const leaf = side === "start" ? piece.leaves[0]! : piece.leaves.at(-1)!;
+      leaf.poles[side === "start" ? 0 : 3] = value;
+    }
+  };
+  for (const [jointIndex, entry] of frame.plan.adjacencies.entries()) {
+    if (entry.kind !== "parallel" && entry.kind !== "absorbed") continue;
+    const next = (jointIndex + 1) % count;
+    const first = { index: jointIndex, side: terminal(jointIndex, true) };
+    const second = { index: next, side: terminal(next, false) };
+    const [keep, adopt] =
+      entry.keeper === "first" ? [first, second] : [second, first];
+    setTerminal(adopt.index, adopt.side, own[keep.index]![keep.side]);
+  }
+  // Seed-arc piece radius (the circle leaves' radius): hypot(start − C) of
+  // the (possibly adopted) piece start.
+  for (const [index, piece] of pieces.entries())
+    if (piece.kind === "arc") {
+      const value = own[index]!;
+      const s = minus(piece.start, piece.center);
+      value.radius =
+        dotVec(s, minus(value.start, value.center!)) / Math.hypot(s[0], s[1]);
+    }
+  // Trims: the implicit joint-parameter JVP at the representatives.
+  const jet = (index: number, leaf: number, parameter: number) => {
+    const piece = pieces[index]!;
+    const value = own[index]!;
+    if (piece.kind === "lineSegment")
+      return {
+        first: minus(piece.end, piece.start),
+        variation: plus(
+          value.start,
+          times(minus(value.end, value.start), parameter),
+        ),
+      };
+    if (piece.kind === "derivedCubic") {
+      const span = piece.spans[leaf]!;
+      const differential = value.leaves![leaf]!;
+      const evaluated = evaluateSplineSpan(
+        {
+          interval: span.sourceInterval,
+          poles: span.poles,
+          differential: {
+            interval: differential.sourceInterval,
+            poles: differential.poles as unknown as SplinePoles,
+          },
+        },
+        { kind: "source", value: parameter },
+      );
+      return {
+        first: evaluated.first,
+        variation: evaluated.differential.position,
+      };
+    }
+    const radius = piece.radius;
+    const cosine = Math.cos(parameter);
+    const sine = Math.sin(parameter);
+    return {
+      first: [-radius * sine, radius * cosine] as Vec,
+      variation: plus(value.center!, times([cosine, sine], value.radius!)),
+    };
+  };
+  const trims: {
+    jointIndex: number;
+    position: Vec;
+    first: number;
+    second: number;
+  }[] = [];
+  for (const trim of frame.trims) {
+    const next = (trim.jointIndex + 1) % count;
+    const a = jet(trim.jointIndex, trim.first.leaf, trim.first.parameter);
+    const b = jet(next, trim.second.leaf, trim.second.parameter);
+    const determinant = b.first[0] * a.first[1] - a.first[0] * b.first[1];
+    if (!Number.isFinite(determinant) || determinant === 0) return null;
+    const rx = b.variation[0] - a.variation[0];
+    const ry = b.variation[1] - a.variation[1];
+    const ds = (b.first[0] * ry - b.first[1] * rx) / determinant;
+    const dt = (a.first[0] * ry - a.first[1] * rx) / determinant;
+    // The published point's side (`trimPosition`).
+    const firstArc = pieces[trim.jointIndex]!.kind === "arc";
+    const onSecond =
+      pieces[next]!.kind === "arc" && (!pieces[next]!.reversed || !firstArc);
+    trims.push({
+      jointIndex: trim.jointIndex,
+      position: onSecond
+        ? plus(b.variation, times(b.first, dt))
+        : plus(a.variation, times(a.first, ds)),
+      first: ds,
+      second: dt,
+    });
+  }
+  const trimOf = (jointIndex: number) =>
+    trims.find((trim) => trim.jointIndex === jointIndex)!;
+  // The trim's first side is piece `jointIndex` at its exiting natural side;
+  // every other end at that joint is the second side. By piece and side, not
+  // by seed: a self-trim (one positional-closure piece) has one seed on both.
+  const trimParameter = (
+    end: OffsetChainDomainEnd,
+    index: number,
+    side: "start" | "end",
+  ) => {
+    if (end.kind !== "joint") return undefined;
+    const value = trimOf(end.jointIndex);
+    return end.jointIndex === index && side === terminal(index, true)
+      ? value.first
+      : value.second;
+  };
+  const cubics = new Map<
+    SketchEntityId,
+    { poles: SplinePoles; queryDomain: readonly [number, number] }[]
+  >();
+  const lineArcEndpoints = new Map<SketchEntityId, { start: Vec; end: Vec }>();
+  const seedArcs = new Map<SketchEntityId, OffsetFrameArcVariation>();
+  const circles = new Map<SketchEntityId, { center: Vec; radius: number }>();
+  for (const [index, piece] of pieces.entries()) {
+    const seed = piece.seedEntityId;
+    const value = own[index]!;
+    if (piece.kind === "circle") {
+      circles.set(seed, { center: value.center!, radius: value.radius! });
+      continue;
+    }
+    if (piece.kind === "derivedCubic") {
+      const spans = frame.cubics.get(seed)!;
+      cubics.set(
+        seed,
+        spans.map((span, leaf) => {
+          const differential = value.leaves![leaf]!;
+          return {
+            poles: differential.poles as unknown as SplinePoles,
+            queryDomain: [
+              trimParameter(span.start, index, "start") ??
+                differential.sourceInterval[0],
+              trimParameter(span.end, index, "end") ??
+                differential.sourceInterval[1],
+            ],
+          };
+        }),
+      );
+      continue;
+    }
+    const ends = frame.lineArcEndpoints.get(seed)!;
+    const endpoint = (end: OffsetChainDomainEnd, variationOf: Vec) =>
+      end.kind === "joint" ? trimOf(end.jointIndex).position : variationOf;
+    const published = {
+      start: endpoint(ends.startDomainEnd, value.start),
+      end: endpoint(ends.endDomainEnd, value.end),
+    };
+    lineArcEndpoints.set(seed, published);
+    if (piece.kind === "arc")
+      seedArcs.set(
+        seed,
+        pointDefinedArcVariation(piece.center, ends.start, ends.end, {
+          center: value.center!,
+          ...published,
+        }),
+      );
+  }
+  const arcs = frame.arcs.map((arc) => {
+    const next = (arc.jointIndex + 1) % count;
+    return {
+      jointIndex: arc.jointIndex,
+      ...pointDefinedArcVariation(arc.center, arc.start, arc.end, {
+        center: pointVariation(frame.vertices[arc.jointIndex]!.first.pointId),
+        start: own[arc.jointIndex]![terminal(arc.jointIndex, true)],
+        end: own[next]![terminal(next, false)],
+      }),
+    };
+  });
+  const result: OffsetFrameJvp = {
+    cubics,
+    lineArcEndpoints,
+    seedArcs,
+    circles,
+    trims,
+    arcs,
+  };
+  return finiteNumbers([
+    [...cubics],
+    [...lineArcEndpoints],
+    [...seedArcs],
+    [...circles],
+    trims,
+    arcs,
+  ])
+    ? result
+    : null;
+}
+
+/** A held location on a derived cubic output: an owner leaf and its local Bézier parameter u. */
+export interface OffsetFrameCurveLocation {
+  readonly leaf: number;
+  readonly u: number;
+}
+
+/** The local sub-interval of one leaf's representative query domain (exact ends kept). */
+function localQueryDomain(
+  span: OffsetFrameCubicSpan,
+): readonly [number, number] {
+  const [low, high] = span.sourceDomain;
+  const [from, to] = span.representativeQueryDomain;
+  const local = (value: number, end: number, exact: 0 | 1) =>
+    value === end ? exact : (value - low) / (high - low);
+  return [local(from, low, 0), local(to, high, 1)];
+}
+
+/**
+ * The point-on-derived-curve residual helper (T08b-g2, dark; the g5
+ * `pointOnCurve` residual on a derived cubic output): r = P − C(leaf, u).
+ * The location comes from a closest-point search restricted to every
+ * leaf's representative query domain (`closestSplineSpanLocation` with
+ * `domains`), so a point never binds to a trimmed-off tail, unless a held
+ * `location` is given. The gradient holds (leaf, u) fixed: ∂r/∂P = I and
+ * ∂r_c/∂source is the pullback of the held leaf's pole cotangent
+ * −Bᵢ(u)·e_c. `derivativeUnavailable` when the search finds nothing or the
+ * pullback is unavailable.
+ */
+export function offsetFrameCurveResidual(input: {
+  readonly frame: OffsetSolveFrame;
+  readonly derivatives: OffsetFrameDerivatives;
+  readonly seedEntityId: SketchEntityId;
+  readonly point: SketchPoint2D;
+  readonly location?: OffsetFrameCurveLocation;
+}):
+  | {
+      readonly ok: true;
+      readonly location: OffsetFrameCurveLocation;
+      readonly value: SketchPoint2D;
+      readonly gradient: {
+        /** ∂r/∂P (rows r_x, r_y). */
+        readonly point: readonly [SketchPoint2D, SketchPoint2D];
+        /** ∂r_x/∂source, ∂r_y/∂source. */
+        readonly source: readonly [OffsetFrameVariation, OffsetFrameVariation];
+      };
+    }
+  | OffsetChainFailure {
+  const { frame, derivatives, seedEntityId, point } = input;
+  const leaves = frame.cubics.get(seedEntityId);
+  if (!leaves)
+    throw new RangeError(
+      `Offset seed ${seedEntityId} has no derived cubic output in this frame.`,
+    );
+  const zeroPoles: SplinePoles = [ZERO, ZERO, ZERO, ZERO];
+  const found =
+    input.location ??
+    (() => {
+      const hit = closestSplineSpanLocation(
+        point,
+        leaves.map((leaf) => ({
+          interval: leaf.sourceDomain,
+          poles: leaf.span.poles,
+          differential: { interval: [0, 0] as const, poles: zeroPoles },
+        })),
+        leaves.map(localQueryDomain),
+      );
+      return hit ? { leaf: hit.spanIndex, u: hit.u } : null;
+    })();
+  if (!found)
+    return chainFailure(
+      codes.derivativeUnavailable,
+      "No closest point on the derived curve's active domain.",
+      seedEntityId,
+    );
+  const leaf = leaves[found.leaf]!;
+  const { u } = found;
+  const curve = evaluateSplineSpan(
+    {
+      interval: leaf.sourceDomain,
+      poles: leaf.span.poles,
+      differential: { interval: [0, 0], poles: zeroPoles },
+    },
+    { kind: "local", value: u },
+  ).position;
+  const v = 1 - u;
+  const weights = [v * v * v, 3 * u * v * v, 3 * u * u * v, u * u * u];
+  const component = (axis: 0 | 1) => {
+    const unit: SketchPoint2D = axis === 0 ? [-1, 0] : [0, -1];
+    const cotangentLeaves: { poles: SplinePoles }[] = [];
+    cotangentLeaves[found.leaf] = {
+      poles: weights.map((weight) =>
+        times(unit, weight),
+      ) as unknown as SplinePoles,
+    };
+    return derivatives.pullback({
+      cubics: new Map([[seedEntityId, cotangentLeaves]]),
+    });
+  };
+  const x = component(0);
+  if ("ok" in x) return x;
+  const y = component(1);
+  if ("ok" in y) return y;
+  return {
+    ok: true,
+    location: found,
+    value: minus(point, curve),
+    gradient: {
+      point: [
+        [1, 0],
+        [0, 1],
+      ],
+      source: [x, y],
+    },
+  };
 }
