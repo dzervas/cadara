@@ -290,6 +290,11 @@ async function handleWorkerOperation(operation: OccWorkerOperation) {
       );
     case "queryNeutralCurveJoin":
       return workerNeutralCurveQueries.queryNeutralCurveJoin(operation.request);
+    case "deriveSketchRegions":
+      // Live derivation must never queue ahead of feature preview/commit here.
+      throw new Error(
+        "Sketch region derivation runs in the dedicated sketch-derivation worker, not the OCC kernel worker.",
+      );
     case "commitSketch":
       return getWorkerAdapter(operation.request.documentId).commitSketch(
         operation.request,

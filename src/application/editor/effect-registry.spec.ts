@@ -23,7 +23,20 @@ import {
 } from "./effect-registry";
 import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
 import { createRecordingNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import {
+  SketchConstraintSolverAdapter,
+  SketchRegionDerivationSupersededError,
+} from "@/domain/solver/sketch-constraint-solver-adapter";
+import { defaultSelectionFilter } from "@/core/editor/schema";
+import { transitionEditorState } from "@/core/editor/state-machine/reducer-root";
+import { initialEditorState } from "@/core/editor/state-machine/state-creators";
+import type {
+  EditorEffect,
+  SketchEditorState,
+} from "@/core/editor/state-machine/types";
+import { withLiveSolveBasis } from "@/domain/editor/sketch-session";
+import { openSketchSessionFromSelection } from "@/domain/editor/sketch-session-controller";
+import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
 
 test("commits the current authored sketch after deletion without resurrecting a history tail", async () => {
   function addLine(
@@ -341,4 +354,112 @@ test("two documents with different tolerances reach the live region queries with
       `Every live query carries the document tolerance ${modelingTolerance} unchanged.`,
     ).toEqual(new Set([modelingTolerance]));
   }
+});
+
+// Seam: a live derivation superseded by a newer request for its document (the
+// dedicated derivation worker terminates it) completes as the standard
+// failure event, which the reducer discards because the newer request owns
+// the pending slot; any other rejection still reaches error reporting.
+test("a superseded live derivation completes as a stale failure event; real errors still reject", async () => {
+  const snapshot = await createSeedDocumentSnapshot();
+  const sketch = snapshot.document.sketches[0]!;
+  const opened = openSketchSessionFromSelection(
+    [{ kind: "sketch", sketchId: sketch.sketchId }],
+    snapshot,
+  )!;
+  const session = withLiveSolveBasis(opened, opened.definition);
+  const sessionState = (commandSessionId: string): SketchEditorState => ({
+    ...initialEditorState,
+    document: {
+      documentId: snapshot.document.documentId,
+      revisionId: snapshot.document.revisionId,
+    },
+    snapshot,
+    kind: "editingSketch",
+    mode: "sketch",
+    command: { commandSessionId, toolId: "sketch", phase: "editing" },
+    session,
+    selection: [{ kind: "sketch", sketchId: sketch.sketchId }],
+    selectionFilter: defaultSelectionFilter,
+    pendingCommitRequestId: null,
+    pendingProjectionRequestId: null,
+    pendingImportRequestId: null,
+    pendingRegionRequest: null,
+  });
+  const deriveEffect = (state: SketchEditorState) => {
+    const result = transitionEditorState(state, {
+      type: "document.refreshRequested",
+    });
+    const effect = result.effects.find(
+      (
+        candidate,
+      ): candidate is Extract<EditorEffect, { type: "sketch.deriveRegions" }> =>
+        candidate.type === "sketch.deriveRegions",
+    )!;
+    return { state: result.state as SketchEditorState, effect };
+  };
+  // The old command session's request is still running when the sketch is
+  // re-entered; the new session's request supersedes it in the pool.
+  const old = deriveEffect(sessionState("command_sketch-1"));
+  const current = deriveEffect(sessionState("command_sketch-2"));
+  const unused = () => {
+    throw new Error("Only live region derivation is exercised here.");
+  };
+  const runtimeRejecting = (error: Error) =>
+    createModelingServiceEditorEffectRuntime({
+      getCurrentDocumentSnapshot: unused,
+      projectSketchExternalReferences: unused,
+      sketchSolver: {
+        async deriveSketchRegions() {
+          throw error;
+        },
+        createCommitCorrelation: unused,
+        projectExternalReferences: unused,
+      },
+      commitSketch: unused,
+      evaluatePreview: unused,
+      createFeature: unused,
+      updateFeature: unused,
+      setFeatureCursor: unused,
+    });
+  const request = (requestId: string) =>
+    ({
+      contractVersion: "modeling-contract/v1alpha1",
+      requestId,
+      documentId: old.effect.documentId,
+    }) as never;
+  const superseded = new SketchRegionDerivationSupersededError(
+    request(old.effect.requestId),
+    request(current.effect.requestId),
+  );
+
+  const event = await runEditorEffect(old.effect, runtimeRejecting(superseded));
+  expect(
+    event,
+    "The superseded request completes as its own standard failure event.",
+  ).toMatchObject({
+    type: "effect.sketchRegionDerivationFailed",
+    requestId: old.effect.requestId,
+    commandSessionId: "command_sketch-1",
+    generation: old.effect.generation,
+  });
+  const after = transitionEditorState(current.state, event);
+  const afterState = after.state as SketchEditorState;
+  expect(
+    afterState.pendingRegionRequest,
+    "The newer request keeps the pending slot.",
+  ).toEqual(current.state.pendingRegionRequest);
+  expect(
+    afterState.session.liveRegions,
+    "The superseded failure never marks the current session's regions failed.",
+  ).toBe(current.state.session.liveRegions);
+  expect(after.effects, "Nothing is re-emitted.").toEqual([]);
+
+  await expect(
+    runEditorEffect(
+      current.effect,
+      runtimeRejecting(new Error("worker derivation failed")),
+    ),
+    "Any other rejection still reaches the event loop's error reporting.",
+  ).rejects.toThrow("worker derivation failed");
 });

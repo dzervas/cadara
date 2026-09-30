@@ -51,6 +51,7 @@ import {
   isModelingMutationError,
   modelingMutationErrorToDiagnostic,
 } from "@/core/editor/state-machine/error-mapping";
+import { SketchRegionDerivationSupersededError } from "@/domain/solver/sketch-constraint-solver-adapter";
 
 export function createEffectExecutor(runtime: EditorEffectRuntime) {
   return async function executeEffect(
@@ -308,18 +309,35 @@ export function createEffectExecutor(runtime: EditorEffectRuntime) {
         }
       }
       case "sketch.deriveRegions": {
-        // No catch: a rejection must reach the event loop's error reporting,
-        // which then dispatches the standard failure event for this effect.
+        // Real failures are not caught: they must reach the event loop's error
+        // reporting, which then dispatches the standard failure event.
         if (!runtime.deriveSketchRegions) {
           throw new Error("Live sketch region derivation is not available.");
         }
 
-        const result = await runtime.deriveSketchRegions({
-          requestId: effect.requestId,
-          documentId: effect.documentId,
-          baseRevisionId: effect.baseRevisionId,
-          basis: effect.basis,
-        });
+        let result: Awaited<
+          ReturnType<NonNullable<EditorEffectRuntime["deriveSketchRegions"]>>
+        >;
+        try {
+          result = await runtime.deriveSketchRegions({
+            requestId: effect.requestId,
+            documentId: effect.documentId,
+            baseRevisionId: effect.baseRevisionId,
+            basis: effect.basis,
+          });
+        } catch (error: unknown) {
+          if (!(error instanceof SketchRegionDerivationSupersededError)) {
+            throw error;
+          }
+          // Superseded by a newer request for this document, which by
+          // construction belongs to a newer command session or a restarted
+          // loop: the reducer discards this request's failure event as stale.
+          return createEditorEffectFailureEvent(
+            effect,
+            error,
+            "Sketch region derivation was superseded.",
+          );
+        }
 
         return {
           type: "effect.sketchRegionsDerived",
