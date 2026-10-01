@@ -16,8 +16,13 @@ import type {
   SketchEntityDefinition,
   SketchStyleDefinition,
   SketchStyleRecord,
+  SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import {
+  sampleSolvedCubicSpans,
+  solvedCubicSpans,
+} from "@/contracts/sketch/spline-geometry";
 import {
   projectedSplineDisplayPoints,
   projectedSplineIsClosed,
@@ -135,19 +140,13 @@ export function getStableSketchSessionDisplayRenderables(
       displayDefinition,
       referenceImageOperationOverrides,
     );
-  const cachedSnapshot = getSketchSessionSolvedSnapshot(session);
-  const solved = cachedSnapshot
-    ? { solvedSnapshot: cachedSnapshot }
-    : solveSketchDefinitionCore({
-        definition: resolveSketchDefinitionForSolve(
-          displayDefinition,
-          session.documentVariables,
-        ),
-        projectedReferences: displayProjectedReferences,
-        tolerances: session.solverTolerances,
-        ...getSketchSessionDerivationSettings(session),
-        partialSolvePolicy: "bestEffort",
-      });
+  const solved = {
+    solvedSnapshot: getSketchSessionDisplaySolvedSnapshot(
+      session,
+      displayDefinition,
+      displayProjectedReferences,
+    ),
+  };
   const constraintDisplaySummary = getSketchConstraintDisplaySummary({
     sketchId,
     definition: displayDefinition,
@@ -262,19 +261,24 @@ export function getStableSketchSessionDisplayRenderables(
       index,
     ),
   );
-  const entityRenderables = getAcceptedSketchDisplayEntities(
-    sketchId,
-    displayDefinition,
-  ).map((entity, index) =>
-    withSketchConstraintDisplay(
-      createDisplayRenderableForEntity(
-        session,
-        entity,
-        index,
-        entity.entityId ? localStyleLookup.get(entity.entityId) : undefined,
-      ),
-      constraintDisplaySummary,
+  const entityRenderables = [
+    ...getAcceptedSketchDisplayEntities(sketchId, displayDefinition).map(
+      (entity, index) =>
+        createDisplayRenderableForEntity(
+          session,
+          entity,
+          index,
+          entity.entityId ? localStyleLookup.get(entity.entityId) : undefined,
+        ),
     ),
+    ...createDisplayRenderablesForDerivedShells(
+      session,
+      displayDefinition,
+      solved.solvedSnapshot,
+      localStyleLookup,
+    ),
+  ].map((renderable) =>
+    withSketchConstraintDisplay(renderable, constraintDisplaySummary),
   );
 
   const renderables = [
@@ -349,6 +353,47 @@ export function getStableSketchSessionDisplayRenderables(
   stableDisplayCacheRenderables = renderables;
 
   return renderables;
+}
+
+let displaySolveCacheKey: string | null = null;
+let displaySolveCacheSnapshot: SolvedSketchSnapshot | null = null;
+
+/**
+ * The solved snapshot the session displays: the live solve, else a
+ * best-effort solve of the display definition (an opened sketch before its
+ * first edit), cached on the stable display key. Display, pick and snap read
+ * the shells' spans from this one snapshot (T08b-g5b).
+ */
+export function getSketchSessionDisplaySolvedSnapshot(
+  session: SketchSessionState,
+  displayDefinition?: SketchDefinition,
+  displayProjectedReferences?: readonly ProjectedSketchReferenceRecord[],
+): SolvedSketchSnapshot {
+  const live = getSketchSessionSolvedSnapshot(session);
+  if (live) return live;
+  const key = getStableSketchSessionDisplayKey(session);
+  if (displaySolveCacheKey === key && displaySolveCacheSnapshot)
+    return displaySolveCacheSnapshot;
+  // Derived lazily: callers without a display definition (snap, on every
+  // pointer move) skip the derivation when a live solve exists.
+  displayDefinition ??= getSketchSessionDisplayDefinition(session);
+  displayProjectedReferences ??= getSketchSessionDisplayProjectedReferences(
+    session,
+    displayDefinition,
+  );
+  const snapshot = solveSketchDefinitionCore({
+    definition: resolveSketchDefinitionForSolve(
+      displayDefinition,
+      session.documentVariables,
+    ),
+    projectedReferences: displayProjectedReferences,
+    tolerances: session.solverTolerances,
+    ...getSketchSessionDerivationSettings(session),
+    partialSolvePolicy: "bestEffort",
+  }).solvedSnapshot;
+  displaySolveCacheKey = key;
+  displaySolveCacheSnapshot = snapshot;
+  return snapshot;
 }
 
 export function getTransientSketchSessionDisplayRenderables(
@@ -455,6 +500,74 @@ export function withSketchConstraintDisplay(
       summary,
     ),
   };
+}
+
+/**
+ * Display validity of a solved derived offset shell (T08b-g5b, plan §3.4):
+ * `certified` is current. A provisional shell is `stale` (normal colour,
+ * U-A) while a drag is active, while its publication round is pending, or
+ * before the session has a live solve; once the round has settled
+ * (current, unavailable or failed) without certifying it, it is `invalid`
+ * (the existing red tint).
+ */
+export function getDerivedShellDisplayValidity(
+  session: SketchSessionState,
+  publication: "provisional" | "certified",
+): SketchDerivedValidity["state"] {
+  if (publication === "certified") return "current";
+  return session.liveSolve === null ||
+    session.activeDrag !== null ||
+    session.liveRegions.status === "pending"
+    ? "stale"
+    : "invalid";
+}
+
+/**
+ * The derived offset shells of the display definition, drawn from their
+ * solved spans clipped to each span's drawn `queryDomain` (the same
+ * `solvedCubicSpans` pick, snap, measure, export and the OCC snapshot read).
+ * Provisional shells draw too (U-A); a shell has no handles.
+ */
+export function createDisplayRenderablesForDerivedShells(
+  session: SketchSessionState,
+  definition: SketchDefinition,
+  solvedSnapshot: SolvedSketchSnapshot,
+  styles: ReadonlyMap<SketchEntityId, SketchEntityDisplayStyle>,
+): SketchSessionDisplayRenderable[] {
+  const records = new Map(
+    solvedSnapshot.solvedEntities.map((record) => [record.entityId, record]),
+  );
+  return definition.entities.flatMap((entity) => {
+    if (entity.kind !== "derivedPiecewiseCubic") return [];
+    const record = records.get(entity.entityId);
+    if (record?.kind !== "derivedPiecewiseCubic") return [];
+    const points = sampleSolvedCubicSpans(solvedCubicSpans(record));
+    if (points.length < 2) return [];
+    return [
+      {
+        ...createDisplayRenderableForEntity(
+          session,
+          {
+            id: entity.entityId,
+            kind: "polyline",
+            points,
+            isClosed: false,
+            entityId: entity.entityId,
+            status: "accepted",
+            label: entity.label,
+            isConstruction: entity.isConstruction,
+          },
+          0,
+          styles.get(entity.entityId),
+        ),
+        id: `renderable_sketch_shell_${entity.entityId}` as RenderableId,
+        regionValidity: getDerivedShellDisplayValidity(
+          session,
+          record.publication,
+        ),
+      },
+    ];
+  });
 }
 
 export function createOverconstraintDiagnosticRenderable(

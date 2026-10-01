@@ -327,6 +327,22 @@ test("src/contracts/solver/solver-contract.spec.ts", async () => {
       validateDeriveSketchRegionsRequest(regionRequest).success,
       "Region requests without the document modelingTolerance are rejected at the runtime boundary.",
     ).toBe(false);
+    expect(
+      validateDeriveSketchRegionsRequest({
+        ...regionRequest,
+        modelingTolerance: 1e-3,
+        derivationLane: "offsetPreview",
+      }).success,
+      "T08b-g5b: the explicit offset-preview derivation lane is a valid region request field.",
+    ).toBe(true);
+    expect(
+      validateDeriveSketchRegionsRequest({
+        ...regionRequest,
+        modelingTolerance: 1e-3,
+        derivationLane: "live-ish",
+      }).success,
+      "T08b-g5b: an unknown derivation lane is rejected at the runtime boundary.",
+    ).toBe(false);
     for (const modelingTolerance of [0, -1e-3, Number.NaN, Infinity]) {
       await expect(
         adapter.deriveSketchRegions({ ...regionRequest, modelingTolerance }),

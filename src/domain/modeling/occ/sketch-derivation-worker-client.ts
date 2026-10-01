@@ -1,7 +1,6 @@
-import {
-  SKETCH_OFFSET_PREVIEW_REQUEST_SCOPE,
-  type DeriveSketchRegionsRequest,
-  type DeriveSketchRegionsResponse,
+import type {
+  DeriveSketchRegionsRequest,
+  DeriveSketchRegionsResponse,
 } from "@/contracts/solver/schema";
 import type { DocumentId } from "@/contracts/shared/ids";
 import {
@@ -19,7 +18,11 @@ interface DerivationSlot {
   inFlight: {
     request: DeriveSketchRegionsRequest;
     startedAt: number;
-    supersede: (error: SketchRegionDerivationSupersededError) => void;
+    supersede: (
+      error:
+        | SketchRegionDerivationSupersededError
+        | SketchRegionDerivationDisposedError,
+    ) => void;
   } | null;
 }
 
@@ -51,10 +54,13 @@ export const SKETCH_REGION_DERIVATION_MINIMUM_SUPERSEDE_AGE_MS = 250;
  *   with a running derivation keep a worker.
  * - Any other rejection (worker failure message, transport error, clone
  *   failure) reaches the caller unchanged and retires that worker.
- * - Offset preview publications (U-G3, request scope
- *   `SKETCH_OFFSET_PREVIEW_REQUEST_SCOPE`) run in their own lane (worker) per
- *   document, so a preview check and the live region derivation never
- *   supersede each other; each lane supersedes only its own requests.
+ * - Offset preview publications (U-G3, `derivationLane: "offsetPreview"`)
+ *   run in their own lane (worker) per document, so a preview check and the
+ *   live region derivation never supersede each other; each lane supersedes
+ *   only its own requests.
+ * - `dispose()` settles every request: a waiting one and a running one
+ *   reject with `SketchRegionDerivationDisposedError`, and no timer stays
+ *   scheduled.
  */
 export class SketchRegionDerivationWorkerPool implements SketchRegionDerivationDelegate {
   private readonly createWorker: () => OccWorkerLike;
@@ -194,7 +200,19 @@ export class SketchRegionDerivationWorkerPool implements SketchRegionDerivationD
   }
 
   dispose() {
-    for (const [key, slot] of this.slots) this.retire(key, slot);
+    for (const [lane, entry] of this.waiting) {
+      this.waiting.delete(lane);
+      entry.cancelTimer();
+      entry.reject(new SketchRegionDerivationDisposedError(entry.request));
+    }
+    for (const [key, slot] of this.slots) {
+      const running = slot.inFlight;
+      slot.inFlight = null;
+      running?.supersede(
+        new SketchRegionDerivationDisposedError(running.request),
+      );
+      this.retire(key, slot);
+    }
   }
 
   private retire(key: string, slot: DerivationSlot) {
@@ -203,10 +221,20 @@ export class SketchRegionDerivationWorkerPool implements SketchRegionDerivationD
   }
 }
 
-/** One worker lane per document and request kind (live regions / offset preview). */
+/** One worker lane per document and request kind (carried explicitly by the request). */
 function laneOf(request: DeriveSketchRegionsRequest) {
-  const preview = request.requestId.startsWith(
-    `request_${SKETCH_OFFSET_PREVIEW_REQUEST_SCOPE}`,
-  );
-  return `${request.documentId}\u0000${preview ? "preview" : "live"}`;
+  return `${request.documentId}\u0000${request.derivationLane ?? "live"}`;
+}
+
+/** A derivation still waiting or running when its pool was disposed. */
+export class SketchRegionDerivationDisposedError extends Error {
+  override readonly name = "SketchRegionDerivationDisposedError";
+  readonly requestId: DeriveSketchRegionsRequest["requestId"];
+
+  constructor(request: DeriveSketchRegionsRequest) {
+    super(
+      `Sketch region derivation ${request.requestId} ended because its derivation worker pool was disposed.`,
+    );
+    this.requestId = request.requestId;
+  }
 }

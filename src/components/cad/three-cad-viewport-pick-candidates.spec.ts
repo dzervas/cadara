@@ -309,6 +309,97 @@ test("semantic sketch curves keep existing candidate ranking against points and 
   ).toBe(curveTarget);
 });
 
+// Lane: ui (docs/testing.md). Seam: screen-space sketch-curve pick wiring of
+// a derived offset shell (T08b-g5b): the candidate is the shell entity, along
+// its solved spans clipped to `queryDomain` (fabricated solved record: the
+// render-local contract, not offset geometry).
+test("a derived offset shell is picked along its drawn (queryDomain) spans and never along its trimmed-off tail", () => {
+  const viewportRect = {
+    left: 0,
+    top: 0,
+    width: 200,
+    height: 200,
+  } as DOMRectReadOnly;
+  const camera = new THREE.OrthographicCamera(-10, 10, 10, -10, 0.1, 100);
+  camera.position.set(0, 0, 10);
+  camera.lookAt(0, 0, 0);
+  camera.updateProjectionMatrix();
+  camera.updateMatrixWorld(true);
+  const sketchId = "sketch_primary" as SketchId;
+  const shellId = "sketch_entity_shell" as SketchEntityId;
+  const base = createNewSketchSession(
+    createStandardPlaneDefinition("xy"),
+    OCC_KERNEL_SETTINGS,
+  );
+  const shell = {
+    kind: "derivedPiecewiseCubic",
+    entityId: shellId,
+    label: "Offset shell",
+    target: { kind: "sketchEntity", sketchId, entityId: shellId },
+    isConstruction: false,
+    derivationId: "derivation_shell",
+  } as const;
+  // One straight cubic from x = -8 to x = 8 on y = 0, drawn on [-4, 8] only.
+  const record = {
+    entityId: shellId,
+    kind: "derivedPiecewiseCubic",
+    publication: "certified",
+    spans: [
+      {
+        outputSpanId: "a>b",
+        subIndex: 0,
+        sourceLocalInterval: [0, 1],
+        sourceDomain: [0, 1],
+        queryDomain: [0.25, 1],
+        poles: [
+          [-8, 0],
+          [-8 / 3, 0],
+          [8 / 3, 0],
+          [8, 0],
+        ],
+        certifiedError: 0,
+      },
+    ],
+  } as const;
+  const definition = {
+    ...base.definition,
+    entityIds: [shellId],
+    entities: [shell],
+  } as unknown as SketchDefinition;
+  const session = {
+    ...base,
+    sketchId,
+    definition,
+    liveSolve: {
+      definition,
+      projectedReferences: [],
+      solvedSnapshot: { solvedEntities: [record], solvedPoints: [] },
+      accepted: true,
+    },
+  } as never;
+  const at = (x: number) =>
+    collectProjectedSketchCurveCandidates({
+      clientX: 100 + x * 10,
+      clientY: 100,
+      camera,
+      viewportRect,
+      sketchSession: session,
+      acceptsTarget: () => true,
+      currentHoverTarget: null,
+    }).some(
+      (candidate) =>
+        candidate.target.kind === "sketchEntity" &&
+        candidate.target.entityId === shellId,
+    );
+  expect(at(4), "The drawn part of the shell picks the shell entity.").toBe(
+    true,
+  );
+  expect(
+    at(-7),
+    "The trimmed-off tail (x < -4) is not drawn and never picks the shell.",
+  ).toBe(false);
+});
+
 function makeCurveSession(sketchId: SketchId) {
   const point = (suffix: string, position: SketchPoint2D) =>
     createPointDefinition(

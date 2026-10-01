@@ -1,6 +1,7 @@
 import type {
   SketchDefinition,
   SketchPoint2D,
+  SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
 import {
   projectedSplineDisplayPoints,
@@ -17,7 +18,9 @@ import type { SketchToolId } from "@/core/sketch-tools/definition";
 import { distanceBetween, midpoint } from "@/domain/sketch/point-math";
 import {
   reconstructSplineAggregate,
+  sampleSolvedCubicSpans,
   sampleSplineGeometry,
+  solvedCubicSpans,
 } from "@/contracts/sketch/spline-geometry";
 
 const DEFAULT_SNAP_TOLERANCE = 0.18;
@@ -149,7 +152,19 @@ export interface SketchSnapResult {
 export function collectSketchSnapGeometries(input: {
   definition: SketchDefinition;
   projectedReferences?: readonly ProjectedSketchReferenceRecord[];
+  /**
+   * T08b-g5b: the solved snapshot the session displays; a derived offset
+   * shell snaps along its solved spans clipped to their drawn domains (the
+   * display tessellation). Absent: shells give no candidates.
+   */
+  solvedSnapshot?: SolvedSketchSnapshot | null;
 }): SketchSnapGeometry[] {
+  const solvedEntities = new Map(
+    (input.solvedSnapshot?.solvedEntities ?? []).map((record) => [
+      record.entityId,
+      record,
+    ]),
+  );
   const points = new Map(
     input.definition.points.map((point) => [point.pointId, point]),
   );
@@ -265,12 +280,29 @@ export function collectSketchSnapGeometries(input: {
               ]
             : [];
         }
+        case "derivedPiecewiseCubic": {
+          const record = solvedEntities.get(entity.entityId);
+          const fitPoints =
+            record?.kind === "derivedPiecewiseCubic"
+              ? sampleSolvedCubicSpans(solvedCubicSpans(record))
+              : [];
+          return fitPoints.length >= 2
+            ? [
+                {
+                  kind: "spline",
+                  source: { ...source, geometryKind: "spline" },
+                  fitPoints,
+                  isClosed: false,
+                  label: entity.label,
+                },
+              ]
+            : [];
+        }
         case "ellipse":
         case "ellipticalArc":
         case "conic":
         case "bezierCurve":
         case "profileText":
-        case "derivedPiecewiseCubic":
           return [];
       }
     },

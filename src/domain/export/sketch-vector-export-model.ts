@@ -21,7 +21,11 @@ import type {
   SketchStyleStroke,
   SolvedSketchEntityGeometryRecord,
 } from "@/contracts/sketch/schema";
-import { reconstructSplineAggregate } from "@/contracts/sketch/spline-geometry";
+import {
+  clippedSolvedCubicSpanPoles,
+  reconstructSplineAggregate,
+  solvedCubicSpans,
+} from "@/contracts/sketch/spline-geometry";
 import type {
   DocumentId,
   RevisionId,
@@ -211,6 +215,29 @@ function buildEntity(
         entityId: entity.entityId,
         label: entity.label,
         spans: solvedEntity.reconstruction.spans.map((span) => span.poles),
+        isConstruction: entity.isConstruction,
+        style,
+      };
+    }
+
+    if (solvedEntity.kind === "derivedPiecewiseCubic") {
+      // [TECH] G7: export consumes only a certified shell, as SVG cubics of
+      // its solved spans clipped to their drawn domains.
+      if (solvedEntity.publication !== "certified") {
+        diagnostics.push(
+          createDiagnostic(
+            "sketch-vector-uncertified-offset",
+            `Offset curve ${entity.entityId} is not certified yet, so it was not exported.`,
+            target,
+          ),
+        );
+        return null;
+      }
+      return {
+        kind: "spline",
+        entityId: entity.entityId,
+        label: entity.label,
+        spans: solvedCubicSpans(solvedEntity).map(clippedSolvedCubicSpanPoles),
         isConstruction: entity.isConstruction,
         style,
       };

@@ -79,6 +79,7 @@ import {
   rebuildSessionCommitRequest,
   withConstructionFlag,
 } from "./internals";
+import { getSketchSessionDisplaySolvedSnapshot } from "./display";
 import { buildCommittedDimensionOverlays } from "./annotations";
 import {
   activateSketchConstraintTool,
@@ -387,27 +388,9 @@ export function buildSketchEditToolPresentation(
             confirmLabel: "Create",
             cancelLabel: "Cancel",
             placement: "target",
-            anchor:
-              previewEntities[0]?.kind === "line"
-                ? {
-                    kind: "sketchPoint" as const,
-                    point: [
-                      (previewEntities[0].start[0] +
-                        previewEntities[0].end[0]) /
-                        2,
-                      (previewEntities[0].start[1] +
-                        previewEntities[0].end[1]) /
-                        2,
-                    ],
-                    offset: { x: 18, y: -18 },
-                  }
-                : previewEntities[0]?.kind === "circle"
-                  ? {
-                      kind: "sketchPoint" as const,
-                      point: previewEntities[0].center,
-                      offset: { x: 18, y: -18 },
-                    }
-                  : undefined,
+            // T08b-g5b: a shell or joint-arc preview (polyline) anchors too;
+            // otherwise its offset could not be confirmed in the viewport.
+            anchor: getPreviewAnchor(previewEntities),
             submitAction: { type: "patch", patch: { intent: "commitOffset" } },
             cancelAction: { type: "patch", patch: { intent: "cancelOffset" } },
           }
@@ -2404,6 +2387,7 @@ export function resolveSessionSnap(
     geometries: collectSketchSnapGeometries({
       definition: session.definition,
       projectedReferences: session.projectedReferences,
+      solvedSnapshot: getSketchSessionDisplaySolvedSnapshot(session),
     }),
     activeTool: session.activeTool,
     activeAnchor:

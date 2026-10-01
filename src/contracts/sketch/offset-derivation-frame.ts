@@ -955,21 +955,147 @@ function firstChoice(
  * diagnostics of the solve ([TECH] G16), never publications.
  */
 export function solveOffsetFrame(
-  input: {
-    readonly relationship: OffsetFrameRelationship;
-    readonly definition: Pick<
-      SketchDefinition,
-      "points" | "entities" | "constraints"
-    >;
-    readonly modelingTolerance: number;
-    /**
-     * T08b-g5: carry the source-basis directions (every point, authored
-     * tangent and circle radius DOF) on this frame's own owner calls, for
-     * the solver's pullback. Geometry is byte-identical without it ([TECH]
-     * G8a); only the solver projection asks for it.
-     */
-    readonly withSourceBasis?: boolean;
-  },
+  input: OffsetSolveFrameInput,
+  plan?: OffsetFramePlan,
+): OffsetSolveFrameResult {
+  return solveFrameMemo.solve(input, plan);
+}
+
+/** The input of one solve frame. */
+export interface OffsetSolveFrameInput {
+  readonly relationship: OffsetFrameRelationship;
+  readonly definition: Pick<
+    SketchDefinition,
+    "points" | "entities" | "constraints"
+  >;
+  readonly modelingTolerance: number;
+  /**
+   * T08b-g5: carry the source-basis directions (every point, authored
+   * tangent and circle radius DOF) on this frame's own owner calls, for
+   * the solver's pullback. Geometry is byte-identical without it ([TECH]
+   * G8a); only the solver projection asks for it.
+   */
+  readonly withSourceBasis?: boolean;
+}
+
+/**
+ * The point ids a seed entity's frame reads (positions or existence): a
+ * superset of N2's and the piece builder's reads for every seed kind the
+ * frame supports; any other kind fails the frame without reading points.
+ */
+function seedReadPointIds(
+  entity: OffsetSolveFrameInput["definition"]["entities"][number],
+): readonly string[] {
+  switch (entity.kind) {
+    case "lineSegment":
+      return [entity.startPointId, entity.endPointId];
+    case "arc":
+      return [entity.startPointId, entity.endPointId, entity.centerPointId];
+    case "circle":
+      return [entity.centerPointId];
+    case "spline":
+      return entity.pointOccurrences.map((occurrence) => occurrence.pointId);
+    default:
+      return [];
+  }
+}
+
+/**
+ * The bitwise content key of a solve frame (T08b-g5b, g5a review REQUIRED):
+ * everything `solveOffsetFrame` reads, encoded with every number by its
+ * binary64 bits. That is the frame relationship (id, seeds, d, authored
+ * arc joints), τ, the plan hint (origin included), the basis flag, the seed
+ * entities in seed order (absent ones as null; their kind, closure,
+ * occurrences, authored tangents and circle radius), every coincident
+ * constraint (N2 reads them all, including paths through unselected
+ * points), and the position (or absence) of every point a seed or a
+ * coincident constraint names.
+ */
+function solveFrameKey(
+  input: OffsetSolveFrameInput,
+  plan: OffsetFramePlan | undefined,
+): string {
+  const { relationship, definition } = input;
+  const entities = new Map(
+    definition.entities.map((entity) => [entity.entityId, entity]),
+  );
+  const seeds = relationship.seedEntityIds.map(
+    (seedId) => entities.get(seedId) ?? null,
+  );
+  const coincident = definition.constraints.flatMap((constraint) =>
+    constraint.kind === "coincident" ? [constraint] : [],
+  );
+  const pointIds = new Set<string>();
+  for (const seed of seeds)
+    if (seed)
+      for (const pointId of seedReadPointIds(seed)) pointIds.add(pointId);
+  for (const constraint of coincident)
+    for (const pointId of constraint.pointIds) pointIds.add(pointId);
+  const positions = new Map(
+    definition.points.map((point) => [point.pointId as string, point.position]),
+  );
+  return encode([
+    relationship,
+    input.modelingTolerance,
+    plan ?? null,
+    input.withSourceBasis === true,
+    seeds,
+    coincident,
+    [...pointIds].map((pointId) => [pointId, positions.get(pointId) ?? null]),
+  ]);
+}
+
+/**
+ * T08b-g5b (g5a review REQUIRED, g2 routed "g4/g5 must cache"): a bounded,
+ * content-keyed memo of solve frames. The frame is deterministic in exactly
+ * its key (`solveFrameKey`), so a hit returns the SAME frame object the same
+ * call computed before; that identity keeps `frameSourceBasis` (keyed by the
+ * frame) valid. It does not reuse fixed-topology derivatives: the derivation
+ * layer's `offsetDerivatives` cache is keyed by the per-evaluation record, so
+ * those are recomputed on each evaluation. Least-recently-used eviction.
+ */
+class OffsetSolveFrameMemo {
+  private readonly entries = new Map<string, OffsetSolveFrameResult>();
+  private readonly capacity: number;
+
+  constructor(capacity: number) {
+    this.capacity = capacity;
+  }
+
+  solve(
+    input: OffsetSolveFrameInput,
+    plan: OffsetFramePlan | undefined,
+  ): OffsetSolveFrameResult {
+    const key = solveFrameKey(input, plan);
+    const known = this.entries.get(key);
+    if (known) {
+      this.entries.delete(key);
+      this.entries.set(key, known);
+      return known;
+    }
+    const result = solveOffsetFrameUnmemoized(input, plan);
+    this.entries.set(key, result);
+    if (this.entries.size > this.capacity)
+      this.entries.delete(this.entries.keys().next().value!);
+    return result;
+  }
+}
+
+const solveFrameMemo = new OffsetSolveFrameMemo(64);
+
+/**
+ * Test seam (T08b-g5b memo equivalence): the solve frame computed without
+ * the memo. Production code calls `solveOffsetFrame`.
+ */
+export function solveOffsetFrameWithoutMemoForTest(
+  input: OffsetSolveFrameInput,
+  plan?: OffsetFramePlan,
+): OffsetSolveFrameResult {
+  return solveOffsetFrameUnmemoized(input, plan);
+}
+
+function solveOffsetFrameUnmemoized(
+  input: OffsetSolveFrameInput,
   plan?: OffsetFramePlan,
 ): OffsetSolveFrameResult {
   const { relationship, definition, modelingTolerance } = input;

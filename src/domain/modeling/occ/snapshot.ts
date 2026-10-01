@@ -18,7 +18,11 @@ import type {
   RenderableEntityRecord,
 } from "@/contracts/render/schema";
 import type { SolvedSketchEntityGeometryRecord } from "@/contracts/sketch/schema";
-import { sampleSplineGeometry } from "@/contracts/sketch/spline-geometry";
+import {
+  sampleSolvedCubicSpans,
+  sampleSplineGeometry,
+  solvedCubicSpans,
+} from "@/contracts/sketch/spline-geometry";
 import { describeFeatureTreeNode } from "@/domain/modeling/feature-description";
 import type {
   BodyId,
@@ -2178,8 +2182,7 @@ function buildSketchCurveRenderRecords(
       entityId: entity.entityId,
     };
 
-    // T08b-g5b: derived offset shells are not drawn here yet.
-    if (entity.kind === "point" || entity.kind === "derivedPiecewiseCubic") {
+    if (entity.kind === "point") {
       return [];
     }
 
@@ -2209,6 +2212,11 @@ function buildSketchCurveRenderRecords(
         break;
       case "spline":
         points2D = sampleSplineGeometry(entity.reconstruction);
+        break;
+      case "derivedPiecewiseCubic":
+        // The session display's tessellation: solved spans clipped to their
+        // drawn domains (T08b-g5b).
+        points2D = sampleSolvedCubicSpans(solvedCubicSpans(entity));
         break;
       case "ellipse":
         points2D = sampleEllipsePoints(

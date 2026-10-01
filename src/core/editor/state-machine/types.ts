@@ -1240,6 +1240,8 @@ export interface EditorEffectRuntime {
     documentId: DocumentId;
     baseRevisionId: RevisionId;
     basis: SketchLiveRegionBasis;
+    /** See `DeriveSketchRegionsRequest.derivationLane` (absent: live). */
+    derivationLane?: "offsetPreview";
   }): Promise<{
     regions: RegionRecord[];
     diagnostics: SketchSolveDiagnostic[];

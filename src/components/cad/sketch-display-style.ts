@@ -159,10 +159,14 @@ export function getSketchDisplayPolylineMaterialConfig(
   palette: SketchRenderingPalette,
 ): SketchDisplayPolylineMaterialConfig {
   const isDiagnostic = renderable.diagnosticStyle?.kind === "overconstraint";
+  // A derived offset shell whose publication settled uncertified carries
+  // the region tint's `invalid` state: its stroke takes the same danger red.
+  // Stale (pending or dragged) shells keep the normal colour (U-A).
+  const isInvalidDerived = renderable.regionValidity === "invalid";
   const defaultColor =
     renderable.role === "reference"
       ? SURFACE_COLORS.sketchReference
-      : isDiagnostic
+      : isDiagnostic || isInvalidDerived
         ? palette.overconstrained
         : getDefaultSketchConstraintColor(renderable, palette);
   const hasAuthoredDash =
@@ -183,11 +187,12 @@ export function getSketchDisplayPolylineMaterialConfig(
 
   return {
     linePattern,
-    color: isDiagnostic
-      ? defaultColor
-      : applyStyles
-        ? (renderable.strokeStyle?.color ?? defaultColor)
-        : defaultColor,
+    color:
+      isDiagnostic || isInvalidDerived
+        ? defaultColor
+        : applyStyles
+          ? (renderable.strokeStyle?.color ?? defaultColor)
+          : defaultColor,
     opacity: isDiagnostic
       ? 1
       : applyStyles

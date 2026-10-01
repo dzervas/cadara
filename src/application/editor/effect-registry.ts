@@ -372,6 +372,7 @@ export function createEffectExecutor(runtime: EditorEffectRuntime) {
             documentId: effect.documentId,
             baseRevisionId: effect.baseRevisionId,
             basis: effect.basis,
+            derivationLane: "offsetPreview",
           });
         } catch (error: unknown) {
           if (!(error instanceof SketchRegionDerivationSupersededError)) {
@@ -829,6 +830,9 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
         solvedSnapshot: input.basis.solvedSnapshot,
         projectedReferences: input.basis.projectedReferences,
         modelingTolerance: input.basis.modelingTolerance,
+        ...(input.derivationLane
+          ? { derivationLane: input.derivationLane }
+          : {}),
       });
 
       return {

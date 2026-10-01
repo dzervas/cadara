@@ -20,7 +20,9 @@ import type {
 } from "@/contracts/sketch/schema";
 import {
   reconstructSplineAggregate,
+  sampleSolvedCubicSpans,
   sampleSplineGeometry,
+  solvedCubicSpans,
 } from "@/contracts/sketch/spline-geometry";
 import {
   getPrimitiveRefKey,
@@ -722,6 +724,40 @@ function resolveSketchEntityTarget(
           id: "fit-points",
           label: "Fit Points",
           value: String(entity.pointOccurrenceIds.length),
+        },
+      ],
+    });
+  }
+
+  if (entity.kind === "derivedPiecewiseCubic") {
+    // [TECH] G7: a modeling consumer measures only a certified shell, along
+    // its solved spans clipped to their drawn domains.
+    const record = sketch.sketch.solvedSnapshot.solvedEntities.find(
+      (entry) => entry.entityId === entity.entityId,
+    );
+    if (
+      record?.kind !== "derivedPiecewiseCubic" ||
+      record.publication !== "certified"
+    ) {
+      return null;
+    }
+    const sampledPoints = sampleSolvedCubicSpans(
+      solvedCubicSpans(record),
+      SPLINE_SEGMENTS,
+    ).map((point) => mapSketchPointToWorkspaceWorld(sketch.plane, point));
+    if (sampledPoints.length < 2) {
+      return null;
+    }
+    return createCurveTarget({
+      target,
+      label: entity.label,
+      key: getPrimitiveRefKey(target),
+      polyline: sampledPoints,
+      rows: [
+        {
+          id: "length",
+          label: "Length",
+          value: formatLength(polylineLength(sampledPoints, false)),
         },
       ],
     });

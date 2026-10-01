@@ -1428,7 +1428,12 @@ export type RegionBoundarySource =
 /** Stable source branch: one line/arc/circle, or one neutral cubic span. */
 export interface RegionBoundaryBranch {
   source: RegionBoundarySource;
-  /** "whole" | `${startOccurrenceId}>${endOccurrenceId}` (authored span, or a derived shell's output span id) | `span${index}` (projected neutral span). */
+  /**
+   * "whole" | `${startOccurrenceId}>${endOccurrenceId}` (authored spline span) |
+   * `${outputSpanId}` (a derived offset shell's output span: one source span;
+   * every owner sub-span inside it shares this branch, T08b-g3) |
+   * `span${index}` (projected neutral span).
+   */
   spanId: string;
 }
 

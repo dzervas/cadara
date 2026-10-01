@@ -847,3 +847,56 @@ function getStrokeWorldHeight(bounds: THREE.Box3) {
 function nearlyEqual(left: number, right: number) {
   return Math.abs(left - right) <= 1e-6;
 }
+
+// Lane: ui (docs/testing.md). Seam: the polyline material config, the stale /
+// invalid tint wiring of a derived offset shell's stroke (T08b-g5b).
+test("a derived offset shell stroke takes the existing invalid tint only when its publication settled uncertified", () => {
+  const palette = {
+    constrained: 0x222222,
+    underconstrained: 0x1651b0,
+    overconstrained: 0xff5555,
+    regionFill: 0x343a40,
+  } as const;
+  const shell = {
+    id: "renderable_sketch_shell_sketch_entity_shell",
+    label: "Offset shell",
+    geometry: {
+      kind: "polyline",
+      points: [
+        [0, 0, 0],
+        [1, 0.2, 0],
+        [2, 0, 0],
+      ],
+      isClosed: false,
+    },
+    target: {
+      kind: "sketchEntity",
+      sketchId: "sketch_primary",
+      entityId: "sketch_entity_shell",
+    },
+    linePattern: "solid",
+    role: "local",
+    strokeStyle: { color: 0x33ffaa, opacity: 0.5, width: 3 },
+  } as const;
+  const colorOf = (regionValidity?: "current" | "stale" | "invalid") =>
+    getSketchDisplayPolylineMaterialConfig(
+      { ...shell, ...(regionValidity ? { regionValidity } : {}) } as never,
+      true,
+      palette,
+    ).color;
+  expect(colorOf(), "Control: no validity keeps the authored stroke.").toBe(
+    0x33ffaa,
+  );
+  expect(
+    colorOf("current"),
+    "A certified (current) shell keeps the authored stroke.",
+  ).toBe(0x33ffaa);
+  expect(
+    colorOf("stale"),
+    "A stale (dragged / pending, U-A) shell keeps its normal colour.",
+  ).toBe(0x33ffaa);
+  expect(
+    colorOf("invalid"),
+    "A shell whose publication settled uncertified uses the existing invalid (danger) tint.",
+  ).toBe(palette.overconstrained);
+});
