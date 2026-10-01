@@ -23,6 +23,7 @@ import {
   approximateSplineOffset,
   type AdoptedEndpoint,
 } from "@/contracts/sketch/spline-offset-geometry";
+import { offsetLinePoints } from "@/contracts/sketch/offset-geometry";
 import {
   createCertifiedCubicTubeChain,
   createCertifiedCubicTubeChainWithBudgetObserverForTest,
@@ -7070,3 +7071,1037 @@ const STEPPED_PIN = {
   euclideanSteps: 6_621,
   integerBits: 1_186,
 };
+
+// Logic lane (docs/testing.md): T08b-g5d deep trims at the exported certifier
+// seam `certifyPieceChain`, on certifier-input fixtures that are NOT
+// owner-reachable: exact straight sources split into dyadic leaves of ONE
+// source span (same-leaf joins), emitted = the exact true offsets unless a
+// row says otherwise. Native rows are in offset-chain-topology.spec.ts.
+describe("piece tube chain (T08b-g5d): deep trims inside the terminal source span (certifier-input fixtures, not owner-reachable)", () => {
+  type Vector = readonly [number, number];
+  type Interval = readonly [number, number];
+  const PAD = 1e-9;
+  /** Straight source S(s) = start + 3s·step (s ∈ [0, 1], exact when dyadic). */
+  const legPoles = (start: Vector, step: Vector): SplinePoles =>
+    [0, 1, 2, 3].map((index) => [
+      start[0] + index * step[0],
+      start[1] + index * step[1],
+    ]) as unknown as SplinePoles;
+  /** The leaf [a, b] of a straight leg, shifted by `offset` (exact for dyadic a, b). */
+  const legLeaf = (
+    start: Vector,
+    step: Vector,
+    [a, b]: Interval,
+    offset: Vector,
+  ): SplinePoles =>
+    [0, 1, 2, 3].map((index) => {
+      const k = 3 * a + index * (b - a);
+      return [
+        start[0] + k * step[0] + offset[0],
+        start[1] + k * step[1] + offset[1],
+      ];
+    }) as unknown as SplinePoles;
+  interface Leg {
+    readonly start: Vector;
+    readonly step: Vector;
+    /** d·N of the natural source (exact). */
+    readonly offset: Vector;
+    readonly cuts: readonly Interval[];
+    readonly error: number;
+    /** Extra emitted translation (within `error`), per leaf index. */
+    readonly shift?: (leaf: number) => Vector;
+    /** Per-leaf derivative box override (an honest, looser enclosure). */
+    readonly box?: (leaf: number) => Box | undefined;
+    /** Per-leaf source span index override (U-B rows). */
+    readonly spanIndex?: (leaf: number) => number;
+    readonly splineId: string;
+  }
+  const tubesOf = (leg: Leg, ownerDistance: number) => {
+    const source = legPoles(leg.start, leg.step);
+    const box: Box = [
+      [3 * leg.step[0], 3 * leg.step[0]],
+      [3 * leg.step[1], 3 * leg.step[1]],
+    ];
+    return leg.cuts.map((interval, leaf): NeutralCubicPieceTube => {
+      const shift = leg.shift?.(leaf) ?? [0, 0];
+      return {
+        poles: legLeaf(leg.start, leg.step, interval, [
+          leg.offset[0] + shift[0],
+          leg.offset[1] + shift[1],
+        ]),
+        certifiedError: leg.error,
+        reference: {
+          derivative: leg.box?.(leaf) ?? box,
+          sourcePoles: source,
+          distance: ownerDistance,
+        },
+        source: {
+          splineId: leg.splineId,
+          spanIndex: leg.spanIndex?.(leaf) ?? 0,
+          startOccurrenceId: `${leg.splineId}-o0`,
+          endOccurrenceId: `${leg.splineId}-o1`,
+        },
+        sourceLocalInterval: interval,
+        queryDomain: interval,
+      };
+    });
+  };
+  const verifiedOf = (result: TubePieceChainResult) => {
+    if (result.kind !== "verified")
+      throw new Error(`${result.kind} ${result.code}: ${result.message}`);
+    return result.certificate;
+  };
+  const removedOf = (result: TubePieceChainResult) =>
+    verifiedOf(result).leaves.flatMap((leaf, index) =>
+      leaf.removed ? [index] : [],
+    );
+
+  // ---- Lemma T-W (line↔cubic) -------------------------------------------
+  /**
+   * A reversed vertical straight source (0,0) → (0, 0.75), traversed down
+   * into the vertex (0,0), then a line to (1, 1/2): a left turn, concave at
+   * d = 1/64. The cubic's emitted leaves are the exact offset x = d; the
+   * true crossing lies at s* ≈ 0.0337 of the source, inside leaf 1 of the
+   * cuts [0, 1/32], [1/32, 1/16], [1/16, 1] (vertex leaf 0, trim offset 1).
+   */
+  const D8 = 1 / 64;
+  const RISE: Omit<Leg, "cuts"> = {
+    start: [0, 0],
+    step: [0, 0.25],
+    offset: [D8, 0],
+    error: 0,
+    splineId: "rise",
+  };
+  const LINE_END: Vector = [1, 0.5];
+  const lineTube = () => {
+    const emitted = offsetLinePoints([0, 0], LINE_END, D8)!;
+    return {
+      kind: "line" as const,
+      reversed: false,
+      tube: {
+        emitted: [emitted.start, emitted.end] as const,
+        source: [[0, 0], LINE_END] as const,
+        distance: D8,
+      },
+    };
+  };
+  /** The exact true crossing: segment t* on the line, s* on the source. */
+  const riseCrossing = () => {
+    const length = Math.hypot(LINE_END[0], LINE_END[1]);
+    const normal: Vector = [-LINE_END[1] / length, LINE_END[0] / length];
+    const t = (D8 - D8 * normal[0]) / LINE_END[0];
+    const y = t * LINE_END[1] + D8 * normal[1];
+    return { t, s: y / 0.75 };
+  };
+  const riseRequest = ({
+    cuts = [
+      [0, 1 / 32],
+      [1 / 32, 1 / 16],
+      [1 / 16, 1],
+    ] as readonly Interval[],
+    offset = 1,
+    box,
+    spanIndex,
+  }: {
+    cuts?: readonly Interval[];
+    offset?: number;
+    box?: Leg["box"];
+    spanIndex?: Leg["spanIndex"];
+  } = {}): PieceTubeChainRequest => {
+    const { t, s } = riseCrossing();
+    return {
+      modelingTolerance: TOLERANCE,
+      closed: false,
+      distance: D8,
+      pieces: [
+        {
+          kind: "cubic",
+          reversed: true,
+          tubes: tubesOf({ ...RISE, cuts, box, spanIndex }, -D8),
+        },
+        lineTube(),
+      ],
+      trims: [
+        {
+          jointIndex: 0,
+          firstParameterBounds: [s - PAD, s + PAD],
+          secondParameterBounds: [t - PAD, t + PAD],
+          ...(offset > 0 ? { firstLeafOffset: offset } : {}),
+        },
+      ],
+    };
+  };
+
+  test("Lemma T-W: a deep line trim on inner leaf 1 verifies; leaf 0 is reported removed (no claim) and the trim records its proved offset", () => {
+    const result = certifier.certifyPieceChain(riseRequest());
+    const certificate = verifiedOf(result);
+    const trim = certificate.joins.find((join) => join.kind === "trim")!;
+    expect(trim).toMatchObject({
+      kind: "trim",
+      jointIndex: 0,
+      first: 1,
+      second: 3,
+      line: "second",
+      firstLeafOffset: 1,
+    });
+    if (trim.kind !== "trim") throw new Error("trim");
+    expect(trim.secondLeafOffset).toBeUndefined();
+    const { s, t } = riseCrossing();
+    // Reversed piece: natural τ of the trim leaf [1/32, 1/16].
+    const tau = (s - 1 / 32) / (1 / 32);
+    expect(trim.firstRootBounds[0]).toBeLessThan(tau);
+    expect(trim.firstRootBounds[1]).toBeGreaterThan(tau);
+    expect(trim.secondRootBounds[0]).toBeLessThan(t);
+    expect(trim.secondRootBounds[1]).toBeGreaterThan(t);
+    expect(removedOf(result)).toEqual([0]);
+    expect(certificate.leaves[0]).toEqual({
+      baseErrorStar: 0,
+      displacementBound: 0,
+      clearanceRadius: 0,
+      removed: true,
+    });
+    // No terminal-only request is affected: the same chain cut so the root
+    // lies on the vertex leaf verifies with no offset and no removed leaf.
+    const terminal = certifier.certifyPieceChain(
+      riseRequest({
+        cuts: [
+          [0, 1 / 16],
+          [1 / 16, 1],
+        ],
+        offset: 0,
+      }),
+    );
+    expect(removedOf(terminal)).toEqual([]);
+    expect(
+      verifiedOf(terminal).joins.find((join) => join.kind === "trim"),
+    ).not.toHaveProperty("firstLeafOffset");
+  });
+
+  test("D-T1 window cone: a removed leaf whose honest (loose) true O′ box leaves the cone s·rot(a)·O′ > 0 fails closed, never as a magnitude failure", () => {
+    // Leaf 0's box admits O′ = (2, 0.75): w = (−1/2, 1) gives w·O′ < 0
+    // (K1 with leaf 1 still holds: its cone is vertical).
+    const result = certifier.certifyPieceChain(
+      riseRequest({
+        box: (leaf) =>
+          leaf === 0
+            ? [
+                [0, 2],
+                [0.75, 0.75],
+              ]
+            : undefined,
+      }),
+    );
+    expect(result).toEqual({
+      kind: "uncertain",
+      code: "trim-window-unproven",
+      message:
+        "The window cone s·rot(a)·O′ > 0 is not proved on removed leaf 0.",
+      first: 1,
+      second: 3,
+    });
+  });
+
+  test("D-T2 forged offsets are never trusted: a leaf offset one too large or too small fails at the trim leaf's own root enclosure", () => {
+    const window = (first: number) => ({
+      kind: "uncertain",
+      code: "trim-window-unproven",
+      message:
+        "A true-root enclosure is not strictly inside its terminal leaf.",
+      first,
+      second: 3,
+      magnitude: true,
+    });
+    expect(certifier.certifyPieceChain(riseRequest({ offset: 2 }))).toEqual(
+      window(2),
+    );
+    expect(certifier.certifyPieceChain(riseRequest({ offset: 0 }))).toEqual(
+      window(0),
+    );
+  });
+
+  test("D-T3 U-B: a window that leaves the vertex leaf's source span fails closed", () => {
+    // Two collinear source spans (a parallel knot), one leaf each; offset 1
+    // names the leaf of span 1 while the vertex leaf is on span 0.
+    const span = (index: number): NeutralCubicPieceTube => {
+      const start: Vector = [0, (3 * index) / 64];
+      return {
+        poles: legLeaf(start, [0, 1 / 64], [0, 1], [D8, 0]),
+        certifiedError: 0,
+        reference: {
+          derivative: [
+            [0, 0],
+            [3 / 64, 3 / 64],
+          ],
+          sourcePoles: legPoles(start, [0, 1 / 64]),
+          distance: -D8,
+        },
+        source: {
+          splineId: "rise",
+          spanIndex: index,
+          startOccurrenceId: `rise-o${index}`,
+          endOccurrenceId: `rise-o${index + 1}`,
+        },
+        sourceLocalInterval: [0, 1],
+        queryDomain: [index, index + 1],
+      };
+    };
+    const base = riseRequest();
+    expect(
+      certifier.certifyPieceChain({
+        ...base,
+        pieces: [
+          { kind: "cubic", reversed: true, tubes: [span(0), span(1)] },
+          base.pieces[1]!,
+        ],
+      }),
+    ).toEqual({
+      kind: "uncertain",
+      code: "trim-window-unproven",
+      message: "A deep trim leaf lies beyond the terminal source span (U-B).",
+      first: 1,
+      second: 2,
+    });
+  });
+
+  test("admission: an offset on a line side, past the piece or not a count is invalid; R4: two deep trims of one piece that overlap fail closed before any work", () => {
+    const base = riseRequest();
+    const trim = base.trims[0]!;
+    const invalid = {
+      kind: "uncertain",
+      code: "invalid-cubic-tube-chain",
+      message: "Trim 0: invalid trim leaf offset.",
+    };
+    for (const forged of [
+      { firstLeafOffset: 3 },
+      { firstLeafOffset: 0.5 },
+      { firstLeafOffset: -1 },
+      { firstLeafOffset: 1, secondLeafOffset: 1 },
+    ])
+      expect(
+        certifier.certifyPieceChain({
+          ...base,
+          trims: [{ ...trim, ...forged }],
+        }),
+        JSON.stringify(forged),
+      ).toEqual(invalid);
+    // R4: line → three-leaf cubic → line, the cubic trimmed deep at both
+    // natural ends with k_start + k_end = 2 + 1 > size − 1 = 2.
+    const cubic = tubesOf(
+      {
+        ...RISE,
+        cuts: [
+          [0, 1 / 4],
+          [1 / 4, 1 / 2],
+          [1 / 2, 1],
+        ],
+      },
+      D8,
+    );
+    const line = (start: Vector, end: Vector) => {
+      const emitted = offsetLinePoints(start, end, D8)!;
+      return {
+        kind: "line" as const,
+        reversed: false,
+        tube: {
+          emitted: [emitted.start, emitted.end] as const,
+          source: [start, end] as const,
+          distance: D8,
+        },
+      };
+    };
+    const overlap: PieceTubeChainRequest = {
+      modelingTolerance: TOLERANCE,
+      closed: false,
+      distance: D8,
+      pieces: [
+        line([1, -1], [0, 0]),
+        { kind: "cubic", reversed: false, tubes: cubic },
+        line([0, 0.75], [1, 1.75]),
+      ],
+      trims: [
+        {
+          jointIndex: 0,
+          firstParameterBounds: [0.5, 0.5],
+          secondParameterBounds: [0.6, 0.6],
+          secondLeafOffset: 2,
+        },
+        {
+          jointIndex: 1,
+          firstParameterBounds: [0.4, 0.4],
+          secondParameterBounds: [0.5, 0.5],
+          firstLeafOffset: 1,
+        },
+      ],
+    };
+    expect(certifier.certifyPieceChain(overlap)).toEqual({
+      kind: "uncertain",
+      code: "trim-window-unproven",
+      message:
+        "Piece 1: its two deep trims overlap (a leaf removed by one end is trimmed or removed by the other).",
+      first: 1,
+      second: 3,
+    });
+  });
+
+  // ---- Deep S2 (cubic↔cubic) ----------------------------------------------
+  /**
+   * The S2 straight 3-4-5 legs (h = 1/16, d = 5/64): P into the origin along
+   * (4, −3), Q out along (4, 3); the exact true crossing (0, 5d/4) lies at
+   * u* = 15/16 on P and v* = 1/16 on Q. P is cut [0, ½], [½, ¾], [¾, 31/32],
+   * [31/32, 1] (u* on leaf 2, offset 1), Q [0, 1/32], [1/32, ⅛], [⅛, ½],
+   * [½, 1] (v* on leaf 1, offset 1).
+   */
+  const H = 1 / 16;
+  const D = 5 / 64;
+  const P: Omit<Leg, "cuts"> = {
+    start: [-12 * H, 9 * H],
+    step: [4 * H, -3 * H],
+    offset: [3 / 64, 1 / 16],
+    error: 2 ** -11,
+    splineId: "P",
+  };
+  const Q: Omit<Leg, "cuts"> = {
+    start: [0, 0],
+    step: [4 * H, 3 * H],
+    offset: [-3 / 64, 1 / 16],
+    error: 2 ** -30,
+    splineId: "Q",
+  };
+  const P_CUTS: readonly Interval[] = [
+    [0, 1 / 2],
+    [1 / 2, 3 / 4],
+    [3 / 4, 31 / 32],
+    [31 / 32, 1],
+  ];
+  const Q_CUTS: readonly Interval[] = [
+    [0, 1 / 32],
+    [1 / 32, 1 / 8],
+    [1 / 8, 1 / 2],
+    [1 / 2, 1],
+  ];
+  const s2Request = ({
+    first = { ...P, cuts: P_CUTS },
+    second = { ...Q, cuts: Q_CUTS },
+    offsets = [1, 1] as readonly [number, number],
+    bounds = [15 / 16, 1 / 16] as Vector,
+  }: {
+    first?: Leg;
+    second?: Leg;
+    offsets?: readonly [number, number];
+    bounds?: Vector;
+  } = {}): PieceTubeChainRequest => ({
+    modelingTolerance: TOLERANCE,
+    closed: false,
+    distance: D,
+    pieces: [
+      { kind: "cubic", reversed: false, tubes: tubesOf(first, D) },
+      { kind: "cubic", reversed: false, tubes: tubesOf(second, D) },
+    ],
+    trims: [
+      {
+        jointIndex: 0,
+        firstParameterBounds: [bounds[0] - PAD, bounds[0] + PAD],
+        secondParameterBounds: [bounds[1] - PAD, bounds[1] + PAD],
+        ...(offsets[0] > 0 ? { firstLeafOffset: offsets[0] } : {}),
+        ...(offsets[1] > 0 ? { secondLeafOffset: offsets[1] } : {}),
+      },
+    ],
+  });
+
+  test("deep S2: both sides deep verifies on the trim leaves (G1 there, G2 and the covering on every window leaf); the removed leaves keep K3 against the partner's non-window leaves", () => {
+    const result = certifier.certifyPieceChain(s2Request());
+    const certificate = verifiedOf(result);
+    const trim = certificate.joins.find((join) => join.kind === "graph-trim");
+    expect(trim).toMatchObject({
+      kind: "graph-trim",
+      jointIndex: 0,
+      first: 2,
+      second: 5,
+      firstLeafOffset: 1,
+      secondLeafOffset: 1,
+    });
+    if (trim?.kind !== "graph-trim") throw new Error("graph trim");
+    expect(trim.separation).toBeGreaterThan(0);
+    expect(trim).not.toHaveProperty("glue");
+    expect(removedOf(result)).toEqual([3, 4]);
+    // Removed P leaf 3 against Q's non-window leaves 6 and 7 (and removed
+    // Q leaf 4 against P's 0 and 1) are K3-cleared, not exempt.
+    for (const pair of [
+      [3, 6],
+      [3, 7],
+      [0, 4],
+      [1, 4],
+    ])
+      expect(certificate.clearedPairs).toContainEqual(pair);
+    expect(certificate.clearedPairs).not.toContainEqual([3, 5]);
+    expect(certificate.clearedPairs).not.toContainEqual([2, 4]);
+  });
+
+  test("D-S2-1 (the S2 math review's D1 counterexample, fix (a)): the true crossing lies on the REMOVED leaf A_{I−1} while the emitted witness lies on A_I near its knot; the Lemma-X margin at the trim leaf's knot fails closed", () => {
+    // P's emitted is the true offset translated by t = 2⁻¹⁴·(4, −3) along
+    // its own direction (|t| = 5·2⁻¹⁴ < ε_P): the emitted crossing slides to
+    // û = 15/16 − 2⁻¹⁰/3 while u* = 15/16 stays. P's knot at 15/16 − 2⁻¹³
+    // separates them: û on the trim leaf, u* on the removed vertex leaf.
+    const knot = 15 / 16 - 2 ** -13;
+    const shifted: Leg = {
+      ...P,
+      cuts: [
+        [0, 1 / 2],
+        [1 / 2, 3 / 4],
+        [3 / 4, knot],
+        [knot, 1],
+      ],
+      shift: () => [2 ** -14 * 4, -(2 ** -14) * 3],
+    };
+    const witness = 15 / 16 - 2 ** -10 / 3;
+    expect(witness).toBeLessThan(knot);
+    expect(15 / 16).toBeGreaterThan(knot);
+    expect(
+      certifier.certifyPieceChain(
+        s2Request({
+          first: shifted,
+          second: {
+            ...Q,
+            cuts: [
+              [0, 3 / 32],
+              [3 / 32, 1],
+            ],
+          },
+          offsets: [1, 0],
+          bounds: [witness, 1 / 16],
+        }),
+      ),
+    ).toEqual({
+      kind: "uncertain",
+      code: "trim-existence-unproven",
+      message:
+        "The true terminal offsets are not proved to cross once inside both terminal leaves.",
+      first: 2,
+      second: 4,
+      magnitude: true,
+    });
+  });
+
+  test("R12 + D-T2 for S2: a forged offset maps the stored witness bounds outside the named trim leaf and fails closed (no extrapolation)", () => {
+    const outside = (first: number, second: number) => ({
+      kind: "uncertain",
+      code: "trim-window-unproven",
+      message:
+        "The stored witness bounds are not strictly inside the trim leaf.",
+      first,
+      second,
+    });
+    // Too large on P (names [½, ¾]); too small on Q (names its vertex leaf).
+    expect(certifier.certifyPieceChain(s2Request({ offsets: [2, 1] }))).toEqual(
+      outside(1, 5),
+    );
+    expect(certifier.certifyPieceChain(s2Request({ offsets: [1, 0] }))).toEqual(
+      outside(2, 4),
+    );
+  });
+
+  // ---- R13: a deep S2 self-trim at a positional closure -------------------
+  /**
+   * The real owner's inward offset (d = 0.02) of a native-like positional
+   * closure loop through (0,0), (1, 0.3), (0.4, 1.2), (−0.7, 0.5), (0,0)
+   * (centripetal reconstruction; a corner at the closure V). Its first and
+   * last leaves (the V leaves) are split by binary64 de Casteljau (ε
+   * inflated by 2⁻⁴⁰ for the rounding; the owner's box and source data hold
+   * on every sub-leaf) at the local fractions `cuts` of each, so the
+   * emitted crossing lies on Q leaf `qCuts.length − 1 …` as chosen.
+   */
+  const selfTrimRequest = (
+    pCuts: readonly number[],
+    qCuts: readonly number[],
+    vertexError = 0,
+  ) => {
+    const points: readonly SplineVector[] = [
+      [0, 0],
+      [1, 0.3],
+      [0.4, 1.2],
+      [-0.7, 0.5],
+      [0, 0],
+    ];
+    const geometry = reconstructSpline({
+      id: "loop",
+      policy: "centripetal-mean-arm-v1",
+      closure: "positional",
+      points: points.map((position, index) => ({
+        occurrenceId: `o${index}`,
+        id: index === 4 ? "p0" : `p${index}`,
+        position,
+        tangent: { kind: "automatic" as const },
+      })),
+    });
+    if (geometry.validity !== "valid") throw new Error("invalid fixture");
+    const distance = 0.02;
+    const owner = approximateSplineOffset({
+      spans: geometry.spans,
+      distance,
+      modelingTolerance: TOLERANCE,
+    });
+    if (!owner.ok) throw new Error(owner.code);
+    const lerp = (
+      p: SplineVector,
+      q: SplineVector,
+      t: number,
+    ): SplineVector => [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t];
+    /** De Casteljau of a cubic at t: [left, right], sharing one pole. */
+    const split = (poles: SplinePoles, t: number) => {
+      const [a, b, c, e] = poles;
+      const ab = lerp(a, b, t);
+      const bc = lerp(b, c, t);
+      const ce = lerp(c, e, t);
+      const abc = lerp(ab, bc, t);
+      const bce = lerp(bc, ce, t);
+      const mid = lerp(abc, bce, t);
+      return [
+        [a, ab, abc, mid],
+        [mid, bce, ce, e],
+      ] as unknown as readonly [SplinePoles, SplinePoles];
+    };
+    /** Sub-leaves of one owner leaf at its local fractions `cuts` (increasing). */
+    const splitLeaf = (
+      tube: (typeof owner.spans)[number],
+      cuts: readonly number[],
+      errors: (leaf: number) => number,
+    ): NeutralCubicPieceTube[] => {
+      const out: NeutralCubicPieceTube[] = [];
+      let rest = tube.poles as SplinePoles;
+      let from = 0;
+      const [l0, l1] = tube.sourceLocalInterval;
+      const [q0, q1] = tube.sourceInterval;
+      const local = (t: number) =>
+        t === 0 ? l0 : t === 1 ? l1 : l0 + t * (l1 - l0);
+      const query = (t: number) =>
+        t === 0 ? q0 : t === 1 ? q1 : q0 + t * (q1 - q0);
+      for (const [index, cut] of [...cuts, 1].entries()) {
+        let poles = rest;
+        if (cut < 1) {
+          const [left, right] = split(rest, (cut - from) / (1 - from));
+          poles = left;
+          rest = right;
+        }
+        // The owner's Q4-E1 metadata is leaf-specific: not carried.
+        const reference = {
+          derivative: tube.reference.derivative,
+          sourcePoles: tube.reference.sourcePoles,
+          distance: tube.reference.distance,
+        };
+        out.push({
+          poles,
+          certifiedError: tube.certifiedError + 2 ** -40 + errors(index),
+          reference,
+          source: tube.source,
+          sourceLocalInterval: [local(from), local(cut)],
+          queryDomain: [query(from), query(cut)],
+        });
+        from = cut;
+      }
+      return out;
+    };
+    const asPiece = (span: (typeof owner.spans)[number]) => ({
+      ...span,
+      queryDomain: span.sourceInterval,
+    });
+    const leaves = owner.spans;
+    const q = splitLeaf(leaves[0]!, qCuts, () => 0);
+    const p = splitLeaf(leaves.at(-1)!, pCuts, (leaf) =>
+      leaf === pCuts.length ? vertexError : 0,
+    );
+    const middle = leaves.slice(1, -1).map(asPiece);
+    const tubes = [...q, ...middle, ...p];
+    // Float Newton for the emitted crossing, over every (P, Q) sub-leaf pair.
+    const bezier = (poles: SplinePoles, u: number): SplineVector => {
+      const w = [
+        (1 - u) ** 3,
+        3 * u * (1 - u) ** 2,
+        3 * u * u * (1 - u),
+        u ** 3,
+      ];
+      return [0, 1].map((axis) =>
+        poles.reduce((sum, pole, k) => sum + w[k]! * pole[axis]!, 0),
+      ) as unknown as SplineVector;
+    };
+    const crossing = (first: SplinePoles, second: SplinePoles) => {
+      let [u, v] = [0.5, 0.5];
+      const f = (x: number, y: number) => {
+        const a = bezier(first, x);
+        const b = bezier(second, y);
+        return [a[0] - b[0], a[1] - b[1]];
+      };
+      for (let step = 0; step < 80; step += 1) {
+        const h = 1e-8;
+        const r = f(u, v);
+        const du = f(u + h, v).map((value, k) => (value - r[k]!) / h);
+        const dv = f(u, v + h).map((value, k) => (value - r[k]!) / h);
+        const det = du[0]! * dv[1]! - du[1]! * dv[0]!;
+        u -= (r[0]! * dv[1]! - r[1]! * dv[0]!) / det;
+        v -= (du[0]! * r[1]! - du[1]! * r[0]!) / det;
+      }
+      const r = f(u, v);
+      return u > 0 &&
+        u < 1 &&
+        v > 0 &&
+        v < 1 &&
+        Math.hypot(r[0]!, r[1]!) < 1e-13
+        ? ([u, v] as const)
+        : null;
+    };
+    const map = (tube: NeutralCubicPieceTube, t: number) =>
+      tube.queryDomain[0] + t * (tube.queryDomain[1] - tube.queryDomain[0]);
+    for (let i = p.length - 1; i >= 0; i -= 1)
+      for (let j = 0; j < q.length; j += 1) {
+        const root = crossing(p[i]!.poles, q[j]!.poles);
+        if (!root) continue;
+        const request: PieceTubeChainRequest = {
+          modelingTolerance: TOLERANCE,
+          closed: true,
+          distance,
+          pieces: [{ kind: "cubic", reversed: false, tubes }],
+          trims: [
+            {
+              jointIndex: 0,
+              firstParameterBounds: [
+                map(p[i]!, root[0]) - PAD,
+                map(p[i]!, root[0]) + PAD,
+              ],
+              secondParameterBounds: [
+                map(q[j]!, root[1]) - PAD,
+                map(q[j]!, root[1]) + PAD,
+              ],
+              authority: { kind: "positional-closure", pointId: "p0" },
+              ...(p.length - 1 - i > 0
+                ? { firstLeafOffset: p.length - 1 - i }
+                : {}),
+              ...(j > 0 ? { secondLeafOffset: j } : {}),
+            },
+          ],
+        };
+        return {
+          request,
+          trimLeaves: [q.length + middle.length + i, j] as const,
+          offsets: [p.length - 1 - i, j] as const,
+          count: tubes.length,
+        };
+      }
+    throw new Error("no emitted crossing on the V leaves");
+  };
+
+  test("R13 control: a deep S2 self-trim at a positional closure (one removed leaf per side) verifies; the removed leaves are K3-checked against every non-window leaf of the piece, its partner", () => {
+    const built = selfTrimRequest([0.8, 0.97], [0.01, 0.15]);
+    expect(built.offsets).toEqual([1, 1]);
+    const result = certifier.certifyPieceChain(built.request);
+    const certificate = verifiedOf(result);
+    expect(
+      certificate.joins.find((join) => join.kind === "graph-trim"),
+    ).toMatchObject({
+      first: built.trimLeaves[0],
+      second: built.trimLeaves[1],
+      firstLeafOffset: 1,
+      secondLeafOffset: 1,
+    });
+    const last = built.count - 1;
+    expect(removedOf(result)).toEqual([0, last]);
+    // Removed leaf `last` (P's vertex leaf) against the P side's own far
+    // leaf, which is outside the partner's (Q's) window: checked, cleared.
+    expect(certificate.clearedPairs).toContainEqual([
+      built.trimLeaves[0] - 1,
+      last,
+    ]);
+  });
+
+  test("R13 adversary: the same self-trim with P's removed vertex leaf two leaves from its trim leaf, its honest (loose) ε covering the short removed leaf between them, fails closed at K3 (the partner rule wins over the own-piece exemption)", () => {
+    const built = selfTrimRequest(
+      [0.8, 0.97, 0.97 + 2 ** -14],
+      [0.01, 0.15],
+      2 ** -12,
+    );
+    expect(built.offsets).toEqual([2, 1]);
+    expect(certifier.certifyPieceChain(built.request)).toEqual({
+      kind: "uncertain",
+      code: "cubic-tube-clearance-unproven",
+      message:
+        "Certified error tubes overlap; true-offset separation not proved.",
+      first: built.trimLeaves[0],
+      second: built.count - 1,
+    });
+  });
+
+  // ---- Deep S2 e fallback, glue k ≥ 2, whole clip (math review R1) --------
+  /**
+   * Obtuse straight legs (h = 1/16, d = 5/64): P into the origin along
+   * (4, −3), Q out along (0, 5); the exact true crossing (−5/64, 5/32) lies
+   * at u* = 5/6 on P (trim leaf [¾, ⅞], τ = ⅔) and v* = 1/6 on Q.
+   */
+  const P_OBTUSE: Omit<Leg, "cuts"> = {
+    start: [-12 * H, 9 * H],
+    step: [4 * H, -3 * H],
+    offset: [3 / 64, 1 / 16],
+    error: 2 ** -14,
+    splineId: "P",
+  };
+  const Q_OBTUSE: Omit<Leg, "cuts"> = {
+    start: [0, 0],
+    step: [0, 5 * H],
+    offset: [-5 / 64, 0],
+    error: 2 ** -30,
+    splineId: "Q",
+  };
+  const OBTUSE_P_CUTS: readonly Interval[] = [
+    [0, 1 / 2],
+    [1 / 2, 3 / 4],
+    [3 / 4, 7 / 8],
+    [7 / 8, 1],
+  ];
+  const obtuseRequest = (qCuts: readonly Interval[]) =>
+    s2Request({
+      first: { ...P_OBTUSE, cuts: OBTUSE_P_CUTS },
+      second: { ...Q_OBTUSE, cuts: qCuts },
+      bounds: [5 / 6, 1 / 6],
+    });
+  const graphTrimOf = (result: TubePieceChainResult) => {
+    const trim = verifiedOf(result).joins.find(
+      (join) => join.kind === "graph-trim",
+    );
+    if (trim?.kind !== "graph-trim") throw new Error("graph trim");
+    return trim;
+  };
+
+  test("math review F1 (D-S2-3/4): P's trim leaf is twice Q's, so the raw chord sum fails G1 on Q; the unit-chord e fallback verifies with e = (0.8, 0.4), and Q's glue is ¾ (k ≥ 2) beyond its crossing τ = ⅔", () => {
+    const trim = graphTrimOf(
+      certifier.certifyPieceChain(
+        obtuseRequest([
+          [0, 1 / 8],
+          [1 / 8, 3 / 16],
+          [3 / 16, 1 / 2],
+          [1 / 2, 1],
+        ]),
+      ),
+    );
+    // The sum of the binary64-normalized chords (0.8, −0.6) + (0, 1).
+    expect(trim).toMatchObject({
+      first: 2,
+      second: 5,
+      direction: [0.8, 0.4],
+      firstLeafOffset: 1,
+      secondLeafOffset: 1,
+      glue: [0.5, 0.75],
+    });
+    // τ_P = (5/6 − ¾)/⅛ = ⅔ and τ_Q = (1/6 − ⅛)/(1/16) = ⅔.
+    for (const bounds of [trim.firstRootBounds, trim.secondRootBounds]) {
+      expect(bounds[0]).toBeLessThan(2 / 3);
+      expect(bounds[1]).toBeGreaterThan(2 / 3);
+    }
+    expect(trim.glue![1]).toBeGreaterThan(2 / 3);
+  });
+
+  test("math review F1b (control): equal trim-leaf widths keep the raw chord sum e (no fallback) and glue ½", () => {
+    const trim = graphTrimOf(
+      certifier.certifyPieceChain(
+        obtuseRequest([
+          [0, 1 / 8],
+          [1 / 8, 1 / 4],
+          [1 / 4, 1 / 2],
+          [1 / 2, 1],
+        ]),
+      ),
+    );
+    // Raw chords: 3·⅛·(4h, −3h) + 3·⅛·(0, 5h), exact dyadic.
+    expect(trim.direction).toEqual([0.09375, 0.046875]);
+    expect(trim).not.toHaveProperty("glue");
+    for (const [bounds, tau] of [
+      [trim.firstRootBounds, 2 / 3],
+      [trim.secondRootBounds, 1 / 3],
+    ] as const) {
+      expect(bounds[0]).toBeLessThan(tau);
+      expect(bounds[1]).toBeGreaterThan(tau);
+    }
+  });
+
+  test("math review F2 (D-S2-2 whole clip): P's window far end lies inside H, so P's covering takes its whole window; verifies with P glue ¾ (crossing at τ = ½) and (A_{I+1}, removed B) = 1:4 K3-cleared", () => {
+    const result = certifier.certifyPieceChain(
+      s2Request({
+        first: {
+          ...P,
+          error: 2 ** -14,
+          cuts: [
+            [0, 1 / 2],
+            [1 / 2, 29 / 32],
+            [29 / 32, 31 / 32],
+            [31 / 32, 1],
+          ],
+        },
+      }),
+    );
+    const trim = graphTrimOf(result);
+    expect(trim).toMatchObject({
+      first: 2,
+      second: 5,
+      firstLeafOffset: 1,
+      secondLeafOffset: 1,
+      glue: [0.75, 0.5],
+    });
+    // u* = 15/16 at τ = ½ of P's trim leaf [29/32, 31/32].
+    expect(trim.firstRootBounds[0]).toBeLessThan(0.5);
+    expect(trim.firstRootBounds[1]).toBeGreaterThan(0.5);
+    expect(removedOf(result)).toEqual([3, 4]);
+    for (const pair of [
+      [1, 4],
+      [3, 6],
+    ])
+      expect(verifiedOf(result).clearedPairs).toContainEqual(pair);
+  });
+
+  // ---- Deep-S2 / Lemma T-W meters (meter review R1) ------------------------
+  describe("deep-trim meters: literals, count / count − 1, caps inside each new stage", () => {
+    const KEYS = ["operations", "euclideanSteps", "integerBits"] as const;
+    type Literal = Record<(typeof KEYS)[number], number>;
+    const literalOf = (request: PieceTubeChainRequest) => {
+      let last: ExactProofBudgetSnapshot | undefined;
+      const result = createCertifiedCubicTubeChainWithBudgetObserverForTest(
+        (snapshot) => (last = snapshot),
+      ).certifyPieceChain(request);
+      return {
+        result,
+        literal: {
+          operations: last!.operations,
+          euclideanSteps: last!.euclideanSteps,
+          integerBits: Math.max(last!.maxStoredBits, last!.maxPreProductBits),
+        },
+      };
+    };
+    const under = (request: PieceTubeChainRequest, limits: Partial<Literal>) =>
+      createCertifiedCubicTubeChainWithLowerBudgetForTest(
+        limits,
+      ).certifyPieceChain(request);
+    /**
+     * The literal, count passes and count − 1 exhausts on every meter, and an
+     * operations cap inside each listed stage (measured stage boundaries,
+     * T08b-g5d-meter-review-evidence/run/mr-cert.*.jsonl) is reported as the
+     * exhaustion itself: never a stage failure or the raw-chord failure.
+     */
+    const pinned = (
+      request: PieceTubeChainRequest,
+      literal: Literal,
+      stageCaps: readonly (readonly [string, number])[],
+    ) => {
+      const measured = literalOf(request);
+      expect(measured.result.kind).toBe("verified");
+      expect(measured.literal).toEqual(literal);
+      for (const key of KEYS) {
+        expect(
+          under(request, { [key]: literal[key] }).kind,
+          `${key} = count`,
+        ).toBe("verified");
+        expect(
+          under(request, { [key]: literal[key] - 1 }),
+          `${key} = count − 1`,
+        ).toEqual(EXHAUSTED_RESULT);
+      }
+      for (const [stage, cap] of stageCaps)
+        expect(
+          under(request, { operations: cap }),
+          `${stage} @ ${cap}`,
+        ).toEqual(EXHAUSTED_RESULT);
+    };
+
+    /**
+     * The e-fallback meter row: the 3-4-5 legs turned to (3, −4) / (3, 4) (a
+     * 106° turn); the true crossing at u* = 8/9 on P (trim leaf [½, 15/16],
+     * offset 1) and v* = 1/9 on Q (trim leaf [1/16, ⅛], offset 1). P's long
+     * trim leaf dominates the raw chord sum, so e_raw·Q′ < 0 (G1 fails); the
+     * unit-chord e is the bisector (1.2, 0), and glue k = 3 (⅞) runs after ½
+     * fails its collar.
+     */
+    const fallbackRequest = () =>
+      s2Request({
+        first: {
+          start: [-9 * H, 12 * H],
+          step: [3 * H, -4 * H],
+          offset: [4 / 64, 3 / 64],
+          error: 2 ** -11,
+          splineId: "P",
+          cuts: [
+            [0, 1 / 2],
+            [1 / 2, 15 / 16],
+            [15 / 16, 1],
+          ],
+        },
+        second: {
+          start: [0, 0],
+          step: [3 * H, 4 * H],
+          offset: [-4 / 64, 3 / 64],
+          error: 2 ** -30,
+          splineId: "Q",
+          cuts: [
+            [0, 1 / 16],
+            [1 / 16, 1 / 8],
+            [1 / 8, 1],
+          ],
+        },
+        bounds: [8 / 9, 1 / 9],
+      });
+
+    test("deep S2 e fallback + glue k ≥ 2 + covering: literal 145,263 / 19,413 / 182; caps inside the fallback precharge, deep Lemma P, both coverings and each glue candidate's precharge and evaluation exhaust as themselves", () => {
+      const request = fallbackRequest();
+      expect(graphTrimOf(certifier.certifyPieceChain(request))).toMatchObject({
+        direction: [1.2, 0],
+        firstLeafOffset: 1,
+        secondLeafOffset: 1,
+        glue: [0.5, 0.875],
+      });
+      pinned(
+        request,
+        { operations: 145_263, euclideanSteps: 19_413, integerBits: 182 },
+        [
+          ["e fallback precharge", 16_903],
+          ["deep Lemma P", 22_665],
+          ["covering P", 24_138],
+          ["covering Q", 39_196],
+          ["glue k = 2", 77_716],
+          ["glue k = 2 evaluation", 78_200],
+          ["glue k = 3", 78_951],
+          ["glue k = 3 evaluation", 79_500],
+        ],
+      );
+    });
+
+    test("deep S2 positive literal 96,004 / 14,987 / 197 and Lemma T-W literals 129,243 / 25,614 / 370 (offset 2: 131,209 / 25,703 / 370, one window cone per removed leaf), with in-stage caps", () => {
+      pinned(
+        s2Request(),
+        { operations: 96_004, euclideanSteps: 14_987, integerBits: 197 },
+        [
+          ["deep Lemma P", 25_839],
+          ["covering P", 27_896],
+          ["covering Q", 45_711],
+        ],
+      );
+      pinned(
+        riseRequest(),
+        { operations: 129_243, euclideanSteps: 25_614, integerBits: 370 },
+        [
+          ["window cone", 13_465],
+          ["window cone dot product", 13_530],
+        ],
+      );
+      pinned(
+        riseRequest({
+          cuts: [
+            [0, 1 / 64],
+            [1 / 64, 1 / 32],
+            [1 / 32, 1 / 16],
+            [1 / 16, 1],
+          ],
+          offset: 2,
+        }),
+        { operations: 131_209, euclideanSteps: 25_703, integerBits: 370 },
+        [
+          ["window cone 1", 14_788],
+          ["window cone 2", 14_907],
+          ["window cone 2 dot product", 14_970],
+        ],
+      );
+    });
+  });
+});

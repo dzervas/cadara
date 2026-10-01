@@ -2452,6 +2452,35 @@ describe("T08b-g5b consumers and region wiring", () => {
     }
   }, 600_000);
 
+  test("T08b-g5d (U-G6): the g5b-1b loop at inward d = 0.1 (deep trims on inner leaves of the terminal source span) commits, publishes certified and derives the annulus + disk with oracle areas; the shell record omits the removed sub-spans", async () => {
+    const { session, seeds } = splineLoopSession();
+    const committed = committedOffsetOnSide(session, seeds, 0.1, "right");
+    expect(
+      committed.definition.entities.some(
+        (entity) => entity.kind === "derivedPiecewiseCubic",
+      ),
+      "Commit created the shell (formerly: no converged transverse trim)",
+    ).toBe(true);
+    const { session: live, response } = await liveRound(committed);
+    expect(response.offsetPublications.map((item) => item.status)).toEqual([
+      "certified",
+    ]);
+    const shell = shellRecord(live.liveSolve!.solvedSnapshot);
+    expect(shell.publication).toBe("certified");
+    // The owner partition has 8 leaves; the two removed vertex leaves are
+    // not in the record, whose first and last sub-spans are trimmed inside.
+    expect(shell.spans).toHaveLength(6);
+    for (const [span, end] of [
+      [shell.spans[0]!, 0],
+      [shell.spans.at(-1)!, 1],
+    ] as const) {
+      const [s0, s1] = span.sourceDomain;
+      expect(span.queryDomain[end]).toBeGreaterThan(s0);
+      expect(span.queryDomain[end]).toBeLessThan(s1);
+    }
+    expectInwardLoopRegions(live, response, "g5d d = 0.1");
+  }, 300_000);
+
   test("g5b-2: a provisional shell is never region input (G7); it is excluded with a targeted unpublished diagnostic (G19)", async () => {
     const { session, seeds } = splineLoopSession();
     const committed = committedOffsetOnSide(session, seeds, 0.01, "left");

@@ -1878,3 +1878,141 @@ export function offsetPartitionDragRows(): readonly OffsetPartitionDragRow[] {
     },
   }));
 }
+
+/**
+ * The T08b-g5d design §1.1 native rows (U-G6, τ = 1e-3), built with the
+ * native tools: a spline closed by a line snapped at both ends (`SL h0.4`,
+ * `SL h0.8`, `SL h1.6`, `SL lean`; `SL h0.4 5pt` is the design's session row, see
+ * below) and two
+ * splines snapped at both ends (`SS lens <top>/<bottom>`), each at the
+ * inward distances −0.01 … −0.2, plus the review-R3 row `SL arch R3 0.4`
+ * (an open arch → line corner absorbed first). Labels are `<row> <distance>`.
+ */
+export function deepTrimRows(): readonly CornerMatrixRow[] {
+  const loop =
+    (points: readonly Vector[]) =>
+    (h: NativeOffsetChainHarness): readonly Authored[] => {
+      const spline = h.drawSpline([], points);
+      const [start, end] = h.splineEnds(spline);
+      return [
+        spline,
+        h.drawLine([spline], points.at(-1)!, points[0]!, {
+          start: end,
+          end: start,
+        }),
+      ];
+    };
+  const lens =
+    (top: number, bottom: number) =>
+    (h: NativeOffsetChainHarness): readonly Authored[] => {
+      const first = h.drawSpline(
+        [],
+        [
+          [0, 0],
+          [1, top],
+          [2, 0],
+        ],
+      );
+      const [start, end] = h.splineEnds(first);
+      return [
+        first,
+        h.drawSpline(
+          [first],
+          [
+            [2, 0],
+            [1, bottom],
+            [0, 0],
+          ],
+          { start: end, end: start },
+        ),
+      ];
+    };
+  const families: readonly (readonly [string, CornerMatrixRow["build"]])[] = [
+    [
+      "SL h0.4",
+      loop([
+        [0, 0],
+        [1, 0.4],
+        [2, 0],
+      ]),
+    ],
+    [
+      "SL h0.8",
+      loop([
+        [0, 0],
+        [1, 0.8],
+        [2, 0],
+      ]),
+    ],
+    [
+      "SL h1.6",
+      loop([
+        [0, 0],
+        [1, 1.6],
+        [2, 0],
+      ]),
+    ],
+    [
+      "SL lean",
+      loop([
+        [0, 0],
+        [-0.4, 0.9],
+        [2, 0],
+      ]),
+    ],
+    // The design's "5-point" row as the native session authors it: the
+    // spline tool commits after three fit points, so it is the spline
+    // (0,0)–(0.5,0.3)–(1,0.4) and an open line (2,0) → (0,0) sharing its start.
+    [
+      "SL h0.4 5pt",
+      (h) => {
+        const spline = h.drawSpline(
+          [],
+          [
+            [0, 0],
+            [0.5, 0.3],
+            [1, 0.4],
+          ],
+        );
+        const [start] = h.splineEnds(spline);
+        return [spline, h.drawLine([spline], [2, 0], [0, 0], { end: start })];
+      },
+    ],
+    ["SS lens 0.4/-0.3", lens(0.4, -0.3)],
+    ["SS lens 0.8/-0.6", lens(0.8, -0.6)],
+  ];
+  return [
+    ...families.flatMap(([row, build]) =>
+      [-0.01, -0.03, -0.05, -0.1, -0.2].map((distance) => ({
+        row,
+        distance,
+        build,
+      })),
+    ),
+    // Review R3: an arch spline into a line turning by 1 rad (< 90°, D > 0),
+    // concave toward d = 0.4: the terminal query is verified empty, so the
+    // corner absorbs first; the deferred deep scan trims it.
+    {
+      row: "SL arch R3",
+      distance: 0.4,
+      build: (h: NativeOffsetChainHarness): readonly Authored[] => {
+        const arch = h.drawSpline(
+          [],
+          [
+            [0, 0],
+            [1, 0.8],
+            [2, 0],
+          ],
+        );
+        const [, end] = h.splineEnds(arch);
+        const angle = Math.atan2(-0.96, 1) + 1;
+        return [
+          arch,
+          h.drawLine([arch], [2, 0], [2 + Math.cos(angle), Math.sin(angle)], {
+            start: end,
+          }),
+        ];
+      },
+    },
+  ];
+}

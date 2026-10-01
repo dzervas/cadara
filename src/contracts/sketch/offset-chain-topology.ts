@@ -77,6 +77,15 @@ import {
  * query is deferred to the SEL's fallback. Arcs adopt as the T2 rank rule
  * says (line < arc < spline) and are eligible swap adopters (review R6).
  *
+ * T08b-g5d (U-G6, no refinement, U-G7): at a joint without a seed-arc side
+ * (review R1), a derived-cubic side whose terminal query is empty scans the
+ * inner leaves of its terminal source span in ring order (`jointCandidates`;
+ * a D > 0 absorbable vertex absorbs first and scans only as the SEL's
+ * deferred fallback, review R3); a deep trim marks the leaves between the
+ * vertex and its trim leaf `removed`, and the certifier request carries the
+ * trim leaf offsets (re-proved, never trusted: Lemma T-W / deep S2). A root
+ * beyond the terminal source span stays U-B (fail closed, review R5 text).
+ *
  * T08b-g1: the solve / publish frame (`offset-derivation-frame.ts`, whose
  * JSDoc carries the T08b-g plan §2.5 trust note) builds its uncertified
  * pieces with `uncheckedDeclaredOffsetChainPieces`, plans with
@@ -242,12 +251,19 @@ export interface ResolvedOffsetArc extends CanonicalArcSupport {
   readonly jointIndex: number;
 }
 
-/** Where an active domain ends: the exact raw source end, a joint root, a declared vertex or an F1 arc. */
+/**
+ * Where an active domain ends: the exact raw source end, a joint root, a
+ * declared vertex or an F1 arc. T08b-g5d (U-G6): `removed` marks both ends of
+ * a derived-cubic leaf wholly removed by the deep trim `jointIndex` (a leaf
+ * strictly between the piece's traversal-terminal leaf and the trim leaf):
+ * it has no active domain, and the solved shell record omits it.
+ */
 export type OffsetChainDomainEnd =
   | { readonly kind: "source" }
   | { readonly kind: "joint"; readonly jointIndex: number }
   | { readonly kind: "vertex"; readonly vertexIndex: number }
-  | { readonly kind: "arc"; readonly jointIndex: number };
+  | { readonly kind: "arc"; readonly jointIndex: number }
+  | { readonly kind: "removed"; readonly jointIndex: number };
 
 export interface ResolvedOffsetTrimJoint {
   /** The declared adjacency index (one index space with `vertices`, R5). */
@@ -561,6 +577,152 @@ function terminal(
   const curve = naturalEnd ? last : first;
   const startIsLow = curves[curve]!.startIsLow;
   return { curve, side: naturalEnd === startIsLow ? "high" : "low" };
+}
+
+/**
+ * The candidate trim curves of declared adjacency `index`, each side from the
+ * vertex inward, exactly as the resolver queries them and the solve frame
+ * scans them (one helper, so the two cannot drift: g1 A3):
+ * - T08b-f review R7: a seed-arc side offers its inner leaves in order;
+ * - T08b-g5d (U-G6): at a joint WITHOUT a seed-arc side (review R1), a
+ *   derived-cubic side offers the inner leaves of its terminal leaf's source
+ *   span, stopping at the first leaf of another source span (U-B).
+ * `ring`: the pairs are scanned in the deterministic ring order over (i, j)
+ * ≠ (0, 0), keyed (max(i, j), i + j, i) (`ringPairs`); otherwise the R7
+ * order (the first side's inner leaves against the second's terminal, then
+ * the first's terminal against the second's inner leaves). Uniqueness is
+ * never taken from the scan: the certifier proves it.
+ */
+function jointCandidates(
+  pieces: readonly OffsetChainPiece[],
+  pieceCurves: readonly (readonly [number, number])[],
+  curves: readonly ChainCurve[],
+  index: number,
+): {
+  readonly first: readonly number[];
+  readonly second: readonly number[];
+  readonly firstSide: Side;
+  readonly secondSide: Side;
+  readonly ring: boolean;
+  /** Both sides are derived cubics (the G20 ring cap applies). */
+  readonly splinePair: boolean;
+} {
+  const next = (index + 1) % pieces.length;
+  const end = terminal(pieces, pieceCurves, curves, index, "traversalEnd");
+  const start = terminal(pieces, pieceCurves, curves, next, "traversalStart");
+  const arcSide = pieces[index]!.kind === "arc" || pieces[next]!.kind === "arc";
+  const inward = (terminalCurve: number, pieceIndex: number) => {
+    const piece = pieces[pieceIndex]!;
+    if (piece.kind !== "arc" && (piece.kind !== "derivedCubic" || arcSide))
+      return [terminalCurve];
+    const [first, last] = pieceCurves[pieceIndex]!;
+    const step = terminalCurve === first ? 1 : -1;
+    const sourceSpan = (curve: number) =>
+      piece.kind === "derivedCubic"
+        ? piece.spans[curve - first]!.source.spanIndex
+        : null;
+    const order = [terminalCurve];
+    for (
+      let curve = terminalCurve + step;
+      curve >= first &&
+      curve <= last &&
+      sourceSpan(curve) === sourceSpan(terminalCurve);
+      curve += step
+    )
+      order.push(curve);
+    return order;
+  };
+  const firstOrder = inward(end.curve, index);
+  const secondOrder = inward(start.curve, next);
+  return {
+    first: firstOrder,
+    second: secondOrder,
+    firstSide: end.side,
+    secondSide: start.side,
+    ring: !arcSide && (firstOrder.length > 1 || secondOrder.length > 1),
+    splinePair:
+      pieces[index]!.kind === "derivedCubic" &&
+      pieces[next]!.kind === "derivedCubic",
+  };
+}
+
+/**
+ * T08b-g5d [TECH] G20 (latency, U-G7's choice against long waits): a
+ * spline↔spline ring joint scans only the pairs with max(i, j) ≤ this
+ * radius, the smallest that keeps both verified native lens rows (0.4/−0.3
+ * and 0.8/−0.6 at d = −0.2, trim offsets ≤ 1) verifying. An empty ring fails
+ * closed (`splineJointUnsupported`) with `TOO_DEEP_MESSAGE` when some pair
+ * beyond it, inside the terminal source spans, is not pole-box disjoint (a
+ * crossing may lie there); only when every such pair is disjoint (no root
+ * anywhere in the spans) does it keep the U-B (review R5) text. Each spline↔spline
+ * pair query costs ≈ 1–4 s, so a fail-closed scan is bounded by
+ * (1 + 1)² queries per joint instead of (1 + n_P)(1 + n_Q).
+ */
+const DEEP_SPLINE_RING_RADIUS = 1;
+
+const TOO_DEEP_MESSAGE =
+  "Offset joint has no crossing within one leaf of the corner: the corner trim may lie too deep inside the offset curve to verify (deep spline-to-spline corners are checked only one piece deep).";
+
+/**
+ * The scanned (i, j) ≠ (0, 0) candidate index pairs of one joint, in scan
+ * order (`jointCandidates`); on a spline↔spline ring joint only those inside
+ * `DEEP_SPLINE_RING_RADIUS` (G20) unless `capped` is false.
+ */
+function candidatePairs(
+  candidates: ReturnType<typeof jointCandidates>,
+  capped = true,
+) {
+  const { first, second } = candidates;
+  if (!candidates.ring)
+    return [
+      ...first.slice(1).map((_, i) => [i + 1, 0] as const),
+      ...second.slice(1).map((_, j) => [0, j + 1] as const),
+    ];
+  const pairs: (readonly [number, number])[] = [];
+  const radius =
+    candidates.splinePair && capped
+      ? DEEP_SPLINE_RING_RADIUS
+      : Number.POSITIVE_INFINITY;
+  for (let i = 0; i < first.length && i <= radius; i += 1)
+    for (let j = 0; j < second.length && j <= radius; j += 1)
+      if (i + j > 0) pairs.push([i, j]);
+  return pairs.sort(
+    (a, b) =>
+      Math.max(a[0], a[1]) - Math.max(b[0], b[1]) ||
+      a[0] + a[1] - (b[0] + b[1]) ||
+      a[0] - b[0],
+  );
+}
+
+/**
+ * T08b-g5d [TECH] G20 (meter review A1): a deep spline↔spline ring pair whose
+ * r-inflated pole boxes are disjoint on an axis is skipped (never queried).
+ * Each leaf's box is the exact min/max of its binary64 poles, inflated by its
+ * owner `certifiedError` r and rounded one binary64 neighbour outward, so a
+ * skip implies, exactly, lo_B − r_B > hi_A + r_A (or the mirror) on that axis.
+ * Sound: a cubic lies in its pole hull ⊂ pole box, so the two emitted leaves
+ * cannot meet (the query would be verified empty), and neither can the true
+ * offsets, each within r of its leaf. Touching or non-finite boxes are never
+ * skipped. The test is O(1) binary64 work inside the pair's slot of the
+ * request precharge (64 per sized query, charged at `openRequest`, before any
+ * work); a skipped slot is simply not issued.
+ */
+function poleBoxesDisjoint(
+  first: SplineOffsetCubicSpan,
+  second: SplineOffsetCubicSpan,
+) {
+  const box = (span: SplineOffsetCubicSpan, axis: 0 | 1) => {
+    const values = span.poles.map((pole) => pole[axis]);
+    return [
+      binary64Neighbor(Math.min(...values) - span.certifiedError, "down"),
+      binary64Neighbor(Math.max(...values) + span.certifiedError, "up"),
+    ] as const;
+  };
+  return ([0, 1] as const).some((axis) => {
+    const [firstLow, firstHigh] = box(first, axis);
+    const [secondLow, secondHigh] = box(second, axis);
+    return secondLow > firstHigh || firstLow > secondHigh;
+  });
 }
 
 function strictlyInside(
@@ -934,6 +1096,16 @@ type AdjacencyDecisions =
       readonly requery?: (
         index: number,
       ) => AdjacencyDecision | OffsetChainFailure | QueryBudgetExhausted;
+      /**
+       * T08b-g5d (design §3.2 item 3, review R3): the step-2(b) absorption
+       * candidates whose deep ring scan was deferred (verified-empty terminal
+       * query), and that scan on the same meter (the pairs i + j > 0 only;
+       * the request was sized for them).
+       */
+      readonly deepDeferred?: ReadonlySet<number>;
+      readonly deepRequery?: (
+        index: number,
+      ) => AdjacencyDecision | OffsetChainFailure | QueryBudgetExhausted;
     }
   | OffsetChainFailure;
 
@@ -1054,26 +1226,47 @@ function decideAdjacencies(
   const deferred = (index: number) => concave[index] === true;
   const queried = (index: number) =>
     classes?.[index]?.class !== "parallel" && !plans[index] && !deferred(index);
-  // T08b-f review R7: a joint with a seed-arc side may query inner leaves.
-  const innerLeaves = (pieceIndex: number) => {
-    const [first, last] = pieceCurves[pieceIndex]!;
-    return pieces[pieceIndex]!.kind === "arc" ? last - first : 0;
+  // T08b-f review R7: a joint with a seed-arc side may query inner leaves;
+  // T08b-g5d: so may a cubic side inside its terminal source span
+  // (`jointCandidates`). The count is structural: 1 + every scanned pair,
+  // (1 + n_P)(1 + n_Q) on a ring joint (review R2; n ≤ 1 per side on a
+  // spline↔spline joint, G20), 1 + n_P + n_Q under R7.
+  const candidatesOf = (index: number) =>
+    jointCandidates(pieces, pieceCurves, curves, index);
+  /** The owner leaf of a derived-cubic curve (null on a line or arc side). */
+  const spanOf = (curve: number) => {
+    const { pieceIndex, spanIndex } = curves[curve]!;
+    const piece = pieces[pieceIndex]!;
+    return piece.kind === "derivedCubic" ? piece.spans[spanIndex]! : null;
   };
   const queryCount = (index: number) =>
-    1 + innerLeaves(index) + innerLeaves((index + 1) % pieces.length);
+    1 + candidatePairs(candidatesOf(index)).length;
   let jointCount = 0;
   for (let index = 0; index < adjacencyCount; index += 1)
     if (queried(index) || deferred(index)) jointCount += queryCount(index);
   // M7: one precharged whole-request meter for exactly these joint queries.
   const jointRequest = query.openRequest(jointCount);
   /**
+   * T08b-g5d (design §3.2 item 3): step-2(b) absorption candidates at a
+   * ring joint whose terminal query was verified EMPTY: their deep scan did
+   * not run in the first pass (absorption first), so the SEL may run it once
+   * if that absorption does not certify (`deepRequery`).
+   */
+  const deepDeferred = new Set<number>();
+  /**
    * The joint query of one adjacency (SEL steps 1–2): a trim decision, a
    * step-2(b) absorption candidate or a failure. With a seed-arc side whose
    * terminal-leaf query is empty, the inner leaves are queried in order from
-   * the vertex (review R7), so the trim may name an inner leaf.
+   * the vertex (review R7), so the trim may name an inner leaf. T08b-g5d: at
+   * a ring joint (`jointCandidates`) the inner cubic leaves of the terminal
+   * source span are scanned in ring order, except at a D > 0 absorbable
+   * vertex, where the first pass keeps the terminal query only and the scan
+   * is the SEL's deferred fallback: `deepOnly` issues exactly the pairs
+   * i + j > 0, reusing the verified-empty terminal result (review R3).
    */
   const queryAdjacency = (
     index: number,
+    deepOnly = false,
   ): AdjacencyDecision | OffsetChainFailure | QueryBudgetExhausted => {
     const next = (index + 1) % pieces.length;
     const firstSeed = pieces[index]!.seedEntityId;
@@ -1108,38 +1301,69 @@ function decideAdjacencies(
       const request = pair(endCurve, startCurve);
       return { request, result: jointRequest.queryPair(request) };
     };
+    // Review R7 (T08b-f) and T08b-g5d: candidate leaves, from the vertex inward.
+    const candidates = candidatesOf(index);
+    const deferDeep = candidates.ring && absorbable && !deepOnly;
+    const scans = deferDeep
+      ? []
+      : candidatePairs(candidates).map(
+          ([i, j]) => [candidates.first[i]!, candidates.second[j]!] as const,
+        );
+    const empty = (value: NeutralCurveQueryResult) =>
+      value.kind === "verified" &&
+      value.points.length === 0 &&
+      value.overlaps.length === 0;
     let endCurve = end.curve;
     let startCurve = start.curve;
-    let { request, result } = issue(endCurve, startCurve);
-    // Review R7 (T08b-f): inner seed-arc leaves, from the vertex inward.
-    const inward = (terminalCurve: number, pieceIndex: number) => {
-      if (pieces[pieceIndex]!.kind !== "arc") return [];
-      const [first, last] = pieceCurves[pieceIndex]!;
-      const step = terminalCurve === first ? 1 : -1;
-      const inner: number[] = [];
-      for (
-        let curve = terminalCurve + step;
-        curve >= first && curve <= last;
-        curve += step
-      )
-        inner.push(curve);
-      return inner;
-    };
-    const scans = [
-      ...inward(end.curve, index).map((curve) => [curve, start.curve] as const),
-      ...inward(start.curve, next).map((curve) => [end.curve, curve] as const),
-    ];
+    let request = pair(endCurve, startCurve);
+    // A deep requery reuses the first pass's verified empty terminal result.
+    let result: NeutralCurveQueryResult | null = deepOnly
+      ? null
+      : jointRequest.queryPair(request);
+    if (deferDeep && result && empty(result)) deepDeferred.add(index);
+    // G20: a disjoint deep spline↔spline pair holds no root (`poleBoxesDisjoint`).
+    let skipped = false;
     for (const [deepEnd, deepStart] of scans) {
-      if (
-        result.kind !== "verified" ||
-        result.points.length !== 0 ||
-        result.overlaps.length !== 0
-      )
-        break;
+      if (result && !empty(result)) break;
+      const firstSpan = spanOf(deepEnd);
+      const secondSpan = spanOf(deepStart);
+      if (firstSpan && secondSpan && poleBoxesDisjoint(firstSpan, secondSpan)) {
+        skipped = true;
+        continue;
+      }
       endCurve = deepEnd;
       startCurve = deepStart;
       ({ request, result } = issue(endCurve, startCurve));
     }
+    if (!result && !skipped)
+      throw new RangeError("A deep requery needs a ring joint with pairs");
+    // G20: a pair beyond the spline↔spline ring that may hold a crossing
+    // (uncharged binary64 box tests over the structural uncapped ring).
+    const tooDeep = () =>
+      candidates.splinePair &&
+      candidatePairs(candidates, false).some(
+        ([i, j]) =>
+          Math.max(i, j) > DEEP_SPLINE_RING_RADIUS &&
+          !poleBoxesDisjoint(
+            spanOf(candidates.first[i]!)!,
+            spanOf(candidates.second[j]!)!,
+          ),
+      );
+    if (!result || (result.kind === "verified" && empty(result)))
+      return inadmissible(
+        failure(
+          codes.splineJointUnsupported,
+          scans.length === 0
+            ? "Offset joint needs a fallback arc or tangent-continuous join, which is not supported yet for spline chains."
+            : candidates.ring
+              ? tooDeep()
+                ? TOO_DEEP_MESSAGE
+                : // Review R5: the U-B boundary, for spline sides.
+                  "Offset joint has no crossing on any leaf of the terminal source span: the offset corner lies beyond the terminal source span (U-B), or the offsets do not meet."
+              : "Offset joint has no crossing on any seed-arc leaf of the joint (the offset curves do not meet there; the offset may be empty or the arc collapses).",
+          firstSeed,
+        ),
+      );
     if (result.kind !== "verified") {
       if (result.code === "exact-query-proof-budget-exhausted")
         return {
@@ -1154,17 +1378,6 @@ function decideAdjacencies(
         codes.topologyUncertain,
         `Joint query is not verified (${describe(result)}).`,
         firstSeed,
-      );
-    }
-    if (result.points.length === 0 && result.overlaps.length === 0) {
-      return inadmissible(
-        failure(
-          codes.splineJointUnsupported,
-          scans.length > 0
-            ? "Offset joint has no crossing on any seed-arc leaf of the joint (the offset curves do not meet there; the offset may be empty or the arc collapses)."
-            : "Offset joint needs a fallback arc or tangent-continuous join, which is not supported yet for spline chains.",
-          firstSeed,
-        ),
       );
     }
     const witness = result.points[0];
@@ -1260,7 +1473,13 @@ function decideAdjacencies(
     if ("ok" in decision) return decision;
     decisions.push(decision);
   }
-  return { ok: true, decisions, requery: queryAdjacency };
+  return {
+    ok: true,
+    decisions,
+    requery: (index) => queryAdjacency(index),
+    deepDeferred,
+    deepRequery: (index) => queryAdjacency(index, true),
+  };
 }
 
 /** Bitwise neutral-curve geometry equality, ignoring only curve labels. */
@@ -1291,6 +1510,12 @@ function assembleOffsetChainResolution(
   const { curves, pieceCurves } = buildCurves(pieces);
   const seedOf = (curve: number) =>
     pieces[curves[curve]!.pieceIndex]!.seedEntityId;
+  const deepOverlap = (pieceIndex: number) =>
+    failure(
+      codes.jointUnsatisfied,
+      "The deep trims at both ends of one spline offset overlap: a leaf removed by one trim is trimmed, absorbed or removed by the other.",
+      pieces[pieceIndex]!.seedEntityId,
+    );
   const jointRecords = new Map<number, JointRecord>();
   const vertices: ResolvedOffsetVertex[] = [];
   const arcs: ResolvedOffsetArc[] = [];
@@ -1334,10 +1559,26 @@ function assembleOffsetChainResolution(
       continue;
     }
     // T08b-f review R7: a deep arc-leaf trim names its own (inner) leaves;
-    // the leaves before them on that piece are wholly removed.
+    // the leaves before them on that piece are wholly removed. T08b-g5d: a
+    // deep cubic trim likewise, its removed leaves marked `removed` at both
+    // ends (each must still be untouched: review R4).
     const endCurve = decision.firstCurve ?? end.curve;
     const startCurve = decision.secondCurve ?? start.curve;
-    if (endCurve !== end.curve) {
+    for (const [pieceIndex, from, to] of [
+      [index, end.curve, endCurve],
+      [next, start.curve, startCurve],
+    ] as const) {
+      if (pieces[pieceIndex]!.kind !== "derivedCubic") continue;
+      const removedEnd = { kind: "removed", jointIndex: index } as const;
+      for (let curve = from; curve !== to; curve += to > from ? 1 : -1) {
+        const item = curves[curve]!;
+        if (item.low.kind !== "source" || item.high.kind !== "source")
+          return deepOverlap(pieceIndex);
+        item.low = removedEnd;
+        item.high = removedEnd;
+      }
+    }
+    if (endCurve !== end.curve && pieces[index]!.kind === "arc") {
       const removed = removedLeaves.get(index) ?? [0, 0];
       const count = Math.abs(endCurve - end.curve);
       removedLeaves.set(
@@ -1345,7 +1586,7 @@ function assembleOffsetChainResolution(
         pieces[index]!.reversed ? [count, removed[1]] : [removed[0], count],
       );
     }
-    if (startCurve !== start.curve) {
+    if (startCurve !== start.curve && pieces[next]!.kind === "arc") {
       const removed = removedLeaves.get(next) ?? [0, 0];
       const count = Math.abs(startCurve - start.curve);
       removedLeaves.set(
@@ -1394,6 +1635,18 @@ function assembleOffsetChainResolution(
     curves[startCurve]![start.side] = jointEnd;
   }
 
+  // T08b-g5d review R4: a removed leaf is removed at both ends by one trim
+  // (never trimmed, absorbed or removed by the other end).
+  for (const curve of curves) {
+    const removedLow = curve.low.kind === "removed";
+    if (
+      removedLow !== (curve.high.kind === "removed") ||
+      (removedLow &&
+        (curve.low as { jointIndex: number }).jointIndex !==
+          (curve.high as { jointIndex: number }).jointIndex)
+    )
+      return deepOverlap(curve.pieceIndex);
+  }
   // Two trims on one curve must be ordered by disjoint root enclosures.
   for (const [curveIndex, curve] of curves.entries()) {
     if (curve.low.kind !== "joint" || curve.high.kind !== "joint") continue;
@@ -2297,10 +2550,21 @@ export type OffsetChainTubeStabilityResult =
  * gate stays even though an S2 graph-trim end checks the emitted G1 cone:
  * Lemma T's m′ is a TRUE-O′ cone and does not count.
  *
- * Cubic↔cubic trims (S2, terminal leaves only) are certified under R_C′: at a
+ * Line↔cubic trims are certified under [TECH] R_C″ (T08b-g5d, amends R_C):
+ * at a declared coincident or shared-point line↔cubic join that passes H2 in
+ * a solver-accepted frame, O* is the two pieces' true offsets, each trimmed
+ * at the unique common point of the two joined pieces' true offsets over the
+ * joint window (the trim leaf may be an inner leaf of the terminal source
+ * span: Lemma T-W). The claim is joint-local (math review A1): removed
+ * leaves carry no claim against other pieces (they are neither in E nor in
+ * O*; every retained pair keeps K3).
+ *
+ * Cubic↔cubic trims (S2; since T08b-g5d also deep inside the terminal
+ * source spans) are certified under R_C′: at a
  * declared coincident or shared-point cubic↔cubic join that passes H2 in a
  * solver-accepted frame, O* is the two pieces' true offsets, each trimmed at
- * their unique common point. The premises are the same as R_C: the adapter's
+ * their unique common point (on a deep trim, over the joint windows,
+ * joint-locally as for R_C″). The premises are the same as R_C: the adapter's
  * E1–E4 accepted pair, H2 on exact source tangents, the stored joint bounds
  * through the stored query-domain map, and the owner's ε/O′/source metadata;
  * the proof never reads the source gap P₃ − Q₀, so a nonzero declared gap is
@@ -2601,6 +2865,8 @@ function declaredTubeRequest(
           ? end.kind === "arc" && end.jointIndex === expected
           : end.kind === "joint" && end.jointIndex === expected;
   const requestPieces: TubeChainPiece[] = [];
+  /** T08b-g5d: removed leaves [at the natural start, at the natural end]. */
+  const deepOffsets = new Map<number, readonly [number, number]>();
   for (const [index, piece] of pieces.entries()) {
     const source = sources[index]!;
     const [low, high] = piece.reversed
@@ -2689,18 +2955,48 @@ function declaredTubeRequest(
         piece.seedEntityId,
       );
     const spans = resolved.cubics.get(piece.seedEntityId);
-    const last = piece.spans.length - 1;
+    // T08b-g5d: a trimmed end may carry a run of leaves removed by exactly
+    // that end's trim (both ends `removed` with its index); the first
+    // retained leaf then carries the end itself.
+    const removedBy = (
+      item: ResolvedDerivedCubicSpan | undefined,
+      expected: number | null,
+    ) =>
+      item !== undefined &&
+      expected !== null &&
+      // Without declared vertices every adjacency is a trim (as `isEnd`).
+      adjacencyKind[expected] !== "vertex" &&
+      adjacencyKind[expected] !== "arc" &&
+      item.start.kind === "removed" &&
+      item.end.kind === "removed" &&
+      item.start.jointIndex === expected &&
+      item.end.jointIndex === expected;
+    let head = 0;
+    while (spans && head < spans.length && removedBy(spans[head], low))
+      head += 1;
+    let tail = 0;
+    while (
+      spans &&
+      head + tail < spans.length &&
+      removedBy(spans[spans.length - 1 - tail], high)
+    )
+      tail += 1;
+    const last = piece.spans.length - 1 - tail;
     if (
       piece.spans !== source.spans ||
       spans?.length !== piece.spans.length ||
+      head > last ||
       spans.some(
         (item, offset) =>
           item.span !== piece.spans[offset] ||
-          !isEnd(item.start, offset === 0 ? low : null) ||
-          !isEnd(item.end, offset === last ? high : null),
+          (offset >= head &&
+            offset <= last &&
+            (!isEnd(item.start, offset === head ? low : null) ||
+              !isEnd(item.end, offset === last ? high : null))),
       )
     )
       return mismatch("The resolution does not describe its own owner spans.");
+    if (head > 0 || tail > 0) deepOffsets.set(index, [head, tail]);
     // A vertex or F1 arc end runs K1 on the whole emitted leaf (R8, after
     // adoption; T08b-e arc-entry/exit cones).
     const vertexEnd = [low, high].some(
@@ -2731,22 +3027,52 @@ function declaredTubeRequest(
   }
   const positional =
     vertexAware && count === 1 ? declared.vertices[0] : undefined;
+  /**
+   * T08b-g5d: a trim side's leaf offset from its traversal terminal (the
+   * removed run at that natural end); the joint request must name exactly
+   * that leaf (the certifier re-proves it anyway).
+   */
+  const leafOffset = (
+    pieceIndex: number,
+    exiting: boolean,
+    curve: NeutralCurve,
+  ) => {
+    const piece = pieces[pieceIndex]!;
+    if (piece.kind !== "derivedCubic") return 0;
+    const naturalEnd = exiting !== piece.reversed;
+    const [head, tail] = deepOffsets.get(pieceIndex) ?? [0, 0];
+    const offset = naturalEnd ? tail : head;
+    const leaf = naturalEnd ? piece.spans.length - 1 - offset : offset;
+    return curve.provenance.sourceSpanId === String(leaf) ? offset : null;
+  };
+  const trims: TubeChainTrimDeclaration[] = [];
+  for (const [position, joint] of resolved.joints.entries()) {
+    const firstOffset = leafOffset(joint.jointIndex, true, joint.request.first);
+    const secondOffset = leafOffset(
+      (joint.jointIndex + 1) % count,
+      false,
+      joint.request.second,
+    );
+    if (firstOffset === null || secondOffset === null)
+      return mismatch("A resolved trim does not name its own trim leaves.");
+    trims.push({
+      jointIndex: vertexAware ? joint.jointIndex : position,
+      firstParameterBounds: joint.firstParameterBounds,
+      secondParameterBounds: joint.secondParameterBounds,
+      // T7: a trim at a positional closure carries its authority.
+      ...(positional
+        ? { authority: certifierAuthority(positional.authority) }
+        : {}),
+      ...(firstOffset > 0 ? { firstLeafOffset: firstOffset } : {}),
+      ...(secondOffset > 0 ? { secondLeafOffset: secondOffset } : {}),
+    });
+  }
   return {
     modelingTolerance,
     closed,
     distance: declared.distance,
     pieces: requestPieces,
-    trims: resolved.joints.map(
-      (joint, position): TubeChainTrimDeclaration => ({
-        jointIndex: vertexAware ? joint.jointIndex : position,
-        firstParameterBounds: joint.firstParameterBounds,
-        secondParameterBounds: joint.secondParameterBounds,
-        // T7: a trim at a positional closure carries its authority.
-        ...(positional
-          ? { authority: certifierAuthority(positional.authority) }
-          : {}),
-      }),
-    ),
+    trims,
     ...(vertexAware
       ? {
           vertices: resolved.vertices.map(
@@ -3287,8 +3613,13 @@ function selectDeclaredOffsetChain(
       if (fits === true) concaveState.set(index, { queried: false });
     },
   );
+  // T08b-g5d (design §3.2 item 3): step-2(b) absorption candidates whose
+  // deep ring scan was deferred, each of which may still take it once.
+  const deepState = new Map<number, { queried: boolean }>();
+  for (const jointIndex of decided.deepDeferred ?? [])
+    deepState.set(jointIndex, { queried: false });
   const request = certifier.openRequest(
-    1 + flippable + switchable + concaveState.size,
+    1 + flippable + switchable + concaveState.size + deepState.size,
   );
   const modeOf = (jointIndex: number) =>
     decisions.find((decision) => decisionIndex(decision) === jointIndex)?.kind;
@@ -3365,6 +3696,48 @@ function selectDeclaredOffsetChain(
     );
     return null;
   };
+  /**
+   * T08b-g5d: the verdict the SEL would return without the deep fallback,
+   * kept once a deferred deep scan runs: if the deep route fails too, that
+   * verdict is returned unchanged (budget exhaustion excepted).
+   */
+  let preDeep: OffsetChainFailure | undefined;
+  /** A step-2(b) vertex that may still take its deferred deep scan. */
+  const mayDeep = (jointIndex: number) =>
+    deepState.get(jointIndex)?.queried === false &&
+    modeOf(jointIndex) === "vertex";
+  /**
+   * The deferred deep scan of one step-2(b) vertex, after its absorption
+   * failed with `final`: a trim replaces the absorption (never flipped
+   * back), anything else returns `final`.
+   */
+  const takeDeep = (
+    jointIndex: number,
+    final: OffsetChainFailure,
+  ): OffsetChainTubeStabilityResult | null => {
+    deepState.get(jointIndex)!.queried = true;
+    preDeep ??= final;
+    const decision = decided.deepRequery!(jointIndex);
+    if ("exhausted" in decision) return decision.exhausted;
+    if ("ok" in decision || decision.kind !== "trim") return preDeep;
+    flipped.add(jointIndex);
+    decisions = decisions.map((item) =>
+      decisionIndex(item) === jointIndex ? decision : item,
+    );
+    return null;
+  };
+  /**
+   * Every non-exhaustion failure after a deep fallback reports the pre-deep
+   * verdict (an exhaustion is never settled: it is reported as itself).
+   */
+  const settle = (
+    result: OffsetChainTubeStabilityResult,
+  ): OffsetChainTubeStabilityResult =>
+    result.ok ||
+    !preDeep ||
+    result.message.includes("exact-query-proof-budget-exhausted")
+      ? result
+      : preDeep;
   for (;;) {
     // R6: a failed absorption keeps the pre-absorption verdict.
     const absorptionFailure = (jointIndex: number, reason: string) => {
@@ -3395,10 +3768,16 @@ function selectDeclaredOffsetChain(
       }
       if (mayQuery(adopted.jointIndex)) {
         const final = takeQuery(adopted.jointIndex, adopted.reason);
-        if (final) return final;
+        if (final) return settle(final);
         continue;
       }
-      return absorptionFailure(adopted.jointIndex, adopted.reason);
+      const final = absorptionFailure(adopted.jointIndex, adopted.reason);
+      if (mayDeep(adopted.jointIndex)) {
+        const deep = takeDeep(adopted.jointIndex, final);
+        if (deep) return deep;
+        continue;
+      }
+      return settle(final);
     }
     const adoptedInput: OffsetChainTopologyInput = {
       ...input,
@@ -3409,9 +3788,9 @@ function selectDeclaredOffsetChain(
       adopted.decisions,
     );
     if (!resolved.ok)
-      return (
+      return settle(
         firstTrigger(adopted.decisions, resolved.message) ??
-        (original && flipped.size > 0 ? original : resolved)
+          (original && flipped.size > 0 ? original : resolved),
       );
     // [TECH E8] on the adopted pieces: an arc that cannot clear K3 falls
     // back to absorption without an attempt.
@@ -3437,7 +3816,7 @@ function selectDeclaredOffsetChain(
       continue;
     }
     const pieceRequest = declaredTubeRequest(resolved, adopted.declared);
-    if ("ok" in pieceRequest) return pieceRequest;
+    if ("ok" in pieceRequest) return settle(pieceRequest);
     const raw = request.certifyPieceChain(pieceRequest);
     for (const [jointIndex, state] of convex)
       if (modeOf(jointIndex) === "arc") state.arcTried = true;
@@ -3553,7 +3932,7 @@ function selectDeclaredOffsetChain(
       .find((jointIndex) => mayQuery(jointIndex) && incident(jointIndex));
     if (queryTarget !== undefined) {
       const final = takeQuery(queryTarget, `${raw.code}: ${raw.message}`);
-      if (final) return final;
+      if (final) return settle(final);
       continue;
     }
     // Any other failure is final. A tagged arc that already tried its
@@ -3563,8 +3942,6 @@ function selectDeclaredOffsetChain(
         modeOf(jointIndex) === "arc" &&
         convex.get(jointIndex)?.absorptionReason !== undefined,
     );
-    if (tried !== undefined)
-      return withAbsorption(mapped, convex.get(tried)!.absorptionReason!);
     // A failed absorption keeps its trigger: the one whose terminal leaves
     // were reported (math review A4), else the lowest.
     const triggered = adopted.decisions.filter(
@@ -3576,12 +3953,27 @@ function selectDeclaredOffsetChain(
         (decision) =>
           decision.kind === "vertex" && incident(decision.vertex.jointIndex),
       ) ?? triggered[0];
-    if (absorbed?.kind === "vertex")
-      return absorptionFailure(
-        absorbed.vertex.jointIndex,
-        `${raw.code}: ${raw.message}`,
-      );
-    return original ?? mapped;
+    const final =
+      tried !== undefined
+        ? withAbsorption(mapped, convex.get(tried)!.absorptionReason!)
+        : absorbed?.kind === "vertex"
+          ? absorptionFailure(
+              absorbed.vertex.jointIndex,
+              `${raw.code}: ${raw.message}`,
+            )
+          : (original ?? mapped);
+    // T08b-g5d: last, a step-2(b) vertex failing at its terminal leaves
+    // takes its deferred deep scan (at most once); the verdict above stands
+    // if the deep route fails too.
+    const deepTarget = [...deepState.keys()]
+      .sort((left, right) => left - right)
+      .find((jointIndex) => mayDeep(jointIndex) && incident(jointIndex));
+    if (deepTarget !== undefined) {
+      const deep = takeDeep(deepTarget, final);
+      if (deep) return deep;
+      continue;
+    }
+    return settle(final);
   }
 }
 
@@ -3841,9 +4233,12 @@ export interface OffsetChainJointLeaf {
 
 /**
  * The candidate trim leaves of declared adjacency `jointIndex`, from the
- * vertex inward, exactly as the resolver builds and scans them: the
- * traversal-terminal curve of each side, then (a seed arc only, review R7)
- * its inner leaves in order.
+ * vertex inward, exactly as the resolver builds and scans them (the shared
+ * `jointCandidates`): the traversal-terminal curve of each side, then a seed
+ * arc's inner leaves (review R7) or, at a joint without a seed-arc side, a
+ * derived cubic's inner leaves of its terminal source span (T08b-g5d).
+ * `pairs`: the inner (i, j) ≠ (0, 0) index pairs in the resolver's scan
+ * order, present only on a ring joint (the solve frame's Newton scan).
  */
 export function offsetChainJointLeaves(
   pieces: readonly OffsetChainPiece[],
@@ -3851,37 +4246,23 @@ export function offsetChainJointLeaves(
 ): {
   readonly first: readonly OffsetChainJointLeaf[];
   readonly second: readonly OffsetChainJointLeaf[];
+  readonly pairs?: readonly (readonly [number, number])[];
 } {
   const { curves, pieceCurves } = buildCurves(pieces);
-  const next = (jointIndex + 1) % pieces.length;
-  const end = terminal(pieces, pieceCurves, curves, jointIndex, "traversalEnd");
-  const start = terminal(pieces, pieceCurves, curves, next, "traversalStart");
-  const leaves = (
-    terminalCurve: number,
-    pieceIndex: number,
-    side: Side,
-  ): OffsetChainJointLeaf[] => {
-    const order = [terminalCurve];
-    if (pieces[pieceIndex]!.kind === "arc") {
-      const [first, last] = pieceCurves[pieceIndex]!;
-      const step = terminalCurve === first ? 1 : -1;
-      for (
-        let curve = terminalCurve + step;
-        curve >= first && curve <= last;
-        curve += step
-      )
-        order.push(curve);
-    }
-    return order.map((curve) => ({
-      leaf: curves[curve]!.spanIndex,
-      curve: curves[curve]!.neutral,
-      bounds: curves[curve]!.bounds,
-      vertexSide: side,
-    }));
-  };
+  const candidates = jointCandidates(pieces, pieceCurves, curves, jointIndex);
+  const leaves = (order: readonly number[], side: Side) =>
+    order.map(
+      (curve): OffsetChainJointLeaf => ({
+        leaf: curves[curve]!.spanIndex,
+        curve: curves[curve]!.neutral,
+        bounds: curves[curve]!.bounds,
+        vertexSide: side,
+      }),
+    );
   return {
-    first: leaves(end.curve, jointIndex, end.side),
-    second: leaves(start.curve, next, start.side),
+    first: leaves(candidates.first, candidates.firstSide),
+    second: leaves(candidates.second, candidates.secondSide),
+    ...(candidates.ring ? { pairs: candidatePairs(candidates) } : {}),
   };
 }
 
