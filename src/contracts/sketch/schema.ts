@@ -1538,6 +1538,15 @@ export interface SolvedSketchSnapshot {
    * definition has no offset relationship.
    */
   offsetFramePlans?: SolvedOffsetFramePlanRecord[];
+  /**
+   * [TECH] G19a (T08b-g5c): the offset relationships whose publication
+   * certified this solved snapshot, written only by
+   * `applyOffsetPublications` (solved revision data, never identity). Every
+   * output of any other offset relationship (failed, pending a re-solve or
+   * unpublished) is non-accepted geometry (`isAcceptedOffsetOutput`). Absent
+   * when no offset relationship is certified.
+   */
+  certifiedOffsetDerivationIds?: string[];
 }
 
 /** One adjacency of a solve frame's plan ([TECH] G3; trims carry their leaves and Newton seeds). */

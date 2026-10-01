@@ -7,6 +7,7 @@ import {
   buildSketchPolylineStrokeGeometry,
   getActiveSketchMarkerWorldRadii,
   getActiveSketchPolylineStrokeGeometryConfig,
+  getDocumentRenderableMaterialOptions,
   getSketchDisplayMarkerRenderOrder,
   getSketchDisplayMeshMaterialConfig,
   getSketchDisplayMarkerMaterialConfig,
@@ -898,5 +899,79 @@ test("a derived offset shell stroke takes the existing invalid tint only when it
   expect(
     colorOf("invalid"),
     "A shell whose publication settled uncertified uses the existing invalid (danger) tint.",
+  ).toBe(palette.overconstrained);
+});
+
+test("T08b-g5c [TECH] G19: a non-accepted offset LINE output takes the same tint as a shell in sketch mode, and a committed one the danger tint in part mode", () => {
+  const palette = {
+    constrained: 0x222222,
+    underconstrained: 0x1651b0,
+    overconstrained: 0xff5555,
+    regionFill: 0x343a40,
+  } as const;
+  const line = {
+    id: "renderable_sketch_line_offset_output",
+    label: "Offset output line",
+    geometry: {
+      kind: "polyline",
+      points: [
+        [0, 0, 0],
+        [1, 0, 0],
+      ],
+      isClosed: false,
+    },
+    target: {
+      kind: "sketchEntity",
+      sketchId: "sketch_primary",
+      entityId: "sketch_entity_offset_line",
+    },
+    linePattern: "solid",
+    role: "local",
+    strokeStyle: { color: 0x33ffaa, opacity: 0.5, width: 3 },
+  } as const;
+  const colorOf = (regionValidity?: "current" | "stale" | "invalid") =>
+    getSketchDisplayPolylineMaterialConfig(
+      { ...line, ...(regionValidity ? { regionValidity } : {}) } as never,
+      true,
+      palette,
+    ).color;
+  expect(colorOf(), "An accepted line keeps the authored stroke.").toBe(
+    0x33ffaa,
+  );
+  expect(colorOf("stale"), "Pending or dragged: the normal colour.").toBe(
+    0x33ffaa,
+  );
+  expect(
+    colorOf("invalid"),
+    "A failed relationship's line output uses the danger tint.",
+  ).toBe(palette.overconstrained);
+
+  const committed = {
+    origin: "document",
+    renderable: {
+      id: "render_offset_line",
+      label: "Offset output line",
+      ownerBodyId: null,
+      ownerFeatureId: null,
+      binding: {
+        pickId: "pick_offset_line",
+        pickPriority: 1,
+        target: line.target,
+        topology: null,
+        semanticClass: "sketchCurve",
+      },
+      geometry: line.geometry,
+    },
+  } as const;
+  expect(
+    getDocumentRenderableMaterialOptions(committed as never, palette).color,
+    "Part mode: an accepted sketch curve keeps its normal colour.",
+  ).toBe(palette.underconstrained);
+  expect(
+    getDocumentRenderableMaterialOptions(
+      { ...committed, offsetOutputValidity: "invalid" } as never,
+      palette,
+    ).color,
+    "Part mode: a non-accepted offset output uses the danger tint.",
   ).toBe(palette.overconstrained);
 });

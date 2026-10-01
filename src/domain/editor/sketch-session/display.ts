@@ -18,6 +18,7 @@ import type {
   SketchStyleRecord,
   SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
+import { nonAcceptedOffsetOutputs } from "@/contracts/sketch/offset-publication";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import {
   sampleSolvedCubicSpans,
@@ -261,15 +262,31 @@ export function getStableSketchSessionDisplayRenderables(
       index,
     ),
   );
+  // [TECH] G19: a non-accepted offset output (line, arc, joint arc) takes the
+  // same stale/invalid display state as a non-accepted shell.
+  const nonAcceptedOutputs = nonAcceptedOffsetOutputs(
+    displayDefinition,
+    solved.solvedSnapshot,
+  );
   const entityRenderables = [
     ...getAcceptedSketchDisplayEntities(sketchId, displayDefinition).map(
-      (entity, index) =>
-        createDisplayRenderableForEntity(
+      (entity, index) => {
+        const renderable = createDisplayRenderableForEntity(
           session,
           entity,
           index,
           entity.entityId ? localStyleLookup.get(entity.entityId) : undefined,
-        ),
+        );
+        return entity.entityId && nonAcceptedOutputs.has(entity.entityId)
+          ? {
+              ...renderable,
+              regionValidity: getDerivedShellDisplayValidity(
+                session,
+                "provisional",
+              ),
+            }
+          : renderable;
+      },
     ),
     ...createDisplayRenderablesForDerivedShells(
       session,
@@ -503,12 +520,13 @@ export function withSketchConstraintDisplay(
 }
 
 /**
- * Display validity of a solved derived offset shell (T08b-g5b, plan §3.4):
- * `certified` is current. A provisional shell is `stale` (normal colour,
- * U-A) while a drag is active, while its publication round is pending, or
- * before the session has a live solve; once the round has settled
- * (current, unavailable or failed) without certifying it, it is `invalid`
- * (the existing red tint).
+ * Display validity of a derived offset output (T08b-g5b, plan §3.4; [TECH]
+ * G19 for every output kind): an accepted (`certified`) output is current. A
+ * non-accepted (`provisional`) one is `stale` (normal colour, U-A) while a
+ * drag is active, while its publication round is pending, or before the
+ * session has a live solve; once the round has settled (current,
+ * unavailable or failed) without certifying it, it is `invalid` (the
+ * existing red tint).
  */
 export function getDerivedShellDisplayValidity(
   session: SketchSessionState,
@@ -537,6 +555,7 @@ export function createDisplayRenderablesForDerivedShells(
   const records = new Map(
     solvedSnapshot.solvedEntities.map((record) => [record.entityId, record]),
   );
+  const nonAccepted = nonAcceptedOffsetOutputs(definition, solvedSnapshot);
   return definition.entities.flatMap((entity) => {
     if (entity.kind !== "derivedPiecewiseCubic") return [];
     const record = records.get(entity.entityId);
@@ -563,7 +582,7 @@ export function createDisplayRenderablesForDerivedShells(
         id: `renderable_sketch_shell_${entity.entityId}` as RenderableId,
         regionValidity: getDerivedShellDisplayValidity(
           session,
-          record.publication,
+          nonAccepted.has(entity.entityId) ? "provisional" : "certified",
         ),
       },
     ];

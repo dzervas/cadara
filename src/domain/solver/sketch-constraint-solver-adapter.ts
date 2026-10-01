@@ -525,8 +525,9 @@ export class SketchConstraintSolverAdapter implements SketchSolverAdapter {
       modelingTolerance: request.modelingTolerance,
       capabilities: this.offsetPublication,
     });
-    // T08b-g5b: regions consume exactly the certified shells ([TECH] G7);
-    // every other offset output is an obstacle ([TECH] G5).
+    // T08b-g5b/g5c: regions consume exactly the accepted offset outputs
+    // ([TECH] G7/G19); every non-accepted one is excluded like construction
+    // geometry with one targeted diagnostic, and blocks nothing ([TECH] G19).
     const solvedSnapshot = applyOffsetPublications(
       request.definition,
       request.solvedSnapshot,

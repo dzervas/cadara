@@ -31,6 +31,7 @@ import {
 } from "@/domain/modeling/occ/geometry";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import { deleteOccObject } from "@/domain/modeling/occ/memory";
+import { assertAcceptedSketchFeaturePoint } from "@/domain/modeling/sketch-feature-input";
 import {
   requireSolidBody,
   requireSketchSnapshot,
@@ -293,6 +294,13 @@ function resolveHoleLocations(
 ): HoleLocation[] {
   return locations.map((target) => {
     const sketch = requireSketchSnapshot(context, target.sketchId);
+    // [TECH] G19c: a driven point of a non-accepted offset output is not
+    // modeling input.
+    assertAcceptedSketchFeaturePoint(
+      sketch.sketch,
+      target.pointId,
+      "a hole location",
+    );
     const solvedPoint = sketch.sketch.solvedSnapshot.solvedPoints.find(
       (point) => point.pointId === target.pointId,
     );

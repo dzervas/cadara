@@ -6,6 +6,7 @@ import { SURFACE_COLORS } from "@/infrastructure/viewport/render-picking";
 import type { ToolbarMode } from "@/core/tools/schema";
 import type { SketchRenderingPalette } from "@/components/cad/sketch-rendering-palette";
 import type { SketchPlaneFrame } from "@/contracts/shared/sketch-plane";
+import type { ViewportRenderableRecord } from "@/core/workspace/viewport-renderables";
 
 export interface SketchDisplayMeshMaterialConfig {
   fill: SketchDisplayMeshFillConfig;
@@ -840,4 +841,38 @@ function getDefaultSketchConstraintColor(
     case undefined:
       return palette.underconstrained;
   }
+}
+
+/** Material options of a committed (part-mode) document renderable. */
+export function getDocumentRenderableMaterialOptions(
+  entry: ViewportRenderableRecord,
+  palette: SketchRenderingPalette,
+  diagnostic = false,
+) {
+  const semanticClass = entry.renderable.binding.semanticClass;
+  const display = entry.sketchConstraintDisplay;
+
+  if (semanticClass === "region") {
+    return { color: palette.regionFill, flat: true };
+  }
+
+  if (semanticClass !== "sketchCurve" && semanticClass !== "sketchPoint") {
+    return {};
+  }
+
+  // A non-accepted offset output ([TECH] G19) takes the danger tint, as the
+  // sketch-mode stroke of an invalid offset output does.
+  if (diagnostic || entry.offsetOutputValidity === "invalid") {
+    return { color: palette.overconstrained, flat: true };
+  }
+
+  if (semanticClass === "sketchPoint" && display?.isAffectedOverconstraint) {
+    return { color: palette.overconstrained, flat: true };
+  }
+
+  if (display?.state === "constrained") {
+    return { color: palette.constrained, flat: true };
+  }
+
+  return { color: palette.underconstrained, flat: true };
 }

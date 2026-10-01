@@ -32,6 +32,7 @@ import type {
   SketchId,
   SketchPointId,
 } from "@/contracts/shared/ids";
+import { nonAcceptedOffsetOutputs } from "@/contracts/sketch/offset-publication";
 import {
   canonicalRegionSignature,
   createRegionId,
@@ -125,17 +126,18 @@ export interface SketchArrangementInput {
    */
   derivedCurves?: readonly SketchArrangementDerivedCurve[];
   /**
-   * T08b-g5b ([TECH] G5): the line/arc/circle outputs and joint arcs of
+   * T08b-g5b, [TECH] G19 (T08b-g5c, U-G5, replacing G5's obstacle rule): the
+   * non-accepted outputs (lines, arcs, circles, joint arcs and shells) of
    * offset relationships that are not certified in this pair (failed,
-   * pending a re-solve, or unpublished). Each is an obstacle with a
-   * targeted `region-derived-unpublished` diagnostic and never bounds a
-   * region. A shell entity that is not in `derivedCurves` is the same
-   * obstacle.
+   * pending a re-solve, or unpublished). Each is excluded from the region
+   * input exactly as construction geometry is, with a targeted
+   * `region-derived-unpublished` diagnostic, and never bounds a region. A
+   * shell entity that is not in `derivedCurves` is excluded the same way.
    */
   unpublishedOffsetOutputs?: readonly SketchArrangementUnpublishedOutput[];
 }
 
-/** One output of a non-certified offset relationship (T08b-g5b, [TECH] G5). */
+/** One output of a non-certified offset relationship (T08b-g5b, [TECH] G19). */
 export interface SketchArrangementUnpublishedOutput {
   readonly entityId: SketchEntityId;
   readonly derivationId: string;
@@ -145,15 +147,17 @@ export interface SketchArrangementUnpublishedOutput {
 
 /**
  * T08b-g5b: the offset part of the region input of one accepted pair
- * ([TECH] G5/G7), mapped exactly as the g3 fixture helper
+ * ([TECH] G7/G19), mapped exactly as the g3 fixture helper
  * (`addOffsetFramePublication`) maps a publication. `solvedSnapshot` is the
- * pair's snapshot with the publications applied (`applyOffsetPublications`),
- * so a shell is consumed only when its record is `certified` and its
- * relationship's publication is `certified`; each non-construction shell
+ * pair's snapshot with the publications applied (`applyOffsetPublications`);
+ * acceptance is the shared predicate `nonAcceptedOffsetOutputs` on it, so a
+ * shell is consumed only when its relationship is certified in the snapshot
+ * and its record is `certified`. Each accepted non-construction shell
  * becomes one derived curve on its authored driven terminal points and its
  * solved sub-spans (untrimmed poles on `sourceDomain`, trims in
- * `queryDomain`). Every output of any other offset relationship is an
- * unpublished obstacle. Without offset relationships the result is empty,
+ * `queryDomain`). Every non-accepted output is excluded like construction
+ * geometry, its diagnostic naming the relationship's publication state
+ * from `publications`. Without offset relationships the result is empty,
  * so the arrangement input is byte-identical.
  */
 export function offsetArrangementInput(
@@ -181,39 +185,19 @@ export function offsetArrangementInput(
   const entities = new Map(
     definition.entities.map((entity) => [entity.entityId, entity]),
   );
+  const nonAccepted = nonAcceptedOffsetOutputs(definition, solvedSnapshot);
   const derivedCurves: SketchArrangementDerivedCurve[] = [];
   const unpublishedOffsetOutputs: SketchArrangementUnpublishedOutput[] = [];
   for (const relationship of offsets) {
     const state = status.get(relationship.derivationId);
-    if (state === "certified") {
-      for (const output of relationship.piecewiseCubicOutputs) {
-        const record = records.get(output.outputEntityId);
-        if (
-          record?.publication !== "certified" ||
-          entities.get(output.outputEntityId)?.isConstruction !== false
-        )
-          continue;
-        derivedCurves.push({
-          outputEntityId: output.outputEntityId,
-          startPointId: output.startPointId,
-          endPointId: output.endPointId,
-          spans: record.spans.map((span) => ({
-            outputSpanId: span.outputSpanId,
-            subIndex: span.subIndex,
-            poles: span.poles,
-            sourceDomain: span.sourceDomain,
-            queryDomain: span.queryDomain,
-          })),
-        });
-      }
-      continue;
-    }
     const reason =
       state === "failed"
         ? `offset relationship ${relationship.derivationId} failed its publication`
         : state === "planChanged"
           ? `offset relationship ${relationship.derivationId} is pending its re-solve`
-          : `offset relationship ${relationship.derivationId} is not published`;
+          : state === "certified"
+            ? `offset relationship ${relationship.derivationId} is not certified in this solved snapshot`
+            : `offset relationship ${relationship.derivationId} is not published`;
     for (const entityId of [
       ...relationship.outputs.map((output) => output.outputEntityId),
       ...relationship.jointOutputs.map((output) => output.outputEntityId),
@@ -221,11 +205,33 @@ export function offsetArrangementInput(
         (output) => output.outputEntityId,
       ),
     ])
-      unpublishedOffsetOutputs.push({
-        entityId,
-        derivationId: relationship.derivationId,
-        reason,
+      if (nonAccepted.has(entityId))
+        unpublishedOffsetOutputs.push({
+          entityId,
+          derivationId: relationship.derivationId,
+          reason,
+        });
+    for (const output of relationship.piecewiseCubicOutputs) {
+      const record = records.get(output.outputEntityId);
+      if (
+        nonAccepted.has(output.outputEntityId) ||
+        !record ||
+        entities.get(output.outputEntityId)?.isConstruction !== false
+      )
+        continue;
+      derivedCurves.push({
+        outputEntityId: output.outputEntityId,
+        startPointId: output.startPointId,
+        endPointId: output.endPointId,
+        spans: record.spans.map((span) => ({
+          outputSpanId: span.outputSpanId,
+          subIndex: span.subIndex,
+          poles: span.poles,
+          sourceDomain: span.sourceDomain,
+          queryDomain: span.queryDomain,
+        })),
       });
+    }
   }
   return { derivedCurves, unpublishedOffsetOutputs };
 }
@@ -242,9 +248,12 @@ export function offsetArrangementInput(
  *   `sourceDomain`) has no port: its driven terminal point's class is an
  *   interior membership at the representative trim parameter (the
  *   `queryDomain` end, bitwise), as a `pointOnCurve` T-junction is, and the
- *   trimmed-off tail beyond it is dangling. Any other arrangement event on
- *   the tail fails the branch closed with `region-derived-tail-crossing`,
- *   so undrawn geometry never bounds a face.
+ *   trimmed-off tail beyond it is dangling. [TECH] G14′ (T08b-g5c): point
+ *   contacts certified on the tail are not arrangement events; any other
+ *   event on the tail (a join, an overlap end, a contact reaching the trim)
+ *   fails the branch closed (`region-derived-tail-crossing`, or
+ *   `region-vertex-order-uncertain` for a contact reaching the trim), so
+ *   undrawn geometry never bounds a face.
  * Branch identity is `(outputEntityId, outputSpanId)`: every sub-span of one
  * output span has that one branch record, so the owner's sub-partition is
  * revision data and region ids survive a partition refinement.
@@ -314,14 +323,22 @@ interface Branch {
   };
 }
 
-/** An unsupported, degenerate or unpublished curve: it blocks everything its box meets. */
+/** An unsupported or degenerate curve: it blocks everything its box meets. */
 interface Obstacle {
   box: Box;
-  code:
-    | "region-unsupported-curve"
-    | "region-degenerate-curve"
-    | "region-derived-unpublished";
+  code: "region-unsupported-curve" | "region-degenerate-curve";
   entityId: SketchEntityId | null;
+  description: string;
+  reason: string;
+}
+
+/**
+ * [TECH] G19: a non-accepted offset output, excluded from the region input
+ * like construction geometry. It blocks nothing; it only gets its targeted
+ * diagnostic.
+ */
+interface ExcludedOutput {
+  entityId: SketchEntityId;
   description: string;
   reason: string;
 }
@@ -572,9 +589,10 @@ function collectArrangementBranches(
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
   derivedCurves: readonly SketchArrangementDerivedCurve[],
   unpublishedOutputs: readonly SketchArrangementUnpublishedOutput[],
-): { branches: Branch[]; obstacles: Obstacle[] } {
+): { branches: Branch[]; obstacles: Obstacle[]; excluded: ExcludedOutput[] } {
   const drafts: BranchDraft[] = [];
   const obstacles: Obstacle[] = [];
+  const excluded: ExcludedOutput[] = [];
   const solvedById = new Map(
     solved.solvedEntities.map((entity) => [entity.entityId, entity]),
   );
@@ -584,17 +602,12 @@ function collectArrangementBranches(
   const unpublished = new Map(
     unpublishedOutputs.map((output) => [output.entityId, output.reason]),
   );
-  // [TECH] G5: an output of a non-certified offset never bounds a region.
-  const unpublishedObstacle = (
-    source: RegionBoundarySource,
-    box: Box,
-    reason: string,
-  ) =>
-    obstacles.push({
-      box,
-      code: "region-derived-unpublished",
-      entityId: source.kind === "entity" ? source.entityId : null,
-      description: sourceDescription(source),
+  // [TECH] G19: a non-accepted offset output is excluded like construction
+  // geometry, so it never bounds a region and never blocks one.
+  const exclude = (entityId: SketchEntityId, reason: string) =>
+    excluded.push({
+      entityId,
+      description: sourceDescription({ kind: "entity", entityId }),
       reason,
     });
   const addDraft = (
@@ -602,12 +615,6 @@ function collectArrangementBranches(
     source: RegionBoundarySource,
     box: Box,
   ) => {
-    const unpublishedReason =
-      source.kind === "entity" ? unpublished.get(source.entityId) : undefined;
-    if (unpublishedReason !== undefined) {
-      unpublishedObstacle(source, box, unpublishedReason);
-      return;
-    }
     if (typeof draft !== "string") {
       drafts.push(draft);
       return;
@@ -635,6 +642,11 @@ function collectArrangementBranches(
 
   for (const entity of definition.entities) {
     if (entity.isConstruction || entity.kind === "point") continue;
+    const unpublishedReason = unpublished.get(entity.entityId);
+    if (unpublishedReason !== undefined) {
+      exclude(entity.entityId, unpublishedReason);
+      continue;
+    }
     const source: RegionBoundarySource = {
       kind: "entity",
       entityId: entity.entityId,
@@ -780,14 +792,10 @@ function collectArrangementBranches(
         break;
       case "derivedPiecewiseCubic": {
         // A consumable shell's branches come from `derivedCurves` (below);
-        // any other shell is an unpublished obstacle ([TECH] G5/G7).
+        // any other shell is excluded ([TECH] G7/G19).
         if (derivedShellIds.has(entity.entityId)) break;
-        const poles = geometry.spans.flatMap((span) => [...span.poles]);
-        unpublishedObstacle(
-          source,
-          poles.length > 0
-            ? boxOfPoints(poles)
-            : { x: [-Infinity, Infinity], y: [-Infinity, Infinity] },
+        exclude(
+          entity.entityId,
           unpublished.get(entity.entityId) ??
             `its publication is ${geometry.publication}, not certified`,
         );
@@ -975,7 +983,7 @@ function collectArrangementBranches(
     const curve = { ...draft.curve, curveId: key } as OwnedCurve;
     return { ...draft, index, key, curve, box: curveBox(curve) };
   });
-  return { branches, obstacles };
+  return { branches, obstacles, excluded };
 }
 
 // ---------------------------------------------------------------------------
@@ -1612,6 +1620,113 @@ function widenOnBranch(branch: Branch, bounds: Interval): Interval {
     Math.max(branch.domain[0], widened[0]),
     Math.min(branch.domain[1], widened[1]),
   ];
+}
+
+/**
+ * [TECH] G14′ (T08b-g5c): whether a point contact with parameter enclosure
+ * `bounds` on `branch` is certified to lie on the trimmed-off tail at
+ * `side`. The enclosure is widened exactly as `collectEvents` widens it and
+ * compared in binary64 against the published trim parameter (bitwise the
+ * sub-span's `queryDomain` end): strictly before a start trim, or strictly
+ * after an end trim. A contact whose enclosure reaches the trim is not on
+ * the tail.
+ */
+function onDerivedTail(
+  branch: Branch,
+  bounds: Interval,
+  side: "start" | "end",
+): boolean {
+  const tail = branch.derived?.tails[side];
+  if (!tail) return false;
+  const enclosure = widenOnBranch(branch, bounds);
+  return side === "start"
+    ? enclosure[1] < tail.parameter
+    : enclosure[0] > tail.parameter;
+}
+
+/** A tail of one derived branch, keyed `<branch index>:<side>`. */
+const tailKey = (index: number, side: "start" | "end") => `${index}:${side}`;
+
+/**
+ * [TECH] G14′ (T08b-g5c): drops every point contact certified to lie on a
+ * trimmed-off derived tail (`onDerivedTail`): pair and declared-join partner
+ * points on a tail of either branch, and self points either of whose
+ * parameters is on a tail. Joins and overlaps are never dropped, and a
+ * contact whose enclosure reaches a trim is kept, so G14 still sees every
+ * other event on a tail. Failed queries are kept as they are (they block).
+ * A pair or self result of a branch without tails is returned unchanged
+ * (the same object), so an input without derived curves is untouched.
+ *
+ * [THM] (T08b-g5c design §2 (a1), review R1): with this filter, the
+ * arrangement of the untrimmed region input R publishes the faces, holes,
+ * nesting, certified area intervals, records and crossing keys of the
+ * arrangement of the published (drawn) geometry P, modulo the T09 join-ball
+ * realization of each trim (as for any gapped declared join), or it fails
+ * closed. L1: a dropped contact c has t_c ∈ E_c, E_c strictly beyond q, so
+ * c is not a contact of the drawn piece; the kept contacts are those of the
+ * drawn piece plus straddlers whose enclosure holds q. L2: a trim membership
+ * realized `declaredEnds` has an enclosure holding q, so a kept straddler
+ * cannot be strictly separated from it and the component fails with
+ * `region-vertex-order-uncertain`; one realized `uniqueContactInBall` at
+ * t* ≠ q has [t*, q] inside the near piece in the join ball, where no
+ * partner point lies (T09a) and every non-member fails clearance, and a
+ * kept straddler before a membership at t* > q fails G14. So every
+ * surviving occurrence lies in [q, b] or in the trim's near piece inside
+ * its join ball. L3–L6 (graph, conservative whole-curve boxes, nesting from
+ * drawn points only, identity) are in the design; `tailsWithDroppedContacts`
+ * feeds the nesting ray.
+ */
+function withoutTailContacts(
+  result: {
+    pairs: PairOutcome[];
+    selves: { branch: number; result: NeutralCurveQueryResult }[];
+  },
+  branches: readonly Branch[],
+): {
+  pairs: PairOutcome[];
+  selves: { branch: number; result: NeutralCurveQueryResult }[];
+  /** Tails (`tailKey`) that lost at least one contact with another branch. */
+  tailsWithDroppedContacts: Set<string>;
+} {
+  const tailsWithDroppedContacts = new Set<string>();
+  const tailed = (index: number) => {
+    const tails = branches[index]!.derived?.tails;
+    return !!tails && (tails.start !== null || tails.end !== null);
+  };
+  const tailsOf = (index: number, bounds: Interval) =>
+    (["start", "end"] as const).filter((side) =>
+      onDerivedTail(branches[index]!, bounds, side),
+    );
+  const pairs = result.pairs.map((pair): PairOutcome => {
+    if (
+      pair.kind !== "verified" ||
+      !(tailed(pair.first) || tailed(pair.second))
+    )
+      return pair;
+    const points = pair.points.filter((point) => {
+      const first = tailsOf(pair.first, point.proof.firstParameterBounds);
+      const second = tailsOf(pair.second, point.proof.secondParameterBounds);
+      if (first.length === 0 && second.length === 0) return true;
+      for (const side of first)
+        tailsWithDroppedContacts.add(tailKey(pair.first, side));
+      for (const side of second)
+        tailsWithDroppedContacts.add(tailKey(pair.second, side));
+      return false;
+    });
+    return points.length === pair.points.length ? pair : { ...pair, points };
+  });
+  const selves = result.selves.map((self) => {
+    if (self.result.kind !== "verified" || !tailed(self.branch)) return self;
+    const points = self.result.points.filter(
+      (point) =>
+        tailsOf(self.branch, point.proof.firstParameterBounds).length === 0 &&
+        tailsOf(self.branch, point.proof.secondParameterBounds).length === 0,
+    );
+    return points.length === self.result.points.length
+      ? self
+      : { branch: self.branch, result: { ...self.result, points } };
+  });
+  return { pairs, selves, tailsWithDroppedContacts };
 }
 
 function collectEvents(
@@ -2284,9 +2399,11 @@ async function buildComponent(
   // [TECH] G14 tail guard (T08b-g3): the membership of each trimmed derived
   // end must be its branch's extreme occurrence on the tail side. The tail
   // beyond it is then an open tail ending at a free branch end, dangling by
-  // construction and never built (below). Any other event on the tail (a
-  // crossing, a touch, another join, a self contact) fails the branch closed:
-  // undrawn geometry never bounds a face.
+  // construction and never built (below). Point contacts certified on the
+  // tail were dropped before the census ([TECH] G14′), so this is the
+  // backstop for every other event on the tail (another join, an overlap
+  // end, a membership that was never realized): it fails the branch closed,
+  // and undrawn geometry never bounds a face.
   for (const index of componentBranches) {
     const branch = branches[index]!;
     const tails = branch.derived?.tails;
@@ -2308,7 +2425,9 @@ async function buildComponent(
   }
 
   // Sub-edges between consecutive vertices. Open tails end at a free branch end
-  // (degree 1) and are dangling by construction, so they are not built.
+  // (degree 1) and are dangling by construction, so they are not built; with
+  // [TECH] G14′ no kept occurrence lies on a tail beyond its membership, so no
+  // sub-edge meets one.
   const edges: SubEdge[] = [];
   const edgeAt = new Map<string, SubEdge>();
   for (const [index, list] of ordered) {
@@ -2893,6 +3012,7 @@ async function rayContainment(
   parent: BuiltComponent,
   global: Box,
   direction: number,
+  tailsWithDroppedContacts: ReadonlySet<string>,
 ): Promise<RayVerdict> {
   const span = Math.max(
     1,
@@ -2957,11 +3077,34 @@ async function rayContainment(
   };
 
   // K's last verified crossing X: beyond it the ray never meets K again.
+  // [TECH] G14′ (L5): X is a drawn point of K, so the parity from X is the
+  // parity of drawn K, which is connected modulo K's own join gaps (every
+  // non-member, F included, is proven clear of K's join boxes) and meets no
+  // edge of F. On a tail that lost a contact with another branch (it may
+  // cross F) a ray contact strictly on the tail is skipped, and one whose
+  // enclosure reaches the trim retries (D3). A tail that lost no such
+  // contact meets no other branch, so K together with it is connected and
+  // disjoint from F, and its ray contacts count (review advisory A1).
   let last: Interval | null = null;
   for (const index of child.branches) {
     const points = await contacts(index);
     if (points === null) return "retry";
+    const branch = branches[index]!;
+    const restricted = (["start", "end"] as const).filter((side) =>
+      tailsWithDroppedContacts.has(tailKey(index, side)),
+    );
     for (const point of points) {
+      const onK = point.proof.secondParameterBounds;
+      if (restricted.some((side) => onDerivedTail(branch, onK, side))) continue;
+      const onBranch = widenOnBranch(branch, onK);
+      if (
+        restricted.some((side) =>
+          side === "start"
+            ? onBranch[0] <= branch.derived!.tails.start!.parameter
+            : onBranch[1] >= branch.derived!.tails.end!.parameter,
+        )
+      )
+        return "retry";
       const bounds = rayBounds(point.proof.firstParameterBounds);
       if (last === null || bounds[1] > last[1]) last = bounds;
     }
@@ -3419,7 +3562,7 @@ async function deriveArrangement(
     return { regions: [], diagnostics };
   }
 
-  const { branches, obstacles } = collectArrangementBranches(
+  const { branches, obstacles, excluded } = collectArrangementBranches(
     input.definition,
     input.solvedSnapshot,
     input.projectedReferences,
@@ -3450,15 +3593,19 @@ async function deriveArrangement(
     branches,
   );
   const classOf = (member: string) => declarations.classes.find(member);
-  const { pairs, selves } = await queryArrangement(
-    queries,
+  // [TECH] G14′: contacts certified on a trimmed-off tail are not events.
+  const { pairs, selves, tailsWithDroppedContacts } = withoutTailContacts(
+    await queryArrangement(
+      queries,
+      branches,
+      declarations,
+      input.modelingTolerance,
+    ),
     branches,
-    declarations,
-    input.modelingTolerance,
   );
   const events = collectEvents(branches, declarations, pairs, selves);
 
-  // Components over verified contacts only.
+  // Components over verified (kept) contacts only.
   const components = new UnionFind<number>();
   for (const branch of branches) components.find(branch.index);
   for (const pair of pairs) {
@@ -3515,13 +3662,20 @@ async function deriveArrangement(
       failure.branches,
     );
   }
+  // [TECH] G19: one targeted diagnostic per excluded offset output.
+  for (const output of excluded)
+    emit(
+      makeDiagnostic(
+        "region-derived-unpublished",
+        `${output.description} is an offset output that is not consumable (${output.reason}); regions are derived without it.`,
+        { kind: "entity", entityId: output.entityId },
+      ),
+    );
   for (const obstacle of obstacles) {
     const label =
       obstacle.code === "region-unsupported-curve"
         ? `${obstacle.description} (${obstacle.reason}) has no neutral region curve form.`
-        : obstacle.code === "region-derived-unpublished"
-          ? `${obstacle.description} is an offset output that is not consumable (${obstacle.reason}).`
-          : `${obstacle.description} is degenerate (${obstacle.reason}).`;
+        : `${obstacle.description} is degenerate (${obstacle.reason}).`;
     emit(
       makeDiagnostic(
         obstacle.code,
@@ -3707,6 +3861,7 @@ async function deriveArrangement(
           owner.built!,
           global,
           direction,
+          tailsWithDroppedContacts,
         );
       if (verdict === "retry") {
         faceBlock.set(

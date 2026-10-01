@@ -17,6 +17,7 @@ import type {
   SketchPointId,
 } from "@/contracts/shared/ids";
 import type { SketchPlaneDefinition } from "@/contracts/shared/sketch-plane";
+import { assertAcceptedSketchFeatureInput } from "@/domain/modeling/sketch-feature-input";
 import { buildConstructionPlaneFromPlanarFace as buildConstructionPlaneFromPlanarFaceFromPlaneUtility } from "@/domain/modeling/occ/planes";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import {
@@ -1085,6 +1086,8 @@ function resolveOpenCurveSegment(
   sketch: SketchRecord,
   entityId: SketchEntityId,
 ): OpenCurveSegment {
+  // [TECH] G19: a non-accepted offset output is not modeling input.
+  assertAcceptedSketchFeatureInput(sketch, entityId, "an open profile curve");
   const geometry = getSolvedEntityGeometry(sketch, entityId);
   assertLoopSegmentOwnership(sketch, geometry);
 

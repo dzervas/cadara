@@ -10,7 +10,12 @@ import type { AuthoredActionState } from "@/contracts/modeling/authored-actions"
 import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
 import type { ModelingDocumentSettings } from "@/contracts/modeling/schema";
 import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
-import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
+import {
+  CONTRACT_VERSION,
+  EXTRUDE_FEATURE_SCHEMA_VERSION,
+  REVOLVE_FEATURE_SCHEMA_VERSION,
+} from "@/contracts/shared/versioning";
+import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION } from "@/contracts/modeling/advanced-solid";
 import {
   evaluateSketchDerivationJvp,
   evaluateSketchDerivations,
@@ -18,7 +23,9 @@ import {
 } from "@/contracts/sketch/derived-geometry";
 import {
   applyOffsetPublications,
+  isAcceptedOffsetOutput,
   isOffsetReplanRound,
+  nonAcceptedOffsetOutputPoints,
   publishSketchOffsets,
   solvedPairDefinition,
 } from "@/contracts/sketch/offset-publication";
@@ -30,6 +37,7 @@ import {
   validateSolvedSketchSnapshot,
 } from "@/contracts/sketch/runtime-schema";
 import type {
+  RegionRecord,
   SketchDefinition,
   SketchRecord,
   SolvedSketchSnapshot,
@@ -75,7 +83,17 @@ import {
 } from "@/domain/modeling/modeling-service/normalization";
 import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
 import { createCertifiedNeutralCurveRequestQuery } from "@/domain/modeling/neutral-curve-certification/query";
-import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+import {
+  OCC_KERNEL_SETTINGS,
+  createStandardPlaneDefinition,
+} from "@/domain/modeling/opencascade-kernel-seed";
+import {
+  executeOccFeature,
+  type OccFeatureExecutionContext,
+} from "@/domain/modeling/occ/features";
+import { createOccTopologyProvenanceIndex } from "@/domain/modeling/occ/topology-stage";
+import { trackNewSolidBody } from "@/domain/modeling/occ/topology";
+import { NON_ACCEPTED_OFFSET_FEATURE_INPUT_CODE } from "@/domain/modeling/sketch-feature-input";
 import {
   createSketchDerivedTransformContribution,
   offsetSideForSketchPoint,
@@ -103,6 +121,16 @@ import { buildSketchVectorExportModel } from "@/domain/export/sketch-vector-expo
 import { buildOccRenderExport } from "@/domain/modeling/occ/snapshot";
 import { getDefaultOpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import { buildRegionProfileFace } from "@/domain/modeling/occ/sketch-profile";
+import {
+  NON_ACCEPTED_OFFSET_OUTPUT_PROJECTION_CODE,
+  projectSketchExternalReferencesFromSnapshot,
+} from "@/domain/modeling/sketch-reference-projection";
+import {
+  closedCurvesSignedArea,
+  cubicOracle,
+  lineOracle,
+  type OracleCurve,
+} from "@/contracts/sketch/region-extraction.fixtures";
 
 const XY = {
   kind: "construction",
@@ -2140,6 +2168,179 @@ function sketchRecordOf(session: SketchSessionState) {
 
 const xy = (point: readonly number[]) => [point[0]!, point[1]!];
 
+/** Oracle curves of one region loop, read back from the solved snapshot (spec-only). */
+function loopOracleCurves(
+  loop: RegionRecord["loops"][number],
+  snapshot: SolvedSketchSnapshot,
+): OracleCurve[] {
+  const solved = new Map(
+    snapshot.solvedEntities.map((entity) => [entity.entityId, entity]),
+  );
+  return loop.segments.map((segment): OracleCurve => {
+    const [lo, hi] = segment.sourceParameterInterval;
+    const [from, to] =
+      segment.traversalDirection === "forward" ? [lo, hi] : [hi, lo];
+    const source = segment.branch.source;
+    if (source.kind !== "entity") throw new Error("a projected segment");
+    const geometry = solved.get(source.entityId)!;
+    if (geometry.kind === "derivedPiecewiseCubic") {
+      const span = geometry.spans.find(
+        (candidate) =>
+          candidate.outputSpanId === segment.branch.spanId &&
+          candidate.sourceDomain[0] <= lo &&
+          hi <= candidate.sourceDomain[1],
+      )!;
+      return cubicOracle(span.poles, span.sourceDomain, from, to);
+    }
+    if (geometry.kind === "lineSegment")
+      return {
+        ...lineOracle(geometry.startPosition, geometry.endPosition),
+        from,
+        to,
+      };
+    if (geometry.kind === "spline") {
+      const span = geometry.reconstruction.spans.find(
+        (candidate) =>
+          `${candidate.source.startOccurrenceId}>${candidate.source.endOccurrenceId}` ===
+          segment.branch.spanId,
+      )!;
+      return cubicOracle(span.poles, span.interval, from, to);
+    }
+    throw new Error(`no oracle for ${geometry.kind}`);
+  });
+}
+
+/**
+ * The inward offset of a native spline-and-line loop publishes the drawn
+ * picture ([TECH] G14′): an annulus whose outer loop is the source loop and
+ * whose hole is the offset loop, plus the inner disk, with no diagnostic.
+ * Areas against independent oracles (the source spline's spans and line;
+ * the shell's spans clipped to `queryDomain` and the line output), and every
+ * shell segment inside its sub-span's `queryDomain`, ending bitwise at the
+ * trims (the drawn geometry, no tail).
+ */
+function expectInwardLoopRegions(
+  session: SketchSessionState,
+  response: DeriveSketchRegionsResponse,
+  label: string,
+) {
+  const snapshot = session.liveSolve!.solvedSnapshot;
+  const definition = session.liveSolve!.definition;
+  const relationship = definition.derivedRelationships![0]!;
+  if (relationship.kind !== "offset") throw new Error("offset");
+  expect(relationship.jointOutputs, `${label}: premise, no joint arc`).toEqual(
+    [],
+  );
+  expect(response.diagnostics, `${label}: no diagnostic`).toEqual([]);
+  const annulus = response.regions.filter(
+    (region) => region.loops.length === 2,
+  );
+  const disks = response.regions.filter((region) => region.loops.length === 1);
+  expect(
+    [annulus.length, disks.length],
+    `${label}: an annulus and a disk`,
+  ).toEqual([1, 1]);
+  const shell = shellRecord(snapshot);
+  const sourceSpline = snapshot.solvedEntities.find(
+    (entity) => entity.kind === "spline",
+  )!;
+  if (sourceSpline.kind !== "spline") throw new Error("spline");
+  const sourceLine = snapshot.solvedEntities.find(
+    (entity) =>
+      entity.kind === "lineSegment" &&
+      !relationship.outputs.some(
+        (output) => output.outputEntityId === entity.entityId,
+      ),
+  )!;
+  if (sourceLine.kind !== "lineSegment") throw new Error("line");
+  const sourceArea = Math.abs(
+    closedCurvesSignedArea([
+      ...sourceSpline.reconstruction.spans.map((span) =>
+        cubicOracle(span.poles, span.interval, ...span.interval),
+      ),
+      lineOracle(sourceLine.startPosition, sourceLine.endPosition),
+    ]),
+  );
+  const drawn = shell.spans.map((span) =>
+    cubicOracle(span.poles, span.sourceDomain, ...span.queryDomain),
+  );
+  const drawnEnd = drawn.at(-1)!.point(drawn.at(-1)!.to);
+  const outputs = relationship.outputs.map((output) => {
+    const line = snapshot.solvedEntities.find(
+      (entity) => entity.entityId === output.outputEntityId,
+    )!;
+    if (line.kind !== "lineSegment") throw new Error("line output");
+    return line;
+  });
+  expect(outputs, `${label}: premise, one line output`).toHaveLength(1);
+  const [a, b] = [outputs[0]!.startPosition, outputs[0]!.endPosition];
+  const near = (p: readonly number[], q: readonly number[]) =>
+    Math.hypot(p[0]! - q[0]!, p[1]! - q[1]!);
+  const closing =
+    near(a, drawnEnd) < near(b, drawnEnd) ? lineOracle(a, b) : lineOracle(b, a);
+  const publishedArea = Math.abs(closedCurvesSignedArea([...drawn, closing]));
+  const area = (loop: RegionRecord["loops"][number]) =>
+    closedCurvesSignedArea(loopOracleCurves(loop, snapshot));
+  const close = (actual: number, oracle: number, what: string) =>
+    expect(
+      Math.abs(actual - oracle),
+      `${label}: ${what} ${actual} = oracle ${oracle}`,
+    ).toBeLessThanOrEqual(1e-9 * Math.max(1, Math.abs(oracle)));
+  const outer = annulus[0]!.loops.find((loop) => loop.role === "outer")!;
+  const hole = annulus[0]!.loops.find((loop) => loop.role === "inner")!;
+  close(Math.abs(area(outer)), sourceArea, "annulus outer = source loop");
+  close(Math.abs(area(hole)), publishedArea, "annulus hole = offset loop");
+  close(
+    Math.abs(area(disks[0]!.loops[0]!)),
+    publishedArea,
+    "disk = offset loop",
+  );
+  const entityIds = (loop: RegionRecord["loops"][number]) =>
+    new Set(
+      loop.segments.map((segment) =>
+        segment.branch.source.kind === "entity"
+          ? segment.branch.source.entityId
+          : "projected",
+      ),
+    );
+  expect(
+    entityIds(outer),
+    `${label}: the outer loop is the source loop`,
+  ).toEqual(new Set([sourceSpline.entityId, sourceLine.entityId]));
+  expect(entityIds(hole), `${label}: the hole is the offset loop`).toEqual(
+    new Set([shell.entityId, outputs[0]!.entityId]),
+  );
+  for (const region of response.regions)
+    for (const loop of region.loops) {
+      const segments = loop.segments.filter(
+        (segment) =>
+          segment.branch.source.kind === "entity" &&
+          segment.branch.source.entityId === shell.entityId,
+      );
+      for (const segment of segments) {
+        const [lo, hi] = segment.sourceParameterInterval;
+        expect(
+          shell.spans.some(
+            (span) =>
+              span.outputSpanId === segment.branch.spanId &&
+              span.queryDomain[0] <= lo &&
+              hi <= span.queryDomain[1],
+          ),
+          `${label}: shell segment [${lo}, ${hi}] lies in the published domain`,
+        ).toBe(true);
+      }
+      if (segments.length === 0) continue;
+      const ends = segments.flatMap(
+        (segment) => segment.sourceParameterInterval,
+      );
+      expect(
+        ends.some((end) => sameBits(end, shell.spans[0]!.queryDomain[0])) &&
+          ends.some((end) => sameBits(end, shell.spans.at(-1)!.queryDomain[1])),
+        `${label}: the shell's loop ends bitwise at both trims`,
+      ).toBe(true);
+    }
+}
+
 describe("T08b-g5b consumers and region wiring", () => {
   test("g5b-1: an offset loop's regions close through the live derivation and keep their ids across the owner's partition refinement", async () => {
     const { session, seeds } = splineLoopSession();
@@ -2217,27 +2418,41 @@ describe("T08b-g5b consumers and region wiring", () => {
     ).toBeGreaterThan(1);
   }, 300_000);
 
-  test("g5b-1b (known limit, fails closed): an inward offset of the loop certifies, but its trimmed-off tails cross the source line, so the G14 guard blocks the component", async () => {
+  test("g5b-1b ([TECH] G14′, D2 re-pin): an inward offset of the loop certifies, and its trimmed-off tails' crossings of the source line are not events: an annulus (outer = source, hole = offset) plus the inner disk, areas by oracle, ids stable across the drag", async () => {
     const { session, seeds } = splineLoopSession();
     const committed = committedOffsetOnSide(session, seeds, 0.01, "right");
-    const shellId = shellIdOf(committed);
-    const { response } = await liveRound(committed);
+    let { session: live, response } = await liveRound(committed);
     expect(response.offsetPublications.map((item) => item.status)).toEqual([
       "certified",
     ]);
-    expect(
-      response.regions,
-      "Undrawn tail geometry never bounds a face: no region is published.",
-    ).toEqual([]);
-    expect(
-      response.diagnostics.find(
-        (diagnostic) => diagnostic.code === "region-derived-tail-crossing",
-      )?.target,
-      "The targeted tail-crossing diagnostic names the shell.",
-    ).toEqual({ kind: "entity", entityId: shellId });
-  }, 300_000);
+    expectInwardLoopRegions(live, response, "g5b-1b");
+    const ids = response.regions.map((region) => region.regionId).sort();
+    const spline = live.definition.entities.find(
+      (entity) => entity.kind === "spline",
+    )!;
+    if (spline.kind !== "spline") throw new Error("spline");
+    const middle = spline.pointOccurrences[1]!.pointId;
+    for (const height of [0.5, 0.6, 0.7, 0.85]) {
+      const definition = {
+        ...live.definition,
+        points: live.definition.points.map((point) =>
+          point.pointId === middle
+            ? { ...point, position: [1, height] as const }
+            : point,
+        ),
+      };
+      ({ session: live, response } = await liveRound(
+        withLiveSolveBasis({ ...live, definition }, definition),
+      ));
+      expectInwardLoopRegions(live, response, `g5b-1b height ${height}`);
+      expect(
+        response.regions.map((region) => region.regionId).sort(),
+        `height ${height}: region ids survive the drag`,
+      ).toEqual(ids);
+    }
+  }, 600_000);
 
-  test("g5b-2: a provisional shell is never region input (G7); it is a targeted unpublished obstacle", async () => {
+  test("g5b-2: a provisional shell is never region input (G7); it is excluded with a targeted unpublished diagnostic (G19)", async () => {
     const { session, seeds } = splineLoopSession();
     const committed = committedOffsetOnSide(session, seeds, 0.01, "left");
     const shellId = shellIdOf(committed);
@@ -2293,7 +2508,7 @@ describe("T08b-g5b consumers and region wiring", () => {
             diagnostic.target?.kind === "entity" &&
             diagnostic.target.entityId === shellId,
         ),
-        `${label}: the shell is a targeted unpublished obstacle`,
+        `${label}: the shell is excluded with a targeted unpublished diagnostic`,
       ).toBe(true);
     }
     const certified = applyOffsetPublications(
@@ -2756,5 +2971,1330 @@ describe("T08b-g5b consumers and region wiring", () => {
       outputSpanIds.has(u9![2]!),
       "The U9 error names one of the shell's output spans.",
     ).toBe(true);
+  }, 300_000);
+});
+
+// ---------------------------------------------------------------------------
+// T08b-g5c: [TECH] G14′ native rows (inward loops publish the drawn picture)
+// and [TECH] G19/G19a (non-accepted offset outputs, every consumer).
+// ---------------------------------------------------------------------------
+
+/** A native closed loop: a spline through `fit`, closed by a line (snapped ends). */
+function loopSession(fit: readonly (readonly [number, number])[]) {
+  let session = drawSpline(newSession(), fit);
+  session = drawLine(session, fit.at(-1)!, fit[0]!);
+  const seeds = session.definition.entities
+    .filter((entity) => entity.kind !== "point")
+    .map((entity) => entity.entityId);
+  return { session, seeds };
+}
+
+/** Two native rectangles: the offset source (0,0)–(4,2) and an unrelated one (10,0)–(12,2). */
+function rectanglesSession() {
+  let session = acceptSketchDraw(
+    startSketchDraw(beginSketchTool(newSession(), "rectangle"), [0, 0]),
+    [4, 2],
+  );
+  const seeds = session.definition.entities
+    .filter((entity) => entity.kind === "lineSegment")
+    .map((entity) => entity.entityId);
+  session = acceptSketchDraw(
+    startSketchDraw(beginSketchTool(session, "rectangle"), [10, 0]),
+    [12, 2],
+  );
+  return { session, seeds };
+}
+
+function offsetOutputIds(session: SketchSessionState) {
+  const relationship = session.definition.derivedRelationships![0]!;
+  if (relationship.kind !== "offset") throw new Error("offset");
+  return {
+    derivationId: relationship.derivationId,
+    outputs: [
+      ...relationship.outputs.map((output) => output.outputEntityId),
+      ...relationship.jointOutputs.map((output) => output.outputEntityId),
+    ],
+  };
+}
+
+/** The committed session with a settled `failed` publication round (forged failure). */
+function failedRound(session: SketchSessionState) {
+  const { derivationId } = offsetOutputIds(session);
+  return publishSketchLiveRegions(
+    session,
+    [],
+    [],
+    [
+      {
+        derivationId,
+        status: "failed",
+        diagnostic: {
+          code: OFFSET_DIAGNOSTIC_CODES.topologyUncertain,
+          severity: "error",
+          message: "forged failure",
+          target: null,
+        },
+      },
+    ],
+  );
+}
+
+const usesAny = (
+  regions: readonly RegionRecord[],
+  entityIds: readonly SketchEntityId[],
+) =>
+  regions.some((region) =>
+    region.loops.some((loop) =>
+      loop.segments.some(
+        (segment) =>
+          segment.branch.source.kind === "entity" &&
+          entityIds.includes(segment.branch.source.entityId),
+      ),
+    ),
+  );
+
+/** A minimal workspace snapshot holding one committed sketch record (projection seam). */
+function projectionSnapshot(session: SketchSessionState) {
+  const record = sketchRecordOf(session) as unknown as {
+    sketchId: string;
+    plane: SketchSessionState["plane"];
+  };
+  return {
+    document: {
+      documentId: "doc_workspace",
+      revisionId: "rev_0001",
+      sketches: [record],
+      cursor: { kind: "sketch", sketchId: record.sketchId },
+      render: { records: [] },
+    },
+    presentation: {
+      documentHistory: [
+        {
+          id: "history_g5c",
+          label: "Sketch",
+          description: "Sketch",
+          kind: "sketch",
+          target: { kind: "sketch", sketchId: record.sketchId },
+          sketchId: record.sketchId,
+          featureId: null,
+        },
+      ],
+    },
+  } as never;
+}
+
+function project(
+  session: SketchSessionState,
+  source:
+    | { kind: "sketchEntity"; entityId: SketchEntityId }
+    | { kind: "sketch" },
+) {
+  return projectSketchExternalReferencesFromSnapshot(
+    projectionSnapshot(session),
+    {
+      contractVersion: CONTRACT_VERSION,
+      solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+      requestId: "request_g5c_project",
+      documentId: "doc_workspace",
+      revisionId: "rev_0001",
+      sketchId: "sketch_g5c_target",
+      plane: session.plane.frame,
+      tolerances: {
+        coincidence: 1e-6,
+        angleRadians: 1e-6,
+        minimumSegmentLength: 1e-6,
+      },
+      references: [
+        {
+          referenceId: "ref_g5c",
+          reference: {
+            referenceId: "ref_g5c",
+            kind: "sketchReference",
+            label: "g5c",
+            source:
+              source.kind === "sketch"
+                ? { kind: "sketch", sketchId: "sketch_g5b" }
+                : {
+                    kind: "sketchEntity",
+                    sketchId: "sketch_g5b",
+                    entityId: source.entityId,
+                  },
+            projectionMode: "projectAlongPlaneNormal",
+          },
+        },
+      ],
+    } as never,
+  ).projectedReferences[0]!;
+}
+
+describe("T08b-g5c inward offsets publish the drawn picture ([TECH] G14′)", () => {
+  test.each([
+    [
+      "h0.8 (38.7° corners)",
+      [
+        [0, 0],
+        [1, 0.8],
+        [2, 0],
+      ],
+      0.01,
+    ],
+    [
+      "h0.8 (38.7° corners)",
+      [
+        [0, 0],
+        [1, 0.8],
+        [2, 0],
+      ],
+      0.03,
+    ],
+    [
+      "h0.8 (38.7° corners)",
+      [
+        [0, 0],
+        [1, 0.8],
+        [2, 0],
+      ],
+      0.05,
+    ],
+    [
+      "h1.6 (58.0° corners)",
+      [
+        [0, 0],
+        [1, 1.6],
+        [2, 0],
+      ],
+      0.01,
+    ],
+    [
+      "h1.6 (58.0° corners)",
+      [
+        [0, 0],
+        [1, 1.6],
+        [2, 0],
+      ],
+      0.03,
+    ],
+    [
+      "h1.6 (58.0° corners)",
+      [
+        [0, 0],
+        [1, 1.6],
+        [2, 0],
+      ],
+      0.05,
+    ],
+    [
+      "h1.6 (58.0° corners)",
+      [
+        [0, 0],
+        [1, 1.6],
+        [2, 0],
+      ],
+      0.1,
+    ],
+    [
+      "lean (114.0° and 20.6° corners)",
+      [
+        [0, 0],
+        [-0.4, 0.9],
+        [2, 0],
+      ],
+      0.03,
+    ],
+  ] as const)(
+    "native inward loop %s, d = %s: certified; an annulus (outer = source, hole = offset) plus the inner disk, areas by oracle",
+    async (_name, fit, distance) => {
+      const { session, seeds } = loopSession(fit);
+      const committed = committedOffsetOnSide(
+        session,
+        seeds,
+        distance,
+        "right",
+      );
+      expect(
+        committed.definition.derivedRelationships ?? [],
+        "premise: the offset commits",
+      ).toHaveLength(1);
+      const { session: live, response } = await liveRound(committed);
+      expect(response.offsetPublications.map((item) => item.status)).toEqual([
+        "certified",
+      ]);
+      expectInwardLoopRegions(live, response, `${_name} d=${distance}`);
+    },
+    600_000,
+  );
+});
+
+describe("T08b-g5c non-accepted offset outputs ([TECH] G19/G19a, U-G5)", () => {
+  test.each(["left", "right"] as const)(
+    "regions: the rectangle offset 0.5 %s plus an unrelated rectangle; certified → the offset regions and the far one; failed, pending or unpublished → the source and far regions survive (ids as without the offset), one targeted diagnostic per output, no output bounds a region",
+    async (side) => {
+      const { session, seeds } = rectanglesSession();
+      const baseline = await liveDerive(session);
+      const baseIds = baseline.regions.map((region) => region.regionId).sort();
+      expect(baseIds, "premise: the two rectangles").toHaveLength(2);
+      const committed = committedOffsetOnSide(session, seeds, 0.5, side);
+      const { derivationId, outputs } = offsetOutputIds(committed);
+      const certified = await liveDerive(committed);
+      expect(certified.offsetPublications.map((item) => item.status)).toEqual([
+        "certified",
+      ]);
+      expect(
+        certified.regions,
+        `${side}: certified, 2 + 1 regions`,
+      ).toHaveLength(3);
+      expect(usesAny(certified.regions, outputs), side).toBe(true);
+      const certifiedIds = certified.regions.map((region) => region.regionId);
+      // Inward (left: trimmed lines) the source region gains the offset as
+      // a hole, so only the far region keeps its id; outward (right: lines
+      // and joint arcs) the source region is unchanged too.
+      expect(
+        baseIds.filter((id) => certifiedIds.includes(id)),
+        `${side}: the far rectangle's region (and outward the source's) is unchanged`,
+      ).toHaveLength(side === "left" ? 1 : 2);
+      const live = committed.liveSolve!;
+      expect(
+        live.solvedSnapshot.certifiedOffsetDerivationIds,
+        "premise: the live solve itself certifies nothing",
+      ).toBeUndefined();
+      const deriver = createSketchArrangementDeriver(
+        createCertifiedNeutralCurveQueryCapabilityForTest(),
+      );
+      for (const publications of [
+        [{ derivationId, status: "failed" }],
+        [{ derivationId, status: "planChanged" }],
+        [],
+      ] as const) {
+        const state = publications[0]?.status ?? "unpublished";
+        const result = await deriver.derive({
+          documentId: "doc_workspace" as never,
+          revisionId: "rev_0001" as never,
+          sketchId: "sketch_g5b" as never,
+          definition: live.definition,
+          solvedSnapshot: live.solvedSnapshot,
+          projectedReferences: [],
+          modelingTolerance: 1e-3,
+          ...offsetArrangementInput(
+            live.definition,
+            live.solvedSnapshot,
+            publications as readonly SketchOffsetPublicationRecord[],
+          ),
+        });
+        const where = `${side} ${state}`;
+        expect(
+          result.regions.map((region) => region.regionId).sort(),
+          `${where}: the source and far regions, ids as without the offset`,
+        ).toEqual(baseIds);
+        expect(usesAny(result.regions, outputs), where).toBe(false);
+        expect(
+          [...new Set(result.diagnostics.map((d) => d.code))],
+          `${where}: only the targeted exclusion diagnostics`,
+        ).toEqual(["region-derived-unpublished"]);
+        const targets = result.diagnostics.map((d) =>
+          d.target?.kind === "entity" ? d.target.entityId : null,
+        );
+        expect(
+          [...targets].sort(),
+          `${where}: exactly one diagnostic per output`,
+        ).toEqual([...outputs].sort());
+        expect(
+          result.diagnostics.every((d) => d.message.includes(derivationId)),
+          `${where}: each names the relationship`,
+        ).toBe(true);
+      }
+    },
+    600_000,
+  );
+
+  test("consumers: outputs (lines and joint arcs) of a failed relationship are not measured, exported, snapped or projected, draw invalid (stale while pending), and stay pickable; certified ones are ordinary", async () => {
+    const { session, seeds } = rectanglesSession();
+    const committed = committedOffsetOnSide(session, seeds, 0.5, "right");
+    const { derivationId, outputs } = offsetOutputIds(committed);
+    expect(
+      outputs.length,
+      "premise: line outputs and joint arcs",
+    ).toBeGreaterThan(4);
+    const source = seeds[0]!;
+    const failed = failedRound(committed);
+    const { session: certified } = await liveRound(committed);
+    expect(
+      certified.liveSolve!.solvedSnapshot.certifiedOffsetDerivationIds,
+      "G19a: the certified round records its relationship",
+    ).toEqual([derivationId]);
+    expect(
+      failed.liveSolve!.solvedSnapshot.certifiedOffsetDerivationIds,
+      "G19a: a failed round records nothing",
+    ).toBeUndefined();
+
+    // Measurement.
+    const measure = (state: SketchSessionState, entityId: SketchEntityId) =>
+      deriveMeasurementViewModel({
+        activeToolId: "measure",
+        selection: [
+          { kind: "sketchEntity", sketchId: "sketch_g5b", entityId } as never,
+        ],
+        snapshot: { document: { sketches: [sketchRecordOf(state)] } } as never,
+      })?.witnesses ?? [];
+    for (const output of outputs) {
+      expect(
+        measure(failed, output),
+        `failed: ${output} is not measured`,
+      ).toEqual([]);
+      expect(
+        measure(certified, output).length,
+        `certified: ${output} is measured`,
+      ).toBeGreaterThan(0);
+    }
+    expect(
+      measure(failed, source).length,
+      "the source is measured",
+    ).toBeGreaterThan(0);
+
+    // Vector export.
+    const exportOf = (state: SketchSessionState) => {
+      const model = buildSketchVectorExportModel({
+        documentId: "doc_workspace" as never,
+        revisionId: "rev_0001" as never,
+        sketches: [sketchRecordOf(state)],
+        target: { kind: "sketch", sketchId: "sketch_g5b" } as never,
+      });
+      if ("diagnostic" in model) throw new Error(model.diagnostic.message);
+      return model;
+    };
+    const failedExport = exportOf(failed);
+    expect(
+      failedExport.entities.filter((entity) =>
+        outputs.includes(entity.entityId as SketchEntityId),
+      ),
+      "failed: no output is exported",
+    ).toEqual([]);
+    expect(
+      failedExport.entities.some((entity) => entity.entityId === source),
+      "the source is exported",
+    ).toBe(true);
+    const skipped = failedExport.diagnostics.filter(
+      (diagnostic) => diagnostic.code === "sketch-vector-uncertified-offset",
+    );
+    expect(skipped, "failed: one warning per output").toHaveLength(
+      outputs.length,
+    );
+    expect(
+      outputs.every((output) =>
+        skipped.some((diagnostic) => diagnostic.message.includes(output)),
+      ),
+    ).toBe(true);
+    const certifiedExport = exportOf(certified);
+    expect(
+      outputs.every((output) =>
+        certifiedExport.entities.some((entity) => entity.entityId === output),
+      ),
+      "certified: every output is exported",
+    ).toBe(true);
+    expect(
+      certifiedExport.diagnostics.some(
+        (diagnostic) => diagnostic.code === "sketch-vector-uncertified-offset",
+      ),
+    ).toBe(false);
+
+    // Snapping.
+    const snapIds = (state: SketchSessionState) =>
+      collectSketchSnapGeometries({
+        definition: state.liveSolve!.definition,
+        solvedSnapshot: state.liveSolve!.solvedSnapshot,
+      }).flatMap((geometry) =>
+        geometry.source.kind === "localEntity"
+          ? [geometry.source.entityId]
+          : [],
+      );
+    expect(
+      snapIds(failed).filter((id) => outputs.includes(id)),
+      "failed: no output snaps",
+    ).toEqual([]);
+    expect(snapIds(failed)).toContain(source);
+    expect(
+      outputs.every((output) => snapIds(certified).includes(output)),
+      "certified: every output snaps",
+    ).toBe(true);
+
+    // Display (sketch mode) and pick.
+    const validityOf = (state: SketchSessionState, entityId: SketchEntityId) =>
+      getStableSketchSessionDisplayRenderables(state)
+        .filter(
+          (item) =>
+            item.target?.kind === "sketchEntity" &&
+            item.target.entityId === entityId &&
+            item.semanticClass !== "region",
+        )
+        .map((item) => item.regionValidity);
+    expect(committed.liveRegions.status, "premise: pending").toBe("pending");
+    for (const output of outputs) {
+      expect(validityOf(failed, output), `failed: ${output} invalid`).toEqual([
+        "invalid",
+      ]);
+      expect(validityOf(committed, output), `pending: ${output} stale`).toEqual(
+        ["stale"],
+      );
+      expect(
+        validityOf(certified, output),
+        `certified: ${output} ordinary`,
+      ).toEqual([undefined]);
+      expect(
+        collectSketchInteractionGeometry(failed).some(
+          (geometry) => geometry.id === `sketch-entity:${output}`,
+        ),
+        `failed: ${output} stays pickable`,
+      ).toBe(true);
+    }
+    expect(validityOf(failed, source), "the source is ordinary").toEqual([
+      undefined,
+    ]);
+
+    // Part mode: the committed render export still draws and binds them.
+    const occIds = buildOccRenderExport(
+      { constructions: [], bodies: [], sketches: [] } as never,
+      new Map(),
+      {},
+      [sketchRecordOf(failed)],
+    ).records.flatMap((record) =>
+      record.binding.target.kind === "sketchEntity"
+        ? [record.binding.target.entityId]
+        : [],
+    );
+    expect(
+      outputs.every((output) => occIds.includes(output)),
+      "failed: part mode still draws and binds every output (pickable)",
+    ).toBe(true);
+
+    // Projection (modeling consumption).
+    const output = outputs[0]!;
+    const one = project(failed, { kind: "sketchEntity", entityId: output });
+    expect(one.status).toBe("unsupportedSource");
+    expect(one.geometry).toEqual([]);
+    expect(one.diagnostics.map((d) => d.code)).toEqual([
+      NON_ACCEPTED_OFFSET_OUTPUT_PROJECTION_CODE,
+    ]);
+    expect(one.diagnostics[0]!.message).toContain(derivationId);
+    expect(
+      project(certified, { kind: "sketchEntity", entityId: output }).status,
+      "certified: the output projects",
+    ).toBe("projected");
+    const whole = project(failed, { kind: "sketch" });
+    expect(whole.status).toBe("projected");
+    expect(
+      whole.diagnostics.map((d) => d.code),
+      "failed: one warning per skipped output",
+    ).toEqual(outputs.map(() => NON_ACCEPTED_OFFSET_OUTPUT_PROJECTION_CODE));
+    const wholeCertified = project(certified, { kind: "sketch" });
+    expect(wholeCertified.diagnostics).toEqual([]);
+    expect(
+      wholeCertified.geometry.length - whole.geometry.length,
+      "the skipped geometry is exactly the outputs",
+    ).toBe(outputs.length);
+  }, 600_000);
+
+  test("G19a: certifiedOffsetDerivationIds is solved revision data written only for certified relationships, validated (unique, existing offset relationship) and round-tripped by normalization; absent otherwise", async () => {
+    const { session, seeds } = rectanglesSession();
+    const committed = committedOffsetOnSide(session, seeds, 0.5, "left");
+    const { derivationId } = offsetOutputIds(committed);
+    const raw = committed.liveSolve!.solvedSnapshot;
+    const definition = committed.liveSolve!.definition;
+    expect(
+      applyOffsetPublications(definition, raw, [
+        { derivationId, status: "failed" } as never,
+      ]),
+      "no certified relationship: the snapshot object is returned as it is",
+    ).toBe(raw);
+    expect(applyOffsetPublications(definition, raw, [])).toBe(raw);
+    const published = applyOffsetPublications(definition, raw, [
+      { derivationId, status: "certified" } as never,
+    ]);
+    expect(published.certifiedOffsetDerivationIds).toEqual([derivationId]);
+    expect(
+      applyOffsetPublications(definition, published, [
+        { derivationId, status: "certified" } as never,
+      ]),
+      "idempotent (equal; a round's ids replace the recorded ones, review advisory 4)",
+    ).toEqual(published);
+    expect(validateSolvedSketchSnapshot(published).success).toBe(true);
+    expect(normalizeSolvedSketchSnapshot(published)).toEqual(published);
+    expect(
+      "certifiedOffsetDerivationIds" in normalizeSolvedSketchSnapshot(raw),
+      "absent stays absent",
+    ).toBe(false);
+    const duplicate = validateSolvedSketchSnapshot({
+      ...published,
+      certifiedOffsetDerivationIds: [derivationId, derivationId],
+    });
+    expect(
+      duplicate.success ? [] : duplicate.issues.map((issue) => issue.message),
+    ).toContain(
+      "Certified offset relationship ids must name each relationship once.",
+    );
+    const base = (
+      await new MockKernelAdapter().getDocumentSnapshot({
+        contractVersion: CONTRACT_VERSION,
+        documentId: "doc_workspace",
+      })
+    ).snapshot.document.sketches[0]!.sketch;
+    const record = (ids: string[]) =>
+      validateSketchRecord({
+        ...structuredClone(base),
+        definition,
+        solvedSnapshot: { ...published, certifiedOffsetDerivationIds: ids },
+        regions: [],
+      });
+    expect(record([derivationId]).success).toBe(true);
+    const unknown = record(["sketch_derivation_unknown"]);
+    expect(
+      unknown.success ? [] : unknown.issues.map((issue) => issue.message),
+    ).toContain(
+      "A certified offset relationship id must reference an existing offset relationship.",
+    );
+    expect(() =>
+      normalizeSolvedSketchSnapshot({
+        ...published,
+        certifiedOffsetDerivationIds: [1],
+      }),
+    ).toThrow("Invalid certified offset relationship id payload.");
+  }, 300_000);
+});
+
+// ---------------------------------------------------------------------------
+// T08b-g5c review fixes (logic lane). REQUIRED-1: feature execution (OCC
+// `executeOccFeature`, the mock kernel's `createFeature`) consumes a sketch
+// entity only when it is accepted geometry ([TECH] G19). Advisory 3: driven
+// points of non-accepted outputs ([TECH] G19b). Advisory 4: a round's
+// certified ids replace the recorded ones.
+// ---------------------------------------------------------------------------
+
+/**
+ * A mock solver whose every solve nudges one driven output point by 8 ulp:
+ * the relationship's publication then fails honestly in the commit round
+ * (spec-only fake port; the certifier and region derivation are real).
+ */
+class NudgingSolverAdapter extends MockSketchSolverAdapter {
+  readonly nudged: SketchPointId;
+
+  constructor(nudged: SketchPointId) {
+    super({
+      neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+    });
+    this.nudged = nudged;
+  }
+
+  override async solveSketch(request: SolveSketchRequest) {
+    const response = await super.solveSketch(request);
+    return {
+      ...response,
+      solvedSnapshot: {
+        ...response.solvedSnapshot,
+        solvedPoints: response.solvedSnapshot.solvedPoints.map((point) =>
+          point.pointId === this.nudged
+            ? {
+                ...point,
+                solvedPosition: [
+                  point.solvedPosition[0] + Number.EPSILON * 8,
+                  point.solvedPosition[1],
+                ] as const,
+              }
+            : point,
+        ),
+      },
+    };
+  }
+}
+
+/**
+ * The two rectangles with the source offset 0.5 outward, committed through
+ * the mock kernel: certified, or with its publication failed by a nudged
+ * driven point. Returns the kernel, the committed snapshot sketch record and
+ * the horizontal line output on y = -0.5 (the bottom edge's offset).
+ */
+async function committedOffsetFeatureSketch(failed: boolean) {
+  const { session, seeds } = rectanglesSession();
+  const committed = committedOffsetOnSide(session, seeds, 0.5, "right");
+  const relationship = offsetRelationshipOf(committed.definition);
+  const adapter = new MockKernelAdapter({
+    solverAdapter: failed
+      ? new NudgingSolverAdapter(relationship.outputs[0]!.outputPointIds[0]!)
+      : new MockSketchSolverAdapter({
+          neutralCurveQueries:
+            createCertifiedNeutralCurveQueryCapabilityForTest(),
+        }),
+  });
+  const before = await adapter.getDocumentSnapshot(KERNEL_REQUEST);
+  const response = await adapter.commitSketch({
+    ...KERNEL_REQUEST,
+    baseRevisionId: before.snapshot.document.revisionId,
+    solverCorrelation: {
+      requestId: "request_g5c_feature",
+      projectionRequestId: "request_g5c_feature:project",
+      validationRequestId: "request_g5c_feature:validate",
+      solveRequestId: "request_g5c_feature:solve",
+      regionRequestId: "request_g5c_feature:regions",
+    },
+    sketchId: null,
+    sketchLabel: "G5c feature inputs",
+    plane: before.snapshot.document.sketches[0]!.plane,
+    definition: committed.definition,
+  });
+  const after = await adapter.getDocumentSnapshot(KERNEL_REQUEST);
+  const entry = after.snapshot.document.sketches.find(
+    (candidate) => candidate.sketchId === response.sketchId,
+  )!;
+  const solved = new Map(
+    entry.sketch.solvedSnapshot.solvedEntities.map((record) => [
+      record.entityId,
+      record,
+    ]),
+  );
+  const axisLine = relationship.outputs
+    .map((output) => output.outputEntityId)
+    .find((entityId) => {
+      const record = solved.get(entityId);
+      return (
+        record?.kind === "lineSegment" &&
+        Math.abs(record.startPosition[1] + 0.5) < 1e-9 &&
+        Math.abs(record.endPosition[1] + 0.5) < 1e-9
+      );
+    })!;
+  // The far rectangle's own (accepted) lines and region.
+  const farLine = entry.sketch.definition.entities.find((entity) => {
+    const record = solved.get(entity.entityId);
+    return (
+      record?.kind === "lineSegment" &&
+      record.startPosition[0] >= 10 &&
+      record.endPosition[0] >= 10
+    );
+  })!.entityId;
+  const farRegion = entry.sketch.regions.find((region) =>
+    region.loops.some((loop) =>
+      loop.segments.some(
+        (segment) =>
+          segment.branch.source.kind === "entity" &&
+          segment.branch.source.entityId === farLine,
+      ),
+    ),
+  )!;
+  // [TECH] G19c: the axis line's driven end point with the larger x.
+  const solvedPoints = new Map(
+    entry.sketch.solvedSnapshot.solvedPoints.map((point) => [
+      point.pointId,
+      point.solvedPosition,
+    ]),
+  );
+  const drivenPoint = [
+    ...relationship.outputs.find(
+      (output) => output.outputEntityId === axisLine,
+    )!.outputPointIds,
+  ].sort(
+    (left, right) => solvedPoints.get(right)![0] - solvedPoints.get(left)![0],
+  )[0]!;
+  return {
+    adapter,
+    entry,
+    derivationId: relationship.derivationId,
+    axisLine,
+    farLine,
+    farRegion,
+    drivenPoint,
+    drivenPosition: solvedPoints.get(drivenPoint)!,
+  };
+}
+
+async function occFeatureContext(
+  sketches: OccFeatureExecutionContext["sketches"],
+  bodies: OccFeatureExecutionContext["bodies"] = [],
+): Promise<OccFeatureExecutionContext> {
+  return {
+    oc: await getDefaultOpenCascadeInstance(),
+    documentId: "doc_workspace",
+    revisionId: "rev_0001",
+    modelingTolerance: 1e-3,
+    sketches,
+    constructions: [],
+    constructionPlanes: new Map(),
+    bodies,
+    assets: { records: [] },
+    assetBlobs: new Map(),
+    resolvedGeometryAssets: new Map(),
+    bakedShapeCache: new Map(),
+    previousTopologyStage: null,
+    topologyProvenanceIndex: createOccTopologyProvenanceIndex({
+      stages: new Map(),
+      previousLineage: new Map(),
+      historyOrder: [],
+    }),
+  };
+}
+
+const sketchEntityRef = (sketchId: string, entityId: SketchEntityId) =>
+  ({ kind: "sketchEntity", sketchId, entityId }) as never;
+
+const surfaceExtrude = (sketchId: string, entityId: SketchEntityId) =>
+  ({
+    kind: "extrude",
+    featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+    parameters: {
+      resultBodyType: "surface",
+      profiles: [sketchEntityRef(sketchId, entityId)],
+      startExtent: { kind: "profilePlane" },
+      extent: {
+        mode: "oneSide",
+        end: { kind: "blind", direction: "positive", distance: 2 },
+      },
+    },
+  }) as never;
+
+const surfaceRevolve = (
+  sketchId: string,
+  profile: SketchEntityId,
+  axis: SketchEntityId,
+) =>
+  ({
+    kind: "revolve",
+    featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
+    parameters: {
+      resultBodyType: "surface",
+      profiles: [sketchEntityRef(sketchId, profile)],
+      axis: sketchEntityRef(sketchId, axis),
+      startAngle: 0,
+      extent: { mode: "oneSide", end: { kind: "full" } },
+    },
+  }) as never;
+
+const sketchPathSweep = (
+  profileSketchId: string,
+  regionId: string,
+  sketchId: string,
+  path: SketchEntityId,
+) =>
+  ({
+    kind: "sweep",
+    featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+    parameters: {
+      operationIntent: "create",
+      participants: [
+        {
+          role: "profile",
+          targets: [{ kind: "region", sketchId: profileSketchId, regionId }],
+        },
+        { role: "path", targets: [sketchEntityRef(sketchId, path)] },
+      ],
+    },
+  }) as never;
+
+const sketchDirectionPattern = (
+  bodyId: string,
+  sketchId: string,
+  direction: SketchEntityId,
+) =>
+  ({
+    kind: "linearPattern",
+    featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+    parameters: {
+      participants: [
+        { role: "body", targets: [{ kind: "body", bodyId }] },
+        { role: "direction", targets: [sketchEntityRef(sketchId, direction)] },
+      ],
+      options: {
+        instanceCount: 2,
+        spacing: 10,
+        centered: false,
+        oppositeDirection: false,
+      },
+    },
+  }) as never;
+
+const sketchPointRef = (sketchId: string, pointId: SketchPointId) =>
+  ({ kind: "sketchPoint", sketchId, pointId }) as never;
+
+const pointHole = (sketchId: string, pointId: SketchPointId, bodyId: string) =>
+  ({
+    kind: "hole",
+    featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+    parameters: {
+      participants: [
+        { role: "location", targets: [sketchPointRef(sketchId, pointId)] },
+        { role: "body", targets: [{ kind: "body", bodyId }] },
+      ],
+      options: {
+        style: "simple",
+        mainDiameter: 0.2,
+        termination: "throughAll",
+      },
+    },
+  }) as never;
+
+/** A solid extrude of `regionId` whose start extent or up-to terminator is a sketch point. */
+const pointExtentExtrude = (
+  profileSketchId: string,
+  regionId: string,
+  sketchId: string,
+  pointId: SketchPointId,
+  extent: "start" | "upToVertex",
+) =>
+  ({
+    kind: "extrude",
+    featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+    parameters: {
+      resultBodyType: "solid",
+      profiles: [{ kind: "region", sketchId: profileSketchId, regionId }],
+      startExtent:
+        extent === "start"
+          ? {
+              kind: "sketchPointOffset",
+              target: sketchPointRef(sketchId, pointId),
+            }
+          : { kind: "profilePlane" },
+      extent: {
+        mode: "oneSide",
+        end:
+          extent === "start"
+            ? { kind: "blind", direction: "positive", distance: 1 }
+            : {
+                kind: "upToVertex",
+                direction: "positive",
+                target: sketchPointRef(sketchId, pointId),
+              },
+      },
+      operation: "newBody",
+      booleanScope: { kind: "standalone" },
+    },
+  }) as never;
+
+function occFailure(run: () => unknown) {
+  try {
+    run();
+  } catch (error) {
+    return (error as Error).message;
+  }
+  return null;
+}
+
+describe("T08b-g5c review fixes", () => {
+  test("REQUIRED-1 (OCC): a failed relationship's line output is not an open profile, revolve axis, sweep path or pattern direction (targeted feature-input-offset-not-certified naming the output and relationship); the certified output builds each feature", async () => {
+    const failed = await committedOffsetFeatureSketch(true);
+    const certified = await committedOffsetFeatureSketch(false);
+    expect(
+      failed.entry.sketch.solvedSnapshot.certifiedOffsetDerivationIds,
+      "premise: the nudged commit round certifies nothing",
+    ).toBeUndefined();
+    expect(
+      failed.entry.sketch.derivedValidity.state,
+      "premise: the sketch itself stays current (G16), so only G19 can refuse the output",
+    ).toBe("current");
+    expect(
+      certified.entry.sketch.solvedSnapshot.certifiedOffsetDerivationIds,
+    ).toEqual([certified.derivationId]);
+    expect(failed.axisLine, "premise: the bottom offset line").toBeDefined();
+    expect(
+      failed.farRegion,
+      "premise: the far rectangle's region",
+    ).toBeDefined();
+
+    for (const { label, fixture, expectFailure } of [
+      { label: "failed", fixture: failed, expectFailure: true },
+      { label: "certified", fixture: certified, expectFailure: false },
+    ]) {
+      const { entry, axisLine, farLine, farRegion, derivationId } = fixture;
+      const sketchId = entry.sketchId;
+      // A second record of the same sketch on YZ: a sweep profile across
+      // the XY path (spec-only fixture).
+      const profileSketch = {
+        ...entry,
+        sketchId: "sketch_g5c_profile",
+        plane: createStandardPlaneDefinition("yz"),
+      } as typeof entry;
+      const context = await occFeatureContext([entry, profileSketch]);
+      const solidExtrude = executeOccFeature(
+        context,
+        "feature_g5c_seed" as never,
+        {
+          kind: "extrude",
+          featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            resultBodyType: "solid",
+            profiles: [
+              { kind: "region", sketchId, regionId: farRegion.regionId },
+            ],
+            startExtent: { kind: "profilePlane" },
+            extent: {
+              mode: "oneSide",
+              end: { kind: "blind", direction: "positive", distance: 1 },
+            },
+            operation: "newBody",
+            booleanScope: { kind: "standalone" },
+          },
+        } as never,
+      );
+      const seedBody = solidExtrude.bodies[0]!;
+      const patternContext = await occFeatureContext([entry], [seedBody]);
+      const rows = [
+        {
+          use: "an open profile curve",
+          run: () =>
+            executeOccFeature(
+              context,
+              "feature_g5c_open" as never,
+              surfaceExtrude(sketchId, axisLine),
+            ),
+        },
+        {
+          use: "an axis or direction",
+          run: () =>
+            executeOccFeature(
+              context,
+              "feature_g5c_axis" as never,
+              surfaceRevolve(sketchId, farLine, axisLine),
+            ),
+        },
+        {
+          use: "a sweep path",
+          run: () =>
+            executeOccFeature(
+              context,
+              "feature_g5c_sweep" as never,
+              sketchPathSweep(
+                profileSketch.sketchId,
+                farRegion.regionId,
+                sketchId,
+                axisLine,
+              ),
+            ),
+        },
+        {
+          use: "an axis or direction",
+          run: () =>
+            executeOccFeature(
+              patternContext,
+              "feature_g5c_pattern" as never,
+              sketchDirectionPattern(seedBody.bodyId, sketchId, axisLine),
+            ),
+        },
+      ];
+      for (const [index, row] of rows.entries()) {
+        const where = `${label} row ${index} (${row.use})`;
+        const message = occFailure(row.run);
+        if (expectFailure)
+          expect(message, where).toBe(
+            `${NON_ACCEPTED_OFFSET_FEATURE_INPUT_CODE}: Sketch entity ${axisLine} is an output of offset relationship ${derivationId}, which is not certified, so it cannot be used as ${row.use}.`,
+          );
+        else expect(message, `${where}: builds`).toBeNull();
+      }
+    }
+  }, 600_000);
+
+  test("G19c (OCC): a failed relationship's driven point is not a hole location, an extrude start-extent point or an up-to-vertex terminator (targeted feature-input-offset-not-certified naming the point and relationship); the certified point builds each feature", async () => {
+    for (const failedRound of [true, false]) {
+      const fixture = await committedOffsetFeatureSketch(failedRound);
+      const { entry, farRegion, drivenPoint, drivenPosition, derivationId } =
+        fixture;
+      const label = failedRound ? "failed" : "certified";
+      expect(
+        entry.sketch.solvedSnapshot.certifiedOffsetDerivationIds,
+        `premise: ${label}`,
+      ).toEqual(failedRound ? undefined : [derivationId]);
+      const sketchId = entry.sketchId;
+      const profileSketch = {
+        ...entry,
+        sketchId: "sketch_g5c_profile",
+        plane: createStandardPlaneDefinition("yz"),
+      } as typeof entry;
+      const oc = await getDefaultOpenCascadeInstance();
+      const box = new oc.BRepPrimAPI_MakeBox_3(
+        new oc.gp_Pnt_3(drivenPosition[0] - 1, drivenPosition[1] - 1, -2),
+        2,
+        2,
+        4,
+      );
+      box.Build(new oc.Message_ProgressRange_1());
+      const body = trackNewSolidBody(oc, {
+        bodyId: "body_g5c_hole" as never,
+        label: "body_g5c_hole",
+        ownerFeatureId: "feature_g5c_box" as never,
+        shape: box.Shape(),
+      });
+      const context = await occFeatureContext([entry, profileSketch], [body]);
+      expect(
+        drivenPosition[0],
+        "premise: the terminator lies ahead of the YZ profile plane",
+      ).toBeGreaterThan(1);
+      const rows = [
+        {
+          use: "a hole location",
+          run: () =>
+            executeOccFeature(
+              context,
+              "feature_g5c_hole" as never,
+              pointHole(sketchId, drivenPoint, body.bodyId),
+            ),
+        },
+        {
+          use: "an extrude extent point",
+          run: () =>
+            executeOccFeature(
+              context,
+              "feature_g5c_start" as never,
+              pointExtentExtrude(
+                sketchId,
+                farRegion.regionId,
+                sketchId,
+                drivenPoint,
+                "start",
+              ),
+            ),
+        },
+        {
+          use: "an extrude extent point",
+          run: () =>
+            executeOccFeature(
+              context,
+              "feature_g5c_up_to" as never,
+              pointExtentExtrude(
+                profileSketch.sketchId,
+                farRegion.regionId,
+                sketchId,
+                drivenPoint,
+                "upToVertex",
+              ),
+            ),
+        },
+      ];
+      for (const [index, row] of rows.entries()) {
+        const where = `${label} point row ${index} (${row.use})`;
+        const message = occFailure(row.run);
+        if (failedRound)
+          expect(message, where).toBe(
+            `${NON_ACCEPTED_OFFSET_FEATURE_INPUT_CODE}: Sketch point ${drivenPoint} is a driven point of an output of offset relationship ${derivationId}, which is not certified, so it cannot be used as ${row.use}.`,
+          );
+        else expect(message, `${where}: builds`).toBeNull();
+      }
+    }
+  }, 600_000);
+
+  test("G19c (mock kernel): createFeature rejects a failed relationship's driven point as a hole location or an extrude start-extent point with the targeted diagnostic on that point; the certified point is accepted", async () => {
+    for (const failedRound of [true, false]) {
+      const fixture = await committedOffsetFeatureSketch(failedRound);
+      const { adapter, entry, farRegion, drivenPoint, derivationId } = fixture;
+      const sketchId = entry.sketchId;
+      for (const [index, definition] of [
+        pointHole(sketchId, drivenPoint, "body_part-1"),
+        pointExtentExtrude(
+          sketchId,
+          farRegion.regionId,
+          sketchId,
+          drivenPoint,
+          "start",
+        ),
+      ].entries()) {
+        const kind = (definition as { kind: string }).kind;
+        const where = `${failedRound ? "failed" : "certified"} ${kind} point row ${index}`;
+        const baseRevisionId = (
+          await adapter.getDocumentSnapshot(KERNEL_REQUEST)
+        ).snapshot.document.revisionId;
+        const response = await adapter.createFeature({
+          ...KERNEL_REQUEST,
+          baseRevisionId,
+          definition,
+        } as never);
+        const offsetDiagnostics = response.diagnostics.filter(
+          (diagnostic) =>
+            diagnostic.code === NON_ACCEPTED_OFFSET_FEATURE_INPUT_CODE,
+        );
+        if (failedRound) {
+          expect(response.revisionState, where).toEqual({
+            kind: "rejected",
+            baseRevisionId,
+            reasonCode: NON_ACCEPTED_OFFSET_FEATURE_INPUT_CODE,
+          });
+          expect(offsetDiagnostics, where).toEqual([
+            {
+              code: NON_ACCEPTED_OFFSET_FEATURE_INPUT_CODE,
+              severity: "error",
+              message: `Sketch point ${drivenPoint} is a driven point of an output of offset relationship ${derivationId}, which is not certified, so it cannot be used as an input of ${kind}.`,
+              target: { kind: "sketchPoint", sketchId, pointId: drivenPoint },
+              detail: null,
+            },
+          ]);
+        } else {
+          expect(offsetDiagnostics, `${where}: no G19c refusal`).toEqual([]);
+          expect(response.revisionState.kind, `${where}: accepted`).toBe(
+            "accepted",
+          );
+        }
+      }
+    }
+  }, 600_000);
+
+  test("REQUIRED-1 (mock kernel): createFeature rejects a failed relationship's line output as a sweep path, pattern direction, open profile or revolve axis with the targeted diagnostic on that output; the certified output is accepted", async () => {
+    for (const failedRound of [true, false]) {
+      const fixture = await committedOffsetFeatureSketch(failedRound);
+      const { adapter, entry, axisLine, farRegion, derivationId } = fixture;
+      const sketchId = entry.sketchId;
+      const create = async (definition: never) => {
+        const baseRevisionId = (
+          await adapter.getDocumentSnapshot(KERNEL_REQUEST)
+        ).snapshot.document.revisionId;
+        return {
+          baseRevisionId,
+          response: await adapter.createFeature({
+            ...KERNEL_REQUEST,
+            baseRevisionId,
+            definition,
+          } as never),
+        };
+      };
+      const rows = [
+        sketchPathSweep(sketchId, farRegion.regionId, sketchId, axisLine),
+        sketchDirectionPattern("body_part-1", sketchId, axisLine),
+        surfaceExtrude(sketchId, axisLine),
+        surfaceRevolve(sketchId, axisLine, axisLine),
+      ];
+      for (const [index, definition] of rows.entries()) {
+        const { baseRevisionId, response } = await create(definition);
+        const kind = (definition as { kind: string }).kind;
+        const where = `${failedRound ? "failed" : "certified"} ${kind} row ${index}`;
+        const offsetDiagnostics = response.diagnostics.filter(
+          (diagnostic) =>
+            diagnostic.code === NON_ACCEPTED_OFFSET_FEATURE_INPUT_CODE,
+        );
+        if (failedRound) {
+          expect(response.revisionState, where).toEqual({
+            kind: "rejected",
+            baseRevisionId,
+            reasonCode: NON_ACCEPTED_OFFSET_FEATURE_INPUT_CODE,
+          });
+          expect(offsetDiagnostics, where).toEqual([
+            {
+              code: NON_ACCEPTED_OFFSET_FEATURE_INPUT_CODE,
+              severity: "error",
+              message: `Sketch entity ${axisLine} is an output of offset relationship ${derivationId}, which is not certified, so it cannot be used as an input of ${kind}.`,
+              target: { kind: "sketchEntity", sketchId, entityId: axisLine },
+              detail: null,
+            },
+          ]);
+        } else {
+          expect(offsetDiagnostics, `${where}: no G19 refusal`).toEqual([]);
+          // Revolve is not implemented by the mock kernel; the rest build.
+          if (kind !== "revolve")
+            expect(response.revisionState.kind, `${where}: accepted`).toBe(
+              "accepted",
+            );
+        }
+      }
+    }
+  }, 600_000);
+
+  test("G19b (advisory 3): the driven points of a failed relationship's outputs are not snap candidates and are not measurable; certified ones are", async () => {
+    const { session, seeds } = rectanglesSession();
+    const committed = committedOffsetOnSide(session, seeds, 0.5, "right");
+    const relationship = offsetRelationshipOf(committed.definition);
+    const drivenPoints = [
+      ...new Set([
+        ...relationship.outputs.flatMap((output) => output.outputPointIds),
+        ...relationship.jointOutputs.flatMap((joint) => [
+          joint.startPointId,
+          joint.endPointId,
+          joint.centerPointId,
+        ]),
+      ]),
+    ];
+    const failed = failedRound(committed);
+    const { session: certified } = await liveRound(committed);
+    const sourcePoint = (
+      committed.definition.entities.find(
+        (entity) => entity.entityId === seeds[0],
+      ) as { startPointId: SketchPointId }
+    ).startPointId;
+    expect(
+      [
+        ...nonAcceptedOffsetOutputPoints(
+          failed.liveSolve!.definition,
+          failed.liveSolve!.solvedSnapshot,
+        ).keys(),
+      ].sort(),
+      "the predicate names exactly the driven points",
+    ).toEqual([...drivenPoints].sort());
+    expect(
+      nonAcceptedOffsetOutputPoints(
+        certified.liveSolve!.definition,
+        certified.liveSolve!.solvedSnapshot,
+      ).size,
+    ).toBe(0);
+
+    const snapPointIds = (state: SketchSessionState) =>
+      collectSketchSnapGeometries({
+        definition: state.liveSolve!.definition,
+        solvedSnapshot: state.liveSolve!.solvedSnapshot,
+      }).flatMap((geometry) =>
+        geometry.source.kind === "localPoint" ? [geometry.source.pointId] : [],
+      );
+    const measured = (state: SketchSessionState, pointId: SketchPointId) =>
+      deriveMeasurementViewModel({
+        activeToolId: "measure",
+        selection: [
+          { kind: "sketchPoint", sketchId: "sketch_g5b", pointId } as never,
+        ],
+        snapshot: { document: { sketches: [sketchRecordOf(state)] } } as never,
+      })?.witnesses ?? [];
+    const centers = new Set(
+      relationship.jointOutputs.map((joint) => joint.centerPointId),
+    );
+    for (const pointId of drivenPoints) {
+      expect(
+        snapPointIds(failed),
+        `failed: ${pointId} is not a snap candidate`,
+      ).not.toContain(pointId);
+      // Arc centers are never point candidates (existing rule).
+      if (!centers.has(pointId))
+        expect(
+          snapPointIds(certified),
+          `certified: ${pointId} snaps`,
+        ).toContain(pointId);
+      expect(measured(failed, pointId), `failed: ${pointId}`).toEqual([]);
+      expect(
+        measured(certified, pointId).length,
+        `certified: ${pointId} is measurable`,
+      ).toBeGreaterThan(0);
+    }
+    expect(snapPointIds(failed), "a source point snaps").toContain(sourcePoint);
+    expect(measured(failed, sourcePoint).length).toBeGreaterThan(0);
+  }, 600_000);
+
+  test("advisory 4: applyOffsetPublications replaces the recorded certified ids with the round's; a relationship that has since failed (or is no longer published) is not accepted", async () => {
+    const { session, seeds } = rectanglesSession();
+    const committed = committedOffsetOnSide(session, seeds, 0.5, "right");
+    const { derivationId, outputs } = offsetOutputIds(committed);
+    const definition = committed.liveSolve!.definition;
+    const published = applyOffsetPublications(
+      definition,
+      committed.liveSolve!.solvedSnapshot,
+      [{ derivationId, status: "certified" } as never],
+    );
+    expect(published.certifiedOffsetDerivationIds).toEqual([derivationId]);
+    for (const publications of [
+      [{ derivationId, status: "failed" }],
+      [{ derivationId, status: "planChanged" }],
+      [],
+    ]) {
+      const state = publications[0]?.status ?? "unpublished";
+      const later = applyOffsetPublications(
+        definition,
+        published,
+        publications as never,
+      );
+      expect(
+        "certifiedOffsetDerivationIds" in later,
+        `${state} after certified: no recorded id survives`,
+      ).toBe(false);
+      expect(
+        outputs.filter((output) =>
+          isAcceptedOffsetOutput(definition, later, output),
+        ),
+        `${state} after certified: no output is accepted`,
+      ).toEqual([]);
+      expect(validateSolvedSketchSnapshot(later).success).toBe(true);
+    }
   }, 300_000);
 });

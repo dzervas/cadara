@@ -9,9 +9,16 @@ import {
   getExtrudeFeatureExtent,
   getSurfaceExtrudeGeneratedSideFaceEndRole,
 } from "@/contracts/modeling/feature-extents";
-import type { BodyId, EdgeId, FeatureId, RegionId } from "@/contracts/shared/ids";
+import type {
+  BodyId,
+  EdgeId,
+  FeatureId,
+  RegionId,
+  SketchPointId,
+} from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
 import { mapSketchPointToWorld, type Vec3 } from "@/domain/modeling/occ/math";
+import { assertAcceptedSketchFeaturePoint } from "@/domain/modeling/sketch-feature-input";
 import {
   buildOpenSketchCurveWire,
   buildRegionProfileFace,
@@ -648,6 +655,13 @@ function resolveSketchPointWorldPosition(
   const snapshot = requireSketchSnapshot(
     context,
     target.sketchId as Parameters<typeof requireSketchSnapshot>[1],
+  );
+  // [TECH] G19c: a driven point of a non-accepted offset output is not
+  // modeling input (start extent or up-to terminator).
+  assertAcceptedSketchFeaturePoint(
+    snapshot.sketch,
+    target.pointId as SketchPointId,
+    "an extrude extent point",
   );
   const solved = snapshot.sketch.solvedSnapshot.solvedPoints.find(
     (entry) => entry.pointId === target.pointId,

@@ -529,19 +529,36 @@ function validateOffsetFramePlanReferences(
       relationship.kind === "offset" ? [relationship.derivationId] : [],
     ),
   );
-  return (snapshot.offsetFramePlans ?? []).flatMap((record, index) =>
-    offsets.has(record.derivationId)
-      ? []
-      : [
-          {
-            path: `offsetFramePlans.${index}.derivationId`,
-            expected: "an existing offset relationship",
-            value: record.derivationId,
-            message:
-              "A solved offset frame plan must reference an existing offset relationship.",
-          },
-        ],
-  );
+  return [
+    ...(snapshot.offsetFramePlans ?? []).flatMap((record, index) =>
+      offsets.has(record.derivationId)
+        ? []
+        : [
+            {
+              path: `offsetFramePlans.${index}.derivationId`,
+              expected: "an existing offset relationship",
+              value: record.derivationId,
+              message:
+                "A solved offset frame plan must reference an existing offset relationship.",
+            },
+          ],
+    ),
+    // [TECH] G19a: certified relationships exist.
+    ...(snapshot.certifiedOffsetDerivationIds ?? []).flatMap(
+      (derivationId, index) =>
+        offsets.has(derivationId)
+          ? []
+          : [
+              {
+                path: `certifiedOffsetDerivationIds.${index}`,
+                expected: "an existing offset relationship",
+                value: derivationId,
+                message:
+                  "A certified offset relationship id must reference an existing offset relationship.",
+              },
+            ],
+    ),
+  ];
 }
 
 function validateSolvedSketchSnapshotInvariants(
@@ -557,6 +574,15 @@ function validateSolvedSketchSnapshotInvariants(
       expected: "one plan per offset relationship",
       value: planIds,
       message: "Solved offset frame plans must name each relationship once.",
+    });
+  const certifiedIds = snapshot.certifiedOffsetDerivationIds ?? [];
+  if (new Set(certifiedIds).size !== certifiedIds.length)
+    issues.push({
+      path: "certifiedOffsetDerivationIds",
+      expected: "unique certified offset relationship ids",
+      value: certifiedIds,
+      message:
+        "Certified offset relationship ids must name each relationship once.",
     });
 
   snapshot.solvedEntities.forEach((entity, index) => {

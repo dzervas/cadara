@@ -11,6 +11,7 @@ import {
 } from "@/contracts/modeling/authored-values";
 import { getAdvancedParticipant } from "@/contracts/modeling/advanced-solid";
 import type { Vec3 } from "@/domain/modeling/occ/math";
+import { assertAcceptedSketchFeatureInput } from "@/domain/modeling/sketch-feature-input";
 import {
   buildAxisFromLineEdge,
   buildRegionProfileFace,
@@ -85,6 +86,12 @@ function buildSweepPathWire(
   let edge: InstanceType<OpenCascadeInstance["TopoDS_Edge"]>;
   if (path.kind === "sketchEntity") {
     const sketch = requireSketchSnapshot(context, path.sketchId);
+    // [TECH] G19: a non-accepted offset output is not modeling input.
+    assertAcceptedSketchFeatureInput(
+      sketch.sketch,
+      path.entityId,
+      "a sweep path",
+    );
     const geometry = sketch.sketch.solvedSnapshot.solvedEntities.find(
       (candidate) => candidate.entityId === path.entityId,
     );

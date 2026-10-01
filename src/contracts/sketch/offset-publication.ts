@@ -1,6 +1,6 @@
 import type { CertifiedTubePieceChainRequests } from "@/contracts/modeling/neutral-curve-query";
 import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
-import type { SketchEntityId } from "@/contracts/shared/ids";
+import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
 import type { CertifiedNeutralCurveRequestQuery } from "@/contracts/sketch/offset-chain-topology";
 import {
   publishOffsetFrame,
@@ -251,8 +251,13 @@ function publicationDiagnostic(
 }
 
 /**
- * [TECH] G7: marks the shells of every `certified` relationship certified in
- * the snapshot the publications were computed from. Nothing else changes.
+ * [TECH] G7/G19a: marks the shells of every `certified` relationship
+ * certified in the snapshot the publications were computed from, and records
+ * exactly those relationships in `certifiedOffsetDerivationIds` (definition
+ * order). The ids are REPLACED by this round's, never merged with ids
+ * already recorded (review advisory 4): a relationship that has since failed
+ * is not accepted. Nothing else changes; without a certified offset
+ * relationship and without recorded ids the snapshot is returned as it is.
  */
 export function applyOffsetPublications(
   definition: SketchDefinition,
@@ -264,7 +269,19 @@ export function applyOffsetPublications(
       .filter((publication) => publication.status === "certified")
       .map((publication) => publication.derivationId),
   );
-  if (certified.size === 0) return snapshot;
+  const certifiedOffsetDerivationIds = (
+    definition.derivedRelationships ?? []
+  ).flatMap((relationship) =>
+    relationship.kind === "offset" && certified.has(relationship.derivationId)
+      ? [relationship.derivationId]
+      : [],
+  );
+  if (certifiedOffsetDerivationIds.length === 0) {
+    if (snapshot.certifiedOffsetDerivationIds === undefined) return snapshot;
+    const replaced = { ...snapshot };
+    delete replaced.certifiedOffsetDerivationIds;
+    return replaced;
+  }
   const certifiedShells = new Set(
     definition.entities.flatMap((entity) =>
       entity.kind === "derivedPiecewiseCubic" &&
@@ -281,7 +298,114 @@ export function applyOffsetPublications(
         ? { ...entity, publication: "certified" }
         : entity,
     ),
+    certifiedOffsetDerivationIds,
   };
+}
+
+/**
+ * [TECH] G19/G19a (T08b-g5c, U-G5): the non-accepted offset outputs of one
+ * `(definition, solvedSnapshot)` pair, by entity id, each with its owning
+ * relationship. An output (line, arc, circle, joint arc or shell) of an
+ * offset relationship that is not in the snapshot's
+ * `certifiedOffsetDerivationIds` is non-accepted, and so is a shell whose
+ * solved record is missing or not `certified` ([TECH] G7). Non-accepted
+ * geometry is drawn with the stale/invalid tint and stays pickable, but it
+ * is not region input, measured, exported, snapped or projected. Every
+ * other entity is not a non-accepted offset output and is not in the map.
+ */
+export function nonAcceptedOffsetOutputs(
+  definition: Pick<SketchDefinition, "derivedRelationships" | "entities">,
+  snapshot: Pick<
+    SolvedSketchSnapshot,
+    "solvedEntities" | "certifiedOffsetDerivationIds"
+  >,
+): ReadonlyMap<SketchEntityId, { readonly derivationId: string }> {
+  const result = new Map<SketchEntityId, { readonly derivationId: string }>();
+  const certified = new Set(snapshot.certifiedOffsetDerivationIds ?? []);
+  for (const relationship of definition.derivedRelationships ?? []) {
+    if (relationship.kind !== "offset") continue;
+    if (certified.has(relationship.derivationId)) continue;
+    const owner = { derivationId: relationship.derivationId };
+    for (const output of [
+      ...relationship.outputs,
+      ...relationship.jointOutputs,
+      ...relationship.piecewiseCubicOutputs,
+    ])
+      result.set(output.outputEntityId, owner);
+  }
+  const shells = definition.entities.filter(
+    (entity) =>
+      entity.kind === "derivedPiecewiseCubic" && !result.has(entity.entityId),
+  );
+  if (shells.length === 0) return result;
+  const certifiedShells = new Set(
+    snapshot.solvedEntities.flatMap((entity) =>
+      entity.kind === "derivedPiecewiseCubic" &&
+      entity.publication === "certified"
+        ? [entity.entityId]
+        : [],
+    ),
+  );
+  for (const entity of shells)
+    if (
+      entity.kind === "derivedPiecewiseCubic" &&
+      !certifiedShells.has(entity.entityId)
+    )
+      result.set(entity.entityId, { derivationId: entity.derivationId });
+  return result;
+}
+
+/**
+ * [TECH] G19b (T08b-g5c review advisory 3): the driven points of the
+ * non-accepted offset outputs, by point id, each with its owning
+ * relationship: a line/arc/circle output's `outputPointIds`, a joint arc's
+ * start, end and center, and a shell's terminal points. They are not snap
+ * candidates and are not measurable, like their outputs.
+ */
+export function nonAcceptedOffsetOutputPoints(
+  definition: Pick<SketchDefinition, "derivedRelationships" | "entities">,
+  snapshot: Pick<
+    SolvedSketchSnapshot,
+    "solvedEntities" | "certifiedOffsetDerivationIds"
+  >,
+): ReadonlyMap<SketchPointId, { readonly derivationId: string }> {
+  const outputs = nonAcceptedOffsetOutputs(definition, snapshot);
+  const result = new Map<SketchPointId, { readonly derivationId: string }>();
+  if (outputs.size === 0) return result;
+  for (const relationship of definition.derivedRelationships ?? []) {
+    if (relationship.kind !== "offset") continue;
+    const owner = { derivationId: relationship.derivationId };
+    const pointsOf = (
+      entityId: SketchEntityId,
+      pointIds: readonly SketchPointId[],
+    ) => {
+      if (outputs.has(entityId))
+        for (const pointId of pointIds) result.set(pointId, owner);
+    };
+    for (const output of relationship.outputs)
+      pointsOf(output.outputEntityId, output.outputPointIds);
+    for (const joint of relationship.jointOutputs)
+      pointsOf(joint.outputEntityId, [
+        joint.startPointId,
+        joint.endPointId,
+        joint.centerPointId,
+      ]);
+    for (const shell of relationship.piecewiseCubicOutputs)
+      pointsOf(shell.outputEntityId, [shell.startPointId, shell.endPointId]);
+  }
+  return result;
+}
+
+/** [TECH] G19: whether `entityId` is accepted geometry (not a non-accepted offset output). */
+export function isAcceptedOffsetOutput(
+  definition: Pick<SketchDefinition, "derivedRelationships" | "entities">,
+  snapshot: Pick<
+    SolvedSketchSnapshot,
+    "solvedEntities" | "certifiedOffsetDerivationIds"
+  >,
+  entityId: SketchEntityId,
+): boolean {
+  return !nonAcceptedOffsetOutputs(definition, snapshot).has(entityId);
 }
 
 /**

@@ -21,6 +21,7 @@ import type {
   SketchStyleStroke,
   SolvedSketchEntityGeometryRecord,
 } from "@/contracts/sketch/schema";
+import { nonAcceptedOffsetOutputs } from "@/contracts/sketch/offset-publication";
 import {
   clippedSolvedCubicSpanPoles,
   reconstructSplineAggregate,
@@ -221,18 +222,8 @@ function buildEntity(
     }
 
     if (solvedEntity.kind === "derivedPiecewiseCubic") {
-      // [TECH] G7: export consumes only a certified shell, as SVG cubics of
-      // its solved spans clipped to their drawn domains.
-      if (solvedEntity.publication !== "certified") {
-        diagnostics.push(
-          createDiagnostic(
-            "sketch-vector-uncertified-offset",
-            `Offset curve ${entity.entityId} is not certified yet, so it was not exported.`,
-            target,
-          ),
-        );
-        return null;
-      }
+      // [TECH] G7/G19: an accepted (certified) shell exports as SVG cubics
+      // of its solved spans clipped to their drawn domains.
       return {
         kind: "spline",
         entityId: entity.entityId,
@@ -548,16 +539,32 @@ export function buildSketchVectorExportModel(
     );
   }
 
+  // [TECH] G19: a non-accepted offset output (of a failed or pending
+  // relationship, or an uncertified shell) is not exported.
+  const nonAccepted = nonAcceptedOffsetOutputs(
+    sketch.sketch.definition,
+    sketch.sketch.solvedSnapshot,
+  );
   const entities = sketch.sketch.definition.entities
-    .map((entity) =>
-      buildEntity(
-        entity,
-        solvedEntities.get(entity.entityId),
-        points,
-        input.target,
-        diagnostics,
-      ),
-    )
+    .map((entity) => {
+      const owner = nonAccepted.get(entity.entityId);
+      if (!owner)
+        return buildEntity(
+          entity,
+          solvedEntities.get(entity.entityId),
+          points,
+          input.target,
+          diagnostics,
+        );
+      diagnostics.push(
+        createDiagnostic(
+          "sketch-vector-uncertified-offset",
+          `Offset output ${entity.entityId} of relationship ${owner.derivationId} is not certified, so it was not exported.`,
+          input.target,
+        ),
+      );
+      return null;
+    })
     .filter((entity): entity is SketchVectorEntity => entity !== null);
   const entityIds = new Set(entities.map((entity) => entity.entityId));
   const regions = buildRegions(

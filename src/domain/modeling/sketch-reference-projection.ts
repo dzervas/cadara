@@ -30,6 +30,7 @@ import {
 } from "@/contracts/sketch/spline-geometry";
 import type { SketchSolveDiagnostic } from "@/contracts/sketch";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
+import { nonAcceptedOffsetOutputs } from "@/contracts/sketch/offset-publication";
 import { isDocumentHistoryTargetAppliedForCursor } from "@/domain/modeling/document-history";
 
 type Vec3 = readonly [number, number, number];
@@ -58,6 +59,17 @@ function diagnostic(
     message,
     target: null,
   };
+}
+
+/** [TECH] G19: a projection skipped a non-accepted offset output. */
+export const NON_ACCEPTED_OFFSET_OUTPUT_PROJECTION_CODE =
+  "projection-source-offset-not-certified";
+
+function nonAcceptedOffsetOutputProjectionMessage(
+  entityId: string,
+  derivationId: string,
+) {
+  return `Sketch entity ${entityId} is an output of offset relationship ${derivationId}, which is not certified, so it is not projected.`;
 }
 
 function failedReference(
@@ -863,6 +875,23 @@ function projectSketchEntity(
     );
   }
 
+  // [TECH] G19: a non-accepted offset output is not modeling input.
+  const nonAccepted = nonAcceptedOffsetOutputs(
+    sketch.sketch.definition,
+    sketch.sketch.solvedSnapshot,
+  ).get(entity.entityId);
+  if (nonAccepted) {
+    return failedReference(
+      reference.referenceId,
+      "unsupportedSource",
+      NON_ACCEPTED_OFFSET_OUTPUT_PROJECTION_CODE,
+      nonAcceptedOffsetOutputProjectionMessage(
+        entity.entityId,
+        nonAccepted.derivationId,
+      ),
+    );
+  }
+
   const geometry = projectSketchEntityGeometry({
     snapshot,
     referenceId: reference.referenceId,
@@ -964,16 +993,40 @@ function projectWholeSketch(
     );
   }
 
+  // [TECH] G19: non-accepted offset outputs are skipped, each with a
+  // targeted warning on the projection.
+  const nonAccepted = nonAcceptedOffsetOutputs(
+    sketch.sketch.definition,
+    sketch.sketch.solvedSnapshot,
+  );
+  const skipped: SketchSolveDiagnostic[] = [];
   const geometry = sketch.sketch.definition.entities.flatMap(
-    (entity): ProjectedSketchReferenceGeometry[] =>
-      projectSketchEntityGeometry({
-        snapshot,
-        referenceId: reference.referenceId,
-        sourceSketchId: sketch.sketchId,
-        sourceEntityId: entity.entityId,
-        plane,
-        tolerances,
-      }) ?? [],
+    (entity): ProjectedSketchReferenceGeometry[] => {
+      const owner = nonAccepted.get(entity.entityId);
+      if (owner) {
+        skipped.push(
+          diagnostic(
+            NON_ACCEPTED_OFFSET_OUTPUT_PROJECTION_CODE,
+            "warning",
+            nonAcceptedOffsetOutputProjectionMessage(
+              entity.entityId,
+              owner.derivationId,
+            ),
+          ),
+        );
+        return [];
+      }
+      return (
+        projectSketchEntityGeometry({
+          snapshot,
+          referenceId: reference.referenceId,
+          sourceSketchId: sketch.sketchId,
+          sourceEntityId: entity.entityId,
+          plane,
+          tolerances,
+        }) ?? []
+      );
+    },
   );
 
   return geometry.length > 0
@@ -981,7 +1034,7 @@ function projectWholeSketch(
         referenceId: reference.referenceId,
         status: "projected",
         geometry,
-        diagnostics: [],
+        diagnostics: skipped,
       }
     : failedReference(
         reference.referenceId,
