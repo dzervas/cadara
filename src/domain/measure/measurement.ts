@@ -13,6 +13,10 @@ import {
   type ProjectedSketchArcGeometry,
   type ProjectedSketchCircleGeometry,
 } from "@/contracts/solver/schema";
+import {
+  isAcceptedOffsetOutput,
+  nonAcceptedOffsetOutputPoints,
+} from "@/contracts/sketch/offset-publication";
 import type {
   RegionLoopRecord,
   RegionRecord,
@@ -533,6 +537,17 @@ function resolveSketchPointTarget(
     return null;
   }
 
+  // [TECH] G19b: a driven point of a non-accepted offset output is not
+  // measurable, like its output.
+  if (
+    nonAcceptedOffsetOutputPoints(
+      sketch.sketch.definition,
+      sketch.sketch.solvedSnapshot,
+    ).has(point.pointId)
+  ) {
+    return null;
+  }
+
   const position = mapSketchPointToWorkspaceWorld(sketch.plane, point.position);
 
   return {
@@ -569,6 +584,18 @@ function resolveSketchEntityTarget(
   );
 
   if (!sketch || !entity) {
+    return null;
+  }
+
+  // [TECH] G19: a non-accepted offset output (of a failed or pending
+  // relationship, or an uncertified shell) is not measured.
+  if (
+    !isAcceptedOffsetOutput(
+      sketch.sketch.definition,
+      sketch.sketch.solvedSnapshot,
+      entity.entityId,
+    )
+  ) {
     return null;
   }
 
@@ -730,15 +757,12 @@ function resolveSketchEntityTarget(
   }
 
   if (entity.kind === "derivedPiecewiseCubic") {
-    // [TECH] G7: a modeling consumer measures only a certified shell, along
-    // its solved spans clipped to their drawn domains.
+    // [TECH] G7/G19: an accepted (certified) shell is measured along its
+    // solved spans clipped to their drawn domains.
     const record = sketch.sketch.solvedSnapshot.solvedEntities.find(
       (entry) => entry.entityId === entity.entityId,
     );
-    if (
-      record?.kind !== "derivedPiecewiseCubic" ||
-      record.publication !== "certified"
-    ) {
+    if (record?.kind !== "derivedPiecewiseCubic") {
       return null;
     }
     const sampledPoints = sampleSolvedCubicSpans(

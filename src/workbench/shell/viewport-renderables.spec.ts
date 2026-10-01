@@ -436,3 +436,111 @@ test("src/app/viewport-renderables.spec.ts", async () => {
     ).toBeTruthy();
   }
 });
+
+test("T08b-g5c [TECH] G19: committed non-accepted offset outputs are marked for the part-mode danger tint (shared predicate on the committed snapshot); accepted ones and other curves are not", async () => {
+  const { applyOffsetPublications, publishSketchOffsets } =
+    await import("@/contracts/sketch/offset-publication");
+  const {
+    completeSketchOffsetPreviewPublication,
+    patchSketchEditToolValue,
+    selectSketchEditToolTarget,
+  } = await import("@/domain/editor/sketch-session");
+  const { createCertifiedNeutralCurveRequestQuery } =
+    await import("@/domain/modeling/neutral-curve-certification/query");
+  const { createCertifiedCubicTubeChain } =
+    await import("@/domain/modeling/neutral-curve-certification/cubic-tube-chain");
+  let session = acceptSketchDraw(
+    startSketchDraw(
+      beginSketchTool(
+        createNewSketchSessionFromSupport(
+          { kind: "construction", constructionId: "construction_plane-xy" },
+          { ...OCC_KERNEL_SETTINGS },
+        ),
+        "rectangle",
+      ),
+      [0, 0],
+    ),
+    [4, 2],
+  );
+  const seeds = session.definition.entities.filter(
+    (entity) => entity.kind === "lineSegment",
+  );
+  session = beginSketchTool(session, "offset");
+  for (const seed of seeds)
+    session = selectSketchEditToolTarget(session, seed.target);
+  session = patchSketchEditToolValue(session, { value: 0.5 });
+  session = patchSketchEditToolValue(session, { intent: "commitOffset" });
+  const publication = session.activeEditTool!.offsetPublication!;
+  session = completeSketchOffsetPreviewPublication(
+    session,
+    publication.derivationId,
+    publishSketchOffsets({
+      definition: publication.basis!.definition,
+      solvedSnapshot: publication.basis!.solvedSnapshot,
+      modelingTolerance: publication.basis!.modelingTolerance,
+      capabilities: {
+        query: createCertifiedNeutralCurveRequestQuery(),
+        certifier: createCertifiedCubicTubeChain(),
+      },
+    }),
+  );
+  const live = session.liveSolve!;
+  const relationship = live.definition.derivedRelationships![0]!;
+  if (relationship.kind !== "offset") throw new Error("offset");
+  const output = relationship.outputs[0]!.outputEntityId;
+  const curve = (entityId: string): RenderableEntityRecord => ({
+    id: `render_${entityId}` as never,
+    label: entityId,
+    ownerBodyId: null,
+    ownerFeatureId: null,
+    binding: {
+      pickId: `pick_${entityId}` as never,
+      pickPriority: 1,
+      target: {
+        kind: "sketchEntity",
+        sketchId: "sketch_g5c",
+        entityId,
+      } as never,
+      topology: null,
+      semanticClass: "sketchCurve",
+    },
+    geometry: {
+      kind: "polyline",
+      points: [
+        [0, 0, 0],
+        [1, 0, 0],
+      ],
+      isClosed: false,
+    },
+  });
+  const sketchRecord = (solvedSnapshot: typeof live.solvedSnapshot) =>
+    ({
+      sketchId: "sketch_g5c",
+      sketch: {
+        definition: live.definition,
+        solvedSnapshot,
+        derivedValidity: { state: "current", diagnostics: [] },
+        regions: [],
+      },
+    }) as unknown as SketchSnapshotRecord;
+  const marks = (solvedSnapshot: typeof live.solvedSnapshot) =>
+    composeViewportRenderables({
+      snapshotRenderables: [curve(output), curve(seeds[0]!.entityId)],
+      snapshotSketches: [sketchRecord(solvedSnapshot)],
+      previewRenderables: null,
+      sketchSession: null,
+      hiddenTargetKeys: {},
+    }).documentRenderables.map((entry) => entry.offsetOutputValidity);
+  expect(
+    marks(live.solvedSnapshot),
+    "Uncertified: the output is marked, the source line is not (both still composed, so pickable).",
+  ).toEqual(["invalid", undefined]);
+  expect(
+    marks(
+      applyOffsetPublications(live.definition, live.solvedSnapshot, [
+        { derivationId: relationship.derivationId, status: "certified" },
+      ]),
+    ),
+    "Certified: nothing is marked.",
+  ).toEqual([undefined, undefined]);
+}, 120_000);

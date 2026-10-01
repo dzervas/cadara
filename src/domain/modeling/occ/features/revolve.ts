@@ -11,6 +11,7 @@ import {
   OCC_CONTRACT_GAP_CODES,
 } from "@/domain/modeling/occ/implementation-policy";
 import type { Vec3 } from "@/domain/modeling/occ/math";
+import { assertAcceptedSketchFeatureInput } from "@/domain/modeling/sketch-feature-input";
 import {
   buildAxisFromLineEdge,
   buildOpenSketchCurveWire,
@@ -127,6 +128,13 @@ export function buildAxisFromSketchLine(
   entityId: import("@/contracts/shared/ids").SketchEntityId,
 ) {
   const sketch = requireSketchSnapshot(context, sketchId);
+  // [TECH] G19: a non-accepted offset output is not modeling input (revolve,
+  // mirror, transform and pattern axes and directions all resolve here).
+  assertAcceptedSketchFeatureInput(
+    sketch.sketch,
+    entityId,
+    "an axis or direction",
+  );
   const entity = sketch.sketch.solvedSnapshot.solvedEntities.find(
     (candidate) => candidate.entityId === entityId,
   );

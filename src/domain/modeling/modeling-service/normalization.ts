@@ -3337,7 +3337,22 @@ export function normalizeSolvedSketchSnapshot(
             value.offsetFramePlans,
           ),
         }),
+    // [TECH] G19a: solved revision data; shape only (the solved runtime
+    // schema checks uniqueness and references).
+    ...(value.certifiedOffsetDerivationIds === undefined
+      ? {}
+      : {
+          certifiedOffsetDerivationIds: normalizeCertifiedOffsetDerivationIds(
+            value.certifiedOffsetDerivationIds,
+          ),
+        }),
   };
+}
+
+function normalizeCertifiedOffsetDerivationIds(value: unknown): string[] {
+  if (!Array.isArray(value) || !value.every(isString))
+    throw new Error("Invalid certified offset relationship id payload.");
+  return [...value];
 }
 
 function normalizeNumberPair(value: unknown, message: string) {

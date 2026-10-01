@@ -2,6 +2,7 @@ import { useEffect, useMemo } from "react";
 import * as THREE from "three";
 
 import type { SketchRenderingPalette } from "@/components/cad/sketch-rendering-palette";
+import { getDocumentRenderableMaterialOptions } from "@/components/cad/sketch-display-style";
 import {
   MARKER_SPHERE_GEOMETRY,
   GEOMETRY_HIGHLIGHT_COLORS,
@@ -18,37 +19,6 @@ import {
   isSeededDatumPlaneRenderable,
 } from "@/infrastructure/viewport/render-picking";
 import type { ViewportRenderableRecord } from "@/core/workspace/viewport-renderables";
-
-function getDocumentRenderableMaterialOptions(
-  entry: ViewportRenderableRecord,
-  palette: SketchRenderingPalette,
-  diagnostic = false,
-) {
-  const semanticClass = entry.renderable.binding.semanticClass;
-  const display = entry.sketchConstraintDisplay;
-
-  if (semanticClass === "region") {
-    return { color: palette.regionFill, flat: true };
-  }
-
-  if (semanticClass !== "sketchCurve" && semanticClass !== "sketchPoint") {
-    return {};
-  }
-
-  if (diagnostic) {
-    return { color: palette.overconstrained, flat: true };
-  }
-
-  if (semanticClass === "sketchPoint" && display?.isAffectedOverconstraint) {
-    return { color: palette.overconstrained, flat: true };
-  }
-
-  if (display?.state === "constrained") {
-    return { color: palette.constrained, flat: true };
-  }
-
-  return { color: palette.underconstrained, flat: true };
-}
 
 export function DocumentRenderableNode({
   entry,

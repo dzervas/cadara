@@ -1,3 +1,7 @@
+import {
+  nonAcceptedOffsetOutputPoints,
+  nonAcceptedOffsetOutputs,
+} from "@/contracts/sketch/offset-publication";
 import type {
   SketchDefinition,
   SketchPoint2D,
@@ -156,9 +160,21 @@ export function collectSketchSnapGeometries(input: {
    * T08b-g5b: the solved snapshot the session displays; a derived offset
    * shell snaps along its solved spans clipped to their drawn domains (the
    * display tessellation). Absent: shells give no candidates.
+   * [TECH] G19: a non-accepted offset output of this snapshot (every offset
+   * output when it is absent) gives no candidates; nor do its driven points
+   * ([TECH] G19b).
    */
   solvedSnapshot?: SolvedSketchSnapshot | null;
 }): SketchSnapGeometry[] {
+  const acceptedSnapshot = input.solvedSnapshot ?? { solvedEntities: [] };
+  const nonAccepted = nonAcceptedOffsetOutputs(
+    input.definition,
+    acceptedSnapshot,
+  );
+  const nonAcceptedPoints = nonAcceptedOffsetOutputPoints(
+    input.definition,
+    acceptedSnapshot,
+  );
   const solvedEntities = new Map(
     (input.solvedSnapshot?.solvedEntities ?? []).map((record) => [
       record.entityId,
@@ -176,7 +192,11 @@ export function collectSketchSnapGeometries(input: {
     ),
   );
   const localPointGeometries: SketchSnapGeometry[] = input.definition.points
-    .filter((point) => !centerPointIds.has(point.pointId))
+    .filter(
+      (point) =>
+        !centerPointIds.has(point.pointId) &&
+        !nonAcceptedPoints.has(point.pointId),
+    )
     .map((point) => ({
       kind: "point",
       source: {
@@ -188,6 +208,7 @@ export function collectSketchSnapGeometries(input: {
     }));
   const localEntityGeometries = input.definition.entities.flatMap(
     (entity): SketchSnapGeometry[] => {
+      if (nonAccepted.has(entity.entityId)) return [];
       const source: SketchSnapSourceRef = {
         kind: "localEntity",
         entityId: entity.entityId,

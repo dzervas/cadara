@@ -139,6 +139,7 @@ import {
 import type { OccTessellationTierId } from "@/domain/modeling/occ/tessellation";
 import type { OccWorkerSnapshotClient } from "@/domain/modeling/occ/worker-client";
 import { projectSketchExternalReferencesFromSnapshot } from "@/domain/modeling/sketch-reference-projection";
+import { NON_ACCEPTED_OFFSET_FEATURE_INPUT_CODE } from "@/domain/modeling/sketch-feature-input";
 import {
   findDocumentHistoryOrderDependencyViolations,
   getDocumentHistoryOrderEntryKey,
@@ -248,6 +249,7 @@ const OCC_REBUILD_DIAGNOSTIC_CODES = new Set<string>([
   "advanced-feature-unsupported-kernel-case",
   "feature-replay-unsupported",
   "feature-replay-source-unavailable",
+  NON_ACCEPTED_OFFSET_FEATURE_INPUT_CODE,
 ]);
 function assertSupportedModelingRequest(
   request: {

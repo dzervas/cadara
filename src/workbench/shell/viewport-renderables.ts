@@ -1,5 +1,6 @@
 import type { RenderableEntityRecord } from "@/contracts/render/schema";
 import type { SketchSnapshotRecord } from "@/contracts/modeling/schema";
+import { nonAcceptedOffsetOutputs } from "@/contracts/sketch/offset-publication";
 import type { SketchSessionState } from "@/domain/editor/sketch-session";
 import {
   getSketchConstraintDisplayForTarget,
@@ -80,6 +81,8 @@ export function composeViewportRenderables(
       .filter((sketch) => sketch.sketch.derivedValidity.state !== "current")
       .map((sketch) => sketch.sketchId),
   );
+  const nonAcceptedOffsetOutputsById =
+    createCommittedNonAcceptedOffsetOutputLookup(snapshotSketches);
   const layeredRenderables = [
     ...input.snapshotRenderables.map((renderable) => ({
       origin: "document" as const,
@@ -88,6 +91,12 @@ export function composeViewportRenderables(
         renderable,
         sketchConstraintDisplayById,
       ),
+      ...(isCommittedNonAcceptedOffsetOutput(
+        renderable,
+        nonAcceptedOffsetOutputsById,
+      )
+        ? { offsetOutputValidity: "invalid" as const }
+        : {}),
     })),
     ...(input.previewRenderables ?? []).map((renderable) => ({
       origin: "preview" as const,
@@ -97,10 +106,7 @@ export function composeViewportRenderables(
     const target = renderable.binding.target;
     return (
       !isTargetHidden(target, input.hiddenTargetKeys) &&
-      !(
-        target.kind === "region" &&
-        nonCurrentSketchIds.has(target.sketchId)
-      )
+      !(target.kind === "region" && nonCurrentSketchIds.has(target.sketchId))
     );
   });
 
@@ -153,4 +159,33 @@ function getCommittedSketchConstraintDisplay(
   return summary
     ? getSketchConstraintDisplayForTarget(target, summary)
     : undefined;
+}
+
+/** [TECH] G19: the non-accepted offset outputs of each committed sketch. */
+function createCommittedNonAcceptedOffsetOutputLookup(
+  sketches: readonly SketchSnapshotRecord[],
+) {
+  return new Map(
+    sketches.map(
+      (sketch) =>
+        [
+          sketch.sketchId,
+          nonAcceptedOffsetOutputs(
+            sketch.sketch.definition,
+            sketch.sketch.solvedSnapshot,
+          ),
+        ] as const,
+    ),
+  );
+}
+
+function isCommittedNonAcceptedOffsetOutput(
+  renderable: RenderableEntityRecord,
+  lookup: ReturnType<typeof createCommittedNonAcceptedOffsetOutputLookup>,
+) {
+  const target = renderable.binding.target;
+  return (
+    target.kind === "sketchEntity" &&
+    lookup.get(target.sketchId)?.has(target.entityId) === true
+  );
 }

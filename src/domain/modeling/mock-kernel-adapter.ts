@@ -157,6 +157,11 @@ import {
 } from "@/domain/solver/mock-sketch-solver-adapter";
 import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
 import { projectSketchExternalReferencesFromSnapshot } from "@/domain/modeling/sketch-reference-projection";
+import {
+  NON_ACCEPTED_OFFSET_FEATURE_INPUT_CODE,
+  nonAcceptedOffsetFeatureInputMessage,
+  nonAcceptedOffsetFeaturePointMessage,
+} from "@/domain/modeling/sketch-feature-input";
 import { describeFeatureTreeNode } from "@/domain/modeling/feature-description";
 
 const CONTRACT_VERSION = "modeling-contract/v1alpha1" as const;
@@ -1245,6 +1250,42 @@ function findNonCurrentSketchFeatureInput(
   });
 }
 
+/**
+ * [TECH] G19 (T08b-g5c review REQUIRED-1): the first sketch-entity input of
+ * `definition` (profile, axis, path, guide curve, direction or axis
+ * reference) that is a non-accepted offset output, or ([TECH] G19c) the
+ * first sketch-point input (hole location, extent point) that is a driven
+ * point of one, with its targeted message.
+ */
+function findNonAcceptedOffsetFeatureInput(
+  definition: FeatureDefinition,
+  snapshot: WorkspaceSnapshot,
+) {
+  for (const target of getFeatureDefinitionChangedTargets(definition)) {
+    if (target.kind !== "sketchEntity" && target.kind !== "sketchPoint")
+      continue;
+    const sketch = snapshot.document.sketches.find(
+      (entry) => entry.sketchId === target.sketchId,
+    );
+    const use = `an input of ${definition.kind}`;
+    const message = !sketch
+      ? null
+      : target.kind === "sketchEntity"
+        ? nonAcceptedOffsetFeatureInputMessage(
+            sketch.sketch,
+            target.entityId,
+            use,
+          )
+        : nonAcceptedOffsetFeaturePointMessage(
+            sketch.sketch,
+            target.pointId,
+            use,
+          );
+    if (message) return { target, message };
+  }
+  return null;
+}
+
 const HOLE_ADVANCED_FEATURE_DESCRIPTOR = {
   featureKind: "hole",
   participants: [
@@ -1743,6 +1784,26 @@ function validateFeatureDefinitionAgainstSnapshot(
           nonCurrentSketchInput,
           "Features can consume sketch-derived inputs only when their owning sketch has current derived validity.",
         ),
+      ],
+    };
+  }
+
+  const nonAcceptedOffsetInput = findNonAcceptedOffsetFeatureInput(
+    definition,
+    snapshot,
+  );
+  if (nonAcceptedOffsetInput) {
+    return {
+      accepted: false as const,
+      reasonCode: NON_ACCEPTED_OFFSET_FEATURE_INPUT_CODE,
+      diagnostics: [
+        {
+          code: NON_ACCEPTED_OFFSET_FEATURE_INPUT_CODE,
+          severity: "error" as const,
+          message: nonAcceptedOffsetInput.message,
+          target: nonAcceptedOffsetInput.target,
+          detail: null,
+        },
       ],
     };
   }
