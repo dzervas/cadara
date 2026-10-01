@@ -1,3 +1,4 @@
+import type { SketchDerivationSettings } from "@/contracts/sketch/derived-geometry";
 import type {
   DocumentVariableRecord,
   SketchPoint,
@@ -48,6 +49,7 @@ import {
   getTargetKey,
   normalizeConstraintValue,
   rebuildSessionCommitRequest,
+  getSketchSessionDerivationSettings,
 } from "./internals";
 import {
   patchSketchAnnotationEditValue,
@@ -614,12 +616,14 @@ export function solveCommittedConstraintDefinition(
   definition: SketchDefinition,
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
   tolerances: SolverTolerancePolicy,
-  documentVariables: readonly DocumentVariableRecord[] = [],
+  documentVariables: readonly DocumentVariableRecord[],
+  derivation: SketchDerivationSettings,
 ): { definition: SketchDefinition; solvedSnapshot?: SolvedSketchSnapshot } {
   const solved = solveSketchDefinitionCore({
     definition: resolveSketchDefinitionForSolve(definition, documentVariables),
     projectedReferences,
     tolerances,
+    ...derivation,
     partialSolvePolicy: "bestEffort",
   });
   const constraintsSatisfied = solved.solvedSnapshot.constraintStatuses.every(
@@ -634,6 +638,7 @@ export function solveCommittedConstraintDefinition(
     definition: applySolvedSketchToDefinition(
       definition,
       solved.solvedSnapshot,
+      derivation,
     ),
     solvedSnapshot: solved.solvedSnapshot,
   };
@@ -686,6 +691,7 @@ export function commitSketchConstraintAuthoring(
     session.projectedReferences,
     session.solverTolerances,
     session.documentVariables,
+    getSketchSessionDerivationSettings(session),
   );
 
   return withLiveSolveBasis(

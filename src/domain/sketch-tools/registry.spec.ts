@@ -678,6 +678,7 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
         angleRadians: 1e-6,
         minimumSegmentLength: 1e-6,
       },
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     }).solvedSnapshot.solvedEntities.find(
       (entity) => entity.entityId === invalidSpline?.entityId,
@@ -712,6 +713,7 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
         angleRadians: 1e-6,
         minimumSegmentLength: 1e-6,
       },
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     }).solvedSnapshot.solvedEntities.find((entity) => entity.kind === "spline");
     expect(
@@ -810,6 +812,7 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
         angleRadians: 1e-6,
         minimumSegmentLength: 1e-6,
       },
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
     const conicRegions = await regionSolver.deriveSketchRegions({
@@ -957,6 +960,7 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
         angleRadians: 1e-6,
         minimumSegmentLength: 1e-6,
       },
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
     const regions = await regionSolver.deriveSketchRegions({

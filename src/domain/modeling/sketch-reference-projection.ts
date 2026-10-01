@@ -818,6 +818,9 @@ function projectSketchEntityGeometry(input: {
     case "bezierCurve":
     case "profileText":
       return null;
+    // A derived offset shell is never projected (T08b plan §2.6).
+    case "derivedPiecewiseCubic":
+      return null;
   }
 }
 

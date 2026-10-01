@@ -1701,6 +1701,7 @@ describe("region arrangement owner: exact overlaps and U6 identity", () => {
         angleRadians: 1e-4,
         minimumSegmentLength: FIXTURE_TOLERANCE,
       },
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
     expect(solved.status.solveState).not.toBe("solved");
@@ -2560,6 +2561,7 @@ function createNativeArcAuthoring(sketchId: string): NativeArcAuthoring {
         side: distance >= 0 ? "left" : "right",
         sequence,
         factories: factoriesOf(sequence),
+        modelingTolerance: 1e-3,
       } as never);
       return result.valid && result.contribution
         ? (result.contribution as never)

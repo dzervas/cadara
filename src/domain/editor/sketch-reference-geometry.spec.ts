@@ -30,7 +30,7 @@ import {
 test("src/domain/editor/sketch-reference-geometry.spec.ts", () => {
   function createDefinition(): SketchDefinition {
     return {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: ["sketch_point_a", "sketch_point_b"],
@@ -90,6 +90,7 @@ test("src/domain/editor/sketch-reference-geometry.spec.ts", () => {
         angleRadians: 1e-6,
         minimumSegmentLength: 1e-6,
       },
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
 
@@ -169,6 +170,7 @@ test("src/domain/editor/sketch-reference-geometry.spec.ts", () => {
         angleRadians: 1e-6,
         minimumSegmentLength: 1e-6,
       },
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
     const session = createSketchSessionFromSnapshot(
@@ -244,6 +246,7 @@ test("src/domain/editor/sketch-reference-geometry.spec.ts", () => {
         angleRadians: 1e-6,
         minimumSegmentLength: 1e-6,
       },
+      modelingTolerance: 1e-3,
     });
 
     expect(
@@ -277,6 +280,7 @@ test("src/domain/editor/sketch-reference-geometry.spec.ts", () => {
         angleRadians: 1e-6,
         minimumSegmentLength: 1e-6,
       },
+      modelingTolerance: 1e-3,
     });
 
     expect(

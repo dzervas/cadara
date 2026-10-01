@@ -2283,6 +2283,8 @@ describe("declared multi-piece tube stability (L1b, bounded helper, not live)", 
       commitTool(...edit),
       [],
       SKETCH_DIRECT_EDIT_TOLERANCES,
+      [],
+      { modelingTolerance: 1e-3 },
     );
     if (!solved.solvedSnapshot)
       throw new Error(`${edit[1]} edit was not solver-accepted`);
@@ -2691,6 +2693,8 @@ describe("declared multi-piece tube stability (L1b, bounded helper, not live)", 
       ),
       [],
       SKETCH_DIRECT_EDIT_TOLERANCES,
+      [],
+      { modelingTolerance: 1e-3 },
     );
     if (!solved.solvedSnapshot) throw new Error("not accepted in place");
     const pair = solved as AcceptedPair;
@@ -2764,6 +2768,7 @@ describe("declared multi-piece tube stability (L1b, bounded helper, not live)", 
       const solved = solveSketchDefinitionCore({
         definition,
         tolerances: { ...SKETCH_DIRECT_EDIT_TOLERANCES, coincidence },
+        modelingTolerance: 1e-3,
         partialSolvePolicy: "bestEffort",
       });
       // N3b: with every requirement within the document tolerance the solver
@@ -2790,7 +2795,9 @@ describe("declared multi-piece tube stability (L1b, bounded helper, not live)", 
         snapshot.diagnostics.some((item) => item.severity === "error"),
       ).toBe(false);
       const pair = {
-        definition: applySolvedSketchToDefinition(definition, snapshot),
+        definition: applySolvedSketchToDefinition(definition, snapshot, {
+          modelingTolerance: 1e-3,
+        }),
         solvedSnapshot: snapshot,
       };
       expect(
@@ -2871,6 +2878,8 @@ describe("declared multi-piece tube stability (L1b, bounded helper, not live)", 
         rejectedDefinition,
         [],
         SKETCH_DIRECT_EDIT_TOLERANCES,
+        [],
+        { modelingTolerance: 1e-3 },
       ).solvedSnapshot,
     ).toBeUndefined();
     expectAdapterRejects(
@@ -3007,6 +3016,8 @@ describe("declared multi-piece tube stability (L1b, bounded helper, not live)", 
       },
       [],
       SKETCH_DIRECT_EDIT_TOLERANCES,
+      [],
+      { modelingTolerance: 1e-3 },
     );
     if (!authored.solvedSnapshot) throw new Error("authored tangent rejected");
     const pair = authored as AcceptedPair;
@@ -3051,6 +3062,8 @@ describe("declared multi-piece tube stability (L1b, bounded helper, not live)", 
       },
       [],
       SKETCH_DIRECT_EDIT_TOLERANCES,
+      [],
+      { modelingTolerance: 1e-3 },
     );
     if (!without.solvedSnapshot) throw new Error("re-solve rejected");
     expectAdapterRejects(
@@ -3914,6 +3927,8 @@ describe("T08b-b S2: native spline→spline graph trims under R_C′ (terminal l
       definition,
       [],
       SKETCH_DIRECT_EDIT_TOLERANCES,
+      [],
+      { modelingTolerance: 1e-3 },
     );
     if (!solved.solvedSnapshot) throw new Error("not accepted in place");
     const pair = solved as AcceptedPair;
@@ -4781,6 +4796,8 @@ describe("T08b-d SEL: declared vertices, adoption, U1 absorption", () => {
       definition,
       [],
       SKETCH_DIRECT_EDIT_TOLERANCES,
+      [],
+      { modelingTolerance: 1e-3 },
     );
     if (!solved.solvedSnapshot) throw new Error("not accepted in place");
     return solved as AcceptedPair;
@@ -7659,6 +7676,7 @@ function createNativeArcAuthoring(sketchId: string): NativeArcAuthoring {
         side: distance >= 0 ? "left" : "right",
         sequence,
         factories: factoriesOf(sequence),
+        modelingTolerance: 1e-3,
       } as never);
       return result.valid && result.contribution
         ? (result.contribution as never)

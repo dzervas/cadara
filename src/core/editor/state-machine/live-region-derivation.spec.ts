@@ -4,6 +4,9 @@ import { defaultSelectionFilter } from "@/core/editor/schema";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
 import type { ConstraintId } from "@/contracts/shared/ids";
 import {
+  beginSketchTool,
+  patchSketchEditToolValue,
+  selectSketchEditToolTarget,
   getSketchSessionDerivedValidity,
   getSketchSessionDisplayRenderables,
   getSketchSessionPreviewLabel,
@@ -16,7 +19,10 @@ import {
 import { openSketchSessionFromSelection } from "@/domain/editor/sketch-session-controller";
 import { getFirstSketchStyleTarget } from "@/domain/editor/sketch-session/styles";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
-import { emitPendingSketchRegionDerivation } from "./effect-emitters";
+import {
+  emitPendingSketchOffsetPreviewPublication,
+  emitPendingSketchRegionDerivation,
+} from "./effect-emitters";
 import { transitionEditorState } from "./reducer-root";
 import { initialEditorState } from "./state-creators";
 import type { EditorEffect, EditorEvent, SketchEditorState } from "./types";
@@ -108,6 +114,7 @@ function derivedEvent(
     generation: effect.generation,
     regions,
     diagnostics: [],
+    offsetPublications: [],
   };
 }
 
@@ -458,4 +465,156 @@ test("style patches and label moves keep live regions; fill targets require curr
     getFirstSketchStyleTarget(pending, [regionTarget], "fill"),
     "Pending (stale) live regions are not fill targets.",
   ).toBe(null);
+});
+
+test("T08b-g5 supersession: with a superseding runtime a newer generation is emitted while one is in flight, and the older result and cancellation are dropped", async () => {
+  const { sketch, state } = await makeSketchState();
+  const first = transitionEditorState(
+    withSession(
+      state,
+      withLiveSolveBasis(state.session, state.session.definition),
+    ),
+    { type: "document.refreshRequested" },
+  );
+  const firstEffect = onlyDeriveEffect(first.effects);
+  const inFlight = first.state as SketchEditorState;
+  const edited = withSession(
+    inFlight,
+    withLiveSolveBasis(inFlight.session, inFlight.session.definition),
+  );
+  expect(
+    emitPendingSketchRegionDerivation({ state: edited, effects: [] }).effects,
+    "Without the capability (no terminable worker) one request stays in flight.",
+  ).toEqual([]);
+
+  const superseding = emitPendingSketchRegionDerivation(
+    { state: edited, effects: [] },
+    { supersede: true },
+  );
+  const secondEffect = onlyDeriveEffect(superseding.effects);
+  const replaced = superseding.state as SketchEditorState;
+  expect(secondEffect.generation).toBe(edited.session.liveRegions.generation);
+  expect(secondEffect.requestId).not.toBe(firstEffect.requestId);
+  expect(
+    replaced.pendingRegionRequest,
+    "The newer request replaces the pending slot.",
+  ).toEqual({
+    requestId: secondEffect.requestId,
+    generation: secondEffect.generation,
+  });
+  expect(
+    emitPendingSketchRegionDerivation(
+      { state: replaced, effects: [] },
+      { supersede: true },
+    ).effects,
+    "The latest generation is emitted once.",
+  ).toEqual([]);
+
+  const published = structuredClone(sketch.sketch.regions);
+  expect(
+    transitionEditorState(replaced, derivedEvent(firstEffect, published)).state,
+    "The superseded request's result is dropped.",
+  ).toBe(replaced);
+  expect(
+    transitionEditorState(replaced, {
+      type: "effect.sketchRegionDerivationFailed",
+      requestId: firstEffect.requestId,
+      documentId: firstEffect.documentId,
+      commandSessionId: firstEffect.commandSessionId,
+      baseRevisionId: firstEffect.baseRevisionId,
+      generation: firstEffect.generation,
+      message: "Sketch region derivation was superseded.",
+    }).state,
+    "The superseded request's cancellation is dropped, never a visible failure.",
+  ).toBe(replaced);
+  const applied = transitionEditorState(
+    replaced,
+    derivedEvent(secondEffect, published),
+  ).state as SketchEditorState;
+  expect(applied.session.liveRegions.status).toBe("current");
+});
+
+test("T08b-g5 supersession (U-A): no emission during a drag even with a superseding runtime", async () => {
+  const { state } = await makeSketchState();
+  const first = transitionEditorState(
+    withSession(
+      state,
+      withLiveSolveBasis(state.session, state.session.definition),
+    ),
+    { type: "document.refreshRequested" },
+  );
+  const inFlight = first.state as SketchEditorState;
+  const dragging = withSession(inFlight, {
+    ...withLiveSolveBasis(inFlight.session, inFlight.session.definition),
+    activeDrag: {
+      target: state.session.definition.points[0]!.target,
+      startPoint: [0, 0],
+      currentPoint: [1, 0],
+      status: "dragging",
+      message: null,
+      interactiveSolveSession: null,
+    },
+  });
+  expect(
+    emitPendingSketchRegionDerivation(
+      { state: dragging, effects: [] },
+      { supersede: true },
+    ).effects,
+  ).toEqual([]);
+});
+
+test("T08b-g5 U-G3: a staged offset preview emits one background publication; its certified result is applied, a stale one dropped", async () => {
+  const { state } = await makeSketchState();
+  const line = state.session.definition.entities.find(
+    (entity) => entity.kind === "lineSegment",
+  )!;
+  let session = beginSketchTool(state.session, "offset");
+  session = selectSketchEditToolTarget(session, line.target);
+  session = patchSketchEditToolValue(session, { value: 0.5 });
+  const publication = session.activeEditTool?.offsetPublication;
+  expect(publication?.status).toBe("pending");
+  const staged = withSession(state, session);
+
+  const emitted = emitPendingSketchOffsetPreviewPublication({
+    state: staged,
+    effects: [],
+  });
+  const effects = emitted.effects.filter(
+    (effect) => effect.type === "sketch.publishOffsetPreview",
+  );
+  expect(effects).toHaveLength(1);
+  const effect = effects[0]!;
+  if (effect.type !== "sketch.publishOffsetPreview") throw new Error("effect");
+  expect(effect).toMatchObject({
+    background: true,
+    derivationId: publication!.derivationId,
+    basis: publication!.basis,
+  });
+  expect(
+    emitPendingSketchOffsetPreviewPublication(emitted).effects,
+    "Idempotent: one request per staged preview.",
+  ).toHaveLength(1);
+
+  const inFlight = emitted.state as SketchEditorState;
+  const published = (requestId: string): EditorEvent => ({
+    type: "effect.sketchOffsetPreviewPublished",
+    requestId: requestId as never,
+    documentId: effect.documentId,
+    commandSessionId: effect.commandSessionId,
+    baseRevisionId: effect.baseRevisionId,
+    derivationId: effect.derivationId,
+    offsetPublications: [
+      { derivationId: effect.derivationId, status: "certified" },
+    ],
+  });
+  expect(
+    transitionEditorState(inFlight, published("request_stale-1")).state,
+    "A result for another request is dropped.",
+  ).toBe(inFlight);
+  const applied = transitionEditorState(inFlight, published(effect.requestId))
+    .state as SketchEditorState;
+  expect(applied.pendingOffsetPreviewRequest).toBe(null);
+  expect(applied.session.activeEditTool?.offsetPublication?.status).toBe(
+    "certified",
+  );
 });

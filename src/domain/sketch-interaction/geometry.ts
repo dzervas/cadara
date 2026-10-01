@@ -358,6 +358,9 @@ function createLocalEntityInteractionGeometry(
           )
         : null;
     }
+    // T08b-g5b: derived offset shells are not drawn/consumed here yet.
+    case "derivedPiecewiseCubic":
+      return null;
   }
 }
 

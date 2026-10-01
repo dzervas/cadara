@@ -48,7 +48,7 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
 
   function createDraftSketchDefinition(sketchId: `sketch_${string}`) {
     return {
-      schemaVersion: "sketch-definition/v1alpha1" as const,
+      schemaVersion: "sketch-definition/v1alpha2" as const,
       referenceIds: [],
       references: [],
       pointIds: [
@@ -236,6 +236,7 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
         angleRadians: 1e-6,
         minimumSegmentLength: 1e-6,
       },
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
     });
     const regions = (await regionSolver.deriveSketchRegions({
@@ -555,6 +556,7 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
             angleRadians: 1e-6,
             minimumSegmentLength: 1e-6,
           },
+          modelingTolerance: 1e-3,
           partialSolvePolicy: "failOnConflict",
         }).solvedSnapshot;
         const regions = (await regionSolver.deriveSketchRegions({

@@ -208,6 +208,7 @@ async function deriveFixtureRegionId(
       angleRadians: 1e-6,
       minimumSegmentLength: 1e-6,
     },
+    modelingTolerance: 1e-3,
     partialSolvePolicy: "bestEffort",
   });
   const region = (

@@ -1,4 +1,7 @@
-import { SketchRegionDerivationWorkerPool } from "@/domain/modeling/occ/sketch-derivation-worker-client";
+import {
+  SKETCH_REGION_DERIVATION_MINIMUM_SUPERSEDE_AGE_MS,
+  SketchRegionDerivationWorkerPool,
+} from "@/domain/modeling/occ/sketch-derivation-worker-client";
 import { canUseOccModuleWorker } from "@/domain/modeling/occ/worker-runtime";
 
 let browserSketchRegionDerivation: SketchRegionDerivationWorkerPool | null =
@@ -16,6 +19,7 @@ export function getBrowserSketchRegionDerivation() {
         new Worker(new URL("./sketch-derivation.worker.ts", import.meta.url), {
           type: "module",
         }),
+      minimumSupersedeAgeMs: SKETCH_REGION_DERIVATION_MINIMUM_SUPERSEDE_AGE_MS,
     });
   }
   return browserSketchRegionDerivation;

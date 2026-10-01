@@ -18,7 +18,7 @@ import {
 
 test("src/domain/editor/sketch-session-style.spec.ts", () => {
   const definition = {
-    schemaVersion: "sketch-definition/v1alpha1",
+    schemaVersion: "sketch-definition/v1alpha2",
     referenceIds: [],
     references: [],
     pointIds: ["sketch_point_a", "sketch_point_b"],
@@ -108,6 +108,7 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
       angleRadians: 1e-6,
       minimumSegmentLength: 1e-6,
     },
+    modelingTolerance: 1e-3,
     partialSolvePolicy: "bestEffort",
   });
   const plane = createStandardPlaneDefinition("xy");
@@ -230,6 +231,7 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
       angleRadians: 1e-6,
       minimumSegmentLength: 1e-6,
     },
+    modelingTolerance: 1e-3,
     partialSolvePolicy: "bestEffort",
   });
   const localSession = createSketchSessionFromSnapshot(
@@ -350,6 +352,7 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
       angleRadians: 1e-6,
       minimumSegmentLength: 1e-6,
     },
+    modelingTolerance: 1e-3,
     partialSolvePolicy: "bestEffort",
   });
   const regionSession = {
@@ -465,6 +468,7 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
       angleRadians: 1e-6,
       minimumSegmentLength: 1e-6,
     },
+    modelingTolerance: 1e-3,
     partialSolvePolicy: "bestEffort",
   });
   const disabledStrokeSession = createSketchSessionFromSnapshot(
@@ -525,6 +529,7 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
       angleRadians: 1e-6,
       minimumSegmentLength: 1e-6,
     },
+    modelingTolerance: 1e-3,
     partialSolvePolicy: "bestEffort",
   });
   const pointStyledSession = createSketchSessionFromSnapshot(
@@ -610,7 +615,7 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
     ],
   } as SketchDefinition;
   const unsatisfiedSnapshot: SolvedSketchSnapshot = {
-    schemaVersion: "solved-sketch/v1alpha1",
+    schemaVersion: "solved-sketch/v1alpha2",
     status: {
       solveState: "partiallySolved",
       constraintState: "underConstrained",

@@ -12,6 +12,11 @@ import type {
   SketchPointId,
 } from "@/contracts/shared/ids";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
+import {
+  evaluateSketchDerivationJvp,
+  evaluateSketchDerivations,
+  prepareSketchDerivationPullback,
+} from "@/contracts/sketch/derived-geometry";
 import type { SketchConstraintToolId } from "@/core/sketch-constraints/definition";
 import {
   getSketchConstraintDefinition,
@@ -334,6 +339,7 @@ function createNativeArcAuthoring(sketchId: string): NativeArcAuthoring {
         side: distance >= 0 ? "left" : "right",
         sequence,
         factories: factoriesOf(sequence),
+        modelingTolerance: 1e-3,
       } as never);
       return result.valid && result.contribution
         ? (result.contribution as never)
@@ -1906,6 +1912,8 @@ function gappedSs60Row(distance: number): DerivativeRow {
     definition,
     [],
     SKETCH_DIRECT_EDIT_TOLERANCES,
+    [],
+    { modelingTolerance: 1e-3 },
   );
   if (!solved.solvedSnapshot)
     throw new Error("gapped SS-60 was not solver-accepted");
@@ -2104,6 +2112,42 @@ describe("T08b-g2 frame derivatives: adjoint identity ⟨Jv, w⟩ = ⟨v, Jᵀw�
   });
 });
 
+describe("review R3: frames carry no source-basis directions", () => {
+  test.each([
+    "S1 0.01",
+    "SL-90 0.01",
+    "arch → 2-point spline (C φ=0.005 turn) → line (absorbed vertex + F1 arc at the one-span spline adopter's other end) -0.01",
+  ])(
+    "%s: a frame solved with the source basis is bitwise the frame without it, `cubics` included",
+    (label) => {
+      const row = derivativeRow(label);
+      const input = {
+        relationship: relationshipOf(row.seeds, row.distance),
+        definition: row.pair.definition,
+        modelingTolerance: TOLERANCE,
+      };
+      const plain = solvedFrame(solveOffsetFrame(input));
+      const based = solvedFrame(
+        solveOffsetFrame({ ...input, withSourceBasis: true }),
+      );
+      expect(plain.cubics.size, "premise: a spline piece").toBeGreaterThan(0);
+      const flat = (frame: OffsetSolveFrame) => ({
+        ...frame,
+        cubics: [...frame.cubics],
+        lineArcEndpoints: [...frame.lineArcEndpoints],
+      });
+      expect(encode([...based.cubics])).toBe(encode([...plain.cubics]));
+      expect(encode(flat(based))).toBe(encode(flat(plain)));
+      // The basis is still on the frame's own owner calls (kept beside it).
+      const derivatives = prepareOffsetFrameDerivatives(input, based);
+      jvpOf(
+        derivatives.jvp([randomVariation(derivatives.sourceDofs, prng(11))])[0],
+      );
+    },
+    60_000,
+  );
+});
+
 describe("T08b-g2 frame derivatives: unavailable directions, tangent authority, d math A3", () => {
   test("a singular joint (fabricated: a vertical half-disc diameter trim moved to the circle's tangency angle θ = 0, not owner-reachable) is derivativeUnavailable in every direction and in the pullback", () => {
     const a = arcHarness.arc(arcHarness.empty(), [0, 0], [0, -1], [0, 1]);
@@ -2151,6 +2195,66 @@ describe("T08b-g2 frame derivatives: unavailable directions, tangent authority, 
         lineArcEndpoints: new Map([[diameter.id, { start: [1, 0] as const }]]),
       }),
     ).toMatchObject({ ok: false, code: codes.derivativeUnavailable });
+  });
+
+  test("review A4: a singular frame derivative is reported by the derivation JVP and pullback, never silent zero motion", () => {
+    const a = arcHarness.arc(arcHarness.empty(), [0, 0], [0, -1], [0, 1]);
+    const diameter = arcHarness.line(a.definition, [0, 1], [0, -1], {
+      start: a.end,
+      end: a.start,
+    });
+    const { pair } = arcHarness.adapt(
+      { definition: diameter.definition, seeds: [a.id, diameter.id] },
+      0.1,
+    );
+    const evaluation = evaluateSketchDerivations({
+      definition: pair.definition,
+      modelingTolerance: TOLERANCE,
+    });
+    const record = evaluation.offsetFrames[0]!;
+    expect(record.frame.trims, "premise: two trims").toHaveLength(2);
+    const arcIndex = record.frame.pieces.findIndex(
+      (piece) => piece.kind === "arc",
+    );
+    // The same fabricated singular joint as the frame-level row above.
+    const fabricated = {
+      ...evaluation,
+      offsetFrames: [
+        {
+          ...record,
+          frame: {
+            ...record.frame,
+            trims: record.frame.trims.map((trim, index) =>
+              index !== 0
+                ? trim
+                : trim.jointIndex === arcIndex
+                  ? { ...trim, first: { ...trim.first, parameter: 0 } }
+                  : { ...trim, second: { ...trim.second, parameter: 0 } },
+            ),
+          },
+        },
+      ],
+    };
+    const variation = {
+      points: { [pair.definition.points[0]!.pointId]: [1, 0] as const },
+    };
+    const [outputPointId] = [...record.outputs.points][0]!;
+    const cotangent = { points: { [outputPointId]: [1, 0] as const } };
+    expect(
+      evaluateSketchDerivationJvp(evaluation, variation).derivativeUnavailable,
+      "control: the native frame's derivative is available",
+    ).toBeUndefined();
+    expect(
+      prepareSketchDerivationPullback(evaluation)(cotangent)
+        .derivativeUnavailable,
+    ).toBeUndefined();
+    expect(
+      evaluateSketchDerivationJvp(fabricated, variation).derivativeUnavailable,
+    ).toEqual([record.derivationId]);
+    expect(
+      prepareSketchDerivationPullback(fabricated)(cotangent)
+        .derivativeUnavailable,
+    ).toEqual([record.derivationId]);
   });
 
   test("a non-finite direction is unavailable alone; the batch's other directions are bitwise unchanged", () => {

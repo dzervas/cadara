@@ -201,7 +201,7 @@ function makeLineAngleDimension(
 
 function makeDefinition(parts: MutableSketchDefinitionParts): SketchDefinition {
   return {
-    schemaVersion: "sketch-definition/v1alpha1",
+    schemaVersion: "sketch-definition/v1alpha2",
     referenceIds: [],
     references: [],
     pointIds: parts.points.map((point) => point.pointId),
@@ -815,6 +815,8 @@ export async function evaluateSketchSolverBenchmarkFixture(
   const solved = solveSketchDefinitionCore({
     definition,
     tolerances: SKETCH_SOLVER_BENCHMARK_TOLERANCES,
+    // The benchmark document's modeling tolerance is its coincidence tolerance.
+    modelingTolerance: SKETCH_SOLVER_BENCHMARK_TOLERANCES.coincidence,
     partialSolvePolicy: "bestEffort",
   });
   const fullSolveMs = performance.now() - fullSolveStartedAt;
@@ -839,6 +841,8 @@ export async function evaluateSketchSolverBenchmarkFixture(
   const program = compileSketchSolveProgram({
     definition,
     tolerances: SKETCH_SOLVER_BENCHMARK_TOLERANCES,
+    // The benchmark document's modeling tolerance is its coincidence tolerance.
+    modelingTolerance: SKETCH_SOLVER_BENCHMARK_TOLERANCES.coincidence,
     partialSolvePolicy: "bestEffort",
   });
   const session = createCompiledSketchSolveSession({

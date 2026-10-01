@@ -105,7 +105,9 @@ import { SOLVED_SKETCH_SCHEMA_VERSION } from "@/contracts/sketch/schema";
 import {
   deriveSketchValidity,
   mergeSketchSolveDiagnostics,
+  withRelationshipScopedDiagnostics,
 } from "@/contracts/sketch/derived-validity";
+import { solveAndDeriveSketchWithOffsets } from "@/domain/solver/offset-publication-round";
 import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
 import {
   applyOccFeatureToAuthoringState,
@@ -2323,34 +2325,39 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       sketchId,
       plane: sketch.plane.frame,
       tolerances,
-      definition: resolvedDefinition.definition,
-      projectedReferences: projection.projectedReferences,
-    });
-    const solved = await solverAdapter.solveSketch({
-      contractVersion: CONTRACT_VERSION,
-      solverSchemaVersion: SOLVER_SCHEMA_VERSION,
-      requestId: correlation.solveRequestId,
-      documentId: document.documentId,
-      revisionId: document.revisionId,
-      sketchId,
-      plane: sketch.plane.frame,
-      tolerances,
-      partialSolvePolicy: "bestEffort",
-      definition: resolvedDefinition.definition,
-      projectedReferences: projection.projectedReferences,
-    });
-    const regions = await solverAdapter.deriveSketchRegions({
-      contractVersion: CONTRACT_VERSION,
-      solverSchemaVersion: SOLVER_SCHEMA_VERSION,
-      requestId: correlation.regionRequestId,
-      documentId: document.documentId,
-      revisionId: document.revisionId,
-      sketchId,
-      solvedSnapshot: solved.solvedSnapshot,
-      definition: resolvedDefinition.definition,
-      projectedReferences: projection.projectedReferences,
       modelingTolerance: document.settings.modelingTolerance,
+      definition: resolvedDefinition.definition,
+      projectedReferences: projection.projectedReferences,
     });
+    const { solved, regions, offsetDiagnostics } =
+      await solveAndDeriveSketchWithOffsets(
+        solverAdapter,
+        {
+          contractVersion: CONTRACT_VERSION,
+          solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+          requestId: correlation.solveRequestId,
+          documentId: document.documentId,
+          revisionId: document.revisionId,
+          sketchId,
+          plane: sketch.plane.frame,
+          tolerances,
+          modelingTolerance: document.settings.modelingTolerance,
+          partialSolvePolicy: "bestEffort",
+          definition: resolvedDefinition.definition,
+          projectedReferences: projection.projectedReferences,
+        },
+        {
+          contractVersion: CONTRACT_VERSION,
+          solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+          requestId: correlation.regionRequestId,
+          documentId: document.documentId,
+          revisionId: document.revisionId,
+          sketchId,
+          definition: resolvedDefinition.definition,
+          projectedReferences: projection.projectedReferences,
+          modelingTolerance: document.settings.modelingTolerance,
+        },
+      );
 
     const derivedDiagnostics = mergeSketchSolveDiagnostics(
       projection.diagnostics,
@@ -2358,11 +2365,15 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       solved.diagnostics,
       regions.diagnostics,
     );
-    const derivedValidity = createDerivedValidity({
+    const sketchValidity = createDerivedValidity({
       solvedSnapshot: solved.solvedSnapshot,
       diagnostics: derivedDiagnostics,
       validationIsValid: validation.isValid,
     });
+    const derivedValidity = withRelationshipScopedDiagnostics(
+      sketchValidity,
+      offsetDiagnostics,
+    );
 
     return buildSketchSnapshotRecord(
       {
@@ -4106,6 +4117,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     let derivedRegions: RegionRecord[] = [];
     let validationIsValid = false;
     let sketchDiagnostics: SketchSolveDiagnostic[];
+    let offsetDiagnostics: SketchSolveDiagnostic[] = [];
 
     if (!resolvedDefinition.ok) {
       sketchDiagnostics = resolvedDefinition.diagnostics.map(
@@ -4138,34 +4150,40 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         sketchId,
         plane: request.plane.frame,
         tolerances,
-        definition: solverDefinition,
-        projectedReferences,
-      });
-      const solved = await solverAdapter.solveSketch({
-        contractVersion: CONTRACT_VERSION,
-        solverSchemaVersion: SOLVER_SCHEMA_VERSION,
-        requestId: correlation.solveRequestId,
-        documentId: this.documentId,
-        revisionId: request.baseRevisionId,
-        sketchId,
-        plane: request.plane.frame,
-        tolerances,
-        partialSolvePolicy: "bestEffort",
-        definition: solverDefinition,
-        projectedReferences,
-      });
-      const regions = await solverAdapter.deriveSketchRegions({
-        contractVersion: CONTRACT_VERSION,
-        solverSchemaVersion: SOLVER_SCHEMA_VERSION,
-        requestId: correlation.regionRequestId,
-        documentId: this.documentId,
-        revisionId: request.baseRevisionId,
-        sketchId,
-        solvedSnapshot: solved.solvedSnapshot,
-        definition: solverDefinition,
-        projectedReferences,
         modelingTolerance: runtimeState.authoringState.modelingTolerance,
+        definition: solverDefinition,
+        projectedReferences,
       });
+      const round = await solveAndDeriveSketchWithOffsets(
+        solverAdapter,
+        {
+          contractVersion: CONTRACT_VERSION,
+          solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+          requestId: correlation.solveRequestId,
+          documentId: this.documentId,
+          revisionId: request.baseRevisionId,
+          sketchId,
+          plane: request.plane.frame,
+          tolerances,
+          modelingTolerance: runtimeState.authoringState.modelingTolerance,
+          partialSolvePolicy: "bestEffort",
+          definition: solverDefinition,
+          projectedReferences,
+        },
+        {
+          contractVersion: CONTRACT_VERSION,
+          solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+          requestId: correlation.regionRequestId,
+          documentId: this.documentId,
+          revisionId: request.baseRevisionId,
+          sketchId,
+          definition: solverDefinition,
+          projectedReferences,
+          modelingTolerance: runtimeState.authoringState.modelingTolerance,
+        },
+      );
+      const { solved, regions } = round;
+      offsetDiagnostics = round.offsetDiagnostics;
       validationIsValid = validation.isValid;
       solvedSnapshot = solved.solvedSnapshot;
       derivedRegions = regions.regions;
@@ -4177,15 +4195,20 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       );
     }
 
-    const derivedValidity = createDerivedValidity({
+    const sketchValidity = createDerivedValidity({
       solvedSnapshot,
       diagnostics: sketchDiagnostics,
       validationIsValid,
     });
     solvedSnapshot = {
       ...solvedSnapshot,
-      diagnostics: derivedValidity.diagnostics,
+      diagnostics: sketchValidity.diagnostics,
     };
+    // [TECH] G16: relationship-scoped, never in the solved snapshot.
+    const derivedValidity = withRelationshipScopedDiagnostics(
+      sketchValidity,
+      offsetDiagnostics,
+    );
     const solverDiagnostics = derivedValidity.diagnostics.map((diagnostic) =>
       mapSketchSolverDiagnostic(sketchId, diagnostic),
     );

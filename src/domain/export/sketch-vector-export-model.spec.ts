@@ -109,7 +109,7 @@ function createSketchSnapshot(
   solvedSnapshot = createSolvedSnapshot(),
 ): SketchSnapshotRecord {
   const definition: SketchDefinition = {
-    schemaVersion: "sketch-definition/v1alpha1",
+    schemaVersion: "sketch-definition/v1alpha2",
     referenceIds: [],
     references: [],
     pointIds: [
@@ -235,7 +235,7 @@ function createSketchSnapshot(
 
 function createSolvedRectangleSnapshot(): SolvedSketchSnapshot {
   return {
-    schemaVersion: "solved-sketch/v1alpha1",
+    schemaVersion: "solved-sketch/v1alpha2",
     status: { solveState: "solved", constraintState: "wellConstrained" },
     solvedPoints: [
       { pointId: "point_a", solvedPosition: [0, 0] },
@@ -328,7 +328,7 @@ function makeLine(
 
 function createSolvedSnapshot(): SolvedSketchSnapshot {
   return {
-    schemaVersion: "solved-sketch/v1alpha1",
+    schemaVersion: "solved-sketch/v1alpha2",
     status: { solveState: "notEvaluated", constraintState: "unknown" },
     solvedEntities: [],
     solvedPoints: [],

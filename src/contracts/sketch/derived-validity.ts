@@ -46,6 +46,26 @@ export function deriveSketchValidity(input: {
   return { state: invalid ? "invalid" : "current", diagnostics };
 }
 
+/**
+ * [TECH] G5/G16: adds relationship-scoped offset publication diagnostics to a
+ * sketch's validity for display. They never change its state: a failing
+ * offset relationship makes only its own outputs non-consumable.
+ */
+export function withRelationshipScopedDiagnostics(
+  validity: SketchDerivedValidity,
+  diagnostics: readonly SketchSolveDiagnostic[],
+): SketchDerivedValidity {
+  return diagnostics.length === 0
+    ? validity
+    : {
+        ...validity,
+        diagnostics: mergeSketchSolveDiagnostics(
+          validity.diagnostics,
+          diagnostics,
+        ),
+      };
+}
+
 export function getConsumableSketchRegions(
   sketch: Pick<SketchRecord, "derivedValidity" | "regions">,
 ): readonly RegionRecord[] {

@@ -11,7 +11,7 @@ test("curved inner loops exclude their material void without boundary point ids"
   const point = (name: string) => `sketch_point_${name}` as SketchPointId;
   const entity = (name: string) => `sketch_entity_${name}` as SketchEntityId;
   const definition: SketchDefinition = {
-    schemaVersion: "sketch-definition/v1alpha1",
+    schemaVersion: "sketch-definition/v1alpha2",
     referenceIds: [],
     references: [],
     pointIds: [point("bl"), point("br"), point("tr"), point("tl"), point("center")],

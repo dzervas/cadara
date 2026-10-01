@@ -80,7 +80,7 @@ test("src/contracts/sketch/solver-drag-minimum-motion.spec.ts", () => {
       },
     ];
     return {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: ["sq_a", "sq_b", "sq_c", "sq_d"],
@@ -128,7 +128,7 @@ test("src/contracts/sketch/solver-drag-minimum-motion.spec.ts", () => {
   // slide along the x-axis (one remaining degree of freedom).
   function horizontalSliderDefinition(): SketchDefinition {
     return {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: ["sl_a", "sl_b"],
@@ -214,6 +214,7 @@ test("src/contracts/sketch/solver-drag-minimum-motion.spec.ts", () => {
         definition,
         dragTarget: { kind: "sketchPoint", pointId: "sq_b", position: cursor },
         tolerances,
+        modelingTolerance: 1e-3,
         partialSolvePolicy: "failOnConflict",
         targetTolerance: 1e-4,
       });
@@ -234,6 +235,7 @@ test("src/contracts/sketch/solver-drag-minimum-motion.spec.ts", () => {
     const program = compileSketchSolveProgram({
       definition: freeSquareDefinition(),
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
     });
     const session = createCompiledSketchSolveSession({
@@ -276,6 +278,7 @@ test("src/contracts/sketch/solver-drag-minimum-motion.spec.ts", () => {
       definition: horizontalSliderDefinition(),
       dragTarget: { kind: "sketchPoint", pointId: "sl_b", position: [5, 4] },
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
       targetTolerance: 1e-4,
     });
@@ -306,6 +309,7 @@ test("src/contracts/sketch/solver-drag-minimum-motion.spec.ts", () => {
       definition,
       dragTarget: { kind: "sketchPoint", pointId: "sq_b", position: [6, 5] },
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
       targetTolerance: 1e-4,
     });
@@ -333,6 +337,7 @@ test("src/contracts/sketch/solver-drag-minimum-motion.spec.ts", () => {
     const sliderProgram = compileSketchSolveProgram({
       definition: horizontalSliderDefinition(),
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
     });
     const sliderSession = createCompiledSketchSolveSession({
@@ -351,6 +356,7 @@ test("src/contracts/sketch/solver-drag-minimum-motion.spec.ts", () => {
     const squareProgram = compileSketchSolveProgram({
       definition: freeSquareDefinition(),
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
     });
     const squareSession = createCompiledSketchSolveSession({

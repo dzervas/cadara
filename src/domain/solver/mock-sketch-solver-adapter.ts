@@ -50,10 +50,23 @@ import {
   type SketchEntityDefinition,
   type SketchPoint2D,
   type SketchSolveDiagnostic,
+  type SolvedSketchDerivedCubicSpan,
   type SolvedSketchEntityGeometryRecord,
   type SolvedSketchSnapshot,
   type SolvedSketchStatus,
 } from "@/contracts/sketch/schema";
+import {
+  evaluateSketchDerivations,
+  solvedOffsetFramePlans,
+  solvedOffsetShellSpans,
+} from "@/contracts/sketch/derived-geometry";
+import { OffsetCertificationMemo } from "@/contracts/sketch/offset-derivation-frame";
+import {
+  publishSketchOffsets,
+  type OffsetPublicationCapabilities,
+} from "@/contracts/sketch/offset-publication";
+import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
+import { createCertifiedNeutralCurveRequestQuery } from "@/domain/modeling/neutral-curve-certification/query";
 import type {
   ConstraintId,
   DimensionId,
@@ -923,10 +936,19 @@ function distance(left: SketchPoint2D, right: SketchPoint2D) {
 function solvedGeometryForEntity(
   entity: SketchEntityDefinition,
   definition: SketchDefinition,
+  shellSpans: ReadonlyMap<SketchEntityId, SolvedSketchDerivedCubicSpan[]>,
 ): SolvedSketchEntityGeometryRecord | null {
   const points = pointRecordMap(definition);
 
   switch (entity.kind) {
+    case "derivedPiecewiseCubic":
+      // The shared contracts solve frame (no second evaluator), uncertified.
+      return {
+        entityId: entity.entityId,
+        kind: "derivedPiecewiseCubic",
+        publication: "provisional",
+        spans: shellSpans.get(entity.entityId) ?? [],
+      };
     case "point": {
       const point = points.get(entity.pointId);
       return point
@@ -1067,15 +1089,36 @@ function solvedGeometryForEntity(
 }
 
 function solveDefinition(
-  definition: SketchDefinition,
+  authoredDefinition: SketchDefinition,
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
-  validationDiagnostics: SketchSolveDiagnostic[],
+  authoredValidationDiagnostics: SketchSolveDiagnostic[],
   partialSolvePolicy: SolveSketchRequest["partialSolvePolicy"],
+  modelingTolerance: number,
+  offsetPlans: SolveSketchRequest["offsetPlans"],
 ) {
+  // T08b-g5: offsets come from the shared contracts solve frame at τ.
+  const hasOffsets = (authoredDefinition.derivedRelationships ?? []).some(
+    (relationship) => relationship.kind === "offset",
+  );
+  const evaluation = hasOffsets
+    ? evaluateSketchDerivations({
+        definition: authoredDefinition,
+        modelingTolerance,
+        ...(offsetPlans ? { offsetPlans } : {}),
+      })
+    : null;
+  const definition = evaluation?.definition ?? authoredDefinition;
+  const validationDiagnostics = [
+    ...authoredValidationDiagnostics,
+    ...(evaluation?.diagnostics ?? []),
+  ];
+  const shellSpans = evaluation
+    ? solvedOffsetShellSpans(evaluation)
+    : new Map<SketchEntityId, SolvedSketchDerivedCubicSpan[]>();
   const points = pointRecordMap(definition);
   const entityMap = entityRecordMap(definition);
   const solvedEntities = definition.entities.flatMap((entity) => {
-    const solved = solvedGeometryForEntity(entity, definition);
+    const solved = solvedGeometryForEntity(entity, definition, shellSpans);
     return solved ? [solved] : [];
   });
   const solvedPoints = definition.points.map((point) => ({
@@ -1239,6 +1282,9 @@ function solveDefinition(
     constraintStatuses,
     dimensionStatuses,
     diagnostics: validationDiagnostics,
+    ...(evaluation
+      ? { offsetFramePlans: solvedOffsetFramePlans(evaluation) }
+      : {}),
   };
 
   return {
@@ -1272,6 +1318,12 @@ export class MockSketchSolverAdapter implements SketchSolverAdapter {
   private nextInteractiveSessionSequence = 1;
 
   private readonly regionDeriver: SketchArrangementDeriver;
+  /** The same kernel-free offset publication as the production adapter. */
+  private readonly offsetPublication: OffsetPublicationCapabilities = {
+    query: createCertifiedNeutralCurveRequestQuery(),
+    certifier: createCertifiedCubicTubeChain(),
+    memo: new OffsetCertificationMemo(),
+  };
 
   constructor(
     options: Partial<
@@ -1334,6 +1386,8 @@ export class MockSketchSolverAdapter implements SketchSolverAdapter {
       request.projectedReferences,
       validation.diagnostics,
       request.partialSolvePolicy,
+      request.modelingTolerance,
+      request.offsetPlans,
     );
     return {
       ...base,
@@ -1347,10 +1401,13 @@ export class MockSketchSolverAdapter implements SketchSolverAdapter {
     request: StartInteractiveSketchSolveSessionRequest,
   ): Promise<StartInteractiveSketchSolveSessionResponse> {
     assertSupportedRequest(request, this.options);
+    const offsetPlans = request.priorSolvedSnapshot?.offsetFramePlans;
     const program = compileSketchSolveProgram({
       definition: request.definition,
       projectedReferences: request.projectedReferences,
       tolerances: request.tolerances,
+      modelingTolerance: request.modelingTolerance,
+      ...(offsetPlans ? { offsetPlans } : {}),
       partialSolvePolicy: request.partialSolvePolicy,
       strategy: request.strategy,
     });
@@ -1554,6 +1611,13 @@ export class MockSketchSolverAdapter implements SketchSolverAdapter {
     assertSupportedRequest(request, this.options);
     assertDocumentModelingTolerance(request.modelingTolerance);
     const base = makeResponseBase(request);
+    // [TECH] G1: publish first (relationship-scoped), then regions.
+    const offsetPublications = publishSketchOffsets({
+      definition: request.definition,
+      solvedSnapshot: request.solvedSnapshot,
+      modelingTolerance: request.modelingTolerance,
+      capabilities: this.offsetPublication,
+    });
     const derived = await this.regionDeriver.derive({
       documentId: request.documentId,
       revisionId: request.revisionId,
@@ -1567,6 +1631,7 @@ export class MockSketchSolverAdapter implements SketchSolverAdapter {
       ...base,
       regions: derived.regions,
       diagnostics: derived.diagnostics,
+      offsetPublications,
     };
   }
 

@@ -161,6 +161,8 @@ export type ModelingHistoryRestoreState =
  * This keeps Phase 3 solver behavior separate from the broader kernel service.
  */
 export interface SketchSolverService {
+  /** See `SketchSolverAdapter.supersedesRegionDerivation`. */
+  readonly supersedesRegionDerivation: boolean;
   solveSketch(
     input: Omit<SolveSketchRequest, "contractVersion">,
   ): ReturnType<SketchSolverBoundary["solveSketch"]>;

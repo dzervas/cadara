@@ -120,7 +120,7 @@ export function makeSketchFixture(): SketchFixture {
   const constraintId = () => `constraint_${constraints.length}` as ConstraintId;
 
   const definition = (): SketchDefinition => ({
-    schemaVersion: "sketch-definition/v1alpha1",
+    schemaVersion: "sketch-definition/v1alpha2",
     referenceIds: references.map((reference) => reference.referenceId),
     references: [...references],
     pointIds: points.map((point) => point.pointId),
@@ -183,7 +183,7 @@ export function makeSketchFixture(): SketchFixture {
       },
     );
     return {
-      schemaVersion: "solved-sketch/v1alpha1",
+      schemaVersion: "solved-sketch/v1alpha2",
       status: { solveState: "solved", constraintState: "wellConstrained" },
       solvedEntities,
       solvedPoints: current.points.map((point) => ({

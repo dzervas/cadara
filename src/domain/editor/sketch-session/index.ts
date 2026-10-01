@@ -84,6 +84,7 @@ export {
 
 export {
   beginSketchGeometryDrag,
+  completeSketchOffsetPreviewPublication,
   deleteSelectedSketchGeometry,
   finishSketchGeometryDrag,
   patchSketchEditToolValue,
@@ -96,6 +97,7 @@ export { buildCommitRequest, getSketchHistoryItems } from "./history";
 
 export {
   failSketchLiveRegions,
+  getSketchSessionDerivationSettings,
   getSketchSessionDerivedValidity,
   getSketchSessionLiveRegionBasis,
   getSketchSessionRegionDiagnostics,

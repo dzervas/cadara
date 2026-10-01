@@ -66,6 +66,9 @@ export function getSketchEntityDefiningPointIds(
       return entity.controlPointIds;
     case "profileText":
       return [entity.anchorPointId];
+    // A derived shell has no defining points: dragging it never moves seeds.
+    case "derivedPiecewiseCubic":
+      return [];
   }
 }
 

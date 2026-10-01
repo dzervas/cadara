@@ -23,7 +23,7 @@ test("src/domain/editor/sketch-drag-intent.spec.ts", () => {
   }
 
   const definition: SketchDefinition = {
-    schemaVersion: "sketch-definition/v1alpha1",
+    schemaVersion: "sketch-definition/v1alpha2",
     referenceIds: [],
     references: [],
     pointIds: ["p_start", "p_end", "p_center", "p_arc_center"],

@@ -3341,7 +3341,7 @@ test("generic prepared pattern actions materialize constructionOf and sketchEnti
       },
     },
     definition: {
-      schemaVersion: "sketch-definition/v1alpha1" as const,
+      schemaVersion: "sketch-definition/v1alpha2" as const,
       referenceIds: [],
       references: [],
       pointIds: [

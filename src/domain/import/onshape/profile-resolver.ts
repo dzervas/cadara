@@ -249,6 +249,7 @@ async function deriveVerificationSketch(
     requestId: "request_import_verification_solve" as RequestId,
     plane: translation.plane.frame,
     tolerances: createDocumentSolverTolerances(verifier),
+    modelingTolerance: verifier.modelingTolerance,
     partialSolvePolicy: "bestEffort",
   });
   const { regions } = await verifier.sketchSolver.deriveSketchRegions({

@@ -3,7 +3,7 @@ import { validateSketchDefinition } from "./runtime-schema";
 import type { SketchDefinition } from "./schema";
 
 const definition: SketchDefinition = {
-  schemaVersion: "sketch-definition/v1alpha1",
+  schemaVersion: "sketch-definition/v1alpha2",
   referenceIds: [],
   references: [],
   pointIds: [],

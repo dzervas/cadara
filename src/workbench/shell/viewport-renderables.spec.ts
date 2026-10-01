@@ -299,7 +299,7 @@ test("src/app/viewport-renderables.spec.ts", async () => {
         label: "Sketch A",
         planeSupport: plane.support,
         definition: {
-          schemaVersion: "sketch-definition/v1alpha1",
+          schemaVersion: "sketch-definition/v1alpha2",
           referenceIds: [],
           references: [],
           pointIds: [],
@@ -319,7 +319,7 @@ test("src/app/viewport-renderables.spec.ts", async () => {
           dimensions: [],
         },
         solvedSnapshot: {
-          schemaVersion: "solved-sketch/v1alpha1",
+          schemaVersion: "solved-sketch/v1alpha2",
           status: {
             solveState: "partiallySolved",
             constraintState: "underConstrained",

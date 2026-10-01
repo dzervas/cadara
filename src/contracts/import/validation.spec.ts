@@ -163,7 +163,7 @@ test("src/contracts/import/validation.spec.ts", async () => {
       key: "xy",
     },
     definition: {
-      schemaVersion: "sketch-definition/v1alpha1" as const,
+      schemaVersion: "sketch-definition/v1alpha2" as const,
       referenceIds: [],
       references: [],
       pointIds: [],
@@ -768,7 +768,7 @@ test("validates deferred revolve boolean scope and advanced construction partici
       key: "xy" as const,
     },
     definition: {
-      schemaVersion: "sketch-definition/v1alpha1" as const,
+      schemaVersion: "sketch-definition/v1alpha2" as const,
       referenceIds: [],
       references: [],
       pointIds: [],
@@ -935,7 +935,7 @@ test("validates deferred advanced sketch-point participant sketch producers", ()
       key: "xy" as const,
     },
     definition: {
-      schemaVersion: "sketch-definition/v1alpha1" as const,
+      schemaVersion: "sketch-definition/v1alpha2" as const,
       referenceIds: [],
       references: [],
       pointIds: ["sketch_point_hole_center"],
@@ -1097,7 +1097,7 @@ test("validates deferred open sketch-curve profiles on surface extrude actions",
       key: "xy" as const,
     },
     definition: {
-      schemaVersion: "sketch-definition/v1alpha1" as const,
+      schemaVersion: "sketch-definition/v1alpha2" as const,
       referenceIds: [],
       references: [],
       pointIds: [],

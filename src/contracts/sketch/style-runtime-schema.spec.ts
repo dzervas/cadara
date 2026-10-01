@@ -5,7 +5,7 @@ import type { SketchDefinition } from "@/contracts/sketch/schema";
 
 test("src/contracts/sketch/style-runtime-schema.spec.ts", () => {
   const baseDefinition: SketchDefinition = {
-    schemaVersion: "sketch-definition/v1alpha1",
+    schemaVersion: "sketch-definition/v1alpha2",
     referenceIds: [],
     references: [],
     pointIds: ["sketch_point_a", "sketch_point_b"],

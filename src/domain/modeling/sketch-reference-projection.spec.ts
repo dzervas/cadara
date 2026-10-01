@@ -222,7 +222,7 @@ function projectAuthoredSpline(derivedValidity: SketchDerivedValidity) {
         constructionId: "construction_plane-xy",
       },
       definition: {
-        schemaVersion: "sketch-definition/v1alpha1",
+        schemaVersion: "sketch-definition/v1alpha2",
         referenceIds: [],
         references: [],
         pointIds: ["sketch_point_start", "sketch_point_end"],

@@ -158,6 +158,16 @@ export function createEditorEffectFailureEvent(
         baseRevisionId: effect.baseRevisionId,
         message: appError.message,
       };
+    case "sketch.publishOffsetPreview":
+      return {
+        type: "effect.sketchOffsetPreviewPublicationFailed",
+        requestId: effect.requestId,
+        documentId: effect.documentId,
+        commandSessionId: effect.commandSessionId,
+        baseRevisionId: effect.baseRevisionId,
+        derivationId: effect.derivationId,
+        message: appError.message,
+      };
     case "sketch.deriveRegions":
       return {
         type: "effect.sketchRegionDerivationFailed",

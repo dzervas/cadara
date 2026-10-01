@@ -14,6 +14,7 @@ export function createSketchSolverService(
   adapter: SketchSolverBoundary,
 ): SketchSolverService {
   return {
+    supersedesRegionDerivation: adapter.supersedesRegionDerivation === true,
     solveSketch(input) {
       return adapter.solveSketch(
         withContractVersion<SolveSketchRequest>(input),

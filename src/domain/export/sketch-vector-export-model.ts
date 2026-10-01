@@ -402,6 +402,7 @@ function buildEntity(
     case "ellipse":
     case "ellipticalArc":
     case "profileText":
+    case "derivedPiecewiseCubic":
       diagnostics.push(
         createDiagnostic(
           "sketch-vector-unsupported-entity",

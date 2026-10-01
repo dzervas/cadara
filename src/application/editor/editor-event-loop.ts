@@ -6,6 +6,7 @@ import {
 import {
   createEditorEffectFailureEvent,
   defaultEditorExtensionDependencies,
+  emitPendingSketchOffsetPreviewPublication,
   emitPendingSketchRegionDerivation,
   initialEditorState,
   transitionEditorState,
@@ -41,9 +42,12 @@ export class EditorEventLoop {
   private transition(event: EditorEvent) {
     // Authored-action restores (undo/redo, gesture exits) happen after the
     // reducer, so the live region hook runs again on the final result.
-    return emitPendingSketchRegionDerivation(
-      this.sketchActions.transition(this.state, event, (state) =>
-        transitionEditorState(state, event, this.dependencies),
+    return emitPendingSketchOffsetPreviewPublication(
+      emitPendingSketchRegionDerivation(
+        this.sketchActions.transition(this.state, event, (state) =>
+          transitionEditorState(state, event, this.dependencies),
+        ),
+        { supersede: this.runtime.supersedesSketchRegionDerivation === true },
       ),
     );
   }

@@ -29,7 +29,7 @@ test("src/contracts/sketch/solver-benchmark.spec.ts", async () => {
     expect(
       sketch.definition.schemaVersion,
       "Benchmark fixtures should expose authored definitions.",
-    ).toBe("sketch-definition/v1alpha1");
+    ).toBe("sketch-definition/v1alpha2");
   }
 
   expect(

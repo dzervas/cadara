@@ -2178,7 +2178,8 @@ function buildSketchCurveRenderRecords(
       entityId: entity.entityId,
     };
 
-    if (entity.kind === "point") {
+    // T08b-g5b: derived offset shells are not drawn here yet.
+    if (entity.kind === "point" || entity.kind === "derivedPiecewiseCubic") {
       return [];
     }
 

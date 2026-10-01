@@ -1373,6 +1373,7 @@ export async function verifySketchTranslationSolveConsistency(
         angleRadians: 1e-4,
         minimumSegmentLength: tolerance,
       },
+      modelingTolerance: tolerance,
       partialSolvePolicy: "failOnConflict",
       // Projection is materialized above. Deferred source selectors are not
       // consulted by solve once every authored reference has an exact record.

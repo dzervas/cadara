@@ -3,7 +3,10 @@ import {
   getFeaturePrimarySelectionTarget,
   type FeatureEditSessionState,
 } from "@/domain/editor/feature-editing";
-import { type SketchSessionState } from "@/domain/editor/sketch-session";
+import {
+  getSketchSessionDerivationSettings,
+  type SketchSessionState,
+} from "@/domain/editor/sketch-session";
 import { openSketchSessionFromSelection } from "@/domain/editor/sketch-session-controller";
 import {
   buildSketchPlaneCommitRequest,
@@ -27,6 +30,7 @@ import type { AuthoredActionSketch } from "@/contracts/modeling/authored-actions
 import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
 import { resolveSketchDerivationDistances } from "@/domain/modeling/sketch-dimension-expressions";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
+import { requireSketchOffsetPublications } from "@/contracts/solver/runtime-schema";
 import type {
   DeriveSketchRegionsRequest,
   ProjectedSketchReferenceRecord,
@@ -329,9 +333,11 @@ export function createEffectExecutor(runtime: EditorEffectRuntime) {
           if (!(error instanceof SketchRegionDerivationSupersededError)) {
             throw error;
           }
-          // Superseded by a newer request for this document, which by
-          // construction belongs to a newer command session or a restarted
-          // loop: the reducer discards this request's failure event as stale.
+          // Superseded by a newer request for this document: a newer
+          // generation of the same command session (T08b-g5: emitted while
+          // this one was in flight, so it owns `pendingRegionRequest`), a
+          // newer command session, or a restarted loop. In every case the
+          // reducer discards this request's failure event as stale.
           return createEditorEffectFailureEvent(
             effect,
             error,
@@ -348,6 +354,45 @@ export function createEffectExecutor(runtime: EditorEffectRuntime) {
           generation: effect.generation,
           regions: result.regions,
           diagnostics: result.diagnostics,
+          offsetPublications: result.offsetPublications,
+        };
+      }
+      case "sketch.publishOffsetPreview": {
+        // U-G3: the same derivation boundary as live regions ([TECH] G1).
+        // Real failures reach the event loop's error reporting.
+        if (!runtime.deriveSketchRegions) {
+          throw new Error("Offset preview publication is not available.");
+        }
+        let result: Awaited<
+          ReturnType<NonNullable<EditorEffectRuntime["deriveSketchRegions"]>>
+        >;
+        try {
+          result = await runtime.deriveSketchRegions({
+            requestId: effect.requestId,
+            documentId: effect.documentId,
+            baseRevisionId: effect.baseRevisionId,
+            basis: effect.basis,
+          });
+        } catch (error: unknown) {
+          if (!(error instanceof SketchRegionDerivationSupersededError)) {
+            throw error;
+          }
+          // Superseded by a newer derivation for this document; the reducer
+          // drops this stale request's failure event (request-id check).
+          return createEditorEffectFailureEvent(
+            effect,
+            error,
+            "Offset preview publication was superseded.",
+          );
+        }
+        return {
+          type: "effect.sketchOffsetPreviewPublished",
+          requestId: effect.requestId,
+          documentId: effect.documentId,
+          commandSessionId: effect.commandSessionId,
+          baseRevisionId: effect.baseRevisionId,
+          derivationId: effect.derivationId,
+          offsetPublications: result.offsetPublications,
         };
       }
       case "sketch.importReferenceImages": {
@@ -501,11 +546,14 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
     diagnostics: ProjectedSketchReferenceRecord["diagnostics"];
   }>;
   sketchSolver: {
+    /** See `SketchSolverAdapter.supersedesRegionDerivation`. */
+    readonly supersedesRegionDerivation?: boolean;
     deriveSketchRegions(
       input: Omit<DeriveSketchRegionsRequest, "contractVersion">,
     ): Promise<{
       regions: RegionRecord[];
       diagnostics: SketchSolveDiagnostic[];
+      offsetPublications: unknown;
     }>;
     createCommitCorrelation(requestId: RequestId): {
       requestId: RequestId;
@@ -619,18 +667,21 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
   }>;
 }): EditorEffectRuntime {
   return {
+    supersedesSketchRegionDerivation:
+      modelingService.sketchSolver?.supersedesRegionDerivation === true,
     getCurrentDocumentSnapshot: () =>
       modelingService.getCurrentDocumentSnapshot(),
     async commitSketch(input) {
       // Evaluate with resolved derivation distances so committed geometry is
       // current, while the persisted relationships keep authored expressions.
       const commitDefinition = {
-        ...evaluateSketchDerivations(
-          resolveSketchDerivationDistances({
+        ...evaluateSketchDerivations({
+          definition: resolveSketchDerivationDistances({
             definition: input.session.definition,
             variables: input.session.documentVariables,
           }),
-        ).definition,
+          ...getSketchSessionDerivationSettings(input.session),
+        }).definition,
         derivedRelationships: input.session.definition.derivedRelationships,
       };
       const result = await modelingService.commitSketch({
@@ -783,6 +834,11 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
       return {
         regions: result.regions,
         diagnostics: result.diagnostics,
+        // Crosses the derivation-worker boundary as plain data: validated
+        // before any offset publication is trusted ([TECH] G17).
+        offsetPublications: requireSketchOffsetPublications(
+          result.offsetPublications,
+        ),
       };
     },
     async runSketchSpecialModeEffect() {

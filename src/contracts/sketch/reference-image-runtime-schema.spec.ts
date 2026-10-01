@@ -5,7 +5,7 @@ import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
 
 test("src/contracts/sketch/reference-image-runtime-schema.spec.ts", () => {
   const baseDefinition: SketchDefinition = {
-    schemaVersion: "sketch-definition/v1alpha1",
+    schemaVersion: "sketch-definition/v1alpha2",
     referenceIds: [],
     references: [],
     pointIds: [],

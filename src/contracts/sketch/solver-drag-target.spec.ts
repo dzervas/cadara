@@ -95,7 +95,7 @@ test("src/contracts/sketch/solver-drag-target.spec.ts", () => {
     ];
 
     return {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: [
@@ -146,7 +146,7 @@ test("src/contracts/sketch/solver-drag-target.spec.ts", () => {
 
   function createRectangleToolDefinition(): SketchDefinition {
     return {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: [
@@ -255,7 +255,7 @@ test("src/contracts/sketch/solver-drag-target.spec.ts", () => {
 
   function createLogoLikeDragDefinition(): SketchDefinition {
     return {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: [
@@ -401,7 +401,7 @@ test("src/contracts/sketch/solver-drag-target.spec.ts", () => {
     const line21End = "sketch_point_21_line-end";
 
     return {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: [
@@ -627,6 +627,7 @@ test("src/contracts/sketch/solver-drag-target.spec.ts", () => {
         position: [4, 3],
       },
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
       targetTolerance: 1e-4,
     });
@@ -679,6 +680,7 @@ test("src/contracts/sketch/solver-drag-target.spec.ts", () => {
           ],
         },
         tolerances,
+        modelingTolerance: 1e-3,
         partialSolvePolicy: "failOnConflict",
         targetTolerance: 1e-4,
       });
@@ -728,6 +730,7 @@ test("src/contracts/sketch/solver-drag-target.spec.ts", () => {
         position: requestedPosition,
       },
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
       targetTolerance: 1e-4,
     });
@@ -783,6 +786,7 @@ test("src/contracts/sketch/solver-drag-target.spec.ts", () => {
           position: entry.cursor,
         },
         tolerances,
+        modelingTolerance: 1e-3,
         partialSolvePolicy: "failOnConflict",
         targetTolerance: 1e-4,
       });
@@ -834,6 +838,7 @@ test("src/contracts/sketch/solver-drag-target.spec.ts", () => {
         position: [2, 2],
       },
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
       targetTolerance: 1e-4,
     });

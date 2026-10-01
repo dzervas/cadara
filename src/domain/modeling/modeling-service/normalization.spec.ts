@@ -20,6 +20,7 @@ function makeOffsetPayload(overrides: Record<string, unknown> = {}) {
     seedEntityIds: ["sketch_entity_seed"],
     distance: { source: "expression", valueText: "wall / 2" },
     jointPolicy: "trimExtendArcFallback",
+    piecewiseCubicOutputs: [],
     jointOutputs: [
       {
         firstSeedEntityId: "sketch_entity_seed",
