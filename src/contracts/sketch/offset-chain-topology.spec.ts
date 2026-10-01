@@ -34,6 +34,7 @@ import {
   type CubicTubeChainRequest,
   type EndpointNeutralSegment,
   type NeutralCurvePointWitness,
+  type NeutralCurveQueryResult,
   type PieceTubeChainRequest,
   type TubeChainPiece,
   type TubePieceChainResult,
@@ -87,6 +88,7 @@ import {
   convexArcNativeRows,
   cornerMatrixRows,
   createNativeArcOffsetHarness,
+  deepTrimRows,
   createNativeOffsetChainHarness,
   seedArcRows,
   positionalClosureSpline,
@@ -3330,7 +3332,9 @@ describe("T08b-a capacity: joint queries only on one whole-request meter (M0/M7)
     "SL-90 -0.01": codes.splineJointUnsupported,
     "SL-90 0.2": "verified",
     "SL-90 -0.2": codes.splineJointUnsupported,
-    "SL-90 0.5": codes.splineJointUnsupported,
+    // T08b-g5d (U-G6): the root lies on an inner leaf of the terminal source
+    // span; Lemma T-W certifies the deep trim (formerly splineJointUnsupported).
+    "SL-90 0.5": "verified",
     "SL-shallow 0.01": codes.splineJointUnsupported,
     "SL-shallow -0.01": "verified",
     "SL-tiny 0.01": codes.jointUnsatisfied,
@@ -3349,7 +3353,20 @@ describe("T08b-a capacity: joint queries only on one whole-request meter (M0/M7)
     "S2pt 0.01": "verified",
   };
 
-  test("native corner matrix: every row keeps its verdict, S2pt, SS-60 (d > 0) and the Lemma-T band rows now verify, and each request is sized by its joints", () => {
+  // T08b-g5d review R2 (one-time re-pin, old → new): a cubic-side joint
+  // whose terminal source span has more than one leaf is sized for its ring
+  // scan, (1 + n_P)(1 + n_Q) joint queries; every other request keeps one per
+  // joint (T08b-g5d-evidence/out/sizes-matrix.jsonl).
+  const MATRIX_SIZES: Record<string, number> = {
+    "SL-90 0.2": 2, // was 1
+    "SL-90 -0.2": 2, // was 1
+    "SL-90 0.5": 2, // was 1
+    "SS-60 0.2": 4, // was 1
+    "SL-loop 0.01": 6, // was 2
+    "SL-loop -0.01": 6, // was 2
+  };
+
+  test("native corner matrix: every row keeps its verdict, S2pt, SS-60 (d > 0) and the Lemma-T band rows now verify, SL-90 d = 0.5 verifies deep (T08b-g5d), and each request is sized structurally", () => {
     const rows = cornerMatrixRows();
     expect(rows.map((row) => `${row.row} ${row.distance}`)).toEqual(
       Object.keys(MATRIX_VERDICTS),
@@ -3368,8 +3385,9 @@ describe("T08b-a capacity: joint queries only on one whole-request meter (M0/M7)
       const label = `${row.row} ${row.distance}`;
       expect(verdict(chain), label).toBe(MATRIX_VERDICTS[label]);
       const joints = chain.connectivity.joins.length;
-      expect(sizes, label).toEqual([joints]);
-      expect(pairs.length, label).toBeLessThanOrEqual(joints);
+      const size = MATRIX_SIZES[label] ?? joints;
+      expect(sizes, label).toEqual([size]);
+      expect(pairs.length, label).toBeLessThanOrEqual(size);
     }
   }, 120_000);
 
@@ -8277,6 +8295,80 @@ describe("T08b-f seed arcs: native line/arc chains through the SEL (Offset relat
     120_000,
   );
 
+  /**
+   * The 9eef2dbf resolver literal of the R1 row (identical at the g5d
+   * working copy, T08b-g5d-evidence/out/r1-candidates.json "c1 -0.01").
+   */
+  const R1_ARC_SPLINE_LITERAL = {
+    operations: 662_873,
+    euclideanSteps: 153_324,
+    bits: 2_325,
+  };
+  test("T08b-g5d review R1: a joint with a seed-arc side keeps R7 exactly (no cubic inner-leaf scan): an arc→spline corner whose spline terminal source span has 4 leaves is sized 1 + n_arc and keeps its resolver literal", () => {
+    const snapshots: ExactProofBudgetSnapshot[] = [];
+    const pairs: string[] = [];
+    const { sizes, query: recorded } = recordingRequests(
+      createCertifiedNeutralCurveRequestQueryWithBudgetObserverForTest(
+        (snapshot) => snapshots.push(snapshot),
+      ),
+      (pair) =>
+        pairs.push(
+          `${pair.first.kind}:${pair.first.provenance.sourceSpanId}/${pair.second.kind}:${pair.second.provenance.sourceSpanId}`,
+        ),
+    );
+    const arcThenSpline = harness.arc(harness.empty(), [0, 0], [1, 0], [0, 1]);
+    const sketch = harness.spline(
+      arcThenSpline.definition,
+      [
+        [0, 1],
+        [-1, 1.3],
+        [-1.3, 2.6],
+      ],
+      { start: arcThenSpline.end },
+    );
+    const { declared } = harness.adapt(
+      {
+        definition: sketch.definition,
+        seeds: [arcThenSpline.id, sketch.id],
+      },
+      -0.01,
+    );
+    if (!declared.ok) throw new Error(declared.message);
+    // Premise: the spline's terminal source span has more than one leaf, so
+    // a ring scan would have sized (1 + n_arc)(1 + n_cubic) queries.
+    const spline = declared.pieces.find(
+      (piece) => piece.kind === "derivedCubic",
+    )!;
+    if (spline.kind !== "derivedCubic") throw new Error("spline");
+    const arc = declared.pieces.find((piece) => piece.kind === "arc")!;
+    if (arc.kind !== "arc") throw new Error("arc");
+    const terminalSpan = spline.reversed
+      ? spline.spans.at(-1)!.source.spanIndex
+      : spline.spans[0]!.source.spanIndex;
+    expect(
+      spline.spans.filter((span) => span.source.spanIndex === terminalSpan)
+        .length,
+      "premise: a multi-leaf terminal source span",
+    ).toBeGreaterThan(1);
+    const result = certifyDeclaredOffsetChain(
+      declared,
+      recorded,
+      createCertifiedCubicTubeChain(),
+    );
+    expect(result.ok).toBe(true);
+    expect(sizes, "R7: 1 + n_arc, unchanged").toEqual([
+      1 + (arc.splits?.length ?? 0),
+    ]);
+    // The arc's terminal (last) leaf against the spline's terminal leaf only.
+    expect(pairs, "the terminal pair only").toEqual(["circle:1/cubicBezier:0"]);
+    const last = snapshots.at(-1)!;
+    expect({
+      operations: last.operations,
+      euclideanSteps: last.euclideanSteps,
+      bits: Math.max(last.maxStoredBits, last.maxPreProductBits),
+    }).toEqual(R1_ARC_SPLINE_LITERAL);
+  });
+
   // Staged caps inside every new stage (instrumented stage maps in
   // T08b-f-evidence/stages/): each exhausts as itself.
   test.each([
@@ -8738,4 +8830,626 @@ describe("T08b-f1 [TECH] F12: the certifier's whole-request ceiling scales with 
       message: expect.stringContaining("exact-query-proof-budget-exhausted"),
     });
   }, 300_000);
+});
+
+// Logic lane (docs/testing.md): T08b-g5d (U-G6, no refinement rounds by user
+// decision U-G7). Seam: the exported SEL (`declaredOffsetChainPieces` +
+// `certifyDeclaredOffsetChain`) on the shared native fixture rows
+// `deepTrimRows()` (commit → solve → N2 → adapter), the real kernel-free
+// query and certifier. Full matrix with timings in
+// T08b-g5d-evidence/out/harness-{sl,5pt,lens}.jsonl.
+/** The g5d deep row's certifier literal (new path; T08b-g5d-evidence). */
+const G5D_CERTIFIER_LITERAL = {
+  operations: 98_910,
+  euclideanSteps: 24_644,
+  integerBits: 321,
+};
+/** The g5d deep row's resolver literal (sized 8: R2; T08b-g5d-evidence). */
+const G5D_RESOLVER_LITERAL = {
+  operations: 328_922,
+  euclideanSteps: 52_179,
+  integerBits: 486,
+};
+
+describe("T08b-g5d (U-G6): deep spline offset trims inside the terminal source span (native SEL)", () => {
+  const harness = createNativeOffsetChainHarness({
+    authoring: createNativeToolAuthoring("sketch_g5d"),
+    query,
+    modelingTolerance: 1e-3,
+  });
+  const rows = deepTrimRows();
+  /** `<row> <distance>`: a fixture row, at any distance (G20 rows: d = −0.3). */
+  const declaredOf = (label: string) => {
+    const at = label.lastIndexOf(" ");
+    const row = rows.find((item) => item.row === label.slice(0, at));
+    if (!row) throw new Error(`no row ${label}`);
+    harness.resetSequence();
+    return harness.nativeChain(row.build(harness), Number(label.slice(at + 1)))
+      .declared;
+  };
+  /** One SEL run: verdict, resolver sizes and pairs, certifier requests. */
+  const run = (label: string, requestQuery = query) => {
+    const declared = declaredOf(label);
+    const pairs: string[] = [];
+    const { sizes, query: recorded } = recordingRequests(requestQuery, (pair) =>
+      pairs.push(
+        `${pair.first.provenance.sourceSpanId}/${pair.second.provenance.sourceSpanId}`,
+      ),
+    );
+    const requests: PieceTubeChainRequest[] = [];
+    const real = createCertifiedCubicTubeChain();
+    const result = certifyDeclaredOffsetChain(declared, recorded, {
+      openRequest: (attempts) => {
+        const request = real.openRequest(attempts);
+        return {
+          certifyPieceChain: (item) => {
+            requests.push(item);
+            return request.certifyPieceChain(item);
+          },
+        };
+      },
+    });
+    return { declared, result, sizes, pairs, requests };
+  };
+  const trimsOf = (result: ReturnType<typeof run>["result"]) => {
+    if (!result.ok) throw new Error(`${result.code}: ${result.message}`);
+    return result.certificate.joins.flatMap((join) =>
+      join.kind === "trim" || join.kind === "graph-trim"
+        ? [
+            {
+              kind: join.kind,
+              jointIndex: join.jointIndex,
+              first: join.first,
+              second: join.second,
+              offsets: [join.firstLeafOffset ?? 0, join.secondLeafOffset ?? 0],
+              ...(join.kind === "graph-trim" && join.glue
+                ? { glue: join.glue }
+                : {}),
+            },
+          ]
+        : [],
+    );
+  };
+
+  test.each([
+    [
+      "SL h0.4 -0.1",
+      [
+        [0, 6, 8, [1, 0]],
+        [1, 8, 1, [0, 1]],
+      ],
+      [0, 7],
+      8,
+    ],
+    [
+      "SL h0.8 -0.2",
+      [
+        [0, 11, 14, [2, 0]],
+        [1, 14, 2, [0, 2]],
+      ],
+      [0, 1, 12, 13],
+      14,
+    ],
+  ] as const)(
+    "Lemma T-W: %s verifies with deep line trims on inner leaves of the terminal source span; the removed leaves are reported removed and the resolution marks them",
+    (label, trims, removed, size) => {
+      const { result, requests, sizes, declared } = run(label);
+      expect(
+        trimsOf(result).map((trim) => [
+          trim.jointIndex,
+          trim.first,
+          trim.second,
+          trim.offsets,
+        ]),
+      ).toEqual(trims);
+      if (!result.ok) throw new Error("verified");
+      expect(
+        result.certificate.leaves.flatMap((leaf, index) =>
+          leaf.removed ? [index] : [],
+        ),
+        "removed leaves (vertex leaf … trim leaf, exclusive)",
+      ).toEqual(removed);
+      // The request carries exactly the trim-leaf offsets, once.
+      expect(requests).toHaveLength(1);
+      expect(
+        requests[0]!.trims.map((trim) => [
+          trim.firstLeafOffset ?? 0,
+          trim.secondLeafOffset ?? 0,
+        ]),
+      ).toEqual(trims.map(([, , , offsets]) => offsets));
+      // R2: the request is sized for the ring scan of both cubic joints.
+      expect(sizes).toEqual([size]);
+      // The resolution's own domain ends: removed leaves at both ends.
+      const spline = declared.pieces.find(
+        (piece) => piece.kind === "derivedCubic",
+      )!;
+      const ends = result.resolved.cubics.get(spline.seedEntityId)!;
+      expect(
+        ends.flatMap((span, offset) =>
+          span.start.kind === "removed" && span.end.kind === "removed"
+            ? [offset]
+            : [],
+        ),
+      ).toEqual(removed);
+    },
+    60_000,
+  );
+
+  // Rows that stay fail-closed (U-G7 refinement rows, U-B, owner
+  // singularities, a K1 cone), each with its exact code and certifier text.
+  test.each([
+    ["SL h0.4 -0.03", "trim-composition-unproven", "(leaves 0)"],
+    ["SL h0.4 -0.05", "trim-composition-unproven", "(leaves 0)"],
+    ["SL h0.8 -0.1", "trim-composition-unproven", "(leaves 0)"],
+    ["SL lean -0.01", "trim-composition-unproven", "(leaves 16)"],
+    // The design's "5-point" row: the deep trim is found and fails its
+    // composition on the trim leaf (it needs a refinement round, U-G7).
+    ["SL h0.4 5pt -0.1", "trim-composition-unproven", "(leaves 2)"],
+    ["SL lean -0.05", "cubic-tube-cone-unproven", "(leaves 7/8)"],
+  ] as const)(
+    "%s fails closed with %s %s",
+    (label, inner, leaves) => {
+      const { result } = run(label);
+      expect(result).toMatchObject({
+        ok: false,
+        code: codes.topologyUncertain,
+        message: expect.stringContaining(`${leaves}: uncertain ${inner}:`),
+      });
+    },
+    60_000,
+  );
+
+  test("U-B (review R5): a corner beyond the terminal source span fails closed; a spline side says so", () => {
+    expect(run("SL h0.4 -0.2").result).toMatchObject({
+      ok: false,
+      code: codes.jointUnsatisfied,
+      message:
+        "Offset joint has no single certified transverse interior crossing.",
+    });
+    const { result, sizes, pairs } = run("SL h0.4 5pt -0.2");
+    expect(result).toMatchObject({
+      ok: false,
+      code: codes.splineJointUnsupported,
+      message:
+        "Offset joint has no crossing on any leaf of the terminal source span: the offset corner lies beyond the terminal source span (U-B), or the offsets do not meet.",
+    });
+    // Every scanned pair stays inside the terminal source span.
+    expect(sizes).toEqual([pairs.length]);
+    for (const label of ["SL h1.6 -0.2", "SL lean -0.1", "SL lean -0.2"])
+      expect(() => declaredOf(label), label).toThrow(
+        "The spline offset owner did not certify (offset-topology-uncertain).",
+      );
+  });
+
+  test("G20 pole-box prefilter (fabricated spans, seam-fake query): a deep spline↔spline ring pair whose r-inflated pole boxes are disjoint is never queried; a pair disjoint only inside the inflation r is queried", () => {
+    // Collinear dyadic leaves on y = 0, r = 2⁻¹² each. P (natural order,
+    // traversal end = leaf 1) and Q (traversal start = leaf 0); the ring
+    // pairs (1,0) = P0/Q0, (0,1) = P1/Q1, (1,1) = P0/Q1. P1 [1, 2] and Q1
+    // [2 + 2⁻²⁰, 4] are disjoint by 2⁻²⁰ < r_P + r_Q (queried); P0 [0, 1]
+    // is 3 from Q0 and 1 + 2⁻²⁰ from Q1 (skipped).
+    const r = 2 ** -12;
+    const leaf = (
+      poles: SplinePoles,
+      sourceInterval: readonly [number, number],
+    ) => ({
+      ...fabricatedSpan(poles, ZERO_POLES, sourceInterval),
+      certifiedError: r,
+    });
+    const gap = 2 ** -20;
+    const pieces = [
+      cubic("p", [
+        leaf(
+          [
+            [0, 0],
+            [0.25, 0],
+            [0.75, 0],
+            [1, 0],
+          ],
+          [0, 0.5],
+        ),
+        leaf(
+          [
+            [1, 0],
+            [1.25, 0],
+            [1.75, 0],
+            [2, 0],
+          ],
+          [0.5, 1],
+        ),
+      ]),
+      cubic("q", [
+        leaf(
+          [
+            [5, 0],
+            [4.75, 0],
+            [4.25, 0],
+            [4, 0],
+          ],
+          [0, 0.5],
+        ),
+        leaf(
+          [
+            [4, 0],
+            [3, 0],
+            [2.5, 0],
+            [2 + gap, 0],
+          ],
+          [0.5, 1],
+        ),
+      ]),
+    ];
+    const issued: string[] = [];
+    const empty: NeutralCurveQueryResult = {
+      kind: "verified",
+      points: [],
+      overlaps: [],
+      completenessProof: {
+        kind: "completeIsolatedRootSet",
+        family: "cubicCubic",
+        distinctRootCount: 0,
+      },
+    };
+    const { sizes, query: recorded } = recordingRequests(
+      perRequest({ queryPair: () => empty }),
+      (pair) =>
+        issued.push(
+          `${pair.first.provenance.sourceEntityId === id("p") ? "P" : "Q"}${pair.first.provenance.sourceSpanId}/Q${pair.second.provenance.sourceSpanId}`,
+        ),
+    );
+    expect(
+      failed(makeOffsetChainFixture(pieces, { query: recorded })),
+    ).toMatchObject({
+      code: codes.splineJointUnsupported,
+      message:
+        "Offset joint has no crossing on any leaf of the terminal source span: the offset corner lies beyond the terminal source span (U-B), or the offsets do not meet.",
+    });
+    // Sized structurally (R2): every ring slot is precharged, skipped or not.
+    expect(sizes).toEqual([4]);
+    expect(issued, "the terminal pair, then P1/Q1 only").toEqual([
+      "P1/Q0",
+      "P1/Q1",
+    ]);
+  });
+
+  test("R2: the deep row's resolver literal (sized 8, 4 issued); count − 1 exhausts on operations, Euclid and bits with the pooled message", () => {
+    const snapshots: ExactProofBudgetSnapshot[] = [];
+    const observed = run(
+      "SL h0.4 -0.1",
+      createCertifiedNeutralCurveRequestQueryWithBudgetObserverForTest(
+        (snapshot) => snapshots.push(snapshot),
+      ),
+    );
+    expect(observed.result.ok).toBe(true);
+    expect(observed.sizes).toEqual([8]);
+    expect(observed.pairs).toEqual(["7/0", "6/0", "0/0", "0/1"]);
+    expect(snapshots).toHaveLength(5);
+    expect(snapshots[0]!.operations).toBe(64 * 8);
+    const last = snapshots.at(-1)!;
+    const literal = {
+      operations: last.operations,
+      euclideanSteps: last.euclideanSteps,
+      integerBits: Math.max(last.maxStoredBits, last.maxPreProductBits),
+    };
+    expect(literal).toEqual(G5D_RESOLVER_LITERAL);
+    for (const key of [
+      "operations",
+      "euclideanSteps",
+      "integerBits",
+    ] as const) {
+      const under = (limit: number) =>
+        run(
+          "SL h0.4 -0.1",
+          createCertifiedNeutralCurveRequestQueryWithLowerBudgetForTest({
+            [key]: limit,
+          }),
+        ).result;
+      expect(under(literal[key]).ok, `${key} = count`).toBe(true);
+      expect(under(literal[key] - 1), `${key} = count − 1`).toMatchObject({
+        ok: false,
+        code: codes.topologyUncertain,
+        message: expect.stringContaining(
+          "the whole-request budget of all 8 joint queries is exhausted",
+        ),
+      });
+    }
+  }, 120_000);
+
+  test("R3: a D > 0 absorbable corner keeps absorption first (terminal query only); its failed absorption takes the deferred deep scan once, reusing the empty terminal result, on a request sized for the whole ring (no RangeError)", () => {
+    // A native arch spline into a line turning by less than 90° (D > 0),
+    // concave toward d = 0.4: the terminal query is verified empty, so the
+    // first pass absorbs (step 2(b)); absorption does not certify.
+    const declared = declaredOf("SL arch R3 0.4");
+    expect(classifyOffsetChainVertex(declared.vertices[0]!)).toMatchObject({
+      class: "nonparallel",
+      forward: true,
+    });
+    const pairs: string[] = [];
+    const { sizes, query: recorded } = recordingRequests(query, (pair) =>
+      pairs.push(
+        `${pair.first.provenance.sourceSpanId}/${pair.second.provenance.sourceSpanId}`,
+      ),
+    );
+    const attempts: number[] = [];
+    const real = createCertifiedCubicTubeChain();
+    const result = certifyDeclaredOffsetChain(declared, recorded, {
+      openRequest: (count) => {
+        attempts.push(count);
+        return real.openRequest(count);
+      },
+    });
+    const spline = declared.pieces[0]!;
+    if (spline.kind !== "derivedCubic") throw new Error("spline");
+    const terminalSpan = spline.spans.at(-1)!.source.spanIndex;
+    const ring = spline.spans.filter(
+      (span) => span.source.spanIndex === terminalSpan,
+    ).length;
+    expect(sizes, "sized (1 + n_P)(1 + n_Q) once").toEqual([ring]);
+    expect(pairs.length).toBeLessThanOrEqual(ring);
+    expect(pairs[0], "the first pass: the terminal pair only").toBe(
+      `${spline.spans.length - 1}/0`,
+    );
+    expect(new Set(pairs).size, "the terminal pair is never re-issued").toBe(
+      pairs.length,
+    );
+    expect(attempts, "1 + one deferred deep vertex").toEqual([2]);
+    expect(trimsOf(result)).toEqual([
+      expect.objectContaining({ kind: "trim", jointIndex: 0 }),
+    ]);
+    expect(trimsOf(result)[0]!.offsets[0]).toBeGreaterThan(0);
+  }, 60_000);
+
+  test("R3 meters (meter review R2): the deferred deep vertex draws on one resolver meter and one staged certifier budget: resolver 199,432 / 37,559 / 497 (sized 7; the deep requery issues 12/0 only), certifier attempts 11,562 → 200,907 / 51,861 / 373; count passes, count − 1 exhausts; exhaustion inside the deep requery or attempt 2 is reported as itself, never as the pre-deep verdict", () => {
+    const declared = declaredOf("SL arch R3 0.4");
+    const meterOf = (snapshot: ExactProofBudgetSnapshot) => ({
+      operations: snapshot.operations,
+      euclideanSteps: snapshot.euclideanSteps,
+      integerBits: Math.max(snapshot.maxStoredBits, snapshot.maxPreProductBits),
+    });
+    const KEYS = ["operations", "euclideanSteps", "integerBits"] as const;
+    const RESOLVER = {
+      operations: 199_432,
+      euclideanSteps: 37_559,
+      integerBits: 497,
+    };
+    const CERTIFIER = {
+      operations: 200_907,
+      euclideanSteps: 51_861,
+      integerBits: 373,
+    };
+    const RESOLVER_EXHAUSTED =
+      "Joint query is not verified (uncertain exact-query-proof-budget-exhausted: The deterministic exact-query arithmetic budget was exhausted.): the whole-request budget of all 7 joint queries is exhausted, not necessarily by this joint.";
+    const resolverSnapshots: ExactProofBudgetSnapshot[] = [];
+    const pairs: string[] = [];
+    const { sizes, query: recorded } = recordingRequests(
+      createCertifiedNeutralCurveRequestQueryWithBudgetObserverForTest(
+        (snapshot) => resolverSnapshots.push(snapshot),
+      ),
+      (pair) =>
+        pairs.push(
+          `${pair.first.provenance.sourceSpanId}/${pair.second.provenance.sourceSpanId}`,
+        ),
+    );
+    const certifierSnapshots: ExactProofBudgetSnapshot[] = [];
+    const result = certifyDeclaredOffsetChain(
+      declared,
+      recorded,
+      createCertifiedCubicTubeChainWithBudgetObserverForTest((snapshot) =>
+        certifierSnapshots.push(snapshot),
+      ),
+    );
+    expect(result.ok).toBe(true);
+    expect(sizes).toEqual([7]);
+    expect(pairs, "terminal first pass, then the deep requery").toEqual([
+      "13/0",
+      "12/0",
+    ]);
+    expect(resolverSnapshots.map(meterOf)).toEqual([
+      { operations: 64 * 7, euclideanSteps: 0, integerBits: 0 },
+      { operations: 45_191, euclideanSteps: 11_464, integerBits: 497 },
+      RESOLVER,
+    ]);
+    expect(certifierSnapshots.map((snapshot) => snapshot.operations)).toEqual([
+      11_562, 200_907,
+    ]);
+    expect(meterOf(certifierSnapshots.at(-1)!)).toEqual(CERTIFIER);
+    const withResolver = (limits: Record<string, number>) =>
+      certifyDeclaredOffsetChain(
+        declared,
+        createCertifiedNeutralCurveRequestQueryWithLowerBudgetForTest(limits),
+        createCertifiedCubicTubeChain(),
+      );
+    const withCertifier = (limits: Record<string, number>) =>
+      certifyDeclaredOffsetChain(
+        declared,
+        query,
+        createCertifiedCubicTubeChainWithLowerBudgetForTest(limits),
+      );
+    for (const key of KEYS) {
+      expect(withResolver({ [key]: RESOLVER[key] }).ok, `resolver ${key}`).toBe(
+        true,
+      );
+      expect(
+        withResolver({ [key]: RESOLVER[key] - 1 }),
+        `resolver ${key} − 1`,
+      ).toMatchObject({
+        ok: false,
+        code: codes.topologyUncertain,
+        message: RESOLVER_EXHAUSTED,
+      });
+      expect(
+        withCertifier({ [key]: CERTIFIER[key] }).ok,
+        `certifier ${key}`,
+      ).toBe(true);
+      expect(
+        withCertifier({ [key]: CERTIFIER[key] - 1 }),
+        `certifier ${key} − 1`,
+      ).toMatchObject({
+        ok: false,
+        code: codes.topologyUncertain,
+        message: expect.stringContaining("exact-query-proof-budget-exhausted"),
+      });
+    }
+    // Inside the deep requery's first query (after the first pass).
+    expect(withResolver({ operations: 45_191 + 64 })).toMatchObject({
+      ok: false,
+      code: codes.topologyUncertain,
+      message: RESOLVER_EXHAUSTED,
+    });
+    // Inside attempt 2's retry entry charge and inside its window cone.
+    for (const cap of [11_563, 125_389])
+      expect(
+        withCertifier({ operations: cap }),
+        `certifier @ ${cap}`,
+      ).toMatchObject({
+        ok: false,
+        code: codes.topologyUncertain,
+        message:
+          "Tube stability is not certified: uncertain exact-query-proof-budget-exhausted: The deterministic exact-query arithmetic budget was exhausted.",
+      });
+  }, 120_000);
+
+  test("Lemma T-W certifier literal (SL h0.4 d = −0.1, two window cones): count passes, count − 1 exhausts on operations, Euclid and bits", () => {
+    const declared = declaredOf("SL h0.4 -0.1");
+    const snapshots: ExactProofBudgetSnapshot[] = [];
+    const result = certifyDeclaredOffsetChain(
+      declared,
+      query,
+      createCertifiedCubicTubeChainWithBudgetObserverForTest((snapshot) =>
+        snapshots.push(snapshot),
+      ),
+    );
+    expect(result.ok).toBe(true);
+    const last = snapshots.at(-1)!;
+    const literal = {
+      operations: last.operations,
+      euclideanSteps: last.euclideanSteps,
+      integerBits: Math.max(last.maxStoredBits, last.maxPreProductBits),
+    };
+    expect(literal).toEqual(G5D_CERTIFIER_LITERAL);
+    for (const key of [
+      "operations",
+      "euclideanSteps",
+      "integerBits",
+    ] as const) {
+      const under = (limit: number) =>
+        certifyDeclaredOffsetChain(
+          declared,
+          query,
+          createCertifiedCubicTubeChainWithLowerBudgetForTest({
+            [key]: limit,
+          }),
+        );
+      expect(under(literal[key]).ok, `${key} = count`).toBe(true);
+      expect(under(literal[key] - 1), `${key} = count − 1`).toMatchObject({
+        ok: false,
+        code: codes.topologyUncertain,
+        message: expect.stringContaining("exact-query-proof-budget-exhausted"),
+      });
+    }
+  }, 120_000);
+
+  // Deep S2 (each spline↔spline resolution costs ≈ 8–14 s).
+  test("deep S2: lens 0.4/−0.3 d = −0.2 verifies with both trims deep on both splines, glue at ¾ (k ≥ 2 only after ½)", () => {
+    const { result, sizes, pairs } = run("SS lens 0.4/-0.3 -0.2");
+    // G20: the ring of radius 1 (4 slots per joint); the pole-box prefilter
+    // skips 6/0 and 7/1 at both joints, never the crossing pair 6/1.
+    expect(sizes).toEqual([8]);
+    expect(pairs).toEqual(["7/0", "6/1", "7/0", "6/1"]);
+    expect(trimsOf(result)).toEqual([
+      {
+        kind: "graph-trim",
+        jointIndex: 0,
+        first: 6,
+        second: 9,
+        offsets: [1, 1],
+        glue: [0.75, 0.75],
+      },
+      {
+        kind: "graph-trim",
+        jointIndex: 1,
+        first: 14,
+        second: 1,
+        offsets: [1, 1],
+        glue: [0.75, 0.75],
+      },
+    ]);
+  }, 120_000);
+
+  test("deep S2: lens 0.8/−0.6 d = −0.2 verifies with one deep side per trim, glue at ⅞ on the deep side", () => {
+    const { result, sizes, pairs } = run("SS lens 0.8/-0.6 -0.2");
+    expect(sizes).toEqual([8]);
+    expect(pairs).toEqual(["13/0", "12/0", "9/0", "9/1"]);
+    expect(trimsOf(result)).toEqual([
+      {
+        kind: "graph-trim",
+        jointIndex: 0,
+        first: 12,
+        second: 14,
+        offsets: [1, 0],
+        glue: [0.5, 0.875],
+      },
+      {
+        kind: "graph-trim",
+        jointIndex: 1,
+        first: 23,
+        second: 1,
+        offsets: [0, 1],
+        glue: [0.875, 0.5],
+      },
+    ]);
+  }, 120_000);
+
+  test.each([
+    [
+      "SS lens 0.4/-0.3 -0.3",
+      ["7/0"],
+      "Offset joint has no crossing within one leaf of the corner: the corner trim may lie too deep inside the offset curve to verify (deep spline-to-spline corners are checked only one piece deep).",
+    ],
+    [
+      "SS lens 0.8/-0.6 -0.3",
+      ["13/0", "12/1"],
+      "Offset joint has no crossing within one leaf of the corner: the corner trim may lie too deep inside the offset curve to verify (deep spline-to-spline corners are checked only one piece deep).",
+    ],
+    // A real U-B row: every pair of the terminal source spans beyond the
+    // ring is pole-box disjoint, so no crossing lies anywhere in the spans.
+    [
+      "SS lens 0.4/-0.3 -0.4",
+      ["9/0"],
+      "Offset joint has no crossing on any leaf of the terminal source span: the offset corner lies beyond the terminal source span (U-B), or the offsets do not meet.",
+    ],
+  ] as const)(
+    "G20: %s fails closed at joint 0 after the terminal query and the unskipped radius-1 ring pairs only: the too-deep text when a pair beyond the ring may hold the crossing, the U-B text when none can",
+    (label, issued, message) => {
+      const { result, sizes, pairs } = run(label);
+      expect(result).toMatchObject({
+        ok: false,
+        code: codes.splineJointUnsupported,
+        message,
+      });
+      expect(sizes, "(1 + 1)² slots per joint").toEqual([8]);
+      expect(pairs).toEqual(issued);
+    },
+    120_000,
+  );
+
+  test.each([
+    [
+      "SS lens 0.4/-0.3 -0.1",
+      "(leaves 7/8): uncertain trim-window-unproven: The emitted terminal hodograph is not proved inside the graph cone e (G1).",
+    ],
+    [
+      "SS lens 0.8/-0.6 -0.1",
+      "(leaves 11/12): uncertain trim-window-unproven: The vertex window of a terminal leaf is not proved inside it (t ≥ 1).",
+    ],
+  ] as const)(
+    "%s (a refinement row, U-G7) keeps failing closed with its current code",
+    (label, text) => {
+      expect(run(label).result).toMatchObject({
+        ok: false,
+        code: codes.topologyUncertain,
+        message: expect.stringContaining(text),
+      });
+    },
+    120_000,
+  );
 });

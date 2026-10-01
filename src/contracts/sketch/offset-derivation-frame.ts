@@ -12,6 +12,7 @@ import {
 import {
   adoptOffsetChainPlan,
   certifyDeclaredOffsetChain,
+  classifyOffsetChainVertex,
   declaredOffsetChainPieces,
   firstChoiceOffsetChainPlan,
   offsetArcSweepAdmissible,
@@ -105,6 +106,7 @@ import type { SplineOffsetCubicSpan } from "@/contracts/sketch/spline-offset-geo
  *    - It requires e·g ≥ 0 and Lemma G's bound, and fails closed otherwise.
  *    - d math A6: at a concave vertex with g ≠ 0 the certificate proves O* simple and bridged; it does **not** prove that the untranslated true offsets cross exactly once.
  * 3. **R_C′**: at a declared coincident or shared-point cubic↔cubic join that passes H2 in a solver-accepted frame, O* is the two pieces' true offsets, each trimmed at their unique common point.
+ *    - **R_C″** ([TECH], T08b-g5d, amends R_C): at a declared coincident or shared-point line↔cubic join that passes H2 in a solver-accepted frame, O* is the two pieces' true offsets, each trimmed at the unique common point of the two joined pieces' true offsets over the joint window. Since T08b-g5d (U-G6) the trim may lie on an inner leaf of the terminal source span (Lemma T-W, deep S2); the leaves before it are removed and never drawn. The claim is joint-local (g5d math review A1): removed leaves carry no claim against other pieces (they are neither in E nor in O*; every retained pair keeps K3).
  * 4. **R′** (seed arcs, F1/R10 wording): circles through the arc's declared ends, with r_V = |V − C| at declared-join ends and ρ_s at trimmed or chain-terminal ends, plus a vertical radial step of length |r_E − r_S| at an interior knot. It realizes the arc's own declared end-point incidence within τ, measured exactly, and is not undeclared healing.
  * 5. **G1 is disclaimed.** Tangent deviation at joint-arc ends is reported, never gated (E4, e A4). A user tangent constraint on a gapped joint arc sees a residual ≈ |g|.
  * 6. **Angles are not certified.** Consumers draw arcs from rounded `atan2` angles of certified ends (e R4). Rounding across π draws the same half circle; only a 0/2π wrap is rejected (F10 wrap guard on the published ends).
@@ -499,10 +501,20 @@ type TrimOutcome =
     }
   | { readonly ok: false };
 
-/** One trim: seeded from the plan's representatives, else from the source vertex. */
+/**
+ * One trim: seeded from the plan's representatives, else from the source
+ * vertex. T08b-g5d: at a ring joint (`leaves.pairs`, a derived cubic side
+ * with inner leaves in its terminal source span) whose terminal pair does
+ * not converge, Newton runs on each candidate pair in the resolver's ring
+ * order, seeded at the pair's vertex-side ends, and the first pair that
+ * converges strictly inside both leaves is the trim; `scan` is false at a
+ * D > 0 absorbable vertex, where the deep trim is only the SEL's fallback
+ * after absorption (design §3.2 item 3), so the first choice absorbs.
+ */
 function solveTrim(
   leaves: ReturnType<typeof offsetChainJointLeaves>,
   entry: Extract<OffsetFramePlanEntry, { kind: "trim" }>,
+  scan: boolean,
 ): TrimOutcome {
   const { first, second } = leaves;
   const attempt = (
@@ -531,12 +543,20 @@ function solveTrim(
   }
   const vertexParameter = (leaf: OffsetChainJointLeaf) =>
     leaf.bounds[leaf.vertexSide === "low" ? 0 : 1];
-  return attempt(
-    first[0]!,
-    second[0]!,
-    [vertexParameter(first[0]!), vertexParameter(second[0]!)],
-    false,
-  );
+  const pairAttempt = (i: number, j: number) =>
+    attempt(
+      first[i]!,
+      second[j]!,
+      [vertexParameter(first[i]!), vertexParameter(second[j]!)],
+      false,
+    );
+  const terminalOutcome = pairAttempt(0, 0);
+  if (terminalOutcome.ok || !scan || !leaves.pairs) return terminalOutcome;
+  for (const [i, j] of leaves.pairs) {
+    const outcome = pairAttempt(i, j);
+    if (outcome.ok) return outcome;
+  }
+  return terminalOutcome;
 }
 
 /**
@@ -593,15 +613,23 @@ interface TrimRepresentative {
   readonly second: { readonly leaf: number; readonly parameter: number };
 }
 
-/** Trims by the Newton step, then the frame geometry from them. */
+/**
+ * Trims by the Newton step, then the frame geometry from them. `absorbable`:
+ * the D > 0 absorbable declared vertices (no deep scan there, `solveTrim`).
+ */
 function buildFrameGeometry(
   pieces: readonly OffsetChainPiece[],
   plan: readonly OffsetFramePlanEntry[],
+  absorbable: (jointIndex: number) => boolean,
 ): BuiltFrame {
   const representatives = new Map<number, TrimRepresentative>();
   for (const [jointIndex, entry] of plan.entries()) {
     if (entry.kind !== "trim") continue;
-    const solved = solveTrim(offsetChainJointLeaves(pieces, jointIndex), entry);
+    const solved = solveTrim(
+      offsetChainJointLeaves(pieces, jointIndex),
+      entry,
+      !absorbable(jointIndex),
+    );
     if (!solved.ok) return { ok: false, jointIndex };
     representatives.set(jointIndex, {
       first: {
@@ -718,19 +746,53 @@ function assembleFrameGeometry(
     const seed = piece.seedEntityId;
     if (piece.kind === "circle") continue;
     if (piece.kind === "derivedCubic") {
-      const last = piece.spans.length - 1;
+      // T08b-g5d: a trim end sits on its own trim leaf (g3 review A4); the
+      // leaves before it are `removed` by that trim, exactly as the
+      // resolution assembles them.
+      const startLeaf =
+        own.start.kind === "joint" && own.startLeaf !== undefined
+          ? own.startLeaf
+          : 0;
+      const endLeaf =
+        own.end.kind === "joint" && own.endLeaf !== undefined
+          ? own.endLeaf
+          : piece.spans.length - 1;
+      if (startLeaf > endLeaf)
+        return chainFailure(
+          codes.jointUnsatisfied,
+          "Both trims of one offset curve remove its whole active domain.",
+          seed,
+        );
+      const removedBy = (end: OffsetChainDomainEnd): OffsetChainDomainEnd =>
+        end.kind === "joint"
+          ? { kind: "removed", jointIndex: end.jointIndex }
+          : end;
       cubics.set(
         seed,
         piece.spans.map((span, offset) => ({
           span,
           sourceDomain: span.sourceInterval,
-          start: offset === 0 ? own.start : { kind: "source" },
-          end: offset === last ? own.end : { kind: "source" },
+          start:
+            offset < startLeaf
+              ? removedBy(own.start)
+              : offset > endLeaf
+                ? removedBy(own.end)
+                : offset === startLeaf
+                  ? own.start
+                  : { kind: "source" },
+          end:
+            offset < startLeaf
+              ? removedBy(own.start)
+              : offset > endLeaf
+                ? removedBy(own.end)
+                : offset === endLeaf
+                  ? own.end
+                  : { kind: "source" },
           representativeQueryDomain: [
-            offset === 0 && own.startParameter !== undefined
+            offset === startLeaf && own.startParameter !== undefined
               ? own.startParameter
               : span.sourceInterval[0],
-            offset === last && own.endParameter !== undefined
+            offset === endLeaf && own.endParameter !== undefined
               ? own.endParameter
               : span.sourceInterval[1],
           ],
@@ -860,7 +922,12 @@ function runPlan(
     const effective = adopted.plan.map((entry, index) =>
       entry.kind === "trim" ? plan[index]! : entry,
     );
-    const geometry = buildFrameGeometry(adopted.pieces, effective);
+    const geometry = buildFrameGeometry(adopted.pieces, effective, (index) => {
+      const vertex = declared.vertices[index];
+      if (!vertex) return false;
+      const vertexClass = classifyOffsetChainVertex(vertex);
+      return vertexClass.class === "nonparallel" && vertexClass.forward;
+    });
     if (!geometry.ok) {
       if ("code" in geometry) return geometry;
       if (take(geometry.jointIndex)) continue;
@@ -2342,8 +2409,10 @@ function localQueryDomain(
  * `pointOnCurve` residual on a derived cubic output): r = P − C(leaf, u).
  * The location comes from a closest-point search restricted to every
  * leaf's representative query domain (`closestSplineSpanLocation` with
- * `domains`), so a point never binds to a trimmed-off tail, unless a held
- * `location` is given. The gradient holds (leaf, u) fixed: ∂r/∂P = I and
+ * `domains`; T08b-g5d: never a leaf `removed` by a deep trim), so a point
+ * never binds to a trimmed-off tail, unless a held `location` is given (a
+ * held location on a leaf a later frame removes is the caller's: like the
+ * g5b query-domain restriction, a fresh search jumps to the drawn domain). The gradient holds (leaf, u) fixed: ∂r/∂P = I and
  * ∂r_c/∂source is the pullback of the held leaf's pole cotangent
  * −Bᵢ(u)·e_c. `derivativeUnavailable` when the search finds nothing or the
  * pullback is unavailable.
@@ -2384,7 +2453,10 @@ export function offsetFrameCurveResidual(input: {
           poles: leaf.span.poles,
           differential: { interval: [0, 0] as const, poles: zeroPoles },
         })),
-        leaves.map(localQueryDomain),
+        // T08b-g5d: a removed leaf has no drawn domain (never bound).
+        leaves.map((leaf) =>
+          leaf.start.kind === "removed" ? undefined : localQueryDomain(leaf),
+        ),
       );
       return hit ? { leaf: hit.spanIndex, u: hit.u } : null;
     })();

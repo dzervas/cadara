@@ -49,6 +49,7 @@ import {
   microSeedArcRows,
   nearCollinearCornerRow,
   offsetFrameChainRows,
+  deepTrimRows,
   offsetFrameDerivativeRows,
   seedArcRows,
   type AcceptedPair,
@@ -96,6 +97,10 @@ import {
   evaluateSplineSpan,
 } from "@/contracts/sketch/spline-geometry";
 import { solveCommittedConstraintDefinition } from "@/domain/editor/sketch-session/constraints";
+import {
+  offsetFrameShellSpans,
+  ownerSpanKey,
+} from "@/contracts/sketch/offset-derivation-outputs";
 import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
 import { createCertifiedNeutralCurveRequestQuery } from "@/domain/modeling/neutral-curve-certification/query";
 
@@ -2733,4 +2738,181 @@ describe("T08b-g2 point-on-derived-curve residual helper", () => {
     expect(result.location.u).toBeLessThanOrEqual(localEnd);
     expect(Math.hypot(...result.value)).toBeGreaterThan(1e-4);
   });
+});
+
+// Logic lane (docs/testing.md): T08b-g5d (U-G6) at the exported solve /
+// publish frame seam on the shared native rows `deepTrimRows()`: G3
+// agreement on a deep trim, the record omission of removed sub-spans, the
+// drawn-domain residual, and the fixed-topology JVP against a central FD.
+describe("T08b-g5d frame: deep trims inside the terminal source span", () => {
+  const rows = deepTrimRows();
+  const deepRow = (label: string): DerivativeRow => {
+    const row = rows.find((item) => `${item.row} ${item.distance}` === label);
+    if (!row) throw new Error(`no row ${label}`);
+    const harness = matrixHarnesses.native;
+    harness.resetSequence();
+    const pair = harness.solvedPair(row.build(harness));
+    return {
+      label,
+      pair,
+      seeds: pair.definition.entities.map((entity) => entity.entityId),
+      distance: row.distance,
+    };
+  };
+  const shellSpansOf = (frame: OffsetSolveFrame, seed: SketchEntityId) =>
+    offsetFrameShellSpans(frame, {
+      entityId: "shell" as SketchEntityId,
+      seed,
+      spanIds: new Map(
+        frame.cubics
+          .get(seed)!
+          .map((leaf) => [
+            ownerSpanKey(leaf.span.source),
+            ownerSpanKey(leaf.span.source),
+          ]),
+      ),
+    });
+
+  test("SL h0.4 d = −0.1: the first-choice frame's ring Newton scan names the SEL's deep trim leaves, so publish certifies with no re-solve; the shell record omits the removed sub-spans", () => {
+    const row = deepRow("SL h0.4 -0.1");
+    const relationship = relationshipOf(row.seeds, row.distance);
+    const cycle = publishCycle(relationship, row.pair);
+    expect(cycle.publications.map((item) => item.status)).toEqual([
+      "certified",
+    ]);
+    const publication = certifiedOf(cycle);
+    const { frame } = publication;
+    expect(
+      frame.trims.map((trim) => [
+        trim.jointIndex,
+        trim.first.leaf,
+        trim.second.leaf,
+      ]),
+    ).toEqual([
+      [0, 6, 0],
+      [1, 0, 1],
+    ]);
+    const spline = frame.pieces.find((piece) => piece.kind === "derivedCubic")!;
+    const leaves = frame.cubics.get(spline.seedEntityId)!;
+    // Removed: the vertex leaf of each trimmed end, marked by its trim.
+    expect(
+      leaves.flatMap((leaf, index) =>
+        leaf.start.kind === "removed" ? [[index, leaf.start.jointIndex]] : [],
+      ),
+    ).toEqual([
+      [0, 1],
+      [7, 0],
+    ]);
+    expect(leaves.map((leaf) => [leaf.start.kind, leaf.end.kind])).toEqual(
+      leaves.map((_, index) =>
+        index === 0 || index === 7
+          ? ["removed", "removed"]
+          : [
+              index === 1 ? "joint" : "source",
+              index === 6 ? "joint" : "source",
+            ],
+      ),
+    );
+    // The record: removed sub-spans left out before the sub-index count; the
+    // trim leaves are the record's first and last sub-spans, each trimmed
+    // strictly inside (the g3/g5c region-input premise).
+    const record = shellSpansOf(frame, spline.seedEntityId);
+    expect(record).toHaveLength(leaves.length - 2);
+    expect(record[0]!.poles).toBe(leaves[1]!.span.poles);
+    expect(record.at(-1)!.poles).toBe(leaves[6]!.span.poles);
+    expect(record[0]!.subIndex).toBe(0);
+    for (const [span, end] of [
+      [record[0]!, 0],
+      [record.at(-1)!, 1],
+    ] as const) {
+      const [s0, s1] = span.sourceDomain;
+      const trimmed = span.queryDomain[end];
+      expect(trimmed > s0 && trimmed < s1, "trim strictly inside").toBe(true);
+    }
+    // Interior sub-spans and the contiguous domains are unchanged.
+    for (const [index, span] of record.entries()) {
+      if (index > 0)
+        expect(span.sourceDomain[0]).toBe(record[index - 1]!.sourceDomain[1]);
+      if (index > 0 && index < record.length - 1)
+        expect(span.queryDomain).toEqual(span.sourceDomain);
+    }
+  }, 120_000);
+
+  test("R3 vertex (math review A3): the arch → line corner absorbed first publishes its deferred deep trim within one hinted re-solve (planChanged with the certifier's plan, then certified on the deep leaf)", () => {
+    const row = deepRow("SL arch R3 0.4");
+    const cycle = publishCycle(
+      relationshipOf(row.seeds, row.distance),
+      row.pair,
+    );
+    expect(cycle.publications.map((item) => item.status)).toEqual([
+      "planChanged",
+      "certified",
+    ]);
+    const first = cycle.publications[0]!;
+    if (first.status !== "planChanged") throw new Error("planChanged");
+    expect(first.reason).toBe("plan");
+    expect(cycle.solves).toHaveLength(2);
+    const { frame } = certifiedOf(cycle);
+    expect(frame.plan.origin, "the hinted re-solve").toBe("certified");
+    const spline = frame.pieces.find((piece) => piece.kind === "derivedCubic")!;
+    const leaves = frame.cubics.get(spline.seedEntityId)!;
+    // The deep trim replaces the absorption: on the inner leaf 12 of the
+    // terminal source span, the vertex leaf 13 removed by joint 0.
+    expect(
+      frame.trims.map((trim) => [
+        trim.jointIndex,
+        trim.first.leaf,
+        trim.second.leaf,
+      ]),
+    ).toEqual([[0, leaves.length - 2, 0]]);
+    expect(leaves.at(-1)!.start).toEqual({ kind: "removed", jointIndex: 0 });
+  }, 120_000);
+
+  test("SL h0.4 d = −0.1: the point-on-curve residual never binds to a removed leaf (its emitted vertex pole maps to the drawn domain)", () => {
+    const row = deepRow("SL h0.4 -0.1");
+    const { frame, derivatives } = frameAndDerivatives(row);
+    const spline = frame.pieces.find((piece) => piece.kind === "derivedCubic")!;
+    const leaves = frame.cubics.get(spline.seedEntityId)!;
+    for (const removed of [0, 7]) {
+      const residual = offsetFrameCurveResidual({
+        frame,
+        derivatives,
+        seedEntityId: spline.seedEntityId,
+        point: leaves[removed]!.span.poles[removed === 0 ? 0 : 3],
+      });
+      if ("ok" in residual && !residual.ok) throw new Error(residual.message);
+      if (!residual.ok) throw new Error("residual");
+      expect(residual.location.leaf).toBe(removed === 0 ? 1 : 6);
+    }
+  });
+
+  test.each(["SL h0.4 -0.1", "SS lens 0.4/-0.3 -0.2"])(
+    "%s: the fixed-topology JVP of every published datum (deep trim leaves, removed spans) matches a central FD",
+    (label) => {
+      const target = deepRow(label);
+      const { derivatives, frame } = frameAndDerivatives(target);
+      expect(
+        frame.trims.some(
+          (trim) =>
+            trim.first.leaf !== 0 &&
+            trim.first.leaf !==
+              (frame.cubics.get(trim.first.seedEntityId)?.length ?? 1) - 1,
+        ) ||
+          frame.trims.some(
+            (trim) =>
+              trim.second.leaf !== 0 &&
+              trim.second.leaf !==
+                (frame.cubics.get(trim.second.seedEntityId)?.length ?? 1) - 1,
+          ),
+        "premise: a deep trim leaf",
+      ).toBe(true);
+      const { worst, keys } = expectJvpMatchesFd(
+        target,
+        randomVariation(derivatives.sourceDofs, prng(53)),
+      );
+      expect(keys).toBeGreaterThan(0);
+      expect(worst).toBeLessThanOrEqual(FD_BOUND);
+    },
+    120_000,
+  );
 });

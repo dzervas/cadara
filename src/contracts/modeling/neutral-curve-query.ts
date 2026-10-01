@@ -463,6 +463,13 @@ export interface CubicTubeChainLeaf {
   readonly displacementBound: number;
   /** K3 radius r = ε + δ⁺ of each convex end (concave tails are never added). */
   readonly clearanceRadius: number;
+  /**
+   * T08b-g5d (U-G6): a cubic leaf wholly removed by a deep trim (a leaf
+   * strictly between its piece's traversal-terminal leaf and the trim leaf).
+   * It is not part of the certified emitted chain E: no displacement claim
+   * (its bounds are its owner ε, reported only). Absent on every other leaf.
+   */
+  readonly removed?: true;
 }
 
 export type CubicTubeChainResult =
@@ -654,6 +661,17 @@ export interface TubeChainTrimDeclaration {
    * ONE closed piece: the intrinsic positional closure (T08b-d T7).
    */
   readonly authority?: TubeChainVertexAuthority;
+  /**
+   * T08b-g5d (U-G6): the trim leaf of each side, counted in leaves from that
+   * piece's traversal terminal (the vertex leaf) inward: the leaves before it
+   * are removed. Absent means 0 (the terminal leaf; every pre-g5d request).
+   * Only a cubic side may be deep, inside the terminal leaf's source span.
+   * Never trusted: it only names the leaf the certifier must prove the trim
+   * on (the stored bounds through that leaf's `queryDomain`), and every
+   * removed leaf is re-proved (window cone, or the deep S2 covering).
+   */
+  readonly firstLeafOffset?: number;
+  readonly secondLeafOffset?: number;
 }
 
 /**
@@ -731,6 +749,17 @@ export interface PieceTubeChainRequest {
  * leaf's natural parameter (Bézier τ, or segment t). No representative
  * parameter or position is claimed; rounded emitted ends are NOT claimed to
  * connect (emitted representation and JVP remain a later batch's obligation).
+ *
+ * T08b-g5d (U-G6, Lemma T-W): the cubic side may be deep, its trim leaf an
+ * inner leaf of the terminal source span (`firstLeafOffset` /
+ * `secondLeafOffset` > 0). Then Lemma T runs on the trim leaf and the window
+ * cone s·rot(a)·O′ > 0 (the same s) on every removed leaf, so the true offset
+ * meets the full support line of ℓ once on the window. Reference [TECH]
+ * R_C″, read joint-locally (math review A1): at a declared coincident or
+ * shared-point line↔cubic join that passes H2 in a solver-accepted frame, O*
+ * is the two pieces' true offsets, each trimmed at the unique common point of
+ * the two joined pieces' true offsets over the joint window. Removed leaves
+ * carry no claim against other pieces (they are neither in E nor in O*).
  */
 export interface TubeChainTrimJoin {
   readonly kind: "trim";
@@ -746,10 +775,14 @@ export interface TubeChainTrimJoin {
   readonly secondRootBounds: readonly [number, number];
   /** Upper bound M·δ on the removed-tail parameter-shift displacement. */
   readonly tail: number;
+  /** T08b-g5d: the proved trim-leaf offsets (present only when > 0). */
+  readonly firstLeafOffset?: number;
+  readonly secondLeafOffset?: number;
 }
 
 /**
- * S2 graph trim at a concave cubic↔cubic joint (terminal leaves only). Both
+ * S2 graph trim at a concave cubic↔cubic joint (terminal leaves, or since
+ * T08b-g5d deep trim leaves inside the terminal source span). Both
  * terminal leaves are e-graphs (emitted hodograph and true O′ box strictly
  * e-positive); the certificate concerns ONLY the abstract chain trimmed at the
  * exact (unknown) witnessed root of `jointIndex`, against the two pieces' true
@@ -770,6 +803,15 @@ export interface TubeChainGraphTrimJoin {
   readonly secondRootBounds: readonly [number, number];
   /** σ, outward down: the proved true-slope separation on the vertex windows. */
   readonly separation: number;
+  /**
+   * T08b-g5d deep S2: the proved trim-leaf offsets (present only when > 0)
+   * and the Lemma-C glue fractions [first, second] measured from each trim
+   * leaf's vertex side (present only when one is not ½: 1 − 2⁻ᵏ, k ≥ 2,
+   * tried only after k = 1 failed its collar).
+   */
+  readonly firstLeafOffset?: number;
+  readonly secondLeafOffset?: number;
+  readonly glue?: readonly [number, number];
 }
 
 interface TubeChainVertexJoinBase {

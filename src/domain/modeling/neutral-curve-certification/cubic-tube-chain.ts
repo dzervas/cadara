@@ -427,6 +427,14 @@ const CIRCLE_SEED_PRECHARGE = 64 + 16 * 8;
 const ARC_TRIM_PRECHARGE = 256;
 /** Fixed precharge of one Lemma-W realization-segment test, before it. */
 const JUNCTION_PRECHARGE = 32;
+/** T08b-g5d: fixed precharge of one removed leaf's Lemma T-W window cone. */
+const WINDOW_CONE_PRECHARGE = 16;
+/** T08b-g5d: fixed precharge of one removed leaf of a deep S2 covering (one restriction). */
+const DEEP_COVERING_PRECHARGE = 64;
+/** T08b-g5d: fixed precharge of one Lemma-C glue candidate k ≥ 2. */
+const GLUE_CANDIDATE_PRECHARGE = 32;
+/** T08b-g5d: Lemma-C glue candidates 1 − 2⁻ᵏ, k = 1 (the reviewed ½) … 4. */
+const GLUE_DEPTH = 4;
 /** Bisection depth of the Lemma-T° window / exclusion subdivision. */
 const SEED_TRIM_DEPTH = 5;
 /** The eight exact circle leaf directions ([TECH] F11), counter-clockwise. */
@@ -2217,7 +2225,29 @@ function certifyChain(
       readonly ownSquared: ExactFraction;
       readonly ownUpper: ExactFraction;
       readonly otherUpper: ExactFraction;
+      /**
+       * T08b-g5d glue fallback (k ≥ 2, review R14): the leaf's exact e-dot
+       * poles, the natural side of its vertex and its trim report.
+       */
+      readonly poleX: readonly ExactFraction[];
+      readonly vertexSide: "start" | "end";
+      readonly report: number;
+      readonly sideIndex: 0 | 1;
+      /** A deep S2 side: only there may k ≥ 2 run (pre-g5d verdicts kept). */
+      readonly deep: boolean;
     }[]
+  >();
+  /**
+   * T08b-g5d (U-G6): cubic leaves wholly removed by deep trims, each proved
+   * by the Lemma T-W window cone or the deep S2 covering. Not part of E or
+   * O*: no composition, and K3-exempt except a deep S2 removed leaf against
+   * its partner piece's non-window leaves (`removedPartners`, review R13:
+   * that rule wins over the own-piece exemption on a self-trim).
+   */
+  const removedLeaves = new Set<number>();
+  const removedPartners = new Map<
+    number,
+    { readonly piece: number; readonly window: ReadonlySet<number> }
   >();
   /** Lemma-T trims with their one-shot Q4-E1 local upgrade (leaf loop). */
   const lemmaTrims: {
@@ -2271,19 +2301,33 @@ function certifyChain(
       negateExact(vector[0], budget),
       negateExact(vector[1], budget),
     ];
-    /** Traversal-terminal leaf of a piece and the natural side it ends on. */
-    const terminal = (pieceIndex: number, exiting: boolean) => {
+    /**
+     * Traversal-terminal leaf of a piece and the natural side it ends on;
+     * T08b-g5d: `offset` leaves inward (a deep trim leaf, offset < size).
+     */
+    const terminal = (pieceIndex: number, exiting: boolean, offset = 0) => {
       const piece = general.pieces[pieceIndex]!;
       const first = general.firstLeaf[pieceIndex]!;
       const size = general.sizes[pieceIndex]!;
       const naturalEnd = exiting !== piece.reversed;
       return {
-        leaf: naturalEnd ? first + size - 1 : first,
+        leaf: naturalEnd ? first + size - 1 - offset : first + offset,
         side: naturalEnd ? ("end" as const) : ("start" as const),
         reversed: piece.reversed,
       };
     };
     type Terminal = ReturnType<typeof terminal>;
+    /**
+     * T08b-g5d: a deep trim's chain-vertex leaves and its removed leaves per
+     * side, from the vertex inward (empty on a side whose trim leaf is its
+     * traversal terminal).
+     */
+    interface DeepWindow {
+      readonly firstVertex: Terminal;
+      readonly secondVertex: Terminal;
+      readonly removedFirst: readonly number[];
+      readonly removedSecond: readonly number[];
+    }
     const rotate = (vector: ExactPoint): ExactPoint => [
       negateExact(vector[1], budget),
       vector[0],
@@ -2679,24 +2723,49 @@ function certifyChain(
      * cubic with binary64-derived ends; no exhaustion is caught here. The
      * Lemma-C glue runs in the leaf loop, once every far-end correction is
      * written. Returns a failure, or null after recording the trim.
+     *
+     * T08b-g5d deep S2 (`deep`, a trim leaf offset > 0 on either side): the
+     * windows A₀ … A_I, B₀ … B_J end at the trim leaves `firstEnd` /
+     * `secondEnd`, all inside the terminal source span (checked by the
+     * caller). G1 on the trim leaves only; G2 on every window leaf; Lemma P
+     * as a covering from the chain vertex over the removed leaves into the
+     * trim leaf, H clipped to the windows' x-overlap; fix (a): the Lemma-X
+     * margins at the TRIM leaves' vertex-side knot poles, so Σ lies inside
+     * the x-ranges of A_I and B_J; no Q4-E1 local branch. `unitChords`: the
+     * e fallback (sum of binary64-normalized chords), tried only after the
+     * raw chords failed G1, G2 or Lemma V (`retryable`).
      */
     const graphTrim = (
       declaration: PieceTubeChainRequest["trims"][number],
       firstEnd: Terminal,
       secondEnd: Terminal,
       fail: (code: string, message: string, magnitude?: true) => Failure,
+      deep: DeepWindow | null,
+      unitChords: boolean,
+      retryable: WeakSet<Failure>,
     ): Failure | null => {
       const WINDOW = "trim-window-unproven";
       const CLASSIFICATION = "trim-classification-unproven";
       const EXISTENCE = "trim-existence-unproven";
       const COMPOSITION = "trim-composition-unproven";
-      // e: binary64 sum of both traversal emitted chords (uncharged, as K1).
+      /** A G1, G2 or Lemma V failure: the e fallback may retry it. */
+      const retry = (failure: Failure) => {
+        retryable.add(failure);
+        return failure;
+      };
+      // e: binary64 sum of both traversal emitted chords (uncharged, as K1);
+      // T08b-g5d fallback: of both binary64-normalized chords.
       const direction: [number, number] = [0, 0];
       for (const end of [firstEnd, secondEnd]) {
         const cubic = tubes[end.leaf]!.poles;
         const sign = end.reversed ? -1 : 1;
-        direction[0] += sign * (cubic[3]![0] - cubic[0]![0]);
-        direction[1] += sign * (cubic[3]![1] - cubic[0]![1]);
+        const chord = [
+          cubic[3]![0] - cubic[0]![0],
+          cubic[3]![1] - cubic[0]![1],
+        ] as const;
+        const length = unitChords ? Math.hypot(chord[0], chord[1]) : 1;
+        direction[0] += (sign * chord[0]) / length;
+        direction[1] += (sign * chord[1]) / length;
       }
       if (!direction.every(Number.isFinite))
         return fail(WINDOW, "The graph direction e is not finite.");
@@ -2741,9 +2810,9 @@ function certifyChain(
         };
       };
       const first = terminalData(firstEnd);
-      if (typeof first === "string") return fail(WINDOW, first);
+      if (typeof first === "string") return retry(fail(WINDOW, first));
       const second = terminalData(secondEnd);
-      if (typeof second === "string") return fail(WINDOW, second);
+      if (typeof second === "string") return retry(fail(WINDOW, second));
       type Side = typeof first;
       /** Per-side [P, Q] bounds of |E − O| at one point or sub-window. */
       type Pair = readonly [ExactFraction, ExactFraction];
@@ -2775,8 +2844,100 @@ function certifyChain(
         ] as const;
       };
       /**
+       * T08b-g5d deep Lemma P covering of one side: from the chain vertex over
+       * the removed leaves (whole leaves: G2 on the true O′ box, advance =
+       * min e·O′ · width, slopes = exact source restriction ∩ box) into the
+       * trim leaf with fraction t < 1 rounded up, or the whole window when
+       * the clip is this side's own far end. A string names the failure.
+       */
+      const deepCovering = (
+        side: Side,
+        removed: readonly number[],
+        width: ExactFraction,
+        whole: boolean,
+      ):
+        | "G2"
+        | "t"
+        | "cone"
+        | { readonly low: ExactFraction; readonly high: ExactFraction } => {
+        const { signed } = side;
+        let covered = zero;
+        let low: ExactFraction | null = null;
+        let high: ExactFraction | null = null;
+        const add = (range: readonly [ExactFraction, ExactFraction]) => {
+          low = low ? minimum([low, range[0]]) : range[0];
+          high = high ? maximum([high, range[1]]) : range[1];
+        };
+        for (const leaf of removed) {
+          budget.operation(DEEP_COVERING_PRECHARGE);
+          const box = derivatives[leaf]!;
+          const corner: ExactPoint = [
+            box[0]![positive(signed[0]) ? 0 : 1]!,
+            box[1]![positive(signed[1]) ? 0 : 1]!,
+          ];
+          const along = dot(signed, corner);
+          if (!positive(along)) return "G2";
+          const source = leafSource(leaf);
+          const leafWidth = subtractExact(source.high, source.low, budget);
+          const advance = multiplyExact(along, leafWidth, budget);
+          const corners = box[0]!.flatMap((x) =>
+            box[1]!.map((y): ExactPoint => [x, y]),
+          );
+          const boxSlopes = hull(corners.map(slope));
+          const remaining = subtractExact(width, covered, budget);
+          const done = !whole && compareExact(advance, remaining, budget) >= 0;
+          const t = done
+            ? exactFromNumber(
+                up(divideExact(remaining, advance, budget)),
+                budget,
+              )
+            : one;
+          if (done && compareExact(t, one, budget) >= 0) return "t";
+          // The natural vertex-end window [1 − t, 1] or [0, t] of this leaf.
+          const [from, to] =
+            side.end.side === "end"
+              ? [subtractExact(one, t, budget), one]
+              : [zero, t];
+          const at = (value: ExactFraction) =>
+            addExact(
+              source.low,
+              multiplyExact(value, leafWidth, budget),
+              budget,
+            );
+          const restricted = restrict(source.poles, at(from), at(to));
+          const steps = [0, 1, 2].map((index) =>
+            difference(restricted[index + 1]!, restricted[index]!),
+          );
+          if (!steps.every((step) => positive(dot(signed, step))))
+            return "cone";
+          const refined = hull(steps.map(slope));
+          add([
+            maximum([refined[0], boxSlopes[0]]),
+            minimum([refined[1], boxSlopes[1]]),
+          ]);
+          if (done) return { low: low!, high: high! };
+          covered = addExact(covered, advance, budget);
+        }
+        const fraction = whole
+          ? 1
+          : up(
+              divideExact(
+                subtractExact(width, covered, budget),
+                side.advance,
+                budget,
+              ),
+            );
+        if (!whole && !(fraction < 1)) return "t";
+        const refined = trueWindow(side, fraction);
+        if (!refined) return "cone";
+        add(refined);
+        return { low: low!, high: high! };
+      };
+      /**
        * Lemma P window from the vertex errors: H ⊇ [α_Q, β_P]; t = |H|/adv_O
        * rounded up, t < 1; σ > 0 on the exact vertex-end source windows.
+       * T08b-g5d deep: H from the CHAIN vertex leaves, clipped to the
+       * windows' x-overlap, each side covered by `deepCovering` (review O3).
        */
       const lemmaP = (
         vertex: Pair,
@@ -2786,6 +2947,97 @@ function certifyChain(
             readonly separation: ExactFraction;
             readonly leftTurn: boolean;
           } => {
+        if (deep) {
+          const chainVertex = (end: Terminal) =>
+            dot(e, poles[end.leaf]![end.side === "end" ? 3 : 0]!);
+          const deepLow = subtractExact(
+            chainVertex(deep.secondVertex),
+            multiplyExact(eUpper, errors[deep.secondVertex.leaf]!, budget),
+            budget,
+          );
+          const deepHigh = addExact(
+            chainVertex(deep.firstVertex),
+            multiplyExact(eUpper, errors[deep.firstVertex.leaf]!, budget),
+            budget,
+          );
+          if (!positive(subtractExact(deepHigh, deepLow, budget)))
+            return fail(
+              EXISTENCE,
+              "The true terminal offsets are not proved to overlap at the vertex.",
+            );
+          // Each window's own far x-end (P reaches down, Q up), with ε.
+          const farX = (side: Side) =>
+            dot(e, poles[side.end.leaf]![side.end.side === "end" ? 0 : 3]!);
+          const firstFar = subtractExact(
+            farX(first),
+            multiplyExact(eUpper, first.error, budget),
+            budget,
+          );
+          const secondFar = addExact(
+            farX(second),
+            multiplyExact(eUpper, second.error, budget),
+            budget,
+          );
+          const firstWhole = compareExact(firstFar, deepLow, budget) >= 0;
+          const secondWhole = compareExact(secondFar, deepHigh, budget) <= 0;
+          const lowClip = firstWhole ? firstFar : deepLow;
+          const highClip = secondWhole ? secondFar : deepHigh;
+          if (compareExact(lowClip, highClip, budget) >= 0)
+            return fail(
+              EXISTENCE,
+              "The deep trim windows' x-ranges are not proved to overlap.",
+            );
+          const covering = [
+            deepCovering(
+              first,
+              deep.removedFirst,
+              subtractExact(deepHigh, lowClip, budget),
+              firstWhole,
+            ),
+          ];
+          if (typeof covering[0] !== "string")
+            covering.push(
+              deepCovering(
+                second,
+                deep.removedSecond,
+                subtractExact(highClip, deepLow, budget),
+                secondWhole,
+              ),
+            );
+          const failed = covering.find((item) => typeof item === "string");
+          if (failed === "t")
+            return fail(
+              WINDOW,
+              "The deep trim window is not proved covered by its window leaves (t ≥ 1).",
+              true,
+            );
+          if (failed === "G2")
+            return retry(
+              fail(
+                WINDOW,
+                "The true offset derivative box of a removed window leaf is not proved inside the graph cone e (G2).",
+              ),
+            );
+          if (failed === "cone")
+            return fail(
+              CLASSIFICATION,
+              "The source hodograph is not proved inside the graph cone on a deep trim window leaf.",
+            );
+          const [firstHull, secondHull] = covering as {
+            readonly low: ExactFraction;
+            readonly high: ExactFraction;
+          }[];
+          const deepLeft = positive(distance);
+          const deepSeparation = deepLeft
+            ? subtractExact(secondHull!.low, firstHull!.high, budget)
+            : subtractExact(firstHull!.low, secondHull!.high, budget);
+          if (!positive(deepSeparation))
+            return fail(
+              CLASSIFICATION,
+              "The true slopes are not proved separated on the deep trim windows.",
+            );
+          return { separation: deepSeparation, leftTurn: deepLeft };
+        }
         const hullLow = subtractExact(
           second.vertex,
           multiplyExact(eUpper, vertex[1], budget),
@@ -2853,6 +3105,26 @@ function certifyChain(
           slopes: hull(steps.map(slope)),
         };
       };
+      // T08b-g5d review R12 (uncharged binary64 comparisons, exact): the
+      // stored bounds map strictly inside the named leaf, 0 < from ≤ to < 1
+      // (never an extrapolation of its polynomial; a wrong leaf offset fails).
+      const inside = (side: Side, bounds: readonly [number, number]) => {
+        const domain = (tubes[side.end.leaf] as NeutralCubicPieceTube)
+          .queryDomain;
+        return (
+          bounds[0] > domain[0] &&
+          bounds[0] <= bounds[1] &&
+          bounds[1] < domain[1]
+        );
+      };
+      if (
+        !inside(first, declaration.firstParameterBounds) ||
+        !inside(second, declaration.secondParameterBounds)
+      )
+        return fail(
+          WINDOW,
+          "The stored witness bounds are not strictly inside the trim leaf.",
+        );
       const firstWitness = witness(first, declaration.firstParameterBounds);
       const secondWitness =
         firstWitness && witness(second, declaration.secondParameterBounds);
@@ -2911,10 +3183,12 @@ function certifyChain(
         compareExact(firstSquared, toleranceSquared, budget) > 0 ||
         compareExact(secondSquared, toleranceSquared, budget) > 0
       )
-        return fail(
-          COMPOSITION,
-          "The vertical graph deviation exceeds the modeling tolerance.",
-          true,
+        return retry(
+          fail(
+            COMPOSITION,
+            "The vertical graph deviation exceeds the modeling tolerance.",
+            true,
+          ),
         );
       const firstUpper = squareRootUpper(firstSquared);
       const secondUpper = firstUpper && squareRootUpper(secondSquared);
@@ -3053,9 +3327,12 @@ function certifyChain(
         [firstUpper, secondUpper],
         window.separation,
       );
+      // The Q4-E1 local branch stays off on deep windows (review A5).
       const located = leafWideLocated
         ? { ...leafWideLocated, separation: window.separation }
-        : localLemmaX();
+        : deep
+          ? null
+          : localLemmaX();
       if (!located)
         return fail(
           EXISTENCE,
@@ -3072,9 +3349,17 @@ function certifyChain(
 
       // Retention ½ at the natural vertex side; glue data for Lemma C.
       const eight = exact(8n, 1n, budget);
-      for (const [side, exiting, ownSquared, ownUpper, otherUpper] of [
-        [first, true, firstSquared, firstUpper, secondUpper],
-        [second, false, secondSquared, secondUpper, firstUpper],
+      const report = trimReports.length;
+      for (const [
+        side,
+        exiting,
+        ownSquared,
+        ownUpper,
+        otherUpper,
+        sideIndex,
+      ] of [
+        [first, true, firstSquared, firstUpper, secondUpper, 0],
+        [second, false, secondSquared, secondUpper, firstUpper, 1],
       ] as const) {
         const leaf = side.end.leaf;
         trimmedLeaves.add(leaf);
@@ -3104,10 +3389,37 @@ function certifyChain(
           ownSquared,
           ownUpper,
           otherUpper,
+          poleX: x,
+          vertexSide: side.end.side,
+          report,
+          sideIndex,
+          deep: deep !== null,
         };
         const existing = graphSides.get(leaf);
         if (existing) existing.push(entry);
         else graphSides.set(leaf, [entry]);
+      }
+      if (deep) {
+        // Removed leaves leave E and O*; each keeps K3 against the partner
+        // piece's non-window leaves (removed × partner window: D monotone).
+        const window = (removed: readonly number[], end: Terminal) =>
+          new Set([...removed, end.leaf]);
+        const firstPartner = {
+          piece: general.pieceOf[secondEnd.leaf]!,
+          window: window(deep.removedSecond, secondEnd),
+        };
+        const secondPartner = {
+          piece: general.pieceOf[firstEnd.leaf]!,
+          window: window(deep.removedFirst, firstEnd),
+        };
+        for (const leaf of deep.removedFirst) {
+          removedLeaves.add(leaf);
+          removedPartners.set(leaf, firstPartner);
+        }
+        for (const leaf of deep.removedSecond) {
+          removedLeaves.add(leaf);
+          removedPartners.set(leaf, secondPartner);
+        }
       }
       trimReports.push({
         kind: "graph-trim",
@@ -3118,6 +3430,12 @@ function certifyChain(
         firstRootBounds,
         secondRootBounds,
         separation: down(separation),
+        ...(deep && deep.removedFirst.length > 0
+          ? { firstLeafOffset: deep.removedFirst.length }
+          : {}),
+        ...(deep && deep.removedSecond.length > 0
+          ? { secondLeafOffset: deep.removedSecond.length }
+          : {}),
       });
       return null;
     };
@@ -4794,12 +5112,63 @@ function certifyChain(
       if (!family) return noFamily();
       arc.family = family;
     }
+    // T08b-g5d (uncharged, structural; nothing without a leaf offset): a
+    // trim leaf offset is a count below its CUBIC piece's size, and review
+    // R4: the deep trims at a piece's two natural ends never overlap,
+    // k_start + k_end ≤ size − 1 (no leaf is removed by one end and trimmed
+    // or removed by the other; one shared trim leaf keeps the retained-domain
+    // check).
+    const deepEnds = new Map<number, [number, number]>();
+    for (const declaration of general.trims) {
+      const { jointIndex } = declaration;
+      for (const [offset, pieceIndex, exiting] of [
+        [declaration.firstLeafOffset, jointIndex, true],
+        [declaration.secondLeafOffset, (jointIndex + 1) % pieceCount, false],
+      ] as const) {
+        if (offset === undefined) continue;
+        const piece = general.pieces[pieceIndex]!;
+        if (
+          !Number.isSafeInteger(offset) ||
+          offset < 0 ||
+          offset >= general.sizes[pieceIndex]! ||
+          (offset > 0 && piece.kind !== "cubic")
+        )
+          return invalidPieceChain(
+            `Trim ${jointIndex}: invalid trim leaf offset.`,
+          );
+        const ends = deepEnds.get(pieceIndex) ?? [0, 0];
+        ends[exiting !== piece.reversed ? 1 : 0] += offset;
+        deepEnds.set(pieceIndex, ends);
+      }
+    }
+    for (const [pieceIndex, [start, end]] of deepEnds)
+      if (start + end > general.sizes[pieceIndex]! - 1)
+        return uncertain(
+          "trim-window-unproven",
+          `Piece ${pieceIndex}: its two deep trims overlap (a leaf removed by one end is trimmed or removed by the other).`,
+          general.firstLeaf[pieceIndex]!,
+          general.firstLeaf[pieceIndex]! + general.sizes[pieceIndex]! - 1,
+        );
     for (const declaration of general.trims) {
       budget.operation(64);
       // One index space (review R5): the declared adjacency index.
       const { jointIndex } = declaration;
-      const firstEnd = terminal(jointIndex, true);
-      const secondEnd = terminal((jointIndex + 1) % pieceCount, false);
+      const next = (jointIndex + 1) % pieceCount;
+      // T08b-g5d: the chain-vertex leaves (H2, T7) and the trim leaves.
+      const firstOffset = declaration.firstLeafOffset ?? 0;
+      const secondOffset = declaration.secondLeafOffset ?? 0;
+      const firstVertexEnd = terminal(jointIndex, true);
+      const secondVertexEnd = terminal(next, false);
+      const firstEnd = terminal(jointIndex, true, firstOffset);
+      const secondEnd = terminal(next, false, secondOffset);
+      /** The removed window leaves of one side, from the vertex inward. */
+      const removedOf = (vertex: Terminal, offset: number) =>
+        Array.from(
+          { length: offset },
+          (_, k) => vertex.leaf + (vertex.side === "end" ? -k : k),
+        );
+      const removedFirst = removedOf(firstVertexEnd, firstOffset);
+      const removedSecond = removedOf(secondVertexEnd, secondOffset);
       const fail = (code: string, message: string, magnitude?: true) =>
         magnitude
           ? {
@@ -4807,16 +5176,35 @@ function certifyChain(
               magnitude,
             }
           : uncertain(code, message, firstEnd.leaf, secondEnd.leaf);
+      // U-B: a deep window lies inside the vertex leaf's source span.
+      for (const [vertex, end, removed] of [
+        [firstVertexEnd, firstEnd, removedFirst],
+        [secondVertexEnd, secondEnd, removedSecond],
+      ] as const) {
+        if (removed.length === 0) continue;
+        const anchor = tubes[vertex.leaf]!.source;
+        if (
+          [...removed, end.leaf].some(
+            (leaf) =>
+              tubes[leaf]!.source.splineId !== anchor.splineId ||
+              tubes[leaf]!.source.spanIndex !== anchor.spanIndex,
+          )
+        )
+          return fail(
+            "trim-window-unproven",
+            "A deep trim leaf lies beyond the terminal source span (U-B).",
+          );
+      }
       // T7: a trim inside ONE closed piece needs its positional closure.
-      if (jointIndex === (jointIndex + 1) % pieceCount) {
+      if (jointIndex === next) {
         const defect = authorityDefect(
           declaration.authority?.kind === "positional-closure"
             ? declaration.authority
             : undefined,
           jointIndex,
           jointIndex,
-          firstEnd,
-          secondEnd,
+          firstVertexEnd,
+          secondVertexEnd,
         );
         if (defect)
           return uncertain(
@@ -4826,6 +5214,15 @@ function certifyChain(
             secondEnd.leaf,
           );
       }
+      const deep: DeepWindow | null =
+        removedFirst.length > 0 || removedSecond.length > 0
+          ? {
+              firstVertex: firstVertexEnd,
+              secondVertex: secondVertexEnd,
+              removedFirst,
+              removedSecond,
+            }
+          : null;
       const firstIsLine = lineData.has(firstEnd.leaf);
       // T08b-f Lemma T°: a seed-arc terminal on either side (own precharge).
       const seeded =
@@ -4834,9 +5231,10 @@ function certifyChain(
       if (seeded) budget.operation(ARC_TRIM_PRECHARGE);
       // S2 cubic↔cubic: one fixed precharge before H2 or any conversion.
       if (graph) budget.operation(GRAPH_TRIM_PRECHARGE);
-      // H2 gate: sgn(d)·cross(u_in, u_out) > 0 on exact source tangents.
-      const incoming = vertexTangent(firstEnd);
-      const outgoing = vertexTangent(secondEnd);
+      // H2 gate: sgn(d)·cross(u_in, u_out) > 0 on exact source tangents
+      // (T08b-g5d: at the TRUE vertex leaves, unchanged by a deep trim).
+      const incoming = vertexTangent(firstVertexEnd);
+      const outgoing = vertexTangent(secondVertexEnd);
       if (!incoming || !outgoing || distanceValue === 0)
         return fail(
           "trim-side-unproven",
@@ -4848,13 +5246,49 @@ function certifyChain(
           "trim-side-unproven",
           "The exact source-tangent turn is not concave toward the offset side.",
         );
+      // A deep cubic window against a seed-arc leaf (Lemma T° on a deep
+      // window) is out of g5d's scope: fail closed (the resolver never
+      // builds one, review R1).
+      if (seeded && deep)
+        return fail(
+          "trim-window-unproven",
+          "A deep trim against a seed-arc leaf is not certified (Lemma T° on a deep window is not supported).",
+        );
       if (seeded) {
         const failure = seedTrim(declaration, firstEnd, secondEnd, fail);
         if (failure) return failure;
         continue;
       }
       if (graph) {
-        const failure = graphTrim(declaration, firstEnd, secondEnd, fail);
+        const retryable = new WeakSet<Failure>();
+        const failure = graphTrim(
+          declaration,
+          firstEnd,
+          secondEnd,
+          fail,
+          deep,
+          false,
+          retryable,
+        );
+        // T08b-g5d e fallback (design §3.4.6): deep S2 only (every pre-g5d
+        // request keeps its verdict and charges), only after the raw chords
+        // failed G1, G2 or Lemma V, once, with its own fixed precharge; any
+        // binary64 e is sound. The raw failure is reported if it fails too.
+        if (deep && failure && retryable.has(failure)) {
+          budget.operation(GRAPH_TRIM_PRECHARGE);
+          if (
+            graphTrim(
+              declaration,
+              firstEnd,
+              secondEnd,
+              fail,
+              deep,
+              true,
+              retryable,
+            ) === null
+          )
+            continue;
+        }
         if (failure) return failure;
         continue;
       }
@@ -4893,6 +5327,24 @@ function certifyChain(
           "trim-window-unproven",
           "The leaf-wide cone s·rot(a)·B′ > 0 is not proved on the terminal leaf.",
         );
+      // T08b-g5d Lemma T-W: the window cone, the same w·O′ > 0 on the true
+      // O′ box of every removed leaf (one exact dot product each), so the
+      // true offset meets the full support line of ℓ at most once on the
+      // window; never a magnitude failure (review A1).
+      const removedCurve = firstIsLine ? removedSecond : removedFirst;
+      for (const leaf of removedCurve) {
+        budget.operation(WINDOW_CONE_PRECHARGE);
+        const removedBox = derivatives[leaf]!;
+        const removedCorner: ExactPoint = [
+          removedBox[0]![positive(w[0]) ? 0 : 1]!,
+          removedBox[1]![positive(w[1]) ? 0 : 1]!,
+        ];
+        if (!positive(dot(w, removedCorner)))
+          return fail(
+            "trim-window-unproven",
+            `The window cone s·rot(a)·O′ > 0 is not proved on removed leaf ${leaf}.`,
+          );
+      }
       const lineError = line.error;
       const curveError = errors[curveEnd.leaf]!;
       // δ = (ε_A + ε_B)·L_hi/m′ and M = max corner |O′|·(b − a), upper √.
@@ -5004,6 +5456,12 @@ function certifyChain(
           firstRootBounds: [down(firstRoot[0]), up(firstRoot[1])],
           secondRootBounds: [down(secondRoot[0]), up(secondRoot[1])],
           tail: up(tail),
+          ...(removedFirst.length > 0
+            ? { firstLeafOffset: removedFirst.length }
+            : {}),
+          ...(removedSecond.length > 0
+            ? { secondLeafOffset: removedSecond.length }
+            : {}),
         };
         return true;
       };
@@ -5047,6 +5505,8 @@ function certifyChain(
           "A true-root enclosure is not strictly inside its terminal leaf.",
           true,
         );
+      // Removed leaves leave E and O* (every pair with them is K3-exempt).
+      for (const leaf of removedCurve) removedLeaves.add(leaf);
     }
 
     // T°2 pairs (T08b-f): each line with an unexcluded other side must be
@@ -5499,11 +5959,88 @@ function certifyChain(
       };
   }
 
+  /**
+   * T08b-g5d Lemma-C glue fallback (design §3.4.3, review R14), on a deep
+   * S2 side only and only after the reviewed ½ failed its collar: the dyadic glue fraction f = 1 − 2⁻ᵏ
+   * (k = 2 … GLUE_DEPTH) from the trim leaf's vertex side, the first whose
+   * EXACT emitted point E(f) clears the switch region with the same collar
+   * quantity as ½ (`collared`, ε* of the leaf loop) while the retained
+   * domain t_far + f < 1 holds. Writes the retained-domain fraction and the
+   * report's glue; Lemma C is unchanged at any glue point beyond the collar.
+   */
+  const glueBeyondHalf = (
+    index: number,
+    side: NonNullable<ReturnType<typeof graphSides.get>>[number],
+    collared: (value: ExactFraction) => boolean,
+  ) => {
+    const atStart = side.vertexSide === "start";
+    for (let k = 2; k <= GLUE_DEPTH; k += 1) {
+      budget.operation(GLUE_CANDIDATE_PRECHARGE);
+      const fraction = subtractExact(
+        one,
+        exact(1n, 1n << BigInt(k), budget),
+        budget,
+      );
+      const far = atStart ? trimEnd[index] : trimStart[index];
+      if (
+        far &&
+        compareExact(addExact(far, fraction, budget), one, budget) >= 0
+      )
+        return false;
+      const tau = atStart ? fraction : subtractExact(one, fraction, budget);
+      const rest = subtractExact(one, tau, budget);
+      const weights = [
+        multiplyExact(multiplyExact(rest, rest, budget), rest, budget),
+        multiplyExact(
+          three,
+          multiplyExact(multiplyExact(rest, rest, budget), tau, budget),
+          budget,
+        ),
+        multiplyExact(
+          three,
+          multiplyExact(multiplyExact(rest, tau, budget), tau, budget),
+          budget,
+        ),
+        multiplyExact(multiplyExact(tau, tau, budget), tau, budget),
+      ];
+      const value = weights.reduce(
+        (sum, weight, pole) =>
+          addExact(
+            sum,
+            multiplyExact(weight, side.poleX[pole]!, budget),
+            budget,
+          ),
+        zero,
+      );
+      if (!collared(value)) continue;
+      if (atStart) trimStart[index] = fraction;
+      else trimEnd[index] = fraction;
+      const report = trimReports[side.report] as TubeChainGraphTrimJoin;
+      const glue = 1 - 2 ** -k;
+      trimReports[side.report] = {
+        ...report,
+        glue:
+          side.sideIndex === 0
+            ? [glue, report.glue?.[1] ?? 0.5]
+            : [report.glue?.[0] ?? 0.5, glue],
+      };
+      return true;
+    }
+    return false;
+  };
+
   // Per-leaf composition (sums of both ends) and the K3 radii.
   budget.operation(4 * count);
   const stars: ExactFraction[] = [];
   const radii: ExactFraction[] = [];
   for (let index = 0; index < count; index += 1) {
+    // T08b-g5d: a removed leaf carries no claim (not in E): its owner ε is
+    // reported as its star and K3 radius, never composed.
+    if (removedLeaves.has(index)) {
+      stars.push(errors[index]!);
+      radii.push(errors[index]!);
+      continue;
+    }
     const trimmed = trimmedLeaves.has(index);
     const leafFailure = (reason: string): Failure =>
       trimmed
@@ -5598,18 +6135,19 @@ function certifyChain(
       const candidates: ExactFraction[] = [];
       for (const side of graphs) {
         const reach = multiplyExact(side.eUpper, base, budget);
-        const collared = side.exiting
-          ? compareExact(
-              addExact(side.middle, reach, budget),
-              side.limit,
-              budget,
-            ) < 0
-          : compareExact(
-              subtractExact(side.middle, reach, budget),
-              side.limit,
-              budget,
-            ) > 0;
-        if (!collared)
+        const collared = (value: ExactFraction) =>
+          side.exiting
+            ? compareExact(addExact(value, reach, budget), side.limit, budget) <
+              0
+            : compareExact(
+                subtractExact(value, reach, budget),
+                side.limit,
+                budget,
+              ) > 0;
+        if (
+          !collared(side.middle) &&
+          !(side.deep && glueBeyondHalf(index, side, collared))
+        )
           return {
             ...uncertain(
               "trim-window-unproven",
@@ -5753,6 +6291,26 @@ function certifyChain(
       for (let j = i + 1; j < leaves.length; j += 1)
         if (!(wide && i === 0 && j === leaves.length - 1))
           exempt.push(`${leaves[i]!}:${leaves[j]!}`);
+  }
+  // T08b-g5d: a removed leaf is in neither E nor O*, so its pairs are
+  // exempt (Lemma T-W: the window cone covers the full support line of ℓ),
+  // except that a deep S2 removed leaf keeps K3 against every retained
+  // leaf of its partner piece outside the partner's window (review R13: on
+  // a self-trim this partner rule wins over the own-piece exemption).
+  for (const leaf of removedLeaves) {
+    const partner = removedPartners.get(leaf);
+    for (let other = 0; other < count + arcLeaves.length; other += 1) {
+      if (other === leaf) continue;
+      if (
+        partner &&
+        other < count &&
+        general!.pieceOf[other] === partner.piece &&
+        !partner.window.has(other) &&
+        !removedLeaves.has(other)
+      )
+        continue;
+      exempt.push(`${Math.min(leaf, other)}:${Math.max(leaf, other)}`);
+    }
   }
   const adjacency =
     general &&
@@ -6093,6 +6651,7 @@ function certifyChain(
           ? baseErrorStar
           : modelingTolerance,
       clearanceRadius: unchanged(radii[index]!),
+      ...(removedLeaves.has(index) ? { removed: true as const } : {}),
     };
   });
   if (arcLeaves.length > 0) {

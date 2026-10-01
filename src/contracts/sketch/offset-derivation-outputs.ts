@@ -483,7 +483,11 @@ export function offsetFrameEntityCotangent(
 /**
  * The solved sub-spans of one shell from its frame (T08b slice design §2.2):
  * the owner's poles unchanged, `queryDomain` the representative active
- * domain, the output span id by source occurrence key.
+ * domain, the output span id by source occurrence key. T08b-g5d ([TECH],
+ * U-G6): leaves `removed` by a deep trim are left out BEFORE the sub-index
+ * count, so a deep trim leaf is its output span's sub-span 0 (or its last)
+ * and every trimmed terminal end lies strictly inside the record's first or
+ * last sub-span, the g3/g5c region-input premise.
  */
 export function offsetFrameShellSpans(
   frame: OffsetSolveFrame,
@@ -491,7 +495,10 @@ export function offsetFrameShellSpans(
 ): SolvedSketchDerivedCubicSpan[] {
   let subIndex = 0;
   let previous: string | null = null;
-  return frame.cubics.get(shell.seed)!.map((leaf) => {
+  const leaves = frame.cubics
+    .get(shell.seed)!
+    .filter((leaf) => leaf.start.kind !== "removed");
+  return leaves.map((leaf) => {
     const key = ownerSpanKey(leaf.span.source);
     subIndex = key === previous ? subIndex + 1 : 0;
     previous = key;
