@@ -133,9 +133,11 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     values?: Float64Array,
   ) {
     const baseValues =
-      values ?? getSketchSolveInitialValuesForTest(definition, tolerances);
+      values ??
+      getSketchSolveInitialValuesForTest(definition, tolerances, 1e-3);
     const analytical = evaluateSketchScalarConstraintForTest({
       tolerances,
+      modelingTolerance: 1e-3,
       definition,
       constraintId,
       values: baseValues,
@@ -149,12 +151,14 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       minus[index] -= epsilon;
       const next = evaluateSketchScalarConstraintForTest({
         tolerances,
+        modelingTolerance: 1e-3,
         definition,
         constraintId,
         values: plus,
       });
       const previous = evaluateSketchScalarConstraintForTest({
         tolerances,
+        modelingTolerance: 1e-3,
         definition,
         constraintId,
         values: minus,
@@ -278,7 +282,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const line21End = "sketch_point_21_line-end";
 
     return {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: [
@@ -477,7 +481,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     references?: SketchDefinition["references"];
   }): SketchDefinition {
     return {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds:
         input.references?.map((reference) => reference.referenceId) ?? [],
       references: input.references ?? [],
@@ -547,6 +551,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const lineSolved = solveSketchDefinitionCore({
       definition: lineDefinition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
     const linePoints = new Map(
@@ -615,6 +620,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const pointSolved = solveSketchDefinitionCore({
       definition: pointDefinition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
     const solvedPoint = pointSolved.solvedSnapshot.solvedPoints.find(
@@ -693,6 +699,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       definition,
       projectedReferences,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
     const points = new Map(
@@ -748,6 +755,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const missingValidation = validateSketchDefinitionCore({
       definition: missing,
       tolerances,
+      modelingTolerance: 1e-3,
     });
     expect(
       missingValidation.diagnostics.some(
@@ -783,6 +791,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const degenerateValidation = validateSketchDefinitionCore({
       definition: degenerate,
       tolerances,
+      modelingTolerance: 1e-3,
     });
     expect(
       degenerateValidation.diagnostics.some(
@@ -794,7 +803,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
 
   async function testFixPoint() {
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: ["sketch_point_a"],
@@ -818,6 +827,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const solved = solveSketchDefinitionCore({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
 
@@ -836,7 +846,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
 
   async function testEuclideanDistance() {
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: ["sketch_point_a", "sketch_point_b"],
@@ -864,6 +874,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const solved = solveSketchDefinitionCore({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
 
@@ -889,7 +900,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
 
   async function testHorizontalDistance() {
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: ["sketch_point_a", "sketch_point_b"],
@@ -916,6 +927,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const solved = solveSketchDefinitionCore({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
 
@@ -937,7 +949,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
 
   async function testVerticalDistance() {
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: ["sketch_point_a", "sketch_point_b"],
@@ -964,6 +976,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const solved = solveSketchDefinitionCore({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
 
@@ -1005,7 +1018,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       ),
     ];
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       points,
@@ -1034,6 +1047,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const solved = solveSketchDefinitionCore({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
     });
     expect(
@@ -1079,7 +1093,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
         ),
       ];
       return {
-        schemaVersion: "sketch-definition/v1alpha1",
+        schemaVersion: "sketch-definition/v1alpha2",
         referenceIds: [],
         references: [],
         points,
@@ -1125,9 +1139,10 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       try {
         evaluateSketchScalarConstraintForTest({
           tolerances: policy,
+          modelingTolerance: 1e-3,
           definition,
           constraintId: "dimension_gap",
-          values: getSketchSolveInitialValuesForTest(definition, policy),
+          values: getSketchSolveInitialValuesForTest(definition, policy, 1e-3),
         });
       } catch (error) {
         // Only a non-admitted dimension is expected; anything else bubbles.
@@ -1142,6 +1157,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       const status = solveSketchDefinitionCore({
         definition,
         tolerances: policy,
+        modelingTolerance: 1e-3,
         partialSolvePolicy: "bestEffort",
       }).solvedSnapshot.dimensionStatuses[0]!;
       return {
@@ -1206,7 +1222,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       ];
       const solved = solveSketchDefinitionCore({
         definition: {
-          schemaVersion: "sketch-definition/v1alpha1",
+          schemaVersion: "sketch-definition/v1alpha2",
           referenceIds: [],
           references: [],
           points,
@@ -1219,6 +1235,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
           dimensionIds: dimensions.map((item) => item.dimensionId),
         },
         tolerances: documentPolicy,
+        modelingTolerance: 1e-3,
         partialSolvePolicy: "bestEffort",
       }).solvedSnapshot;
       return {
@@ -1428,7 +1445,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
         makeLine("sketch_entity_b", "B", "sketch_point_b0", "sketch_point_b1"),
       ];
       return {
-        schemaVersion: "sketch-definition/v1alpha1",
+        schemaVersion: "sketch-definition/v1alpha2",
         referenceIds: [],
         references: [],
         points,
@@ -1462,6 +1479,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
         program: compileSketchSolveProgram({
           definition,
           tolerances: policy,
+          modelingTolerance: 1e-3,
           partialSolvePolicy: "failOnConflict",
         }),
       }).lastAcceptedSnapshot;
@@ -1499,6 +1517,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const fallback = solveSketchDefinitionCore({
       definition: twoFreeLines([0, 5], 0.1, parallel),
       tolerances: tightPolicy,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     }).solvedSnapshot;
     expect
@@ -1544,7 +1563,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       ];
       const solved = solveSketchDefinitionCore({
         definition: {
-          schemaVersion: "sketch-definition/v1alpha1",
+          schemaVersion: "sketch-definition/v1alpha2",
           referenceIds: [],
           references: [],
           points,
@@ -1559,6 +1578,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
           dimensionIds: [input.dimension.dimensionId],
         },
         tolerances,
+        modelingTolerance: 1e-3,
         partialSolvePolicy: "bestEffort",
       }).solvedSnapshot;
       return {
@@ -1670,7 +1690,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
 
   async function testExpandedDimensionStatuses() {
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: [
@@ -1808,6 +1828,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const solved = solveSketchDefinitionCore({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
     const statusById = new Map(
@@ -1854,7 +1875,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
 
   async function testAxisQualifiedDistance() {
     const horizontal: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: ["sketch_point_a", "sketch_point_b"],
@@ -1896,6 +1917,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const solvedHorizontal = solveSketchDefinitionCore({
       definition: horizontal,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
     const [horizontalA, horizontalB] =
@@ -1919,6 +1941,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const solvedVertical = solveSketchDefinitionCore({
       definition: vertical,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
     const [verticalA, verticalB] = solvedVertical.solvedSnapshot.solvedPoints;
@@ -1941,7 +1964,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
 
   async function testObtuseLineAngleDimension() {
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: ["sketch_point_a", "sketch_point_b", "sketch_point_c"],
@@ -1997,6 +2020,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const solved = solveSketchDefinitionCore({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
     });
     const pointC = solved.solvedSnapshot.solvedPoints.find(
@@ -2040,7 +2064,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
 
   async function testHorizontalLine() {
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: ["sketch_point_a", "sketch_point_b"],
@@ -2073,6 +2097,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const solved = solveSketchDefinitionCore({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
     const [a, b] = solved.solvedSnapshot.solvedPoints;
@@ -2093,7 +2118,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
 
   async function testVerticalLine() {
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: ["sketch_point_a", "sketch_point_b"],
@@ -2126,6 +2151,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const solved = solveSketchDefinitionCore({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
     const [a, b] = solved.solvedSnapshot.solvedPoints;
@@ -2146,7 +2172,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
 
   async function testAngleBetweenPoints() {
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: ["sketch_point_a", "sketch_point_b", "sketch_point_m"],
@@ -2174,6 +2200,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const solved = solveSketchDefinitionCore({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
     const pointA = solved.solvedSnapshot.solvedPoints.find(
@@ -2212,7 +2239,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
 
   async function testAngleBetweenPointsSpecificCase() {
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: ["sketch_point_a", "sketch_point_b", "sketch_point_m"],
@@ -2255,6 +2282,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const solved = solveSketchDefinitionCore({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
     const pointA = solved.solvedSnapshot.solvedPoints.find(
@@ -2297,7 +2325,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
 
   async function testEqualLength() {
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: [
@@ -2343,6 +2371,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const solved = solveSketchDefinitionCore({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
     const points = new Map(
@@ -2372,7 +2401,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
 
   async function testParallelLines() {
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: [
@@ -2418,6 +2447,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const solved = solveSketchDefinitionCore({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
     const points = new Map(
@@ -2448,7 +2478,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
 
   async function testPerpendicularLines() {
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: [
@@ -2494,6 +2524,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const solved = solveSketchDefinitionCore({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
     const points = new Map(
@@ -2524,7 +2555,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
 
   async function testArcStartPointCoincident() {
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: [
@@ -2574,6 +2605,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const solved = solveSketchDefinitionCore({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
     const arc = solved.solvedSnapshot.solvedEntities.find(
@@ -2602,7 +2634,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
 
   async function testArcEndPointCoincident() {
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: [
@@ -2652,6 +2684,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const solved = solveSketchDefinitionCore({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
     const arc = solved.solvedSnapshot.solvedEntities.find(
@@ -2680,7 +2713,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
 
   async function testAxisAlignedRectangle() {
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: [
@@ -2789,6 +2822,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const solved = solveSketchDefinitionCore({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
     const coords = new Map(
@@ -2862,6 +2896,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const solved = solveSketchDefinitionCore({
       definition: anchoredDefinition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
       strategy: "bfgs",
     });
@@ -2911,7 +2946,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     },
   ) {
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: [
@@ -3037,6 +3072,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const solved = solveSketchDefinitionCore({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
       strategy,
     });
@@ -3079,7 +3115,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
 
   async function testRotatedRectangleGradientDescent() {
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: [
@@ -3188,6 +3224,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const solved = solveSketchDefinitionCore({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
       strategy: "gradientDescent",
     });
@@ -3245,7 +3282,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
 
   async function testValidationRejectsDegenerateLine() {
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: ["sketch_point_a", "sketch_point_b"],
@@ -3268,7 +3305,11 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       dimensions: [],
     };
 
-    const validation = validateSketchDefinitionCore({ definition, tolerances });
+    const validation = validateSketchDefinitionCore({
+      definition,
+      tolerances,
+      modelingTolerance: 1e-3,
+    });
     expect(validation.isValid, "Degenerate line should fail validation.").toBe(
       false,
     );
@@ -3276,7 +3317,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
 
   async function testValidationRejectsPointIdsWithoutRecords() {
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: ["sketch_point_a", "sketch_point_missing"],
@@ -3289,7 +3330,11 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       dimensions: [],
     };
 
-    const validation = validateSketchDefinitionCore({ definition, tolerances });
+    const validation = validateSketchDefinitionCore({
+      definition,
+      tolerances,
+      modelingTolerance: 1e-3,
+    });
     expect(
       validation.diagnostics.some(
         (diagnostic) => diagnostic.code === "point-missing-from-records",
@@ -3300,7 +3345,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
 
   async function testValidationRejectsMissingConstraintReferences() {
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: ["sketch_point_a"],
@@ -3321,7 +3366,11 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       dimensions: [],
     };
 
-    const validation = validateSketchDefinitionCore({ definition, tolerances });
+    const validation = validateSketchDefinitionCore({
+      definition,
+      tolerances,
+      modelingTolerance: 1e-3,
+    });
     expect(
       validation.diagnostics.some(
         (diagnostic) => diagnostic.code === "missing-fix-point",
@@ -3333,7 +3382,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
   async function testValidationRejectsDuplicatePointRecords() {
     const duplicate = makePoint("sketch_point_duplicate", "Duplicate", 0, 0);
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: ["sketch_point_duplicate"],
@@ -3352,7 +3401,11 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       dimensions: [],
     };
 
-    const validation = validateSketchDefinitionCore({ definition, tolerances });
+    const validation = validateSketchDefinitionCore({
+      definition,
+      tolerances,
+      modelingTolerance: 1e-3,
+    });
     expect(
       validation.isValid,
       "Validation should reject duplicate point records even when pointIds is unique.",
@@ -3367,7 +3420,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
 
   async function testValidationRejectsDuplicateEntityRecords() {
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: ["sketch_point_a", "sketch_point_b", "sketch_point_c"],
@@ -3397,7 +3450,11 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       dimensions: [],
     };
 
-    const validation = validateSketchDefinitionCore({ definition, tolerances });
+    const validation = validateSketchDefinitionCore({
+      definition,
+      tolerances,
+      modelingTolerance: 1e-3,
+    });
     expect(
       validation.isValid,
       "Validation should reject duplicate entity records even when entityIds is unique.",
@@ -3412,7 +3469,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
 
   async function testCircleRadiusDimensionDrivesSolvedCircleRadius() {
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: ["sketch_point_center"],
@@ -3438,6 +3495,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const solved = solveSketchDefinitionCore({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
     const solvedCircle = solved.solvedSnapshot.solvedEntities.find(
@@ -3475,7 +3533,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
 
   async function testCircleDiameterDimensionDrivesSolvedCircleRadius() {
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: ["sketch_point_center"],
@@ -3501,6 +3559,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const solved = solveSketchDefinitionCore({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
     const solvedCircle = solved.solvedSnapshot.solvedEntities.find(
@@ -3538,7 +3597,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
 
   function createIndependentLineComponentsDefinition(): SketchDefinition {
     return {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: [
@@ -3598,6 +3657,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const program = compileSketchSolveProgram({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
     const numericEdit: SketchDefinition = {
@@ -3617,6 +3677,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       isCompiledSketchSolveProgramCompatible(program, {
         definition: numericEdit,
         tolerances,
+        modelingTolerance: 1e-3,
       }),
       "Compiled program should remain compatible across authored point numeric edits.",
     ).toBeTruthy();
@@ -3624,6 +3685,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       isCompiledSketchSolveProgramCompatible(program, {
         definition,
         tolerances: { ...tolerances, coincidence: 1e-5 },
+        modelingTolerance: 1e-3,
       }),
       "Compiled program should invalidate when tolerance policy changes.",
     ).toBeFalsy();
@@ -3631,6 +3693,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       solveSketchDefinitionCore({
         definition,
         tolerances,
+        modelingTolerance: 1e-3,
         partialSolvePolicy: "bestEffort",
       }).status.solveState,
       "Full solve should route through the compiled-program path and remain solved.",
@@ -3642,11 +3705,13 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const solved = solveSketchDefinitionCore({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
     const program = compileSketchSolveProgram({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
     const session = createCompiledSketchSolveSession({
@@ -3709,7 +3774,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
 
   async function testCompiledInteractiveDragKeepsInitiallyCoincidentPointsTogether() {
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: ["sketch_point_a", "sketch_point_b"],
@@ -3741,6 +3806,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       definition,
       dragTarget,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
       targetTolerance: 1e-4,
     });
@@ -3752,6 +3818,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const program = compileSketchSolveProgram({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
     const session = createCompiledSketchSolveSession({
@@ -3760,6 +3827,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       priorSolvedSnapshot: solveSketchDefinitionCore({
         definition,
         tolerances,
+        modelingTolerance: 1e-3,
         partialSolvePolicy: "bestEffort",
       }).solvedSnapshot,
     });
@@ -3807,7 +3875,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
 
   async function testCompiledInteractiveDragTranslatesRigidRectangle() {
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: [
@@ -3907,11 +3975,13 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const solved = solveSketchDefinitionCore({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
     const program = compileSketchSolveProgram({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
     const session = createCompiledSketchSolveSession({
@@ -4067,7 +4137,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       value: 3,
     });
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: points.map((point) => point.pointId),
@@ -4083,6 +4153,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const solved = solveSketchDefinitionCore({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
     const solvedPoints = new Map(
@@ -4167,7 +4238,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       })),
     ];
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: points.map((point) => point.pointId),
@@ -4180,13 +4251,18 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       dimensions: [],
     };
     const before = structuredClone(definition);
-    const initial = getSketchSolveInitialValuesForTest(definition, tolerances);
+    const initial = getSketchSolveInitialValuesForTest(
+      definition,
+      tolerances,
+      1e-3,
+    );
 
     // Four point pairs plus all three authored tangent-vector pairs.
     expect(initial.length).toBe(14);
     expect([...initial.slice(8)]).toEqual([0.3, 0.15, 0, 0, 0.2, -0.1]);
     const contactEvaluation = evaluateSketchScalarConstraintForTest({
       tolerances,
+      modelingTolerance: 1e-3,
       definition,
       constraintId: "constraint_contact",
       values: initial,
@@ -4213,6 +4289,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const solved = solveSketchDefinitionCore({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
     const status = solved.solvedSnapshot.constraintStatuses.find(
@@ -4297,7 +4374,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       interpolationPolicy: "centripetal-mean-arm-v1" as const,
     };
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: points.map((point) => point.pointId),
@@ -4309,11 +4386,19 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       dimensionIds: [],
       dimensions: [],
     };
-    const initial = getSketchSolveInitialValuesForTest(definition, tolerances);
+    const initial = getSketchSolveInitialValuesForTest(
+      definition,
+      tolerances,
+      1e-3,
+    );
     // Shared canonical aliases have one point pair; automatic occurrences add no variables.
     expect(initial.length).toBe(10);
     expect([...initial.slice(6)]).toEqual([0.4, 0, 0, 0]);
-    const solved = solveSketchDefinitionCore({ definition, tolerances });
+    const solved = solveSketchDefinitionCore({
+      definition,
+      tolerances,
+      modelingTolerance: 1e-3,
+    });
     const geometry = solved.solvedSnapshot.solvedEntities.find(
       (entity) =>
         entity.entityId === baseSpline.entityId && entity.kind === "spline",
@@ -4334,7 +4419,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
   async function testProjectedSourceSamplesAreRejectedAsDisplayOnly() {
     const point = makePoint("sketch_point_projected", "Projected", 0.5, 0.5);
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: ["ref_spline"],
       references: [
         {
@@ -4394,6 +4479,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       definition,
       projectedReferences,
       tolerances,
+      modelingTolerance: 1e-3,
     });
     expect(validated.isValid).toBe(false);
     expect(validated.diagnostics).toContainEqual(
@@ -4403,6 +4489,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       definition,
       projectedReferences,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
     });
     expect(solved.status.solveState).toBe("failed");
@@ -4467,7 +4554,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       },
     ];
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: points.map((point) => point.pointId),
@@ -4506,9 +4593,10 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     );
     const evaluation = evaluateSketchScalarConstraintForTest({
       tolerances,
+      modelingTolerance: 1e-3,
       definition,
       constraintId: "constraint_output_position",
-      values: getSketchSolveInitialValuesForTest(definition, tolerances),
+      values: getSketchSolveInitialValuesForTest(definition, tolerances, 1e-3),
     });
     expect(
       [...evaluation.gradient.slice(0, 2)].some(
@@ -4526,6 +4614,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const constrainedProgram = compileSketchSolveProgram({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
     });
     const outputEquation = constrainedProgram.equationMetadata.find(
@@ -4540,6 +4629,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const solved = solveSketchDefinitionCore({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
     });
     expect(solved.status.solveState).toBe("solved");
@@ -4567,6 +4657,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const program = compileSketchSolveProgram({
       definition: dragDefinition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
     });
     const outputComponent = program.components.find((component) =>
@@ -4578,6 +4669,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const initialDragSolve = solveSketchDefinitionCore({
       definition: dragDefinition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
     });
     const session = createCompiledSketchSolveSession({
@@ -4657,7 +4749,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       },
     ];
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: points.map((point) => point.pointId),
@@ -4736,6 +4828,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const gradientProgram = compileSketchSolveProgram({
       definition: gradientDefinition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
     });
     const outputScalar = gradientProgram.system.scalarConstraints.find(
@@ -4751,6 +4844,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const mutatedEvaluation = outputScalar.evaluate(mutableValues);
     const freshEvaluation = evaluateSketchScalarConstraintForTest({
       tolerances,
+      modelingTolerance: 1e-3,
       definition: gradientDefinition,
       constraintId: outputRequirement.constraintId,
       values: new Float64Array(mutableValues),
@@ -4781,6 +4875,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const program = compileSketchSolveProgram({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
     });
     const outputComponent = program.components.find((component) =>
@@ -4790,6 +4885,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const initial = solveSketchDefinitionCore({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
     });
     const session = createCompiledSketchSolveSession({
@@ -4825,6 +4921,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       solveSketchDefinitionCore({
         definition,
         tolerances: policy,
+        modelingTolerance: 1e-3,
         partialSolvePolicy: "bestEffort",
       });
     const fixedConstraints = (
@@ -4853,7 +4950,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       value: 1,
     };
     const linearDefinition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: linearPoints.map((point) => point.pointId),
@@ -4924,7 +5021,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       valueRadians: Math.PI / 2 + 0.01,
     };
     const angleDefinition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: anglePoints.map((point) => point.pointId),
@@ -5022,7 +5119,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       position: [5, 0] as const,
     };
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: points.map((point) => point.pointId),
@@ -5046,6 +5143,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
           seedEntityIds: [entities[0]!.entityId, entities[1]!.entityId],
           distance: -1,
           jointPolicy: "trimExtendArcFallback",
+          piecewiseCubicOutputs: [],
           jointOutputs: [
             {
               firstSeedEntityId: entities[0]!.entityId,
@@ -5083,6 +5181,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const result = solveSketchDefinitionCore({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
     });
     expect(result.status.solveState).toBe("solved");
@@ -5111,11 +5210,14 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       "The offset-output requirement should move seed authority rather than an output slot.",
     ).toBeTruthy();
     const freshlyDerived = evaluateSketchDerivations({
-      ...definition,
-      points: definition.points.map((point) => ({
-        ...point,
-        position: solvedPositions.get(point.pointId) ?? point.position,
-      })),
+      definition: {
+        ...definition,
+        points: definition.points.map((point) => ({
+          ...point,
+          position: solvedPositions.get(point.pointId) ?? point.position,
+        })),
+      },
+      modelingTolerance: 1e-3,
     }).definition;
     const freshOutput = freshlyDerived.points.find(
       (point) => point.pointId === points[3]!.pointId,
@@ -5167,11 +5269,13 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const accepted = solveSketchDefinitionCore({
       definition: definitionWithAnchors([4, 0]),
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
     });
     const topologyProgram = compileSketchSolveProgram({
       definition: definitionWithAnchors([4, 5]),
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
     });
     const topologySession = createCompiledSketchSolveSession({
@@ -5189,8 +5293,12 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     expect(
       blocked.diagnostics.some(
         (diagnostic) =>
-          diagnostic.code === OFFSET_DIAGNOSTIC_CODES.jointUnsatisfied ||
-          diagnostic.code === OFFSET_DIAGNOSTIC_CODES.selfIntersection,
+          // T08b-g5 ([TECH] G6): arc presence is authored intent, so a
+          // corner that can no longer hold its authored arc is
+          // `topologyChanged` (was the legacy joint-count check).
+          diagnostic.code === OFFSET_DIAGNOSTIC_CODES.topologyChanged &&
+          diagnostic.severity === "error" &&
+          diagnostic.target?.kind === "entity",
       ),
       "A committed offset joint topology change should block with its targeted diagnostic.",
     ).toBeTruthy();
@@ -5216,7 +5324,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       ),
     ];
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: points.map((point) => point.pointId),
@@ -5244,6 +5352,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
           seedEntityIds: [entities[0]!.entityId],
           distance: 1,
           jointPolicy: "trimExtendArcFallback",
+          piecewiseCubicOutputs: [],
           jointOutputs: [],
           outputs: [
             {
@@ -5261,6 +5370,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const program = compileSketchSolveProgram({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
     });
     const seedState = program.system.entityStates.get(entities[0]!.entityId)!;
@@ -5283,6 +5393,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const solved = solveSketchDefinitionCore({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
     });
     expect(solved.status.solveState).toBe("solved");
@@ -5303,12 +5414,15 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     expect(solvedSeed.solvedRadius).not.toBeCloseTo(2, 6);
 
     const fresh = evaluateSketchDerivations({
-      ...definition,
-      entities: definition.entities.map((entity) =>
-        entity.entityId === solvedSeed.entityId && entity.kind === "circle"
-          ? { ...entity, radius: solvedSeed.solvedRadius }
-          : entity,
-      ),
+      definition: {
+        ...definition,
+        entities: definition.entities.map((entity) =>
+          entity.entityId === solvedSeed.entityId && entity.kind === "circle"
+            ? { ...entity, radius: solvedSeed.solvedRadius }
+            : entity,
+        ),
+      },
+      modelingTolerance: 1e-3,
     }).definition;
     const freshOutput = fresh.entities.find(
       (entity) => entity.entityId === solvedOutput.entityId,
@@ -5345,7 +5459,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       ),
     ];
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: points.map((point) => point.pointId),
@@ -5373,6 +5487,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
           seedEntityIds: [entities[0]!.entityId],
           distance: 1,
           jointPolicy: "trimExtendArcFallback",
+          piecewiseCubicOutputs: [],
           jointOutputs: [],
           outputs: [
             {
@@ -5389,6 +5504,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const program = compileSketchSolveProgram({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
     });
     const seedState = program.system.entityStates.get(entities[0]!.entityId)!;
@@ -5445,6 +5561,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const solved = solveSketchDefinitionCore({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
     });
     expect(solved.status.solveState).toBe("solved");
@@ -5526,11 +5643,14 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     ).toBeCloseTo(Math.atan2(end[1] - center[1], end[0] - center[0]), 10);
 
     const fresh = evaluateSketchDerivations({
-      ...definition,
-      points: definition.points.map((point) => ({
-        ...point,
-        position: solvedPoints.get(point.pointId) ?? point.position,
-      })),
+      definition: {
+        ...definition,
+        points: definition.points.map((point) => ({
+          ...point,
+          position: solvedPoints.get(point.pointId) ?? point.position,
+        })),
+      },
+      modelingTolerance: 1e-3,
     }).definition;
     for (const pointId of [
       points[3]!.pointId,
@@ -5570,6 +5690,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const mismatched = solveSketchDefinitionCore({
       definition: mismatchedDefinition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
       strategy: "gaussNewton",
     });
@@ -5590,6 +5711,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
           program: compileSketchSolveProgram({
             definition: mismatchedDefinition,
             tolerances,
+            modelingTolerance: 1e-3,
             partialSolvePolicy: "failOnConflict",
             strategy: "gaussNewton",
           }),
@@ -5600,6 +5722,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const dragProgram = compileSketchSolveProgram({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
       strategy: "gaussNewton",
     });
@@ -5690,7 +5813,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       curve: { kind: "localEntity" as const, entityId: spline.entityId },
     };
     const localDefinition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: [
@@ -5707,9 +5830,14 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     };
     const local = evaluateSketchScalarConstraintForTest({
       tolerances,
+      modelingTolerance: 1e-3,
       definition: localDefinition,
       constraintId: localConstraint.constraintId,
-      values: getSketchSolveInitialValuesForTest(localDefinition, tolerances),
+      values: getSketchSolveInitialValuesForTest(
+        localDefinition,
+        tolerances,
+        1e-3,
+      ),
     });
     expect(local.residual).toBe(Number.MIN_VALUE);
 
@@ -5773,12 +5901,14 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     ];
     const projected = evaluateSketchScalarConstraintForTest({
       tolerances,
+      modelingTolerance: 1e-3,
       definition: projectedDefinition,
       projectedReferences,
       constraintId: projectedConstraint.constraintId,
       values: getSketchSolveInitialValuesForTest(
         projectedDefinition,
         tolerances,
+        1e-3,
       ),
     });
     expect(projected.residual).toBe(Number.MIN_VALUE);
@@ -5824,7 +5954,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       curve: { kind: "localEntity" as const, entityId: spline.entityId },
     };
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: points.map((point) => point.pointId),
@@ -5840,6 +5970,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const solved = solveSketchDefinitionCore({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
     });
     expect(solved.status.solveState).toBe("failed");
@@ -5923,7 +6054,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
             },
           ];
     return {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: points.map((point) => point.pointId),
@@ -5942,6 +6073,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const solved = solveSketchDefinitionCore({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
     });
     expect(solved.status.solveState).toBe("solved");
@@ -5954,6 +6086,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const program = compileSketchSolveProgram({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
     });
     const metadata = program.equationMetadata.find(
@@ -5989,6 +6122,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const solved = solveSketchDefinitionCore({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
       strategy: "levenbergMarquardt",
     });
@@ -6033,15 +6167,17 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     });
     const initial = evaluateSketchScalarConstraintForTest({
       tolerances,
+      modelingTolerance: 1e-3,
       definition,
       constraintId: "constraint_equal_offset",
-      values: getSketchSolveInitialValuesForTest(definition, tolerances),
+      values: getSketchSolveInitialValuesForTest(definition, tolerances, 1e-3),
     });
     expect(initial.residual).toBeLessThan(1e-20);
 
     const perturbed = getSketchSolveInitialValuesForTest(
       definition,
       tolerances,
+      1e-3,
     );
     perturbed[5] += 0.37;
     perturbed[10] -= 0.21;
@@ -6089,6 +6225,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
         coincidence: 1e-3,
         angleRadians: 1e-6,
       },
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
     });
     expect(angularSolve.status.solveState).toBe("failed");
@@ -6114,6 +6251,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
         coincidence: 1e-6,
         angleRadians: 1e-3,
       },
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
     });
     expect(linearSolve.status.solveState).toBe("failed");
@@ -6143,6 +6281,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       const accepted = solveSketchDefinitionCore({
         definition: angularAccepted,
         tolerances: { ...tolerances, coincidence: 1e-3, angleRadians },
+        modelingTolerance: 1e-3,
         partialSolvePolicy: "failOnConflict",
       });
       expect(accepted.status.solveState).toBe("solved");
@@ -6172,6 +6311,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       const accepted = solveSketchDefinitionCore({
         definition: linearAccepted,
         tolerances: { ...tolerances, coincidence, angleRadians: 1e-3 },
+        modelingTolerance: 1e-3,
         partialSolvePolicy: "failOnConflict",
       });
       expect(accepted.status.solveState).toBe("solved");
@@ -6200,6 +6340,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const incompatibleValidation = validateSketchDefinitionCore({
       definition: incompatible,
       tolerances,
+      modelingTolerance: 1e-3,
     });
     expect(incompatibleValidation.isValid).toBe(false);
     expect(incompatibleValidation.diagnostics).toContainEqual(
@@ -6215,6 +6356,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const selfPairedProgram = compileSketchSolveProgram({
       definition: selfPaired,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
     });
     expect(
@@ -6225,6 +6367,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const selfPairedSolve = solveSketchDefinitionCore({
       definition: selfPaired,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
     });
     expect(selfPairedSolve.status.solveState).toBe("failed");
@@ -6236,6 +6379,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const validPrior = solveSketchDefinitionCore({
       definition: makeEqualOffsetDefinition(),
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
     }).solvedSnapshot;
     for (const nonFiniteCoordinate of [Number.NaN, Number.POSITIVE_INFINITY]) {
@@ -6243,9 +6387,10 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       nonFinite.points[1]!.position = [nonFiniteCoordinate, 0];
       const nonFiniteEvaluation = evaluateSketchScalarConstraintForTest({
         tolerances,
+        modelingTolerance: 1e-3,
         definition: nonFinite,
         constraintId: "constraint_equal_offset",
-        values: getSketchSolveInitialValuesForTest(nonFinite, tolerances),
+        values: getSketchSolveInitialValuesForTest(nonFinite, tolerances, 1e-3),
       });
       expect(nonFiniteEvaluation.residual).toBe(Number.POSITIVE_INFINITY);
       expect(
@@ -6256,6 +6401,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       const nonFiniteSolve = solveSketchDefinitionCore({
         definition: nonFinite,
         tolerances,
+        modelingTolerance: 1e-3,
         partialSolvePolicy: "failOnConflict",
       });
       expect(nonFiniteSolve.status.solveState).toBe("failed");
@@ -6273,6 +6419,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       const nonFiniteProgram = compileSketchSolveProgram({
         definition: nonFinite,
         tolerances,
+        modelingTolerance: 1e-3,
         partialSolvePolicy: "failOnConflict",
       });
       expect(() =>
@@ -6311,7 +6458,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       oldPoint.pointId,
     );
     const unrelatedDefinition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: [sharedPoint.pointId, oldPoint.pointId],
@@ -6326,6 +6473,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const unrelatedPrior = solveSketchDefinitionCore({
       definition: unrelatedDefinition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
     }).solvedSnapshot;
     expect(unrelatedPrior.status.solveState).toBe("solved");
@@ -6337,6 +6485,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
         program: compileSketchSolveProgram({
           definition: invalidForUnrelatedPrior,
           tolerances,
+          modelingTolerance: 1e-3,
           partialSolvePolicy: "failOnConflict",
         }),
         priorSolvedSnapshot: unrelatedPrior,
@@ -6348,6 +6497,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const degenerateValidation = validateSketchDefinitionCore({
       definition: degenerate,
       tolerances,
+      modelingTolerance: 1e-3,
     });
     expect(degenerateValidation.isValid).toBe(false);
     expect(degenerateValidation.diagnostics).toContainEqual(

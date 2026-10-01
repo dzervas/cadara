@@ -346,6 +346,7 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
         angleRadians: 1e-6,
         minimumSegmentLength: 1e-6,
       },
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
     expect(

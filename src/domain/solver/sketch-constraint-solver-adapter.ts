@@ -38,6 +38,11 @@ import {
   type SketchSolveDiagnostic,
 } from "@/contracts/sketch";
 import type { DocumentId, RevisionId } from "@/contracts/shared/ids";
+import { OffsetCertificationMemo } from "@/contracts/sketch/offset-derivation-frame";
+import { publishSketchOffsets } from "@/contracts/sketch/offset-publication";
+import type { OffsetPublicationCapabilities } from "@/contracts/sketch/offset-publication";
+import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
+import { createCertifiedNeutralCurveRequestQuery } from "@/domain/modeling/neutral-curve-certification/query";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 
 /**
@@ -220,6 +225,17 @@ export class SketchConstraintSolverAdapter implements SketchSolverAdapter {
   >();
   private nextInteractiveSessionSequence = 1;
   private readonly regionDeriver: SketchArrangementDeriver;
+  /** Kernel-free offset certification ([TECH] G1): one memo per adapter. */
+  private readonly offsetPublication: OffsetPublicationCapabilities = {
+    query: createCertifiedNeutralCurveRequestQuery(),
+    certifier: createCertifiedCubicTubeChain(),
+    memo: new OffsetCertificationMemo(),
+  };
+
+  /** Live derivations forwarded to a terminable delegate are superseded (T08b-g5). */
+  get supersedesRegionDerivation() {
+    return this.options.regionDerivation !== undefined;
+  }
 
   constructor(
     options: Partial<Omit<SketchConstraintSolverAdapterOptions, "neutralCurveQueries">> &
@@ -253,6 +269,7 @@ export class SketchConstraintSolverAdapter implements SketchSolverAdapter {
       definition: request.definition,
       projectedReferences: request.projectedReferences,
       tolerances: request.tolerances,
+      modelingTolerance: request.modelingTolerance,
     });
     return {
       ...makeResponseBase(request),
@@ -267,6 +284,8 @@ export class SketchConstraintSolverAdapter implements SketchSolverAdapter {
       definition: request.definition,
       projectedReferences: request.projectedReferences,
       tolerances: request.tolerances,
+      modelingTolerance: request.modelingTolerance,
+      ...(request.offsetPlans ? { offsetPlans: request.offsetPlans } : {}),
       partialSolvePolicy: request.partialSolvePolicy,
     });
 
@@ -282,10 +301,13 @@ export class SketchConstraintSolverAdapter implements SketchSolverAdapter {
     request: StartInteractiveSketchSolveSessionRequest,
   ): Promise<StartInteractiveSketchSolveSessionResponse> {
     assertSupportedRequest(request, this.options);
+    const offsetPlans = request.priorSolvedSnapshot?.offsetFramePlans;
     const program = compileSketchSolveProgram({
       definition: request.definition,
       projectedReferences: request.projectedReferences,
       tolerances: request.tolerances,
+      modelingTolerance: request.modelingTolerance,
+      ...(offsetPlans ? { offsetPlans } : {}),
       partialSolvePolicy: request.partialSolvePolicy,
       strategy: request.strategy,
     });
@@ -492,6 +514,13 @@ export class SketchConstraintSolverAdapter implements SketchSolverAdapter {
     if (this.options.regionDerivation) {
       return this.options.regionDerivation.deriveSketchRegions(request);
     }
+    // [TECH] G1: publish first (relationship-scoped), then regions.
+    const offsetPublications = publishSketchOffsets({
+      definition: request.definition,
+      solvedSnapshot: request.solvedSnapshot,
+      modelingTolerance: request.modelingTolerance,
+      capabilities: this.offsetPublication,
+    });
     const derived = await this.regionDeriver.derive({
       documentId: request.documentId,
       revisionId: request.revisionId,
@@ -505,6 +534,7 @@ export class SketchConstraintSolverAdapter implements SketchSolverAdapter {
       ...makeResponseBase(request),
       regions: derived.regions,
       diagnostics: derived.diagnostics,
+      offsetPublications,
     };
   }
 

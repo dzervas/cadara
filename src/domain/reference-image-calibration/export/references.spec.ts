@@ -21,7 +21,7 @@ test("src/domain/reference-image-calibration/export/references.spec.ts does not 
   });
 
   const definition: SketchDefinition = {
-    schemaVersion: "sketch-definition/v1alpha1",
+    schemaVersion: "sketch-definition/v1alpha2",
     referenceIds: [],
     references: [],
     pointIds: [],
@@ -62,7 +62,7 @@ test("src/domain/reference-image-calibration/export/references.spec.ts does not 
   });
 
   const projectedReferences = buildReferenceImageAnchorProjectedReferences({
-    schemaVersion: "sketch-definition/v1alpha1",
+    schemaVersion: "sketch-definition/v1alpha2",
     referenceIds: [],
     references: [],
     pointIds: [],

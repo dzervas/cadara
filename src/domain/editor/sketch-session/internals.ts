@@ -22,7 +22,21 @@ import type {
   SketchOperationRef,
   SketchPointRef,
 } from "@/contracts/shared/references";
-import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
+import {
+  evaluateSketchDerivations,
+  type SketchDerivationSettings,
+} from "@/contracts/sketch/derived-geometry";
+import {
+  applyOffsetPublications,
+  isOffsetPublicationSolveAccepted,
+  offsetPublicationDiagnostics,
+  carriedOffsetPlans,
+  closeOffsetReplanRound,
+  isOffsetReplanRound,
+  offsetReplanHints,
+  publishedOffsetPlans,
+} from "@/contracts/sketch/offset-publication";
+import type { SketchOffsetPublicationRecord } from "@/contracts/solver/schema";
 import {
   type RegionRecord,
   type SketchDefinition,
@@ -42,6 +56,7 @@ import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import {
   deriveSketchValidity,
   mergeSketchSolveDiagnostics,
+  withRelationshipScopedDiagnostics,
 } from "@/contracts/sketch/derived-validity";
 import {
   resolveSketchDerivationDistances,
@@ -318,14 +333,25 @@ export function mergeDerivedProjectedReferences(
   ];
 }
 
+/** τ and the session's offset plan hints ([TECH] G3/G12/G17) for every session evaluation. */
+export function getSketchSessionDerivationSettings(
+  session: Pick<SketchSessionState, "modelingTolerance" | "offsetPlans">,
+): SketchDerivationSettings {
+  return {
+    modelingTolerance: session.modelingTolerance,
+    ...(session.offsetPlans ? { offsetPlans: session.offsetPlans } : {}),
+  };
+}
+
 export function getSketchSessionDisplayDefinition(session: SketchSessionState) {
   const sketchId = session.sketchId ?? ("sketch_draft" as SketchId);
-  const evaluatedDefinition = evaluateSketchDerivations(
-    resolveSketchDerivationDistances({
+  const evaluatedDefinition = evaluateSketchDerivations({
+    definition: resolveSketchDerivationDistances({
       definition: session.definition,
       variables: session.documentVariables,
     }),
-  ).definition;
+    ...getSketchSessionDerivationSettings(session),
+  }).definition;
   return mergeReferenceImageAnchorReferences(
     evaluatedDefinition,
     sketchId,
@@ -347,6 +373,7 @@ export function getSketchSessionDisplayProjectedReferences(
 let cachedSolveDefinition: SketchDefinition | null = null;
 let cachedSolveProjectedRefs: ProjectedSketchReferenceRecord[] | null = null;
 let cachedSolveTolerances: SketchSessionState["solverTolerances"] | null = null;
+let cachedSolveModelingTolerance: number | null = null;
 let cachedSolveResult: SolvedSketchSnapshot | null = null;
 
 /**
@@ -401,15 +428,23 @@ export function withLiveSolveBasis(
   definition: SketchDefinition,
   solvedSnapshot?: SolvedSketchSnapshot,
 ): SketchSessionState {
-  const evaluatedDefinition = evaluateSketchDerivations(
-    resolveSketchDefinitionForSolve(definition, session.documentVariables),
-  ).definition;
+  const settings = getSketchSessionDerivationSettings(session);
+  const evaluatedDefinition = evaluateSketchDerivations({
+    definition: resolveSketchDefinitionForSolve(
+      definition,
+      session.documentVariables,
+    ),
+    ...settings,
+  }).definition;
   let usableSolvedSnapshot = solvedSnapshot;
   if (!usableSolvedSnapshot) {
+    // The evaluation is memoized on (definition, τ, plan hints), so an equal
+    // evaluated definition identity implies the same hints.
     if (
       cachedSolveDefinition === evaluatedDefinition &&
       cachedSolveProjectedRefs === session.projectedReferences &&
       cachedSolveTolerances === session.solverTolerances &&
+      cachedSolveModelingTolerance === session.modelingTolerance &&
       cachedSolveResult
     ) {
       usableSolvedSnapshot = cachedSolveResult;
@@ -418,11 +453,13 @@ export function withLiveSolveBasis(
         definition: evaluatedDefinition,
         projectedReferences: session.projectedReferences,
         tolerances: session.solverTolerances,
+        ...settings,
         partialSolvePolicy: "bestEffort",
       }).solvedSnapshot;
       cachedSolveDefinition = evaluatedDefinition;
       cachedSolveProjectedRefs = session.projectedReferences;
       cachedSolveTolerances = session.solverTolerances;
+      cachedSolveModelingTolerance = session.modelingTolerance;
       cachedSolveResult = usableSolvedSnapshot;
     }
   }
@@ -458,6 +495,42 @@ export function withLiveSolveBasis(
   };
 }
 
+/**
+ * U-G3 / [TECH] G11: the accepted pair of a staged preview definition (the
+ * same synchronous, kernel-free solve as a live basis), for its background
+ * offset publication. Null when the preview's solve is not accepted: offsets
+ * certify only from an accepted solve (U-G1).
+ */
+export function getSketchSessionPreviewBasis(
+  session: SketchSessionState,
+  definition: SketchDefinition,
+): SketchLiveRegionBasis | null {
+  const settings = getSketchSessionDerivationSettings(session);
+  const evaluatedDefinition = evaluateSketchDerivations({
+    definition: resolveSketchDefinitionForSolve(
+      definition,
+      session.documentVariables,
+    ),
+    ...settings,
+  }).definition;
+  const solvedSnapshot = solveSketchDefinitionCore({
+    definition: evaluatedDefinition,
+    projectedReferences: session.projectedReferences,
+    tolerances: session.solverTolerances,
+    ...settings,
+    partialSolvePolicy: "bestEffort",
+  }).solvedSnapshot;
+  return isOffsetPublicationSolveAccepted(solvedSnapshot)
+    ? {
+        sketchId: session.sketchId ?? ("sketch_draft" as SketchId),
+        definition: evaluatedDefinition,
+        projectedReferences: session.projectedReferences,
+        solvedSnapshot,
+        modelingTolerance: session.modelingTolerance,
+      }
+    : null;
+}
+
 /** Basis for the async live region derivation, or null before the first live solve. */
 export function getSketchSessionLiveRegionBasis(
   session: SketchSessionState,
@@ -475,14 +548,62 @@ export function getSketchSessionLiveRegionBasis(
   };
 }
 
-/** Publishes regions derived for the session's current generation. */
+const samePlans = (
+  first: SketchSessionState["offsetPlans"],
+  second: SketchSessionState["offsetPlans"],
+) => JSON.stringify(first ?? []) === JSON.stringify(second ?? []);
+
+/**
+ * Publishes regions and offset publications derived for the session's
+ * current generation ([TECH] G1/G3/G7/G17). A `planChanged` round re-solves
+ * the live basis ONCE with the certified hints (passed unchanged; a second
+ * disagreement fails closed in publish, and a `planChanged` of the re-solve
+ * round fails closed here) and stays pending for the new generation; later
+ * solves carry those hints as `published` (review A1). Otherwise the certified relationships' shells are marked
+ * `certified` in the live solve, their published plans seed the next solves,
+ * and failures stay relationship-scoped display diagnostics ([TECH] G16).
+ */
 export function publishSketchLiveRegions(
   session: SketchSessionState,
   regions: RegionRecord[],
   diagnostics: SketchSolveDiagnostic[],
+  roundPublications: readonly SketchOffsetPublicationRecord[] = [],
 ): SketchSessionState {
+  // [TECH] G3: a re-solve round never asks for another re-solve.
+  const offsetPublications =
+    session.liveSolve && isOffsetReplanRound(session.liveSolve.solvedSnapshot)
+      ? closeOffsetReplanRound(session.liveSolve.definition, roundPublications)
+      : roundPublications;
+  const hints = offsetReplanHints(offsetPublications);
+  if (hints && session.liveSolve)
+    return {
+      ...withLiveSolveBasis(
+        { ...session, offsetPlans: hints },
+        session.definition,
+      ),
+      // Review A1: the certifier's hints serve this one re-solve only.
+      offsetPlans: carriedOffsetPlans(hints),
+    };
+  const published = publishedOffsetPlans(offsetPublications);
   return {
     ...session,
+    ...(session.liveSolve
+      ? {
+          liveSolve: {
+            ...session.liveSolve,
+            solvedSnapshot: applyOffsetPublications(
+              session.liveSolve.definition,
+              session.liveSolve.solvedSnapshot,
+              offsetPublications,
+            ),
+          },
+        }
+      : {}),
+    offsetPlans: samePlans(published, session.offsetPlans)
+      ? session.offsetPlans
+      : published,
+    offsetPublicationDiagnostics:
+      offsetPublicationDiagnostics(offsetPublications),
     liveRegions: {
       generation: session.liveRegions.generation,
       status: "current",
@@ -533,12 +654,15 @@ export function getSketchSessionDerivedValidity(
 ): SketchDerivedValidity {
   const { liveRegions, liveSolve } = session;
   if (liveRegions.status === "current") {
-    return liveSolve
-      ? deriveSketchValidity({
-          solvedSnapshot: liveSolve.solvedSnapshot,
-          diagnostics: liveRegions.diagnostics,
-        })
-      : { state: "current", diagnostics: liveRegions.diagnostics };
+    return withRelationshipScopedDiagnostics(
+      liveSolve
+        ? deriveSketchValidity({
+            solvedSnapshot: liveSolve.solvedSnapshot,
+            diagnostics: liveRegions.diagnostics,
+          })
+        : { state: "current", diagnostics: liveRegions.diagnostics },
+      session.offsetPublicationDiagnostics ?? [],
+    );
   }
 
   const diagnostics = mergeSketchSolveDiagnostics(
@@ -591,6 +715,10 @@ export function getEntityPointIds(entity: SketchEntityDefinition) {
       return entity.controlPointIds;
     case "profileText":
       return [entity.anchorPointId];
+    case "derivedPiecewiseCubic":
+      // A derived shell owns no points (its driven terminals belong to its
+      // offset relationship's outputs).
+      return [];
   }
 }
 
@@ -1410,12 +1538,13 @@ export function rebuildSessionCommitRequest(
   // current, but persist the authored relationship records so expression
   // distances survive the round-trip.
   const evaluatedDefinition = {
-    ...evaluateSketchDerivations(
-      resolveSketchDerivationDistances({
+    ...evaluateSketchDerivations({
+      definition: resolveSketchDerivationDistances({
         definition,
         variables: session.documentVariables,
       }),
-    ).definition,
+      ...getSketchSessionDerivationSettings(session),
+    }).definition,
     derivedRelationships: definition.derivedRelationships,
   };
   return buildCommitRequest({

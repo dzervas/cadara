@@ -61,7 +61,10 @@ test("evaluateSketchDerivations mirrors geometry and reverses mirrored arc sweep
   const axisStart = definition.points.find(
     (point) => point.pointId === "axis_start",
   );
-  const result = evaluateSketchDerivations(definition);
+  const result = evaluateSketchDerivations({
+    definition: definition,
+    modelingTolerance: 1e-3,
+  });
   const center = pointPosition(result.definition, "mirror_center");
   const start = pointPosition(result.definition, "mirror_start");
   const end = pointPosition(result.definition, "mirror_end");
@@ -210,7 +213,10 @@ test("evaluateSketchDerivations applies linear, circular, and transform relation
     ],
   });
 
-  const result = evaluateSketchDerivations(definition);
+  const result = evaluateSketchDerivations({
+    definition: definition,
+    modelingTolerance: 1e-3,
+  });
   const scaledCircle = entity(result.definition, "scaled_circle");
 
   assertPoint(
@@ -257,7 +263,7 @@ test("evaluateSketchDerivations applies linear, circular, and transform relation
     "Valid derived relationships should not emit diagnostics.",
   ).toBe(0);
 
-  const differential = evaluateSketchDerivationJvp(result.definition, {
+  const differential = evaluateSketchDerivationJvp(result, {
     points: {
       line_seed_start: [2, 3],
       circle_center: [1, -2],
@@ -403,10 +409,16 @@ test("evaluateSketchDerivations preserves complete spline aggregates and linearl
     ],
   });
 
-  const first = evaluateSketchDerivations(definition);
+  const first = evaluateSketchDerivations({
+    definition: definition,
+    modelingTolerance: 1e-3,
+  });
   const second = evaluateSketchDerivations({
-    ...definition,
-    points: [...definition.points],
+    definition: {
+      ...definition,
+      points: [...definition.points],
+    },
+    modelingTolerance: 1e-3,
   });
   const mirrorResult = entity(first.definition, "mirrored_spline") as Extract<
     SketchEntityDefinition,
@@ -448,7 +460,7 @@ test("evaluateSketchDerivations preserves complete spline aggregates and linearl
     { kind: "automatic" },
   ]);
 
-  const differential = evaluateSketchDerivationJvp(first.definition, {
+  const differential = evaluateSketchDerivationJvp(first, {
     splineTangents: {
       seed_spline: { "seed-occ-a": [3, -1], "seed-occ-b": [0, 0] },
     },
@@ -476,12 +488,9 @@ test("evaluateSketchDerivations preserves complete spline aggregates and linearl
       seed_spline: { "seed-occ-a": [3, -1] as const },
     },
   };
-  const mirrorDifferential = evaluateSketchDerivationJvp(
-    first.definition,
-    variation,
-  );
+  const mirrorDifferential = evaluateSketchDerivationJvp(first, variation);
   const outputCotangent = [0.7, -1.2] as const;
-  const pulled = prepareSketchDerivationPullback(first.definition)({
+  const pulled = prepareSketchDerivationPullback(first)({
     splineTangents: {
       mirrored_spline: { "mirror-occ-a": outputCotangent },
     },
@@ -571,7 +580,10 @@ test("evaluateSketchDerivations emits diagnostics for missing seed, missing outp
     ],
   });
 
-  const result = evaluateSketchDerivations(definition);
+  const result = evaluateSketchDerivations({
+    definition: definition,
+    modelingTolerance: 1e-3,
+  });
   const codes = result.diagnostics.map((diagnostic) => diagnostic.code);
 
   expect(
@@ -602,14 +614,14 @@ test("evaluateSketchDerivations recomputes offset chains from seed edits with st
         makePoint("c", [input.bX, 4]),
         makePoint("o1s", [0, 0]),
         makePoint("o1e", [0, 0]),
-        makePoint("o2s", [0, 0]),
         makePoint("o2e", [0, 0]),
       ],
       entities: [
         makeLine("seed_ab", "a", "b"),
         makeLine("seed_bc", "b", "c"),
         makeLine("out_ab", "o1s", "o1e"),
-        makeLine("out_bc", "o2s", "o2e"),
+        // T08b-g5 (D2/[TECH] G6): a trimmed corner is one shared driven point.
+        makeLine("out_bc", "o1e", "o2e"),
       ],
       derivedRelationships: [
         makeRelationship({
@@ -622,6 +634,7 @@ test("evaluateSketchDerivations recomputes offset chains from seed edits with st
           ] as unknown as SketchDerivationDefinition["seedEntityIds"],
           distance: input.distance,
           jointPolicy: "trimExtendArcFallback",
+          piecewiseCubicOutputs: [],
           jointOutputs: [],
           outputs: [
             {
@@ -636,7 +649,7 @@ test("evaluateSketchDerivations recomputes offset chains from seed edits with st
               outputEntityId: "out_bc",
               instanceIndex: 1,
               seedPointIds: ["b", "c"],
-              outputPointIds: ["o2s", "o2e"],
+              outputPointIds: ["o1e", "o2e"],
             },
           ],
         } as SketchDerivationDefinition),
@@ -644,9 +657,10 @@ test("evaluateSketchDerivations recomputes offset chains from seed edits with st
     });
   }
 
-  const initial = evaluateSketchDerivations(
-    makeOffsetDefinition({ bX: 4, distance: 1 }),
-  );
+  const initial = evaluateSketchDerivations({
+    definition: makeOffsetDefinition({ bX: 4, distance: 1 }),
+    modelingTolerance: 1e-3,
+  });
   expect(
     initial.diagnostics.length,
     "A resolvable offset chain should not emit diagnostics.",
@@ -661,20 +675,20 @@ test("evaluateSketchDerivations recomputes offset chains from seed edits with st
     [3, 1],
     "Offset recompute should trim the inside corner.",
   );
-  assertPoint(
-    pointPosition(initial.definition, "o2s"),
-    [3, 1],
-    "Adjacent trimmed outputs should share the corner position.",
-  );
+  expect(
+    initial.definition.entities.find((entity) => entity.entityId === "out_bc"),
+    "Adjacent trimmed outputs should share the corner point.",
+  ).toMatchObject({ startPointId: "o1e" });
   assertPoint(
     pointPosition(initial.definition, "o2e"),
     [3, 4],
     "Offset recompute should keep the natural direction of each seed.",
   );
 
-  const seedEdited = evaluateSketchDerivations(
-    makeOffsetDefinition({ bX: 6, distance: 1 }),
-  );
+  const seedEdited = evaluateSketchDerivations({
+    definition: makeOffsetDefinition({ bX: 6, distance: 1 }),
+    modelingTolerance: 1e-3,
+  });
   expect(
     seedEdited.diagnostics.length,
     "Seed edits should recompute without diagnostics.",
@@ -696,19 +710,15 @@ test("evaluateSketchDerivations recomputes offset chains from seed edits with st
       c: [-0.1, 0.6] as const,
     },
   };
-  const differential = evaluateSketchDerivationJvp(
-    initial.definition,
-    variation,
-  );
+  const differential = evaluateSketchDerivationJvp(initial, variation);
   const cotangent = {
     points: {
       o1s: [0.8, -0.2] as const,
       o1e: [-0.3, 0.9] as const,
-      o2s: [0.5, 0.4] as const,
       o2e: [-0.6, 0.1] as const,
     },
   };
-  const pulled = prepareSketchDerivationPullback(initial.definition)(cotangent);
+  const pulled = prepareSketchDerivationPullback(initial)(cotangent);
   const dot = (left: SketchPoint2D, right: SketchPoint2D) =>
     left[0] * right[0] + left[1] * right[1];
   const forwardDot = Object.entries(cotangent.points).reduce(
@@ -730,33 +740,36 @@ test("evaluateSketchDerivations recomputes offset chains from seed edits with st
     "Offset output slots must not receive authority cotangents.",
   ).toBeUndefined();
 
-  const distanceEdited = evaluateSketchDerivations(
-    makeOffsetDefinition({ bX: 4, distance: 0.5 }),
-  );
+  const distanceEdited = evaluateSketchDerivations({
+    definition: makeOffsetDefinition({ bX: 4, distance: 0.5 }),
+    modelingTolerance: 1e-3,
+  });
   assertPoint(
     pointPosition(distanceEdited.definition, "o1s"),
     [0, 0.5],
     "Distance edits should recompute the derived chain.",
   );
 
-  const literalAuthored = evaluateSketchDerivations(
-    makeOffsetDefinition({
+  const literalAuthored = evaluateSketchDerivations({
+    definition: makeOffsetDefinition({
       bX: 4,
       distance: { source: "literal", value: 1 },
     }),
-  );
+    modelingTolerance: 1e-3,
+  });
   assertPoint(
     pointPosition(literalAuthored.definition, "o1s"),
     [0, 1],
     "Authored literal distances should evaluate like plain numbers.",
   );
 
-  const unresolvedExpression = evaluateSketchDerivations(
-    makeOffsetDefinition({
+  const unresolvedExpression = evaluateSketchDerivations({
+    definition: makeOffsetDefinition({
       bX: 4,
       distance: { source: "expression", valueText: "wall / 2" },
     }),
-  );
+    modelingTolerance: 1e-3,
+  });
   expect(
     unresolvedExpression.diagnostics.some(
       (diagnostic) => diagnostic.code === "derived-offset-unresolved-distance",
@@ -810,6 +823,7 @@ test("offset derivatives compose through transform relationships in both directi
         seedEntityIds: ["seed_ab"],
         distance: 0.5,
         jointPolicy: "trimExtendArcFallback",
+        piecewiseCubicOutputs: [],
         jointOutputs: [],
         outputs: [
           {
@@ -866,6 +880,7 @@ test("offset derivatives compose through transform relationships in both directi
         seedEntityIds: ["transform_cd"],
         distance: -0.25,
         jointPolicy: "trimExtendArcFallback",
+        piecewiseCubicOutputs: [],
         jointOutputs: [],
         outputs: [
           {
@@ -879,7 +894,10 @@ test("offset derivatives compose through transform relationships in both directi
       } as SketchDerivationDefinition),
     ],
   });
-  const evaluated = evaluateSketchDerivations(definition).definition;
+  const evaluation = evaluateSketchDerivations({
+    definition: definition,
+    modelingTolerance: 1e-3,
+  });
   const variation = {
     points: {
       a: [0.2, -0.1] as const,
@@ -888,7 +906,7 @@ test("offset derivatives compose through transform relationships in both directi
       d: [0.6, -0.2] as const,
     },
   };
-  const jvp = evaluateSketchDerivationJvp(evaluated, variation);
+  const jvp = evaluateSketchDerivationJvp(evaluation, variation);
   const cotangent = {
     points: {
       offset_transform_a: [0.7, -0.4] as const,
@@ -897,7 +915,7 @@ test("offset derivatives compose through transform relationships in both directi
       transform_offset_b: [-0.9, 0.1] as const,
     },
   };
-  const pulled = prepareSketchDerivationPullback(evaluated)(cotangent);
+  const pulled = prepareSketchDerivationPullback(evaluation)(cotangent);
   const dot = (left: SketchPoint2D, right: SketchPoint2D) =>
     left[0] * right[0] + left[1] * right[1];
   const forward = Object.entries(cotangent.points).reduce(
@@ -950,6 +968,7 @@ test("evaluateSketchDerivations maintains offset joint arcs and reports structur
           ] as unknown as SketchDerivationDefinition["seedEntityIds"],
           distance,
           jointPolicy: "trimExtendArcFallback",
+          piecewiseCubicOutputs: [],
           jointOutputs: [
             {
               firstSeedEntityId: "seed_ab",
@@ -984,7 +1003,10 @@ test("evaluateSketchDerivations maintains offset joint arcs and reports structur
     });
   }
 
-  const arcJoined = evaluateSketchDerivations(makeJointDefinition(-1));
+  const arcJoined = evaluateSketchDerivations({
+    definition: makeJointDefinition(-1),
+    modelingTolerance: 1e-3,
+  });
   expect(
     arcJoined.diagnostics.length,
     "A satisfiable arc-joined offset should not emit diagnostics.",
@@ -1004,7 +1026,7 @@ test("evaluateSketchDerivations maintains offset joint arcs and reports structur
     [5, 0],
     "The joint arc end should sit at the second segment's offset start.",
   );
-  const jointDifferential = evaluateSketchDerivationJvp(arcJoined.definition, {
+  const jointDifferential = evaluateSketchDerivationJvp(arcJoined, {
     points: { b: [0.4, -0.3] },
   });
   assertPoint(
@@ -1013,12 +1035,17 @@ test("evaluateSketchDerivations maintains offset joint arcs and reports structur
     "Committed joint centers should carry the shared seed vertex differential.",
   );
 
-  const topologyFlip = evaluateSketchDerivations(makeJointDefinition(1));
+  const topologyFlip = evaluateSketchDerivations({
+    definition: makeJointDefinition(1),
+    modelingTolerance: 1e-3,
+  });
   expect(
     topologyFlip.diagnostics.some(
-      (diagnostic) => diagnostic.code === "derived-offset-joint-unsatisfied",
+      // T08b-g5 ([TECH] G6): arc presence is authored intent; a corner that
+      // can no longer hold its authored arc is `topologyChanged`.
+      (diagnostic) => diagnostic.code === "derived-offset-topology-changed",
     ),
-    "A joint topology change should emit the joint-unsatisfied diagnostic.",
+    "A joint topology change should emit the topology-changed diagnostic.",
   ).toBeTruthy();
   assertPoint(
     pointPosition(topologyFlip.definition, "o1e"),
@@ -1026,8 +1053,8 @@ test("evaluateSketchDerivations maintains offset joint arcs and reports structur
     "Joint topology changes should keep outputs in their last resolvable state.",
   );
 
-  const collapsed = evaluateSketchDerivations(
-    makeSketchDefinition({
+  const collapsed = evaluateSketchDerivations({
+    definition: makeSketchDefinition({
       points: [
         makePoint("arc_center", [0, 0]),
         makePoint("arc_start", [2, 0]),
@@ -1062,6 +1089,7 @@ test("evaluateSketchDerivations maintains offset joint arcs and reports structur
           ] as unknown as SketchDerivationDefinition["seedEntityIds"],
           distance: 3,
           jointPolicy: "trimExtendArcFallback",
+          piecewiseCubicOutputs: [],
           jointOutputs: [],
           outputs: [
             {
@@ -1075,7 +1103,8 @@ test("evaluateSketchDerivations maintains offset joint arcs and reports structur
         } as SketchDerivationDefinition),
       ],
     }),
-  );
+    modelingTolerance: 1e-3,
+  });
   expect(
     collapsed.diagnostics.some(
       (diagnostic) => diagnostic.code === "derived-offset-arc-collapse",
@@ -1129,8 +1158,8 @@ function entity(
 }
 
 test("circle scalar derivatives compose transitively and pull back only to source authority", () => {
-  const definition = evaluateSketchDerivations(
-    makeSketchDefinition({
+  const evaluation = evaluateSketchDerivations({
+    definition: makeSketchDefinition({
       points: [
         makePoint("circle_seed_center", [0, 0]),
         makePoint("circle_offset_center", [0, 0]),
@@ -1149,6 +1178,7 @@ test("circle scalar derivatives compose transitively and pull back only to sourc
           seedEntityIds: ["circle_seed"],
           distance: 1,
           jointPolicy: "trimExtendArcFallback",
+          piecewiseCubicOutputs: [],
           jointOutputs: [],
           outputs: [
             {
@@ -1181,13 +1211,14 @@ test("circle scalar derivatives compose transitively and pull back only to sourc
         } as SketchDerivationDefinition),
       ],
     }),
-  ).definition;
+    modelingTolerance: 1e-3,
+  });
   const variation = {
     entities: {
       circle_seed: { kind: "circle" as const, radius: 0.3 },
     },
   };
-  const jvp = evaluateSketchDerivationJvp(definition, variation);
+  const jvp = evaluateSketchDerivationJvp(evaluation, variation);
   expect(jvp.entities.circle_offset).toEqual({ kind: "circle", radius: 0.3 });
   expect(jvp.entities.circle_transform).toEqual({
     kind: "circle",
@@ -1199,7 +1230,7 @@ test("circle scalar derivatives compose transitively and pull back only to sourc
       circle_transform: { kind: "circle" as const, radius: 1.5 },
     },
   };
-  const pulled = prepareSketchDerivationPullback(definition)(cotangent);
+  const pulled = prepareSketchDerivationPullback(evaluation)(cotangent);
   const forward = 1.5 * (jvp.entities.circle_transform?.radius ?? 0);
   const reverse =
     variation.entities.circle_seed.radius *
@@ -1215,7 +1246,7 @@ function makeSketchDefinition(overrides: {
   derivedRelationships?: SketchDerivationDefinition[];
 }) {
   return {
-    schemaVersion: "sketch-definition/v1alpha1",
+    schemaVersion: "sketch-definition/v1alpha2",
     referenceIds: [],
     references: [],
     pointIds: overrides.points.map((point) => point.pointId),

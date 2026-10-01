@@ -2235,8 +2235,14 @@ function declaredOffsetChainVertices(
  * transported regions are.
  */
 class CertifiedOffsetChainTubeStability {
-  /** Nominal brand (T08b-a math A2): no runtime field. */
-  declare private readonly brand: true;
+  /**
+   * Nominal brand (T08b-a math A2): a protected prototype method, so no own
+   * runtime field (JSON and `toEqual` see the same value) and no TS
+   * `declare` field (T08b-g5: the dev-server transform rejects those).
+   */
+  protected brand(): true {
+    return true;
+  }
   readonly ok: true;
   readonly resolved: OffsetChainTopologySuccess;
   readonly seedEntityId: SketchEntityId;

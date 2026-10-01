@@ -1,3 +1,4 @@
+import type { SketchDerivationSettings } from "@/contracts/sketch/derived-geometry";
 import type {
   DocumentVariableRecord,
   SketchPoint,
@@ -66,6 +67,7 @@ import {
   createSketchDimensionRef,
   createSketchEntityRef,
   createSketchPointRef,
+  getSketchSessionDerivationSettings,
 } from "./internals";
 import {
   addAnchorOffset,
@@ -536,6 +538,7 @@ export function commitSketchAnnotationEditValue(
     updatedFullDefinition,
     session.projectedReferences,
     session.solverTolerances,
+    getSketchSessionDerivationSettings(session),
     session.documentVariables,
   );
 
@@ -576,6 +579,7 @@ export function solveEditedAnnotationDefinition(
   definition: SketchDefinition,
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
   tolerances: SolverTolerancePolicy,
+  derivation: SketchDerivationSettings,
   documentVariables: readonly DocumentVariableRecord[] = [],
 ) {
   const resolvedDefinition = resolveSketchDimensionValues({
@@ -595,6 +599,7 @@ export function solveEditedAnnotationDefinition(
     definition: resolvedDefinition.definition,
     projectedReferences,
     tolerances,
+    ...derivation,
     partialSolvePolicy: "failOnConflict",
   });
   const constraintsSatisfied = solved.solvedSnapshot.constraintStatuses.every(
@@ -621,6 +626,7 @@ export function solveEditedAnnotationDefinition(
     definition: applySolvedSketchToDefinition(
       definition,
       solved.solvedSnapshot,
+      derivation,
     ),
     solvedSnapshot: solved.solvedSnapshot,
   };
@@ -1194,6 +1200,7 @@ export function getSketchAnnotationDescriptors(
     ),
     projectedReferences: session.projectedReferences,
     tolerances: session.solverTolerances,
+    ...getSketchSessionDerivationSettings(session),
     partialSolvePolicy: "bestEffort",
   });
   const constraintDisplaySummary = getSketchConstraintDisplaySummary({
@@ -2901,6 +2908,9 @@ export function getEntityAnchor(
       return getAveragePointPosition(definition, entity.controlPointIds);
     case "profileText":
       return getPointPosition(definition, entity.anchorPointId);
+    // T08b-g5b: derived offset shells have no annotation anchor yet.
+    case "derivedPiecewiseCubic":
+      return null;
   }
 }
 
@@ -2935,6 +2945,8 @@ export function getEntityAnchorPointId(
       return entity.controlPointIds[0] ?? null;
     case "profileText":
       return entity.anchorPointId;
+    case "derivedPiecewiseCubic":
+      return null;
   }
 }
 

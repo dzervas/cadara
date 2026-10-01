@@ -54,6 +54,7 @@ import {
   emitDocumentCursorMove,
   emitEditSessionCursorRestore,
   emitFeaturePreview,
+  emitPendingSketchOffsetPreviewPublication,
   emitPendingSketchRegionDerivation,
   emitSketchOpen,
   emitSketchPlaneCommit,
@@ -97,6 +98,8 @@ import {
   handleEffectSketchReferenceProjectionFailed,
   handleEffectSketchRegionsDerived,
   handleEffectSketchRegionDerivationFailed,
+  handleEffectSketchOffsetPreviewPublished,
+  handleEffectSketchOffsetPreviewPublicationFailed,
   handleEffectSketchReferenceImageImportCompleted,
   handleEffectSketchReferenceImageImportFailed,
   handleEffectSketchSpecialModeEffectCompleted,
@@ -640,6 +643,10 @@ function handleSharedEvent(
       return handleEffectSketchRegionsDerived(state, event);
     case "effect.sketchRegionDerivationFailed":
       return handleEffectSketchRegionDerivationFailed(state, event);
+    case "effect.sketchOffsetPreviewPublished":
+      return handleEffectSketchOffsetPreviewPublished(state, event);
+    case "effect.sketchOffsetPreviewPublicationFailed":
+      return handleEffectSketchOffsetPreviewPublicationFailed(state, event);
     case "effect.sketchReferenceImageImportCompleted":
       return handleEffectSketchReferenceImageImportCompleted(state, event);
     case "effect.sketchReferenceImageImportFailed":
@@ -670,5 +677,7 @@ export function transitionEditorState(
     routeToWorkflow(state, event, dependencies) ??
     handleSharedEvent(state, event, dependencies);
 
-  return emitPendingSketchRegionDerivation(result);
+  return emitPendingSketchOffsetPreviewPublication(
+    emitPendingSketchRegionDerivation(result),
+  );
 }

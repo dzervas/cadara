@@ -27,6 +27,8 @@ import type {
   SketchPoint2D,
   SketchReferenceDefinition,
   SketchSolveDiagnostic,
+  SolvedOffsetFramePlan,
+  SolvedOffsetFramePlanRecord,
   SolvedSketchSnapshot,
   SolvedSketchStatus,
 } from "@/contracts/sketch/schema";
@@ -40,6 +42,14 @@ export type SolverSchemaVersion = "sketch-solver/v1alpha1";
 /**
  * Current sketch solver schema version literal.
  */
+/**
+ * Request-id scope of an offset preview publication (U-G3). A terminable
+ * derivation runtime keeps these in their own lane, so a preview check and
+ * the live region derivation of one document never supersede each other.
+ */
+export const SKETCH_OFFSET_PREVIEW_REQUEST_SCOPE =
+  "sketch-offset-preview-publication";
+
 export const SOLVER_SCHEMA_VERSION: SolverSchemaVersion =
   "sketch-solver/v1alpha1";
 export type { SketchPlaneFrame };
@@ -366,6 +376,8 @@ export interface ValidateSketchRequest extends SketchSolverRequestBase {
   plane: SketchPlaneFrame;
   /** Explicit tolerance policy for validation checks. */
   tolerances: SolverTolerancePolicy;
+  /** The document's settings.modelingTolerance (finite, > 0; [TECH] G12); never a default. */
+  modelingTolerance: number;
   /** Durable authored sketch definition submitted for validation. */
   definition: SketchDefinition;
   /** Explicit projected external references already resolved into sketch space. */
@@ -392,12 +404,20 @@ export interface SolveSketchRequest extends SketchSolverRequestBase {
   plane: SketchPlaneFrame;
   /** Explicit tolerance policy for solve and consistency checks. */
   tolerances: SolverTolerancePolicy;
+  /** The document's settings.modelingTolerance (finite, > 0; [TECH] G12); never a default. */
+  modelingTolerance: number;
   /** Declares whether the solver may return partial results when conflicts exist. */
   partialSolvePolicy: SolverPartialSolvePolicy;
   /** Durable authored sketch definition to solve. */
   definition: SketchDefinition;
   /** Explicit projected external references available to the solver. */
   projectedReferences: ProjectedSketchReferenceRecord[];
+  /**
+   * [TECH] G3/G17 offset plan hints for this solve (a publication round's
+   * `planChanged` re-solve, or the last published plans); passed to the
+   * solve frames unchanged. Absent: the SEL first choice.
+   */
+  offsetPlans?: SolvedOffsetFramePlanRecord[];
 }
 
 /**
@@ -421,6 +441,8 @@ export interface StartInteractiveSketchSolveSessionRequest extends SketchSolverR
   plane: SketchPlaneFrame;
   /** Explicit tolerance policy for solve and consistency checks. */
   tolerances: SolverTolerancePolicy;
+  /** The document's settings.modelingTolerance (finite, > 0; [TECH] G12); never a default. */
+  modelingTolerance: number;
   /** Declares whether the solver may return partial results when conflicts exist. */
   partialSolvePolicy: SolverPartialSolvePolicy;
   /** Durable authored sketch definition to solve. */
@@ -563,6 +585,28 @@ export interface DeriveSketchRegionsResponse extends SketchSolverResponseBase {
   regions: RegionRecord[];
   /** Diagnostics emitted while deriving sketch regions. */
   diagnostics: SketchSolveDiagnostic[];
+  /**
+   * [TECH] G1/G5/G16/G17: the publication of every offset relationship of
+   * the request's accepted pair, in relationship order (empty without
+   * offsets or when the solve is not accepted, U-G1). Relationship-scoped:
+   * a failure never enters `diagnostics` or the solved snapshot.
+   */
+  offsetPublications: SketchOffsetPublicationRecord[];
+}
+
+/**
+ * One offset relationship's publication ([TECH] G17): `certified` when the
+ * unchanged SEL certified exactly the solve frame the snapshot's
+ * `offsetFramePlans` hint reproduces (its `plan`, origin `published`, seeds
+ * the next solves); `planChanged` when the certified plan differs (the
+ * caller re-solves ONCE with `plan`, origin `certified`, unchanged);
+ * `failed` with its source-linked diagnostic.
+ */
+export interface SketchOffsetPublicationRecord {
+  derivationId: string;
+  status: "certified" | "planChanged" | "failed";
+  plan?: SolvedOffsetFramePlan;
+  diagnostic?: SketchSolveDiagnostic;
 }
 
 /**

@@ -36,6 +36,7 @@ import {
   getEntityPointIds,
   getNextDefinitionSequence,
   getSessionSketchId,
+  getSketchSessionDerivationSettings,
   mapDefinitionEntityToDraftEntity,
 } from "./internals";
 import { buildCommitRequest } from "./history";
@@ -214,12 +215,13 @@ export function deriveSketchDisplayEntities(
   session: SketchSessionState,
 ): readonly SketchDraftEntity[] {
   const sketchId = getSessionSketchId(session);
-  const displayDefinition = evaluateSketchDerivations(
-    resolveSketchDerivationDistances({
+  const displayDefinition = evaluateSketchDerivations({
+    definition: resolveSketchDerivationDistances({
       definition: session.definition,
       variables: session.documentVariables,
     }),
-  ).definition;
+    ...getSketchSessionDerivationSettings(session),
+  }).definition;
   const acceptedEntities = displayDefinition.entities.flatMap((entity) =>
     mapDefinitionEntityToDraftEntity(
       sketchId,

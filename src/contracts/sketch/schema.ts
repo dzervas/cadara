@@ -31,6 +31,7 @@ import type {
   SplineGeometry,
   SplineInterpolationPolicy,
   SplinePointOccurrence,
+  SplinePoles,
 } from "@/contracts/sketch/spline-geometry";
 
 /**
@@ -42,24 +43,24 @@ export type SketchPoint2D = readonly [number, number];
 /**
  * Versioned schema identifier for authored sketch payloads.
  */
-export type SketchSchemaVersion = "sketch-definition/v1alpha1";
+export type SketchSchemaVersion = "sketch-definition/v1alpha2";
 
 /**
  * Versioned schema identifier for solved sketch payloads.
  */
-export type SolvedSketchSchemaVersion = "solved-sketch/v1alpha1";
+export type SolvedSketchSchemaVersion = "solved-sketch/v1alpha2";
 
 /**
  * Current authored sketch schema version literal.
  */
 export const SKETCH_SCHEMA_VERSION: SketchSchemaVersion =
-  "sketch-definition/v1alpha1";
+  "sketch-definition/v1alpha2";
 
 /**
  * Current solved sketch schema version literal.
  */
 export const SOLVED_SKETCH_SCHEMA_VERSION: SolvedSketchSchemaVersion =
-  "solved-sketch/v1alpha1";
+  "solved-sketch/v1alpha2";
 
 export type SketchFillMode = "none" | "solid" | "gradient";
 export type SketchStrokeCap = "butt" | "round" | "square";
@@ -135,6 +136,34 @@ export interface SketchOffsetJointOutput {
   endPointId: SketchPointId;
 }
 
+/**
+ * One source span of a spline seed's derived piecewise-cubic offset shell
+ * (T08b slice design §2.1, [TECH] D1): identity per SOURCE span, keyed by the
+ * seed's source occurrence pair in source order, never by the owner's
+ * sub-partition (revision data in the solved record).
+ */
+export interface SketchOffsetPiecewiseCubicSpan {
+  /** Stable output-span identity, unique within the relationship. */
+  outputSpanId: string;
+  sourceStartOccurrenceId: string;
+  sourceEndOccurrenceId: string;
+}
+
+/**
+ * The derived piecewise-cubic offset output of one spline seed (T08b-g5): a
+ * `derivedPiecewiseCubic` shell entity whose traversal-terminal ends are
+ * ordinary DRIVEN output points (D2), shared with neighbours at every
+ * non-arc adjacency ([TECH] G6). A closed single-seed chain uses one point
+ * for both ends.
+ */
+export interface SketchOffsetPiecewiseCubicOutput {
+  seedEntityId: SketchEntityId;
+  outputEntityId: SketchEntityId;
+  startPointId: SketchPointId;
+  endPointId: SketchPointId;
+  spans: readonly SketchOffsetPiecewiseCubicSpan[];
+}
+
 export type SketchDerivationDefinition =
   | (SketchDerivationDefinitionBase & {
       kind: "mirror";
@@ -171,8 +200,16 @@ export type SketchDerivationDefinition =
        */
       distance: SketchDimensionAuthoredValue;
       jointPolicy: SketchOffsetJointPolicy;
-      /** Stable identities for generated arc joins, keyed by adjacent seed pair. */
+      /**
+       * Stable identities for generated arc joins, keyed by adjacent seed
+       * pair. Arc presence is authored intent ([TECH] G6).
+       */
       jointOutputs: readonly SketchOffsetJointOutput[];
+      /**
+       * T08b-g5: one derived piecewise-cubic shell per spline seed. Spline
+       * seeds have no `outputs` entry (no fit-point output).
+       */
+      piecewiseCubicOutputs: readonly SketchOffsetPiecewiseCubicOutput[];
     });
 
 export interface SketchStyleDefinition {
@@ -385,6 +422,27 @@ export type SketchEntityDefinition =
       controlPointIds: readonly SketchPointId[];
       /** Polynomial degree for this Bezier representation. */
       degree: 2 | 3;
+      /** Optional local style authored directly in the sketch session. */
+      style?: SketchStyleDefinition;
+    }
+  | {
+      /**
+       * T08b-g5: the derived piecewise-cubic offset shell of one spline seed
+       * (T08b slice design §2.1, integration review C1). It has no points,
+       * poles, handles, closure or trim data: its geometry is the solved
+       * record of its owning offset relationship (`derivationId`).
+       */
+      kind: "derivedPiecewiseCubic";
+      /** Durable authored entity identity within the containing sketch definition. */
+      entityId: SketchEntityId;
+      /** Human-readable label owned by the producer of the sketch definition. */
+      label: string;
+      /** Durable target that must resolve to the same sketch as the containing record. */
+      target: SketchEntityRef;
+      /** True when the curve is construction-only and should not generate derived regions. */
+      isConstruction: boolean;
+      /** The owning offset relationship. */
+      derivationId: string;
       /** Optional local style authored directly in the sketch session. */
       style?: SketchStyleDefinition;
     }
@@ -1142,6 +1200,26 @@ export interface SolvedSketchStatus {
 }
 
 /**
+ * One owner sub-span of a solved derived shell (T08b slice design §2.2). The
+ * poles are the owner's, unchanged (C2); trims only restrict `queryDomain`.
+ */
+export interface SolvedSketchDerivedCubicSpan {
+  /** The authored output span (one source span) this sub-span lies in. */
+  outputSpanId: string;
+  /** Index inside that output span (revision data, never identity). */
+  subIndex: number;
+  /** The owner leaf's sub-interval of its source span's local [0, 1]. */
+  sourceLocalInterval: [number, number];
+  /** Increasing sub-interval of the source spline parameter. */
+  sourceDomain: [number, number];
+  /** The active domain: `sourceDomain` except at trimmed terminal ends (representatives). */
+  queryDomain: [number, number];
+  poles: SplinePoles;
+  /** The owner's conservative parameter-corresponding error certificate. */
+  certifiedError: number;
+}
+
+/**
  * Solver-owned solved entity geometry.
  * Geometry records are authoritative solver outputs, not authored inputs.
  */
@@ -1195,6 +1273,20 @@ export type SolvedSketchEntityGeometryRecord =
       kind: "spline";
       /** Sole owner-produced neutral cubic reconstruction, including invalid diagnostics. */
       reconstruction: SplineGeometry;
+    }
+  | {
+      /** Authored `derivedPiecewiseCubic` shell whose solved geometry is being reported. */
+      entityId: SketchEntityId;
+      /** Stable discriminant for a solved derived piecewise-cubic offset shell (T08b-g5). */
+      kind: "derivedPiecewiseCubic";
+      /**
+       * [TECH] G7: `provisional` is the uncertified solve frame (drawn, never
+       * consumable, U-A); `certified` is a publication of exactly these spans.
+       * Modeling consumers accept only `certified`.
+       */
+      publication: "provisional" | "certified";
+      /** Every owner sub-span in natural source order. */
+      spans: SolvedSketchDerivedCubicSpan[];
     }
   | {
       /** Authored entity identity whose solved geometry is being reported. */
@@ -1336,7 +1428,7 @@ export type RegionBoundarySource =
 /** Stable source branch: one line/arc/circle, or one neutral cubic span. */
 export interface RegionBoundaryBranch {
   source: RegionBoundarySource;
-  /** "whole" | `${startOccurrenceId}>${endOccurrenceId}` (authored span) | `span${index}` (projected neutral span). */
+  /** "whole" | `${startOccurrenceId}>${endOccurrenceId}` (authored span, or a derived shell's output span id) | `span${index}` (projected neutral span). */
   spanId: string;
 }
 
@@ -1433,6 +1525,38 @@ export interface SolvedSketchSnapshot {
   dimensionStatuses: DimensionStatusRecord[];
   /** Solver/kernel diagnostics for the current solved sketch state. */
   diagnostics: SketchSolveDiagnostic[];
+  /**
+   * [TECH] G17: the plan each offset relationship's solve frame actually ran
+   * (solved revision data, like shell sub-spans: never authored, never
+   * identity). Publish only uses it as the hint to re-run the solve frame;
+   * the SEL still decides and is compared bitwise. Absent when the
+   * definition has no offset relationship.
+   */
+  offsetFramePlans?: SolvedOffsetFramePlanRecord[];
+}
+
+/** One adjacency of a solve frame's plan ([TECH] G3; trims carry their leaves and Newton seeds). */
+export type SolvedOffsetFramePlanEntry =
+  | {
+      readonly kind: "trim";
+      readonly leaves?: readonly [number, number];
+      readonly representatives?: readonly [number, number];
+    }
+  | {
+      readonly kind: "parallel" | "absorbed";
+      readonly keeper: "first" | "second";
+    }
+  | { readonly kind: "arc" };
+
+/** The plan of one offset relationship's solve frame ([TECH] G3/G17). */
+export interface SolvedOffsetFramePlan {
+  readonly origin: "firstChoice" | "published" | "certified";
+  readonly adjacencies: readonly SolvedOffsetFramePlanEntry[];
+}
+
+export interface SolvedOffsetFramePlanRecord {
+  readonly derivationId: string;
+  readonly plan: SolvedOffsetFramePlan;
 }
 
 /**

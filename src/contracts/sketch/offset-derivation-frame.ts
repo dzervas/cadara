@@ -49,8 +49,12 @@ import {
 import type { SplineOffsetCubicSpan } from "@/contracts/sketch/spline-offset-geometry";
 
 /**
- * T08b-g1: the solve / publish frame owner of one offset relationship (dark:
- * no production path imports it yet; nothing here is persisted).
+ * T08b-g1: the solve / publish frame owner of one offset relationship. Live
+ * since T08b-g5: `evaluateSketchDerivations` runs the solve frame (solver
+ * projection, every session/display path, authoring) and
+ * `publishSketchOffsets` runs publish inside the `deriveSketchRegions`
+ * boundary ([TECH] G1/G2′). The frame itself is not persisted; its plan is
+ * solved revision data (`offsetFramePlans`, [TECH] G17).
  *
  * - `solveOffsetFrame` (every synchronous caller, certifier-free): N2
  *   connectivity, the UNCHECKED piece builder ([TECH] G4, the checked
@@ -86,7 +90,7 @@ import type { SplineOffsetCubicSpan } from "@/contracts/sketch/spline-offset-geo
  * - [TECH] G6: trim, parallel and absorbed are revision data (a change among
  *   them is `planChanged`); arc presence, when authored (`arcJoints`), is
  *   intent: a certified arc set that differs is `topologyChanged`.
- * - T08b-g2 (dark): `prepareOffsetFrameDerivatives` gives a solve frame's
+ * - T08b-g2: `prepareOffsetFrameDerivatives` gives a solve frame's
  *   fixed-topology JVP (the owner's batched multi-direction differential,
  *   [TECH] G8a) and its pullback by basis application with a per-frame
  *   cache; `offsetFrameCurveResidual` is the point-on-derived-curve
@@ -216,8 +220,14 @@ export type OffsetSolveFrameResult = OffsetSolveFrame | OffsetFrameFailure;
  * type, trusted as transported (T08b-g plan §2.4).
  */
 class CertifiedOffsetFramePublication {
-  /** Nominal brand (T08b-a math A2): no runtime field. */
-  declare private readonly brand: true;
+  /**
+   * Nominal brand (T08b-a math A2): a protected prototype method, so no own
+   * runtime field (JSON and `toEqual` see the same value) and no TS
+   * `declare` field (T08b-g5: the dev-server transform rejects those).
+   */
+  protected brand(): true {
+    return true;
+  }
   readonly status: "certified";
   readonly derivationId: string;
   /** The published geometry: the solve frame, proved equal to the certified chain. */
@@ -775,6 +785,7 @@ type PlanRun =
       readonly ok: true;
       readonly plan: readonly OffsetFramePlanEntry[];
       readonly pieces: readonly OffsetChainPiece[];
+      readonly sources: readonly DeclaredOffsetPieceSource[];
       readonly arcs: readonly ResolvedOffsetArc[];
       readonly geometry: Extract<BuiltFrame, { ok: true }>;
     }
@@ -875,11 +886,27 @@ function runPlan(
           : entry;
       }),
       pieces: adopted.pieces,
+      sources: adopted.sources,
       arcs: adopted.arcs,
       geometry,
     };
   }
 }
+
+/**
+ * T08b-g5 (g2 routed item): the source-basis directions a solve frame's OWN
+ * owner calls carried, kept beside the frame (never in it, so publish's
+ * bitwise comparison and every frame consumer see the direction-free
+ * pieces). `prepareOffsetFrameDerivatives` builds its pullback basis from
+ * them instead of a second owner call per spline.
+ */
+const frameSourceBasis = new WeakMap<
+  OffsetSolveFrame,
+  {
+    readonly pieces: readonly OffsetChainPiece[];
+    readonly sources: readonly DeclaredOffsetPieceSource[];
+  }
+>();
 
 /**
  * The SEL's first choice (G3), with authored arc presence (G6) applied: a
@@ -935,6 +962,13 @@ export function solveOffsetFrame(
       "points" | "entities" | "constraints"
     >;
     readonly modelingTolerance: number;
+    /**
+     * T08b-g5: carry the source-basis directions (every point, authored
+     * tangent and circle radius DOF) on this frame's own owner calls, for
+     * the solver's pullback. Geometry is byte-identical without it ([TECH]
+     * G8a); only the solver projection asks for it.
+     */
+    readonly withSourceBasis?: boolean;
   },
   plan?: OffsetFramePlan,
 ): OffsetSolveFrameResult {
@@ -946,27 +980,41 @@ export function solveOffsetFrame(
     seedIds: relationship.seedEntityIds,
   });
   if (!connectivity.ok) return fail(connectivityFailure(connectivity));
+  const basis = input.withSourceBasis
+    ? frameSourceDofs(
+        definition,
+        connectivity.pieces.map((piece) => piece.seedEntityId),
+      ).map(basisVariation)
+    : undefined;
   const declared = uncheckedDeclaredOffsetChainPieces({
     definition,
     connectivity,
     distance: relationship.distance,
     modelingTolerance,
+    ...(basis ? { directions: basis.map(sourceDirection) } : {}),
   });
   if (!declared.ok) return fail(declared);
-  const frameOf = (run: Extract<PlanRun, { ok: true }>): OffsetSolveFrame => ({
-    ok: true,
-    derivationId: relationship.derivationId,
-    distance: relationship.distance,
-    modelingTolerance,
-    connectivity,
-    plan: { origin: plan?.origin ?? "firstChoice", adjacencies: run.plan },
-    pieces: run.pieces,
-    vertices: declared.vertices,
-    trims: run.geometry.trims,
-    arcs: run.arcs,
-    cubics: run.geometry.cubics,
-    lineArcEndpoints: run.geometry.lineArcEndpoints,
-  });
+  const frameOf = (run: Extract<PlanRun, { ok: true }>): OffsetSolveFrame => {
+    const frame: OffsetSolveFrame = {
+      ok: true,
+      derivationId: relationship.derivationId,
+      distance: relationship.distance,
+      modelingTolerance,
+      connectivity,
+      plan: { origin: plan?.origin ?? "firstChoice", adjacencies: run.plan },
+      pieces: basis ? withoutDirections(run.pieces) : run.pieces,
+      vertices: declared.vertices,
+      trims: run.geometry.trims,
+      arcs: run.arcs,
+      cubics: basis
+        ? cubicsWithoutDirections(run.geometry.cubics)
+        : run.geometry.cubics,
+      lineArcEndpoints: run.geometry.lineArcEndpoints,
+    };
+    if (basis)
+      frameSourceBasis.set(frame, { pieces: run.pieces, sources: run.sources });
+    return frame;
+  };
   const arcJoints = relationship.arcJoints;
   if (
     plan &&
@@ -1237,6 +1285,8 @@ export function publishOffsetFrame(input: {
   readonly query: CertifiedNeutralCurveRequestQuery;
   readonly certifier: CertifiedTubePieceChainRequests;
   readonly solveFrame: OffsetSolveFrame;
+  /** T08b-g5: the per-deriver certifier memo (see `OffsetCertificationMemo`). */
+  readonly memo?: OffsetCertificationMemo;
 }): OffsetFramePublication {
   const { relationship, pair, modelingTolerance, solveFrame } = input;
   const failed = (failure: OffsetChainFailure): OffsetFramePublication => {
@@ -1261,11 +1311,9 @@ export function publishOffsetFrame(input: {
     modelingTolerance,
   });
   if (!declared.ok) return failed(declared);
-  const certified = certifyDeclaredOffsetChain(
-    declared,
-    input.query,
-    input.certifier,
-  );
+  const certified = input.memo
+    ? input.memo.certify(declared, input.query, input.certifier)
+    : certifyDeclaredOffsetChain(declared, input.query, input.certifier);
   if (!certified.ok) return failed(certified);
   const plan = certifiedPlanOf(certified.resolved, declared.vertices.length);
   if (
@@ -1307,8 +1355,59 @@ export function publishOffsetFrame(input: {
   );
 }
 
+/**
+ * T08b-g5 (g1 routed item, plan §3.4): a bounded memo of the SEL's result
+ * keyed by the bitwise encoding of the CHECKED adapter output (pieces,
+ * sources, vertices, connectivity, d and τ) plus the identity of the query
+ * and certifier capabilities. The SEL is deterministic in exactly that
+ * input, so a hit returns the result the same call would compute. Plan
+ * agreement and the arc checks still run on every frame (they read the
+ * solve frame, which is not part of the key).
+ */
+export class OffsetCertificationMemo {
+  private readonly entries = new Map<
+    string,
+    ReturnType<typeof certifyDeclaredOffsetChain>
+  >();
+  private readonly capabilityIds = new WeakMap<object, number>();
+  private nextCapabilityId = 0;
+  private readonly capacity: number;
+
+  constructor(capacity = 256) {
+    this.capacity = capacity;
+  }
+
+  private capabilityId(capability: object) {
+    let id = this.capabilityIds.get(capability);
+    if (id === undefined) {
+      id = this.nextCapabilityId++;
+      this.capabilityIds.set(capability, id);
+    }
+    return id;
+  }
+
+  certify(
+    declared: Parameters<typeof certifyDeclaredOffsetChain>[0],
+    query: CertifiedNeutralCurveRequestQuery,
+    certifier: CertifiedTubePieceChainRequests,
+  ): ReturnType<typeof certifyDeclaredOffsetChain> {
+    const key = `${this.capabilityId(query)}:${this.capabilityId(certifier)}:${encode(declared)}`;
+    const known = this.entries.get(key);
+    if (known) {
+      this.entries.delete(key);
+      this.entries.set(key, known);
+      return known;
+    }
+    const result = certifyDeclaredOffsetChain(declared, query, certifier);
+    this.entries.set(key, result);
+    if (this.entries.size > this.capacity)
+      this.entries.delete(this.entries.keys().next().value!);
+    return result;
+  }
+}
+
 // ---------------------------------------------------------------------------
-// Frame derivatives (T08b-g2, dark)
+// Frame derivatives (T08b-g2; live since T08b-g5)
 // ---------------------------------------------------------------------------
 
 /**
@@ -1552,6 +1651,16 @@ function basisVariation(dof: OffsetFrameSourceDof): OffsetFrameVariation {
   return { circleRadii: { [dof.entityId]: 1 } };
 }
 
+/** The owner-direction part of one source variation (circle radii are analytic). */
+function sourceDirection(variation: OffsetFrameVariation) {
+  return {
+    ...(variation.points ? { points: variation.points } : {}),
+    ...(variation.splineTangents
+      ? { splineTangents: variation.splineTangents }
+      : {}),
+  };
+}
+
 /** ⟨jvp, cotangent⟩ over every datum the cotangent names. */
 function pairing(jvp: OffsetFrameJvp, cotangent: OffsetFrameCotangent) {
   const vec = (a: Vec, b: Vec | undefined) => (b ? dotVec(a, b) : 0);
@@ -1628,8 +1737,23 @@ function withoutDirections(pieces: readonly OffsetChainPiece[]) {
   );
 }
 
+/** The frame's cubic outputs without the batched owner directions (review R3: frames carry none). */
+function cubicsWithoutDirections(
+  cubics: OffsetSolveFrame["cubics"],
+): OffsetSolveFrame["cubics"] {
+  return new Map(
+    [...cubics].map(([seed, spans]) => [
+      seed,
+      spans.map((leaf) => ({
+        ...leaf,
+        span: (({ directions: _directions, ...span }) => span)(leaf.span),
+      })),
+    ]),
+  );
+}
+
 /**
- * The derivatives of one solve frame (T08b-g2; dark). Fixed topology: the
+ * The derivatives of one solve frame (T08b-g2; wired by T08b-g5). Fixed topology: the
  * frame's plan, adoption (effective keepers), trim leaves and
  * representatives; every datum is differentiated as `assembleFrameGeometry`
  * publishes it:
@@ -1685,12 +1809,7 @@ export function prepareOffsetFrameDerivatives(
       connectivity: frame.connectivity,
       distance: relationship.distance,
       modelingTolerance,
-      directions: variations.map((variation) => ({
-        ...(variation.points ? { points: variation.points } : {}),
-        ...(variation.splineTangents
-          ? { splineTangents: variation.splineTangents }
-          : {}),
-      })),
+      directions: variations.map(sourceDirection),
     });
     if (!declared.ok)
       throw new RangeError(
@@ -1731,10 +1850,31 @@ export function prepareOffsetFrameDerivatives(
   };
 
   let columns: readonly (OffsetFrameJvp | OffsetChainFailure)[] | undefined;
+  const basisColumns = () => {
+    // T08b-g5: the solve frame's own batched owner call already carries the
+    // source basis (same DOF order: same definition and seeds).
+    const own = frameSourceBasis.get(frame);
+    if (!own) return jvp(sourceDofs.map(basisVariation));
+    return sourceDofs.map(
+      (dof, index) =>
+        directionJvp(
+          frame,
+          own.pieces,
+          own.sources,
+          definition,
+          basisVariation(dof),
+          index,
+        ) ??
+        unavailable(
+          "The offset frame derivative is singular or non-finite in this direction.",
+          seeds[0] ?? null,
+        ),
+    );
+  };
   const pullback = (
     cotangent: OffsetFrameCotangent,
   ): OffsetFrameVariation | OffsetChainFailure => {
-    columns ??= jvp(sourceDofs.map(basisVariation));
+    columns ??= basisColumns();
     const points: Record<string, [number, number]> = {};
     const splineTangents: Record<string, Record<string, [number, number]>> = {};
     const circleRadii: Record<string, number> = {};
@@ -2072,7 +2212,7 @@ function localQueryDomain(
 }
 
 /**
- * The point-on-derived-curve residual helper (T08b-g2, dark; the g5
+ * The point-on-derived-curve residual helper (T08b-g2; the g5
  * `pointOnCurve` residual on a derived cubic output): r = P − C(leaf, u).
  * The location comes from a closest-point search restricted to every
  * leaf's representative query domain (`closestSplineSpanLocation` with

@@ -7,7 +7,7 @@ import {
 import type { RegionRecord, SolvedSketchSnapshot } from "@/contracts/sketch/schema";
 
 const solved: SolvedSketchSnapshot = {
-  schemaVersion: "solved-sketch/v1alpha1",
+  schemaVersion: "solved-sketch/v1alpha2",
   status: { solveState: "solved", constraintState: "underConstrained" },
   solvedEntities: [],
   solvedPoints: [],

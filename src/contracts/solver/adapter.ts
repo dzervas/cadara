@@ -77,6 +77,12 @@ export interface SketchSolverAdapter {
     request: DeriveSketchRegionsRequest,
   ): Promise<DeriveSketchRegionsResponse>;
   /**
+   * True when a newer `deriveSketchRegions` request for a document cancels
+   * that document's still-running one (a terminable derivation worker), so
+   * the editor may emit a newer generation while one is in flight (T08b-g5).
+   */
+  readonly supersedesRegionDerivation?: boolean;
+  /**
    * Resolves a sketch-local target and reports whether it is still valid.
    * Implementers must not silently remap invalid targets to surviving geometry.
    */

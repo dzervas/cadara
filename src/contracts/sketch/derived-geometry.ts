@@ -5,26 +5,91 @@ import type {
   SketchPoint2D,
   SketchPointDefinition,
   SketchSolveDiagnostic,
+  SolvedOffsetFramePlanRecord,
+  SolvedSketchDerivedCubicSpan,
 } from "@/contracts/sketch/schema";
 import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
 import {
   orderedSplineOccurrences,
   orderedSplinePointIds,
+  type SplinePoles,
   type SplineVector,
 } from "@/contracts/sketch/spline-geometry";
 import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
+import { OFFSET_DIAGNOSTIC_CODES } from "@/contracts/sketch/offset-geometry";
 import {
-  OFFSET_DIAGNOSTIC_CODES,
-  computeOffsetChain,
-  computeOffsetChainJvp,
-  offsetSeedCurveFromEntity,
-  type OffsetSeedCurve,
-  type OffsetSeedCurveVariation,
-} from "@/contracts/sketch/offset-geometry";
+  prepareOffsetFrameDerivatives,
+  solveOffsetFrame,
+  type OffsetFrameCotangent,
+  type OffsetFrameDerivatives,
+  type OffsetFramePlan,
+  type OffsetFrameRelationship,
+  type OffsetSolveFrame,
+} from "@/contracts/sketch/offset-derivation-frame";
+import {
+  mapOffsetFrameOutputs,
+  offsetFrameCircleRadius,
+  offsetFrameEntityCotangent,
+  offsetFrameEntityJvp,
+  offsetFramePointCotangent,
+  offsetFramePointJvp,
+  offsetFramePointValue,
+  offsetFrameRelationshipOf,
+  offsetFrameShellSpans,
+  ownerSpanKey,
+  type OffsetFrameEntityDatum,
+  type OffsetFrameOutputMap,
+  type OffsetFramePointDatum,
+} from "@/contracts/sketch/offset-derivation-outputs";
 
-interface SketchDerivationEvaluationResult {
+/** Explicit diagnostic: a derived shell used as a mirror/pattern/transform seed (U-G2). */
+export const DERIVED_SHELL_SEED_UNSUPPORTED =
+  "derived-offset-shell-seed-unsupported";
+
+/** One derivation evaluation input: the definition iterate, τ and the offset plan hints. */
+export interface SketchDerivationInput {
+  readonly definition: SketchDefinition;
+  /** The document's settings.modelingTolerance ([TECH] G12); never a default. */
+  readonly modelingTolerance: number;
+  /**
+   * [TECH] G3/G17 per-relationship plan hints (the last publication, a
+   * prior solved snapshot's `offsetFramePlans`, or a `planChanged` hint),
+   * passed to `solveOffsetFrame` unchanged. Absent: the SEL first choice.
+   */
+  readonly offsetPlans?: readonly SolvedOffsetFramePlanRecord[];
+  /**
+   * T08b-g5 (the solver projection only): the offset solve frames' own owner
+   * calls carry the source basis, so the pullback needs no second owner
+   * call. Geometry is byte-identical either way.
+   */
+  readonly withDerivatives?: boolean;
+}
+
+/** τ and the offset plan hints of one derivation evaluation (callers thread them with a definition). */
+export type SketchDerivationSettings = Omit<
+  SketchDerivationInput,
+  "definition" | "withDerivatives"
+>;
+
+/** The evaluated solve frame of one offset relationship and its output map. */
+export interface OffsetDerivationFrameRecord {
+  readonly derivationId: string;
+  readonly relationship: OffsetFrameRelationship;
+  /** The definition iterate the frame was solved on (its derivatives rebuild from it). */
+  readonly definition: Pick<
+    SketchDefinition,
+    "points" | "entities" | "constraints"
+  >;
+  readonly frame: OffsetSolveFrame;
+  readonly outputs: OffsetFrameOutputMap;
+}
+
+export interface SketchDerivationEvaluationResult {
   definition: SketchDefinition;
   diagnostics: SketchSolveDiagnostic[];
+  readonly modelingTolerance: number;
+  /** Every offset relationship whose solve frame evaluated, in relationship order. */
+  readonly offsetFrames: readonly OffsetDerivationFrameRecord[];
 }
 
 type TransformPoint = (point: SketchPoint2D) => SketchPoint2D;
@@ -62,6 +127,12 @@ export interface SketchDerivationVariation {
   >;
 }
 
+/** One output span's sub-span pole and query-domain variations (T08b-g plan §2.6). */
+export interface SketchDerivationPiecewiseCubicVariation {
+  poles: SplinePoles[];
+  queryDomain: (readonly [number, number])[];
+}
+
 export interface SketchDerivationJvp {
   points: Readonly<Record<SketchPointId, SketchPoint2D>>;
   entities: Readonly<
@@ -70,11 +141,31 @@ export interface SketchDerivationJvp {
   splineTangents: Readonly<
     Partial<Record<SketchEntityId, Readonly<Record<string, SplineVector>>>>
   >;
+  /** Per shell, per output span: one entry per owner sub-span. */
+  piecewiseCubics: Readonly<
+    Record<
+      SketchEntityId,
+      Readonly<Record<string, SketchDerivationPiecewiseCubicVariation>>
+    >
+  >;
+  /**
+   * Offset relationships whose frame derivative is unavailable at this
+   * iterate (`derivativeUnavailable`: a singular joint). Their outputs claim
+   * no first-order motion; this is not zero motion, so consumers must not
+   * treat it as such. Absent when every derivative is available.
+   */
+  derivativeUnavailable?: readonly string[];
 }
+
+/** A pullback, with the offset relationships it could not pull through (review A4). */
+export type SketchDerivationPullbackResult = SketchDerivationVariation & {
+  /** As `SketchDerivationJvp.derivativeUnavailable`: the gradient is incomplete, never zero. */
+  derivativeUnavailable?: readonly string[];
+};
 
 export type SketchDerivationPullback = (
   cotangent: SketchDerivationVariation,
-) => SketchDerivationVariation;
+) => SketchDerivationPullbackResult;
 
 const EPSILON = 1e-9;
 
@@ -116,6 +207,8 @@ function getEntityPointIds(
       return entity.controlPointIds;
     case "profileText":
       return [entity.anchorPointId];
+    case "derivedPiecewiseCubic":
+      return [];
   }
 }
 
@@ -404,187 +497,13 @@ function transformedEntity(
   return output;
 }
 
-interface OffsetPointUpdate {
-  pointId: SketchPointId;
-  position: SketchPoint2D;
-}
-
-/**
- * Recomputes an offset relationship's derived geometry from its seed chain.
- * All updates are collected before any is applied so a diagnostic failure
- * keeps the outputs in their last resolvable state.
- */
-function evaluateOffsetRelationship(
-  relationship: Extract<SketchDerivationDefinition, { kind: "offset" }>,
-  entityById: Map<SketchEntityId, SketchEntityDefinition>,
-  pointById: Map<SketchPointId, SketchPointDefinition>,
-  diagnostics: SketchSolveDiagnostic[],
-  replacePoint: (pointId: SketchPointId, position: SketchPoint2D) => void,
-  replaceEntity: (entity: SketchEntityDefinition) => void,
-) {
-  const fail = (
-    code: string,
-    message: string,
-    entityId: SketchEntityId | null = null,
-  ) => {
-    diagnostics.push(
-      diagnostic(
-        code,
-        "error",
-        `Offset relationship ${relationship.derivationId}: ${message}`,
-        entityId ? { kind: "entity", entityId } : null,
-      ),
-    );
-  };
-
-  const distance = getAuthoredLiteralValue<number>(relationship.distance);
-  if (typeof distance !== "number" || !Number.isFinite(distance)) {
-    fail(
-      OFFSET_DIAGNOSTIC_CODES.unresolvedDistance,
-      "distance is unresolved; resolve expressions before evaluating derivations.",
-    );
-    return;
-  }
-
-  const curves: OffsetSeedCurve[] = [];
-  const splineFitPointCounts = new Map<SketchEntityId, number>();
-  for (const seedEntityId of relationship.seedEntityIds) {
-    const seed = entityById.get(seedEntityId);
-    const curve = seed
-      ? offsetSeedCurveFromEntity(
-          seed,
-          (pointId) => pointById.get(pointId)?.position ?? null,
-        )
-      : null;
-    if (!curve) {
-      fail(
-        OFFSET_DIAGNOSTIC_CODES.unsupportedSeed,
-        `seed entity ${seedEntityId} is missing or unsupported.`,
-        seedEntityId,
-      );
-      return;
-    }
-
-    curves.push(curve);
-    if (curve.kind === "spline") {
-      const output = relationship.outputs.find(
-        (candidate) => candidate.seedEntityId === seedEntityId,
-      );
-      if (output) {
-        splineFitPointCounts.set(seedEntityId, output.outputPointIds.length);
-      }
-    }
-  }
-
-  const result = computeOffsetChain({ curves, distance, splineFitPointCounts });
-  if (!result.ok) {
-    fail(result.code, result.message, result.seedEntityId);
-    return;
-  }
-
-  const segmentBySeed = new Map(
-    result.segments.map((segment) => [segment.seedEntityId, segment] as const),
-  );
-  const pointUpdates: OffsetPointUpdate[] = [];
-  const entityUpdates: SketchEntityDefinition[] = [];
-
-  for (const output of relationship.outputs) {
-    const target = entityById.get(output.outputEntityId);
-    const segment = segmentBySeed.get(output.seedEntityId);
-    if (!target || !segment || target.kind !== segment.kind) {
-      fail(
-        OFFSET_DIAGNOSTIC_CODES.unsupportedSeed,
-        `output entity ${output.outputEntityId} no longer matches its seed segment.`,
-        output.seedEntityId,
-      );
-      return;
-    }
-
-    const positions: SketchPoint2D[] = [];
-    switch (segment.kind) {
-      case "lineSegment":
-        positions.push(segment.start, segment.end);
-        break;
-      case "circle":
-        positions.push(segment.center);
-        if (target.kind === "circle") {
-          entityUpdates.push({ ...target, radius: segment.radius });
-        }
-        break;
-      case "arc":
-        positions.push(segment.center, segment.start, segment.end);
-        break;
-      case "spline":
-        positions.push(...segment.points);
-        break;
-    }
-
-    if (positions.length !== output.outputPointIds.length) {
-      fail(
-        OFFSET_DIAGNOSTIC_CODES.splineFitFailure,
-        `output entity ${output.outputEntityId} has a stale point map.`,
-        output.seedEntityId,
-      );
-      return;
-    }
-
-    output.outputPointIds.forEach((pointId, index) => {
-      pointUpdates.push({ pointId, position: positions[index]! });
-    });
-  }
-
-  const jointKey = (first: SketchEntityId, second: SketchEntityId) =>
-    `${first} ${second}`;
-  const geometryJoints = new Map(
-    result.joints.map(
-      (joint) =>
-        [
-          jointKey(joint.firstSeedEntityId, joint.secondSeedEntityId),
-          joint,
-        ] as const,
-    ),
-  );
-
-  if (geometryJoints.size !== relationship.jointOutputs.length) {
-    fail(
-      OFFSET_DIAGNOSTIC_CODES.jointUnsatisfied,
-      "the joint topology changed; the committed joints no longer match the recomputed chain.",
-    );
-    return;
-  }
-
-  for (const jointOutput of relationship.jointOutputs) {
-    const joint = geometryJoints.get(
-      jointKey(jointOutput.firstSeedEntityId, jointOutput.secondSeedEntityId),
-    );
-    const target = entityById.get(jointOutput.outputEntityId);
-    if (!joint || !target || target.kind !== "arc") {
-      fail(
-        OFFSET_DIAGNOSTIC_CODES.jointUnsatisfied,
-        `joint arc ${jointOutput.outputEntityId} cannot be maintained.`,
-        jointOutput.outputEntityId,
-      );
-      return;
-    }
-
-    pointUpdates.push({
-      pointId: jointOutput.centerPointId,
-      position: joint.center,
-    });
-    if (target.sweepDirection !== joint.sweepDirection) {
-      entityUpdates.push({ ...target, sweepDirection: joint.sweepDirection });
-    }
-  }
-
-  for (const update of pointUpdates) {
-    replacePoint(update.pointId, update.position);
-  }
-  for (const entity of entityUpdates) {
-    replaceEntity(entity);
-  }
-}
-
 const ZERO_VECTOR: SketchPoint2D = [0, 0];
+const ZERO_POLES: SplinePoles = [
+  [0, 0],
+  [0, 0],
+  [0, 0],
+  [0, 0],
+];
 
 function circleLikeVariationFromPoints(
   entity: Extract<SketchEntityDefinition, { kind: "arc" }>,
@@ -631,155 +550,15 @@ function circleLikeVariationFromPoints(
   };
 }
 
-interface OffsetRelationshipJvp {
-  points: Map<SketchPointId, SketchPoint2D>;
-  entities: Map<SketchEntityId, SketchDerivedEntityVariation>;
-}
-
-function evaluateOffsetRelationshipJvp(
-  relationship: Extract<SketchDerivationDefinition, { kind: "offset" }>,
-  entityById: Map<SketchEntityId, SketchEntityDefinition>,
-  pointById: Map<SketchPointId, SketchPointDefinition>,
-  pointVariations: Readonly<Record<SketchPointId, SketchPoint2D>>,
-  entityVariations: Readonly<
-    Partial<Record<SketchEntityId, SketchDerivedEntityVariation>>
-  >,
-): OffsetRelationshipJvp | null {
-  const distance = getAuthoredLiteralValue<number>(relationship.distance);
-  if (typeof distance !== "number" || !Number.isFinite(distance)) return null;
-
-  const curves: OffsetSeedCurve[] = [];
-  const curveVariations: OffsetSeedCurveVariation[] = [];
-  const splineFitPointCounts = new Map<SketchEntityId, number>();
-  for (const seedEntityId of relationship.seedEntityIds) {
-    const entity = entityById.get(seedEntityId);
-    if (!entity) return null;
-    const curve = offsetSeedCurveFromEntity(
-      entity,
-      (pointId) => pointById.get(pointId)?.position ?? null,
-    );
-    if (!curve) return null;
-    curves.push(curve);
-    const pointVariation = (pointId: SketchPointId) =>
-      pointVariations[pointId] ?? ZERO_VECTOR;
-    switch (entity.kind) {
-      case "lineSegment":
-        curveVariations.push({
-          kind: "lineSegment",
-          start: pointVariation(entity.startPointId),
-          end: pointVariation(entity.endPointId),
-        });
-        break;
-      case "circle": {
-        const entityVariation = entityVariations[entity.entityId];
-        curveVariations.push({
-          kind: "circle",
-          center: pointVariation(entity.centerPointId),
-          radius:
-            entityVariation?.kind === "circle" ? entityVariation.radius : 0,
-        });
-        break;
-      }
-      case "arc":
-        curveVariations.push({
-          kind: "arc",
-          center: pointVariation(entity.centerPointId),
-          start: pointVariation(entity.startPointId),
-          end: pointVariation(entity.endPointId),
-        });
-        break;
-      case "spline": {
-        const pointIds = orderedSplinePointIds(entity);
-        curveVariations.push({
-          kind: "spline",
-          points: pointIds.map(pointVariation),
-        });
-        const output = relationship.outputs.find(
-          (candidate) => candidate.seedEntityId === seedEntityId,
-        );
-        if (output)
-          splineFitPointCounts.set(seedEntityId, output.outputPointIds.length);
-        break;
-      }
-      default:
-        return null;
-    }
-  }
-
-  const result = computeOffsetChainJvp({
-    curves,
-    curveVariations,
-    distance,
-    splineFitPointCounts,
-  });
-  if (!result.ok) return null;
-  const output = new Map<SketchPointId, SketchPoint2D>();
-  const entityOutput = new Map<SketchEntityId, SketchDerivedEntityVariation>();
-  const segmentBySeed = new Map(
-    result.segments.map((segment) => [segment.seedEntityId, segment] as const),
-  );
-  for (const mapping of relationship.outputs) {
-    const segment = segmentBySeed.get(mapping.seedEntityId);
-    if (!segment) return null;
-    const values =
-      segment.kind === "lineSegment"
-        ? [segment.start, segment.end]
-        : segment.kind === "circle"
-          ? [segment.center]
-          : [segment.center, segment.start, segment.end];
-    if (values.length !== mapping.outputPointIds.length) return null;
-    mapping.outputPointIds.forEach((pointId, index) =>
-      output.set(pointId, values[index]!),
-    );
-    if (segment.kind === "circle") {
-      entityOutput.set(mapping.outputEntityId, {
-        kind: "circle",
-        radius: segment.radius,
-      });
-    }
-  }
-  const jointKey = (first: SketchEntityId, second: SketchEntityId) =>
-    `${first}\u0000${second}`;
-  const jointBySeeds = new Map(
-    result.joints.map(
-      (joint) =>
-        [
-          jointKey(joint.firstSeedEntityId, joint.secondSeedEntityId),
-          joint,
-        ] as const,
-    ),
-  );
-  for (const mapping of relationship.jointOutputs) {
-    const joint = jointBySeeds.get(
-      jointKey(mapping.firstSeedEntityId, mapping.secondSeedEntityId),
-    );
-    if (!joint) return null;
-    output.set(mapping.centerPointId, joint.center);
-    output.set(mapping.startPointId, joint.start);
-    output.set(mapping.endPointId, joint.end);
-  }
-  for (const outputEntityId of [
-    ...relationship.outputs.map((mapping) => mapping.outputEntityId),
-    ...relationship.jointOutputs.map((mapping) => mapping.outputEntityId),
-  ]) {
-    const entity = entityById.get(outputEntityId);
-    if (entity?.kind !== "arc") continue;
-    const variation = circleLikeVariationFromPoints(
-      entity,
-      pointById,
-      Object.fromEntries(output),
-    );
-    if (variation) entityOutput.set(entity.entityId, variation);
-  }
-  return { points: output, entities: entityOutput };
-}
-
 /** Applies exact directional derivatives of supported one-way derivations. */
 export function evaluateSketchDerivationJvp(
-  definition: SketchDefinition,
+  evaluation: SketchDerivationEvaluationResult,
   variation: SketchDerivationVariation,
 ): SketchDerivationJvp {
-  const evaluatedDefinition = evaluateSketchDerivations(definition).definition;
+  const evaluatedDefinition = evaluation.definition;
+  const offsetRecords = new Map(
+    evaluation.offsetFrames.map((record) => [record.derivationId, record]),
+  );
   const pointById = new Map(
     evaluatedDefinition.points.map((point) => [point.pointId, point]),
   );
@@ -798,6 +577,11 @@ export function evaluateSketchDerivationJvp(
   const splineTangents: Partial<
     Record<SketchEntityId, Record<string, SplineVector>>
   > = {};
+  const piecewiseCubics: Record<
+    SketchEntityId,
+    Record<string, SketchDerivationPiecewiseCubicVariation>
+  > = {};
+  const derivativeUnavailable: string[] = [];
 
   for (const entity of evaluatedDefinition.entities) {
     if (entity.kind !== "spline") continue;
@@ -812,43 +596,53 @@ export function evaluateSketchDerivationJvp(
 
   for (const relationship of evaluatedDefinition.derivedRelationships ?? []) {
     if (relationship.kind === "offset") {
-      const outputVariations = evaluateOffsetRelationshipJvp(
-        relationship,
-        entityById,
-        pointById,
-        points,
-        entities,
-      );
-      for (const output of relationship.outputs) {
-        for (const pointId of output.outputPointIds) {
-          points[pointId] =
-            outputVariations?.points.get(pointId) ?? ZERO_VECTOR;
-        }
-        const entityVariation = outputVariations?.entities.get(
-          output.outputEntityId,
-        );
-        if (entityVariation) entities[output.outputEntityId] = entityVariation;
-        const outputEntity = entityById.get(output.outputEntityId);
-        if (outputEntity?.kind === "spline") {
-          splineTangents[output.outputEntityId] = Object.fromEntries(
-            (orderedSplineOccurrences(outputEntity) ?? []).map((occurrence) => [
-              occurrence.occurrenceId,
-              ZERO_VECTOR,
-            ]),
-          );
-        }
+      const record = offsetRecords.get(relationship.derivationId);
+      // A failed relationship has no frame: its diagnostic already makes
+      // the solve unaccepted, and its outputs keep their last state.
+      if (!record) continue;
+      const circleRadii: Record<string, number> = {};
+      const seedTangents: Record<
+        string,
+        Readonly<Record<string, SplineVector>>
+      > = {};
+      for (const seedEntityId of relationship.seedEntityIds) {
+        const seedVariation = entities[seedEntityId];
+        if (seedVariation?.kind === "circle")
+          circleRadii[seedEntityId] = seedVariation.radius;
+        const tangents = splineTangents[seedEntityId];
+        if (tangents) seedTangents[seedEntityId] = tangents;
       }
-      for (const output of relationship.jointOutputs) {
-        points[output.centerPointId] =
-          outputVariations?.points.get(output.centerPointId) ?? ZERO_VECTOR;
-        points[output.startPointId] =
-          outputVariations?.points.get(output.startPointId) ?? ZERO_VECTOR;
-        points[output.endPointId] =
-          outputVariations?.points.get(output.endPointId) ?? ZERO_VECTOR;
-        const entityVariation = outputVariations?.entities.get(
-          output.outputEntityId,
-        );
-        if (entityVariation) entities[output.outputEntityId] = entityVariation;
+      const result = offsetRecordDerivatives(record).jvp([
+        { points, splineTangents: seedTangents, circleRadii },
+      ])[0]!;
+      const jvp = "ok" in result ? null : result;
+      // `derivativeUnavailable` (a singular joint, measure zero in the
+      // solver's iterates): no first-order motion is claimed, and the
+      // result says so explicitly.
+      if (!jvp) derivativeUnavailable.push(relationship.derivationId);
+      for (const [pointId, datum] of record.outputs.points)
+        points[pointId] = jvp ? offsetFramePointJvp(jvp, datum) : ZERO_VECTOR;
+      for (const [entityId, datum] of record.outputs.entities) {
+        const entityJvp = jvp ? offsetFrameEntityJvp(jvp, datum) : null;
+        if (entityJvp) entities[entityId] = entityJvp;
+      }
+      for (const shell of record.outputs.shells) {
+        const spans: Record<string, SketchDerivationPiecewiseCubicVariation> =
+          {};
+        const leaves = record.frame.cubics.get(shell.seed) ?? [];
+        leaves.forEach((leaf, index) => {
+          const outputSpanId = shell.spanIds.get(
+            ownerSpanKey(leaf.span.source),
+          )!;
+          const entry = (spans[outputSpanId] ??= {
+            poles: [],
+            queryDomain: [],
+          });
+          const value = jvp?.cubics.get(shell.seed)?.[index];
+          entry.poles.push(value?.poles ?? ZERO_POLES);
+          entry.queryDomain.push(value?.queryDomain ?? [0, 0]);
+        });
+        piecewiseCubics[shell.entityId] = spans;
       }
       continue;
     }
@@ -928,17 +722,28 @@ export function evaluateSketchDerivationJvp(
     }
   }
 
-  return { points, entities, splineTangents };
+  return {
+    points,
+    entities,
+    splineTangents,
+    piecewiseCubics,
+    ...(derivativeUnavailable.length > 0 ? { derivativeUnavailable } : {}),
+  };
 }
 
 /**
  * Prepares a sparse reverse-mode derivative for an already evaluated derivation
  * frame. Only relationships upstream of the supplied cotangent are visited;
  * point/entity lookup data is shared by every residual evaluated in the frame.
+ * Offset outputs are pulled back through their solve frame's fixed-topology
+ * map (`prepareOffsetFrameDerivatives`, one cached basis per frame): seed
+ * points, seed authored tangents and seed circle radii. No finite
+ * differences.
  */
 export function prepareSketchDerivationPullback(
-  definition: SketchDefinition,
+  evaluation: SketchDerivationEvaluationResult,
 ): SketchDerivationPullback {
+  const definition = evaluation.definition;
   const pointById = new Map(
     definition.points.map((point) => [point.pointId, point]),
   );
@@ -948,8 +753,8 @@ export function prepareSketchDerivationPullback(
   type PointProducer =
     | {
         kind: "offset";
-        relationship: Extract<SketchDerivationDefinition, { kind: "offset" }>;
-        outputPointId: SketchPointId;
+        record: OffsetDerivationFrameRecord;
+        datum: OffsetFramePointDatum;
       }
     | {
         kind: "transform";
@@ -957,44 +762,32 @@ export function prepareSketchDerivationPullback(
         instanceIndex: number;
         seedPointId: SketchPointId;
       };
-  type TangentProducer =
-    | { kind: "offset" }
-    | {
-        kind: "transform";
-        relationship: Exclude<SketchDerivationDefinition, { kind: "offset" }>;
-        instanceIndex: number;
-        seedEntityId: SketchEntityId;
-        seedOccurrenceId: string;
-      };
+  interface TangentProducer {
+    relationship: Exclude<SketchDerivationDefinition, { kind: "offset" }>;
+    instanceIndex: number;
+    seedEntityId: SketchEntityId;
+    seedOccurrenceId: string;
+  }
   const pointProducers = new Map<SketchPointId, PointProducer>();
   const entityProducers = new Set<SketchEntityId>();
+  const offsetEntityProducers = new Map<
+    SketchEntityId,
+    { record: OffsetDerivationFrameRecord; datum: OffsetFrameEntityDatum }
+  >();
   const tangentProducers = new Map<string, TangentProducer>();
   const tangentKey = (entityId: SketchEntityId, occurrenceId: string) =>
     `${entityId}\u0000${occurrenceId}`;
 
+  for (const record of evaluation.offsetFrames) {
+    for (const [pointId, datum] of record.outputs.points)
+      pointProducers.set(pointId, { kind: "offset", record, datum });
+    for (const [entityId, datum] of record.outputs.entities)
+      offsetEntityProducers.set(entityId, { record, datum });
+  }
   for (const relationship of definition.derivedRelationships ?? []) {
+    if (relationship.kind === "offset") continue;
     for (const output of relationship.outputs) {
       const target = entityById.get(output.outputEntityId);
-      if (relationship.kind === "offset") {
-        entityProducers.add(output.outputEntityId);
-        output.outputPointIds.forEach((pointId) =>
-          pointProducers.set(pointId, {
-            kind: "offset",
-            relationship,
-            outputPointId: pointId,
-          }),
-        );
-        if (target?.kind === "spline") {
-          for (const occurrence of orderedSplineOccurrences(target) ?? []) {
-            tangentProducers.set(
-              tangentKey(target.entityId, occurrence.occurrenceId),
-              { kind: "offset" },
-            );
-          }
-        }
-        continue;
-      }
-
       entityProducers.add(output.outputEntityId);
       const seed = entityById.get(output.seedEntityId);
       if (
@@ -1029,29 +822,12 @@ export function prepareSketchDerivationPullback(
         tangentProducers.set(
           tangentKey(target.entityId, occurrence.occurrenceId),
           {
-            kind: "transform",
             relationship,
             instanceIndex: output.instanceIndex,
             seedEntityId: seed.entityId,
             seedOccurrenceId: seedOccurrence.occurrenceId,
           },
         );
-      });
-    }
-    if (relationship.kind === "offset") {
-      relationship.jointOutputs.forEach((output) => {
-        entityProducers.add(output.outputEntityId);
-        for (const pointId of [
-          output.centerPointId,
-          output.startPointId,
-          output.endPointId,
-        ]) {
-          pointProducers.set(pointId, {
-            kind: "offset",
-            relationship,
-            outputPointId: pointId,
-          });
-        }
       });
     }
   }
@@ -1077,6 +853,13 @@ export function prepareSketchDerivationPullback(
     const splineTangents: Partial<
       Record<SketchEntityId, Record<string, SplineVector>>
     > = {};
+    const derivativeUnavailable = new Set<string>();
+    const jvpOf = (variation: SketchDerivationVariation) => {
+      const jvp = evaluateSketchDerivationJvp(evaluation, variation);
+      for (const id of jvp.derivativeUnavailable ?? [])
+        derivativeUnavailable.add(id);
+      return jvp;
+    };
     const addPoint = (pointId: SketchPointId, value: SketchPoint2D) => {
       if (isZero(value)) return;
       const current = points[pointId] ?? ZERO_VECTOR;
@@ -1115,6 +898,34 @@ export function prepareSketchDerivationPullback(
       entity[occurrenceId] = [current[0] + value[0], current[1] + value[1]];
       splineTangents[entityId] = entity;
     };
+    /** Pulls one frame cotangent back onto the relationship's seeds. */
+    const pullOffset = (
+      record: OffsetDerivationFrameRecord,
+      frameCotangent: OffsetFrameCotangent,
+      visiting: ReadonlySet<SketchPointId>,
+    ) => {
+      const pulled = offsetRecordDerivatives(record).pullback(frameCotangent);
+      // `derivativeUnavailable` (a singular joint): reported, never zero.
+      if ("ok" in pulled) {
+        derivativeUnavailable.add(record.derivationId);
+        return;
+      }
+      for (const [pointId, value] of Object.entries(pulled.points ?? {}))
+        pullPoint(pointId as SketchPointId, value, visiting);
+      for (const [entityId, occurrences] of Object.entries(
+        pulled.splineTangents ?? {},
+      ))
+        for (const [occurrenceId, value] of Object.entries(occurrences))
+          pullTangent(
+            entityId as SketchEntityId,
+            occurrenceId,
+            value,
+            new Set(),
+          );
+      for (const [entityId, radius] of Object.entries(pulled.circleRadii ?? {}))
+        if (radius !== 0)
+          addEntity(entityId as SketchEntityId, { kind: "circle", radius });
+    };
     const pullPoint = (
       pointId: SketchPointId,
       value: SketchPoint2D,
@@ -1127,33 +938,13 @@ export function prepareSketchDerivationPullback(
         return;
       }
       if (visiting.has(pointId)) return;
+      const nextVisiting = new Set(visiting).add(pointId);
       if (producer.kind === "offset") {
-        const dependencies = producer.relationship.seedEntityIds
-          .flatMap((entityId) => {
-            const entity = entityById.get(entityId);
-            return entity ? getEntityPointIds(entity) : [];
-          })
-          .filter(
-            (dependency, index, all) => all.indexOf(dependency) === index,
-          );
-        const nextVisiting = new Set(visiting).add(pointId);
-        for (const dependency of dependencies) {
-          const pulled: [number, number] = [0, 0];
-          for (let component = 0; component < 2; component += 1) {
-            const basis: SketchPoint2D = component === 0 ? [1, 0] : [0, 1];
-            const differential = evaluateOffsetRelationshipJvp(
-              producer.relationship,
-              entityById,
-              pointById,
-              { [dependency]: basis } as Readonly<
-                Record<SketchPointId, SketchPoint2D>
-              >,
-              {},
-            )?.points.get(producer.outputPointId);
-            if (differential) pulled[component] = dotPoint(value, differential);
-          }
-          pullPoint(dependency, pulled, nextVisiting);
-        }
+        pullOffset(
+          producer.record,
+          offsetFramePointCotangent(producer.datum, value),
+          nextVisiting,
+        );
         return;
       }
       const seedPoint = pointById.get(producer.seedPointId);
@@ -1162,7 +953,6 @@ export function prepareSketchDerivationPullback(
         producer.seedPointId,
         ...axisPointIds(producer.relationship),
       ].filter((dependency, index, all) => all.indexOf(dependency) === index);
-      const nextVisiting = new Set(visiting).add(pointId);
       for (const dependency of dependencies) {
         const pulled: [number, number] = [0, 0];
         for (let component = 0; component < 2; component += 1) {
@@ -1200,7 +990,7 @@ export function prepareSketchDerivationPullback(
         addTangent(entityId, occurrenceId, value);
         return;
       }
-      if (producer.kind === "offset" || visiting.has(key)) return;
+      if (visiting.has(key)) return;
       const seed = entityById.get(producer.seedEntityId);
       if (seed?.kind !== "spline") return;
       const seedOccurrence = (orderedSplineOccurrences(seed) ?? []).find(
@@ -1263,8 +1053,21 @@ export function prepareSketchDerivationPullback(
     for (const [outputEntityId, value] of Object.entries(
       cotangent.entities ?? {},
     )) {
-      if (!value || !entityProducers.has(outputEntityId as SketchEntityId)) {
-        if (value) addEntity(outputEntityId as SketchEntityId, value);
+      if (!value) continue;
+      const offsetProducer = offsetEntityProducers.get(
+        outputEntityId as SketchEntityId,
+      );
+      if (offsetProducer) {
+        const frameCotangent = offsetFrameEntityCotangent(
+          offsetProducer.datum,
+          value,
+        );
+        if (frameCotangent)
+          pullOffset(offsetProducer.record, frameCotangent, new Set());
+        continue;
+      }
+      if (!entityProducers.has(outputEntityId as SketchEntityId)) {
+        addEntity(outputEntityId as SketchEntityId, value);
         continue;
       }
       const scalarDot = (
@@ -1285,7 +1088,7 @@ export function prepareSketchDerivationPullback(
         for (let component = 0; component < 2; component += 1) {
           const basis: SketchPoint2D = component === 0 ? [1, 0] : [0, 1];
           pulled[component] = scalarDot(
-            evaluateSketchDerivationJvp(definition, {
+            jvpOf({
               points: { [point.pointId]: basis },
             }).entities[outputEntityId as SketchEntityId],
           );
@@ -1293,11 +1096,15 @@ export function prepareSketchDerivationPullback(
         addPoint(point.pointId, pulled);
       }
       for (const entity of definition.entities) {
-        if (entity.kind !== "circle" || entityProducers.has(entity.entityId)) {
+        if (
+          entity.kind !== "circle" ||
+          entityProducers.has(entity.entityId) ||
+          offsetEntityProducers.has(entity.entityId)
+        ) {
           continue;
         }
         const radius = scalarDot(
-          evaluateSketchDerivationJvp(definition, {
+          jvpOf({
             entities: {
               [entity.entityId]: { kind: "circle", radius: 1 },
             },
@@ -1315,28 +1122,201 @@ export function prepareSketchDerivationPullback(
         pullTangent(entityId as SketchEntityId, occurrenceId, value, new Set());
       }
     }
-    return { points, entities, splineTangents };
+    return {
+      points,
+      entities,
+      splineTangents,
+      ...(derivativeUnavailable.size > 0
+        ? { derivativeUnavailable: [...derivativeUnavailable] }
+        : {}),
+    };
   };
 }
 
-let cachedDerivationInput: SketchDefinition | null = null;
+/**
+ * Evaluates one offset relationship's solve frame ([TECH] G3/G4: the
+ * certifier-free `solveOffsetFrame`, run with the relationship's plan hint)
+ * and writes its published data onto the authored outputs. All updates are
+ * collected before any is applied, so a failing relationship keeps its
+ * outputs in their last state; its failure is a projection diagnostic of the
+ * solve ([TECH] G16).
+ */
+function evaluateOffsetRelationship(
+  relationship: Extract<SketchDerivationDefinition, { kind: "offset" }>,
+  iterate: Pick<SketchDefinition, "points" | "entities" | "constraints">,
+  context: {
+    readonly modelingTolerance: number;
+    readonly plan: OffsetFramePlan | undefined;
+    readonly withDerivatives: boolean;
+    readonly entityById: ReadonlyMap<SketchEntityId, SketchEntityDefinition>;
+    readonly diagnostics: SketchSolveDiagnostic[];
+    readonly replacePoint: (
+      pointId: SketchPointId,
+      position: SketchPoint2D,
+    ) => void;
+    readonly replaceEntity: (entity: SketchEntityDefinition) => void;
+  },
+): OffsetDerivationFrameRecord | null {
+  const fail = (
+    code: string,
+    message: string,
+    entityId: SketchEntityId | null = relationship.seedEntityIds[0] ?? null,
+  ) => {
+    context.diagnostics.push(
+      diagnostic(
+        code,
+        "error",
+        `Offset relationship ${relationship.derivationId}: ${message}`,
+        entityId ? { kind: "entity", entityId } : null,
+      ),
+    );
+    return null;
+  };
+
+  const distance = getAuthoredLiteralValue<number>(relationship.distance);
+  if (typeof distance !== "number" || !Number.isFinite(distance))
+    return fail(
+      OFFSET_DIAGNOSTIC_CODES.unresolvedDistance,
+      "distance is unresolved; resolve expressions before evaluating derivations.",
+      null,
+    );
+  const frameRelationship = offsetFrameRelationshipOf(
+    relationship,
+    distance,
+    iterate,
+  );
+  if (!frameRelationship)
+    return fail(
+      OFFSET_DIAGNOSTIC_CODES.topologyChanged,
+      "an authored joint arc no longer joins adjacent seeds of the chain.",
+    );
+  const frame = solveOffsetFrame(
+    {
+      relationship: frameRelationship,
+      definition: iterate,
+      modelingTolerance: context.modelingTolerance,
+      withSourceBasis: context.withDerivatives,
+    },
+    context.plan,
+  );
+  if (!frame.ok) {
+    context.diagnostics.push(frame.diagnostic);
+    return null;
+  }
+  const outputs = mapOffsetFrameOutputs(
+    relationship,
+    frame,
+    (entityId) => context.entityById.get(entityId)?.kind,
+  );
+  if (typeof outputs === "string")
+    return fail(OFFSET_DIAGNOSTIC_CODES.topologyChanged, outputs);
+
+  for (const [pointId, datum] of outputs.points)
+    context.replacePoint(pointId, offsetFramePointValue(frame, datum));
+  for (const [entityId, datum] of outputs.entities) {
+    const entity = context.entityById.get(entityId);
+    if (datum.kind === "circle" && entity?.kind === "circle")
+      context.replaceEntity({
+        ...entity,
+        radius: offsetFrameCircleRadius(frame, datum.seed),
+      });
+    const sweep = outputs.sweeps.get(entityId);
+    if (entity?.kind === "arc" && sweep && entity.sweepDirection !== sweep)
+      context.replaceEntity({ ...entity, sweepDirection: sweep });
+  }
+  return {
+    derivationId: relationship.derivationId,
+    relationship: frameRelationship,
+    definition: iterate,
+    frame,
+    outputs,
+  };
+}
+
+const offsetDerivatives = new WeakMap<
+  OffsetDerivationFrameRecord,
+  OffsetFrameDerivatives
+>();
+
+/** The (cached, one per frame) fixed-topology derivatives of one offset frame record. */
+export function offsetRecordDerivatives(
+  record: OffsetDerivationFrameRecord,
+): OffsetFrameDerivatives {
+  let derivatives = offsetDerivatives.get(record);
+  if (!derivatives) {
+    derivatives = prepareOffsetFrameDerivatives(
+      {
+        relationship: record.relationship,
+        definition: record.definition,
+        modelingTolerance: record.frame.modelingTolerance,
+      },
+      record.frame,
+    );
+    offsetDerivatives.set(record, derivatives);
+  }
+  return derivatives;
+}
+
+/** [TECH] G17: the plan every evaluated offset frame ran (solved revision data). */
+export function solvedOffsetFramePlans(
+  evaluation: SketchDerivationEvaluationResult,
+): SolvedOffsetFramePlanRecord[] {
+  return evaluation.offsetFrames.map((record) => ({
+    derivationId: record.derivationId,
+    plan: record.frame.plan,
+  }));
+}
+
+/** The provisional solved spans of every evaluated shell, by shell entity id. */
+export function solvedOffsetShellSpans(
+  evaluation: SketchDerivationEvaluationResult,
+): ReadonlyMap<SketchEntityId, SolvedSketchDerivedCubicSpan[]> {
+  const spans = new Map<SketchEntityId, SolvedSketchDerivedCubicSpan[]>();
+  for (const record of evaluation.offsetFrames)
+    for (const shell of record.outputs.shells)
+      spans.set(shell.entityId, offsetFrameShellSpans(record.frame, shell));
+  return spans;
+}
+
+let cachedDerivationInput: SketchDerivationInput | null = null;
 let cachedDerivationResult: SketchDerivationEvaluationResult | null = null;
 
+/**
+ * Evaluates every derived relationship of one definition iterate. Offsets
+ * run their certifier-free solve frame at the document modeling tolerance τ
+ * with the given per-relationship plan hint ([TECH] G3/G17); there is no
+ * default τ. Memoized on (definition identity, τ, plan-hint identity).
+ */
 export function evaluateSketchDerivations(
-  definition: SketchDefinition,
+  input: SketchDerivationInput,
 ): SketchDerivationEvaluationResult {
-  if (cachedDerivationInput === definition && cachedDerivationResult) {
+  const { definition, modelingTolerance, offsetPlans } = input;
+  const withDerivatives = input.withDerivatives === true;
+  if (
+    cachedDerivationInput &&
+    cachedDerivationResult &&
+    cachedDerivationInput.definition === definition &&
+    cachedDerivationInput.modelingTolerance === modelingTolerance &&
+    cachedDerivationInput.offsetPlans === offsetPlans &&
+    (cachedDerivationInput.withDerivatives === true) === withDerivatives
+  ) {
     return cachedDerivationResult;
   }
 
   const relationships = definition.derivedRelationships ?? [];
   if (relationships.length === 0) {
-    cachedDerivationInput = definition;
-    cachedDerivationResult = { definition, diagnostics: [] };
+    cachedDerivationInput = input;
+    cachedDerivationResult = {
+      definition,
+      diagnostics: [],
+      modelingTolerance,
+      offsetFrames: [],
+    };
     return cachedDerivationResult;
   }
 
   const diagnostics: SketchSolveDiagnostic[] = [];
+  const offsetFrames: OffsetDerivationFrameRecord[] = [];
   const pointById = new Map<SketchPointId, SketchPointDefinition>();
   const pointIndicesById = new Map<SketchPointId, number[]>();
   definition.points.forEach((point, index) => {
@@ -1378,14 +1358,26 @@ export function evaluateSketchDerivations(
 
   for (const relationship of relationships) {
     if (relationship.kind === "offset") {
-      evaluateOffsetRelationship(
+      const record = evaluateOffsetRelationship(
         relationship,
-        entityById,
-        pointById,
-        diagnostics,
-        replacePoint,
-        replaceEntity,
+        {
+          points: [...nextPoints],
+          entities: [...nextEntities],
+          constraints: definition.constraints,
+        },
+        {
+          modelingTolerance,
+          withDerivatives,
+          plan: offsetPlans?.find(
+            (entry) => entry.derivationId === relationship.derivationId,
+          )?.plan,
+          entityById,
+          diagnostics,
+          replacePoint,
+          replaceEntity,
+        },
       );
+      if (record) offsetFrames.push(record);
       continue;
     }
 
@@ -1411,6 +1403,19 @@ export function evaluateSketchDerivations(
             "error",
             `Derived relationship ${relationship.derivationId} references missing output entity ${output.outputEntityId}.`,
             { kind: "entity", entityId: output.seedEntityId },
+          ),
+        );
+        continue;
+      }
+
+      if (seed.kind === "derivedPiecewiseCubic") {
+        // U-G2: a derived shell is never the seed of a derived operator.
+        diagnostics.push(
+          diagnostic(
+            DERIVED_SHELL_SEED_UNSUPPORTED,
+            "error",
+            `Derived relationship ${relationship.derivationId} uses the derived offset curve ${seed.entityId} as a seed; mirroring, patterning or transforming an offset spline curve is not supported yet.`,
+            { kind: "entity", entityId: seed.entityId },
           ),
         );
         continue;
@@ -1489,8 +1494,10 @@ export function evaluateSketchDerivations(
       entities: nextEntities,
     },
     diagnostics,
+    modelingTolerance,
+    offsetFrames,
   };
-  cachedDerivationInput = definition;
+  cachedDerivationInput = input;
   cachedDerivationResult = result;
   return result;
 }

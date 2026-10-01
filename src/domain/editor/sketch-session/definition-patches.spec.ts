@@ -58,7 +58,7 @@ function solvedSnapshot(
   handles: readonly (readonly [number, number])[],
 ): SolvedSketchSnapshot {
   return {
-    schemaVersion: "solved-sketch/v1alpha1",
+    schemaVersion: "solved-sketch/v1alpha2",
     status: { solveState: "solved", constraintState: "satisfied" },
     solvedEntities: [
       {
@@ -107,7 +107,7 @@ test("solved seed handles derive outputs coherently across aliases and repeated 
     endPointId: "sketch_point_axis_b" as const,
   };
   const definition: SketchDefinition = {
-    schemaVersion: "sketch-definition/v1alpha1",
+    schemaVersion: "sketch-definition/v1alpha2",
     referenceIds: [],
     references: [],
     pointIds: [
@@ -173,6 +173,7 @@ test("solved seed handles derive outputs coherently across aliases and repeated 
   const first = applySolvedSketchToDefinition(
     definition,
     solvedSnapshot(firstHandles),
+    { modelingTolerance: 1e-3 },
   );
   const secondHandles = [
     [8, -1],
@@ -183,6 +184,7 @@ test("solved seed handles derive outputs coherently across aliases and repeated 
   const second = applySolvedSketchToDefinition(
     first,
     solvedSnapshot(secondHandles),
+    { modelingTolerance: 1e-3 },
   );
   const output = second.entities.find(
     (entity) => entity.entityId === "sketch_entity_output",
@@ -236,7 +238,7 @@ test("driven spline constraints keep snapshot, applied definition, and fresh sol
     point("sketch_point_contact", [0, 0]),
   ];
   const base: SketchDefinition = {
-    schemaVersion: "sketch-definition/v1alpha1",
+    schemaVersion: "sketch-definition/v1alpha2",
     referenceIds: [],
     references: [],
     pointIds: points.map((entry) => entry.pointId),
@@ -279,8 +281,11 @@ test("driven spline constraints keep snapshot, applied definition, and fresh sol
     ),
   };
   const desiredDefinition = evaluateSketchDerivations({
-    ...base,
-    entities: [desiredSeed, output, axis],
+    definition: {
+      ...base,
+      entities: [desiredSeed, output, axis],
+    },
+    modelingTolerance: 1e-3,
   }).definition;
   const desiredOutput = desiredDefinition.entities.find(
     (entity) => entity.entityId === output.entityId,
@@ -342,6 +347,7 @@ test("driven spline constraints keep snapshot, applied definition, and fresh sol
   const solved = solveSketchDefinitionCore({
     definition,
     tolerances,
+    modelingTolerance: 1e-3,
     partialSolvePolicy: "failOnConflict",
   });
   expect(solved.status.solveState).toBe("solved");
@@ -354,6 +360,7 @@ test("driven spline constraints keep snapshot, applied definition, and fresh sol
   const applied = applySolvedSketchToDefinition(
     definition,
     solved.solvedSnapshot,
+    { modelingTolerance: 1e-3 },
   );
   const solvedOutput = solved.solvedSnapshot.solvedEntities.find(
     (entity) => entity.entityId === output.entityId && entity.kind === "spline",
@@ -381,6 +388,7 @@ test("driven spline constraints keep snapshot, applied definition, and fresh sol
   const fresh = solveSketchDefinitionCore({
     definition: applied,
     tolerances,
+    modelingTolerance: 1e-3,
     partialSolvePolicy: "failOnConflict",
   });
   expect(fresh.status.solveState).toBe("solved");

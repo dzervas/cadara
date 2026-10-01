@@ -12,7 +12,7 @@ test("src/contracts/sketch/inferred-constraint-solver.spec.ts", () => {
   } as const;
 
   const definition: SketchDefinition = {
-    schemaVersion: "sketch-definition/v1alpha1",
+    schemaVersion: "sketch-definition/v1alpha2",
     referenceIds: [],
     references: [],
     pointIds: [
@@ -165,6 +165,7 @@ test("src/contracts/sketch/inferred-constraint-solver.spec.ts", () => {
   const solved = solveSketchDefinitionCore({
     definition,
     tolerances,
+    modelingTolerance: 1e-3,
     partialSolvePolicy: "bestEffort",
   });
   const solvedPoints = new Map(
@@ -247,6 +248,7 @@ test("src/contracts/sketch/inferred-constraint-solver.spec.ts", () => {
     const constrained = solveSketchDefinitionCore({
       definition: constrainedDefinition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
     const circle = constrained.solvedSnapshot.solvedEntities.find(
@@ -296,7 +298,7 @@ test("src/contracts/sketch/inferred-constraint-solver.spec.ts", () => {
   }
 
   const tangentAndConcentric: SketchDefinition = {
-    schemaVersion: "sketch-definition/v1alpha1",
+    schemaVersion: "sketch-definition/v1alpha2",
     referenceIds: [],
     references: [],
     pointIds: [
@@ -419,6 +421,7 @@ test("src/contracts/sketch/inferred-constraint-solver.spec.ts", () => {
   const tangentSolved = solveSketchDefinitionCore({
     definition: tangentAndConcentric,
     tolerances,
+    modelingTolerance: 1e-3,
     partialSolvePolicy: "bestEffort",
   });
   expect(
@@ -429,7 +432,7 @@ test("src/contracts/sketch/inferred-constraint-solver.spec.ts", () => {
   ).toBeTruthy();
 
   const normalAndSymmetric: SketchDefinition = {
-    schemaVersion: "sketch-definition/v1alpha1",
+    schemaVersion: "sketch-definition/v1alpha2",
     referenceIds: [],
     references: [],
     pointIds: [
@@ -607,6 +610,7 @@ test("src/contracts/sketch/inferred-constraint-solver.spec.ts", () => {
   const normalAndSymmetricSolved = solveSketchDefinitionCore({
     definition: normalAndSymmetric,
     tolerances,
+    modelingTolerance: 1e-3,
     partialSolvePolicy: "bestEffort",
   });
   expect(
@@ -623,6 +627,7 @@ test("src/contracts/sketch/inferred-constraint-solver.spec.ts", () => {
     const solved = solveSketchDefinitionCore({
       definition,
       tolerances,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
 
@@ -632,7 +637,7 @@ test("src/contracts/sketch/inferred-constraint-solver.spec.ts", () => {
   }
 
   const circleArcOutsideSweep: SketchDefinition = {
-    schemaVersion: "sketch-definition/v1alpha1",
+    schemaVersion: "sketch-definition/v1alpha2",
     referenceIds: [],
     references: [],
     pointIds: [
@@ -789,7 +794,7 @@ test("src/contracts/sketch/inferred-constraint-solver.spec.ts", () => {
   ).toBe("unsatisfied");
 
   const arcArcOutsideSweep: SketchDefinition = {
-    schemaVersion: "sketch-definition/v1alpha1",
+    schemaVersion: "sketch-definition/v1alpha2",
     referenceIds: [],
     references: [],
     pointIds: [

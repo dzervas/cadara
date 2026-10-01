@@ -2,6 +2,7 @@ import typia from "typia";
 
 import type {
   DeriveSketchRegionsRequest,
+  SketchOffsetPublicationRecord,
   DisposeInteractiveSketchSolveSessionRequest,
   FinalizeInteractiveSketchSolveSessionRequest,
   ProjectSketchExternalReferencesRequest,
@@ -36,6 +37,8 @@ const deriveSketchRegionsRequestValidator =
   typia.createValidateEquals<DeriveSketchRegionsRequest>();
 const resolveSketchReferenceRequestValidator =
   typia.createValidateEquals<ResolveSketchReferenceRequest>();
+const offsetPublicationsValidator =
+  typia.createValidateEquals<SketchOffsetPublicationRecord[]>();
 
 export function validateSketchSolverEnvelope(
   value: unknown,
@@ -269,5 +272,20 @@ export function requireResolveSketchReferenceRequest(
     resolveSketchReferenceRequestValidator,
     value,
     "Resolve sketch reference request",
+  );
+}
+
+/**
+ * [TECH] G17: a region-derivation response's per-relationship offset
+ * publications cross the derivation-worker boundary as plain data;
+ * consumers validate them before trusting any publication.
+ */
+export function requireSketchOffsetPublications(
+  value: unknown,
+): SketchOffsetPublicationRecord[] {
+  return requireContract(
+    offsetPublicationsValidator,
+    value,
+    "Sketch offset publications",
   );
 }

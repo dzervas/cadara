@@ -199,6 +199,7 @@ test("src/contracts/shared/contract-examples.spec.ts", async () => {
     sketchId: "sketch_profile",
     plane: solveSketchProjectionRequest.plane,
     tolerances: solveSketchProjectionRequest.tolerances,
+    modelingTolerance: 1e-3,
     partialSolvePolicy: "bestEffort",
     definition: sketchDefinition,
     projectedReferences: [],
@@ -831,7 +832,7 @@ test("src/contracts/shared/contract-examples.spec.ts", async () => {
     expect(
       SOLVED_SKETCH_SCHEMA_VERSION,
       "Solved sketch schema version literal must remain explicit in examples.",
-    ).toBe("solved-sketch/v1alpha1");
+    ).toBe("solved-sketch/v1alpha2");
   }
 
   function testAdvancedSolidExamplesUseRoleSpecificParticipants() {

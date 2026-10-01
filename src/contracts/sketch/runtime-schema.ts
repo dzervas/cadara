@@ -36,9 +36,46 @@ const projectedReferenceRequestTargetValidator =
 const solverRegionRecordValidator = typia.createValidateEquals<RegionRecord>();
 const solverRequestIdValidator = typia.createValidateEquals<RequestId>();
 
+/**
+ * T08b-g5: v1alpha1 payloads (and with them the fit-point/refit offset
+ * outputs) are rejected explicitly, never migrated.
+ */
+function retiredVersionIssues(
+  value: unknown,
+  path: string,
+  retired: string,
+): ContractValidationIssue[] {
+  const version =
+    typeof value === "object" && value !== null
+      ? (value as { schemaVersion?: unknown }).schemaVersion
+      : undefined;
+  return version === retired
+    ? [
+        {
+          path: path ? `${path}.schemaVersion` : "schemaVersion",
+          expected: retired.replace("v1alpha1", "v1alpha2"),
+          value: version,
+          message: `Unsupported sketch payload version ${retired}: this payload predates certified offset outputs and cannot be opened; there is no migration.`,
+        },
+      ]
+    : [];
+}
+
+function retired<T>(
+  issues: ContractValidationIssue[],
+  value: unknown,
+): ContractValidationResult<T> | null {
+  return issues.length > 0 ? { success: false, data: value, issues } : null;
+}
+
 export function validateSketchDefinition(
   value: unknown,
 ): ContractValidationResult<SketchDefinition> {
+  const rejected = retired<SketchDefinition>(
+    retiredVersionIssues(value, "", "sketch-definition/v1alpha1"),
+    value,
+  );
+  if (rejected) return rejected;
   const result = validateContract(sketchDefinitionValidator, value);
   if (!result.success) {
     return result;
@@ -65,6 +102,26 @@ export function requireSketchDefinition(value: unknown): SketchDefinition {
 export function validateSketchRecord(
   value: unknown,
 ): ContractValidationResult<SketchRecord> {
+  const record =
+    typeof value === "object" && value !== null
+      ? (value as Partial<Record<"definition" | "solvedSnapshot", unknown>>)
+      : {};
+  const rejected = retired<SketchRecord>(
+    [
+      ...retiredVersionIssues(
+        record.definition,
+        "definition",
+        "sketch-definition/v1alpha1",
+      ),
+      ...retiredVersionIssues(
+        record.solvedSnapshot,
+        "solvedSnapshot",
+        "solved-sketch/v1alpha1",
+      ),
+    ],
+    value,
+  );
+  if (rejected) return rejected;
   const result = validateContract(sketchRecordValidator, value);
   if (!result.success) {
     return result;
@@ -80,6 +137,15 @@ export function validateSketchRecord(
       validateSolvedSketchSnapshotInvariants(result.data.solvedSnapshot),
     ),
   ];
+  invariantIssues.push(
+    ...prefixIssues(
+      "solvedSnapshot",
+      validateOffsetFramePlanReferences(
+        result.data.definition,
+        result.data.solvedSnapshot,
+      ),
+    ),
+  );
   if (
     result.data.derivedValidity.state !== "current" &&
     result.data.regions.length > 0
@@ -111,6 +177,11 @@ export function requireSketchRecord(value: unknown): SketchRecord {
 export function validateSolvedSketchSnapshot(
   value: unknown,
 ): ContractValidationResult<SolvedSketchSnapshot> {
+  const rejected = retired<SolvedSketchSnapshot>(
+    retiredVersionIssues(value, "", "solved-sketch/v1alpha1"),
+    value,
+  );
+  if (rejected) return rejected;
   const result = validateContract(solvedSketchSnapshotValidator, value);
   if (!result.success) {
     return result;
@@ -257,6 +328,8 @@ function validateSketchDefinitionInvariants(definition: SketchDefinition) {
     }
   });
 
+  issues.push(...validateOffsetShellInvariants(definition));
+
   const pointIds = new Set(definition.points.map((point) => point.pointId));
   const entityIds = new Set(
     definition.entities.map((entity) => entity.entityId),
@@ -312,10 +385,179 @@ function validateSketchDefinitionInvariants(definition: SketchDefinition) {
   return issues;
 }
 
+/**
+ * Persistence invariants of derived offset shells ([TECH] G18, amending plan
+ * §2.6): only structure that does not depend on seed geometry. Exactly one
+ * owning offset relationship per shell, with a matching `derivationId`;
+ * unique output span ids per output; spline seeds have no fit-point
+ * `outputs` entry; a shell's driven terminal points exist and are owned by
+ * its relationship only (never a seed point or another relationship's
+ * output; adjacent outputs of one chain share their joint point, G6); a
+ * shell is never the seed of an offset, mirror, pattern or transform; a
+ * relationship never names a missing shell (deleting a shell alone is
+ * invalid). Seed existence and the span keys' match with the seed's source
+ * occurrence pairs are NOT invariants: a deleted or edited seed is a valid
+ * authored state that evaluation reports (missing dependency /
+ * `topologyChanged`) while the authored data is kept.
+ */
+function validateOffsetShellInvariants(
+  definition: SketchDefinition,
+): ContractValidationIssue[] {
+  const issues: ContractValidationIssue[] = [];
+  const entities = new Map(
+    definition.entities.map((entity) => [entity.entityId, entity]),
+  );
+  const pointIds = new Set(definition.points.map((point) => point.pointId));
+  const relationships = definition.derivedRelationships ?? [];
+  const owners = new Map<string, string[]>();
+  const issue = (
+    path: string,
+    expected: string,
+    value: unknown,
+    message: string,
+  ) => issues.push({ path, expected, value, message });
+  relationships.forEach((relationship, index) => {
+    relationship.seedEntityIds.forEach((seedId, seedIndex) => {
+      if (entities.get(seedId)?.kind === "derivedPiecewiseCubic")
+        issue(
+          `derivedRelationships.${index}.seedEntityIds.${seedIndex}`,
+          "a seed that is not a derived offset shell",
+          seedId,
+          "A derived offset shell cannot be the seed of an offset, mirror, pattern or transform.",
+        );
+    });
+    if (relationship.kind !== "offset") return;
+    relationship.outputs.forEach((output, outputIndex) => {
+      if (entities.get(output.seedEntityId)?.kind === "spline")
+        issue(
+          `derivedRelationships.${index}.outputs.${outputIndex}`,
+          "spline seeds publish only a derived shell",
+          output.seedEntityId,
+          "An offset spline seed has no fit-point output; its output is a derived shell.",
+        );
+    });
+    const otherPoints = new Set<string>([
+      ...relationship.seedEntityIds.flatMap((seedId) => {
+        const seed = entities.get(seedId);
+        return seed?.kind === "spline"
+          ? seed.pointOccurrences.map((occurrence) => occurrence.pointId)
+          : seed && "startPointId" in seed
+            ? [seed.startPointId, seed.endPointId]
+            : [];
+      }),
+      ...relationships
+        .filter((other) => other !== relationship)
+        .flatMap((other) => [
+          ...other.outputs.flatMap((output) => output.outputPointIds),
+          ...(other.kind === "offset"
+            ? other.piecewiseCubicOutputs.flatMap((output) => [
+                output.startPointId,
+                output.endPointId,
+              ])
+            : []),
+        ]),
+    ]);
+    relationship.piecewiseCubicOutputs.forEach((output, outputIndex) => {
+      const path = `derivedRelationships.${index}.piecewiseCubicOutputs.${outputIndex}`;
+      const shell = entities.get(output.outputEntityId);
+      if (shell?.kind !== "derivedPiecewiseCubic") {
+        issue(
+          `${path}.outputEntityId`,
+          "an existing derived offset shell",
+          output.outputEntityId,
+          "An offset shell output must name an existing derived shell entity (a shell is deleted with its relationship).",
+        );
+      } else {
+        (
+          owners.get(shell.entityId) ??
+          owners.set(shell.entityId, []).get(shell.entityId)!
+        ).push(relationship.derivationId);
+        if (shell.derivationId !== relationship.derivationId)
+          issue(
+            `${path}.outputEntityId`,
+            "a shell whose derivationId is its owning relationship",
+            shell.derivationId,
+            "A derived offset shell's derivationId must be its owning offset relationship.",
+          );
+      }
+      const spanIds = output.spans.map((span) => span.outputSpanId);
+      if (new Set(spanIds).size !== spanIds.length)
+        issue(
+          `${path}.spans`,
+          "unique output span ids",
+          output.spans,
+          "Derived shell output span ids must be unique.",
+        );
+      for (const pointId of [output.startPointId, output.endPointId])
+        if (!pointIds.has(pointId))
+          issue(
+            `${path}`,
+            "an existing driven terminal point",
+            pointId,
+            "A derived shell's driven terminal point must exist (it is deleted only with its relationship).",
+          );
+        else if (otherPoints.has(pointId))
+          issue(
+            `${path}`,
+            "driven terminal points owned by this relationship only",
+            pointId,
+            "A derived shell's driven terminal point must not be a seed point or another relationship's output.",
+          );
+    });
+  });
+  definition.entities.forEach((entity, index) => {
+    if (entity.kind !== "derivedPiecewiseCubic") return;
+    const owning = owners.get(entity.entityId) ?? [];
+    if (owning.length !== 1)
+      issue(
+        `entities.${index}`,
+        "exactly one owning offset relationship",
+        owning,
+        "A derived offset shell must be owned by exactly one offset relationship.",
+      );
+  });
+  return issues;
+}
+
+/** [TECH] G17: solved plans reference existing offset relationships, once each. */
+function validateOffsetFramePlanReferences(
+  definition: SketchDefinition,
+  snapshot: SolvedSketchSnapshot,
+): ContractValidationIssue[] {
+  const offsets = new Set(
+    (definition.derivedRelationships ?? []).flatMap((relationship) =>
+      relationship.kind === "offset" ? [relationship.derivationId] : [],
+    ),
+  );
+  return (snapshot.offsetFramePlans ?? []).flatMap((record, index) =>
+    offsets.has(record.derivationId)
+      ? []
+      : [
+          {
+            path: `offsetFramePlans.${index}.derivationId`,
+            expected: "an existing offset relationship",
+            value: record.derivationId,
+            message:
+              "A solved offset frame plan must reference an existing offset relationship.",
+          },
+        ],
+  );
+}
+
 function validateSolvedSketchSnapshotInvariants(
   snapshot: SolvedSketchSnapshot,
 ): ContractValidationIssue[] {
   const issues: ContractValidationIssue[] = [];
+  const planIds = (snapshot.offsetFramePlans ?? []).map(
+    (record) => record.derivationId,
+  );
+  if (new Set(planIds).size !== planIds.length)
+    issues.push({
+      path: "offsetFramePlans",
+      expected: "one plan per offset relationship",
+      value: planIds,
+      message: "Solved offset frame plans must name each relationship once.",
+    });
 
   snapshot.solvedEntities.forEach((entity, index) => {
     if (entity.kind === "circle" && entity.solvedRadius <= 0) {

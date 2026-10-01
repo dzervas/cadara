@@ -176,6 +176,10 @@ class InstrumentedSketchSolverAdapter implements SketchSolverAdapter {
     return result;
   }
 
+  get supersedesRegionDerivation() {
+    return this.inner.supersedesRegionDerivation === true;
+  }
+
   deriveSketchRegions(request: DeriveSketchRegionsRequest) {
     return this.measure(
       "deriveSketchRegions",

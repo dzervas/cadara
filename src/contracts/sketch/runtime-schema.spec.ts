@@ -90,7 +90,7 @@ test("equal-offset persists as a strict normal constraint", () => {
     ],
   };
   const definition = {
-    schemaVersion: "sketch-definition/v1alpha1",
+    schemaVersion: "sketch-definition/v1alpha2",
     referenceIds: [],
     references: [],
     pointIds: points.map((entry) => entry.pointId),

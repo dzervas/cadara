@@ -502,7 +502,7 @@ function getSketchDefinition(
   return (
     candidate.definition ??
     candidate.sketch?.definition ?? {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: [],

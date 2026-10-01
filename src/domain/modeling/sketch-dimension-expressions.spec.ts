@@ -124,6 +124,7 @@ test("src/domain/modeling/sketch-dimension-expressions.spec.ts solver boundary r
       angleRadians: 1e-6,
       minimumSegmentLength: 1e-6,
     },
+    modelingTolerance: 1e-3,
     partialSolvePolicy: "bestEffort",
   });
   expect(
@@ -146,6 +147,7 @@ test("src/domain/modeling/sketch-dimension-expressions.spec.ts solver boundary r
       angleRadians: 1e-6,
       minimumSegmentLength: 1e-6,
     },
+    modelingTolerance: 1e-3,
     partialSolvePolicy: "bestEffort",
   });
   expect(
@@ -170,6 +172,7 @@ test("src/domain/modeling/sketch-dimension-expressions.spec.ts offset derivation
         seedEntityIds: ["entity_line" as never],
         distance: createExpressionAuthoredValue("wall / 2"),
         jointPolicy: "trimExtendArcFallback",
+        piecewiseCubicOutputs: [],
         jointOutputs: [],
         outputs: [],
       },
@@ -212,7 +215,7 @@ function createSketchDefinition(input: {
   dimensions: SketchDefinition["dimensions"];
 }): SketchDefinition {
   return {
-    schemaVersion: "sketch-definition/v1alpha1",
+    schemaVersion: "sketch-definition/v1alpha2",
     referenceIds: [],
     references: [],
     pointIds: ["point_a", "point_b"],

@@ -145,7 +145,7 @@ export function createStandardPlaneDefinition(
 }
 
 export const OCC_KERNEL_SEED_SKETCH_DEFINITION: SketchDefinition = {
-  schemaVersion: "sketch-definition/v1alpha1",
+  schemaVersion: "sketch-definition/v1alpha2",
   referenceIds: ["ref_sketch_primary_plane"],
   references: [
     {

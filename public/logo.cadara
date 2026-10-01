@@ -859,7 +859,7 @@
         ],
         "referenceIds": [],
         "references": [],
-        "schemaVersion": "sketch-definition/v1alpha1",
+        "schemaVersion": "sketch-definition/v1alpha2",
         "styleIds": [],
         "styles": [],
         "svgRenderingEnabled": true,

@@ -26,7 +26,7 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
   }
 
   const definition: SketchDefinition = {
-    schemaVersion: "sketch-definition/v1alpha1",
+    schemaVersion: "sketch-definition/v1alpha2",
     referenceIds: [],
     references: [],
     pointIds: [

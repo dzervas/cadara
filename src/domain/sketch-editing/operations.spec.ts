@@ -118,7 +118,7 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
     entities: SketchDefinition["entities"],
   ): SketchDefinition {
     return {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: points.map((point) => point.pointId),
@@ -842,6 +842,7 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
       side: "left",
       sequence: 10,
       factories: createFactories(),
+      modelingTolerance: 1e-3,
     });
     expect(
       emptySelection.valid,
@@ -859,6 +860,7 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
       side: "left",
       sequence: 10,
       factories: createFactories(),
+      modelingTolerance: 1e-3,
     });
     expect(
       disconnected.valid,
@@ -876,6 +878,7 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
       side: "left",
       sequence: 10,
       factories: createFactories(),
+      modelingTolerance: 1e-3,
     });
     expect(
       missingEntity.valid,
@@ -889,6 +892,7 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
       side: "right",
       sequence: 10,
       factories: createFactories(),
+      modelingTolerance: 1e-3,
     });
     expect(
       committed.valid,
@@ -986,6 +990,7 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
       value: null,
       sequence: 10,
       factories: createFactories(),
+      modelingTolerance: 1e-3,
     });
     const output = result.contribution?.entities.find(
       (entity): entity is Extract<SketchEntityDefinition, { kind: "spline" }> =>

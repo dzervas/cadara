@@ -34,7 +34,7 @@ function loadCapturedReferenceImageSketchFixture() {
     },
     planeKey: "xy" as const,
     definition: {
-      schemaVersion: "sketch-definition/v1alpha1" as const,
+      schemaVersion: "sketch-definition/v1alpha2" as const,
       referenceIds: [],
       references: [],
       pointIds: [
@@ -175,6 +175,7 @@ function loadCapturedReferenceImageSketchFixture() {
       angleRadians: 1e-6,
       minimumSegmentLength: 1e-6,
     },
+    modelingTolerance: 1e-3,
     partialSolvePolicy: "bestEffort",
   });
 
@@ -546,7 +547,7 @@ test("src/domain/editor/reference-image-operations.spec.ts renders draft referen
 
 test("src/domain/editor/reference-image-operations.spec.ts lets bound anchor points participate in ordinary sketch constraints", () => {
   const definition = {
-    schemaVersion: "sketch-definition/v1alpha1" as const,
+    schemaVersion: "sketch-definition/v1alpha2" as const,
     referenceIds: [],
     references: [],
     pointIds: ["sketch_point_anchor", "sketch_point_free"],
@@ -649,6 +650,7 @@ test("src/domain/editor/reference-image-operations.spec.ts lets bound anchor poi
       angleRadians: 1e-6,
       minimumSegmentLength: 1e-6,
     },
+    modelingTolerance: 1e-3,
     partialSolvePolicy: "bestEffort",
   });
   const anchorPoint = solved.solvedSnapshot.solvedPoints.find(

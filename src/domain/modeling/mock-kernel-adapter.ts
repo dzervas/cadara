@@ -7,7 +7,9 @@ import type {
 import {
   deriveSketchValidity,
   mergeSketchSolveDiagnostics,
+  withRelationshipScopedDiagnostics,
 } from "@/contracts/sketch/derived-validity";
+import { solveAndDeriveSketchWithOffsets } from "@/domain/solver/offset-publication-round";
 import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
 import type { SketchSolverAdapter } from "@/contracts/solver/adapter";
 import {
@@ -3218,7 +3220,7 @@ function createInvalidSolvedSnapshot(
   diagnostics: readonly SketchSolveDiagnostic[],
 ): SolvedSketchSnapshot {
   return {
-    schemaVersion: "solved-sketch/v1alpha1",
+    schemaVersion: "solved-sketch/v1alpha2",
     status: { solveState: "failed", constraintState: "inconsistent" },
     solvedEntities: [],
     solvedPoints: [],
@@ -3272,7 +3274,7 @@ function mapSketchSolverDiagnostic(
 }
 
 const sketchDefinition: SketchDefinition = {
-  schemaVersion: "sketch-definition/v1alpha1",
+  schemaVersion: "sketch-definition/v1alpha2",
   referenceIds: ["ref_sketch_primary_plane" as const],
   references: [
     {
@@ -3548,26 +3550,34 @@ async function buildSketchRecord(
     requestId: `${requestId}:validate` as RequestId,
     plane,
     tolerances,
-    definition: input.definition,
-    projectedReferences: projection.projectedReferences,
-  });
-  const solved = await solverAdapter.solveSketch({
-    ...base,
-    requestId: `${requestId}:solve` as RequestId,
-    plane,
-    tolerances,
-    partialSolvePolicy: "bestEffort",
-    definition: input.definition,
-    projectedReferences: projection.projectedReferences,
-  });
-  const regions = await solverAdapter.deriveSketchRegions({
-    ...base,
-    requestId: `${requestId}:regions` as RequestId,
-    solvedSnapshot: solved.solvedSnapshot,
-    definition: input.definition,
-    projectedReferences: projection.projectedReferences,
     modelingTolerance: input.settings.modelingTolerance,
+    definition: input.definition,
+    projectedReferences: projection.projectedReferences,
   });
+  const {
+    solved,
+    regions,
+    offsetDiagnostics: solvedOffsetDiagnostics,
+  } = await solveAndDeriveSketchWithOffsets(
+    solverAdapter,
+    {
+      ...base,
+      requestId: `${requestId}:solve` as RequestId,
+      plane,
+      tolerances,
+      modelingTolerance: input.settings.modelingTolerance,
+      partialSolvePolicy: "bestEffort",
+      definition: input.definition,
+      projectedReferences: projection.projectedReferences,
+    },
+    {
+      ...base,
+      requestId: `${requestId}:regions` as RequestId,
+      definition: input.definition,
+      projectedReferences: projection.projectedReferences,
+      modelingTolerance: input.settings.modelingTolerance,
+    },
+  );
 
   return {
     ownerDocumentId: input.documentId,
@@ -3583,14 +3593,17 @@ async function buildSketchRecord(
     },
     definition: input.definition,
     solvedSnapshot: solved.solvedSnapshot,
-    derivedValidity: deriveSketchValidity({
-      solvedSnapshot: solved.solvedSnapshot,
-      diagnostics: mergeSketchSolveDiagnostics(
-        validation.diagnostics,
-        solved.diagnostics,
-        regions.diagnostics,
-      ),
-    }),
+    derivedValidity: withRelationshipScopedDiagnostics(
+      deriveSketchValidity({
+        solvedSnapshot: solved.solvedSnapshot,
+        diagnostics: mergeSketchSolveDiagnostics(
+          validation.diagnostics,
+          solved.diagnostics,
+          regions.diagnostics,
+        ),
+      }),
+      solvedOffsetDiagnostics,
+    ),
     projectedReferences: projection.projectedReferences,
     regions: validation.isValid ? regions.regions : [],
   };
@@ -3679,36 +3692,44 @@ async function rebuildSketchesForDocumentVariables(input: {
       tolerances: createDocumentSolverTolerances(
         input.snapshot.document.settings,
       ),
-      definition: resolvedDefinition.definition,
-      projectedReferences: projection.projectedReferences,
-    });
-    const solved = await input.solverAdapter.solveSketch({
-      contractVersion: CONTRACT_VERSION,
-      solverSchemaVersion: SOLVER_SCHEMA_VERSION,
-      requestId: `${requestId}:solve` as RequestId,
-      documentId: input.snapshot.document.documentId,
-      revisionId: input.snapshot.document.revisionId,
-      sketchId: sketch.sketchId,
-      plane: sketch.plane.frame,
-      tolerances: createDocumentSolverTolerances(
-        input.snapshot.document.settings,
-      ),
-      partialSolvePolicy: "bestEffort",
-      definition: resolvedDefinition.definition,
-      projectedReferences: projection.projectedReferences,
-    });
-    const regions = await input.solverAdapter.deriveSketchRegions({
-      contractVersion: CONTRACT_VERSION,
-      solverSchemaVersion: SOLVER_SCHEMA_VERSION,
-      requestId: `${requestId}:regions` as RequestId,
-      documentId: input.snapshot.document.documentId,
-      revisionId: input.snapshot.document.revisionId,
-      sketchId: sketch.sketchId,
-      solvedSnapshot: solved.solvedSnapshot,
-      definition: resolvedDefinition.definition,
-      projectedReferences: projection.projectedReferences,
       modelingTolerance: input.snapshot.document.settings.modelingTolerance,
+      definition: resolvedDefinition.definition,
+      projectedReferences: projection.projectedReferences,
     });
+    const {
+      solved,
+      regions,
+      offsetDiagnostics: solvedOffsetDiagnostics,
+    } = await solveAndDeriveSketchWithOffsets(
+      input.solverAdapter,
+      {
+        contractVersion: CONTRACT_VERSION,
+        solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+        requestId: `${requestId}:solve` as RequestId,
+        documentId: input.snapshot.document.documentId,
+        revisionId: input.snapshot.document.revisionId,
+        sketchId: sketch.sketchId,
+        plane: sketch.plane.frame,
+        tolerances: createDocumentSolverTolerances(
+          input.snapshot.document.settings,
+        ),
+        modelingTolerance: input.snapshot.document.settings.modelingTolerance,
+        partialSolvePolicy: "bestEffort",
+        definition: resolvedDefinition.definition,
+        projectedReferences: projection.projectedReferences,
+      },
+      {
+        contractVersion: CONTRACT_VERSION,
+        solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+        requestId: `${requestId}:regions` as RequestId,
+        documentId: input.snapshot.document.documentId,
+        revisionId: input.snapshot.document.revisionId,
+        sketchId: sketch.sketchId,
+        definition: resolvedDefinition.definition,
+        projectedReferences: projection.projectedReferences,
+        modelingTolerance: input.snapshot.document.settings.modelingTolerance,
+      },
+    );
 
     const sketchDiagnostics = [
       ...projection.diagnostics.map((diagnostic) =>
@@ -3726,7 +3747,7 @@ async function rebuildSketchesForDocumentVariables(input: {
     ];
 
     diagnostics.push(...sketchDiagnostics);
-    const derivedValidity = deriveSketchValidity({
+    const sketchValidity = deriveSketchValidity({
       solvedSnapshot: solved.solvedSnapshot,
       diagnostics: mergeSketchSolveDiagnostics(
         projection.diagnostics,
@@ -3747,13 +3768,17 @@ async function rebuildSketchesForDocumentVariables(input: {
       ),
     });
 
+    const derivedValidity = withRelationshipScopedDiagnostics(
+      sketchValidity,
+      solvedOffsetDiagnostics,
+    );
     const sketchRecord: SketchRecord = {
       ...sketch.sketch,
       ownerRevisionId: input.nextRevisionId,
       definition,
       solvedSnapshot: {
         ...solved.solvedSnapshot,
-        diagnostics: derivedValidity.diagnostics,
+        diagnostics: sketchValidity.diagnostics,
       },
       derivedValidity,
       projectedReferences: structuredClone(projection.projectedReferences),
@@ -5226,39 +5251,48 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
                 sketchId: sketch.sketchId,
                 plane: sketch.plane.frame,
                 tolerances,
-                definition: resolvedDefinition.definition,
-                projectedReferences: projected.projectedReferences,
-              });
-              const solve = await restoreSolverAdapter.solveSketch({
-                contractVersion: CONTRACT_VERSION,
-                solverSchemaVersion: SOLVER_SCHEMA_VERSION,
-                requestId: `${requestId}:solve` as RequestId,
-                documentId: document.documentId,
-                revisionId: document.revisionId,
-                sketchId: sketch.sketchId,
-                plane: sketch.plane.frame,
-                tolerances,
-                partialSolvePolicy: "bestEffort",
-                definition: resolvedDefinition.definition,
-                projectedReferences: projected.projectedReferences,
-              });
-              const regions = await restoreSolverAdapter.deriveSketchRegions({
-                contractVersion: CONTRACT_VERSION,
-                solverSchemaVersion: SOLVER_SCHEMA_VERSION,
-                requestId: `${requestId}:regions` as RequestId,
-                documentId: document.documentId,
-                revisionId: document.revisionId,
-                sketchId: sketch.sketchId,
-                solvedSnapshot: solve.solvedSnapshot,
-                definition: resolvedDefinition.definition,
-                projectedReferences: projected.projectedReferences,
                 modelingTolerance: document.settings.modelingTolerance,
+                definition: resolvedDefinition.definition,
+                projectedReferences: projected.projectedReferences,
               });
+              const {
+                solved: solve,
+                regions,
+                offsetDiagnostics,
+              } = await solveAndDeriveSketchWithOffsets(
+                restoreSolverAdapter,
+                {
+                  contractVersion: CONTRACT_VERSION,
+                  solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+                  requestId: `${requestId}:solve` as RequestId,
+                  documentId: document.documentId,
+                  revisionId: document.revisionId,
+                  sketchId: sketch.sketchId,
+                  plane: sketch.plane.frame,
+                  tolerances,
+                  modelingTolerance: document.settings.modelingTolerance,
+                  partialSolvePolicy: "bestEffort",
+                  definition: resolvedDefinition.definition,
+                  projectedReferences: projected.projectedReferences,
+                },
+                {
+                  contractVersion: CONTRACT_VERSION,
+                  solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+                  requestId: `${requestId}:regions` as RequestId,
+                  documentId: document.documentId,
+                  revisionId: document.revisionId,
+                  sketchId: sketch.sketchId,
+                  definition: resolvedDefinition.definition,
+                  projectedReferences: projected.projectedReferences,
+                  modelingTolerance: document.settings.modelingTolerance,
+                },
+              );
               return {
                 projectedReferences: projected.projectedReferences,
                 validation,
                 solve,
                 regions,
+                offsetDiagnostics,
               };
             })()
           : null;
@@ -5277,10 +5311,14 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
               evaluation.regions.diagnostics,
             )
           : expressionDiagnostics;
-        const derivedValidity = deriveSketchValidity({
+        const sketchValidity = deriveSketchValidity({
           solvedSnapshot,
           diagnostics: derivedDiagnostics,
         });
+        const derivedValidity = withRelationshipScopedDiagnostics(
+          sketchValidity,
+          evaluation?.offsetDiagnostics ?? [],
+        );
         const sketchRecord: SketchRecord = {
           ownerDocumentId: document.documentId,
           ownerRevisionId: document.revisionId,
@@ -5293,7 +5331,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
           definition: structuredClone(sketch.definition),
           solvedSnapshot: {
             ...solvedSnapshot,
-            diagnostics: derivedValidity.diagnostics,
+            diagnostics: sketchValidity.diagnostics,
           },
           derivedValidity,
           projectedReferences: structuredClone(
@@ -5954,6 +5992,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       ReturnType<MockKernelAdapter["projectSketchExternalReferences"]>
     >["projectedReferences"];
     let solvedSnapshot: SolvedSketchSnapshot;
+    let offsetDiagnostics: SketchSolveDiagnostic[] = [];
     let derivedRegions = [] as Awaited<
       ReturnType<SketchSolverAdapter["deriveSketchRegions"]>
     >["regions"];
@@ -5989,35 +6028,46 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
         sketchId,
         plane: referenceFrame,
         tolerances: createDocumentSolverTolerances(snapshot.document.settings),
-        definition: resolvedDefinition.definition,
-        projectedReferences,
-      });
-      const solved = await this.solverAdapter.solveSketch({
-        contractVersion: CONTRACT_VERSION,
-        solverSchemaVersion: SOLVER_SCHEMA_VERSION,
-        requestId: solverCorrelation.solveRequestId,
-        documentId: request.documentId,
-        revisionId: request.baseRevisionId,
-        sketchId,
-        plane: referenceFrame,
-        tolerances: createDocumentSolverTolerances(snapshot.document.settings),
-        partialSolvePolicy: "bestEffort",
-        definition: resolvedDefinition.definition,
-        projectedReferences,
-      });
-      const regions = await this.solverAdapter.deriveSketchRegions({
-        contractVersion: CONTRACT_VERSION,
-        solverSchemaVersion: SOLVER_SCHEMA_VERSION,
-        requestId: solverCorrelation.regionRequestId,
-        documentId: request.documentId,
-        revisionId: request.baseRevisionId,
-        sketchId,
-        solvedSnapshot: solved.solvedSnapshot,
-        definition: resolvedDefinition.definition,
-        projectedReferences,
         modelingTolerance: snapshot.document.settings.modelingTolerance,
+        definition: resolvedDefinition.definition,
+        projectedReferences,
       });
+      const {
+        solved,
+        regions,
+        offsetDiagnostics: solvedOffsetDiagnostics,
+      } = await solveAndDeriveSketchWithOffsets(
+        this.solverAdapter,
+        {
+          contractVersion: CONTRACT_VERSION,
+          solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+          requestId: solverCorrelation.solveRequestId,
+          documentId: request.documentId,
+          revisionId: request.baseRevisionId,
+          sketchId,
+          plane: referenceFrame,
+          tolerances: createDocumentSolverTolerances(
+            snapshot.document.settings,
+          ),
+          modelingTolerance: snapshot.document.settings.modelingTolerance,
+          partialSolvePolicy: "bestEffort",
+          definition: resolvedDefinition.definition,
+          projectedReferences,
+        },
+        {
+          contractVersion: CONTRACT_VERSION,
+          solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+          requestId: solverCorrelation.regionRequestId,
+          documentId: request.documentId,
+          revisionId: request.baseRevisionId,
+          sketchId,
+          definition: resolvedDefinition.definition,
+          projectedReferences,
+          modelingTolerance: snapshot.document.settings.modelingTolerance,
+        },
+      );
       solvedSnapshot = solved.solvedSnapshot;
+      offsetDiagnostics = solvedOffsetDiagnostics;
       derivedRegions = regions.regions;
       sketchDiagnostics = mergeSketchSolveDiagnostics(
         projection.diagnostics,
@@ -6038,14 +6088,19 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       );
     }
 
-    const derivedValidity = deriveSketchValidity({
+    const sketchValidity = deriveSketchValidity({
       solvedSnapshot,
       diagnostics: sketchDiagnostics,
     });
     solvedSnapshot = {
       ...solvedSnapshot,
-      diagnostics: derivedValidity.diagnostics,
+      diagnostics: sketchValidity.diagnostics,
     };
+    // [TECH] G16: relationship-scoped, never in the solved snapshot.
+    const derivedValidity = withRelationshipScopedDiagnostics(
+      sketchValidity,
+      offsetDiagnostics,
+    );
     const commitDiagnostics = derivedValidity.diagnostics.map((diagnostic) =>
       mapSketchSolverDiagnostic(sketchId, diagnostic),
     );

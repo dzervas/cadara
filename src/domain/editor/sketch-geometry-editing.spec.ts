@@ -2,12 +2,14 @@ import { test, expect } from "vitest";
 import { readFileSync } from "node:fs";
 
 import type { SketchDefinition } from "@/contracts/sketch/schema";
+import type { SketchSessionState } from "@/domain/editor/sketch-session";
 import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
 import type { SketchSnapshotRecord } from "@/contracts/modeling/schema";
 import { parseAuthoredModelDocument } from "@/contracts/modeling/authored-document.runtime-schema";
 import {
   beginSketchGeometryDrag,
   beginSketchTool,
+  completeSketchOffsetPreviewPublication,
   createNewSketchSessionFromSupport,
   createSketchSessionFromSnapshot,
   deleteSelectedSketchGeometry,
@@ -41,6 +43,9 @@ import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import { createSketchArrangementDeriver } from "@/contracts/sketch/region-extraction";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { toolDefinitions } from "@/core/tools/tool-registry";
+import { publishSketchOffsets } from "@/contracts/sketch/offset-publication";
+import { createCertifiedNeutralCurveRequestQuery } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
 
 test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
   function assertClosePoint(
@@ -190,7 +195,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     entities: SketchDefinition["entities"];
   }): SketchDefinition {
     return {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: input.pointIds as `sketch_point_${string}`[],
@@ -244,7 +249,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     ];
 
     return {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: [
@@ -336,7 +341,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     ];
 
     return {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: [
@@ -441,7 +446,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
 
   function createAnchoredBranchDragDefinition(): SketchDefinition {
     return {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: ["sketch_point_anchor", "sketch_point_tip"],
@@ -502,6 +507,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
         angleRadians: 1e-6,
         minimumSegmentLength: 1e-6,
       },
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
 
@@ -548,6 +554,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
         angleRadians: 1e-6,
         minimumSegmentLength: 1e-6,
       },
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
 
@@ -2112,6 +2119,44 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     ).toBe(1);
   }
 
+  /**
+   * U-G3: Commit waits for the staged preview's certification. Requests the
+   * commit (nothing is committed while pending), then runs the preview's
+   * real publication (production query + certifier, the same contracts
+   * publish the derivation worker runs) and delivers it, re-authoring once
+   * on `planChanged` exactly as the editor loop does.
+   */
+  function commitCertifiedOffset(session: SketchSessionState) {
+    let next = patchSketchEditToolValue(session, { intent: "commitOffset" });
+    for (let round = 0; round < 2; round += 1) {
+      const publication = next.activeEditTool?.offsetPublication;
+      if (publication?.status !== "pending") break;
+      expect(
+        next.definition.entityIds.length,
+        "U-G3: nothing is committed while the offset check is pending.",
+      ).toBe(session.definition.entityIds.length);
+      expect(
+        publication.commitRequested,
+        "U-G3: the commit request waits for the check.",
+      ).toBeTruthy();
+      const basis = publication.basis!;
+      next = completeSketchOffsetPreviewPublication(
+        next,
+        publication.derivationId,
+        publishSketchOffsets({
+          definition: basis.definition,
+          solvedSnapshot: basis.solvedSnapshot,
+          modelingTolerance: basis.modelingTolerance,
+          capabilities: {
+            query: createCertifiedNeutralCurveRequestQuery(),
+            certifier: createCertifiedCubicTubeChain(),
+          },
+        }),
+      );
+    }
+    return next;
+  }
+
   function testOffsetAddsLineCopyAndRejectsInvalidDistance() {
     let session = createNewSketchSessionFromSupport(
       {
@@ -2156,7 +2201,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     ).toBe("Offset distance must be greater than zero.");
 
     session = patchSketchEditToolValue(session, { value: 1 });
-    session = patchSketchEditToolValue(session, { intent: "commitOffset" });
+    session = commitCertifiedOffset(session);
 
     expect(
       session.definition.entityIds.length,
@@ -2253,9 +2298,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     ).toBe(4);
 
     outerSession = patchSketchEditToolValue(outerSession, { value: 1 });
-    outerSession = patchSketchEditToolValue(outerSession, {
-      intent: "commitOffset",
-    });
+    outerSession = commitCertifiedOffset(outerSession);
 
     const outerLines = outerSession.definition.entities.filter(
       (entity) =>
@@ -2311,9 +2354,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     }
 
     innerSession = patchSketchEditToolValue(innerSession, { value: 0.25 });
-    innerSession = patchSketchEditToolValue(innerSession, {
-      intent: "commitOffset",
-    });
+    innerSession = commitCertifiedOffset(innerSession);
 
     const innerPoints = innerSession.definition.points.filter(
       (point) => !definition.pointIds.includes(point.pointId),
@@ -2416,7 +2457,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     }
 
     session = patchSketchEditToolValue(session, { value: 1 });
-    session = patchSketchEditToolValue(session, { intent: "commitOffset" });
+    session = commitCertifiedOffset(session);
 
     const offsetLines = session.definition.entities.filter(
       (entity) =>
@@ -2507,9 +2548,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       value: "right",
     });
     circleSession = patchSketchEditToolValue(circleSession, { value: 1 });
-    circleSession = patchSketchEditToolValue(circleSession, {
-      intent: "commitOffset",
-    });
+    circleSession = commitCertifiedOffset(circleSession);
     const offsetCircle = circleSession.definition.entities.find(
       (entity) =>
         entity.entityId !== "sketch_entity_circle" && entity.kind === "circle",
@@ -2529,9 +2568,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       entityId: "sketch_entity_arc",
     });
     arcSession = patchSketchEditToolValue(arcSession, { value: 1 });
-    arcSession = patchSketchEditToolValue(arcSession, {
-      intent: "commitOffset",
-    });
+    arcSession = commitCertifiedOffset(arcSession);
     expect(
       arcSession.definition.entities.some(
         (entity) =>
@@ -2550,17 +2587,29 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       entityId: "sketch_entity_spline",
     });
     splineSession = patchSketchEditToolValue(splineSession, { value: 1 });
-    splineSession = patchSketchEditToolValue(splineSession, {
-      intent: "commitOffset",
-    });
+    splineSession = commitCertifiedOffset(splineSession);
+    // T08b-g5: a spline seed's offset is one derived piecewise-cubic shell
+    // with one output span per source span (no fit-point spline copy).
+    const splineRelationship =
+      splineSession.definition.derivedRelationships?.find(
+        (relationship) => relationship.kind === "offset",
+      );
     expect(
       splineSession.definition.entities.some(
         (entity) =>
-          entity.entityId !== "sketch_entity_spline" &&
-          entity.kind === "spline",
+          entity.kind === "derivedPiecewiseCubic" &&
+          entity.derivationId === splineRelationship?.derivationId,
       ),
-      "Spline offset should add a copied spline entity.",
+      "Spline offset should add a derived offset shell owned by its relationship.",
     ).toBeTruthy();
+    expect(
+      splineRelationship?.kind === "offset"
+        ? splineRelationship.piecewiseCubicOutputs.map((output) =>
+            output.spans.map((span) => span.outputSpanId),
+          )
+        : null,
+      "Spline offset should key the shell's output spans by the seed's source spans.",
+    ).toEqual([["occ-0>occ-1", "occ-1>occ-2"]]);
   }
 
   function testOffsetAddsProjectedCircleAndSplineCopies() {
@@ -2951,6 +3000,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
         angleRadians: 1e-6,
         minimumSegmentLength: 1e-6,
       },
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
     const updatedDerivedPoint = solvedEdited.solvedSnapshot.solvedPoints.find(
@@ -3050,6 +3100,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
         angleRadians: 1e-6,
         minimumSegmentLength: 1e-6,
       },
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
     const regions = await regionDeriver.derive({
@@ -3237,6 +3288,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
         angleRadians: 1e-6,
         minimumSegmentLength: 1e-6,
       },
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "failOnConflict",
     });
     expect(freshSolved.status.solveState).toBe("solved");
@@ -3318,6 +3370,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
         angleRadians: 1e-6,
         minimumSegmentLength: 1e-6,
       },
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
     let session = createSketchSessionFromSnapshot(

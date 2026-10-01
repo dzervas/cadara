@@ -4,7 +4,10 @@ import type {
   SketchPointDefinition,
   SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
-import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
+import {
+  evaluateSketchDerivations,
+  type SketchDerivationSettings,
+} from "@/contracts/sketch/derived-geometry";
 import { orderedSplineOccurrences } from "@/contracts/sketch/spline-geometry";
 import { projectedSplineDisplayPoints } from "@/contracts/solver/schema";
 import type { SketchToolAnchorDescriptor } from "@/core/sketch-tools/editor-schema";
@@ -27,6 +30,7 @@ export function addAnchorOffset(
 export function applyPointPositionsToDefinition(
   definition: SketchDefinition,
   positions: readonly Pick<SketchPointDefinition, "pointId" | "position">[],
+  derivation: SketchDerivationSettings,
 ): SketchDefinition {
   const positionMap = new Map(
     positions.map((point) => [point.pointId, point.position]),
@@ -44,12 +48,16 @@ export function applyPointPositionsToDefinition(
     }),
   };
 
-  return evaluateSketchDerivations(nextDefinition).definition;
+  return evaluateSketchDerivations({
+    definition: nextDefinition,
+    ...derivation,
+  }).definition;
 }
 
 export function applySolvedSketchToDefinition(
   definition: SketchDefinition,
   solvedSnapshot: SolvedSketchSnapshot,
+  derivation: SketchDerivationSettings,
 ): SketchDefinition {
   const solvedPointPositions = new Map(
     solvedSnapshot.solvedPoints.map((point) => [
@@ -97,7 +105,10 @@ export function applySolvedSketchToDefinition(
     }),
   };
 
-  return evaluateSketchDerivations(acceptedDefinition).definition;
+  return evaluateSketchDerivations({
+    definition: acceptedDefinition,
+    ...derivation,
+  }).definition;
 }
 
 export function getSketchDatumGuideExtent(

@@ -29,7 +29,7 @@ const neutralCurveQueries = createCertifiedNeutralCurveQueryCapabilityForTest();
 
 test("src/contracts/solver/solver-contract.spec.ts", async () => {
   const sketchDefinition: SketchDefinition = {
-    schemaVersion: "sketch-definition/v1alpha1",
+    schemaVersion: "sketch-definition/v1alpha2",
     referenceIds: ["ref_model_edge_1"],
     references: [
       {
@@ -201,6 +201,7 @@ test("src/contracts/solver/solver-contract.spec.ts", async () => {
       sketchId: "sketch_primary",
       plane: DEFAULT_MOCK_SKETCH_PLANE_FRAME,
       tolerances: DEFAULT_MOCK_SOLVER_TOLERANCES,
+      modelingTolerance: 1e-3,
       definition: sketchDefinition,
       projectedReferences: [],
     };
@@ -220,6 +221,7 @@ test("src/contracts/solver/solver-contract.spec.ts", async () => {
       sketchId: "sketch_primary",
       plane: DEFAULT_MOCK_SKETCH_PLANE_FRAME,
       tolerances: DEFAULT_MOCK_SOLVER_TOLERANCES,
+      modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
       definition: sketchDefinition,
       projectedReferences,

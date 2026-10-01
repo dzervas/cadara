@@ -5,7 +5,7 @@ import type { SketchDefinition } from "@/contracts/sketch/schema";
 
 test("src/contracts/sketch/derivation-runtime-schema.spec.ts", () => {
   const baseDefinition: SketchDefinition = {
-    schemaVersion: "sketch-definition/v1alpha1",
+    schemaVersion: "sketch-definition/v1alpha2",
     referenceIds: [],
     references: [],
     pointIds: ["sketch_point_a", "sketch_point_b", "sketch_point_oa", "sketch_point_ob"],
@@ -63,6 +63,7 @@ test("src/contracts/sketch/derivation-runtime-schema.spec.ts", () => {
           seedEntityIds: ["sketch_entity_seed"],
           distance,
           jointPolicy: "trimExtendArcFallback",
+          piecewiseCubicOutputs: [],
           jointOutputs: [],
           outputs: [
             {

@@ -59,7 +59,7 @@ function commitEntry(): Extract<
         },
       },
       definition: {
-        schemaVersion: "sketch-definition/v1alpha1",
+        schemaVersion: "sketch-definition/v1alpha2",
         referenceIds: ["reference_recorded"],
         references: [
           {

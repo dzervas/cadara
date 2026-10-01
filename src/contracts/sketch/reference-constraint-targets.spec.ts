@@ -19,7 +19,7 @@ test("src/contracts/sketch/reference-constraint-targets.spec.ts", async () => {
     constraint: SketchDefinition["constraints"][number],
   ): SketchDefinition {
     return {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: ["ref_edge"],
       references: [
         {
@@ -145,6 +145,7 @@ test("src/contracts/sketch/reference-constraint-targets.spec.ts", async () => {
     definition: pointOnProjectedLine,
     projectedReferences: [projectedLine],
     tolerances,
+    modelingTolerance: 1e-3,
     partialSolvePolicy: "bestEffort",
   });
   const solvedPoint = solved.solvedSnapshot.solvedPoints.find(
@@ -167,6 +168,7 @@ test("src/contracts/sketch/reference-constraint-targets.spec.ts", async () => {
     definition: pointOnProjectedLine,
     projectedReferences: [],
     tolerances,
+    modelingTolerance: 1e-3,
   });
   expect(
     invalid.isValid,
@@ -223,6 +225,7 @@ test("src/contracts/sketch/reference-constraint-targets.spec.ts", async () => {
     definition: pointOnProjectedArc,
     projectedReferences: [projectedArc],
     tolerances,
+    modelingTolerance: 1e-3,
     partialSolvePolicy: "bestEffort",
   });
   const arcPoint = solvedArcPoint.solvedSnapshot.solvedPoints.find(
@@ -261,6 +264,7 @@ test("src/contracts/sketch/reference-constraint-targets.spec.ts", async () => {
     }),
     projectedReferences: [projectedLine],
     tolerances,
+    modelingTolerance: 1e-3,
     partialSolvePolicy: "bestEffort",
   });
   const solvedLine = perpendicular.solvedSnapshot.solvedEntities.find(
@@ -325,6 +329,7 @@ test("src/contracts/sketch/reference-constraint-targets.spec.ts", async () => {
     definition: normalProjectedCircle,
     projectedReferences: [projectedCircle],
     tolerances,
+    modelingTolerance: 1e-3,
     partialSolvePolicy: "bestEffort",
   });
   expect(
@@ -381,6 +386,7 @@ test("src/contracts/sketch/reference-constraint-targets.spec.ts", async () => {
     definition: symmetricProjectedLine,
     projectedReferences: [projectedLine],
     tolerances,
+    modelingTolerance: 1e-3,
     partialSolvePolicy: "bestEffort",
   });
   expect(
@@ -468,6 +474,7 @@ test("src/contracts/sketch/reference-constraint-targets.spec.ts", async () => {
     },
     projectedReferences: [projectedArc],
     tolerances,
+    modelingTolerance: 1e-3,
     partialSolvePolicy: "bestEffort",
   });
   const tangentStatus =
@@ -490,6 +497,7 @@ test("src/contracts/sketch/reference-constraint-targets.spec.ts", async () => {
     }),
     projectedReferences: [],
     tolerances,
+    modelingTolerance: 1e-3,
     partialSolvePolicy: "bestEffort",
   });
   const datumCoincidentPoint = datumCoincident.solvedSnapshot.solvedPoints.find(
@@ -514,6 +522,7 @@ test("src/contracts/sketch/reference-constraint-targets.spec.ts", async () => {
     }),
     projectedReferences: [],
     tolerances,
+    modelingTolerance: 1e-3,
     partialSolvePolicy: "bestEffort",
   });
   const datumParallelLine = datumParallel.solvedSnapshot.solvedEntities.find(
@@ -553,6 +562,7 @@ test("src/contracts/sketch/reference-constraint-targets.spec.ts", async () => {
     definition: datumPointDistanceDefinition,
     projectedReferences: [],
     tolerances,
+    modelingTolerance: 1e-3,
     partialSolvePolicy: "bestEffort",
   });
   const datumPointDistanceStatus =

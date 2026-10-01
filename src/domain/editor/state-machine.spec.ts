@@ -165,7 +165,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
             label: "Sketch A",
             planeSupport: plane.support,
             definition: {
-              schemaVersion: "sketch-definition/v1alpha1",
+              schemaVersion: "sketch-definition/v1alpha2",
               referenceIds: [],
               references: [],
               pointIds: [],
@@ -178,7 +178,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
               dimensions: [],
             },
             solvedSnapshot: {
-              schemaVersion: "solved-sketch/v1alpha1",
+              schemaVersion: "solved-sketch/v1alpha2",
               status: {
                 solveState: "solved",
                 constraintState: "underConstrained",
@@ -218,7 +218,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
               label: "Sketch A",
               planeSupport: plane.support,
               definition: {
-                schemaVersion: "sketch-definition/v1alpha1",
+                schemaVersion: "sketch-definition/v1alpha2",
                 referenceIds: [],
                 references: [],
                 pointIds: [],
@@ -231,7 +231,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
                 dimensions: [],
               },
               solvedSnapshot: {
-                schemaVersion: "solved-sketch/v1alpha1",
+                schemaVersion: "solved-sketch/v1alpha2",
                 status: {
                   solveState: "solved",
                   constraintState: "underConstrained",
@@ -1435,7 +1435,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
           label: "Sketch YZ",
           planeSupport: yzPlane.support,
           definition: {
-            schemaVersion: "sketch-definition/v1alpha1",
+            schemaVersion: "sketch-definition/v1alpha2",
             referenceIds: [],
             references: [],
             pointIds: [],
@@ -1448,7 +1448,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
             dimensions: [],
           },
           solvedSnapshot: {
-            schemaVersion: "solved-sketch/v1alpha1",
+            schemaVersion: "solved-sketch/v1alpha2",
             status: {
               solveState: "solved",
               constraintState: "underConstrained",
@@ -1517,7 +1517,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
         label: "Sketch YZ",
         planeSupport: yzPlane.support,
         definition: {
-          schemaVersion: "sketch-definition/v1alpha1",
+          schemaVersion: "sketch-definition/v1alpha2",
           referenceIds: [],
           references: [],
           pointIds: [],
@@ -1530,7 +1530,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
           dimensions: [],
         },
         solvedSnapshot: {
-          schemaVersion: "solved-sketch/v1alpha1",
+          schemaVersion: "solved-sketch/v1alpha2",
           status: {
             solveState: "solved",
             constraintState: "underConstrained",
@@ -4645,7 +4645,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const entityAB = "sketch_entity_ab" as SketchEntityId;
     const entityBC = "sketch_entity_bc" as SketchEntityId;
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: [pointA, pointB, pointC],

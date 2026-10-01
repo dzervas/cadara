@@ -238,3 +238,99 @@ test("worker failures reach the caller unchanged and the next request gets a fre
   await again;
   expect(cloneFailing.workers[0]!.terminated).toBe(true);
 });
+
+test("T08b-g5 respawn guard: a young derivation is given the minimum age before a newer request supersedes it, and only one request waits", async () => {
+  const workers: FakeDerivationWorker[] = [];
+  let clock = 0;
+  const timers: { at: number; run: () => void; cancelled: boolean }[] = [];
+  const pool = new SketchRegionDerivationWorkerPool({
+    createWorker: () => {
+      const worker = new FakeDerivationWorker();
+      workers.push(worker);
+      return worker;
+    },
+    minimumSupersedeAgeMs: 250,
+    now: () => clock,
+    schedule: (run, delayMs) => {
+      const timer = { at: clock + delayMs, run, cancelled: false };
+      timers.push(timer);
+      return () => {
+        timer.cancelled = true;
+      };
+    },
+  });
+  const advance = (ms: number) => {
+    clock += ms;
+    for (const timer of timers.filter((item) => item.at <= clock))
+      if (!timer.cancelled) {
+        timer.cancelled = true;
+        timer.run();
+      }
+  };
+
+  const first = makeRequest("request_young_1");
+  const firstDone = pool.deriveSketchRegions(first);
+  advance(100);
+  const second = pool.deriveSketchRegions(makeRequest("request_young_2"));
+  expect(
+    workers[0]!.terminated,
+    "A derivation younger than the guard is not terminated.",
+  ).toBe(false);
+  const third = makeRequest("request_young_3");
+  const thirdDone = pool.deriveSketchRegions(third);
+  await expect(
+    second,
+    "A newer waiting request supersedes the waiting one, so at most one waits.",
+  ).rejects.toBeInstanceOf(SketchRegionDerivationSupersededError);
+
+  advance(150);
+  expect(
+    workers[0]!.terminated,
+    "At the guard age the running derivation is superseded.",
+  ).toBe(true);
+  await expect(firstDone).rejects.toBeInstanceOf(
+    SketchRegionDerivationSupersededError,
+  );
+  expect(workers).toHaveLength(2);
+  workers[1]!.respond(responseFor(third));
+  await expect(thirdDone).resolves.toMatchObject({
+    requestId: third.requestId,
+  });
+
+  // A young derivation that finishes first releases the waiting request on
+  // the same warm worker: no respawn.
+  const fourth = makeRequest("request_young_4");
+  const fourthDone = pool.deriveSketchRegions(fourth);
+  const fifth = makeRequest("request_young_5");
+  const fifthDone = pool.deriveSketchRegions(fifth);
+  workers[1]!.respond(responseFor(fourth), 1);
+  await fourthDone;
+  await Promise.resolve();
+  expect(
+    workers,
+    "No respawn when the young derivation finishes.",
+  ).toHaveLength(2);
+  workers[1]!.respond(responseFor(fifth), 2);
+  await expect(fifthDone).resolves.toMatchObject({
+    requestId: fifth.requestId,
+  });
+});
+
+test("T08b-g5 U-G3: an offset preview publication runs in its own lane and never supersedes the live derivation", async () => {
+  const { pool, workers } = makePool();
+  const live = makeRequest("request_sketch-region-derivation-1");
+  const liveDone = pool.deriveSketchRegions(live);
+  const preview = makeRequest("request_sketch-offset-preview-publication-2");
+  const previewDone = pool.deriveSketchRegions(preview);
+  expect(workers).toHaveLength(2);
+  expect(
+    workers[0]!.terminated,
+    "The preview check must not terminate the live derivation.",
+  ).toBe(false);
+  workers[1]!.respond(responseFor(preview));
+  workers[0]!.respond(responseFor(live));
+  await expect(previewDone).resolves.toMatchObject({
+    requestId: preview.requestId,
+  });
+  await expect(liveDone).resolves.toMatchObject({ requestId: live.requestId });
+});

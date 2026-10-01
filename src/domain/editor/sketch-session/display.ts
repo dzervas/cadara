@@ -58,6 +58,7 @@ import {
   getSketchSessionSolvedSnapshot,
   mapDefinitionEntityToDraftEntity,
   resolveSketchDefinitionForSolve,
+  getSketchSessionDerivationSettings,
 } from "./internals";
 import { mapSketchPointToWorld } from "./state";
 import {
@@ -144,6 +145,7 @@ export function getStableSketchSessionDisplayRenderables(
         ),
         projectedReferences: displayProjectedReferences,
         tolerances: session.solverTolerances,
+        ...getSketchSessionDerivationSettings(session),
         partialSolvePolicy: "bestEffort",
       });
   const constraintDisplaySummary = getSketchConstraintDisplaySummary({

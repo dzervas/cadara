@@ -83,6 +83,7 @@ import type {
   SketchRecord,
   SketchStyleDefinition,
   SketchStyleRecord,
+  SolvedSketchDerivedCubicSpan,
   SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
 import type {
@@ -2268,10 +2269,32 @@ export function normalizePoint2D(
   return value as unknown as SketchPoint2D;
 }
 
+/**
+ * T08b-g5 (spec "No backward compatibility"): v1alpha1 sketch payloads,
+ * including their fit-point/refit offset outputs, are rejected explicitly;
+ * there is no migration.
+ */
+function rejectRetiredSketchSchemaVersion(
+  value: Record<string, unknown>,
+  retired: "sketch-definition/v1alpha1" | "solved-sketch/v1alpha1",
+  current: string,
+) {
+  if (value.schemaVersion === retired)
+    throw new Error(
+      `Unsupported sketch payload version ${retired}: this document predates certified offset outputs (${current}) and cannot be opened; there is no migration.`,
+    );
+}
+
 export function normalizeSketchDefinition(value: unknown): SketchDefinition {
+  if (isRecord(value))
+    rejectRetiredSketchSchemaVersion(
+      value,
+      "sketch-definition/v1alpha1",
+      "sketch-definition/v1alpha2",
+    );
   if (
     !isRecord(value) ||
-    value.schemaVersion !== "sketch-definition/v1alpha1" ||
+    value.schemaVersion !== "sketch-definition/v1alpha2" ||
     !Array.isArray(value.referenceIds) ||
     !Array.isArray(value.references) ||
     !Array.isArray(value.pointIds) ||
@@ -2630,7 +2653,8 @@ export function normalizeSketchDerivationDefinition(
   if (value.kind === "offset") {
     if (
       value.jointPolicy !== "trimExtendArcFallback" ||
-      !Array.isArray(value.jointOutputs)
+      !Array.isArray(value.jointOutputs) ||
+      !Array.isArray(value.piecewiseCubicOutputs)
     ) {
       throw new Error("Invalid sketch offset derivation payload.");
     }
@@ -2660,6 +2684,39 @@ export function normalizeSketchDerivationDefinition(
           centerPointId: assertSketchPointId(joint.centerPointId),
           startPointId: assertSketchPointId(joint.startPointId),
           endPointId: assertSketchPointId(joint.endPointId),
+        };
+      }),
+      piecewiseCubicOutputs: value.piecewiseCubicOutputs.map((output) => {
+        if (
+          !isRecord(output) ||
+          !isString(output.seedEntityId) ||
+          !isString(output.outputEntityId) ||
+          !isString(output.startPointId) ||
+          !isString(output.endPointId) ||
+          !Array.isArray(output.spans)
+        ) {
+          throw new Error("Invalid sketch offset shell output payload.");
+        }
+        return {
+          seedEntityId: assertSketchEntityId(output.seedEntityId),
+          outputEntityId: assertSketchEntityId(output.outputEntityId),
+          startPointId: assertSketchPointId(output.startPointId),
+          endPointId: assertSketchPointId(output.endPointId),
+          spans: output.spans.map((span) => {
+            if (
+              !isRecord(span) ||
+              !isString(span.outputSpanId) ||
+              !isString(span.sourceStartOccurrenceId) ||
+              !isString(span.sourceEndOccurrenceId)
+            ) {
+              throw new Error("Invalid sketch offset shell span payload.");
+            }
+            return {
+              outputSpanId: span.outputSpanId,
+              sourceStartOccurrenceId: span.sourceStartOccurrenceId,
+              sourceEndOccurrenceId: span.sourceEndOccurrenceId,
+            };
+          }),
         };
       }),
     };
@@ -2782,7 +2839,7 @@ function requireStrictSplineEntityDefinition(
       )
     : [];
   requireSketchDefinition({
-    schemaVersion: "sketch-definition/v1alpha1",
+    schemaVersion: "sketch-definition/v1alpha2",
     referenceIds: [],
     references: [],
     pointIds,
@@ -2967,6 +3024,27 @@ export function normalizeSketchEntityDefinition(
       pointOccurrences,
       closure: value.closure,
       interpolationPolicy: value.interpolationPolicy,
+      style: normalizeSketchStyleDefinition(value.style),
+    };
+  }
+
+  if (value.kind === "derivedPiecewiseCubic") {
+    if (
+      !isRecord(value.target) ||
+      typeof value.isConstruction !== "boolean" ||
+      !isString(value.derivationId)
+    ) {
+      throw new Error("Invalid derived offset shell definition payload.");
+    }
+    return {
+      kind: "derivedPiecewiseCubic",
+      entityId: assertSketchEntityId(value.entityId),
+      label: value.label,
+      target: assertPrimitiveRef(
+        value.target,
+      ) as SketchEntityDefinition["target"],
+      isConstruction: value.isConstruction,
+      derivationId: value.derivationId,
       style: normalizeSketchStyleDefinition(value.style),
     };
   }
@@ -3173,9 +3251,15 @@ export function normalizeDimensionDefinition(
 export function normalizeSolvedSketchSnapshot(
   value: unknown,
 ): SolvedSketchSnapshot {
+  if (isRecord(value))
+    rejectRetiredSketchSchemaVersion(
+      value,
+      "solved-sketch/v1alpha1",
+      "solved-sketch/v1alpha2",
+    );
   if (
     !isRecord(value) ||
-    value.schemaVersion !== "solved-sketch/v1alpha1" ||
+    value.schemaVersion !== "solved-sketch/v1alpha2" ||
     !isRecord(value.status) ||
     !isString(value.status.solveState) ||
     !isString(value.status.constraintState) ||
@@ -3246,7 +3330,74 @@ export function normalizeSolvedSketchSnapshot(
     diagnostics: value.diagnostics.map((diagnostic) =>
       normalizeSketchSolveDiagnostic(diagnostic),
     ),
+    ...(value.offsetFramePlans === undefined
+      ? {}
+      : {
+          offsetFramePlans: normalizeSolvedOffsetFramePlans(
+            value.offsetFramePlans,
+          ),
+        }),
   };
+}
+
+function normalizeNumberPair(value: unknown, message: string) {
+  if (
+    !Array.isArray(value) ||
+    value.length !== 2 ||
+    value.some((component) => typeof component !== "number")
+  )
+    throw new Error(message);
+  return [value[0] as number, value[1] as number] as [number, number];
+}
+
+/** [TECH] G17: solved revision data; shape only (the solved runtime schema checks references). */
+function normalizeSolvedOffsetFramePlans(
+  value: unknown,
+): NonNullable<SolvedSketchSnapshot["offsetFramePlans"]> {
+  const message = "Invalid solved offset frame plan payload.";
+  if (!Array.isArray(value)) throw new Error(message);
+  return value.map((record) => {
+    if (
+      !isRecord(record) ||
+      !isString(record.derivationId) ||
+      !isRecord(record.plan) ||
+      (record.plan.origin !== "firstChoice" &&
+        record.plan.origin !== "published" &&
+        record.plan.origin !== "certified") ||
+      !Array.isArray(record.plan.adjacencies)
+    )
+      throw new Error(message);
+    return {
+      derivationId: record.derivationId,
+      plan: {
+        origin: record.plan.origin,
+        adjacencies: record.plan.adjacencies.map((entry) => {
+          if (!isRecord(entry)) throw new Error(message);
+          if (entry.kind === "arc") return { kind: "arc" as const };
+          if (entry.kind === "parallel" || entry.kind === "absorbed") {
+            if (entry.keeper !== "first" && entry.keeper !== "second")
+              throw new Error(message);
+            return { kind: entry.kind, keeper: entry.keeper };
+          }
+          if (entry.kind !== "trim") throw new Error(message);
+          return {
+            kind: "trim" as const,
+            ...(entry.leaves === undefined
+              ? {}
+              : { leaves: normalizeNumberPair(entry.leaves, message) }),
+            ...(entry.representatives === undefined
+              ? {}
+              : {
+                  representatives: normalizeNumberPair(
+                    entry.representatives,
+                    message,
+                  ),
+                }),
+          };
+        }),
+      },
+    };
+  });
 }
 
 export function normalizeSolvedSketchEntityGeometry(
@@ -3334,6 +3485,46 @@ export function normalizeSolvedSketchEntityGeometry(
       startPosition: value.startPosition as unknown as [number, number],
       endPosition: value.endPosition as unknown as [number, number],
       sweepDirection: value.sweepDirection,
+    };
+  }
+
+  if (value.kind === "derivedPiecewiseCubic") {
+    const message = "Invalid solved derived offset shell payload.";
+    if (
+      (value.publication !== "provisional" &&
+        value.publication !== "certified") ||
+      !Array.isArray(value.spans)
+    )
+      throw new Error(message);
+    return {
+      entityId: assertSketchEntityId(value.entityId),
+      kind: "derivedPiecewiseCubic",
+      publication: value.publication,
+      spans: value.spans.map((span) => {
+        if (
+          !isRecord(span) ||
+          !isString(span.outputSpanId) ||
+          typeof span.subIndex !== "number" ||
+          typeof span.certifiedError !== "number" ||
+          !Array.isArray(span.poles) ||
+          span.poles.length !== 4
+        )
+          throw new Error(message);
+        return {
+          outputSpanId: span.outputSpanId,
+          subIndex: span.subIndex,
+          sourceLocalInterval: normalizeNumberPair(
+            span.sourceLocalInterval,
+            message,
+          ),
+          sourceDomain: normalizeNumberPair(span.sourceDomain, message),
+          queryDomain: normalizeNumberPair(span.queryDomain, message),
+          poles: span.poles.map((pole) =>
+            normalizeNumberPair(pole, message),
+          ) as unknown as SolvedSketchDerivedCubicSpan["poles"],
+          certifiedError: span.certifiedError,
+        };
+      }),
     };
   }
 

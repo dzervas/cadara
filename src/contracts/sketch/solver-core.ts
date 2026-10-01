@@ -12,6 +12,8 @@ import type {
   SketchPointConstraintOperand,
   SketchPoint2D,
   SketchSolveDiagnostic,
+  SolvedOffsetFramePlanRecord,
+  SolvedSketchDerivedCubicSpan,
   SolvedSketchEntityGeometryRecord,
   SolvedSketchSnapshot,
   SolvedSketchStatus,
@@ -19,10 +21,16 @@ import type {
 import { SOLVED_SKETCH_SCHEMA_VERSION } from "@/contracts/sketch/schema";
 import {
   evaluateSketchDerivations,
+  offsetRecordDerivatives,
   prepareSketchDerivationPullback,
+  solvedOffsetFramePlans,
+  solvedOffsetShellSpans,
+  type SketchDerivationEvaluationResult,
   type SketchDerivationVariation,
   type SketchDerivedEntityVariation,
 } from "@/contracts/sketch/derived-geometry";
+import { offsetFrameCurveResidual } from "@/contracts/sketch/offset-derivation-frame";
+import { canonicalArcSupport } from "@/contracts/sketch/canonical-arc-support";
 import {
   closestSplineSpanLocation,
   evaluateSplineSpan,
@@ -129,6 +137,13 @@ type ScalarConstraintRecord = {
   id: ConstraintId | DimensionId;
   targetKind: "constraint" | "dimension";
   evaluate(values: Float64Array): ScalarConstraintEvaluation;
+  /**
+   * The variables of an internal record (no authored constraint or
+   * dimension to derive them from structurally). Without it the record is
+   * projected on every evaluation and its support is found by perturbation,
+   * one full derivation evaluation per variable.
+   */
+  structuralVariableIndices?: readonly number[];
 };
 
 type ConstraintEvaluationRecord = {
@@ -147,6 +162,10 @@ type SolverPointRecord = {
 type SolverParameterProjection = {
   projectValues(values: Float64Array): Float64Array;
   projectionDiagnostics(values: Float64Array): readonly SketchSolveDiagnostic[];
+  /** The derivation evaluation of one iterate (null without derived relationships). */
+  derivationEvaluation(
+    values: Float64Array,
+  ): SketchDerivationEvaluationResult | null;
   projectVariableIndices(variableIndices: readonly number[]): number[];
   authorityVariableIndices: readonly number[];
   wrapConstraint(
@@ -163,12 +182,18 @@ type BuildSystemResult = {
   splineTangentStates: Map<string, SplineTangentState>;
   parameterProjection: SolverParameterProjection;
   scalarConstraints: ScalarConstraintRecord[];
+  /** Per derived shell: the variables of its owning offset's seeds (its curve's support). */
+  shellSourceVariables: ReadonlyMap<SketchEntityId, readonly number[]>;
 };
 
 interface BuildSystemOptions {
   dragTarget?: SketchDraggedPointTarget | null;
   projectedReferences?: readonly ProjectedSketchReferenceRecord[];
   tolerances: SketchSolveTolerancePolicy;
+  /** The document's settings.modelingTolerance ([TECH] G12): offset solve frames need τ. */
+  modelingTolerance: number;
+  /** [TECH] G3/G17 offset plan hints, passed to every solve frame unchanged. */
+  offsetPlans?: readonly SolvedOffsetFramePlanRecord[];
 }
 
 export interface SketchCompiledSolveComponent {
@@ -193,6 +218,10 @@ export interface SketchCompiledSolveProgram {
   definition: SketchDefinition;
   projectedReferences: readonly ProjectedSketchReferenceRecord[];
   tolerances: SketchSolveTolerancePolicy;
+  /** The document's settings.modelingTolerance ([TECH] G12). */
+  modelingTolerance: number;
+  /** The offset plan hints this program's solve frames run ([TECH] G3/G17). */
+  offsetPlans: readonly SolvedOffsetFramePlanRecord[] | undefined;
   partialSolvePolicy: SolverPartialSolvePolicy;
   strategy: SketchSolveStrategy;
   diagnostics: readonly SketchSolveDiagnostic[];
@@ -835,6 +864,8 @@ function createDerivedParameterProjection(input: {
   pointRecords: Map<SketchPointId, SolverPointRecord>;
   entityStates: Map<SketchEntityId, SolverEntityState>;
   splineTangentStates: Map<string, SplineTangentState>;
+  modelingTolerance: number;
+  offsetPlans: readonly SolvedOffsetFramePlanRecord[] | undefined;
 }): SolverParameterProjection {
   const {
     definition,
@@ -842,11 +873,14 @@ function createDerivedParameterProjection(input: {
     pointRecords,
     entityStates,
     splineTangentStates,
+    modelingTolerance,
+    offsetPlans,
   } = input;
   if ((definition.derivedRelationships?.length ?? 0) === 0) {
     return {
       projectValues: cloneValues,
       projectionDiagnostics: () => [],
+      derivationEvaluation: () => null,
       projectVariableIndices: (variableIndices) =>
         uniqueSortedIndices(variableIndices),
       authorityVariableIndices: Array.from(
@@ -875,6 +909,15 @@ function createDerivedParameterProjection(input: {
   };
   const derivedEntitySeedIndices = (entityId: SketchEntityId) =>
     entityById.get(entityId)?.kind === "circle" ? entityIndices(entityId) : [];
+  const splineTangentIndices = (entity: SketchEntityDefinition) =>
+    entity.kind === "spline"
+      ? (orderedSplineOccurrences(entity) ?? []).flatMap((occurrence) => {
+          const state = splineTangentStates.get(
+            splineTangentStateKey(entity.entityId, occurrence.occurrenceId),
+          );
+          return state ? [state.baseIndex, state.baseIndex + 1] : [];
+        })
+      : [];
   const mirrorAxisIndices = (relationship: SketchDerivationDefinition) => {
     if (relationship.kind !== "mirror") return [];
     const axis = entityById.get(relationship.mirrorReference.entityId);
@@ -906,6 +949,9 @@ function createDerivedParameterProjection(input: {
               ? [
                   ...getEntityPoints(entity).flatMap(pointIndices),
                   ...derivedEntitySeedIndices(entityId),
+                  // T08b-g5: the frame JVP moves offsets with the seed's
+                  // authored tangents too (the legacy omission).
+                  ...splineTangentIndices(entity),
                 ]
               : [];
           })
@@ -954,13 +1000,24 @@ function createDerivedParameterProjection(input: {
         if (!outputState) return;
         setDrivenDependencies(
           [outputState.baseIndex, outputState.baseIndex + 1],
-          relationship.kind === "offset" || !seedState
+          !seedState
             ? []
             : [seedState.baseIndex, seedState.baseIndex + 1, ...axisIndices],
         );
       });
     }
     if (relationship.kind === "offset") {
+      // A derived shell allocates no variables: only its driven terminal
+      // points are solver state (D2).
+      relationship.piecewiseCubicOutputs.forEach((output) =>
+        setDrivenDependencies(
+          [
+            ...pointIndices(output.startPointId),
+            ...pointIndices(output.endPointId),
+          ],
+          offsetSeedIndices,
+        ),
+      );
       relationship.jointOutputs.forEach((output) =>
         setDrivenDependencies(
           [
@@ -1052,6 +1109,7 @@ function createDerivedParameterProjection(input: {
     typeof prepareSketchDerivationPullback
   > | null = null;
   let cachedDiagnostics: readonly SketchSolveDiagnostic[] = [];
+  let cachedEvaluation: SketchDerivationEvaluationResult | null = null;
   const project = (
     values: Float64Array,
     validationIndices?: readonly number[],
@@ -1070,6 +1128,7 @@ function createDerivedParameterProjection(input: {
         values: cachedValues,
         pullback: cachedPullback,
         diagnostics: cachedDiagnostics,
+        evaluation: cachedEvaluation!,
       };
     }
 
@@ -1110,7 +1169,12 @@ function createDerivedParameterProjection(input: {
         };
       }),
     };
-    const derivationEvaluation = evaluateSketchDerivations(solverDefinition);
+    const derivationEvaluation = evaluateSketchDerivations({
+      definition: solverDefinition,
+      modelingTolerance,
+      offsetPlans,
+      withDerivatives: true,
+    });
     const evaluated = derivationEvaluation.definition;
     const projected = cloneValues(values);
     for (const { record, definitionIndex } of drivenPointRecords) {
@@ -1135,7 +1199,13 @@ function createDerivedParameterProjection(input: {
         if (center && start && end) {
           const startOffset = subtract(start, center);
           const endOffset = subtract(end, center);
-          projected[state.baseIndex] = length(startOffset);
+          // R-g3: the one point-defined arc support formula.
+          projected[state.baseIndex] = canonicalArcSupport(
+            center,
+            start,
+            end,
+            entity.sweepDirection,
+          ).radius;
           projected[state.baseIndex + 1] = Math.atan2(
             startOffset[1],
             startOffset[0],
@@ -1156,21 +1226,24 @@ function createDerivedParameterProjection(input: {
       projected[state.baseIndex + 1] = occurrence.tangent.vector[1];
     }
 
-    const pullback = prepareSketchDerivationPullback(evaluated);
+    const pullback = prepareSketchDerivationPullback(derivationEvaluation);
     cachedInput = cloneValues(values);
     cachedValues = projected;
     cachedPullback = pullback;
     cachedDiagnostics = derivationEvaluation.diagnostics;
+    cachedEvaluation = derivationEvaluation;
     return {
       values: projected,
       pullback,
       diagnostics: cachedDiagnostics,
+      evaluation: derivationEvaluation,
     };
   };
 
   return {
     projectValues: (values) => cloneValues(project(values).values),
     projectionDiagnostics: (values) => [...project(values).diagnostics],
+    derivationEvaluation: (values) => project(values).evaluation,
     projectVariableIndices,
     authorityVariableIndices,
     wrapConstraint: (constraint, variableIndices) => {
@@ -1331,6 +1404,10 @@ function createDerivedParameterProjection(input: {
             splineTangents: tangentCotangent,
           };
           const pulled = projected.pullback(cotangent);
+          // Review A4: a singular offset derivative is never zero motion;
+          // like the shell residual, the requirement is unbounded here.
+          if (pulled.derivativeUnavailable)
+            return { residual: Number.POSITIVE_INFINITY, gradient };
           for (const [pointId, value] of Object.entries(pulled.points ?? {})) {
             const record = pointRecords.get(pointId as SketchPointId);
             if (!record || !value) continue;
@@ -1878,6 +1955,78 @@ function buildSystem(
     };
   };
 
+  /**
+   * T08b-g5 (U-G2): point-on-curve on a derived shell, the frame's
+   * `offsetFrameCurveResidual` r = P − C(leaf, u) with the closest point
+   * restricted to the drawn (query) domain and the location held fixed for
+   * the gradient: ∂/∂P = r and ∂/∂source = r·∂r/∂source, pulled back
+   * through the solve frame onto seed points, authored tangents and circle
+   * radii. A relationship whose frame failed has no curve: the residual is
+   * unbounded and its projection diagnostic explains why.
+   */
+  const createShellPointConstraint = (
+    constraint: Extract<ConstraintDefinition, { kind: "pointOnCurve" }>,
+    point: SolverPointRecord,
+    shell: Extract<SketchEntityDefinition, { kind: "derivedPiecewiseCubic" }>,
+  ): ScalarConstraintRecord => ({
+    id: constraint.constraintId,
+    targetKind: "constraint",
+    evaluate(values) {
+      const gradient = zeroVector(parameterCount);
+      const record = parameterProjection
+        .derivationEvaluation(values)
+        ?.offsetFrames.find(
+          (candidate) => candidate.derivationId === shell.derivationId,
+        );
+      const output = record?.outputs.shells.find(
+        (candidate) => candidate.entityId === shell.entityId,
+      );
+      if (!record || !output)
+        return { residual: Number.POSITIVE_INFINITY, gradient };
+      const result = offsetFrameCurveResidual({
+        frame: record.frame,
+        derivatives: offsetRecordDerivatives(record),
+        seedEntityId: output.seed,
+        point: getPoint(values, point),
+      });
+      if ("code" in result)
+        return { residual: Number.POSITIVE_INFINITY, gradient };
+      const [rx, ry] = result.value;
+      gradient[point.baseIndex] += rx;
+      gradient[point.baseIndex + 1] += ry;
+      const [sx, sy] = result.gradient.source;
+      for (const [pointId, value] of Object.entries(sx.points ?? {})) {
+        const record = pointRecords.get(pointId as SketchPointId);
+        const other = sy.points?.[pointId] ?? [0, 0];
+        if (!record) continue;
+        gradient[record.baseIndex] += rx * value[0] + ry * other[0];
+        gradient[record.baseIndex + 1] += rx * value[1] + ry * other[1];
+      }
+      for (const [entityId, occurrences] of Object.entries(
+        sx.splineTangents ?? {},
+      ))
+        for (const [occurrenceId, value] of Object.entries(occurrences)) {
+          const state = splineTangentStates.get(
+            splineTangentStateKey(entityId as SketchEntityId, occurrenceId),
+          );
+          const other = sy.splineTangents?.[entityId]?.[occurrenceId] ?? [0, 0];
+          if (!state) continue;
+          gradient[state.baseIndex] += rx * value[0] + ry * other[0];
+          gradient[state.baseIndex + 1] += rx * value[1] + ry * other[1];
+        }
+      for (const [entityId, value] of Object.entries(sx.circleRadii ?? {})) {
+        const state = entityStates.get(entityId as SketchEntityId);
+        if (state?.kind !== "circle") continue;
+        gradient[state.baseIndex] +=
+          rx * value + ry * (sy.circleRadii?.[entityId] ?? 0);
+      }
+      return {
+        residual: halfSquaredDistanceWithSaturation(rx * rx + ry * ry),
+        gradient,
+      };
+    },
+  });
+
   const pointOnLocalCurveResidual = (
     values: Float64Array,
     point: SolverPointRecord,
@@ -2089,6 +2238,7 @@ function buildSystem(
     scalarConstraints.push({
       id: `constraint_internal_arc_common_radius_${entity.entityId}` as ConstraintId,
       targetKind: "constraint",
+      structuralVariableIndices: pIdx(center, start, end),
       evaluate(values) {
         const gradient = zeroVector(parameterCount);
         const centerPosition = getPoint(values, center);
@@ -2812,6 +2962,13 @@ function buildSystem(
       const curve = definition.entities.find(
         (entity) => entity.entityId === constraint.curve.entityId,
       );
+
+      if (point && curve?.kind === "derivedPiecewiseCubic") {
+        scalarConstraints.push(
+          createShellPointConstraint(constraint, point, curve),
+        );
+        continue;
+      }
 
       if (
         !point ||
@@ -3972,8 +4129,19 @@ function buildSystem(
     pointRecords,
     entityStates,
     splineTangentStates,
+    modelingTolerance: options.modelingTolerance,
+    offsetPlans: options.offsetPlans,
   });
 
+  const shellSourceVariables = new Map<SketchEntityId, readonly number[]>();
+  for (const relationship of definition.derivedRelationships ?? []) {
+    if (relationship.kind !== "offset") continue;
+    const sources = uniqueSortedIndices(
+      relationship.seedEntityIds.flatMap(entityIdx),
+    );
+    for (const output of relationship.piecewiseCubicOutputs)
+      shellSourceVariables.set(output.outputEntityId, sources);
+  }
   const system: BuildSystemResult = {
     parameterCount,
     initialValues: parameterProjection.projectValues(initialValues),
@@ -3982,13 +4150,16 @@ function buildSystem(
     splineTangentStates,
     parameterProjection,
     scalarConstraints,
+    shellSourceVariables,
   };
   const structuralVariables = structuralEquationVariableIndexMap(
     system,
     definition,
   );
   system.scalarConstraints = scalarConstraints.map((constraint) => {
-    const variables = structuralVariables.get(constraint.id);
+    const variables =
+      structuralVariables.get(constraint.id) ??
+      constraint.structuralVariableIndices;
     return parameterProjection.wrapConstraint(
       constraint,
       variables && variables.length > 0 ? variables : undefined,
@@ -4816,7 +4987,8 @@ function validateDefinition(
           entity.kind !== "lineSegment" &&
           entity.kind !== "circle" &&
           entity.kind !== "arc" &&
-          entity.kind !== "spline"
+          entity.kind !== "spline" &&
+          entity.kind !== "derivedPiecewiseCubic"
         ) {
           diagnostics.push(
             makeDiagnostic(
@@ -5463,10 +5635,87 @@ function validateDefinition(
     }
   }
 
+  diagnostics.push(...derivedShellRequirementDiagnostics(definition));
+
   return {
     isValid: diagnostics.every((diagnostic) => diagnostic.severity !== "error"),
     diagnostics,
   };
+}
+
+/** Explicit diagnostic of a requirement a derived shell does not support yet (U-G2). */
+export const DERIVED_SHELL_REQUIREMENT_UNSUPPORTED =
+  "derived-offset-shell-requirement-unsupported";
+
+/** Every entity ID one constraint or dimension operand names (`entityId` / `entityIds`). */
+function referencedEntityIds(value: unknown, into: Set<string>) {
+  if (Array.isArray(value)) {
+    for (const item of value) referencedEntityIds(item, into);
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  for (const [key, item] of Object.entries(value)) {
+    if (key === "entityId" && typeof item === "string") into.add(item);
+    else if (key === "entityIds" && Array.isArray(item))
+      for (const id of item)
+        if (typeof id === "string") into.add(id);
+        else referencedEntityIds(item, into);
+  }
+}
+
+/**
+ * U-G2: a derived piecewise-cubic offset shell supports only `pointOnCurve`
+ * with the shell as its curve. Every other constraint or dimension naming a
+ * shell is an explicit error (never silently ignored).
+ */
+function derivedShellRequirementDiagnostics(
+  definition: SketchDefinition,
+): SketchSolveDiagnostic[] {
+  const shellIds = new Set<string>(
+    definition.entities
+      .filter((entity) => entity.kind === "derivedPiecewiseCubic")
+      .map((entity) => entity.entityId),
+  );
+  if (shellIds.size === 0) return [];
+  const diagnostics: SketchSolveDiagnostic[] = [];
+  const check = (
+    record: ConstraintDefinition | DimensionDefinition,
+    target: SketchSolveDiagnostic["target"],
+    id: string,
+  ) => {
+    const named = new Set<string>();
+    referencedEntityIds(record, named);
+    const shell = [...named].find((entityId) => shellIds.has(entityId));
+    if (!shell) return;
+    if (
+      record.kind === "pointOnCurve" &&
+      "curve" in record &&
+      record.curve.entityId === shell &&
+      named.size === 1
+    )
+      return;
+    diagnostics.push(
+      makeDiagnostic(
+        DERIVED_SHELL_REQUIREMENT_UNSUPPORTED,
+        "error",
+        `${id} uses the offset spline curve ${shell} as a ${record.kind} target; only point-on-curve is supported on an offset spline curve for now.`,
+        target,
+      ),
+    );
+  };
+  for (const constraint of definition.constraints)
+    check(
+      constraint,
+      { kind: "constraint", constraintId: constraint.constraintId },
+      `Constraint ${constraint.constraintId}`,
+    );
+  for (const dimension of definition.dimensions)
+    check(
+      dimension,
+      { kind: "dimension", dimensionId: dimension.dimensionId },
+      `Dimension ${dimension.dimensionId}`,
+    );
+  return diagnostics;
 }
 
 function evaluateLoss(
@@ -5925,6 +6174,8 @@ function createSketchSolveCompatibilityKey(input: {
   definition: SketchDefinition;
   projectedReferences: readonly ProjectedSketchReferenceRecord[];
   tolerances: SketchSolveTolerancePolicy;
+  modelingTolerance: number;
+  offsetPlans: readonly SolvedOffsetFramePlanRecord[] | undefined;
   partialSolvePolicy: SolverPartialSolvePolicy;
   strategy: SketchSolveStrategy;
 }) {
@@ -5949,6 +6200,8 @@ function createSketchSolveCompatibilityKey(input: {
       geometry: reference.geometry,
     })),
     tolerances: input.tolerances,
+    modelingTolerance: input.modelingTolerance,
+    offsetPlans: input.offsetPlans ?? null,
     partialSolvePolicy: input.partialSolvePolicy,
     strategy: input.strategy,
   });
@@ -6006,6 +6259,8 @@ function entityVariableIndices(
     return [];
   }
 
+  if (entity.kind === "derivedPiecewiseCubic")
+    return [...(system.shellSourceVariables.get(entity.entityId) ?? [])];
   const pointIndices = getEntityPoints(entity).flatMap((pointId) =>
     pointVariableIndices(system.pointRecords.get(pointId)),
   );
@@ -6316,7 +6571,9 @@ function buildCompiledComponentData(
     definition,
   );
   const equationVariables = system.scalarConstraints.map((constraint) => {
-    const variables = structuralVariables.get(constraint.id);
+    const variables =
+      structuralVariables.get(constraint.id) ??
+      constraint.structuralVariableIndices;
     return system.parameterProjection.projectVariableIndices(
       variables && variables.length > 0
         ? variables
@@ -6515,15 +6772,36 @@ function preconditionValuesForPointAnchors(
   return translated ? values : initialValues;
 }
 
+/** τ is an explicit document setting ([TECH] G12): never a default. */
+function assertSolveModelingTolerance(modelingTolerance: unknown) {
+  if (
+    typeof modelingTolerance !== "number" ||
+    !Number.isFinite(modelingTolerance) ||
+    modelingTolerance <= 0
+  )
+    throw new RangeError(
+      `A sketch solve requires the document modelingTolerance as a positive finite number; received ${String(modelingTolerance)}.`,
+    );
+}
+
 export function compileSketchSolveProgram(input: {
   definition: SketchDefinition;
   projectedReferences?: readonly ProjectedSketchReferenceRecord[];
   tolerances: SketchSolveTolerancePolicy;
+  /** The document's settings.modelingTolerance ([TECH] G12). */
+  modelingTolerance: number;
+  /** [TECH] G3/G17 offset plan hints (the last publication or a `planChanged` hint). */
+  offsetPlans?: readonly SolvedOffsetFramePlanRecord[];
   partialSolvePolicy: SolverPartialSolvePolicy;
   strategy?: SketchSolveStrategy;
 }): SketchCompiledSolveProgram {
+  assertSolveModelingTolerance(input.modelingTolerance);
   const projectedReferences = input.projectedReferences ?? [];
-  const derived = evaluateSketchDerivations(input.definition);
+  const derived = evaluateSketchDerivations({
+    definition: input.definition,
+    modelingTolerance: input.modelingTolerance,
+    offsetPlans: input.offsetPlans,
+  });
   const definition = derived.definition;
   const validation = validateDefinition(
     definition,
@@ -6534,12 +6812,16 @@ export function compileSketchSolveProgram(input: {
     dragTarget: null,
     projectedReferences,
     tolerances: input.tolerances,
+    modelingTolerance: input.modelingTolerance,
+    offsetPlans: input.offsetPlans,
   });
   const strategy = input.strategy ?? "bfgs";
   const compatibilityKey = createSketchSolveCompatibilityKey({
     definition,
     projectedReferences,
     tolerances: input.tolerances,
+    modelingTolerance: input.modelingTolerance,
+    offsetPlans: input.offsetPlans,
     partialSolvePolicy: input.partialSolvePolicy,
     strategy,
   });
@@ -6554,6 +6836,8 @@ export function compileSketchSolveProgram(input: {
     definition,
     projectedReferences,
     tolerances: input.tolerances,
+    modelingTolerance: input.modelingTolerance,
+    offsetPlans: input.offsetPlans,
     partialSolvePolicy: input.partialSolvePolicy,
     strategy,
     diagnostics: derived.diagnostics,
@@ -6570,17 +6854,25 @@ export function isCompiledSketchSolveProgramCompatible(
     definition: SketchDefinition;
     projectedReferences?: readonly ProjectedSketchReferenceRecord[];
     tolerances: SketchSolveTolerancePolicy;
+    modelingTolerance: number;
+    offsetPlans?: readonly SolvedOffsetFramePlanRecord[];
     partialSolvePolicy?: SolverPartialSolvePolicy;
     strategy?: SketchSolveStrategy;
   },
 ) {
   const projectedReferences = input.projectedReferences ?? [];
-  const derived = evaluateSketchDerivations(input.definition);
+  const derived = evaluateSketchDerivations({
+    definition: input.definition,
+    modelingTolerance: input.modelingTolerance,
+    offsetPlans: input.offsetPlans,
+  });
   const strategy = input.strategy ?? program.strategy;
   const compatibilityKey = createSketchSolveCompatibilityKey({
     definition: derived.definition,
     projectedReferences,
     tolerances: input.tolerances,
+    modelingTolerance: input.modelingTolerance,
+    offsetPlans: input.offsetPlans,
     partialSolvePolicy: input.partialSolvePolicy ?? program.partialSolvePolicy,
     strategy,
   });
@@ -6724,12 +7016,18 @@ function materializeSolveResult(
     ...projectionDiagnostics,
     ...commonCircleDiagnostics,
   ];
+  const evaluation =
+    program.system.parameterProjection.derivationEvaluation(values);
   const solvedEntities = buildSolvedEntities(
     definition,
     program.system.pointRecords,
     program.system.entityStates,
     program.system.splineTangentStates,
     projectedValues,
+    evaluation ? solvedOffsetShellSpans(evaluation) : new Map(),
+  );
+  const hasOffsets = (definition.derivedRelationships ?? []).some(
+    (relationship) => relationship.kind === "offset",
   );
   const solvedPoints = definition.points.flatMap((point) => {
     const record = program.system.pointRecords.get(point.pointId);
@@ -6831,6 +7129,9 @@ function materializeSolveResult(
     constraintStatuses,
     dimensionStatuses,
     diagnostics,
+    ...(hasOffsets && evaluation
+      ? { offsetFramePlans: solvedOffsetFramePlans(evaluation) }
+      : {}),
   };
 
   return {
@@ -7633,6 +7934,7 @@ function buildSolvedEntities(
   entityStates: Map<SketchEntityId, SolverEntityState>,
   splineTangentStates: Map<string, SplineTangentState>,
   values: Float64Array,
+  shellSpans: ReadonlyMap<SketchEntityId, SolvedSketchDerivedCubicSpan[]>,
 ): SolvedSketchEntityGeometryRecord[] {
   const solved: SolvedSketchEntityGeometryRecord[] = [];
   const pointDefinedArcEntityIds = new Set(
@@ -7647,6 +7949,18 @@ function buildSolvedEntities(
     ),
   );
   for (const entity of definition.entities) {
+    if (entity.kind === "derivedPiecewiseCubic") {
+      // [TECH] G7: the solve frame is uncertified; only publish certifies.
+      // A failed relationship has no spans (its diagnostic is in the solve).
+      solved.push({
+        entityId: entity.entityId,
+        kind: "derivedPiecewiseCubic",
+        publication: "provisional",
+        spans: shellSpans.get(entity.entityId) ?? [],
+      });
+      continue;
+    }
+
     if (entity.kind === "point") {
       const point = pointRecords.get(entity.pointId);
       if (point) {
@@ -8041,7 +8355,8 @@ function buildConstraintStatuses(
         (entity.kind === "lineSegment" ||
           entity.kind === "circle" ||
           entity.kind === "arc" ||
-          entity.kind === "spline")
+          entity.kind === "spline" ||
+          entity.kind === "derivedPiecewiseCubic")
           ? isConstraintResidualWithinTolerance(residual, residualTolerance)
             ? "satisfied"
             : "unsatisfied"
@@ -8486,6 +8801,8 @@ function getEntityPoints(
       return entity.controlPointIds;
     case "profileText":
       return [entity.anchorPointId];
+    case "derivedPiecewiseCubic":
+      return [];
   }
 }
 
@@ -8500,6 +8817,8 @@ export function solveSketchDefinitionCore(input: {
   definition: SketchDefinition;
   projectedReferences?: readonly ProjectedSketchReferenceRecord[];
   tolerances: SketchSolveTolerancePolicy;
+  modelingTolerance: number;
+  offsetPlans?: readonly SolvedOffsetFramePlanRecord[];
   partialSolvePolicy: SolverPartialSolvePolicy;
   strategy?: SketchSolveStrategy;
 }): SketchCoreSolveResult {
@@ -8511,6 +8830,8 @@ export function solveSketchDefinitionWithDraggedPointTarget(input: {
   projectedReferences?: readonly ProjectedSketchReferenceRecord[];
   dragTarget: SketchDraggedPointTarget;
   tolerances: SketchSolveTolerancePolicy;
+  modelingTolerance: number;
+  offsetPlans?: readonly SolvedOffsetFramePlanRecord[];
   partialSolvePolicy: SolverPartialSolvePolicy;
   strategy?: SketchSolveStrategy;
   targetTolerance?: number;
@@ -8539,6 +8860,8 @@ export function solveSketchDefinitionWithDraggedPointTarget(input: {
     definition: input.definition,
     projectedReferences: input.projectedReferences,
     tolerances: input.tolerances,
+    modelingTolerance: input.modelingTolerance,
+    offsetPlans: input.offsetPlans,
     partialSolvePolicy: input.partialSolvePolicy,
     strategy: input.strategy,
   });
@@ -8566,8 +8889,14 @@ export function validateSketchDefinitionCore(input: {
   definition: SketchDefinition;
   projectedReferences?: readonly ProjectedSketchReferenceRecord[];
   tolerances: SketchSolveTolerancePolicy;
+  /** The document's settings.modelingTolerance ([TECH] G12). */
+  modelingTolerance: number;
 }): SketchCoreValidationResult {
-  const derived = evaluateSketchDerivations(input.definition);
+  assertSolveModelingTolerance(input.modelingTolerance);
+  const derived = evaluateSketchDerivations({
+    definition: input.definition,
+    modelingTolerance: input.modelingTolerance,
+  });
   const validation = validateDefinition(
     derived.definition,
     input.tolerances,
@@ -8584,8 +8913,10 @@ export function validateSketchDefinitionCore(input: {
 export function getSketchSolveInitialValuesForTest(
   definition: SketchDefinition,
   tolerances: SketchSolveTolerancePolicy,
+  modelingTolerance: number,
 ) {
-  return buildSystem(definition, { tolerances }).initialValues;
+  return buildSystem(definition, { tolerances, modelingTolerance })
+    .initialValues;
 }
 
 export function evaluateSketchScalarConstraintForTest(input: {
@@ -8594,10 +8925,12 @@ export function evaluateSketchScalarConstraintForTest(input: {
   constraintId: ConstraintId | DimensionId;
   values: Float64Array;
   tolerances: SketchSolveTolerancePolicy;
+  modelingTolerance: number;
 }): SketchScalarConstraintEvaluationForTest {
   const system = buildSystem(input.definition, {
     projectedReferences: input.projectedReferences ?? [],
     tolerances: input.tolerances,
+    modelingTolerance: input.modelingTolerance,
   });
   const constraint = system.scalarConstraints.find(
     (candidate) => candidate.id === input.constraintId,

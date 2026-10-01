@@ -1080,7 +1080,7 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
       sketchLabel: "Authoring Operation Sketch",
       plane: sourceSketch.plane,
       definition: {
-        schemaVersion: "sketch-definition/v1alpha1",
+        schemaVersion: "sketch-definition/v1alpha2",
         referenceIds: [],
         references: [],
         pointIds: ["sketch_point_1_a", "sketch_point_1_b"],

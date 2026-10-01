@@ -11,6 +11,7 @@ import type {
   SketchReferenceImageRecord,
   SketchDefinition,
   SketchSolveDiagnostic,
+  SolvedOffsetFramePlanRecord,
   SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
 import type {
@@ -175,6 +176,26 @@ export interface SketchLiveRegionBasis {
   modelingTolerance: number;
 }
 
+/**
+ * U-G3 / [TECH] G11: the certification of the staged derived-offset preview.
+ * Commit applies exactly `contribution` once it is `certified`; a commit
+ * requested while `pending` waits; `failed` commits nothing and shows its
+ * message on the preview.
+ */
+export interface SketchOffsetPreviewPublication {
+  /** The previewed relationship (identity of this check). */
+  derivationId: string;
+  /** The exact authored contribution being checked and, if certified, committed. */
+  contribution: import("@/core/sketch-tools/definition").SketchToolCommitContribution;
+  /** The preview's accepted pair; null when it is not solver-accepted (U-G1). */
+  basis: SketchLiveRegionBasis | null;
+  status: "pending" | "certified" | "failed";
+  message: string | null;
+  commitRequested: boolean;
+  /** True after the one `planChanged` re-authoring ([TECH] G3). */
+  replanned: boolean;
+}
+
 export interface SketchEditToolState {
   toolId: SketchEditToolId;
   hoverTarget: PrimitiveRef | null;
@@ -183,6 +204,8 @@ export interface SketchEditToolState {
   offsetDistance: number | null;
   offsetSide: OffsetSide;
   toolValue: number | null;
+  /** U-G3: the staged derived-offset preview's publication (offset tool only). */
+  offsetPublication?: SketchOffsetPreviewPublication;
 }
 
 export interface SketchSessionState {
@@ -212,6 +235,16 @@ export interface SketchSessionState {
   solverTolerances: SolverTolerancePolicy;
   /** The document's settings.modelingTolerance. */
   modelingTolerance: number;
+  /**
+   * [TECH] G3/G17 offset plan hints of the next solves: the last current
+   * publication's plans, or one `planChanged` round's certified hints.
+   */
+  offsetPlans?: readonly SolvedOffsetFramePlanRecord[];
+  /**
+   * [TECH] G5/G16: the last current publication's relationship-scoped
+   * diagnostics (display only; never solve diagnostics).
+   */
+  offsetPublicationDiagnostics?: readonly SketchSolveDiagnostic[];
   activeTool: SketchAuthoringToolId | null;
   status: SketchSessionStatus;
   constructionTargetPicking: boolean;

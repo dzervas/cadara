@@ -208,7 +208,7 @@ test("src/domain/measure/measurement.spec.ts", () => {
         label: "Measure Sketch",
         planeSupport: plane.support,
         definition: {
-          schemaVersion: "sketch-definition/v1alpha1",
+          schemaVersion: "sketch-definition/v1alpha2",
           referenceIds: ["reference_projected_circle"],
           references: [],
           pointIds: [
@@ -323,7 +323,7 @@ test("src/domain/measure/measurement.spec.ts", () => {
           dimensions: [],
         },
         solvedSnapshot: {
-          schemaVersion: "solved-sketch/v1alpha1",
+          schemaVersion: "solved-sketch/v1alpha2",
           status: { solveState: "solved", constraintState: "underConstrained" },
           solvedEntities: [],
           solvedPoints: [],

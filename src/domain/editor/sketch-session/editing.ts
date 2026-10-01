@@ -1,3 +1,4 @@
+import type { SketchDerivationSettings } from "@/contracts/sketch/derived-geometry";
 import type { SketchPoint } from "@/contracts/modeling/schema";
 import type {
   SketchEntityId,
@@ -35,13 +36,16 @@ import {
   createSketchSlotContribution,
   createSketchSplitMutation,
   offsetCurveDescriptorFromProjectedGeometry,
+  offsetSideForSketchPoint,
   trimLineSegmentAtIntersections,
 } from "@/domain/sketch-editing/operations";
-import {
-  offsetSeedCurveFromEntity,
-  offsetSideForPoint,
-} from "@/contracts/sketch/offset-geometry";
-import type { SketchEditToolState, SketchSessionState } from "./types";
+import type { OffsetFramePlan } from "@/contracts/sketch/offset-derivation-frame";
+import type { SketchOffsetPublicationRecord } from "@/contracts/solver/schema";
+import type {
+  SketchEditToolState,
+  SketchOffsetPreviewPublication,
+  SketchSessionState,
+} from "./types";
 import {
   CONSTRAINED_DRAG_BLOCKED_MESSAGE,
   CONSTRAINED_DRAG_MOVE_FRACTION,
@@ -60,6 +64,8 @@ import {
   isDrawingSketchTool,
   rebuildSessionCommitRequest,
   rebuildSessionForDefinition,
+  getSketchSessionDerivationSettings,
+  getSketchSessionPreviewBasis,
 } from "./internals";
 import { updateReferenceImageOperationStates } from "./references";
 import {
@@ -79,6 +85,32 @@ import {
   getSelectedReferenceImageOperationIds,
   getSelectedSketchGeometryIds,
 } from "./selection";
+
+/** Explicit rejection of deleting a derived offset shell on its own. */
+export const DERIVED_SHELL_DELETE_MESSAGE =
+  "An offset spline curve is part of its offset and cannot be deleted on its own.";
+
+/** Explicit rejection of deleting a derived offset shell's driven end point on its own. */
+export const DERIVED_SHELL_POINT_DELETE_MESSAGE =
+  "An offset spline curve's end point is part of its offset and cannot be deleted on its own.";
+
+/**
+ * The driven terminal points of every derived offset shell. No entity
+ * references them (a shell owns no points), so the point sweep must treat
+ * them as referenced by their relationship ([TECH] G18).
+ */
+function shellTerminalPointIds(definition: SketchDefinition) {
+  return new Set<SketchPointId>(
+    (definition.derivedRelationships ?? []).flatMap((relationship) =>
+      relationship.kind === "offset"
+        ? relationship.piecewiseCubicOutputs.flatMap((output) => [
+            output.startPointId,
+            output.endPointId,
+          ])
+        : [],
+    ),
+  );
+}
 
 export function deleteSelectedSketchGeometry(
   session: SketchSessionState,
@@ -163,6 +195,30 @@ export function deleteSelectedSketchGeometry(
     return nextSession;
   }
 
+  // T08b-g plan §2.6: a derived offset shell lives and dies with its offset
+  // relationship; deleting it alone is rejected before any mutation.
+  if (
+    nextSession.definition.entities.some(
+      (entity) =>
+        entity.kind === "derivedPiecewiseCubic" &&
+        selected.entityIds.has(entity.entityId),
+    )
+  ) {
+    return {
+      ...nextSession,
+      validationMessage: DERIVED_SHELL_DELETE_MESSAGE,
+    };
+  }
+  const relationshipOwnedPointIds = shellTerminalPointIds(
+    nextSession.definition,
+  );
+  if ([...selected.pointIds].some((id) => relationshipOwnedPointIds.has(id))) {
+    return {
+      ...nextSession,
+      validationMessage: DERIVED_SHELL_POINT_DELETE_MESSAGE,
+    };
+  }
+
   const beforeDefinition = cloneDefinition(nextSession.definition);
   const deletedEntityIds = new Set(selected.entityIds);
   for (const entity of beforeDefinition.entities) {
@@ -178,9 +234,10 @@ export function deleteSelectedSketchGeometry(
   const remainingEntities = beforeDefinition.entities.filter(
     (entity) => !deletedEntityIds.has(entity.entityId),
   );
-  const remainingEntityPointIds = new Set(
-    remainingEntities.flatMap((entity) => getEntityPointIds(entity)),
-  );
+  const remainingEntityPointIds = new Set([
+    ...remainingEntities.flatMap((entity) => getEntityPointIds(entity)),
+    ...relationshipOwnedPointIds,
+  ]);
   const deletedPointIds = new Set<SketchPointId>(
     beforeDefinition.pointIds.filter(
       (pointId) =>
@@ -291,6 +348,7 @@ export function deleteSelectedSketchGeometry(
 export function getOffsetPreview(
   session: SketchSessionState,
   activeEditTool: SketchEditToolState,
+  plan?: OffsetFramePlan,
 ): SketchEditOperationResult {
   const selectedTargets = activeEditTool.selectedTargets;
   const sketchEntityTargets = selectedTargets.filter(
@@ -336,6 +394,211 @@ export function getOffsetPreview(
     side: activeEditTool.offsetSide,
     sequence: nextSequence,
     factories: createSessionCommitFactories(nextSequence, sketchId),
+    modelingTolerance: session.modelingTolerance,
+    ...(plan ? { plan } : {}),
+  });
+}
+
+const OFFSET_PREVIEW_UNACCEPTED_MESSAGE =
+  "The offset can be checked only when every sketch constraint is solved.";
+const OFFSET_PREVIEW_PENDING_MESSAGE = "Checking the offset…";
+
+/**
+ * U-G3 / [TECH] G11: attaches the staged preview's publication to the edit
+ * tool. A derived-offset preview starts `pending` (its background publish is
+ * emitted by the editor loop) or `failed` when its solve is not accepted
+ * (U-G1); a static or invalid preview has none.
+ */
+export function stageOffsetPreviewPublication(
+  session: SketchSessionState,
+  tool: SketchEditToolState,
+  preview: SketchEditOperationResult,
+  /** [TECH] G3/G17: the certifier's hint the preview was re-authored with. */
+  replan?: OffsetFramePlan,
+): SketchEditToolState {
+  const relationship = preview.valid
+    ? preview.contribution?.derivedRelationships?.find(
+        (candidate) => candidate.kind === "offset",
+      )
+    : undefined;
+  const rest = withoutOffsetPublication(tool);
+  if (!relationship || !preview.contribution) return rest;
+  // The re-solve runs the hint unchanged (keyed by the re-authored
+  // relationship), so a second disagreement fails closed in publish.
+  const basis = getSketchSessionPreviewBasis(
+    replan
+      ? {
+          ...session,
+          offsetPlans: [
+            ...(session.offsetPlans ?? []),
+            { derivationId: relationship.derivationId, plan: replan },
+          ],
+        }
+      : session,
+    applySketchContribution(session, preview.contribution).definition,
+  );
+  const offsetPublication: SketchOffsetPreviewPublication = {
+    derivationId: relationship.derivationId,
+    contribution: preview.contribution,
+    basis,
+    status: basis ? "pending" : "failed",
+    message: basis ? null : OFFSET_PREVIEW_UNACCEPTED_MESSAGE,
+    commitRequested: false,
+    replanned: replan !== undefined,
+  };
+  return { ...rest, offsetPublication };
+}
+
+function withoutOffsetPublication(
+  tool: SketchEditToolState,
+): SketchEditToolState {
+  const next = { ...tool };
+  delete next.offsetPublication;
+  return next;
+}
+
+/** Commits a certified (or static) offset contribution. */
+function commitOffsetContribution(
+  session: SketchSessionState,
+  activeEditTool: SketchEditToolState,
+  contribution: NonNullable<SketchEditOperationResult["contribution"]>,
+): SketchSessionState {
+  const nextSequence = session.sequence + 1;
+  const history = applySketchContribution(session, contribution);
+  const tool = withoutOffsetPublication(activeEditTool);
+  const nextEditTool = {
+    ...tool,
+    selectedTarget: null,
+    selectedTargets: [],
+  };
+
+  return withLiveSolveBasis(
+    {
+      ...session,
+      activeEditTool: nextEditTool,
+      toolStagedEntities: [],
+      definition: history.definition,
+      sequence: nextSequence,
+      commitRequest: rebuildSessionCommitRequest(session, history.definition),
+      validationMessage: null,
+      toolPresentation: buildSketchEditToolPresentation(nextEditTool),
+    },
+    history.definition,
+  );
+}
+
+function withOffsetPublication(
+  session: SketchSessionState,
+  tool: SketchEditToolState,
+  publication: SketchOffsetPreviewPublication,
+): SketchSessionState {
+  const nextEditTool = { ...tool, offsetPublication: publication };
+  const message =
+    publication.status === "failed"
+      ? publication.message
+      : publication.status === "pending" && publication.commitRequested
+        ? OFFSET_PREVIEW_PENDING_MESSAGE
+        : null;
+  return {
+    ...session,
+    activeEditTool: nextEditTool,
+    validationMessage: publication.status === "failed" ? message : null,
+    toolPresentation: buildSketchEditToolPresentation(
+      nextEditTool,
+      message,
+      session.toolStagedEntities,
+    ),
+  };
+}
+
+/**
+ * U-G3 / [TECH] G3/G11: applies the background publication of the staged
+ * preview `derivationId` (ignored unless it is still the pending one).
+ * `certified` commits it if Commit was requested; `planChanged` re-authors
+ * the preview ONCE with the certifier's hint (unchanged) and checks again;
+ * anything else fails: nothing is committed and the error stays on the
+ * preview.
+ */
+export function completeSketchOffsetPreviewPublication(
+  session: SketchSessionState,
+  derivationId: string,
+  publications: readonly SketchOffsetPublicationRecord[],
+): SketchSessionState {
+  const tool = session.activeEditTool;
+  const publication = tool?.offsetPublication;
+  if (
+    !tool ||
+    !publication ||
+    publication.derivationId !== derivationId ||
+    publication.status !== "pending"
+  )
+    return session;
+  const record = publications.find(
+    (candidate) => candidate.derivationId === derivationId,
+  );
+  if (record?.status === "certified")
+    return publication.commitRequested
+      ? commitOffsetContribution(
+          // The published plan seeds the committed relationship's solves
+          // (G17), so the live solve reproduces the certified frame.
+          record.plan
+            ? {
+                ...session,
+                offsetPlans: [
+                  ...(session.offsetPlans ?? []),
+                  { derivationId, plan: record.plan },
+                ],
+              }
+            : session,
+          tool,
+          publication.contribution,
+        )
+      : withOffsetPublication(session, tool, {
+          ...publication,
+          status: "certified",
+        });
+  if (
+    record?.status === "planChanged" &&
+    record.plan &&
+    !publication.replanned
+  ) {
+    const preview = getOffsetPreview(session, tool, record.plan);
+    const staged = stageOffsetPreviewPublication(
+      session,
+      tool,
+      preview,
+      record.plan,
+    );
+    const next = staged.offsetPublication;
+    return {
+      ...session,
+      activeEditTool: next
+        ? {
+            ...staged,
+            offsetPublication: {
+              ...next,
+              commitRequested: publication.commitRequested,
+            },
+          }
+        : staged,
+      toolStagedEntities: preview.previewEntities,
+      validationMessage: preview.valid ? null : preview.message,
+      toolPresentation: buildSketchEditToolPresentation(
+        staged,
+        preview.valid ? null : preview.message,
+        preview.previewEntities,
+      ),
+    };
+  }
+  return withOffsetPublication(session, tool, {
+    ...publication,
+    status: "failed",
+    commitRequested: false,
+    message:
+      record?.diagnostic?.message ??
+      (record?.status === "planChanged"
+        ? "The certified corner plan does not match the offset preview."
+        : "The offset could not be checked."),
   });
 }
 
@@ -357,35 +620,23 @@ export function updateSketchOffsetPointer(
     return session;
   }
 
-  const entitiesById = new Map(
-    session.definition.entities.map((entity) => [entity.entityId, entity]),
-  );
-  const pointsById = new Map(
-    session.definition.points.map((entry) => [entry.pointId, entry]),
-  );
-  const curves = entityIds.map((entityId) => {
-    const entity = entitiesById.get(entityId);
-    return entity
-      ? offsetSeedCurveFromEntity(
-          entity,
-          (pointId) => pointsById.get(pointId)?.position ?? null,
-        )
-      : null;
-  });
-  if (curves.some((curve) => curve === null)) {
-    return session;
-  }
-
-  const side = offsetSideForPoint({
-    curves: curves as NonNullable<(typeof curves)[number]>[],
+  // [TECH] G9: the side on the declared (N2) traversal of the exact sources.
+  const side = offsetSideForSketchPoint({
+    definition: session.definition,
+    entityIds,
     point,
   });
   if (!side || side === activeEditTool.offsetSide) {
     return session;
   }
 
-  const nextEditTool = { ...activeEditTool, offsetSide: side };
-  const preview = getOffsetPreview(session, nextEditTool);
+  const sideEditTool = { ...activeEditTool, offsetSide: side };
+  const preview = getOffsetPreview(session, sideEditTool);
+  const nextEditTool = stageOffsetPreviewPublication(
+    session,
+    sideEditTool,
+    preview,
+  );
   return {
     ...session,
     activeEditTool: nextEditTool,
@@ -485,6 +736,7 @@ export function getSketchEditOperatorResult(
         value: activeEditTool.toolValue,
         sequence: nextSequence,
         factories,
+        modelingTolerance: session.modelingTolerance,
       });
     case "sketchLinearPattern":
       return createSketchDerivedTransformContribution({
@@ -494,6 +746,7 @@ export function getSketchEditOperatorResult(
         value: activeEditTool.toolValue,
         sequence: nextSequence,
         factories,
+        modelingTolerance: session.modelingTolerance,
       });
     case "sketchCircularPattern":
       return createSketchDerivedTransformContribution({
@@ -503,6 +756,7 @@ export function getSketchEditOperatorResult(
         value: activeEditTool.toolValue,
         sequence: nextSequence,
         factories,
+        modelingTolerance: session.modelingTolerance,
       });
     case "sketchTransform":
       return createSketchDerivedTransformContribution({
@@ -512,6 +766,7 @@ export function getSketchEditOperatorResult(
         value: activeEditTool.toolValue,
         sequence: nextSequence,
         factories,
+        modelingTolerance: session.modelingTolerance,
       });
     case "trim":
     case "offset":
@@ -690,10 +945,15 @@ export function selectSketchEditToolTarget(
       hoverTarget: null,
     };
     const preview = getOffsetPreview(session, nextEditTool);
+    const stagedEditTool = stageOffsetPreviewPublication(
+      session,
+      nextEditTool,
+      preview,
+    );
 
     return {
       ...session,
-      activeEditTool: nextEditTool,
+      activeEditTool: stagedEditTool,
       toolStagedEntities: preview.previewEntities,
       validationMessage: preview.valid ? null : preview.message,
       toolPresentation: buildSketchEditToolPresentation(
@@ -794,8 +1054,9 @@ export function patchSketchEditToolValue(
   }
 
   if (patch.intent === "cancelOffset") {
+    const tool = withoutOffsetPublication(activeEditTool);
     const nextEditTool = {
-      ...activeEditTool,
+      ...tool,
       selectedTarget: null,
       selectedTargets: [],
     };
@@ -825,10 +1086,15 @@ export function patchSketchEditToolValue(
           : activeEditTool.offsetSide,
     };
     const preview = getOffsetPreview(session, nextEditTool);
+    const stagedEditTool = stageOffsetPreviewPublication(
+      session,
+      nextEditTool,
+      preview,
+    );
 
     return {
       ...session,
-      activeEditTool: nextEditTool,
+      activeEditTool: stagedEditTool,
       toolStagedEntities: preview.previewEntities,
       validationMessage: preview.valid ? null : preview.message,
       toolPresentation: buildSketchEditToolPresentation(
@@ -841,6 +1107,21 @@ export function patchSketchEditToolValue(
 
   if (patch.intent !== "commitOffset") {
     return session;
+  }
+
+  // U-G3: a derived offset commits only its certified preview, exactly.
+  const staged = activeEditTool.offsetPublication;
+  if (staged) {
+    if (staged.status === "certified")
+      return commitOffsetContribution(
+        session,
+        activeEditTool,
+        staged.contribution,
+      );
+    return withOffsetPublication(session, activeEditTool, {
+      ...staged,
+      commitRequested: staged.status === "pending",
+    });
   }
 
   const preview = getOffsetPreview(session, activeEditTool);
@@ -856,26 +1137,25 @@ export function patchSketchEditToolValue(
     };
   }
 
-  const nextSequence = session.sequence + 1;
-  const history = applySketchContribution(session, preview.contribution);
-  const nextEditTool = {
-    ...activeEditTool,
-    selectedTarget: null,
-    selectedTargets: [],
-  };
-
-  return withLiveSolveBasis(
-    {
-      ...session,
-      activeEditTool: nextEditTool,
-      toolStagedEntities: [],
-      definition: history.definition,
-      sequence: nextSequence,
-      commitRequest: rebuildSessionCommitRequest(session, history.definition),
-      validationMessage: null,
-      toolPresentation: buildSketchEditToolPresentation(nextEditTool),
-    },
-    history.definition,
+  const stagedEditTool = stageOffsetPreviewPublication(
+    session,
+    activeEditTool,
+    preview,
+  );
+  if (stagedEditTool.offsetPublication)
+    return withOffsetPublication(
+      { ...session, toolStagedEntities: preview.previewEntities },
+      stagedEditTool,
+      {
+        ...stagedEditTool.offsetPublication,
+        commitRequested: stagedEditTool.offsetPublication.status === "pending",
+      },
+    );
+  // The static one-shot projected offset (D6) has no derivation to certify.
+  return commitOffsetContribution(
+    session,
+    activeEditTool,
+    preview.contribution,
   );
 }
 
@@ -1010,6 +1290,7 @@ export function beginSketchGeometryDrag(
         selected.definition,
         selected.projectedReferences,
         selected.solverTolerances,
+        getSketchSessionDerivationSettings(selected),
         target.pointId,
       ),
     },
@@ -1071,6 +1352,7 @@ export function applySketchGeometryDrag(
     session.definition,
     session.projectedReferences,
     session.solverTolerances,
+    getSketchSessionDerivationSettings(session),
     drag.target.pointId,
     point,
     drag.interactiveSolveSession,
@@ -1121,6 +1403,7 @@ export function solveDraggedPointEdit(
   definition: SketchDefinition,
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
   tolerances: SolverTolerancePolicy,
+  derivation: SketchDerivationSettings,
   pointId: SketchPointId,
   position: SketchPoint,
   interactiveSolveSession: SketchCompiledSolveSession | null = null,
@@ -1142,9 +1425,11 @@ export function solveDraggedPointEdit(
   ) {
     return {
       kind: "accepted",
-      definition: applyPointPositionsToDefinition(definition, [
-        { pointId, position },
-      ]),
+      definition: applyPointPositionsToDefinition(
+        definition,
+        [{ pointId, position }],
+        derivation,
+      ),
       interactiveSolveSession: null,
     };
   }
@@ -1155,6 +1440,7 @@ export function solveDraggedPointEdit(
       definition,
       projectedReferences,
       tolerances,
+      derivation,
       pointId,
     );
   const solved = solveSession
@@ -1176,6 +1462,7 @@ export function solveDraggedPointEdit(
           position,
         },
         tolerances,
+        ...derivation,
         partialSolvePolicy: "failOnConflict",
         targetTolerance: 1e-4,
       });
@@ -1224,6 +1511,7 @@ export function solveDraggedPointEdit(
     definition: applySolvedSketchToDefinition(
       definition,
       solved.solvedSnapshot,
+      derivation,
     ),
     solvedSnapshot: solved.solvedSnapshot,
     interactiveSolveSession: solveSession,
@@ -1234,6 +1522,7 @@ function createInteractiveSolveSessionForDrag(
   definition: SketchDefinition,
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
   tolerances: SolverTolerancePolicy,
+  derivation: SketchDerivationSettings,
   pointId: SketchPointId,
 ): SketchCompiledSolveSession | null {
   if (
@@ -1247,6 +1536,7 @@ function createInteractiveSolveSessionForDrag(
     definition,
     projectedReferences,
     tolerances,
+    ...derivation,
     partialSolvePolicy: "failOnConflict",
   });
   return createCompiledSketchSolveSession({

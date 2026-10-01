@@ -644,6 +644,20 @@ function collectArrangementBranches(
           "profile text",
         );
         break;
+      case "derivedPiecewiseCubic": {
+        // T08b-g5a: shells are not region input until g5b wires
+        // `derivedCurves`; until then each is an explicit obstacle so a
+        // region it crosses fails closed.
+        const poles = geometry.spans.flatMap((span) => [...span.poles]);
+        unsupported(
+          source,
+          poles.length > 0
+            ? boxOfPoints(poles)
+            : { x: [-Infinity, Infinity], y: [-Infinity, Infinity] },
+          "derived offset curve",
+        );
+        break;
+      }
     }
   }
 

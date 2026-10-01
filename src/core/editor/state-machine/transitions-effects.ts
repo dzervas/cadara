@@ -6,6 +6,7 @@ import {
   featurePreviewSupportsAutomaticBooleanTargetPreselection,
 } from "@/domain/editor/feature-boolean-target-preselection";
 import {
+  completeSketchOffsetPreviewPublication,
   failSketchLiveRegions,
   getSketchSessionPreviewLabel,
   publishSketchLiveRegions,
@@ -882,8 +883,89 @@ export function handleEffectSketchRegionsDerived(
   return {
     state: withLiveRegionSession(
       state,
-      publishSketchLiveRegions(state.session, event.regions, event.diagnostics),
+      publishSketchLiveRegions(
+        state.session,
+        event.regions,
+        event.diagnostics,
+        event.offsetPublications,
+      ),
     ),
+    effects: [],
+  };
+}
+
+function isPendingOffsetPreviewResult(
+  state: EditorState,
+  event: Extract<
+    EditorEvent,
+    {
+      type:
+        | "effect.sketchOffsetPreviewPublished"
+        | "effect.sketchOffsetPreviewPublicationFailed";
+    }
+  >,
+): state is SketchEditorState {
+  return (
+    state.kind === "editingSketch" &&
+    state.command.commandSessionId === event.commandSessionId &&
+    state.pendingOffsetPreviewRequest?.requestId === event.requestId
+  );
+}
+
+/** U-G3: applies the staged offset preview's publication (stale results are dropped). */
+export function handleEffectSketchOffsetPreviewPublished(
+  state: EditorState,
+  event: Extract<EditorEvent, { type: "effect.sketchOffsetPreviewPublished" }>,
+): EditorTransitionResult {
+  if (!isPendingOffsetPreviewResult(state, event)) {
+    return { state, effects: [] };
+  }
+  return {
+    state: {
+      ...state,
+      pendingOffsetPreviewRequest: null,
+      session: completeSketchOffsetPreviewPublication(
+        state.session,
+        event.derivationId,
+        event.offsetPublications,
+      ),
+    },
+    effects: [],
+  };
+}
+
+/** U-G3: a failed check commits nothing and shows the error on the preview. */
+export function handleEffectSketchOffsetPreviewPublicationFailed(
+  state: EditorState,
+  event: Extract<
+    EditorEvent,
+    { type: "effect.sketchOffsetPreviewPublicationFailed" }
+  >,
+): EditorTransitionResult {
+  if (!isPendingOffsetPreviewResult(state, event)) {
+    return { state, effects: [] };
+  }
+  return {
+    state: {
+      ...state,
+      pendingOffsetPreviewRequest: null,
+      session: completeSketchOffsetPreviewPublication(
+        state.session,
+        event.derivationId,
+        [
+          {
+            derivationId: event.derivationId,
+            status: "failed",
+            diagnostic: {
+              code: "derived-offset-publication-failed",
+              severity: "error",
+              message: event.message,
+              target: null,
+            },
+          },
+        ],
+      ),
+    },
     effects: [],
   };
 }

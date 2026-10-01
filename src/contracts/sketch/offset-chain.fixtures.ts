@@ -94,7 +94,7 @@ export function createNativeOffsetChainHarness(options: {
     const entities = patches.flatMap((patch) => patch.entities);
     const constraints = patches.flatMap((patch) => patch.constraints ?? []);
     return {
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: points.map((point) => point.pointId),
@@ -190,6 +190,7 @@ export function createNativeOffsetChainHarness(options: {
     const solved = solveSketchDefinitionCore({
       definition,
       tolerances: solveTolerances,
+      modelingTolerance,
       partialSolvePolicy: "bestEffort",
     });
     if (solved.status.solveState !== "solved")
@@ -873,7 +874,7 @@ export function createNativeArcOffsetHarness(options: {
   const next = () => (sequence += 1);
   const empty = (): SketchDefinition =>
     ({
-      schemaVersion: "sketch-definition/v1alpha1",
+      schemaVersion: "sketch-definition/v1alpha2",
       referenceIds: [],
       references: [],
       pointIds: [],
@@ -1102,6 +1103,7 @@ export function createNativeArcOffsetHarness(options: {
     const result = solveSketchDefinitionCore({
       definition,
       tolerances: solveTolerances,
+      modelingTolerance,
       partialSolvePolicy: "bestEffort",
     });
     if (result.status.solveState !== "solved")

@@ -40,7 +40,10 @@ import type {
   SketchId,
   SketchAuthoringOperationId,
 } from "@/contracts/shared/ids";
-import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
+import type {
+  ProjectedSketchReferenceRecord,
+  SketchOffsetPublicationRecord,
+} from "@/contracts/solver/schema";
 import type {
   RegionRecord,
   SketchSolveDiagnostic,
@@ -168,6 +171,11 @@ export interface SketchEditorState extends EditorStateBase {
   pendingImportRequestId: RequestId | null;
   /** The single in-flight live region derivation, and the generation it derives. */
   pendingRegionRequest: { requestId: RequestId; generation: number } | null;
+  /** U-G3: the in-flight publication of the staged offset preview, if any. */
+  pendingOffsetPreviewRequest?: {
+    requestId: RequestId;
+    derivationId: string;
+  } | null;
 }
 
 /**
@@ -841,6 +849,8 @@ export type EditorEvent =
       generation: number;
       regions: RegionRecord[];
       diagnostics: SketchSolveDiagnostic[];
+      /** [TECH] G1/G17: the basis' offset publications (relationship-scoped). */
+      offsetPublications: SketchOffsetPublicationRecord[];
     }
   | {
       type: "effect.sketchRegionDerivationFailed";
@@ -849,6 +859,25 @@ export type EditorEvent =
       commandSessionId: CommandSessionId;
       baseRevisionId: RevisionId;
       generation: number;
+      message: string;
+    }
+  | {
+      /** U-G3: the staged offset preview's background publication. */
+      type: "effect.sketchOffsetPreviewPublished";
+      requestId: RequestId;
+      documentId: DocumentId;
+      commandSessionId: CommandSessionId;
+      baseRevisionId: RevisionId;
+      derivationId: string;
+      offsetPublications: SketchOffsetPublicationRecord[];
+    }
+  | {
+      type: "effect.sketchOffsetPreviewPublicationFailed";
+      requestId: RequestId;
+      documentId: DocumentId;
+      commandSessionId: CommandSessionId;
+      baseRevisionId: RevisionId;
+      derivationId: string;
       message: string;
     }
   | {
@@ -1088,6 +1117,20 @@ export type EditorEffect =
       basis: SketchLiveRegionBasis;
     }
   | {
+      /**
+       * U-G3 / [TECH] G11: publish the staged offset preview's accepted pair
+       * off the UI thread (the same `deriveSketchRegions` boundary, G1).
+       */
+      type: "sketch.publishOffsetPreview";
+      background: true;
+      requestId: RequestId;
+      commandSessionId: CommandSessionId;
+      documentId: DocumentId;
+      baseRevisionId: RevisionId;
+      derivationId: string;
+      basis: SketchLiveRegionBasis;
+    }
+  | {
       type: "sketch.importReferenceImages";
       requestId: RequestId;
       commandSessionId: CommandSessionId;
@@ -1184,6 +1227,13 @@ export interface EditorEffectRuntime {
     projectedReferences: ProjectedSketchReferenceRecord[];
     diagnostics: ProjectedSketchReferenceRecord["diagnostics"];
   }>;
+  /**
+   * True when a newer `deriveSketchRegions` for a document supersedes its
+   * still-running one (the dedicated terminable worker). Only then may the
+   * editor emit a newer live generation while one is in flight; without it
+   * one request stays in flight (T08b-g4 review, routed to g5).
+   */
+  readonly supersedesSketchRegionDerivation?: boolean;
   /** Derives display-only live sketch regions through the async solver boundary. */
   deriveSketchRegions?(input: {
     requestId: RequestId;
@@ -1193,6 +1243,7 @@ export interface EditorEffectRuntime {
   }): Promise<{
     regions: RegionRecord[];
     diagnostics: SketchSolveDiagnostic[];
+    offsetPublications: SketchOffsetPublicationRecord[];
   }>;
   /** Imports one or more reference images into the active sketch workflow. */
   importSketchReferenceImages?(input: {

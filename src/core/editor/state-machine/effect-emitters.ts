@@ -22,6 +22,7 @@ import type {
   DocumentFeatureCursor,
   SnapshotMutationBasis,
 } from "@/contracts/modeling/schema";
+import { SKETCH_OFFSET_PREVIEW_REQUEST_SCOPE } from "@/contracts/solver/schema";
 import type { ReferenceImagePayload } from "@/contracts/reference-image/schema";
 import type { CommandSessionId } from "@/contracts/shared/ids";
 import type { FeatureId, RequestId } from "@/contracts/shared/ids";
@@ -529,18 +530,26 @@ export function emitSketchReferenceProjection(
 }
 
 /**
- * Post-transition hook: emits the single live region derivation for a pending
- * live solve basis. Drags stay stale until they complete, and at most one
- * request is in flight; a discarded stale result re-enters here for the latest
- * generation. Idempotent, so nested and repeated applications are safe.
+ * Post-transition hook: emits the live region derivation for a pending live
+ * solve basis. Drags stay stale until they complete. Without `supersede` at
+ * most one request is in flight and a discarded stale result re-enters here
+ * for the latest generation. With `supersede` (a runtime whose newer request
+ * cancels the running one, T08b-g4 review) a newer generation is emitted
+ * while an older one is in flight: it replaces the pending request, so the
+ * older result or cancellation fails the request-id check and is dropped.
+ * Idempotent, so nested and repeated applications are safe.
  */
 export function emitPendingSketchRegionDerivation(
   result: EditorTransitionResult,
+  options: { readonly supersede?: boolean } = {},
 ): EditorTransitionResult {
   const state = result.state;
   if (
     state.kind !== "editingSketch" ||
-    state.pendingRegionRequest ||
+    (state.pendingRegionRequest &&
+      (!options.supersede ||
+        state.pendingRegionRequest.generation ===
+          state.session.liveRegions.generation)) ||
     state.session.liveRegions.status !== "pending" ||
     state.session.activeDrag !== null ||
     state.document.documentId === null ||
@@ -574,6 +583,56 @@ export function emitPendingSketchRegionDerivation(
         baseRevisionId: state.document.revisionId,
         generation,
         basis,
+      },
+    ],
+  };
+}
+
+/**
+ * Post-transition hook (U-G3 / [TECH] G11): emits the background publication
+ * of the staged offset preview while it is pending and not yet requested.
+ * A newer preview replaces the pending request; the older result fails the
+ * request-id check and is dropped. Idempotent.
+ */
+export function emitPendingSketchOffsetPreviewPublication(
+  result: EditorTransitionResult,
+): EditorTransitionResult {
+  const state = result.state;
+  if (state.kind !== "editingSketch") return result;
+  const publication = state.session.activeEditTool?.offsetPublication;
+  if (
+    !publication ||
+    publication.status !== "pending" ||
+    !publication.basis ||
+    state.pendingOffsetPreviewRequest?.derivationId ===
+      publication.derivationId ||
+    state.document.documentId === null ||
+    state.document.revisionId === null
+  ) {
+    return result;
+  }
+
+  const requestId = nextRequestId(state, SKETCH_OFFSET_PREVIEW_REQUEST_SCOPE);
+  return {
+    state: {
+      ...state,
+      nextRequestSequence: state.nextRequestSequence + 1,
+      pendingOffsetPreviewRequest: {
+        requestId,
+        derivationId: publication.derivationId,
+      },
+    },
+    effects: [
+      ...result.effects,
+      {
+        type: "sketch.publishOffsetPreview",
+        background: true,
+        requestId,
+        commandSessionId: state.command.commandSessionId,
+        documentId: state.document.documentId,
+        baseRevisionId: state.document.revisionId,
+        derivationId: publication.derivationId,
+        basis: publication.basis,
       },
     ],
   };

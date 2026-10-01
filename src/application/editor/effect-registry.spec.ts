@@ -202,7 +202,7 @@ test("live region derivation goes through the modeling service sketch solver bou
     sketchSolver: {
       async deriveSketchRegions(input) {
         requests.push(input);
-        return { regions: [], diagnostics: [] };
+        return { regions: [], diagnostics: [], offsetPublications: [] };
       },
       createCommitCorrelation: unused,
       projectExternalReferences: unused,
@@ -250,6 +250,7 @@ test("live region derivation goes through the modeling service sketch solver bou
     generation: 7,
     regions: [],
     diagnostics: [],
+    offsetPublications: [],
   });
 
   await expect(
@@ -279,6 +280,76 @@ test("live region derivation goes through the modeling service sketch solver bou
   ).rejects.toThrow(
     "Live sketch regions require the modeling service sketch solver.",
   );
+});
+
+// Seam: [TECH] G17, the derive response's offset publications cross the
+// derivation-worker boundary as plain data and are validated before the
+// reducer can flip any shell to certified.
+test("a derive response whose offset publications fail validation rejects instead of reaching the reducer (G17)", async () => {
+  let session = createNewSketchSessionFromSupport(
+    { kind: "construction", constructionId: "construction_plane-xy" },
+    OCC_KERNEL_SETTINGS,
+  );
+  session = acceptSketchDraw(
+    startSketchDraw(beginSketchTool(session, "rectangle"), [0, 0]),
+    [2, 1],
+  );
+  const basis = getSketchSessionLiveRegionBasis(session)!;
+  const unused = () => {
+    throw new Error("Only live region derivation is exercised here.");
+  };
+  const runtimeAnswering = (offsetPublications: unknown) =>
+    createModelingServiceEditorEffectRuntime({
+      getCurrentDocumentSnapshot: unused,
+      projectSketchExternalReferences: unused,
+      sketchSolver: {
+        async deriveSketchRegions() {
+          return {
+            regions: [],
+            diagnostics: [],
+            offsetPublications,
+          } as never;
+        },
+        createCommitCorrelation: unused,
+        projectExternalReferences: unused,
+      },
+      commitSketch: unused,
+      evaluatePreview: unused,
+      createFeature: unused,
+      updateFeature: unused,
+      setFeatureCursor: unused,
+    });
+  const derive = (offsetPublications: unknown) =>
+    runEditorEffect(
+      {
+        type: "sketch.deriveRegions",
+        background: true,
+        requestId: "request_live_regions-g17" as RequestId,
+        commandSessionId: "command_sketch-1",
+        documentId: "doc_fixture" as DocumentId,
+        baseRevisionId: "rev_0001" as RevisionId,
+        generation: 1,
+        basis,
+      },
+      runtimeAnswering(offsetPublications),
+    );
+
+  for (const [label, forged] of [
+    ["an unknown status", [{ derivationId: "d", status: "trusted" }]],
+    [
+      "an extra field",
+      [{ derivationId: "d", status: "certified", certifiedBy: "worker" }],
+    ],
+    ["a missing field", undefined],
+  ] as const)
+    await expect(derive(forged), label).rejects.toThrow();
+  await expect(
+    derive([{ derivationId: "d", status: "failed" }]),
+    "A well-formed publication list is passed through unchanged.",
+  ).resolves.toMatchObject({
+    type: "effect.sketchRegionsDerived",
+    offsetPublications: [{ derivationId: "d", status: "failed" }],
+  });
 });
 
 // Seam: live region requests carry the session's document tolerance through

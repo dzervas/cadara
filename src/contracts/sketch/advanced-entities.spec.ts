@@ -257,7 +257,11 @@ test("src/contracts/sketch/advanced-entities.spec.ts", async () => {
     ).toBeTruthy();
   }
 
-  const validation = validateSketchDefinitionCore({ definition, tolerances });
+  const validation = validateSketchDefinitionCore({
+    definition,
+    tolerances,
+    modelingTolerance: 1e-3,
+  });
   expect(
     validation.isValid,
     "Advanced entities with valid defining data should pass sketch validation.",
@@ -266,6 +270,7 @@ test("src/contracts/sketch/advanced-entities.spec.ts", async () => {
   const solved = solveSketchDefinitionCore({
     definition,
     tolerances,
+    modelingTolerance: 1e-3,
     partialSolvePolicy: "bestEffort",
   });
   const solvedKinds = new Set(
@@ -348,6 +353,7 @@ test("src/contracts/sketch/advanced-entities.spec.ts", async () => {
       ],
     },
     tolerances,
+    modelingTolerance: 1e-3,
   });
   expect(
     unsupportedConstraintValidation.diagnostics.some(
