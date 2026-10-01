@@ -103,6 +103,7 @@ import {
 import type {
   ProjectedSketchReferenceGeometry,
   ProjectedSketchReferenceRecord,
+  SketchOffsetPublicationRecord,
 } from "@/contracts/solver/schema";
 
 export interface SketchArrangementInput {
@@ -116,13 +117,117 @@ export interface SketchArrangementInput {
   /** The document's settings.modelingTolerance: the only semantic linear tolerance. */
   modelingTolerance: number;
   /**
-   * T08b-g3 (dark: no production caller before T08b-g5): the published
-   * derived piecewise-cubic offset shells of this accepted pair, one entry
-   * per shell. Contracts-local and never persisted. Absent: the arrangement
-   * is exactly the one without derived curves. The caller passes only
-   * certified publications of non-construction shells ([TECH] G7).
+   * T08b-g3 (live since T08b-g5b, via `offsetArrangementInput`): the
+   * published derived piecewise-cubic offset shells of this accepted pair,
+   * one entry per shell. Contracts-local and never persisted. Absent: the
+   * arrangement is exactly the one without derived curves. The caller passes
+   * only certified publications of non-construction shells ([TECH] G7).
    */
   derivedCurves?: readonly SketchArrangementDerivedCurve[];
+  /**
+   * T08b-g5b ([TECH] G5): the line/arc/circle outputs and joint arcs of
+   * offset relationships that are not certified in this pair (failed,
+   * pending a re-solve, or unpublished). Each is an obstacle with a
+   * targeted `region-derived-unpublished` diagnostic and never bounds a
+   * region. A shell entity that is not in `derivedCurves` is the same
+   * obstacle.
+   */
+  unpublishedOffsetOutputs?: readonly SketchArrangementUnpublishedOutput[];
+}
+
+/** One output of a non-certified offset relationship (T08b-g5b, [TECH] G5). */
+export interface SketchArrangementUnpublishedOutput {
+  readonly entityId: SketchEntityId;
+  readonly derivationId: string;
+  /** Why it is not consumable (the relationship's publication state). */
+  readonly reason: string;
+}
+
+/**
+ * T08b-g5b: the offset part of the region input of one accepted pair
+ * ([TECH] G5/G7), mapped exactly as the g3 fixture helper
+ * (`addOffsetFramePublication`) maps a publication. `solvedSnapshot` is the
+ * pair's snapshot with the publications applied (`applyOffsetPublications`),
+ * so a shell is consumed only when its record is `certified` and its
+ * relationship's publication is `certified`; each non-construction shell
+ * becomes one derived curve on its authored driven terminal points and its
+ * solved sub-spans (untrimmed poles on `sourceDomain`, trims in
+ * `queryDomain`). Every output of any other offset relationship is an
+ * unpublished obstacle. Without offset relationships the result is empty,
+ * so the arrangement input is byte-identical.
+ */
+export function offsetArrangementInput(
+  definition: SketchDefinition,
+  solvedSnapshot: SolvedSketchSnapshot,
+  publications: readonly SketchOffsetPublicationRecord[],
+): Pick<SketchArrangementInput, "derivedCurves" | "unpublishedOffsetOutputs"> {
+  const offsets = (definition.derivedRelationships ?? []).flatMap(
+    (relationship) => (relationship.kind === "offset" ? [relationship] : []),
+  );
+  if (offsets.length === 0) return {};
+  const status = new Map(
+    publications.map((publication) => [
+      publication.derivationId,
+      publication.status,
+    ]),
+  );
+  const records = new Map(
+    solvedSnapshot.solvedEntities.flatMap((record) =>
+      record.kind === "derivedPiecewiseCubic"
+        ? [[record.entityId, record] as const]
+        : [],
+    ),
+  );
+  const entities = new Map(
+    definition.entities.map((entity) => [entity.entityId, entity]),
+  );
+  const derivedCurves: SketchArrangementDerivedCurve[] = [];
+  const unpublishedOffsetOutputs: SketchArrangementUnpublishedOutput[] = [];
+  for (const relationship of offsets) {
+    const state = status.get(relationship.derivationId);
+    if (state === "certified") {
+      for (const output of relationship.piecewiseCubicOutputs) {
+        const record = records.get(output.outputEntityId);
+        if (
+          record?.publication !== "certified" ||
+          entities.get(output.outputEntityId)?.isConstruction !== false
+        )
+          continue;
+        derivedCurves.push({
+          outputEntityId: output.outputEntityId,
+          startPointId: output.startPointId,
+          endPointId: output.endPointId,
+          spans: record.spans.map((span) => ({
+            outputSpanId: span.outputSpanId,
+            subIndex: span.subIndex,
+            poles: span.poles,
+            sourceDomain: span.sourceDomain,
+            queryDomain: span.queryDomain,
+          })),
+        });
+      }
+      continue;
+    }
+    const reason =
+      state === "failed"
+        ? `offset relationship ${relationship.derivationId} failed its publication`
+        : state === "planChanged"
+          ? `offset relationship ${relationship.derivationId} is pending its re-solve`
+          : `offset relationship ${relationship.derivationId} is not published`;
+    for (const entityId of [
+      ...relationship.outputs.map((output) => output.outputEntityId),
+      ...relationship.jointOutputs.map((output) => output.outputEntityId),
+      ...relationship.piecewiseCubicOutputs.map(
+        (output) => output.outputEntityId,
+      ),
+    ])
+      unpublishedOffsetOutputs.push({
+        entityId,
+        derivationId: relationship.derivationId,
+        reason,
+      });
+  }
+  return { derivedCurves, unpublishedOffsetOutputs };
 }
 
 /**
@@ -209,10 +314,13 @@ interface Branch {
   };
 }
 
-/** An unsupported or degenerate curve: it blocks everything its box meets. */
+/** An unsupported, degenerate or unpublished curve: it blocks everything its box meets. */
 interface Obstacle {
   box: Box;
-  code: "region-unsupported-curve" | "region-degenerate-curve";
+  code:
+    | "region-unsupported-curve"
+    | "region-degenerate-curve"
+    | "region-derived-unpublished";
   entityId: SketchEntityId | null;
   description: string;
   reason: string;
@@ -463,17 +571,43 @@ function collectArrangementBranches(
   solved: SolvedSketchSnapshot,
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
   derivedCurves: readonly SketchArrangementDerivedCurve[],
+  unpublishedOutputs: readonly SketchArrangementUnpublishedOutput[],
 ): { branches: Branch[]; obstacles: Obstacle[] } {
   const drafts: BranchDraft[] = [];
   const obstacles: Obstacle[] = [];
   const solvedById = new Map(
     solved.solvedEntities.map((entity) => [entity.entityId, entity]),
   );
+  const derivedShellIds = new Set(
+    derivedCurves.map((shell) => shell.outputEntityId),
+  );
+  const unpublished = new Map(
+    unpublishedOutputs.map((output) => [output.entityId, output.reason]),
+  );
+  // [TECH] G5: an output of a non-certified offset never bounds a region.
+  const unpublishedObstacle = (
+    source: RegionBoundarySource,
+    box: Box,
+    reason: string,
+  ) =>
+    obstacles.push({
+      box,
+      code: "region-derived-unpublished",
+      entityId: source.kind === "entity" ? source.entityId : null,
+      description: sourceDescription(source),
+      reason,
+    });
   const addDraft = (
     draft: BranchDraft | string,
     source: RegionBoundarySource,
     box: Box,
   ) => {
+    const unpublishedReason =
+      source.kind === "entity" ? unpublished.get(source.entityId) : undefined;
+    if (unpublishedReason !== undefined) {
+      unpublishedObstacle(source, box, unpublishedReason);
+      return;
+    }
     if (typeof draft !== "string") {
       drafts.push(draft);
       return;
@@ -645,16 +779,17 @@ function collectArrangementBranches(
         );
         break;
       case "derivedPiecewiseCubic": {
-        // T08b-g5a: shells are not region input until g5b wires
-        // `derivedCurves`; until then each is an explicit obstacle so a
-        // region it crosses fails closed.
+        // A consumable shell's branches come from `derivedCurves` (below);
+        // any other shell is an unpublished obstacle ([TECH] G5/G7).
+        if (derivedShellIds.has(entity.entityId)) break;
         const poles = geometry.spans.flatMap((span) => [...span.poles]);
-        unsupported(
+        unpublishedObstacle(
           source,
           poles.length > 0
             ? boxOfPoints(poles)
             : { x: [-Infinity, Infinity], y: [-Infinity, Infinity] },
-          "derived offset curve",
+          unpublished.get(entity.entityId) ??
+            `its publication is ${geometry.publication}, not certified`,
         );
         break;
       }
@@ -3289,6 +3424,7 @@ async function deriveArrangement(
     input.solvedSnapshot,
     input.projectedReferences,
     input.derivedCurves ?? [],
+    input.unpublishedOffsetOutputs ?? [],
   );
   const emitForBranches = (
     code: string,
@@ -3383,7 +3519,9 @@ async function deriveArrangement(
     const label =
       obstacle.code === "region-unsupported-curve"
         ? `${obstacle.description} (${obstacle.reason}) has no neutral region curve form.`
-        : `${obstacle.description} is degenerate (${obstacle.reason}).`;
+        : obstacle.code === "region-derived-unpublished"
+          ? `${obstacle.description} is an offset output that is not consumable (${obstacle.reason}).`
+          : `${obstacle.description} is degenerate (${obstacle.reason}).`;
     emit(
       makeDiagnostic(
         obstacle.code,

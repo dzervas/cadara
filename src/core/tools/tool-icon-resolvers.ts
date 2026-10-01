@@ -108,8 +108,9 @@ function getSketchEntityToolIcon(
     case "conic":
     case "bezierCurve":
     case "profileText":
-    case "derivedPiecewiseCubic":
       return "spline";
+    case "derivedPiecewiseCubic":
+      return "offset";
     case "point":
       return null;
   }

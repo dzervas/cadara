@@ -8,12 +8,15 @@ import type {
   SketchDefinition,
   SketchEntityDefinition,
   SketchPoint2D,
+  SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
 import type { SketchId, SketchPointId } from "@/contracts/shared/ids";
 import {
   orderedSplinePointIds,
   reconstructSplineAggregate,
+  sampleSolvedCubicSpans,
   sampleSplineGeometry,
+  solvedCubicSpans,
 } from "@/contracts/sketch/spline-geometry";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import {
@@ -21,6 +24,7 @@ import {
   getSketchSessionDisplayProjectedReferences,
 } from "@/domain/editor/sketch-session/internals";
 import { getSketchDatumGuideExtent } from "@/domain/editor/sketch-session/definition-patches";
+import { getSketchSessionDisplaySolvedSnapshot } from "@/domain/editor/sketch-session/display";
 import type { SketchSessionState } from "@/domain/editor/sketch-session";
 
 const TURN = Math.PI * 2;
@@ -101,7 +105,14 @@ export function collectSketchInteractionGeometry(
       definition,
       projectedReferences,
     ),
-    ...collectLocalInteractionGeometry(definition),
+    ...collectLocalInteractionGeometry(
+      definition,
+      getSketchSessionDisplaySolvedSnapshot(
+        session,
+        definition,
+        projectedReferences,
+      ),
+    ),
     ...collectProjectedInteractionGeometry(projectedReferences),
   ];
 }
@@ -186,7 +197,11 @@ function collectDatumInteractionGeometry(
 
 function collectLocalInteractionGeometry(
   definition: SketchDefinition,
+  solvedSnapshot: SolvedSketchSnapshot,
 ): SketchInteractionGeometry[] {
+  const solvedEntities = new Map(
+    solvedSnapshot.solvedEntities.map((record) => [record.entityId, record]),
+  );
   const pointMap = new Map(
     definition.points.map((point) => [point.pointId, point] as const),
   );
@@ -202,7 +217,13 @@ function collectLocalInteractionGeometry(
   );
 
   for (const entity of definition.entities) {
-    const geometry = createLocalEntityInteractionGeometry(entity, pointMap);
+    const geometry =
+      entity.kind === "derivedPiecewiseCubic"
+        ? createDerivedShellInteractionGeometry(
+            entity,
+            solvedEntities.get(entity.entityId),
+          )
+        : createLocalEntityInteractionGeometry(entity, pointMap);
     if (geometry) {
       entries.push(geometry);
     }
@@ -358,10 +379,26 @@ function createLocalEntityInteractionGeometry(
           )
         : null;
     }
-    // T08b-g5b: derived offset shells are not drawn/consumed here yet.
+    // Drawn from the solved snapshot (`createDerivedShellInteractionGeometry`).
     case "derivedPiecewiseCubic":
       return null;
   }
+}
+
+/**
+ * A derived offset shell picks along exactly its displayed tessellation:
+ * its solved spans clipped to each span's drawn `queryDomain` (T08b-g5b).
+ */
+function createDerivedShellInteractionGeometry(
+  entity: Extract<SketchEntityDefinition, { kind: "derivedPiecewiseCubic" }>,
+  record: SolvedSketchSnapshot["solvedEntities"][number] | undefined,
+): SketchInteractionGeometry | null {
+  if (record?.kind !== "derivedPiecewiseCubic") return null;
+  return createSampledLocalCurve(
+    entity,
+    sampleSolvedCubicSpans(solvedCubicSpans(record)),
+    false,
+  );
 }
 
 function createLocalPointEntityGeometry(

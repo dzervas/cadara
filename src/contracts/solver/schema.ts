@@ -43,9 +43,8 @@ export type SolverSchemaVersion = "sketch-solver/v1alpha1";
  * Current sketch solver schema version literal.
  */
 /**
- * Request-id scope of an offset preview publication (U-G3). A terminable
- * derivation runtime keeps these in their own lane, so a preview check and
- * the live region derivation of one document never supersede each other.
+ * Request-id scope of an offset preview publication (U-G3). Its scheduling
+ * lane is carried explicitly (`DeriveSketchRegionsRequest.derivationLane`).
  */
 export const SKETCH_OFFSET_PREVIEW_REQUEST_SCOPE =
   "sketch-offset-preview-publication";
@@ -575,6 +574,13 @@ export interface DeriveSketchRegionsRequest extends SketchSolverRequestBase {
   projectedReferences: ProjectedSketchReferenceRecord[];
   /** The document's settings.modelingTolerance (finite, > 0); never a default. */
   modelingTolerance: number;
+  /**
+   * T08b-g5b (g5a review A3): the scheduling lane of a terminable derivation
+   * runtime. `offsetPreview` is an offset preview publication (U-G3), which
+   * runs in its own lane so it and the live region derivation of one
+   * document never supersede each other. Absent: the live lane.
+   */
+  derivationLane?: "offsetPreview";
 }
 
 /**

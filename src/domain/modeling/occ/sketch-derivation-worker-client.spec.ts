@@ -14,7 +14,10 @@ import {
 } from "@/contracts/solver/schema";
 import type { DocumentId, RequestId } from "@/contracts/shared/ids";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
-import { SketchRegionDerivationWorkerPool } from "@/domain/modeling/occ/sketch-derivation-worker-client";
+import {
+  SketchRegionDerivationDisposedError,
+  SketchRegionDerivationWorkerPool,
+} from "@/domain/modeling/occ/sketch-derivation-worker-client";
 import type { OccWorkerLike } from "@/domain/modeling/occ/worker-client";
 import {
   normalizeOccWorkerFailure,
@@ -320,7 +323,10 @@ test("T08b-g5 U-G3: an offset preview publication runs in its own lane and never
   const { pool, workers } = makePool();
   const live = makeRequest("request_sketch-region-derivation-1");
   const liveDone = pool.deriveSketchRegions(live);
-  const preview = makeRequest("request_sketch-offset-preview-publication-2");
+  const preview: DeriveSketchRegionsRequest = {
+    ...makeRequest("request_sketch-offset-preview-publication-2"),
+    derivationLane: "offsetPreview",
+  };
   const previewDone = pool.deriveSketchRegions(preview);
   expect(workers).toHaveLength(2);
   expect(
@@ -333,4 +339,83 @@ test("T08b-g5 U-G3: an offset preview publication runs in its own lane and never
     requestId: preview.requestId,
   });
   await expect(liveDone).resolves.toMatchObject({ requestId: live.requestId });
+});
+
+test("T08b-g5b (g5a review A3): the lane is the request's explicit derivationLane, never inferred from the request id", async () => {
+  const { pool, workers } = makePool();
+  const live = makeRequest("request_live_1");
+  const liveDone = pool.deriveSketchRegions(live);
+  // A preview-scoped request id without the lane field is a live request.
+  const unlabelled = makeRequest("request_sketch-offset-preview-publication-2");
+  const unlabelledDone = pool.deriveSketchRegions(unlabelled);
+  await expect(
+    liveDone,
+    "Without derivationLane the request is in the live lane and supersedes the live derivation, whatever its request id says.",
+  ).rejects.toBeInstanceOf(SketchRegionDerivationSupersededError);
+  expect(workers[0]!.terminated).toBe(true);
+  workers[1]!.respond(responseFor(unlabelled));
+  await unlabelledDone;
+
+  const preview: DeriveSketchRegionsRequest = {
+    ...makeRequest("request_any_id"),
+    derivationLane: "offsetPreview",
+  };
+  const previewDone = pool.deriveSketchRegions(preview);
+  expect(
+    workers,
+    "An explicitly labelled preview spawns its own lane's worker even with an unscoped request id.",
+  ).toHaveLength(3);
+  expect(workers[1]!.terminated).toBe(false);
+  workers[2]!.respond(responseFor(preview));
+  await previewDone;
+});
+
+test("T08b-g5b (g5a review A3, g4 A4): dispose settles the running and the waiting request of every lane and cancels the respawn timer", async () => {
+  const workers: FakeDerivationWorker[] = [];
+  const timers: { cancelled: boolean }[] = [];
+  const pool = new SketchRegionDerivationWorkerPool({
+    createWorker: () => {
+      const worker = new FakeDerivationWorker();
+      workers.push(worker);
+      return worker;
+    },
+    minimumSupersedeAgeMs: 250,
+    now: () => 0,
+    schedule: () => {
+      const timer = { cancelled: false };
+      timers.push(timer);
+      return () => {
+        timer.cancelled = true;
+      };
+    },
+  });
+  const running = pool.deriveSketchRegions(makeRequest("request_running"));
+  const waiting = pool.deriveSketchRegions(makeRequest("request_waiting"));
+  const preview = pool.deriveSketchRegions({
+    ...makeRequest("request_preview"),
+    derivationLane: "offsetPreview",
+  });
+  pool.dispose();
+  for (const [promise, requestId] of [
+    [running, "request_running"],
+    [waiting, "request_waiting"],
+    [preview, "request_preview"],
+  ] as const) {
+    const error = await promise.catch((reason: unknown) => reason);
+    expect(
+      error,
+      `Disposal rejects ${requestId} with the typed disposal error instead of leaving it unsettled.`,
+    ).toBeInstanceOf(SketchRegionDerivationDisposedError);
+    expect(error).toMatchObject({ requestId });
+  }
+  expect(
+    timers.every((timer) => timer.cancelled),
+    "No respawn timer stays scheduled after disposal.",
+  ).toBe(true);
+  expect(
+    workers.every((worker) => worker.terminated),
+    "Every lane's worker is terminated.",
+  ).toBe(true);
+  // A late worker message after disposal resolves no one.
+  workers[0]!.respond(responseFor(makeRequest("request_running")));
 });

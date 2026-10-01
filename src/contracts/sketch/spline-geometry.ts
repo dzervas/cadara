@@ -1,6 +1,7 @@
 /** Sole neutral reconstruction seam. No kernel, topology or persistence authority.
  * Differentials are analytic directional derivatives: seed a canonical coordinate
  * or authored handle component with 1 to obtain a Jacobian column. */
+import type { SolvedSketchEntityGeometryRecord } from "@/contracts/sketch/schema";
 export type SplineVector = readonly [number, number];
 export type SplinePoles = readonly [
   SplineVector,
@@ -792,4 +793,152 @@ export function evaluateSplineSpan(
       ),
     },
   };
+}
+
+/**
+ * One solved cubic span as every consumer draws it (T08b slice design §2.8):
+ * an ordinary solved spline span (`queryDomain` absent: the whole span) or a
+ * derived offset shell sub-span, whose `interval` is its untrimmed
+ * `sourceDomain` and whose drawn part is `queryDomain` (C2: trims never
+ * repole).
+ */
+export interface SolvedCubicSpan {
+  readonly interval: readonly [number, number];
+  readonly poles: SplinePoles;
+  readonly queryDomain?: readonly [number, number];
+}
+
+/**
+ * The accepted cubic spans of a solved spline or derived shell record, the
+ * one source display, pick, snap, measure, vector export and the OCC
+ * snapshot read (T08b-g5b). A shell's spans are returned whatever its
+ * publication; modeling consumers check `publication === "certified"`
+ * themselves ([TECH] G7). Any other record (or an invalid spline) has none.
+ */
+export function solvedCubicSpans(
+  record: SolvedSketchEntityGeometryRecord,
+): readonly SolvedCubicSpan[] {
+  if (record.kind === "spline")
+    return record.reconstruction.validity === "valid"
+      ? record.reconstruction.spans.map((span) => ({
+          interval: span.interval,
+          poles: span.poles,
+        }))
+      : [];
+  if (record.kind === "derivedPiecewiseCubic")
+    return record.spans.map((span) => ({
+      interval: span.sourceDomain,
+      poles: span.poles,
+      queryDomain: span.queryDomain,
+    }));
+  return [];
+}
+
+/**
+ * The drawn local sub-interval [u₀, u₁] of a solved span, with exact ends
+ * kept (an untrimmed end is exactly 0 or 1): the same mapping the shell's
+ * `pointOnCurve` residual restricts its closest-point search to.
+ */
+export function solvedCubicSpanLocalDomain(
+  span: SolvedCubicSpan,
+): readonly [number, number] {
+  if (!span.queryDomain) return [0, 1];
+  const [low, high] = span.interval;
+  const [from, to] = span.queryDomain;
+  const local = (value: number, end: number, exact: 0 | 1) =>
+    value === end ? exact : (value - low) / (high - low);
+  return [local(from, low, 0), local(to, high, 1)];
+}
+
+const ZERO_DIFFERENTIAL = {
+  interval: [0, 0] as const,
+  poles: [zero, zero, zero, zero] as const,
+};
+
+/** The point of a solved span at local parameter `u` (its own poles, never re-poled). */
+export function solvedCubicSpanPoint(
+  span: SolvedCubicSpan,
+  u: number,
+): SplineVector {
+  return evaluateSplineSpan(
+    {
+      interval: span.interval,
+      poles: span.poles,
+      differential: ZERO_DIFFERENTIAL,
+    },
+    { kind: "local", value: u },
+  ).position;
+}
+
+/**
+ * Display tessellation of solved spans, each clipped to its drawn domain:
+ * `samplesPerSpan` steps per span from u₀ to u₁ (both exact), the shared
+ * knot of consecutive spans emitted once. Display output only, never
+ * geometry.
+ */
+export function sampleSolvedCubicSpans(
+  spans: readonly SolvedCubicSpan[],
+  samplesPerSpan = 16,
+): readonly SplineVector[] {
+  if (!Number.isInteger(samplesPerSpan) || samplesPerSpan < 1) return [];
+  return spans.flatMap((span, spanIndex) => {
+    const [from, to] = solvedCubicSpanLocalDomain(span);
+    return Array.from(
+      { length: samplesPerSpan + (spanIndex === 0 ? 1 : 0) },
+      (_, index) => {
+        const step = index + (spanIndex === 0 ? 0 : 1);
+        return solvedCubicSpanPoint(
+          span,
+          step === samplesPerSpan
+            ? to
+            : from + ((to - from) * step) / samplesPerSpan,
+        );
+      },
+    );
+  });
+}
+
+/**
+ * The poles of a solved span restricted to its drawn domain (de Casteljau
+ * subdivision at u₀ and u₁), for exporters that write cubic commands (SVG).
+ * An untrimmed span returns its own poles unchanged.
+ */
+export function clippedSolvedCubicSpanPoles(
+  span: SolvedCubicSpan,
+): SplinePoles {
+  const [from, to] = solvedCubicSpanLocalDomain(span);
+  if (from === 0 && to === 1) return span.poles;
+  const lerp = (a: SplineVector, b: SplineVector, t: number): SplineVector => [
+    a[0] + (b[0] - a[0]) * t,
+    a[1] + (b[1] - a[1]) * t,
+  ];
+  // Keep [t, 1] of the given poles.
+  const tail = (poles: SplinePoles, t: number): SplinePoles => {
+    const [p0, p1, p2, p3] = poles;
+    const a = lerp(p0, p1, t);
+    const b = lerp(p1, p2, t);
+    const c = lerp(p2, p3, t);
+    const d = lerp(a, b, t);
+    const e = lerp(b, c, t);
+    return [lerp(d, e, t), e, c, p3];
+  };
+  // Keep [0, t] of the given poles.
+  const head = (poles: SplinePoles, t: number): SplinePoles => {
+    const [p0, p1, p2, p3] = poles;
+    const a = lerp(p0, p1, t);
+    const b = lerp(p1, p2, t);
+    const c = lerp(p2, p3, t);
+    const d = lerp(a, b, t);
+    const e = lerp(b, c, t);
+    return [p0, a, d, lerp(d, e, t)];
+  };
+  const kept = from > 0 ? tail(span.poles, from) : span.poles;
+  const clipped = to < 1 ? head(kept, (to - from) / (1 - from)) : kept;
+  // The drawn ends are the span's own evaluations at u₀ and u₁.
+  return [
+    solvedCubicSpanPoint(span, from),
+    clipped[1],
+    clipped[2],
+    solvedCubicSpanPoint(span, to),
+  ];
 }

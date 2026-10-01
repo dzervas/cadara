@@ -30,8 +30,14 @@ import type {
   SketchDefinition,
   SketchStyleDefinition,
   SketchStyleRecord,
+  SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
-import { orderedSplinePointIds } from "@/contracts/sketch/spline-geometry";
+import {
+  orderedSplinePointIds,
+  solvedCubicSpanPoint,
+  solvedCubicSpans,
+  type SolvedCubicSpan,
+} from "@/contracts/sketch/spline-geometry";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import { resolveSketchDimensionValues } from "@/domain/modeling/sketch-dimension-expressions";
 import {
@@ -68,6 +74,7 @@ import {
   createSketchEntityRef,
   createSketchPointRef,
   getSketchSessionDerivationSettings,
+  getSketchSessionSolvedSnapshot,
 } from "./internals";
 import {
   addAnchorOffset,
@@ -1607,7 +1614,11 @@ export function createConstraintAnnotationAnchor(
         getAverageSketchPoint(
           [
             getPointPosition(definition, constraint.point.pointId),
-            getEntityAnchor(definition, constraint.curve.entityId),
+            getEntityAnchor(
+              definition,
+              constraint.curve.entityId,
+              getSketchSessionSolvedSnapshot(session),
+            ),
           ].filter((point): point is SketchPoint => point !== null),
         ),
       );
@@ -2871,6 +2882,8 @@ export function getAverageEntityAnchor(
 export function getEntityAnchor(
   definition: SketchDefinition,
   entityId: SketchEntityId,
+  /** T08b-g5b: places a derived offset shell's anchor on its solved curve. */
+  solvedSnapshot: SolvedSketchSnapshot | null = null,
 ): SketchPoint | null {
   const entity = definition.entities.find(
     (entry) => entry.entityId === entityId,
@@ -2908,10 +2921,49 @@ export function getEntityAnchor(
       return getAveragePointPosition(definition, entity.controlPointIds);
     case "profileText":
       return getPointPosition(definition, entity.anchorPointId);
-    // T08b-g5b: derived offset shells have no annotation anchor yet.
     case "derivedPiecewiseCubic":
-      return null;
+      return getDerivedShellAnchor(definition, entityId, solvedSnapshot);
   }
+}
+
+/**
+ * A derived offset shell's anchor lies on the curve (T08b-g5b): the point at
+ * the middle of the drawn (`queryDomain`) source-parameter range of its
+ * solved spans, provisional or certified. Without its solved record, the
+ * shell's start terminal driven point (the mean of the terminals can lie off
+ * an open curve).
+ */
+function getDerivedShellAnchor(
+  definition: SketchDefinition,
+  entityId: SketchEntityId,
+  solvedSnapshot: SolvedSketchSnapshot | null,
+): SketchPoint | null {
+  const record = solvedSnapshot?.solvedEntities.find(
+    (entry) => entry.entityId === entityId,
+  );
+  const spans = record ? solvedCubicSpans(record) : [];
+  const drawn = (span: SolvedCubicSpan) => span.queryDomain ?? span.interval;
+  const first = spans[0];
+  const last = spans.at(-1);
+  if (first && last) {
+    const middle = (drawn(first)[0] + drawn(last)[1]) / 2;
+    const span =
+      spans.find(
+        (candidate) =>
+          drawn(candidate)[0] <= middle && middle <= drawn(candidate)[1],
+      ) ?? last;
+    const [low, high] = span.interval;
+    return solvedCubicSpanPoint(
+      span,
+      Math.min(1, Math.max(0, (middle - low) / (high - low))),
+    );
+  }
+  const output = definition.derivedRelationships
+    ?.flatMap((relationship) =>
+      relationship.kind === "offset" ? relationship.piecewiseCubicOutputs : [],
+    )
+    .find((candidate) => candidate.outputEntityId === entityId);
+  return output ? getPointPosition(definition, output.startPointId) : null;
 }
 
 export function getEntityAnchorPointId(

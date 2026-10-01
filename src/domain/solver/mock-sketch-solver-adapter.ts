@@ -30,6 +30,7 @@ import { validateSketchSolverEnvelope } from "@/contracts/solver/runtime-schema"
 import type { NeutralCurveQueryCapability } from "@/contracts/modeling/neutral-curve-query";
 import {
   createSketchArrangementDeriver,
+  offsetArrangementInput,
   type SketchArrangementDeriver,
 } from "@/contracts/sketch/region-extraction";
 import { assertDocumentModelingTolerance } from "@/domain/solver/sketch-constraint-solver-adapter";
@@ -62,6 +63,7 @@ import {
 } from "@/contracts/sketch/derived-geometry";
 import { OffsetCertificationMemo } from "@/contracts/sketch/offset-derivation-frame";
 import {
+  applyOffsetPublications,
   publishSketchOffsets,
   type OffsetPublicationCapabilities,
 } from "@/contracts/sketch/offset-publication";
@@ -1618,14 +1620,26 @@ export class MockSketchSolverAdapter implements SketchSolverAdapter {
       modelingTolerance: request.modelingTolerance,
       capabilities: this.offsetPublication,
     });
+    // T08b-g5b: regions consume exactly the certified shells ([TECH] G7);
+    // every other offset output is an obstacle ([TECH] G5).
+    const solvedSnapshot = applyOffsetPublications(
+      request.definition,
+      request.solvedSnapshot,
+      offsetPublications,
+    );
     const derived = await this.regionDeriver.derive({
       documentId: request.documentId,
       revisionId: request.revisionId,
       sketchId: request.sketchId,
-      solvedSnapshot: request.solvedSnapshot,
+      solvedSnapshot,
       definition: request.definition,
       projectedReferences: request.projectedReferences,
       modelingTolerance: request.modelingTolerance,
+      ...offsetArrangementInput(
+        request.definition,
+        solvedSnapshot,
+        offsetPublications,
+      ),
     });
     return {
       ...base,

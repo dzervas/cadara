@@ -253,6 +253,30 @@ test("live region derivation goes through the modeling service sketch solver bou
     offsetPublications: [],
   });
 
+  // T08b-g5b (g5a review A3): the offset preview check names its lane
+  // explicitly; the live derivation above carries none.
+  await runEditorEffect(
+    {
+      type: "sketch.publishOffsetPreview",
+      background: true,
+      requestId: "request_offset_preview-1" as RequestId,
+      commandSessionId: "command_sketch-1",
+      documentId: "doc_fixture" as DocumentId,
+      baseRevisionId: "rev_0001" as RevisionId,
+      derivationId: "derivation_preview",
+      basis: basis!,
+    },
+    runtime,
+  );
+  expect(
+    requests[1],
+    "The offset preview publication request carries derivationLane offsetPreview.",
+  ).toEqual({
+    ...(requests[0] as object),
+    requestId: "request_offset_preview-1",
+    derivationLane: "offsetPreview",
+  });
+
   await expect(
     runEditorEffect(
       {

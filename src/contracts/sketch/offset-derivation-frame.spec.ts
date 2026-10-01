@@ -72,6 +72,7 @@ import {
   prepareOffsetFrameDerivatives,
   publishOffsetFrame,
   solveOffsetFrame,
+  solveOffsetFrameWithoutMemoForTest,
   type OffsetFrameArcVariation,
   type OffsetFrameCubicSpan,
   type OffsetFrameCotangent,
@@ -459,11 +460,17 @@ const solveOf = (
   relationship: OffsetFrameRelationship,
   definition: AcceptedPair["definition"],
   plan?: OffsetFramePlan,
-) =>
-  solveOffsetFrame(
-    { relationship, definition, modelingTolerance: TOLERANCE },
-    plan,
-  );
+  solve: typeof solveOffsetFrame = solveOffsetFrame,
+) => solve({ relationship, definition, modelingTolerance: TOLERANCE }, plan);
+
+/** Bitwise encoding that also spells out Maps (frames carry `cubics` / `lineArcEndpoints`). */
+const encodeDeep = (value: unknown) =>
+  JSON.stringify(value, (_key, item: unknown) => {
+    if (item instanceof Map) return { map: [...item] };
+    if (typeof item !== "number") return item;
+    bits.setFloat64(0, item);
+    return `f64:${bits.getBigUint64(0).toString(16)}`;
+  });
 
 const publishOf = (
   relationship: OffsetFrameRelationship,
@@ -492,11 +499,12 @@ function publishCycle(
   relationship: OffsetFrameRelationship,
   pair: AcceptedPair,
   ports: Ports = { query, certifier },
+  solver: typeof solveOffsetFrame = solveOffsetFrame,
 ) {
   const solves: OffsetSolveFrameResult[] = [];
   const publications: OffsetFramePublication[] = [];
   const solve = (plan?: OffsetFramePlan) => {
-    const frame = solveOf(relationship, pair.definition, plan);
+    const frame = solveOf(relationship, pair.definition, plan, solver);
     solves.push(frame);
     return frame;
   };
@@ -630,6 +638,27 @@ function expectPublishMatchesSel(
     : declared;
   const attempts = ports.certifications();
   const cycle = publishCycle(relationshipOf(seeds, distance), pair, ports);
+  // T08b-g5b memo equivalence: the same cycle without the solve-frame memo
+  // (on the same replaying ports) has bitwise the same frames and the same
+  // publications, and a repeated solve is the memo's same frame object.
+  const uncached = publishCycle(
+    relationshipOf(seeds, distance),
+    pair,
+    ports,
+    solveOffsetFrameWithoutMemoForTest,
+  );
+  expect(
+    encodeDeep(uncached.solves),
+    "T08b-g5b: memoized solve frames are bitwise the uncached frames",
+  ).toBe(encodeDeep(cycle.solves));
+  expect(
+    encodeDeep(uncached.publications),
+    "T08b-g5b: publications of memoized frames are identical to the uncached ones",
+  ).toBe(encodeDeep(cycle.publications));
+  expect(
+    solveOf(relationshipOf(seeds, distance), pair.definition),
+    "T08b-g5b: a repeated solve frame is the memo's same object",
+  ).toBe(cycle.solves[0]);
   if (direct.ok) {
     const publication = certifiedOf(cycle);
     expectCertifiedGeometry(publication, direct);
@@ -2146,6 +2175,178 @@ describe("review R3: frames carry no source-basis directions", () => {
     },
     60_000,
   );
+});
+
+describe("T08b-g5b solve-frame memo: content-keyed, bounded, never crosses an input the frame reads", () => {
+  test("every read input misses (and then equals the uncached frame); geometry the frame does not read hits the same frame object", () => {
+    const row = derivativeRow("SL-90 0.01");
+    const definition = row.pair.definition;
+    const input = {
+      relationship: relationshipOf(row.seeds, row.distance),
+      definition,
+      modelingTolerance: TOLERANCE,
+    };
+    const base = solvedFrame(solveOffsetFrame(input));
+    expect(
+      solveOffsetFrame({ ...input, definition: structuredClone(definition) }),
+      "The key is content, not identity: an equal clone hits the same frame.",
+    ).toBe(base);
+    const spline = definition.entities.find(
+      (entity) => entity.kind === "spline",
+    );
+    const line = definition.entities.find(
+      (entity) => entity.kind === "lineSegment",
+    );
+    if (spline?.kind !== "spline" || line?.kind !== "lineSegment")
+      throw new Error("premise: SL-90 is a spline and a line");
+    const seedPoint = spline.pointOccurrences[1]!.pointId;
+    const unrelated = {
+      ...definition.points[0]!,
+      pointId: "sketch_point_g5b_unrelated" as never,
+      position: [40, 40] as const,
+    };
+    expect(
+      solveOffsetFrame({
+        ...input,
+        definition: {
+          ...definition,
+          pointIds: [...definition.pointIds, unrelated.pointId],
+          points: [...definition.points, unrelated],
+        },
+      }),
+      "A point no seed and no coincident constraint names is not read: the same frame object.",
+    ).toBe(base);
+    const plan: OffsetFramePlan = { ...base.plan, origin: "published" };
+    const variants: readonly [string, Parameters<typeof solveOffsetFrame>][] = [
+      [
+        "a seed point 1 ulp off",
+        [
+          {
+            ...input,
+            definition: {
+              ...definition,
+              points: definition.points.map((point) =>
+                point.pointId === seedPoint
+                  ? {
+                      ...point,
+                      position: [nextUp(point.position[0]), point.position[1]],
+                    }
+                  : point,
+              ),
+            },
+          },
+        ],
+      ],
+      [
+        "an authored tangent on a seed",
+        [
+          {
+            ...input,
+            definition: {
+              ...definition,
+              entities: definition.entities.map((entity) =>
+                entity.entityId === spline.entityId && entity.kind === "spline"
+                  ? {
+                      ...entity,
+                      pointOccurrences: entity.pointOccurrences.map(
+                        (occurrence, index) =>
+                          index === 0
+                            ? {
+                                ...occurrence,
+                                tangent: {
+                                  kind: "authored" as const,
+                                  vector: [1, 0.25] as const,
+                                },
+                              }
+                            : occurrence,
+                      ),
+                    }
+                  : entity,
+              ),
+            },
+          },
+        ],
+      ],
+      [
+        "an added coincident constraint on seed terminals",
+        [
+          {
+            ...input,
+            definition: {
+              ...definition,
+              constraintIds: [
+                ...definition.constraintIds,
+                "constraint_g5b_coincident" as never,
+              ],
+              constraints: [
+                ...definition.constraints,
+                {
+                  constraintId: "constraint_g5b_coincident",
+                  kind: "coincident",
+                  label: "g5b",
+                  pointIds: [
+                    line.endPointId,
+                    spline.pointOccurrences[0]!.pointId,
+                  ],
+                } as SketchDefinition["constraints"][number],
+              ],
+            },
+          },
+        ],
+      ],
+      ["τ", [{ ...input, modelingTolerance: TOLERANCE / 2 }]],
+      [
+        "d",
+        [
+          {
+            ...input,
+            relationship: relationshipOf(row.seeds, nextUp(row.distance)),
+          },
+        ],
+      ],
+      [
+        "the authored arc set",
+        [
+          {
+            ...input,
+            relationship: relationshipOf(row.seeds, row.distance, []),
+          },
+        ],
+      ],
+      ["the plan hint (origin published)", [input, plan]],
+      ["the basis flag", [{ ...input, withSourceBasis: true }]],
+    ];
+    for (const [label, args] of variants) {
+      const memoized = solveOffsetFrame(...args);
+      expect(memoized, `${label}: a different key misses`).not.toBe(base);
+      expect(
+        encodeDeep(memoized),
+        `${label}: the memoized frame is the uncached frame of that input`,
+      ).toBe(encodeDeep(solveOffsetFrameWithoutMemoForTest(...args)));
+      expect(solveOffsetFrame(...args), `${label}: then it hits`).toBe(
+        memoized,
+      );
+    }
+  });
+
+  test("the memo is bounded: an evicted key is recomputed bitwise", () => {
+    const row = derivativeRow("SL-90 0.01");
+    const input = {
+      relationship: relationshipOf(row.seeds, row.distance),
+      definition: row.pair.definition,
+      modelingTolerance: TOLERANCE,
+    };
+    const first = solveOffsetFrame(input);
+    // More distinct keys than the memo holds (64).
+    for (let index = 1; index <= 80; index += 1)
+      solveOffsetFrame({
+        ...input,
+        modelingTolerance: TOLERANCE + index * 1e-9,
+      });
+    const again = solveOffsetFrame(input);
+    expect(again, "The first key was evicted (bounded memo).").not.toBe(first);
+    expect(encodeDeep(again)).toBe(encodeDeep(first));
+  }, 60_000);
 });
 
 describe("T08b-g2 frame derivatives: unavailable directions, tangent authority, d math A3", () => {

@@ -31,6 +31,7 @@ import {
 } from "@/contracts/sketch/runtime-schema";
 import type {
   SketchDefinition,
+  SketchRecord,
   SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
 import {
@@ -87,6 +88,21 @@ import {
 import { MockSketchSolverAdapter } from "@/domain/solver/mock-sketch-solver-adapter";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import {
+  createSketchArrangementDeriver,
+  offsetArrangementInput,
+} from "@/contracts/sketch/region-extraction";
+import { evaluateSplineSpan } from "@/contracts/sketch/spline-geometry";
+import { getStableSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session";
+import { getDerivedShellDisplayValidity } from "@/domain/editor/sketch-session/display";
+import { getEntityAnchor } from "@/domain/editor/sketch-session/annotations";
+import { collectSketchInteractionGeometry } from "@/domain/sketch-interaction/geometry";
+import { collectSketchSnapGeometries } from "@/domain/sketch-snapping/snap-candidates";
+import { deriveMeasurementViewModel } from "@/domain/measure/measurement";
+import { buildSketchVectorExportModel } from "@/domain/export/sketch-vector-export-model";
+import { buildOccRenderExport } from "@/domain/modeling/occ/snapshot";
+import { getDefaultOpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import { buildRegionProfileFace } from "@/domain/modeling/occ/sketch-profile";
 
 const XY = {
   kind: "construction",
@@ -1972,4 +1988,773 @@ describe("T08b-g5a review fixes", () => {
       generation: dragged.liveRegions.generation + 1,
     });
   });
+});
+
+// ---------------------------------------------------------------------------
+// T08b-g5b (logic lane). Seams: the live derivation boundary
+// (`SketchConstraintSolverAdapter.deriveSketchRegions`: publish → region
+// input → regions) and the exported arrangement owner with
+// `offsetArrangementInput`; the consumer seams (session display renderables,
+// sketch-interaction geometry, snap geometries, measurement view model,
+// vector export model, OCC render export) against the certified poles and
+// `queryDomain`; and the solver's shell `pointOnCurve` residual.
+// ---------------------------------------------------------------------------
+
+const regionAdapter = new SketchConstraintSolverAdapter({
+  revisionId: null,
+  neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+});
+
+/** A native closed loop: a 3-point spline closed by a line (snapped ends). */
+function splineLoopSession() {
+  let session = drawSpline(newSession(), [
+    [0, 0],
+    [1, 0.4],
+    [2, 0],
+  ]);
+  session = drawLine(session, [2, 0], [0, 0]);
+  const seeds = session.definition.entities
+    .filter((entity) => entity.kind !== "point")
+    .map((entity) => entity.entityId);
+  return { session, seeds };
+}
+
+function committedOffsetOnSide(
+  session: SketchSessionState,
+  seeds: readonly SketchEntityId[],
+  distance: number,
+  side: "left" | "right",
+) {
+  let next = beginSketchTool(session, "offset");
+  for (const entityId of seeds)
+    next = selectSketchEditToolTarget(
+      next,
+      next.definition.entities.find((entity) => entity.entityId === entityId)!
+        .target,
+    );
+  next = patchSketchEditToolValue(next, {
+    intent: "setOffsetSide",
+    value: side,
+  });
+  return commitCertified(patchSketchEditToolValue(next, { value: distance }));
+}
+
+/** The live derive effect, through the real derivation boundary. */
+function liveDerive(session: SketchSessionState) {
+  const live = session.liveSolve!;
+  return regionAdapter.deriveSketchRegions({
+    contractVersion: CONTRACT_VERSION,
+    solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+    requestId: "request_g5b_live" as never,
+    documentId: "doc_workspace" as never,
+    revisionId: "rev_0001" as never,
+    sketchId: "sketch_g5b" as never,
+    definition: live.definition,
+    solvedSnapshot: live.solvedSnapshot,
+    projectedReferences: [],
+    modelingTolerance: session.modelingTolerance,
+  });
+}
+
+/** Derive + publish, re-solving once on `planChanged` as the editor loop does. */
+async function liveRound(session: SketchSessionState) {
+  let next = session;
+  for (let round = 0; round < 2; round += 1) {
+    const response = await liveDerive(next);
+    next = publishSketchLiveRegions(
+      next,
+      response.regions,
+      response.diagnostics,
+      response.offsetPublications,
+    );
+    if (next.liveRegions.status === "current")
+      return { session: next, response };
+  }
+  throw new Error("the live round did not settle after one re-solve");
+}
+
+function shellIdOf(session: SketchSessionState) {
+  return session.definition.entities.find(
+    (entity) => entity.kind === "derivedPiecewiseCubic",
+  )!.entityId;
+}
+
+const sameBits = (left: number, right: number) => Object.is(left, right);
+
+/**
+ * Spec-only oracle: the drawn tessellation of solved shell spans, computed
+ * from the record's poles and `queryDomain` alone (local domain ends exact
+ * at untrimmed ends), `samples` steps per span, the shared knot once.
+ */
+function drawnOracle(
+  spans: ReturnType<typeof shellRecord>["spans"],
+  samples: number,
+) {
+  return spans.flatMap((span, index) => {
+    const [low, high] = span.sourceDomain;
+    const local = (value: number, end: number, exact: number) =>
+      value === end ? exact : (value - low) / (high - low);
+    const from = local(span.queryDomain[0], low, 0);
+    const to = local(span.queryDomain[1], high, 1);
+    return Array.from({ length: samples + (index === 0 ? 1 : 0) }, (_, k) => {
+      const step = k + (index === 0 ? 0 : 1);
+      return evaluateSplineSpan(
+        {
+          interval: span.sourceDomain,
+          poles: span.poles,
+          differential: {
+            interval: [0, 0],
+            poles: [
+              [0, 0],
+              [0, 0],
+              [0, 0],
+              [0, 0],
+            ],
+          },
+        },
+        {
+          kind: "local",
+          value: step === samples ? to : from + ((to - from) * step) / samples,
+        },
+      ).position;
+    });
+  });
+}
+
+function sketchRecordOf(session: SketchSessionState) {
+  const live = session.liveSolve!;
+  return {
+    sketchId: "sketch_g5b",
+    label: "Sketch g5b",
+    plane: session.plane,
+    ownerFeatureId: null,
+    sketch: {
+      definition: live.definition,
+      solvedSnapshot: live.solvedSnapshot,
+      regions: session.liveRegions.regions,
+      projectedReferences: [],
+      derivedValidity: getSketchSessionDerivedValidity(session),
+    },
+  } as never;
+}
+
+const xy = (point: readonly number[]) => [point[0]!, point[1]!];
+
+describe("T08b-g5b consumers and region wiring", () => {
+  test("g5b-1: an offset loop's regions close through the live derivation and keep their ids across the owner's partition refinement", async () => {
+    const { session, seeds } = splineLoopSession();
+    const committed = committedOffsetOnSide(session, seeds, 0.01, "left");
+    const shellId = shellIdOf(committed);
+    let { session: live, response } = await liveRound(committed);
+    expect(response.offsetPublications.map((item) => item.status)).toEqual([
+      "certified",
+    ]);
+    expect(
+      shellRecord(live.liveSolve!.solvedSnapshot).publication,
+      "The live round certifies the shell (G7).",
+    ).toBe("certified");
+    expect(
+      response.diagnostics,
+      "The outward loop derives with no diagnostic.",
+    ).toEqual([]);
+    const bounded = response.regions.filter((region) =>
+      region.loops.some((loop) =>
+        loop.segments.some(
+          (segment) =>
+            segment.branch.source.kind === "entity" &&
+            segment.branch.source.entityId === shellId,
+        ),
+      ),
+    );
+    expect(
+      bounded.map((region) => [region.isClosed, region.loops.length]),
+      "The offset loop bounds one closed annulus whose hole is the source loop.",
+    ).toEqual([[true, 2]]);
+    const outputSpanIds = new Set(
+      shellRecord(live.liveSolve!.solvedSnapshot).spans.map(
+        (span) => span.outputSpanId,
+      ),
+    );
+    for (const segment of bounded[0]!.loops.flatMap((loop) => loop.segments))
+      if (
+        segment.branch.source.kind === "entity" &&
+        segment.branch.source.entityId === shellId
+      )
+        expect(
+          outputSpanIds.has(segment.branch.spanId),
+          "A shell segment's branch is (shell, outputSpanId) (region identity).",
+        ).toBe(true);
+    const ids = response.regions.map((region) => region.regionId).sort();
+    expect(ids, "The annulus and the source region.").toHaveLength(2);
+
+    const spline = live.definition.entities.find(
+      (entity) => entity.kind === "spline",
+    )!;
+    if (spline.kind !== "spline") throw new Error("spline");
+    const middle = spline.pointOccurrences[1]!.pointId;
+    const partitions = new Set<number>();
+    for (const height of [0.5, 0.6, 0.7, 0.85]) {
+      const definition = {
+        ...live.definition,
+        points: live.definition.points.map((point) =>
+          point.pointId === middle
+            ? { ...point, position: [1, height] as const }
+            : point,
+        ),
+      };
+      ({ session: live, response } = await liveRound(
+        withLiveSolveBasis({ ...live, definition }, definition),
+      ));
+      partitions.add(shellRecord(live.liveSolve!.solvedSnapshot).spans.length);
+      expect(
+        response.regions.map((region) => region.regionId).sort(),
+        `height ${height}: region ids survive the refinement`,
+      ).toEqual(ids);
+    }
+    expect(
+      partitions.size,
+      "premise: the drag changes the owner partition",
+    ).toBeGreaterThan(1);
+  }, 300_000);
+
+  test("g5b-1b (known limit, fails closed): an inward offset of the loop certifies, but its trimmed-off tails cross the source line, so the G14 guard blocks the component", async () => {
+    const { session, seeds } = splineLoopSession();
+    const committed = committedOffsetOnSide(session, seeds, 0.01, "right");
+    const shellId = shellIdOf(committed);
+    const { response } = await liveRound(committed);
+    expect(response.offsetPublications.map((item) => item.status)).toEqual([
+      "certified",
+    ]);
+    expect(
+      response.regions,
+      "Undrawn tail geometry never bounds a face: no region is published.",
+    ).toEqual([]);
+    expect(
+      response.diagnostics.find(
+        (diagnostic) => diagnostic.code === "region-derived-tail-crossing",
+      )?.target,
+      "The targeted tail-crossing diagnostic names the shell.",
+    ).toEqual({ kind: "entity", entityId: shellId });
+  }, 300_000);
+
+  test("g5b-2: a provisional shell is never region input (G7); it is a targeted unpublished obstacle", async () => {
+    const { session, seeds } = splineLoopSession();
+    const committed = committedOffsetOnSide(session, seeds, 0.01, "left");
+    const shellId = shellIdOf(committed);
+    const live = committed.liveSolve!;
+    expect(shellRecord(live.solvedSnapshot).publication).toBe("provisional");
+    const derivationId = live.definition.derivedRelationships![0]!.derivationId;
+    const deriver = createSketchArrangementDeriver(
+      createCertifiedNeutralCurveQueryCapabilityForTest(),
+    );
+    for (const [label, publications] of [
+      [
+        "certified relationship, provisional record",
+        [{ derivationId, status: "certified" }],
+      ],
+      ["pending re-solve", [{ derivationId, status: "planChanged" }]],
+      ["unpublished (no publication)", []],
+    ] as const) {
+      const input = offsetArrangementInput(
+        live.definition,
+        live.solvedSnapshot,
+        publications as readonly SketchOffsetPublicationRecord[],
+      );
+      expect(
+        input.derivedCurves,
+        `${label}: only a certified record of a certified relationship is a derived curve`,
+      ).toEqual([]);
+      const result = await deriver.derive({
+        documentId: "doc_workspace" as never,
+        revisionId: "rev_0001" as never,
+        sketchId: "sketch_g5b" as never,
+        definition: live.definition,
+        solvedSnapshot: live.solvedSnapshot,
+        projectedReferences: [],
+        modelingTolerance: 1e-3,
+        ...input,
+      });
+      expect(
+        result.regions.some((region) =>
+          region.loops.some((loop) =>
+            loop.segments.some(
+              (segment) =>
+                segment.branch.source.kind === "entity" &&
+                segment.branch.source.entityId === shellId,
+            ),
+          ),
+        ),
+        `${label}: no region is bounded by the provisional shell`,
+      ).toBe(false);
+      expect(
+        result.diagnostics.some(
+          (diagnostic) =>
+            diagnostic.code === "region-derived-unpublished" &&
+            diagnostic.target?.kind === "entity" &&
+            diagnostic.target.entityId === shellId,
+        ),
+        `${label}: the shell is a targeted unpublished obstacle`,
+      ).toBe(true);
+    }
+    const certified = applyOffsetPublications(
+      live.definition,
+      live.solvedSnapshot,
+      [{ derivationId, status: "certified" }],
+    );
+    expect(
+      offsetArrangementInput(live.definition, certified, [
+        { derivationId, status: "certified" },
+      ]).derivedCurves?.map((curve) => curve.outputEntityId),
+      "Control: the certified record of a certified relationship is the one derived curve.",
+    ).toEqual([shellId]);
+  }, 300_000);
+
+  test("g5b-3: line/arc outputs of a failed or pending relationship never bound regions (G5, g5a review A2); a certified one does", async () => {
+    let session = acceptSketchDraw(
+      startSketchDraw(beginSketchTool(newSession(), "rectangle"), [0, 0]),
+      [4, 2],
+    );
+    const seeds = session.definition.entities
+      .filter((entity) => entity.kind === "lineSegment")
+      .map((entity) => entity.entityId);
+    session = committedOffsetOnSide(session, seeds, 0.5, "left");
+    const live = session.liveSolve!;
+    const relationship = live.definition.derivedRelationships![0]!;
+    if (relationship.kind !== "offset") throw new Error("offset");
+    const outputIds = new Set([
+      ...relationship.outputs.map((output) => output.outputEntityId),
+      ...relationship.jointOutputs.map((output) => output.outputEntityId),
+    ]);
+    const usesOutputs = (
+      regions: readonly {
+        loops: readonly {
+          segments: readonly {
+            branch: { source: { kind: string; entityId?: unknown } };
+          }[];
+        }[];
+      }[],
+    ) =>
+      regions.some((region) =>
+        region.loops.some((loop) =>
+          loop.segments.some(
+            (segment) =>
+              segment.branch.source.kind === "entity" &&
+              outputIds.has(segment.branch.source.entityId as SketchEntityId),
+          ),
+        ),
+      );
+    const certified = await liveDerive(session);
+    expect(certified.offsetPublications.map((item) => item.status)).toEqual([
+      "certified",
+    ]);
+    expect(
+      usesOutputs(certified.regions),
+      "Control: a certified relationship's outputs bound the offset region.",
+    ).toBe(true);
+    const deriver = createSketchArrangementDeriver(
+      createCertifiedNeutralCurveQueryCapabilityForTest(),
+    );
+    for (const status of ["failed", "planChanged"] as const) {
+      const result = await deriver.derive({
+        documentId: "doc_workspace" as never,
+        revisionId: "rev_0001" as never,
+        sketchId: "sketch_g5b" as never,
+        definition: live.definition,
+        solvedSnapshot: live.solvedSnapshot,
+        projectedReferences: [],
+        modelingTolerance: 1e-3,
+        ...offsetArrangementInput(live.definition, live.solvedSnapshot, [
+          { derivationId: relationship.derivationId, status },
+        ]),
+      });
+      expect(
+        usesOutputs(result.regions),
+        `${status}: no region is bounded by the relationship's line/arc outputs`,
+      ).toBe(false);
+      const targeted = new Set(
+        result.diagnostics.flatMap((diagnostic) =>
+          diagnostic.code === "region-derived-unpublished" &&
+          diagnostic.target?.kind === "entity" &&
+          diagnostic.message.includes(relationship.derivationId)
+            ? [diagnostic.target.entityId]
+            : [],
+        ),
+      );
+      expect(
+        [...outputIds].every((entityId) => targeted.has(entityId)),
+        `${status}: every output (lines and joint arcs) has its targeted diagnostic`,
+      ).toBe(true);
+    }
+  }, 300_000);
+
+  test("g5b-5: shell display state — provisional while pending or dragged is stale (normal colour, U-A); settled uncertified is invalid; certified is current; no handles", async () => {
+    const { session, seeds } = splineLoopSession();
+    const committed = committedOffsetOnSide(session, seeds, 0.01, "left");
+    const shellId = shellIdOf(committed);
+    const shellRenderable = (state: SketchSessionState) =>
+      getStableSketchSessionDisplayRenderables(state).find(
+        (item) => item.id === `renderable_sketch_shell_${shellId}`,
+      );
+    expect(committed.liveRegions.status, "premise: the round is pending").toBe(
+      "pending",
+    );
+    expect(
+      shellRenderable(committed)?.regionValidity,
+      "A provisional shell whose publication is pending is stale (normal colour).",
+    ).toBe("stale");
+    const derivationId =
+      committed.definition.derivedRelationships![0]!.derivationId;
+    const failed = publishSketchLiveRegions(
+      committed,
+      [],
+      [],
+      [
+        {
+          derivationId,
+          status: "failed",
+          diagnostic: {
+            code: OFFSET_DIAGNOSTIC_CODES.topologyUncertain,
+            severity: "error",
+            message: "forged failure",
+            target: null,
+          },
+        },
+      ],
+    );
+    expect(
+      shellRenderable(failed)?.regionValidity,
+      "A shell whose round settled without certifying it is invalid (the existing red tint).",
+    ).toBe("invalid");
+    const { session: live } = await liveRound(committed);
+    expect(
+      shellRenderable(live)?.regionValidity,
+      "A certified shell is current.",
+    ).toBe("current");
+    const dragging = { ...failed, activeDrag: {} as never };
+    expect(
+      getDerivedShellDisplayValidity(dragging, "provisional"),
+      "During a drag a provisional shell is stale (U-A: normal colour).",
+    ).toBe("stale");
+    expect(
+      getStableSketchSessionDisplayRenderables(live).some(
+        (item) =>
+          item.target?.kind === "sketchPoint" && item.id.includes(shellId),
+      ),
+      "A shell has no handle renderables of its own.",
+    ).toBe(false);
+  }, 300_000);
+
+  test("g5b-6: a shell's annotation anchor lies on the drawn curve (middle of its queryDomain range); without its solved record, the start terminal point", async () => {
+    const { session, seeds } = splineLoopSession();
+    const committed = committedOffsetOnSide(session, seeds, 0.01, "right");
+    const shellId = shellIdOf(committed);
+    const live = committed.liveSolve!;
+    const record = shellRecord(live.solvedSnapshot);
+    const anchor = getEntityAnchor(
+      live.definition,
+      shellId,
+      live.solvedSnapshot,
+    )!;
+    const from = record.spans[0]!.queryDomain[0];
+    const to = record.spans.at(-1)!.queryDomain[1];
+    const middle = (from + to) / 2;
+    const span = record.spans.find(
+      (candidate) =>
+        candidate.queryDomain[0] <= middle &&
+        middle <= candidate.queryDomain[1],
+    )!;
+    const expected = evaluateSplineSpan(
+      {
+        interval: span.sourceDomain,
+        poles: span.poles,
+        differential: {
+          interval: [0, 0],
+          poles: [
+            [0, 0],
+            [0, 0],
+            [0, 0],
+            [0, 0],
+          ],
+        },
+      },
+      { kind: "source", value: middle },
+    ).position;
+    expect(
+      Math.hypot(anchor[0] - expected[0], anchor[1] - expected[1]),
+      "The anchor is the curve point at the middle of the drawn parameter range.",
+    ).toBeLessThan(1e-12);
+    const relationship = live.definition.derivedRelationships![0]!;
+    if (relationship.kind !== "offset") throw new Error("offset");
+    const start = live.definition.points.find(
+      (point) =>
+        point.pointId === relationship.piecewiseCubicOutputs[0]!.startPointId,
+    )!.position;
+    expect(
+      getEntityAnchor(live.definition, shellId),
+      "Without the solved snapshot the anchor is the start terminal point.",
+    ).toEqual(start);
+  }, 300_000);
+
+  test("g5b-4: display, pick, snap, measure, vector export and the OCC snapshot read the same certified spans clipped to queryDomain; the shell pointOnCurve binds only inside the drawn domain", async () => {
+    const { session, seeds } = splineLoopSession();
+    const committed = committedOffsetOnSide(session, seeds, 0.01, "right");
+    const shellId = shellIdOf(committed);
+    const { session: live } = await liveRound(committed);
+    const record = shellRecord(live.liveSolve!.solvedSnapshot);
+    expect(record.publication).toBe("certified");
+    const trimmed = record.spans.filter(
+      (span) =>
+        !sameBits(span.queryDomain[0], span.sourceDomain[0]) ||
+        !sameBits(span.queryDomain[1], span.sourceDomain[1]),
+    );
+    expect(
+      trimmed.length,
+      "premise: the inward shell is trimmed at both ends",
+    ).toBe(2);
+    const expected16 = drawnOracle(record.spans, 16);
+
+    // Display (session renderables).
+    const renderable = getStableSketchSessionDisplayRenderables(live).find(
+      (item) => item.id === `renderable_sketch_shell_${shellId}`,
+    );
+    expect(renderable?.target).toMatchObject({ entityId: shellId });
+    expect(renderable?.regionValidity, "A certified shell is current.").toBe(
+      "current",
+    );
+    expect(
+      renderable?.geometry.kind === "polyline" &&
+        renderable.geometry.points.map(xy),
+      "Display draws the certified spans clipped to queryDomain.",
+    ).toEqual(expected16);
+
+    // Pick.
+    const pick = collectSketchInteractionGeometry(live).find(
+      (geometry) => geometry.id === `sketch-entity:${shellId}`,
+    );
+    expect(
+      pick?.kind === "sampledCurve" && pick.points,
+      "Pick uses exactly the displayed spans.",
+    ).toEqual(expected16);
+
+    // Snap.
+    const snap = collectSketchSnapGeometries({
+      definition: live.definition,
+      solvedSnapshot: live.liveSolve!.solvedSnapshot,
+    }).find(
+      (geometry) =>
+        geometry.source.kind === "localEntity" &&
+        geometry.source.entityId === shellId,
+    );
+    expect(
+      snap?.kind === "spline" && snap.fitPoints,
+      "Snap uses exactly the displayed spans.",
+    ).toEqual(expected16);
+
+    // Measure (a committed sketch record).
+    const measured = deriveMeasurementViewModel({
+      activeToolId: "measure",
+      selection: [
+        {
+          kind: "sketchEntity",
+          sketchId: "sketch_g5b",
+          entityId: shellId,
+        } as never,
+      ],
+      snapshot: { document: { sketches: [sketchRecordOf(live)] } } as never,
+    });
+    const witness = measured?.witnesses[0];
+    expect(
+      witness?.kind === "polyline" && witness.points.map(xy),
+      "Measure samples the same clipped spans (48 steps per span).",
+    ).toEqual(drawnOracle(record.spans, 48));
+
+    // Vector export: SVG cubics clipped to queryDomain.
+    const exported = buildSketchVectorExportModel({
+      documentId: "doc_workspace" as never,
+      revisionId: "rev_0001" as never,
+      sketches: [sketchRecordOf(live)],
+      target: { kind: "sketch", sketchId: "sketch_g5b" } as never,
+    });
+    if ("diagnostic" in exported) throw new Error(exported.diagnostic.message);
+    const entity = exported.entities.find(
+      (candidate) => candidate.entityId === shellId,
+    );
+    if (entity?.kind !== "spline") throw new Error("exported shell");
+    expect(entity.spans).toHaveLength(record.spans.length);
+    const bezier = (poles: readonly (readonly number[])[], s: number) =>
+      [0, 1].map(
+        (axis) =>
+          (1 - s) ** 3 * poles[0]![axis]! +
+          3 * s * (1 - s) ** 2 * poles[1]![axis]! +
+          3 * s * s * (1 - s) * poles[2]![axis]! +
+          s ** 3 * poles[3]![axis]!,
+      );
+    record.spans.forEach((span, index) => {
+      const poles = entity.spans[index]!;
+      const ends = drawnOracle([span], 1);
+      expect(
+        [xy(poles[0]), xy(poles[3])],
+        `span ${index}: the exported cubic ends are the drawn ends`,
+      ).toEqual(ends);
+      if (!trimmed.includes(span)) {
+        expect(
+          poles,
+          `span ${index}: an untrimmed span exports its own poles`,
+        ).toEqual(span.poles);
+        return;
+      }
+      const drawn = drawnOracle([span], 8);
+      drawn.forEach((point, k) => {
+        const at = bezier(poles, k / 8);
+        expect(
+          Math.hypot(at[0]! - point[0]!, at[1]! - point[1]!),
+          `span ${index}: the clipped cubic is the drawn sub-curve (s = ${k}/8)`,
+        ).toBeLessThan(1e-12);
+      });
+    });
+
+    // OCC snapshot (committed render export).
+    const occ = buildOccRenderExport(
+      { constructions: [], bodies: [], sketches: [] } as never,
+      new Map(),
+      {},
+      [sketchRecordOf(live)],
+    ).records.find(
+      (item) =>
+        item.binding.target.kind === "sketchEntity" &&
+        item.binding.target.entityId === shellId,
+    );
+    expect(
+      occ?.geometry.kind === "polyline" && occ.geometry.points.map(xy),
+      "The OCC snapshot draws the same clipped spans.",
+    ).toEqual(expected16);
+
+    // Routed check: the shell pointOnCurve binds only inside the drawn
+    // domain. A point just past the start tail's undrawn end binds to the
+    // displayed start (the trim), not to the closer tail.
+    const first = record.spans[0]!;
+    expect(trimmed).toContain(first);
+    const tailEnd = first.poles[0];
+    const drawnStart = expected16[0]!;
+    const pointPosition = [
+      tailEnd[0] + (tailEnd[0] - drawnStart[0]!) * 0.5,
+      tailEnd[1] + (tailEnd[1] - drawnStart[1]!) * 0.5,
+    ] as const;
+    const pointId = "sketch_point_g5b_probe" as SketchPointId;
+    const definition = live.liveSolve!.definition;
+    const probe: SketchDefinition = {
+      ...definition,
+      pointIds: [...definition.pointIds, pointId],
+      points: [
+        ...definition.points,
+        {
+          ...definition.points[0]!,
+          pointId,
+          label: "probe",
+          target: { ...definition.points[0]!.target, pointId },
+          position: pointPosition,
+        },
+      ],
+      constraintIds: [...definition.constraintIds, "constraint_g5b_probe"],
+      constraints: [
+        ...definition.constraints,
+        {
+          constraintId: "constraint_g5b_probe",
+          kind: "pointOnCurve",
+          label: "probe",
+          point: { kind: "localPoint", pointId },
+          curve: { kind: "localEntity", entityId: shellId },
+        } as SketchDefinition["constraints"][number],
+      ],
+    };
+    const tolerances = {
+      coincidence: 1e-6,
+      angleRadians: 1e-6,
+      minimumSegmentLength: 1e-6,
+    };
+    const values = getSketchSolveInitialValuesForTest(probe, tolerances, 1e-3);
+    const evaluated = evaluateSketchScalarConstraintForTest({
+      definition: probe,
+      constraintId: "constraint_g5b_probe",
+      values,
+      tolerances,
+      modelingTolerance: 1e-3,
+    });
+    const at = [...values.keys()].find(
+      (index) =>
+        sameBits(values[index]!, pointPosition[0]) &&
+        sameBits(values[index + 1]!, pointPosition[1]),
+    )!;
+    const bound = [
+      pointPosition[0] - evaluated.gradient[at]!,
+      pointPosition[1] - evaluated.gradient[at + 1]!,
+    ];
+    expect(
+      Math.hypot(bound[0]! - drawnStart[0]!, bound[1]! - drawnStart[1]!),
+      "The residual binds the probe to the displayed trimmed start.",
+    ).toBeLessThan(1e-12);
+    expect(
+      Math.hypot(pointPosition[0] - tailEnd[0], pointPosition[1] - tailEnd[1]),
+      "premise: the undrawn tail is closer to the probe than the drawn domain",
+    ).toBeLessThan(
+      Math.hypot(pointPosition[0] - bound[0]!, pointPosition[1] - bound[1]!),
+    );
+  }, 300_000);
+
+  test("g5b-7 (review R1, U9): on native OCC the profile face of the shell-bounded annulus raises the explicit spline-profile error naming the shell and one of its output spans", async () => {
+    const { session, seeds } = splineLoopSession();
+    const committed = committedOffsetOnSide(session, seeds, 0.01, "left");
+    const shellId = shellIdOf(committed);
+    const { session: live, response } = await liveRound(committed);
+    const solved = live.liveSolve!;
+    const outputSpanIds = new Set(
+      shellRecord(solved.solvedSnapshot).spans.map((span) => span.outputSpanId),
+    );
+    const sketch: SketchRecord = {
+      ownerDocumentId: "doc_workspace" as never,
+      ownerRevisionId: "rev_0001" as never,
+      ownerFeatureId: null,
+      ownerSketchId: "sketch_g5b" as never,
+      ownerBodyId: null,
+      sketchId: "sketch_g5b" as never,
+      label: "Sketch g5b",
+      planeSupport: XY as never,
+      definition: solved.definition,
+      solvedSnapshot: solved.solvedSnapshot,
+      derivedValidity: { state: "current", diagnostics: [] },
+      projectedReferences: [],
+      regions: response.regions,
+    };
+    const usesShell = (region: (typeof response.regions)[number]) =>
+      region.loops.some((loop) =>
+        loop.segments.some(
+          (segment) =>
+            segment.branch.source.kind === "entity" &&
+            segment.branch.source.entityId === shellId,
+        ),
+      );
+    const annulus = response.regions.filter(usesShell);
+    expect(annulus, "premise: one shell-bounded region (g5b-1)").toHaveLength(
+      1,
+    );
+    const oc = await getDefaultOpenCascadeInstance();
+    let message = "";
+    try {
+      buildRegionProfileFace(oc, { plane: live.plane, sketch }, annulus[0]!);
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    const u9 =
+      /^Spline profile boundary sketch entity (\S+) span (\S+) is not yet supported by the OCC profile builder\.$/.exec(
+        message,
+      );
+    expect(
+      u9?.[1],
+      `The annulus fails with the U9 error naming the shell (${message}).`,
+    ).toBe(shellId);
+    expect(
+      outputSpanIds.has(u9![2]!),
+      "The U9 error names one of the shell's output spans.",
+    ).toBe(true);
+  }, 300_000);
 });
