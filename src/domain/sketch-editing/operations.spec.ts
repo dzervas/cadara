@@ -152,6 +152,8 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
         }) as SketchEntityDefinition,
       createEntityId: (suffix) =>
         `sketch_entity_10_${suffix}` as SketchEntityId,
+      createConstraintId: (suffix) => `constraint_10_${suffix}` as const,
+      createDimensionId: (suffix) => `dimension_10_${suffix}` as const,
       createPoint: (label, pointId, position) => ({
         pointId,
         label,
@@ -911,7 +913,213 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
     ]);
   }
 
+  // T08b-g7-F (issue 06, "preserve relationships that define a primitive";
+  // sizing decision B): the authored records of one Fillet / Slot action.
+  function testFilletAuthorsTangencyAndArcEndpointBinding() {
+    const fillet = createSketchFilletMutation({
+      definition: createCornerDefinition(),
+      entityIds: ["sketch_entity_ab", "sketch_entity_ac"] as SketchEntityId[],
+      radius: 1,
+      sequence: 10,
+      factories: createFactories(),
+    });
+    const definition = fillet.definition!;
+    const arc = definition.entities.find((entity) => entity.kind === "arc");
+    if (arc?.kind !== "arc") throw new Error("Fillet should add an arc.");
+    const lineEnd = (entityId: string) => {
+      const line = definition.entities.find(
+        (entity) => entity.entityId === entityId,
+      );
+      if (line?.kind !== "lineSegment") throw new Error("not a line");
+      return line.startPointId;
+    };
+    expect(
+      [lineEnd("sketch_entity_ab"), lineEnd("sketch_entity_ac")],
+      "premise: the arc starts on AB and ends on AC (the trimmed ends)",
+    ).toEqual([arc.startPointId, arc.endPointId]);
+    expect(
+      definition.constraints,
+      "Fillet authors one tangent constraint per trimmed line, arc first.",
+    ).toEqual([
+      {
+        constraintId: "constraint_10_fillet-tangent-a",
+        kind: "tangent",
+        label: "Fillet 10 tangent A",
+        entityIds: [arc.entityId, "sketch_entity_ab"],
+        relation: "external",
+      },
+      {
+        constraintId: "constraint_10_fillet-tangent-b",
+        kind: "tangent",
+        label: "Fillet 10 tangent B",
+        entityIds: [arc.entityId, "sketch_entity_ac"],
+        relation: "external",
+      },
+    ]);
+    expect(
+      definition.dimensions,
+      "Fillet binds its arc to its end points as every arc tool does, and adds no radius dimension.",
+    ).toEqual([
+      {
+        dimensionId: "dimension_10_fillet-arc-start",
+        kind: "arcStartPointCoincident",
+        label: "Fillet 10 start",
+        entityId: arc.entityId,
+        pointId: arc.startPointId,
+      },
+      {
+        dimensionId: "dimension_10_fillet-arc-end",
+        kind: "arcEndPointCoincident",
+        label: "Fillet 10 end",
+        entityId: arc.entityId,
+        pointId: arc.endPointId,
+      },
+    ]);
+    expect(definition.constraintIds).toEqual(
+      definition.constraints.map((constraint) => constraint.constraintId),
+    );
+    expect(definition.dimensionIds).toEqual(
+      definition.dimensions.map((dimension) => dimension.dimensionId),
+    );
+  }
+
+  function testSlotAuthorsTangencyAndArcEndpointBinding() {
+    const lineSlot = createSketchSlotContribution({
+      definition: makeDefinition(
+        [
+          makePoint("sketch_point_a", "A", [0, 0]),
+          makePoint("sketch_point_b", "B", [4, 0]),
+        ],
+        [
+          makeLine(
+            "sketch_entity_ab",
+            "AB",
+            "sketch_point_a",
+            "sketch_point_b",
+          ),
+        ],
+      ),
+      entityIds: ["sketch_entity_ab"] as SketchEntityId[],
+      width: 2,
+      sequence: 10,
+      factories: createFactories(),
+    }).contribution!;
+    const byId = new Map(
+      lineSlot.entities.map((entity) => [entity.entityId, entity]),
+    );
+    const shape = (entityId: string) => {
+      const entity = byId.get(entityId as SketchEntityId)!;
+      return entity.kind === "arc"
+        ? [entity.kind, entity.startPointId, entity.endPointId]
+        : entity.kind === "lineSegment"
+          ? [entity.kind, entity.startPointId, entity.endPointId]
+          : [entity.kind];
+    };
+    expect(
+      lineSlot.constraints?.map((constraint) =>
+        constraint.kind === "tangent"
+          ? [constraint.constraintId, ...constraint.entityIds]
+          : [constraint.kind],
+      ),
+      "Line slot: each end arc is tangent to both side lines.",
+    ).toEqual([
+      [
+        "constraint_10_slot-end-tangent-left",
+        "sketch_entity_10_slot-end-arc",
+        "sketch_entity_10_slot-left-line",
+      ],
+      [
+        "constraint_10_slot-end-tangent-right",
+        "sketch_entity_10_slot-end-arc",
+        "sketch_entity_10_slot-right-line",
+      ],
+      [
+        "constraint_10_slot-start-tangent-left",
+        "sketch_entity_10_slot-start-arc",
+        "sketch_entity_10_slot-left-line",
+      ],
+      [
+        "constraint_10_slot-start-tangent-right",
+        "sketch_entity_10_slot-start-arc",
+        "sketch_entity_10_slot-right-line",
+      ],
+    ]);
+    expect(
+      lineSlot.dimensions?.map((dimension) =>
+        dimension.kind === "arcStartPointCoincident" ||
+        dimension.kind === "arcEndPointCoincident"
+          ? [dimension.kind, dimension.entityId, dimension.pointId]
+          : [dimension.kind],
+      ),
+      "Line slot: both end arcs are bound to their end points; no radius dimension.",
+    ).toEqual(
+      [
+        "sketch_entity_10_slot-end-arc",
+        "sketch_entity_10_slot-start-arc",
+      ].flatMap((arcId) => {
+        const [, start, end] = shape(arcId);
+        return [
+          ["arcStartPointCoincident", arcId, start],
+          ["arcEndPointCoincident", arcId, end],
+        ];
+      }),
+    );
+    expect(
+      new Set(lineSlot.dimensions?.map((dimension) => dimension.dimensionId))
+        .size,
+      "Slot dimension ids are unique.",
+    ).toBe(4);
+
+    const arcSlot = createSketchSlotContribution({
+      definition: makeDefinition(
+        [
+          makePoint("sketch_point_center", "Center", [0, 0]),
+          makePoint("sketch_point_start", "Start", [2, 0]),
+          makePoint("sketch_point_end", "End", [0, 2]),
+        ],
+        [
+          makeArc(
+            "sketch_entity_arc",
+            "Arc",
+            "sketch_point_center",
+            "sketch_point_start",
+            "sketch_point_end",
+          ),
+        ],
+      ),
+      entityIds: ["sketch_entity_arc"] as SketchEntityId[],
+      width: 1,
+      sequence: 10,
+      factories: createFactories(),
+    }).contribution!;
+    const arcs = arcSlot.entities.filter(
+      (entity): entity is Extract<SketchEntityDefinition, { kind: "arc" }> =>
+        entity.kind === "arc",
+    );
+    expect(
+      arcSlot.constraints ?? [],
+      "Arc slot: its caps are radial lines, so no arc rounds a line.",
+    ).toEqual([]);
+    expect(
+      arcSlot.dimensions?.map((dimension) =>
+        dimension.kind === "arcStartPointCoincident" ||
+        dimension.kind === "arcEndPointCoincident"
+          ? [dimension.kind, dimension.entityId, dimension.pointId]
+          : [dimension.kind],
+      ),
+      "Arc slot: both side arcs are bound to their end points.",
+    ).toEqual(
+      arcs.flatMap((arc) => [
+        ["arcStartPointCoincident", arc.entityId, arc.startPointId],
+        ["arcEndPointCoincident", arc.entityId, arc.endPointId],
+      ]),
+    );
+    expect(arcs).toHaveLength(2);
+  }
+
   testFilletAndChamferMutateAdjacentLines();
+  testFilletAuthorsTangencyAndArcEndpointBinding();
+  testSlotAuthorsTangencyAndArcEndpointBinding();
   testExtendAndSplitMutateOnlySelectedLine();
   testSlotCreatesDurableGeometryForSupportedReferences();
   testSlotCreatesProfileOffsetsForClosedLineLoops();

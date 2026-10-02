@@ -25,6 +25,7 @@ export interface Authored {
   readonly points: SketchDefinition["points"];
   readonly entities: SketchDefinition["entities"];
   readonly constraints?: SketchDefinition["constraints"];
+  readonly dimensions?: SketchDefinition["dimensions"];
 }
 
 export interface EndpointSnaps {
@@ -1061,8 +1062,20 @@ export function createNativeArcOffsetHarness(options: {
       lineId,
       width,
     });
+    // T08b-g7-F: Slot's arc-endpoint dimensions are part of its authored
+    // relationships (`merge` keeps constraints only; the arc tool rows keep
+    // their historical shape).
+    const merged = merge(definition, contribution);
+    const dimensions = contribution.dimensions ?? [];
     return {
-      definition: merge(definition, contribution),
+      definition: {
+        ...merged,
+        dimensionIds: [
+          ...merged.dimensionIds,
+          ...dimensions.map((dimension) => dimension.dimensionId),
+        ],
+        dimensions: [...merged.dimensions, ...dimensions],
+      },
       ids: contribution.entities.map((entity) => entity.entityId),
     };
   };
@@ -1479,27 +1492,15 @@ export function seedArcRows(): readonly SeedArcRow[] {
   );
   add(
     "rounded rect rotated + Tangent, dragged 1e-4",
+    // "+ Tangent": since T08b-g7-F the tangency is the Fillet's own (two
+    // `tangent` constraints per fillet). The native Tangent tool, which this
+    // row used to apply, adds nothing between two local curves (it only
+    // constrains a local curve to a projected circle/arc).
     (h) => {
       let { definition } = filleted(0.3, 0.2)(h);
       const arcs = definition.entities.filter(
         (entity) => entity.kind === "arc",
       );
-      const lines = definition.entities.filter(
-        (entity) => entity.kind === "lineSegment",
-      );
-      for (const arc of arcs)
-        for (const line of lines)
-          if (
-            arc.kind === "arc" &&
-            line.kind === "lineSegment" &&
-            [line.startPointId, line.endPointId].some(
-              (point) => point === arc.startPointId || point === arc.endPointId,
-            )
-          )
-            definition = h.constraint(definition, "constraintTangent", [
-              arc.entityId,
-              line.entityId,
-            ]);
       const first = arcs[0]!;
       if (first.kind !== "arc") throw new Error("not an arc");
       definition = {
@@ -1561,8 +1562,9 @@ export function seedArcCapacityRows(): readonly SeedArcRow[] {
 
 /**
  * T08b-g7 (audit C1, user decision U-G8): the native outlines of the C1
- * matrix, by `seedArcRows` name. Fillet records no tangency, so an edit of a
- * source line kinks the fillet ends on it (`withLineLength`).
+ * matrix, by `seedArcRows` name. A fillet authored before T08b-g7-F records
+ * no tangency, so an edit of a source line kinks the fillet ends on it
+ * (`withLineLength`); `editedFilletSketch` builds those by default.
  */
 export const EDITED_FILLET_ROWS = [
   "rect + 1 fillet",
@@ -1577,14 +1579,56 @@ export const EDITED_FILLET_ROWS = [
 export const EDITED_FILLET_DISTANCES = [0.01, -0.01, 0.1, -0.1] as const;
 export const EDITED_FILLET_DELTAS = [0.001, 0.05, 0.2] as const;
 
-/** One C1 outline (a `seedArcRows` builder) and the source line it edits. */
+/**
+ * T08b-g7-F: the tangent-fillet C1 matrix (design §4, 5 filleted rows × d ×
+ * Δ = 75 cells) adds d = −0.5, where the solver's quadratic tangency
+ * residual leaves a kink large enough to matter (review R15).
+ */
+export const TANGENT_FILLET_DISTANCES = [0.01, -0.01, 0.1, -0.1, -0.5] as const;
+
+/**
+ * A Fillet authored before T08b-g7-F: the native Fillet's two `tangent`
+ * constraints and its arc-endpoint dimensions removed (existing documents
+ * are not migrated). On the C1 outlines every tangent constraint and every
+ * arc-endpoint dimension is a fillet's.
+ */
+export function withoutFilletRelationships(
+  definition: SketchDefinition,
+): SketchDefinition {
+  const constraints = definition.constraints.filter(
+    (constraint) => constraint.kind !== "tangent",
+  );
+  const dimensions = definition.dimensions.filter(
+    (dimension) =>
+      dimension.kind !== "arcStartPointCoincident" &&
+      dimension.kind !== "arcEndPointCoincident",
+  );
+  return {
+    ...definition,
+    constraintIds: constraints.map((constraint) => constraint.constraintId),
+    constraints,
+    dimensionIds: dimensions.map((dimension) => dimension.dimensionId),
+    dimensions,
+  };
+}
+
+/**
+ * One C1 outline (a `seedArcRows` builder) and the source line it edits.
+ * `fillets` = "beforeG7F" (default; the T08b-g7a kinked-corner matrix) strips
+ * the Fillet relationships, "native" keeps them.
+ */
 export function editedFilletSketch(
   harness: NativeArcOffsetHarness,
   row: (typeof EDITED_FILLET_ROWS)[number],
+  fillets: "beforeG7F" | "native" = "beforeG7F",
 ): { readonly sketch: SeedArcSketch; readonly line: SketchEntityId } {
   const spec = seedArcRows().find((item) => item.row === row);
   if (!spec) throw new Error(`no row ${row}`);
-  const sketch = spec.build(harness);
+  const built = spec.build(harness);
+  const sketch =
+    fillets === "native"
+      ? built
+      : { ...built, definition: withoutFilletRelationships(built.definition) };
   const line = sketch.seeds.find(
     (id) =>
       sketch.definition.entities.find((entity) => entity.entityId === id)

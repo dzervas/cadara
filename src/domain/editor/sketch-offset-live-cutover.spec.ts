@@ -99,7 +99,10 @@ import {
   createSketchFilletMutation,
   offsetSideForSketchPoint,
 } from "@/domain/sketch-editing/operations";
-import { withLineLength } from "@/contracts/sketch/offset-chain.fixtures";
+import {
+  withLineLength,
+  withoutFilletRelationships,
+} from "@/contracts/sketch/offset-chain.fixtures";
 import {
   createSessionCommitFactories,
   rebuildSessionForDefinition,
@@ -1398,7 +1401,7 @@ const KERNEL_REQUEST = {
 /** Finish through the mock kernel (commit), then read the saved record back. */
 async function commitToMockKernel(
   definition: SketchDefinition,
-  solverAdapter?: MockSketchSolverAdapter,
+  solverAdapter?: MockSketchSolverAdapter | SketchConstraintSolverAdapter,
 ) {
   const adapter = new MockKernelAdapter(
     solverAdapter ? { solverAdapter } : undefined,
@@ -4361,8 +4364,13 @@ describe("T08b-g7a live two-edit sequence (audit C1, U-G8)", () => {
     ),
   });
 
-  test("rect + 1 fillet, inward d = 0.1: edit 1 (+0.2, a convex A4 kink) fails with the D5 topologyChanged and drops the published plan; edit 2 (+0.05) then solves UNHINTED, reads solved (never partiallySolved) and certifies", () => {
-    let session = acceptSketchDraw(
+  /**
+   * Rectangle + Fillet r = 0.2 at its first corner. "beforeG7F": a fillet
+   * authored before T08b-g7-F (no tangency, unbound arc), the only native way
+   * an edit still kinks it (existing documents are not migrated).
+   */
+  const filletedRectangle = (fillets: "beforeG7F" | "native") => {
+    const session = acceptSketchDraw(
       startSketchDraw(beginSketchTool(newSession(), "rectangle"), [0, 0]),
       [2, 1],
     );
@@ -4378,9 +4386,16 @@ describe("T08b-g7a live two-edit sequence (audit C1, U-G8)", () => {
     });
     if (!filleted.valid || !filleted.definition)
       throw new Error(`fillet: ${filleted.message}`);
-    session = rebuildSessionForDefinition(session, {
-      definition: filleted.definition,
+    return rebuildSessionForDefinition(session, {
+      definition:
+        fillets === "native"
+          ? filleted.definition
+          : withoutFilletRelationships(filleted.definition),
     });
+  };
+
+  test("rect + 1 fillet (authored before T08b-g7-F), inward d = 0.1: edit 1 (+0.2, a convex A4 kink) fails with the D5 topologyChanged and drops the published plan; edit 2 (+0.05) then solves UNHINTED, reads solved (never partiallySolved) and certifies", () => {
+    const session = filletedRectangle("beforeG7F");
     const seeds = session.definition.entities
       .filter(
         (entity) => entity.kind === "lineSegment" || entity.kind === "arc",
@@ -4432,4 +4447,255 @@ describe("T08b-g7a live two-edit sequence (audit C1, U-G8)", () => {
     expect(second.liveRegions.status).toBe("pending");
     expect(settle(second).publication.status).toBe("certified");
   }, 120_000);
+
+  test("rect + 1 native fillet, inward d = 0.1: the edits that kinked a pre-T08b-g7-F fillet (+0.2, then +0.05) keep the fillet tangent (≤ 0.3°) and certify, carrying the published plan", () => {
+    const session = filletedRectangle("native");
+    const seeds = session.definition.entities
+      .filter(
+        (entity) => entity.kind === "lineSegment" || entity.kind === "arc",
+      )
+      .map((entity) => entity.entityId);
+    const committed = settle(
+      committedOffsetOnSide(session, seeds, 0.1, "left"),
+    );
+    expect(committed.publication.status).toBe("certified");
+    const line = seeds.find(
+      (id) =>
+        committed.session.definition.entities.find(
+          (entity) => entity.entityId === id,
+        )?.kind === "lineSegment",
+    )!;
+    const edited = withLineLength(committed.session.definition, line, 0.2);
+    const first = settle(
+      rebuildSessionForDefinition(committed.session, { definition: edited }),
+    );
+    expect(first.session.liveSolve!.accepted).toBe(true);
+    expect(
+      first.publication.status,
+      `${first.publication.diagnostic?.message}`,
+    ).toBe("certified");
+    expect(first.session.offsetPlans ?? []).toHaveLength(1);
+    const positions = new Map(
+      first.session.liveSolve!.solvedSnapshot.solvedPoints.map((point) => [
+        point.pointId,
+        point.solvedPosition,
+      ]),
+    );
+    const turns = filletEndTurns(
+      edited,
+      positions,
+      seeds.filter(
+        (id) =>
+          edited.entities.find((entity) => entity.entityId === id)?.kind ===
+          "arc",
+      ),
+    );
+    expect(turns).toHaveLength(2);
+    for (const turn of turns) expect(turn).toBeLessThanOrEqual(0.3);
+
+    const second = settle(
+      rebuildSessionForDefinition(first.session, {
+        definition: withDimensionValue(
+          first.session.definition,
+          (
+            edited.dimensions.find(
+              (item) => item.dimensionId === "dimension_c1_edit",
+            ) as { value: number }
+          ).value - 0.15,
+        ),
+      }),
+    );
+    expect(second.session.liveSolve!.accepted).toBe(true);
+    expect(second.publication.status).toBe("certified");
+  }, 120_000);
+});
+
+/** Turn (degrees) between each fillet end's line and the arc's tangent. */
+function filletEndTurns(
+  definition: SketchDefinition,
+  positions: ReadonlyMap<string, readonly [number, number]>,
+  arcIds: readonly SketchEntityId[],
+) {
+  return definition.entities.flatMap((arc) =>
+    arc.kind !== "arc" || !arcIds.includes(arc.entityId)
+      ? []
+      : definition.entities.flatMap((line) =>
+          line.kind !== "lineSegment"
+            ? []
+            : [arc.startPointId, arc.endPointId]
+                .filter(
+                  (end) => line.startPointId === end || line.endPointId === end,
+                )
+                .map((end) => {
+                  const c = positions.get(arc.centerPointId)!;
+                  const e = positions.get(end)!;
+                  const o = positions.get(
+                    line.startPointId === end
+                      ? line.endPointId
+                      : line.startPointId,
+                  )!;
+                  const r = [e[0] - c[0], e[1] - c[1]];
+                  const t = [o[0] - e[0], o[1] - e[1]];
+                  return (
+                    (Math.abs(
+                      Math.asin(
+                        (r[0]! * t[0]! + r[1]! * t[1]!) /
+                          (Math.hypot(r[0]!, r[1]!) * Math.hypot(t[0]!, t[1]!)),
+                      ),
+                    ) *
+                      180) /
+                    Math.PI
+                  );
+                }),
+        ),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// T08b-g7-F (logic lane). Seam: the live session and the authored-action
+// history around a native Fillet (issue 06: a primitive's defining
+// relationships are authored with it; sizing decision B: no radius).
+// ---------------------------------------------------------------------------
+
+describe("T08b-g7-F Fillet relationships through the session (issue 06)", () => {
+  const rectangle = () =>
+    acceptSketchDraw(
+      startSketchDraw(beginSketchTool(newSession(), "rectangle"), [0, 0]),
+      [2, 1],
+    );
+  /** The session's Fillet edit tool on two lines, committed (one authored action). */
+  const filletThroughSession = (
+    session: SketchSessionState,
+    first: SketchEntityId,
+    second: SketchEntityId,
+  ) => {
+    const targetOf = (entityId: SketchEntityId) =>
+      session.definition.entities.find(
+        (entity) => entity.entityId === entityId,
+      )!.target;
+    let next = beginSketchTool(session, "sketchFillet");
+    next = selectSketchEditToolTarget(next, targetOf(first));
+    next = selectSketchEditToolTarget(next, targetOf(second));
+    next = patchSketchEditToolValue(next, { value: 0.2 });
+    return patchSketchEditToolValue(next, {
+      intent: "commitSketchEditOperator",
+    });
+  };
+  test("a native Fillet commits two tangent constraints (arc ↔ each trimmed line) and the two arc-endpoint dimensions, no radius dimension; all are satisfied after Finish; Undo removes every one of them in one step", async () => {
+    const drawn = rectangle();
+    const lines = drawn.definition.entities
+      .filter((entity) => entity.kind === "lineSegment")
+      .map((entity) => entity.entityId);
+    const filleted = filletThroughSession(drawn, lines[0]!, lines[1]!);
+    const definition = filleted.definition;
+    const arc = definition.entities.find((entity) => entity.kind === "arc");
+    if (arc?.kind !== "arc") throw new Error("no fillet arc");
+    const before = new Set<string>([
+      ...drawn.definition.constraintIds,
+      ...drawn.definition.dimensionIds,
+    ]);
+    const addedConstraints = definition.constraints.filter(
+      (constraint) => !before.has(constraint.constraintId),
+    );
+    const addedDimensions = definition.dimensions.filter(
+      (dimension) => !before.has(dimension.dimensionId),
+    );
+    expect(
+      addedConstraints.map((constraint) =>
+        constraint.kind === "tangent"
+          ? [constraint.kind, ...constraint.entityIds]
+          : [constraint.kind],
+      ),
+    ).toEqual([
+      ["tangent", arc.entityId, lines[0]],
+      ["tangent", arc.entityId, lines[1]],
+    ]);
+    expect(
+      addedDimensions.map((dimension) =>
+        dimension.kind === "arcStartPointCoincident" ||
+        dimension.kind === "arcEndPointCoincident"
+          ? [dimension.kind, dimension.entityId, dimension.pointId]
+          : [dimension.kind],
+      ),
+    ).toEqual([
+      ["arcStartPointCoincident", arc.entityId, arc.startPointId],
+      ["arcEndPointCoincident", arc.entityId, arc.endPointId],
+    ]);
+    expect(validateSketchDefinition(definition).success).toBe(true);
+
+    // Finish with the production solver (the mock solver does not evaluate
+    // local tangency or arc-endpoint dimensions, for any arc tool).
+    const { response, record } = await commitToMockKernel(
+      definition,
+      new SketchConstraintSolverAdapter({
+        revisionId: null,
+        neutralCurveQueries:
+          createCertifiedNeutralCurveQueryCapabilityForTest(),
+      }),
+    );
+    expect(response.revisionState.kind, "Finish is accepted.").toBe("accepted");
+    if (!record) throw new Error("no saved record");
+    expect(record.solvedSnapshot.status).toEqual({
+      solveState: "solved",
+      constraintState: "wellConstrained",
+    });
+    expect(
+      record.solvedSnapshot.constraintStatuses
+        .filter((status) =>
+          addedConstraints.some(
+            (constraint) => constraint.constraintId === status.constraintId,
+          ),
+        )
+        .map((status) => status.status),
+      "The Fillet's tangencies are satisfied after Finish.",
+    ).toEqual(["satisfied", "satisfied"]);
+    expect(
+      record.solvedSnapshot.dimensionStatuses
+        .filter((status) =>
+          addedDimensions.some(
+            (dimension) => dimension.dimensionId === status.dimensionId,
+          ),
+        )
+        .map((status) => status.status),
+      "The Fillet's arc-endpoint dimensions are satisfied after Finish.",
+    ).toEqual(["driving", "driving"]);
+
+    const identity: Parameters<AuthoredActionHistory["commit"]>[0] = {
+      actorId: "actor-g7f",
+      documentId: "doc-g7f" as never,
+      context: { kind: "sketch", sketchId: "sketch-g7f" as never },
+    };
+    const state = (value: SketchDefinition): AuthoredActionState =>
+      ({
+        documentId: "doc-g7f",
+        context: { kind: "sketch", sketchId: "sketch-g7f" },
+        data: {
+          sketchId: "sketch-g7f",
+          label: "Sketch",
+          plane: drawn.plane,
+          definition: value,
+        },
+      }) as unknown as AuthoredActionState;
+    const history = new AuthoredActionHistory();
+    const start = state(drawn.definition);
+    const applied = history.commit(
+      identity,
+      start,
+      state(definition),
+      "Fillet",
+      start,
+    );
+    if (applied.status !== "applied") throw new Error("not applied");
+    const undone = history.undo(identity, applied.state);
+    if (undone.status !== "applied") throw new Error("not undone");
+    const restored = (undone.state.data as { definition: SketchDefinition })
+      .definition;
+    expect(
+      restored,
+      "One Undo restores the pre-Fillet definition: no tangent constraint, no arc-endpoint dimension, no arc.",
+    ).toEqual(drawn.definition);
+    expect(
+      restored.constraints.some((constraint) => constraint.kind === "tangent"),
+    ).toBe(false);
+  });
 });

@@ -46,6 +46,10 @@ import type {
   SketchToolCommitContribution,
   SketchToolCommitFactories,
 } from "@/core/sketch-tools/definition";
+import {
+  createArcEndpointDimensions,
+  createTangentConstraint,
+} from "@/core/sketch-tools/constraints";
 import { distanceBetween as distanceBetweenPoints } from "@/domain/sketch/point-math";
 
 export type OffsetSide = "left" | "right";
@@ -75,6 +79,8 @@ export type SketchEditOperationFactories = Pick<
   SketchToolCommitFactories,
   | "createPointId"
   | "createEntityId"
+  | "createConstraintId"
+  | "createDimensionId"
   | "createPoint"
   | "createLineEntity"
   | "createPointEntity"
@@ -1238,6 +1244,44 @@ function updateDefinitionEntities(
   };
 }
 
+/**
+ * Issue 06 ("preserve relationships that define a primitive"): an edit
+ * operation's arc is bound to its end points exactly as the arc tools bind
+ * theirs (`createArcEndpointDimensions`) and is tangent to each line it
+ * rounds. No radius dimension: sizes stay free (sizing decision B).
+ */
+function primitiveArcRelationships(input: {
+  factories: SketchEditOperationFactories;
+  idPrefix: string;
+  label: string;
+  arc: {
+    entityId: SketchEntityId;
+    startPointId: SketchPointId;
+    endPointId: SketchPointId;
+  };
+  tangentLines: readonly { name: string; entityId: SketchEntityId }[];
+}) {
+  return {
+    constraints: input.tangentLines.map((line) =>
+      createTangentConstraint({
+        constraintId: input.factories.createConstraintId(
+          `${input.idPrefix}-tangent-${line.name.toLowerCase()}`,
+        ),
+        label: `${input.label} tangent ${line.name}`,
+        entityIds: [input.arc.entityId, line.entityId],
+      }),
+    ),
+    dimensions: createArcEndpointDimensions({
+      createDimensionId: (suffix) =>
+        input.factories.createDimensionId(`${input.idPrefix}-${suffix}`),
+      labelPrefix: input.label,
+      entityId: input.arc.entityId,
+      startPointId: input.arc.startPointId,
+      endPointId: input.arc.endPointId,
+    }),
+  };
+}
+
 export function createSketchFilletMutation(input: {
   definition: SketchDefinition;
   entityIds: readonly SketchEntityId[];
@@ -1347,7 +1391,21 @@ export function createSketchFilletMutation(input: {
     corner.pointId,
     secondPointId,
   );
-  const definition = appendPointsAndEntities(
+  const { constraints, dimensions } = primitiveArcRelationships({
+    factories: input.factories,
+    idPrefix: "fillet",
+    label: `Fillet ${input.sequence}`,
+    arc: {
+      entityId: arcEntityId,
+      startPointId: firstPointId,
+      endPointId: secondPointId,
+    },
+    tangentLines: [
+      { name: "A", entityId: first.entity.entityId },
+      { name: "B", entityId: second.entity.entityId },
+    ],
+  });
+  const geometry = appendPointsAndEntities(
     updateDefinitionEntities(input.definition, [updatedFirst, updatedSecond]),
     [
       input.factories.createPoint(
@@ -1368,6 +1426,19 @@ export function createSketchFilletMutation(input: {
     ],
     [arcEntity],
   );
+  const definition: SketchDefinition = {
+    ...geometry,
+    constraintIds: [
+      ...geometry.constraintIds,
+      ...constraints.map((constraint) => constraint.constraintId),
+    ],
+    constraints: [...geometry.constraints, ...constraints],
+    dimensionIds: [
+      ...geometry.dimensionIds,
+      ...dimensions.map((dimension) => dimension.dimensionId),
+    ],
+    dimensions: [...geometry.dimensions, ...dimensions],
+  };
 
   return createMutationOperationResult(definition, [
     makePreviewLine(
@@ -1878,9 +1949,39 @@ function createLineSlotContribution(input: {
   const startArcId = input.factories.createEntityId("slot-start-arc");
   const isConstruction = input.curve.isConstruction;
   const style = input.curve.style;
+  const sides = [
+    { name: "left", entityId: leftLineId },
+    { name: "right", entityId: rightLineId },
+  ];
+  const relationships = [
+    primitiveArcRelationships({
+      factories: input.factories,
+      idPrefix: "slot-end",
+      label: `Slot ${input.sequence} end`,
+      arc: {
+        entityId: endArcId,
+        startPointId: leftEndPointId,
+        endPointId: rightEndPointId,
+      },
+      tangentLines: sides,
+    }),
+    primitiveArcRelationships({
+      factories: input.factories,
+      idPrefix: "slot-start",
+      label: `Slot ${input.sequence} start`,
+      arc: {
+        entityId: startArcId,
+        startPointId: rightStartPointId,
+        endPointId: leftStartPointId,
+      },
+      tangentLines: sides,
+    }),
+  ];
 
   return createContributionOperationResult(
     {
+      constraints: relationships.flatMap((item) => item.constraints),
+      dimensions: relationships.flatMap((item) => item.dimensions),
       points: [
         input.factories.createPoint(
           `Slot ${input.sequence} left start`,
@@ -2007,9 +2108,36 @@ function createArcSlotContribution(input: {
   const endCapId = input.factories.createEntityId("slot-end-cap");
   const isConstruction = input.curve.isConstruction;
   const style = input.curve.style;
+  // The caps are radial lines, so no arc here rounds a line: endpoint binding only.
+  const relationships = [
+    primitiveArcRelationships({
+      factories: input.factories,
+      idPrefix: "slot-outer",
+      label: `Slot ${input.sequence} outer`,
+      arc: {
+        entityId: outerArcId,
+        startPointId: outerStartId,
+        endPointId: outerEndId,
+      },
+      tangentLines: [],
+    }),
+    primitiveArcRelationships({
+      factories: input.factories,
+      idPrefix: "slot-inner",
+      label: `Slot ${input.sequence} inner`,
+      arc: {
+        entityId: innerArcId,
+        startPointId: innerEndId,
+        endPointId: innerStartId,
+      },
+      tangentLines: [],
+    }),
+  ];
 
   return createContributionOperationResult(
     {
+      constraints: relationships.flatMap((item) => item.constraints),
+      dimensions: relationships.flatMap((item) => item.dimensions),
       points: [
         input.factories.createPoint(
           `Slot ${input.sequence} outer start`,
