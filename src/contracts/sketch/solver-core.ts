@@ -18,7 +18,10 @@ import type {
   SolvedSketchSnapshot,
   SolvedSketchStatus,
 } from "@/contracts/sketch/schema";
-import { SOLVED_SKETCH_SCHEMA_VERSION } from "@/contracts/sketch/schema";
+import {
+  isAcceptedConstraintStatus,
+  SOLVED_SKETCH_SCHEMA_VERSION,
+} from "@/contracts/sketch/schema";
 import {
   evaluateSketchDerivations,
   offsetRecordDerivatives,
@@ -30,6 +33,8 @@ import {
   type SketchDerivedEntityVariation,
 } from "@/contracts/sketch/derived-geometry";
 import { offsetFrameCurveResidual } from "@/contracts/sketch/offset-derivation-frame";
+import { OFFSET_DIAGNOSTIC_CODES } from "@/contracts/sketch/offset-geometry";
+import { isOffsetPublicationSolveAccepted } from "@/contracts/sketch/offset-publication";
 import { canonicalArcSupport } from "@/contracts/sketch/canonical-arc-support";
 import {
   closestSplineSpanLocation,
@@ -144,6 +149,33 @@ type ScalarConstraintRecord = {
    * one full derivation evaluation per variable.
    */
   structuralVariableIndices?: readonly number[];
+  /**
+   * [TECH] G16′/G16‴: the offset relationships whose outputs this
+   * requirement names and that do not evaluate normally at `values` (see
+   * `OffsetRequirementBlocker`). Absent when the requirement names no offset
+   * output.
+   */
+  offsetBlockers?(values: Float64Array): readonly OffsetRequirementBlocker[];
+};
+
+/**
+ * One offset relationship affecting a requirement at an iterate.
+ * - `failed` ([TECH] G16′/G16‴/G16⁗): it is in the solve's blocked set (it
+ *   failed at the solve's start state); the requirement is held blocked for
+ *   the whole solve (residual 0, gradient 0), even at iterates where the
+ *   relationship builds, and reported `blocked` when it still fails at the
+ *   end (never silently satisfied). One that builds at the end is
+ *   re-evaluated and re-solved once (`solveWithRebuildRetry`).
+ * - `failedDuringSolve` ([TECH] G16‴): it built at the start but fails
+ *   here; the requirement is unbounded (`+∞`, never a reward) and, if that
+ *   holds at the final values, reported `unsatisfied`.
+ * - `derivativeUnavailable` (review R1): the frame built but the pullback is
+ *   singular; the requirement keeps its real residual, only its gradient
+ *   through the offset is dropped, and it carries a targeted warning.
+ */
+type OffsetRequirementBlocker = {
+  derivationId: string;
+  reason: "failed" | "failedDuringSolve" | "derivativeUnavailable";
 };
 
 type ConstraintEvaluationRecord = {
@@ -172,6 +204,22 @@ type SolverParameterProjection = {
     constraint: ScalarConstraintRecord,
     variableIndices?: readonly number[],
   ): ScalarConstraintRecord;
+  /** [TECH] G16‴: the offset relationships failing at `values`. */
+  offsetFailuresAt(values: Float64Array): ReadonlySet<string>;
+  /**
+   * [TECH] G16‴/G16⁗: runs one solve whose blocked set is `blocked` (the
+   * offset relationships failing at its start state, see
+   * `solveWithRebuildRetry`); it is decided once, never per iterate.
+   * Outside any solve it is empty.
+   */
+  withBlockedOffsets<T>(blocked: ReadonlySet<string>, run: () => T): T;
+  /**
+   * [TECH] G16‴/G16⁗: whether `derivationId` is in the current solve's
+   * blocked set: the failures at the solve's start, or, in the one
+   * re-solve of `solveWithRebuildRetry`, F \ R (not the re-solve's own
+   * start failures). The name predates the re-solve.
+   */
+  failedAtSolveStart(derivationId: string): boolean;
 };
 
 type BuildSystemResult = {
@@ -888,6 +936,9 @@ function createDerivedParameterProjection(input: {
         (_, index) => index,
       ),
       wrapConstraint: (constraint) => constraint,
+      offsetFailuresAt: () => new Set(),
+      withBlockedOffsets: (_blocked, run) => run(),
+      failedAtSolveStart: () => false,
     };
   }
 
@@ -932,6 +983,30 @@ function createDerivedParameterProjection(input: {
     }
   };
 
+  // [TECH] G16′: the driven indices of each offset relationship's outputs.
+  const offsetDrivenIndices = new Map<string, Set<number>>();
+  for (const relationship of definition.derivedRelationships ?? []) {
+    if (relationship.kind !== "offset") continue;
+    offsetDrivenIndices.set(
+      relationship.derivationId,
+      new Set([
+        ...relationship.outputs.flatMap((output) => [
+          ...output.outputPointIds.flatMap(pointIndices),
+          ...entityIndices(output.outputEntityId),
+        ]),
+        ...relationship.piecewiseCubicOutputs.flatMap((output) => [
+          ...pointIndices(output.startPointId),
+          ...pointIndices(output.endPointId),
+        ]),
+        ...relationship.jointOutputs.flatMap((output) => [
+          ...pointIndices(output.centerPointId),
+          ...pointIndices(output.startPointId),
+          ...pointIndices(output.endPointId),
+          ...entityIndices(output.outputEntityId),
+        ]),
+      ]),
+    );
+  }
   for (const relationship of definition.derivedRelationships ?? []) {
     const axisIndices = mirrorAxisIndices(relationship);
     const offsetSeedIndices =
@@ -1046,6 +1121,25 @@ function createDerivedParameterProjection(input: {
       ),
     );
   };
+  /**
+   * [TECH] G16′: the offset relationships (in definition order) whose
+   * outputs a requirement on `variableIndices` names, directly or through
+   * a derived output that depends on them (a mirror of an offset output).
+   */
+  const offsetsNamedBy = (variableIndices: readonly number[]) => {
+    const reached = new Set<number>();
+    const pending = [...variableIndices];
+    while (pending.length > 0) {
+      const index = pending.pop()!;
+      const dependencies = dependenciesByDrivenIndex.get(index);
+      if (!dependencies || reached.has(index)) continue;
+      reached.add(index);
+      pending.push(...dependencies);
+    }
+    return [...offsetDrivenIndices].flatMap(([derivationId, indices]) =>
+      [...indices].some((index) => reached.has(index)) ? [derivationId] : [],
+    );
+  };
   const projectVariableIndices = (variableIndices: readonly number[]) =>
     uniqueSortedIndices(
       variableIndices.flatMap((index) => resolveAuthority(index)),
@@ -1110,6 +1204,8 @@ function createDerivedParameterProjection(input: {
   > | null = null;
   let cachedDiagnostics: readonly SketchSolveDiagnostic[] = [];
   let cachedEvaluation: SketchDerivationEvaluationResult | null = null;
+  // [TECH] G16‴: the current solve's blocked set (see `withBlockedOffsets`).
+  let startFailedOffsets: ReadonlySet<string> = new Set();
   const project = (
     values: Float64Array,
     validationIndices?: readonly number[],
@@ -1246,6 +1342,22 @@ function createDerivedParameterProjection(input: {
     derivationEvaluation: (values) => project(values).evaluation,
     projectVariableIndices,
     authorityVariableIndices,
+    offsetFailuresAt: (values) =>
+      new Set(
+        project(values).evaluation.offsetFailures.map(
+          (failure) => failure.derivationId,
+        ),
+      ),
+    withBlockedOffsets: (blocked, run) => {
+      const previous = startFailedOffsets;
+      startFailedOffsets = blocked;
+      try {
+        return run();
+      } finally {
+        startFailedOffsets = previous;
+      }
+    },
+    failedAtSolveStart: (derivationId) => startFailedOffsets.has(derivationId),
     wrapConstraint: (constraint, variableIndices) => {
       const support = variableIndices ? new Set(variableIndices) : null;
       const projectedSupport = variableIndices
@@ -1278,169 +1390,246 @@ function createDerivedParameterProjection(input: {
       ) {
         return constraint;
       }
+      const blockingOffsets = variableIndices
+        ? offsetsNamedBy(variableIndices)
+        : [];
+      const blocked = (
+        blockers: readonly OffsetRequirementBlocker[],
+      ): {
+        result: ScalarConstraintEvaluation;
+        blockers: readonly OffsetRequirementBlocker[];
+      } => ({
+        result: { residual: 0, gradient: zeroVector(parameterCount) },
+        blockers,
+      });
 
-      return {
-        ...constraint,
-        evaluate(values) {
-          const projected = project(values, projectionValidationIndices);
-          const evaluated = constraint.evaluate(projected.values);
-          const pointCotangent: Partial<Record<SketchPointId, SketchPoint2D>> =
-            {};
-          const entityCotangent: Partial<
-            Record<SketchEntityId, SketchDerivedEntityVariation>
-          > = {};
-          const tangentCotangent: Partial<
-            Record<SketchEntityId, Record<string, SketchPoint2D>>
-          > = {};
-          let hasDrivenCotangent = false;
-          const addPointCotangent = (
-            pointId: SketchPointId,
-            value: SketchPoint2D,
-          ) => {
-            const current = pointCotangent[pointId] ?? [0, 0];
-            pointCotangent[pointId] = [
-              current[0] + value[0],
-              current[1] + value[1],
-            ];
+      const evaluateScoped = (
+        values: Float64Array,
+      ): {
+        result: ScalarConstraintEvaluation;
+        blockers: readonly OffsetRequirementBlocker[];
+      } => {
+        const projected = project(values, projectionValidationIndices);
+        // [TECH] G16′/G16‴: a requirement naming an output of a
+        // relationship outside the solve's blocked set that fails at this
+        // iterate (its outputs are frozen) is unbounded, so stepping into
+        // a failure that appears mid-solve is never a reward.
+        const failedDuringSolve = blockingOffsets.filter(
+          (derivationId) =>
+            !startFailedOffsets.has(derivationId) &&
+            projected.evaluation.offsetFailures.some(
+              (failure) => failure.derivationId === derivationId,
+            ),
+        );
+        // [TECH] G16⁗ (re-review A-1): a relationship of the blocked set
+        // holds the requirement blocked for the whole solve, also where it
+        // builds again, so its real residual appearing there is never a
+        // barrier that rewards staying failed.
+        const failed = blockingOffsets.filter((derivationId) =>
+          startFailedOffsets.has(derivationId),
+        );
+        if (failedDuringSolve.length > 0)
+          return {
+            result: {
+              residual: Number.POSITIVE_INFINITY,
+              gradient: zeroVector(parameterCount),
+            },
+            blockers: failedDuringSolve.map((derivationId) => ({
+              derivationId,
+              reason: "failedDuringSolve" as const,
+            })),
           };
-          for (const { record } of relevantDrivenPointRecords) {
-            const x = evaluated.gradient[record.baseIndex]!;
-            const y = evaluated.gradient[record.baseIndex + 1]!;
-            if (x === 0 && y === 0) continue;
-            addPointCotangent(record.pointId, [x, y]);
-            hasDrivenCotangent = true;
+        if (failed.length > 0)
+          return blocked(
+            failed.map((derivationId) => ({
+              derivationId,
+              reason: "failed" as const,
+            })),
+          );
+        const evaluated = constraint.evaluate(projected.values);
+        const pointCotangent: Partial<Record<SketchPointId, SketchPoint2D>> =
+          {};
+        const entityCotangent: Partial<
+          Record<SketchEntityId, SketchDerivedEntityVariation>
+        > = {};
+        const tangentCotangent: Partial<
+          Record<SketchEntityId, Record<string, SketchPoint2D>>
+        > = {};
+        let hasDrivenCotangent = false;
+        const addPointCotangent = (
+          pointId: SketchPointId,
+          value: SketchPoint2D,
+        ) => {
+          const current = pointCotangent[pointId] ?? [0, 0];
+          pointCotangent[pointId] = [
+            current[0] + value[0],
+            current[1] + value[1],
+          ];
+        };
+        for (const { record } of relevantDrivenPointRecords) {
+          const x = evaluated.gradient[record.baseIndex]!;
+          const y = evaluated.gradient[record.baseIndex + 1]!;
+          if (x === 0 && y === 0) continue;
+          addPointCotangent(record.pointId, [x, y]);
+          hasDrivenCotangent = true;
+        }
+        for (const { state } of relevantDrivenEntityStates) {
+          if (state.kind === "circle") {
+            const radius = evaluated.gradient[state.baseIndex]!;
+            if (radius !== 0) {
+              entityCotangent[state.entityId] = { kind: "circle", radius };
+              hasDrivenCotangent = true;
+            }
+            continue;
           }
-          for (const { state } of relevantDrivenEntityStates) {
-            if (state.kind === "circle") {
-              const radius = evaluated.gradient[state.baseIndex]!;
-              if (radius !== 0) {
-                entityCotangent[state.entityId] = { kind: "circle", radius };
-                hasDrivenCotangent = true;
-              }
+
+          const radius = evaluated.gradient[state.baseIndex]!;
+          const startAngle = evaluated.gradient[state.baseIndex + 1]!;
+          const endAngle = evaluated.gradient[state.baseIndex + 2]!;
+          if (radius === 0 && startAngle === 0 && endAngle === 0) continue;
+          const entity = entityById.get(state.entityId);
+          if (
+            entity?.kind === "arc" &&
+            pointDefinedArcEntityIds.has(entity.entityId)
+          ) {
+            const centerRecord = pointRecords.get(entity.centerPointId);
+            const startRecord = pointRecords.get(entity.startPointId);
+            const endRecord = pointRecords.get(entity.endPointId);
+            if (!centerRecord || !startRecord || !endRecord) continue;
+            const center = getPoint(projected.values, centerRecord);
+            const start = getPoint(projected.values, startRecord);
+            const end = getPoint(projected.values, endRecord);
+            const startOffset = subtract(start, center);
+            const endOffset = subtract(end, center);
+            const startLengthSquared =
+              startOffset[0] ** 2 + startOffset[1] ** 2;
+            const endLengthSquared = endOffset[0] ** 2 + endOffset[1] ** 2;
+            if (
+              startLengthSquared <= DEGENERATE_NORM_EPSILON ** 2 ||
+              endLengthSquared <= DEGENERATE_NORM_EPSILON ** 2
+            ) {
               continue;
             }
+            const startCotangent: SketchPoint2D = [
+              (radius * startOffset[0]) / Math.sqrt(startLengthSquared) -
+                (startAngle * startOffset[1]) / startLengthSquared,
+              (radius * startOffset[1]) / Math.sqrt(startLengthSquared) +
+                (startAngle * startOffset[0]) / startLengthSquared,
+            ];
+            const endCotangent: SketchPoint2D = [
+              (-endAngle * endOffset[1]) / endLengthSquared,
+              (endAngle * endOffset[0]) / endLengthSquared,
+            ];
+            addPointCotangent(entity.startPointId, startCotangent);
+            addPointCotangent(entity.endPointId, endCotangent);
+            addPointCotangent(entity.centerPointId, [
+              -startCotangent[0] - endCotangent[0],
+              -startCotangent[1] - endCotangent[1],
+            ]);
+          } else {
+            entityCotangent[state.entityId] = {
+              kind: "arc",
+              radius,
+              startAngle,
+              endAngle,
+            };
+          }
+          hasDrivenCotangent = true;
+        }
+        for (const { state } of relevantDrivenTangentStates) {
+          const x = evaluated.gradient[state.baseIndex]!;
+          const y = evaluated.gradient[state.baseIndex + 1]!;
+          if (x === 0 && y === 0) continue;
+          const entity = tangentCotangent[state.entityId] ?? {};
+          entity[state.occurrenceId] = [x, y];
+          tangentCotangent[state.entityId] = entity;
+          hasDrivenCotangent = true;
+        }
+        if (!hasDrivenCotangent) return { result: evaluated, blockers: [] };
 
-            const radius = evaluated.gradient[state.baseIndex]!;
-            const startAngle = evaluated.gradient[state.baseIndex + 1]!;
-            const endAngle = evaluated.gradient[state.baseIndex + 2]!;
-            if (radius === 0 && startAngle === 0 && endAngle === 0) continue;
-            const entity = entityById.get(state.entityId);
-            if (
-              entity?.kind === "arc" &&
-              pointDefinedArcEntityIds.has(entity.entityId)
-            ) {
-              const centerRecord = pointRecords.get(entity.centerPointId);
-              const startRecord = pointRecords.get(entity.startPointId);
-              const endRecord = pointRecords.get(entity.endPointId);
-              if (!centerRecord || !startRecord || !endRecord) continue;
-              const center = getPoint(projected.values, centerRecord);
-              const start = getPoint(projected.values, startRecord);
-              const end = getPoint(projected.values, endRecord);
-              const startOffset = subtract(start, center);
-              const endOffset = subtract(end, center);
-              const startLengthSquared =
-                startOffset[0] ** 2 + startOffset[1] ** 2;
-              const endLengthSquared = endOffset[0] ** 2 + endOffset[1] ** 2;
-              if (
-                startLengthSquared <= DEGENERATE_NORM_EPSILON ** 2 ||
-                endLengthSquared <= DEGENERATE_NORM_EPSILON ** 2
-              ) {
-                continue;
-              }
-              const startCotangent: SketchPoint2D = [
-                (radius * startOffset[0]) / Math.sqrt(startLengthSquared) -
-                  (startAngle * startOffset[1]) / startLengthSquared,
-                (radius * startOffset[1]) / Math.sqrt(startLengthSquared) +
-                  (startAngle * startOffset[0]) / startLengthSquared,
-              ];
-              const endCotangent: SketchPoint2D = [
-                (-endAngle * endOffset[1]) / endLengthSquared,
-                (endAngle * endOffset[0]) / endLengthSquared,
-              ];
-              addPointCotangent(entity.startPointId, startCotangent);
-              addPointCotangent(entity.endPointId, endCotangent);
-              addPointCotangent(entity.centerPointId, [
-                -startCotangent[0] - endCotangent[0],
-                -startCotangent[1] - endCotangent[1],
-              ]);
-            } else {
-              entityCotangent[state.entityId] = {
-                kind: "arc",
-                radius,
-                startAngle,
-                endAngle,
-              };
-            }
-            hasDrivenCotangent = true;
+        const gradient = evaluated.gradient.slice();
+        for (const { record } of relevantDrivenPointRecords) {
+          gradient[record.baseIndex] = 0;
+          gradient[record.baseIndex + 1] = 0;
+        }
+        for (const { state } of relevantDrivenEntityStates) {
+          for (const index of entityIndices(state.entityId)) {
+            gradient[index] = 0;
           }
-          for (const { state } of relevantDrivenTangentStates) {
-            const x = evaluated.gradient[state.baseIndex]!;
-            const y = evaluated.gradient[state.baseIndex + 1]!;
-            if (x === 0 && y === 0) continue;
-            const entity = tangentCotangent[state.entityId] ?? {};
-            entity[state.occurrenceId] = [x, y];
-            tangentCotangent[state.entityId] = entity;
-            hasDrivenCotangent = true;
-          }
-          if (!hasDrivenCotangent) return evaluated;
-
-          const gradient = evaluated.gradient.slice();
-          for (const { record } of relevantDrivenPointRecords) {
-            gradient[record.baseIndex] = 0;
-            gradient[record.baseIndex + 1] = 0;
-          }
-          for (const { state } of relevantDrivenEntityStates) {
-            for (const index of entityIndices(state.entityId)) {
-              gradient[index] = 0;
-            }
-          }
-          for (const { state } of relevantDrivenTangentStates) {
-            gradient[state.baseIndex] = 0;
-            gradient[state.baseIndex + 1] = 0;
-          }
-          const cotangent: SketchDerivationVariation = {
-            points: pointCotangent,
-            entities: entityCotangent,
-            splineTangents: tangentCotangent,
+        }
+        for (const { state } of relevantDrivenTangentStates) {
+          gradient[state.baseIndex] = 0;
+          gradient[state.baseIndex + 1] = 0;
+        }
+        const cotangent: SketchDerivationVariation = {
+          points: pointCotangent,
+          entities: entityCotangent,
+          splineTangents: tangentCotangent,
+        };
+        const pulled = projected.pullback(cotangent);
+        // Review A4: a singular offset derivative is never zero motion.
+        // [TECH] G16‴ (review R1): the requirement keeps its real residual
+        // (its status follows it); only its gradient through the offset is
+        // dropped, and it is reported with a targeted warning.
+        if (pulled.derivativeUnavailable)
+          return {
+            result: { residual: evaluated.residual, gradient },
+            blockers: pulled.derivativeUnavailable.map((derivationId) => ({
+              derivationId,
+              reason: "derivativeUnavailable" as const,
+            })),
           };
-          const pulled = projected.pullback(cotangent);
-          // Review A4: a singular offset derivative is never zero motion;
-          // like the shell residual, the requirement is unbounded here.
-          if (pulled.derivativeUnavailable)
-            return { residual: Number.POSITIVE_INFINITY, gradient };
-          for (const [pointId, value] of Object.entries(pulled.points ?? {})) {
-            const record = pointRecords.get(pointId as SketchPointId);
-            if (!record || !value) continue;
-            gradient[record.baseIndex] += value[0];
-            gradient[record.baseIndex + 1] += value[1];
+        for (const [pointId, value] of Object.entries(pulled.points ?? {})) {
+          const record = pointRecords.get(pointId as SketchPointId);
+          if (!record || !value) continue;
+          gradient[record.baseIndex] += value[0];
+          gradient[record.baseIndex + 1] += value[1];
+        }
+        for (const [entityId, value] of Object.entries(pulled.entities ?? {})) {
+          const state = entityStates.get(entityId as SketchEntityId);
+          if (!state || !value || state.kind !== value.kind) continue;
+          gradient[state.baseIndex] += value.radius;
+          if (state.kind === "arc" && value.kind === "arc") {
+            gradient[state.baseIndex + 1] += value.startAngle;
+            gradient[state.baseIndex + 2] += value.endAngle;
           }
-          for (const [entityId, value] of Object.entries(
-            pulled.entities ?? {},
+        }
+        for (const [entityId, occurrences] of Object.entries(
+          pulled.splineTangents ?? {},
+        )) {
+          for (const [occurrenceId, value] of Object.entries(
+            occurrences ?? {},
           )) {
-            const state = entityStates.get(entityId as SketchEntityId);
-            if (!state || !value || state.kind !== value.kind) continue;
-            gradient[state.baseIndex] += value.radius;
-            if (state.kind === "arc" && value.kind === "arc") {
-              gradient[state.baseIndex + 1] += value.startAngle;
-              gradient[state.baseIndex + 2] += value.endAngle;
-            }
+            const state = splineTangentStates.get(
+              splineTangentStateKey(entityId as SketchEntityId, occurrenceId),
+            );
+            if (!state || !value) continue;
+            gradient[state.baseIndex] += value[0];
+            gradient[state.baseIndex + 1] += value[1];
           }
-          for (const [entityId, occurrences] of Object.entries(
-            pulled.splineTangents ?? {},
-          )) {
-            for (const [occurrenceId, value] of Object.entries(
-              occurrences ?? {},
-            )) {
-              const state = splineTangentStates.get(
-                splineTangentStateKey(entityId as SketchEntityId, occurrenceId),
-              );
-              if (!state || !value) continue;
-              gradient[state.baseIndex] += value[0];
-              gradient[state.baseIndex + 1] += value[1];
+        }
+        return {
+          result: { residual: evaluated.residual, gradient },
+          blockers: [],
+        };
+      };
+
+      const innerBlockers = constraint.offsetBlockers;
+      return {
+        ...constraint,
+        evaluate: (values) => evaluateScoped(values).result,
+        ...(blockingOffsets.length > 0 || innerBlockers
+          ? {
+              offsetBlockers: (values: Float64Array) => {
+                const own = evaluateScoped(values).blockers;
+                return own.length > 0 || !innerBlockers
+                  ? own
+                  : innerBlockers(
+                      project(values, projectionValidationIndices).values,
+                    );
+              },
             }
-          }
-          return { residual: evaluated.residual, gradient };
-        },
+          : {}),
       };
     },
   };
@@ -1968,11 +2157,30 @@ function buildSystem(
     constraint: Extract<ConstraintDefinition, { kind: "pointOnCurve" }>,
     point: SolverPointRecord,
     shell: Extract<SketchEntityDefinition, { kind: "derivedPiecewiseCubic" }>,
-  ): ScalarConstraintRecord => ({
-    id: constraint.constraintId,
-    targetKind: "constraint",
-    evaluate(values) {
+  ): ScalarConstraintRecord => {
+    // [TECH] G16′/G16‴: a failed relationship has no curve. The
+    // requirement is blocked (reported, never silently satisfied) when the
+    // relationship already failed at the solve's start, and unbounded when
+    // the failure appears mid-solve (never a reward). Without a closest
+    // point on the drawn domain there is no residual either: unbounded.
+    // [TECH] G16⁗: a relationship of the blocked set holds it blocked for
+    // the whole solve, also where it builds again.
+    const scoped = (
+      values: Float64Array,
+    ): {
+      result: ScalarConstraintEvaluation;
+      blockers: readonly OffsetRequirementBlocker[];
+    } => {
       const gradient = zeroVector(parameterCount);
+      const blocked = (reason: OffsetRequirementBlocker["reason"]) => ({
+        result: {
+          residual: reason === "failed" ? 0 : Number.POSITIVE_INFINITY,
+          gradient,
+        },
+        blockers: [{ derivationId: shell.derivationId, reason }],
+      });
+      if (parameterProjection.failedAtSolveStart(shell.derivationId))
+        return blocked("failed");
       const record = parameterProjection
         .derivationEvaluation(values)
         ?.offsetFrames.find(
@@ -1981,16 +2189,14 @@ function buildSystem(
       const output = record?.outputs.shells.find(
         (candidate) => candidate.entityId === shell.entityId,
       );
-      if (!record || !output)
-        return { residual: Number.POSITIVE_INFINITY, gradient };
+      if (!record || !output) return blocked("failedDuringSolve");
       const result = offsetFrameCurveResidual({
         frame: record.frame,
         derivatives: offsetRecordDerivatives(record),
         seedEntityId: output.seed,
         point: getPoint(values, point),
       });
-      if ("code" in result)
-        return { residual: Number.POSITIVE_INFINITY, gradient };
+      if ("code" in result) return blocked("derivativeUnavailable");
       const [rx, ry] = result.value;
       gradient[point.baseIndex] += rx;
       gradient[point.baseIndex + 1] += ry;
@@ -2021,11 +2227,20 @@ function buildSystem(
           rx * value + ry * (sy.circleRadii?.[entityId] ?? 0);
       }
       return {
-        residual: halfSquaredDistanceWithSaturation(rx * rx + ry * ry),
-        gradient,
+        result: {
+          residual: halfSquaredDistanceWithSaturation(rx * rx + ry * ry),
+          gradient,
+        },
+        blockers: [],
       };
-    },
-  });
+    };
+    return {
+      id: constraint.constraintId,
+      targetKind: "constraint",
+      evaluate: (values) => scoped(values).result,
+      offsetBlockers: (values) => scoped(values).blockers,
+    };
+  };
 
   const pointOnLocalCurveResidual = (
     values: Float64Array,
@@ -5647,6 +5862,16 @@ function validateDefinition(
 export const DERIVED_SHELL_REQUIREMENT_UNSUPPORTED =
   "derived-offset-shell-requirement-unsupported";
 
+/**
+ * [TECH] G16′ (U-G9): a requirement naming an output of an offset
+ * relationship that failed (or whose derivative is unavailable) at this
+ * solve. Its status is `blocked` ([TECH] G16″: it does not count against
+ * the sketch's status) with this targeted warning (the relationship carries
+ * the error), and it contributes
+ * nothing to the solve: stale held outputs never drive the rest.
+ */
+export const OFFSET_REQUIREMENT_BLOCKED = "derived-offset-requirement-blocked";
+
 /** Every entity ID one constraint or dimension operand names (`entityId` / `entityIds`). */
 function referencedEntityIds(value: unknown, into: Set<string>) {
   if (Array.isArray(value)) {
@@ -7050,6 +7275,11 @@ function materializeSolveResult(
       : [];
   });
 
+  // [TECH] G16′: a requirement naming a failed relationship's outputs is
+  // blocked ([TECH] G16″): status `blocked` with a targeted diagnostic,
+  // but only when the relationship already failed at the solve's start
+  // ([TECH] G16‴); one that failed during the solve is `unsatisfied`.
+  const blocked = offsetBlockedRequirements(program, values);
   const constraintStatuses = buildConstraintStatuses(
     definition,
     program.system.pointRecords,
@@ -7058,7 +7288,10 @@ function materializeSolveResult(
     program.tolerances,
     solved.perConstraint,
     program.projectedReferences,
-  );
+  ).map((entry) => {
+    const status = offsetRequirementStatus(blocked.get(entry.constraintId));
+    return status ? { ...entry, status } : entry;
+  });
   const dimensionStatuses = buildDimensionStatuses(
     definition,
     program.system.pointRecords,
@@ -7067,14 +7300,21 @@ function materializeSolveResult(
     solved.perConstraint,
     program.tolerances,
     program.projectedReferences,
-  );
+  ).map((entry) => {
+    const status = offsetRequirementStatus(blocked.get(entry.dimensionId));
+    return status ? { ...entry, status } : entry;
+  });
+  diagnostics.push(...blockedRequirementDiagnostics(definition, blocked));
   const geometryValid = ![
     ...projectionDiagnostics,
     ...commonCircleDiagnostics,
   ].some((diagnostic) => diagnostic.severity === "error");
   const requirementsSatisfied =
     geometryValid &&
-    constraintStatuses.every((entry) => entry.status === "satisfied") &&
+    // [TECH] G16″: a blocked requirement does not count against the status.
+    constraintStatuses.every((entry) =>
+      isAcceptedConstraintStatus(entry.status),
+    ) &&
     dimensionStatuses.every((entry) => entry.status !== "unsatisfied");
 
   let status: SolvedSketchStatus;
@@ -7141,11 +7381,273 @@ function materializeSolveResult(
       ? { offsetFramePlans: solvedOffsetFramePlans(evaluation) }
       : {}),
   };
+  // [TECH] G16′: each failed relationship's one diagnostic is
+  // relationship-scoped. An accepted solve never carries it (G16: E1 reads
+  // the snapshot); its publication reports it (the frame failure is
+  // hint-independent, so publish reproduces it). An unaccepted solve
+  // publishes nothing (U-G1), so the snapshot reports it instead.
+  if (!isOffsetPublicationSolveAccepted(solvedSnapshot))
+    diagnostics.push(...offsetRelationshipDiagnostics(definition, evaluation));
 
   return {
     status,
     solvedSnapshot,
     diagnostics,
+  };
+}
+
+/** [TECH] G16′: authored requirement id → the offset relationships blocking it at `values`. */
+function offsetBlockedRequirements(
+  program: SketchCompiledSolveProgram,
+  values: Float64Array,
+): ReadonlyMap<
+  ConstraintId | DimensionId,
+  readonly OffsetRequirementBlocker[]
+> {
+  const blocked = new Map<
+    ConstraintId | DimensionId,
+    OffsetRequirementBlocker[]
+  >();
+  for (const record of program.system.scalarConstraints) {
+    if (!record.offsetBlockers) continue;
+    const blockers = record.offsetBlockers(values);
+    if (blockers.length === 0) continue;
+    const entry = blocked.get(record.id) ?? [];
+    for (const blocker of blockers)
+      if (
+        !entry.some(
+          (known) =>
+            known.derivationId === blocker.derivationId &&
+            known.reason === blocker.reason,
+        )
+      )
+        entry.push(blocker);
+    blocked.set(record.id, entry);
+  }
+  return blocked;
+}
+
+/**
+ * [TECH] G16‴: the status an offset relationship forces on a requirement
+ * naming its outputs, or null when its own residual decides (none, or only
+ * a singular derivative: review R1). A failure that appeared during the
+ * solve is `unsatisfied`; one already present at the start is `blocked`.
+ */
+function offsetRequirementStatus(
+  blockers: readonly OffsetRequirementBlocker[] | undefined,
+): "blocked" | "unsatisfied" | null {
+  if (blockers?.some((blocker) => blocker.reason === "failedDuringSolve"))
+    return "unsatisfied";
+  if (blockers?.some((blocker) => blocker.reason === "failed"))
+    return "blocked";
+  return null;
+}
+
+/**
+ * The targeted warnings of the requirements naming offset outputs, in
+ * definition order: one `derived-offset-requirement-blocked` per blocked
+ * requirement and one `derived-offset-derivative-unavailable` per
+ * requirement solved without its gradient through a singular offset (review
+ * R1). A requirement that is unsatisfied because its relationship failed
+ * during the solve gets the ordinary unsatisfied reporting; the
+ * relationship reports its own failure.
+ */
+function blockedRequirementDiagnostics(
+  definition: SketchDefinition,
+  blocked: ReadonlyMap<
+    ConstraintId | DimensionId,
+    readonly OffsetRequirementBlocker[]
+  >,
+): SketchSolveDiagnostic[] {
+  if (blocked.size === 0) return [];
+  const targeted = (
+    kind: "Constraint" | "Dimension",
+    id: string,
+    target: SketchSolveDiagnostic["target"],
+  ): SketchSolveDiagnostic[] => {
+    const blockers = blocked.get(id as ConstraintId | DimensionId) ?? [];
+    const ids = (reason: OffsetRequirementBlocker["reason"]) =>
+      blockers
+        .filter((blocker) => blocker.reason === reason)
+        .map((blocker) => blocker.derivationId)
+        .join(", ");
+    const status = offsetRequirementStatus(blockers);
+    const singular = ids("derivativeUnavailable");
+    return [
+      ...(status === "blocked"
+        ? [
+            makeDiagnostic(
+              OFFSET_REQUIREMENT_BLOCKED,
+              "warning",
+              `${kind} ${id} names an output of offset relationship ${ids("failed")} (its solve frame failed, so its outputs are held); it is blocked and not solved until the offset evaluates again.`,
+              target,
+            ),
+          ]
+        : []),
+      ...(status === null && singular
+        ? [
+            makeDiagnostic(
+              OFFSET_DIAGNOSTIC_CODES.derivativeUnavailable,
+              "warning",
+              `${kind} ${id} names an output of offset relationship ${singular}, whose derivative is unavailable at this solve (a singular joint); it is solved without its gradient through the offset.`,
+              target,
+            ),
+          ]
+        : []),
+    ];
+  };
+  return [
+    ...definition.constraints.flatMap((constraint) =>
+      targeted("Constraint", constraint.constraintId, {
+        kind: "constraint",
+        constraintId: constraint.constraintId,
+      }),
+    ),
+    ...definition.dimensions.flatMap((dimension) =>
+      targeted("Dimension", dimension.dimensionId, {
+        kind: "dimension",
+        dimensionId: dimension.dimensionId,
+      }),
+    ),
+  ];
+}
+
+/**
+ * [TECH] G16′: the one relationship-scoped diagnostic of each failed offset
+ * relationship (its evaluation failure), in definition order.
+ */
+function offsetRelationshipDiagnostics(
+  definition: SketchDefinition,
+  evaluation: SketchDerivationEvaluationResult | null,
+): SketchSolveDiagnostic[] {
+  const failures = evaluation?.offsetFailures ?? [];
+  return (definition.derivedRelationships ?? []).flatMap((relationship) => {
+    if (relationship.kind !== "offset") return [];
+    const failure = failures.find(
+      (candidate) => candidate.derivationId === relationship.derivationId,
+    );
+    return failure ? [failure.diagnostic] : [];
+  });
+}
+
+/**
+ * [TECH] G16⁗: the relationships of the current solve's blocked set that a
+ * requirement names and that build at `values` (their requirements were
+ * held blocked, so their real residuals are still unknown).
+ */
+function rebuiltBlockedOffsets(
+  program: SketchCompiledSolveProgram,
+  values: Float64Array,
+): ReadonlySet<string> {
+  const failing = program.system.parameterProjection.offsetFailuresAt(values);
+  const rebuilt = new Set<string>();
+  for (const blockers of offsetBlockedRequirements(program, values).values())
+    for (const blocker of blockers)
+      if (blocker.reason === "failed" && !failing.has(blocker.derivationId))
+        rebuilt.add(blocker.derivationId);
+  return rebuilt;
+}
+
+/**
+ * [TECH] G16‴ + G16⁗: one solve from `startValues` with at most one
+ * re-solve on rebuild.
+ * - The blocked set is the offset relationships failing at `startValues`,
+ *   decided once. A requirement naming one of them is held blocked for the
+ *   whole solve, also at iterates where it builds again (re-review A-1:
+ *   its real residual appearing there would reward staying failed).
+ * - If a held relationship that a requirement names builds at the end
+ *   values, the first result is re-evaluated there with those
+ *   relationships out of the blocked set (their requirements use real
+ *   residuals). If that is accepted, it is the result (the solver's own
+ *   acceptance: a re-solve cannot be better). Otherwise the problem is
+ *   re-solved exactly once from the end values with the reduced set, where
+ *   a mid-solve failure is unbounded as in any solve.
+ * - The re-solve is judged the same way (a held relationship building at
+ *   its end values is re-evaluated, never re-solved again) and replaces
+ *   the first result only when it is accepted.
+ * Without a failure at the start this is the one plain solve.
+ */
+function solveWithRebuildRetry<T>(input: {
+  program: SketchCompiledSolveProgram;
+  startValues: Float64Array;
+  solve: () => T;
+  retry: (from: Float64Array) => T;
+  valuesOf: (result: T) => Float64Array | null;
+  reevaluate: (values: Float64Array) => T;
+  isAccepted: (result: T) => boolean;
+}): T {
+  const projection = input.program.system.parameterProjection;
+  const run = (blocked: ReadonlySet<string>, solve: () => T) =>
+    projection.withBlockedOffsets(blocked, () => {
+      const result = solve();
+      const values = blocked.size > 0 ? input.valuesOf(result) : null;
+      return {
+        result,
+        values,
+        rebuilt: values
+          ? rebuiltBlockedOffsets(input.program, values)
+          : new Set<string>(),
+      };
+    });
+  const without = (
+    blocked: ReadonlySet<string>,
+    rebuilt: ReadonlySet<string>,
+  ): ReadonlySet<string> =>
+    new Set([...blocked].filter((derivationId) => !rebuilt.has(derivationId)));
+  const judged = (
+    blocked: ReadonlySet<string>,
+    solved: ReturnType<typeof run>,
+  ) =>
+    solved.rebuilt.size === 0
+      ? solved.result
+      : projection.withBlockedOffsets(without(blocked, solved.rebuilt), () =>
+          input.reevaluate(solved.values!),
+        );
+
+  const blockedAtStart = projection.offsetFailuresAt(input.startValues);
+  const first = run(blockedAtStart, input.solve);
+  if (first.rebuilt.size === 0) return first.result;
+  const kept = judged(blockedAtStart, first);
+  if (input.isAccepted(kept)) return kept;
+  const blocked = without(blockedAtStart, first.rebuilt);
+  const retried = judged(
+    blocked,
+    run(blocked, () => input.retry(first.values!)),
+  );
+  return input.isAccepted(retried) ? retried : kept;
+}
+
+/** One batch solve of `program` from `startValues` (no rebuild handling). */
+function solveProgramValues(
+  program: SketchCompiledSolveProgram,
+  startValues: Float64Array,
+) {
+  const solved = solveSystemValues(
+    startValues,
+    program.system.scalarConstraints,
+    program.strategy,
+    (candidate) => isAcceptableSolvedValues(program, candidate),
+  );
+  return {
+    solved,
+    result: materializeSolveResult(program, solved.values, solved),
+  };
+}
+
+/** [TECH] G16⁗: a batch or session solve result re-materialized at `values`. */
+function reevaluateProgramValues(
+  program: SketchCompiledSolveProgram,
+  values: Float64Array,
+) {
+  const state = evaluateLoss(values, program.system.scalarConstraints);
+  const solved: SolvedSystemValues = {
+    values: cloneValues(values),
+    loss: state.loss,
+    perConstraint: state.perConstraint,
+  };
+  return {
+    solved,
+    result: materializeSolveResult(program, solved.values, solved),
   };
 }
 
@@ -7157,13 +7659,18 @@ export function solveCompiledSketchProgram(
     program,
     initialValues,
   );
-  const solved = solveSystemValues(
-    preconditionedValues,
-    program.system.scalarConstraints,
-    program.strategy,
-    (candidate) => isAcceptableSolvedValues(program, candidate),
-  );
-  return materializeSolveResult(program, solved.values, solved);
+  // [TECH] G16‴/G16⁗: the blocked set is decided on the solve's start
+  // state, with one re-solve when a blocked offset builds at the end.
+  return solveWithRebuildRetry({
+    program,
+    startValues: preconditionedValues,
+    solve: () => solveProgramValues(program, preconditionedValues),
+    retry: (from) => solveProgramValues(program, from),
+    valuesOf: (solved) => solved.solved.values,
+    reevaluate: (values) => reevaluateProgramValues(program, values),
+    isAccepted: (solved) =>
+      isAcceptableSolvedSnapshot(solved.result.solvedSnapshot),
+  }).result;
 }
 
 function isAcceptableSolvedValues(
@@ -7178,8 +7685,8 @@ function isAcceptableSolvedValues(
 function isAcceptableSolvedSnapshot(snapshot: SolvedSketchSnapshot) {
   return (
     snapshot.status.solveState !== "failed" &&
-    snapshot.constraintStatuses.every(
-      (status) => status.status === "satisfied",
+    snapshot.constraintStatuses.every((status) =>
+      isAcceptedConstraintStatus(status.status),
     ) &&
     snapshot.dimensionStatuses.every(
       (status) => status.status !== "unsatisfied",
@@ -7238,10 +7745,11 @@ function solvedSnapshotStructurallyCoversProgram(
     snapshot.dimensionStatuses.map((status) => [status.dimensionId, status]),
   );
   return (
-    program.definition.constraints.every(
-      (constraint) =>
-        constraintStatuses.get(constraint.constraintId)?.status ===
-        "satisfied",
+    program.definition.constraints.every((constraint) =>
+      isAcceptedConstraintStatus(
+        constraintStatuses.get(constraint.constraintId)?.status ??
+          "unsatisfied",
+      ),
     ) &&
     program.definition.dimensions.every(
       (dimension) =>
@@ -7264,43 +7772,52 @@ export function createCompiledSketchSolveSession(input: {
     input.program,
     seeded.values,
   );
-  const initialState = evaluateLoss(
-    initialValues,
-    input.program.system.scalarConstraints,
-  );
-  const initialCommonCircleValid =
-    offsetArcCommonCircleDiagnostics(
-      input.program,
-      input.program.system.parameterProjection.projectValues(initialValues),
-    ).length === 0;
-  const isAccepted = (candidate: SolvedSystemValues) =>
-    isAcceptableSolvedValues(input.program, candidate);
-  const initialCandidate =
-    initialCommonCircleValid &&
-    (initialState.loss < SOLVED_LOSS_THRESHOLD ||
-      uniformNorm(initialState.gradient) < 1e-8)
-      ? {
-          values: cloneValues(initialValues),
-          loss: initialState.loss,
-          perConstraint: initialState.perConstraint,
-        }
-      : null;
-  // Skip the solve only when the start already meets every requirement; a
-  // low total loss can still leave one outside its document tolerance.
-  const solvedValues =
-    initialCandidate && isAccepted(initialCandidate)
-      ? initialCandidate
-      : solveSystemValues(
-          initialValues,
-          input.program.system.scalarConstraints,
-          input.program.strategy,
-          isAccepted,
-        );
-  const solved = materializeSolveResult(
-    input.program,
-    solvedValues.values,
-    solvedValues,
-  );
+  // [TECH] G16‴/G16⁗: the blocked set is decided on the session solve's
+  // start, with one re-solve when a blocked offset builds at the end.
+  const { solved: solvedValues, result: solved } = solveWithRebuildRetry({
+    program: input.program,
+    startValues: initialValues,
+    solve: () => {
+      const initialState = evaluateLoss(
+        initialValues,
+        input.program.system.scalarConstraints,
+      );
+      const initialCommonCircleValid =
+        offsetArcCommonCircleDiagnostics(
+          input.program,
+          input.program.system.parameterProjection.projectValues(initialValues),
+        ).length === 0;
+      const initialCandidate =
+        initialCommonCircleValid &&
+        (initialState.loss < SOLVED_LOSS_THRESHOLD ||
+          uniformNorm(initialState.gradient) < 1e-8)
+          ? {
+              values: cloneValues(initialValues),
+              loss: initialState.loss,
+              perConstraint: initialState.perConstraint,
+            }
+          : null;
+      // Skip the solve only when the start already meets every
+      // requirement; a low total loss can still leave one outside its
+      // document tolerance.
+      return initialCandidate &&
+        isAcceptableSolvedValues(input.program, initialCandidate)
+        ? {
+            solved: initialCandidate,
+            result: materializeSolveResult(
+              input.program,
+              initialCandidate.values,
+              initialCandidate,
+            ),
+          }
+        : solveProgramValues(input.program, initialValues);
+    },
+    retry: (from) => solveProgramValues(input.program, from),
+    valuesOf: (candidate) => candidate.solved.values,
+    reevaluate: (values) => reevaluateProgramValues(input.program, values),
+    isAccepted: (candidate) =>
+      isAcceptableSolvedSnapshot(candidate.result.solvedSnapshot),
+  });
   const solvedIsAcceptable = isAcceptableSolvedSnapshot(
     solved.solvedSnapshot,
   );
@@ -7410,7 +7927,7 @@ function tryTranslateDraggedComponent(
   component: SketchCompiledSolveComponent | null,
   dragTarget: SketchDraggedPointTarget,
   targetTolerance: number,
-): SketchDraggedPointSolveResult | null {
+): DraggedPointCandidate | null {
   if (!component || component.pointIds.length === 0) {
     return null;
   }
@@ -7463,8 +7980,8 @@ function tryTranslateDraggedComponent(
     ? length(subtract(solvedPoint.solvedPosition, dragTarget.position))
     : Number.POSITIVE_INFINITY;
   const constraintsSatisfied =
-    materialized.solvedSnapshot.constraintStatuses.every(
-      (status) => status.status === "satisfied",
+    materialized.solvedSnapshot.constraintStatuses.every((status) =>
+      isAcceptedConstraintStatus(status.status),
     );
   const dimensionsSatisfied =
     materialized.solvedSnapshot.dimensionStatuses.every(
@@ -7481,13 +7998,7 @@ function tryTranslateDraggedComponent(
     constraintsSatisfied &&
     dimensionsSatisfied
   ) {
-    session.values = candidateValues;
-    session.lastAcceptedSnapshot = materialized.solvedSnapshot;
-    return {
-      kind: "solved",
-      solvedSnapshot: materialized.solvedSnapshot,
-      diagnostics: materialized.diagnostics,
-    };
+    return { accepted: true, values: candidateValues, materialized };
   }
 
   return null;
@@ -7498,8 +8009,8 @@ function createDraggedPointAcceptance(input: {
   materialized: SketchCoreSolveResult;
 }) {
   const constraintsSatisfied =
-    input.materialized.solvedSnapshot.constraintStatuses.every(
-      (status) => status.status === "satisfied",
+    input.materialized.solvedSnapshot.constraintStatuses.every((status) =>
+      isAcceptedConstraintStatus(status.status),
     );
   const dimensionsSatisfied =
     input.materialized.solvedSnapshot.dimensionStatuses.every(
@@ -7523,6 +8034,87 @@ function createDraggedPointAcceptance(input: {
   return { accepted };
 }
 
+/**
+ * [TECH] G16′: an accepted frame's values with every driven index set to
+ * its accepted (projected) value, so an offset relationship that fails in a
+ * later frame holds the last accepted frame's outputs, not the drag start's.
+ * Authority indices are unchanged, and a driven raw value is never read
+ * while its relationship evaluates, so nothing changes without a failure.
+ */
+function heldDrivenValues(
+  program: SketchCompiledSolveProgram,
+  values: Float64Array,
+) {
+  return program.system.parameterProjection.projectValues(values);
+}
+
+/** One drag frame's candidate values, materialized, and whether the frame accepts them. */
+type DraggedPointCandidate = {
+  accepted: boolean;
+  values: Float64Array;
+  materialized: SketchCoreSolveResult;
+};
+
+/** [TECH] G16⁗: a drag frame's candidate re-materialized and re-judged at `values`. */
+function reevaluateDraggedPointCandidate(
+  session: SketchCompiledSolveSession,
+  values: Float64Array,
+): DraggedPointCandidate {
+  const { materialized } = materializeDraggedPointCandidate(session, values);
+  return {
+    accepted: createDraggedPointAcceptance({
+      program: session.program,
+      materialized,
+    }).accepted,
+    values,
+    materialized,
+  };
+}
+
+/**
+ * [TECH] G16‴/G16⁗: one drag frame toward `dragTarget`, a solve whose start
+ * state is the last accepted frame (`session.values`): its blocked set is
+ * decided there, with one re-solve (from the frame's end values) when a
+ * blocked offset builds at the end. `translate` tries the rigid-translation
+ * fast path first. The session is not mutated.
+ */
+function solveDraggedPointFrameWithRebuild(input: {
+  session: SketchCompiledSolveSession;
+  component: SketchCompiledSolveComponent | null;
+  dragTarget: SketchDraggedPointTarget;
+  translate?: { targetTolerance: number };
+}): DraggedPointCandidate | null {
+  const { session, component, dragTarget, translate } = input;
+  return solveWithRebuildRetry<DraggedPointCandidate | null>({
+    program: session.program,
+    startValues: session.values,
+    solve: () =>
+      // Rigid-translation fast path (D5): a verified optimization only. It
+      // succeeds exclusively when translating the whole component satisfies
+      // every authored constraint, i.e. the component is internally rigid
+      // and translation is the minimum-motion solution, so its result
+      // equals the general solve.
+      (translate
+        ? tryTranslateDraggedComponent(
+            session,
+            component,
+            dragTarget,
+            translate.targetTolerance,
+          )
+        : null) ?? solveDraggedPointFrame({ session, component, dragTarget }),
+    retry: (from) =>
+      solveDraggedPointFrame({
+        session,
+        component,
+        dragTarget,
+        startValues: from,
+      }),
+    valuesOf: (candidate) => candidate?.values ?? null,
+    reevaluate: (values) => reevaluateDraggedPointCandidate(session, values),
+    isAccepted: (candidate) => candidate?.accepted === true,
+  });
+}
+
 function materializeDraggedPointCandidate(
   session: SketchCompiledSolveSession,
   values: Float64Array,
@@ -7541,7 +8133,7 @@ function acceptDraggedPointCandidate(
   values: Float64Array,
   materialized: SketchCoreSolveResult,
 ): SketchDraggedPointSolveResult {
-  session.values = values;
+  session.values = heldDrivenValues(session.program, values);
   session.lastAcceptedSnapshot = materialized.solvedSnapshot;
   return {
     kind: "solved",
@@ -7606,11 +8198,9 @@ function solveDraggedPointFrame(input: {
   session: SketchCompiledSolveSession;
   component: SketchCompiledSolveComponent | null;
   dragTarget: SketchDraggedPointTarget;
-}): {
-  accepted: boolean;
-  values: Float64Array;
-  materialized: SketchCoreSolveResult;
-} | null {
+  /** [TECH] G16⁗: the re-solve's start (default: the last accepted frame). */
+  startValues?: Float64Array;
+}): DraggedPointCandidate | null {
   const { session, component, dragTarget } = input;
   const program = session.program;
   const parameterCount = program.system.parameterCount;
@@ -7656,7 +8246,7 @@ function solveDraggedPointFrame(input: {
     }),
   ];
   const solvedA = solveSystemValues(
-    cloneValues(session.values),
+    cloneValues(input.startValues ?? session.values),
     phaseAConstraints,
     program.strategy,
   );
@@ -7739,7 +8329,8 @@ export function sketchDraggedPointHasFreeDof(
     [0, -probe],
   ];
   for (const direction of directions) {
-    const frame = solveDraggedPointFrame({
+    // [TECH] G16‴: each probe frame is a solve from the session's values.
+    const frame = solveDraggedPointFrameWithRebuild({
       session,
       component,
       dragTarget: {
@@ -7876,29 +8467,13 @@ export function updateCompiledSketchSolveSession(
       ],
     };
 
-    // Rigid-translation fast path (D5): a verified optimization only. It succeeds
-    // exclusively when translating the whole component satisfies every authored
-    // constraint, i.e. the component is internally rigid and translation is the
-    // minimum-motion solution, so its result equals the general solve.
-    const translated = tryTranslateDraggedComponent(
-      session,
-      component,
-      stepTarget,
-      targetTolerance,
-    );
-    if (translated && translated.kind === "solved") {
-      lastAccepted = {
-        status: translated.solvedSnapshot.status,
-        solvedSnapshot: translated.solvedSnapshot,
-        diagnostics: translated.diagnostics,
-      };
-      continue;
-    }
-
-    const frame = solveDraggedPointFrame({
+    // [TECH] G16‴: each substep is a solve whose start state is the last
+    // accepted frame (`session.values`); its blocked set is decided there.
+    const frame = solveDraggedPointFrameWithRebuild({
       session,
       component,
       dragTarget: stepTarget,
+      translate: { targetTolerance },
     });
     if (frame && frame.accepted) {
       acceptDraggedPointCandidate(session, frame.values, frame.materialized);

@@ -1,4 +1,5 @@
 import type { CertifiedTubePieceChainRequests } from "@/contracts/modeling/neutral-curve-query";
+import { isAcceptedConstraintStatus } from "@/contracts/sketch/schema";
 import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
 import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
 import type { CertifiedNeutralCurveRequestQuery } from "@/contracts/sketch/offset-chain-topology";
@@ -36,8 +37,9 @@ export function isOffsetPublicationSolveAccepted(
 ): boolean {
   return (
     snapshot.status.solveState === "solved" &&
-    snapshot.constraintStatuses.every(
-      (entry) => entry.status === "satisfied",
+    // [TECH] G16″: a blocked requirement does not count (scoped status).
+    snapshot.constraintStatuses.every((entry) =>
+      isAcceptedConstraintStatus(entry.status),
     ) &&
     snapshot.dimensionStatuses.every(
       (entry) => entry.status !== "unsatisfied",
@@ -312,6 +314,12 @@ export function applyOffsetPublications(
  * geometry is drawn with the stale/invalid tint and stays pickable, but it
  * is not region input, measured, exported, snapped or projected. Every
  * other entity is not a non-accepted offset output and is not in the map.
+ *
+ * [TECH] G16‴ (T08b-g7b review R3): non-acceptance follows derived
+ * dependents. A mirror, pattern or transform output whose seed is
+ * non-accepted, and every output of a mirror whose axis is non-accepted, is
+ * computed from that (possibly stale) geometry, so it is non-accepted too,
+ * owned by the same offset relationship.
  */
 export function nonAcceptedOffsetOutputs(
   definition: Pick<SketchDefinition, "derivedRelationships" | "entities">,
@@ -337,14 +345,15 @@ export function nonAcceptedOffsetOutputs(
     (entity) =>
       entity.kind === "derivedPiecewiseCubic" && !result.has(entity.entityId),
   );
-  if (shells.length === 0) return result;
   const certifiedShells = new Set(
-    snapshot.solvedEntities.flatMap((entity) =>
-      entity.kind === "derivedPiecewiseCubic" &&
-      entity.publication === "certified"
-        ? [entity.entityId]
-        : [],
-    ),
+    shells.length === 0
+      ? []
+      : snapshot.solvedEntities.flatMap((entity) =>
+          entity.kind === "derivedPiecewiseCubic" &&
+          entity.publication === "certified"
+            ? [entity.entityId]
+            : [],
+        ),
   );
   for (const entity of shells)
     if (
@@ -352,7 +361,35 @@ export function nonAcceptedOffsetOutputs(
       !certifiedShells.has(entity.entityId)
     )
       result.set(entity.entityId, { derivationId: entity.derivationId });
+  addNonAcceptedDerivedDependents(definition, result);
   return result;
+}
+
+/** [TECH] G16‴: closes `result` over mirror/pattern/transform outputs (to a fixed point). */
+function addNonAcceptedDerivedDependents(
+  definition: Pick<SketchDefinition, "derivedRelationships">,
+  result: Map<SketchEntityId, { readonly derivationId: string }>,
+) {
+  if (result.size === 0) return;
+  const derived = (definition.derivedRelationships ?? []).filter(
+    (relationship) => relationship.kind !== "offset",
+  );
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (const relationship of derived) {
+      const axis =
+        relationship.kind === "mirror"
+          ? result.get(relationship.mirrorReference.entityId)
+          : undefined;
+      for (const output of relationship.outputs) {
+        if (result.has(output.outputEntityId)) continue;
+        const owner = axis ?? result.get(output.seedEntityId);
+        if (!owner) continue;
+        result.set(output.outputEntityId, owner);
+        changed = true;
+      }
+    }
+  }
 }
 
 /**
@@ -373,17 +410,18 @@ export function nonAcceptedOffsetOutputPoints(
   const result = new Map<SketchPointId, { readonly derivationId: string }>();
   if (outputs.size === 0) return result;
   for (const relationship of definition.derivedRelationships ?? []) {
-    if (relationship.kind !== "offset") continue;
-    const owner = { derivationId: relationship.derivationId };
     const pointsOf = (
       entityId: SketchEntityId,
       pointIds: readonly SketchPointId[],
     ) => {
-      if (outputs.has(entityId))
-        for (const pointId of pointIds) result.set(pointId, owner);
+      const owner = outputs.get(entityId);
+      if (owner) for (const pointId of pointIds) result.set(pointId, owner);
     };
+    // [TECH] G16‴: a non-accepted mirror/pattern/transform output's driven
+    // points too.
     for (const output of relationship.outputs)
       pointsOf(output.outputEntityId, output.outputPointIds);
+    if (relationship.kind !== "offset") continue;
     for (const joint of relationship.jointOutputs)
       pointsOf(joint.outputEntityId, [
         joint.startPointId,

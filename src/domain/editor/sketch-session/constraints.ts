@@ -1,4 +1,5 @@
 import type { SketchDerivationSettings } from "@/contracts/sketch/derived-geometry";
+import { isAcceptedConstraintStatus } from "@/contracts/sketch/schema";
 import type {
   DocumentVariableRecord,
   SketchPoint,
@@ -627,7 +628,7 @@ export function solveCommittedConstraintDefinition(
     partialSolvePolicy: "bestEffort",
   });
   const constraintsSatisfied = solved.solvedSnapshot.constraintStatuses.every(
-    (status) => status.status === "satisfied",
+    (status) => isAcceptedConstraintStatus(status.status),
   );
 
   if (solved.status.solveState !== "solved" || !constraintsSatisfied) {

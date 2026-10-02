@@ -83,7 +83,8 @@ export function getSketchConstraintDisplaySummary(input: {
   definition: SketchDefinition;
   solvedSnapshot: SolvedSketchSnapshot;
 }): SketchConstraintDisplaySummary {
-  const affectedTargetKeys = getSketchAffectedConstraintTargetKeys(input);
+  const { affectedTargetKeys, blockedTargetKeys } =
+    getSketchAffectedConstraintTargetKeys(input);
 
   return {
     state: normalizeSketchConstraintDisplayState(
@@ -91,6 +92,7 @@ export function getSketchConstraintDisplaySummary(input: {
       affectedTargetKeys.size,
     ),
     affectedTargetKeys,
+    blockedTargetKeys,
   };
 }
 
@@ -102,8 +104,9 @@ export function getSketchConstraintDisplayForTarget(
     state: summary.state,
     isAffectedOverconstraint:
       target !== null &&
-      summary.state === "overconstrained" &&
-      summary.affectedTargetKeys.has(getPrimitiveRefKey(target)),
+      ((summary.state === "overconstrained" &&
+        summary.affectedTargetKeys.has(getPrimitiveRefKey(target))) ||
+        summary.blockedTargetKeys.has(getPrimitiveRefKey(target))),
   };
 }
 
@@ -113,6 +116,9 @@ function getSketchAffectedConstraintTargetKeys(input: {
   solvedSnapshot: SolvedSketchSnapshot;
 }) {
   const targetKeys = new Set<string>();
+  // [TECH] G16″: a blocked requirement leaves the sketch solved, so its
+  // targets get the problem styling on their own, like unsatisfied ones.
+  const blockedTargetKeys = new Set<string>();
   const constraintById = new Map(
     input.definition.constraints.map((c) => [c.constraintId, c]),
   );
@@ -140,48 +146,38 @@ function getSketchAffectedConstraintTargetKeys(input: {
       continue;
     }
 
-    targetKeys.add(
-      getPrimitiveRefKey(
-        createSketchConstraintRef(input.sketchId, status.constraintId),
-      ),
-    );
     const constraint = constraintById.get(status.constraintId);
-    if (!constraint) {
-      continue;
-    }
-
-    for (const target of getConstraintAffectedGeometryRefs(
-      input.sketchId,
-      constraint,
-    )) {
+    for (const target of [
+      createSketchConstraintRef(input.sketchId, status.constraintId),
+      ...(constraint
+        ? getConstraintAffectedGeometryRefs(input.sketchId, constraint)
+        : []),
+    ]) {
       targetKeys.add(getPrimitiveRefKey(target));
+      if (status.status === "blocked")
+        blockedTargetKeys.add(getPrimitiveRefKey(target));
     }
   }
 
   for (const status of input.solvedSnapshot.dimensionStatuses) {
-    if (status.status !== "unsatisfied") {
+    if (status.status !== "unsatisfied" && status.status !== "blocked") {
       continue;
     }
 
-    targetKeys.add(
-      getPrimitiveRefKey(
-        createSketchDimensionRef(input.sketchId, status.dimensionId),
-      ),
-    );
     const dimension = dimensionById.get(status.dimensionId);
-    if (!dimension) {
-      continue;
-    }
-
-    for (const target of getDimensionAffectedGeometryRefs(
-      input.sketchId,
-      dimension,
-    )) {
+    for (const target of [
+      createSketchDimensionRef(input.sketchId, status.dimensionId),
+      ...(dimension
+        ? getDimensionAffectedGeometryRefs(input.sketchId, dimension)
+        : []),
+    ]) {
       targetKeys.add(getPrimitiveRefKey(target));
+      if (status.status === "blocked")
+        blockedTargetKeys.add(getPrimitiveRefKey(target));
     }
   }
 
-  return targetKeys;
+  return { affectedTargetKeys: targetKeys, blockedTargetKeys };
 }
 
 function getSketchDiagnosticAffectedTargets(

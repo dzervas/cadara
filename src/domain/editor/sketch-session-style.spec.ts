@@ -4,6 +4,13 @@ import type { SketchDefinition } from "@/contracts/sketch/schema";
 import type { SolvedSketchSnapshot } from "@/contracts/sketch/schema";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import type { SketchSnapshotRecord } from "@/contracts/modeling/schema";
+import type {
+  ConstraintId,
+  DimensionId,
+  SketchEntityId,
+  SketchPointId,
+} from "@/contracts/shared/ids";
+import type { PrimitiveRef } from "@/core/editor/schema";
 import {
   createSketchSessionFromSnapshot,
   getSketchConstraintDisplayForTarget,
@@ -659,4 +666,100 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
     ).isAffectedOverconstraint,
     "Unaffected geometry should not receive overconstraint diagnostics.",
   ).toBeFalsy();
+
+  // [TECH] G16″: a requirement blocked by a failed offset relationship
+  // leaves the sketch solved, yet it and its geometry keep the problem
+  // styling of an unsatisfied requirement; nothing else is marked.
+  const blockedDefinition = {
+    ...constrainedDefinition,
+    dimensionIds: ["dimension_ab"],
+    dimensions: [
+      {
+        kind: "distance",
+        dimensionId: "dimension_ab",
+        label: "Distance",
+        pointIds: ["sketch_point_a", "sketch_point_b"],
+        axis: "aligned",
+        value: 1,
+      },
+    ],
+  } as SketchDefinition;
+  for (const [label, constraintStatus, dimensionStatus] of [
+    ["blocked constraint", "blocked", "driving"],
+    ["blocked dimension", "satisfied", "blocked"],
+  ] as const) {
+    const blockedSummary = getSketchConstraintDisplaySummary({
+      sketchId: "sketch_primary",
+      definition: blockedDefinition,
+      solvedSnapshot: {
+        ...unsatisfiedSnapshot,
+        status: { solveState: "solved", constraintState: "wellConstrained" },
+        constraintStatuses: [
+          { constraintId: "constraint_horizontal", status: constraintStatus },
+        ],
+        dimensionStatuses: [
+          {
+            dimensionId: "dimension_ab",
+            status: dimensionStatus,
+            solvedValue: 1,
+          },
+        ],
+      },
+    });
+    expect(
+      blockedSummary.state,
+      `${label}: the solved sketch keeps its own display state`,
+    ).toBe("constrained");
+    const marked = (target: PrimitiveRef) =>
+      getSketchConstraintDisplayForTarget(target, blockedSummary)
+        .isAffectedOverconstraint;
+    const requirement: PrimitiveRef =
+      constraintStatus === "blocked"
+        ? {
+            kind: "constraint",
+            sketchId: "sketch_primary",
+            constraintId: "constraint_horizontal" as ConstraintId,
+          }
+        : {
+            kind: "dimension",
+            sketchId: "sketch_primary",
+            dimensionId: "dimension_ab" as DimensionId,
+          };
+    expect(
+      marked(requirement),
+      `${label}: the blocked requirement shows the problem styling`,
+    ).toBe(true);
+    expect(
+      marked(
+        constraintStatus === "blocked"
+          ? {
+              kind: "sketchEntity",
+              sketchId: "sketch_primary",
+              entityId: "sketch_entity_ab" as SketchEntityId,
+            }
+          : {
+              kind: "sketchPoint",
+              sketchId: "sketch_primary",
+              pointId: "sketch_point_b" as SketchPointId,
+            },
+      ),
+      `${label}: its geometry shows the problem styling`,
+    ).toBe(true);
+    expect(
+      marked(
+        constraintStatus === "blocked"
+          ? {
+              kind: "dimension",
+              sketchId: "sketch_primary",
+              dimensionId: "dimension_ab" as DimensionId,
+            }
+          : {
+              kind: "constraint",
+              sketchId: "sketch_primary",
+              constraintId: "constraint_horizontal" as ConstraintId,
+            },
+      ),
+      `${label}: the satisfied requirement is not marked`,
+    ).toBe(false);
+  }
 });

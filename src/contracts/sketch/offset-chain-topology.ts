@@ -15,6 +15,7 @@ import type {
   TubeChainVertexDeclaration,
   TubePieceChainResult,
 } from "@/contracts/modeling/neutral-curve-query";
+import { isAcceptedConstraintStatus } from "@/contracts/sketch/schema";
 import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
 import {
   canonicalArcSupport,
@@ -1964,7 +1965,9 @@ export function declaredOffsetChainPieces(input: {
   if (
     solvedSnapshot.status.solveState !== "solved" ||
     solvedSnapshot.constraintStatuses.some(
-      (status) => status.status !== "satisfied",
+      // [TECH] G16″: the scoped status (a blocked requirement belongs to a
+      // failed relationship, never to this one's accepted frame).
+      (status) => !isAcceptedConstraintStatus(status.status),
     ) ||
     solvedSnapshot.dimensionStatuses.some(
       (status) => status.status === "unsatisfied",

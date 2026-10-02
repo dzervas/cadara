@@ -325,6 +325,11 @@ export interface SketchConstraintDisplayTargetState {
 export interface SketchConstraintDisplaySummary {
   state: SketchConstraintDisplayState;
   affectedTargetKeys: ReadonlySet<string>;
+  /**
+   * [TECH] G16″: targets of requirements blocked by a failed offset
+   * relationship; they get the problem styling even when the sketch solves.
+   */
+  blockedTargetKeys: ReadonlySet<string>;
 }
 
 export interface SketchDisplayDiagnosticStyle {

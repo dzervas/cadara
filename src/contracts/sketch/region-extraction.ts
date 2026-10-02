@@ -9,6 +9,7 @@
  * analytic areas (`region-interval-geometry.ts`) are internal safeguards: none
  * of them can close a gap or create a contact.
  */
+import { isAcceptedConstraintStatus } from "@/contracts/sketch/schema";
 import {
   evaluateNeutralCurve,
   type NeutralCurveJoinLocation,
@@ -188,16 +189,18 @@ export function offsetArrangementInput(
   const nonAccepted = nonAcceptedOffsetOutputs(definition, solvedSnapshot);
   const derivedCurves: SketchArrangementDerivedCurve[] = [];
   const unpublishedOffsetOutputs: SketchArrangementUnpublishedOutput[] = [];
+  const reasonOf = (derivationId: string) => {
+    const state = status.get(derivationId);
+    return state === "failed"
+      ? `offset relationship ${derivationId} failed its publication`
+      : state === "planChanged"
+        ? `offset relationship ${derivationId} is pending its re-solve`
+        : state === "certified"
+          ? `offset relationship ${derivationId} is not certified in this solved snapshot`
+          : `offset relationship ${derivationId} is not published`;
+  };
   for (const relationship of offsets) {
-    const state = status.get(relationship.derivationId);
-    const reason =
-      state === "failed"
-        ? `offset relationship ${relationship.derivationId} failed its publication`
-        : state === "planChanged"
-          ? `offset relationship ${relationship.derivationId} is pending its re-solve`
-          : state === "certified"
-            ? `offset relationship ${relationship.derivationId} is not certified in this solved snapshot`
-            : `offset relationship ${relationship.derivationId} is not published`;
+    const reason = reasonOf(relationship.derivationId);
     for (const entityId of [
       ...relationship.outputs.map((output) => output.outputEntityId),
       ...relationship.jointOutputs.map((output) => output.outputEntityId),
@@ -231,6 +234,20 @@ export function offsetArrangementInput(
           queryDomain: span.queryDomain,
         })),
       });
+    }
+  }
+  // [TECH] G16‴ (review R3): a mirror/pattern/transform output derived
+  // from a non-accepted offset output is excluded too, naming that offset.
+  for (const relationship of definition.derivedRelationships ?? []) {
+    if (relationship.kind === "offset") continue;
+    for (const output of relationship.outputs) {
+      const owner = nonAccepted.get(output.outputEntityId);
+      if (owner)
+        unpublishedOffsetOutputs.push({
+          entityId: output.outputEntityId,
+          derivationId: owner.derivationId,
+          reason: reasonOf(owner.derivationId),
+        });
     }
   }
   return { derivedCurves, unpublishedOffsetOutputs };
@@ -3514,7 +3531,11 @@ function projectedReferenceDiagnostics(
 function isAcceptedSolve(solved: SolvedSketchSnapshot) {
   return (
     solved.status.solveState === "solved" &&
-    solved.constraintStatuses.every((entry) => entry.status === "satisfied")
+    // [TECH] G16″: a requirement blocked by a failed offset relationship
+    // does not withhold the rest of the sketch's regions (U-G1, scoped).
+    solved.constraintStatuses.every((entry) =>
+      isAcceptedConstraintStatus(entry.status),
+    )
   );
 }
 
