@@ -23,6 +23,7 @@ import {
 } from "@/contracts/sketch/region-extraction.fixtures";
 import {
   createSketchArrangementDeriver,
+  offsetArrangementInput,
   type SketchArrangementDerivedCurve,
   type SketchArrangementInput,
   type SketchArrangementResult,
@@ -38,6 +39,10 @@ import type {
 } from "@/contracts/sketch/schema";
 import { regionBranchKey } from "@/contracts/sketch/region-identity";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import {
+  applyOffsetPublications,
+  publishSketchOffsets,
+} from "@/contracts/sketch/offset-publication";
 import type {
   SplinePoles,
   SplineSpan,
@@ -81,7 +86,13 @@ import {
   offsetFrameChainRows,
   offsetPartitionDragRows,
   seedArcRows,
+  EDITED_FILLET_DELTAS,
+  EDITED_FILLET_ROWS,
+  TANGENT_FILLET_DISTANCES,
+  editedFilletSketch,
   tangentEdit,
+  withLineLength,
+  withoutFilletRelationships,
   type AcceptedPair,
   type Authored,
   type EndpointSnaps,
@@ -4975,3 +4986,417 @@ const D7_90_MESSAGES = [
   `${D7_90_MESSAGE}sketch_entity_off_p0 span spline_occurrence_<uuid>>spline_occurrence_<uuid> sub-span 9.`,
   `${D7_90_MESSAGE}sketch_entity_off_p0 span spline_occurrence_<uuid>>spline_occurrence_<uuid> sub-span 10.`,
 ];
+
+// ---------------------------------------------------------------------------
+// T08b-g7-F (logic lane). Seam: solver → region arrangement on native Fillet
+// and Slot outlines with no offset (design §4 consequence 1, review R14): an
+// edit of a source line must leave each arc attached to its points in the
+// solved snapshot and in the region output. Control: the same outline with
+// the relationships stripped (a Fillet/Slot authored before T08b-g7-F).
+// ---------------------------------------------------------------------------
+
+describe("T08b-g7-F: Fillet and Slot arcs stay attached after an edit (no offset; solved snapshot and regions)", () => {
+  const EDIT_TOLERANCES = createDocumentSolverTolerances(OCC_KERNEL_SETTINGS);
+  type Row = "rounded rect" | "rect + 1 fillet" | "slot";
+  /**
+   * The row, edited by +Δ on its first source line and solved. `relationships`
+   * "beforeG7F" strips the Fillet/Slot relationships; `slotSource`
+   * "construction" makes the slot's reference line construction geometry.
+   */
+  const edit = (
+    label: Row,
+    relationships: "native" | "beforeG7F",
+    delta: number,
+    slotSource: "asDrawn" | "construction" = "asDrawn",
+  ) => {
+    const row = seedArcRows().find((item) => item.row === label)!;
+    const sketch = row.build(offsetArcHarness);
+    const base =
+      relationships === "native"
+        ? sketch.definition
+        : withoutFilletRelationships(sketch.definition);
+    const authored: SketchDefinition =
+      slotSource === "construction"
+        ? {
+            ...base,
+            entities: base.entities.map((entity) =>
+              sketch.seeds.includes(entity.entityId)
+                ? entity
+                : { ...entity, isConstruction: true },
+            ),
+          }
+        : base;
+    const line = sketch.seeds.find(
+      (id) =>
+        authored.entities.find((entity) => entity.entityId === id)?.kind ===
+        "lineSegment",
+    )!;
+    const definition = withLineLength(authored, line, delta);
+    const solved = solveSketchDefinitionCore({
+      definition,
+      tolerances: EDIT_TOLERANCES,
+      modelingTolerance: FIXTURE_TOLERANCE,
+      partialSolvePolicy: "bestEffort",
+    });
+    const points = new Map(
+      solved.solvedSnapshot.solvedPoints.map((point) => [
+        point.pointId,
+        point.solvedPosition,
+      ]),
+    );
+    const arcs = definition.entities.filter(
+      (entity): entity is Extract<typeof entity, { kind: "arc" }> =>
+        entity.kind === "arc",
+    );
+    // The largest gap between a solved arc record's ends and its solved points.
+    const detach = Math.max(
+      ...arcs.map((arc) => {
+        const record = solved.solvedSnapshot.solvedEntities.find(
+          (entity) => entity.entityId === arc.entityId,
+        );
+        if (record?.kind !== "arc") throw new Error("no solved arc");
+        const gap = (a: readonly number[], b: readonly number[]) =>
+          Math.hypot(a[0]! - b[0]!, a[1]! - b[1]!);
+        return Math.max(
+          gap(record.startPosition, points.get(arc.startPointId)!),
+          gap(record.endPosition, points.get(arc.endPointId)!),
+        );
+      }),
+    );
+    return { definition, solved, arcs, detach };
+  };
+  const regionsOf = ({ definition, solved }: ReturnType<typeof edit>) =>
+    createSketchArrangementDeriver(capability).derive({
+      documentId: "doc_workspace" as never,
+      revisionId: "rev_0001" as never,
+      sketchId: "sketch_g7f" as never,
+      definition,
+      solvedSnapshot: solved.solvedSnapshot,
+      projectedReferences: [],
+      modelingTolerance: FIXTURE_TOLERANCE,
+    });
+  const boundedBy = (regions: readonly RegionRecord[], entityId: string) =>
+    regions.some((region) =>
+      region.loops.some((loop) =>
+        loop.segments.some(
+          (segment) =>
+            segment.branch.source.kind === "entity" &&
+            segment.branch.source.entityId === entityId,
+        ),
+      ),
+    );
+
+  test.each(
+    (
+      [
+        ["rounded rect", "asDrawn"],
+        ["rect + 1 fillet", "asDrawn"],
+        ["slot", "construction"],
+      ] as const
+    ).flatMap(([label, slotSource]) =>
+      [0.05, 0.2].map((delta) => [label, delta, slotSource] as const),
+    ),
+  )(
+    "%s, source line +%s (slot reference line: %s): with the native relationships every arc stays on its points and bounds a region; with them stripped (identity control) an arc detaches and bounds none",
+    async (label, delta, slotSource) => {
+      const native = edit(label, "native", delta, slotSource);
+      expect(native.solved.status.solveState).toBe("solved");
+      // Measured ≤ 1.4e-6 (the solve's own convergence); the control's gap
+      // is the edit itself (≥ τ).
+      expect(
+        native.detach,
+        "native: the solved arc records sit on their solved points (within τ/100)",
+      ).toBeLessThanOrEqual(FIXTURE_TOLERANCE / 100);
+      const nativeRegions = await regionsOf(native);
+      for (const arc of native.arcs)
+        expect(
+          boundedBy(nativeRegions.regions, arc.entityId),
+          `native: ${arc.label} bounds a region`,
+        ).toBe(true);
+
+      const stripped = edit(label, "beforeG7F", delta, slotSource);
+      expect(
+        stripped.detach,
+        "control: an unbound arc keeps its old record while its point slides",
+      ).toBeGreaterThan(FIXTURE_TOLERANCE);
+      const strippedRegions = await regionsOf(stripped);
+      expect(
+        stripped.arcs.some(
+          (arc) => !boundedBy(strippedRegions.regions, arc.entityId),
+        ),
+        "control: a detached arc bounds no region",
+      ).toBe(true);
+    },
+    120_000,
+  );
+
+  // Recorded limit (routed): with the slot's reference line left as drawn,
+  // it ends exactly at both cap centres. After an edit the caps stay
+  // attached, but the line ↔ start-cap pair query exhausts its exact budget
+  // on the edited (non-dyadic) coordinates, so the arrangement publishes no
+  // region (unedited: one region). Before T08b-g7-F the same edit detached
+  // the caps and also gave no region bounded by them.
+  test.each([0.05, 0.2])(
+    "slot with its reference line as drawn, +%s: the caps stay attached, but the reference line ↔ start-cap query is uncertain, so no region is published (recorded limit)",
+    async (delta) => {
+      const native = edit("slot", "native", delta);
+      expect(native.solved.status.solveState).toBe("solved");
+      expect(native.detach).toBeLessThanOrEqual(FIXTURE_TOLERANCE / 100);
+      const result = await regionsOf(native);
+      expect(result.regions).toEqual([]);
+      expect([...new Set(result.diagnostics.map((item) => item.code))]).toEqual(
+        ["region-query-uncertain"],
+      );
+      expect(
+        result.diagnostics.every((item) =>
+          item.message.includes("exact-query-proof-budget-exhausted"),
+        ),
+      ).toBe(true);
+    },
+    120_000,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// T08b-g7-F (logic lane). Seam: the native C1 outlines with the Fillet's own
+// relationships, carrying an Offset, then a source-line edit, through the
+// solver → publish rounds (unhinted and hinted with the unedited published
+// plan, as the live G17 path) and, on certified cells, the region
+// arrangement with the published offset (design §4 table, review R15).
+// ---------------------------------------------------------------------------
+
+describe("T08b-g7-F: tangent fillets carrying an offset certify after an edit (design §4 matrix)", () => {
+  const TOLERANCES = createDocumentSolverTolerances(OCC_KERNEL_SETTINGS);
+  type Plans = Parameters<typeof solveSketchDefinitionCore>[0]["offsetPlans"];
+  const solve = (definition: SketchDefinition, offsetPlans?: Plans) =>
+    solveSketchDefinitionCore({
+      definition,
+      tolerances: TOLERANCES,
+      modelingTolerance: FIXTURE_TOLERANCE,
+      partialSolvePolicy: "bestEffort",
+      ...(offsetPlans ? { offsetPlans } : {}),
+    });
+  const capabilities = {
+    query: offsetQuery,
+    certifier: offsetCertifier,
+  };
+  /** One live round: solve, publish, at most one hinted re-solve on planChanged. */
+  const round = (definition: SketchDefinition, hints?: Plans) => {
+    const first = solve(definition, hints);
+    let snapshot = first.solvedSnapshot;
+    const publish = () =>
+      publishSketchOffsets({
+        definition,
+        solvedSnapshot: snapshot,
+        modelingTolerance: FIXTURE_TOLERANCE,
+        capabilities,
+      })[0];
+    let publication = publish();
+    if (publication?.status === "planChanged") {
+      snapshot = solve(definition, [
+        { derivationId: publication.derivationId, plan: publication.plan! },
+      ]).solvedSnapshot;
+      publication = publish();
+    }
+    return { solveState: first.status.solveState, snapshot, publication };
+  };
+  /**
+   * Recorded cells that do not certify, by final code (review R15): the
+   * solver's tangency residual is quadratic in the angle, so the edited
+   * fillet ends keep a ≈ 0.2° kink; at |d| = 0.5 that is δ ≈ 2e-3 ≥ τ and
+   * the outward corner needs an arc that rule Z cannot place. Routed to T12
+   * (a linear G1 residual).
+   */
+  const FAILURES = new Map<string, string>(
+    ["rounded rect", "rounded rect rotated 0.3"].flatMap((row) =>
+      (["unhinted", "hinted"] as const).map(
+        (label) =>
+          [
+            `${row} -0.5 0.2 ${label}`,
+            "derived-offset-spline-joint-unsupported",
+          ] as const,
+      ),
+    ),
+  );
+
+  test.each(
+    EDITED_FILLET_ROWS.filter((row) => row !== "rect").map(
+      (row) => [row] as const,
+    ),
+  )(
+    "%s with native fillets: every d × Δ cell solves and certifies, unhinted and hinted, except the recorded |d| = 0.5 limit cells; at d = 0.1, Δ = 0.2 every fillet arc bounds a region with the published offset",
+    async (row) => {
+      const { sketch, line } = editedFilletSketch(
+        offsetArcHarness,
+        row,
+        "native",
+      );
+      const cells = new Map<string, string>();
+      let regionCell:
+        | (ReturnType<typeof round> & { edited: SketchDefinition })
+        | undefined;
+      for (const distance of TANGENT_FILLET_DISTANCES) {
+        const { pair, relationshipDistance } = offsetArcHarness.adapt(
+          sketch,
+          distance,
+        );
+        expect(relationshipDistance, `${row} ${distance}`).toBe(distance);
+        const base = round(pair.definition);
+        expect(base.publication?.status, `${row} ${distance} unedited`).toBe(
+          "certified",
+        );
+        const published: Plans = [
+          {
+            derivationId: base.publication!.derivationId,
+            plan: { ...base.publication!.plan!, origin: "published" },
+          },
+        ];
+        for (const delta of EDITED_FILLET_DELTAS) {
+          const edited = withLineLength(pair.definition, line, delta);
+          for (const [label, result] of [
+            ["unhinted", round(edited)],
+            ["hinted", round(edited, published)],
+          ] as const) {
+            const cell = `${row} ${distance} ${delta} ${label}`;
+            expect(result.solveState, cell).toBe("solved");
+            if (distance === 0.1 && delta === 0.2 && label === "hinted")
+              regionCell = { edited, ...result };
+            cells.set(
+              cell,
+              result.publication?.status === "certified"
+                ? "certified"
+                : `${result.publication?.diagnostic?.code}`,
+            );
+          }
+        }
+      }
+      expect(
+        new Map([...cells].filter(([, verdict]) => verdict !== "certified")),
+      ).toEqual(
+        new Map(
+          [...FAILURES].filter(
+            ([cell]) =>
+              cell.startsWith(`${row} `) &&
+              /^[-\d]/.test(cell.slice(row.length + 1)),
+          ),
+        ),
+      );
+
+      const { edited, snapshot, publication } = regionCell!;
+      expect(publication?.status).toBe("certified");
+      const publications = [publication!];
+      const applied = applyOffsetPublications(edited, snapshot, publications);
+      const result = await createSketchArrangementDeriver(capability).derive({
+        documentId: "doc_workspace" as never,
+        revisionId: "rev_0001" as never,
+        sketchId: "sketch_g7f" as never,
+        definition: edited,
+        solvedSnapshot: applied,
+        projectedReferences: [],
+        modelingTolerance: FIXTURE_TOLERANCE,
+        ...offsetArrangementInput(edited, applied, publications),
+      });
+      const filletArcs = sketch.seeds.filter(
+        (id) =>
+          edited.entities.find((entity) => entity.entityId === id)?.kind ===
+          "arc",
+      );
+      expect(filletArcs.length).toBeGreaterThan(0);
+      for (const arc of filletArcs)
+        expect(
+          result.regions.some((region) =>
+            region.loops.some((loop) =>
+              loop.segments.some(
+                (segment) =>
+                  segment.branch.source.kind === "entity" &&
+                  segment.branch.source.entityId === arc,
+              ),
+            ),
+          ),
+          `${row} d = 0.1 Δ = 0.2: fillet ${arc} bounds a region`,
+        ).toBe(true);
+    },
+    600_000,
+  );
+
+  /**
+   * Recorded slot cells that do not certify, by final code: the same R15
+   * limit (a ≈ 0.27° residual kink times |d| = 0.25 is δ ≥ τ).
+   */
+  const SLOT_FAILURES = new Map<string, string>(
+    ["slot 0.25 0.05", "slot 0.25 0.2", "slot rotated 0.3 0.25 0.05"].flatMap(
+      (cell) =>
+        (["unhinted", "hinted"] as const).map(
+          (label) =>
+            [
+              `${cell} ${label}`,
+              "derived-offset-spline-joint-unsupported",
+            ] as const,
+        ),
+    ),
+  );
+
+  test.each(["slot", "slot rotated 0.3"])(
+    "%s (native Slot relationships): an edit of a side line keeps every cell solved and certified, unhinted and hinted, except the recorded |d| = 0.25 limit cells",
+    (row) => {
+      const spec = seedArcRows().find((item) => item.row === row)!;
+      const sketch = spec.build(offsetArcHarness);
+      const line = sketch.seeds.find(
+        (id) =>
+          sketch.definition.entities.find((entity) => entity.entityId === id)
+            ?.kind === "lineSegment",
+      )!;
+      const cells = new Map<string, string>();
+      // The slot's own D3 distances (|d| = 0.5 collapses its r = 0.2 caps).
+      const distances = seedArcRows()
+        .filter((item) => item.row === row)
+        .map((item) => item.distance);
+      expect(distances).toEqual([0.01, -0.01, 0.1, -0.1, 0.25]);
+      for (const distance of distances) {
+        const { pair, relationshipDistance } = offsetArcHarness.adapt(
+          sketch,
+          distance,
+        );
+        expect(relationshipDistance, `${row} ${distance}`).toBe(distance);
+        const base = round(pair.definition);
+        expect(base.publication?.status, `${row} ${distance} unedited`).toBe(
+          "certified",
+        );
+        const published: Plans = [
+          {
+            derivationId: base.publication!.derivationId,
+            plan: { ...base.publication!.plan!, origin: "published" },
+          },
+        ];
+        for (const delta of EDITED_FILLET_DELTAS) {
+          const edited = withLineLength(pair.definition, line, delta);
+          for (const [label, result] of [
+            ["unhinted", round(edited)],
+            ["hinted", round(edited, published)],
+          ] as const) {
+            const cell = `${row} ${distance} ${delta} ${label}`;
+            expect(result.solveState, cell).toBe("solved");
+            cells.set(
+              cell,
+              result.publication?.status === "certified"
+                ? "certified"
+                : `${result.publication?.diagnostic?.code}`,
+            );
+          }
+        }
+      }
+      expect(
+        new Map([...cells].filter(([, verdict]) => verdict !== "certified")),
+      ).toEqual(
+        new Map(
+          [...SLOT_FAILURES].filter(
+            ([cell]) =>
+              cell.startsWith(`${row} `) &&
+              /^[-\d]/.test(cell.slice(row.length + 1)),
+          ),
+        ),
+      );
+    },
+    600_000,
+  );
+});
