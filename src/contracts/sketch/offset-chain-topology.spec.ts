@@ -46,7 +46,6 @@ import type {
 } from "@/contracts/shared/ids";
 import type {
   SketchDefinition,
-  SketchPoint2D,
   SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
 import type { SketchConstraintToolId } from "@/core/sketch-constraints/definition";
@@ -73,10 +72,7 @@ import {
 } from "@/domain/editor/sketch-session/internals";
 import { createDocumentSolverTolerances } from "@/contracts/solver/schema";
 import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
-import {
-  canonicalArcSupport,
-  seedArcLeafSplits,
-} from "@/contracts/sketch/canonical-arc-support";
+import { canonicalArcSupport } from "@/contracts/sketch/canonical-arc-support";
 import { extractDeclaredOffsetChainConnectivity } from "@/contracts/sketch/offset-chain-connectivity";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import {
@@ -112,24 +108,18 @@ import {
   classifyOffsetChainVertex,
   declaredOffsetChainPieces,
   offsetChainRootEnclosure,
-  resolveOffsetChainTopology,
-  resolveOffsetChainTopologyJvp,
+  resolveOffsetChainTopologyForTest,
   type CertifiedNeutralCurveRequestQuery,
   type DeclaredOffsetChainPieces,
   type DeclaredOffsetPieceSource,
   type OffsetChainPiece,
-  type OffsetChainPieceVariation,
   type OffsetChainTopologyInput,
-  type OffsetChainTopologySuccess,
   type OffsetChainTubeStabilityCertificate,
   type OffsetChainVertex,
-  type OffsetChainVertexSide,
 } from "@/contracts/sketch/offset-chain-topology";
 import {
   OFFSET_DIAGNOSTIC_CODES,
-  computeOffsetChain,
   offsetLinePoints,
-  offsetSeedCurveFromEntity,
   scalePointFromCenter,
 } from "@/contracts/sketch/offset-geometry";
 import {
@@ -374,13 +364,13 @@ const arc = (
 };
 
 function resolved(input: OffsetChainTopologyInput) {
-  const result = resolveOffsetChainTopology(input);
+  const result = resolveOffsetChainTopologyForTest(input);
   if (!result.ok) throw new Error(`${result.code}: ${result.message}`);
   return result;
 }
 
 function failed(input: OffsetChainTopologyInput) {
-  const result = resolveOffsetChainTopology(input);
+  const result = resolveOffsetChainTopologyForTest(input);
   if (result.ok) throw new Error("expected the resolver to fail closed");
   return result;
 }
@@ -391,21 +381,9 @@ const SOURCE_POLES: SplinePoles = [
   [2, 0.125],
   [3, 0],
 ];
-const SOURCE_VARIATION: SplinePoles = [
-  [0, 0],
-  [0.1, 0.25],
-  [-0.2, 0.05],
-  [0, 0],
-];
 
 /** Real owner output for one source span; this shape emits one output span. */
-function ownerSpans(input: {
-  distance: number;
-  distanceDifferential?: number;
-  poles?: SplinePoles;
-  poleVariation?: SplinePoles;
-  modelingTolerance?: number;
-}) {
+function ownerSpans(input: { distance: number; modelingTolerance?: number }) {
   const source: SplineSpan = {
     source: {
       splineId: "seed",
@@ -417,17 +395,13 @@ function ownerSpans(input: {
     },
     orientation: "forward",
     interval: [0, 1],
-    poles: input.poles ?? SOURCE_POLES,
+    poles: SOURCE_POLES,
     validity: "valid",
-    differential: {
-      interval: [0, 0],
-      poles: input.poleVariation ?? ZERO_POLES,
-    },
+    differential: { interval: [0, 0], poles: ZERO_POLES },
   };
   const result = approximateSplineOffset({
     spans: [source],
     distance: input.distance,
-    distanceDifferential: input.distanceDifferential ?? 0,
     modelingTolerance: input.modelingTolerance ?? 1e-3,
   });
   if (!result.ok) throw new Error(result.code);
@@ -890,7 +864,7 @@ describe("offset chain joints fail closed", () => {
 
   test("budget exhaustion is topology-uncertain with no partial result", () => {
     expect(
-      resolveOffsetChainTopology(
+      resolveOffsetChainTopologyForTest(
         makeOffsetChainFixture([archPiece, line("l", [2.5, 1], [2.5, -1])], {
           query: createCertifiedNeutralCurveRequestQueryWithLowerBudgetForTest({
             operations: 1000,
@@ -969,7 +943,7 @@ describe("offset chain adjacency and global validity (M0: the certificate is the
   const chainCertifier = createCertifiedCubicTubeChain();
   /** Resolver, then the certificate: the only claim of global validity. */
   const certifiedChain = (input: OffsetChainTopologyInput) => {
-    const resolution = resolveOffsetChainTopology(input);
+    const resolution = resolveOffsetChainTopologyForTest(input);
     return resolution.ok
       ? certifyOffsetChainTubeStability(resolution, chainCertifier)
       : resolution;
@@ -985,7 +959,7 @@ describe("offset chain adjacency and global validity (M0: the certificate is the
   ) => {
     const { sizes, query: recorded } = recordingRequests(input.query);
     const withRecording = { ...input, query: recorded };
-    expect(resolveOffsetChainTopology(withRecording).ok).toBe(true);
+    expect(resolveOffsetChainTopologyForTest(withRecording).ok).toBe(true);
     expect(sizes, "one request, joint queries only").toEqual([
       input.closed ? input.pieces.length : input.pieces.length - 1,
     ]);
@@ -1254,7 +1228,7 @@ describe("offset chain seam contracts", () => {
     };
     let thrown: unknown;
     try {
-      resolveOffsetChainTopology(
+      resolveOffsetChainTopologyForTest(
         makeOffsetChainFixture(
           [
             cubic("arch", [fabricatedSpan(ARCH)]),
@@ -1317,225 +1291,7 @@ describe("offset chain seam contracts", () => {
   });
 });
 
-describe("offset chain fixed-topology JVP", () => {
-  const flatten = (result: OffsetChainTopologySuccess) => [
-    ...[...result.cubics.values()].flatMap((spans) =>
-      spans.flatMap((span) => span.representativeQueryDomain),
-    ),
-    ...result.joints.flatMap((joint) => joint.position),
-    ...[...result.lineArcEndpoints.values()].flatMap((endpoints) => [
-      ...endpoints.start,
-      ...endpoints.end,
-    ]),
-  ];
-  /** Independent test-only central finite-difference oracle over re-run primal resolutions. */
-  const checkAgainstFiniteDifference = (
-    /** Dyadic steps keep perturbed dyadic fixtures inside the unchanged exact budget. */
-    h: number,
-    build: (epsilon: number) => {
-      input: OffsetChainTopologyInput;
-      variations: ReadonlyMap<SketchEntityId, OffsetChainPieceVariation>;
-    },
-  ) => {
-    const base = build(0);
-    const primal = resolved(base.input);
-    const jvp = resolveOffsetChainTopologyJvp(
-      base.input,
-      primal,
-      base.variations,
-    );
-    if (!jvp.ok) throw new Error(jvp.code);
-    const plus = resolved(build(h).input);
-    const minus = resolved(build(-h).input);
-    const shape = (result: OffsetChainTopologySuccess) =>
-      JSON.stringify([
-        [...result.cubics.values()].map((spans) =>
-          spans.map((span) => [span.start, span.end]),
-        ),
-        result.joints.length,
-      ]);
-    expect(shape(plus), "fixed topology").toBe(shape(primal));
-    expect(shape(minus), "fixed topology").toBe(shape(primal));
-    const predicted = [
-      ...[...jvp.representativeQueryDomains.values()].flatMap((domains) =>
-        domains.flat(),
-      ),
-      ...jvp.jointPositions.flat(),
-      ...[...jvp.lineArcEndpoints.values()].flatMap((endpoints) => [
-        ...endpoints.start,
-        ...endpoints.end,
-      ]),
-    ];
-    const upper = flatten(plus);
-    const lower = flatten(minus);
-    expect(predicted).toHaveLength(upper.length);
-    predicted.forEach((value, index) => {
-      const measured = (upper[index]! - lower[index]!) / (2 * h);
-      expect(
-        Math.abs(value - measured),
-        `component ${index}: ${value} vs ${measured}`,
-      ).toBeLessThanOrEqual(1e-5 * Math.max(1, Math.abs(measured)));
-    });
-  };
-  const moved = (poles: SplinePoles, variation: SplinePoles, e: number) =>
-    poles.map((pole, index) => [
-      pole[0] + e * variation[index]![0],
-      pole[1] + e * variation[index]![1],
-    ]) as unknown as SplinePoles;
-
-  test("line/cubic trims agree with the oracle under distance and source-point variation", () => {
-    checkAgainstFiniteDifference(2 ** -20, (epsilon) => {
-      const distance = -0.25 + epsilon;
-      const spans = ownerSpans({
-        distance,
-        distanceDifferential: 1,
-        poles: moved(SOURCE_POLES, SOURCE_VARIATION, epsilon),
-        poleVariation: SOURCE_VARIATION,
-      });
-      expect(spans).toHaveLength(1);
-      return {
-        input: makeOffsetChainFixture(ownerLineCubicLine(distance, spans)),
-        variations: new Map<SketchEntityId, OffsetChainPieceVariation>([
-          [id("first"), { kind: "lineSegment", start: [-1, 0], end: [-1, 0] }],
-          [id("last"), { kind: "lineSegment", start: [1, 0], end: [1, 0] }],
-        ]),
-      };
-    });
-  });
-
-  test("arc/cubic and cubic/cubic trims agree with the oracle", () => {
-    const archVariation: SplinePoles = [
-      [0, 0.125],
-      [0.25, -0.375],
-      [0, 0.5],
-      [0.125, 0],
-    ];
-    checkAgainstFiniteDifference(2 ** -20, (epsilon) => {
-      const center: Point = [3 + 0.25 * epsilon, 1 - 0.125 * epsilon];
-      const radius = 0.95 + 0.5 * epsilon;
-      return {
-        input: makeOffsetChainFixture([
-          cubic("arch", [
-            fabricatedSpan(moved(ARCH, archVariation, epsilon), archVariation),
-          ]),
-          arc("arc", center, radius, [3, 4], "counterClockwise"),
-        ]),
-        variations: new Map<SketchEntityId, OffsetChainPieceVariation>([
-          [
-            id("arc"),
-            {
-              kind: "arc",
-              center: [0.25, -0.125],
-              radius: 0.5,
-              start: [0.25 + 0.5 * Math.cos(3), -0.125 + 0.5 * Math.sin(3)],
-              end: [0.25 + 0.5 * Math.cos(4), -0.125 + 0.5 * Math.sin(4)],
-            },
-          ],
-        ]),
-      };
-    });
-    const secondPoles: SplinePoles = [
-      [2, 1.5],
-      [2.25, 0.5],
-      [2.5, 0],
-      [2.75, -1],
-    ];
-    // Before the polynomial budget repair, generic simultaneous pole variations
-    // exhausted the budget. This bounded fixture retains one moving pole and a translation.
-    const firstVariation: SplinePoles = [
-      [0, 0],
-      [0, 1],
-      [0, 0],
-      [0, 0],
-    ];
-    const secondVariation: SplinePoles = [
-      [1, 0],
-      [1, 0],
-      [1, 0],
-      [1, 0],
-    ];
-    checkAgainstFiniteDifference(2 ** -20, (epsilon) => ({
-      input: makeOffsetChainFixture([
-        cubic("first", [
-          fabricatedSpan(moved(ARCH, firstVariation, epsilon), firstVariation),
-        ]),
-        cubic("second", [
-          fabricatedSpan(
-            moved(secondPoles, secondVariation, epsilon),
-            secondVariation,
-          ),
-        ]),
-      ]),
-      variations: new Map(),
-    }));
-  });
-
-  test("line/line and line/cubic trims agree with the oracle under independent segment endpoint variation", () => {
-    const horizontalVariation = {
-      start: [0.5, 0.25],
-      end: [-0.25, 1],
-    } as const;
-    const verticalVariation = {
-      start: [0.125, -0.5],
-      end: [0.75, 0.25],
-    } as const;
-    const shift = (point: Point, variation: Point, e: number): Point => [
-      point[0] + e * variation[0],
-      point[1] + e * variation[1],
-    ];
-    const cap = cubic("cap", [
-      fabricatedSpan([
-        [0, 1.5],
-        [1, 2.5],
-        [2, 2.5],
-        [3, 1.5],
-      ]),
-    ]);
-    for (const reversedTraversal of [false, true]) {
-      checkAgainstFiniteDifference(2 ** -20, (epsilon) => {
-        const horizontal = line(
-          "horizontal",
-          shift([0, 0], horizontalVariation.start, epsilon),
-          shift([3, 0], horizontalVariation.end, epsilon),
-        );
-        const vertical = line(
-          "vertical",
-          shift([1, -1], verticalVariation.start, epsilon),
-          shift([1, 3], verticalVariation.end, epsilon),
-        );
-        const pieces = reversedTraversal
-          ? [cap, vertical, horizontal].map((piece) => ({
-              ...piece,
-              reversed: true,
-            }))
-          : [horizontal, vertical, cap];
-        return {
-          input: makeOffsetChainFixture(pieces),
-          variations: new Map<SketchEntityId, OffsetChainPieceVariation>([
-            [id("horizontal"), { kind: "lineSegment", ...horizontalVariation }],
-            [id("vertical"), { kind: "lineSegment", ...verticalVariation }],
-          ]),
-        };
-      });
-    }
-  });
-
-  test("untrimmed cubic domain ends carry the owner's source-interval differential", () => {
-    const span: SplineOffsetCubicSpan = {
-      ...fabricatedSpan(ARCH),
-      differential: { sourceInterval: [0.25, -0.5], poles: ZERO_POLES },
-    };
-    const input = makeOffsetChainFixture([cubic("s", [span])]);
-    const jvp = resolveOffsetChainTopologyJvp(
-      input,
-      resolved(input),
-      new Map(),
-    );
-    expect(jvp).toMatchObject({ ok: true });
-    if (!jvp.ok) return;
-    expect(jvp.representativeQueryDomains.get(id("s"))).toEqual([[0.25, -0.5]]);
-  });
-
+describe("offset chain joint determinant (primal)", () => {
   test("real certifier: a subnormal tangent determinant is rejected by the primal", () => {
     const m = Number.MIN_VALUE;
     const input = makeOffsetChainFixture([
@@ -1553,7 +1309,7 @@ describe("offset chain fixed-topology JVP", () => {
         ),
       ]),
     ]);
-    expect(resolveOffsetChainTopology(input)).toMatchObject({
+    expect(resolveOffsetChainTopologyForTest(input)).toMatchObject({
       ok: false,
       code: codes.derivativeUnavailable,
       seedEntityId: id("line"),
@@ -1591,21 +1347,11 @@ describe("offset chain fixed-topology JVP", () => {
       [line("a", [0, 0], [2, 0]), line("b", [0, 1], [2, 1])],
       { query: perRequest(parallel) },
     );
-    expect(resolveOffsetChainTopology(input)).toMatchObject({
+    expect(resolveOffsetChainTopologyForTest(input)).toMatchObject({
       ok: false,
       code: codes.derivativeUnavailable,
       seedEntityId: id("a"),
     });
-  });
-
-  test("the JVP only differentiates the accepted resolution of the same input", () => {
-    const distance = -0.25;
-    const spans = ownerSpans({ distance });
-    const input = makeOffsetChainFixture(ownerLineCubicLine(distance, spans));
-    const other = makeOffsetChainFixture(ownerLineCubicLine(distance, spans));
-    expect(() =>
-      resolveOffsetChainTopologyJvp(other, resolved(input), new Map()),
-    ).toThrow(RangeError);
   });
 });
 
@@ -3634,7 +3380,7 @@ describe("T08b-a capacity: joint queries only on one whole-request meter (M0/M7)
     string,
     (
       requestQuery: CertifiedNeutralCurveRequestQuery,
-    ) => ReturnType<typeof resolveOffsetChainTopology>,
+    ) => ReturnType<typeof resolveOffsetChainTopologyForTest>,
     readonly ("line" | "cubicBezier")[],
     { operations: number; euclideanSteps: number; bits: number },
   ])[] = [
@@ -3655,7 +3401,7 @@ describe("T08b-a capacity: joint queries only on one whole-request meter (M0/M7)
     [
       "owner line/cubic/line, forward: (first line, cubic) then (cubic, last line)",
       (requestQuery) =>
-        resolveOffsetChainTopology(
+        resolveOffsetChainTopologyForTest(
           makeOffsetChainFixture(
             ownerLineCubicLine(ownerDistance, ownerChainSpans),
             { query: requestQuery },
@@ -3667,7 +3413,7 @@ describe("T08b-a capacity: joint queries only on one whole-request meter (M0/M7)
     [
       "owner line/cubic/line, reversed traversal: each pair in the swapped argument order",
       (requestQuery) =>
-        resolveOffsetChainTopology(
+        resolveOffsetChainTopologyForTest(
           makeOffsetChainFixture(
             ownerLineCubicLine(ownerDistance, ownerChainSpans, true),
             { query: requestQuery },
@@ -5298,7 +5044,7 @@ describe("T08b-d SEL: declared vertices, adoption, U1 absorption", () => {
     // M4: the same bitwise-shared poles without vertices are just queried.
     const legacy = recordingRequests();
     expect(
-      resolveOffsetChainTopology({
+      resolveOffsetChainTopologyForTest({
         pieces: chain.declared.pieces,
         closed: false,
         modelingTolerance: TOLERANCE,
@@ -5590,110 +5336,6 @@ describe("T08b-d SEL: declared vertices, adoption, U1 absorption", () => {
       ).toMatchObject({ ok: false, message: expect.stringContaining("fake") });
       expect(fake.requests, failure.code).toHaveLength(1);
     }
-  });
-
-  test("JVP at a vertex end: the adopting line's end varies with the keeper spline's pole (finite-difference oracle of the adoption recipe)", () => {
-    const d = 0.125;
-    // Exactly parallel at the vertex: the line ends along +x, the spline starts along +x.
-    const poles: SplinePoles = [
-      [0, 0],
-      [1, 0],
-      [2, 0.25],
-      [3, 0],
-    ];
-    const variation: SplinePoles = [
-      [0, 0],
-      [0.25, 0],
-      [-0.25, 0.125],
-      [0, 0],
-    ];
-    const lineVariation = {
-      kind: "lineSegment" as const,
-      start: [0.5, -0.25] as Point,
-      // The line's OWN end variation is ignored at an adopted vertex end.
-      end: [5, 5] as Point,
-    };
-    const build = (epsilon: number) => {
-      const spans = ownerSpans({
-        distance: d + epsilon,
-        distanceDifferential: 1,
-        poles: poles.map((pole, index) => [
-          pole[0] + epsilon * variation[index]![0],
-          pole[1] + epsilon * variation[index]![1],
-        ]) as unknown as SplinePoles,
-        poleVariation: variation,
-      });
-      // The adoption recipe: the line's end IS the spline's start pole.
-      const lineStart: Point = [
-        -1 + epsilon * lineVariation.start[0],
-        d + epsilon + epsilon * lineVariation.start[1],
-      ];
-      const vertices: OffsetChainVertex[] = [
-        {
-          jointIndex: 0,
-          authority: { kind: "sharedPoint", pointId: "p0" as SketchPointId },
-          first: {
-            pointId: "p0" as SketchPointId,
-            vertex: [0, 0],
-            tangent: [
-              [-1, 0],
-              [0, 0],
-            ],
-          },
-          second: {
-            pointId: "p0" as SketchPointId,
-            vertex: [0, 0],
-            tangent: [
-              [0, 0],
-              [1, 0],
-            ],
-          },
-        },
-      ];
-      return {
-        input: {
-          ...makeOffsetChainFixture([
-            line("in", lineStart, spans[0]!.poles[0]),
-            cubic("spline", spans),
-          ]),
-          vertices,
-        },
-        variations: new Map<SketchEntityId, OffsetChainPieceVariation>([
-          [id("in"), lineVariation],
-        ]),
-      };
-    };
-    const base = build(0);
-    const primal = resolved(base.input);
-    expect(primal.vertices).toEqual([
-      // Line–spline: the line adopts, the spline keeps (T2).
-      expect.objectContaining({ kind: "parallel", keeper: "second" }),
-    ]);
-    // A parallel vertex is not queried and domain ends name the vertex.
-    expect(primal.joints).toEqual([]);
-    const jvp = resolveOffsetChainTopologyJvp(
-      base.input,
-      primal,
-      base.variations,
-    );
-    if (!jvp.ok) throw new Error(jvp.code);
-    const h = 2 ** -20;
-    const end = (epsilon: number) =>
-      resolved(build(epsilon).input).lineArcEndpoints.get(id("in"))!.end;
-    const measured = [0, 1].map(
-      (axis) => (end(h)[axis]! - end(-h)[axis]!) / (2 * h),
-    );
-    const predicted = jvp.lineArcEndpoints.get(id("in"))!.end;
-    for (const axis of [0, 1])
-      expect(Math.abs(predicted[axis]! - measured[axis]!)).toBeLessThanOrEqual(
-        1e-6,
-      );
-    // It is the keeper's pole differential, not the line's own end variation.
-    expect(predicted).toEqual(
-      base.input.pieces[1]!.kind === "derivedCubic"
-        ? base.input.pieces[1]!.spans[0]!.differential.poles[0]
-        : null,
-    );
   });
 
   test("R9 staged cap under [TECH] F12 (native, zero queries): wrap-zig34 d = +0.05 needs more than ONE production Euclid ceiling but its 378 leaves give m = 12, so it verifies alone and as attempt 1 of a 2-attempt request (stage 1 = m·C); an exhausted attempt stays sticky; attempt k may use k·m·C", () => {
@@ -6292,415 +5934,6 @@ describe("T08b-d SEL: declared vertices, adoption, U1 absorption", () => {
         message: expect.stringContaining("exact-query-proof-budget-exhausted"),
       });
     });
-
-    /**
-     * JVP versus finite differences of the resolver recipe (fabricated
-     * sources, real owner, real query and certifier; the native adapter takes
-     * no variation input): source poles and line ends move by h·δ, each run
-     * is a fresh owner call and a fresh SEL, and the F1 arc record is read
-     * from the certified resolution. The JVP's point variations (centre =
-     * the declared source point, ends = the neighbours' OWN terminal pole
-     * variations) and the point-defined radius/angle variations must match.
-     */
-    interface FdSpline {
-      readonly kind: "spline";
-      readonly name: string;
-      readonly poles: SplinePoles;
-      readonly variation: SplinePoles;
-      readonly ids: readonly [string, string];
-    }
-    interface FdLine {
-      readonly kind: "line";
-      readonly name: string;
-      readonly ends: readonly [Point, Point];
-      readonly variation: readonly [Point, Point];
-      readonly ids: readonly [string, string];
-    }
-    const fdChain = (
-      sources: readonly (FdSpline | FdLine)[],
-      joins: readonly ("shared" | "coincident")[],
-      d: number,
-      h: number,
-    ): DeclaredOffsetChainPieces => {
-      const move = (point: Point, delta: Point): Point => [
-        point[0] + h * delta[0],
-        point[1] + h * delta[1],
-      ];
-      const pieces: OffsetChainPiece[] = [];
-      const declaredSources: DeclaredOffsetPieceSource[] = [];
-      const sides: {
-        start: OffsetChainVertexSide;
-        end: OffsetChainVertexSide;
-      }[] = [];
-      for (const source of sources) {
-        if (source.kind === "line") {
-          const [start, end] = source.ends.map((point, index) =>
-            move(point, source.variation[index]!),
-          ) as [Point, Point];
-          const offset = offsetLinePoints(start, end, d)!;
-          pieces.push(line(source.name, offset.start, offset.end));
-          declaredSources.push({
-            kind: "line",
-            source: [start, end],
-            distance: d,
-            startPointId: source.ids[0] as SketchPointId,
-            endPointId: source.ids[1] as SketchPointId,
-          });
-          sides.push({
-            start: {
-              pointId: source.ids[0] as SketchPointId,
-              vertex: start,
-              tangent: [start, end],
-            },
-            end: {
-              pointId: source.ids[1] as SketchPointId,
-              vertex: end,
-              tangent: [start, end],
-            },
-          });
-          continue;
-        }
-        const poles = source.poles.map((pole, index) =>
-          move(pole, source.variation[index]!),
-        ) as unknown as SplinePoles;
-        const span: SplineSpan = {
-          source: {
-            splineId: source.name,
-            spanIndex: 0,
-            startPointId: source.ids[0],
-            endPointId: source.ids[1],
-            startOccurrenceId: `${source.name}-0`,
-            endOccurrenceId: `${source.name}-1`,
-          },
-          orientation: "forward",
-          interval: [0, 1],
-          poles,
-          validity: "valid",
-          differential: { interval: [0, 0], poles: source.variation },
-        };
-        const owner = approximateSplineOffset({
-          spans: [span],
-          distance: d,
-          modelingTolerance: TOLERANCE,
-        });
-        if (!owner.ok) throw new Error(owner.code);
-        pieces.push(cubic(source.name, owner.spans));
-        declaredSources.push({
-          kind: "spline",
-          distance: d,
-          spans: owner.spans,
-          sourceSpans: [span],
-        });
-        sides.push({
-          start: {
-            pointId: source.ids[0] as SketchPointId,
-            vertex: poles[0],
-            tangent: [poles[0], poles[1]],
-          },
-          end: {
-            pointId: source.ids[1] as SketchPointId,
-            vertex: poles[3],
-            tangent: [poles[2], poles[3]],
-          },
-        });
-      }
-      const connectivityJoins = joins.map((kind, index) => {
-        const first = sides[index]!.end.pointId!;
-        const second = sides[index + 1]!.start.pointId!;
-        return kind === "shared"
-          ? ({ kind: "sharedPoint", pointId: first } as const)
-          : ({
-              kind: "coincidentConstraint",
-              constraintId: `c${index}` as never,
-              pointIds: [first, second],
-            } as const);
-      });
-      return {
-        ok: true,
-        connectivity: {
-          ok: true,
-          closed: false,
-          pieces: pieces.map(({ seedEntityId, reversed }) => ({
-            seedEntityId,
-            reversed,
-          })),
-          joins: connectivityJoins,
-        },
-        distance: d,
-        modelingTolerance: TOLERANCE,
-        pieces,
-        sources: declaredSources,
-        vertices: connectivityJoins.map((join, index) => ({
-          jointIndex: index,
-          authority:
-            join.kind === "sharedPoint"
-              ? { kind: "sharedPoint", pointId: join.pointId }
-              : { kind: "coincident", pointIds: join.pointIds },
-          first: sides[index]!.end,
-          second: sides[index + 1]!.start,
-        })),
-      };
-    };
-    const lineVariationOf = (source: FdLine, d: number) => {
-      const step = 2 ** -26;
-      const at = (sign: number) => {
-        const [start, end] = source.ends.map(
-          (point, index): Point => [
-            point[0] + sign * step * source.variation[index]![0],
-            point[1] + sign * step * source.variation[index]![1],
-          ],
-        );
-        return offsetLinePoints(start, end, d)!;
-      };
-      const plus = at(1);
-      const minus = at(-1);
-      const derivative = (u: Point, v: Point): Point => [
-        (u[0] - v[0]) / (2 * step),
-        (u[1] - v[1]) / (2 * step),
-      ];
-      return {
-        kind: "lineSegment" as const,
-        start: derivative(plus.start, minus.start),
-        end: derivative(plus.end, minus.end),
-      };
-    };
-    const expectArcJvp = (
-      sources: readonly (FdSpline | FdLine)[],
-      joins: readonly ("shared" | "coincident")[],
-      d: number,
-      expected: { readonly vertices: number; readonly arcs: number },
-    ) => {
-      const runAt = (h: number) => {
-        const result = certifyDeclaredOffsetChain(
-          fdChain(sources, joins, d, h),
-          query,
-          pieceCertifier,
-        );
-        if (!result.ok) throw new Error(result.message);
-        return result;
-      };
-      const base = runAt(0);
-      expect(base.resolved.vertices).toHaveLength(expected.vertices);
-      expect(base.resolved.arcs).toHaveLength(expected.arcs);
-      const pointVariations = new Map<SketchPointId, Point>();
-      for (const source of sources) {
-        const [start, end] =
-          source.kind === "line"
-            ? source.variation
-            : [source.variation[0], source.variation[3]];
-        pointVariations.set(source.ids[0] as SketchPointId, start);
-        pointVariations.set(source.ids[1] as SketchPointId, end);
-      }
-      const variations = new Map<SketchEntityId, OffsetChainPieceVariation>(
-        sources.flatMap((source) =>
-          source.kind === "line"
-            ? [[id(source.name), lineVariationOf(source, d)] as const]
-            : [],
-        ),
-      );
-      const jvp = resolveOffsetChainTopologyJvp(
-        base.resolved.input,
-        base.resolved,
-        variations,
-        pointVariations,
-      );
-      if (!jvp.ok) throw new Error(jvp.code);
-      const h = 2 ** -20;
-      const plus = runAt(h).resolved.arcs;
-      const minus = runAt(-h).resolved.arcs;
-      const fd = (u: number, v: number) => (u - v) / (2 * h);
-      const angle = (point: Point, center: Point) =>
-        Math.atan2(point[1] - center[1], point[0] - center[0]);
-      for (const [index, arc] of base.resolved.arcs.entries()) {
-        const predicted = jvp.arcs[index]!;
-        expect(predicted.jointIndex).toBe(arc.jointIndex);
-        for (const field of ["center", "start", "end"] as const)
-          for (const axis of [0, 1])
-            expect(
-              Math.abs(
-                predicted[field][axis]! -
-                  fd(plus[index]![field][axis]!, minus[index]![field][axis]!),
-              ),
-              `${field}[${axis}]`,
-            ).toBeLessThanOrEqual(1e-6);
-        // The point-defined radius and angle variations (derived-geometry).
-        const relative = (point: Point, variation: Point) => {
-          const offset: Point = [
-            point[0] - arc.center[0],
-            point[1] - arc.center[1],
-          ];
-          const delta: Point = [
-            variation[0] - predicted.center[0],
-            variation[1] - predicted.center[1],
-          ];
-          const squared = offset[0] ** 2 + offset[1] ** 2;
-          return {
-            radius:
-              (offset[0] * delta[0] + offset[1] * delta[1]) /
-              Math.sqrt(squared),
-            angle: (offset[0] * delta[1] - offset[1] * delta[0]) / squared,
-          };
-        };
-        const start = relative(arc.start, predicted.start);
-        const end = relative(arc.end, predicted.end);
-        expect(
-          Math.abs(
-            start.radius - fd(plus[index]!.radius, minus[index]!.radius),
-          ),
-          "radius",
-        ).toBeLessThanOrEqual(1e-6);
-        expect(
-          Math.abs(
-            start.angle -
-              fd(
-                angle(plus[index]!.start, plus[index]!.center),
-                angle(minus[index]!.start, minus[index]!.center),
-              ),
-          ),
-          "start angle",
-        ).toBeLessThanOrEqual(1e-5);
-        expect(
-          Math.abs(
-            end.angle -
-              fd(
-                angle(plus[index]!.end, plus[index]!.center),
-                angle(minus[index]!.end, minus[index]!.center),
-              ),
-          ),
-          "end angle",
-        ).toBeLessThanOrEqual(1e-5);
-      }
-      return jvp;
-    };
-    const archSource = (
-      name: string,
-      from: Point,
-      ids: readonly [string, string],
-      variation: SplinePoles,
-      turn = 0,
-    ): FdSpline => ({
-      kind: "spline",
-      name,
-      ids,
-      variation,
-      poles: [
-        from,
-        [from[0] + 0.7, from[1] + 0.3 + turn],
-        [from[0] + 1.4, from[1] + 0.3 + 2 * turn],
-        [from[0] + 2, from[1] + 3 * turn],
-      ],
-    });
-    const MOVE_A: SplinePoles = [
-      [0.05, -0.02],
-      [0.1, 0.2],
-      [-0.2, 0.05],
-      [0.3, -0.1],
-    ];
-    test("JVP vs FD (fabricated, real owner): SL-90-like spline → line arc; the centre follows its source point, A′ the spline's own pole differential, B′ the line's own start", () => {
-      expectArcJvp(
-        [
-          archSource("s", [0, 0], ["p0", "p1"], MOVE_A),
-          {
-            kind: "line",
-            name: "l",
-            ends: [
-              [2, 0],
-              [2, 1],
-            ],
-            variation: [MOVE_A[3], [-0.1, 0.2]],
-            ids: ["p1", "p2"],
-          },
-        ],
-        ["shared"],
-        -0.01,
-        { vertices: 0, arcs: 1 },
-      );
-    }, 120_000);
-
-    test("JVP vs FD (fabricated, real owner): SS-60-like spline → spline arc, then the same corner with a coincident source gap (centre = the incoming end)", () => {
-      const outgoing = (from: Point, variation: SplinePoles): FdSpline => ({
-        kind: "spline",
-        name: "t",
-        ids: ["q1", "q2"],
-        variation,
-        poles: [
-          from,
-          [from[0] + 0.5, from[1] + 0.7],
-          [from[0] + 1, from[1] + 1.4],
-          [from[0] + 1, from[1] + 2],
-        ],
-      });
-      const MOVE_B: SplinePoles = [
-        [0.3, -0.1],
-        [-0.1, 0.1],
-        [0.2, 0.3],
-        [0, -0.2],
-      ];
-      expectArcJvp(
-        [
-          archSource("s", [0, 0], ["p0", "p1"], MOVE_A),
-          { ...outgoing([2, 0], MOVE_B), ids: ["p1", "q2"] },
-        ],
-        ["shared"],
-        -0.01,
-        { vertices: 0, arcs: 1 },
-      );
-      const MOVE_C: SplinePoles = [
-        [-0.2, 0.1],
-        [-0.1, 0.1],
-        [0.2, 0.3],
-        [0, -0.2],
-      ];
-      expectArcJvp(
-        [
-          archSource("s", [0, 0], ["p0", "p1"], MOVE_A),
-          outgoing([2 + 3e-4, 2e-4], MOVE_C),
-        ],
-        ["coincident"],
-        -0.01,
-        { vertices: 0, arcs: 1 },
-      );
-    }, 120_000);
-
-    test("JVP vs FD (fabricated, real owner; review §7): a one-span spline that ADOPTS at its start (absorbed near-tangent vertex) and ends at an F1 arc keeps its own pole differential at the arc end", () => {
-      const jvp = expectArcJvp(
-        [
-          archSource("s", [0, 0], ["p0", "p1"], MOVE_A),
-          {
-            ...archSource(
-              "t",
-              [2, 0],
-              ["p1", "q2"],
-              [MOVE_A[3], [0.05, 0.1], [-0.1, 0.2], [0.2, -0.1]],
-              -0.1,
-            ),
-            poles: [
-              [2, 0],
-              [2.6, -0.299],
-              [3.3, -0.35],
-              [4, -0.2],
-            ],
-          },
-          {
-            kind: "line",
-            name: "l",
-            ends: [
-              [4, -0.2],
-              [3.5, 0.8],
-            ],
-            variation: [
-              [0.2, -0.1],
-              [0.1, 0.1],
-            ],
-            ids: ["q2", "q3"],
-          },
-        ],
-        ["shared", "shared"],
-        -0.01,
-        { vertices: 1, arcs: 1 },
-      );
-      expect(jvp.arcs.map((arc) => arc.jointIndex)).toEqual([1]);
-    }, 120_000);
 
     // Native U-slot certifier literal (closed, 8 lines, 19 leaves; K3 is 84 %
     // of its operations; stages/: K3 from 242 649 ops, first arc-wedge split
@@ -7521,6 +6754,21 @@ const SL_TINY_STAGED: readonly (readonly [
 ];
 
 /**
+ * [TECH] G13: the legacy offset's verdict on every `seedArcRows()` row
+ * (`${row} ${distance}`), captured from `computeOffsetChain` at `7b524c28`
+ * before T08b-g6 deleted it. Legacy drew the other 114 rows.
+ */
+const LEGACY_D3_ROW_COUNT = 120;
+const LEGACY_D3_ARC_COLLAPSES: ReadonlySet<string> = new Set([
+  "rounded rect 0.25",
+  "rounded rect rotated 0.3 0.25",
+  "circle 1.5",
+  "line-arc-line semicircle 0.6",
+  "line-arc-line cap 0.8",
+  "quarter arc 1.2",
+]);
+
+/**
  * The T08b-f native arc authoring seam: the line, centre-point arc, spline,
  * circle and rectangle tools with the session's endpoint-snap inference, the
  * Fillet and Slot edit operations, constraint tool commits on entities and
@@ -7769,29 +7017,20 @@ describe("T08b-f seed arcs: native line/arc chains through the SEL (Offset relat
 
   // D3 against legacy (design §5 as amended): every row legacy draws must
   // verify; the legacy arc collapses fail as derived-offset-arc-collapse.
+  // [TECH] G13: the legacy verdicts are pinned (LEGACY_D3_ARC_COLLAPSES).
+  test("G13: the pinned legacy verdicts cover exactly the D3 rows", () => {
+    expect(rows).toHaveLength(LEGACY_D3_ROW_COUNT);
+    const labels = new Set(rows.map((row) => `${row.row} ${row.distance}`));
+    expect(labels.size).toBe(LEGACY_D3_ROW_COUNT);
+    for (const label of LEGACY_D3_ARC_COLLAPSES)
+      expect(labels.has(label)).toBe(true);
+  });
   test.each(rows.map((row) => [row.row, row.distance, row] as const))(
     "D3 %s d = %s: the certified verdict matches the legacy offset (verified where legacy draws, arc collapse where it collapses)",
-    (_label, distance, row) => {
+    (label, distance, row) => {
       const sketch = row.build(harness);
-      const pre = harness.solved(sketch.definition);
-      const position = (pointId: string) =>
-        pre.definition.points.find((point) => point.pointId === pointId)!
-          .position;
-      const legacy = computeOffsetChain({
-        curves: sketch.seeds.map(
-          (seed) =>
-            offsetSeedCurveFromEntity(
-              pre.definition.entities.find(
-                (entity) => entity.entityId === seed,
-              )!,
-              position as never,
-            )!,
-        ),
-        distance,
-      });
       const { declared } = harness.adapt(sketch, distance);
-      if (!legacy.ok) {
-        expect(legacy.code).toBe(codes.arcCollapse);
+      if (LEGACY_D3_ARC_COLLAPSES.has(`${label} ${distance}`)) {
         expect(declared).toMatchObject({ ok: false, code: codes.arcCollapse });
         return;
       }
@@ -8033,24 +7272,10 @@ describe("T08b-f seed arcs: native line/arc chains through the SEL (Offset relat
         "no crossing on any seed-arc leaf of the joint (the offset curves do not meet there; the offset may be empty or the arc collapses)",
       ),
     });
-    const pre = harness.solved(sketch.definition);
-    const position = (pointId: string) =>
-      pre.definition.points.find((point) => point.pointId === pointId)!
-        .position;
-    const legacy = computeOffsetChain({
-      curves: sketch.seeds.map(
-        (seed) =>
-          offsetSeedCurveFromEntity(
-            pre.definition.entities.find((entity) => entity.entityId === seed)!,
-            position as never,
-          )!,
-      ),
-      distance: 0.1,
-    });
-    if (!legacy.ok) throw new Error("legacy no longer draws it");
-    // Legacy's offset arc ends BELOW its offset chord (y = 0.1): inverted.
-    const arc = legacy.segments.find((segment) => segment.kind === "arc")!;
-    expect(arc.kind === "arc" && arc.start[1]).toBeLessThan(0.1);
+    // [TECH] G13: the legacy owner (deleted in T08b-g6) drew this row at
+    // d = 0.1 with its offset arc starting at y = −0.09486832980505122,
+    // BELOW its offset chord (y = 0.1): inverted (T08b-g6 evidence,
+    // probes/g13-literals.json).
   });
 
   test("Lemma T° adversary (certifier input, not owner-reachable): a line bracket forged to straddle the chord's exact foot t₀ fails T°1 as a SIGN failure (never magnitude-tagged, so never flipped)", () => {
@@ -8101,91 +7326,6 @@ describe("T08b-f seed arcs: native line/arc chains through the SEL (Offset relat
         modelingTolerance: 1e-3,
       }),
     ).toMatchObject({ ok: false, code: codes.unsupportedSeed });
-  });
-
-  /** Distinct arbitrary first-order variations of every resolved piece. */
-  const variationsOf = (pieces: readonly OffsetChainPiece[]) =>
-    new Map<SketchEntityId, OffsetChainPieceVariation>(
-      pieces.map(
-        (piece, index): [SketchEntityId, OffsetChainPieceVariation] => {
-          const v = (k: number): SketchPoint2D => [
-            0.1 * index + 0.01 * k,
-            0.2 - 0.03 * k,
-          ];
-          return [
-            piece.seedEntityId,
-            piece.kind === "arc"
-              ? {
-                  kind: "arc",
-                  center: v(1),
-                  radius: 0.05 * index,
-                  start: v(2),
-                  end: v(3),
-                }
-              : { kind: "lineSegment", start: v(4), end: v(5) },
-          ];
-        },
-      ),
-    );
-  test("JVP (design §7): an arc end adopted from a line pole varies as the keeper line's own end; an F1 arc at a seed-arc end takes the seed arc's own end variation and its source point's centre variation", () => {
-    const adopted = certificateOf("rect + 1 fillet 0.01").resolved;
-    const pieces = adopted.input.pieces;
-    const variations = variationsOf(pieces);
-    const jvp = resolveOffsetChainTopologyJvp(
-      adopted.input,
-      adopted,
-      variations,
-    );
-    if (!jvp.ok) throw new Error(jvp.message);
-    let checked = 0;
-    for (const vertex of adopted.vertices) {
-      const index = vertex.jointIndex;
-      const next = (index + 1) % pieces.length;
-      const [keeperIndex, adopterIndex] =
-        vertex.keeper === "first" ? [index, next] : [next, index];
-      const adopter = pieces[adopterIndex]!;
-      const keeper = pieces[keeperIndex]!;
-      if (adopter.kind !== "arc" || keeper.kind !== "lineSegment") continue;
-      const keeperSide =
-        (vertex.keeper === "first") !== keeper.reversed ? "end" : "start";
-      const adopterSide =
-        (vertex.keeper === "first") === adopter.reversed ? "end" : "start";
-      expect(
-        jvp.lineArcEndpoints.get(adopter.seedEntityId)![adopterSide],
-      ).toEqual(
-        (
-          variations.get(keeper.seedEntityId) as {
-            start: SketchPoint2D;
-            end: SketchPoint2D;
-          }
-        )[keeperSide],
-      );
-      checked += 1;
-    }
-    expect(checked).toBeGreaterThan(0);
-
-    const f1 = certificateOf("line-arc-line semicircle 0.01").resolved;
-    const f1Variations = variationsOf(f1.input.pieces);
-    const centre: SketchPoint2D = [0.7, -0.3];
-    const sourcePoints = new Map<SketchPointId, SketchPoint2D>(
-      f1.input.vertices!.map((vertex) => [vertex.first.pointId!, centre]),
-    );
-    const f1Jvp = resolveOffsetChainTopologyJvp(
-      f1.input,
-      f1,
-      f1Variations,
-      sourcePoints,
-    );
-    if (!f1Jvp.ok) throw new Error(f1Jvp.message);
-    const seedArc = f1.input.pieces[1]!;
-    const seedVariation = f1Variations.get(seedArc.seedEntityId) as {
-      start: SketchPoint2D;
-      end: SketchPoint2D;
-    };
-    expect(f1Jvp.arcs).toHaveLength(2);
-    expect(f1Jvp.arcs[0]!.end).toEqual(seedVariation.start);
-    expect(f1Jvp.arcs[1]!.start).toEqual(seedVariation.end);
-    expect(f1Jvp.arcs.map((arc) => arc.center)).toEqual([centre, centre]);
   });
 
   const PINS = {
@@ -8413,183 +7553,6 @@ describe("T08b-f seed arcs: native line/arc chains through the SEL (Offset relat
       });
     },
     60_000,
-  );
-});
-
-describe("T08b-f seed-arc JVP (design §7) against a central finite difference (fabricated sources, the real resolver)", () => {
-  type Point2 = readonly [number, number];
-  /** The adapter's seed-arc piece of (C, S, E) at d (ray scaling, B′ splits). */
-  const seedArc = (
-    C: Point2,
-    S: Point2,
-    E: Point2,
-    d: number,
-  ): OffsetChainPiece => {
-    const rho = Math.hypot(S[0] - C[0], S[1] - C[1]);
-    const shifted = rho - d;
-    const start = scalePointFromCenter(C, S, shifted)!;
-    const end = scalePointFromCenter(C, E, shifted)!;
-    return {
-      kind: "arc",
-      seedEntityId: id("arc"),
-      reversed: false,
-      center: C,
-      radius: Math.hypot(start[0] - C[0], start[1] - C[1]),
-      start,
-      end,
-      sweepDirection: "counterClockwise",
-      splits: seedArcLeafSplits(C, start, end, "counterClockwise", S, E)!,
-    };
-  };
-  /** Design §7 variation: δS′ = δC + δR·ŝ + R·(I − ŝŝᵀ)(δS − δC)/|s|, δρ_o = ŝ·(δS′ − δC). */
-  const seedArcVariation = (
-    C: Point2,
-    S: Point2,
-    E: Point2,
-    d: number,
-    dC: Point2,
-    dS: Point2,
-    dE: Point2,
-  ): OffsetChainPieceVariation => {
-    const unit = (v: Point2) => {
-      const n = Math.hypot(v[0], v[1]);
-      return { u: [v[0] / n, v[1] / n] as Point2, n };
-    };
-    const s = unit([S[0] - C[0], S[1] - C[1]]);
-    const e = unit([E[0] - C[0], E[1] - C[1]]);
-    const ds: Point2 = [dS[0] - dC[0], dS[1] - dC[1]];
-    const de: Point2 = [dE[0] - dC[0], dE[1] - dC[1]];
-    const dR = s.u[0] * ds[0] + s.u[1] * ds[1];
-    const R = s.n - d;
-    const tangential = (u: Point2, n: number, dv: Point2): Point2 => {
-      const along = u[0] * dv[0] + u[1] * dv[1];
-      return [(dv[0] - along * u[0]) / n, (dv[1] - along * u[1]) / n];
-    };
-    const dus = tangential(s.u, s.n, ds);
-    const due = tangential(e.u, e.n, de);
-    return {
-      kind: "arc",
-      center: dC,
-      radius: dR,
-      start: [
-        dC[0] + dR * s.u[0] + R * dus[0],
-        dC[1] + dR * s.u[1] + R * dus[1],
-      ],
-      end: [dC[0] + dR * e.u[0] + R * due[0], dC[1] + dR * e.u[1] + R * due[1]],
-    };
-  };
-  const lineVariation = (
-    a: Point2,
-    b: Point2,
-    da: Point2,
-    db: Point2,
-    d: number,
-  ): OffsetChainPieceVariation => {
-    const t: Point2 = [b[0] - a[0], b[1] - a[1]];
-    const L = Math.hypot(t[0], t[1]);
-    const dt: Point2 = [db[0] - da[0], db[1] - da[1]];
-    const along = (t[0] * dt[0] + t[1] * dt[1]) / L;
-    const du: Point2 = [
-      (dt[0] - (along * t[0]) / L) / L,
-      (dt[1] - (along * t[1]) / L) / L,
-    ];
-    const dn: Point2 = [-du[1] * d, du[0] * d];
-    return {
-      kind: "lineSegment",
-      start: [da[0] + dn[0], da[1] + dn[1]],
-      end: [db[0] + dn[0], db[1] + dn[1]],
-    };
-  };
-  const d = -0.1;
-  test.each([
-    ["semicircle", 0],
-    ["45° cap", 0.5],
-  ] as const)(
-    "line–arc–line (%s) at d = −0.1: both Lemma-T° trim roots vary as the whole-recipe FD in δC, δS and δE (≤ 1e-6 relative)",
-    (_label, centerY) => {
-      const C0: Point2 = [0.5, centerY];
-      const S0: Point2 = [0, 0];
-      const E0: Point2 = [1, 0];
-      const build = (dC: Point2, dS: Point2, dE: Point2, h: number) => {
-        const C: Point2 = [C0[0] + h * dC[0], C0[1] + h * dC[1]];
-        const S: Point2 = [S0[0] + h * dS[0], S0[1] + h * dS[1]];
-        const E: Point2 = [E0[0] + h * dE[0], E0[1] + h * dE[1]];
-        const first = offsetLinePoints([-1, 0], S, d)!;
-        const last = offsetLinePoints(E, [2, 0], d)!;
-        const pieces: OffsetChainPiece[] = [
-          {
-            kind: "lineSegment",
-            seedEntityId: id("l1"),
-            reversed: false,
-            start: first.start,
-            end: first.end,
-          },
-          seedArc(C, S, E, d),
-          {
-            kind: "lineSegment",
-            seedEntityId: id("l2"),
-            reversed: false,
-            start: last.start,
-            end: last.end,
-          },
-        ];
-        const input: OffsetChainTopologyInput = {
-          pieces,
-          closed: false,
-          modelingTolerance: 1e-3,
-          query,
-        };
-        return { input, resolved: resolveOffsetChainTopology(input) };
-      };
-      for (const [dC, dS, dE] of [
-        [
-          [1, 0.3],
-          [0, 0],
-          [0, 0],
-        ],
-        [
-          [0, 0],
-          [0.2, 0.7],
-          [0, 0],
-        ],
-        [
-          [0, 0],
-          [0, 0],
-          [-0.4, 0.5],
-        ],
-      ] as const) {
-        const base = build([0, 0], [0, 0], [0, 0], 0);
-        if (!base.resolved.ok) throw new Error(base.resolved.message);
-        expect(base.resolved.joints).toHaveLength(2);
-        const variations = new Map<SketchEntityId, OffsetChainPieceVariation>([
-          [id("l1"), lineVariation([-1, 0], S0, [0, 0], dS, d)],
-          [id("arc"), seedArcVariation(C0, S0, E0, d, dC, dS, dE)],
-          [id("l2"), lineVariation(E0, [2, 0], dE, [0, 0], d)],
-        ]);
-        const jvp = resolveOffsetChainTopologyJvp(
-          base.input,
-          base.resolved,
-          variations,
-        );
-        if (!jvp.ok) throw new Error(jvp.message);
-        const h = 1e-6;
-        const plus = build(dC, dS, dE, h).resolved;
-        const minus = build(dC, dS, dE, -h).resolved;
-        if (!plus.ok || !minus.ok) throw new Error("FD resolution failed");
-        plus.joints.forEach((joint, index) => {
-          const fd = [0, 1].map(
-            (axis) =>
-              (joint.position[axis]! - minus.joints[index]!.position[axis]!) /
-              (2 * h),
-          );
-          const scale = Math.max(1, ...fd.map(Math.abs));
-          for (const axis of [0, 1])
-            expect(
-              Math.abs(jvp.jointPositions[index]![axis]! - fd[axis]!) / scale,
-            ).toBeLessThan(1e-6);
-        });
-      }
-    },
   );
 });
 

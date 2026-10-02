@@ -307,7 +307,7 @@ export interface ResolvedOffsetLineArcEndpoints {
 
 export interface OffsetChainTopologySuccess {
   readonly ok: true;
-  /** The exact input this result was resolved from (identity-checked by the JVP). */
+  /** The exact input this result was resolved from (identity-checked by the tube request). */
   readonly input: OffsetChainTopologyInput;
   readonly cubics: ReadonlyMap<
     SketchEntityId,
@@ -327,48 +327,6 @@ export interface OffsetChainTopologySuccess {
 
 export type OffsetChainTopologyResult =
   | OffsetChainTopologySuccess
-  | OffsetChainFailure;
-
-/** First-order variation of raw line/arc pieces; cubic variation is `span.differential`. */
-export type OffsetChainPieceVariation =
-  | {
-      readonly kind: "lineSegment";
-      readonly start: SketchPoint2D;
-      readonly end: SketchPoint2D;
-    }
-  | {
-      readonly kind: "arc";
-      readonly center: SketchPoint2D;
-      readonly radius: number;
-      readonly start: SketchPoint2D;
-      readonly end: SketchPoint2D;
-    };
-
-export type OffsetChainTopologyJvp =
-  | {
-      readonly ok: true;
-      readonly representativeQueryDomains: ReadonlyMap<
-        SketchEntityId,
-        readonly (readonly [number, number])[]
-      >;
-      readonly jointPositions: readonly SketchPoint2D[];
-      readonly lineArcEndpoints: ReadonlyMap<
-        SketchEntityId,
-        { readonly start: SketchPoint2D; readonly end: SketchPoint2D }
-      >;
-      /**
-       * Point variations of each F1 arc (T08b-e): the centre's declared
-       * source point and both neighbours' OWN terminal pole variations (no
-       * adoption at an arc vertex). The radius and angle variations are the
-       * point-defined arc's (`derived-geometry.ts`), never recomputed here.
-       */
-      readonly arcs: readonly {
-        readonly jointIndex: number;
-        readonly center: SketchPoint2D;
-        readonly start: SketchPoint2D;
-        readonly end: SketchPoint2D;
-      }[];
-    }
   | OffsetChainFailure;
 
 type Side = "low" | "high";
@@ -1075,8 +1033,11 @@ function ruleKeeper(
  * it has no admissible arc (rule Z), else an F1 arc (`arcs`, the canonical
  * support of the input pieces). Ordinary exceptions from the query propagate
  * unchanged.
+ *
+ * Test seam (T08b-g6 review R2): production reaches the same two steps
+ * through the SEL (`certifyDeclaredOffsetChain`), never through this entry.
  */
-export function resolveOffsetChainTopology(
+export function resolveOffsetChainTopologyForTest(
   input: OffsetChainTopologyInput,
 ): OffsetChainTopologyResult {
   const decided = decideOffsetChainAdjacencies(input);
@@ -4269,12 +4230,6 @@ export function offsetChainJointLeaves(
 interface CurveFrame {
   readonly position: SketchPoint2D;
   readonly first: SketchPoint2D;
-  readonly variation?: SketchPoint2D;
-}
-
-interface CurveJet extends CurveFrame {
-  /** Position variation at the fixed source parameter. */
-  readonly variation: SketchPoint2D;
 }
 
 /**
@@ -4304,11 +4259,7 @@ function curveFrame(
       },
       { kind: "source", value: parameter },
     );
-    return {
-      position: evaluated.position,
-      first: evaluated.first,
-      variation: evaluated.differential.position,
-    };
+    return { position: evaluated.position, first: evaluated.first };
   }
   if (piece.kind === "lineSegment") {
     const derivative = lineFrame(piece.start, piece.end);
@@ -4350,247 +4301,4 @@ function jointTangentDeterminant(
     determinant !== 0
     ? determinant
     : null;
-}
-
-function curveJet(
-  piece: OffsetChainPiece,
-  spanIndex: number,
-  parameter: number,
-  variation: OffsetChainPieceVariation | undefined,
-): CurveJet {
-  const frame = curveFrame(piece, spanIndex, parameter);
-  if (piece.kind === "derivedCubic") {
-    return { ...frame, variation: frame.variation! };
-  }
-  if (!variation || variation.kind !== piece.kind) {
-    throw new RangeError(
-      `Missing ${piece.kind} variation for offset chain piece ${piece.seedEntityId}`,
-    );
-  }
-  if (piece.kind === "lineSegment" && variation.kind === "lineSegment") {
-    // At fixed t the position varies by dStart + t·(dEnd − dStart).
-    const derivative = lineFrame(variation.start, variation.end);
-    return {
-      ...frame,
-      variation: [
-        variation.start[0] + parameter * derivative[0],
-        variation.start[1] + parameter * derivative[1],
-      ],
-    };
-  }
-  if (piece.kind !== "arc" || variation.kind !== "arc") {
-    throw new RangeError("Offset chain variation kind mismatch");
-  }
-  const cosine = Math.cos(parameter);
-  const sine = Math.sin(parameter);
-  return {
-    ...frame,
-    variation: [
-      variation.center[0] + variation.radius * cosine,
-      variation.center[1] + variation.radius * sine,
-    ],
-  };
-}
-
-/**
- * Fixed-topology JVP of an accepted resolution. It reuses the accepted joints
- * (no requery) and solves the 2×2 implicit joint system at the representative
- * parameters; an exactly singular or non-finite solve fails closed.
- *
- * A finite nonzero joint determinant does not make arbitrary supplied
- * variations representable: their arithmetic can still overflow. Batch 2 must
- * not publish or consume a frame until every required JVP evaluation succeeds.
- *
- * An F1 arc (T08b-e) is point-defined: its centre varies with its declared
- * source point (`sourcePointVariations`, by the vertex's first point ID,
- * required when the resolution has arcs), its ends with the neighbours' OWN
- * terminal variations (never adopted). Its radius and angle variations are
- * the point-defined arc's (`derived-geometry.ts`).
- */
-export function resolveOffsetChainTopologyJvp(
-  input: OffsetChainTopologyInput,
-  resolved: OffsetChainTopologySuccess,
-  variations: ReadonlyMap<SketchEntityId, OffsetChainPieceVariation>,
-  sourcePointVariations?: ReadonlyMap<SketchPointId, SketchPoint2D>,
-): OffsetChainTopologyJvp {
-  if (resolved.input !== input) {
-    throw new RangeError(
-      "Offset chain JVP requires the resolution of this exact input",
-    );
-  }
-  const pieceOf = new Map(
-    input.pieces.map((piece) => [piece.seedEntityId, piece] as const),
-  );
-  const jointParameterDifferentials: (readonly [number, number])[] = [];
-  const jointPositions: SketchPoint2D[] = [];
-  for (const joint of resolved.joints) {
-    const jet = (seed: SketchEntityId, curve: NeutralCurve, value: number) =>
-      curveJet(
-        pieceOf.get(seed)!,
-        Number(curve.provenance.sourceSpanId),
-        value,
-        variations.get(seed),
-      );
-    const a = jet(
-      joint.firstSeedEntityId,
-      joint.request.first,
-      joint.firstParameter,
-    );
-    const b = jet(
-      joint.secondSeedEntityId,
-      joint.request.second,
-      joint.secondParameter,
-    );
-    const determinant = jointTangentDeterminant(
-      pieceOf.get(joint.firstSeedEntityId)!,
-      Number(joint.request.first.provenance.sourceSpanId),
-      joint.firstParameter,
-      pieceOf.get(joint.secondSeedEntityId)!,
-      Number(joint.request.second.provenance.sourceSpanId),
-      joint.secondParameter,
-    );
-    if (determinant === null) {
-      return failure(
-        codes.derivativeUnavailable,
-        "The offset joint derivative is singular or non-finite.",
-        joint.firstSeedEntityId,
-      );
-    }
-    const rx = b.variation[0] - a.variation[0];
-    const ry = b.variation[1] - a.variation[1];
-    const ds = (b.first[0] * ry - b.first[1] * rx) / determinant;
-    const dt = (a.first[0] * ry - a.first[1] * rx) / determinant;
-    const position: SketchPoint2D = [
-      a.variation[0] + a.first[0] * ds,
-      a.variation[1] + a.first[1] * ds,
-    ];
-    if (![ds, dt, ...position].every(Number.isFinite)) {
-      return failure(
-        codes.derivativeUnavailable,
-        "The offset joint derivative is singular or non-finite.",
-        joint.firstSeedEntityId,
-      );
-    }
-    jointParameterDifferentials.push([ds, dt]);
-    jointPositions.push(position);
-  }
-  // Domain ends name adjacency indices (review R5); joints are dense.
-  const jointPosition = new Map(
-    resolved.joints.map((joint, position) => [joint.jointIndex, position]),
-  );
-  const jointDifferential = (
-    end: OffsetChainDomainEnd,
-    seed: SketchEntityId,
-    spanIndex: number,
-  ) => {
-    // A vertex end is the source end: the span's own (adopted) differential.
-    if (end.kind !== "joint") return null;
-    const position = jointPosition.get(end.jointIndex)!;
-    const joint = resolved.joints[position]!;
-    const [ds, dt] = jointParameterDifferentials[position]!;
-    return joint.firstSeedEntityId === seed &&
-      Number(joint.request.first.provenance.sourceSpanId) === spanIndex
-      ? ds
-      : dt;
-  };
-  const representativeQueryDomains = new Map<
-    SketchEntityId,
-    (readonly [number, number])[]
-  >();
-  for (const [seed, spans] of resolved.cubics) {
-    representativeQueryDomains.set(
-      seed,
-      spans.map(({ span, start, end }, spanIndex) => [
-        jointDifferential(start, seed, spanIndex) ??
-          span.differential.sourceInterval[0],
-        jointDifferential(end, seed, spanIndex) ??
-          span.differential.sourceInterval[1],
-      ]),
-    );
-  }
-  /**
-   * A line end at a declared vertex is the keeper's emitted pole verbatim
-   * (adoption, T08b-d), so its variation is the keeper's pole variation:
-   * a keeper spline's terminal pole differential, a keeper line's own end
-   * variation. Null when this line is the keeper (its own variation).
-   */
-  const vertexEndVariation = (
-    jointIndex: number,
-    seed: SketchEntityId,
-  ): SketchPoint2D | null => {
-    const vertex = resolved.vertices.find(
-      (item) => item.jointIndex === jointIndex,
-    )!;
-    const count = input.pieces.length;
-    const keeperIndex =
-      vertex.keeper === "first" ? jointIndex : (jointIndex + 1) % count;
-    const keeper = pieceTerminal(
-      input.pieces,
-      keeperIndex,
-      vertex.keeper === "first",
-    );
-    if (keeper.piece.seedEntityId === seed) return null;
-    if (keeper.piece.kind === "derivedCubic")
-      return emittedTerminal(keeper)!.differential!;
-    const variation = variations.get(keeper.piece.seedEntityId);
-    if (!variation || variation.kind !== keeper.piece.kind)
-      throw new RangeError(
-        `Missing variation for offset chain piece ${keeper.piece.seedEntityId}`,
-      );
-    return keeper.side === "end" ? variation.end : variation.start;
-  };
-  const lineArcEndpoints = new Map<
-    SketchEntityId,
-    { start: SketchPoint2D; end: SketchPoint2D }
-  >();
-  for (const [seed, endpoints] of resolved.lineArcEndpoints) {
-    const variation = variations.get(seed);
-    if (!variation) {
-      throw new RangeError(`Missing variation for offset chain piece ${seed}`);
-    }
-    const endpoint = (end: OffsetChainDomainEnd, source: SketchPoint2D) =>
-      end.kind === "joint"
-        ? jointPositions[jointPosition.get(end.jointIndex)!]!
-        : end.kind === "vertex"
-          ? (vertexEndVariation(end.vertexIndex, seed) ?? source)
-          : source;
-    lineArcEndpoints.set(seed, {
-      start: endpoint(endpoints.startDomainEnd, variation.start),
-      end: endpoint(endpoints.endDomainEnd, variation.end),
-    });
-  }
-  /** A piece's own terminal pole variation (an arc end is never adopted). */
-  const ownTerminal = (index: number, exiting: boolean) => {
-    const end = pieceTerminal(input.pieces, index, exiting);
-    if (end.piece.kind === "derivedCubic")
-      return emittedTerminal(end)!.differential!;
-    const variation = variations.get(end.piece.seedEntityId);
-    if (!variation || variation.kind !== end.piece.kind)
-      throw new RangeError(
-        `Missing variation for offset chain piece ${end.piece.seedEntityId}`,
-      );
-    return end.side === "end" ? variation.end : variation.start;
-  };
-  const arcs = resolved.arcs.map((arc) => {
-    const pointId = input.vertices![arc.jointIndex]!.first.pointId;
-    const center =
-      pointId === undefined ? undefined : sourcePointVariations?.get(pointId);
-    if (!center)
-      throw new RangeError(
-        `Missing source point variation for offset arc ${arc.jointIndex}`,
-      );
-    return {
-      jointIndex: arc.jointIndex,
-      center,
-      start: ownTerminal(arc.jointIndex, true),
-      end: ownTerminal((arc.jointIndex + 1) % input.pieces.length, false),
-    };
-  });
-  return {
-    ok: true,
-    representativeQueryDomains,
-    jointPositions,
-    lineArcEndpoints,
-    arcs,
-  };
 }

@@ -22,6 +22,10 @@ import {
 } from "@/contracts/sketch/spline-geometry";
 import type { ConstraintId, DimensionId } from "@/contracts/shared/ids";
 import { createDocumentSolverTolerances } from "@/contracts/solver/schema";
+import type { ModelingDocumentSettings } from "@/contracts/modeling/schema";
+import { createNewSketchSessionFromSupport } from "@/domain/editor/sketch-session";
+import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
+import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
 
 test("src/contracts/sketch/solver-core.spec.ts", async () => {
   function assertClose(
@@ -6567,4 +6571,164 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
   }
 
   await run();
+});
+
+/**
+ * A circle offset (seed radius 2, inward distance 1): `deleteSeed` removes
+ * the seed circle and keeps the relationship; `seedRadius` drives the seed
+ * radius by a dimension.
+ */
+function circleOffsetDefinition(options: {
+  deleteSeed?: boolean;
+  seedRadius?: number;
+}): SketchDefinition {
+  const point = (id: string) =>
+    ({
+      pointId: `sketch_point_${id}`,
+      label: id,
+      target: {
+        kind: "sketchPoint",
+        sketchId: "sketch_primary",
+        pointId: `sketch_point_${id}`,
+      },
+      position: [0, 0],
+      isConstruction: false,
+    }) as const;
+  const circle = (id: string, radius: number) =>
+    ({
+      kind: "circle",
+      entityId: `sketch_entity_${id}`,
+      label: id,
+      target: {
+        kind: "sketchEntity",
+        sketchId: "sketch_primary",
+        entityId: `sketch_entity_${id}`,
+      },
+      isConstruction: false,
+      centerPointId: `sketch_point_${id}`,
+      radius,
+    }) as const;
+  const points = [point("seed"), point("output")];
+  const entities = [
+    ...(options.deleteSeed ? [] : [circle("seed", 2)]),
+    circle("output", 1),
+  ];
+  return {
+    schemaVersion: "sketch-definition/v1alpha2",
+    referenceIds: [],
+    references: [],
+    pointIds: points.map((item) => item.pointId),
+    points,
+    entityIds: entities.map((item) => item.entityId),
+    entities,
+    constraintIds: [],
+    constraints: [],
+    dimensionIds:
+      options.seedRadius === undefined ? [] : ["dimension_seed_radius"],
+    dimensions:
+      options.seedRadius === undefined
+        ? []
+        : [
+            {
+              dimensionId: "dimension_seed_radius",
+              kind: "circleRadius",
+              label: "Seed radius",
+              entityId: "sketch_entity_seed",
+              value: options.seedRadius,
+            },
+          ],
+    derivedRelationships: [
+      {
+        derivationId: "derivation_offset_circle",
+        kind: "offset",
+        label: "Circle offset",
+        seedEntityIds: ["sketch_entity_seed"],
+        distance: 1,
+        jointPolicy: "trimExtendArcFallback",
+        piecewiseCubicOutputs: [],
+        jointOutputs: [],
+        outputs: [
+          {
+            seedEntityId: "sketch_entity_seed",
+            outputEntityId: "sketch_entity_output",
+            instanceIndex: 1,
+            seedPointIds: ["sketch_point_seed"],
+            outputPointIds: ["sketch_point_output"],
+          },
+        ],
+      },
+    ],
+  };
+}
+
+/** The core solve, its compiled diagnostics and the sketch session's live solve of one definition. */
+function solveCoreAndLive(definition: SketchDefinition) {
+  const input = {
+    definition,
+    tolerances: {
+      coincidence: 1e-6,
+      angleRadians: 1e-6,
+      minimumSegmentLength: 1e-6,
+    },
+    modelingTolerance: 1e-3,
+    partialSolvePolicy: "bestEffort" as const,
+  };
+  const session = rebuildSessionForDefinition(
+    createNewSketchSessionFromSupport(
+      { kind: "construction", constructionId: "construction_plane-xy" },
+      { ...OCC_KERNEL_SETTINGS } as ModelingDocumentSettings,
+    ),
+    { definition },
+  );
+  return {
+    compiled: compileSketchSolveProgram(input).diagnostics,
+    core: solveSketchDefinitionCore(input).solvedSnapshot,
+    live: session.liveSolve!.solvedSnapshot,
+  };
+}
+
+test("T08b-g6 review R1: a deleted offset seed's unsupported-seed diagnostic is listed once, not once more by the solve's projection (core solve and session live solve)", () => {
+  const { compiled, core, live } = solveCoreAndLive(
+    circleOffsetDefinition({ deleteSeed: true }),
+  );
+  const missingSeed = OFFSET_DIAGNOSTIC_CODES.unsupportedSeed;
+  expect(
+    compiled.map((diagnostic) => diagnostic.code),
+    "premise: the compiled program already lists the missing seed",
+  ).toEqual([missingSeed]);
+  for (const [label, snapshot] of [
+    ["core solve", core],
+    ["live solve", live],
+  ] as const) {
+    expect(
+      snapshot.diagnostics.map((diagnostic) => diagnostic.code),
+      label,
+    ).toEqual([missingSeed]);
+    expect(snapshot.status, label).toEqual({
+      solveState: "partiallySolved",
+      constraintState: "inconsistent",
+    });
+  }
+});
+
+test("T08b-g6 review R1: a projection-only offset diagnostic (the solved seed radius collapses the offset) is still listed and still makes the geometry invalid", () => {
+  const { compiled, core, live } = solveCoreAndLive(
+    circleOffsetDefinition({ seedRadius: 0.5 }),
+  );
+  expect(compiled, "premise: nothing collapses at the authored radius").toEqual(
+    [],
+  );
+  for (const [label, snapshot] of [
+    ["core solve", core],
+    ["live solve", live],
+  ] as const) {
+    expect(
+      snapshot.diagnostics.map((diagnostic) => diagnostic.code),
+      label,
+    ).toEqual([OFFSET_DIAGNOSTIC_CODES.arcCollapse]);
+    expect(snapshot.status, label).toEqual({
+      solveState: "partiallySolved",
+      constraintState: "inconsistent",
+    });
+  }
 });

@@ -7010,10 +7010,18 @@ function materializeSolveResult(
     program,
     projectedValues,
   );
+  // The compile-time derivation diagnostics and the projection's (the same
+  // derivations re-evaluated at `values`) repeat every unchanged entry once.
+  const compiledDerivationDiagnostics = new Set(
+    program.diagnostics.map((diagnostic) => JSON.stringify(diagnostic)),
+  );
   const diagnostics = [
     ...program.diagnostics,
     ...program.validation.diagnostics,
-    ...projectionDiagnostics,
+    ...projectionDiagnostics.filter(
+      (diagnostic) =>
+        !compiledDerivationDiagnostics.has(JSON.stringify(diagnostic)),
+    ),
     ...commonCircleDiagnostics,
   ];
   const evaluation =

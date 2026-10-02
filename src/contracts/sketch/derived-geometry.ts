@@ -12,7 +12,6 @@ import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
 import {
   orderedSplineOccurrences,
   orderedSplinePointIds,
-  type SplinePoles,
   type SplineVector,
 } from "@/contracts/sketch/spline-geometry";
 import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
@@ -36,7 +35,6 @@ import {
   offsetFramePointValue,
   offsetFrameRelationshipOf,
   offsetFrameShellSpans,
-  ownerSpanKey,
   type OffsetFrameEntityDatum,
   type OffsetFrameOutputMap,
   type OffsetFramePointDatum,
@@ -127,12 +125,6 @@ export interface SketchDerivationVariation {
   >;
 }
 
-/** One output span's sub-span pole and query-domain variations (T08b-g plan §2.6). */
-export interface SketchDerivationPiecewiseCubicVariation {
-  poles: SplinePoles[];
-  queryDomain: (readonly [number, number])[];
-}
-
 export interface SketchDerivationJvp {
   points: Readonly<Record<SketchPointId, SketchPoint2D>>;
   entities: Readonly<
@@ -140,13 +132,6 @@ export interface SketchDerivationJvp {
   >;
   splineTangents: Readonly<
     Partial<Record<SketchEntityId, Readonly<Record<string, SplineVector>>>>
-  >;
-  /** Per shell, per output span: one entry per owner sub-span. */
-  piecewiseCubics: Readonly<
-    Record<
-      SketchEntityId,
-      Readonly<Record<string, SketchDerivationPiecewiseCubicVariation>>
-    >
   >;
   /**
    * Offset relationships whose frame derivative is unavailable at this
@@ -498,12 +483,6 @@ function transformedEntity(
 }
 
 const ZERO_VECTOR: SketchPoint2D = [0, 0];
-const ZERO_POLES: SplinePoles = [
-  [0, 0],
-  [0, 0],
-  [0, 0],
-  [0, 0],
-];
 
 function circleLikeVariationFromPoints(
   entity: Extract<SketchEntityDefinition, { kind: "arc" }>,
@@ -577,10 +556,6 @@ export function evaluateSketchDerivationJvp(
   const splineTangents: Partial<
     Record<SketchEntityId, Record<string, SplineVector>>
   > = {};
-  const piecewiseCubics: Record<
-    SketchEntityId,
-    Record<string, SketchDerivationPiecewiseCubicVariation>
-  > = {};
   const derivativeUnavailable: string[] = [];
 
   for (const entity of evaluatedDefinition.entities) {
@@ -625,24 +600,6 @@ export function evaluateSketchDerivationJvp(
       for (const [entityId, datum] of record.outputs.entities) {
         const entityJvp = jvp ? offsetFrameEntityJvp(jvp, datum) : null;
         if (entityJvp) entities[entityId] = entityJvp;
-      }
-      for (const shell of record.outputs.shells) {
-        const spans: Record<string, SketchDerivationPiecewiseCubicVariation> =
-          {};
-        const leaves = record.frame.cubics.get(shell.seed) ?? [];
-        leaves.forEach((leaf, index) => {
-          const outputSpanId = shell.spanIds.get(
-            ownerSpanKey(leaf.span.source),
-          )!;
-          const entry = (spans[outputSpanId] ??= {
-            poles: [],
-            queryDomain: [],
-          });
-          const value = jvp?.cubics.get(shell.seed)?.[index];
-          entry.poles.push(value?.poles ?? ZERO_POLES);
-          entry.queryDomain.push(value?.queryDomain ?? [0, 0]);
-        });
-        piecewiseCubics[shell.entityId] = spans;
       }
       continue;
     }
@@ -726,7 +683,6 @@ export function evaluateSketchDerivationJvp(
     points,
     entities,
     splineTangents,
-    piecewiseCubics,
     ...(derivativeUnavailable.length > 0 ? { derivativeUnavailable } : {}),
   };
 }

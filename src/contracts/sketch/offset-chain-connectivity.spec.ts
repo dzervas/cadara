@@ -6,10 +6,6 @@ import { lineSketchToolDefinition } from "@/core/sketch-tools/tools/line";
 import { appendInferredSnapConstraints } from "@/domain/editor/sketch-session/tools";
 import { createSessionCommitFactories } from "@/domain/editor/sketch-session/internals";
 import { extractDeclaredOffsetChainConnectivity } from "@/contracts/sketch/offset-chain-connectivity";
-import {
-  computeOffsetChain,
-  offsetSeedCurveFromEntity,
-} from "@/contracts/sketch/offset-geometry";
 import type {
   ConstraintId,
   SketchEntityId,
@@ -30,31 +26,6 @@ function definition(...patches: readonly SketchToolCommitContribution[]) {
     entities: patches.flatMap((patch) => patch.entities),
     constraints: patches.flatMap((patch) => patch.constraints ?? []),
   } as Pick<SketchDefinition, "points" | "entities" | "constraints">;
-}
-
-function legacyPieces(
-  authored: Pick<SketchDefinition, "points" | "entities">,
-  seedIds: readonly SketchEntityId[],
-) {
-  const positions = new Map(
-    authored.points.map((point) => [point.pointId, point.position]),
-  );
-  const curves = seedIds.map((seedId) =>
-    offsetSeedCurveFromEntity(
-      authored.entities.find((entity) => entity.entityId === seedId)!,
-      (pointId) => positions.get(pointId) ?? null,
-    ),
-  );
-  const resolvedCurves = curves.filter(
-    (curve): curve is NonNullable<typeof curve> => curve !== null,
-  );
-  if (resolvedCurves.length !== curves.length) {
-    throw new Error("Native authoring fixture must resolve to offset seeds.");
-  }
-  const result = computeOffsetChain({ curves: resolvedCurves, distance: 0.01 });
-  if (!result.ok)
-    throw new Error("Native authoring fixture must be offsettable.");
-  return result.order;
 }
 
 function endpointSnap(id: SketchPointId, point: readonly [number, number]) {
@@ -121,9 +92,12 @@ describe("declared offset-chain connectivity", () => {
       definition: authoredDefinition,
       seedIds,
     });
-    expect(connectivity.ok && connectivity.pieces).toEqual(
-      legacyPieces(authoredDefinition, seedIds),
-    );
+    // [TECH] G13: the legacy offset's traversal order of this chain, pinned
+    // from `computeOffsetChain` at 7b524c28 before T08b-g6 deleted it.
+    expect(connectivity.ok && connectivity.pieces).toEqual([
+      { seedEntityId: splineEntity.entityId, reversed: false },
+      { seedEntityId: lineEntity.entityId, reversed: false },
+    ]);
     expect(connectivity).toEqual({
       ok: true,
       closed: false,

@@ -10,7 +10,7 @@ import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
 import { extractDeclaredOffsetChainConnectivity } from "@/contracts/sketch/offset-chain-connectivity";
 import {
   declaredOffsetChainPieces,
-  resolveOffsetChainTopology,
+  resolveOffsetChainTopologyForTest,
   type CertifiedNeutralCurveRequestQuery,
 } from "@/contracts/sketch/offset-chain-topology";
 import type {
@@ -175,7 +175,7 @@ export function createNativeOffsetChainHarness(options: {
       return declared;
     };
     const declared = adapt();
-    const resolution = resolveOffsetChainTopology({
+    const resolution = resolveOffsetChainTopologyForTest({
       pieces: declared.pieces,
       closed: connectivity.closed,
       modelingTolerance,
@@ -1673,8 +1673,9 @@ const WAVE8_POINTS: readonly Vector[] = [
 /**
  * T08b-g2 frame-derivative rows on the offset-chain harness: the brief's FD
  * table rows that are not D3 rows (those are `seedArcRows` by label), the
- * G8 5- / 8-point splines, the authored-tangent rows and the self-trim
- * positional wraps at d = +0.01 (T08b-g2 review R1), each labelled.
+ * G8 5- / 8-point splines, the authored-tangent rows, the self-trim
+ * positional wraps at d = +0.01 (T08b-g2 review R1) and the trims against a
+ * reversed piece (T08b-g6 review R2), each labelled.
  */
 export function offsetFrameDerivativeRows(): readonly OffsetFrameDerivativeRow[] {
   const matrixRow = (label: string, distance: number, covers: string) => {
@@ -1720,6 +1721,32 @@ export function offsetFrameDerivativeRows(): readonly OffsetFrameDerivativeRow[]
     matrixRow("SL-loop", 0.01, "SL-loop +"),
     matrixRow("SL-loop", -0.01, "SL-loop −"),
     matrixRow("SL-tiny", 0.01, "step-2(b) absorbed vertex, line adopter"),
+    {
+      row: "LL-90 with the second line drawn backwards (end snap)",
+      distance: 0.01,
+      harness: "matrix",
+      covers:
+        "line/line trim against a reversed line under generic endpoint variation (T08b-g6 review R2)",
+      build: (h) => {
+        const first = h.drawLine([], [0, 0], [1, 0]);
+        const [, end] = h.lineEnds(first);
+        return [first, h.drawLine([first], [1, 1], [1, 0], { end })];
+      },
+    },
+    {
+      row: "LS-90 with the spline drawn backwards (end snap)",
+      distance: 0.01,
+      harness: "matrix",
+      covers: "line/cubic trim against a reversed spline (T08b-g6 review R2)",
+      build: (h) => {
+        const line = h.drawLine([], [-1, 1], [0, 0]);
+        const [, end] = h.lineEnds(line);
+        return [
+          line,
+          h.drawSpline([line], [...ARCH_POINTS].reverse(), { end }),
+        ];
+      },
+    },
     {
       row: "SL-tiny then a 165° return (absorbed vertex + F1 arc at the adopting line's other end)",
       distance: -0.01,

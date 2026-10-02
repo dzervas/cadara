@@ -2348,11 +2348,13 @@ export function createSketchSlotContribution(input: {
   );
 }
 
+/**
+ * The static one-shot offset of one curve (D6: projected reference geometry,
+ * which cannot be a derivation master yet). Sketch entities are offset by
+ * `createSketchOffsetDerivationContribution`.
+ */
 export function createOffsetContribution(input: {
-  definition: SketchDefinition;
-  entityId?: SketchEntityId;
-  entityIds?: readonly SketchEntityId[];
-  curve?: OffsetCurveDescriptor;
+  curve: OffsetCurveDescriptor;
   distance: number | null;
   side: OffsetSide;
   sequence: number;
@@ -2376,35 +2378,7 @@ export function createOffsetContribution(input: {
     };
   }
 
-  const entityIds = input.entityIds ?? (input.entityId ? [input.entityId] : []);
-  if (entityIds.length > 1) {
-    return createContinuousLineOffsetContribution({
-      definition: input.definition,
-      entityIds,
-      distance: input.distance,
-      side: input.side,
-      sequence: input.sequence,
-      factories: input.factories,
-    });
-  }
-
-  const targetEntityId = entityIds[0];
-  const entity = targetEntityId
-    ? input.definition.entities.find(
-        (candidate) => candidate.entityId === targetEntityId,
-      )
-    : null;
-  const curve =
-    input.curve ??
-    (entity ? getCurveDescriptor(input.definition, entity) : null);
-  if (!curve) {
-    return {
-      valid: false,
-      message: "Offset supports line, circle, arc, and spline entities.",
-      contribution: null,
-      previewEntities: [],
-    };
-  }
+  const curve = input.curve;
   const isConstruction = curve.isConstruction;
   const style = curve.style;
 

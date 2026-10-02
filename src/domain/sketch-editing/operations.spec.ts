@@ -6,6 +6,10 @@ import type {
   SketchPointDefinition,
 } from "@/contracts/sketch/schema";
 import type { SketchPoint } from "@/contracts/modeling/schema";
+import {
+  reconstructSplineAggregate,
+  sampleSplineGeometry,
+} from "@/contracts/sketch/spline-geometry";
 import type {
   SketchEntityId,
   SketchId,
@@ -472,16 +476,17 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
   }
 
   function testOffsetCharacterizationSingleCurves() {
-    const lineDefinition = makeDefinition(
-      [
-        makePoint("sketch_point_a", "A", [0, 0]),
-        makePoint("sketch_point_b", "B", [4, 0]),
-      ],
-      [makeLine("sketch_entity_ab", "AB", "sketch_point_a", "sketch_point_b")],
-    );
+    // D6 static offset: one curve descriptor in (projected reference
+    // geometry); sketch entities take the derivation path.
+    const line = {
+      kind: "lineSegment" as const,
+      isConstruction: false,
+      style: undefined,
+      start: [0, 0] as SketchPoint,
+      end: [4, 0] as SketchPoint,
+    };
     const leftLine = createOffsetContribution({
-      definition: lineDefinition,
-      entityIds: ["sketch_entity_ab"] as SketchEntityId[],
+      curve: line,
       distance: 1,
       side: "left",
       sequence: 10,
@@ -500,8 +505,7 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
     );
 
     const rightLine = createOffsetContribution({
-      definition: lineDefinition,
-      entityIds: ["sketch_entity_ab"] as SketchEntityId[],
+      curve: line,
       distance: 1,
       side: "right",
       sequence: 10,
@@ -513,27 +517,15 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
       "Right line offset start",
     );
 
-    const circleDefinition = makeDefinition(
-      [makePoint("sketch_point_center", "Center", [1, 1])],
-      [
-        {
-          kind: "circle",
-          entityId: "sketch_entity_circle" as SketchEntityId,
-          label: "Circle",
-          target: {
-            kind: "sketchEntity",
-            sketchId: "sketch_primary" as SketchId,
-            entityId: "sketch_entity_circle" as SketchEntityId,
-          },
-          isConstruction: false,
-          centerPointId: "sketch_point_center" as SketchPointId,
-          radius: 2,
-        },
-      ],
-    );
+    const circle = {
+      kind: "circle" as const,
+      isConstruction: false,
+      style: undefined,
+      center: [1, 1] as SketchPoint,
+      radius: 2,
+    };
     const grownCircle = createOffsetContribution({
-      definition: circleDefinition,
-      entityIds: ["sketch_entity_circle"] as SketchEntityId[],
+      curve: circle,
       distance: 0.5,
       side: "left",
       sequence: 10,
@@ -546,8 +538,7 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
     ).toBe(2.5);
 
     const collapsedCircle = createOffsetContribution({
-      definition: circleDefinition,
-      entityIds: ["sketch_entity_circle"] as SketchEntityId[],
+      curve: circle,
       distance: 2,
       side: "right",
       sequence: 10,
@@ -558,25 +549,17 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
       "Circle offset collapsing the radius should be rejected.",
     ).toBeFalsy();
 
-    const arcDefinition = makeDefinition(
-      [
-        makePoint("sketch_point_center", "Center", [0, 0]),
-        makePoint("sketch_point_start", "Start", [2, 0]),
-        makePoint("sketch_point_end", "End", [0, 2]),
-      ],
-      [
-        makeArc(
-          "sketch_entity_arc",
-          "Arc",
-          "sketch_point_center",
-          "sketch_point_start",
-          "sketch_point_end",
-        ),
-      ],
-    );
+    const arc = {
+      kind: "arc" as const,
+      isConstruction: false,
+      style: undefined,
+      center: [0, 0] as SketchPoint,
+      start: [2, 0] as SketchPoint,
+      end: [0, 2] as SketchPoint,
+      sweepDirection: "counterClockwise" as const,
+    };
     const grownArc = createOffsetContribution({
-      definition: arcDefinition,
-      entityIds: ["sketch_entity_arc"] as SketchEntityId[],
+      curve: arc,
       distance: 1,
       side: "left",
       sequence: 10,
@@ -595,8 +578,7 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
     );
 
     const collapsedArc = createOffsetContribution({
-      definition: arcDefinition,
-      entityIds: ["sketch_entity_arc"] as SketchEntityId[],
+      curve: arc,
       distance: 2,
       side: "right",
       sequence: 10,
@@ -607,23 +589,25 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
       "Arc offset collapsing the radius should be rejected.",
     ).toBeFalsy();
 
-    const splineDefinition = makeDefinition(
-      [
-        makePoint("sketch_point_s0", "S0", [0, 0]),
-        makePoint("sketch_point_s1", "S1", [1, 2]),
-        makePoint("sketch_point_s2", "S2", [2, 0]),
-      ],
-      [
-        makeSpline("sketch_entity_spline", "Spline", [
-          "sketch_point_s0",
-          "sketch_point_s1",
-          "sketch_point_s2",
-        ]),
-      ],
-    );
+    const splineEntity = makeSpline("sketch_entity_spline", "Spline", [
+      "sketch_point_s0",
+      "sketch_point_s1",
+      "sketch_point_s2",
+    ]);
+    if (splineEntity.kind !== "spline") throw new Error("spline");
     const splineOffset = createOffsetContribution({
-      definition: splineDefinition,
-      entityIds: ["sketch_entity_spline"] as SketchEntityId[],
+      curve: {
+        kind: "spline",
+        isConstruction: false,
+        style: undefined,
+        points: sampleSplineGeometry(
+          reconstructSplineAggregate(splineEntity, {
+            sketch_point_s0: [0, 0],
+            sketch_point_s1: [1, 2],
+            sketch_point_s2: [2, 0],
+          }),
+        ),
+      },
       distance: 1,
       side: "left",
       sequence: 10,
@@ -642,95 +626,6 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
     expect(
       Math.max(...offsetPoints.map((point) => point.position[1])),
     ).toBeGreaterThan(2);
-  }
-
-  function testOffsetCharacterizationChains() {
-    const openChain = makeDefinition(
-      [
-        makePoint("sketch_point_a", "A", [0, 0]),
-        makePoint("sketch_point_b", "B", [4, 0]),
-        makePoint("sketch_point_c", "C", [4, 4]),
-      ],
-      [
-        makeLine("sketch_entity_ab", "AB", "sketch_point_a", "sketch_point_b"),
-        makeLine("sketch_entity_bc", "BC", "sketch_point_b", "sketch_point_c"),
-      ],
-    );
-    const openOffset = createOffsetContribution({
-      definition: openChain,
-      entityIds: ["sketch_entity_ab", "sketch_entity_bc"] as SketchEntityId[],
-      distance: 1,
-      side: "left",
-      sequence: 10,
-      factories: createFactories(),
-    });
-    expect(openOffset.valid, "Open chain offset should be valid.").toBeTruthy();
-    expect(
-      openOffset.contribution?.entities.length,
-      "Open two-line chain offset should keep two line entities.",
-    ).toBe(2);
-    expectPointCloseTo(
-      openOffset.contribution?.points[0]?.position,
-      [0, 1],
-      "Open chain offset start",
-    );
-    expectPointCloseTo(
-      openOffset.contribution?.points[1]?.position,
-      [3, 1],
-      "Open chain offset corner",
-    );
-    expectPointCloseTo(
-      openOffset.contribution?.points[2]?.position,
-      [3, 4],
-      "Open chain offset end",
-    );
-
-    const closedChain = makeDefinition(
-      [
-        makePoint("sketch_point_a", "A", [0, 0]),
-        makePoint("sketch_point_b", "B", [4, 0]),
-        makePoint("sketch_point_c", "C", [4, 4]),
-        makePoint("sketch_point_d", "D", [0, 4]),
-      ],
-      [
-        makeLine("sketch_entity_ab", "AB", "sketch_point_a", "sketch_point_b"),
-        makeLine("sketch_entity_bc", "BC", "sketch_point_b", "sketch_point_c"),
-        makeLine("sketch_entity_cd", "CD", "sketch_point_c", "sketch_point_d"),
-        makeLine("sketch_entity_da", "DA", "sketch_point_d", "sketch_point_a"),
-      ],
-    );
-    const closedOffset = createOffsetContribution({
-      definition: closedChain,
-      entityIds: [
-        "sketch_entity_ab",
-        "sketch_entity_bc",
-        "sketch_entity_cd",
-        "sketch_entity_da",
-      ] as SketchEntityId[],
-      distance: 1,
-      side: "left",
-      sequence: 10,
-      factories: createFactories(),
-    });
-    expect(
-      closedOffset.valid,
-      "Closed loop offset should be valid.",
-    ).toBeTruthy();
-    expect(
-      closedOffset.contribution?.entities.length,
-      "Closed square loop offset should keep four line entities.",
-    ).toBe(4);
-    const closedPositions = closedOffset.contribution?.points.map(
-      (point) => point.position,
-    );
-    expect(
-      closedPositions?.some(
-        (position) =>
-          Math.abs(position[0] - -1) < 1e-6 &&
-          Math.abs(position[1] - -1) < 1e-6,
-      ),
-      "Left offset of a counter-clockwise loop should expand outward.",
-    ).toBeTruthy();
   }
 
   function testSlotOffsetCharacterization() {
@@ -1021,7 +916,6 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
   testSlotCreatesDurableGeometryForSupportedReferences();
   testSlotCreatesProfileOffsetsForClosedLineLoops();
   testOffsetCharacterizationSingleCurves();
-  testOffsetCharacterizationChains();
   testSlotOffsetCharacterization();
   testOffsetDerivationValidationAndCommitPreparation();
   testDerivedSplineFactoryPreservesCompleteAggregate();
