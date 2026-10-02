@@ -4,7 +4,7 @@
 // kernel-free query and certifier; plus the persistence boundary
 // (normalization, runtime schema), the solver's shell residual / U-G2 and
 // the authored-action history.
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import type { AuthoredActionState } from "@/contracts/modeling/authored-actions";
 import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
@@ -44,6 +44,7 @@ import type {
 } from "@/contracts/sketch/schema";
 import {
   DERIVED_SHELL_REQUIREMENT_UNSUPPORTED,
+  OFFSET_REQUIREMENT_BLOCKED,
   evaluateSketchScalarConstraintForTest,
   getSketchSolveInitialValuesForTest,
   solveSketchDefinitionCore,
@@ -59,15 +60,18 @@ import {
 } from "@/contracts/solver/schema";
 import {
   acceptSketchDraw,
+  beginSketchGeometryDrag,
   beginSketchTool,
   completeSketchOffsetPreviewPublication,
   createNewSketchSessionFromSupport,
   deleteSelectedSketchGeometry,
+  finishSketchGeometryDrag,
   getSketchSessionDerivedValidity,
   patchSketchEditToolValue,
   publishSketchLiveRegions,
   selectSketchEditToolTarget,
   startSketchDraw,
+  updateSketchGeometryDrag,
   updateSketchPointer,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
@@ -93,10 +97,14 @@ import {
 } from "@/domain/modeling/occ/features";
 import { createOccTopologyProvenanceIndex } from "@/domain/modeling/occ/topology-stage";
 import { trackNewSolidBody } from "@/domain/modeling/occ/topology";
-import { NON_ACCEPTED_OFFSET_FEATURE_INPUT_CODE } from "@/domain/modeling/sketch-feature-input";
+import {
+  NON_ACCEPTED_OFFSET_FEATURE_INPUT_CODE,
+  nonAcceptedOffsetFeatureInputMessage,
+} from "@/domain/modeling/sketch-feature-input";
 import {
   createSketchDerivedTransformContribution,
   createSketchFilletMutation,
+  createSketchOffsetDerivationContribution,
   offsetSideForSketchPoint,
 } from "@/domain/sketch-editing/operations";
 import {
@@ -136,6 +144,73 @@ import {
   lineOracle,
   type OracleCurve,
 } from "@/contracts/sketch/region-extraction.fixtures";
+
+/**
+ * T08b-g7b fabricated triggers (spec-only): when a toggle names a
+ * relationship, its solve frame fails as a plan/adoption failure, or its
+ * frame derivative's pullback is unavailable (a singular joint). Both
+ * toggles are off by default, so every other row runs the real module.
+ */
+const fabricated = vi.hoisted(() => ({
+  planFailure: null as string | null,
+  singularPullback: null as string | null,
+}));
+vi.mock(
+  "@/contracts/sketch/offset-derivation-frame",
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import("@/contracts/sketch/offset-derivation-frame")
+      >();
+    return {
+      ...actual,
+      solveOffsetFrame: (
+        ...args: Parameters<typeof actual.solveOffsetFrame>
+      ): ReturnType<typeof actual.solveOffsetFrame> => {
+        const relationship = args[0].relationship;
+        if (fabricated.planFailure !== relationship.derivationId)
+          return actual.solveOffsetFrame(...args);
+        const seedEntityId = relationship.seedEntityIds[0]!;
+        const failure = {
+          ok: false as const,
+          code: "derived-offset-knot-incidence-unproven" as const,
+          message:
+            "Declared vertex 0 is not buildable in the solve frame: fabricated adoption failure (spec-only).",
+          seedEntityId,
+        };
+        return {
+          ok: false,
+          derivationId: relationship.derivationId,
+          failure,
+          diagnostic: {
+            code: failure.code,
+            severity: "error",
+            message: `Offset relationship ${relationship.derivationId}: ${failure.message}`,
+            target: { kind: "entity", entityId: seedEntityId },
+          },
+        } as ReturnType<typeof actual.solveOffsetFrame>;
+      },
+      prepareOffsetFrameDerivatives: (
+        ...args: Parameters<typeof actual.prepareOffsetFrameDerivatives>
+      ) => {
+        const derivatives = actual.prepareOffsetFrameDerivatives(...args);
+        if (fabricated.singularPullback !== args[0].relationship.derivationId)
+          return derivatives;
+        return {
+          sourceDofs: derivatives.sourceDofs,
+          jvp: (variations: Parameters<typeof derivatives.jvp>[0]) =>
+            derivatives.jvp(variations),
+          pullback: () => ({
+            ok: false as const,
+            code: "derived-offset-derivative-unavailable" as const,
+            message: "fabricated singular joint (spec-only)",
+            seedEntityId: null,
+          }),
+        };
+      },
+    };
+  },
+);
 
 const XY = {
   kind: "construction",
@@ -461,11 +536,13 @@ describe("T08b-g5a live offset cutover", () => {
       definition: edited,
       modelingTolerance: 1e-3,
     });
+    // [TECH] G16′: the failure is scoped to the relationship.
+    expect(evaluation.diagnostics).toEqual([]);
     expect(
-      evaluation.diagnostics.find(
-        (diagnostic) =>
-          diagnostic.code === OFFSET_DIAGNOSTIC_CODES.topologyChanged,
-      ),
+      evaluation.offsetFailures.find(
+        (failure) =>
+          failure.diagnostic.code === OFFSET_DIAGNOSTIC_CODES.topologyChanged,
+      )?.diagnostic,
       "A source-span change is a targeted topologyChanged diagnostic.",
     ).toMatchObject({
       severity: "error",
@@ -1115,8 +1192,31 @@ describe("T08b-g5a live offset cutover", () => {
       ),
     };
     const first = solve(invalid);
-    const errorCodes = first.solvedSnapshot.diagnostics.filter(
-      (diagnostic) => diagnostic.severity === "error",
+    // [TECH] G16′ (T08b-g7b): the frame failure is relationship-scoped. The
+    // sketch stays solved, its snapshot carries no error, and the
+    // publication round reports the relationship's diagnostic.
+    expect(first.status.solveState).toBe("solved");
+    expect(
+      first.solvedSnapshot.diagnostics.filter(
+        (diagnostic) => diagnostic.severity === "error",
+      ),
+    ).toEqual([]);
+    const publish = (
+      definition: SketchDefinition,
+      snapshot: SolvedSketchSnapshot,
+    ) =>
+      publishSketchOffsets({
+        definition,
+        solvedSnapshot: snapshot,
+        modelingTolerance: 1e-3,
+        capabilities: capabilities(),
+      });
+    const errorCodes = publish(invalid, first.solvedSnapshot).flatMap(
+      (publication) =>
+        publication.status === "failed" &&
+        publication.diagnostic?.severity === "error"
+          ? [publication.diagnostic]
+          : [],
     );
     expect(errorCodes.length, "The invalid edit is diagnosed.").toBeGreaterThan(
       0,
@@ -1137,6 +1237,10 @@ describe("T08b-g5a live offset cutover", () => {
       second.solvedSnapshot.diagnostics,
       "Reopening the saved invalid document yields the same diagnostics (C8, T05).",
     ).toEqual(first.solvedSnapshot.diagnostics);
+    expect(
+      publish(reopened, second.solvedSnapshot),
+      "Reopening yields the same relationship-scoped diagnostics (G16′).",
+    ).toEqual(publish(invalid, first.solvedSnapshot));
     expect(validateSketchDefinition(reopened).success).toBe(true);
   });
 
@@ -1495,8 +1599,15 @@ async function expectRetainedBrokenSeed(
       (entity) => entity.kind === "derivedPiecewiseCubic",
     ),
   ).toBe(true);
+  // [TECH] G16′ (T08b-g7b): the relationship's failure is scoped to it and
+  // reported by the live publication round; the sketch stays solved.
+  expect(broken.liveSolve!.solvedSnapshot.status.solveState).toBe("solved");
   expect(
-    diagnosed(getSketchSessionDerivedValidity(broken).diagnostics),
+    diagnosed(
+      getSketchSessionDerivedValidity(
+        publishSketchLiveRegions(broken, [], [], livePublications(broken)),
+      ).diagnostics,
+    ),
     "The session reports the source-linked diagnostic.",
   ).toBe(true);
   expect(
@@ -1528,6 +1639,11 @@ async function expectRetainedBrokenSeed(
     solve(reopened).solvedSnapshot.diagnostics,
     "Reopening gives equal diagnostics (C8, T05).",
   ).toEqual(solve(broken.definition).solvedSnapshot.diagnostics);
+  const reopenedRound = await commitToMockKernel(reopened);
+  expect(
+    reopenedRound.record?.derivedValidity.diagnostics,
+    "Reopening and saving again gives equal relationship-scoped diagnostics (G16′).",
+  ).toEqual(record.derivedValidity.diagnostics);
 
   const identity = {
     actorId: "actor-g5a",
@@ -4697,5 +4813,1433 @@ describe("T08b-g7-F Fillet relationships through the session (issue 06)", () => 
     expect(
       restored.constraints.some((constraint) => constraint.kind === "tangent"),
     ).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T08b-g7b (logic lane). Seam: native session authoring → live solve →
+// the real derivation boundary (publish + regions) and the mock-kernel
+// commit. [TECH] G16′ (U-G9): every solve-frame offset failure is
+// relationship-scoped: the sketch stays solved (its status reflects only its
+// own requirements), the relationship gets one source-linked diagnostic, its
+// outputs are non-accepted and held, and unrelated regions are derived.
+// ---------------------------------------------------------------------------
+
+/** A unit rectangle far from every offset row (its region is "unrelated"). */
+function withUnrelatedRectangle(session: SketchSessionState) {
+  const before = new Set(session.definition.entityIds);
+  const drawn = acceptSketchDraw(
+    startSketchDraw(beginSketchTool(session, "rectangle"), [10, 10]),
+    [11, 11],
+  );
+  return {
+    session: drawn,
+    lines: drawn.definition.entities
+      .filter((entity) => !before.has(entity.entityId))
+      .map((entity) => entity.entityId),
+  };
+}
+
+/** The Offset tool's relationship authored on `seeds` at signed `distance` (one action). */
+function withOffsetRelationship(
+  definition: SketchDefinition,
+  seeds: readonly SketchEntityId[],
+  distance: number,
+  sequence = 700,
+): SketchDefinition {
+  const result = createSketchOffsetDerivationContribution({
+    definition,
+    entityIds: seeds,
+    distance: Math.abs(distance),
+    side: distance >= 0 ? "left" : "right",
+    sequence,
+    factories: createSessionCommitFactories(sequence, "sketch_g7b" as never),
+    modelingTolerance: 1e-3,
+  });
+  if (!result.valid || !result.contribution)
+    throw new Error(`offset: ${result.message}`);
+  const contribution = result.contribution;
+  const points = [...definition.points, ...contribution.points];
+  const entities = [...definition.entities, ...contribution.entities];
+  const relationships = [
+    ...(definition.derivedRelationships ?? []),
+    ...(contribution.derivedRelationships ?? []),
+  ];
+  return {
+    ...definition,
+    pointIds: points.map((point) => point.pointId),
+    points,
+    entityIds: entities.map((entity) => entity.entityId),
+    entities,
+    derivedRelationships: relationships,
+  };
+}
+
+/** An authored distance edit of one offset relationship (the Offset value field). */
+function withOffsetDistance(
+  definition: SketchDefinition,
+  derivationId: string,
+  distance: number,
+): SketchDefinition {
+  return {
+    ...definition,
+    derivedRelationships: definition.derivedRelationships!.map(
+      (relationship) =>
+        relationship.derivationId === derivationId &&
+        relationship.kind === "offset"
+          ? { ...relationship, distance }
+          : relationship,
+    ),
+  };
+}
+
+/** Rectangle (0,0)–(2,1) with one native Fillet r = 0.2 (the session's Fillet tool), plus the unrelated rectangle. */
+function nativeFilletedRectangle() {
+  const session = acceptSketchDraw(
+    startSketchDraw(beginSketchTool(newSession(), "rectangle"), [0, 0]),
+    [2, 1],
+  );
+  const lines = session.definition.entities
+    .filter((entity) => entity.kind === "lineSegment")
+    .map((entity) => entity.entityId);
+  const targetOf = (entityId: SketchEntityId) =>
+    session.definition.entities.find((entity) => entity.entityId === entityId)!
+      .target;
+  let filleted = beginSketchTool(session, "sketchFillet");
+  filleted = selectSketchEditToolTarget(filleted, targetOf(lines[0]!));
+  filleted = selectSketchEditToolTarget(filleted, targetOf(lines[1]!));
+  filleted = patchSketchEditToolValue(filleted, { value: 0.2 });
+  filleted = patchSketchEditToolValue(filleted, {
+    intent: "commitSketchEditOperator",
+  });
+  const arc = filleted.definition.entities.find(
+    (entity) => entity.kind === "arc",
+  );
+  if (!arc) throw new Error("no fillet arc");
+  const seeds = filleted.definition.entities
+    .filter((entity) => entity.kind === "lineSegment" || entity.kind === "arc")
+    .map((entity) => entity.entityId);
+  return {
+    ...withUnrelatedRectangle(filleted),
+    seeds,
+    line: lines[0]!,
+    arc: arc.entityId,
+  };
+}
+
+/** A native spline (3 fit points) closed by a native line snapped at both ends, plus the unrelated rectangle. */
+function nativeSplineLoop(
+  fit: readonly (readonly [number, number])[],
+  closing: readonly [readonly [number, number], readonly [number, number]],
+) {
+  const loop = drawLine(drawSpline(newSession(), fit), closing[0], closing[1]);
+  const seeds = loop.definition.entities
+    .filter((entity) => entity.kind !== "point")
+    .map((entity) => entity.entityId);
+  return { ...withUnrelatedRectangle(loop), seeds };
+}
+
+const offsetIdsOf = (definition: SketchDefinition) =>
+  (definition.derivedRelationships ?? []).flatMap((relationship) =>
+    relationship.kind === "offset" ? [relationship.derivationId] : [],
+  );
+
+/** Every output entity of one offset relationship. */
+function outputEntityIds(definition: SketchDefinition, derivationId: string) {
+  const relationship = definition.derivedRelationships!.find(
+    (candidate) => candidate.derivationId === derivationId,
+  );
+  if (relationship?.kind !== "offset") throw new Error("no offset");
+  return [
+    ...relationship.outputs,
+    ...relationship.jointOutputs,
+    ...relationship.piecewiseCubicOutputs,
+  ].map((output) => output.outputEntityId);
+}
+
+/** Every driven output point of one offset relationship. */
+function outputPointIds(definition: SketchDefinition, derivationId: string) {
+  const relationship = definition.derivedRelationships!.find(
+    (candidate) => candidate.derivationId === derivationId,
+  );
+  if (relationship?.kind !== "offset") throw new Error("no offset");
+  return [
+    ...relationship.outputs.flatMap((output) => output.outputPointIds),
+    ...relationship.jointOutputs.flatMap((output) => [
+      output.centerPointId,
+      output.startPointId,
+      output.endPointId,
+    ]),
+    ...relationship.piecewiseCubicOutputs.flatMap((output) => [
+      output.startPointId,
+      output.endPointId,
+    ]),
+  ];
+}
+
+const positionsOf = (snapshot: SolvedSketchSnapshot) =>
+  new Map(
+    snapshot.solvedPoints.map((point) => [point.pointId, point.solvedPosition]),
+  );
+
+/** Whether a derived region is bounded exactly by the unrelated rectangle's lines. */
+const isUnrelatedRegion =
+  (lines: readonly SketchEntityId[]) => (region: RegionRecord) => {
+    const sources = new Set(
+      region.loops.flatMap((loop) =>
+        loop.segments.map((segment) =>
+          segment.branch.source.kind === "entity"
+            ? segment.branch.source.entityId
+            : null,
+        ),
+      ),
+    );
+    return (
+      region.loops.length === 1 &&
+      sources.size === lines.length &&
+      lines.every((line) => sources.has(line))
+    );
+  };
+
+/**
+ * The U-G9 row contract on one settled live round: the sketch is solved,
+ * the failing relationship has exactly one source-linked failed diagnostic
+ * with `code` (publication and session validity; none in the snapshot), its
+ * outputs are non-accepted, every other relationship certifies, and the
+ * unrelated rectangle's region is derived.
+ */
+async function expectScopedFailure(input: {
+  readonly session: SketchSessionState;
+  readonly failing: string;
+  readonly code: string;
+  readonly seed: SketchEntityId;
+  readonly unrelated: readonly SketchEntityId[];
+}) {
+  const { session, failing, code, seed, unrelated } = input;
+  const live = session.liveSolve!;
+  expect(live.solvedSnapshot.status, "the sketch stays solved").toEqual({
+    solveState: "solved",
+    constraintState: expect.any(String),
+  });
+  expect(live.accepted).toBe(true);
+  expect(
+    live.solvedSnapshot.diagnostics.filter(
+      (diagnostic) => diagnostic.severity === "error",
+    ),
+    "an accepted solve never carries the relationship's failure (G16)",
+  ).toEqual([]);
+  const { session: settled, response } = await liveRound(session);
+  const failed = response.offsetPublications.find(
+    (publication) => publication.derivationId === failing,
+  );
+  expect(
+    failed?.status,
+    `${failing}: ${failed?.diagnostic?.message ?? "no publication"}`,
+  ).toBe("failed");
+  expect(failed!.diagnostic).toMatchObject({
+    code,
+    severity: "error",
+    target: { kind: "entity", entityId: seed },
+  });
+  expect(
+    getSketchSessionDerivedValidity(settled).diagnostics.filter(
+      (diagnostic) =>
+        diagnostic.code === code && diagnostic.message.includes(failing),
+    ),
+    "the relationship has exactly one diagnostic",
+  ).toHaveLength(1);
+  const snapshot = settled.liveSolve!.solvedSnapshot;
+  expect(snapshot.certifiedOffsetDerivationIds ?? []).not.toContain(failing);
+  for (const entityId of outputEntityIds(settled.definition, failing))
+    expect(
+      isAcceptedOffsetOutput(settled.definition, snapshot, entityId),
+      `output ${entityId} is non-accepted`,
+    ).toBe(false);
+  for (const other of offsetIdsOf(settled.definition).filter(
+    (id) => id !== failing,
+  ))
+    expect(
+      response.offsetPublications.find(
+        (publication) => publication.derivationId === other,
+      )?.status,
+      `the other relationship ${other} certifies`,
+    ).toBe("certified");
+  expect(
+    response.regions.filter(isUnrelatedRegion(unrelated)),
+    "the unrelated rectangle's region is derived",
+  ).toHaveLength(1);
+  return { settled, response };
+}
+
+describe("T08b-g7b relationship-scoped solve-frame failures ([TECH] G16′, U-G9)", () => {
+  test("arc-collapse (native, the T08b-g7-F inward d = 0.15, Δ = 0.2 cell): rect + 1 native fillet, the edit shrinks the fillet below the offset; the sketch stays solved, the offset reports arc-collapse, the outputs are held and non-accepted, the unrelated region is derived", async () => {
+    const built = nativeFilletedRectangle();
+    const authored = withOffsetRelationship(
+      built.session.definition,
+      built.seeds,
+      0.15,
+    );
+    const [derivationId] = offsetIdsOf(authored);
+    const base = rebuildSessionForDefinition(built.session, {
+      definition: authored,
+    });
+    const baseRound = await liveRound(base);
+    expect(
+      baseRound.response.offsetPublications.map((item) => item.status),
+      "premise: the unedited offset certifies",
+    ).toEqual(["certified"]);
+    const edited = rebuildSessionForDefinition(baseRound.session, {
+      definition: withLineLength(baseRound.session.definition, built.line, 0.2),
+    });
+    const before = positionsOf(baseRound.session.liveSolve!.solvedSnapshot);
+    const after = positionsOf(edited.liveSolve!.solvedSnapshot);
+    for (const pointId of outputPointIds(authored, derivationId!))
+      expect(after.get(pointId), `${pointId} is held`).toEqual(
+        before.get(pointId),
+      );
+    await expectScopedFailure({
+      session: edited,
+      failing: derivationId!,
+      code: OFFSET_DIAGNOSTIC_CODES.arcCollapse,
+      seed: built.arc,
+      unrelated: built.lines,
+    });
+  }, 120_000);
+
+  test("arc-collapse at a large inward d (native): an authored distance edit 0.1 → 0.5 on the rect + 1 native fillet; Finish, save, reopen and Undo give equivalent diagnostics", async () => {
+    const built = nativeFilletedRectangle();
+    const authored = withOffsetRelationship(
+      built.session.definition,
+      built.seeds,
+      0.1,
+    );
+    const [derivationId] = offsetIdsOf(authored);
+    const broken = withOffsetDistance(authored, derivationId!, 0.5);
+    await expectScopedFailure({
+      session: rebuildSessionForDefinition(built.session, {
+        definition: broken,
+      }),
+      failing: derivationId!,
+      code: OFFSET_DIAGNOSTIC_CODES.arcCollapse,
+      seed: built.arc,
+      unrelated: built.lines,
+    });
+
+    const production = () =>
+      new SketchConstraintSolverAdapter({
+        revisionId: null,
+        neutralCurveQueries:
+          createCertifiedNeutralCurveQueryCapabilityForTest(),
+      });
+    const { response, record } = await commitToMockKernel(broken, production());
+    expect(response.revisionState.kind, "Finish is accepted").toBe("accepted");
+    if (!record) throw new Error("no saved record");
+    expect(validateSketchRecord(record).success).toBe(true);
+    expect(record.solvedSnapshot.status.solveState).toBe("solved");
+    expect(
+      record.derivedValidity.state,
+      "a relationship-scoped failure never changes the sketch's validity (G5/G16)",
+    ).toBe("current");
+    expect(
+      record.derivedValidity.diagnostics
+        .filter((diagnostic) => diagnostic.severity === "error")
+        .map((diagnostic) => diagnostic.code),
+      "the saved record carries the relationship's one diagnostic",
+    ).toEqual([OFFSET_DIAGNOSTIC_CODES.arcCollapse]);
+    expect(
+      record.regions.filter(isUnrelatedRegion(built.lines)),
+      "the unrelated region is saved",
+    ).toHaveLength(1);
+    const reopened = normalizeSketchDefinition(
+      JSON.parse(JSON.stringify(record.definition)),
+    );
+    const again = await commitToMockKernel(reopened, production());
+    expect(
+      again.record?.derivedValidity,
+      "save and reopen give equivalent diagnostics",
+    ).toEqual(record.derivedValidity);
+
+    const identity: Parameters<AuthoredActionHistory["commit"]>[0] = {
+      actorId: "actor-g7b",
+      documentId: "doc-g7b" as never,
+      context: { kind: "sketch", sketchId: "sketch-g7b" as never },
+    };
+    const state = (definition: SketchDefinition): AuthoredActionState =>
+      ({
+        documentId: "doc-g7b",
+        context: { kind: "sketch", sketchId: "sketch-g7b" },
+        data: {
+          sketchId: "sketch-g7b",
+          label: "Sketch",
+          plane: built.session.plane,
+          definition,
+        },
+      }) as unknown as AuthoredActionState;
+    const history = new AuthoredActionHistory();
+    const start = state(authored);
+    const applied = history.commit(
+      identity,
+      start,
+      state(broken),
+      "Offset distance",
+      start,
+    );
+    if (applied.status !== "applied") throw new Error("not applied");
+    const undone = history.undo(identity, applied.state);
+    if (undone.status !== "applied") throw new Error("not undone");
+    const restored = (undone.state.data as { definition: SketchDefinition })
+      .definition;
+    expect(
+      (await commitToMockKernel(restored, production())).record?.derivedValidity
+        .diagnostics,
+      "Undo restores the certifying offset: no diagnostic",
+    ).toEqual([]);
+    const redone = history.redo(identity, undone.state);
+    if (redone.status !== "applied") throw new Error("not redone");
+    expect(
+      (
+        await commitToMockKernel(
+          (redone.state.data as { definition: SketchDefinition }).definition,
+          production(),
+        )
+      ).record?.derivedValidity,
+      "Redo gives the same relationship-scoped diagnostics again",
+    ).toEqual(record.derivedValidity);
+  }, 180_000);
+
+  test("owner spline-fit-failure on a cusp (native SL lean, inward d = 0.01 → 0.1)", async () => {
+    const built = nativeSplineLoop(
+      [
+        [0, 0],
+        [-0.4, 0.9],
+        [2, 0],
+      ],
+      [
+        [2, 0],
+        [0, 0],
+      ],
+    );
+    const authored = withOffsetRelationship(
+      built.session.definition,
+      built.seeds,
+      -0.01,
+    );
+    const [derivationId] = offsetIdsOf(authored);
+    await expectScopedFailure({
+      session: rebuildSessionForDefinition(built.session, {
+        definition: withOffsetDistance(authored, derivationId!, -0.1),
+      }),
+      failing: derivationId!,
+      code: OFFSET_DIAGNOSTIC_CODES.splineFitFailure,
+      seed: built.seeds[0]!,
+      unrelated: built.lines,
+    });
+  }, 120_000);
+
+  test("Newton non-convergence (native SL h0.4 5pt row, inward d = 0.01 → 0.2: no converged transverse trim)", async () => {
+    const spline = drawSpline(newSession(), [
+      [0, 0],
+      [0.5, 0.3],
+      [1, 0.4],
+    ]);
+    const opened = drawLine(spline, [2, 0], [0, 0]);
+    const seeds = opened.definition.entities
+      .filter((entity) => entity.kind !== "point")
+      .map((entity) => entity.entityId);
+    const built = withUnrelatedRectangle(opened);
+    const authored = withOffsetRelationship(
+      built.session.definition,
+      seeds,
+      -0.01,
+    );
+    const [derivationId] = offsetIdsOf(authored);
+    await expectScopedFailure({
+      session: rebuildSessionForDefinition(built.session, {
+        definition: withOffsetDistance(authored, derivationId!, -0.2),
+      }),
+      failing: derivationId!,
+      code: OFFSET_DIAGNOSTIC_CODES.jointUnsatisfied,
+      seed: expect.any(String) as never,
+      unrelated: built.lines,
+    });
+  }, 120_000);
+
+  test("topology change after a fit-point insert (native spline offset) and unsupported seed (the seed deleted): each scoped to its relationship", async () => {
+    const { committed, seed } = offsetSplineSession();
+    const built = withUnrelatedRectangle(committed);
+    const [derivationId] = offsetIdsOf(built.session.definition);
+    await expectScopedFailure({
+      session: rebuildSessionForDefinition(built.session, {
+        definition: withInsertedSeedOccurrence(built.session.definition, seed),
+      }),
+      failing: derivationId!,
+      code: OFFSET_DIAGNOSTIC_CODES.topologyChanged,
+      seed,
+      unrelated: built.lines,
+    });
+    const seedEntity = built.session.definition.entities.find(
+      (entity) => entity.entityId === seed,
+    )!;
+    await expectScopedFailure({
+      session: deleteSelectedSketchGeometry(built.session, [seedEntity.target]),
+      failing: derivationId!,
+      code: OFFSET_DIAGNOSTIC_CODES.unsupportedSeed,
+      seed,
+      unrelated: built.lines,
+    });
+  }, 120_000);
+
+  test("two offsets in one sketch, one failing (an edit to 0.5 collapses it): the other certifies and the unrelated region is derived", async () => {
+    const built = nativeFilletedRectangle();
+    const first = withOffsetRelationship(
+      built.session.definition,
+      built.seeds,
+      0.1,
+      700,
+    );
+    const both = withOffsetRelationship(first, built.seeds, 0.05, 710);
+    const [healthy, failing] = offsetIdsOf(both);
+    await expectScopedFailure({
+      session: rebuildSessionForDefinition(built.session, {
+        definition: withOffsetDistance(both, failing!, 0.5),
+      }),
+      failing: failing!,
+      code: OFFSET_DIAGNOSTIC_CODES.arcCollapse,
+      seed: built.arc,
+      unrelated: built.lines,
+    });
+    expect(healthy).toBeDefined();
+  }, 180_000);
+
+  test("a requirement on a failed offset's output is blocked ([TECH] G16″), never silently satisfied or dropped: status blocked with a targeted diagnostic, the sketch stays solved and the unrelated region is derived, the held output does not drive the rest; when the offset recovers the requirement solves again; Finish, save and reopen are equal", async () => {
+    const built = nativeFilletedRectangle();
+    const authored = withOffsetRelationship(
+      built.session.definition,
+      built.seeds,
+      0.1,
+    );
+    const [derivationId] = offsetIdsOf(authored);
+    const healthy = rebuildSessionForDefinition(built.session, {
+      definition: authored,
+    });
+    const outputPoint = outputPointIds(authored, derivationId!)[0]!;
+    const held = positionsOf(healthy.liveSolve!.solvedSnapshot).get(
+      outputPoint,
+    )!;
+    // An unrelated rectangle corner is pinned to the offset output point
+    // (a distance dimension of 0 between them would be the same seam).
+    const corner = built.session.definition.points.find(
+      (point) =>
+        point.position[0] === 10 &&
+        point.position[1] === 10 &&
+        built.session.definition.entities.some(
+          (entity) =>
+            entity.kind === "lineSegment" &&
+            built.lines.includes(entity.entityId) &&
+            (entity.startPointId === point.pointId ||
+              entity.endPointId === point.pointId),
+        ),
+    )!;
+    const requirement = {
+      dimensionId: "dimension_g7b_on_output",
+      kind: "distance",
+      label: "Output to unrelated corner",
+      pointIds: [outputPoint, corner.pointId],
+      axis: "horizontal",
+      value: 10 - held[0],
+    } as unknown as SketchDefinition["dimensions"][number];
+    const withRequirement = (definition: SketchDefinition) => ({
+      ...definition,
+      dimensionIds: [...definition.dimensionIds, requirement.dimensionId],
+      dimensions: [...definition.dimensions, requirement],
+    });
+    const control = rebuildSessionForDefinition(built.session, {
+      definition: withRequirement(authored),
+    });
+    expect(
+      control.liveSolve!.solvedSnapshot.dimensionStatuses.find(
+        (status) => status.dimensionId === requirement.dimensionId,
+      )?.status,
+      "premise: without a failure the requirement is ordinary and satisfied",
+    ).toBe("driving");
+    expect(control.liveSolve!.solvedSnapshot.status.solveState).toBe("solved");
+
+    const brokenDefinition = withRequirement(
+      withOffsetDistance(authored, derivationId!, 0.5),
+    );
+    const broken = rebuildSessionForDefinition(built.session, {
+      definition: brokenDefinition,
+    });
+    const snapshot = broken.liveSolve!.solvedSnapshot;
+    expect(
+      snapshot.dimensionStatuses.find(
+        (status) => status.dimensionId === requirement.dimensionId,
+      )?.status,
+      "the requirement is reported blocked",
+    ).toBe("blocked");
+    expect(
+      snapshot.diagnostics.filter(
+        (diagnostic) => diagnostic.code === OFFSET_REQUIREMENT_BLOCKED,
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        severity: "warning",
+        target: { kind: "dimension", dimensionId: requirement.dimensionId },
+        message: expect.stringContaining(derivationId!),
+      }),
+    ]);
+    expect(
+      snapshot.status.solveState,
+      "a blocked requirement does not count against the sketch's status",
+    ).toBe("solved");
+    const positions = positionsOf(snapshot);
+    expect(positions.get(outputPoint), "the output is held").toEqual(held);
+    expect(
+      positions.get(corner.pointId),
+      "the held output does not drive the unrelated corner",
+    ).toEqual([10, 10]);
+    // The relationship's own failure, the non-accepted outputs and the
+    // unrelated region: the full U-G9 contract.
+    await expectScopedFailure({
+      session: broken,
+      failing: derivationId!,
+      code: OFFSET_DIAGNOSTIC_CODES.arcCollapse,
+      seed: built.arc,
+      unrelated: built.lines,
+    });
+
+    const recovered = rebuildSessionForDefinition(broken, {
+      definition: withRequirement(authored),
+    });
+    expect(
+      recovered.liveSolve!.solvedSnapshot.dimensionStatuses.find(
+        (status) => status.dimensionId === requirement.dimensionId,
+      )?.status,
+      "when the offset recovers, the requirement solves again",
+    ).toBe("driving");
+    expect(
+      recovered.liveSolve!.solvedSnapshot.diagnostics.filter(
+        (diagnostic) => diagnostic.code === OFFSET_REQUIREMENT_BLOCKED,
+      ),
+    ).toEqual([]);
+    expect(
+      (await liveRound(recovered)).response.offsetPublications.map(
+        (publication) => publication.status,
+      ),
+    ).toEqual(["certified"]);
+
+    const production = () =>
+      new SketchConstraintSolverAdapter({
+        revisionId: null,
+        neutralCurveQueries:
+          createCertifiedNeutralCurveQueryCapabilityForTest(),
+      });
+    const { response, record } = await commitToMockKernel(
+      brokenDefinition,
+      production(),
+    );
+    expect(response.revisionState.kind).toBe("accepted");
+    if (!record) throw new Error("no saved record");
+    expect(validateSketchRecord(record).success).toBe(true);
+    expect(record.solvedSnapshot.status.solveState).toBe("solved");
+    expect(
+      record.solvedSnapshot.dimensionStatuses.find(
+        (status) => status.dimensionId === requirement.dimensionId,
+      )?.status,
+      "the saved record keeps the blocked status",
+    ).toBe("blocked");
+    expect(record.derivedValidity.state).toBe("current");
+    expect(record.regions.filter(isUnrelatedRegion(built.lines))).toHaveLength(
+      1,
+    );
+    expect(
+      normalizeSolvedSketchSnapshot(
+        JSON.parse(JSON.stringify(record.solvedSnapshot)),
+      ),
+      "a persisted blocked status round-trips",
+    ).toEqual(record.solvedSnapshot);
+    const reopened = normalizeSketchDefinition(
+      JSON.parse(JSON.stringify(record.definition)),
+    );
+    const again = await commitToMockKernel(reopened, production());
+    expect(again.record?.solvedSnapshot.dimensionStatuses).toEqual(
+      record.solvedSnapshot.dimensionStatuses,
+    );
+    expect(
+      again.record?.derivedValidity,
+      "reopen gives equal diagnostics",
+    ).toEqual(record.derivedValidity);
+  }, 180_000);
+
+  test("a point-on-shell requirement on a failed relationship (fit point inserted into the seed) is blocked instead of making the whole loss unbounded", () => {
+    const { committed, seed } = offsetSplineSession();
+    const built = withUnrelatedRectangle(committed);
+    const shell = built.session.definition.entities.find(
+      (entity) => entity.kind === "derivedPiecewiseCubic",
+    )!;
+    const free = drawLine(built.session, [0.5, 2], [1, 3]);
+    const line = free.definition.entities.at(-1)!;
+    if (line.kind !== "lineSegment") throw new Error("line");
+    const onShell = {
+      constraintId: "constraint_g7b_on_shell",
+      kind: "pointOnCurve",
+      label: "On shell",
+      point: { kind: "localPoint", pointId: line.startPointId },
+      curve: { kind: "localEntity", entityId: shell.entityId },
+    } as unknown as SketchDefinition["constraints"][number];
+    const definition = withInsertedSeedOccurrence(
+      {
+        ...free.definition,
+        constraintIds: [...free.definition.constraintIds, onShell.constraintId],
+        constraints: [...free.definition.constraints, onShell],
+      },
+      seed,
+    );
+    const result = solve(definition);
+    expect(
+      result.solvedSnapshot.constraintStatuses.find(
+        (status) => status.constraintId === onShell.constraintId,
+      )?.status,
+    ).toBe("blocked");
+    expect(
+      result.solvedSnapshot.status.solveState,
+      "[TECH] G16″: the blocked requirement does not count",
+    ).toBe("solved");
+    expect(
+      result.solvedSnapshot.diagnostics
+        .filter((diagnostic) => diagnostic.code === OFFSET_REQUIREMENT_BLOCKED)
+        .map((diagnostic) => diagnostic.target),
+    ).toEqual([{ kind: "constraint", constraintId: onShell.constraintId }]);
+    expect(
+      result.solvedSnapshot.diagnostics.some(
+        (diagnostic) => diagnostic.code === "solver-residual-too-large",
+      ),
+      "the loss stays bounded (no +∞ term)",
+    ).toBe(false);
+    expect(
+      result.solvedSnapshot.solvedPoints.every((point) =>
+        point.solvedPosition.every(Number.isFinite),
+      ),
+    ).toBe(true);
+  });
+
+  test("determinism: two failing offsets are scoped in relationship order, the same in the snapshot (unaccepted), in the publications (accepted) and on every re-solve", () => {
+    const built = nativeFilletedRectangle();
+    const both = withOffsetRelationship(
+      withOffsetRelationship(built.session.definition, built.seeds, 0.1, 700),
+      built.seeds,
+      0.05,
+      710,
+    );
+    const [first, second] = offsetIdsOf(both);
+    const broken = withOffsetDistance(
+      withOffsetDistance(both, first!, 0.5),
+      second!,
+      0.6,
+    );
+    const accepted = solve(broken).solvedSnapshot;
+    expect(accepted.status.solveState).toBe("solved");
+    const publications = publishSketchOffsets({
+      definition: broken,
+      solvedSnapshot: accepted,
+      modelingTolerance: 1e-3,
+      capabilities: capabilities(),
+    });
+    expect(
+      publications.map((item) => [item.derivationId, item.status]),
+    ).toEqual([
+      [first, "failed"],
+      [second, "failed"],
+    ]);
+    // A requirement on the second offset's output is blocked; a conflicting
+    // pair of fixes on the unrelated rectangle makes the solve unaccepted,
+    // so the snapshot then reports both relationships, in order.
+    const outputPoint = outputPointIds(broken, second!)[0]!;
+    const corner = broken.points.find(
+      (point) => point.position[0] === 0 && point.position[1] === 1,
+    )!;
+    const unrelatedCorner = broken.points.find(
+      (point) => point.position[0] === 10 && point.position[1] === 10,
+    )!;
+    const unaccepted: SketchDefinition = {
+      ...broken,
+      constraintIds: [
+        ...broken.constraintIds,
+        "constraint_g7b_fix_a",
+        "constraint_g7b_fix_b",
+      ],
+      constraints: [
+        ...broken.constraints,
+        ...[
+          [10, 10],
+          [12, 10],
+        ].map(
+          (position, index) =>
+            ({
+              constraintId:
+                index === 0 ? "constraint_g7b_fix_a" : "constraint_g7b_fix_b",
+              kind: "fixPoint",
+              label: "Conflicting fix",
+              pointId: unrelatedCorner.pointId,
+              position,
+            }) as unknown as SketchDefinition["constraints"][number],
+        ),
+      ],
+      dimensionIds: [...broken.dimensionIds, "dimension_g7b_order"],
+      dimensions: [
+        ...broken.dimensions,
+        {
+          dimensionId: "dimension_g7b_order",
+          kind: "distance",
+          label: "Order",
+          pointIds: [outputPoint, corner.pointId],
+          axis: "aligned",
+          value: 1,
+        } as unknown as SketchDefinition["dimensions"][number],
+      ],
+    };
+    const codes = (snapshot: SolvedSketchSnapshot) =>
+      snapshot.diagnostics
+        .filter(
+          (diagnostic) =>
+            diagnostic.severity === "error" ||
+            diagnostic.code === OFFSET_REQUIREMENT_BLOCKED,
+        )
+        .map((diagnostic) => [
+          diagnostic.code,
+          [first, second].find((id) => diagnostic.message.includes(id!)),
+        ]);
+    const snapshot = solve(unaccepted).solvedSnapshot;
+    expect(codes(snapshot)).toEqual([
+      [OFFSET_REQUIREMENT_BLOCKED, second],
+      [OFFSET_DIAGNOSTIC_CODES.arcCollapse, first],
+      [OFFSET_DIAGNOSTIC_CODES.arcCollapse, second],
+    ]);
+    for (let round = 0; round < 3; round += 1) {
+      expect(solve(unaccepted).solvedSnapshot).toEqual(snapshot);
+      expect(solve(broken).solvedSnapshot).toEqual(accepted);
+    }
+  }, 120_000);
+
+  test("plan or adoption failure (fabricated: the solve frame fails with knot-incidence-unproven on the native spline loop)", async () => {
+    const built = nativeSplineLoop(
+      [
+        [0, 0],
+        [1, 0.4],
+        [2, 0],
+      ],
+      [
+        [2, 0],
+        [0, 0],
+      ],
+    );
+    const authored = withOffsetRelationship(
+      built.session.definition,
+      built.seeds,
+      -0.01,
+    );
+    const [derivationId] = offsetIdsOf(authored);
+    fabricated.planFailure = derivationId!;
+    try {
+      await expectScopedFailure({
+        session: rebuildSessionForDefinition(built.session, {
+          definition: authored,
+        }),
+        failing: derivationId!,
+        code: OFFSET_DIAGNOSTIC_CODES.knotIncidenceUnproven,
+        seed: built.seeds[0]!,
+        unrelated: built.lines,
+      });
+    } finally {
+      fabricated.planFailure = null;
+    }
+  }, 120_000);
+
+  test("derivative unavailable (fabricated singular pullback, review R1): the requirement on the offset output keeps its real residual and only loses its gradient through the offset, never blocked or forced to 0: met → driving with a targeted warning, solved, certified, unrelated region derived; violated → unsatisfied and the sketch is not solved; recovery solves the requirement", async () => {
+    const built = nativeFilletedRectangle();
+    const authored = withOffsetRelationship(
+      built.session.definition,
+      built.seeds,
+      0.1,
+    );
+    const [derivationId] = offsetIdsOf(authored);
+    const outputPoint = outputPointIds(authored, derivationId!)[0]!;
+    const healthy = solve(authored).solvedSnapshot;
+    const at = positionsOf(healthy).get(outputPoint)!;
+    // A translation-invariant requirement between the offset output and a
+    // source corner: only a shape change (through the pullback) can meet it.
+    const corner = authored.points.find(
+      (point) => point.position[0] === 0 && point.position[1] === 1,
+    )!;
+    const requirement = {
+      dimensionId: "dimension_g7b_output_corner",
+      kind: "distance",
+      label: "Output to corner",
+      pointIds: [outputPoint, corner.pointId],
+      axis: "aligned",
+      value: Math.hypot(at[0] - 0, at[1] - 1) + 0.05,
+    } as unknown as SketchDefinition["dimensions"][number];
+    // The filleted rectangle's width and height dimensions are removed so
+    // the requirement is satisfiable by a shape change (the healthy control
+    // below solves it).
+    const kept = authored.dimensions.filter(
+      (dimension) =>
+        !(
+          dimension.dimensionId.startsWith("dimension_1_width") ||
+          dimension.dimensionId.startsWith("dimension_1_height")
+        ),
+    );
+    expect(kept.length, "premise: two rectangle sizes removed").toBe(
+      authored.dimensions.length - 2,
+    );
+    const definition: SketchDefinition = {
+      ...authored,
+      dimensionIds: [
+        ...kept.map((dimension) => dimension.dimensionId),
+        requirement.dimensionId,
+      ],
+      dimensions: [...kept, requirement],
+    };
+    fabricated.singularPullback = derivationId!;
+    try {
+      const session = rebuildSessionForDefinition(built.session, {
+        definition,
+      });
+      const snapshot = session.liveSolve!.solvedSnapshot;
+      expect(
+        snapshot.dimensionStatuses.find(
+          (status) => status.dimensionId === requirement.dimensionId,
+        )?.status,
+        "the real residual is met (through the source corner's own gradient): an ordinary status, never blocked",
+      ).toBe("driving");
+      expect(
+        snapshot.diagnostics.map((diagnostic) => [
+          diagnostic.code,
+          diagnostic.severity,
+          diagnostic.target,
+        ]),
+        "only the requirement's targeted warning (it names the cause)",
+      ).toEqual([
+        [
+          OFFSET_DIAGNOSTIC_CODES.derivativeUnavailable,
+          "warning",
+          { kind: "dimension", dimensionId: requirement.dimensionId },
+        ],
+      ]);
+      expect(snapshot.diagnostics[0]!.message).toContain(
+        "derivative is unavailable",
+      );
+      expect(snapshot.diagnostics[0]!.message).toContain(derivationId!);
+      expect(snapshot.status.solveState).toBe("solved");
+      expect(
+        snapshot.offsetFramePlans?.map((plan) => plan.derivationId),
+        "the frame itself built: its outputs are valid geometry",
+      ).toEqual([derivationId]);
+      const { response } = await liveRound(session);
+      expect(
+        response.offsetPublications.map((item) => item.status),
+        "a singular derivative is not a geometry failure: the outputs certify",
+      ).toEqual(["certified"]);
+      expect(
+        response.regions.filter(isUnrelatedRegion(built.lines)),
+        "the unrelated rectangle's region is derived",
+      ).toHaveLength(1);
+
+      // Violated at the final values: a fix on the output point itself has
+      // no gradient left once the pullback is dropped, so its real residual
+      // stays and it is reported unsatisfied (never blocked, never 0).
+      const fix = {
+        constraintId: "constraint_g7b_fix_output",
+        kind: "fixPoint",
+        label: "Fix output",
+        pointId: outputPoint,
+        position: [at[0] + 0.05, at[1]],
+      } as unknown as SketchDefinition["constraints"][number];
+      const violated = rebuildSessionForDefinition(built.session, {
+        definition: {
+          ...definition,
+          constraintIds: [...definition.constraintIds, fix.constraintId],
+          constraints: [...definition.constraints, fix],
+        },
+      }).liveSolve!.solvedSnapshot;
+      expect(
+        violated.constraintStatuses.find(
+          (status) => status.constraintId === fix.constraintId,
+        )?.status,
+        "the violated requirement keeps its real residual: unsatisfied",
+      ).toBe("unsatisfied");
+      expect(
+        violated.status.solveState,
+        "an unsatisfied requirement counts against the sketch",
+      ).toBe("partiallySolved");
+      expect(
+        violated.diagnostics
+          .filter(
+            (diagnostic) =>
+              diagnostic.code === OFFSET_DIAGNOSTIC_CODES.derivativeUnavailable,
+          )
+          .map((diagnostic) => diagnostic.target),
+      ).toContainEqual({
+        kind: "constraint",
+        constraintId: fix.constraintId,
+      });
+      expect(
+        violated.diagnostics.some(
+          (diagnostic) => diagnostic.code === OFFSET_REQUIREMENT_BLOCKED,
+        ),
+        "never blocked",
+      ).toBe(false);
+    } finally {
+      fabricated.singularPullback = null;
+    }
+    // A fresh definition object: the evaluation memo (and its per-frame
+    // derivative cache) would otherwise replay the fabricated derivative.
+    expect(
+      solve({ ...definition }).solvedSnapshot.dimensionStatuses.find(
+        (status) => status.dimensionId === requirement.dimensionId,
+      )?.status,
+      "with the derivative available again the requirement solves",
+    ).toBe("driving");
+  }, 120_000);
+
+  test("drag through a failure and back (U-A): the rest keeps following while the offset is held at the last accepted frame; release publishes failed; dragging back recovers and certifies; the same drag replays identically (no oscillation)", async () => {
+    const setup = () => {
+      // The native 3-point arch closed by a line, inward d = 0.1; dragging
+      // its middle fit point toward the lean cusp row fails the offset's
+      // solve frame (owner spline-fit-failure) and dragging back recovers.
+      // The unrelated rectangle's constraints put the drag on the
+      // interactive solve session.
+      const built = nativeSplineLoop(
+        [
+          [0, 0],
+          [1, 0.4],
+          [2, 0],
+        ],
+        [
+          [2, 0],
+          [0, 0],
+        ],
+      );
+      const offset = withOffsetRelationship(
+        built.session.definition,
+        built.seeds,
+        -0.1,
+      );
+      const spline = offset.entities.find((entity) => entity.kind === "spline");
+      if (spline?.kind !== "spline") throw new Error("spline");
+      // Fix the arch's ends (requirements on seeds, not on offset outputs),
+      // so the drag reshapes the spline instead of translating the loop.
+      const fixes = [0, 2].map((index) => {
+        const pointId = spline.pointOccurrences[index]!.pointId;
+        return {
+          constraintId: `constraint_g7b_fix_${index}`,
+          kind: "fixPoint",
+          label: `Fix ${index}`,
+          pointId,
+          position: offset.points.find((point) => point.pointId === pointId)!
+            .position,
+        } as unknown as SketchDefinition["constraints"][number];
+      });
+      const authored: SketchDefinition = {
+        ...offset,
+        constraintIds: [
+          ...offset.constraintIds,
+          ...fixes.map((fix) => fix.constraintId),
+        ],
+        constraints: [...offset.constraints, ...fixes],
+      };
+      return { built, authored, spline };
+    };
+    const base = setup();
+    const run = async ({ built, authored, spline }: typeof base) => {
+      const [derivationId] = offsetIdsOf(authored);
+      let session = rebuildSessionForDefinition(built.session, {
+        definition: authored,
+      });
+      const middle = authored.points.find(
+        (point) => point.pointId === spline.pointOccurrences[1]!.pointId,
+      )!;
+      const outputs = outputPointIds(authored, derivationId!);
+      const frames: {
+        status: string | undefined;
+        failed: boolean;
+        snapshot: SolvedSketchSnapshot;
+      }[] = [];
+      const settle = async (current: SketchSessionState) =>
+        (await liveRound(current)).response.offsetPublications[0]!;
+      const along = (t: number): [number, number] => [
+        1 - 1.4 * t,
+        0.4 + 0.5 * t,
+      ];
+      session = beginSketchGeometryDrag(session, middle.target, [1, 0.4]);
+      for (const t of [0.5, 0.75, 1, 0.75, 0.5, 0]) {
+        session = updateSketchGeometryDrag(session, along(t));
+        const snapshot = session.liveSolve!.solvedSnapshot;
+        frames.push({
+          status: session.activeDrag?.status,
+          failed: !snapshot.offsetFramePlans?.some(
+            (plan) => plan.derivationId === derivationId,
+          ),
+          snapshot,
+        });
+        if (t === 1) {
+          // Release inside the failure: publish re-evaluates.
+          const released = finishSketchGeometryDrag(session, along(t));
+          const publication = await settle(released);
+          expect(publication).toMatchObject({
+            status: "failed",
+            diagnostic: { code: OFFSET_DIAGNOSTIC_CODES.splineFitFailure },
+          });
+          session = beginSketchGeometryDrag(released, middle.target, along(t));
+        }
+      }
+      const released = finishSketchGeometryDrag(session, along(0));
+      return { frames, outputs, final: await settle(released), built };
+    };
+    const first = await run(base);
+    expect(
+      first.frames.map((frame) => frame.status),
+      "every frame follows the drag (none blocked)",
+    ).toEqual(Array(6).fill("dragging"));
+    for (const frame of first.frames)
+      expect(frame.snapshot.status.solveState).toBe("solved");
+    const failedFrames = first.frames.map((frame) => frame.failed);
+    expect(
+      failedFrames,
+      "premise: the drag passes through a failure and back",
+    ).toContain(true);
+    expect(failedFrames.at(-1)).toBe(false);
+    for (let index = 1; index < first.frames.length; index += 1) {
+      if (!first.frames[index]!.failed) continue;
+      const previous = positionsOf(first.frames[index - 1]!.snapshot);
+      const current = positionsOf(first.frames[index]!.snapshot);
+      for (const pointId of first.outputs)
+        expect(
+          current.get(pointId),
+          `frame ${index}: ${pointId} is held at the last accepted frame`,
+        ).toEqual(previous.get(pointId));
+    }
+    expect(first.final.status, "dragging back recovers and certifies").toBe(
+      "certified",
+    );
+    const second = await run(base);
+    expect(
+      second.frames.map((frame) => [frame.failed, frame.snapshot]),
+      "the same drag gives the same scoping and geometry (deterministic, no oscillation)",
+    ).toEqual(first.frames.map((frame) => [frame.failed, frame.snapshot]));
+  }, 240_000);
+
+  test("review R3 ([TECH] G16‴): G19 non-acceptance follows derived dependents: a transform of a non-accepted offset's outputs is excluded from regions (one targeted diagnostic per copy, naming the offset), refused as a feature input and has non-accepted driven points; a mirror whose axis is a non-accepted output is non-accepted too; with the offset certified every copy is ordinary", async () => {
+    const { session, seeds } = rectanglesSession();
+    const committed = committedOffsetOnSide(session, seeds, 0.5, "right");
+    const { derivationId, outputs } = offsetOutputIds(committed);
+    const derive = (
+      definition: SketchDefinition,
+      operatorKind: "transform" | "mirror",
+      entityIds: readonly SketchEntityId[],
+    ) => {
+      const result = createSketchDerivedTransformContribution({
+        definition,
+        operatorKind,
+        entityIds,
+        value: 30,
+        sequence: 97,
+        factories: createSessionCommitFactories(97, "sketch_draft" as never),
+        modelingTolerance: 1e-3,
+      });
+      const contribution = result.contribution;
+      if (!result.valid || !contribution) throw new Error(result.message!);
+      const relationship = contribution.derivedRelationships![0]!;
+      return {
+        definition: {
+          ...definition,
+          pointIds: [
+            ...definition.pointIds,
+            ...contribution.points.map((point) => point.pointId),
+          ],
+          points: [...definition.points, ...contribution.points],
+          entityIds: [
+            ...definition.entityIds,
+            ...contribution.entities.map((entity) => entity.entityId),
+          ],
+          entities: [...definition.entities, ...contribution.entities],
+          derivedRelationships: [
+            ...(definition.derivedRelationships ?? []),
+            relationship,
+          ],
+        },
+        copies: relationship.outputs.map((output) => output.outputEntityId),
+        copyPoints: relationship.outputs.flatMap(
+          (output) => output.outputPointIds,
+        ),
+      };
+    };
+    // The offset loop (lines and joint arcs) translated by 30: a closed
+    // loop of its own, far from everything else.
+    const translated = derive(committed.definition, "transform", outputs);
+    const withCopy = rebuildSessionForDefinition(committed, {
+      definition: translated.definition,
+    });
+    const { session: certified, response } = await liveRound(withCopy);
+    expect(
+      response.offsetPublications.map((item) => item.status),
+      "premise: the offset certifies",
+    ).toEqual(["certified"]);
+    expect(
+      usesAny(response.regions, translated.copies),
+      "certified: the translated loop bounds a region",
+    ).toBe(true);
+    const certifiedSketch = {
+      definition: certified.liveSolve!.definition,
+      solvedSnapshot: certified.liveSolve!.solvedSnapshot,
+    };
+    for (const copy of translated.copies)
+      expect(
+        nonAcceptedOffsetFeatureInputMessage(
+          certifiedSketch,
+          copy,
+          "a sweep path",
+        ),
+        `certified: ${copy} is an ordinary feature input`,
+      ).toBeNull();
+
+    // Not certified (a failed publication): every copy is non-accepted.
+    const live = withCopy.liveSolve!;
+    expect(live.solvedSnapshot.certifiedOffsetDerivationIds).toBeUndefined();
+    const deriver = createSketchArrangementDeriver(
+      createCertifiedNeutralCurveQueryCapabilityForTest(),
+    );
+    const failed = await deriver.derive({
+      documentId: "doc_workspace" as never,
+      revisionId: "rev_0001" as never,
+      sketchId: "sketch_g5b" as never,
+      definition: live.definition,
+      solvedSnapshot: live.solvedSnapshot,
+      projectedReferences: [],
+      modelingTolerance: 1e-3,
+      ...offsetArrangementInput(live.definition, live.solvedSnapshot, [
+        { derivationId, status: "failed" },
+      ] as readonly SketchOffsetPublicationRecord[]),
+    });
+    expect(
+      usesAny(failed.regions, [...outputs, ...translated.copies]),
+      "failed: neither the offset's outputs nor their copies bound a region",
+    ).toBe(false);
+    const excluded = failed.diagnostics.filter(
+      (diagnostic) =>
+        diagnostic.target?.kind === "entity" &&
+        translated.copies.includes(diagnostic.target.entityId),
+    );
+    expect(
+      excluded
+        .map((diagnostic) =>
+          diagnostic.target?.kind === "entity"
+            ? diagnostic.target.entityId
+            : null,
+        )
+        .sort(),
+      "failed: exactly one targeted exclusion per copy",
+    ).toEqual([...translated.copies].sort());
+    for (const diagnostic of excluded) {
+      expect(diagnostic.code).toBe("region-derived-unpublished");
+      expect(diagnostic.message).toContain(derivationId);
+    }
+    const failedSketch = {
+      definition: live.definition,
+      solvedSnapshot: live.solvedSnapshot,
+    };
+    for (const copy of translated.copies)
+      expect(
+        nonAcceptedOffsetFeatureInputMessage(
+          failedSketch,
+          copy,
+          "a sweep path",
+        ),
+        `failed: ${copy} is refused as a feature input, naming the offset`,
+      ).toBe(
+        `Sketch entity ${copy} is an output of offset relationship ${derivationId}, which is not certified, so it cannot be used as a sweep path.`,
+      );
+    const points = nonAcceptedOffsetOutputPoints(
+      live.definition,
+      live.solvedSnapshot,
+    );
+    for (const pointId of translated.copyPoints)
+      expect(points.get(pointId), `failed: ${pointId} is non-accepted`).toEqual(
+        { derivationId },
+      );
+
+    // A mirror of the far rectangle across one of the offset's line outputs.
+    const axis = outputs.find(
+      (entityId) =>
+        committed.definition.entities.find(
+          (entity) => entity.entityId === entityId,
+        )?.kind === "lineSegment",
+    )!;
+    const farLines = committed.definition.entities.flatMap((entity) =>
+      entity.kind === "lineSegment" &&
+      !seeds.includes(entity.entityId) &&
+      !outputs.includes(entity.entityId)
+        ? [entity.entityId]
+        : [],
+    );
+    expect(farLines, "premise: the far rectangle").toHaveLength(4);
+    const mirrored = derive(committed.definition, "mirror", [
+      ...farLines,
+      axis,
+    ]);
+    const mirrorSession = rebuildSessionForDefinition(committed, {
+      definition: mirrored.definition,
+    });
+    const mirrorSketch = {
+      definition: mirrorSession.liveSolve!.definition,
+      solvedSnapshot: mirrorSession.liveSolve!.solvedSnapshot,
+    };
+    for (const copy of mirrored.copies)
+      expect(
+        isAcceptedOffsetOutput(
+          mirrorSketch.definition,
+          mirrorSketch.solvedSnapshot,
+          copy,
+        ),
+        `${copy}: mirrored across a non-accepted axis`,
+      ).toBe(false);
+    for (const line of farLines)
+      expect(
+        isAcceptedOffsetOutput(
+          mirrorSketch.definition,
+          mirrorSketch.solvedSnapshot,
+          line,
+        ),
+        `${line}: the mirror's seed itself is ordinary`,
+      ).toBe(true);
+    const { session: mirrorCertified } = await liveRound(mirrorSession);
+    for (const copy of mirrored.copies)
+      expect(
+        isAcceptedOffsetOutput(
+          mirrorCertified.liveSolve!.definition,
+          mirrorCertified.liveSolve!.solvedSnapshot,
+          copy,
+        ),
+        `${copy}: accepted once the axis's offset certifies`,
+      ).toBe(true);
+  }, 600_000);
+
+  // T08b-g7b final review F1 ([TECH] G16⁗, barrier-shell): the
+  // point-on-shell record holds its requirement blocked for the whole solve
+  // while its offset is in the blocked set, also where the offset builds
+  // again, so the solve re-solves once from there instead of being trapped
+  // at a barrier. P must start far from the shell (near it the jump is too
+  // small to trap the solve).
+  test("final review F1 ([TECH] G16⁗): a spline offset failing at the start (middle fit point at the lean cusp) is pulled back out by a fixPoint; P 3 units off the shell, on it, is solved (core solve and live session)", () => {
+    // The drag row's native arch closed by a line, inward d = 0.1.
+    const loop = drawLine(
+      drawSpline(newSession(), [
+        [0, 0],
+        [1, 0.4],
+        [2, 0],
+      ]),
+      [2, 0],
+      [0, 0],
+    );
+    const seeds = loop.definition.entities
+      .filter((entity) => entity.kind !== "point")
+      .map((entity) => entity.entityId);
+    const withP = drawLine(loop, [1, 3], [1.5, 6]);
+    const free = withP.definition.entities.at(-1)!;
+    if (free.kind !== "lineSegment") throw new Error("free line");
+    const offset = withOffsetRelationship(withP.definition, seeds, -0.1);
+    const [derivationId] = offsetIdsOf(offset);
+    const spline = offset.entities.find((entity) => entity.kind === "spline");
+    if (spline?.kind !== "spline") throw new Error("spline");
+    const shell = offset.entities.find(
+      (entity) => entity.kind === "derivedPiecewiseCubic",
+    )!;
+    const middleId = spline.pointOccurrences[1]!.pointId;
+    const constraints = [
+      ...[0, 2].map((index) => {
+        const pointId = spline.pointOccurrences[index]!.pointId;
+        return {
+          constraintId: `constraint_g7b_fix_${index}`,
+          kind: "fixPoint",
+          label: `Fix ${index}`,
+          pointId,
+          position: offset.points.find((point) => point.pointId === pointId)!
+            .position,
+        };
+      }),
+      {
+        constraintId: "constraint_g7b_fix_middle",
+        kind: "fixPoint",
+        label: "Fix middle",
+        pointId: middleId,
+        position: [1, 0.4],
+      },
+      {
+        constraintId: "constraint_g7b_on_shell",
+        kind: "pointOnCurve",
+        label: "On shell",
+        point: { kind: "localPoint", pointId: free.startPointId },
+        curve: { kind: "localEntity", entityId: shell.entityId },
+      },
+    ] as unknown as SketchDefinition["constraints"];
+    const definition: SketchDefinition = {
+      ...offset,
+      points: offset.points.map((point) =>
+        point.pointId === middleId
+          ? { ...point, position: [-0.4, 0.9] }
+          : point,
+      ),
+      constraintIds: [
+        ...offset.constraintIds,
+        ...constraints.map((constraint) => constraint.constraintId),
+      ],
+      constraints: [...offset.constraints, ...constraints],
+    };
+    expect(
+      evaluateSketchDerivations({
+        definition,
+        modelingTolerance: 1e-3,
+      }).offsetFailures.map((failure) => [
+        failure.derivationId,
+        failure.diagnostic.code,
+      ]),
+      "premise: the spline offset fails at the start",
+    ).toEqual([[derivationId, "derived-offset-spline-fit-failure"]]);
+    const core = solve(definition).solvedSnapshot;
+    const live = rebuildSessionForDefinition(withP, { definition }).liveSolve!
+      .solvedSnapshot;
+    for (const [label, snapshot] of [
+      ["core", core],
+      ["live", live],
+    ] as const) {
+      expect(snapshot.status, label).toEqual({
+        solveState: "solved",
+        constraintState: "wellConstrained",
+      });
+      expect(
+        snapshot.offsetFramePlans?.map((plan) => plan.derivationId),
+        `${label}: the offset is rebuilt`,
+      ).toEqual([derivationId]);
+      const status = (constraintId: string) =>
+        snapshot.constraintStatuses.find(
+          (candidate) => candidate.constraintId === constraintId,
+        )?.status;
+      expect(status("constraint_g7b_fix_middle"), label).toBe("satisfied");
+      expect(status("constraint_g7b_on_shell"), label).toBe("satisfied");
+      expect(
+        snapshot.diagnostics.map((diagnostic) => diagnostic.code),
+        label,
+      ).toEqual([]);
+      const positions = positionsOf(snapshot);
+      const middle = positions.get(middleId)!;
+      expect(
+        Math.hypot(middle[0] - 1, middle[1] - 0.4),
+        `${label}: the middle fit point is pulled back out`,
+      ).toBeLessThan(1e-6);
+      expect(
+        positions.get(free.startPointId)![1],
+        `${label}: P left (1, 3) for the shell`,
+      ).toBeLessThan(0.5);
+    }
   });
 });

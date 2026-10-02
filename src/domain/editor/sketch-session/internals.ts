@@ -2,6 +2,7 @@ import type {
   DocumentVariableRecord,
   SketchPoint,
 } from "@/contracts/modeling/schema";
+import { isAcceptedConstraintStatus } from "@/contracts/sketch/schema";
 import {
   createExpressionAuthoredValue,
   createLiteralAuthoredValue,
@@ -410,8 +411,8 @@ const LIVE_REGIONS_DERIVATION_FAILED_CODE = "regions-derivation-failed";
 function isAcceptedLiveSolve(solvedSnapshot: SolvedSketchSnapshot) {
   return (
     solvedSnapshot.status.solveState === "solved" &&
-    solvedSnapshot.constraintStatuses.every(
-      (entry) => entry.status === "satisfied",
+    solvedSnapshot.constraintStatuses.every((entry) =>
+      isAcceptedConstraintStatus(entry.status),
     )
   );
 }

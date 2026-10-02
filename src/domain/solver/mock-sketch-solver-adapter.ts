@@ -64,6 +64,7 @@ import {
 import { OffsetCertificationMemo } from "@/contracts/sketch/offset-derivation-frame";
 import {
   applyOffsetPublications,
+  isOffsetPublicationSolveAccepted,
   publishSketchOffsets,
   type OffsetPublicationCapabilities,
 } from "@/contracts/sketch/offset-publication";
@@ -1288,6 +1289,13 @@ function solveDefinition(
       ? { offsetFramePlans: solvedOffsetFramePlans(evaluation) }
       : {}),
   };
+  // [TECH] G16′, as the core solver: an offset relationship's failure is
+  // relationship-scoped (its publication reports it); only an unaccepted
+  // solve, which publishes nothing, carries it in the snapshot.
+  if (evaluation && !isOffsetPublicationSolveAccepted(solvedSnapshot))
+    validationDiagnostics.push(
+      ...evaluation.offsetFailures.map((failure) => failure.diagnostic),
+    );
 
   return {
     status,

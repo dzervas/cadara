@@ -3554,7 +3554,8 @@ export function normalizeConstraintStatusRecord(
     !isString(value.constraintId) ||
     (value.status !== "satisfied" &&
       value.status !== "unsatisfied" &&
-      value.status !== "conflicting")
+      value.status !== "conflicting" &&
+      value.status !== "blocked")
   ) {
     throw new Error("Invalid constraint status payload.");
   }
@@ -3573,7 +3574,8 @@ export function normalizeDimensionStatusRecord(
     !isString(value.dimensionId) ||
     (value.status !== "driving" &&
       value.status !== "driven" &&
-      value.status !== "unsatisfied") ||
+      value.status !== "unsatisfied" &&
+      value.status !== "blocked") ||
     !(typeof value.solvedValue === "number" || value.solvedValue === null)
   ) {
     throw new Error("Invalid dimension status payload.");

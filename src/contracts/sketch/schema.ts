@@ -1367,8 +1367,25 @@ export type SolvedSketchEntityGeometryRecord =
 export interface ConstraintStatusRecord {
   /** Authored constraint identity being reported. */
   constraintId: ConstraintId;
-  /** Machine-readable evaluation result for the authored constraint. */
-  status: "satisfied" | "unsatisfied" | "conflicting";
+  /**
+   * Machine-readable evaluation result for the authored constraint.
+   * `blocked` ([TECH] G16″, U-G9): it names an output of an offset
+   * relationship that failed at this solve, so it is not solved (it carries
+   * a targeted `derived-offset-requirement-blocked` diagnostic) and it does
+   * not count against the sketch's status (`isAcceptedConstraintStatus`).
+   */
+  status: "satisfied" | "unsatisfied" | "conflicting" | "blocked";
+}
+
+/**
+ * [TECH] G16″: whether a constraint status lets the sketch's solve be
+ * accepted: satisfied, or blocked by a failed offset relationship (the
+ * relationship reports its own failure; the rest of the sketch is solved).
+ */
+export function isAcceptedConstraintStatus(
+  status: ConstraintStatusRecord["status"],
+): boolean {
+  return status === "satisfied" || status === "blocked";
 }
 
 /**
@@ -1377,8 +1394,12 @@ export interface ConstraintStatusRecord {
 export interface DimensionStatusRecord {
   /** Authored dimension identity being reported. */
   dimensionId: DimensionId;
-  /** Machine-readable evaluation result for the authored dimension. */
-  status: "driving" | "driven" | "unsatisfied";
+  /**
+   * Machine-readable evaluation result for the authored dimension.
+   * `blocked`: as `ConstraintStatusRecord.status` ([TECH] G16″); it is not
+   * `unsatisfied`, so it does not count against the sketch's status.
+   */
+  status: "driving" | "driven" | "unsatisfied" | "blocked";
   /** Solver-computed value in sketch-plane units when available. */
   solvedValue: number | null;
 }

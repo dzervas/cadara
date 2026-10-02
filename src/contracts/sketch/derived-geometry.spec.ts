@@ -770,12 +770,18 @@ test("evaluateSketchDerivations recomputes offset chains from seed edits with st
     }),
     modelingTolerance: 1e-3,
   });
+  // [TECH] G16′: an offset failure is relationship-scoped (offsetFailures),
+  // never a sketch diagnostic.
   expect(
-    unresolvedExpression.diagnostics.some(
-      (diagnostic) => diagnostic.code === "derived-offset-unresolved-distance",
-    ),
-    "Unresolved expression distances should emit the unresolved-distance diagnostic.",
-  ).toBeTruthy();
+    unresolvedExpression.offsetFailures.map((failure) => [
+      failure.derivationId,
+      failure.diagnostic.code,
+    ]),
+    "Unresolved expression distances should emit the unresolved-distance diagnostic, scoped to the relationship.",
+  ).toEqual([
+    ["sketch_derivation_1_offset", "derived-offset-unresolved-distance"],
+  ]);
+  expect(unresolvedExpression.diagnostics).toEqual([]);
   assertPoint(
     pointPosition(unresolvedExpression.definition, "o1s"),
     [0, 0],
@@ -1040,13 +1046,13 @@ test("evaluateSketchDerivations maintains offset joint arcs and reports structur
     modelingTolerance: 1e-3,
   });
   expect(
-    topologyFlip.diagnostics.some(
-      // T08b-g5 ([TECH] G6): arc presence is authored intent; a corner that
-      // can no longer hold its authored arc is `topologyChanged`.
-      (diagnostic) => diagnostic.code === "derived-offset-topology-changed",
-    ),
+    topologyFlip.offsetFailures.map((failure) => failure.diagnostic.code),
+    // T08b-g5 ([TECH] G6): arc presence is authored intent; a corner that
+    // can no longer hold its authored arc is `topologyChanged`. [TECH] G16′:
+    // scoped to the relationship, never a sketch diagnostic.
     "A joint topology change should emit the topology-changed diagnostic.",
-  ).toBeTruthy();
+  ).toEqual(["derived-offset-topology-changed"]);
+  expect(topologyFlip.diagnostics).toEqual([]);
   assertPoint(
     pointPosition(topologyFlip.definition, "o1e"),
     [9, 9],
@@ -1106,11 +1112,13 @@ test("evaluateSketchDerivations maintains offset joint arcs and reports structur
     modelingTolerance: 1e-3,
   });
   expect(
-    collapsed.diagnostics.some(
-      (diagnostic) => diagnostic.code === "derived-offset-arc-collapse",
-    ),
-    "Arc collapse should emit the structured arc-collapse diagnostic.",
-  ).toBeTruthy();
+    collapsed.offsetFailures.map((failure) => [
+      failure.derivationId,
+      failure.diagnostic.code,
+    ]),
+    "Arc collapse should emit the structured arc-collapse diagnostic, scoped to the relationship ([TECH] G16′).",
+  ).toEqual([["sketch_derivation_3_offset", "derived-offset-arc-collapse"]]);
+  expect(collapsed.diagnostics).toEqual([]);
   assertPoint(
     pointPosition(collapsed.definition, "out_start"),
     [9, 9],

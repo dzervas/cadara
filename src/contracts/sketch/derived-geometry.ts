@@ -82,12 +82,27 @@ export interface OffsetDerivationFrameRecord {
   readonly outputs: OffsetFrameOutputMap;
 }
 
+/** One offset relationship whose evaluation failed at this iterate (G16′). */
+export interface OffsetDerivationFailure {
+  readonly derivationId: string;
+  /** Its one source-linked diagnostic (the solve frame's own, or the relationship's). */
+  readonly diagnostic: SketchSolveDiagnostic;
+}
+
 export interface SketchDerivationEvaluationResult {
   definition: SketchDefinition;
+  /** Sketch-scoped diagnostics (never an offset relationship's failure, G16′). */
   diagnostics: SketchSolveDiagnostic[];
   readonly modelingTolerance: number;
   /** Every offset relationship whose solve frame evaluated, in relationship order. */
   readonly offsetFrames: readonly OffsetDerivationFrameRecord[];
+  /**
+   * [TECH] G16′ (U-G9): every offset relationship that failed at this
+   * iterate, in relationship order. A failure is relationship-scoped: the
+   * relationship's outputs keep the iterate's values (frozen) and it is in
+   * neither `offsetFrames` nor `diagnostics`.
+   */
+  readonly offsetFailures: readonly OffsetDerivationFailure[];
 }
 
 type TransformPoint = (point: SketchPoint2D) => SketchPoint2D;
@@ -1094,8 +1109,8 @@ export function prepareSketchDerivationPullback(
  * certifier-free `solveOffsetFrame`, run with the relationship's plan hint)
  * and writes its published data onto the authored outputs. All updates are
  * collected before any is applied, so a failing relationship keeps its
- * outputs in their last state; its failure is a projection diagnostic of the
- * solve ([TECH] G16).
+ * outputs in their last state (frozen); its failure is relationship-scoped
+ * ([TECH] G16′): reported in `failures`, never a sketch diagnostic.
  */
 function evaluateOffsetRelationship(
   relationship: Extract<SketchDerivationDefinition, { kind: "offset" }>,
@@ -1105,7 +1120,7 @@ function evaluateOffsetRelationship(
     readonly plan: OffsetFramePlan | undefined;
     readonly withDerivatives: boolean;
     readonly entityById: ReadonlyMap<SketchEntityId, SketchEntityDefinition>;
-    readonly diagnostics: SketchSolveDiagnostic[];
+    readonly failures: OffsetDerivationFailure[];
     readonly replacePoint: (
       pointId: SketchPointId,
       position: SketchPoint2D,
@@ -1118,14 +1133,15 @@ function evaluateOffsetRelationship(
     message: string,
     entityId: SketchEntityId | null = relationship.seedEntityIds[0] ?? null,
   ) => {
-    context.diagnostics.push(
-      diagnostic(
+    context.failures.push({
+      derivationId: relationship.derivationId,
+      diagnostic: diagnostic(
         code,
         "error",
         `Offset relationship ${relationship.derivationId}: ${message}`,
         entityId ? { kind: "entity", entityId } : null,
       ),
-    );
+    });
     return null;
   };
 
@@ -1156,7 +1172,10 @@ function evaluateOffsetRelationship(
     context.plan,
   );
   if (!frame.ok) {
-    context.diagnostics.push(frame.diagnostic);
+    context.failures.push({
+      derivationId: relationship.derivationId,
+      diagnostic: frame.diagnostic,
+    });
     return null;
   }
   const outputs = mapOffsetFrameOutputs(
@@ -1267,12 +1286,14 @@ export function evaluateSketchDerivations(
       diagnostics: [],
       modelingTolerance,
       offsetFrames: [],
+      offsetFailures: [],
     };
     return cachedDerivationResult;
   }
 
   const diagnostics: SketchSolveDiagnostic[] = [];
   const offsetFrames: OffsetDerivationFrameRecord[] = [];
+  const offsetFailures: OffsetDerivationFailure[] = [];
   const pointById = new Map<SketchPointId, SketchPointDefinition>();
   const pointIndicesById = new Map<SketchPointId, number[]>();
   definition.points.forEach((point, index) => {
@@ -1328,7 +1349,7 @@ export function evaluateSketchDerivations(
             (entry) => entry.derivationId === relationship.derivationId,
           )?.plan,
           entityById,
-          diagnostics,
+          failures: offsetFailures,
           replacePoint,
           replaceEntity,
         },
@@ -1452,6 +1473,7 @@ export function evaluateSketchDerivations(
     diagnostics,
     modelingTolerance,
     offsetFrames,
+    offsetFailures,
   };
   cachedDerivationInput = input;
   cachedDerivationResult = result;
