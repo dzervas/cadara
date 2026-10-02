@@ -949,8 +949,12 @@ export interface TubeChainArcRecord {
  * other terminal leaf B (line, cubic or seed-arc leaf) the explicit one. The
  * certificate concerns ONLY the abstract chain trimmed at the exact
  * (unknown) witnessed roots, against the two pieces' true offsets each
- * trimmed at their unique common point (unique against the FULL circle K and
- * the full emitted circle, R3), never the binary64 angle domain of the query.
+ * trimmed at the unique common point of the drawn pieces: unique against the
+ * FULL circle K, or (T08b-g7, Lemma T°2′), on a Lemma-T° line's other
+ * monotone side, against every circle about C_A inside A's whole exact
+ * certifier wedge (every rule-B′ leaf, R7-removed included; never the
+ * query's angle domain), and the emitted analogue (R3) on the full emitted
+ * circle or the emitted wedges. Never the binary64 angle domain of the query.
  */
 export interface TubeChainArcTrimJoin {
   readonly kind: "arc-trim";

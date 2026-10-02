@@ -96,8 +96,10 @@ import { trackNewSolidBody } from "@/domain/modeling/occ/topology";
 import { NON_ACCEPTED_OFFSET_FEATURE_INPUT_CODE } from "@/domain/modeling/sketch-feature-input";
 import {
   createSketchDerivedTransformContribution,
+  createSketchFilletMutation,
   offsetSideForSketchPoint,
 } from "@/domain/sketch-editing/operations";
+import { withLineLength } from "@/contracts/sketch/offset-chain.fixtures";
 import {
   createSessionCommitFactories,
   rebuildSessionForDefinition,
@@ -4326,4 +4328,108 @@ describe("T08b-g5c review fixes", () => {
       expect(validateSolvedSketchSnapshot(later).success).toBe(true);
     }
   }, 300_000);
+});
+
+// ---------------------------------------------------------------------------
+// T08b-g7a (logic lane). Seam: the live session after an edit of a filleted
+// outline carrying an offset (audit C1, user decision U-G8): the rectangle
+// tool, the Fillet edit operation and the Offset tool, then source edits
+// through `rebuildSessionForDefinition` and the live G17 rounds.
+// ---------------------------------------------------------------------------
+
+describe("T08b-g7a live two-edit sequence (audit C1, U-G8)", () => {
+  /** One live round: publish, and once more after a planChanged re-solve. */
+  const settle = (session: SketchSessionState) => {
+    let current = session;
+    let publications = livePublications(current);
+    current = publishSketchLiveRegions(current, [], [], publications);
+    if (publications.some((item) => item.status === "planChanged")) {
+      publications = livePublications(current);
+      current = publishSketchLiveRegions(current, [], [], publications);
+    }
+    return { session: current, publication: publications[0]! };
+  };
+  const withDimensionValue = (
+    definition: SketchDefinition,
+    value: number,
+  ): SketchDefinition => ({
+    ...definition,
+    dimensions: definition.dimensions.map((dimension) =>
+      dimension.dimensionId === "dimension_c1_edit"
+        ? ({ ...dimension, value } as typeof dimension)
+        : dimension,
+    ),
+  });
+
+  test("rect + 1 fillet, inward d = 0.1: edit 1 (+0.2, a convex A4 kink) fails with the D5 topologyChanged and drops the published plan; edit 2 (+0.05) then solves UNHINTED, reads solved (never partiallySolved) and certifies", () => {
+    let session = acceptSketchDraw(
+      startSketchDraw(beginSketchTool(newSession(), "rectangle"), [0, 0]),
+      [2, 1],
+    );
+    const lines = session.definition.entities
+      .filter((entity) => entity.kind === "lineSegment")
+      .map((entity) => entity.entityId);
+    const filleted = createSketchFilletMutation({
+      definition: session.definition,
+      entityIds: [lines[0]!, lines[1]!],
+      radius: 0.2,
+      sequence: 90,
+      factories: createSessionCommitFactories(90, session.sketchId!),
+    });
+    if (!filleted.valid || !filleted.definition)
+      throw new Error(`fillet: ${filleted.message}`);
+    session = rebuildSessionForDefinition(session, {
+      definition: filleted.definition,
+    });
+    const seeds = session.definition.entities
+      .filter(
+        (entity) => entity.kind === "lineSegment" || entity.kind === "arc",
+      )
+      .map((entity) => entity.entityId);
+    const committed = settle(
+      committedOffsetOnSide(session, seeds, 0.1, "left"),
+    );
+    expect(committed.publication.status).toBe("certified");
+    expect(committed.session.offsetPlans).toHaveLength(1);
+    const line = seeds.find(
+      (id) =>
+        committed.session.definition.entities.find(
+          (entity) => entity.entityId === id,
+        )?.kind === "lineSegment",
+    )!;
+
+    const edited = withLineLength(committed.session.definition, line, 0.2);
+    const first = settle(
+      rebuildSessionForDefinition(committed.session, { definition: edited }),
+    );
+    expect(first.session.liveSolve!.accepted).toBe(true);
+    expect(first.publication).toMatchObject({
+      status: "failed",
+      diagnostic: {
+        code: OFFSET_DIAGNOSTIC_CODES.topologyChanged,
+        message: expect.stringContaining("now needs an offset arc"),
+      },
+    });
+    expect(
+      first.session.offsetPlans ?? [],
+      "a failed publication carries no plan into the next solve",
+    ).toEqual([]);
+
+    const dimension = edited.dimensions.find(
+      (item) => item.dimensionId === "dimension_c1_edit",
+    )!;
+    const second = rebuildSessionForDefinition(first.session, {
+      definition: withDimensionValue(
+        first.session.definition,
+        (dimension as { value: number }).value - 0.15,
+      ),
+    });
+    expect(
+      second.liveSolve!.solvedSnapshot.offsetFramePlans?.[0]?.plan.origin,
+      "premise: the second edit solves without a hint",
+    ).toBe("firstChoice");
+    expect(second.liveSolve!.accepted).toBe(true);
+    expect(second.liveRegions.status).toBe("pending");
+    expect(settle(second).publication.status).toBe("certified");
+  }, 120_000);
 });

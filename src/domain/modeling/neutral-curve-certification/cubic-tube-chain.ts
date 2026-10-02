@@ -26,7 +26,10 @@ import type {
   TubePieceChainJoin,
   TubePieceChainResult,
 } from "@/contracts/modeling/neutral-curve-query";
-import { seedArcLeafSplits } from "@/contracts/sketch/canonical-arc-support";
+import {
+  seedArcLeafSplits,
+  seedArcMinimumLeaves,
+} from "@/contracts/sketch/canonical-arc-support";
 import type {
   SplinePoles,
   SplineVector,
@@ -317,7 +320,8 @@ import {
  * - Precharge 64 + 16·16 per arc (8 fixed leaves: 64 + 16·8 per circle)
  *   BEFORE its partition is chosen or any tube field is read. The rule-B′
  *   partition (review R1) is recomputed with `seedArcLeafSplits` (A6; two
- *   leaves at least in a two-piece closed chain) and re-proved: every leaf
+ *   leaves at least where `seedArcMinimumLeaves` says so, T08b-g7 P3) and
+ *   re-proved: every leaf
  *   of BOTH the emitted (a … b) and the reference (s … e) wedge has σ(u×v)
  *   > 0 and 2u·v > σ(u×v) exactly, the half-plane sequence never returns
  *   (total < 2π), a·s > 0 and b·e > 0. Admission: ρ_o = hypot(S′ − C), ρ_s
@@ -347,21 +351,35 @@ import {
  *   segment at its other end). (T°1/T°2, review R2) a monotone window W
  *   of (O_B − C_A)·O_B′ holding the bracket: on a line split at the exact
  *   foot t₀ (the other side excluded, or PAIRED with the line's other-end
- *   T° trim against the same K: a line meets a circle at most twice); on
+ *   T° trim against the same K: a line meets a circle at most twice, or,
+ *   T08b-g7 Lemma T°2′, its exact direction cone from C_A, in one open
+ *   half-plane of the line's own normal, disjoint from EVERY closed leaf
+ *   wedge of A's whole partition, R7-removed leaves included: then the
+ *   other side meets no circle about C_A inside A's wedge; ties fail
+ *   closed; no bisection, no new constant); on
  *   an arc split at ±(C_B − C_A) exactly, the rest excluded by bisected
  *   wedge boxes; on a cubic by dyadic windows (O′ = λS′ on the restricted
  *   source). (T°3) φ = η(2R⁺ + η) with η = ε_B(τ̂) (owner Q4-E1 local
  *   bound) + |ρ_o − R| + w, δ = φ/(2m°); on an arc B, exact sign-bracketing
  *   candidate directions. (R3) the same monotone/exclusion/bracket tests on
  *   the EMITTED supports against the emitted circle (radius family): the
- *   joint pair meets once on the full circle, never read from the query's
- *   angle domain. (T°4) both root boxes strictly inside A's reference /
+ *   joint pair meets once on the full circle, or (T°2′) on a Lemma-T°
+ *   line's other monotone side against every circle about C_A inside A's
+ *   whole exact certifier wedge (every rule-B′ leaf, R7-removed included;
+ *   never the query's angle domain), and the emitted analogue (R3); O* is
+ *   then the unique common point of the drawn pieces' true offsets. (T°4) both root boxes strictly inside A's reference /
  *   emitted leaf wedges; cut chord R⁺|X̂ − X*|/min(ρ_lo, R_A). Composition:
  *   B takes M(δ + Δ) (cubic tail, line end), both cut arcs their chords;
  *   a one-leaf arc cut at both ends needs the cuts σ-ordered. R7 removals
- *   are never trusted: on the implicit side T° already runs on the full
- *   circles; on an explicit arc every removed leaf at the joint is
- *   excluded by T°2 on both wedges (review Q1), else fail closed.
+ *   are never trusted: on the implicit side T° runs on the full circles,
+ *   and T°2′ tests the line's rest cone against every leaf wedge of A,
+ *   removed or retained (the carried count is never read there); on an
+ *   explicit arc every removed leaf at the joint is excluded by T°2 on
+ *   both wedges (review Q1), else fail closed.
+ * - T08b-g7 P3: an arc whose natural start and end are both declared
+ *   adjacencies (`seedArcMinimumLeaves`, structural: every arc of a closed
+ *   chain of ≥ 2 pieces, every non-terminal arc of an open chain) takes at
+ *   least two leaves, computed by the owner and here from the same helper.
  * - Review R12 (option c): a seed arc whose natural START is a trim
  *   certifies the radius family [lo, hi] (record `radiusFamily`) computed
  *   before any trim; w is added to every leaf's ε, star and K3 radius and
@@ -416,6 +434,12 @@ const ARC_PRECHARGE = 64;
 const K3_LEAF_BOX_PRECHARGE = 16;
 /** Fixed per-leaf precharge of the K3 broad-phase sweep, before it. */
 const K3_SWEEP_PRECHARGE = 16;
+/**
+ * T08b-g7 (Lemma T°2′): fixed precharge per leaf wedge of A's whole
+ * partition, before one rest side's cone is built (run only for a T°2
+ * entry with no opposite partner).
+ */
+const T2_WEDGE_PRECHARGE = 16;
 /**
  * Fixed per-seed-arc precharge (T08b-f), before its partition is chosen or
  * any of its data is read: 64 + 16 per leaf at the partition cap of 16.
@@ -2290,6 +2314,13 @@ function certifyChain(
     readonly piece: number;
     readonly radius: ExactFraction;
     readonly low: readonly (boolean | undefined)[];
+    /**
+     * T08b-g7 (T°2′): every unexcluded rest side is wedge-clear, so the
+     * entry needs no partner (it still partners another entry). Metered,
+     * and run only for an entry with no opposite partner, so a pairing
+     * certificate's charge sequence is unchanged.
+     */
+    readonly wedgeClear: () => boolean;
   }[] = [];
   if (general) {
     const pieceCount = general.pieces.length;
@@ -4930,7 +4961,10 @@ function certifyChain(
               [lineSplits.reference, aSquaredReference],
               [lineSplits.emitted, rangeSquarePositive(radiusA)],
             ] as const;
-            let paired = false;
+            const unexcluded: {
+              readonly reference: boolean;
+              readonly rest: ExactRange;
+            }[] = [];
             for (const [split, circleSquared] of splits) {
               if (!split?.rest) continue;
               const box = (
@@ -4943,15 +4977,95 @@ function certifyChain(
                   rangeSubtract(boxDistance(box, center), circleSquared),
                 )
               )
-                paired = true;
+                unexcluded.push({
+                  reference: split === lineSplits.reference,
+                  rest: split.rest,
+                });
             }
-            if (paired)
+            const positions = [emittedPosition, referencePosition] as const;
+            const tube = lineTube!;
+            const sourceDirection = bLine.direction;
+            /**
+             * T08b-g7 Lemma T°2′ on one rest side [t_a, t_b]: every corner
+             * of its two endpoint boxes, from C_A, has the same nonzero
+             * sign against the line's own normal rot(a) (one open half-
+             * plane, so the segment's directions run monotonically inside
+             * the corners' σ-hull [lo, hi], span < π), and that closed
+             * cone is disjoint from EVERY closed leaf wedge of A's whole
+             * partition (reference wedges for the true line, emitted for
+             * the emitted one; R7-removed leaves included, review R1): four
+             * exact turn signs per leaf, ties fail closed. Then the side
+             * meets no circle about C_A inside A's wedge.
+             */
+            const restClear = (side: (typeof unexcluded)[number]) => {
+              const boundaries = side.reference ? aArc.reference : aArc.emitted;
+              budget.operation(T2_WEDGE_PRECHARGE * (boundaries.length - 1));
+              const position = positions[side.reference ? 1 : 0];
+              const direction = side.reference
+                ? sourceDirection
+                : difference(
+                    exactPoint(tube.emitted[1]),
+                    exactPoint(tube.emitted[0]),
+                  );
+              const normal: ExactPoint = [negate(direction[1]), direction[0]];
+              const corners = side.rest.flatMap((t) => {
+                const box = position(t, t);
+                return box[0]!.flatMap((x) =>
+                  box[1]!.map(
+                    (y): ExactPoint => [
+                      subtractExact(x, center[0], budget),
+                      subtractExact(y, center[1], budget),
+                    ],
+                  ),
+                );
+              });
+              const sign = compareExact(dot(corners[0]!, normal), zero, budget);
+              if (
+                sign === 0 ||
+                corners.some(
+                  (corner) =>
+                    compareExact(dot(corner, normal), zero, budget) !== sign,
+                )
+              )
+                return false;
+              const turn = turnOf(aArc);
+              let low = corners[0]!;
+              let high = corners[0]!;
+              for (const corner of corners.slice(1)) {
+                if (positive(turn(corner, low))) low = corner;
+                if (positive(turn(high, corner))) high = corner;
+              }
+              if (negative(turn(low, high))) return false;
+              const closedIn = (
+                wedge: readonly [ExactPoint, ExactPoint],
+                value: ExactPoint,
+              ) =>
+                !negative(turn(wedge[0], value)) &&
+                !negative(turn(value, wedge[1]));
+              const cone = [low, high] as const;
+              for (let leaf = 0; leaf + 1 < boundaries.length; leaf += 1) {
+                const wedge = [
+                  boundaries[leaf]!,
+                  boundaries[leaf + 1]!,
+                ] as const;
+                if (
+                  closedIn(wedge, low) ||
+                  closedIn(wedge, high) ||
+                  closedIn(cone, wedge[0]) ||
+                  closedIn(cone, wedge[1])
+                )
+                  return false;
+              }
+              return true;
+            };
+            if (unexcluded.length > 0)
               linePairs.push({
                 leaf: bEnd.leaf,
                 side: bEnd.side,
                 piece: aArc.piece,
                 radius: aReference[0],
                 low: [lineSplits.reference?.low, lineSplits.emitted?.low],
+                wedgeClear: () => unexcluded.every(restClear),
               });
           }
           referenceBox = referencePosition(referenceRoot[0], referenceRoot[1]);
@@ -5528,7 +5642,7 @@ function certifyChain(
             partner.low[index] === undefined ||
             low !== partner.low[index],
         );
-      if (!opposite) {
+      if (!opposite && !pair.wedgeClear()) {
         const [firstLeaf, secondLeaf] = [pair.leaf, pair.leaf];
         return {
           ...uncertain(
@@ -6928,10 +7042,11 @@ function certifyPieceChain(
       budget.operation(
         piece.kind === "arc" ? ARC_SEED_PRECHARGE : CIRCLE_SEED_PRECHARGE,
       );
-      // The arcs of a two-piece closed chain take at least two leaves.
+      // T08b-g7 P3: an arc with both natural ends declared adjacencies takes
+      // at least two leaves (the owner's own structural predicate).
       const partition = seedPartition(
         piece,
-        closed && pieces.length === 2 ? 2 : 1,
+        seedArcMinimumLeaves(closed, pieces.length, pieceIndex),
       );
       if (typeof partition === "string")
         return partition === "invalid"

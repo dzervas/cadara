@@ -19,6 +19,7 @@ import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
 import {
   canonicalArcSupport,
   seedArcLeafSplits,
+  seedArcMinimumLeaves,
   type CanonicalArcSupport,
 } from "@/contracts/sketch/canonical-arc-support";
 import type { DeclaredOffsetChainConnectivity } from "@/contracts/sketch/offset-chain-connectivity";
@@ -70,7 +71,8 @@ import {
  * T08b-f: point-defined seed arcs and circles are pieces. A seed arc's
  * emitted ends are the legacy ray-scaled S′, E′ (radius hypot(S′ − C)) and
  * it is queried one neutral circle per rule-B′ leaf (`seedArcLeafSplits`,
- * two leaves at least in a two-piece closed chain); a joint whose terminal
+ * two leaves at least when both natural ends are declared adjacencies,
+ * `seedArcMinimumLeaves`, T08b-g7 P3); a joint whose terminal
  * leaves do not cross queries the inner leaves in order (review R7, the
  * earlier leaves then being removed). A concave D > 0 vertex with a seed-arc
  * side proved within τ is absorbed first with no query ([TECH F6]); its
@@ -875,6 +877,76 @@ function vertexFits(
   return normals + root * bridge < root * scaledExact(modelingTolerance);
 }
 
+/** ⌊√n⌋ of a nonnegative integer. */
+function floorSquareRoot(value: bigint) {
+  const root = ceilingSquareRoot(value);
+  return root * root === value ? root : root - 1n;
+}
+
+/**
+ * T08b-g7 D5 (review R12): Lemma G's G = δ + |g| of a declared vertex with
+ * D > 0 PROVED at least τ by a LOWER bound G⁻ = δ⁻ + |g|⁻, the same scaled
+ * integers as `vertexFits` with floor square roots: δ² = 2d²(1 − D/W) ≥
+ * 2d²(r − D)/r for r = ⌊√(U₁U₂)⌋ ≤ W (0 when r ≤ D), so δ ≥
+ * ⌊√(2d²(r − D)r)⌋/(S·r); |g| ≥ ⌊√(g·g)⌋/S. Every certifier bound of the
+ * keeper's correction is ≥ G ≥ τ, so its strict composition (ε* < τ) cannot
+ * hold: the corner is never absorbed. Bounded BigInt, unmetered (T4).
+ */
+function vertexExceeds(
+  vertex: OffsetChainVertex,
+  distance: number,
+  modelingTolerance: number,
+) {
+  const [u, v] = exactTangents(vertex);
+  const product = u[0] * v[0] + u[1] * v[1];
+  const scaled = (point: SketchPoint2D) =>
+    [scaledExact(point[0]), scaledExact(point[1])] as const;
+  const center = scaled(vertex.first.vertex);
+  const root = floorSquareRoot(
+    (u[0] * u[0] + u[1] * u[1]) * (v[0] * v[0] + v[1] * v[1]),
+  );
+  if (root <= 0n) return false;
+  const d = scaledExact(distance);
+  const normals =
+    root > product ? floorSquareRoot(2n * d * d * (root - product) * root) : 0n;
+  const gap = scaled(vertex.second.vertex).map(
+    (value, axis) => value - center[axis]!,
+  );
+  const bridge = floorSquareRoot(gap[0]! * gap[0]! + gap[1]! * gap[1]!);
+  return normals + root * bridge >= root * scaledExact(modelingTolerance);
+}
+
+/**
+ * T08b-g7 D5 (review R12/R13, a [TECH] G6 extension): the declared
+ * adjacencies whose convex corner provably needs an F1 arc, from the exact
+ * convex plan alone (no query, no certifier): a convex nonparallel vertex
+ * with an admissible arc (never rule Z, whose "no admissible arc" stays
+ * `splineJointUnsupported`) that cannot be absorbed, because D ≤ 0 (no
+ * absorption exists) or its G⁻ ≥ τ (`vertexExceeds`; the U-E upper bound
+ * `fits` is NOT such a proof). Where the authored arc set lacks one of them
+ * the only certifiable plan changes arc presence, so publish reports
+ * `topologyChanged` before the SEL, taking precedence over any SEL failure,
+ * wherever the solve frame's own authoring rule builds that arc (T08b-g7a
+ * review R-1: re-creating the offset then adds it).
+ */
+export function offsetChainRequiredArcs(
+  declared: AdoptablePieces,
+): readonly number[] {
+  const { pieces, vertices, distance, modelingTolerance } = declared;
+  const required: number[] = [];
+  for (const vertex of vertices) {
+    if (classifyOffsetChainVertex(vertex).class !== "nonparallel") continue;
+    const plan = convexVertexPlan(pieces, vertex, distance, modelingTolerance);
+    if (
+      plan &&
+      !plan.zero &&
+      (!plan.forward || vertexExceeds(vertex, distance, modelingTolerance))
+    )
+      required.push(vertex.jointIndex);
+  }
+  return required;
+}
+
 /**
  * T08b-f [TECH F6]: per declared adjacency, true for a concave nonparallel
  * vertex (exact side sign(d)·X > 0) with D > 0, a seed-arc side and U-E's
@@ -1110,10 +1182,33 @@ function decideOffsetChainAdjacencies(
   );
 }
 
+/**
+ * T08b-g7 P2 (review R6): re-queries the given trim adjacencies of an
+ * ADOPTED chain with the resolver's own joint query, on a SEPARATE request
+ * sized exactly by Σ queryCount(j) on the adopted pieces (never the first
+ * pass's meter), with its own exhaustion message. Each result is a trim, or
+ * a failure (a step-2(b) candidate is never taken here).
+ */
+function requeryAdjacencies(
+  input: OffsetChainTopologyInput,
+  indices: readonly number[],
+):
+  | {
+      readonly ok: true;
+      readonly decisions: readonly AdjacencyDecision[];
+    }
+  | OffsetChainFailure
+  | QueryBudgetExhausted {
+  const decisions: AdjacencyDecision[] = [];
+  const decided = decideAdjacencies(input, decisions, true, indices);
+  return decided.ok ? { ok: true, decisions } : decided;
+}
+
 function decideAdjacencies(
   input: OffsetChainTopologyInput,
   decisions: AdjacencyDecision[],
   absorptionFirst: boolean,
+  only?: readonly number[],
 ): AdjacencyDecisions | QueryBudgetExhausted {
   const { pieces, closed, modelingTolerance, query, vertices } = input;
   if (pieces.length === 0) {
@@ -1203,9 +1298,12 @@ function decideAdjacencies(
   const queryCount = (index: number) =>
     1 + candidatePairs(candidatesOf(index)).length;
   let jointCount = 0;
-  for (let index = 0; index < adjacencyCount; index += 1)
-    if (queried(index) || deferred(index)) jointCount += queryCount(index);
-  // M7: one precharged whole-request meter for exactly these joint queries.
+  if (only) for (const index of only) jointCount += queryCount(index);
+  else
+    for (let index = 0; index < adjacencyCount; index += 1)
+      if (queried(index) || deferred(index)) jointCount += queryCount(index);
+  // M7: one precharged whole-request meter for exactly these joint queries
+  // (T08b-g7 P2: a re-query request is a second one, sized the same way).
   const jointRequest = query.openRequest(jointCount);
   /**
    * T08b-g5d (design §3.2 item 3): step-2(b) absorption candidates at a
@@ -1331,7 +1429,9 @@ function decideAdjacencies(
           ok: false,
           exhausted: failure(
             codes.topologyUncertain,
-            `Joint query is not verified (${describe(result)}): the whole-request budget of all ${jointCount} joint queries is exhausted, not necessarily by this joint.`,
+            only
+              ? `Joint re-query after adoption is not verified (${describe(result)}): the re-query request's budget of all ${jointCount} joint queries on the adopted pieces is exhausted, not necessarily by this joint.`
+              : `Joint query is not verified (${describe(result)}): the whole-request budget of all ${jointCount} joint queries is exhausted, not necessarily by this joint.`,
             firstSeed,
           ),
         };
@@ -1390,6 +1490,20 @@ function decideAdjacencies(
       ...(startCurve !== start.curve ? { secondCurve: startCurve } : {}),
     };
   };
+  if (only) {
+    for (const index of only) {
+      const decision = queryAdjacency(index);
+      if ("ok" in decision) return decision;
+      if (decision.kind !== "trim")
+        return failure(
+          codes.topologyUncertain,
+          "The trim re-queried after adoption is not an admissible trim.",
+          pieces[index]!.seedEntityId,
+        );
+      decisions.push(decision);
+    }
+    return { ok: true, decisions };
+  }
   for (let index = 0; index < adjacencyCount; index += 1) {
     const firstSeed = pieces[index]!.seedEntityId;
     const keeper = ruleKeeper(pieces, closed, index);
@@ -1964,7 +2078,9 @@ function buildDeclaredOffsetChainPieces(
     positions[point.pointId] = point.position;
   const pieces: OffsetChainPiece[] = [];
   const sources: DeclaredOffsetPieceSource[] = [];
-  for (const { seedEntityId, reversed } of connectivity.pieces) {
+  for (const [pieceIndex, { seedEntityId, reversed }] of [
+    ...connectivity.pieces.entries(),
+  ]) {
     const entity = definition.entities.find(
       (candidate) => candidate.entityId === seedEntityId,
     );
@@ -2045,7 +2161,11 @@ function buildDeclaredOffsetChainPieces(
         [start, end],
         entity.sweepDirection,
         effective,
-        seedArcMinimumLeaves(connectivity),
+        seedArcMinimumLeaves(
+          connectivity.closed,
+          connectivity.pieces.length,
+          pieceIndex,
+        ),
       );
       if ("ok" in arc) return arc;
       pieces.push(arc.piece);
@@ -2251,17 +2371,6 @@ function seedArcPiece(
         "The offset seed arc has no admissible leaf partition (a full turn, a zero radius vector or a consumer sweep-class disagreement).",
         seedEntityId,
       );
-}
-
-/**
- * The arcs of a two-piece closed chain take at least two rule-B′ leaves
- * (the certifier re-derives the same rule from its request): every terminal
- * leaf then reaches only its own corner.
- */
-function seedArcMinimumLeaves(
-  connectivity: Pick<DeclaredOffsetChainConnectivity, "closed" | "pieces">,
-): 1 | 2 {
-  return connectivity.closed && connectivity.pieces.length === 2 ? 2 : 1;
 }
 
 /**
@@ -3106,6 +3215,17 @@ type AdoptionOutcome<D extends AdoptionDecision> =
         | D
         | { readonly kind: "vertex"; readonly vertex: ResolvedOffsetVertex }
       )[];
+      /**
+       * T08b-g7 P2: the declared vertices adopted on the re-query rung, in
+       * adjacency order (empty: the T08b-d ladder alone sufficed).
+       */
+      readonly rungs: readonly number[];
+      /**
+       * T08b-g7 P2: the trims at the OTHER ends of the rung adopters, in
+       * adjacency order; their stored witnesses are stale (the SEL
+       * re-queries them on the adopted pieces before any assembly).
+       */
+      readonly requeried: readonly number[];
     }
   | {
       readonly ok: false;
@@ -3124,14 +3244,31 @@ type AdoptionOutcome<D extends AdoptionDecision> =
  * geometry unchanged (a line never; a spline with ≥ 2 source spans). A
  * positional closure re-calls with the first pass's first leaf at its end
  * and requires its source spans 0 … n − 2 bitwise unchanged.
+ *
+ * T08b-g7 P2 (the re-query rung, `rungs`): when neither the rule keeper nor
+ * the swap is eligible, the rule keeper and then the swap are tried once
+ * more with a LINE or seed-ARC adopter allowed a trim at its other end (at
+ * either side for an arc; a spline keeps its ≥ 2-source-span rule). That
+ * trim is listed in `requeried`: its witness no longer describes the
+ * adopted piece, so the caller must re-query it on the adopted pieces (the
+ * SEL) or solve it there (the solve frame, whose trims are Newton-solved
+ * after adoption anyway). Sound by reduction: the certifier re-proves every
+ * leaf, vertex and trim of the adopted chain (M0); T2 only forbade applying
+ * a stored witness to changed geometry. `rungs: false` is today's ladder;
+ * `taken.rung` records whether any pass took the rung (a failure after a
+ * rung is not today's failure).
  */
 function adoptDeclaredVertices<D extends AdoptionDecision>(
   declared: AdoptablePieces,
   decisions: readonly D[],
+  rungs = true,
+  taken?: { rung: boolean },
 ): AdoptionOutcome<D> {
   const { pieces } = declared;
   const closed = declared.connectivity.closed;
   const count = pieces.length;
+  const minimumLeaves = (index: number) =>
+    seedArcMinimumLeaves(closed, count, index);
   const kinds = new Map<number, AdoptionDecision["kind"]>();
   for (const decision of decisions)
     kinds.set(decisionIndex(decision), decision.kind);
@@ -3142,16 +3279,25 @@ function adoptDeclaredVertices<D extends AdoptionDecision>(
       return undefined;
     return kinds.get(exitingHere ? (index - 1 + count) % count : index);
   };
-  /** T2 eligibility of the keeper choice at one vertex. */
+  /**
+   * T2 eligibility of the keeper choice at one vertex; `rung` (P2): a line
+   * or arc adopter may have a trim at its other end (re-queried).
+   */
   const eligible = (
     keeper: "first" | "second",
     first: PieceTerminal,
     second: PieceTerminal,
+    rung = false,
   ) => {
     if (count === 1) return keeper === "second";
     const [keep, adopt] =
       keeper === "first" ? [first, second] : [second, first];
     const other = otherAdjacency(adopt.index, adopt === first);
+    if (rung)
+      return (
+        (adopt.piece.kind === "lineSegment" || adopt.piece.kind === "arc") &&
+        other === "trim"
+      );
     if (adopt.piece.kind === "lineSegment") return other !== "trim";
     // T08b-f review R6: an arc is an eligible (swap) adopter of any
     // neighbour's pole. Next to a trim it may adopt only at its natural END
@@ -3166,7 +3312,7 @@ function adoptDeclaredVertices<D extends AdoptionDecision>(
       const again = seedArcAt(
         { ...adopt.piece, end: pole.position },
         source.source,
-        seedArcMinimumLeaves(declared.connectivity),
+        minimumLeaves(adopt.index),
       );
       const before = adopt.piece.splits ?? [];
       return (
@@ -3208,6 +3354,8 @@ function adoptDeclaredVertices<D extends AdoptionDecision>(
       | { readonly kind: "vertex"; readonly vertex: ResolvedOffsetVertex }
     )[] = [];
     const swappable = new Map<number, "first" | "second">();
+    const rungVertices: number[] = [];
+    const requeried = new Set<number>();
     for (const decision of decisions) {
       // An F1 arc end keeps its own emitted pole (no adoption there).
       if (decision.kind !== "vertex") {
@@ -3236,13 +3384,31 @@ function adoptDeclaredVertices<D extends AdoptionDecision>(
         continue;
       }
       const other = vertex.keeper === "first" ? "second" : "first";
-      const keeper =
+      let keeper =
         forced.get(index) ??
         (eligible(vertex.keeper, first, second)
           ? vertex.keeper
           : eligible(other, first, second)
             ? other
             : undefined);
+      // T08b-g7 P2: the re-query rung, rule keeper first, then the swap.
+      if (!keeper && rungs) {
+        keeper = eligible(vertex.keeper, first, second, true)
+          ? vertex.keeper
+          : eligible(other, first, second, true)
+            ? other
+            : undefined;
+        if (keeper) {
+          const adopter = keeper === "first" ? second : first;
+          if (taken) taken.rung = true;
+          rungVertices.push(index);
+          requeried.add(
+            adopter === first
+              ? (adopter.index - 1 + count) % count
+              : adopter.index,
+          );
+        }
+      }
       if (!keeper)
         return {
           ok: false,
@@ -3311,7 +3477,7 @@ function adoptDeclaredVertices<D extends AdoptionDecision>(
                 end: ends.end ?? piece.end,
               },
               source.source,
-              seedArcMinimumLeaves(declared.connectivity),
+              minimumLeaves(index),
             )
           : null;
       if (!adopted)
@@ -3409,6 +3575,8 @@ function adoptDeclaredVertices<D extends AdoptionDecision>(
       ok: true,
       declared: { ...declared, pieces: nextPieces, sources: nextSources },
       decisions: updated,
+      rungs: rungVertices,
+      requeried: [...requeried].sort((left, right) => left - right),
     };
   }
 }
@@ -3466,8 +3634,22 @@ const MAGNITUDE_CODES: ReadonlySet<string> = new Set([
  *   vertex its step-2 resolver failure, a rule-Z vertex its missing arc,
  *   each with the absorption reason appended (the absorbed vertex whose
  *   terminal leaves were reported, else the lowest); after a flip the
- *   original trim failure. Budget exhaustion is always reported as itself. Every path ends
- *   in a verified certificate of the emitted chain or a diagnostic.
+ *   original trim failure. Budget exhaustion is always reported as itself,
+ *   with ONE exception (T08b-g7a review A1): an exhaustion of the re-query
+ *   rung's own two requests is not the verdict (the vertex falls back to
+ *   today's ladder, below); when today's ladder then fails with any other
+ *   code, that code stands and the rung's exhaustion is appended to its
+ *   message. Every path ends in a verified certificate of the emitted chain
+ *   or a diagnostic.
+ * - T08b-g7 P2 (the re-query rung, review R4–R6): where today's adoption
+ *   fails because every adopter is trimmed at its other end, adoption takes
+ *   the re-query rung once; that composition re-queries the stale trims on
+ *   the adopted pieces (a SEPARATE query request sized exactly by
+ *   Σ queryCount(j)) and is certified on a SEPARATE one-attempt certifier
+ *   request. Verified ⇒ done; any failure of it (exhaustion of those two
+ *   requests included) closes the rung and the same iteration re-runs on
+ *   today's ladder, so every other verdict, and every charge of the staged
+ *   request, is today's. The rung re-queries at most once per call.
  * Exceptions (queries, owner misuse, certifier) propagate unchanged.
  */
 export function certifyDeclaredOffsetChain(
@@ -3524,11 +3706,34 @@ function shortArc(pieces: readonly OffsetChainPiece[], arc: ResolvedOffsetArc) {
   return chord[0]! * chord[0]! + chord[1]! * chord[1]! <= reach * reach;
 }
 
+/** A budget-exhaustion verdict (reported as itself, never re-labelled). */
+const isExhaustion = (result: OffsetChainFailure) =>
+  result.message.includes("exact-query-proof-budget-exhausted");
+
 function selectDeclaredOffsetChain(
   declared: DeclaredOffsetChainPieces,
   query: CertifiedNeutralCurveRequestQuery,
   certifier: CertifiedTubePieceChainRequests,
   policy: DeclaredOffsetChainPolicy,
+): OffsetChainTubeStabilityResult {
+  // T08b-g7a review A1: today's verdict after a rung that ran out of its
+  // own budget names that exhaustion (its code is today's).
+  const rung: { exhaustion?: string } = {};
+  const result = selectOnLadders(declared, query, certifier, policy, rung);
+  return result.ok || rung.exhaustion === undefined || isExhaustion(result)
+    ? result
+    : {
+        ...result,
+        message: `${result.message} (The re-query rung was not decided first: ${rung.exhaustion})`,
+      };
+}
+
+function selectOnLadders(
+  declared: DeclaredOffsetChainPieces,
+  query: CertifiedNeutralCurveRequestQuery,
+  certifier: CertifiedTubePieceChainRequests,
+  policy: DeclaredOffsetChainPolicy,
+  rung: { exhaustion?: string },
 ): OffsetChainTubeStabilityResult {
   const input: OffsetChainTopologyInput = {
     pieces: declared.pieces,
@@ -3694,11 +3899,69 @@ function selectDeclaredOffsetChain(
   const settle = (
     result: OffsetChainTubeStabilityResult,
   ): OffsetChainTubeStabilityResult =>
-    result.ok ||
-    !preDeep ||
-    result.message.includes("exact-query-proof-budget-exhausted")
-      ? result
-      : preDeep;
+    result.ok || !preDeep || isExhaustion(result) ? result : preDeep;
+  /**
+   * T08b-g7 P2: the re-query rung is open until one rung composition fails.
+   * A rung composition is ONE side-effect-free trial: the stale trims are
+   * re-queried on the adopted pieces (`requeryAdjacencies`, its own
+   * request, review R6), the chain is assembled and certified on its own
+   * one-attempt request (review R5: the staged request of today's ladder is
+   * sized and charged exactly as before). Verified ⇒ done. ANY failure
+   * (re-query, assembly, E8, binding or certificate; also an exhaustion of
+   * those two separate requests, which never touch today's meters) closes
+   * the rung and re-runs the same iteration on today's ladder (review R4):
+   * the vertex goes down today's U-E arc / F6 query / deep fallbacks, and
+   * every verdict other than the rung's own certificate is today's (an
+   * exhaustion of the rung's requests is recorded in `rung`, review A1).
+   */
+  let rungs = true;
+  const rungTrial = (
+    adopted: Extract<AdoptionOutcome<AdjacencyDecision>, { ok: true }>,
+  ): OffsetChainTubeStabilityResult | null => {
+    const adoptedInput: OffsetChainTopologyInput = {
+      ...input,
+      pieces: adopted.declared.pieces,
+    };
+    let trial = adopted.decisions;
+    if (adopted.requeried.length > 0) {
+      const fresh = requeryAdjacencies(adoptedInput, adopted.requeried);
+      if ("exhausted" in fresh) rung.exhaustion = fresh.exhausted.message;
+      if (!fresh.ok) return null;
+      trial = trial.map(
+        (decision) =>
+          fresh.decisions.find(
+            (item) => decisionIndex(item) === decisionIndex(decision),
+          ) ?? decision,
+      );
+    }
+    const resolved = assembleOffsetChainResolution(adoptedInput, trial);
+    if (!resolved.ok) return null;
+    if (
+      policy.shortArcPretest &&
+      resolved.arcs.some(
+        (arc) =>
+          convex.get(arc.jointIndex)!.switchable &&
+          !convex.get(arc.jointIndex)!.absorptionTried &&
+          shortArc(adopted.declared.pieces, arc),
+      )
+    )
+      return null;
+    const pieceRequest = declaredTubeRequest(resolved, adopted.declared);
+    if ("ok" in pieceRequest) return null;
+    const raw = certifier.openRequest(1).certifyPieceChain(pieceRequest);
+    if (raw.kind !== "verified") {
+      if (raw.code === "exact-query-proof-budget-exhausted")
+        rung.exhaustion = `its one-attempt certifier request is not verified (${raw.kind} ${raw.code}: ${raw.message})`;
+      return null;
+    }
+    const mapped = tubeStabilityResult(
+      resolved,
+      adopted.declared.pieces[0]!.seedEntityId,
+      raw,
+      "leaves",
+    );
+    return mapped.ok ? mapped : null;
+  };
   for (;;) {
     // R6: a failed absorption keeps the pre-absorption verdict.
     const absorptionFailure = (jointIndex: number, reason: string) => {
@@ -3717,7 +3980,14 @@ function selectDeclaredOffsetChain(
         declared.pieces[jointIndex]!.seedEntityId,
       );
     };
-    const adopted = adoptDeclaredVertices(declared, decisions);
+    const taken = { rung: false };
+    const adopted = adoptDeclaredVertices(declared, decisions, rungs, taken);
+    if (taken.rung) {
+      const verified = adopted.ok ? rungTrial(adopted) : null;
+      if (verified) return verified;
+      rungs = false;
+      continue;
+    }
     if (!adopted.ok) {
       // U-E: an absorption-first corner whose adoption fails takes its arc.
       if (mayTakeArc(adopted.jointIndex)) {
@@ -4101,7 +4371,9 @@ export function firstChoiceOffsetChainPlan(
  * own emitted terminal poles, `canonicalArcSupport`). On a certified plan of
  * the same adapter output the pieces are bitwise the certified ones. The
  * returned plan carries the effective keepers; `shortArcs` lists the arcs
- * the SEL's [TECH E8] pre-test would send to absorption.
+ * the SEL's [TECH E8] pre-test would send to absorption. T08b-g7 P2: the
+ * same ladder, re-query rung included (the frame's trims are Newton-solved
+ * on the adopted pieces), so the frame's keepers are the SEL's (G3).
  */
 export function adoptOffsetChainPlan(
   declared: AdoptablePieces,
