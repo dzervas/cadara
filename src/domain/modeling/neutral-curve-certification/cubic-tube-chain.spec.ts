@@ -6834,6 +6834,442 @@ describe("piece tube chain (T08b-f): seed arcs and circles (certifier-input fixt
     });
   });
 
+  // T08b-g7 P1 (Lemma T°2′, review R1–R3): a Lemma-T° line's other monotone
+  // side may meet the implicit circle when its exact direction cone from
+  // C_A misses EVERY closed leaf wedge of A (removed leaves included).
+  /**
+   * Arc C = 0, r = 1, ccw from `arcStart`° to V = 0°, then a concave line
+   * from V at `heading` of length `length`, d = 0.05 (review probe
+   * `p1-removed-leaf`): the offset line meets the emitted circle at X₁ (near
+   * V) and X₂; the request brackets `trimAt` and carries `removed`.
+   */
+  const kinkedLine = (
+    heading: number,
+    length: number,
+    removed: readonly [number, number],
+    trimAt: "x1" | "x2",
+    arcStart: number,
+  ) => {
+    const d = 0.05;
+    const vertex: Vector = [1, 0];
+    const arc = seedArc(
+      [0, 0],
+      [polar([0, 0], 1, arcStart * degrees), vertex],
+      "counterClockwise",
+      { distance: d, ids: ["s", "v"], tube: { removed } },
+    );
+    const rho = (arc as Extract<TubeChainPiece, { kind: "arc" }>).tube.radius;
+    const far = polar(vertex, length, heading * degrees);
+    const piece = line(vertex, far, ["v", "w"], { distance: d });
+    const [e0, e1] = (piece as Extract<TubeChainPiece, { kind: "line" }>).tube
+      .emitted;
+    const step: Vector = [e1[0] - e0[0], e1[1] - e0[1]];
+    const qa = step[0] ** 2 + step[1] ** 2;
+    const qb = 2 * (e0[0] * step[0] + e0[1] * step[1]);
+    const qc = e0[0] ** 2 + e0[1] ** 2 - rho ** 2;
+    const root = Math.sqrt(qb * qb - 4 * qa * qc);
+    const roots = {
+      x1: (-qb - root) / (2 * qa),
+      x2: (-qb + root) / (2 * qa),
+    };
+    const t = roots[trimAt];
+    const angle = Math.atan2(e0[1] + t * step[1], e0[0] + t * step[0]);
+    const along = (value: number) =>
+      Math.atan2(e0[1] + value * step[1], e0[0] + value * step[0]) / degrees;
+    return {
+      roots,
+      along,
+      request: request([arc, piece], {
+        distance: d,
+        trims: [
+          {
+            jointIndex: 0,
+            firstParameterBounds: [angle - 1e-12, angle + 1e-12],
+            secondParameterBounds: [t - 1e-12, t + 1e-12],
+          },
+        ],
+      }),
+    };
+  };
+  const T2_PAIRING =
+    "that side is not the root of its other-end trim against the same circle (T°2)";
+
+  test("T08b-g7 review R1 adversary (certifier input, not owner-reachable): a crossing inside an R7-REMOVED leaf of the IMPLICIT arc at the trimmed end is never skipped; T°2′ tests every leaf wedge, so the far bracket fails closed", () => {
+    // −140° … 0° (rule B′: four 35° leaves), heading −120°, length 0.9:
+    // X₁ ≈ −14.6° lies in the tail leaf the request removes, X₂ ≈ −45.4°
+    // in the retained terminal leaf; the bracket names X₂, skipping X₁.
+    const row = kinkedLine(-120, 0.9, [0, 1], "x2", -140);
+    expect(row.along(row.roots.x1)).toBeGreaterThan(-35);
+    expect(row.along(row.roots.x2)).toBeLessThan(-35);
+    expect(row.along(row.roots.x2)).toBeGreaterThan(-70);
+    expect(certifier.certifyPieceChain(row.request)).toMatchObject({
+      kind: "uncertain",
+      code: "trim-classification-unproven",
+      message: expect.stringContaining(T2_PAIRING),
+    });
+  });
+
+  test("T08b-g7 review R3 (certifier input): a second crossing inside a retained NON-terminal leaf fails closed at T°2′ (the cone meets that leaf's wedge), never relying on K3", () => {
+    // heading −145°, length 1.6: X₁ (the trim) in leaf 3 near V, X₂ ≈
+    // −104° in the retained non-terminal leaf 1 (−105° … −70°).
+    const row = kinkedLine(-145, 1.6, [0, 0], "x1", -140);
+    expect(row.along(row.roots.x2)).toBeLessThan(-70);
+    expect(row.along(row.roots.x2)).toBeGreaterThan(-105);
+    expect(row.roots.x2).toBeLessThan(1);
+    expect(certifier.certifyPieceChain(row.request)).toMatchObject({
+      kind: "uncertain",
+      code: "trim-classification-unproven",
+      message: expect.stringContaining(T2_PAIRING),
+    });
+  });
+
+  /**
+   * T08b-g7 P1 tie fixture (exact on the emitted side): C = 0, a 270° seed
+   * arc ccw from S = (0, 1) to V = (1, 0) (both ends on axes, so S′ ∥ S
+   * exactly), d = 5/256, and a concave line from V along ≈ (−3, 4)/5 to F =
+   * (1/64 + 2⁻⁴⁰, 1.3125). Its EMITTED far end is set exactly to (0,
+   * 1.30078125), ON the arc's start ray (2⁻⁴⁰ from the true offset end, well
+   * inside τ), while the true offset end stays 2⁻⁴⁰ right of that ray (its
+   * reference box, a few 1e-18 wide, never touches it). The offset line
+   * re-crosses the circle at ≈ 74°, between its foot (≈ 36.9°) and 90°,
+   * outside the arc. `shorten` moves F back along the line by 1/128 and
+   * emits it unforged (the cone then stops short of 90° on both sides).
+   */
+  const tieRow = (shorten: boolean) => {
+    const d = 5 / 256;
+    const vertex: Vector = [1, 0];
+    const length = shorten ? 1.640625 - 1 / 128 : 1.640625;
+    const far: Vector = [
+      1 - 0.6 * length + (shorten ? 0 : 2 ** -40),
+      0.8 * length,
+    ];
+    const arc = seedArc([0, 0], [[0, 1], vertex], "counterClockwise", {
+      distance: d,
+      ids: ["s", "v"],
+    });
+    const rho = (arc as Extract<TubeChainPiece, { kind: "arc" }>).tube.radius;
+    const e0: Vector = [1 - 0.8 * d, -0.6 * d];
+    const e1: Vector = shorten
+      ? [far[0] - 0.8 * d, far[1] - 0.6 * d]
+      : [0, 1.30078125];
+    const step: Vector = [e1[0] - e0[0], e1[1] - e0[1]];
+    const qa = step[0] ** 2 + step[1] ** 2;
+    const qb = 2 * (e0[0] * step[0] + e0[1] * step[1]);
+    const qc = e0[0] ** 2 + e0[1] ** 2 - rho ** 2;
+    const root = Math.sqrt(qb * qb - 4 * qa * qc);
+    const t1 = (-qb - root) / (2 * qa);
+    const t2 = (-qb + root) / (2 * qa);
+    const angle =
+      Math.atan2(e0[1] + t1 * step[1], e0[0] + t1 * step[0]) + 2 * Math.PI;
+    return {
+      e1,
+      t2,
+      request: request(
+        [
+          arc,
+          line(vertex, far, ["v", "w"], { distance: d, emitted: [e0, e1] }),
+        ],
+        {
+          distance: d,
+          trims: [
+            {
+              jointIndex: 0,
+              firstParameterBounds: [angle - 1e-12, angle + 1e-12],
+              secondParameterBounds: [t1 - 1e-12, t1 + 1e-12],
+            },
+          ],
+        },
+      ),
+    };
+  };
+
+  test("T08b-g7 P1 tie (certifier input, exact): a rest cone that touches the arc's start ray exactly fails closed (closed wedges); stopped short of it, the same kinked trim certifies (T°2′ control)", () => {
+    const tie = tieRow(false);
+    // Premises: the emitted far end lies exactly on the start ray x = 0,
+    // y > ρ, and the second crossing is on the segment (a real re-crossing).
+    expect(tie.e1).toEqual([0, 1.30078125]);
+    expect(tie.t2).toBeGreaterThan(0.5);
+    expect(tie.t2).toBeLessThan(1);
+    expect(certifier.certifyPieceChain(tie.request)).toMatchObject({
+      kind: "uncertain",
+      code: "trim-classification-unproven",
+      message: expect.stringContaining(T2_PAIRING),
+    });
+    const short = tieRow(true);
+    expect(short.e1[0]).toBeGreaterThan(0);
+    expect(short.t2).toBeLessThan(1);
+    const certificate = certificateOf(
+      certifier.certifyPieceChain(short.request),
+    );
+    expect(
+      certificate.joins.filter((join) => join.kind === "arc-trim"),
+    ).toHaveLength(1);
+  });
+
+  // T08b-g7a review R-3 (meter, observer): the certifying T°2′ control's
+  // whole-request literal (count passes, count − 1 exhausts), and staged
+  // caps inside the T°2′ stage (16 ops per leaf wedge precharged before the
+  // cone; review-fix stage map, T08b-g7a-fix-evidence/mutants/stage): on
+  // the control, ref side 108 406 → precharged 108 534 → cone 133 464, the
+  // emitted side 160 787 → 160 915 → 174 574, cleared at 200 439; on the
+  // tie, ref 88 689 → 88 817 → cone 108 862, emitted 133 308 → failed at
+  // 138 481. A cap inside the stage reports exhaustion, never a T°2 code.
+  const T2_PRIME_PIN = {
+    operations: 231_386,
+    euclideanSteps: 57_319,
+    integerBits: 1_290,
+  };
+  test("T08b-g7a review R-3 (meter): the T°2′ control's whole-request literal (count / count − 1 on all three meters); caps inside the T°2′ stage exhaust as themselves on the control and on the failing tie (never a T°2 code)", () => {
+    const control = () => tieRow(true).request;
+    let snapshot: ExactProofBudgetSnapshot | undefined;
+    certificateOf(
+      createCertifiedCubicTubeChainWithBudgetObserverForTest((value) => {
+        snapshot = value;
+      }).certifyPieceChain(control()),
+    );
+    expect({
+      operations: snapshot!.operations,
+      euclideanSteps: snapshot!.euclideanSteps,
+      integerBits: Math.max(
+        snapshot!.maxStoredBits,
+        snapshot!.maxPreProductBits,
+      ),
+    }).toEqual(T2_PRIME_PIN);
+    const capped = (
+      request: PieceTubeChainRequest,
+      limits: Partial<Record<keyof typeof T2_PRIME_PIN, number>>,
+    ) =>
+      createCertifiedCubicTubeChainWithLowerBudgetForTest(
+        limits,
+      ).certifyPieceChain(request);
+    for (const kind of [
+      "operations",
+      "euclideanSteps",
+      "integerBits",
+    ] as const) {
+      expect(capped(control(), { [kind]: T2_PRIME_PIN[kind] }).kind, kind).toBe(
+        "verified",
+      );
+      expect(
+        capped(control(), { [kind]: T2_PRIME_PIN[kind] - 1 }),
+        kind,
+      ).toEqual(EXHAUSTED_RESULT);
+    }
+    // The failing tie ends INSIDE the T°2′ stage (its emitted side is the
+    // last work): its count reports the T°2 code, count − 1 exhausts.
+    const tie = () => tieRow(false).request;
+    let spent = 0;
+    const failed = createCertifiedCubicTubeChainWithBudgetObserverForTest(
+      (value) => {
+        spent = value.operations;
+      },
+    ).certifyPieceChain(tie());
+    expect(failed).toMatchObject({
+      kind: "uncertain",
+      code: "trim-classification-unproven",
+      message: expect.stringContaining(T2_PAIRING),
+    });
+    expect(spent).toBe(138_481);
+    expect(capped(tie(), { operations: spent })).toEqual(failed);
+    expect(capped(tie(), { operations: spent - 1 })).toEqual(EXHAUSTED_RESULT);
+    for (const [request, caps] of [
+      [control, [108_533, 108_534, 120_000, 160_915, 190_000]],
+      [tie, [88_816, 88_817, 100_000, 135_000]],
+    ] as const)
+      for (const operations of caps)
+        expect(
+          capped(request(), { operations }),
+          `operations ${operations}`,
+        ).toEqual(EXHAUSTED_RESULT);
+  });
+
+  /**
+   * T08b-g7a review R-2 (i) fixture: the tie row's arc and line with the
+   * arc's EMITTED start pole forged η = 2⁻²⁰ ccw off the start ray (S′ ∦ S,
+   * so the reference and emitted wedge sets differ). The true far end F′ =
+   * F + d·ν sits at x = ∓2⁻³⁰ (`crossing`: just past the reference start
+   * ray x = 0, inside A's reference wedge; else just short of it), and the
+   * emitted far end is forged at x = +2⁻³⁰, short of BOTH start rays. So
+   * only the true line against the reference wedges sees the crossing.
+   */
+  const forgedStartRow = (crossing: boolean) => {
+    const d = 5 / 256;
+    const vertex: Vector = [1, 0];
+    const shifted = 1 - d;
+    const eta = 2 ** -20;
+    const arc = seedArc([0, 0], [[0, 1], vertex], "counterClockwise", {
+      distance: d,
+      ids: ["s", "v"],
+      tube: {
+        emitted: [
+          [-eta, Math.sqrt(shifted * shifted - eta * eta)],
+          [shifted, 0],
+        ],
+      },
+    });
+    const rho = (arc as Extract<TubeChainPiece, { kind: "arc" }>).tube.radius;
+    const far: Vector = [0.015625 + (crossing ? -1 : 1) * 2 ** -30, 1.3125];
+    const e0: Vector = [1 - 0.8 * d, -0.6 * d];
+    const e1: Vector = [2 ** -30, 1.30078125];
+    const step: Vector = [e1[0] - e0[0], e1[1] - e0[1]];
+    const qa = step[0] ** 2 + step[1] ** 2;
+    const qb = 2 * (e0[0] * step[0] + e0[1] * step[1]);
+    const qc = e0[0] ** 2 + e0[1] ** 2 - rho ** 2;
+    const root = Math.sqrt(qb * qb - 4 * qa * qc);
+    const t1 = (-qb - root) / (2 * qa);
+    const angle =
+      Math.atan2(e0[1] + t1 * step[1], e0[0] + t1 * step[0]) + 2 * Math.PI;
+    return {
+      trueEnd: [far[0] - 0.8 * d, far[1] - 0.6 * d] as Vector,
+      request: request(
+        [
+          arc,
+          line(vertex, far, ["v", "w"], { distance: d, emitted: [e0, e1] }),
+        ],
+        {
+          distance: d,
+          trims: [
+            {
+              jointIndex: 0,
+              firstParameterBounds: [angle - 1e-12, angle + 1e-12],
+              secondParameterBounds: [t1 - 1e-12, t1 + 1e-12],
+            },
+          ],
+        },
+      ),
+    };
+  };
+
+  test("T08b-g7a review R-2 (i) (certifier input): with S′ ∦ S, a TRUE rest cone past the reference start ray fails closed even though it is clear of the emitted start ray (reference wedges for the true line, emitted for the emitted line); short of it, the same forged arc certifies", () => {
+    const crossing = forgedStartRow(true);
+    // Premises: the true far end is left of x = 0 (inside A's reference
+    // wedge at 90°+) but at an angle below the forged emitted start ray.
+    expect(crossing.trueEnd[0]).toBeLessThan(0);
+    expect(
+      Math.atan2(crossing.trueEnd[1], crossing.trueEnd[0]) - Math.PI / 2,
+    ).toBeLessThan(2 ** -20 / 2);
+    expect(certifier.certifyPieceChain(crossing.request)).toMatchObject({
+      kind: "uncertain",
+      code: "trim-classification-unproven",
+      message: expect.stringContaining(T2_PAIRING),
+    });
+    const clear = forgedStartRow(false);
+    expect(clear.trueEnd[0]).toBeGreaterThan(0);
+    const certificate = certificateOf(
+      certifier.certifyPieceChain(clear.request),
+    );
+    expect(
+      certificate.joins.filter((join) => join.kind === "arc-trim"),
+    ).toHaveLength(1);
+  });
+
+  /**
+   * T08b-g7a review R-2 (ii) fixture: a true offset line exactly THROUGH
+   * C_A. C = 0, r = 25/32, d = 7/32, all source data dyadic; ρ = 18/32.
+   * `arcFirst`: A ccw 150° … 360° = V = (r, 0), then the line V → V +
+   * (−24, 7)/16. Else the mirror order turned by π: the line W → V = (−r,
+   * 0) with W = V + s·(24, 7), s = 3441/65536, then A ccw 180° … 30°. Each
+   * source line lies exactly 7/32 from C, so its exact left offset passes
+   * through C: it meets K at X₁ (the trim, near V) and again at X₂ = −X₁,
+   * inside A. Its rest side runs from the foot (= C, a box straddling C_A)
+   * to the far end, so its corners lie in no one open half-plane.
+   * Line-first, the true far end lies only ≈ 1.4e−4 beyond K and the
+   * EMITTED far end is forged 2⁻¹³ inside the emitted circle (≈ 2.6e−4 from
+   * the true one, within τ), so the emitted rest side is excluded and only
+   * the true side is tested; its far corners come first in the σ-extreme
+   * scan, which, without the half-plane premise, ends on the foot corners
+   * (a cone ≈ [73.7°, 106.3°] that misses A).
+   */
+  const throughCenterRow = (arcFirst: boolean) => {
+    const d = 7 / 32;
+    const radius = 25 / 32;
+    const vertex: Vector = arcFirst ? [radius, 0] : [-radius, 0];
+    const arc = seedArc(
+      [0, 0],
+      arcFirst
+        ? [polar([0, 0], radius, 150 * degrees), vertex]
+        : [vertex, polar([0, 0], radius, 30 * degrees)],
+      "counterClockwise",
+      { distance: d, ids: arcFirst ? ["s", "v"] : ["v", "s"] },
+    );
+    const rho = (arc as Extract<TubeChainPiece, { kind: "arc" }>).tube.radius;
+    const s = 3441 / 65536;
+    const far: Vector = arcFirst
+      ? [radius - 1.5, 0.4375]
+      : [-radius + 24 * s, 7 * s];
+    const unforged = arcFirst
+      ? line(vertex, far, ["v", "w"], { distance: d })
+      : line(far, vertex, ["w", "v"], { distance: d });
+    const emitted = (unforged as Extract<TubeChainPiece, { kind: "line" }>).tube
+      .emitted;
+    const piece = arcFirst
+      ? unforged
+      : line(far, vertex, ["w", "v"], {
+          distance: d,
+          emitted: [
+            [(rho - 2 ** -13) * 0.96, (rho - 2 ** -13) * 0.28],
+            emitted[1],
+          ],
+        });
+    const [e0, e1] = (piece as Extract<TubeChainPiece, { kind: "line" }>).tube
+      .emitted;
+    const step: Vector = [e1[0] - e0[0], e1[1] - e0[1]];
+    const qa = step[0] ** 2 + step[1] ** 2;
+    const qb = 2 * (e0[0] * step[0] + e0[1] * step[1]);
+    const qc = e0[0] ** 2 + e0[1] ** 2 - rho ** 2;
+    const root = Math.sqrt(qb * qb - 4 * qa * qc);
+    const trim = arcFirst ? (-qb - root) / (2 * qa) : (-qb + root) / (2 * qa);
+    const turn = (angle: number) => (angle < 0 ? angle + 2 * Math.PI : angle);
+    const angle = turn(
+      Math.atan2(e0[1] + trim * step[1], e0[0] + trim * step[0]),
+    );
+    const lineBounds = [trim - 1e-12, trim + 1e-12] as const;
+    const arcBounds = [angle - 1e-12, angle + 1e-12] as const;
+    // The true far end: source + d·ν (ν the left unit normal: (−7, −24)/25
+    // arc first, (7, −24)/25 line first).
+    const trueFar: Vector = arcFirst
+      ? [far[0] - 0.28 * d, far[1] - 0.96 * d]
+      : [far[0] + 0.28 * d, far[1] - 0.96 * d];
+    return {
+      trueFar: Math.hypot(trueFar[0], trueFar[1]) - rho,
+      emittedFar: Math.hypot(e0[0], e0[1]) - rho,
+      x2: turn(Math.atan2(trueFar[1], trueFar[0])) / degrees,
+      request: request(arcFirst ? [arc, piece] : [piece, arc], {
+        distance: d,
+        trims: [
+          {
+            jointIndex: 0,
+            firstParameterBounds: arcFirst ? arcBounds : lineBounds,
+            secondParameterBounds: arcFirst ? lineBounds : arcBounds,
+          },
+        ],
+      }),
+    };
+  };
+
+  test.each([
+    ["arc first", true, 150, 180],
+    ["line first, turned by π, emitted side excluded", false, 0, 30],
+  ] as const)(
+    "T08b-g7a review R-2 (ii) (certifier input, %s): a Lemma-T° line whose true offset passes through C_A (its rest corners straddle the centre) and re-crosses K inside A fails closed at T°2′ (no one open half-plane, so no cone)",
+    (_label, arcFirst, low, high) => {
+      const row = throughCenterRow(arcFirst);
+      // Premises: the true rest side ends beyond K, in A's direction range.
+      expect(row.trueFar).toBeGreaterThan(0);
+      expect(row.x2).toBeGreaterThan(low);
+      expect(row.x2).toBeLessThan(high);
+      if (!arcFirst) {
+        expect(row.trueFar).toBeLessThan(2e-4);
+        expect(row.emittedFar).toBeLessThan(0);
+      }
+      expect(certifier.certifyPieceChain(row.request)).toMatchObject({
+        kind: "uncertain",
+        code: "trim-classification-unproven",
+        message: expect.stringContaining(T2_PAIRING),
+      });
+    },
+  );
+
   test("review Q2 A2 (math review; certifier input, not owner-reachable): a forged shared pole whose two emitted terminal leaves cross is rejected by Lemma W steepness, never verified", () => {
     // Arc 1: C₁ = 0 ccw (0, −1) → V = (1, 0); arc 2: C₂ = (½, 0) natural cw
     // 60° → V, traversed reversed; parallel vertex at V. Arc 2's emitted

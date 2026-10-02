@@ -11,7 +11,12 @@ import type {
   SketchId,
   SketchPointId,
 } from "@/contracts/shared/ids";
-import type { SketchDefinition } from "@/contracts/sketch/schema";
+import type {
+  SketchDefinition,
+  SolvedSketchSnapshot,
+} from "@/contracts/sketch/schema";
+import { publishSketchOffsets } from "@/contracts/sketch/offset-publication";
+import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import {
   evaluateSketchDerivationJvp,
   evaluateSketchDerivations,
@@ -44,8 +49,13 @@ import {
   ARCH_POINTS,
   CORNER_MATRIX_SOLVE_TOLERANCES,
   SS_60_OUTGOING,
+  EDITED_FILLET_DELTAS,
+  EDITED_FILLET_DISTANCES,
+  EDITED_FILLET_ROWS,
   createNativeArcOffsetHarness,
   createNativeOffsetChainHarness,
+  editedFilletSketch,
+  withLineLength,
   microSeedArcRows,
   nearCollinearCornerRow,
   offsetFrameChainRows,
@@ -63,6 +73,7 @@ import {
   certifyDeclaredOffsetChain,
   declaredOffsetChainPieces,
   offsetArcSweepAdmissible,
+  offsetChainJointLeaves,
   uncheckedDeclaredOffsetChainPieces,
   type CertifiedNeutralCurveRequestQuery,
   type CertifiedOffsetChainTubeStability,
@@ -82,6 +93,7 @@ import {
   type OffsetFrameVariation,
   type CertifiedOffsetFramePublication,
   type OffsetFramePlan,
+  type OffsetFramePlanEntry,
   type OffsetFramePublication,
   type OffsetFrameRelationship,
   type OffsetSolveFrame,
@@ -1069,10 +1081,34 @@ describe("T08b-g1 frame owner: §2.1 published seed-arc checks (R12 family, 0/2�
     });
   });
 
-  test("wrap-guard adversary (fabricated query bounds, certificate family and solve frame, not owner-reachable): published trimmed ends one ulp apart whose binary64 atan2 sweep wraps to a full turn fail closed", () => {
-    // The flat 37° cap: ONE leaf trimmed at both natural ends (joints 0, 1).
-    const { pair, seeds, distance } = d3Row("line-arc-line flat cap -0.1");
-    const relationship = relationshipOf(seeds, distance);
+  test("wrap-guard adversary (fabricated query bounds, certificate family and solve frame, not owner-reachable): published trimmed ends a few ulps apart (across the two-leaf cap's split, P3) whose binary64 atan2 sweep wraps to a full turn fail closed", () => {
+    // The flat 37° cap trimmed at both natural ends (joints 0, 1), moved to
+    // x ≈ 64: since T08b-g7 P3 (both ends declared) it has TWO leaves split
+    // near −π/2, each trimmed once, so the two ends can only meet across
+    // that split; at x ≈ 64.5 one ulp of x is ≈ 60 r·(one angle ulp), so
+    // angles a few ulps either side of the split round to one point (a tie).
+    const sketch = (() => {
+      const first = arcHarness.line(arcHarness.empty(), [63, 0], [64, 0]);
+      const cap = arcHarness.arc(
+        first.definition,
+        [64.5, 1.5],
+        [64, 0],
+        [65, 0],
+        {
+          start: first.end,
+        },
+      );
+      const last = arcHarness.line(cap.definition, [65, 0], [66, 0], {
+        start: cap.end,
+      });
+      return {
+        definition: last.definition,
+        seeds: [first.id, cap.id, last.id],
+      };
+    })();
+    const distance = -0.1;
+    const { pair } = arcHarness.adapt(sketch, distance);
+    const relationship = relationshipOf(sketch.seeds, distance);
     const genuine = certifiedOf(publishCycle(relationship, pair));
     const arc = genuine.frame.pieces[1]!;
     if (arc.kind !== "arc") throw new Error("not a seed arc");
@@ -1080,18 +1116,27 @@ describe("T08b-g1 frame owner: §2.1 published seed-arc checks (R12 family, 0/2�
       arc.center[0] + arc.radius * Math.cos(angle),
       arc.center[1] + arc.radius * Math.sin(angle),
     ];
-    // Two angles one ulp apart inside the retained cap whose points wrap
-    // under the consumer's binary64 atan2 (a tie): searched, deterministic.
+    // Two angles a few ulps apart, each strictly inside its own trimmed leaf
+    // (the stretched bounds below stay inside the queried leaves), whose
+    // points wrap under the consumer's binary64 atan2: searched around the
+    // shared leaf boundary, deterministic.
     const joints = genuine.certified.resolved.joints;
     expect(arc.sweepDirection).toBe("counterClockwise");
+    expect(arc.splits).toHaveLength(1);
     const low = joints[0]!.secondParameter;
     const high = joints[1]!.firstParameter;
+    const startLeaf = offsetChainJointLeaves(genuine.frame.pieces, 0).second[0]!
+      .bounds;
+    const endLeaf = offsetChainJointLeaves(genuine.frame.pieces, 1).first[0]!
+      .bounds;
     let angles: readonly [number, number] | undefined;
-    for (let sample = 1; sample <= 200 && !angles; sample += 1)
-      for (let step = 0; step < 2000 && !angles; step += 1) {
-        const start = nextUp(low + ((high - low) * sample) / 201, step);
-        const end = nextUp(start);
+    for (let below = 1; below <= 64 && !angles; below += 1)
+      for (let above = 1; above <= 64 && !angles; above += 1) {
+        const start = nextUp(startLeaf[1], -below);
+        const end = nextUp(endLeaf[0], above);
         if (
+          start > low &&
+          end < high &&
           !offsetArcSweepAdmissible(
             arc.center,
             point(start),
@@ -1103,7 +1148,8 @@ describe("T08b-g1 frame owner: §2.1 published seed-arc checks (R12 family, 0/2�
       }
     if (!angles) throw new Error("no wrapping angle pair in the cap");
     const [startAngle, endAngle] = angles;
-    expect(startAngle).toBeLessThan(endAngle);
+    expect(startAngle).toBeLessThan(startLeaf[1]);
+    expect(endAngle).toBeGreaterThan(endLeaf[0]);
     // Fabricated query: the arc-side witness bounds stretched into the
     // cap, still ordered (joint 0 up to the start angle, joint 1 down from
     // the end angle), so the resolver's trim-order check still holds.
@@ -2998,4 +3044,303 @@ describe("T08b-g5d frame: deep trims inside the terminal source span", () => {
     },
     120_000,
   );
+});
+
+describe("T08b-g7a audit C1 (U-G8): edited filleted outlines carrying an offset (native rows, solver → publish, live G17 rounds)", () => {
+  const harness = createNativeArcOffsetHarness({
+    authoring: createNativeArcAuthoring("sketch_g7"),
+    modelingTolerance: TOLERANCE,
+    solveTolerances: SKETCH_DIRECT_EDIT_TOLERANCES,
+  });
+  type Plans = Parameters<typeof solveSketchDefinitionCore>[0]["offsetPlans"];
+  const solve = (definition: SketchDefinition, offsetPlans?: Plans) =>
+    solveSketchDefinitionCore({
+      definition,
+      tolerances: SKETCH_DIRECT_EDIT_TOLERANCES,
+      modelingTolerance: TOLERANCE,
+      partialSolvePolicy: "bestEffort",
+      ...(offsetPlans ? { offsetPlans } : {}),
+    });
+  const publish = (
+    definition: SketchDefinition,
+    solvedSnapshot: SolvedSketchSnapshot,
+  ) =>
+    publishSketchOffsets({
+      definition,
+      solvedSnapshot,
+      modelingTolerance: TOLERANCE,
+      capabilities: { query, certifier },
+    });
+  /**
+   * One live round (G17): solve (with hints), publish, and on planChanged
+   * one re-solve with the certified hint, then publish again. Returns the
+   * first solve's state, the final publication and its plan agreement.
+   */
+  const round = (definition: SketchDefinition, hints?: Plans) => {
+    const first = solve(definition, hints);
+    let snapshot = first.solvedSnapshot;
+    let [publication] = publish(definition, snapshot);
+    let resolved = false;
+    if (publication?.status === "planChanged") {
+      resolved = true;
+      snapshot = solve(definition, [
+        { derivationId: publication.derivationId, plan: publication.plan! },
+      ]).solvedSnapshot;
+      [publication] = publish(definition, snapshot);
+    }
+    return {
+      solveState: first.status.solveState,
+      firstPlan: first.solvedSnapshot.offsetFramePlans?.[0]?.plan,
+      publication: publication!,
+      resolved,
+    };
+  };
+  /** Kinds and effective keepers (never representatives). */
+  const keepers = (
+    plan: { readonly adjacencies: readonly OffsetFramePlanEntry[] } | undefined,
+  ) =>
+    plan?.adjacencies.map((entry) =>
+      entry.kind === "trim" || entry.kind === "arc"
+        ? entry.kind
+        : `${entry.kind}:${entry.keeper}`,
+    );
+  /** The A4 cells (a convex-side kink with G⁻ ≥ τ): D5 `topologyChanged`. */
+  const A4 = new Set([
+    "rect + 1 fillet 0.1 0.2",
+    "rect rotated 0.3 + 2 fillets 0.01 0.2",
+    "rect rotated 0.3 + 2 fillets 0.1 0.05",
+    "rect rotated 0.3 + 2 fillets 0.1 0.2",
+    "hexagon + 2 fillets 0.1 0.2",
+    "rounded rect 0.1 0.2",
+    "rounded rect rotated 0.3 0.1 0.2",
+  ]);
+  const expected = (row: string, distance: number, delta: number) =>
+    row === "rect" || delta === 0.001
+      ? "certified"
+      : distance < 0 || A4.has(`${row} ${distance} ${delta}`)
+        ? codes.topologyChanged
+        : "certified";
+  const D5_MESSAGE = "now needs an offset arc (its corner is proved not to fit";
+
+  test.each(EDITED_FILLET_ROWS.map((row) => [row] as const))(
+    "%s: inward cells certify after the edit except A4 (D5 topologyChanged), outward cells are topologyChanged, every unhinted solve reads solved; the frame's first-choice keepers equal the SEL's (G3/G17)",
+    (row) => {
+      const { sketch, line } = editedFilletSketch(harness, row);
+      for (const distance of EDITED_FILLET_DISTANCES) {
+        const { pair } = harness.adapt(sketch, distance);
+        const base = round(pair.definition);
+        expect(base.publication.status, `${row} ${distance} unedited`).toBe(
+          "certified",
+        );
+        const published: Plans = [
+          {
+            derivationId: base.publication.derivationId,
+            plan: { ...base.publication.plan!, origin: "published" },
+          },
+        ];
+        for (const delta of EDITED_FILLET_DELTAS) {
+          const cell = `${row} ${distance} ${delta}`;
+          const edited = withLineLength(pair.definition, line, delta);
+          const want = expected(row, distance, delta);
+          for (const [label, result] of [
+            ["unhinted", round(edited)],
+            ["hinted", round(edited, published)],
+          ] as const) {
+            const where = `${cell} ${label}`;
+            expect(result.solveState, where).toBe("solved");
+            const { publication } = result;
+            if (want === "certified") {
+              expect(
+                publication.status,
+                `${where}: ${publication.diagnostic?.message}`,
+              ).toBe("certified");
+              // G3/G17 plan agreement: the solve frame's keepers (unhinted:
+              // the SEL's first choice, re-query rung included) are the
+              // certified plan's; a re-solve is a representatives one.
+              if (label === "unhinted")
+                expect(keepers(result.firstPlan), where).toEqual(
+                  keepers(publication.plan),
+                );
+            } else {
+              expect(publication, where).toMatchObject({
+                status: "failed",
+                diagnostic: {
+                  code: want,
+                  message: expect.stringContaining(D5_MESSAGE),
+                },
+              });
+            }
+          }
+        }
+      }
+    },
+    300_000,
+  );
+
+  /**
+   * T08b-g7a review R-1: the cells whose re-created offset does not certify
+   * (every other cell certifies), by their final code. Re-creation is the
+   * user's: the offset removed from the live edited sketch, the source
+   * solved alone from its live positions (it does not move), a fresh native
+   * Offset at the cell's d, then one live round. Those cells author their
+   * arc and fail the certificate (cone at the arc's realization segment) or,
+   * on the hexagon, rule Z on the re-solved pieces; never D5.
+   */
+  const RECREATED_FAILURES = new Map<string, string>([
+    ["rect + 1 fillet 0.1 0.2", codes.topologyUncertain],
+    ["rect rotated 0.3 + 2 fillets 0.1 0.2", codes.topologyUncertain],
+    ["hexagon + 2 fillets 0.1 0.2", codes.splineJointUnsupported],
+    ["rounded rect 0.1 0.2", codes.topologyUncertain],
+    ["rounded rect -0.1 0.2", codes.topologyUncertain],
+    ["rounded rect rotated 0.3 0.1 0.2", codes.topologyUncertain],
+    ["rounded rect rotated 0.3 -0.1 0.2", codes.topologyUncertain],
+  ]);
+
+  test.each(EDITED_FILLET_ROWS.map((row) => [row] as const))(
+    "review R-1 (%s): a fresh native Offset authored on the edited source never reports D5 (the frame's authoring rule gives it every arc D5 would require); its verdicts are pinned",
+    (row) => {
+      const { sketch, line } = editedFilletSketch(harness, row);
+      for (const distance of EDITED_FILLET_DISTANCES) {
+        const { pair } = harness.adapt(sketch, distance);
+        for (const delta of EDITED_FILLET_DELTAS) {
+          const cell = `${row} ${distance} ${delta}`;
+          const live = solve(withLineLength(pair.definition, line, delta));
+          const positions = new Map(
+            live.solvedSnapshot.solvedPoints.map((point) => [
+              point.pointId,
+              point.solvedPosition,
+            ]),
+          );
+          const edited = withLineLength(sketch.definition, line, delta);
+          const source = harness.solved({
+            ...edited,
+            points: edited.points.map((point) => ({
+              ...point,
+              position: positions.get(point.pointId)!,
+            })),
+          });
+          const fresh = harness.adapt(
+            { definition: source.definition, seeds: sketch.seeds },
+            distance,
+          );
+          expect(fresh.relationshipDistance, cell).toBe(distance);
+          const { publication } = round(fresh.pair.definition);
+          const failure = RECREATED_FAILURES.get(cell);
+          if (!failure) {
+            expect(
+              publication.status,
+              `${cell}: ${publication.diagnostic?.message}`,
+            ).toBe("certified");
+            continue;
+          }
+          expect(publication, cell).toMatchObject({
+            status: "failed",
+            diagnostic: { code: failure },
+          });
+          expect(publication.diagnostic!.message, cell).not.toContain(
+            D5_MESSAGE,
+          );
+        }
+      }
+    },
+    300_000,
+  );
+
+  // T08b-g7a review R-1 (the D5 gate): d = 0.1 on L0 → L1 → L2, vertex 0
+  // a 30° convex corner (δ ≈ 0.052 ≥ τ: D5 requires its arc), vertex 1 a
+  // 165° concave hairpin whose inner offsets meet ≈ 0.76 back along each
+  // line. With L2 of length 1.5 the frame's authoring rule builds the chain
+  // with vertex 0's arc, so D5 fires; with L2 of 0.3 the hairpin trim never
+  // converges and has no fallback (D < 0): a fresh Offset cannot be created
+  // at all, so D5's "re-create" is withheld and the SEL's own verdict (the
+  // hairpin's resolver failure) is reported. Publish runs on a solve frame
+  // that absorbs both vertices (a plan hint; D5 never reads the frame).
+  test("review R-1 (D5 gate): D5 fires only where the frame's authoring rule builds the required arc on the published pieces; where a fresh Offset could not be authored at all, the SEL's own fail-closed verdict is reported", () => {
+    const harness = matrixHarnesses.matrix;
+    const publication = (length: number) => {
+      harness.resetSequence();
+      const a = harness.drawLine([], [-1, 0], [0, 0]);
+      const corner: Vector = [Math.cos(Math.PI / 6), -0.5];
+      const b = harness.drawLine([a], [0, 0], corner, {
+        start: harness.lineEnds(a)[1],
+      });
+      const c = harness.drawLine(
+        [a, b],
+        corner,
+        [
+          corner[0] + length * Math.cos((3 * Math.PI) / 4),
+          corner[1] + length * Math.sin((3 * Math.PI) / 4),
+        ],
+        { start: harness.lineEnds(b)[1] },
+      );
+      const pair = harness.solvedPair([a, b, c]);
+      const seeds = pair.definition.entities.map((entity) => entity.entityId);
+      const relationship = relationshipOf(seeds, 0.1, []);
+      const frame = solvedFrame(
+        solveOf(relationship, pair.definition, {
+          origin: "published",
+          adjacencies: [
+            { kind: "absorbed", keeper: "first" },
+            { kind: "absorbed", keeper: "first" },
+          ],
+        }),
+      );
+      return publishOf(relationship, pair, frame);
+    };
+    expect(publication(1.5)).toMatchObject({
+      status: "failed",
+      failure: {
+        code: codes.topologyChanged,
+        message: expect.stringContaining(
+          "The edited corner at declared adjacency 0 now needs an offset arc",
+        ),
+      },
+    });
+    const short = failedOf(publication(0.3));
+    expect(short.failure.code).not.toBe(codes.topologyChanged);
+    expect(short.failure.message).not.toContain("now needs an offset arc");
+    expect(short.failure).toMatchObject({
+      code: codes.splineJointUnsupported,
+      message:
+        "Offset joint needs a fallback arc or tangent-continuous join, which is not supported yet for spline chains.",
+    });
+  }, 120_000);
+
+  // Review R7 (recorded verdict change): a convex corner that fits (U-E)
+  // between two lines both trimmed at their other ends. Before P2 its
+  // adoption failed, the SEL took U-E's arc and an AUTHORED arc there
+  // published; the re-query rung now absorbs it (U-E absorption first), so
+  // the authored arc set changes: `topologyChanged` (G6), as for every
+  // absorbed corner without a trim neighbour. Without an authored arc the
+  // absorption publishes.
+  test("review R7: an authored arc at a corner that now fits (both adopters trimmed at their other ends) is topologyChanged after P2 (the rung absorbs it); with no authored arc it certifies absorbed", () => {
+    const harness = matrixHarnesses.matrix;
+    harness.resetSequence();
+    const a = harness.drawLine([], [-1, -1], [0, 0]);
+    const p = harness.drawLine([a], [0, 0], [1, 0], {
+      start: harness.lineEnds(a)[1],
+    });
+    const q = harness.drawLine([a, p], [1, 0], [2, 0.001], {
+      start: harness.lineEnds(p)[1],
+    });
+    const r = harness.drawLine([a, p, q], [2, 0.001], [2.5, -0.5], {
+      start: harness.lineEnds(q)[1],
+    });
+    const pair = harness.solvedPair([a, p, q, r]);
+    const seeds = pair.definition.entities.map((entity) => entity.entityId);
+    const authored = publishCycle(relationshipOf(seeds, -0.01, [1]), pair);
+    expect(authored.final).toMatchObject({
+      status: "failed",
+      failure: {
+        code: codes.topologyChanged,
+        message: "The certified corner plan changes the authored arc set.",
+      },
+    });
+    const absorbed = certifiedOf(
+      publishCycle(relationshipOf(seeds, -0.01, []), pair),
+    );
+    expect(absorbed.certified.resolved.vertices).toMatchObject([
+      { jointIndex: 1, kind: "absorbed" },
+    ]);
+  }, 120_000);
 });

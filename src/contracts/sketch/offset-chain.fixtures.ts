@@ -1376,7 +1376,8 @@ export function seedArcRows(): readonly SeedArcRow[] {
     lineArcLine(0, 6),
     [-0.5, -1, -2, -4.5],
   );
-  // A flat 37° cap: ONE rule-B′ leaf, trimmed at both ends inward.
+  // A flat 37° cap, trimmed at both ends inward: one rule-B′ leaf by sweep,
+  // two since T08b-g7 P3 (both natural ends are declared adjacencies).
   add("line-arc-line flat cap", lineArcLine(1.5), [0.01, -0.01, 0.1, -0.1]);
   add(
     "arc→spline corner",
@@ -1537,26 +1538,95 @@ export function microSeedArcRows(): readonly SeedArcRow[] {
 
 /**
  * T08b-f1 capacity rows ([TECH] F12, the leaf-scaled ceiling), kept out of
- * the D3 table (their adapter solves take seconds): the rounded 32-gon (64
- * leaves, m = 2; it needs more than one production Euclid ceiling), and the
- * leaf boundary pair: 16 lines + 15 fillets outward (31 piece leaves + 1 F1
- * arc = 32, m = 1) and 17 lines + 16 fillets inward (33 leaves, m = 2).
+ * the D3 table (their adapter solves take seconds): the rounded 32-gon (96
+ * leaves since T08b-g7 P3, m = 3; it needs more than one production Euclid
+ * ceiling), and the leaf boundary pair, re-derived under P3 (every fillet of
+ * a closed chain takes two leaves; review R9): 11 lines + 10 fillets outward
+ * (31 piece leaves + 1 F1 arc = 32, m = 1) and the rounded 11-gon inward (11
+ * + 22 = 33 leaves, m = 2). Before P3 the pair was the 16-gon with 15
+ * fillets outward (32) and the 17-gon with 16 fillets inward (33).
  */
 export function seedArcCapacityRows(): readonly SeedArcRow[] {
   const corners = (count: number) => Array.from({ length: count }, (_, k) => k);
   return [
     { row: "rounded 32-gon", distance: -0.01, build: roundedPolygon(32) },
     {
-      row: "16-gon with 15 fillets",
+      row: "11-gon with 10 fillets",
       distance: -0.01,
-      build: roundedPolygon(16, corners(15)),
+      build: roundedPolygon(11, corners(10)),
     },
-    {
-      row: "17-gon with 16 fillets",
-      distance: 0.01,
-      build: roundedPolygon(17, corners(16)),
-    },
+    { row: "rounded 11-gon", distance: 0.01, build: roundedPolygon(11) },
   ];
+}
+
+/**
+ * T08b-g7 (audit C1, user decision U-G8): the native outlines of the C1
+ * matrix, by `seedArcRows` name. Fillet records no tangency, so an edit of a
+ * source line kinks the fillet ends on it (`withLineLength`).
+ */
+export const EDITED_FILLET_ROWS = [
+  "rect + 1 fillet",
+  "rect rotated 0.3 + 2 fillets",
+  "hexagon + 2 fillets",
+  "rounded rect",
+  "rounded rect rotated 0.3",
+  "rect",
+] as const;
+
+/** The C1 offset distances (d > 0 is inward on these outlines) and edits. */
+export const EDITED_FILLET_DISTANCES = [0.01, -0.01, 0.1, -0.1] as const;
+export const EDITED_FILLET_DELTAS = [0.001, 0.05, 0.2] as const;
+
+/** One C1 outline (a `seedArcRows` builder) and the source line it edits. */
+export function editedFilletSketch(
+  harness: NativeArcOffsetHarness,
+  row: (typeof EDITED_FILLET_ROWS)[number],
+): { readonly sketch: SeedArcSketch; readonly line: SketchEntityId } {
+  const spec = seedArcRows().find((item) => item.row === row);
+  if (!spec) throw new Error(`no row ${row}`);
+  const sketch = spec.build(harness);
+  const line = sketch.seeds.find(
+    (id) =>
+      sketch.definition.entities.find((entity) => entity.entityId === id)
+        ?.kind === "lineSegment",
+  );
+  if (!line) throw new Error(`row ${row} has no source line`);
+  return { sketch, line };
+}
+
+/**
+ * The C1 edit (closeout audit §3.4, T08b-g7 design §1): a `lineLength`
+ * dimension on `lineId` of its current length + Δ, appended as an authored
+ * edit (the native Distance dimension's shape).
+ */
+export function withLineLength(
+  definition: SketchDefinition,
+  lineId: SketchEntityId,
+  delta: number,
+): SketchDefinition {
+  const line = definition.entities.find((entity) => entity.entityId === lineId);
+  if (line?.kind !== "lineSegment") throw new Error("not a line");
+  const at = (pointId: SketchPointId) =>
+    definition.points.find((point) => point.pointId === pointId)!.position;
+  const a = at(line.startPointId);
+  const b = at(line.endPointId);
+  return {
+    ...definition,
+    dimensionIds: [
+      ...definition.dimensionIds,
+      "dimension_c1_edit" as SketchDefinition["dimensionIds"][number],
+    ],
+    dimensions: [
+      ...definition.dimensions,
+      {
+        dimensionId: "dimension_c1_edit",
+        kind: "lineLength",
+        label: "C1 edit",
+        entityId: lineId,
+        value: Math.hypot(b[0] - a[0], b[1] - a[1]) + delta,
+      },
+    ] as SketchDefinition["dimensions"],
+  };
 }
 
 /**

@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   canonicalArcSupport,
   seedArcLeafSplits,
+  seedArcMinimumLeaves,
 } from "@/contracts/sketch/canonical-arc-support";
 
 describe("canonical arc support (T08b-e [TECH E7])", () => {
@@ -98,5 +99,24 @@ describe("seed-arc rule-B′ partition (T08b-f review R1)", () => {
         [0, 1],
       ),
     ).toBeNull();
+  });
+});
+
+describe("seed-arc minimum leaves (T08b-g7 P3, review R10)", () => {
+  test("two leaves exactly when both natural ends are declared adjacencies: every arc of a closed chain of ≥ 2 pieces, every non-terminal arc of an open chain; structural only", () => {
+    // Closed: the arc's two ends are always declared (a lone closed piece
+    // closes on itself: no second adjacency).
+    expect(seedArcMinimumLeaves(true, 1, 0)).toBe(1);
+    for (const count of [2, 3, 8])
+      for (let index = 0; index < count; index += 1)
+        expect(seedArcMinimumLeaves(true, count, index)).toBe(2);
+    // Open: chain-terminal arcs keep one; interior arcs take two.
+    expect(seedArcMinimumLeaves(false, 1, 0)).toBe(1);
+    expect(seedArcMinimumLeaves(false, 2, 0)).toBe(1);
+    expect(seedArcMinimumLeaves(false, 2, 1)).toBe(1);
+    expect(seedArcMinimumLeaves(false, 3, 0)).toBe(1);
+    expect(seedArcMinimumLeaves(false, 3, 1)).toBe(2);
+    expect(seedArcMinimumLeaves(false, 3, 2)).toBe(1);
+    expect(seedArcMinimumLeaves(false, 5, 3)).toBe(2);
   });
 });

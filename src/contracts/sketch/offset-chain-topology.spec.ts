@@ -72,7 +72,10 @@ import {
 } from "@/domain/editor/sketch-session/internals";
 import { createDocumentSolverTolerances } from "@/contracts/solver/schema";
 import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
-import { canonicalArcSupport } from "@/contracts/sketch/canonical-arc-support";
+import {
+  canonicalArcSupport,
+  seedArcLeafSplits,
+} from "@/contracts/sketch/canonical-arc-support";
 import { extractDeclaredOffsetChainConnectivity } from "@/contracts/sketch/offset-chain-connectivity";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import {
@@ -93,6 +96,7 @@ import {
   regularPolygonOutline,
   seedArcCapacityRows,
   uSlotPolygon,
+  withLineLength,
   type AcceptedPair,
   type Authored,
   type EndpointSnaps,
@@ -102,11 +106,14 @@ import {
   type Vector,
 } from "@/contracts/sketch/offset-chain.fixtures";
 import {
+  adoptOffsetChainPlan,
   certifyDeclaredOffsetChain,
   certifyDeclaredOffsetChainWithPolicyForTest,
   certifyOffsetChainTubeStability,
   classifyOffsetChainVertex,
   declaredOffsetChainPieces,
+  firstChoiceOffsetChainPlan,
+  offsetChainRequiredArcs,
   offsetChainRootEnclosure,
   resolveOffsetChainTopologyForTest,
   type CertifiedNeutralCurveRequestQuery,
@@ -6305,8 +6312,9 @@ describe("T08b-d SEL: declared vertices, adoption, U1 absorption", () => {
       expect(run.shape).toEqual([{ vertices: [], arcs: [0] }]);
     });
 
-    test("U-E: an absorption-first corner whose adoption cannot be built (both line neighbours trimmed at their other ends) takes its arc with no attempt spent (native)", () => {
-      const chain = built("matrix", -0.01, (harness) => {
+    /** The U-E line chain: vertex 1 (≈ 0.06° convex, G⁺ < τ) between two 45°-ish trims. */
+    const tightCorner = () =>
+      built("matrix", -0.01, (harness) => {
         const a = harness.drawLine([], [-1, -1], [0, 0]);
         const p = harness.drawLine([a], [0, 0], [1, 0], {
           start: harness.lineEnds(a)[1],
@@ -6323,12 +6331,350 @@ describe("T08b-d SEL: declared vertices, adoption, U1 absorption", () => {
           }),
         ];
       });
-      const run = recordedSel(chain.declared);
+    /**
+     * SEL run recording every certifier request (its attempt count) and
+     * attempt (request index, shape, verdict), and the resolver's request
+     * sizes; `forge` may replace the raw result of one request's attempts.
+     */
+    /** The rung attempt's charges on `tightCorner` (pinned, see the meter row). */
+    const RUNG_METER = { operations: 62_646, euclideanSteps: 14_512 };
+    const ladderRun = (
+      declared: DeclaredOffsetChainPieces,
+      forge?: (
+        request: number,
+        raw: TubePieceChainResult,
+      ) => TubePieceChainResult,
+      limits?: Record<string, number>,
+      inner?: CertifiedNeutralCurveRequestQuery,
+    ) => {
+      const { sizes, query: recorded } = recordingRequests(inner);
+      const requests: number[] = [];
+      const attempts: {
+        request: number;
+        vertices: number[];
+        arcs: number[];
+        kind: string;
+      }[] = [];
+      const result = certifyDeclaredOffsetChain(declared, recorded, {
+        openRequest: (count) => {
+          const index = requests.length;
+          requests.push(count);
+          const inner = (
+            limits
+              ? createCertifiedCubicTubeChainWithLowerBudgetForTest(limits)
+              : pieceCertifier
+          ).openRequest(count);
+          return {
+            certifyPieceChain: (item) => {
+              const raw = inner.certifyPieceChain(item);
+              const final = forge ? forge(index, raw) : raw;
+              attempts.push({
+                request: index,
+                vertices: (item.vertices ?? []).map(
+                  (vertex) => vertex.jointIndex,
+                ),
+                arcs: (item.arcs ?? []).map((arc) => arc.jointIndex),
+                kind: final.kind,
+              });
+              return final;
+            },
+          };
+        },
+      });
+      return { result, requests, attempts, querySizes: sizes };
+    };
+
+    // T08b-g7 P2 (review R7, recorded): before P2 this corner's adoption
+    // failed (both line adopters trimmed at their other ends) and U-E took
+    // its arc with no attempt spent. The re-query rung now honours U-E's
+    // absorption-first rule: the outgoing line adopts the pole, its other-
+    // end trim is re-queried on the adopted line (a second resolver request
+    // of exactly Σ queryCount = 1), and the composition is certified on its
+    // own one-attempt request; today's staged request (sized as before)
+    // issues nothing.
+    test("U-E + T08b-g7 P2 (R7 verdict change): an absorption-first corner whose adopters are both trimmed at their other ends now absorbs on the re-query rung (its own query request of Σ queryCount, its own one-attempt certifier request); before P2 it took its arc (native)", () => {
+      const run = ladderRun(tightCorner().declared);
       if (!run.result.ok) throw new Error(run.result.message);
-      expect(run.shape).toEqual([{ vertices: [], arcs: [1] }]);
+      expect(run.attempts).toEqual([
+        { request: 1, vertices: [1], arcs: [], kind: "verified" },
+      ]);
+      // Today's staged request: 1 + 2 flippable trims + 1 switchable corner.
+      expect(run.requests).toEqual([4, 1]);
+      expect(run.querySizes).toEqual([2, 1]);
       expect(
         run.result.certificate.joins.filter((join) => join.kind === "trim"),
       ).toHaveLength(2);
+      expect(run.result.resolved.vertices).toMatchObject([
+        { jointIndex: 1, kind: "absorbed", keeper: "first" },
+      ]);
+      expect(run.result.resolved.arcs).toHaveLength(0);
+    }, 120_000);
+
+    test("T08b-g7 P2 meter (review R5/R6): the rung's own attempt is pinned count / count − 1 on operations and Euclid; a cap inside it exhausts the rung only: the vertex returns to today's ladder, whose arc attempt then runs under the same cap and reports its own exhaustion", () => {
+      const declared = tightCorner().declared;
+      const snapshots: ExactProofBudgetSnapshot[] = [];
+      const observed = certifyDeclaredOffsetChain(
+        declared,
+        query,
+        createCertifiedCubicTubeChainWithBudgetObserverForTest((snapshot) =>
+          snapshots.push(snapshot),
+        ),
+      );
+      expect(observed.ok).toBe(true);
+      expect(snapshots).toHaveLength(1);
+      const rung = snapshots[0]!;
+      expect({
+        operations: rung.operations,
+        euclideanSteps: rung.euclideanSteps,
+      }).toEqual(RUNG_METER);
+      const under = (limits: Record<string, number>) =>
+        ladderRun(declared, undefined, limits);
+      for (const kind of ["operations", "euclideanSteps"] as const) {
+        const exact = under({ [kind]: RUNG_METER[kind] });
+        expect(exact.attempts, kind).toEqual([
+          { request: 1, vertices: [1], arcs: [], kind: "verified" },
+        ]);
+        // The rung's exhaustion is not the verdict: today's ladder runs (its
+        // arc attempt, on today's staged request) under the same absolute
+        // cap, and exhausts there as itself (today's verdict at that cap).
+        const capped = under({ [kind]: RUNG_METER[kind] - 1 });
+        expect(capped.attempts, kind).toEqual([
+          { request: 1, vertices: [1], arcs: [], kind: "uncertain" },
+          { request: 0, vertices: [], arcs: [1], kind: "uncertain" },
+        ]);
+        expect(capped.result, kind).toMatchObject({
+          ok: false,
+          code: codes.topologyUncertain,
+          message: expect.stringContaining(
+            "exact-query-proof-budget-exhausted",
+          ),
+        });
+      }
+    }, 120_000);
+
+    test("T08b-g7 P2 review R4 (fabricated rung failure): when the re-query composition fails its certificate at leaves NOT incident to the vertex (trim 2's, a magnitude code), the vertex returns to today's ladder exactly: U-E takes its arc on today's staged request and the verdict is today's", () => {
+      const declared = tightCorner().declared;
+      const run = ladderRun(declared, (request, raw) =>
+        request === 1
+          ? {
+              kind: "uncertain",
+              code: "trim-window-unproven",
+              message: "forged rung failure at trim 2's leaves",
+              magnitude: true,
+              first: 2,
+              second: 3,
+            }
+          : raw,
+      );
+      if (!run.result.ok) throw new Error(run.result.message);
+      expect(run.attempts).toEqual([
+        { request: 1, vertices: [1], arcs: [], kind: "uncertain" },
+        { request: 0, vertices: [], arcs: [1], kind: "verified" },
+      ]);
+      expect(run.requests).toEqual([4, 1]);
+      expect(run.result.resolved.arcs.map((arc) => arc.jointIndex)).toEqual([
+        1,
+      ]);
+      expect(
+        run.result.certificate.joins.filter((join) => join.kind === "trim"),
+      ).toHaveLength(2);
+    }, 120_000);
+
+    /**
+     * T08b-g7a review R-3 / A1: the real query, except its second request
+     * (the rung's re-query on `tightCorner`, sized 1) under `limits`, or
+     * observed (each snapshot is that request's running total).
+     */
+    const requeryUnder = (
+      limits?: Record<string, number>,
+      observe?: (snapshot: ExactProofBudgetSnapshot) => void,
+    ): CertifiedNeutralCurveRequestQuery => {
+      let opened = 0;
+      return {
+        openRequest: (count) =>
+          (opened++ !== 1
+            ? query
+            : limits
+              ? createCertifiedNeutralCurveRequestQueryWithLowerBudgetForTest(
+                  limits,
+                )
+              : createCertifiedNeutralCurveRequestQueryWithBudgetObserverForTest(
+                  observe!,
+                )
+          ).openRequest(count),
+      };
+    };
+    /** The rung's re-query request on `tightCorner` (pinned, observer). */
+    const REQUERY_METER = { operations: 4_964, euclideanSteps: 1_130 };
+
+    test("T08b-g7a review R-3 (meter): the rung's re-query request is pinned count / count − 1 on operations and Euclid; a cap inside it closes the rung before its certificate, and the vertex goes down today's ladder exactly (U-E's arc on today's staged request, today's verdict)", () => {
+      const declared = tightCorner().declared;
+      const snapshots: ExactProofBudgetSnapshot[] = [];
+      expect(
+        certifyDeclaredOffsetChain(
+          declared,
+          requeryUnder(undefined, (snapshot) => snapshots.push(snapshot)),
+          pieceCertifier,
+        ).ok,
+      ).toBe(true);
+      expect({
+        operations: snapshots.at(-1)!.operations,
+        euclideanSteps: snapshots.at(-1)!.euclideanSteps,
+      }).toEqual(REQUERY_METER);
+      for (const kind of ["operations", "euclideanSteps"] as const) {
+        const exact = ladderRun(
+          declared,
+          undefined,
+          undefined,
+          requeryUnder({ [kind]: REQUERY_METER[kind] }),
+        );
+        expect(exact.attempts, kind).toEqual([
+          { request: 1, vertices: [1], arcs: [], kind: "verified" },
+        ]);
+        expect(exact.querySizes, kind).toEqual([2, 1]);
+        // count − 1: the re-query exhausts, so the rung closes before its
+        // one-attempt request is opened; today's ladder then takes U-E's
+        // arc on today's staged request (sized as before) and verifies.
+        const capped = ladderRun(
+          declared,
+          undefined,
+          undefined,
+          requeryUnder({ [kind]: REQUERY_METER[kind] - 1 }),
+        );
+        if (!capped.result.ok) throw new Error(capped.result.message);
+        expect(capped.attempts, kind).toEqual([
+          { request: 0, vertices: [], arcs: [1], kind: "verified" },
+        ]);
+        expect(capped.requests, kind).toEqual([4]);
+        expect(capped.querySizes, kind).toEqual([2, 1]);
+      }
+    }, 120_000);
+
+    test("T08b-g7a review A1: a rung that ran out of its own budget never hides that: when today's ladder then fails with another code, that code stands and the rung's exhaustion is appended (a cap inside the re-query, and inside the rung's own attempt); with no rung exhaustion the message is today's alone", () => {
+      const declared = tightCorner().declared;
+      const FORGED = "forged failure of today's arc attempt at trim 2's leaves";
+      /** A non-verified SEL verdict's message (today's code throughout). */
+      const messageOf = (
+        result: ReturnType<typeof certifyDeclaredOffsetChain>,
+      ) => {
+        if (result.ok) throw new Error("unexpectedly verified");
+        expect(result.code).toBe(codes.topologyUncertain);
+        return result.message;
+      };
+      /** Today's staged request (request 0) fails, not magnitude-tagged. */
+      const forgeToday = (request: number, raw: TubePieceChainResult) =>
+        request === 0
+          ? ({
+              kind: "uncertain",
+              code: "trim-window-unproven",
+              message: FORGED,
+              first: 2,
+              second: 3,
+            } as const)
+          : raw;
+      // Control: the rung's certificate forged to fail (R4): today's
+      // failure is reported with no rung note.
+      const plain = ladderRun(declared, (request, raw) =>
+        request === 1
+          ? {
+              kind: "uncertain",
+              code: "trim-window-unproven",
+              message: "forged rung failure",
+              first: 2,
+              second: 3,
+            }
+          : forgeToday(request, raw),
+      );
+      expect(messageOf(plain.result)).toContain(FORGED);
+      expect(messageOf(plain.result)).not.toContain("re-query rung");
+      // The re-query exhausts: today's code, the re-query's exhaustion named.
+      const requery = ladderRun(
+        declared,
+        forgeToday,
+        undefined,
+        requeryUnder({ operations: REQUERY_METER.operations - 1 }),
+      );
+      expect(requery.attempts).toEqual([
+        { request: 0, vertices: [], arcs: [1], kind: "uncertain" },
+      ]);
+      expect(messageOf(requery.result)).toMatch(
+        new RegExp(
+          `${FORGED}.*\\(The re-query rung was not decided first: Joint re-query after adoption is not verified \\(uncertain exact-query-proof-budget-exhausted`,
+        ),
+      );
+      // The rung's own attempt exhausts at its count − 1. (No cap lies
+      // between the rung's attempt and today's arc attempt here: the arc
+      // attempt costs more, 68 740 ops, so its result is forged.) Today's
+      // code, the attempt's exhaustion named.
+      const attempt = ladderRun(declared, forgeToday, {
+        operations: RUNG_METER.operations - 1,
+      });
+      expect(attempt.attempts).toEqual([
+        { request: 1, vertices: [1], arcs: [], kind: "uncertain" },
+        { request: 0, vertices: [], arcs: [1], kind: "uncertain" },
+      ]);
+      expect(messageOf(attempt.result)).toMatch(
+        new RegExp(
+          `${FORGED}.*\\(The re-query rung was not decided first: its one-attempt certifier request is not verified \\(uncertain exact-query-proof-budget-exhausted`,
+        ),
+      );
+    }, 120_000);
+
+    test("T08b-g7a review A3: splines stay off the re-query rung: `tightCorner` with its middle lines drawn as one-source-span (2-point) splines, both trimmed at their other ends, has no rung adopter (the frame's adoption fails there as today) and the SEL opens no re-query and no rung request (native)", () => {
+      const chain = built("native", -0.01, (harness) => {
+        const a = harness.drawLine([], [-1, -1], [0, 0]);
+        const p = harness.drawSpline(
+          [a],
+          [
+            [0, 0],
+            [1, 0],
+          ],
+          { start: harness.lineEnds(a)[1] },
+        );
+        const q = harness.drawSpline(
+          [a, p],
+          [
+            [1, 0],
+            [2, 0.001],
+          ],
+          { start: harness.splineEnds(p)[1] },
+        );
+        return [
+          a,
+          p,
+          q,
+          harness.drawLine([a, p, q], [2, 0.001], [2.5, -0.5], {
+            start: harness.splineEnds(q)[1],
+          }),
+        ];
+      });
+      const { declared } = chain;
+      expect(
+        declared.sources.map((source) =>
+          source.kind === "spline" ? source.sourceSpans.length : 0,
+        ),
+      ).toEqual([0, 1, 1, 0]);
+      const choices = firstChoiceOffsetChainPlan(declared);
+      if ("ok" in choices) throw new Error(choices.message);
+      expect(choices.map((choice) => choice.kind)).toEqual([
+        "trim",
+        "absorbed",
+        "trim",
+      ]);
+      expect(adoptOffsetChainPlan(declared, choices)).toEqual({
+        ok: false,
+        jointIndex: 1,
+        reason: "absorbed vertex adopter is trimmed at its other end",
+      });
+      // Today's verdict: U-E takes the corner's arc on today's staged
+      // request; nothing is re-queried and no rung request is opened.
+      const run = ladderRun(declared);
+      if (!run.result.ok) throw new Error(run.result.message);
+      expect(run.querySizes).toHaveLength(1);
+      expect(run.requests).toHaveLength(1);
+      expect(run.attempts).toEqual([
+        { request: 0, vertices: [], arcs: [1], kind: "verified" },
+      ]);
     }, 120_000);
 
     test("a one-leaf spline piece at an F1 arc end is admitted (the arc-entry cone checks its whole emitted leaf; native 2-point spline → line at 90°)", () => {
@@ -7626,18 +7972,19 @@ describe("T08b-f1 [TECH] F12: the certifier's whole-request ceiling scales with 
     integerBits: Math.max(snapshot.maxStoredBits, snapshot.maxPreProductBits),
   });
 
-  // Capacity row: exhausted before F12 (≈ 120 % of one Euclid ceiling);
-  // 64 leaves give m = 2. Lower limits are absolute, so count / count − 1
-  // pin the unchanged charges.
+  // Capacity row: exhausted before F12 (≈ 120 % of one Euclid ceiling).
+  // T08b-g7 review R9 (P3: every fillet takes two leaves): 96 leaves, m = 3
+  // (was 64, m = 2; operations 6 881 306, Euclid 1 798 813, bits 413).
+  // Lower limits are absolute, so count / count − 1 pin the charges.
   const POLYGON_32_METER = {
-    operations: 6_881_306,
-    euclideanSteps: 1_798_813,
+    operations: 7_390_511,
+    euclideanSteps: 1_922_268,
     integerBits: 413,
   };
-  test("native rounded 32-gon d = −0.01 (32 lines + 32 fillets, 64 leaves, m = 2) needs more than one production Euclid ceiling and verifies; count / count − 1 on operations, Euclid and bits", () => {
+  test("native rounded 32-gon d = −0.01 (32 lines + 32 two-leaf fillets, 96 leaves, m = 3) needs more than one production Euclid ceiling and verifies; count / count − 1 on operations, Euclid and bits", () => {
     const declared = declaredOf("rounded 32-gon -0.01");
     const run = capture(declared);
-    expect(run.certificate.leaves).toHaveLength(64);
+    expect(run.certificate.leaves).toHaveLength(96);
     expect(run.snapshots).toHaveLength(1);
     const meter = meterOf(run.snapshots[0]!);
     expect(meter.euclideanSteps, "premise: above one ceiling").toBeGreaterThan(
@@ -7668,33 +8015,44 @@ describe("T08b-f1 [TECH] F12: the certifier's whole-request ceiling scales with 
     }
   }, 300_000);
 
-  test("the 32 / 33 leaf boundary (m = 1 / m = 2; a declared F1 arc counts one leaf) is fixed by attempt 1 for the whole staged request: a heavy 378-leaf attempt 2 is never rescaled", () => {
-    // 31 piece leaves + 1 F1 arc (the unfilleted outward corner) = 32.
-    const at32 = capture(declaredOf("16-gon with 15 fillets -0.01"));
+  // T08b-g7 review R9: P3 gives every fillet of a closed chain two leaves,
+  // so the pair is re-derived (was 16-gon / 15 fillets −0.01 and 17-gon / 16
+  // fillets +0.01). The new 32-leaf row is lighter (10 fillets, not 15), so
+  // one heavy attempt no longer crosses 2·C: two heavy attempts after it
+  // cross 3·C at m = 1 and fit 6·C at m = 2.
+  test("the 32 / 33 leaf boundary (m = 1 / m = 2; a declared F1 arc counts one leaf) is fixed by attempt 1 for the whole staged request: heavy 378-leaf attempts 2 and 3 are never rescaled", () => {
+    // 11 lines + 10 two-leaf fillets + 1 F1 arc (the unfilleted outward
+    // corner) = 32; the rounded 11-gon inward: 11 + 22 = 33.
+    const at32 = capture(declaredOf("11-gon with 10 fillets -0.01"));
     expect(at32.certificate.leaves).toHaveLength(32);
     expect(at32.certificate.arcs).toHaveLength(1);
-    const at33 = capture(declaredOf("17-gon with 16 fillets 0.01"));
+    const at33 = capture(declaredOf("rounded 11-gon 0.01"));
     expect(at33.certificate.leaves).toHaveLength(33);
     expect(at33.certificate.arcs ?? []).toHaveLength(0);
     const heavy = heavyWrap();
     const euclid = (run: { snapshots: ExactProofBudgetSnapshot[] }) =>
       run.snapshots.at(-1)!.euclideanSteps;
-    // Premises: 32 + heavy exceeds 2·C; 33 + heavy fits 2·2·C.
-    expect(euclid(at32) + euclid(heavy)).toBeGreaterThan(2 * C_EUCLID);
-    expect(euclid(at33) + euclid(heavy)).toBeLessThanOrEqual(4 * C_EUCLID);
+    // Premises: 32 + heavy fits 2·C, 32 + 2·heavy exceeds 3·C; 33 + 2·heavy
+    // fits 3·2·C.
+    expect(euclid(at32) + euclid(heavy)).toBeLessThanOrEqual(2 * C_EUCLID);
+    expect(euclid(at32) + 2 * euclid(heavy)).toBeGreaterThan(3 * C_EUCLID);
+    expect(euclid(at33) + 2 * euclid(heavy)).toBeLessThanOrEqual(6 * C_EUCLID);
     const staged = (first: PieceTubeChainRequest) => {
-      const request = createCertifiedCubicTubeChain().openRequest(2);
+      const request = createCertifiedCubicTubeChain().openRequest(3);
       return [
         request.certifyPieceChain(first),
         request.certifyPieceChain(heavy.requests[0]!),
+        request.certifyPieceChain(heavy.requests[0]!),
       ];
     };
-    const [first32, second32] = staged(at32.requests[0]!);
+    const [first32, second32, third32] = staged(at32.requests[0]!);
     expect(first32!.kind).toBe("verified");
-    expect(second32, "m = 1: stage 2 is 2·C").toMatchObject(exhausted);
-    const [first33, second33] = staged(at33.requests[0]!);
+    expect(second32!.kind, "m = 1: stage 2 is 2·C").toBe("verified");
+    expect(third32, "m = 1: stage 3 is 3·C").toMatchObject(exhausted);
+    const [first33, second33, third33] = staged(at33.requests[0]!);
     expect(first33!.kind).toBe("verified");
-    expect(second33!.kind, "m = 2: stage 2 is 4·C").toBe("verified");
+    expect(second33!.kind).toBe("verified");
+    expect(third33!.kind, "m = 2: stage 3 is 6·C").toBe("verified");
   }, 300_000);
 
   test("the legacy path scales too: the heavy wrap's 378 cubic leaves as ONE open legacy chain reach their clearance verdict at m = 12, and exhaust under one absolute Euclid ceiling", () => {
@@ -8415,4 +8773,386 @@ describe("T08b-g5d (U-G6): deep spline offset trims inside the terminal source s
     },
     120_000,
   );
+});
+
+describe("T08b-g7a: kinked line↔arc corners (P2 re-query rung, P3 two-leaf seed arcs, D5 proved arcs; native SEL and contract rows)", () => {
+  const harness = createNativeArcOffsetHarness({
+    authoring: createNativeArcAuthoring("sketch_g7a"),
+    modelingTolerance: 1e-3,
+    solveTolerances: SKETCH_DIRECT_EDIT_TOLERANCES,
+  });
+  const rotate = (vector: Vector, degrees: number): Vector => {
+    const angle = (degrees * Math.PI) / 180;
+    return [
+      vector[0] * Math.cos(angle) - vector[1] * Math.sin(angle),
+      vector[0] * Math.sin(angle) + vector[1] * Math.cos(angle),
+    ];
+  };
+  const along = (point: Vector, direction: Vector, length = 1): Vector => [
+    point[0] + length * direction[0],
+    point[1] + length * direction[1],
+  ];
+  /** The ccw tangent of a circle about `center` at `point`. */
+  const tangentAt = (center: Vector, point: Vector): Vector => {
+    const length = Math.hypot(point[0] - center[0], point[1] - center[1]);
+    return [-(point[1] - center[1]) / length, (point[0] - center[0]) / length];
+  };
+  const polarPoint = (center: Vector, radius: number, degrees: number) =>
+    along(center, rotate([1, 0], degrees), radius);
+  const declaredOf = (sketch: SeedArcSketchOf, distance: number) => {
+    const { declared } = harness.adapt(sketch, distance);
+    if (!declared.ok) throw new Error(`${declared.code}: ${declared.message}`);
+    return declared;
+  };
+  type SeedArcSketchOf = Parameters<typeof harness.adapt>[0];
+  /** SEL run recording certifier requests / attempts and query request sizes. */
+  const ladderRun = (declared: DeclaredOffsetChainPieces) => {
+    const { sizes, query: recorded } = recordingRequests();
+    const requests: number[] = [];
+    const attempts: { request: number; vertices: number[]; kind: string }[] =
+      [];
+    const certifier = createCertifiedCubicTubeChain();
+    const result = certifyDeclaredOffsetChain(declared, recorded, {
+      openRequest: (count) => {
+        const index = requests.length;
+        requests.push(count);
+        const inner = certifier.openRequest(count);
+        return {
+          certifyPieceChain: (item) => {
+            const raw = inner.certifyPieceChain(item);
+            attempts.push({
+              request: index,
+              vertices: (item.vertices ?? []).map(
+                (vertex) => vertex.jointIndex,
+              ),
+              kind: raw.kind,
+            });
+            return raw;
+          },
+        };
+      },
+    });
+    return { result, requests, attempts, querySizes: sizes };
+  };
+  const leavesOf = (
+    certificate: OffsetChainTubeStabilityCertificate,
+    piece: number,
+  ) =>
+    certificate.seedArcs?.find((record) => record.piece === piece)?.leaves
+      .length;
+
+  /**
+   * Open chain S → A → L1 (review R8): a native 3-point spline S, then a ccw
+   * quarter arc A (r = 1) from S's end along S's end chord (a small kink,
+   * absorbed at d = 0.01), then a line at an 11° concave kink (a Lemma-T°
+   * trim). A adopts S's pole at its natural START (rank arc < spline; ρ_o
+   * and its partition re-derived), next to its end trim (never eligible
+   * before P2), and S cannot adopt an arc's pole: A adopts on the rung.
+   */
+  const arcStartRung = () => {
+    const points: readonly Vector[] = [
+      [-2, -0.3],
+      [-1, -0.05],
+      [0, 0],
+    ];
+    const spline = harness.spline(harness.empty(), points);
+    const entity = spline.definition.entities.at(-1)!;
+    if (entity.kind !== "spline") throw new Error("not a spline");
+    const chord = Math.hypot(1, 0.05);
+    const t: Vector = [1 / chord, 0.05 / chord];
+    const start: Vector = [0, 0];
+    const center: Vector = [-t[1], t[0]];
+    const end = along(
+      center,
+      rotate([start[0] - center[0], start[1] - center[1]], 90),
+    );
+    const a = harness.arc(spline.definition, center, start, end, {
+      start: entity.pointOccurrences.at(-1)!.pointId,
+    });
+    const l1 = harness.line(
+      a.definition,
+      end,
+      along(end, rotate(tangentAt(center, end), 11)),
+      { start: a.end },
+    );
+    return { definition: l1.definition, seeds: [spline.id, a.id, l1.id] };
+  };
+
+  test("T08b-g7 P2 review R8: an ARC adopts on the re-query rung at its natural start (ρ_o and its partition re-derived); its end trim is re-queried on the adopted arc (next to a spline keeper) with a request of Σ queryCount = 2 (a two-leaf arc side, P3), and the chain certifies on the rung's own attempt", () => {
+    const run = ladderRun(declaredOf(arcStartRung(), 0.01));
+    if (!run.result.ok) throw new Error(run.result.message);
+    expect(run.result.resolved.vertices).toMatchObject([
+      { jointIndex: 0, kind: "absorbed", keeper: "first" },
+    ]);
+    expect(run.result.resolved.joints.map((joint) => joint.jointIndex)).toEqual(
+      [1],
+    );
+    expect(run.attempts).toEqual([
+      { request: 1, vertices: [0], kind: "verified" },
+    ]);
+    expect(run.requests.at(-1)).toBe(1);
+    // First pass, then the re-query of trim 1 on the adopted pieces: 1 + the
+    // arc side's one inner leaf.
+    expect(run.querySizes.at(-1)).toBe(2);
+    expect(leavesOf(run.result.certificate, 1)).toBe(2);
+    // ρ_o re-derived from the adopted start (S's emitted end pole).
+    const adoptedArc = run.result.resolved.input.pieces[1]!;
+    const kept = run.result.resolved.input.pieces[0]!;
+    if (adoptedArc.kind !== "arc" || kept.kind !== "derivedCubic")
+      throw new Error("not an arc after a spline");
+    expect(adoptedArc.start).toEqual(kept.spans.at(-1)!.poles[3]);
+    expect(adoptedArc.radius).toBe(
+      canonicalArcSupport(
+        adoptedArc.center,
+        adoptedArc.start,
+        adoptedArc.end,
+        adoptedArc.sweepDirection,
+      ).radius,
+    );
+  }, 120_000);
+
+  /**
+   * Open chain L0 → A → L1 (review R10): a 40° arc (one rule-B′ leaf by
+   * sweep) trimmed at its START by a 10° concave kink, joined at its END to
+   * a 0.01°-kinked line (absorbed). Its stepped reference R′ (ρ_s at the
+   * trim, |V − C| at the declared end, unequal in binary64) needs the step
+   * on an interior knot: P3 gives this open-chain arc two leaves.
+   */
+  const steppedOpenArc = () => {
+    const center: Vector = [0.3, 1.1];
+    const radius = Math.hypot(0.3, 1.1);
+    const start: Vector = [0, 0];
+    const startAngle = (Math.atan2(-1.1, -0.3) * 180) / Math.PI;
+    const end = polarPoint(center, radius, startAngle + 40);
+    const a = harness.arc(harness.empty(), center, start, end);
+    const l0 = harness.line(
+      a.definition,
+      along(start, rotate(tangentAt(center, start), -10), -1),
+      start,
+      { end: a.start },
+    );
+    const l1 = harness.line(
+      l0.definition,
+      end,
+      along(end, rotate(tangentAt(center, end), 0.01)),
+      { start: a.end },
+    );
+    return { definition: l1.definition, seeds: [l0.id, a.id, l1.id] };
+  };
+
+  test("T08b-g7 P3 review R10 (open chain): a one-leaf-by-sweep arc whose natural start and end are both declared adjacencies takes two leaves on BOTH sides (owner and certifier share `seedArcMinimumLeaves`), so its stepped reference sits on the knot and the kinked inward trim certifies", () => {
+    const declared = declaredOf(steppedOpenArc(), 0.01);
+    const arc = declared.pieces[1]!;
+    if (arc.kind !== "arc") throw new Error("not an arc");
+    expect(arc.splits).toHaveLength(1);
+    // The sweep alone admits one leaf (the predicate, not geometry, splits).
+    expect(
+      seedArcLeafSplits(
+        arc.center,
+        arc.start,
+        arc.end,
+        arc.sweepDirection,
+        (
+          declared.sources[1] as Extract<
+            DeclaredOffsetPieceSource,
+            { kind: "arc" }
+          >
+        ).source[0],
+        (
+          declared.sources[1] as Extract<
+            DeclaredOffsetPieceSource,
+            { kind: "arc" }
+          >
+        ).source[1],
+      ),
+    ).toEqual([]);
+    const result = certifyDeclaredOffsetChain(
+      declared,
+      query,
+      createCertifiedCubicTubeChain(),
+    );
+    if (!result.ok) throw new Error(`${result.code}: ${result.message}`);
+    expect(leavesOf(result.certificate, 1)).toBe(2);
+    expect(result.resolved.joints.map((joint) => joint.jointIndex)).toEqual([
+      0,
+    ]);
+    expect(
+      result.certificate.joins.filter((join) => join.kind === "arc-trim"),
+    ).toHaveLength(1);
+  }, 120_000);
+
+  test("T08b-g7 P3 review R11: a micro fillet (r = 10⁻³, a 60° hexagon corner) in a closed chain keeps an admitted two-leaf partition and the outward offset certifies", () => {
+    const hexagon = harness.polygon(
+      harness.empty(),
+      Array.from(
+        { length: 6 },
+        (_, k): Vector => polarPoint([0, 0], 1, 60 * k + 5.7),
+      ),
+    );
+    const definition = harness.fillet(
+      hexagon.definition,
+      hexagon.ids[0]!,
+      hexagon.ids[1]!,
+      1e-3,
+    );
+    const declared = declaredOf(
+      { definition, seeds: harness.lineArcSeeds(definition) },
+      -0.01,
+    );
+    const arc = declared.pieces.find((piece) => piece.kind === "arc");
+    if (arc?.kind !== "arc") throw new Error("no fillet arc");
+    expect(arc.splits).toHaveLength(1);
+    const result = certifyDeclaredOffsetChain(
+      declared,
+      query,
+      createCertifiedCubicTubeChain(),
+    );
+    if (!result.ok) throw new Error(`${result.code}: ${result.message}`);
+    expect(
+      result.certificate.seedArcs?.map((record) => record.leaves.length),
+    ).toEqual([2]);
+  }, 120_000);
+
+  test("T08b-g7a review A4 (R11 intent): an ADOPTED inward micro fillet (r = 10⁻³ at a 60° hexagon corner, the line after it edited by Δ = 10⁻⁴, a 2.86° kink, d = 5·10⁻⁴ < r) adopts the line's pole at its start (shift ≈ 0.1 of its half sweep), keeps an admitted two-leaf partition and certifies (the tip certified it too)", () => {
+    const hexagon = harness.polygon(
+      harness.empty(),
+      Array.from(
+        { length: 6 },
+        (_, k): Vector => polarPoint([0, 0], 1, 60 * k + 5.7),
+      ),
+    );
+    const definition = harness.fillet(
+      hexagon.definition,
+      hexagon.ids[0]!,
+      hexagon.ids[1]!,
+      1e-3,
+    );
+    const seeds = harness.lineArcSeeds(definition);
+    const line = seeds.find(
+      (id) =>
+        definition.entities.find((entity) => entity.entityId === id)?.kind ===
+        "lineSegment",
+    )!;
+    const declared = declaredOf(
+      { definition: withLineLength(definition, line, 1e-4), seeds },
+      5e-4,
+    );
+    const arcIndex = declared.pieces.findIndex((piece) => piece.kind === "arc");
+    const arc = declared.pieces[arcIndex]!;
+    if (arc.kind !== "arc") throw new Error("no fillet arc");
+    expect(arc.splits).toHaveLength(1);
+    const result = certifyDeclaredOffsetChain(
+      declared,
+      query,
+      createCertifiedCubicTubeChain(),
+    );
+    if (!result.ok) throw new Error(`${result.code}: ${result.message}`);
+    const before =
+      (arcIndex - 1 + declared.pieces.length) % declared.pieces.length;
+    expect(
+      result.resolved.vertices.find((vertex) => vertex.jointIndex === before),
+    ).toMatchObject({ kind: "absorbed", keeper: "first" });
+    // The arc adopted the line's emitted pole at its natural start.
+    const adopted = result.resolved.input.pieces[arcIndex]!;
+    if (adopted.kind !== "arc") throw new Error("not an arc");
+    expect(adopted.start).not.toEqual(arc.start);
+    const angle = (point: Vector) =>
+      Math.atan2(point[1] - arc.center[1], point[0] - arc.center[0]);
+    const shift = Math.abs(angle(adopted.start) - angle(arc.start));
+    const halfSweep = Math.abs(angle(arc.end) - angle(arc.start)) / 2;
+    expect(shift / halfSweep).toBeGreaterThan(0.05);
+    expect(shift / halfSweep).toBeLessThan(0.5);
+    expect(
+      result.certificate.seedArcs?.map((record) => record.leaves.length),
+    ).toEqual([2]);
+  }, 120_000);
+
+  /**
+   * D5 contract rows (review R12): one convex declared line↔line vertex at
+   * V = 0 with u₁ = (1, 0), d = −2⁻¹⁰⁷⁴ and τ = 5·2⁻¹⁰⁷⁴, so δ ≈ 2⁻¹⁰⁸⁴ and
+   * G ≈ |g| on the subnormal grid, where the floor and ceiling square roots
+   * of |g|² differ by one unit. Only the convex plan's data is read: the
+   * two pieces' emitted terminal poles A′ (piece 0's end) and B′ (piece 1's
+   * start) decide rule Z.
+   */
+  const unit = Number.MIN_VALUE;
+  const d5Chain = (
+    gap: Vector,
+    outgoing: Vector,
+    poles: readonly [Vector, Vector] = [
+      [0, 1],
+      [-1, 1],
+    ],
+  ) =>
+    ({
+      pieces: [
+        {
+          kind: "lineSegment",
+          seedEntityId: "sketch_entity_d5_a",
+          reversed: false,
+          start: [-1, 1],
+          end: poles[0],
+        },
+        {
+          kind: "lineSegment",
+          seedEntityId: "sketch_entity_d5_b",
+          reversed: false,
+          start: poles[1],
+          end: [1, 1],
+        },
+      ],
+      vertices: [
+        {
+          jointIndex: 0,
+          authority: { kind: "sharedPoint", pointId: "sketch_point_d5" },
+          first: {
+            pointId: undefined,
+            vertex: [0, 0],
+            tangent: [
+              [-1, 0],
+              [0, 0],
+            ],
+          },
+          second: {
+            pointId: undefined,
+            vertex: gap,
+            tangent: [gap, [gap[0] + outgoing[0], gap[1] + outgoing[1]]],
+          },
+        },
+      ],
+      distance: -unit,
+      modelingTolerance: 5 * unit,
+    }) as unknown as Parameters<typeof offsetChainRequiredArcs>[0];
+
+  test("T08b-g7 D5 review R12 (contract): a corner whose U-E upper bound G⁺ reaches τ but whose lower bound G⁻ does not (|g| = √20 units, τ = 5 units: ⌊√20⌋ = 4 < 5 ≤ ⌈√20⌉) is NOT a proved arc; |g| = 5 units (G⁻ = τ) is", () => {
+    const outgoing: Vector = [1, 2 ** -10];
+    expect(
+      offsetChainRequiredArcs(d5Chain([4 * unit, 2 * unit], outgoing)),
+    ).toEqual([]);
+    expect(offsetChainRequiredArcs(d5Chain([5 * unit, 0], outgoing))).toEqual([
+      0,
+    ]);
+    // D ≤ 0 (a 135° corner): no absorption exists, so the arc is proved.
+    expect(offsetChainRequiredArcs(d5Chain([0, 0], [-1, 1]))).toEqual([0]);
+  });
+
+  test("T08b-g7 D5 review R12 (contract): rule Z (A′ = B′, or reversed ends) is never a proved arc, whatever G⁻ and D (no admissible arc: `splineJointUnsupported` stays)", () => {
+    const outgoing: Vector = [1, 2 ** -10];
+    const same: readonly [Vector, Vector] = [
+      [0, 1],
+      [0, 1],
+    ];
+    const reversed: readonly [Vector, Vector] = [
+      [-1, 1],
+      [0, 1],
+    ];
+    for (const poles of [same, reversed]) {
+      expect(
+        offsetChainRequiredArcs(d5Chain([5 * unit, 0], outgoing, poles)),
+      ).toEqual([]);
+      expect(offsetChainRequiredArcs(d5Chain([0, 0], [-1, 1], poles))).toEqual(
+        [],
+      );
+    }
+  });
 });

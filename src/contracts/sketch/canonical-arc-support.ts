@@ -41,9 +41,9 @@ const SEED_ARC_SPLIT_DEPTH = 4;
  * one leaf iff BOTH satisfy σ(u × v) > 0 and 2u·v > σ(u × v) (a sweep below
  * atan 2 ≈ 63.4°), exactly; otherwise it splits at the binary64 [cos, sin] of
  * the float half-angle, admitted only when strictly inside both wedges.
- * `minimumLeaves` = 2 forces the first split (the arcs of a two-piece
- * closed chain: each terminal leaf then reaches only its own corner, so a
- * joint query never sees the other corner's crossing). Returns the interior
+ * `minimumLeaves` = 2 forces the first split (`seedArcMinimumLeaves`: each
+ * terminal leaf then reaches only its own corner, so a joint query never
+ * sees the other corner's crossing). Returns the interior
  * split directions in natural order ([] for one leaf), or null for a zero
  * vector, an exactly full turn (a ∥ b in the same sense) or a failed
  * admission within depth 4. Bounded BigInt (unmetered, the T4 pattern): it
@@ -120,6 +120,24 @@ export function seedArcLeafSplits(
     [a, b, s, e],
     0,
   );
+}
+
+/**
+ * The minimum rule-B′ leaf count of seed arc `pieceIndex` in a declared
+ * chain of `pieceCount` pieces (T08b-f; T08b-g7 P3, review R10): 2 when the
+ * arc's natural start and natural end are both declared adjacencies (trim,
+ * vertex or F1 arc), i.e. every arc of a closed chain of at least two
+ * pieces and every non-terminal arc of an open chain; else 1. Structural
+ * only (never geometry), and the ONE predicate both the resolver's owner
+ * and the tube certifier evaluate, so the two partitions cannot drift.
+ */
+export function seedArcMinimumLeaves(
+  closed: boolean,
+  pieceCount: number,
+  pieceIndex: number,
+): 1 | 2 {
+  if (closed) return pieceCount >= 2 ? 2 : 1;
+  return pieceIndex > 0 && pieceIndex < pieceCount - 1 ? 2 : 1;
 }
 
 export function canonicalArcSupport(

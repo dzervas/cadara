@@ -17,9 +17,11 @@ import {
   firstChoiceOffsetChainPlan,
   offsetArcSweepAdmissible,
   offsetChainJointLeaves,
+  offsetChainRequiredArcs,
   uncheckedDeclaredOffsetChainPieces,
   type CertifiedNeutralCurveRequestQuery,
   type CertifiedOffsetChainTubeStability,
+  type DeclaredOffsetChainPieces,
   type DeclaredOffsetPieceSource,
   type OffsetChainAdjacencyPlan,
   type OffsetChainDomainEnd,
@@ -871,7 +873,7 @@ const sameArcSet = (first: readonly number[], second: readonly number[]) => {
  * absorption (step 2(b)). Authored arc presence (G6) is never switched.
  */
 function runPlan(
-  declared: UncheckedDeclaredOffsetChainPieces,
+  declared: UncheckedDeclaredOffsetChainPieces | DeclaredOffsetChainPieces,
   initial: readonly OffsetFramePlanEntry[],
   choices: readonly OffsetChainFirstChoice[] | undefined,
   authoredArcs: boolean,
@@ -1238,6 +1240,18 @@ function encode(value: unknown) {
   });
 }
 
+/**
+ * The arc set the frame authors on `declared` when a fresh Offset is created
+ * (`solveOffsetFrame` without authored arcs: the first choice through
+ * `runPlan`); [] when that frame does not build (creation fails).
+ */
+function authoredArcs(declared: DeclaredOffsetChainPieces) {
+  const choices = firstChoiceOffsetChainPlan(declared);
+  if ("ok" in choices) return [];
+  const run = runPlan(declared, choices, choices, false);
+  return run.ok ? arcSet(run.plan) : [];
+}
+
 /** The certified plan of a verified SEL resolution (origin `certified`). */
 function certifiedPlanOf(
   resolved: OffsetChainTopologySuccess,
@@ -1504,6 +1518,30 @@ export function publishOffsetFrame(input: {
     modelingTolerance,
   });
   if (!declared.ok) return failed(declared);
+  // T08b-g7 D5 ([TECH] G6 extension, review R12/R13): a convex corner that
+  // provably needs an F1 arc the authored arc set lacks is `topologyChanged`
+  // before the SEL (exact plan data only), over any other SEL failure.
+  // T08b-g7a review R-1: only where the frame's own authoring rule (the
+  // first choice run with no authored arcs, as a fresh Offset is created)
+  // builds that arc on these pieces, so re-creating the offset adds it;
+  // elsewhere the SEL's own fail-closed verdict stands.
+  const missing = relationship.arcJoints
+    ? offsetChainRequiredArcs(declared).filter(
+        (index) => !relationship.arcJoints!.includes(index),
+      )
+    : [];
+  const required =
+    missing.length > 0
+      ? missing.find((index) => authoredArcs(declared).includes(index))
+      : undefined;
+  if (required !== undefined)
+    return failed(
+      chainFailure(
+        codes.topologyChanged,
+        `The edited corner at declared adjacency ${required} now needs an offset arc (its corner is proved not to fit within the modelling tolerance), which the authored arc set does not have: re-create the offset.`,
+        declared.pieces[required]!.seedEntityId,
+      ),
+    );
   const certified = input.memo
     ? input.memo.certify(declared, input.query, input.certifier)
     : certifyDeclaredOffsetChain(declared, input.query, input.certifier);
