@@ -2597,6 +2597,89 @@ describe("T08b-g2 frame derivatives: unavailable directions, tangent authority, 
   });
 });
 
+describe("T08b-g6 review R2: frame-JVP rows for the deleted resolver JVP's claims", () => {
+  test("an arc end adopted from a line pole varies as the keeper line's own end (native rect + 1 fillet d = 0.01: parallel vertex 0, keeper line → adopter arc)", () => {
+    const target = d3DerivativeRow("rect + 1 fillet 0.01");
+    const { relationship, frame, derivatives } = frameAndDerivatives(target);
+    expect(frame.plan.adjacencies[0]).toEqual({
+      kind: "parallel",
+      keeper: "first",
+    });
+    const line = frame.pieces[0]!;
+    const arc = frame.pieces[1]!;
+    if (
+      line.kind !== "lineSegment" ||
+      arc.kind !== "arc" ||
+      line.reversed ||
+      arc.reversed
+    )
+      throw new Error("shape");
+    // Vertex 1 (keeper arc → line trimmed at its other end) is a d-A3 plan
+    // boundary, where a generic direction leaves the plan (the JVP is the
+    // documented one-sided derivative), so this row checks vertex 0's
+    // published data only, not every datum.
+    const plan: OffsetFramePlan = {
+      origin: "published",
+      adjacencies: frame.plan.adjacencies,
+    };
+    const side = (variation: OffsetFrameVariation, h: number) =>
+      solvedFrame(
+        solveOffsetFrame(
+          {
+            relationship,
+            definition: perturbed(target.pair.definition, variation, h),
+            modelingTolerance: TOLERANCE,
+          },
+          plan,
+        ),
+      );
+    const random = prng(31);
+    for (let trial = 0; trial < 3; trial += 1) {
+      const variation = randomVariation(derivatives.sourceDofs, random);
+      const jvp = jvpOf(derivatives.jvp([variation])[0]);
+      const keeperEnd = jvp.lineArcEndpoints.get(line.seedEntityId)!.end;
+      expect(
+        encode(jvp.lineArcEndpoints.get(arc.seedEntityId)!.start),
+        "the adopter arc's start is the keeper line's end variation",
+      ).toBe(encode(keeperEnd));
+      const plus = side(variation, FD_STEP);
+      const minus = side(variation, -FD_STEP);
+      for (const [seed, end] of [
+        [line.seedEntityId, "end"],
+        [arc.seedEntityId, "start"],
+      ] as const)
+        for (const axis of [0, 1] as const) {
+          const fd =
+            (plus.lineArcEndpoints.get(seed)![end][axis] -
+              minus.lineArcEndpoints.get(seed)![end][axis]) /
+            (2 * FD_STEP);
+          expect(
+            Math.abs(fd - keeperEnd[axis]) /
+              Math.max(1, Math.abs(keeperEnd[axis])),
+            `${seed} ${end}[${axis}]: FD ${fd} vs JVP ${keeperEnd[axis]}`,
+          ).toBeLessThanOrEqual(FD_BOUND);
+        }
+    }
+  }, 60_000);
+
+  test("the frame JVP only differentiates a frame its definition reproduces (a moved definition throws, as the resolver JVP's same-input guard did)", () => {
+    const target = derivativeRow("SL-90 0.01");
+    const { input, frame, derivatives } = frameAndDerivatives(target);
+    const variation = randomVariation(derivatives.sourceDofs, prng(5));
+    expect(derivatives.jvp([variation])).toHaveLength(1);
+    const moved = prepareOffsetFrameDerivatives(
+      {
+        ...input,
+        definition: perturbed(target.pair.definition, variation, 1e-3),
+      },
+      frame,
+    );
+    expect(() => moved.jvp([variation])).toThrow(
+      /The solve frame is not reproduced by its definition/,
+    );
+  });
+});
+
 describe("T08b-g2 point-on-derived-curve residual helper", () => {
   const row = () => derivativeRow("SL-90 0.01");
   const splineOf = (frame: OffsetSolveFrame) => [...frame.cubics.keys()][0]!;

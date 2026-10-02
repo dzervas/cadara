@@ -370,8 +370,6 @@ export function getOffsetPreview(
     // Projected reference geometry cannot be a derivation master yet, so it
     // keeps the static one-shot offset path.
     const staticResult = createOffsetContribution({
-      definition: session.definition,
-      entityIds: [],
       curve: projectedCurve,
       distance: activeEditTool.offsetDistance,
       side: activeEditTool.offsetSide,

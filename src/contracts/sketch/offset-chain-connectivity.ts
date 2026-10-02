@@ -444,8 +444,9 @@ export function extractDeclaredOffsetChainConnectivity(input: {
     );
   }
 
-  // Match legacy buildTraversal's seed-order policy: start at seedIds[0] in
-  // natural orientation, then prepend any path found behind its start.
+  // The legacy seed-order policy (pinned by G13 in
+  // offset-chain-connectivity.spec.ts): start at seedIds[0] in natural
+  // orientation, then prepend any path found behind its start.
   const pieces: OffsetChainTraversalPiece[] = [];
   const joins: DeclaredOffsetChainJoin[] = [];
   const used = new Set<number>();
