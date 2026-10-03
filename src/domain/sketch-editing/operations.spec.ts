@@ -10,6 +10,10 @@ import {
   reconstructSplineAggregate,
   tessellateCubicSpans,
 } from "@/contracts/sketch/spline-geometry";
+import {
+  neutralSpan,
+  projectedSpline,
+} from "@/contracts/sketch/region-extraction.fixtures";
 import type {
   SketchEntityId,
   SketchId,
@@ -24,6 +28,7 @@ import {
   createSketchOffsetDerivationContribution,
   createSketchSlotContribution,
   createSketchSplitMutation,
+  offsetCurveDescriptorFromProjectedGeometry,
   type SketchEditOperationFactories,
 } from "@/domain/sketch-editing/operations";
 
@@ -602,13 +607,15 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
         kind: "spline",
         isConstruction: false,
         style: undefined,
-        points: tessellateCubicSpans(
-          reconstructSplineAggregate(splineEntity, {
+        geometry: {
+          kind: "spans",
+          spans: reconstructSplineAggregate(splineEntity, {
             sketch_point_s0: [0, 0],
             sketch_point_s1: [1, 2],
             sketch_point_s2: [2, 0],
           }).spans,
-        ),
+        },
+        isClosed: false,
       },
       distance: 1,
       side: "left",
@@ -1127,4 +1134,79 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
   testSlotOffsetCharacterization();
   testOffsetDerivationValidationAndCommitPreparation();
   testDerivedSplineFactoryPreservesCompleteAggregate();
+});
+
+// Lane: logic (docs/testing.md). Seam: the exported operations descriptor of
+// projected geometry (T10f): a spline descriptor carries the exact spans (or
+// the source samples that are the curve), not a sampled polyline.
+test("projected spline descriptors carry their neutral spans or source samples", () => {
+  const spans = [
+    neutralSpan(
+      [
+        [0, 0],
+        [1, 2],
+        [3, 2],
+        [4, 0],
+      ],
+      0,
+      ["o0", "o1"],
+      0,
+    ),
+  ];
+  const descriptor = offsetCurveDescriptorFromProjectedGeometry(
+    projectedSpline("projected_geometry_curve", spans),
+  );
+  expect(descriptor?.kind === "spline" && descriptor.geometry).toEqual({
+    kind: "spans",
+    spans,
+  });
+  expect(
+    descriptor?.kind === "spline" &&
+      descriptor.geometry.kind === "spans" &&
+      descriptor.geometry.spans,
+  ).toBe(spans);
+  const points = [
+    [0, 0],
+    [1, 1],
+    [2, 0],
+  ] as const;
+  const sampled = offsetCurveDescriptorFromProjectedGeometry({
+    geometryId: "projected_geometry_samples",
+    kind: "spline",
+    representation: { kind: "sourceSamples", points, isClosed: true },
+  });
+  expect(sampled?.kind === "spline" && sampled.geometry).toEqual({
+    kind: "samples",
+    points,
+  });
+  expect(sampled?.kind === "spline" && sampled.isClosed).toBe(true);
+
+  // The static D6 offset reads the spans' display polyline (until T10h):
+  // the same points the one tessellator draws for the spans.
+  const offset = createOffsetContribution({
+    curve: descriptor!,
+    distance: 0.5,
+    side: "left",
+    sequence: 1,
+    factories: {
+      createPointId: (suffix) => `point_${suffix}` as SketchPointId,
+      createEntityId: (suffix) => `entity_${suffix}` as SketchEntityId,
+      createPoint: (label, pointId, position) => ({
+        pointId,
+        label,
+        target: {
+          kind: "sketchPoint",
+          sketchId: "sketch_primary" as SketchId,
+          pointId,
+        },
+        position,
+        isConstruction: false,
+      }),
+      createSplineEntity: (label, entityId) =>
+        ({ kind: "spline", label, entityId }) as never,
+    } as never,
+  });
+  expect(offset.contribution?.points).toHaveLength(
+    tessellateCubicSpans(spans).length,
+  );
 });

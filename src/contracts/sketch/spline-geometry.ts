@@ -846,11 +846,180 @@ export function solvedCubicSpanPoint(
 }
 
 /**
+ * The axis-aligned box of the poles of `spans` (T10f): exact and
+ * conservative, since each cubic, and so each drawn sub-span of it, lies in
+ * the convex hull of its own poles. Null for no spans.
+ */
+export function cubicSpansPoleBounds(
+  spans: readonly Pick<SolvedCubicSpan, "poles">[],
+): { readonly min: SplineVector; readonly max: SplineVector } | null {
+  if (spans.length === 0) return null;
+  let [minX, minY] = spans[0]!.poles[0];
+  let [maxX, maxY] = [minX, minY];
+  for (const span of spans)
+    for (const [x, y] of span.poles) {
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  return { min: [minX, minY], max: [maxX, maxY] };
+}
+
+function distanceToBox(
+  position: SplineVector,
+  box: { readonly min: SplineVector; readonly max: SplineVector },
+) {
+  return Math.hypot(
+    Math.max(box.min[0] - position[0], 0, position[0] - box.max[0]),
+    Math.max(box.min[1] - position[1], 0, position[1] - box.max[1]),
+  );
+}
+
+export interface SolvedCubicSpansClosestPoint {
+  readonly spanIndex: number;
+  /** Local parameter inside the span's drawn domain. */
+  readonly u: number;
+  /** The span's own evaluation at `u` (a point of the curve). */
+  readonly point: SplineVector;
+  readonly distance: number;
+}
+
+/**
+ * The closest point of solved cubic spans (each on its drawn domain) to
+ * `position`: `closestSplineSpanLocation` with `solvedCubicSpanLocalDomain`
+ * domains, after an exact pole-box prefilter (T10f, review A6). A span is
+ * searched only if its pole box lies within U + slack of `position`, where U
+ * is the distance to the nearest drawn span end (a point of the curve, so an
+ * upper bound on the minimum) and slack (2⁻³⁰ of the coordinate scale) covers
+ * the rounding of evaluated positions, so every skipped span is strictly
+ * farther than the returned point. The result is the unfiltered search's.
+ * With `maxDistance`, spans whose box is farther than it (+ slack) are
+ * skipped too: the result is the unfiltered one whenever that lies within
+ * `maxDistance`, and may be null or farther otherwise (snap tolerance).
+ */
+export function closestPointOnSolvedCubicSpans(
+  position: SplineVector,
+  spans: readonly SolvedCubicSpan[],
+  maxDistance = Number.POSITIVE_INFINITY,
+): SolvedCubicSpansClosestPoint | null {
+  const domains = spans.map(solvedCubicSpanLocalDomain);
+  let upper = Number.POSITIVE_INFINITY;
+  let scale = Math.max(Math.abs(position[0]), Math.abs(position[1]));
+  spans.forEach((span, index) => {
+    for (const u of domains[index]!) {
+      const end = solvedCubicSpanPoint(span, u);
+      upper = Math.min(
+        upper,
+        Math.hypot(end[0] - position[0], end[1] - position[1]),
+      );
+    }
+    for (const pole of span.poles)
+      scale = Math.max(scale, Math.abs(pole[0]), Math.abs(pole[1]));
+  });
+  const limit = Math.min(upper, maxDistance) + scale * 2 ** -30;
+  const located = closestSplineSpanLocation(
+    position,
+    spans.map((span) => ({ ...span, differential: ZERO_DIFFERENTIAL })),
+    spans.map((span, index) =>
+      distanceToBox(position, cubicSpansPoleBounds([span])!) <= limit
+        ? domains[index]
+        : undefined,
+    ),
+  );
+  if (!located) return null;
+  const point = solvedCubicSpanPoint(spans[located.spanIndex]!, located.u);
+  return {
+    spanIndex: located.spanIndex,
+    u: located.u,
+    point,
+    distance: Math.hypot(point[0] - position[0], point[1] - position[1]),
+  };
+}
+
+/** A rational quadratic Bézier (weights 1, w, 1) at t; its end poles at 0 and 1. */
+export function rationalQuadraticPoint(
+  poles: readonly [SplineVector, SplineVector, SplineVector],
+  weight: number,
+  t: number,
+): SplineVector {
+  if (t === 0) return poles[0];
+  if (t === 1) return poles[2];
+  const [b0, b1, b2] = [(1 - t) ** 2, 2 * t * (1 - t) * weight, t * t];
+  const w = b0 + b1 + b2;
+  return [0, 1].map(
+    (axis) =>
+      (b0 * poles[0][axis]! + b1 * poles[1][axis]! + b2 * poles[2][axis]!) / w,
+  ) as unknown as SplineVector;
+}
+
+export interface RationalQuadraticClosestPoint {
+  readonly t: number;
+  readonly point: SplineVector;
+  readonly distance: number;
+}
+
+/**
+ * The closest point of a rational quadratic Bézier (poles P0, P1, P2,
+ * weights 1, w, 1; w > 0) to `position` (T10f review A-1: a circular arc
+ * of sweep ≤ π/2 is exactly one, and so is its affine image, e.g. on an
+ * orthographic screen). With D = N − position·W (N, W the weighted
+ * numerator and denominator), the stationary points solve the quartic
+ * D · (D′W − DW′) = 0; its roots in (0, 1) are isolated like the cubic
+ * closest-point owner's and compared with both ends. Coordinates are taken
+ * relative to `position` and scaled by the largest pole offset.
+ */
+export function closestPointOnRationalQuadratic(
+  position: SplineVector,
+  poles: readonly [SplineVector, SplineVector, SplineVector],
+  weight: number,
+): RationalQuadraticClosestPoint | null {
+  const relative = poles.map((pole) => sub(pole, position));
+  const extent = Math.max(...relative.flatMap((pole) => pole.map(Math.abs)));
+  if (!Number.isFinite(extent) || !(weight > 0)) return null;
+  const candidates = [0, 1];
+  if (extent > 0) {
+    const [d0, d1, d2] = relative.map((pole) => scale(pole, 1 / extent));
+    // Power bases: W = 1 + a t + b t², D = c0 + c1 t + c2 t² (per axis).
+    const W = [1, 2 * (weight - 1), 2 - 2 * weight];
+    const dW = [W[1]!, 2 * W[2]!];
+    const stationary = [0, 0, 0, 0, 0];
+    for (const axis of [0, 1] as const) {
+      const D = [
+        d0![axis],
+        2 * (weight * d1![axis] - d0![axis]),
+        d0![axis] - 2 * weight * d1![axis] + d2![axis],
+      ];
+      const dD = [D[1]!, 2 * D[2]!];
+      // E = D′W − DW′ (degree 2: its cubic coefficient 2c₂b − c₂·2b is 0).
+      const E = [0, 0, 0, 0];
+      dD.forEach((x, i) => W.forEach((y, j) => (E[i + j]! += x * y)));
+      D.forEach((x, i) => dW.forEach((y, j) => (E[i + j]! -= x * y)));
+      D.forEach((x, i) =>
+        E.slice(0, 3).forEach((y, j) => (stationary[i + j]! += x * y)),
+      );
+    }
+    candidates.push(
+      ...unitIntervalPolynomialRoots(stationary).filter(
+        (root) => root > 0 && root < 1,
+      ),
+    );
+  }
+  let best: RationalQuadraticClosestPoint | null = null;
+  for (const t of candidates) {
+    const point = rationalQuadraticPoint(poles, weight, t);
+    const distance = Math.hypot(point[0] - position[0], point[1] - position[1]);
+    if (!best || distance < best.distance) best = { t, point, distance };
+  }
+  return best;
+}
+
+/**
  * The one cubic-span tessellator (T10 [TECH] T-7): `samplesPerSpan` steps
  * per span from u₀ to u₁ of its drawn domain (both exact; an untrimmed span
  * or an ordinary `SplineSpan` runs over [0, 1]), the shared knot of
- * consecutive spans emitted once. Display output only, never geometry; the
- * remaining non-display readers are T10e/T10f cutover targets.
+ * consecutive spans emitted once. Display output only, never geometry
+ * (importers are allowlisted by the tessellation boundary guard).
  */
 export function tessellateCubicSpans(
   spans: readonly SolvedCubicSpan[],
@@ -877,7 +1046,7 @@ export function tessellateCubicSpans(
 /**
  * The display polyline of a projected spline: its own source samples as
  * given, or the one tessellator over its neutral cubic spans. Display output
- * only; the non-display readers are T10e/T10f cutover targets.
+ * only (importers are allowlisted by the tessellation boundary guard).
  */
 export function tessellateProjectedSpline(
   geometry: ProjectedSketchSplineGeometry,

@@ -33,7 +33,6 @@ import type {
 } from "@/contracts/sketch/schema";
 import {
   closestSplineSpanLocation,
-  reconstructSplineAggregate,
   tessellateCubicSpans,
   tessellateProjectedSpline,
   solvedCubicSpanLocalDomain,
@@ -777,26 +776,22 @@ function resolveSketchEntityTarget(
   }
 
   if (entity.kind === "spline") {
-    const positions = Object.fromEntries(
-      sketch.sketch.definition.points.map((point) => [
-        point.pointId,
-        point.position,
-      ]),
+    // T10f review R-1: the record's solved spans (modeling-grade), never the
+    // authored reconstruction; no valid solved spline, no measurement.
+    const record = sketch.sketch.solvedSnapshot.solvedEntities.find(
+      (entry) => entry.entityId === entity.entityId,
     );
-    const splineGeometry = reconstructSplineAggregate(entity, positions);
-    const fitPoints = tessellateCubicSpans(
-      splineGeometry.spans,
-      SPLINE_SEGMENTS,
-    );
-
-    if (fitPoints.length < 2) {
+    const solvedSpans =
+      record?.kind === "spline" ? solvedCubicSpans(record) : [];
+    if (solvedSpans.length === 0) {
       return null;
     }
 
-    const sampledPoints = fitPoints.map((point) =>
-      mapSketchPointToWorkspaceWorld(sketch.plane, point),
-    );
-    const spans = splineGeometry.spans.map((span) => span.poles);
+    const sampledPoints = tessellateCubicSpans(
+      solvedSpans,
+      SPLINE_SEGMENTS,
+    ).map((point) => mapSketchPointToWorkspaceWorld(sketch.plane, point));
+    const spans = solvedSpans.map((span) => span.poles);
     const length = cubicSpansLength(spans);
     return createCurveTarget({
       target,

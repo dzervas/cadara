@@ -9,8 +9,8 @@ import {
   type SketchDerivationSettings,
 } from "@/contracts/sketch/derived-geometry";
 import {
+  cubicSpansPoleBounds,
   orderedSplineOccurrences,
-  tessellateProjectedSpline,
 } from "@/contracts/sketch/spline-geometry";
 import type { SketchToolAnchorDescriptor } from "@/core/sketch-tools/editor-schema";
 
@@ -153,10 +153,24 @@ export function getSketchDatumGuideExtent(
             Math.abs(geometry.centerPosition[1]) + radius,
           ];
         }
-        case "spline":
-          return tessellateProjectedSpline(geometry).flatMap(
-            (point: SketchPoint) => [Math.abs(point[0]), Math.abs(point[1])],
-          );
+        case "spline": {
+          // Exact and conservative: the pole box contains the curve.
+          const { representation } = geometry;
+          const bounds =
+            representation.kind === "neutralCubicSpans"
+              ? cubicSpansPoleBounds(representation.spans)
+              : null;
+          const points: readonly SketchPoint[] =
+            representation.kind === "neutralCubicSpans"
+              ? bounds
+                ? [bounds.min, bounds.max]
+                : []
+              : representation.points;
+          return points.flatMap((point) => [
+            Math.abs(point[0]),
+            Math.abs(point[1]),
+          ]);
+        }
       }
     }),
   );

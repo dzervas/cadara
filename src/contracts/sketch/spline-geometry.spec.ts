@@ -1,7 +1,13 @@
 import { describe, expect, test } from "vitest";
 import {
+  closestPointOnSolvedCubicSpans,
   closestSplineSpanLocation,
+  cubicSpansPoleBounds,
   evaluateSplineSpan,
+  solvedCubicSpanLocalDomain,
+  solvedCubicSpanPoint,
+  tessellateCubicSpans,
+  type SolvedCubicSpan,
   reconstructSpline,
   reconstructSplineAggregate,
   type ResolvedSplineInput,
@@ -905,5 +911,115 @@ describe("neutral spline reconstruction owner", () => {
     expect(() =>
       evaluateSplineSpan(span, { kind: "local", value: 1.1 }),
     ).toThrow(RangeError);
+  });
+
+  // T10f (review A6): the pick/snap closest point with a pole-box prefilter.
+  test("closestPointOnSolvedCubicSpans returns the unfiltered owner search on drawn domains; the pole box is exact and conservative", () => {
+    let seed = 7;
+    const random = () => {
+      seed = (seed * 16807) % 2147483647;
+      return seed / 2147483647;
+    };
+    const zeroDifferential = {
+      interval: [0, 0] as const,
+      poles: [
+        [0, 0],
+        [0, 0],
+        [0, 0],
+        [0, 0],
+      ] as const,
+    };
+    let pruned = 0;
+    for (let trial = 0; trial < 200; trial += 1) {
+      const fit: V[] = Array.from({ length: 3 + (trial % 30) }, (_, i) => [
+        i * 2 + random(),
+        Math.sin(i) * 3 + random() * 4 - 2,
+      ]);
+      const spans: SolvedCubicSpan[] = build(input(fit)).spans.map(
+        (span, index, all) =>
+          // Trim the first and last span like a derived shell (queryDomain).
+          trial % 2 === 1 && (index === 0 || index === all.length - 1)
+            ? {
+                interval: span.interval,
+                poles: span.poles,
+                queryDomain:
+                  index === 0
+                    ? [
+                        span.interval[0] +
+                          0.3 * (span.interval[1] - span.interval[0]),
+                        span.interval[1],
+                      ]
+                    : [
+                        span.interval[0],
+                        span.interval[0] +
+                          0.6 * (span.interval[1] - span.interval[0]),
+                      ],
+              }
+            : { interval: span.interval, poles: span.poles },
+      );
+      const query: V = [random() * 70 - 5, random() * 14 - 7];
+      const unfiltered = closestSplineSpanLocation(
+        query,
+        spans.map((span) => ({ ...span, differential: zeroDifferential })),
+        spans.map(solvedCubicSpanLocalDomain),
+      );
+      const found = closestPointOnSolvedCubicSpans(query, spans);
+      expect(
+        found && { spanIndex: found.spanIndex, u: found.u },
+        `trial ${trial}: the prefiltered search is the unfiltered one`,
+      ).toEqual(
+        unfiltered && { spanIndex: unfiltered.spanIndex, u: unfiltered.u },
+      );
+      const point = solvedCubicSpanPoint(spans[found!.spanIndex]!, found!.u);
+      expect(found!.point).toEqual(point);
+      expect(found!.distance).toBe(Math.hypot(...sub(point, query)));
+      // Spans the prefilter skips (box farther than the nearest drawn end).
+      const ends = spans.flatMap((span) =>
+        solvedCubicSpanLocalDomain(span).map((u) =>
+          Math.hypot(...sub(solvedCubicSpanPoint(span, u), query)),
+        ),
+      );
+      pruned += spans.filter((span) => {
+        const box = cubicSpansPoleBounds([span])!;
+        const gap = Math.hypot(
+          Math.max(box.min[0] - query[0], 0, query[0] - box.max[0]),
+          Math.max(box.min[1] - query[1], 0, query[1] - box.max[1]),
+        );
+        return gap > Math.min(...ends) * (1 + 1e-6);
+      }).length;
+      // The pole box contains every drawn point of every span.
+      const box = cubicSpansPoleBounds(spans)!;
+      for (const [x, y] of tessellateCubicSpans(spans, 64))
+        expect(
+          x >= box.min[0] &&
+            x <= box.max[0] &&
+            y >= box.min[1] &&
+            y <= box.max[1],
+        ).toBe(true);
+    }
+    expect(
+      pruned,
+      "premise: the prefilter actually skips spans",
+    ).toBeGreaterThan(1000);
+    expect(cubicSpansPoleBounds([])).toBeNull();
+  });
+
+  test("closestPointOnSolvedCubicSpans with maxDistance keeps any result within it and skips spans beyond it", () => {
+    const spans: SolvedCubicSpan[] = build(
+      input([
+        [0, 0],
+        [4, 3],
+        [8, 0],
+        [12, 3],
+      ]),
+    ).spans;
+    const query: V = [4, 3.1];
+    const free = closestPointOnSolvedCubicSpans(query, spans)!;
+    expect(free.distance).toBeLessThan(0.2);
+    expect(closestPointOnSolvedCubicSpans(query, spans, 0.2)).toEqual(free);
+    expect(
+      closestPointOnSolvedCubicSpans([4, 30], spans, 0.2),
+      "every span's box is beyond maxDistance",
+    ).toBeNull();
   });
 });

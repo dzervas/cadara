@@ -11,16 +11,19 @@ import type {
 } from "@/contracts/sketch/schema";
 import type { SketchId, SketchPointId } from "@/contracts/shared/ids";
 import {
+  closestPointOnSolvedCubicSpans,
+  cubicSpansPoleBounds,
   orderedSplinePointIds,
   reconstructSplineAggregate,
-  tessellateCubicSpans,
-  tessellateProjectedSpline,
   solvedCubicSpans,
+  type SolvedCubicSpan,
+  type SplinePoles,
 } from "@/contracts/sketch/spline-geometry";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import {
   getSketchSessionDisplayDefinition,
   getSketchSessionDisplayProjectedReferences,
+  isAcceptedSketchSolve,
 } from "@/domain/editor/sketch-session/internals";
 import { getSketchDatumGuideExtent } from "@/domain/editor/sketch-session/definition-patches";
 import { getSketchSessionDisplaySolvedSnapshot } from "@/domain/editor/sketch-session/display";
@@ -28,10 +31,7 @@ import type { SketchSessionState } from "@/domain/editor/sketch-session";
 
 const TURN = Math.PI * 2;
 const EPSILON = 1e-9;
-const CIRCLE_SAMPLE_COUNT = 64;
-const ARC_SAMPLE_COUNT = 40;
 const ADVANCED_SAMPLE_COUNT = 64;
-const SPLINE_SEGMENTS_PER_SPAN = 16;
 
 export type SketchInteractionGeometrySource = "local" | "projected" | "datum";
 
@@ -74,6 +74,23 @@ export type SketchInteractionGeometry =
       sweepDirection: "clockwise" | "counterClockwise";
     }
   | {
+      /**
+       * Exact cubic spans (T10f): a solved spline or derived shell (its
+       * `solvedCubicSpans`, drawn domains kept), a projected neutral spline,
+       * or an authored `bezierCurve` (quadratics degree-elevated exactly).
+       */
+      kind: "cubicSpans";
+      source: SketchInteractionGeometrySource;
+      id: string;
+      label: string;
+      target: PrimitiveRef;
+      spans: readonly SolvedCubicSpan[];
+    }
+  | {
+      /**
+       * A polyline that is the curve as the sketch holds it: projected
+       * source samples, and the sampled ellipse/conic/text curves.
+       */
       kind: "sampledCurve";
       source: SketchInteractionGeometrySource;
       id: string;
@@ -116,23 +133,128 @@ export function collectSketchInteractionGeometry(
   ];
 }
 
-export function flattenSketchInteractionCurve(
+/**
+ * The exact closest point of a sketch interaction curve to `point`, in the
+ * sketch plane (T10f): closed form for lines, circles and arcs (an outside
+ * angle clamps to the nearer authored end point), the owner's
+ * `closestPointOnSolvedCubicSpans` for cubic spans, and the polyline itself
+ * for a sampled curve. Null when the curve has no point (degenerate input).
+ */
+export function closestPointOnSketchInteractionCurve(
   geometry: SketchInteractionCurveGeometry,
-): readonly SketchPoint2D[] {
+  point: SketchPoint2D,
+): SketchPoint2D | null {
   switch (geometry.kind) {
     case "lineSegment":
-      return [geometry.start, geometry.end];
+      return closestPointOnSegment(point, geometry.start, geometry.end);
     case "circle":
-      return sampleCirclePoints(geometry.center, geometry.radius);
+      return geometry.radius > EPSILON
+        ? closestPointOnCircle(point, geometry.center, geometry.radius)
+        : null;
     case "arc":
-      return sampleArcPoints(
-        geometry.center,
-        geometry.start,
-        geometry.end,
-        geometry.sweepDirection,
+      return closestPointOnArc(point, geometry);
+    case "cubicSpans":
+      return (
+        closestPointOnSolvedCubicSpans(point, geometry.spans)?.point ?? null
       );
+    case "sampledCurve": {
+      const points = closeSampledPoints(geometry.points, geometry.isClosed);
+      let best: SketchPoint2D | null = points.length === 1 ? points[0]! : null;
+      let bestDistance = Number.POSITIVE_INFINITY;
+      for (let index = 1; index < points.length; index += 1) {
+        const candidate = closestPointOnSegment(
+          point,
+          points[index - 1]!,
+          points[index]!,
+        );
+        const distance = distanceBetween(point, candidate);
+        if (distance < bestDistance) {
+          best = candidate;
+          bestDistance = distance;
+        }
+      }
+      return best;
+    }
+  }
+}
+
+/**
+ * A circle or arc as exact rational quadratic pieces of sweep ≤ π/2
+ * (T10f review A-1): P0 and P2 on the circle, P1 = c + r/cos h · (cos m,
+ * sin m), weight cos h, with h the half sweep and m the mid angle. An arc's
+ * first and last poles are its authored end points. Empty for a degenerate
+ * circle or arc (radius ≤ ε, zero sweep).
+ */
+export function getSketchInteractionCircularPieces(
+  geometry: Extract<SketchInteractionCurveGeometry, { kind: "circle" | "arc" }>,
+): {
+  readonly poles: readonly [SketchPoint2D, SketchPoint2D, SketchPoint2D];
+  readonly weight: number;
+}[] {
+  const { center } = geometry;
+  const radius =
+    geometry.kind === "circle"
+      ? geometry.radius
+      : distanceBetween(center, geometry.start);
+  if (!(radius > EPSILON)) return [];
+  const startAngle =
+    geometry.kind === "circle"
+      ? 0
+      : Math.atan2(
+          geometry.start[1] - center[1],
+          geometry.start[0] - center[0],
+        );
+  const sweep =
+    geometry.kind === "circle"
+      ? TURN
+      : getSweepRadians(
+          startAngle,
+          Math.atan2(geometry.end[1] - center[1], geometry.end[0] - center[0]),
+          geometry.sweepDirection,
+        ) * (geometry.sweepDirection === "counterClockwise" ? 1 : -1);
+  if (sweep === 0) return [];
+  const count = Math.ceil(Math.abs(sweep) / (Math.PI / 2));
+  const at = (angle: number, distance = radius): SketchPoint2D => [
+    center[0] + distance * Math.cos(angle),
+    center[1] + distance * Math.sin(angle),
+  ];
+  const half = sweep / count / 2;
+  return Array.from({ length: count }, (_, index) => {
+    const from = startAngle + (sweep * index) / count;
+    const to = startAngle + (sweep * (index + 1)) / count;
+    return {
+      poles: [
+        index === 0 && geometry.kind === "arc" ? geometry.start : at(from),
+        at(from + half, radius / Math.cos(half)),
+        index === count - 1 && geometry.kind === "arc" ? geometry.end : at(to),
+      ],
+      weight: Math.cos(half),
+    };
+  });
+}
+
+/**
+ * An exact, conservative sketch-plane box of the curve (T10f pick
+ * prefilter): cubic spans by their pole box, circles and arcs by their full
+ * circle, lines and polylines by their points.
+ */
+export function getSketchInteractionCurveBounds(
+  geometry: SketchInteractionCurveGeometry,
+): { readonly min: SketchPoint2D; readonly max: SketchPoint2D } | null {
+  switch (geometry.kind) {
+    case "lineSegment":
+      return pointBounds([geometry.start, geometry.end]);
+    case "circle":
+      return circleBounds(geometry.center, geometry.radius);
+    case "arc":
+      return circleBounds(
+        geometry.center,
+        distanceBetween(geometry.center, geometry.start),
+      );
+    case "cubicSpans":
+      return cubicSpansPoleBounds(geometry.spans);
     case "sampledCurve":
-      return closeSampledPoints(geometry.points, geometry.isClosed);
+      return pointBounds(geometry.points);
   }
 }
 
@@ -215,14 +337,18 @@ function collectLocalInteractionGeometry(
     }),
   );
 
+  let accepted: boolean | undefined;
+  const isAccepted = () => (accepted ??= isAcceptedSketchSolve(solvedSnapshot));
   for (const entity of definition.entities) {
     const geometry =
-      entity.kind === "derivedPiecewiseCubic"
-        ? createDerivedShellInteractionGeometry(
-            entity,
-            solvedEntities.get(entity.entityId),
-          )
-        : createLocalEntityInteractionGeometry(entity, pointMap);
+      entity.kind === "spline" && !isAccepted()
+        ? createAuthoredSplineInteractionGeometry(entity, pointMap)
+        : entity.kind === "spline" || entity.kind === "derivedPiecewiseCubic"
+          ? createSolvedSpansInteractionGeometry(
+              entity,
+              solvedEntities.get(entity.entityId),
+            )
+          : createLocalEntityInteractionGeometry(entity, pointMap);
     if (geometry) {
       entries.push(geometry);
     }
@@ -290,29 +416,6 @@ function createLocalEntityInteractionGeometry(
           }
         : null;
     }
-    case "spline": {
-      const pointIds = orderedSplinePointIds(entity);
-      const points = collectDefiningPoints(pointIds, point);
-      if (!points) return null;
-      const positions = Object.fromEntries(
-        pointIds.map((pointId, index) => [pointId, points[index]!]),
-      ) as Record<SketchPointId, SketchPoint2D>;
-      const sampled = tessellateCubicSpans(
-        reconstructSplineAggregate(entity, positions).spans,
-        SPLINE_SEGMENTS_PER_SPAN,
-      );
-      return sampled.length
-        ? {
-            kind: "sampledCurve",
-            source: "local",
-            id: `sketch-entity:${entity.entityId}`,
-            label: entity.label,
-            target: entity.target,
-            points: sampled,
-            isClosed: entity.closure !== "open",
-          }
-        : null;
-    }
     case "ellipse": {
       const center = point(entity.centerPointId);
       const majorAxis = point(entity.majorAxisPointId);
@@ -360,13 +463,18 @@ function createLocalEntityInteractionGeometry(
     }
     case "bezierCurve": {
       const points = collectDefiningPoints(entity.controlPointIds, point);
-      return points
-        ? createSampledLocalCurve(
-            entity,
-            sampleBezierPoints(points, entity.degree),
-            false,
-          )
-        : null;
+      if (!points) return null;
+      const poles = bezierCubicPoles(points, entity.degree);
+      return poles
+        ? {
+            kind: "cubicSpans",
+            source: "local",
+            id: `sketch-entity:${entity.entityId}`,
+            label: entity.label,
+            target: entity.target,
+            spans: [{ interval: [0, 1], poles }],
+          }
+        : createSampledLocalCurve(entity, points, false);
     }
     case "profileText": {
       const anchor = point(entity.anchorPointId);
@@ -378,26 +486,68 @@ function createLocalEntityInteractionGeometry(
           )
         : null;
     }
-    // Drawn from the solved snapshot (`createDerivedShellInteractionGeometry`).
+    // Picked along their solved spans (`createSolvedSpansInteractionGeometry`).
+    case "spline":
     case "derivedPiecewiseCubic":
       return null;
   }
 }
 
 /**
- * A derived offset shell picks along exactly its displayed tessellation:
- * its solved spans clipped to each span's drawn `queryDomain` (T08b-g5b).
+ * With a not-accepted solve a spline picks along the authored
+ * reconstruction the session display draws (T10f review R-2): the solver's
+ * best-effort positions may differ from the drawn curve.
  */
-function createDerivedShellInteractionGeometry(
-  entity: Extract<SketchEntityDefinition, { kind: "derivedPiecewiseCubic" }>,
+function createAuthoredSplineInteractionGeometry(
+  entity: Extract<SketchEntityDefinition, { kind: "spline" }>,
+  pointMap: ReadonlyMap<SketchPointId, { position: SketchPoint2D }>,
+): SketchInteractionGeometry | null {
+  const pointIds = orderedSplinePointIds(entity);
+  if (pointIds.some((pointId) => !pointMap.has(pointId))) return null;
+  const positions = Object.fromEntries(
+    pointIds.map((pointId) => [pointId, pointMap.get(pointId)!.position]),
+  ) as Record<SketchPointId, SketchPoint2D>;
+  const spans = reconstructSplineAggregate(entity, positions).spans;
+  return spans.length > 0
+    ? {
+        kind: "cubicSpans",
+        source: "local",
+        id: `sketch-entity:${entity.entityId}`,
+        label: entity.label,
+        target: entity.target,
+        spans: spans.map((span) => ({
+          interval: span.interval,
+          poles: span.poles,
+        })),
+      }
+    : null;
+}
+
+/**
+ * A spline (accepted solve) or derived offset shell picks along its solved
+ * spans in the session's display solved snapshot (T10f; a shell's drawn
+ * `queryDomain`s kept, T08b-g5b): the spans display tessellates, snap and
+ * measure read.
+ */
+function createSolvedSpansInteractionGeometry(
+  entity: Extract<
+    SketchEntityDefinition,
+    { kind: "spline" | "derivedPiecewiseCubic" }
+  >,
   record: SolvedSketchSnapshot["solvedEntities"][number] | undefined,
 ): SketchInteractionGeometry | null {
-  if (record?.kind !== "derivedPiecewiseCubic") return null;
-  return createSampledLocalCurve(
-    entity,
-    tessellateCubicSpans(solvedCubicSpans(record)),
-    false,
-  );
+  if (record?.kind !== entity.kind) return null;
+  const spans = solvedCubicSpans(record);
+  return spans.length > 0
+    ? {
+        kind: "cubicSpans",
+        source: "local",
+        id: `sketch-entity:${entity.entityId}`,
+        label: entity.label,
+        target: entity.target,
+        spans,
+      }
+    : null;
 }
 
 function createLocalPointEntityGeometry(
@@ -491,67 +641,20 @@ function createProjectedGeometry(
         sweepDirection: geometry.sweepDirection,
       };
     case "spline": {
-      const points = tessellateProjectedSpline(geometry);
-      if (points.length < 2) return null;
+      const { representation } = geometry;
+      if (representation.kind === "neutralCubicSpans")
+        return representation.spans.length > 0
+          ? { ...base, kind: "cubicSpans", spans: representation.spans }
+          : null;
+      if (representation.points.length < 2) return null;
       return {
         ...base,
         kind: "sampledCurve",
-        points,
+        points: representation.points,
         isClosed: projectedSplineIsClosed(geometry),
       };
     }
   }
-}
-
-function sampleCirclePoints(
-  center: SketchPoint2D,
-  radius: number,
-): readonly SketchPoint2D[] {
-  if (radius <= EPSILON) {
-    return [];
-  }
-
-  return closeSampledPoints(
-    Array.from({ length: CIRCLE_SAMPLE_COUNT }, (_, index) => {
-      const angle = (TURN * index) / CIRCLE_SAMPLE_COUNT;
-      return [
-        center[0] + Math.cos(angle) * radius,
-        center[1] + Math.sin(angle) * radius,
-      ] satisfies SketchPoint2D;
-    }),
-    true,
-  );
-}
-
-function sampleArcPoints(
-  center: SketchPoint2D,
-  start: SketchPoint2D,
-  end: SketchPoint2D,
-  sweepDirection: "clockwise" | "counterClockwise",
-): readonly SketchPoint2D[] {
-  const radius = Math.hypot(start[0] - center[0], start[1] - center[1]);
-  if (radius <= EPSILON) {
-    return [];
-  }
-
-  const startAngle = Math.atan2(start[1] - center[1], start[0] - center[0]);
-  const sweep = getSweepRadians(
-    startAngle,
-    Math.atan2(end[1] - center[1], end[0] - center[0]),
-    sweepDirection,
-  );
-
-  return Array.from({ length: ARC_SAMPLE_COUNT + 1 }, (_, index) => {
-    const t = index / ARC_SAMPLE_COUNT;
-    const angle =
-      sweepDirection === "counterClockwise"
-        ? startAngle + sweep * t
-        : startAngle - sweep * t;
-    return [
-      center[0] + Math.cos(angle) * radius,
-      center[1] + Math.sin(angle) * radius,
-    ] satisfies SketchPoint2D;
-  });
 }
 
 function sampleEllipsePoints(
@@ -628,20 +731,6 @@ function sampleConicPoints(
         weight,
     ] satisfies SketchPoint2D;
   });
-}
-
-function sampleBezierPoints(
-  controlPoints: readonly SketchPoint2D[],
-  degree: 2 | 3,
-) {
-  const usablePoints = controlPoints.slice(0, degree + 1);
-  if (usablePoints.length < degree + 1) {
-    return usablePoints;
-  }
-
-  return Array.from({ length: ADVANCED_SAMPLE_COUNT }, (_, index) =>
-    evaluateBezier(usablePoints, index / (ADVANCED_SAMPLE_COUNT - 1)),
-  );
 }
 
 function sampleProfileTextOutline(
@@ -738,28 +827,6 @@ function evaluateEllipsePoint(
   );
 }
 
-function evaluateBezier(
-  points: readonly SketchPoint2D[],
-  t: number,
-): SketchPoint2D {
-  if (points.length === 1) {
-    return points[0]!;
-  }
-
-  return evaluateBezier(
-    points
-      .slice(0, -1)
-      .map(
-        (point, index) =>
-          [
-            point[0] + (points[index + 1]![0] - point[0]) * t,
-            point[1] + (points[index + 1]![1] - point[1]) * t,
-          ] satisfies SketchPoint2D,
-      ),
-    t,
-  );
-}
-
 function getSweepRadians(
   startAngle: number,
   endAngle: number,
@@ -822,4 +889,99 @@ function scalePoint(point: SketchPoint2D, scale: number): SketchPoint2D {
 
 function dotPoints(left: SketchPoint2D, right: SketchPoint2D) {
   return left[0] * right[0] + left[1] * right[1];
+}
+
+/**
+ * The cubic poles of an authored Bézier: a cubic as given, a quadratic
+ * degree-elevated exactly (P0, P0 + ⅔(P1 − P0), P2 + ⅔(P1 − P2), P2;
+ * T10 plan §2.3, B2). Null with too few control points.
+ */
+function bezierCubicPoles(
+  points: readonly SketchPoint2D[],
+  degree: 2 | 3,
+): SplinePoles | null {
+  if (points.length < degree + 1) return null;
+  const [p0, p1, p2, p3] = points;
+  if (degree === 3) return [p0!, p1!, p2!, p3!];
+  const toward = (from: SketchPoint2D, to: SketchPoint2D): SketchPoint2D => [
+    from[0] + (2 / 3) * (to[0] - from[0]),
+    from[1] + (2 / 3) * (to[1] - from[1]),
+  ];
+  return [p0!, toward(p0!, p1!), toward(p2!, p1!), p2!];
+}
+
+function closestPointOnSegment(
+  point: SketchPoint2D,
+  start: SketchPoint2D,
+  end: SketchPoint2D,
+): SketchPoint2D {
+  const delta = subtractPoints(end, start);
+  const lengthSquared = dotPoints(delta, delta);
+  if (lengthSquared === 0) return start;
+  const t = dotPoints(subtractPoints(point, start), delta) / lengthSquared;
+  if (t <= 0) return start;
+  if (t >= 1) return end;
+  return addPoints(start, scalePoint(delta, t));
+}
+
+function closestPointOnCircle(
+  point: SketchPoint2D,
+  center: SketchPoint2D,
+  radius: number,
+): SketchPoint2D {
+  const delta = subtractPoints(point, center);
+  const length = Math.hypot(delta[0], delta[1]);
+  // Every point of the circle is closest to its center; take angle 0.
+  return length === 0
+    ? [center[0] + radius, center[1]]
+    : addPoints(center, scalePoint(delta, radius / length));
+}
+
+function closestPointOnArc(
+  point: SketchPoint2D,
+  arc: Extract<SketchInteractionGeometry, { kind: "arc" }>,
+): SketchPoint2D | null {
+  const radius = distanceBetween(arc.center, arc.start);
+  if (radius <= EPSILON) return null;
+  const startAngle = Math.atan2(
+    arc.start[1] - arc.center[1],
+    arc.start[0] - arc.center[0],
+  );
+  const sweep = getSweepRadians(
+    startAngle,
+    Math.atan2(arc.end[1] - arc.center[1], arc.end[0] - arc.center[0]),
+    arc.sweepDirection,
+  );
+  const pointAngle = Math.atan2(
+    point[1] - arc.center[1],
+    point[0] - arc.center[0],
+  );
+  const inside =
+    distanceBetween(point, arc.center) > 0 &&
+    getSweepRadians(startAngle, pointAngle, arc.sweepDirection) <= sweep;
+  if (inside) return closestPointOnCircle(point, arc.center, radius);
+  return distanceBetween(point, arc.start) <= distanceBetween(point, arc.end)
+    ? arc.start
+    : arc.end;
+}
+
+function pointBounds(points: readonly SketchPoint2D[]) {
+  if (points.length === 0) return null;
+  const xs = points.map((point) => point[0]);
+  const ys = points.map((point) => point[1]);
+  return {
+    min: [Math.min(...xs), Math.min(...ys)] satisfies SketchPoint2D,
+    max: [Math.max(...xs), Math.max(...ys)] satisfies SketchPoint2D,
+  };
+}
+
+function circleBounds(center: SketchPoint2D, radius: number) {
+  return {
+    min: [center[0] - radius, center[1] - radius] satisfies SketchPoint2D,
+    max: [center[0] + radius, center[1] + radius] satisfies SketchPoint2D,
+  };
+}
+
+function distanceBetween(left: SketchPoint2D, right: SketchPoint2D) {
+  return Math.hypot(left[0] - right[0], left[1] - right[1]);
 }
