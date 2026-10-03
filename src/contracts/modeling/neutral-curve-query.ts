@@ -1079,8 +1079,15 @@ export interface NeutralCurveQueryCapability {
   ): Promise<NeutralCurveQueryResult>;
   /**
    * Declared-join pairs; ordinary pair queries on joined curves are
-   * pathological (T09 probe). Documented limits, all failing closed:
-   * - a join on a full-turn circle is `unsupported`;
+   * pathological (T09 probe). A full-turn circle member has only interior
+   * joins; its witness parameters stay in its source winding, and a join's
+   * parameter bounds may cross the seam (a real-angle lift shorter than one
+   * turn). Documented limits, all failing closed:
+   * - two near pieces that overlap around a full turn, or far pieces whose
+   *   overlap with the first near piece is not checked ⊂ that piece, are
+   *   `uncertain` `join-ball-crowded`; a full-turn contact that cannot be certified
+   *   inside or outside one certificate piece is `uncertain`
+   *   `join-full-turn-piece-unresolved`;
    * - tangential cubic/cubic joins without a bitwise-shared point are
    *   `uncertain`;
    * - exact overlaps are admitted only for collinear line pairs (numeric lines

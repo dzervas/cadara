@@ -1,8 +1,10 @@
+import { TWO_PI_OUTWARD_UPPER } from "@/contracts/modeling/circle-angular-domain";
 import {
   checkNeutralCurvePointConsistency,
   evaluateNeutralCurve,
   getNeutralCurveJoinParameter,
   neutralCurveParameterInside,
+  neutralCurveSourceParameterInside,
   validateNeutralCurveJoinRequest,
   type NeutralCurve,
   type NeutralCurveJoinRequest,
@@ -33,6 +35,7 @@ import {
   ExactProofBudget,
   addExact,
   compareExact,
+  compareFiniteSpanToTwoPiExact,
   exactFromNumber,
   multiplyExact,
   nextBinary64,
@@ -59,6 +62,22 @@ import {
  * ordinary owner already proves on the whole pair (collinear segments and
  * same/reversed cubic pole identity): that owner runs first, and every
  * declared join must lie on its overlap.
+ *
+ * Full-turn circles (T10g-0). Every join on a full turn is interior, so its
+ * near piece is a proper arc [θ − e, θ + e] lifted around the join angle θ
+ * (it may cross the source seam). The far pieces cover the rest of the turn
+ * from the first near piece's upper end h₁ up to E = ↑(l₁ + 2π), where l₁ is
+ * that near piece's lower end: E ≥ l₁ + 2π, so near and far pieces cover the
+ * whole circle. They overlap only on the arc [l₁ + 2π, E], and that overlap
+ * ⊂ N₁ (mod 2π), checked: E − h₁ < 2π exactly, else `join-ball-crowded` (a
+ * near piece narrower than the rounding of E). All pieces are proper arcs shorter than 2π in one
+ * real-angle lift, so every enclosure and separation step is unchanged. The
+ * ordinary owner runs on a piece through a source-winding `queryDomain` when
+ * the piece lies in the winding; otherwise it runs on the whole turn and each
+ * reported contact is kept only when its winding bounds lie in the piece
+ * modulo 2π (exact comparisons), dropped when disjoint from it (another
+ * piece pair reports it), and fails closed when it straddles a piece end.
+ * Reported parameters therefore stay in the request's source winding.
  */
 
 type Interval = CertifiedInterval;
@@ -74,6 +93,10 @@ type VerifiedPair = Extract<
   NeutralCurveQueryResult,
   { readonly kind: "verified" }
 >;
+/** The ordinary owner's result on one piece pair, full-turn filtered. */
+type OrdinaryOutcome =
+  | Exclude<NeutralCurveQueryResult, { readonly kind: "verified" }>
+  | Pick<VerifiedPair, "kind" | "points" | "overlaps">;
 
 interface Enclosure {
   /** The piece lies in conv(boxes) ⊕ disk(slack). */
@@ -101,6 +124,8 @@ const LOCAL_DEPTH = 24;
 const SUBDIVISION_VISIT_SAFEGUARD = 8_000;
 /** Far arc pieces never exceed one radian (sagitta and cone validity). */
 const MAX_ARC_PIECE = 1;
+/** The binary64 neighbour below 2π; with `TWO_PI_OUTWARD_UPPER` it brackets 2π. */
+const TWO_PI_INWARD_LOWER = 6.283185307179586;
 const NEAR_HALVINGS = 8;
 
 class JoinUncertain extends Error {
@@ -188,7 +213,8 @@ function boxMid(box: Box): SplineVector {
 
 /** Outward enclosures of one whole source curve over binary64 subintervals. */
 class CurveModel {
-  readonly domain: Domain;
+  /** Null for a full-turn circle: its pieces are real-angle arcs in any lift. */
+  readonly domain: Domain | null;
   readonly speed: number;
   readonly #arithmetic: OutwardArithmetic;
   readonly #radiusScale: Interval | null;
@@ -202,9 +228,8 @@ class CurveModel {
     this.curve = curve;
     this.#arithmetic = arithmetic;
     if (curve.kind === "circle") {
-      if (curve.sourceDomain.kind !== "arc")
-        throw new Error("Full-turn circles are rejected before modeling.");
-      this.domain = curve.sourceDomain.interval;
+      this.domain =
+        curve.sourceDomain.kind === "arc" ? curve.sourceDomain.interval : null;
       this.speed = curve.radius;
       this.#radiusScale = this.#circleRadiusScale(curve);
     } else {
@@ -799,23 +824,112 @@ class JoinCertifier {
     return leftovers;
   }
 
-  #restricted(side: Side, interval: Domain): NeutralCurve {
+  /**
+   * The ordinary-owner curve for one piece. A full-turn piece outside the
+   * source winding runs on the whole turn, filtered by the piece.
+   */
+  #restricted(
+    side: Side,
+    interval: Domain,
+  ): { readonly curve: NeutralCurve; readonly filter: Domain | null } {
     const curve = this.#models[side].curve;
-    return curve.kind === "circle"
-      ? { ...curve, queryDomain: { kind: "arc", interval } }
-      : { ...curve, queryDomain: interval };
+    if (curve.kind !== "circle")
+      return { curve: { ...curve, queryDomain: interval }, filter: null };
+    const restricted: Extract<NeutralCurve, { kind: "circle" }> = {
+      ...curve,
+      queryDomain: { kind: "arc", interval },
+    };
+    if (
+      curve.sourceDomain.kind === "arc" ||
+      validateCertifiedCircleAngularDomain(restricted, this.budget)
+    )
+      return { curve: restricted, filter: null };
+    return { curve, filter: interval };
   }
 
   /** The ordinary exact owner on one closed parameter box, same argument order. */
-  #ordinary(firstInterval: Domain, secondInterval: Domain) {
-    return this.certifyPair(
+  #ordinary(firstInterval: Domain, secondInterval: Domain): OrdinaryOutcome {
+    const first = this.#restricted(0, firstInterval);
+    const second = this.#restricted(1, secondInterval);
+    const result = this.certifyPair(
       {
         modelingTolerance: this.request.modelingTolerance,
-        first: this.#restricted(0, firstInterval),
-        second: this.#restricted(1, secondInterval),
+        first: first.curve,
+        second: second.curve,
       },
       this.budget,
     );
+    if (result.kind !== "verified" || (!first.filter && !second.filter))
+      return result;
+    const points = result.points.filter((found) => {
+      const inFirst = this.#inPiece(
+        found.proof.firstParameterBounds,
+        first.filter,
+      );
+      const inSecond = this.#inPiece(
+        found.proof.secondParameterBounds,
+        second.filter,
+      );
+      return inFirst && inSecond;
+    });
+    return { kind: "verified", points, overlaps: result.overlaps };
+  }
+
+  /**
+   * Whether a contact's source-winding bounds lie in the real-angle piece
+   * modulo 2π: true when some shift t + 2πk holds them in the piece, false
+   * when every shift is disjoint from it, and a failure otherwise (a contact
+   * on a piece end, or an undecided comparison). Shifts outside the scanned
+   * range miss the piece by more than a turn less the binary64 error of the
+   * range estimate.
+   */
+  #inPiece(bounds: readonly [number, number], piece: Domain | null) {
+    if (!piece) return true;
+    const [t0, t1] = bounds;
+    const [a, b] = piece;
+    const turn = 2 * Math.PI;
+    const lowest = Math.floor((a - t1) / turn) - 1;
+    const highest = Math.ceil((b - t0) / turn) + 1;
+    let inside = false;
+    for (let k = lowest; k <= highest; k += 1) {
+      this.budget.operation();
+      // a ≤ t0 + 2πk and t1 + 2πk ≤ b.
+      const lower = this.#turnSign(a, t0, -k);
+      const upper = this.#turnSign(t1, b, k);
+      if (lower !== null && lower >= 0 && upper !== null && upper >= 0) {
+        inside = true;
+        continue;
+      }
+      // t1 + 2πk < a or t0 + 2πk > b.
+      if (this.#turnSign(a, t1, -k) === -1 || this.#turnSign(t0, b, k) === -1)
+        continue;
+      return fail(
+        "join-full-turn-piece-unresolved",
+        "A contact on a full-turn circle is not certified inside or outside one certificate piece.",
+      );
+    }
+    return inside;
+  }
+
+  /** sign((y − x) − 2πk), exact; null when the outward bracket and the exact one-turn comparison cannot decide. */
+  #turnSign(x: number, y: number, k: number): -1 | 0 | 1 | null {
+    if (k === 0) return y > x ? 1 : y < x ? -1 : 0;
+    const arithmetic = this.#arithmetic;
+    const difference = y - x;
+    const [turnsLower, turnsUpper] =
+      k > 0
+        ? [k * TWO_PI_INWARD_LOWER, k * TWO_PI_OUTWARD_UPPER]
+        : [k * TWO_PI_OUTWARD_UPPER, k * TWO_PI_INWARD_LOWER];
+    if (arithmetic.up(difference) < arithmetic.down(turnsLower)) return -1;
+    if (arithmetic.down(difference) > arithmetic.up(turnsUpper)) return 1;
+    if (k === 1)
+      return y <= x ? -1 : compareFiniteSpanToTwoPiExact(x, y, this.budget);
+    if (k === -1) {
+      if (x <= y) return 1;
+      const sign = compareFiniteSpanToTwoPiExact(y, x, this.budget);
+      return sign === null ? null : sign === 1 ? -1 : 1;
+    }
+    return null;
   }
 
   /** Closed boxes that touch or overlap are merged until pairwise disjoint. */
@@ -863,7 +977,8 @@ class JoinCertifier {
     distance: number,
   ): Piece {
     const model = this.#models[side];
-    const [lower, upper] = model.domain;
+    // A full turn never clamps: its near piece is lifted around the join.
+    const [lower, upper] = model.domain ?? [-Infinity, Infinity];
     let extent = (radius - distance) / model.speed;
     if (model.curve.kind === "circle") extent = Math.min(extent, 0.5);
     if (!Number.isFinite(extent)) extent = upper - lower;
@@ -887,7 +1002,7 @@ class JoinCertifier {
   }
 
   #interpretNear(
-    result: NeutralCurveQueryResult,
+    result: OrdinaryOutcome,
     parameters: readonly [number, number],
   ):
     | { readonly kind: "declared"; readonly bounds?: readonly [Domain, Domain] }
@@ -1136,14 +1251,40 @@ class JoinCertifier {
             "Two declared joins share near pieces on one curve.",
           );
       }
+      // A full turn's far pieces run from the first near piece's upper end
+      // once around to E = ↑(l₁ + 2π) ≥ l₁ + 2π; the last near piece must end
+      // strictly less than a turn after the first one starts.
+      const [first, last] = [near[0]!.interval, near.at(-1)!.interval];
+      if (
+        !model.domain &&
+        compareFiniteSpanToTwoPiExact(first[0], last[1], this.budget) !== -1
+      )
+        fail(
+          "join-ball-crowded",
+          "Two declared joins share near pieces around one full-turn circle.",
+        );
+      const [from, to] = model.domain ?? [
+        first[1],
+        this.#arithmetic.up(first[0] + TWO_PI_OUTWARD_UPPER),
+      ];
+      // The overlap [l₁ + 2π, E] lies in N₁ + 2π iff E < h₁ + 2π: checked,
+      // not assumed, since N₁ can be as narrow as the rounding of E.
+      if (
+        !model.domain &&
+        compareFiniteSpanToTwoPiExact(from, to, this.budget) !== -1
+      )
+        fail(
+          "join-ball-crowded",
+          "A full-turn circle's far pieces are not certified to end inside its first near piece.",
+        );
       const result: Piece[] = [...near];
-      let cursor = model.domain[0];
+      let cursor = from;
       const gaps: Domain[] = [];
       for (const piece of near) {
         if (cursor < piece.interval[0]) gaps.push([cursor, piece.interval[0]]);
         cursor = piece.interval[1];
       }
-      if (cursor < model.domain[1]) gaps.push([cursor, model.domain[1]]);
+      if (cursor < to) gaps.push([cursor, to]);
       for (const gap of gaps) {
         const count =
           model.curve.kind === "circle"
@@ -1348,21 +1489,33 @@ function admitVerifiedJoinResult(
     curve.kind === "circle"
       ? curve.sourceDomain.kind === "arc"
         ? curve.sourceDomain.interval
-        : ([Number.NaN, Number.NaN] as const)
+        : null
       : curve.sourceDomain,
   );
-  const ordered = (bounds: Domain, domain: Domain) =>
+  // A full turn's bounds are a real-angle lift (they may cross the seam)
+  // shorter than one exact turn.
+  const ordered = (bounds: Domain, domain: Domain | null) =>
     Number.isFinite(bounds[0]) &&
     Number.isFinite(bounds[1]) &&
     bounds[0] <= bounds[1] &&
-    bounds[0] >= domain[0] &&
-    bounds[1] <= domain[1];
+    (domain
+      ? bounds[0] >= domain[0] && bounds[1] <= domain[1]
+      : bounds[0] === bounds[1] ||
+        compareFiniteSpanToTwoPiExact(bounds[0], bounds[1], budget) === -1);
   const joinsValid =
     joins.length === request.joins.length &&
     joins.every((join) => {
       if (
         !ordered(join.firstParameterBounds, domains[0]!) ||
         !ordered(join.secondParameterBounds, domains[1]!) ||
+        !neutralCurveSourceParameterInside(
+          request.first,
+          join.firstParameter,
+        ) ||
+        !neutralCurveSourceParameterInside(
+          request.second,
+          join.secondParameter,
+        ) ||
         !neutralCurveParameterInside(
           join.firstParameter,
           join.firstParameterBounds,
@@ -1460,13 +1613,6 @@ export function certifyNeutralCurveJoin(
         code: "invalid-neutral-curve-join-query",
         message:
           "Join queries require circle domains shorter than the exact full turn.",
-      };
-    if (curve.kind === "circle" && curve.sourceDomain.kind !== "arc")
-      return {
-        kind: "unsupported",
-        code: "unsupported-neutral-curve-join-full-turn",
-        message:
-          "Declared joins on full-turn circles are not admitted by the kernel-free join certificate.",
       };
   }
   try {
