@@ -402,6 +402,15 @@ const VERIFIED_ROWS: readonly VerifiedRow[] = [
     classifications: [],
     operations: [150955, 151495],
   },
+  {
+    name: "line/arc join at an arc starting at exactly fl(3π/4) (T10a)",
+    first: segment("line", center, onCircle(center, 3, (3 * Math.PI) / 4)),
+    second: arc("arc135", center, 3, [(3 * Math.PI) / 4, Math.PI]),
+    joins: [endToStart],
+    realizations: ["declaredEnds"],
+    classifications: [],
+    operations: [110419, 110419],
+  },
 ];
 
 const UNCERTAIN_ROWS: readonly {

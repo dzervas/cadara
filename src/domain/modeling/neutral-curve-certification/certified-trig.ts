@@ -17,7 +17,8 @@ export interface CertifiedSinCos {
 // Adjacent binary64 bounds known to contain the mathematical constants.
 const HALF_PI_LOWER = 1.5707963267948966;
 const HALF_PI_UPPER = 1.5707963267948968;
-const QUARTER_PI_UPPER = 0.7853981633974484;
+// Accuracy bound on the reduced angle; see the certifySinCos proof.
+const REDUCED_ANGLE_BOUND = 1;
 const HALF_PI_SEED = 1.5707963267948966;
 const MAX_QUADRANT = 1_048_576;
 const MAX_BINARY64_STORAGE = 18446744073709551615n;
@@ -117,6 +118,26 @@ function taylorRemainder(
  * Bounded outward sin/cos enclosure without calling native trig or modulo.
  * The rounded quadrant is only a range-reduction seed. All fixed work and the
  * 64-bit nextafter representation are precharged to the caller's one meter.
+ *
+ * Proof sketch. Let a be the finite input angle and q = round(fl(a / L)).
+ * 1. Reduction: L < π/2 < U, and each rounded product or difference is pushed
+ *    one ulp outward, so r = a − qπ/2 lies in `reduced` for every q.
+ * 2. Taylor: the loops sum sin's series to r^29 and cos's to r^28. The next
+ *    nonzero terms have degree 31 and 30, and |sin^(n)| = |cos^(n)| ≤ 1 for
+ *    every ξ, so the Lagrange remainders are at most |r|^31/31! and
+ *    |r|^30/30!. `taylorRemainder(max|reduced|, 31 / 30)` bounds these (each
+ *    step may fall about one ulp short before its upward nudge; the final
+ *    `widen` absorbs that, so the enclosure stays sound).
+ *    The interval terms and outward scalars enclose each term for every r in
+ *    `reduced`. This holds for any finite r, not only |r| ≤ π/4.
+ * 3. Quadrant: sin(r + qπ/2) and cos(r + qπ/2) are sin r, cos r rotated by
+ *    q mod 4 (identity, (cos, −sin), (−sin, −cos), (−cos, sin)) for every r.
+ * 4. Accuracy: at an odd multiple of π/4 both neighbouring q leave |reduced|
+ *    a few ulps above π/4, so the bound is |reduced| ≤ 1. There the
+ *    remainders are at most 1/31! ≈ 1.2e-34 and 1/30! ≈ 3.8e-33, so the
+ *    width comes from the outward rounding, not the truncation. With
+ *    |q| ≤ 2^20 the reduction already keeps |reduced| < π/4 + 1e-9, so the
+ *    check only states the accuracy precondition locally.
  */
 export function certifySinCos(
   angle: number,
@@ -153,7 +174,10 @@ export function certifySinCos(
     lower: nextBinary64(angle - product.upper, "down", budget),
     upper: nextBinary64(angle - product.lower, "up", budget),
   };
-  if (reduced.lower < -QUARTER_PI_UPPER || reduced.upper > QUARTER_PI_UPPER) {
+  if (
+    reduced.lower < -REDUCED_ANGLE_BOUND ||
+    reduced.upper > REDUCED_ANGLE_BOUND
+  ) {
     return null;
   }
   const square = outwardIntervalMultiply(reduced, reduced, budget);
