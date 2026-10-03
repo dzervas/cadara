@@ -2,6 +2,7 @@
  * Differentials are analytic directional derivatives: seed a canonical coordinate
  * or authored handle component with 1 to obtain a Jacobian column. */
 import type { SolvedSketchEntityGeometryRecord } from "@/contracts/sketch/schema";
+import type { ProjectedSketchSplineGeometry } from "@/contracts/solver/schema";
 export type SplineVector = readonly [number, number];
 export type SplinePoles = readonly [
   SplineVector,
@@ -377,32 +378,6 @@ export function reconstructSpline(
         handles,
         handleDifferentials,
       };
-}
-
-export function sampleSplineSpans(
-  spans: readonly SplineSpan[],
-  samplesPerSpan = 16,
-): readonly SplineVector[] {
-  if (!Number.isInteger(samplesPerSpan) || samplesPerSpan < 1) return [];
-  return spans.flatMap((span, spanIndex) =>
-    Array.from(
-      { length: samplesPerSpan + (spanIndex === 0 ? 1 : 0) },
-      (_, index) =>
-        evaluateSplineSpan(span, {
-          kind: "local",
-          value: (index + (spanIndex === 0 ? 0 : 1)) / samplesPerSpan,
-        }).position,
-    ),
-  );
-}
-
-export function sampleSplineGeometry(
-  geometry: SplineGeometry,
-  samplesPerSpan = 16,
-): readonly SplineVector[] {
-  return geometry.validity === "valid"
-    ? sampleSplineSpans(geometry.spans, samplesPerSpan)
-    : [];
 }
 
 export interface ClosestSplineSpanLocation {
@@ -871,12 +846,13 @@ export function solvedCubicSpanPoint(
 }
 
 /**
- * Display tessellation of solved spans, each clipped to its drawn domain:
- * `samplesPerSpan` steps per span from u₀ to u₁ (both exact), the shared
- * knot of consecutive spans emitted once. Display output only, never
- * geometry.
+ * The one cubic-span tessellator (T10 [TECH] T-7): `samplesPerSpan` steps
+ * per span from u₀ to u₁ of its drawn domain (both exact; an untrimmed span
+ * or an ordinary `SplineSpan` runs over [0, 1]), the shared knot of
+ * consecutive spans emitted once. Display output only, never geometry; the
+ * remaining non-display readers are T10e/T10f cutover targets.
  */
-export function sampleSolvedCubicSpans(
+export function tessellateCubicSpans(
   spans: readonly SolvedCubicSpan[],
   samplesPerSpan = 16,
 ): readonly SplineVector[] {
@@ -896,6 +872,19 @@ export function sampleSolvedCubicSpans(
       },
     );
   });
+}
+
+/**
+ * The display polyline of a projected spline: its own source samples as
+ * given, or the one tessellator over its neutral cubic spans. Display output
+ * only; the non-display readers are T10e/T10f cutover targets.
+ */
+export function tessellateProjectedSpline(
+  geometry: ProjectedSketchSplineGeometry,
+): readonly SplineVector[] {
+  return geometry.representation.kind === "sourceSamples"
+    ? geometry.representation.points
+    : tessellateCubicSpans(geometry.representation.spans);
 }
 
 /**

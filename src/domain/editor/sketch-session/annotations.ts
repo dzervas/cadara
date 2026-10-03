@@ -37,12 +37,12 @@ import {
   orderedSplinePointIds,
   solvedCubicSpanPoint,
   solvedCubicSpans,
+  tessellateProjectedSpline,
   type SolvedCubicSpan,
 } from "@/contracts/sketch/spline-geometry";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import { resolveSketchDimensionValues } from "@/domain/modeling/sketch-dimension-expressions";
 import {
-  projectedSplineDisplayPoints,
   type ProjectedSketchReferenceRecord,
   type SolverTolerancePolicy,
 } from "@/contracts/solver/schema";
@@ -2738,7 +2738,7 @@ export function getProjectedGeometryAnchor(
     case "arc":
       return geometry.centerPosition;
     case "spline":
-      return projectedSplineDisplayPoints(geometry)[0] ?? null;
+      return tessellateProjectedSpline(geometry)[0] ?? null;
   }
 }
 

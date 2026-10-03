@@ -21,11 +21,11 @@ import type {
 import { nonAcceptedOffsetOutputs } from "@/contracts/sketch/offset-publication";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import {
-  sampleSolvedCubicSpans,
+  tessellateCubicSpans,
+  tessellateProjectedSpline,
   solvedCubicSpans,
 } from "@/contracts/sketch/spline-geometry";
 import {
-  projectedSplineDisplayPoints,
   projectedSplineIsClosed,
   type ProjectedSketchReferenceRecord,
 } from "@/contracts/solver/schema";
@@ -560,7 +560,7 @@ export function createDisplayRenderablesForDerivedShells(
     if (entity.kind !== "derivedPiecewiseCubic") return [];
     const record = records.get(entity.entityId);
     if (record?.kind !== "derivedPiecewiseCubic") return [];
-    const points = sampleSolvedCubicSpans(solvedCubicSpans(record));
+    const points = tessellateCubicSpans(solvedCubicSpans(record));
     if (points.length < 2) return [];
     return [
       {
@@ -1553,7 +1553,7 @@ export function createDisplayRenderableForProjectedGeometry(
       target,
       geometry: {
         kind: "polyline",
-        points: projectedSplineDisplayPoints(geometry).map((point) =>
+        points: tessellateProjectedSpline(geometry).map((point) =>
           mapSketchPointToWorld(session.plane, point),
         ),
         isClosed: projectedSplineIsClosed(geometry),

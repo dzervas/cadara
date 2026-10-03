@@ -1,5 +1,4 @@
 import {
-  projectedSplineDisplayPoints,
   projectedSplineIsClosed,
   type ProjectedSketchReferenceGeometry,
   type ProjectedSketchReferenceRecord,
@@ -14,8 +13,8 @@ import type { SketchId, SketchPointId } from "@/contracts/shared/ids";
 import {
   orderedSplinePointIds,
   reconstructSplineAggregate,
-  sampleSolvedCubicSpans,
-  sampleSplineGeometry,
+  tessellateCubicSpans,
+  tessellateProjectedSpline,
   solvedCubicSpans,
 } from "@/contracts/sketch/spline-geometry";
 import type { PrimitiveRef } from "@/core/editor/schema";
@@ -298,8 +297,8 @@ function createLocalEntityInteractionGeometry(
       const positions = Object.fromEntries(
         pointIds.map((pointId, index) => [pointId, points[index]!]),
       ) as Record<SketchPointId, SketchPoint2D>;
-      const sampled = sampleSplineGeometry(
-        reconstructSplineAggregate(entity, positions),
+      const sampled = tessellateCubicSpans(
+        reconstructSplineAggregate(entity, positions).spans,
         SPLINE_SEGMENTS_PER_SPAN,
       );
       return sampled.length
@@ -396,7 +395,7 @@ function createDerivedShellInteractionGeometry(
   if (record?.kind !== "derivedPiecewiseCubic") return null;
   return createSampledLocalCurve(
     entity,
-    sampleSolvedCubicSpans(solvedCubicSpans(record)),
+    tessellateCubicSpans(solvedCubicSpans(record)),
     false,
   );
 }
@@ -492,7 +491,7 @@ function createProjectedGeometry(
         sweepDirection: geometry.sweepDirection,
       };
     case "spline": {
-      const points = projectedSplineDisplayPoints(geometry);
+      const points = tessellateProjectedSpline(geometry);
       if (points.length < 2) return null;
       return {
         ...base,

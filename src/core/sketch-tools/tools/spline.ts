@@ -9,7 +9,7 @@ import type { SketchToolPresentationSchema } from "@/core/sketch-tools/editor-sc
 import { createIdleState } from "@/core/sketch-tools/shared";
 import {
   reconstructSplineAggregate,
-  sampleSplineGeometry,
+  tessellateCubicSpans,
 } from "@/contracts/sketch/spline-geometry";
 
 const MIN_SPLINE_POINTS = 3;
@@ -66,7 +66,7 @@ function buildSplinePreview(
     return [];
   }
 
-  const sampled = sampleSplineGeometry(reconstructPreviewSpline(points));
+  const sampled = tessellateCubicSpans(reconstructPreviewSpline(points).spans);
 
   return sampled.length < 2
     ? []

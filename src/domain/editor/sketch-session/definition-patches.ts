@@ -8,8 +8,10 @@ import {
   evaluateSketchDerivations,
   type SketchDerivationSettings,
 } from "@/contracts/sketch/derived-geometry";
-import { orderedSplineOccurrences } from "@/contracts/sketch/spline-geometry";
-import { projectedSplineDisplayPoints } from "@/contracts/solver/schema";
+import {
+  orderedSplineOccurrences,
+  tessellateProjectedSpline,
+} from "@/contracts/sketch/spline-geometry";
 import type { SketchToolAnchorDescriptor } from "@/core/sketch-tools/editor-schema";
 
 export function addAnchorOffset(
@@ -152,7 +154,7 @@ export function getSketchDatumGuideExtent(
           ];
         }
         case "spline":
-          return projectedSplineDisplayPoints(geometry).flatMap(
+          return tessellateProjectedSpline(geometry).flatMap(
             (point: SketchPoint) => [Math.abs(point[0]), Math.abs(point[1])],
           );
       }

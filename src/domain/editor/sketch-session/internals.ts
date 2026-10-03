@@ -51,7 +51,7 @@ import {
 import {
   orderedSplinePointIds,
   reconstructSplineAggregate,
-  sampleSplineGeometry,
+  tessellateCubicSpans,
 } from "@/contracts/sketch/spline-geometry";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import {
@@ -1055,8 +1055,8 @@ export function mapDefinitionEntityToDraftEntity(
       SketchPointId,
       SketchPoint
     >;
-    const splinePoints = sampleSplineGeometry(
-      reconstructSplineAggregate(entity, positions),
+    const splinePoints = tessellateCubicSpans(
+      reconstructSplineAggregate(entity, positions).spans,
     );
 
     if (splinePoints.length < 2) {

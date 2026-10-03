@@ -8,7 +8,6 @@ import type {
   SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
 import {
-  projectedSplineDisplayPoints,
   projectedSplineIsClosed,
   type ProjectedSketchReferenceRecord,
 } from "@/contracts/solver/schema";
@@ -22,8 +21,8 @@ import type { SketchToolId } from "@/core/sketch-tools/definition";
 import { distanceBetween, midpoint } from "@/domain/sketch/point-math";
 import {
   reconstructSplineAggregate,
-  sampleSolvedCubicSpans,
-  sampleSplineGeometry,
+  tessellateCubicSpans,
+  tessellateProjectedSpline,
   solvedCubicSpans,
 } from "@/contracts/sketch/spline-geometry";
 
@@ -286,8 +285,8 @@ export function collectSketchSnapGeometries(input: {
               point.position,
             ]),
           ) as Record<SketchPointId, SketchPoint2D>;
-          const fitPoints = sampleSplineGeometry(
-            reconstructSplineAggregate(entity, positions),
+          const fitPoints = tessellateCubicSpans(
+            reconstructSplineAggregate(entity, positions).spans,
           );
           return fitPoints.length
             ? [
@@ -305,7 +304,7 @@ export function collectSketchSnapGeometries(input: {
           const record = solvedEntities.get(entity.entityId);
           const fitPoints =
             record?.kind === "derivedPiecewiseCubic"
-              ? sampleSolvedCubicSpans(solvedCubicSpans(record))
+              ? tessellateCubicSpans(solvedCubicSpans(record))
               : [];
           return fitPoints.length >= 2
             ? [
@@ -390,7 +389,7 @@ export function collectSketchSnapGeometries(input: {
               {
                 kind: "spline",
                 source,
-                fitPoints: projectedSplineDisplayPoints(geometry),
+                fitPoints: tessellateProjectedSpline(geometry),
                 isClosed: projectedSplineIsClosed(geometry),
                 label,
               },
@@ -481,7 +480,7 @@ function getSketchDatumAxisExtent(
           ];
         }
         case "spline":
-          return projectedSplineDisplayPoints(geometry).flatMap((point) => [
+          return tessellateProjectedSpline(geometry).flatMap((point) => [
             Math.abs(point[0]),
             Math.abs(point[1]),
           ]);

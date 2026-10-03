@@ -17,7 +17,8 @@ import {
   orderedSplineOccurrences,
   orderedSplinePointIds,
   reconstructSplineAggregate,
-  sampleSplineGeometry,
+  tessellateCubicSpans,
+  tessellateProjectedSpline,
 } from "@/contracts/sketch/spline-geometry";
 import {
   offsetLinePoints,
@@ -35,7 +36,6 @@ import {
 } from "@/contracts/sketch/offset-derivation-outputs";
 import { canonicalArcSupport } from "@/contracts/sketch/canonical-arc-support";
 import {
-  projectedSplineDisplayPoints,
   projectedSplineIsClosed,
   type ProjectedSketchReferenceGeometry,
 } from "@/contracts/solver/schema";
@@ -278,8 +278,8 @@ function getCurveDescriptor(
       const positions = Object.fromEntries(
         definition.points.map((point) => [point.pointId, point.position]),
       ) as Record<SketchPointId, SketchPoint>;
-      const points = sampleSplineGeometry(
-        reconstructSplineAggregate(entity, positions),
+      const points = tessellateCubicSpans(
+        reconstructSplineAggregate(entity, positions).spans,
       );
       return points.length >= 2
         ? {
@@ -334,7 +334,7 @@ export function offsetCurveDescriptorFromProjectedGeometry(
         sweepDirection: geometry.sweepDirection,
       };
     case "spline": {
-      const points = projectedSplineDisplayPoints(geometry);
+      const points = tessellateProjectedSpline(geometry);
       return points.length >= 2
         ? {
             kind: "spline",

@@ -475,8 +475,9 @@ const CUBIC_AREA_WEIGHTS = [0, 1, 2, 3].map((i) =>
  * ½[r²Δθ + r(cₓ Δsin θ − c_y Δcos θ)]; cubic the closed form over the exact
  * blossomed sub-poles. Evaluated with outward interval arithmetic only.
  *
- * Exported only so the spec's independent quadrature oracle can check it:
- * region records carry no areas, so the owner seam cannot expose them.
+ * Production API: the arrangement's `cycleArea` and the region-boundary
+ * curve owner's `boundaryLoopSignedArea` (`region-boundary-curves.ts`) sum it
+ * per piece; the specs check it against independent oracles.
  */
 export function certifyNeutralCurvePieceSignedArea(
   curve: NeutralCurve,
