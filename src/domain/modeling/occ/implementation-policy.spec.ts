@@ -350,7 +350,7 @@ test("src/domain/modeling/occ/implementation-policy.spec.ts", async () => {
     let thrownMessage: string | null = null;
 
     try {
-      buildRegionProfileFace(oc, { plane, sketch }, region);
+      buildRegionProfileFace(oc, { plane, sketch, modelingTolerance: 1e-3 }, region);
     } catch (error) {
       thrownMessage = error instanceof Error ? error.message : String(error);
     }

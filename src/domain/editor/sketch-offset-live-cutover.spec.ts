@@ -3105,7 +3105,7 @@ describe("T08b-g5b consumers and region wiring", () => {
     const oc = await getDefaultOpenCascadeInstance();
     let message = "";
     try {
-      buildRegionProfileFace(oc, { plane: live.plane, sketch }, annulus[0]!);
+      buildRegionProfileFace(oc, { plane: live.plane, sketch, modelingTolerance: 1e-3 }, annulus[0]!);
     } catch (error) {
       message = (error as Error).message;
     }

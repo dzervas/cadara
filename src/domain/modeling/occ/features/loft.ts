@@ -47,7 +47,11 @@ function buildLoftSectionWire(
 
     const face = buildRegionProfileFace(
       context.oc,
-      { plane: sketch.plane, sketch: sketch.sketch },
+      {
+        plane: sketch.plane,
+        sketch: sketch.sketch,
+        modelingTolerance: context.modelingTolerance,
+      },
       region,
     ).face;
     return context.oc.BRepTools.OuterWire(face);

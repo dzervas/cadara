@@ -359,7 +359,7 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
     const [region, ...others] = await deriveRegions(sketch);
     expect(others, "A rectangle derives exactly one region.").toEqual([]);
 
-    const profile = buildRegionProfileFace(oc, { plane, sketch }, region);
+    const profile = buildRegionProfileFace(oc, { plane, sketch, modelingTolerance: 1e-3 }, region);
     assertClose(
       await faceArea(profile.face),
       12,
@@ -420,7 +420,7 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
     const [editedRegion] = await deriveRegions(editedSketch);
     const editedProfile = buildRegionProfileFace(
       oc,
-      { plane, sketch: editedSketch },
+      { plane, sketch: editedSketch, modelingTolerance: 1e-3 },
       editedRegion,
     );
     expectCyclic(
@@ -467,7 +467,7 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
     ]);
     const [region] = await deriveRegions(sketch);
 
-    const profile = buildRegionProfileFace(oc, { plane, sketch }, region);
+    const profile = buildRegionProfileFace(oc, { plane, sketch, modelingTolerance: 1e-3 }, region);
     assertClose(
       await faceArea(profile.face),
       Math.PI * 4,
@@ -541,7 +541,7 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
     const [region, ...others] = await deriveRegions(sketch);
     expect(others, "An arc and its chord derive exactly one region.").toEqual([]);
 
-    const profile = buildRegionProfileFace(oc, { plane, sketch }, region);
+    const profile = buildRegionProfileFace(oc, { plane, sketch, modelingTolerance: 1e-3 }, region);
     assertClose(
       await faceArea(profile.face),
       Math.PI / 2,
@@ -754,7 +754,7 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
       candidate.loops.some((loop) => loop.role === "inner"),
     )!;
 
-    const profile = buildRegionProfileFace(oc, { plane, sketch }, region);
+    const profile = buildRegionProfileFace(oc, { plane, sketch, modelingTolerance: 1e-3 }, region);
     assertClose(
       await faceArea(profile.face),
       32,
@@ -882,12 +882,12 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
 
     const outerProfile = buildRegionProfileFace(
       oc,
-      { plane, sketch },
+      { plane, sketch, modelingTolerance: 1e-3 },
       outerCell,
     );
     const innerProfile = buildRegionProfileFace(
       oc,
-      { plane, sketch },
+      { plane, sketch, modelingTolerance: 1e-3 },
       innerCell,
     );
 
@@ -1001,7 +1001,7 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
     const [region, ...others] = await deriveRegions(sketch);
     expect(others, "The mixed local/projected loop derives one region.").toEqual([]);
 
-    const profile = buildRegionProfileFace(oc, { plane, sketch }, region);
+    const profile = buildRegionProfileFace(oc, { plane, sketch, modelingTolerance: 1e-3 }, region);
     assertClose(
       await faceArea(profile.face),
       12,
@@ -1051,7 +1051,7 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
     );
     const [region] = await deriveRegions(sketch);
 
-    const profile = buildRegionProfileFace(oc, { plane, sketch }, region);
+    const profile = buildRegionProfileFace(oc, { plane, sketch, modelingTolerance: 1e-3 }, region);
     assertClose(
       await faceArea(profile.face),
       Math.PI * 4,
@@ -1094,7 +1094,7 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
 
     let thrown: (Error & { code?: string }) | null = null;
     try {
-      buildRegionProfileFace(oc, { plane, sketch }, region);
+      buildRegionProfileFace(oc, { plane, sketch, modelingTolerance: 1e-3 }, region);
     } catch (error) {
       thrown = error as Error & { code?: string };
     }
@@ -1155,7 +1155,7 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
 
     let thrown: (Error & { code?: string }) | null = null;
     try {
-      buildRegionProfileFace(oc, { plane, sketch }, region);
+      buildRegionProfileFace(oc, { plane, sketch, modelingTolerance: 1e-3 }, region);
     } catch (error) {
       thrown = error as Error & { code?: string };
     }
@@ -1226,7 +1226,7 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
       },
     ]);
     expect(
-      () => buildRegionProfileFace(oc, { plane, sketch }, region),
+      () => buildRegionProfileFace(oc, { plane, sketch, modelingTolerance: 1e-3 }, region),
       "The profile builder rejects an ellipse boundary explicitly.",
     ).toThrow(
       `Sketch entity ${ellipseId} of kind ellipse cannot define a profile boundary in this OCC profile builder.`,
@@ -1261,9 +1261,9 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
     const halves = await deriveRegions(sketch);
     expect(halves, "A circle split by its diameter derives two cells.").toHaveLength(2);
     const [top, bottom] = halves;
-    assertClose(await faceArea(buildRegionProfileFace(oc, { plane, sketch }, top!).face), Math.PI * 2, 1e-5,
+    assertClose(await faceArea(buildRegionProfileFace(oc, { plane, sketch, modelingTolerance: 1e-3 }, top!).face), Math.PI * 2, 1e-5,
       "The upper split-circle cell must build as a bounded circle arc and chord.");
-    assertClose(await faceArea(buildRegionProfileFace(oc, { plane, sketch }, bottom!).face), Math.PI * 2, 1e-5,
+    assertClose(await faceArea(buildRegionProfileFace(oc, { plane, sketch, modelingTolerance: 1e-3 }, bottom!).face), Math.PI * 2, 1e-5,
       "The lower split-circle cell must build as a bounded circle arc and chord.");
   }
 
@@ -1289,7 +1289,7 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
     let thrownMessage: string | null = null;
 
     try {
-      buildRegionProfileFace(oc, { plane, sketch }, region);
+      buildRegionProfileFace(oc, { plane, sketch, modelingTolerance: 1e-3 }, region);
     } catch (error) {
       thrownMessage = error instanceof Error ? error.message : String(error);
     }
@@ -1397,7 +1397,7 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
     const [region, ...others] = await deriveRegions(sketch);
     expect(others, "The rails and chords bound exactly one cell.").toEqual([]);
 
-    const profile = buildRegionProfileFace(oc, { plane, sketch }, region);
+    const profile = buildRegionProfileFace(oc, { plane, sketch, modelingTolerance: 1e-3 }, region);
 
     assertClose(
       await faceArea(profile.face),
@@ -1526,7 +1526,7 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
       new Set(circleOrdinals).size,
       "The band uses two distinct split pieces of the circle.",
     ).toBe(2);
-    const profile = buildRegionProfileFace(oc, { plane, sketch }, band);
+    const profile = buildRegionProfileFace(oc, { plane, sketch, modelingTolerance: 1e-3 }, band);
     assertClose(
       await faceArea(profile.face),
       (4 * Math.PI) / 3 + 2 * sqrt3,
@@ -1570,7 +1570,7 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
       () =>
         buildRegionProfileFace(
           oc,
-          { plane: createSketchPlane(), sketch },
+          { plane: createSketchPlane(), sketch, modelingTolerance: 1e-3 },
           regions[0]!,
         ),
       "OCC rejects spline-bounded regions explicitly until exact span trimming lands (U9 tracked gap).",
@@ -1676,7 +1676,7 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
       return {
         regions,
         profiles: regions.map((region) =>
-          buildRegionProfileFace(oc, { plane, sketch }, region),
+          buildRegionProfileFace(oc, { plane, sketch, modelingTolerance: 1e-3 }, region),
         ),
       };
     };
@@ -1822,12 +1822,12 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
       "the owner derives the touching band and the diamond",
     ).toBeTruthy();
     expect(
-      () => buildRegionProfileFace(oc, { plane, sketch }, touching!),
+      () => buildRegionProfileFace(oc, { plane, sketch, modelingTolerance: 1e-3 }, touching!),
       "A face whose loops share a boundary vertex fails closed explicitly (review A2).",
     ).toThrow(
       /^Region .* loops .* and .* share boundary vertex j\["sketch_point_d0"\]; profiles with point-touching loops are not yet supported by the OCC profile builder\.$/,
     );
-    const built = buildRegionProfileFace(oc, { plane, sketch }, diamond!);
+    const built = buildRegionProfileFace(oc, { plane, sketch, modelingTolerance: 1e-3 }, diamond!);
     await expectValidProfile(
       diamond!,
       built,
@@ -1859,7 +1859,7 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
         () =>
           buildRegionProfileFace(
             oc,
-            { plane, sketch: circleSketch },
+            { plane, sketch: circleSketch, modelingTolerance: 1e-3 },
             {
               ...disk!,
               loops: [{ ...disk!.loops[0]!, segments: [halfOpen] }],

@@ -50,8 +50,6 @@ const AUDITED_BORROWED_BINDINGS = [
 // Every audited production borrowed root. A new root needs an ownership review.
 const AUDITED_PRODUCTION_ROOTS = [
   "src/domain/modeling/occ/features/shell.ts Handle_Poly_Triangulation.get",
-  "src/domain/modeling/occ/features/sweep.ts Handle_Geom_TrimmedCurve.get",
-  "src/domain/modeling/occ/sketch-profile.ts Handle_Geom_TrimmedCurve.get",
   "src/domain/modeling/occ/snapshot.ts Handle_Poly_Polygon3D.get",
   "src/domain/modeling/occ/snapshot.ts Handle_Poly_PolygonOnTriangulation.get",
   "src/domain/modeling/occ/snapshot.ts Handle_Poly_Triangulation.get",
