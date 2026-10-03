@@ -18,7 +18,7 @@ import {
   orderedSplinePointIds,
   reconstructSplineAggregate,
   tessellateCubicSpans,
-  tessellateProjectedSpline,
+  type SolvedCubicSpan,
 } from "@/contracts/sketch/spline-geometry";
 import {
   offsetLinePoints,
@@ -131,7 +131,16 @@ type CurveDescriptor =
       entity: Extract<SketchEntityDefinition, { kind: "spline" }>;
       isConstruction: boolean;
       style: SketchEntityDefinition["style"];
-      points: readonly SketchPoint[];
+      /**
+       * T10f: the curve's exact cubic spans (a sketch spline's
+       * reconstruction, a projected neutral spline's spans), or a projected
+       * spline's source samples, which are its geometry.
+       */
+      geometry:
+        | { kind: "spans"; spans: readonly SolvedCubicSpan[] }
+        | { kind: "samples"; points: readonly SketchPoint[] };
+      /** A projected closed spline: its polyline returns to its start. */
+      isClosed: boolean;
     };
 
 export type OffsetCurveDescriptor =
@@ -278,16 +287,16 @@ function getCurveDescriptor(
       const positions = Object.fromEntries(
         definition.points.map((point) => [point.pointId, point.position]),
       ) as Record<SketchPointId, SketchPoint>;
-      const points = tessellateCubicSpans(
-        reconstructSplineAggregate(entity, positions).spans,
-      );
-      return points.length >= 2
+      const spans = reconstructSplineAggregate(entity, positions).spans;
+      return spans.length > 0
         ? {
             kind: "spline",
             entity,
             isConstruction: entity.isConstruction,
             style: entity.style,
-            points,
+            geometry: { kind: "spans", spans },
+            // A closed sketch spline's spans already return to its start.
+            isClosed: false,
           }
         : null;
     }
@@ -334,16 +343,21 @@ export function offsetCurveDescriptorFromProjectedGeometry(
         sweepDirection: geometry.sweepDirection,
       };
     case "spline": {
-      const points = tessellateProjectedSpline(geometry);
-      return points.length >= 2
+      const { representation } = geometry;
+      const usable =
+        representation.kind === "neutralCubicSpans"
+          ? representation.spans.length > 0
+          : representation.points.length >= 2;
+      return usable
         ? {
             kind: "spline",
             isConstruction: false,
             style: undefined,
-            points:
-              projectedSplineIsClosed(geometry) && points.length > 2
-                ? [...points, points[0]!]
-                : points,
+            geometry:
+              representation.kind === "neutralCubicSpans"
+                ? { kind: "spans", spans: representation.spans }
+                : { kind: "samples", points: representation.points },
+            isClosed: projectedSplineIsClosed(geometry),
           }
         : null;
     }
@@ -386,6 +400,25 @@ function pointOnCircle(
     center[0] + Math.cos(angle) * radius,
     center[1] + Math.sin(angle) * radius,
   ];
+}
+
+/**
+ * The display polyline of a spline descriptor, read only by the samplers
+ * that remain until their slices replace them (T10f, listed in the
+ * tessellation boundary guard): Trim's intersection sampling (T10g) and the
+ * D6 static spline offset/slot polyline (T10h).
+ */
+function splineDescriptorPolyline(
+  curve: Pick<
+    Extract<OffsetCurveDescriptor, { kind: "spline" }>,
+    "geometry" | "isClosed"
+  >,
+): readonly SketchPoint[] {
+  const points =
+    curve.geometry.kind === "spans"
+      ? tessellateCubicSpans(curve.geometry.spans)
+      : curve.geometry.points;
+  return curve.isClosed && points.length > 2 ? [...points, points[0]!] : points;
 }
 
 function sampleSplineDisplayPolyline(
@@ -438,14 +471,16 @@ function sampleCurve(curve: CurveDescriptor): CurveSample[] {
         };
       });
     }
-    case "spline":
+    case "spline": {
+      const polyline = splineDescriptorPolyline(curve);
       return Array.from({ length: CURVE_SAMPLE_COUNT + 1 }, (_, index) => {
         const t = index / CURVE_SAMPLE_COUNT;
         return {
-          point: sampleSplineDisplayPolyline(curve.points, t),
+          point: sampleSplineDisplayPolyline(polyline, t),
           t,
         };
       });
+    }
   }
 }
 
@@ -2245,12 +2280,9 @@ function createSplineSlotContribution(input: {
   factories: SketchEditOperationFactories;
 }): SketchEditOperationResult {
   const halfWidth = input.width / 2;
-  const leftPoints = offsetSplinePoints(input.curve.points, halfWidth, "left");
-  const rightPoints = offsetSplinePoints(
-    input.curve.points,
-    halfWidth,
-    "right",
-  );
+  const polyline = splineDescriptorPolyline(input.curve);
+  const leftPoints = offsetSplinePoints(polyline, halfWidth, "left");
+  const rightPoints = offsetSplinePoints(polyline, halfWidth, "right");
   const leftPointIds = leftPoints.map((_, index) =>
     input.factories.createPointId(`slot-left-spline-${index + 1}`),
   );
@@ -2716,7 +2748,7 @@ export function createOffsetContribution(input: {
   }
 
   const offsetPoints = offsetSplinePoints(
-    curve.points,
+    splineDescriptorPolyline(curve),
     input.distance,
     input.side,
   );

@@ -8,15 +8,26 @@ import {
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
 import {
+  closestPointOnSketchInteractionCurve,
   collectSketchInteractionGeometry,
-  flattenSketchInteractionCurve,
+  getSketchInteractionCircularPieces,
+  getSketchInteractionCurveBounds,
+  type SketchInteractionCurveGeometry,
   isSketchInteractionCurveGeometry,
 } from "@/domain/sketch-interaction/geometry";
+import { mapWorldPointToWorkspaceSketch } from "@/core/workspace/sketch-plane-mapping";
 import type {
   SketchConstraintRef,
   SketchDimensionRef,
 } from "@/contracts/shared/references";
 import type { SketchPoint2D } from "@/contracts/sketch/schema";
+import {
+  closestPointOnRationalQuadratic,
+  closestPointOnSolvedCubicSpans,
+  rationalQuadraticPoint,
+  solvedCubicSpanPoint,
+  type SplinePoles,
+} from "@/contracts/sketch/spline-geometry";
 import {
   createProjectedPickCandidate,
   DEFAULT_PROJECTED_POINT_PICK_ENTER_RADIUS_PX,
@@ -29,6 +40,20 @@ import type { ViewportRenderableRecord } from "@/core/workspace/viewport-rendera
 
 export const DEFAULT_PROJECTED_SKETCH_CURVE_PICK_ENTER_RADIUS_PX = 10;
 export const DEFAULT_PROJECTED_SKETCH_CURVE_PICK_EXIT_RADIUS_PX = 14;
+/**
+ * Below this angle between the pointer ray and the sketch plane (1°), the
+ * sketch-plane metric is ill-conditioned: perspective cubic spans (and
+ * curves with a pole behind the camera) give no screen-space candidates
+ * (review A6 grazing fallback).
+ * This is a hard floor only: the plane metric over-reports a distance by at
+ * least (1 + c²)/(2c), c = sin(elevation) (×1.6 at 20°, ×3 at 10°, ×5.8 at
+ * 5°), so those curves are practically pickable only above about 10–20°
+ * (perspective cubic spans: 8.9% of truly in-radius pointers rejected at
+ * 20°, 28% at 10°; T10f-evidence/review-fix/arc-pick-rejection.after.log).
+ * Lines, polylines, arcs, circles and orthographic cubic spans are exact
+ * at every angle.
+ */
+const SKETCH_CURVE_PICK_GRAZING_SINE = Math.sin(Math.PI / 180);
 
 export function collectProjectedVertexCandidates({
   clientX,
@@ -199,12 +224,30 @@ export function collectProjectedSketchCurveCandidates({
   acceptsTarget: (target: PrimitiveRef) => boolean;
   currentHoverTarget: PrimitiveRef | null;
 }): PickCandidate[] {
-  const pointerX = clientX - viewportRect.left;
-  const pointerY = clientY - viewportRect.top;
-
   if (!sketchSession) {
     return [];
   }
+
+  const pointer = {
+    x: clientX - viewportRect.left,
+    y: clientY - viewportRect.top,
+  };
+  // Computed lazily: only the plane metric (arcs, circles, perspective
+  // cubic spans) needs the sketch-plane pointer.
+  let planePoint: SketchPoint2D | null | undefined;
+  const getPlanePoint = () =>
+    planePoint === undefined
+      ? (planePoint = getSketchPlanePointerPoint({
+          pointer,
+          camera,
+          viewportRect,
+          sketchSession,
+        }))
+      : planePoint;
+  const toScreen = (point: SketchPoint2D) =>
+    projectSketchPointToScreen(point, sketchSession, camera, viewportRect);
+  const toClip = (point: SketchPoint2D) =>
+    projectSketchPointToClip(point, sketchSession, camera, viewportRect);
 
   return collectSketchInteractionGeometry(sketchSession).flatMap((geometry) => {
     if (
@@ -214,28 +257,35 @@ export function collectProjectedSketchCurveCandidates({
       return [];
     }
 
-    const points = flattenSketchInteractionCurve(geometry);
-    if (points.length < 2) {
+    // Mandatory exact prefilter: the curve lies in its box, so its screen
+    // image lies in the box's image; farther than the exit radius, no point
+    // of the curve can be a candidate.
+    const bounds = getSketchInteractionCurveBounds(geometry);
+    if (
+      !bounds ||
+      screenDistanceToSketchBox(
+        pointer,
+        bounds,
+        sketchSession,
+        camera,
+        viewportRect,
+      ) > DEFAULT_PROJECTED_SKETCH_CURVE_PICK_EXIT_RADIUS_PX
+    ) {
       return [];
     }
 
-    const projected = projectSketchCurvePoints({
-      points,
-      sketchSession,
+    const measured = measureSketchCurveScreenDistance(
+      geometry,
+      pointer,
       camera,
-      viewportRect,
-    });
-    if (projected.length < 2) {
+      toScreen,
+      toClip,
+      getPlanePoint,
+    );
+    if (!measured) {
       return [];
     }
-
-    const distance = getPointToPolylineDistance(
-      {
-        x: pointerX,
-        y: pointerY,
-      },
-      projected,
-    );
+    const { distance, depth } = measured;
 
     if (
       !shouldIncludeProjectedPickCandidate({
@@ -256,14 +306,229 @@ export function collectProjectedSketchCurveCandidates({
         semanticClass:
           geometry.source === "local" ? "sketchCurve" : "sketchReference",
         screenDistance: distance,
-        depth: projected.reduce(
-          (nearest, point) => Math.min(nearest, point.depth),
-          Number.POSITIVE_INFINITY,
-        ),
+        depth,
         stableKey: `sketch-interaction:${geometry.id}`,
       }),
     ];
   });
+}
+
+/** Screen px and NDC depth; `visible` when the depth lies in the clip range. */
+type ScreenPoint = { x: number; y: number; depth: number; visible: boolean };
+
+/**
+ * The pick metric (T10f, review A6 and A-1): the screen distance from the
+ * pointer to the curve, and the NDC depth of the hit.
+ * - Lines and sampled polylines: exact screen-space distance. A projective
+ *   map sends segments to segments, so the projected end points (all in
+ *   front of the camera) give the projected curve; the depth interpolates
+ *   affinely along each projected segment.
+ * - Arcs and circles under any camera (all piece poles in front of it):
+ *   exact, as projected rational quadratic pieces
+ *   (`circularScreenDistance`, `closestPointOnRationalQuadratic`).
+ * - Cubic spans under an orthographic camera: exact. The sketch-to-screen
+ *   map is affine and Bézier curves are affinely invariant, so the poles
+ *   mapped to screen px are the projected curve's poles; its closest point
+ *   to the pointer is the owner's `closestPointOnSolvedCubicSpans` there.
+ * - Cubic spans under a perspective camera (they project to rational
+ *   cubics), or a curve with a pole behind the camera: the plane metric
+ *   |screen(C) − pointer|, C the exact closest point to the pointer
+ *   ray's sketch-plane point P (`getSketchPlanePointerPoint`). Viewed along
+ *   the normal this is the screen minimum; at oblique views it is an upper
+ *   bound (screen(C) is a point of the projected curve), inflated by at
+ *   least (1 + c²)/(2c) on a line, c = sin(elevation). Null at grazing views.
+ */
+function measureSketchCurveScreenDistance(
+  geometry: SketchInteractionCurveGeometry,
+  pointer: { x: number; y: number },
+  camera: ViewportCamera,
+  toScreen: (point: SketchPoint2D) => ScreenPoint,
+  toClip: (point: SketchPoint2D) => ClipPoint,
+  getPlanePoint: () => SketchPoint2D | null,
+): { distance: number; depth: number } | null {
+  if (geometry.kind === "lineSegment" || geometry.kind === "sampledCurve") {
+    const points =
+      geometry.kind === "lineSegment"
+        ? [geometry.start, geometry.end]
+        : geometry.isClosed && geometry.points.length > 2
+          ? [...geometry.points, geometry.points[0]!]
+          : geometry.points;
+    const projected = points.map(toScreen);
+    if (projected.every((point) => point.visible))
+      return screenPolylineDistance(pointer, projected);
+  } else if (geometry.kind === "circle" || geometry.kind === "arc") {
+    const exact = circularScreenDistance(geometry, pointer, toClip);
+    if (exact !== undefined) return exact;
+  } else if (
+    geometry.kind === "cubicSpans" &&
+    (camera as THREE.OrthographicCamera).isOrthographicCamera
+  ) {
+    // The orthographic map is affine (w = 1): no pole lies behind it.
+    const screenSpans = geometry.spans.map((span) => ({
+      ...span,
+      poles: span.poles.map((pole) => {
+        const at = toScreen(pole);
+        return [at.x, at.y] as const;
+      }) as unknown as SplinePoles,
+    }));
+    const closest = closestPointOnSolvedCubicSpans(
+      [pointer.x, pointer.y],
+      screenSpans,
+    );
+    if (!closest) return null;
+    const hit = toScreen(
+      solvedCubicSpanPoint(geometry.spans[closest.spanIndex]!, closest.u),
+    );
+    return hit.visible
+      ? { distance: closest.distance, depth: hit.depth }
+      : null;
+  }
+  const planePoint = getPlanePoint();
+  const closest = planePoint
+    ? closestPointOnSketchInteractionCurve(geometry, planePoint)
+    : null;
+  const hit = closest ? toScreen(closest) : null;
+  return hit?.visible
+    ? {
+        distance: Math.hypot(hit.x - pointer.x, hit.y - pointer.y),
+        depth: hit.depth,
+      }
+    : null;
+}
+
+/** Screen px and NDC depth of a point with its clip-space w (> 0 in front). */
+type ClipPoint = { x: number; y: number; depth: number; w: number };
+
+/**
+ * Exact screen distance of a circle or arc under any camera (review A-1):
+ * each exact rational quadratic piece maps to a rational quadratic on the
+ * screen with the poles' screen images and weights (1, w, 1) scaled by the
+ * poles' clip w (projective invariance); rescaled to the standard form
+ * w′ = w·w₁/√(w₀w₂) it is the same curve, depth included. Undefined (use the
+ * plane metric) when a pole lies behind the camera.
+ */
+function circularScreenDistance(
+  geometry: Extract<SketchInteractionCurveGeometry, { kind: "circle" | "arc" }>,
+  pointer: { x: number; y: number },
+  toClip: (point: SketchPoint2D) => ClipPoint,
+): { distance: number; depth: number } | null | undefined {
+  let best: { distance: number; depth: number } | null = null;
+  for (const { poles, weight } of getSketchInteractionCircularPieces(
+    geometry,
+  )) {
+    const clipped = poles.map(toClip);
+    if (!clipped.every((pole) => pole.w > 0)) return undefined;
+    const [c0, c1, c2] = clipped as [ClipPoint, ClipPoint, ClipPoint];
+    const screenWeight = (weight * c1.w) / Math.sqrt(c0.w * c2.w);
+    const closest = closestPointOnRationalQuadratic(
+      [pointer.x, pointer.y],
+      [
+        [c0.x, c0.y],
+        [c1.x, c1.y],
+        [c2.x, c2.y],
+      ],
+      screenWeight,
+    );
+    if (!closest || (best && closest.distance >= best.distance)) continue;
+    const depth = rationalQuadraticPoint(
+      [
+        [c0.depth, 0],
+        [c1.depth, 0],
+        [c2.depth, 0],
+      ],
+      screenWeight,
+      closest.t,
+    )[0];
+    if (depth >= -1 && depth <= 1) best = { distance: closest.distance, depth };
+  }
+  return best;
+}
+
+function screenPolylineDistance(
+  pointer: { x: number; y: number },
+  points: readonly ScreenPoint[],
+): { distance: number; depth: number } | null {
+  let best: { distance: number; depth: number } | null =
+    points.length === 1
+      ? {
+          distance: Math.hypot(
+            points[0]!.x - pointer.x,
+            points[0]!.y - pointer.y,
+          ),
+          depth: points[0]!.depth,
+        }
+      : null;
+  for (let index = 1; index < points.length; index += 1) {
+    const start = points[index - 1]!;
+    const end = points[index]!;
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const lengthSquared = dx * dx + dy * dy;
+    const t =
+      lengthSquared === 0
+        ? 0
+        : Math.min(
+            1,
+            Math.max(
+              0,
+              ((pointer.x - start.x) * dx + (pointer.y - start.y) * dy) /
+                lengthSquared,
+            ),
+          );
+    const distance = Math.hypot(
+      start.x + dx * t - pointer.x,
+      start.y + dy * t - pointer.y,
+    );
+    if (!best || distance < best.distance)
+      best = { distance, depth: start.depth + (end.depth - start.depth) * t };
+  }
+  return best;
+}
+
+/**
+ * The pick metric's sketch-plane pointer (T10f, review A6): the pointer
+ * ray (`Raycaster.setFromCamera`, as sketch tools place points) meets the
+ * sketch plane at P. Null when the ray misses the plane or meets it at
+ * less than 1° (`SKETCH_CURVE_PICK_GRAZING_SINE`), where P is
+ * ill-conditioned; the plane metric then gives no candidate.
+ */
+function getSketchPlanePointerPoint({
+  pointer,
+  camera,
+  viewportRect,
+  sketchSession,
+}: {
+  pointer: { x: number; y: number };
+  camera: ViewportCamera;
+  viewportRect: DOMRectReadOnly;
+  sketchSession: SketchSessionState;
+}): SketchPoint2D | null {
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(
+    new THREE.Vector2(
+      (pointer.x / viewportRect.width) * 2 - 1,
+      -(pointer.y / viewportRect.height) * 2 + 1,
+    ),
+    camera,
+  );
+  const { frame } = sketchSession.plane;
+  const normal = new THREE.Vector3(...frame.normal);
+  if (
+    Math.abs(raycaster.ray.direction.dot(normal)) <
+    SKETCH_CURVE_PICK_GRAZING_SINE
+  ) {
+    return null;
+  }
+  const hit = raycaster.ray.intersectPlane(
+    new THREE.Plane().setFromNormalAndCoplanarPoint(
+      normal,
+      new THREE.Vector3(...frame.origin),
+    ),
+    new THREE.Vector3(),
+  );
+  return hit
+    ? mapWorldPointToWorkspaceSketch(sketchSession.plane, [hit.x, hit.y, hit.z])
+    : null;
 }
 
 function getProjectedSketchDisplayPointSemanticClass(
@@ -297,52 +562,92 @@ function hasVisibleProjectedDepth(projectedPoint: THREE.Vector3) {
   );
 }
 
-function projectSketchCurvePoints({
-  points,
-  sketchSession,
-  camera,
-  viewportRect,
-}: {
-  points: readonly SketchPoint2D[];
-  sketchSession: SketchSessionState;
-  camera: ViewportCamera;
-  viewportRect: DOMRectReadOnly;
-}) {
-  const projectedPoint = new THREE.Vector3();
-
-  return points.flatMap((point) => {
-    const worldPoint = mapSketchPointToWorld(sketchSession.plane, point);
-    projectedPoint.set(worldPoint[0], worldPoint[1], worldPoint[2]);
-    projectedPoint.project(camera);
-
-    if (!hasVisibleProjectedDepth(projectedPoint)) {
-      return [];
-    }
-
-    return [
-      {
-        x: ((projectedPoint.x + 1) / 2) * viewportRect.width,
-        y: ((-projectedPoint.y + 1) / 2) * viewportRect.height,
-        depth: projectedPoint.z,
-      },
-    ];
-  });
+function projectSketchPointToScreen(
+  point: SketchPoint2D,
+  sketchSession: SketchSessionState,
+  camera: ViewportCamera,
+  viewportRect: DOMRectReadOnly,
+): ScreenPoint {
+  const worldPoint = mapSketchPointToWorld(sketchSession.plane, point);
+  const projectedPoint = new THREE.Vector3(...worldPoint).project(camera);
+  return {
+    x: ((projectedPoint.x + 1) / 2) * viewportRect.width,
+    y: ((-projectedPoint.y + 1) / 2) * viewportRect.height,
+    depth: projectedPoint.z,
+    visible: hasVisibleProjectedDepth(projectedPoint),
+  };
 }
 
-function getPointToPolylineDistance(
-  point: { x: number; y: number },
-  polyline: readonly { x: number; y: number }[],
-) {
-  let distance = Number.POSITIVE_INFINITY;
+function projectSketchPointToClip(
+  point: SketchPoint2D,
+  sketchSession: SketchSessionState,
+  camera: ViewportCamera,
+  viewportRect: DOMRectReadOnly,
+): ClipPoint {
+  const clip = new THREE.Vector4(
+    ...mapSketchPointToWorld(sketchSession.plane, point),
+    1,
+  )
+    .applyMatrix4(camera.matrixWorldInverse)
+    .applyMatrix4(camera.projectionMatrix);
+  return {
+    x: ((clip.x / clip.w + 1) / 2) * viewportRect.width,
+    y: ((-clip.y / clip.w + 1) / 2) * viewportRect.height,
+    depth: clip.z / clip.w,
+    w: clip.w,
+  };
+}
 
-  for (let index = 1; index < polyline.length; index += 1) {
+/**
+ * Screen distance from the pointer to the image of a sketch-plane box: its
+ * four corners projected, which bound a convex quadrilateral containing the
+ * image of every point of the box while all corners lie in front of the
+ * camera (a projective map keeps lines and convexity there). 0 when any
+ * corner is behind the camera (no pruning: conservative).
+ */
+function screenDistanceToSketchBox(
+  pointer: { x: number; y: number },
+  bounds: { readonly min: SketchPoint2D; readonly max: SketchPoint2D },
+  sketchSession: SketchSessionState,
+  camera: ViewportCamera,
+  viewportRect: DOMRectReadOnly,
+) {
+  const clip = new THREE.Vector4();
+  const corners: { x: number; y: number }[] = [];
+  for (const point of [
+    bounds.min,
+    [bounds.max[0], bounds.min[1]],
+    bounds.max,
+    [bounds.min[0], bounds.max[1]],
+  ] satisfies SketchPoint2D[]) {
+    clip
+      .set(...mapSketchPointToWorld(sketchSession.plane, point), 1)
+      .applyMatrix4(camera.matrixWorldInverse)
+      .applyMatrix4(camera.projectionMatrix);
+    if (!(clip.w > 0)) return 0;
+    corners.push({
+      x: ((clip.x / clip.w + 1) / 2) * viewportRect.width,
+      y: ((-clip.y / clip.w + 1) / 2) * viewportRect.height,
+    });
+  }
+  let left = false;
+  let right = false;
+  let distance = Number.POSITIVE_INFINITY;
+  for (let index = 0; index < corners.length; index += 1) {
+    const start = corners[index]!;
+    const end = corners[(index + 1) % corners.length]!;
+    const side =
+      (end.x - start.x) * (pointer.y - start.y) -
+      (end.y - start.y) * (pointer.x - start.x);
+    left ||= side > 0;
+    right ||= side < 0;
     distance = Math.min(
       distance,
-      getPointToSegmentDistance(point, polyline[index - 1]!, polyline[index]!),
+      getPointToSegmentDistance(pointer, start, end),
     );
   }
-
-  return distance;
+  // Inside (or on) the convex quadrilateral: no two edges disagree.
+  return left && right ? distance : 0;
 }
 
 function getPointToSegmentDistance(

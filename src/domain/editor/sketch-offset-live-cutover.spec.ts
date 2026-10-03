@@ -2970,9 +2970,29 @@ describe("T08b-g5b consumers and region wiring", () => {
     const pick = collectSketchInteractionGeometry(live).find(
       (geometry) => geometry.id === `sketch-entity:${shellId}`,
     );
+    // T10f: pick and snap carry the record's spans (drawn domains kept);
+    // drawn with the oracle they are exactly the displayed polyline.
+    const drawnSpans = record.spans.map((span) => ({
+      interval: span.sourceDomain,
+      poles: span.poles,
+      queryDomain: span.queryDomain,
+    }));
     expect(
-      pick?.kind === "sampledCurve" && pick.points,
+      pick?.kind === "cubicSpans" && pick.spans,
       "Pick uses exactly the displayed spans.",
+    ).toEqual(drawnSpans);
+    expect(
+      pick?.kind === "cubicSpans" &&
+        drawnOracle(
+          pick.spans.map((span, index) => ({
+            ...record.spans[index]!,
+            sourceDomain: span.interval,
+            poles: span.poles,
+            queryDomain: span.queryDomain!,
+          })),
+          16,
+        ),
+      "Pick's spans draw exactly the displayed polyline.",
     ).toEqual(expected16);
 
     // Snap.
@@ -2985,9 +3005,9 @@ describe("T08b-g5b consumers and region wiring", () => {
         geometry.source.entityId === shellId,
     );
     expect(
-      snap?.kind === "spline" && snap.fitPoints,
+      snap?.kind === "spline" && snap.spans,
       "Snap uses exactly the displayed spans.",
-    ).toEqual(expected16);
+    ).toEqual(drawnSpans);
 
     // Measure (a committed sketch record).
     const measured = deriveMeasurementViewModel({

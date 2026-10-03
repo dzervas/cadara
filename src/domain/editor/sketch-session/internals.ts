@@ -413,7 +413,12 @@ const LIVE_REGIONS_UNAVAILABLE_DIAGNOSTIC: SketchSolveDiagnostic = {
 
 const LIVE_REGIONS_DERIVATION_FAILED_CODE = "regions-derivation-failed";
 
-function isAcceptedLiveSolve(solvedSnapshot: SolvedSketchSnapshot) {
+/**
+ * An accepted solve: solved, with every constraint status accepted. Live
+ * regions derive only from one; pick and snap read a snapshot's spline spans
+ * only from one (otherwise the authored reconstruction the display draws).
+ */
+export function isAcceptedSketchSolve(solvedSnapshot: SolvedSketchSnapshot) {
   return (
     solvedSnapshot.status.solveState === "solved" &&
     solvedSnapshot.constraintStatuses.every((entry) =>
@@ -470,7 +475,7 @@ export function withLiveSolveBasis(
     }
   }
 
-  const accepted = isAcceptedLiveSolve(usableSolvedSnapshot);
+  const accepted = isAcceptedSketchSolve(usableSolvedSnapshot);
   const generation = session.liveRegions.generation + 1;
   return {
     ...session,

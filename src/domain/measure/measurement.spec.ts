@@ -17,11 +17,67 @@ import {
   SNAPSHOT_SCHEMA_VERSION,
 } from "@/contracts/shared/versioning";
 import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
-import { lineLoopSegmentsForTest } from "@/contracts/sketch/region-record.fixtures";
+import {
+  lineLoopSegmentsForTest,
+  sketchSnapshotRecordForTest,
+} from "@/contracts/sketch/region-record.fixtures";
+import type { SketchPointId } from "@/contracts/shared/ids";
+import type {
+  SketchEntityDefinition,
+  SketchPoint2D,
+} from "@/contracts/sketch/schema";
 import {
   reconstructSplineAggregate,
+  solvedCubicSpans,
+  tessellateCubicSpans,
   type SplinePoles,
 } from "@/contracts/sketch/spline-geometry";
+import { curveLength } from "@/contracts/sketch/region-boundary-curves";
+import {
+  FIXTURE_SKETCH_ID,
+  makeSketchFixture,
+} from "@/contracts/sketch/region-extraction.fixtures";
+
+/** The fixture's authored spline (its solved record reconstructs it from the authored points). */
+const MEASUREMENT_SPLINE: Extract<SketchEntityDefinition, { kind: "spline" }> =
+  {
+    kind: "spline",
+    entityId: "spline_primary",
+    label: "Spline 1",
+    target: {
+      kind: "sketchEntity",
+      sketchId: "sketch_measure",
+      entityId: "spline_primary",
+    },
+    isConstruction: false,
+    pointOccurrenceIds: ["occ-a", "occ-b", "occ-c"],
+    pointOccurrences: [
+      {
+        occurrenceId: "occ-a",
+        pointId: "point_spline_a",
+        tangent: { kind: "automatic" },
+      },
+      {
+        occurrenceId: "occ-b",
+        pointId: "point_spline_b",
+        tangent: { kind: "automatic" },
+      },
+      {
+        occurrenceId: "occ-c",
+        pointId: "point_spline_c",
+        tangent: { kind: "automatic" },
+      },
+    ],
+    closure: "open",
+    interpolationPolicy: "centripetal-mean-arm-v1",
+  };
+
+/** The fixture spline's authored fit points. */
+const MEASUREMENT_SPLINE_POINTS = {
+  point_spline_a: [16, 0],
+  point_spline_b: [17.5, 2],
+  point_spline_c: [19, 0],
+} as Record<SketchPointId, SketchPoint2D>;
 
 test("src/domain/measure/measurement.spec.ts", () => {
   function createMeasurementSnapshot(): WorkspaceSnapshot {
@@ -317,37 +373,7 @@ test("src/domain/measure/measurement.spec.ts", () => {
               endPointId: "point_arc_start",
               sweepDirection: "clockwise",
             },
-            {
-              kind: "spline",
-              entityId: "spline_primary",
-              label: "Spline 1",
-              target: {
-                kind: "sketchEntity",
-                sketchId: "sketch_measure",
-                entityId: "spline_primary",
-              },
-              isConstruction: false,
-              pointOccurrenceIds: ["occ-a", "occ-b", "occ-c"],
-              pointOccurrences: [
-                {
-                  occurrenceId: "occ-a",
-                  pointId: "point_spline_a",
-                  tangent: { kind: "automatic" },
-                },
-                {
-                  occurrenceId: "occ-b",
-                  pointId: "point_spline_b",
-                  tangent: { kind: "automatic" },
-                },
-                {
-                  occurrenceId: "occ-c",
-                  pointId: "point_spline_c",
-                  tangent: { kind: "automatic" },
-                },
-              ],
-              closure: "open",
-              interpolationPolicy: "centripetal-mean-arm-v1",
-            },
+            MEASUREMENT_SPLINE,
           ],
           constraintIds: [],
           constraints: [],
@@ -364,6 +390,14 @@ test("src/domain/measure/measurement.spec.ts", () => {
             createSolvedLine("line_right", [4, 0], [4, 3]),
             createSolvedLine("line_top", [4, 3], [0, 3]),
             createSolvedLine("line_left", [0, 3], [0, 0]),
+            {
+              entityId: "spline_primary",
+              kind: "spline",
+              reconstruction: reconstructSplineAggregate(
+                MEASUREMENT_SPLINE,
+                MEASUREMENT_SPLINE_POINTS,
+              ),
+            },
           ],
           solvedPoints: [],
           constraintStatuses: [],
@@ -1176,3 +1210,128 @@ function closestOnCubicsOracle(
   }
   return at(best.poles, (lo + hi) / 2);
 }
+
+// Lane: logic (docs/testing.md). Seam: `deriveMeasurementViewModel` on a
+// committed sketch record (T10f review R-1): an entity spline is measured
+// along the record's solved spans, never the authored reconstruction.
+test("entity splines measure the record's solved spans; no valid solved spline measures nothing", () => {
+  const sketch = makeSketchFixture();
+  sketch.point("a", 16, 0);
+  sketch.point("b", 17.5, 2.5);
+  sketch.point("c", 19, 0);
+  sketch.point("probe", 17.4, 1.2);
+  sketch.spline("arch", ["a", "b", "c"], "open");
+  // The solved snapshot holds b at (17.5, 2.5); the definition keeps (17.5, 2).
+  const solved = sketch.build().solvedSnapshot;
+  sketch.move("b", 17.5, 2);
+  const plane = createStandardPlaneDefinition("xy");
+  const recordOf = (solvedSnapshot: typeof solved) =>
+    sketchSnapshotRecordForTest(
+      { ...sketch.build(), solvedSnapshot },
+      [],
+      plane,
+    );
+  const measure = (
+    record: ReturnType<typeof recordOf>,
+    selection: readonly PrimitiveRef[],
+  ) =>
+    deriveMeasurementViewModel({
+      activeToolId: "measure",
+      selection,
+      snapshot: { document: { sketches: [record] } } as never,
+    });
+  const spline = {
+    kind: "sketchEntity",
+    sketchId: FIXTURE_SKETCH_ID,
+    entityId: "sketch_entity_arch",
+  } as PrimitiveRef;
+  const record = recordOf(solved);
+  const spans = solvedCubicSpans(
+    solved.solvedEntities.find(
+      (entry) => entry.entityId === "sketch_entity_arch",
+    )!,
+  );
+  const length = spans.reduce(
+    (sum, span) =>
+      sum +
+      curveLength({ kind: "cubicBezier", poles: span.poles }, [0, 1]).value,
+    0,
+  );
+  const formatted = `${length
+    .toFixed(2)
+    .replace(/\.00$/, "")
+    .replace(/(\.\d)0$/, "$1")} mm`;
+  const measured = measure(record, [spline]);
+  expect(
+    measured?.rows.find((row) => row.label === "Length")?.value,
+    "Length is the solved spans' length.",
+  ).toBe(formatted);
+  const authoredLength = reconstructSplineAggregate(
+    record.sketch.definition.entities[0] as Extract<
+      SketchEntityDefinition,
+      { kind: "spline" }
+    >,
+    Object.fromEntries(
+      record.sketch.definition.points.map((point) => [
+        point.pointId,
+        point.position,
+      ]),
+    ),
+  ).spans.reduce(
+    (sum, span) =>
+      sum +
+      curveLength({ kind: "cubicBezier", poles: span.poles }, [0, 1]).value,
+    0,
+  );
+  expect(
+    Math.abs(authoredLength - length),
+    "premise: the authored reconstruction measures differently",
+  ).toBeGreaterThan(0.05);
+  const witness = measured?.witnesses.find(
+    (entry) => entry.kind === "polyline",
+  );
+  expect(
+    witness?.kind === "polyline" &&
+      witness.points.map((point) => [point[0], point[1]]),
+    "The witness is the solved spans' display tessellation.",
+  ).toEqual(tessellateCubicSpans(spans, 48).map((point) => [...point]));
+
+  const probe = [17.4, 1.2] as const;
+  const oracle = closestOnCubicsOracle(
+    probe,
+    spans.map((span) => span.poles),
+  );
+  const distance = measure(record, [
+    {
+      kind: "sketchPoint",
+      sketchId: FIXTURE_SKETCH_ID,
+      pointId: "sketch_point_probe",
+    } as PrimitiveRef,
+    spline,
+  ])?.witnesses.find((entry) => entry.id.endsWith(":distance"));
+  const onCurve = (distance as { points: readonly number[][] }).points[1]!;
+  expect(
+    Math.abs(
+      Math.hypot(onCurve[0]! - probe[0], onCurve[1]! - probe[1]) -
+        Math.hypot(oracle[0] - probe[0], oracle[1] - probe[1]),
+    ),
+    "Point ↔ spline follows the solved spans.",
+  ).toBeLessThan(1e-13);
+
+  // Deliberate behaviour change: no solved record, or an invalid one,
+  // measures nothing (the authored points are not modeling data).
+  const withoutRecord = recordOf({ ...solved, solvedEntities: [] });
+  expect(measure(withoutRecord, [spline])).toBeNull();
+  const invalid = recordOf({
+    ...solved,
+    solvedEntities: solved.solvedEntities.map((entry) =>
+      entry.kind === "spline"
+        ? {
+            ...entry,
+            reconstruction: { ...entry.reconstruction, validity: "invalid" },
+          }
+        : entry,
+    ) as typeof solved.solvedEntities,
+  });
+  expect(measure(invalid, [spline])).toBeNull();
+});

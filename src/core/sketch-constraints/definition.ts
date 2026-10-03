@@ -9,10 +9,7 @@ import type {
   SketchPointDefinition,
 } from "@/contracts/sketch/schema";
 import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
-import {
-  orderedSplinePointIds,
-  tessellateProjectedSpline,
-} from "@/contracts/sketch/spline-geometry";
+import { orderedSplinePointIds } from "@/contracts/sketch/spline-geometry";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import type { ToolMetadataBase } from "@/core/tools/metadata";
 import type {
@@ -463,7 +460,10 @@ function resolveProjectedGeometryTarget(
       target,
       label: `Projected ${geometry.geometryId}`,
       kind: "spline",
-      anchor: tessellateProjectedSpline(geometry)[0] ?? [0, 0],
+      // Its start point: the first sample, or pole 0 of the first span.
+      anchor: (geometry.representation.kind === "sourceSamples"
+        ? geometry.representation.points[0]
+        : geometry.representation.spans[0]?.poles[0]) ?? [0, 0],
       projected: { reference: target, geometry },
     };
   }

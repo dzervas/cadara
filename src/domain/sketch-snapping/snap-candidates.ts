@@ -20,11 +20,16 @@ import type {
 import type { SketchToolId } from "@/core/sketch-tools/definition";
 import { distanceBetween, midpoint } from "@/domain/sketch/point-math";
 import {
+  closestPointOnSolvedCubicSpans,
+  cubicSpansPoleBounds,
+  solvedCubicSpanLocalDomain,
+  solvedCubicSpanPoint,
+  orderedSplinePointIds,
   reconstructSplineAggregate,
-  tessellateCubicSpans,
-  tessellateProjectedSpline,
   solvedCubicSpans,
+  type SolvedCubicSpan,
 } from "@/contracts/sketch/spline-geometry";
+import { isAcceptedSketchSolve } from "@/domain/editor/sketch-session/internals";
 
 const DEFAULT_SNAP_TOLERANCE = 0.18;
 const DEFAULT_SKETCH_DATUM_AXIS_EXTENT = 10;
@@ -129,9 +134,22 @@ export type SketchSnapGeometry =
       label: string;
     }
   | {
+      /**
+       * Exact cubic spans (T10f): a solved spline or derived shell (its
+       * `solvedCubicSpans`, drawn domains kept) or a projected neutral
+       * spline. Nearest and end point candidates are points of these spans.
+       */
       kind: "spline";
       source: SketchSnapSourceRef;
-      fitPoints: readonly SketchPoint2D[];
+      spans: readonly SolvedCubicSpan[];
+      isClosed: boolean;
+      label: string;
+    }
+  | {
+      /** A projected spline given as source samples (they are its geometry). */
+      kind: "sampledSpline";
+      source: SketchSnapSourceRef;
+      points: readonly SketchPoint2D[];
       isClosed: boolean;
       label: string;
     };
@@ -156,9 +174,11 @@ export function collectSketchSnapGeometries(input: {
   definition: SketchDefinition;
   projectedReferences?: readonly ProjectedSketchReferenceRecord[];
   /**
-   * T08b-g5b: the solved snapshot the session displays; a derived offset
-   * shell snaps along its solved spans clipped to their drawn domains (the
-   * display tessellation). Absent: shells give no candidates.
+   * T08b-g5b / T10f: the solved snapshot the session displays; derived
+   * offset shells snap along its solved spans (`solvedCubicSpans`, clipped
+   * to their drawn domains; absent: no candidates). Splines snap along its
+   * spans when it is accepted, otherwise (or absent) along the authored
+   * reconstruction the session display draws (T10f review R-2).
    * [TECH] G19: a non-accepted offset output of this snapshot (every offset
    * output when it is absent) gives no candidates; nor do its driven points
    * ([TECH] G19b).
@@ -174,6 +194,10 @@ export function collectSketchSnapGeometries(input: {
     input.definition,
     acceptedSnapshot,
   );
+  let solvedSplinesDrawn: boolean | undefined;
+  const splinesUseSolvedSpans = () =>
+    (solvedSplinesDrawn ??=
+      !!input.solvedSnapshot && isAcceptedSketchSolve(input.solvedSnapshot));
   const solvedEntities = new Map(
     (input.solvedSnapshot?.solvedEntities ?? []).map((record) => [
       record.entityId,
@@ -278,40 +302,21 @@ export function collectSketchSnapGeometries(input: {
               ]
             : [];
         }
-        case "spline": {
-          const positions = Object.fromEntries(
-            [...points.entries()].map(([pointId, point]) => [
-              pointId,
-              point.position,
-            ]),
-          ) as Record<SketchPointId, SketchPoint2D>;
-          const fitPoints = tessellateCubicSpans(
-            reconstructSplineAggregate(entity, positions).spans,
-          );
-          return fitPoints.length
-            ? [
-                {
-                  kind: "spline",
-                  source,
-                  fitPoints,
-                  isClosed: false,
-                  label: entity.label,
-                },
-              ]
-            : [];
-        }
+        case "spline":
         case "derivedPiecewiseCubic": {
           const record = solvedEntities.get(entity.entityId);
-          const fitPoints =
-            record?.kind === "derivedPiecewiseCubic"
-              ? tessellateCubicSpans(solvedCubicSpans(record))
-              : [];
-          return fitPoints.length >= 2
+          const spans =
+            entity.kind === "spline" && !splinesUseSolvedSpans()
+              ? authoredSplineSpans(entity, points)
+              : record?.kind === entity.kind
+                ? solvedCubicSpans(record)
+                : [];
+          return spans.length > 0
             ? [
                 {
                   kind: "spline",
                   source: { ...source, geometryKind: "spline" },
-                  fitPoints,
+                  spans,
                   isClosed: false,
                   label: entity.label,
                 },
@@ -385,15 +390,25 @@ export function collectSketchSnapGeometries(input: {
               },
             ];
           case "spline":
-            return [
-              {
-                kind: "spline",
-                source,
-                fitPoints: tessellateProjectedSpline(geometry),
-                isClosed: projectedSplineIsClosed(geometry),
-                label,
-              },
-            ];
+            return geometry.representation.kind === "neutralCubicSpans"
+              ? [
+                  {
+                    kind: "spline",
+                    source,
+                    spans: geometry.representation.spans,
+                    isClosed: projectedSplineIsClosed(geometry),
+                    label,
+                  },
+                ]
+              : [
+                  {
+                    kind: "sampledSpline",
+                    source,
+                    points: geometry.representation.points,
+                    isClosed: geometry.representation.isClosed,
+                    label,
+                  },
+                ];
         }
       });
     },
@@ -441,6 +456,22 @@ export function collectSketchSnapGeometries(input: {
   ];
 }
 
+/** The authored reconstruction of a spline (what the session display draws). */
+function authoredSplineSpans(
+  entity: Extract<SketchDefinition["entities"][number], { kind: "spline" }>,
+  points: ReadonlyMap<SketchPointId, { position: SketchPoint2D }>,
+): readonly SolvedCubicSpan[] {
+  const pointIds = orderedSplinePointIds(entity);
+  if (pointIds.some((pointId) => !points.has(pointId))) return [];
+  const positions = Object.fromEntries(
+    pointIds.map((pointId) => [pointId, points.get(pointId)!.position]),
+  ) as Record<SketchPointId, SketchPoint2D>;
+  return reconstructSplineAggregate(entity, positions).spans.map((span) => ({
+    interval: span.interval,
+    poles: span.poles,
+  }));
+}
+
 function getSketchDatumAxisExtent(
   definition: SketchDefinition,
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
@@ -479,11 +510,24 @@ function getSketchDatumAxisExtent(
             Math.abs(geometry.centerPosition[1]) + radius,
           ];
         }
-        case "spline":
-          return tessellateProjectedSpline(geometry).flatMap((point) => [
+        case "spline": {
+          // Exact and conservative: the pole box contains the curve.
+          const { representation } = geometry;
+          const bounds =
+            representation.kind === "neutralCubicSpans"
+              ? cubicSpansPoleBounds(representation.spans)
+              : null;
+          const points =
+            representation.kind === "neutralCubicSpans"
+              ? bounds
+                ? [bounds.min, bounds.max]
+                : []
+              : representation.points;
+          return points.flatMap((point) => [
             Math.abs(point[0]),
             Math.abs(point[1]),
           ]);
+        }
       }
     }),
   );
@@ -626,27 +670,13 @@ function collectPointCandidates(
       continue;
     }
 
-    if (geometry.kind === "spline") {
+    if (geometry.kind === "spline" || geometry.kind === "sampledSpline") {
       if (!geometry.isClosed) {
-        const start = geometry.fitPoints[0];
-        const end = geometry.fitPoints.at(-1);
-        if (start) {
+        for (const point of splineEndPoints(geometry)) {
           candidates.push(
             createCandidate({
               kind: "endpoint",
-              point: start,
-              pointer,
-              tolerance,
-              activeTool,
-              sources: [geometry.source],
-            }),
-          );
-        }
-        if (end && end !== start) {
-          candidates.push(
-            createCandidate({
-              kind: "endpoint",
-              point: end,
+              point,
               pointer,
               tolerance,
               activeTool,
@@ -756,8 +786,9 @@ function collectCurveCandidates(
       continue;
     }
 
-    if (geometry.kind === "spline") {
-      const point = nearestPointOnSpline(pointer, geometry);
+    if (geometry.kind === "spline" || geometry.kind === "sampledSpline") {
+      const point = nearestPointOnSpline(pointer, geometry, tolerance);
+      if (!point) continue;
       candidates.push(
         createCandidate({
           kind: "nearestOnSpline",
@@ -1129,15 +1160,48 @@ function projectPointToSegment(
   ];
 }
 
+/**
+ * Spline end point candidates: the exact ends of the first and last drawn
+ * spans (poles 0 and 3 of untrimmed spans), or the first and last samples.
+ */
+function splineEndPoints(
+  geometry: Extract<SketchSnapGeometry, { kind: "spline" | "sampledSpline" }>,
+): SketchPoint2D[] {
+  if (geometry.kind === "sampledSpline")
+    return geometry.points.length > 0
+      ? [geometry.points[0]!, geometry.points.at(-1)!]
+      : [];
+  const first = geometry.spans[0];
+  const last = geometry.spans.at(-1);
+  return first && last
+    ? [
+        solvedCubicSpanPoint(first, solvedCubicSpanLocalDomain(first)[0]),
+        solvedCubicSpanPoint(last, solvedCubicSpanLocalDomain(last)[1]),
+      ]
+    : [];
+}
+
+/**
+ * The nearest point on a spline (T10f): the owner's exact closest point of
+ * its spans (a point of the curve, so a snapped position stays on it), or
+ * the closest point of the source-sample polyline. Null when no span lies
+ * within `tolerance` (the candidate would be dropped anyway).
+ */
 function nearestPointOnSpline(
   point: SketchPoint2D,
-  geometry: Extract<SketchSnapGeometry, { kind: "spline" }>,
-): SketchPoint2D {
+  geometry: Extract<SketchSnapGeometry, { kind: "spline" | "sampledSpline" }>,
+  tolerance: number,
+): SketchPoint2D | null {
+  if (geometry.kind === "spline")
+    return (
+      closestPointOnSolvedCubicSpans(point, geometry.spans, tolerance)?.point ??
+      null
+    );
   const segments =
-    geometry.isClosed && geometry.fitPoints.length > 2
-      ? [...geometry.fitPoints, geometry.fitPoints[0]!]
-      : geometry.fitPoints;
-  let nearest = segments[0] ?? point;
+    geometry.isClosed && geometry.points.length > 2
+      ? [...geometry.points, geometry.points[0]!]
+      : geometry.points;
+  let nearest = segments[0] ?? null;
   let bestDistance = Number.POSITIVE_INFINITY;
 
   for (let index = 0; index < segments.length - 1; index += 1) {

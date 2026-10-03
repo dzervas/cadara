@@ -37,7 +37,6 @@ import {
   orderedSplinePointIds,
   solvedCubicSpanPoint,
   solvedCubicSpans,
-  tessellateProjectedSpline,
   type SolvedCubicSpan,
 } from "@/contracts/sketch/spline-geometry";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
@@ -2738,7 +2737,10 @@ export function getProjectedGeometryAnchor(
     case "arc":
       return geometry.centerPosition;
     case "spline":
-      return tessellateProjectedSpline(geometry)[0] ?? null;
+      // Its start point: the first sample, or pole 0 of the first span.
+      return geometry.representation.kind === "sourceSamples"
+        ? (geometry.representation.points[0] ?? null)
+        : (geometry.representation.spans[0]?.poles[0] ?? null);
   }
 }
 
