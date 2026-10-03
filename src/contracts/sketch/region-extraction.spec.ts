@@ -585,6 +585,25 @@ describe("region arrangement owner: declared joins and closure", () => {
     );
   });
 
+  test.each([
+    ["counter-clockwise (0,3)→(3,0)", [0, 3], [3, 0], "counterClockwise"],
+    ["clockwise (0,3)→(−3,0)", [0, 3], [-3, 0], "clockwise"],
+  ] as const)(
+    "a 270° arc plus chord with ends on the axes derives one region, %s (T10a: arc samples at odd multiples of π/4)",
+    async (_label, start, end, sweep) => {
+      const sketch = makeSketchFixture();
+      sketch.point("k", 0, 0);
+      sketch.point("s", start[0], start[1]);
+      sketch.point("e", end[0], end[1]);
+      sketch.arc("arc", "k", "s", "e", sweep);
+      sketch.line("chord", "s", "e");
+      const result = await derive(sketch);
+      expect(result.diagnostics).toEqual([]);
+      expect(result.regions).toHaveLength(1);
+      expect(boundaryEntities(result.regions[0]!)).toEqual(["arc", "chord"]);
+    },
+  );
+
   test("T-junctions on a line and on an arc split the host at the declared incidence", async () => {
     const onLine = makeSketchFixture();
     addRectangle(onLine, "r", [0, 0, 10, 5]);
@@ -5130,28 +5149,35 @@ describe("T08b-g7-F: Fillet and Slot arcs stay attached after an edit (no offset
     120_000,
   );
 
-  // Recorded limit (routed): with the slot's reference line left as drawn,
-  // it ends exactly at both cap centres. After an edit the caps stay
-  // attached, but the line ↔ start-cap pair query exhausts its exact budget
-  // on the edited (non-dyadic) coordinates, so the arrangement publishes no
-  // region (unedited: one region). Before T08b-g7-F the same edit detached
-  // the caps and also gave no region bounded by them.
+  // With the slot's reference line left as drawn, it ends exactly at both cap
+  // centres. Before T10a the line ↔ start-cap pair query exhausted its exact
+  // budget after an edit and no region was published: the circle-root
+  // bisection's first midpoint is fl(π/4), which certifySinCos rejected, so
+  // the bisection never moved (T10a-evidence/slot-tip-null-trace.log). With
+  // the T10a range bound the edited slot publishes one region, as unedited.
   test.each([0.05, 0.2])(
-    "slot with its reference line as drawn, +%s: the caps stay attached, but the reference line ↔ start-cap query is uncertain, so no region is published (recorded limit)",
+    "slot with its reference line as drawn, +%s: the caps stay attached and bound the one published region (T10a re-pin of the former budget-exhaustion limit)",
     async (delta) => {
       const native = edit("slot", "native", delta);
       expect(native.solved.status.solveState).toBe("solved");
       expect(native.detach).toBeLessThanOrEqual(FIXTURE_TOLERANCE / 100);
       const result = await regionsOf(native);
-      expect(result.regions).toEqual([]);
+      // Only the reference line itself is open (its ends are the cap centres).
       expect([...new Set(result.diagnostics.map((item) => item.code))]).toEqual(
-        ["region-query-uncertain"],
+        ["profile-open-segment"],
       );
-      expect(
-        result.diagnostics.every((item) =>
-          item.message.includes("exact-query-proof-budget-exhausted"),
-        ),
-      ).toBe(true);
+      for (const item of result.diagnostics)
+        expect(
+          item.target?.kind === "entity" &&
+            !boundedBy(result.regions, item.target.entityId),
+          "the open segment bounds no region",
+        ).toBe(true);
+      expect(result.regions).toHaveLength(1);
+      for (const arc of native.arcs)
+        expect(
+          boundedBy(result.regions, arc.entityId),
+          `${arc.label} bounds the region`,
+        ).toBe(true);
     },
     120_000,
   );
