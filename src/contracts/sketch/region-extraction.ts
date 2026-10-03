@@ -309,7 +309,7 @@ export interface SketchArrangementDeriver {
 // §3.1 Branches: the only place curve kinds are listed
 // ---------------------------------------------------------------------------
 
-interface Branch {
+export interface Branch {
   index: number;
   record: RegionBoundaryBranch;
   key: string;
@@ -367,7 +367,7 @@ type BranchDraft = Omit<Branch, "index" | "key" | "box" | "curve"> & {
     | Omit<CubicCurve, "curveId">;
 };
 
-function sourceDescription(source: RegionBoundarySource) {
+export function sourceDescription(source: RegionBoundarySource) {
   return source.kind === "entity"
     ? `entity ${source.entityId}`
     : `projected geometry ${source.reference.referenceId}/${source.reference.geometryId}`;
@@ -599,8 +599,13 @@ function projectedSource(
   };
 }
 
-/** Collects every region-capable branch plus the unsupported/degenerate obstacles. */
-function collectArrangementBranches(
+/**
+ * Collects every region-capable branch plus the unsupported/degenerate
+ * obstacles. Exported for the region-boundary curve owner
+ * (`region-boundary-curves.ts`, T10b R1), which resolves records against the
+ * branches this builds from the identical input.
+ */
+export function collectArrangementBranches(
   definition: SketchDefinition,
   solved: SolvedSketchSnapshot,
   projectedReferences: readonly ProjectedSketchReferenceRecord[],

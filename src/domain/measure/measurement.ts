@@ -8,7 +8,6 @@ import type {
   RenderableEntityRecord,
 } from "@/contracts/render/schema";
 import {
-  projectedSplineDisplayPoints,
   projectedSplineIsClosed,
   type ProjectedSketchArcGeometry,
   type ProjectedSketchCircleGeometry,
@@ -24,8 +23,8 @@ import type {
 } from "@/contracts/sketch/schema";
 import {
   reconstructSplineAggregate,
-  sampleSolvedCubicSpans,
-  sampleSplineGeometry,
+  tessellateCubicSpans,
+  tessellateProjectedSpline,
   solvedCubicSpans,
 } from "@/contracts/sketch/spline-geometry";
 import {
@@ -722,7 +721,10 @@ function resolveSketchEntityTarget(
       ]),
     );
     const splineGeometry = reconstructSplineAggregate(entity, positions);
-    const fitPoints = sampleSplineGeometry(splineGeometry, SPLINE_SEGMENTS);
+    const fitPoints = tessellateCubicSpans(
+      splineGeometry.spans,
+      SPLINE_SEGMENTS,
+    );
 
     if (fitPoints.length < 2) {
       return null;
@@ -765,7 +767,7 @@ function resolveSketchEntityTarget(
     if (record?.kind !== "derivedPiecewiseCubic") {
       return null;
     }
-    const sampledPoints = sampleSolvedCubicSpans(
+    const sampledPoints = tessellateCubicSpans(
       solvedCubicSpans(record),
       SPLINE_SEGMENTS,
     ).map((point) => mapSketchPointToWorkspaceWorld(sketch.plane, point));
@@ -921,7 +923,7 @@ function resolveProjectedGeometryTarget(
   }
 
   if (geometry.kind === "spline") {
-    const points = projectedSplineDisplayPoints(geometry);
+    const points = tessellateProjectedSpline(geometry);
     const isClosed = projectedSplineIsClosed(geometry);
     const sampledPoints = points.map((point) =>
       mapSketchPointToWorkspaceWorld(sketch.plane, point),

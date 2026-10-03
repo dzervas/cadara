@@ -19,8 +19,7 @@ import type {
 } from "@/contracts/render/schema";
 import type { SolvedSketchEntityGeometryRecord } from "@/contracts/sketch/schema";
 import {
-  sampleSolvedCubicSpans,
-  sampleSplineGeometry,
+  tessellateCubicSpans,
   solvedCubicSpans,
 } from "@/contracts/sketch/spline-geometry";
 import { describeFeatureTreeNode } from "@/domain/modeling/feature-description";
@@ -2215,12 +2214,12 @@ function buildSketchCurveRenderRecords(
         );
         break;
       case "spline":
-        points2D = sampleSplineGeometry(entity.reconstruction);
+        points2D = tessellateCubicSpans(entity.reconstruction.spans);
         break;
       case "derivedPiecewiseCubic":
         // The session display's tessellation: solved spans clipped to their
         // drawn domains (T08b-g5b).
-        points2D = sampleSolvedCubicSpans(solvedCubicSpans(entity));
+        points2D = tessellateCubicSpans(solvedCubicSpans(entity));
         break;
       case "ellipse":
         points2D = sampleEllipsePoints(

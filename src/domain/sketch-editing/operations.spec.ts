@@ -8,7 +8,7 @@ import type {
 import type { SketchPoint } from "@/contracts/modeling/schema";
 import {
   reconstructSplineAggregate,
-  sampleSplineGeometry,
+  tessellateCubicSpans,
 } from "@/contracts/sketch/spline-geometry";
 import type {
   SketchEntityId,
@@ -602,12 +602,12 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
         kind: "spline",
         isConstruction: false,
         style: undefined,
-        points: sampleSplineGeometry(
+        points: tessellateCubicSpans(
           reconstructSplineAggregate(splineEntity, {
             sketch_point_s0: [0, 0],
             sketch_point_s1: [1, 2],
             sketch_point_s2: [2, 0],
-          }),
+          }).spans,
         ),
       },
       distance: 1,

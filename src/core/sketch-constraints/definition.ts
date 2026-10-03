@@ -8,11 +8,11 @@ import type {
   SketchPoint2D,
   SketchPointDefinition,
 } from "@/contracts/sketch/schema";
+import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
 import {
-  projectedSplineDisplayPoints,
-  type ProjectedSketchReferenceRecord,
-} from "@/contracts/solver/schema";
-import { orderedSplinePointIds } from "@/contracts/sketch/spline-geometry";
+  orderedSplinePointIds,
+  tessellateProjectedSpline,
+} from "@/contracts/sketch/spline-geometry";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import type { ToolMetadataBase } from "@/core/tools/metadata";
 import type {
@@ -463,7 +463,7 @@ function resolveProjectedGeometryTarget(
       target,
       label: `Projected ${geometry.geometryId}`,
       kind: "spline",
-      anchor: projectedSplineDisplayPoints(geometry)[0] ?? [0, 0],
+      anchor: tessellateProjectedSpline(geometry)[0] ?? [0, 0],
       projected: { reference: target, geometry },
     };
   }

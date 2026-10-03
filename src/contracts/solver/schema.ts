@@ -1,7 +1,4 @@
-import {
-  sampleSplineSpans,
-  type SplineSpan,
-} from "@/contracts/sketch/spline-geometry";
+import type { SplineSpan } from "@/contracts/sketch/spline-geometry";
 import type {
   DocumentId,
   ProjectedGeometryId,
@@ -226,18 +223,6 @@ export interface ProjectedSketchSplineGeometry {
       };
 }
 
-/**
- * Union of all explicit 2D geometry that the solver may return for a projected
- * external sketch reference.
- */
-export function projectedSplineDisplayPoints(
-  geometry: ProjectedSketchSplineGeometry,
-): readonly SketchPoint2D[] {
-  return geometry.representation.kind === "sourceSamples"
-    ? geometry.representation.points
-    : sampleSplineSpans(geometry.representation.spans);
-}
-
 export function projectedSplineIsClosed(
   geometry: ProjectedSketchSplineGeometry,
 ): boolean {
@@ -250,6 +235,10 @@ export function projectedSplineIsClosed(
   return first[0] === last[0] && first[1] === last[1];
 }
 
+/**
+ * Union of all explicit 2D geometry that the solver may return for a projected
+ * external sketch reference.
+ */
 export type ProjectedSketchReferenceGeometry =
   | ProjectedSketchPointGeometry
   | ProjectedSketchLineSegmentGeometry
