@@ -12,10 +12,12 @@ import { buildSketchVectorExportModel } from "@/domain/export/sketch-vector-expo
 import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
 
 test("buildSketchVectorExportModel extracts committed sketch geometry, regions, styles, and diagnostics", () => {
+  // T10e: regions resolve against the record's own solved pair, so the
+  // record carries the solve its region was derived from.
   const modelOrFailure = buildSketchVectorExportModel({
     documentId: "doc_export",
     revisionId: "rev_0001",
-    sketches: [createSketchSnapshot()],
+    sketches: [createSketchSnapshot(createSolvedRectangleSnapshot())],
     target: { kind: "sketch", sketchId: "sketch_profile" },
   });
 
@@ -58,6 +60,30 @@ test("buildSketchVectorExportModel extracts committed sketch geometry, regions, 
     ),
     "Unsupported sketch entity kinds should be reported without dropping supported geometry.",
   ).toBeTruthy();
+});
+
+test("an unsolved record exports authored entities and leaves its unresolvable region out with a diagnostic", () => {
+  const model = buildSketchVectorExportModel({
+    documentId: "doc_export",
+    revisionId: "rev_0001",
+    sketches: [createSketchSnapshot()],
+    target: { kind: "sketch", sketchId: "sketch_profile" },
+  }) as SketchVectorExportModel;
+  const line = model.entities.find(
+    (entity) =>
+      entity.kind === "lineSegment" && entity.entityId === "entity_ab",
+  );
+  expect(
+    line?.kind === "lineSegment" && line.end,
+    "With no solved geometry the entity comes from its authored points.",
+  ).toEqual([10, 0]);
+  expect(
+    model.regions,
+    "The region has no solved boundary to resolve against (T10e).",
+  ).toEqual([]);
+  expect(model.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+    "sketch-vector-region-unresolved",
+  );
 });
 
 test("buildSketchVectorExportModel exports solved committed geometry for dimensioned rectangles", () => {
@@ -361,7 +387,6 @@ function createRegion(): RegionRecord {
         role: "outer",
         orientation: "counterClockwise",
         isClosed: true,
-        boundaryPointIds: ["point_a", "point_b", "point_c", "point_d"],
         segments: lineLoopSegmentsForTest(
           [
             { pointId: "point_a", position: [0, 0] },

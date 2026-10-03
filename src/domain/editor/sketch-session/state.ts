@@ -15,6 +15,7 @@ import type {
   SketchPlaneSupportRef,
 } from "@/contracts/shared/sketch-plane";
 import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
+import { createRegionBoundaryBasis } from "@/contracts/sketch/region-boundary-curves";
 import { resolveSketchDerivationDistances } from "@/domain/modeling/sketch-dimension-expressions";
 import type {
   ConstraintDefinition,
@@ -132,6 +133,18 @@ export function createSketchSessionFromSnapshot(
           ? "current"
           : "unavailable",
       regions: [...sketch.sketch.regions],
+      // R2: the record holds its regions with the pair that produced them.
+      boundaryBasis:
+        sketch.sketch.regions.length > 0
+          ? createRegionBoundaryBasis(
+              {
+                definition: sketch.sketch.definition,
+                solvedSnapshot: sketch.sketch.solvedSnapshot,
+                projectedReferences: sketch.sketch.projectedReferences ?? [],
+              },
+              sketch.sketch.regions,
+            )
+          : null,
       diagnostics: structuredClone(sketch.sketch.derivedValidity.diagnostics),
     },
     projectedReferences,
@@ -199,6 +212,7 @@ export function createNewSketchSession(
       generation: 0,
       status: "current",
       regions: [],
+      boundaryBasis: null,
       diagnostics: [],
     },
     projectedReferences: [],

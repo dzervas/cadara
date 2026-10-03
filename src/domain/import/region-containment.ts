@@ -18,6 +18,19 @@ import type {
   SketchPoint2D,
 } from "@/contracts/sketch/schema";
 
+/**
+ * T10e: the start `portPointId` of each declared-join segment in traversal
+ * order, exactly the per-loop point list the region owner published before
+ * T10e (importer behaviour unchanged).
+ */
+export function loopPortPointIds(loop: RegionRecord["loops"][number]): SketchPointId[] {
+  return loop.segments.flatMap((entry) =>
+    entry.start?.kind === "declaredJoin" && entry.start.portPointId
+      ? [entry.start.portPointId]
+      : [],
+  );
+}
+
 // Importer-owned post-T18 debt (T09 U7): interior-point selection samples arc
 // and circle boundaries into polygons. Region topology never samples; this
 // sampler lives here only for the importer's selector verification.
@@ -173,7 +186,7 @@ function loopPolygon(
     );
   }
   if (points.length >= 3) return points;
-  return loop.boundaryPointIds.flatMap((pointId) => {
+  return loopPortPointIds(loop).flatMap((pointId) => {
     const point = sketch.solvedPoints.get(pointId);
     return point ? [point] : [];
   });

@@ -4140,11 +4140,6 @@ async function publishRegions(
               ? ("counterClockwise" as const)
               : ("clockwise" as const),
           segments,
-          boundaryPointIds: segments.flatMap((entry) =>
-            entry.start?.kind === "declaredJoin" && entry.start.portPointId
-              ? [entry.start.portPointId]
-              : [],
-          ),
           isClosed: true,
         };
       });

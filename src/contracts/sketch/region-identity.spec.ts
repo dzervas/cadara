@@ -48,7 +48,6 @@ const loop = (
   role,
   orientation: role === "outer" ? "counterClockwise" : "clockwise",
   segments,
-  boundaryPointIds: [],
   isClosed: true,
 });
 const [a, b, c, d] = ["a", "b", "c", "d"].map(join) as [

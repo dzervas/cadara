@@ -53,13 +53,12 @@ test("curved inner loops exclude their material void without boundary point ids"
     ownerSketchId: sketchId, ownerBodyId: null, regionId: "region_containment" as RegionRecord["regionId"], signature: "hand-built annulus",
     label: "Annulus", target: { kind: "region", sketchId, regionId: "region_containment" as RegionRecord["regionId"] },
     sourceSketch: { kind: "sketch", sketchId }, isClosed: true,
-    loops: [{ loopId: "region_loop_containment_outer" as RegionRecord["loops"][number]["loopId"], role: "outer", orientation: "counterClockwise", segments: outer, boundaryPointIds: [], isClosed: true }, {
+    loops: [{ loopId: "region_loop_containment_outer" as RegionRecord["loops"][number]["loopId"], role: "outer", orientation: "counterClockwise", segments: outer, isClosed: true }, {
       loopId: "region_loop_containment_inner" as RegionRecord["loops"][number]["loopId"], role: "inner", orientation: "clockwise",
       segments: [
         { branch: { source: { kind: "entity", entityId: entity("circle") }, spanId: "whole" }, sourceParameterInterval: [0, Math.PI], traversalDirection: "forward", sourceSegmentOrdinal: 0, start: vertex([1, 0]), end: vertex([-1, 0]) },
         { branch: { source: { kind: "entity", entityId: entity("circle") }, spanId: "whole" }, sourceParameterInterval: [Math.PI, 2 * Math.PI], traversalDirection: "forward", sourceSegmentOrdinal: 1, start: vertex([-1, 0]), end: vertex([1, 0]) },
       ],
-      boundaryPointIds: [], isClosed: true,
     }],
   };
   const sketch = { regions: [region], solvedPoints: new Map([[point("center"), [0, 0] as [number, number]]]), definition };

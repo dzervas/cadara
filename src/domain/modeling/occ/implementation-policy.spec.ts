@@ -314,7 +314,6 @@ test("src/domain/modeling/occ/implementation-policy.spec.ts", async () => {
               sourceSegmentOrdinal: 0,
             },
           ],
-          boundaryPointIds: [],
           isClosed: true,
         },
       ],

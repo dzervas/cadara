@@ -154,6 +154,14 @@ const boundaryEntities = (region: RegionRecord) =>
     ...new Set(region.loops.flatMap((loop) => loop.segments.map(entityOf))),
   ].sort();
 /** Loop records start at an arbitrary vertex: rotate to start at `first`. */
+/** Each segment's start `portPointId`, in traversal order (declared joins). */
+const portPointIdsOf = (loop: RegionRecord["loops"][number]): string[] =>
+  loop.segments.flatMap((segment) =>
+    segment.start?.kind === "declaredJoin" && segment.start.portPointId
+      ? [segment.start.portPointId]
+      : [],
+  );
+
 const cyclicFrom = (names: string[], first: string) => {
   const index = names.indexOf(first);
   return [...names.slice(index), ...names.slice(0, index)];
@@ -406,7 +414,7 @@ describe("region arrangement owner: declared joins and closure", () => {
       "r_s2",
       "r_s3",
     ]);
-    expect(cyclicFrom(loop.boundaryPointIds, "sketch_point_r0")).toEqual([
+    expect(cyclicFrom(portPointIdsOf(loop), "sketch_point_r0")).toEqual([
       "sketch_point_r0",
       "sketch_point_r1",
       "sketch_point_r2",
@@ -1433,7 +1441,7 @@ describe("region arrangement owner: verified crossings, lobes and nesting", () =
         (segment) => segment.start?.kind === "verifiedIntersection",
       ),
     ).toBe(true);
-    expect(result.regions[0]!.loops[0]!.boundaryPointIds).toEqual([]);
+    expect(portPointIdsOf(result.regions[0]!.loops[0]!)).toEqual([]);
   });
 });
 

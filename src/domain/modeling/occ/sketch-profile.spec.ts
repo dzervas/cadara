@@ -1099,7 +1099,6 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
             reference: { kind: "projectedCircle", referenceId, geometryId },
           }),
         ],
-        boundaryPointIds: [],
         isClosed: true,
       },
     ]);
@@ -1160,7 +1159,6 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
             reference: { kind: "projectedCircle", referenceId, geometryId },
           }),
         ],
-        boundaryPointIds: [],
         isClosed: true,
       },
     ]);
@@ -1233,7 +1231,6 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
         role: "outer",
         orientation: "counterClockwise",
         segments: [closedBranchSegment({ kind: "entity", entityId: ellipseId })],
-        boundaryPointIds: [],
         isClosed: true,
       },
     ]);
@@ -1293,7 +1290,6 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
       role: "outer" as const,
       orientation: "counterClockwise" as const,
       segments: [],
-      boundaryPointIds: [],
       isClosed: true,
     };
     const region = createRegion(sketchId, "bad_region", [

@@ -8,6 +8,10 @@ import type {
   SketchVectorExportModel,
 } from "@/contracts/export/sketch-vector";
 import type { SketchPoint2D } from "@/contracts/sketch/schema";
+import {
+  tessellateCubicSpans,
+  type SplinePoles,
+} from "@/contracts/sketch/spline-geometry";
 import type { FeatureEditorFormSchema } from "@/core/feature-authoring/form-schema";
 
 export type DxfSketchExportOptions = Record<string, never>;
@@ -22,46 +26,28 @@ function angleDegrees(center: SketchPoint2D, point: SketchPoint2D) {
   return degrees < 0 ? degrees + 360 : degrees;
 }
 
-function sampleQuadratic(
-  points: readonly [SketchPoint2D, SketchPoint2D, SketchPoint2D],
-  steps = 16,
-): SketchPoint2D[] {
-  const samples: SketchPoint2D[] = [];
-  for (let index = 0; index <= steps; index += 1) {
-    const t = index / steps;
-    const oneMinusT = 1 - t;
-    samples.push([
-      oneMinusT * oneMinusT * points[0][0] +
-        2 * oneMinusT * t * points[1][0] +
-        t * t * points[2][0],
-      oneMinusT * oneMinusT * points[0][1] +
-        2 * oneMinusT * t * points[1][1] +
-        t * t * points[2][1],
-    ]);
-  }
-  return samples;
+/** Output-only polyline of cubic poles through the one owner tessellator. */
+function tessellateCubics(
+  spans: readonly SplinePoles[],
+  steps: number,
+): readonly SketchPoint2D[] {
+  return tessellateCubicSpans(
+    spans.map((poles) => ({ interval: [0, 1] as const, poles })),
+    steps,
+  );
 }
 
-function sampleCubic(
-  points: readonly [SketchPoint2D, SketchPoint2D, SketchPoint2D, SketchPoint2D],
-  steps = 24,
-): SketchPoint2D[] {
-  const samples: SketchPoint2D[] = [];
-  for (let index = 0; index <= steps; index += 1) {
-    const t = index / steps;
-    const oneMinusT = 1 - t;
-    samples.push([
-      oneMinusT ** 3 * points[0][0] +
-        3 * oneMinusT * oneMinusT * t * points[1][0] +
-        3 * oneMinusT * t * t * points[2][0] +
-        t ** 3 * points[3][0],
-      oneMinusT ** 3 * points[0][1] +
-        3 * oneMinusT * oneMinusT * t * points[1][1] +
-        3 * oneMinusT * t * t * points[2][1] +
-        t ** 3 * points[3][1],
-    ]);
-  }
-  return samples;
+/** The exact degree elevation of a quadratic Bézier to a cubic. */
+function elevateQuadratic([
+  start,
+  control,
+  end,
+]: readonly SketchPoint2D[]): SplinePoles {
+  const toward = (from: SketchPoint2D): SketchPoint2D => [
+    from[0] + (2 / 3) * (control![0] - from[0]),
+    from[1] + (2 / 3) * (control![1] - from[1]),
+  ];
+  return [start!, toward(start!), toward(end!), end!];
 }
 
 function lineEntity(start: SketchPoint2D, end: SketchPoint2D) {
@@ -132,29 +118,29 @@ function entityToDxf(entity: SketchVectorEntity): string[] {
       ];
     }
     case "spline":
-      return polylineEntity(
-        entity.spans.flatMap((span, index) =>
-          sampleCubic(span).slice(index === 0 ? 0 : 1),
-        ),
-      );
+      return polylineEntity(tessellateCubics(entity.spans, 24));
     case "bezierCurve":
       return polylineEntity(
         entity.degree === 3 && entity.controlPoints.length >= 4
-          ? sampleCubic([
-              entity.controlPoints[0]!,
-              entity.controlPoints[1]!,
-              entity.controlPoints[2]!,
-              entity.controlPoints[3]!,
-            ])
-          : sampleQuadratic([
-              entity.controlPoints[0]!,
-              entity.controlPoints[1]!,
-              entity.controlPoints[2]!,
-            ]),
+          ? tessellateCubics(
+              [
+                [
+                  entity.controlPoints[0]!,
+                  entity.controlPoints[1]!,
+                  entity.controlPoints[2]!,
+                  entity.controlPoints[3]!,
+                ],
+              ],
+              24,
+            )
+          : tessellateCubics([elevateQuadratic(entity.controlPoints)], 16),
       );
     case "conic":
       return polylineEntity(
-        sampleQuadratic([entity.start, entity.control, entity.end]),
+        tessellateCubics(
+          [elevateQuadratic([entity.start, entity.control, entity.end])],
+          16,
+        ),
       );
   }
 }
