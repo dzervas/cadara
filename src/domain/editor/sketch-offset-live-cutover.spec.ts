@@ -5,6 +5,7 @@
 // (normalization, runtime schema), the solver's shell residual / U-G2 and
 // the authored-action history.
 import { describe, expect, test, vi } from "vitest";
+import { readFile } from "node:fs/promises";
 
 import type { AuthoredActionState } from "@/contracts/modeling/authored-actions";
 import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
@@ -132,8 +133,16 @@ import { collectSketchSnapGeometries } from "@/domain/sketch-snapping/snap-candi
 import { deriveMeasurementViewModel } from "@/domain/measure/measurement";
 import { buildSketchVectorExportModel } from "@/domain/export/sketch-vector-export-model";
 import { buildOccRenderExport } from "@/domain/modeling/occ/snapshot";
-import { getDefaultOpenCascadeInstance } from "@/domain/modeling/occ/runtime";
-import { buildRegionProfileFace } from "@/domain/modeling/occ/sketch-profile";
+import {
+  getDefaultOpenCascadeInstance,
+  type OpenCascadeInstance,
+} from "@/domain/modeling/occ/runtime";
+import {
+  buildRegionProfileFace,
+  regionBoundaryBasisOfSketchRecord,
+  releaseBuiltSketchProfileFace,
+} from "@/domain/modeling/occ/sketch-profile";
+import { resolveRegionBoundaryCurve } from "@/contracts/sketch/region-boundary-curves";
 import {
   NON_ACCEPTED_OFFSET_OUTPUT_PROJECTION_CODE,
   projectSketchExternalReferencesFromSnapshot,
@@ -211,6 +220,23 @@ vi.mock(
     };
   },
 );
+
+/** The shipped `public/cadara-occ` runtime (T10 T-1: the browser's bindings). */
+let productionOcc: Promise<OpenCascadeInstance> | null = null;
+function loadProductionOcc() {
+  productionOcc ??= (async () => {
+    const module = (await import("../../../public/cadara-occ.js")) as {
+      default: new (
+        module: Record<string, unknown>,
+      ) => Promise<OpenCascadeInstance>;
+    };
+    const wasmBinary = new Uint8Array(
+      await readFile(new URL("../../../public/cadara-occ.wasm", import.meta.url)),
+    );
+    return new module.default({ wasmBinary });
+  })();
+  return productionOcc;
+}
 
 const XY = {
   kind: "construction",
@@ -2319,6 +2345,19 @@ function loopOracleCurves(
         from,
         to,
       };
+    if (geometry.kind === "arc") {
+      const [cx, cy] = geometry.centerPosition;
+      const radius = Math.hypot(
+        geometry.startPosition[0] - cx,
+        geometry.startPosition[1] - cy,
+      );
+      return {
+        point: (t) => [cx + radius * Math.cos(t), cy + radius * Math.sin(t)],
+        derivative: (t) => [-radius * Math.sin(t), radius * Math.cos(t)],
+        from,
+        to,
+      };
+    }
     if (geometry.kind === "spline") {
       const span = geometry.reconstruction.spans.find(
         (candidate) =>
@@ -3066,62 +3105,266 @@ describe("T08b-g5b consumers and region wiring", () => {
     );
   }, 300_000);
 
-  test("g5b-7 (review R1, U9): on native OCC the profile face of the shell-bounded annulus raises the explicit spline-profile error naming the shell and one of its output spans", async () => {
-    const { session, seeds } = splineLoopSession();
-    const committed = committedOffsetOnSide(session, seeds, 0.01, "left");
-    const shellId = shellIdOf(committed);
-    const { session: live, response } = await liveRound(committed);
-    const solved = live.liveSolve!;
-    const outputSpanIds = new Set(
-      shellRecord(solved.solvedSnapshot).spans.map((span) => span.outputSpanId),
-    );
-    const sketch: SketchRecord = {
-      ownerDocumentId: "doc_workspace" as never,
-      ownerRevisionId: "rev_0001" as never,
-      ownerFeatureId: null,
-      ownerSketchId: "sketch_g5b" as never,
-      ownerBodyId: null,
-      sketchId: "sketch_g5b" as never,
-      label: "Sketch g5b",
-      planeSupport: XY as never,
-      definition: solved.definition,
-      solvedSnapshot: solved.solvedSnapshot,
-      derivedValidity: { state: "current", diagnostics: [] },
-      projectedReferences: [],
-      regions: response.regions,
-    };
-    const usesShell = (region: (typeof response.regions)[number]) =>
-      region.loops.some((loop) =>
-        loop.segments.some(
-          (segment) =>
-            segment.branch.source.kind === "entity" &&
-            segment.branch.source.entityId === shellId,
-        ),
-      );
-    const annulus = response.regions.filter(usesShell);
-    expect(annulus, "premise: one shell-bounded region (g5b-1)").toHaveLength(
-      1,
-    );
-    const oc = await getDefaultOpenCascadeInstance();
-    let message = "";
-    try {
-      buildRegionProfileFace(oc, { plane: live.plane, sketch, modelingTolerance: 1e-3 }, annulus[0]!);
-    } catch (error) {
-      message = (error as Error).message;
+  test("g5b-7 → T10c (A1/A2, review R1): on native OCC (stock and production assets) the outward shell annulus (joint arcs) and the inward annulus (shell sub-spans across knots) build exact faces whose areas and prism volumes equal the oracle; each shell edge is its selected sub-span's untrimmed poles over the record interval", async () => {
+    for (const [side, distance] of [
+      ["left", 0.01],
+      ["right", 0.1],
+    ] as const) {
+      const label = `${side === "left" ? "outward" : "inward"} d = ${distance}`;
+      const { session, seeds } = splineLoopSession();
+      const committed = committedOffsetOnSide(session, seeds, distance, side);
+      const shellId = shellIdOf(committed);
+      const { session: live, response } = await liveRound(committed);
+      const solved = live.liveSolve!;
+      const relationship = solved.definition.derivedRelationships![0]!;
+      if (relationship.kind !== "offset") throw new Error("offset");
+      const shell = shellRecord(solved.solvedSnapshot);
+      if (side === "left")
+        expect(
+          relationship.jointOutputs.length,
+          `${label}: premise, the outward loop carries joint arcs`,
+        ).toBeGreaterThan(0);
+      else
+        expect(
+          shell.spans.length,
+          `${label}: premise, an output span is split into sub-spans (knots inside it)`,
+        ).toBeGreaterThan(new Set(shell.spans.map((span) => span.outputSpanId)).size);
+      const sketch: SketchRecord = {
+        ownerDocumentId: "doc_workspace" as never,
+        ownerRevisionId: "rev_0001" as never,
+        ownerFeatureId: null,
+        ownerSketchId: "sketch_g5b" as never,
+        ownerBodyId: null,
+        sketchId: "sketch_g5b" as never,
+        label: "Sketch g5b",
+        planeSupport: XY as never,
+        definition: solved.definition,
+        solvedSnapshot: solved.solvedSnapshot,
+        derivedValidity: { state: "current", diagnostics: [] },
+        projectedReferences: [],
+        regions: response.regions,
+      };
+      const snapshot = {
+        ...sketch,
+        plane: live.plane,
+        sketch,
+      } as unknown as OccFeatureExecutionContext["sketches"][number];
+      const usesShell = (region: RegionRecord) =>
+        region.loops.some((loop) =>
+          loop.segments.some(
+            (segment) =>
+              segment.branch.source.kind === "entity" &&
+              segment.branch.source.entityId === shellId,
+          ),
+        );
+      expect(
+        response.regions.filter(usesShell).length,
+        `${label}: premise, the shell bounds regions`,
+      ).toBeGreaterThan(0);
+      if (side === "left")
+        expect(
+          response.regions.some(
+            (region) =>
+              usesShell(region) &&
+              region.loops.some((loop) =>
+                loop.segments.some((segment) =>
+                  relationship.jointOutputs.some(
+                    (joint) =>
+                      segment.branch.source.kind === "entity" &&
+                      segment.branch.source.entityId === joint.outputEntityId,
+                  ),
+                ),
+              ),
+          ),
+          `${label}: premise, the annulus boundary runs through a joint arc`,
+        ).toBe(true);
+
+      // Sub-span selection (A2): every shell segment resolves to the one
+      // sub-span of its output span whose source domain holds its interval,
+      // untrimmed poles (the record's own objects), u by the documented map.
+      const basis = regionBoundaryBasisOfSketchRecord(sketch);
+      const crossesKnot: boolean[] = [];
+      for (const region of response.regions)
+        for (const loop of region.loops)
+          for (const segment of loop.segments) {
+            if (
+              segment.branch.source.kind !== "entity" ||
+              segment.branch.source.entityId !== shellId
+            )
+              continue;
+            const [a, b] = segment.sourceParameterInterval;
+            const holders = shell.spans.filter(
+              (span) =>
+                span.outputSpanId === segment.branch.spanId &&
+                span.sourceDomain[0] <= a &&
+                b <= span.sourceDomain[1],
+            );
+            expect(holders, `${label}: one sub-span holds [${a}, ${b}]`).toHaveLength(1);
+            const [span] = holders;
+            crossesKnot.push(
+              shell.spans.filter(
+                (candidate) => candidate.outputSpanId === segment.branch.spanId,
+              ).length > 1,
+            );
+            const resolved = resolveRegionBoundaryCurve(basis, segment);
+            if (resolved.kind !== "resolved" || resolved.curve.kind !== "cubicBezier")
+              throw new Error(`${label}: the shell segment resolves to a cubic`);
+            expect(
+              resolved.curve.poles,
+              `${label}: the selected sub-span's untrimmed poles`,
+            ).toBe(span!.poles);
+            expect(resolved.curve.sourceDomain).toBe(span!.sourceDomain);
+            const [s0, s1] = span!.sourceDomain;
+            const local = (t: number) =>
+              t === s0 ? 0 : t === s1 ? 1 : (t - s0) / (s1 - s0);
+            expect(resolved.kernelInterval).toEqual([local(a), local(b)]);
+          }
+      if (side === "right")
+        expect(
+          crossesKnot.some(Boolean),
+          `${label}: premise, a shell segment's output span has several sub-spans`,
+        ).toBe(true);
+
+      for (const [runtime, loadRuntime] of [
+        ["production", loadProductionOcc],
+        ["stock", getDefaultOpenCascadeInstance],
+      ] as const) {
+        const oc = await loadRuntime();
+        for (const [index, region] of response.regions.entries()) {
+          const name = `${label} ${runtime} region ${index} (${region.loops.length} loops)`;
+          const oracle = region.loops.reduce(
+            (total, loop) =>
+              total +
+              closedCurvesSignedArea(
+                loopOracleCurves(loop, solved.solvedSnapshot),
+              ),
+            0,
+          );
+          const built = buildRegionProfileFace(
+            oc,
+            { plane: live.plane, sketch, modelingTolerance: 1e-3 },
+            region,
+          );
+          try {
+            const analyzer = new oc.BRepCheck_Analyzer(built.face, true, false);
+            try {
+              expect(analyzer.IsValid_2(), `${name}: BRepCheck accepts the face`).toBe(true);
+            } finally {
+              analyzer.delete();
+            }
+            const props = new oc.GProp_GProps_1();
+            try {
+              oc.BRepGProp.SurfaceProperties_1(built.face, props, false, false);
+              expect(
+                Math.abs(props.Mass() - oracle) / oracle,
+                `${name}: face area ${props.Mass()} = oracle ${oracle}`,
+              ).toBeLessThanOrEqual(1e-9);
+            } finally {
+              props.delete();
+            }
+            // Each shell edge is the Bézier of its selected sub-span over the
+            // mapped interval (no re-poling): OCC's own curve at its range
+            // ends equals the sub-span's poles evaluated at u.
+            const allSegments = region.loops.flatMap((loop) => loop.segments);
+            for (const segment of allSegments) {
+              if (
+                segment.branch.source.kind !== "entity" ||
+                segment.branch.source.entityId !== shellId
+              )
+                continue;
+              const base = `${shellId}@${segment.branch.spanId}`;
+              const shared =
+                allSegments.filter(
+                  (other) =>
+                    other.branch.source.kind === "entity" &&
+                    other.branch.source.entityId === shellId &&
+                    other.branch.spanId === segment.branch.spanId,
+                ).length > 1;
+              const edge = built.provenance.edges.get(
+                (shared ? `${base}#${segment.sourceSegmentOrdinal}` : base) as never,
+              );
+              expect(edge, `${name}: the shell segment's edge is keyed by span and ordinal`).toBeDefined();
+              const resolved = resolveRegionBoundaryCurve(basis, segment);
+              if (resolved.kind !== "resolved" || resolved.curve.kind !== "cubicBezier")
+                throw new Error("cubic");
+              const poles = resolved.curve.poles;
+              const adaptor = new oc.BRepAdaptor_Curve_2(edge!);
+              try {
+                expect(
+                  adaptor.GetType(),
+                  `${name}: the shell edge is an exact Bézier curve`,
+                ).toBe(oc.GeomAbs_CurveType.GeomAbs_BezierCurve);
+                expect(
+                  [adaptor.FirstParameter(), adaptor.LastParameter()],
+                  `${name}: the edge range is the mapped record interval`,
+                ).toEqual([...resolved.kernelInterval]);
+                for (const u of resolved.kernelInterval) {
+                  const value = adaptor.Value(u);
+                  const v = 1 - u;
+                  const expected = [0, 1].map(
+                    (axis) =>
+                      v * v * v * poles[0][axis]! +
+                      3 * v * v * u * poles[1][axis]! +
+                      3 * v * u * u * poles[2][axis]! +
+                      u * u * u * poles[3][axis]!,
+                  );
+                  try {
+                    expect(
+                      Math.hypot(value.X() - expected[0]!, value.Y() - expected[1]!, value.Z()),
+                      `${name}: OCC's curve value at u = ${u} is the sub-span's`,
+                    ).toBeLessThanOrEqual(1e-12);
+                  } finally {
+                    value.delete();
+                  }
+                }
+              } finally {
+                adaptor.delete();
+              }
+            }
+          } finally {
+            releaseBuiltSketchProfileFace(built);
+          }
+          const extruded = executeOccFeature(
+            await occFeatureContext([snapshot], [], oc),
+            `feature_t10c_shell_${index}` as never,
+            {
+              kind: "extrude",
+              featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+              parameters: {
+                resultBodyType: "solid",
+                profiles: [
+                  { kind: "region", sketchId: "sketch_g5b", regionId: region.regionId },
+                ],
+                startExtent: { kind: "profilePlane" },
+                extent: {
+                  mode: "oneSide",
+                  end: { kind: "blind", direction: "positive", distance: 2 },
+                },
+                operation: "newBody",
+                booleanScope: { kind: "standalone" },
+              },
+            } as never,
+          );
+          const volume = new oc.GProp_GProps_1();
+          try {
+            oc.BRepGProp.VolumeProperties_1(
+              extruded.bodies[0]!.shape as never,
+              volume,
+              false,
+              false,
+              false,
+            );
+            expect(
+              Math.abs(volume.Mass() - 2 * oracle) / (2 * oracle),
+              `${name}: prism volume ${volume.Mass()} = 2 × oracle area`,
+            ).toBeLessThanOrEqual(1e-9);
+          } finally {
+            volume.delete();
+          }
+        }
+      }
     }
-    const u9 =
-      /^Spline profile boundary sketch entity (\S+) span (\S+) is not yet supported by the OCC profile builder\.$/.exec(
-        message,
-      );
-    expect(
-      u9?.[1],
-      `The annulus fails with the U9 error naming the shell (${message}).`,
-    ).toBe(shellId);
-    expect(
-      outputSpanIds.has(u9![2]!),
-      "The U9 error names one of the shell's output spans.",
-    ).toBe(true);
-  }, 300_000);
+  }, 600_000);
 });
 
 // ---------------------------------------------------------------------------
@@ -3855,9 +4098,10 @@ async function committedOffsetFeatureSketch(failed: boolean) {
 async function occFeatureContext(
   sketches: OccFeatureExecutionContext["sketches"],
   bodies: OccFeatureExecutionContext["bodies"] = [],
+  oc?: OpenCascadeInstance,
 ): Promise<OccFeatureExecutionContext> {
   return {
-    oc: await getDefaultOpenCascadeInstance(),
+    oc: oc ?? (await getDefaultOpenCascadeInstance()),
     documentId: "doc_workspace",
     revisionId: "rev_0001",
     modelingTolerance: 1e-3,

@@ -5,7 +5,10 @@ import {
   admitCurveEndAtVertex,
   arcSourceInterval,
   buildExactArcEdge,
+  buildExactBezierEdge,
+  evaluateOccBezier,
   evaluateOccCircle,
+  OCC_PRECISION_CONFUSION,
   type OccCircleSupport,
 } from "@/domain/modeling/occ/exact-edges";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
@@ -95,6 +98,89 @@ test("src/domain/modeling/occ/exact-edges.spec.ts", async () => {
     () => buildExactArcEdge(oc, support, [1, 1 + 2 * Math.PI], "full turn"),
     "a full turn is not an arc",
   ).toThrow(/empty or full-turn interval/);
+
+  // A circle touching the boundary at one vertex: the full turn through that
+  // one shared vertex, MakeEdge_29(h, V, V, θ, θ + 2π).
+  const touch = vertexAt(oc, evaluateOccCircle(support, 1));
+  const closed = buildExactArcEdge(
+    oc,
+    support,
+    [1, 1 + 2 * Math.PI],
+    "touch circle",
+    {
+      low: touch,
+      high: touch,
+    },
+  );
+  const closedAdaptor = new oc.BRepAdaptor_Curve_2(closed);
+  expect(
+    closedAdaptor.LastParameter() - closedAdaptor.FirstParameter(),
+    "the touch-vertex circle is a full turn",
+  ).toBeCloseTo(2 * Math.PI, 14);
+  const [first, last] = [
+    oc.TopExp.FirstVertex(closed, false),
+    oc.TopExp.LastVertex(closed, false),
+  ];
+  expect(
+    first.IsSame(touch) && last.IsSame(touch),
+    "both ends of the closed edge are the one shared vertex",
+  ).toBe(true);
+  for (const object of [first, last, closedAdaptor, closed, touch])
+    object.delete();
+
+  // R12: a radius below Precision::Confusion is a kernel-reported limit.
+  expect(
+    () =>
+      buildExactArcEdge(
+        oc,
+        { ...support, radius: OCC_PRECISION_CONFUSION / 2 },
+        [0, 1],
+        "micro arc",
+      ),
+    "an arc below OCC's resolution fails closed naming the edge",
+  ).toThrow(
+    /^profile-edge-below-kernel-resolution: The edge of micro arc has radius /,
+  );
+
+  // Exact Bézier edge: the poles as given, trimmed by the edge range (no
+  // re-poling): an exact Bézier curve whose range is [u0, u1] and whose
+  // value there is the poles' own.
+  const poles: Vec3[] = [
+    [0, 0, 0],
+    [1, 2, 0],
+    [3, 2, 0],
+    [4, 0, 0],
+  ];
+  const range = [0.25, 0.8125] as const;
+  const [low, high] = range.map((u) =>
+    vertexAt(oc, evaluateOccBezier(poles, u)),
+  );
+  const bezier = buildExactBezierEdge(oc, poles, range, "test span", {
+    low: low!,
+    high: high!,
+  });
+  const bezierAdaptor = new oc.BRepAdaptor_Curve_2(bezier);
+  expect(bezierAdaptor.GetType(), "an exact Bézier curve").toBe(
+    oc.GeomAbs_CurveType.GeomAbs_BezierCurve,
+  );
+  expect(
+    [bezierAdaptor.FirstParameter(), bezierAdaptor.LastParameter()],
+    "the edge range is the span-local interval",
+  ).toEqual([...range]);
+  for (const u of [...range, 0.5]) {
+    const value = bezierAdaptor.Value(u);
+    const expected = evaluateOccBezier(poles, u);
+    expect(
+      Math.hypot(
+        value.X() - expected[0],
+        value.Y() - expected[1],
+        value.Z() - expected[2],
+      ),
+      `OCC's curve at u = ${u} is the poles' Bézier`,
+    ).toBeLessThanOrEqual(1e-14);
+    value.delete();
+  }
+  for (const object of [bezierAdaptor, bezier, low!, high!]) object.delete();
 
   // Vertex handoff: gap 0 → default; gap within the cap → tolerance = gap;
   // gap above the cap → profile-vertex-gap-exceeds-join.

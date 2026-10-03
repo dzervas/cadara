@@ -109,6 +109,21 @@ class PartiallySolvedRestoreSolverAdapter extends SketchConstraintSolverAdapter 
   }
 }
 
+/**
+ * A fake OpenCascade instance with no kernel. The part-mode region render is
+ * the only snapshot path that calls OCC; it fails as an explicit, tagged
+ * kernel failure (a region diagnostic) because untagged errors are rethrown.
+ */
+function createFakeOccWithoutKernel() {
+  return {
+    BRepBuilderAPI_MakeWire_1: function NoKernel() {
+      throw Object.assign(new Error("fake OCC runtime: no kernel"), {
+        code: "profile-face-invalid",
+      });
+    },
+  } as unknown as OpenCascadeInstance;
+}
+
 test("OCC preserves document tolerance through variable rebuild, snapshot, export, and commit without native WASM", async () => {
   const seedAdapter = new MockKernelAdapter();
   const document =
@@ -155,7 +170,7 @@ test("OCC preserves document tolerance through variable rebuild, snapshot, expor
     createSolverAdapter: () => solverAdapter,
     getOpenCascadeInstance: async () => {
       fakeOccInitializations += 1;
-      return {} as OpenCascadeInstance;
+      return createFakeOccWithoutKernel();
     },
   });
 
@@ -168,6 +183,14 @@ test("OCC preserves document tolerance through variable rebuild, snapshot, expor
     modelingTolerance: expected.coincidence,
     angularToleranceRadians: expected.angleRadians,
   });
+  const regionFailures = restoredSnapshot.snapshot.document.diagnostics
+    .filter((diagnostic) => diagnostic.code.startsWith("profile-"))
+    .map((diagnostic) => diagnostic.code);
+  expect(
+    regionFailures.length > 0 &&
+      regionFailures.every((code) => code === "profile-face-invalid"),
+    "Without a kernel, region faces fail only as the fake runtime's tagged failure.",
+  ).toBe(true);
   expect(
     restoredQueries.modelingTolerances.length,
     "OCC restore derives regions through the injected queries.",
@@ -255,7 +278,7 @@ test("OCC preserves document tolerance through variable rebuild, snapshot, expor
     createSolverAdapter: () => freshSolver,
     getOpenCascadeInstance: async () => {
       fakeOccInitializations += 1;
-      return {} as OpenCascadeInstance;
+      return createFakeOccWithoutKernel();
     },
   });
   const freshSnapshot = await fresh.getDocumentSnapshot({

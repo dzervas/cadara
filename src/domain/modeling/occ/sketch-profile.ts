@@ -4,8 +4,14 @@ import type {
   RegionRecord,
   SolvedSketchEntityGeometryRecord,
   SketchRecord,
-  SketchPoint2D,
 } from "@/contracts/sketch/schema";
+import {
+  createRegionBoundaryBasis,
+  resolveRegionBoundaryCurve,
+  type RegionBoundaryBasis,
+  type ResolvedBoundaryCurve,
+} from "@/contracts/sketch/region-boundary-curves";
+import type { OwnedCurve } from "@/contracts/sketch/region-interval-geometry";
 import type {
   ProjectedSketchReferenceGeometry,
   ProjectedSketchReferenceRecord,
@@ -31,19 +37,25 @@ import {
 } from "@/domain/modeling/occ/geometry";
 import {
   admitCurveEndAtVertex,
+  bezierEvaluationScale,
   buildExactArcEdge,
+  buildExactBezierEdge,
   buildSketchArcEdge,
+  buildVertexLineEdge,
   circleEvaluationScale,
   curveEvaluationRoundingBound,
+  edgeBelowKernelResolution,
+  evaluateOccBezier,
   evaluateOccCircle,
-  reverseOccEdge,
+  OCC_PRECISION_CONFUSION,
+  replaceWithReversedEdge,
   sketchCircleSupport,
+  withOccTemporaries,
   type OccCircleSupport,
 } from "@/domain/modeling/occ/exact-edges";
 import {
   createProjectedRegionLoopRejection,
   getProjectedRegionLoopRejectionMessage,
-  isProjectedRegionSegmentSourceSupported,
 } from "@/domain/modeling/occ/implementation-policy";
 import {
   combineOccCleanupError,
@@ -60,16 +72,24 @@ export type SketchProfileBaseEdgeSourceKey =
   | ProjectedSketchProfileEdgeKey;
 export type SketchProfileEdgeSourceKey =
   | SketchProfileBaseEdgeSourceKey
+  | SpanSketchProfileEdgeKey
   | SplitSketchProfileEdgeKey;
 /**
- * Distinct key for ONE split piece of a source curve that contributes several
+ * Key of one neutral cubic span of a spline, projected spline or offset
+ * shell source (the region branch's `spanId`; a `whole` branch keeps the
+ * bare source key).
+ */
+export type SpanSketchProfileEdgeKey =
+  `${SketchProfileBaseEdgeSourceKey}@${string}`;
+/**
+ * Distinct key for ONE split piece of a source branch that contributes several
  * boundary segments to the same profile. The ordinal is the region
  * extraction's persisted `sourceSegmentOrdinal` (split-piece position in
- * source-curve parameter order), never a geometric match, so the key is exact
- * and reproducible. Sources contributing a single segment keep their bare key.
+ * branch parameter order), never a geometric match, so the key is exact
+ * and reproducible. Branches contributing a single segment keep their key.
  */
 export type SplitSketchProfileEdgeKey =
-  `${SketchProfileBaseEdgeSourceKey}#${number}`;
+  `${SketchProfileBaseEdgeSourceKey | SpanSketchProfileEdgeKey}#${number}`;
 export type SketchProfileVertexSourceKey =
   | SketchPointId
   | ProjectedSketchProfileVertexKey;
@@ -112,6 +132,7 @@ interface MutableSketchProfileProvenance {
   >;
 }
 type OccProfileVertex = InstanceType<OpenCascadeInstance["TopoDS_Vertex"]>;
+type OccEdge = InstanceType<OpenCascadeInstance["TopoDS_Edge"]>;
 // Resolves an open-curve chain endpoint to a single shared TopoDS_Vertex, so
 // consecutive open surface-profile curves share one vertex.
 type ProfileVertexResolver = (
@@ -165,57 +186,56 @@ function getSketchEntityDefinition(sketch: SketchRecord, entityId: string) {
   return entity;
 }
 
+/**
+ * A malformed region record (ownership, loop structure): a known profile
+ * failure, tagged `profile-face-invalid` so the part-mode render reports it as
+ * a region diagnostic (review A-4); its message stays the same. Any untagged,
+ * unprefixed error is a code fault and is rethrown there.
+ */
+function profileRecordError(message: string) {
+  return Object.assign(new Error(message), {
+    code: "profile-face-invalid" as const,
+  });
+}
+
 function assertRegionBelongsToSketch(
   sketch: SketchRecord,
   region: RegionRecord,
 ) {
   if (region.ownerSketchId !== sketch.sketchId) {
-    throw new Error(
+    throw profileRecordError(
       `Region ${region.regionId} is owned by sketch ${region.ownerSketchId}, not sketch ${sketch.sketchId}.`,
     );
   }
 
   if (region.sourceSketch.sketchId !== sketch.sketchId) {
-    throw new Error(
+    throw profileRecordError(
       `Region ${region.regionId} sources sketch ${region.sourceSketch.sketchId}, not sketch ${sketch.sketchId}.`,
     );
   }
 
   if (region.target.sketchId !== sketch.sketchId) {
-    throw new Error(
+    throw profileRecordError(
       `Region ${region.regionId} targets sketch ${region.target.sketchId}, not sketch ${sketch.sketchId}.`,
-    );
-  }
-}
-
-function assertBoundaryPointExists(sketch: SketchRecord, pointId: string) {
-  const authoredPoint = sketch.definition.points.find(
-    (entry) => entry.pointId === pointId,
-  );
-
-  if (!authoredPoint) {
-    throw new Error(
-      `Boundary point ${pointId} is not authored on sketch ${sketch.sketchId}.`,
     );
   }
 }
 
 /** Closure is structural: consecutive segments share boundary-vertex keys. */
 function assertLoopCanBuildProfile(
-  sketch: SketchRecord,
   region: RegionRecord,
   loop: RegionRecord["loops"][number],
 ) {
   if (!region.isClosed) {
-    throw new Error(`Region ${region.regionId} is not closed.`);
+    throw profileRecordError(`Region ${region.regionId} is not closed.`);
   }
 
   if (!loop.isClosed) {
-    throw new Error(`Region loop ${loop.loopId} is not closed.`);
+    throw profileRecordError(`Region loop ${loop.loopId} is not closed.`);
   }
 
   if (loop.segments.length === 0) {
-    throw new Error(
+    throw profileRecordError(
       `Region loop ${loop.loopId} does not contain any boundary segments.`,
     );
   }
@@ -228,7 +248,7 @@ function assertLoopCanBuildProfile(
         only!.end !== null &&
         only!.start.key === only!.end.key);
     if (!closesOnItself) {
-      throw new Error(
+      throw profileRecordError(
         `Region loop ${loop.loopId} does not close back onto its starting vertex.`,
       );
     }
@@ -240,15 +260,11 @@ function assertLoopCanBuildProfile(
         next.start === null ||
         current.end.key !== next.start.key
       ) {
-        throw new Error(
+        throw profileRecordError(
           `Region loop ${loop.loopId} is not closed between segments ${index} and ${(index + 1) % loop.segments.length}.`,
         );
       }
     });
-  }
-
-  for (const pointId of loop.boundaryPointIds) {
-    assertBoundaryPointExists(sketch, pointId);
   }
 }
 
@@ -282,14 +298,9 @@ function createProfileVertex(
   oc: OpenCascadeInstance,
   position: Vec3,
 ): OccProfileVertex {
-  const point = toGpPnt(oc, position);
-  const builder = new oc.BRepBuilderAPI_MakeVertex(point);
-  try {
-    return builder.Vertex();
-  } finally {
-    deleteOccObject(builder);
-    deleteOccObject(point);
-  }
+  return withOccTemporaries((own) =>
+    own(new oc.BRepBuilderAPI_MakeVertex(own(toGpPnt(oc, position)))).Vertex(),
+  );
 }
 
 function buildCircleEdge(
@@ -312,22 +323,17 @@ function buildCircleEdgeFromSketchGeometry(
   radius: number,
 ) {
   const center = mapSketchPointToWorld(plane, centerPosition);
-  const centerPoint = toGpPnt(oc, center);
-  const normalDirection = toGpDir(oc, plane.frame.normal);
-  const xDirection = toGpDir(oc, plane.frame.xAxis);
-  const axis = new oc.gp_Ax2_2(centerPoint, normalDirection, xDirection);
-  const circle = new oc.gp_Circ_2(axis, radius);
-  const builder = new oc.BRepBuilderAPI_MakeEdge_8(circle);
-  try {
-    return builder.Edge();
-  } finally {
-    deleteOccObject(builder);
-    deleteOccObject(circle);
-    deleteOccObject(axis);
-    deleteOccObject(centerPoint);
-    deleteOccObject(normalDirection);
-    deleteOccObject(xDirection);
-  }
+  return withOccTemporaries((own) => {
+    const axis = own(
+      new oc.gp_Ax2_2(
+        own(toGpPnt(oc, center)),
+        own(toGpDir(oc, plane.frame.normal)),
+        own(toGpDir(oc, plane.frame.xAxis)),
+      ),
+    );
+    const circle = own(new oc.gp_Circ_2(axis, radius));
+    return own(new oc.BRepBuilderAPI_MakeEdge_8(circle)).Edge();
+  });
 }
 
 function buildArcEdge(
@@ -470,13 +476,18 @@ function getSolvedBoundaryPointPosition(
 
 type RegionBoundarySegment = RegionRecord["loops"][number]["segments"][number];
 
+/** The source key of a segment's branch: its entity or projected geometry, plus its span when not `whole`. */
 function getRegionSegmentBaseEdgeKey(
   segment: RegionBoundarySegment,
-): SketchProfileBaseEdgeSourceKey {
+): SketchProfileBaseEdgeSourceKey | SpanSketchProfileEdgeKey {
   const source = segment.branch.source;
-  return source.kind === "projectedGeometry"
-    ? getProjectedSegmentId(source)
-    : source.entityId;
+  const base =
+    source.kind === "projectedGeometry"
+      ? getProjectedSegmentId(source)
+      : source.entityId;
+  return segment.branch.spanId === "whole"
+    ? base
+    : `${base}@${segment.branch.spanId}`;
 }
 
 /**
@@ -485,8 +496,9 @@ function getRegionSegmentBaseEdgeKey(
  * A source curve crossed several times by a region boundary contributes
  * SEVERAL wire edges. Keying them all by the bare source id silently
  * overwrites every edge but the last, so the earlier edges' swept faces reach
- * later features with no lineage at all. Each split piece therefore keys on
- * its `sourceSegmentOrdinal` (split-piece position in source-parameter order).
+ * later features with no lineage at all. Each spline (or shell) span keys on
+ * its span id, and each split piece of one branch on its
+ * `sourceSegmentOrdinal` (split-piece position in source-parameter order).
  */
 function createRegionSegmentEdgeKeyResolver(
   loops: readonly RegionRecord["loops"][number][],
@@ -507,105 +519,107 @@ function createRegionSegmentEdgeKeyResolver(
   };
 }
 
-/** Support geometry of one boundary branch; the edge runs through the boundary vertices. */
-type RegionBranchSupport =
-  | { kind: "line" }
-  | { kind: "circle"; center: SketchPoint2D; radius: number };
-
 function describeRegionBoundarySource(source: RegionBoundarySource) {
   return source.kind === "entity"
     ? `sketch entity ${source.entityId}`
     : `projected geometry ${source.reference.referenceId}/${source.reference.geometryId}`;
 }
 
-function resolveRegionBranchSupport(
-  sketch: SketchRecord,
-  projectedReferences: readonly ProjectedSketchReferenceRecord[],
-  segment: RegionBoundarySegment,
-): RegionBranchSupport {
-  const source = segment.branch.source;
-  if (!isProjectedRegionSegmentSourceSupported(source)) {
-    throw new Error("Unsupported region segment source.");
-  }
-  if (segment.branch.spanId !== "whole") {
-    // U9 tracked gap: spline-bounded regions are derived and selectable, but
-    // exact span trimming for OCC lands in T10.
-    throw new Error(
-      `Spline profile boundary ${describeRegionBoundarySource(source)} span ${segment.branch.spanId} is not yet supported by the OCC profile builder.`,
-    );
-  }
-
-  if (source.kind === "projectedGeometry") {
-    const geometry = resolveProjectedBoundaryGeometry(
-      sketch,
-      projectedReferences,
-      source,
-    );
-    switch (geometry.kind) {
-      case "lineSegment":
-        return { kind: "line" };
-      case "arc":
-        return {
-          kind: "circle",
-          center: geometry.centerPosition,
-          radius: Math.hypot(
-            geometry.startPosition[0] - geometry.centerPosition[0],
-            geometry.startPosition[1] - geometry.centerPosition[1],
-          ),
-        };
-      case "circle":
-        return {
-          kind: "circle",
-          center: geometry.centerPosition,
-          radius: geometry.radius,
-        };
-      case "spline":
-        throw new Error(
-          `Spline profile boundary ${describeRegionBoundarySource(source)} is not yet supported by the OCC profile builder.`,
-        );
-      case "point":
-        throw new Error(
-          `Projected point geometry ${source.reference.geometryId} cannot define a profile boundary.`,
-        );
-    }
-  }
-
-  const geometry = getSolvedEntityGeometry(sketch, source.entityId);
-  assertLoopSegmentOwnership(sketch, geometry);
-  switch (geometry.kind) {
-    case "lineSegment":
-      return { kind: "line" };
-    case "arc":
-      return {
-        kind: "circle",
-        center: geometry.centerPosition,
-        radius: Math.hypot(
-          geometry.startPosition[0] - geometry.centerPosition[0],
-          geometry.startPosition[1] - geometry.centerPosition[1],
-        ),
-      };
-    case "circle":
-      return {
-        kind: "circle",
-        center: geometry.centerPosition,
-        radius: geometry.solvedRadius,
-      };
-    case "spline":
-      throw new Error(
-        `Spline profile boundary ${describeRegionBoundarySource(source)} is not yet supported by the OCC profile builder.`,
-      );
-    default:
-      throw new Error(
-        `Sketch entity ${geometry.entityId} of kind ${geometry.kind} cannot define a profile boundary in this OCC profile builder.`,
-      );
-  }
+/** The source branch a diagnostic names: its source, and its span unless `whole`. */
+function describeRegionBoundaryBranch(segment: RegionBoundarySegment) {
+  const source = describeRegionBoundarySource(segment.branch.source);
+  return segment.branch.spanId === "whole"
+    ? source
+    : `${source} span ${segment.branch.spanId}`;
 }
 
 /**
- * One OCC vertex per boundary-vertex key, positioned at the vertex
- * representative (a declared join's realization; never identity). Declared
- * joins register the vertex under every joined authored point id, so side-edge
- * lineage keeps naming it by its sketch points.
+ * One cached basis per record object, with the four field references it was
+ * built from (review A-2): any reassigned field rebuilds it.
+ */
+const sketchRecordBases = new WeakMap<
+  SketchRecord,
+  {
+    definition: SketchRecord["definition"];
+    solvedSnapshot: SketchRecord["solvedSnapshot"];
+    projectedReferences: SketchRecord["projectedReferences"];
+    regions: SketchRecord["regions"];
+    basis: RegionBoundaryBasis;
+  }
+>();
+
+/**
+ * The region-boundary basis of one OCC sketch record (T10b review R-2): its
+ * definition, solved snapshot (publications applied, as stored), projected
+ * references and its own `regions`, held together by the record, so a
+ * region resolves only against the pair that produced it. Records reach OCC
+ * whole (structured clone, persistence), so a basis built from the record in
+ * hand holds the very segment objects its regions carry. Only a `current`
+ * record has consumable regions; a stale or invalid one fails closed. The
+ * basis is cached per record object and rebuilt when any of its definition,
+ * solved snapshot, projected references or regions is a different object.
+ */
+export function regionBoundaryBasisOfSketchRecord(
+  sketch: SketchRecord,
+): RegionBoundaryBasis {
+  if (sketch.derivedValidity.state !== "current") {
+    throw new Error(
+      `profile-boundary-unresolved: Sketch ${sketch.sketchId} derived output is ${sketch.derivedValidity.state}; only the regions of a current sketch resolve.`,
+    );
+  }
+  const cached = sketchRecordBases.get(sketch);
+  if (
+    cached &&
+    cached.definition === sketch.definition &&
+    cached.solvedSnapshot === sketch.solvedSnapshot &&
+    cached.projectedReferences === sketch.projectedReferences &&
+    cached.regions === sketch.regions
+  )
+    return cached.basis;
+  const basis = createRegionBoundaryBasis(
+    {
+      definition: sketch.definition,
+      solvedSnapshot: sketch.solvedSnapshot,
+      projectedReferences: sketch.projectedReferences ?? [],
+    },
+    sketch.regions,
+  );
+  sketchRecordBases.set(sketch, {
+    definition: sketch.definition,
+    solvedSnapshot: sketch.solvedSnapshot,
+    projectedReferences: sketch.projectedReferences,
+    regions: sketch.regions,
+    basis,
+  });
+  return basis;
+}
+
+/**
+ * Registers one provenance key, failing closed when the key already names a
+ * different OCC wrapper (review A-8): an overwrite would drop the earlier
+ * wrapper's lineage and leak it.
+ */
+function bindProvenance<K, V>(map: Map<K, V>, key: K, value: V, what: string) {
+  const bound = map.get(key);
+  if (bound !== undefined && bound !== value)
+    throw new Error(
+      `profile-face-invalid: provenance key ${String(key)} would name two different OCC ${what}s.`,
+    );
+  map.set(key, value);
+}
+
+type RegionVertexResolver = (
+  vertex: RegionBoundaryVertex,
+  endpointKey: SketchProfileVertexSourceKey | null,
+) => OccProfileVertex;
+
+/**
+ * One OCC vertex per boundary-vertex key for a whole face (outer and inner
+ * loops together, so point-touching loops share one `TopoDS_Vertex`; T-4),
+ * positioned at the vertex representative (a declared join's realization;
+ * never identity). Declared joins register the vertex under every joined
+ * authored point id, so side-edge lineage keeps naming it by its sketch
+ * points. Vertices left `unregistered` belong to the face build only.
  */
 function createRegionVertexResolver(
   oc: OpenCascadeInstance,
@@ -614,10 +628,7 @@ function createRegionVertexResolver(
 ) {
   const byKey = new Map<string, OccProfileVertex>();
   const unregistered = new Set<OccProfileVertex>();
-  const resolve = (
-    vertex: RegionBoundaryVertex,
-    endpointKey: SketchProfileVertexSourceKey | null,
-  ): OccProfileVertex => {
+  const resolve: RegionVertexResolver = (vertex, endpointKey) => {
     let occVertex = byKey.get(vertex.key);
     if (!occVertex) {
       occVertex = createProfileVertex(
@@ -632,7 +643,7 @@ function createRegionVertexResolver(
       ...(endpointKey ? [endpointKey] : []),
     ];
     for (const key of keys) {
-      provenance.vertices.set(key, occVertex);
+      bindProvenance(provenance.vertices, key, occVertex, "vertex");
       unregistered.delete(occVertex);
     }
     return occVertex;
@@ -641,124 +652,144 @@ function createRegionVertexResolver(
 }
 
 /**
- * Provenance keys of a line branch's own endpoints at this segment's ends:
- * an end whose source parameter is exactly the branch domain end (0 or 1) is
- * that line's authored (or projected) endpoint. Structural, never proximity.
+ * Provenance keys of a branch's own endpoints at this segment's low and high
+ * source-parameter ends, by the exact-parameter rule: an end whose source
+ * parameter is bitwise the branch's own domain end is that branch's
+ * endpoint. Lines: the authored (or projected `…:start/:end`) endpoint at
+ * t = 0 / 1. Projected arcs (A5): `…:start/:end` at the resolver's own arc
+ * draft domain ends [θ_lo, θ_hi] (θ_lo is the start of a counter-clockwise
+ * arc, the end of a clockwise one), never OCC parameters (R3). Structural,
+ * never proximity.
  */
-function lineEndpointKeys(
+function branchEndpointKeys(
   sketch: SketchRecord,
   segment: RegionBoundarySegment,
+  curve: OwnedCurve,
+  projected: ProjectedSketchReferenceGeometry | null,
 ): {
-  start: SketchProfileVertexSourceKey | null;
-  end: SketchProfileVertexSourceKey | null;
+  low: SketchProfileVertexSourceKey | null;
+  high: SketchProfileVertexSourceKey | null;
 } {
   const source = segment.branch.source;
-  let atZero: SketchProfileVertexSourceKey | null = null;
-  let atOne: SketchProfileVertexSourceKey | null = null;
-  if (source.kind === "projectedGeometry") {
-    const key = getProjectedSegmentId(source);
-    atZero = `${key}:start`;
-    atOne = `${key}:end`;
-  } else {
-    const entity = getSketchEntityDefinition(sketch, source.entityId);
-    if (entity.kind !== "lineSegment") return { start: null, end: null };
-    atZero = entity.startPointId;
-    atOne = entity.endPointId;
+  const [a, b] = segment.sourceParameterInterval;
+  if (curve.kind === "line") {
+    let atZero: SketchProfileVertexSourceKey;
+    let atOne: SketchProfileVertexSourceKey;
+    if (source.kind === "projectedGeometry") {
+      const key = getProjectedSegmentId(source);
+      atZero = `${key}:start`;
+      atOne = `${key}:end`;
+    } else {
+      const entity = getSketchEntityDefinition(sketch, source.entityId);
+      if (entity.kind !== "lineSegment") return { low: null, high: null };
+      atZero = entity.startPointId;
+      atOne = entity.endPointId;
+    }
+    return { low: a === 0 ? atZero : null, high: b === 1 ? atOne : null };
   }
-  const [low, high] = segment.sourceParameterInterval;
-  const lowKey = low === 0 ? atZero : null;
-  const highKey = high === 1 ? atOne : null;
-  return segment.traversalDirection === "reverse"
-    ? { start: highKey, end: lowKey }
-    : { start: lowKey, end: highKey };
+  if (
+    curve.kind === "circle" &&
+    curve.sourceDomain.kind === "arc" &&
+    source.kind === "projectedGeometry" &&
+    projected?.kind === "arc"
+  ) {
+    const key = getProjectedSegmentId(source);
+    const [lo, hi] = curve.sourceDomain.interval;
+    const counterClockwise = projected.sweepDirection === "counterClockwise";
+    return {
+      low: a === lo ? `${key}:${counterClockwise ? "start" : "end"}` : null,
+      high: b === hi ? `${key}:${counterClockwise ? "end" : "start"}` : null,
+    };
+  }
+  return { low: null, high: null };
 }
 
-function buildRegionSegmentEdge(
-  oc: OpenCascadeInstance,
+/**
+ * A resolved boundary curve in world space: its point at a kernel parameter
+ * (the owner's evaluation of exactly the curve the arrangement certified),
+ * the coordinate scale of its points, and an upper bound on its extent over
+ * a source-parameter interval (for the intersection caps).
+ */
+type WorldBoundaryCurve =
+  | {
+      kind: "line";
+      at(parameter: number): Vec3;
+      scale: number;
+      extent(bounds: readonly [number, number]): number;
+    }
+  | {
+      kind: "circle";
+      support: OccCircleSupport;
+      at(parameter: number): Vec3;
+      scale: number;
+      extent(bounds: readonly [number, number]): number;
+    }
+  | {
+      kind: "cubicBezier";
+      poles: readonly Vec3[];
+      at(parameter: number): Vec3;
+      scale: number;
+      extent(bounds: readonly [number, number]): number;
+    };
+
+function worldBoundaryCurve(
   plane: SketchPlaneDefinition,
-  sketch: SketchRecord,
-  segment: RegionBoundarySegment,
-  support: RegionBranchSupport,
-  resolve: (
-    vertex: RegionBoundaryVertex,
-    endpointKey: SketchProfileVertexSourceKey | null,
-  ) => OccProfileVertex,
-  tolerance: number,
-) {
-  const label = describeRegionBoundarySource(segment.branch.source);
-  if ((segment.start === null) !== (segment.end === null)) {
-    throw new Error(
-      `Boundary segment of ${label} has exactly one null end; only an unsplit closed branch has no boundary vertices.`,
+  curve: OwnedCurve,
+): WorldBoundaryCurve {
+  if (curve.kind === "line") {
+    const start = mapSketchPointToWorld(plane, curve.start);
+    const end = mapSketchPointToWorld(plane, curve.end);
+    const length = Math.hypot(
+      end[0] - start[0],
+      end[1] - start[1],
+      end[2] - start[2],
     );
+    return {
+      kind: "line",
+      at: (t) => [
+        start[0] + t * (end[0] - start[0]),
+        start[1] + t * (end[1] - start[1]),
+        start[2] + t * (end[2] - start[2]),
+      ],
+      scale: Math.max(...start.map(Math.abs), ...end.map(Math.abs)),
+      extent: ([low, high]) => length * (high - low),
+    };
   }
-  if (support.kind === "line") {
-    if (segment.start === null || segment.end === null) {
-      throw new Error(`Line boundary ${label} has no boundary vertices.`);
-    }
-    const endpointKeys = lineEndpointKeys(sketch, segment);
-    return buildLineEdge(
-      oc,
-      resolve(segment.start, endpointKeys.start),
-      resolve(segment.end, endpointKeys.end),
+  if (curve.kind === "circle") {
+    // The arrangement's circles all carry xAxis [1, 0]: angles from the
+    // sketch's +x, which `sketchCircleSupport` maps to the plane frame.
+    const support = sketchCircleSupport(plane, curve.center, curve.radius);
+    return {
+      kind: "circle",
+      support,
+      at: (angle) => evaluateOccCircle(support, angle),
+      scale: circleEvaluationScale(support),
+      extent: ([low, high]) => curve.radius * (high - low),
+    };
+  }
+  const poles = curve.poles.map((pole) => mapSketchPointToWorld(plane, pole));
+  // |B'(u)| ≤ 3·max|P_{i+1} − P_i| (hodograph hull), and u = (t − s₀)/(s₁ − s₀).
+  const speed =
+    3 *
+    Math.max(
+      ...poles
+        .slice(1)
+        .map((pole, index) =>
+          Math.hypot(
+            pole[0] - poles[index]![0],
+            pole[1] - poles[index]![1],
+            pole[2] - poles[index]![2],
+          ),
+        ),
     );
-  }
-
-  const closesOnItself =
-    segment.start === null ||
-    segment.end === null ||
-    segment.start.key === segment.end.key;
-  if (closesOnItself) {
-    // An unsplit full circle, or a full turn through one touch vertex.
-    const edge = buildCircleEdgeFromSketchGeometry(
-      oc,
-      plane,
-      support.center,
-      support.radius,
-    );
-    if (segment.traversalDirection !== "reverse") {
-      return edge;
-    }
-    try {
-      return reverseOccEdge(oc, edge);
-    } finally {
-      deleteOccObject(edge);
-    }
-  }
-
-  // Arcs and split circles: the record's own increasing (counter-clockwise)
-  // source interval, never a refit through the vertex positions (A3). The
-  // edge runs forward from its low to its high vertex; a reverse traversal is
-  // the reversed edge.
-  const forward = segment.traversalDirection !== "reverse";
-  const ends = forward
-    ? { low: segment.start!, high: segment.end! }
-    : { low: segment.end!, high: segment.start! };
-  const circle = sketchCircleSupport(plane, support.center, support.radius);
-  const interval = segment.sourceParameterInterval;
-  const vertices = {
-    low: resolve(ends.low, null),
-    high: resolve(ends.high, null),
+  const [s0, s1] = curve.sourceDomain;
+  return {
+    kind: "cubicBezier",
+    poles,
+    at: (u) => evaluateOccBezier(poles, u),
+    scale: bezierEvaluationScale(poles),
+    extent: ([low, high]) => (speed * (high - low)) / (s1 - s0),
   };
-  for (const [vertex, occVertex, parameter] of [
-    [ends.low, vertices.low, interval[0]],
-    [ends.high, vertices.high, interval[1]],
-  ] as const) {
-    admitCurveEndAtVertex(
-      oc,
-      occVertex,
-      evaluateOccCircle(circle, parameter),
-      regionVertexGapCap(segment, vertex, parameter, circle, tolerance),
-      circleEvaluationScale(circle),
-      label,
-    );
-  }
-  const edge = buildExactArcEdge(oc, circle, interval, label, vertices);
-  if (forward) return edge;
-  try {
-    return reverseOccEdge(oc, edge);
-  } finally {
-    deleteOccObject(edge);
-  }
 }
 
 function isSameBoundaryBranch(
@@ -778,162 +809,324 @@ function isSameBoundaryBranch(
 }
 
 /**
- * The largest gap a boundary vertex may absorb at one arc end (T10 T-3):
- * - a declared join: its certified ball, min(ballRadius, τ);
- * - a verified intersection (R6): the extent of this arc over the witness
- *   side's parameter bounds [a, b] (the side on this branch whose bounds hold
- *   the end parameter, mod 2π), r·(b − a) + rounding: the crossing lies on
- *   C([a, b]), so its representative may be no further from the end's curve
- *   value. τ is only the backstop (also when no witness side is on this
- *   branch, e.g. an overlap end named by another branch).
+ * The extent of the owner's curve of one witness side over its parameter
+ * bounds (plus rounding), read from a record segment of the same basis on
+ * that side's branch (for a cubic, the sub-span holding the bounds), or null
+ * when no region of the record runs along that branch there.
+ */
+type WitnessSideExtent = (
+  side: Extract<
+    RegionBoundaryVertex,
+    { kind: "verifiedIntersection" }
+  >["witness"]["first"],
+) => number | null;
+
+function createWitnessSideExtent(
+  plane: SketchPlaneDefinition,
+  basis: RegionBoundaryBasis,
+): WitnessSideExtent {
+  return (side) => {
+    const [low, high] = side.parameterBounds;
+    for (const region of basis.regions)
+      for (const loop of region.loops)
+        for (const segment of loop.segments) {
+          if (!isSameBoundaryBranch(segment.branch, side.branch)) continue;
+          const resolved = resolveRegionBoundaryCurve(basis, segment);
+          if (resolved.kind !== "resolved") continue;
+          const { curve } = resolved;
+          if (
+            curve.kind === "cubicBezier" &&
+            !(curve.sourceDomain[0] <= low && high <= curve.sourceDomain[1])
+          )
+            continue;
+          const world = worldBoundaryCurve(plane, curve);
+          return (
+            world.extent(side.parameterBounds) +
+            curveEvaluationRoundingBound(world.scale)
+          );
+        }
+    return null;
+  };
+}
+
+/**
+ * The largest gap a boundary vertex may absorb at one edge end (T10 T-3):
+ * - a declared join: its certified ball, min(ballRadius, τ) (a class with
+ *   more than two members carries its largest pair ball, so the cap is that
+ *   radius; a member end further away fails closed);
+ * - a verified intersection (R6, review A-1): the crossing lies on both
+ *   witness curves over their parameter bounds, so a representative on
+ *   either curve there is within ext_this + ext_other of this end's curve
+ *   value: the extent of this curve over the side on this branch whose
+ *   bounds hold the end's source parameter (mod 2π for a circle), plus the
+ *   other side's curve extent over its bounds, plus rounding, clamped at τ.
+ *   τ is the backstop: when no witness side is on this branch (an overlap
+ *   end named by another branch) or the other side's curve is not in this
+ *   record's regions.
  */
 function regionVertexGapCap(
   segment: RegionBoundarySegment,
   vertex: RegionBoundaryVertex,
   parameter: number,
-  circle: OccCircleSupport,
+  curve: WorldBoundaryCurve,
+  witnessSideExtent: WitnessSideExtent,
   tolerance: number,
 ) {
   if (vertex.kind === "declaredJoin")
     return Math.min(vertex.ballRadius, tolerance);
+  const shifts = curve.kind === "circle" ? [0, -2 * Math.PI, 2 * Math.PI] : [0];
   const holds = ([low, high]: readonly [number, number]) =>
-    [0, -2 * Math.PI, 2 * Math.PI].some(
+    shifts.some(
       (shift) => low <= parameter + shift && parameter + shift <= high,
     );
-  const enclosures = [vertex.witness.first, vertex.witness.second]
-    .filter(
-      (side) =>
-        isSameBoundaryBranch(side.branch, segment.branch) &&
-        holds(side.parameterBounds),
+  const sides = [vertex.witness.first, vertex.witness.second] as const;
+  const caps = sides.flatMap((side, index) => {
+    if (
+      !isSameBoundaryBranch(side.branch, segment.branch) ||
+      !holds(side.parameterBounds)
     )
-    .map(
-      ({ parameterBounds: [low, high] }) =>
-        circle.radius * (high - low) +
-        curveEvaluationRoundingBound(circleEvaluationScale(circle)),
+      return [];
+    const other = witnessSideExtent(sides[1 - index]!);
+    return [
+      other === null
+        ? tolerance
+        : curve.extent(side.parameterBounds) +
+          curveEvaluationRoundingBound(curve.scale) +
+          other,
+    ];
+  });
+  return caps.length === 0 ? tolerance : Math.min(Math.max(...caps), tolerance);
+}
+
+/**
+ * The exact edge of one boundary segment (T10 §2.2): the resolver's curve,
+ * forward over its kernel interval between the face's low and high
+ * vertices, reversed for a reverse traversal. Lines run through their two
+ * vertices (built start → end, as traversed); arcs and split circles are the
+ * source circle at its source angles; an unsplit circle is the full
+ * `gp_Circ`, a circle touching the boundary at one vertex the full turn
+ * through that vertex; a cubic span (ordinary, projected or shell sub-span)
+ * is its Bézier poles trimmed by the edge range. Every edge end first
+ * admits its exact curve value at its vertex under the vertex's cap.
+ */
+function buildRegionSegmentEdge(
+  oc: OpenCascadeInstance,
+  plane: SketchPlaneDefinition,
+  sketch: SketchRecord,
+  segment: RegionBoundarySegment,
+  resolved: ResolvedBoundaryCurve,
+  projected: ProjectedSketchReferenceGeometry | null,
+  resolve: RegionVertexResolver,
+  witnessSideExtent: WitnessSideExtent,
+  tolerance: number,
+): OccEdge {
+  const label = describeRegionBoundaryBranch(segment);
+  if ((segment.start === null) !== (segment.end === null)) {
+    throw profileRecordError(
+      `Boundary segment of ${label} has exactly one null end; only an unsplit closed branch has no boundary vertices.`,
     );
-  return enclosures.length === 0
-    ? tolerance
-    : Math.min(Math.max(...enclosures), tolerance);
+  }
+  const curve = worldBoundaryCurve(plane, resolved.curve);
+  const forward = resolved.traversal === "forward";
+  if (
+    curve.kind === "circle" &&
+    !(curve.support.radius >= OCC_PRECISION_CONFUSION)
+  ) {
+    throw edgeBelowKernelResolution(
+      label,
+      `has radius ${curve.support.radius}, below OCC's Precision::Confusion (${OCC_PRECISION_CONFUSION})`,
+    );
+  }
+
+  if (segment.start === null || segment.end === null) {
+    if (curve.kind !== "circle") {
+      throw profileRecordError(`Boundary ${label} has no boundary vertices.`);
+    }
+    // An unsplit full circle: its own seam vertex.
+    const edge = buildCircleEdgeFromSketchGeometry(
+      oc,
+      plane,
+      (resolved.curve as Extract<OwnedCurve, { kind: "circle" }>).center,
+      curve.support.radius,
+    );
+    return forward ? edge : replaceWithReversedEdge(oc, edge);
+  }
+
+  const ends = forward
+    ? { low: segment.start, high: segment.end }
+    : { low: segment.end, high: segment.start };
+  const keys = branchEndpointKeys(sketch, segment, resolved.curve, projected);
+  const vertices = {
+    low: resolve(ends.low, keys.low),
+    high: resolve(ends.high, keys.high),
+  };
+  const kernel = resolved.kernelInterval;
+  const source = resolved.sourceInterval;
+  for (const [vertex, occVertex, kernelParameter, sourceParameter] of [
+    [ends.low, vertices.low, kernel[0], source[0]],
+    [ends.high, vertices.high, kernel[1], source[1]],
+  ] as const) {
+    admitCurveEndAtVertex(
+      oc,
+      occVertex,
+      curve.at(kernelParameter),
+      regionVertexGapCap(
+        segment,
+        vertex,
+        sourceParameter,
+        curve,
+        witnessSideExtent,
+        tolerance,
+      ),
+      curve.scale,
+      label,
+    );
+  }
+
+  if (curve.kind === "line") {
+    return forward
+      ? buildVertexLineEdge(oc, vertices.low, vertices.high, label)
+      : buildVertexLineEdge(oc, vertices.high, vertices.low, label);
+  }
+  const edge =
+    curve.kind === "circle"
+      ? buildExactArcEdge(oc, curve.support, kernel, label, vertices)
+      : buildExactBezierEdge(oc, curve.poles, kernel, label, vertices);
+  return forward ? edge : replaceWithReversedEdge(oc, edge);
 }
 
 function buildLoopWire(
   oc: OpenCascadeInstance,
   plane: SketchPlaneDefinition,
   sketch: SketchRecord,
+  basis: RegionBoundaryBasis,
   loop: RegionRecord["loops"][number],
-  projectedReferences: readonly ProjectedSketchReferenceRecord[],
   provenance: MutableSketchProfileProvenance,
   resolveSegmentEdgeKey: (
     segment: RegionBoundarySegment,
   ) => SketchProfileEdgeSourceKey,
+  resolveVertex: RegionVertexResolver,
+  witnessSideExtent: WitnessSideExtent,
   tolerance: number,
 ) {
-  const vertices = createRegionVertexResolver(oc, plane, provenance);
-  const wireBuilder = new oc.BRepBuilderAPI_MakeWire_1();
-
-  try {
+  return withOccTemporaries((own) => {
+    const wireBuilder = own(new oc.BRepBuilderAPI_MakeWire_1());
     for (const segment of loop.segments) {
-      const support = resolveRegionBranchSupport(
-        sketch,
-        projectedReferences,
-        segment,
-      );
+      const source = segment.branch.source;
+      const projected =
+        source.kind === "projectedGeometry"
+          ? resolveProjectedBoundaryGeometry(
+              sketch,
+              sketch.projectedReferences ?? [],
+              source,
+            )
+          : null;
+      const resolved = resolveRegionBoundaryCurve(basis, segment);
+      if (resolved.kind === "failed") throw new Error(resolved.message);
       const edge = buildRegionSegmentEdge(
         oc,
         plane,
         sketch,
         segment,
-        support,
-        vertices.resolve,
+        resolved,
+        projected,
+        resolveVertex,
+        witnessSideExtent,
         tolerance,
       );
+      try {
+        bindProvenance(
+          provenance.edges,
+          resolveSegmentEdgeKey(segment),
+          edge,
+          "edge",
+        );
+      } catch (error) {
+        try {
+          releaseOccObjects([edge]);
+        } catch (cleanupError) {
+          throw combineOccCleanupError(error, cleanupError);
+        }
+        throw error;
+      }
       wireBuilder.Add_1(edge);
-      provenance.edges.set(resolveSegmentEdgeKey(segment), edge);
     }
 
     if (!wireBuilder.IsDone()) {
       throw new Error(
-        `Failed to build OCC wire for region loop ${loop.loopId}.`,
+        `profile-wire-invalid: OCC did not build the wire of region loop ${loop.loopId}.`,
       );
     }
 
     return wireBuilder.Wire();
-  } finally {
-    deleteOccObject(wireBuilder);
-    // Unregistered vertices are loop-local; registered ones are released with
-    // the profile provenance.
-    for (const vertex of vertices.unregistered) deleteOccObject(vertex);
+  });
+}
+
+/** `profile-face-invalid` unless OCC's full geometric check accepts the face. */
+function assertValidProfileFace(
+  oc: OpenCascadeInstance,
+  face: InstanceType<OpenCascadeInstance["TopoDS_Face"]>,
+  region: RegionRecord,
+) {
+  const valid = withOccTemporaries((own) =>
+    own(new oc.BRepCheck_Analyzer(face, true, false)).IsValid_2(),
+  );
+  if (!valid) {
+    throw new Error(
+      `profile-face-invalid: BRepCheck_Analyzer rejects the OCC face of region ${region.regionId}.`,
+    );
   }
 }
 
 /**
- * Each loop's wire gets its own OCC vertices, so a boundary vertex shared by
- * two loops of one face (point-touching loops) would become two coincident
- * OCC vertices and two provenance registrations. That face is rejected
- * explicitly until T10 proves touching-loop faces.
+ * The exact OCC face of one region of a current sketch record (T10 §2.2):
+ * every segment resolves through the record's own region-boundary basis
+ * (`regionBoundaryBasisOfSketchRecord`), so `region` must be one of
+ * `sketch.regions`. One vertex resolver serves the whole face, so loops that
+ * touch at a point share one `TopoDS_Vertex` (T-4). No healing: the wire and
+ * face must be done and `BRepCheck_Analyzer(face, true, false)` must accept
+ * the face, otherwise the build fails closed (`profile-wire-invalid`,
+ * `profile-face-invalid`).
  */
-function assertLoopsShareNoBoundaryVertex(region: RegionRecord) {
-  const loopByVertexKey = new Map<string, string>();
-  for (const loop of region.loops) {
-    const keys = new Set(
-      loop.segments.flatMap((segment) =>
-        [segment.start, segment.end].flatMap((vertex) =>
-          vertex ? [vertex.key] : [],
-        ),
-      ),
-    );
-    for (const key of keys) {
-      const other = loopByVertexKey.get(key);
-      if (other !== undefined) {
-        throw new Error(
-          `Region ${region.regionId} loops ${other} and ${loop.loopId} share boundary vertex ${key}; profiles with point-touching loops are not yet supported by the OCC profile builder.`,
-        );
-      }
-      loopByVertexKey.set(key, loop.loopId);
-    }
-  }
-}
-
 export function buildRegionProfileFace(
   oc: OpenCascadeInstance,
   snapshotSketch: {
     plane: SketchPlaneDefinition;
     sketch: SketchRecord;
-    projectedReferences?: readonly ProjectedSketchReferenceRecord[];
     /** The document's settings.modelingTolerance (τ): the vertex-gap backstop. */
     modelingTolerance: number;
   },
   region: RegionRecord,
 ): BuiltSketchProfileFace {
-  assertRegionBelongsToSketch(snapshotSketch.sketch, region);
+  const sketch = snapshotSketch.sketch;
+  assertRegionBelongsToSketch(sketch, region);
 
   const outerLoops = region.loops.filter((loop) => loop.role === "outer");
 
   if (outerLoops.length !== 1) {
-    throw new Error(
+    throw profileRecordError(
       `Region ${region.regionId} must contain exactly one outer loop.`,
     );
   }
 
   const [outerLoop] = outerLoops;
-
-  assertLoopCanBuildProfile(snapshotSketch.sketch, region, outerLoop);
-  assertLoopsShareNoBoundaryVertex(region);
+  const innerLoops = region.loops.filter((loop) => loop.role === "inner");
+  for (const loop of [outerLoop!, ...innerLoops]) {
+    assertLoopCanBuildProfile(region, loop);
+  }
+  const basis = regionBoundaryBasisOfSketchRecord(sketch);
 
   const plane = snapshotSketch.plane;
-  const projectedReferences =
-    snapshotSketch.projectedReferences ??
-    snapshotSketch.sketch.projectedReferences ??
-    [];
   const provenance: MutableSketchProfileProvenance = {
     edges: new Map(),
     vertices: new Map(),
   };
-  const resolveSegmentEdgeKey = createRegionSegmentEdgeKeyResolver(
-    region.loops.filter(
-      (loop) => loop.role === "outer" || loop.role === "inner",
-    ),
-  );
+  const resolveSegmentEdgeKey = createRegionSegmentEdgeKeyResolver([
+    outerLoop!,
+    ...innerLoops,
+  ]);
+  const vertices = createRegionVertexResolver(oc, plane, provenance);
+  const witnessSideExtent = createWitnessSideExtent(plane, basis);
   let outerWire: ReturnType<typeof buildLoopWire> | null = null;
   let faceBuilder: {
     Add(wire: unknown): void;
@@ -941,50 +1134,51 @@ export function buildRegionProfileFace(
     IsDone(): boolean;
     delete?: () => void;
   } | null = null;
+  let face: InstanceType<OpenCascadeInstance["TopoDS_Face"]> | null = null;
 
   let result: BuiltSketchProfileFace;
   try {
     outerWire = buildLoopWire(
       oc,
       plane,
-      snapshotSketch.sketch,
-      outerLoop,
-      projectedReferences,
+      sketch,
+      basis,
+      outerLoop!,
       provenance,
       resolveSegmentEdgeKey,
+      vertices.resolve,
+      witnessSideExtent,
       snapshotSketch.modelingTolerance,
     );
     faceBuilder = new oc.BRepBuilderAPI_MakeFace_15(outerWire, true);
 
-    for (const innerLoop of region.loops.filter(
-      (loop) => loop.role === "inner",
-    )) {
-      assertLoopCanBuildProfile(snapshotSketch.sketch, region, innerLoop);
+    for (const innerLoop of innerLoops) {
       const innerWire = buildLoopWire(
         oc,
         plane,
-        snapshotSketch.sketch,
+        sketch,
+        basis,
         innerLoop,
-        projectedReferences,
         provenance,
         resolveSegmentEdgeKey,
+        vertices.resolve,
+        witnessSideExtent,
         snapshotSketch.modelingTolerance,
       );
-      try {
-        faceBuilder.Add(innerWire);
-      } finally {
-        deleteOccObject(innerWire);
-      }
+      const builder = faceBuilder;
+      withOccTemporaries((own) => builder.Add(own(innerWire)));
     }
 
     if (!faceBuilder.IsDone()) {
       throw new Error(
-        `Failed to build OCC face for region ${region.regionId}.`,
+        `profile-face-invalid: OCC did not build the face of region ${region.regionId}.`,
       );
     }
 
+    face = faceBuilder.Face();
+    assertValidProfileFace(oc, face, region);
     result = {
-      face: faceBuilder.Face(),
+      face,
       plane,
       normal: plane.frame.normal,
       provenance,
@@ -992,8 +1186,10 @@ export function buildRegionProfileFace(
   } catch (error) {
     try {
       releaseOccObjects([
+        ...(face ? [face] : []),
         ...(faceBuilder ? [faceBuilder] : []),
         ...(outerWire ? [outerWire] : []),
+        ...vertices.unregistered,
         ...provenance.edges.values(),
         ...provenance.vertices.values(),
       ]);
@@ -1004,9 +1200,12 @@ export function buildRegionProfileFace(
   }
 
   try {
+    // Unregistered vertices are face-build temporaries; registered ones are
+    // released with the profile provenance.
     releaseOccObjects([
       ...(faceBuilder ? [faceBuilder] : []),
       ...(outerWire ? [outerWire] : []),
+      ...vertices.unregistered,
     ]);
   } catch (cleanupError) {
     try {
@@ -1038,7 +1237,9 @@ function releaseProfileProvenance(provenance: SketchProfileProvenance) {
 }
 
 /**
- * Outer boundary wire of a closed region, without face construction.
+ * Outer boundary wire of a closed region, without face construction (the
+ * same exact edges as `buildRegionProfileFace`, so `region` must be one of
+ * the current `sketch.regions`).
  *
  * Sweeping a wire yields a sheet; sweeping a face yields a solid. Inner loops
  * have no sheet meaning here — a sweep of two independent boundary wires cannot
@@ -1049,49 +1250,75 @@ export function buildRegionProfileWire(
   snapshotSketch: {
     plane: SketchPlaneDefinition;
     sketch: SketchRecord;
-    projectedReferences?: readonly ProjectedSketchReferenceRecord[];
     /** The document's settings.modelingTolerance (τ): the vertex-gap backstop. */
     modelingTolerance: number;
   },
   region: RegionRecord,
 ): BuiltSketchProfileWire {
-  assertRegionBelongsToSketch(snapshotSketch.sketch, region);
+  const sketch = snapshotSketch.sketch;
+  assertRegionBelongsToSketch(sketch, region);
 
   const outerLoops = region.loops.filter((loop) => loop.role === "outer");
 
   if (outerLoops.length !== 1) {
-    throw new Error(
+    throw profileRecordError(
       `Region ${region.regionId} must contain exactly one outer loop.`,
     );
   }
 
   const [outerLoop] = outerLoops;
-  assertLoopCanBuildProfile(snapshotSketch.sketch, region, outerLoop);
+  assertLoopCanBuildProfile(region, outerLoop!);
+  const basis = regionBoundaryBasisOfSketchRecord(sketch);
 
   const plane = snapshotSketch.plane;
   const provenance: MutableSketchProfileProvenance = {
     edges: new Map(),
     vertices: new Map(),
   };
+  const vertices = createRegionVertexResolver(oc, plane, provenance);
 
+  let result: BuiltSketchProfileWire;
   try {
     const wire = buildLoopWire(
       oc,
       plane,
-      snapshotSketch.sketch,
-      outerLoop,
-      snapshotSketch.projectedReferences ??
-        snapshotSketch.sketch.projectedReferences ??
-        [],
+      sketch,
+      basis,
+      outerLoop!,
       provenance,
-      createRegionSegmentEdgeKeyResolver([outerLoop]),
+      createRegionSegmentEdgeKeyResolver([outerLoop!]),
+      vertices.resolve,
+      createWitnessSideExtent(plane, basis),
       snapshotSketch.modelingTolerance,
     );
-    return { wire, plane, normal: plane.frame.normal, provenance };
+    result = { wire, plane, normal: plane.frame.normal, provenance };
   } catch (error) {
-    releaseProfileProvenance(provenance);
+    try {
+      releaseOccObjects([
+        ...vertices.unregistered,
+        ...provenance.edges.values(),
+        ...provenance.vertices.values(),
+      ]);
+    } catch (cleanupError) {
+      throw combineOccCleanupError(error, cleanupError);
+    }
     throw error;
   }
+  try {
+    releaseOccObjects([...vertices.unregistered]);
+  } catch (cleanupError) {
+    try {
+      releaseOccObjects([
+        result.wire,
+        ...provenance.edges.values(),
+        ...provenance.vertices.values(),
+      ]);
+    } catch (resultCleanupError) {
+      throw combineOccCleanupError(cleanupError, resultCleanupError);
+    }
+    throw cleanupError;
+  }
+  return result;
 }
 
 interface OpenCurveSegment {

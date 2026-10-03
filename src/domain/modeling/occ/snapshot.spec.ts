@@ -1346,7 +1346,7 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
     ).toBeTruthy();
   }
 
-  async function testRegionRenderFailuresWarnAndSkipOnlyBadRegion() {
+  async function testRegionRenderFailuresDiagnoseAndSkipOnlyBadRegion() {
     const oc = await getDefaultOpenCascadeInstance();
     const plane = createStandardPlaneDefinition("xy");
     const { sketch, region } = createRectangleSketch(
@@ -1360,34 +1360,32 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
     const state = createOccAuthoringState(oc, {
       sketches: [sketch],
     });
-    const warnings: string[] = [];
-    const originalWarn = console.warn;
-    console.warn = (...args: unknown[]) => {
-      warnings.push(args.map((arg) => String(arg)).join(" "));
-    };
-    try {
-      const snapshot = buildOccWorkspaceSnapshot(state);
-      expect(
-        snapshot.document.render.records.some(
-          (record) =>
-            record.binding.semanticClass === "region" &&
-            record.binding.target.kind === "region" &&
-            record.binding.target.regionId === region.regionId,
-        ),
-        "Bad region profiles should be skipped from render export.",
-      ).toBeFalsy();
-    } finally {
-      console.warn = originalWarn;
-    }
-
+    const snapshot = buildOccWorkspaceSnapshot(state);
     expect(
-      warnings.some(
-        (warning) =>
-          warning.includes(String(region.regionId)) &&
-          warning.includes("failed to build profile face"),
+      snapshot.document.render.records.some(
+        (record) =>
+          record.binding.semanticClass === "region" &&
+          record.binding.target.kind === "region" &&
+          record.binding.target.regionId === region.regionId,
       ),
-      "Skipped region profile render failures should be surfaced as console warnings.",
-    ).toBeTruthy();
+      "Bad region profiles should be skipped from render export.",
+    ).toBeFalsy();
+
+    // T10c: the failure reaches the document snapshot's diagnostics (what the
+    // user sees) with the profile builder's stable code, instead of a console
+    // warning. The emptied solve leaves the record's basis without branches.
+    expect(
+      snapshot.document.diagnostics
+        .filter((diagnostic) => diagnostic.code.startsWith("profile-"))
+        .map(({ code, severity, target }) => ({ code, severity, target })),
+      "Skipped region profile render failures should be surfaced as region diagnostics.",
+    ).toEqual([
+      {
+        code: "profile-boundary-unresolved",
+        severity: "warning",
+        target: region.target,
+      },
+    ]);
   }
 
   async function testProjectedRegionContractGapSkipsRegionRenderWithoutWarning() {
@@ -1475,6 +1473,14 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
         ),
         "Projected-region contract gaps should skip unsupported region render records.",
       ).toBeFalsy();
+      // T10c review R-2: the contract gap stays silent in the document
+      // snapshot too (no region profile diagnostic), unlike a profile failure.
+      expect(
+        snapshot.document.diagnostics.filter((diagnostic) =>
+          diagnostic.code.startsWith("profile-"),
+        ),
+        "Projected-region contract gaps should not surface as region profile diagnostics.",
+      ).toEqual([]);
     } finally {
       console.warn = originalWarn;
     }
@@ -1597,7 +1603,7 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
   await testJoinedExtrudeSnapshotDoesNotRenderInteriorBooleanTopology();
   await testWorkspaceSnapshotPreservesInvalidatedReferencesWithoutPromotingDiagnostics();
   await testOccSnapshotSurfacesSketchNavigationAndHistory();
-  await testRegionRenderFailuresWarnAndSkipOnlyBadRegion();
+  await testRegionRenderFailuresDiagnoseAndSkipOnlyBadRegion();
   await testProjectedRegionContractGapSkipsRegionRenderWithoutWarning();
 
   console.log("OCC phase 6 snapshot/export tests passed.");

@@ -39,7 +39,12 @@ function makeTracker(oc: OC) {
   const created = new Map<string, W[]>();
   const attempts = new Map<W, number>();
   const stacks = new Map<W, string>();
-  const armed = new Map<string, Error[]>();
+  // An armed failure, optionally only for a wrapper created at a call site
+  // whose stack `where` accepts (T10c review R-3: pick one of several sites).
+  const armed = new Map<
+    string,
+    { error: Error; where?: (stack: string) => boolean }[]
+  >();
   const failing = new Map<W, Error>();
   const restorers: Array<() => void> = [];
   let on = false;
@@ -47,9 +52,13 @@ function makeTracker(oc: OC) {
     if (!on || typeof v !== "object" || v === null) return v;
     const w = v as W;
     (created.get(kind) ?? created.set(kind, []).get(kind)!).push(w);
-    stacks.set(w, new Error().stack ?? "");
-    const queue = armed.get(kind);
-    if (queue?.length) failing.set(w, queue.shift()!);
+    const stack = new Error().stack ?? "";
+    stacks.set(w, stack);
+    const queue = armed.get(kind) ?? [];
+    const index = queue.findIndex(
+      (entry) => !entry.where || entry.where(stack),
+    );
+    if (index >= 0) failing.set(w, queue.splice(index, 1)[0]!.error);
     const native = w.delete.bind(w);
     attempts.set(w, 0);
     w.delete = () => {
@@ -125,8 +134,11 @@ function makeTracker(oc: OC) {
         on = false;
       }
     },
-    arm(kind: string, e: Error) {
-      (armed.get(kind) ?? armed.set(kind, []).get(kind)!).push(e);
+    arm(kind: string, e: Error, where?: (stack: string) => boolean) {
+      (armed.get(kind) ?? armed.set(kind, []).get(kind)!).push({
+        error: e,
+        where,
+      });
     },
     of: (k: string) => created.get(k) ?? [],
     attempts: (w: W) => attempts.get(w) ?? 0,
@@ -511,7 +523,14 @@ test("F1 control: same commit without injection is accepted and leaves no live a
   }
 });
 
-test("F2: service.projectSketchExternalReferences snapshot cleanup failure retention (non-serialized main-thread read)", async () => {
+/**
+ * F2 / F2b: a `BRep_Tool.Pnt` release failure during the service's
+ * projection-time snapshot read is an OccCleanupError, retained (one
+ * attempt, not deleted) until dispose retries it. The snapshot reads vertex
+ * points at several sites (T10c review R-3): `site` picks the one armed, and
+ * the failing wrapper's recorded stack proves which site was exercised.
+ */
+async function expectProjectionSnapshotVertexPointRetention(site: string) {
   const oc = await loadOc();
   const { adapter } = await adapterWithExtrudedBody(oc);
   const current = await adapter.getDocumentSnapshot(req);
@@ -524,9 +543,11 @@ test("F2: service.projectSketchExternalReferences snapshot cleanup failure reten
     // F3 variant (WARM=0): arm before service initialization's own snapshot read.
     if (process.env.F2_WARM !== "0") await service.getCurrentDocumentSnapshot();
     const cleanupError = new Error(
-      "injected projection-snapshot vertex point release failure",
+      `injected projection-snapshot vertex point release failure (${site})`,
     );
-    tracker.arm("gp_Pnt(vertex)", cleanupError);
+    tracker.arm("gp_Pnt(vertex)", cleanupError, (stack) =>
+      stack.includes(site),
+    );
     let rejected: unknown;
     try {
       await tracker.record(() =>
@@ -548,11 +569,15 @@ test("F2: service.projectSketchExternalReferences snapshot cleanup failure reten
       rejected = error;
     }
     const [failed] = tracker.failing();
+    expect(failed, `premise: a vertex point was read at ${site}`).toBeDefined();
+    expect(
+      tracker.stack(failed!),
+      `the injected release failure is the ${site} read`,
+    ).toContain(site);
     const cleanup = collectOccCleanupErrors(rejected);
     expect(rejected).toBe(cleanup[0]);
     expect(cleanup).toHaveLength(1);
     expect(cleanup[0]!.errors).toContain(cleanupError);
-    expect(failed).toBeDefined();
     expect(tracker.attempts(failed!)).toBe(1);
     expect(failed!.isDeleted?.()).toBe(false);
     expect(tracker.siblingsNotOnce()).toBe(0);
@@ -566,4 +591,12 @@ test("F2: service.projectSketchExternalReferences snapshot cleanup failure reten
     tracker.leftovers();
     tracker.restore();
   }
+}
+
+test("F2: service.projectSketchExternalReferences snapshot cleanup failure retention, region profile path (admitCurveEndAtVertex vertex point; non-serialized main-thread read)", async () => {
+  await expectProjectionSnapshotVertexPointRetention("admitCurveEndAtVertex");
+});
+
+test("F2b: service.projectSketchExternalReferences snapshot cleanup failure retention, body vertex render (buildVertexRenderRecord vertex point; non-serialized main-thread read)", async () => {
+  await expectProjectionSnapshotVertexPointRetention("buildVertexRenderRecord");
 });
