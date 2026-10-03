@@ -1051,7 +1051,7 @@ describe("region arrangement owner: declared joins and closure", () => {
     expect(result.diagnostics[0]!.message).toContain("contraction");
   }, 30_000);
 
-  test("a declared incidence on a full circle fails closed (T09a full-turn join limit)", async () => {
+  test("a declared incidence on a full circle keeps the disk and leaves the stem open (T10g-0)", async () => {
     const sketch = makeSketchFixture();
     sketch.point("c", 0, 0);
     sketch.circle("C", "c", 2);
@@ -1060,14 +1060,197 @@ describe("region arrangement owner: declared joins and closure", () => {
     sketch.line("stem", "s0", "s1");
     sketch.pointOnCurve("s0", "C");
     addRectangle(sketch, "q", [30, 0, 40, 10]);
+    const input = sketch.build();
     const result = await derive(sketch);
     expect(result.regions.map(boundaryEntities)).toEqual([
       ["q_s0", "q_s1", "q_s2", "q_s3"],
+      ["C"],
     ]);
-    expect(codes(result)).toEqual(["region-join-uncertain"]);
-    expect(targetsOf(result, "region-join-uncertain")).toEqual(["C", "stem"]);
-    expect(result.diagnostics[0]!.message).toContain("unsupported");
+    expect(codes(result)).toEqual(["profile-open-segment"]);
+    expect(targetsOf(result, "profile-open-segment")).toEqual(["stem"]);
+    expect(
+      closedCurvesSignedArea(
+        regionLoopCurves(result.regions[1]!.loops[0]!, input),
+      ),
+    ).toBeCloseTo(4 * Math.PI, 9);
   });
+
+  /**
+   * Spokes from an inside apex r end on a whole ring (radius R) through
+   * `pointOnCurve`. Between consecutive spoke angles θᵢ < θⱼ (cyclic, φ =
+   * θⱼ − θᵢ) the region r → qᵢ → arc → qⱼ → r has the closed-form area
+   * ½(qᵢ − r) × (qⱼ − r) + ½R²(φ − sin φ).
+   */
+  const FULL_TURN_SPOKE_ROWS: readonly {
+    readonly name: string;
+    readonly apex: SplineVector;
+    readonly angles: readonly number[];
+  }[] = [
+    { name: "P-g2 A case 0", apex: [0.3, 0.1], angles: [0.4, 1.9] },
+    { name: "P-g2 A case 1", apex: [-0.2, 0.35], angles: [0.77, 2.6] },
+    {
+      name: "P-g2 A case 2 (π/4, 3π/4)",
+      apex: [0, 0.2],
+      angles: [Math.PI / 4, (3 * Math.PI) / 4],
+    },
+    { name: "a spoke at the seam (angle 0)", apex: [0.3, 0.4], angles: [0, 2] },
+    {
+      name: "spokes at ±π/4 (the seam between them)",
+      apex: [0.5, 0.1],
+      angles: [-Math.PI / 4, Math.PI / 4],
+    },
+    {
+      name: "a spoke 1e-9 rad below the seam (near 2π)",
+      apex: [0.1, 0.3],
+      angles: [-1e-9, 2.5],
+    },
+    {
+      name: "three spokes (three joins on one circle)",
+      apex: [0.2, -0.1],
+      angles: [0.3, 2.4, 4.2],
+    },
+  ];
+  for (const row of FULL_TURN_SPOKE_ROWS) {
+    test(`tied spokes on a whole ring split its disk: ${row.name} (T10g-0)`, async () => {
+      const radius = 2;
+      const sketch = makeSketchFixture();
+      sketch.point("c", 0, 0);
+      sketch.circle("ring", "c", radius);
+      sketch.point("r", ...row.apex);
+      const ends = row.angles.map(
+        (angle): SplineVector => [
+          radius * Math.cos(angle),
+          radius * Math.sin(angle),
+        ],
+      );
+      ends.forEach((end, index) => {
+        sketch.point(`q${index}`, ...end);
+        sketch.line(`spoke${index}`, "r", `q${index}`);
+        sketch.pointOnCurve(`q${index}`, "ring");
+      });
+      const input = sketch.build();
+      const result = await derive(sketch);
+      expect(result.diagnostics, row.name).toEqual([]);
+      const sorted = [...row.angles].sort((l, r) => l - r);
+      const expected = sorted
+        .map((angle, index) => {
+          const next = sorted[(index + 1) % sorted.length]!;
+          const phi =
+            next - angle + (index + 1 === sorted.length ? 2 * Math.PI : 0);
+          const [from, to] = [angle, next].map(
+            (value) => ends[row.angles.indexOf(value)]!,
+          );
+          const cross =
+            (from![0] - row.apex[0]) * (to![1] - row.apex[1]) -
+            (from![1] - row.apex[1]) * (to![0] - row.apex[0]);
+          return cross / 2 + ((radius * radius) / 2) * (phi - Math.sin(phi));
+        })
+        .sort((l, r) => l - r);
+      const areas = result.regions
+        .map((region) => {
+          expect(region.loops, row.name).toHaveLength(1);
+          return closedCurvesSignedArea(
+            regionLoopCurves(region.loops[0]!, input),
+          );
+        })
+        .sort((l, r) => l - r);
+      expect(areas, `${row.name}: one region per sector`).toHaveLength(
+        expected.length,
+      );
+      areas.forEach((area, index) =>
+        expect(area, `${row.name}: area vs closed form`).toBeCloseTo(
+          expected[index]!,
+          9,
+        ),
+      );
+    }, 60_000);
+  }
+
+  test("a chord tied at both ends to a whole circle splits it into two segments (T10g-0)", async () => {
+    const radius = 3;
+    const [a, b] = [5.9, 1.2];
+    const sketch = makeSketchFixture();
+    sketch.point("c", 1, -2);
+    sketch.circle("C", "c", radius);
+    sketch.point("p", 1 + radius * Math.cos(a), -2 + radius * Math.sin(a));
+    sketch.point("q", 1 + radius * Math.cos(b), -2 + radius * Math.sin(b));
+    sketch.line("chord", "p", "q");
+    sketch.pointOnCurve("p", "C");
+    sketch.pointOnCurve("q", "C");
+    const input = sketch.build();
+    const result = await derive(sketch);
+    expect(result.diagnostics).toEqual([]);
+    const phi = b - a + 2 * Math.PI;
+    const segment = ((radius * radius) / 2) * (phi - Math.sin(phi));
+    const areas = result.regions
+      .map((region) =>
+        closedCurvesSignedArea(regionLoopCurves(region.loops[0]!, input)),
+      )
+      .sort((l, r) => l - r);
+    expect(areas).toHaveLength(2);
+    expect(areas[0]).toBeCloseTo(segment, 9);
+    expect(areas[1]).toBeCloseTo(Math.PI * radius * radius - segment, 9);
+  }, 60_000);
+
+  // T10g-0 math review R2: one join on a whole circle at a vertex of degree
+  // ≥ 3 makes its only sub-edge a self-loop whose two halves share both box
+  // crossings; the forward half exits at the lower one, the reverse at the
+  // upper one.
+  test("a lollipop: one tied stem from a whole circle to a rectangle corner keeps both faces (T10g-0)", async () => {
+    const radius = 2;
+    const sketch = makeSketchFixture();
+    sketch.point("c", 0, 0);
+    sketch.circle("C", "c", radius);
+    sketch.point("q", radius * Math.cos(0.5), radius * Math.sin(0.5));
+    sketch.pointOnCurve("q", "C");
+    addRectangle(sketch, "r", [6, 0, 9, 3]);
+    sketch.line("stem", "q", "r0");
+    const input = sketch.build();
+    const result = await derive(sketch);
+    expect(codes(result)).toEqual([]);
+    expect(result.regions.map(boundaryEntities)).toEqual([
+      ["C"],
+      ["r_s0", "r_s1", "r_s2", "r_s3"],
+    ]);
+    const areas = result.regions.map((region) =>
+      closedCurvesSignedArea(regionLoopCurves(region.loops[0]!, input)),
+    );
+    expect(areas[0]).toBeCloseTo(Math.PI * radius * radius, 9);
+    expect(areas[1]).toBeCloseTo(9, 9);
+  }, 60_000);
+
+  test("a triangle outside a whole circle touching it at one tied point keeps both faces (T10g-0)", async () => {
+    const radius = 2;
+    const q: SplineVector = [radius * Math.cos(1), radius * Math.sin(1)];
+    const [a, b]: SplineVector[] = [
+      [5, 1],
+      [3, 5],
+    ];
+    const sketch = makeSketchFixture();
+    sketch.point("c", 0, 0);
+    sketch.circle("C", "c", radius);
+    sketch.point("q", ...q);
+    sketch.pointOnCurve("q", "C");
+    sketch.point("a", ...a!);
+    sketch.point("b", ...b!);
+    sketch.line("qa", "q", "a");
+    sketch.line("ab", "a", "b");
+    sketch.line("bq", "b", "q");
+    const input = sketch.build();
+    const result = await derive(sketch);
+    expect(codes(result)).toEqual([]);
+    expect(result.regions.map(boundaryEntities)).toEqual([
+      ["C"],
+      ["ab", "bq", "qa"],
+    ]);
+    const areas = result.regions.map((region) =>
+      closedCurvesSignedArea(regionLoopCurves(region.loops[0]!, input)),
+    );
+    const triangle =
+      ((a![0] - q[0]) * (b![1] - q[1]) - (a![1] - q[1]) * (b![0] - q[0])) / 2;
+    expect(areas[0]).toBeCloseTo(Math.PI * radius * radius, 9);
+    expect(areas[1]).toBeCloseTo(triangle, 9);
+  }, 60_000);
 });
 
 describe("region arrangement owner: verified crossings, lobes and nesting", () => {

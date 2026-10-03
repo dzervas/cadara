@@ -3276,7 +3276,9 @@ function realizedEndSpread(
  * no other vertex lies on its piece in the box:
  * - a segment starts inside the convex box, so it meets the boundary in
  *   exactly one point; every report (two at a corner) encloses that point;
- * - any other member must report exactly one verified `crossing`.
+ * - any other member must report exactly one verified `crossing`; a full
+ *   circle's self-loop sub-edge (its only join) reports two, and each half
+ *   takes the one it reaches first.
  * Exits are ordered by the certified angle of their enclosure about the box
  * centre: seen from an interior point, the boundary of a convex region is
  * swept counter-clockwise exactly once, so disjoint angle intervals give the
@@ -3297,7 +3299,6 @@ async function joinExitOrder(
   for (const half of halves) {
     const edge = groups[half >> 1]!.members[0]!.edge;
     const branch = branches[edge.branch]!;
-    if (branch.closed) return null;
     const contacts = await boxBoundaryContacts(
       queries,
       modelingTolerance,
@@ -3306,14 +3307,32 @@ async function joinExitOrder(
     );
     if (!contacts) return null;
     const span: Interval = [edge.fromEnclosure[0], edge.toEnclosure[1]];
-    const along = contacts.filter((point) =>
-      ivOverlap(widenOnBranch(branch, point.proof.secondParameterBounds), span),
-    );
+    // T10g-0: a full circle's sub-edge may run past its seam (the wrap edge
+    // ends a turn up), so its contacts are compared one turn either way too.
+    const along: { point: NeutralCurvePointWitness; onBranch: Interval }[] = [];
+    for (const point of contacts) {
+      const widened = widenOnBranch(branch, point.proof.secondParameterBounds);
+      const shifts = (branch.closed ? [-1, 0, 1] : [0])
+        .map((turns) => shiftInterval(widened, turns))
+        .filter((shifted) => ivOverlap(shifted, span));
+      if (shifts.length > 1) return null;
+      if (shifts.length === 1) along.push({ point, onBranch: shifts[0]! });
+    }
+    // T10g-0 R2: a full circle with one join is a self-loop sub-edge, so both
+    // of its box crossings lie along both of its halves. `provenSingleEntry`
+    // proved (box path) that its in-box parameters are one cyclic interval
+    // around the join with exactly these two crossings as its ends: leaving
+    // forward, the curve stays in the box up to the lower crossing; leaving
+    // in reverse, up to the upper one. They must be ordered disjointly.
+    if (branch.closed && edge.from === edge.to && along.length === 2) {
+      along.sort((l, r) => l.onBranch[0] - r.onBranch[0]);
+      if (!(along[0]!.onBranch[1] < along[1]!.onBranch[0])) return null;
+      along.splice(half % 2 === 0 ? 1 : 0, 1);
+    }
     const segment = branch.curve.kind === "line";
     if (along.length === 0 || (!segment && along.length !== 1)) return null;
     let exit: Box | null = null;
-    for (const point of along) {
-      const onBranch = widenOnBranch(branch, point.proof.secondParameterBounds);
+    for (const { point, onBranch } of along) {
       if (
         (!segment && point.classification !== "crossing") ||
         !(
@@ -3442,6 +3461,12 @@ function trimmedTailAt(
  *   verified crossings interior to a side, and its free end(s) are certified
  *   outside the box. The join end lies in the box, so the parameters inside
  *   the closed box form one interval.
+ * - A full circle (T10g-0, interior joins only) takes the arc rules with the
+ *   point opposite its join as the free end: in the ball, circle ∩ disk is
+ *   one arc unless the whole circle is inside, which that outside point
+ *   excludes; against the box, exactly two verified crossings interior to a
+ *   side split it into one arc inside and one outside, so the in-box
+ *   parameters are one cyclic interval.
  * - [THM] T08b-g3b: a derived sub-span's own trim membership (`tail`) whose
  *   trimmed-off free end is not certified outside the box. Its kept free end
  *   must be certified outside and its only box-boundary contact exactly one
@@ -3461,9 +3486,17 @@ async function provenSingleEntry(
   tail: "start" | "end" | null,
 ): Promise<boolean> {
   if (branch.curve.kind === "line") return true;
-  if (branch.closed) return false;
-  const freeEnds =
-    location === "start"
+  // T10g-0: a full circle has no free end. Its witness of leaving the region
+  // is the point opposite its (interior) join, and its box test needs the
+  // two crossings of an interior join: a closed curve with exactly two
+  // transverse boundary crossings is one arc inside and one arc outside.
+  // The outside point is kept although no row observes it (T10g-0 math
+  // review M9/A1): on the box path the two crossings already imply it, and on
+  // the ball path it only matters for a circle inside its own ball, which the
+  // zero-area backstop blocks today. It keeps this argument self-contained.
+  const freeEnds = branch.closed
+    ? [(location as { interior: number }).interior + Math.PI]
+    : location === "start"
       ? [branch.domain[1]]
       : location === "end"
         ? [branch.domain[0]]
@@ -3488,7 +3521,7 @@ async function provenSingleEntry(
   );
   return (
     contacts !== null &&
-    contacts.length === ends.length &&
+    contacts.length === (branch.closed ? 2 : ends.length) &&
     contacts.every((contact) => {
       // Strictly inside the side: no corner contact, which two sides share.
       const bounds = contact.proof.firstParameterBounds;

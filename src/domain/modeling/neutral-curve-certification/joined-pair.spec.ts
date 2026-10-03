@@ -123,6 +123,29 @@ const arch: readonly [Point, Point, Point, Point] = [
   [4, 0],
 ];
 const hostArc = arc("host", center, 3, [0.7, 2.2]);
+const ring = (
+  seam = 0,
+  ringCenter: Point = center,
+  radius = 3,
+): NeutralCurve => ({
+  curveId: "ring",
+  kind: "circle",
+  center: ringCenter,
+  radius,
+  xAxis: [1, 0],
+  sourceDomain: { kind: "fullTurn", seam },
+  provenance: provenance("ring"),
+});
+const onRing = (angle: number) => ({ interior: angle });
+/** A line tangent to the ring at `angle`, arriving from the clockwise side. */
+const tangentInto = (angle: number): NeutralCurve => {
+  const end = onCircle(center, 3, angle);
+  return segment(
+    "tangent",
+    [end[0] + 2 * Math.sin(angle), end[1] - 2 * Math.cos(angle)],
+    end,
+  );
+};
 
 interface ExpectedOverlap {
   readonly orientation: NeutralCurveOverlapWitness["orientation"];
@@ -403,6 +426,134 @@ const VERIFIED_ROWS: readonly VerifiedRow[] = [
     operations: [150955, 151495],
   },
   {
+    name: "full turn: stem from outside ending on the ring at 0.5 (was unsupported)",
+    first: segment("stem", [10, 0], onCircle(center, 3, 0.5)),
+    second: ring(),
+    joins: [{ first: "end", second: onRing(0.5) }],
+    realizations: ["declaredEnds"],
+    classifications: ["crossing"],
+    operations: [422527, 427374],
+  },
+  {
+    name: "full turn: radial stem joined at the seam (angle 0)",
+    first: segment("stem", center, onCircle(center, 3, 0)),
+    second: ring(),
+    joins: [{ first: "end", second: onRing(0) }],
+    realizations: ["declaredEnds"],
+    classifications: [],
+    operations: [215484, 215484],
+  },
+  {
+    name: "full turn: radial stem joined at fl(π/4) (T10a)",
+    first: segment("stem", center, onCircle(center, 3, Math.PI / 4)),
+    second: ring(),
+    joins: [{ first: "end", second: onRing(Math.PI / 4) }],
+    realizations: ["declaredEnds"],
+    classifications: [],
+    operations: [278835, 278835],
+  },
+  {
+    name: "full turn: radial stem joined at −fl(π/4) in a winding from −π",
+    first: segment("stem", center, onCircle(center, 3, -Math.PI / 4)),
+    second: ring(-Math.PI),
+    joins: [{ first: "end", second: onRing(-Math.PI / 4) }],
+    realizations: ["declaredEnds"],
+    classifications: [],
+    operations: [278813, 278813],
+  },
+  {
+    name: "full turn: radial stem joined 1e-9 rad below 2π",
+    first: segment("stem", center, onCircle(center, 3, 2 * Math.PI - 1e-9)),
+    second: ring(),
+    joins: [{ first: "end", second: onRing(2 * Math.PI - 1e-9) }],
+    realizations: ["declaredEnds"],
+    classifications: [],
+    operations: [222433, 222433],
+  },
+  {
+    name: "full turn: tangent line ending 1e-4 rad past the seam",
+    first: tangentInto(1e-4),
+    second: ring(),
+    joins: [{ first: "end", second: onRing(1e-4) }],
+    realizations: ["declaredEnds"],
+    classifications: [],
+    operations: [188853, 189033],
+  },
+  {
+    name: "full turn: chord joined at both ends across the seam",
+    first: segment("chord", onCircle(center, 3, 5.9), onCircle(center, 3, 1.2)),
+    second: ring(),
+    joins: [
+      { first: "start", second: onRing(5.9) },
+      { first: "end", second: onRing(1.2) },
+    ],
+    realizations: ["declaredEnds", "declaredEnds"],
+    classifications: [],
+    operations: [452705, 452165],
+  },
+  {
+    name: "full turn: line joined at 0.1 after crossing the ring outside the ball",
+    first: segment(
+      "cut",
+      [center[0] - 5, center[1] + 0.3],
+      onCircle(center, 3, 0.1),
+    ),
+    second: ring(),
+    joins: [{ first: "end", second: onRing(0.1) }],
+    realizations: ["declaredEnds"],
+    classifications: ["crossing"],
+    operations: [399003, 408083],
+  },
+  {
+    name: "full turn: line joined at 3 crossing the ring next to the seam",
+    first: segment("cut", [center[0] + 4, center[1]], onCircle(center, 3, 3)),
+    second: ring(),
+    joins: [{ first: "end", second: onRing(3) }],
+    realizations: ["declaredEnds"],
+    classifications: ["crossing"],
+    operations: [436242, 443420],
+  },
+  {
+    name: "full turn: cubic end joined on the ring at 2",
+    first: cubic("bend", [
+      [center[0] - 6, center[1] + 6],
+      [center[0] - 4, center[1] + 7],
+      [center[0] - 3, center[1] + 4],
+      onCircle(center, 3, 2),
+    ]),
+    second: ring(),
+    joins: [{ first: "end", second: onRing(2) }],
+    realizations: ["declaredEnds"],
+    classifications: [],
+    operations: [571446, 571383],
+  },
+  {
+    name: "full turn: two whole circles joined at one crossing, the other reported",
+    first: ring(0, [0, 0], 1),
+    second: ring(0, [1, 0], 1),
+    joins: [{ first: onRing(Math.PI / 3), second: onRing((2 * Math.PI) / 3) }],
+    realizations: ["declaredEnds"],
+    classifications: ["crossing"],
+    operations: [905339, 907125],
+  },
+  {
+    // T10g-0 math review R3: both far pieces cross their seams, so the
+    // whole-turn owner also returns the declared join; only the full-turn
+    // contact filter drops it (without it: `join-ball-crowded`).
+    name: "full turn: two whole circles with seams 3 and 3.3 joined at one crossing",
+    first: ring(3, [0, 0], 1),
+    second: ring(3.3, [1, 0], 1),
+    joins: [
+      {
+        first: onRing(Math.PI / 3 + 2 * Math.PI),
+        second: onRing((2 * Math.PI) / 3 + 2 * Math.PI),
+      },
+    ],
+    realizations: ["declaredEnds"],
+    classifications: ["crossing"],
+    operations: [843858, 845478],
+  },
+  {
     name: "line/arc join at an arc starting at exactly fl(3π/4) (T10a)",
     first: segment("line", center, onCircle(center, 3, (3 * Math.PI) / 4)),
     second: arc("arc135", center, 3, [(3 * Math.PI) / 4, Math.PI]),
@@ -504,6 +655,44 @@ const UNCERTAIN_ROWS: readonly {
     second: probeArc,
     joins: [endToStart],
     code: "join-ball-exceeds-tolerance",
+  },
+  {
+    name: "full turn: chord ±1e-3 rad around the seam, near pieces overlap around the turn",
+    first: segment(
+      "chord",
+      onCircle([0, 0], 1, 2 * Math.PI - 1e-3),
+      onCircle([0, 0], 1, 1e-3),
+    ),
+    second: ring(0, [0, 0], 1),
+    joins: [
+      { first: "start", second: onRing(2 * Math.PI - 1e-3) },
+      { first: "end", second: onRing(1e-3) },
+    ],
+    modelingTolerance: 1e-2,
+    code: "join-ball-crowded",
+    operations: [18845, 20638],
+  },
+  {
+    // T10g-0 math review R1: N₁ is as narrow as the rounding of E, so the
+    // far pieces' overlap [l₁ + 2π, E] is not inside N₁.
+    name: "full turn: stem at 3 on a unit ring at tolerance 8e-15, far pieces past the first near piece",
+    first: segment("stem", onCircle([0, 0], 1.5, 3), onCircle([0, 0], 1, 3)),
+    second: ring(0, [0, 0], 1),
+    joins: [{ first: "end", second: onRing(3) }],
+    modelingTolerance: 8e-15,
+    code: "join-ball-crowded",
+    operations: [16562, 16525],
+  },
+  {
+    // T10g-0 math review A2: the arc twin [0, 6] verifies; the full turn
+    // cannot place a contact in or out of one piece.
+    name: "full turn: stem at 3 on a unit ring at tolerance 1.2e-14, contact not placed in a piece",
+    first: segment("stem", onCircle([0, 0], 1.5, 3), onCircle([0, 0], 1, 3)),
+    second: ring(0, [0, 0], 1),
+    joins: [{ first: "end", second: onRing(3) }],
+    modelingTolerance: 1.2e-14,
+    code: "join-full-turn-piece-unresolved",
+    operations: [1617663, 1780466],
   },
   {
     name: "U6 10→11 end to interior 1 ulp off the overlap",
@@ -899,7 +1088,7 @@ describe("declared-join certificate at the kernel-free dispatcher seam", () => {
     });
   });
 
-  test("invalid requests and full turns fail before any certificate work", () => {
+  test("invalid requests and full-turn ends fail before any certificate work", () => {
     const query = createCertifiedNeutralCurveQuery();
     const line = segment("line", [0, 0], [1, 0]);
     const other = segment("other", [1, 0], [1, 1]);
@@ -959,17 +1148,16 @@ describe("declared-join certificate at the kernel-free dispatcher seam", () => {
         joins: [{ first: "end", second: "start" }],
       }),
     ).toMatchObject(invalid);
+    // T10g-0: an interior join on a full turn is a verified row above; one
+    // outside the source winding is still invalid.
     expect(
       query.queryJoin({
         modelingTolerance: 1e-3,
-        first: segment("stem", [10, 0], onCircle(center, 3, 0.5)),
+        first: segment("stem", [10, 0], onCircle(center, 3, -0.5)),
         second: fullTurn,
-        joins: [{ first: "end", second: { interior: 0.5 } }],
+        joins: [{ first: "end", second: { interior: -0.5 } }],
       }),
-    ).toMatchObject({
-      kind: "unsupported",
-      code: "unsupported-neutral-curve-join-full-turn",
-    });
+    ).toMatchObject(invalid);
   });
 
   test("ordinary-owner failures pass through and non-budget errors propagate", () => {
