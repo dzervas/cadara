@@ -26,7 +26,6 @@ function region(regionId: string, entityId = "boundary"): RegionRecord {
       role: "outer",
       orientation: "counterClockwise",
       isClosed: true,
-      boundaryPointIds: [],
       segments: [{
         branch: { source: { kind: "entity", entityId }, spanId: "whole" },
         sourceParameterInterval: [0, 2 * Math.PI],

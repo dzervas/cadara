@@ -470,12 +470,6 @@ function createMockSketchModel(): SketchVectorExportModel {
     sketchId: "sketch_export",
     label: "Styled Sketch",
     units: "millimeter",
-    points: new Map([
-      ["point_a", [0, 0]],
-      ["point_b", [10, 0]],
-      ["point_c", [10, 8]],
-      ["point_d", [0, 8]],
-    ]),
     entities: [
       {
         kind: "lineSegment",
@@ -523,10 +517,11 @@ function createMockSketchModel(): SketchVectorExportModel {
           {
             role: "outer",
             isClosed: true,
-            boundaryPointIds: ["point_a", "point_b", "point_c", "point_d"],
             segments: [
-              { entityId: "entity_ab", traversalDirection: "forward" },
-              { entityId: "entity_bc", traversalDirection: "forward" },
+              { kind: "line", start: [0, 0], end: [10, 0] },
+              { kind: "line", start: [10, 0], end: [10, 8] },
+              { kind: "line", start: [10, 8], end: [0, 8] },
+              { kind: "line", start: [0, 8], end: [0, 0] },
             ],
           },
         ],
@@ -564,12 +559,6 @@ function createOffsetUnstyledSketchModel(): SketchVectorExportModel {
     sketchId: "sketch_export",
     label: "Unstyled Sketch",
     units: "millimeter",
-    points: new Map([
-      ["point_a", [11.837349689681922, -3.5042547517455396]],
-      ["point_b", [17.024798172032582, -3.5042547517455396]],
-      ["point_c", [17.024798172032582, 5.978617145073699]],
-      ["point_d", [11.837349689681922, 5.978617145073699]],
-    ]),
     entities: [
       {
         kind: "lineSegment",

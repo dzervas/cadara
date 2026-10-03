@@ -2,6 +2,7 @@ import type {
   WorkspaceSnapshot,
   SketchSnapshotRecord,
 } from "@/contracts/modeling/schema";
+import type { SketchPlaneDefinition } from "@/contracts/shared/sketch-plane";
 import type {
   RenderMeshGeometry,
   RenderPoint3D,
@@ -16,16 +17,29 @@ import {
   isAcceptedOffsetOutput,
   nonAcceptedOffsetOutputPoints,
 } from "@/contracts/sketch/offset-publication";
+import {
+  boundaryLoopSignedArea,
+  createRegionBoundaryBasis,
+  curveLength,
+  resolveRegionBoundaryCurve,
+  tessellateBoundaryLoop,
+  type BoundaryCurveFailure,
+  type RegionBoundaryBasis,
+} from "@/contracts/sketch/region-boundary-curves";
 import type {
-  RegionLoopRecord,
   RegionRecord,
   SketchPoint2D,
+  SketchRecord,
 } from "@/contracts/sketch/schema";
 import {
+  closestSplineSpanLocation,
   reconstructSplineAggregate,
   tessellateCubicSpans,
   tessellateProjectedSpline,
+  solvedCubicSpanLocalDomain,
+  solvedCubicSpanPoint,
   solvedCubicSpans,
+  type SplinePoles,
 } from "@/contracts/sketch/spline-geometry";
 import {
   getPrimitiveRefKey,
@@ -35,6 +49,7 @@ import {
 } from "@/core/editor/schema";
 import {
   mapSketchPointToWorkspaceWorld,
+  mapWorldPointToWorkspaceSketch,
   type WorkspaceVec3,
 } from "@/core/workspace/sketch-plane-mapping";
 
@@ -71,10 +86,40 @@ export interface MeasurementViewModel {
 }
 
 type MeasuredTargetCategory = "body" | "surface" | "curve" | "point";
+/**
+ * A distance primitive. `exact` marks a polyline that tessellates a curved
+ * sketch curve: point distances use the exact curve, every other pairing
+ * measures the tessellation and is labelled approximate (T-6, review R7).
+ * `approximate` marks a mesh built from such a tessellation (a region fill).
+ */
 type DistancePrimitive =
   | { kind: "point"; point: WorkspaceVec3 }
-  | { kind: "polyline"; points: readonly WorkspaceVec3[] }
-  | { kind: "mesh"; triangles: readonly Triangle[] };
+  | {
+      kind: "polyline";
+      points: readonly WorkspaceVec3[];
+      exact?: ExactSketchCurve;
+    }
+  | { kind: "mesh"; triangles: readonly Triangle[]; approximate?: boolean };
+
+/** A curved sketch curve in its plane, for exact closest points. */
+interface ExactSketchCurve {
+  plane: SketchPlaneDefinition;
+  curve:
+    | {
+        kind: "arc";
+        center: SketchPoint2D;
+        radius: number;
+        /** Counter-clockwise radian interval, from < to ≤ from + 2π. */
+        from: number;
+        to: number;
+      }
+    | {
+        kind: "cubics";
+        spans: readonly SplinePoles[];
+        /** Local drawn domain per span (absent: each whole span). */
+        domains?: readonly (readonly [number, number])[];
+      };
+}
 
 interface Triangle {
   first: WorkspaceVec3;
@@ -97,6 +142,8 @@ interface PairwiseDistanceResult {
   distance: number;
   start: WorkspaceVec3;
   end: WorkspaceVec3;
+  /** Measured on a tessellation of a curved sketch shape (shown with "≈"). */
+  approximate?: boolean;
 }
 
 const CIRCLE_SEGMENTS = 48;
@@ -214,7 +261,7 @@ export function deriveMeasurementViewModel(input: {
         {
           id: "distance",
           label: "Distance",
-          value: formatLength(pairwise.distance),
+          value: formatLength(pairwise.distance, pairwise.approximate),
         },
         ...resolvePairwiseAngleRow(first!, second!),
       ]
@@ -475,18 +522,25 @@ function resolveRegionTarget(
     return null;
   }
 
-  const loopMeasurements = measureRegionLoops(sketch, region);
-  const perimeter = loopMeasurements.reduce(
-    (sum, entry) => sum + entry.length,
-    0,
-  );
-  const area = Math.abs(
-    loopMeasurements.reduce((sum, entry) => sum + entry.signedArea, 0),
-  );
-  const witnesses = loopMeasurements.map((entry, index) => ({
+  const measured = measureSketchRegion(sketch, region);
+  if (measured.kind === "failed") {
+    return {
+      target,
+      key: getPrimitiveRefKey(target),
+      label: getTargetLabel(snapshot, target),
+      category: "surface",
+      distancePrimitive: null,
+      rows: [],
+      note: `Region boundary geometry is unavailable: ${measured.message}`,
+      witnesses: [],
+    };
+  }
+  const witnesses = measured.loops.map((entry, index) => ({
     id: `${target.regionId}:loop:${index}`,
     kind: "polyline" as const,
-    points: entry.worldPoints,
+    points: entry.polygon.map((point) =>
+      mapSketchPointToWorkspaceWorld(sketch.plane, point),
+    ),
     isClosed: true,
   }));
 
@@ -496,27 +550,27 @@ function resolveRegionTarget(
     label: getTargetLabel(snapshot, target),
     category: "surface",
     distancePrimitive:
-      area > DISTANCE_EPSILON
+      measured.area > DISTANCE_EPSILON
         ? {
             kind: "mesh",
-            triangles: triangulateLoopFan(
-              loopMeasurements[0]?.worldPoints ?? [],
-            ),
+            triangles: triangulateLoopFan(witnesses[0]?.points ?? []),
+            approximate: true,
           }
         : null,
     rows: [
-      { id: "area", label: "Area", value: formatArea(area) },
-      { id: "perimeter", label: "Perimeter", value: formatLength(perimeter) },
-      ...loopMeasurements.map((entry, index) => ({
+      { id: "area", label: "Area", value: formatArea(measured.area) },
+      {
+        id: "perimeter",
+        label: "Perimeter",
+        value: formatLength(measured.perimeter, measured.approximate),
+      },
+      ...measured.loops.map((entry, index) => ({
         id: `boundary-${index + 1}`,
         label: `Boundary ${index + 1}`,
-        value: formatLength(entry.length),
+        value: formatLength(entry.length, entry.approximate),
       })),
     ],
-    note:
-      loopMeasurements.length === 0
-        ? "Region boundary geometry is unavailable."
-        : null,
+    note: null,
     witnesses,
   };
 }
@@ -647,6 +701,7 @@ function resolveSketchEntityTarget(
       label: entity.label,
       key: getPrimitiveRefKey(target),
       polyline,
+      exact: exactCircle(sketch, center, entity.radius),
       isClosed: true,
       rows: [
         { id: "radius", label: "Radius", value: formatLength(entity.radius) },
@@ -695,6 +750,14 @@ function resolveSketchEntityTarget(
       label: entity.label,
       key: getPrimitiveRefKey(target),
       polyline,
+      exact: exactArc(
+        sketch,
+        center,
+        radius,
+        start,
+        end,
+        entity.sweepDirection,
+      ),
       rows: [
         { id: "radius", label: "Radius", value: formatLength(radius) },
         { id: "diameter", label: "Diameter", value: formatLength(radius * 2) },
@@ -733,16 +796,19 @@ function resolveSketchEntityTarget(
     const sampledPoints = fitPoints.map((point) =>
       mapSketchPointToWorkspaceWorld(sketch.plane, point),
     );
+    const spans = splineGeometry.spans.map((span) => span.poles);
+    const length = cubicSpansLength(spans);
     return createCurveTarget({
       target,
       label: entity.label,
       key: getPrimitiveRefKey(target),
       polyline: sampledPoints,
+      exact: { plane: sketch.plane, curve: { kind: "cubics", spans } },
       rows: [
         {
           id: "length",
           label: "Length",
-          value: formatLength(polylineLength(sampledPoints, false)),
+          value: formatLength(length.value, length.approximate),
         },
         {
           id: "closed",
@@ -767,23 +833,28 @@ function resolveSketchEntityTarget(
     if (record?.kind !== "derivedPiecewiseCubic") {
       return null;
     }
+    const solvedSpans = solvedCubicSpans(record);
     const sampledPoints = tessellateCubicSpans(
-      solvedCubicSpans(record),
+      solvedSpans,
       SPLINE_SEGMENTS,
     ).map((point) => mapSketchPointToWorkspaceWorld(sketch.plane, point));
     if (sampledPoints.length < 2) {
       return null;
     }
+    const spans = solvedSpans.map((span) => span.poles);
+    const domains = solvedSpans.map(solvedCubicSpanLocalDomain);
+    const length = cubicSpansLength(spans, domains);
     return createCurveTarget({
       target,
       label: entity.label,
       key: getPrimitiveRefKey(target),
       polyline: sampledPoints,
+      exact: { plane: sketch.plane, curve: { kind: "cubics", spans, domains } },
       rows: [
         {
           id: "length",
           label: "Length",
-          value: formatLength(polylineLength(sampledPoints, false)),
+          value: formatLength(length.value, length.approximate),
         },
       ],
     });
@@ -868,6 +939,7 @@ function resolveProjectedGeometryTarget(
       label: getTargetLabel(snapshot, target),
       key: getPrimitiveRefKey(target),
       polyline,
+      exact: exactCircle(sketch, geometry.centerPosition, geometry.radius),
       isClosed: true,
       rows: [
         { id: "radius", label: "Radius", value: formatLength(geometry.radius) },
@@ -902,6 +974,14 @@ function resolveProjectedGeometryTarget(
       label: getTargetLabel(snapshot, target),
       key: getPrimitiveRefKey(target),
       polyline,
+      exact: exactArc(
+        sketch,
+        geometry.centerPosition,
+        radius,
+        geometry.startPosition,
+        geometry.endPosition,
+        geometry.sweepDirection,
+      ),
       rows: [
         { id: "radius", label: "Radius", value: formatLength(radius) },
         { id: "diameter", label: "Diameter", value: formatLength(radius * 2) },
@@ -928,17 +1008,32 @@ function resolveProjectedGeometryTarget(
     const sampledPoints = points.map((point) =>
       mapSketchPointToWorkspaceWorld(sketch.plane, point),
     );
+    // Source samples are the projected geometry itself (an exact polyline);
+    // neutral spans are measured and located on their cubics.
+    const spans =
+      geometry.representation.kind === "neutralCubicSpans"
+        ? geometry.representation.spans.map((span) => span.poles)
+        : null;
+    const length = spans
+      ? cubicSpansLength(spans)
+      : {
+          value: polylineLength(sampledPoints, isClosed),
+          approximate: false,
+        };
     return createCurveTarget({
       target,
       label: getTargetLabel(snapshot, target),
       key: getPrimitiveRefKey(target),
       polyline: sampledPoints,
+      ...(spans
+        ? { exact: { plane: sketch.plane, curve: { kind: "cubics", spans } } }
+        : {}),
       isClosed,
       rows: [
         {
           id: "length",
           label: "Length",
-          value: formatLength(polylineLength(sampledPoints, isClosed)),
+          value: formatLength(length.value, length.approximate),
         },
         {
           id: "closed",
@@ -962,6 +1057,7 @@ function createCurveTarget(input: {
   label: string;
   key: string;
   polyline: readonly WorkspaceVec3[];
+  exact?: ExactSketchCurve;
   rows: readonly MeasurementRow[];
   isClosed?: boolean;
 }): MeasuredTarget {
@@ -973,6 +1069,7 @@ function createCurveTarget(input: {
     distancePrimitive: {
       kind: "polyline",
       points: input.polyline,
+      ...(input.exact ? { exact: input.exact } : {}),
     },
     rows: input.rows,
     note: null,
@@ -1126,16 +1223,41 @@ function measureDistanceBetweenPrimitives(
   }
 
   if (first.kind === "point" && second.kind === "polyline") {
-    return measurePointToPolyline(first.point, second.points);
+    return second.exact
+      ? measurePointToExactCurve(first.point, second.exact)
+      : measurePointToPolyline(first.point, second.points);
   }
 
   if (first.kind === "polyline" && second.kind === "point") {
-    const result = measurePointToPolyline(second.point, first.points);
+    const result = first.exact
+      ? measurePointToExactCurve(second.point, first.exact)
+      : measurePointToPolyline(second.point, first.points);
     return result
       ? { distance: result.distance, start: result.end, end: result.start }
       : null;
   }
 
+  // Every other pairing measures tessellations; it is exact only when no
+  // side tessellates a curved sketch shape (T-6, review R7).
+  const result = measureTessellatedPrimitives(first, second);
+  return result
+    ? {
+        ...result,
+        approximate: isTessellatedCurve(first) || isTessellatedCurve(second),
+      }
+    : null;
+}
+
+function isTessellatedCurve(primitive: DistancePrimitive) {
+  return primitive.kind === "polyline"
+    ? primitive.exact !== undefined
+    : primitive.kind === "mesh" && primitive.approximate === true;
+}
+
+function measureTessellatedPrimitives(
+  first: DistancePrimitive,
+  second: DistancePrimitive,
+): PairwiseDistanceResult | null {
   if (first.kind === "point" && second.kind === "mesh") {
     return measurePointToMesh(first.point, second.triangles);
   }
@@ -1184,6 +1306,117 @@ function measurePointToPolyline(
   });
 
   return best;
+}
+
+/**
+ * Exact point ↔ curve distance (T10 plan §2.3): the closest point of the
+ * point's projection into the sketch plane on the curve itself (closed form
+ * for arcs and circles, `closestSplineSpanLocation` for cubic spans), which
+ * is the 3D closest point because the out-of-plane offset is constant.
+ */
+function measurePointToExactCurve(
+  point: WorkspaceVec3,
+  exact: ExactSketchCurve,
+): PairwiseDistanceResult | null {
+  const local = mapWorldPointToWorkspaceSketch(exact.plane, point);
+  const closest = closestPointOnExactCurve(local, exact.curve);
+  if (!closest) return null;
+  const end = mapSketchPointToWorkspaceWorld(exact.plane, closest);
+  return { distance: distanceBetween(point, end), start: point, end };
+}
+
+function closestPointOnExactCurve(
+  point: SketchPoint2D,
+  curve: ExactSketchCurve["curve"],
+): SketchPoint2D | null {
+  if (curve.kind === "arc") {
+    const { center, radius, from, to } = curve;
+    const onCircle = (angle: number): SketchPoint2D => [
+      center[0] + radius * Math.cos(angle),
+      center[1] + radius * Math.sin(angle),
+    ];
+    let angle = Math.atan2(point[1] - center[1], point[0] - center[0]);
+    while (angle < from) angle += Math.PI * 2;
+    while (angle >= from + Math.PI * 2) angle -= Math.PI * 2;
+    if (angle <= to) return onCircle(angle);
+    const [start, end] = [onCircle(from), onCircle(to)];
+    return distanceBetween2D(point, start) <= distanceBetween2D(point, end)
+      ? start
+      : end;
+  }
+  const spans = curve.spans.map((poles) => ({
+    interval: [0, 1] as const,
+    poles,
+    differential: { interval: [0, 0] as const, poles: ZERO_POLES },
+  }));
+  const located = closestSplineSpanLocation(point, spans, curve.domains);
+  return located
+    ? solvedCubicSpanPoint(spans[located.spanIndex]!, located.u)
+    : null;
+}
+
+const ZERO_POLES: SplinePoles = [
+  [0, 0],
+  [0, 0],
+  [0, 0],
+  [0, 0],
+];
+
+/** Σ `curveLength` over cubic spans (each on its local drawn domain). */
+function cubicSpansLength(
+  spans: readonly SplinePoles[],
+  domains?: readonly (readonly [number, number])[],
+) {
+  return spans.reduce(
+    (total, poles, index) => {
+      const length = curveLength(
+        { kind: "cubicBezier", poles },
+        domains?.[index] ?? [0, 1],
+      );
+      return {
+        value: total.value + length.value,
+        approximate: total.approximate || length.approximate,
+      };
+    },
+    { value: 0, approximate: false },
+  );
+}
+
+function exactCircle(
+  sketch: SketchSnapshotRecord,
+  center: SketchPoint2D,
+  radius: number,
+): ExactSketchCurve {
+  return {
+    plane: sketch.plane,
+    curve: { kind: "arc", center, radius, from: 0, to: Math.PI * 2 },
+  };
+}
+
+function exactArc(
+  sketch: SketchSnapshotRecord,
+  center: SketchPoint2D,
+  radius: number,
+  start: SketchPoint2D,
+  end: SketchPoint2D,
+  sweepDirection: "clockwise" | "counterClockwise",
+): ExactSketchCurve {
+  const startAngle = Math.atan2(start[1] - center[1], start[0] - center[0]);
+  const endAngle = normalizeArcEndAngle(
+    startAngle,
+    Math.atan2(end[1] - center[1], end[0] - center[0]),
+    sweepDirection,
+  );
+  return {
+    plane: sketch.plane,
+    curve: {
+      kind: "arc",
+      center,
+      radius,
+      from: Math.min(startAngle, endAngle),
+      to: Math.max(startAngle, endAngle),
+    },
+  };
 }
 
 function measurePointToMesh(
@@ -1500,90 +1733,103 @@ function polylineWitnessFromPoints(
     : [];
 }
 
-function measureRegionLoops(
+const sketchRecordBases = new WeakMap<
+  SketchRecord,
+  {
+    definition: SketchRecord["definition"];
+    solvedSnapshot: SketchRecord["solvedSnapshot"];
+    projectedReferences: SketchRecord["projectedReferences"];
+    regions: SketchRecord["regions"];
+    basis: RegionBoundaryBasis;
+  }
+>();
+
+/**
+ * The region-boundary basis of a committed sketch record (review R2): the
+ * record holds its regions together with the pair that produced them.
+ * Cached per record object while its pair and regions are the same objects.
+ */
+function regionBoundaryBasisOfRecord(sketch: SketchRecord) {
+  const cached = sketchRecordBases.get(sketch);
+  if (
+    cached &&
+    cached.definition === sketch.definition &&
+    cached.solvedSnapshot === sketch.solvedSnapshot &&
+    cached.projectedReferences === sketch.projectedReferences &&
+    cached.regions === sketch.regions
+  )
+    return cached.basis;
+  const basis = createRegionBoundaryBasis(
+    {
+      definition: sketch.definition,
+      solvedSnapshot: sketch.solvedSnapshot,
+      projectedReferences: sketch.projectedReferences ?? [],
+    },
+    sketch.regions,
+  );
+  sketchRecordBases.set(sketch, {
+    definition: sketch.definition,
+    solvedSnapshot: sketch.solvedSnapshot,
+    projectedReferences: sketch.projectedReferences,
+    regions: sketch.regions,
+    basis,
+  });
+  return basis;
+}
+
+export interface SketchRegionMeasure {
+  readonly kind: "measured";
+  /** |Σ loop signed areas|: the outer loop minus its holes. */
+  readonly area: number;
+  readonly perimeter: number;
+  /** A boundary length did not converge (shown with "≈"). */
+  readonly approximate: boolean;
+  readonly loops: readonly {
+    /** Midpoint of the owner's certified loop area interval. */
+    readonly signedArea: number;
+    readonly length: number;
+    readonly approximate: boolean;
+    /** Display tessellation (witness polyline) in sketch coordinates. */
+    readonly polygon: readonly SketchPoint2D[];
+  }[];
+}
+
+/**
+ * Exact measures of one committed region from the region-boundary owner
+ * (T10 plan §2.3, [TECH] T-6): each loop's area is the midpoint of
+ * `boundaryLoopSignedArea`, its length the sum of `curveLength` over its
+ * segments' kernel intervals, both on the curves the arrangement certified
+ * at the record's own solved positions. The polygon is display output only.
+ */
+export function measureSketchRegion(
   sketch: SketchSnapshotRecord,
   region: RegionRecord,
-) {
-  return region.loops.flatMap((loop) => {
-    const points = getRegionLoopSketchPoints(sketch, loop);
-    if (points.length < 3) {
-      return [];
+): SketchRegionMeasure | BoundaryCurveFailure {
+  const basis = regionBoundaryBasisOfRecord(sketch.sketch);
+  const loops: SketchRegionMeasure["loops"][number][] = [];
+  for (const loop of region.loops) {
+    const area = boundaryLoopSignedArea(basis, loop);
+    if (area.kind === "failed") return area;
+    const polygon = tessellateBoundaryLoop(basis, loop, SPLINE_SEGMENTS);
+    if ("kind" in polygon) return polygon;
+    let length = 0;
+    let approximate = false;
+    for (const segment of loop.segments) {
+      const resolved = resolveRegionBoundaryCurve(basis, segment);
+      if (resolved.kind === "failed") return resolved;
+      const measured = curveLength(resolved.curve, resolved.kernelInterval);
+      length += measured.value;
+      approximate ||= measured.approximate;
     }
-
-    const worldPoints = points.map((point) =>
-      mapSketchPointToWorkspaceWorld(sketch.plane, point),
-    );
-    return [
-      {
-        signedArea: getLoopSignedArea(points),
-        length: polylineLength(worldPoints, true),
-        worldPoints,
-      },
-    ];
-  });
-}
-
-function getRegionLoopSketchPoints(
-  sketch: SketchSnapshotRecord,
-  loop: RegionLoopRecord,
-) {
-  const pointById = new Map(
-    sketch.sketch.definition.points.map(
-      (point) => [point.pointId, point.position] as const,
-    ),
-  );
-  if (loop.boundaryPointIds.length >= 3) {
-    return loop.boundaryPointIds.flatMap((pointId) => {
-      const point = pointById.get(pointId);
-      return point ? [point] : [];
-    });
+    loops.push({ signedArea: area.value, length, approximate, polygon });
   }
-
-  const source = loop.segments[0]?.branch.source;
-  if (!source || source.kind !== "entity") {
-    return [];
-  }
-
-  const entity = sketch.sketch.definition.entities.find(
-    (entry) => entry.entityId === source.entityId,
-  );
-  if (!entity) {
-    return [];
-  }
-
-  if (entity.kind === "circle") {
-    const center = getSketchDefinitionPoint2D(sketch, entity.centerPointId);
-    if (!center) {
-      return [];
-    }
-    return Array.from({ length: CIRCLE_SEGMENTS }, (_, index) => {
-      const angle = (Math.PI * 2 * index) / CIRCLE_SEGMENTS;
-      return [
-        center[0] + Math.cos(angle) * entity.radius,
-        center[1] + Math.sin(angle) * entity.radius,
-      ] as const;
-    });
-  }
-
-  if (entity.kind === "lineSegment") {
-    const start = getSketchDefinitionPoint2D(sketch, entity.startPointId);
-    const end = getSketchDefinitionPoint2D(sketch, entity.endPointId);
-    return start && end ? [start, end] : [];
-  }
-
-  return [];
-}
-
-function getLoopSignedArea(points: readonly SketchPoint2D[]) {
-  let area = 0;
-
-  for (let index = 0; index < points.length; index += 1) {
-    const current = points[index]!;
-    const next = points[(index + 1) % points.length]!;
-    area += current[0] * next[1] - next[0] * current[1];
-  }
-
-  return area / 2;
+  return {
+    kind: "measured",
+    area: Math.abs(loops.reduce((sum, entry) => sum + entry.signedArea, 0)),
+    perimeter: loops.reduce((sum, entry) => sum + entry.length, 0),
+    approximate: loops.some((entry) => entry.approximate),
+    loops,
+  };
 }
 
 function triangulateLoopFan(points: readonly WorkspaceVec3[]) {
@@ -2086,8 +2332,8 @@ function normalizeArcEndAngle(
   return endAngle;
 }
 
-function formatLength(value: number) {
-  return `${formatNumber(value)} mm`;
+function formatLength(value: number, approximate = false) {
+  return `${approximate ? "≈ " : ""}${formatNumber(value)} mm`;
 }
 
 function formatArea(value: number) {

@@ -41,6 +41,7 @@ import {
 } from "@/domain/modeling/opencascade-kernel-seed";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import { createSketchArrangementDeriver } from "@/contracts/sketch/region-extraction";
+import { createRegionBoundaryBasis } from "@/contracts/sketch/region-boundary-curves";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { toolDefinitions } from "@/core/tools/tool-registry";
 import { publishSketchOffsets } from "@/contracts/sketch/offset-publication";
@@ -558,17 +559,27 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       partialSolvePolicy: "bestEffort",
     });
 
-    return (
-      await regionDeriver.derive({
-        documentId: "doc_workspace",
-        revisionId: "rev_0001",
-        sketchId: "sketch_primary",
-        definition,
-        solvedSnapshot: solved.solvedSnapshot,
-        projectedReferences: [],
-        modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
-      })
-    ).regions;
+    const { regions } = await regionDeriver.derive({
+      documentId: "doc_workspace",
+      revisionId: "rev_0001",
+      sketchId: "sketch_primary",
+      definition,
+      solvedSnapshot: solved.solvedSnapshot,
+      projectedReferences: [],
+      modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+    });
+    return {
+      regions,
+      // T10e (R2): committed regions travel with the pair they came from.
+      boundaryBasis: createRegionBoundaryBasis(
+        {
+          definition,
+          solvedSnapshot: solved.solvedSnapshot,
+          projectedReferences: [],
+        },
+        regions,
+      ),
+    };
   }
 
   async function withCommittedRegions(
@@ -578,7 +589,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       ...session,
       liveRegions: {
         ...session.liveRegions,
-        regions: await deriveRegionsForDefinition(session.definition),
+        ...(await deriveRegionsForDefinition(session.definition)),
       },
     };
   }

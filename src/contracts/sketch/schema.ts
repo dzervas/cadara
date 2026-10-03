@@ -1526,8 +1526,6 @@ export interface RegionLoopRecord {
   orientation: "clockwise" | "counterClockwise";
   /** Ordered boundary segments around the loop perimeter. */
   segments: RegionBoundarySegmentRecord[];
-  /** `portPointId` of each segment's start, when present (consumer polygons until T10). */
-  boundaryPointIds: SketchPointId[];
   /** False when the producer is reporting an incomplete loop candidate. */
   isClosed: boolean;
 }

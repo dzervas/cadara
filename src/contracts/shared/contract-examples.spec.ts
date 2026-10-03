@@ -383,12 +383,6 @@ test("src/contracts/shared/contract-examples.spec.ts", async () => {
                   sourceSegmentOrdinal: 0,
                 },
               ],
-              boundaryPointIds: [
-                "sketch_point_a",
-                "sketch_point_b",
-                "sketch_point_c",
-                "sketch_point_d",
-              ],
               isClosed: true,
             },
           ],

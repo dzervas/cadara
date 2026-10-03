@@ -7,6 +7,7 @@ import type {
   SketchVectorEntity,
   SketchVectorExportModel,
   SketchVectorRegion,
+  SketchVectorRegionSegment,
   SketchVectorStyle,
 } from "@/contracts/export/sketch-vector";
 import type { DocumentExportDiagnostic } from "@/contracts/modeling/export";
@@ -218,17 +219,12 @@ function entityBounds(entity: SketchVectorEntity): SketchPoint2D[] {
 function computeCoordinateSystem(
   model: SketchVectorExportModel,
 ): SvgCoordinateSystem {
-  const points = model.entities.flatMap(entityBounds);
-  for (const region of model.regions) {
-    for (const loop of region.loops) {
-      for (const pointId of loop.boundaryPointIds) {
-        const point = model.points.get(pointId);
-        if (point) {
-          points.push(point);
-        }
-      }
-    }
-  }
+  const points = [
+    ...model.entities.flatMap(entityBounds),
+    ...model.regions.flatMap((region) =>
+      region.loops.flatMap((loop) => loop.segments.flatMap(segmentBounds)),
+    ),
+  ];
 
   if (points.length === 0) {
     return { minX: 0, minY: 0, width: 1, height: 1 };
@@ -250,41 +246,107 @@ function formatViewBox(coordinates: SvgCoordinateSystem) {
   return `0 0 ${formatNumber(coordinates.width)} ${formatNumber(coordinates.height)}`;
 }
 
+function segmentBounds(segment: SketchVectorRegionSegment): SketchPoint2D[] {
+  switch (segment.kind) {
+    case "line":
+      return [segment.start, segment.end];
+    case "arc":
+      // The full circle's box, like an arc entity (conservative).
+      return [
+        [
+          segment.center[0] - segment.radius,
+          segment.center[1] - segment.radius,
+        ],
+        [
+          segment.center[0] + segment.radius,
+          segment.center[1] + segment.radius,
+        ],
+      ];
+    case "cubic":
+      return [...segment.poles];
+  }
+}
+
+function arcPoint(
+  segment: Extract<SketchVectorRegionSegment, { kind: "arc" }>,
+  angle: number,
+): SketchPoint2D {
+  return [
+    segment.center[0] + segment.radius * Math.cos(angle),
+    segment.center[1] + segment.radius * Math.sin(angle),
+  ];
+}
+
+function segmentStart(segment: SketchVectorRegionSegment): SketchPoint2D {
+  switch (segment.kind) {
+    case "line":
+      return segment.start;
+    case "arc":
+      return arcPoint(segment, segment.startAngle);
+    case "cubic":
+      return segment.poles[0];
+  }
+}
+
+/**
+ * The path commands of one segment from its own start (B5): a line `L`, an
+ * arc `A` over its exact sub-angles, a cubic `C` with its sub-poles. An arc
+ * sweeping more than π is written as two `A`s of half its sweep: one `A`
+ * cannot draw a full turn, and a wrap edge [a, a + 2π] whose binary64 sweep
+ * falls an ulp short of 2π would otherwise end where it starts, which SVG
+ * draws as nothing (review R-1).
+ */
+function segmentCommands(
+  segment: SketchVectorRegionSegment,
+  coordinates: SvgCoordinateSystem,
+): string[] {
+  switch (segment.kind) {
+    case "line":
+      return [`L ${formatPoint(segment.end, coordinates)}`];
+    case "arc": {
+      const delta = segment.endAngle - segment.startAngle;
+      // Sketch coordinates are written unflipped, so increasing angle is
+      // SVG's positive-angle direction (sweep 1), as for arc entities.
+      const sweepFlag = delta > 0 ? 1 : 0;
+      const radius = formatNumber(segment.radius);
+      const arc = (angle: number) =>
+        `A ${radius} ${radius} 0 0 ${sweepFlag} ${formatPoint(arcPoint(segment, angle), coordinates)}`;
+      return Math.abs(delta) > Math.PI
+        ? [arc(segment.startAngle + delta / 2), arc(segment.endAngle)]
+        : [arc(segment.endAngle)];
+    }
+    case "cubic": {
+      const [, first, second, end] = segment.poles;
+      return [
+        `C ${formatPoint(first, coordinates)} ${formatPoint(second, coordinates)} ${formatPoint(end, coordinates)}`,
+      ];
+    }
+  }
+}
+
+/**
+ * One closed subpath per loop, one command run per resolved segment. Where
+ * a segment does not start where the previous one ended (a declared join
+ * realized within tolerance), a straight connector `L` joins them, as in the
+ * owner's loop area, so every written pole stays the exact sub-pole.
+ */
 function regionPath(
   region: SketchVectorRegion,
-  model: SketchVectorExportModel,
   coordinates: SvgCoordinateSystem,
 ) {
-  const byEntityId = new Map(
-    model.entities.map((entity) => [entity.entityId, entity]),
-  );
   const commands: string[] = [];
 
   for (const loop of region.loops) {
-    const segmentPaths = loop.segments
-      .map((segment) => byEntityId.get(segment.entityId))
-      .filter((entity): entity is SketchVectorEntity => entity !== undefined)
-      .map((entity) => entityPath(entity, coordinates))
-      .filter((path): path is string => path !== null);
-
-    if (segmentPaths.length > 0) {
-      commands.push(segmentPaths.join(" "));
-      commands.push("Z");
-      continue;
+    let current: string | null = null;
+    for (const segment of loop.segments) {
+      const start = formatPoint(segmentStart(segment), coordinates);
+      if (current === null) commands.push(`M ${start}`);
+      else if (current !== start) commands.push(`L ${start}`);
+      const segmentPath = segmentCommands(segment, coordinates);
+      commands.push(...segmentPath);
+      current = segmentPath.at(-1)!.split(" ").slice(-2).join(" ");
     }
-
-    const points = loop.boundaryPointIds
-      .map((pointId) => model.points.get(pointId))
-      .filter((point): point is SketchPoint2D => point !== undefined);
-    if (points.length > 2) {
-      commands.push(`M ${formatPoint(points[0]!, coordinates)}`);
-      commands.push(
-        ...points
-          .slice(1)
-          .map((point) => `L ${formatPoint(point, coordinates)}`),
-      );
-      commands.push("Z");
-    }
+    if (current !== null) commands.push("Z");
   }
 
   return commands.join(" ");
@@ -299,7 +361,7 @@ function serializeSvg(model: SketchVectorExportModel): ExportResult {
   const coordinates = computeCoordinateSystem(model);
 
   for (const region of model.regions) {
-    const path = regionPath(region, model, coordinates);
+    const path = regionPath(region, coordinates);
     if (!path) {
       continue;
     }

@@ -17,6 +17,11 @@ import {
   SNAPSHOT_SCHEMA_VERSION,
 } from "@/contracts/shared/versioning";
 import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
+import { lineLoopSegmentsForTest } from "@/contracts/sketch/region-record.fixtures";
+import {
+  reconstructSplineAggregate,
+  type SplinePoles,
+} from "@/contracts/sketch/spline-geometry";
 
 test("src/domain/measure/measurement.spec.ts", () => {
   function createMeasurementSnapshot(): WorkspaceSnapshot {
@@ -223,6 +228,8 @@ test("src/domain/measure/measurement.spec.ts", () => {
             "point_spline_a",
             "point_spline_b",
             "point_spline_c",
+            "point_probe",
+            "point_arc_probe",
           ],
           points: [
             createPoint("point_rect_a", [0, 0]),
@@ -236,11 +243,17 @@ test("src/domain/measure/measurement.spec.ts", () => {
             createPoint("point_spline_a", [16, 0]),
             createPoint("point_spline_b", [17.5, 2]),
             createPoint("point_spline_c", [19, 0]),
+            createPoint("point_probe", [16.4, 1.3]),
+            createPoint("point_arc_probe", [13.8, 0.4]),
           ],
           entityIds: [
             "line_bottom",
+            "line_right",
+            "line_top",
+            "line_left",
             "circle_primary",
             "arc_primary",
+            "arc_clockwise",
             "spline_primary",
           ],
           entities: [
@@ -257,6 +270,9 @@ test("src/domain/measure/measurement.spec.ts", () => {
               startPointId: "point_rect_a",
               endPointId: "point_rect_b",
             },
+            createLine("line_right", "point_rect_b", "point_rect_c"),
+            createLine("line_top", "point_rect_c", "point_rect_d"),
+            createLine("line_left", "point_rect_d", "point_rect_a"),
             {
               kind: "circle",
               entityId: "circle_primary",
@@ -284,6 +300,22 @@ test("src/domain/measure/measurement.spec.ts", () => {
               startPointId: "point_arc_start",
               endPointId: "point_arc_end",
               sweepDirection: "counterClockwise",
+            },
+            {
+              // The same quarter arc authored clockwise (review A-3).
+              kind: "arc",
+              entityId: "arc_clockwise",
+              label: "Arc CW",
+              target: {
+                kind: "sketchEntity",
+                sketchId: "sketch_measure",
+                entityId: "arc_clockwise",
+              },
+              isConstruction: false,
+              centerPointId: "point_arc_center",
+              startPointId: "point_arc_end",
+              endPointId: "point_arc_start",
+              sweepDirection: "clockwise",
             },
             {
               kind: "spline",
@@ -325,7 +357,14 @@ test("src/domain/measure/measurement.spec.ts", () => {
         solvedSnapshot: {
           schemaVersion: "solved-sketch/v1alpha2",
           status: { solveState: "solved", constraintState: "underConstrained" },
-          solvedEntities: [],
+          // The region's boundary lines, as solved (T10e: regions resolve
+          // against the record's own solved pair).
+          solvedEntities: [
+            createSolvedLine("line_bottom", [0, 0], [4, 0]),
+            createSolvedLine("line_right", [4, 0], [4, 3]),
+            createSolvedLine("line_top", [4, 3], [0, 3]),
+            createSolvedLine("line_left", [0, 3], [0, 0]),
+          ],
           solvedPoints: [],
           constraintStatuses: [],
           dimensionStatuses: [],
@@ -362,13 +401,20 @@ test("src/domain/measure/measurement.spec.ts", () => {
               {
                 loopId: "loop_outer",
                 role: "outer",
-                boundaryPointIds: [
-                  "point_rect_a",
-                  "point_rect_b",
-                  "point_rect_c",
-                  "point_rect_d",
-                ],
-                segments: [],
+                segments: lineLoopSegmentsForTest(
+                  [
+                    { pointId: "point_rect_a", position: [0, 0] },
+                    { pointId: "point_rect_b", position: [4, 0] },
+                    { pointId: "point_rect_c", position: [4, 3] },
+                    { pointId: "point_rect_d", position: [0, 3] },
+                  ] as never,
+                  [
+                    "line_bottom",
+                    "line_right",
+                    "line_top",
+                    "line_left",
+                  ] as never,
+                ),
               },
             ],
           },
@@ -519,6 +565,39 @@ test("src/domain/measure/measurement.spec.ts", () => {
       contributingFeatureIds: [],
       consumedByFeatureIds: [],
       selectionSemantics,
+    };
+  }
+
+  function createLine(
+    entityId: string,
+    startPointId: string,
+    endPointId: string,
+  ) {
+    return {
+      kind: "lineSegment" as const,
+      entityId,
+      label: entityId,
+      target: {
+        kind: "sketchEntity" as const,
+        sketchId: "sketch_measure",
+        entityId,
+      },
+      isConstruction: false,
+      startPointId,
+      endPointId,
+    };
+  }
+
+  function createSolvedLine(
+    entityId: string,
+    startPosition: readonly [number, number],
+    endPosition: readonly [number, number],
+  ) {
+    return {
+      entityId,
+      kind: "lineSegment" as const,
+      startPosition,
+      endPosition,
     };
   }
 
@@ -930,6 +1009,122 @@ test("src/domain/measure/measurement.spec.ts", () => {
     "Compatible measure targets should build a pair.",
   ).toBeTruthy();
 
+  // T10e (plan §2.3): point ↔ curve distance is exact on the curve; the
+  // closest point is checked against an independent minimisation (own
+  // Bernstein evaluator, dense grid plus golden section), far tighter than
+  // the 48-segment tessellation's chord error.
+  const splineEntity =
+    snapshot.document.sketches[0]!.sketch.definition.entities.find(
+      (entity) => entity.entityId === "spline_primary",
+    )!;
+  const splinePositions = Object.fromEntries(
+    snapshot.document.sketches[0]!.sketch.definition.points.map((point) => [
+      point.pointId,
+      point.position,
+    ]),
+  );
+  const probe = [16.4, 1.3] as const;
+  const oracle = closestOnCubicsOracle(
+    probe,
+    reconstructSplineAggregate(
+      splineEntity as Extract<typeof splineEntity, { kind: "spline" }>,
+      splinePositions,
+    ).spans.map((span) => span.poles),
+  );
+  const pointToSpline = deriveMeasurementViewModel({
+    activeToolId: "measure",
+    selection: [
+      {
+        kind: "sketchPoint",
+        sketchId: "sketch_measure",
+        pointId: "point_probe",
+      },
+      {
+        kind: "sketchEntity",
+        sketchId: "sketch_measure",
+        entityId: "spline_primary",
+      },
+    ],
+    snapshot,
+  });
+  const connector = pointToSpline?.witnesses.find((witness) =>
+    witness.id.endsWith(":distance"),
+  );
+  expect(connector?.kind, "Point ↔ spline keeps its connector.").toBe(
+    "polyline",
+  );
+  const onCurve = (connector as { points: readonly number[][] }).points[1]!;
+  // The distance is stationary at the minimum, so it is compared tightly and
+  // the location (determined only to about √ε along the curve) loosely.
+  expect(
+    Math.abs(
+      Math.hypot(onCurve[0]! - probe[0], onCurve[1]! - probe[1]) -
+        Math.hypot(oracle[0] - probe[0], oracle[1] - probe[1]),
+    ),
+    "The point ↔ spline distance is the exact closest distance.",
+  ).toBeLessThan(1e-13);
+  expect(
+    Math.hypot(onCurve[0]! - oracle[0], onCurve[1]! - oracle[1]),
+    "The point ↔ spline witness ends at the exact closest point of the spline.",
+  ).toBeLessThan(1e-7);
+  expect(
+    pointToSpline?.rows.find((row) => row.label === "Distance")?.value,
+    "An exact point ↔ curve distance is not marked approximate.",
+  ).toBe(
+    `${Math.hypot(oracle[0] - probe[0], oracle[1] - probe[1]).toFixed(2)} mm`,
+  );
+
+  const splineToLine = deriveMeasurementViewModel({
+    activeToolId: "measure",
+    selection: [
+      {
+        kind: "sketchEntity",
+        sketchId: "sketch_measure",
+        entityId: "spline_primary",
+      },
+      {
+        kind: "sketchEntity",
+        sketchId: "sketch_measure",
+        entityId: "line_bottom",
+      },
+    ],
+    snapshot,
+  });
+  expect(
+    splineToLine?.rows.find((row) => row.label === "Distance")?.value,
+    "A curve ↔ curve distance on a tessellated spline is labelled approximate (T-6, R7).",
+  ).toMatch(/^≈ /);
+
+  // Review A-3: a probe outside a clockwise arc's sweep measures to the
+  // nearer arc end, not to the unclamped circle (1.11 mm here).
+  const pointToArc = deriveMeasurementViewModel({
+    activeToolId: "measure",
+    selection: [
+      {
+        kind: "sketchPoint",
+        sketchId: "sketch_measure",
+        pointId: "point_arc_probe",
+      },
+      {
+        kind: "sketchEntity",
+        sketchId: "sketch_measure",
+        entityId: "arc_clockwise",
+      },
+    ],
+    snapshot,
+  });
+  expect(
+    pointToArc?.rows.find((row) => row.label === "Distance")?.value,
+    "Point ↔ clockwise arc clamps to the nearer arc end (√(0.8² + 1.1²)).",
+  ).toBe(`${Math.hypot(0.8, 1.1).toFixed(2)} mm`);
+  const arcConnector = pointToArc?.witnesses.find((witness) =>
+    witness.id.endsWith(":distance"),
+  ) as { points: readonly number[][] } | undefined;
+  expect(
+    arcConnector?.points[1],
+    "The witness ends at the arc's end point.",
+  ).toEqual([13, 1.5, 0]);
+
   const replacementCandidate = resolveMeasureSelectionCandidate(
     snapshot,
     [{ kind: "body", bodyId: "body_measure" }],
@@ -942,3 +1137,42 @@ test("src/domain/measure/measurement.spec.ts", () => {
     "Unsupported second targets should replace the prior selection with a fresh measurement seed.",
   ).toBeTruthy();
 });
+
+/** Independent closest point on cubic spans: dense grid, then golden section. */
+function closestOnCubicsOracle(
+  point: readonly [number, number],
+  spans: readonly SplinePoles[],
+): readonly [number, number] {
+  const at = ([p0, p1, p2, p3]: SplinePoles, u: number) => {
+    const v = 1 - u;
+    const [b0, b1, b2, b3] = [
+      v * v * v,
+      3 * u * v * v,
+      3 * u * u * v,
+      u * u * u,
+    ];
+    return [
+      b0 * p0[0] + b1 * p1[0] + b2 * p2[0] + b3 * p3[0],
+      b0 * p0[1] + b1 * p1[1] + b2 * p2[1] + b3 * p3[1],
+    ] as const;
+  };
+  const gap = (poles: SplinePoles, u: number) => {
+    const [x, y] = at(poles, u);
+    return Math.hypot(x - point[0], y - point[1]);
+  };
+  let best = { poles: spans[0]!, u: 0, d: Infinity };
+  for (const poles of spans)
+    for (let k = 0; k <= 20000; k += 1) {
+      const d = gap(poles, k / 20000);
+      if (d < best.d) best = { poles, u: k / 20000, d };
+    }
+  let [lo, hi] = [Math.max(0, best.u - 1e-4), Math.min(1, best.u + 1e-4)];
+  const ratio = (Math.sqrt(5) - 1) / 2;
+  for (let step = 0; step < 200; step += 1) {
+    const a = hi - ratio * (hi - lo);
+    const b = lo + ratio * (hi - lo);
+    if (gap(best.poles, a) < gap(best.poles, b)) hi = b;
+    else lo = a;
+  }
+  return at(best.poles, (lo + hi) / 2);
+}

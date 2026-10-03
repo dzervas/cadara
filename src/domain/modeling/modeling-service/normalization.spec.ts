@@ -246,7 +246,6 @@ test("normalizes split-boundary vertex records without accepting partial or lega
           role: "outer",
           orientation: "counterClockwise",
           segments: [segment],
-          boundaryPointIds: [],
           isClosed: true,
         },
       ],

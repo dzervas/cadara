@@ -313,7 +313,6 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
             })),
             entities.map((entity) => entity.entityId),
           ),
-          boundaryPointIds: points.map((point) => point.id),
           isClosed: true,
         },
       ],

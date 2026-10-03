@@ -28,7 +28,6 @@ function region(input: {
       role: loop.role,
       orientation: "counterClockwise",
       isClosed: true,
-      boundaryPointIds: [],
       segments: loop.segments.map(
         ([
           entityId,

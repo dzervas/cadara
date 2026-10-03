@@ -26,6 +26,7 @@ import {
 } from "@/contracts/solver/schema";
 import {
   countContainingRegions,
+  loopPortPointIds,
   selectInnermostContainingRegion,
   type RegionSelectionSketch,
 } from "@/domain/import/region-containment";
@@ -265,7 +266,7 @@ function* legacyInteriorPoint(selectionSketch: RegionSelectionSketch) {
   for (const region of selectionSketch.regions) {
     const outer = region.loops.find((loop) => loop.role === "outer");
     if (!outer) continue;
-    const points = outer.boundaryPointIds.flatMap((id) => {
+    const points = loopPortPointIds(outer).flatMap((id) => {
       const point = selectionSketch.solvedPoints.get(id);
       return point ? [point] : [];
     });

@@ -8,7 +8,6 @@ import type {
   SketchPointId,
 } from "@/contracts/shared/ids";
 import type {
-  RegionLoopRecord,
   RegionRecord,
   SketchReferenceImageRecord,
   SketchDefinition,
@@ -19,6 +18,10 @@ import type {
   SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
 import { nonAcceptedOffsetOutputs } from "@/contracts/sketch/offset-publication";
+import {
+  tessellateBoundaryLoop,
+  type RegionBoundaryBasis,
+} from "@/contracts/sketch/region-boundary-curves";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import {
   tessellateCubicSpans,
@@ -56,7 +59,6 @@ import {
   collectVisibleReferenceImageAnchorPointIds,
   createSketchEntityRef,
   createSketchPointRef,
-  getDefinitionSketchId,
   getReferenceImageOperationOverrides,
   getSketchSessionDisplayDefinition,
   getSketchSessionDisplayProjectedReferences,
@@ -163,7 +165,6 @@ export function getStableSketchSessionDisplayRenderables(
     (region, index) => {
       const renderable = createDisplayRenderableForRegion(
         session,
-        displayDefinition,
         region,
         index,
         regionStyleLookup.get(region.regionId),
@@ -616,13 +617,15 @@ export function createOverconstraintDiagnosticRenderable(
 
 export function createDisplayRenderableForRegion(
   session: SketchSessionState,
-  definition: SketchDefinition,
   region: RegionRecord,
   index: number,
   style: SketchEntityDisplayStyle | undefined,
   validity: SketchDerivedValidity["state"] = "current",
 ): SketchSessionDisplayRenderable | null {
-  const triangulated = triangulateSketchRegionLoops(definition, region);
+  const basis = session.liveRegions.boundaryBasis;
+  const triangulated = basis
+    ? triangulateSketchRegionLoops(basis, region)
+    : null;
   if (!triangulated) {
     return null;
   }
@@ -649,8 +652,21 @@ export function createDisplayRenderableForRegion(
   };
 }
 
+/**
+ * Samples per boundary curve of the in-sketch region fill: the density of the
+ * circle display polyline, so a filled circle meets its stroke.
+ */
+const REGION_FILL_SAMPLES_PER_CURVE = 48;
+
+/**
+ * In-sketch region fill (T10 plan §2.3): each loop is the region-boundary
+ * owner's display tessellation of its resolved segments at the solved
+ * positions of the pair that produced the region (`basis`, review R2), so
+ * arcs, splines and crossing-closed lobes fill along their exact curves.
+ * Null when a loop does not resolve against `basis` or does not triangulate.
+ */
 export function triangulateSketchRegionLoops(
-  definition: SketchDefinition,
+  basis: RegionBoundaryBasis,
   region: RegionRecord,
 ): {
   points: SketchPoint[];
@@ -661,31 +677,25 @@ export function triangulateSketchRegionLoops(
     return null;
   }
 
-  const outerPoints = orientSketchLoopPoints(
-    normalizeClosedSketchLoopPoints(
-      getRegionLoopSketchPoints(definition, outerLoop),
-    ),
-    "counterClockwise",
-  );
-  if (outerPoints.length < 3) {
-    return null;
+  const loops: (readonly SketchPoint[])[] = [];
+  for (const loop of [
+    outerLoop,
+    ...region.loops.filter((entry) => entry.role === "inner"),
+  ]) {
+    const points = tessellateBoundaryLoop(
+      basis,
+      loop,
+      REGION_FILL_SAMPLES_PER_CURVE,
+    );
+    if ("kind" in points || points.length < 3) {
+      return null;
+    }
+    loops.push(points);
   }
-
-  const innerLoops = region.loops.filter((loop) => loop.role === "inner");
-  const innerPoints = innerLoops.map((loop) =>
-    orientSketchLoopPoints(
-      normalizeClosedSketchLoopPoints(
-        getRegionLoopSketchPoints(definition, loop),
-      ),
-      "clockwise",
-    ),
-  );
-  if (innerPoints.some((points) => points.length < 3)) {
-    return null;
-  }
+  const [outerPoints, ...innerPoints] = loops;
 
   const triangleIndices = ShapeUtils.triangulateShape(
-    outerPoints.map(pointToVector2),
+    outerPoints!.map(pointToVector2),
     innerPoints.map((loop) => loop.map(pointToVector2)),
   ).map((triangle) => [triangle[0]!, triangle[1]!, triangle[2]!] as const);
 
@@ -694,118 +704,13 @@ export function triangulateSketchRegionLoops(
   }
 
   return {
-    points: [outerPoints, ...innerPoints].flat(),
+    points: loops.flat(),
     triangleIndices,
   };
 }
 
 export function pointToVector2(point: SketchPoint) {
   return new Vector2(point[0], point[1]);
-}
-
-export function orientSketchLoopPoints(
-  points: SketchPoint[],
-  orientation: "clockwise" | "counterClockwise",
-) {
-  const isClockwise = getSketchLoopSignedArea(points) < 0;
-  const shouldBeClockwise = orientation === "clockwise";
-  return shouldBeClockwise === isClockwise ? points : [...points].reverse();
-}
-
-export function normalizeClosedSketchLoopPoints(
-  points: readonly SketchPoint[],
-): SketchPoint[] {
-  if (points.length < 2) {
-    return [...points];
-  }
-
-  const first = points[0];
-  const last = points[points.length - 1];
-  if (
-    first &&
-    last &&
-    Math.hypot(first[0] - last[0], first[1] - last[1]) <= 1e-9
-  ) {
-    return points.slice(0, -1);
-  }
-
-  return [...points];
-}
-
-export function getRegionLoopSketchPoints(
-  definition: SketchDefinition,
-  loop: RegionLoopRecord,
-): SketchPoint[] {
-  if (loop.boundaryPointIds.length >= 3) {
-    const pointById = new Map(
-      definition.points.map(
-        (point) => [point.pointId, point.position] as const,
-      ),
-    );
-    return loop.boundaryPointIds.flatMap((pointId) => {
-      const position = pointById.get(pointId);
-      return position ? [position] : [];
-    });
-  }
-
-  if (loop.segments.length !== 1) {
-    return [];
-  }
-
-  const source = loop.segments[0]?.branch.source;
-  if (!source || source.kind !== "entity") {
-    return [];
-  }
-
-  return getClosedEntityLoopPoints(definition, source.entityId);
-}
-
-export function getClosedEntityLoopPoints(
-  definition: SketchDefinition,
-  entityId: SketchEntityId,
-): SketchPoint[] {
-  const entity = definition.entities.find(
-    (entry) => entry.entityId === entityId,
-  );
-  if (!entity) {
-    return [];
-  }
-
-  const draftEntity = mapDefinitionEntityToDraftEntity(
-    getDefinitionSketchId(definition),
-    definition.points,
-    entity,
-  )[0];
-  if (!draftEntity) {
-    return [];
-  }
-
-  if (draftEntity.kind === "circle") {
-    const pointCount = 48;
-    return Array.from({ length: pointCount }, (_, pointIndex) => {
-      const angle = (Math.PI * 2 * pointIndex) / pointCount;
-      return [
-        draftEntity.center[0] + Math.cos(angle) * draftEntity.radius,
-        draftEntity.center[1] + Math.sin(angle) * draftEntity.radius,
-      ] as const;
-    });
-  }
-
-  if (draftEntity.kind === "polyline" && draftEntity.isClosed) {
-    return [...draftEntity.points];
-  }
-
-  return [];
-}
-
-export function getSketchLoopSignedArea(points: readonly SketchPoint[]) {
-  let area = 0;
-  for (let index = 0; index < points.length; index += 1) {
-    const current = points[index]!;
-    const next = points[(index + 1) % points.length]!;
-    area += current[0] * next[1] - next[0] * current[1];
-  }
-  return area / 2;
 }
 
 export function createDisplayRenderableForEntity(

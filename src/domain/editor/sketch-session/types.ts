@@ -52,6 +52,7 @@ import type {
   RegionRecord,
   SketchDerivedValidity,
 } from "@/contracts/sketch/schema";
+import type { RegionBoundaryBasis } from "@/contracts/sketch/region-boundary-curves";
 
 export type {
   SketchDraftEntity,
@@ -163,6 +164,15 @@ export interface SketchLiveRegions {
   generation: number;
   status: "current" | "pending" | "unavailable" | "failed";
   regions: RegionRecord[];
+  /**
+   * T10 review R2: the accepted pair that produced `regions`, bound to them.
+   * It travels with `regions` (retained together while stale), so fill and
+   * measurement resolve stale regions against their own pair, never the
+   * moving live definition. Null only when there are no regions (every
+   * producer builds it with them; a region that does not resolve against it
+   * is reported as a `profile-boundary-unresolved` region diagnostic).
+   */
+  boundaryBasis: RegionBoundaryBasis | null;
   diagnostics: SketchSolveDiagnostic[];
 }
 

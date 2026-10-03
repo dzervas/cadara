@@ -68,6 +68,7 @@ import {
   deleteSelectedSketchGeometry,
   finishSketchGeometryDrag,
   getSketchSessionDerivedValidity,
+  getSketchSessionDisplayRenderables,
   patchSketchEditToolValue,
   publishSketchLiveRegions,
   selectSketchEditToolTarget,
@@ -2576,6 +2577,40 @@ describe("T08b-g5b consumers and region wiring", () => {
       partitions.size,
       "premise: the drag changes the owner partition",
     ).toBeGreaterThan(1);
+  }, 300_000);
+
+  test("T10e review R-2: a published shell-bounded region fills against the round's own pair (publications applied)", async () => {
+    const { session, seeds } = splineLoopSession();
+    const committed = committedOffsetOnSide(session, seeds, 0.01, "left");
+    const { session: live, response } = await liveRound(committed);
+    expect(response.offsetPublications.map((item) => item.status)).toEqual([
+      "certified",
+    ]);
+    expect(
+      getSketchSessionDerivedValidity(live).diagnostics.filter(
+        (diagnostic) => diagnostic.code === "profile-boundary-unresolved",
+      ),
+      "Every published region resolves against the stored basis.",
+    ).toEqual([]);
+    const fills = getSketchSessionDisplayRenderables(live).filter(
+      (renderable) => renderable.semanticClass === "region",
+    );
+    expect(fills, "The annulus and the source region both fill.").toHaveLength(
+      response.regions.length,
+    );
+    const annulus = response.regions.find(
+      (region) => region.loops.length === 2,
+    )!;
+    const fill = fills.find((renderable) =>
+      renderable.id.startsWith(`renderable_sketch_region_${annulus.regionId}_`),
+    )!;
+    if (fill.geometry.kind !== "mesh") throw new Error("fill is not a mesh");
+    // The source loop's chord lies on y = 0; the outward shell runs 0.01 below.
+    const lowest = Math.min(
+      ...fill.geometry.vertexPositions.map((point) => point[1]),
+    );
+    expect(lowest).toBeLessThan(-0.009);
+    expect(lowest).toBeGreaterThan(-0.011);
   }, 300_000);
 
   test("g5b-1b ([TECH] G14′, D2 re-pin): an inward offset of the loop certifies, and its trimmed-off tails' crossings of the source line are not events: an annulus (outer = source, hole = offset) plus the inner disk, areas by oracle, ids stable across the drag", async () => {

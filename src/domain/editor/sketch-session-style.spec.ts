@@ -3,6 +3,7 @@ import { test, expect } from "vitest";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
 import type { SolvedSketchSnapshot } from "@/contracts/sketch/schema";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { lineLoopSegmentsForTest } from "@/contracts/sketch/region-record.fixtures";
 import type { SketchSnapshotRecord } from "@/contracts/modeling/schema";
 import type {
   ConstraintId,
@@ -321,8 +322,24 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
         isConstruction: false,
       },
     ],
-    entityIds: [],
-    entities: [],
+    // T10e: the region's boundary is three real lines (fill resolves the
+    // region's segments against the record's solved pair).
+    entityIds: ["sketch_entity_ab", "sketch_entity_bc", "sketch_entity_ca"],
+    entities: (
+      [
+        ["sketch_entity_ab", "sketch_point_a", "sketch_point_b"],
+        ["sketch_entity_bc", "sketch_point_b", "sketch_point_c"],
+        ["sketch_entity_ca", "sketch_point_c", "sketch_point_a"],
+      ] as const
+    ).map(([entityId, startPointId, endPointId]) => ({
+      kind: "lineSegment",
+      entityId,
+      label: entityId,
+      target: { kind: "sketchEntity", sketchId: "sketch_primary", entityId },
+      isConstruction: false,
+      startPointId,
+      endPointId,
+    })),
     styles: [
       {
         styleId: "style_region_gradient",
@@ -405,12 +422,18 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
               loops: [
                 {
                   role: "outer",
-                  segments: [],
-                  boundaryPointIds: [
-                    "sketch_point_a",
-                    "sketch_point_b",
-                    "sketch_point_c",
-                  ],
+                  segments: lineLoopSegmentsForTest(
+                    [
+                      { pointId: "sketch_point_a", position: [0, 0] },
+                      { pointId: "sketch_point_b", position: [4, 0] },
+                      { pointId: "sketch_point_c", position: [0, 4] },
+                    ] as never,
+                    [
+                      "sketch_entity_ab",
+                      "sketch_entity_bc",
+                      "sketch_entity_ca",
+                    ] as never,
+                  ),
                   isClosed: true,
                 },
               ],

@@ -64,6 +64,10 @@ import {
   resolveSketchDimensionValues,
 } from "@/domain/modeling/sketch-dimension-expressions";
 import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
+import {
+  createRegionBoundaryBasis,
+  resolveRegionBoundaryCurve,
+} from "@/contracts/sketch/region-boundary-curves";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import {
   buildReferenceImageAnchorProjectedReferences,
@@ -88,6 +92,7 @@ import { sampleArcPoints } from "@/core/sketch-tools/geometry";
 import type {
   SketchAuthoringToolId,
   SketchLiveRegionBasis,
+  SketchLiveRegions,
   SketchSessionState,
 } from "./types";
 import { buildCommitRequest } from "./history";
@@ -491,6 +496,7 @@ export function withLiveSolveBasis(
           generation,
           status: "unavailable",
           regions: session.liveRegions.regions,
+          boundaryBasis: session.liveRegions.boundaryBasis,
           diagnostics: [LIVE_REGIONS_UNAVAILABLE_DIAGNOSTIC],
         },
   };
@@ -586,20 +592,17 @@ export function publishSketchLiveRegions(
       offsetPlans: carriedOffsetPlans(hints),
     };
   const published = publishedOffsetPlans(offsetPublications);
+  const liveSolve = session.liveSolve && {
+    ...session.liveSolve,
+    solvedSnapshot: applyOffsetPublications(
+      session.liveSolve.definition,
+      session.liveSolve.solvedSnapshot,
+      offsetPublications,
+    ),
+  };
   return {
     ...session,
-    ...(session.liveSolve
-      ? {
-          liveSolve: {
-            ...session.liveSolve,
-            solvedSnapshot: applyOffsetPublications(
-              session.liveSolve.definition,
-              session.liveSolve.solvedSnapshot,
-              offsetPublications,
-            ),
-          },
-        }
-      : {}),
+    ...(liveSolve ? { liveSolve } : {}),
     offsetPlans: samePlans(published, session.offsetPlans)
       ? session.offsetPlans
       : published,
@@ -609,9 +612,27 @@ export function publishSketchLiveRegions(
       generation: session.liveRegions.generation,
       status: "current",
       regions,
+      // R2: the regions were derived from this accepted pair (publications
+      // applied, as the solver adapter's arrangement read it).
+      boundaryBasis: liveRegionBasis(liveSolve, regions),
       diagnostics,
     },
   };
+}
+
+/**
+ * Review A-1: published regions always carry their pair; a region set with
+ * no live solve to bind it to cannot be published (a derivation request
+ * needs a live solve), so it is an invariant breach, not a null basis.
+ */
+function liveRegionBasis(
+  liveSolve: SketchSessionState["liveSolve"],
+  regions: readonly RegionRecord[],
+) {
+  if (regions.length === 0) return null;
+  if (!liveSolve)
+    throw new Error("Live regions were published without a live solve.");
+  return createRegionBoundaryBasis(liveSolve, regions);
 }
 
 /** Records a failed live derivation; the last regions stay as invalid display. */
@@ -636,6 +657,50 @@ export function failSketchLiveRegions(
   };
 }
 
+const liveRegionBoundaryDiagnostics = new WeakMap<
+  SketchLiveRegions,
+  readonly SketchSolveDiagnostic[]
+>();
+
+/**
+ * Review R-3: a displayed live region whose boundary does not resolve
+ * against its own basis (or has none) gets a region-scoped
+ * `profile-boundary-unresolved` error, as measurement and export report the
+ * same failure, instead of silently losing its fill. Pairing makes this an
+ * invariant breach; the diagnostic keeps it visible. Cached per
+ * `liveRegions` object (immutable).
+ */
+export function getLiveRegionBoundaryDiagnostics(
+  liveRegions: SketchLiveRegions,
+): readonly SketchSolveDiagnostic[] {
+  const cached = liveRegionBoundaryDiagnostics.get(liveRegions);
+  if (cached) return cached;
+  const { boundaryBasis: basis } = liveRegions;
+  const diagnostics = liveRegions.regions.flatMap(
+    (region): SketchSolveDiagnostic[] => {
+      const failure = basis
+        ? region.loops
+            .flatMap((loop) => loop.segments)
+            .map((segment) => resolveRegionBoundaryCurve(basis, segment))
+            .find((result) => result.kind === "failed")
+        : undefined;
+      if (basis && !failure) return [];
+      return [
+        {
+          code: "profile-boundary-unresolved",
+          severity: "error",
+          message: failure
+            ? `${region.label} cannot be drawn: ${failure.message}`
+            : `profile-boundary-unresolved: ${region.label} has no boundary basis, so it cannot be drawn.`,
+          target: { kind: "region", regionId: region.regionId },
+        },
+      ];
+    },
+  );
+  liveRegionBoundaryDiagnostics.set(liveRegions, diagnostics);
+  return diagnostics;
+}
+
 export function getSketchSessionRegionDiagnostics(session: SketchSessionState) {
   return getSketchSessionDerivedValidity(session).diagnostics;
 }
@@ -654,21 +719,32 @@ export function getSketchSessionDerivedValidity(
   session: SketchSessionState,
 ): SketchDerivedValidity {
   const { liveRegions, liveSolve } = session;
+  const regionDiagnostics = mergeSketchSolveDiagnostics(
+    liveRegions.diagnostics,
+    getLiveRegionBoundaryDiagnostics(liveRegions),
+  );
   if (liveRegions.status === "current") {
     return withRelationshipScopedDiagnostics(
       liveSolve
         ? deriveSketchValidity({
             solvedSnapshot: liveSolve.solvedSnapshot,
-            diagnostics: liveRegions.diagnostics,
+            diagnostics: regionDiagnostics,
           })
-        : { state: "current", diagnostics: liveRegions.diagnostics },
+        : {
+            state: regionDiagnostics.some(
+              (diagnostic) => diagnostic.severity === "error",
+            )
+              ? "invalid"
+              : "current",
+            diagnostics: regionDiagnostics,
+          },
       session.offsetPublicationDiagnostics ?? [],
     );
   }
 
   const diagnostics = mergeSketchSolveDiagnostics(
     liveSolve?.solvedSnapshot.diagnostics ?? [],
-    liveRegions.diagnostics,
+    regionDiagnostics,
   );
   return liveRegions.status === "pending"
     ? { state: "stale", diagnostics }

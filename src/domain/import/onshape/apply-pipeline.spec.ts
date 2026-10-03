@@ -4001,7 +4001,6 @@ test("applyImportPreparedActions uses innermost containment for nested region se
                 sourceSegmentOrdinal: 0,
               };
             }),
-            boundaryPointIds: labels.map((label) => line(label).startPointId),
             isClosed: true,
           },
         ],

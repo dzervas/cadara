@@ -436,7 +436,10 @@ const GL_WEIGHTS = [
  * accepted spans, never a topology decision.
  */
 export function curveLength(
-  curve: OwnedCurve,
+  curve:
+    | Pick<Extract<OwnedCurve, { kind: "line" }>, "kind" | "start" | "end">
+    | Pick<Extract<OwnedCurve, { kind: "circle" }>, "kind" | "radius">
+    | Pick<Extract<OwnedCurve, { kind: "cubicBezier" }>, "kind" | "poles">,
   [from, to]: readonly [number, number],
   options?: { maxDepth?: number },
 ): { readonly value: number; readonly approximate: boolean } {

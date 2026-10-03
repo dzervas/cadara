@@ -229,7 +229,6 @@ test("src/components/layout/feature-timeline-highlight-history.spec.tsx", async 
                   })),
                   entities.map((entity) => entity.entityId),
                 ),
-                boundaryPointIds: points.map((point) => point.id),
                 isClosed: true,
               },
             ],

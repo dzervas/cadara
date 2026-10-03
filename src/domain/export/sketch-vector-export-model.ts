@@ -3,16 +3,16 @@ import type {
   SketchVectorExportModel,
   SketchVectorRegion,
   SketchVectorRegionLoop,
+  SketchVectorRegionSegment,
   SketchVectorStyle,
 } from "@/contracts/export/sketch-vector";
+import { evaluateNeutralCurve } from "@/contracts/modeling/neutral-curve-query";
 import type { DocumentExportDiagnostic } from "@/contracts/modeling/export";
 import type {
   WorkspaceSnapshot,
   SketchSnapshotRecord,
 } from "@/contracts/modeling/schema";
 import type {
-  RegionRecord,
-  SketchDefinition,
   SketchEntityDefinition,
   SketchPoint2D,
   SketchStyleDefinition,
@@ -23,6 +23,11 @@ import type {
 } from "@/contracts/sketch/schema";
 import { nonAcceptedOffsetOutputs } from "@/contracts/sketch/offset-publication";
 import {
+  createRegionBoundaryBasis,
+  resolveRegionBoundaryCurve,
+  type ResolvedBoundaryCurve,
+} from "@/contracts/sketch/region-boundary-curves";
+import {
   clippedSolvedCubicSpanPoles,
   reconstructSplineAggregate,
   solvedCubicSpans,
@@ -30,7 +35,6 @@ import {
 import type {
   DocumentId,
   RevisionId,
-  SketchEntityId,
   SketchPointId,
 } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
@@ -432,51 +436,97 @@ function buildEntity(
   }
 }
 
-function buildRegionLoop(
-  loop: RegionRecord["loops"][number],
-  entityIds: ReadonlySet<SketchEntityId>,
-): SketchVectorRegionLoop {
+/** One resolved boundary segment in export form (traversal order). */
+function vectorRegionSegment({
+  curve,
+  sourceInterval: [from, to],
+  traversal,
+}: ResolvedBoundaryCurve): SketchVectorRegionSegment {
+  const forward = traversal === "forward";
+  if (curve.kind === "line") {
+    const start = evaluateNeutralCurve(curve, from);
+    const end = evaluateNeutralCurve(curve, to);
+    return forward
+      ? { kind: "line", start, end }
+      : { kind: "line", start: end, end: start };
+  }
+  if (curve.kind === "circle")
+    return {
+      kind: "arc",
+      center: curve.center,
+      radius: curve.radius,
+      startAngle: forward ? from : to,
+      endAngle: forward ? to : from,
+    };
+  // The sub-poles on the kernel interval: `clippedSolvedCubicSpanPoles`
+  // maps [from, to] on the source domain to local u exactly as the owner's
+  // kernel interval does.
+  const [p0, p1, p2, p3] = clippedSolvedCubicSpanPoles({
+    interval: curve.sourceDomain,
+    poles: curve.poles,
+    queryDomain: [from, to],
+  });
   return {
-    role: loop.role,
-    isClosed: loop.isClosed,
-    boundaryPointIds: loop.boundaryPointIds,
-    segments: loop.segments
-      .filter(
-        (segment) =>
-          segment.branch.source.kind === "entity" &&
-          entityIds.has(segment.branch.source.entityId),
-      )
-      .map((segment) => ({
-        entityId:
-          segment.branch.source.kind === "entity"
-            ? segment.branch.source.entityId
-            : ("" as SketchEntityId),
-        traversalDirection: segment.traversalDirection,
-      })),
+    kind: "cubic",
+    poles: forward ? [p0, p1, p2, p3] : [p3, p2, p1, p0],
   };
 }
 
+/**
+ * The committed regions as exact boundary segments, resolved against the
+ * record's own pair (review R2). A region whose boundary does not resolve is
+ * left out with a diagnostic, never approximated.
+ */
 function buildRegions(
-  definition: SketchDefinition,
-  regions: readonly RegionRecord[],
-  entityIds: ReadonlySet<SketchEntityId>,
+  sketch: SketchSnapshotRecord,
+  target: DurableRef,
+  diagnostics: DocumentExportDiagnostic[],
 ): SketchVectorRegion[] {
+  const { definition, regions } = sketch.sketch;
+  if (regions.length === 0) return [];
+  const basis = createRegionBoundaryBasis(
+    {
+      definition,
+      solvedSnapshot: sketch.sketch.solvedSnapshot,
+      projectedReferences: sketch.sketch.projectedReferences ?? [],
+    },
+    regions,
+  );
   return regions
     .filter((region) => region.isClosed)
-    .map((region) => {
+    .flatMap((region) => {
+      const loops: SketchVectorRegionLoop[] = [];
+      for (const loop of region.loops.filter((entry) => entry.isClosed)) {
+        const segments: SketchVectorRegionSegment[] = [];
+        for (const segment of loop.segments) {
+          const resolved = resolveRegionBoundaryCurve(basis, segment);
+          if (resolved.kind === "failed") {
+            diagnostics.push(
+              createDiagnostic(
+                "sketch-vector-region-unresolved",
+                `Region ${region.regionId} was not exported: ${resolved.message}`,
+                target,
+              ),
+            );
+            return [];
+          }
+          segments.push(vectorRegionSegment(resolved));
+        }
+        loops.push({ role: loop.role, isClosed: loop.isClosed, segments });
+      }
       const styleRecord = definition.styles?.find(
         (style) =>
           style.target.kind === "region" &&
           style.target.regionId === region.regionId,
       );
-      return {
-        regionId: region.regionId,
-        label: region.label,
-        loops: region.loops
-          .filter((loop) => loop.isClosed)
-          .map((loop) => buildRegionLoop(loop, entityIds)),
-        style: resolveAuthoredSketchVectorStyle(styleRecord),
-      };
+      return [
+        {
+          regionId: region.regionId,
+          label: region.label,
+          loops,
+          style: resolveAuthoredSketchVectorStyle(styleRecord),
+        },
+      ];
     });
 }
 
@@ -566,12 +616,7 @@ export function buildSketchVectorExportModel(
       return null;
     })
     .filter((entity): entity is SketchVectorEntity => entity !== null);
-  const entityIds = new Set(entities.map((entity) => entity.entityId));
-  const regions = buildRegions(
-    sketch.sketch.definition,
-    sketch.sketch.regions,
-    entityIds,
-  );
+  const regions = buildRegions(sketch, input.target, diagnostics);
 
   if (entities.length === 0 && regions.length === 0) {
     diagnostics.push(
@@ -590,7 +635,6 @@ export function buildSketchVectorExportModel(
     sketchId: sketch.sketchId,
     label: sketch.label,
     units: "millimeter",
-    points,
     entities,
     regions,
     diagnostics,

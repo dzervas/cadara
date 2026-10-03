@@ -643,7 +643,6 @@ function forgedLoopRegion(
           end: join(piece.to),
           sourceSegmentOrdinal: 0,
         })),
-        boundaryPointIds: [],
         isClosed: true,
       },
     ],

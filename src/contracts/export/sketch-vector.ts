@@ -11,7 +11,6 @@ import type {
   RevisionId,
   SketchEntityId,
   SketchId,
-  SketchPointId,
 } from "@/contracts/shared/ids";
 
 export interface SketchVectorStyle {
@@ -79,15 +78,31 @@ export type SketchVectorEntity =
       style: SketchVectorStyle | null;
     };
 
-export interface SketchVectorRegionSegment {
-  entityId: SketchEntityId;
-  traversalDirection: "forward" | "reverse";
-}
+/**
+ * One region boundary segment, resolved by the region-boundary owner (T10
+ * plan §2.3, B5) and written in traversal order: exactly the piece of the
+ * curve the arrangement certified, between the segment's own kernel
+ * parameters.
+ */
+export type SketchVectorRegionSegment =
+  | { kind: "line"; start: SketchPoint2D; end: SketchPoint2D }
+  | {
+      kind: "arc";
+      center: SketchPoint2D;
+      radius: number;
+      /** Source radians; `endAngle < startAngle` runs clockwise. */
+      startAngle: number;
+      endAngle: number;
+    }
+  | {
+      kind: "cubic";
+      /** De Casteljau sub-poles over the kernel interval, traversal order. */
+      poles: SplinePoles;
+    };
 
 export interface SketchVectorRegionLoop {
   role: "outer" | "inner";
   segments: readonly SketchVectorRegionSegment[];
-  boundaryPointIds: readonly SketchPointId[];
   isClosed: boolean;
 }
 
@@ -104,7 +119,6 @@ export interface SketchVectorExportModel {
   sketchId: SketchId;
   label: string;
   units: "millimeter";
-  points: ReadonlyMap<SketchPointId, SketchPoint2D>;
   entities: readonly SketchVectorEntity[];
   regions: readonly SketchVectorRegion[];
   diagnostics: readonly DocumentExportDiagnostic[];
