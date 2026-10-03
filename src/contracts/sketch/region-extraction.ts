@@ -1034,6 +1034,50 @@ class UnionFind<T> {
   }
 }
 
+/**
+ * The declared-join classes of a sketch (§3.2): a union-find over point ids
+ * (shared ids are one member) and projected-point / datum keys, joined by the
+ * `coincident` and `coincidentProjectedPoint` constraints whose solve status
+ * is `satisfied` (judged by the solve policy, tolerance τ). Endpoint distance
+ * never joins. `find` returns a member's class root (an unseen member is a
+ * class of one). The arrangement builds its join classes from exactly this,
+ * and open-profile chaining (T10d) reads it for curve ends.
+ */
+export interface DeclaredJoinClasses {
+  find(member: string): string;
+}
+
+export function declaredJoinClasses(
+  definition: SketchDefinition,
+  solved: SolvedSketchSnapshot,
+): DeclaredJoinClasses {
+  const classes = new UnionFind<string>();
+  const satisfied = new Set(
+    solved.constraintStatuses
+      .filter((status) => status.status === "satisfied")
+      .map((status) => status.constraintId),
+  );
+  for (const constraint of definition.constraints) {
+    if (!satisfied.has(constraint.constraintId)) continue;
+    if (constraint.kind === "coincident")
+      classes.union(constraint.pointIds[0], constraint.pointIds[1]);
+    else if (constraint.kind === "coincidentProjectedPoint") {
+      const target = constraint.projectedPoint;
+      if (target.kind === "projectedGeometry")
+        classes.union(
+          constraint.point.pointId,
+          projectedPointKey(
+            target.reference.referenceId,
+            target.reference.geometryId,
+          ),
+        );
+      else if (target.datum === "origin")
+        classes.union(constraint.point.pointId, "datum:origin");
+    }
+  }
+  return classes;
+}
+
 interface Membership {
   branch: number;
   location: NeutralCurveJoinLocation;
@@ -1047,7 +1091,7 @@ interface DeclaredJoin {
 }
 
 interface Declarations {
-  classes: UnionFind<string>;
+  classes: DeclaredJoinClasses;
   classMembers: Map<string, string[]>;
   /** Keyed `${first}|${second}` with first < second (branch indices). */
   pairJoins: Map<string, DeclaredJoin[]>;
@@ -1127,7 +1171,7 @@ function collectDeclarations(
   solved: SolvedSketchSnapshot,
   branches: readonly Branch[],
 ): Declarations {
-  const classes = new UnionFind<string>();
+  const classes = declaredJoinClasses(definition, solved);
   const satisfied = new Set(
     solved.constraintStatuses
       .filter((status) => status.status === "satisfied")
@@ -1158,23 +1202,6 @@ function collectDeclarations(
   for (const constraint of definition.constraints) {
     if (!satisfied.has(constraint.constraintId)) continue;
     switch (constraint.kind) {
-      case "coincident":
-        classes.union(constraint.pointIds[0], constraint.pointIds[1]);
-        break;
-      case "coincidentProjectedPoint": {
-        const target = constraint.projectedPoint;
-        if (target.kind === "projectedGeometry")
-          classes.union(
-            constraint.point.pointId,
-            projectedPointKey(
-              target.reference.referenceId,
-              target.reference.geometryId,
-            ),
-          );
-        else if (target.datum === "origin")
-          classes.union(constraint.point.pointId, "datum:origin");
-        break;
-      }
       case "pointOnCurve":
         incidences.push({
           member: constraint.point.pointId,

@@ -51,8 +51,12 @@ import {
   executeOccFeature,
   type OccFeatureExecutionContext,
 } from "@/domain/modeling/occ/features";
-import { collectOccCleanupErrors } from "@/domain/modeling/occ/memory";
 import {
+  collectOccCleanupErrors,
+  releaseOccObjects,
+} from "@/domain/modeling/occ/memory";
+import {
+  buildOpenSketchCurveWire,
   buildRegionProfileFace,
   regionBoundaryBasisOfSketchRecord,
   releaseBuiltSketchProfileFace,
@@ -693,6 +697,150 @@ function unmatchedDirectedEdges(triangles: readonly MeshTriangle[]) {
     const [from, to] = edge.split(">");
     return (counts.get(`${to}>${from}`) ?? 0) !== count;
   });
+}
+
+/** The sketch with one constraint's solve status replaced (an open curve set derives no region). */
+function withConstraintStatus(
+  snapshot: SketchSnapshotRecord,
+  constraintId: string,
+  status: "satisfied" | "unsatisfied",
+): SketchSnapshotRecord {
+  const solvedSnapshot = snapshot.sketch.solvedSnapshot;
+  return {
+    ...snapshot,
+    sketch: {
+      ...snapshot.sketch,
+      solvedSnapshot: {
+        ...solvedSnapshot,
+        constraintStatuses: solvedSnapshot.constraintStatuses.map((entry) =>
+          entry.constraintId === constraintId ? { ...entry, status } : entry,
+        ),
+      },
+    },
+  };
+}
+
+function entityIdOf(snapshot: SketchSnapshotRecord, label: string) {
+  return snapshot.sketch.definition.entities.find(
+    (entity) => entity.label === label,
+  )!.entityId;
+}
+
+function openWire(
+  oc: OpenCascadeInstance,
+  snapshot: SketchSnapshotRecord,
+  labels: readonly string[],
+) {
+  return buildOpenSketchCurveWire(
+    oc,
+    {
+      plane: snapshot.plane,
+      sketch: snapshot.sketch,
+      modelingTolerance: FIXTURE_TOLERANCE,
+    },
+    labels.map((label) => entityIdOf(snapshot, label)),
+  );
+}
+
+function releaseOpenWire(built: ReturnType<typeof buildOpenSketchCurveWire>) {
+  releaseOccObjects([
+    built.wire,
+    ...built.provenance.edges.values(),
+    ...built.provenance.vertices.values(),
+  ]);
+}
+
+function openSurfaceExtrude(
+  oc: OpenCascadeInstance,
+  snapshot: SketchSnapshotRecord,
+  labels: readonly string[],
+) {
+  return shapeProperties(
+    oc,
+    producedShape(
+      executeOccFeature(
+        createContext(oc, [snapshot]),
+        "feature_t10d_open_extrude" as FeatureId,
+        {
+          kind: "extrude",
+          featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            resultBodyType: "surface",
+            profiles: labels.map((label) => ({
+              kind: "sketchEntity",
+              sketchId: snapshot.sketchId,
+              entityId: entityIdOf(snapshot, label),
+            })),
+            startExtent: { kind: "profilePlane" },
+            extent: {
+              mode: "oneSide",
+              end: { kind: "blind", direction: "positive", distance: HEIGHT },
+            },
+          },
+        } as never,
+      ),
+    ),
+    "surface",
+  );
+}
+
+const GAUSS_5 = [
+  [0, 128 / 225],
+  [-0.5384693101056831, 0.47862867049936647],
+  [0.5384693101056831, 0.47862867049936647],
+  [-0.906179845938664, 0.23692688505618908],
+  [0.906179845938664, 0.23692688505618908],
+] as const;
+
+/**
+ * ∫ weight(B(u))·|B'(u)| du over [0, 1] for the planar cubic B with `poles`:
+ * composite 5-point Gauss–Legendre on 256 cells (independent of OCC and of
+ * the arrangement; weight 1 is the arc length).
+ */
+function cubicArcIntegral(
+  poles: readonly (readonly [number, number])[],
+  weight: (point: readonly [number, number]) => number = () => 1,
+) {
+  const [p0, p1, p2, p3] = poles as readonly (readonly [number, number])[];
+  const cells = 256;
+  let sum = 0;
+  for (let cell = 0; cell < cells; cell += 1)
+    for (const [node, w] of GAUSS_5) {
+      const u = (cell + (node + 1) / 2) / cells;
+      const v = 1 - u;
+      const derivative = [0, 1].map(
+        (axis) =>
+          3 *
+          (v * v * (p1![axis]! - p0![axis]!) +
+            2 * u * v * (p2![axis]! - p1![axis]!) +
+            u * u * (p3![axis]! - p2![axis]!)),
+      );
+      const point = [0, 1].map(
+        (axis) =>
+          v * v * v * p0![axis]! +
+          3 * u * v * v * p1![axis]! +
+          3 * u * u * v * p2![axis]! +
+          u * u * u * p3![axis]!,
+      ) as unknown as readonly [number, number];
+      sum +=
+        (w / 2 / cells) *
+        weight(point) *
+        Math.hypot(derivative[0]!, derivative[1]!);
+    }
+  return sum;
+}
+
+function splineSpans(snapshot: SketchSnapshotRecord, label: string) {
+  const id = entityIdOf(snapshot, label);
+  const geometry = snapshot.sketch.solvedSnapshot.solvedEntities.find(
+    (entity) => entity.entityId === id,
+  )!;
+  if (
+    geometry.kind !== "spline" ||
+    geometry.reconstruction.validity !== "valid"
+  )
+    throw new Error(`premise: ${label} is a valid spline`);
+  return geometry.reconstruction.spans;
 }
 
 function extrudeRegion(
@@ -2230,6 +2378,369 @@ describe("src/domain/modeling/occ/production-asset-conformance.spec.ts", () => {
           target: micro.target,
         },
       ]);
+    });
+
+    // T10d (A6, user decision 2026-09-28): open curves chain only through
+    // declared joins, never by endpoint distance.
+    test(`${runtimeName}: open curves chain through shared points and satisfied coincident constraints (one vertex per class at its smallest member point, admitted within τ)`, async () => {
+      const oc = await loadRuntime();
+      const plane = createStandardPlaneDefinition("xy");
+      const gap = 0.4 * FIXTURE_TOLERANCE;
+      const fixture = makeSketchFixture();
+      fixture.point("a", 0, 0);
+      fixture.point("b", 4, 0);
+      fixture.point("b2", 4, gap);
+      fixture.point("c", 4, 3);
+      fixture.point("d", 1, 3);
+      fixture.line("ab", "a", "b");
+      fixture.line("bc", "b2", "c");
+      fixture.line("cd", "c", "d");
+      fixture.coincident("b", "b2");
+      const sketch = await sketchSnapshot(fixture, plane);
+
+      const built = openWire(oc, sketch, ["ab", "bc", "cd"]);
+      try {
+        const vertices = built.provenance.vertices;
+        const joined = vertices.get("sketch_point_b" as never)!;
+        expect(
+          vertices.get("sketch_point_b2" as never),
+          "the coincident class is one shared vertex",
+        ).toBe(joined);
+        const point = oc.BRep_Tool.Pnt(joined);
+        try {
+          expect(
+            [point.X(), point.Y(), point.Z()],
+            "the class vertex sits bitwise at its lexicographically smallest member point (b)",
+          ).toEqual([4, 0, 0]);
+        } finally {
+          point.delete();
+        }
+        const tolerance = oc.BRep_Tool.Tolerance_3(joined);
+        expect(
+          tolerance,
+          "b2's line end is admitted at the class vertex: its gap",
+        ).toBeGreaterThanOrEqual(gap);
+        expect(tolerance, "…capped at τ").toBeLessThanOrEqual(
+          FIXTURE_TOLERANCE,
+        );
+        expect(
+          vertices.get("sketch_point_c" as never),
+          "the shared point id c is one vertex",
+        ).toBeDefined();
+        expect([...built.provenance.edges.keys()].sort()).toEqual(
+          ["ab", "bc", "cd"].map((label) => entityIdOf(sketch, label)).sort(),
+        );
+      } finally {
+        releaseOpenWire(built);
+      }
+
+      // The bc edge runs from the class vertex (b) to c.
+      const sheet = openSurfaceExtrude(oc, sketch, ["ab", "bc", "cd"]);
+      expectRelative(sheet.mass, (4 + 3 + 3) * HEIGHT, "open chain sheet area");
+    });
+
+    test(`${runtimeName}: open curves without a satisfied declaration are disconnected, branches are rejected, and a satisfied join beyond τ fails closed`, async () => {
+      const oc = await loadRuntime();
+      const plane = createStandardPlaneDefinition("xy");
+      const twoLines = async (
+        offset: number,
+        declare: "none" | "satisfied" | "unsatisfied",
+      ) => {
+        const fixture = makeSketchFixture();
+        fixture.point("a", 0, 0);
+        fixture.point("b", 4, 0);
+        fixture.point("b2", 4, offset);
+        fixture.point("c", 4, 3);
+        fixture.line("ab", "a", "b");
+        fixture.line("bc", "b2", "c");
+        if (declare === "none") return sketchSnapshot(fixture, plane);
+        const constraint = fixture.coincident("b", "b2");
+        return withConstraintStatus(
+          await sketchSnapshot(fixture, plane),
+          constraint,
+          declare,
+        );
+      };
+      const disconnected =
+        /^unsupported-profile-group: Open sketch curves sketch_entity_bc are not connected to the rest of the surface profile chain: curve ends connect only through a shared point or a satisfied coincident constraint\.$/;
+
+      const nearMiss = await twoLines(5e-7, "none");
+      const bitwise = await twoLines(0, "none");
+      const unsatisfied = await twoLines(0, "unsatisfied");
+      const beyond = await twoLines(2 * FIXTURE_TOLERANCE, "satisfied");
+      // Formerly chained by the 1e-6 endpoint rule; now nothing declares it.
+      expect(
+        () => openWire(oc, nearMiss, ["ab", "bc"]),
+        "an undeclared near-miss (5e-7) is disconnected",
+      ).toThrow(disconnected);
+      expect(
+        () => openWire(oc, bitwise, ["ab", "bc"]),
+        "even bitwise-equal undeclared ends are disconnected",
+      ).toThrow(disconnected);
+      expect(
+        () => openWire(oc, unsatisfied, ["ab", "bc"]),
+        "an unsatisfied coincident is no join",
+      ).toThrow(disconnected);
+      expect(
+        () => openWire(oc, beyond, ["ab", "bc"]),
+        "a satisfied join whose member end lies beyond τ fails closed",
+      ).toThrow(
+        /^profile-vertex-gap-exceeds-join: The end of sketch entity sketch_entity_bc lies /,
+      );
+
+      const star = makeSketchFixture();
+      star.point("o", 0, 0);
+      for (const [name, x, y] of [
+        ["p", 1, 0],
+        ["q", 0, 1],
+        ["r", -1, 0],
+      ] as const) {
+        star.point(name, x, y);
+        star.line(`o${name}`, "o", name);
+      }
+      const starSketch = await sketchSnapshot(star, plane);
+      expect(
+        () => openWire(oc, starSketch, ["op", "oq", "or"]),
+        "three ends in one class branch",
+      ).toThrow(
+        /^unsupported-profile-group: Open sketch curves .* branch at a declared join and do not form one sweepable chain\.$/,
+      );
+
+      const tee = makeSketchFixture();
+      tee.point("s0", 0, 0);
+      tee.point("s1", 2, 1);
+      tee.point("s2", 4, 0);
+      tee.point("t", 2, 3);
+      tee.spline("sp", ["s0", "s1", "s2"], "open");
+      tee.line("leg", "t", "s1");
+      const teeSketch = await sketchSnapshot(tee, plane);
+      expect(
+        () => openWire(oc, teeSketch, ["sp", "leg"]),
+        "a curve end joined to a spline's interior knot branches",
+      ).toThrow(/branch at a declared join/);
+    });
+
+    test(`${runtimeName}: an open spline chained to a line surface-extrudes and an open spline surface-revolves (per-span Bézier edges, shared knot vertices; T-8)`, async () => {
+      const oc = await loadRuntime();
+      const plane = createStandardPlaneDefinition("xy");
+      const fixture = makeSketchFixture();
+      fixture.point("s0", 0, 0);
+      fixture.point("s1", 1, 1.5);
+      fixture.point("s2", 3, 2);
+      fixture.point("s3", 5, 0.5);
+      fixture.point("l", 6, 2);
+      fixture.spline("sp", ["s0", "s1", "s2", "s3"], "open");
+      fixture.line("tail", "s3", "l");
+      fixture.point("x0", -2, -1, true);
+      fixture.point("x1", 8, -1, true);
+      fixture.line("axis", "x0", "x1", true);
+      const sketch = await sketchSnapshot(fixture, plane);
+      const spans = splineSpans(sketch, "sp");
+      expect(spans, "premise: three spans").toHaveLength(3);
+      const splineId = entityIdOf(sketch, "sp");
+
+      const built = openWire(oc, sketch, ["sp", "tail"]);
+      try {
+        const keys = spans.map(
+          (span) =>
+            `${splineId}@${span.source.startOccurrenceId}>${span.source.endOccurrenceId}`,
+        );
+        expect([...built.provenance.edges.keys()].sort()).toEqual(
+          [...keys, entityIdOf(sketch, "tail")].sort(),
+        );
+        const edges = keys.map(
+          (key) => built.provenance.edges.get(key as never)!,
+        );
+        for (const [index, edge] of edges.entries()) {
+          const adaptor = new oc.BRepAdaptor_Curve_2(edge);
+          try {
+            expect(adaptor.GetType(), `span ${index} is a Bézier edge`).toBe(
+              oc.GeomAbs_CurveType.GeomAbs_BezierCurve,
+            );
+            expect(
+              [adaptor.FirstParameter(), adaptor.LastParameter()],
+              `span ${index} runs over its whole Bézier [0, 1]`,
+            ).toEqual([0, 1]);
+          } finally {
+            adaptor.delete();
+          }
+        }
+        for (let index = 0; index + 1 < edges.length; index += 1) {
+          const knot = built.provenance.vertices.get(
+            spans[index]!.source.endPointId as never,
+          )!;
+          const last = oc.TopExp.LastVertex(edges[index]!, false);
+          const first = oc.TopExp.FirstVertex(edges[index + 1]!, false);
+          const point = oc.BRep_Tool.Pnt(knot);
+          try {
+            expect(
+              last.IsSame(knot) && first.IsSame(knot),
+              `interior knot ${index + 1} is one vertex shared by its two spans`,
+            ).toBe(true);
+            expect(
+              [point.X(), point.Y()],
+              `interior knot ${index + 1} sits at its span pole`,
+            ).toEqual([...spans[index]!.poles[3]]);
+          } finally {
+            last.delete();
+            first.delete();
+            point.delete();
+          }
+        }
+        const tailStart = oc.TopExp.FirstVertex(
+          built.provenance.edges.get(entityIdOf(sketch, "tail"))!,
+          false,
+        );
+        try {
+          expect(
+            tailStart.IsSame(
+              oc.TopExp.LastVertex(edges[edges.length - 1]!, false),
+            ),
+            "the line starts at the spline's end vertex (shared point s3)",
+          ).toBe(true);
+        } finally {
+          tailStart.delete();
+        }
+      } finally {
+        releaseOpenWire(built);
+      }
+
+      const splineLength = spans.reduce(
+        (sum, span) => sum + cubicArcIntegral(span.poles),
+        0,
+      );
+      const sheet = openSurfaceExtrude(oc, sketch, ["sp", "tail"]);
+      expectRelative(
+        sheet.mass,
+        (splineLength + Math.hypot(1, 1.5)) * HEIGHT,
+        "spline + line sheet area (oracle: Gauss–Legendre arc length)",
+      );
+
+      // Pappus: revolving by π about y = −1 sweeps π·∫(y + 1) ds.
+      const revolve = executeOccFeature(
+        createContext(oc, [sketch]),
+        "feature_t10d_spline_revolve" as FeatureId,
+        {
+          kind: "revolve",
+          featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            resultBodyType: "surface",
+            profiles: [
+              {
+                kind: "sketchEntity",
+                sketchId: sketch.sketchId,
+                entityId: splineId,
+              },
+            ],
+            axis: {
+              kind: "sketchEntity",
+              sketchId: sketch.sketchId,
+              entityId: entityIdOf(sketch, "axis"),
+            },
+            startAngle: 0,
+            extent: {
+              mode: "oneSide",
+              end: {
+                kind: "blind",
+                direction: "counterClockwise",
+                angle: Math.PI,
+              },
+            },
+          },
+        } as never,
+      );
+      const surface = shapeProperties(oc, producedShape(revolve), "surface");
+      expectRelative(
+        surface.mass,
+        Math.PI *
+          spans.reduce(
+            (sum, span) =>
+              sum + cubicArcIntegral(span.poles, (point) => point[1] + 1),
+            0,
+          ),
+        "revolved spline sheet area (Pappus)",
+      );
+    });
+
+    test(`${runtimeName}: a square sweeps along an open spline path (volume = A·L against the Gauss–Legendre path length)`, async () => {
+      const oc = await loadRuntime();
+      const profileFixture = makeSketchFixture();
+      addRectangle(profileFixture, "p", [-0.2, -0.2, 0.2, 0.2]);
+      const profile = await sketchSnapshot(
+        profileFixture,
+        createStandardPlaneDefinition("xy"),
+      );
+      // Path on the XZ plane (sketch (u, v) → world (u, 0, v)), leaving the
+      // profile centroid along +z (authored start tangent).
+      const pathFixture = makeSketchFixture();
+      pathFixture.point("p0", 0, 0);
+      pathFixture.point("p1", 1, 2.5);
+      pathFixture.point("p2", 3, 3.5);
+      pathFixture.point("p3", 5, 3);
+      pathFixture.spline("path", ["p0", "p1", "p2", "p3"], "open", [[0, 2]]);
+      const path = {
+        ...(await sketchSnapshot(
+          pathFixture,
+          createStandardPlaneDefinition("xz"),
+        )),
+        sketchId: "sketch_t10d_path" as SketchId,
+      };
+      const spans = splineSpans(path, "path");
+      const sweep = executeOccFeature(
+        createContext(oc, [profile, path]),
+        "feature_t10d_spline_sweep" as FeatureId,
+        {
+          kind: "sweep",
+          featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            operationIntent: "create",
+            participants: [
+              {
+                role: "profile",
+                targets: [
+                  {
+                    kind: "region",
+                    sketchId: profile.sketchId,
+                    regionId: profile.sketch.regions[0]!.regionId,
+                  },
+                ],
+              },
+              {
+                role: "path",
+                targets: [
+                  {
+                    kind: "sketchEntity",
+                    sketchId: path.sketchId,
+                    entityId: entityIdOf(path, "path"),
+                  },
+                ],
+              },
+            ],
+          },
+        } as never,
+      );
+      const solid = shapeProperties(oc, producedShape(sweep), "volume");
+      const length = spans.reduce(
+        (sum, span) => sum + cubicArcIntegral(span.poles),
+        0,
+      );
+      // Exact tube volume: the profile (centroid on the planar path, normal to
+      // it) gives A·L. OCC approximates each swept lateral face within its
+      // sweep tolerance Tol3d = 1e-4 (BRepFill_Sweep's default, OCCT
+      // BRepFill_Sweep.cxx `SetTolerance(1.e-4)`), so the solid's volume is
+      // within Tol3d × lateral area (perimeter·L) of A·L. The two lateral
+      // faces in the path's planes are exact planes.
+      const sweepTolerance = 1e-4;
+      expect(
+        Math.abs(solid.mass - 0.16 * length),
+        `spline-path sweep volume ${solid.mass} vs A·L = ${0.16 * length}`,
+      ).toBeLessThanOrEqual(sweepTolerance * 1.6 * length);
+      const polyline =
+        Math.hypot(1, 2.5) + Math.hypot(2, 1) + Math.hypot(2, -0.5);
+      expect(
+        0.16 * (length - polyline),
+        "premise: the bound separates the spline path from its fit-point polyline",
+      ).toBeGreaterThan(sweepTolerance * 1.6 * length);
     });
   }
 });
