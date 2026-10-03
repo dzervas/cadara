@@ -1471,7 +1471,11 @@ function buildRegionRenderRecords(
       try {
         profileFace = buildRegionProfileFace(
           state.oc,
-          { plane: sketch.plane, sketch: sketch.sketch },
+          {
+            plane: sketch.plane,
+            sketch: sketch.sketch,
+            modelingTolerance: state.modelingTolerance,
+          },
           region,
         );
       } catch (error) {

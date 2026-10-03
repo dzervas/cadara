@@ -846,7 +846,11 @@ function buildSurfaceExtrudeProfile(
     const sketch = requireSketchSnapshot(context, sketchId);
     const built = buildOpenSketchCurveWire(
       context.oc,
-      { plane: sketch.plane, sketch: sketch.sketch },
+      {
+        plane: sketch.plane,
+        sketch: sketch.sketch,
+        modelingTolerance: context.modelingTolerance,
+      },
       openProfiles.map((profile) => profile.entityId),
     );
     return {
@@ -870,7 +874,11 @@ function buildSurfaceExtrudeProfile(
     const region = requireRegion(sketch, profile.regionId);
     const built = buildRegionProfileWire(
       context.oc,
-      { plane: sketch.plane, sketch: sketch.sketch },
+      {
+        plane: sketch.plane,
+        sketch: sketch.sketch,
+        modelingTolerance: context.modelingTolerance,
+      },
       region,
     );
     return {
@@ -1007,7 +1015,11 @@ function buildExtrudeProfileShapes(
     const region = requireRegion(sketch, profile.regionId);
     const profileFace = buildRegionProfileFace(
       context.oc,
-      { plane: sketch.plane, sketch: sketch.sketch },
+      {
+        plane: sketch.plane,
+        sketch: sketch.sketch,
+        modelingTolerance: context.modelingTolerance,
+      },
       region,
     );
     profileShape = profileFace.face;

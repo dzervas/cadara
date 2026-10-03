@@ -11,7 +11,9 @@ import {
 } from "@/contracts/modeling/authored-values";
 import { getAdvancedParticipant } from "@/contracts/modeling/advanced-solid";
 import type { Vec3 } from "@/domain/modeling/occ/math";
+import { canonicalArcSupport } from "@/contracts/sketch/canonical-arc-support";
 import { assertAcceptedSketchFeatureInput } from "@/domain/modeling/sketch-feature-input";
+import { buildSketchArcEdge } from "@/domain/modeling/occ/exact-edges";
 import {
   buildAxisFromLineEdge,
   buildRegionProfileFace,
@@ -20,7 +22,6 @@ import {
 import {
   magnitude,
   mapSketchPointToWorld,
-  midpointOnArc,
   normalize,
   subtract,
   toGpDir,
@@ -62,7 +63,11 @@ function buildSweepProfileShape(
     const region = requireRegion(sketch, profile.regionId);
     return buildRegionProfileFace(
       context.oc,
-      { plane: sketch.plane, sketch: sketch.sketch },
+      {
+        plane: sketch.plane,
+        sketch: sketch.sketch,
+        modelingTolerance: context.modelingTolerance,
+      },
       region,
     ).face;
   }
@@ -124,28 +129,17 @@ function buildSweepPathWire(
         new context.oc.gp_Circ_2(axis, geometry.solvedRadius),
       ).Edge();
     } else if (geometry.kind === "arc") {
-      const start = mapSketchPointToWorld(sketch.plane, geometry.startPosition);
-      const end = mapSketchPointToWorld(sketch.plane, geometry.endPosition);
-      const midpoint = midpointOnArc(
-        start,
-        end,
-        mapSketchPointToWorld(sketch.plane, geometry.centerPosition),
-        sketch.plane.frame.normal,
-        geometry.sweepDirection,
+      edge = buildSketchArcEdge(
+        context.oc,
+        sketch.plane,
+        canonicalArcSupport(
+          geometry.centerPosition,
+          geometry.startPosition,
+          geometry.endPosition,
+          geometry.sweepDirection,
+        ),
+        `sweep path ${path.entityId}`,
       );
-      const arc = new context.oc.GC_MakeArcOfCircle_4(
-        toGpPnt(context.oc, start),
-        toGpPnt(context.oc, midpoint),
-        toGpPnt(context.oc, end),
-      );
-      if (!arc.IsDone()) {
-        throw new Error(
-          "advanced-feature-unsupported-kernel-case: OCC sweep failed to build the solved sketch arc path.",
-        );
-      }
-      const value = arc.Value();
-      const handle = new context.oc.Handle_Geom_Curve_2(value.get());
-      edge = new context.oc.BRepBuilderAPI_MakeEdge_24(handle).Edge();
     } else {
       throw new Error(
         "advanced-feature-unsupported-kernel-case: OCC sweep path must be a solved line, arc, or circle sketch curve.",

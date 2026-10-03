@@ -173,7 +173,7 @@ test("an inward offset of a line rectangle commits certified trimmed line output
   await workbench.expectBodyCountAtLeast(2);
 });
 
-test("an outward offset of a spline closed by a line commits a certified shell; after Finish its regions are selectable; the source region raises the explicit U9 spline-profile error and the annulus the known browser arc-binding error", async ({
+test("an outward offset of a spline closed by a line commits a certified shell; after Finish its regions are selectable; the source region and the annulus each raise the explicit U9 spline-profile error naming their own spline", async ({
   page,
 }) => {
   const workbench = new FeatureWorkbenchHarness(page);
@@ -213,11 +213,9 @@ test("an outward offset of a spline closed by a line commits a certified shell; 
   const targets = await regionTargets(page, 2);
   // No spline-bounded profile extrudes before T10: each preview is an
   // explicit error, recorded per region. The arc-free source region raises
-  // the U9 message naming the source spline. The offset annulus (joint arcs)
-  // currently fails earlier, on the browser OCC arc-edge binding (a
-  // pre-existing limit of every arc profile; T08b-g5b report Finding 2). The
-  // shell's own U9 is pinned on native OCC by logic row g5b-7; once arc
-  // binding works in the browser this row must be updated to expect it here.
+  // the U9 message naming the source spline. Since T10c0 builds the offset
+  // annulus's joint arcs in the browser, it reaches the same U9, naming the
+  // offset shell (as logic row g5b-7 pins on native OCC).
   const diagnostics = new Map<string, string>();
   for (const [index, target] of targets.entries()) {
     if (index > 0) {
@@ -250,21 +248,21 @@ test("an outward offset of a spline closed by a line commits a certified shell; 
   const summary = [...diagnostics].map(([t, d]) => `${t}: ${d}`).join(" | ");
   const U9 =
     /Spline profile boundary sketch entity (\S+) span \S+ is not yet supported by the OCC profile builder/;
-  const u9Targets = targets.filter((target) =>
-    U9.test(diagnostics.get(target)!),
+  const u9Entities = targets.map(
+    (target) => U9.exec(diagnostics.get(target)!)?.[1] ?? null,
   );
   expect(
-    u9Targets,
-    `Exactly one region (the source region) raises U9 (${summary}).`,
+    u9Entities.every((entity) => entity !== null),
+    `Both regions raise U9 (${summary}).`,
+  ).toBe(true);
+  expect(
+    u9Entities.filter((entity) => /^sketch_entity_\d+_spline_/.test(entity!)),
+    `Exactly one U9 region is the source region: it names the authored spline (${summary}).`,
   ).toHaveLength(1);
-  const u9Entity = U9.exec(diagnostics.get(u9Targets[0]!)!)![1]!;
   expect(
-    u9Entity,
-    `The U9 region is the source region: it names the authored spline, not the offset shell (${summary}).`,
-  ).toMatch(/^sketch_entity_\d+_spline_/);
-  const annulus = targets.find((target) => target !== u9Targets[0])!;
-  expect(
-    diagnostics.get(annulus),
-    `The offset annulus fails on the known browser arc-edge binding limit (${summary}).`,
-  ).toContain("Cannot call GC_MakeArcOfCircle.Value due to unbound types");
+    u9Entities.filter((entity) =>
+      /^sketch_entity_\d+_offset-sketch_entity_\d+_spline_/.test(entity!),
+    ),
+    `Exactly one U9 region is the offset annulus: it names the offset shell, not an arc-binding error (${summary}).`,
+  ).toHaveLength(1);
 });

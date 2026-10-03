@@ -17,18 +17,29 @@ import type {
   SketchPointId,
 } from "@/contracts/shared/ids";
 import type { SketchPlaneDefinition } from "@/contracts/shared/sketch-plane";
+import { canonicalArcSupport } from "@/contracts/sketch/canonical-arc-support";
 import { assertAcceptedSketchFeatureInput } from "@/domain/modeling/sketch-feature-input";
 import { buildConstructionPlaneFromPlanarFace as buildConstructionPlaneFromPlanarFaceFromPlaneUtility } from "@/domain/modeling/occ/planes";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import {
   extractPlanarFaceData,
   mapSketchPointToWorld,
-  midpointOnArc,
   negate,
   toGpDir,
   toGpPnt,
   type Vec3,
 } from "@/domain/modeling/occ/geometry";
+import {
+  admitCurveEndAtVertex,
+  buildExactArcEdge,
+  buildSketchArcEdge,
+  circleEvaluationScale,
+  curveEvaluationRoundingBound,
+  evaluateOccCircle,
+  reverseOccEdge,
+  sketchCircleSupport,
+  type OccCircleSupport,
+} from "@/domain/modeling/occ/exact-edges";
 import {
   createProjectedRegionLoopRejection,
   getProjectedRegionLoopRejectionMessage,
@@ -325,82 +336,22 @@ function buildArcEdge(
   geometry: Extract<SolvedSketchEntityGeometryRecord, { kind: "arc" }>,
   startVertex: InstanceType<OpenCascadeInstance["TopoDS_Vertex"]>,
   endVertex: InstanceType<OpenCascadeInstance["TopoDS_Vertex"]>,
+  modelingTolerance: number,
 ) {
-  return buildArcEdgeFromSketchGeometry(
+  return buildSketchArcEdge(
     oc,
     plane,
-    geometry.startPosition,
-    geometry.endPosition,
-    geometry.centerPosition,
-    geometry.sweepDirection,
+    canonicalArcSupport(
+      geometry.centerPosition,
+      geometry.startPosition,
+      geometry.endPosition,
+      geometry.sweepDirection,
+    ),
     `sketch entity ${geometry.entityId}`,
-    startVertex,
-    endVertex,
+    // Open-chain vertices are solved endpoints; τ caps their gap (T10d
+    // replaces the chain's vertex pool with structural joins).
+    { start: startVertex, end: endVertex, cap: modelingTolerance },
   );
-}
-
-function buildArcEdgeFromSketchGeometry(
-  oc: OpenCascadeInstance,
-  plane: SketchPlaneDefinition,
-  startPosition: readonly [number, number],
-  endPosition: readonly [number, number],
-  centerPosition: readonly [number, number],
-  sweepDirection: "clockwise" | "counterClockwise",
-  label: string,
-  startVertex?: InstanceType<OpenCascadeInstance["TopoDS_Vertex"]>,
-  endVertex?: InstanceType<OpenCascadeInstance["TopoDS_Vertex"]>,
-) {
-  const start = mapSketchPointToWorld(plane, startPosition);
-  const end = mapSketchPointToWorld(plane, endPosition);
-  const midpoint = midpointOnArc(
-    start,
-    end,
-    mapSketchPointToWorld(plane, centerPosition),
-    plane.frame.normal,
-    sweepDirection,
-  );
-  const startPoint = toGpPnt(oc, start);
-  const midpointPoint = toGpPnt(oc, midpoint);
-  const endPoint = toGpPnt(oc, end);
-  const arc = new oc.GC_MakeArcOfCircle_4(startPoint, midpointPoint, endPoint);
-
-  let curveHandle: { delete?: () => void } | null = null;
-  let builder: {
-    Edge(): InstanceType<OpenCascadeInstance["TopoDS_Edge"]>;
-    delete?: () => void;
-  } | null = null;
-  try {
-    if (!arc.IsDone()) {
-      throw new Error(`Failed to build OCC arc for ${label}.`);
-    }
-
-    const arcValue = arc.Value();
-    let nextCurveHandle: InstanceType<
-      OpenCascadeInstance["Handle_Geom_Curve"]
-    > | null = null;
-    try {
-      nextCurveHandle = new oc.Handle_Geom_Curve_2(arcValue.get());
-      curveHandle = nextCurveHandle;
-    } finally {
-      deleteOccObject(arcValue);
-    }
-    builder =
-      startVertex && endVertex
-        ? new oc.BRepBuilderAPI_MakeEdge_27(
-            nextCurveHandle,
-            startVertex,
-            endVertex,
-          )
-        : new oc.BRepBuilderAPI_MakeEdge_24(nextCurveHandle);
-    return builder.Edge();
-  } finally {
-    deleteOccObject(builder);
-    deleteOccObject(curveHandle);
-    deleteOccObject(arc);
-    deleteOccObject(startPoint);
-    deleteOccObject(midpointPoint);
-    deleteOccObject(endPoint);
-  }
 }
 
 function getProjectedSegmentId(
@@ -515,18 +466,6 @@ function getSolvedBoundaryPointPosition(
   }
 
   return mapSketchPointToWorld(plane, authoredPoint.position);
-}
-
-function reverseEdge(
-  oc: OpenCascadeInstance,
-  edge: InstanceType<OpenCascadeInstance["TopoDS_Edge"]>,
-) {
-  const reversed = edge.Reversed();
-  try {
-    return oc.TopoDS.Edge_1(reversed);
-  } finally {
-    deleteOccObject(reversed);
-  }
 }
 
 type RegionBoundarySegment = RegionRecord["loops"][number]["segments"][number];
@@ -744,6 +683,7 @@ function buildRegionSegmentEdge(
     vertex: RegionBoundaryVertex,
     endpointKey: SketchProfileVertexSourceKey | null,
   ) => OccProfileVertex,
+  tolerance: number,
 ) {
   const label = describeRegionBoundarySource(segment.branch.source);
   if ((segment.start === null) !== (segment.end === null)) {
@@ -751,11 +691,6 @@ function buildRegionSegmentEdge(
       `Boundary segment of ${label} has exactly one null end; only an unsplit closed branch has no boundary vertices.`,
     );
   }
-  // Arcs and circles use increasing (counter-clockwise) source angle; a
-  // reverse traversal runs clockwise.
-  const sweep =
-    segment.traversalDirection === "reverse" ? "clockwise" : "counterClockwise";
-
   if (support.kind === "line") {
     if (segment.start === null || segment.end === null) {
       throw new Error(`Line boundary ${label} has no boundary vertices.`);
@@ -784,23 +719,101 @@ function buildRegionSegmentEdge(
       return edge;
     }
     try {
-      return reverseEdge(oc, edge);
+      return reverseOccEdge(oc, edge);
     } finally {
       deleteOccObject(edge);
     }
   }
 
-  return buildArcEdgeFromSketchGeometry(
-    oc,
-    plane,
-    segment.start!.position,
-    segment.end!.position,
-    support.center,
-    sweep,
-    label,
-    resolve(segment.start!, null),
-    resolve(segment.end!, null),
+  // Arcs and split circles: the record's own increasing (counter-clockwise)
+  // source interval, never a refit through the vertex positions (A3). The
+  // edge runs forward from its low to its high vertex; a reverse traversal is
+  // the reversed edge.
+  const forward = segment.traversalDirection !== "reverse";
+  const ends = forward
+    ? { low: segment.start!, high: segment.end! }
+    : { low: segment.end!, high: segment.start! };
+  const circle = sketchCircleSupport(plane, support.center, support.radius);
+  const interval = segment.sourceParameterInterval;
+  const vertices = {
+    low: resolve(ends.low, null),
+    high: resolve(ends.high, null),
+  };
+  for (const [vertex, occVertex, parameter] of [
+    [ends.low, vertices.low, interval[0]],
+    [ends.high, vertices.high, interval[1]],
+  ] as const) {
+    admitCurveEndAtVertex(
+      oc,
+      occVertex,
+      evaluateOccCircle(circle, parameter),
+      regionVertexGapCap(segment, vertex, parameter, circle, tolerance),
+      circleEvaluationScale(circle),
+      label,
+    );
+  }
+  const edge = buildExactArcEdge(oc, circle, interval, label, vertices);
+  if (forward) return edge;
+  try {
+    return reverseOccEdge(oc, edge);
+  } finally {
+    deleteOccObject(edge);
+  }
+}
+
+function isSameBoundaryBranch(
+  left: RegionBoundarySegment["branch"],
+  right: RegionBoundarySegment["branch"],
+) {
+  if (left.spanId !== right.spanId) return false;
+  const [a, b] = [left.source, right.source];
+  if (a.kind === "entity" || b.kind === "entity")
+    return (
+      a.kind === "entity" && b.kind === "entity" && a.entityId === b.entityId
+    );
+  return (
+    a.reference.referenceId === b.reference.referenceId &&
+    a.reference.geometryId === b.reference.geometryId
   );
+}
+
+/**
+ * The largest gap a boundary vertex may absorb at one arc end (T10 T-3):
+ * - a declared join: its certified ball, min(ballRadius, τ);
+ * - a verified intersection (R6): the extent of this arc over the witness
+ *   side's parameter bounds [a, b] (the side on this branch whose bounds hold
+ *   the end parameter, mod 2π), r·(b − a) + rounding: the crossing lies on
+ *   C([a, b]), so its representative may be no further from the end's curve
+ *   value. τ is only the backstop (also when no witness side is on this
+ *   branch, e.g. an overlap end named by another branch).
+ */
+function regionVertexGapCap(
+  segment: RegionBoundarySegment,
+  vertex: RegionBoundaryVertex,
+  parameter: number,
+  circle: OccCircleSupport,
+  tolerance: number,
+) {
+  if (vertex.kind === "declaredJoin")
+    return Math.min(vertex.ballRadius, tolerance);
+  const holds = ([low, high]: readonly [number, number]) =>
+    [0, -2 * Math.PI, 2 * Math.PI].some(
+      (shift) => low <= parameter + shift && parameter + shift <= high,
+    );
+  const enclosures = [vertex.witness.first, vertex.witness.second]
+    .filter(
+      (side) =>
+        isSameBoundaryBranch(side.branch, segment.branch) &&
+        holds(side.parameterBounds),
+    )
+    .map(
+      ({ parameterBounds: [low, high] }) =>
+        circle.radius * (high - low) +
+        curveEvaluationRoundingBound(circleEvaluationScale(circle)),
+    );
+  return enclosures.length === 0
+    ? tolerance
+    : Math.min(Math.max(...enclosures), tolerance);
 }
 
 function buildLoopWire(
@@ -813,6 +826,7 @@ function buildLoopWire(
   resolveSegmentEdgeKey: (
     segment: RegionBoundarySegment,
   ) => SketchProfileEdgeSourceKey,
+  tolerance: number,
 ) {
   const vertices = createRegionVertexResolver(oc, plane, provenance);
   const wireBuilder = new oc.BRepBuilderAPI_MakeWire_1();
@@ -831,6 +845,7 @@ function buildLoopWire(
         segment,
         support,
         vertices.resolve,
+        tolerance,
       );
       wireBuilder.Add_1(edge);
       provenance.edges.set(resolveSegmentEdgeKey(segment), edge);
@@ -885,6 +900,8 @@ export function buildRegionProfileFace(
     plane: SketchPlaneDefinition;
     sketch: SketchRecord;
     projectedReferences?: readonly ProjectedSketchReferenceRecord[];
+    /** The document's settings.modelingTolerance (τ): the vertex-gap backstop. */
+    modelingTolerance: number;
   },
   region: RegionRecord,
 ): BuiltSketchProfileFace {
@@ -935,6 +952,7 @@ export function buildRegionProfileFace(
       projectedReferences,
       provenance,
       resolveSegmentEdgeKey,
+      snapshotSketch.modelingTolerance,
     );
     faceBuilder = new oc.BRepBuilderAPI_MakeFace_15(outerWire, true);
 
@@ -950,6 +968,7 @@ export function buildRegionProfileFace(
         projectedReferences,
         provenance,
         resolveSegmentEdgeKey,
+        snapshotSketch.modelingTolerance,
       );
       try {
         faceBuilder.Add(innerWire);
@@ -1031,6 +1050,8 @@ export function buildRegionProfileWire(
     plane: SketchPlaneDefinition;
     sketch: SketchRecord;
     projectedReferences?: readonly ProjectedSketchReferenceRecord[];
+    /** The document's settings.modelingTolerance (τ): the vertex-gap backstop. */
+    modelingTolerance: number;
   },
   region: RegionRecord,
 ): BuiltSketchProfileWire {
@@ -1064,6 +1085,7 @@ export function buildRegionProfileWire(
         [],
       provenance,
       createRegionSegmentEdgeKeyResolver([outerLoop]),
+      snapshotSketch.modelingTolerance,
     );
     return { wire, plane, normal: plane.frame.normal, provenance };
   } catch (error) {
@@ -1213,7 +1235,12 @@ function orderConnectedOpenCurveSegments(
  */
 export function buildOpenSketchCurveWire(
   oc: OpenCascadeInstance,
-  snapshotSketch: { plane: SketchPlaneDefinition; sketch: SketchRecord },
+  snapshotSketch: {
+    plane: SketchPlaneDefinition;
+    sketch: SketchRecord;
+    /** The document's settings.modelingTolerance (τ). */
+    modelingTolerance: number;
+  },
   entityIds: readonly SketchEntityId[],
 ): BuiltSketchProfileWire {
   if (entityIds.length === 0) {
@@ -1295,6 +1322,7 @@ export function buildOpenSketchCurveWire(
                 >,
                 resolveProfileVertex(segment.start, segment.startPointId),
                 resolveProfileVertex(segment.end, segment.endPointId),
+                snapshotSketch.modelingTolerance,
               );
       wireBuilder.Add_1(edge);
       provenance.edges.set(segment.entityId, edge);
@@ -1365,14 +1393,4 @@ export function buildAxisFromLineEdge(
   }
 
   return curve.Line().Position();
-}
-
-export function buildCircleAxis(
-  oc: OpenCascadeInstance,
-  plane: SketchPlaneDefinition,
-  center: Vec3,
-  radius: number,
-) {
-  const normal = toGpDir(oc, plane.frame.normal);
-  return new oc.GC_MakeCircle_6(toGpPnt(oc, center), normal, radius);
 }
