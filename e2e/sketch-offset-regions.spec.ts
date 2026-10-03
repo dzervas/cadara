@@ -173,7 +173,7 @@ test("an inward offset of a line rectangle commits certified trimmed line output
   await workbench.expectBodyCountAtLeast(2);
 });
 
-test("an outward offset of a spline closed by a line commits a certified shell; after Finish its regions are selectable; the source region and the annulus each raise the explicit U9 spline-profile error naming their own spline", async ({
+test("an outward offset of a spline closed by a line commits a certified shell; after Finish its regions are selectable; the source region and the annulus each extrude into a body", async ({
   page,
 }) => {
   const workbench = new FeatureWorkbenchHarness(page);
@@ -211,58 +211,44 @@ test("an outward offset of a spline closed by a line commits a certified shell; 
 
   await workbench.activateFeature("extrude");
   const targets = await regionTargets(page, 2);
-  // No spline-bounded profile extrudes before T10: each preview is an
-  // explicit error, recorded per region. The arc-free source region raises
-  // the U9 message naming the source spline. Since T10c0 builds the offset
-  // annulus's joint arcs in the browser, it reaches the same U9, naming the
-  // offset shell (as logic row g5b-7 pins on native OCC).
-  const diagnostics = new Map<string, string>();
-  for (const [index, target] of targets.entries()) {
-    if (index > 0) {
-      // One profile at a time: remove the previous region reference.
-      await page
-        .getByRole("button", { name: `Remove ${targets[index - 1]!}` })
-        .click();
-      await expect(
-        page.getByRole("button", { name: `Remove ${targets[index - 1]!}` }),
-      ).toHaveCount(0);
-    }
-    await workbench.selectReference(target);
-    let text = "";
-    await expect
-      .poll(
-        async () => {
-          text = await page.evaluate(
-            () => window.__cadaraDebug?.getState()?.previewDiagnostics ?? "",
-          );
-          return text;
-        },
-        {
-          message: `The extrude preview of ${target} reports an explicit error.`,
-          timeout: 30_000,
-        },
-      )
-      .toMatch(/\berror\b/i);
-    diagnostics.set(target, text);
-  }
-  const summary = [...diagnostics].map(([t, d]) => `${t}: ${d}`).join(" | ");
-  const U9 =
-    /Spline profile boundary sketch entity (\S+) span \S+ is not yet supported by the OCC profile builder/;
-  const u9Entities = targets.map(
-    (target) => U9.exec(diagnostics.get(target)!)?.[1] ?? null,
+  const diagnosticsBefore = await page.evaluate(
+    () => window.__cadaraDebug?.getState()?.snapshotDiagnosticsCount ?? -1,
   );
+  // T10c: spline-bounded profiles build exact Bézier edges in the browser
+  // OCC build. The source region (the spline arch and its line) and the
+  // offset annulus (the shell, the line output and the joint arcs, with the
+  // source loop as its hole) each extrude on their own into a new body.
+  await workbench.selectReference(targets[0]!);
+  await workbench.expectFeaturePreviewReady("extrude");
+  await workbench.commitFeature("feature_extrude-1");
+  await workbench.expectBodyCountAtLeast(1);
+
+  // A new extrude reopens with the previous profile; clear it so this one
+  // extrudes the other region alone, as a new body.
+  await workbench.activateFeature("extrude");
+  await page.getByRole("button", { name: "Clear Profile targets" }).click();
+  await expect(
+    page.getByRole("button", { name: `Remove ${targets[0]!}` }),
+  ).toHaveCount(0);
   expect(
-    u9Entities.every((entity) => entity !== null),
-    `Both regions raise U9 (${summary}).`,
-  ).toBe(true);
-  expect(
-    u9Entities.filter((entity) => /^sketch_entity_\d+_spline_/.test(entity!)),
-    `Exactly one U9 region is the source region: it names the authored spline (${summary}).`,
-  ).toHaveLength(1);
-  expect(
-    u9Entities.filter((entity) =>
-      /^sketch_entity_\d+_offset-sketch_entity_\d+_spline_/.test(entity!),
+    await page.evaluate(
+      (id) => window.__cadaraDebug?.selectTarget(id) ?? false,
+      targets[1]!,
     ),
-    `Exactly one U9 region is the offset annulus: it names the offset shell, not an arc-binding error (${summary}).`,
-  ).toHaveLength(1);
+  ).toBe(true);
+  await expect(
+    page.getByRole("button", { name: `Remove ${targets[1]!}` }),
+  ).toHaveCount(1, { timeout: 10_000 });
+  await workbench.setOperation("newBody");
+  await workbench.expectFeaturePreviewReady("extrude");
+  await workbench.commitFeature("feature_extrude-2");
+  await workbench.expectBodyCountAtLeast(2);
+  // Review A-3: neither region raised a document diagnostic (a profile face
+  // that failed in the part-mode render would add a `profile-…` warning).
+  expect(
+    await page.evaluate(
+      () => window.__cadaraDebug?.getState()?.snapshotDiagnosticsCount ?? -1,
+    ),
+    "no new document diagnostic",
+  ).toBe(diagnosticsBefore);
 });

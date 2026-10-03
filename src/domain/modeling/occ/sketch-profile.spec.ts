@@ -11,6 +11,8 @@ import {
 import { createSketchArrangementDeriver } from "@/contracts/sketch/region-extraction";
 import {
   addRectangle,
+  closedCurvesSignedArea,
+  cubicOracle,
   FIXTURE_TOLERANCE,
   makeSketchFixture,
   type SketchFixture,
@@ -30,8 +32,11 @@ import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
 import type { SketchPlaneDefinition } from "@/contracts/shared/sketch-plane";
 import {
   buildRegionProfileFace,
+  regionBoundaryBasisOfSketchRecord,
   releaseBuiltSketchProfileFace,
 } from "@/domain/modeling/occ/sketch-profile";
+import { resolveRegionBoundaryCurve } from "@/contracts/sketch/region-boundary-curves";
+import { requireSketchRecord } from "@/contracts/sketch/runtime-schema";
 import { getDefaultOpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 
 test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
@@ -200,7 +205,10 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
     createCertifiedNeutralCurveQueryCapabilityForTest(),
   );
 
-  /** Profiles consume the arrangement owner's records (T09e cutover). */
+  /**
+   * Profiles consume the arrangement owner's records (T09e cutover), held by
+   * their sketch record: the record's own basis resolves them (T10c).
+   */
   async function deriveRegions(sketch: SketchRecord) {
     const result = await deriver.derive({
       documentId: "doc_workspace",
@@ -211,6 +219,7 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
       projectedReferences: sketch.projectedReferences ?? [],
       modelingTolerance: 1e-3,
     });
+    sketch.regions = result.regions;
     return result.regions;
   }
 
@@ -1225,11 +1234,14 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
         isClosed: true,
       },
     ]);
+    // Forged into the record, so the record's own basis reads it: the
+    // arrangement has no neutral curve for an ellipse (T10c).
+    sketch.regions = [region];
     expect(
       () => buildRegionProfileFace(oc, { plane, sketch, modelingTolerance: 1e-3 }, region),
-      "The profile builder rejects an ellipse boundary explicitly.",
+      "The profile builder rejects an ellipse boundary explicitly, naming it.",
     ).toThrow(
-      `Sketch entity ${ellipseId} of kind ellipse cannot define a profile boundary in this OCC profile builder.`,
+      `profile-boundary-unsupported: the boundary segment on entity ${ellipseId} span whole has no neutral region curve form.`,
     );
   }
 
@@ -1546,7 +1558,7 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
 
   }
 
-  async function testSplineBoundaryFailsClosedUntilT10() {
+  async function testClosedSplineBoundaryBuildsExactBezierEdges() {
     const oc = await getDefaultOpenCascadeInstance();
     const fixture = makeSketchFixture();
     fixture.point("s0", 0, 0);
@@ -1566,15 +1578,51 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
       regions,
       "A closed spline derives one selectable region (U9).",
     ).toHaveLength(1);
+    const [region] = regions;
+    const profile = buildRegionProfileFace(
+      oc,
+      { plane: createSketchPlane(), sketch, modelingTolerance: 1e-3 },
+      region!,
+    );
+    // Independent oracle (shared Gauss–Legendre Green fixture, exact for the
+    // cubic integrand) on the solved spans at the records' own intervals.
+    const solved = input.solvedSnapshot.solvedEntities[0]!;
+    if (solved.kind !== "spline") throw new Error("premise: a solved spline");
+    const loop = region!.loops[0]!;
+    const oracle = closedCurvesSignedArea(
+      loop.segments.map((segment) => {
+        const span = solved.reconstruction.spans.find(
+          (candidate) =>
+            `${candidate.source.startOccurrenceId}>${candidate.source.endOccurrenceId}` ===
+            segment.branch.spanId,
+        )!;
+        const [a, b] = segment.sourceParameterInterval;
+        return segment.traversalDirection === "forward"
+          ? cubicOracle(span.poles, span.interval, a, b)
+          : cubicOracle(span.poles, span.interval, b, a);
+      }),
+    );
+    expect(oracle, "premise: a counter-clockwise outer loop").toBeGreaterThan(1);
+    const area = await faceArea(profile.face);
     expect(
-      () =>
-        buildRegionProfileFace(
-          oc,
-          { plane: createSketchPlane(), sketch, modelingTolerance: 1e-3 },
-          regions[0]!,
-        ),
-      "OCC rejects spline-bounded regions explicitly until exact span trimming lands (U9 tracked gap).",
-    ).toThrow(/^Spline profile boundary sketch entity .* is not yet supported by the OCC profile builder\.$/);
+      Math.abs(area - oracle) / oracle,
+      `The spline face is exactly the spline (area ${area} vs oracle ${oracle}).`,
+    ).toBeLessThanOrEqual(1e-9);
+    await expectValidProfile(
+      region!,
+      profile,
+      { area: oracle, perimeter: 14 },
+      "closed spline",
+    );
+    expect(
+      [...profile.provenance.edges.keys()].sort(),
+      "Each spline span is its own exact edge, keyed by its span id.",
+    ).toEqual(
+      loop.segments
+        .map((segment) => `${input.definition.entities[0]!.entityId}@${segment.branch.spanId}`)
+        .sort(),
+    );
+    releaseBuiltSketchProfileFace(profile);
   }
 
   /** A sketch record carrying the fixture's solve, including its satisfied statuses. */
@@ -1796,7 +1844,7 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
     for (const built of arcBuilt.profiles) releaseBuiltSketchProfileFace(built);
   }
 
-  async function testPointTouchingLoopsFailClosed() {
+  async function testPointTouchingLoopsBuildValidFaces() {
     const oc = await getDefaultOpenCascadeInstance();
     const plane = createSketchPlane();
     // A diamond hole whose bottom corner is declared on the square's bottom
@@ -1821,12 +1869,54 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
       touching && diamond,
       "the owner derives the touching band and the diamond",
     ).toBeTruthy();
-    expect(
-      () => buildRegionProfileFace(oc, { plane, sketch, modelingTolerance: 1e-3 }, touching!),
-      "A face whose loops share a boundary vertex fails closed explicitly (review A2).",
-    ).toThrow(
-      /^Region .* loops .* and .* share boundary vertex j\["sketch_point_d0"\]; profiles with point-touching loops are not yet supported by the OCC profile builder\.$/,
+    // T-4: one vertex resolver per face, so the loops share one
+    // TopoDS_Vertex, and BRepCheck accepts the face.
+    const band = buildRegionProfileFace(oc, { plane, sketch, modelingTolerance: 1e-3 }, touching!);
+    await expectValidProfile(
+      touching!,
+      band,
+      { area: 100 - 12, perimeter: 40 + 4 * Math.hypot(2, 3) },
+      "point-touching band",
     );
+    expect(
+      Math.abs((await faceArea(band.face)) - 88) / 88,
+      "The band is the square minus the diamond.",
+    ).toBeLessThanOrEqual(1e-9);
+    const touch = band.provenance.vertices.get(pointId("d0"))!;
+    const wireVertices = (wire: object) => {
+      const explorer = new oc.TopExp_Explorer_2(
+        wire as never,
+        oc.TopAbs_ShapeEnum.TopAbs_VERTEX as never,
+        oc.TopAbs_ShapeEnum.TopAbs_SHAPE as never,
+      );
+      let shared = false;
+      while (explorer.More()) {
+        const current = explorer.Current();
+        shared ||= current.IsSame(touch);
+        current.delete();
+        explorer.Next();
+      }
+      explorer.delete();
+      return shared;
+    };
+    const wires = new oc.TopExp_Explorer_2(
+      band.face as never,
+      oc.TopAbs_ShapeEnum.TopAbs_WIRE as never,
+      oc.TopAbs_ShapeEnum.TopAbs_SHAPE as never,
+    );
+    const sharing: boolean[] = [];
+    while (wires.More()) {
+      const wire = wires.Current();
+      sharing.push(wireVertices(wire));
+      wire.delete();
+      wires.Next();
+    }
+    wires.delete();
+    expect(
+      sharing,
+      "Both the outer and the inner wire pass through the one shared touch vertex.",
+    ).toEqual([true, true]);
+    releaseBuiltSketchProfileFace(band);
     const built = buildRegionProfileFace(oc, { plane, sketch, modelingTolerance: 1e-3 }, diamond!);
     await expectValidProfile(
       diamond!,
@@ -1870,10 +1960,110 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
     }
   }
 
+  /**
+   * T10b review R-2 (T10c): the basis is the record's own (definition, solved
+   * snapshot, projected references and regions held together). Records are
+   * cloned whole, so after a structured clone and after a persistence round
+   * trip the clone's regions resolve against the clone to the same curves
+   * and build the same face; another record's region objects do not resolve;
+   * a record that is not current fails closed.
+   */
+  async function testRegionBasisFollowsItsWholeSketchRecord() {
+    const oc = await getDefaultOpenCascadeInstance();
+    const plane = createSketchPlane();
+    const fixture = makeSketchFixture();
+    fixture.point("A", 0, 0);
+    fixture.point("B", 10, 0);
+    fixture.point("K", 10, 3);
+    fixture.point("C", 10, 6);
+    fixture.point("D", 5, 8.5);
+    fixture.point("E", 0, 6);
+    fixture.line("base", "A", "B");
+    fixture.arc("bulge", "K", "B", "C");
+    fixture.spline("top", ["C", "D", "E"], "open");
+    fixture.line("side", "E", "A");
+    const original = fixtureSketchRecord(fixture);
+    const [region] = await deriveRegions(original);
+    expect(region, "premise: the mixed outline derives one region").toBeDefined();
+    const basis = regionBoundaryBasisOfSketchRecord(original);
+    expect(
+      regionBoundaryBasisOfSketchRecord(original),
+      "the basis is cached per record",
+    ).toBe(basis);
+    const curvesOf = (record: SketchRecord) => {
+      const recordBasis = regionBoundaryBasisOfSketchRecord(record);
+      return record.regions[0]!.loops.flatMap((loop) =>
+        loop.segments.map((segment) =>
+          resolveRegionBoundaryCurve(recordBasis, segment),
+        ),
+      );
+    };
+    const originalCurves = curvesOf(original);
+    expect(
+      originalCurves.every((curve) => curve.kind === "resolved"),
+      "every segment of the record's region resolves",
+    ).toBe(true);
+    const originalProfile = buildRegionProfileFace(
+      oc,
+      { plane, sketch: original, modelingTolerance: 1e-3 },
+      region!,
+    );
+    const originalArea = await faceArea(originalProfile.face);
+    releaseBuiltSketchProfileFace(originalProfile);
+    // The persistence boundary: JSON, then the strict sketch-record contract.
+    const persisted = requireSketchRecord(JSON.parse(JSON.stringify(original)));
+    for (const [label, copy] of [
+      ["structured clone", structuredClone(original)],
+      ["persistence round trip", persisted],
+    ] as const) {
+      expect(
+        curvesOf(copy),
+        `${label}: the copy's regions resolve to the original's curves`,
+      ).toEqual(originalCurves);
+      const built = buildRegionProfileFace(
+        oc,
+        { plane, sketch: copy, modelingTolerance: 1e-3 },
+        copy.regions[0]!,
+      );
+      expect(
+        await faceArea(built.face),
+        `${label}: the copy builds the same face`,
+      ).toBe(originalArea);
+      releaseBuiltSketchProfileFace(built);
+      expect(
+        () =>
+          buildRegionProfileFace(
+            oc,
+            { plane, sketch: copy, modelingTolerance: 1e-3 },
+            region!,
+          ),
+        `${label}: the original record's region objects do not resolve against the copy`,
+      ).toThrow(/^profile-boundary-unresolved: .* is not a record of this basis's regions\.$/);
+    }
+    for (const state of ["stale", "invalid"] as const) {
+      const notCurrent: SketchRecord = {
+        ...original,
+        derivedValidity: { state, diagnostics: [] },
+      };
+      expect(
+        () =>
+          buildRegionProfileFace(
+            oc,
+            { plane, sketch: notCurrent, modelingTolerance: 1e-3 },
+            region!,
+          ),
+        `a ${state} record fails closed`,
+      ).toThrow(
+        new RegExp(`^profile-boundary-unresolved: Sketch .* derived output is ${state}; `),
+      );
+    }
+  }
+
+  await testRegionBasisFollowsItsWholeSketchRecord();
   await testNonBitwiseDeclaredJoinsBuildValidFaces();
-  await testPointTouchingLoopsFailClosed();
+  await testPointTouchingLoopsBuildValidFaces();
   await testSplitCircleChordCellsBuildAsBoundedArcs();
-  await testSplineBoundaryFailsClosedUntilT10();
+  await testClosedSplineBoundaryBuildsExactBezierEdges();
   await testMultiPieceSourceCurveKeysEachSplitSegmentDistinctly();
   await testRejectsMultipleOuterLoops();
   await testMixedTrimmedAndAuthoredLoopSharesCornerVertices();

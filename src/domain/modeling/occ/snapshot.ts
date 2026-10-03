@@ -1453,10 +1453,40 @@ function buildCurrentFaceMapForMeshedBody(
   }
 }
 
+/**
+ * A region whose exact profile face does not build keeps no part-mode fill
+ * but stays selectable; the diagnostic names it with the builder's stable
+ * code (a `profile-…` message prefix, or the `profile-face-invalid` code of a
+ * malformed record, T10 §2.2). Anything else is not a known profile failure
+ * (a code fault, an unbound binding): null, and the caller rethrows it
+ * (review A-4).
+ */
+function regionProfileFailureDiagnostic(
+  region: SketchSnapshotRecord["sketch"]["regions"][number],
+  error: unknown,
+): ModelingDiagnostic | null {
+  if (!(error instanceof Error)) return null;
+  const tagged = (error as Error & { code?: unknown }).code;
+  const code =
+    /^(profile-[a-z-]+):/.exec(error.message)?.[1] ??
+    (typeof tagged === "string" && tagged.startsWith("profile-")
+      ? tagged
+      : null);
+  if (code === null) return null;
+  return {
+    code,
+    severity: "warning",
+    message: `Region ${region.label} has no part-mode face: ${error.message}`,
+    target: region.target,
+    detail: null,
+  };
+}
+
 function buildRegionRenderRecords(
   state: OccAuthoringState,
   sketches: readonly SketchSnapshotRecord[],
-  options: OccSnapshotBuildOptions = {},
+  options: OccSnapshotBuildOptions,
+  diagnostics: ModelingDiagnostic[],
 ) {
   const records: RenderableEntityRecord[] = [];
   const tessellationTier = getOccTessellationTier(options.lodTierId);
@@ -1482,10 +1512,9 @@ function buildRegionRenderRecords(
           throw error;
         }
         if (!isProjectedRegionContractGap(error)) {
-          console.warn(
-            `[occ-snapshot] Skipping region render ${region.regionId}: failed to build profile face.`,
-            error,
-          );
+          const diagnostic = regionProfileFailureDiagnostic(region, error);
+          if (diagnostic === null) throw error;
+          diagnostics.push(diagnostic);
         }
         continue;
       }
@@ -2335,10 +2364,11 @@ function buildSketchPointRenderRecords(
 function buildSketchRenderRecords(
   state: OccAuthoringState,
   sketches: readonly SketchSnapshotRecord[],
-  options: OccSnapshotBuildOptions = {},
+  options: OccSnapshotBuildOptions,
+  regionDiagnostics: ModelingDiagnostic[],
 ) {
   return [
-    ...buildRegionRenderRecords(state, sketches, options),
+    ...buildRegionRenderRecords(state, sketches, options, regionDiagnostics),
     ...sketches.flatMap((sketch) => [
       ...buildSketchCurveRenderRecords(state, sketch),
       ...buildSketchPointRenderRecords(state, sketch),
@@ -2354,10 +2384,17 @@ export function buildOccRenderExport(
   > = createFaceSemanticClassMap(state),
   options: OccSnapshotBuildOptions = {},
   appliedSketches: readonly SketchSnapshotRecord[] = state.sketches,
+  /** Receives one diagnostic per region whose profile face does not build. */
+  regionDiagnostics: ModelingDiagnostic[] = [],
 ) {
   const records: RenderableEntityRecord[] = [
     ...buildConstructionRenderRecords(state),
-    ...buildSketchRenderRecords(state, appliedSketches, options),
+    ...buildSketchRenderRecords(
+      state,
+      appliedSketches,
+      options,
+      regionDiagnostics,
+    ),
     ...state.bodies.flatMap((body) =>
       buildBodyRenderRecords(state, body, faceSemanticClasses, options),
     ),
@@ -2394,7 +2431,18 @@ export function buildOccKernelDocumentSnapshot(
     appliedSketches,
   );
   const references = buildReferenceRecords(state, appliedSketchIds);
-  const diagnostics = buildOccSnapshotDiagnostics(state, extraDiagnostics);
+  const regionDiagnostics: ModelingDiagnostic[] = [];
+  const render = buildOccRenderExport(
+    state,
+    faceSemanticClasses,
+    options,
+    appliedSketches,
+    regionDiagnostics,
+  );
+  const diagnostics = buildOccSnapshotDiagnostics(state, [
+    ...extraDiagnostics,
+    ...regionDiagnostics,
+  ]);
 
   return {
     contractVersion: CONTRACT_VERSION,
@@ -2419,12 +2467,7 @@ export function buildOccKernelDocumentSnapshot(
     entities,
     references,
     diagnostics,
-    render: buildOccRenderExport(
-      state,
-      faceSemanticClasses,
-      options,
-      appliedSketches,
-    ),
+    render,
   };
 }
 
