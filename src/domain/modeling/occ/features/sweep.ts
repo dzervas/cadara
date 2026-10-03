@@ -11,17 +11,19 @@ import {
 } from "@/contracts/modeling/authored-values";
 import { getAdvancedParticipant } from "@/contracts/modeling/advanced-solid";
 import type { Vec3 } from "@/domain/modeling/occ/math";
-import { canonicalArcSupport } from "@/contracts/sketch/canonical-arc-support";
 import { assertAcceptedSketchFeatureInput } from "@/domain/modeling/sketch-feature-input";
-import { buildSketchArcEdge } from "@/domain/modeling/occ/exact-edges";
+import {
+  combineOccCleanupError,
+  releaseOccObjects,
+} from "@/domain/modeling/occ/memory";
 import {
   buildAxisFromLineEdge,
+  buildOpenSketchCurveWire,
   buildRegionProfileFace,
   getExtrusionNormalForPlanarFace,
 } from "@/domain/modeling/occ/sketch-profile";
 import {
   magnitude,
-  mapSketchPointToWorld,
   normalize,
   subtract,
   toGpDir,
@@ -84,6 +86,12 @@ function buildSweepProfileShape(
   );
 }
 
+/**
+ * The sweep path wire. A sketch-entity path is built by the open-profile
+ * builder (`buildOpenSketchCurveWire`: exact lines, arcs at their source
+ * angles, circles and per-span spline Bézier edges); its provenance wrappers
+ * are released, the wire keeps its own references.
+ */
 function buildSweepPathWire(
   context: OccFeatureExecutionContext,
   path: DurableRef,
@@ -97,54 +105,29 @@ function buildSweepPathWire(
       path.entityId,
       "a sweep path",
     );
-    const geometry = sketch.sketch.solvedSnapshot.solvedEntities.find(
-      (candidate) => candidate.entityId === path.entityId,
+    const built = buildOpenSketchCurveWire(
+      context.oc,
+      {
+        plane: sketch.plane,
+        sketch: sketch.sketch,
+        modelingTolerance: context.modelingTolerance,
+      },
+      [path.entityId],
     );
-    if (!geometry) {
-      throw new Error(
-        "advanced-feature-unsupported-kernel-case: OCC sweep sketch path did not resolve in solved geometry.",
-      );
+    try {
+      releaseOccObjects([
+        ...built.provenance.edges.values(),
+        ...built.provenance.vertices.values(),
+      ]);
+    } catch (cleanupError) {
+      try {
+        releaseOccObjects([built.wire]);
+      } catch (wireCleanupError) {
+        throw combineOccCleanupError(cleanupError, wireCleanupError);
+      }
+      throw cleanupError;
     }
-    if (geometry.kind === "lineSegment") {
-      edge = new context.oc.BRepBuilderAPI_MakeEdge_3(
-        toGpPnt(
-          context.oc,
-          mapSketchPointToWorld(sketch.plane, geometry.startPosition),
-        ),
-        toGpPnt(
-          context.oc,
-          mapSketchPointToWorld(sketch.plane, geometry.endPosition),
-        ),
-      ).Edge();
-    } else if (geometry.kind === "circle") {
-      const axis = new context.oc.gp_Ax2_2(
-        toGpPnt(
-          context.oc,
-          mapSketchPointToWorld(sketch.plane, geometry.centerPosition),
-        ),
-        toGpDir(context.oc, sketch.plane.frame.normal),
-        toGpDir(context.oc, sketch.plane.frame.xAxis),
-      );
-      edge = new context.oc.BRepBuilderAPI_MakeEdge_8(
-        new context.oc.gp_Circ_2(axis, geometry.solvedRadius),
-      ).Edge();
-    } else if (geometry.kind === "arc") {
-      edge = buildSketchArcEdge(
-        context.oc,
-        sketch.plane,
-        canonicalArcSupport(
-          geometry.centerPosition,
-          geometry.startPosition,
-          geometry.endPosition,
-          geometry.sweepDirection,
-        ),
-        `sweep path ${path.entityId}`,
-      );
-    } else {
-      throw new Error(
-        "advanced-feature-unsupported-kernel-case: OCC sweep path must be a solved line, arc, or circle sketch curve.",
-      );
-    }
+    return built.wire;
   } else if (path.kind === "edge") {
     edge = requireEdge(context, requireSolidBody(context, path.bodyId, "sweep"), path.edgeId);
   } else {

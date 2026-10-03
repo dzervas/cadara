@@ -98,6 +98,22 @@ function surfaceChainSketchEntities(featureId: string) {
 }
 
 /**
+ * The chain's join, declared as a real Onshape capture carries it: a
+ * `COINCIDENT` between segment A's end and segment B's start (open profiles
+ * connect only through declared joins, T10d).
+ */
+function surfaceChainCoincidentConstraints(featureId: string) {
+  return [{
+    constraintType: "COINCIDENT",
+    entityId: `${featureId}_chain_coincident`,
+    parameters: [
+      { parameterId: "localFirst", value: `${featureId}_${SURFACE_CHAIN_ENTITY_IDS[0]}.end` },
+      { parameterId: "localSecond", value: `${featureId}_${SURFACE_CHAIN_ENTITY_IDS[1]}.start` },
+    ],
+  }];
+}
+
+/**
  * Surface extrude mirroring the two local `Extrude 4` forms: profiles come from
  * `surfaceEntities`, the surface operation is `NEW`, and the `d3cd` studio also
  * authors Onshape's `symmetric` flag.
@@ -159,7 +175,10 @@ export function makeWaveXSurfaceExtrudeCaptureBundle(): OnshapeCaptureBundleV2 {
       name,
       features: {
         features: [
-          sketch("S_SURFACE", "Surface profile"),
+          {
+            ...sketch("S_SURFACE", "Surface profile"),
+            constraints: surfaceChainCoincidentConstraints("S_SURFACE"),
+          },
           surfaceExtrude({
             featureId: "E_SURFACE_4",
             name: "Extrude 4",

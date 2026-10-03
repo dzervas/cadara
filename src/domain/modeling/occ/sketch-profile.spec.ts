@@ -8,7 +8,10 @@ import {
   type SketchDefinition,
   type SketchRecord,
 } from "@/contracts/sketch/schema";
-import { createSketchArrangementDeriver } from "@/contracts/sketch/region-extraction";
+import {
+  createSketchArrangementDeriver,
+  declaredJoinClasses,
+} from "@/contracts/sketch/region-extraction";
 import {
   addRectangle,
   closedCurvesSignedArea,
@@ -2069,4 +2072,70 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
   await testMixedTrimmedAndAuthoredLoopSharesCornerVertices();
 
   console.log("OCC phase 3 sketch profile tests passed.");
+});
+
+// T10d: open-profile chaining reads the arrangement's own declared-join
+// classes. Every published declared-join vertex names exactly the sketch
+// points of one `declaredJoinClasses` class (satisfied coincident and shared
+// ids join; an unsatisfied coincident does not).
+test("declaredJoinClasses are the region output's declared-join classes", async () => {
+  const deriver = createSketchArrangementDeriver(
+    createCertifiedNeutralCurveQueryCapabilityForTest(),
+  );
+  const fixture = makeSketchFixture();
+  fixture.point("a", 0, 0);
+  fixture.point("b", 4, 0);
+  fixture.point("b2", 4, 0.0003);
+  fixture.point("c", 2, 3);
+  fixture.point("c2", 2.0002, 3);
+  fixture.point("q", 9, 9);
+  fixture.point("q2", 9, 9);
+  fixture.line("ab", "a", "b");
+  fixture.line("bc", "b2", "c");
+  fixture.line("ca", "c2", "a");
+  fixture.coincident("b", "b2");
+  fixture.coincident("c", "c2");
+  const unsatisfied = fixture.coincident("q", "q2");
+  const input = fixture.build();
+  const solvedSnapshot = {
+    ...input.solvedSnapshot,
+    constraintStatuses: input.solvedSnapshot.constraintStatuses.map((entry) =>
+      entry.constraintId === unsatisfied
+        ? { ...entry, status: "unsatisfied" as const }
+        : entry,
+    ),
+  };
+  // Any unsatisfied constraint makes regions unavailable, so the regions are
+  // derived from the all-satisfied solve and the q pair is checked on classes.
+  const { regions } = await deriver.derive(input);
+  expect(regions, "premise: the declared triangle derives").toHaveLength(1);
+  const classes = declaredJoinClasses(input.definition, input.solvedSnapshot);
+  const members = (root: string) =>
+    input.definition.points
+      .map((point) => point.pointId)
+      .filter((pointId) => classes.find(pointId) === root)
+      .sort();
+  const joins = regions[0]!.loops
+    .flatMap((loop) => loop.segments.map((segment) => segment.start))
+    .filter((vertex) => vertex?.kind === "declaredJoin");
+  expect(joins, "premise: three declared corners").toHaveLength(3);
+  for (const join of joins) {
+    if (join?.kind !== "declaredJoin") continue;
+    expect(
+      join.pointIds,
+      `corner ${join.key} names exactly one declaredJoinClasses class`,
+    ).toEqual(members(classes.find(join.pointIds[0]!)));
+  }
+  expect(classes.find("sketch_point_b"), "a satisfied coincident joins").toBe(
+    classes.find("sketch_point_b2"),
+  );
+  expect(
+    classes.find("sketch_point_q"),
+    "premise: the satisfied q coincident joins",
+  ).toBe(classes.find("sketch_point_q2"));
+  const withUnsatisfied = declaredJoinClasses(input.definition, solvedSnapshot);
+  expect(
+    withUnsatisfied.find("sketch_point_q"),
+    "an unsatisfied coincident does not join (bitwise-equal points)",
+  ).not.toBe(withUnsatisfied.find("sketch_point_q2"));
 });
