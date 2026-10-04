@@ -2,6 +2,9 @@ import * as THREE from "three";
 import { SVGLoader } from "three-stdlib";
 
 import type { SketchSessionDisplayRenderable } from "@/domain/editor/sketch-session";
+import { getSketchPointMarkerVisibility } from "@/domain/editor/sketch-session/display";
+import { type PrimitiveRef, primitiveRefEquals } from "@/core/editor/schema";
+import type { SketchPointId } from "@/contracts/shared/ids";
 import { SURFACE_COLORS } from "@/infrastructure/viewport/render-picking";
 import type { ToolbarMode } from "@/core/tools/schema";
 import type { SketchRenderingPalette } from "@/components/cad/sketch-rendering-palette";
@@ -259,6 +262,44 @@ export function getActiveSketchPolylineStrokeGeometryConfig(
   return {
     ...materialConfig,
     lineWidth: clamp(materialConfig.lineWidth, bounds.min, bounds.max),
+  };
+}
+
+/** A hovered sketch point's marker grows by this factor (T11-D8). */
+export const SKETCH_POINT_HOVER_MARKER_SCALE = 1.5;
+
+/**
+ * What the sketch marker nodes draw by (T11-D8): the revealed contextual
+ * points (`getSketchRevealedPointIds`, computed once per viewport render)
+ * and the hover target.
+ */
+export interface SketchMarkerDisplayContext {
+  revealedPointIds: ReadonlySet<SketchPointId>;
+  hoverTarget: PrimitiveRef | null;
+}
+
+/**
+ * How a marker renderable is drawn (T11-D8): `visible` by the contextual
+ * marker rule, and the visible radius factor, larger for the hovered point
+ * itself (a stronger hover than a curve's). A hidden marker stays mounted
+ * and bound, so its highlight binding survives; its point stays pickable
+ * (picked from the renderables in screen space, never from the mesh).
+ */
+export function getSketchDisplayMarkerPresentation(
+  renderable: SketchSessionDisplayRenderable,
+  context: SketchMarkerDisplayContext,
+) {
+  return {
+    visible: getSketchPointMarkerVisibility(
+      renderable,
+      context.revealedPointIds,
+    ),
+    radiusScale:
+      renderable.target?.kind === "sketchPoint" &&
+      context.hoverTarget !== null &&
+      primitiveRefEquals(context.hoverTarget, renderable.target)
+        ? SKETCH_POINT_HOVER_MARKER_SCALE
+        : 1,
   };
 }
 

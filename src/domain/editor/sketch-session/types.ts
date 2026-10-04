@@ -341,6 +341,15 @@ export interface SketchSessionDisplayRenderable {
     | "sketchReference"
     | "sketchImage";
   markerLayer?: "default" | "overlay";
+  /**
+   * A sketch point marker's display rule (T11-D8): `always` (no owning
+   * curve), or `contextual` (shown only near or on its owning curves;
+   * `getSketchPointMarkerVisibility`).
+   */
+  pointMarker?: {
+    visibility: "always" | "contextual";
+    ownerEntityIds: readonly SketchEntityId[];
+  };
   paintStyle?: SketchDisplayPaintStyle;
   strokeStyle?: SketchDisplayStrokeStyle;
   constraintDisplay?: SketchConstraintDisplayTargetState;

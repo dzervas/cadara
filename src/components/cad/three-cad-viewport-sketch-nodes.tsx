@@ -5,6 +5,8 @@ import * as THREE from "three";
 import {
   getActiveSketchMarkerWorldRadii,
   getActiveSketchPolylineStrokeGeometryConfig,
+  getSketchDisplayMarkerPresentation,
+  type SketchMarkerDisplayContext,
   buildSketchGradientMeshMaterial,
   buildSketchPolylineStrokeGeometry,
   getSketchFeedbackWorldUnitsPerPixel,
@@ -32,12 +34,14 @@ interface SketchDisplayRenderableNodeProps {
   renderable: SketchSessionDisplayRenderable;
   applyStyles: boolean;
   palette: SketchRenderingPalette;
+  markerContext: SketchMarkerDisplayContext;
 }
 
 export function SketchDisplayRenderableNode({
   renderable,
   applyStyles,
   palette,
+  markerContext,
 }: SketchDisplayRenderableNodeProps) {
   switch (renderable.geometry.kind) {
     case "mesh":
@@ -62,6 +66,7 @@ export function SketchDisplayRenderableNode({
           renderable={renderable}
           applyStyles={applyStyles}
           palette={palette}
+          markerContext={markerContext}
         />
       );
   }
@@ -504,16 +509,22 @@ export function SketchDisplayMarkerNode({
   renderable,
   applyStyles,
   palette,
+  markerContext,
 }: {
   renderable: SketchSessionDisplayRenderable;
   applyStyles: boolean;
   palette: SketchRenderingPalette;
+  markerContext: SketchMarkerDisplayContext;
 }) {
   const geometryData =
     renderable.geometry.kind === "marker" ? renderable.geometry : null;
   if (!geometryData) {
     throw new Error("Display renderable is missing marker geometry.");
   }
+  const { visible, radiusScale } = getSketchDisplayMarkerPresentation(
+    renderable,
+    markerContext,
+  );
 
   const materialConfig = useMemo(
     () =>
@@ -554,8 +565,16 @@ export function SketchDisplayMarkerNode({
       renderable,
       camera,
       size.height,
+      radiusScale,
     );
-  }, [camera, geometryData.position, pickProxy, renderable, size.height]);
+  }, [
+    camera,
+    geometryData.position,
+    pickProxy,
+    radiusScale,
+    renderable,
+    size.height,
+  ]);
 
   useEffect(() => () => material.dispose(), [material]);
   useEffect(() => {
@@ -586,10 +605,11 @@ export function SketchDisplayMarkerNode({
     >
       <mesh
         ref={visibleMeshRef}
+        visible={visible}
         geometry={MARKER_SPHERE_GEOMETRY}
         material={material}
         position={geometryData.position}
-        scale={initialRadii.visibleRadius}
+        scale={initialRadii.visibleRadius * radiusScale}
         renderOrder={getSketchDisplayMarkerRenderOrder(renderable)}
       />
       <primitive object={pickProxy} />
@@ -603,12 +623,13 @@ function updateActiveSketchMarkerScales(
   renderable: SketchSessionDisplayRenderable,
   camera: THREE.Camera,
   viewportHeight: number,
+  radiusScale: number,
 ) {
   const radii = getActiveSketchMarkerWorldRadii(
     renderable,
     camera,
     viewportHeight,
   );
-  visibleMesh?.scale.setScalar(radii.visibleRadius);
+  visibleMesh?.scale.setScalar(radii.visibleRadius * radiusScale);
   pickProxy.scale.setScalar(radii.pickRadius);
 }
