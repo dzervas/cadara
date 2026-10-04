@@ -6,7 +6,12 @@ import type {
   SketchPointDefinition,
 } from "@/contracts/sketch/schema";
 import type { SketchPoint } from "@/contracts/modeling/schema";
-import { reconstructSplineAggregate } from "@/contracts/sketch/spline-geometry";
+import {
+  evaluateSplineSpan,
+  reconstructSplineAggregate,
+} from "@/contracts/sketch/spline-geometry";
+import { nextUp } from "@/contracts/sketch/region-interval-geometry";
+import { applySolvedSketchToDefinition } from "@/domain/editor/sketch-session/definition-patches";
 import {
   FIXTURE_SKETCH_ID,
   makeSketchFixture,
@@ -42,6 +47,7 @@ import {
   offsetCurveDescriptorFromProjectedGeometry,
   PROJECTED_SPLINE_OFFSET_UNSUPPORTED_MESSAGE,
   SPLINE_SLOT_UNSUPPORTED_MESSAGE,
+  splineTrimCutMismatchMessage,
   type SketchEditOperationFactories,
 } from "@/domain/sketch-editing/operations";
 
@@ -1374,6 +1380,7 @@ describe("createSketchTrimMutation (T10g-1 exact Trim, Q1b ties, review R-3)", (
       definition,
       targetEntityId: entity(target),
       intersections: result,
+      solvedSnapshot: solve(definition),
       factories: createSessionCommitFactories(1, FIXTURE_SKETCH_ID as SketchId),
     });
     expect(mutation.message).toBeNull();
@@ -1832,6 +1839,677 @@ describe("createSketchTrimMutation (T10g-1 exact Trim, Q1b ties, review R-3)", (
     ]);
     expect(accepted(definition)).toBe(true);
     expect(await regions(definition)).toBe(2);
+  });
+
+  // ---------------------------------------------------------------------
+  // T10g-3b: spline Trim (option B) on the same pipeline. The pieces are
+  // compared with the original by owner evaluation (`evaluateSplineSpan`
+  // on both reconstructions) at 65 parameters per piece span.
+  // ---------------------------------------------------------------------
+  type Spline = Extract<SketchEntityDefinition, { kind: "spline" }>;
+  const splineOf = (definition: SketchDefinition, name: string) => {
+    const found = definition.entities.find(
+      (candidate) => candidate.entityId === entity(name),
+    );
+    if (found?.kind !== "spline") throw new Error(`${name} is no spline`);
+    return found;
+  };
+  const trimFactories = () =>
+    createSessionCommitFactories(1, FIXTURE_SKETCH_ID as SketchId);
+  /** Solve once, query on that snapshot, build on it (the session's path). */
+  async function trimSpline(definition: SketchDefinition, target = "target") {
+    const solvedSnapshot = solve(definition);
+    const result = await querySketchEditIntersections(
+      {
+        definition,
+        solvedSnapshot,
+        projectedReferences: [],
+        modelingTolerance: 1e-3,
+        operation: { kind: "trim", targetEntityId: entity(target) },
+      },
+      queries,
+    );
+    if (result.kind !== "verified") throw new Error(result.message);
+    const mutation = createSketchTrimMutation({
+      definition,
+      targetEntityId: entity(target),
+      intersections: result,
+      solvedSnapshot,
+      factories: trimFactories(),
+    });
+    expect(mutation.message).toBeNull();
+    return { result, solvedSnapshot, after: mutation.definition };
+  }
+  /** New points of `after` (the cut points Q). */
+  const newPoints = (before: SketchDefinition, after: SketchDefinition) =>
+    after.points.filter(
+      (candidate) => !before.pointIds.includes(candidate.pointId),
+    );
+  /**
+   * The largest distance between piece `pieceName` of `after` (its kept
+   * fit points at their solved positions, its new points as authored) and
+   * the solved original, the piece's parameter t matching tFrom + t.
+   */
+  function reproductionError(
+    before: SketchDefinition,
+    solvedSnapshot: ReturnType<typeof solve>,
+    after: SketchDefinition,
+    pieceName: string,
+    tFrom: number,
+    /** The piece's own geometry (e.g. its re-solved record); default: rebuilt from `after`. */
+    pieceGeometry?: ReturnType<typeof reconstructSplineAggregate>,
+  ) {
+    const record = solvedSnapshot.solvedEntities.find(
+      (candidate) => candidate.entityId === entity("target"),
+    );
+    if (record?.kind !== "spline" || record.reconstruction.validity !== "valid")
+      throw new Error("original");
+    const original = record.reconstruction.spans;
+    const positions = Object.fromEntries([
+      ...solvedSnapshot.solvedPoints.map(
+        (candidate) => [candidate.pointId, candidate.solvedPosition] as const,
+      ),
+      ...newPoints(before, after).map(
+        (candidate) => [candidate.pointId, candidate.position] as const,
+      ),
+    ]) as Record<SketchPointId, SketchPoint>;
+    const piece =
+      pieceGeometry ??
+      reconstructSplineAggregate(splineOf(after, pieceName), positions);
+    if (piece.validity !== "valid") throw new Error("piece is invalid");
+    let worst = 0;
+    for (const span of piece.spans)
+      for (let k = 0; k <= 64; k++) {
+        const u = k / 64;
+        const at = evaluateSplineSpan(span, { kind: "local", value: u });
+        const t =
+          tFrom + span.interval[0] + u * (span.interval[1] - span.interval[0]);
+        const host =
+          original.find((candidate) => t <= candidate.interval[1]) ??
+          original.at(-1)!;
+        const clamped = Math.min(
+          Math.max(t, host.interval[0]),
+          host.interval[1],
+        );
+        const expected = evaluateSplineSpan(host, {
+          kind: "source",
+          value: clamped,
+        });
+        worst = Math.max(
+          worst,
+          Math.hypot(
+            at.position[0] - expected.position[0],
+            at.position[1] - expected.position[1],
+          ),
+        );
+      }
+    return worst;
+  }
+  /** Ties authored by the Trim: [point, kind, curve or other point]. */
+  const newTies = (before: SketchDefinition, after: SketchDefinition) =>
+    after.constraints
+      .filter(
+        (constraint) => !before.constraintIds.includes(constraint.constraintId),
+      )
+      .map((constraint) =>
+        constraint.kind === "pointOnCurve"
+          ? [
+              constraint.point.pointId,
+              "pointOnCurve",
+              constraint.curve.entityId,
+            ]
+          : constraint.kind === "coincident"
+            ? [constraint.pointIds[0], "coincident", constraint.pointIds[1]]
+            : [constraint.kind],
+      );
+  /** Points of `after` that no entity uses (Q-g2: left free). */
+  const freePoints = (after: SketchDefinition) =>
+    after.pointIds.filter(
+      (pointId) =>
+        !after.entities.some((candidate) =>
+          JSON.stringify(candidate).includes(`"${pointId}"`),
+        ),
+    );
+  /** Verticals x = at from y0 to y1. */
+  const verticals = (
+    sketch: ReturnType<typeof makeSketchFixture>,
+    xs: readonly number[],
+    y0 = -1,
+    y1 = 4,
+  ) =>
+    xs.forEach((x, index) => {
+      sketch.point(`v${index}a`, x, y0);
+      sketch.point(`v${index}b`, x, y1);
+      sketch.line(`v${index}`, `v${index}a`, `v${index}b`);
+    });
+
+  test("T10g-3b open spline: two splines (original id keeps [0, c₁], `trim-split` keeps [c₂, T] reusing the occurrence ids, construction and style copied); the kept sub-curves reproduce the original ≤ 1e-12·scale; Q = cut.position bitwise; ties; the removed fit point stays free", async () => {
+    const sketch = makeSketchFixture();
+    const fit: P[] = [
+      [0, 0],
+      [1, 2],
+      [2, 2.5],
+      [3, 2],
+      [4, 0],
+      [5, -1],
+    ];
+    fit.forEach((at, index) => sketch.point(`s${index}`, ...at));
+    sketch.spline(
+      "target",
+      fit.map((_, index) => `s${index}`),
+      "open",
+      [undefined, undefined, undefined, undefined, [0.6, -0.9]] as never,
+    );
+    verticals(sketch, [1.5, 2.5]);
+    const style = { strokeColor: "#ff0000", strokeWidth: 3 };
+    const before = {
+      ...sketch.definition(),
+      entities: sketch
+        .definition()
+        .entities.map((candidate) =>
+          candidate.entityId === entity("target")
+            ? { ...candidate, isConstruction: true, style }
+            : candidate,
+        ),
+    };
+    const original = splineOf(before, "target");
+    const { result, solvedSnapshot, after } = await trimSpline(before);
+    const [c1, c2] = result.cuts as [
+      (typeof result.cuts)[0],
+      (typeof result.cuts)[0],
+    ];
+    expect([c1.knotOccurrenceIndex, c2.knotOccurrenceIndex]).toEqual([
+      null,
+      null,
+    ]);
+    const a = splineOf(after, "target");
+    const pieceId = after.entityIds.at(-1)!;
+    expect(pieceId).toMatch(/trim-split/);
+    const b = after.entities.at(-1) as Spline;
+    expect(b.kind).toBe("spline");
+    expect([
+      b.label,
+      b.isConstruction,
+      b.style,
+      a.isConstruction,
+      a.style,
+    ]).toEqual(["target trimmed", true, style, true, style]);
+    expect([a.closure, b.closure]).toEqual(["open", "open"]);
+    const [q1, q2] = newPoints(before, after);
+    expect(q1!.position, "Q₁ is the service's position bitwise").toEqual(
+      c1.position,
+    );
+    expect(q2!.position, "Q₂ is the service's position bitwise").toEqual(
+      c2.position,
+    );
+    const ids = original.pointOccurrenceIds;
+    expect(a.pointOccurrenceIds.slice(0, 2)).toEqual(ids.slice(0, 2));
+    expect(b.pointOccurrenceIds.slice(1)).toEqual(ids.slice(3));
+    expect(
+      [a.pointOccurrenceIds[2], b.pointOccurrenceIds[0]].every(
+        (id) => !ids.includes(id!),
+      ),
+    ).toBe(true);
+    expect(a.pointOccurrences.map(({ pointId }) => pointId)).toEqual([
+      "sketch_point_s0",
+      "sketch_point_s1",
+      q1!.pointId,
+    ]);
+    expect(b.pointOccurrences.map(({ pointId }) => pointId)).toEqual([
+      q2!.pointId,
+      "sketch_point_s3",
+      "sketch_point_s4",
+      "sketch_point_s5",
+    ]);
+    expect(
+      b.pointOccurrences[2]!.tangent,
+      "an untouched authored tangent keeps its authored vector",
+    ).toBe(original.pointOccurrences[4]!.tangent);
+    expect(
+      [
+        a.pointOccurrences[1]!.tangent.kind,
+        b.pointOccurrences[1]!.tangent.kind,
+      ],
+      "the neighbours of the cut spans are re-expressed (authored)",
+    ).toEqual(["authored", "authored"]);
+    expect(Object.keys(a.endSpanParameterLengths ?? {})).toEqual(["end"]);
+    expect(Object.keys(b.endSpanParameterLengths ?? {})).toEqual(["start"]);
+    const scale = 5;
+    expect(
+      reproductionError(before, solvedSnapshot, after, "target", 0),
+    ).toBeLessThanOrEqual(1e-12 * scale);
+    expect(
+      reproductionError(
+        before,
+        solvedSnapshot,
+        after,
+        pieceId.replace("sketch_entity_", ""),
+        c2.representative,
+      ),
+    ).toBeLessThanOrEqual(1e-12 * scale);
+    expect(newTies(before, after)).toEqual([
+      [q1!.pointId, "pointOnCurve", entity("v0")],
+      [q2!.pointId, "pointOnCurve", entity("v1")],
+    ]);
+    expect(freePoints(after), "Q-g2: S2 stays, as a free point").toEqual([
+      "sketch_point_s2",
+    ]);
+    expect(accepted(after)).toBe(true);
+    expect(displacement(after)).toBeLessThan(1e-9);
+  });
+
+  test("T10g-3b closed splines: smooth and positional closures cut by y = 0.3 become one open spline (same id) over [c₁, c₂] that reproduces the original; with the line it forms one region", async () => {
+    for (const closure of ["smooth", "positional"] as const) {
+      const sketch = makeSketchFixture();
+      sketch.point("p0", 1, 0);
+      sketch.point("p1", 0, 1);
+      sketch.point("p2", -1, 0);
+      sketch.point("p3", 0, -1);
+      sketch.spline(
+        "target",
+        closure === "smooth"
+          ? ["p0", "p1", "p2", "p3"]
+          : ["p0", "p1", "p2", "p3", "p0"],
+        closure,
+      );
+      sketch.point("a", -2, 0.3);
+      sketch.point("b", 2, 0.3);
+      sketch.line("chord", "a", "b");
+      const before = sketch.definition();
+      const { result, solvedSnapshot, after } = await trimSpline(before);
+      expect(after.entityIds, closure).toEqual(before.entityIds);
+      const piece = splineOf(after, "target");
+      const [q1, q2] = newPoints(before, after);
+      expect(piece.closure).toBe("open");
+      expect(piece.pointOccurrences.map(({ pointId }) => pointId)).toEqual([
+        q1!.pointId,
+        "sketch_point_p1",
+        q2!.pointId,
+      ]);
+      expect([q1!.position, q2!.position]).toEqual(
+        result.cuts.map((cut) => cut.position),
+      );
+      expect(Object.keys(piece.endSpanParameterLengths ?? {})).toEqual([
+        "start",
+        "end",
+      ]);
+      expect(
+        reproductionError(
+          before,
+          solvedSnapshot,
+          after,
+          "target",
+          result.cuts[0]!.representative,
+        ),
+        closure,
+      ).toBeLessThanOrEqual(1e-12);
+      expect(newTies(before, after)).toEqual([
+        [q1!.pointId, "pointOnCurve", entity("chord")],
+        [q2!.pointId, "pointOnCurve", entity("chord")],
+      ]);
+      expect(freePoints(after).sort(), closure).toEqual([
+        "sketch_point_p0",
+        "sketch_point_p2",
+        "sketch_point_p3",
+      ]);
+      expect(accepted(after), closure).toBe(true);
+      expect(await regions(after), closure).toBe(1);
+    }
+  });
+
+  test("T10g-3b closed seam (A-R2): a smooth or positional closure cut by y = 0 at its seam/corner knot and the opposite knot keeps [P₀, P₂] with no new point; the knots' fit points are tied; one region", async () => {
+    for (const closure of ["smooth", "positional"] as const) {
+      const sketch = makeSketchFixture();
+      sketch.point("p0", 1, 0);
+      sketch.point("p1", 0, 1);
+      sketch.point("p2", -1, 0);
+      sketch.point("p3", 0, -1);
+      sketch.spline(
+        "target",
+        closure === "smooth"
+          ? ["p0", "p1", "p2", "p3"]
+          : ["p0", "p1", "p2", "p3", "p0"],
+        closure,
+      );
+      sketch.point("a", -2, 0);
+      sketch.point("b", 2, 0);
+      sketch.line("axis", "a", "b");
+      const before = sketch.definition();
+      const { result, solvedSnapshot, after } = await trimSpline(before);
+      expect(
+        result.cuts.map((cut) => cut.knotOccurrenceIndex),
+        closure,
+      ).toEqual([0, 2]);
+      expect(newPoints(before, after), "knot cuts add no point").toEqual([]);
+      const piece = splineOf(after, "target");
+      expect(piece.closure).toBe("open");
+      expect(piece.pointOccurrences.map(({ pointId }) => pointId)).toEqual([
+        "sketch_point_p0",
+        "sketch_point_p1",
+        "sketch_point_p2",
+      ]);
+      expect(
+        piece.endSpanParameterLengths,
+        "knot cuts fix no span length",
+      ).toBeUndefined();
+      expect("endSpanParameterLengths" in piece).toBe(false);
+      expect(
+        reproductionError(before, solvedSnapshot, after, "target", 0),
+        closure,
+      ).toBeLessThanOrEqual(1e-12);
+      expect(newTies(before, after)).toEqual([
+        ["sketch_point_p0", "pointOnCurve", entity("axis")],
+        ["sketch_point_p2", "pointOnCurve", entity("axis")],
+      ]);
+      expect(freePoints(after)).toEqual(["sketch_point_p3"]);
+      expect(accepted(after), closure).toBe(true);
+      expect(await regions(after), closure).toBe(1);
+    }
+  });
+
+  test("T10g-3b knot cut (open): lines through two fit points keep [S₀, S₁] and [S₃, S₄] with no new point, tying S₁ and S₃; a cutter already joined at the knot (its end is S₁) adds no tie", async () => {
+    const build = (joined: boolean) => {
+      const sketch = makeSketchFixture();
+      const fit: P[] = [
+        [0, 0],
+        [1, 1],
+        [2, 0],
+        [3, 1],
+        [4, 0],
+      ];
+      fit.forEach((at, index) => sketch.point(`s${index}`, ...at));
+      sketch.spline(
+        "target",
+        fit.map((_, index) => `s${index}`),
+        "open",
+      );
+      if (joined) {
+        sketch.point("k", 1, -1);
+        sketch.line("spoke", "s1", "k");
+      } else {
+        sketch.point("k0", 1, -1);
+        sketch.point("k1", 1, 2);
+        sketch.line("spoke", "k0", "k1");
+      }
+      sketch.point("m0", 3, -1);
+      sketch.point("m1", 3, 2);
+      sketch.line("other", "m0", "m1");
+      return sketch.definition();
+    };
+    for (const joined of [false, true]) {
+      const before = build(joined);
+      const { result, solvedSnapshot, after } = await trimSpline(before);
+      expect(result.cuts.map((cut) => cut.knotOccurrenceIndex)).toEqual([1, 3]);
+      expect(newPoints(before, after)).toEqual([]);
+      const a = splineOf(after, "target");
+      const b = after.entities.at(-1) as Spline;
+      expect(a.pointOccurrences.map(({ pointId }) => pointId)).toEqual([
+        "sketch_point_s0",
+        "sketch_point_s1",
+      ]);
+      expect(b.pointOccurrences.map(({ pointId }) => pointId)).toEqual([
+        "sketch_point_s3",
+        "sketch_point_s4",
+      ]);
+      expect(
+        reproductionError(before, solvedSnapshot, after, "target", 0),
+      ).toBeLessThanOrEqual(4e-12);
+      expect(newTies(before, after), `joined: ${joined}`).toEqual([
+        ...(joined
+          ? []
+          : [["sketch_point_s1", "pointOnCurve", entity("spoke")]]),
+        ["sketch_point_s3", "pointOnCurve", entity("other")],
+      ]);
+      expect(freePoints(after)).toEqual(["sketch_point_s2"]);
+      expect(accepted(after)).toBe(true);
+    }
+  });
+
+  test("T10g-3b R-3 on a spline: a `pointOnCurve` whose declared join is the last cut and one beyond it move to the new piece; one on the first piece stays; the result solves in place", async () => {
+    const sketch = makeSketchFixture();
+    const fit: P[] = [
+      [0, 0],
+      [1, 1.5],
+      [2, 2],
+      [3, 1.5],
+      [4, 0],
+    ];
+    fit.forEach((at, index) => sketch.point(`s${index}`, ...at));
+    sketch.spline(
+      "target",
+      fit.map((_, index) => `s${index}`),
+      "open",
+    );
+    verticals(sketch, [1.5]);
+    const geometry = reconstructSplineAggregate(
+      splineOf(sketch.definition(), "target"),
+      Object.fromEntries(
+        sketch
+          .definition()
+          .points.map((candidate) => [candidate.pointId, candidate.position]),
+      ),
+    );
+    if (geometry.validity !== "valid") throw new Error("spline");
+    const at = (span: number, u: number) =>
+      evaluateSplineSpan(geometry.spans[span]!, { kind: "local", value: u })
+        .position;
+    const foot = at(2, 0.4);
+    sketch.point("f", ...foot);
+    sketch.point("r", foot[0], 4);
+    sketch.line("spoke", "r", "f");
+    const footTie = sketch.pointOnCurve("f", "target");
+    sketch.point("x", ...at(3, 0.5));
+    const beyondTie = sketch.pointOnCurve("x", "target");
+    sketch.point("y", ...at(0, 0.5));
+    const firstTie = sketch.pointOnCurve("y", "target");
+    const before = sketch.definition();
+    expect(accepted(before), "premise: the incidences solve").toBe(true);
+    const { result, after } = await trimSpline(before);
+    expect(result.incidences).toEqual([
+      expect.objectContaining({ constraintId: footTie, cut: 1 }),
+      expect.objectContaining({ constraintId: beyondTie, cut: null }),
+      expect.objectContaining({ constraintId: firstTie, cut: null }),
+    ]);
+    const curveOf = (constraintId: string) => {
+      const found = after.constraints.find(
+        (candidate) => candidate.constraintId === constraintId,
+      );
+      return found?.kind === "pointOnCurve" ? found.curve.entityId : null;
+    };
+    const piece = after.entityIds.at(-1)!;
+    expect([curveOf(footTie), curveOf(beyondTie), curveOf(firstTie)]).toEqual([
+      piece,
+      piece,
+      entity("target"),
+    ]);
+    expect(
+      newTies(before, after).at(-1),
+      "the spoke's end, tied onto the spline, is the last cut: Q₂ is tied coincident with it",
+    ).toEqual([
+      newPoints(before, after).at(-1)!.pointId,
+      "coincident",
+      "sketch_point_f",
+    ]);
+    expect(accepted(after)).toBe(true);
+    expect(displacement(after)).toBeLessThan(1e-9);
+  });
+
+  test("T10g-3a review A-1: the pieces are built from the SOLVED input (a fit point the solve moved): Q = cut.position bitwise; an authored-position snapshot or a cut position 1 ulp off fails closed", async () => {
+    const sketch = makeSketchFixture();
+    sketch.point("s0", 0, 0);
+    sketch.point("s1", 1, 1.5);
+    sketch.point("s2", 2, 2.6);
+    sketch.point("s3", 3, 1.5);
+    sketch.point("s4", 4, 0);
+    sketch.spline("target", ["s0", "s1", "s2", "s3", "s4"], "open", [
+      undefined,
+      [0.8, 0.9],
+    ] as never);
+    sketch.point("k", 2, 2);
+    sketch.coincident("s2", "k");
+    // A point off the curve held onto it: the solve also moves the spline's
+    // authored handle (a solver unknown).
+    sketch.point("x", 1, 1.6);
+    sketch.pointOnCurve("x", "target");
+    verticals(sketch, [1.5, 2.5]);
+    const before = sketch.definition();
+    const { result, solvedSnapshot, after } = await trimSpline(before);
+    const moved = solvedSnapshot.solvedPoints.find(
+      (candidate) => candidate.pointId === "sketch_point_s2",
+    )!.solvedPosition;
+    expect(
+      Math.hypot(moved[0] - 2, moved[1] - 2.6),
+      "premise: the solve moved S2 away from its authored position",
+    ).toBeGreaterThan(1e-3);
+    const record = solvedSnapshot.solvedEntities.find(
+      (candidate) => candidate.entityId === entity("target"),
+    );
+    const handle =
+      record?.kind === "spline" && record.reconstruction.validity === "valid"
+        ? record.reconstruction.handles[1]!
+        : null;
+    expect(
+      handle && Math.hypot(handle[0] - 0.8, handle[1] - 0.9),
+      "premise: the solve moved S1's authored handle",
+    ).toBeGreaterThan(1e-6);
+    expect(newPoints(before, after).map((point) => point.position)).toEqual(
+      result.cuts.map((cut) => cut.position),
+    );
+    expect(
+      reproductionError(before, solvedSnapshot, after, "target", 0),
+    ).toBeLessThanOrEqual(4e-12);
+    const failed = (
+      snapshot: typeof solvedSnapshot,
+      intersections: typeof result,
+    ) =>
+      createSketchTrimMutation({
+        definition: before,
+        targetEntityId: entity("target"),
+        intersections,
+        solvedSnapshot: snapshot,
+        factories: trimFactories(),
+      });
+    for (const mutation of [
+      failed(sketch.build().solvedSnapshot, result),
+      failed(solvedSnapshot, {
+        ...result,
+        cuts: [
+          {
+            ...result.cuts[0]!,
+            position: [
+              nextUp(result.cuts[0]!.position[0]),
+              result.cuts[0]!.position[1],
+            ],
+          },
+          result.cuts[1]!,
+        ],
+      }),
+    ])
+      expect(mutation).toEqual({
+        changed: false,
+        message: splineTrimCutMismatchMessage("target"),
+        definition: before,
+      });
+  });
+
+  test("T10g-3b review A-1: on the session's commit invariant (authored == solved, `applySolvedSketchToDefinition`), Trim then re-solve reproduces the pre-Trim solved curve ≤ 1e-12·scale, handles included (an untouched authored handle the solve had moved)", async () => {
+    const sketch = makeSketchFixture();
+    const fit: P[] = [
+      [0, 0],
+      [1, 1.5],
+      [2, 2.6],
+      [3, 1.5],
+      [4, 0.5],
+      [5, 0],
+    ];
+    fit.forEach((at, index) => sketch.point(`s${index}`, ...at));
+    sketch.spline(
+      "target",
+      fit.map((_, index) => `s${index}`),
+      "open",
+      [
+        undefined,
+        [0.8, 0.9],
+        undefined,
+        undefined,
+        undefined,
+        [0.8, 0.3],
+      ] as never,
+    );
+    sketch.point("k", 2, 2);
+    sketch.coincident("s2", "k");
+    // Points off the curve held onto it: the solve moves both authored
+    // handles, S₅'s in the piece's untouched end span.
+    sketch.point("x", 1, 1.6);
+    sketch.pointOnCurve("x", "target");
+    sketch.point("y", 4.6, 0.4);
+    sketch.pointOnCurve("y", "target");
+    verticals(sketch, [1.5, 2.5]);
+    const authored = sketch.definition();
+    const unreconciled = solve(authored);
+    const handleOf = (snapshot: typeof unreconciled, index: number) => {
+      const record = snapshot.solvedEntities.find(
+        (candidate) => candidate.entityId === entity("target"),
+      );
+      return record?.kind === "spline" &&
+        record.reconstruction.validity === "valid"
+        ? record.reconstruction.handles[index]!
+        : null;
+    };
+    const h5 = handleOf(unreconciled, 5)!;
+    expect(
+      Math.hypot(h5[0] - 0.8, h5[1] - 0.3),
+      "premise: the solve moved S₅'s authored handle",
+    ).toBeGreaterThan(1e-6);
+    const before = applySolvedSketchToDefinition(authored, unreconciled, {
+      modelingTolerance: 1e-3,
+    });
+    const { result, solvedSnapshot, after } = await trimSpline(before);
+    const resolved = solve(after);
+    expect(accepted(after)).toBe(true);
+    const pieceId = after.entityIds.at(-1)!;
+    const geometryOf = (entityId: string) => {
+      const record = resolved.solvedEntities.find(
+        (candidate) => candidate.entityId === entityId,
+      );
+      if (record?.kind !== "spline") throw new Error("re-solved piece");
+      return record.reconstruction;
+    };
+    const scale = 5;
+    for (const [name, id, tFrom] of [
+      ["target", entity("target"), 0],
+      [
+        pieceId.replace("sketch_entity_", ""),
+        pieceId,
+        result.cuts[1]!.representative,
+      ],
+    ] as const)
+      expect(
+        reproductionError(
+          before,
+          solvedSnapshot,
+          after,
+          name,
+          tFrom,
+          geometryOf(id),
+        ),
+        `re-solved ${name}`,
+      ).toBeLessThanOrEqual(1e-12 * scale);
+  });
+
+  test("T10g-3b: an open spline closed by a line, crossed by two lines: 3 regions before; after the tied Trim the two outer regions remain (2)", async () => {
+    const sketch = makeSketchFixture();
+    sketch.point("s0", 0, 0);
+    sketch.point("s1", 2, 3);
+    sketch.point("s2", 4, 0);
+    sketch.spline("target", ["s0", "s1", "s2"], "open");
+    sketch.line("base", "s0", "s2");
+    verticals(sketch, [1, 3]);
+    const before = sketch.definition();
+    expect(await regions(before)).toBe(3);
+    const { after } = await trimSpline(before);
+    expect(accepted(after)).toBe(true);
+    expect(await regions(after)).toBe(2);
   });
 
   // T10g-2: the exact Extend and Split builders on the same pipeline.

@@ -251,6 +251,42 @@ describe("querySketchEditIntersections (T10g-1 exact edit-intersection service)"
     expect(result.cuts[1]!.representative).toBeGreaterThan(knot);
   });
 
+  test("T10g-1 re-review A-R2 (T10g-3b): a smooth closed 4-point spline cut by y = 0 meets it at its seam knot and at the opposite knot: 2 cuts, the first the seam (t = 0, knot 0)", async () => {
+    const sketch = makeSketchFixture();
+    sketch.point("p0", 1, 0);
+    sketch.point("p1", 0, 1);
+    sketch.point("p2", -1, 0);
+    sketch.point("p3", 0, -1);
+    sketch.spline("target", ["p0", "p1", "p2", "p3"], "smooth");
+    sketch.point("a", -2, 0);
+    sketch.point("b", 2, 0);
+    sketch.line("axis", "a", "b");
+    const result = verified(await trim(sketch, "target"));
+    const spans = targetCurve(sketch, "target").sort(
+      (left, right) => left.domain[0] - right.domain[0],
+    );
+    expect(result.cuts).toHaveLength(2);
+    const [seam, opposite] = result.cuts as [
+      (typeof result.cuts)[0],
+      (typeof result.cuts)[0],
+    ];
+    expect(Object.is(seam.representative, 0)).toBe(true);
+    expect(seam.knotOccurrenceIndex).toBe(0);
+    expect(seam.position).toEqual([1, 0]);
+    expect(
+      seam.enclosure[0],
+      "the seam cut's enclosure is lifted around the seam start (its part before T wraps)",
+    ).toBeLessThan(0);
+    expect(seam.cutters).toEqual([
+      { entityId: entity("axis"), tie: { kind: "pointOnCurve" } },
+    ]);
+    expect(opposite).toMatchObject({
+      representative: spans[2]!.domain[0],
+      knotOccurrenceIndex: 2,
+      position: [-1, 0],
+    });
+  });
+
   test("A-8: a circle target's parameter is the angle from the +x seam, today's Trim origin (cuts at π/3, 2π/3, 4π/3, 5π/3)", async () => {
     const sketch = makeSketchFixture();
     sketch.point("c", 0, 0);
@@ -1024,5 +1060,49 @@ describe("Trim kept-piece length (T10g-2 review A-1)", () => {
       tooShort("target"),
     );
     verified(await trim(circleWithCutters([0, 1e-2]), "target"));
+  });
+
+  // T10g-3b (brief item 6): a spline piece is measured by the polyline
+  // through its fit points (its ends and every kept knot), a lower bound
+  // of its curve length.
+  test("an open spline: a kept end piece whose fit-point polyline is under 1e-3 refuses; 2e-3 trims", async () => {
+    const openSpline = (x: number) => {
+      const sketch = makeSketchFixture();
+      sketch.point("s0", 0, 0);
+      sketch.point("s1", 2, 3);
+      sketch.point("s2", 4, 0);
+      sketch.spline("target", ["s0", "s1", "s2"], "open");
+      [x, 3].forEach((at, index) => {
+        sketch.point(`v${index}a`, at, -1);
+        sketch.point(`v${index}b`, at, 5);
+        sketch.line(`v${index}`, `v${index}a`, `v${index}b`);
+      });
+      return sketch;
+    };
+    expect(await trim(openSpline(1e-4), "target")).toEqual(tooShort("target"));
+    const kept = verified(await trim(openSpline(2e-3), "target"));
+    expect(Math.abs(kept.cuts[0]!.position[0] - 2e-3)).toBeLessThan(1e-15);
+  });
+
+  test("a smooth closed spline: a kept piece [c₁, c₂] whose fit-point polyline is under 1e-3 refuses; 1e-2 trims", async () => {
+    const closedSpline = (x: number) => {
+      const sketch = makeSketchFixture();
+      sketch.point("p0", 2, 0);
+      sketch.point("p1", 0, 2);
+      sketch.point("p2", -2, 0);
+      sketch.point("p3", 0, -2);
+      sketch.spline("target", ["p0", "p1", "p2", "p3"], "smooth");
+      [x, 0].forEach((at, index) => {
+        sketch.point(`v${index}a`, at, 1.9);
+        sketch.point(`v${index}b`, at, 2.1);
+        sketch.line(`v${index}`, `v${index}a`, `v${index}b`);
+      });
+      return sketch;
+    };
+    expect(await trim(closedSpline(1e-4), "target")).toEqual(
+      tooShort("target"),
+    );
+    const kept = verified(await trim(closedSpline(1e-2), "target"));
+    expect(kept.cuts.map((cut) => cut.knotOccurrenceIndex)).toEqual([null, 1]);
   });
 });

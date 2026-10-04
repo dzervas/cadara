@@ -518,6 +518,12 @@ export function splineAggregatePiece<TPointId extends string>(
  * closure keeps [c₁, c₂] from its seam, which never crosses the seam or
  * corner (the circle precedent). Pieces per `splineAggregatePiece`. Null when
  * the original doesn't reconstruct.
+ *
+ * Contract (relied on by the Trim builder, T10g-3b): a kept `original`
+ * occurrence whose tangent this builder leaves unchanged carries the
+ * aggregate's own tangent object (`tangent ===` the input occurrence's
+ * `tangent`); a re-expressed one (next to a cut span, or a new end) carries a
+ * new authored tangent object. Callers detect "untouched" by that identity.
  */
 export function trimSplineAggregate<TPointId extends string>(
   aggregate: AuthoredSplineAggregate<TPointId>,

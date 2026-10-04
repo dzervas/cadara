@@ -288,24 +288,54 @@ function targetBranchesOf(
 }
 
 /**
- * The end positions of the pieces a Trim/Split keeps: a line or arc keeps
- * start→first cut and last cut→end (Split: the same, one cut); a circle
- * keeps the arc from the first to the last cut. Ends are the solved target
- * end points and the cuts' `position`s. Splines are not edit targets yet
- * (T07; g-3b): none.
+ * Polylines whose lengths bound the pieces a Trim/Split keeps from below: a
+ * line or arc keeps start→first cut and last cut→end (Split: the same, one
+ * cut); a circle keeps the arc from the first to the last cut (lines: the
+ * length; arcs: the chord). A spline (T10g-3b) keeps the same parameter
+ * ranges as a line (open) or a circle (smooth/positional closure); its
+ * polyline runs through the piece's fit points (its ends and every knot
+ * strictly inside), each chord at most the arc between them, so its length
+ * is a lower bound of the piece's curve length. Ends are the solved target
+ * end points and the cuts' `position`s.
  */
 function keptPieces(
   definition: SketchDefinition,
   solved: SolvedSketchSnapshot,
   targetId: SketchEntityId,
+  ordered: readonly Branch[],
   cuts: readonly SketchEditCut[],
-): (readonly [readonly [number, number], readonly [number, number]])[] {
+): (readonly (readonly [number, number])[])[] {
   const entity = definition.entities.find(
     (candidate) => candidate.entityId === targetId,
   );
   const first = cuts[0]!.position;
   const last = cuts.at(-1)!.position;
   if (entity?.kind === "circle") return [[first, last]];
+  if (entity?.kind === "spline") {
+    const domainStart = ordered[0]!.domain[0];
+    const domainEnd = ordered.at(-1)!.domain[1];
+    const polyline = (
+      from: number,
+      to: number,
+      start: readonly [number, number],
+      end: readonly [number, number],
+    ) => [
+      start,
+      ...ordered.flatMap((branch) =>
+        from < branch.domain[0] && branch.domain[0] < to
+          ? [branch.portPositions.start!]
+          : [],
+      ),
+      end,
+    ];
+    const [c1, c2] = [cuts[0]!.representative, cuts.at(-1)!.representative];
+    return entity.closure === "open"
+      ? [
+          polyline(domainStart, c1, ordered[0]!.portPositions.start!, first),
+          polyline(c2, domainEnd, last, ordered.at(-1)!.portPositions.end!),
+        ]
+      : [polyline(c1, c2, first, last)];
+  }
   if (entity?.kind !== "lineSegment" && entity?.kind !== "arc") return [];
   const at = (pointId: SketchPointId) =>
     solved.solvedPoints.find((point) => point.pointId === pointId)!
@@ -665,13 +695,23 @@ async function queryCuts(
   // Review R-1/A-1: a kept piece must be a valid solver curve. Its end
   // positions (the solved target ends and the cuts' evaluator positions)
   // must be at least the solver's minimum segment length apart
-  // (`minimumSegmentLength = modelingTolerance`; for arcs the chord). This
-  // checks the result against the solver's own policy; the exact
-  // classification of the cuts is unchanged. Split keeps today's refusal of
-  // a crossing at an end.
-  const tooShort = keptPieces(definition, solved, targetId, cuts).some(
-    ([from, to]) =>
-      Math.hypot(to[0] - from[0], to[1] - from[1]) < modelingTolerance,
+  // (`minimumSegmentLength = modelingTolerance`; for arcs the chord; for
+  // splines the fit-point polyline, T10g-3b). This checks the result
+  // against the solver's own policy; the exact classification of the cuts
+  // is unchanged. Split keeps today's refusal of a crossing at an end.
+  const tooShort = keptPieces(definition, solved, targetId, ordered, cuts).some(
+    (polyline) =>
+      polyline
+        .slice(1)
+        .reduce(
+          (length, to, index) =>
+            length +
+            Math.hypot(
+              to[0] - polyline[index]![0],
+              to[1] - polyline[index]![1],
+            ),
+          0,
+        ) < modelingTolerance,
   );
   if (tooShort && operation.kind === "split")
     fail("edit-no-crossing", SPLIT_NO_CROSSING_MESSAGE, [

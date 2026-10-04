@@ -904,3 +904,88 @@ test("T10g-1: Undo of a circle Trim restores its circleRadius dimension exactly;
     after,
   );
 });
+
+// T10g-3b: a spline Trim (two option-B pieces, new fit points, ties) is one
+// "Trim" action; Undo restores the original spline exactly (no field key,
+// its occurrences and tangents), Redo the pieces, neither re-queries.
+test("T10g-3b: an applied spline Trim is one 'Trim' action; Undo/Redo restore it exactly without re-querying", async () => {
+  const f = await fixture();
+  let session = beginSketchTool(f.session, "spline");
+  session = startSketchDraw(session, [20, 0]);
+  for (const point of [
+    [22, 3],
+    [24, 0],
+  ] as const)
+    session = acceptSketchDraw(session, point);
+  for (const x of [21, 23])
+    session = acceptSketchDraw(
+      startSketchDraw(beginSketchTool(session, "line"), [x, -1]),
+      [x, 4],
+    );
+  f.apply({ type: "selection.cleared" }, session);
+  const spline = f.session.definition.entities.find(
+    (entity) => entity.kind === "spline",
+  )!;
+  const original = structuredClone(spline);
+  f.apply(
+    { type: "selection.cleared" },
+    selectSketchEditToolTarget(
+      beginSketchTool(f.session, "trim"),
+      spline.target,
+    ),
+  );
+  const before = projection(f.session);
+  const undoDepth = f.session.actionHistory!.undo.length;
+  const emitted = emitPendingSketchEditQuery({ state: f.state, effects: [] });
+  const effect = emitted.effects.find(
+    (candidate) => candidate.type === "sketch.queryEditIntersections",
+  );
+  if (effect?.type !== "sketch.queryEditIntersections")
+    throw new Error("Expected the Trim query.");
+  const event = await runEditorEffect(effect, {
+    querySketchEditIntersections: querySketchEditIntersectionsForTest,
+  } as EditorEffectRuntime);
+  const applied = f.owner.transition(
+    emitted.state as SketchEditorState,
+    event,
+    (state) => transitionEditorState(state, event),
+  );
+  if (applied.state.kind !== "editingSketch") throw Error("Expected sketch");
+  const after = projection(applied.state.session);
+  const splines = applied.state.session.definition.entities.filter(
+    (entity) => entity.kind === "spline",
+  );
+  expect(splines).toHaveLength(2);
+  expect(
+    splines.every(
+      (entity) =>
+        entity.kind === "spline" &&
+        entity.endSpanParameterLengths !== undefined,
+    ),
+  ).toBe(true);
+  expect(applied.state.session.actionHistory?.undo.at(-1)?.label).toBe("Trim");
+  expect(applied.state.session.actionHistory?.undo).toHaveLength(undoDepth + 1);
+  const step = (state: SketchEditorState, type: EditorEvent["type"]) => {
+    const next = f.owner.transition(state, { type } as EditorEvent, (current) =>
+      transitionEditorState(current, { type } as EditorEvent),
+    );
+    expect(
+      next.effects.filter(
+        (candidate) => candidate.type === "sketch.queryEditIntersections",
+      ),
+      `${type} never re-queries`,
+    ).toEqual([]);
+    if (next.state.kind !== "editingSketch") throw Error("Expected sketch");
+    return next.state;
+  };
+  const undone = step(applied.state, "history.undoRequested");
+  expect(projection(undone.session)).toEqual(before);
+  const restored = undone.session.definition.entities.find(
+    (entity) => entity.entityId === spline.entityId,
+  )!;
+  expect(restored).toStrictEqual(original);
+  expect(Object.hasOwn(restored, "endSpanParameterLengths")).toBe(false);
+  expect(projection(step(undone, "history.redoRequested").session)).toEqual(
+    after,
+  );
+});

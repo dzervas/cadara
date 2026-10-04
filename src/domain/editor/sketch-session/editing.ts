@@ -44,6 +44,7 @@ import {
 import {
   EXTEND_TARGET_UNSUPPORTED_MESSAGE,
   SPLIT_TARGET_UNSUPPORTED_MESSAGE,
+  type SketchEditIntersectionInput,
   type SketchEditIntersectionResult,
   type SketchEditOperation,
 } from "@/contracts/sketch/edit-intersections";
@@ -923,7 +924,7 @@ export function refreshSketchEditToolAfterOffsetRound(
 ): SketchSessionState {
   const tool = session.activeEditTool;
   if (tool && isSketchEditQueryTool(tool.toolId)) {
-    const advanced = advanceSketchTrimQueue(session);
+    const advanced = advanceSketchEditQueryQueue(session);
     if (tool.selectedTargets.length === 0) return advanced;
     const message =
       editSelectionMessage(advanced, advanced.activeEditTool!) ??
@@ -966,7 +967,7 @@ export function refreshSketchEditToolAfterOffsetRound(
   };
 }
 
-export const TRIM_CHECKING_MESSAGE = "Checking intersections…";
+export const SKETCH_EDIT_QUERY_CHECKING_MESSAGE = "Checking intersections…";
 export const TRIM_STALE_MESSAGE = editQueryStaleMessage("trim");
 export const TRIM_BASIS_NOT_ACCEPTED_MESSAGE =
   editQueryBasisNotAcceptedMessage("trim");
@@ -1028,7 +1029,10 @@ function withEditQuery(
     validationMessage: message,
     toolPresentation: buildSketchEditToolPresentation(
       tool,
-      message ?? (editQuery.queue.length > 0 ? TRIM_CHECKING_MESSAGE : null),
+      message ??
+        (editQuery.queue.length > 0
+          ? SKETCH_EDIT_QUERY_CHECKING_MESSAGE
+          : null),
     ),
   };
 }
@@ -1125,7 +1129,7 @@ function queueSketchEditQueryClick(
     click,
   );
   if (refusal) return withEditQuery(session, editQuery, refusal);
-  return advanceSketchTrimQueue(
+  return advanceSketchEditQueryQueue(
     withEditQuery(
       session,
       { ...editQuery, queue: [...editQuery.queue, click] },
@@ -1143,7 +1147,7 @@ function queueSketchEditQueryClick(
  * which offset outputs are accepted), and so does a click whose C3 gate is
  * still pending. Unchanged when nothing waits.
  */
-export function advanceSketchTrimQueue(
+export function advanceSketchEditQueryQueue(
   session: SketchSessionState,
   initialMessage: string | null = null,
 ): SketchSessionState {
@@ -1225,13 +1229,17 @@ export function advanceSketchTrimQueue(
   }
 }
 
-/** The builder of the in-flight operation (Trim, Extend or Split). */
+/**
+ * The builder of the in-flight operation (Trim, Extend or Split) on the
+ * snapshot its intersections were certified on.
+ */
 function buildEditQueryMutation(
   session: SketchSessionState,
-  operation: SketchEditOperation,
+  input: SketchEditIntersectionInput,
   result: Extract<SketchEditIntersectionResult, { kind: "verified" }>,
   sequence: number,
 ): SketchMutationResult {
+  const { operation } = input;
   const factories = createSessionCommitFactories(
     sequence,
     session.sketchId ?? ("sketch_draft" as SketchId),
@@ -1244,7 +1252,10 @@ function buildEditQueryMutation(
   };
   switch (operation.kind) {
     case "trim":
-      return createSketchTrimMutation(common);
+      return createSketchTrimMutation({
+        ...common,
+        solvedSnapshot: input.solvedSnapshot,
+      });
     case "extend":
       return createSketchExtendMutation({ ...common, sequence });
     case "split":
@@ -1265,7 +1276,7 @@ function buildEditQueryMutation(
  *   boundary) and the non-accepted outputs near a Trim target (T-g5); the
  *   next click follows.
  */
-export function completeSketchTrimQuery(
+export function completeSketchEditQuery(
   session: SketchSessionState,
   queryId: string,
   result: SketchEditIntersectionResult,
@@ -1283,7 +1294,7 @@ export function completeSketchTrimQuery(
   const cleared = { ...editQuery!, inFlight: null };
   const popped = { ...cleared, queue: cleared.queue.slice(1) };
   if (session.definition !== inFlight.definition)
-    return advanceSketchTrimQueue(
+    return advanceSketchEditQueryQueue(
       withEditQuery(session, popped, null),
       editQueryStaleMessage(operation.kind),
     );
@@ -1291,7 +1302,7 @@ export function completeSketchTrimQuery(
     session.liveRegions.generation !== inFlight.generation ||
     session.liveSolve?.solvedSnapshot !== inFlight.input.solvedSnapshot
   )
-    return advanceSketchTrimQueue(withEditQuery(session, cleared, null));
+    return advanceSketchEditQueryQueue(withEditQuery(session, cleared, null));
   const gate = offsetEditInputGate(
     session,
     [
@@ -1307,26 +1318,26 @@ export function completeSketchTrimQuery(
     editQueryInputUse(tool.toolId, false),
   );
   if (gate?.pending)
-    return advanceSketchTrimQueue(withEditQuery(session, cleared, null));
+    return advanceSketchEditQueryQueue(withEditQuery(session, cleared, null));
   if (gate)
-    return advanceSketchTrimQueue(
+    return advanceSketchEditQueryQueue(
       withEditQuery(session, popped, null),
       gate.message,
     );
   if (result.kind === "failed")
-    return advanceSketchTrimQueue(
+    return advanceSketchEditQueryQueue(
       withEditQuery(session, popped, null),
       result.message,
     );
   const nextSequence = session.sequence + 1;
   const mutation = buildEditQueryMutation(
     session,
-    operation,
+    inFlight.input,
     result,
     nextSequence,
   );
   if (!mutation.changed)
-    return advanceSketchTrimQueue(
+    return advanceSketchEditQueryQueue(
       withEditQuery(session, popped, null),
       mutation.message,
     );
@@ -1342,11 +1353,42 @@ export function completeSketchTrimQuery(
     },
     mutation.definition,
   );
-  return advanceSketchTrimQueue(applied);
+  return advanceSketchEditQueryQueue(
+    applied,
+    freedFitPointsMessage(
+      session.definition,
+      mutation.definition,
+      operation.targetEntityId,
+    ),
+  );
+}
+
+/**
+ * T10g-3b (user decision Q-g2): the fit points of a trimmed spline that no
+ * curve uses any more stay as free points with their constraints; the
+ * tool message says how many. Null when there are none (every other edit).
+ */
+function freedFitPointsMessage(
+  before: SketchDefinition,
+  after: SketchDefinition,
+  targetEntityId: SketchEntityId,
+) {
+  const target = before.entities.find(
+    (entity) => entity.entityId === targetEntityId,
+  );
+  if (target?.kind !== "spline") return null;
+  const used = new Set(after.entities.flatMap(getEntityPointIds));
+  const freed = new Set(
+    getEntityPointIds(target).filter((pointId) => !used.has(pointId)),
+  ).size;
+  if (freed === 0) return null;
+  return freed === 1
+    ? `Trim left 1 fit point of ${target.label} as a free point (with its constraints): the removed part used it.`
+    : `Trim left ${freed} fit points of ${target.label} as free points (with their constraints): the removed part used them.`;
 }
 
 /** T10g-1: the in-flight edit query failed (a real error): nothing is applied. */
-export function failSketchTrimQuery(
+export function failSketchEditQuery(
   session: SketchSessionState,
   queryId: string,
   message: string,
@@ -1360,7 +1402,7 @@ export function failSketchTrimQuery(
     inFlight?.queryId !== queryId
   )
     return session;
-  return advanceSketchTrimQueue(
+  return advanceSketchEditQueryQueue(
     withEditQuery(
       session,
       { ...editQuery!, inFlight: null, queue: editQuery!.queue.slice(1) },

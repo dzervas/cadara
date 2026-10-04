@@ -14,7 +14,7 @@ import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { querySketchEditIntersections } from "@/contracts/sketch/edit-intersections";
 import {
-  completeSketchTrimQuery,
+  completeSketchEditQuery,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
 
@@ -69,7 +69,7 @@ export const querySketchEditIntersectionsForTest: NonNullable<
  * T10g-1 (session seam): answers the Trim tool's in-flight queries with the
  * one contract function, as the editor loop does, until none is in flight.
  */
-export async function completeSketchTrimQueriesForTest(
+export async function completeSketchEditQueriesForTest(
   session: SketchSessionState,
   queries = createCertifiedNeutralCurveQueryCapabilityForTest(),
 ): Promise<SketchSessionState> {
@@ -77,7 +77,7 @@ export async function completeSketchTrimQueriesForTest(
   for (;;) {
     const inFlight = next.activeEditTool?.editQuery?.inFlight;
     if (!inFlight) return next;
-    next = completeSketchTrimQuery(
+    next = completeSketchEditQuery(
       next,
       inFlight.queryId,
       await querySketchEditIntersections(inFlight.input, queries),
