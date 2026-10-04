@@ -3074,6 +3074,10 @@ function createDerivedEntity(
       style: entity.style,
       closure: entity.closure,
       interpolationPolicy: entity.interpolationPolicy,
+      // T10g option B: copied like the tangents; transformedEntity re-sets it (×√|s|) whenever the derivation evaluates.
+      ...(entity.endSpanParameterLengths
+        ? { endSpanParameterLengths: entity.endSpanParameterLengths }
+        : {}),
       pointOccurrences: outputOccurrences.map((occurrence, index) => ({
         ...occurrence,
         tangent: sourceOccurrences[index]!.tangent,

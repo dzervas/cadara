@@ -476,7 +476,7 @@ function transformedEntity(
       outputOccurrences &&
       seedOccurrences.length === outputOccurrences.length
     ) {
-      return {
+      const copy: Extract<SketchEntityDefinition, { kind: "spline" }> = {
         ...output,
         closure: seed.closure,
         interpolationPolicy: seed.interpolationPolicy,
@@ -491,6 +491,23 @@ function transformedEntity(
           };
         }),
       };
+      // T10g option B: set from the seed, never inherited from the stale
+      // output (A-6). A transform scales chords by |s|, so centripetal
+      // parameter lengths by √|s|; the other relationships are isometries.
+      const fixed = seed.endSpanParameterLengths;
+      if (!fixed) {
+        delete copy.endSpanParameterLengths;
+        return copy;
+      }
+      const factor =
+        relationship.kind === "transform"
+          ? Math.sqrt(Math.abs(relationship.scale))
+          : 1;
+      copy.endSpanParameterLengths = {
+        ...(fixed.start === undefined ? {} : { start: fixed.start * factor }),
+        ...(fixed.end === undefined ? {} : { end: fixed.end * factor }),
+      };
+      return copy;
     }
   }
 

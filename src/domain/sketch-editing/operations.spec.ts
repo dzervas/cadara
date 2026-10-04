@@ -994,6 +994,33 @@ test("src/domain/sketch-editing/operations.spec.ts", async () => {
       { kind: "authored", vector: [0, 0] },
       { kind: "automatic" },
     ]);
+    expect(output && "endSpanParameterLengths" in output).toBe(false);
+
+    // T10g option B: a trimmed seed's fixed end-span lengths reach the copy
+    // (a mirror is an isometry, so unchanged).
+    const trimmed = createSketchDerivedTransformContribution({
+      definition: {
+        ...definition,
+        entities: definition.entities.map((entity) =>
+          entity.entityId === source.entityId
+            ? { ...source, endSpanParameterLengths: { start: 0.6, end: 0.9 } }
+            : entity,
+        ),
+      },
+      operatorKind: "mirror",
+      entityIds: [
+        "sketch_entity_spline",
+        "sketch_entity_axis",
+      ] as SketchEntityId[],
+      value: null,
+      sequence: 11,
+      factories: createFactories(),
+      modelingTolerance: 1e-3,
+    });
+    expect(trimmed.valid).toBeTruthy();
+    expect(
+      trimmed.contribution?.entities.find((entity) => entity.kind === "spline"),
+    ).toMatchObject({ endSpanParameterLengths: { start: 0.6, end: 0.9 } });
   }
 
   // T08b-g7-F (issue 06, "preserve relationships that define a primitive";

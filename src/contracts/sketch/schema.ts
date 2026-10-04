@@ -28,6 +28,7 @@ import type { ReferenceImageOperationState } from "@/contracts/reference-image/s
 import type { NeutralCurvePointWitness } from "@/contracts/modeling/neutral-curve-query";
 import type {
   SplineClosure,
+  SplineEndSpanParameterLengths,
   SplineGeometry,
   SplineInterpolationPolicy,
   SplinePointOccurrence,
@@ -340,6 +341,15 @@ export type SketchEntityDefinition =
       closure: SplineClosure;
       /** Versioned reconstruction policy; consumers must not guess another curve family. */
       interpolationPolicy: SplineInterpolationPolicy;
+      /**
+       * Option B (T10g): the fixed source-parameter length (centripetal
+       * units, √model length) of the first and/or last span, written only by
+       * exact Trim. Absent: both spans are centripetal. Structure here (a
+       * non-empty object of known keys); numeric validity (finite, > 0, not
+       * on a smooth closure, one span: both keys bitwise equal) is checked by
+       * `reconstructSpline` only, so a bad value is an invalid spline.
+       */
+      endSpanParameterLengths?: SplineEndSpanParameterLengths;
       /** Optional local style authored directly in the sketch session. */
       style?: SketchStyleDefinition;
     }
