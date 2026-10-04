@@ -156,9 +156,8 @@ export const sketchEditToolDefinitions = [
       previewLabel: "Slot preview",
       validationMessages: {
         emptySelection:
-          "Select a line, arc, spline, or closed line profile for the slot.",
-        unsupportedTarget:
-          "Slot supports a line, arc, spline, or closed line profile.",
+          "Select a line, arc, or closed line profile for the slot.",
+        unsupportedTarget: "Slot supports a line, arc, or closed line profile.",
       },
       mutationContract: "createSlotBoundary",
     },

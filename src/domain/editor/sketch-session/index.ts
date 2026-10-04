@@ -88,6 +88,7 @@ export {
   deleteSelectedSketchGeometry,
   finishSketchGeometryDrag,
   patchSketchEditToolValue,
+  refreshSketchEditToolAfterOffsetRound,
   selectSketchEditToolTarget,
   updateSketchEditToolHover,
   updateSketchGeometryDrag,

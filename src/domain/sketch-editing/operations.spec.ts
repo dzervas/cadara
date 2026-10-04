@@ -6,10 +6,7 @@ import type {
   SketchPointDefinition,
 } from "@/contracts/sketch/schema";
 import type { SketchPoint } from "@/contracts/modeling/schema";
-import {
-  reconstructSplineAggregate,
-  tessellateCubicSpans,
-} from "@/contracts/sketch/spline-geometry";
+import { reconstructSplineAggregate } from "@/contracts/sketch/spline-geometry";
 import {
   neutralSpan,
   projectedSpline,
@@ -29,6 +26,8 @@ import {
   createSketchSlotContribution,
   createSketchSplitMutation,
   offsetCurveDescriptorFromProjectedGeometry,
+  PROJECTED_SPLINE_OFFSET_UNSUPPORTED_MESSAGE,
+  SPLINE_SLOT_UNSUPPORTED_MESSAGE,
   type SketchEditOperationFactories,
 } from "@/domain/sketch-editing/operations";
 
@@ -427,16 +426,28 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
       sequence: 10,
       factories: createFactories(),
     });
+    // T10h (D6, user decision Q2 = S1): Slot along a spline is refused
+    // explicitly, also before a width is set.
     expect(
-      splineSlot.valid && splineSlot.contribution,
-      "Slot should accept a spline reference.",
-    ).toBeTruthy();
+      splineSlot,
+      "Slot along a spline should be refused as not supported yet.",
+    ).toMatchObject({
+      valid: false,
+      message: SPLINE_SLOT_UNSUPPORTED_MESSAGE,
+      definition: null,
+      contribution: null,
+      previewEntities: [],
+    });
     expect(
-      splineSlot.contribution?.entities.some(
-        (entity) => entity.kind === "spline",
-      ),
-      "Spline slot should create spline boundary geometry.",
-    ).toBeTruthy();
+      createSketchSlotContribution({
+        definition: curveDefinition,
+        entityIds: ["sketch_entity_spline"] as SketchEntityId[],
+        width: null,
+        sequence: 10,
+        factories: createFactories(),
+      }).message,
+      "The spline refusal comes before the width check.",
+    ).toBe(SPLINE_SLOT_UNSUPPORTED_MESSAGE);
   }
 
   function testSlotCreatesProfileOffsetsForClosedLineLoops() {
@@ -622,19 +633,16 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
       sequence: 10,
       factories: createFactories(),
     });
-    expect(splineOffset.valid, "Spline offset should be valid.").toBeTruthy();
-    const offsetPoints = splineOffset.contribution?.points ?? [];
+    // T10h (D6, [TECH] T-10): a spline has no exact static offset.
     expect(
-      offsetPoints.length,
-      "Spline offset should consume the owner-sampled complete cubic spans.",
-    ).toBeGreaterThan(3);
-    expect(offsetPoints[0]!.position[0]).toBeLessThan(0);
-    expect(offsetPoints[0]!.position[1]).toBeGreaterThan(0);
-    expect(offsetPoints.at(-1)!.position[0]).toBeGreaterThan(2);
-    expect(offsetPoints.at(-1)!.position[1]).toBeGreaterThan(0);
-    expect(
-      Math.max(...offsetPoints.map((point) => point.position[1])),
-    ).toBeGreaterThan(2);
+      splineOffset,
+      "A static spline offset should be refused as not supported yet.",
+    ).toEqual({
+      valid: false,
+      message: PROJECTED_SPLINE_OFFSET_UNSUPPORTED_MESSAGE,
+      contribution: null,
+      previewEntities: [],
+    });
   }
 
   function testSlotOffsetCharacterization() {
@@ -1181,32 +1189,23 @@ test("projected spline descriptors carry their neutral spans or source samples",
   });
   expect(sampled?.kind === "spline" && sampled.isClosed).toBe(true);
 
-  // The static D6 offset reads the spans' display polyline (until T10h):
-  // the same points the one tessellator draws for the spans.
-  const offset = createOffsetContribution({
-    curve: descriptor!,
-    distance: 0.5,
-    side: "left",
-    sequence: 1,
-    factories: {
-      createPointId: (suffix) => `point_${suffix}` as SketchPointId,
-      createEntityId: (suffix) => `entity_${suffix}` as SketchEntityId,
-      createPoint: (label, pointId, position) => ({
-        pointId,
-        label,
-        target: {
-          kind: "sketchPoint",
-          sketchId: "sketch_primary" as SketchId,
-          pointId,
-        },
-        position,
-        isConstruction: false,
+  // T10h (D6, [TECH] T-10): no static offset of a projected spline, from
+  // its spans or its source samples; nothing is previewed or authored.
+  for (const curve of [descriptor!, sampled!]) {
+    expect(
+      createOffsetContribution({
+        curve,
+        distance: 0.5,
+        side: "left",
+        sequence: 1,
+        factories: {} as never,
       }),
-      createSplineEntity: (label, entityId) =>
-        ({ kind: "spline", label, entityId }) as never,
-    } as never,
-  });
-  expect(offset.contribution?.points).toHaveLength(
-    tessellateCubicSpans(spans).length,
-  );
+      `projected spline (${curve.kind === "spline" ? curve.geometry.kind : curve.kind}) offset is refused`,
+    ).toEqual({
+      valid: false,
+      message: PROJECTED_SPLINE_OFFSET_UNSUPPORTED_MESSAGE,
+      contribution: null,
+      previewEntities: [],
+    });
+  }
 });

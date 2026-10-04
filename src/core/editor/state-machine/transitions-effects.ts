@@ -10,6 +10,7 @@ import {
   failSketchLiveRegions,
   getSketchSessionPreviewLabel,
   publishSketchLiveRegions,
+  refreshSketchEditToolAfterOffsetRound,
   updateSketchReferenceProjection,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
@@ -881,13 +882,17 @@ export function handleEffectSketchRegionsDerived(
   }
 
   return {
+    // T10i review R-1: the round settles offset acceptance, so the active
+    // edit tool's gated selection is re-evaluated (never applied).
     state: withLiveRegionSession(
       state,
-      publishSketchLiveRegions(
-        state.session,
-        event.regions,
-        event.diagnostics,
-        event.offsetPublications,
+      refreshSketchEditToolAfterOffsetRound(
+        publishSketchLiveRegions(
+          state.session,
+          event.regions,
+          event.diagnostics,
+          event.offsetPublications,
+        ),
       ),
     ),
     effects: [],
@@ -985,7 +990,9 @@ export function handleEffectSketchRegionDerivationFailed(
   return {
     state: withLiveRegionSession(
       state,
-      failSketchLiveRegions(state.session, event.message),
+      refreshSketchEditToolAfterOffsetRound(
+        failSketchLiveRegions(state.session, event.message),
+      ),
     ),
     effects: [],
   };

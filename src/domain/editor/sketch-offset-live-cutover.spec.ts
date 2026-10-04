@@ -80,6 +80,8 @@ import {
 import {
   DERIVED_SHELL_DELETE_MESSAGE,
   DERIVED_SHELL_POINT_DELETE_MESSAGE,
+  NON_ACCEPTED_OFFSET_EDIT_INPUT_CODE,
+  refreshSketchEditToolAfterOffsetRound,
 } from "@/domain/editor/sketch-session/editing";
 import { AuthoredActionHistory } from "@/domain/modeling/authored-action-history";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
@@ -118,7 +120,10 @@ import {
   rebuildSessionForDefinition,
   withLiveSolveBasis,
 } from "@/domain/editor/sketch-session/internals";
-import { MockSketchSolverAdapter } from "@/domain/solver/mock-sketch-solver-adapter";
+import {
+  DEFAULT_MOCK_SKETCH_PLANE_FRAME,
+  MockSketchSolverAdapter,
+} from "@/domain/solver/mock-sketch-solver-adapter";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import {
@@ -6541,4 +6546,922 @@ describe("T08b-g7b relationship-scoped solve-frame failures ([TECH] G16′, U-G9
       ).toBeLessThan(0.5);
     }
   });
+});
+
+// ---------------------------------------------------------------------------
+// T10i (C3, T10 review A8): every edit tool gates its whole input set on the
+// G19 predicate (with the G16‴ closure) of the session's live solve: a
+// non-accepted offset output (failed, pending or unpublished) is refused with
+// `edit-input-offset-not-certified`; a certified one is ordinary input.
+// C4: a declared coincident join that is blocked fails the chain closed.
+// ---------------------------------------------------------------------------
+
+/**
+ * The two rectangles plus a short vertical line crossing the inward offset's
+ * bottom output (a Split/Trim cutter), the inward 0.5 offset committed, and
+ * its certified, failed and pending live states.
+ */
+let editInputStates: ReturnType<typeof buildEditInputStates> | null = null;
+function buildEditInputStates() {
+  return (async () => {
+    const { session, seeds } = rectanglesSession();
+    const before = new Set(session.definition.entityIds);
+    const withCutters = drawLine(
+      drawLine(session, [2, 0.2], [2, 0.8]),
+      [3, 0.2],
+      [3, 0.8],
+    );
+    const cutter = withCutters.definition.entityIds.find(
+      (id) => !before.has(id),
+    )!;
+    // Review R-2: a free horizontal line between the rectangles (an Extend
+    // target towards the offset's right output, a Mirror source).
+    const beforeFree = new Set(withCutters.definition.entityIds);
+    const withCutter = drawLine(withCutters, [5, 1], [6, 1]);
+    const free = withCutter.definition.entityIds.find(
+      (id) => !beforeFree.has(id),
+    )!;
+    const far = session.definition.entities
+      .filter(
+        (entity) =>
+          entity.kind === "lineSegment" && !seeds.includes(entity.entityId),
+      )
+      .map((entity) => entity.entityId);
+    const pending = committedOffsetOnSide(withCutter, seeds, 0.5, "left");
+    const { derivationId, outputs } = offsetOutputIds(pending);
+    const certified = (await liveRound(pending)).session;
+    expect(
+      certified.liveSolve!.solvedSnapshot.certifiedOffsetDerivationIds,
+      "premise: the offset certifies",
+    ).toEqual([derivationId]);
+    return {
+      pending,
+      certified,
+      failed: failedRound(pending),
+      derivationId,
+      outputs,
+      cutter,
+      free,
+      far,
+    };
+  })();
+}
+const editInputs = () => (editInputStates ??= buildEditInputStates());
+
+const targetOf = (session: SketchSessionState, entityId: SketchEntityId) =>
+  session.definition.entities.find((entity) => entity.entityId === entityId)!
+    .target;
+
+/** Begins `toolId`, selects `entityIds` in order, sets `value` and commits. */
+function runEditTool(
+  session: SketchSessionState,
+  toolId: Parameters<typeof beginSketchTool>[1],
+  entityIds: readonly SketchEntityId[],
+  value: number | null,
+) {
+  let next = beginSketchTool(session, toolId);
+  for (const entityId of entityIds)
+    next = selectSketchEditToolTarget(next, targetOf(next, entityId));
+  if (toolId === "trim" || next.definition !== session.definition) return next;
+  if (toolId === "offset") {
+    next = patchSketchEditToolValue(next, { value });
+    return patchSketchEditToolValue(next, { intent: "commitOffset" });
+  }
+  if (value !== null) next = patchSketchEditToolValue(next, { value });
+  return patchSketchEditToolValue(next, {
+    intent: "commitSketchEditOperator",
+  });
+}
+
+const gateMessage = (entityId: SketchEntityId, derivationId: string) =>
+  expect.stringMatching(
+    new RegExp(
+      `^${NON_ACCEPTED_OFFSET_EDIT_INPUT_CODE}: Sketch entity ${entityId} is an output of offset relationship ${derivationId}, which is not certified, so it cannot be used as `,
+    ),
+  );
+
+/** Review R-1: while the round is pending the input is "still being checked" (not refused as uncertified). */
+const checkingMessage = (entityId: SketchEntityId, derivationId: string) =>
+  expect.stringMatching(
+    new RegExp(
+      `^Sketch entity ${entityId} is an output of offset relationship ${derivationId}, which is still being checked; it can be used as .+ once the check finishes\\.$`,
+    ),
+  );
+
+describe("T10i edit inputs on non-accepted offset outputs ([TECH] C3, review A8)", () => {
+  test.each([
+    ["sketchFillet", (o: SketchEntityId[]) => [o[0]!, o[1]!], 0.1],
+    ["sketchChamfer", (o: SketchEntityId[]) => [o[0]!, o[1]!], 0.1],
+    [
+      "sketchExtend",
+      (o: SketchEntityId[], far: SketchEntityId[]) => [o[0]!, far[3]!],
+      null,
+    ],
+    [
+      "sketchSplit",
+      (o: SketchEntityId[], _far: SketchEntityId[], cutter: SketchEntityId) => [
+        o[0]!,
+        cutter,
+      ],
+      null,
+    ],
+    ["sketchSlot", (o: SketchEntityId[]) => [o[0]!], 0.2],
+    [
+      "sketchMirror",
+      (o: SketchEntityId[], far: SketchEntityId[]) => [o[0]!, far[3]!],
+      null,
+    ],
+    ["sketchLinearPattern", (o: SketchEntityId[]) => [o[0]!], 1],
+    ["sketchCircularPattern", (o: SketchEntityId[]) => [o[0]!], 0.5],
+    ["sketchTransform", (o: SketchEntityId[]) => [o[0]!], 1],
+    ["offset", (o: SketchEntityId[]) => [o[0]!], 0.1],
+    ["trim", (o: SketchEntityId[]) => [o[0]!], null],
+  ] as const)(
+    "%s: refused on a failed offset output, still being checked on a pending one (targeted, nothing authored); a certified output is ordinary input",
+    async (toolId, inputs, value) => {
+      const states = await editInputs();
+      const selection = inputs(
+        states.outputs,
+        states.far,
+        states.cutter,
+      ) as SketchEntityId[];
+      for (const [label, state] of [
+        ["failed", states.failed],
+        ["pending", states.pending],
+      ] as const) {
+        const result = runEditTool(state, toolId, selection, value);
+        expect(
+          result.validationMessage,
+          `${toolId} on a ${label} output is ${label === "failed" ? "refused" : "still being checked"}`,
+        ).toEqual(
+          (label === "failed" ? gateMessage : checkingMessage)(
+            states.outputs[0]!,
+            states.derivationId,
+          ),
+        );
+        expect(
+          result.definition,
+          `${toolId} on a ${label} output authors nothing`,
+        ).toBe(state.definition);
+        expect(result.toolStagedEntities, label).toEqual([]);
+        expect(result.activeEditTool?.offsetPublication, label).toBeUndefined();
+      }
+      const result = runEditTool(states.certified, toolId, selection, value);
+      expect(
+        result.validationMessage ?? "",
+        `${toolId} on a certified output is not refused`,
+      ).not.toContain(NON_ACCEPTED_OFFSET_EDIT_INPUT_CODE);
+      if (toolId === "offset")
+        expect(
+          result.activeEditTool?.offsetPublication?.status,
+          "offset of a certified output stages its check",
+        ).toBe("pending");
+      else
+        expect(
+          result.definition,
+          `${toolId} on a certified output edits the sketch`,
+        ).not.toBe(states.certified.definition);
+    },
+    600_000,
+  );
+
+  test("G16‴ closure: a mirror copy of the offset's output follows it (refused while the offset failed, ordinary once certified); an unrelated input is never refused", async () => {
+    const states = await editInputs();
+    const mirrored = runEditTool(
+      states.certified,
+      "sketchMirror",
+      [states.outputs[0]!, states.far[3]!],
+      null,
+    );
+    const relationship = mirrored.definition.derivedRelationships!.find(
+      (candidate) => candidate.kind === "mirror",
+    );
+    if (relationship?.kind !== "mirror") throw new Error("no mirror");
+    const copy = relationship.outputs[0]!.outputEntityId;
+    const failed = failedRound(mirrored);
+    for (const [toolId, value] of [
+      ["offset", 0.1],
+      ["sketchSlot", 0.2],
+    ] as const) {
+      expect(
+        runEditTool(failed, toolId, [copy], value).validationMessage,
+        `${toolId} of the copy of a failed output is refused`,
+      ).toEqual(gateMessage(copy, states.derivationId));
+      const certified = (await liveRound(mirrored)).session;
+      expect(
+        runEditTool(certified, toolId, [copy], value).validationMessage ?? "",
+        `${toolId} of the copy of a certified output is ordinary`,
+      ).not.toContain(NON_ACCEPTED_OFFSET_EDIT_INPUT_CODE);
+    }
+    const unrelated = runEditTool(
+      states.failed,
+      "sketchSlot",
+      [states.far[0]!],
+      0.2,
+    );
+    expect(unrelated.validationMessage).toBeNull();
+    expect(unrelated.definition).not.toBe(states.failed.definition);
+  }, 600_000);
+
+  test("async apply: an offset whose seed was certified at staging is re-checked when its publication arrives; a seed failed meanwhile commits nothing and fails the preview with the targeted message", async () => {
+    const states = await editInputs();
+    const staged = runEditTool(
+      states.certified,
+      "offset",
+      [states.outputs[0]!],
+      0.1,
+    );
+    const publication = staged.activeEditTool!.offsetPublication!;
+    expect(publication).toMatchObject({
+      status: "pending",
+      commitRequested: true,
+    });
+    const seedFailed = publishSketchLiveRegions(
+      staged,
+      [],
+      [],
+      [{ derivationId: states.derivationId, status: "failed" }],
+    );
+    const applied = completeSketchOffsetPreviewPublication(
+      seedFailed,
+      publication.derivationId,
+      [{ derivationId: publication.derivationId, status: "certified" }],
+    );
+    expect(applied.definition, "nothing is committed").toBe(
+      seedFailed.definition,
+    );
+    expect(applied.activeEditTool!.offsetPublication).toMatchObject({
+      status: "failed",
+      commitRequested: false,
+      message: gateMessage(states.outputs[0]!, states.derivationId),
+    });
+    expect(applied.validationMessage).toEqual(
+      gateMessage(states.outputs[0]!, states.derivationId),
+    );
+    const control = completeSketchOffsetPreviewPublication(
+      staged,
+      publication.derivationId,
+      [{ derivationId: publication.derivationId, status: "certified" }],
+    );
+    expect(
+      control.definition.derivedRelationships,
+      "control: with the seed still certified the offset commits",
+    ).toHaveLength(2);
+  }, 600_000);
+
+  test("C4 (g7b A1): a declared coincident join naming an output of a failed offset is blocked, so an offset over it fails closed as a disconnected chain; with the first offset building the same chain certifies", async () => {
+    const states = await editInputs();
+    // A line from the certified output's end, joined to that driven point
+    // by a declared coincident constraint (its own start point, as the
+    // spline tool and the importer author a snapped join; the line tool
+    // would share the point), then an offset of output + line.
+    const output = states.certified.definition.entities.find(
+      (entity) => entity.entityId === states.outputs[0],
+    );
+    if (output?.kind !== "lineSegment") throw new Error("line output");
+    const positions = positionsOf(states.certified.liveSolve!.solvedSnapshot);
+    const end = positions.get(output.endPointId)!;
+    const shared = drawLine(
+      states.certified,
+      [end[0], end[1]],
+      [end[0] + 0.3, end[1] - 0.2],
+    ).definition;
+    const line = shared.entityIds.find(
+      (id) => !states.certified.definition.entityIds.includes(id),
+    )!;
+    const start = "sketch_point_t10i_join_start" as SketchPointId;
+    const join = {
+      constraintId: "constraint_t10i_join" as never,
+      kind: "coincident" as const,
+      label: "T10i declared join",
+      pointIds: [start, output.endPointId] as [SketchPointId, SketchPointId],
+    };
+    const drawn = {
+      definition: {
+        ...shared,
+        pointIds: [...shared.pointIds, start],
+        points: [
+          ...shared.points,
+          {
+            ...shared.points[0]!,
+            pointId: start,
+            target: { ...shared.points[0]!.target, pointId: start },
+            label: "T10i join start",
+            position: [end[0], end[1]] as [number, number],
+          },
+        ],
+        entities: shared.entities.map((entity) =>
+          entity.entityId === line && entity.kind === "lineSegment"
+            ? { ...entity, startPointId: start }
+            : entity,
+        ),
+        constraintIds: [...shared.constraintIds, join.constraintId],
+        constraints: [...shared.constraints, join],
+      } as SketchDefinition,
+    };
+    const definition = withOffsetRelationship(
+      drawn.definition,
+      [states.outputs[0]!, line],
+      0.05,
+      701,
+    );
+    const second = offsetIdsOf(definition).find(
+      (id) => id !== states.derivationId,
+    )!;
+    const publishOnce = () => {
+      const solved = solve(definition);
+      return {
+        solved,
+        publications: publishSketchOffsets({
+          definition,
+          solvedSnapshot: solved.solvedSnapshot,
+          modelingTolerance: 1e-3,
+          capabilities: capabilities(),
+        }),
+      };
+    };
+    const control = publishOnce();
+    expect(
+      control.publications.find((item) => item.derivationId === second)?.status,
+      "control: the chain over a satisfied join certifies",
+    ).toBe("certified");
+    fabricated.planFailure = states.derivationId;
+    try {
+      const { solved, publications } = publishOnce();
+      expect(
+        solved.solvedSnapshot.constraintStatuses.find(
+          (entry) => entry.constraintId === join!.constraintId,
+        )?.status,
+        "premise: the join is blocked by the failed first offset (G16″)",
+      ).toBe("blocked");
+      const failed = publications.find((item) => item.derivationId === second);
+      expect(failed?.status).toBe("failed");
+      expect(failed?.diagnostic).toMatchObject({
+        code: OFFSET_DIAGNOSTIC_CODES.disconnectedChain,
+        message: expect.stringContaining(
+          `The declared coincident join ${join!.constraintId} is blocked in this solve frame, so it does not join the chain.`,
+        ),
+      });
+    } finally {
+      fabricated.planFailure = null;
+    }
+  }, 600_000);
+});
+
+// ---------------------------------------------------------------------------
+// T10i review fixes: R-2 (every input of the set is gated, not only the
+// first), R-1 (pending is "still being checked"; the round re-evaluates the
+// tool without applying it), A-1 (an offset over a non-accepted seed).
+// ---------------------------------------------------------------------------
+
+/** The offset output line whose solved points both satisfy `on` (the inner rectangle's sides). */
+function outputLineWhere(
+  session: SketchSessionState,
+  outputs: readonly SketchEntityId[],
+  on: (point: readonly number[]) => boolean,
+) {
+  const positions = positionsOf(session.liveSolve!.solvedSnapshot);
+  const id = outputs.find((entityId) => {
+    const entity = session.definition.entities.find(
+      (candidate) => candidate.entityId === entityId,
+    );
+    return (
+      entity?.kind === "lineSegment" &&
+      on(positions.get(entity.startPointId)!) &&
+      on(positions.get(entity.endPointId)!)
+    );
+  });
+  if (!id) throw new Error("no such output line");
+  return id;
+}
+
+/** Selects `entityIds` in `toolId` and sets `value`, without committing. */
+function selectEditTool(
+  session: SketchSessionState,
+  toolId: Parameters<typeof beginSketchTool>[1],
+  entityIds: readonly SketchEntityId[],
+  value: number | null,
+) {
+  let next = beginSketchTool(session, toolId);
+  for (const entityId of entityIds)
+    next = selectSketchEditToolTarget(next, targetOf(next, entityId));
+  return value === null ? next : patchSketchEditToolValue(next, { value });
+}
+
+describe("T10i review fixes (R-2, R-1, A-1)", () => {
+  const near = (value: number, target: number) =>
+    Math.abs(value - target) < 1e-9;
+  test.each([
+    ["sketchExtend", "the Extend boundary"],
+    ["sketchSplit", "the Split boundary"],
+    ["sketchMirror", "the Mirror axis"],
+    ["sketchFillet", "a Fillet second source"],
+  ] as const)(
+    "R-2 %s: %s is an offset output (not the first input): refused while failed, still being checked while pending, ordinary once certified",
+    async (toolId) => {
+      const states = await editInputs();
+      const bottom = outputLineWhere(states.certified, states.outputs, (p) =>
+        near(p[1]!, 0.5),
+      );
+      const right = outputLineWhere(states.certified, states.outputs, (p) =>
+        near(p[0]!, 3.5),
+      );
+      // Fillet: a line drawn from the bottom output's corner shares its
+      // driven point (the line tool snaps onto it once certified), so
+      // [line, output] is a corner whose second source is the output.
+      const corner =
+        toolId === "sketchFillet"
+          ? (() => {
+              const line = states.certified.definition.entities.find(
+                (entity) => entity.entityId === bottom,
+              );
+              if (line?.kind !== "lineSegment") throw new Error("line");
+              const positions = positionsOf(
+                states.certified.liveSolve!.solvedSnapshot,
+              );
+              const end = positions.get(line.endPointId)!;
+              const drawn = drawLine(
+                states.certified,
+                [end[0], end[1]],
+                [end[0] + (end[0] > 2 ? 0.3 : -0.3), end[1] - 0.3],
+              );
+              return {
+                drawn,
+                line: drawn.definition.entityIds.find(
+                  (id) => !states.certified.definition.entityIds.includes(id),
+                )!,
+              };
+            })()
+          : null;
+      const fixtures = corner
+        ? {
+            pending: corner.drawn,
+            failed: failedRound(corner.drawn),
+            certified: (await liveRound(corner.drawn)).session,
+          }
+        : states;
+      const [selection, output] =
+        toolId === "sketchExtend"
+          ? [[states.free, right], right]
+          : toolId === "sketchMirror"
+            ? [[states.free, bottom], bottom]
+            : toolId === "sketchSplit"
+              ? [[states.cutter, bottom], bottom]
+              : [[corner!.line, bottom], bottom];
+      const value = toolId === "sketchFillet" ? 0.05 : null;
+      for (const [label, state, message] of [
+        ["failed", fixtures.failed, gateMessage],
+        ["pending", fixtures.pending, checkingMessage],
+      ] as const) {
+        const result = runEditTool(state, toolId, selection, value);
+        expect(
+          result.validationMessage,
+          `${toolId}, ${label}: the gate names the non-first input`,
+        ).toEqual(message(output, states.derivationId));
+        expect(result.definition, `${label}: nothing authored`).toBe(
+          state.definition,
+        );
+      }
+      const result = runEditTool(fixtures.certified, toolId, selection, value);
+      expect(
+        result.validationMessage ?? "",
+        `${toolId} with a certified ${output} is not refused`,
+      ).not.toContain(NON_ACCEPTED_OFFSET_EDIT_INPUT_CODE);
+      expect(
+        result.definition,
+        `${toolId} with a certified output edits the sketch (${result.validationMessage})`,
+      ).not.toBe(fixtures.certified.definition);
+    },
+    600_000,
+  );
+
+  test("R-1: a selection made while the round is pending says the output is being checked; when the round certifies, the tool is re-evaluated (message cleared, preview shown) and nothing is applied, also for a complete Extend selection; Commit then applies", async () => {
+    const states = await editInputs();
+    const right = outputLineWhere(states.certified, states.outputs, (p) =>
+      near(p[0]!, 3.5),
+    );
+    for (const [toolId, selection, value] of [
+      ["sketchFillet", [states.outputs[0]!, states.outputs[1]!], 0.1],
+      ["sketchExtend", [states.free, right], null],
+    ] as const) {
+      const selected = selectEditTool(states.pending, toolId, selection, value);
+      expect(selected.validationMessage, `${toolId}: pending`).toEqual(
+        expect.stringContaining("which is still being checked"),
+      );
+      expect(selected.toolStagedEntities).toEqual([]);
+      expect(selected.definition).toBe(states.pending.definition);
+      const settled = refreshSketchEditToolAfterOffsetRound(
+        (await liveRound(selected)).session,
+      );
+      expect(
+        settled.liveSolve!.solvedSnapshot.certifiedOffsetDerivationIds,
+        "premise: the round certified the offset",
+      ).toEqual([states.derivationId]);
+      expect(settled.validationMessage, `${toolId}: cleared`).toBeNull();
+      expect(
+        settled.toolStagedEntities.length,
+        `${toolId}: the preview is shown`,
+      ).toBeGreaterThan(0);
+      expect(
+        settled.toolPresentation?.validation ?? [],
+        `${toolId}: the panel shows no error`,
+      ).toEqual([]);
+      expect(
+        settled.definition,
+        `${toolId}: the re-evaluation applies nothing (no auto-apply)`,
+      ).toBe(selected.definition);
+      expect(settled.activeEditTool?.selectedTargets).toHaveLength(2);
+      const committed = patchSketchEditToolValue(settled, {
+        intent: "commitSketchEditOperator",
+      });
+      expect(committed.definition, `${toolId}: Commit then applies`).not.toBe(
+        settled.definition,
+      );
+    }
+  }, 600_000);
+
+  test("R-1: when the round fails, the pending selection becomes the decided refusal; an Offset seed selected while pending stages its check once the round certifies", async () => {
+    const states = await editInputs();
+    const selected = selectEditTool(
+      states.pending,
+      "sketchSlot",
+      [states.outputs[0]!],
+      0.2,
+    );
+    expect(selected.validationMessage).toEqual(
+      checkingMessage(states.outputs[0]!, states.derivationId),
+    );
+    const refused = refreshSketchEditToolAfterOffsetRound(
+      failedRound(selected),
+    );
+    expect(refused.validationMessage).toEqual(
+      gateMessage(states.outputs[0]!, states.derivationId),
+    );
+    expect(refused.toolPresentation?.validation?.[0]?.message).toEqual(
+      gateMessage(states.outputs[0]!, states.derivationId),
+    );
+    expect(refused.definition).toBe(selected.definition);
+
+    const offset = selectEditTool(
+      states.pending,
+      "offset",
+      [states.outputs[0]!],
+      null,
+    );
+    const valued = patchSketchEditToolValue(offset, { value: 0.1 });
+    expect(valued.validationMessage).toEqual(
+      checkingMessage(states.outputs[0]!, states.derivationId),
+    );
+    expect(valued.activeEditTool?.offsetPublication).toBeUndefined();
+    const staged = refreshSketchEditToolAfterOffsetRound(
+      (await liveRound(valued)).session,
+    );
+    expect(staged.validationMessage).toBeNull();
+    expect(
+      staged.activeEditTool?.offsetPublication,
+      "the offset's check is staged (the editor loop emits it); nothing is committed",
+    ).toMatchObject({ status: "pending", commitRequested: false });
+    expect(staged.definition).toBe(valued.definition);
+  }, 600_000);
+
+  test("R-1 async apply: a staged offset whose seed's round is pending again when its check certifies commits nothing, drops the check and says the seed is being checked; the round's re-evaluation re-stages it", async () => {
+    const states = await editInputs();
+    const staged = runEditTool(
+      states.certified,
+      "offset",
+      [states.outputs[0]!],
+      0.1,
+    );
+    const publication = staged.activeEditTool!.offsetPublication!;
+    expect(publication).toMatchObject({
+      status: "pending",
+      commitRequested: true,
+    });
+    const rePending = withLiveSolveBasis(staged, staged.definition);
+    expect(rePending.liveRegions.status, "premise: a new round").toBe(
+      "pending",
+    );
+    const applied = completeSketchOffsetPreviewPublication(
+      rePending,
+      publication.derivationId,
+      [{ derivationId: publication.derivationId, status: "certified" }],
+    );
+    expect(applied.definition, "nothing is committed").toBe(
+      rePending.definition,
+    );
+    expect(applied.activeEditTool?.offsetPublication).toBeUndefined();
+    expect(applied.validationMessage).toEqual(
+      checkingMessage(states.outputs[0]!, states.derivationId),
+    );
+    const restaged = refreshSketchEditToolAfterOffsetRound(
+      (await liveRound(applied)).session,
+    );
+    expect(restaged.activeEditTool?.offsetPublication).toMatchObject({
+      status: "pending",
+      commitRequested: false,
+    });
+    expect(restaged.validationMessage).toBeNull();
+  }, 600_000);
+
+  test("A-1: an offset B of A's output alone: with A failed, B fails its publication (derived-offset-seed-not-certified on the seed) and, by the G19 closure, B's outputs are non-accepted and excluded from regions naming A; with A certified, B certifies and is ordinary", async () => {
+    const states = await editInputs();
+    const definition = withOffsetRelationship(
+      states.certified.definition,
+      [states.outputs[0]!],
+      0.05,
+      702,
+    );
+    const second = offsetIdsOf(definition).find(
+      (id) => id !== states.derivationId,
+    )!;
+    const secondOutputs = outputEntityIds(definition, second);
+    const solved = solve(definition).solvedSnapshot;
+    const publishOnce = (snapshot: SolvedSketchSnapshot) =>
+      publishSketchOffsets({
+        definition,
+        solvedSnapshot: snapshot,
+        modelingTolerance: 1e-3,
+        capabilities: capabilities(),
+      });
+    const control = publishOnce(solved);
+    expect(
+      control.map((item) => item.status),
+      "control: A and B certify",
+    ).toEqual(["certified", "certified"]);
+    const controlSnapshot = applyOffsetPublications(
+      definition,
+      solved,
+      control,
+    );
+    for (const entityId of secondOutputs)
+      expect(
+        isAcceptedOffsetOutput(definition, controlSnapshot, entityId),
+        `control: ${entityId} is accepted`,
+      ).toBe(true);
+
+    fabricated.planFailure = states.derivationId;
+    try {
+      const failedSolve = solve(definition).solvedSnapshot;
+      const publications = publishOnce(failedSolve);
+      expect(publications[0]!.status, "premise: A fails").toBe("failed");
+      expect(publications[1]).toMatchObject({
+        derivationId: second,
+        status: "failed",
+        diagnostic: {
+          code: OFFSET_DIAGNOSTIC_CODES.seedNotCertified,
+          severity: "error",
+          target: { kind: "entity", entityId: states.outputs[0]! },
+          message: `Offset relationship ${second}: its seed ${states.outputs[0]!} is an output of offset relationship ${states.derivationId}, which is not certified, so this offset is not certified either.`,
+        },
+      });
+    } finally {
+      fabricated.planFailure = null;
+    }
+
+    // The closure alone (a snapshot recording B but not A as certified).
+    const forged = applyOffsetPublications(definition, solved, [
+      { derivationId: states.derivationId, status: "failed" },
+      { derivationId: second, status: "certified" },
+    ] as SketchOffsetPublicationRecord[]);
+    expect(forged.certifiedOffsetDerivationIds).toEqual([second]);
+    for (const entityId of secondOutputs)
+      expect(
+        isAcceptedOffsetOutput(definition, forged, entityId),
+        `${entityId} of B over a failed A is non-accepted`,
+      ).toBe(false);
+    const excluded = offsetArrangementInput(definition, forged, [
+      { derivationId: states.derivationId, status: "failed" },
+      { derivationId: second, status: "certified" },
+    ] as SketchOffsetPublicationRecord[]).unpublishedOffsetOutputs!;
+    for (const entityId of secondOutputs)
+      expect(
+        excluded.find((item) => item.entityId === entityId),
+        `${entityId} is excluded from region input, naming A`,
+      ).toMatchObject({
+        derivationId: states.derivationId,
+        reason: `offset relationship ${states.derivationId} failed its publication`,
+      });
+  }, 600_000);
+});
+
+// ---------------------------------------------------------------------------
+// T10i (C5, [TECH] T-11): a line output shorter than τ fails its offset's
+// solve frame (`derived-offset-output-degenerate`, relationship-scoped,
+// [TECH] G16′); `validateDefinition` no longer flags offset line outputs
+// sketch-wide; authored lines keep `degenerate-line-segment`.
+// ---------------------------------------------------------------------------
+
+/** Native rectangle (0,0)–(2,0.2) + the unrelated one; inward offset 0.05 → 0.0996 (short sides 0.0008 < τ). */
+function degenerateOutputRectangle() {
+  const drawn = acceptSketchDraw(
+    startSketchDraw(beginSketchTool(newSession(), "rectangle"), [0, 0]),
+    [2, 0.2],
+  );
+  const seeds = drawn.definition.entities
+    .filter((entity) => entity.kind === "lineSegment")
+    .map((entity) => entity.entityId);
+  const built = withUnrelatedRectangle(drawn);
+  const authored = withOffsetRelationship(
+    built.session.definition,
+    seeds,
+    0.05,
+  );
+  const [derivationId] = offsetIdsOf(authored);
+  const relationship = authored.derivedRelationships!.find(
+    (candidate) => candidate.derivationId === derivationId,
+  );
+  if (relationship?.kind !== "offset") throw new Error("offset");
+  // The short sides' outputs (the vertical source sides).
+  const shortOutputs = relationship.outputs
+    .filter((output) => {
+      const seed = authored.entities.find(
+        (entity) => entity.entityId === output.seedEntityId,
+      );
+      if (seed?.kind !== "lineSegment") return false;
+      const at = (pointId: SketchPointId) =>
+        authored.points.find((point) => point.pointId === pointId)!.position;
+      return Math.abs(at(seed.startPointId)[0] - at(seed.endPointId)[0]) < 1e-9;
+    })
+    .map((output) => output.outputEntityId);
+  return {
+    built,
+    seeds,
+    authored,
+    derivationId: derivationId!,
+    shortOutputs,
+    edited: withOffsetDistance(authored, derivationId!, 0.0996),
+  };
+}
+
+/** `definition` with each of `lineIds`' end point moved to 0.0008 from its start (persisted sub-τ positions). */
+function withShortLines(
+  definition: SketchDefinition,
+  lineIds: readonly SketchEntityId[],
+): SketchDefinition {
+  const moved = new Map<SketchPointId, [number, number]>();
+  for (const lineId of lineIds) {
+    const line = definition.entities.find(
+      (entity) => entity.entityId === lineId,
+    );
+    if (line?.kind !== "lineSegment") throw new Error("line");
+    const start = definition.points.find(
+      (point) => point.pointId === line.startPointId,
+    )!.position;
+    moved.set(line.endPointId, [start[0], start[1] + 0.0008]);
+  }
+  return {
+    ...definition,
+    points: definition.points.map((point) =>
+      moved.has(point.pointId)
+        ? { ...point, position: moved.get(point.pointId)! }
+        : point,
+    ),
+  };
+}
+
+const mockSolve = (definition: SketchDefinition) =>
+  new MockSketchSolverAdapter({
+    neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+  }).solveSketch({
+    contractVersion: CONTRACT_VERSION,
+    solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+    requestId: "request_t10i_c5" as never,
+    documentId: "doc_workspace" as never,
+    revisionId: "rev_0001" as never,
+    sketchId: "sketch_t10i" as never,
+    plane: DEFAULT_MOCK_SKETCH_PLANE_FRAME,
+    tolerances: {
+      coincidence: 1e-6,
+      angleRadians: 1e-6,
+      minimumSegmentLength: 1e-3,
+    },
+    modelingTolerance: 1e-3,
+    partialSolvePolicy: "bestEffort",
+    definition,
+    projectedReferences: [],
+  });
+
+describe("T10i degenerate offset line outputs are relationship-scoped ([TECH] C5, T-11)", () => {
+  test("the native trigger (rectangle 2×0.2, inward 0.05 → 0.0996): the sketch stays solved, the offset fails derived-offset-output-degenerate in its publication (reproduced from the frame), its outputs are held and non-accepted, a requirement on a short output is blocked, the unrelated region is derived", async () => {
+    const trigger = degenerateOutputRectangle();
+    const base = rebuildSessionForDefinition(trigger.built.session, {
+      definition: trigger.authored,
+    });
+    const baseRound = await liveRound(base);
+    expect(
+      baseRound.response.offsetPublications.map((item) => item.status),
+      "premise: the authored 0.05 offset certifies",
+    ).toEqual(["certified"]);
+    // A requirement on a short output (authored, satisfied at 0.05).
+    const vertical = {
+      constraintId: "constraint_t10i_short_vertical" as never,
+      kind: "vertical" as const,
+      label: "T10i vertical on a short output",
+      entityId: trigger.shortOutputs[0]!,
+    };
+    const definition = {
+      ...trigger.edited,
+      constraintIds: [...trigger.edited.constraintIds, vertical.constraintId],
+      constraints: [...trigger.edited.constraints, vertical],
+    } as SketchDefinition;
+    expect(
+      solve(definition, 1e-3).solvedSnapshot.diagnostics.map((d) => d.code),
+      "premise (core, 1e-6 segment policy): no sketch-scoped degenerate-line-segment",
+    ).not.toContain("degenerate-line-segment");
+    const edited = rebuildSessionForDefinition(baseRound.session, {
+      definition,
+    });
+    const before = positionsOf(baseRound.session.liveSolve!.solvedSnapshot);
+    const after = positionsOf(edited.liveSolve!.solvedSnapshot);
+    for (const pointId of outputPointIds(definition, trigger.derivationId))
+      expect(after.get(pointId), `${pointId} is held`).toEqual(
+        before.get(pointId),
+      );
+    expect(
+      edited.liveSolve!.solvedSnapshot.constraintStatuses.find(
+        (entry) => entry.constraintId === vertical.constraintId,
+      )?.status,
+      "the requirement on the short output is blocked (G16″)",
+    ).toBe("blocked");
+    const { response } = await expectScopedFailure({
+      session: edited,
+      failing: trigger.derivationId,
+      code: OFFSET_DIAGNOSTIC_CODES.outputDegenerate,
+      seed: expect.any(String) as never,
+      unrelated: trigger.built.lines,
+    });
+    const failure = response.offsetPublications[0]!.diagnostic!;
+    const target =
+      failure.target?.kind === "entity" ? failure.target.entityId : null;
+    expect(
+      trigger.seeds.includes(target as SketchEntityId),
+      "the diagnostic targets a source side",
+    ).toBe(true);
+    expect(failure.message).toMatch(
+      /: An offset line would be 0\.000800 mm long, shorter than the modeling tolerance 0\.001 mm\.$/,
+    );
+  }, 300_000);
+
+  test("persisted sub-τ positions of offset line outputs are never a sketch-scoped error (core and mock); an authored sub-τ line still is", async () => {
+    const trigger = degenerateOutputRectangle();
+    const persisted = withShortLines(trigger.edited, trigger.shortOutputs);
+    const core = solveSketchDefinitionCore({
+      definition: persisted,
+      tolerances: {
+        coincidence: 1e-6,
+        angleRadians: 1e-6,
+        minimumSegmentLength: 1e-3,
+      },
+      modelingTolerance: 1e-3,
+      partialSolvePolicy: "bestEffort",
+    });
+    expect(core.solvedSnapshot.status.solveState, "core: solved").toBe(
+      "solved",
+    );
+    expect(
+      core.solvedSnapshot.diagnostics.map((d) => d.code),
+      "core: no degenerate-line-segment for an offset output",
+    ).not.toContain("degenerate-line-segment");
+    const mock = await mockSolve(persisted);
+    expect(mock.solvedSnapshot.status.solveState, "mock: solved").toBe(
+      "solved",
+    );
+    expect(
+      mock.solvedSnapshot.diagnostics.map((d) => d.code),
+      "mock: no degenerate-line-segment for an offset output",
+    ).not.toContain("degenerate-line-segment");
+
+    // An authored line (the unrelated rectangle's side) at the same length.
+    const authoredShort = withShortLines(trigger.edited, [
+      trigger.built.lines[1]!,
+    ]);
+    const expected = {
+      code: "degenerate-line-segment",
+      severity: "error",
+      target: { kind: "entity", entityId: trigger.built.lines[1]! },
+    };
+    const coreAuthored = solveSketchDefinitionCore({
+      definition: authoredShort,
+      tolerances: {
+        coincidence: 1e-6,
+        angleRadians: 1e-6,
+        minimumSegmentLength: 1e-3,
+      },
+      modelingTolerance: 1e-3,
+      partialSolvePolicy: "bestEffort",
+    });
+    expect(coreAuthored.solvedSnapshot.status.solveState).toBe(
+      "partiallySolved",
+    );
+    expect(coreAuthored.solvedSnapshot.diagnostics).toContainEqual(
+      expect.objectContaining(expected),
+    );
+    const mockAuthored = await mockSolve(authoredShort);
+    expect(mockAuthored.solvedSnapshot.status.solveState).toBe(
+      "partiallySolved",
+    );
+    expect(mockAuthored.solvedSnapshot.diagnostics).toContainEqual(
+      expect.objectContaining(expected),
+    );
+  }, 300_000);
 });

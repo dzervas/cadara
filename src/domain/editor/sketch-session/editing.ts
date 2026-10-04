@@ -40,6 +40,7 @@ import {
   trimLineSegmentAtIntersections,
 } from "@/domain/sketch-editing/operations";
 import type { OffsetFramePlan } from "@/contracts/sketch/offset-derivation-frame";
+import { nonAcceptedOffsetOutputs } from "@/contracts/sketch/offset-publication";
 import type { SketchOffsetPublicationRecord } from "@/contracts/solver/schema";
 import type {
   SketchEditToolState,
@@ -110,6 +111,75 @@ function shellTerminalPointIds(definition: SketchDefinition) {
         : [],
     ),
   );
+}
+
+/**
+ * T10i (C3, T10 review A8): an edit tool refused an input that is a
+ * non-accepted offset output (the G19 predicate, with its G16‴ closure over
+ * mirror/pattern/transform copies), parallel to the feature-input code
+ * `feature-input-offset-not-certified` ([TECH] G19c).
+ */
+export const NON_ACCEPTED_OFFSET_EDIT_INPUT_CODE =
+  "edit-input-offset-not-certified";
+
+/**
+ * T10i (C3; review R-1): the gate on an edit's inputs. Null when no input
+ * is a non-accepted offset output of the session's live solve; otherwise
+ * the targeted message for the first such input, naming its relationship
+ * and the edit `use`.
+ * - `pending`: the live solve's publication round is still running
+ *   (`liveRegions.status === "pending"`), so acceptance is undecidable
+ *   (every edit starts a round whose snapshot certifies nothing yet). The
+ *   input is not usable yet, the message says it is being checked, and the
+ *   tool is re-evaluated when the round completes
+ *   (`refreshSketchEditToolAfterOffsetRound`).
+ * - otherwise it is decided: `edit-input-offset-not-certified`, with the
+ *   G19a snapshot rule (no `certifiedOffsetDerivationIds`, or no live
+ *   solve, accepts no offset output).
+ * A derived offset shell is skipped: it is never an edit input (U-G2), and
+ * each edit refuses it with that permanent message.
+ */
+export function offsetEditInputGate(
+  session: SketchSessionState,
+  entityIds: readonly SketchEntityId[],
+  use: string,
+): { readonly pending: boolean; readonly message: string } | null {
+  if (entityIds.length === 0) return null;
+  const nonAccepted = nonAcceptedOffsetOutputs(
+    session.definition,
+    session.liveSolve?.solvedSnapshot ?? { solvedEntities: [] },
+  );
+  const shells = new Set(
+    session.definition.entities.flatMap((entity) =>
+      entity.kind === "derivedPiecewiseCubic" ? [entity.entityId] : [],
+    ),
+  );
+  const pending =
+    session.liveSolve !== null && session.liveRegions.status === "pending";
+  for (const entityId of entityIds) {
+    const owner = nonAccepted.get(entityId);
+    if (!owner || shells.has(entityId)) continue;
+    return pending
+      ? {
+          pending,
+          message: `Sketch entity ${entityId} is an output of offset relationship ${owner.derivationId}, which is still being checked; it can be used as ${use} once the check finishes.`,
+        }
+      : {
+          pending,
+          message: `${NON_ACCEPTED_OFFSET_EDIT_INPUT_CODE}: Sketch entity ${entityId} is an output of offset relationship ${owner.derivationId}, which is not certified, so it cannot be used as ${use}.`,
+        };
+  }
+  return null;
+}
+
+function refusedEditOperation(message: string): SketchEditOperationResult {
+  return {
+    valid: false,
+    message,
+    definition: null,
+    contribution: null,
+    previewEntities: [],
+  };
 }
 
 export function deleteSelectedSketchGeometry(
@@ -385,9 +455,15 @@ export function getOffsetPreview(
     };
   }
 
+  const seedEntityIds = sketchEntityTargets.map((target) => target.entityId);
+  // T10i (C3): an offset seed (direct, or a G16‴ copy of one) must be
+  // accepted geometry.
+  const gate = offsetEditInputGate(session, seedEntityIds, "an offset seed");
+  if (gate) return refusedEditOperation(gate.message);
+
   return createSketchOffsetDerivationContribution({
     definition: session.definition,
-    entityIds: sketchEntityTargets.map((target) => target.entityId),
+    entityIds: seedEntityIds,
     distance: activeEditTool.offsetDistance,
     side: activeEditTool.offsetSide,
     sequence: nextSequence,
@@ -455,12 +531,54 @@ function withoutOffsetPublication(
   return next;
 }
 
-/** Commits a certified (or static) offset contribution. */
+/**
+ * Commits a certified (or static) offset contribution. T10i (C3): a derived
+ * offset's seeds are re-checked against the live solve at this (possibly
+ * asynchronous) apply, and nothing is committed unless they are accepted.
+ * A seed whose live round is still pending drops the staged check and shows
+ * the pending message; the tool re-stages it when the round completes
+ * (`refreshSketchEditToolAfterOffsetRound`, review R-1), and Commit is
+ * asked again. A seed decided non-accepted fails the preview.
+ */
 function commitOffsetContribution(
   session: SketchSessionState,
   activeEditTool: SketchEditToolState,
   contribution: NonNullable<SketchEditOperationResult["contribution"]>,
 ): SketchSessionState {
+  const gate = offsetEditInputGate(
+    session,
+    (contribution.derivedRelationships ?? []).flatMap((relationship) =>
+      relationship.kind === "offset" ? relationship.seedEntityIds : [],
+    ),
+    "an offset seed",
+  );
+  if (gate) {
+    // Only a derived offset has seeds, and it commits from a staged check.
+    const publication = activeEditTool.offsetPublication;
+    if (!publication)
+      throw new Error(
+        "A derived offset commit must come from its staged publication.",
+      );
+    if (gate.pending) {
+      const tool = withoutOffsetPublication(activeEditTool);
+      return {
+        ...session,
+        activeEditTool: tool,
+        validationMessage: gate.message,
+        toolPresentation: buildSketchEditToolPresentation(
+          tool,
+          gate.message,
+          session.toolStagedEntities,
+        ),
+      };
+    }
+    return withOffsetPublication(session, activeEditTool, {
+      ...publication,
+      status: "failed",
+      commitRequested: false,
+      message: gate.message,
+    });
+  }
   const nextSequence = session.sequence + 1;
   const history = applySketchContribution(session, contribution);
   const tool = withoutOffsetPublication(activeEditTool);
@@ -683,6 +801,17 @@ export function getSketchEditOperatorResult(
   activeEditTool: SketchEditToolState,
 ): SketchEditOperationResult {
   const entityIds = getSelectedSketchEntityIds(activeEditTool);
+  // T10i (C3, review A8): one gate over the operation's full input set (its
+  // selected targets, boundaries, sources, references and mirror axis),
+  // also at commit, which recomputes this result.
+  if (activeEditTool.toolId !== "trim" && activeEditTool.toolId !== "offset") {
+    const gate = offsetEditInputGate(
+      session,
+      entityIds,
+      `a ${getSketchEditToolDefinition(activeEditTool.toolId).metadata.name} input`,
+    );
+    if (gate) return refusedEditOperation(gate.message);
+  }
   const nextSequence = session.sequence + 1;
   const sketchId = session.sketchId ?? ("sketch_draft" as SketchId);
   const factories = createSessionCommitFactories(nextSequence, sketchId);
@@ -778,6 +907,51 @@ export function getSketchEditOperatorResult(
   }
 }
 
+/**
+ * T10i review R-1: re-evaluates the active edit tool's current selection
+ * after an offset publication round settles (the editor applies it to
+ * every live-region result, published or failed), so a "still being
+ * checked" input clears or becomes its decided refusal without reselection.
+ * Only the preview, message and presentation change: nothing is applied
+ * (no Extend/Split/Mirror auto-apply, no Commit). An Offset with a staged
+ * check keeps it (its own completion re-checks the seeds); one without
+ * (refused or still checking) re-stages its preview, whose check the
+ * editor loop then emits. Trim keeps no selection, so it is left alone.
+ */
+export function refreshSketchEditToolAfterOffsetRound(
+  session: SketchSessionState,
+): SketchSessionState {
+  const tool = session.activeEditTool;
+  if (!tool || tool.toolId === "trim" || tool.selectedTargets.length === 0)
+    return session;
+  if (tool.toolId === "offset") {
+    if (tool.offsetPublication) return session;
+    const preview = getOffsetPreview(session, tool);
+    return {
+      ...session,
+      activeEditTool: stageOffsetPreviewPublication(session, tool, preview),
+      toolStagedEntities: preview.previewEntities,
+      validationMessage: preview.valid ? null : preview.message,
+      toolPresentation: buildSketchEditToolPresentation(
+        tool,
+        preview.message,
+        preview.previewEntities,
+      ),
+    };
+  }
+  const preview = getSketchEditOperatorResult(session, tool);
+  return {
+    ...session,
+    toolStagedEntities: preview.previewEntities,
+    validationMessage: preview.valid ? null : preview.message,
+    toolPresentation: buildSketchEditToolPresentation(
+      tool,
+      preview.message,
+      preview.previewEntities,
+    ),
+  };
+}
+
 export function applySketchEditOperationResult(
   session: SketchSessionState,
   result: SketchEditOperationResult,
@@ -846,6 +1020,31 @@ export function selectSketchEditToolTarget(
     if (target.kind !== "sketchEntity") {
       return session;
     }
+
+    // T10i (C3): the Trim target must be accepted geometry; while its live
+    // round is pending the click is not applied and says the target is
+    // being checked (review R-1, the same rule as T10g R-1). Cutters are not
+    // gated here: today's Trim cuts at every crossing in the sketch, so
+    // gating them would refuse every Trim in a sketch with any unrelated
+    // non-accepted output. Hook for T10g-1 (design review R-1/T-g5): gate
+    // only non-accepted outputs whose outward box meets the target's box,
+    // on the publication-current basis, with this same gate (deferring the
+    // click while pending instead of dropping it), and re-check target and
+    // cutters when the asynchronous edit query applies.
+    const gate = offsetEditInputGate(
+      session,
+      [target.entityId],
+      "a Trim target",
+    );
+    if (gate)
+      return {
+        ...session,
+        validationMessage: gate.message,
+        toolPresentation: buildSketchEditToolPresentation(
+          activeEditTool,
+          gate.message,
+        ),
+      };
 
     const nextSequence = session.sequence + 1;
     const sketchId = session.sketchId ?? ("sketch_draft" as SketchId);

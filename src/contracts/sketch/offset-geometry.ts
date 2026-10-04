@@ -8,9 +8,9 @@ import type { SketchPoint2D } from "@/contracts/sketch/schema";
  * The certified offset route (`offset-chain-topology.ts`,
  * `offset-derivation-frame.ts`) owns every derived offset chain ([TECH] D3);
  * it reuses the diagnostic codes, the failure shape and the line/arc helpers
- * below. The static projected-spline offset and the spline Slot
- * (`operations.ts`, [TECH] D6, tracked for T10) use `offsetPolylinePoints`.
- * This module must stay free of domain/application imports.
+ * below, as do the static projected line/arc offsets and the line/arc Slots
+ * (`operations.ts`). This module must stay free of domain/application
+ * imports.
  */
 
 export const OFFSET_DIAGNOSTIC_CODES = {
@@ -31,6 +31,10 @@ export const OFFSET_DIAGNOSTIC_CODES = {
   knotIncidenceUnproven: "derived-offset-knot-incidence-unproven",
   /** Chains or joins outside the tube-stability certificate's supported scope. */
   topologyStabilityUnsupported: "derived-offset-topology-stability-unsupported",
+  /** T10i (C5): a line output is shorter than the modeling tolerance τ. */
+  outputDegenerate: "derived-offset-output-degenerate",
+  /** T10i (A-1): a seed is a non-accepted offset output (offset of a non-certified offset). */
+  seedNotCertified: "derived-offset-seed-not-certified",
 } as const;
 
 export type OffsetDiagnosticCode =
@@ -91,20 +95,4 @@ export function scalePointFromCenter(
 ): SketchPoint2D | null {
   const direction = normalize(subtract(point, center));
   return direction ? add(center, scale(direction, radius)) : null;
-}
-
-/**
- * Displaces every polyline point along the local left normal (averaged from
- * its neighbor directions) by `distance`. Positive is left of traversal.
- */
-export function offsetPolylinePoints(
-  points: readonly SketchPoint2D[],
-  distance: number,
-): SketchPoint2D[] {
-  return points.map((point, index) => {
-    const previous = points[Math.max(0, index - 1)]!;
-    const next = points[Math.min(points.length - 1, index + 1)]!;
-    const normal = leftNormal(subtract(next, previous));
-    return normal ? add(point, scale(normal, distance)) : point;
-  });
 }

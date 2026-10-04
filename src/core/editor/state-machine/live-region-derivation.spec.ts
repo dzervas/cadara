@@ -618,3 +618,65 @@ test("T08b-g5 U-G3: a staged offset preview emits one background publication; it
     "certified",
   );
 });
+
+// T10i review R-1 (logic lane). Seam: the editor's live-region result
+// handlers re-evaluate the active edit tool's selection when a round settles
+// (published or failed), without applying it.
+test("T10i R-1: a settled live-region round re-evaluates the active edit tool's preview and message and never applies it", async () => {
+  const { sketch, state } = await makeSketchState();
+  const line = state.session.definition.entities.find(
+    (entity) => entity.kind === "lineSegment",
+  );
+  if (!line) throw new Error("The seed sketch must have a line.");
+  const selected = patchSketchEditToolValue(
+    selectSketchEditToolTarget(
+      beginSketchTool(state.session, "sketchSlot"),
+      line.target,
+    ),
+    { value: 0.2 },
+  );
+  expect(selected.validationMessage, "premise: a valid Slot preview").toBe(
+    null,
+  );
+  // A stale tool state, as a gate message left from the pending round.
+  const stale: SketchSessionState = {
+    ...withLiveSolveBasis(selected, selected.definition),
+    validationMessage: "stale: still being checked",
+    toolStagedEntities: [],
+  };
+  const first = transitionEditorState(withSession(state, stale), {
+    type: "document.refreshRequested",
+  });
+  const effect = onlyDeriveEffect(first.effects);
+  for (const event of [
+    derivedEvent(effect, structuredClone(sketch.sketch.regions)),
+    {
+      type: "effect.sketchRegionDerivationFailed",
+      requestId: effect.requestId,
+      documentId: effect.documentId,
+      commandSessionId: effect.commandSessionId,
+      baseRevisionId: effect.baseRevisionId,
+      generation: effect.generation,
+      message: "derivation failed",
+    } as EditorEvent,
+  ]) {
+    const settled = transitionEditorState(
+      first.state as SketchEditorState,
+      event,
+    ).state as SketchEditorState;
+    expect(settled.session.liveRegions.status).not.toBe("pending");
+    expect(
+      settled.session.validationMessage,
+      `${event.type}: the message is re-evaluated`,
+    ).toBe(null);
+    expect(
+      settled.session.toolStagedEntities.length,
+      `${event.type}: the preview is re-evaluated`,
+    ).toBeGreaterThan(0);
+    expect(
+      settled.session.definition,
+      `${event.type}: nothing is applied`,
+    ).toBe(stale.definition);
+    expect(settled.session.activeEditTool?.selectedTargets).toHaveLength(1);
+  }
+});

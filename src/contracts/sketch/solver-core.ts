@@ -4397,6 +4397,13 @@ function validateDefinition(
   const dimensionIds = new Set<DimensionId>();
   const referenceIds = new Set<ReferenceId>();
   const styleIds = new Set<(typeof authoredStyleIds)[number]>();
+  const offsetOutputLineIds = new Set<SketchEntityId>(
+    (definition.derivedRelationships ?? []).flatMap((relationship) =>
+      relationship.kind === "offset"
+        ? relationship.outputs.map((output) => output.outputEntityId)
+        : [],
+    ),
+  );
   const collectRecordMap = <Id extends string, Record>(
     records: readonly Record[],
     getId: (record: Record) => Id,
@@ -4686,8 +4693,12 @@ function validateDefinition(
           ),
         );
       } else if (
+        // T10i (C5, [TECH] T-11): an offset relationship's line output is
+        // relationship-owned; its solve frame fails it below τ
+        // (`derived-offset-output-degenerate`, [TECH] G16′).
+        !offsetOutputLineIds.has(entity.entityId) &&
         length(subtract(start.position, end.position)) <
-        tolerances.minimumSegmentLength
+          tolerances.minimumSegmentLength
       ) {
         diagnostics.push(
           makeDiagnostic(
