@@ -156,3 +156,117 @@ export function resolveSketchPickStack<
       return true;
     });
 }
+
+/**
+ * A click within this many px of the previous selecting click may cycle
+ * (the viewport's click/drag threshold; T11-D4).
+ */
+export const SKETCH_PICK_CYCLE_RADIUS_PX = 6;
+
+/**
+ * The repeated-click cycle (T11d, T11-D4/D5, review R-1): what the previous
+ * selecting click picked, kept by the viewport in a ref; `null` when no
+ * cycle is anchored.
+ */
+export interface SketchPickCycle {
+  /** Client position of the previous selecting click. */
+  readonly x: number;
+  readonly y: number;
+  /** Ordered target keys (`getPrimitiveRefKey`) of the stack it resolved. */
+  readonly stackKeys: readonly string[];
+  /** Index in that stack of the target it picked. */
+  readonly index: number;
+  /** Its selection context (`getSketchSelectionCycleContext().key`). */
+  readonly contextKey: string;
+}
+
+/** The pointer and the stack resolved at it. */
+export interface SketchPickCyclePointer {
+  readonly x: number;
+  readonly y: number;
+  readonly stackKeys: readonly string[];
+  readonly contextKey: string;
+  /**
+   * Whether the selection still holds the previous pick, the stack entry at
+   * this index (per the context's cycle mode).
+   */
+  readonly retainsPick: (index: number) => boolean;
+}
+
+export type SketchPickCycleEvent =
+  | ({
+      readonly type: "clicked";
+      /** `MouseEvent.detail` of the `click` (pointer events report 0). */
+      readonly detail: number;
+      /** False where the context does not cycle (mode `none`). */
+      readonly cycles: boolean;
+    } & SketchPickCyclePointer)
+  /** Escape, a selection change from elsewhere, an Undo, a stack change. */
+  | { readonly type: "reset" };
+
+/**
+ * The stack index the next single click advances to, or `null` when no
+ * cycle is armed. Armed: the stack has at least 2 entries (with one there
+ * is nothing to cycle, and a repeated click keeps its ordinary meaning,
+ * e.g. toggling an Offset target off; T11d review R-1), the pointer is
+ * within `SKETCH_PICK_CYCLE_RADIUS_PX` of the previous selecting click, in
+ * the same context, on a stack with equal ordered keys, and the selection
+ * still holds what that click picked.
+ */
+export function getArmedSketchPickCycleIndex(
+  cycle: SketchPickCycle | null,
+  pointer: SketchPickCyclePointer,
+): number | null {
+  if (
+    !cycle ||
+    cycle.stackKeys.length < 2 ||
+    Math.hypot(pointer.x - cycle.x, pointer.y - cycle.y) >
+      SKETCH_PICK_CYCLE_RADIUS_PX ||
+    pointer.contextKey !== cycle.contextKey ||
+    pointer.stackKeys.length !== cycle.stackKeys.length ||
+    pointer.stackKeys.some((key, index) => key !== cycle.stackKeys[index]) ||
+    !pointer.retainsPick(cycle.index)
+  ) {
+    return null;
+  }
+  return (cycle.index + 1) % cycle.stackKeys.length;
+}
+
+/**
+ * The stack index the next single click would pick: the armed cycle's next
+ * index, else 0. Hover previews it and the release dispatch carries it, so
+ * both equal what that click selects.
+ */
+export function getSketchPickPreviewIndex(
+  cycle: SketchPickCycle | null,
+  pointer: SketchPickCyclePointer,
+): number {
+  return getArmedSketchPickCycleIndex(cycle, pointer) ?? 0;
+}
+
+/**
+ * The cycle reducer. A single click (`detail === 1`) in a cycling context
+ * picks the preview index (wrapping) and anchors the cycle there; any other
+ * click (connected selection, `detail >= 2`), a non-cycling context, an
+ * empty stack or a reset clears it.
+ */
+export function reduceSketchPickCycle(
+  cycle: SketchPickCycle | null,
+  event: SketchPickCycleEvent,
+): SketchPickCycle | null {
+  if (
+    event.type === "reset" ||
+    event.detail !== 1 ||
+    !event.cycles ||
+    event.stackKeys.length === 0
+  ) {
+    return null;
+  }
+  return {
+    x: event.x,
+    y: event.y,
+    stackKeys: event.stackKeys,
+    index: getSketchPickPreviewIndex(cycle, event),
+    contextKey: event.contextKey,
+  };
+}

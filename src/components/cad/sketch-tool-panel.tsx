@@ -3,6 +3,7 @@ import { NumberInput, Paper, Select, Switch, TextInput } from "@mantine/core";
 import {
   VIEWPORT_FLOATING_PANEL_LEFT_PX,
   VIEWPORT_FLOATING_PANEL_TOP_STYLE,
+  VIEWPORT_SKETCH_TOOL_PANEL_WIDTH_PX,
 } from "@/components/cad/viewport-overlay-layout";
 import type { SketchToolPresentationSchema } from "@/core/sketch-tools/editor-schema";
 import {
@@ -63,10 +64,11 @@ export function SketchToolPanel({ schema, onPatch }: SketchToolPanelProps) {
   return (
     <Paper
       component="div"
-      className={`${pointerEventsClassName} absolute z-20 w-[260px] max-w-[calc(100vw-32px)] overflow-hidden rounded-[6px] text-xs text-[var(--workbench-shell-text-muted)]`}
+      className={`${pointerEventsClassName} absolute z-20 max-w-[calc(100vw-32px)] overflow-hidden rounded-[6px] text-xs text-[var(--workbench-shell-text-muted)]`}
       style={{
         left: VIEWPORT_FLOATING_PANEL_LEFT_PX,
         top: VIEWPORT_FLOATING_PANEL_TOP_STYLE,
+        width: VIEWPORT_SKETCH_TOOL_PANEL_WIDTH_PX,
         background: "var(--workbench-shell-surface-panel-elev)",
         boxShadow: "var(--workbench-shell-elevation-md)",
       }}

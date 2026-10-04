@@ -74,6 +74,23 @@ export const DEFAULT_PROJECTED_POINT_PICK_EXIT_RADIUS_PX = 56;
 /** Sketch display points (T11-D2); feature vertices keep the radii above. */
 export const DEFAULT_SKETCH_POINT_PICK_ENTER_RADIUS_PX = 12;
 export const DEFAULT_SKETCH_POINT_PICK_EXIT_RADIUS_PX = 16;
+
+/**
+ * Projected feature (model) vertex radii: in sketch mode they are reference
+ * points beside sketch points and use the sketch point radii (T11c review
+ * ADV-3); part mode keeps 48/56 px.
+ */
+export function getProjectedFeatureVertexPickRadii(inSketchSession: boolean) {
+  return inSketchSession
+    ? {
+        enterRadius: DEFAULT_SKETCH_POINT_PICK_ENTER_RADIUS_PX,
+        exitRadius: DEFAULT_SKETCH_POINT_PICK_EXIT_RADIUS_PX,
+      }
+    : {
+        enterRadius: DEFAULT_PROJECTED_POINT_PICK_ENTER_RADIUS_PX,
+        exitRadius: DEFAULT_PROJECTED_POINT_PICK_EXIT_RADIUS_PX,
+      };
+}
 const DEFAULT_WIRE_OCCLUSION_TOLERANCE = 0.01;
 const DEFAULT_SAME_LAYER_TOLERANCE = 0.004;
 const PICK_DISTANCE_EPSILON = 1e-9;

@@ -338,6 +338,11 @@ export interface ViewportSelectionRequestedEvent {
   target: PrimitiveRef;
   /** Current viewport camera position when the selection came from the viewport. */
   cameraPosition?: Vec3;
+  /**
+   * A repeated single click on the same sketch pick stack (T11d): the
+   * previous click's pick, which this target replaces in the selection.
+   */
+  cycleReplaces?: PrimitiveRef;
 }
 
 /** Requests connected local sketch-entity selection from a viewport double-click. */

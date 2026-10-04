@@ -95,7 +95,11 @@ export function createWorkbenchViewportCommands(input: {
 interface WorkbenchViewportIntentActions {
   dispatch: (event: EditorEvent) => void;
   onHover: (target: PrimitiveRef) => void;
-  onSelect: (target: PrimitiveRef, cameraPosition?: Vec3) => void;
+  onSelect: (
+    target: PrimitiveRef,
+    cameraPosition?: Vec3,
+    cycleReplaces?: PrimitiveRef,
+  ) => void;
   onConnectedSketchSelect: (target: PrimitiveRef) => void;
   onDeselect: () => void;
   onClearHover: () => void;
@@ -168,7 +172,7 @@ export function createWorkbenchViewportIntentHandler({
         onHover(intent.target);
         return;
       case "selected":
-        onSelect(intent.target, intent.cameraPosition);
+        onSelect(intent.target, intent.cameraPosition, intent.cycleReplaces);
         return;
       case "connectedSketchSelected":
         onConnectedSketchSelect(intent.target);

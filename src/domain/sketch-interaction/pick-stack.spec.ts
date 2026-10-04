@@ -32,8 +32,14 @@ import {
   OCC_KERNEL_SETTINGS,
 } from "@/domain/modeling/opencascade-kernel-seed";
 import {
+  getArmedSketchPickCycleIndex,
+  getSketchPickPreviewIndex,
+  reduceSketchPickCycle,
   resolveSketchPickStack,
   SKETCH_PICK_CLASSES,
+  SKETCH_PICK_CYCLE_RADIUS_PX,
+  type SketchPickCycle,
+  type SketchPickCyclePointer,
   type SketchPickStackCandidate,
 } from "@/domain/sketch-interaction/pick-stack";
 
@@ -581,4 +587,149 @@ test("[TECH] G19: a non-accepted derived output stays pickable in its own class"
     ["shell-construction", "constructionCurve"],
     ["origin", "referencePoint"],
   ]);
+});
+
+// T11d: the repeated-click cycle reducer (T11-D4/D5, review R-1).
+const cycleStack = ["line", "construction", "xAxis"] as const;
+
+function cyclePointer(
+  overrides: Partial<SketchPickCyclePointer> = {},
+): SketchPickCyclePointer {
+  return {
+    x: 100,
+    y: 200,
+    stackKeys: cycleStack,
+    contextKey: "select:none",
+    retainsPick: () => true,
+    ...overrides,
+  };
+}
+
+function clickCycle(
+  cycle: SketchPickCycle | null,
+  overrides: Partial<SketchPickCyclePointer> & {
+    detail?: number;
+    cycles?: boolean;
+  } = {},
+) {
+  const { detail = 1, cycles = true, ...pointer } = overrides;
+  return reduceSketchPickCycle(cycle, {
+    type: "clicked",
+    detail,
+    cycles,
+    ...cyclePointer(pointer),
+  });
+}
+
+test("T11d cycle: repeated single clicks advance through the stack and wrap", () => {
+  const picks: number[] = [];
+  let cycle: SketchPickCycle | null = null;
+  for (let click = 0; click < 5; click += 1) {
+    const preview = getSketchPickPreviewIndex(cycle, cyclePointer());
+    cycle = clickCycle(cycle);
+    expect(cycle?.index, "The click picks what the preview showed.").toBe(
+      preview,
+    );
+    picks.push(cycle!.index);
+  }
+  expect(picks, "stack[(i + 1) mod n], wrapping.").toEqual([0, 1, 2, 0, 1]);
+  expect(cycle).toEqual({
+    x: 100,
+    y: 200,
+    stackKeys: cycleStack,
+    index: 1,
+    contextKey: "select:none",
+  });
+  expect(
+    getArmedSketchPickCycleIndex(null, cyclePointer()),
+    "Nothing anchored: not armed.",
+  ).toBeNull();
+});
+
+test("T11d cycle: within the 6 px click radius it advances; each reset rule restarts at stack[0]", () => {
+  const anchored = clickCycle(clickCycle(null));
+  expect(anchored?.index).toBe(1);
+  expect(SKETCH_PICK_CYCLE_RADIUS_PX).toBe(6);
+  expect(
+    clickCycle(anchored, { x: 106, y: 200 })?.index,
+    "6 px away still cycles.",
+  ).toBe(2);
+  const resets: [string, SketchPickCycle | null][] = [
+    ["moved more than 6 px", clickCycle(anchored, { x: 106.01, y: 200 })],
+    [
+      "moved diagonally more than 6 px",
+      clickCycle(anchored, { x: 105, y: 204 }),
+    ],
+    [
+      "a stack change (reordered keys)",
+      clickCycle(anchored, { stackKeys: ["construction", "line", "xAxis"] }),
+    ],
+    [
+      "a stack change (one more candidate)",
+      clickCycle(anchored, { stackKeys: [...cycleStack, "origin"] }),
+    ],
+    [
+      "another selection context",
+      clickCycle(anchored, { contextKey: "edit:offset:offset" }),
+    ],
+    [
+      "the selection no longer holds the previous pick (Escape, Undo, a selection from elsewhere)",
+      clickCycle(anchored, { retainsPick: () => false }),
+    ],
+  ];
+  for (const [rule, cycle] of resets) {
+    expect(cycle?.index, `Reset: ${rule}.`).toBe(0);
+  }
+  expect(
+    reduceSketchPickCycle(anchored, { type: "reset" }),
+    "An explicit reset clears the cycle.",
+  ).toBeNull();
+});
+
+test("T11d cycle: retention is asked about the previous pick's index", () => {
+  const anchored = clickCycle(clickCycle(null));
+  const asked: number[] = [];
+  clickCycle(anchored, {
+    retainsPick: (index) => {
+      asked.push(index);
+      return true;
+    },
+  });
+  expect(asked).toEqual([1]);
+});
+
+test("T11d cycle: connected selection (detail >= 2), a non-cycling context and an empty stack clear it", () => {
+  const anchored = clickCycle(clickCycle(null));
+  expect(
+    clickCycle(anchored, { detail: 2 }),
+    "A double click's second click never advances; it resets.",
+  ).toBeNull();
+  expect(clickCycle(anchored, { detail: 3 })).toBeNull();
+  expect(
+    clickCycle(anchored, { detail: 0 }),
+    "Pointer events report detail 0: never a cycle click.",
+  ).toBeNull();
+  expect(
+    clickCycle(anchored, { cycles: false }),
+    "Immediate-action contexts do not cycle.",
+  ).toBeNull();
+  expect(clickCycle(anchored, { stackKeys: [] })).toBeNull();
+  expect(
+    clickCycle(clickCycle(anchored, { detail: 2 }))?.index,
+    "After a connected selection the next single click starts at stack[0].",
+  ).toBe(0);
+});
+
+test("T11d review R-1: a 1-entry stack never arms a cycle", () => {
+  const single = ["line"];
+  const anchored = clickCycle(null, { stackKeys: single });
+  expect(anchored?.index).toBe(0);
+  expect(
+    getArmedSketchPickCycleIndex(anchored, cyclePointer({ stackKeys: single })),
+    "Nothing to cycle: a repeated click keeps its ordinary meaning.",
+  ).toBeNull();
+  expect(
+    clickCycle(anchored, { stackKeys: single })?.index,
+    "The repeated click picks stack[0] again, as an ordinary click.",
+  ).toBe(0);
 });
