@@ -97,7 +97,10 @@ function actionLabel(event: EditorEvent, before: EditorState) {
                 .replace(/([A-Z])/g, " $1")
                 .replace(/^./, (value) => value.toUpperCase())
             : "Update Sketch";
+    // A committing Escape or Enter is a finalized spline (T11-D10).
     case "sketch.pointerReleased":
+    case "sketch.escapeRequested":
+    case "sketch.confirmRequested":
       return "Create Sketch Geometry";
     case "sketch.specialModeDragEnded":
       return "Edit Sketch Operation";
@@ -241,7 +244,8 @@ export class SketchAuthoredActions {
       event.type === "command.cancelled" ||
       event.type === "command.commitRequested" ||
       event.type === "tool.activated" ||
-      event.type === "sketch.activeToolCleared";
+      event.type === "sketch.activeToolCleared" ||
+      event.type === "sketch.escapeRequested";
     const hasAnnotationGesture =
       beforeKey !== null && this.annotationGestures.has(beforeKey);
     const annotationStartPoint = beforeKey

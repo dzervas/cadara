@@ -174,6 +174,7 @@ export const centerPointArcSketchToolDefinition: SketchToolDefinition<"centerPoi
         variantIds: ["centerPointArc", "threePointArc", "tangentArc"],
       },
     },
+    lifecycle: "discrete",
     activate() {
       const state = {
         status: "idle",

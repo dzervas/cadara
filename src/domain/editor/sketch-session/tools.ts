@@ -39,7 +39,9 @@ import { buildSketchStylePresentation } from "@/domain/sketch-styles/definition"
 import type {
   SketchDraftEntity,
   SketchToolCommitContribution,
+  SketchToolDefinition,
   SketchToolId,
+  SketchToolPointerResult,
 } from "@/core/sketch-tools/definition";
 import type {
   SketchToolAnchorDescriptor,
@@ -713,6 +715,62 @@ export function beginSketchTool(
     activeSnap: null,
     drawStartSnap: null,
   };
+}
+
+/** What one Escape does to an armed drawing tool (T11-D10). */
+export type SketchDrawingEscapeStep =
+  | "endChain"
+  | "finalizeDraft"
+  | "cancelDraft"
+  | "exitTool";
+
+/**
+ * The Escape step order for an armed drawing tool (T11-D10). An open pick
+ * chooser consumes Escape before this, in the viewport (T11e). Then: end an
+ * active Line chain (Line stays armed); finalize a fit-point draft that has
+ * its minimum points (one action, the tool stays armed); cancel any other
+ * incomplete draft (no action, the tool stays armed); otherwise leave the
+ * tool for Select.
+ */
+export function resolveSketchDrawingEscapeStep(draft: {
+  chainActive: boolean;
+  finalizable: boolean;
+  incomplete: boolean;
+}): SketchDrawingEscapeStep {
+  if (draft.chainActive) {
+    return "endChain";
+  }
+
+  if (draft.finalizable) {
+    return "finalizeDraft";
+  }
+
+  return draft.incomplete ? "cancelDraft" : "exitTool";
+}
+
+export function escapeSketchDrawing(
+  session: SketchSessionState,
+): SketchDrawingEscapeStep {
+  return resolveSketchDrawingEscapeStep({
+    // T11h adds the Line chain; until then Line commits without one.
+    chainActive: false,
+    // T11i adds fit-point finalize; until then the spline commits on its
+    // third click, so a spline draft with 1-2 points cancels.
+    finalizable: false,
+    incomplete: session.status === "drawing",
+  });
+}
+
+/**
+ * What Enter does to an armed drawing tool: the Escape steps that complete
+ * something (end a chain, finalize a viable fit-point draft), else nothing,
+ * so Enter is not consumed (T11-D10, review A-9).
+ */
+export function confirmSketchDrawing(
+  session: SketchSessionState,
+): Extract<SketchDrawingEscapeStep, "endChain" | "finalizeDraft"> | null {
+  const step = escapeSketchDrawing(session);
+  return step === "endChain" || step === "finalizeDraft" ? step : null;
 }
 
 export function clearActiveSketchTool(
@@ -2077,6 +2135,22 @@ export function startSketchDraw(
     } satisfies import("@/core/sketch-tools/definition").SketchToolRuntimeState,
     point: snap.point,
   });
+  const startPoint = snap.point ?? point;
+
+  // A one-click tool (Point, T11-D19) completes on its first release.
+  if (
+    result.state.status === "idle" &&
+    result.state.validationMessage === null
+  ) {
+    return commitSketchDraw(
+      { ...session, drawStartSnap: null },
+      toolDefinition,
+      result,
+      startPoint,
+      startPoint,
+      snap.candidate,
+    );
+  }
 
   return {
     ...session,
@@ -2157,6 +2231,28 @@ export function acceptSketchDraw(
     };
   }
 
+  return commitSketchDraw(
+    session,
+    toolDefinition,
+    result,
+    startPoint,
+    endPoint,
+    snap.candidate,
+  );
+}
+
+/**
+ * Commits a completed draw as one definition change. The release `result`
+ * completed the tool; `endSnap` is the snap accepted on that release.
+ */
+function commitSketchDraw(
+  session: SketchSessionState,
+  toolDefinition: SketchToolDefinition,
+  result: SketchToolPointerResult,
+  startPoint: SketchPoint,
+  endPoint: SketchPoint,
+  endSnap: SketchSnapCandidate | null,
+): SketchSessionState {
   const nextSequence = session.sequence + 1;
   const sketchId = session.sketchId ?? ("sketch_draft" as SketchId);
   const baseDefinitionPatch = toolDefinition.createCommitContribution({
@@ -2168,7 +2264,7 @@ export function acceptSketchDraw(
     isConstruction: session.constructionModifierActive,
     acceptedSnaps: {
       start: session.drawStartSnap,
-      end: snap.candidate,
+      end: endSnap,
     },
     factories: {
       createPointId: (suffix) => createPointId(nextSequence, suffix),
@@ -2327,9 +2423,9 @@ export function acceptSketchDraw(
   const definitionPatch = appendInferredSnapConstraints({
     previousDefinition: session.definition,
     patch: baseDefinitionPatch,
-    activeTool: session.activeTool,
+    activeTool: toolDefinition.metadata.id,
     startSnap: session.drawStartSnap,
-    endSnap: snap.candidate,
+    endSnap,
     sequence: nextSequence,
     createConstraintId: (suffix) => createConstraintId(nextSequence, suffix),
   });

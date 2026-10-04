@@ -39,6 +39,8 @@ export type {
   SketchGeometryDragEndedEvent,
   SketchToolPatchedEvent,
   SketchActiveToolClearedEvent,
+  SketchEscapeRequestedEvent,
+  SketchConfirmRequestedEvent,
   DocumentHistoryCursorRequestedEvent,
   HistoryUndoRequestedEvent,
   HistoryRedoRequestedEvent,

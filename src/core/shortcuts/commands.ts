@@ -22,6 +22,7 @@ export type ShortcutCommandCategory =
 export type ToolCommandId = `tool.${ToolId}`;
 export type EditorCommandId =
   | "editor.cancel"
+  | "editor.confirm"
   | "editor.deleteSelection"
   | "editor.focusSearch"
   | "editor.redo"
@@ -97,6 +98,14 @@ const editorCommands = [
     category: "Editor",
     scope: "global",
     defaultShortcuts: ["escape"],
+    customizable: true,
+  },
+  {
+    id: "editor.confirm",
+    label: "End Chain / Finalize Spline",
+    category: "Sketch",
+    scope: "sketch",
+    defaultShortcuts: ["enter"],
     customizable: true,
   },
   {

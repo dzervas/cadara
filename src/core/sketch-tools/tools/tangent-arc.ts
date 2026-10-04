@@ -178,6 +178,7 @@ export const tangentArcSketchToolDefinition: SketchToolDefinition<"tangentArc"> 
       icon: "circle",
       modes: ["sketch"],
     },
+    lifecycle: "discrete",
     activate() {
       const state = {
         status: "idle",

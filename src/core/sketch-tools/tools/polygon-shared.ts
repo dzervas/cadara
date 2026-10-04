@@ -146,6 +146,7 @@ export function createRegularPolygonSketchToolDefinition(input: {
       dropdown: input.dropdown,
     },
     {
+      lifecycle: "discrete",
       buildPreview,
       buildPresentation,
       validate,

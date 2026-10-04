@@ -7,6 +7,7 @@ import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
 import type { PrimitiveRef, SelectionFilter } from "@/core/editor/schema";
 import { getRegisteredFeatureAuthoringDefinitions } from "@/core/feature-authoring/registry";
 import {
+  confirmSketchDrawing,
   getActiveSketchStyleToolId,
   isSketchConstructionSelected,
   type SketchAuthoringToolId,
@@ -68,6 +69,15 @@ export function getEscapeEvent(
     return { type: "form.referencePickerCancelled" };
   }
 
+  // Drawing tools take Escape in steps (T11-D10); edit, constraint and
+  // special-mode tools keep the single-Escape exit.
+  if (
+    state.sketchSession?.activeTool &&
+    isRegisteredSketchToolId(state.sketchSession.activeTool)
+  ) {
+    return { type: "sketch.escapeRequested" };
+  }
+
   if (
     state.sketchSession?.activeTool ||
     (state.sketchSession &&
@@ -89,6 +99,22 @@ export function getEscapeEvent(
   }
 
   return null;
+}
+
+/**
+ * Enter ends a Line chain or finalizes a viable fit-point draft; otherwise it
+ * is not consumed (T11-D10).
+ */
+export function getEnterEvent(
+  state: Pick<EditorViewState, "sketchSession">,
+): EditorEvent | null {
+  const session = state.sketchSession;
+
+  return session?.activeTool &&
+    isRegisteredSketchToolId(session.activeTool) &&
+    confirmSketchDrawing(session) !== null
+    ? { type: "sketch.confirmRequested" }
+    : null;
 }
 
 export function shouldViewportClickRequestSelection(

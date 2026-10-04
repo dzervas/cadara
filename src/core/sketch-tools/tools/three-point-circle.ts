@@ -173,6 +173,7 @@ export const threePointCircleSketchToolDefinition: SketchToolDefinition<"threePo
       icon: "circle",
       modes: ["sketch"],
     },
+    lifecycle: "discrete",
     activate() {
       const state = {
         status: "idle",

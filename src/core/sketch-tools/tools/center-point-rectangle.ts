@@ -175,6 +175,7 @@ export const centerPointRectangleSketchToolDefinition: SketchToolDefinition<"cen
       modes: ["sketch"],
     },
     {
+      lifecycle: "discrete",
       buildPreview: buildCenterPointRectanglePreview,
       buildPresentation: buildCenterPointRectanglePresentation,
       validate: validateCenterPointRectangle,

@@ -25,11 +25,35 @@ Keyboard shortcuts for tools SHALL activate tools through the same action path a
 - **THEN** the part-mode feature command does not execute
 
 ### Requirement: Escape SHALL cancel or close active interactions
-The Escape shortcut SHALL cancel or close the current cancelable workbench interaction, SHALL clear the current selection when no higher-priority interaction handles Escape, and SHALL NOT finish the active sketch.
+The Escape shortcut SHALL cancel or close the current cancelable workbench interaction, SHALL clear the current selection when no higher-priority interaction handles Escape, and SHALL NOT finish the active sketch. With an armed sketch drawing tool, each Escape SHALL take one step, in order: close an open candidate chooser; end an active Line chain (Line stays armed); finalize a fit-point spline draft that has its minimum points (one action, Spline stays armed); cancel any other incomplete draft without an action (the tool stays armed); otherwise leave the tool for Select. Edit, constraint and special-mode tools SHALL leave on one Escape.
 
 #### Scenario: Escape with cancelable sketch interaction
 - **WHEN** a sketch interaction exposes a cancel event and the user presses Escape
 - **THEN** the workbench dispatches that cancel event
+
+#### Scenario: Escape cancels an incomplete drawing draft
+- **WHEN** a sketch drawing tool such as Circle has an incomplete draft and the user presses Escape
+- **THEN** the draft is discarded without a history action
+- **AND** the tool stays armed
+
+#### Scenario: Escape leaves an armed drawing tool with no draft
+- **WHEN** a sketch drawing tool is armed with no draft and the user presses Escape
+- **THEN** the tool is cleared and the sketch returns to Select
+
+#### Scenario: Escape leaves an edit or constraint tool at once
+- **WHEN** a sketch edit or constraint tool is active and the user presses Escape
+- **THEN** the tool is cleared on that one Escape
+
+### Requirement: Enter SHALL complete a drawing step only when one applies
+The Enter shortcut SHALL end an active Line chain or finalize a fit-point spline draft that has its minimum points, keeping the tool armed. When neither applies, the shortcut SHALL NOT consume Enter. When it applies, the consumed Enter SHALL NOT also activate a focused toolbar button.
+
+#### Scenario: Enter with nothing to complete
+- **WHEN** a sketch drawing tool is armed with no chain and no viable spline draft and the user presses Enter
+- **THEN** the shortcut system does not handle the key
+
+#### Scenario: Enter on a focused toolbar button
+- **WHEN** a toolbar button has focus, Enter applies to the armed drawing tool and the user presses Enter
+- **THEN** the shortcut system consumes the key so the button is not activated and the tool is not restarted
 
 #### Scenario: Escape while sketch session is idle
 - **WHEN** the user is in sketch mode with no cancelable interaction and presses Escape

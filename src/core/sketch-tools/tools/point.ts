@@ -26,7 +26,7 @@ function buildPointPreview(point: SketchPoint): readonly SketchDraftEntity[] {
 function buildPointPresentation(
   state: SketchToolRuntimeState,
 ): SketchToolPresentationSchema {
-  const point = state.livePoint ?? state.pointerDownPoint;
+  const point = state.livePoint;
 
   return {
     prompts: [
@@ -41,7 +41,7 @@ function buildPointPresentation(
       {
         id: "point-completion",
         text: point
-          ? "Click to accept the point"
+          ? "Click to place the point"
           : "Click to set the point location",
         ready: point !== null,
       },
@@ -69,6 +69,7 @@ export const pointSketchToolDefinition: SketchToolDefinition<"point"> = {
     icon: "point",
     modes: ["sketch"],
   },
+  lifecycle: "discrete",
   activate() {
     const state = createIdleState();
 
@@ -99,10 +100,10 @@ export const pointSketchToolDefinition: SketchToolDefinition<"point"> = {
       };
     }
 
-    const complete = state.status === "drawing";
+    // One click places the point (T11-D19): the release completes at once.
     const nextState = {
-      status: complete ? "idle" : "drawing",
-      pointerDownPoint: complete ? null : point,
+      status: "idle",
+      pointerDownPoint: null,
       livePoint: point,
       placedPoints: [point],
       validationMessage: null,
@@ -110,12 +111,12 @@ export const pointSketchToolDefinition: SketchToolDefinition<"point"> = {
 
     return {
       state: nextState,
-      stagedEntities: complete ? [] : buildPointPreview(point),
+      stagedEntities: [],
       presentation: buildPointPresentation(nextState),
     };
   },
   getStagedEntities(state) {
-    const point = state.livePoint ?? state.pointerDownPoint;
+    const point = state.livePoint;
 
     return point ? buildPointPreview(point) : [];
   },

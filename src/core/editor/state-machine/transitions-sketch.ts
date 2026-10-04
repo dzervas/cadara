@@ -1,12 +1,16 @@
+import type { SketchToolId } from "@/core/sketch-tools/definition";
 import { isRegisteredSketchToolId } from "@/core/sketch-tools/registry";
 import {
   acceptSketchDraw,
   beginSketchAnnotationEdit,
   beginSketchGeometryDrag,
+  beginSketchTool,
   clearActiveSketchTool,
+  confirmSketchDrawing,
   deleteSelectedSketchAnnotation,
   deleteSelectedSketchGeometry,
   deleteSketchReferenceTarget,
+  escapeSketchDrawing,
   finishSketchGeometryDrag,
   getConnectedSketchEntitySelectionTargets,
   getSketchSessionPreviewLabel,
@@ -21,6 +25,7 @@ import {
   startSketchDraw,
   updateSketchGeometryDrag,
   updateSketchPointer,
+  type SketchDrawingEscapeStep,
 } from "@/domain/editor/sketch-session";
 import {
   enterSketchSpecialMode,
@@ -253,6 +258,80 @@ export function handleSketchActiveToolCleared(
     },
     effects: [],
   };
+}
+
+/** Escape with an armed drawing tool takes the next step (T11-D10). */
+export function handleSketchEscapeRequested(
+  state: EditorState,
+): EditorTransitionResult {
+  if (state.kind !== "editingSketch") {
+    return { state, effects: [] };
+  }
+
+  const toolId = state.session.activeTool;
+  if (toolId === null || !isRegisteredSketchToolId(toolId)) {
+    return handleSketchActiveToolCleared(state);
+  }
+
+  return applySketchDrawingStep(
+    state,
+    toolId,
+    escapeSketchDrawing(state.session),
+  );
+}
+
+/** Enter with an armed drawing tool: end a chain or finalize, else nothing. */
+export function handleSketchConfirmRequested(
+  state: EditorState,
+): EditorTransitionResult {
+  if (state.kind !== "editingSketch") {
+    return { state, effects: [] };
+  }
+
+  const toolId = state.session.activeTool;
+  if (toolId === null || !isRegisteredSketchToolId(toolId)) {
+    return { state, effects: [] };
+  }
+
+  const step = confirmSketchDrawing(state.session);
+  return step
+    ? applySketchDrawingStep(state, toolId, step)
+    : { state, effects: [] };
+}
+
+function applySketchDrawingStep(
+  state: SketchEditorState,
+  toolId: SketchToolId,
+  step: SketchDrawingEscapeStep,
+): EditorTransitionResult {
+  switch (step) {
+    case "endChain":
+    case "finalizeDraft":
+      // `escapeSketchDrawing` returns these only once T11h (Line chain) and
+      // T11i (fit-point finalize) land.
+      throw new Error(`Sketch drawing step "${step}" is not available yet.`);
+    case "cancelDraft": {
+      // The draft never reached the definition: restarting the armed tool
+      // drops it with no action, like a tool switch (T11-D14).
+      const session = beginSketchTool(state.session, toolId);
+
+      return {
+        state: {
+          ...state,
+          session,
+          command: { ...state.command, phase: "collecting" },
+          preview: {
+            kind: "sketch",
+            label: getSketchSessionPreviewLabel(session),
+            target: session.planeTarget,
+          },
+        },
+        effects: [],
+      };
+    }
+    case "exitTool":
+      return handleSketchActiveToolCleared(state);
+  }
 }
 
 export function handleSketchAnnotationDeleteRequested(

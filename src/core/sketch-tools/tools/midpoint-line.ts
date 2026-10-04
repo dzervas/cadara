@@ -121,6 +121,7 @@ export const midpointLineSketchToolDefinition: SketchToolDefinition<"midpointLin
       modes: ["sketch"],
     },
     {
+      lifecycle: "discrete",
       buildPreview: buildMidpointLinePreview,
       buildPresentation: buildMidpointLinePresentation,
       validate: validateMidpointLine,

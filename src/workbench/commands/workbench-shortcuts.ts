@@ -3,7 +3,10 @@ import type {
   EditorViewState,
 } from "@/domain/editor/state-machine";
 import { isEditableSketchGeometrySelection } from "@/domain/editor/sketch-session";
-import { getEscapeEvent } from "@/domain/editor/workbench-interactions";
+import {
+  getEnterEvent,
+  getEscapeEvent,
+} from "@/domain/editor/workbench-interactions";
 import {
   getToolCommandId,
   type ShortcutScope,
@@ -68,6 +71,19 @@ export function createWorkbenchShortcutCommandHandlers({
           selection,
           sketchSession,
         }) !== null,
+    },
+    // Enabled only when it applies, so an unused Enter keeps its native
+    // behaviour; when it applies the resolver consumes it, so a focused
+    // toolbar button is not activated too (review A-5(a)).
+    "editor.confirm": {
+      execute: () => {
+        const enterEvent = getEnterEvent({ sketchSession });
+
+        if (enterEvent) {
+          dispatch(enterEvent);
+        }
+      },
+      isEnabled: () => getEnterEvent({ sketchSession }) !== null,
     },
     "editor.redo": {
       execute: () => {

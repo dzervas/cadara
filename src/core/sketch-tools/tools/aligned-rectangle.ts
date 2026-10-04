@@ -228,6 +228,7 @@ export const alignedRectangleSketchToolDefinition: SketchToolDefinition<"aligned
       icon: "rectangle",
       modes: ["sketch"],
     },
+    lifecycle: "discrete",
     activate() {
       const state = {
         status: "idle",

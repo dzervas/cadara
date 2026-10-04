@@ -140,6 +140,7 @@ export const lineSketchToolDefinition: SketchToolDefinition<"line"> =
       },
     },
     {
+      lifecycle: "chain",
       buildPreview: buildLinePreview,
       buildPresentation: buildLinePresentation,
       validate: validateLine,

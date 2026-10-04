@@ -401,14 +401,16 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
   }
 
   function testPointAndMidpointLineConstructorsCommitDurableIntent() {
-    const pointSession = drawSketchTool("point", [
-      [1, 2],
-      [1, 2],
-    ]);
+    // Point commits on a single click (T11-D19).
+    const pointSession = drawSketchTool("point", [[1, 2]]);
     expect(
       pointSession.definition.entities[0]?.kind,
       "Point constructor should commit a durable point entity.",
     ).toBe("point");
+    expect(
+      pointSession.definition.entities,
+      "One click should commit exactly one point entity.",
+    ).toHaveLength(1);
     expect(
       pointSession.commitRequest?.definition.entities[0]?.kind,
       "Point commit request should include durable point geometry.",

@@ -8,6 +8,7 @@ import type {
   SketchToolCommitContribution,
   SketchToolCommitInput,
   SketchToolDefinition,
+  SketchToolLifecycle,
   SketchToolMetadata,
   SketchToolPointerInput,
   SketchToolPointerResult,
@@ -167,6 +168,7 @@ export function createSketchToolDefinition<
 >(
   metadata: SketchToolMetadata<TToolId>,
   input: {
+    lifecycle: SketchToolLifecycle;
     buildPreview(
       start: SketchPoint,
       end: SketchPoint,
@@ -182,6 +184,7 @@ export function createSketchToolDefinition<
 ): SketchToolDefinition<TToolId> {
   return {
     metadata,
+    lifecycle: input.lifecycle,
     activate() {
       const state = createIdleState();
 

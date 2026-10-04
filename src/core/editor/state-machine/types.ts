@@ -475,6 +475,23 @@ export interface SketchActiveToolClearedEvent {
   type: "sketch.activeToolCleared";
 }
 
+/**
+ * Escape with an armed drawing tool: applies the next step of
+ * `escapeSketchDrawing` (end chain, finalize, cancel the draft, or leave the
+ * tool; T11-D10).
+ */
+export interface SketchEscapeRequestedEvent {
+  type: "sketch.escapeRequested";
+}
+
+/**
+ * Enter with an armed drawing tool: ends a Line chain or finalizes a viable
+ * fit-point draft (`confirmSketchDrawing`); otherwise it changes nothing.
+ */
+export interface SketchConfirmRequestedEvent {
+  type: "sketch.confirmRequested";
+}
+
 /** Moves the active sketch-local history cursor. */
 
 /** Moves the document-level authored history cursor through the editor runtime. */
@@ -638,6 +655,8 @@ export type EditorEvent =
   | SketchGeometryDragEndedEvent
   | SketchToolPatchedEvent
   | SketchActiveToolClearedEvent
+  | SketchEscapeRequestedEvent
+  | SketchConfirmRequestedEvent
   | DocumentHistoryCursorRequestedEvent
   | HistoryUndoRequestedEvent
   | HistoryRedoRequestedEvent
