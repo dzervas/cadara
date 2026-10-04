@@ -1335,6 +1335,109 @@ export function closestPointOnRationalQuadratic(
   return best;
 }
 
+/** The weights of a rational cubic Bézier, one per pole. */
+export type RationalCubicWeights = readonly [number, number, number, number];
+
+/** A rational cubic Bézier (weights wᵢ > 0) at u; its end poles at 0 and 1. */
+export function rationalCubicPoint(
+  poles: SplinePoles,
+  weights: RationalCubicWeights,
+  u: number,
+): SplineVector {
+  if (u === 0) return poles[0];
+  if (u === 1) return poles[3];
+  const v = 1 - u;
+  const b = [
+    v * v * v * weights[0],
+    3 * u * v * v * weights[1],
+    3 * u * u * v * weights[2],
+    u * u * u * weights[3],
+  ] as const;
+  const w = b[0] + b[1] + b[2] + b[3];
+  return [0, 1].map(
+    (axis) =>
+      (b[0] * poles[0][axis]! +
+        b[1] * poles[1][axis]! +
+        b[2] * poles[2][axis]! +
+        b[3] * poles[3][axis]!) /
+      w,
+  ) as unknown as SplineVector;
+}
+
+export interface RationalCubicClosestPoint {
+  readonly u: number;
+  readonly point: SplineVector;
+  readonly distance: number;
+}
+
+/**
+ * The closest point of a rational cubic Bézier (poles P0..P3, weights
+ * wᵢ > 0) on [0, 1] to `position` (T11b, T11-D15: a polynomial cubic span
+ * in the sketch plane is one on a perspective screen, its weights the poles'
+ * clip w). With D = N − position·W (N, W the weighted numerator and
+ * denominator), the stationary points solve Σ D·(D′W − DW′) = 0, of
+ * degree 7 (the u⁵ coefficient of D′W − DW′ cancels); its roots in (0, 1)
+ * are isolated like the cubic closest-point owner's and compared with both
+ * ends. The weights are divided by their maximum and the coordinates taken
+ * relative to `position` and scaled by the largest pole offset (review A-3).
+ * Null for a non-positive or non-finite weight or pole.
+ */
+export function closestPointOnRationalCubic(
+  position: SplineVector,
+  poles: SplinePoles,
+  weights: RationalCubicWeights,
+): RationalCubicClosestPoint | null {
+  const maxWeight = Math.max(...weights);
+  if (!Number.isFinite(maxWeight) || !weights.every((weight) => weight > 0))
+    return null;
+  const normalizedWeights = weights.map(
+    (weight) => weight / maxWeight,
+  ) as unknown as RationalCubicWeights;
+  const relative = poles.map((pole) => sub(pole, position));
+  const extent = Math.max(...relative.flatMap((pole) => pole.map(Math.abs)));
+  if (!Number.isFinite(extent)) return null;
+  const candidates = [0, 1];
+  if (extent > 0) {
+    // Bernstein (cubic) coefficients → power basis.
+    const power = ([c0, c1, c2, c3]: readonly number[]) => [
+      c0!,
+      3 * (c1! - c0!),
+      3 * (c0! - 2 * c1! + c2!),
+      -c0! + 3 * c1! - 3 * c2! + c3!,
+    ];
+    const W = power(normalizedWeights);
+    const dW = [W[1]!, 2 * W[2]!, 3 * W[3]!];
+    const stationary = Array.from({ length: 8 }, () => 0);
+    for (const axis of [0, 1] as const) {
+      const D = power(
+        relative.map(
+          (pole, index) => (pole[axis] / extent) * normalizedWeights[index]!,
+        ),
+      );
+      const dD = [D[1]!, 2 * D[2]!, 3 * D[3]!];
+      // E = D′W − DW′ (degree 4: its u⁵ coefficient 3d₃w₃ − d₃·3w₃ is 0).
+      const E = [0, 0, 0, 0, 0, 0];
+      dD.forEach((x, i) => W.forEach((y, j) => (E[i + j]! += x * y)));
+      D.forEach((x, i) => dW.forEach((y, j) => (E[i + j]! -= x * y)));
+      D.forEach((x, i) =>
+        E.slice(0, 5).forEach((y, j) => (stationary[i + j]! += x * y)),
+      );
+    }
+    candidates.push(
+      ...unitIntervalPolynomialRoots(stationary).filter(
+        (root) => root > 0 && root < 1,
+      ),
+    );
+  }
+  let best: RationalCubicClosestPoint | null = null;
+  for (const u of candidates) {
+    const point = rationalCubicPoint(poles, normalizedWeights, u);
+    const distance = Math.hypot(point[0] - position[0], point[1] - position[1]);
+    if (!best || distance < best.distance) best = { u, point, distance };
+  }
+  return best;
+}
+
 /**
  * The one cubic-span tessellator (T10 [TECH] T-7): `samplesPerSpan` steps
  * per span from u₀ to u₁ of its drawn domain (both exact; an untrimmed span

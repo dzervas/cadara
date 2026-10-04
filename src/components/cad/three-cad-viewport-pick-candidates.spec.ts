@@ -420,6 +420,38 @@ test("a derived offset shell is picked along its drawn (queryDomain) spans and n
     at(-7),
     "The trimmed-off tail (x < -4) is not drawn and never picks the shell.",
   ).toBe(false);
+
+  // Under a perspective camera (T11b: the clipped poles' rational cubic).
+  const perspective = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+  perspective.position.set(0, -20, 8);
+  perspective.up.set(0, 0, 1);
+  perspective.lookAt(0, 0, 0);
+  perspective.updateProjectionMatrix();
+  perspective.updateMatrixWorld(true);
+  const atPerspective = (x: number) => {
+    const projected = new THREE.Vector3(x, 0, 0).project(perspective);
+    return collectProjectedSketchCurveCandidates({
+      clientX: ((projected.x + 1) / 2) * viewportRect.width,
+      clientY: ((-projected.y + 1) / 2) * viewportRect.height,
+      camera: perspective,
+      viewportRect,
+      sketchSession: session,
+      acceptsTarget: () => true,
+      currentHoverTarget: null,
+    }).find(
+      (candidate) =>
+        candidate.target.kind === "sketchEntity" &&
+        candidate.target.entityId === shellId,
+    );
+  };
+  expect(
+    atPerspective(4)?.screenDistance,
+    "Perspective: the drawn part picks the shell exactly.",
+  ).toBeLessThan(1e-9);
+  expect(
+    atPerspective(-7),
+    "Perspective: the trimmed-off tail never picks the shell.",
+  ).toBeUndefined();
 });
 
 function makeCurveSession(sketchId: SketchId) {
@@ -630,6 +662,61 @@ function waveCandidates(
   );
 }
 
+/**
+ * Independent exact screen distance of cubic spans under any camera: each
+ * span evaluated as a polynomial cubic and projected point by point on a
+ * 4000-step grid, refined by golden section around every grid local
+ * minimum (untrimmed spans). Also returns the NDC depth of the closest
+ * point.
+ */
+function screenOracle(
+  spans: readonly SolvedCubicSpan[],
+  camera: THREE.Camera,
+  rect: DOMRectReadOnly,
+  pointer: { x: number; y: number },
+) {
+  const grid = 4000;
+  const project = (span: SolvedCubicSpan, t: number) => {
+    const point = bernsteinPoint(span, t);
+    const projected = new THREE.Vector3(point[0], point[1], 0).project(camera);
+    const x = ((projected.x + 1) / 2) * rect.width;
+    const y = ((-projected.y + 1) / 2) * rect.height;
+    return {
+      distance: Math.hypot(x - pointer.x, y - pointer.y),
+      depth: projected.z,
+    };
+  };
+  let best = project(spans[0]!, 0);
+  const ratio = (Math.sqrt(5) - 1) / 2;
+  for (const span of spans) {
+    const values = Array.from(
+      { length: grid + 1 },
+      (_, k) => project(span, k / grid).distance,
+    );
+    for (let k = 0; k <= grid; k += 1) {
+      if (
+        (k > 0 && values[k - 1]! < values[k]!) ||
+        (k < grid && values[k + 1]! < values[k]!)
+      )
+        continue;
+      let low = Math.max(0, (k - 1) / grid);
+      let high = Math.min(1, (k + 1) / grid);
+      for (let iteration = 0; iteration < 200; iteration += 1) {
+        const a = high - ratio * (high - low);
+        const b = low + ratio * (high - low);
+        if (project(span, a).distance < project(span, b).distance) high = b;
+        else low = a;
+      }
+      for (const candidate of [
+        project(span, k / grid),
+        project(span, (low + high) / 2),
+      ])
+        if (candidate.distance < best.distance) best = candidate;
+    }
+  }
+  return best;
+}
+
 function topCamera() {
   // 12.5 px per sketch unit, looking down -z at the wave.
   const camera = new THREE.OrthographicCamera(-8, 8, 8, -8, 0.1, 100);
@@ -714,7 +801,7 @@ test("a spline's pick distance is the exact metric, not its display polyline's",
   ).toHaveLength(1);
 });
 
-test("at an oblique view the pick distance follows the defined metric; below 1° grazing the spline gives no candidate", () => {
+test("at an oblique perspective view the spline picks exactly; below 1° grazing only a spline reaching behind the camera gives no candidate", () => {
   const { session, spans } = waveSession();
   const camera = perspectiveCamera([1, -9, 7]);
   const on = bernsteinPoint(spans[0]!, 0.6);
@@ -722,27 +809,82 @@ test("at an oblique view the pick distance follows the defined metric; below 1°
   const pointer = { x: onScreen.x + 2, y: onScreen.y - 3 };
   const candidates = waveCandidates(session, camera, pointer);
   expect(candidates).toHaveLength(1);
-  const expected = screenOf(
+  const exact = screenOracle(spans, camera, PICK_RECT, pointer);
+  expect(
+    Math.abs(candidates[0]!.screenDistance - exact.distance),
+    "The candidate distance is the exact screen distance (T11b).",
+  ).toBeLessThan(1e-6);
+  const planeMetric = screenOf(
     camera,
     oracleClosestPoint(spans, planePointOf(camera, pointer)),
   );
   expect(
-    Math.abs(
-      candidates[0]!.screenDistance -
-        Math.hypot(expected.x - pointer.x, expected.y - pointer.y),
-    ),
-  ).toBeLessThan(1e-6);
+    Math.hypot(planeMetric.x - pointer.x, planeMetric.y - pointer.y) -
+      exact.distance,
+    "premise: the former plane metric over-reports here",
+  ).toBeGreaterThan(1e-3);
 
-  // Pointer over the curve's own projection at 0.4° (grazing) vs 4°.
-  const grazing = perspectiveCamera([5, -40, 0.3]);
+  // Pointer over the curve's own projection at 0.4° (grazing) vs 4°. With
+  // every pole in front of the camera, the exact metric picks at both.
+  for (const height of [0.3, 3]) {
+    const view = perspectiveCamera([5, -40, height]);
+    const picked = waveCandidates(session, view, screenOf(view, on));
+    expect(picked, `${height}: picked exactly`).toHaveLength(1);
+    expect(picked[0]!.screenDistance).toBeLessThan(1e-6);
+  }
+
+  // A camera inside the wave's extent, looking along +x: span 0 has poles
+  // behind it (clip w ≤ 0), so the wave keeps the plane metric there, with
+  // the 1° floor. Pointer over a visible point of the curve (x ≈ 8).
+  const target = bernsteinPoint(spans[2]!, 0.5);
+  const fallbackCamera = (height: number) => {
+    const view = new THREE.PerspectiveCamera(45, 1, 0.1, 200);
+    view.position.set(2.5, 1.5, height);
+    view.up.set(0, 0, 1);
+    view.lookAt(target[0], target[1], 0);
+    view.updateProjectionMatrix();
+    view.updateMatrixWorld(true);
+    return view;
+  };
+  const behind = (view: THREE.Camera) =>
+    spans.some((span) =>
+      span.poles.some(
+        (pole) =>
+          new THREE.Vector3(pole[0], pole[1], 0).applyMatrix4(
+            view.matrixWorldInverse,
+          ).z >= 0,
+      ),
+    );
+  const grazing = fallbackCamera(0.04);
+  expect(behind(grazing), "premise: a pole lies behind the camera").toBe(true);
   expect(
-    waveCandidates(session, grazing, screenOf(grazing, on)),
-    "Grazing: the sketch-plane metric is ill-conditioned, no candidate.",
+    waveCandidates(session, grazing, screenOf(grazing, target)),
+    "Grazing and behind the camera: the plane metric is ill-conditioned, no candidate.",
   ).toHaveLength(0);
-  const shallow = perspectiveCamera([5, -40, 3]);
-  expect(waveCandidates(session, shallow, screenOf(shallow, on))).toHaveLength(
-    1,
+  const shallow = fallbackCamera(0.4);
+  expect(behind(shallow), "premise: a pole lies behind the camera").toBe(true);
+  const shallowPointer = screenOf(shallow, target);
+  shallowPointer.y -= 0.5;
+  const fallback = waveCandidates(session, shallow, shallowPointer);
+  expect(fallback).toHaveLength(1);
+  expect(
+    fallback[0]!.screenDistance,
+    "premise: the inflated plane metric, not the 0.5 px screen offset",
+  ).toBeGreaterThan(1);
+  const fallbackExpected = screenOf(
+    shallow,
+    oracleClosestPoint(spans, planePointOf(shallow, shallowPointer)),
   );
+  expect(
+    Math.abs(
+      fallback[0]!.screenDistance -
+        Math.hypot(
+          fallbackExpected.x - shallowPointer.x,
+          fallbackExpected.y - shallowPointer.y,
+        ),
+    ),
+    "Behind the camera: the plane metric (fallback).",
+  ).toBeLessThan(1e-6);
 });
 
 // Lane: ui (docs/testing.md). Seam: one shared spline fixture through every
@@ -1007,10 +1149,10 @@ test("at oblique orthographic views lines and splines pick by their exact screen
 });
 
 // Lane: ui (docs/testing.md). Seam: `collectProjectedSketchCurveCandidates`
-// at oblique orthographic and perspective views (review A-1): arcs and
-// circles (projected rational quadratics) and lines are exact under both;
-// perspective cubic spans keep the plane metric, an upper bound.
-test("arcs, circles and lines pick exactly at oblique orthographic and perspective views; perspective splines by an upper bound", () => {
+// at oblique orthographic and perspective views (review A-1, T11b): arcs and
+// circles (projected rational quadratics), lines and cubic spans (projected
+// rational cubics under perspective) are exact under both.
+test("arcs, circles, lines and splines pick exactly at oblique orthographic and perspective views", () => {
   const sketch = makeSketchFixture();
   sketch.point("o", 5, 1.5);
   sketch.circle("ring", "o", 3);
@@ -1055,23 +1197,19 @@ test("arcs, circles and lines pick exactly at oblique orthographic and perspecti
   const curves = [
     {
       entityId: "sketch_entity_ring",
-      exact: true,
       points: ring([5, 1.5], 3, 0, 2 * Math.PI),
     },
     {
       entityId: "sketch_entity_bow",
-      exact: true,
       points: ring([5, -4], 4, 0, Math.PI / 2),
     },
     {
       // Clockwise quarter from the bottom (5, -6) to the left (3, -4).
       entityId: "sketch_entity_hook",
-      exact: true,
       points: ring([5, -4], 2, -Math.PI / 2, -Math.PI / 2),
     },
     {
       entityId: "sketch_entity_diag",
-      exact: true,
       points: Array.from(
         { length: 4001 },
         (_, k) => [k / 500, -4 + k / 500] as SplineVector,
@@ -1079,7 +1217,6 @@ test("arcs, circles and lines pick exactly at oblique orthographic and perspecti
     },
     {
       entityId: "sketch_entity_wave",
-      exact: false,
       points: spans.flatMap((span) =>
         Array.from({ length: 4001 }, (_, k) => bernsteinPoint(span, k / 4000)),
       ),
@@ -1087,7 +1224,6 @@ test("arcs, circles and lines pick exactly at oblique orthographic and perspecti
   ];
   const rect = { left: 0, top: 0, width: 800, height: 800 } as DOMRectReadOnly;
   let exactWithin = 0;
-  let boundChecked = 0;
   for (const perspective of [false, true])
     for (const elevation of [35.26, 20, 10])
       for (const azimuth of [-90, 0, 30]) {
@@ -1115,8 +1251,7 @@ test("arcs, circles and lines pick exactly at oblique orthographic and perspecti
             y: ((-projected.y + 1) / 2) * rect.height,
           };
         };
-        for (const { entityId, exact, points } of curves) {
-          if (!exact && !perspective) continue; // covered by the row above
+        for (const { entityId, points } of curves) {
           const projected = points.map(screen);
           const truth = (pointer: { x: number; y: number }) => {
             let best = Number.POSITIVE_INFINITY;
@@ -1168,15 +1303,7 @@ test("arcs, circles and lines pick exactly at oblique orthographic and perspecti
                 entry.target.entityId === entityId,
             );
             const at = `${entityId} ${perspective ? "perspective" : "orthographic"} elevation ${elevation}° azimuth ${azimuth}° pointer ${k}`;
-            if (!exact) {
-              if (candidate) {
-                boundChecked += 1;
-                expect(
-                  candidate.screenDistance,
-                  `${at}: the plane metric is an upper bound`,
-                ).toBeGreaterThanOrEqual(expected - 1e-3);
-              }
-            } else if (expected <= 9.99) {
+            if (expected <= 9.99) {
               exactWithin += 1;
               expect(candidate, `${at}: within the radius picks`).toBeDefined();
               expect(
@@ -1196,8 +1323,174 @@ test("arcs, circles and lines pick exactly at oblique orthographic and perspecti
     exactWithin,
     "premise: many pointers within the radius",
   ).toBeGreaterThan(400);
+});
+
+// Lane: ui (docs/testing.md). Seam: `collectProjectedSketchCurveCandidates`
+// for a spline under perspective cameras (T11b, T11-D15): each drawn span is
+// picked by its exact screen-space distance (a projected rational cubic),
+// against an independent oracle (the polynomial span projected point by
+// point, 4000-step grid + golden section), and its depth is the hit's.
+test("perspective views at 5°, 10°, 45° and 90° pick a spline span by its exact screen distance", () => {
+  const { session, spans } = waveSession();
+  const rect = { left: 0, top: 0, width: 800, height: 800 } as DOMRectReadOnly;
+  let within = 0;
+  let beyond = 0;
+  for (const elevation of [5, 10, 45, 90])
+    for (const azimuth of [-90, 0, 30]) {
+      const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 200);
+      const el = (elevation * Math.PI) / 180;
+      const az = (azimuth * Math.PI) / 180;
+      camera.position.set(
+        5 + 22 * Math.cos(el) * Math.cos(az),
+        1.5 + 22 * Math.cos(el) * Math.sin(az),
+        22 * Math.sin(el),
+      );
+      if (elevation === 90) camera.up.set(0, 1, 0);
+      else camera.up.set(0, 0, 1);
+      camera.lookAt(5, 1.5, 0);
+      camera.updateProjectionMatrix();
+      camera.updateMatrixWorld(true);
+      for (let k = 0; k < 30; k += 1) {
+        const span = spans[k % spans.length]!;
+        const base = new THREE.Vector3(
+          ...bernsteinPoint(span, (k + 0.5) / 30),
+          0,
+        ).project(camera);
+        const angle = (k * 2.399) % (2 * Math.PI);
+        const radius = 2 + (k % 16);
+        const pointer = {
+          x: ((base.x + 1) / 2) * rect.width + radius * Math.cos(angle),
+          y: ((-base.y + 1) / 2) * rect.height + radius * Math.sin(angle),
+        };
+        const expected = screenOracle(spans, camera, rect, pointer);
+        const candidate = collectProjectedSketchCurveCandidates({
+          clientX: pointer.x,
+          clientY: pointer.y,
+          camera,
+          viewportRect: rect,
+          sketchSession: session,
+          acceptsTarget: () => true,
+          currentHoverTarget: null,
+        }).find(
+          (entry) =>
+            entry.target.kind === "sketchEntity" &&
+            entry.target.entityId === "sketch_entity_wave",
+        );
+        const at = `elevation ${elevation}° azimuth ${azimuth}° pointer ${k}`;
+        if (expected.distance <= 9.999) {
+          within += 1;
+          expect(candidate, `${at}: within the radius picks`).toBeDefined();
+          expect(
+            Math.abs(candidate!.screenDistance - expected.distance),
+            `${at}: exact screen-space distance`,
+          ).toBeLessThan(1e-6);
+          expect(
+            Math.abs(candidate!.depth - expected.depth),
+            `${at}: the hit's depth`,
+          ).toBeLessThan(1e-9);
+        } else if (expected.distance > 10.001) {
+          beyond += 1;
+          expect(
+            candidate,
+            `${at}: beyond the radius does not`,
+          ).toBeUndefined();
+        }
+      }
+    }
+  expect(within, "premise: pointers within the radius").toBeGreaterThan(200);
+  expect(beyond, "premise: pointers beyond the radius").toBeGreaterThan(40);
+});
+
+// Lane: ui (docs/testing.md). Seam: `collectProjectedSketchCurveCandidates`
+// for a spline crossing the far plane (T11b review REQ-1): the pointer sits
+// on a knot beyond the far plane (the nearest drawn span end, out of depth
+// range), and the in-range end of the last span is about 7 px away. The span
+// prefilter must not skip that span on the out-of-range end's bound.
+test("a perspective spline partly beyond the far plane still picks its in-range span near an out-of-range knot", () => {
+  const sketch = makeSketchFixture();
+  const fit: SplineVector[] = [
+    [-6, 0],
+    [0, 12],
+    [6, 0],
+    [0.15, 11.85],
+  ];
+  fit.forEach(([x, y], index) => sketch.point(`f${index}`, x, y));
+  sketch.spline(
+    "hook",
+    fit.map((_, index) => `f${index}`),
+    "open",
+  );
+  const input = sketch.build();
+  const session = createSketchSessionFromSnapshot(
+    sketchSnapshotRecordForTest(input, [], createStandardPlaneDefinition("xy")),
+    OCC_KERNEL_SETTINGS,
+  );
+  const spans = solvedCubicSpans(
+    input.solvedSnapshot.solvedEntities.find(
+      (entry) => entry.entityId === "sketch_entity_hook",
+    )!,
+  );
+  const rect = { left: 0, top: 0, width: 800, height: 800 } as DOMRectReadOnly;
+  const eye = new THREE.Vector3(0, -8, 10);
+  const look = new THREE.Vector3(0, 8, 0);
+  const view = look.clone().sub(eye).normalize();
+  const along = (point: SplineVector) =>
+    new THREE.Vector3(point[0], point[1], 0).sub(eye).dot(view);
+  const knot = fit[1]!;
+  const end = spans.at(-1)!.poles[3];
+  // The far plane lies between the knot and the in-range end.
+  const camera = new THREE.PerspectiveCamera(
+    45,
+    1,
+    10,
+    (along(knot) + along(end)) / 2,
+  );
+  camera.position.copy(eye);
+  camera.up.set(0, 0, 1);
+  camera.lookAt(look);
+  camera.updateProjectionMatrix();
+  camera.updateMatrixWorld(true);
+  const screen = (point: SplineVector) => {
+    const projected = new THREE.Vector3(point[0], point[1], 0).project(camera);
+    return {
+      x: ((projected.x + 1) / 2) * rect.width,
+      y: ((-projected.y + 1) / 2) * rect.height,
+      depth: projected.z,
+    };
+  };
+  const pointer = screen(knot);
+  const endOnScreen = screen(end);
   expect(
-    boundChecked,
-    "premise: perspective spline candidates",
-  ).toBeGreaterThan(20);
+    pointer.depth,
+    "premise: the knot lies beyond the far plane",
+  ).toBeGreaterThan(1);
+  expect(endOnScreen.depth, "premise: the end lies in range").toBeLessThan(1);
+  const expected = Math.hypot(
+    endOnScreen.x - pointer.x,
+    endOnScreen.y - pointer.y,
+  );
+  expect(
+    expected,
+    "premise: the in-range end is within the radius",
+  ).toBeLessThan(9);
+  expect(expected, "premise: and farther than the knot").toBeGreaterThan(5);
+  const candidate = collectProjectedSketchCurveCandidates({
+    clientX: pointer.x,
+    clientY: pointer.y,
+    camera,
+    viewportRect: rect,
+    sketchSession: session,
+    acceptsTarget: () => true,
+    currentHoverTarget: null,
+  }).find(
+    (entry) =>
+      entry.target.kind === "sketchEntity" &&
+      entry.target.entityId === "sketch_entity_hook",
+  );
+  expect(
+    candidate,
+    "The in-range span near the out-of-range knot picks.",
+  ).toBeDefined();
+  expect(Math.abs(candidate!.screenDistance - expected)).toBeLessThan(1e-6);
+  expect(Math.abs(candidate!.depth - endOnScreen.depth)).toBeLessThan(1e-9);
 });

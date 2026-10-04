@@ -1,7 +1,11 @@
 import { describe, expect, test } from "vitest";
 import {
+  clippedSolvedCubicSpanPoles,
+  closestPointOnRationalCubic,
   closestPointOnSolvedCubicSpans,
   closestSplineSpanLocation,
+  rationalCubicPoint,
+  type SplinePoles,
   cubicSpansPoleBounds,
   evaluateSplineSpan,
   solvedCubicSpanLocalDomain,
@@ -1027,6 +1031,300 @@ describe("neutral spline reconstruction owner", () => {
     expect(
       closestPointOnSolvedCubicSpans([4, 30], spans, 0.2),
       "every span's box is beyond maxDistance",
+    ).toBeNull();
+  });
+});
+
+// T11b (T11-D15, review A-3): the perspective image of a cubic span is a
+// rational cubic (screen poles, clip-w weights). Truth is independent of the
+// owner: the curve evaluated directly (own Bernstein sums, or the original
+// polynomial span projected point by point) on a dense grid (≥ 4000 samples
+// per span), refined by golden section around every grid local minimum.
+type Weights = readonly [number, number, number, number];
+const rationalDirect = (
+  poles: readonly V[],
+  weights: Weights,
+  u: number,
+): V => {
+  const s = 1 - u;
+  const b = [s * s * s, 3 * s * s * u, 3 * s * u * u, u * u * u].map(
+    (basis, index) => basis * weights[index]!,
+  );
+  const w = b.reduce((sum, value) => sum + value, 0);
+  return [0, 1].map(
+    (axis) =>
+      b.reduce((sum, value, index) => sum + value * poles[index]![axis]!, 0) /
+      w,
+  ) as unknown as V;
+};
+/** The minimum over u ∈ [low, high] of |curve(u) − query| (dense + golden). */
+function denseMinimum(
+  curve: (u: number) => V,
+  query: V,
+  samples = 4000,
+  [low, high]: readonly [number, number] = [0, 1],
+) {
+  const gap = (u: number) => Math.hypot(...sub(curve(u), query));
+  const at = (k: number) => low + ((high - low) * k) / samples;
+  const grid = Array.from({ length: samples + 1 }, (_, k) => gap(at(k)));
+  let best = Math.min(grid[0]!, grid[samples]!);
+  const ratio = (Math.sqrt(5) - 1) / 2;
+  for (let k = 0; k <= samples; k += 1) {
+    if (
+      (k > 0 && grid[k - 1]! < grid[k]!) ||
+      (k < samples && grid[k + 1]! < grid[k]!)
+    )
+      continue;
+    let a = at(Math.max(0, k - 1));
+    let b = at(Math.min(samples, k + 1));
+    for (let iteration = 0; iteration < 200; iteration += 1) {
+      const left = b - ratio * (b - a);
+      const right = a + ratio * (b - a);
+      if (gap(left) < gap(right)) b = right;
+      else a = left;
+    }
+    best = Math.min(best, grid[k]!, gap((a + b) / 2));
+  }
+  return best;
+}
+/** A pinhole camera at `elevation` over the sketch plane z = 0 (800×800 px). */
+function pinhole(elevationDeg: number, azimuthDeg: number, range = 22) {
+  const el = (elevationDeg * Math.PI) / 180;
+  const az = (azimuthDeg * Math.PI) / 180;
+  const eye = [
+    5 + range * Math.cos(el) * Math.cos(az),
+    1.5 + range * Math.cos(el) * Math.sin(az),
+    range * Math.sin(el),
+  ];
+  const forward = [5 - eye[0]!, 1.5 - eye[1]!, -eye[2]!];
+  const length = Math.hypot(...forward);
+  const f = forward.map((value) => value / length);
+  const up = elevationDeg === 90 ? [0, 1, 0] : [0, 0, 1];
+  const cross = (a: number[], b: number[]) => [
+    a[1]! * b[2]! - a[2]! * b[1]!,
+    a[2]! * b[0]! - a[0]! * b[2]!,
+    a[0]! * b[1]! - a[1]! * b[0]!,
+  ];
+  const side = cross(f, up);
+  const sideLength = Math.hypot(...side);
+  const s = side.map((value) => value / sideLength);
+  const t = cross(s, f);
+  const focal = 1 / Math.tan(Math.PI / 8);
+  return (point: V) => {
+    const d = [point[0] - eye[0]!, point[1] - eye[1]!, -eye[2]!];
+    const dot = (a: number[]) => a[0]! * d[0]! + a[1]! * d[1]! + a[2]! * d[2]!;
+    const w = dot(f);
+    return {
+      screen: [
+        ((focal * dot(s)) / w + 1) * 400,
+        ((-focal * dot(t)) / w + 1) * 400,
+      ] as V,
+      w,
+    };
+  };
+}
+const bernstein = (poles: readonly V[], u: number) =>
+  rationalDirect(poles, [1, 1, 1, 1], u);
+
+describe("rational cubic closest point (T11b)", () => {
+  test("closestPointOnRationalCubic matches dense-sampling truth on random rational cubics, its point lies on the curve", () => {
+    let seed = 11;
+    const random = () => {
+      seed = (seed * 16807) % 2147483647;
+      return seed / 2147483647;
+    };
+    let worst = 0;
+    for (let trial = 0; trial < 150; trial += 1) {
+      const poles = Array.from(
+        { length: 4 },
+        (): V => [random() * 1200, random() * 800],
+      ) as unknown as SplinePoles;
+      const weights = Array.from({ length: 4 }, () =>
+        Math.exp(random() * 4 - 2),
+      ) as unknown as Weights;
+      const query: V = [random() * 1200, random() * 800];
+      const found = closestPointOnRationalCubic(query, poles, weights)!;
+      const truth = denseMinimum(
+        (u) => rationalDirect(poles, weights, u),
+        query,
+      );
+      expect(
+        Math.abs(found.distance - truth),
+        `trial ${trial}: the owner's distance is the dense truth`,
+      ).toBeLessThanOrEqual(1e-6);
+      worst = Math.max(worst, Math.abs(found.distance - truth));
+      near(found.point, rationalDirect(poles, weights, found.u), 1e-12);
+      expect(found.distance).toBe(Math.hypot(...sub(found.point, query)));
+      near(rationalCubicPoint(poles, weights, found.u), found.point, 1e-12);
+    }
+    expect(worst).toBeLessThanOrEqual(1e-6);
+  });
+
+  test("a trimmed span's perspective image is the rational cubic of its clipped poles and clip w; its closest point is exact at 5–90°", () => {
+    // The wave's middle span, drawn on its local [0.3, 0.8] only.
+    const poles: SplinePoles = [
+      [1, 0.5],
+      [4, 6],
+      [6, -3],
+      [9, 3],
+    ];
+    const span: SolvedCubicSpan = {
+      interval: [2, 3],
+      poles,
+      queryDomain: [2.3, 2.8],
+    };
+    const clipped = clippedSolvedCubicSpanPoles(span);
+    let seed = 5;
+    const random = () => {
+      seed = (seed * 16807) % 2147483647;
+      return seed / 2147483647;
+    };
+    for (const elevation of [5, 10, 45, 90])
+      for (const azimuth of [-90, 0, 30]) {
+        const project = pinhole(elevation, azimuth);
+        const images = clipped.map(project);
+        expect(images.every((image) => image.w > 0)).toBe(true);
+        const screenPoles = images.map(
+          (image) => image.screen,
+        ) as unknown as SplinePoles;
+        const weights = images.map((image) => image.w) as unknown as Weights;
+        const drawn = (u: number) => project(bernstein(poles, u)).screen;
+        for (let k = 0; k < 12; k += 1) {
+          const base = drawn(0.3 + 0.5 * random());
+          const query: V = [
+            base[0] + random() * 40 - 20,
+            base[1] + random() * 40 - 20,
+          ];
+          const found = closestPointOnRationalCubic(
+            query,
+            screenPoles,
+            weights,
+          )!;
+          // Truth: the ORIGINAL polynomial span on its drawn domain,
+          // projected point by point (no rational form, no clipping).
+          const truth = denseMinimum(drawn, query, 4000, [0.3, 0.8]);
+          const at = `elevation ${elevation}° azimuth ${azimuth}° query ${k}`;
+          expect(
+            Math.abs(found.distance - truth),
+            `${at}: exact screen distance on the drawn domain`,
+          ).toBeLessThanOrEqual(1e-6);
+          // The rational image at u is the projected span at 0.3 + 0.5u.
+          near(found.point, drawn(0.3 + 0.5 * found.u), 1e-9);
+        }
+      }
+  });
+
+  test("weights far from 1: a near-camera weight ratio ≥ 1e3, and weights scaled by 1e±300, are normalised", () => {
+    // A span reaching to w = 0.004 in front of the eye (clip w is affine
+    // along the plane, so solve for that point on x = 5): its weights span
+    // more than three decades.
+    const project = pinhole(30, -90, 6);
+    const w0 = project([5, 0]).w;
+    const w1 = project([5, 1]).w;
+    const eyeward: V = [5, (0.004 - w0) / (w1 - w0)];
+    const poles: SplinePoles = [eyeward, [3, -2], [6, 1], [8, 4]];
+    const images = poles.map(project);
+    const weights = images.map((image) => image.w) as unknown as Weights;
+    expect(
+      Math.max(...weights) / Math.min(...weights),
+      "premise: weight ratio ≥ 1e3",
+    ).toBeGreaterThanOrEqual(1e3);
+    const screenPoles = images.map(
+      (image) => image.screen,
+    ) as unknown as SplinePoles;
+    const drawn = (u: number) => project(bernstein(poles, u)).screen;
+    for (const u of [0.0005, 0.003, 0.02, 0.2, 0.5, 0.9]) {
+      const base = drawn(u);
+      for (const offset of [
+        [3, 4],
+        [-7, 2],
+        [0, -9],
+      ] as const) {
+        const query: V = [base[0] + offset[0], base[1] + offset[1]];
+        const found = closestPointOnRationalCubic(query, screenPoles, weights)!;
+        const truth = denseMinimum(drawn, query, 40000);
+        expect(
+          Math.abs(found.distance - truth),
+          `u ${u} offset ${offset}: exact with a ${Math.round(Math.max(...weights) / Math.min(...weights))}× weight ratio`,
+        ).toBeLessThanOrEqual(1e-6);
+      }
+    }
+    // Generic weights 1e-3 … 1 with their 1e±300 multiples: the products of
+    // unnormalised weights would overflow or underflow.
+    const generic: SplinePoles = [
+      [0, 0],
+      [300, 500],
+      [700, -200],
+      [1000, 300],
+    ];
+    const spread: Weights = [1e-3, 0.05, 0.4, 1];
+    const query: V = [420, 260];
+    const found = closestPointOnRationalCubic(query, generic, spread)!;
+    expect(
+      Math.abs(
+        found.distance -
+          denseMinimum((u) => rationalDirect(generic, spread, u), query, 40000),
+      ),
+    ).toBeLessThanOrEqual(1e-6);
+    for (const factor of [1e300, 1e-300]) {
+      const scaled = spread.map(
+        (weight) => weight * factor,
+      ) as unknown as Weights;
+      const again = closestPointOnRationalCubic(query, generic, scaled)!;
+      expect(Math.abs(again.distance - found.distance)).toBeLessThan(1e-9);
+      expect(Math.abs(again.u - found.u)).toBeLessThan(1e-12);
+    }
+  });
+
+  test("ends are minima exactly; a degenerate span and invalid weights or poles", () => {
+    const poles: SplinePoles = [
+      [0, 0],
+      [10, 0],
+      [20, 10],
+      [30, 10],
+    ];
+    const weights: Weights = [1, 3, 0.5, 2];
+    // Beyond either end, against its end tangent: the end is the minimum.
+    const start = closestPointOnRationalCubic([-5, 1], poles, weights)!;
+    expect(start.u).toBe(0);
+    expect(start.point).toEqual(poles[0]);
+    expect(start.distance).toBe(Math.hypot(5, 1));
+    const end = closestPointOnRationalCubic([36, 9], poles, weights)!;
+    expect(end.u).toBe(1);
+    expect(end.point).toEqual(poles[3]);
+    expect(end.distance).toBe(Math.hypot(6, 1));
+    // A point of the curve is at distance ~0 from itself.
+    const on = rationalDirect(poles, weights, 0.37);
+    expect(
+      closestPointOnRationalCubic(on, poles, weights)!.distance,
+    ).toBeLessThan(1e-9);
+    // Degenerate: every pole equal (any weights) → that point.
+    const point: V = [4, -2];
+    const collapsed = closestPointOnRationalCubic(
+      [7, 2],
+      [point, point, point, point],
+      weights,
+    )!;
+    near(collapsed.point, point, 1e-15);
+    expect(Math.abs(collapsed.distance - 5)).toBeLessThan(1e-14);
+    // The query on a collapsed span: distance 0, no stationary polynomial.
+    expect(
+      closestPointOnRationalCubic(point, [point, point, point, point], weights),
+    ).toEqual({ u: 0, point, distance: 0 });
+    // Only positive finite weights and finite poles.
+    for (const bad of [
+      [1, 0, 1, 1],
+      [1, -2, 1, 1],
+      [1, Number.NaN, 1, 1],
+      [1, Number.POSITIVE_INFINITY, 1, 1],
+    ] as const)
+      expect(closestPointOnRationalCubic([1, 1], poles, bad)).toBeNull();
+    expect(
+      closestPointOnRationalCubic(
+        [1, 1],
+        [poles[0], [Number.NaN, 0], poles[2], poles[3]],
+        weights,
+      ),
     ).toBeNull();
   });
 });

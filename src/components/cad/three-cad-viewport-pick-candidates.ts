@@ -22,10 +22,15 @@ import type {
 } from "@/contracts/shared/references";
 import type { SketchPoint2D } from "@/contracts/sketch/schema";
 import {
+  closestPointOnRationalCubic,
   closestPointOnRationalQuadratic,
   closestPointOnSolvedCubicSpans,
+  clippedSolvedCubicSpanPoles,
+  rationalCubicPoint,
   rationalQuadraticPoint,
+  type RationalCubicWeights,
   solvedCubicSpanPoint,
+  type SolvedCubicSpan,
   type SplinePoles,
 } from "@/contracts/sketch/spline-geometry";
 import {
@@ -42,16 +47,18 @@ export const DEFAULT_PROJECTED_SKETCH_CURVE_PICK_ENTER_RADIUS_PX = 10;
 export const DEFAULT_PROJECTED_SKETCH_CURVE_PICK_EXIT_RADIUS_PX = 14;
 /**
  * Below this angle between the pointer ray and the sketch plane (1°), the
- * sketch-plane metric is ill-conditioned: perspective cubic spans (and
- * curves with a pole behind the camera) give no screen-space candidates
- * (review A6 grazing fallback).
+ * sketch-plane metric is ill-conditioned: geometry that still uses the
+ * plane metric (a line or polyline end point outside the near–far depth
+ * range, or an arc, circle or cubic pole with clip w ≤ 0, i.e. geometry
+ * that reaches behind the camera) gives no screen-space candidates (review
+ * A6 grazing fallback; T11-D16).
+ * Edge-on (< 1°) geometry that reaches behind the camera isn't pickable;
+ * orbit slightly.
  * This is a hard floor only: the plane metric over-reports a distance by at
  * least (1 + c²)/(2c), c = sin(elevation) (×1.6 at 20°, ×3 at 10°, ×5.8 at
- * 5°), so those curves are practically pickable only above about 10–20°
- * (perspective cubic spans: 8.9% of truly in-radius pointers rejected at
- * 20°, 28% at 10°; T10f-evidence/review-fix/arc-pick-rejection.after.log).
- * Lines, polylines, arcs, circles and orthographic cubic spans are exact
- * at every angle.
+ * 5°), so such geometry is practically pickable only above about 10–20°.
+ * Lines, polylines, arcs, circles and cubic spans wholly in front of the
+ * camera are exact at every angle, under any camera.
  */
 const SKETCH_CURVE_PICK_GRAZING_SINE = Math.sin(Math.PI / 180);
 
@@ -232,8 +239,8 @@ export function collectProjectedSketchCurveCandidates({
     x: clientX - viewportRect.left,
     y: clientY - viewportRect.top,
   };
-  // Computed lazily: only the plane metric (arcs, circles, perspective
-  // cubic spans) needs the sketch-plane pointer.
+  // Computed lazily: only the plane metric (geometry that reaches behind
+  // the camera) needs the sketch-plane pointer.
   let planePoint: SketchPoint2D | null | undefined;
   const getPlanePoint = () =>
     planePoint === undefined
@@ -320,9 +327,9 @@ type ScreenPoint = { x: number; y: number; depth: number; visible: boolean };
  * The pick metric (T10f, review A6 and A-1): the screen distance from the
  * pointer to the curve, and the NDC depth of the hit.
  * - Lines and sampled polylines: exact screen-space distance. A projective
- *   map sends segments to segments, so the projected end points (all in
- *   front of the camera) give the projected curve; the depth interpolates
- *   affinely along each projected segment.
+ *   map sends segments to segments, so the projected end points (all with
+ *   depth in the near–far range) give the projected curve; the depth
+ *   interpolates affinely along each projected segment.
  * - Arcs and circles under any camera (all piece poles in front of it):
  *   exact, as projected rational quadratic pieces
  *   (`circularScreenDistance`, `closestPointOnRationalQuadratic`).
@@ -330,13 +337,17 @@ type ScreenPoint = { x: number; y: number; depth: number; visible: boolean };
  *   map is affine and Bézier curves are affinely invariant, so the poles
  *   mapped to screen px are the projected curve's poles; its closest point
  *   to the pointer is the owner's `closestPointOnSolvedCubicSpans` there.
- * - Cubic spans under a perspective camera (they project to rational
- *   cubics), or a curve with a pole behind the camera: the plane metric
- *   |screen(C) − pointer|, C the exact closest point to the pointer
- *   ray's sketch-plane point P (`getSketchPlanePointerPoint`). Viewed along
- *   the normal this is the screen minimum; at oblique views it is an upper
- *   bound (screen(C) is a point of the projected curve), inflated by at
- *   least (1 + c²)/(2c) on a line, c = sin(elevation). Null at grazing views.
+ * - Cubic spans under a perspective camera (all drawn-domain poles in front
+ *   of it): exact, as projected rational cubics
+ *   (`perspectiveCubicScreenDistance`, `closestPointOnRationalCubic`).
+ * - Otherwise (a line or polyline end point outside the near–far depth
+ *   range, an arc/circle/cubic pole with clip w ≤ 0, or a cubic span whose
+ *   rational image the owner can't evaluate): the plane metric |screen(C) − pointer|, C the exact closest
+ *   point to the pointer ray's sketch-plane point P
+ *   (`getSketchPlanePointerPoint`). Viewed along the normal this is the
+ *   screen minimum; at oblique views it is an upper bound (screen(C) is a
+ *   point of the projected curve), inflated by at least (1 + c²)/(2c) on a
+ *   line, c = sin(elevation). Null at grazing views.
  */
 function measureSketchCurveScreenDistance(
   geometry: SketchInteractionCurveGeometry,
@@ -361,8 +372,15 @@ function measureSketchCurveScreenDistance(
     if (exact !== undefined) return exact;
   } else if (
     geometry.kind === "cubicSpans" &&
-    (camera as THREE.OrthographicCamera).isOrthographicCamera
+    !(camera as THREE.OrthographicCamera).isOrthographicCamera
   ) {
+    const exact = perspectiveCubicScreenDistance(
+      geometry.spans,
+      pointer,
+      toClip,
+    );
+    if (exact !== undefined) return exact;
+  } else if (geometry.kind === "cubicSpans") {
     // The orthographic map is affine (w = 1): no pole lies behind it.
     const screenSpans = geometry.spans.map((span) => ({
       ...span,
@@ -438,6 +456,84 @@ function circularScreenDistance(
       ],
       screenWeight,
       closest.t,
+    )[0];
+    if (depth >= -1 && depth <= 1) best = { distance: closest.distance, depth };
+  }
+  return best;
+}
+
+/**
+ * Exact screen distance of cubic spans under a perspective camera (T11b,
+ * T11-D15): each span's drawn domain (`clippedSolvedCubicSpanPoles`) maps
+ * to a rational cubic on the screen with the poles' screen images and
+ * their clip w as weights (projective invariance); the depth is the same
+ * rational cubic of the poles' NDC z. A span is searched only if its
+ * screen pole box lies within U + slack of the pointer, U the distance to
+ * the nearest drawn span end (a point of the curve): with positive weights
+ * a span lies in its poles' convex hull, so every skipped span is farther.
+ * The prefilter runs only when every clipped pole depth lies in [-1, 1]:
+ * the depth of every point then lies in the hull of the pole depths, so
+ * every hit passes the depth check and U is attained (T11b review REQ-1);
+ * otherwise every span is searched.
+ * The depth check is per span, as `circularScreenDistance` does per piece:
+ * a span whose closest point lies outside the near–far range gives no hit,
+ * even if other in-range points of it are within the radius (lines and
+ * polylines instead fall back to the plane metric; review ADV-1).
+ * Verified accuracy (T11b review ADV-3): projectively consistent inputs
+ * are exact to ~1e-12 px, including pole clip w down to 1e-12; synthetic
+ * weight ratios ≥ 1e6 with poles unrelated to the weights reached 2e-2 px.
+ * Undefined (use the plane metric) when a clipped pole lies behind the
+ * camera, or the owner can't evaluate a span (e.g. a denormal w overflowing
+ * x/w; review ADV-4).
+ */
+function perspectiveCubicScreenDistance(
+  spans: readonly SolvedCubicSpan[],
+  pointer: { x: number; y: number },
+  toClip: (point: SketchPoint2D) => ClipPoint,
+): { distance: number; depth: number } | null | undefined {
+  const clipped = spans.map((span) =>
+    clippedSolvedCubicSpanPoles(span).map(toClip),
+  );
+  if (!clipped.every((poles) => poles.every((pole) => pole.w > 0)))
+    return undefined;
+  let upper = Number.POSITIVE_INFINITY;
+  let scale = Math.max(Math.abs(pointer.x), Math.abs(pointer.y));
+  for (const poles of clipped) {
+    for (const end of [poles[0]!, poles[3]!])
+      upper = Math.min(upper, Math.hypot(end.x - pointer.x, end.y - pointer.y));
+    for (const pole of poles)
+      scale = Math.max(scale, Math.abs(pole.x), Math.abs(pole.y));
+  }
+  const limit = clipped.every((poles) =>
+    poles.every((pole) => pole.depth >= -1 && pole.depth <= 1),
+  )
+    ? upper + scale * 2 ** -30
+    : Number.POSITIVE_INFINITY;
+  let best: { distance: number; depth: number } | null = null;
+  for (const poles of clipped) {
+    const xs = poles.map((pole) => pole.x);
+    const ys = poles.map((pole) => pole.y);
+    if (
+      Math.hypot(
+        Math.max(Math.min(...xs) - pointer.x, 0, pointer.x - Math.max(...xs)),
+        Math.max(Math.min(...ys) - pointer.y, 0, pointer.y - Math.max(...ys)),
+      ) > limit
+    )
+      continue;
+    const weights = poles.map(
+      (pole) => pole.w,
+    ) as unknown as RationalCubicWeights;
+    const closest = closestPointOnRationalCubic(
+      [pointer.x, pointer.y],
+      poles.map((pole) => [pole.x, pole.y] as const) as unknown as SplinePoles,
+      weights,
+    );
+    if (!closest) return undefined;
+    if (best && closest.distance >= best.distance) continue;
+    const depth = rationalCubicPoint(
+      poles.map((pole) => [pole.depth, 0] as const) as unknown as SplinePoles,
+      weights,
+      closest.u,
     )[0];
     if (depth >= -1 && depth <= 1) best = { distance: closest.distance, depth };
   }
