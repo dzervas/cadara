@@ -215,10 +215,22 @@ export interface SketchToolCommitContribution {
   derivedRelationships?: SketchDerivationDefinition[];
 }
 
+/**
+ * How a drawing tool continues after a creation (T11-D9): `chain` continues
+ * from the committed end until the chain ends, `discrete` repeats fixed-click
+ * primitives, and `fitPoints` adds points until it is finalized with at least
+ * `minimum` of them.
+ */
+export type SketchToolLifecycle =
+  | "chain"
+  | "discrete"
+  | { kind: "fitPoints"; minimum: 2 };
+
 export interface SketchToolDefinition<
   TToolId extends SketchToolId = SketchToolId,
 > {
   metadata: SketchToolMetadata<TToolId>;
+  lifecycle: SketchToolLifecycle;
   activate(): SketchToolActivationResult;
   pointerMove(input: SketchToolPointerInput): SketchToolPointerResult;
   pointerRelease(input: SketchToolPointerInput): SketchToolPointerResult;

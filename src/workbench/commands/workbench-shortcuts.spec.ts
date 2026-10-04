@@ -139,8 +139,71 @@ test("src/workbench/commands/workbench-shortcuts.spec.ts", () => {
   ).toBe("editor.cancel");
   expect(
     escapeFixture.dispatchedEvents.at(-1)?.type,
-    "Escape should dispatch the sketch active-tool clear event when a sketch tool is active.",
+    "Escape should dispatch the drawing-tool Escape step event when a sketch drawing tool is active (T11-D10).",
+  ).toBe("sketch.escapeRequested");
+
+  const escapeEditToolFixture = createFixture({
+    mode: "sketch",
+    sketchSession: createSketchSession("trim"),
+  });
+  expect(escapeEditToolFixture.press({ key: "Escape" }).commandId).toBe(
+    "editor.cancel",
+  );
+  expect(
+    escapeEditToolFixture.dispatchedEvents.at(-1)?.type,
+    "Escape should dispatch the sketch active-tool clear event when a sketch edit tool is active.",
   ).toBe("sketch.activeToolCleared");
+
+  // Enter (T11-D10): consumed only when a drawing step applies. Before
+  // T11h/T11i nothing applies, so a plain Enter keeps its native behaviour.
+  const enterFixture = createFixture({
+    mode: "sketch",
+    sketchSession: createSketchSession("circle"),
+  });
+  let enterPrevented = false;
+  const enterResult = enterFixture.press({
+    key: "Enter",
+    target: createToolbarButtonTarget(),
+    preventDefault: () => {
+      enterPrevented = true;
+    },
+  });
+  expect(
+    enterResult.handled || enterPrevented,
+    "Enter with nothing to complete should not be consumed.",
+  ).toBe(false);
+  expect(enterFixture.dispatchedEvents).toEqual([]);
+  expect(
+    enterFixture.triggeredToolIds,
+    "Plain Enter is not a tool shortcut (Shift+Enter is Finish Sketch).",
+  ).toEqual([]);
+
+  // Review A-5(a): when Enter applies, the resolver consumes it even with a
+  // toolbar button focused, so the browser does not also activate the button
+  // and restart the armed tool. The applicable step is faked until
+  // T11h/T11i make one reachable.
+  const enterOnButtonFixture = createFixture({
+    confirmApplies: true,
+    mode: "sketch",
+    sketchSession: createSketchSession("spline"),
+  });
+  let buttonEnterPrevented = 0;
+  const enterOnButtonResult = enterOnButtonFixture.press({
+    key: "Enter",
+    target: createToolbarButtonTarget(),
+    preventDefault: () => {
+      buttonEnterPrevented += 1;
+    },
+  });
+  expect(enterOnButtonResult.commandId).toBe("editor.confirm");
+  expect(
+    buttonEnterPrevented,
+    "An applicable Enter on a focused toolbar button should be prevented once, cancelling the native button activation.",
+  ).toBe(1);
+  expect(
+    enterOnButtonFixture.triggeredToolIds,
+    "The shortcut layer should not re-activate the armed tool.",
+  ).toEqual([]);
 
   const escapeStyleFocusFixture = createFixture({
     mode: "sketch",
@@ -285,6 +348,7 @@ test("src/workbench/commands/workbench-shortcuts.spec.ts", () => {
 
 interface FixtureOptions {
   canRedo?: boolean;
+  confirmApplies?: boolean;
   canUndo?: boolean;
   mode: EditorViewState["mode"];
   selection?: EditorViewState["selection"];
@@ -293,6 +357,7 @@ interface FixtureOptions {
 
 function createFixture({
   canRedo = true,
+  confirmApplies = false,
   canUndo = true,
   mode,
   selection = [],
@@ -324,6 +389,12 @@ function createFixture({
     selection,
     sketchSession,
   });
+  if (confirmApplies) {
+    commandHandlers["editor.confirm"] = {
+      ...commandHandlers["editor.confirm"]!,
+      isEnabled: () => true,
+    };
+  }
   const registry = createShortcutCommandRegistry(
     getShortcutCommandDefinitions(),
   );
@@ -388,4 +459,8 @@ function createTextTarget(target: {
   tagName?: string;
 }) {
   return target as EventTarget;
+}
+
+function createToolbarButtonTarget() {
+  return { tagName: "BUTTON" } as unknown as EventTarget;
 }

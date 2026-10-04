@@ -189,6 +189,7 @@ export const splineSketchToolDefinition: SketchToolDefinition<"spline"> = {
       variantIds: ["spline", "controlPointSpline"],
     },
   },
+  lifecycle: { kind: "fitPoints", minimum: 2 },
   activate() {
     const state = createIdleState();
 

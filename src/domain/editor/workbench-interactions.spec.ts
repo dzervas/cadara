@@ -11,6 +11,7 @@ import {
 } from "@/domain/modeling/opencascade-kernel-seed";
 
 import {
+  getEnterEvent,
   getEscapeEvent,
   getNavigationReopenRequest,
   getViewportCanvasClickIntent,
@@ -84,11 +85,15 @@ test("src/domain/editor/workbench-interactions.spec.ts", async () => {
     ).toBe("form.referencePickerCancelled");
   }
 
-  function testEscapeClearsActiveSketchToolBeforeExitingSketch() {
-    const event = getEscapeEvent({
+  function escapeWithSketchTool(
+    activeTool: NonNullable<
+      Parameters<typeof getEscapeEvent>[0]["sketchSession"]
+    >["activeTool"],
+  ) {
+    return getEscapeEvent({
       activeCommand: {
         commandSessionId: "command_sketch-1",
-        toolId: "line",
+        toolId: "sketch",
         phase: "editing",
       },
       activeReferencePickerFieldId: null,
@@ -98,14 +103,55 @@ test("src/domain/editor/workbench-interactions.spec.ts", async () => {
           createStandardPlaneDefinition("xy"),
           OCC_KERNEL_SETTINGS,
         ),
-        activeTool: "line",
+        activeTool,
       },
     });
+  }
 
-    expect(
-      event?.type,
-      "Escape should clear the active sketch tool before exiting sketch mode.",
-    ).toBe("sketch.activeToolCleared");
+  function testEscapeClearsActiveSketchToolBeforeExitingSketch() {
+    // T11g (T11-D10): a drawing tool takes Escape in steps
+    // (`escapeSketchDrawing`: chain end, finalize, cancel, exit), still before
+    // anything that would leave the sketch or clear the selection.
+    for (const drawingTool of ["line", "circle", "point", "spline"] as const) {
+      expect(
+        escapeWithSketchTool(drawingTool)?.type,
+        `Escape with ${drawingTool} should request the next drawing-tool Escape step before exiting sketch mode.`,
+      ).toBe("sketch.escapeRequested");
+    }
+
+    // Edit, constraint and target-picking tools keep the single-Escape exit.
+    for (const otherTool of [
+      "trim",
+      "constraintCoincident",
+      "construction",
+      "projectReference",
+    ] as const) {
+      expect(
+        escapeWithSketchTool(otherTool)?.type,
+        `Escape should clear the active ${otherTool} tool before exiting sketch mode.`,
+      ).toBe("sketch.activeToolCleared");
+    }
+  }
+
+  function testEnterIsOnlyConsumedWhenADrawingStepApplies() {
+    const session = createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    );
+    // T11h/T11i make the chain end and spline finalize reachable; before
+    // that no drawing state gives Enter a step.
+    for (const sketchSession of [
+      null,
+      session,
+      { ...session, activeTool: "line" as const },
+      { ...session, activeTool: "circle" as const, status: "drawing" as const },
+      { ...session, activeTool: "trim" as const },
+    ]) {
+      expect(
+        getEnterEvent({ sketchSession }),
+        "Enter is not consumed when there is no chain or viable spline draft.",
+      ).toBe(null);
+    }
   }
 
   function testEscapeClearsActiveSketchStyleFocus() {
@@ -371,6 +417,7 @@ test("src/domain/editor/workbench-interactions.spec.ts", async () => {
   testSketchReopenIntentUsesSketchFlow();
   testEscapePrefersReferencePickerCancellation();
   testEscapeClearsActiveSketchToolBeforeExitingSketch();
+  testEnterIsOnlyConsumedWhenADrawingStepApplies();
   testEscapeClearsActiveSketchStyleFocus();
   testEscapeDoesNothingWhenSketchIsIdle();
   testEscapeClearsSelectionWhenNoInteractionHandlesIt();

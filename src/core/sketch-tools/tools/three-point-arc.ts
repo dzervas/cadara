@@ -176,6 +176,7 @@ export const threePointArcSketchToolDefinition: SketchToolDefinition<"threePoint
       icon: "circle",
       modes: ["sketch"],
     },
+    lifecycle: "discrete",
     activate() {
       const state = {
         status: "idle",

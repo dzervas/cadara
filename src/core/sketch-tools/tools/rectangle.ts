@@ -223,6 +223,7 @@ export const rectangleSketchToolDefinition: SketchToolDefinition<"rectangle"> =
       },
     },
     {
+      lifecycle: "discrete",
       buildPreview: buildRectanglePreview,
       buildPresentation: buildRectanglePresentation,
       validate: validateRectangle,

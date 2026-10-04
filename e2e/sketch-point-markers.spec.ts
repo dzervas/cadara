@@ -30,7 +30,7 @@ test("hovering a line shows its end-point markers, moving away hides them, selec
   await openSketch(workbench);
   await drawLine(workbench, lineStart, lineEnd, "1 entities");
   await workbench.activateTool("Create a sketch point.");
-  await workbench.clickViewportAt(freePoint);
+  // Point commits on a single click (T11-D19).
   await workbench.clickViewportAt(freePoint);
   await expect
     .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })

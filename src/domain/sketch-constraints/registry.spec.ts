@@ -932,8 +932,8 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       definition: degenerateDefinition,
     };
     degenerateSession = beginSketchTool(degenerateSession, "point");
+    // Point commits on a single click (T11-D19).
     degenerateSession = startSketchDraw(degenerateSession, [1, 1]);
-    degenerateSession = acceptSketchDraw(degenerateSession, [1, 1]);
 
     const degenerateLine = degenerateSession.definition.entities.find(
       (entity) => entity.kind === "lineSegment",

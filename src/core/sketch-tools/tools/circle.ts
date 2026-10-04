@@ -144,6 +144,7 @@ export const circleSketchToolDefinition: SketchToolDefinition<"circle"> =
       },
     },
     {
+      lifecycle: "discrete",
       buildPreview: buildCirclePreview,
       buildPresentation: buildCirclePresentation,
       validate: validateCircle,

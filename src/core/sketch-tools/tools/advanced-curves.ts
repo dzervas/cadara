@@ -198,6 +198,9 @@ function createFixedPointTool<
 ): SketchToolDefinition<TToolId> {
   return {
     metadata,
+    // Fixed-point tools, including the control-point spline, are discrete
+    // (T11-D9, D20).
+    lifecycle: "discrete",
     activate() {
       const state = {
         status: "idle",

@@ -108,10 +108,21 @@ async function fixture(constrained = false) {
     state = result.state;
     return state.session;
   }
+  /** Runs `event` through the real reducer inside the action owner. */
+  function dispatch(event: EditorEvent) {
+    const result = owner.transition(state, event, (current) =>
+      transitionEditorState(current, event),
+    );
+    if (result.state.kind !== "editingSketch")
+      throw Error("Expected sketch state");
+    state = result.state;
+    return result;
+  }
   apply({ type: "selection.cleared" });
   return {
     owner,
     apply,
+    dispatch,
     get session() {
       return state.session;
     },
@@ -988,4 +999,209 @@ test("T10g-3b: an applied spline Trim is one 'Trim' action; Undo/Redo restore it
   expect(projection(step(undone, "history.redoRequested").session)).toEqual(
     after,
   );
+});
+
+describe("T11g: drawing-tool lifecycle history boundaries (T11-D10, D14, D19)", () => {
+  function undoLabels(f: Awaited<ReturnType<typeof fixture>>) {
+    return f.session.actionHistory?.undo.map((entry) => entry.label) ?? [];
+  }
+
+  test("a discrete tool repeats; each completion is one action and the tool stays armed", async () => {
+    const f = await fixture();
+    f.dispatch({ type: "tool.activated", toolId: "circle" });
+    for (const [x, y] of [
+      [20, 0],
+      [40, 0],
+    ]) {
+      f.dispatch({ type: "sketch.pointerReleased", point: [x, y] });
+      f.dispatch({ type: "sketch.pointerReleased", point: [x + 3, y] });
+    }
+
+    expect(
+      f.session.definition.entities.filter(
+        (entity) => entity.kind === "circle",
+      ),
+      "Two circles in a row without re-activating the tool.",
+    ).toHaveLength(2);
+    expect(f.session.activeTool, "Circle stays armed.").toBe("circle");
+    expect(undoLabels(f), "One action per circle.").toEqual([
+      "Create Sketch Geometry",
+      "Create Sketch Geometry",
+    ]);
+  });
+
+  test("Escape cancels a draft with no action and keeps the tool; the next Escape leaves it", async () => {
+    const f = await fixture();
+    const before = projection(f.session);
+    // Review V-R1: select the existing line first; arming Circle keeps it.
+    const lineTarget = f.session.definition.entities[0]!.target;
+    f.dispatch({ type: "sketch.activeToolCleared" });
+    f.dispatch({ type: "viewport.selectionRequested", target: lineTarget });
+    f.dispatch({ type: "tool.activated", toolId: "circle" });
+    const selected = f.state.selection;
+    expect(selected, "The line is selected while Circle is armed.").toEqual([
+      lineTarget,
+    ]);
+    f.dispatch({ type: "sketch.pointerReleased", point: [20, 0] });
+    expect(f.session.status).toBe("drawing");
+
+    f.dispatch({ type: "sketch.escapeRequested" });
+    expect(
+      f.state.selection,
+      "Cancelling the draft keeps the selection.",
+    ).toEqual(selected);
+    expect(f.session.activeTool, "The first Escape keeps Circle armed.").toBe(
+      "circle",
+    );
+    expect(f.session.status, "The draft is cancelled.").toBe("idle");
+    expect(f.session.toolStagedEntities).toEqual([]);
+    expect(f.session.toolPlacedPoints).toEqual([]);
+    expect(projection(f.session)).toEqual(before);
+    expect(
+      f.session.actionAvailability?.canUndo,
+      "Cancelling records nothing.",
+    ).toBe(false);
+
+    f.dispatch({ type: "sketch.escapeRequested" });
+    expect(f.session.activeTool, "The second Escape leaves for Select.").toBe(
+      null,
+    );
+    expect(f.state.selection, "Leaving the tool clears the selection.").toEqual(
+      [],
+    );
+    expect(f.session.actionAvailability?.canUndo).toBe(false);
+
+    // The cancelled circle starts afresh: one later circle is one action.
+    f.dispatch({ type: "tool.activated", toolId: "circle" });
+    f.dispatch({ type: "sketch.pointerReleased", point: [20, 0] });
+    f.dispatch({ type: "sketch.escapeRequested" });
+    f.dispatch({ type: "sketch.pointerReleased", point: [30, 0] });
+    f.dispatch({ type: "sketch.pointerReleased", point: [33, 0] });
+    const circles = f.session.definition.entities.filter(
+      (entity) => entity.kind === "circle",
+    );
+    expect(circles).toHaveLength(1);
+    expect(undoLabels(f)).toEqual(["Create Sketch Geometry"]);
+  });
+
+  test("Escape during an annotation-label drag with a drawing tool armed restores the label and records nothing (review V-5)", async () => {
+    const f = await fixture();
+    f.apply({ type: "selection.cleared" }, mutations.annotation(f.session));
+    const placed = projection(f.session);
+    const labels = undoLabels(f);
+    f.dispatch({ type: "tool.activated", toolId: "circle" });
+    const drag = (
+      gesturePhase: "start" | "move",
+      point: readonly [number, number],
+    ) =>
+      f.dispatch({
+        type: "sketch.toolPatched",
+        patch: {
+          intent: "setDimensionAnnotationPlacement",
+          dimensionId: "dimension_annotation",
+          point,
+          gesturePhase,
+          clientPoint: point,
+        },
+      });
+    drag("start", [6, 20]);
+    drag("move", [6, 40]);
+    expect(
+      projection(f.session),
+      "The label preview moved during the drag.",
+    ).not.toEqual(placed);
+
+    f.dispatch({ type: "sketch.escapeRequested" });
+    expect(
+      projection(f.session),
+      "Escape abandons the drag and restores the accepted label placement.",
+    ).toEqual(placed);
+    expect(undoLabels(f), "The abandoned drag records nothing.").toEqual(
+      labels,
+    );
+    expect(
+      f.session.activeTool,
+      "With no draft, the same Escape leaves Circle.",
+    ).toBe(null);
+  });
+
+  test("Enter with an incomplete discrete draft changes nothing and records nothing", async () => {
+    const f = await fixture();
+    f.dispatch({ type: "tool.activated", toolId: "circle" });
+    f.dispatch({ type: "sketch.pointerReleased", point: [20, 0] });
+    const drafting = f.session;
+
+    f.dispatch({ type: "sketch.confirmRequested" });
+    expect(f.session, "Enter does not apply to a circle draft.").toEqual(
+      drafting,
+    );
+    expect(f.session.actionAvailability?.canUndo).toBe(false);
+  });
+
+  test.each([
+    ["a tool switch", "rectangle"],
+    ["the construction toggle (review A-7)", "construction"],
+  ] as const)(
+    "%s mid-draft discards the draft with no action",
+    async (_name, toolId) => {
+      const f = await fixture();
+      const before = projection(f.session);
+      f.dispatch({ type: "tool.activated", toolId: "circle" });
+      f.dispatch({ type: "sketch.pointerReleased", point: [20, 0] });
+      f.dispatch({ type: "tool.activated", toolId });
+
+      expect(f.session.activeTool).toBe(toolId);
+      expect(f.session.pointerDownPoint, "The draft is gone.").toBe(null);
+      expect(f.session.toolStagedEntities).toEqual([]);
+      expect(projection(f.session)).toEqual(before);
+      expect(f.session.actionAvailability?.canUndo).toBe(false);
+    },
+  );
+
+  test("Finish mid-draft publishes the definition without the draft and records nothing (T11-D14)", async () => {
+    const f = await fixture();
+    const before = projection(f.session);
+    f.dispatch({ type: "tool.activated", toolId: "circle" });
+    f.dispatch({ type: "sketch.pointerReleased", point: [20, 0] });
+    const event: EditorEvent = {
+      type: "tool.activated",
+      toolId: "finishSketch",
+    };
+    const result = f.owner.transition(f.state, event, (state) =>
+      transitionEditorState(state, event),
+    );
+    const commit = result.effects.find(
+      (effect) => effect.type === "sketch.commit",
+    );
+
+    expect(commit?.type).toBe("sketch.commit");
+    if (commit?.type === "sketch.commit")
+      expect(projection(commit.session)).toEqual(before);
+    expect(
+      result.state.kind === "editingSketch"
+        ? result.state.session.actionAvailability?.canUndo
+        : null,
+      "The discarded draft adds no action.",
+    ).toBe(false);
+  });
+
+  test("Point places one point per click, one action each (T11-D19)", async () => {
+    const f = await fixture();
+    f.dispatch({ type: "tool.activated", toolId: "point" });
+    f.dispatch({ type: "sketch.pointerReleased", point: [20, 5] });
+
+    const points = () =>
+      f.session.definition.entities.filter((entity) => entity.kind === "point");
+    expect(points(), "One click places the point.").toHaveLength(1);
+    expect(f.session.status).toBe("idle");
+    expect(undoLabels(f)).toEqual(["Create Sketch Geometry"]);
+
+    f.dispatch({ type: "sketch.pointerReleased", point: [30, 5] });
+    expect(points()).toHaveLength(2);
+    expect(undoLabels(f)).toEqual([
+      "Create Sketch Geometry",
+      "Create Sketch Geometry",
+    ]);
+    expect(f.session.activeTool, "Point stays armed.").toBe("point");
+  });
 });

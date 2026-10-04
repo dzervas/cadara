@@ -39,6 +39,8 @@ import {
   handleSketchPointerReleased,
   handleSketchToolPatched,
   handleSketchActiveToolCleared,
+  handleSketchEscapeRequested,
+  handleSketchConfirmRequested,
   handleSketchAnnotationDeleteRequested,
   handleSketchAnnotationEditRequested,
   handleSketchConnectedSelectionRequested,
@@ -283,6 +285,10 @@ export function reduceSketchWorkflow(
       return handleSketchToolPatched(state, event);
     case "sketch.activeToolCleared":
       return handleSketchActiveToolCleared(state);
+    case "sketch.escapeRequested":
+      return handleSketchEscapeRequested(state);
+    case "sketch.confirmRequested":
+      return handleSketchConfirmRequested(state);
     case "sketch.annotationDeleteRequested":
       return handleSketchAnnotationDeleteRequested(state);
     case "sketch.annotationEditRequested":
