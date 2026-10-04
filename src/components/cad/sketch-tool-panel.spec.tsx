@@ -136,3 +136,43 @@ test("the sketch tool panel shows the D6 not-supported-yet messages", () => {
     );
   }
 });
+
+// Lane: UI (docs/testing.md). Seam: the panel renders a Trim click's pending
+// state from the session's tool presentation (T10g-1): the edit waits for its
+// exact intersections and the user sees that it is being checked.
+test("the sketch tool panel shows Trim's 'Checking intersections…' while its query is pending", () => {
+  let drawn = createNewSketchSessionFromSupport(
+    { kind: "construction", constructionId: "construction_plane-xy" },
+    OCC_KERNEL_SETTINGS,
+  );
+  for (const [start, end] of [
+    [
+      [0, 0],
+      [4, 0],
+    ],
+    [
+      [1, -1],
+      [1, 1],
+    ],
+  ] as const)
+    drawn = acceptSketchDraw(
+      startSketchDraw(beginSketchTool(drawn, "line"), [...start]),
+      [...end],
+    );
+  const pending = selectSketchEditToolTarget(
+    beginSketchTool(drawn, "trim"),
+    drawn.definition.entities[0]!.target,
+  );
+  expect(pending.definition, "premise: nothing applied yet").toBe(
+    drawn.definition,
+  );
+  const markup = renderToStaticMarkup(
+    <MantineProvider>
+      <SketchToolPanel
+        schema={getSketchToolPresentation(pending)}
+        onPatch={() => undefined}
+      />
+    </MantineProvider>,
+  );
+  expect(markup).toContain("Checking intersections…");
+});

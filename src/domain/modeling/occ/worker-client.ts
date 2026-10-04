@@ -46,6 +46,8 @@ import type {
 import type {
   DeriveSketchRegionsRequest,
   DeriveSketchRegionsResponse,
+  QuerySketchEditIntersectionsRequest,
+  QuerySketchEditIntersectionsResponse,
   ProjectSketchExternalReferencesRequest,
   ProjectSketchExternalReferencesResponse,
 } from "@/contracts/solver/schema";
@@ -325,6 +327,14 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
   deriveSketchRegions(request: DeriveSketchRegionsRequest) {
     return this.invoke<DeriveSketchRegionsResponse>({
       kind: "deriveSketchRegions",
+      request,
+    });
+  }
+
+  /** T10g-1: answered only by the dedicated sketch-derivation worker. */
+  querySketchEditIntersections(request: QuerySketchEditIntersectionsRequest) {
+    return this.invoke<QuerySketchEditIntersectionsResponse>({
+      kind: "querySketchEditIntersections",
       request,
     });
   }

@@ -1,17 +1,22 @@
 import { describe, expect, test } from "vitest";
 import { SketchAuthoredActions } from "./sketch-authored-actions";
 import {
+  emitPendingSketchEditQuery,
   initialEditorState,
   transitionEditorState,
+  type EditorEffectRuntime,
   type EditorEvent,
   type SketchEditorState,
 } from "@/core/editor/state-machine";
+import { runEditorEffect } from "./effect-registry";
+import { querySketchEditIntersectionsForTest } from "@/domain/editor/state-machine-test-builder";
 import {
   acceptSketchDraw,
   beginSketchTool,
   createNewSketchSession,
   startSketchDraw,
   deleteSelectedSketchGeometry,
+  selectSketchEditToolTarget,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
 import {
@@ -669,4 +674,165 @@ test("reentry uses latest authored state and retains blocked actions instead of 
   expect(result.state.session.actionHistory?.undo.at(-1)).toMatchObject({
     blockedReason: "expected-state-changed",
   });
+});
+
+// T10g-1 (T-g15): an applied exact Trim is one labelled T01 action. Undo and
+// Redo replay its write set (points, pieces, ties) exactly and never query
+// again; a peer change to a field of the write set blocks Redo atomically.
+test("T10g-1: an applied Trim is one 'Trim' action; Undo/Redo restore it exactly without re-querying; a peer edit inside its write set blocks Redo", async () => {
+  const f = await fixture();
+  const draw = (
+    session: SketchSessionState,
+    start: [number, number],
+    end: [number, number],
+  ) =>
+    acceptSketchDraw(
+      startSketchDraw(beginSketchTool(session, "line"), start),
+      end,
+    );
+  f.apply(
+    { type: "selection.cleared" },
+    draw(draw(f.session, [3, -1], [3, 1]), [9, -1], [9, 1]),
+  );
+  const target = f.session.definition.entities[0]!;
+  const clicked = selectSketchEditToolTarget(
+    beginSketchTool(f.session, "trim"),
+    target.target,
+  );
+  f.apply({ type: "selection.cleared" }, clicked);
+  const before = projection(f.session);
+  expect(f.session.actionHistory?.undo).toHaveLength(1);
+  const emitted = emitPendingSketchEditQuery({ state: f.state, effects: [] });
+  const effect = emitted.effects.find(
+    (candidate) => candidate.type === "sketch.queryEditIntersections",
+  );
+  if (effect?.type !== "sketch.queryEditIntersections")
+    throw new Error("Expected the Trim query.");
+  const event = await runEditorEffect(effect, {
+    querySketchEditIntersections: querySketchEditIntersectionsForTest,
+  } as EditorEffectRuntime);
+  const result = f.owner.transition(
+    emitted.state as SketchEditorState,
+    event,
+    (state) => transitionEditorState(state, event),
+  );
+  if (result.state.kind !== "editingSketch") throw Error("Expected sketch");
+  const after = projection(result.state.session);
+  expect(after).not.toEqual(before);
+  expect(result.state.session.definition.entities).toHaveLength(4);
+  expect(result.state.session.actionHistory?.undo.at(-1)?.label).toBe("Trim");
+  expect(result.state.session.actionHistory?.undo).toHaveLength(2);
+
+  const replay = (state: SketchEditorState, type: EditorEvent["type"]) => {
+    const step = { type } as EditorEvent;
+    const next = f.owner.transition(state, step, (current) =>
+      transitionEditorState(current, step),
+    );
+    expect(
+      next.effects.filter(
+        (candidate) => candidate.type === "sketch.queryEditIntersections",
+      ),
+      `${type} never re-queries`,
+    ).toEqual([]);
+    if (next.state.kind !== "editingSketch") throw Error("Expected sketch");
+    return next.state;
+  };
+  const undone = replay(result.state, "history.undoRequested");
+  expect(projection(undone.session)).toEqual(before);
+  const redone = replay(undone, "history.redoRequested");
+  expect(projection(redone.session)).toEqual(after);
+
+  // A peer rewrites the target's end point (a field the Trim wrote) after Undo.
+  const reundone = replay(redone, "history.undoRequested");
+  const peer = {
+    ...reundone.session,
+    definition: {
+      ...reundone.session.definition,
+      entities: reundone.session.definition.entities.map((entity) =>
+        entity.entityId === target.entityId && entity.kind === "lineSegment"
+          ? { ...entity, endPointId: entity.startPointId }
+          : entity,
+      ),
+    },
+  };
+  const opened = f.owner.transition(
+    initialEditorState,
+    { type: "selection.cleared" },
+    () => ({ state: { ...reundone, session: peer }, effects: [] }),
+  );
+  const blocked = f.owner.transition(
+    opened.state,
+    { type: "history.redoRequested" },
+    (state) => ({ state, effects: [] }),
+  );
+  if (blocked.state.kind !== "editingSketch") throw Error("Expected sketch");
+  expect(projection(blocked.state.session)).toEqual(projection(peer));
+  expect(blocked.state.session.validationMessage).toContain("Cannot redo");
+  expect(blocked.state.session.actionHistory?.redo.at(-1)).toMatchObject({
+    label: "Trim",
+    blockedReason: expect.any(String),
+  });
+});
+
+// Orchestrator [TECH] 2026-10-04: the radius → diameter rewrite of a trimmed
+// circle is part of the one "Trim" action; Undo restores the radius bitwise.
+test("T10g-1: Undo of a circle Trim restores its circleRadius dimension exactly; Redo restores the diameter", async () => {
+  const f = await fixture();
+  let session = acceptSketchDraw(
+    startSketchDraw(beginSketchTool(f.session, "circle"), [20, 0]),
+    [22, 0],
+  );
+  for (const x of [21, 19])
+    session = acceptSketchDraw(
+      startSketchDraw(beginSketchTool(session, "line"), [x, -3]),
+      [x, 3],
+    );
+  f.apply({ type: "selection.cleared" }, session);
+  const circle = f.session.definition.entities.find(
+    (entity) => entity.kind === "circle",
+  )!;
+  f.apply(
+    { type: "selection.cleared" },
+    selectSketchEditToolTarget(
+      beginSketchTool(f.session, "trim"),
+      circle.target,
+    ),
+  );
+  const before = projection(f.session);
+  const radius = structuredClone(f.session.definition.dimensions);
+  const emitted = emitPendingSketchEditQuery({ state: f.state, effects: [] });
+  const effect = emitted.effects.find(
+    (candidate) => candidate.type === "sketch.queryEditIntersections",
+  );
+  if (effect?.type !== "sketch.queryEditIntersections")
+    throw new Error("Expected the Trim query.");
+  const event = await runEditorEffect(effect, {
+    querySketchEditIntersections: querySketchEditIntersectionsForTest,
+  } as EditorEffectRuntime);
+  const applied = f.owner.transition(
+    emitted.state as SketchEditorState,
+    event,
+    (state) => transitionEditorState(state, event),
+  );
+  if (applied.state.kind !== "editingSketch") throw Error("Expected sketch");
+  const after = projection(applied.state.session);
+  expect(
+    applied.state.session.definition.dimensions.map(
+      (dimension) => dimension.kind,
+    ),
+  ).toContain("diameter");
+  expect(applied.state.session.actionHistory?.undo.at(-1)?.label).toBe("Trim");
+  const step = (state: SketchEditorState, type: EditorEvent["type"]) => {
+    const next = f.owner.transition(state, { type } as EditorEvent, (current) =>
+      transitionEditorState(current, { type } as EditorEvent),
+    );
+    if (next.state.kind !== "editingSketch") throw Error("Expected sketch");
+    return next.state;
+  };
+  const undone = step(applied.state, "history.undoRequested");
+  expect(projection(undone.session)).toEqual(before);
+  expect(undone.session.definition.dimensions).toEqual(radius);
+  expect(projection(step(undone, "history.redoRequested").session)).toEqual(
+    after,
+  );
 });

@@ -7,6 +7,8 @@ import {
 } from "@/domain/editor/feature-boolean-target-preselection";
 import {
   completeSketchOffsetPreviewPublication,
+  completeSketchTrimQuery,
+  failSketchTrimQuery,
   failSketchLiveRegions,
   getSketchSessionPreviewLabel,
   publishSketchLiveRegions,
@@ -970,6 +972,74 @@ export function handleEffectSketchOffsetPreviewPublicationFailed(
           },
         ],
       ),
+    },
+    effects: [],
+  };
+}
+
+function isPendingEditQueryResult(
+  state: EditorState,
+  event: Extract<
+    EditorEvent,
+    {
+      type:
+        | "effect.sketchEditIntersectionsQueried"
+        | "effect.sketchEditIntersectionsQueryFailed";
+    }
+  >,
+): state is SketchEditorState {
+  return (
+    state.kind === "editingSketch" &&
+    state.command.commandSessionId === event.commandSessionId &&
+    state.pendingEditQueryRequest?.requestId === event.requestId
+  );
+}
+
+/**
+ * T10g-1: applies the Trim tool's exact edit intersections (stale requests
+ * are dropped; the session drops a result whose query is no longer in
+ * flight, e.g. after Esc or a tool switch).
+ */
+export function handleEffectSketchEditIntersectionsQueried(
+  state: EditorState,
+  event: Extract<
+    EditorEvent,
+    { type: "effect.sketchEditIntersectionsQueried" }
+  >,
+): EditorTransitionResult {
+  if (!isPendingEditQueryResult(state, event)) {
+    return { state, effects: [] };
+  }
+  return {
+    state: {
+      ...state,
+      pendingEditQueryRequest: null,
+      session: completeSketchTrimQuery(
+        state.session,
+        event.queryId,
+        event.result,
+      ),
+    },
+    effects: [],
+  };
+}
+
+/** T10g-1: a failed edit query applies nothing and shows the error on the tool. */
+export function handleEffectSketchEditIntersectionsQueryFailed(
+  state: EditorState,
+  event: Extract<
+    EditorEvent,
+    { type: "effect.sketchEditIntersectionsQueryFailed" }
+  >,
+): EditorTransitionResult {
+  if (!isPendingEditQueryResult(state, event)) {
+    return { state, effects: [] };
+  }
+  return {
+    state: {
+      ...state,
+      pendingEditQueryRequest: null,
+      session: failSketchTrimQuery(state.session, event.queryId, event.message),
     },
     effects: [],
   };

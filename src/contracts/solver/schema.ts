@@ -1,5 +1,9 @@
 import type { SplineSpan } from "@/contracts/sketch/spline-geometry";
 import type {
+  SketchEditIntersectionInput,
+  SketchEditIntersectionResult,
+} from "@/contracts/sketch/edit-intersections";
+import type {
   DocumentId,
   ProjectedGeometryId,
   ReferenceId,
@@ -587,6 +591,19 @@ export interface DeriveSketchRegionsResponse extends SketchSolverResponseBase {
    * a failure never enters `diagnostics` or the solved snapshot.
    */
   offsetPublications: SketchOffsetPublicationRecord[];
+}
+
+/**
+ * T10g-1: the exact edit-intersection query of one accepted live pair
+ * (`querySketchEditIntersections`, `contracts/sketch/edit-intersections.ts`).
+ * A terminable runtime runs it in its own `editQuery` lane per document.
+ */
+export interface QuerySketchEditIntersectionsRequest
+  extends SketchSolverRequestBase, SketchEditIntersectionInput {}
+
+/** The verified cuts or the named failure; validated at the transport boundary. */
+export interface QuerySketchEditIntersectionsResponse extends SketchSolverResponseBase {
+  result: SketchEditIntersectionResult;
 }
 
 /**

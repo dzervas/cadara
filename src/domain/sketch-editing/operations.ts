@@ -1,4 +1,5 @@
 import type {
+  ConstraintDefinition,
   SketchDefinition,
   SketchDerivationDefinition,
   SketchDerivedEntityOutput,
@@ -17,7 +18,6 @@ import {
   orderedSplineOccurrences,
   orderedSplinePointIds,
   reconstructSplineAggregate,
-  tessellateCubicSpans,
   type SolvedCubicSpan,
 } from "@/contracts/sketch/spline-geometry";
 import {
@@ -39,6 +39,7 @@ import {
   type ProjectedSketchReferenceGeometry,
 } from "@/contracts/solver/schema";
 import type { SketchPoint } from "@/contracts/modeling/schema";
+import { isAuthoredValue } from "@/contracts/modeling/authored-values";
 import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
 import type {
   SketchDraftEntity,
@@ -47,8 +48,10 @@ import type {
 } from "@/core/sketch-tools/definition";
 import {
   createArcEndpointDimensions,
+  createPointOnCurveConstraint,
   createTangentConstraint,
 } from "@/core/sketch-tools/constraints";
+import type { SketchEditIntersectionResult } from "@/contracts/sketch/edit-intersections";
 import { distanceBetween as distanceBetweenPoints } from "@/domain/sketch/point-math";
 
 export type OffsetSide = "left" | "right";
@@ -87,16 +90,6 @@ export type SketchEditOperationFactories = Pick<
   | "createArcEntity"
   | "createSplineEntity"
 >;
-
-type CurveSample = {
-  point: SketchPoint;
-  t: number;
-};
-
-type CurveSegment = {
-  start: CurveSample;
-  end: CurveSample;
-};
 
 type CurveDescriptor =
   | {
@@ -165,42 +158,7 @@ export interface SketchDerivedTransformContributionInput {
   modelingTolerance: number;
 }
 
-type TrimIntersection = {
-  point: SketchPoint;
-  t: number;
-};
-
-type TrimFactories = {
-  nextPointId(suffix: string): SketchPointId;
-  nextEntityId(suffix: string): SketchEntityId;
-  createPoint(
-    label: string,
-    pointId: SketchPointId,
-    position: SketchPoint,
-  ): SketchPointDefinition;
-  createLine(
-    label: string,
-    entityId: SketchEntityId,
-    startPointId: SketchPointId,
-    endPointId: SketchPointId,
-  ): SketchEntityDefinition;
-  createArc(
-    label: string,
-    entityId: SketchEntityId,
-    centerPointId: SketchPointId,
-    startPointId: SketchPointId,
-    endPointId: SketchPointId,
-    sweepDirection: "clockwise" | "counterClockwise",
-  ): SketchEntityDefinition;
-  createSpline(
-    label: string,
-    entityId: SketchEntityId,
-    fitPointIds: readonly SketchPointId[],
-  ): SketchEntityDefinition;
-};
-
 const EPSILON = 1e-6;
-const CURVE_SAMPLE_COUNT = 96;
 
 function distanceBetween(left: SketchPoint, right: SketchPoint) {
   return distanceBetweenPoints(left, right);
@@ -401,98 +359,6 @@ function pointOnCircle(
   ];
 }
 
-/**
- * The display polyline of a spline descriptor, read only by the sampler
- * that remains until its slice replaces it (T10f, listed in the
- * tessellation boundary guard): Trim's intersection sampling (T10g).
- */
-function splineDescriptorPolyline(
-  curve: Pick<
-    Extract<OffsetCurveDescriptor, { kind: "spline" }>,
-    "geometry" | "isClosed"
-  >,
-): readonly SketchPoint[] {
-  const points =
-    curve.geometry.kind === "spans"
-      ? tessellateCubicSpans(curve.geometry.spans)
-      : curve.geometry.points;
-  return curve.isClosed && points.length > 2 ? [...points, points[0]!] : points;
-}
-
-function sampleSplineDisplayPolyline(
-  points: readonly SketchPoint[],
-  t: number,
-): SketchPoint {
-  const scaled = Math.max(0, Math.min(1, t)) * (points.length - 1);
-  const index = Math.min(Math.floor(scaled), points.length - 2);
-  const local = scaled - index;
-  const start = points[index]!;
-  const end = points[index + 1]!;
-  return [
-    start[0] + (end[0] - start[0]) * local,
-    start[1] + (end[1] - start[1]) * local,
-  ];
-}
-
-function sampleCurve(curve: CurveDescriptor): CurveSample[] {
-  switch (curve.kind) {
-    case "lineSegment":
-      return [
-        { point: curve.start, t: 0 },
-        { point: curve.end, t: 1 },
-      ];
-    case "circle":
-      return Array.from({ length: CURVE_SAMPLE_COUNT + 1 }, (_, index) => {
-        const t = index / CURVE_SAMPLE_COUNT;
-        return {
-          point: pointOnCircle(curve.center, curve.radius, t * Math.PI * 2),
-          t,
-        };
-      });
-    case "arc": {
-      const startAngle = Math.atan2(
-        curve.start[1] - curve.center[1],
-        curve.start[0] - curve.center[0],
-      );
-      const sweep = arcSweep(curve);
-      return Array.from({ length: CURVE_SAMPLE_COUNT + 1 }, (_, index) => {
-        const t = index / CURVE_SAMPLE_COUNT;
-        const offset =
-          sweep * t * (curve.sweepDirection === "counterClockwise" ? 1 : -1);
-        return {
-          point: pointOnCircle(
-            curve.center,
-            distanceBetween(curve.start, curve.center),
-            startAngle + offset,
-          ),
-          t,
-        };
-      });
-    }
-    case "spline": {
-      const polyline = splineDescriptorPolyline(curve);
-      return Array.from({ length: CURVE_SAMPLE_COUNT + 1 }, (_, index) => {
-        const t = index / CURVE_SAMPLE_COUNT;
-        return {
-          point: sampleSplineDisplayPolyline(polyline, t),
-          t,
-        };
-      });
-    }
-  }
-}
-
-function segmentsFromSamples(samples: readonly CurveSample[]): CurveSegment[] {
-  const segments: CurveSegment[] = [];
-  for (let index = 0; index + 1 < samples.length; index += 1) {
-    segments.push({
-      start: samples[index]!,
-      end: samples[index + 1]!,
-    });
-  }
-  return segments;
-}
-
 function lineLineIntersection(input: {
   start: SketchPoint;
   end: SketchPoint;
@@ -551,85 +417,6 @@ function infiniteLineIntersection(input: {
   return [input.start[0] + dx * t, input.start[1] + dy * t] as const;
 }
 
-function segmentIntersection(
-  target: CurveSegment,
-  candidate: CurveSegment,
-): TrimIntersection | null {
-  const intersection = lineLineIntersection({
-    start: target.start.point,
-    end: target.end.point,
-    otherStart: candidate.start.point,
-    otherEnd: candidate.end.point,
-  });
-
-  if (!intersection) {
-    return null;
-  }
-
-  return {
-    point: intersection.point,
-    t: target.start.t + (target.end.t - target.start.t) * intersection.t,
-  };
-}
-
-function uniqueIntersections(intersections: readonly TrimIntersection[]) {
-  const sorted = [...intersections].sort((left, right) => left.t - right.t);
-  const unique: TrimIntersection[] = [];
-
-  for (const intersection of sorted) {
-    if (
-      !unique.some(
-        (entry) =>
-          Math.abs(entry.t - intersection.t) <= EPSILON ||
-          distanceBetween(entry.point, intersection.point) <= EPSILON,
-      )
-    ) {
-      unique.push(intersection);
-    }
-  }
-
-  return unique;
-}
-
-function collectTargetIntersections(
-  definition: SketchDefinition,
-  targetCurve: CurveDescriptor,
-) {
-  const targetSegments = segmentsFromSamples(sampleCurve(targetCurve));
-  const intersections = definition.entities.flatMap(
-    (entity): TrimIntersection[] => {
-      if (entity.entityId === targetCurve.entity.entityId) {
-        return [];
-      }
-
-      const candidateCurve = getCurveDescriptor(definition, entity);
-      if (!candidateCurve) {
-        return [];
-      }
-
-      const candidateSegments = segmentsFromSamples(
-        sampleCurve(candidateCurve),
-      );
-      return targetSegments.flatMap((targetSegment) =>
-        candidateSegments.flatMap((candidateSegment) => {
-          const intersection = segmentIntersection(
-            targetSegment,
-            candidateSegment,
-          );
-          return intersection ? [intersection] : [];
-        }),
-      );
-    },
-  );
-
-  return uniqueIntersections(
-    intersections.filter(
-      (intersection) =>
-        intersection.t > EPSILON && intersection.t < 1 - EPSILON,
-    ),
-  );
-}
-
 function fail(
   message: string,
   definition: SketchDefinition,
@@ -647,191 +434,231 @@ function withAppendedTrimPoints(
   };
 }
 
-export function trimLineSegmentAtIntersections(
-  input: {
-    definition: SketchDefinition;
-    entityId: SketchEntityId;
-  } & TrimFactories,
-): SketchMutationResult {
-  const entity = input.definition.entities.find(
-    (candidate) => candidate.entityId === input.entityId,
+export const SPLINE_TRIM_UNAVAILABLE_MESSAGE =
+  "Spline trimming requires exact neutral-span trimming and is not available yet.";
+const TRIM_TARGET_KIND_MESSAGE =
+  "Trim supports line, circle, arc, and spline entities.";
+
+/**
+ * Why `entity` cannot be a Trim target before any query runs (T10g-1):
+ * line, arc and circle targets are trimmed; a spline target keeps the T07
+ * message until T10g-3b; every other kind is unsupported. Null when it can.
+ */
+export function trimTargetRefusal(entity: SketchEntityDefinition) {
+  switch (entity.kind) {
+    case "lineSegment":
+    case "arc":
+    case "circle":
+      return null;
+    case "spline":
+      return SPLINE_TRIM_UNAVAILABLE_MESSAGE;
+    default:
+      return TRIM_TARGET_KIND_MESSAGE;
+  }
+}
+
+/** An authored dimension value doubled: exact for literals; `2 * (text)` for expressions. */
+function doubledDimensionValue(value: unknown) {
+  if (typeof value === "number") return 2 * value;
+  if (isAuthoredValue(value))
+    return value.source === "literal"
+      ? { source: "literal" as const, value: 2 * (value.value as number) }
+      : {
+          source: "expression" as const,
+          valueText: `2 * (${value.valueText})`,
+        };
+  throw new Error(`A dimension value must be a number or an authored value.`);
+}
+
+/**
+ * The exact Trim (T10g design §3, g-1: line, arc, circle; shapes unchanged
+ * from the sampled Trim). From the verified edit intersections of the
+ * accepted pair it keeps the target outside its first and last cut (a
+ * circle keeps the counter-clockwise arc from the first to the last cut,
+ * measured from angle 0):
+ * - new end points sit at the cuts' `position`s, the sole evaluator at the
+ *   representatives on the SOLVED target (T10f A-4: no span is rebuilt from
+ *   the authored definition here);
+ * - Q1b: each new end is tied to every tied cutter of its cut
+ *   (`coincident` with a cutter end point, else `pointOnCurve`);
+ * - review R-3: a `pointOnCurve` on a line or arc target moves to the new
+ *   piece when it belongs to the last cut, or (away from every cut) when its
+ *   parameter lies beyond the last cut; everything else stays on the
+ *   original id (which keeps the first piece);
+ * - a circle's `circleRadius` dimensions become `diameter` dimensions (same
+ *   id and placement, value doubled; a default "… radius" label becomes
+ *   "… diameter").
+ */
+export function createSketchTrimMutation(input: {
+  definition: SketchDefinition;
+  targetEntityId: SketchEntityId;
+  intersections: Extract<SketchEditIntersectionResult, { kind: "verified" }>;
+  factories: SketchEditOperationFactories;
+}): SketchMutationResult {
+  const { definition, factories, intersections } = input;
+  const entity = definition.entities.find(
+    (candidate) => candidate.entityId === input.targetEntityId,
   );
-  if (!entity) {
-    return fail("Trim target was not found.", input.definition);
-  }
-
-  const targetCurve = getCurveDescriptor(input.definition, entity);
-  if (!targetCurve) {
+  if (!entity) return fail("Trim target was not found.", definition);
+  if (
+    entity.kind !== "lineSegment" &&
+    entity.kind !== "arc" &&
+    entity.kind !== "circle"
+  )
     return fail(
-      "Trim supports line, circle, arc, and spline entities.",
-      input.definition,
+      trimTargetRefusal(entity) ?? TRIM_TARGET_KIND_MESSAGE,
+      definition,
     );
-  }
-
-  const intersections = collectTargetIntersections(
-    input.definition,
-    targetCurve,
-  );
-  if (intersections.length < 2) {
-    return fail(
-      "Trim needs two unambiguous intersections on the target curve.",
-      input.definition,
-    );
-  }
-
-  const trimStart = intersections[0]!;
-  const trimEnd = intersections.at(-1)!;
-
-  if (targetCurve.kind === "lineSegment") {
-    const trimStartPointId = input.nextPointId("trim-start");
-    const trimEndPointId = input.nextPointId("trim-end");
-    const splitEntityId = input.nextEntityId("trim-split");
-    const trimStartPoint = input.createPoint(
-      `${entity.label} trim start`,
-      trimStartPointId,
-      trimStart.point,
-    );
-    const trimEndPoint = input.createPoint(
-      `${entity.label} trim end`,
-      trimEndPointId,
-      trimEnd.point,
-    );
-    const updatedEntity = {
-      ...targetCurve.entity,
-      endPointId: trimStartPointId,
-    };
-    const splitEntity = {
-      ...input.createLine(
-        `${entity.label} trimmed`,
-        splitEntityId,
-        trimEndPointId,
-        targetCurve.entity.endPointId,
-      ),
-      isConstruction: entity.isConstruction,
-      style: entity.style,
-    };
-    const appended = withAppendedTrimPoints(input.definition, [
-      trimStartPoint,
-      trimEndPoint,
-    ]);
-
+  const { cuts } = intersections;
+  const last = cuts.length - 1;
+  const ends = [
+    { cut: cuts[0]!, tag: "start" },
+    { cut: cuts[last]!, tag: "end" },
+  ].map(({ cut, tag }) => {
+    const pointId = factories.createPointId(`trim-${tag}`);
     return {
-      changed: true,
-      message: null,
-      definition: {
-        ...input.definition,
-        ...appended,
-        entityIds: [...input.definition.entityIds, splitEntityId],
-        entities: [
-          ...input.definition.entities.map((candidate) =>
-            candidate.entityId === entity.entityId ? updatedEntity : candidate,
-          ),
-          splitEntity,
-        ],
-      },
+      cut,
+      tag,
+      pointId,
+      point: factories.createPoint(
+        `${entity.label} trim ${tag}`,
+        pointId,
+        cut.position,
+      ),
     };
-  }
+  });
+  const [start, end] = ends as [(typeof ends)[0], (typeof ends)[0]];
+  const labelOf = (entityId: SketchEntityId) =>
+    definition.entities.find((candidate) => candidate.entityId === entityId)
+      ?.label ?? entityId;
+  const ties = ends.flatMap(({ cut, tag, pointId }) =>
+    cut.cutters.flatMap(({ entityId, tie }): ConstraintDefinition[] => {
+      if (!tie) return [];
+      const constraintId = factories.createConstraintId(
+        `tie-${tag}-${entityId}`,
+      );
+      const label = `${entity.label} trim ${tag} on ${labelOf(entityId)}`;
+      return [
+        tie.kind === "coincident"
+          ? {
+              constraintId,
+              kind: "coincident",
+              label,
+              pointIds: [pointId, tie.pointId],
+            }
+          : createPointOnCurveConstraint({
+              constraintId,
+              label,
+              pointId,
+              curveEntityId: entityId,
+            }),
+      ];
+    }),
+  );
 
-  if (targetCurve.kind === "circle") {
-    const trimStartPointId = input.nextPointId("trim-start");
-    const trimEndPointId = input.nextPointId("trim-end");
-    const trimStartPoint = input.createPoint(
-      `${entity.label} trim start`,
-      trimStartPointId,
-      trimStart.point,
-    );
-    const trimEndPoint = input.createPoint(
-      `${entity.label} trim end`,
-      trimEndPointId,
-      trimEnd.point,
-    );
-    const updatedEntity = {
-      ...input.createArc(
+  let updated: SketchEntityDefinition;
+  let piece: SketchEntityDefinition | null = null;
+  if (entity.kind === "circle") {
+    updated = {
+      ...factories.createArcEntity(
         entity.label,
         entity.entityId,
-        targetCurve.entity.centerPointId,
-        trimStartPointId,
-        trimEndPointId,
+        entity.centerPointId,
+        start.pointId,
+        end.pointId,
         "counterClockwise",
       ),
       isConstruction: entity.isConstruction,
       style: entity.style,
     };
-    const appended = withAppendedTrimPoints(input.definition, [
-      trimStartPoint,
-      trimEndPoint,
-    ]);
-
-    return {
-      changed: true,
-      message: null,
-      definition: {
-        ...input.definition,
-        ...appended,
-        entities: input.definition.entities.map((candidate) =>
-          candidate.entityId === entity.entityId ? updatedEntity : candidate,
-        ),
-      },
-    };
-  }
-
-  if (targetCurve.kind === "arc") {
-    const trimStartPointId = input.nextPointId("trim-start");
-    const trimEndPointId = input.nextPointId("trim-end");
-    const splitEntityId = input.nextEntityId("trim-split");
-    const trimStartPoint = input.createPoint(
-      `${entity.label} trim start`,
-      trimStartPointId,
-      trimStart.point,
-    );
-    const trimEndPoint = input.createPoint(
-      `${entity.label} trim end`,
-      trimEndPointId,
-      trimEnd.point,
-    );
-    const updatedEntity = {
-      ...targetCurve.entity,
-      endPointId: trimStartPointId,
-    };
-    const splitEntity = {
-      ...input.createArc(
-        `${entity.label} trimmed`,
-        splitEntityId,
-        targetCurve.entity.centerPointId,
-        trimEndPointId,
-        targetCurve.entity.endPointId,
-        targetCurve.entity.sweepDirection,
-      ),
+  } else {
+    updated = { ...entity, endPointId: start.pointId };
+    const pieceId = factories.createEntityId("trim-split");
+    piece = {
+      ...(entity.kind === "lineSegment"
+        ? factories.createLineEntity(
+            `${entity.label} trimmed`,
+            pieceId,
+            end.pointId,
+            entity.endPointId,
+          )
+        : factories.createArcEntity(
+            `${entity.label} trimmed`,
+            pieceId,
+            entity.centerPointId,
+            end.pointId,
+            entity.endPointId,
+            entity.sweepDirection,
+          )),
       isConstruction: entity.isConstruction,
       style: entity.style,
     };
-    const appended = withAppendedTrimPoints(input.definition, [
-      trimStartPoint,
-      trimEndPoint,
-    ]);
-
-    return {
-      changed: true,
-      message: null,
-      definition: {
-        ...input.definition,
-        ...appended,
-        entityIds: [...input.definition.entityIds, splitEntityId],
-        entities: [
-          ...input.definition.entities.map((candidate) =>
-            candidate.entityId === entity.entityId ? updatedEntity : candidate,
-          ),
-          splitEntity,
-        ],
-      },
-    };
   }
-
+  const lastCut = cuts[last]!;
+  const beyondLast = (parameter: number) =>
+    intersections.parameterOrder === "increasing"
+      ? parameter > lastCut.enclosure[1]
+      : parameter < lastCut.enclosure[0];
+  const retargeted = new Set(
+    piece
+      ? intersections.incidences.flatMap((incidence) =>
+          incidence.cut === last ||
+          (incidence.cut === null && beyondLast(incidence.parameter))
+            ? [incidence.constraintId]
+            : [],
+        )
+      : [],
+  );
+  const constraints = definition.constraints.map((constraint) =>
+    piece &&
+    constraint.kind === "pointOnCurve" &&
+    retargeted.has(constraint.constraintId)
+      ? {
+          ...constraint,
+          curve: { ...constraint.curve, entityId: piece.entityId },
+        }
+      : constraint,
+  );
+  // Orchestrator [TECH] 2026-10-04: a circle's `circleRadius` dimensions
+  // (the Circle tool authors one) cannot drive the arc it becomes; each
+  // becomes the same-id `diameter` (which drives arcs) of twice its value.
+  const dimensions =
+    entity.kind === "circle"
+      ? definition.dimensions.map((dimension) =>
+          dimension.kind === "circleRadius" &&
+          dimension.entityId === entity.entityId
+            ? {
+                ...dimension,
+                kind: "diameter" as const,
+                // Review A-3: the default label ("Circle N radius") follows.
+                label: dimension.label.replace(/ radius$/, " diameter"),
+                value: doubledDimensionValue(dimension.value),
+              }
+            : dimension,
+        )
+      : definition.dimensions;
   return {
-    changed: false,
-    message:
-      "Spline trimming requires exact neutral-span trimming and is not available yet.",
-    definition: input.definition,
+    changed: true,
+    message: null,
+    definition: {
+      ...definition,
+      ...withAppendedTrimPoints(definition, [start.point, end.point]),
+      dimensions,
+      entityIds: piece
+        ? [...definition.entityIds, piece.entityId]
+        : definition.entityIds,
+      entities: [
+        ...definition.entities.map((candidate) =>
+          candidate.entityId === entity.entityId ? updated : candidate,
+        ),
+        ...(piece ? [piece] : []),
+      ],
+      constraintIds: [
+        ...definition.constraintIds,
+        ...ties.map((tie) => tie.constraintId),
+      ],
+      constraints: [...constraints, ...ties],
+    },
   };
 }
 

@@ -11,6 +11,8 @@ import {
   SOLVER_SCHEMA_VERSION,
   type DeriveSketchRegionsRequest,
   type DeriveSketchRegionsResponse,
+  type QuerySketchEditIntersectionsRequest,
+  type QuerySketchEditIntersectionsResponse,
 } from "@/contracts/solver/schema";
 import type { DocumentId, RequestId } from "@/contracts/shared/ids";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
@@ -50,12 +52,19 @@ class FakeDerivationWorker implements OccWorkerLike {
   terminate() {
     this.terminated = true;
   }
-  respond(payload: DeriveSketchRegionsResponse, index = 0) {
+  respond(
+    payload: DeriveSketchRegionsResponse | QuerySketchEditIntersectionsResponse,
+    index = 0,
+  ) {
+    const posted = this.posted[index]!;
     this.listener?.({
       data: {
         kind: "invoked",
-        requestId: this.posted[index]!.requestId,
-        operation: "deriveSketchRegions",
+        requestId: posted.requestId,
+        operation:
+          posted.kind === "invoke"
+            ? posted.operation.kind
+            : "deriveSketchRegions",
         payload,
       },
     } as MessageEvent<OccWorkerResponse>);
@@ -418,4 +427,85 @@ test("T08b-g5b (g5a review A3, g4 A4): dispose settles the running and the waiti
   ).toBe(true);
   // A late worker message after disposal resolves no one.
   workers[0]!.respond(responseFor(makeRequest("request_running")));
+});
+
+// T10g-1 (design review A-3): exact edit queries run in a third lane per
+// document, with their own worker; they never supersede (or are superseded
+// by) the live derivation or an offset preview check, only each other.
+test("T10g-1: an edit-intersection query runs in its own editQuery lane; only a newer edit query supersedes it", async () => {
+  const { pool, workers } = makePool();
+  const editRequest = (
+    requestId: string,
+  ): QuerySketchEditIntersectionsRequest => {
+    const base = makeRequest(requestId);
+    return {
+      ...base,
+      operation: {
+        kind: "trim",
+        targetEntityId: base.definition.entityIds[0]!,
+      },
+    };
+  };
+  const editResponse = (
+    request: QuerySketchEditIntersectionsRequest,
+  ): QuerySketchEditIntersectionsResponse => ({
+    contractVersion: CONTRACT_VERSION,
+    solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+    requestId: request.requestId,
+    documentId: request.documentId,
+    revisionId: request.revisionId,
+    sketchId: request.sketchId,
+    result: {
+      kind: "failed",
+      code: "edit-too-few-cuts",
+      message: "fake",
+      entityIds: [],
+      nonAcceptedNearTarget: [],
+    },
+  });
+  const live = makeRequest("request_live");
+  const liveDone = pool.deriveSketchRegions(live);
+  const preview = pool.deriveSketchRegions({
+    ...makeRequest("request_preview"),
+    derivationLane: "offsetPreview",
+  });
+  const first = editRequest("request_edit_1");
+  const firstDone = pool.querySketchEditIntersections(first);
+  expect(workers, "one worker per lane").toHaveLength(3);
+  expect(
+    workers[2]!.posted[0]!.kind === "invoke" &&
+      workers[2]!.posted[0]!.operation,
+  ).toEqual({ kind: "querySketchEditIntersections", request: first });
+  const validation = validateOccWorkerRequestEnvelope(
+    structuredClone(workers[2]!.posted[0]!),
+  );
+  expect(validation.success ? [] : validation.errors).toEqual([]);
+  expect(workers.map((worker) => worker.terminated)).toEqual([
+    false,
+    false,
+    false,
+  ]);
+  // A newer live derivation supersedes the live lane only.
+  const newerLive = makeRequest("request_live_2");
+  const newerLiveDone = pool.deriveSketchRegions(newerLive);
+  await expect(liveDone).rejects.toBeInstanceOf(
+    SketchRegionDerivationSupersededError,
+  );
+  expect(workers[2]!.terminated, "the edit lane keeps running").toBe(false);
+  // A newer edit query supersedes the edit lane only.
+  const second = editRequest("request_edit_2");
+  const secondDone = pool.querySketchEditIntersections(second);
+  await expect(firstDone).rejects.toMatchObject({
+    requestId: "request_edit_1",
+    supersededBy: "request_edit_2",
+  });
+  expect(workers[1]!.terminated, "the preview lane keeps running").toBe(false);
+  const editWorker = workers.at(-1)!;
+  const response = editResponse(second);
+  editWorker.respond(response);
+  expect(await secondDone).toBe(response);
+  workers[3]!.respond(responseFor(newerLive));
+  await newerLiveDone;
+  workers[1]!.respond(responseFor(makeRequest("request_preview")));
+  await preview;
 });

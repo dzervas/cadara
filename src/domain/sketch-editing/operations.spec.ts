@@ -1,4 +1,4 @@
-import { test, expect } from "vitest";
+import { describe, test, expect } from "vitest";
 
 import type {
   SketchDefinition,
@@ -8,9 +8,22 @@ import type {
 import type { SketchPoint } from "@/contracts/modeling/schema";
 import { reconstructSplineAggregate } from "@/contracts/sketch/spline-geometry";
 import {
+  FIXTURE_SKETCH_ID,
+  makeSketchFixture,
   neutralSpan,
   projectedSpline,
 } from "@/contracts/sketch/region-extraction.fixtures";
+import {
+  querySketchEditIntersections,
+  type SketchEditIntersectionResult,
+} from "@/contracts/sketch/edit-intersections";
+import { createSketchArrangementDeriver } from "@/contracts/sketch/region-extraction";
+import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { isAcceptedConstraintStatus } from "@/contracts/sketch/schema";
+import { createSessionCommitFactories } from "@/domain/editor/sketch-session/internals";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { resolveSketchDimensionValues } from "@/domain/modeling/sketch-dimension-expressions";
+import type { DimensionId, DocumentVariableId } from "@/contracts/shared/ids";
 import type {
   SketchEntityId,
   SketchId,
@@ -25,6 +38,7 @@ import {
   createSketchOffsetDerivationContribution,
   createSketchSlotContribution,
   createSketchSplitMutation,
+  createSketchTrimMutation,
   offsetCurveDescriptorFromProjectedGeometry,
   PROJECTED_SPLINE_OFFSET_UNSUPPORTED_MESSAGE,
   SPLINE_SLOT_UNSUPPORTED_MESSAGE,
@@ -1208,4 +1222,534 @@ test("projected spline descriptors carry their neutral spans or source samples",
       previewEntities: [],
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// T10g-1: the exact Trim builder on verified edit intersections (logic lane:
+// solve → `querySketchEditIntersections` → `createSketchTrimMutation` →
+// solve → arrangement, every stage the production contract function).
+// ---------------------------------------------------------------------------
+
+describe("createSketchTrimMutation (T10g-1 exact Trim, Q1b ties, review R-3)", () => {
+  const TOLERANCES = {
+    coincidence: 1e-6,
+    angleRadians: 1e-6,
+    minimumSegmentLength: 1e-6,
+  };
+  const queries = createCertifiedNeutralCurveQueryCapabilityForTest();
+  const deriver = createSketchArrangementDeriver(queries);
+  const entity = (name: string) => `sketch_entity_${name}` as SketchEntityId;
+  type P = readonly [number, number];
+
+  const solve = (definition: SketchDefinition) =>
+    solveSketchDefinitionCore({
+      definition,
+      tolerances: TOLERANCES,
+      modelingTolerance: 1e-3,
+      partialSolvePolicy: "bestEffort",
+    }).solvedSnapshot;
+  const accepted = (definition: SketchDefinition) => {
+    const solved = solve(definition);
+    return (
+      solved.status.solveState === "solved" &&
+      solved.constraintStatuses.every((entry) =>
+        isAcceptedConstraintStatus(entry.status),
+      )
+    );
+  };
+  async function regions(definition: SketchDefinition) {
+    return (
+      await deriver.derive({
+        documentId: "doc_trim",
+        revisionId: "rev_trim",
+        sketchId: FIXTURE_SKETCH_ID,
+        definition,
+        solvedSnapshot: solve(definition),
+        projectedReferences: [],
+        modelingTolerance: 1e-3,
+      })
+    ).regions.length;
+  }
+  async function intersections(definition: SketchDefinition, target: string) {
+    const result = await querySketchEditIntersections(
+      {
+        definition,
+        solvedSnapshot: solve(definition),
+        projectedReferences: [],
+        modelingTolerance: 1e-3,
+        operation: { kind: "trim", targetEntityId: entity(target) },
+      },
+      queries,
+    );
+    if (result.kind !== "verified") throw new Error(result.message);
+    return result;
+  }
+  function apply(
+    definition: SketchDefinition,
+    target: string,
+    result: Extract<SketchEditIntersectionResult, { kind: "verified" }>,
+  ) {
+    const mutation = createSketchTrimMutation({
+      definition,
+      targetEntityId: entity(target),
+      intersections: result,
+      factories: createSessionCommitFactories(1, FIXTURE_SKETCH_ID as SketchId),
+    });
+    expect(mutation.message).toBeNull();
+    return mutation.definition;
+  }
+  /** The largest solved-point move away from the authored positions. */
+  const displacement = (definition: SketchDefinition) =>
+    Math.max(
+      ...solve(definition).solvedPoints.map((solved) => {
+        const authored = definition.points.find(
+          (candidate) => candidate.pointId === solved.pointId,
+        )!.position;
+        return Math.hypot(
+          solved.solvedPosition[0] - authored[0],
+          solved.solvedPosition[1] - authored[1],
+        );
+      }),
+    );
+  const trim = async (definition: SketchDefinition, target: string) =>
+    apply(definition, target, await intersections(definition, target));
+  const lineX = (a: P, b: P, c: P, d: P): [number, number] => {
+    const r = [b[0] - a[0], b[1] - a[1]];
+    const s = [d[0] - c[0], d[1] - c[1]];
+    const den = r[0]! * s[1]! - r[1]! * s[0]!;
+    const t = ((c[0] - a[0]) * s[1]! - (c[1] - a[1]) * s[0]!) / den;
+    return [a[0] + t * r[0]!, a[1] + t * r[1]!];
+  };
+
+  test("positions are the cuts' evaluator positions; one tie per tied cutter; the original id keeps the first piece", async () => {
+    const sketch = makeSketchFixture();
+    sketch.point("t0", 0, 0);
+    sketch.point("t1", 4, 0);
+    sketch.line("target", "t0", "t1");
+    for (const x of [1, 3]) {
+      sketch.point(`c${x}a`, x, -1);
+      sketch.point(`c${x}b`, x, 1);
+      sketch.line(`c${x}`, `c${x}a`, `c${x}b`);
+    }
+    const definition = sketch.definition();
+    const result = await intersections(definition, "target");
+    const after = apply(definition, "target", result);
+    const target = after.entities.find(
+      (candidate) => candidate.entityId === entity("target"),
+    );
+    const piece = after.entities.at(-1);
+    if (target?.kind !== "lineSegment" || piece?.kind !== "lineSegment")
+      throw new Error("pieces");
+    const at = (pointId: string) =>
+      after.points.find((candidate) => candidate.pointId === pointId)!.position;
+    expect(at(target.endPointId)).toEqual(result.cuts[0]!.position);
+    expect(at(piece.startPointId)).toEqual(result.cuts[1]!.position);
+    expect(piece.endPointId).toBe("sketch_point_t1");
+    expect(
+      after.constraints.map((constraint) =>
+        constraint.kind === "pointOnCurve"
+          ? [constraint.point.pointId, constraint.curve.entityId]
+          : constraint.kind,
+      ),
+    ).toEqual([
+      [target.endPointId, entity("c1")],
+      [piece.startPointId, entity("c3")],
+    ]);
+    expect(after.constraintIds).toEqual(
+      after.constraints.map((constraint) => constraint.constraintId),
+    );
+    expect(accepted(after)).toBe(true);
+  });
+
+  test("R-P3: the five T-junction apexes of the plan review each give one region after exact, tied Trims (the sampled Trim gave 0 in cases 2 and 3)", async () => {
+    const counts: number[] = [];
+    for (const apex of [
+      [1, 3],
+      [1.3, 2.71],
+      [0.77, 3.141],
+      [2.2, -2.9],
+      [1.111, 1.777],
+    ] as P[]) {
+      const c0: P = [-1, -0.37];
+      const c1: P = [4, 1.91];
+      const side = Math.sign(
+        (c1[0] - c0[0]) * (apex[1] - c0[1]) -
+          (c1[1] - c0[1]) * (apex[0] - c0[0]),
+      );
+      const q = lineX(apex, [apex[0] + 2.3, apex[1] - 4.1], c0, c1);
+      const s = lineX(apex, [apex[0] - 1.7, apex[1] - 3.3], c0, c1);
+      const sketch = makeSketchFixture();
+      // The probe's cutter support, extended so both feet (computed on the
+      // support, as the sampled Trim placed them) lie inside the segment.
+      sketch.point("c0", 2 * c0[0] - c1[0], 2 * c0[1] - c1[1]);
+      sketch.point("c1", 2 * c1[0] - c0[0], 2 * c1[1] - c0[1]);
+      sketch.line("cut", "c0", "c1");
+      // A second line beyond `cut` (away from the apex) gives each spoke two cuts.
+      const shift = -side * 1.2;
+      sketch.point("d0", c0[0] - 10, c0[1] - 10 * 0.456 + shift);
+      sketch.point("d1", c1[0] + 10, c1[1] + 10 * 0.456 + shift);
+      sketch.line("far", "d0", "d1");
+      sketch.point("r", ...apex);
+      for (const [name, foot] of [
+        ["a", q],
+        ["b", s],
+      ] as const) {
+        sketch.point(
+          `${name}End`,
+          apex[0] + 4 * (foot[0] - apex[0]),
+          apex[1] + 4 * (foot[1] - apex[1]),
+        );
+        sketch.line(name, "r", `${name}End`);
+      }
+      let definition = sketch.definition();
+      definition = await trim(definition, "a");
+      definition = await trim(definition, "b");
+      counts.push(await regions(definition));
+    }
+    expect(counts).toEqual([1, 1, 1, 1, 1]);
+  });
+
+  test("P-g2 B (review R-3, closest point away from cuts): ties of a trimmed cutter's points move to the kept piece that holds them, so the triangle closes in all five cases", async () => {
+    const counts: number[] = [];
+    for (const apex of [
+      [3.1, 3],
+      [3.3, 2.71],
+      [2.77, 3.141],
+      [3.6, 2.2],
+      [3.111, 2.777],
+    ] as P[]) {
+      const c0: P = [-1, -0.37];
+      const cEnd: P = [6, 2.79];
+      const sketch = makeSketchFixture();
+      sketch.point("c0", ...c0);
+      sketch.point("cEnd", ...cEnd);
+      sketch.line("c", "c0", "cEnd");
+      for (const [name, x] of [
+        ["x", 0.2],
+        ["y", 0.9],
+      ] as const) {
+        sketch.point(`${name}0`, x, -3);
+        sketch.point(`${name}1`, x, 3);
+        sketch.line(name, `${name}0`, `${name}1`);
+      }
+      const cutsOnly = sketch.definition();
+      sketch.point("r", ...apex);
+      sketch.point(
+        "q",
+        ...lineX(apex, [apex[0] + 2.3, apex[1] - 4.1], c0, cEnd),
+      );
+      sketch.point(
+        "s",
+        ...lineX(apex, [apex[0] - 1.7, apex[1] - 3.3], c0, cEnd),
+      );
+      sketch.line("a", "r", "q");
+      sketch.line("b", "r", "s");
+      const qTie = sketch.pointOnCurve("q", "c");
+      const sTie = sketch.pointOnCurve("s", "c");
+      const definition = sketch.definition();
+      // The builder seam: c is cut at x and y only (the spokes' feet lie
+      // beyond the last cut, away from every cut).
+      const cuts = await intersections(cutsOnly, "c");
+      const solved = solve(definition);
+      const along = (name: string) => {
+        const position = solved.solvedPoints.find(
+          (point) => point.pointId === `sketch_point_${name}`,
+        )!.solvedPosition;
+        return (position[0] - c0[0]) / (cEnd[0] - c0[0]);
+      };
+      const after = apply(definition, "c", {
+        ...cuts,
+        incidences: [
+          {
+            constraintId: qTie,
+            pointId: "sketch_point_q" as SketchPointId,
+            parameter: along("q"),
+            cut: null,
+          },
+          {
+            constraintId: sTie,
+            pointId: "sketch_point_s" as SketchPointId,
+            parameter: along("s"),
+            cut: null,
+          },
+        ],
+      });
+      const piece = after.entities.at(-1)!.entityId;
+      expect(
+        after.constraints
+          .filter((constraint) =>
+            [qTie, sTie].includes(constraint.constraintId),
+          )
+          .map((constraint) =>
+            constraint.kind === "pointOnCurve"
+              ? constraint.curve.entityId
+              : null,
+          ),
+      ).toEqual([piece, piece]);
+      counts.push(await regions(after));
+    }
+    expect(counts).toEqual([1, 1, 1, 1, 1]);
+  });
+
+  test("R-3 at c2: an arc's `pointOnCurve` whose declared join is the last cut moves to the new arc piece, so the bounded-sweep incidence stays satisfied", async () => {
+    const sketch = makeSketchFixture();
+    sketch.point("o", 0, 0);
+    sketch.point("a0", 2, 0);
+    sketch.point("a1", -2, 0);
+    sketch.arc("target", "o", "a0", "a1");
+    sketch.point("x0", 1, -1);
+    sketch.point("x1", 1, 3);
+    sketch.line("cross", "x0", "x1");
+    const foot: P = [
+      2 * Math.cos((2 * Math.PI) / 3),
+      2 * Math.sin((2 * Math.PI) / 3),
+    ];
+    sketch.point("r", -1, 3);
+    sketch.point("f", ...foot);
+    sketch.line("spoke", "r", "f");
+    const tie = sketch.pointOnCurve("f", "target");
+    const definition = sketch.definition();
+    expect(accepted(definition), "premise: the tied spoke solves").toBe(true);
+    const result = await intersections(definition, "target");
+    expect(result.incidences).toEqual([
+      expect.objectContaining({ constraintId: tie, cut: 1 }),
+    ]);
+    const after = apply(definition, "target", result);
+    const piece = after.entities.at(-1)!;
+    expect(piece.kind).toBe("arc");
+    const moved = after.constraints.find(
+      (constraint) => constraint.constraintId === tie,
+    );
+    expect(moved?.kind === "pointOnCurve" && moved.curve.entityId).toBe(
+      piece.entityId,
+    );
+    expect(
+      accepted(after),
+      "every tie and the retargeted incidence are satisfied",
+    ).toBe(true);
+    expect(
+      displacement(after),
+      "satisfied where the Trim placed it: the solve moves nothing",
+    ).toBeLessThan(1e-9);
+    // Mutant oracle: left on the first arc piece (bounded sweep [0, π/3]),
+    // the incidence is violated, so the solve has to drag geometry onto it.
+    const unmoved = {
+      ...after,
+      constraints: after.constraints.map((constraint) =>
+        constraint.constraintId === tie
+          ? definition.constraints[0]!
+          : constraint,
+      ),
+    };
+    expect(
+      !accepted(unmoved) || displacement(unmoved) > 1e-3,
+      "left on the first piece the incidence is not satisfied in place",
+    ).toBe(true);
+  });
+
+  test("R-3 at c2 on a circle: the incidence at the last cut stays on the (same-id) arc, which ends there, and is satisfied", async () => {
+    const sketch = makeSketchFixture();
+    sketch.point("o", 0, 0);
+    sketch.circle("target", "o", 2);
+    sketch.point("x0", 1, -3);
+    sketch.point("x1", 1, 3);
+    sketch.line("cross", "x0", "x1");
+    const angle = (7 * Math.PI) / 4;
+    sketch.point("r", 3, -3);
+    sketch.point("f", 2 * Math.cos(angle), 2 * Math.sin(angle));
+    sketch.line("spoke", "r", "f");
+    const tie = sketch.pointOnCurve("f", "target");
+    const definition = sketch.definition();
+    const result = await intersections(definition, "target");
+    expect(result.cuts.at(-1)!.cutters).toEqual([
+      {
+        entityId: entity("spoke"),
+        tie: { kind: "coincident", pointId: "sketch_point_f" },
+      },
+    ]);
+    expect(result.incidences).toEqual([
+      expect.objectContaining({
+        constraintId: tie,
+        cut: result.cuts.length - 1,
+      }),
+    ]);
+    const after = apply(definition, "target", result);
+    const arc = after.entities.find(
+      (candidate) => candidate.entityId === entity("target"),
+    );
+    expect(arc?.kind).toBe("arc");
+    expect(accepted(after)).toBe(true);
+  });
+
+  test("orchestrator 2026-10-04: a trimmed circle's `circleRadius` dimensions become same-id `diameter` dimensions of twice the value (number, literal, expression; placement kept), and the result solves", async () => {
+    const sketch = makeSketchFixture();
+    sketch.point("o", 0, 0);
+    sketch.circle("target", "o", 2);
+    for (const x of [-1, 1]) {
+      sketch.point(`x${x}a`, x, -3);
+      sketch.point(`x${x}b`, x, 3);
+      sketch.line(`x${x}`, `x${x}a`, `x${x}b`);
+    }
+    const placement = { kind: "dimensionLine" as const, offset: 0.5 };
+    const radius = (dimensionId: string, value: unknown) => ({
+      dimensionId: dimensionId as DimensionId,
+      kind: "circleRadius" as const,
+      label: `${dimensionId} label`,
+      entityId: entity("target"),
+      value,
+      annotationPlacement: placement,
+    });
+    const base = sketch.definition();
+    const variables = [
+      {
+        variableId: "variable_r" as DocumentVariableId,
+        name: "r",
+        valueText: "1 + 1",
+      },
+    ];
+    for (const [value, doubled] of [
+      [2, 4],
+      [
+        { source: "literal", value: 2 },
+        { source: "literal", value: 4 },
+      ],
+      [
+        { source: "expression", valueText: "r" },
+        { source: "expression", valueText: "2 * (r)" },
+      ],
+    ] as const) {
+      const definition = {
+        ...base,
+        dimensionIds: ["dimension_radius" as DimensionId],
+        dimensions: [radius("dimension_radius", value)],
+      } as SketchDefinition;
+      const resolved = (candidate: SketchDefinition) => {
+        const result = resolveSketchDimensionValues({
+          definition: candidate,
+          variables,
+        });
+        if (!result.ok) throw new Error(JSON.stringify(result.diagnostics));
+        return result.definition;
+      };
+      const after = apply(
+        definition,
+        "target",
+        await intersections(resolved(definition), "target"),
+      );
+      expect(after.dimensions).toEqual([
+        {
+          dimensionId: "dimension_radius",
+          kind: "diameter",
+          // Review A-3: a label that is not "… radius" is kept.
+          label: "dimension_radius label",
+          entityId: entity("target"),
+          value: doubled,
+          annotationPlacement: placement,
+        },
+      ]);
+      const numeric = resolved(after);
+      expect(
+        numeric.dimensions[0]?.kind === "diameter" &&
+          numeric.dimensions[0].value,
+        "the doubled value evaluates to twice the radius",
+      ).toBe(4);
+      expect(accepted(numeric), `${JSON.stringify(value)}: solves`).toBe(true);
+      // The unconverted radius dimension on the arc does not (mutant oracle).
+      expect(
+        accepted({ ...numeric, dimensions: resolved(definition).dimensions }),
+      ).toBe(false);
+    }
+  });
+
+  test("[TECH] 2026-10-04 seam: a circle cut along its x diameter keeps the arc from 0° (its first cut) to 180°, tied to the line, and the half disk is one region", async () => {
+    const sketch = makeSketchFixture();
+    sketch.point("c", 0, 0);
+    sketch.circle("target", "c", 1);
+    sketch.point("a", -2, 0);
+    sketch.point("b", 2, 0);
+    sketch.line("h", "a", "b");
+    const definition = sketch.definition();
+    const after = await trim(definition, "target");
+    const arc = after.entities.find(
+      (candidate) => candidate.entityId === entity("target"),
+    );
+    if (arc?.kind !== "arc") throw new Error("arc");
+    const at = (pointId: string) =>
+      after.points.find((candidate) => candidate.pointId === pointId)!.position;
+    expect(arc.sweepDirection).toBe("counterClockwise");
+    expect(at(arc.startPointId)).toEqual([1, 0]);
+    expect(at(arc.endPointId)[0]).toBeCloseTo(-1, 12);
+    expect(
+      after.constraints.map((constraint) =>
+        constraint.kind === "pointOnCurve" ? constraint.curve.entityId : null,
+      ),
+    ).toEqual([entity("h"), entity("h")]);
+    expect(accepted(after)).toBe(true);
+    expect(await regions(after)).toBe(1);
+  });
+
+  test("[TECH] 2026-10-04 seam (the review's sketch): a spoke tied at 0° and a vertical line; Trim keeps 0°→270°, joined to the spoke, closing one region", async () => {
+    const sketch = makeSketchFixture();
+    sketch.point("c", 0, 0);
+    sketch.circle("target", "c", 1);
+    sketch.point("q", 1, 0);
+    sketch.point("r", 3, 0);
+    sketch.line("spoke", "r", "q");
+    sketch.pointOnCurve("q", "target");
+    sketch.point("v0", 0, -2);
+    sketch.point("v1", 0, 2);
+    sketch.line("v", "v0", "v1");
+    const after = await trim(sketch.definition(), "target");
+    const arc = after.entities.find(
+      (candidate) => candidate.entityId === entity("target"),
+    );
+    if (arc?.kind !== "arc") throw new Error("arc");
+    const ties = after.constraints.slice(1);
+    expect(
+      ties.map((constraint) =>
+        constraint.kind === "coincident"
+          ? ["coincident", constraint.pointIds]
+          : constraint.kind === "pointOnCurve"
+            ? [
+                "pointOnCurve",
+                constraint.point.pointId,
+                constraint.curve.entityId,
+              ]
+            : [constraint.kind],
+      ),
+    ).toEqual([
+      ["coincident", [arc.startPointId, "sketch_point_q"]],
+      ["pointOnCurve", arc.endPointId, entity("v")],
+    ]);
+    expect(accepted(after)).toBe(true);
+    expect(await regions(after)).toBe(1);
+  });
+
+  test("Q-g1 (a) with g-0: spokes trimmed at a whole circle stay tied onto it and their sector still forms (2 regions, not 0)", async () => {
+    const sketch = makeSketchFixture();
+    sketch.point("o", 0, 0);
+    sketch.circle("ring", "o", 2);
+    sketch.circle("guide", "o", 2.5, true);
+    sketch.point("e", 3, 0);
+    sketch.point("n", 0, 3);
+    sketch.line("east", "o", "e");
+    sketch.line("north", "o", "n");
+    let definition = sketch.definition();
+    definition = await trim(definition, "east");
+    definition = await trim(definition, "north");
+    expect(
+      definition.constraints
+        .filter((constraint) => constraint.kind === "pointOnCurve")
+        .map((constraint) =>
+          constraint.kind === "pointOnCurve" ? constraint.curve.entityId : null,
+        ),
+    ).toEqual([
+      entity("ring"),
+      entity("guide"),
+      entity("ring"),
+      entity("guide"),
+    ]);
+    expect(accepted(definition)).toBe(true);
+    expect(await regions(definition)).toBe(2);
+  });
 });

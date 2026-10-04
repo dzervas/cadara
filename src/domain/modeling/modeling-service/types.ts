@@ -20,6 +20,7 @@ import type {
   SolveSketchRequest,
   ValidateSketchRequest,
   DeriveSketchRegionsRequest,
+  QuerySketchEditIntersectionsRequest,
   ProjectSketchExternalReferencesRequest,
   ResolveSketchReferenceRequest,
 } from "@/contracts/solver/schema";
@@ -172,6 +173,10 @@ export interface SketchSolverService {
   deriveSketchRegions(
     input: Omit<DeriveSketchRegionsRequest, "contractVersion">,
   ): ReturnType<SketchSolverBoundary["deriveSketchRegions"]>;
+  /** T10g-1: the exact edit intersections of one accepted pair. */
+  querySketchEditIntersections(
+    input: Omit<QuerySketchEditIntersectionsRequest, "contractVersion">,
+  ): ReturnType<SketchSolverBoundary["querySketchEditIntersections"]>;
   projectExternalReferences(
     input: Omit<ProjectSketchExternalReferencesRequest, "contractVersion">,
   ): ReturnType<SketchSolverBoundary["projectExternalReferences"]>;

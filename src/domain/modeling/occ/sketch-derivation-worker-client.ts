@@ -1,6 +1,8 @@
 import type {
   DeriveSketchRegionsRequest,
   DeriveSketchRegionsResponse,
+  QuerySketchEditIntersectionsRequest,
+  QuerySketchEditIntersectionsResponse,
 } from "@/contracts/solver/schema";
 import type { DocumentId } from "@/contracts/shared/ids";
 import {
@@ -12,11 +14,19 @@ import {
   type SketchRegionDerivationDelegate,
 } from "@/domain/solver/sketch-constraint-solver-adapter";
 
+/** A region derivation or (T10g-1) an edit-intersection query. */
+type DerivationRequest =
+  | DeriveSketchRegionsRequest
+  | QuerySketchEditIntersectionsRequest;
+
+/** Runs one request on a lane's worker client. */
+type DerivationCall = (client: OccWorkerClient) => Promise<unknown>;
+
 interface DerivationSlot {
   documentId: DocumentId;
   client: OccWorkerClient;
   inFlight: {
-    request: DeriveSketchRegionsRequest;
+    request: DerivationRequest;
     startedAt: number;
     supersede: (
       error:
@@ -27,8 +37,9 @@ interface DerivationSlot {
 }
 
 interface WaitingRequest {
-  request: DeriveSketchRegionsRequest;
-  resolve: (response: DeriveSketchRegionsResponse) => void;
+  request: DerivationRequest;
+  call: DerivationCall;
+  resolve: (response: unknown) => void;
   reject: (error: unknown) => void;
   cancelTimer: () => void;
 }
@@ -57,7 +68,9 @@ export const SKETCH_REGION_DERIVATION_MINIMUM_SUPERSEDE_AGE_MS = 250;
  * - Offset preview publications (U-G3, `derivationLane: "offsetPreview"`)
  *   run in their own lane (worker) per document, so a preview check and the
  *   live region derivation never supersede each other; each lane supersedes
- *   only its own requests.
+ *   only its own requests. T10g-1: edit-intersection queries run in a third
+ *   lane, `editQuery`, with its own worker, query memo and lazy OCC load
+ *   (design review A-3).
  * - `dispose()` settles every request: a waiting one and a running one
  *   reject with `SketchRegionDerivationDisposedError`, and no timer stays
  *   scheduled.
@@ -91,11 +104,33 @@ export class SketchRegionDerivationWorkerPool implements SketchRegionDerivationD
   deriveSketchRegions(
     request: DeriveSketchRegionsRequest,
   ): Promise<DeriveSketchRegionsResponse> {
-    const lane = laneOf(request);
+    return this.submit(
+      `${request.documentId}\u0000${request.derivationLane ?? "live"}`,
+      request,
+      (client) => client.deriveSketchRegions(request),
+    ) as Promise<DeriveSketchRegionsResponse>;
+  }
+
+  querySketchEditIntersections(
+    request: QuerySketchEditIntersectionsRequest,
+  ): Promise<QuerySketchEditIntersectionsResponse> {
+    return this.submit(
+      `${request.documentId}\u0000editQuery`,
+      request,
+      (client) => client.querySketchEditIntersections(request),
+    ) as Promise<QuerySketchEditIntersectionsResponse>;
+  }
+
+  /** One worker lane per document and request kind (carried explicitly by the request). */
+  private submit(
+    lane: string,
+    request: DerivationRequest,
+    call: DerivationCall,
+  ): Promise<unknown> {
     const running = this.slots.get(lane)?.inFlight;
     const age = running ? this.now() - running.startedAt : 0;
     if (running && age < this.minimumSupersedeAgeMs) {
-      return new Promise<DeriveSketchRegionsResponse>((resolve, reject) => {
+      return new Promise<unknown>((resolve, reject) => {
         const previous = this.waiting.get(lane);
         if (previous) {
           previous.cancelTimer();
@@ -108,6 +143,7 @@ export class SketchRegionDerivationWorkerPool implements SketchRegionDerivationD
         }
         const entry: WaitingRequest = {
           request,
+          call,
           resolve,
           reject,
           cancelTimer: () => {},
@@ -119,7 +155,7 @@ export class SketchRegionDerivationWorkerPool implements SketchRegionDerivationD
         this.waiting.set(lane, entry);
       });
     }
-    return this.start(request);
+    return this.start(lane, request, call);
   }
 
   /** Starts a waiting request (timer fired, or the running derivation settled). */
@@ -127,13 +163,17 @@ export class SketchRegionDerivationWorkerPool implements SketchRegionDerivationD
     if (this.waiting.get(lane) !== entry) return;
     this.waiting.delete(lane);
     entry.cancelTimer();
-    this.start(entry.request).then(entry.resolve, entry.reject);
+    this.start(lane, entry.request, entry.call).then(
+      entry.resolve,
+      entry.reject,
+    );
   }
 
   private start(
-    request: DeriveSketchRegionsRequest,
-  ): Promise<DeriveSketchRegionsResponse> {
-    const lane = laneOf(request);
+    lane: string,
+    request: DerivationRequest,
+    call: DerivationCall,
+  ): Promise<unknown> {
     for (const [key, slot] of this.slots) {
       if (key === lane && slot.inFlight) {
         const superseded = slot.inFlight;
@@ -169,14 +209,14 @@ export class SketchRegionDerivationWorkerPool implements SketchRegionDerivationD
       if (next) this.release(lane, next);
     };
 
-    return new Promise<DeriveSketchRegionsResponse>((resolve, reject) => {
+    return new Promise<unknown>((resolve, reject) => {
       const inFlight = {
         request,
         startedAt: this.now(),
         supersede: reject,
       };
       current.inFlight = inFlight;
-      current.client.deriveSketchRegions(request).then(
+      call(current.client).then(
         (response) => {
           const wasCurrent = current.inFlight === inFlight;
           if (wasCurrent) current.inFlight = null;
@@ -221,17 +261,12 @@ export class SketchRegionDerivationWorkerPool implements SketchRegionDerivationD
   }
 }
 
-/** One worker lane per document and request kind (carried explicitly by the request). */
-function laneOf(request: DeriveSketchRegionsRequest) {
-  return `${request.documentId}\u0000${request.derivationLane ?? "live"}`;
-}
-
 /** A derivation still waiting or running when its pool was disposed. */
 export class SketchRegionDerivationDisposedError extends Error {
   override readonly name = "SketchRegionDerivationDisposedError";
   readonly requestId: DeriveSketchRegionsRequest["requestId"];
 
-  constructor(request: DeriveSketchRegionsRequest) {
+  constructor(request: DerivationRequest) {
     super(
       `Sketch region derivation ${request.requestId} ended because its derivation worker pool was disposed.`,
     );

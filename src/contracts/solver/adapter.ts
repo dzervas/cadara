@@ -7,6 +7,8 @@ import type {
   FinalizeInteractiveSketchSolveSessionResponse,
   ProjectSketchExternalReferencesRequest,
   ProjectSketchExternalReferencesResponse,
+  QuerySketchEditIntersectionsRequest,
+  QuerySketchEditIntersectionsResponse,
   ResolveSketchReferenceRequest,
   ResolveSketchReferenceResponse,
   SolveSketchRequest,
@@ -82,6 +84,15 @@ export interface SketchSolverAdapter {
    * the editor may emit a newer generation while one is in flight (T08b-g5).
    */
   readonly supersedesRegionDerivation?: boolean;
+  /**
+   * T10g-1: the exact edit intersections (cuts, ties, incidences) of one
+   * accepted pair, from the one contract function
+   * `querySketchEditIntersections`. A terminable runtime runs it in its own
+   * `editQuery` lane per document, superseding only its own requests.
+   */
+  querySketchEditIntersections(
+    request: QuerySketchEditIntersectionsRequest,
+  ): Promise<QuerySketchEditIntersectionsResponse>;
   /**
    * Resolves a sketch-local target and reports whether it is still valid.
    * Implementers must not silently remap invalid targets to surviving geometry.

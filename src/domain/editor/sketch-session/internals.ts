@@ -428,6 +428,19 @@ export function isAcceptedSketchSolve(solvedSnapshot: SolvedSketchSnapshot) {
 }
 
 /**
+ * T10g-1 (design review R-6): the live solve is accepted and was
+ * established for the current authored definition (every definition change
+ * goes through `withLiveSolveBasis`, which records it).
+ */
+export function hasAcceptedLiveSolveOfDefinition(session: SketchSessionState) {
+  return (
+    session.liveSolve !== null &&
+    session.liveSolve.accepted &&
+    session.liveSolve.sourceDefinition === session.definition
+  );
+}
+
+/**
  * Establishes a new live solve basis: solves synchronously and kernel-free
  * (reusing the cached solve), bumps the live region generation and marks the
  * regions pending (accepted solve) or unavailable. Regions are derived
@@ -480,6 +493,7 @@ export function withLiveSolveBasis(
   return {
     ...session,
     liveSolve: {
+      sourceDefinition: definition,
       definition: evaluatedDefinition,
       projectedReferences: session.projectedReferences,
       solvedSnapshot: usableSolvedSnapshot,

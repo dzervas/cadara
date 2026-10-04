@@ -30,10 +30,14 @@ import type { AuthoredActionSketch } from "@/contracts/modeling/authored-actions
 import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
 import { resolveSketchDerivationDistances } from "@/domain/modeling/sketch-dimension-expressions";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
-import { requireSketchOffsetPublications } from "@/contracts/solver/runtime-schema";
+import {
+  requireQuerySketchEditIntersectionsResponse,
+  requireSketchOffsetPublications,
+} from "@/contracts/solver/runtime-schema";
 import type {
   DeriveSketchRegionsRequest,
   ProjectedSketchReferenceRecord,
+  QuerySketchEditIntersectionsRequest,
   SolverTolerancePolicy,
 } from "@/contracts/solver/schema";
 import type {
@@ -396,6 +400,49 @@ export function createEffectExecutor(runtime: EditorEffectRuntime) {
           offsetPublications: result.offsetPublications,
         };
       }
+      case "sketch.queryEditIntersections": {
+        // T10g-1: the derivation worker's `editQuery` lane. Real failures
+        // reach the event loop's error reporting (never silenced).
+        if (!runtime.querySketchEditIntersections) {
+          throw new Error(
+            "Sketch edit-intersection queries are not available.",
+          );
+        }
+        let result: Awaited<
+          ReturnType<
+            NonNullable<EditorEffectRuntime["querySketchEditIntersections"]>
+          >
+        >;
+        try {
+          result = await runtime.querySketchEditIntersections({
+            requestId: effect.requestId,
+            documentId: effect.documentId,
+            baseRevisionId: effect.baseRevisionId,
+            sketchId: effect.sketchId,
+            input: effect.input,
+          });
+        } catch (error: unknown) {
+          if (!(error instanceof SketchRegionDerivationSupersededError)) {
+            throw error;
+          }
+          // Superseded by a newer query of this document's edit lane; the
+          // reducer drops this stale request's failure event.
+          return createEditorEffectFailureEvent(
+            effect,
+            error,
+            "Sketch edit-intersection query was superseded.",
+          );
+        }
+        return {
+          type: "effect.sketchEditIntersectionsQueried",
+          requestId: effect.requestId,
+          documentId: effect.documentId,
+          commandSessionId: effect.commandSessionId,
+          baseRevisionId: effect.baseRevisionId,
+          queryId: effect.queryId,
+          result,
+        };
+      }
       case "sketch.importReferenceImages": {
         try {
           if (!runtime.importSketchReferenceImages) {
@@ -556,6 +603,9 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
       diagnostics: SketchSolveDiagnostic[];
       offsetPublications: unknown;
     }>;
+    querySketchEditIntersections(
+      input: Omit<QuerySketchEditIntersectionsRequest, "contractVersion">,
+    ): Promise<unknown>;
     createCommitCorrelation(requestId: RequestId): {
       requestId: RequestId;
       projectionRequestId: RequestId;
@@ -844,6 +894,25 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
           result.offsetPublications,
         ),
       };
+    },
+    async querySketchEditIntersections(input) {
+      if (!modelingService.sketchSolver) {
+        throw new Error(
+          "Sketch edit-intersection queries require the modeling service sketch solver.",
+        );
+      }
+      // Crosses the derivation-worker boundary as plain data: validated
+      // before any cut is applied (T10g-1).
+      return requireQuerySketchEditIntersectionsResponse(
+        await modelingService.sketchSolver.querySketchEditIntersections({
+          solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+          requestId: input.requestId,
+          documentId: input.documentId,
+          revisionId: input.baseRevisionId,
+          sketchId: input.sketchId,
+          ...input.input,
+        }),
+      ).result;
     },
     async runSketchSpecialModeEffect() {
       throw new Error("No sketch special mode runtime has been registered.");

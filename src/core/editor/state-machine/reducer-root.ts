@@ -54,6 +54,7 @@ import {
   emitDocumentCursorMove,
   emitEditSessionCursorRestore,
   emitFeaturePreview,
+  emitPendingSketchEditQuery,
   emitPendingSketchOffsetPreviewPublication,
   emitPendingSketchRegionDerivation,
   emitSketchOpen,
@@ -99,6 +100,8 @@ import {
   handleEffectSketchRegionsDerived,
   handleEffectSketchRegionDerivationFailed,
   handleEffectSketchOffsetPreviewPublished,
+  handleEffectSketchEditIntersectionsQueried,
+  handleEffectSketchEditIntersectionsQueryFailed,
   handleEffectSketchOffsetPreviewPublicationFailed,
   handleEffectSketchReferenceImageImportCompleted,
   handleEffectSketchReferenceImageImportFailed,
@@ -647,6 +650,10 @@ function handleSharedEvent(
       return handleEffectSketchOffsetPreviewPublished(state, event);
     case "effect.sketchOffsetPreviewPublicationFailed":
       return handleEffectSketchOffsetPreviewPublicationFailed(state, event);
+    case "effect.sketchEditIntersectionsQueried":
+      return handleEffectSketchEditIntersectionsQueried(state, event);
+    case "effect.sketchEditIntersectionsQueryFailed":
+      return handleEffectSketchEditIntersectionsQueryFailed(state, event);
     case "effect.sketchReferenceImageImportCompleted":
       return handleEffectSketchReferenceImageImportCompleted(state, event);
     case "effect.sketchReferenceImageImportFailed":
@@ -677,7 +684,9 @@ export function transitionEditorState(
     routeToWorkflow(state, event, dependencies) ??
     handleSharedEvent(state, event, dependencies);
 
-  return emitPendingSketchOffsetPreviewPublication(
-    emitPendingSketchRegionDerivation(result),
+  return emitPendingSketchEditQuery(
+    emitPendingSketchOffsetPreviewPublication(
+      emitPendingSketchRegionDerivation(result),
+    ),
   );
 }

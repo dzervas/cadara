@@ -77,6 +77,7 @@ export type { EditorExtensionDependencies } from "./dependencies";
 export { defaultEditorExtensionDependencies } from "./dependencies";
 export { transitionEditorState } from "./reducer-root";
 export {
+  emitPendingSketchEditQuery,
   emitPendingSketchOffsetPreviewPublication,
   emitPendingSketchRegionDerivation,
 } from "./effect-emitters";

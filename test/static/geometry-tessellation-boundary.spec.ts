@@ -10,7 +10,7 @@ import { expect, test } from "vitest";
 // Files are read as bytes (latin1), so a NUL or other binary byte cannot hide
 // a file from the scan the way text tools skip "binary" files.
 
-/** Deleted names: forbidden anywhere in `src` (T10b, T10d, T10e, T10f, T10h). */
+/** Deleted names: forbidden anywhere in `src` (T10b, T10d, T10e, T10f, T10h, T10g-1). */
 const FORBIDDEN_NAMES = [
   "sampleSplineGeometry",
   "sampleSplineSpans",
@@ -20,6 +20,10 @@ const FORBIDDEN_NAMES = [
   "evaluateBezier",
   "OPEN_CURVE_CHAIN_TOLERANCE",
   "offsetPolylinePoints",
+  "trimLineSegmentAtIntersections",
+  "collectTargetIntersections",
+  "sampleSplineDisplayPolyline",
+  "splineDescriptorPolyline",
 ] as const;
 
 const TESSELLATORS = [
@@ -46,10 +50,6 @@ const TESSELLATOR_ALLOWLIST: Record<string, string> = {
   "src/domain/measure/measurement.ts": "measurement witness polylines",
   "src/contracts/sketch/region-boundary-curves.ts":
     "tessellateBoundaryLoop draws its cubic segments with the one tessellator",
-  // TEMPORARY: Trim's intersection sampling is removed in T10g; delete this
-  // entry then (the D6 offset/slot polyline went in T10h).
-  "src/domain/sketch-editing/operations.ts":
-    "TEMPORARY until T10g (Trim intersection sampling)",
 };
 
 const EXTENSIONS = new Set([".ts", ".tsx"]);
@@ -140,6 +140,6 @@ test("test/static/geometry-tessellation-boundary.spec.ts", () => {
   ).toEqual([]);
   expect(
     stale,
-    "An allowlisted module no longer reads a tessellator: remove its entry (T10g removes operations.ts).",
+    "An allowlisted module no longer reads a tessellator: remove its entry.",
   ).toEqual([]);
 });

@@ -27,6 +27,10 @@ import type {
   SnapshotMutationBasis,
 } from "@/contracts/modeling/schema";
 import type { ReferenceImagePayload } from "@/contracts/reference-image/schema";
+import type {
+  SketchEditIntersectionInput,
+  SketchEditIntersectionResult,
+} from "@/contracts/sketch/edit-intersections";
 import type { AuthoredActionSketch } from "@/contracts/modeling/authored-actions";
 import type { ImportReviewEnvelope } from "@/contracts/import/review";
 import type { ResolvedImportSource } from "@/contracts/import/source";
@@ -175,6 +179,11 @@ export interface SketchEditorState extends EditorStateBase {
   pendingOffsetPreviewRequest?: {
     requestId: RequestId;
     derivationId: string;
+  } | null;
+  /** T10g-1: the in-flight exact edit-intersection query of the Trim tool, if any. */
+  pendingEditQueryRequest?: {
+    requestId: RequestId;
+    queryId: string;
   } | null;
 }
 
@@ -872,6 +881,25 @@ export type EditorEvent =
       offsetPublications: SketchOffsetPublicationRecord[];
     }
   | {
+      /** T10g-1: the exact edit intersections of the in-flight Trim query. */
+      type: "effect.sketchEditIntersectionsQueried";
+      requestId: RequestId;
+      documentId: DocumentId;
+      commandSessionId: CommandSessionId;
+      baseRevisionId: RevisionId;
+      queryId: string;
+      result: SketchEditIntersectionResult;
+    }
+  | {
+      type: "effect.sketchEditIntersectionsQueryFailed";
+      requestId: RequestId;
+      documentId: DocumentId;
+      commandSessionId: CommandSessionId;
+      baseRevisionId: RevisionId;
+      queryId: string;
+      message: string;
+    }
+  | {
       type: "effect.sketchOffsetPreviewPublicationFailed";
       requestId: RequestId;
       documentId: DocumentId;
@@ -1131,6 +1159,21 @@ export type EditorEffect =
       basis: SketchLiveRegionBasis;
     }
   | {
+      /**
+       * T10g-1: the exact edit intersections of the Trim tool's head click,
+       * off the UI thread (the derivation worker's `editQuery` lane).
+       */
+      type: "sketch.queryEditIntersections";
+      background: true;
+      requestId: RequestId;
+      commandSessionId: CommandSessionId;
+      documentId: DocumentId;
+      baseRevisionId: RevisionId;
+      queryId: string;
+      sketchId: SketchId;
+      input: SketchEditIntersectionInput;
+    }
+  | {
       type: "sketch.importReferenceImages";
       requestId: RequestId;
       commandSessionId: CommandSessionId;
@@ -1247,6 +1290,14 @@ export interface EditorEffectRuntime {
     diagnostics: SketchSolveDiagnostic[];
     offsetPublications: SketchOffsetPublicationRecord[];
   }>;
+  /** T10g-1: the exact edit intersections of one accepted pair (async solver boundary). */
+  querySketchEditIntersections?(input: {
+    requestId: RequestId;
+    documentId: DocumentId;
+    baseRevisionId: RevisionId;
+    sketchId: SketchId;
+    input: SketchEditIntersectionInput;
+  }): Promise<SketchEditIntersectionResult>;
   /** Imports one or more reference images into the active sketch workflow. */
   importSketchReferenceImages?(input: {
     requestId: RequestId;

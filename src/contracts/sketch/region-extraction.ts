@@ -609,7 +609,10 @@ function projectedSource(
  * Collects every region-capable branch plus the unsupported/degenerate
  * obstacles. Exported for the region-boundary curve owner
  * (`region-boundary-curves.ts`, T10b R1), which resolves records against the
- * branches this builds from the identical input.
+ * branches this builds from the identical input. `includeConstruction`
+ * (T10g-1, the exact edit-intersection service: Trim cuts at construction
+ * curves too, A4) also builds construction curves; absent, they are skipped
+ * and the output is unchanged.
  */
 export function collectArrangementBranches(
   definition: SketchDefinition,
@@ -617,6 +620,7 @@ export function collectArrangementBranches(
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
   derivedCurves: readonly SketchArrangementDerivedCurve[],
   unpublishedOutputs: readonly SketchArrangementUnpublishedOutput[],
+  options: { readonly includeConstruction?: boolean } = {},
 ): { branches: Branch[]; obstacles: Obstacle[]; excluded: ExcludedOutput[] } {
   const drafts: BranchDraft[] = [];
   const obstacles: Obstacle[] = [];
@@ -669,7 +673,11 @@ export function collectArrangementBranches(
     });
 
   for (const entity of definition.entities) {
-    if (entity.isConstruction || entity.kind === "point") continue;
+    if (
+      (entity.isConstruction && !options.includeConstruction) ||
+      entity.kind === "point"
+    )
+      continue;
     const unpublishedReason = unpublished.get(entity.entityId);
     if (unpublishedReason !== undefined) {
       exclude(entity.entityId, unpublishedReason);
@@ -1096,7 +1104,7 @@ interface DeclaredJoin {
   classRoot: string;
 }
 
-interface Declarations {
+export interface Declarations {
   classes: DeclaredJoinClasses;
   classMembers: Map<string, string[]>;
   /** Keyed `${first}|${second}` with first < second (branch indices). */
@@ -1117,7 +1125,7 @@ interface Declarations {
   exactPointClasses: Set<string>;
 }
 
-const pairKey = (first: number, second: number) => `${first}|${second}`;
+export const pairKey = (first: number, second: number) => `${first}|${second}`;
 
 function locationOnBranch(
   branch: Branch,
@@ -1172,7 +1180,39 @@ function incidenceParameter(branch: Branch, point: SplineVector): number {
   return located ? s0 + located.u * (s1 - s0) : s0;
 }
 
-function collectDeclarations(
+/**
+ * The solver's representative incidence of `point` on the branches of one
+ * host curve: the closest point (a multi-span host: the span holding it).
+ */
+export function incidenceOnHosts(
+  hosts: readonly Branch[],
+  point: SplineVector,
+): { host: Branch; parameter: number } {
+  if (hosts.length === 1)
+    return { host: hosts[0]!, parameter: incidenceParameter(hosts[0]!, point) };
+  const spans = hosts.map((candidate) => {
+    const curve = candidate.curve as CubicCurve;
+    return {
+      interval: curve.sourceDomain,
+      poles: curve.poles,
+      differential: {
+        interval: [0, 0] as const,
+        poles: [
+          [0, 0],
+          [0, 0],
+          [0, 0],
+          [0, 0],
+        ] as SplinePoles,
+      },
+    };
+  });
+  const located = closestSplineSpanLocation(point, spans);
+  const host = hosts[located?.spanIndex ?? 0]!;
+  const [s0, s1] = (host.curve as CubicCurve).sourceDomain;
+  return { host, parameter: s0 + (located?.u ?? 0) * (s1 - s0) };
+}
+
+export function collectDeclarations(
   definition: SketchDefinition,
   solved: SolvedSketchSnapshot,
   branches: readonly Branch[],
@@ -1268,36 +1308,19 @@ function collectDeclarations(
     let parameter: number;
     if (incidence.half) {
       parameter = 0.5;
-    } else if (incidence.hosts.length === 1) {
-      parameter = incidenceParameter(host, position);
+    } else {
+      // A multi-span host: the span holding the closest point carries the incidence.
+      ({ host, parameter } = incidenceOnHosts(incidence.hosts, position));
       // The solver's line `pointOnCurve` is the infinite line. A representative
       // outside the segment's [0, 1] is no incidence with the segment: dropping
       // it can neither close a gap nor hide a contact (the pair falls back to
       // the ordinary query).
-      if (host.curve.kind === "line" && (parameter < 0 || parameter > 1))
+      if (
+        incidence.hosts.length === 1 &&
+        host.curve.kind === "line" &&
+        (parameter < 0 || parameter > 1)
+      )
         continue;
-    } else {
-      // A multi-span host: the span holding the closest point carries the incidence.
-      const spans = incidence.hosts.map((candidate) => {
-        const curve = candidate.curve as CubicCurve;
-        return {
-          interval: curve.sourceDomain,
-          poles: curve.poles,
-          differential: {
-            interval: [0, 0] as const,
-            poles: [
-              [0, 0],
-              [0, 0],
-              [0, 0],
-              [0, 0],
-            ] as SplinePoles,
-          },
-        };
-      });
-      const located = closestSplineSpanLocation(position, spans);
-      host = incidence.hosts[located?.spanIndex ?? 0]!;
-      const [s0, s1] = (host.curve as CubicCurve).sourceDomain;
-      parameter = s0 + (located?.u ?? 0) * (s1 - s0);
     }
     add(classes.find(incidence.member), {
       branch: host.index,
@@ -1446,7 +1469,7 @@ function collectDeclarations(
 type JoinVerified = Extract<NeutralCurveJoinResult, { kind: "verified" }>;
 type PairVerified = Extract<NeutralCurveQueryResult, { kind: "verified" }>;
 
-interface CachedQueries {
+export interface CachedQueries {
   pair(request: NeutralCurveQueryRequest): Promise<NeutralCurveQueryResult>;
   self(
     request: NeutralCurveSelfIntersectionRequest,
@@ -1465,7 +1488,7 @@ function exactRequestKey(operation: string, request: unknown) {
   )}`;
 }
 
-function createCachedQueries(
+export function createCachedQueries(
   queries: NeutralCurveQueryCapability,
   capacity: number,
 ): CachedQueries {
@@ -1498,7 +1521,7 @@ function createCachedQueries(
   };
 }
 
-type PairOutcome =
+export type PairOutcome =
   | {
       kind: "verified";
       first: number;
@@ -1517,11 +1540,21 @@ type PairOutcome =
       message: string;
     };
 
-async function queryArrangement(
+/**
+ * Every branch pair (declared pairs through the join query) and every cubic
+ * self-intersection. `options` (T10g-1, the edit-intersection service)
+ * restricts the queried pairs and skips the self queries; absent, every pair
+ * and self query runs, unchanged.
+ */
+export async function queryArrangement(
   queries: CachedQueries,
   branches: readonly Branch[],
   declarations: Declarations,
   modelingTolerance: number,
+  options: {
+    readonly pairs?: (first: Branch, second: Branch) => boolean;
+    readonly selves?: boolean;
+  } = {},
 ): Promise<{
   pairs: PairOutcome[];
   selves: { branch: number; result: NeutralCurveQueryResult }[];
@@ -1531,6 +1564,7 @@ async function queryArrangement(
     for (let second = first + 1; second < branches.length; second += 1) {
       const a = branches[first]!;
       const b = branches[second]!;
+      if (options.pairs && !options.pairs(a, b)) continue;
       if (declarations.failedPairs.has(pairKey(first, second))) continue;
       const declared = declarations.pairJoins.get(pairKey(first, second));
       if (declared) {
@@ -1599,7 +1633,8 @@ async function queryArrangement(
   }
   const selves: { branch: number; result: NeutralCurveQueryResult }[] = [];
   for (const branch of branches) {
-    if (branch.curve.kind !== "cubicBezier") continue;
+    if (options.selves === false || branch.curve.kind !== "cubicBezier")
+      continue;
     selves.push({
       branch: branch.index,
       result: await queries.self({ modelingTolerance, curve: branch.curve }),
@@ -1667,7 +1702,7 @@ interface ArrangementEvents {
  * (for example `exactFiniteLineIntersection`): widen them by one ulp. Every
  * contact lies in the certified domain, so an open branch clips to it.
  */
-function widenOnBranch(branch: Branch, bounds: Interval): Interval {
+export function widenOnBranch(branch: Branch, bounds: Interval): Interval {
   const widened: Interval =
     bounds[0] === bounds[1] ? [nextDown(bounds[0]), nextUp(bounds[1])] : bounds;
   if (branch.closed) return widened;
