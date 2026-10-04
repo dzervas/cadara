@@ -85,9 +85,9 @@ export {
 export {
   beginSketchGeometryDrag,
   completeSketchOffsetPreviewPublication,
-  completeSketchTrimQuery,
+  completeSketchEditQuery,
   deleteSelectedSketchGeometry,
-  failSketchTrimQuery,
+  failSketchEditQuery,
   finishSketchGeometryDrag,
   patchSketchEditToolValue,
   refreshSketchEditToolAfterOffsetRound,

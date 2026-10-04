@@ -7,8 +7,8 @@ import {
 } from "@/domain/editor/feature-boolean-target-preselection";
 import {
   completeSketchOffsetPreviewPublication,
-  completeSketchTrimQuery,
-  failSketchTrimQuery,
+  completeSketchEditQuery,
+  failSketchEditQuery,
   failSketchLiveRegions,
   getSketchSessionPreviewLabel,
   publishSketchLiveRegions,
@@ -1014,7 +1014,7 @@ export function handleEffectSketchEditIntersectionsQueried(
     state: {
       ...state,
       pendingEditQueryRequest: null,
-      session: completeSketchTrimQuery(
+      session: completeSketchEditQuery(
         state.session,
         event.queryId,
         event.result,
@@ -1039,7 +1039,7 @@ export function handleEffectSketchEditIntersectionsQueryFailed(
     state: {
       ...state,
       pendingEditQueryRequest: null,
-      session: failSketchTrimQuery(state.session, event.queryId, event.message),
+      session: failSketchEditQuery(state.session, event.queryId, event.message),
     },
     effects: [],
   };

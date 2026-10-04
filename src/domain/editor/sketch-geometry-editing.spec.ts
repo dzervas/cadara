@@ -43,7 +43,7 @@ import {
   OCC_KERNEL_SETTINGS,
 } from "@/domain/modeling/opencascade-kernel-seed";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
-import { completeSketchTrimQueriesForTest } from "@/domain/editor/state-machine-test-builder";
+import { completeSketchEditQueriesForTest } from "@/domain/editor/state-machine-test-builder";
 import { TRIM_BASIS_NOT_ACCEPTED_MESSAGE } from "@/domain/editor/sketch-session/editing";
 import {
   PROJECTED_SPLINE_OFFSET_UNSUPPORTED_MESSAGE,
@@ -1920,7 +1920,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       clicked.toolPresentation?.validation?.map((entry) => entry.message),
       `${label}: the tool says it is checking intersections.`,
     ).toEqual(["Checking intersections…"]);
-    return completeSketchTrimQueriesForTest(clicked);
+    return completeSketchEditQueriesForTest(clicked);
   }
 
   /** The Q1b ties authored by a Trim: (new point, kind, cutter or point). */
@@ -2194,28 +2194,63 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
         ),
       ],
     });
-    let splineSession = beginSketchTool(
+    // T10g-3b: the former T07 rejection row, flipped: an open spline is
+    // trimmed exactly (option B) into two splines.
+    const splineStarted = beginSketchTool(
       createSessionFromDefinition(splineDefinition),
       "trim",
     );
-    splineSession = selectSketchEditToolTarget(splineSession, {
-      kind: "sketchEntity",
-      sketchId: "sketch_primary",
-      entityId: "sketch_entity_spline",
-    });
-
-    expect(
-      splineSession.validationMessage,
-      "Spline trimming requires exact neutral-span trimming and is not available yet.",
-    ).toBe(
-      "Spline trimming requires exact neutral-span trimming and is not available yet.",
+    const splineSession = await trimTarget(
+      splineStarted,
+      "sketch_entity_spline",
+      "spline",
+    );
+    const splines = splineSession.definition.entities.filter(
+      (entity) => entity.kind === "spline",
     );
     expect(
-      splineSession.definition.entities.filter(
-        (entity) => entity.kind === "spline",
-      ).length,
-      "Unavailable exact spline trimming must preserve the authored spline.",
-    ).toBe(1);
+      splines.map((entity) => entity.entityId)[0],
+      "The original spline id keeps the piece before the first cut.",
+    ).toBe("sketch_entity_spline");
+    expect(
+      splines.length,
+      "Trimming an open spline keeps its two outside pieces as two splines.",
+    ).toBe(2);
+    const fitPoints = (entity: (typeof splines)[number]) =>
+      entity.kind === "spline"
+        ? entity.pointOccurrences.map(({ pointId }) => pointId)
+        : [];
+    expect(
+      [fitPoints(splines[0]!)[0], fitPoints(splines[1]!).at(-1)],
+      "The pieces keep the spline's original ends.",
+    ).toEqual(["sketch_point_s0", "sketch_point_s2"]);
+    expect(
+      [fitPoints(splines[0]!).length, fitPoints(splines[1]!).length],
+      "Each piece ends at a new fit point at its cut (S1 is removed).",
+    ).toEqual([2, 2]);
+    expect(
+      trimTies(splineStarted, splineSession),
+      "Spline trim ties its first cut to the left cutter and its last cut to the right cutter.",
+    ).toEqual([
+      ["pointOnCurve", "sketch_entity_left"],
+      ["pointOnCurve", "sketch_entity_right"],
+    ]);
+    expect(
+      splineSession.definition.points.some(
+        (point) => point.pointId === "sketch_point_s1",
+      ),
+      "Q-g2: the fit point only the removed part used stays as a free point.",
+    ).toBe(true);
+    expect(
+      splineSession.validationMessage,
+      "The tool message says how many fit points were left free.",
+    ).toBe(
+      "Trim left 1 fit point of Spline as a free point (with its constraints): the removed part used it.",
+    );
+    expect(
+      splineSession.liveSolve?.accepted,
+      "The trimmed, tied spline pieces solve.",
+    ).toBe(true);
   }
 
   /**
@@ -3022,7 +3057,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     expect(
       extendClicked.toolPresentation?.validation?.map((entry) => entry.message),
     ).toEqual(["Checking intersections…"]);
-    extendSession = await completeSketchTrimQueriesForTest(extendClicked);
+    extendSession = await completeSketchEditQueriesForTest(extendClicked);
     assertIncludesPoint(
       extendSession.definition.points,
       [3, 0],
@@ -3080,7 +3115,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       targetEntityId: "sketch_entity_ab",
       boundaryEntityId: "sketch_entity_cd",
     });
-    splitSession = await completeSketchTrimQueriesForTest(splitClicked);
+    splitSession = await completeSketchEditQueriesForTest(splitClicked);
     expect(
       splitSession.definition.entities.length,
       "Sketch split should divide the selected line in session state.",
@@ -3773,7 +3808,7 @@ test("T10g-1 R-6: Trim needs the accepted live solve of the current definition",
   expect(refused.activeEditTool?.editQuery?.queue).toEqual([]);
   expect(refused.definition).toBe(conflicted.definition);
   // The accepted sketch queries and applies.
-  const applied = await completeSketchTrimQueriesForTest(
+  const applied = await completeSketchEditQueriesForTest(
     selectSketchEditToolTarget(beginSketchTool(session, "trim"), target.target),
   );
   expect(applied.definition.entities).toHaveLength(4);
@@ -3802,7 +3837,7 @@ test("T10g-1: trimming a Circle-tool circle keeps the sketch accepted and a seco
       startSketchDraw(beginSketchTool(session, "line"), [x, -3]),
       [x, 3],
     );
-  const trimmed = await completeSketchTrimQueriesForTest(
+  const trimmed = await completeSketchEditQueriesForTest(
     selectSketchEditToolTarget(beginSketchTool(session, "trim"), circle.target),
   );
   expect(trimmed.validationMessage).toBeNull();
@@ -3829,7 +3864,7 @@ test("T10g-1: trimming a Circle-tool circle keeps the sketch accepted and a seco
   const line = trimmed.definition.entities.find(
     (entity) => entity.kind === "lineSegment",
   )!;
-  const second = await completeSketchTrimQueriesForTest(
+  const second = await completeSketchEditQueriesForTest(
     selectSketchEditToolTarget(trimmed, line.target),
   );
   expect(second.validationMessage).toBeNull();

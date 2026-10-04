@@ -77,7 +77,7 @@ import {
   updateSketchPointer,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
-import { completeSketchTrimQueriesForTest } from "@/domain/editor/state-machine-test-builder";
+import { completeSketchEditQueriesForTest } from "@/domain/editor/state-machine-test-builder";
 import { TRIM_TOO_FEW_CUTS_MESSAGE } from "@/contracts/sketch/edit-intersections";
 import {
   DERIVED_SHELL_DELETE_MESSAGE,
@@ -6715,7 +6715,7 @@ describe("T10i edit inputs on non-accepted offset outputs ([TECH] C3, review A8)
         toolId === "trim" ||
         toolId === "sketchExtend" ||
         toolId === "sketchSplit"
-          ? await completeSketchTrimQueriesForTest(clicked)
+          ? await completeSketchEditQueriesForTest(clicked)
           : clicked;
       expect(
         result.validationMessage ?? "",
@@ -7033,7 +7033,7 @@ describe("T10i review fixes (R-2, R-1, A-1)", () => {
         );
       }
       // T10g-2: an Extend/Split selection applies when its query result arrives.
-      const result = await completeSketchTrimQueriesForTest(
+      const result = await completeSketchEditQueriesForTest(
         runEditTool(fixtures.certified, toolId, selection, value),
       );
       expect(
@@ -7165,7 +7165,7 @@ describe("T10i review fixes (R-2, R-1, A-1)", () => {
       targetEntityId: states.free,
       boundaryEntityId: right,
     });
-    const applied = await completeSketchTrimQueriesForTest(settled);
+    const applied = await completeSketchEditQueriesForTest(settled);
     expect(applied.definition, "sketchExtend: its result applies").not.toBe(
       settled.definition,
     );
@@ -7649,7 +7649,7 @@ describe("T10g-1 Trim with offset relationships (review R-1, T-g5)", () => {
       inFlight.input.solvedSnapshot.certifiedOffsetDerivationIds,
       "the query runs on the publication-current basis",
     ).toEqual([states.derivationId]);
-    const applied = await completeSketchTrimQueriesForTest(settled);
+    const applied = await completeSketchEditQueriesForTest(settled);
     expect(applied.validationMessage).toBeNull();
     expect(applied.definition.entityIds.length).toBe(
       states.pending.definition.entityIds.length + 1,
@@ -7658,7 +7658,7 @@ describe("T10g-1 Trim with offset relationships (review R-1, T-g5)", () => {
 
   test("T-g5: a failed offset's outputs are not cutters; they refuse a Trim only when their box meets the target's (named), never an unrelated one", async () => {
     const states = await trimStates();
-    const refused = await completeSketchTrimQueriesForTest(
+    const refused = await completeSketchEditQueriesForTest(
       click(states.failed, states.cutter),
     );
     expect(refused.definition).toBe(states.failed.definition);
@@ -7669,13 +7669,13 @@ describe("T10g-1 Trim with offset relationships (review R-1, T-g5)", () => {
         ),
       ),
     );
-    const unrelated = await completeSketchTrimQueriesForTest(
+    const unrelated = await completeSketchEditQueriesForTest(
       click(states.failed, states.farBottom),
     );
     expect(unrelated.validationMessage).toBeNull();
     expect(unrelated.definition).not.toBe(states.failed.definition);
     // Certified, the output is an ordinary cutter (one crossing: too few).
-    const certified = await completeSketchTrimQueriesForTest(
+    const certified = await completeSketchEditQueriesForTest(
       click(states.certified, states.cutter),
     );
     expect(certified.validationMessage).toBe(TRIM_TOO_FEW_CUTS_MESSAGE);
