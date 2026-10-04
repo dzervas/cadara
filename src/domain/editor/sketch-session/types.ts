@@ -5,6 +5,7 @@ import type {
   SketchAuthoringOperationId,
   SketchEntityId,
   SketchId,
+  SketchPointId,
 } from "@/contracts/shared/ids";
 import type { MaybeAuthoredValue } from "@/contracts/modeling/authored-values";
 import type {
@@ -259,6 +260,20 @@ export interface SketchEditToolState {
   editQuery?: SketchEditQueryState;
 }
 
+/**
+ * An active Line chain (T11-D11/D12): where it started and the segments it
+ * committed, in order. Kept across Undo/Redo; each restore reconciles it
+ * with the restored definition (`reconcileSketchToolDraft`).
+ */
+export interface SketchToolChain {
+  start: { pointId: SketchPointId | null; position: SketchPoint };
+  segments: readonly {
+    entityId: SketchEntityId;
+    startPointId: SketchPointId;
+    endPointId: SketchPointId;
+  }[];
+}
+
 export interface SketchSessionState {
   actionContextId: SketchId;
   actionAvailability?: { canUndo: boolean; canRedo: boolean };
@@ -316,6 +331,8 @@ export interface SketchSessionState {
   activeDrag: SketchGeometryDragState | null;
   activeSnap: SketchSnapCandidate | null;
   drawStartSnap: SketchSnapCandidate | null;
+  /** The active Line chain; absent or null when no chain is active. */
+  toolChain?: SketchToolChain | null;
   sequence: number;
   /** Null until the session first solves; opened sessions show committed regions. */
   liveSolve: SketchLiveSolve | null;

@@ -78,6 +78,8 @@ test("src/domain/editor/runtime-machine.spec.ts", async () => {
     actor.dispatch({ type: "tool.activated", toolId: "line" });
     actor.dispatch({ type: "sketch.pointerReleased", point: [0, 0] });
     actor.dispatch({ type: "sketch.pointerReleased", point: [1, 0.3] });
+    // End the line chain (T11-D11) so the drag starts from an idle tool.
+    actor.dispatch({ type: "sketch.escapeRequested" });
 
     const beforeDrag = actor.getState();
     expect(beforeDrag.kind, "Expected active sketch session before drag.").toBe(

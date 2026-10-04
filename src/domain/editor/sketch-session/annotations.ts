@@ -102,6 +102,7 @@ export function beginSketchAnnotationEdit(
       activeEditTarget: null,
       activeDrag: null,
       validationMessage: null,
+      toolChain: null,
     };
   }
 

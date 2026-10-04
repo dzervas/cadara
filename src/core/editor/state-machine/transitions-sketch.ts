@@ -305,14 +305,15 @@ function applySketchDrawingStep(
   step: SketchDrawingEscapeStep,
 ): EditorTransitionResult {
   switch (step) {
-    case "endChain":
     case "finalizeDraft":
-      // `escapeSketchDrawing` returns these only once T11h (Line chain) and
-      // T11i (fit-point finalize) land.
+      // `escapeSketchDrawing` returns this only once T11i (fit-point
+      // finalize) lands.
       throw new Error(`Sketch drawing step "${step}" is not available yet.`);
+    case "endChain":
     case "cancelDraft": {
-      // The draft never reached the definition: restarting the armed tool
-      // drops it with no action, like a tool switch (T11-D14).
+      // The draft and the chain never reached the definition (each committed
+      // segment already did): restarting the armed tool drops them with no
+      // action, like a tool switch (T11-D14).
       const session = beginSketchTool(state.session, toolId);
 
       return {

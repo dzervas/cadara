@@ -74,7 +74,9 @@ export function createWorkbenchShortcutCommandHandlers({
     },
     // Enabled only when it applies, so an unused Enter keeps its native
     // behaviour; when it applies the resolver consumes it, so a focused
-    // toolbar button is not activated too (review A-5(a)).
+    // toolbar button is not activated too (review A-5(a)). Enter on any other
+    // button, a menu item (the pick chooser, a toolbar dropdown) or in a
+    // dialog is that control's own (T11g review V-1, T11h review A-3).
     "editor.confirm": {
       execute: () => {
         const enterEvent = getEnterEvent({ sketchSession });
@@ -83,7 +85,9 @@ export function createWorkbenchShortcutCommandHandlers({
           dispatch(enterEvent);
         }
       },
-      isEnabled: () => getEnterEvent({ sketchSession }) !== null,
+      isEnabled: (target) =>
+        !isNativeEnterTarget(target) &&
+        getEnterEvent({ sketchSession }) !== null,
     },
     "editor.redo": {
       execute: () => {
@@ -126,6 +130,21 @@ export function createWorkbenchShortcutCommandHandlers({
   }
 
   return commandHandlers;
+}
+
+function isNativeEnterTarget(target: EventTarget | null | undefined) {
+  const element = target as {
+    closest?: (selector: string) => unknown;
+  } | null;
+  if (typeof element?.closest !== "function") {
+    return false;
+  }
+
+  return (
+    element.closest('[role="menu"], [role="dialog"]') !== null ||
+    (element.closest('button, [role="button"]') !== null &&
+      element.closest('[role="toolbar"]') === null)
+  );
 }
 
 function focusWorkbenchSearch() {

@@ -117,7 +117,8 @@ async function openSketch(workbench: SketchWorkbenchHarness) {
   await workbench.expectSketchSessionActive();
 }
 
-/** A line between two viewport points; Escape leaves Line. */
+/** A line between two viewport points; the first Escape ends the
+ * line chain (T11h), the second leaves Line. */
 async function drawLine(
   workbench: SketchWorkbenchHarness,
   start: ViewportPoint,
@@ -131,6 +132,16 @@ async function drawLine(
     .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
     .toContain(`${staged} staged`);
   await workbench.page.keyboard.press("Escape");
+  await workbench.page.keyboard.press("Escape");
+  await expect
+    .poll(
+      () =>
+        workbench.page.evaluate(
+          () => window.__cadaraDebug?.getState()?.command ?? "",
+        ),
+      { message: "Line is left for Select.", timeout: 10_000 },
+    )
+    .toBe("sketch");
 }
 
 async function clearSelection(workbench: SketchWorkbenchHarness) {

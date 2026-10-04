@@ -3,6 +3,7 @@ import type {
   SketchDraftEntity,
   SketchToolCommitContribution,
   SketchToolDefinition,
+  SketchToolPointerResult,
   SketchToolRuntimeState,
 } from "@/core/sketch-tools/definition";
 import type { SketchToolPresentationSchema } from "@/core/sketch-tools/editor-schema";
@@ -125,7 +126,7 @@ function buildLinePresentation(
   };
 }
 
-export const lineSketchToolDefinition: SketchToolDefinition<"line"> =
+const lineToolDefinition: SketchToolDefinition<"line"> =
   createSketchToolDefinition(
     {
       id: "line",
@@ -175,3 +176,38 @@ export const lineSketchToolDefinition: SketchToolDefinition<"line"> =
       },
     },
   );
+
+/**
+ * A zero-length Line rubber band (the pointer on the draft start or chain
+ * anchor) is not an error: a click there is ignored (T11-D11), so it shows
+ * no validation message (T11h review A-2).
+ */
+function withoutZeroLengthValidation(
+  result: SketchToolPointerResult,
+): SketchToolPointerResult {
+  if (result.state.validationMessage === null) {
+    return result;
+  }
+
+  const state = { ...result.state, validationMessage: null };
+  return { ...result, state, presentation: buildLinePresentation(state) };
+}
+
+export const lineSketchToolDefinition: SketchToolDefinition<"line"> = {
+  ...lineToolDefinition,
+  pointerMove(input) {
+    return withoutZeroLengthValidation(lineToolDefinition.pointerMove(input));
+  },
+  // A release at the draft's start (zero length) is ignored: the draft, or
+  // the chain it continues, goes on (T11-D11).
+  pointerRelease(input) {
+    const start =
+      input.state.status === "drawing" ? input.state.pointerDownPoint : null;
+
+    return withoutZeroLengthValidation(
+      start && input.point && !validateLine(start, input.point).valid
+        ? lineToolDefinition.pointerMove(input)
+        : lineToolDefinition.pointerRelease(input),
+    );
+  },
+};

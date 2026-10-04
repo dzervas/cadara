@@ -28,6 +28,10 @@ test("dragging an active sketch vertex updates the committed sketch definition",
   await expect
     .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
     .toContain("1 entities staged");
+  // The line chain continues after the segment (T11h); Escape ends it so the
+  // armed Line is idle and the press starts a geometry drag.
+  await page.keyboard.press("Escape");
+  await expect.poll(() => workbench.currentPhase()).toBe("collecting");
 
   const box = await canvas.boundingBox();
   if (!box) {
@@ -107,7 +111,14 @@ test("active sketch curve picking selects semantic curves without pixel-perfect 
     .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
     .toContain("4 entities staged");
 
+  // The first Escape ends the line chain (T11h), the second leaves Line.
   await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.__cadaraDebug?.getState()?.command ?? ""),
+    )
+    .toBe("sketch");
 
   const semanticPickFixtures = [
     { label: "Line 1", point: { x: 370, y: 268 } },

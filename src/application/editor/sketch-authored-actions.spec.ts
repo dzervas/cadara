@@ -1205,3 +1205,178 @@ describe("T11g: drawing-tool lifecycle history boundaries (T11-D10, D14, D19)", 
     expect(f.session.activeTool, "Point stays armed.").toBe("point");
   });
 });
+
+describe("T11h: Line chain history (T11-D11, D12)", () => {
+  function undoLabels(f: Awaited<ReturnType<typeof fixture>>) {
+    return f.session.actionHistory?.undo.map((entry) => entry.label) ?? [];
+  }
+  function chainLines(f: Awaited<ReturnType<typeof fixture>>) {
+    return f.session.definition.entities.flatMap((entity) =>
+      entity.kind === "lineSegment" && entity.label !== "Line 1"
+        ? [entity]
+        : [],
+    );
+  }
+  async function chainOfThree() {
+    const f = await fixture();
+    f.dispatch({ type: "tool.activated", toolId: "line" });
+    for (const point of [
+      [20, 20],
+      [30, 21],
+      [31, 31],
+      [42, 33],
+    ] as const) {
+      f.dispatch({ type: "sketch.pointerReleased", point });
+    }
+    return f;
+  }
+
+  test("each segment is one action; ending the chain by Enter or Escape records nothing", async () => {
+    const f = await chainOfThree();
+    expect(chainLines(f), "Three joined segments.").toHaveLength(3);
+    expect(undoLabels(f), "One action per segment.").toEqual([
+      "Create Sketch Geometry",
+      "Create Sketch Geometry",
+      "Create Sketch Geometry",
+    ]);
+    expect(f.session.activeTool).toBe("line");
+    expect(f.session.status, "The chain continues.").toBe("drawing");
+    const committed = projection(f.session);
+
+    f.dispatch({ type: "sketch.confirmRequested" });
+    expect(f.session.activeTool, "Enter keeps Line armed.").toBe("line");
+    expect(f.session.status, "Enter ends the chain.").toBe("idle");
+    expect(f.session.toolChain ?? null).toBe(null);
+    expect(projection(f.session)).toEqual(committed);
+    expect(undoLabels(f), "Ending the chain records nothing.").toHaveLength(3);
+
+    f.dispatch({ type: "sketch.pointerReleased", point: [60, 60] });
+    f.dispatch({ type: "sketch.pointerReleased", point: [70, 60] });
+    expect(undoLabels(f)).toHaveLength(4);
+    const fourth = projection(f.session);
+    f.dispatch({ type: "sketch.escapeRequested" });
+    expect(f.session.activeTool, "The first Escape keeps Line armed.").toBe(
+      "line",
+    );
+    expect(f.session.status, "The first Escape ends the chain.").toBe("idle");
+    expect(projection(f.session)).toEqual(fourth);
+    expect(undoLabels(f)).toHaveLength(4);
+    f.dispatch({ type: "sketch.escapeRequested" });
+    expect(f.session.activeTool, "The second Escape leaves Line.").toBe(null);
+    expect(undoLabels(f)).toHaveLength(4);
+  });
+
+  test("Undo twice moves the anchor back with Line armed; Redo re-extends; a new segment after Undo continues from the anchor", async () => {
+    const f = await chainOfThree();
+    const [first, second, third] = chainLines(f);
+
+    f.dispatch({ type: "history.undoRequested" });
+    expect(f.session.activeTool, "Undo keeps Line armed.").toBe("line");
+    expect(f.session.status).toBe("drawing");
+    expect(chainLines(f)).toEqual([first, second]);
+    expect(f.session.pointerDownPoint).toEqual([31, 31]);
+    f.dispatch({ type: "history.undoRequested" });
+    expect(chainLines(f)).toEqual([first]);
+    expect(f.session.pointerDownPoint, "The anchor moved back again.").toEqual([
+      30, 21,
+    ]);
+
+    f.dispatch({ type: "history.redoRequested" });
+    expect(chainLines(f)).toEqual([first, second]);
+    expect(f.session.pointerDownPoint, "Redo re-extends the chain.").toEqual([
+      31, 31,
+    ]);
+    expect(f.session.status).toBe("drawing");
+
+    f.dispatch({ type: "sketch.pointerReleased", point: [20, 40] });
+    const added = chainLines(f).at(-1);
+    expect(chainLines(f)).toHaveLength(3);
+    expect(added?.entityId).not.toBe(third?.entityId);
+    expect(
+      added?.startPointId,
+      "The new segment starts on the restored anchor.",
+    ).toBe(second?.endPointId);
+    expect(f.session.actionAvailability?.canRedo, "New work clears Redo.").toBe(
+      false,
+    );
+    expect(
+      f.session.toolChain?.segments.map((segment) => segment.entityId),
+    ).toEqual([first, second, added].map((line) => line?.entityId));
+  });
+
+  test("Undo past the first segment leaves Line armed with only the chain start placed", async () => {
+    const f = await fixture();
+    f.dispatch({ type: "tool.activated", toolId: "line" });
+    f.dispatch({ type: "sketch.pointerReleased", point: [20, 20] });
+    f.dispatch({ type: "sketch.pointerReleased", point: [30, 21] });
+    const before = chainLines(f)[0];
+
+    f.dispatch({ type: "history.undoRequested" });
+    expect(chainLines(f)).toEqual([]);
+    expect(f.session.activeTool).toBe("line");
+    expect(f.session.status).toBe("drawing");
+    expect(f.session.pointerDownPoint).toEqual([20, 20]);
+
+    f.dispatch({ type: "sketch.pointerReleased", point: [20, 40] });
+    const [line] = chainLines(f);
+    expect(line?.startPointId, "The undone start id is not reused.").not.toBe(
+      before?.startPointId,
+    );
+    expect(
+      f.session.definition.points.some(
+        (point) => point.pointId === line?.startPointId,
+      ),
+    ).toBe(true);
+  });
+
+  test("a blocked Undo changes nothing, the chain included", async () => {
+    const f = await chainOfThree();
+    const third = chainLines(f)[2]!;
+    // A peer moves the last segment's end point (inside its write set).
+    const peer = {
+      ...f.session,
+      definition: {
+        ...f.session.definition,
+        points: f.session.definition.points.map((point) =>
+          point.pointId === third.endPointId
+            ? { ...point, position: [44, 35] as const }
+            : point,
+        ),
+      },
+    };
+    const opened = f.owner.transition(
+      initialEditorState,
+      { type: "selection.cleared" },
+      () => ({ state: { ...f.state, session: peer }, effects: [] }),
+    );
+    if (opened.state.kind !== "editingSketch") throw Error("Expected sketch");
+    const before = opened.state.session;
+    const blocked = f.owner.transition(
+      opened.state,
+      { type: "history.undoRequested" },
+      (state) =>
+        transitionEditorState(state, { type: "history.undoRequested" }),
+    );
+    if (blocked.state.kind !== "editingSketch") throw Error("Expected sketch");
+    const after = blocked.state.session;
+
+    expect(after.validationMessage).toContain("Cannot undo");
+    expect(projection(after)).toEqual(projection(peer));
+    expect(
+      {
+        activeTool: after.activeTool,
+        status: after.status,
+        pointerDownPoint: after.pointerDownPoint,
+        drawStartSnap: after.drawStartSnap,
+        toolChain: after.toolChain,
+      },
+      "The chain and its anchor are unchanged.",
+    ).toEqual({
+      activeTool: before.activeTool,
+      status: before.status,
+      pointerDownPoint: before.pointerDownPoint,
+      drawStartSnap: before.drawStartSnap,
+      toolChain: before.toolChain,
+    });
+  });
+});

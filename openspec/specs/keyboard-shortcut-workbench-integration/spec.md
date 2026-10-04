@@ -55,6 +55,10 @@ The Enter shortcut SHALL end an active Line chain or finalize a fit-point spline
 - **WHEN** a toolbar button has focus, Enter applies to the armed drawing tool and the user presses Enter
 - **THEN** the shortcut system consumes the key so the button is not activated and the tool is not restarted
 
+#### Scenario: Enter on a menu item, in a dialog or on another button
+- **WHEN** focus is inside a menu (such as the candidate chooser or a toolbar dropdown) or a dialog, or on a button outside the toolbar, Enter would apply to the armed drawing tool and the user presses Enter
+- **THEN** the shortcut system does not handle the key, so the focused control keeps its native activation and the chain is not ended
+
 #### Scenario: Escape while sketch session is idle
 - **WHEN** the user is in sketch mode with no cancelable interaction and presses Escape
 - **THEN** the workbench does not finish the sketch

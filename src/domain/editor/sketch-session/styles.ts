@@ -42,6 +42,7 @@ export function focusSketchStyleTool(
     activeDrag: null,
     activeSnap: null,
     drawStartSnap: null,
+    toolChain: null,
   };
 }
 
