@@ -2975,7 +2975,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     ).toBe(unchanged);
   }
 
-  function testSketchExtendSplitAndUnsupportedDiagnosticsUseSessionState() {
+  async function testSketchExtendSplitAndUnsupportedDiagnosticsUseSessionState() {
     const extendDefinition = makeDefinition({
       pointIds: [
         "sketch_point_a",
@@ -3003,10 +3003,26 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       extendSession,
       extendDefinition.entities[0]!.target,
     );
-    extendSession = selectSketchEditToolTarget(
+    const extendClicked = selectSketchEditToolTarget(
       extendSession,
       extendDefinition.entities[1]!.target,
     );
+    // T10g-2: the completed selection only queues its exact query.
+    expect(
+      extendClicked.definition,
+      "Extend authors nothing before its intersection is certified.",
+    ).toBe(extendSession.definition);
+    expect(
+      extendClicked.activeEditTool?.editQuery?.inFlight?.input.operation,
+    ).toEqual({
+      kind: "extend",
+      targetEntityId: "sketch_entity_ab",
+      boundaryEntityId: "sketch_entity_cd",
+    });
+    expect(
+      extendClicked.toolPresentation?.validation?.map((entry) => entry.message),
+    ).toEqual(["Checking intersections…"]);
+    extendSession = await completeSketchTrimQueriesForTest(extendClicked);
     assertIncludesPoint(
       extendSession.definition.points,
       [3, 0],
@@ -3016,6 +3032,11 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       extendSession.definition.entities.length,
       "Sketch extend should preserve unrelated boundary geometry.",
     ).toBe(2);
+    expect(
+      trimTies(extendClicked, extendSession),
+      "Q1b: the new end is tied onto the boundary.",
+    ).toEqual([["pointOnCurve", "sketch_entity_cd"]]);
+    expect(extendSession.liveSolve?.accepted).toBe(true);
 
     const splitDefinition = makeDefinition({
       pointIds: [
@@ -3044,10 +3065,22 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       splitSession,
       splitDefinition.entities[0]!.target,
     );
-    splitSession = selectSketchEditToolTarget(
+    const splitClicked = selectSketchEditToolTarget(
       splitSession,
       splitDefinition.entities[1]!.target,
     );
+    expect(
+      splitClicked.definition,
+      "Split authors nothing before its crossing is certified.",
+    ).toBe(splitSession.definition);
+    expect(
+      splitClicked.activeEditTool?.editQuery?.inFlight?.input.operation,
+    ).toEqual({
+      kind: "split",
+      targetEntityId: "sketch_entity_ab",
+      boundaryEntityId: "sketch_entity_cd",
+    });
+    splitSession = await completeSketchTrimQueriesForTest(splitClicked);
     expect(
       splitSession.definition.entities.length,
       "Sketch split should divide the selected line in session state.",
@@ -3057,6 +3090,51 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       [2, 0],
       "Sketch split should add the split point at the crossing boundary.",
     );
+    expect(
+      trimTies(splitClicked, splitSession),
+      "Q1b: the one shared split point is tied once.",
+    ).toEqual([["pointOnCurve", "sketch_entity_cd"]]);
+    expect(splitSession.liveSolve?.accepted).toBe(true);
+
+    // Q-g3: other kinds keep today's messages; nothing is queried or authored.
+    const circleDefinition = makeDefinition({
+      pointIds: ["sketch_point_a", "sketch_point_b", "sketch_point_center"],
+      points: [
+        makePoint("sketch_point_a", "A", 0, 0),
+        makePoint("sketch_point_b", "B", 1, 0),
+        makePoint("sketch_point_center", "Center", 4, 0),
+      ],
+      entityIds: ["sketch_entity_ab", "sketch_entity_circle"],
+      entities: [
+        makeLine("sketch_entity_ab", "AB", "sketch_point_a", "sketch_point_b"),
+        makeCircle("sketch_entity_circle", "Circle", "sketch_point_center", 1),
+      ],
+    });
+    for (const [toolId, message] of [
+      [
+        "sketchExtend",
+        "Sketch extend currently supports a line extended to another line.",
+      ],
+      [
+        "sketchSplit",
+        "Sketch split currently supports a line split by another line.",
+      ],
+    ] as const) {
+      const begun = beginSketchTool(
+        createSessionFromDefinition(circleDefinition),
+        toolId,
+      );
+      const refused = selectSketchEditToolTarget(
+        selectSketchEditToolTarget(begun, circleDefinition.entities[0]!.target),
+        circleDefinition.entities[1]!.target,
+      );
+      expect(refused.validationMessage, `${toolId}: today's message`).toBe(
+        message,
+      );
+      expect(refused.definition).toBe(begun.definition);
+      expect(refused.activeEditTool?.editQuery?.inFlight ?? null).toBeNull();
+      expect(refused.activeEditTool?.selectedTargets).toHaveLength(2);
+    }
 
     let unsupportedSession = beginSketchTool(
       createSessionFromDefinition(splitDefinition),
@@ -3608,7 +3686,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
   testOffsetAddsCircleArcAndSplineCopies();
   testOffsetAddsProjectedCircleAndSplineCopies();
   testSketchFilletChamferAndSlotUseSessionPreviewAndCommit();
-  testSketchExtendSplitAndUnsupportedDiagnosticsUseSessionState();
+  await testSketchExtendSplitAndUnsupportedDiagnosticsUseSessionState();
   testSketchDerivedTransformOperatorsCreateDurableRelationships();
   testSketchPatternAndTransformOperatorsCommitWithoutPartFeatureSessions();
   await testDerivedLinearPatternGeometryParticipatesInProfiles();

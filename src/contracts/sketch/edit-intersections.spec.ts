@@ -4,7 +4,11 @@ import {
   type NeutralCurveQueryCapability,
 } from "@/contracts/modeling/neutral-curve-query";
 import {
+  EXTEND_NO_INTERSECTION_MESSAGE,
+  EXTEND_TARGET_UNSUPPORTED_MESSAGE,
   querySketchEditIntersections,
+  SPLIT_NO_CROSSING_MESSAGE,
+  SPLIT_TARGET_UNSUPPORTED_MESSAGE,
   TRIM_TOO_FEW_CUTS_MESSAGE,
   type SketchEditIntersectionResult,
 } from "@/contracts/sketch/edit-intersections";
@@ -563,5 +567,462 @@ describe("querySketchEditIntersections (T10g-1 exact edit-intersection service)"
       ...defaults.branches.map((branch) => branch.key),
       expect.stringContaining("construction"),
     ]);
+  });
+});
+
+// T10g-2 (Q-g3: today's kinds, a line target with a line boundary, made
+// exact and tied). Contract seam, kernel-free certified capability.
+describe("Extend and Split (T10g-2)", () => {
+  async function edit(
+    sketch: SketchFixture,
+    kind: "extend" | "split",
+    target = "target",
+    boundary = "boundary",
+    queries: NeutralCurveQueryCapability = createCertifiedNeutralCurveQueryCapabilityForTest(),
+  ) {
+    const input = sketch.build();
+    return querySketchEditIntersections(
+      {
+        definition: input.definition,
+        solvedSnapshot: input.solvedSnapshot,
+        projectedReferences: [],
+        modelingTolerance: input.modelingTolerance,
+        operation: {
+          kind,
+          targetEntityId: entity(target),
+          boundaryEntityId: entity(boundary),
+        },
+      },
+      queries,
+    );
+  }
+  /** Target (0,0)→(t1x,0) and a boundary line (b0)→(b1). */
+  function lines(
+    t1x: number,
+    b0: readonly [number, number],
+    b1: readonly [number, number],
+  ) {
+    const sketch = makeSketchFixture();
+    sketch.point("t0", 0, 0);
+    sketch.point("t1", t1x, 0);
+    sketch.line("target", "t0", "t1");
+    sketch.point("b0", b0[0], b0[1]);
+    sketch.point("b1", b1[0], b1[1]);
+    sketch.line("boundary", "b0", "b1");
+    return sketch;
+  }
+  const failure = (code: string, message: string) => ({
+    kind: "failed",
+    code,
+    message,
+    entityIds: [entity("target"), entity("boundary")],
+    nonAcceptedNearTarget: [],
+  });
+
+  test("extend line→line, end: the end moves to the boundary at the evaluator position on the extension, tied pointOnCurve", async () => {
+    const result = verified(await edit(lines(1, [3, -1], [3, 1]), "extend"));
+    expect(result.extendedEnd).toBe("end");
+    expect(result.cuts).toHaveLength(1);
+    const [cut] = result.cuts;
+    // Distance from the end (1,0) along the unit extension.
+    expect(cut!.representative).toBe(2);
+    expect(cut!.enclosure[0]).toBeLessThanOrEqual(2);
+    expect(cut!.enclosure[1]).toBeGreaterThanOrEqual(2);
+    expect(cut!.position).toEqual([3, 0]);
+    expect(cut!.cutters).toEqual([
+      { entityId: entity("boundary"), tie: { kind: "pointOnCurve" } },
+    ]);
+    expect(result.incidences).toEqual([]);
+  });
+
+  test("extend line→line, start: a boundary behind the start extends the start", async () => {
+    const result = verified(await edit(lines(1, [-2, -1], [-2, 1]), "extend"));
+    expect(result.extendedEnd).toBe("start");
+    expect(result.cuts[0]!.position).toEqual([-2, 0]);
+    expect(result.cuts[0]!.representative).toBe(2);
+  });
+
+  test("extend: the boundary is its infinite line (T-g10): a hit beyond the boundary segment extends, tied pointOnCurve", async () => {
+    const result = verified(await edit(lines(1, [3, 1], [3, 2]), "extend"));
+    expect(result.cuts[0]!.position).toEqual([3, 0]);
+    expect(result.cuts[0]!.cutters).toEqual([
+      { entityId: entity("boundary"), tie: { kind: "pointOnCurve" } },
+    ]);
+    // Beyond its end point too, along a slanted boundary.
+    const slanted = verified(await edit(lines(1, [5, 4], [4, 2]), "extend"));
+    expect(slanted.extendedEnd).toBe("end");
+    expect(slanted.cuts[0]!.position[0]).toBeCloseTo(3, 12);
+    expect(slanted.cuts[0]!.position[1]).toBe(0);
+  });
+
+  test("extend R-2: a boundary end point on the extension is tied coincident with that point (by the boundary segment's or its ray's enclosure alone)", async () => {
+    const inner = createCertifiedNeutralCurveQueryCapabilityForTest();
+    // Drops one boundary piece's contacts: the segment's, or its two rays'.
+    const without = (
+      piece: "segment" | "rays",
+    ): NeutralCurveQueryCapability => ({
+      ...inner,
+      queryNeutralCurves: async (request) => {
+        const answer = await inner.queryNeutralCurves(request);
+        const isSegment =
+          request.second.kind === "line" &&
+          request.second.form === "endpointSegment";
+        return answer.kind === "verified" && (piece === "segment") === isSegment
+          ? { ...answer, points: [] }
+          : answer;
+      },
+    });
+    for (const queries of [
+      createCertifiedNeutralCurveQueryCapabilityForTest(),
+      without("segment"),
+      without("rays"),
+    ])
+      for (const [b0, b1, port] of [
+        [[3, 0], [3, 2], "b0"],
+        [[3, 2], [3, 0], "b1"],
+      ] as const) {
+        const result = verified(
+          await edit(lines(1, b0, b1), "extend", "target", "boundary", queries),
+        );
+        expect(result.cuts[0]!.position).toEqual([3, 0]);
+        expect(result.cuts[0]!.cutters).toEqual([
+          {
+            entityId: entity("boundary"),
+            tie: { kind: "coincident", pointId: point(port) },
+          },
+        ]);
+      }
+  });
+
+  test("extend: parallel, collinear, crossing inside, or through the end is no intersection outside the selected curve", async () => {
+    for (const [b0, b1] of [
+      [
+        [0, 1],
+        [1, 1],
+      ], // parallel
+      [
+        [2, 0],
+        [3, 0],
+      ], // collinear (an overlap of the extension)
+      [
+        [0.5, -1],
+        [0.5, 1],
+      ], // crosses the target inside
+      [
+        [1, -1],
+        [1, 1],
+      ], // through the end
+      [
+        [0, -1],
+        [0, 1],
+      ], // through the start
+    ] as const)
+      expect(await edit(lines(1, b0, b1), "extend")).toEqual(
+        failure("edit-no-crossing", EXTEND_NO_INTERSECTION_MESSAGE),
+      );
+  });
+
+  test("review A-2 (intended, T-g10 exact semantics): a nearly parallel boundary is met far away and Extend goes there; no extent bound refuses it", async () => {
+    // Boundary y = 1 − 1e-9·x: it meets the target's line at x = 1e9.
+    const result = verified(
+      await edit(lines(1, [0, 1], [1, 1 - 1e-9]), "extend"),
+    );
+    expect(result.extendedEnd).toBe("end");
+    expect(result.cuts[0]!.position[1]).toBe(0);
+    expect(Math.abs(result.cuts[0]!.position[0] / 1e9 - 1)).toBeLessThan(1e-6);
+    expect(result.cuts[0]!.cutters).toEqual([
+      { entityId: entity("boundary"), tie: { kind: "pointOnCurve" } },
+    ]);
+  });
+
+  test("review A-5: a degenerate boundary is named as the boundary, not as the curve being extended", async () => {
+    expect(await edit(lines(1, [3, 1], [3, 1]), "extend")).toEqual({
+      kind: "failed",
+      code: "edit-target-invalid",
+      message:
+        "Extend can't use boundary as a boundary: its shape is invalid (zero-length line).",
+      entityIds: [entity("boundary")],
+      nonAcceptedNearTarget: [],
+    });
+  });
+
+  test("extend: the nearer end wins; both ends reaching the boundary equally far fail closed (edit-extend-ambiguous)", async () => {
+    const inner = createCertifiedNeutralCurveQueryCapabilityForTest();
+    // A stub: each extension ray meets the boundary segment at `distance[end]`.
+    const stub = (distance: { start: number; end: number }) => ({
+      ...inner,
+      queryNeutralCurves: async (
+        request: Parameters<
+          NeutralCurveQueryCapability["queryNeutralCurves"]
+        >[0],
+      ) => {
+        const span = request.first.provenance.sourceSpanId;
+        if (
+          (span !== "extend-start" && span !== "extend-end") ||
+          request.second.kind !== "line" ||
+          request.second.form !== "endpointSegment"
+        )
+          return inner.queryNeutralCurves(request);
+        const s = span === "extend-start" ? distance.start : distance.end;
+        return {
+          kind: "verified" as const,
+          points: [
+            {
+              classification: "crossing" as const,
+              firstParameter: s,
+              secondParameter: 0.5,
+              position: evaluateNeutralCurve(request.first, s),
+              proof: {
+                kind: "exactAlgebraicCurveRootSet" as const,
+                family: "linePair" as const,
+                firstParameterBounds: [s, s] as [number, number],
+                secondParameterBounds: [0.5, 0.5] as [number, number],
+              },
+            },
+          ],
+          overlaps: [],
+          completenessProof: {
+            kind: "completeIsolatedRootSet" as const,
+            family: "linePair" as const,
+            distinctRootCount: 1,
+          },
+        };
+      },
+    });
+    const sketch = lines(1, [0.5, 3], [0.5, 4]);
+    const nearer = verified(
+      await edit(
+        sketch,
+        "extend",
+        "target",
+        "boundary",
+        stub({ start: 1, end: 2 }),
+      ),
+    );
+    expect(nearer.extendedEnd).toBe("start");
+    expect(nearer.cuts[0]!.position).toEqual([-1, 0]);
+    expect(
+      await edit(
+        sketch,
+        "extend",
+        "target",
+        "boundary",
+        stub({ start: 2, end: 2 }),
+      ),
+    ).toEqual(
+      failure(
+        "edit-extend-ambiguous",
+        "Extend can't choose which end of target to extend: both reach boundary equally far.",
+      ),
+    );
+  });
+
+  test("extend: an uncertain pair is a named failure", async () => {
+    const inner = createCertifiedNeutralCurveQueryCapabilityForTest();
+    const result = await edit(
+      lines(1, [3, -1], [3, 1]),
+      "extend",
+      "target",
+      "boundary",
+      {
+        ...inner,
+        queryNeutralCurves: async () => ({
+          kind: "uncertain",
+          code: "probe-uncertain",
+          message: "probe",
+        }),
+      },
+    );
+    expect(result).toEqual(
+      failure(
+        "edit-intersection-uncertain",
+        "Extend could not verify where target meets boundary (probe-uncertain). Nothing was changed.",
+      ),
+    );
+  });
+
+  test("split line×line: one cut at the crossing inside, tied pointOnCurve; none, at an end, or collinear is no crossing", async () => {
+    const result = verified(await edit(lines(4, [2, -1], [2, 1]), "split"));
+    expect(result.cuts).toHaveLength(1);
+    expect(result.cuts[0]!.representative).toBe(0.5);
+    expect(result.cuts[0]!.position).toEqual([2, 0]);
+    expect(result.cuts[0]!.cutters).toEqual([
+      { entityId: entity("boundary"), tie: { kind: "pointOnCurve" } },
+    ]);
+    expect(result.extendedEnd).toBeUndefined();
+    for (const [b0, b1] of [
+      [
+        [5, -1],
+        [5, 1],
+      ], // misses
+      [
+        [0, 1],
+        [4, 1],
+      ], // parallel
+      [
+        [4, -1],
+        [4, 1],
+      ], // at the end: no cut
+      [
+        [0, -1],
+        [0, 1],
+      ], // at the start: no cut
+      [
+        [1, 0],
+        [2, 0],
+      ], // collinear overlap
+      [
+        [2, 0],
+        [5, 0],
+      ], // collinear through the end (one overlap end inside)
+    ] as const)
+      expect(await edit(lines(4, b0, b1), "split")).toEqual(
+        failure("edit-no-crossing", SPLIT_NO_CROSSING_MESSAGE),
+      );
+  });
+
+  test("review R-1: a Split crossing closer than the modeling tolerance (1e-3) to an end leaves a sub-tolerance piece: no crossing, as today; 2e-3 away splits", async () => {
+    expect(lines(4, [2, -1], [2, 1]).build().modelingTolerance).toBe(1e-3);
+    for (const x of [4 - 1e-9, 4 - 1e-4, 1e-4, 1e-9])
+      expect(
+        await edit(lines(4, [x, -1], [x, 1]), "split"),
+        `crossing at x = ${x}`,
+      ).toEqual(failure("edit-no-crossing", SPLIT_NO_CROSSING_MESSAGE));
+    for (const x of [4 - 2e-3, 2e-3]) {
+      const result = verified(await edit(lines(4, [x, -1], [x, 1]), "split"));
+      expect(result.cuts[0]!.position).toEqual([x, 0]);
+    }
+  });
+
+  test("split: only the boundary cuts (other curves are not cutters); a boundary end on the target is tied coincident (R-2)", async () => {
+    const sketch = lines(4, [2, 0], [2, 1]);
+    sketch.point("o0", 1, -1);
+    sketch.point("o1", 1, 1);
+    sketch.line("other", "o0", "o1");
+    const result = verified(await edit(sketch, "split"));
+    expect(result.cuts).toHaveLength(1);
+    expect(result.cuts[0]!.position).toEqual([2, 0]);
+    expect(result.cuts[0]!.cutters).toEqual([
+      {
+        entityId: entity("boundary"),
+        tie: { kind: "coincident", pointId: point("b0") },
+      },
+    ]);
+  });
+
+  test("split R-3 data: a target pointOnCurve that produced the cut belongs to it; one away from it does not", async () => {
+    const sketch = lines(4, [2, 0], [2, 1]);
+    const atCut = sketch.pointOnCurve("b0", "target");
+    sketch.point("p", 3, 0);
+    sketch.point("q", 3, 1);
+    sketch.line("other", "p", "q");
+    const away = sketch.pointOnCurve("p", "target");
+    const result = verified(await edit(sketch, "split"));
+    expect(result.cuts).toHaveLength(1);
+    expect(result.incidences).toEqual([
+      { constraintId: atCut, pointId: point("b0"), parameter: 0.5, cut: 0 },
+      { constraintId: away, pointId: point("p"), parameter: 0.75, cut: null },
+    ]);
+  });
+
+  test("unsupported kinds keep today's messages", async () => {
+    const arcTarget = makeSketchFixture();
+    arcTarget.point("c", 0, 0);
+    arcTarget.point("a", 1, 0);
+    arcTarget.point("b", 0, 1);
+    arcTarget.arc("target", "c", "a", "b");
+    arcTarget.point("b0", 3, -1);
+    arcTarget.point("b1", 3, 1);
+    arcTarget.line("boundary", "b0", "b1");
+    const circleBoundary = makeSketchFixture();
+    circleBoundary.point("t0", 0, 0);
+    circleBoundary.point("t1", 4, 0);
+    circleBoundary.line("target", "t0", "t1");
+    circleBoundary.point("c", 2, 0);
+    circleBoundary.circle("boundary", "c", 1);
+    for (const sketch of [arcTarget, circleBoundary]) {
+      expect(await edit(sketch, "extend")).toMatchObject({
+        kind: "failed",
+        code: "edit-target-unsupported",
+        message: EXTEND_TARGET_UNSUPPORTED_MESSAGE,
+      });
+      expect(await edit(sketch, "split")).toMatchObject({
+        kind: "failed",
+        code: "edit-target-unsupported",
+        message: SPLIT_TARGET_UNSUPPORTED_MESSAGE,
+      });
+    }
+  });
+});
+
+// Review A-1: a Trim refuses a kept piece shorter than the modeling
+// tolerance (the solver's minimum segment length; arcs by chord).
+describe("Trim kept-piece length (T10g-2 review A-1)", () => {
+  const tooShort = (target: string) => ({
+    kind: "failed",
+    code: "edit-piece-too-short",
+    message: `Trim would leave a piece of ${target} shorter than the modeling tolerance (0.001). Nothing was changed.`,
+    entityIds: [entity(target)],
+    nonAcceptedNearTarget: [],
+  });
+
+  test("a line: a cut within 1e-3 of either end refuses; 2e-3 away trims", async () => {
+    for (const xs of [
+      [1e-4, 3],
+      [1, 4 - 1e-4],
+      [1, 4 - 1e-9],
+    ])
+      expect(await trim(lineWithCutters(xs), "target"), `cuts ${xs}`).toEqual(
+        tooShort("target"),
+      );
+    const kept = verified(
+      await trim(lineWithCutters([2e-3, 4 - 2e-3]), "target"),
+    );
+    expect(kept.cuts.map((cut) => cut.position)).toEqual([
+      [2e-3, 0],
+      [4 - 2e-3, 0],
+    ]);
+  });
+
+  /** Arc (2,0)→(0,2) ccw about the origin, crossed by verticals at `xs`. */
+  function arcWithCutters(xs: readonly number[]) {
+    const sketch = makeSketchFixture();
+    sketch.point("c", 0, 0);
+    sketch.point("a", 2, 0);
+    sketch.point("b", 0, 2);
+    sketch.arc("target", "c", "a", "b");
+    xs.forEach((x, index) => {
+      sketch.point(`v${index}a`, x, 0.5);
+      sketch.point(`v${index}b`, x, 3);
+      sketch.line(`v${index}`, `v${index}a`, `v${index}b`);
+    });
+    return sketch;
+  }
+
+  test("an arc: a kept piece whose chord is under 1e-3 refuses; 2e-3 trims", async () => {
+    expect(await trim(arcWithCutters([1, 1e-4]), "target")).toEqual(
+      tooShort("target"),
+    );
+    verified(await trim(arcWithCutters([1, 2e-3]), "target"));
+  });
+
+  /** Circle r = 2 at the origin, crossed near its top by short verticals at `xs`. */
+  function circleWithCutters(xs: readonly number[]) {
+    const sketch = makeSketchFixture();
+    sketch.point("c", 0, 0);
+    sketch.circle("target", "c", 2);
+    xs.forEach((x, index) => {
+      sketch.point(`v${index}a`, x, 1.9);
+      sketch.point(`v${index}b`, x, 2.1);
+      sketch.line(`v${index}`, `v${index}a`, `v${index}b`);
+    });
+    return sketch;
+  }
+
+  test("a circle: a kept arc (first to last cut) whose chord is under 1e-3 refuses; 1e-2 trims", async () => {
+    expect(await trim(circleWithCutters([0, 1e-4]), "target")).toEqual(
+      tooShort("target"),
+    );
+    verified(await trim(circleWithCutters([0, 1e-2]), "target"));
   });
 });

@@ -176,3 +176,48 @@ test("the sketch tool panel shows Trim's 'Checking intersections…' while its q
   );
   expect(markup).toContain("Checking intersections…");
 });
+
+// Lane: UI (docs/testing.md). Seam: the same pending state for a completed
+// Extend or Split selection (T10g-2): one queued click, being checked.
+test.each(["sketchExtend", "sketchSplit"] as const)(
+  "the sketch tool panel shows %s's 'Checking intersections…' while its query is pending",
+  (toolId) => {
+    let drawn = createNewSketchSessionFromSupport(
+      { kind: "construction", constructionId: "construction_plane-xy" },
+      OCC_KERNEL_SETTINGS,
+    );
+    for (const [start, end] of [
+      [
+        [0, 0],
+        [4, 0],
+      ],
+      [
+        [toolId === "sketchExtend" ? 6 : 2, -1],
+        [toolId === "sketchExtend" ? 6 : 2, 1],
+      ],
+    ] as const)
+      drawn = acceptSketchDraw(
+        startSketchDraw(beginSketchTool(drawn, "line"), [...start]),
+        [...end],
+      );
+    const pending = selectSketchEditToolTarget(
+      selectSketchEditToolTarget(
+        beginSketchTool(drawn, toolId),
+        drawn.definition.entities[0]!.target,
+      ),
+      drawn.definition.entities[1]!.target,
+    );
+    expect(pending.definition, "premise: nothing applied yet").toBe(
+      drawn.definition,
+    );
+    const markup = renderToStaticMarkup(
+      <MantineProvider>
+        <SketchToolPanel
+          schema={getSketchToolPresentation(pending)}
+          onPatch={() => undefined}
+        />
+      </MantineProvider>,
+    );
+    expect(markup).toContain("Checking intersections…");
+  },
+);

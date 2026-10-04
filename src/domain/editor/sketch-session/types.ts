@@ -214,22 +214,27 @@ export interface SketchOffsetPreviewPublication {
   replanned: boolean;
 }
 
-/** T10g-1: one Trim click waiting for its exact edit intersections. */
-export interface SketchTrimClick {
+/**
+ * T10g-1: one Trim click waiting for its exact edit intersections; T10g-2:
+ * or one completed Extend/Split selection (target, then boundary).
+ */
+export interface SketchEditQueryClick {
   targetEntityId: SketchEntityId;
   /** Review R-5: the target entity object at click time (its identity). */
   entity: SketchEntityDefinition;
+  /** Extend/Split: the boundary and its entity object at click time. */
+  boundary?: { entityId: SketchEntityId; entity: SketchEntityDefinition };
 }
 
 /**
- * T10g-1 (design §2.7 with review R-1/R-5, A-4): the Trim clicks in FIFO
+ * T10g-1 (design §2.7 with review R-1/R-5, A-4): the edit-query clicks in FIFO
  * order. The head is in flight once its query is issued on a basis that is
  * the accepted live solve of the current definition (publication-current
  * when the sketch has offset relationships); its result applies only to
  * that definition and live solve.
  */
 export interface SketchEditQueryState {
-  queue: SketchTrimClick[];
+  queue: SketchEditQueryClick[];
   inFlight: {
     queryId: string;
     /** `session.definition` (identity) the query was issued for. */
@@ -250,7 +255,7 @@ export interface SketchEditToolState {
   toolValue: number | null;
   /** U-G3: the staged derived-offset preview's publication (offset tool only). */
   offsetPublication?: SketchOffsetPreviewPublication;
-  /** T10g-1: queued and in-flight Trim clicks (trim tool only). */
+  /** T10g-1/T10g-2: queued and in-flight clicks (Trim, Extend, Split only). */
   editQuery?: SketchEditQueryState;
 }
 
