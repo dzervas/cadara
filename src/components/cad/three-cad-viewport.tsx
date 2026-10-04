@@ -115,6 +115,10 @@ import {
   type SketchPickCycle,
 } from "@/domain/sketch-interaction/pick-stack";
 import { getSketchSessionDisplayDefinition } from "@/domain/editor/sketch-session/internals";
+import {
+  getSketchRevealedPointIds,
+  getSketchToolMarkerPointIds,
+} from "@/domain/editor/sketch-session/display";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
 import { createViewportCameraTransitionController } from "@/infrastructure/viewport/viewport-camera-transition";
 import {
@@ -189,6 +193,14 @@ interface SketchStackPickAt {
   y: number;
   sketch: SketchStackPick;
 }
+
+/** The hovered sketch stack's targets and their member-set key (T11f). */
+interface SketchHoverStack {
+  key: string;
+  targets: readonly PrimitiveRef[];
+}
+
+const EMPTY_SKETCH_HOVER_STACK: SketchHoverStack = { key: "", targets: [] };
 
 interface ThreeCadViewportProps {
   model: ViewportModel;
@@ -424,6 +436,60 @@ export function ThreeCadViewport({
   // pointer-up and click are swallowed (T11e review R-2).
   const chooserDismissPressRef = useRef(false);
   const [chooser, setChooser] = useState<SketchPickChooserModel | null>(null);
+  // The hovered sketch pick stack's targets, which reveal contextual point
+  // markers (T11-D8). Keyed by its member set, so neither a pointer move
+  // nor a reorder of the same members renders (T11f review A-3).
+  const [sketchHoverStack, setSketchHoverStack] = useState<SketchHoverStack>(
+    EMPTY_SKETCH_HOVER_STACK,
+  );
+  const updateSketchHoverStack = useCallback(
+    (stack: readonly PrimitiveRef[]) => {
+      const key = stack.map(getPrimitiveRefKey).sort().join("|");
+      setSketchHoverStack((current) =>
+        current.key === key ? current : { key, targets: stack },
+      );
+    },
+    [],
+  );
+  // Entering, leaving or switching sketches forgets the last hovered stack
+  // (T11f review A-4); adjusted while rendering, like the chooser scope.
+  const sketchHoverScope = sketchSession
+    ? (sketchSession.sketchId ?? "sketch_draft")
+    : null;
+  const [hoverStackScope, setHoverStackScope] = useState(sketchHoverScope);
+  if (hoverStackScope !== sketchHoverScope) {
+    setHoverStackScope(sketchHoverScope);
+    setSketchHoverStack(EMPTY_SKETCH_HOVER_STACK);
+  }
+  const markerActiveTool = sketchSession?.activeTool ?? null;
+  const markerDrawStartSnap = sketchSession?.drawStartSnap ?? null;
+  const sketchMarkerToolPointIds = useMemo(
+    () =>
+      getSketchToolMarkerPointIds({
+        activeTool: markerActiveTool,
+        drawStartSnap: markerDrawStartSnap,
+      }),
+    [markerActiveTool, markerDrawStartSnap],
+  );
+  // One revealed-point set per render, not a scan per marker (A-3).
+  const sketchMarkerContext = useMemo(
+    () => ({
+      revealedPointIds: getSketchRevealedPointIds(sketchDisplayRenderables, {
+        hoverStack: sketchHoverStack.targets,
+        hoverTarget,
+        selection,
+        toolPointIds: sketchMarkerToolPointIds,
+      }),
+      hoverTarget,
+    }),
+    [
+      hoverTarget,
+      selection,
+      sketchDisplayRenderables,
+      sketchHoverStack,
+      sketchMarkerToolPointIds,
+    ],
+  );
   // The hint with the definition and tool it was computed for; it shows
   // only while both are current (review A-3).
   const [pickHint, setPickHint] = useState<{
@@ -1800,6 +1866,7 @@ export function ThreeCadViewport({
       }
 
       if (pointerWithinViewCube(event.clientX, event.clientY)) {
+        updateSketchHoverStack([]);
         clearHover();
         return;
       }
@@ -1812,6 +1879,9 @@ export function ThreeCadViewport({
       const wiring = pick.sketch
         ? getSketchPickCycleWiring(pick.sketch.stack)
         : null;
+      updateSketchHoverStack(
+        pick.sketch?.stack.map((entry) => entry.target) ?? [],
+      );
       // Hover highlights exactly what the next click picks: `stack[0]`, or
       // `stack[next]` while a cycle is armed (T11d).
       const target = wiring
@@ -2106,6 +2176,7 @@ export function ThreeCadViewport({
         primaryPointerDownRef.current = null;
         pendingSketchGeometryDragRef.current = null;
       }
+      updateSketchHoverStack([]);
       clearHover();
     };
 
@@ -2396,6 +2467,7 @@ export function ThreeCadViewport({
     closeSketchPickChooser,
     openSketchPickChooser,
     scheduleSketchGeometryDragMove,
+    updateSketchHoverStack,
   ]);
 
   useEffect(() => {
@@ -2619,6 +2691,7 @@ export function ThreeCadViewport({
                 renderable={renderable}
                 applyStyles={sketchDisplayStylesEnabled}
                 palette={sketchRenderingPalette}
+                markerContext={sketchMarkerContext}
               />
             ))}
           </group>

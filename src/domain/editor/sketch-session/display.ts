@@ -64,6 +64,7 @@ import {
   getSketchSessionDisplayProjectedReferences,
   getSketchSessionDerivedValidity,
   getSketchSessionSolvedSnapshot,
+  getEntityPointIds,
   mapDefinitionEntityToDraftEntity,
   resolveSketchDefinitionForSolve,
   getSketchSessionDerivationSettings,
@@ -175,8 +176,10 @@ export function getStableSketchSessionDisplayRenderables(
         : [];
     },
   );
+  const pointOwners = getSketchPointOwnerEntityIds(displayDefinition);
   const pointRenderables = displayDefinition.points.map((point) => {
     const style = pointStyleLookup.get(point.pointId);
+    const ownerEntityIds = pointOwners.get(point.pointId) ?? [];
     const isVisibleReferenceImageAnchor =
       visibleReferenceImageAnchorPointIds.has(point.pointId);
     const referenceImageAnchorStyle = isVisibleReferenceImageAnchor
@@ -206,6 +209,13 @@ export function getStableSketchSessionDisplayRenderables(
         },
         linePattern: "solid" as const,
         role: "local" as const,
+        pointMarker: {
+          visibility:
+            ownerEntityIds.length > 0
+              ? ("contextual" as const)
+              : ("always" as const),
+          ownerEntityIds,
+        },
         paintStyle: style?.paintStyle ?? referenceImageAnchorStyle?.paintStyle,
         strokeStyle:
           style?.strokeStyle ?? referenceImageAnchorStyle?.strokeStyle,
@@ -371,6 +381,147 @@ export function getStableSketchSessionDisplayRenderables(
   stableDisplayCacheRenderables = renderables;
 
   return renderables;
+}
+
+/**
+ * The curves each point belongs to (T11-D8): every entity whose definition
+ * references it, except the Point tool's own `point` entity; a derived
+ * shell's driven terminal points (from its offset relationship); and the
+ * curve of a `pointOnCurve` / line of a `midpoint` constraint on a point
+ * that is not a Point-tool point (3-point circle and arc, midpoint line;
+ * T11f review R-1). A point with no owner is a free point (Point tool,
+ * kept after Trim).
+ */
+function getSketchPointOwnerEntityIds(definition: SketchDefinition) {
+  const owners = new Map<SketchPointId, SketchEntityId[]>();
+  const add = (pointId: SketchPointId, entityId: SketchEntityId) => {
+    const entry = owners.get(pointId);
+    if (!entry) owners.set(pointId, [entityId]);
+    else if (!entry.includes(entityId)) entry.push(entityId);
+  };
+  const pointToolPointIds = new Set<SketchPointId>();
+  for (const entity of definition.entities) {
+    if (entity.kind === "point") {
+      pointToolPointIds.add(entity.pointId);
+      continue;
+    }
+    for (const pointId of getEntityPointIds(entity)) {
+      add(pointId, entity.entityId);
+    }
+  }
+  for (const relationship of definition.derivedRelationships ?? []) {
+    if (relationship.kind !== "offset") continue;
+    for (const output of relationship.piecewiseCubicOutputs) {
+      add(output.startPointId, output.outputEntityId);
+      add(output.endPointId, output.outputEntityId);
+    }
+  }
+  for (const constraint of definition.constraints) {
+    const [point, curve] =
+      constraint.kind === "pointOnCurve"
+        ? [constraint.point, constraint.curve]
+        : constraint.kind === "midpoint"
+          ? [constraint.point, constraint.line]
+          : [null, null];
+    if (
+      point?.kind === "localPoint" &&
+      curve?.kind === "localEntity" &&
+      !pointToolPointIds.has(point.pointId)
+    ) {
+      add(point.pointId, curve.entityId);
+    }
+  }
+  return owners;
+}
+
+/** What reveals contextual point markers (T11-D8). */
+export interface SketchPointMarkerContext {
+  /** The whole current hover stack, not only its top. */
+  hoverStack: readonly PrimitiveRef[];
+  /** The hovered target (a click's preview, the chooser's item preview). */
+  hoverTarget: PrimitiveRef | null;
+  selection: readonly PrimitiveRef[];
+  /** The active tool's draft and chain anchor points. */
+  toolPointIds: ReadonlySet<SketchPointId>;
+}
+
+/**
+ * The contextual points whose markers are revealed (T11-D8, review A-2):
+ * the point or one of its owning curves (same sketch) is in the hover
+ * stack (anywhere), is the hover target or is selected, or the point
+ * anchors the active tool's draft. One pass over the context and the
+ * markers (T11f review A-3).
+ */
+export function getSketchRevealedPointIds(
+  renderables: readonly SketchSessionDisplayRenderable[],
+  context: SketchPointMarkerContext,
+): ReadonlySet<SketchPointId> {
+  const active = [
+    ...context.hoverStack,
+    ...(context.hoverTarget ? [context.hoverTarget] : []),
+    ...context.selection,
+  ];
+  const activePoints = new Set<string>();
+  const activeEntities = new Set<string>();
+  for (const entry of active) {
+    if (entry.kind === "sketchPoint")
+      activePoints.add(`${entry.sketchId}|${entry.pointId}`);
+    else if (entry.kind === "sketchEntity")
+      activeEntities.add(`${entry.sketchId}|${entry.entityId}`);
+  }
+  const revealed = new Set<SketchPointId>();
+  for (const { pointMarker, target } of renderables) {
+    if (
+      pointMarker?.visibility !== "contextual" ||
+      target?.kind !== "sketchPoint"
+    )
+      continue;
+    if (
+      context.toolPointIds.has(target.pointId) ||
+      activePoints.has(`${target.sketchId}|${target.pointId}`) ||
+      pointMarker.ownerEntityIds.some((entityId) =>
+        activeEntities.has(`${target.sketchId}|${entityId}`),
+      )
+    ) {
+      revealed.add(target.pointId);
+    }
+  }
+  return revealed;
+}
+
+/**
+ * Whether a marker renderable is drawn (T11-D8): a contextual point marker
+ * only while revealed (`getSketchRevealedPointIds`). Every other marker (a
+ * free point, the datum origin, projected and unresolved references)
+ * always shows. Display only: pickability never depends on it.
+ */
+export function getSketchPointMarkerVisibility(
+  renderable: SketchSessionDisplayRenderable,
+  revealedPointIds: ReadonlySet<SketchPointId>,
+): boolean {
+  const { pointMarker, target } = renderable;
+  return (
+    pointMarker?.visibility !== "contextual" ||
+    target?.kind !== "sketchPoint" ||
+    revealedPointIds.has(target.pointId)
+  );
+}
+
+/**
+ * The active tool's draft anchor points (T11-D8): the existing point a
+ * drawing tool's draft starts from (`drawStartSnap`), which is also where a
+ * Line chain continues (review A-4).
+ */
+export function getSketchToolMarkerPointIds(
+  session: Pick<SketchSessionState, "activeTool" | "drawStartSnap">,
+): ReadonlySet<SketchPointId> {
+  return new Set(
+    session.activeTool === null
+      ? []
+      : (session.drawStartSnap?.sources ?? []).flatMap((source) =>
+          source.kind === "localPoint" ? [source.pointId] : [],
+        ),
+  );
 }
 
 let displaySolveCacheKey: string | null = null;
