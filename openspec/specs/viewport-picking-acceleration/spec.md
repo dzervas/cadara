@@ -45,7 +45,7 @@ The workbench viewport SHALL compute the canvas bounds once for each pick operat
 - **THEN** the hover resolution and sketch projection use the same captured canvas rectangle for that pointer event
 
 ### Requirement: Viewport picking SHALL resolve all candidates through one ranked list
-The workbench viewport SHALL collect raycast candidates and projected point candidates into a unified candidate list before applying selection filters, de-duplication, occlusion checks, and ranking.
+The workbench viewport SHALL collect raycast candidates and projected point candidates into a unified candidate list before applying selection filters, de-duplication, occlusion checks, and ranking. Outside sketch mode the part-mode resolver ranks that list as below; in sketch mode the sketch pick stack ranks it (see "Sketch picking SHALL rank one authored-first candidate stack").
 
 #### Scenario: Projected vertex overlaps a face raycast
 - **WHEN** a face raycast candidate and an in-radius projected vertex candidate are both present for one pick
@@ -60,8 +60,33 @@ The workbench viewport SHALL collect raycast candidates and projected point cand
 - **THEN** the resolver continues evaluating lower-ranked candidates
 - **AND** the first acceptable candidate is returned instead of returning no target
 
+### Requirement: Sketch picking SHALL rank one authored-first candidate stack
+In sketch mode the workbench viewport SHALL map its unified candidate list to one ordered pick stack, owned by the pure `resolveSketchPickStack` (`src/domain/sketch-interaction/pick-stack.ts`); hover, pointer release and click SHALL all read that stack, and for now its top entry. The stack SHALL be the sketch editor's only candidate ranking.
+
+#### Scenario: Candidates are mapped before ranking
+- **WHEN** the viewport builds the sketch pick stack
+- **THEN** wires behind the nearest body face beyond the wire occlusion tolerance are dropped
+- **AND** because the stack is class-first, the same occlusion drops ray-picked regions, reference images and construction planes behind the nearest body face, so nothing is picked through a body; coplanar ones (within the tolerance) stay
+- **AND** background datum planes are dropped when a click on them counts as empty, so an empty stack clears the selection
+- **AND** each remaining candidate maps to its eligible target (the hit target, else its owner body) before ordering; ineligible candidates are dropped
+- **AND** entities and points of the edited sketch that are not in its display definition (staged previews) and annotation targets are never candidates
+
+#### Scenario: Classes order the stack
+- **WHEN** eligible candidates of several classes are present
+- **THEN** they order by class: authored points (including driven points of derived outputs and centres); ordinary authored curves; construction authored curves (construction looked up in the session's display definition; a non-accepted derived output keeps its class); reference points (datum origin, projected and external points, model vertices, other sketches' points); reference curves (datum axes, projected curves, model edges, other sketches' curves); regions; reference images; faces and bodies; construction planes
+- **AND** within a class screen-space candidates come first by screen distance, then raycast-only candidates by ray distance, then depth, then stable key
+
+#### Scenario: Authored geometry coincides with a datum
+- **WHEN** an authored curve lies on a datum axis or passes within the sketch point radius of the datum origin
+- **THEN** the authored curve is the top entry and the datum is below it
+- **AND** an authored point on the datum origin is above both
+
+#### Scenario: Several candidates share one target
+- **WHEN** several candidates map to one target (for example a raycast hit and a screen-space candidate of one sketch point, or several face hits standing for one body)
+- **THEN** the stack keeps one entry for that target, the best-ordered candidate
+
 ### Requirement: Viewport picking SHALL apply stable deterministic ranking boundaries
-The workbench viewport SHALL rank equal or near-equal candidates deterministically using documented tolerances, semantic interaction rank, pick priority, and stable target keys.
+The workbench viewport SHALL rank equal or near-equal candidates deterministically using documented tolerances, semantic interaction rank, pick priority, and stable target keys. These boundaries apply to the part-mode resolver; the sketch pick stack keeps the wire occlusion boundary and orders ties by depth and stable key.
 
 #### Scenario: Candidates are inside the same-layer tolerance
 - **WHEN** two raycast candidates are separated by no more than the same-layer tolerance
@@ -85,7 +110,7 @@ The workbench viewport SHALL rank equal or near-equal candidates deterministical
 - **AND** the result is independent of raw raycaster hit order
 
 ### Requirement: Projected point hover SHALL use enter/exit hysteresis
-The workbench viewport SHALL use a smaller enter radius and larger exit radius for projected point hover so an already-hovered projected point remains stable until the pointer leaves the exit radius.
+The workbench viewport SHALL use a smaller enter radius and larger exit radius for projected point hover so an already-hovered projected point remains stable until the pointer leaves the exit radius. Sketch points (including the datum origin) use 12 px enter and 16 px exit; feature vertices use 48 px and 56 px; sketch curves use 10 px and 14 px. The exit radius applies only to the current hover target (the previous top of the stack); every other candidate uses its enter radius. Screen-space sketch point markers are not also ray-picked, and stack de-duplication collapses any further screen-space candidates of the same point (such as reference-image anchor overlays), so each sketch point has one stack entry.
 
 #### Scenario: Pointer enters a projected point radius
 - **WHEN** a projected point candidate is not currently hovered

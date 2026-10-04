@@ -20,7 +20,10 @@ import type {
   SketchConstraintRef,
   SketchDimensionRef,
 } from "@/contracts/shared/references";
-import type { SketchPoint2D } from "@/contracts/sketch/schema";
+import type {
+  SketchDefinition,
+  SketchPoint2D,
+} from "@/contracts/sketch/schema";
 import {
   closestPointOnRationalCubic,
   closestPointOnRationalQuadratic,
@@ -37,6 +40,8 @@ import {
   createProjectedPickCandidate,
   DEFAULT_PROJECTED_POINT_PICK_ENTER_RADIUS_PX,
   DEFAULT_PROJECTED_POINT_PICK_EXIT_RADIUS_PX,
+  DEFAULT_SKETCH_POINT_PICK_ENTER_RADIUS_PX,
+  DEFAULT_SKETCH_POINT_PICK_EXIT_RADIUS_PX,
   shouldIncludeProjectedPickCandidate,
   type PickCandidate,
 } from "@/infrastructure/viewport/render-picking";
@@ -164,12 +169,7 @@ export function collectProjectedSketchDisplayPointCandidates({
 
     if (
       !geometryData ||
-      !renderable.target ||
-      (renderable.target.kind !== "sketchPoint" &&
-        !(
-          renderable.target.kind === "sketchDatumReference" &&
-          renderable.target.geometryKind === "point"
-        )) ||
+      !isProjectedSketchDisplayPointTarget(renderable.target) ||
       !acceptsTarget(renderable.target)
     ) {
       return [];
@@ -194,8 +194,8 @@ export function collectProjectedSketchDisplayPointCandidates({
         target: renderable.target,
         currentHoverTarget,
         screenDistance: distance,
-        enterRadius: DEFAULT_PROJECTED_POINT_PICK_ENTER_RADIUS_PX,
-        exitRadius: DEFAULT_PROJECTED_POINT_PICK_EXIT_RADIUS_PX,
+        enterRadius: DEFAULT_SKETCH_POINT_PICK_ENTER_RADIUS_PX,
+        exitRadius: DEFAULT_SKETCH_POINT_PICK_EXIT_RADIUS_PX,
       })
     ) {
       return [];
@@ -205,7 +205,8 @@ export function collectProjectedSketchDisplayPointCandidates({
       createProjectedPickCandidate({
         pickId: null,
         target: renderable.target,
-        semanticClass: getProjectedSketchDisplayPointSemanticClass(renderable),
+        semanticClass:
+          renderable.role === "reference" ? "sketchReference" : "sketchPoint",
         screenDistance: distance,
         depth: projectedPoint.z,
         stableKey: `sketch:${renderable.id}`,
@@ -220,6 +221,7 @@ export function collectProjectedSketchCurveCandidates({
   camera,
   viewportRect,
   sketchSession,
+  displayDefinition,
   acceptsTarget,
   currentHoverTarget,
 }: {
@@ -228,6 +230,8 @@ export function collectProjectedSketchCurveCandidates({
   camera: ViewportCamera;
   viewportRect: DOMRectReadOnly;
   sketchSession: SketchSessionState | null;
+  /** The session's display definition, when the caller already has it. */
+  displayDefinition?: SketchDefinition;
   acceptsTarget: (target: PrimitiveRef) => boolean;
   currentHoverTarget: PrimitiveRef | null;
 }): PickCandidate[] {
@@ -256,7 +260,10 @@ export function collectProjectedSketchCurveCandidates({
   const toClip = (point: SketchPoint2D) =>
     projectSketchPointToClip(point, sketchSession, camera, viewportRect);
 
-  return collectSketchInteractionGeometry(sketchSession).flatMap((geometry) => {
+  return collectSketchInteractionGeometry(
+    sketchSession,
+    displayDefinition,
+  ).flatMap((geometry) => {
     if (
       !isSketchInteractionCurveGeometry(geometry) ||
       !acceptsTarget(geometry.target)
@@ -627,15 +634,18 @@ function getSketchPlanePointerPoint({
     : null;
 }
 
-function getProjectedSketchDisplayPointSemanticClass(
-  renderable: SketchSessionDisplayRenderable,
-) {
-  return renderable.target?.kind === "sketchDatumReference" ||
-    renderable.target?.kind === "projectedReferenceGeometry"
-    ? "sketchPoint"
-    : renderable.role === "reference"
-      ? "sketchReference"
-      : "sketchPoint";
+/**
+ * Sketch display markers picked in screen space by
+ * `collectProjectedSketchDisplayPointCandidates` (sketch points and the
+ * datum origin); their markers are not also ray-picked (T11c, review A-1).
+ */
+export function isProjectedSketchDisplayPointTarget(
+  target: PrimitiveRef | null,
+): target is PrimitiveRef {
+  return (
+    target?.kind === "sketchPoint" ||
+    (target?.kind === "sketchDatumReference" && target.geometryKind === "point")
+  );
 }
 
 export function isVisibleProjectedPoint(projectedPoint: THREE.Vector3) {
