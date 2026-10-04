@@ -89,11 +89,14 @@ import type {
   SketchToolId,
 } from "@/core/sketch-tools/definition";
 import { sampleArcPoints } from "@/core/sketch-tools/geometry";
+import { getSketchToolDefinition } from "@/core/sketch-tools/registry";
+import type { SketchSnapCandidate } from "@/domain/sketch-snapping/snap-candidates";
 import type {
   SketchAuthoringToolId,
   SketchLiveRegionBasis,
   SketchLiveRegions,
   SketchSessionState,
+  SketchToolChain,
 } from "./types";
 import { buildCommitRequest } from "./history";
 
@@ -1597,22 +1600,24 @@ export function rebuildSessionForDefinition(
   input: { definition: SketchDefinition },
 ): SketchSessionState {
   const definition = cloneDefinition(input.definition);
-  const rebuilt = withLiveSolveBasis(
-    {
-      ...session,
-      definition,
-      projectedReferences: mergeDerivedProjectedReferences(
+  const rebuilt = reconcileSketchToolDraft(
+    withLiveSolveBasis(
+      {
+        ...session,
         definition,
-        session.projectedReferences,
-      ),
-      toolStagedEntities: [],
-      activeAnnotationEdit: null,
-      selectedAnnotation: null,
-      activeEditTarget: null,
-      activeDrag: null,
-      commitRequest: rebuildSessionCommitRequest(session, definition),
-    },
-    definition,
+        projectedReferences: mergeDerivedProjectedReferences(
+          definition,
+          session.projectedReferences,
+        ),
+        toolStagedEntities: [],
+        activeAnnotationEdit: null,
+        selectedAnnotation: null,
+        activeEditTarget: null,
+        activeDrag: null,
+        commitRequest: rebuildSessionCommitRequest(session, definition),
+      },
+      definition,
+    ),
   );
   return {
     ...rebuilt,
@@ -1623,6 +1628,167 @@ export function rebuildSessionForDefinition(
           )?.message ??
           "Sketch profiles are unavailable until the sketch is corrected.")
         : null,
+  };
+}
+
+/**
+ * Reconciles the armed drawing tool's draft with a restored definition
+ * (T11-D12: Undo, Redo and every other restore). A snap that references a
+ * point or entity the definition no longer has is dropped and its raw
+ * position kept, so a commit never reuses a deleted id. An active Line
+ * chain keeps its records and is restaged from its committed prefix
+ * (`restageSketchToolChain`).
+ */
+export function reconcileSketchToolDraft(
+  session: SketchSessionState,
+): SketchSessionState {
+  const { definition } = session;
+  const reconciled: SketchSessionState = {
+    ...session,
+    activeSnap: sketchSnapReferencesExist(definition, session.activeSnap)
+      ? session.activeSnap
+      : null,
+    drawStartSnap: sketchSnapReferencesExist(definition, session.drawStartSnap)
+      ? session.drawStartSnap
+      : null,
+  };
+
+  return session.toolChain && isSketchToolChainActive(session)
+    ? restageSketchToolChain(reconciled, session.toolChain)
+    : reconciled;
+}
+
+function sketchSnapReferencesExist(
+  definition: SketchDefinition,
+  snap: SketchSnapCandidate | null,
+) {
+  return (snap?.sources ?? []).every((source) =>
+    source.kind === "localPoint"
+      ? definition.points.some((point) => point.pointId === source.pointId)
+      : source.kind === "localEntity"
+        ? definition.entities.some(
+            (entity) => entity.entityId === source.entityId,
+          )
+        : true,
+  );
+}
+
+/**
+ * Whether a chain is active: the armed tool chains its segments
+ * (`lifecycle: "chain"`), is drawing, and has chain records (review R-1).
+ */
+export function isSketchToolChainActive(
+  session: Pick<SketchSessionState, "activeTool" | "status" | "toolChain">,
+) {
+  return (
+    Boolean(session.toolChain) &&
+    session.status === "drawing" &&
+    isDrawingSketchTool(session.activeTool) &&
+    getSketchToolDefinition(session.activeTool).lifecycle === "chain"
+  );
+}
+
+/**
+ * The committed prefix of a chain: the longest prefix of its segments whose
+ * entities all exist in the definition (T11-D12).
+ */
+export function getCommittedSketchToolChainSegments(
+  chain: SketchToolChain,
+  definition: SketchDefinition,
+): SketchToolChain["segments"] {
+  const missing = chain.segments.findIndex(
+    (segment) =>
+      !definition.entities.some(
+        (entity) => entity.entityId === segment.entityId,
+      ),
+  );
+
+  return missing === -1 ? chain.segments : chain.segments.slice(0, missing);
+}
+
+/**
+ * Stages the next segment of a chain (T11-D11/D12): the draft starts at the
+ * anchor, the end point of the last committed segment (or the chain start
+ * when no segment is committed), at its current definition position. The
+ * anchor is the draft's start snap at that point (review A-4), so the next
+ * segment reuses its id. A chain start whose point no longer exists keeps
+ * only its position. The rubber band is restaged from `livePoint`.
+ */
+export function restageSketchToolChain(
+  session: SketchSessionState,
+  chain: SketchToolChain,
+): SketchSessionState {
+  if (!isDrawingSketchTool(session.activeTool)) {
+    return session;
+  }
+
+  // The last committed segment's current end point (review A-1), else the
+  // chain start.
+  const lastSegment = getCommittedSketchToolChainSegments(
+    chain,
+    session.definition,
+  ).at(-1);
+  const lastEntity = session.definition.entities.find(
+    (entity) => entity.entityId === lastSegment?.entityId,
+  );
+  const anchorPointId =
+    lastEntity?.kind === "lineSegment"
+      ? lastEntity.endPointId
+      : chain.start.pointId;
+  const anchorPoint = session.definition.points.find(
+    (point) => point.pointId === anchorPointId,
+  );
+  const anchor = anchorPoint?.position ?? chain.start.position;
+  const result = getSketchToolDefinition(session.activeTool).pointerMove({
+    state: {
+      status: "drawing",
+      pointerDownPoint: anchor,
+      livePoint: null,
+      placedPoints: [],
+      settings: session.toolSettings,
+      validationMessage: null,
+    },
+    point: session.livePoint ?? anchor,
+  });
+
+  return {
+    ...session,
+    toolChain: chain,
+    status: "drawing",
+    pointerDownPoint: anchor,
+    livePoint: result.state.livePoint,
+    toolPlacedPoints: result.state.placedPoints ?? [],
+    toolStagedEntities: withConstructionFlag(
+      result.stagedEntities,
+      session.constructionModifierActive,
+    ),
+    validationMessage: result.state.validationMessage,
+    toolPresentation: result.presentation,
+    activeSnap: null,
+    drawStartSnap: anchorPoint
+      ? createSketchPointAnchorSnap(anchorPoint.pointId, anchor)
+      : null,
+  };
+}
+
+/**
+ * A snap at an existing local point, for a draft that starts there: the
+ * commit reuses that point id and infers no constraint for it
+ * (`normalizeLinePatchEndpointReuse`, review A-4).
+ */
+function createSketchPointAnchorSnap(
+  pointId: SketchPointId,
+  position: SketchPoint,
+): SketchSnapCandidate {
+  return {
+    key: `endpoint:anchor:local-point:${pointId}`,
+    kind: "endpoint",
+    point: position,
+    rawPointer: position,
+    distance: 0,
+    priority: 0,
+    sources: [{ kind: "localPoint", pointId }],
+    preview: { label: "Endpoint", glyph: "endpoint" },
   };
 }
 

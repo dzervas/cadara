@@ -29,7 +29,11 @@ export interface ShortcutResolverEvent extends KeyboardShortcutEvent {
 export interface ShortcutResolverOptions {
   activeScopes: readonly ShortcutScope[];
   executeCommand: (command: ShortcutCommandDefinition) => void;
-  isCommandEnabled?: (command: ShortcutCommandDefinition) => boolean;
+  /** `target` is the keydown target, for commands that depend on focus. */
+  isCommandEnabled?: (
+    command: ShortcutCommandDefinition,
+    target?: EventTarget | null,
+  ) => boolean;
   isTextEditingTarget?: (target: EventTarget | null | undefined) => boolean;
   platform?: "mac" | "windows" | "linux";
 }
@@ -169,7 +173,7 @@ export class ShortcutResolver {
       return false;
     }
 
-    return options.isCommandEnabled?.(command) ?? true;
+    return options.isCommandEnabled?.(command, event.target) ?? true;
   }
 
   private canUseBinding(

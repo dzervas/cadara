@@ -74,11 +74,14 @@ import {
   createProfileTextEntityDefinition,
   createSplineEntityDefinition,
   withLiveSolveBasis,
+  getCommittedSketchToolChainSegments,
   getSessionSketchId,
   getSketchSessionRegionDiagnostics,
   getTargetKey,
   isDrawingSketchTool,
+  isSketchToolChainActive,
   rebuildSessionCommitRequest,
+  restageSketchToolChain,
   withConstructionFlag,
 } from "./internals";
 import { getSketchSessionDisplaySolvedSnapshot } from "./display";
@@ -662,10 +665,13 @@ export function beginSketchEditTool(
 }
 
 export function beginSketchTool(
-  session: SketchSessionState,
+  current: SketchSessionState,
   toolId: SketchAuthoringToolId,
   initialSelectedTargets: readonly PrimitiveRef[] = [],
 ): SketchSessionState {
+  // Any (re)activation ends an active Line chain (T11-D14, review A-7).
+  const session = current.toolChain ? { ...current, toolChain: null } : current;
+
   if (toolId === "construction") {
     return beginSketchConstructionTool(session);
   }
@@ -752,8 +758,7 @@ export function escapeSketchDrawing(
   session: SketchSessionState,
 ): SketchDrawingEscapeStep {
   return resolveSketchDrawingEscapeStep({
-    // T11h adds the Line chain; until then Line commits without one.
-    chainActive: false,
+    chainActive: isSketchToolChainActive(session),
     // T11i adds fit-point finalize; until then the spline commits on its
     // third click, so a spline draft with 1-2 points cancels.
     finalizable: false,
@@ -808,6 +813,7 @@ export function clearActiveSketchTool(
     activeDrag: null,
     activeSnap: null,
     drawStartSnap: null,
+    toolChain: null,
   };
 }
 
@@ -2143,7 +2149,7 @@ export function startSketchDraw(
     result.state.validationMessage === null
   ) {
     return commitSketchDraw(
-      { ...session, drawStartSnap: null },
+      { ...session, drawStartSnap: null, toolChain: null },
       toolDefinition,
       result,
       startPoint,
@@ -2167,6 +2173,8 @@ export function startSketchDraw(
     toolPresentation: withSnapPresentation(result.presentation, snap.candidate),
     activeSnap: snap.candidate,
     drawStartSnap: snap.candidate,
+    // A draft started from idle never continues a chain (review R-1).
+    toolChain: null,
   };
 }
 
@@ -2433,7 +2441,7 @@ function commitSketchDraw(
     ...definitionPatch,
   });
 
-  return withLiveSolveBasis(
+  const committed = withLiveSolveBasis(
     {
       ...session,
       toolStagedEntities: [],
@@ -2468,6 +2476,55 @@ function commitSketchDraw(
     },
     history.definition,
   );
+
+  return toolDefinition.lifecycle === "chain"
+    ? continueSketchToolChain(session, committed, definitionPatch, startPoint)
+    : committed;
+}
+
+/**
+ * After a committed chain segment (T11-D11): the chain continues from the
+ * segment's end point, whose id the next segment reuses. A new commit after
+ * Undo first drops the records past the committed prefix (T11-D12). A
+ * segment ending on the chain's own first point closes the loop: the chain
+ * ends and the tool stays armed (Q1).
+ */
+function continueSketchToolChain(
+  before: SketchSessionState,
+  committed: SketchSessionState,
+  patch: SketchToolCommitContribution,
+  startPosition: SketchPoint,
+): SketchSessionState {
+  const segment = patch.entities.find(
+    (entity) => entity.kind === "lineSegment",
+  );
+  if (segment?.kind !== "lineSegment") {
+    return committed;
+  }
+
+  const prefix = before.toolChain
+    ? getCommittedSketchToolChainSegments(before.toolChain, before.definition)
+    : [];
+  const start =
+    before.toolChain && prefix.length > 0
+      ? before.toolChain.start
+      : { pointId: segment.startPointId, position: startPosition };
+
+  if (segment.endPointId === start.pointId) {
+    return { ...committed, toolChain: null };
+  }
+
+  return restageSketchToolChain(committed, {
+    start,
+    segments: [
+      ...prefix,
+      {
+        entityId: segment.entityId,
+        startPointId: segment.startPointId,
+        endPointId: segment.endPointId,
+      },
+    ],
+  });
 }
 
 export function resolveSessionSnap(

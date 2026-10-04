@@ -261,6 +261,7 @@ export function deleteSelectedSketchGeometry(
       activeStyleFocus: null,
       activeSnap: null,
       drawStartSnap: null,
+      toolChain: null,
       sequence: nextSession.sequence + 1,
     };
   }
@@ -417,6 +418,7 @@ export function deleteSelectedSketchGeometry(
     activeStyleFocus: null,
     activeSnap: null,
     drawStartSnap: null,
+    toolChain: null,
     sequence: rebuiltSession.sequence,
   };
 }

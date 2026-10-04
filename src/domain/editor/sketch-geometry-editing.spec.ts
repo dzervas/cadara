@@ -887,6 +887,9 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [0, 0]);
     session = acceptSketchDraw(session, [1, 0]);
+    // The line chain continues after the segment (T11-D11); ending it (the
+    // Escape step restarts the armed Line) leaves an idle drawing tool.
+    session = beginSketchTool(session, "line");
 
     const point = session.definition.points[0];
     expect(point, "Expected authored point from line creation.").toBeTruthy();

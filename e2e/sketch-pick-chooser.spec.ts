@@ -320,7 +320,8 @@ async function openOverlapSketch(workbench: SketchWorkbenchHarness) {
     .toBe("Nothing selected");
 }
 
-/** A line from (850, 450) to (1050, 450), on the X axis; Escape leaves Line. */
+/** A line from (850, 450) to (1050, 450), on the X axis; the first Escape ends the
+ * line chain (T11h), the second leaves Line. */
 async function drawAxisLine(workbench: SketchWorkbenchHarness, staged: string) {
   await workbench.activateTool("Create line geometry.");
   await workbench.clickViewportAt({ x: 850, y: 450 });
@@ -329,6 +330,16 @@ async function drawAxisLine(workbench: SketchWorkbenchHarness, staged: string) {
     .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
     .toContain(staged);
   await workbench.page.keyboard.press("Escape");
+  await workbench.page.keyboard.press("Escape");
+  await expect
+    .poll(
+      () =>
+        workbench.page.evaluate(
+          () => window.__cadaraDebug?.getState()?.command ?? "",
+        ),
+      { message: "Line is left for Select.", timeout: 10_000 },
+    )
+    .toBe("sketch");
 }
 
 async function expectHover(

@@ -6,13 +6,19 @@ import type {
 import { getRegisteredSketchToolDefinitions } from "@/core/sketch-tools/registry";
 import {
   acceptSketchDraw,
+  beginSketchAnnotationEdit,
   beginSketchTool,
   confirmSketchDrawing,
   createNewSketchSession,
+  deleteSelectedSketchGeometry,
   escapeSketchDrawing,
+  focusSketchStyleTool,
   resolveSketchDrawingEscapeStep,
   startSketchDraw,
+  updateSketchPointer,
 } from "@/domain/editor/sketch-session";
+import { getSketchToolMarkerPointIds } from "@/domain/editor/sketch-session/display";
+import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
@@ -220,3 +226,552 @@ test("a single Point click keeps snap inference: coincident on an endpoint, midp
     },
   ]);
 });
+
+// T11h (T11-D11, D12, Q1): the Line chain and its reconcile on restore.
+describe("Line chain (T11-D11)", () => {
+  type Session = ReturnType<typeof armed>;
+
+  function lines(session: Session) {
+    return session.definition.entities.flatMap((entity) =>
+      entity.kind === "lineSegment" ? [entity] : [],
+    );
+  }
+
+  function anchorPointIds(session: Session) {
+    return (session.drawStartSnap?.sources ?? []).flatMap((source) =>
+      source.kind === "localPoint" ? [source.pointId] : [],
+    );
+  }
+
+  function draw(session: Session, points: readonly [number, number][]) {
+    return points.reduce(
+      (current, point) =>
+        current.status === "drawing"
+          ? acceptSketchDraw(current, point)
+          : startSketchDraw(current, point),
+      session,
+    );
+  }
+
+  test("continues from each committed end, reusing its point id with no join constraint", () => {
+    const session = draw(armed("line"), [
+      [20, 20],
+      [30, 21],
+      [31, 31],
+      [42, 33],
+    ]);
+    const [first, second, third] = lines(session);
+
+    expect(
+      lines(session),
+      "Three clicks after the start make three segments.",
+    ).toHaveLength(3);
+    expect(
+      [second?.startPointId, third?.startPointId],
+      "Each segment starts on the previous segment's end point (structural join).",
+    ).toEqual([first?.endPointId, second?.endPointId]);
+    expect(
+      session.definition.points,
+      "4 points for 3 joined segments.",
+    ).toHaveLength(4);
+    expect(
+      session.definition.constraints.filter(
+        (constraint) => constraint.kind === "coincident",
+      ),
+      "A structural join needs no coincident constraint.",
+    ).toEqual([]);
+    expect(session.activeTool, "Line stays armed.").toBe("line");
+    expect(session.status, "The next segment is staged.").toBe("drawing");
+    expect(session.pointerDownPoint, "The anchor is the last end.").toEqual([
+      42, 33,
+    ]);
+    expect(
+      anchorPointIds(session),
+      "The anchor is a local-point start snap (review A-4).",
+    ).toEqual([third?.endPointId]);
+    expect(
+      [...getSketchToolMarkerPointIds(session)],
+      "The anchor point's marker shows (T11f seam).",
+    ).toEqual([third?.endPointId]);
+    expect(
+      session.toolChain?.segments.map((segment) => segment.entityId),
+    ).toEqual([first, second, third].map((line) => line?.entityId));
+    expect(escapeSketchDrawing(session), "Escape ends the chain.").toBe(
+      "endChain",
+    );
+    expect(confirmSketchDrawing(session), "Enter ends the chain.").toBe(
+      "endChain",
+    );
+  });
+
+  test("a click on the anchor (zero length) is ignored and the chain continues", () => {
+    const chained = draw(armed("line"), [
+      [20, 20],
+      [30, 20],
+    ]);
+    const clicked = acceptSketchDraw(chained, [30, 20]);
+
+    expect(clicked.definition, "Nothing is committed.").toBe(
+      chained.definition,
+    );
+    expect(clicked.status).toBe("drawing");
+    expect(clicked.pointerDownPoint).toEqual([30, 20]);
+    expect(clicked.toolChain).toBe(chained.toolChain);
+    expect(anchorPointIds(clicked)).toEqual(anchorPointIds(chained));
+
+    const next = acceptSketchDraw(clicked, [30, 30]);
+    expect(
+      lines(next)[1]?.startPointId,
+      "The chain goes on from the same anchor.",
+    ).toBe(lines(chained)[0]?.endPointId);
+
+    // The first segment's start behaves the same: no zero-length line.
+    const started = startSketchDraw(armed("line"), [5, 5]);
+    const again = acceptSketchDraw(started, [5, 5]);
+    expect(again.definition).toBe(started.definition);
+    expect(again.status).toBe("drawing");
+    expect(again.pointerDownPoint).toEqual([5, 5]);
+  });
+
+  test("closing onto the chain's first point ends the chain and keeps Line armed (Q1)", () => {
+    const closed = draw(armed("line"), [
+      [20, 20],
+      [30, 20],
+      [30, 30],
+      [20, 30],
+      [20, 20],
+    ]);
+    const segments = lines(closed);
+
+    expect(segments).toHaveLength(4);
+    expect(
+      segments[3]?.endPointId,
+      "The closing segment ends on the chain's first point id.",
+    ).toBe(segments[0]?.startPointId);
+    expect(
+      closed.definition.points,
+      "A closed 4-segment loop has 4 points.",
+    ).toHaveLength(4);
+    expect(closed.activeTool, "Line stays armed.").toBe("line");
+    expect(closed.status, "The chain ended.").toBe("idle");
+    expect(closed.toolChain ?? null).toBe(null);
+    expect(escapeSketchDrawing(closed), "The next Escape leaves Line.").toBe(
+      "exitTool",
+    );
+    expect(confirmSketchDrawing(closed)).toBe(null);
+  });
+
+  test("only a placed start (no segment yet) is a draft: Escape cancels, Enter does nothing", () => {
+    const started = startSketchDraw(armed("line"), [5, 5]);
+
+    expect(started.toolChain ?? null).toBe(null);
+    expect(escapeSketchDrawing(started)).toBe("cancelDraft");
+    expect(confirmSketchDrawing(started)).toBe(null);
+  });
+
+  test("re-activating Line restarts it and ends the chain (review A-7)", () => {
+    const chained = draw(armed("line"), [
+      [20, 20],
+      [30, 20],
+    ]);
+    const restarted = beginSketchTool(chained, "line");
+
+    expect(restarted.activeTool).toBe("line");
+    expect(restarted.status).toBe("idle");
+    expect(restarted.toolChain ?? null).toBe(null);
+    expect(restarted.drawStartSnap).toBe(null);
+    expect(restarted.definition).toBe(chained.definition);
+  });
+});
+
+describe("Line chain reconcile on restore (T11-D12)", () => {
+  type Session = ReturnType<typeof armed>;
+
+  function lineIds(session: Session) {
+    return session.definition.entities.flatMap((entity) =>
+      entity.kind === "lineSegment" ? [entity.entityId] : [],
+    );
+  }
+
+  function anchorPointIds(session: Session) {
+    return (session.drawStartSnap?.sources ?? []).flatMap((source) =>
+      source.kind === "localPoint" ? [source.pointId] : [],
+    );
+  }
+
+  /** The definitions after the start click and after each of 3 segments. */
+  function chainOfThree() {
+    const definitions = [];
+    let session = startSketchDraw(armed("line"), [20, 20]);
+    definitions.push(session.definition);
+    for (const point of [
+      [30, 21],
+      [31, 31],
+      [42, 33],
+    ] as const) {
+      session = acceptSketchDraw(session, point);
+      definitions.push(session.definition);
+    }
+    return { session: updateSketchPointer(session, [50, 40]), definitions };
+  }
+
+  test("Undo moves the anchor back to the previous end; Redo re-extends; records are kept", () => {
+    const { session, definitions } = chainOfThree();
+    const segments = session.toolChain!.segments;
+
+    const undone = rebuildSessionForDefinition(session, {
+      definition: definitions[2]!,
+    });
+    expect(undone.activeTool, "Line stays armed.").toBe("line");
+    expect(undone.status).toBe("drawing");
+    expect(
+      undone.pointerDownPoint,
+      "The anchor is the 2nd segment's end.",
+    ).toEqual([31, 31]);
+    expect(anchorPointIds(undone)).toEqual([segments[1]!.endPointId]);
+    expect(
+      undone.toolChain?.segments,
+      "The records are kept for Redo.",
+    ).toEqual(segments);
+    expect(
+      undone.toolStagedEntities,
+      "The rubber band is restaged from the live pointer.",
+    ).toMatchObject([{ kind: "line", start: [31, 31], end: [50, 40] }]);
+    expect(undone.toolStagedEntities).toHaveLength(1);
+    expect(escapeSketchDrawing(undone)).toBe("endChain");
+
+    const twice = rebuildSessionForDefinition(undone, {
+      definition: definitions[1]!,
+    });
+    expect(twice.pointerDownPoint).toEqual([30, 21]);
+    expect(anchorPointIds(twice)).toEqual([segments[0]!.endPointId]);
+
+    const redone = rebuildSessionForDefinition(twice, {
+      definition: definitions[2]!,
+    });
+    expect(redone.pointerDownPoint, "Redo re-extends the prefix.").toEqual([
+      31, 31,
+    ]);
+    expect(anchorPointIds(redone)).toEqual([segments[1]!.endPointId]);
+    expect(redone.toolChain?.segments).toEqual(segments);
+  });
+
+  test("a new commit after Undo truncates the records to the committed prefix", () => {
+    const { session, definitions } = chainOfThree();
+    const segments = session.toolChain!.segments;
+    const undone = rebuildSessionForDefinition(session, {
+      definition: definitions[2]!,
+    });
+
+    const next = acceptSketchDraw(undone, [25, 40]);
+    const added = next.definition.entities.find(
+      (entity) =>
+        entity.kind === "lineSegment" &&
+        !segments.some((segment) => segment.entityId === entity.entityId),
+    );
+    if (added?.kind !== "lineSegment") throw Error("Expected the new segment.");
+
+    expect(
+      added.startPointId,
+      "The new segment starts on the restored anchor.",
+    ).toBe(segments[1]!.endPointId);
+    expect(
+      next.toolChain?.segments,
+      "Records past the prefix are dropped.",
+    ).toEqual([
+      segments[0],
+      segments[1],
+      {
+        entityId: added.entityId,
+        startPointId: added.startPointId,
+        endPointId: added.endPointId,
+      },
+    ]);
+    expect(next.toolChain?.start).toEqual(session.toolChain?.start);
+  });
+
+  test("Undo past the first segment keeps Line armed with only the chain start; its deleted point id is dropped", () => {
+    const { session, definitions } = chainOfThree();
+    const firstStartId = session.toolChain!.start.pointId;
+
+    const undone = rebuildSessionForDefinition(session, {
+      definition: definitions[0]!,
+    });
+    expect(lineIds(undone)).toEqual([]);
+    expect(undone.activeTool).toBe("line");
+    expect(undone.status, "Only the chain start is placed.").toBe("drawing");
+    expect(undone.pointerDownPoint).toEqual([20, 20]);
+    expect(
+      undone.drawStartSnap,
+      "The start point no longer exists, so no snap keeps its id.",
+    ).toBe(null);
+
+    const next = acceptSketchDraw(undone, [30, 20]);
+    const [line] = next.definition.entities;
+    if (line?.kind !== "lineSegment") throw Error("Expected one line.");
+    expect(line.startPointId, "A deleted point id is never reused.").not.toBe(
+      firstStartId,
+    );
+    expect(
+      [line.startPointId, line.endPointId].map(
+        (pointId) =>
+          next.definition.points.find((point) => point.pointId === pointId)
+            ?.position,
+      ),
+    ).toEqual([
+      [20, 20],
+      [30, 20],
+    ]);
+    expect(
+      next.toolChain?.start,
+      "The chain restarts from the new segment.",
+    ).toEqual({
+      pointId: line.startPointId,
+      position: [20, 20],
+    });
+  });
+
+  test("a chain started on an existing point keeps that id after Undo past its first segment", () => {
+    const existing = acceptSketchDraw(
+      startSketchDraw(armed("line"), [0, 0]),
+      [10, 0],
+    );
+    const fixtureLine = existing.definition.entities[0];
+    if (fixtureLine?.kind !== "lineSegment") throw Error("Expected a line.");
+    const before = beginSketchTool(existing, "line");
+    const chained = acceptSketchDraw(startSketchDraw(before, [10, 0]), [20, 5]);
+    expect(chained.toolChain?.start.pointId).toBe(fixtureLine.endPointId);
+
+    const undone = rebuildSessionForDefinition(chained, {
+      definition: before.definition,
+    });
+    expect(anchorPointIds(undone)).toEqual([fixtureLine.endPointId]);
+    const next = acceptSketchDraw(undone, [20, -5]);
+    expect(next.definition.entities.at(-1)).toMatchObject({
+      kind: "lineSegment",
+      startPointId: fixtureLine.endPointId,
+    });
+  });
+
+  test("a discrete draft keeps its placed position but drops a start snap whose point was undone", () => {
+    const withLine = acceptSketchDraw(
+      startSketchDraw(armed("line"), [0, 0]),
+      [10, 0],
+    );
+    const circleDraft = startSketchDraw(
+      beginSketchTool(withLine, "circle"),
+      [10, 0],
+    );
+    expect(
+      circleDraft.drawStartSnap?.sources.some(
+        (source) =>
+          source.kind === "localPoint" || source.kind === "localEntity",
+      ),
+      "The circle centre snapped onto the line's end.",
+    ).toBe(true);
+
+    const undone = rebuildSessionForDefinition(circleDraft, {
+      definition: { ...withLine.definition, ...emptyDefinitionGeometry() },
+    });
+    expect(undone.status, "The draft is kept.").toBe("drawing");
+    expect(undone.pointerDownPoint, "Its raw position is kept.").toEqual([
+      10, 0,
+    ]);
+    expect(undone.drawStartSnap, "A snap on a missing point is dropped.").toBe(
+      null,
+    );
+
+    const committed = acceptSketchDraw(undone, [13, 0]);
+    const knownPointIds = new Set(
+      committed.definition.points.map((point) => point.pointId),
+    );
+    expect(
+      committed.definition.constraints
+        .flatMap((constraint) =>
+          constraint.kind === "coincident" ? constraint.pointIds : [],
+        )
+        .filter((pointId) => !knownPointIds.has(pointId)),
+      "No inferred constraint references an undone point.",
+    ).toEqual([]);
+    expect(committed.definition.entities.map((entity) => entity.kind)).toEqual([
+      "circle",
+    ]);
+  });
+});
+
+// T11h review fixes (R-1, A-1, A-2, A-5, A-6).
+describe("Line chain review fixes", () => {
+  type Session = ReturnType<typeof armed>;
+
+  function chained() {
+    return acceptSketchDraw(
+      acceptSketchDraw(startSketchDraw(armed("line"), [20, 20]), [30, 20]),
+      [30, 30],
+    );
+  }
+
+  function anchorPointIds(session: Session) {
+    return (session.drawStartSnap?.sources ?? []).flatMap((source) =>
+      source.kind === "localPoint" ? [source.pointId] : [],
+    );
+  }
+
+  function expectNoChain(session: Session, message: string) {
+    expect(session.toolChain ?? null, message).toBe(null);
+    expect(escapeSketchDrawing(session), message).not.toBe("endChain");
+    expect(confirmSketchDrawing(session), message).toBe(null);
+    const rebuilt = rebuildSessionForDefinition(session, {
+      definition: session.definition,
+    });
+    expect(rebuilt.status, `${message}: a restore does not restage`).toBe(
+      session.status,
+    );
+    expect(rebuilt.toolStagedEntities).toEqual([]);
+  }
+
+  test("R-1: a style focus mid-chain ends the chain; Escape leaves, Enter does nothing, a restore does not restage", () => {
+    const focused = focusSketchStyleTool(chained(), [], "stroke");
+
+    expect(focused.activeTool, "premise: Line stays the active tool").toBe(
+      "line",
+    );
+    expectNoChain(focused, "style focus");
+    expect(escapeSketchDrawing(focused)).toBe("exitTool");
+  });
+
+  test("R-1: selecting a non-editable annotation mid-chain ends the chain", () => {
+    const session = chained();
+    const line = session.definition.entities[0]!;
+    const withConstraint: Session = {
+      ...session,
+      definition: {
+        ...session.definition,
+        constraintIds: ["constraint_horizontal"],
+        constraints: [
+          {
+            constraintId: "constraint_horizontal",
+            kind: "horizontal",
+            label: "Horizontal",
+            entityId: line.entityId,
+          },
+        ],
+      },
+    };
+    const selected = beginSketchAnnotationEdit(withConstraint, {
+      kind: "constraint",
+      sketchId: line.target.sketchId,
+      constraintId: "constraint_horizontal",
+    });
+
+    expect(selected.activeAnnotationEdit, "premise: not editable").toBe(null);
+    expect(selected.activeTool, "premise: Line stays the active tool").toBe(
+      "line",
+    );
+    expectNoChain(selected, "annotation select");
+  });
+
+  test("R-1: a draft started from idle never continues a stale chain; Undo anchors at the fresh start", () => {
+    const old = chained();
+    // Any path that leaves stale records on an idle Line.
+    const stale: Session = {
+      ...old,
+      status: "idle",
+      pointerDownPoint: null,
+      livePoint: null,
+      toolStagedEntities: [],
+      drawStartSnap: null,
+    };
+    const started = startSketchDraw(stale, [100, 100]);
+    expect(started.toolChain ?? null).toBe(null);
+    const next = acceptSketchDraw(started, [110, 100]);
+    const fresh = next.definition.entities.at(-1);
+    if (fresh?.kind !== "lineSegment") throw Error("Expected a line.");
+
+    expect(next.toolChain?.start.pointId).toBe(fresh.startPointId);
+    expect(next.toolChain?.segments).toHaveLength(1);
+
+    const undone = rebuildSessionForDefinition(next, {
+      definition: started.definition,
+    });
+    expect(
+      undone.pointerDownPoint,
+      "Undo of the fresh segment anchors at the fresh start, not the old chain's end.",
+    ).toEqual([100, 100]);
+  });
+
+  test("A-6: deleting geometry mid-chain clears the chain", () => {
+    const session = chained();
+    const deleted = deleteSelectedSketchGeometry(session, [
+      session.definition.entities[0]!.target,
+    ]);
+
+    expect(deleted.activeTool).toBe(null);
+    expect(deleted.toolChain ?? null).toBe(null);
+  });
+
+  test("A-5: the construction toggle mid-chain ends the chain; Line re-armed starts afresh", () => {
+    const session = chained();
+    const toggled = beginSketchTool(session, "construction");
+
+    expect(toggled.toolChain ?? null).toBe(null);
+    expect(toggled.definition).toBe(session.definition);
+    const rearmed = beginSketchTool(toggled, "line");
+    expect(rearmed.status).toBe("idle");
+    expect(rearmed.toolChain ?? null).toBe(null);
+    expect(rearmed.constructionModifierActive).toBe(true);
+  });
+
+  test("A-1: the anchor follows the last segment's current end point id", () => {
+    const session = chained();
+    const last = session.definition.entities.at(-1);
+    if (last?.kind !== "lineSegment") throw Error("Expected a line.");
+    const first = session.definition.entities[0];
+    if (first?.kind !== "lineSegment") throw Error("Expected a line.");
+    // The last segment now ends on the first segment's start point.
+    const replaced = {
+      ...session.definition,
+      entities: session.definition.entities.map((entity) =>
+        entity.entityId === last.entityId
+          ? { ...last, endPointId: first.startPointId }
+          : entity,
+      ),
+    };
+
+    const restored = rebuildSessionForDefinition(session, {
+      definition: replaced,
+    });
+    expect(restored.pointerDownPoint).toEqual([20, 20]);
+    expect(anchorPointIds(restored)).toEqual([first.startPointId]);
+  });
+
+  test("A-2: a zero-length chain rubber band is not an error", () => {
+    const session = chained();
+    expect(session.validationMessage, "right after a commit").toBe(null);
+    expect(session.toolPresentation?.validation ?? []).toEqual([]);
+
+    const ignored = acceptSketchDraw(session, [30, 30]);
+    expect(ignored.definition).toBe(session.definition);
+    expect(ignored.validationMessage, "after an ignored anchor click").toBe(
+      null,
+    );
+    expect(ignored.toolPresentation?.validation ?? []).toEqual([]);
+    expect(ignored.status).toBe("drawing");
+
+    const moved = updateSketchPointer(ignored, [40, 35]);
+    expect(moved.validationMessage).toBe(null);
+    expect(moved.toolStagedEntities).toMatchObject([
+      { kind: "line", start: [30, 30], end: [40, 35] },
+    ]);
+  });
+});
+
+function emptyDefinitionGeometry() {
+  return {
+    points: [],
+    pointIds: [],
+    entities: [],
+    entityIds: [],
+    constraints: [],
+    constraintIds: [],
+  };
+}

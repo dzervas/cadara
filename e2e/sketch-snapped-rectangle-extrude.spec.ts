@@ -36,8 +36,9 @@ test("a snapped rectangle closes through its declared closing corner after a dim
   ];
   // The bottom side overshoots the closing corner; the last side's end snaps
   // onto the bottom side's body, which declares the closing corner as a
-  // point-on-curve incidence (the line tool shares snapped endpoints, so the
-  // other corners are shared points).
+  // point-on-curve incidence. Line chains its sides (T11h): each side's
+  // "from" click lands on the chain anchor, a zero-length click that is
+  // ignored, so the other corners are shared points.
   await workbench.activateTool("Create line geometry.");
   const sides = [
     [{ x: 580, y: 420 }, corners[1]!],
@@ -122,13 +123,31 @@ test("a snapped rectangle closes through its declared closing corner after a dim
               (end[1] - start[1]) * (foot[0] - start[0]),
           ) / Math.hypot(end[0] - start[0], end[1] - start[1])
         : null;
+    const sides =
+      definition?.entities?.filter(
+        (entity) => entity.startPointId && entity.endPointId,
+      ) ?? [];
     return {
+      sides: sides.map((side) => [side.startPointId, side.endPointId]),
       points: definition?.points?.length ?? 0,
       pointOnCurve: incidences.length,
       kinds: definition?.constraints?.map((constraint) => constraint.kind),
       footResidual,
     };
   }, MODELING_OPERATION_HISTORY_STORAGE_KEY);
+  // T11h: each side after the first continues the line chain from the
+  // previous side's end, so consecutive sides share the identical point id.
+  expect(committed.sides, "Four line sides are committed.").toHaveLength(4);
+  for (const index of [1, 2, 3]) {
+    expect(
+      committed.sides[index]![0],
+      `Side ${index + 1} starts on side ${index}'s end point id.`,
+    ).toBe(committed.sides[index - 1]![1]);
+  }
+  expect(
+    committed.points,
+    "Five points: the overshooting start, three shared corners and the closing corner.",
+  ).toBe(5);
   expect(
     committed.pointOnCurve,
     `The snapped closing corner is declared as a point-on-curve incidence (${committed.kinds}).`,

@@ -38,7 +38,7 @@ import { validateShortcutOverrideUpdate } from "@/hooks/shortcut-validation";
 
 export interface ShortcutCommandHandler {
   execute: () => void;
-  isEnabled?: () => boolean;
+  isEnabled?: (target?: EventTarget | null) => boolean;
 }
 
 export type ShortcutCommandHandlers = Partial<
@@ -115,8 +115,8 @@ export function ShortcutProvider({
       resolver.handleKeyDown(event, {
         activeScopes,
         executeCommand: (command) => commandHandlers[command.id]?.execute(),
-        isCommandEnabled: (command) =>
-          commandHandlers[command.id]?.isEnabled?.() ??
+        isCommandEnabled: (command, target) =>
+          commandHandlers[command.id]?.isEnabled?.(target) ??
           Boolean(commandHandlers[command.id]),
         isTextEditingTarget,
       });

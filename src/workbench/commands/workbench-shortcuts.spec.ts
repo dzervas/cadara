@@ -178,14 +178,12 @@ test("src/workbench/commands/workbench-shortcuts.spec.ts", () => {
     "Plain Enter is not a tool shortcut (Shift+Enter is Finish Sketch).",
   ).toEqual([]);
 
-  // Review A-5(a): when Enter applies, the resolver consumes it even with a
-  // toolbar button focused, so the browser does not also activate the button
-  // and restart the armed tool. The applicable step is faked until
-  // T11h/T11i make one reachable.
+  // Review A-5(a): when Enter applies (an active Line chain, T11h), the
+  // resolver consumes it even with a toolbar button focused, so the browser
+  // does not also activate the button and restart the armed tool.
   const enterOnButtonFixture = createFixture({
-    confirmApplies: true,
     mode: "sketch",
-    sketchSession: createSketchSession("spline"),
+    sketchSession: createLineChainSession(),
   });
   let buttonEnterPrevented = 0;
   const enterOnButtonResult = enterOnButtonFixture.press({
@@ -201,8 +199,90 @@ test("src/workbench/commands/workbench-shortcuts.spec.ts", () => {
     "An applicable Enter on a focused toolbar button should be prevented once, cancelling the native button activation.",
   ).toBe(1);
   expect(
+    enterOnButtonFixture.dispatchedEvents.map((event) => event.type),
+    "Enter with an active Line chain dispatches the confirm step (T11h).",
+  ).toEqual(["sketch.confirmRequested"]);
+  expect(
     enterOnButtonFixture.triggeredToolIds,
     "The shortcut layer should not re-activate the armed tool.",
+  ).toEqual([]);
+
+  // T11g review V-1: Enter on a menu item (the pick chooser, a toolbar
+  // dropdown) or on a dialog button belongs to that control, even while a
+  // chain is active: not consumed, not prevented, nothing dispatched.
+  for (const role of ["menu", "dialog"] as const) {
+    const enterInOverlayFixture = createFixture({
+      mode: "sketch",
+      sketchSession: createLineChainSession(),
+    });
+    let overlayEnterPrevented = false;
+    const overlayResult = enterInOverlayFixture.press({
+      key: "Enter",
+      target: createButtonInsideRoleTarget(role),
+      preventDefault: () => {
+        overlayEnterPrevented = true;
+      },
+    });
+    expect(
+      overlayResult.handled || overlayEnterPrevented,
+      `Enter on a button inside [role=${role}] keeps its native activation.`,
+    ).toBe(false);
+    expect(
+      enterInOverlayFixture.dispatchedEvents,
+      `Enter inside [role=${role}] must not end the chain.`,
+    ).toEqual([]);
+  }
+
+  // T11h review A-3: Enter is consumed on a focused toolbar button (above),
+  // the canvas and the page body; any other focused button (sidebar,
+  // inspector, feature tree) keeps its native Enter.
+  for (const [name, target] of [
+    ["canvas", createTarget([{ tagName: "CANVAS" }, { tagName: "MAIN" }])],
+    ["page body", createTarget([{ tagName: "BODY" }])],
+  ] as const) {
+    const enterOnSurfaceFixture = createFixture({
+      mode: "sketch",
+      sketchSession: createLineChainSession(),
+    });
+    let surfaceEnterPrevented = 0;
+    expect(
+      enterOnSurfaceFixture.press({
+        key: "Enter",
+        target,
+        preventDefault: () => {
+          surfaceEnterPrevented += 1;
+        },
+      }).commandId,
+      `Enter on the ${name} ends the chain.`,
+    ).toBe("editor.confirm");
+    expect(surfaceEnterPrevented).toBe(1);
+    expect(
+      enterOnSurfaceFixture.dispatchedEvents.map((event) => event.type),
+    ).toEqual(["sketch.confirmRequested"]);
+  }
+  const enterOnSidebarFixture = createFixture({
+    mode: "sketch",
+    sketchSession: createLineChainSession(),
+  });
+  let sidebarEnterPrevented = false;
+  const sidebarResult = enterOnSidebarFixture.press({
+    key: "Enter",
+    target: createTarget([
+      { tagName: "BUTTON" },
+      { tagName: "LI", role: "treeitem" },
+      { tagName: "ASIDE" },
+    ]),
+    preventDefault: () => {
+      sidebarEnterPrevented = true;
+    },
+  });
+  expect(
+    sidebarResult.handled || sidebarEnterPrevented,
+    "Enter on a focused non-toolbar button keeps its native activation.",
+  ).toBe(false);
+  expect(
+    enterOnSidebarFixture.dispatchedEvents,
+    "Enter on a non-toolbar button must not end the chain.",
   ).toEqual([]);
 
   const escapeStyleFocusFixture = createFixture({
@@ -348,7 +428,6 @@ test("src/workbench/commands/workbench-shortcuts.spec.ts", () => {
 
 interface FixtureOptions {
   canRedo?: boolean;
-  confirmApplies?: boolean;
   canUndo?: boolean;
   mode: EditorViewState["mode"];
   selection?: EditorViewState["selection"];
@@ -357,7 +436,6 @@ interface FixtureOptions {
 
 function createFixture({
   canRedo = true,
-  confirmApplies = false,
   canUndo = true,
   mode,
   selection = [],
@@ -389,12 +467,6 @@ function createFixture({
     selection,
     sketchSession,
   });
-  if (confirmApplies) {
-    commandHandlers["editor.confirm"] = {
-      ...commandHandlers["editor.confirm"]!,
-      isEnabled: () => true,
-    };
-  }
   const registry = createShortcutCommandRegistry(
     getShortcutCommandDefinitions(),
   );
@@ -414,8 +486,8 @@ function createFixture({
       return resolver.handleKeyDown(event, {
         activeScopes: getWorkbenchShortcutActiveScopes(mode),
         executeCommand: (command) => commandHandlers[command.id]?.execute(),
-        isCommandEnabled: (command) =>
-          commandHandlers[command.id]?.isEnabled?.() ??
+        isCommandEnabled: (command, target) =>
+          commandHandlers[command.id]?.isEnabled?.(target) ??
           Boolean(commandHandlers[command.id]),
         isTextEditingTarget,
         platform: "windows",
@@ -454,6 +526,25 @@ function createSketchSession(
   } as EditorViewState["sketchSession"];
 }
 
+/** An armed Line with a committed segment: its chain is active (T11h). */
+function createLineChainSession() {
+  return {
+    ...createSketchSession("line"),
+    status: "drawing",
+    pointerDownPoint: [10, 0],
+    toolChain: {
+      start: { pointId: "sketch_point_1", position: [0, 0] },
+      segments: [
+        {
+          entityId: "sketch_entity_1",
+          startPointId: "sketch_point_1",
+          endPointId: "sketch_point_2",
+        },
+      ],
+    },
+  } as EditorViewState["sketchSession"];
+}
+
 function createTextTarget(target: {
   isContentEditable?: true;
   tagName?: string;
@@ -462,5 +553,38 @@ function createTextTarget(target: {
 }
 
 function createToolbarButtonTarget() {
-  return { tagName: "BUTTON" } as unknown as EventTarget;
+  return createTarget([
+    { tagName: "BUTTON" },
+    { tagName: "DIV", role: "toolbar" },
+  ]);
+}
+
+/** A button whose ancestor carries `role`. */
+function createButtonInsideRoleTarget(role: "menu" | "dialog") {
+  return createTarget([
+    { tagName: "BUTTON", role: role === "menu" ? "menuitem" : undefined },
+    { tagName: "DIV", role },
+  ]);
+}
+
+/**
+ * A fake element: `path` is the element then its ancestors. `closest`
+ * matches tag (`button`) and role (`[role="toolbar"]`) selector lists, like
+ * `Element.closest`.
+ */
+function createTarget(path: readonly { tagName: string; role?: string }[]) {
+  return {
+    tagName: path[0]!.tagName,
+    closest: (selectors: string) =>
+      path.find((node) =>
+        selectors
+          .split(",")
+          .map((selector) => selector.trim())
+          .some(
+            (selector) =>
+              selector === node.tagName.toLowerCase() ||
+              (node.role !== undefined && selector === `[role="${node.role}"]`),
+          ),
+      ) ?? null,
+  } as unknown as EventTarget;
 }
