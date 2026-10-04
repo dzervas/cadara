@@ -19,8 +19,15 @@ import {
   createSketchPickHint,
   getSketchPickHintText,
   getSketchPickTargetLabel,
+  handleSketchPickChooserKeyDown,
   SKETCH_PICK_HINT_LEFT_PX,
 } from "@/components/cad/sketch-pick-hint-model";
+import {
+  createShortcutCommandRegistry,
+  getShortcutCommandDefinitions,
+} from "@/core/shortcuts/commands";
+import { createEffectiveKeymap } from "@/core/shortcuts/keymap";
+import { createShortcutResolver } from "@/core/shortcuts/resolver";
 import {
   VIEWPORT_FLOATING_PANEL_LEFT_PX,
   VIEWPORT_SKETCH_TOOL_PANEL_WIDTH_PX,
@@ -142,4 +149,70 @@ test("the hint chip renders top-left, beside the tool panel slot, with a Chooseâ
   ).toBeGreaterThan(
     VIEWPORT_FLOATING_PANEL_LEFT_PX + VIEWPORT_SKETCH_TOOL_PANEL_WIDTH_PX,
   );
+});
+
+// T11e (UI lane). Seam: the chooser's keydown handler composed with the
+// window shortcut resolver in the order the browser runs them: the
+// chooser's window capture-phase listener, then (unless propagation was
+// stopped) the shortcut provider's bubble listener (review R-1).
+test("T11e review A-5(b)/R-1: the open chooser consumes Escape before the global editor.cancel; other keys pass", () => {
+  const registry = createShortcutCommandRegistry(
+    getShortcutCommandDefinitions(),
+  );
+  const resolver = createShortcutResolver(
+    registry,
+    createEffectiveKeymap(registry),
+  );
+  const makeEvent = (key: string) => {
+    const event = {
+      key,
+      defaultPrevented: false,
+      propagationStopped: false,
+      preventDefault() {
+        event.defaultPrevented = true;
+      },
+      stopPropagation() {
+        event.propagationStopped = true;
+      },
+    };
+    return event;
+  };
+  const resolve = (event: ReturnType<typeof makeEvent>) => {
+    const executed: string[] = [];
+    resolver.handleKeyDown(event, {
+      activeScopes: ["global", "sketch"],
+      executeCommand: (command) => executed.push(command.id),
+      isCommandEnabled: () => true,
+    });
+    return executed;
+  };
+  const press = (key: string, chooserOpen: boolean) => {
+    const event = makeEvent(key);
+    let closed = 0;
+    if (chooserOpen) handleSketchPickChooserKeyDown(event, () => (closed += 1));
+    return {
+      closed,
+      stopped: event.propagationStopped,
+      executed: event.propagationStopped ? [] : resolve(event),
+    };
+  };
+
+  expect(
+    press("Escape", false).executed,
+    "Control: without the chooser Escape runs editor.cancel.",
+  ).toEqual(["editor.cancel"]);
+  expect(
+    press("Escape", true),
+    "With the chooser open, Escape only closes it and stops there.",
+  ).toEqual({ closed: 1, stopped: true, executed: [] });
+  const prevented = makeEvent("Escape");
+  handleSketchPickChooserKeyDown(prevented, () => undefined);
+  expect(
+    resolve(prevented),
+    "Even if it reached the shortcut layer, the prevented Escape runs nothing.",
+  ).toEqual([]);
+  expect(
+    press("ArrowDown", true),
+    "Arrow keys are the menu's: no close, not stopped.",
+  ).toMatchObject({ closed: 0, stopped: false });
 });

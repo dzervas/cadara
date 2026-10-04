@@ -3,8 +3,9 @@ import {
   VIEWPORT_FLOATING_PANEL_LEFT_PX,
   VIEWPORT_SKETCH_TOOL_PANEL_WIDTH_PX,
 } from "@/components/cad/viewport-overlay-layout";
-import type { PrimitiveRef } from "@/core/editor/schema";
+import { getPrimitiveRefKey, type PrimitiveRef } from "@/core/editor/schema";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
+import type { SketchPickClass } from "@/domain/sketch-interaction/pick-stack";
 
 /**
  * The hint's left edge: in the top-left overlay row, past the sketch tool
@@ -57,6 +58,78 @@ export function getSketchPickHintText(hint: SketchPickHintModel) {
     `${hint.more} more here${hint.cycles ? " — click again to cycle" : ""}`,
     "Alt+click to choose",
   ].join(" · ");
+}
+
+/** One candidate chooser item (T11e, T11-D6): label plus class tag. */
+export interface SketchPickChooserItem {
+  readonly key: string;
+  readonly target: PrimitiveRef;
+  readonly label: string;
+  readonly tag: string;
+  /** Whether the target is selected now (marked, like the prototype's `.sel`). */
+  readonly selected: boolean;
+}
+
+const SKETCH_PICK_CLASS_TAGS: Record<SketchPickClass, string> = {
+  authoredPoint: "Point",
+  authoredCurve: "Curve",
+  constructionCurve: "Construction",
+  referencePoint: "Reference",
+  referenceCurve: "Reference",
+  region: "Region",
+  referenceImage: "Image",
+  face: "Face",
+  constructionPlane: "Plane",
+};
+
+/**
+ * The chooser items for the eligible candidates of a pick stack, in stack
+ * order; `classOf` gives each target's pick class.
+ */
+export function createSketchPickChooserItems({
+  targets,
+  classOf,
+  isSelected,
+  definition,
+}: {
+  targets: readonly PrimitiveRef[];
+  classOf: (target: PrimitiveRef) => SketchPickClass | undefined;
+  isSelected: (target: PrimitiveRef) => boolean;
+  definition: SketchDefinition;
+}): SketchPickChooserItem[] {
+  return targets.map((target) => {
+    const pickClass = classOf(target);
+    return {
+      key: getPrimitiveRefKey(target),
+      target,
+      label: getSketchPickTargetLabel(target, definition),
+      tag: pickClass ? SKETCH_PICK_CLASS_TAGS[pickClass] : "",
+      selected: isSelected(target),
+    };
+  });
+}
+
+/**
+ * The open chooser's keydown, run by a window capture-phase listener so it
+ * sees every key first, wherever focus is (T11e review R-1): Escape closes
+ * the chooser and is consumed (`preventDefault`, which the shortcut
+ * resolver skips, and `stopPropagation`), so it never also runs
+ * `editor.cancel` (review A-5(b)). Other keys pass; arrow keys and Enter
+ * are Mantine `Menu`'s.
+ */
+export function handleSketchPickChooserKeyDown(
+  event: {
+    readonly key: string;
+    preventDefault: () => void;
+    stopPropagation: () => void;
+  },
+  onClose: () => void,
+) {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    event.stopPropagation();
+    onClose();
+  }
 }
 
 /** A short human label for a pick-stack target. */

@@ -45,17 +45,26 @@ import {
   collectProjectedVertexCandidates,
   createSketchPickCycleWiring,
   getAnnotationHighlightTargets,
+  getSketchPickChooserTargets,
   getSketchPickPreviewTarget,
   isAnnotationTarget,
+  resolveSketchPickChoice,
   resolveSketchPickClick,
   type SketchPickCycleWiring,
   updatePointerFromClientPoint,
 } from "@/components/cad/three-cad-viewport-pick-candidates";
 import { SketchPickHint } from "@/components/cad/sketch-pick-hint";
 import {
+  SketchPickChooser,
+  type SketchPickChooserModel,
+} from "@/components/cad/sketch-pick-chooser";
+import {
+  createSketchPickChooserItems,
   createSketchPickHint,
   getSketchPickHintText,
+  handleSketchPickChooserKeyDown,
   SKETCH_PICK_HINT_LEFT_PX,
+  type SketchPickChooserItem,
   type SketchPickHintModel,
 } from "@/components/cad/sketch-pick-hint-model";
 import {
@@ -102,6 +111,7 @@ import {
 } from "@/infrastructure/viewport/render-picking";
 import {
   resolveSketchPickStack,
+  type SketchPickClass,
   type SketchPickCycle,
 } from "@/domain/sketch-interaction/pick-stack";
 import { getSketchSessionDisplayDefinition } from "@/domain/editor/sketch-session/internals";
@@ -110,7 +120,6 @@ import { createViewportCameraTransitionController } from "@/infrastructure/viewp
 import {
   getViewportCanvasClickIntent,
   shouldViewportClickEventRequestConnectedSketchSelection,
-  shouldViewportClickRequestSelection,
   shouldViewportDoubleClickRequestConnectedSketchSelection,
   shouldViewportStartSketchGeometryDrag,
 } from "@/domain/editor/workbench-interactions";
@@ -167,6 +176,19 @@ import {
   resizeViewCubeRenderer,
   scheduleCoalescedSketchGeometryDragMove,
 } from "@/components/cad/three-cad-viewport-helpers";
+
+/** The sketch pick stack at one pointer position, with each entry's class. */
+interface SketchStackPick {
+  stack: (PickResult & { pickClass: SketchPickClass })[];
+  displayDefinition: SketchDefinition;
+}
+
+/** A stack and the client point it was resolved at. */
+interface SketchStackPickAt {
+  x: number;
+  y: number;
+  sketch: SketchStackPick;
+}
 
 interface ThreeCadViewportProps {
   model: ViewportModel;
@@ -381,12 +403,27 @@ export function ThreeCadViewport({
     y: number;
     pick: {
       top: PickResult | null;
-      sketch: {
-        stack: PickResult[];
-        displayDefinition: SketchDefinition;
-      } | null;
+      sketch: SketchStackPick | null;
     };
   } | null>(null);
+  // The overlap the hint shows (sticky until another stack is hovered, a
+  // click, or a definition/tool change; T11e) and the open chooser's pick
+  // context (T11-D6).
+  const pickOverlapRef = useRef<SketchStackPickAt | null>(null);
+  const chooserRef = useRef<{
+    x: number;
+    y: number;
+    wiring: SketchPickCycleWiring;
+    restoreHover: PrimitiveRef | null;
+    /** The session scope the wiring was built for (review B-1). */
+    definition: unknown;
+    activeTool: unknown;
+    detachKeys: () => void;
+  } | null>(null);
+  // Set by the canvas press that dismisses an open chooser; that press's
+  // pointer-up and click are swallowed (T11e review R-2).
+  const chooserDismissPressRef = useRef(false);
+  const [chooser, setChooser] = useState<SketchPickChooserModel | null>(null);
   // The hint with the definition and tool it was computed for; it shows
   // only while both are current (review A-3).
   const [pickHint, setPickHint] = useState<{
@@ -741,17 +778,187 @@ export function ThreeCadViewport({
     }
   }, [hoverTarget]);
 
+  const focusCanvas = useCallback(() => {
+    canvasElementRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  /**
+   * Forgets the open chooser's pick context and its window Escape listener
+   * (T11e); returns what was open.
+   */
+  const detachSketchPickChooser = useCallback(() => {
+    const open = chooserRef.current;
+    chooserRef.current = null;
+    open?.detachKeys();
+    return open;
+  }, []);
+
   // A definition change (an Undo or Redo, a commit, a toggle), a tool
   // change (Escape, a keyboard switch) or leaving the sketch resets the
   // cycle and clears the hint until the pointer moves again; selection
   // changes from elsewhere fail the cycle's retention check at the next
-  // hover or click (T11d, review A-3).
+  // hover or click (T11d, review A-3). An open chooser closes without a
+  // pick (T11e review B-1).
   const sketchDefinition = sketchSession?.definition ?? null;
   const sketchActiveTool = sketchSession?.activeTool ?? null;
   useEffect(() => {
     pickCycleRef.current = null;
     pickHintTextRef.current = null;
-  }, [sketchDefinition, sketchActiveTool]);
+    pickOverlapRef.current = null;
+    if (detachSketchPickChooser()) focusCanvas();
+  }, [
+    detachSketchPickChooser,
+    focusCanvas,
+    sketchDefinition,
+    sketchActiveTool,
+  ]);
+  // Unmounting with the chooser open must not leave its window Escape
+  // listener behind (T11e re-review N-2).
+  useEffect(
+    () => () => void detachSketchPickChooser(),
+    [detachSketchPickChooser],
+  );
+  // The chooser's state follows the same scope: adjusted while rendering,
+  // so a stale chooser never renders, not even after leaving and
+  // re-entering a sketch (T11e review B-1).
+  const [chooserScope, setChooserScope] = useState({
+    definition: sketchDefinition,
+    activeTool: sketchActiveTool,
+  });
+  if (
+    chooserScope.definition !== sketchDefinition ||
+    chooserScope.activeTool !== sketchActiveTool
+  ) {
+    setChooserScope({
+      definition: sketchDefinition,
+      activeTool: sketchActiveTool,
+    });
+    setChooser(null);
+  }
+
+  /** Clears the overlap hint and its stored overlap (T11e: a click). */
+  const clearSketchPickHint = useCallback(() => {
+    pickOverlapRef.current = null;
+    if (pickHintTextRef.current !== null) {
+      pickHintTextRef.current = null;
+      setPickHint({ hint: null, definition: null, activeTool: null });
+    }
+  }, []);
+
+  const setViewportHover = useCallback((target: PrimitiveRef | null) => {
+    hoverTargetRef.current = target;
+    if (target) {
+      hoverRef.current(target);
+    } else {
+      clearHoverRef.current();
+    }
+  }, []);
+
+  /** Escape or click outside: nothing selected, the hover restored. */
+  const closeSketchPickChooser = useCallback(() => {
+    const open = detachSketchPickChooser();
+    setChooser(null);
+    if (open) setViewportHover(open.restoreHover);
+    focusCanvas();
+  }, [detachSketchPickChooser, focusCanvas, setViewportHover]);
+
+  /**
+   * Opens the candidate chooser for a stack at its overlap point when it has
+   * at least 2 eligible candidates (T11e, T11-D6); false otherwise. While
+   * open, a window capture-phase listener consumes Escape whatever has focus
+   * (Mantine moves focus into the menu only after a timeout), before the
+   * shortcut layer's `editor.cancel` (review A-5(b), T11e review R-1).
+   */
+  const openSketchPickChooser = useCallback(
+    ({ x, y, sketch }: SketchStackPickAt) => {
+      const session = sketchSessionRef.current;
+      const viewportElement = viewportRef.current;
+      if (!session || !viewportElement) return false;
+      const selection = selectionRef.current;
+      const wiring = createSketchPickCycleWiring({
+        session,
+        selection,
+        selectionFilter: selectionFilterRef.current,
+        stack: sketch.stack.map((entry) => entry.target),
+      });
+      const targets = getSketchPickChooserTargets(session, wiring);
+      if (!targets) return false;
+      const classes = new Map(
+        sketch.stack.map(
+          (entry) =>
+            [getPrimitiveRefKey(entry.target), entry.pickClass] as const,
+        ),
+      );
+      const rect = viewportElement.getBoundingClientRect();
+      detachSketchPickChooser();
+      const handleKeyDown = (event: KeyboardEvent) =>
+        handleSketchPickChooserKeyDown(event, closeSketchPickChooser);
+      window.addEventListener("keydown", handleKeyDown, true);
+      chooserRef.current = {
+        x,
+        y,
+        wiring,
+        restoreHover: hoverTargetRef.current,
+        definition: session.definition,
+        activeTool: session.activeTool,
+        detachKeys: () =>
+          window.removeEventListener("keydown", handleKeyDown, true),
+      };
+      setChooser({
+        left: x - rect.left,
+        top: y - rect.top,
+        items: createSketchPickChooserItems({
+          targets,
+          classOf: (target) => classes.get(getPrimitiveRefKey(target)),
+          isSelected: (target) =>
+            selection.some((selected) => primitiveRefEquals(selected, target)),
+          definition: sketch.displayDefinition,
+        }),
+      });
+      return true;
+    },
+    [closeSketchPickChooser, detachSketchPickChooser],
+  );
+
+  /**
+   * The same selection event a click picking the item sends (T11-D6). A
+   * pick whose wiring was built for another definition or tool is dropped
+   * (T11e review B-1).
+   */
+  const pickFromSketchPickChooser = useCallback(
+    (item: SketchPickChooserItem) => {
+      const open = detachSketchPickChooser();
+      setChooser(null);
+      focusCanvas();
+      const session = sketchSessionRef.current;
+      if (
+        !open ||
+        !session ||
+        open.definition !== session.definition ||
+        open.activeTool !== session.activeTool
+      ) {
+        return;
+      }
+      const choice = resolveSketchPickChoice(
+        pickCycleRef.current,
+        open,
+        open.wiring,
+        item.target,
+      );
+      pickCycleRef.current = choice.cycle;
+      clearSketchPickHint();
+      lastPickedTargetRef.current = choice.target;
+      const camera = cameraRef.current;
+      selectRef.current(
+        choice.target,
+        camera
+          ? [camera.position.x, camera.position.y, camera.position.z]
+          : undefined,
+        choice.replaces ?? undefined,
+      );
+    },
+    [clearSketchPickHint, detachSketchPickChooser, focusCanvas],
+  );
 
   const updateSketchFeedbackProjections = useCallback(() => {
     const camera = cameraRef.current;
@@ -1181,10 +1388,7 @@ export function ThreeCadViewport({
       viewportRect: DOMRectReadOnly,
     ): {
       top: PickResult | null;
-      sketch: {
-        stack: PickResult[];
-        displayDefinition: SketchDefinition;
-      } | null;
+      sketch: SketchStackPick | null;
     } => {
       const camera = cameraRef.current;
       const bindings = getCachedBindings();
@@ -1279,6 +1483,7 @@ export function ThreeCadViewport({
         pickId: entry.candidate.pick.pickId,
         target: entry.target,
         renderable: entry.candidate.pick.renderable,
+        pickClass: entry.pickClass,
       }));
 
       return {
@@ -1311,29 +1516,29 @@ export function ThreeCadViewport({
       });
     };
 
-    /** Hover preview and hint for a sketch stack at (x, y) (T11d). */
+    /**
+     * The hint for the sketch stack hovered or clicked at (x, y) (T11d): it
+     * replaces the shown one, and is kept as the overlap "Choose…" opens
+     * (T11e). Empty space never calls this, so the last overlap stays.
+     */
     const updateSketchPickHint = (
-      sketch: {
-        stack: readonly PickResult[];
-        displayDefinition: SketchDefinition;
-      } | null,
+      at: SketchStackPickAt,
       previewTarget: PrimitiveRef | null,
       wiring: SketchPickCycleWiring | null,
     ) => {
       const session = sketchSessionRef.current;
+      const targets =
+        wiring && session ? getSketchPickChooserTargets(session, wiring) : null;
       const hint =
-        sketch &&
-        wiring &&
-        session &&
-        !session.activeSpecialMode &&
-        shouldViewportClickRequestSelection(session.activeTool)
+        targets && wiring
           ? createSketchPickHint({
-              stack: wiring.hintStack ?? wiring.stack,
+              stack: targets,
               previewTarget,
               cycles: wiring.hintCycles ?? wiring.context.mode !== "none",
-              definition: sketch.displayDefinition,
+              definition: at.sketch.displayDefinition,
             })
           : null;
+      pickOverlapRef.current = hint ? at : null;
       const text = hint ? getSketchPickHintText(hint) : null;
 
       if (text !== pickHintTextRef.current) {
@@ -1501,8 +1706,8 @@ export function ThreeCadViewport({
         canvasElement.getBoundingClientRect(),
       );
 
+    // The overlap hint stays (sticky last overlap, T11e).
     const clearHover = () => {
-      updateSketchPickHint(null, null, null);
       lastPickedTargetRef.current = null;
       if (hoverTargetRef.current !== null) {
         hoverTargetRef.current = null;
@@ -1618,8 +1823,16 @@ export function ThreeCadViewport({
           )
         : (pick.top?.target ?? null);
 
+      // Any stack replaces the hint (T11e); empty space keeps it.
+      if (pick.sketch && pick.sketch.stack.length > 0) {
+        updateSketchPickHint(
+          { x: event.clientX, y: event.clientY, sketch: pick.sketch },
+          target,
+          wiring,
+        );
+      }
+
       if (target && acceptsViewportTarget(target)) {
-        updateSketchPickHint(pick.sketch, target, wiring);
         lastPickedTargetRef.current = target;
         if (
           hoverTargetRef.current === null ||
@@ -1657,6 +1870,15 @@ export function ThreeCadViewport({
       // A new press: a stack cached at an earlier pointer-up whose `click`
       // returned early is stale (review A-2).
       releasedPickRef.current = null;
+      chooserDismissPressRef.current = false;
+
+      // A press on the canvas only dismisses an open chooser; its
+      // pointer-up and click are swallowed (T11e review R-2).
+      if (chooserRef.current && event.button === 0) {
+        chooserDismissPressRef.current = true;
+        closeSketchPickChooser();
+        return;
+      }
 
       if (
         event.button !== 0 ||
@@ -1742,6 +1964,10 @@ export function ThreeCadViewport({
     };
 
     const handlePointerUp = (event: PointerEvent) => {
+      if (event.button === 0 && chooserDismissPressRef.current) {
+        return;
+      }
+
       if (event.button !== 0) {
         cancelSketchGeometryDragMove();
         primaryPointerDownRef.current = null;
@@ -1884,6 +2110,11 @@ export function ThreeCadViewport({
     };
 
     const handleClick = (event: MouseEvent) => {
+      if (event.button === 0 && chooserDismissPressRef.current) {
+        chooserDismissPressRef.current = false;
+        return;
+      }
+
       if (
         event.button !== 0 ||
         pointerWithinViewCube(event.clientX, event.clientY)
@@ -1912,6 +2143,10 @@ export function ThreeCadViewport({
 
         return;
       }
+
+      // A click clears the stored overlap; a selecting click on a stack
+      // shows that stack's hint again below (T11e).
+      clearSketchPickHint();
 
       // Reuse the stack resolved at this click's pointer-up (T11d, R-1).
       const released = releasedPickRef.current;
@@ -1994,6 +2229,28 @@ export function ThreeCadViewport({
         return;
       }
 
+      const at = pick.sketch
+        ? { x: event.clientX, y: event.clientY, sketch: pick.sketch }
+        : null;
+
+      // Alt+click with ≥ 2 eligible candidates opens the chooser at the
+      // click point; otherwise it is a plain click (T11e, T11-D6).
+      if (at && event.altKey && event.detail === 1) {
+        if (openSketchPickChooser(at)) {
+          updateSketchPickHint(
+            at,
+            getSketchPickPreviewTarget(
+              pickCycleRef.current,
+              at.x,
+              at.y,
+              wiring,
+            ),
+            wiring,
+          );
+          return;
+        }
+      }
+
       const clicked = resolveSketchPickClick(
         pickCycleRef.current,
         { x: event.clientX, y: event.clientY, detail: event.detail },
@@ -2012,13 +2269,16 @@ export function ThreeCadViewport({
         clicked.replaces ?? undefined,
       );
 
+      if (at) {
+        updateSketchPickHint(at, clicked.preview, wiring);
+      }
+
       // The hover now previews what the next click would pick (the
       // selection transition has just hovered the selected target).
       if (
         clicked.preview &&
         !primitiveRefEquals(clicked.preview, clicked.target)
       ) {
-        updateSketchPickHint(pick.sketch, clicked.preview, wiring);
         hoverTargetRef.current = clicked.preview;
         hoverRef.current(clicked.preview);
       }
@@ -2132,6 +2392,9 @@ export function ThreeCadViewport({
   }, [
     cancelSketchGeometryDragMove,
     canvasReadyVersion,
+    clearSketchPickHint,
+    closeSketchPickChooser,
+    openSketchPickChooser,
     scheduleSketchGeometryDragMove,
   ]);
 
@@ -2278,6 +2541,11 @@ export function ThreeCadViewport({
           );
           cameraRef.current = viewportCamera;
           canvasElementRef.current = gl.domElement;
+          // Focusable without a tab stop, so focus can return to it when
+          // the candidate chooser closes (T11e).
+          gl.domElement.tabIndex = -1;
+          gl.domElement.style.outline = "none";
+          gl.domElement.setAttribute("aria-label", "3D viewport");
           canvasCreatedRef.current?.();
           setCanvasReadyVersion((current) => current + 1);
           gl.setClearColor(0x000000, 0);
@@ -2313,7 +2581,13 @@ export function ThreeCadViewport({
         <WorkspaceSceneScaffold />
         <SketchProjectionFrameWatcher
           enabled={Boolean(sketchSession)}
-          onCameraChanged={updateSketchFeedbackProjections}
+          onCameraChanged={() => {
+            updateSketchFeedbackProjections();
+            // The stored overlap's screen point is stale, and so is an open
+            // chooser's anchor (T11e review A-1, re-review N-1).
+            clearSketchPickHint();
+            if (chooserRef.current) closeSketchPickChooser();
+          }}
         />
         <BodyLodWatcher
           enabled={!sketchSession}
@@ -2411,7 +2685,7 @@ export function ThreeCadViewport({
           </div>
         ) : null}
       </div>
-      {/* Overlap hint (T11d, T11-D7); T11e adds its "Choose…" button. */}
+      {/* Overlap hint (T11d, T11-D7) with its "Choose…" button (T11e, A-8). */}
       <div
         className="pointer-events-none absolute z-20"
         style={{
@@ -2427,8 +2701,22 @@ export function ThreeCadViewport({
               ? pickHint.hint
               : null
           }
+          onChoose={() => {
+            const overlap = pickOverlapRef.current;
+            // Nothing to choose any more (the selection or its filter
+            // changed): the hint goes (T11e review A-2).
+            if (!overlap || !openSketchPickChooser(overlap)) {
+              clearSketchPickHint();
+            }
+          }}
         />
       </div>
+      <SketchPickChooser
+        chooser={sketchSession ? chooser : null}
+        onPick={pickFromSketchPickChooser}
+        onPreview={(item) => setViewportHover(item.target)}
+        onClose={closeSketchPickChooser}
+      />
       <SketchViewportFeedbackLayer
         schema={sketchToolPresentation}
         projections={sketchFeedbackProjections}

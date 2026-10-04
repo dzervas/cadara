@@ -38,8 +38,10 @@ import {
   collectProjectedSketchDisplayPointCandidates,
   collectProjectedVertexCandidates,
   createSketchPickCycleWiring,
+  getSketchPickChooserTargets,
   getSketchPickPreviewTarget,
   isProjectedSketchDisplayPointTarget,
+  resolveSketchPickChoice,
   resolveSketchPickClick,
   type SketchPickCycleWiring,
 } from "@/components/cad/three-cad-viewport-pick-candidates";
@@ -49,7 +51,10 @@ import {
 } from "@/domain/editor/sketch-session/display";
 import type { SketchPickCycle } from "@/domain/sketch-interaction/pick-stack";
 import { beginSketchTool } from "@/domain/editor/sketch-session";
-import { createSketchPickHint } from "@/components/cad/sketch-pick-hint-model";
+import {
+  createSketchPickChooserItems,
+  createSketchPickHint,
+} from "@/components/cad/sketch-pick-hint-model";
 import { getDefaultSelectionFilterForMode } from "@/core/editor/schema";
 import {
   bindRenderableObject,
@@ -2394,4 +2399,153 @@ test("T11d review R-2/A-1: the hint counts only targets the tool takes; no-cycle
     wiringFor("projectReference").hintCycles,
     "Neither does the single-shot reference picker.",
   ).toBe(false);
+});
+
+// T11e (UI lane). Seam: the viewport's chooser wiring on the real projected
+// stack: which candidates the chooser lists (`getSketchPickChooserTargets`,
+// the hint's eligibility filter, review R-2), its items, and the selection
+// event a chooser pick sends (`resolveSketchPickChoice`).
+test("T11e: the chooser lists the eligible stack in order with class tags; fewer than 2 eligible is a plain click", () => {
+  const { session, lineTarget, constructionTarget, xAxisTarget } =
+    makeAxisLineSession({ withConstruction: true });
+  const entries = pickSketchStackAt(session, 120, 102);
+  const stack = entries.map((entry) => entry.target);
+  expect(stack).toEqual([lineTarget, constructionTarget, xAxisTarget]);
+  const targetsFor = (
+    toolId: Parameters<typeof beginSketchTool>[1] | null,
+    on: readonly PrimitiveRef[] = stack,
+  ) => {
+    const toolSession = toolId ? beginSketchTool(session, toolId) : session;
+    return getSketchPickChooserTargets(
+      toolSession,
+      createSketchPickCycleWiring({
+        session: toolSession,
+        selection: [],
+        selectionFilter: getDefaultSelectionFilterForMode("sketch"),
+        stack: on,
+      }),
+    );
+  };
+
+  const noTool = targetsFor(null);
+  expect(noTool, "No tool: all three, in stack order.").toEqual(stack);
+  const classes = new Map(
+    entries.map((entry) => [getPrimitiveRefKey(entry.target), entry.pickClass]),
+  );
+  expect(
+    createSketchPickChooserItems({
+      targets: noTool!,
+      classOf: (target) => classes.get(getPrimitiveRefKey(target)),
+      isSelected: (target) =>
+        getPrimitiveRefKey(target) === getPrimitiveRefKey(lineTarget),
+      definition: getSketchSessionDisplayDefinition(session),
+    }).map((item) => [item.label, item.tag, item.target, item.selected]),
+    "Label, class tag, target, and the selected line marked (review A-3).",
+  ).toEqual([
+    ["Line", "Curve", lineTarget, true],
+    ["Construction", "Construction", constructionTarget, false],
+    ["X axis", "Reference", xAxisTarget, false],
+  ]);
+  expect(
+    targetsFor("offset"),
+    "Offset takes no datum axis: the chooser lists only the two lines.",
+  ).toEqual([lineTarget, constructionTarget]);
+  expect(
+    targetsFor("trim"),
+    "Trim (immediate action) lists what it can act on.",
+  ).toEqual([lineTarget, constructionTarget]);
+  expect(
+    targetsFor("trim", [lineTarget, xAxisTarget]),
+    "Trim over a line on the axis: one eligible candidate, no chooser (Alt+click is a plain click).",
+  ).toBeNull();
+  expect(
+    targetsFor(null, [xAxisTarget]),
+    "A lone candidate: no chooser.",
+  ).toBeNull();
+  expect(
+    targetsFor("line"),
+    "A drawing tool's click places points: no chooser.",
+  ).toBeNull();
+});
+
+test("T11e: a chooser pick sends the selection event a click picking it would, and resets the cycle", () => {
+  const { session, lineTarget, constructionTarget, xAxisTarget } =
+    makeAxisLineSession({ withConstruction: true });
+  const stack = pickSketchStackAt(session, 120, 102).map(
+    (entry) => entry.target,
+  );
+  const selection = { current: [] as readonly PrimitiveRef[] };
+  const wiring = cycleWiring(stack, selection);
+
+  expect(
+    resolveSketchPickChoice(null, { x: 120, y: 102 }, wiring, xAxisTarget),
+    "No cycle armed: an ordinary click on the chosen target.",
+  ).toEqual({ cycle: null, target: xAxisTarget, replaces: null });
+
+  // A first click picked the line; a cycle click there would replace it.
+  const first = resolveSketchPickClick(
+    null,
+    { x: 120, y: 102, detail: 1 },
+    wiring,
+  );
+  selection.current = [first.target!];
+  const cycleClick = resolveSketchPickClick(
+    first.cycle,
+    { x: 120, y: 102, detail: 1 },
+    wiring,
+  );
+  const chosen = resolveSketchPickChoice(
+    first.cycle,
+    { x: 120, y: 102 },
+    wiring,
+    xAxisTarget,
+  );
+  expect(
+    chosen,
+    "Armed: the chooser replaces the previous pick like the cycle click, and resets the cycle.",
+  ).toEqual({ cycle: null, target: xAxisTarget, replaces: lineTarget });
+  expect(chosen.replaces).toEqual(cycleClick.replaces);
+  const lastAdded = cycleWiring(stack, selection, "replaceLastAdded");
+  expect(
+    resolveSketchPickChoice(
+      resolveSketchPickClick(null, { x: 120, y: 102, detail: 1 }, lastAdded)
+        .cycle,
+      { x: 121, y: 103 },
+      lastAdded,
+      constructionTarget,
+    ),
+    "Replace-last-added contexts replace the previous pick the same way.",
+  ).toEqual({ cycle: null, target: constructionTarget, replaces: lineTarget });
+  expect(
+    resolveSketchPickClick(null, { x: 120, y: 102, detail: 1 }, wiring).target,
+    "After the reset the next click starts at stack[0].",
+  ).toEqual(lineTarget);
+
+  expect(
+    resolveSketchPickChoice(
+      first.cycle,
+      { x: 120, y: 102 },
+      cycleWiring(stack, selection, "none"),
+      constructionTarget,
+    ),
+    "Immediate-action contexts: a plain pick of the chosen target, which the tool then acts on.",
+  ).toEqual({ cycle: null, target: constructionTarget, replaces: null });
+  expect(
+    resolveSketchPickChoice(
+      first.cycle,
+      { x: 120, y: 102 },
+      cycleWiring(stack, { current: [] }),
+      xAxisTarget,
+    ).replaces,
+    "The previous pick no longer selected (Escape, elsewhere): nothing to replace.",
+  ).toBeNull();
+  expect(
+    resolveSketchPickChoice(
+      first.cycle,
+      { x: 130, y: 102 },
+      wiring,
+      xAxisTarget,
+    ).replaces,
+    "An overlap more than 6 px from the previous click: nothing to replace.",
+  ).toBeNull();
 });
