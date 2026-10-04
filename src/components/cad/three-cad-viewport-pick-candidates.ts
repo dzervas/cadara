@@ -1,6 +1,25 @@
 import * as THREE from "three";
 
-import { type PrimitiveRef, primitiveRefEquals } from "@/core/editor/schema";
+import {
+  getPrimitiveRefKey,
+  type PrimitiveRef,
+  primitiveRefEquals,
+  type SelectionFilter,
+} from "@/core/editor/schema";
+import {
+  getSketchSelectionCycleContext,
+  isSketchSelectionContextSingleShot,
+  isSketchSelectionCycleTargetEligible,
+  isSketchSelectionCyclePickRetained,
+  type SketchSelectionCycleContext,
+} from "@/domain/editor/sketch-session/selection";
+import {
+  getArmedSketchPickCycleIndex,
+  getSketchPickPreviewIndex,
+  reduceSketchPickCycle,
+  type SketchPickCycle,
+  type SketchPickCyclePointer,
+} from "@/domain/sketch-interaction/pick-stack";
 import {
   mapSketchPointToWorld,
   type SketchAnnotationDescriptor,
@@ -38,10 +57,9 @@ import {
 } from "@/contracts/sketch/spline-geometry";
 import {
   createProjectedPickCandidate,
-  DEFAULT_PROJECTED_POINT_PICK_ENTER_RADIUS_PX,
-  DEFAULT_PROJECTED_POINT_PICK_EXIT_RADIUS_PX,
   DEFAULT_SKETCH_POINT_PICK_ENTER_RADIUS_PX,
   DEFAULT_SKETCH_POINT_PICK_EXIT_RADIUS_PX,
+  getProjectedFeatureVertexPickRadii,
   shouldIncludeProjectedPickCandidate,
   type PickCandidate,
 } from "@/infrastructure/viewport/render-picking";
@@ -75,6 +93,7 @@ export function collectProjectedVertexCandidates({
   renderables,
   acceptsTarget,
   currentHoverTarget,
+  inSketchSession = false,
 }: {
   clientX: number;
   clientY: number;
@@ -83,10 +102,13 @@ export function collectProjectedVertexCandidates({
   renderables: ViewportRenderableRecord[];
   acceptsTarget: (target: PrimitiveRef) => boolean;
   currentHoverTarget: PrimitiveRef | null;
+  /** Sketch mode uses the sketch point radii (T11c review ADV-3). */
+  inSketchSession?: boolean;
 }): PickCandidate[] {
   const pointerX = clientX - viewportRect.left;
   const pointerY = clientY - viewportRect.top;
   const projectedPoint = new THREE.Vector3();
+  const radii = getProjectedFeatureVertexPickRadii(inSketchSession);
 
   return renderables.flatMap(({ renderable }) => {
     const geometryData =
@@ -121,8 +143,7 @@ export function collectProjectedVertexCandidates({
         target: renderable.binding.target,
         currentHoverTarget,
         screenDistance: distance,
-        enterRadius: DEFAULT_PROJECTED_POINT_PICK_ENTER_RADIUS_PX,
-        exitRadius: DEFAULT_PROJECTED_POINT_PICK_EXIT_RADIUS_PX,
+        ...radii,
       })
     ) {
       return [];
@@ -636,15 +657,20 @@ function getSketchPlanePointerPoint({
 
 /**
  * Sketch display markers picked in screen space by
- * `collectProjectedSketchDisplayPointCandidates` (sketch points and the
- * datum origin); their markers are not also ray-picked (T11c, review A-1).
+ * `collectProjectedSketchDisplayPointCandidates` (sketch points, the datum
+ * origin, projected reference points and unresolved reference markers);
+ * their markers are not also ray-picked (T11c, review A-1). Reference
+ * points are ranked by screen distance like the origin (T11c review ADV-4).
  */
 export function isProjectedSketchDisplayPointTarget(
   target: PrimitiveRef | null,
 ): target is PrimitiveRef {
   return (
     target?.kind === "sketchPoint" ||
-    (target?.kind === "sketchDatumReference" && target.geometryKind === "point")
+    target?.kind === "sketchExternalReference" ||
+    ((target?.kind === "sketchDatumReference" ||
+      target?.kind === "projectedReferenceGeometry") &&
+      target.geometryKind === "point")
   );
 }
 
@@ -813,4 +839,130 @@ export function getAnnotationHighlightTargets(
   return activeAnnotations.flatMap(
     (annotation) => annotation.affectedGeometryRefs,
   );
+}
+
+/**
+ * The sketch pick stack at one pointer position as the repeated-click cycle
+ * sees it (T11d): its ordered targets, the selection context's cycle mode
+ * and key, and whether the selection still holds a previous pick.
+ */
+export interface SketchPickCycleWiring {
+  readonly stack: readonly PrimitiveRef[];
+  readonly context: SketchSelectionCycleContext;
+  readonly retains: (target: PrimitiveRef) => boolean;
+  /** The candidates the hint counts: those the active tool can take. */
+  readonly hintStack?: readonly PrimitiveRef[];
+  /** Whether the hint teaches a cycle (not in single-shot pickers). */
+  readonly hintCycles?: boolean;
+}
+
+/**
+ * The cycle wiring for a sketch stack in the current selection context
+ * (T11d). The cycle walks only targets the tool takes in `replaceLastAdded`
+ * contexts; elsewhere `stack` stays the full stack, so a no-cycle context's
+ * click and release keep acting on the unfiltered `stack[0]`, while its
+ * hint still counts only eligible targets (review R-2).
+ */
+export function createSketchPickCycleWiring({
+  session,
+  selection,
+  selectionFilter,
+  stack,
+}: {
+  session: SketchSessionState;
+  selection: readonly PrimitiveRef[];
+  selectionFilter: SelectionFilter | null;
+  stack: readonly PrimitiveRef[];
+}): SketchPickCycleWiring {
+  const state = { session, selection, selectionFilter };
+  const context = getSketchSelectionCycleContext(session, selectionFilter);
+  const eligible = stack.filter((target) =>
+    isSketchSelectionCycleTargetEligible(session, target),
+  );
+  return {
+    stack: context.mode === "replaceLastAdded" ? eligible : stack,
+    context,
+    retains: (target) => isSketchSelectionCyclePickRetained(state, target),
+    hintStack: eligible,
+    hintCycles:
+      context.mode !== "none" && !isSketchSelectionContextSingleShot(session),
+  };
+}
+
+function toSketchPickCyclePointer(
+  x: number,
+  y: number,
+  wiring: SketchPickCycleWiring,
+): SketchPickCyclePointer {
+  return {
+    x,
+    y,
+    stackKeys: wiring.stack.map(getPrimitiveRefKey),
+    contextKey: wiring.context.key,
+    retainsPick: (index) => {
+      const target = wiring.stack[index];
+      return target !== undefined && wiring.retains(target);
+    },
+  };
+}
+
+/**
+ * What the next single click at (x, y) would pick: `stack[next]` while a
+ * cycle is armed, else `stack[0]`. Hover highlights it and the release
+ * dispatch (`sketch.pointerReleased`) carries it (review R-1).
+ */
+export function getSketchPickPreviewTarget(
+  cycle: SketchPickCycle | null,
+  x: number,
+  y: number,
+  wiring: SketchPickCycleWiring,
+): PrimitiveRef | null {
+  if (wiring.context.mode === "none") return wiring.stack[0] ?? null;
+  return (
+    wiring.stack[
+      getSketchPickPreviewIndex(cycle, toSketchPickCyclePointer(x, y, wiring))
+    ] ?? null
+  );
+}
+
+/**
+ * One `click` (where `detail` is reliable) on the stack cached at its
+ * pointer-up: the next cycle state, the target the click selects, the
+ * previous pick a cycle click replaces, and the hover preview after it.
+ * A double click (`detail >= 2`, connected selection) resets the cycle and
+ * works on `stack[0]`.
+ */
+export function resolveSketchPickClick(
+  cycle: SketchPickCycle | null,
+  click: { x: number; y: number; detail: number },
+  wiring: SketchPickCycleWiring,
+): {
+  cycle: SketchPickCycle | null;
+  target: PrimitiveRef | null;
+  replaces: PrimitiveRef | null;
+  preview: PrimitiveRef | null;
+} {
+  const pointer = toSketchPickCyclePointer(click.x, click.y, wiring);
+  const cycles = wiring.context.mode !== "none";
+  const armed =
+    click.detail === 1 && cycles
+      ? getArmedSketchPickCycleIndex(cycle, pointer)
+      : null;
+  const next = reduceSketchPickCycle(cycle, {
+    type: "clicked",
+    detail: click.detail,
+    cycles,
+    ...pointer,
+  });
+  const count = wiring.stack.length;
+  return {
+    cycle: next,
+    target: wiring.stack[next?.index ?? 0] ?? null,
+    replaces:
+      armed !== null && cycle ? (wiring.stack[cycle.index] ?? null) : null,
+    preview:
+      (next && count > 1
+        ? wiring.stack[(next.index + 1) % count]
+        : wiring.stack[0]) ?? null,
+  };
 }

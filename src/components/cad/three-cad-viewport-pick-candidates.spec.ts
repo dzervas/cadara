@@ -37,8 +37,20 @@ import {
   collectProjectedSketchCurveCandidates,
   collectProjectedSketchDisplayPointCandidates,
   collectProjectedVertexCandidates,
+  createSketchPickCycleWiring,
+  getSketchPickPreviewTarget,
   isProjectedSketchDisplayPointTarget,
+  resolveSketchPickClick,
+  type SketchPickCycleWiring,
 } from "@/components/cad/three-cad-viewport-pick-candidates";
+import {
+  createDisplayRenderableForProjectedGeometry,
+  createDisplayRenderableForReferenceRecord,
+} from "@/domain/editor/sketch-session/display";
+import type { SketchPickCycle } from "@/domain/sketch-interaction/pick-stack";
+import { beginSketchTool } from "@/domain/editor/sketch-session";
+import { createSketchPickHint } from "@/components/cad/sketch-pick-hint-model";
+import { getDefaultSelectionFilterForMode } from "@/core/editor/schema";
 import {
   bindRenderableObject,
   collectBindings,
@@ -864,9 +876,19 @@ test("T11c review A-1/R-3: screen-space sketch point markers are not also ray-pi
         geometryId: "geometry_a",
         geometryKind: "point",
       } as PrimitiveRef,
+      {
+        kind: "projectedReferenceGeometry",
+        referenceId: "reference_a",
+        geometryId: "geometry_b",
+        geometryKind: "lineSegment",
+      } as PrimitiveRef,
+      {
+        kind: "sketchExternalReference",
+        referenceId: "reference_b",
+      } as PrimitiveRef,
     ].map(isProjectedSketchDisplayPointTarget),
-    "Exactly the targets the projected point collector covers lose their ray-picked marker binding.",
-  ).toEqual([true, true, false, false]);
+    "Exactly the targets the projected point collector covers lose their ray-picked marker binding (projected reference points and unresolved markers too since T11d, review ADV-4).",
+  ).toEqual([true, true, false, true, false, true]);
 
   // The marker node binds its group, then excludes it from ray picking.
   const group = new THREE.Group();
@@ -2036,4 +2058,340 @@ test("a perspective spline partly beyond the far plane still picks its in-range 
   ).toBeDefined();
   expect(Math.abs(candidate!.screenDistance - expected)).toBeLessThan(1e-6);
   expect(Math.abs(candidate!.depth - endOnScreen.depth)).toBeLessThan(1e-9);
+});
+
+// T11d (UI lane). Seam: the viewport's repeated-click cycle wiring on the
+// real projected stack: `getSketchPickPreviewTarget` (hover and the
+// `sketch.pointerReleased` target) and `resolveSketchPickClick` (the
+// `click`, where `detail` is reliable), as the viewport composes them.
+function cycleWiring(
+  stack: readonly PrimitiveRef[],
+  selection: { current: readonly PrimitiveRef[] },
+  mode: SketchPickCycleWiring["context"]["mode"] = "replace",
+): SketchPickCycleWiring {
+  return {
+    stack,
+    context: { mode, key: `select:${mode}` },
+    retains: (target) =>
+      selection.current.some(
+        (selected) =>
+          getPrimitiveRefKey(selected) === getPrimitiveRefKey(target),
+      ),
+  };
+}
+
+test("T11d: single clicks cycle the stack and wrap; the release target equals the click target; the hover previews the next pick", () => {
+  const { session, lineTarget, constructionTarget, xAxisTarget } =
+    makeAxisLineSession({ withConstruction: true });
+  const selection = { current: [] as readonly PrimitiveRef[] };
+  let cycle: SketchPickCycle | null = null;
+  let hover: PrimitiveRef | null = null;
+  const picks: PrimitiveRef[] = [];
+  const replaced: (PrimitiveRef | null)[] = [];
+
+  for (let click = 0; click < 4; click += 1) {
+    // Pointer-up: the stack at the pointer, under the current hover target.
+    const stack = pickSketchStackAt(session, 120, 102, hover).map(
+      (entry) => entry.target,
+    );
+    expect(stack).toEqual([lineTarget, constructionTarget, xAxisTarget]);
+    const wiring = cycleWiring(stack, selection);
+    const releaseTarget = getSketchPickPreviewTarget(cycle, 120, 102, wiring);
+    // Click (detail 1) on the stack cached at that pointer-up.
+    const clicked = resolveSketchPickClick(
+      cycle,
+      { x: 120, y: 102, detail: 1 },
+      wiring,
+    );
+    expect(
+      clicked.target,
+      `Click ${click + 1}: the release dispatch carried the click's target.`,
+    ).toEqual(releaseTarget);
+    cycle = clicked.cycle;
+    hover = clicked.preview;
+    picks.push(clicked.target!);
+    replaced.push(clicked.replaces);
+    selection.current = [clicked.target!];
+    expect(
+      getSketchPickPreviewTarget(cycle, 121, 103, wiring),
+      `Click ${click + 1}: hovering within 6 px previews the armed next pick.`,
+    ).toEqual(hover);
+  }
+
+  expect(picks, "line → construction → X axis → line (wrap).").toEqual([
+    lineTarget,
+    constructionTarget,
+    xAxisTarget,
+    lineTarget,
+  ]);
+  expect(
+    replaced,
+    "Each cycle click names the previous pick it replaces.",
+  ).toEqual([null, lineTarget, constructionTarget, xAxisTarget]);
+  const wiring = cycleWiring(
+    pickSketchStackAt(session, 120, 102, hover).map((entry) => entry.target),
+    selection,
+  );
+  expect(
+    getSketchPickPreviewTarget(cycle, 130, 102, wiring),
+    "More than 6 px away the hover previews stack[0] again.",
+  ).toEqual(lineTarget);
+  expect(
+    getSketchPickPreviewTarget(
+      cycle,
+      120,
+      102,
+      cycleWiring(wiring.stack, {
+        current: [],
+      }),
+    ),
+    "A cleared selection (Escape, Undo) disarms the preview.",
+  ).toEqual(lineTarget);
+});
+
+test("T11d: a double click (detail 2) never advances the cycle and resets it; immediate-action contexts never cycle", () => {
+  const { session, lineTarget, constructionTarget } = makeAxisLineSession({
+    withConstruction: true,
+  });
+  const stack = pickSketchStackAt(session, 120, 102).map(
+    (entry) => entry.target,
+  );
+  const selection = { current: [] as readonly PrimitiveRef[] };
+  const wiring = cycleWiring(stack, selection);
+  const first = resolveSketchPickClick(
+    null,
+    { x: 120, y: 102, detail: 1 },
+    wiring,
+  );
+  selection.current = [first.target!];
+  expect(first.target).toEqual(lineTarget);
+  expect(
+    getSketchPickPreviewTarget(first.cycle, 120, 102, wiring),
+    "Armed: the next pick previewed is the construction line.",
+  ).toEqual(constructionTarget);
+
+  const second = resolveSketchPickClick(
+    first.cycle,
+    { x: 120, y: 102, detail: 2 },
+    wiring,
+  );
+  expect(second, "detail 2: stack[0], no replacement, cycle reset.").toEqual({
+    cycle: null,
+    target: lineTarget,
+    replaces: null,
+    preview: lineTarget,
+  });
+  expect(
+    resolveSketchPickClick(second.cycle, { x: 120, y: 102, detail: 1 }, wiring)
+      .target,
+    "The next single click starts again at stack[0].",
+  ).toEqual(lineTarget);
+
+  const none = cycleWiring(stack, selection, "none");
+  const trimmed = resolveSketchPickClick(
+    first.cycle,
+    { x: 120, y: 102, detail: 1 },
+    none,
+  );
+  expect(trimmed, "No cycle: stack[0], nothing replaced.").toEqual({
+    cycle: null,
+    target: lineTarget,
+    replaces: null,
+    preview: lineTarget,
+  });
+  expect(getSketchPickPreviewTarget(first.cycle, 120, 102, none)).toEqual(
+    lineTarget,
+  );
+});
+
+test("T11d review A-1: hysteresis applies to the hover target only, so a stack kept by it is another stack and the cycle resets", () => {
+  const { session, lineTarget, constructionTarget } = makeAxisLineSession({
+    withConstruction: true,
+  });
+  // 12 px off the coincident lines: inside the 14 px exit, outside the
+  // 10 px enter radius.
+  const at = (hover: PrimitiveRef | null) =>
+    pickSketchStackAt(session, 120, 112, hover)
+      .map((entry) => entry.target)
+      .filter((target) => target.kind === "sketchEntity");
+  expect(at(null), "Neither line is entered at 12 px.").toEqual([]);
+  expect(
+    at(lineTarget),
+    "Only the hovered (previewed) line keeps its exit radius.",
+  ).toEqual([lineTarget]);
+  expect(
+    at(constructionTarget),
+    "An armed preview of the construction line keeps only it, not the armed stack.",
+  ).toEqual([constructionTarget]);
+  const stackKeyed = (targets: readonly PrimitiveRef[]) =>
+    targets.map(getPrimitiveRefKey);
+  expect(stackKeyed(at(lineTarget))).not.toEqual(
+    stackKeyed(at(constructionTarget)),
+  );
+});
+
+test("T11d review ADV-4: projected reference points and unresolved markers rank by screen distance among reference points", () => {
+  const { session, originTarget } = makeAxisLineSession();
+  const referenceId = "reference_edge" as never;
+  const projectedPoint = createDisplayRenderableForProjectedGeometry(
+    session,
+    referenceId,
+    { geometryId: "geometry_p" as never, kind: "point", position: [0.8, 0] },
+    0,
+  );
+  const marker = createDisplayRenderableForReferenceRecord(
+    session,
+    "reference_missing" as never,
+    0,
+  );
+  const camera = createStackCamera();
+  const stackAt = (clientX: number, clientY: number) =>
+    resolveViewportSketchStack(
+      session,
+      collectProjectedSketchDisplayPointCandidates({
+        clientX,
+        clientY,
+        camera,
+        viewportRect: stackViewportRect,
+        sketchDisplayRenderables: [
+          ...getSketchSessionDisplayRenderables(session),
+          projectedPoint,
+          marker,
+        ],
+        acceptsTarget: () => true,
+        currentHoverTarget: null,
+      }),
+    ).map((entry) => [entry.target, entry.pickClass, entry.candidate.metric]);
+
+  expect(
+    stackAt(108, 100),
+    "Exactly on the projected point it beats the origin 8 px away.",
+  ).toEqual([
+    [projectedPoint.target, "referencePoint", "screen"],
+    [originTarget, "referencePoint", "screen"],
+  ]);
+  expect(stackAt(103, 99), "Nearer the origin, the origin is first.").toEqual([
+    [originTarget, "referencePoint", "screen"],
+    [projectedPoint.target, "referencePoint", "screen"],
+  ]);
+  // The unresolved reference marker sits at sketch (−0.72, −0.72).
+  expect(stackAt(92.8, 107.2)[0]).toEqual([
+    marker.target,
+    "referencePoint",
+    "screen",
+  ]);
+});
+
+test("T11d review ADV-3: in sketch mode feature vertices use the sketch point radii 12/16 px", () => {
+  const vertexRenderable = {
+    origin: "document",
+    renderable: {
+      id: "renderable_vertex",
+      label: "Vertex",
+      ownerBodyId: "body_a",
+      ownerFeatureId: null,
+      binding: {
+        pickId: "pick_vertex",
+        pickPriority: 0,
+        target: { kind: "vertex", bodyId: "body_a", vertexId: "vertex_a" },
+        topology: "vertex",
+        semanticClass: "featureVertex",
+      },
+      geometry: { kind: "marker", position: [0, 0, 0], displayRadius: 0.1 },
+    },
+  } as unknown as ViewportRenderableRecord;
+  const vertexAt = (offset: number, hovered: PrimitiveRef | null = null) =>
+    collectProjectedVertexCandidates({
+      clientX: 100,
+      clientY: 100 + offset,
+      camera: createStackCamera(),
+      viewportRect: stackViewportRect,
+      renderables: [vertexRenderable],
+      acceptsTarget: () => true,
+      currentHoverTarget: hovered,
+      inSketchSession: true,
+    }).length;
+  const target = vertexRenderable.renderable.binding.target;
+  expect(
+    [
+      vertexAt(12),
+      vertexAt(12.5),
+      vertexAt(16, target),
+      vertexAt(16.5, target),
+    ],
+    "Sketch mode: 12 px enter, 16 px exit (part mode keeps 48/56 px).",
+  ).toEqual([1, 0, 1, 0]);
+});
+
+test("T11d review R-1: a lone candidate clicked twice is never a cycle click", () => {
+  const { lineTarget } = makeAxisLineSession();
+  const wiring = cycleWiring([lineTarget], { current: [lineTarget] });
+  const first = resolveSketchPickClick(
+    null,
+    { x: 120, y: 102, detail: 1 },
+    wiring,
+  );
+  const second = resolveSketchPickClick(
+    first.cycle,
+    { x: 120, y: 102, detail: 1 },
+    wiring,
+  );
+  expect(
+    second.replaces,
+    "No `cycleReplaces`: an Offset target keeps its ordinary toggle.",
+  ).toBeNull();
+  expect(second.target).toEqual(lineTarget);
+});
+
+test("T11d review R-2/A-1: the hint counts only targets the tool takes; no-cycle contexts keep the unfiltered stack[0]; single-shot pickers teach no cycle", () => {
+  const { session, lineTarget, xAxisTarget } = makeAxisLineSession();
+  const stack = pickSketchStackAt(session, 120, 102).map(
+    (entry) => entry.target,
+  );
+  expect(stack).toEqual([lineTarget, xAxisTarget]);
+  const definition = getSketchSessionDisplayDefinition(session);
+  const wiringFor = (toolId: Parameters<typeof beginSketchTool>[1] | null) =>
+    createSketchPickCycleWiring({
+      session: toolId ? beginSketchTool(session, toolId) : session,
+      selection: [],
+      selectionFilter: getDefaultSelectionFilterForMode("sketch"),
+      stack,
+    });
+  const hintFor = (wiring: ReturnType<typeof wiringFor>) =>
+    createSketchPickHint({
+      stack: wiring.hintStack!,
+      previewTarget: getSketchPickPreviewTarget(null, 120, 102, wiring),
+      cycles: wiring.hintCycles!,
+      definition,
+    });
+
+  const trim = wiringFor("trim");
+  expect(trim.context.mode).toBe("none");
+  expect(
+    hintFor(trim),
+    "Trim over a line on the X axis: the axis is not eligible, so no hint.",
+  ).toBeNull();
+  expect(
+    trim.stack,
+    "Trim's click and release keep the unfiltered stack.",
+  ).toEqual(stack);
+  expect(
+    resolveSketchPickClick(null, { x: 120, y: 102, detail: 1 }, trim).target,
+  ).toEqual(lineTarget);
+  expect(getSketchPickPreviewTarget(null, 120, 102, trim)).toEqual(lineTarget);
+
+  expect(hintFor(wiringFor(null)), "No tool: both count.").toEqual({
+    label: "Line",
+    more: 1,
+    cycles: true,
+  });
+  const construction = wiringFor("construction");
+  expect(
+    construction.hintCycles,
+    "The single-shot construction toggle teaches no cycle.",
+  ).toBe(false);
+  expect(
+    wiringFor("projectReference").hintCycles,
+    "Neither does the single-shot reference picker.",
+  ).toBe(false);
 });

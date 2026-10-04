@@ -145,11 +145,13 @@ export function useWorkbenchViewportEvents({
       handleViewportSelect(
         target: PrimitiveRef,
         cameraPosition?: readonly [number, number, number],
+        cycleReplaces?: PrimitiveRef,
       ) {
         dispatch({
           type: "viewport.selectionRequested",
           target,
           cameraPosition,
+          ...(cycleReplaces ? { cycleReplaces } : {}),
         });
       },
     }),

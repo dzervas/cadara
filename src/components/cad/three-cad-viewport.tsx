@@ -43,10 +43,21 @@ import {
   collectProjectedSketchCurveCandidates,
   collectProjectedSketchDisplayPointCandidates,
   collectProjectedVertexCandidates,
+  createSketchPickCycleWiring,
   getAnnotationHighlightTargets,
+  getSketchPickPreviewTarget,
   isAnnotationTarget,
+  resolveSketchPickClick,
+  type SketchPickCycleWiring,
   updatePointerFromClientPoint,
 } from "@/components/cad/three-cad-viewport-pick-candidates";
+import { SketchPickHint } from "@/components/cad/sketch-pick-hint";
+import {
+  createSketchPickHint,
+  getSketchPickHintText,
+  SKETCH_PICK_HINT_LEFT_PX,
+  type SketchPickHintModel,
+} from "@/components/cad/sketch-pick-hint-model";
 import {
   SectionCapLayer,
   SectionViewOverlay,
@@ -89,12 +100,17 @@ import {
   toSketchPickStackCandidates,
   updateWorkspaceHighlight,
 } from "@/infrastructure/viewport/render-picking";
-import { resolveSketchPickStack } from "@/domain/sketch-interaction/pick-stack";
+import {
+  resolveSketchPickStack,
+  type SketchPickCycle,
+} from "@/domain/sketch-interaction/pick-stack";
 import { getSketchSessionDisplayDefinition } from "@/domain/editor/sketch-session/internals";
+import type { SketchDefinition } from "@/contracts/sketch/schema";
 import { createViewportCameraTransitionController } from "@/infrastructure/viewport/viewport-camera-transition";
 import {
   getViewportCanvasClickIntent,
   shouldViewportClickEventRequestConnectedSketchSelection,
+  shouldViewportClickRequestSelection,
   shouldViewportDoubleClickRequestConnectedSketchSelection,
   shouldViewportStartSketchGeometryDrag,
 } from "@/domain/editor/workbench-interactions";
@@ -190,8 +206,17 @@ export function ThreeCadViewport({
     [onIntent],
   );
   const onSelect = useCallback(
-    (target: PrimitiveRef, cameraPosition?: Vec3) =>
-      onIntent({ type: "selected", target, cameraPosition }),
+    (
+      target: PrimitiveRef,
+      cameraPosition?: Vec3,
+      cycleReplaces?: PrimitiveRef,
+    ) =>
+      onIntent({
+        type: "selected",
+        target,
+        cameraPosition,
+        ...(cycleReplaces ? { cycleReplaces } : {}),
+      }),
     [onIntent],
   );
   const onConnectedSketchSelect = useCallback(
@@ -348,6 +373,28 @@ export function ThreeCadViewport({
     preSketchFrame: null,
   });
   const lastPickedTargetRef = useRef<PrimitiveRef | null>(null);
+  // The repeated-click cycle (T11d): a pure reducer's state kept in a ref,
+  // and the pick resolved at the last pointer-up for its `click`.
+  const pickCycleRef = useRef<SketchPickCycle | null>(null);
+  const releasedPickRef = useRef<{
+    x: number;
+    y: number;
+    pick: {
+      top: PickResult | null;
+      sketch: {
+        stack: PickResult[];
+        displayDefinition: SketchDefinition;
+      } | null;
+    };
+  } | null>(null);
+  // The hint with the definition and tool it was computed for; it shows
+  // only while both are current (review A-3).
+  const [pickHint, setPickHint] = useState<{
+    hint: SketchPickHintModel | null;
+    definition: unknown;
+    activeTool: unknown;
+  }>({ hint: null, definition: null, activeTool: null });
+  const pickHintTextRef = useRef<string | null>(null);
   const lastFitViewRequestIdRef = useRef(fitViewRequestId);
   const pendingFitViewRequestIdRef = useRef<number | null>(null);
   const selectRef = useRef(onSelect);
@@ -693,6 +740,18 @@ export function ThreeCadViewport({
       hoverTargetRef.current = null;
     }
   }, [hoverTarget]);
+
+  // A definition change (an Undo or Redo, a commit, a toggle), a tool
+  // change (Escape, a keyboard switch) or leaving the sketch resets the
+  // cycle and clears the hint until the pointer moves again; selection
+  // changes from elsewhere fail the cycle's retention check at the next
+  // hover or click (T11d, review A-3).
+  const sketchDefinition = sketchSession?.definition ?? null;
+  const sketchActiveTool = sketchSession?.activeTool ?? null;
+  useEffect(() => {
+    pickCycleRef.current = null;
+    pickHintTextRef.current = null;
+  }, [sketchDefinition, sketchActiveTool]);
 
   const updateSketchFeedbackProjections = useCallback(() => {
     const camera = cameraRef.current;
@@ -1111,16 +1170,27 @@ export function ThreeCadViewport({
       );
     };
 
-    const getPickTargetFromClientPoint = (
+    /**
+     * The pick at a client point. In sketch mode `sketch` holds the whole
+     * ordered sketch pick stack (T11c) and its display definition; `top` is
+     * its first entry. Part mode resolves one target.
+     */
+    const resolvePickFromClientPoint = (
       clientX: number,
       clientY: number,
       viewportRect: DOMRectReadOnly,
-    ): PickResult | null => {
+    ): {
+      top: PickResult | null;
+      sketch: {
+        stack: PickResult[];
+        displayDefinition: SketchDefinition;
+      } | null;
+    } => {
       const camera = cameraRef.current;
       const bindings = getCachedBindings();
 
       if (!camera || !bindings) {
-        return null;
+        return { top: null, sketch: null };
       }
 
       updatePointerFromClientPoint(
@@ -1174,20 +1244,24 @@ export function ThreeCadViewport({
           renderables: renderablesRef.current,
           acceptsTarget: acceptsViewportTarget,
           currentHoverTarget: hoverTargetRef.current,
+          inSketchSession: sketchSession !== null,
         }),
       ];
 
       if (!sketchSession || !sketchDisplayDefinition) {
-        return resolveAllCandidates(
-          candidates,
-          acceptsViewportTarget,
-          pickTuning.resolutionOptions,
-        );
+        return {
+          top: resolveAllCandidates(
+            candidates,
+            acceptsViewportTarget,
+            pickTuning.resolutionOptions,
+          ),
+          sketch: null,
+        };
       }
 
-      // Sketch mode: hover, release and click all read the top of the one
-      // sketch pick stack (T11c).
-      const [top] = resolveSketchPickStack({
+      // Sketch mode: hover, release and click all read the one sketch pick
+      // stack (T11c); the repeated-click cycle walks it (T11d).
+      const stack = resolveSketchPickStack({
         session: sketchSession,
         displayDefinition: sketchDisplayDefinition,
         candidates: toSketchPickStackCandidates(candidates, {
@@ -1201,15 +1275,75 @@ export function ThreeCadViewport({
             }) === "clearSelection",
         }),
         acceptsTarget: acceptsViewportTarget,
-      });
+      }).map((entry) => ({
+        pickId: entry.candidate.pick.pickId,
+        target: entry.target,
+        renderable: entry.candidate.pick.renderable,
+      }));
 
-      return top
-        ? {
-            pickId: top.candidate.pick.pickId,
-            target: top.target,
-            renderable: top.candidate.pick.renderable,
-          }
-        : null;
+      return {
+        top: stack[0] ?? null,
+        sketch: { stack, displayDefinition: sketchDisplayDefinition },
+      };
+    };
+
+    const getPickTargetFromClientPoint = (
+      clientX: number,
+      clientY: number,
+      viewportRect: DOMRectReadOnly,
+    ): PickResult | null =>
+      resolvePickFromClientPoint(clientX, clientY, viewportRect).top;
+
+    const getSketchPickCycleWiring = (
+      stack: readonly PickResult[],
+    ): SketchPickCycleWiring | null => {
+      const session = sketchSessionRef.current;
+
+      if (!session) {
+        return null;
+      }
+
+      return createSketchPickCycleWiring({
+        session,
+        selection: selectionRef.current,
+        selectionFilter: selectionFilterRef.current,
+        stack: stack.map((entry) => entry.target),
+      });
+    };
+
+    /** Hover preview and hint for a sketch stack at (x, y) (T11d). */
+    const updateSketchPickHint = (
+      sketch: {
+        stack: readonly PickResult[];
+        displayDefinition: SketchDefinition;
+      } | null,
+      previewTarget: PrimitiveRef | null,
+      wiring: SketchPickCycleWiring | null,
+    ) => {
+      const session = sketchSessionRef.current;
+      const hint =
+        sketch &&
+        wiring &&
+        session &&
+        !session.activeSpecialMode &&
+        shouldViewportClickRequestSelection(session.activeTool)
+          ? createSketchPickHint({
+              stack: wiring.hintStack ?? wiring.stack,
+              previewTarget,
+              cycles: wiring.hintCycles ?? wiring.context.mode !== "none",
+              definition: sketch.displayDefinition,
+            })
+          : null;
+      const text = hint ? getSketchPickHintText(hint) : null;
+
+      if (text !== pickHintTextRef.current) {
+        pickHintTextRef.current = text;
+        setPickHint({
+          hint,
+          definition: session?.definition ?? null,
+          activeTool: session?.activeTool ?? null,
+        });
+      }
     };
 
     const getViewportCameraPosition = (): Vec3 | null => {
@@ -1368,6 +1502,7 @@ export function ThreeCadViewport({
       );
 
     const clearHover = () => {
+      updateSketchPickHint(null, null, null);
       lastPickedTargetRef.current = null;
       if (hoverTargetRef.current !== null) {
         hoverTargetRef.current = null;
@@ -1464,20 +1599,34 @@ export function ThreeCadViewport({
         return;
       }
 
-      const target = getPickTargetFromClientPoint(
+      const pick = resolvePickFromClientPoint(
         event.clientX,
         event.clientY,
         viewportRect,
       );
+      const wiring = pick.sketch
+        ? getSketchPickCycleWiring(pick.sketch.stack)
+        : null;
+      // Hover highlights exactly what the next click picks: `stack[0]`, or
+      // `stack[next]` while a cycle is armed (T11d).
+      const target = wiring
+        ? getSketchPickPreviewTarget(
+            pickCycleRef.current,
+            event.clientX,
+            event.clientY,
+            wiring,
+          )
+        : (pick.top?.target ?? null);
 
-      if (target && acceptsViewportTarget(target.target)) {
-        lastPickedTargetRef.current = target.target;
+      if (target && acceptsViewportTarget(target)) {
+        updateSketchPickHint(pick.sketch, target, wiring);
+        lastPickedTargetRef.current = target;
         if (
           hoverTargetRef.current === null ||
-          !primitiveRefEquals(hoverTargetRef.current, target.target)
+          !primitiveRefEquals(hoverTargetRef.current, target)
         ) {
-          hoverTargetRef.current = target.target;
-          hoverRef.current(target.target);
+          hoverTargetRef.current = target;
+          hoverRef.current(target);
         }
       } else {
         clearHover();
@@ -1505,6 +1654,10 @@ export function ThreeCadViewport({
     };
 
     const handlePointerDown = (event: PointerEvent) => {
+      // A new press: a stack cached at an earlier pointer-up whose `click`
+      // returned early is stale (review A-2).
+      releasedPickRef.current = null;
+
       if (
         event.button !== 0 ||
         pointerWithinViewCube(event.clientX, event.clientY)
@@ -1690,14 +1843,34 @@ export function ThreeCadViewport({
         event.clientY,
         viewportRect,
       );
-      const resolvedTarget = getPickTargetFromClientPoint(
+      // The stack is resolved once per physical click, here, and reused by
+      // `click`, where `detail` is reliable (T11d, review R-1).
+      const pick = resolvePickFromClientPoint(
         event.clientX,
         event.clientY,
         viewportRect,
       );
+      releasedPickRef.current = {
+        x: event.clientX,
+        y: event.clientY,
+        pick,
+      };
+      const wiring = pick.sketch
+        ? getSketchPickCycleWiring(pick.sketch.stack)
+        : null;
+      // The release carries what the click will pick: the armed cycle's
+      // `stack[next]`, else `stack[0]`.
+      const releaseTarget = wiring
+        ? getSketchPickPreviewTarget(
+            pickCycleRef.current,
+            event.clientX,
+            event.clientY,
+            wiring,
+          )
+        : (pick.top?.target ?? null);
 
       if (point) {
-        sketchReleaseRef.current(point, resolvedTarget?.target ?? null);
+        sketchReleaseRef.current(point, releaseTarget);
       }
     };
 
@@ -1740,13 +1913,21 @@ export function ThreeCadViewport({
         return;
       }
 
-      const resolvedTarget = getPickTargetFromClientPoint(
-        event.clientX,
-        event.clientY,
-        viewportRect,
-      );
+      // Reuse the stack resolved at this click's pointer-up (T11d, R-1).
+      const released = releasedPickRef.current;
+      releasedPickRef.current = null;
+      const pick =
+        released && released.x === event.clientX && released.y === event.clientY
+          ? released.pick
+          : resolvePickFromClientPoint(
+              event.clientX,
+              event.clientY,
+              viewportRect,
+            );
+      const resolvedTarget = pick.top;
 
       if (sketchSessionRef.current?.activeSpecialMode) {
+        pickCycleRef.current = null;
         const point = projectSketchPoint(
           event.clientX,
           event.clientY,
@@ -1768,6 +1949,8 @@ export function ThreeCadViewport({
           target: resolvedTarget?.target ?? null,
         })
       ) {
+        // Connected selection (`detail >= 2`) resets the cycle.
+        pickCycleRef.current = null;
         const target = resolvedTarget?.target;
 
         if (target) {
@@ -1788,19 +1971,57 @@ export function ThreeCadViewport({
       });
 
       if (intent === "clearSelection") {
+        pickCycleRef.current = null;
         deselectRef.current();
         return;
       }
 
       if (intent === "ignore" || !resolvedTarget) {
+        pickCycleRef.current = null;
         return;
       }
 
-      lastPickedTargetRef.current = resolvedTarget.target;
-      selectRef.current(
-        resolvedTarget.target,
-        getViewportCameraPosition() ?? undefined,
+      const wiring = pick.sketch
+        ? getSketchPickCycleWiring(pick.sketch.stack)
+        : null;
+
+      if (!wiring) {
+        lastPickedTargetRef.current = resolvedTarget.target;
+        selectRef.current(
+          resolvedTarget.target,
+          getViewportCameraPosition() ?? undefined,
+        );
+        return;
+      }
+
+      const clicked = resolveSketchPickClick(
+        pickCycleRef.current,
+        { x: event.clientX, y: event.clientY, detail: event.detail },
+        wiring,
       );
+      pickCycleRef.current = clicked.cycle;
+
+      if (!clicked.target) {
+        return;
+      }
+
+      lastPickedTargetRef.current = clicked.target;
+      selectRef.current(
+        clicked.target,
+        getViewportCameraPosition() ?? undefined,
+        clicked.replaces ?? undefined,
+      );
+
+      // The hover now previews what the next click would pick (the
+      // selection transition has just hovered the selected target).
+      if (
+        clicked.preview &&
+        !primitiveRefEquals(clicked.preview, clicked.target)
+      ) {
+        updateSketchPickHint(pick.sketch, clicked.preview, wiring);
+        hoverTargetRef.current = clicked.preview;
+        hoverRef.current(clicked.preview);
+      }
     };
 
     const handleDoubleClick = (event: MouseEvent) => {
@@ -2189,6 +2410,24 @@ export function ThreeCadViewport({
             </Button>
           </div>
         ) : null}
+      </div>
+      {/* Overlap hint (T11d, T11-D7); T11e adds its "Choose…" button. */}
+      <div
+        className="pointer-events-none absolute z-20"
+        style={{
+          left: SKETCH_PICK_HINT_LEFT_PX,
+          top: VIEWPORT_OVERLAY_TOP_INSET_STYLE,
+        }}
+      >
+        <SketchPickHint
+          hint={
+            sketchSession &&
+            pickHint.definition === sketchDefinition &&
+            pickHint.activeTool === sketchActiveTool
+              ? pickHint.hint
+              : null
+          }
+        />
       </div>
       <SketchViewportFeedbackLayer
         schema={sketchToolPresentation}

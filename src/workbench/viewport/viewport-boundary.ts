@@ -57,6 +57,8 @@ export type ViewportIntent =
       type: "selected";
       target: PrimitiveRef;
       cameraPosition?: Vec3;
+      /** The previous pick a repeated-click cycle replaces (T11d). */
+      cycleReplaces?: PrimitiveRef;
     }
   | { type: "connectedSketchSelected"; target: PrimitiveRef }
   | { type: "deselected" }

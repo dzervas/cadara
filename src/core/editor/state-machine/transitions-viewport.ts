@@ -19,6 +19,11 @@ import {
   sketchSessionHasActiveSpecialMode,
 } from "@/core/sketch-special-modes/presentation";
 import { openSketchSessionFromSelection } from "@/domain/editor/sketch-session-controller";
+import {
+  getSketchSelectionCycleContext,
+  isSketchSelectionCyclePickRetained,
+  withoutSketchSelectionCyclePick,
+} from "@/domain/editor/sketch-session/selection";
 import { createSectionViewSession } from "@/core/section-view/session";
 import {
   getDefaultSelectionFilterForMode,
@@ -671,7 +676,40 @@ function handleEditingSketchPlaneViewportSelection(
   };
 }
 
+/**
+ * A repeated-click cycle selection (T11d, review R-2): the previous pick
+ * (`cycleReplaces`) is first removed as the context's last-added target,
+ * then the next stack entry is selected as one ordinary click. The result
+ * stands only when it holds the new target where the previous pick was;
+ * otherwise (the context no longer holds the previous pick, or rejects or
+ * toggles the new one) nothing changes: a cycle click never toggles or
+ * appends a second target.
+ */
 function handleEditingSketchViewportSelection(
+  state: SketchEditorState,
+  event: Extract<EditorEvent, { type: "viewport.selectionRequested" }>,
+): EditorTransitionResult {
+  if (!event.cycleReplaces) {
+    return selectEditingSketchViewportTarget(state, event);
+  }
+
+  const { mode } = getSketchSelectionCycleContext(
+    state.session,
+    state.selectionFilter,
+  );
+  const trimmed = withoutSketchSelectionCyclePick(state, event.cycleReplaces);
+  if (!trimmed) {
+    return { state, effects: [] };
+  }
+
+  const result = selectEditingSketchViewportTarget(trimmed, event);
+  return result.state.kind === "editingSketch" &&
+    isSketchSelectionCyclePickRetained(result.state, event.target, mode)
+    ? result
+    : { state, effects: [] };
+}
+
+function selectEditingSketchViewportTarget(
   state: SketchEditorState,
   event: Extract<EditorEvent, { type: "viewport.selectionRequested" }>,
 ): EditorTransitionResult {
@@ -796,10 +834,17 @@ export function handleViewportSelectionRequested(
   event: Extract<EditorEvent, { type: "viewport.selectionRequested" }>,
   dependencies: EditorExtensionDependencies,
 ): EditorTransitionResult {
+  // A cycle click is gated on the selection without the pick it replaces
+  // (T11d review A-6; matters for multi-slot filters).
+  const gateSelection =
+    state.kind === "editingSketch" && event.cycleReplaces
+      ? (withoutSketchSelectionCyclePick(state, event.cycleReplaces)
+          ?.selection ?? state.selection)
+      : state.selection;
   if (
     !selectionFilterAllowsTarget(
       state.selectionFilter,
-      state.selection,
+      gateSelection,
       event.target,
       state.selectionCatalog,
     )

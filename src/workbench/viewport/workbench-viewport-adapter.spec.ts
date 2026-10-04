@@ -51,8 +51,12 @@ test("workbench viewport adapter routes typed intents to editor events and comma
     onHover(receivedTarget) {
       calls.push(`hover:${receivedTarget.kind}`);
     },
-    onSelect(receivedTarget, cameraPosition) {
-      calls.push(`select:${receivedTarget.kind}:${cameraPosition?.join(",")}`);
+    onSelect(receivedTarget, cameraPosition, cycleReplaces) {
+      calls.push(
+        `select:${receivedTarget.kind}:${cameraPosition?.join(",")}${
+          cycleReplaces ? `:replaces:${cycleReplaces.kind}` : ""
+        }`,
+      );
     },
     onConnectedSketchSelect() {
       calls.push("connected");
@@ -118,6 +122,13 @@ test("workbench viewport adapter routes typed intents to editor events and comma
     target,
     cameraPosition: [1, 2, 3],
   });
+  // T11d: a repeated-click cycle selection forwards the pick it replaces.
+  handler({
+    type: "selected",
+    target,
+    cameraPosition: [1, 2, 3],
+    cycleReplaces: { kind: "body", bodyId: "body_0" },
+  });
   handler({
     type: "annotationEditRequested",
     target: {
@@ -133,6 +144,7 @@ test("workbench viewport adapter routes typed intents to editor events and comma
 
   expect(calls).toEqual([
     "select:body:1,2,3",
+    "select:body:1,2,3:replaces:body",
     "section-offset:3",
     "lod:fine",
     "canvas",
