@@ -15,6 +15,16 @@ export type SplineTangent =
   | { readonly kind: "authored"; readonly vector: SplineVector };
 export type SplineClosure = "open" | "positional" | "smooth";
 export type SplineInterpolationPolicy = "centripetal-mean-arm-v1";
+/**
+ * Option B (T10g): the fixed source-parameter length (centripetal units,
+ * √model length) of the first and/or last span, an authored constant that
+ * replaces that span's centripetal length. Written only by exact Trim
+ * (`trimSplineAggregate`); validity is judged by `reconstructSpline`.
+ */
+export interface SplineEndSpanParameterLengths {
+  readonly start?: number;
+  readonly end?: number;
+}
 export interface SplinePointOccurrence<TPointId extends string = string> {
   /** Stable identity for this ordered use, distinct from its canonical point identity. */
   readonly occurrenceId: string;
@@ -27,6 +37,7 @@ export interface AuthoredSplineAggregate<TPointId extends string = string> {
   readonly pointOccurrences: readonly SplinePointOccurrence<TPointId>[];
   readonly closure: SplineClosure;
   readonly interpolationPolicy: SplineInterpolationPolicy;
+  readonly endSpanParameterLengths?: SplineEndSpanParameterLengths;
 }
 export function orderedSplineOccurrences<TPointId extends string>(
   aggregate: Pick<
@@ -70,6 +81,7 @@ export interface ResolvedSplineInput {
   readonly id: string;
   readonly policy: SplineInterpolationPolicy;
   readonly closure: SplineClosure;
+  readonly endSpanParameterLengths?: SplineEndSpanParameterLengths;
   readonly points: readonly {
     readonly occurrenceId: string;
     readonly id: string;
@@ -120,7 +132,12 @@ export interface SplineDiagnostic {
     | "coincident-points"
     | "positional-gap"
     | "invalid-occurrence-order"
-    | "missing-point";
+    | "missing-point"
+    /**
+     * `endSpanParameterLengths` holds a non-finite or non-positive value,
+     * is set on a smooth closure, or sets both keys of one span unequally.
+     */
+    | "invalid-end-span-parameter-length";
   readonly pointIndex?: number;
   readonly spanIndex?: number;
 }
@@ -153,31 +170,18 @@ const scale = (a: SplineVector, b: number): SplineVector => [
 ];
 const finite = (v: SplineVector) => v.every(Number.isFinite);
 
-/** Resolve the complete authored aggregate exactly once before reconstruction. */
-export function reconstructSplineAggregate<TPointId extends string>(
+/** The ordered input of an authored aggregate, or why it can't be resolved. */
+function resolveSplineAggregate<TPointId extends string>(
   aggregate: AuthoredSplineAggregate<TPointId>,
   positions: Readonly<Record<TPointId, SplineVector>>,
-  variation: SplineVariation = {},
-): SplineGeometry {
+): ResolvedSplineInput | SplineDiagnostic {
   const ordered = orderedSplineOccurrences(aggregate);
-  if (!ordered) {
-    return {
-      validity: "invalid",
-      diagnostics: [{ code: "invalid-occurrence-order" }],
-      spans: [],
-    };
-  }
+  if (!ordered) return { code: "invalid-occurrence-order" };
   const points: Array<ResolvedSplineInput["points"][number]> = [];
   for (let index = 0; index < ordered.length; index++) {
     const occurrence = ordered[index]!;
     const position = positions[occurrence.pointId];
-    if (!position) {
-      return {
-        validity: "invalid",
-        diagnostics: [{ code: "missing-point", pointIndex: index }],
-        spans: [],
-      };
-    }
+    if (!position) return { code: "missing-point", pointIndex: index };
     points.push({
       occurrenceId: occurrence.occurrenceId,
       id: occurrence.pointId,
@@ -185,25 +189,51 @@ export function reconstructSplineAggregate<TPointId extends string>(
       tangent: occurrence.tangent,
     });
   }
-  return reconstructSpline(
-    {
-      id: aggregate.entityId,
-      policy: aggregate.interpolationPolicy,
-      closure: aggregate.closure,
-      points,
-    },
-    variation,
-  );
+  return {
+    id: aggregate.entityId,
+    policy: aggregate.interpolationPolicy,
+    closure: aggregate.closure,
+    endSpanParameterLengths: aggregate.endSpanParameterLengths,
+    points,
+  };
+}
+
+/** Resolve the complete authored aggregate exactly once before reconstruction. */
+export function reconstructSplineAggregate<TPointId extends string>(
+  aggregate: AuthoredSplineAggregate<TPointId>,
+  positions: Readonly<Record<TPointId, SplineVector>>,
+  variation: SplineVariation = {},
+): SplineGeometry {
+  const resolved = resolveSplineAggregate(aggregate, positions);
+  return "code" in resolved
+    ? { validity: "invalid", diagnostics: [resolved], spans: [] }
+    : reconstructSpline(resolved, variation);
 }
 
 /** Positive intervals only; exact coincident points are retained and diagnosed.
  * 'valid' means reconstruction is defined, NOT regularity or profile validity.
  * Positional closure requires coincident endpoints, but never wraps tangents.
- * No near-degenerate modeling threshold or automatic repair is introduced. */
+ * No near-degenerate modeling threshold or automatic repair is introduced.
+ * Option B (T10g): `endSpanParameterLengths` replaces the first/last span's
+ * centripetal length h by the authored constant L (dh = 0, no Jacobian
+ * column; every downstream term is generic in h and dh). Coincidence is
+ * still judged on the chord. */
 export function reconstructSpline(
   input: ResolvedSplineInput,
   variation: SplineVariation = {},
 ): SplineGeometry {
+  return reconstructSplineParts(input, variation).geometry;
+}
+
+/** The reconstruction plus the per-occurrence source derivatives D_i and span lengths h it used. */
+function reconstructSplineParts(
+  input: ResolvedSplineInput,
+  variation: SplineVariation,
+): {
+  readonly geometry: SplineGeometry;
+  readonly derivatives: readonly SplineVector[];
+  readonly lengths: readonly number[];
+} {
   const { points } = input;
   const n = points.length;
   const diagnostics: SplineDiagnostic[] = [];
@@ -234,10 +264,14 @@ export function reconstructSpline(
     points[0].position.some((v, axis) => v !== points[n - 1].position[axis])
   )
     diagnostics.push({ code: "positional-gap" });
-  const invalid = (): SplineGeometry => ({
-    validity: "invalid",
-    diagnostics,
-    spans: [],
+  const invalid = () => ({
+    geometry: {
+      validity: "invalid",
+      diagnostics,
+      spans: [],
+    } satisfies SplineGeometry,
+    derivatives: [],
+    lengths: [],
   });
   if (diagnostics.length) return invalid();
   const wrapped = input.closure === "smooth";
@@ -262,6 +296,32 @@ export function reconstructSpline(
       diagnostics.push({ code: "non-finite", spanIndex: i });
   }
   if (diagnostics.length) return invalid();
+  const fixedStart = input.endSpanParameterLengths?.start,
+    fixedEnd = input.endSpanParameterLengths?.end;
+  if (fixedStart !== undefined || fixedEnd !== undefined) {
+    const positive = (value: number | undefined) =>
+      value === undefined || (Number.isFinite(value) && value > 0);
+    if (
+      wrapped ||
+      !positive(fixedStart) ||
+      !positive(fixedEnd) ||
+      (count === 1 &&
+        fixedStart !== undefined &&
+        fixedEnd !== undefined &&
+        fixedStart !== fixedEnd)
+    ) {
+      diagnostics.push({ code: "invalid-end-span-parameter-length" });
+      return invalid();
+    }
+    if (fixedStart !== undefined) {
+      h[0] = fixedStart;
+      dh[0] = 0;
+    }
+    if (fixedEnd !== undefined) {
+      h[count - 1] = fixedEnd;
+      dh[count - 1] = 0;
+    }
+  }
   const derivatives: SplineVector[] = [],
     dDerivatives: SplineVector[] = [];
   const handles: SplineVector[] = [],
@@ -372,12 +432,267 @@ export function reconstructSpline(
   return diagnostics.length
     ? invalid()
     : {
-        validity: "valid",
-        diagnostics: [],
-        spans,
-        handles,
-        handleDifferentials,
+        geometry: {
+          validity: "valid",
+          diagnostics: [],
+          spans,
+          handles,
+          handleDifferentials,
+        },
+        derivatives,
+        lengths: h,
       };
+}
+
+/** A cut on a spline target, as the edit-intersection service reports it. */
+export interface SplineCut {
+  /** Global source parameter t*; bitwise that knot when `knotOccurrenceIndex` is set. */
+  readonly representative: number;
+  /** The occurrence index whose knot the cut snapped to (the knot rule), else null. */
+  readonly knotOccurrenceIndex: number | null;
+}
+
+/** One fit-point use of a piece: a kept original occurrence or a new cut point Q. */
+export type SplinePieceOccurrence<TPointId extends string = string> =
+  | {
+      readonly kind: "original";
+      readonly occurrenceId: string;
+      readonly pointId: TPointId;
+      readonly tangent: SplineTangent;
+    }
+  | {
+      readonly kind: "cut";
+      /** S(t*), the owner's evaluation of the original at the cut. */
+      readonly position: SplineVector;
+      readonly tangent: Extract<SplineTangent, { kind: "authored" }>;
+    };
+
+/** An open spline reproducing one sub-curve of the original (T10g option B). */
+export interface SplinePiece<TPointId extends string = string> {
+  readonly occurrences: readonly SplinePieceOccurrence<TPointId>[];
+  readonly endSpanParameterLengths?: SplineEndSpanParameterLengths;
+}
+
+export interface SplineTrim<TPointId extends string = string> {
+  /** Open target: [start, c₁] and [c₂, end]; closed target: [c₁, c₂]. */
+  readonly pieces: readonly SplinePiece<TPointId>[];
+  /** Original occurrences in no piece, in order. */
+  readonly droppedOccurrenceIds: readonly string[];
+  /** Points of dropped occurrences that no kept occurrence uses (Q-g2: kept as free points by the caller). */
+  readonly droppedPointIds: readonly TPointId[];
+}
+
+/**
+ * The piece [from, to] of a spline in its global source parameter (null: the
+ * original end of an open or positional spline), as an open spline that
+ * reproduces that sub-curve to rounding (T10g design §4.3):
+ * - a cut strictly inside span k adds a fit point Q = S(t*) with the authored
+ *   handle S′(t*)·Δ/3 and fixes that end span's parameter length to
+ *   Δ = t_{k+1} − t* (start) or t* − t_k (end);
+ * - a knot cut adds nothing: P_j becomes the end;
+ * - every kept fit point whose arm changes (next to a cut span, or a new end)
+ *   is re-expressed as authored H′ = D_j·w′/3 with its new arm w′, whether it
+ *   was automatic or authored; every other fit point keeps its tangent;
+ * - one span: every present key holds that span's one length t_to − t_from.
+ * Spans next to a re-expressed handle agree only to rounding; spans further
+ * away are bitwise. A cut very near a knot yields a micro end span (and Q
+ * next to P_j), which fails closed downstream at kernel resolution like a
+ * micro line piece; the builder doesn't refuse it. The piece never wraps a
+ * closure's seam or corner. Null when the original doesn't reconstruct; a
+ * cut that is not inside the spline, out of order, or whose knot index
+ * disagrees with its parameter throws.
+ */
+export function splineAggregatePiece<TPointId extends string>(
+  aggregate: AuthoredSplineAggregate<TPointId>,
+  positions: Readonly<Record<TPointId, SplineVector>>,
+  from: SplineCut | null,
+  to: SplineCut | null,
+): SplinePiece<TPointId> | null {
+  const original = reconstructForEdit(aggregate, positions);
+  return original && splinePiece<TPointId>(original, from, to);
+}
+
+/**
+ * Trim of a spline at two cuts c₁ < c₂ (Q-g3: Trim only). An open spline
+ * keeps [start, c₁] and [c₂, end] (two pieces); a smooth or positional
+ * closure keeps [c₁, c₂] from its seam, which never crosses the seam or
+ * corner (the circle precedent). Pieces per `splineAggregatePiece`. Null when
+ * the original doesn't reconstruct.
+ */
+export function trimSplineAggregate<TPointId extends string>(
+  aggregate: AuthoredSplineAggregate<TPointId>,
+  positions: Readonly<Record<TPointId, SplineVector>>,
+  cuts: readonly [SplineCut, SplineCut],
+): SplineTrim<TPointId> | null {
+  const original = reconstructForEdit(aggregate, positions);
+  if (!original) return null;
+  const [first, second] = cuts;
+  if (!(first.representative < second.representative))
+    throw new RangeError("Spline trim cuts must be strictly increasing");
+  const pieces =
+    aggregate.closure === "open"
+      ? [
+          splinePiece<TPointId>(original, null, first),
+          splinePiece<TPointId>(original, second, null),
+        ]
+      : [splinePiece<TPointId>(original, first, second)];
+  const kept = pieces.flatMap((piece) =>
+    piece.occurrences.flatMap((occurrence) =>
+      occurrence.kind === "original" ? [occurrence] : [],
+    ),
+  );
+  const keptOccurrences = new Set(kept.map((entry) => entry.occurrenceId));
+  const keptPoints = new Set<string>(kept.map((entry) => entry.pointId));
+  const dropped = original.input.points.filter(
+    (point) => !keptOccurrences.has(point.occurrenceId),
+  );
+  return {
+    pieces,
+    droppedOccurrenceIds: dropped.map((point) => point.occurrenceId),
+    droppedPointIds: [
+      ...new Set(
+        dropped
+          .map((point) => point.id as TPointId)
+          .filter((id) => !keptPoints.has(id)),
+      ),
+    ],
+  };
+}
+
+interface EditableSpline {
+  readonly input: ResolvedSplineInput;
+  readonly spans: readonly SplineSpan[];
+  readonly derivatives: readonly SplineVector[];
+  readonly lengths: readonly number[];
+}
+
+function reconstructForEdit<TPointId extends string>(
+  aggregate: AuthoredSplineAggregate<TPointId>,
+  positions: Readonly<Record<TPointId, SplineVector>>,
+): EditableSpline | null {
+  const input = resolveSplineAggregate(aggregate, positions);
+  if ("code" in input) return null;
+  const { geometry, derivatives, lengths } = reconstructSplineParts(input, {});
+  return geometry.validity === "valid"
+    ? { input, spans: geometry.spans, derivatives, lengths }
+    : null;
+}
+
+function splinePiece<TPointId extends string>(
+  original: EditableSpline,
+  from: SplineCut | null,
+  to: SplineCut | null,
+): SplinePiece<TPointId> {
+  const { input, spans, derivatives, lengths } = original;
+  const n = input.points.length;
+  const count = spans.length;
+  const wrapped = input.closure === "smooth";
+  /** A knot cut: its occurrence index; else the span strictly holding t*. */
+  const locate = (cut: SplineCut) => {
+    const t = cut.representative;
+    const j = cut.knotOccurrenceIndex;
+    if (j !== null) {
+      if (
+        !(Number.isInteger(j) && j >= 0 && j < count) ||
+        spans[j]!.interval[0] !== t
+      )
+        throw new RangeError(
+          "Spline cut knot index disagrees with its parameter",
+        );
+      return { t, knot: j, span: null };
+    }
+    const k = spans.findIndex(
+      (span) => span.interval[0] < t && t < span.interval[1],
+    );
+    if (k < 0)
+      throw new RangeError(
+        "Spline cut must lie strictly inside a span or on a knot",
+      );
+    return { t, knot: null, span: k };
+  };
+  if ((from === null || to === null) && wrapped)
+    throw new RangeError("A smooth closure has no original end");
+  const start = from && locate(from);
+  const end = to && locate(to);
+  const tFrom = start?.t ?? spans[0]!.interval[0];
+  const tTo = end?.t ?? spans[count - 1]!.interval[1];
+  if (!(tFrom < tTo))
+    throw new RangeError("Spline piece must have a positive parameter range");
+  const startCut = start?.span ?? null;
+  const endCut = end?.span ?? null;
+  // Original occurrences kept, in order (a piece never wraps: first ≤ last + 1).
+  const first = start === null ? 0 : (start.knot ?? startCut! + 1);
+  const last = end === null ? n - 1 : (end.knot ?? endCut!);
+  const offset = startCut === null ? 0 : 1;
+  const spanCount = last - first + offset + (endCut === null ? 0 : 1);
+  const single = spanCount === 1 && (startCut !== null || endCut !== null);
+  // Parameter length of each piece span: Δ at a cut, else the original h.
+  const pieceLengths = Array.from({ length: spanCount }, (_, m) =>
+    single
+      ? tTo - tFrom
+      : m === 0 && startCut !== null
+        ? spans[startCut]!.interval[1] - tFrom
+        : m === spanCount - 1 && endCut !== null
+          ? tTo - spans[endCut]!.interval[0]
+          : lengths[first + m - offset]!,
+  );
+  const fixedStart =
+    startCut !== null ||
+    (first === 0 && input.endSpanParameterLengths?.start !== undefined);
+  const fixedEnd =
+    endCut !== null ||
+    (last === n - 1 &&
+      !wrapped &&
+      input.endSpanParameterLengths?.end !== undefined);
+  const cutPoint = (spanIndex: number, t: number, arm: number) => {
+    const evaluated = evaluateSplineSpan(spans[spanIndex]!, {
+      kind: "source",
+      value: t,
+    });
+    return {
+      kind: "cut" as const,
+      position: evaluated.position,
+      tangent: {
+        kind: "authored" as const,
+        vector: scale(evaluated.first, arm / 3),
+      },
+    };
+  };
+  const occurrences: SplinePieceOccurrence<TPointId>[] = [];
+  if (startCut !== null)
+    occurrences.push(cutPoint(startCut, tFrom, pieceLengths[0]!));
+  for (let i = first; i <= last; i++) {
+    const point = input.points[i]!;
+    const m = i - first + offset;
+    const isEnd = m === 0 || m === spanCount;
+    const nextToCut =
+      (startCut !== null && m === 1) ||
+      (endCut !== null && m === spanCount - 1);
+    const newEnd = isEnd && (wrapped || (i !== 0 && i !== n - 1));
+    const arm = isEnd
+      ? pieceLengths[m === 0 ? 0 : spanCount - 1]!
+      : (pieceLengths[m - 1]! + pieceLengths[m]!) / 2;
+    occurrences.push({
+      kind: "original",
+      occurrenceId: point.occurrenceId,
+      pointId: point.id as TPointId,
+      tangent:
+        nextToCut || newEnd
+          ? { kind: "authored", vector: scale(derivatives[i]!, arm / 3) }
+          : point.tangent,
+    });
+  }
+  if (endCut !== null)
+    occurrences.push(cutPoint(endCut, tTo, pieceLengths[spanCount - 1]!));
+  return fixedStart || fixedEnd
+    ? {
+        occurrences,
+        endSpanParameterLengths: {
+          ...(fixedStart ? { start: pieceLengths[0]! } : {}),
+          ...(fixedEnd ? { end: pieceLengths[spanCount - 1]! } : {}),
+        },
+      }
+    : { occurrences };
 }
 
 export interface ClosestSplineSpanLocation {

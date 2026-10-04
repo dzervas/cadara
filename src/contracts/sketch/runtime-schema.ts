@@ -280,6 +280,18 @@ function validateSketchDefinitionInvariants(definition: SketchDefinition) {
             "Spline occurrence order must be bijective with stable occurrence records.",
         });
       }
+      // T10g (A-7): only the shape is structural here; the values are
+      // judged by reconstructSpline, so a bad value is an invalid spline.
+      const fixed = entity.endSpanParameterLengths;
+      if (fixed && fixed.start === undefined && fixed.end === undefined) {
+        issues.push({
+          path: `entities.${index}.endSpanParameterLengths`,
+          expected: "start and/or end",
+          value: fixed,
+          message:
+            "Spline end-span parameter lengths must set start, end, or both; omit the field otherwise.",
+        });
+      }
     }
 
     if (entity.kind === "profileText") {

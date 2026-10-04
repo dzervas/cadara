@@ -404,6 +404,90 @@ describe("authored action boundary", () => {
       ]);
     }
   });
+  test("T10g option B: endSpanParameterLengths is written whole when added, by key once present, and restores exactly", () => {
+    const history = new AuthoredActionHistory();
+    const before = changed(point(point(seed(), "p"), "q"), (data) => {
+      data.definition.entityIds = ["spline"];
+      data.definition.entities = [
+        {
+          entityId: "spline",
+          kind: "spline",
+          label: "Spline",
+          target: {
+            kind: "sketchEntity",
+            sketchId: "sketch-a",
+            entityId: "spline",
+          },
+          isConstruction: false,
+          pointOccurrenceIds: ["occ-p", "occ-q"],
+          pointOccurrences: [
+            {
+              occurrenceId: "occ-p",
+              pointId: "p",
+              tangent: { kind: "automatic" },
+            },
+            {
+              occurrenceId: "occ-q",
+              pointId: "q",
+              tangent: { kind: "automatic" },
+            },
+          ],
+          closure: "open",
+          interpolationPolicy: "centripetal-mean-arm-v1",
+        },
+      ];
+    });
+    const fields = (start: number, end: number) =>
+      changed(before, (data) => {
+        const entity = data.definition.entities[0];
+        if (entity.kind === "spline")
+          entity.endSpanParameterLengths = { start, end };
+      });
+    const trimmed = fields(0.5, 0.5);
+    const committed = history.commit(identity, before, trimmed, "Trim", before);
+    expect(committed.status).toBe("applied");
+    // Adding the absent field is one optional-field write of the object.
+    if (committed.status === "applied")
+      expect(committed.writes.map((write) => write.address)).toEqual([
+        ["definition", "entities", "spline", "endSpanParameterLengths"],
+      ]);
+    // Undo removes the field again (not an empty object); Redo restores it.
+    const undone = applied(history.undo(identity, trimmed));
+    expect(undone).toEqual(before);
+    // Deleted, not left as an undefined-valued key (toEqual can't tell).
+    if (undone.context.kind !== "sketch" || !undone.data)
+      throw new Error("Expected sketch");
+    if (!("sketchId" in undone.data)) throw new Error("Expected sketch record");
+    expect(
+      Object.hasOwn(
+        undone.data.definition.entities[0]!,
+        "endSpanParameterLengths",
+      ),
+    ).toBe(false);
+    expect(applied(history.redo(identity, undone))).toEqual(trimmed);
+
+    // A peer edit of one key conflicts only with a write of that key.
+    const later = new AuthoredActionHistory();
+    const endOnly = fields(0.5, 0.25);
+    const edited = later.commit(identity, trimmed, endOnly, "Edit", trimmed);
+    expect(edited.status).toBe("applied");
+    if (edited.status === "applied")
+      expect(edited.writes.map((write) => write.address)).toEqual([
+        ["definition", "entities", "spline", "endSpanParameterLengths", "end"],
+      ]);
+    const peer = changed(endOnly, (data) => {
+      const entity = data.definition.entities[0];
+      if (entity.kind === "spline" && entity.endSpanParameterLengths)
+        entity.endSpanParameterLengths.start = 0.75;
+    });
+    expect(applied(later.undo(identity, peer))).toEqual(
+      changed(trimmed, (data) => {
+        const entity = data.definition.entities[0];
+        if (entity.kind === "spline" && entity.endSpanParameterLengths)
+          entity.endSpanParameterLengths.start = 0.75;
+      }),
+    );
+  });
   test("250 compact entries, no-op retains Redo, real new action clears it", () => {
     const history = new AuthoredActionHistory();
     let state = seed();

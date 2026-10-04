@@ -2859,6 +2859,32 @@ function requireStrictSplineEntityDefinition(
   });
 }
 
+/**
+ * T10g option B: carried explicitly (a dropped field would silently change
+ * the shape on reload). The strict check above has fixed its structure;
+ * its values are judged by reconstructSpline.
+ */
+function normalizeSplineEndSpanParameterLengths(
+  value: unknown,
+): Pick<
+  Extract<SketchEntityDefinition, { kind: "spline" }>,
+  "endSpanParameterLengths"
+> {
+  if (value === undefined) return {};
+  const { start, end } = value as NonNullable<
+    Extract<
+      SketchEntityDefinition,
+      { kind: "spline" }
+    >["endSpanParameterLengths"]
+  >;
+  return {
+    endSpanParameterLengths: {
+      ...(start === undefined ? {} : { start }),
+      ...(end === undefined ? {} : { end }),
+    },
+  };
+}
+
 export function normalizeSketchEntityDefinition(
   value: unknown,
 ): SketchEntityDefinition {
@@ -3024,6 +3050,7 @@ export function normalizeSketchEntityDefinition(
       pointOccurrences,
       closure: value.closure,
       interpolationPolicy: value.interpolationPolicy,
+      ...normalizeSplineEndSpanParameterLengths(value.endSpanParameterLengths),
       style: normalizeSketchStyleDefinition(value.style),
     };
   }

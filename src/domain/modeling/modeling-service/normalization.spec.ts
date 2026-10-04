@@ -188,6 +188,45 @@ test("spline normalization rejects unknown fields without changing authored orde
   ).toThrow();
 });
 
+// Seam: the spline entity persistence boundary carries T10g's option-B field
+// explicitly (a dropped field would silently change the shape on reload).
+test("spline normalization carries endSpanParameterLengths and rejects malformed shapes", () => {
+  const payload = makeSplinePayload();
+  expect(
+    "endSpanParameterLengths" in normalizeSketchEntityDefinition(payload),
+  ).toBe(false);
+  for (const fields of [{ start: 0.5 }, { end: 2 }, { start: 0.5, end: 2 }]) {
+    const stored = JSON.parse(
+      JSON.stringify({ ...payload, endSpanParameterLengths: fields }),
+    );
+    const normalized = normalizeSketchEntityDefinition(stored);
+    expect(normalized).toEqual(stored);
+    expect(
+      normalized.kind === "spline" && normalized.endSpanParameterLengths,
+    ).toEqual(fields);
+    // Round trip: normalizing the normalized record is the identity.
+    expect(
+      normalizeSketchEntityDefinition(JSON.parse(JSON.stringify(normalized))),
+    ).toEqual(normalized);
+  }
+  // Values are judged by reconstructSpline (A-7), not here.
+  expect(
+    normalizeSketchEntityDefinition({
+      ...payload,
+      endSpanParameterLengths: { start: -1 },
+    }),
+  ).toMatchObject({ endSpanParameterLengths: { start: -1 } });
+  for (const malformed of [{}, { start: 1, other: 2 }, { end: "2" }, 3, null])
+    expect(
+      () =>
+        normalizeSketchEntityDefinition({
+          ...payload,
+          endSpanParameterLengths: malformed,
+        }),
+      JSON.stringify(malformed),
+    ).toThrow();
+});
+
 // Lane: logic (per docs/testing.md — shell parameter normalization is a domain
 // contract boundary with no UI or browser dependency).
 // Seam: normalizeShellFeatureParameters distinguishes legacy open-face shells,

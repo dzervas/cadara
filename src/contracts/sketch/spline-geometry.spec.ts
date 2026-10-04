@@ -10,7 +10,14 @@ import {
   type SolvedCubicSpan,
   reconstructSpline,
   reconstructSplineAggregate,
+  splineAggregatePiece,
+  trimSplineAggregate,
+  type AuthoredSplineAggregate,
   type ResolvedSplineInput,
+  type SplineCut,
+  type SplineGeometry,
+  type SplinePiece,
+  type SplineSpan,
   type SplineVariation,
   type SplineVector as V,
 } from "./spline-geometry";
@@ -1020,6 +1027,780 @@ describe("neutral spline reconstruction owner", () => {
     expect(
       closestPointOnSolvedCubicSpans([4, 30], spans, 0.2),
       "every span's box is beyond maxDistance",
+    ).toBeNull();
+  });
+});
+
+// T10g-3a: option B (fixed end-span parameter lengths) and the Trim builder.
+type Fields = ResolvedSplineInput["endSpanParameterLengths"];
+type Closure = ResolvedSplineInput["closure"];
+interface EditSpline {
+  readonly aggregate: AuthoredSplineAggregate;
+  readonly positions: Readonly<Record<string, V>>;
+}
+/** An aggregate over `points`; a positional closure aliases its last occurrence to p0. */
+function editSpline(
+  points: readonly V[],
+  closure: Closure = "open",
+  handles: Readonly<Record<number, V>> = {},
+  endSpanParameterLengths?: Fields,
+): EditSpline {
+  const pointId = (i: number) =>
+    closure === "positional" && i === points.length - 1 ? "p0" : `p${i}`;
+  return {
+    aggregate: {
+      entityId: "spline",
+      pointOccurrenceIds: points.map((_, i) => `occ-${i}`),
+      pointOccurrences: points.map((_, i) => ({
+        occurrenceId: `occ-${i}`,
+        pointId: pointId(i),
+        tangent: handles[i]
+          ? { kind: "authored" as const, vector: handles[i]! }
+          : { kind: "automatic" as const },
+      })),
+      closure,
+      interpolationPolicy: "centripetal-mean-arm-v1",
+      ...(endSpanParameterLengths ? { endSpanParameterLengths } : {}),
+    },
+    positions: Object.fromEntries(points.map((p, i) => [pointId(i), p])),
+  };
+}
+/** The piece as an aggregate: cut points become new occurrences and points. */
+function pieceSpline(piece: SplinePiece, positions: EditSpline["positions"]) {
+  const next = { ...positions };
+  const occurrences = piece.occurrences.map((occurrence, index) => {
+    if (occurrence.kind === "original")
+      return {
+        occurrenceId: occurrence.occurrenceId,
+        pointId: occurrence.pointId,
+        tangent: occurrence.tangent,
+      };
+    next[`q-${index}`] = occurrence.position;
+    return {
+      occurrenceId: `cut-${index}`,
+      pointId: `q-${index}`,
+      tangent: occurrence.tangent,
+    };
+  });
+  return {
+    aggregate: {
+      entityId: "piece",
+      pointOccurrenceIds: occurrences.map((entry) => entry.occurrenceId),
+      pointOccurrences: occurrences,
+      closure: "open" as const,
+      interpolationPolicy: "centripetal-mean-arm-v1" as const,
+      ...(piece.endSpanParameterLengths
+        ? { endSpanParameterLengths: piece.endSpanParameterLengths }
+        : {}),
+    },
+    positions: next,
+  };
+}
+function valid(geometry: SplineGeometry) {
+  if (geometry.validity !== "valid")
+    throw new Error(JSON.stringify(geometry.diagnostics));
+  return geometry;
+}
+const geometryOf = ({ aggregate, positions }: EditSpline) =>
+  valid(reconstructSplineAggregate(aggregate, positions));
+const knotsOf = (spans: readonly SplineSpan[]) => [
+  ...spans.map((span) => span.interval[0]),
+  spans.at(-1)!.interval[1],
+];
+/** A cut at fraction f of span k (strictly inside), or exactly on knot j. */
+const cutIn = (spans: readonly SplineSpan[], k: number, f: number) => ({
+  representative:
+    spans[k]!.interval[0] + f * (spans[k]!.interval[1] - spans[k]!.interval[0]),
+  knotOccurrenceIndex: null,
+});
+const cutAtKnot = (spans: readonly SplineSpan[], j: number) => ({
+  representative: spans[j]!.interval[0],
+  knotOccurrenceIndex: j,
+});
+/** Owner evaluation of the original at its source parameter t. */
+function originalAt(spans: readonly SplineSpan[], t: number): V {
+  const span = spans.find(
+    (entry) => entry.interval[0] <= t && t <= entry.interval[1],
+  )!;
+  return evaluateSplineSpan(span, { kind: "source", value: t }).position;
+}
+/**
+ * Every piece span at 64 parameters (65 points) vs the original's owner
+ * evaluation at tFrom + t, ≤ 1e-12·scale (design §4.6: positions, never pole
+ * bitwise equality). Returns the relative error.
+ */
+function expectReproduces(
+  original: readonly SplineSpan[],
+  piece: readonly SplineSpan[],
+  tFrom: number,
+  tTo: number,
+) {
+  const scale = Math.max(
+    ...original.flatMap((span) =>
+      span.poles.flatMap((pole) => pole.map(Math.abs)),
+    ),
+  );
+  let worst = 0;
+  for (const span of piece)
+    for (let step = 0; step <= 64; step++) {
+      const u = step / 64;
+      const t = Math.min(
+        tTo,
+        tFrom + span.interval[0] + u * (span.interval[1] - span.interval[0]),
+      );
+      const here = evaluateSplineSpan(span, { kind: "local", value: u });
+      worst = Math.max(
+        worst,
+        Math.hypot(...sub(here.position, originalAt(original, t))),
+      );
+    }
+  expect(worst / scale).toBeLessThanOrEqual(1e-12);
+  expect(piece.at(-1)!.interval[1]).toBeCloseTo(tTo - tFrom, 12);
+  return worst / scale;
+}
+/** Builds the piece [from, to], reconstructs it and checks it reproduces the original. */
+function checkedPiece(
+  spline: EditSpline,
+  from: SplineCut | null,
+  to: SplineCut | null,
+) {
+  const original = geometryOf(spline).spans;
+  const piece = splineAggregatePiece(
+    spline.aggregate,
+    spline.positions,
+    from,
+    to,
+  )!;
+  const geometry = geometryOf(pieceSpline(piece, spline.positions));
+  expectReproduces(
+    original,
+    geometry.spans,
+    from?.representative ?? 0,
+    to?.representative ?? original.at(-1)!.interval[1],
+  );
+  return { piece, geometry, original };
+}
+/** Independent oracle: de Casteljau split of one cubic at u → [left, right] poles. */
+function deCasteljau(poles: readonly V[], u: number): [V[], V[]] {
+  const lerp = (a: V, b: V) => add(a, mul(sub(b, a), u));
+  const [p0, p1, p2, p3] = poles as [V, V, V, V];
+  const a = lerp(p0, p1),
+    b = lerp(p1, p2),
+    c = lerp(p2, p3);
+  const d = lerp(a, b),
+    e = lerp(b, c);
+  const f = lerp(d, e);
+  return [
+    [p0, a, d, f],
+    [f, e, c, p3],
+  ];
+}
+/** P-g1 open fixture: one authored interior point (P3). */
+const pg1: V[] = [
+  [0, 0],
+  [1, 2],
+  [3, 2.5],
+  [4.2, 0.3],
+  [6, 1],
+  [7.5, -1],
+  [9, 0.4],
+];
+const pg1Handles = { 3: [0.9, -0.4] as V };
+/** R-g1 open fixture (review): all automatic. */
+const rg1: V[] = [
+  [0, 0],
+  [1.3, 2.1],
+  [3.2, 2.6],
+  [4.1, 0.4],
+  [6.3, -1.1],
+  [7.9, 1.7],
+  [9.4, 0.2],
+];
+/**
+ * FD oracle plan (design §4.2): columns are every canonical coordinate and
+ * every authored handle component; analytic pole and interval differentials
+ * vs central differences at ε = 1e-6·scale, within 1e-7·max(1, |FD|); a
+ * fixed span's interval differential is exactly 0.
+ */
+function expectFixedSpanJacobian(data: ResolvedSplineInput) {
+  const scale = Math.max(
+    1,
+    ...data.points.flatMap((point) => point.position.map(Math.abs)),
+  );
+  const epsilon = 1e-6 * scale;
+  const columns: SplineVariation[] = [];
+  for (const id of new Set(data.points.map((point) => point.id)))
+    for (const unit of [
+      [1, 0],
+      [0, 1],
+    ] as V[])
+      columns.push({ points: { [id]: unit } });
+  data.points.forEach((point, i) => {
+    if (point.tangent.kind === "authored")
+      for (const unit of [
+        [1, 0],
+        [0, 1],
+      ] as V[])
+        columns.push({ tangents: { [i]: unit } });
+  });
+  const within = (analytic: number, fd: number) =>
+    expect(Math.abs(analytic - fd)).toBeLessThanOrEqual(
+      1e-7 * Math.max(1, Math.abs(fd)),
+    );
+  const fixed = data.endSpanParameterLengths!;
+  for (const column of columns) {
+    const analytic = build(data, column),
+      plus = build(perturb(data, column, epsilon)),
+      minus = build(perturb(data, column, -epsilon));
+    analytic.spans.forEach((span, i) => {
+      for (const side of [0, 1])
+        within(
+          span.differential.interval[side]!,
+          (plus.spans[i]!.interval[side]! - minus.spans[i]!.interval[side]!) /
+            (2 * epsilon),
+        );
+      span.differential.poles.forEach((pole, j) =>
+        pole.forEach((value, axis) =>
+          within(
+            value,
+            (plus.spans[i]!.poles[j]![axis]! -
+              minus.spans[i]!.poles[j]![axis]!) /
+              (2 * epsilon),
+          ),
+        ),
+      );
+    });
+    const fixedSpans = [
+      ...(fixed.start === undefined ? [] : [analytic.spans[0]!]),
+      ...(fixed.end === undefined ? [] : [analytic.spans.at(-1)!]),
+    ];
+    for (const span of fixedSpans)
+      expect(
+        span.differential.interval[1] - span.differential.interval[0],
+      ).toBe(0);
+  }
+  return columns.length;
+}
+
+describe("option B: fixed end-span parameter lengths (T10g-3a)", () => {
+  test("an absent field (or an empty object) reconstructs exactly as before", () => {
+    for (const closure of ["open", "smooth"] as const) {
+      const data = input(uneven, closure, { 2: [0.7, -0.4] });
+      const plain = JSON.stringify(reconstructSpline(data));
+      expect(
+        JSON.stringify(
+          reconstructSpline({ ...data, endSpanParameterLengths: undefined }),
+        ),
+      ).toBe(plain);
+      expect(
+        JSON.stringify(
+          reconstructSpline({ ...data, endSpanParameterLengths: {} }),
+        ),
+      ).toBe(plain);
+    }
+  });
+
+  test("a fixed length replaces that end span's centripetal length as a constant", () => {
+    const fixed = build({
+      ...input(uneven, "open", { 2: [0.7, -0.4] }),
+      endSpanParameterLengths: { start: 1.25, end: 0.5 },
+    });
+    const plain = build(input(uneven, "open", { 2: [0.7, -0.4] }));
+    expect(fixed.spans[0]!.interval).toEqual([0, 1.25]);
+    const last = fixed.spans.at(-1)!;
+    expect(last.interval[1] - last.interval[0]).toBeCloseTo(0.5, 12);
+    // Spans whose arms don't involve a fixed span are bitwise unchanged.
+    for (const i of [2, 3])
+      expect(fixed.spans[i]!.poles).toEqual(plain.spans[i]!.poles);
+    expect(fixed.spans[0]!.poles).not.toEqual(plain.spans[0]!.poles);
+    // Coincidence is still judged on the chord (no implicit repair).
+    expect(
+      reconstructSpline({
+        ...input([
+          [0, 0],
+          [0, 0],
+          [1, 2],
+        ]),
+        endSpanParameterLengths: { start: 1 },
+      }),
+    ).toMatchObject({
+      validity: "invalid",
+      diagnostics: [{ code: "coincident-points", spanIndex: 0 }],
+    });
+  });
+
+  test("each numeric rule rejects with invalid-end-span-parameter-length", () => {
+    const two: V[] = [
+      [0, 0],
+      [5, 3],
+    ];
+    const rejected: [string, ResolvedSplineInput][] = [
+      ["NaN", { ...input(), endSpanParameterLengths: { start: Number.NaN } }],
+      [
+        "infinite",
+        {
+          ...input(),
+          endSpanParameterLengths: { end: Number.POSITIVE_INFINITY },
+        },
+      ],
+      ["zero", { ...input(), endSpanParameterLengths: { start: 0 } }],
+      ["negative", { ...input(), endSpanParameterLengths: { end: -1 } }],
+      [
+        "smooth closure",
+        { ...input(uneven, "smooth"), endSpanParameterLengths: { start: 1 } },
+      ],
+      [
+        "one span, unequal keys",
+        { ...input(two), endSpanParameterLengths: { start: 1, end: 2 } },
+      ],
+      [
+        "one span, keys differ by one ulp",
+        {
+          ...input(two),
+          endSpanParameterLengths: { start: 2, end: 2 + Number.EPSILON * 2 },
+        },
+      ],
+    ];
+    for (const [name, data] of rejected)
+      expect(reconstructSpline(data), name).toEqual({
+        validity: "invalid",
+        diagnostics: [{ code: "invalid-end-span-parameter-length" }],
+        spans: [],
+      });
+    const accepted: [string, ResolvedSplineInput][] = [
+      [
+        "one span, equal keys",
+        { ...input(two), endSpanParameterLengths: { start: 2, end: 2 } },
+      ],
+      [
+        "one span, one key",
+        { ...input(two), endSpanParameterLengths: { end: 2 } },
+      ],
+      [
+        "positional closure",
+        {
+          ...input([...uneven, uneven[0]!], "positional"),
+          endSpanParameterLengths: { start: 1, end: 3 },
+        },
+      ],
+    ];
+    for (const [name, data] of accepted)
+      expect(reconstructSpline(data).validity, name).toBe("valid");
+    expect(
+      build({ ...input(two), endSpanParameterLengths: { start: 2, end: 2 } })
+        .spans[0]!.interval,
+    ).toEqual([0, 2]);
+  });
+
+  test("FD Jacobian with fixed spans: open (both), positional, single span; fixed-span interval differential is exactly 0", () => {
+    const pg1Spline = editSpline(pg1, "open", pg1Handles);
+    const spans = geometryOf(pg1Spline).spans;
+    const T = spans.at(-1)!.interval[1];
+    const middle = splineAggregatePiece(
+      pg1Spline.aggregate,
+      pg1Spline.positions,
+      { representative: 0.12 * T, knotOccurrenceIndex: null },
+      { representative: 0.88 * T, knotOccurrenceIndex: null },
+    )!;
+    expect(middle.endSpanParameterLengths).toEqual({
+      start: expect.any(Number),
+      end: expect.any(Number),
+    });
+    const asInput = (spline: ReturnType<typeof pieceSpline>) => {
+      const ordered = spline.aggregate.pointOccurrences;
+      return {
+        id: "piece",
+        policy: "centripetal-mean-arm-v1" as const,
+        closure: "open" as const,
+        endSpanParameterLengths: spline.aggregate.endSpanParameterLengths,
+        points: ordered.map((occurrence) => ({
+          occurrenceId: occurrence.occurrenceId,
+          id: occurrence.pointId,
+          position: spline.positions[occurrence.pointId]!,
+          tangent: occurrence.tangent,
+        })),
+      };
+    };
+    const loop: V[] = [
+      [0, 0],
+      [2, 1],
+      [3, 3],
+      [1, 4],
+      [-1, 2],
+      [0, 0],
+    ];
+    const positionalRaw = input(loop, "positional", {
+      0: [0.5, 0.2],
+      2: [-0.3, 0.6],
+    });
+    const cases: [string, ResolvedSplineInput, number][] = [
+      // 7 points (14 coordinates) + authored Q₁, Q₂, P₁, P₃, P₅ (10 components).
+      [
+        "open trim piece, both fields",
+        asInput(pieceSpline(middle, pg1Spline.positions)),
+        24,
+      ],
+      [
+        "open, end field only, automatic interior",
+        // R-g1 points: `uneven`'s 0.022 chord is too short for ε = 1e-6·scale.
+        { ...input(rg1), endSpanParameterLengths: { end: 1.7 } },
+        14,
+      ],
+      [
+        "positional, both fields",
+        {
+          ...positionalRaw,
+          points: positionalRaw.points.map((point, i) =>
+            i === loop.length - 1 ? { ...point, id: "p0" } : point,
+          ),
+          endSpanParameterLengths: { start: 1.1, end: 0.9 },
+        },
+        14,
+      ],
+      [
+        "single span, both fields equal",
+        {
+          ...input(
+            [
+              [0, 0],
+              [5, 3],
+            ],
+            "open",
+            { 0: [1, 0.5], 1: [2, -1] },
+          ),
+          endSpanParameterLengths: { start: 2.2, end: 2.2 },
+        },
+        8,
+      ],
+    ];
+    for (const [name, data, columns] of cases)
+      expect(expectFixedSpanJacobian(data), name).toBe(columns);
+  });
+
+  test("P-g1: Trim pieces A and B, start/end trims and an authored neighbour reproduce the original sub-curve", () => {
+    const spline = editSpline(pg1, "open", pg1Handles);
+    const original = geometryOf(spline).spans;
+    const T = original.at(-1)!.interval[1];
+    const at = (f: number) => ({
+      representative: f * T,
+      knotOccurrenceIndex: null,
+    });
+    const a = checkedPiece(spline, null, at(0.41));
+    expect(Object.keys(a.piece.endSpanParameterLengths!)).toEqual(["end"]);
+    const b = checkedPiece(spline, at(0.67), null);
+    expect(Object.keys(b.piece.endSpanParameterLengths!)).toEqual(["start"]);
+    checkedPiece(spline, at(0.03), null);
+    checkedPiece(spline, null, at(0.97));
+    // P₃ (authored) is the neighbour of a cut in span 2: re-expressed with its new arm.
+    const neighbour = checkedPiece(spline, at(0.47), null);
+    const k = original.findIndex(
+      (span) => span.interval[0] < 0.47 * T && 0.47 * T < span.interval[1],
+    );
+    expect(neighbour.piece.occurrences[1]).toMatchObject({
+      kind: "original",
+      occurrenceId: `occ-${k + 1}`,
+      tangent: { kind: "authored" },
+    });
+    expect(neighbour.piece.occurrences[1]!.tangent).not.toEqual({
+      kind: "authored",
+      vector: pg1Handles[3],
+    });
+    // The new end Q: S(t*) with the handle S′(t*)·Δ/3, Δ the fixed field.
+    const cut = neighbour.piece.occurrences[0]!;
+    const span = original[k]!;
+    const exact = evaluateSplineSpan(span, { kind: "source", value: 0.47 * T });
+    const delta = span.interval[1] - 0.47 * T;
+    expect(neighbour.piece.endSpanParameterLengths).toEqual({ start: delta });
+    expect(cut).toEqual({
+      kind: "cut",
+      position: exact.position,
+      tangent: { kind: "authored", vector: mul(exact.first, delta / 3) },
+    });
+  });
+
+  test("open pieces carry an original start/end field bitwise; the untouched end span keeps the original poles", () => {
+    const spline = editSpline(pg1, "open", pg1Handles, {
+      start: 1.3,
+      end: 0.9,
+    });
+    const original = geometryOf(spline).spans;
+    // Piece B [c₂, end]: the original end span is untouched.
+    const b = checkedPiece(spline, cutIn(original, 2, 0.4), null);
+    expect(b.piece.endSpanParameterLengths!.end).toBe(0.9);
+    expect(b.piece.endSpanParameterLengths!.start).toBe(
+      original[2]!.interval[1] - cutIn(original, 2, 0.4).representative,
+    );
+    expect(b.geometry.spans.at(-1)!.poles).toEqual(original.at(-1)!.poles);
+    // Piece A [start, c₁]: the original start span is untouched.
+    const a = checkedPiece(spline, null, cutIn(original, 3, 0.6));
+    expect(a.piece.endSpanParameterLengths!.start).toBe(1.3);
+    expect(a.geometry.spans[0]!.poles).toEqual(original[0]!.poles);
+  });
+
+  test("P-g1: the cut end span's poles equal an independent de Casteljau split", () => {
+    const spline = editSpline(pg1, "open", pg1Handles);
+    const original = geometryOf(spline).spans;
+    const t = 0.41 * original.at(-1)!.interval[1];
+    const k = original.findIndex(
+      (span) => span.interval[0] < t && t < span.interval[1],
+    );
+    const span = original[k]!;
+    const [left] = deCasteljau(
+      span.poles,
+      (t - span.interval[0]) / (span.interval[1] - span.interval[0]),
+    );
+    const { geometry } = checkedPiece(spline, null, {
+      representative: t,
+      knotOccurrenceIndex: null,
+    });
+    geometry.spans
+      .at(-1)!
+      .poles.forEach((pole, j) => near(pole, left[j]!, 1e-14));
+  });
+
+  test("P-g1: a knot cut adds no point and no field; P_j becomes the end with H = D_j·h/3", () => {
+    const spline = editSpline(pg1, "open", pg1Handles);
+    const original = geometryOf(spline).spans;
+    const { piece, geometry } = checkedPiece(
+      spline,
+      cutAtKnot(original, 3),
+      null,
+    );
+    expect(piece.endSpanParameterLengths).toBeUndefined();
+    expect(piece.occurrences.map((entry) => entry.kind)).toEqual([
+      "original",
+      "original",
+      "original",
+      "original",
+    ]);
+    // P₃ was authored; as the new start its handle is D₃·h₃/3 (endpoint arm),
+    // i.e. the original span 3's first pole arm.
+    near(
+      (piece.occurrences[0]!.tangent as { vector: V }).vector,
+      sub(original[3]!.poles[1], original[3]!.poles[0]),
+      1e-14,
+    );
+    // Spans away from the re-expressed point are bitwise the original's.
+    expect(geometry.spans[1]!.poles).toEqual(original[4]!.poles);
+    expect(geometry.spans[2]!.poles).toEqual(original[5]!.poles);
+  });
+
+  test("P-g1: a single span trimmed twice keeps both fields equal to its one length", () => {
+    const spline = editSpline(
+      [
+        [0, 0],
+        [5, 3],
+      ],
+      "open",
+      { 1: [2, -1] },
+    );
+    const original = geometryOf(spline).spans;
+    const T = original[0]!.interval[1];
+    const first = checkedPiece(spline, cutIn(original, 0, 0.2), null);
+    expect(first.piece.endSpanParameterLengths).toEqual({ start: T - 0.2 * T });
+    const once = pieceSpline(first.piece, spline.positions);
+    const T1 = geometryOf(once).spans[0]!.interval[1];
+    const second = splineAggregatePiece(once.aggregate, once.positions, null, {
+      representative: 0.7 * T1,
+      knotOccurrenceIndex: null,
+    })!;
+    expect(second.endSpanParameterLengths).toEqual({
+      start: 0.7 * T1,
+      end: 0.7 * T1,
+    });
+    expectReproduces(
+      original,
+      geometryOf(pieceSpline(second, once.positions)).spans,
+      0.2 * T,
+      0.2 * T + 0.7 * T1,
+    );
+    // Both cuts in one span at once: every present key is t_to − t_from.
+    const both = checkedPiece(
+      spline,
+      cutIn(original, 0, 0.25),
+      cutIn(original, 0, 0.6),
+    );
+    expect(both.piece.endSpanParameterLengths).toEqual({
+      start: 0.6 * T - 0.25 * T,
+      end: 0.6 * T - 0.25 * T,
+    });
+  });
+
+  test("R-g1: middle pieces (adjacent spans sharing a neighbour, spans 0/4 and 0/5, cuts 1e-9 from knots)", () => {
+    const spline = editSpline(rg1);
+    const original = geometryOf(spline).spans;
+    // Adjacent spans: P₂ is the one re-expressed neighbour of both cuts, w′ = (Δ₁ + Δ₂)/2.
+    const adjacent = checkedPiece(
+      spline,
+      cutIn(original, 1, 0.37),
+      cutIn(original, 2, 0.61),
+    );
+    expect(adjacent.piece.occurrences.map((entry) => entry.kind)).toEqual([
+      "cut",
+      "original",
+      "cut",
+    ]);
+    checkedPiece(spline, cutIn(original, 0, 0.2), cutIn(original, 4, 0.8));
+    const wide = checkedPiece(
+      spline,
+      cutIn(original, 0, 0.2),
+      cutIn(original, 5, 0.7),
+    );
+    // P₁ and P₅ re-expressed; P₂…P₄ stay automatic and span P₂→P₃ is bitwise.
+    expect(wide.piece.occurrences.map((entry) => entry.tangent.kind)).toEqual([
+      "authored",
+      "authored",
+      "automatic",
+      "automatic",
+      "automatic",
+      "authored",
+      "authored",
+    ]);
+    expect(wide.geometry.spans[2]!.poles).toEqual(original[2]!.poles);
+    checkedPiece(
+      spline,
+      cutIn(original, 2, 1 - 1e-9),
+      cutIn(original, 3, 1e-9),
+    );
+  });
+
+  test("A-8: a cut 1e-9 from a knot gives a micro end span the builder doesn't refuse", () => {
+    const spline = editSpline(rg1);
+    const original = geometryOf(spline).spans;
+    const knots = knotsOf(original);
+    const { piece } = checkedPiece(spline, cutIn(original, 2, 1 - 1e-9), null);
+    const start = piece.endSpanParameterLengths!.start!;
+    expect(start).toBeGreaterThan(0);
+    expect(start).toBeLessThan(1e-8 * (knots[3]! - knots[2]!));
+  });
+
+  test("closed targets: a smooth or positional piece [c₁, c₂] never crosses the seam and reproduces it", () => {
+    const smooth = editSpline(rg1.slice(0, 6), "smooth");
+    const smoothSpans = geometryOf(smooth).spans;
+    // c₂ inside the closing span P₅→P₀; P₀ dropped.
+    checkedPiece(
+      smooth,
+      cutIn(smoothSpans, 0, 0.3),
+      cutIn(smoothSpans, 5, 0.6),
+    );
+    // The seam knot as the first cut: P₀ becomes the start, re-expressed.
+    const seam = checkedPiece(
+      smooth,
+      cutAtKnot(smoothSpans, 0),
+      cutIn(smoothSpans, 2, 0.5),
+    );
+    expect(seam.piece.occurrences[0]).toMatchObject({
+      occurrenceId: "occ-0",
+      tangent: { kind: "authored" },
+    });
+    expect(seam.piece.endSpanParameterLengths).toEqual({
+      end: expect.any(Number),
+    });
+    const loop = editSpline(
+      [
+        [0, 0],
+        [2, 1],
+        [3, 3],
+        [1, 4],
+        [-1, 2],
+        [0, 0],
+      ],
+      "positional",
+      {},
+      { start: 1.6 },
+    );
+    const loopSpans = geometryOf(loop).spans;
+    checkedPiece(loop, cutIn(loopSpans, 1, 0.5), cutIn(loopSpans, 4, 0.25));
+    // From the corner: the original start field is carried (its span is untouched).
+    const corner = checkedPiece(
+      loop,
+      cutAtKnot(loopSpans, 0),
+      cutIn(loopSpans, 3, 0.5),
+    );
+    expect(corner.piece.endSpanParameterLengths).toEqual({
+      start: 1.6,
+      end: expect.any(Number),
+    });
+    expect(corner.geometry.spans[0]!.poles).toEqual(loopSpans[0]!.poles);
+  });
+
+  test("trimSplineAggregate: open → two pieces, closed → one; dropped occurrences and points are reported", () => {
+    const open = editSpline(pg1, "open", pg1Handles);
+    const spans = geometryOf(open).spans;
+    const trim = trimSplineAggregate(open.aggregate, open.positions, [
+      cutIn(spans, 1, 0.5),
+      cutIn(spans, 4, 0.5),
+    ])!;
+    expect(
+      trim.pieces.map((piece) =>
+        piece.occurrences.map((entry) =>
+          entry.kind === "original" ? entry.occurrenceId : "Q",
+        ),
+      ),
+    ).toEqual([
+      ["occ-0", "occ-1", "Q"],
+      ["Q", "occ-5", "occ-6"],
+    ]);
+    expect(trim.droppedOccurrenceIds).toEqual(["occ-2", "occ-3", "occ-4"]);
+    expect(trim.droppedPointIds).toEqual(["p2", "p3", "p4"]);
+    // Knot cuts keep their fit points as the new ends.
+    const knotTrim = trimSplineAggregate(open.aggregate, open.positions, [
+      cutAtKnot(spans, 2),
+      cutAtKnot(spans, 4),
+    ])!;
+    expect(knotTrim.droppedOccurrenceIds).toEqual(["occ-3"]);
+    expect(
+      knotTrim.pieces.map((piece) => piece.endSpanParameterLengths),
+    ).toEqual([undefined, undefined]);
+
+    const loop = editSpline(
+      [
+        [0, 0],
+        [2, 1],
+        [3, 3],
+        [1, 4],
+        [-1, 2],
+        [0, 0],
+      ],
+      "positional",
+    );
+    const loopSpans = geometryOf(loop).spans;
+    const closed = trimSplineAggregate(loop.aggregate, loop.positions, [
+      cutIn(loopSpans, 1, 0.5),
+      cutIn(loopSpans, 2, 0.5),
+    ])!;
+    expect(closed.pieces).toHaveLength(1);
+    expect(closed.droppedOccurrenceIds).toEqual([
+      "occ-0",
+      "occ-1",
+      "occ-3",
+      "occ-4",
+      "occ-5",
+    ]);
+    // The corner's two occurrences share p0, reported once.
+    expect(closed.droppedPointIds).toEqual(["p0", "p1", "p3", "p4"]);
+
+    expect(() =>
+      trimSplineAggregate(open.aggregate, open.positions, [
+        cutIn(spans, 4, 0.5),
+        cutIn(spans, 1, 0.5),
+      ]),
+    ).toThrow(RangeError);
+    expect(() =>
+      trimSplineAggregate(open.aggregate, open.positions, [
+        {
+          representative: spans[2]!.interval[0] + 1e-3,
+          knotOccurrenceIndex: 2,
+        },
+        cutIn(spans, 4, 0.5),
+      ]),
+    ).toThrow(RangeError);
+    expect(
+      trimSplineAggregate(
+        { ...open.aggregate, endSpanParameterLengths: { start: -1 } },
+        open.positions,
+        [cutIn(spans, 1, 0.5), cutIn(spans, 4, 0.5)],
+      ),
     ).toBeNull();
   });
 });

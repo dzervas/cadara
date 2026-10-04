@@ -13,6 +13,7 @@ import {
   evaluateSketchDerivations,
   prepareSketchDerivationPullback,
 } from "@/contracts/sketch/derived-geometry";
+import { reconstructSplineAggregate } from "@/contracts/sketch/spline-geometry";
 
 test("evaluateSketchDerivations mirrors geometry and reverses mirrored arc sweep direction", () => {
   const definition = makeSketchDefinition({
@@ -1398,3 +1399,195 @@ function makeRelationship(
 ): SketchDerivationDefinition {
   return definition;
 }
+
+// Lane: logic. Seam: evaluateSketchDerivations' spline copies of T10g option B
+// (design §4.7, review A-6): the field is set from the seed, ×√|s| under a
+// transform, unchanged under the isometries, and deleted when the seed has none.
+test("spline copies carry endSpanParameterLengths (×√|s| under transform) and drop a stale one", () => {
+  type Spline = Extract<SketchEntityDefinition, { kind: "spline" }>;
+  const seedIds = ["seed_a", "seed_b", "seed_c", "seed_d"];
+  const seed: Spline = {
+    ...(makeSpline("seed_spline", seedIds) as Spline),
+    pointOccurrences: seedIds.map((pointId, index) => ({
+      occurrenceId: `occ-${index}`,
+      pointId: pointId as SketchPointId,
+      tangent:
+        index === 0
+          ? { kind: "authored", vector: [0.3, 0.5] }
+          : index === 3
+            ? { kind: "authored", vector: [0.4, -0.2] }
+            : { kind: "automatic" },
+    })),
+    endSpanParameterLengths: { start: 0.8, end: 1.1 },
+  };
+  const plainSeed = makeSpline("plain_seed", ["seed_a", "seed_b"]) as Spline;
+  const rotate = ([x, y]: SketchPoint2D, angle: number, scale = 1) =>
+    [
+      scale * (x * Math.cos(angle) - y * Math.sin(angle)),
+      scale * (x * Math.sin(angle) + y * Math.cos(angle)),
+    ] as const;
+  const cases: {
+    id: string;
+    relationship: Record<string, unknown>;
+    map: (point: SketchPoint2D) => SketchPoint2D;
+    factor: number;
+  }[] = [
+    ...[2.5, -1.7].map((scale, index) => ({
+      id: `transform_${index}`,
+      relationship: {
+        kind: "transform",
+        origin: [0.5, -1],
+        translation: [9, 7],
+        rotationRadians: 0.3,
+        scale,
+      },
+      map: (point: SketchPoint2D) => {
+        const turned = rotate([point[0] - 0.5, point[1] + 1], 0.3, scale);
+        return [turned[0] + 0.5 + 9, turned[1] - 1 + 7] as const;
+      },
+      factor: Math.sqrt(Math.abs(scale)),
+    })),
+    {
+      id: "mirror",
+      relationship: {
+        kind: "mirror",
+        mirrorReference: { kind: "lineEntity", entityId: "axis" },
+      },
+      map: ([x, y]: SketchPoint2D) => [-x, y] as const,
+      factor: 1,
+    },
+    {
+      id: "linear",
+      relationship: {
+        kind: "linearPattern",
+        vector: [3, -2],
+        instanceCount: 2,
+      },
+      map: ([x, y]: SketchPoint2D) => [x + 3, y - 2] as const,
+      factor: 1,
+    },
+    {
+      id: "circular",
+      relationship: {
+        kind: "circularPattern",
+        center: [0, 0],
+        angleRadians: Math.PI / 3,
+        instanceCount: 2,
+      },
+      map: (point: SketchPoint2D) => rotate(point, Math.PI / 3),
+      factor: 1,
+    },
+  ];
+  const outputIds = (id: string) => seedIds.map((point) => `${id}_${point}`);
+  const definition = makeSketchDefinition({
+    points: [
+      makePoint("axis_start", [0, -2]),
+      makePoint("axis_end", [0, 2]),
+      makePoint("seed_a", [0, 0]),
+      makePoint("seed_b", [1, 2]),
+      makePoint("seed_c", [3, 2.5]),
+      makePoint("seed_d", [4.2, 0.3]),
+      ...cases.flatMap(({ id }) =>
+        outputIds(id).map((point) => makePoint(point, [0, 0])),
+      ),
+      makePoint("plain_a", [0, 0]),
+      makePoint("plain_b", [0, 0]),
+    ],
+    entities: [
+      makeLine("axis", "axis_start", "axis_end"),
+      seed,
+      plainSeed,
+      // Stale fields on the outputs: the derivation must overwrite / delete them.
+      ...cases.map(({ id }) => ({
+        ...(makeSpline(`${id}_spline`, outputIds(id)) as Spline),
+        endSpanParameterLengths: { start: 99 },
+      })),
+      {
+        ...(makeSpline("plain_copy", ["plain_a", "plain_b"]) as Spline),
+        endSpanParameterLengths: { end: 5 },
+      },
+    ],
+    derivedRelationships: [
+      ...cases.map(
+        ({ id, relationship }) =>
+          ({
+            derivationId: `${id}_relationship`,
+            label: id,
+            seedEntityIds: ["seed_spline"],
+            ...relationship,
+            outputs: [
+              {
+                seedEntityId: "seed_spline",
+                outputEntityId: `${id}_spline`,
+                instanceIndex: 1,
+                seedPointIds: seedIds,
+                outputPointIds: outputIds(id),
+              },
+            ],
+          }) as unknown as SketchDerivationDefinition,
+      ),
+      makeRelationship({
+        kind: "transform",
+        derivationId: "plain_relationship",
+        label: "plain",
+        seedEntityIds: ["plain_seed"],
+        origin: [0, 0],
+        translation: [1, 1],
+        rotationRadians: 0,
+        scale: 2.5,
+        outputs: [
+          {
+            seedEntityId: "plain_seed",
+            outputEntityId: "plain_copy",
+            instanceIndex: 1,
+            seedPointIds: ["seed_a", "seed_b"] as SketchPointId[],
+            outputPointIds: ["plain_a", "plain_b"] as SketchPointId[],
+          },
+        ],
+      } as SketchDerivationDefinition),
+    ],
+  });
+  const result = evaluateSketchDerivations({
+    definition,
+    modelingTolerance: 1e-3,
+  });
+  expect(result.diagnostics).toEqual([]);
+  const positions = Object.fromEntries(
+    result.definition.points.map((point) => [point.pointId, point.position]),
+  );
+  const poles = (spline: Spline) => {
+    const geometry = reconstructSplineAggregate(spline, positions);
+    if (geometry.validity !== "valid")
+      throw new Error(JSON.stringify(geometry.diagnostics));
+    return geometry.spans.flatMap((span) => span.poles);
+  };
+  const seedPoles = poles(seed);
+  for (const { id, map, factor } of cases) {
+    const copy = entity(result.definition, `${id}_spline`) as Spline;
+    expect(copy.endSpanParameterLengths, id).toEqual({
+      start: 0.8 * factor,
+      end: 1.1 * factor,
+    });
+    const error = (candidate: Spline) =>
+      Math.max(
+        ...poles(candidate).map((pole, index) => {
+          const image = map(seedPoles[index]!);
+          return Math.hypot(pole[0] - image[0], pole[1] - image[1]);
+        }),
+      ) / 10;
+    // The copy is the image of the seed curve (owner reconstruction, not poles bitwise).
+    expect(error(copy), id).toBeLessThanOrEqual(1e-12);
+    if (factor !== 1)
+      // Control (P-g1 g / R-g1): an unscaled field gives a visibly different copy.
+      expect(
+        error({
+          ...copy,
+          endSpanParameterLengths: seed.endSpanParameterLengths,
+        }),
+        id,
+      ).toBeGreaterThan(1e-4);
+  }
+  expect(
+    "endSpanParameterLengths" in entity(result.definition, "plain_copy"),
+  ).toBe(false);
+});
