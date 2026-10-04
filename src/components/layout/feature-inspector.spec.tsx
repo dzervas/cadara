@@ -307,4 +307,63 @@ test("src/components/layout/feature-inspector.spec.tsx", async () => {
       !invalidEditorMarkup.includes("pointer-events-none absolute right-2"),
     "Expression editor should render invalid preview feedback without replacing authored text.",
   ).toBeTruthy();
+
+  // T10 plan §2.9: a dangling region selection stays in the profile field as
+  // "Missing region" with its guidance and code until the user replaces it.
+  const danglingRegion = {
+    kind: "region" as const,
+    sketchId: "sketch_a" as const,
+    regionId: "region_gone" as const,
+  };
+  const liveRegion = {
+    kind: "region" as const,
+    sketchId: "sketch_a" as const,
+    regionId: "region_live" as const,
+  };
+  const extrudeSession = {
+    ...patchFeatureEditSession(
+      createFeatureEditSession({
+        featureType: "extrude",
+        selectedTarget: danglingRegion,
+      }),
+      { profileTargets: [danglingRegion, liveRegion] },
+    ),
+    mode: "edit" as const,
+    featureId: "feature_extrude-1" as const,
+  };
+  const danglingMarkup = renderInspector({
+    activeEditSession: extrudeSession,
+    snapshot: {
+      document: {
+        variables: [],
+        diagnostics: [
+          {
+            code: "profile-region-reselect",
+            severity: "error",
+            message: "Extrude 1 profile selection is incorrect.",
+            featureId: "feature_extrude-1",
+            fieldId: "profiles",
+            repairGuidance:
+              "Edit Extrude 1 and choose a valid profile selection.",
+            target: danglingRegion,
+            detail: null,
+          },
+        ],
+      },
+    } as unknown as WorkspaceSnapshot,
+  });
+  expect(
+    danglingMarkup.includes("Missing region (sketch_a.region_gone)") &&
+      danglingMarkup.includes(
+        "Edit Extrude 1 and choose a valid profile selection.",
+      ) &&
+      danglingMarkup.includes("profile-region-reselect"),
+    "The dangling region renders as a missing region with its guidance and code.",
+  ).toBeTruthy();
+  expect(
+    danglingMarkup.includes("Remove sketch_a.region_gone") &&
+      danglingMarkup.includes(">sketch_a.region_live</span>") &&
+      !danglingMarkup.includes("Missing region (sketch_a.region_live)"),
+    "The dangling selection is kept (removable) and the live one renders normally; nothing is replaced automatically.",
+  ).toBeTruthy();
 });

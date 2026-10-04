@@ -2473,6 +2473,31 @@ describe("query routing through the injected capability", () => {
     expect(requests.length).toBeGreaterThan(sent);
   });
 
+  test("a bounded query cache stays sound under eviction (T10 A10: one deriver per kernel adapter)", async () => {
+    const sketch = makeSketchFixture();
+    addRectangle(sketch, "r", [0, 0, 10, 5]);
+    sketch.point("c", 10, 2.5);
+    sketch.circle("c1", "c", 1);
+    const input = sketch.build({ modelingTolerance: 0.00123 });
+    const reference =
+      await createSketchArrangementDeriver(capability).derive(input);
+    const { requests, capability: recorder } = recording(capability);
+    const tiny = createSketchArrangementDeriver(recorder, {
+      queryCacheEntries: 1,
+    });
+    expect(await tiny.derive(input)).toEqual(reference);
+    const sent = requests.length;
+    expect(
+      sent,
+      "the fixture issues more requests than the cache holds",
+    ).toBeGreaterThan(1);
+    expect(
+      await tiny.derive(input),
+      "evicted requests are re-queried, never answered by another request's entry",
+    ).toEqual(reference);
+    expect(requests.length).toBeGreaterThan(sent);
+  });
+
   test("declarations that cannot be queried block both branches and send no ordinary pair query (review 6)", async () => {
     // Three declared joins between one branch pair (at most two are supported).
     const three = makeSketchFixture();

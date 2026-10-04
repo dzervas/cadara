@@ -71,6 +71,7 @@ import type {
   RegionBoundarySegmentRecord,
   RegionLoopRecord,
   RegionRecord,
+  SketchRecord,
 } from "@/contracts/sketch/schema";
 import {
   tessellateCubicSpans,
@@ -136,6 +137,56 @@ export function createRegionBoundaryBasis(
     },
     regions,
   );
+}
+
+type RegionBoundaryRecord = Pick<
+  SketchRecord,
+  "definition" | "solvedSnapshot" | "projectedReferences" | "regions"
+>;
+
+const recordBases = new WeakMap<
+  RegionBoundaryRecord,
+  RegionBoundaryRecord & { basis: RegionBoundaryBasis }
+>();
+
+/**
+ * The basis of one stored sketch record (T10e A-5; the one helper OCC
+ * profiles, measurement and export use): the record's definition, solved
+ * snapshot (publications applied, as stored), projected references and its
+ * own `regions`, held together by the record, so a region resolves only
+ * against the pair that produced it (R2). Records reach consumers whole
+ * (structured clone, persistence), so a basis built from the record in hand
+ * holds the very segment objects its regions carry. Cached per record object
+ * and rebuilt when any of the four fields is a different object.
+ */
+export function regionBoundaryBasisOfRecord(
+  sketch: RegionBoundaryRecord,
+): RegionBoundaryBasis {
+  const cached = recordBases.get(sketch);
+  if (
+    cached &&
+    cached.definition === sketch.definition &&
+    cached.solvedSnapshot === sketch.solvedSnapshot &&
+    cached.projectedReferences === sketch.projectedReferences &&
+    cached.regions === sketch.regions
+  )
+    return cached.basis;
+  const basis = createRegionBoundaryBasis(
+    {
+      definition: sketch.definition,
+      solvedSnapshot: sketch.solvedSnapshot,
+      projectedReferences: sketch.projectedReferences ?? [],
+    },
+    sketch.regions,
+  );
+  recordBases.set(sketch, {
+    definition: sketch.definition,
+    solvedSnapshot: sketch.solvedSnapshot,
+    projectedReferences: sketch.projectedReferences,
+    regions: sketch.regions,
+    basis,
+  });
+  return basis;
 }
 
 /**

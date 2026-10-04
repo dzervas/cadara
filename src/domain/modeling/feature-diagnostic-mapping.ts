@@ -268,6 +268,87 @@ export function createFeatureFieldDiagnostic(input: {
   };
 }
 
+/**
+ * T10 plan §2.9 (A9) reselection causes. A region id that is not among the
+ * consumable regions of a `current` sketch needs reselection (identity lost
+ * or ambiguous); a region of a `stale`/`invalid` sketch keeps its selection,
+ * which reconnects by identity once the sketch is corrected; an exact profile
+ * build failure is attributed to the sketch, not the profile field.
+ */
+export const PROFILE_REGION_RESELECT_CODE = "profile-region-reselect";
+export const PROFILE_REGION_SKETCH_NOT_CURRENT_CODE =
+  "profile-region-sketch-not-current";
+
+/** Codes of a region profile the exact OCC builder failed to build (T10c). */
+export const SKETCH_PROFILE_BUILD_FAILURE_CODES: ReadonlySet<string> = new Set([
+  "profile-boundary-unresolved",
+  "profile-boundary-unsupported",
+  "profile-vertex-gap-exceeds-join",
+  "profile-edge-below-kernel-resolution",
+  "profile-wire-invalid",
+  "profile-face-invalid",
+]);
+
+export function profileRegionSketchNotCurrentGuidance(
+  sketchLabel: string,
+  errorCount: number,
+) {
+  const errors =
+    errorCount > 0
+      ? ` (${errorCount} error${errorCount === 1 ? "" : "s"})`
+      : "";
+  return `Correct ${sketchLabel}${errors}; the profile will resolve again.`;
+}
+
+export function createProfileRegionSketchNotCurrentDiagnostic(input: {
+  feature: DiagnosticFeatureRecord;
+  target: Extract<DurableRef, { kind: "region" }>;
+  sketchLabel: string;
+  sketchState: "stale" | "invalid";
+  errorCount: number;
+}): ModelingDiagnostic {
+  return {
+    ...createFeatureFieldDiagnostic({
+      code: PROFILE_REGION_SKETCH_NOT_CURRENT_CODE,
+      feature: input.feature,
+      target: input.target,
+      detail: null,
+    }),
+    message: `${featureLabel(input.feature)} profile region waits for ${input.sketchLabel}, whose derived output is ${input.sketchState}.`,
+    repairGuidance: profileRegionSketchNotCurrentGuidance(
+      input.sketchLabel,
+      input.errorCount,
+    ),
+  };
+}
+
+/**
+ * An exact profile build failure (`code: reason`) attributed to the sketch:
+ * the feature-level diagnostic names the sketch, not the profile field.
+ */
+export function createSketchProfileBuildDiagnostic(input: {
+  code: string;
+  reason: string;
+  feature: DiagnosticFeatureRecord;
+  sketch: {
+    sketchId: Extract<DurableRef, { kind: "sketch" }>["sketchId"];
+    label: string;
+  };
+  detail: ModelingDiagnostic["detail"];
+}): ModelingDiagnostic {
+  return {
+    code: input.code,
+    severity: "error",
+    message: `${featureLabel(input.feature)} cannot build from ${input.sketch.label}: ${input.reason}`,
+    featureId: input.feature.featureId,
+    fieldId: "sketch",
+    fieldPath: ["sketch", input.sketch.sketchId],
+    repairGuidance: `Edit ${input.sketch.label}: ${input.reason}`,
+    target: { kind: "sketch", sketchId: input.sketch.sketchId },
+    detail: input.detail,
+  };
+}
+
 export function createDependencyBlockedDiagnostic(input: {
   featureId: FeatureId;
   featureLabel: string;

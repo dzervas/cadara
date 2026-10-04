@@ -1,5 +1,11 @@
 import { ActionIcon, Paper, Select, Tooltip } from "@mantine/core";
-import { useMemo, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   Controller,
   type Control,
@@ -27,6 +33,10 @@ import {
   type PrimitiveRef,
 } from "@/core/editor/schema";
 import { formatInspectorDiagnosticDetail } from "@/domain/modeling/diagnostic-formatting";
+import {
+  PROFILE_REGION_RESELECT_CODE,
+  PROFILE_REGION_SKETCH_NOT_CURRENT_CODE,
+} from "@/domain/modeling/feature-diagnostic-mapping";
 import { getFeatureEditorFormSchema } from "@/domain/editor/feature-editing";
 import {
   createFeatureEditorExpressionControlFormValue,
@@ -189,6 +199,30 @@ function isProfileReferenceCollectionField(
   return (
     field.kind === "referenceCollection" &&
     field.advancedParticipant?.role === "profile"
+  );
+}
+
+/**
+ * The edited feature's diagnostics, read by the profile field to mark a
+ * dangling region selection (T10 plan §2.9). The selection is kept until the
+ * user replaces it; nothing is picked automatically.
+ */
+const FeatureDiagnosticsContext = createContext<readonly ModelingDiagnostic[]>(
+  [],
+);
+
+function findProfileSelectionDiagnostic(
+  diagnostics: readonly ModelingDiagnostic[],
+  target: PrimitiveRef,
+) {
+  return (
+    diagnostics.find(
+      (diagnostic) =>
+        (diagnostic.code === PROFILE_REGION_RESELECT_CODE ||
+          diagnostic.code === PROFILE_REGION_SKETCH_NOT_CURRENT_CODE) &&
+        diagnostic.target !== null &&
+        primitiveRefEquals(diagnostic.target, target),
+    ) ?? null
   );
 }
 
@@ -685,6 +719,7 @@ function ReferenceCollectionCard(props: {
   onActivate: () => void;
   onPatch: (patch: Record<string, unknown>) => void;
 }) {
+  const featureDiagnostics = useContext(FeatureDiagnosticsContext);
   return (
     <Controller
       control={props.control}
@@ -723,40 +758,61 @@ function ReferenceCollectionCard(props: {
             <div>
               {hasSelection ? (
                 <div className="space-y-1">
-                  {selected.map((target) => (
-                    <div
-                      key={getPrimitiveRefLabel(target)}
-                      className="flex min-h-7 items-center justify-between gap-2 rounded-[3px] px-2"
-                      style={{ background: "var(--workbench-shell-overlay)" }}
-                    >
-                      <span className="min-w-0 truncate text-[12px] text-(--workbench-shell-text)">
-                        {getPrimitiveRefLabel(target)}
-                      </span>
-                      <ActionIcon
-                        component="button"
-                        onClick={() => {
-                          field.onChange(
-                            selected.filter(
-                              (entry) => !primitiveRefEquals(entry, target),
-                            ),
-                          );
-                          props.onPatch(
-                            createFeatureEditorRemoveReferenceItemPatch(
-                              props.field,
-                              target,
-                            ),
-                          );
-                        }}
-                        aria-label={`Remove ${getPrimitiveRefLabel(target)}`}
-                        variant="default"
-                        color="red"
-                        size={22}
-                        styles={compactActionIconStyles()}
-                      >
-                        <WorkbenchIcon name="close" className="h-3 w-3" />
-                      </ActionIcon>
-                    </div>
-                  ))}
+                  {selected.map((target) => {
+                    const diagnostic = findProfileSelectionDiagnostic(
+                      featureDiagnostics,
+                      target,
+                    );
+                    return (
+                      <div key={getPrimitiveRefLabel(target)}>
+                        <div
+                          className="flex min-h-7 items-center justify-between gap-2 rounded-[3px] px-2"
+                          style={{
+                            background: "var(--workbench-shell-overlay)",
+                          }}
+                        >
+                          <span
+                            className={`min-w-0 truncate text-[12px] ${diagnostic ? "text-(--workbench-shell-danger-text)" : "text-(--workbench-shell-text)"}`}
+                          >
+                            {diagnostic?.code === PROFILE_REGION_RESELECT_CODE
+                              ? `Missing region (${getPrimitiveRefLabel(target)})`
+                              : getPrimitiveRefLabel(target)}
+                          </span>
+                          <ActionIcon
+                            component="button"
+                            onClick={() => {
+                              field.onChange(
+                                selected.filter(
+                                  (entry) => !primitiveRefEquals(entry, target),
+                                ),
+                              );
+                              props.onPatch(
+                                createFeatureEditorRemoveReferenceItemPatch(
+                                  props.field,
+                                  target,
+                                ),
+                              );
+                            }}
+                            aria-label={`Remove ${getPrimitiveRefLabel(target)}`}
+                            variant="default"
+                            color="red"
+                            size={22}
+                            styles={compactActionIconStyles()}
+                          >
+                            <WorkbenchIcon name="close" className="h-3 w-3" />
+                          </ActionIcon>
+                        </div>
+                        {diagnostic ? (
+                          <p className="px-2 pt-0.5 text-xs text-(--workbench-shell-danger-text)">
+                            {diagnostic.repairGuidance ?? diagnostic.message}{" "}
+                            <span className="text-(--workbench-shell-text-muted)">
+                              {diagnostic.code}
+                            </span>
+                          </p>
+                        ) : null}
+                      </div>
+                    );
+                  })}
                 </div>
               ) : null}
               <button
@@ -1121,68 +1177,81 @@ export function FeatureInspector({
       ? `F${activeEditSession.featureId.slice(-2).toUpperCase()}`
       : null;
   const visualSections = getVisualFormSections(formSchema.sections);
+  const editedFeatureId = activeEditSession.featureId;
+  const featureDiagnostics = [
+    ...activeEditSession.diagnostics,
+    ...(editor.state.snapshot?.document.diagnostics ?? []).filter(
+      (diagnostic) =>
+        editedFeatureId !== null && diagnostic.featureId === editedFeatureId,
+    ),
+  ];
 
   return (
-    <WorkbenchInspectorPanel
-      iconName="layers"
-      title={title}
-      shortCode={featureIdShortCode}
-      statusLabel="idle"
-      onCancel={onCancel}
-      onCommit={onCommit}
-    >
-      {visualSections.map((section) => {
-        const profileReferenceField = section.fields.find(
-          isProfileReferenceCollectionField,
-        );
-        const hasProfileSelection =
-          (profileReferenceField?.value.length ?? 0) > 0;
+    <FeatureDiagnosticsContext.Provider value={featureDiagnostics}>
+      <WorkbenchInspectorPanel
+        iconName="layers"
+        title={title}
+        shortCode={featureIdShortCode}
+        statusLabel="idle"
+        onCancel={onCancel}
+        onCommit={onCommit}
+      >
+        {visualSections.map((section) => {
+          const profileReferenceField = section.fields.find(
+            isProfileReferenceCollectionField,
+          );
+          const hasProfileSelection =
+            (profileReferenceField?.value.length ?? 0) > 0;
 
-        return (
-          <section key={section.id} className="pb-1">
-            <div className="flex items-center justify-between px-3 pb-1 pt-3">
-              <p className={SECTION_HEADER_CLASSES}>{section.title}</p>
-              {profileReferenceField ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    form.setValue(profileReferenceField.id, []);
-                    onPatch(
-                      createFeatureEditorClearReferencePatch(
-                        profileReferenceField,
-                      ),
-                    );
-                  }}
-                  disabled={!hasProfileSelection}
-                  aria-label={`Clear ${profileReferenceField.label}`}
-                  className="rounded-[3px] px-1.5 py-0.5 text-[10px] font-medium text-(--workbench-shell-text-muted) transition-colors enabled:hover:bg-(--workbench-shell-overlay) disabled:opacity-40"
-                >
-                  Clear
-                </button>
-              ) : section.hint ? (
-                <p className="font-mono text-[10px] text-(--workbench-shell-text-dim)">
-                  {section.hint}
-                </p>
-              ) : null}
-            </div>
-            <div className="space-y-0.5 px-2">
-              {section.fields.map((field) => (
-                <FeatureFormFieldRenderer
-                  key={field.id}
-                  control={form.control}
-                  field={field}
-                  documentVariables={documentVariables}
-                  activeReferencePickerFieldId={activeReferencePickerFieldId}
-                  onReferencePickerActivate={(fieldId) =>
-                    dispatch({ type: "form.referencePickerActivated", fieldId })
-                  }
-                  onPatch={onPatch}
-                />
-              ))}
-            </div>
-          </section>
-        );
-      })}
-    </WorkbenchInspectorPanel>
+          return (
+            <section key={section.id} className="pb-1">
+              <div className="flex items-center justify-between px-3 pb-1 pt-3">
+                <p className={SECTION_HEADER_CLASSES}>{section.title}</p>
+                {profileReferenceField ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      form.setValue(profileReferenceField.id, []);
+                      onPatch(
+                        createFeatureEditorClearReferencePatch(
+                          profileReferenceField,
+                        ),
+                      );
+                    }}
+                    disabled={!hasProfileSelection}
+                    aria-label={`Clear ${profileReferenceField.label}`}
+                    className="rounded-[3px] px-1.5 py-0.5 text-[10px] font-medium text-(--workbench-shell-text-muted) transition-colors enabled:hover:bg-(--workbench-shell-overlay) disabled:opacity-40"
+                  >
+                    Clear
+                  </button>
+                ) : section.hint ? (
+                  <p className="font-mono text-[10px] text-(--workbench-shell-text-dim)">
+                    {section.hint}
+                  </p>
+                ) : null}
+              </div>
+              <div className="space-y-0.5 px-2">
+                {section.fields.map((field) => (
+                  <FeatureFormFieldRenderer
+                    key={field.id}
+                    control={form.control}
+                    field={field}
+                    documentVariables={documentVariables}
+                    activeReferencePickerFieldId={activeReferencePickerFieldId}
+                    onReferencePickerActivate={(fieldId) =>
+                      dispatch({
+                        type: "form.referencePickerActivated",
+                        fieldId,
+                      })
+                    }
+                    onPatch={onPatch}
+                  />
+                ))}
+              </div>
+            </section>
+          );
+        })}
+      </WorkbenchInspectorPanel>
+    </FeatureDiagnosticsContext.Provider>
   );
 }

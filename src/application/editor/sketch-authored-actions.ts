@@ -52,6 +52,33 @@ function restoreAuthoredSession(
   });
 }
 
+/**
+ * Replaces the reducer's state with a session restored after the reducer
+ * (T10 A11/A13). The reducer's post-transition hook may just have requested a
+ * live region derivation for the basis this restore supersedes; that request
+ * is dropped (its effect and its `pendingRegionRequest`), so the event loop's
+ * hook derives the restored basis once instead of twice.
+ */
+function restoreAfterReducer(
+  before: EditorState,
+  result: EditorTransitionResult,
+  restored: Extract<EditorState, { kind: "editingSketch" }>,
+) {
+  const prior =
+    before.kind === "editingSketch" ? before.pendingRegionRequest : null;
+  const requested = restored.pendingRegionRequest;
+  if (requested && requested.requestId !== prior?.requestId) {
+    result.effects = result.effects.filter(
+      (effect) =>
+        effect.type !== "sketch.deriveRegions" ||
+        effect.requestId !== requested.requestId,
+    );
+    result.state = { ...restored, pendingRegionRequest: prior };
+    return;
+  }
+  result.state = restored;
+}
+
 const ANNOTATION_DRAG_THRESHOLD_PX = 6;
 
 function actionLabel(event: EditorEvent, before: EditorState) {
@@ -309,19 +336,19 @@ export class SketchAuthoredActions {
     }
     if (annotationPhase === "cancel") {
       this.annotationGestures.delete(key);
-      result.state = {
+      restoreAfterReducer(before, result, {
         ...state,
         session: restoreAuthoredSession(state.session, expected),
-      };
+      });
       return this.withAvailability(result, identity);
     }
     if (annotationPhase === "end") {
       this.annotationGestures.delete(key);
       if (!annotationMoved) {
-        result.state = {
+        restoreAfterReducer(before, result, {
           ...state,
           session: restoreAuthoredSession(state.session, expected),
-        };
+        });
         return this.withAvailability(result, identity);
       }
     }
@@ -382,12 +409,12 @@ export class SketchAuthoredActions {
         restored.data &&
         "definition" in restored.data
       ) {
-        result.state = {
+        restoreAfterReducer(before, result, {
           ...state,
           selection: [],
           hoverTarget: null,
           session: restoreAuthoredSession(state.session, restored),
-        };
+        });
       }
       return this.withAvailability(result, identity);
     }
@@ -409,10 +436,10 @@ export class SketchAuthoredActions {
         expected.data &&
         "definition" in expected.data
       )
-        result.state = {
+        restoreAfterReducer(before, result, {
           ...state,
           session: restoreAuthoredSession(state.session, expected),
-        };
+        });
       return this.withAvailability(result, identity);
     }
     const candidate = authoredState(documentId, state.session);

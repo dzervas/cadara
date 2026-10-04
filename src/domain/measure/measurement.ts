@@ -19,18 +19,13 @@ import {
 } from "@/contracts/sketch/offset-publication";
 import {
   boundaryLoopSignedArea,
-  createRegionBoundaryBasis,
   curveLength,
+  regionBoundaryBasisOfRecord,
   resolveRegionBoundaryCurve,
   tessellateBoundaryLoop,
   type BoundaryCurveFailure,
-  type RegionBoundaryBasis,
 } from "@/contracts/sketch/region-boundary-curves";
-import type {
-  RegionRecord,
-  SketchPoint2D,
-  SketchRecord,
-} from "@/contracts/sketch/schema";
+import type { RegionRecord, SketchPoint2D } from "@/contracts/sketch/schema";
 import {
   closestSplineSpanLocation,
   tessellateCubicSpans,
@@ -1726,50 +1721,6 @@ function polylineWitnessFromPoints(
         },
       ]
     : [];
-}
-
-const sketchRecordBases = new WeakMap<
-  SketchRecord,
-  {
-    definition: SketchRecord["definition"];
-    solvedSnapshot: SketchRecord["solvedSnapshot"];
-    projectedReferences: SketchRecord["projectedReferences"];
-    regions: SketchRecord["regions"];
-    basis: RegionBoundaryBasis;
-  }
->();
-
-/**
- * The region-boundary basis of a committed sketch record (review R2): the
- * record holds its regions together with the pair that produced them.
- * Cached per record object while its pair and regions are the same objects.
- */
-function regionBoundaryBasisOfRecord(sketch: SketchRecord) {
-  const cached = sketchRecordBases.get(sketch);
-  if (
-    cached &&
-    cached.definition === sketch.definition &&
-    cached.solvedSnapshot === sketch.solvedSnapshot &&
-    cached.projectedReferences === sketch.projectedReferences &&
-    cached.regions === sketch.regions
-  )
-    return cached.basis;
-  const basis = createRegionBoundaryBasis(
-    {
-      definition: sketch.definition,
-      solvedSnapshot: sketch.solvedSnapshot,
-      projectedReferences: sketch.projectedReferences ?? [],
-    },
-    sketch.regions,
-  );
-  sketchRecordBases.set(sketch, {
-    definition: sketch.definition,
-    solvedSnapshot: sketch.solvedSnapshot,
-    projectedReferences: sketch.projectedReferences,
-    regions: sketch.regions,
-    basis,
-  });
-  return basis;
 }
 
 export interface SketchRegionMeasure {

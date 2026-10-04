@@ -154,6 +154,11 @@ import {
 import {
   createDependencyBlockedDiagnostic,
   createFeatureFieldDiagnostic,
+  createProfileRegionSketchNotCurrentDiagnostic,
+  createSketchProfileBuildDiagnostic,
+  PROFILE_REGION_RESELECT_CODE,
+  PROFILE_REGION_SKETCH_NOT_CURRENT_CODE,
+  SKETCH_PROFILE_BUILD_FAILURE_CODES,
 } from "@/domain/modeling/feature-diagnostic-mapping";
 import {
   advanceTopologyToken,
@@ -199,12 +204,15 @@ import { createOpenCascadeNeutralCurveQueryCapability } from "@/domain/modeling/
 
 interface OpenCascadeKernelAdapterOptions {
   /**
-   * Builds the sketch solver for one revision. The adapter passes its own
-   * neutral curve queries (worker-delegating when a worker client is present),
-   * which the solver uses only for region derivation.
+   * Builds the adapter's one sketch solver, called once with `revisionId:
+   * null` so the solver serves every revision (T10 A10): one region deriver
+   * and one bounded exact-query cache per kernel adapter, keyed on exact
+   * requests. The adapter passes its own neutral curve queries
+   * (worker-delegating when a worker client is present), which the solver
+   * uses only for region derivation.
    */
   createSolverAdapter: (
-    revisionId: RevisionId,
+    revisionId: RevisionId | null,
     neutralCurveQueries: NeutralCurveQueryCapability,
   ) => SketchSolverAdapter;
   getOpenCascadeInstance?: () => Promise<OpenCascadeInstance>;
@@ -250,6 +258,9 @@ const OCC_REBUILD_DIAGNOSTIC_CODES = new Set<string>([
   "feature-replay-unsupported",
   "feature-replay-source-unavailable",
   NON_ACCEPTED_OFFSET_FEATURE_INPUT_CODE,
+  PROFILE_REGION_RESELECT_CODE,
+  PROFILE_REGION_SKETCH_NOT_CURRENT_CODE,
+  ...SKETCH_PROFILE_BUILD_FAILURE_CODES,
 ]);
 function assertSupportedModelingRequest(
   request: {
@@ -505,7 +516,11 @@ function createInvalidReferenceDiagnostic(
   feature?: OccAuthoringFeatureRecord,
 ): ModelingDiagnostic {
   const diagnostic = createDiagnostic(
-    resolution.invalidation?.reason ?? "occ-invalid-reference",
+    // T10 plan §2.9: a region id that is not among the consumable regions of
+    // its (current) sketch asks for reselection.
+    feature && resolution.target.kind === "region"
+      ? PROFILE_REGION_RESELECT_CODE
+      : (resolution.invalidation?.reason ?? "occ-invalid-reference"),
     "error",
     "Requested durable reference does not resolve in the current OCC authoring state.",
     resolution.target,
@@ -626,20 +641,122 @@ export function createFeatureRebuildFailureDiagnostic(
   feature: OccAuthoringFeatureRecord,
   error: unknown,
   affectedTargets: NonNullable<ModelingDiagnostic["target"]>[],
+  sketches: readonly SketchSnapshotRecord[] = [],
 ): ModelingDiagnostic {
+  const code = deriveRebuildFailureCode(error);
+  const regionDiagnostic = createRegionProfileFailureDiagnostic(
+    feature,
+    code,
+    error,
+    affectedTargets,
+    sketches,
+  );
+  if (regionDiagnostic) {
+    return regionDiagnostic;
+  }
   const rebuildSlot = getRebuildSlot(error);
   const attributedTarget = rebuildSlot
     ? getRebuildSlotTarget(feature.definition, rebuildSlot)
     : null;
 
   return createRebuildFailureDiagnostic(
-    deriveRebuildFailureCode(error),
+    code,
     error instanceof Error ? error.message : "OCC rebuild failed.",
     [feature.featureId],
     affectedTargets,
     feature,
     attributedTarget,
   );
+}
+
+/**
+ * T10 plan §2.9 causes thrown while a feature consumes a sketch region: the
+ * region-scoped codes attribute to the profile selection whose id the error
+ * names; an exact build failure attributes to the one sketch the feature's
+ * sketch-sourced inputs come from (feature-level when that sketch is not
+ * unique).
+ */
+function createRegionProfileFailureDiagnostic(
+  feature: OccAuthoringFeatureRecord,
+  code: string,
+  error: unknown,
+  affectedTargets: NonNullable<ModelingDiagnostic["target"]>[],
+  sketches: readonly SketchSnapshotRecord[],
+): ModelingDiagnostic | null {
+  const message = error instanceof Error ? error.message : "";
+  const consumed = getFeatureConsumedTargets(feature.definition);
+  const regionTargets = consumed.filter(
+    (target): target is Extract<DurableRef, { kind: "region" }> =>
+      target.kind === "region",
+  );
+  const detail = {
+    kind: "rebuildFailure" as const,
+    affectedFeatureIds: [feature.featureId],
+    affectedTargets,
+  };
+  if (
+    code === PROFILE_REGION_RESELECT_CODE ||
+    code === PROFILE_REGION_SKETCH_NOT_CURRENT_CODE
+  ) {
+    // `requireRegion` names the region as "Sketch region <id> " (review A-2:
+    // delimited, so one legacy id inside another cannot match).
+    const target =
+      regionTargets.find((entry) =>
+        message.includes(`Sketch region ${entry.regionId} `),
+      ) ?? null;
+    if (!target) return null;
+    const sketch = sketches.find((entry) => entry.sketchId === target.sketchId);
+    const validity = sketch?.sketch.derivedValidity;
+    if (
+      code === PROFILE_REGION_SKETCH_NOT_CURRENT_CODE &&
+      sketch &&
+      validity &&
+      validity.state !== "current"
+    ) {
+      return {
+        ...createProfileRegionSketchNotCurrentDiagnostic({
+          feature,
+          target,
+          sketchLabel: sketch.label,
+          sketchState: validity.state,
+          errorCount: validity.diagnostics.filter(
+            (diagnostic) => diagnostic.severity === "error",
+          ).length,
+        }),
+        detail,
+      };
+    }
+    return createFeatureFieldDiagnostic({ code, feature, target, detail });
+  }
+  if (!SKETCH_PROFILE_BUILD_FAILURE_CODES.has(code)) return null;
+  // Review R-1: open-chain builders (sweep paths, open profiles) throw the
+  // same codes, so the sketch is attributed only when every sketch-sourced
+  // input of the feature comes from one sketch.
+  const sketchIds = [
+    ...new Set(
+      consumed.flatMap((target) =>
+        target.kind === "region" ||
+        target.kind === "sketchEntity" ||
+        target.kind === "sketchPoint"
+          ? [target.sketchId]
+          : [],
+      ),
+    ),
+  ];
+  const sketch =
+    sketchIds.length === 1
+      ? sketches.find((entry) => entry.sketchId === sketchIds[0])
+      : undefined;
+  if (!sketch) return null;
+  return createSketchProfileBuildDiagnostic({
+    code,
+    reason: message.startsWith(`${code}:`)
+      ? message.slice(code.length + 1).trimStart()
+      : message,
+    feature,
+    sketch: { sketchId: sketch.sketchId, label: sketch.label },
+    detail,
+  });
 }
 
 function createAdvancedUnsupportedDiagnostic(
@@ -1690,14 +1807,25 @@ function collectInvalidConsumedTargetDiagnostics(
       const sketch = state.sketches.find(
         (entry) => entry.sketchId === target.sketchId,
       );
-      if (sketch && sketch.sketch.derivedValidity.state !== "current") {
+      const validity = sketch?.sketch.derivedValidity;
+      if (sketch && validity && validity.state !== "current") {
         diagnostics.push(
-          createFeatureFieldDiagnostic({
-            code: "occ-sketch-derived-output-not-current",
-            feature,
-            target,
-            detail: null,
-          }),
+          target.kind === "region"
+            ? createProfileRegionSketchNotCurrentDiagnostic({
+                feature,
+                target,
+                sketchLabel: sketch.label,
+                sketchState: validity.state,
+                errorCount: validity.diagnostics.filter(
+                  (diagnostic) => diagnostic.severity === "error",
+                ).length,
+              })
+            : createFeatureFieldDiagnostic({
+                code: "occ-sketch-derived-output-not-current",
+                feature,
+                target,
+                detail: null,
+              }),
         );
         continue;
       }
@@ -1754,6 +1882,7 @@ type OccOwnerGraph = Parameters<
 
 export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   private readonly createSolverAdapter: OpenCascadeKernelAdapterOptions["createSolverAdapter"];
+  private solverAdapter: SketchSolverAdapter | null = null;
   private readonly loadOpenCascadeInstance: () => Promise<OpenCascadeInstance>;
   private readonly initialSnapshotRequiresRuntime: boolean;
   private readonly workerSnapshotClient: OccWorkerSnapshotClient | null;
@@ -2168,8 +2297,9 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     return true;
   }
 
-  private getSolverAdapter(revisionId: RevisionId) {
-    return this.createSolverAdapter(revisionId, this);
+  private getSolverAdapter() {
+    this.solverAdapter ??= this.createSolverAdapter(null, this);
+    return this.solverAdapter;
   }
 
   private async getRuntimeState() {
@@ -2299,7 +2429,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       sketchId,
       document.revisionId,
     );
-    const solverAdapter = this.getSolverAdapter(document.revisionId);
+    const solverAdapter = this.getSolverAdapter();
     const tolerances = createDocumentSolverTolerances(document.settings);
     const projection = this.projectSketchReferencesFromSnapshot(
       buildOccWorkspaceSnapshot(sourceState),
@@ -3227,6 +3357,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
             feature,
             error,
             uniqueTargets(consumedTargets),
+            current.sketches,
           ),
         );
         failedFeatures.push(createFailedFeatureRecord(feature));
@@ -4108,7 +4239,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     const correlation =
       request.solverCorrelation ??
       createDefaultSolverCorrelation(sketchId, request.baseRevisionId);
-    const solverAdapter = this.getSolverAdapter(request.baseRevisionId);
+    const solverAdapter = this.getSolverAdapter();
     const tolerances = createDocumentSolverTolerances({
       modelingTolerance: runtimeState.authoringState.modelingTolerance,
       angularToleranceRadians:
@@ -5752,7 +5883,19 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
                 ? error.message
                 : `OCC adapter does not implement ${request.definition.kind} yet.`,
             )
-          : createDiagnostic(
+          : // T10 plan §2.9: the edited feature's profile field shows a
+            // region cause on the region it names.
+            (createRegionProfileFailureDiagnostic(
+              {
+                ...previewFeature,
+                label: replacedFeature?.label ?? previewFeature.label,
+              },
+              deriveRebuildFailureCode(error),
+              error,
+              [{ kind: "feature", featureId: previewFeatureId }],
+              runtimeState.authoringState.sketches,
+            ) ??
+            createDiagnostic(
               deriveRebuildFailureCode(error),
               "error",
               error instanceof Error
@@ -5766,7 +5909,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
                   { kind: "feature", featureId: previewFeatureId },
                 ],
               },
-            ),
+            )),
       ];
 
       return {
