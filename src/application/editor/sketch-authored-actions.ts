@@ -54,7 +54,7 @@ function restoreAuthoredSession(
 
 const ANNOTATION_DRAG_THRESHOLD_PX = 6;
 
-function actionLabel(event: EditorEvent) {
+function actionLabel(event: EditorEvent, before: EditorState) {
   switch (event.type) {
     case "sketch.geometryDragEnded":
       return "Move Sketch Geometry";
@@ -74,9 +74,17 @@ function actionLabel(event: EditorEvent) {
       return "Create Sketch Geometry";
     case "sketch.specialModeDragEnded":
       return "Edit Sketch Operation";
-    // T10g-1 (T-g15): the applied exact Trim is one labelled action.
-    case "effect.sketchEditIntersectionsQueried":
-      return "Trim";
+    // T10g-1/T10g-2 (T-g15): the applied exact Trim, Extend or Split is
+    // one action labelled by the operation of the query it answers (review
+    // A-4: the in-flight query before the transition).
+    case "effect.sketchEditIntersectionsQueried": {
+      const kind =
+        before.kind === "editingSketch"
+          ? before.session.activeEditTool?.editQuery?.inFlight?.input.operation
+              .kind
+          : undefined;
+      return kind === "extend" ? "Extend" : kind === "split" ? "Split" : "Trim";
+    }
     default:
       return event.type
         .replace(/^sketch\./, "")
@@ -412,7 +420,7 @@ export class SketchAuthoredActions {
       identity,
       expected,
       candidate,
-      actionLabel(event),
+      actionLabel(event, before),
       expected,
     );
     if (action.status === "blocked")

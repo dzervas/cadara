@@ -45,7 +45,7 @@ import {
   type SketchEditOperationFactories,
 } from "@/domain/sketch-editing/operations";
 
-test("src/domain/sketch-editing/operations.spec.ts", () => {
+test("src/domain/sketch-editing/operations.spec.ts", async () => {
   function makePoint(
     pointId: string,
     label: string,
@@ -318,7 +318,42 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
     ).toBe(3);
   }
 
-  function testExtendAndSplitMutateOnlySelectedLine() {
+  /**
+   * T10g-2: the verified edit intersections of an Extend/Split of AB by CD
+   * on the definition's accepted solve (the one contract function).
+   */
+  async function lineEditIntersections(
+    definition: SketchDefinition,
+    kind: "extend" | "split",
+  ) {
+    const result = await querySketchEditIntersections(
+      {
+        definition,
+        solvedSnapshot: solveSketchDefinitionCore({
+          definition,
+          tolerances: {
+            coincidence: 1e-6,
+            angleRadians: 1e-6,
+            minimumSegmentLength: 1e-6,
+          },
+          modelingTolerance: 1e-3,
+          partialSolvePolicy: "bestEffort",
+        }).solvedSnapshot,
+        projectedReferences: [],
+        modelingTolerance: 1e-3,
+        operation: {
+          kind,
+          targetEntityId: "sketch_entity_ab" as SketchEntityId,
+          boundaryEntityId: "sketch_entity_cd" as SketchEntityId,
+        },
+      },
+      createCertifiedNeutralCurveQueryCapabilityForTest(),
+    );
+    if (result.kind !== "verified") throw new Error(result.message);
+    return result;
+  }
+
+  async function testExtendAndSplitMutateOnlySelectedLine() {
     const extendDefinition = makeDefinition(
       [
         makePoint("sketch_point_a", "A", [0, 0]),
@@ -333,39 +368,58 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
     );
     const extended = createSketchExtendMutation({
       definition: extendDefinition,
-      entityIds: ["sketch_entity_ab", "sketch_entity_cd"] as SketchEntityId[],
+      targetEntityId: "sketch_entity_ab" as SketchEntityId,
+      intersections: await lineEditIntersections(extendDefinition, "extend"),
       sequence: 10,
       factories: createFactories(),
     });
     expect(
-      extended.valid && extended.definition,
+      extended.changed && extended.definition,
       "Extend should accept a target line and boundary line.",
     ).toBeTruthy();
     expect(
-      extended.definition?.entities.length,
+      extended.definition.entities.length,
       "Extend should not add unrelated entities.",
     ).toBe(extendDefinition.entities.length);
     expect(
-      extended.definition?.points.some(
+      extended.definition.points.some(
         (point) => point.position[0] === 3 && point.position[1] === 0,
       ),
       "Extend should add an endpoint at the boundary intersection.",
     ).toBeTruthy();
+    expect(
+      extended.definition.constraints.map((constraint) =>
+        constraint.kind === "pointOnCurve"
+          ? [constraint.curve.entityId, constraint.label]
+          : constraint.kind,
+      ),
+      "Q1b: the extended end is tied onto the boundary line.",
+    ).toEqual([["sketch_entity_cd", "AB extend end on CD"]]);
 
+    const crossing = createCrossingDefinition();
     const split = createSketchSplitMutation({
-      definition: createCrossingDefinition(),
-      entityIds: ["sketch_entity_ab", "sketch_entity_cd"] as SketchEntityId[],
+      definition: crossing,
+      targetEntityId: "sketch_entity_ab" as SketchEntityId,
+      intersections: await lineEditIntersections(crossing, "split"),
       sequence: 10,
       factories: createFactories(),
     });
     expect(
-      split.valid && split.definition,
+      split.changed && split.definition,
       "Split should accept a target line and crossing boundary.",
     ).toBeTruthy();
     expect(
-      split.definition?.entities.length,
+      split.definition.entities.length,
       "Split should divide the selected line into two line entities.",
     ).toBe(3);
+    expect(
+      split.definition.constraints.map((constraint) =>
+        constraint.kind === "pointOnCurve"
+          ? [constraint.curve.entityId, constraint.label]
+          : constraint.kind,
+      ),
+      "Q1b: the one split point is tied once onto the boundary.",
+    ).toEqual([["sketch_entity_cd", "AB split on CD"]]);
   }
 
   function testSlotCreatesDurableGeometryForSupportedReferences() {
@@ -1149,7 +1203,7 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
   testFilletAndChamferMutateAdjacentLines();
   testFilletAuthorsTangencyAndArcEndpointBinding();
   testSlotAuthorsTangencyAndArcEndpointBinding();
-  testExtendAndSplitMutateOnlySelectedLine();
+  await testExtendAndSplitMutateOnlySelectedLine();
   testSlotCreatesDurableGeometryForSupportedReferences();
   testSlotCreatesProfileOffsetsForClosedLineLoops();
   testOffsetCharacterizationSingleCurves();
@@ -1751,5 +1805,178 @@ describe("createSketchTrimMutation (T10g-1 exact Trim, Q1b ties, review R-3)", (
     ]);
     expect(accepted(definition)).toBe(true);
     expect(await regions(definition)).toBe(2);
+  });
+
+  // T10g-2: the exact Extend and Split builders on the same pipeline.
+  async function lineEdit(
+    definition: SketchDefinition,
+    kind: "extend" | "split",
+    target: string,
+    boundary: string,
+  ) {
+    const result = await querySketchEditIntersections(
+      {
+        definition,
+        solvedSnapshot: solve(definition),
+        projectedReferences: [],
+        modelingTolerance: 1e-3,
+        operation: {
+          kind,
+          targetEntityId: entity(target),
+          boundaryEntityId: entity(boundary),
+        },
+      },
+      queries,
+    );
+    if (result.kind !== "verified") throw new Error(result.message);
+    const build =
+      kind === "extend"
+        ? createSketchExtendMutation
+        : createSketchSplitMutation;
+    const mutation = build({
+      definition,
+      targetEntityId: entity(target),
+      intersections: result,
+      sequence: 1,
+      factories: createSessionCommitFactories(1, FIXTURE_SKETCH_ID as SketchId),
+    });
+    expect(mutation.message).toBeNull();
+    return { result, after: mutation.definition };
+  }
+  const positionOf = (definition: SketchDefinition, pointId: string) =>
+    definition.points.find((candidate) => candidate.pointId === pointId)!
+      .position;
+
+  test("Extend (T10g-2): the extended end becomes a new point at the cut's evaluator position, tied to the boundary; the other end and the old point stay; accepted", async () => {
+    for (const [x, end] of [
+      [3, "end"],
+      [-2, "start"],
+    ] as const) {
+      const sketch = makeSketchFixture();
+      sketch.point("t0", 0, 0);
+      sketch.point("t1", 1, 0);
+      sketch.line("target", "t0", "t1");
+      sketch.point("b0", x, -1);
+      sketch.point("b1", x, 1);
+      sketch.line("boundary", "b0", "b1");
+      const definition = sketch.definition();
+      const { result, after } = await lineEdit(
+        definition,
+        "extend",
+        "target",
+        "boundary",
+      );
+      const line = after.entities.find(
+        (candidate) => candidate.entityId === entity("target"),
+      );
+      if (line?.kind !== "lineSegment") throw new Error("line");
+      const moved = end === "end" ? line.endPointId : line.startPointId;
+      const kept = end === "end" ? line.startPointId : line.endPointId;
+      expect(moved).toMatch(/extend-endpoint/);
+      expect(positionOf(after, moved)).toEqual(result.cuts[0]!.position);
+      expect(positionOf(after, moved)).toEqual([x, 0]);
+      expect(kept).toBe(end === "end" ? "sketch_point_t0" : "sketch_point_t1");
+      expect(after.pointIds).toContain(
+        end === "end" ? "sketch_point_t1" : "sketch_point_t0",
+      );
+      expect(after.entities).toHaveLength(definition.entities.length);
+      expect(
+        after.constraints.map((constraint) =>
+          constraint.kind === "pointOnCurve"
+            ? [constraint.point.pointId, constraint.curve.entityId]
+            : constraint.kind,
+        ),
+      ).toEqual([[moved, entity("boundary")]]);
+      expect(accepted(after)).toBe(true);
+      expect(displacement(after)).toBeLessThan(1e-12);
+    }
+  });
+
+  test("Extend (T10g-2) closes a profile: extended to a boundary whose end point is on the extension, the new end is coincident with it (R-2) and the outline is one region", async () => {
+    const sketch = makeSketchFixture();
+    sketch.point("p0", 0, 0);
+    sketch.point("p1", 4, 0);
+    sketch.point("p2", 4, 3);
+    sketch.point("p3", 0, 3);
+    sketch.point("top", 1, 3);
+    sketch.line("bottom", "p0", "p1");
+    sketch.line("right", "p1", "p2");
+    sketch.line("left", "p0", "p3");
+    sketch.line("cap", "p2", "top");
+    const definition = sketch.definition();
+    expect(await regions(definition)).toBe(0);
+    const { after } = await lineEdit(definition, "extend", "cap", "left");
+    expect(
+      after.constraints.map((constraint) =>
+        constraint.kind === "coincident" ? constraint.pointIds[1] : null,
+      ),
+    ).toEqual(["sketch_point_p3"]);
+    expect(accepted(after)).toBe(true);
+    expect(await regions(after)).toBe(1);
+  });
+
+  test("Split (T10g-2): the original id keeps start→Q, a new piece Q→end shares Q, tied once; review R-3: a point at the cut stays on the earlier piece, one beyond moves to the new piece; accepted", async () => {
+    const sketch = makeSketchFixture();
+    sketch.point("t0", 0, 0);
+    sketch.point("t1", 4, 0);
+    sketch.line("target", "t0", "t1");
+    sketch.point("b0", 2, -1);
+    sketch.point("b1", 2, 1);
+    sketch.line("boundary", "b0", "b1");
+    // A T-junction at the cut and one beyond it, both on the target.
+    sketch.point("j0", 2, 0);
+    sketch.point("j1", 2, 2);
+    sketch.line("junction", "j0", "j1");
+    const atCut = sketch.pointOnCurve("j0", "target");
+    sketch.point("k0", 3, 0);
+    sketch.point("k1", 3, 2);
+    sketch.line("beyond", "k0", "k1");
+    const beyond = sketch.pointOnCurve("k0", "target");
+    sketch.point("m0", 1, 0);
+    sketch.point("m1", 1, 2);
+    sketch.line("before", "m0", "m1");
+    const before = sketch.pointOnCurve("m0", "target");
+    const definition = sketch.definition();
+    const { result, after } = await lineEdit(
+      definition,
+      "split",
+      "target",
+      "boundary",
+    );
+    const line = after.entities.find(
+      (candidate) => candidate.entityId === entity("target"),
+    );
+    const piece = after.entities.at(-1);
+    if (line?.kind !== "lineSegment" || piece?.kind !== "lineSegment")
+      throw new Error("pieces");
+    expect(line.startPointId).toBe("sketch_point_t0");
+    expect(line.endPointId).toBe(piece.startPointId);
+    expect(piece.endPointId).toBe("sketch_point_t1");
+    expect(piece.entityId).toMatch(/split-line/);
+    expect(positionOf(after, piece.startPointId)).toEqual(
+      result.cuts[0]!.position,
+    );
+    expect(positionOf(after, piece.startPointId)).toEqual([2, 0]);
+    const curveOf = (constraintId: string) => {
+      const constraint = after.constraints.find(
+        (candidate) => candidate.constraintId === constraintId,
+      );
+      return constraint?.kind === "pointOnCurve"
+        ? constraint.curve.entityId
+        : null;
+    };
+    expect(curveOf(atCut)).toBe(entity("target"));
+    expect(curveOf(before)).toBe(entity("target"));
+    expect(curveOf(beyond)).toBe(piece.entityId);
+    expect(
+      after.constraints
+        .filter((constraint) => constraint.label.includes(" split on "))
+        .map((constraint) =>
+          constraint.kind === "pointOnCurve"
+            ? [constraint.point.pointId, constraint.curve.entityId]
+            : constraint.kind,
+        ),
+    ).toEqual([[piece.startPointId, entity("boundary")]]);
+    expect(accepted(after)).toBe(true);
   });
 });

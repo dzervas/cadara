@@ -6708,10 +6708,13 @@ describe("T10i edit inputs on non-accepted offset outputs ([TECH] C3, review A8)
         expect(result.toolStagedEntities, label).toEqual([]);
         expect(result.activeEditTool?.offsetPublication, label).toBeUndefined();
       }
-      // T10g-1: a Trim click applies when its exact query result arrives.
+      // T10g-1/T10g-2: a Trim click (an Extend/Split selection) applies
+      // when its exact query result arrives.
       const clicked = runEditTool(states.certified, toolId, selection, value);
       const result =
-        toolId === "trim"
+        toolId === "trim" ||
+        toolId === "sketchExtend" ||
+        toolId === "sketchSplit"
           ? await completeSketchTrimQueriesForTest(clicked)
           : clicked;
       expect(
@@ -7029,7 +7032,10 @@ describe("T10i review fixes (R-2, R-1, A-1)", () => {
           state.definition,
         );
       }
-      const result = runEditTool(fixtures.certified, toolId, selection, value);
+      // T10g-2: an Extend/Split selection applies when its query result arrives.
+      const result = await completeSketchTrimQueriesForTest(
+        runEditTool(fixtures.certified, toolId, selection, value),
+      );
       expect(
         result.validationMessage ?? "",
         `${toolId} with a certified ${output} is not refused`,
@@ -7042,14 +7048,10 @@ describe("T10i review fixes (R-2, R-1, A-1)", () => {
     600_000,
   );
 
-  test("R-1: a selection made while the round is pending says the output is being checked; when the round certifies, the tool is re-evaluated (message cleared, preview shown) and nothing is applied, also for a complete Extend selection; Commit then applies", async () => {
+  test("R-1: a selection made while the round is pending says the output is being checked; when the round certifies, the tool is re-evaluated (message cleared, preview shown) and nothing is applied; Commit then applies", async () => {
     const states = await editInputs();
-    const right = outputLineWhere(states.certified, states.outputs, (p) =>
-      near(p[0]!, 3.5),
-    );
     for (const [toolId, selection, value] of [
       ["sketchFillet", [states.outputs[0]!, states.outputs[1]!], 0.1],
-      ["sketchExtend", [states.free, right], null],
     ] as const) {
       const selected = selectEditTool(states.pending, toolId, selection, value);
       expect(selected.validationMessage, `${toolId}: pending`).toEqual(
@@ -7085,6 +7087,111 @@ describe("T10i review fixes (R-2, R-1, A-1)", () => {
         settled.definition,
       );
     }
+  }, 600_000);
+
+  // T10g-2: a complete Extend selection is one queued click, as a Trim
+  // click (T10g-1, review R-1): deferred while the round is pending, queried
+  // once the round certifies (the re-evaluation itself applies nothing), and
+  // applied as one edit when its exact result arrives.
+  // T10g-2 review A-3: a deferred Extend/Split click whose round then fails
+  // becomes the decided refusal (dropped from the queue, nothing queried).
+  test.each(["sketchExtend", "sketchSplit"] as const)(
+    "R-1 (T10g-2) %s: a complete selection deferred while pending is refused when the round fails; the queue empties and nothing is queried or authored",
+    async (toolId) => {
+      const states = await editInputs();
+      const output = outputLineWhere(states.certified, states.outputs, (p) =>
+        toolId === "sketchExtend" ? near(p[0]!, 3.5) : near(p[1]!, 0.5),
+      );
+      const selection =
+        toolId === "sketchExtend"
+          ? [states.free, output]
+          : [states.cutter, output];
+      const selected = selectEditTool(states.pending, toolId, selection, null);
+      expect(selected.validationMessage).toEqual(
+        checkingMessage(output, states.derivationId),
+      );
+      expect(selected.activeEditTool?.editQuery?.queue).toHaveLength(1);
+      const refused = refreshSketchEditToolAfterOffsetRound(
+        failedRound(selected),
+      );
+      expect(refused.validationMessage).toEqual(
+        gateMessage(output, states.derivationId),
+      );
+      expect(refused.activeEditTool?.editQuery).toEqual({
+        queue: [],
+        inFlight: null,
+      });
+      expect(refused.definition).toBe(selected.definition);
+    },
+    600_000,
+  );
+
+  test("R-1 (T10g-2): a complete Extend selection made while the round is pending is deferred; when the round certifies its query is issued (nothing applied, message cleared) and its result applies, tied to the output", async () => {
+    const states = await editInputs();
+    const right = outputLineWhere(states.certified, states.outputs, (p) =>
+      near(p[0]!, 3.5),
+    );
+    const selected = selectEditTool(
+      states.pending,
+      "sketchExtend",
+      [states.free, right],
+      null,
+    );
+    expect(selected.validationMessage, "sketchExtend: pending").toEqual(
+      expect.stringContaining("which is still being checked"),
+    );
+    expect(selected.toolStagedEntities).toEqual([]);
+    expect(selected.definition).toBe(states.pending.definition);
+    expect(selected.activeEditTool?.editQuery).toMatchObject({
+      queue: [{ targetEntityId: states.free, boundary: { entityId: right } }],
+      inFlight: null,
+    });
+    const settled = refreshSketchEditToolAfterOffsetRound(
+      (await liveRound(selected)).session,
+    );
+    expect(
+      settled.liveSolve!.solvedSnapshot.certifiedOffsetDerivationIds,
+      "premise: the round certified the offset",
+    ).toEqual([states.derivationId]);
+    expect(settled.validationMessage, "sketchExtend: cleared").toBeNull();
+    expect(
+      settled.definition,
+      "sketchExtend: the re-evaluation applies nothing (it issues the query)",
+    ).toBe(selected.definition);
+    expect(
+      settled.activeEditTool?.editQuery?.inFlight?.input.operation,
+    ).toEqual({
+      kind: "extend",
+      targetEntityId: states.free,
+      boundaryEntityId: right,
+    });
+    const applied = await completeSketchTrimQueriesForTest(settled);
+    expect(applied.definition, "sketchExtend: its result applies").not.toBe(
+      settled.definition,
+    );
+    expect(
+      applied.toolPresentation?.validation ?? [],
+      "sketchExtend: the panel shows no error",
+    ).toEqual([]);
+    const known = new Set(settled.definition.constraintIds);
+    expect(
+      applied.definition.constraints
+        .filter((constraint) => !known.has(constraint.constraintId))
+        .map((constraint) =>
+          constraint.kind === "pointOnCurve"
+            ? [constraint.kind, constraint.curve.entityId]
+            : [constraint.kind],
+        ),
+      "Q1b: the new end is tied onto the certified output",
+    ).toEqual([["pointOnCurve", right]]);
+    const free = applied.definition.entities.find(
+      (entity) => entity.entityId === states.free,
+    );
+    if (free?.kind !== "lineSegment") throw new Error("line");
+    const start = applied.definition.points.find(
+      (point) => point.pointId === free.startPointId,
+    )!.position;
+    expect(near(start[0], 3.5) && near(start[1], 1)).toBe(true);
   }, 600_000);
 
   test("R-1: when the round fails, the pending selection becomes the decided refusal; an Offset seed selected while pending stages its check once the round certifies", async () => {

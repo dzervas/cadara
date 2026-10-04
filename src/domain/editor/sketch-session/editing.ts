@@ -31,6 +31,7 @@ import {
   createSketchChamferMutation,
   createSketchDerivedTransformContribution,
   createSketchExtendMutation,
+  type SketchMutationResult,
   createSketchFilletMutation,
   createSketchOffsetDerivationContribution,
   createSketchSlotContribution,
@@ -40,11 +41,17 @@ import {
   createSketchTrimMutation,
   trimTargetRefusal,
 } from "@/domain/sketch-editing/operations";
-import type { SketchEditIntersectionResult } from "@/contracts/sketch/edit-intersections";
+import {
+  EXTEND_TARGET_UNSUPPORTED_MESSAGE,
+  SPLIT_TARGET_UNSUPPORTED_MESSAGE,
+  type SketchEditIntersectionResult,
+  type SketchEditOperation,
+} from "@/contracts/sketch/edit-intersections";
 import type { OffsetFramePlan } from "@/contracts/sketch/offset-derivation-frame";
 import { nonAcceptedOffsetOutputs } from "@/contracts/sketch/offset-publication";
 import type { SketchOffsetPublicationRecord } from "@/contracts/solver/schema";
 import type {
+  SketchEditQueryClick,
   SketchEditQueryState,
   SketchEditToolState,
   SketchOffsetPreviewPublication,
@@ -801,8 +808,12 @@ export function getSketchEditOperatorResult(
   const entityIds = getSelectedSketchEntityIds(activeEditTool);
   // T10i (C3, review A8): one gate over the operation's full input set (its
   // selected targets, boundaries, sources, references and mirror axis),
-  // also at commit, which recomputes this result.
-  if (activeEditTool.toolId !== "trim" && activeEditTool.toolId !== "offset") {
+  // also at commit, which recomputes this result. The edit-query tools
+  // (Trim, Extend, Split) gate their clicks themselves.
+  if (
+    !isSketchEditQueryTool(activeEditTool.toolId) &&
+    activeEditTool.toolId !== "offset"
+  ) {
     const gate = offsetEditInputGate(
       session,
       entityIds,
@@ -828,20 +839,6 @@ export function getSketchEditOperatorResult(
         definition: session.definition,
         entityIds,
         distance: activeEditTool.toolValue,
-        sequence: nextSequence,
-        factories,
-      });
-    case "sketchExtend":
-      return createSketchExtendMutation({
-        definition: session.definition,
-        entityIds,
-        sequence: nextSequence,
-        factories,
-      });
-    case "sketchSplit":
-      return createSketchSplitMutation({
-        definition: session.definition,
-        entityIds,
         sequence: nextSequence,
         factories,
       });
@@ -894,6 +891,8 @@ export function getSketchEditOperatorResult(
         modelingTolerance: session.modelingTolerance,
       });
     case "trim":
+    case "sketchExtend":
+    case "sketchSplit":
     case "offset":
       return {
         valid: false,
@@ -911,18 +910,33 @@ export function getSketchEditOperatorResult(
  * every live-region result, published or failed), so a "still being
  * checked" input clears or becomes its decided refusal without reselection.
  * Only the preview, message and presentation change: nothing is applied
- * (no Extend/Split/Mirror auto-apply, no Commit). An Offset with a staged
+ * (no Mirror auto-apply, no Commit). An Offset with a staged
  * check keeps it (its own completion re-checks the seeds); one without
  * (refused or still checking) re-stages its preview, whose check the
- * editor loop then emits. Trim keeps no selection: its queued clicks are
- * advanced instead (T10g-1, review R-1: a click deferred while the round
- * was pending is queried now).
+ * editor loop then emits. The edit-query tools (Trim, Extend, Split)
+ * advance their queued clicks instead (T10g-1, review R-1: a click deferred
+ * while the round was pending is queried now); an Extend/Split selection
+ * still being made only has its message re-evaluated.
  */
 export function refreshSketchEditToolAfterOffsetRound(
   session: SketchSessionState,
 ): SketchSessionState {
   const tool = session.activeEditTool;
-  if (tool?.toolId === "trim") return advanceSketchTrimQueue(session);
+  if (tool && isSketchEditQueryTool(tool.toolId)) {
+    const advanced = advanceSketchTrimQueue(session);
+    if (tool.selectedTargets.length === 0) return advanced;
+    const message =
+      editSelectionMessage(advanced, advanced.activeEditTool!) ??
+      advanced.validationMessage;
+    return {
+      ...advanced,
+      validationMessage: message,
+      toolPresentation: buildSketchEditToolPresentation(
+        advanced.activeEditTool!,
+        message,
+      ),
+    };
+  }
   if (!tool || tool.selectedTargets.length === 0) return session;
   if (tool.toolId === "offset") {
     if (tool.offsetPublication) return session;
@@ -953,13 +967,56 @@ export function refreshSketchEditToolAfterOffsetRound(
 }
 
 export const TRIM_CHECKING_MESSAGE = "Checking intersections…";
-export const TRIM_STALE_MESSAGE =
-  "Trim was not applied: the sketch changed while its intersections were being checked. Click again.";
+export const TRIM_STALE_MESSAGE = editQueryStaleMessage("trim");
 export const TRIM_BASIS_NOT_ACCEPTED_MESSAGE =
-  "Trim needs a solved sketch; resolve the conflicting constraints first.";
+  editQueryBasisNotAcceptedMessage("trim");
 
-/** The Trim tool with `editQuery`; `message` is shown (else "Checking…" while clicks wait). */
-function withTrimQuery(
+/** The tools whose edits wait for exact edit intersections (T10g-1, T10g-2). */
+type SketchEditQueryToolId = "trim" | "sketchExtend" | "sketchSplit";
+
+export function isSketchEditQueryTool(
+  toolId: SketchEditToolState["toolId"],
+): toolId is SketchEditQueryToolId {
+  return (
+    toolId === "trim" || toolId === "sketchExtend" || toolId === "sketchSplit"
+  );
+}
+
+const EDIT_QUERY_KINDS = {
+  trim: "trim",
+  sketchExtend: "extend",
+  sketchSplit: "split",
+} as const;
+
+/** "<Tool> was not applied: the sketch changed …" (design §2.9 `edit-stale`). */
+export function editQueryStaleMessage(
+  kind: SketchEditOperation["kind"],
+): string {
+  return `${editQueryToolName(kind)} was not applied: the sketch changed while its intersections were being checked. Click again.`;
+}
+
+/** "<Tool> needs a solved sketch; …" (design §2.9 `edit-basis-not-accepted`). */
+export function editQueryBasisNotAcceptedMessage(
+  kind: SketchEditOperation["kind"],
+): string {
+  return `${editQueryToolName(kind)} needs a solved sketch; resolve the conflicting constraints first.`;
+}
+
+function editQueryToolName(kind: SketchEditOperation["kind"]) {
+  return kind === "trim" ? "Trim" : kind === "extend" ? "Extend" : "Split";
+}
+
+/** The C3 `use` of an edit-query input (Extend/Split keep T10i's wording). */
+function editQueryInputUse(toolId: SketchEditQueryToolId, click: boolean) {
+  return toolId === "trim"
+    ? click
+      ? "a Trim target"
+      : "a Trim input"
+    : `a ${getSketchEditToolDefinition(toolId).metadata.name} input`;
+}
+
+/** The edit-query tool with `editQuery`; `message` is shown (else "Checking…" while clicks wait). */
+function withEditQuery(
   session: SketchSessionState,
   editQuery: SketchEditQueryState,
   message: string | null,
@@ -976,78 +1033,148 @@ function withTrimQuery(
   };
 }
 
+/** The click's entity ids: the target, then the Extend/Split boundary. */
+function clickEntityIds(click: SketchEditQueryClick) {
+  return click.boundary
+    ? [click.targetEntityId, click.boundary.entityId]
+    : [click.targetEntityId];
+}
+
 /**
- * T10g-1 (design §2.7): a Trim click. Target kind and the accepted live
- * solve of the current definition are checked now (a session without a live
- * solve, e.g. just reopened, establishes it first); C3 refuses a decided
- * non-accepted target and defers a pending one (review R-1). The click is
- * queued with its target's identity (R-5); nothing is authored until its
- * exact intersections arrive.
+ * Why a click cannot be queried now, decided before any query runs: the
+ * target kind (Trim: `trimTargetRefusal`; Extend/Split: a line and a line,
+ * Q-g3), the accepted live solve of the current definition, and a decided
+ * C3 refusal of an input (a pending one defers instead, review R-1).
  */
-function queueSketchTrimClick(
+function editQueryClickRefusal(
   session: SketchSessionState,
-  tool: SketchEditToolState,
-  targetEntityId: SketchEntityId,
-): SketchSessionState {
-  const entity = session.definition.entities.find(
-    (candidate) => candidate.entityId === targetEntityId,
+  toolId: SketchEditQueryToolId,
+  click: SketchEditQueryClick,
+) {
+  const kind = EDIT_QUERY_KINDS[toolId];
+  const gate = offsetEditInputGate(
+    session,
+    clickEntityIds(click),
+    editQueryInputUse(toolId, true),
   );
-  if (!entity) return session;
-  const editQuery = tool.editQuery ?? { queue: [], inFlight: null };
-  const based = session.liveSolve
+  const kindRefusal =
+    toolId === "trim"
+      ? trimTargetRefusal(click.entity)
+      : click.entity.kind === "lineSegment" &&
+          click.boundary?.entity.kind === "lineSegment"
+        ? null
+        : toolId === "sketchExtend"
+          ? EXTEND_TARGET_UNSUPPORTED_MESSAGE
+          : SPLIT_TARGET_UNSUPPORTED_MESSAGE;
+  return (
+    kindRefusal ??
+    (hasAcceptedLiveSolveOfDefinition(session)
+      ? null
+      : editQueryBasisNotAcceptedMessage(kind)) ??
+    (gate && !gate.pending ? gate.message : null)
+  );
+}
+
+/** The click on `targetEntityId` (and an Extend/Split `boundaryEntityId`), or null if gone. */
+function editQueryClick(
+  session: SketchSessionState,
+  targetEntityId: SketchEntityId,
+  boundaryEntityId: SketchEntityId | null,
+): SketchEditQueryClick | null {
+  const find = (entityId: SketchEntityId) =>
+    session.definition.entities.find(
+      (candidate) => candidate.entityId === entityId,
+    );
+  const entity = find(targetEntityId);
+  const boundary = boundaryEntityId ? find(boundaryEntityId) : null;
+  if (!entity || (boundaryEntityId && !boundary)) return null;
+  return {
+    targetEntityId,
+    entity,
+    ...(boundary
+      ? { boundary: { entityId: boundaryEntityId!, entity: boundary } }
+      : {}),
+  };
+}
+
+/** A session with a live solve: one just reopened establishes it first. */
+function withEditQueryBasis(session: SketchSessionState) {
+  return session.liveSolve
     ? session
     : withLiveSolveBasis(session, session.definition);
-  const gate = offsetEditInputGate(based, [targetEntityId], "a Trim target");
-  const refusal =
-    trimTargetRefusal(entity) ??
-    (hasAcceptedLiveSolveOfDefinition(based)
-      ? null
-      : TRIM_BASIS_NOT_ACCEPTED_MESSAGE) ??
-    (gate && !gate.pending ? gate.message : null);
-  if (refusal) return withTrimQuery(based, editQuery, refusal);
+}
+
+/**
+ * T10g-1 (design §2.7): a Trim click, or (T10g-2) a completed Extend/Split
+ * selection. Target kind and the accepted live solve of the current
+ * definition are checked now (a session without a live solve, e.g. just
+ * reopened, establishes it first); C3 refuses a decided non-accepted input
+ * and defers a pending one (review R-1). The click is queued with its
+ * entities' identities (R-5); nothing is authored until its exact
+ * intersections arrive.
+ */
+function queueSketchEditQueryClick(
+  session: SketchSessionState,
+  tool: SketchEditToolState,
+  click: SketchEditQueryClick,
+): SketchSessionState {
+  const editQuery = tool.editQuery ?? { queue: [], inFlight: null };
+  const refusal = editQueryClickRefusal(
+    session,
+    tool.toolId as SketchEditQueryToolId,
+    click,
+  );
+  if (refusal) return withEditQuery(session, editQuery, refusal);
   return advanceSketchTrimQueue(
-    withTrimQuery(
-      based,
-      { ...editQuery, queue: [...editQuery.queue, { targetEntityId, entity }] },
+    withEditQuery(
+      session,
+      { ...editQuery, queue: [...editQuery.queue, click] },
       null,
     ),
   );
 }
 
 /**
- * T10g-1: issues the head click's query when nothing is in flight. A head
- * whose target changed since its click is dropped as stale (R-5). The query
- * runs on the accepted live solve of the current definition only (R-6);
- * with offset relationships it waits while the publication round is pending
- * (R-1: the basis must say which offset outputs are accepted), and so does
- * a target whose C3 gate is still pending. Unchanged when nothing waits.
+ * T10g-1: issues the head click's query when nothing is in flight (Trim,
+ * and T10g-2 Extend/Split). A head whose target or boundary changed since
+ * its click is dropped as stale (R-5). The query runs on the accepted live
+ * solve of the current definition only (R-6); with offset relationships it
+ * waits while the publication round is pending (R-1: the basis must say
+ * which offset outputs are accepted), and so does a click whose C3 gate is
+ * still pending. Unchanged when nothing waits.
  */
 export function advanceSketchTrimQueue(
   session: SketchSessionState,
   initialMessage: string | null = null,
 ): SketchSessionState {
-  const editQuery = session.activeEditTool?.editQuery;
-  if (session.activeEditTool?.toolId !== "trim" || !editQuery) return session;
+  const tool = session.activeEditTool;
+  const editQuery = tool?.editQuery;
+  if (!tool || !isSketchEditQueryTool(tool.toolId) || !editQuery)
+    return session;
   if (editQuery.inFlight || (editQuery.queue.length === 0 && !initialMessage))
     return session;
+  const kind = EDIT_QUERY_KINDS[tool.toolId];
   let message = initialMessage;
   const queue = [...editQuery.queue];
   for (;;) {
     const head = queue[0];
-    if (!head) return withTrimQuery(session, { ...editQuery, queue }, message);
-    const current = session.definition.entities.find(
-      (entity) => entity.entityId === head.targetEntityId,
-    );
+    if (!head) return withEditQuery(session, { ...editQuery, queue }, message);
+    const current = (entityId: SketchEntityId) =>
+      session.definition.entities.find(
+        (entity) => entity.entityId === entityId,
+      );
     const gate = offsetEditInputGate(
       session,
-      [head.targetEntityId],
-      "a Trim target",
+      clickEntityIds(head),
+      editQueryInputUse(tool.toolId, true),
     );
     const refusal =
-      current !== head.entity
-        ? TRIM_STALE_MESSAGE
+      current(head.targetEntityId) !== head.entity ||
+      (head.boundary &&
+        current(head.boundary.entityId) !== head.boundary.entity)
+        ? editQueryStaleMessage(kind)
         : !hasAcceptedLiveSolveOfDefinition(session)
-          ? TRIM_BASIS_NOT_ACCEPTED_MESSAGE
+          ? editQueryBasisNotAcceptedMessage(kind)
           : gate && !gate.pending
             ? gate.message
             : null;
@@ -1060,21 +1187,28 @@ export function advanceSketchTrimQueue(
       (relationship) => relationship.kind === "offset",
     );
     if (gate || (offsets && session.liveRegions.status === "pending"))
-      return withTrimQuery(
+      return withEditQuery(
         session,
         { ...editQuery, queue },
         message ?? gate?.message ?? null,
       );
     const liveSolve = session.liveSolve!;
-    return withTrimQuery(
+    const operation: SketchEditOperation = head.boundary
+      ? {
+          kind: kind as "extend" | "split",
+          targetEntityId: head.targetEntityId,
+          boundaryEntityId: head.boundary.entityId,
+        }
+      : { kind: "trim", targetEntityId: head.targetEntityId };
+    return withEditQuery(
       session,
       {
         queue,
         inFlight: {
-          // Review R-1: unique across tool activations (a new Trim after
+          // Review R-1: unique across tool activations (a new tool after
           // Esc starts a fresh queue), so a result of a cancelled query
           // never matches a later click's query.
-          queryId: `trim-query-${crypto.randomUUID()}`,
+          queryId: `${kind}-query-${crypto.randomUUID()}`,
           definition: session.definition,
           generation: session.liveRegions.generation,
           input: {
@@ -1082,7 +1216,7 @@ export function advanceSketchTrimQueue(
             solvedSnapshot: liveSolve.solvedSnapshot,
             projectedReferences: liveSolve.projectedReferences,
             modelingTolerance: session.modelingTolerance,
-            operation: { kind: "trim", targetEntityId: head.targetEntityId },
+            operation,
           },
         },
       },
@@ -1091,46 +1225,78 @@ export function advanceSketchTrimQueue(
   }
 }
 
+/** The builder of the in-flight operation (Trim, Extend or Split). */
+function buildEditQueryMutation(
+  session: SketchSessionState,
+  operation: SketchEditOperation,
+  result: Extract<SketchEditIntersectionResult, { kind: "verified" }>,
+  sequence: number,
+): SketchMutationResult {
+  const factories = createSessionCommitFactories(
+    sequence,
+    session.sketchId ?? ("sketch_draft" as SketchId),
+  );
+  const common = {
+    definition: session.definition,
+    targetEntityId: operation.targetEntityId,
+    intersections: result,
+    factories,
+  };
+  switch (operation.kind) {
+    case "trim":
+      return createSketchTrimMutation(common);
+    case "extend":
+      return createSketchExtendMutation({ ...common, sequence });
+    case "split":
+      return createSketchSplitMutation({ ...common, sequence });
+  }
+}
+
 /**
- * T10g-1 (design §2.7/§2.8): the exact intersections of the in-flight
- * Trim query `queryId` (ignored unless it is still the one in flight).
+ * T10g-1 (design §2.7/§2.8), for Trim and (T10g-2) Extend/Split: the exact
+ * intersections of the in-flight query `queryId` (ignored unless it is
+ * still the one in flight).
  * - The definition changed meanwhile (an edit, Undo/Redo): discarded with
  *   the stale message.
  * - Only the live solve changed (a re-solve, a publication: a new
  *   generation or snapshot, review A-4): queried again for the head.
  * - Otherwise a failure shows its message, and a verified result applies as
- *   one authored edit, after C3 over target, cut cutters and the
- *   non-accepted outputs near the target (T-g5); the next click follows.
+ *   one authored edit, after C3 over target, cut cutters (Extend/Split: the
+ *   boundary) and the non-accepted outputs near a Trim target (T-g5); the
+ *   next click follows.
  */
 export function completeSketchTrimQuery(
   session: SketchSessionState,
   queryId: string,
   result: SketchEditIntersectionResult,
 ): SketchSessionState {
-  const editQuery = session.activeEditTool?.editQuery;
+  const tool = session.activeEditTool;
+  const editQuery = tool?.editQuery;
   const inFlight = editQuery?.inFlight;
   if (
-    session.activeEditTool?.toolId !== "trim" ||
+    !tool ||
+    !isSketchEditQueryTool(tool.toolId) ||
     inFlight?.queryId !== queryId
   )
     return session;
+  const { operation } = inFlight.input;
   const cleared = { ...editQuery!, inFlight: null };
   const popped = { ...cleared, queue: cleared.queue.slice(1) };
   if (session.definition !== inFlight.definition)
     return advanceSketchTrimQueue(
-      withTrimQuery(session, popped, null),
-      TRIM_STALE_MESSAGE,
+      withEditQuery(session, popped, null),
+      editQueryStaleMessage(operation.kind),
     );
   if (
     session.liveRegions.generation !== inFlight.generation ||
     session.liveSolve?.solvedSnapshot !== inFlight.input.solvedSnapshot
   )
-    return advanceSketchTrimQueue(withTrimQuery(session, cleared, null));
-  const targetEntityId = inFlight.input.operation.targetEntityId;
+    return advanceSketchTrimQueue(withEditQuery(session, cleared, null));
   const gate = offsetEditInputGate(
     session,
     [
-      targetEntityId,
+      operation.targetEntityId,
+      ...(operation.kind === "trim" ? [] : [operation.boundaryEntityId]),
       ...(result.kind === "verified"
         ? [result.cuts[0]!, result.cuts.at(-1)!].flatMap((cut) =>
             cut.cutters.map((cutter) => cutter.entityId),
@@ -1138,36 +1304,35 @@ export function completeSketchTrimQuery(
         : []),
       ...result.nonAcceptedNearTarget,
     ],
-    "a Trim input",
+    editQueryInputUse(tool.toolId, false),
   );
   if (gate?.pending)
-    return advanceSketchTrimQueue(withTrimQuery(session, cleared, null));
+    return advanceSketchTrimQueue(withEditQuery(session, cleared, null));
   if (gate)
     return advanceSketchTrimQueue(
-      withTrimQuery(session, popped, null),
+      withEditQuery(session, popped, null),
       gate.message,
     );
   if (result.kind === "failed")
     return advanceSketchTrimQueue(
-      withTrimQuery(session, popped, null),
+      withEditQuery(session, popped, null),
       result.message,
     );
   const nextSequence = session.sequence + 1;
-  const sketchId = session.sketchId ?? ("sketch_draft" as SketchId);
-  const mutation = createSketchTrimMutation({
-    definition: session.definition,
-    targetEntityId,
-    intersections: result,
-    factories: createSessionCommitFactories(nextSequence, sketchId),
-  });
+  const mutation = buildEditQueryMutation(
+    session,
+    operation,
+    result,
+    nextSequence,
+  );
   if (!mutation.changed)
     return advanceSketchTrimQueue(
-      withTrimQuery(session, popped, null),
+      withEditQuery(session, popped, null),
       mutation.message,
     );
   const applied = withLiveSolveBasis(
     {
-      ...withTrimQuery(session, popped, null),
+      ...withEditQuery(session, popped, null),
       definition: mutation.definition,
       toolStagedEntities: [],
       sequence: nextSequence,
@@ -1180,26 +1345,91 @@ export function completeSketchTrimQuery(
   return advanceSketchTrimQueue(applied);
 }
 
-/** T10g-1: the in-flight Trim query failed (a real error): nothing is applied. */
+/** T10g-1: the in-flight edit query failed (a real error): nothing is applied. */
 export function failSketchTrimQuery(
   session: SketchSessionState,
   queryId: string,
   message: string,
 ): SketchSessionState {
-  const editQuery = session.activeEditTool?.editQuery;
+  const tool = session.activeEditTool;
+  const editQuery = tool?.editQuery;
+  const inFlight = editQuery?.inFlight;
   if (
-    session.activeEditTool?.toolId !== "trim" ||
-    editQuery?.inFlight?.queryId !== queryId
+    !tool ||
+    !isSketchEditQueryTool(tool.toolId) ||
+    inFlight?.queryId !== queryId
   )
     return session;
   return advanceSketchTrimQueue(
-    withTrimQuery(
+    withEditQuery(
       session,
-      { ...editQuery, inFlight: null, queue: editQuery.queue.slice(1) },
+      { ...editQuery!, inFlight: null, queue: editQuery!.queue.slice(1) },
       null,
     ),
-    `Trim failed: ${message}`,
+    `${editQueryToolName(inFlight.input.operation.kind)} failed: ${message}`,
   );
+}
+
+/**
+ * C3 over an Extend/Split selection still being made (decided or still
+ * being checked), or the refusal of a complete selection; null when none.
+ */
+function editSelectionMessage(
+  session: SketchSessionState,
+  tool: SketchEditToolState,
+) {
+  const entityIds = getSelectedSketchEntityIds(tool);
+  if (entityIds.length === 2) {
+    const click = editQueryClick(session, entityIds[0]!, entityIds[1]!);
+    return click
+      ? editQueryClickRefusal(
+          session,
+          tool.toolId as SketchEditQueryToolId,
+          click,
+        )
+      : null;
+  }
+  return (
+    offsetEditInputGate(
+      session,
+      entityIds,
+      editQueryInputUse(tool.toolId as SketchEditQueryToolId, true),
+    )?.message ?? null
+  );
+}
+
+/**
+ * T10g-2: an Extend/Split selection (target, then boundary). A complete one
+ * is queued as one click (`queueSketchEditQueryClick`) and the selection
+ * restarts; a refused one keeps the selection and shows why. An incomplete
+ * one shows its C3 state.
+ */
+function selectSketchEditQueryTargets(
+  session: SketchSessionState,
+  tool: SketchEditToolState,
+): SketchSessionState {
+  const entityIds = getSelectedSketchEntityIds(tool);
+  const click =
+    entityIds.length === 2
+      ? editQueryClick(session, entityIds[0]!, entityIds[1]!)
+      : null;
+  const based = click ? withEditQueryBasis(session) : session;
+  const message = editSelectionMessage(based, tool);
+  if (click && !message) {
+    const reset = { ...tool, selectedTarget: null, selectedTargets: [] };
+    return queueSketchEditQueryClick(
+      { ...based, activeEditTool: reset, toolStagedEntities: [] },
+      reset,
+      click,
+    );
+  }
+  return {
+    ...based,
+    activeEditTool: tool,
+    toolStagedEntities: [],
+    validationMessage: message,
+    toolPresentation: buildSketchEditToolPresentation(tool, message),
+  };
 }
 
 export function applySketchEditOperationResult(
@@ -1242,7 +1472,7 @@ export function updateSketchEditToolHover(
   const preview =
     activeEditTool.toolId === "offset"
       ? getOffsetPreview(session, activeEditTool)
-      : activeEditTool.toolId === "trim"
+      : isSketchEditQueryTool(activeEditTool.toolId)
         ? null
         : getSketchEditOperatorResult(session, activeEditTool);
 
@@ -1270,7 +1500,11 @@ export function selectSketchEditToolTarget(
     if (target.kind !== "sketchEntity") {
       return session;
     }
-    return queueSketchTrimClick(session, activeEditTool, target.entityId);
+    const based = withEditQueryBasis(session);
+    const click = editQueryClick(based, target.entityId, null);
+    return click
+      ? queueSketchEditQueryClick(based, activeEditTool, click)
+      : session;
   }
 
   if (
@@ -1346,12 +1580,12 @@ export function selectSketchEditToolTarget(
     selectedTargets: nextSelectedTargets,
     hoverTarget: null,
   };
+  if (isSketchEditQueryTool(nextEditTool.toolId))
+    return selectSketchEditQueryTargets(session, nextEditTool);
   const preview = getSketchEditOperatorResult(session, nextEditTool);
 
   if (
-    (nextEditTool.toolId === "sketchExtend" ||
-      nextEditTool.toolId === "sketchSplit" ||
-      nextEditTool.toolId === "sketchMirror") &&
+    nextEditTool.toolId === "sketchMirror" &&
     nextSelectedTargets.length >= metadata.selection.requiredCount &&
     preview.valid
   ) {
@@ -1554,6 +1788,13 @@ export function patchSketchEditOperatorValue(
   if (patch.intent !== "commitSketchEditOperator") {
     return session;
   }
+
+  // T10g-2: Extend/Split commit a complete selection as its click (an
+  // incomplete one, e.g. already queued, commits nothing).
+  if (isSketchEditQueryTool(activeEditTool.toolId))
+    return getSelectedSketchEntityIds(activeEditTool).length === 2
+      ? selectSketchEditQueryTargets(session, activeEditTool)
+      : session;
 
   const preview = getSketchEditOperatorResult(session, activeEditTool);
   if (!preview.valid) {

@@ -51,7 +51,12 @@ import {
   createPointOnCurveConstraint,
   createTangentConstraint,
 } from "@/core/sketch-tools/constraints";
-import type { SketchEditIntersectionResult } from "@/contracts/sketch/edit-intersections";
+import {
+  EXTEND_TARGET_UNSUPPORTED_MESSAGE,
+  SPLIT_TARGET_UNSUPPORTED_MESSAGE,
+  type SketchEditCut,
+  type SketchEditIntersectionResult,
+} from "@/contracts/sketch/edit-intersections";
 import { distanceBetween as distanceBetweenPoints } from "@/domain/sketch/point-math";
 
 export type OffsetSide = "left" | "right";
@@ -359,41 +364,6 @@ function pointOnCircle(
   ];
 }
 
-function lineLineIntersection(input: {
-  start: SketchPoint;
-  end: SketchPoint;
-  otherStart: SketchPoint;
-  otherEnd: SketchPoint;
-}) {
-  const dx = input.end[0] - input.start[0];
-  const dy = input.end[1] - input.start[1];
-  const otherDx = input.otherEnd[0] - input.otherStart[0];
-  const otherDy = input.otherEnd[1] - input.otherStart[1];
-  const denominator = dx * otherDy - dy * otherDx;
-
-  if (Math.abs(denominator) <= EPSILON) {
-    return null;
-  }
-
-  const offsetX = input.otherStart[0] - input.start[0];
-  const offsetY = input.otherStart[1] - input.start[1];
-  const t = (offsetX * otherDy - offsetY * otherDx) / denominator;
-  const u = (offsetX * dy - offsetY * dx) / denominator;
-
-  if (t < -EPSILON || t > 1 + EPSILON || u < -EPSILON || u > 1 + EPSILON) {
-    return null;
-  }
-
-  const clampedT = Math.max(0, Math.min(1, t));
-  return {
-    point: [
-      input.start[0] + dx * clampedT,
-      input.start[1] + dy * clampedT,
-    ] as const,
-    t: clampedT,
-  };
-}
-
 function infiniteLineIntersection(input: {
   start: SketchPoint;
   end: SketchPoint;
@@ -471,6 +441,47 @@ function doubledDimensionValue(value: unknown) {
 }
 
 /**
+ * Q1b: the ties of a new point `pointId` at `cut`, one per tied cutter
+ * (`coincident` with a cutter end point, else `pointOnCurve`), with ids
+ * `tie-<idTag>-<cutterId>` and labels "<label> on <Cutter>".
+ */
+function cutTies(input: {
+  definition: SketchDefinition;
+  cut: SketchEditCut;
+  pointId: SketchPointId;
+  idTag: string;
+  label: string;
+  factories: SketchEditOperationFactories;
+}): ConstraintDefinition[] {
+  const labelOf = (entityId: SketchEntityId) =>
+    input.definition.entities.find(
+      (candidate) => candidate.entityId === entityId,
+    )?.label ?? entityId;
+  return input.cut.cutters.flatMap(({ entityId, tie }) => {
+    if (!tie) return [];
+    const constraintId = input.factories.createConstraintId(
+      `tie-${input.idTag}-${entityId}`,
+    );
+    const label = `${input.label} on ${labelOf(entityId)}`;
+    return [
+      tie.kind === "coincident"
+        ? {
+            constraintId,
+            kind: "coincident",
+            label,
+            pointIds: [input.pointId, tie.pointId],
+          }
+        : createPointOnCurveConstraint({
+            constraintId,
+            label,
+            pointId: input.pointId,
+            curveEntityId: entityId,
+          }),
+    ];
+  });
+}
+
+/**
  * The exact Trim (T10g design §3, g-1: line, arc, circle; shapes unchanged
  * from the sampled Trim). From the verified edit intersections of the
  * accepted pair it keeps the target outside its first and last cut (a
@@ -528,31 +539,14 @@ export function createSketchTrimMutation(input: {
     };
   });
   const [start, end] = ends as [(typeof ends)[0], (typeof ends)[0]];
-  const labelOf = (entityId: SketchEntityId) =>
-    definition.entities.find((candidate) => candidate.entityId === entityId)
-      ?.label ?? entityId;
   const ties = ends.flatMap(({ cut, tag, pointId }) =>
-    cut.cutters.flatMap(({ entityId, tie }): ConstraintDefinition[] => {
-      if (!tie) return [];
-      const constraintId = factories.createConstraintId(
-        `tie-${tag}-${entityId}`,
-      );
-      const label = `${entity.label} trim ${tag} on ${labelOf(entityId)}`;
-      return [
-        tie.kind === "coincident"
-          ? {
-              constraintId,
-              kind: "coincident",
-              label,
-              pointIds: [pointId, tie.pointId],
-            }
-          : createPointOnCurveConstraint({
-              constraintId,
-              label,
-              pointId,
-              curveEntityId: entityId,
-            }),
-      ];
+    cutTies({
+      definition,
+      cut,
+      pointId,
+      idTag: tag,
+      label: `${entity.label} trim ${tag}`,
+      factories,
     }),
   );
 
@@ -1460,163 +1454,155 @@ export function createSketchChamferMutation(input: {
   ]);
 }
 
+/**
+ * The exact Extend (T10g-2; design §3.1, Q-g3: a line extended to a line):
+ * the extended end (`intersections.extendedEnd`) becomes a new
+ * `extend-endpoint` point Q at the one cut's `position` (the evaluator on
+ * the extension of the solved target), tied to the boundary (Q1b:
+ * `coincident` with a boundary end point, else `pointOnCurve` on its
+ * infinite line). The replaced end point stays in the sketch.
+ */
 export function createSketchExtendMutation(input: {
   definition: SketchDefinition;
-  entityIds: readonly SketchEntityId[];
+  targetEntityId: SketchEntityId;
+  intersections: Extract<SketchEditIntersectionResult, { kind: "verified" }>;
   sequence: number;
   factories: SketchEditOperationFactories;
-}): SketchEditOperationResult {
-  if (input.entityIds.length !== 2) {
-    return createInvalidOperationResult(
-      "Sketch extend needs a target line and a boundary line.",
-    );
-  }
-
-  const target = getLineDescriptorById(input.definition, input.entityIds[0]!);
-  const boundary = getLineDescriptorById(input.definition, input.entityIds[1]!);
-  if (!target || !boundary) {
-    return createInvalidOperationResult(
-      "Sketch extend currently supports a line extended to another line.",
-    );
-  }
-
-  const intersection = infiniteLineIntersection({
-    start: target.start,
-    end: target.end,
-    otherStart: boundary.start,
-    otherEnd: boundary.end,
-  });
-  if (!intersection) {
-    return createInvalidOperationResult(
-      "Sketch extend needs non-parallel lines.",
-    );
-  }
-
-  const targetVector = subtract(target.end, target.start);
-  const targetLengthSquared = dot(targetVector, targetVector);
-  const t =
-    targetLengthSquared <= EPSILON
-      ? 0
-      : dot(subtract(intersection, target.start), targetVector) /
-        targetLengthSquared;
-  if (t >= -EPSILON && t <= 1 + EPSILON) {
-    return createInvalidOperationResult(
-      "Sketch extend needs an intersection outside the selected line.",
-    );
-  }
-
-  const replaceStart = t < 0;
-  const replacementPointId = input.factories.createPointId("extend-endpoint");
-  const updatedTarget = {
-    ...target.entity,
-    startPointId: replaceStart
-      ? replacementPointId
-      : target.entity.startPointId,
-    endPointId: replaceStart ? target.entity.endPointId : replacementPointId,
-  };
-  const definition = appendPointsAndEntities(
-    updateDefinitionEntities(input.definition, [updatedTarget]),
-    [
-      input.factories.createPoint(
-        `Extend ${input.sequence} endpoint`,
-        replacementPointId,
-        intersection,
-      ),
-    ],
-    [],
+}): SketchMutationResult {
+  const { definition, factories, intersections } = input;
+  const entity = definition.entities.find(
+    (candidate) => candidate.entityId === input.targetEntityId,
   );
-
-  return createMutationOperationResult(definition, [
-    makePreviewLine(
-      "preview-extend-line",
-      "Extend preview",
-      replaceStart ? intersection : target.start,
-      replaceStart ? target.end : intersection,
-      target.entity.isConstruction,
-    ),
-  ]);
+  if (entity?.kind !== "lineSegment" || !intersections.extendedEnd)
+    return fail(EXTEND_TARGET_UNSUPPORTED_MESSAGE, definition);
+  const end = intersections.extendedEnd;
+  const cut = intersections.cuts[0]!;
+  const pointId = factories.createPointId("extend-endpoint");
+  const ties = cutTies({
+    definition,
+    cut,
+    pointId,
+    idTag: "extend",
+    label: `${entity.label} extend ${end}`,
+    factories,
+  });
+  const updated = {
+    ...entity,
+    ...(end === "start" ? { startPointId: pointId } : { endPointId: pointId }),
+  };
+  return {
+    changed: true,
+    message: null,
+    definition: {
+      ...definition,
+      ...withAppendedTrimPoints(definition, [
+        factories.createPoint(
+          `Extend ${input.sequence} endpoint`,
+          pointId,
+          cut.position,
+        ),
+      ]),
+      entities: definition.entities.map((candidate) =>
+        candidate.entityId === entity.entityId ? updated : candidate,
+      ),
+      constraintIds: [
+        ...definition.constraintIds,
+        ...ties.map((tie) => tie.constraintId),
+      ],
+      constraints: [...definition.constraints, ...ties],
+    },
+  };
 }
 
+/**
+ * The exact Split (T10g-2; design §3.1, Q-g3: a line split by a line at its
+ * one crossing): the original id keeps start→Q and a new `split-line`
+ * piece runs Q→end, sharing the one new `split-point` Q at the cut's
+ * `position`, tied once to the boundary (Q1b). Review R-3: a target
+ * `pointOnCurve` at the cut stays on the earlier piece (the original id);
+ * one away from the cut moves to the new piece when its parameter lies
+ * beyond the cut's enclosure.
+ */
 export function createSketchSplitMutation(input: {
   definition: SketchDefinition;
-  entityIds: readonly SketchEntityId[];
+  targetEntityId: SketchEntityId;
+  intersections: Extract<SketchEditIntersectionResult, { kind: "verified" }>;
   sequence: number;
   factories: SketchEditOperationFactories;
-}): SketchEditOperationResult {
-  if (input.entityIds.length !== 2) {
-    return createInvalidOperationResult(
-      "Sketch split needs a target line and a crossing boundary line.",
-    );
-  }
-
-  const target = getLineDescriptorById(input.definition, input.entityIds[0]!);
-  const boundary = getLineDescriptorById(input.definition, input.entityIds[1]!);
-  if (!target || !boundary) {
-    return createInvalidOperationResult(
-      "Sketch split currently supports a line split by another line.",
-    );
-  }
-
-  const intersection = lineLineIntersection({
-    start: target.start,
-    end: target.end,
-    otherStart: boundary.start,
-    otherEnd: boundary.end,
-  });
-  if (
-    !intersection ||
-    intersection.t <= EPSILON ||
-    intersection.t >= 1 - EPSILON
-  ) {
-    return createInvalidOperationResult(
-      "Sketch split needs a boundary crossing inside the selected line.",
-    );
-  }
-
-  const splitPointId = input.factories.createPointId("split-point");
-  const splitEntityId = input.factories.createEntityId("split-line");
-  const updatedTarget = {
-    ...target.entity,
-    endPointId: splitPointId,
-  };
-  const splitEntity = {
-    ...input.factories.createLineEntity(
-      `${target.entity.label} split`,
-      splitEntityId,
-      splitPointId,
-      target.entity.endPointId,
-    ),
-    isConstruction: target.entity.isConstruction,
-    style: target.entity.style,
-  };
-  const definition = appendPointsAndEntities(
-    updateDefinitionEntities(input.definition, [updatedTarget]),
-    [
-      input.factories.createPoint(
-        `Split ${input.sequence} point`,
-        splitPointId,
-        intersection.point,
-      ),
-    ],
-    [splitEntity],
+}): SketchMutationResult {
+  const { definition, factories, intersections } = input;
+  const entity = definition.entities.find(
+    (candidate) => candidate.entityId === input.targetEntityId,
   );
-
-  return createMutationOperationResult(definition, [
-    makePreviewLine(
-      "preview-split-a",
-      "Split preview",
-      target.start,
-      intersection.point,
-      target.entity.isConstruction,
+  if (entity?.kind !== "lineSegment")
+    return fail(SPLIT_TARGET_UNSUPPORTED_MESSAGE, definition);
+  const cut = intersections.cuts[0]!;
+  const pointId = factories.createPointId("split-point");
+  const pieceId = factories.createEntityId("split-line");
+  const ties = cutTies({
+    definition,
+    cut,
+    pointId,
+    idTag: "split",
+    label: `${entity.label} split`,
+    factories,
+  });
+  const piece = {
+    ...factories.createLineEntity(
+      `${entity.label} split`,
+      pieceId,
+      pointId,
+      entity.endPointId,
     ),
-    makePreviewLine(
-      "preview-split-b",
-      "Split preview",
-      intersection.point,
-      target.end,
-      target.entity.isConstruction,
+    isConstruction: entity.isConstruction,
+    style: entity.style,
+  };
+  const retargeted = new Set(
+    intersections.incidences.flatMap((incidence) =>
+      incidence.cut === null && incidence.parameter > cut.enclosure[1]
+        ? [incidence.constraintId]
+        : [],
     ),
-  ]);
+  );
+  return {
+    changed: true,
+    message: null,
+    definition: {
+      ...definition,
+      ...withAppendedTrimPoints(definition, [
+        factories.createPoint(
+          `Split ${input.sequence} point`,
+          pointId,
+          cut.position,
+        ),
+      ]),
+      entityIds: [...definition.entityIds, pieceId],
+      entities: [
+        ...definition.entities.map((candidate) =>
+          candidate.entityId === entity.entityId
+            ? { ...entity, endPointId: pointId }
+            : candidate,
+        ),
+        piece,
+      ],
+      constraintIds: [
+        ...definition.constraintIds,
+        ...ties.map((tie) => tie.constraintId),
+      ],
+      constraints: [
+        ...definition.constraints.map((constraint) =>
+          constraint.kind === "pointOnCurve" &&
+          retargeted.has(constraint.constraintId)
+            ? {
+                ...constraint,
+                curve: { ...constraint.curve, entityId: pieceId },
+              }
+            : constraint,
+        ),
+        ...ties,
+      ],
+    },
+  };
 }
 
 function createContinuousLineOffsetContribution(input: {

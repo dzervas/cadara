@@ -11,7 +11,10 @@ import {
   withLiveSolveBasis,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
-import { TRIM_STALE_MESSAGE } from "@/domain/editor/sketch-session/editing";
+import {
+  editQueryStaleMessage,
+  TRIM_STALE_MESSAGE,
+} from "@/domain/editor/sketch-session/editing";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
@@ -375,5 +378,232 @@ describe("T10g-1 Trim edit query (editor loop)", () => {
     const dropped = sketchState(transitionEditorState(newer, superseded));
     expect(dropped.session).toBe(newer.session);
     expect(dropped.pendingEditQueryRequest).toBe(newer.pendingEditQueryRequest);
+  });
+});
+
+// T10g-2: Extend and Split run through the same flow (one completed
+// selection = one queued click; stale, queue and cancel as for Trim).
+describe.each([
+  ["sketchExtend", "extend", 1, 3],
+  ["sketchSplit", "split", 4, 2],
+] as const)("T10g-2 %s edit query (editor loop)", (toolId, kind, length, x) => {
+  /** Targets T1 (0,0)→(length,0) and T2 (0,2)→(length,2); boundary B x = `x`, y ∈ [−1, 3]. */
+  async function lineEditState() {
+    const { state } = await trimState();
+    let session = createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    );
+    session = draw(session, [0, 0], [length, 0]);
+    session = draw(session, [0, 2], [length, 2]);
+    session = draw(session, [x, -1], [x, 3]);
+    const [first, second, boundary] = session.definition.entities.map(
+      (entity) => entity.entityId,
+    ) as [SketchEntityId, SketchEntityId, SketchEntityId];
+    return {
+      state: { ...state, session: beginSketchTool(session, toolId) },
+      first,
+      second,
+      boundary,
+    };
+  }
+  /** Selects target then boundary (a complete selection) and emits. */
+  function select(
+    state: SketchEditorState,
+    target: SketchEntityId,
+    boundary: SketchEntityId,
+  ) {
+    const once = click(state, target);
+    return click(sketchState(once), boundary);
+  }
+  /** The new end point the applied edit authored on `target`. */
+  function editedAt(state: SketchEditorState, target: SketchEntityId) {
+    const line = state.session.definition.entities.find(
+      (entity) => entity.entityId === target,
+    );
+    if (line?.kind !== "lineSegment") throw new Error("line");
+    // Extend moves the end; Split ends the original id at the split point.
+    return state.session.definition.points.find(
+      (point) => point.pointId === line.endPointId,
+    )!.position;
+  }
+
+  test("a complete selection emits one background query and authors nothing (the selection restarts); its result applies once; a result of another request is dropped", async () => {
+    const { state, first, boundary } = await lineEditState();
+    const half = click(state, first);
+    expect(
+      queryEffects(half.effects),
+      "half a selection queries nothing",
+    ).toEqual([]);
+    const selected = select(state, first, boundary);
+    const [effect] = queryEffects(selected.effects);
+    expect(queryEffects(selected.effects)).toHaveLength(1);
+    expect(effect).toMatchObject({
+      background: true,
+      queryId: expect.stringMatching(new RegExp(`^${kind}-query-`)),
+      input: {
+        operation: { kind, targetEntityId: first, boundaryEntityId: boundary },
+      },
+    });
+    expect(
+      queryEffects(emitPendingSketchEditQuery(selected).effects),
+    ).toHaveLength(1);
+    const pending = sketchState(selected);
+    expect(pending.session.definition).toBe(state.session.definition);
+    expect(pending.session.activeEditTool?.selectedTargets).toEqual([]);
+    const event = await runEditorEffect(effect!, runtime);
+    const other = sketchState(
+      transitionEditorState(pending, {
+        ...event,
+        requestId: "request_other",
+      } as EditorEvent),
+    );
+    expect(other.session).toBe(pending.session);
+    const applied = sketchState(transitionEditorState(pending, event));
+    expect(applied.pendingEditQueryRequest).toBeNull();
+    expect(applied.session.validationMessage).toBeNull();
+    expect(applied.session.definition.entities).toHaveLength(
+      kind === "split" ? 4 : 3,
+    );
+    expect(editedAt(applied, first)).toEqual([x, 0]);
+    expect(applied.session.activeEditTool?.editQuery).toMatchObject({
+      queue: [],
+      inFlight: null,
+    });
+  });
+
+  test("the definition changes while the query is in flight: the result is discarded with the stale message", async () => {
+    const { state, first, boundary } = await lineEditState();
+    const selected = select(state, first, boundary);
+    const [effect] = queryEffects(selected.effects);
+    const pending = sketchState(selected);
+    const changed = draw(pending.session, [10, 10], [11, 10]);
+    const transition = await answer(
+      {
+        ...pending,
+        session: { ...changed, activeEditTool: pending.session.activeEditTool },
+      },
+      effect!,
+    );
+    const result = sketchState(transition);
+    expect(result.session.definition).toBe(changed.definition);
+    expect(result.session.validationMessage).toBe(editQueryStaleMessage(kind));
+    expect(result.session.validationMessage).toMatch(
+      kind === "extend" ? /^Extend was not applied/ : /^Split was not applied/,
+    );
+    expect(queryEffects(transition.effects)).toEqual([]);
+  });
+
+  test("FIFO queue: a second selection while the first is in flight waits, then is queried and applied in order", async () => {
+    const { state, first, second, boundary } = await lineEditState();
+    const one = select(state, first, boundary);
+    const [firstEffect] = queryEffects(one.effects);
+    const two = select(sketchState(one), second, boundary);
+    expect(queryEffects(two.effects)).toEqual([]);
+    expect(
+      sketchState(two).session.activeEditTool?.editQuery?.queue.map((entry) => [
+        entry.targetEntityId,
+        entry.boundary?.entityId,
+      ]),
+    ).toEqual([
+      [first, boundary],
+      [second, boundary],
+    ]);
+    const afterFirst = await answer(sketchState(two), firstEffect!);
+    expect(editedAt(sketchState(afterFirst), first)).toEqual([x, 0]);
+    const [secondEffect] = queryEffects(afterFirst.effects);
+    expect(secondEffect?.input.operation.targetEntityId).toBe(second);
+    const afterSecond = sketchState(
+      await answer(sketchState(afterFirst), secondEffect!),
+    );
+    expect(editedAt(afterSecond, second)).toEqual([x, 2]);
+    expect(afterSecond.session.validationMessage).toBeNull();
+  });
+
+  test("review R-5: a queued selection whose boundary an earlier applied edit changed is dropped with the stale message, not queried", async () => {
+    const { state, first, boundary } = await lineEditState();
+    const one = select(state, first, boundary);
+    const [effect] = queryEffects(one.effects);
+    // The second click's boundary is the first edit's target.
+    const two = select(sketchState(one), boundary, first);
+    const result = await answer(sketchState(two), effect!);
+    const applied = sketchState(result);
+    expect(editedAt(applied, first)).toEqual([x, 0]);
+    expect(applied.session.validationMessage).toBe(editQueryStaleMessage(kind));
+    expect(applied.session.activeEditTool?.editQuery?.queue).toEqual([]);
+    expect(queryEffects(result.effects)).toEqual([]);
+  });
+
+  test("Esc and a tool switch cancel: the late result applies nothing and clears the request", async () => {
+    const { state, first, boundary } = await lineEditState();
+    for (const event of [
+      { type: "sketch.activeToolCleared" },
+      { type: "tool.activated", toolId: "line" },
+    ] as EditorEvent[]) {
+      const selected = select(state, first, boundary);
+      const [effect] = queryEffects(selected.effects);
+      const cancelled = sketchState(
+        transitionEditorState(sketchState(selected), event),
+      );
+      expect(cancelled.session.activeEditTool?.editQuery).toBeUndefined();
+      expect(cancelled.pendingEditQueryRequest).toBeNull();
+      const late = sketchState(await answer(cancelled, effect!));
+      expect(late.session.definition).toBe(cancelled.session.definition);
+    }
+  });
+
+  test("review A-3/A-4: every generation-only change (same definition) re-queries; the result for the current solve applies", async () => {
+    const { state, first, boundary } = await lineEditState();
+    let current = select(state, first, boundary);
+    let [effect] = queryEffects(current.effects);
+    for (let round = 0; round < 2; round += 1) {
+      const pending = sketchState(current);
+      const resolved = {
+        ...pending,
+        session: withLiveSolveBasis(
+          pending.session,
+          pending.session.definition,
+        ),
+      };
+      const previous = effect!.queryId;
+      current = await answer(resolved, effect!);
+      expect(sketchState(current).session.definition).toBe(
+        state.session.definition,
+      );
+      [effect] = queryEffects(current.effects);
+      expect(effect?.queryId).toMatch(new RegExp(`^${kind}-query-`));
+      expect(effect?.queryId).not.toBe(previous);
+      expect(effect?.input.solvedSnapshot).toBe(
+        resolved.session.liveSolve!.solvedSnapshot,
+      );
+    }
+    const applied = sketchState(await answer(sketchState(current), effect!));
+    expect(editedAt(applied, first)).toEqual([x, 0]);
+  });
+
+  test("review A-3: a real query failure applies nothing and is shown as the tool's failure", async () => {
+    const { state, first, boundary } = await lineEditState();
+    const selected = select(state, first, boundary);
+    const [effect] = queryEffects(selected.effects);
+    const failed = sketchState(
+      transitionEditorState(sketchState(selected), {
+        type: "effect.sketchEditIntersectionsQueryFailed",
+        requestId: effect!.requestId,
+        documentId: effect!.documentId,
+        commandSessionId: effect!.commandSessionId,
+        baseRevisionId: effect!.baseRevisionId,
+        queryId: effect!.queryId,
+        message: "worker crashed",
+      }),
+    );
+    expect(failed.session.definition).toBe(state.session.definition);
+    expect(failed.session.validationMessage).toBe(
+      `${kind === "extend" ? "Extend" : "Split"} failed: worker crashed`,
+    );
+    expect(failed.session.activeEditTool?.editQuery).toMatchObject({
+      queue: [],
+      inFlight: null,
+    });
+    expect(failed.pendingEditQueryRequest).toBeNull();
   });
 });
