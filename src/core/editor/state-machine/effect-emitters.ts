@@ -7,6 +7,7 @@ import {
 import {
   getSketchSessionLiveRegionBasis,
   updateSketchReferenceProjection,
+  withLiveSolveBasis,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
 import {
@@ -491,7 +492,7 @@ export function emitSketchCommit(
 export function emitSketchReferenceProjection(
   state: SketchEditorState,
   session: SketchSessionState,
-): EditorTransitionResult {
+): EditorTransitionResult & { state: SketchEditorState } {
   if (
     session.definition.references.length === 0 ||
     state.document.documentId === null ||
@@ -508,12 +509,18 @@ export function emitSketchReferenceProjection(
   }
 
   const requestId = nextRequestId(state, "sketch-reference-projection");
+  // T11a (A3): a just-opened session (sketch entry, or reopened after a
+  // reference-image import) has no live solve yet; it is based on its
+  // current projections while they refresh.
+  const based = session.liveSolve
+    ? session
+    : withLiveSolveBasis(session, session.definition);
 
   return {
     state: {
       ...state,
       nextRequestSequence: state.nextRequestSequence + 1,
-      session,
+      session: based,
       pendingProjectionRequestId: requestId,
     },
     effects: [
@@ -523,7 +530,7 @@ export function emitSketchReferenceProjection(
         commandSessionId: state.command.commandSessionId,
         documentId: state.document.documentId,
         baseRevisionId: state.document.revisionId,
-        session,
+        session: based,
       },
     ],
   };

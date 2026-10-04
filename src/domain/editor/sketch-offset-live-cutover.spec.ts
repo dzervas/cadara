@@ -65,6 +65,7 @@ import {
   beginSketchTool,
   completeSketchOffsetPreviewPublication,
   createNewSketchSessionFromSupport,
+  createSketchSessionFromSnapshot,
   deleteSelectedSketchGeometry,
   finishSketchGeometryDrag,
   getSketchSessionDerivedValidity,
@@ -77,12 +78,27 @@ import {
   updateSketchPointer,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
-import { completeSketchEditQueriesForTest } from "@/domain/editor/state-machine-test-builder";
+import {
+  completeSketchEditQueriesForTest,
+  deriveSketchRegionsForTest,
+} from "@/domain/editor/state-machine-test-builder";
+import {
+  initialEditorState,
+  transitionEditorState,
+  type EditorEffect,
+  type EditorEffectRuntime,
+  type EditorState,
+  type SelectionCommandEditorState,
+  type SketchEditorState,
+} from "@/core/editor/state-machine";
+import { runEditorEffect } from "@/application/editor/effect-registry";
+import { resolveSessionSnap } from "@/domain/editor/sketch-session/tools";
 import { TRIM_TOO_FEW_CUTS_MESSAGE } from "@/contracts/sketch/edit-intersections";
 import {
   DERIVED_SHELL_DELETE_MESSAGE,
   DERIVED_SHELL_POINT_DELETE_MESSAGE,
   NON_ACCEPTED_OFFSET_EDIT_INPUT_CODE,
+  offsetEditInputGate,
   refreshSketchEditToolAfterOffsetRound,
 } from "@/domain/editor/sketch-session/editing";
 import { AuthoredActionHistory } from "@/domain/modeling/authored-action-history";
@@ -134,7 +150,10 @@ import {
 } from "@/contracts/sketch/region-extraction";
 import { evaluateSplineSpan } from "@/contracts/sketch/spline-geometry";
 import { getStableSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session";
-import { getDerivedShellDisplayValidity } from "@/domain/editor/sketch-session/display";
+import {
+  getDerivedShellDisplayValidity,
+  getSketchSessionDisplaySolvedSnapshot,
+} from "@/domain/editor/sketch-session/display";
 import { getEntityAnchor } from "@/domain/editor/sketch-session/annotations";
 import { collectSketchInteractionGeometry } from "@/domain/sketch-interaction/geometry";
 import { collectSketchSnapGeometries } from "@/domain/sketch-snapping/snap-candidates";
@@ -7679,5 +7698,288 @@ describe("T10g-1 Trim with offset relationships (review R-1, T-g5)", () => {
       click(states.certified, states.cutter),
     );
     expect(certified.validationMessage).toBe(TRIM_TOO_FEW_CUTS_MESSAGE);
+  }, 600_000);
+});
+
+const t11aRuntime = {
+  deriveSketchRegions: deriveSketchRegionsForTest,
+} as EditorEffectRuntime;
+
+/**
+ * T11a: the certified edit-input sketch saved as Finish saves it (authored
+ * definition and its solve; optionally with a construction-plane reference
+ * to project) and reopened through the editor's normal entry
+ * (`effect.sketchSessionOpened` → `enterSketchEditing`).
+ */
+async function reopenCertified(withReference: boolean) {
+  const states = await editInputs();
+  const live = states.certified.liveSolve!;
+  const reference = {
+    referenceId: "ref_t11a",
+    kind: "constructionPlane",
+    label: "YZ plane",
+    source: { kind: "construction", constructionId: "construction_plane-yz" },
+    projectionMode: "coplanar",
+  } as const;
+  const definition = withReference
+    ? {
+        ...live.sourceDefinition,
+        referenceIds: [
+          ...live.sourceDefinition.referenceIds,
+          reference.referenceId,
+        ],
+        references: [...live.sourceDefinition.references, reference],
+      }
+    : live.sourceDefinition;
+  const raw = createSketchSessionFromSnapshot(
+    {
+      sketchId: states.certified.actionContextId,
+      label: "Sketch T11a",
+      plane: states.certified.plane,
+      ownerFeatureId: null,
+      sketch: {
+        definition,
+        solvedSnapshot: live.solvedSnapshot,
+        regions: states.certified.liveRegions.regions,
+        projectedReferences: [],
+        derivedValidity: getSketchSessionDerivedValidity(states.certified),
+      },
+    } as never,
+    OCC_KERNEL_SETTINGS,
+  );
+  expect(raw.liveSolve, "premise: a raw reopened session").toBe(null);
+  const command: SelectionCommandEditorState = {
+    ...initialEditorState,
+    kind: "selectionCommand",
+    mode: "part",
+    document: { documentId: "doc_workspace", revisionId: "rev_0001" },
+    command: {
+      commandSessionId: "command_t11a",
+      toolId: "sketch",
+      phase: "collecting",
+    },
+    pendingRequestId: "request_t11a_open",
+  };
+  const opened = transitionEditorState(command, {
+    type: "effect.sketchSessionOpened",
+    requestId: "request_t11a_open",
+    documentId: "doc_workspace",
+    revisionId: "rev_0001",
+    commandSessionId: "command_t11a",
+    session: raw,
+  });
+  expect(opened.state.kind).toBe("editingSketch");
+  return { ...states, raw, opened };
+}
+
+/** Runs the requested live derivations through the real effect executor and reducer until none is requested. */
+async function settleDerivations(
+  state: EditorState,
+  effects: readonly EditorEffect[],
+) {
+  const derivations = (list: readonly EditorEffect[]) =>
+    list.filter((effect) => effect.type === "sketch.deriveRegions");
+  const queue = derivations(effects);
+  while (queue.length > 0) {
+    const next = transitionEditorState(
+      state,
+      await runEditorEffect(queue.shift()!, t11aRuntime),
+    );
+    state = next.state;
+    queue.push(...derivations(next.effects));
+  }
+  if (state.kind !== "editingSketch") throw new Error("Expected sketch state.");
+  return state;
+}
+
+const certifiedIdsOf = (session: SketchSessionState) =>
+  getSketchSessionDisplaySolvedSnapshot(session).certifiedOffsetDerivationIds ??
+  [];
+
+/** Whether a Line tool's pointer 30% along line `entityId` snaps to it. */
+function snapsTo(session: SketchSessionState, entityId: SketchEntityId) {
+  const entity = session.definition.entities.find(
+    (candidate) => candidate.entityId === entityId,
+  );
+  if (entity?.kind !== "lineSegment") throw new Error("Expected a line.");
+  const at = (pointId: SketchPointId) =>
+    session.definition.points.find((point) => point.pointId === pointId)!
+      .position;
+  const [start, end] = [at(entity.startPointId), at(entity.endPointId)];
+  const { candidate } = resolveSessionSnap(beginSketchTool(session, "line"), [
+    start[0] + 0.3 * (end[0] - start[0]),
+    start[1] + 0.3 * (end[1] - start[1]),
+  ]);
+  return (
+    candidate?.sources.some(
+      (source) => source.kind === "localEntity" && source.entityId === entityId,
+    ) ?? false
+  );
+}
+
+type T11aOffset = {
+  readonly outputs: readonly SketchEntityId[];
+  readonly derivationId: string;
+};
+
+/** While the round is pending: "still being checked", never "not certified"; no snap. */
+function expectBeingChecked(
+  state: SketchEditorState,
+  { outputs, derivationId }: T11aOffset,
+  label: string,
+) {
+  const { session } = state;
+  expect(session.liveRegions.status, label).toBe("pending");
+  expect(certifiedIdsOf(session), label).toEqual([]);
+  expect(
+    offsetEditInputGate(session, [outputs[0]!], "a Trim target"),
+    `${label}: still being checked, not refused as uncertified`,
+  ).toEqual({
+    pending: true,
+    message: checkingMessage(outputs[0]!, derivationId),
+  });
+  expect(snapsTo(session, outputs[0]!), `${label}: no snap yet`).toBe(false);
+}
+
+/** After the round: certified, an ordinary C3 input, snaps. */
+function expectCertified(
+  state: SketchEditorState,
+  { outputs, derivationId }: T11aOffset,
+  label: string,
+) {
+  const { session } = state;
+  expect(session.liveRegions.status, label).toBe("current");
+  expect(certifiedIdsOf(session), `${label}: certified`).toEqual([
+    derivationId,
+  ]);
+  for (const output of outputs)
+    expect(
+      offsetEditInputGate(session, [output], "a Trim target"),
+      `${label}: ${output} passes the C3 gate`,
+    ).toBe(null);
+  expect(snapsTo(session, outputs[0]!), `${label}: the output snaps`).toBe(
+    true,
+  );
+}
+
+describe("T11a reopened sketch certification (routed A3, review R-5)", () => {
+  test("normal reopen of a certified offset: certified after the opening round with no edit; the output snaps, passes the C3 gate and is a Trim target", async () => {
+    const reopened = await reopenCertified(false);
+    const opened = reopened.opened.state as SketchEditorState;
+    expect(opened.pendingProjectionRequestId, "no references").toBe(null);
+    expect(
+      opened.session.liveSolve!.sourceDefinition,
+      "the basis is of the reopened definition",
+    ).toBe(reopened.raw.definition);
+    expectBeingChecked(opened, reopened, "reopened, round pending");
+
+    const settled = await settleDerivations(opened, reopened.opened.effects);
+    expect(settled.session.definition, "the round authors nothing").toBe(
+      reopened.raw.definition,
+    );
+    expectCertified(settled, reopened, "after the opening round");
+
+    // Trim on the freshly reopened sketch, without any prior edit.
+    const trimmed = await completeSketchEditQueriesForTest(
+      selectSketchEditToolTarget(
+        beginSketchTool(settled.session, "trim"),
+        targetOf(settled.session, reopened.cutter),
+      ),
+    );
+    expect(trimmed.validationMessage).toBe(TRIM_TOO_FEW_CUTS_MESSAGE);
+    const trimmedOutput = await completeSketchEditQueriesForTest(
+      selectSketchEditToolTarget(
+        beginSketchTool(settled.session, "trim"),
+        targetOf(settled.session, reopened.outputs[0]!),
+      ),
+    );
+    expect(
+      trimmedOutput.validationMessage ?? "",
+      "a certified output is an ordinary Trim target",
+    ).not.toContain(NON_ACCEPTED_OFFSET_EDIT_INPUT_CODE);
+    expect(trimmedOutput.definition).not.toBe(settled.session.definition);
+  }, 600_000);
+
+  test("references pending: based on the record's projections at once (still being checked, then certified); the projection result re-bases and certifies again", async () => {
+    const reopened = await reopenCertified(true);
+    const opened = reopened.opened.state as SketchEditorState;
+    expect(
+      reopened.opened.effects.map((effect) => effect.type),
+      "the projection request and the entry round",
+    ).toEqual(["sketch.projectReferences", "sketch.deriveRegions"]);
+    expect(opened.pendingProjectionRequestId).not.toBe(null);
+    expectBeingChecked(opened, reopened, "references pending, round pending");
+    const entryRound = await settleDerivations(opened, reopened.opened.effects);
+    expect(entryRound.pendingProjectionRequestId).not.toBe(null);
+    expectCertified(
+      entryRound,
+      reopened,
+      "references pending, after the entry round",
+    );
+
+    const projected = transitionEditorState(entryRound, {
+      type: "effect.sketchReferencesProjected",
+      requestId: entryRound.pendingProjectionRequestId!,
+      documentId: "doc_workspace",
+      commandSessionId: "command_t11a",
+      baseRevisionId: "rev_0001",
+      projectedReferences: [],
+      diagnostics: [],
+    });
+    const rebased = projected.state as SketchEditorState;
+    expect(rebased.pendingProjectionRequestId).toBe(null);
+    expectBeingChecked(rebased, reopened, "projection result, round pending");
+    expectCertified(
+      await settleDerivations(rebased, projected.effects),
+      reopened,
+      "after the projected round",
+    );
+  }, 600_000);
+
+  test("projection failed: the entry basis (record projections) is kept, no new round; its round certifies, and a certification already published survives the failure", async () => {
+    const reopened = await reopenCertified(true);
+    const opened = reopened.opened.state as SketchEditorState;
+    const fail = (state: SketchEditorState) =>
+      transitionEditorState(state, {
+        type: "effect.sketchReferenceProjectionFailed",
+        requestId: opened.pendingProjectionRequestId!,
+        documentId: "doc_workspace",
+        commandSessionId: "command_t11a",
+        baseRevisionId: "rev_0001",
+        message: "Reference projection failed.",
+      });
+
+    // Failure before the entry round returns: the basis is kept.
+    const early = fail(opened);
+    const earlyState = early.state as SketchEditorState;
+    expect(earlyState.session.validationMessage).toBe(
+      "Reference projection failed.",
+    );
+    expect(earlyState.session.liveSolve, "the entry basis is kept").toBe(
+      opened.session.liveSolve,
+    );
+    expect(earlyState.session.liveRegions.generation).toBe(
+      opened.session.liveRegions.generation,
+    );
+    expect(early.effects, "no new derivation round").toEqual([]);
+    expectBeingChecked(
+      earlyState,
+      reopened,
+      "projection failed, entry round pending",
+    );
+    expectCertified(
+      await settleDerivations(earlyState, reopened.opened.effects),
+      reopened,
+      "projection failed, after the entry round",
+    );
+
+    // Failure after the entry round certified: the certification survives.
+    const certified = await settleDerivations(opened, reopened.opened.effects);
+    expect(certified.pendingProjectionRequestId).not.toBe(null);
+    const late = fail(certified);
+    const lateState = late.state as SketchEditorState;
+    expect(lateState.session.liveSolve).toBe(certified.session.liveSolve);
+    expect(late.effects, "no new derivation round").toEqual([]);
+    expectCertified(lateState, reopened, "certified, then projection failed");
   }, 600_000);
 });
