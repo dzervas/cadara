@@ -62,6 +62,8 @@ import type {
   DeriveSketchRegionsResponse,
   ProjectSketchExternalReferencesRequest,
   ProjectSketchExternalReferencesResponse,
+  QuerySketchEditIntersectionsRequest,
+  QuerySketchEditIntersectionsResponse,
 } from "@/contracts/solver/schema";
 import type { PackedWorkspaceSnapshot } from "@/domain/modeling/occ/mesh-transport";
 import type {
@@ -165,6 +167,10 @@ export type OccWorkerOperation =
       request: DeriveSketchRegionsRequest;
     }
   | {
+      kind: "querySketchEditIntersections";
+      request: QuerySketchEditIntersectionsRequest;
+    }
+  | {
       kind: "commitSketch";
       request: CommitSketchRequest;
     }
@@ -262,6 +268,7 @@ export type OccWorkerOperationResult =
   | NeutralCurveQueryResult
   | NeutralCurveJoinResult
   | DeriveSketchRegionsResponse
+  | QuerySketchEditIntersectionsResponse
   | CommitSketchResponse
   | CreateFeatureResponse
   | UpdateFeatureResponse

@@ -77,6 +77,8 @@ import {
   updateSketchPointer,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
+import { completeSketchTrimQueriesForTest } from "@/domain/editor/state-machine-test-builder";
+import { TRIM_TOO_FEW_CUTS_MESSAGE } from "@/contracts/sketch/edit-intersections";
 import {
   DERIVED_SHELL_DELETE_MESSAGE,
   DERIVED_SHELL_POINT_DELETE_MESSAGE,
@@ -6706,7 +6708,12 @@ describe("T10i edit inputs on non-accepted offset outputs ([TECH] C3, review A8)
         expect(result.toolStagedEntities, label).toEqual([]);
         expect(result.activeEditTool?.offsetPublication, label).toBeUndefined();
       }
-      const result = runEditTool(states.certified, toolId, selection, value);
+      // T10g-1: a Trim click applies when its exact query result arrives.
+      const clicked = runEditTool(states.certified, toolId, selection, value);
+      const result =
+        toolId === "trim"
+          ? await completeSketchTrimQueriesForTest(clicked)
+          : clicked;
       expect(
         result.validationMessage ?? "",
         `${toolId} on a certified output is not refused`,
@@ -7464,4 +7471,106 @@ describe("T10i degenerate offset line outputs are relationship-scoped ([TECH] C5
       expect.objectContaining(expected),
     );
   }, 300_000);
+});
+
+// ---------------------------------------------------------------------------
+// T10g-1 (design review R-1, [TECH] T-g5): Trim on the exact edit service in
+// a sketch with an offset relationship. Its queries wait while the
+// publication round is pending; a non-accepted offset output is never a
+// cutter, and refuses the Trim only when its outward box meets the target's.
+// ---------------------------------------------------------------------------
+
+describe("T10g-1 Trim with offset relationships (review R-1, T-g5)", () => {
+  /** The rectangles, two lines crossing the far rectangle's bottom, the x = 2 cutter, the inward 0.5 offset. */
+  async function trimStates() {
+    const initial = rectanglesSession();
+    const seeds = initial.seeds;
+    let session = initial.session;
+    const farBottom = session.definition.entities.find(
+      (entity) =>
+        entity.kind === "lineSegment" &&
+        !seeds.includes(entity.entityId) &&
+        session.definition.points.find(
+          (point) => point.pointId === entity.startPointId,
+        )!.position[1] === 0 &&
+        session.definition.points.find(
+          (point) => point.pointId === entity.endPointId,
+        )!.position[1] === 0,
+    )!.entityId;
+    session = drawLine(session, [10.5, -0.5], [10.5, 0.5]);
+    session = drawLine(session, [11.5, -0.5], [11.5, 0.5]);
+    const before = new Set(session.definition.entityIds);
+    session = drawLine(session, [2, 0.2], [2, 0.8]);
+    const cutter = session.definition.entityIds.find((id) => !before.has(id))!;
+    const pending = committedOffsetOnSide(session, seeds, 0.5, "left");
+    const { derivationId, outputs } = offsetOutputIds(pending);
+    return {
+      pending,
+      failed: failedRound(pending),
+      certified: (await liveRound(pending)).session,
+      farBottom,
+      cutter,
+      derivationId,
+      outputs,
+    };
+  }
+
+  const click = (session: SketchSessionState, entityId: SketchEntityId) =>
+    selectSketchEditToolTarget(
+      beginSketchTool(session, "trim"),
+      targetOf(session, entityId),
+    );
+
+  test("R-1: while the publication round is pending the click is queued, not queried; when the round settles it is queried on the certified basis and applies", async () => {
+    const states = await trimStates();
+    const queued = click(states.pending, states.farBottom);
+    expect(queued.definition, "nothing authored").toBe(
+      states.pending.definition,
+    );
+    expect(queued.activeEditTool?.editQuery).toMatchObject({
+      inFlight: null,
+      queue: [{ targetEntityId: states.farBottom }],
+    });
+    expect(
+      queued.toolPresentation?.validation?.map((entry) => entry.message),
+    ).toEqual(["Checking intersections…"]);
+    const settled = refreshSketchEditToolAfterOffsetRound(
+      (await liveRound(queued)).session,
+    );
+    const inFlight = settled.activeEditTool!.editQuery!.inFlight!;
+    expect(
+      inFlight.input.solvedSnapshot.certifiedOffsetDerivationIds,
+      "the query runs on the publication-current basis",
+    ).toEqual([states.derivationId]);
+    const applied = await completeSketchTrimQueriesForTest(settled);
+    expect(applied.validationMessage).toBeNull();
+    expect(applied.definition.entityIds.length).toBe(
+      states.pending.definition.entityIds.length + 1,
+    );
+  }, 600_000);
+
+  test("T-g5: a failed offset's outputs are not cutters; they refuse a Trim only when their box meets the target's (named), never an unrelated one", async () => {
+    const states = await trimStates();
+    const refused = await completeSketchTrimQueriesForTest(
+      click(states.failed, states.cutter),
+    );
+    expect(refused.definition).toBe(states.failed.definition);
+    expect(refused.validationMessage).toEqual(
+      expect.stringMatching(
+        new RegExp(
+          `^${NON_ACCEPTED_OFFSET_EDIT_INPUT_CODE}: Sketch entity (${states.outputs.join("|")}) is an output of offset relationship ${states.derivationId}, which is not certified, so it cannot be used as a Trim input\\.$`,
+        ),
+      ),
+    );
+    const unrelated = await completeSketchTrimQueriesForTest(
+      click(states.failed, states.farBottom),
+    );
+    expect(unrelated.validationMessage).toBeNull();
+    expect(unrelated.definition).not.toBe(states.failed.definition);
+    // Certified, the output is an ordinary cutter (one crossing: too few).
+    const certified = await completeSketchTrimQueriesForTest(
+      click(states.certified, states.cutter),
+    );
+    expect(certified.validationMessage).toBe(TRIM_TOO_FEW_CUTS_MESSAGE);
+  }, 600_000);
 });

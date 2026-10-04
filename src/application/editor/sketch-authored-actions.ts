@@ -74,6 +74,9 @@ function actionLabel(event: EditorEvent) {
       return "Create Sketch Geometry";
     case "sketch.specialModeDragEnded":
       return "Edit Sketch Operation";
+    // T10g-1 (T-g15): the applied exact Trim is one labelled action.
+    case "effect.sketchEditIntersectionsQueried":
+      return "Trim";
     default:
       return event.type
         .replace(/^sketch\./, "")

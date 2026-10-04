@@ -12,6 +12,7 @@ import type {
   DisposeInteractiveSketchSolveSessionRequest,
   FinalizeInteractiveSketchSolveSessionRequest,
   ProjectSketchExternalReferencesRequest,
+  QuerySketchEditIntersectionsRequest,
   ResolveSketchReferenceRequest,
   SolveSketchRequest,
   StartInteractiveSketchSolveSessionRequest,
@@ -189,6 +190,18 @@ class InstrumentedSketchSolverAdapter implements SketchSolverAdapter {
         ...definitionAttributes(request),
         "cadara.projected_reference_count": request.projectedReferences.length,
         "cadara.diagnostic_count": result.diagnostics.length,
+      }),
+    );
+  }
+
+  querySketchEditIntersections(request: QuerySketchEditIntersectionsRequest) {
+    return this.measure(
+      "querySketchEditIntersections",
+      request,
+      () => this.inner.querySketchEditIntersections(request),
+      (response) => ({
+        ...definitionAttributes(request),
+        "cadara.result": response.result.kind,
       }),
     );
   }

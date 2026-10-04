@@ -4,6 +4,7 @@ import type {
   ValidateSketchRequest,
   DeriveSketchRegionsRequest,
   ProjectSketchExternalReferencesRequest,
+  QuerySketchEditIntersectionsRequest,
   ResolveSketchReferenceRequest,
 } from "@/contracts/solver/schema";
 import type { RequestId } from "@/contracts/shared/ids";
@@ -28,6 +29,11 @@ export function createSketchSolverService(
     deriveSketchRegions(input) {
       return adapter.deriveSketchRegions(
         withContractVersion<DeriveSketchRegionsRequest>(input),
+      );
+    },
+    querySketchEditIntersections(input) {
+      return adapter.querySketchEditIntersections(
+        withContractVersion<QuerySketchEditIntersectionsRequest>(input),
       );
     },
     projectExternalReferences(input) {

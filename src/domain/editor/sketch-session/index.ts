@@ -85,7 +85,9 @@ export {
 export {
   beginSketchGeometryDrag,
   completeSketchOffsetPreviewPublication,
+  completeSketchTrimQuery,
   deleteSelectedSketchGeometry,
+  failSketchTrimQuery,
   finishSketchGeometryDrag,
   patchSketchEditToolValue,
   refreshSketchEditToolAfterOffsetRound,
@@ -102,6 +104,7 @@ export {
   getSketchSessionDerivedValidity,
   getSketchSessionLiveRegionBasis,
   getSketchSessionRegionDiagnostics,
+  hasAcceptedLiveSolveOfDefinition,
   publishSketchLiveRegions,
   withLiveSolveBasis,
 } from "./internals";

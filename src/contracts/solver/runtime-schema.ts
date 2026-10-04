@@ -6,6 +6,7 @@ import type {
   DisposeInteractiveSketchSolveSessionRequest,
   FinalizeInteractiveSketchSolveSessionRequest,
   ProjectSketchExternalReferencesRequest,
+  QuerySketchEditIntersectionsResponse,
   ResolveSketchReferenceRequest,
   SketchSolverRequestBase,
   SolveSketchRequest,
@@ -39,6 +40,8 @@ const resolveSketchReferenceRequestValidator =
   typia.createValidateEquals<ResolveSketchReferenceRequest>();
 const offsetPublicationsValidator =
   typia.createValidateEquals<SketchOffsetPublicationRecord[]>();
+const querySketchEditIntersectionsResponseValidator =
+  typia.createValidateEquals<QuerySketchEditIntersectionsResponse>();
 
 export function validateSketchSolverEnvelope(
   value: unknown,
@@ -272,6 +275,20 @@ export function requireResolveSketchReferenceRequest(
     resolveSketchReferenceRequestValidator,
     value,
     "Resolve sketch reference request",
+  );
+}
+
+/**
+ * T10g-1: an edit-intersection response crosses the derivation-worker
+ * boundary as plain data; the editor validates it before applying any cut.
+ */
+export function requireQuerySketchEditIntersectionsResponse(
+  value: unknown,
+): QuerySketchEditIntersectionsResponse {
+  return requireContract(
+    querySketchEditIntersectionsResponseValidator,
+    value,
+    "Query sketch edit intersections response",
   );
 }
 

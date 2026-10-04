@@ -10,7 +10,10 @@ import {
   beginSketchGeometryDrag,
   beginSketchTool,
   completeSketchOffsetPreviewPublication,
+  createNewSketchSession,
   createNewSketchSessionFromSupport,
+  hasAcceptedLiveSolveOfDefinition,
+  withLiveSolveBasis,
   createSketchSessionFromSnapshot,
   deleteSelectedSketchGeometry,
   deriveSketchDisplayEntities,
@@ -40,6 +43,8 @@ import {
   OCC_KERNEL_SETTINGS,
 } from "@/domain/modeling/opencascade-kernel-seed";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { completeSketchTrimQueriesForTest } from "@/domain/editor/state-machine-test-builder";
+import { TRIM_BASIS_NOT_ACCEPTED_MESSAGE } from "@/domain/editor/sketch-session/editing";
 import {
   PROJECTED_SPLINE_OFFSET_UNSUPPORTED_MESSAGE,
   SPLINE_SLOT_UNSUPPORTED_MESSAGE,
@@ -1888,7 +1893,51 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     ).toBeTruthy();
   }
 
-  function testTrimSplitsLineAtClearIntersections() {
+  /**
+   * T10g-1: a Trim click only queues its exact query (nothing is authored,
+   * the tool says it is checking); the edit applies when the query result
+   * (the one contract function, kernel-free capability) is delivered.
+   */
+  async function trimTarget(
+    session: SketchSessionState,
+    entityId: string,
+    label: string,
+  ) {
+    const clicked = selectSketchEditToolTarget(session, {
+      kind: "sketchEntity",
+      sketchId: "sketch_primary",
+      entityId,
+    } as never);
+    expect(
+      clicked.definition,
+      `${label}: the click authors nothing before its intersections are certified.`,
+    ).toBe(session.definition);
+    expect(
+      clicked.activeEditTool?.editQuery?.inFlight?.input.operation,
+      `${label}: the click issues its exact query.`,
+    ).toEqual({ kind: "trim", targetEntityId: entityId });
+    expect(
+      clicked.toolPresentation?.validation?.map((entry) => entry.message),
+      `${label}: the tool says it is checking intersections.`,
+    ).toEqual(["Checking intersections…"]);
+    return completeSketchTrimQueriesForTest(clicked);
+  }
+
+  /** The Q1b ties authored by a Trim: (new point, kind, cutter or point). */
+  function trimTies(before: SketchSessionState, after: SketchSessionState) {
+    const known = new Set(before.definition.constraintIds);
+    return after.definition.constraints
+      .filter((constraint) => !known.has(constraint.constraintId))
+      .map((constraint) =>
+        constraint.kind === "pointOnCurve"
+          ? ["pointOnCurve", constraint.curve.entityId]
+          : constraint.kind === "coincident"
+            ? ["coincident", constraint.pointIds[1]]
+            : [constraint.kind],
+      );
+  }
+
+  async function testTrimSplitsLineAtClearIntersections() {
     const definition = makeDefinition({
       pointIds: [
         "sketch_point_a",
@@ -1913,15 +1962,11 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
         makeLine("sketch_entity_ef", "EF", "sketch_point_e", "sketch_point_f"),
       ],
     });
-    let session = beginSketchTool(
+    const started = beginSketchTool(
       createSessionFromDefinition(definition),
       "trim",
     );
-    session = selectSketchEditToolTarget(session, {
-      kind: "sketchEntity",
-      sketchId: "sketch_primary",
-      entityId: "sketch_entity_ab",
-    });
+    const session = await trimTarget(started, "sketch_entity_ab", "line");
 
     expect(
       session.validationMessage,
@@ -1939,9 +1984,36 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       session.commitRequest?.definition.entityIds.length,
       "Trim should rebuild the sketch commit request.",
     ).toBe(4);
+    const position = (pointId: string) =>
+      session.definition.points.find((point) => point.pointId === pointId)
+        ?.position;
+    const target = session.definition.entities.find(
+      (entity) => entity.entityId === "sketch_entity_ab",
+    );
+    const piece = session.definition.entities.at(-1);
+    if (target?.kind !== "lineSegment" || piece?.kind !== "lineSegment")
+      throw new Error("line pieces");
+    expect(
+      [position(target.endPointId), position(piece.startPointId)],
+      "Trim ends sit exactly at the certified crossings (the evaluator at t = 1/4 and 3/4).",
+    ).toEqual([
+      [1, 0],
+      [3, 0],
+    ]);
+    expect(
+      trimTies(started, session),
+      "Q1b: each new end is tied onto the curve it was cut against.",
+    ).toEqual([
+      ["pointOnCurve", "sketch_entity_cd"],
+      ["pointOnCurve", "sketch_entity_ef"],
+    ]);
+    expect(
+      session.liveSolve?.accepted,
+      "The tied trim result solves (every tie is satisfied).",
+    ).toBe(true);
   }
 
-  function testTrimHandlesCircleArcAndSplineTargets() {
+  async function testTrimHandlesCircleArcAndSplineTargets() {
     const circleDefinition = makeDefinition({
       pointIds: [
         "sketch_point_center",
@@ -1978,15 +2050,15 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
         ),
       ],
     });
-    let circleSession = beginSketchTool(
+    const circleStarted = beginSketchTool(
       createSessionFromDefinition(circleDefinition),
       "trim",
     );
-    circleSession = selectSketchEditToolTarget(circleSession, {
-      kind: "sketchEntity",
-      sketchId: "sketch_primary",
-      entityId: "sketch_entity_circle",
-    });
+    const circleSession = await trimTarget(
+      circleStarted,
+      "sketch_entity_circle",
+      "circle",
+    );
 
     const trimmedCircle = circleSession.definition.entities.find(
       (entity) => entity.entityId === "sketch_entity_circle",
@@ -1999,6 +2071,14 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       circleSession.validationMessage,
       "Circle trim should not leave validation feedback.",
     ).toBe(null);
+    expect(
+      trimTies(circleStarted, circleSession),
+      "Circle trim ties its first (angle π/3 from the +x seam) and last (5π/3) cut to the right cutter.",
+    ).toEqual([
+      ["pointOnCurve", "sketch_entity_right"],
+      ["pointOnCurve", "sketch_entity_right"],
+    ]);
+    expect(circleSession.liveSolve?.accepted).toBe(true);
 
     const arcDefinition = makeDefinition({
       pointIds: [
@@ -2046,15 +2126,11 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
         ),
       ],
     });
-    let arcSession = beginSketchTool(
+    const arcStarted = beginSketchTool(
       createSessionFromDefinition(arcDefinition),
       "trim",
     );
-    arcSession = selectSketchEditToolTarget(arcSession, {
-      kind: "sketchEntity",
-      sketchId: "sketch_primary",
-      entityId: "sketch_entity_arc",
-    });
+    const arcSession = await trimTarget(arcStarted, "sketch_entity_arc", "arc");
 
     expect(
       arcSession.validationMessage,
@@ -2065,6 +2141,14 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
         .length,
       "Trimming an arc should split the remaining geometry into two arcs.",
     ).toBe(2);
+    expect(
+      trimTies(arcStarted, arcSession),
+      "Arc trim ties its first cut (right cutter) and last cut (left cutter).",
+    ).toEqual([
+      ["pointOnCurve", "sketch_entity_right"],
+      ["pointOnCurve", "sketch_entity_left"],
+    ]);
+    expect(arcSession.liveSolve?.accepted).toBe(true);
 
     const splineDefinition = makeDefinition({
       pointIds: [
@@ -3514,8 +3598,8 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
   testSelectedPointDeletionRemovesDependentGeometryAndAnnotations();
   await testLocalSketchStylePatchUpdatesCommitRequestAndIgnoresExternalTargets();
   await testSvgRenderingToggleSuppressesAuthoredStylesWithoutDeletingThem();
-  testTrimSplitsLineAtClearIntersections();
-  testTrimHandlesCircleArcAndSplineTargets();
+  await testTrimSplitsLineAtClearIntersections();
+  await testTrimHandlesCircleArcAndSplineTargets();
   testOffsetAddsLineCopyAndRejectsInvalidDistance();
   testOffsetActivationSeedsCompatiblePreselectionAndClearsInvalidSelection();
   testOffsetCreatesContinuousOuterAndInnerSquares();
@@ -3533,4 +3617,145 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
   testConstrainedSplineDragPersistsAcceptedTangentsAcrossFreshReentry();
   testNoOpPointerMovementPreservesSessionIdentity();
   testLogoCadaraPointerPreviewReusesStableDisplayBasis();
+});
+
+// T10g-1 (logic lane, session seam). Review R-6: the "accepted live solve of
+// the current definition" check is the recorded source identity
+// (`liveSolve.sourceDefinition`), and Trim queries only on it (T-g3).
+test("T10g-1 R-6: Trim needs the accepted live solve of the current definition", async () => {
+  const draw = (
+    session: SketchSessionState,
+    start: [number, number],
+    end: [number, number],
+  ) =>
+    acceptSketchDraw(
+      startSketchDraw(beginSketchTool(session, "line"), start),
+      end,
+    );
+  let session = createNewSketchSession(
+    createStandardPlaneDefinition("xy"),
+    OCC_KERNEL_SETTINGS,
+  );
+  session = draw(
+    draw(draw(session, [0, 0], [4, 0]), [1, -1], [1, 1]),
+    [3, -1],
+    [3, 1],
+  );
+  const target = session.definition.entities[0]!;
+  expect(session.liveSolve?.sourceDefinition).toBe(session.definition);
+  expect(hasAcceptedLiveSolveOfDefinition(session)).toBe(true);
+  // A definition that did not go through `withLiveSolveBasis` is not current.
+  const unsolved = {
+    ...session,
+    definition: { ...session.definition },
+  };
+  expect(hasAcceptedLiveSolveOfDefinition(unsolved)).toBe(false);
+  expect(
+    hasAcceptedLiveSolveOfDefinition(
+      withLiveSolveBasis(unsolved, unsolved.definition),
+    ),
+  ).toBe(true);
+  // A conflicting sketch: the click is refused, nothing is queued or authored.
+  const pointId = session.definition.points[0]!.pointId;
+  const conflicting = {
+    ...session.definition,
+    constraintIds: [
+      ...session.definition.constraintIds,
+      "constraint_fix_a",
+      "constraint_fix_b",
+    ],
+    constraints: [
+      ...session.definition.constraints,
+      {
+        constraintId: "constraint_fix_a",
+        kind: "fixPoint",
+        label: "Fix A",
+        pointId,
+        position: [0, 0],
+      },
+      {
+        constraintId: "constraint_fix_b",
+        kind: "fixPoint",
+        label: "Fix B",
+        pointId,
+        position: [100, 0],
+      },
+    ],
+  } as SketchDefinition;
+  const conflicted = withLiveSolveBasis(
+    { ...session, definition: conflicting },
+    conflicting,
+  );
+  expect(conflicted.liveSolve?.accepted).toBe(false);
+  const refused = selectSketchEditToolTarget(
+    beginSketchTool(conflicted, "trim"),
+    target.target,
+  );
+  expect(refused.validationMessage).toBe(TRIM_BASIS_NOT_ACCEPTED_MESSAGE);
+  expect(refused.activeEditTool?.editQuery?.queue).toEqual([]);
+  expect(refused.definition).toBe(conflicted.definition);
+  // The accepted sketch queries and applies.
+  const applied = await completeSketchTrimQueriesForTest(
+    selectSketchEditToolTarget(beginSketchTool(session, "trim"), target.target),
+  );
+  expect(applied.definition.entities).toHaveLength(4);
+});
+
+// Orchestrator [TECH] 2026-10-04 (logic lane, session seam): a Circle-tool
+// circle carries a `circleRadius`; after its Trim the sketch stays accepted
+// (the radius is now a diameter of the arc), so a second Trim still runs.
+test("T10g-1: trimming a Circle-tool circle keeps the sketch accepted and a second Trim in the same sketch succeeds", async () => {
+  let session = createNewSketchSession(
+    createStandardPlaneDefinition("xy"),
+    OCC_KERNEL_SETTINGS,
+  );
+  session = acceptSketchDraw(
+    startSketchDraw(beginSketchTool(session, "circle"), [0, 0]),
+    [2, 0],
+  );
+  const circle = session.definition.entities.find(
+    (entity) => entity.kind === "circle",
+  )!;
+  const radius = session.definition.dimensions.find(
+    (dimension) => dimension.kind === "circleRadius",
+  )!;
+  for (const x of [1, -1])
+    session = acceptSketchDraw(
+      startSketchDraw(beginSketchTool(session, "line"), [x, -3]),
+      [x, 3],
+    );
+  const trimmed = await completeSketchTrimQueriesForTest(
+    selectSketchEditToolTarget(beginSketchTool(session, "trim"), circle.target),
+  );
+  expect(trimmed.validationMessage).toBeNull();
+  expect(
+    trimmed.definition.entities.find(
+      (entity) => entity.entityId === circle.entityId,
+    )?.kind,
+  ).toBe("arc");
+  expect(radius.label, "premise: the Circle tool's default label").toMatch(
+    / radius$/,
+  );
+  expect(trimmed.definition.dimensions).toEqual([
+    {
+      ...radius,
+      kind: "diameter",
+      // Review A-3: the default "… radius" label becomes "… diameter".
+      label: radius.label.replace(/ radius$/, " diameter"),
+      value: 2 * (radius.value as number),
+    },
+  ]);
+  expect(trimmed.liveSolve?.accepted, "the trimmed sketch stays accepted").toBe(
+    true,
+  );
+  const line = trimmed.definition.entities.find(
+    (entity) => entity.kind === "lineSegment",
+  )!;
+  const second = await completeSketchTrimQueriesForTest(
+    selectSketchEditToolTarget(trimmed, line.target),
+  );
+  expect(second.validationMessage).toBeNull();
+  expect(second.definition.entityIds.length).toBe(
+    trimmed.definition.entityIds.length + 1,
+  );
 });

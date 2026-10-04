@@ -12,6 +12,8 @@ import {
   type ProjectedSketchReferenceRecord,
   type ProjectSketchExternalReferencesRequest,
   type ProjectSketchExternalReferencesResponse,
+  type QuerySketchEditIntersectionsRequest,
+  type QuerySketchEditIntersectionsResponse,
   type ResolveSketchReferenceRequest,
   type ResolveSketchReferenceResponse,
   type SketchPlaneFrame,
@@ -34,6 +36,7 @@ import {
   type SketchArrangementDeriver,
 } from "@/contracts/sketch/region-extraction";
 import { assertDocumentModelingTolerance } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { querySketchEditIntersections } from "@/contracts/sketch/edit-intersections";
 import {
   orderedSplineOccurrences,
   reconstructSplineAggregate,
@@ -112,6 +115,7 @@ function makeResponseBase(
     | FinalizeInteractiveSketchSolveSessionRequest
     | DisposeInteractiveSketchSolveSessionRequest
     | DeriveSketchRegionsRequest
+    | QuerySketchEditIntersectionsRequest
     | ResolveSketchReferenceRequest,
 ): SketchSolverResponseBase {
   return {
@@ -172,6 +176,7 @@ function assertSupportedRequest(
     | FinalizeInteractiveSketchSolveSessionRequest
     | DisposeInteractiveSketchSolveSessionRequest
     | DeriveSketchRegionsRequest
+    | QuerySketchEditIntersectionsRequest
     | ResolveSketchReferenceRequest,
   options: MockSketchSolverAdapterOptions,
 ): void {
@@ -1237,6 +1242,26 @@ function solveDefinition(
           solvedValue: entity?.kind === "circle" ? entity.radius : null,
         } as const;
       }
+      case "diameter": {
+        // T10g-1: a Trim turns a circle's radius dimension into a diameter
+        // on the arc it becomes; it drives circles and arcs, as in the core.
+        const entity = entityMap.get(dimension.entityId);
+        const center =
+          entity?.kind === "arc" ? points.get(entity.centerPointId) : null;
+        const start =
+          entity?.kind === "arc" ? points.get(entity.startPointId) : null;
+        const solvedValue =
+          entity?.kind === "circle"
+            ? 2 * entity.radius
+            : center && start
+              ? 2 * distance(center.position, start.position)
+              : null;
+        return {
+          dimensionId: dimension.dimensionId,
+          status: solvedValue === null ? "unsatisfied" : "driving",
+          solvedValue,
+        } as const;
+      }
       case "lineLength": {
         const entity = entityMap.get(dimension.entityId);
         const start =
@@ -1665,6 +1690,21 @@ export class MockSketchSolverAdapter implements SketchSolverAdapter {
       regions: derived.regions,
       diagnostics: derived.diagnostics,
       offsetPublications,
+    };
+  }
+
+  /** T10g-1: the same contract function as the real adapter (mock parity). */
+  async querySketchEditIntersections(
+    request: QuerySketchEditIntersectionsRequest,
+  ): Promise<QuerySketchEditIntersectionsResponse> {
+    assertSupportedRequest(request, this.options);
+    assertDocumentModelingTolerance(request.modelingTolerance);
+    return {
+      ...makeResponseBase(request),
+      result: await querySketchEditIntersections(
+        request,
+        this.options.neutralCurveQueries,
+      ),
     };
   }
 

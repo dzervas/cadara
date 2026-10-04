@@ -10,6 +10,7 @@ import type { MaybeAuthoredValue } from "@/contracts/modeling/authored-values";
 import type {
   SketchReferenceImageRecord,
   SketchDefinition,
+  SketchEntityDefinition,
   SketchSolveDiagnostic,
   SolvedOffsetFramePlanRecord,
   SolvedSketchSnapshot,
@@ -53,6 +54,7 @@ import type {
   SketchDerivedValidity,
 } from "@/contracts/sketch/schema";
 import type { RegionBoundaryBasis } from "@/contracts/sketch/region-boundary-curves";
+import type { SketchEditIntersectionInput } from "@/contracts/sketch/edit-intersections";
 
 export type {
   SketchDraftEntity,
@@ -146,6 +148,12 @@ export interface SketchGeometryDragState {
 
 /** Synchronous, kernel-free live solve that is the basis of live regions. */
 export interface SketchLiveSolve {
+  /**
+   * T10g-1 (design review R-6): the authored `session.definition` this solve
+   * was established for (`withLiveSolveBasis`). The live solve is the one of
+   * the current definition exactly when this is `session.definition`.
+   */
+  sourceDefinition: SketchDefinition;
   /** Evaluated definition used for the solve. */
   definition: SketchDefinition;
   projectedReferences: ProjectedSketchReferenceRecord[];
@@ -206,6 +214,32 @@ export interface SketchOffsetPreviewPublication {
   replanned: boolean;
 }
 
+/** T10g-1: one Trim click waiting for its exact edit intersections. */
+export interface SketchTrimClick {
+  targetEntityId: SketchEntityId;
+  /** Review R-5: the target entity object at click time (its identity). */
+  entity: SketchEntityDefinition;
+}
+
+/**
+ * T10g-1 (design §2.7 with review R-1/R-5, A-4): the Trim clicks in FIFO
+ * order. The head is in flight once its query is issued on a basis that is
+ * the accepted live solve of the current definition (publication-current
+ * when the sketch has offset relationships); its result applies only to
+ * that definition and live solve.
+ */
+export interface SketchEditQueryState {
+  queue: SketchTrimClick[];
+  inFlight: {
+    queryId: string;
+    /** `session.definition` (identity) the query was issued for. */
+    definition: SketchDefinition;
+    /** The live generation the basis belongs to. */
+    generation: number;
+    input: SketchEditIntersectionInput;
+  } | null;
+}
+
 export interface SketchEditToolState {
   toolId: SketchEditToolId;
   hoverTarget: PrimitiveRef | null;
@@ -216,6 +250,8 @@ export interface SketchEditToolState {
   toolValue: number | null;
   /** U-G3: the staged derived-offset preview's publication (offset tool only). */
   offsetPublication?: SketchOffsetPreviewPublication;
+  /** T10g-1: queued and in-flight Trim clicks (trim tool only). */
+  editQuery?: SketchEditQueryState;
 }
 
 export interface SketchSessionState {

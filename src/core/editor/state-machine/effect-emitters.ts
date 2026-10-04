@@ -25,7 +25,7 @@ import type {
 import { SKETCH_OFFSET_PREVIEW_REQUEST_SCOPE } from "@/contracts/solver/schema";
 import type { ReferenceImagePayload } from "@/contracts/reference-image/schema";
 import type { CommandSessionId } from "@/contracts/shared/ids";
-import type { FeatureId, RequestId } from "@/contracts/shared/ids";
+import type { FeatureId, RequestId, SketchId } from "@/contracts/shared/ids";
 import type { EditorExtensionDependencies } from "./dependencies";
 import { advanceCursorPhase } from "./cursor-lifecycle";
 import { hasPendingDocumentCursorRefresh } from "./document-helpers";
@@ -633,6 +633,57 @@ export function emitPendingSketchOffsetPreviewPublication(
         baseRevisionId: state.document.revisionId,
         derivationId: publication.derivationId,
         basis: publication.basis,
+      },
+    ],
+  };
+}
+
+/**
+ * Post-transition hook (T10g-1, design §2.7): emits the exact
+ * edit-intersection query of the Trim tool's in-flight click once. A newer
+ * query (a re-query for a new live solve, or a new click after a cancel)
+ * replaces the pending request, and a cancelled one is cleared; the older
+ * result fails the request-id check and is dropped. Idempotent.
+ */
+export function emitPendingSketchEditQuery(
+  result: EditorTransitionResult,
+): EditorTransitionResult {
+  const state = result.state;
+  if (state.kind !== "editingSketch") return result;
+  const inFlight = state.session.activeEditTool?.editQuery?.inFlight;
+  // Review R-1: nothing in flight (Esc, a tool switch, a settled query):
+  // the pending request is forgotten, so a late result is dropped by the
+  // request-id check and can never apply to a later click.
+  if (!inFlight && state.pendingEditQueryRequest)
+    return { ...result, state: { ...state, pendingEditQueryRequest: null } };
+  if (
+    !inFlight ||
+    state.pendingEditQueryRequest?.queryId === inFlight.queryId ||
+    state.document.documentId === null ||
+    state.document.revisionId === null
+  ) {
+    return result;
+  }
+
+  const requestId = nextRequestId(state, "sketch-edit-query");
+  return {
+    state: {
+      ...state,
+      nextRequestSequence: state.nextRequestSequence + 1,
+      pendingEditQueryRequest: { requestId, queryId: inFlight.queryId },
+    },
+    effects: [
+      ...result.effects,
+      {
+        type: "sketch.queryEditIntersections",
+        background: true,
+        requestId,
+        commandSessionId: state.command.commandSessionId,
+        documentId: state.document.documentId,
+        baseRevisionId: state.document.revisionId,
+        queryId: inFlight.queryId,
+        sketchId: state.session.sketchId ?? ("sketch_draft" as SketchId),
+        input: inFlight.input,
       },
     ],
   };

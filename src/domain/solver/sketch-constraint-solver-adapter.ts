@@ -11,8 +11,11 @@ import {
   type ProjectedSketchReferenceRecord,
   type ProjectSketchExternalReferencesRequest,
   type ProjectSketchExternalReferencesResponse,
+  type QuerySketchEditIntersectionsRequest,
+  type QuerySketchEditIntersectionsResponse,
   type ResolveSketchReferenceRequest,
   type ResolveSketchReferenceResponse,
+  type SketchSolverRequestBase,
   type SketchSolverResponseBase,
   type SolveSketchRequest,
   type SolveSketchResponse,
@@ -44,31 +47,37 @@ import {
   publishSketchOffsets,
 } from "@/contracts/sketch/offset-publication";
 import { offsetArrangementInput } from "@/contracts/sketch/region-extraction";
+import { querySketchEditIntersections } from "@/contracts/sketch/edit-intersections";
 import type { OffsetPublicationCapabilities } from "@/contracts/sketch/offset-publication";
 import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
 import { createCertifiedNeutralCurveRequestQuery } from "@/domain/modeling/neutral-curve-certification/query";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 
 /**
- * Answers `deriveSketchRegions` elsewhere, e.g. the dedicated sketch-derivation
- * worker. It may reject a request with `SketchRegionDerivationSupersededError`
- * when a newer request for the same document replaced it; any other rejection
- * is a real failure.
+ * Answers `deriveSketchRegions` and `querySketchEditIntersections` elsewhere,
+ * e.g. the dedicated sketch-derivation worker. It may reject a request with
+ * `SketchRegionDerivationSupersededError` when a newer request for the same
+ * document and lane replaced it; any other rejection is a real failure.
  */
 export type SketchRegionDerivationDelegate = Pick<
   SketchSolverAdapter,
-  "deriveSketchRegions"
+  "deriveSketchRegions" | "querySketchEditIntersections"
 >;
 
-/** A live region derivation cancelled because a newer one for its document started. */
+type DerivationRequestIdentity = Pick<
+  SketchSolverRequestBase,
+  "requestId" | "documentId"
+>;
+
+/** A derivation (or edit query) cancelled because a newer one in its lane started. */
 export class SketchRegionDerivationSupersededError extends Error {
   override readonly name = "SketchRegionDerivationSupersededError";
   readonly requestId: DeriveSketchRegionsRequest["requestId"];
   readonly supersededBy: DeriveSketchRegionsRequest["requestId"];
 
   constructor(
-    request: DeriveSketchRegionsRequest,
-    supersededBy: DeriveSketchRegionsRequest,
+    request: DerivationRequestIdentity,
+    supersededBy: DerivationRequestIdentity,
   ) {
     super(
       `Sketch region derivation ${request.requestId} was superseded by ${supersededBy.requestId} for document ${request.documentId}.`,
@@ -81,12 +90,12 @@ export class SketchRegionDerivationSupersededError extends Error {
 export interface SketchConstraintSolverAdapterOptions {
   documentId: DocumentId;
   revisionId: RevisionId | null;
-  /** The selected kernel's neutral curve queries; only `deriveSketchRegions` uses them. */
+  /** The selected kernel's neutral curve queries (region derivation and edit queries). */
   neutralCurveQueries: NeutralCurveQueryCapability;
   /**
-   * When present, `deriveSketchRegions` forwards the validated request here
-   * unchanged instead of deriving on this thread; the delegate recomputes the
-   * result from the plain request.
+   * When present, `deriveSketchRegions` and `querySketchEditIntersections`
+   * forward the validated request here unchanged instead of running on this
+   * thread; the delegate recomputes the result from the plain request.
    */
   regionDerivation?: SketchRegionDerivationDelegate;
 }
@@ -113,6 +122,7 @@ function makeResponseBase(
     | FinalizeInteractiveSketchSolveSessionRequest
     | DisposeInteractiveSketchSolveSessionRequest
     | DeriveSketchRegionsRequest
+    | QuerySketchEditIntersectionsRequest
     | ResolveSketchReferenceRequest,
 ): SketchSolverResponseBase {
   return {
@@ -187,6 +197,7 @@ function assertSupportedRequest(
     | FinalizeInteractiveSketchSolveSessionRequest
     | DisposeInteractiveSketchSolveSessionRequest
     | DeriveSketchRegionsRequest
+    | QuerySketchEditIntersectionsRequest
     | ResolveSketchReferenceRequest,
   options: SketchConstraintSolverAdapterOptions,
 ) {
@@ -552,6 +563,29 @@ export class SketchConstraintSolverAdapter implements SketchSolverAdapter {
       regions: derived.regions,
       diagnostics: derived.diagnostics,
       offsetPublications,
+    };
+  }
+
+  /**
+   * T10g-1: forwarded to the delegate (the worker pool's `editQuery` lane)
+   * when present, otherwise the contract function on this thread with this
+   * adapter's capability.
+   */
+  async querySketchEditIntersections(
+    request: QuerySketchEditIntersectionsRequest,
+  ): Promise<QuerySketchEditIntersectionsResponse> {
+    assertSupportedRequest(request, this.options);
+    assertDocumentModelingTolerance(request.modelingTolerance);
+    if (this.options.regionDerivation)
+      return this.options.regionDerivation.querySketchEditIntersections(
+        request,
+      );
+    return {
+      ...makeResponseBase(request),
+      result: await querySketchEditIntersections(
+        request,
+        this.options.neutralCurveQueries,
+      ),
     };
   }
 

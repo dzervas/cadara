@@ -37,12 +37,15 @@ import {
   createSketchSplitMutation,
   offsetCurveDescriptorFromProjectedGeometry,
   offsetSideForSketchPoint,
-  trimLineSegmentAtIntersections,
+  createSketchTrimMutation,
+  trimTargetRefusal,
 } from "@/domain/sketch-editing/operations";
+import type { SketchEditIntersectionResult } from "@/contracts/sketch/edit-intersections";
 import type { OffsetFramePlan } from "@/contracts/sketch/offset-derivation-frame";
 import { nonAcceptedOffsetOutputs } from "@/contracts/sketch/offset-publication";
 import type { SketchOffsetPublicationRecord } from "@/contracts/solver/schema";
 import type {
+  SketchEditQueryState,
   SketchEditToolState,
   SketchOffsetPreviewPublication,
   SketchSessionState,
@@ -53,13 +56,8 @@ import {
   CONSTRAINED_DRAG_REQUEST_EPSILON,
   applySketchContribution,
   cloneDefinition,
-  createArcEntityDefinition,
-  createEntityId,
-  createLineEntityDefinition,
-  createPointDefinition,
-  createPointId,
   createSessionCommitFactories,
-  createSplineEntityDefinition,
+  hasAcceptedLiveSolveOfDefinition,
   withLiveSolveBasis,
   getEntityPointIds,
   isDrawingSketchTool,
@@ -916,14 +914,16 @@ export function getSketchEditOperatorResult(
  * (no Extend/Split/Mirror auto-apply, no Commit). An Offset with a staged
  * check keeps it (its own completion re-checks the seeds); one without
  * (refused or still checking) re-stages its preview, whose check the
- * editor loop then emits. Trim keeps no selection, so it is left alone.
+ * editor loop then emits. Trim keeps no selection: its queued clicks are
+ * advanced instead (T10g-1, review R-1: a click deferred while the round
+ * was pending is queried now).
  */
 export function refreshSketchEditToolAfterOffsetRound(
   session: SketchSessionState,
 ): SketchSessionState {
   const tool = session.activeEditTool;
-  if (!tool || tool.toolId === "trim" || tool.selectedTargets.length === 0)
-    return session;
+  if (tool?.toolId === "trim") return advanceSketchTrimQueue(session);
+  if (!tool || tool.selectedTargets.length === 0) return session;
   if (tool.toolId === "offset") {
     if (tool.offsetPublication) return session;
     const preview = getOffsetPreview(session, tool);
@@ -950,6 +950,256 @@ export function refreshSketchEditToolAfterOffsetRound(
       preview.previewEntities,
     ),
   };
+}
+
+export const TRIM_CHECKING_MESSAGE = "Checking intersections…";
+export const TRIM_STALE_MESSAGE =
+  "Trim was not applied: the sketch changed while its intersections were being checked. Click again.";
+export const TRIM_BASIS_NOT_ACCEPTED_MESSAGE =
+  "Trim needs a solved sketch; resolve the conflicting constraints first.";
+
+/** The Trim tool with `editQuery`; `message` is shown (else "Checking…" while clicks wait). */
+function withTrimQuery(
+  session: SketchSessionState,
+  editQuery: SketchEditQueryState,
+  message: string | null,
+): SketchSessionState {
+  const tool = { ...session.activeEditTool!, editQuery };
+  return {
+    ...session,
+    activeEditTool: tool,
+    validationMessage: message,
+    toolPresentation: buildSketchEditToolPresentation(
+      tool,
+      message ?? (editQuery.queue.length > 0 ? TRIM_CHECKING_MESSAGE : null),
+    ),
+  };
+}
+
+/**
+ * T10g-1 (design §2.7): a Trim click. Target kind and the accepted live
+ * solve of the current definition are checked now (a session without a live
+ * solve, e.g. just reopened, establishes it first); C3 refuses a decided
+ * non-accepted target and defers a pending one (review R-1). The click is
+ * queued with its target's identity (R-5); nothing is authored until its
+ * exact intersections arrive.
+ */
+function queueSketchTrimClick(
+  session: SketchSessionState,
+  tool: SketchEditToolState,
+  targetEntityId: SketchEntityId,
+): SketchSessionState {
+  const entity = session.definition.entities.find(
+    (candidate) => candidate.entityId === targetEntityId,
+  );
+  if (!entity) return session;
+  const editQuery = tool.editQuery ?? { queue: [], inFlight: null };
+  const based = session.liveSolve
+    ? session
+    : withLiveSolveBasis(session, session.definition);
+  const gate = offsetEditInputGate(based, [targetEntityId], "a Trim target");
+  const refusal =
+    trimTargetRefusal(entity) ??
+    (hasAcceptedLiveSolveOfDefinition(based)
+      ? null
+      : TRIM_BASIS_NOT_ACCEPTED_MESSAGE) ??
+    (gate && !gate.pending ? gate.message : null);
+  if (refusal) return withTrimQuery(based, editQuery, refusal);
+  return advanceSketchTrimQueue(
+    withTrimQuery(
+      based,
+      { ...editQuery, queue: [...editQuery.queue, { targetEntityId, entity }] },
+      null,
+    ),
+  );
+}
+
+/**
+ * T10g-1: issues the head click's query when nothing is in flight. A head
+ * whose target changed since its click is dropped as stale (R-5). The query
+ * runs on the accepted live solve of the current definition only (R-6);
+ * with offset relationships it waits while the publication round is pending
+ * (R-1: the basis must say which offset outputs are accepted), and so does
+ * a target whose C3 gate is still pending. Unchanged when nothing waits.
+ */
+export function advanceSketchTrimQueue(
+  session: SketchSessionState,
+  initialMessage: string | null = null,
+): SketchSessionState {
+  const editQuery = session.activeEditTool?.editQuery;
+  if (session.activeEditTool?.toolId !== "trim" || !editQuery) return session;
+  if (editQuery.inFlight || (editQuery.queue.length === 0 && !initialMessage))
+    return session;
+  let message = initialMessage;
+  const queue = [...editQuery.queue];
+  for (;;) {
+    const head = queue[0];
+    if (!head) return withTrimQuery(session, { ...editQuery, queue }, message);
+    const current = session.definition.entities.find(
+      (entity) => entity.entityId === head.targetEntityId,
+    );
+    const gate = offsetEditInputGate(
+      session,
+      [head.targetEntityId],
+      "a Trim target",
+    );
+    const refusal =
+      current !== head.entity
+        ? TRIM_STALE_MESSAGE
+        : !hasAcceptedLiveSolveOfDefinition(session)
+          ? TRIM_BASIS_NOT_ACCEPTED_MESSAGE
+          : gate && !gate.pending
+            ? gate.message
+            : null;
+    if (refusal) {
+      queue.shift();
+      message = refusal;
+      continue;
+    }
+    const offsets = (session.definition.derivedRelationships ?? []).some(
+      (relationship) => relationship.kind === "offset",
+    );
+    if (gate || (offsets && session.liveRegions.status === "pending"))
+      return withTrimQuery(
+        session,
+        { ...editQuery, queue },
+        message ?? gate?.message ?? null,
+      );
+    const liveSolve = session.liveSolve!;
+    return withTrimQuery(
+      session,
+      {
+        queue,
+        inFlight: {
+          // Review R-1: unique across tool activations (a new Trim after
+          // Esc starts a fresh queue), so a result of a cancelled query
+          // never matches a later click's query.
+          queryId: `trim-query-${crypto.randomUUID()}`,
+          definition: session.definition,
+          generation: session.liveRegions.generation,
+          input: {
+            definition: liveSolve.definition,
+            solvedSnapshot: liveSolve.solvedSnapshot,
+            projectedReferences: liveSolve.projectedReferences,
+            modelingTolerance: session.modelingTolerance,
+            operation: { kind: "trim", targetEntityId: head.targetEntityId },
+          },
+        },
+      },
+      message,
+    );
+  }
+}
+
+/**
+ * T10g-1 (design §2.7/§2.8): the exact intersections of the in-flight
+ * Trim query `queryId` (ignored unless it is still the one in flight).
+ * - The definition changed meanwhile (an edit, Undo/Redo): discarded with
+ *   the stale message.
+ * - Only the live solve changed (a re-solve, a publication: a new
+ *   generation or snapshot, review A-4): queried again for the head.
+ * - Otherwise a failure shows its message, and a verified result applies as
+ *   one authored edit, after C3 over target, cut cutters and the
+ *   non-accepted outputs near the target (T-g5); the next click follows.
+ */
+export function completeSketchTrimQuery(
+  session: SketchSessionState,
+  queryId: string,
+  result: SketchEditIntersectionResult,
+): SketchSessionState {
+  const editQuery = session.activeEditTool?.editQuery;
+  const inFlight = editQuery?.inFlight;
+  if (
+    session.activeEditTool?.toolId !== "trim" ||
+    inFlight?.queryId !== queryId
+  )
+    return session;
+  const cleared = { ...editQuery!, inFlight: null };
+  const popped = { ...cleared, queue: cleared.queue.slice(1) };
+  if (session.definition !== inFlight.definition)
+    return advanceSketchTrimQueue(
+      withTrimQuery(session, popped, null),
+      TRIM_STALE_MESSAGE,
+    );
+  if (
+    session.liveRegions.generation !== inFlight.generation ||
+    session.liveSolve?.solvedSnapshot !== inFlight.input.solvedSnapshot
+  )
+    return advanceSketchTrimQueue(withTrimQuery(session, cleared, null));
+  const targetEntityId = inFlight.input.operation.targetEntityId;
+  const gate = offsetEditInputGate(
+    session,
+    [
+      targetEntityId,
+      ...(result.kind === "verified"
+        ? [result.cuts[0]!, result.cuts.at(-1)!].flatMap((cut) =>
+            cut.cutters.map((cutter) => cutter.entityId),
+          )
+        : []),
+      ...result.nonAcceptedNearTarget,
+    ],
+    "a Trim input",
+  );
+  if (gate?.pending)
+    return advanceSketchTrimQueue(withTrimQuery(session, cleared, null));
+  if (gate)
+    return advanceSketchTrimQueue(
+      withTrimQuery(session, popped, null),
+      gate.message,
+    );
+  if (result.kind === "failed")
+    return advanceSketchTrimQueue(
+      withTrimQuery(session, popped, null),
+      result.message,
+    );
+  const nextSequence = session.sequence + 1;
+  const sketchId = session.sketchId ?? ("sketch_draft" as SketchId);
+  const mutation = createSketchTrimMutation({
+    definition: session.definition,
+    targetEntityId,
+    intersections: result,
+    factories: createSessionCommitFactories(nextSequence, sketchId),
+  });
+  if (!mutation.changed)
+    return advanceSketchTrimQueue(
+      withTrimQuery(session, popped, null),
+      mutation.message,
+    );
+  const applied = withLiveSolveBasis(
+    {
+      ...withTrimQuery(session, popped, null),
+      definition: mutation.definition,
+      toolStagedEntities: [],
+      sequence: nextSequence,
+      commitRequest: rebuildSessionCommitRequest(session, mutation.definition),
+      activeEditTarget: null,
+      activeDrag: null,
+    },
+    mutation.definition,
+  );
+  return advanceSketchTrimQueue(applied);
+}
+
+/** T10g-1: the in-flight Trim query failed (a real error): nothing is applied. */
+export function failSketchTrimQuery(
+  session: SketchSessionState,
+  queryId: string,
+  message: string,
+): SketchSessionState {
+  const editQuery = session.activeEditTool?.editQuery;
+  if (
+    session.activeEditTool?.toolId !== "trim" ||
+    editQuery?.inFlight?.queryId !== queryId
+  )
+    return session;
+  return advanceSketchTrimQueue(
+    withTrimQuery(
+      session,
+      { ...editQuery, inFlight: null, queue: editQuery.queue.slice(1) },
+      null,
+    ),
+    `Trim failed: ${message}`,
+  );
 }
 
 export function applySketchEditOperationResult(
@@ -1020,103 +1270,7 @@ export function selectSketchEditToolTarget(
     if (target.kind !== "sketchEntity") {
       return session;
     }
-
-    // T10i (C3): the Trim target must be accepted geometry; while its live
-    // round is pending the click is not applied and says the target is
-    // being checked (review R-1, the same rule as T10g R-1). Cutters are not
-    // gated here: today's Trim cuts at every crossing in the sketch, so
-    // gating them would refuse every Trim in a sketch with any unrelated
-    // non-accepted output. Hook for T10g-1 (design review R-1/T-g5): gate
-    // only non-accepted outputs whose outward box meets the target's box,
-    // on the publication-current basis, with this same gate (deferring the
-    // click while pending instead of dropping it), and re-check target and
-    // cutters when the asynchronous edit query applies.
-    const gate = offsetEditInputGate(
-      session,
-      [target.entityId],
-      "a Trim target",
-    );
-    if (gate)
-      return {
-        ...session,
-        validationMessage: gate.message,
-        toolPresentation: buildSketchEditToolPresentation(
-          activeEditTool,
-          gate.message,
-        ),
-      };
-
-    const nextSequence = session.sequence + 1;
-    const sketchId = session.sketchId ?? ("sketch_draft" as SketchId);
-    const result = trimLineSegmentAtIntersections({
-      definition: session.definition,
-      entityId: target.entityId,
-      nextPointId: (suffix) => createPointId(nextSequence, suffix),
-      nextEntityId: (suffix) => createEntityId(nextSequence, suffix),
-      createPoint: (label, pointId, position) =>
-        createPointDefinition(sketchId, pointId, label, position, false),
-      createLine: (label, entityId, startPointId, endPointId) =>
-        createLineEntityDefinition(
-          sketchId,
-          entityId,
-          label,
-          startPointId,
-          endPointId,
-          false,
-        ),
-      createArc: (
-        label,
-        entityId,
-        centerPointId,
-        startPointId,
-        endPointId,
-        sweepDirection,
-      ) =>
-        createArcEntityDefinition(
-          sketchId,
-          entityId,
-          label,
-          centerPointId,
-          startPointId,
-          endPointId,
-          sweepDirection,
-          false,
-        ),
-      createSpline: (label, entityId, fitPointIds) =>
-        createSplineEntityDefinition(
-          sketchId,
-          entityId,
-          label,
-          fitPointIds,
-          false,
-        ),
-    });
-
-    if (!result.changed) {
-      return {
-        ...session,
-        validationMessage: result.message,
-        toolPresentation: buildSketchEditToolPresentation(
-          activeEditTool,
-          result.message,
-        ),
-      };
-    }
-
-    return withLiveSolveBasis(
-      {
-        ...session,
-        definition: result.definition,
-        toolStagedEntities: [],
-        sequence: nextSequence,
-        validationMessage: null,
-        commitRequest: rebuildSessionCommitRequest(session, result.definition),
-        toolPresentation: buildSketchEditToolPresentation(activeEditTool),
-        activeEditTarget: null,
-        activeDrag: null,
-      },
-      result.definition,
-    );
+    return queueSketchTrimClick(session, activeEditTool, target.entityId);
   }
 
   if (
