@@ -22,7 +22,6 @@ import {
 } from "@/contracts/sketch/spline-geometry";
 import {
   offsetLinePoints,
-  offsetPolylinePoints,
   scalePointFromCenter,
 } from "@/contracts/sketch/offset-geometry";
 import { extractDeclaredOffsetChainConnectivity } from "@/contracts/sketch/offset-chain-connectivity";
@@ -403,10 +402,9 @@ function pointOnCircle(
 }
 
 /**
- * The display polyline of a spline descriptor, read only by the samplers
- * that remain until their slices replace them (T10f, listed in the
- * tessellation boundary guard): Trim's intersection sampling (T10g) and the
- * D6 static spline offset/slot polyline (T10h).
+ * The display polyline of a spline descriptor, read only by the sampler
+ * that remains until its slice replaces it (T10f, listed in the
+ * tessellation boundary guard): Trim's intersection sampling (T10g).
  */
 function splineDescriptorPolyline(
   curve: Pick<
@@ -873,14 +871,6 @@ function createArcPreview(
     pointOnCircle(curve.center, radius, midAngle),
     add(curve.center, scale(endVector, radius)),
   ];
-}
-
-function offsetSplinePoints(
-  points: readonly SketchPoint[],
-  distance: number,
-  side: OffsetSide,
-) {
-  return offsetPolylinePoints(points, side === "left" ? distance : -distance);
 }
 
 type LineChainRecord = {
@@ -2273,113 +2263,6 @@ function createArcSlotContribution(input: {
   );
 }
 
-function createSplineSlotContribution(input: {
-  curve: Extract<CurveDescriptor, { kind: "spline" }>;
-  width: number;
-  sequence: number;
-  factories: SketchEditOperationFactories;
-}): SketchEditOperationResult {
-  const halfWidth = input.width / 2;
-  const polyline = splineDescriptorPolyline(input.curve);
-  const leftPoints = offsetSplinePoints(polyline, halfWidth, "left");
-  const rightPoints = offsetSplinePoints(polyline, halfWidth, "right");
-  const leftPointIds = leftPoints.map((_, index) =>
-    input.factories.createPointId(`slot-left-spline-${index + 1}`),
-  );
-  const rightPointIds = rightPoints.map((_, index) =>
-    input.factories.createPointId(`slot-right-spline-${index + 1}`),
-  );
-  const leftSplineId = input.factories.createEntityId("slot-left-spline");
-  const rightSplineId = input.factories.createEntityId("slot-right-spline");
-  const startCapId = input.factories.createEntityId("slot-spline-start-cap");
-  const endCapId = input.factories.createEntityId("slot-spline-end-cap");
-  const isConstruction = input.curve.isConstruction;
-  const style = input.curve.style;
-
-  return createContributionOperationResult(
-    {
-      points: [
-        ...leftPoints.map((point, index) =>
-          input.factories.createPoint(
-            `Slot ${input.sequence} left ${index + 1}`,
-            leftPointIds[index]!,
-            point,
-          ),
-        ),
-        ...rightPoints.map((point, index) =>
-          input.factories.createPoint(
-            `Slot ${input.sequence} right ${index + 1}`,
-            rightPointIds[index]!,
-            point,
-          ),
-        ),
-      ],
-      entities: [
-        {
-          ...input.factories.createSplineEntity(
-            `Slot ${input.sequence} left`,
-            leftSplineId,
-            leftPointIds,
-          ),
-          isConstruction,
-          style,
-        },
-        {
-          ...input.factories.createLineEntity(
-            `Slot ${input.sequence} end cap`,
-            endCapId,
-            leftPointIds.at(-1)!,
-            rightPointIds.at(-1)!,
-          ),
-          isConstruction,
-          style,
-        },
-        {
-          ...input.factories.createSplineEntity(
-            `Slot ${input.sequence} right`,
-            rightSplineId,
-            [...rightPointIds].reverse(),
-          ),
-          isConstruction,
-          style,
-        },
-        {
-          ...input.factories.createLineEntity(
-            `Slot ${input.sequence} start cap`,
-            startCapId,
-            rightPointIds[0]!,
-            leftPointIds[0]!,
-          ),
-          isConstruction,
-          style,
-        },
-      ],
-    },
-    [
-      makePreviewSpline("preview-slot-left-spline", leftPoints, isConstruction),
-      makePreviewSpline(
-        "preview-slot-right-spline",
-        rightPoints,
-        isConstruction,
-      ),
-      makePreviewLine(
-        "preview-slot-spline-start-cap",
-        "Slot preview",
-        rightPoints[0]!,
-        leftPoints[0]!,
-        isConstruction,
-      ),
-      makePreviewLine(
-        "preview-slot-spline-end-cap",
-        "Slot preview",
-        leftPoints.at(-1)!,
-        rightPoints.at(-1)!,
-        isConstruction,
-      ),
-    ],
-  );
-}
-
 function createClosedLineSlotContribution(input: {
   definition: SketchDefinition;
   entityIds: readonly SketchEntityId[];
@@ -2447,6 +2330,18 @@ export function createSketchSlotContribution(input: {
   sequence: number;
   factories: SketchEditOperationFactories;
 }): SketchEditOperationResult {
+  const entity =
+    input.entityIds.length === 1
+      ? input.definition.entities.find(
+          (candidate) => candidate.entityId === input.entityIds[0],
+        )
+      : undefined;
+  // T10h (D6, user decision Q2 = S1): there is no exact slot along a spline
+  // yet, so it is refused before any width check.
+  if (entity?.kind === "spline") {
+    return createInvalidOperationResult(SPLINE_SLOT_UNSUPPORTED_MESSAGE);
+  }
+
   if (input.width === null || input.width <= EPSILON) {
     return createInvalidOperationResult(
       "Slot width must be greater than zero.",
@@ -2455,7 +2350,7 @@ export function createSketchSlotContribution(input: {
 
   if (input.entityIds.length === 0) {
     return createInvalidOperationResult(
-      "Select a line, arc, spline, or closed line profile for the slot.",
+      "Select a line, arc, or closed line profile for the slot.",
     );
   }
 
@@ -2466,13 +2361,10 @@ export function createSketchSlotContribution(input: {
     });
   }
 
-  const entity = input.definition.entities.find(
-    (candidate) => candidate.entityId === input.entityIds[0],
-  );
   const curve = entity ? getCurveDescriptor(input.definition, entity) : null;
   if (!curve) {
     return createInvalidOperationResult(
-      "Slot supports a line, arc, spline, or closed line profile.",
+      "Slot supports a line, arc, or closed line profile.",
     );
   }
 
@@ -2494,23 +2386,23 @@ export function createSketchSlotContribution(input: {
     });
   }
 
-  if (curve.kind === "spline") {
-    return createSplineSlotContribution({
-      curve,
-      width: input.width,
-      sequence: input.sequence,
-      factories: input.factories,
-    });
-  }
-
   return createInvalidOperationResult(
-    "Slot supports a line, arc, spline, or closed line profile.",
+    "Slot supports a line, arc, or closed line profile.",
   );
 }
 
+/** T10h (D6, [TECH] T-10): a projected spline has no exact static offset. */
+export const PROJECTED_SPLINE_OFFSET_UNSUPPORTED_MESSAGE =
+  "Offsetting projected spline geometry is not supported yet; offset a sketch curve or use the projected line/arc/circle.";
+
+/** T10h (D6, user decision Q2 = S1): a Slot along a spline. */
+export const SPLINE_SLOT_UNSUPPORTED_MESSAGE =
+  "Slot along a spline is not supported yet.";
+
 /**
- * The static one-shot offset of one curve (D6: projected reference geometry,
- * which cannot be a derivation master yet). Sketch entities are offset by
+ * The static one-shot offset of one projected line, arc or circle (D6:
+ * projected reference geometry cannot be a derivation master yet); a
+ * projected spline is refused. Sketch entities are offset by
  * `createSketchOffsetDerivationContribution`.
  */
 export function createOffsetContribution(input: {
@@ -2526,9 +2418,17 @@ export function createOffsetContribution(input: {
     | "createLineEntity"
     | "createCircleEntity"
     | "createArcEntity"
-    | "createSplineEntity"
   >;
 }): OffsetContributionResult {
+  if (input.curve.kind === "spline") {
+    return {
+      valid: false,
+      message: PROJECTED_SPLINE_OFFSET_UNSUPPORTED_MESSAGE,
+      contribution: null,
+      previewEntities: [],
+    };
+  }
+
   if (input.distance === null || input.distance <= EPSILON) {
     return {
       valid: false,
@@ -2672,111 +2572,72 @@ export function createOffsetContribution(input: {
     };
   }
 
-  if (curve.kind === "arc") {
-    const sideFactor = input.side === "left" ? 1 : -1;
-    const radius =
-      distanceBetween(curve.center, curve.start) + input.distance * sideFactor;
-    if (radius <= EPSILON) {
-      return {
-        valid: false,
-        message: "Offset distance would create an invalid arc radius.",
-        contribution: null,
-        previewEntities: [],
-      };
-    }
-
-    const offsetStart = scalePointFromCenter(curve.center, curve.start, radius);
-    const offsetEnd = scalePointFromCenter(curve.center, curve.end, radius);
-    if (!offsetStart || !offsetEnd) {
-      return {
-        valid: false,
-        message: "Offset target has invalid arc geometry.",
-        contribution: null,
-        previewEntities: [],
-      };
-    }
-
-    const centerPointId = input.factories.createPointId("offset-arc-center");
-    const startPointId = input.factories.createPointId("offset-arc-start");
-    const endPointId = input.factories.createPointId("offset-arc-end");
-    const entityId = input.factories.createEntityId("offset-arc");
-
+  // An arc: the spline was refused, the line and circle returned above.
+  const sideFactor = input.side === "left" ? 1 : -1;
+  const radius =
+    distanceBetween(curve.center, curve.start) + input.distance * sideFactor;
+  if (radius <= EPSILON) {
     return {
-      valid: true,
-      message: null,
-      previewEntities: [
-        makePreviewSpline(
-          "preview-offset-arc",
-          createArcPreview(curve, radius),
-          isConstruction,
-        ),
-      ],
-      contribution: {
-        points: [
-          input.factories.createPoint(
-            `Offset ${input.sequence} center`,
-            centerPointId,
-            curve.center,
-          ),
-          input.factories.createPoint(
-            `Offset ${input.sequence} start`,
-            startPointId,
-            offsetStart,
-          ),
-          input.factories.createPoint(
-            `Offset ${input.sequence} end`,
-            endPointId,
-            offsetEnd,
-          ),
-        ],
-        entities: [
-          {
-            ...input.factories.createArcEntity(
-              `Offset ${input.sequence}`,
-              entityId,
-              centerPointId,
-              startPointId,
-              endPointId,
-              curve.sweepDirection,
-            ),
-            isConstruction,
-            style,
-          },
-        ],
-      },
+      valid: false,
+      message: "Offset distance would create an invalid arc radius.",
+      contribution: null,
+      previewEntities: [],
     };
   }
 
-  const offsetPoints = offsetSplinePoints(
-    splineDescriptorPolyline(curve),
-    input.distance,
-    input.side,
-  );
-  const pointIds = offsetPoints.map((_, index) =>
-    input.factories.createPointId(`offset-spline-${index + 1}`),
-  );
-  const entityId = input.factories.createEntityId("offset-spline");
+  const offsetStart = scalePointFromCenter(curve.center, curve.start, radius);
+  const offsetEnd = scalePointFromCenter(curve.center, curve.end, radius);
+  if (!offsetStart || !offsetEnd) {
+    return {
+      valid: false,
+      message: "Offset target has invalid arc geometry.",
+      contribution: null,
+      previewEntities: [],
+    };
+  }
+
+  const centerPointId = input.factories.createPointId("offset-arc-center");
+  const startPointId = input.factories.createPointId("offset-arc-start");
+  const endPointId = input.factories.createPointId("offset-arc-end");
+  const entityId = input.factories.createEntityId("offset-arc");
 
   return {
     valid: true,
     message: null,
     previewEntities: [
-      makePreviewSpline("preview-offset-spline", offsetPoints, isConstruction),
+      makePreviewSpline(
+        "preview-offset-arc",
+        createArcPreview(curve, radius),
+        isConstruction,
+      ),
     ],
     contribution: {
-      points: offsetPoints.map((point, index) =>
+      points: [
         input.factories.createPoint(
-          `Offset ${input.sequence} point ${index + 1}`,
-          pointIds[index]!,
-          point,
+          `Offset ${input.sequence} center`,
+          centerPointId,
+          curve.center,
         ),
-      ),
+        input.factories.createPoint(
+          `Offset ${input.sequence} start`,
+          startPointId,
+          offsetStart,
+        ),
+        input.factories.createPoint(
+          `Offset ${input.sequence} end`,
+          endPointId,
+          offsetEnd,
+        ),
+      ],
       entities: [
         {
-          ...input.factories.createSplineEntity(
+          ...input.factories.createArcEntity(
             `Offset ${input.sequence}`,
             entityId,
-            pointIds,
+            centerPointId,
+            startPointId,
+            endPointId,
+            curve.sweepDirection,
           ),
           isConstruction,
           style,

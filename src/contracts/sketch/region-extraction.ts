@@ -158,7 +158,9 @@ export interface SketchArrangementUnpublishedOutput {
  * solved sub-spans (untrimmed poles on `sourceDomain`, trims in
  * `queryDomain`). Every non-accepted output is excluded like construction
  * geometry, its diagnostic naming the relationship's publication state
- * from `publications`. Without offset relationships the result is empty,
+ * from `publications` (T10i, review A-1: an offset over a non-accepted
+ * seed is excluded through the predicate's closure, naming the seed's
+ * offset). Without offset relationships the result is empty,
  * so the arrangement input is byte-identical.
  */
 export function offsetArrangementInput(
@@ -200,20 +202,24 @@ export function offsetArrangementInput(
           : `offset relationship ${derivationId} is not published`;
   };
   for (const relationship of offsets) {
-    const reason = reasonOf(relationship.derivationId);
     for (const entityId of [
       ...relationship.outputs.map((output) => output.outputEntityId),
       ...relationship.jointOutputs.map((output) => output.outputEntityId),
       ...relationship.piecewiseCubicOutputs.map(
         (output) => output.outputEntityId,
       ),
-    ])
-      if (nonAccepted.has(entityId))
+    ]) {
+      // T10i (review A-1): an output of a certified offset over a
+      // non-accepted seed is owned by (and names) that seed's offset, as a
+      // G16‴ copy is.
+      const owner = nonAccepted.get(entityId);
+      if (owner)
         unpublishedOffsetOutputs.push({
           entityId,
-          derivationId: relationship.derivationId,
-          reason,
+          derivationId: owner.derivationId,
+          reason: reasonOf(owner.derivationId),
         });
+    }
     for (const output of relationship.piecewiseCubicOutputs) {
       const record = records.get(output.outputEntityId);
       if (

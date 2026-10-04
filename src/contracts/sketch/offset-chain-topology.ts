@@ -2010,6 +2010,20 @@ export function declaredOffsetChainPieces(input: {
       return uncertain(
         "The declared coincident join is not a direct constraint of this definition.",
       );
+    // T10i (C4, g7b A1): a join whose coincident constraint is not
+    // satisfied in this frame (`blocked` because it names an output of a
+    // failed offset, [TECH] G16″; `unsatisfied` already fails E1 above) does
+    // not join anything here, so the chain fails closed as disconnected.
+    // E2 above: every constraint of the definition has its status.
+    const { status } = solvedSnapshot.constraintStatuses.find(
+      (entry) => entry.constraintId === join.constraintId,
+    )!;
+    if (status !== "satisfied")
+      return failure(
+        codes.disconnectedChain,
+        `The declared coincident join ${join.constraintId} is ${status} in this solve frame, so it does not join the chain.`,
+        null,
+      );
   }
   return buildDeclaredOffsetChainPieces(input, solvedSnapshot);
 }

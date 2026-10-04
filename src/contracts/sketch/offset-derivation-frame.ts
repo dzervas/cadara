@@ -1210,6 +1210,10 @@ function solveOffsetFrameUnmemoized(
       frameSourceBasis.set(frame, { pieces: run.pieces, sources: run.sources });
     return frame;
   };
+  const built = (run: Extract<PlanRun, { ok: true }>) => {
+    const degenerate = degenerateLineOutput(run, modelingTolerance);
+    return degenerate ? fail(degenerate) : frameOf(run);
+  };
   const arcJoints = relationship.arcJoints;
   if (
     plan &&
@@ -1217,12 +1221,49 @@ function solveOffsetFrameUnmemoized(
     (!arcJoints || sameArcSet(arcSet(plan.adjacencies), arcJoints))
   ) {
     const given = runPlan(declared, plan.adjacencies, undefined, true);
-    if (given.ok) return frameOf(given);
+    if (given.ok) return built(given);
   }
   const choices = firstChoice(declared, arcJoints);
   if ("ok" in choices) return fail(choices);
   const run = runPlan(declared, choices, choices, arcJoints !== undefined);
-  return run.ok ? frameOf(run) : fail(run);
+  return run.ok ? built(run) : fail(run);
+}
+
+/**
+ * T10i (C5, [TECH] T-11): a line output shorter than τ fails the frame
+ * (relationship-scoped, [TECH] G16′), in declared order. The test is
+ * binary64 `Math.hypot` of the difference of the line output's published
+ * endpoints (its `lineArcEndpoints`, bitwise the driven points the snapshot
+ * persists), strictly below τ: the same expression and threshold as
+ * `validateDefinition`'s `degenerate-line-segment` at the document
+ * tolerance (minimumSegmentLength = τ), which used to flag the output
+ * sketch-wide. A built frame is the only line output datum, so the solver
+ * and publish (which re-runs this frame) decide it identically. It runs on
+ * every frame evaluation, also mid-solve and during drags, where a sub-τ
+ * output fails the frame like any other frame failure ([TECH] G16‴).
+ */
+function degenerateLineOutput(
+  run: Extract<PlanRun, { ok: true }>,
+  modelingTolerance: number,
+): OffsetChainFailure | null {
+  for (const piece of run.pieces) {
+    if (piece.kind !== "lineSegment") continue;
+    const ends = run.geometry.lineArcEndpoints.get(piece.seedEntityId)!;
+    const length = Math.hypot(
+      ends.end[0] - ends.start[0],
+      ends.end[1] - ends.start[1],
+    );
+    if (length < modelingTolerance)
+      return chainFailure(
+        codes.outputDegenerate,
+        // Review A-4: 3 significant digits (the measurement formatter's
+        // fixed 2 decimals would print every sub-τ length as 0); the
+        // diagnostic targets the seed.
+        `An offset line would be ${length.toPrecision(3)} mm long, shorter than the modeling tolerance ${modelingTolerance} mm.`,
+        piece.seedEntityId,
+      );
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------

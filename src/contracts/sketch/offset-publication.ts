@@ -149,7 +149,7 @@ export function publishSketchOffsets(input: {
   const kinds = new Map(
     definition.entities.map((entity) => [entity.entityId, entity.kind]),
   );
-  return offsets.map((relationship): SketchOffsetPublicationRecord => {
+  const records = offsets.map((relationship): SketchOffsetPublicationRecord => {
     const failed = (
       code: string,
       message: string,
@@ -237,6 +237,56 @@ export function publishSketchOffsets(input: {
       plan: publication.plan,
     };
   });
+  return withNonAcceptedSeedsFailed(input.definition, solvedSnapshot, records);
+}
+
+/**
+ * T10i (review A-1): an offset certified in this round whose seed is a
+ * non-accepted offset output under this round's publications (the G19
+ * predicate with its closure, the round applied by
+ * `applyOffsetPublications`) was certified from that output's held, stale
+ * geometry, so it fails with a relationship-scoped
+ * `derived-offset-seed-not-certified` on the seed, to a fixed point (an
+ * offset of it fails in turn).
+ */
+function withNonAcceptedSeedsFailed(
+  definition: SketchDefinition,
+  snapshot: SolvedSketchSnapshot,
+  records: readonly SketchOffsetPublicationRecord[],
+): SketchOffsetPublicationRecord[] {
+  const seeds = new Map(
+    (definition.derivedRelationships ?? []).flatMap((relationship) =>
+      relationship.kind === "offset"
+        ? [[relationship.derivationId, relationship.seedEntityIds] as const]
+        : [],
+    ),
+  );
+  let current = [...records];
+  for (;;) {
+    const nonAccepted = nonAcceptedOffsetOutputs(
+      definition,
+      applyOffsetPublications(definition, snapshot, current),
+    );
+    let changed = false;
+    current = current.map((record) => {
+      if (record.status !== "certified") return record;
+      const seed = seeds
+        .get(record.derivationId)!
+        .find((id) => nonAccepted.has(id));
+      if (seed === undefined) return record;
+      changed = true;
+      return {
+        derivationId: record.derivationId,
+        status: "failed",
+        diagnostic: publicationDiagnostic(
+          OFFSET_DIAGNOSTIC_CODES.seedNotCertified,
+          `Offset relationship ${record.derivationId}: its seed ${seed} is an output of offset relationship ${nonAccepted.get(seed)!.derivationId}, which is not certified, so this offset is not certified either.`,
+          seed,
+        ),
+      };
+    });
+    if (!changed) return current;
+  }
 }
 
 function publicationDiagnostic(
@@ -319,7 +369,10 @@ export function applyOffsetPublications(
  * dependents. A mirror, pattern or transform output whose seed is
  * non-accepted, and every output of a mirror whose axis is non-accepted, is
  * computed from that (possibly stale) geometry, so it is non-accepted too,
- * owned by the same offset relationship.
+ * owned by the same offset relationship. T10i (review A-1): so is every
+ * output (line, arc, circle, joint arc, shell) of an offset relationship
+ * one of whose seeds is non-accepted (an offset of a non-certified offset's
+ * output, directly or through a copy), owned by that seed's relationship.
  */
 export function nonAcceptedOffsetOutputs(
   definition: Pick<SketchDefinition, "derivedRelationships" | "entities">,
@@ -365,18 +418,34 @@ export function nonAcceptedOffsetOutputs(
   return result;
 }
 
-/** [TECH] G16‴: closes `result` over mirror/pattern/transform outputs (to a fixed point). */
+/**
+ * [TECH] G16‴: closes `result` over mirror/pattern/transform outputs and
+ * (T10i, review A-1) over offsets of non-accepted seeds, to a fixed point.
+ */
 function addNonAcceptedDerivedDependents(
   definition: Pick<SketchDefinition, "derivedRelationships">,
   result: Map<SketchEntityId, { readonly derivationId: string }>,
 ) {
   if (result.size === 0) return;
-  const derived = (definition.derivedRelationships ?? []).filter(
-    (relationship) => relationship.kind !== "offset",
-  );
+  const derived = definition.derivedRelationships ?? [];
   for (let changed = true; changed; ) {
     changed = false;
     for (const relationship of derived) {
+      if (relationship.kind === "offset") {
+        const seed = relationship.seedEntityIds.find((id) => result.has(id));
+        if (seed === undefined) continue;
+        const owner = result.get(seed)!;
+        for (const output of [
+          ...relationship.outputs,
+          ...relationship.jointOutputs,
+          ...relationship.piecewiseCubicOutputs,
+        ]) {
+          if (result.has(output.outputEntityId)) continue;
+          result.set(output.outputEntityId, owner);
+          changed = true;
+        }
+        continue;
+      }
       const axis =
         relationship.kind === "mirror"
           ? result.get(relationship.mirrorReference.entityId)

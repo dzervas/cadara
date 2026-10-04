@@ -304,6 +304,13 @@ function validateDefinition(
   const referenceIds = new Set<ReferenceId>();
   const points = pointRecordMap(definition);
   const entities = entityRecordMap(definition);
+  const offsetOutputLineIds = new Set<SketchEntityId>(
+    (definition.derivedRelationships ?? []).flatMap((relationship) =>
+      relationship.kind === "offset"
+        ? relationship.outputs.map((output) => output.outputEntityId)
+        : [],
+    ),
+  );
 
   for (const pointId of definition.pointIds) {
     if (pointIds.has(pointId)) {
@@ -452,7 +459,10 @@ function validateDefinition(
           break;
         }
 
+        // T10i (C5): an offset line output is relationship-owned, as in
+        // the core (its solve frame fails it below τ).
         if (
+          !offsetOutputLineIds.has(entity.entityId) &&
           samePoint(
             points.get(entity.startPointId)!.position,
             points.get(entity.endPointId)!.position,

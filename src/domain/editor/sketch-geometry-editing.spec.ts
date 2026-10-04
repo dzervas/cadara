@@ -40,6 +40,10 @@ import {
   OCC_KERNEL_SETTINGS,
 } from "@/domain/modeling/opencascade-kernel-seed";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import {
+  PROJECTED_SPLINE_OFFSET_UNSUPPORTED_MESSAGE,
+  SPLINE_SLOT_UNSUPPORTED_MESSAGE,
+} from "@/domain/sketch-editing/operations";
 import { createSketchArrangementDeriver } from "@/contracts/sketch/region-extraction";
 import { createRegionBoundaryBasis } from "@/contracts/sketch/region-boundary-curves";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
@@ -2711,22 +2715,35 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       geometryId: "projected_geometry_spline",
       geometryKind: "spline",
     });
+    // T10h (D6, [TECH] T-10): a projected spline is refused explicitly at
+    // selection, with a value and at Commit; nothing is previewed or added.
     expect(
-      splineSession.toolStagedEntities.some(
-        (entity) => entity.status === "preview" && entity.kind === "spline",
-      ),
-      "Projected spline offset should preview a spline.",
-    ).toBeTruthy();
+      splineSession.toolStagedEntities,
+      "Projected spline offset should preview nothing.",
+    ).toEqual([]);
+    expect(
+      splineSession.validationMessage,
+      "Projected spline offset should say it is not supported yet.",
+    ).toBe(PROJECTED_SPLINE_OFFSET_UNSUPPORTED_MESSAGE);
+    expect(
+      splineSession.toolPresentation?.validation?.map((item) => item.message),
+      "The tool presentation carries the message to the panel.",
+    ).toEqual([PROJECTED_SPLINE_OFFSET_UNSUPPORTED_MESSAGE]);
+    const emptyDefinition = splineSession.definition;
     splineSession = patchSketchEditToolValue(splineSession, { value: 1 });
+    expect(splineSession.validationMessage).toBe(
+      PROJECTED_SPLINE_OFFSET_UNSUPPORTED_MESSAGE,
+    );
     splineSession = patchSketchEditToolValue(splineSession, {
       intent: "commitOffset",
     });
+    expect(splineSession.validationMessage).toBe(
+      PROJECTED_SPLINE_OFFSET_UNSUPPORTED_MESSAGE,
+    );
     expect(
-      splineSession.definition.entities.some(
-        (entity) => entity.kind === "spline",
-      ),
-      "Projected spline offset should create a sketch-owned spline.",
-    ).toBeTruthy();
+      splineSession.definition,
+      "Projected spline offset should author nothing.",
+    ).toBe(emptyDefinition);
   }
 
   function testSketchFilletChamferAndSlotUseSessionPreviewAndCommit() {
@@ -2826,6 +2843,52 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
         .length,
       "Sketch slot around a line should commit rounded end arcs.",
     ).toBe(2);
+
+    // T10h (D6, user decision Q2 = S1): Slot along a spline is refused at
+    // selection and at Commit; nothing is previewed or authored.
+    const splineDefinition = makeDefinition({
+      pointIds: ["sketch_point_s0", "sketch_point_s1", "sketch_point_s2"],
+      points: [
+        makePoint("sketch_point_s0", "S0", 0, 0),
+        makePoint("sketch_point_s1", "S1", 1, 2),
+        makePoint("sketch_point_s2", "S2", 2, 0),
+      ],
+      entityIds: ["sketch_entity_spline"],
+      entities: [
+        makeSpline("sketch_entity_spline", "Spline", [
+          "sketch_point_s0",
+          "sketch_point_s1",
+          "sketch_point_s2",
+        ]),
+      ],
+    });
+    let splineSlotSession = beginSketchTool(
+      createSessionFromDefinition(splineDefinition),
+      "sketchSlot",
+    );
+    splineSlotSession = selectSketchEditToolTarget(
+      splineSlotSession,
+      splineDefinition.entities[0]!.target,
+    );
+    expect(splineSlotSession.toolStagedEntities).toEqual([]);
+    expect(
+      splineSlotSession.validationMessage,
+      "Slot along a spline should say it is not supported yet.",
+    ).toBe(SPLINE_SLOT_UNSUPPORTED_MESSAGE);
+    const unchanged = splineSlotSession.definition;
+    splineSlotSession = patchSketchEditToolValue(splineSlotSession, {
+      value: 1,
+    });
+    splineSlotSession = patchSketchEditToolValue(splineSlotSession, {
+      intent: "commitSketchEditOperator",
+    });
+    expect(splineSlotSession.validationMessage).toBe(
+      SPLINE_SLOT_UNSUPPORTED_MESSAGE,
+    );
+    expect(
+      splineSlotSession.definition,
+      "Slot along a spline should author nothing.",
+    ).toBe(unchanged);
   }
 
   function testSketchExtendSplitAndUnsupportedDiagnosticsUseSessionState() {
