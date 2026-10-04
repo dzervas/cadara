@@ -13,6 +13,7 @@ import {
   isSketchSelectionCyclePickRetained,
   type SketchSelectionCycleContext,
 } from "@/domain/editor/sketch-session/selection";
+import { shouldViewportClickRequestSelection } from "@/domain/editor/workbench-interactions";
 import {
   getArmedSketchPickCycleIndex,
   getSketchPickPreviewIndex,
@@ -923,6 +924,55 @@ export function getSketchPickPreviewTarget(
       getSketchPickPreviewIndex(cycle, toSketchPickCyclePointer(x, y, wiring))
     ] ?? null
   );
+}
+
+/**
+ * The candidates the overlap hint counts and the chooser lists (T11e,
+ * T11d review R-2): the eligible targets of the stack, in stack order, in a
+ * selection context (no special mode, a click requests selection); `null`
+ * when fewer than 2 (then an Alt+click is a plain click).
+ */
+export function getSketchPickChooserTargets(
+  session: SketchSessionState,
+  wiring: SketchPickCycleWiring,
+): readonly PrimitiveRef[] | null {
+  if (
+    session.activeSpecialMode ||
+    !shouldViewportClickRequestSelection(session.activeTool)
+  ) {
+    return null;
+  }
+  const targets = wiring.hintStack ?? wiring.stack;
+  return targets.length >= 2 ? targets : null;
+}
+
+/**
+ * A chooser pick of `target` from the stack at the overlap point (x, y)
+ * (T11e, T11-D6): the same selection event a click picking it would send.
+ * In a cycling context with a cycle armed at that point, it replaces the
+ * previous pick (`replace` / `replaceLastAdded`, as a cycle click does);
+ * otherwise it is an ordinary click on `target` (incl. immediate-action
+ * contexts, where the tool then acts on it). The cycle resets.
+ */
+export function resolveSketchPickChoice(
+  cycle: SketchPickCycle | null,
+  at: { x: number; y: number },
+  wiring: SketchPickCycleWiring,
+  target: PrimitiveRef,
+): { cycle: null; target: PrimitiveRef; replaces: PrimitiveRef | null } {
+  const armed =
+    wiring.context.mode !== "none" && cycle
+      ? getArmedSketchPickCycleIndex(
+          cycle,
+          toSketchPickCyclePointer(at.x, at.y, wiring),
+        )
+      : null;
+  return {
+    cycle: null,
+    target,
+    replaces:
+      armed !== null && cycle ? (wiring.stack[cycle.index] ?? null) : null,
+  };
 }
 
 /**

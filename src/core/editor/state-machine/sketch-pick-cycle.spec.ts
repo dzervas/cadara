@@ -337,3 +337,59 @@ describe("T11d cycle selection through the editor transition", () => {
     expect(result.selection).toBe(state.selection);
   });
 });
+
+// T11e: a chooser pick is the selection event a click picking the same
+// target sends (`cycleReplaces` = the previous pick only while a cycle is
+// armed at the overlap; `resolveSketchPickChoice`, UI lane), per context.
+describe("T11e chooser picks through the editor transition", () => {
+  test("replace (no tool): picking X axis, unarmed or armed after the line, selects only it", async () => {
+    const { state, line, xAxis } = await makeOverlapState();
+    expect(select(state, xAxis).selection, "Unarmed: a plain pick.").toEqual([
+      xAxis,
+    ]);
+    const first = select(state, line);
+    expect(
+      select(first, xAxis, line).selection,
+      "Armed: the axis replaces the line in one event.",
+    ).toEqual([xAxis]);
+  });
+
+  test("replace-last-added (Offset): the chosen target replaces the previous pick; unarmed it is added once", async () => {
+    const { state, line, construction, other } =
+      await makeOverlapState("offset");
+    expect(
+      offsetTargets(select(state, construction)),
+      "Unarmed (Alt+click first): one ordinary add.",
+    ).toEqual([construction]);
+    const first = select(state, line);
+    expect(
+      offsetTargets(select(first, construction, line)),
+      "Armed: the construction line replaces the line, no append.",
+    ).toEqual([construction]);
+    const chain = select(select(state, other), line);
+    expect(
+      offsetTargets(select(chain, construction, line)),
+      "A chain keeps its earlier targets; only the last-added pick is replaced.",
+    ).toEqual([other, construction]);
+  });
+
+  test("immediate action (Trim): the chooser's plain pick reaches the tool with the chosen target", async () => {
+    const { state, construction, line } = await makeOverlapState("trim");
+    const picked = select(state, construction);
+    expect(
+      picked.selection,
+      "Trim receives the construction line, not stack[0] (the line).",
+    ).toEqual([construction]);
+    expect(picked.selection).not.toContainEqual(line);
+    const refused = transitionEditorState(state, {
+      type: "viewport.selectionRequested",
+      target: construction,
+      cycleReplaces: line,
+    }).state as SketchEditorState;
+    expect(
+      refused.selection,
+      "Contrast: a cycle event (what the chooser never sends here) selects nothing.",
+    ).toBe(state.selection);
+    expect(refused.session).toBe(state.session);
+  });
+});
