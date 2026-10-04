@@ -2461,7 +2461,7 @@ describe("src/domain/modeling/occ/production-asset-conformance.spec.ts", () => {
         );
       };
       const disconnected =
-        /^unsupported-profile-group: Open sketch curves sketch_entity_bc are not connected to the rest of the surface profile chain: curve ends connect only through a shared point or a satisfied coincident constraint\.$/;
+        /^unsupported-profile-group: Open sketch curves sketch_entity_bc are not connected to the rest of the open sketch-curve chain: curve ends connect only through a shared point or a satisfied coincident constraint\.$/;
 
       const nearMiss = await twoLines(5e-7, "none");
       const bitwise = await twoLines(0, "none");

@@ -29,11 +29,24 @@ test("persisted legacy region labels require reselection after canonical region 
 
   await workbench.openWithOperationHistory(history);
 
+  const repair = page.getByRole("treeitem", {
+    name: /Repair Extrude 1\. Edit Extrude 1 and choose a valid profile selection\./,
+  });
   await expect(
-    page.getByRole("treeitem", {
-      name: /Repair Extrude 1\. Edit Extrude 1 and choose a valid profile selection\./,
-    }),
+    repair,
     "The feature whose legacy region no longer resolves asks for reselection.",
   ).toBeVisible({ timeout: 30_000 });
   await workbench.expectBodyAbsent(FEATURE_FIXTURE.body);
+
+  // T10 plan §2.9: the cause is `profile-region-reselect`, and the editor's
+  // profile field keeps the dangling selection as a missing region.
+  await repair.dblclick();
+  await expect(
+    page.getByText(
+      `Missing region (${FEATURE_FIXTURE.profile.replace(canonicalRegionId, legacyRegionId)})`,
+    ),
+  ).toBeVisible({ timeout: 30_000 });
+  await expect(
+    page.getByText("profile-region-reselect", { exact: true }).first(),
+  ).toBeVisible();
 });

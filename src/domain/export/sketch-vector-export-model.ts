@@ -23,7 +23,7 @@ import type {
 } from "@/contracts/sketch/schema";
 import { nonAcceptedOffsetOutputs } from "@/contracts/sketch/offset-publication";
 import {
-  createRegionBoundaryBasis,
+  regionBoundaryBasisOfRecord,
   resolveRegionBoundaryCurve,
   type ResolvedBoundaryCurve,
 } from "@/contracts/sketch/region-boundary-curves";
@@ -484,14 +484,7 @@ function buildRegions(
 ): SketchVectorRegion[] {
   const { definition, regions } = sketch.sketch;
   if (regions.length === 0) return [];
-  const basis = createRegionBoundaryBasis(
-    {
-      definition,
-      solvedSnapshot: sketch.sketch.solvedSnapshot,
-      projectedReferences: sketch.sketch.projectedReferences ?? [],
-    },
-    regions,
-  );
+  const basis = regionBoundaryBasisOfRecord(sketch.sketch);
   return regions
     .filter((region) => region.isClosed)
     .flatMap((region) => {

@@ -376,8 +376,37 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
         ),
       "A pre-canonical region id sharing only the old hash suffix no longer resolves.",
     ).toThrow(
-      `Sketch region region_legacy_region-sketch_entity_z_bottom-3h5wtq1po7fut does not resolve on sketch ${sketchId}; it requires reselection or correction of ${sketch.label} diagnostics.`,
+      `profile-region-reselect: Sketch region region_legacy_region-sketch_entity_z_bottom-3h5wtq1po7fut is not among the current regions of ${sketch.label}; choose a valid profile selection.`,
     );
+
+    // T10 plan §2.9: a stale or invalid sketch keeps the selection; its own
+    // code names the sketch correction (N errors) instead of reselection.
+    for (const [state, diagnostics, guidance] of [
+      ["stale", [], `Correct ${sketch.label}; the profile will resolve again.`],
+      [
+        "invalid",
+        [
+          { code: "a", severity: "error", message: "a", target: null },
+          { code: "b", severity: "warning", message: "b", target: null },
+          { code: "c", severity: "error", message: "c", target: null },
+        ],
+        `Correct ${sketch.label} (2 errors); the profile will resolve again.`,
+      ],
+    ] as const) {
+      const notCurrent = {
+        ...sketch,
+        sketch: {
+          ...sketch.sketch,
+          derivedValidity: { state, diagnostics: [...diagnostics] },
+        },
+      };
+      expect(
+        () => requireRegion(notCurrent, canonicalRegionId),
+        `A ${state} sketch reports profile-region-sketch-not-current, not reselection, even for a region id it still lists.`,
+      ).toThrow(
+        `profile-region-sketch-not-current: Sketch region ${canonicalRegionId} waits for ${sketch.label}, whose derived output is ${state}. ${guidance}`,
+      );
+    }
   }
 
   async function makeBoxBody(

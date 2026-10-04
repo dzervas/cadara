@@ -87,8 +87,11 @@ import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 export interface MockSketchSolverAdapterOptions {
   /** Durable document identity the mock solver accepts. */
   documentId: DocumentId;
-  /** Current committed revision identity the mock solver accepts. */
-  revisionId: RevisionId;
+  /**
+   * Committed revision identity the mock solver accepts; `null` accepts every
+   * revision (one solver per kernel adapter, T10 A10).
+   */
+  revisionId: RevisionId | null;
   /** The selected kernel's neutral curve queries; only `deriveSketchRegions` uses them. */
   neutralCurveQueries: NeutralCurveQueryCapability;
 }
@@ -151,7 +154,7 @@ function getRevisionMismatchDiagnostics(
 ) {
   if (
     request.documentId === options.documentId &&
-    request.revisionId === options.revisionId
+    (options.revisionId === null || request.revisionId === options.revisionId)
   ) {
     return [] as SketchSolveDiagnostic[];
   }

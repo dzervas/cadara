@@ -6,7 +6,7 @@ import type {
   SketchRecord,
 } from "@/contracts/sketch/schema";
 import {
-  createRegionBoundaryBasis,
+  regionBoundaryBasisOfRecord,
   resolveRegionBoundaryCurve,
   type RegionBoundaryBasis,
   type ResolvedBoundaryCurve,
@@ -484,30 +484,10 @@ function describeRegionBoundaryBranch(segment: RegionBoundarySegment) {
 }
 
 /**
- * One cached basis per record object, with the four field references it was
- * built from (review A-2): any reassigned field rebuilds it.
- */
-const sketchRecordBases = new WeakMap<
-  SketchRecord,
-  {
-    definition: SketchRecord["definition"];
-    solvedSnapshot: SketchRecord["solvedSnapshot"];
-    projectedReferences: SketchRecord["projectedReferences"];
-    regions: SketchRecord["regions"];
-    basis: RegionBoundaryBasis;
-  }
->();
-
-/**
- * The region-boundary basis of one OCC sketch record (T10b review R-2): its
- * definition, solved snapshot (publications applied, as stored), projected
- * references and its own `regions`, held together by the record, so a
- * region resolves only against the pair that produced it. Records reach OCC
- * whole (structured clone, persistence), so a basis built from the record in
- * hand holds the very segment objects its regions carry. Only a `current`
- * record has consumable regions; a stale or invalid one fails closed. The
- * basis is cached per record object and rebuilt when any of its definition,
- * solved snapshot, projected references or regions is a different object.
+ * The region-boundary basis of one OCC sketch record (T10b review R-2),
+ * through the contracts owner's cached `regionBoundaryBasisOfRecord`. Only a
+ * `current` record has consumable regions; a stale or invalid one fails
+ * closed.
  */
 export function regionBoundaryBasisOfSketchRecord(
   sketch: SketchRecord,
@@ -517,31 +497,7 @@ export function regionBoundaryBasisOfSketchRecord(
       `profile-boundary-unresolved: Sketch ${sketch.sketchId} derived output is ${sketch.derivedValidity.state}; only the regions of a current sketch resolve.`,
     );
   }
-  const cached = sketchRecordBases.get(sketch);
-  if (
-    cached &&
-    cached.definition === sketch.definition &&
-    cached.solvedSnapshot === sketch.solvedSnapshot &&
-    cached.projectedReferences === sketch.projectedReferences &&
-    cached.regions === sketch.regions
-  )
-    return cached.basis;
-  const basis = createRegionBoundaryBasis(
-    {
-      definition: sketch.definition,
-      solvedSnapshot: sketch.solvedSnapshot,
-      projectedReferences: sketch.projectedReferences ?? [],
-    },
-    sketch.regions,
-  );
-  sketchRecordBases.set(sketch, {
-    definition: sketch.definition,
-    solvedSnapshot: sketch.solvedSnapshot,
-    projectedReferences: sketch.projectedReferences,
-    regions: sketch.regions,
-    basis,
-  });
-  return basis;
+  return regionBoundaryBasisOfRecord(sketch);
 }
 
 /**
@@ -1355,7 +1311,7 @@ function resolveOpenProfileCurve(
     const reconstruction = geometry.reconstruction;
     if (reconstruction.validity !== "valid")
       throw new Error(
-        `unsupported-profile-group: Sketch entity ${entityId} has an invalid spline reconstruction (${reconstruction.diagnostics.map((diagnostic) => diagnostic.code).join(", ")}) and cannot define an open surface profile curve.`,
+        `unsupported-profile-group: Sketch entity ${entityId} has an invalid spline reconstruction (${reconstruction.diagnostics.map((diagnostic) => diagnostic.code).join(", ")}) and cannot be part of an open sketch-curve chain.`,
       );
     const poles = solvedCubicSpans(geometry);
     const spans = reconstruction.spans.map((span, index) => ({
@@ -1373,7 +1329,7 @@ function resolveOpenProfileCurve(
   }
 
   throw new Error(
-    `unsupported-profile-group: Sketch entity ${entityId} of kind ${geometry.kind} cannot define an open surface profile curve.`,
+    `unsupported-profile-group: Sketch entity ${entityId} of kind ${geometry.kind} cannot be part of an open sketch-curve chain.`,
   );
 }
 
@@ -1390,7 +1346,7 @@ function resolveOpenProfileCurve(
 function orderOpenProfileChain(curves: readonly OpenProfileCurve[]) {
   if (curves.length > 1 && curves.some((curve) => curve.kind === "circle")) {
     throw new Error(
-      "unsupported-profile-group: A closed sketch curve cannot be chained with other open surface profile curves.",
+      "unsupported-profile-group: A closed sketch curve cannot be chained with other open sketch curves.",
     );
   }
   const names = (list: readonly OpenProfileCurve[]) =>
@@ -1422,7 +1378,7 @@ function orderOpenProfileChain(curves: readonly OpenProfileCurve[]) {
     );
     if (index < 0) {
       throw new Error(
-        `unsupported-profile-group: Open sketch curves ${names(remaining)} are not connected to the rest of the surface profile chain: curve ends connect only through a shared point or a satisfied coincident constraint.`,
+        `unsupported-profile-group: Open sketch curves ${names(remaining)} are not connected to the rest of the open sketch-curve chain: curve ends connect only through a shared point or a satisfied coincident constraint.`,
       );
     }
     const [curve] = remaining.splice(index, 1);
@@ -1475,13 +1431,13 @@ export function buildOpenSketchCurveWire(
 ): BuiltSketchProfileWire {
   if (entityIds.length === 0) {
     throw new Error(
-      "unsupported-profile-group: An open sketch-curve surface profile requires at least one sketch entity.",
+      "unsupported-profile-group: An open sketch-curve chain requires at least one sketch entity.",
     );
   }
 
   if (new Set(entityIds).size !== entityIds.length) {
     throw new Error(
-      "unsupported-profile-group: An open sketch-curve surface profile must not repeat a sketch entity.",
+      "unsupported-profile-group: An open sketch-curve chain must not repeat a sketch entity.",
     );
   }
 

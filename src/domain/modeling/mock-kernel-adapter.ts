@@ -62,6 +62,11 @@ import {
   evaluateDocumentVariableExpressions,
 } from "@/domain/modeling/document-variable-expressions";
 import { resolveFeatureDefinitionValues } from "@/domain/modeling/feature-value-expressions";
+import {
+  PROFILE_REGION_RESELECT_CODE,
+  PROFILE_REGION_SKETCH_NOT_CURRENT_CODE,
+  profileRegionSketchNotCurrentGuidance,
+} from "@/domain/modeling/feature-diagnostic-mapping";
 import { resolveSketchDimensionValues } from "@/domain/modeling/sketch-dimension-expressions";
 import {
   getExtrudeFeatureExtent,
@@ -1766,6 +1771,28 @@ function createPreviewRenderableSet(
   ];
 }
 
+function createProfileRegionRejection(
+  code: string,
+  target: Extract<DurableRef, { kind: "region" }>,
+  message: string,
+  repairGuidance: string,
+) {
+  return {
+    accepted: false as const,
+    reasonCode: code,
+    diagnostics: [
+      {
+        code,
+        severity: "error" as const,
+        message,
+        repairGuidance,
+        target,
+        detail: null,
+      },
+    ],
+  };
+}
+
 function validateFeatureDefinitionAgainstSnapshot(
   definition: FeatureDefinition,
   snapshot: WorkspaceSnapshot,
@@ -1774,6 +1801,40 @@ function validateFeatureDefinitionAgainstSnapshot(
     definition,
     snapshot,
   );
+  // Review A9: mock parity for the T10 plan §2.9 reselection causes. A
+  // region of a missing sketch asks for reselection, as in OCC (review R-2).
+  const nonCurrentRegionSketch =
+    nonCurrentSketchInput?.kind === "region"
+      ? snapshot.document.sketches.find(
+          (entry) => entry.sketchId === nonCurrentSketchInput.sketchId,
+        )
+      : undefined;
+  if (nonCurrentSketchInput?.kind === "region" && nonCurrentRegionSketch) {
+    const validity = nonCurrentRegionSketch.sketch.derivedValidity;
+    return createProfileRegionRejection(
+      PROFILE_REGION_SKETCH_NOT_CURRENT_CODE,
+      nonCurrentSketchInput,
+      `Sketch region ${nonCurrentSketchInput.regionId} waits for its sketch, whose derived output is ${validity.state}.`,
+      profileRegionSketchNotCurrentGuidance(
+        nonCurrentRegionSketch.label,
+        validity.diagnostics.filter(
+          (diagnostic) => diagnostic.severity === "error",
+        ).length,
+      ),
+    );
+  }
+  const missingRegion = getFeatureDefinitionChangedTargets(definition).find(
+    (target): target is Extract<typeof target, { kind: "region" }> =>
+      target.kind === "region" && !hasRegionTarget(snapshot, target),
+  );
+  if (missingRegion) {
+    return createProfileRegionRejection(
+      PROFILE_REGION_RESELECT_CODE,
+      missingRegion,
+      `Sketch region ${missingRegion.regionId} is not among the current regions of its sketch.`,
+      `Edit the ${definition.kind} and choose a valid profile selection.`,
+    );
+  }
   if (nonCurrentSketchInput) {
     return {
       accepted: false as const,
@@ -1847,10 +1908,8 @@ function validateFeatureDefinitionAgainstSnapshot(
       }
 
       if (
-        (firstProfile.kind === "region" &&
-          !hasRegionTarget(snapshot, firstProfile)) ||
-        (firstProfile.kind === "face" &&
-          !hasFaceTarget(snapshot, firstProfile.bodyId, firstProfile.faceId))
+        firstProfile.kind === "face" &&
+        !hasFaceTarget(snapshot, firstProfile.bodyId, firstProfile.faceId)
       ) {
         return {
           accepted: false as const,
@@ -1859,7 +1918,7 @@ function validateFeatureDefinitionAgainstSnapshot(
             createInvalidFeatureDiagnostic(
               definition,
               firstProfile,
-              "Extrude profile targets must resolve to a live durable region or face in the current snapshot.",
+              "Extrude profile targets must resolve to a live durable face in the current snapshot.",
             ),
           ],
         };
@@ -2079,9 +2138,8 @@ function validateFeatureDefinitionAgainstSnapshot(
       if (
         profileTargets.some(
           (target) =>
-            (target.kind === "region" && !hasRegionTarget(snapshot, target)) ||
-            (target.kind === "face" &&
-              !hasFaceTarget(snapshot, target.bodyId, target.faceId)),
+            target.kind === "face" &&
+            !hasFaceTarget(snapshot, target.bodyId, target.faceId),
         ) ||
         (firstPath.kind === "edge" &&
           !hasEdgeTarget(snapshot, firstPath.bodyId, firstPath.edgeId)) ||
@@ -2195,9 +2253,8 @@ function validateFeatureDefinitionAgainstSnapshot(
       if (
         profileTargets.some(
           (target) =>
-            (target.kind === "region" && !hasRegionTarget(snapshot, target)) ||
-            (target.kind === "face" &&
-              !hasFaceTarget(snapshot, target.bodyId, target.faceId)),
+            target.kind === "face" &&
+            !hasFaceTarget(snapshot, target.bodyId, target.faceId),
         )
       ) {
         return {
@@ -5159,6 +5216,11 @@ function parseMockRevisionSequence(revisionId: RevisionId) {
 export class MockKernelAdapter implements ModelingKernelAdapter {
   private solverAdapter: SketchSolverAdapter;
   private readonly ownsSolverAdapter: boolean;
+  /** T10 A10: one owned solver (one deriver and query cache) per document. */
+  private readonly ownedSolverAdapters = new Map<
+    RepositoryAuthoredModelDocument["documentId"],
+    MockSketchSolverAdapter
+  >();
 
   private snapshotPromise: Promise<WorkspaceSnapshot> | null = null;
   private currentRevisionId: RevisionId = REVISION_ID;
@@ -5173,22 +5235,29 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
   }) {
     this.ownsSolverAdapter = options?.solverAdapter === undefined;
     this.solverAdapter =
-      options?.solverAdapter ??
-      new MockSketchSolverAdapter({ neutralCurveQueries: this });
+      options?.solverAdapter ?? this.solverAdapterForDocument(DOCUMENT_ID);
     this.assetResolver = options?.assetResolver;
   }
 
-  private solverAdapterForRevision(
+  /**
+   * The solver for `documentId`: the injected one, or the adapter's own
+   * revision-agnostic solver for that document, shared across revisions so
+   * its exact-request query cache (bounded, keyed on exact requests) is too.
+   */
+  private solverAdapterForDocument(
     documentId: RepositoryAuthoredModelDocument["documentId"],
-    revisionId: RevisionId,
   ) {
-    return this.ownsSolverAdapter
-      ? new MockSketchSolverAdapter({
-          documentId,
-          revisionId,
-          neutralCurveQueries: this,
-        })
-      : this.solverAdapter;
+    if (!this.ownsSolverAdapter) return this.solverAdapter;
+    let solver = this.ownedSolverAdapters.get(documentId);
+    if (!solver) {
+      solver = new MockSketchSolverAdapter({
+        documentId,
+        revisionId: null,
+        neutralCurveQueries: this,
+      });
+      this.ownedSolverAdapters.set(documentId, solver);
+    }
+    return solver;
   }
 
   /** U3: the conforming test-only kernel delegates to the kernel-free certifier. */
@@ -5245,9 +5314,8 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
     diagnostics: readonly ModelingDiagnostic[] = [],
   ): Promise<void> {
     const snapshot = structuredClone(await this.getSnapshot());
-    const restoreSolverAdapter = this.solverAdapterForRevision(
+    const restoreSolverAdapter = this.solverAdapterForDocument(
       document.documentId,
-      document.revisionId,
     );
     this.authoredAssets = structuredClone(document.assets);
     this.authoredEmbeddedBinaryAssets = structuredClone(
@@ -5484,9 +5552,8 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
     const response = mutate(snapshot, nextRevisionId);
     stampSnapshotRevision(snapshot, nextRevisionId);
     this.currentRevisionId = nextRevisionId;
-    this.solverAdapter = this.solverAdapterForRevision(
+    this.solverAdapter = this.solverAdapterForDocument(
       snapshot.document.documentId,
-      nextRevisionId,
     );
     return response;
   }

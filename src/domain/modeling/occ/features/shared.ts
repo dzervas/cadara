@@ -25,6 +25,11 @@ import type {
   GeometryAssetHash,
   GeometryAssetRecord,
 } from "@/contracts/modeling/geometry-assets";
+import {
+  PROFILE_REGION_RESELECT_CODE,
+  PROFILE_REGION_SKETCH_NOT_CURRENT_CODE,
+  profileRegionSketchNotCurrentGuidance,
+} from "@/domain/modeling/feature-diagnostic-mapping";
 import { OCC_CONTRACT_GAP_CODES } from "@/domain/modeling/occ/implementation-policy";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import type {
@@ -161,10 +166,25 @@ export function describeOccEnumValue(
   return String(numericValue);
 }
 
+/**
+ * The consumable region `regionId` of `sketch`, or a coded failure (T10 plan
+ * §2.9): `profile-region-sketch-not-current` while the sketch is stale or
+ * invalid (the selection is kept and reconnects by identity), otherwise
+ * `profile-region-reselect` (the id is not among the current regions).
+ */
 export function requireRegion(
   sketch: SketchSnapshotRecord,
   regionId: RegionRecord["regionId"],
 ) {
+  const validity = sketch.sketch.derivedValidity;
+  if (validity.state !== "current") {
+    const errorCount = validity.diagnostics.filter(
+      (diagnostic) => diagnostic.severity === "error",
+    ).length;
+    throw new Error(
+      `${PROFILE_REGION_SKETCH_NOT_CURRENT_CODE}: Sketch region ${regionId} waits for ${sketch.label}, whose derived output is ${validity.state}. ${profileRegionSketchNotCurrentGuidance(sketch.label, errorCount)}`,
+    );
+  }
   const region = getConsumableSketchRegions(sketch.sketch).find(
     (entry) => entry.regionId === regionId,
   );
@@ -173,7 +193,7 @@ export function requireRegion(
   }
 
   throw new Error(
-    `Sketch region ${regionId} does not resolve on sketch ${sketch.sketchId}; it requires reselection or correction of ${sketch.label} diagnostics.`,
+    `${PROFILE_REGION_RESELECT_CODE}: Sketch region ${regionId} is not among the current regions of ${sketch.label}; choose a valid profile selection.`,
   );
 }
 

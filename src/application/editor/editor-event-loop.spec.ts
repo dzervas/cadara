@@ -1053,6 +1053,77 @@ test("EditorEventLoop keeps drag regions stale until the drag completes, then de
   loop.stop();
 });
 
+test.each([false, true])(
+  "EditorEventLoop derives a restored annotation-gesture basis once (T10 A11/A13, supersede=%s)",
+  async (supersede) => {
+    const snapshot = await createSeedDocumentSnapshot();
+    const sketch = snapshot.document.sketches[0]!;
+    snapshot.document.cursor = { kind: "sketch", sketchId: sketch.sketchId };
+    snapshot.cursor = { kind: "sketch", sketchId: sketch.sketchId };
+    const { runtime, derivations } = createControlledRegionRuntime(snapshot);
+    const loop = createEditorEventLoop(
+      { ...runtime, supersedesSketchRegionDerivation: supersede },
+      createTestErrorReporter(),
+    );
+    const currentSketch = await openSeedSketch(loop, sketch.sketchId);
+    await waitForCondition(() => derivations.length === 1);
+    derivations[0]!.resolve({
+      regions: sketch.sketch.regions,
+      diagnostics: [],
+    });
+    await waitForState(
+      loop,
+      (state) =>
+        state.kind === "editingSketch" &&
+        state.session.liveRegions.status === "current",
+    );
+
+    const dimension = currentSketch().session.definition.dimensions[0]!;
+    const patch = (
+      gesturePhase: "start" | "move" | "cancel",
+      point: readonly [number, number],
+    ) =>
+      loop.dispatch({
+        type: "sketch.toolPatched",
+        patch: {
+          intent: "setDimensionAnnotationPlacement",
+          dimensionId: dimension.dimensionId,
+          point,
+          gesturePhase,
+          clientPoint: point,
+        },
+      });
+    patch("start", [20, 10]);
+    patch("move", [30, 15]);
+    patch("cancel", [30, 15]);
+    await waitForCondition(() => derivations.length === 2);
+    const restored = currentSketch();
+    expect(restored.pendingRegionRequest).toEqual({
+      requestId: derivations[1]!.input.requestId,
+      generation: restored.session.liveRegions.generation,
+    });
+    expect(derivations[1]!.input.basis.definition).toBe(
+      restored.session.liveSolve!.definition,
+    );
+    derivations[1]!.resolve({
+      regions: sketch.sketch.regions,
+      diagnostics: [],
+    });
+    await waitForState(
+      loop,
+      (state) =>
+        state.kind === "editingSketch" &&
+        state.session.liveRegions.status === "current",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(
+      derivations,
+      "The cancel restores after the reducer; the reducer's request for the superseded basis is dropped, so the restored basis derives once.",
+    ).toHaveLength(2);
+    loop.stop();
+  },
+);
+
 test("EditorEventLoop reports a rejected background derivation and marks live regions failed", async () => {
   const snapshot = await createSeedDocumentSnapshot();
   const sketch = snapshot.document.sketches[0]!;
