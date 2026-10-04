@@ -839,7 +839,14 @@ async function openSeedSketch(
     target: { kind: "sketch", sketchId },
     toolId: "sketch",
   });
-  await waitForState(loop, (state) => state.kind === "editingSketch");
+  // The seed sketch has a reference: entry bases on the record's projections
+  // and requests their refresh, whose result re-bases (T11a).
+  await waitForState(
+    loop,
+    (state) =>
+      state.kind === "editingSketch" &&
+      state.pendingProjectionRequestId === null,
+  );
   return () => {
     const state = loop.getState();
     if (state.kind !== "editingSketch")
@@ -853,6 +860,29 @@ function relabelRegions(
   label: string,
 ) {
   return regions.map((region) => ({ ...region, label }));
+}
+
+/**
+ * Settles a seed sketch's opening (T11a): the entry basis derives first; the
+ * projection result re-bases, so that request is stale (serial) or
+ * superseded, and the projected basis derives second and publishes.
+ */
+async function settleOpeningRounds(
+  loop: ReturnType<typeof createEditorEventLoop>,
+  derivations: ReturnType<typeof createControlledRegionRuntime>["derivations"],
+  regions: DeriveSketchRegionsOutput["regions"],
+) {
+  await waitForCondition(() => derivations.length >= 1);
+  derivations[0]!.resolve({ regions, diagnostics: [] });
+  await waitForCondition(() => derivations.length >= 2);
+  derivations[1]!.resolve({ regions, diagnostics: [] });
+  await waitForState(
+    loop,
+    (state) =>
+      state.kind === "editingSketch" &&
+      state.session.liveRegions.status === "current",
+  );
+  expect(derivations, "Opening derives two bases, once each.").toHaveLength(2);
 }
 
 test("EditorEventLoop derives live regions in the background, discards stale generations and coalesces to the latest basis", async () => {
@@ -872,9 +902,17 @@ test("EditorEventLoop derives live regions in the background, discards stale gen
     getSketchSessionDerivedValidity(opened.session).state,
     "Retained regions are stale while the derivation is outstanding.",
   ).toBe("stale");
-  expect(derivations[0]!.input.basis.definition).toBe(
+  // The entry basis (record projections) derives first; the projection
+  // result re-based the same definition (T11a).
+  expect(derivations[0]!.input.basis.definition).toEqual(
     opened.session.liveSolve!.definition,
   );
+  // Request 0 is the entry basis: one generation behind the projected one.
+  // (The runtime input carries no generation; the pending request does.)
+  expect(opened.pendingRegionRequest).toEqual({
+    requestId: derivations[0]!.input.requestId,
+    generation: opened.session.liveRegions.generation - 1,
+  });
 
   // Geometry edits establish new live solve bases. (Dimension label moves no
   // longer do: placements never affect regions, T09b review A6(a).)
@@ -955,6 +993,13 @@ test("EditorEventLoop derives live regions in the background, discards stale gen
     toolId: "sketch",
   });
   await waitForCondition(() => derivations.length === 4);
+  await waitForState(
+    loop,
+    (state) =>
+      state.kind === "editingSketch" &&
+      state.command.commandSessionId !== finishedSessionId &&
+      state.pendingProjectionRequestId === null,
+  );
   const reopened = currentSketch();
   expect(reopened.command.commandSessionId).not.toBe(finishedSessionId);
   const reopenedRequest = reopened.pendingRegionRequest;
@@ -981,7 +1026,14 @@ test("EditorEventLoop derives live regions in the background, discards stale gen
     "A late result from the finished session must not trigger a new derivation.",
   ).toHaveLength(4);
 
+  // The entry basis's request is stale once the projection result re-based.
   derivations[3]!.resolve({
+    regions: relabelRegions(sketch.sketch.regions, "reopen entry basis"),
+    diagnostics: [],
+  });
+  await waitForCondition(() => derivations.length === 5);
+  expect(currentSketch().session.liveRegions.regions).toBe(reopenedRegions);
+  derivations[4]!.resolve({
     regions: relabelRegions(sketch.sketch.regions, "reopened session"),
     diagnostics: [],
   });
@@ -1005,17 +1057,7 @@ test("EditorEventLoop keeps drag regions stale until the drag completes, then de
   const { runtime, derivations } = createControlledRegionRuntime(snapshot);
   const loop = createEditorEventLoop(runtime, createTestErrorReporter());
   const currentSketch = await openSeedSketch(loop, sketch.sketchId);
-  await waitForCondition(() => derivations.length === 1);
-  derivations[0]!.resolve({
-    regions: sketch.sketch.regions,
-    diagnostics: [],
-  });
-  await waitForState(
-    loop,
-    (state) =>
-      state.kind === "editingSketch" &&
-      state.session.liveRegions.status === "current",
-  );
+  await settleOpeningRounds(loop, derivations, sketch.sketch.regions);
 
   const point = currentSketch().session.definition.points[0]!;
   loop.dispatch({
@@ -1040,14 +1082,14 @@ test("EditorEventLoop keeps drag regions stale until the drag completes, then de
   expect(
     derivations,
     "No derivation is requested while the drag is active.",
-  ).toHaveLength(1);
+  ).toHaveLength(2);
 
   loop.dispatch({
     type: "sketch.geometryDragEnded",
     point: [point.position[0] - 2, point.position[1] - 1],
   });
-  await waitForCondition(() => derivations.length === 2);
-  expect(derivations[1]!.input.basis.definition).toBe(
+  await waitForCondition(() => derivations.length === 3);
+  expect(derivations[2]!.input.basis.definition).toBe(
     currentSketch().session.liveSolve!.definition,
   );
   loop.stop();
@@ -1066,17 +1108,7 @@ test.each([false, true])(
       createTestErrorReporter(),
     );
     const currentSketch = await openSeedSketch(loop, sketch.sketchId);
-    await waitForCondition(() => derivations.length === 1);
-    derivations[0]!.resolve({
-      regions: sketch.sketch.regions,
-      diagnostics: [],
-    });
-    await waitForState(
-      loop,
-      (state) =>
-        state.kind === "editingSketch" &&
-        state.session.liveRegions.status === "current",
-    );
+    await settleOpeningRounds(loop, derivations, sketch.sketch.regions);
 
     const dimension = currentSketch().session.definition.dimensions[0]!;
     const patch = (
@@ -1096,16 +1128,16 @@ test.each([false, true])(
     patch("start", [20, 10]);
     patch("move", [30, 15]);
     patch("cancel", [30, 15]);
-    await waitForCondition(() => derivations.length === 2);
+    await waitForCondition(() => derivations.length === 3);
     const restored = currentSketch();
     expect(restored.pendingRegionRequest).toEqual({
-      requestId: derivations[1]!.input.requestId,
+      requestId: derivations[2]!.input.requestId,
       generation: restored.session.liveRegions.generation,
     });
-    expect(derivations[1]!.input.basis.definition).toBe(
+    expect(derivations[2]!.input.basis.definition).toBe(
       restored.session.liveSolve!.definition,
     );
-    derivations[1]!.resolve({
+    derivations[2]!.resolve({
       regions: sketch.sketch.regions,
       diagnostics: [],
     });
@@ -1119,7 +1151,7 @@ test.each([false, true])(
     expect(
       derivations,
       "The cancel restores after the reducer; the reducer's request for the superseded basis is dropped, so the restored basis derives once.",
-    ).toHaveLength(2);
+    ).toHaveLength(3);
     loop.stop();
   },
 );
@@ -1135,8 +1167,11 @@ test("EditorEventLoop reports a rejected background derivation and marks live re
   const currentSketch = await openSeedSketch(loop, sketch.sketchId);
   await waitForCondition(() => derivations.length === 1);
   const retained = currentSketch().session.liveRegions.regions;
+  // The entry basis's request is stale once the projection result re-based.
+  derivations[0]!.resolve({ regions: [], diagnostics: [] });
+  await waitForCondition(() => derivations.length === 2);
 
-  derivations[0]!.reject(new Error("Region core exploded."));
+  derivations[1]!.reject(new Error("Region core exploded."));
   await waitForState(
     loop,
     (state) =>
@@ -1159,7 +1194,7 @@ test("EditorEventLoop reports a rejected background derivation and marks live re
   ).toBe(true);
   expect(currentSketch().pendingRegionRequest).toBe(null);
   await Promise.resolve();
-  expect(derivations, "A failure is not retried.").toHaveLength(1);
+  expect(derivations, "A failure is not retried.").toHaveLength(2);
   loop.stop();
 });
 

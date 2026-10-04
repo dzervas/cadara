@@ -48,7 +48,7 @@ import {
   emitSketchReferenceProjection,
   emitSketchSpecialModeEffect,
 } from "./effect-emitters";
-import { withPreview } from "./state-creators";
+import { enterSketchEditing, withPreview } from "./state-creators";
 import { deriveSketchPointFromWorld, nextRequestId } from "./utility-helpers";
 
 export function handleSketchPointerMoved(
@@ -484,59 +484,37 @@ export function handleSketchReferenceImagePayloadsPicked(
       return { state, effects: [] };
     }
 
-    const nextState: SketchEditorState = {
-      kind: "editingSketch",
-      mode: "sketch",
-      document: state.document,
-      snapshot: state.snapshot,
-      previewRenderables: null,
-      selection:
-        session.sketchId === null
-          ? [session.planeTarget]
-          : [{ kind: "sketch", sketchId: session.sketchId }],
-      hoverTarget: null,
-      selectionFilter: getDefaultSelectionFilterForMode("sketch"),
-      selectionCatalog: state.selectionCatalog,
-      preview: {
-        kind: "sketch",
-        label: getSketchSessionPreviewLabel(session),
-        target: session.planeTarget,
-      },
-      nextCommandSequence: state.nextCommandSequence,
-      nextRequestSequence: state.nextRequestSequence,
-      pendingSnapshotRequestId: state.pendingSnapshotRequestId,
-      pendingHistoryCursorRequestId: state.pendingHistoryCursorRequestId,
-      editSessionCursorContext: state.editSessionCursorContext,
-      command: {
-        ...state.command,
-        phase: "editing",
-      },
-      session,
-      pendingCommitRequestId: null,
-      pendingProjectionRequestId: null,
-      pendingImportRequestId: null,
-      pendingRegionRequest: null,
-    };
+    const entered = enterSketchEditing(state, session);
+    const nextState = entered.state;
 
-    return !event.payloads || event.payloads.length === 0
-      ? {
-          state: {
-            ...nextState,
-            preview: {
-              kind: "sketch",
-              label: event.message ?? getSketchSessionPreviewLabel(session),
-              target: session.planeTarget,
-            },
-            session: event.message
-              ? {
-                  ...session,
-                  validationMessage: event.message,
-                }
-              : session,
+    if (!event.payloads || event.payloads.length === 0) {
+      return {
+        state: {
+          ...nextState,
+          preview: {
+            kind: "sketch",
+            label: event.message ?? getSketchSessionPreviewLabel(session),
+            target: session.planeTarget,
           },
-          effects: [],
-        }
-      : emitSketchReferenceImageImportWithPayloads(nextState, event.payloads);
+          session: event.message
+            ? {
+                ...nextState.session,
+                validationMessage: event.message,
+              }
+            : nextState.session,
+        },
+        effects: entered.effects,
+      };
+    }
+
+    const imported = emitSketchReferenceImageImportWithPayloads(
+      nextState,
+      event.payloads,
+    );
+    return {
+      state: imported.state,
+      effects: [...entered.effects, ...imported.effects],
+    };
   }
 
   if (state.kind !== "editingSketch") {
@@ -599,41 +577,12 @@ export function handleSketchSpecialModeEntered(
       };
     }
 
-    const nextState: SketchEditorState = {
-      kind: "editingSketch",
-      mode: "sketch",
-      document: state.document,
-      snapshot: state.snapshot,
-      previewRenderables: null,
-      selection:
-        session.sketchId === null
-          ? [session.planeTarget]
-          : [{ kind: "sketch", sketchId: session.sketchId }],
-      hoverTarget: null,
-      selectionFilter: getDefaultSelectionFilterForMode("sketch"),
-      selectionCatalog: state.selectionCatalog,
-      preview: {
-        kind: "sketch",
-        label: getSketchSessionPreviewLabel(session),
-        target: session.planeTarget,
-      },
-      nextCommandSequence: state.nextCommandSequence,
-      nextRequestSequence: state.nextRequestSequence,
-      pendingSnapshotRequestId: state.pendingSnapshotRequestId,
-      pendingHistoryCursorRequestId: state.pendingHistoryCursorRequestId,
-      editSessionCursorContext: state.editSessionCursorContext,
-      command: {
-        ...state.command,
-        phase: "editing",
-      },
-      session,
-      pendingCommitRequestId: null,
-      pendingProjectionRequestId: null,
-      pendingImportRequestId: null,
-      pendingRegionRequest: null,
+    const entered = enterSketchEditing(state, session);
+    const forwarded = transitionEditorState(entered.state, event);
+    return {
+      state: forwarded.state,
+      effects: [...entered.effects, ...forwarded.effects],
     };
-
-    return transitionEditorState(nextState, event);
   }
 
   if (state.kind !== "editingSketch") {

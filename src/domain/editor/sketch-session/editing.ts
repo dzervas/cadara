@@ -1101,18 +1101,11 @@ function editQueryClick(
   };
 }
 
-/** A session with a live solve: one just reopened establishes it first. */
-function withEditQueryBasis(session: SketchSessionState) {
-  return session.liveSolve
-    ? session
-    : withLiveSolveBasis(session, session.definition);
-}
-
 /**
  * T10g-1 (design §2.7): a Trim click, or (T10g-2) a completed Extend/Split
  * selection. Target kind and the accepted live solve of the current
- * definition are checked now (a session without a live solve, e.g. just
- * reopened, establishes it first); C3 refuses a decided non-accepted input
+ * definition are checked now (every sketch entry establishes a live solve,
+ * T11a); C3 refuses a decided non-accepted input
  * and defers a pending one (review R-1). The click is queued with its
  * entities' identities (R-5); nothing is authored until its exact
  * intersections arrive.
@@ -1455,18 +1448,17 @@ function selectSketchEditQueryTargets(
     entityIds.length === 2
       ? editQueryClick(session, entityIds[0]!, entityIds[1]!)
       : null;
-  const based = click ? withEditQueryBasis(session) : session;
-  const message = editSelectionMessage(based, tool);
+  const message = editSelectionMessage(session, tool);
   if (click && !message) {
     const reset = { ...tool, selectedTarget: null, selectedTargets: [] };
     return queueSketchEditQueryClick(
-      { ...based, activeEditTool: reset, toolStagedEntities: [] },
+      { ...session, activeEditTool: reset, toolStagedEntities: [] },
       reset,
       click,
     );
   }
   return {
-    ...based,
+    ...session,
     activeEditTool: tool,
     toolStagedEntities: [],
     validationMessage: message,
@@ -1542,10 +1534,9 @@ export function selectSketchEditToolTarget(
     if (target.kind !== "sketchEntity") {
       return session;
     }
-    const based = withEditQueryBasis(session);
-    const click = editQueryClick(based, target.entityId, null);
+    const click = editQueryClick(session, target.entityId, null);
     return click
-      ? queueSketchEditQueryClick(based, activeEditTool, click)
+      ? queueSketchEditQueryClick(session, activeEditTool, click)
       : session;
   }
 

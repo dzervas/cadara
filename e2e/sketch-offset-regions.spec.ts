@@ -252,3 +252,152 @@ test("an outward offset of a spline closed by a line commits a certified shell; 
     "no new document diagnostic",
   ).toBe(diagnosticsBefore);
 });
+
+type CommittedSketchDefinition = {
+  points: Array<{ pointId: string; position: readonly [number, number] }>;
+  entities: Array<{
+    entityId: string;
+    kind: string;
+    startPointId?: string;
+    endPointId?: string;
+  }>;
+  constraints: Array<{
+    kind: string;
+    point?: { pointId: string };
+    curve?: { entityId: string };
+  }>;
+  derivedRelationships?: Array<{
+    kind: string;
+    outputs: Array<{ outputEntityId: string }>;
+  }>;
+};
+
+/** The definition of the last sketch commit in the browser's operation history. */
+async function lastCommittedSketch(page: Page) {
+  return page.evaluate(() => {
+    const payload = JSON.parse(
+      window.localStorage.getItem(
+        "cad.modeling.operationHistory.doc_workspace.v1",
+      ) ?? "{}",
+    ) as {
+      entries?: Array<{
+        kind: string;
+        payload?: { definition?: unknown };
+      }>;
+    };
+    return (
+      payload.entries?.filter((entry) => entry.kind === "commitSketch").at(-1)
+        ?.payload?.definition ?? null
+    );
+  }) as Promise<CommittedSketchDefinition | null>;
+}
+
+test("T11a: a reopened sketch's certified offset output is snapped to with no prior edit", async ({
+  page,
+}) => {
+  const workbench = new FeatureWorkbenchHarness(page);
+  await startTopPlaneSketch(page, workbench);
+  await workbench.activateTool("Create rectangle geometry.");
+  await page.locator('[role="menuitem"][data-tool-id="rectangle"]').click();
+  await workbench.clickViewportAt({ x: 640, y: 420 });
+  await workbench.clickViewportAt({ x: 860, y: 580 });
+  await expectStaged(workbench, 4);
+  await workbench.activateTool(OFFSET_TOOL);
+  for (const point of [
+    { x: 750, y: 420 },
+    { x: 860, y: 500 },
+    { x: 750, y: 580 },
+    { x: 640, y: 500 },
+  ])
+    await workbench.clickViewportAt(point);
+  await commitOffset(page, workbench, { x: 750, y: 470 }, "0.5");
+  await expectStaged(workbench, 8, 60_000);
+  await workbench.activateTool("Exit the active sketch.");
+  await workbench.expectMachine("idle");
+
+  const saved = await lastCommittedSketch(page);
+  const offset = saved?.derivedRelationships?.find(
+    (relationship) => relationship.kind === "offset",
+  );
+  if (!saved || !offset) throw new Error("No committed offset relationship.");
+  const outputIds = new Set(
+    offset.outputs.map((output) => output.outputEntityId),
+  );
+  const outputPointIds = new Set(
+    saved.entities
+      .filter((entity) => outputIds.has(entity.entityId))
+      .flatMap((entity) => [entity.startPointId, entity.endPointId]),
+  );
+  // The source rectangle spans the clicked 220 × 160 px box; the certified
+  // inward outputs are inset by 0.5 on every side, so the inner rectangle's
+  // top side runs 0.5 sketch units inside the clicked top side. A point a
+  // fifth along it is near no other curve (the source side is ~20 px away).
+  const sourceX = saved.points
+    .filter((point) => !outputPointIds.has(point.pointId))
+    .map((point) => point.position[0]);
+  const sourceY = saved.points
+    .filter((point) => !outputPointIds.has(point.pointId))
+    .map((point) => point.position[1]);
+  const insetX = (0.5 * 220) / (Math.max(...sourceX) - Math.min(...sourceX));
+  const insetY = (0.5 * 160) / (Math.max(...sourceY) - Math.min(...sourceY));
+  const onOutput = {
+    x: Math.round(640 + insetX + 0.2 * (220 - 2 * insetX)),
+    y: Math.round(420 + insetY),
+  };
+
+  await page
+    .getByRole("button", { name: /Select .*Double-click to reopen\./ })
+    .first()
+    .dblclick();
+  await workbench.expectSketchSessionActive();
+  await expectStaged(workbench, 8);
+
+  // No edit: the Line tool snaps onto the output once the opening round has
+  // certified the offset (never before: non-accepted outputs give no snap
+  // candidates).
+  await workbench.activateTool("Create line geometry.");
+  const onLineSnap = page.locator(
+    '[data-sketch-viewport-geometry="snapIndicator"][data-sketch-snap-kind="nearestOnLine"]',
+  );
+  await expect
+    .poll(
+      async () => {
+        await workbench.hoverViewportAt({ x: onOutput.x, y: onOutput.y + 1 });
+        await workbench.hoverViewportAt(onOutput);
+        return onLineSnap.count();
+      },
+      {
+        message: "The reopened offset's output offers an on-line snap.",
+        timeout: 30_000,
+      },
+    )
+    .toBe(1);
+  await workbench.clickViewportAt(onOutput);
+  await workbench.clickViewportAt({ x: 1000, y: 700 });
+  await expectStaged(workbench, 9);
+  await workbench.activateTool("Exit the active sketch.");
+  await workbench.expectMachine("idle");
+
+  const reopenedSave = await lastCommittedSketch(page);
+  const known = new Set(saved.entities.map((entity) => entity.entityId));
+  const line = reopenedSave?.entities.find(
+    (entity) => !known.has(entity.entityId) && entity.kind === "lineSegment",
+  );
+  // The snap is the output's: the start is declared on that output line.
+  expect(
+    reopenedSave?.constraints.filter(
+      (constraint) =>
+        constraint.kind === "pointOnCurve" &&
+        constraint.point?.pointId === line?.startPointId,
+    ),
+    `The new line starts on the snapped offset output (${JSON.stringify(line)}).`,
+  ).toEqual([
+    expect.objectContaining({
+      curve: expect.objectContaining({
+        entityId: expect.stringMatching(
+          new RegExp(`^(${[...outputIds].join("|")})$`),
+        ),
+      }),
+    }),
+  ]);
+});

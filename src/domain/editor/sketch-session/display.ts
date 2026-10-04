@@ -378,8 +378,10 @@ let displaySolveCacheSnapshot: SolvedSketchSnapshot | null = null;
 
 /**
  * The solved snapshot the session displays: the live solve, else a
- * best-effort solve of the display definition (an opened sketch before its
- * first edit), cached on the stable display key. Display, pick and snap read
+ * best-effort solve of the display definition, cached on the stable display
+ * key. Every editor sketch entry establishes the live solve (T11a), so the
+ * fallback serves only sessions never entered for editing (domain fixtures
+ * built from the session constructors). Display, pick and snap read
  * the shells' spans from this one snapshot (T08b-g5b).
  */
 export function getSketchSessionDisplaySolvedSnapshot(

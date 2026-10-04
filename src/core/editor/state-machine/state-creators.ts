@@ -15,7 +15,6 @@ import {
 } from "@/domain/editor/feature-editing";
 import {
   getSketchSessionPreviewLabel,
-  updateSketchReferenceProjection,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
 import {
@@ -25,12 +24,13 @@ import {
 import type { EditorExtensionDependencies } from "./dependencies";
 import { getDefaultImportSelectionField } from "./form-traversal";
 import { advanceCursorPhase } from "./cursor-lifecycle";
+import { emitSketchReferenceProjection } from "./effect-emitters";
 import {
   createFeatureSelectionPreview,
   createImportSelectionPreview,
   createSelectionPreviewForSelection,
 } from "./selection-helpers";
-import { nextCommandSessionId, nextRequestId } from "./utility-helpers";
+import { nextCommandSessionId } from "./utility-helpers";
 import type {
   EditorActiveCommand,
   EditorState,
@@ -306,10 +306,17 @@ export function createSectionViewEditingState(
   };
 }
 
+/**
+ * Every production sketch entry (T11a, A3): the opened session gets a live
+ * solve basis now, so its first derivation round certifies exactly the
+ * definition it displays without waiting for an edit. With references it is
+ * based on the session's current projections and re-based when the
+ * projection result (or failure) arrives.
+ */
 export function enterSketchEditing(
   state: SelectionCommandEditorState,
   session: SketchSessionState,
-): EditorTransitionResult {
+): EditorTransitionResult & { state: SketchEditorState } {
   const nextState: SketchEditorState = {
     kind: "editingSketch",
     mode: "sketch",
@@ -346,39 +353,5 @@ export function enterSketchEditing(
     pendingRegionRequest: null,
   };
 
-  if (
-    session.definition.references.length === 0 ||
-    state.document.documentId === null ||
-    state.document.revisionId === null
-  ) {
-    return {
-      state: {
-        ...nextState,
-        session: updateSketchReferenceProjection(session, [], []),
-        pendingProjectionRequestId: null,
-      },
-      effects: [],
-    };
-  }
-
-  const requestId = nextRequestId(state, "sketch-reference-projection");
-
-  return {
-    state: {
-      ...nextState,
-      nextRequestSequence: state.nextRequestSequence + 1,
-      session,
-      pendingProjectionRequestId: requestId,
-    },
-    effects: [
-      {
-        type: "sketch.projectReferences",
-        requestId,
-        commandSessionId: state.command.commandSessionId,
-        documentId: state.document.documentId,
-        baseRevisionId: state.document.revisionId,
-        session,
-      },
-    ],
-  };
+  return emitSketchReferenceProjection(nextState, session);
 }

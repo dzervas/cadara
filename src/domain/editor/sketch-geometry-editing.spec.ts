@@ -36,6 +36,7 @@ import {
   toggleSketchSvgRendering,
   updateSketchGeometryDrag,
   updateSketchPointer,
+  updateSketchReferenceProjection,
   acceptSketchDraw,
 } from "@/domain/editor/sketch-session";
 import {
@@ -549,6 +550,15 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
         },
       } satisfies SketchSnapshotRecord,
       OCC_KERNEL_SETTINGS,
+    );
+  }
+
+  /** A sketch opened for editing: every entry establishes its live solve (T11a), as `enterSketchEditing` does without references. */
+  function openSessionFromDefinition(definition: SketchDefinition) {
+    return updateSketchReferenceProjection(
+      createSessionFromDefinition(definition),
+      [],
+      [],
     );
   }
 
@@ -1963,7 +1973,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       ],
     });
     const started = beginSketchTool(
-      createSessionFromDefinition(definition),
+      openSessionFromDefinition(definition),
       "trim",
     );
     const session = await trimTarget(started, "sketch_entity_ab", "line");
@@ -2051,7 +2061,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       ],
     });
     const circleStarted = beginSketchTool(
-      createSessionFromDefinition(circleDefinition),
+      openSessionFromDefinition(circleDefinition),
       "trim",
     );
     const circleSession = await trimTarget(
@@ -2127,7 +2137,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       ],
     });
     const arcStarted = beginSketchTool(
-      createSessionFromDefinition(arcDefinition),
+      openSessionFromDefinition(arcDefinition),
       "trim",
     );
     const arcSession = await trimTarget(arcStarted, "sketch_entity_arc", "arc");
@@ -2197,7 +2207,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     // T10g-3b: the former T07 rejection row, flipped: an open spline is
     // trimmed exactly (option B) into two splines.
     const splineStarted = beginSketchTool(
-      createSessionFromDefinition(splineDefinition),
+      openSessionFromDefinition(splineDefinition),
       "trim",
     );
     const splineSession = await trimTarget(
@@ -3031,7 +3041,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       ],
     });
     let extendSession = beginSketchTool(
-      createSessionFromDefinition(extendDefinition),
+      openSessionFromDefinition(extendDefinition),
       "sketchExtend",
     );
     extendSession = selectSketchEditToolTarget(
@@ -3093,7 +3103,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       ],
     });
     let splitSession = beginSketchTool(
-      createSessionFromDefinition(splitDefinition),
+      openSessionFromDefinition(splitDefinition),
       "sketchSplit",
     );
     splitSession = selectSketchEditToolTarget(
@@ -3156,7 +3166,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       ],
     ] as const) {
       const begun = beginSketchTool(
-        createSessionFromDefinition(circleDefinition),
+        openSessionFromDefinition(circleDefinition),
         toolId,
       );
       const refused = selectSketchEditToolTarget(
