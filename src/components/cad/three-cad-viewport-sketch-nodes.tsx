@@ -17,6 +17,7 @@ import {
   updateSketchGradientMaterialFrame,
 } from "@/components/cad/sketch-display-style";
 import type { SketchRenderingPalette } from "@/components/cad/sketch-rendering-palette";
+import { isProjectedSketchDisplayPointTarget } from "@/components/cad/three-cad-viewport-pick-candidates";
 import { createReferenceImageDataUrl } from "@/domain/reference-image/rendering";
 import type { SketchSessionDisplayRenderable } from "@/domain/editor/sketch-session";
 import {
@@ -576,6 +577,10 @@ export function SketchDisplayMarkerNode({
             renderable.role === "reference" ? "sketchReference" : "sketchPoint",
             "document",
           );
+          // Picked in screen space only: one canonical candidate (T11c, A-1).
+          if (isProjectedSketchDisplayPointTarget(renderable.target)) {
+            excludeRenderableObjectFromRaycastPicking(value);
+          }
         }
       }}
     >

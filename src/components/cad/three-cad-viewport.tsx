@@ -84,9 +84,13 @@ import {
   collectRaycastPickCandidates,
   type CollectedBindings,
   isSeededDatumPlaneRenderable,
+  type PickResult,
   resolveAllCandidates,
+  toSketchPickStackCandidates,
   updateWorkspaceHighlight,
 } from "@/infrastructure/viewport/render-picking";
+import { resolveSketchPickStack } from "@/domain/sketch-interaction/pick-stack";
+import { getSketchSessionDisplayDefinition } from "@/domain/editor/sketch-session/internals";
 import { createViewportCameraTransitionController } from "@/infrastructure/viewport/viewport-camera-transition";
 import {
   getViewportCanvasClickIntent,
@@ -1111,7 +1115,7 @@ export function ThreeCadViewport({
       clientX: number,
       clientY: number,
       viewportRect: DOMRectReadOnly,
-    ) => {
+    ): PickResult | null => {
       const camera = cameraRef.current;
       const bindings = getCachedBindings();
 
@@ -1136,6 +1140,11 @@ export function ThreeCadViewport({
         bindings.pickables,
         true,
       );
+      const sketchSession = sketchSessionRef.current;
+      // Built once per pick; the curve collector and the stack share it.
+      const sketchDisplayDefinition = sketchSession
+        ? getSketchSessionDisplayDefinition(sketchSession)
+        : undefined;
       const candidates = [
         ...collectRaycastPickCandidates(intersections),
         ...collectProjectedSketchDisplayPointCandidates({
@@ -1152,7 +1161,8 @@ export function ThreeCadViewport({
           clientY,
           camera,
           viewportRect,
-          sketchSession: sketchSessionRef.current,
+          sketchSession,
+          displayDefinition: sketchDisplayDefinition,
           acceptsTarget: acceptsViewportTarget,
           currentHoverTarget: hoverTargetRef.current,
         }),
@@ -1167,11 +1177,39 @@ export function ThreeCadViewport({
         }),
       ];
 
-      return resolveAllCandidates(
-        candidates,
-        acceptsViewportTarget,
-        pickTuning.resolutionOptions,
-      );
+      if (!sketchSession || !sketchDisplayDefinition) {
+        return resolveAllCandidates(
+          candidates,
+          acceptsViewportTarget,
+          pickTuning.resolutionOptions,
+        );
+      }
+
+      // Sketch mode: hover, release and click all read the top of the one
+      // sketch pick stack (T11c).
+      const [top] = resolveSketchPickStack({
+        session: sketchSession,
+        displayDefinition: sketchDisplayDefinition,
+        candidates: toSketchPickStackCandidates(candidates, {
+          ...pickTuning.resolutionOptions,
+          excludeBackgroundDatumPlanes:
+            getViewportCanvasClickIntent({
+              activeSketchTool: sketchSession.activeTool,
+              hasResolvedTarget: true,
+              isBackgroundDatumTarget: true,
+              selectionFilterKind: selectionFilterRef.current?.kind ?? null,
+            }) === "clearSelection",
+        }),
+        acceptsTarget: acceptsViewportTarget,
+      });
+
+      return top
+        ? {
+            pickId: top.candidate.pick.pickId,
+            target: top.target,
+            renderable: top.candidate.pick.renderable,
+          }
+        : null;
     };
 
     const getViewportCameraPosition = (): Vec3 | null => {

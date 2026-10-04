@@ -11,6 +11,7 @@ import type {
   RenderMeshGeometry,
 } from "@/contracts/render/schema";
 import type { ViewportRenderableOrigin } from "@/core/workspace/viewport-renderables";
+import type { SketchPickStackCandidate } from "@/domain/sketch-interaction/pick-stack";
 import { workbenchGeometryHighlightColors } from "@/theme/workbench-theme";
 
 export type WorkspaceSemanticClass =
@@ -70,6 +71,9 @@ const MARKER_PICK_SCALE_FACTOR = 1.45;
 export const DEFAULT_LINE_PICK_THRESHOLD = 0.75;
 export const DEFAULT_PROJECTED_POINT_PICK_ENTER_RADIUS_PX = 48;
 export const DEFAULT_PROJECTED_POINT_PICK_EXIT_RADIUS_PX = 56;
+/** Sketch display points (T11-D2); feature vertices keep the radii above. */
+export const DEFAULT_SKETCH_POINT_PICK_ENTER_RADIUS_PX = 12;
+export const DEFAULT_SKETCH_POINT_PICK_EXIT_RADIUS_PX = 16;
 const DEFAULT_WIRE_OCCLUSION_TOLERANCE = 0.01;
 const DEFAULT_SAME_LAYER_TOLERANCE = 0.004;
 const PICK_DISTANCE_EPSILON = 1e-9;
@@ -333,29 +337,17 @@ export function resolveAllCandidates(
     )
     .filter(createUniqueHitFilter());
 
-  const nearestOccludingFaceDistance = resolvedHits.reduce<number | null>(
-    (nearest, hit) => {
-      if (
-        !isOccludingFaceSemanticClass(hit.semanticClass) ||
-        hit.rayDistance === null
-      ) {
-        return nearest;
-      }
-
-      return nearest === null
-        ? hit.rayDistance
-        : Math.min(nearest, hit.rayDistance);
-    },
-    null,
-  );
+  const nearestOccludingFaceDistance =
+    getNearestOccludingFaceDistance(resolvedHits);
 
   for (const hit of resolvedHits) {
     if (
-      nearestOccludingFaceDistance !== null &&
-      isWireSemanticClass(hit.semanticClass) &&
-      hit.rayDistance !== null &&
-      hit.rayDistance - nearestOccludingFaceDistance >
-        wireOcclusionTolerance + PICK_DISTANCE_EPSILON
+      isBehindNearestFace(
+        hit,
+        nearestOccludingFaceDistance,
+        wireOcclusionTolerance,
+        isWireSemanticClass,
+      )
     ) {
       continue;
     }
@@ -374,6 +366,86 @@ export function resolveAllCandidates(
   }
 
   return null;
+}
+
+/**
+ * Maps viewport candidates to the sketch pick-stack input (T11c, review
+ * R-3); `resolveSketchPickStack` orders them. Kept from `resolveAllCandidates`:
+ * wires behind the nearest body face are dropped, and topology hits carry
+ * their owner body for eligibility mapping. The stack orders by class
+ * first, so the same occlusion also drops ray-picked regions, reference
+ * images and construction planes behind the nearest body face: nothing is
+ * picked through a body (T11c review REQUIRED-1, ADV-2); coplanar ones
+ * (within the tolerance) stay. Background datum planes are
+ * dropped when a click on them counts as empty (`excludeBackgroundDatumPlanes`),
+ * so an empty stack clears the selection. Screen-space candidates use their
+ * px distance, raycast-only ones their ray distance.
+ */
+export function toSketchPickStackCandidates(
+  candidates: readonly PickCandidate[],
+  options: PickResolutionOptions & { excludeBackgroundDatumPlanes: boolean },
+): (SketchPickStackCandidate & { pick: PickCandidate })[] {
+  const wireOcclusionTolerance =
+    options.wireOcclusionTolerance ?? DEFAULT_WIRE_OCCLUSION_TOLERANCE;
+  const nearestOccludingFaceDistance =
+    getNearestOccludingFaceDistance(candidates);
+
+  return candidates.flatMap((pick) =>
+    isBehindNearestFace(
+      pick,
+      nearestOccludingFaceDistance,
+      wireOcclusionTolerance,
+      isSketchOccludedSemanticClass,
+    ) ||
+    (options.excludeBackgroundDatumPlanes &&
+      pick.renderable !== null &&
+      isSeededDatumPlaneRenderable(pick.renderable))
+      ? []
+      : [
+          {
+            key: pick.stableKey,
+            target: pick.target,
+            ownerBodyTarget: getOwnerBodyTarget(pick),
+            metric: pick.screenDistance === null ? "ray" : "screen",
+            distance:
+              pick.screenDistance ??
+              pick.rayDistance ??
+              Number.POSITIVE_INFINITY,
+            depth: pick.depth,
+            pick,
+          },
+        ],
+  );
+}
+
+function getNearestOccludingFaceDistance(hits: readonly PickCandidate[]) {
+  return hits.reduce<number | null>((nearest, hit) => {
+    if (
+      !isOccludingFaceSemanticClass(hit.semanticClass) ||
+      hit.rayDistance === null
+    ) {
+      return nearest;
+    }
+
+    return nearest === null
+      ? hit.rayDistance
+      : Math.min(nearest, hit.rayDistance);
+  }, null);
+}
+
+function isBehindNearestFace(
+  hit: PickCandidate,
+  nearestOccludingFaceDistance: number | null,
+  wireOcclusionTolerance: number,
+  isOccluded: (semanticClass: WorkspaceSemanticClass) => boolean,
+) {
+  return (
+    nearestOccludingFaceDistance !== null &&
+    isOccluded(hit.semanticClass) &&
+    hit.rayDistance !== null &&
+    hit.rayDistance - nearestOccludingFaceDistance >
+      wireOcclusionTolerance + PICK_DISTANCE_EPSILON
+  );
 }
 
 export function updateWorkspaceHighlight(
@@ -612,6 +684,15 @@ function isWireSemanticClass(semanticClass: WorkspaceSemanticClass) {
     semanticClass === "sketchCurve" ||
     semanticClass === "sketchPoint" ||
     semanticClass === "sketchReference"
+  );
+}
+
+function isSketchOccludedSemanticClass(semanticClass: WorkspaceSemanticClass) {
+  return (
+    isWireSemanticClass(semanticClass) ||
+    semanticClass === "region" ||
+    semanticClass === "sketchImage" ||
+    semanticClass === "construction"
   );
 }
 

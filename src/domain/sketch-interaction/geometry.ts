@@ -107,9 +107,10 @@ export type SketchInteractionCurveGeometry = Exclude<
 
 export function collectSketchInteractionGeometry(
   session: SketchSessionState,
+  /** The session's display definition, when the caller already has it. */
+  definition: SketchDefinition = getSketchSessionDisplayDefinition(session),
 ): SketchInteractionGeometry[] {
   const sketchId = session.sketchId ?? ("sketch_draft" as SketchId);
-  const definition = getSketchSessionDisplayDefinition(session);
   const projectedReferences = getSketchSessionDisplayProjectedReferences(
     session,
     definition,

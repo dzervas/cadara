@@ -1,7 +1,9 @@
 import { test, expect } from "vitest";
 import * as THREE from "three";
 
-import type { PrimitiveRef } from "@/core/editor/schema";
+import { getPrimitiveRefKey, type PrimitiveRef } from "@/core/editor/schema";
+import type { RenderableEntityRecord } from "@/contracts/render/schema";
+import type { ViewportRenderableRecord } from "@/core/workspace/viewport-renderables";
 import type {
   RegionId,
   RenderableId,
@@ -19,11 +21,14 @@ import {
   createArcEntityDefinition,
   createPointDefinition,
   createSplineEntityDefinition,
+  getSketchSessionDisplayDefinition,
 } from "@/domain/editor/sketch-session/internals";
 import {
   createNewSketchSession,
   type SketchSessionDisplayRenderable,
+  type SketchSessionState,
 } from "@/domain/editor/sketch-session";
+import { resolveSketchPickStack } from "@/domain/sketch-interaction/pick-stack";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
@@ -31,12 +36,20 @@ import {
 import {
   collectProjectedSketchCurveCandidates,
   collectProjectedSketchDisplayPointCandidates,
+  collectProjectedVertexCandidates,
+  isProjectedSketchDisplayPointTarget,
 } from "@/components/cad/three-cad-viewport-pick-candidates";
 import {
   bindRenderableObject,
+  collectBindings,
   collectRaycastPickCandidates,
   createProjectedPickCandidate,
+  DEFAULT_SKETCH_POINT_PICK_ENTER_RADIUS_PX,
+  DEFAULT_SKETCH_POINT_PICK_EXIT_RADIUS_PX,
+  excludeRenderableObjectFromRaycastPicking,
+  type PickCandidate,
   resolveAllCandidates,
+  toSketchPickStackCandidates,
 } from "@/infrastructure/viewport/render-picking";
 import { makeSketchFixture } from "@/contracts/sketch/region-extraction.fixtures";
 import { sketchSnapshotRecordForTest } from "@/contracts/sketch/region-record.fixtures";
@@ -129,10 +142,25 @@ test("src/components/cad/three-cad-viewport-pick-candidates.spec.ts", () => {
     originCandidates.length,
     "The sketch datum origin should produce a projected pick candidate.",
   ).toBe(1);
+  // T11c (review R-4): the origin sorts as a reference point in the sketch
+  // pick stack, below authored geometry, not as an authored point.
+  const originSession = {
+    ...createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
+    sketchId: "sketch_primary" as SketchId,
+  };
   expect(
     originCandidates[0]?.semanticClass,
-    "The sketch datum origin should sort as a point, not as a reference wire.",
-  ).toBe("sketchPoint");
+    "The sketch datum origin candidate is a reference candidate, not an authored sketch point.",
+  ).toBe("sketchReference");
+  expect(
+    resolveViewportSketchStack(originSession, originCandidates).map(
+      (entry) => entry.pickClass,
+    ),
+    "The sketch datum origin should sort as a reference point, not as a reference wire or an authored point.",
+  ).toEqual(["referencePoint"]);
 
   const axisLine = new THREE.Line(
     new THREE.BufferGeometry().setFromPoints([
@@ -157,9 +185,12 @@ test("src/components/cad/three-cad-viewport-pick-candidates.spec.ts", () => {
   ]);
 
   expect(
-    resolveAllCandidates([...axisHit, ...originCandidates])?.target,
-    "The origin point should remain pickable at the datum-axis crossing.",
-  ).toBe(originTarget);
+    resolveViewportSketchStack(originSession, [
+      ...axisHit,
+      ...originCandidates,
+    ]).map((entry) => entry.target),
+    "The origin point should remain pickable at the datum-axis crossing (reference points before reference curves).",
+  ).toEqual([originTarget, xAxisTarget]);
 
   const axisCandidates = collectProjectedSketchCurveCandidates({
     clientX: viewportRect.left + 140,
@@ -537,6 +568,518 @@ function makeCurveSession(sketchId: SketchId) {
     definition,
   };
 }
+
+// Lane: ui (docs/testing.md). Seam: the viewport's sketch pick wiring (T11c):
+// the projected point and curve collectors → `toSketchPickStackCandidates`
+// → `resolveSketchPickStack`, as `getPickTargetFromClientPoint` composes
+// them in sketch mode; the stack's top is what hover and click select.
+function resolveViewportSketchStack(
+  session: SketchSessionState,
+  candidates: PickCandidate[],
+  {
+    excludeBackgroundDatumPlanes = true,
+    displayDefinition = getSketchSessionDisplayDefinition(session),
+  } = {},
+) {
+  return resolveSketchPickStack({
+    session,
+    displayDefinition,
+    candidates: toSketchPickStackCandidates(candidates, {
+      excludeBackgroundDatumPlanes,
+    }),
+    acceptsTarget: () => true,
+  });
+}
+
+/** 10 px per sketch unit; sketch (x, y) is at screen (100 + 10x, 100 − 10y). */
+const stackViewportRect = {
+  left: 0,
+  top: 0,
+  width: 200,
+  height: 200,
+} as DOMRectReadOnly;
+
+function createStackCamera() {
+  const camera = new THREE.OrthographicCamera(-10, 10, 10, -10, 0.1, 100);
+  camera.position.set(0, 0, 10);
+  camera.lookAt(0, 0, 0);
+  camera.updateProjectionMatrix();
+  camera.updateMatrixWorld(true);
+  return camera;
+}
+
+function pickSketchStackAt(
+  session: SketchSessionState,
+  clientX: number,
+  clientY: number,
+  currentHoverTarget: PrimitiveRef | null = null,
+) {
+  const camera = createStackCamera();
+  // One display definition per pick, shared as the viewport does (ADV-6).
+  const displayDefinition = getSketchSessionDisplayDefinition(session);
+  const shared = {
+    clientX,
+    clientY,
+    camera,
+    viewportRect: stackViewportRect,
+    acceptsTarget: () => true,
+    currentHoverTarget,
+  };
+  return resolveViewportSketchStack(
+    session,
+    [
+      ...collectProjectedSketchDisplayPointCandidates({
+        ...shared,
+        sketchDisplayRenderables: getSketchSessionDisplayRenderables(session),
+      }),
+      ...collectProjectedSketchCurveCandidates({
+        ...shared,
+        sketchSession: session,
+        displayDefinition,
+      }),
+    ],
+    { displayDefinition },
+  );
+}
+
+/**
+ * A line on the sketch X axis, optionally with a coincident construction
+ * line, or starting at the origin (an authored point on the origin).
+ */
+function makeAxisLineSession({
+  withConstruction = false,
+  fromOrigin = false,
+}: { withConstruction?: boolean; fromOrigin?: boolean } = {}) {
+  const sketchId = "sketch_primary" as SketchId;
+  const point = (suffix: string, position: SketchPoint2D) =>
+    createPointDefinition(
+      sketchId,
+      `sketch_point_${suffix}` as SketchPointId,
+      suffix,
+      position,
+    );
+  const points = [
+    point("line_a", fromOrigin ? [0, 0] : [-4, 0]),
+    point("line_b", [4, 0]),
+    point("construction_a", [-4, 0]),
+    point("construction_b", [4, 0]),
+  ];
+  const line = createLineEntityDefinition(
+    sketchId,
+    "sketch_entity_line" as SketchEntityId,
+    "Line",
+    points[0]!.pointId,
+    points[1]!.pointId,
+  );
+  const construction = createLineEntityDefinition(
+    sketchId,
+    "sketch_entity_construction" as SketchEntityId,
+    "Construction",
+    points[2]!.pointId,
+    points[3]!.pointId,
+    true,
+  );
+  const used = withConstruction ? points : points.slice(0, 2);
+  const entities = withConstruction ? [line, construction] : [line];
+  const base = createNewSketchSession(
+    createStandardPlaneDefinition("xy"),
+    OCC_KERNEL_SETTINGS,
+  );
+  return {
+    session: {
+      ...base,
+      sketchId,
+      definition: {
+        ...base.definition,
+        pointIds: used.map((entry) => entry.pointId),
+        points: used,
+        entityIds: entities.map((entry) => entry.entityId),
+        entities,
+      },
+    } satisfies SketchSessionState,
+    lineTarget: line.target,
+    constructionTarget: construction.target,
+    startPointTarget: points[0]!.target,
+    originTarget: {
+      kind: "sketchDatumReference",
+      sketchId,
+      datumId: "origin",
+      geometryKind: "point",
+    } satisfies PrimitiveRef,
+    xAxisTarget: {
+      kind: "sketchDatumReference",
+      sketchId,
+      datumId: "xAxis",
+      geometryKind: "lineSegment",
+    } satisfies PrimitiveRef,
+  };
+}
+
+test("T11c audit F4: a line on the X axis is picked over the axis exactly on it and 4 px off", () => {
+  const { session, lineTarget, xAxisTarget } = makeAxisLineSession();
+
+  for (const offset of [0, 4, -4]) {
+    const stack = pickSketchStackAt(session, 120, 100 + offset);
+    expect(
+      stack[0]?.target,
+      `The authored line wins the first pick ${offset} px off the X axis.`,
+    ).toEqual(lineTarget);
+    expect(
+      stack.map((entry) => entry.target),
+      `The X axis stays in the stack below the line (${offset} px).`,
+    ).toEqual([lineTarget, xAxisTarget]);
+  }
+});
+
+test("T11c: an ordinary line beats a coincident construction line, which beats the axis", () => {
+  const { session, lineTarget, constructionTarget, xAxisTarget } =
+    makeAxisLineSession({ withConstruction: true });
+
+  expect(
+    pickSketchStackAt(session, 120, 102).map((entry) => [
+      entry.target,
+      entry.pickClass,
+    ]),
+    "Ordinary curve, then construction curve, then the reference axis.",
+  ).toEqual([
+    [lineTarget, "authoredCurve"],
+    [constructionTarget, "constructionCurve"],
+    [xAxisTarget, "referenceCurve"],
+  ]);
+});
+
+test("T11c review R-4: an authored curve 0–12 px from the origin wins; the origin is the second entry", () => {
+  const { session, lineTarget, originTarget } = makeAxisLineSession();
+
+  for (const offset of [0, 6, 11.9]) {
+    const stack = pickSketchStackAt(session, 100 + offset, 100);
+    expect(
+      stack.slice(0, 2).map((entry) => entry.target),
+      `The line wins and the origin is second ${offset} px from the origin.`,
+    ).toEqual([lineTarget, originTarget]);
+  }
+});
+
+test("T11c: an authored point on the origin still wins over the line and the origin", () => {
+  const { session, lineTarget, startPointTarget, originTarget } =
+    makeAxisLineSession({ fromOrigin: true });
+
+  expect(
+    pickSketchStackAt(session, 103, 100)
+      .slice(0, 3)
+      .map((entry) => entry.target),
+    "Authored point, then the authored line, then the datum origin.",
+  ).toEqual([startPointTarget, lineTarget, originTarget]);
+});
+
+test("T11-D2: sketch points pick within 12 px and, while hovered, until 16 px; feature vertices keep 48/56 px", () => {
+  const { session, startPointTarget } = makeAxisLineSession({
+    fromOrigin: true,
+  });
+  // Straight below the point: the line (on y = 0) is as far as the point.
+  const pointsAt = (offset: number, hovered: PrimitiveRef | null = null) =>
+    pickSketchStackAt(session, 100, 100 + offset, hovered).filter(
+      (entry) => entry.target.kind === "sketchPoint",
+    );
+
+  expect(
+    DEFAULT_SKETCH_POINT_PICK_ENTER_RADIUS_PX,
+    "Sketch point enter radius.",
+  ).toBe(12);
+  expect(
+    DEFAULT_SKETCH_POINT_PICK_EXIT_RADIUS_PX,
+    "Sketch point exit radius.",
+  ).toBe(16);
+  expect(
+    pointsAt(12).map((entry) => entry.target),
+    "A sketch point is picked at the 12 px enter radius.",
+  ).toEqual([startPointTarget]);
+  expect(
+    pointsAt(12.5),
+    "A sketch point no longer swallows the pointer beyond 12 px (it was 48 px).",
+  ).toEqual([]);
+  expect(
+    pointsAt(16, startPointTarget).map((entry) => entry.target),
+    "The hovered sketch point stays picked up to the 16 px exit radius.",
+  ).toEqual([startPointTarget]);
+  expect(
+    pointsAt(16.5, startPointTarget),
+    "The hovered sketch point is released beyond 16 px (it was 56 px).",
+  ).toEqual([]);
+  expect(
+    pointsAt(14),
+    "The exit radius applies only to the current hover target.",
+  ).toEqual([]);
+
+  const vertexRenderable = {
+    origin: "document",
+    renderable: {
+      id: "renderable_vertex",
+      label: "Vertex",
+      ownerBodyId: "body_a",
+      ownerFeatureId: null,
+      binding: {
+        pickId: "pick_vertex",
+        pickPriority: 0,
+        target: { kind: "vertex", bodyId: "body_a", vertexId: "vertex_a" },
+        topology: "vertex",
+        semanticClass: "featureVertex",
+      },
+      geometry: { kind: "marker", position: [0, 0, 0], displayRadius: 0.1 },
+    },
+  } as unknown as ViewportRenderableRecord;
+  const vertexAt = (offset: number, hovered: PrimitiveRef | null = null) =>
+    collectProjectedVertexCandidates({
+      clientX: 100,
+      clientY: 100 + offset,
+      camera: createStackCamera(),
+      viewportRect: stackViewportRect,
+      renderables: [vertexRenderable],
+      acceptsTarget: () => true,
+      currentHoverTarget: hovered,
+    }).length;
+  expect(
+    [
+      vertexAt(48),
+      vertexAt(49),
+      vertexAt(56, vertexRenderable.renderable.binding.target),
+      vertexAt(57, vertexRenderable.renderable.binding.target),
+    ],
+    "Feature vertices keep the 48 px enter and 56 px exit radii.",
+  ).toEqual([1, 0, 1, 0]);
+});
+
+test("T11c review A-1/R-3: screen-space sketch point markers are not also ray-picked, and background datum planes leave an empty stack", () => {
+  const { session, startPointTarget, originTarget, xAxisTarget } =
+    makeAxisLineSession({ fromOrigin: true });
+
+  expect(
+    [
+      startPointTarget,
+      originTarget,
+      xAxisTarget,
+      {
+        kind: "projectedReferenceGeometry",
+        referenceId: "reference_a",
+        geometryId: "geometry_a",
+        geometryKind: "point",
+      } as PrimitiveRef,
+    ].map(isProjectedSketchDisplayPointTarget),
+    "Exactly the targets the projected point collector covers lose their ray-picked marker binding.",
+  ).toEqual([true, true, false, false]);
+
+  // The marker node binds its group, then excludes it from ray picking.
+  const group = new THREE.Group();
+  const marker = new THREE.Mesh(
+    new THREE.SphereGeometry(1),
+    new THREE.MeshBasicMaterial(),
+  );
+  group.add(marker);
+  bindRenderableObject(
+    group,
+    null,
+    startPointTarget,
+    "sketchPoint",
+    "document",
+  );
+  excludeRenderableObjectFromRaycastPicking(group);
+  const bindings = collectBindings(group)!;
+  expect(
+    bindings.pickables,
+    "An excluded marker group yields no ray-pick objects.",
+  ).toEqual([]);
+  expect(
+    bindings.targetToObjects.get(getPrimitiveRefKey(startPointTarget)),
+    "The excluded marker still highlights.",
+  ).toEqual([marker]);
+  marker.geometry.dispose();
+  marker.material.dispose();
+
+  // A raycast duplicate of the same point collapses onto the projected one.
+  const proxy = new THREE.Mesh();
+  bindRenderableObject(
+    proxy,
+    null,
+    startPointTarget,
+    "sketchPoint",
+    "document",
+  );
+  const duplicate = collectRaycastPickCandidates([
+    { object: proxy, distance: 10, point: new THREE.Vector3() } as never,
+  ]);
+  const camera = createStackCamera();
+  const projectedPoints = collectProjectedSketchDisplayPointCandidates({
+    clientX: 100,
+    clientY: 100,
+    camera,
+    viewportRect: stackViewportRect,
+    sketchDisplayRenderables: getSketchSessionDisplayRenderables(session),
+    acceptsTarget: () => true,
+    currentHoverTarget: null,
+  });
+  expect(
+    resolveViewportSketchStack(session, [...duplicate, ...projectedPoints]).map(
+      (entry) => [entry.target, entry.candidate.metric],
+    ),
+    "One entry per point target, the screen-space one.",
+  ).toEqual([
+    [startPointTarget, "screen"],
+    [originTarget, "screen"],
+  ]);
+
+  const planeRenderable = {
+    id: "renderable_plane_xy",
+    label: "XY Plane",
+    ownerBodyId: null,
+    ownerFeatureId: null,
+    binding: {
+      pickId: "pick_plane_xy",
+      pickPriority: 5,
+      target: { kind: "construction", constructionId: "construction_plane-xy" },
+      topology: null,
+      semanticClass: "construction",
+    },
+    geometry: {
+      kind: "mesh",
+      vertexPositions: [],
+      vertexNormals: [],
+      triangleIndices: [],
+    },
+  } as unknown as RenderableEntityRecord;
+  const planeMesh = new THREE.Mesh();
+  bindRenderableObject(
+    planeMesh,
+    planeRenderable.binding.pickId,
+    planeRenderable.binding.target,
+    "construction",
+    "document",
+    planeRenderable,
+  );
+  const planeHit = collectRaycastPickCandidates([
+    { object: planeMesh, distance: 10, point: new THREE.Vector3() } as never,
+  ]);
+  expect(
+    resolveViewportSketchStack(session, planeHit),
+    "A background datum plane is not a candidate when its click counts as empty (empty stack = clear selection).",
+  ).toEqual([]);
+  expect(
+    resolveViewportSketchStack(session, planeHit, {
+      excludeBackgroundDatumPlanes: false,
+    }).map((entry) => entry.pickClass),
+    "Where background planes are selectable, the plane stays a candidate.",
+  ).toEqual(["constructionPlane"]);
+});
+
+test("T11c review R-3: wires behind the nearest body face are occluded in the sketch stack", () => {
+  const { session } = makeAxisLineSession();
+  const faceTarget = {
+    kind: "face",
+    bodyId: "body_a",
+    faceId: "face_a",
+  } satisfies PrimitiveRef;
+  const edgeTarget = {
+    kind: "edge",
+    bodyId: "body_a",
+    edgeId: "edge_a",
+  } satisfies PrimitiveRef;
+  const face = new THREE.Mesh();
+  bindRenderableObject(face, "pick_face", faceTarget, "bodyFace", "document");
+  const edge = new THREE.Line();
+  bindRenderableObject(
+    edge,
+    "pick_edge",
+    edgeTarget,
+    "featureEdge",
+    "document",
+  );
+  const hits = (edgeDistance: number) =>
+    collectRaycastPickCandidates([
+      { object: face, distance: 1, point: new THREE.Vector3() },
+      { object: edge, distance: edgeDistance, point: new THREE.Vector3() },
+    ] as never);
+
+  expect(
+    resolveViewportSketchStack(session, hits(1.01)).map(
+      (entry) => entry.target,
+    ),
+    "A wire at the occlusion tolerance stays pickable (a reference curve before the face).",
+  ).toEqual([edgeTarget, faceTarget]);
+  expect(
+    resolveViewportSketchStack(session, hits(1.011)).map(
+      (entry) => entry.target,
+    ),
+    "A wire beyond the occlusion tolerance behind the face is dropped.",
+  ).toEqual([faceTarget]);
+
+  // Review REQUIRED-1 / ADV-2: the stack is class-first, so ray-picked
+  // surfaces behind the nearest body face are occluded too.
+  const surface = (
+    target: PrimitiveRef,
+    semanticClass: "region" | "sketchImage" | "construction",
+  ) => {
+    const mesh = new THREE.Mesh();
+    bindRenderableObject(mesh, null, target, semanticClass, "document");
+    return (distance: number) =>
+      collectRaycastPickCandidates([
+        { object: face, distance: 1, point: new THREE.Vector3() },
+        { object: mesh, distance, point: new THREE.Vector3() },
+      ] as never);
+  };
+  const regionTarget = {
+    kind: "region",
+    sketchId: "sketch_primary" as SketchId,
+    regionId: "region_a" as RegionId,
+  } satisfies PrimitiveRef;
+  const otherRegionTarget = {
+    ...regionTarget,
+    sketchId: "sketch_other" as SketchId,
+  } satisfies PrimitiveRef;
+  const imageTarget = {
+    kind: "sketchOperation",
+    sketchId: "sketch_primary" as SketchId,
+    operationId: "operation_image" as never,
+  } satisfies PrimitiveRef;
+  const planeTarget = {
+    kind: "construction",
+    constructionId: "construction_feature_plane-1" as never,
+  } satisfies PrimitiveRef;
+  const stackTargets = (candidates: PickCandidate[]) =>
+    resolveViewportSketchStack(session, candidates).map(
+      (entry) => entry.target,
+    );
+  for (const [label, target, semanticClass] of [
+    ["edited-sketch region", regionTarget, "region"],
+    ["other sketch's region", otherRegionTarget, "region"],
+    ["reference image", imageTarget, "sketchImage"],
+    ["construction plane", planeTarget, "construction"],
+  ] as const) {
+    const at = surface(target, semanticClass);
+    expect(
+      stackTargets(at(2)),
+      `A ${label} behind the body face is not picked through the body.`,
+    ).toEqual([faceTarget]);
+    expect(
+      stackTargets(at(1.011)),
+      `A ${label} just beyond the occlusion tolerance is occluded.`,
+    ).toEqual([faceTarget]);
+  }
+  expect(
+    stackTargets(surface(regionTarget, "region")(1)),
+    "A coplanar region (sketch on the face) stays and wins by class.",
+  ).toEqual([regionTarget, faceTarget]);
+  expect(
+    stackTargets(surface(regionTarget, "region")(1.01)),
+    "A region within the occlusion tolerance stays.",
+  ).toEqual([regionTarget, faceTarget]);
+  expect(
+    stackTargets(surface(imageTarget, "sketchImage")(0.5)),
+    "A reference image in front of the face stays and wins by class.",
+  ).toEqual([imageTarget, faceTarget]);
+  expect(
+    stackTargets(surface(planeTarget, "construction")(0.5)),
+    "A construction plane in front of the face stays reachable, below the face (class order; recorded, ADV-2).",
+  ).toEqual([faceTarget, planeTarget]);
+});
 
 // Lane: ui (docs/testing.md). Seam: `collectProjectedSketchCurveCandidates`
 // for a spline (T10f, review A6). The metric: the pointer ray meets the
