@@ -2606,6 +2606,414 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
   testNonPointDragTargetsAreInProcess();
   testSplineBodyWithConstrainedNeighbour();
   testBlockedFinalFrameKeepsLastAccepted();
+  testT12fFixedPointFeedback();
+  testT12fFixedLineBodyFeedback();
+  testT12fDimensionedCircleRimFeedback();
+  testT12fNonConvergentFrameFeedback();
+  testT12fPartialConstraintNoFeedback();
+  testT12fFeedbackClearedOnMovingFrame();
+  testT12fFeedbackClearedAtDragEnd();
+  testT12fNoGlobalMessageDuringDrag();
+
+  // T12f: structured drag feedback — fully constrained point shows feedback.
+  function testT12fFixedPointFeedback() {
+    // A fixed point cannot move: the drag should produce `constrained` feedback.
+    const definition = makeDefinition({
+      pointIds: ["sketch_point_a", "sketch_point_b"],
+      points: [
+        makePoint("sketch_point_a", "A", 0, 0),
+        makePoint("sketch_point_b", "B", 4, 0),
+      ],
+      entityIds: ["sketch_entity_line"],
+      entities: [
+        makeLine("sketch_entity_line", "Line", "sketch_point_a", "sketch_point_b"),
+      ],
+    });
+    const constrained: SketchDefinition = {
+      ...definition,
+      constraintIds: ["constraint_fix_a"],
+      constraints: [
+        {
+          constraintId: "constraint_fix_a",
+          kind: "fixPoint",
+          label: "Fix A",
+          pointId: "sketch_point_a",
+          position: [0, 0],
+        },
+      ],
+      dimensionIds: ["dimension_length"],
+      dimensions: [
+        {
+          dimensionId: "dimension_length",
+          kind: "lineLength",
+          label: "L4",
+          entityId: "sketch_entity_line",
+          value: 4,
+        },
+      ],
+    };
+    let session = openSessionFromDefinition(constrained);
+    const target = session.definition.points.find(
+      (p) => p.pointId === "sketch_point_a",
+    )?.target;
+    expect(target).toBeTruthy();
+    session = beginSketchGeometryDrag(session, target, [0, 0]);
+    expect(session.activeDrag).not.toBeNull();
+    session = updateSketchGeometryDrag(session, [3, 3]);
+    expect(
+      session.activeDrag?.feedback?.kind,
+      "T12f: fixed point drag should produce constrained feedback.",
+    ).toBe("constrained");
+    expect(
+      session.activeDrag?.feedback?.text,
+      "T12f: feedback text should be the constrained message.",
+    ).toBe("Geometry is constrained and cannot move to that position.");
+    expect(
+      session.activeDrag?.feedback?.target,
+      "T12f: feedback target should be at the constrained point.",
+    ).toBeTruthy();
+  }
+
+  // T12f: structured drag feedback — fixed line body shows feedback.
+  function testT12fFixedLineBodyFeedback() {
+    // Fix both endpoints of a line → body translate is constrained.
+    const definition = makeDefinition({
+      pointIds: ["sketch_point_a", "sketch_point_b"],
+      points: [
+        makePoint("sketch_point_a", "A", 0, 0),
+        makePoint("sketch_point_b", "B", 4, 0),
+      ],
+      entityIds: ["sketch_entity_line"],
+      entities: [
+        makeLine("sketch_entity_line", "Line", "sketch_point_a", "sketch_point_b"),
+      ],
+    });
+    const constrained: SketchDefinition = {
+      ...definition,
+      constraintIds: ["constraint_fix_a", "constraint_fix_b"],
+      constraints: [
+        {
+          constraintId: "constraint_fix_a",
+          kind: "fixPoint",
+          label: "Fix A",
+          pointId: "sketch_point_a",
+          position: [0, 0],
+        },
+        {
+          constraintId: "constraint_fix_b",
+          kind: "fixPoint",
+          label: "Fix B",
+          pointId: "sketch_point_b",
+          position: [4, 0],
+        },
+      ],
+    };
+    let session = openSessionFromDefinition(constrained);
+    const entity = session.definition.entities.find(
+      (e) => e.entityId === "sketch_entity_line",
+    )!;
+    session = beginSketchGeometryDrag(session, entity.target, [2, 0], {
+      kind: "entityBody",
+      entityId: entity.entityId,
+    });
+    expect(session.activeDrag).not.toBeNull();
+    session = updateSketchGeometryDrag(session, [2, 5]);
+    expect(
+      session.activeDrag?.feedback?.kind,
+      "T12f: fixed line body drag should produce constrained feedback.",
+    ).toBe("constrained");
+  }
+
+  // T12f: structured drag feedback — rim on radius-dimensioned circle.
+  function testT12fDimensionedCircleRimFeedback() {
+    const definition: SketchDefinition = {
+      ...makeDefinition({
+        pointIds: ["sketch_point_center"],
+        points: [makePoint("sketch_point_center", "Center", 0, 0)],
+        entityIds: ["sketch_entity_circle"],
+        entities: [
+          makeCircle("sketch_entity_circle", "Circle", "sketch_point_center", 3),
+        ],
+      }),
+      dimensionIds: ["dim_radius"],
+      dimensions: [
+        {
+          dimensionId: "dim_radius" as `sketch_dimension_${string}`,
+          kind: "circleRadius" as const,
+          label: "R3",
+          entityId: "sketch_entity_circle" as `sketch_entity_${string}`,
+          value: 3,
+          display: { position: [3, 0] as const },
+        },
+      ],
+    };
+    let session = openSessionFromDefinition(definition);
+    const entity = session.definition.entities[0]!;
+    session = beginSketchGeometryDrag(session, entity.target, [3, 0], {
+      kind: "rim",
+      entityId: entity.entityId,
+    });
+    expect(session.activeDrag?.intent.kind).toBe("radius");
+    session = updateSketchGeometryDrag(session, [6, 0]);
+    expect(
+      session.activeDrag?.feedback?.kind,
+      "T12f: rim drag on dimensioned circle should produce constrained feedback.",
+    ).toBe("constrained");
+    expect(
+      session.activeDrag?.feedback?.text,
+      "T12f: feedback text should be the constrained message.",
+    ).toBe("Geometry is constrained and cannot move to that position.");
+  }
+
+  // T12f: structured drag feedback — non-convergent frame (failed feedback).
+  function testT12fNonConvergentFrameFeedback() {
+    // Use the B14 fixture: conflicting constraints that make the sketch
+    // non-acceptable, so beginSketchGeometryDrag fails.
+    const definition: SketchDefinition = {
+      ...makeDefinition({
+        pointIds: ["sketch_point_a", "sketch_point_b"],
+        points: [
+          makePoint("sketch_point_a", "A", 1, 0),
+          makePoint("sketch_point_b", "B", 0, 1),
+        ],
+        entityIds: ["sketch_entity_line"],
+        entities: [
+          makeLine("sketch_entity_line", "Line", "sketch_point_a", "sketch_point_b"),
+        ],
+      }),
+      constraintIds: ["constraint_fix_a", "constraint_fix_b"],
+      constraints: [
+        {
+          constraintId: "constraint_fix_a",
+          kind: "fixPoint",
+          label: "Fix A",
+          pointId: "sketch_point_a",
+          position: [1, 0],
+        },
+        {
+          constraintId: "constraint_fix_b",
+          kind: "fixPoint",
+          label: "Fix B",
+          pointId: "sketch_point_b",
+          position: [0, 1],
+        },
+      ],
+      dimensionIds: ["dimension_conflicting"],
+      dimensions: [
+        {
+          dimensionId: "dimension_conflicting",
+          kind: "lineLength",
+          label: "Impossible length",
+          entityId: "sketch_entity_line",
+          value: 100,
+        },
+      ],
+    };
+    const session = openSessionFromDefinition(definition);
+    // The B14 path: the drag should not start, and a validationMessage
+    // is shown. We check that this path still works.
+    const target = session.definition.points.find(
+      (p) => p.pointId === "sketch_point_a",
+    )?.target;
+    expect(target).toBeTruthy();
+    const after = beginSketchGeometryDrag(session, target, [1, 0]);
+    expect(
+      after.activeDrag,
+      "T12f: non-acceptable sketch should not start a drag.",
+    ).toBeNull();
+    expect(
+      after.validationMessage,
+      "T12f: non-acceptable sketch should show a validation message.",
+    ).toMatch(/can't be dragged/);
+  }
+
+  // T12f: partial-constraint motion shows no feedback.
+  function testT12fPartialConstraintNoFeedback() {
+    // A horizontal line pinned at origin — free endpoint slides along x.
+    // Dragging along x should NOT produce feedback.
+    const definition = makeDefinition({
+      pointIds: ["sketch_point_pin", "sketch_point_slide"],
+      points: [
+        makePoint("sketch_point_pin", "Pin", 0, 0),
+        makePoint("sketch_point_slide", "Slide", 2, 0),
+      ],
+      entityIds: ["sketch_entity_line"],
+      entities: [
+        makeLine(
+          "sketch_entity_line",
+          "Line",
+          "sketch_point_pin",
+          "sketch_point_slide",
+        ),
+      ],
+    });
+    const constrained: SketchDefinition = {
+      ...definition,
+      constraintIds: ["constraint_fix_pin", "constraint_horizontal"],
+      constraints: [
+        {
+          constraintId: "constraint_fix_pin",
+          kind: "fixPoint",
+          label: "Fix Pin",
+          pointId: "sketch_point_pin",
+          position: [0, 0],
+        },
+        {
+          constraintId: "constraint_horizontal",
+          kind: "horizontal",
+          label: "Horizontal",
+          entityId: "sketch_entity_line",
+        },
+      ],
+    };
+    let session = openSessionFromDefinition(constrained);
+    const target = session.definition.points.find(
+      (p) => p.pointId === "sketch_point_slide",
+    )?.target;
+    expect(target).toBeTruthy();
+    session = beginSketchGeometryDrag(session, target, [2, 0]);
+    session = updateSketchGeometryDrag(session, [5, 0]);
+    expect(
+      session.activeDrag?.feedback,
+      "T12f: partial constraint motion along free DOF should show no feedback.",
+    ).toBeFalsy();
+    expect(
+      session.activeDrag?.status,
+      "T12f: should be accepted (dragging).",
+    ).toBe("dragging");
+  }
+
+  // T12f: feedback cleared on the next frame with motion.
+  function testT12fFeedbackClearedOnMovingFrame() {
+    // An unconstrained line: drag one endpoint to get an accepted frame,
+    // then verify feedback is null on that accepted frame.
+    let session = createNewSketchSessionFromSupport(
+      { kind: "construction", constructionId: "construction_plane-xy" },
+      OCC_KERNEL_SETTINGS,
+    );
+    session = beginSketchTool(session, "line");
+    session = startSketchDraw(session, [0, 0]);
+    session = acceptSketchDraw(session, [4, 0]);
+    session = beginSketchTool(session, "line");
+    const freeTarget = session.definition.points.find(
+      (p) =>
+        Math.abs(p.position[0] - 4) < 1e-6 &&
+        Math.abs(p.position[1]) < 1e-6,
+    )?.target;
+    expect(freeTarget).toBeTruthy();
+    session = beginSketchGeometryDrag(session, freeTarget!, [4, 0]);
+    session = updateSketchGeometryDrag(session, [6, 2]);
+    expect(
+      session.activeDrag?.feedback,
+      "T12f: accepted frame on unconstrained point should have no feedback.",
+    ).toBeFalsy();
+    expect(session.activeDrag?.status).toBe("dragging");
+  }
+
+  // T12f: feedback cleared at drag end.
+  function testT12fFeedbackClearedAtDragEnd() {
+    const definition = makeDefinition({
+      pointIds: ["sketch_point_a", "sketch_point_b"],
+      points: [
+        makePoint("sketch_point_a", "A", 0, 0),
+        makePoint("sketch_point_b", "B", 4, 0),
+      ],
+      entityIds: ["sketch_entity_line"],
+      entities: [
+        makeLine("sketch_entity_line", "Line", "sketch_point_a", "sketch_point_b"),
+      ],
+    });
+    const constrained: SketchDefinition = {
+      ...definition,
+      constraintIds: ["constraint_fix_a"],
+      constraints: [
+        {
+          constraintId: "constraint_fix_a",
+          kind: "fixPoint",
+          label: "Fix A",
+          pointId: "sketch_point_a",
+          position: [0, 0],
+        },
+      ],
+      dimensionIds: ["dimension_length"],
+      dimensions: [
+        {
+          dimensionId: "dimension_length",
+          kind: "lineLength",
+          label: "L4",
+          entityId: "sketch_entity_line",
+          value: 4,
+        },
+      ],
+    };
+    let session = openSessionFromDefinition(constrained);
+    const target = session.definition.points.find(
+      (p) => p.pointId === "sketch_point_a",
+    )?.target;
+    expect(target).toBeTruthy();
+    session = beginSketchGeometryDrag(session, target, [0, 0]);
+    session = updateSketchGeometryDrag(session, [3, 3]);
+    expect(session.activeDrag?.feedback?.kind).toBe("constrained");
+    session = finishSketchGeometryDrag(session, [3, 3]);
+    expect(
+      session.activeDrag,
+      "T12f: activeDrag should be null after drag end.",
+    ).toBeNull();
+    // validationMessage may remain on the final release frame (existing behaviour).
+  }
+
+  // T12f: no global validationMessage during mid-drag blocked frames.
+  function testT12fNoGlobalMessageDuringDrag() {
+    const definition = makeDefinition({
+      pointIds: ["sketch_point_a", "sketch_point_b"],
+      points: [
+        makePoint("sketch_point_a", "A", 0, 0),
+        makePoint("sketch_point_b", "B", 4, 0),
+      ],
+      entityIds: ["sketch_entity_line"],
+      entities: [
+        makeLine("sketch_entity_line", "Line", "sketch_point_a", "sketch_point_b"),
+      ],
+    });
+    const constrained: SketchDefinition = {
+      ...definition,
+      constraintIds: ["constraint_fix_a"],
+      constraints: [
+        {
+          constraintId: "constraint_fix_a",
+          kind: "fixPoint",
+          label: "Fix A",
+          pointId: "sketch_point_a",
+          position: [0, 0],
+        },
+      ],
+      dimensionIds: ["dimension_length"],
+      dimensions: [
+        {
+          dimensionId: "dimension_length",
+          kind: "lineLength",
+          label: "L4",
+          entityId: "sketch_entity_line",
+          value: 4,
+        },
+      ],
+    };
+    let session = openSessionFromDefinition(constrained);
+    const target = session.definition.points.find(
+      (p) => p.pointId === "sketch_point_a",
+    )?.target;
+    expect(target).toBeTruthy();
+    session = beginSketchGeometryDrag(session, target, [0, 0]);
+    session = updateSketchGeometryDrag(session, [3, 3]);
+    expect(
+      session.validationMessage,
+      "T12f: no global validationMessage during mid-drag blocked frame.",
+    ).toBeNull();
+    expect(
+      session.activeDrag?.feedback?.kind,
+      "T12f: feedback is local on activeDrag, not global.",
+    ).toBe("constrained");
+  }
 
   // A-new-2: when an intermediate frame was accepted but the final frame
   // solves at the same position, the result keeps the accepted definition

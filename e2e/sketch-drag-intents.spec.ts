@@ -366,3 +366,148 @@ test("T12c: dragging a spline body translates all fit points", async ({
   }
   expect(meanY, "All fit points below origin.").toBeLessThan(-1);
 });
+
+// ── T12f: drag feedback cue ─────────────────────────────────────────────
+
+test("T12f: dragging a fixed circle centre shows a feedback cue that disappears after release", async ({
+  page,
+}) => {
+  const workbench = new SketchWorkbenchHarness(page);
+  await enterSketchMode(workbench);
+
+  // Draw a circle at (500,400). The T12c centre-drag test proves the
+  // centre point at (500,400) is reliably pickable.
+  await workbench.activateTool("Create circular geometry.");
+  await workbench.clickViewportAt({ x: 500, y: 400 });
+  await workbench.clickViewportAt({ x: 600, y: 400 });
+  await expect
+    .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
+    .toContain("1 entities staged");
+  await page.keyboard.press("Escape");
+  await expect.poll(() => workbench.currentPhase()).toBe("editing");
+
+  // Fix the centre point: activate Fix Geometry, then click the centre.
+  await page.getByRole("button", { name: "Fix Geometry" }).click();
+  await workbench.waitForAnimationFrames(2);
+  await page.mouse.click(
+    (await workbench.viewport().boundingBox())!.x + 500,
+    (await workbench.viewport().boundingBox())!.y + 400,
+  );
+  await workbench.waitForAnimationFrames(4);
+  // Escape out of the constraint tool.
+  await page.keyboard.press("Escape");
+  await workbench.waitForAnimationFrames(2);
+
+  const box = await workbench.viewport().boundingBox();
+  if (!box) throw new Error("Viewport not visible.");
+
+  // Now drag the centre point (which is now fixed + has radius dimension =
+  // fully constrained). Use viewportDrag which is proven reliable.
+  await page.mouse.move(box.x + 500, box.y + 400);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 500, box.y + 600, { steps: 10 });
+  await workbench.waitForAnimationFrames(8);
+
+  // The feedback cue MUST appear (the centre is fixed, so it can't move).
+  const cueDuringDrag = await page
+    .locator('[data-testid="sketch-drag-feedback-cue"]')
+    .count();
+  expect(
+    cueDuringDrag,
+    "T12f: feedback cue must appear during drag of a fixed centre.",
+  ).toBeGreaterThan(0);
+
+  // Release.
+  await page.mouse.up();
+  await workbench.waitForAnimationFrames(4);
+
+  const cueAfterRelease = await page
+    .locator('[data-testid="sketch-drag-feedback-cue"]')
+    .count();
+  expect(
+    cueAfterRelease,
+    "T12f: feedback cue must disappear after release.",
+  ).toBe(0);
+
+  await finishSketch(workbench);
+});
+
+test("T12f: dragging the rim of a freshly drawn (radius-dimensioned) circle shows a feedback cue, radius stays unchanged, no Undo step", async ({
+  page,
+}) => {
+  const workbench = new SketchWorkbenchHarness(page);
+  await enterSketchMode(workbench);
+
+  // Draw a circle at (500,400) with rim at (600,400). The circle tool
+  // auto-creates a radius dimension, so the rim is constrained.
+  await workbench.activateTool("Create circular geometry.");
+  await workbench.clickViewportAt({ x: 500, y: 400 });
+  await workbench.clickViewportAt({ x: 600, y: 400 });
+  await expect
+    .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
+    .toContain("1 entities staged");
+  await page.keyboard.press("Escape");
+  await expect.poll(() => workbench.currentPhase()).toBe("editing");
+
+  const box = await workbench.viewport().boundingBox();
+  if (!box) throw new Error("Viewport not visible.");
+
+  // Drag the rim outward. Entity-curve picks depend on tessellation
+  // alignment (T12c report); hover first to warm the pick target.
+  await page.mouse.move(box.x + 600, box.y + 400);
+  await workbench.waitForAnimationFrames(2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 750, box.y + 400, { steps: 8 });
+  await workbench.waitForAnimationFrames(6);
+
+  // Check for the feedback cue during the drag.
+  const cueDuringDrag = await page
+    .locator('[data-testid="sketch-drag-feedback-cue"]')
+    .count();
+
+  // Release.
+  await page.mouse.up();
+  await workbench.waitForAnimationFrames(4);
+
+  const cueAfterRelease = await page
+    .locator('[data-testid="sketch-drag-feedback-cue"]')
+    .count();
+
+  // The rim drag on a dimensioned circle should produce a feedback cue.
+  // The cue depends on the rim pick succeeding (tessellation-dependent);
+  // when it does, it must appear and then clear.
+  expect(
+    cueDuringDrag,
+    "T12f: feedback cue must appear during rim drag of a dimensioned circle.",
+  ).toBeGreaterThan(0);
+  expect(
+    cueAfterRelease,
+    "T12f: feedback cue must disappear after release.",
+  ).toBe(0);
+
+  // Ctrl+Z should undo the circle draw (0 entities), not a drag — no Undo
+  // step was recorded for the blocked drag.
+  await page.keyboard.press("Control+z");
+  await expect
+    .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
+    .toContain("0 entities staged");
+
+  // Redo, finish, verify radius unchanged.
+  await page.keyboard.press("Control+Shift+z");
+  await expect
+    .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
+    .toContain("1 entities staged");
+
+  await finishSketch(workbench);
+  const committed = await readCommittedDefinition(workbench);
+  expect(committed).not.toBeNull();
+  const circle = committed!.entities.find((e) => e.kind === "circle");
+  expect(circle).toBeDefined();
+  // Radius should be the initial authored value (~2.4 units, < 4).
+  expect(
+    circle!.radius!,
+    "Radius must NOT have grown (dimension blocks the drag).",
+  ).toBeLessThan(4);
+});
+
+

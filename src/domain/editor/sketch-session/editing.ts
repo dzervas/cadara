@@ -67,6 +67,7 @@ import {
 } from "@/contracts/sketch/offset-publication";
 import type { SketchOffsetPublicationRecord } from "@/contracts/solver/schema";
 import type {
+  SketchDragFeedback,
   SketchEditQueryClick,
   SketchEditQueryState,
   SketchEditToolState,
@@ -2291,6 +2292,8 @@ export function applySketchGeometryDrag(
   );
 
   if (edit.kind === "blocked") {
+    // T12f: carry structured feedback on activeDrag; no global
+    // validationMessage during the drag (issue 05: local cue only).
     return {
       ...session,
       activeDrag: complete
@@ -2300,8 +2303,11 @@ export function applySketchGeometryDrag(
             currentPoint: point,
             status: "blocked",
             message: edit.message,
+            feedback: edit.feedback ?? null,
           },
-      validationMessage: edit.message,
+      // Only show validationMessage on the final (release) frame or when
+      // the drag is complete, so the cue is the primary drag-time feedback.
+      validationMessage: complete ? edit.message : null,
     };
   }
 
@@ -2321,6 +2327,8 @@ export function applySketchGeometryDrag(
             currentPoint: point,
             status: "dragging",
             message: null,
+            // T12f: clear feedback on an accepted (moving) frame.
+            feedback: null,
             acceptedFrame: true,
             interactiveSolveSession: edit.interactiveSolveSession,
           },
@@ -2427,9 +2435,25 @@ function buildDragTarget(
   }
 }
 
+/** T12f: structured drag edit result with optional feedback cue. */
+export type SolveDragEditResult =
+  | {
+      kind: "accepted";
+      definition: SketchDefinition;
+      solvedSnapshot?: SolvedSketchSnapshot;
+      interactiveSolveSession: SketchCompiledSolveSession | null;
+    }
+  | {
+      kind: "blocked";
+      message: string;
+      /** T12f: structured feedback for the viewport cue (issue 05). */
+      feedback?: SketchDragFeedback;
+    };
+
 /**
  * T12b: generalized drag edit that routes every intent through the solver.
- * Replaces the old solveDraggedPointEdit which only handled point targets.
+ * T12f: every blocked result includes structured feedback for the viewport
+ * cue (issue 05) with kind, target position and short diagnostic text.
  */
 export function solveDragEdit(
   definition: SketchDefinition,
@@ -2439,14 +2463,7 @@ export function solveDragEdit(
   intent: SketchDragIntent,
   dragTarget: SketchDragTarget,
   interactiveSolveSession: SketchCompiledSolveSession | null = null,
-):
-  | {
-      kind: "accepted";
-      definition: SketchDefinition;
-      solvedSnapshot?: SolvedSketchSnapshot;
-      interactiveSolveSession: SketchCompiledSolveSession | null;
-    }
-  | { kind: "blocked"; message: string } {
+): SolveDragEditResult {
   // Unconstrained fast path: no constraints or dimensions.
   if (
     definition.constraints.length === 0 &&
@@ -2465,7 +2482,15 @@ export function solveDragEdit(
       intent,
     );
     if (started.kind === "unacceptable") {
-      return { kind: "blocked", message: started.message };
+      return {
+        kind: "blocked",
+        message: started.message,
+        feedback: {
+          kind: "failed",
+          target: dragFeedbackTarget(definition, intent),
+          text: "Sketch solve failed.",
+        },
+      };
     }
     solveSession = started.session;
   }
@@ -2490,40 +2515,31 @@ export function solveDragEdit(
         };
 
   if (solved.kind !== "solved") {
-    return { kind: "blocked", message: CONSTRAINED_DRAG_BLOCKED_MESSAGE };
+    return {
+      kind: "blocked",
+      message: CONSTRAINED_DRAG_BLOCKED_MESSAGE,
+      feedback: {
+        kind: "failed",
+        target: dragFeedbackTarget(definition, intent),
+        text: CONSTRAINED_DRAG_BLOCKED_MESSAGE,
+      },
+    };
   }
 
-  // D6: constrained-movement feedback for point intents.
-  if (intent.kind === "point" && solveSession) {
-    const draggedSolvedPoint = solved.solvedSnapshot.solvedPoints.find(
-      (p) => p.pointId === intent.pointId,
-    );
-    const previousPosition = definition.points.find(
-      (p) => p.pointId === intent.pointId,
-    )?.position;
-    if (
-      dragTarget.kind === "sketchPoint" &&
-      draggedSolvedPoint &&
-      previousPosition
-    ) {
-      const requestedDistance = Math.hypot(
-        dragTarget.position[0] - previousPosition[0],
-        dragTarget.position[1] - previousPosition[1],
-      );
-      const movedDistance = Math.hypot(
-        draggedSolvedPoint.solvedPosition[0] - previousPosition[0],
-        draggedSolvedPoint.solvedPosition[1] - previousPosition[1],
-      );
-      const barelyMoved =
-        requestedDistance > CONSTRAINED_DRAG_REQUEST_EPSILON &&
-        movedDistance < requestedDistance * CONSTRAINED_DRAG_MOVE_FRACTION;
-      if (
-        barelyMoved &&
-        !sketchDraggedPointHasFreeDof(solveSession, intent.pointId)
-      ) {
-        return { kind: "blocked", message: CONSTRAINED_DRAG_BLOCKED_MESSAGE };
-      }
-    }
+  // D6/T12f: constrained-movement feedback for every intent (not just point).
+  const constrainedFeedback = detectConstrainedMovementFeedback(
+    definition,
+    intent,
+    dragTarget,
+    solved.solvedSnapshot,
+    solveSession,
+  );
+  if (constrainedFeedback) {
+    return {
+      kind: "blocked",
+      message: CONSTRAINED_DRAG_BLOCKED_MESSAGE,
+      feedback: constrainedFeedback,
+    };
   }
 
   return {
@@ -2536,6 +2552,192 @@ export function solveDragEdit(
     solvedSnapshot: solved.solvedSnapshot,
     interactiveSolveSession: solveSession,
   };
+}
+
+/**
+ * T12f: detect constrained-movement feedback for every intent type.
+ * Returns structured feedback when the drag target barely moved and has no
+ * free DOF, or null when the motion is normal (partial constraint with
+ * movement toward the pointer).
+ */
+function detectConstrainedMovementFeedback(
+  definition: SketchDefinition,
+  intent: SketchDragIntent,
+  dragTarget: SketchDragTarget,
+  solvedSnapshot: SolvedSketchSnapshot,
+  solveSession: SketchCompiledSolveSession | null,
+): SketchDragFeedback | null {
+  if (!solveSession) return null;
+
+  switch (intent.kind) {
+    case "point": {
+      if (dragTarget.kind !== "sketchPoint") return null;
+      const solvedPoint = solvedSnapshot.solvedPoints.find(
+        (p) => p.pointId === intent.pointId,
+      );
+      const previousPos = definition.points.find(
+        (p) => p.pointId === intent.pointId,
+      )?.position;
+      if (!solvedPoint || !previousPos) return null;
+      const requested = Math.hypot(
+        dragTarget.position[0] - previousPos[0],
+        dragTarget.position[1] - previousPos[1],
+      );
+      const moved = Math.hypot(
+        solvedPoint.solvedPosition[0] - previousPos[0],
+        solvedPoint.solvedPosition[1] - previousPos[1],
+      );
+      if (
+        requested > CONSTRAINED_DRAG_REQUEST_EPSILON &&
+        moved < requested * CONSTRAINED_DRAG_MOVE_FRACTION &&
+        !sketchDraggedPointHasFreeDof(solveSession, intent.pointId)
+      ) {
+        return {
+          kind: "constrained",
+          target: previousPos,
+          text: CONSTRAINED_DRAG_BLOCKED_MESSAGE,
+        };
+      }
+      return null;
+    }
+    case "translate": {
+      if (dragTarget.kind !== "sketchTranslate") return null;
+      const delta = dragTarget.delta;
+      const requested = Math.hypot(delta[0], delta[1]);
+      if (requested <= CONSTRAINED_DRAG_REQUEST_EPSILON) return null;
+      // Check if the first point barely moved.
+      const firstPointId = intent.pointIds[0];
+      if (!firstPointId) return null;
+      const previousPos = definition.points.find(
+        (p) => p.pointId === firstPointId,
+      )?.position;
+      const solvedPoint = solvedSnapshot.solvedPoints.find(
+        (p) => p.pointId === firstPointId,
+      );
+      if (!previousPos || !solvedPoint) return null;
+      const moved = Math.hypot(
+        solvedPoint.solvedPosition[0] - previousPos[0],
+        solvedPoint.solvedPosition[1] - previousPos[1],
+      );
+      if (
+        moved < requested * CONSTRAINED_DRAG_MOVE_FRACTION &&
+        !sketchDraggedPointHasFreeDof(solveSession, firstPointId)
+      ) {
+        return {
+          kind: "constrained",
+          target: previousPos,
+          text: CONSTRAINED_DRAG_BLOCKED_MESSAGE,
+        };
+      }
+      return null;
+    }
+    case "radius": {
+      if (dragTarget.kind !== "sketchRadius") return null;
+      const entity = definition.entities.find(
+        (e) => e.entityId === intent.entityId,
+      );
+      if (!entity || (entity.kind !== "circle" && entity.kind !== "arc"))
+        return null;
+      const currentRadius =
+        entity.kind === "circle" ? entity.radius : null;
+      if (currentRadius === null) return null;
+      const requestedDelta = Math.abs(
+        dragTarget.targetRadius - currentRadius,
+      );
+      const solvedEntity = solvedSnapshot.solvedEntities?.find(
+        (e) => e.entityId === intent.entityId,
+      );
+      const solvedRadius =
+        solvedEntity?.kind === "circle"
+          ? solvedEntity.solvedRadius
+          : currentRadius;
+      const movedDelta = Math.abs(solvedRadius - currentRadius);
+      if (
+        requestedDelta > CONSTRAINED_DRAG_REQUEST_EPSILON &&
+        movedDelta < requestedDelta * CONSTRAINED_DRAG_MOVE_FRACTION
+      ) {
+        // Radius is constrained — show cue at rim position.
+        const center = definition.points.find(
+          (p) => p.pointId === entity.centerPointId,
+        );
+        const target: SketchPoint = center
+          ? [center.position[0] + currentRadius, center.position[1]]
+          : [0, 0];
+        return {
+          kind: "constrained",
+          target,
+          text: CONSTRAINED_DRAG_BLOCKED_MESSAGE,
+        };
+      }
+      return null;
+    }
+    case "tangentVector": {
+      // Tangent vectors are rarely fully constrained; the solver's acceptance
+      // already handles the common cases. Skip constrained-movement feedback
+      // for tangent vector intents (no DOF probe available for vectors).
+      return null;
+    }
+  }
+}
+
+/**
+ * T12f: compute the feedback cue target position from the intent's current
+ * geometry position (before the drag frame).
+ */
+function dragFeedbackTarget(
+  definition: SketchDefinition,
+  intent: SketchDragIntent,
+): SketchPoint {
+  switch (intent.kind) {
+    case "point": {
+      const p = definition.points.find(
+        (pt) => pt.pointId === intent.pointId,
+      );
+      return p?.position ?? [0, 0];
+    }
+    case "translate": {
+      const p = definition.points.find(
+        (pt) => pt.pointId === intent.pointIds[0],
+      );
+      return p?.position ?? [0, 0];
+    }
+    case "radius": {
+      const entity = definition.entities.find(
+        (e) => e.entityId === intent.entityId,
+      );
+      if (!entity || (entity.kind !== "circle" && entity.kind !== "arc"))
+        return [0, 0];
+      const center = definition.points.find(
+        (p) => p.pointId === entity.centerPointId,
+      );
+      const radius =
+        entity.kind === "circle" ? entity.radius : 1;
+      return center
+        ? [center.position[0] + radius, center.position[1]]
+        : [0, 0];
+    }
+    case "tangentVector": {
+      const entity = definition.entities.find(
+        (e) => e.entityId === intent.entityId,
+      );
+      if (!entity || entity.kind !== "spline") return [0, 0];
+      const occ = entity.pointOccurrences.find(
+        (o) => o.occurrenceId === intent.occurrenceId,
+      );
+      if (!occ) return [0, 0];
+      const fitPoint = definition.points.find(
+        (p) => p.pointId === occ.pointId,
+      );
+      if (!fitPoint) return [0, 0];
+      if (occ.tangent.kind === "authored") {
+        return [
+          fitPoint.position[0] + occ.tangent.vector[0],
+          fitPoint.position[1] + occ.tangent.vector[1],
+        ];
+      }
+      return fitPoint.position;
+    }
+  }
 }
 
 /**

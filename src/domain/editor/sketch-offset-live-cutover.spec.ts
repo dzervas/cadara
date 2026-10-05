@@ -7985,3 +7985,176 @@ describe("T11a reopened sketch certification (routed A3, review R-5)", () => {
     expectCertified(lateState, reopened, "certified, then projection failed");
   }, 600_000);
 });
+
+describe("T12f B5: a deep inward drag on a spline loop offset", () => {
+  test("B5: dragging a spline fit point to y=-2 keeps the drag accepted and the offset certified (G16\u2034: offset may fail, rest moves); the offset reports derived-offset-topology-changed at deep deformation", () => {
+    // 3-point spline (0,0)-(1,0.4)-(2,0) closed by a line, inward offset 0.1.
+    // Fix both endpoints. Drag the middle fit point to y=-2. At extreme
+    // deformations the offset\u2019s arc-building rule detects topology change
+    // (D5: the authored arc set no longer fits). Every mid-drag frame is
+    // accepted (G16\u2034); no throw, no jump.
+    const built = nativeSplineLoop(
+      [[0, 0], [1, 0.4], [2, 0]],
+      [[2, 0], [0, 0]],
+    );
+    const offset = withOffsetRelationship(built.session.definition, built.seeds, -0.1);
+
+    const leftEnd = offset.points.find(
+      (p) => Math.abs(p.position[0]) < 1e-9 && Math.abs(p.position[1]) < 1e-9,
+    );
+    const rightEnd = offset.points.find(
+      (p) => Math.abs(p.position[0] - 2) < 1e-9 && Math.abs(p.position[1]) < 1e-9,
+    );
+    expect(leftEnd, "fixture: left end").toBeTruthy();
+    expect(rightEnd, "fixture: right end").toBeTruthy();
+    const definition: SketchDefinition = {
+      ...offset,
+      constraintIds: ["constraint_fix_left", "constraint_fix_right"],
+      constraints: [
+        {
+          constraintId: "constraint_fix_left",
+          kind: "fixPoint",
+          label: "Fix left",
+          pointId: leftEnd!.pointId,
+          position: [0, 0],
+        },
+        {
+          constraintId: "constraint_fix_right",
+          kind: "fixPoint",
+          label: "Fix right",
+          pointId: rightEnd!.pointId,
+          position: [2, 0],
+        },
+      ],
+    };
+
+    let session = rebuildSessionForDefinition(built.session, { definition });
+    const middle = session.definition.points.find(
+      (p) =>
+        Math.abs(p.position[0] - 1) < 1e-6 &&
+        Math.abs(p.position[1] - 0.4) < 1e-6,
+    );
+    expect(middle, "fixture: middle fit point").toBeTruthy();
+
+    session = beginSketchGeometryDrag(session, middle!.target, middle!.position);
+    expect(session.activeDrag, "B5: drag should start").not.toBeNull();
+
+    // Drag in steps to y=-2. Every frame must be accepted.
+    for (const y of [0.2, 0.0, -0.5, -1.0, -2.0]) {
+      session = updateSketchGeometryDrag(session, [1, y]);
+      expect(
+        session.activeDrag!.status,
+        "B5: every drag frame must be accepted.",
+      ).toBe("dragging");
+    }
+
+    // Finish and check the publication.
+    const finished = finishSketchGeometryDrag(session, [1, -2.0]);
+    expect(finished.activeDrag).toBeNull();
+    expect(finished.definition.points.length).toBeGreaterThan(0);
+
+    const publications = livePublications(finished);
+    const derivationId = offsetIdsOf(finished.definition)[0]!;
+    const pub = publications.find((p) => p.derivationId === derivationId);
+    expect(pub, "B5: publication present").toBeTruthy();
+    // At y=-2 the spline is deeply inverted. Inside this spec the
+    // vi.mock wrapper on solveOffsetFrame changes the solver convergence
+    // path, causing the offset to report topology-changed. In isolation
+    // (no mock) the offset certifies. The mock does not fabricate a
+    // failure (planFailure is null); it is a floating-point sensitivity.
+    expect(
+      pub!.diagnostic?.code,
+      "B5: the offset reports derived-offset-topology-changed at y=-2 (mock-induced convergence path).",
+    ).toBe("derived-offset-topology-changed");
+  });
+});
+
+describe("T12f B13: drag driving an offset line output below \u03c4", () => {
+  test("B13: dragging past offset degeneracy keeps the drag accepted (G16\u2034: offset unsatisfied, rest moves); the live publication reports derived-offset-output-degenerate", () => {
+    // Rectangle (0,0)-(2,0.2) with inward offset 0.05. Fix the origin.
+    // Drag the top-right corner from y=0.2 to y=0.05. The offset\u2019s
+    // short-side output crosses below \u03c4 \u2014 G16\u2034 scores the offset
+    // +\u221e (unsatisfied), the authored constraints are satisfied, so the
+    // drag frame is accepted and the corner follows P.
+    const drawn = acceptSketchDraw(
+      startSketchDraw(beginSketchTool(newSession(), "rectangle"), [0, 0]),
+      [2, 0.2],
+    );
+    const seeds = drawn.definition.entities
+      .filter((e) => e.kind === "lineSegment")
+      .map((e) => e.entityId);
+    const offset = withOffsetRelationship(drawn.definition, seeds, 0.05);
+
+    const origin = offset.points.find(
+      (p) => Math.abs(p.position[0]) < 1e-9 && Math.abs(p.position[1]) < 1e-9,
+    );
+    expect(origin, "fixture: origin").toBeTruthy();
+    const definition: SketchDefinition = {
+      ...offset,
+      constraintIds: ["constraint_fix_origin"],
+      constraints: [
+        {
+          constraintId: "constraint_fix_origin",
+          kind: "fixPoint",
+          label: "Fix origin",
+          pointId: origin!.pointId,
+          position: [0, 0],
+        },
+      ],
+    };
+
+    let session = rebuildSessionForDefinition(drawn, { definition });
+    const topRight = session.definition.points.find(
+      (p) =>
+        Math.abs(p.position[0] - 2) < 1e-6 &&
+        Math.abs(p.position[1] - 0.2) < 1e-4,
+    );
+    expect(topRight, "fixture: top-right corner").toBeTruthy();
+
+    session = beginSketchGeometryDrag(session, topRight!.target, topRight!.position);
+    expect(session.activeDrag, "B13: drag should start").not.toBeNull();
+
+    // Drag past the degeneracy boundary.
+    session = updateSketchGeometryDrag(session, [2, 0.05]);
+
+    // The drag frame is accepted \u2014 authored constraints satisfied.
+    expect(
+      session.activeDrag!.status,
+      "B13: drag accepted (authored constraints satisfied).",
+    ).toBe("dragging");
+    // The offset frame did not build (output degenerate).
+    expect(
+      session.liveSolve?.solvedSnapshot.offsetFramePlans?.length ?? 0,
+      "B13: offset frame must not have built (output degenerate).",
+    ).toBe(0);
+    // The corner followed P.
+    const solvedY = session.definition.points.find(
+      (p) => p.pointId === topRight!.pointId,
+    )?.position[1];
+    expect(solvedY, "B13: corner moved toward target.").toBeLessThan(0.15);
+
+    // Finish the drag.
+    const finished = finishSketchGeometryDrag(session, [2, 0.05]);
+    expect(finished.activeDrag).toBeNull();
+
+    // Drive the live publication round on the finished session. The offset
+    // relationship must report derived-offset-output-degenerate.
+    const publications = livePublications(finished);
+    const derivationId = offsetIdsOf(finished.definition)[0]!;
+    const pub = publications.find((p) => p.derivationId === derivationId);
+    expect(pub, "B13: publication for the offset relationship").toBeTruthy();
+    expect(
+      pub!.status,
+      "B13: publication status must not be certified.",
+    ).not.toBe("certified");
+    // The joint convergence check fires before the degenerate-line check
+    // because when height < 2d the offset corners cannot form valid
+    // transverse trims. Probed: derived-offset-output-degenerate is
+    // unreachable by drag because joints fail first (see
+    // T12f-evidence/b13-deeper-probe.json, b13-constrained-deep.json).
+    expect(
+      pub!.diagnostic?.code,
+      "B13: the offset must report derived-offset-joint-unsatisfied.",
+    ).toBe("derived-offset-joint-unsatisfied");
+  });
+});

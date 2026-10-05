@@ -136,6 +136,21 @@ export type SketchAnnotationGlyphKind =
   | "dimensionAngle"
   | "dimensionCoincident";
 
+/**
+ * Structured drag feedback for the viewport cue (issue 05). Present when
+ * the drag target cannot reach the pointer: fully constrained, non-convergent,
+ * invalid, or offset-relationship failure. Cleared when the next frame moves
+ * and at drag end.
+ */
+export interface SketchDragFeedback {
+  /** `constrained`: no remaining DOF (D6); `failed`: solver non-convergent / invalid / offset failure. */
+  kind: "constrained" | "failed";
+  /** Sketch-space position for the viewport cue (on the grabbed point/handle or near the grab point on a body/rim). */
+  target: SketchPoint;
+  /** Short local diagnostic text shown next to the cue. */
+  text: string;
+}
+
 export interface SketchGeometryDragState {
   /** The original PrimitiveRef that was grabbed. */
   target: import("@/core/editor/schema").PrimitiveRef;
@@ -151,6 +166,13 @@ export interface SketchGeometryDragState {
   message: string | null;
   /** Set once any frame of this gesture was accepted. */
   acceptedFrame?: true;
+  /**
+   * Structured local feedback for the viewport cue (issue 05). Present when
+   * the drag target is constrained or fails; cleared on the next frame with
+   * motion and at drag end. Replaces the session-level `validationMessage`
+   * for drag feedback.
+   */
+  feedback?: SketchDragFeedback | null;
   interactiveSolveSession:
     | import("@/contracts/sketch/solver-core").SketchCompiledSolveSession
     | null;

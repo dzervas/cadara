@@ -13,6 +13,7 @@ import {
 import * as THREE from "three";
 
 import { SketchViewportFeedbackLayer } from "@/components/cad/sketch-viewport-feedback";
+import { SketchDragFeedbackCue } from "@/components/cad/sketch-drag-feedback-cue";
 import { SketchSpecialModeViewportFeedback } from "@/components/cad/sketch-special-mode-viewport-feedback";
 import { SketchConstraintAnnotations } from "@/components/cad/sketch-constraint-annotations";
 import { shouldApplySketchDisplayStyles } from "@/components/cad/sketch-display-style";
@@ -389,6 +390,11 @@ export function ThreeCadViewport({
     useState<SketchViewportFeedbackProjection[]>([]);
   const [specialModeFeedbackProjections, setSpecialModeFeedbackProjections] =
     useState<SketchSpecialModeFeedbackProjection[]>([]);
+  const [dragFeedbackCue, setDragFeedbackCue] = useState<{
+    x: number;
+    y: number;
+    text: string;
+  } | null>(null);
   const [viewportTransitionVersion, setViewportTransitionVersion] = useState(0);
   const raycasterRef = useRef(new THREE.Raycaster());
   const pointerRef = useRef(new THREE.Vector2());
@@ -1166,8 +1172,34 @@ export function ThreeCadViewport({
           : [];
       }),
     );
+
+    // T12f: project the drag feedback cue (issue 05 local diagnostic).
+    const dragFeedback = sketchSession?.activeDrag?.feedback;
+    if (dragFeedback) {
+      const screenPoint = projectSketchFeedbackAnchor({
+        anchor: { kind: "sketchPoint", point: dragFeedback.target },
+        plane,
+        viewport: { width: rect.width, height: rect.height },
+        projectWorldPoint: (point: WorkspaceVec3) => {
+          const projected = new THREE.Vector3(
+            point[0],
+            point[1],
+            point[2],
+          ).project(camera);
+          return { x: projected.x, y: projected.y, z: projected.z };
+        },
+      });
+      setDragFeedbackCue(
+        screenPoint
+          ? { x: screenPoint.x, y: screenPoint.y, text: dragFeedback.text }
+          : null,
+      );
+    } else {
+      setDragFeedbackCue(null);
+    }
   }, [
     sketchAnnotations,
+    sketchSession?.activeDrag?.feedback,
     sketchSession?.plane,
     sketchToolPresentation,
     specialModePresentation,
@@ -3083,6 +3115,7 @@ export function ThreeCadViewport({
           }
         }}
       />
+      <SketchDragFeedbackCue cue={dragFeedbackCue} />
       <SketchSpecialModeViewportFeedback
         presentation={specialModePresentation}
         projections={specialModeFeedbackProjections}
