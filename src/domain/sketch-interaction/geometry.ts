@@ -9,15 +9,22 @@ import type {
   SketchPoint2D,
   SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
-import type { SketchId, SketchPointId } from "@/contracts/shared/ids";
+import type {
+  SketchEntityId,
+  SketchId,
+  SketchPointId,
+} from "@/contracts/shared/ids";
 import {
   closestPointOnSolvedCubicSpans,
   cubicSpansPoleBounds,
+  orderedSplineOccurrences,
   orderedSplinePointIds,
   reconstructSplineAggregate,
   solvedCubicSpans,
-  type SolvedCubicSpan,
+  splineVisibleHandleVectors,
   type SplinePoles,
+  type SplineVector,
+  type SolvedCubicSpan,
 } from "@/contracts/sketch/spline-geometry";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import {
@@ -352,6 +359,51 @@ function collectLocalInteractionGeometry(
           : createLocalEntityInteractionGeometry(entity, pointMap);
     if (geometry) {
       entries.push(geometry);
+    }
+  }
+
+  // Tangent handle tip points (T12d, D8): one point per spline occurrence,
+  // at fit point + visible vector. Only visible handles are pickable, but
+  // pickability is decided by the viewport (screen-space candidates); the
+  // interaction geometry always includes them for the pick collector.
+  const sketchId =
+    definition.points[0]?.target?.kind === "sketchPoint"
+      ? (definition.points[0].target as { sketchId: SketchId }).sketchId
+      : ("sketch_draft" as SketchId);
+  for (const entity of definition.entities) {
+    if (entity.kind !== "spline") continue;
+    const occurrences = orderedSplineOccurrences(entity);
+    if (!occurrences || occurrences.length < 2) continue;
+    const positions: Record<string, SplineVector> = {};
+    for (const occ of occurrences) {
+      const p = pointMap.get(occ.pointId as SketchPointId);
+      if (p) positions[occ.pointId] = p.position;
+    }
+    const visibleVectors = splineVisibleHandleVectors(entity, positions);
+    if (!visibleVectors) continue;
+    for (let i = 0; i < occurrences.length; i++) {
+      const occ = occurrences[i]!;
+      const fitPos = pointMap.get(occ.pointId as SketchPointId)?.position;
+      if (!fitPos) continue;
+      const visibleVec: SplineVector = visibleVectors[i]!;
+      const tipPos: SketchPoint2D = [
+        fitPos[0] + visibleVec[0],
+        fitPos[1] + visibleVec[1],
+      ];
+      entries.push({
+        kind: "point",
+        source: "local",
+        id: `sketch-tangent-handle:${entity.entityId}:${occ.occurrenceId}`,
+        label: "Tangent handle",
+        target: {
+          kind: "sketchTangentHandle",
+          sketchId,
+          entityId: entity.entityId as SketchEntityId,
+          occurrenceId: occ.occurrenceId,
+          pointId: occ.pointId as SketchPointId,
+        },
+        position: tipPos,
+      });
     }
   }
 

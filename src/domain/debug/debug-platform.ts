@@ -144,6 +144,20 @@ export interface DeveloperDebugSession {
   replay: DeveloperDebugReplaySupport;
 }
 
+/** T12d: lightweight snapshot of the live sketch for E2E assertions. */
+export interface SketchDebugSnapshot {
+  points: { id: string; position: readonly [number, number] }[];
+  entities: {
+    id: string;
+    kind: string;
+    occurrences?: {
+      occId: string;
+      pointId: string;
+      tangent: { kind: string; vector?: readonly [number, number] };
+    }[];
+  }[];
+}
+
 export interface CadaraDebugNamespace {
   readonly version: 1;
   getState(): WorkbenchDebugState | null;
@@ -152,4 +166,6 @@ export interface CadaraDebugNamespace {
   clearSelection(): void;
   refreshDocument(): void;
   exportSession(): DeveloperDebugSession;
+  /** T12d: return the live sketch definition + solved points, or null. */
+  getSketchSnapshot(): SketchDebugSnapshot | null;
 }

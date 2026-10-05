@@ -2,6 +2,7 @@ import type {
   CadaraDebugNamespace,
   DeveloperDebugSession,
   EditorRuntimeTraceSnapshot,
+  SketchDebugSnapshot,
   WorkbenchDebugState,
 } from "@/domain/debug/debug-platform";
 
@@ -24,6 +25,7 @@ export function createCadaraDebugNamespace(input: {
   clearSelection: () => void;
   refreshDocument: () => void;
   exportSession: () => DeveloperDebugSession;
+  getSketchSnapshot: () => SketchDebugSnapshot | null;
 }): CadaraDebugNamespace {
   return {
     version: 1,
@@ -37,6 +39,7 @@ export function createCadaraDebugNamespace(input: {
       input.refreshDocument();
     },
     exportSession: () => input.exportSession(),
+    getSketchSnapshot: () => input.getSketchSnapshot(),
   };
 }
 

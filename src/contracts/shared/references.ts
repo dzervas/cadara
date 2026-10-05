@@ -177,6 +177,24 @@ export interface RegionRef {
 }
 
 /**
+ * Non-durable (session-scoped) reference to a spline tangent handle tip
+ * (T12d, D8). Ranks in the `authoredPoint` pick class, after the fit
+ * point at equal distance.
+ */
+export interface SketchTangentHandleRef {
+  /** Stable discriminant for tangent-handle references. */
+  kind: "sketchTangentHandle";
+  /** Owning sketch. */
+  sketchId: SketchId;
+  /** The spline entity. */
+  entityId: SketchEntityId;
+  /** The ordered occurrence this handle belongs to. */
+  occurrenceId: string;
+  /** The fit point this handle is attached to. */
+  pointId: SketchPointId;
+}
+
+/**
  * Canonical durable reference union shared by editor and modeling contracts.
  */
 export type DurableRef =

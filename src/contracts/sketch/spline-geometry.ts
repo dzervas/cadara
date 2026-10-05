@@ -210,6 +210,29 @@ export function reconstructSplineAggregate<TPointId extends string>(
     : reconstructSpline(resolved, variation);
 }
 
+/**
+ * The visible handle vector for each occurrence of a spline: the authored
+ * vector for authored tangents, or the mean-arm reconstruction vector for
+ * automatic ones.  Returns `null` if the reconstruction fails.
+ *
+ * Shared between display (renderables) and interaction geometry (pick
+ * candidates) so the rendered tip and the pick position are bitwise
+ * identical.
+ */
+export function splineVisibleHandleVectors<TPointId extends string>(
+  aggregate: AuthoredSplineAggregate<TPointId>,
+  positions: Readonly<Record<TPointId, SplineVector>>,
+): readonly SplineVector[] | null {
+  const occs = orderedSplineOccurrences(aggregate);
+  if (!occs || occs.length < 2) return null;
+  const reconstruction = reconstructSplineAggregate(aggregate, positions);
+  if (reconstruction.validity !== "valid") return null;
+  return occs.map((occ, i) => {
+    if (occ.tangent.kind === "authored") return occ.tangent.vector;
+    return reconstruction.handles[i] ?? [0, 0];
+  });
+}
+
 /** Positive intervals only; exact coincident points are retained and diagnosed.
  * 'valid' means reconstruction is defined, NOT regularity or profile validity.
  * Positional closure requires coincident endpoints, but never wraps tangents.

@@ -278,7 +278,8 @@ export function getDurableDiagnosticTarget(
     !target ||
     target.kind === "projectedReferenceGeometry" ||
     target.kind === "sketchDatumReference" ||
-    target.kind === "sketchExternalReference"
+    target.kind === "sketchExternalReference" ||
+    target.kind === "sketchTangentHandle"
   ) {
     return null;
   }

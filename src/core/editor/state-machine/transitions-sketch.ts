@@ -503,6 +503,7 @@ export function handleSketchGeometryDragMoved(
   const session = updateSketchGeometryDrag(
     state.session,
     deriveSketchPointFromWorld(state.session.plane, event.point),
+    event.exactZero ? { exactZero: true } : undefined,
   );
 
   return {
@@ -539,6 +540,7 @@ export function handleSketchGeometryDragEnded(
   const session = finishSketchGeometryDrag(
     state.session,
     deriveSketchPointFromWorld(state.session.plane, event.point),
+    event.exactZero ? { exactZero: true } : undefined,
   );
 
   return {

@@ -2549,3 +2549,110 @@ test("T11e: a chooser pick sends the selection event a click picking it would, a
     "An overlap more than 6 px from the previous click: nothing to replace.",
   ).toBeNull();
 });
+
+// T12d: sketchTangentHandle in the pick stack ranks as authoredPoint
+// and tie-breaks after the fit point at equal distance.
+test("T12d: tangent handle in pick-stack — authoredPoint class, after fit point at tie", () => {
+  const sketchId =
+    "sketch_primary" as import("@/contracts/shared/ids").SketchId;
+  const entityId =
+    "e_spline" as import("@/contracts/shared/ids").SketchEntityId;
+  const pointId = "sp_0" as import("@/contracts/shared/ids").SketchPointId;
+  const fitPointTarget: PrimitiveRef = {
+    kind: "sketchPoint",
+    sketchId,
+    pointId,
+  };
+  const handleTarget: PrimitiveRef = {
+    kind: "sketchTangentHandle",
+    sketchId,
+    entityId,
+    occurrenceId: "occ_0",
+    pointId,
+  };
+  // Session with the spline.
+  const session = {
+    sketchId,
+    definition: {
+      schemaVersion: "sketch-definition/v1alpha2" as const,
+      referenceIds: [] as string[],
+      references: [] as never[],
+      pointIds: [pointId],
+      points: [
+        {
+          pointId,
+          label: "p0",
+          target: fitPointTarget,
+          position: [1, 1] as const,
+          isConstruction: false,
+        },
+      ],
+      entityIds: [entityId],
+      entities: [
+        {
+          kind: "spline" as const,
+          entityId,
+          label: "Spline",
+          target: { kind: "sketchEntity" as const, sketchId, entityId },
+          isConstruction: false,
+          closure: "open" as const,
+          interpolationPolicy: "centripetal-mean-arm-v1" as const,
+          pointOccurrenceIds: ["occ_0", "occ_1"],
+          pointOccurrences: [
+            {
+              occurrenceId: "occ_0",
+              pointId,
+              tangent: { kind: "automatic" as const },
+            },
+            {
+              occurrenceId: "occ_1",
+              pointId: "sp_1" as import("@/contracts/shared/ids").SketchPointId,
+              tangent: { kind: "automatic" as const },
+            },
+          ],
+        },
+      ] as import("@/contracts/sketch/schema").SketchEntityDefinition[],
+    } as unknown as import("@/contracts/sketch/schema").SketchDefinition,
+  };
+  // Build candidates at equal distance (0 px) for both targets.
+  const candidates: import("@/domain/sketch-interaction/pick-stack").SketchPickStackCandidate[] =
+    [
+      {
+        key: "sketchPoint:sketch_primary:sp_0",
+        target: fitPointTarget,
+        ownerBodyTarget: null,
+        metric: "screen" as const,
+        distance: 2,
+        depth: 0,
+      },
+      {
+        key: "sketchTangentHandle:sketch_primary:e_spline:occ_0",
+        target: handleTarget,
+        ownerBodyTarget: null,
+        metric: "screen" as const,
+        distance: 2,
+        depth: 0,
+      },
+    ];
+  const stack = resolveSketchPickStack({
+    session: session as unknown as SketchSessionState,
+    displayDefinition: session.definition,
+    candidates,
+    acceptsTarget: () => true,
+  });
+  expect(
+    stack.length,
+    "Both fit point and handle should be in the stack.",
+  ).toBe(2);
+  expect(stack[0]!.pickClass, "Handle should be authoredPoint class.").toBe(
+    "authoredPoint",
+  );
+  expect(
+    stack[0]!.target,
+    "Fit point should be first (lower key) at equal distance.",
+  ).toEqual(fitPointTarget);
+  expect(
+    stack[1]!.target,
+    "Handle should be second (stack[1]) at equal distance.",
+  ).toEqual(handleTarget);
+});

@@ -454,6 +454,8 @@ export interface SketchGeometryDragMovedEvent {
   type: "sketch.geometryDragMoved";
   /** Pointer location in the active sketch plane coordinate frame. */
   point: readonly [number, number];
+  /** T12d D4: the pointer is within the zero-capture radius of the handle's fit point. */
+  exactZero?: boolean;
 }
 
 /** Completes direct sketch geometry editing for the active drag target. */
@@ -461,6 +463,8 @@ export interface SketchGeometryDragEndedEvent {
   type: "sketch.geometryDragEnded";
   /** Release location in the active sketch plane coordinate frame. */
   point: readonly [number, number];
+  /** T12d D4: the pointer is within the zero-capture radius of the handle's fit point. */
+  exactZero?: boolean;
 }
 
 /**

@@ -6,6 +6,7 @@ import {
   getActiveSketchMarkerWorldRadii,
   getActiveSketchPolylineStrokeGeometryConfig,
   getSketchDisplayMarkerPresentation,
+  getSketchDisplayPolylineHandleVisibility,
   type SketchMarkerDisplayContext,
   buildSketchGradientMeshMaterial,
   buildSketchPolylineStrokeGeometry,
@@ -58,6 +59,7 @@ export function SketchDisplayRenderableNode({
           renderable={renderable}
           applyStyles={applyStyles}
           palette={palette}
+          markerContext={markerContext}
         />
       );
     case "marker":
@@ -266,10 +268,12 @@ export function SketchDisplayPolylineNode({
   renderable,
   applyStyles,
   palette,
+  markerContext,
 }: {
   renderable: SketchSessionDisplayRenderable;
   applyStyles: boolean;
   palette: SketchRenderingPalette;
+  markerContext?: SketchMarkerDisplayContext;
 }) {
   const geometryData =
     renderable.geometry.kind === "polyline" ? renderable.geometry : null;
@@ -444,7 +448,11 @@ export function SketchDisplayPolylineNode({
   }, [geometry]);
   useEffect(() => () => material.dispose(), [material]);
 
-  return <primitive object={line} />;
+  const handleVisible = markerContext
+    ? getSketchDisplayPolylineHandleVisibility(renderable, markerContext)
+    : true;
+
+  return <primitive object={line} visible={handleVisible} />;
 }
 
 function updatePolylineStrokeGeometryBuffer(

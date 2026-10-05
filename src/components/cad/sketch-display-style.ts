@@ -2,7 +2,10 @@ import * as THREE from "three";
 import { SVGLoader } from "three-stdlib";
 
 import type { SketchSessionDisplayRenderable } from "@/domain/editor/sketch-session";
-import { getSketchPointMarkerVisibility } from "@/domain/editor/sketch-session/display";
+import {
+  getSketchPointMarkerVisibility,
+  getSketchHandleVisibility,
+} from "@/domain/editor/sketch-session/display";
 import { type PrimitiveRef, primitiveRefEquals } from "@/core/editor/schema";
 import type { SketchPointId } from "@/contracts/shared/ids";
 import { SURFACE_COLORS } from "@/infrastructure/viewport/render-picking";
@@ -275,6 +278,9 @@ export const SKETCH_POINT_HOVER_MARKER_SCALE = 1.5;
  */
 export interface SketchMarkerDisplayContext {
   revealedPointIds: ReadonlySet<SketchPointId>;
+  revealedHandleEntityIds: ReadonlySet<
+    import("@/contracts/shared/ids").SketchEntityId
+  >;
   hoverTarget: PrimitiveRef | null;
 }
 
@@ -289,6 +295,21 @@ export function getSketchDisplayMarkerPresentation(
   renderable: SketchSessionDisplayRenderable,
   context: SketchMarkerDisplayContext,
 ) {
+  // Handle tip markers use handle visibility (T12d, D8).
+  if (renderable.handleDisplay) {
+    return {
+      visible: getSketchHandleVisibility(
+        renderable,
+        context.revealedHandleEntityIds,
+      ),
+      radiusScale:
+        renderable.target?.kind === "sketchTangentHandle" &&
+        context.hoverTarget !== null &&
+        primitiveRefEquals(context.hoverTarget, renderable.target)
+          ? SKETCH_POINT_HOVER_MARKER_SCALE
+          : 1,
+    };
+  }
   return {
     visible: getSketchPointMarkerVisibility(
       renderable,
@@ -301,6 +322,18 @@ export function getSketchDisplayMarkerPresentation(
         ? SKETCH_POINT_HOVER_MARKER_SCALE
         : 1,
   };
+}
+
+/**
+ * Whether a handle polyline renderable is visible (T12d, D8): delegate to
+ * `getSketchHandleVisibility` when the renderable carries `handleDisplay`.
+ */
+export function getSketchDisplayPolylineHandleVisibility(
+  renderable: SketchSessionDisplayRenderable,
+  context: SketchMarkerDisplayContext,
+): boolean {
+  if (!renderable.handleDisplay) return true;
+  return getSketchHandleVisibility(renderable, context.revealedHandleEntityIds);
 }
 
 export function getActiveSketchMarkerWorldRadii(

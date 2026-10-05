@@ -56,7 +56,8 @@ export type PrimitiveRef =
   | DurableRef
   | ProjectedReferenceGeometryRef
   | SketchDatumReferenceRef
-  | SketchExternalReferenceRef;
+  | SketchExternalReferenceRef
+  | import("@/contracts/shared/references").SketchTangentHandleRef;
 
 export type SelectionTarget = PrimitiveRef;
 
@@ -212,6 +213,7 @@ export const sketchSelectionFilter: SelectionFilter = {
     "sketchOperation",
     "sketchEntity",
     "sketchPoint",
+    "sketchTangentHandle",
     "constraint",
     "dimension",
     "projectedReferenceGeometry",
@@ -237,6 +239,7 @@ export const sketchSelectionFilter: SelectionFilter = {
             "sketchOperation",
             "sketchEntity",
             "sketchPoint",
+            "sketchTangentHandle",
             "constraint",
             "dimension",
             "projectedReferenceGeometry",
@@ -1252,6 +1255,8 @@ export function getPrimitiveRefLabel(target: PrimitiveRef) {
       return `${target.sketchId}.${target.entityId}`;
     case "sketchPoint":
       return `${target.sketchId}.${target.pointId}`;
+    case "sketchTangentHandle":
+      return `${target.sketchId}.${target.entityId}.${target.occurrenceId}`;
     case "constraint":
       return `${target.sketchId}.${target.constraintId}`;
     case "dimension":
@@ -1291,6 +1296,8 @@ export function getPrimitiveRefKey(target: PrimitiveRef) {
       return `sketchEntity:${target.sketchId}:${target.entityId}`;
     case "sketchPoint":
       return `sketchPoint:${target.sketchId}:${target.pointId}`;
+    case "sketchTangentHandle":
+      return `sketchTangentHandle:${target.sketchId}:${target.entityId}:${target.occurrenceId}`;
     case "constraint":
       return `constraint:${target.sketchId}:${target.constraintId}`;
     case "dimension":
@@ -1320,7 +1327,8 @@ export function isDurablePrimitiveRef(
   return (
     target.kind !== "projectedReferenceGeometry" &&
     target.kind !== "sketchDatumReference" &&
-    target.kind !== "sketchExternalReference"
+    target.kind !== "sketchExternalReference" &&
+    target.kind !== "sketchTangentHandle"
   );
 }
 
@@ -1397,6 +1405,7 @@ function getTargetSemantics(
     target.kind === "sketchOperation" ||
     target.kind === "sketchEntity" ||
     target.kind === "sketchPoint" ||
+    target.kind === "sketchTangentHandle" ||
     target.kind === "constraint" ||
     target.kind === "dimension" ||
     target.kind === "projectedReferenceGeometry" ||
@@ -1456,6 +1465,9 @@ function getTargetSemantics(
       semantics.push("sketchEntity");
       break;
     case "sketchPoint":
+      semantics.push("sketchPoint");
+      break;
+    case "sketchTangentHandle":
       semantics.push("sketchPoint");
       break;
     case "constraint":

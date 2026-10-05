@@ -112,8 +112,14 @@ interface WorkbenchViewportIntentActions {
     target: PrimitiveRef,
     point: readonly [number, number],
   ) => void;
-  onSketchGeometryDragMove: (point: readonly [number, number]) => void;
-  onSketchGeometryDragEnd: (point: readonly [number, number]) => void;
+  onSketchGeometryDragMove: (
+    point: readonly [number, number],
+    options?: { exactZero?: boolean },
+  ) => void;
+  onSketchGeometryDragEnd: (
+    point: readonly [number, number],
+    options?: { exactZero?: boolean },
+  ) => void;
   onSpecialModeClick: (
     point: readonly [number, number],
     target?: PrimitiveRef | null,
@@ -203,10 +209,16 @@ export function createWorkbenchViewportIntentHandler({
         onSketchGeometryDragStart(intent.target, intent.point);
         return;
       case "sketchGeometryDragMoved":
-        onSketchGeometryDragMove(intent.point);
+        onSketchGeometryDragMove(
+          intent.point,
+          intent.exactZero ? { exactZero: true } : undefined,
+        );
         return;
       case "sketchGeometryDragEnded":
-        onSketchGeometryDragEnd(intent.point);
+        onSketchGeometryDragEnd(
+          intent.point,
+          intent.exactZero ? { exactZero: true } : undefined,
+        );
         return;
       case "sketchGeometryDragCancelled":
         dispatch({ type: "sketch.geometryDragCancelled" });

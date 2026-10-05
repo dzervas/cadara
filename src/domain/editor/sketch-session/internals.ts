@@ -1876,6 +1876,8 @@ export function getTargetKey(target: PrimitiveRef) {
       return `${target.sketchId}:${target.datumId}`;
     case "sketchExternalReference":
       return target.referenceId;
+    case "sketchTangentHandle":
+      return `${target.entityId}:${target.occurrenceId}`;
   }
 }
 

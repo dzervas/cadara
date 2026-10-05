@@ -381,6 +381,15 @@ export interface SketchSessionDisplayRenderable {
     visibility: "always" | "contextual";
     ownerEntityIds: readonly SketchEntityId[];
   };
+  /**
+   * A tangent handle's display rule (T12d, D8): `contextual` (shown only
+   * when its spline, a fit point or a handle is hovered/selected/dragged).
+   */
+  handleDisplay?: {
+    visibility: "contextual";
+    ownerEntityId: SketchEntityId;
+    isAuthored: boolean;
+  };
   paintStyle?: SketchDisplayPaintStyle;
   strokeStyle?: SketchDisplayStrokeStyle;
   constraintDisplay?: SketchConstraintDisplayTargetState;

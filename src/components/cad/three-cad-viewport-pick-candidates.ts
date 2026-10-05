@@ -172,6 +172,7 @@ export function collectProjectedSketchDisplayPointCandidates({
   sketchDisplayRenderables,
   acceptsTarget,
   currentHoverTarget,
+  revealedHandleEntityIds,
 }: {
   clientX: number;
   clientY: number;
@@ -180,6 +181,10 @@ export function collectProjectedSketchDisplayPointCandidates({
   sketchDisplayRenderables: SketchSessionDisplayRenderable[];
   acceptsTarget: (target: PrimitiveRef) => boolean;
   currentHoverTarget: PrimitiveRef | null;
+  /** T12d: only revealed handles are pickable. */
+  revealedHandleEntityIds?: ReadonlySet<
+    import("@/contracts/shared/ids").SketchEntityId
+  >;
 }): PickCandidate[] {
   const pointerX = clientX - viewportRect.left;
   const pointerY = clientY - viewportRect.top;
@@ -193,6 +198,15 @@ export function collectProjectedSketchDisplayPointCandidates({
       !geometryData ||
       !isProjectedSketchDisplayPointTarget(renderable.target) ||
       !acceptsTarget(renderable.target)
+    ) {
+      return [];
+    }
+
+    // T12d: handle tips are only pickable when their spline is revealed.
+    if (
+      renderable.handleDisplay &&
+      revealedHandleEntityIds &&
+      !revealedHandleEntityIds.has(renderable.handleDisplay.ownerEntityId)
     ) {
       return [];
     }
@@ -668,6 +682,7 @@ export function isProjectedSketchDisplayPointTarget(
 ): target is PrimitiveRef {
   return (
     target?.kind === "sketchPoint" ||
+    target?.kind === "sketchTangentHandle" ||
     target?.kind === "sketchExternalReference" ||
     ((target?.kind === "sketchDatumReference" ||
       target?.kind === "projectedReferenceGeometry") &&

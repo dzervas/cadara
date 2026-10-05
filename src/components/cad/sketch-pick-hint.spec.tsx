@@ -124,6 +124,18 @@ test("the hint names the next click's pick and counts the others; one candidate 
     "Immediate-action contexts do not teach a cycle they do not have.",
   ).toBe("«Line 2» · 2 more here · Alt+click to choose");
   expect(getSketchPickTargetLabel(xAxis, definition)).toBe("X axis");
+  // T12d: tangent handle label in the chooser.
+  const handleTarget: import("@/core/editor/schema").PrimitiveRef = {
+    kind: "sketchTangentHandle",
+    sketchId: "sketch_1" as import("@/contracts/shared/ids").SketchId,
+    entityId: "e1" as import("@/contracts/shared/ids").SketchEntityId,
+    occurrenceId: "occ_0",
+    pointId: "p1" as import("@/contracts/shared/ids").SketchPointId,
+  };
+  expect(
+    getSketchPickTargetLabel(handleTarget, definition),
+    "T12d: tangent handle should be labelled 'Tangent handle' in the chooser.",
+  ).toBe("Tangent handle");
 });
 
 test("the hint chip renders top-left, beside the tool panel slot, with a Choose… seam for T11e", () => {

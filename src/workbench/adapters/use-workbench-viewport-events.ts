@@ -70,11 +70,17 @@ export function useWorkbenchViewportEvents({
         dispatch({ type: "viewport.selectionRequested", target });
         dispatch({ type: "viewport.hoverCleared" });
       },
-      handleSketchGeometryDragEnd(point: readonly [number, number]) {
-        dispatch({ type: "sketch.geometryDragEnded", point });
+      handleSketchGeometryDragEnd(
+        point: readonly [number, number],
+        options?: { exactZero?: boolean },
+      ) {
+        dispatch({ type: "sketch.geometryDragEnded", point, ...options });
       },
-      handleSketchGeometryDragMove(point: readonly [number, number]) {
-        dispatch({ type: "sketch.geometryDragMoved", point });
+      handleSketchGeometryDragMove(
+        point: readonly [number, number],
+        options?: { exactZero?: boolean },
+      ) {
+        dispatch({ type: "sketch.geometryDragMoved", point, ...options });
       },
       handleSketchGeometryDragStart(
         target: PrimitiveRef,

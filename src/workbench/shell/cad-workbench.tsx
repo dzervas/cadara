@@ -778,6 +778,32 @@ export function CadWorkbench({
         trace: getRuntimeTrace(),
         location: typeof window === "undefined" ? null : window.location,
       }),
+    getSketchSnapshot: () => {
+      if (!sketchSession) return null;
+      const def = sketchSession.definition;
+      const solved = sketchSession.liveSolve?.solvedSnapshot.solvedPoints ?? [];
+      const solvedMap = new Map(
+        solved.map((sp) => [sp.pointId, sp.solvedPosition] as const),
+      );
+      return {
+        points: def.points.map((p) => ({
+          id: p.pointId,
+          position: solvedMap.get(p.pointId) ?? p.position,
+        })),
+        entities: def.entities.map((e) => ({
+          id: e.entityId,
+          kind: e.kind,
+          occurrences:
+            e.kind === "spline"
+              ? e.pointOccurrences.map((occ) => ({
+                  occId: occ.occurrenceId,
+                  pointId: occ.pointId,
+                  tangent: occ.tangent,
+                }))
+              : undefined,
+        })),
+      };
+    },
   });
 
   const handleTargetVisibilityToggle = (target: PrimitiveRef) => {
