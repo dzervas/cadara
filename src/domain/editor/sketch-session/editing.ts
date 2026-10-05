@@ -5,8 +5,18 @@ import type {
   SketchId,
   SketchPointId,
 } from "@/contracts/shared/ids";
+import {
+  resolveSketchDragIntent,
+  type SketchDragHandle,
+  type SketchDragIntent,
+} from "./drag-intent";
+import {
+  orderedSplineOccurrences,
+  reconstructSplineAggregate,
+} from "@/contracts/sketch/spline-geometry";
 import type {
   SketchDefinition,
+  SolvedOffsetFramePlanRecord,
   SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
 import {
@@ -16,6 +26,7 @@ import {
   solveSketchDefinitionWithDraggedPointTarget,
   updateCompiledSketchSolveSession,
   type SketchCompiledSolveSession,
+  type SketchDragTarget,
 } from "@/contracts/sketch/solver-core";
 import type {
   ProjectedSketchReferenceRecord,
@@ -49,7 +60,10 @@ import {
   type SketchEditOperation,
 } from "@/contracts/sketch/edit-intersections";
 import type { OffsetFramePlan } from "@/contracts/sketch/offset-derivation-frame";
-import { nonAcceptedOffsetOutputs } from "@/contracts/sketch/offset-publication";
+import {
+  carriedOffsetPlans,
+  nonAcceptedOffsetOutputs,
+} from "@/contracts/sketch/offset-publication";
 import type { SketchOffsetPublicationRecord } from "@/contracts/solver/schema";
 import type {
   SketchEditQueryClick,
@@ -1874,40 +1888,173 @@ export function beginSketchGeometryDrag(
   session: SketchSessionState,
   target: PrimitiveRef,
   point: SketchPoint,
+  explicitHandle?: SketchDragHandle,
 ): SketchSessionState {
+  // Guards: must be in a compatible state.
   if (
-    target.kind !== "sketchPoint" ||
     session.status === "drawing" ||
     (session.activeTool !== null && !isDrawingSketchTool(session.activeTool))
   ) {
     return session;
   }
 
-  const selected = selectSketchEditTarget(session, target);
-
-  if (
-    !selected.activeEditTarget ||
-    selected.activeEditTarget.pointId !== target.pointId
-  ) {
+  // D9: non-draggable targets return unchanged.
+  if (target.kind !== "sketchPoint" && target.kind !== "sketchEntity") {
     return session;
   }
 
-  // B14: a sketch whose requirements are not acceptable has no drag
-  // session; the drag does not start and the reason is shown instead.
+  // Resolve the handle from the explicit parameter or from the PrimitiveRef.
+  const handle: SketchDragHandle | null =
+    explicitHandle ?? resolveHandleFromTarget(target);
+  if (!handle) {
+    return session;
+  }
+
+  // Resolve the drag intent.
+  const intent = resolveSketchDragIntent(session.definition, handle);
+  if (!intent) {
+    return session;
+  }
+
+  // For point targets, select the edit target (existing behavior).
+  let base = session;
+  if (target.kind === "sketchPoint") {
+    const selected = selectSketchEditTarget(session, target);
+    if (
+      !selected.activeEditTarget ||
+      selected.activeEditTarget.pointId !== target.pointId
+    ) {
+      return session;
+    }
+    base = selected;
+  }
+
+  // D1: automatic → authored conversion at handle grab.
+  // Grabbing an automatic tangent's handle converts it to authored with the
+  // visible (mean-arm) vector so the curve does not change at grab, then
+  // recompiles the session. Cancel restores the original definition.
+  let workingDefinition = base.definition;
+  if (intent.kind === "tangentVector" && handle.kind === "tangentHandle") {
+    const converted = convertAutomaticTangentToAuthored(
+      workingDefinition,
+      intent.entityId,
+      intent.occurrenceId,
+    );
+    if (converted) {
+      workingDefinition = converted;
+    }
+  }
+
+  return startDragWithIntent(
+    base,
+    workingDefinition,
+    target,
+    handle,
+    intent,
+    point,
+  );
+}
+
+/**
+ * Resolve a PrimitiveRef into a SketchDragHandle. Returns null for
+ * non-draggable targets. The viewport (T12c) will resolve body/centre/rim/
+ * tangent handles; this function handles what the PrimitiveRef carries.
+ */
+function resolveHandleFromTarget(
+  target: PrimitiveRef,
+): SketchDragHandle | null {
+  if (target.kind === "sketchPoint") {
+    return { kind: "point", pointId: target.pointId };
+  }
+  if (target.kind === "sketchEntity") {
+    return { kind: "entityBody", entityId: target.entityId };
+  }
+  return null;
+}
+
+/**
+ * Convert an automatic tangent to authored using the visible (mean-arm)
+ * vector from the spline reconstruction. Returns the mutated definition,
+ * or null if the tangent is already authored or the reconstruction fails.
+ */
+function convertAutomaticTangentToAuthored(
+  definition: SketchDefinition,
+  entityId: SketchEntityId,
+  occurrenceId: string,
+): SketchDefinition | null {
+  const entity = definition.entities.find((e) => e.entityId === entityId);
+  if (!entity || entity.kind !== "spline") return null;
+  const ordered = orderedSplineOccurrences(entity);
+  if (!ordered) return null;
+  const occIndex = ordered.findIndex(
+    (occ) => occ.occurrenceId === occurrenceId,
+  );
+  if (occIndex < 0) return null;
+  const occurrence = ordered[occIndex]!;
+  if (occurrence.tangent.kind === "authored") return null;
+
+  // Reconstruct the spline to get the visible automatic vector.
+  const positions = Object.fromEntries(
+    definition.points.map((p) => [p.pointId, p.position]),
+  ) as Record<SketchPointId, readonly [number, number]>;
+  const reconstruction = reconstructSplineAggregate(entity, positions);
+  if (reconstruction.validity !== "valid") return null;
+  const visibleVector = reconstruction.handles[occIndex];
+  if (!visibleVector) return null;
+
+  // Mutate the definition to convert this occurrence to authored.
+  return {
+    ...definition,
+    entities: definition.entities.map((e) => {
+      if (e.entityId !== entityId || e.kind !== "spline") return e;
+      return {
+        ...e,
+        pointOccurrences: e.pointOccurrences.map((occ) =>
+          occ.occurrenceId === occurrenceId
+            ? {
+                ...occ,
+                tangent: { kind: "authored" as const, vector: visibleVector },
+              }
+            : occ,
+        ),
+      };
+    }),
+  };
+}
+
+/** Start the drag with the resolved intent. */
+function startDragWithIntent(
+  session: SketchSessionState,
+  workingDefinition: SketchDefinition,
+  target: PrimitiveRef,
+  handle: SketchDragHandle,
+  intent: SketchDragIntent,
+  pointerDown: SketchPoint,
+): SketchSessionState {
+  const grabOffset = computeGrabOffset(workingDefinition, intent, pointerDown);
+
+  // B14: a sketch whose requirements are not acceptable has no drag session.
   const started = startInteractiveSolveSessionForDrag(
-    selected.definition,
-    selected.projectedReferences,
-    selected.solverTolerances,
-    getSketchSessionDerivationSettings(selected),
-    target.pointId,
+    workingDefinition,
+    session.projectedReferences,
+    session.solverTolerances,
+    getSketchSessionDerivationSettings(session),
+    intent,
+    session.offsetPlans,
   );
   if (started.kind === "unacceptable") {
     return { ...session, validationMessage: started.message };
   }
   const interactiveSolveSession = started.session;
 
+  // If the definition was modified (auto→authored conversion), update it.
+  const baseSession =
+    workingDefinition !== session.definition
+      ? { ...session, definition: workingDefinition }
+      : session;
+
   return {
-    ...selected,
+    ...baseSession,
     activeTool: null,
     status: "idle",
     constructionTargetPicking: false,
@@ -1923,8 +2070,12 @@ export function beginSketchGeometryDrag(
     toolStagedEntities: [],
     activeDrag: {
       target,
-      startPoint: point,
-      currentPoint: point,
+      handle,
+      intent,
+      preDragDefinition: session.definition,
+      startPoint: pointerDown,
+      currentPoint: pointerDown,
+      grabOffset,
       status: "dragging",
       message: null,
       interactiveSolveSession,
@@ -1933,29 +2084,143 @@ export function beginSketchGeometryDrag(
   };
 }
 
+/**
+ * Compute the grab offset between the pointer-down position and the
+ * logical position of the drag target. The offset is applied every frame
+ * so the target never jumps to the pointer.
+ */
+function computeGrabOffset(
+  definition: SketchDefinition,
+  intent: SketchDragIntent,
+  pointerDown: SketchPoint,
+): SketchPoint {
+  switch (intent.kind) {
+    case "point": {
+      const pointDef = definition.points.find(
+        (p) => p.pointId === intent.pointId,
+      );
+      if (!pointDef) return [0, 0];
+      return [
+        pointDef.position[0] - pointerDown[0],
+        pointDef.position[1] - pointerDown[1],
+      ];
+    }
+    case "translate": {
+      // For body drags, the pointer is the reference for the shared delta.
+      // Offset is the first point's position minus the pointer.
+      const firstPointDef = definition.points.find(
+        (p) => p.pointId === intent.pointIds[0],
+      );
+      if (!firstPointDef) return [0, 0];
+      return [
+        firstPointDef.position[0] - pointerDown[0],
+        firstPointDef.position[1] - pointerDown[1],
+      ];
+    }
+    case "radius": {
+      // A-1: scalar radial offset stored as [radialOffset, 0].
+      // targetRadius = |pointer − centre| + radialOffset, so
+      // radialOffset = currentRadius − |pointerDown − centre|.
+      const entity = definition.entities.find(
+        (e) => e.entityId === intent.entityId,
+      );
+      if (!entity || (entity.kind !== "circle" && entity.kind !== "arc"))
+        return [0, 0];
+      const center = definition.points.find(
+        (p) => p.pointId === entity.centerPointId,
+      );
+      if (!center) return [0, 0];
+      const distToPointer = Math.hypot(
+        pointerDown[0] - center.position[0],
+        pointerDown[1] - center.position[1],
+      );
+      const currentRadius =
+        entity.kind === "circle"
+          ? entity.radius
+          : Math.hypot(
+              definition.points.find((p) => p.pointId === entity.startPointId)!
+                .position[0] - center.position[0],
+              definition.points.find((p) => p.pointId === entity.startPointId)!
+                .position[1] - center.position[1],
+            );
+      return [currentRadius - distToPointer, 0];
+    }
+    case "tangentVector": {
+      // For handle drags, the offset is the handle tip (fit point + vector)
+      // minus the pointer. The definition may already have been converted
+      // from automatic to authored at this point.
+      const entity = definition.entities.find(
+        (e) => e.entityId === intent.entityId,
+      );
+      if (!entity || entity.kind !== "spline") return [0, 0];
+      const occurrence = entity.pointOccurrences.find(
+        (occ) => occ.occurrenceId === intent.occurrenceId,
+      );
+      if (!occurrence) return [0, 0];
+      const fitPoint = definition.points.find(
+        (p) => p.pointId === occurrence.pointId,
+      );
+      if (!fitPoint) return [0, 0];
+      if (occurrence.tangent.kind === "authored") {
+        const tipX = fitPoint.position[0] + occurrence.tangent.vector[0];
+        const tipY = fitPoint.position[1] + occurrence.tangent.vector[1];
+        return [tipX - pointerDown[0], tipY - pointerDown[1]];
+      }
+      // Automatic tangent: compute visible vector from reconstruction.
+      const positions = Object.fromEntries(
+        definition.points.map((p) => [p.pointId, p.position]),
+      ) as Record<SketchPointId, readonly [number, number]>;
+      const reconstruction = reconstructSplineAggregate(entity, positions);
+      if (reconstruction.validity !== "valid") return [0, 0];
+      const ordered = orderedSplineOccurrences(entity);
+      if (!ordered) return [0, 0];
+      const occIdx = ordered.findIndex(
+        (occ) => occ.occurrenceId === intent.occurrenceId,
+      );
+      if (occIdx < 0) return [0, 0];
+      const vec = reconstruction.handles[occIdx]!;
+      return [
+        fitPoint.position[0] + vec[0] - pointerDown[0],
+        fitPoint.position[1] + vec[1] - pointerDown[1],
+      ];
+    }
+  }
+}
+
 export function updateSketchGeometryDrag(
   session: SketchSessionState,
   point: SketchPoint,
+  options?: { exactZero?: boolean },
 ): SketchSessionState {
   if (!session.activeDrag) {
     return session;
   }
 
-  return applySketchGeometryDrag(session, point, false);
+  return applySketchGeometryDrag(session, point, false, options);
 }
 
 export function finishSketchGeometryDrag(
   session: SketchSessionState,
   point: SketchPoint,
+  options?: { exactZero?: boolean },
 ): SketchSessionState {
   if (!session.activeDrag) {
     return session;
   }
 
-  const interactiveSolveSession = session.activeDrag.interactiveSolveSession;
-  const updated = applySketchGeometryDrag(session, point, true);
-  if (interactiveSolveSession) {
-    interactiveSolveSession.disposed = true;
+  const drag = session.activeDrag;
+  const updated = applySketchGeometryDrag(session, point, true, options);
+  // A gesture with no accepted frame (click-only, or every frame blocked)
+  // restores the pre-drag state, undoing an automatic→authored tangent
+  // conversion made at grab. Otherwise the last accepted frame is kept.
+  if (!drag.acceptedFrame && updated.definition === session.definition) {
+    return {
+      ...cancelSketchGeometryDrag(session),
+      validationMessage: updated.validationMessage,
+    };
+  }
+  if (drag.interactiveSolveSession) {
+    drag.interactiveSolveSession.disposed = true;
   }
 
   return {
@@ -1964,10 +2229,41 @@ export function finishSketchGeometryDrag(
   };
 }
 
+/**
+ * Cancel the current drag gesture, restoring the exact pre-drag state
+ * (definition including any automatic→authored tangent conversion at grab,
+ * live/solved basis consistent with that definition) with no history entry.
+ * T12c will wire Escape/pointercancel/tool switch/Finish to this function.
+ */
+export function cancelSketchGeometryDrag(
+  session: SketchSessionState,
+): SketchSessionState {
+  if (!session.activeDrag) {
+    return session;
+  }
+
+  const interactiveSolveSession = session.activeDrag.interactiveSolveSession;
+  if (interactiveSolveSession) {
+    interactiveSolveSession.disposed = true;
+  }
+
+  const { preDragDefinition } = session.activeDrag;
+  const restored = {
+    ...session,
+    definition: preDragDefinition,
+    activeDrag: null,
+  };
+  // Without an accepted frame or grab conversion the basis is still current.
+  return preDragDefinition === session.definition
+    ? restored
+    : withLiveSolveBasis(restored, preDragDefinition);
+}
+
 export function applySketchGeometryDrag(
   session: SketchSessionState,
   point: SketchPoint,
   complete: boolean,
+  options?: { exactZero?: boolean },
 ): SketchSessionState {
   const drag = session.activeDrag;
 
@@ -1983,13 +2279,24 @@ export function applySketchGeometryDrag(
     return session;
   }
 
-  const edit = solveDraggedPointEdit(
+  // Build the SketchDragTarget from the intent, raw pointer, and grab offset.
+  // For most intents, the solver target is pointer + offset (Cartesian).
+  // For radius, the offset is a scalar radial offset applied differently.
+  const dragTarget = buildDragTarget(
+    session.definition,
+    drag.intent,
+    point,
+    drag.grabOffset,
+    options?.exactZero,
+  );
+
+  const edit = solveDragEdit(
     session.definition,
     session.projectedReferences,
     session.solverTolerances,
     getSketchSessionDerivationSettings(session),
-    drag.target.pointId,
-    point,
+    drag.intent,
+    dragTarget,
     drag.interactiveSolveSession,
   );
 
@@ -2024,6 +2331,7 @@ export function applySketchGeometryDrag(
             currentPoint: point,
             status: "dragging",
             message: null,
+            acceptedFrame: true,
             interactiveSolveSession: edit.interactiveSolveSession,
           },
       commitRequest: rebuildSessionCommitRequest(session, definition),
@@ -2034,13 +2342,112 @@ export function applySketchGeometryDrag(
   );
 }
 
-export function solveDraggedPointEdit(
+/**
+ * T12b: build the solver drag target from the intent, raw pointer position,
+ * and grab offset. Every intent maps to one SketchDragTarget variant.
+ *
+ * For point/translate/tangent intents, the offset is Cartesian:
+ *   target = pointer + grabOffset.
+ * For radius, the grab offset is a scalar radial offset (A-1):
+ *   targetRadius = |pointer − centre| + grabOffset[0].
+ */
+function buildDragTarget(
+  definition: SketchDefinition,
+  intent: SketchDragIntent,
+  pointer: SketchPoint,
+  grabOffset: SketchPoint,
+  exactZero?: boolean,
+): SketchDragTarget {
+  // Cartesian offset for non-radius intents.
+  const offsetPoint: SketchPoint = [
+    pointer[0] + grabOffset[0],
+    pointer[1] + grabOffset[1],
+  ];
+
+  switch (intent.kind) {
+    case "point":
+      return {
+        kind: "sketchPoint",
+        pointId: intent.pointId,
+        position: offsetPoint,
+      };
+    case "translate": {
+      // Delta = offsetPoint minus the first defining point's current position.
+      const firstPoint = definition.points.find(
+        (p) => p.pointId === intent.pointIds[0],
+      );
+      const delta: SketchPoint = firstPoint
+        ? [
+            offsetPoint[0] - firstPoint.position[0],
+            offsetPoint[1] - firstPoint.position[1],
+          ]
+        : [0, 0];
+      return {
+        kind: "sketchTranslate",
+        pointIds: intent.pointIds,
+        delta,
+      };
+    }
+    case "radius": {
+      // A-1: scalar radial offset. targetRadius = |pointer − centre| + radialOffset.
+      const entity = definition.entities.find(
+        (e) => e.entityId === intent.entityId,
+      );
+      if (!entity || (entity.kind !== "circle" && entity.kind !== "arc")) {
+        return {
+          kind: "sketchRadius",
+          entityId: intent.entityId,
+          targetRadius: 1,
+        };
+      }
+      const center = definition.points.find(
+        (p) => p.pointId === entity.centerPointId,
+      );
+      const targetRadius = center
+        ? Math.hypot(
+            pointer[0] - center.position[0],
+            pointer[1] - center.position[1],
+          ) + grabOffset[0]
+        : 1;
+      return {
+        kind: "sketchRadius",
+        entityId: intent.entityId,
+        targetRadius,
+      };
+    }
+    case "tangentVector": {
+      // Target vector = offsetPoint minus the fit point's position.
+      const fitPoint = definition.points.find(
+        (p) => p.pointId === intent.pointId,
+      );
+      const targetVector: SketchPoint = fitPoint
+        ? [
+            offsetPoint[0] - fitPoint.position[0],
+            offsetPoint[1] - fitPoint.position[1],
+          ]
+        : [0, 0];
+      return {
+        kind: "sketchTangentVector",
+        entityId: intent.entityId,
+        occurrenceId: intent.occurrenceId,
+        targetVector: exactZero ? [0, 0] : targetVector,
+        exactZero,
+      };
+    }
+  }
+}
+
+/**
+ * T12b: generalized drag edit that routes every intent through the solver.
+ * Replaces the old solveDraggedPointEdit which only handled point targets.
+ */
+export function solveDragEdit(
   definition: SketchDefinition,
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
   tolerances: SolverTolerancePolicy,
   derivation: SketchDerivationSettings,
-  pointId: SketchPointId,
-  position: SketchPoint,
+  intent: SketchDragIntent,
+  dragTarget: SketchDragTarget,
   interactiveSolveSession: SketchCompiledSolveSession | null = null,
 ):
   | {
@@ -2050,23 +2457,12 @@ export function solveDraggedPointEdit(
       interactiveSolveSession: SketchCompiledSolveSession | null;
     }
   | { kind: "blocked"; message: string } {
-  if (!definition.points.some((point) => point.pointId === pointId)) {
-    return { kind: "blocked", message: "Sketch point is no longer editable." };
-  }
-
+  // Unconstrained fast path: no constraints or dimensions.
   if (
     definition.constraints.length === 0 &&
     definition.dimensions.length === 0
   ) {
-    return {
-      kind: "accepted",
-      definition: applyPointPositionsToDefinition(
-        definition,
-        [{ pointId, position }],
-        derivation,
-      ),
-      interactiveSolveSession: null,
-    };
+    return applyUnconstrainedDrag(definition, intent, dragTarget, derivation);
   }
 
   let solveSession = interactiveSolveSession;
@@ -2076,73 +2472,67 @@ export function solveDraggedPointEdit(
       projectedReferences,
       tolerances,
       derivation,
-      pointId,
+      intent,
     );
     if (started.kind === "unacceptable") {
       return { kind: "blocked", message: started.message };
     }
     solveSession = started.session;
   }
+
   const solved = solveSession
-    ? updateCompiledSketchSolveSession(
-        solveSession,
-        {
-          kind: "sketchPoint",
-          pointId,
-          position,
-        },
-        1e-4,
-      )
-    : solveSketchDefinitionWithDraggedPointTarget({
-        definition,
-        projectedReferences,
-        dragTarget: {
-          kind: "sketchPoint",
-          pointId,
-          position,
-        },
-        tolerances,
-        ...derivation,
-        partialSolvePolicy: "failOnConflict",
-        targetTolerance: 1e-4,
-      });
+    ? updateCompiledSketchSolveSession(solveSession, dragTarget, 1e-4)
+    : dragTarget.kind === "sketchPoint"
+      ? solveSketchDefinitionWithDraggedPointTarget({
+          definition,
+          projectedReferences,
+          dragTarget,
+          tolerances,
+          ...derivation,
+          partialSolvePolicy: "failOnConflict",
+          targetTolerance: 1e-4,
+        })
+      : {
+          kind: "blocked" as const,
+          reason: "missingPoint" as const,
+          solvedSnapshot: null,
+          diagnostics: [],
+        };
 
   if (solved.kind !== "solved") {
     return { kind: "blocked", message: CONSTRAINED_DRAG_BLOCKED_MESSAGE };
   }
 
-  // D6 (minimum-motion-sketch-drag): constrained-movement feedback follows the
-  // grabbed target's available degrees of freedom, not cursor reachability. If
-  // the target clearly moved it plainly has a free DOF, so there is no feedback.
-  // If it barely moved despite a real requested motion, it is either fully
-  // constrained (no DOF -> no-op with feedback, draft untouched) or merely lagged
-  // because the pointer pulled across its remaining DOF (still successful, no
-  // feedback). We distinguish the two by probing the target's actual mobility in
-  // the solver rather than by the pull direction.
-  const draggedSolvedPoint = solved.solvedSnapshot.solvedPoints.find(
-    (point) => point.pointId === pointId,
-  );
-  const previousPosition = definition.points.find(
-    (point) => point.pointId === pointId,
-  )?.position;
-  if (draggedSolvedPoint && previousPosition) {
-    const requestedDistance = Math.hypot(
-      position[0] - previousPosition[0],
-      position[1] - previousPosition[1],
+  // D6: constrained-movement feedback for point intents.
+  if (intent.kind === "point" && solveSession) {
+    const draggedSolvedPoint = solved.solvedSnapshot.solvedPoints.find(
+      (p) => p.pointId === intent.pointId,
     );
-    const movedDistance = Math.hypot(
-      draggedSolvedPoint.solvedPosition[0] - previousPosition[0],
-      draggedSolvedPoint.solvedPosition[1] - previousPosition[1],
-    );
-    const barelyMoved =
-      requestedDistance > CONSTRAINED_DRAG_REQUEST_EPSILON &&
-      movedDistance < requestedDistance * CONSTRAINED_DRAG_MOVE_FRACTION;
+    const previousPosition = definition.points.find(
+      (p) => p.pointId === intent.pointId,
+    )?.position;
     if (
-      barelyMoved &&
-      solveSession !== null &&
-      !sketchDraggedPointHasFreeDof(solveSession, pointId)
+      dragTarget.kind === "sketchPoint" &&
+      draggedSolvedPoint &&
+      previousPosition
     ) {
-      return { kind: "blocked", message: CONSTRAINED_DRAG_BLOCKED_MESSAGE };
+      const requestedDistance = Math.hypot(
+        dragTarget.position[0] - previousPosition[0],
+        dragTarget.position[1] - previousPosition[1],
+      );
+      const movedDistance = Math.hypot(
+        draggedSolvedPoint.solvedPosition[0] - previousPosition[0],
+        draggedSolvedPoint.solvedPosition[1] - previousPosition[1],
+      );
+      const barelyMoved =
+        requestedDistance > CONSTRAINED_DRAG_REQUEST_EPSILON &&
+        movedDistance < requestedDistance * CONSTRAINED_DRAG_MOVE_FRACTION;
+      if (
+        barelyMoved &&
+        !sketchDraggedPointHasFreeDof(solveSession, intent.pointId)
+      ) {
+        return { kind: "blocked", message: CONSTRAINED_DRAG_BLOCKED_MESSAGE };
+      }
     }
   }
 
@@ -2158,29 +2548,144 @@ export function solveDraggedPointEdit(
   };
 }
 
+/**
+ * Unconstrained fast path: apply the drag target directly to the definition
+ * without running the solver.
+ */
+function applyUnconstrainedDrag(
+  definition: SketchDefinition,
+  intent: SketchDragIntent,
+  dragTarget: SketchDragTarget,
+  derivation: SketchDerivationSettings,
+):
+  | {
+      kind: "accepted";
+      definition: SketchDefinition;
+      interactiveSolveSession: null;
+    }
+  | { kind: "blocked"; message: string } {
+  switch (intent.kind) {
+    case "point": {
+      if (dragTarget.kind !== "sketchPoint") break;
+      return {
+        kind: "accepted",
+        definition: applyPointPositionsToDefinition(
+          definition,
+          [{ pointId: intent.pointId, position: dragTarget.position }],
+          derivation,
+        ),
+        interactiveSolveSession: null,
+      };
+    }
+    case "translate": {
+      if (dragTarget.kind !== "sketchTranslate") break;
+      const positions = intent.pointIds.map((pointId) => {
+        const p = definition.points.find((pt) => pt.pointId === pointId);
+        return {
+          pointId,
+          position: [
+            (p?.position[0] ?? 0) + dragTarget.delta[0],
+            (p?.position[1] ?? 0) + dragTarget.delta[1],
+          ] as SketchPoint,
+        };
+      });
+      return {
+        kind: "accepted",
+        definition: applyPointPositionsToDefinition(
+          definition,
+          positions,
+          derivation,
+        ),
+        interactiveSolveSession: null,
+      };
+    }
+    case "radius": {
+      if (dragTarget.kind !== "sketchRadius") break;
+      return {
+        kind: "accepted",
+        definition: {
+          ...definition,
+          entities: definition.entities.map((e) => {
+            if (e.entityId !== intent.entityId) return e;
+            if (e.kind === "circle")
+              return { ...e, radius: Math.max(1e-9, dragTarget.targetRadius) };
+            // Arcs: the unconstrained path does not modify arc radius
+            // (it's derived from center+endpoints). The solver handles it.
+            return e;
+          }),
+        },
+        interactiveSolveSession: null,
+      };
+    }
+    case "tangentVector": {
+      if (dragTarget.kind !== "sketchTangentVector") break;
+      return {
+        kind: "accepted",
+        definition: {
+          ...definition,
+          entities: definition.entities.map((e) => {
+            if (e.entityId !== intent.entityId || e.kind !== "spline") return e;
+            return {
+              ...e,
+              pointOccurrences: e.pointOccurrences.map((occ) =>
+                occ.occurrenceId === intent.occurrenceId
+                  ? {
+                      ...occ,
+                      tangent: {
+                        kind: "authored" as const,
+                        vector: dragTarget.targetVector,
+                      },
+                    }
+                  : occ,
+              ),
+            };
+          }),
+        },
+        interactiveSolveSession: null,
+      };
+    }
+  }
+  return { kind: "blocked", message: "Unsupported drag intent." };
+}
+
 function startInteractiveSolveSessionForDrag(
   definition: SketchDefinition,
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
   tolerances: SolverTolerancePolicy,
   derivation: SketchDerivationSettings,
-  pointId: SketchPointId,
+  intent: SketchDragIntent,
+  offsetPlans?: readonly SolvedOffsetFramePlanRecord[],
 ):
   | { kind: "started"; session: SketchCompiledSolveSession | null }
   | { kind: "unacceptable"; message: string } {
   if (
-    !definition.points.some((point) => point.pointId === pointId) ||
-    (definition.constraints.length === 0 && definition.dimensions.length === 0)
+    definition.constraints.length === 0 &&
+    definition.dimensions.length === 0
   ) {
     return { kind: "started", session: null };
   }
 
+  const sessionLabel =
+    intent.kind === "point"
+      ? intent.pointId
+      : intent.kind === "translate"
+        ? `translate_${intent.pointIds[0]}`
+        : intent.kind === "radius"
+          ? `radius_${intent.entityId}`
+          : `tangent_${intent.entityId}_${intent.occurrenceId}`;
+
+  // B7: apply carriedOffsetPlans for uniformity with other interactive solve
+  // session starts (g5a re-review advisory 5).
+  const carried = offsetPlans ? carriedOffsetPlans(offsetPlans) : undefined;
+
   const started = startCompiledSketchSolveSession({
-    sessionId: `interactive_sketch_solve_drag_${pointId}`,
+    sessionId: `interactive_sketch_solve_drag_${sessionLabel}`,
     program: compileSketchSolveProgram({
       definition,
       projectedReferences,
       tolerances,
       ...derivation,
+      offsetPlans: carried,
       partialSolvePolicy: "failOnConflict",
     }),
   });

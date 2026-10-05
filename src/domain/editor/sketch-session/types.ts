@@ -137,11 +137,20 @@ export type SketchAnnotationGlyphKind =
   | "dimensionCoincident";
 
 export interface SketchGeometryDragState {
-  target: SketchPointRef;
+  /** The original PrimitiveRef that was grabbed. */
+  target: import("@/core/editor/schema").PrimitiveRef;
+  handle: import("@/domain/editor/sketch-session/drag-intent").SketchDragHandle;
+  intent: import("@/domain/editor/sketch-session/drag-intent").SketchDragIntent;
+  /** Pre-drag definition, for cancel restoration (incl. automatic tangent state). */
+  preDragDefinition: import("@/contracts/sketch/schema").SketchDefinition;
   startPoint: SketchPoint;
   currentPoint: SketchPoint;
+  /** Offset from pointer-down to the grabbed target, applied every frame. */
+  grabOffset: SketchPoint;
   status: "dragging" | "blocked";
   message: string | null;
+  /** Set once any frame of this gesture was accepted. */
+  acceptedFrame?: true;
   interactiveSolveSession:
     | import("@/contracts/sketch/solver-core").SketchCompiledSolveSession
     | null;
