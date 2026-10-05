@@ -29,6 +29,7 @@ import {
   updateSketchPointer,
   type SketchDrawingEscapeStep,
 } from "@/domain/editor/sketch-session";
+import { applyTangentAction } from "@/domain/editor/sketch-session/tangent-actions";
 import {
   enterSketchSpecialMode,
   getSketchSpecialModeSelectionFilter,
@@ -174,6 +175,31 @@ export function handleSketchToolPatched(
 
   if (state.session.activeEditTool) {
     const session = patchSketchEditToolValue(state.session, event.patch);
+
+    return {
+      state: {
+        ...state,
+        session,
+        preview: {
+          kind: "sketch",
+          label: getSketchSessionPreviewLabel(session),
+          target: session.planeTarget,
+        },
+      },
+      effects: [],
+    };
+  }
+
+  // T12e: tangent reset-to-automatic and set-to-zero selection-context actions.
+  if (
+    event.patch.intent === "resetTangentToAutomatic" ||
+    event.patch.intent === "setTangentToZero"
+  ) {
+    const session = applyTangentAction(
+      state.session,
+      state.selection,
+      event.patch.intent,
+    );
 
     return {
       state: {
