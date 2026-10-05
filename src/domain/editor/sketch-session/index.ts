@@ -16,6 +16,7 @@ export type {
   SketchAnnotationDescriptor,
   SketchDimensionAnnotationDragHandle,
   SketchAnnotationGlyphKind,
+  SketchDragFeedback,
   SketchGeometryDragState,
   SketchLiveRegionBasis,
   SketchLiveRegions,
