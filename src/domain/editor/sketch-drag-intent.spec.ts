@@ -1,7 +1,10 @@
 import { test, expect } from "vitest";
 
 import type { SketchDefinition } from "@/contracts/sketch/schema";
-import { resolveSketchDragIntent } from "@/domain/editor/sketch-session";
+import {
+  resolveHandleFromTarget,
+  resolveSketchDragIntent,
+} from "@/domain/editor/sketch-session";
 
 // Lane: logic (docs/testing.md). Seam: the deterministic per-handle drag intent
 // contract in src/domain/editor/sketch-session/drag-intent.ts. These tests prove
@@ -351,4 +354,322 @@ test("T12b: tangent handle, spline body, arc rim, and non-draggable intent mappi
   testSplineBodyHandleTranslatesAllFitPoints();
   testDerivedEntityBodyReturnsNull();
   testArcRimHandleTargetsRadius();
+});
+
+// T12c: D10 handle resolution from PrimitiveRef + definition.
+test("T12c D10: resolveHandleFromTarget maps PrimitiveRef to the correct handle", () => {
+  function point(pointId: string, x: number, y: number) {
+    return {
+      pointId: pointId as `sketch_point_${string}`,
+      label: pointId,
+      target: {
+        kind: "sketchPoint" as const,
+        sketchId: "sketch_primary" as `sketch_${string}`,
+        pointId: pointId as `sketch_point_${string}`,
+      },
+      position: [x, y] as const,
+      isConstruction: false,
+    };
+  }
+
+  const definition: SketchDefinition = {
+    schemaVersion: "sketch-definition/v1alpha2",
+    referenceIds: [],
+    references: [],
+    pointIds: ["p_start", "p_end", "p_center", "p_shared"],
+    points: [
+      point("p_start", 0, 0),
+      point("p_end", 4, 0),
+      point("p_center", 2, 2),
+      point("p_shared", 5, 5),
+    ],
+    entityIds: ["e_line", "e_circle", "e_arc", "e_derived"],
+    entities: [
+      {
+        kind: "lineSegment",
+        entityId: "e_line" as `sketch_entity_${string}`,
+        label: "Line",
+        target: {
+          kind: "sketchEntity" as const,
+          sketchId: "sketch_primary" as `sketch_${string}`,
+          entityId: "e_line" as `sketch_entity_${string}`,
+        },
+        isConstruction: false,
+        startPointId: "p_start" as `sketch_point_${string}`,
+        endPointId: "p_end" as `sketch_point_${string}`,
+      },
+      {
+        kind: "circle",
+        entityId: "e_circle" as `sketch_entity_${string}`,
+        label: "Circle",
+        target: {
+          kind: "sketchEntity" as const,
+          sketchId: "sketch_primary" as `sketch_${string}`,
+          entityId: "e_circle" as `sketch_entity_${string}`,
+        },
+        isConstruction: false,
+        centerPointId: "p_center" as `sketch_point_${string}`,
+        radius: 3,
+      },
+      {
+        kind: "arc",
+        entityId: "e_arc" as `sketch_entity_${string}`,
+        label: "Arc",
+        target: {
+          kind: "sketchEntity" as const,
+          sketchId: "sketch_primary" as `sketch_${string}`,
+          entityId: "e_arc" as `sketch_entity_${string}`,
+        },
+        isConstruction: false,
+        centerPointId: "p_center" as `sketch_point_${string}`,
+        startPointId: "p_start" as `sketch_point_${string}`,
+        endPointId: "p_end" as `sketch_point_${string}`,
+        sweepDirection: "counterClockwise" as const,
+      },
+      {
+        kind: "derivedPiecewiseCubic",
+        entityId: "e_derived" as `sketch_entity_${string}`,
+        label: "Derived",
+        target: {
+          kind: "sketchEntity" as const,
+          sketchId: "sketch_primary" as `sketch_${string}`,
+          entityId: "e_derived" as `sketch_entity_${string}`,
+        },
+        isConstruction: false,
+        relationshipId: "rel_offset" as `derived_relationship_${string}`,
+      } as import("@/contracts/sketch/schema").SketchEntityDefinition,
+    ],
+    constraintIds: [],
+    constraints: [],
+    dimensionIds: [],
+    dimensions: [],
+  };
+
+  // Line body → entityBody
+  function testLineBodyResolvesToEntityBody() {
+    const handle = resolveHandleFromTarget(definition, {
+      kind: "sketchEntity",
+      sketchId: "sketch_primary" as `sketch_${string}`,
+      entityId: "e_line" as `sketch_entity_${string}`,
+    });
+    expect(
+      handle,
+      "Line entity target should resolve to entityBody handle.",
+    ).toEqual({ kind: "entityBody", entityId: "e_line" });
+  }
+
+  // Circle body → rim
+  function testCircleBodyResolvesToRim() {
+    const handle = resolveHandleFromTarget(definition, {
+      kind: "sketchEntity",
+      sketchId: "sketch_primary" as `sketch_${string}`,
+      entityId: "e_circle" as `sketch_entity_${string}`,
+    });
+    expect(
+      handle,
+      "Circle entity target should resolve to rim handle.",
+    ).toEqual({ kind: "rim", entityId: "e_circle" });
+  }
+
+  // Arc body → rim
+  function testArcBodyResolvesToRim() {
+    const handle = resolveHandleFromTarget(definition, {
+      kind: "sketchEntity",
+      sketchId: "sketch_primary" as `sketch_${string}`,
+      entityId: "e_arc" as `sketch_entity_${string}`,
+    });
+    expect(
+      handle,
+      "Arc entity target should resolve to rim handle.",
+    ).toEqual({ kind: "rim", entityId: "e_arc" });
+  }
+
+  // Centre of exactly one circle → center
+  function testCentreOfOneCircleResolvesToCenter() {
+    const handle = resolveHandleFromTarget(definition, {
+      kind: "sketchPoint",
+      sketchId: "sketch_primary" as `sketch_${string}`,
+      pointId: "p_center" as `sketch_point_${string}`,
+    });
+    // p_center is the centre of both e_circle and e_arc, so it should NOT
+    // resolve to center — it should be a plain point.
+    expect(
+      handle,
+      "A point that is centre of two entities should be a plain point handle.",
+    ).toEqual({ kind: "point", pointId: "p_center" });
+  }
+
+  // Centre of exactly one circle → center (test with only one)
+  function testExclusiveCentreResolvesToCenter() {
+    const singleCircleDef: SketchDefinition = {
+      ...definition,
+      entityIds: ["e_circle"],
+      entities: [definition.entities[1]!],
+    };
+    const handle = resolveHandleFromTarget(singleCircleDef, {
+      kind: "sketchPoint",
+      sketchId: "sketch_primary" as `sketch_${string}`,
+      pointId: "p_center" as `sketch_point_${string}`,
+    });
+    expect(
+      handle,
+      "Centre of exactly one circle should resolve to center handle.",
+    ).toEqual({ kind: "center", entityId: "e_circle" });
+  }
+
+  // Non-centre sketch point → point
+  function testNonCentrePointResolvesToPoint() {
+    const handle = resolveHandleFromTarget(definition, {
+      kind: "sketchPoint",
+      sketchId: "sketch_primary" as `sketch_${string}`,
+      pointId: "p_start" as `sketch_point_${string}`,
+    });
+    expect(
+      handle,
+      "Non-centre sketch point should resolve to point handle.",
+    ).toEqual({ kind: "point", pointId: "p_start" });
+  }
+
+  // Derived entity → null (D9 refusal)
+  function testDerivedEntityReturnsNull() {
+    const handle = resolveHandleFromTarget(definition, {
+      kind: "sketchEntity",
+      sketchId: "sketch_primary" as `sketch_${string}`,
+      entityId: "e_derived" as `sketch_entity_${string}`,
+    });
+    expect(
+      handle,
+      "Derived entity (offset output) should not be draggable.",
+    ).toBe(null);
+  }
+
+  // Non-sketch target → null
+  function testNonSketchTargetReturnsNull() {
+    const handle = resolveHandleFromTarget(definition, {
+      kind: "feature",
+      featureId: "feat_1" as `feature_${string}`,
+    });
+    expect(
+      handle,
+      "Non-sketch targets should not be draggable.",
+    ).toBe(null);
+  }
+
+  // Construction line → entityBody (construction follows same rules)
+  function testConstructionCurveIsDraggable() {
+    const constructionDef: SketchDefinition = {
+      ...definition,
+      entityIds: ["e_construction_line"],
+      entities: [
+        {
+          kind: "lineSegment",
+          entityId: "e_construction_line" as `sketch_entity_${string}`,
+          label: "Construction Line",
+          target: {
+            kind: "sketchEntity" as const,
+            sketchId: "sketch_primary" as `sketch_${string}`,
+            entityId: "e_construction_line" as `sketch_entity_${string}`,
+          },
+          isConstruction: true,
+          startPointId: "p_start" as `sketch_point_${string}`,
+          endPointId: "p_end" as `sketch_point_${string}`,
+        },
+      ],
+    };
+    const handle = resolveHandleFromTarget(constructionDef, {
+      kind: "sketchEntity",
+      sketchId: "sketch_primary" as `sketch_${string}`,
+      entityId: "e_construction_line" as `sketch_entity_${string}`,
+    });
+    expect(
+      handle,
+      "Construction line should resolve to entityBody handle.",
+    ).toEqual({ kind: "entityBody", entityId: "e_construction_line" });
+  }
+
+  // A-2: D9 refusal rows for every non-draggable PrimitiveRef kind.
+  function testD9RefusalsForEveryKind() {
+    // Every D9 non-draggable PrimitiveRef kind.
+    const nonDraggableTargets: import("@/core/editor/schema").PrimitiveRef[] = [
+      // Durable refs not in {sketchPoint, sketchEntity}:
+      { kind: "feature", featureId: "feature_1" as `feature_${string}` },
+      { kind: "body", bodyId: "body_1" as `body_${string}` },
+      {
+        kind: "face",
+        bodyId: "body_1" as `body_${string}`,
+        faceId: "face_1" as `face_${string}`,
+      },
+      {
+        kind: "edge",
+        bodyId: "body_1" as `body_${string}`,
+        edgeId: "edge_1" as `edge_${string}`,
+      },
+      {
+        kind: "vertex",
+        bodyId: "body_1" as `body_${string}`,
+        vertexId: "vertex_1" as `vertex_${string}`,
+      },
+      { kind: "sketch", sketchId: "sketch_1" as `sketch_${string}` },
+      {
+        kind: "sketchOperation",
+        sketchId: "sketch_1" as `sketch_${string}`,
+        operationId:
+          "op_1" as `sketch_operation_${string}`,
+      },
+      {
+        kind: "constraint",
+        sketchId: "sketch_1" as `sketch_${string}`,
+        constraintId: "constraint_1" as `constraint_${string}`,
+      },
+      {
+        kind: "dimension",
+        sketchId: "sketch_1" as `sketch_${string}`,
+        dimensionId: "dimension_1" as `dimension_${string}`,
+      },
+      {
+        kind: "construction",
+        constructionId: "construction_1" as `construction_${string}`,
+      },
+      {
+        kind: "region",
+        regionId: "region_1" as `region_${string}`,
+        sketchId: "sketch_1" as `sketch_${string}`,
+      },
+      // Non-durable refs:
+      {
+        kind: "projectedReferenceGeometry",
+        referenceId: "ref_1" as `ref_${string}`,
+        geometryId: "geo_1" as `projected_geometry_${string}`,
+        geometryKind: "lineSegment" as const,
+      },
+      {
+        kind: "sketchExternalReference",
+        referenceId: "ref_2" as `ref_${string}`,
+      },
+      {
+        kind: "sketchDatumReference",
+        sketchId: "sketch_1" as `sketch_${string}`,
+        datumId: "origin" as const,
+        geometryKind: "point" as const,
+      },
+    ];
+    for (const target of nonDraggableTargets) {
+      const handle = resolveHandleFromTarget(definition, target);
+      expect(
+        handle,
+        `D9: ${target.kind} target should not be draggable.`,
+      ).toBe(null);
+    }
+  }
+
+  testLineBodyResolvesToEntityBody();
+  testCircleBodyResolvesToRim();
+  testArcBodyResolvesToRim();
+  testCentreOfOneCircleResolvesToCenter();
+  testExclusiveCentreResolvesToCenter();
+  testNonCentrePointResolvesToPoint();
+  testDerivedEntityReturnsNull();
+  testNonSketchTargetReturnsNull();
+  testConstructionCurveIsDraggable();
+  testD9RefusalsForEveryKind();
 });

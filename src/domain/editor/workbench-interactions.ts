@@ -5,6 +5,9 @@ import type {
 } from "@/domain/editor/state-machine";
 import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
 import type { PrimitiveRef, SelectionFilter } from "@/core/editor/schema";
+import { primitiveRefEquals } from "@/core/editor/schema";
+import type { SketchDefinition } from "@/contracts/sketch/schema";
+import { resolveHandleFromTarget } from "@/domain/editor/sketch-session/drag-intent";
 import { getRegisteredFeatureAuthoringDefinitions } from "@/core/feature-authoring/registry";
 import {
   confirmSketchDrawing,
@@ -65,6 +68,11 @@ export function getEscapeEvent(
     | "sketchSession"
   >,
 ): EditorEvent | null {
+  // Escape during an active drag cancels the drag and does nothing else (D2).
+  if (state.sketchSession?.activeDrag) {
+    return { type: "sketch.geometryDragCancelled" };
+  }
+
   if (state.activeReferencePickerFieldId) {
     return { type: "form.referencePickerCancelled" };
   }
@@ -224,4 +232,37 @@ function shouldTreatBackgroundDatumClickAsEmpty(
   }
 
   return activeSketchTool !== "construction";
+}
+
+/**
+ * D3 drag target resolution: given a pick stack and the current selection,
+ * return the target to drag.
+ *
+ * If the current selection contains a draggable candidate that appears in the
+ * pick stack, use that one (most recently selected first). Otherwise use
+ * `stack[0]` if draggable. Otherwise return null (no drag).
+ */
+export function resolveSketchDragTarget(
+  stack: readonly { target: PrimitiveRef }[],
+  selection: readonly PrimitiveRef[],
+  definition: SketchDefinition,
+): PrimitiveRef | null {
+  // Selection-first: walk selection backwards (most recently selected first).
+  for (let i = selection.length - 1; i >= 0; i--) {
+    const sel = selection[i]!;
+    if (
+      stack.some((entry) => primitiveRefEquals(entry.target, sel)) &&
+      resolveHandleFromTarget(definition, sel) !== null
+    ) {
+      return sel;
+    }
+  }
+  // Fall back to stack[0].
+  if (stack.length > 0) {
+    const top = stack[0]!;
+    if (resolveHandleFromTarget(definition, top.target) !== null) {
+      return top.target;
+    }
+  }
+  return null;
 }

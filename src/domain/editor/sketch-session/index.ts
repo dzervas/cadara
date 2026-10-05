@@ -41,6 +41,7 @@ export {
 export type { SketchDragHandle, SketchDragIntent } from "./drag-intent";
 export {
   getSketchEntityDefiningPointIds,
+  resolveHandleFromTarget,
   resolveSketchDragIntent,
 } from "./drag-intent";
 

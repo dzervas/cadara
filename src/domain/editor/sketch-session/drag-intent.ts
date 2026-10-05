@@ -1,3 +1,4 @@
+import type { PrimitiveRef } from "@/core/editor/schema";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
 import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
 import { orderedSplinePointIds } from "@/contracts/sketch/spline-geometry";
@@ -83,6 +84,56 @@ export function getSketchEntityDefiningPointIds(
     case "derivedPiecewiseCubic":
       return [];
   }
+}
+
+/**
+ * D10 handle resolution: map a PrimitiveRef + definition to the correct
+ * drag handle.
+ *
+ * - line or spline curve → entityBody
+ * - circle or arc curve → rim (radius)
+ * - sketch point that is the centre of exactly one circle/arc → center
+ * - any other authored sketch point (incl. spline fit points) → point
+ * - construction sketch curves follow the same rules
+ * - everything in D9 (derived outputs, driven points, non-accepted G19
+ *   outputs, construction planes, reference/projected geometry, datums,
+ *   regions, images, annotations) → null
+ */
+export function resolveHandleFromTarget(
+  definition: SketchDefinition,
+  target: PrimitiveRef,
+): SketchDragHandle | null {
+  if (target.kind === "sketchPoint") {
+    // Check if this point is the centre of exactly one circle or arc.
+    const centreEntities = definition.entities.filter(
+      (entity) =>
+        (entity.kind === "circle" || entity.kind === "arc") &&
+        entity.centerPointId === target.pointId,
+    );
+    if (centreEntities.length === 1) {
+      return { kind: "center", entityId: centreEntities[0]!.entityId };
+    }
+    return { kind: "point", pointId: target.pointId };
+  }
+  if (target.kind === "sketchEntity") {
+    const entity = definition.entities.find(
+      (entry) => entry.entityId === target.entityId,
+    );
+    if (!entity) {
+      return null;
+    }
+    // Derived shells have no defining points: not draggable.
+    if (entity.kind === "derivedPiecewiseCubic") {
+      return null;
+    }
+    // Circle and arc bodies → rim (radius).
+    if (entity.kind === "circle" || entity.kind === "arc") {
+      return { kind: "rim", entityId: entity.entityId };
+    }
+    // All other entity bodies (line, spline, ellipse, conic, bezier, etc.).
+    return { kind: "entityBody", entityId: entity.entityId };
+  }
+  return null;
 }
 
 /**

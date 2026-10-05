@@ -3,7 +3,11 @@ import * as THREE from "three";
 import type {
   SketchSessionDisplayRenderable,
   SketchSessionState,
+  SketchAuthoringToolId,
+  SketchSessionStatus,
 } from "@/domain/editor/sketch-session";
+import { shouldViewportStartSketchGeometryDrag } from "@/domain/editor/workbench-interactions";
+import { resolveHandleFromTarget } from "@/domain/editor/sketch-session/drag-intent";
 import {
   getSketchToolDefinition,
   isRegisteredSketchToolId,
@@ -13,8 +17,10 @@ import { getSectionPlaneOrigin } from "@/core/section-view/session";
 import {
   getPrimitiveRefKey,
   getPrimitiveRefLabel,
+  type PrimitiveRef,
   type SelectionFilter,
 } from "@/core/editor/schema";
+import type { SketchDefinition } from "@/contracts/sketch/schema";
 import {
   DEFAULT_LINE_PICK_THRESHOLD,
   applyWireMaterialDepthPolicy,
@@ -524,4 +530,254 @@ function getGeometryToken(
         geometry.displayRadius,
       ].join(":");
   }
+}
+
+// ---------------------------------------------------------------------------
+// Sketch drag gesture helpers (R-4)
+// ---------------------------------------------------------------------------
+
+/** 6 screen-px click-vs-drag threshold. */
+export const SKETCH_DRAG_THRESHOLD_PX = 6;
+
+/** The phase of the viewport's sketch drag gesture. */
+export type SketchDragGesturePhase =
+  | { kind: "idle" }
+  | {
+      kind: "pending";
+      target: PrimitiveRef;
+      startPoint: readonly [number, number];
+      pointerDown: { x: number; y: number };
+    }
+  | { kind: "active"; target: PrimitiveRef; pointerId: number };
+
+/** Events the sketch drag gesture reducer processes. */
+export type SketchDragGestureEvent =
+  | {
+      kind: "pointerMove";
+      clientX: number;
+      clientY: number;
+      pointerId: number;
+      sketchPoint: readonly [number, number] | null;
+    }
+  | {
+      kind: "pointerUp";
+      clientX: number;
+      clientY: number;
+      sketchPoint: readonly [number, number] | null;
+    }
+  | { kind: "rightButton" }
+  | { kind: "pointerCancel" }
+  | { kind: "lostPointerCapture" };
+
+/** Actions the viewport must execute after a gesture decision. */
+export interface SketchDragGestureActions {
+  /** New gesture phase. */
+  phase: SketchDragGesturePhase;
+  /** Dispatch drag start with target and startPoint. */
+  startDrag: {
+    target: PrimitiveRef;
+    startPoint: readonly [number, number];
+  } | null;
+  /** Schedule a coalesced drag move to this point. */
+  scheduleDragMove: readonly [number, number] | null;
+  /** Dispatch drag end at this point. */
+  endDrag: readonly [number, number] | null;
+  /** Dispatch drag cancel. */
+  cancelDrag: boolean;
+  /** Cancel the coalesced drag move animation frame. */
+  cancelDragMove: boolean;
+  /** Set pointer capture on this pointer ID. */
+  requestCapture: number | null;
+  /** Release pointer capture for this pointer ID. */
+  releaseCapture: number | null;
+  /** Set the cursor: `"grabbing"` during drag, `""` for reset. `null` = no change. */
+  cursor: "grabbing" | "" | null;
+  /** Whether the event is consumed (component should return early). */
+  consumed: boolean;
+  /** Call `preventDefault` / `stopPropagation` on the event. */
+  preventDefault: boolean;
+}
+
+/**
+ * Sketch drag gesture reducer: given the current gesture phase and a pointer
+ * event, return the actions the viewport must execute.
+ *
+ * The reducer owns all threshold, capture, cursor, cancel, and click-suppression
+ * decisions. The component owns ref management, sketch-point projection, pick
+ * resolution, and callback dispatch.
+ */
+export function resolveSketchDragGesture(
+  phase: SketchDragGesturePhase,
+  event: SketchDragGestureEvent,
+): SketchDragGestureActions {
+  const noop: SketchDragGestureActions = {
+    phase,
+    startDrag: null,
+    scheduleDragMove: null,
+    endDrag: null,
+    cancelDrag: false,
+    cancelDragMove: false,
+    requestCapture: null,
+    releaseCapture: null,
+    cursor: null,
+    consumed: false,
+    preventDefault: false,
+  };
+
+  if (event.kind === "pointerMove") {
+    if (phase.kind === "active") {
+      return {
+        ...noop,
+        scheduleDragMove: event.sketchPoint,
+        cursor: "grabbing",
+        consumed: true,
+      };
+    }
+    if (phase.kind === "pending") {
+      const distance = Math.hypot(
+        event.clientX - phase.pointerDown.x,
+        event.clientY - phase.pointerDown.y,
+      );
+      if (distance > SKETCH_DRAG_THRESHOLD_PX) {
+        if (event.sketchPoint) {
+          return {
+            ...noop,
+            phase: {
+              kind: "active",
+              target: phase.target,
+              pointerId: event.pointerId,
+            },
+            startDrag: {
+              target: phase.target,
+              startPoint: phase.startPoint,
+            },
+            scheduleDragMove: event.sketchPoint,
+            requestCapture: event.pointerId,
+            cursor: "grabbing",
+            consumed: true,
+            preventDefault: true,
+          };
+        }
+        // Over threshold but sketch projection failed: consumed, no drag start.
+        return { ...noop, consumed: true };
+      }
+      return noop; // Under threshold — not consumed; hover logic continues.
+    }
+    return noop;
+  }
+
+  if (event.kind === "pointerUp") {
+    if (phase.kind === "active") {
+      return {
+        ...noop,
+        phase: { kind: "idle" },
+        endDrag: event.sketchPoint,
+        cancelDragMove: true,
+        releaseCapture: phase.pointerId,
+        cursor: "",
+        consumed: true,
+      };
+    }
+    if (phase.kind === "pending") {
+      const distance = Math.hypot(
+        event.clientX - phase.pointerDown.x,
+        event.clientY - phase.pointerDown.y,
+      );
+      if (distance > SKETCH_DRAG_THRESHOLD_PX) {
+        if (event.sketchPoint) {
+          // Fast drag: start + end in one gesture.
+          return {
+            ...noop,
+            phase: { kind: "idle" },
+            startDrag: {
+              target: phase.target,
+              startPoint: phase.startPoint,
+            },
+            endDrag: event.sketchPoint,
+            consumed: true,
+          };
+        }
+        // Over threshold, no sketch point: consumed but no drag.
+        return { ...noop, phase: { kind: "idle" }, consumed: true };
+      }
+      // Sub-threshold: it's a click. Phase → idle, not consumed.
+      return { ...noop, phase: { kind: "idle" } };
+    }
+    return noop;
+  }
+
+  if (event.kind === "rightButton") {
+    if (phase.kind === "active") {
+      return {
+        ...noop,
+        phase: { kind: "idle" },
+        cancelDrag: true,
+        cancelDragMove: true,
+        releaseCapture: phase.pointerId,
+        cursor: "",
+      };
+    }
+    return { ...noop, phase: { kind: "idle" }, cancelDragMove: true };
+  }
+
+  if (event.kind === "pointerCancel") {
+    if (phase.kind === "active") {
+      return {
+        ...noop,
+        phase: { kind: "idle" },
+        cancelDrag: true,
+        cancelDragMove: true,
+        releaseCapture: phase.pointerId,
+        cursor: "",
+      };
+    }
+    // Clear stale pending (the pointer is done; no pointer-up will follow).
+    if (phase.kind === "pending") {
+      return { ...noop, phase: { kind: "idle" } };
+    }
+    return noop;
+  }
+
+  if (event.kind === "lostPointerCapture") {
+    if (phase.kind === "active") {
+      return {
+        ...noop,
+        phase: { kind: "idle" },
+        cancelDrag: true,
+        cancelDragMove: true,
+        cursor: "",
+        // No releaseCapture: capture is already lost.
+      };
+    }
+    return noop;
+  }
+
+  return noop;
+}
+
+/**
+ * Whether the pointer is hovering a draggable sketch target, producing a
+ * `grab` cursor. The viewport calls this during hover resolution.
+ */
+export function isSketchDragHoverTarget(
+  session: {
+    activeTool: SketchAuthoringToolId | null | undefined;
+    status: SketchSessionStatus | null | undefined;
+    activeSpecialMode?: unknown;
+  } | null,
+  target: PrimitiveRef | null,
+  definition: SketchDefinition | null | undefined,
+): boolean {
+  if (!session || session.activeSpecialMode) {
+    return false;
+  }
+  if (
+    !shouldViewportStartSketchGeometryDrag(session.activeTool, session.status)
+  ) {
+    return false;
+  }
+  if (!target || !definition) {
+    return false;
+  }
+  return resolveHandleFromTarget(definition, target) !== null;
 }

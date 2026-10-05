@@ -15,6 +15,7 @@ import {
   getEscapeEvent,
   getNavigationReopenRequest,
   getViewportCanvasClickIntent,
+  resolveSketchDragTarget,
   shouldViewportClickEventRequestConnectedSketchSelection,
   shouldViewportDoubleClickRequestConnectedSketchSelection,
   shouldViewportClickRequestSelection,
@@ -413,6 +414,224 @@ test("src/domain/editor/workbench-interactions.spec.ts", async () => {
     ).toBeFalsy();
   }
 
+  // T12c: Escape during an active drag cancels the drag before anything else.
+  function testEscapeDuringActiveDragCancelsDrag() {
+    const session = createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    );
+    const sessionWithDrag = {
+      ...session,
+      activeTool: "line" as const,
+      activeDrag: {
+        target: {
+          kind: "sketchPoint" as const,
+          sketchId: "sketch_draft" as const,
+          pointId: "sketch_point_1" as const,
+        },
+        handle: {
+          kind: "point" as const,
+          pointId: "sketch_point_1" as `sketch_point_${string}`,
+        },
+        intent: {
+          kind: "point" as const,
+          pointId: "sketch_point_1" as `sketch_point_${string}`,
+        },
+        preDragDefinition: session.definition,
+        startPoint: [0, 0] as const,
+        currentPoint: [1, 1] as const,
+        grabOffset: [0, 0] as const,
+        status: "dragging" as const,
+        message: null,
+        interactiveSolveSession: null,
+      },
+    };
+
+    const event = getEscapeEvent({
+      activeCommand: {
+        commandSessionId: "command_sketch-1",
+        toolId: "sketch",
+        phase: "editing",
+      },
+      activeReferencePickerFieldId: null,
+      selection: [],
+      sketchSession: sessionWithDrag,
+    });
+
+    expect(
+      event?.type,
+      "Escape during active drag should cancel the drag, not take a drawing step.",
+    ).toBe("sketch.geometryDragCancelled");
+  }
+
+  // T12c: Escape during drag beats reference picker cancellation.
+  function testEscapeDuringDragBeatsReferencePicker() {
+    const session = createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    );
+    const sessionWithDrag = {
+      ...session,
+      activeDrag: {
+        target: {
+          kind: "sketchPoint" as const,
+          sketchId: "sketch_draft" as const,
+          pointId: "sketch_point_1" as const,
+        },
+        handle: {
+          kind: "point" as const,
+          pointId: "sketch_point_1" as `sketch_point_${string}`,
+        },
+        intent: {
+          kind: "point" as const,
+          pointId: "sketch_point_1" as `sketch_point_${string}`,
+        },
+        preDragDefinition: session.definition,
+        startPoint: [0, 0] as const,
+        currentPoint: [1, 1] as const,
+        grabOffset: [0, 0] as const,
+        status: "dragging" as const,
+        message: null,
+        interactiveSolveSession: null,
+      },
+    };
+
+    const event = getEscapeEvent({
+      activeCommand: {
+        commandSessionId: "command_sketch-1",
+        toolId: "sketch",
+        phase: "editing",
+      },
+      activeReferencePickerFieldId: "some-field",
+      selection: [],
+      sketchSession: sessionWithDrag,
+    });
+
+    expect(
+      event?.type,
+      "Escape during active drag takes priority over reference picker cancellation.",
+    ).toBe("sketch.geometryDragCancelled");
+  }
+
+  // T12c R-5: D3 drag target resolution.
+  function testD3SelectionInStackIsDragged() {
+    const lineEntity = {
+      kind: "sketchEntity" as const,
+      sketchId: "sketch_primary" as `sketch_${string}`,
+      entityId: "sketch_entity_line" as `sketch_entity_${string}`,
+    };
+    const pointA = {
+      kind: "sketchPoint" as const,
+      sketchId: "sketch_primary" as `sketch_${string}`,
+      pointId: "sketch_point_a" as `sketch_point_${string}`,
+    };
+    const def: import("@/contracts/sketch/schema").SketchDefinition = {
+      schemaVersion: "sketch-definition/v1alpha2",
+      referenceIds: [],
+      references: [],
+      pointIds: ["sketch_point_a", "sketch_point_b"],
+      points: [
+        {
+          pointId: "sketch_point_a" as `sketch_point_${string}`,
+          label: "A",
+          target: pointA,
+          position: [0, 0],
+          isConstruction: false,
+        },
+        {
+          pointId: "sketch_point_b" as `sketch_point_${string}`,
+          label: "B",
+          target: {
+            kind: "sketchPoint" as const,
+            sketchId: "sketch_primary" as `sketch_${string}`,
+            pointId: "sketch_point_b" as `sketch_point_${string}`,
+          },
+          position: [4, 0],
+          isConstruction: false,
+        },
+      ],
+      entityIds: ["sketch_entity_line"],
+      entities: [
+        {
+          kind: "lineSegment",
+          entityId: "sketch_entity_line" as `sketch_entity_${string}`,
+          label: "Line",
+          target: lineEntity,
+          isConstruction: false,
+          startPointId: "sketch_point_a" as `sketch_point_${string}`,
+          endPointId: "sketch_point_b" as `sketch_point_${string}`,
+        },
+      ],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+      dimensions: [],
+    };
+    const stack = [{ target: lineEntity }, { target: pointA }];
+
+    // No selection: stack[0] (line entity) is dragged.
+    expect(
+      resolveSketchDragTarget(stack, [], def),
+      "With no selection, stack[0] should be dragged.",
+    ).toEqual(lineEntity);
+
+    // Selection contains pointA (in stack): pointA is dragged.
+    expect(
+      resolveSketchDragTarget(stack, [pointA], def),
+      "Selected entry in stack should be dragged.",
+    ).toEqual(pointA);
+
+    // Selection contains lineEntity (also in stack): lineEntity is dragged.
+    expect(
+      resolveSketchDragTarget(stack, [lineEntity], def),
+      "Selected entity in stack should be dragged.",
+    ).toEqual(lineEntity);
+
+    // Selection contains something not in the stack: stack[0] is used.
+    const otherPoint = {
+      kind: "sketchPoint" as const,
+      sketchId: "sketch_primary" as `sketch_${string}`,
+      pointId: "sketch_point_other" as `sketch_point_${string}`,
+    };
+    expect(
+      resolveSketchDragTarget(stack, [otherPoint], def),
+      "Selection not in stack falls back to stack[0].",
+    ).toEqual(lineEntity);
+
+    // Empty stack: null.
+    expect(
+      resolveSketchDragTarget([], [pointA], def),
+      "Empty stack returns null.",
+    ).toBe(null);
+
+    // Stack with only a non-draggable entry: null.
+    const derivedEntity = {
+      kind: "sketchEntity" as const,
+      sketchId: "sketch_primary" as `sketch_${string}`,
+      entityId: "sketch_entity_derived" as `sketch_entity_${string}`,
+    };
+    const defWithDerived: import("@/contracts/sketch/schema").SketchDefinition =
+      {
+        ...def,
+        entityIds: ["sketch_entity_derived"],
+        entities: [
+          {
+            kind: "derivedPiecewiseCubic",
+            entityId: "sketch_entity_derived" as `sketch_entity_${string}`,
+            label: "Derived",
+            target: derivedEntity,
+            isConstruction: false,
+            relationshipId:
+              "derived_relationship_x" as `derived_relationship_${string}`,
+          } as import("@/contracts/sketch/schema").SketchEntityDefinition,
+        ],
+      };
+    expect(
+      resolveSketchDragTarget([{ target: derivedEntity }], [], defWithDerived),
+      "Non-draggable stack[0] returns null.",
+    ).toBe(null);
+  }
+
   testFeatureReopenIntentUsesCommittedFeatureKind();
   testSketchReopenIntentUsesSketchFlow();
   testEscapePrefersReferencePickerCancellation();
@@ -425,4 +644,7 @@ test("src/domain/editor/workbench-interactions.spec.ts", async () => {
   testViewportClickSelectionRoutingAllowsConstraintsOnly();
   testViewportCanvasClickIntentClearsOnlyEmptyClicks();
   testViewportSketchGeometryDragCanInterruptIdleDrawingTools();
+  testEscapeDuringActiveDragCancelsDrag();
+  testEscapeDuringDragBeatsReferencePicker();
+  testD3SelectionInStackIsDragged();
 });
