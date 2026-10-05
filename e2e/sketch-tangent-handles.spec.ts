@@ -64,6 +64,7 @@ type SketchSnap = {
       occId: string;
       pointId: string;
       tangent: { kind: string; vector?: readonly [number, number] };
+      visibleVector?: readonly [number, number] | null;
     }[];
   }[];
 };
@@ -555,4 +556,141 @@ test("T12d: press on zero handle without cycling drags the fit point; cycle then
     vec[0] !== 0 || vec[1] !== 0,
     "After cycling to handle and dragging out, the vector should be non-zero.",
   ).toBe(true);
+});
+
+// ── T12e E2E: reset tangent to automatic ─────────────────────────────────
+
+test("T12e: drag a handle (authored), select it, click Reset to automatic → occurrence automatic, Undo → authored again", async ({
+  page,
+}) => {
+  const workbench = new SketchWorkbenchHarness(page);
+  await enterSketchMode(workbench);
+  await draw4PointSpline(workbench);
+
+  // ── Pre-drag snapshot: capture the automatic visible vector ──
+  const preDrag = await readLiveSketch(workbench);
+  const preSpline = preDrag.entities.find((e) => e.kind === "spline")!;
+  const preOcc1 = preSpline.occurrences![1]!;
+  expect(preOcc1.tangent.kind, "Before drag, occurrence 1 is automatic.").toBe(
+    "automatic",
+  );
+  const preDragVisibleVec = preOcc1.visibleVector;
+  expect(
+    preDragVisibleVec,
+    "Pre-drag automatic visible vector must be non-null.",
+  ).not.toBeNull();
+
+  // ── Drag the handle to make it authored ──
+  const handlePos = await selectSplineAndFindHandle(
+    workbench,
+    { x: 600, y: 400 },
+    { x: 500, y: 300 },
+  );
+  await viewportDrag(workbench, handlePos, {
+    x: handlePos.x + 60,
+    y: handlePos.y,
+  });
+  await workbench.waitForAnimationFrames(4);
+
+  const postDrag = await readLiveSketch(workbench);
+  const postOcc1 = postDrag.entities.find((e) => e.kind === "spline")!
+    .occurrences![1]!;
+  expect(postOcc1.tangent.kind, "After drag, occurrence 1 is authored.").toBe(
+    "authored",
+  );
+  const authoredVec = postOcc1.tangent.vector!;
+
+  // Exit the spline tool completely before selecting the fit point.
+  await page.keyboard.press("Escape");
+  await workbench.waitForAnimationFrames(2);
+  await page.keyboard.press("Escape");
+  await workbench.waitForAnimationFrames(2);
+
+  // ── Select the fit point (brief: a selected fit point maps to its occurrence) ──
+  const box = await workbench.viewport().boundingBox();
+  await workbench.page.mouse.click(box!.x + 500, box!.y + 300);
+  await workbench.waitForAnimationFrames(3);
+
+  // ── Click "Reset to automatic" button ──
+  const resetBtn = page.getByRole("button", { name: /Reset to automatic/i });
+  await expect(resetBtn).toBeVisible({ timeout: 5_000 });
+  await resetBtn.click();
+  await workbench.waitForAnimationFrames(4);
+
+  const afterReset = await readLiveSketch(workbench);
+  const resetOcc1 = afterReset.entities.find((e) => e.kind === "spline")!
+    .occurrences![1]!;
+  expect(
+    resetOcc1.tangent.kind,
+    "After reset, occurrence 1 must be automatic.",
+  ).toBe("automatic");
+
+  // R2: compare the post-reset visible vector to the pre-drag automatic one.
+  const postResetVisibleVec = resetOcc1.visibleVector;
+  expect(
+    postResetVisibleVec,
+    "Post-reset automatic visible vector must be non-null.",
+  ).not.toBeNull();
+  expect(
+    Math.abs(postResetVisibleVec![0] - preDragVisibleVec![0]),
+    "Reset visible vector X must match pre-drag automatic (solver tolerance).",
+  ).toBeLessThan(0.01);
+  expect(
+    Math.abs(postResetVisibleVec![1] - preDragVisibleVec![1]),
+    "Reset visible vector Y must match pre-drag automatic (solver tolerance).",
+  ).toBeLessThan(0.01);
+
+  // ── Undo → back to authored ──
+  await page.keyboard.press("Control+z");
+  await workbench.waitForAnimationFrames(4);
+  const afterUndo = await readLiveSketch(workbench);
+  const undoOcc1 = afterUndo.entities.find((e) => e.kind === "spline")!
+    .occurrences![1]!;
+  expect(
+    undoOcc1.tangent.kind,
+    "After Undo, occurrence 1 must be authored.",
+  ).toBe("authored");
+  expect(
+    undoOcc1.tangent.vector,
+    "Undo must restore the exact authored vector.",
+  ).toEqual(authoredVec);
+});
+
+// ── T12e E2E: set tangent to zero via fit point selection ────────────────
+
+test("T12e: select a fit point, click Set to zero → exactly [0,0]", async ({
+  page,
+}) => {
+  const workbench = new SketchWorkbenchHarness(page);
+  await enterSketchMode(workbench);
+  await draw4PointSpline(workbench);
+
+  // Exit the spline tool: Escape twice (first exits draft, second exits tool).
+  await page.keyboard.press("Escape");
+  await workbench.waitForAnimationFrames(2);
+  await page.keyboard.press("Escape");
+  await workbench.waitForAnimationFrames(2);
+
+  // ── Select the second fit point (at viewport 500, 300) ──
+  const box = await workbench.viewport().boundingBox();
+  await workbench.page.mouse.click(box!.x + 500, box!.y + 300);
+  await workbench.waitForAnimationFrames(3);
+
+  // ── Click "Set to zero" button ──
+  const zeroBtn = page.getByRole("button", { name: /Set to zero/i });
+  await expect(zeroBtn).toBeVisible({ timeout: 5_000 });
+  await zeroBtn.click();
+  await workbench.waitForAnimationFrames(4);
+
+  const afterZero = await readLiveSketch(workbench);
+  const zeroOcc1 = afterZero.entities.find((e) => e.kind === "spline")!
+    .occurrences![1]!;
+  expect(
+    zeroOcc1.tangent.kind,
+    "After set to zero, occurrence 1 must be authored.",
+  ).toBe("authored");
+  expect(
+    zeroOcc1.tangent.vector,
+    "Set to zero must store exactly [0, 0].",
+  ).toEqual([0, 0]);
 });

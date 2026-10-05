@@ -137,6 +137,8 @@ export {
   mapSketchPointToWorld,
 } from "./state";
 
+export { computeSketchTangentActionState } from "./tangent-actions";
+
 export {
   focusSketchStyleTool,
   getActiveSketchStyleToolId,

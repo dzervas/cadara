@@ -88,15 +88,19 @@ function actionLabel(event: EditorEvent, before: EditorState) {
     case "sketch.annotationDeleteRequested":
       return "Delete Sketch Item";
     case "sketch.toolPatched":
-      return event.patch.intent === "setDimensionAnnotationPlacement"
-        ? "Move Dimension Label"
-        : event.patch.intent === "setConstraintAnnotationPlacement"
-          ? "Move Constraint Label"
-          : typeof event.patch.intent === "string"
-            ? event.patch.intent
-                .replace(/([A-Z])/g, " $1")
-                .replace(/^./, (value) => value.toUpperCase())
-            : "Update Sketch";
+      return event.patch.intent === "resetTangentToAutomatic"
+        ? "Reset Tangent"
+        : event.patch.intent === "setTangentToZero"
+          ? "Zero Tangent"
+          : event.patch.intent === "setDimensionAnnotationPlacement"
+            ? "Move Dimension Label"
+            : event.patch.intent === "setConstraintAnnotationPlacement"
+              ? "Move Constraint Label"
+              : typeof event.patch.intent === "string"
+                ? event.patch.intent
+                    .replace(/([A-Z])/g, " $1")
+                    .replace(/^./, (value) => value.toUpperCase())
+                : "Update Sketch";
     // A committing Escape or Enter is a finalized spline (T11-D10).
     case "sketch.pointerReleased":
     case "sketch.escapeRequested":

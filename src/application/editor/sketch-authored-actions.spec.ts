@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import type { SketchId } from "@/contracts/shared/ids";
 import { SketchAuthoredActions } from "./sketch-authored-actions";
 import {
   emitPendingSketchEditQuery,
@@ -1754,5 +1755,219 @@ describe("T11i: fit-point spline history (T11-D10, D13, D14)", () => {
       "Create Sketch Geometry",
       "Create Sketch Geometry",
     ]);
+  });
+});
+
+// ── T12e: tangent reset/zero actions ─────────────────────────────────────
+
+describe("T12e: tangent reset-to-automatic and set-to-zero actions", () => {
+  function undoLabels(f: Awaited<ReturnType<typeof fixture>>) {
+    return f.session.actionHistory?.undo.map((entry) => entry.label) ?? [];
+  }
+
+  async function splineFixture() {
+    const f = await fixture();
+    // Create a 3-point spline.
+    f.dispatch({ type: "tool.activated", toolId: "spline" });
+    f.dispatch({ type: "sketch.pointerReleased", point: [0, 0] });
+    f.dispatch({ type: "sketch.pointerReleased", point: [10, 5] });
+    f.dispatch({ type: "sketch.pointerReleased", point: [20, 0] });
+    f.dispatch({ type: "sketch.confirmRequested" });
+    // Clear the active tool so selection works normally.
+    f.dispatch({ type: "sketch.escapeRequested" });
+    return f;
+  }
+
+  function getSpline(f: Awaited<ReturnType<typeof fixture>>) {
+    return f.session.definition.entities.find((e) => e.kind === "spline")!;
+  }
+
+  function getOccurrences(f: Awaited<ReturnType<typeof fixture>>) {
+    const spline = getSpline(f);
+    if (spline.kind !== "spline") throw new Error("Expected spline entity");
+    return spline.pointOccurrences;
+  }
+
+  test("T12e: reset tangent to automatic enters one action; Undo restores authored, Redo restores automatic", async () => {
+    const f = await splineFixture();
+    const spline = getSpline(f);
+    const occurrences = getOccurrences(f);
+    const occ1 = occurrences[1]!;
+    expect(occ1.tangent.kind).toBe("automatic");
+
+    // Make occ1 authored by mutating the definition through the action boundary.
+    const authoredDef = {
+      ...f.session.definition,
+      entities: f.session.definition.entities.map((entity) => {
+        if (entity.entityId !== spline.entityId || entity.kind !== "spline")
+          return entity;
+        return {
+          ...entity,
+          pointOccurrences: entity.pointOccurrences.map((occ) =>
+            occ.occurrenceId === occ1.occurrenceId
+              ? {
+                  ...occ,
+                  tangent: {
+                    kind: "authored" as const,
+                    vector: [3, 4] as readonly [number, number],
+                  },
+                }
+              : occ,
+          ),
+        };
+      }),
+    };
+    // Commit the authored tangent as a drag end action.
+    f.apply(
+      { type: "sketch.geometryDragEnded" },
+      { ...f.session, definition: authoredDef },
+    );
+    const labelsBeforeReset = undoLabels(f);
+    expect(
+      getOccurrences(f)[1]!.tangent.kind,
+      "Precondition: occurrence 1 must be authored.",
+    ).toBe("authored");
+
+    // Set up the selection with a tangent handle target.
+    // Note: display.ts uses session.sketchId ?? "sketch_draft" for the ref.
+    const sketchId = f.session.sketchId ?? ("sketch_draft" as SketchId);
+    const handleRef = {
+      kind: "sketchTangentHandle" as const,
+      sketchId,
+      entityId: spline.entityId,
+      occurrenceId: occ1.occurrenceId,
+      pointId: occ1.pointId,
+    };
+    // Apply selection by dispatching a viewport selection (Escape already cleared the tool).
+    f.dispatch({
+      type: "viewport.selectionRequested",
+      target: handleRef,
+    });
+    expect(
+      f.state.selection[0]?.kind,
+      "Selection must contain the tangent handle.",
+    ).toBe("sketchTangentHandle");
+
+    // Click "Reset tangent to automatic".
+    f.dispatch({
+      type: "sketch.toolPatched",
+      patch: { intent: "resetTangentToAutomatic" },
+    });
+
+    const afterReset = getOccurrences(f);
+    expect(
+      afterReset[1]!.tangent.kind,
+      "After reset, occurrence 1 must be automatic.",
+    ).toBe("automatic");
+    expect(undoLabels(f).length, "Reset records one action.").toBe(
+      labelsBeforeReset.length + 1,
+    );
+    expect(undoLabels(f).at(-1)).toBe("Reset Tangent");
+
+    // Undo → back to authored.
+    f.dispatch({ type: "history.undoRequested" });
+    const afterUndo = getOccurrences(f);
+    expect(
+      afterUndo[1]!.tangent.kind,
+      "After Undo, occurrence 1 must be authored.",
+    ).toBe("authored");
+    expect(
+      afterUndo[1]!.tangent.vector,
+      "Undo restores the exact authored vector.",
+    ).toEqual([3, 4]);
+
+    // Redo → back to automatic.
+    f.dispatch({ type: "history.redoRequested" });
+    const afterRedo = getOccurrences(f);
+    expect(
+      afterRedo[1]!.tangent.kind,
+      "After Redo, occurrence 1 must be automatic.",
+    ).toBe("automatic");
+  });
+
+  test("T12e: set tangent to zero enters one action; Undo restores automatic, Redo restores zero", async () => {
+    const f = await splineFixture();
+    const occurrences = getOccurrences(f);
+    const occ1 = occurrences[1]!;
+    expect(occ1.tangent.kind).toBe("automatic");
+
+    // Select the fit point (maps to its occurrence).
+    const sketchId = f.session.sketchId ?? ("sketch_draft" as SketchId);
+    f.dispatch({
+      type: "viewport.selectionRequested",
+      target: {
+        kind: "sketchPoint",
+        sketchId,
+        pointId: occ1.pointId,
+      },
+    });
+
+    const labelsBefore = undoLabels(f);
+
+    // Click "Set tangent to zero".
+    f.dispatch({
+      type: "sketch.toolPatched",
+      patch: { intent: "setTangentToZero" },
+    });
+
+    const afterZero = getOccurrences(f);
+    expect(
+      afterZero[1]!.tangent.kind,
+      "After zero, occurrence 1 must be authored.",
+    ).toBe("authored");
+    expect(
+      afterZero[1]!.tangent.vector,
+      "Zero must store exactly [0, 0].",
+    ).toEqual([0, 0]);
+    expect(undoLabels(f).length, "Zero records one action.").toBe(
+      labelsBefore.length + 1,
+    );
+    expect(undoLabels(f).at(-1)).toBe("Zero Tangent");
+
+    // Undo → back to automatic.
+    f.dispatch({ type: "history.undoRequested" });
+    const afterUndo = getOccurrences(f);
+    expect(
+      afterUndo[1]!.tangent.kind,
+      "After Undo, occurrence 1 must be automatic.",
+    ).toBe("automatic");
+
+    // Redo → back to zero.
+    f.dispatch({ type: "history.redoRequested" });
+    const afterRedo = getOccurrences(f);
+    expect(afterRedo[1]!.tangent).toEqual({
+      kind: "authored",
+      vector: [0, 0],
+    });
+  });
+
+  test("T12e: no-op records nothing (reset on already-automatic)", async () => {
+    const f = await splineFixture();
+    const spline = getSpline(f);
+    const occurrences = getOccurrences(f);
+    expect(occurrences[1]!.tangent.kind).toBe("automatic");
+
+    // Select the handle.
+    const sketchId = f.session.sketchId ?? ("sketch_draft" as SketchId);
+    f.dispatch({
+      type: "viewport.selectionRequested",
+      target: {
+        kind: "sketchTangentHandle",
+        sketchId,
+        entityId: spline.entityId,
+        occurrenceId: occurrences[1]!.occurrenceId,
+        pointId: occurrences[1]!.pointId,
+      },
+    });
+
+    const labelsBefore = undoLabels(f);
+
+    // Reset on already-automatic: should be a no-op.
+    f.dispatch({
+      type: "sketch.toolPatched",
+      patch: { intent: "resetTangentToAutomatic" },
+    });
+
+    expect(undoLabels(f), "No-op records nothing.").toEqual(labelsBefore);
   });
 });

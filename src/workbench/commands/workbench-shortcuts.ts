@@ -117,6 +117,32 @@ export function createWorkbenchShortcutCommandHandlers({
     },
   };
 
+  // T12e: tangent selection-context commands (no default shortcut, sketch scope).
+  // A2: disabled during drags, active tools, annotation editing, and when
+  // neither tangent action is enabled for the current selection.
+  const tangentCommandEnabled = () =>
+    sketchSession !== null &&
+    mode === "sketch" &&
+    !sketchSession.activeDrag &&
+    !sketchSession.activeTool &&
+    !sketchSession.activeAnnotationEdit;
+  commandHandlers["sketch.resetTangentToAutomatic"] = {
+    execute: () =>
+      dispatch({
+        type: "sketch.toolPatched",
+        patch: { intent: "resetTangentToAutomatic" },
+      }),
+    isEnabled: tangentCommandEnabled,
+  };
+  commandHandlers["sketch.setTangentToZero"] = {
+    execute: () =>
+      dispatch({
+        type: "sketch.toolPatched",
+        patch: { intent: "setTangentToZero" },
+      }),
+    isEnabled: tangentCommandEnabled,
+  };
+
   for (const tool of toolDefinitions) {
     commandHandlers[getToolCommandId(tool.id)] = {
       execute: () => {

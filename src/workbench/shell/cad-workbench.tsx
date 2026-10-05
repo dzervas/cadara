@@ -5,6 +5,8 @@ import { appVersion, gitCommit } from "@/build-info";
 
 import { ThreeCadViewport } from "@/components/cad/three-cad-viewport";
 import { SketchSpecialModePanel } from "@/components/cad/sketch-special-mode-panel";
+import { SketchTangentActions } from "@/components/cad/sketch-tangent-actions";
+import { splineVisibleHandleVectors } from "@/contracts/sketch/spline-geometry";
 import { SketchToolPanel } from "@/components/cad/sketch-tool-panel";
 import { FeatureInspector } from "@/components/layout/feature-inspector";
 import { FloatingPartsTree } from "@/components/layout/floating-parts-tree";
@@ -72,6 +74,7 @@ import type {
 } from "@/contracts/modeling/schema";
 import { ok } from "@/contracts/errors";
 import {
+  computeSketchTangentActionState,
   getSketchAnnotationDescriptors,
   getSketchToolPresentation,
 } from "@/domain/editor/sketch-session";
@@ -665,6 +668,13 @@ export function CadWorkbench({
   const sketchToolPresentation = sketchSession
     ? getSketchToolPresentation(sketchSession)
     : null;
+  const sketchTangentActionState = useMemo(
+    () =>
+      sketchSession
+        ? computeSketchTangentActionState(sketchSession, selection)
+        : null,
+    [sketchSession, selection],
+  );
   const sketchSpecialModePanel = sketchSession
     ? getSketchSpecialModePanel(sketchSession, sketchSpecialModes)
     : null;
@@ -785,23 +795,33 @@ export function CadWorkbench({
       const solvedMap = new Map(
         solved.map((sp) => [sp.pointId, sp.solvedPosition] as const),
       );
+      const positionsRecord = Object.fromEntries(
+        def.points.map((p) => [
+          p.pointId,
+          solvedMap.get(p.pointId) ?? p.position,
+        ]),
+      ) as Record<string, readonly [number, number]>;
       return {
         points: def.points.map((p) => ({
           id: p.pointId,
           position: solvedMap.get(p.pointId) ?? p.position,
         })),
-        entities: def.entities.map((e) => ({
-          id: e.entityId,
-          kind: e.kind,
-          occurrences:
-            e.kind === "spline"
-              ? e.pointOccurrences.map((occ) => ({
-                  occId: occ.occurrenceId,
-                  pointId: occ.pointId,
-                  tangent: occ.tangent,
-                }))
-              : undefined,
-        })),
+        entities: def.entities.map((e) => {
+          if (e.kind !== "spline") {
+            return { id: e.entityId, kind: e.kind };
+          }
+          const visibleVectors = splineVisibleHandleVectors(e, positionsRecord);
+          return {
+            id: e.entityId,
+            kind: e.kind,
+            occurrences: e.pointOccurrences.map((occ, i) => ({
+              occId: occ.occurrenceId,
+              pointId: occ.pointId,
+              tangent: occ.tangent,
+              visibleVector: visibleVectors?.[i] ?? null,
+            })),
+          };
+        }),
       };
     },
   });
@@ -1299,6 +1319,24 @@ export function CadWorkbench({
                 dispatch({ type: "sketch.toolPatched", patch })
               }
             />
+            {sketchTangentActionState && sketchTangentActionState.visible ? (
+              <SketchTangentActions
+                resetEnabled={sketchTangentActionState.resetEnabled}
+                zeroEnabled={sketchTangentActionState.zeroEnabled}
+                onReset={() =>
+                  dispatch({
+                    type: "sketch.toolPatched",
+                    patch: { intent: "resetTangentToAutomatic" },
+                  })
+                }
+                onZero={() =>
+                  dispatch({
+                    type: "sketch.toolPatched",
+                    patch: { intent: "setTangentToZero" },
+                  })
+                }
+              />
+            ) : null}
             <SketchSpecialModePanel
               schema={sketchSpecialModePanel}
               onAction={(action) =>

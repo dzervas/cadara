@@ -27,6 +27,10 @@ export type EditorCommandId =
   | "editor.focusSearch"
   | "editor.redo"
   | "editor.undo";
+
+export type SketchCommandId =
+  | "sketch.resetTangentToAutomatic"
+  | "sketch.setTangentToZero";
 export type WorkbenchCommandId =
   | "context.delete"
   | "context.edit"
@@ -56,6 +60,7 @@ export type WorkbenchCommandId =
 export type ShortcutCommandId =
   | ToolCommandId
   | EditorCommandId
+  | SketchCommandId
   | WorkbenchCommandId;
 
 export interface ShortcutCommandDefinition {
@@ -353,6 +358,7 @@ export function getShortcutCommandDefinitions() {
   return [
     ...deriveToolCommands(),
     ...editorCommands,
+    ...sketchCommands,
     ...workbenchCommands,
   ] as readonly ShortcutCommandDefinition[];
 }
@@ -362,6 +368,25 @@ export function createShortcutCommandRegistry(
 ): ShortcutCommandRegistry {
   return new Map(commands.map((command) => [command.id, command]));
 }
+
+const sketchCommands = [
+  {
+    id: "sketch.resetTangentToAutomatic",
+    label: "Reset Tangent to Automatic",
+    category: "Sketch",
+    scope: "sketch",
+    defaultShortcuts: [],
+    customizable: true,
+  },
+  {
+    id: "sketch.setTangentToZero",
+    label: "Set Tangent to Zero",
+    category: "Sketch",
+    scope: "sketch",
+    defaultShortcuts: [],
+    customizable: true,
+  },
+] as const satisfies readonly ShortcutCommandDefinition[];
 
 function deriveToolCommands() {
   return toolDefinitions.map((tool) => {
