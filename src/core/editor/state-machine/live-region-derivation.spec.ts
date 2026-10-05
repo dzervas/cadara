@@ -174,13 +174,18 @@ test("the post-transition hook emits one background derivation for a pending acc
 test("the hook never emits while a drag is active or when the solve is not accepted", async () => {
   const { state } = await makeSketchState();
   const pending = withLiveSolveBasis(state.session, state.session.definition);
+  const dragTarget0 = state.session.definition.points[0]!.target;
   const dragging = withSession(state, {
     ...pending,
     activeDrag: {
-      target: state.session.definition.points[0]!.target,
+      target: dragTarget0,
+      handle: { kind: "point" as const, pointId: dragTarget0.pointId },
+      intent: { kind: "point" as const, pointId: dragTarget0.pointId },
+      preDragDefinition: state.session.definition,
       startPoint: [0, 0],
       currentPoint: [1, 0],
-      status: "dragging",
+      grabOffset: [0, 0] as const,
+      status: "dragging" as const,
       message: null,
       interactiveSolveSession: null,
     },
@@ -544,13 +549,18 @@ test("T08b-g5 supersession (U-A): no emission during a drag even with a supersed
     { type: "document.refreshRequested" },
   );
   const inFlight = first.state as SketchEditorState;
+  const dragTarget1 = state.session.definition.points[0]!.target;
   const dragging = withSession(inFlight, {
     ...withLiveSolveBasis(inFlight.session, inFlight.session.definition),
     activeDrag: {
-      target: state.session.definition.points[0]!.target,
+      target: dragTarget1,
+      handle: { kind: "point" as const, pointId: dragTarget1.pointId },
+      intent: { kind: "point" as const, pointId: dragTarget1.pointId },
+      preDragDefinition: state.session.definition,
       startPoint: [0, 0],
       currentPoint: [1, 0],
-      status: "dragging",
+      grabOffset: [0, 0] as const,
+      status: "dragging" as const,
       message: null,
       interactiveSolveSession: null,
     },

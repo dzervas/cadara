@@ -79,6 +79,38 @@ export interface SketchDraggedPointTarget {
   position: SketchPoint2D;
 }
 
+export interface SketchDragTranslateTarget {
+  kind: "sketchTranslate";
+  pointIds: readonly SketchPointId[];
+  delta: SketchPoint2D;
+}
+
+export interface SketchDragRadiusTarget {
+  kind: "sketchRadius";
+  entityId: SketchEntityId;
+  targetRadius: number;
+}
+
+export interface SketchDragTangentVectorTarget {
+  kind: "sketchTangentVector";
+  entityId: SketchEntityId;
+  occurrenceId: string;
+  targetVector: SketchPoint2D;
+  /**
+   * When true, store the vector as exactly [0, 0] regardless of the soft
+   * target's achieved value. The solver fixes both tangent variables at 0
+   * for this frame. A later frame with exactZero=false and a non-zero
+   * target leaves zero continuously through substeps.
+   */
+  exactZero?: boolean;
+}
+
+export type SketchDragTarget =
+  | SketchDraggedPointTarget
+  | SketchDragTranslateTarget
+  | SketchDragRadiusTarget
+  | SketchDragTangentVectorTarget;
+
 export type SketchDraggedPointSolveResult =
   | {
       kind: "solved";
@@ -7974,6 +8006,214 @@ function createDragTargetConstraint(
   );
 }
 
+/**
+ * T12b: create a soft radius-targeting constraint for circle/arc rim drag.
+ * Returns null when the entity is missing or has no radius variable.
+ */
+function createDragRadiusConstraint(
+  system: BuildSystemResult,
+  entityId: SketchEntityId,
+  targetRadius: number,
+  weight = 1,
+): ScalarConstraintRecord | null {
+  const entityState = system.entityStates.get(entityId);
+  if (!entityState) return null;
+  if (entityState.kind !== "circle" && entityState.kind !== "arc") return null;
+  const radiusIndex = entityState.baseIndex;
+  return system.parameterProjection.wrapConstraint(
+    {
+      id: `constraint_drag_radius_${entityId}` as ConstraintId,
+      targetKind: "constraint",
+      evaluate(values) {
+        const gradient = zeroVector(system.parameterCount);
+        const actual = values[radiusIndex]!;
+        const delta = actual - targetRadius;
+        gradient[radiusIndex] += weight * delta;
+        return { residual: 0.5 * weight * delta * delta, gradient };
+      },
+    },
+    [radiusIndex],
+  );
+}
+
+/**
+ * T12b: create a soft tangent-vector-targeting constraint for handle drag.
+ * Returns null when the tangent state is missing.
+ */
+function createDragTangentVectorConstraint(
+  system: BuildSystemResult,
+  entityId: SketchEntityId,
+  occurrenceId: string,
+  targetVector: SketchPoint2D,
+  weight = 1,
+): ScalarConstraintRecord | null {
+  const tangentState = system.splineTangentStates.get(
+    splineTangentStateKey(entityId, occurrenceId),
+  );
+  if (!tangentState) return null;
+  const bx = tangentState.baseIndex;
+  const by = tangentState.baseIndex + 1;
+  return system.parameterProjection.wrapConstraint(
+    {
+      id: `constraint_drag_tangent_${entityId}_${occurrenceId}` as ConstraintId,
+      targetKind: "constraint",
+      evaluate(values) {
+        const gradient = zeroVector(system.parameterCount);
+        const dx = values[bx]! - targetVector[0];
+        const dy = values[by]! - targetVector[1];
+        gradient[bx] += weight * dx;
+        gradient[by] += weight * dy;
+        return { residual: 0.5 * weight * (dx * dx + dy * dy), gradient };
+      },
+    },
+    [bx, by],
+  );
+}
+
+/**
+ * T12b: resolve a SketchDragTarget into soft constraints, dragged variable
+ * indices, and the component to scope the solve. Called within the substep
+ * loop so each substep's interpolated target is captured. `startValues` is the
+ * projected parameter array at the beginning of the substep loop (translate
+ * needs the current point positions to apply the shared delta).
+ */
+function resolveDragTargetFrame(
+  program: SketchCompiledSolveProgram,
+  target: SketchDragTarget,
+  startValues: Float64Array,
+  weight: number,
+): {
+  constraints: ScalarConstraintRecord[];
+  draggedVariableIndices: number[];
+  component: SketchCompiledSolveComponent | null;
+} | null {
+  const system = program.system;
+  switch (target.kind) {
+    case "sketchPoint": {
+      const constraint = createDragTargetConstraint(system, target, weight);
+      if (!constraint) return null;
+      const point = system.pointRecords.get(target.pointId)!;
+      return {
+        constraints: [constraint],
+        draggedVariableIndices: [point.baseIndex, point.baseIndex + 1],
+        component: findComponentForPoint(program, target.pointId),
+      };
+    }
+    case "sketchTranslate": {
+      const constraints: ScalarConstraintRecord[] = [];
+      const draggedVariableIndices: number[] = [];
+      let component: SketchCompiledSolveComponent | null = null;
+      for (const pointId of target.pointIds) {
+        const point = system.pointRecords.get(pointId);
+        if (!point) continue;
+        // Current position from session.values, not point.initial
+        const currentPos = getPoint(startValues, point);
+        const targetPos: SketchPoint2D = [
+          currentPos[0] + target.delta[0],
+          currentPos[1] + target.delta[1],
+        ];
+        const c = createDragTargetConstraint(
+          system,
+          { kind: "sketchPoint", pointId, position: targetPos },
+          weight,
+        );
+        if (c) constraints.push(c);
+        draggedVariableIndices.push(point.baseIndex, point.baseIndex + 1);
+        if (!component) component = findComponentForPoint(program, pointId);
+      }
+      if (constraints.length === 0) return null;
+      return { constraints, draggedVariableIndices, component };
+    }
+    case "sketchRadius": {
+      const constraint = createDragRadiusConstraint(
+        system,
+        target.entityId,
+        target.targetRadius,
+        weight,
+      );
+      if (!constraint) return null;
+      const entityState = system.entityStates.get(target.entityId)!;
+      return {
+        constraints: [constraint],
+        draggedVariableIndices: [entityState.baseIndex],
+        component: findComponentForEntity(program, target.entityId),
+      };
+    }
+    case "sketchTangentVector": {
+      const tangentState = system.splineTangentStates.get(
+        splineTangentStateKey(target.entityId, target.occurrenceId),
+      );
+      if (!tangentState) return null;
+
+      // Exact-zero request: fix both tangent variables at 0 as hard constraints
+      // so the accepted frame stores exactly [0, 0] regardless of soft targets.
+      if (target.exactZero) {
+        const bx = tangentState.baseIndex;
+        const by = tangentState.baseIndex + 1;
+        const hardZeroX = system.parameterProjection.wrapConstraint(
+          {
+            id: `constraint_drag_tangent_zero_x_${target.entityId}_${target.occurrenceId}` as ConstraintId,
+            targetKind: "constraint",
+            evaluate(values) {
+              const gradient = zeroVector(system.parameterCount);
+              const v = values[bx]!;
+              gradient[bx] += v;
+              return { residual: 0.5 * v * v, gradient };
+            },
+          },
+          [bx],
+        );
+        const hardZeroY = system.parameterProjection.wrapConstraint(
+          {
+            id: `constraint_drag_tangent_zero_y_${target.entityId}_${target.occurrenceId}` as ConstraintId,
+            targetKind: "constraint",
+            evaluate(values) {
+              const gradient = zeroVector(system.parameterCount);
+              const v = values[by]!;
+              gradient[by] += v;
+              return { residual: 0.5 * v * v, gradient };
+            },
+          },
+          [by],
+        );
+        return {
+          constraints: [hardZeroX, hardZeroY],
+          draggedVariableIndices: [bx, by],
+          component: findComponentForEntity(program, target.entityId),
+        };
+      }
+
+      const constraint = createDragTangentVectorConstraint(
+        system,
+        target.entityId,
+        target.occurrenceId,
+        target.targetVector,
+        weight,
+      );
+      if (!constraint) return null;
+      return {
+        constraints: [constraint],
+        draggedVariableIndices: [
+          tangentState.baseIndex,
+          tangentState.baseIndex + 1,
+        ],
+        component: findComponentForEntity(program, target.entityId),
+      };
+    }
+  }
+}
+
+function findComponentForEntity(
+  program: SketchCompiledSolveProgram,
+  entityId: SketchEntityId,
+) {
+  return (
+    program.components.find((component) =>
+      component.entityIds.includes(entityId),
+    ) ?? null
+  );
+}
+
 function findComponentForPoint(
   program: SketchCompiledSolveProgram,
   pointId: SketchPointId,
@@ -8257,25 +8497,23 @@ function createMinimumMotionAnchorConstraint(input: {
 // position instead of returning a compromise that violates authored constraints.
 // Neither phase seeds or accepts reflected/discontinuous branches (D4): the frame
 // is solved purely by continuous iteration from the previous accepted values.
-function solveDraggedPointFrame(input: {
+
+/**
+ * T12b: generalized drag frame solver that accepts pre-resolved constraints
+ * and dragged variable indices. All drag target types (point, translate,
+ * radius, tangent vector) reduce to this common frame solver.
+ */
+function solveDragFrameGeneral(input: {
   session: SketchCompiledSolveSession;
   component: SketchCompiledSolveComponent | null;
-  dragTarget: SketchDraggedPointTarget;
-  /** [TECH] G16⁗: the re-solve's start (default: the last accepted frame). */
+  dragConstraints: ScalarConstraintRecord[];
+  draggedVariableIndices: number[];
+  constraintLabel: string;
   startValues?: Float64Array;
 }): DraggedPointCandidate | null {
-  const { session, component, dragTarget } = input;
+  const { session, component } = input;
   const program = session.program;
   const parameterCount = program.system.parameterCount;
-
-  const dragConstraint = createDragTargetConstraint(
-    program.system,
-    dragTarget,
-    DRAG_TARGET_WEIGHT,
-  );
-  if (!dragConstraint) {
-    return null;
-  }
 
   const componentConstraintSet = new Set(component?.equationIndices ?? []);
   const hardConstraints = program.system.scalarConstraints.filter((_, index) =>
@@ -8285,12 +8523,9 @@ function solveDraggedPointFrame(input: {
     component?.variableIndices ??
       Array.from({ length: parameterCount }, (_, index) => index),
   );
-  const draggedRecord = program.system.pointRecords.get(dragTarget.pointId);
-  const draggedVariableIndices = draggedRecord
-    ? [draggedRecord.baseIndex, draggedRecord.baseIndex + 1]
-    : [];
+  const draggedSet = new Set(input.draggedVariableIndices);
   const nonDraggedVariableIndices = affectedVariables.filter(
-    (index) => !draggedVariableIndices.includes(index),
+    (index) => !draggedSet.has(index),
   );
 
   const previousFrame = cloneValues(session.values);
@@ -8298,9 +8533,9 @@ function solveDraggedPointFrame(input: {
   // Phase A: hard constraints + soft cursor target + uniform minimum motion.
   const phaseAConstraints: ScalarConstraintRecord[] = [
     ...hardConstraints,
-    dragConstraint,
+    ...input.dragConstraints,
     createMinimumMotionAnchorConstraint({
-      id: `constraint_drag_minimum_motion_${dragTarget.pointId}` as ConstraintId,
+      id: `constraint_drag_minimum_motion_${input.constraintLabel}` as ConstraintId,
       parameterCount,
       anchorValues: previousFrame,
       variableIndices: nonDraggedVariableIndices,
@@ -8329,14 +8564,7 @@ function solveDraggedPointFrame(input: {
     };
   }
 
-  // Phase B: project the phase-A candidate onto the hard-constraint manifold by
-  // solving the hard constraints ALONE, warm-started from the phase-A
-  // (cursor-pulled) position. Continuous local convergence from that warm start
-  // settles at the nearest feasible configuration, so the dragged point lands at
-  // the closest feasible position instead of the phase-A compromise that
-  // violates authored constraints. No anchor term is used here: a penalty anchor
-  // would bias the solution off the constraint manifold by more than tolerance;
-  // the warm start alone supplies the minimum-motion projection.
+  // Phase B: project the phase-A candidate onto the hard-constraint manifold.
   const phaseBConstraints: ScalarConstraintRecord[] = [...hardConstraints];
   const solvedB = solveSystemValues(
     cloneValues(candidateA),
@@ -8356,6 +8584,70 @@ function solveDraggedPointFrame(input: {
     values: candidateB,
     materialized: evalB.materialized,
   };
+}
+
+function solveDraggedPointFrame(input: {
+  session: SketchCompiledSolveSession;
+  component: SketchCompiledSolveComponent | null;
+  dragTarget: SketchDraggedPointTarget;
+  startValues?: Float64Array;
+}): DraggedPointCandidate | null {
+  const { session, component, dragTarget } = input;
+  const constraint = createDragTargetConstraint(
+    session.program.system,
+    dragTarget,
+    DRAG_TARGET_WEIGHT,
+  );
+  if (!constraint) return null;
+  const draggedRecord = session.program.system.pointRecords.get(
+    dragTarget.pointId,
+  );
+  const draggedVariableIndices = draggedRecord
+    ? [draggedRecord.baseIndex, draggedRecord.baseIndex + 1]
+    : [];
+  return solveDragFrameGeneral({
+    session,
+    component,
+    dragConstraints: [constraint],
+    draggedVariableIndices,
+    constraintLabel: dragTarget.pointId,
+    startValues: input.startValues,
+  });
+}
+
+/**
+ * T12b: generalized frame solve with rebuild retry for any drag target type.
+ */
+function solveDragFrameGeneralWithRebuild(input: {
+  session: SketchCompiledSolveSession;
+  resolved: NonNullable<ReturnType<typeof resolveDragTargetFrame>>;
+  constraintLabel: string;
+}): DraggedPointCandidate | null {
+  const { session, resolved, constraintLabel } = input;
+  return solveWithRebuildRetry<DraggedPointCandidate | null>({
+    program: session.program,
+    startValues: session.values,
+    solve: () =>
+      solveDragFrameGeneral({
+        session,
+        component: resolved.component,
+        dragConstraints: resolved.constraints,
+        draggedVariableIndices: resolved.draggedVariableIndices,
+        constraintLabel,
+      }),
+    retry: (from) =>
+      solveDragFrameGeneral({
+        session,
+        component: resolved.component,
+        dragConstraints: resolved.constraints,
+        draggedVariableIndices: resolved.draggedVariableIndices,
+        constraintLabel,
+        startValues: from,
+      }),
+    valuesOf: (candidate) => candidate?.values ?? null,
+    reevaluate: (values) => reevaluateDraggedPointCandidate(session, values),
+    isAccepted: (candidate) => candidate?.accepted === true,
+  });
 }
 
 // D6 (minimum-motion-sketch-drag): decide constrained-movement feedback from the
@@ -8426,7 +8718,7 @@ export function sketchDraggedPointHasFreeDof(
 
 export function updateCompiledSketchSolveSession(
   session: SketchCompiledSolveSession,
-  dragTarget: SketchDraggedPointTarget,
+  dragTarget: SketchDragTarget,
   targetTolerance = session.program.tolerances.coincidence,
 ): SketchDraggedPointSolveResult {
   if (session.disposed) {
@@ -8439,53 +8731,19 @@ export function updateCompiledSketchSolveSession(
           "stale-interactive-solve-session",
           "error",
           `Interactive solve session ${session.sessionId} has been disposed.`,
-          { kind: "point", pointId: dragTarget.pointId },
+          dragTargetDiagnosticTarget(dragTarget),
         ),
       ],
     };
   }
 
-  if (
-    !session.program.definition.points.some(
-      (point) => point.pointId === dragTarget.pointId,
-    )
-  ) {
-    return {
-      kind: "blocked",
-      reason: "missingPoint",
-      solvedSnapshot: null,
-      diagnostics: [
-        makeDiagnostic(
-          "drag-target-missing-point",
-          "error",
-          `Dragged point ${dragTarget.pointId} does not exist in the sketch definition.`,
-          { kind: "point", pointId: dragTarget.pointId },
-        ),
-      ],
-    };
-  }
+  // Validate the target references exist in the program.
+  const validationError = validateDragTarget(session, dragTarget);
+  if (validationError) return validationError;
 
-  if (!dragTarget.position.every(Number.isFinite)) {
-    return {
-      kind: "blocked",
-      reason: "nonConvergent",
-      solvedSnapshot: session.lastAcceptedSnapshot,
-      diagnostics: [
-        makeDiagnostic(
-          "drag-target-nonconvergent",
-          "warning",
-          "Dragged point frame contains a non-finite target and cannot be solved.",
-          { kind: "point", pointId: dragTarget.pointId },
-        ),
-      ],
-    };
-  }
-
-  const component = findComponentForPoint(session.program, dragTarget.pointId);
-  const draggedRecord = session.program.system.pointRecords.get(
-    dragTarget.pointId,
-  );
-  if (!draggedRecord) {
+  // Compute the substep distance from the motion metric of this target type.
+  const motion = dragTargetMotion(session, dragTarget);
+  if (!motion) {
     return {
       kind: "blocked",
       reason: "missingPoint",
@@ -8494,74 +8752,77 @@ export function updateCompiledSketchSolveSession(
         makeDiagnostic(
           "drag-target-missing-point",
           "error",
-          `Dragged point ${dragTarget.pointId} does not exist in the compiled solve program.`,
-          { kind: "point", pointId: dragTarget.pointId },
+          "Drag target references a missing solver element.",
+          dragTargetDiagnosticTarget(dragTarget),
         ),
       ],
     };
   }
 
-  // D3 (minimum-motion-sketch-drag): subdivide large cursor deltas into bounded
-  // substeps solved continuously from the previous accepted frame, so the
-  // solution tracks the constraint manifold instead of teleporting past
-  // singularities. A non-convergent substep keeps the last accepted frame
-  // (geometry lags the cursor) rather than escalating to a discontinuous search.
-  const startPosition = getPoint(
-    session.program.system.parameterProjection.projectValues(session.values),
-    draggedRecord,
-  );
-  const totalDelta = subtract(dragTarget.position, startPosition);
-  const distance = length(totalDelta);
   const substeps = Math.max(
     1,
-    Math.min(DRAG_MAX_SUBSTEPS, Math.ceil(distance / DRAG_SUBSTEP_LIMIT)),
+    Math.min(DRAG_MAX_SUBSTEPS, Math.ceil(motion.distance / DRAG_SUBSTEP_LIMIT)),
   );
+
+  const projectedValues =
+    session.program.system.parameterProjection.projectValues(session.values);
 
   let lastAccepted: SketchCoreSolveResult | null = null;
 
   for (let step = 1; step <= substeps; step += 1) {
     const fraction = step / substeps;
-    const stepTarget: SketchDraggedPointTarget = {
-      kind: "sketchPoint",
-      pointId: dragTarget.pointId,
-      position: [
-        startPosition[0] + totalDelta[0] * fraction,
-        startPosition[1] + totalDelta[1] * fraction,
-      ],
-    };
+    const stepTarget = interpolateDragTarget(dragTarget, motion, fraction);
 
-    // [TECH] G16‴: each substep is a solve whose start state is the last
-    // accepted frame (`session.values`); its blocked set is decided there.
-    const frame = solveDraggedPointFrameWithRebuild({
+    if (stepTarget.kind === "sketchPoint") {
+      // Point path: use the existing optimized path with rigid-translation
+      // fast path.
+      const component = findComponentForPoint(
+        session.program,
+        stepTarget.pointId,
+      );
+      const frame = solveDraggedPointFrameWithRebuild({
+        session,
+        component,
+        dragTarget: stepTarget,
+        translate: { targetTolerance },
+      });
+      if (frame && frame.accepted) {
+        acceptDraggedPointCandidate(session, frame.values, frame.materialized);
+        lastAccepted = frame.materialized;
+        continue;
+      }
+      if (!lastAccepted) {
+        return blockedDragResult(session, frame, dragTarget);
+      }
+      break;
+    }
+
+    // Generalized path for translate/radius/tangent targets.
+    const resolved = resolveDragTargetFrame(
+      session.program,
+      stepTarget,
+      projectedValues,
+      DRAG_TARGET_WEIGHT,
+    );
+    if (!resolved) {
+      if (!lastAccepted) {
+        return blockedDragResult(session, null, dragTarget);
+      }
+      break;
+    }
+
+    const frame = solveDragFrameGeneralWithRebuild({
       session,
-      component,
-      dragTarget: stepTarget,
-      translate: { targetTolerance },
+      resolved,
+      constraintLabel: dragTargetLabel(dragTarget),
     });
     if (frame && frame.accepted) {
       acceptDraggedPointCandidate(session, frame.values, frame.materialized);
       lastAccepted = frame.materialized;
       continue;
     }
-
-    // Non-convergent substep: keep the last accepted frame and stop advancing.
-    // The last accepted values (never the failed candidate) are preserved so the
-    // reported snapshot is always a valid continuous frame (D3).
     if (!lastAccepted) {
-      return {
-        kind: "blocked",
-        reason: "nonConvergent",
-        solvedSnapshot: session.lastAcceptedSnapshot,
-        diagnostics: [
-          ...(frame?.materialized.diagnostics ?? []),
-          makeDiagnostic(
-            "drag-target-nonconvergent",
-            "warning",
-            "Dragged point frame could not converge to a valid constrained solution.",
-            { kind: "point", pointId: dragTarget.pointId },
-          ),
-        ],
-      };
+      return blockedDragResult(session, frame, dragTarget);
     }
     break;
   }
@@ -8571,6 +8832,280 @@ export function updateCompiledSketchSolveSession(
     solvedSnapshot: session.lastAcceptedSnapshot,
     diagnostics:
       lastAccepted?.diagnostics ?? session.lastAcceptedSnapshot.diagnostics,
+  };
+}
+
+// --- Helpers for the generalized updateCompiledSketchSolveSession ---
+
+function dragTargetDiagnosticTarget(
+  target: SketchDragTarget,
+): { kind: "point"; pointId: SketchPointId } | { kind: "entity"; entityId: SketchEntityId } {
+  switch (target.kind) {
+    case "sketchPoint":
+      return { kind: "point", pointId: target.pointId };
+    case "sketchTranslate":
+      return { kind: "point", pointId: target.pointIds[0]! as SketchPointId };
+    case "sketchRadius":
+      return { kind: "entity", entityId: target.entityId };
+    case "sketchTangentVector":
+      return { kind: "entity", entityId: target.entityId };
+  }
+}
+
+function dragTargetLabel(target: SketchDragTarget): string {
+  switch (target.kind) {
+    case "sketchPoint":
+      return target.pointId;
+    case "sketchTranslate":
+      return `translate_${target.pointIds[0]}`;
+    case "sketchRadius":
+      return `radius_${target.entityId}`;
+    case "sketchTangentVector":
+      return `tangent_${target.entityId}_${target.occurrenceId}`;
+  }
+}
+
+function validateDragTarget(
+  session: SketchCompiledSolveSession,
+  target: SketchDragTarget,
+): SketchDraggedPointSolveResult | null {
+  switch (target.kind) {
+    case "sketchPoint": {
+      if (
+        !session.program.definition.points.some(
+          (p) => p.pointId === target.pointId,
+        )
+      ) {
+        return {
+          kind: "blocked",
+          reason: "missingPoint",
+          solvedSnapshot: null,
+          diagnostics: [
+            makeDiagnostic(
+              "drag-target-missing-point",
+              "error",
+              `Dragged point ${target.pointId} does not exist in the sketch definition.`,
+              { kind: "point", pointId: target.pointId },
+            ),
+          ],
+        };
+      }
+      if (!target.position.every(Number.isFinite)) {
+        return {
+          kind: "blocked",
+          reason: "nonConvergent",
+          solvedSnapshot: session.lastAcceptedSnapshot,
+          diagnostics: [
+            makeDiagnostic(
+              "drag-target-nonconvergent",
+              "warning",
+              "Dragged point frame contains a non-finite target and cannot be solved.",
+              { kind: "point", pointId: target.pointId },
+            ),
+          ],
+        };
+      }
+      if (!session.program.system.pointRecords.get(target.pointId)) {
+        return {
+          kind: "blocked",
+          reason: "missingPoint",
+          solvedSnapshot: session.lastAcceptedSnapshot,
+          diagnostics: [
+            makeDiagnostic(
+              "drag-target-missing-point",
+              "error",
+              `Dragged point ${target.pointId} does not exist in the compiled solve program.`,
+              { kind: "point", pointId: target.pointId },
+            ),
+          ],
+        };
+      }
+      return null;
+    }
+    case "sketchTranslate": {
+      if (!target.delta.every(Number.isFinite)) {
+        return {
+          kind: "blocked",
+          reason: "nonConvergent",
+          solvedSnapshot: session.lastAcceptedSnapshot,
+          diagnostics: [
+            makeDiagnostic(
+              "drag-target-nonconvergent",
+              "warning",
+              "Translate drag frame contains a non-finite delta and cannot be solved.",
+              { kind: "point", pointId: target.pointIds[0]! as SketchPointId },
+            ),
+          ],
+        };
+      }
+      return null;
+    }
+    case "sketchRadius": {
+      if (!Number.isFinite(target.targetRadius)) {
+        return {
+          kind: "blocked",
+          reason: "nonConvergent",
+          solvedSnapshot: session.lastAcceptedSnapshot,
+          diagnostics: [
+            makeDiagnostic(
+              "drag-target-nonconvergent",
+              "warning",
+              "Radius drag frame contains a non-finite target and cannot be solved.",
+              { kind: "entity", entityId: target.entityId },
+            ),
+          ],
+        };
+      }
+      return null;
+    }
+    case "sketchTangentVector": {
+      if (!target.targetVector.every(Number.isFinite)) {
+        return {
+          kind: "blocked",
+          reason: "nonConvergent",
+          solvedSnapshot: session.lastAcceptedSnapshot,
+          diagnostics: [
+            makeDiagnostic(
+              "drag-target-nonconvergent",
+              "warning",
+              "Tangent vector drag frame contains a non-finite target and cannot be solved.",
+              { kind: "entity", entityId: target.entityId },
+            ),
+          ],
+        };
+      }
+      return null;
+    }
+  }
+}
+
+/** T12b: motion metric for substep subdivision. */
+type DragTargetMotion = {
+  distance: number;
+  startPosition?: SketchPoint2D;
+  totalDelta?: SketchPoint2D;
+  startRadius?: number;
+  totalRadiusDelta?: number;
+  startVector?: SketchPoint2D;
+  totalVectorDelta?: SketchPoint2D;
+};
+
+function dragTargetMotion(
+  session: SketchCompiledSolveSession,
+  target: SketchDragTarget,
+): DragTargetMotion | null {
+  const system = session.program.system;
+  const projectedValues = system.parameterProjection.projectValues(
+    session.values,
+  );
+  switch (target.kind) {
+    case "sketchPoint": {
+      const record = system.pointRecords.get(target.pointId);
+      if (!record) return null;
+      const startPosition = getPoint(projectedValues, record);
+      const totalDelta = subtract(target.position, startPosition);
+      return { distance: length(totalDelta), startPosition, totalDelta };
+    }
+    case "sketchTranslate": {
+      return { distance: length(target.delta), totalDelta: target.delta };
+    }
+    case "sketchRadius": {
+      const entityState = system.entityStates.get(target.entityId);
+      if (!entityState) return null;
+      const startRadius = projectedValues[entityState.baseIndex]!;
+      const totalRadiusDelta = target.targetRadius - startRadius;
+      return {
+        distance: Math.abs(totalRadiusDelta),
+        startRadius,
+        totalRadiusDelta,
+      };
+    }
+    case "sketchTangentVector": {
+      const tangentState = system.splineTangentStates.get(
+        splineTangentStateKey(
+          target.entityId,
+          target.occurrenceId,
+        ),
+      );
+      if (!tangentState) return null;
+      const startVector: SketchPoint2D = [
+        projectedValues[tangentState.baseIndex]!,
+        projectedValues[tangentState.baseIndex + 1]!,
+      ];
+      const totalVectorDelta = subtract(target.targetVector, startVector);
+      return {
+        distance: length(totalVectorDelta),
+        startVector,
+        totalVectorDelta,
+      };
+    }
+  }
+}
+
+/** T12b: interpolate a drag target to a substep fraction. */
+function interpolateDragTarget(
+  target: SketchDragTarget,
+  motion: DragTargetMotion,
+  fraction: number,
+): SketchDragTarget {
+  switch (target.kind) {
+    case "sketchPoint":
+      return {
+        kind: "sketchPoint",
+        pointId: target.pointId,
+        position: [
+          motion.startPosition![0] + motion.totalDelta![0] * fraction,
+          motion.startPosition![1] + motion.totalDelta![1] * fraction,
+        ],
+      };
+    case "sketchTranslate":
+      return {
+        kind: "sketchTranslate",
+        pointIds: target.pointIds,
+        delta: [
+          motion.totalDelta![0] * fraction,
+          motion.totalDelta![1] * fraction,
+        ],
+      };
+    case "sketchRadius":
+      return {
+        kind: "sketchRadius",
+        entityId: target.entityId,
+        targetRadius:
+          motion.startRadius! + motion.totalRadiusDelta! * fraction,
+      };
+    case "sketchTangentVector":
+      return {
+        kind: "sketchTangentVector",
+        entityId: target.entityId,
+        occurrenceId: target.occurrenceId,
+        targetVector: [
+          motion.startVector![0] + motion.totalVectorDelta![0] * fraction,
+          motion.startVector![1] + motion.totalVectorDelta![1] * fraction,
+        ],
+        exactZero: target.exactZero,
+      };
+  }
+}
+
+function blockedDragResult(
+  session: SketchCompiledSolveSession,
+  frame: DraggedPointCandidate | null,
+  target: SketchDragTarget,
+): SketchDraggedPointSolveResult {
+  return {
+    kind: "blocked",
+    reason: "nonConvergent",
+    solvedSnapshot: session.lastAcceptedSnapshot,
+    diagnostics: [
+      ...(frame?.materialized.diagnostics ?? []),
+      makeDiagnostic(
+        "drag-target-nonconvergent",
+        "warning",
+        "Dragged point frame could not converge to a valid constrained solution.",
+        dragTargetDiagnosticTarget(target),
+      ),
+    ],
   };
 }
 

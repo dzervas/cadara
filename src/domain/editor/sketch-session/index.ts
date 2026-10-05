@@ -84,6 +84,7 @@ export {
 
 export {
   beginSketchGeometryDrag,
+  cancelSketchGeometryDrag,
   completeSketchOffsetPreviewPublication,
   completeSketchEditQuery,
   deleteSelectedSketchGeometry,

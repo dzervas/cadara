@@ -15,7 +15,13 @@ export type SketchDragHandle =
   | { kind: "point"; pointId: SketchPointId }
   | { kind: "entityBody"; entityId: SketchEntityId }
   | { kind: "rim"; entityId: SketchEntityId }
-  | { kind: "center"; entityId: SketchEntityId };
+  | { kind: "center"; entityId: SketchEntityId }
+  | {
+      kind: "tangentHandle";
+      entityId: SketchEntityId;
+      occurrenceId: string;
+      pointId: SketchPointId;
+    };
 
 export type SketchDragIntent =
   /** Soft-target only the grabbed point. Connected entities stretch/rotate. */
@@ -23,7 +29,14 @@ export type SketchDragIntent =
   /** Apply an identical translation soft-target to all listed defining points. */
   | { kind: "translate"; pointIds: readonly SketchPointId[] }
   /** Soft-target the radius value of a circle or arc; the center is untouched. */
-  | { kind: "radius"; entityId: SketchEntityId };
+  | { kind: "radius"; entityId: SketchEntityId }
+  /** Soft-target only the tangent vector variables; fit points are anchored. */
+  | {
+      kind: "tangentVector";
+      entityId: SketchEntityId;
+      occurrenceId: string;
+      pointId: SketchPointId;
+    };
 
 /**
  * The defining points of an entity — the points an entity-body drag translates
@@ -123,6 +136,26 @@ export function resolveSketchDragIntent(
       return {
         kind: "translate",
         pointIds: getSketchEntityDefiningPointIds(definition, handle.entityId),
+      };
+    }
+    case "tangentHandle": {
+      const entity = definition.entities.find(
+        (entry) => entry.entityId === handle.entityId,
+      );
+      if (!entity || entity.kind !== "spline") {
+        return null;
+      }
+      const occurrence = entity.pointOccurrences.find(
+        (occ) => occ.occurrenceId === handle.occurrenceId,
+      );
+      if (!occurrence) {
+        return null;
+      }
+      return {
+        kind: "tangentVector",
+        entityId: handle.entityId,
+        occurrenceId: handle.occurrenceId,
+        pointId: handle.pointId,
       };
     }
   }

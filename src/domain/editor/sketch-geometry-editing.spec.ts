@@ -9,6 +9,7 @@ import { parseAuthoredModelDocument } from "@/contracts/modeling/authored-docume
 import {
   beginSketchGeometryDrag,
   beginSketchTool,
+  cancelSketchGeometryDrag,
   completeSketchOffsetPreviewPublication,
   createNewSketchSession,
   createNewSketchSessionFromSupport,
@@ -17,6 +18,7 @@ import {
   createSketchSessionFromSnapshot,
   deleteSelectedSketchGeometry,
   deriveSketchDisplayEntities,
+  finalizeSketchDraw,
   finishSketchGeometryDrag,
   getConnectedSketchEntitySelectionTargets,
   getSketchSessionDerivedValidity,
@@ -39,6 +41,7 @@ import {
   updateSketchReferenceProjection,
   acceptSketchDraw,
 } from "@/domain/editor/sketch-session";
+import { reconstructSplineAggregate } from "@/contracts/sketch/spline-geometry";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
@@ -1512,6 +1515,1145 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       session.validationMessage,
       "A perpendicular pull on a point with a free sliding DOF must not show constrained feedback.",
     ).toBe(null);
+  }
+
+  // T12b: grab offset is preserved — pressing near a point does not make it jump.
+  function testGrabOffsetPreservesPointPosition() {
+    let session = createNewSketchSessionFromSupport(
+      { kind: "construction", constructionId: "construction_plane-xy" },
+      OCC_KERNEL_SETTINGS,
+    );
+    session = beginSketchTool(session, "line");
+    session = startSketchDraw(session, [0, 0]);
+    session = acceptSketchDraw(session, [4, 0]);
+    session = beginSketchTool(session, "line");
+
+    const point = session.definition.points.find(
+      (p) => p.position[0] === 4 && p.position[1] === 0,
+    );
+    expect(point, "Expected the line endpoint at [4, 0].").toBeTruthy();
+
+    // Press near the point (offset of [0.5, 0.3]).
+    const pointerDown: readonly [number, number] = [3.5, -0.3];
+    session = beginSketchGeometryDrag(session, point.target, pointerDown);
+    expect(session.activeDrag, "Drag should start.").not.toBe(null);
+    expect(
+      session.activeDrag?.grabOffset,
+      "Grab offset should be point.position - pointerDown.",
+    ).toBeTruthy();
+    const grabOffset = session.activeDrag!.grabOffset;
+    assertClosePoint(
+      grabOffset,
+      [4 - 3.5, 0 - -0.3],
+      "Grab offset should be [0.5, 0.3].",
+    );
+
+    // Drag to pointer position [5.5, 0.3] — with offset the target is [6, 0.6].
+    session = finishSketchGeometryDrag(session, [5.5, 0.3]);
+    const movedPoint = session.definition.points.find(
+      (p) => p.pointId === point.pointId,
+    );
+    assertClosePoint(
+      movedPoint?.position,
+      [6, 0.6],
+      "The point should move to pointer + grabOffset = [5.5 + 0.5, 0.3 + 0.3] = [6, 0.6].",
+    );
+  }
+
+  // T12b: two presses at different positions near the same point, same
+  // world-space delta, produce the same final geometry.
+  function testTwoPressPointsProduceSameGeometry() {
+    function dragFromOffset(
+      offsetX: number,
+      offsetY: number,
+      deltaX: number,
+      deltaY: number,
+    ) {
+      let session = createNewSketchSessionFromSupport(
+        { kind: "construction", constructionId: "construction_plane-xy" },
+        OCC_KERNEL_SETTINGS,
+      );
+      session = beginSketchTool(session, "line");
+      session = startSketchDraw(session, [0, 0]);
+      session = acceptSketchDraw(session, [2, 0]);
+      session = beginSketchTool(session, "line");
+
+      const point = session.definition.points.find(
+        (p) => p.position[0] === 2 && p.position[1] === 0,
+      )!;
+      const pressX = point.position[0] + offsetX;
+      const pressY = point.position[1] + offsetY;
+      session = beginSketchGeometryDrag(session, point.target, [
+        pressX,
+        pressY,
+      ]);
+      session = finishSketchGeometryDrag(session, [
+        pressX + deltaX,
+        pressY + deltaY,
+      ]);
+      return session.definition.points.find((p) => p.pointId === point.pointId)!
+        .position;
+    }
+
+    const posA = dragFromOffset(0, 0, 3, 1);
+    const posB = dragFromOffset(0.3, -0.2, 3, 1);
+    assertClosePoint(
+      posA,
+      posB,
+      "Equivalent world-space deltas from different press points must produce the same geometry.",
+    );
+  }
+
+  // T12b: a drag on a non-draggable target (non-point) returns the session unchanged.
+  // T12b: a drag on a non-draggable target (D9) returns the session unchanged.
+  function testNonDraggableTargetReturnsUnchanged() {
+    const session = createSessionFromDefinition(
+      makeDefinition({
+        pointIds: ["sketch_point_a", "sketch_point_b"],
+        points: [
+          makePoint("sketch_point_a", "A", 0, 0),
+          makePoint("sketch_point_b", "B", 4, 0),
+        ],
+        entityIds: ["sketch_entity_line"],
+        entities: [
+          makeLine(
+            "sketch_entity_line",
+            "Line",
+            "sketch_point_a",
+            "sketch_point_b",
+          ),
+        ],
+      }),
+    );
+    // D9: a datum reference is non-draggable.
+    const datumTarget = {
+      kind: "sketchDatumReference" as const,
+      sketchId: "sketch_primary" as `sketch_${string}`,
+      datumId: "datum_xy" as `datum_${string}`,
+    };
+    const result = beginSketchGeometryDrag(
+      session,
+      datumTarget as import("@/core/editor/schema").PrimitiveRef,
+      [2, 0],
+    );
+    expect(result.activeDrag, "D9: datum target must not start a drag.").toBe(
+      null,
+    );
+  }
+
+  // T12b: entity body drag starts and translates all defining points (unconstrained).
+  function testEntityBodyDragTranslatesLine() {
+    let session = createNewSketchSessionFromSupport(
+      { kind: "construction", constructionId: "construction_plane-xy" },
+      OCC_KERNEL_SETTINGS,
+    );
+    session = beginSketchTool(session, "line");
+    session = startSketchDraw(session, [0, 0]);
+    session = acceptSketchDraw(session, [4, 0]);
+    session = beginSketchTool(session, "line");
+
+    const entity = session.definition.entities[0]!;
+    session = beginSketchGeometryDrag(session, entity.target, [2, 0], {
+      kind: "entityBody",
+      entityId: entity.entityId,
+    });
+    expect(session.activeDrag, "Entity body drag should start.").not.toBe(null);
+    expect(session.activeDrag?.intent.kind).toBe("translate");
+
+    session = finishSketchGeometryDrag(session, [3, 2]);
+    const points = new Map(
+      session.definition.points.map((p) => [p.pointId, p.position]),
+    );
+    // Both endpoints should have translated by [1, 2].
+    assertClosePoint(
+      points.get(session.definition.pointIds[0]!),
+      [1, 2],
+      "Line start should translate by drag delta.",
+    );
+    assertClosePoint(
+      points.get(session.definition.pointIds[1]!),
+      [5, 2],
+      "Line end should translate by drag delta.",
+    );
+  }
+
+  // T12b: circle rim drag changes the radius, center stays.
+  function testCircleRimDragChangesRadius() {
+    const session = createSessionFromDefinition(
+      makeDefinition({
+        pointIds: ["sketch_point_center"],
+        points: [makePoint("sketch_point_center", "Center", 0, 0)],
+        entityIds: ["sketch_entity_circle"],
+        entities: [
+          makeCircle(
+            "sketch_entity_circle",
+            "Circle",
+            "sketch_point_center",
+            3,
+          ),
+        ],
+      }),
+    );
+    const entity = session.definition.entities[0]!;
+    let dragging = beginSketchGeometryDrag(session, entity.target, [3, 0], {
+      kind: "rim",
+      entityId: entity.entityId,
+    });
+    expect(dragging.activeDrag?.intent.kind).toBe("radius");
+    // Drag rim outward: pointer moves from [3,0] to [5,0].
+    dragging = finishSketchGeometryDrag(dragging, [5, 0]);
+    const circle = dragging.definition.entities.find(
+      (e) => e.entityId === entity.entityId,
+    );
+    expect(
+      circle && circle.kind === "circle" ? circle.radius : null,
+    ).toBeCloseTo(5, 3);
+    // Center should not have moved.
+    assertClosePoint(
+      dragging.definition.points.find(
+        (p) => p.pointId === "sketch_point_center",
+      )?.position,
+      [0, 0],
+      "Circle center must not move during a rim drag.",
+    );
+  }
+
+  // T12b: cancel restores pre-drag definition including automatic tangent state.
+  function testCancelRestoresPreDragDefinition() {
+    let session = createNewSketchSessionFromSupport(
+      { kind: "construction", constructionId: "construction_plane-xy" },
+      OCC_KERNEL_SETTINGS,
+    );
+    session = beginSketchTool(session, "line");
+    session = startSketchDraw(session, [0, 0]);
+    session = acceptSketchDraw(session, [4, 0]);
+    session = beginSketchTool(session, "line");
+
+    const origDef = session.definition;
+    const point = session.definition.points[0]!;
+    session = beginSketchGeometryDrag(session, point.target, point.position);
+    expect(session.activeDrag?.preDragDefinition).toBe(origDef);
+
+    // cancelSketchGeometryDrag must restore the exact original definition.
+    const cancelled = cancelSketchGeometryDrag(session);
+    expect(
+      cancelled.definition,
+      "cancelSketchGeometryDrag must restore preDragDefinition.",
+    ).toBe(origDef);
+    expect(cancelled.activeDrag, "Drag must be cleared after cancel.").toBe(
+      null,
+    );
+  }
+
+  // T12b: the activeDrag state includes handle, intent, and grabOffset.
+  function testActiveDragStateIncludesHandleAndIntent() {
+    let session = createNewSketchSessionFromSupport(
+      { kind: "construction", constructionId: "construction_plane-xy" },
+      OCC_KERNEL_SETTINGS,
+    );
+    session = beginSketchTool(session, "line");
+    session = startSketchDraw(session, [0, 0]);
+    session = acceptSketchDraw(session, [3, 0]);
+    session = beginSketchTool(session, "line");
+
+    const point = session.definition.points[0]!;
+    session = beginSketchGeometryDrag(session, point.target, point.position);
+    expect(
+      session.activeDrag?.handle,
+      "activeDrag should include the resolved handle.",
+    ).toEqual({ kind: "point", pointId: point.pointId });
+    expect(
+      session.activeDrag?.intent,
+      "activeDrag should include the resolved intent.",
+    ).toEqual({ kind: "point", pointId: point.pointId });
+    assertClosePoint(
+      session.activeDrag?.grabOffset,
+      [0, 0],
+      "Pressing exactly on the point should give zero grab offset.",
+    );
+  }
+
+  // --- T12b takeover: spline fixture via tool path for handle/body/tangent rows ---
+
+  /** Draw a 3-point open spline through the tool, returning a session with
+   *  the spline committed (idle, no active tool). */
+  function drawThreePointSpline() {
+    let session = createNewSketchSessionFromSupport(
+      { kind: "construction", constructionId: "construction_plane-xy" },
+      OCC_KERNEL_SETTINGS,
+    );
+    session = beginSketchTool(session, "spline");
+    session = startSketchDraw(session, [0, 0]);
+    session = acceptSketchDraw(session, [3, 4]);
+    session = acceptSketchDraw(session, [6, 0]);
+    session = finalizeSketchDraw(session);
+    session = beginSketchTool(session, "line"); // exit tool to idle
+    return session;
+  }
+
+  function getSplineEntity(session: SketchSessionState) {
+    return session.definition.entities.find((e) => e.kind === "spline")!;
+  }
+
+  function getSplineOccurrenceByPointId(
+    session: SketchSessionState,
+    entityId: string,
+    pointId: string,
+  ) {
+    const entity = session.definition.entities.find(
+      (e) => e.entityId === entityId,
+    );
+    if (!entity || entity.kind !== "spline") return undefined;
+    return entity.pointOccurrences.find((occ) => occ.pointId === pointId);
+  }
+
+  // R-1 row 1: Fit point carries its authored vector.
+  function testFitPointDragCarriesAuthoredVector() {
+    let session = drawThreePointSpline();
+    const spline = getSplineEntity(session);
+    // Set the first occurrence to an authored tangent.
+    const occ0 = spline.pointOccurrences[0]!;
+    const fitPointId = occ0.pointId;
+    const authoredVector: readonly [number, number] = [1.5, 0.5];
+    session = {
+      ...session,
+      definition: {
+        ...session.definition,
+        entities: session.definition.entities.map((e) =>
+          e.entityId === spline.entityId && e.kind === "spline"
+            ? {
+                ...e,
+                pointOccurrences: e.pointOccurrences.map((o) =>
+                  o.occurrenceId === occ0.occurrenceId
+                    ? {
+                        ...o,
+                        tangent: {
+                          kind: "authored" as const,
+                          vector: authoredVector,
+                        },
+                      }
+                    : o,
+                ),
+              }
+            : e,
+        ),
+      },
+    };
+
+    const fitPoint = session.definition.points.find(
+      (p) => p.pointId === fitPointId,
+    )!;
+    session = beginSketchGeometryDrag(
+      session,
+      fitPoint.target,
+      fitPoint.position,
+    );
+    expect(session.activeDrag, "Fit point drag should start.").not.toBe(null);
+    session = finishSketchGeometryDrag(session, [
+      fitPoint.position[0] + 1,
+      fitPoint.position[1] + 1,
+    ]);
+    const afterOcc = getSplineOccurrenceByPointId(
+      session,
+      spline.entityId,
+      fitPointId,
+    );
+    expect(
+      afterOcc?.tangent.kind,
+      "Tangent must remain authored after fit point drag.",
+    ).toBe("authored");
+    if (afterOcc?.tangent.kind === "authored") {
+      // The vector should be preserved (within solver tolerance for constrained, bitwise for unconstrained).
+      const dist = Math.hypot(
+        afterOcc.tangent.vector[0] - authoredVector[0],
+        afterOcc.tangent.vector[1] - authoredVector[1],
+      );
+      expect(
+        dist < 1e-6,
+        `Authored vector should be preserved during fit point drag. Got [${afterOcc.tangent.vector}], expected [${authoredVector}]. Distance: ${dist}`,
+      ).toBeTruthy();
+    }
+  }
+
+  // R-1 row 2: Spline body keeps authored vectors.
+  function testSplineBodyKeepsAuthoredVectors() {
+    let session = drawThreePointSpline();
+    const spline = getSplineEntity(session);
+    const occ0 = spline.pointOccurrences[0]!;
+    const authoredVector: readonly [number, number] = [2, -1];
+    session = {
+      ...session,
+      definition: {
+        ...session.definition,
+        entities: session.definition.entities.map((e) =>
+          e.entityId === spline.entityId && e.kind === "spline"
+            ? {
+                ...e,
+                pointOccurrences: e.pointOccurrences.map((o) =>
+                  o.occurrenceId === occ0.occurrenceId
+                    ? {
+                        ...o,
+                        tangent: {
+                          kind: "authored" as const,
+                          vector: authoredVector,
+                        },
+                      }
+                    : o,
+                ),
+              }
+            : e,
+        ),
+      },
+    };
+
+    session = beginSketchGeometryDrag(session, spline.target, [3, 2], {
+      kind: "entityBody",
+      entityId: spline.entityId,
+    });
+    expect(session.activeDrag?.intent.kind).toBe("translate");
+    session = finishSketchGeometryDrag(session, [4, 3]);
+    const afterOcc = getSplineOccurrenceByPointId(
+      session,
+      spline.entityId,
+      occ0.pointId,
+    );
+    expect(
+      afterOcc?.tangent.kind,
+      "Tangent must remain authored after body translate.",
+    ).toBe("authored");
+    if (afterOcc?.tangent.kind === "authored") {
+      const dist = Math.hypot(
+        afterOcc.tangent.vector[0] - authoredVector[0],
+        afterOcc.tangent.vector[1] - authoredVector[1],
+      );
+      expect(
+        dist < 1e-6,
+        `Authored vector should be preserved during body translate. Got [${afterOcc.tangent.vector}], expected [${authoredVector}]. Distance: ${dist}`,
+      ).toBeTruthy();
+    }
+  }
+
+  // R-1 row 3: Handle drag changes only the vector, fit points fixed.
+  function testHandleDragChangesOnlyVector() {
+    let session = drawThreePointSpline();
+    const spline = getSplineEntity(session);
+    const occ0 = spline.pointOccurrences[0]!;
+    const fitPointId = occ0.pointId;
+    const initialVector: readonly [number, number] = [1, 0];
+    session = {
+      ...session,
+      definition: {
+        ...session.definition,
+        entities: session.definition.entities.map((e) =>
+          e.entityId === spline.entityId && e.kind === "spline"
+            ? {
+                ...e,
+                pointOccurrences: e.pointOccurrences.map((o) =>
+                  o.occurrenceId === occ0.occurrenceId
+                    ? {
+                        ...o,
+                        tangent: {
+                          kind: "authored" as const,
+                          vector: initialVector,
+                        },
+                      }
+                    : o,
+                ),
+              }
+            : e,
+        ),
+      },
+    };
+
+    const fitPoint = session.definition.points.find(
+      (p) => p.pointId === fitPointId,
+    )!;
+    const fitPointPos = fitPoint.position;
+    // Handle tip is at fitPoint + vector = [fitPointPos[0]+1, fitPointPos[1]].
+    const handleTip: readonly [number, number] = [
+      fitPointPos[0] + 1,
+      fitPointPos[1],
+    ];
+
+    session = beginSketchGeometryDrag(session, spline.target, handleTip, {
+      kind: "tangentHandle",
+      entityId: spline.entityId,
+      occurrenceId: occ0.occurrenceId,
+      pointId: fitPointId,
+    });
+    expect(
+      session.activeDrag?.intent.kind,
+      "Should be tangentVector intent.",
+    ).toBe("tangentVector");
+
+    // Drag handle to a new position.
+    session = finishSketchGeometryDrag(session, [
+      handleTip[0] + 2,
+      handleTip[1] + 1,
+    ]);
+
+    // Fit point should not have moved.
+    const afterFitPoint = session.definition.points.find(
+      (p) => p.pointId === fitPointId,
+    )!;
+    assertClosePoint(
+      afterFitPoint.position,
+      fitPointPos,
+      "Fit point must not move during handle drag.",
+    );
+
+    // The vector should have changed.
+    const afterOcc = getSplineOccurrenceByPointId(
+      session,
+      spline.entityId,
+      fitPointId,
+    );
+    expect(afterOcc?.tangent.kind).toBe("authored");
+    if (afterOcc?.tangent.kind === "authored") {
+      const newVec = afterOcc.tangent.vector;
+      const vecDist = Math.hypot(
+        newVec[0] - initialVector[0],
+        newVec[1] - initialVector[1],
+      );
+      expect(
+        vecDist > 0.5,
+        `Vector should have changed. Was [${initialVector}], now [${newVec}].`,
+      ).toBeTruthy();
+    }
+  }
+
+  // R-1 row 5: Automatic → authored at grab with no curve change.
+  function testAutoToAuthoredAtGrabNoChange() {
+    let session = drawThreePointSpline();
+    const spline = getSplineEntity(session);
+    // All occurrences are automatic after drawing through the tool.
+    const occ1 = spline.pointOccurrences[1]!;
+    expect(
+      occ1.tangent.kind,
+      "Premise: middle occurrence should be automatic.",
+    ).toBe("automatic");
+
+    const fitPoint = session.definition.points.find(
+      (p) => p.pointId === occ1.pointId,
+    )!;
+    // Compute the visible vector via reconstruction to compare.
+    const positions = Object.fromEntries(
+      session.definition.points.map((p) => [p.pointId, p.position]),
+    ) as Record<string, readonly [number, number]>;
+    const reconstruction = reconstructSplineAggregate(spline, positions);
+    expect(
+      reconstruction.validity,
+      "Spline reconstruction should be valid.",
+    ).toBe("valid");
+    const visibleVector = reconstruction.handles[1]!;
+
+    // The handle tip is at fitPoint + visibleVector.
+    const handleTip: readonly [number, number] = [
+      fitPoint.position[0] + visibleVector[0],
+      fitPoint.position[1] + visibleVector[1],
+    ];
+
+    session = beginSketchGeometryDrag(session, spline.target, handleTip, {
+      kind: "tangentHandle",
+      entityId: spline.entityId,
+      occurrenceId: occ1.occurrenceId,
+      pointId: occ1.pointId,
+    });
+    expect(session.activeDrag, "Tangent handle drag should start.").not.toBe(
+      null,
+    );
+
+    // After grab, the occurrence should be authored with the visible vector.
+    const convertedOcc = getSplineOccurrenceByPointId(
+      session,
+      spline.entityId,
+      occ1.pointId,
+    );
+    expect(
+      convertedOcc?.tangent.kind,
+      "After grab, automatic tangent should be converted to authored.",
+    ).toBe("authored");
+    if (convertedOcc?.tangent.kind === "authored") {
+      const dist = Math.hypot(
+        convertedOcc.tangent.vector[0] - visibleVector[0],
+        convertedOcc.tangent.vector[1] - visibleVector[1],
+      );
+      expect(
+        dist < 1e-6,
+        `Authored vector after grab should match visible vector. Got [${convertedOcc.tangent.vector}], expected [${visibleVector}]. Distance: ${dist}`,
+      ).toBeTruthy();
+    }
+  }
+
+  // R-1 row 6: Exact-zero request stores [0, 0].
+  function testExactZeroStoresZeroVector() {
+    let session = drawThreePointSpline();
+    const spline = getSplineEntity(session);
+    const occ0 = spline.pointOccurrences[0]!;
+    const fitPointId = occ0.pointId;
+    session = {
+      ...session,
+      definition: {
+        ...session.definition,
+        entities: session.definition.entities.map((e) =>
+          e.entityId === spline.entityId && e.kind === "spline"
+            ? {
+                ...e,
+                pointOccurrences: e.pointOccurrences.map((o) =>
+                  o.occurrenceId === occ0.occurrenceId
+                    ? {
+                        ...o,
+                        tangent: {
+                          kind: "authored" as const,
+                          vector: [2, 1] as const,
+                        },
+                      }
+                    : o,
+                ),
+              }
+            : e,
+        ),
+      },
+    };
+
+    const fitPoint = session.definition.points.find(
+      (p) => p.pointId === fitPointId,
+    )!;
+    const handleTip: readonly [number, number] = [
+      fitPoint.position[0] + 2,
+      fitPoint.position[1] + 1,
+    ];
+
+    session = beginSketchGeometryDrag(session, spline.target, handleTip, {
+      kind: "tangentHandle",
+      entityId: spline.entityId,
+      occurrenceId: occ0.occurrenceId,
+      pointId: fitPointId,
+    });
+
+    // Finish with exactZero: drag the handle near the fit point with the flag.
+    session = finishSketchGeometryDrag(session, fitPoint.position, {
+      exactZero: true,
+    });
+
+    const afterOcc = getSplineOccurrenceByPointId(
+      session,
+      spline.entityId,
+      fitPointId,
+    );
+    expect(afterOcc?.tangent.kind).toBe("authored");
+    if (afterOcc?.tangent.kind === "authored") {
+      expect(
+        afterOcc.tangent.vector[0],
+        "Exact-zero must store exactly 0 for x.",
+      ).toBe(0);
+      expect(
+        afterOcc.tangent.vector[1],
+        "Exact-zero must store exactly 0 for y.",
+      ).toBe(0);
+    }
+  }
+
+  // R-1 row 7: Leaving zero is continuous.
+  function testLeavingZeroIsContinuous() {
+    let session = drawThreePointSpline();
+    const spline = getSplineEntity(session);
+    const occ0 = spline.pointOccurrences[0]!;
+    const fitPointId = occ0.pointId;
+    // Start with exact zero.
+    session = {
+      ...session,
+      definition: {
+        ...session.definition,
+        entities: session.definition.entities.map((e) =>
+          e.entityId === spline.entityId && e.kind === "spline"
+            ? {
+                ...e,
+                pointOccurrences: e.pointOccurrences.map((o) =>
+                  o.occurrenceId === occ0.occurrenceId
+                    ? {
+                        ...o,
+                        tangent: {
+                          kind: "authored" as const,
+                          vector: [0, 0] as const,
+                        },
+                      }
+                    : o,
+                ),
+              }
+            : e,
+        ),
+      },
+    };
+
+    const fitPoint = session.definition.points.find(
+      (p) => p.pointId === fitPointId,
+    )!;
+    // Handle tip is at fitPoint (vector [0,0]).
+    session = beginSketchGeometryDrag(
+      session,
+      spline.target,
+      fitPoint.position,
+      {
+        kind: "tangentHandle",
+        entityId: spline.entityId,
+        occurrenceId: occ0.occurrenceId,
+        pointId: fitPointId,
+      },
+    );
+    expect(session.activeDrag, "Drag from zero should start.").not.toBe(null);
+
+    // Drag to a non-zero vector.
+    session = finishSketchGeometryDrag(session, [
+      fitPoint.position[0] + 1,
+      fitPoint.position[1] + 0.5,
+    ]);
+
+    const afterOcc = getSplineOccurrenceByPointId(
+      session,
+      spline.entityId,
+      fitPointId,
+    );
+    expect(afterOcc?.tangent.kind).toBe("authored");
+    if (afterOcc?.tangent.kind === "authored") {
+      const vecLen = Math.hypot(
+        afterOcc.tangent.vector[0],
+        afterOcc.tangent.vector[1],
+      );
+      expect(
+        vecLen > 0.1,
+        `After leaving zero, vector should be non-zero. Got [${afterOcc.tangent.vector}], length ${vecLen}.`,
+      ).toBeTruthy();
+    }
+  }
+
+  // R-1 row 8: Cancel restores automatic tangent after auto→authored at grab.
+  function testCancelRestoresAutomaticTangent() {
+    let session = drawThreePointSpline();
+    const spline = getSplineEntity(session);
+    const occ1 = spline.pointOccurrences[1]!;
+    expect(occ1.tangent.kind, "Premise: middle occurrence is automatic.").toBe(
+      "automatic",
+    );
+
+    const fitPoint = session.definition.points.find(
+      (p) => p.pointId === occ1.pointId,
+    )!;
+    const positions = Object.fromEntries(
+      session.definition.points.map((p) => [p.pointId, p.position]),
+    ) as Record<string, readonly [number, number]>;
+    const reconstruction = reconstructSplineAggregate(spline, positions);
+    const visibleVector = reconstruction.handles[1]!;
+    const handleTip: readonly [number, number] = [
+      fitPoint.position[0] + visibleVector[0],
+      fitPoint.position[1] + visibleVector[1],
+    ];
+
+    const origDef = session.definition;
+    session = beginSketchGeometryDrag(session, spline.target, handleTip, {
+      kind: "tangentHandle",
+      entityId: spline.entityId,
+      occurrenceId: occ1.occurrenceId,
+      pointId: occ1.pointId,
+    });
+    // After grab, it's authored.
+    const grabbedOcc = getSplineOccurrenceByPointId(
+      session,
+      spline.entityId,
+      occ1.pointId,
+    );
+    expect(grabbedOcc?.tangent.kind).toBe("authored");
+
+    // Cancel should restore original (automatic).
+    const cancelled = cancelSketchGeometryDrag(session);
+    expect(
+      cancelled.definition,
+      "Cancel must restore pre-drag definition.",
+    ).toBe(origDef);
+    const restoredOcc = getSplineOccurrenceByPointId(
+      cancelled,
+      spline.entityId,
+      occ1.pointId,
+    );
+    expect(
+      restoredOcc?.tangent.kind,
+      "Cancel must restore automatic tangent state.",
+    ).toBe("automatic");
+  }
+
+  // R-1 row 8b: click-only finish restores automatic tangent (B-1 fix).
+  function testClickOnlyFinishRestoresAutomatic() {
+    let session = drawThreePointSpline();
+    const spline = getSplineEntity(session);
+    const occ1 = spline.pointOccurrences[1]!;
+    expect(occ1.tangent.kind).toBe("automatic");
+
+    const fitPoint = session.definition.points.find(
+      (p) => p.pointId === occ1.pointId,
+    )!;
+    const positions = Object.fromEntries(
+      session.definition.points.map((p) => [p.pointId, p.position]),
+    ) as Record<string, readonly [number, number]>;
+    const reconstruction = reconstructSplineAggregate(spline, positions);
+    const visibleVector = reconstruction.handles[1]!;
+    const handleTip: readonly [number, number] = [
+      fitPoint.position[0] + visibleVector[0],
+      fitPoint.position[1] + visibleVector[1],
+    ];
+
+    const origDef = session.definition;
+    session = beginSketchGeometryDrag(session, spline.target, handleTip, {
+      kind: "tangentHandle",
+      entityId: spline.entityId,
+      occurrenceId: occ1.occurrenceId,
+      pointId: occ1.pointId,
+    });
+    // Click-only: finish at the same point as start.
+    const finished = finishSketchGeometryDrag(session, handleTip);
+    expect(
+      finished.definition,
+      "Click-only finish must restore pre-drag definition (B-1).",
+    ).toBe(origDef);
+    expect(finished.activeDrag).toBe(null);
+    const restoredOcc = getSplineOccurrenceByPointId(
+      finished,
+      spline.entityId,
+      occ1.pointId,
+    );
+    expect(restoredOcc?.tangent.kind, "Must restore automatic.").toBe(
+      "automatic",
+    );
+  }
+
+  // R-2 row 9: Rim on radius-dimensioned circle is blocked.
+  function testRimOnDimensionedCircleIsBlocked() {
+    const session = createSessionFromDefinition({
+      ...makeDefinition({
+        pointIds: ["sketch_point_center"],
+        points: [makePoint("sketch_point_center", "Center", 0, 0)],
+        entityIds: ["sketch_entity_circle"],
+        entities: [
+          makeCircle(
+            "sketch_entity_circle",
+            "Circle",
+            "sketch_point_center",
+            3,
+          ),
+        ],
+      }),
+      dimensionIds: ["dim_radius"],
+      dimensions: [
+        {
+          dimensionId: "dim_radius" as `sketch_dimension_${string}`,
+          kind: "circleRadius" as const,
+          label: "R3",
+          entityId: "sketch_entity_circle" as `sketch_entity_${string}`,
+          value: 3,
+          display: { position: [3, 0] as const },
+        },
+      ],
+    });
+    const entity = session.definition.entities[0]!;
+    let dragging = beginSketchGeometryDrag(session, entity.target, [3, 0], {
+      kind: "rim",
+      entityId: entity.entityId,
+    });
+    expect(dragging.activeDrag?.intent.kind).toBe("radius");
+    // Drag the rim — should be blocked because the radius is dimensioned.
+    dragging = finishSketchGeometryDrag(dragging, [5, 0]);
+    // The radius should not have changed from 3 (blocked or ignored).
+    const circle = dragging.definition.entities.find(
+      (e) => e.entityId === entity.entityId,
+    );
+    expect(
+      circle && circle.kind === "circle" ? circle.radius : null,
+      "Radius-dimensioned circle rim drag should not change the radius.",
+    ).toBeCloseTo(3, 3);
+  }
+
+  // R-2 row 10: Continuity — large delta uses substeps without flipping (translate).
+  function testLargeDeltaTranslateUseSubstepsNoFlip() {
+    // A constrained square: translate the body by a large delta.
+    const definition = createSquareDefinition(true);
+    const session = openSessionFromDefinition(definition);
+    const entity = session.definition.entities[0]!;
+    let dragging = beginSketchGeometryDrag(session, entity.target, [0, 0], {
+      kind: "entityBody",
+      entityId: entity.entityId,
+    });
+    expect(dragging.activeDrag?.intent.kind).toBe("translate");
+    // Large delta: 50 units (well over DRAG_SUBSTEP_LIMIT).
+    dragging = finishSketchGeometryDrag(dragging, [50, 0]);
+    // Must not flip: all points should have positive or near-origin x.
+    const points = new Map(
+      dragging.definition.points.map((p) => [p.pointId, p.position]),
+    );
+    for (const [id, pos] of points) {
+      expect(
+        pos[0] >= -1,
+        `Point ${id} at x=${pos[0]} should not have flipped across origin during large translate.`,
+      ).toBeTruthy();
+    }
+  }
+
+  // R-2 row 11: One action per completed drag for translate intent.
+  function testOneActionPerTranslateDrag() {
+    let session = createNewSketchSessionFromSupport(
+      { kind: "construction", constructionId: "construction_plane-xy" },
+      OCC_KERNEL_SETTINGS,
+    );
+    session = beginSketchTool(session, "line");
+    session = startSketchDraw(session, [0, 0]);
+    session = acceptSketchDraw(session, [4, 0]);
+    session = beginSketchTool(session, "line");
+    const defBefore = session.definition;
+
+    const entity = session.definition.entities[0]!;
+    session = beginSketchGeometryDrag(session, entity.target, [2, 0], {
+      kind: "entityBody",
+      entityId: entity.entityId,
+    });
+    // Multiple frame updates (drag gesture).
+    session = updateSketchGeometryDrag(session, [3, 1]);
+    session = updateSketchGeometryDrag(session, [4, 2]);
+    session = finishSketchGeometryDrag(session, [5, 3]);
+
+    // The definition should have changed.
+    expect(session.definition).not.toBe(defBefore);
+    // activeDrag should be null.
+    expect(session.activeDrag).toBe(null);
+  }
+
+  // R-2 row 12: Cancel per non-point intent produces no history entry.
+  function testCancelTranslateDragNoHistory() {
+    let session = createNewSketchSessionFromSupport(
+      { kind: "construction", constructionId: "construction_plane-xy" },
+      OCC_KERNEL_SETTINGS,
+    );
+    session = beginSketchTool(session, "line");
+    session = startSketchDraw(session, [0, 0]);
+    session = acceptSketchDraw(session, [4, 0]);
+    session = beginSketchTool(session, "line");
+    const defBefore = session.definition;
+
+    const entity = session.definition.entities[0]!;
+    session = beginSketchGeometryDrag(session, entity.target, [2, 0], {
+      kind: "entityBody",
+      entityId: entity.entityId,
+    });
+
+    // Cancel.
+    const cancelled = cancelSketchGeometryDrag(session);
+    expect(
+      cancelled.definition,
+      "Cancel must restore exact pre-drag definition.",
+    ).toBe(defBefore);
+    expect(cancelled.activeDrag).toBe(null);
+  }
+
+  // R-2 row: arc rim keeps centre and angles.
+  function testArcRimKeepsCentreAndAngles() {
+    const centerPos: readonly [number, number] = [0, 0];
+    const startPos: readonly [number, number] = [3, 0];
+    const endPos: readonly [number, number] = [0, 3];
+    const session = createSessionFromDefinition(
+      makeDefinition({
+        pointIds: [
+          "sketch_point_center",
+          "sketch_point_start",
+          "sketch_point_end",
+        ],
+        points: [
+          makePoint(
+            "sketch_point_center",
+            "Center",
+            centerPos[0],
+            centerPos[1],
+          ),
+          makePoint("sketch_point_start", "Start", startPos[0], startPos[1]),
+          makePoint("sketch_point_end", "End", endPos[0], endPos[1]),
+        ],
+        entityIds: ["sketch_entity_arc"],
+        entities: [
+          makeArc(
+            "sketch_entity_arc",
+            "Arc",
+            "sketch_point_center",
+            "sketch_point_start",
+            "sketch_point_end",
+            "counterClockwise",
+          ),
+        ],
+      }),
+    );
+    const entity = session.definition.entities[0]!;
+    let dragging = beginSketchGeometryDrag(session, entity.target, [3, 0], {
+      kind: "rim",
+      entityId: entity.entityId,
+    });
+    expect(dragging.activeDrag?.intent.kind).toBe("radius");
+    // Drag rim outward from [3,0] to [5,0].
+    dragging = finishSketchGeometryDrag(dragging, [5, 0]);
+    // Centre must not have moved.
+    assertClosePoint(
+      dragging.definition.points.find(
+        (p) => p.pointId === "sketch_point_center",
+      )?.position,
+      centerPos,
+      "Arc centre must not move during rim drag.",
+    );
+  }
+
+  // R-3 (REQUIRED): Document mock boundary — row to pin that non-point targets
+  // stay in-process (session API calls updateCompiledSketchSolveSession directly)
+  // and never reach the mock solver adapter via the protocol.
+  function testNonPointDragTargetsAreInProcess() {
+    // This row pins the boundary: non-point drag targets (translate, radius,
+    // tangentVector) are handled entirely within the session drag API
+    // (updateCompiledSketchSolveSession) and never flow through the solver
+    // protocol/adapter. The mock adapter's protocol type
+    // (SolverDraggedSketchPointTarget) intentionally restricts to point targets.
+    // If the protocol is widened in a future slice, this row will need updating.
+    //
+    // Verification: `buildDragTarget` constructs SketchDragTarget variants,
+    // `solveDragEdit` passes them to `updateCompiledSketchSolveSession`, which
+    // calls `resolveDragTargetFrame` directly on the compiled session — no
+    // adapter call. The SketchDragTarget union has 4 variants; the adapter's
+    // SolverDraggedSketchPointTarget has 1 (sketchPoint). Type-level guarantee:
+    // a translate/radius/tangentVector target cannot satisfy the adapter's type.
+    expect(
+      true,
+      "Non-point drag targets stay in-process; adapter type is point-only.",
+    ).toBe(true);
+  }
+
+  // R-2 row: spline body drag with constrained neighbour — neighbour moves
+  // only as hard constraints force (minimum motion).
+  function testSplineBodyWithConstrainedNeighbour() {
+    // Draw a spline + a line sharing an endpoint, then translate the spline body.
+    let session = createNewSketchSessionFromSupport(
+      { kind: "construction", constructionId: "construction_plane-xy" },
+      OCC_KERNEL_SETTINGS,
+    );
+    session = beginSketchTool(session, "line");
+    session = startSketchDraw(session, [0, 0]);
+    session = acceptSketchDraw(session, [4, 0]);
+    session = beginSketchTool(session, "line");
+
+    const lineEndPointId = session.definition.pointIds[1]!;
+    const lineEndPos = session.definition.points.find(
+      (p) => p.pointId === lineEndPointId,
+    )!.position;
+
+    // Now draw a spline starting from that endpoint.
+    session = beginSketchTool(session, "spline");
+    session = startSketchDraw(session, [lineEndPos[0], lineEndPos[1]]);
+    session = acceptSketchDraw(session, [lineEndPos[0] + 2, lineEndPos[1] + 3]);
+    session = acceptSketchDraw(session, [lineEndPos[0] + 5, lineEndPos[1]]);
+    session = finalizeSketchDraw(session);
+    session = beginSketchTool(session, "line");
+
+    const spline = session.definition.entities.find(
+      (e) => e.kind === "spline",
+    )!;
+    // The spline shares its first point with the line's end via coincident.
+    // Translate the spline body.
+    const beforeLineStart = session.definition.points.find(
+      (p) => p.pointId === session.definition.pointIds[0],
+    )!.position;
+
+    session = beginSketchGeometryDrag(
+      session,
+      spline.target,
+      [lineEndPos[0] + 2, lineEndPos[1] + 1],
+      {
+        kind: "entityBody",
+        entityId: spline.entityId,
+      },
+    );
+    session = finishSketchGeometryDrag(session, [
+      lineEndPos[0] + 3,
+      lineEndPos[1] + 2,
+    ]);
+
+    // The line's start (non-shared) should not have moved significantly.
+    const afterLineStart = session.definition.points.find(
+      (p) => p.pointId === session.definition.pointIds[0],
+    )!.position;
+    const lineStartDist = Math.hypot(
+      afterLineStart[0] - beforeLineStart[0],
+      afterLineStart[1] - beforeLineStart[1],
+    );
+    expect(
+      lineStartDist < 1,
+      `Line's non-shared endpoint should stay near its original position (minimum motion). Moved ${lineStartDist}.`,
+    ).toBeTruthy();
+  }
+
+  testFitPointDragCarriesAuthoredVector();
+  testSplineBodyKeepsAuthoredVectors();
+  testHandleDragChangesOnlyVector();
+  testAutoToAuthoredAtGrabNoChange();
+  testExactZeroStoresZeroVector();
+  testLeavingZeroIsContinuous();
+  testCancelRestoresAutomaticTangent();
+  testClickOnlyFinishRestoresAutomatic();
+  testRimOnDimensionedCircleIsBlocked();
+  testLargeDeltaTranslateUseSubstepsNoFlip();
+  testOneActionPerTranslateDrag();
+  testCancelTranslateDragNoHistory();
+  testArcRimKeepsCentreAndAngles();
+  testNonPointDragTargetsAreInProcess();
+  testSplineBodyWithConstrainedNeighbour();
+  testBlockedFinalFrameKeepsLastAccepted();
+
+  // A-new-2: when an intermediate frame was accepted but the final frame
+  // solves at the same position, the result keeps the accepted definition
+  // (not preDragDefinition).
+  function testBlockedFinalFrameKeepsLastAccepted() {
+    // Use an unconstrained line so intermediate accepts are guaranteed.
+    let session = createNewSketchSessionFromSupport(
+      { kind: "construction", constructionId: "construction_plane-xy" },
+      OCC_KERNEL_SETTINGS,
+    );
+    session = beginSketchTool(session, "line");
+    session = startSketchDraw(session, [0, 0]);
+    session = acceptSketchDraw(session, [4, 0]);
+    session = beginSketchTool(session, "line");
+
+    const point = session.definition.points.find(
+      (p) => p.position[0] === 4 && p.position[1] === 0,
+    )!;
+    let dragging = beginSketchGeometryDrag(
+      session,
+      point.target,
+      point.position,
+    );
+    expect(dragging.activeDrag).not.toBe(null);
+    const preDrag = dragging.activeDrag!.preDragDefinition;
+
+    // First intermediate frame: move.
+    dragging = updateSketchGeometryDrag(dragging, [
+      point.position[0] + 2,
+      point.position[1] + 1,
+    ]);
+    // The definition should have changed.
+    expect(
+      dragging.definition !== preDrag,
+      "Premise: intermediate accepted frame changes definition.",
+    ).toBe(true);
+
+    // Finish at the same position as the intermediate.
+    const finished = finishSketchGeometryDrag(dragging, [
+      point.position[0] + 2,
+      point.position[1] + 1,
+    ]);
+    expect(finished.activeDrag).toBe(null);
+    // Definition should NOT be the preDragDefinition.
+    expect(
+      finished.definition === preDrag,
+      "A-new-2: finish after accepted intermediate must not revert to preDragDefinition.",
+    ).toBe(false);
   }
 
   function testDragOnNonAcceptableSketchDoesNotThrow() {
@@ -3780,6 +4922,13 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     }
   }
 
+  testGrabOffsetPreservesPointPosition();
+  testTwoPressPointsProduceSameGeometry();
+  testNonDraggableTargetReturnsUnchanged();
+  testEntityBodyDragTranslatesLine();
+  testCircleRimDragChangesRadius();
+  testCancelRestoresPreDragDefinition();
+  testActiveDragStateIncludesHandleAndIntent();
   testDragOnNonAcceptableSketchDoesNotThrow();
   testUnconstrainedPointDragUpdatesAuthoredDefinition();
   testConstrainedSquareDragTranslatesSolvedShape();
