@@ -7316,9 +7316,27 @@ function materializeSolveResult(
     return status ? { ...entry, status } : entry;
   });
   diagnostics.push(...blockedRequirementDiagnostics(definition, blocked));
+
+  // B12: flag any solved circle whose radius ended up non-positive.
+  const solvedRadiusDiagnostics: SketchSolveDiagnostic[] = [];
+  for (const entity of solvedEntities) {
+    if (entity.kind === "circle" && entity.solvedRadius <= 0) {
+      solvedRadiusDiagnostics.push(
+        makeDiagnostic(
+          "invalid-solved-circle-radius",
+          "error",
+          `Circle ${entity.entityId} solved to a non-positive radius (${entity.solvedRadius}).`,
+          { kind: "entity", entityId: entity.entityId },
+        ),
+      );
+    }
+  }
+  diagnostics.push(...solvedRadiusDiagnostics);
+
   const geometryValid = ![
     ...projectionDiagnostics,
     ...commonCircleDiagnostics,
+    ...solvedRadiusDiagnostics,
   ].some((diagnostic) => diagnostic.severity === "error");
   const requirementsSatisfied =
     geometryValid &&
@@ -7775,6 +7793,39 @@ export function createCompiledSketchSolveSession(input: {
   program: SketchCompiledSolveProgram;
   priorSolvedSnapshot?: SolvedSketchSnapshot | null;
 }): SketchCompiledSolveSession {
+  const started = startCompiledSketchSolveSession(input);
+  if (started.kind === "unacceptable") {
+    throw new Error(
+      `Cannot initialize ${input.sessionId} without ${
+        started.commonCircle
+          ? "a valid common-circle snapshot"
+          : "an acceptable solved snapshot"
+      }${
+        started.diagnostic
+          ? `: ${started.commonCircle ? "" : `${started.diagnostic.code}: `}${started.diagnostic.message}`
+          : "."
+      }`,
+    );
+  }
+  return started.session;
+}
+
+/**
+ * Non-throwing session start: an unacceptable start (neither the session's
+ * own solve nor the prior snapshot is acceptable) is an expected state, e.g.
+ * a drag pressed on a sketch with conflicting requirements (T12a, B14).
+ */
+export function startCompiledSketchSolveSession(input: {
+  sessionId: `interactive_sketch_solve_${string}`;
+  program: SketchCompiledSolveProgram;
+  priorSolvedSnapshot?: SolvedSketchSnapshot | null;
+}):
+  | { kind: "started"; session: SketchCompiledSolveSession }
+  | {
+      kind: "unacceptable";
+      commonCircle: boolean;
+      diagnostic: SketchSolveDiagnostic | null;
+    } {
   const seeded = seedSolveValuesFromSnapshot(
     input.program,
     input.priorSolvedSnapshot,
@@ -7850,22 +7901,22 @@ export function createCompiledSketchSolveSession(input: {
         diagnostic.code === "offset-arc-common-circle-unsatisfied",
     );
     if (commonCircleDiagnostic) {
-      throw new Error(
-        `Cannot initialize ${input.sessionId} without a valid common-circle snapshot: ${commonCircleDiagnostic.message}`,
-      );
+      return {
+        kind: "unacceptable",
+        commonCircle: true,
+        diagnostic: commonCircleDiagnostic,
+      };
     }
-    const errorDiagnostic = solved.diagnostics.find(
-      (diagnostic) => diagnostic.severity === "error",
-    );
-    throw new Error(
-      `Cannot initialize ${input.sessionId} without an acceptable solved snapshot${
-        errorDiagnostic
-          ? `: ${errorDiagnostic.code}: ${errorDiagnostic.message}`
-          : "."
-      }`,
-    );
+    return {
+      kind: "unacceptable",
+      commonCircle: false,
+      diagnostic:
+        solved.diagnostics.find(
+          (diagnostic) => diagnostic.severity === "error",
+        ) ?? null,
+    };
   }
-  return {
+  const session: SketchCompiledSolveSession = {
     sessionId: input.sessionId,
     program: input.program,
     values: cloneValues(
@@ -7877,6 +7928,7 @@ export function createCompiledSketchSolveSession(input: {
     disposed: false,
     warmStarted: seeded.warmStarted,
   };
+  return { kind: "started", session };
 }
 
 // Drag solution selection policy (see openspec/changes/minimum-motion-sketch-drag):

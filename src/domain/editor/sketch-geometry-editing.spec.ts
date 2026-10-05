@@ -1514,6 +1514,83 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     ).toBe(null);
   }
 
+  function testDragOnNonAcceptableSketchDoesNotThrow() {
+    // B14: starting a drag on a sketch whose solve is not acceptable must
+    // not throw. The drag does not start, the definition is unchanged and
+    // the reason is reported instead.
+    const definition: SketchDefinition = {
+      ...makeDefinition({
+        pointIds: ["sketch_point_center", "sketch_point_a", "sketch_point_b"],
+        points: [
+          makePoint("sketch_point_center", "Center", 0, 0),
+          makePoint("sketch_point_a", "A", 1, 0),
+          makePoint("sketch_point_b", "B", 0, 1),
+        ],
+        entityIds: ["sketch_entity_line"],
+        entities: [
+          makeLine(
+            "sketch_entity_line",
+            "Line",
+            "sketch_point_a",
+            "sketch_point_b",
+          ),
+        ],
+      }),
+      constraintIds: ["constraint_fix_a", "constraint_fix_b"],
+      constraints: [
+        {
+          constraintId: "constraint_fix_a",
+          kind: "fixPoint",
+          label: "Fix A",
+          pointId: "sketch_point_a",
+          position: [1, 0],
+        },
+        {
+          constraintId: "constraint_fix_b",
+          kind: "fixPoint",
+          label: "Fix B",
+          pointId: "sketch_point_b",
+          position: [0, 1],
+        },
+      ],
+      dimensionIds: ["dimension_conflicting"],
+      dimensions: [
+        {
+          dimensionId: "dimension_conflicting",
+          kind: "lineLength",
+          label: "Impossible length",
+          entityId: "sketch_entity_line",
+          value: 100,
+        },
+      ],
+    };
+    const session = createSessionFromDefinition(definition);
+    // Confirm the solve is not acceptable (conflicting constraints).
+    expect(
+      session.solvedSnapshot?.status.solveState === "solved" ||
+        session.solvedSnapshot?.status.solveState === "notEvaluated",
+      "Fixture must produce a non-acceptable solve (partiallySolved or failed).",
+    ).toBe(false);
+
+    const target = session.definition.points.find(
+      (point) => point.pointId === "sketch_point_a",
+    )?.target;
+    expect(target, "Expected point A.").toBeTruthy();
+
+    // B14: this must not throw.
+    const afterDrag = beginSketchGeometryDrag(session, target, [1, 0]);
+
+    // The drag should not have started (no interactive session).
+    expect(
+      afterDrag.activeDrag,
+      "Starting a drag on a non-acceptable sketch must not throw; it should return the session without an active drag.",
+    ).toBe(null);
+    expect(afterDrag.definition).toBe(session.definition);
+    expect(afterDrag.validationMessage).toMatch(
+      /^Geometry can't be dragged until the sketch solves/,
+    );
+  }
+
   function testSelectedEntityDeletionRemovesDependentAnnotations() {
     const session = createSessionFromDefinition({
       ...makeDefinition({
@@ -3703,6 +3780,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     }
   }
 
+  testDragOnNonAcceptableSketchDoesNotThrow();
   testUnconstrainedPointDragUpdatesAuthoredDefinition();
   testConstrainedSquareDragTranslatesSolvedShape();
   testLogoLikeFreeEndpointDragClearsValidationFeedback();

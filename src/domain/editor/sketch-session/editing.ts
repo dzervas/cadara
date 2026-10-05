@@ -11,7 +11,7 @@ import type {
 } from "@/contracts/sketch/schema";
 import {
   compileSketchSolveProgram,
-  createCompiledSketchSolveSession,
+  startCompiledSketchSolveSession,
   sketchDraggedPointHasFreeDof,
   solveSketchDefinitionWithDraggedPointTarget,
   updateCompiledSketchSolveSession,
@@ -1892,6 +1892,20 @@ export function beginSketchGeometryDrag(
     return session;
   }
 
+  // B14: a sketch whose requirements are not acceptable has no drag
+  // session; the drag does not start and the reason is shown instead.
+  const started = startInteractiveSolveSessionForDrag(
+    selected.definition,
+    selected.projectedReferences,
+    selected.solverTolerances,
+    getSketchSessionDerivationSettings(selected),
+    target.pointId,
+  );
+  if (started.kind === "unacceptable") {
+    return { ...session, validationMessage: started.message };
+  }
+  const interactiveSolveSession = started.session;
+
   return {
     ...selected,
     activeTool: null,
@@ -1913,13 +1927,7 @@ export function beginSketchGeometryDrag(
       currentPoint: point,
       status: "dragging",
       message: null,
-      interactiveSolveSession: createInteractiveSolveSessionForDrag(
-        selected.definition,
-        selected.projectedReferences,
-        selected.solverTolerances,
-        getSketchSessionDerivationSettings(selected),
-        target.pointId,
-      ),
+      interactiveSolveSession,
     },
     validationMessage: null,
   };
@@ -2061,15 +2069,20 @@ export function solveDraggedPointEdit(
     };
   }
 
-  const solveSession =
-    interactiveSolveSession ??
-    createInteractiveSolveSessionForDrag(
+  let solveSession = interactiveSolveSession;
+  if (!solveSession) {
+    const started = startInteractiveSolveSessionForDrag(
       definition,
       projectedReferences,
       tolerances,
       derivation,
       pointId,
     );
+    if (started.kind === "unacceptable") {
+      return { kind: "blocked", message: started.message };
+    }
+    solveSession = started.session;
+  }
   const solved = solveSession
     ? updateCompiledSketchSolveSession(
         solveSession,
@@ -2145,29 +2158,38 @@ export function solveDraggedPointEdit(
   };
 }
 
-function createInteractiveSolveSessionForDrag(
+function startInteractiveSolveSessionForDrag(
   definition: SketchDefinition,
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
   tolerances: SolverTolerancePolicy,
   derivation: SketchDerivationSettings,
   pointId: SketchPointId,
-): SketchCompiledSolveSession | null {
+):
+  | { kind: "started"; session: SketchCompiledSolveSession | null }
+  | { kind: "unacceptable"; message: string } {
   if (
     !definition.points.some((point) => point.pointId === pointId) ||
     (definition.constraints.length === 0 && definition.dimensions.length === 0)
   ) {
-    return null;
+    return { kind: "started", session: null };
   }
 
-  const program = compileSketchSolveProgram({
-    definition,
-    projectedReferences,
-    tolerances,
-    ...derivation,
-    partialSolvePolicy: "failOnConflict",
-  });
-  return createCompiledSketchSolveSession({
+  const started = startCompiledSketchSolveSession({
     sessionId: `interactive_sketch_solve_drag_${pointId}`,
-    program,
+    program: compileSketchSolveProgram({
+      definition,
+      projectedReferences,
+      tolerances,
+      ...derivation,
+      partialSolvePolicy: "failOnConflict",
+    }),
   });
+  return started.kind === "started"
+    ? started
+    : {
+        kind: "unacceptable",
+        message: `Geometry can't be dragged until the sketch solves${
+          started.diagnostic ? `: ${started.diagnostic.message}` : "."
+        }`,
+      };
 }
