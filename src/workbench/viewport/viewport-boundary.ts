@@ -82,6 +82,7 @@ export type ViewportIntent =
     }
   | { type: "sketchGeometryDragMoved"; point: readonly [number, number] }
   | { type: "sketchGeometryDragEnded"; point: readonly [number, number] }
+  | { type: "sketchGeometryDragCancelled" }
   | {
       type: "specialModeClicked";
       point: readonly [number, number];

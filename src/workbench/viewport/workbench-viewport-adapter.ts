@@ -208,6 +208,9 @@ export function createWorkbenchViewportIntentHandler({
       case "sketchGeometryDragEnded":
         onSketchGeometryDragEnd(intent.point);
         return;
+      case "sketchGeometryDragCancelled":
+        dispatch({ type: "sketch.geometryDragCancelled" });
+        return;
       case "specialModeClicked":
         onSpecialModeClick(intent.point, intent.target);
         return;

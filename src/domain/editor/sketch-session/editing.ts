@@ -6,6 +6,7 @@ import type {
   SketchPointId,
 } from "@/contracts/shared/ids";
 import {
+  resolveHandleFromTarget,
   resolveSketchDragIntent,
   type SketchDragHandle,
   type SketchDragIntent,
@@ -1903,9 +1904,9 @@ export function beginSketchGeometryDrag(
     return session;
   }
 
-  // Resolve the handle from the explicit parameter or from the PrimitiveRef.
+  // Resolve the handle from the explicit parameter or from the PrimitiveRef + definition.
   const handle: SketchDragHandle | null =
-    explicitHandle ?? resolveHandleFromTarget(target);
+    explicitHandle ?? resolveHandleFromTarget(session.definition, target);
   if (!handle) {
     return session;
   }
@@ -1955,22 +1956,7 @@ export function beginSketchGeometryDrag(
   );
 }
 
-/**
- * Resolve a PrimitiveRef into a SketchDragHandle. Returns null for
- * non-draggable targets. The viewport (T12c) will resolve body/centre/rim/
- * tangent handles; this function handles what the PrimitiveRef carries.
- */
-function resolveHandleFromTarget(
-  target: PrimitiveRef,
-): SketchDragHandle | null {
-  if (target.kind === "sketchPoint") {
-    return { kind: "point", pointId: target.pointId };
-  }
-  if (target.kind === "sketchEntity") {
-    return { kind: "entityBody", entityId: target.entityId };
-  }
-  return null;
-}
+// D10 handle resolution is now exported from drag-intent.ts.
 
 /**
  * Convert an automatic tangent to authored using the visible (mean-arm)

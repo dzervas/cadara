@@ -463,6 +463,15 @@ export interface SketchGeometryDragEndedEvent {
   point: readonly [number, number];
 }
 
+/**
+ * Cancels the active sketch geometry drag, restoring the pre-drag state
+ * with no history entry. Dispatched by Escape, pointercancel, lost pointer
+ * capture, tool switch, and Finish while a drag is active (D2).
+ */
+export interface SketchGeometryDragCancelledEvent {
+  type: "sketch.geometryDragCancelled";
+}
+
 /** Applies a generic active sketch-tool draft patch emitted by declarative controls. */
 export interface SketchToolPatchedEvent {
   type: "sketch.toolPatched";
@@ -653,6 +662,7 @@ export type EditorEvent =
   | SketchGeometryDragStartedEvent
   | SketchGeometryDragMovedEvent
   | SketchGeometryDragEndedEvent
+  | SketchGeometryDragCancelledEvent
   | SketchToolPatchedEvent
   | SketchActiveToolClearedEvent
   | SketchEscapeRequestedEvent

@@ -4,6 +4,7 @@ import { isRegisteredSketchEditToolId } from "@/core/sketch-edit-tools/registry"
 import {
   adoptCompatibleSketchEditToolTargets,
   beginSketchTool,
+  cancelSketchGeometryDrag,
   focusSketchStyleTool,
   getSketchSessionPreviewLabel,
   isSketchSvgRenderingEnabled,
@@ -47,6 +48,7 @@ import {
   handleSketchGeometryDragStarted,
   handleSketchGeometryDragMoved,
   handleSketchGeometryDragEnded,
+  handleSketchGeometryDragCancelled,
   handleSketchReferenceImagePayloadsPicked,
   handleSketchSpecialModeEntered,
   handleSketchSpecialModePanelActionInvoked,
@@ -77,6 +79,12 @@ function handleEditingSketchToolActivation(
   state: SketchEditorState,
   event: Extract<SketchEvent, { type: "tool.activated" }>,
 ): EditorTransitionResult | null {
+  // Cancel an active drag before any tool switch or Finish (D2).
+  if (state.session.activeDrag) {
+    const session = cancelSketchGeometryDrag(state.session);
+    return handleEditingSketchToolActivation({ ...state, session }, event);
+  }
+
   if (event.toolId === "finishSketch") {
     return emitSketchCommit(state);
   }
@@ -271,6 +279,8 @@ export function reduceSketchWorkflow(
       return handleSketchGeometryDragMoved(state, event, dependencies);
     case "sketch.geometryDragEnded":
       return handleSketchGeometryDragEnded(state, event);
+    case "sketch.geometryDragCancelled":
+      return handleSketchGeometryDragCancelled(state);
     case "sketch.referenceImagePayloadsPicked":
       return handleSketchReferenceImagePayloadsPicked(
         state,

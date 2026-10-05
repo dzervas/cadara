@@ -3,8 +3,11 @@ import { test, expect } from "vitest";
 import {
   cancelCoalescedSketchGeometryDragMove,
   getViewportPickTuning,
+  isSketchDragHoverTarget,
   isSketchFitPointDraftActive,
   isViewportNavigationPointerMove,
+  resolveSketchDragGesture,
+  SKETCH_DRAG_THRESHOLD_PX,
   WORKSPACE_SCAFFOLD_RENDER_ORDER,
   configureWorkspaceScaffoldWireObject,
   createRenderIdleTracker,
@@ -16,7 +19,12 @@ import {
   resolveSketchFitPointRelease,
   resizeViewCubeRenderer,
   scheduleCoalescedSketchGeometryDragMove,
+  type SketchDragGesturePhase,
 } from "@/components/cad/three-cad-viewport-helpers";
+import { resolveSketchDragTarget } from "@/domain/editor/workbench-interactions";
+import { resolveHandleFromTarget } from "@/domain/editor/sketch-session/drag-intent";
+import type { PrimitiveRef } from "@/core/editor/schema";
+import type { SketchDefinition } from "@/contracts/sketch/schema";
 import {
   requestViewCubeCameraTransition,
   resolveSketchCameraTransition,
@@ -894,4 +902,600 @@ test("a spline double-click's second release is not dispatched; dblclick finaliz
       `dblclick keeps its other behaviour for ${JSON.stringify(session)}.`,
     ).toBe(false);
   }
+});
+
+// ---------------------------------------------------------------------------
+// T12c R-4: sketch drag gesture helpers (viewport seam)
+// ---------------------------------------------------------------------------
+
+/** Minimal sketch definition for drag resolution tests. */
+function makeDefinition(
+  points: SketchDefinition["points"],
+  entities: SketchDefinition["entities"],
+): SketchDefinition {
+  return {
+    schemaVersion: "sketch-definition/v1alpha2",
+    referenceIds: [],
+    references: [],
+    pointIds: points.map((p) => p.pointId),
+    points,
+    entityIds: entities.map((e) => e.entityId),
+    entities,
+    constraintIds: [],
+    constraints: [],
+    dimensionIds: [],
+    dimensions: [],
+  };
+}
+
+function lineEntity(
+  entityId: string,
+  startPointId: string,
+  endPointId: string,
+): SketchDefinition["entities"][number] {
+  return {
+    kind: "lineSegment",
+    entityId,
+    startPointId,
+    endPointId,
+    construction: false,
+  };
+}
+
+function circleEntity(
+  entityId: string,
+  centerPointId: string,
+): SketchDefinition["entities"][number] {
+  return {
+    kind: "circle",
+    entityId,
+    centerPointId,
+    construction: false,
+  };
+}
+
+function arcEntity(
+  entityId: string,
+  centerPointId: string,
+  startPointId: string,
+  endPointId: string,
+): SketchDefinition["entities"][number] {
+  return {
+    kind: "arc",
+    entityId,
+    centerPointId,
+    startPointId,
+    endPointId,
+    construction: false,
+  };
+}
+
+function splineEntity(
+  entityId: string,
+  pointIds: string[],
+): SketchDefinition["entities"][number] {
+  return {
+    kind: "spline",
+    entityId,
+    startPointId: pointIds[0]!,
+    endPointId: pointIds[pointIds.length - 1]!,
+    pointOccurrences: pointIds.map((pointId, i) => ({
+      occurrenceId: `occ_${i}`,
+      pointId,
+      tangent: null,
+    })),
+    periodic: false,
+    construction: false,
+  };
+}
+
+function point(pointId: string): SketchDefinition["points"][number] {
+  return { pointId, x: 0, y: 0 };
+}
+
+function makePending(
+  target: PrimitiveRef,
+  startPoint: readonly [number, number] = [5, 5],
+  pointerDown: { x: number; y: number } = { x: 100, y: 100 },
+): SketchDragGesturePhase & { kind: "pending" } {
+  return { kind: "pending", target, startPoint, pointerDown };
+}
+
+function makeActive(
+  target: PrimitiveRef,
+  pointerId = 1,
+): SketchDragGesturePhase & { kind: "active" } {
+  return { kind: "active", target, pointerId };
+}
+
+const sketchPointRef = (pointId: string): PrimitiveRef => ({
+  kind: "sketchPoint",
+  sketchId: "sketch_1",
+  pointId,
+});
+const sketchEntityRef = (entityId: string): PrimitiveRef => ({
+  kind: "sketchEntity",
+  sketchId: "sketch_1",
+  entityId,
+});
+
+// -- Press kind → handle (through the same path the component uses) ---------
+
+test("T12c R-4: each press kind produces the expected handle through the viewport path", () => {
+  const def = makeDefinition(
+    [
+      point("p1"),
+      point("p2"),
+      point("p3"),
+      point("p4"),
+      point("p5"),
+      point("p6"),
+      point("p7"),
+    ],
+    [
+      lineEntity("line_1", "p1", "p2"),
+      circleEntity("circle_1", "p3"),
+      arcEntity("arc_1", "p4", "p5", "p6"),
+      splineEntity("spline_1", ["p1", "p7", "p2"]),
+    ],
+  );
+
+  // Line body → entityBody
+  const lineTarget = resolveSketchDragTarget(
+    [{ target: sketchEntityRef("line_1") }],
+    [],
+    def,
+  );
+  expect(lineTarget, "Line body should resolve a drag target.").not.toBe(null);
+  expect(
+    resolveHandleFromTarget(def, lineTarget!),
+    "Line body press should produce entityBody handle.",
+  ).toEqual({ kind: "entityBody", entityId: "line_1" });
+
+  // Circle rim → rim
+  const circleRimTarget = resolveSketchDragTarget(
+    [{ target: sketchEntityRef("circle_1") }],
+    [],
+    def,
+  );
+  expect(
+    resolveHandleFromTarget(def, circleRimTarget!),
+    "Circle rim press should produce rim handle.",
+  ).toEqual({ kind: "rim", entityId: "circle_1" });
+
+  // Circle centre → center (exclusive centre of one circle)
+  const circleCentreTarget = resolveSketchDragTarget(
+    [{ target: sketchPointRef("p3") }],
+    [],
+    def,
+  );
+  expect(
+    resolveHandleFromTarget(def, circleCentreTarget!),
+    "Circle centre press should produce center handle.",
+  ).toEqual({ kind: "center", entityId: "circle_1" });
+
+  // Arc centre → center (exclusive centre of one arc)
+  const arcCentreTarget = resolveSketchDragTarget(
+    [{ target: sketchPointRef("p4") }],
+    [],
+    def,
+  );
+  expect(
+    resolveHandleFromTarget(def, arcCentreTarget!),
+    "Arc centre press should produce center handle.",
+  ).toEqual({ kind: "center", entityId: "arc_1" });
+
+  // Spline body → entityBody
+  const splineTarget = resolveSketchDragTarget(
+    [{ target: sketchEntityRef("spline_1") }],
+    [],
+    def,
+  );
+  expect(
+    resolveHandleFromTarget(def, splineTarget!),
+    "Spline body press should produce entityBody handle.",
+  ).toEqual({ kind: "entityBody", entityId: "spline_1" });
+
+  // Fit point (spline point) → point
+  const fitPointTarget = resolveSketchDragTarget(
+    [{ target: sketchPointRef("p7") }],
+    [],
+    def,
+  );
+  expect(
+    resolveHandleFromTarget(def, fitPointTarget!),
+    "Spline fit point press should produce point handle.",
+  ).toEqual({ kind: "point", pointId: "p7" });
+
+  // Plain sketch point → point
+  const plainPointTarget = resolveSketchDragTarget(
+    [{ target: sketchPointRef("p1") }],
+    [],
+    def,
+  );
+  expect(
+    resolveHandleFromTarget(def, plainPointTarget!),
+    "Plain sketch point press should produce point handle.",
+  ).toEqual({ kind: "point", pointId: "p1" });
+});
+
+// -- D9 presses start nothing -----------------------------------------------
+
+test("T12c R-4: D9 presses produce no drag target", () => {
+  const def = makeDefinition([], []);
+  const d9Targets: PrimitiveRef[] = [
+    { kind: "feature", featureId: "f1" },
+    { kind: "body", bodyId: "b1" },
+    { kind: "face", bodyId: "b1", faceId: "f1" },
+    { kind: "edge", bodyId: "b1", edgeId: "e1" },
+    { kind: "vertex", bodyId: "b1", vertexId: "v1" },
+  ];
+  for (const target of d9Targets) {
+    expect(
+      resolveSketchDragTarget([{ target }], [], def),
+      `D9 target ${target.kind} should not produce a drag target.`,
+    ).toBe(null);
+  }
+});
+
+// -- Hover cursor (grab / no grab) ------------------------------------------
+
+test("T12c R-4: grab cursor on draggable hover, cleared otherwise", () => {
+  const def = makeDefinition(
+    [point("p1"), point("p2")],
+    [lineEntity("line_1", "p1", "p2")],
+  );
+  const idleSession = { activeTool: null, status: "idle" as const };
+  const drawingSession = {
+    activeTool: "line" as const,
+    status: "drawing" as const,
+  };
+  const specialSession = {
+    activeTool: null,
+    status: "idle" as const,
+    activeSpecialMode: { kind: "reference-picker" },
+  };
+
+  expect(
+    isSketchDragHoverTarget(idleSession, sketchEntityRef("line_1"), def),
+    "Hovering a draggable entity in idle mode should produce grab cursor.",
+  ).toBe(true);
+
+  expect(
+    isSketchDragHoverTarget(idleSession, sketchPointRef("p1"), def),
+    "Hovering a draggable point in idle mode should produce grab cursor.",
+  ).toBe(true);
+
+  expect(
+    isSketchDragHoverTarget(
+      idleSession,
+      { kind: "feature", featureId: "f" },
+      def,
+    ),
+    "Hovering a non-sketch target should not produce grab cursor.",
+  ).toBe(false);
+
+  expect(
+    isSketchDragHoverTarget(drawingSession, sketchEntityRef("line_1"), def),
+    "Hovering while drawing should not produce grab cursor.",
+  ).toBe(false);
+
+  expect(
+    isSketchDragHoverTarget(specialSession, sketchEntityRef("line_1"), def),
+    "Hovering in a special mode should not produce grab cursor.",
+  ).toBe(false);
+
+  expect(
+    isSketchDragHoverTarget(null, sketchEntityRef("line_1"), def),
+    "Hovering with no session should not produce grab cursor.",
+  ).toBe(false);
+
+  expect(
+    isSketchDragHoverTarget(idleSession, null, def),
+    "Hovering with no target should not produce grab cursor.",
+  ).toBe(false);
+});
+
+// -- Gesture reducer: threshold → drag start, capture, grabbing cursor ------
+
+test("T12c R-4: pointer move crosses threshold → drag start with capture and grabbing cursor", () => {
+  const target = sketchPointRef("p1");
+  const pending = makePending(target, [5, 5], { x: 100, y: 100 });
+
+  // Under threshold: not consumed, no actions.
+  const underResult = resolveSketchDragGesture(pending, {
+    kind: "pointerMove",
+    clientX: 103,
+    clientY: 103,
+    pointerId: 1,
+    sketchPoint: [5.1, 5.1],
+  });
+  expect(
+    underResult.consumed,
+    "Under-threshold move should not be consumed.",
+  ).toBe(false);
+  expect(
+    underResult.startDrag,
+    "Under-threshold move should not start a drag.",
+  ).toBe(null);
+  expect(
+    underResult.phase.kind,
+    "Under-threshold move should keep the pending phase.",
+  ).toBe("pending");
+
+  // Over threshold: start drag.
+  const dx = SKETCH_DRAG_THRESHOLD_PX + 1;
+  const overResult = resolveSketchDragGesture(pending, {
+    kind: "pointerMove",
+    clientX: 100 + dx,
+    clientY: 100,
+    pointerId: 1,
+    sketchPoint: [8, 5],
+  });
+  expect(overResult.consumed, "Over-threshold move should be consumed.").toBe(
+    true,
+  );
+  expect(
+    overResult.phase.kind,
+    "Over-threshold move should transition to active.",
+  ).toBe("active");
+  expect(
+    overResult.startDrag,
+    "Drag start should carry the pending target and startPoint.",
+  ).toEqual({ target, startPoint: [5, 5] });
+  expect(
+    overResult.requestCapture,
+    "Capture should be requested at drag start.",
+  ).toBe(1);
+  expect(overResult.cursor, "Cursor should be grabbing at drag start.").toBe(
+    "grabbing",
+  );
+  expect(
+    overResult.preventDefault,
+    "Drag start should call preventDefault.",
+  ).toBe(true);
+  expect(
+    overResult.scheduleDragMove,
+    "Drag start should schedule the initial move.",
+  ).toEqual([8, 5]);
+});
+
+// -- Gesture reducer: active drag move → grabbing cursor --------------------
+
+test("T12c R-4: active drag move sets grabbing cursor and schedules move", () => {
+  const active = makeActive(sketchPointRef("p1"));
+  const result = resolveSketchDragGesture(active, {
+    kind: "pointerMove",
+    clientX: 200,
+    clientY: 200,
+    pointerId: 1,
+    sketchPoint: [10, 10],
+  });
+  expect(result.consumed, "Active drag move should be consumed.").toBe(true);
+  expect(result.cursor, "Active drag should keep grabbing cursor.").toBe(
+    "grabbing",
+  );
+  expect(
+    result.scheduleDragMove,
+    "Active drag should schedule the move point.",
+  ).toEqual([10, 10]);
+  expect(result.phase.kind, "Active drag should stay in active phase.").toBe(
+    "active",
+  );
+});
+
+// -- Gesture reducer: active drag pointer-up → end, release, reset cursor ---
+
+test("T12c R-4: active drag pointer-up ends drag, releases capture, resets cursor", () => {
+  const active = makeActive(sketchPointRef("p1"), 42);
+  const result = resolveSketchDragGesture(active, {
+    kind: "pointerUp",
+    clientX: 200,
+    clientY: 200,
+    sketchPoint: [10, 10],
+  });
+  expect(result.phase.kind, "Drag end should transition to idle.").toBe("idle");
+  expect(result.endDrag, "Drag end should dispatch end point.").toEqual([
+    10, 10,
+  ]);
+  expect(result.releaseCapture, "Drag end should release capture.").toBe(42);
+  expect(result.cursor, "Drag end should reset cursor.").toBe("");
+  expect(result.consumed, "Drag end is consumed (no click dispatch).").toBe(
+    true,
+  );
+  expect(
+    result.cancelDragMove,
+    "Drag end should cancel pending coalesced moves.",
+  ).toBe(true);
+});
+
+// -- Gesture reducer: sub-threshold pointer-up → click ----------------------
+
+test("T12c R-4: sub-threshold press-release is a click (not consumed)", () => {
+  const target = sketchEntityRef("line_1");
+  const pending = makePending(target, [5, 5], { x: 100, y: 100 });
+  const result = resolveSketchDragGesture(pending, {
+    kind: "pointerUp",
+    clientX: 102,
+    clientY: 102,
+    sketchPoint: [5.1, 5.1],
+  });
+  expect(
+    result.consumed,
+    "Sub-threshold release should not be consumed (it is a click).",
+  ).toBe(false);
+  expect(
+    result.phase.kind,
+    "Sub-threshold release should transition to idle.",
+  ).toBe("idle");
+  expect(
+    result.startDrag,
+    "Sub-threshold release should not start a drag.",
+  ).toBe(null);
+  expect(result.endDrag, "Sub-threshold release should not end a drag.").toBe(
+    null,
+  );
+});
+
+// -- Gesture reducer: pointercancel and lostpointercapture cancel -----------
+
+test("T12c R-4: pointercancel cancels active drag with capture release", () => {
+  const active = makeActive(sketchPointRef("p1"), 7);
+  const result = resolveSketchDragGesture(active, { kind: "pointerCancel" });
+  expect(result.phase.kind, "pointercancel should transition to idle.").toBe(
+    "idle",
+  );
+  expect(result.cancelDrag, "pointercancel should dispatch cancel.").toBe(true);
+  expect(result.releaseCapture, "pointercancel should release capture.").toBe(
+    7,
+  );
+  expect(result.cursor, "pointercancel should reset cursor.").toBe("");
+});
+
+test("T12c R-4: lostpointercapture cancels drag without re-releasing capture", () => {
+  const active = makeActive(sketchPointRef("p1"), 7);
+  const result = resolveSketchDragGesture(active, {
+    kind: "lostPointerCapture",
+  });
+  expect(
+    result.phase.kind,
+    "lostpointercapture should transition to idle.",
+  ).toBe("idle");
+  expect(result.cancelDrag, "lostpointercapture should dispatch cancel.").toBe(
+    true,
+  );
+  expect(
+    result.releaseCapture,
+    "lostpointercapture should NOT re-release capture.",
+  ).toBe(null);
+  expect(result.cursor, "lostpointercapture should reset cursor.").toBe("");
+});
+
+test("T12c R-4: own release does not double-cancel (idle phase at lostpointercapture)", () => {
+  // After the component ends a drag, it clears phase to idle BEFORE calling
+  // releasePointerCapture. The synchronous lostpointercapture sees idle.
+  const idle: SketchDragGesturePhase = { kind: "idle" };
+  const result = resolveSketchDragGesture(idle, {
+    kind: "lostPointerCapture",
+  });
+  expect(
+    result.cancelDrag,
+    "Idle phase at lostpointercapture should not dispatch cancel.",
+  ).toBe(false);
+  expect(result.phase.kind, "Idle phase should remain idle.").toBe("idle");
+});
+
+// -- Gesture reducer: pointercancel clears stale pending --------------------
+
+test("T12c R-4: pointercancel clears a stale pending gesture", () => {
+  const pending = makePending(sketchPointRef("p1"));
+  const result = resolveSketchDragGesture(pending, { kind: "pointerCancel" });
+  expect(result.phase.kind, "pointercancel should clear pending to idle.").toBe(
+    "idle",
+  );
+  expect(
+    result.cancelDrag,
+    "Pending pointercancel should not dispatch cancel (no drag was active).",
+  ).toBe(false);
+});
+
+// -- Gesture reducer: right button cancels ----------------------------------
+
+test("T12c R-4: right button during active drag cancels with release", () => {
+  const active = makeActive(sketchEntityRef("line_1"), 3);
+  const result = resolveSketchDragGesture(active, { kind: "rightButton" });
+  expect(result.phase.kind).toBe("idle");
+  expect(result.cancelDrag).toBe(true);
+  expect(result.releaseCapture).toBe(3);
+  expect(result.cursor).toBe("");
+});
+
+// -- Gesture reducer: drag release dispatches no click ----------------------
+
+test("T12c R-4: drag release is consumed (no click dispatched)", () => {
+  const active = makeActive(sketchPointRef("p1"), 1);
+  const endResult = resolveSketchDragGesture(active, {
+    kind: "pointerUp",
+    clientX: 200,
+    clientY: 200,
+    sketchPoint: [10, 10],
+  });
+  expect(
+    endResult.consumed,
+    "A drag release must be consumed so no click is dispatched.",
+  ).toBe(true);
+
+  // Fast drag (pending + over threshold pointer-up) is also consumed.
+  const pending = makePending(sketchPointRef("p1"), [5, 5], {
+    x: 100,
+    y: 100,
+  });
+  const fastResult = resolveSketchDragGesture(pending, {
+    kind: "pointerUp",
+    clientX: 200,
+    clientY: 100,
+    sketchPoint: [15, 5],
+  });
+  expect(
+    fastResult.consumed,
+    "A fast drag release must be consumed so no click is dispatched.",
+  ).toBe(true);
+  expect(fastResult.startDrag, "Fast drag should dispatch start.").not.toBe(
+    null,
+  );
+  expect(fastResult.endDrag, "Fast drag should dispatch end.").toEqual([15, 5]);
+});
+
+// -- D3: cycle-then-drag drags the selected covered entry -------------------
+
+test("T12c R-4: cycle-then-drag drags the selected covered entry (D3)", () => {
+  const def = makeDefinition(
+    [point("p1"), point("p2"), point("p3"), point("p4")],
+    [lineEntity("line_1", "p1", "p2"), lineEntity("line_2", "p3", "p4")],
+  );
+  const stack = [
+    { target: sketchEntityRef("line_1") },
+    { target: sketchEntityRef("line_2") },
+  ];
+  // After cycling, line_2 is selected. D3 should drag line_2, not line_1.
+  const selection: PrimitiveRef[] = [sketchEntityRef("line_2")];
+  const dragTarget = resolveSketchDragTarget(stack, selection, def);
+  expect(dragTarget, "D3 should pick the selected covered entry.").toEqual(
+    sketchEntityRef("line_2"),
+  );
+
+  // Then the gesture proceeds through the reducer.
+  const pending = makePending(dragTarget!, [5, 5], { x: 100, y: 100 });
+  const dx = SKETCH_DRAG_THRESHOLD_PX + 1;
+  const actions = resolveSketchDragGesture(pending, {
+    kind: "pointerMove",
+    clientX: 100 + dx,
+    clientY: 100,
+    pointerId: 1,
+    sketchPoint: [8, 5],
+  });
+  expect(
+    actions.startDrag?.target,
+    "The drag should start on the selected covered entry.",
+  ).toEqual(sketchEntityRef("line_2"));
+});
+
+// -- Grab offset: startPoint flows through the gesture ----------------------
+
+test("T12c R-4: drag start preserves the pointer-down startPoint (grab offset)", () => {
+  const target = sketchPointRef("p1");
+  const pendingStartPoint: readonly [number, number] = [3.14, 2.72];
+  const pending = makePending(target, pendingStartPoint, { x: 50, y: 50 });
+  const dx = SKETCH_DRAG_THRESHOLD_PX + 1;
+  const actions = resolveSketchDragGesture(pending, {
+    kind: "pointerMove",
+    clientX: 50 + dx,
+    clientY: 50,
+    pointerId: 1,
+    sketchPoint: [10, 2.72],
+  });
+  expect(
+    actions.startDrag?.startPoint,
+    "The drag start must carry the pointer-down projected point, not the target position.",
+  ).toEqual([3.14, 2.72]);
 });

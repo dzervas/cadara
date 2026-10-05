@@ -123,6 +123,7 @@ import type { SketchDefinition } from "@/contracts/sketch/schema";
 import { createViewportCameraTransitionController } from "@/infrastructure/viewport/viewport-camera-transition";
 import {
   getViewportCanvasClickIntent,
+  resolveSketchDragTarget,
   shouldViewportClickEventRequestConnectedSketchSelection,
   shouldViewportDoubleClickRequestConnectedSketchSelection,
   shouldViewportStartSketchGeometryDrag,
@@ -173,14 +174,19 @@ import {
   createViewportInvalidationKey,
   createViewportBvhSceneKey,
   getViewportPickTuning,
+  isSketchDragHoverTarget,
   isSketchFitPointDraftActive,
   isViewportNavigationPointerMove,
   projectWorldPointToViewport,
   projectSceneTargetCentroidToViewport,
+  resolveSketchDragGesture,
+  SKETCH_DRAG_THRESHOLD_PX,
   resolveSectionScreenDragOffset,
   resolveSketchFitPointRelease,
   resizeViewCubeRenderer,
   scheduleCoalescedSketchGeometryDragMove,
+  type SketchDragGestureActions,
+  type SketchDragGesturePhase,
 } from "@/components/cad/three-cad-viewport-helpers";
 
 /** The sketch pick stack at one pointer position, with each entry's class. */
@@ -302,6 +308,10 @@ export function ThreeCadViewport({
       onIntent({ type: "sketchGeometryDragEnded", point }),
     [onIntent],
   );
+  const onSketchGeometryDragCancel = useCallback(
+    () => onIntent({ type: "sketchGeometryDragCancelled" }),
+    [onIntent],
+  );
   const onSpecialModeClick = useCallback(
     (point: readonly [number, number], target?: PrimitiveRef | null) =>
       onIntent({ type: "specialModeClicked", point, target }),
@@ -383,6 +393,7 @@ export function ThreeCadViewport({
   const sketchHitPointRef = useRef(new THREE.Vector3());
   const primaryPointerDownRef = useRef<{ x: number; y: number } | null>(null);
   const sketchGeometryDragRef = useRef<{ target: PrimitiveRef } | null>(null);
+  const sketchGeometryDragPointerIdRef = useRef<number | null>(null);
   const sectionDragRef = useRef<{
     pointerId: number;
     sectionAtDragStart: SectionViewSession;
@@ -520,6 +531,7 @@ export function ThreeCadViewport({
   const sketchGeometryDragStartRef = useRef(onSketchGeometryDragStart);
   const sketchGeometryDragMoveRef = useRef(onSketchGeometryDragMove);
   const sketchGeometryDragEndRef = useRef(onSketchGeometryDragEnd);
+  const sketchGeometryDragCancelRef = useRef(onSketchGeometryDragCancel);
   const specialModeClickRef = useRef(onSpecialModeClick);
   const specialModeDoubleClickRef = useRef(onSpecialModeDoubleClick);
   const specialModeDragStartRef = useRef(onSpecialModeDragStart);
@@ -749,6 +761,7 @@ export function ThreeCadViewport({
     sketchGeometryDragStartRef.current = onSketchGeometryDragStart;
     sketchGeometryDragMoveRef.current = onSketchGeometryDragMove;
     sketchGeometryDragEndRef.current = onSketchGeometryDragEnd;
+    sketchGeometryDragCancelRef.current = onSketchGeometryDragCancel;
     specialModeClickRef.current = onSpecialModeClick;
     specialModeDoubleClickRef.current = onSpecialModeDoubleClick;
     specialModeDragStartRef.current = onSpecialModeDragStart;
@@ -780,6 +793,7 @@ export function ThreeCadViewport({
     onSpecialModeDragEnd,
     onSpecialModeDragMove,
     onSpecialModeDragStart,
+    onSketchGeometryDragCancel,
     onSketchGeometryDragEnd,
     onSketchGeometryDragMove,
     onSketchGeometryDragStart,
@@ -1793,6 +1807,90 @@ export function ThreeCadViewport({
       }
     };
 
+    /** Construct the current sketch drag gesture phase from refs. */
+    const getSketchDragGesturePhase = (): SketchDragGesturePhase => {
+      if (
+        sketchGeometryDragRef.current &&
+        sketchGeometryDragPointerIdRef.current !== null
+      ) {
+        return {
+          kind: "active",
+          target: sketchGeometryDragRef.current.target,
+          pointerId: sketchGeometryDragPointerIdRef.current,
+        };
+      }
+      if (
+        pendingSketchGeometryDragRef.current &&
+        primaryPointerDownRef.current
+      ) {
+        return {
+          kind: "pending",
+          target: pendingSketchGeometryDragRef.current.target,
+          startPoint: pendingSketchGeometryDragRef.current.startPoint,
+          pointerDown: primaryPointerDownRef.current,
+        };
+      }
+      return { kind: "idle" };
+    };
+
+    /** Apply the result of `resolveSketchDragGesture` to DOM and refs. */
+    const applyDragGestureActions = (
+      actions: SketchDragGestureActions,
+      canvas: HTMLElement,
+    ) => {
+      // 1. Apply phase to refs (clear drag state BEFORE release for
+      //    lostpointercapture invariant).
+      switch (actions.phase.kind) {
+        case "idle":
+          sketchGeometryDragRef.current = null;
+          sketchGeometryDragPointerIdRef.current = null;
+          pendingSketchGeometryDragRef.current = null;
+          break;
+        case "active":
+          sketchGeometryDragRef.current = { target: actions.phase.target };
+          sketchGeometryDragPointerIdRef.current = actions.phase.pointerId;
+          pendingSketchGeometryDragRef.current = null;
+          break;
+        case "pending":
+          // Pending is set by pointer-down, not by the reducer.
+          break;
+      }
+      // 2. Cancel pending RAF before any dispatches.
+      if (actions.cancelDragMove) {
+        cancelSketchGeometryDragMove();
+      }
+      // 3. Dispatch cancel, start, move, end.
+      if (actions.cancelDrag) {
+        sketchGeometryDragCancelRef.current();
+      }
+      if (actions.startDrag) {
+        sketchGeometryDragStartRef.current(
+          actions.startDrag.target,
+          actions.startDrag.startPoint,
+        );
+      }
+      if (actions.scheduleDragMove) {
+        scheduleSketchGeometryDragMove(actions.scheduleDragMove);
+      }
+      if (actions.endDrag) {
+        sketchGeometryDragEndRef.current(actions.endDrag);
+      }
+      // 4. Cursor.
+      if (actions.cursor !== null) {
+        canvas.style.cursor = actions.cursor;
+      }
+      // 5. Pointer capture (request first, release last).
+      if (actions.requestCapture !== null) {
+        canvas.setPointerCapture(actions.requestCapture);
+      }
+      if (
+        actions.releaseCapture !== null &&
+        canvas.hasPointerCapture(actions.releaseCapture)
+      ) {
+        canvas.releasePointerCapture(actions.releaseCapture);
+      }
+    };
+
     const handlePointerMove = (event: PointerEvent) => {
       const viewportRect = canvasElement.getBoundingClientRect();
 
@@ -1825,51 +1923,31 @@ export function ThreeCadViewport({
         return;
       }
 
-      if (sketchGeometryDragRef.current) {
-        const point = projectSketchPoint(
-          event.clientX,
-          event.clientY,
-          viewportRect,
-        );
-
-        if (point) {
-          scheduleSketchGeometryDragMove(point);
-        }
-
-        return;
-      }
-
-      const pendingSketchGeometryDrag = pendingSketchGeometryDragRef.current;
-      const pointerDown = primaryPointerDownRef.current;
-
-      if (pendingSketchGeometryDrag && pointerDown) {
-        const dragDistance = Math.hypot(
-          event.clientX - pointerDown.x,
-          event.clientY - pointerDown.y,
-        );
-
-        if (dragDistance > 6) {
-          const point = projectSketchPoint(
+      // Sketch drag gesture: delegate threshold, cursor, and capture
+      // decisions to the extracted reducer.
+      {
+        const gesturePhase = getSketchDragGesturePhase();
+        if (gesturePhase.kind !== "idle") {
+          const sketchPoint = projectSketchPoint(
             event.clientX,
             event.clientY,
             viewportRect,
           );
-
-          if (point) {
-            event.preventDefault();
-            event.stopPropagation();
-            sketchGeometryDragRef.current = {
-              target: pendingSketchGeometryDrag.target,
-            };
-            pendingSketchGeometryDragRef.current = null;
-            sketchGeometryDragStartRef.current(
-              pendingSketchGeometryDrag.target,
-              pendingSketchGeometryDrag.startPoint,
-            );
-            scheduleSketchGeometryDragMove(point);
+          const actions = resolveSketchDragGesture(gesturePhase, {
+            kind: "pointerMove",
+            clientX: event.clientX,
+            clientY: event.clientY,
+            pointerId: event.pointerId,
+            sketchPoint,
+          });
+          applyDragGestureActions(actions, canvasElement);
+          if (actions.consumed) {
+            if (actions.preventDefault) {
+              event.preventDefault();
+              event.stopPropagation();
+            }
+            return;
           }
-
-          return;
         }
       }
 
@@ -1928,6 +2006,20 @@ export function ThreeCadViewport({
       }
 
       const activeSketchSession = sketchSessionRef.current;
+
+      // R-5: show grab cursor when hovering a draggable target and no
+      // non-drawing tool is armed.
+      if (
+        isSketchDragHoverTarget(
+          activeSketchSession,
+          target,
+          pick.sketch?.displayDefinition,
+        )
+      ) {
+        canvasElement.style.cursor = "grab";
+      } else if (canvasElement.style.cursor === "grab") {
+        canvasElement.style.cursor = "";
+      }
 
       if (!activeSketchSession) {
         return;
@@ -2023,19 +2115,18 @@ export function ThreeCadViewport({
         event.clientY,
         viewportRect,
       );
-      const resolvedTarget = getPickTargetFromClientPoint(
+
+      // D3: resolve drag target from pick stack + selection.
+      const pick = resolvePickFromClientPoint(
         event.clientX,
         event.clientY,
         viewportRect,
-      )?.target;
-      const dragTarget =
-        resolvedTarget?.kind === "sketchPoint"
-          ? resolvedTarget
-          : lastPickedTargetRef.current?.kind === "sketchPoint"
-            ? lastPickedTargetRef.current
-            : hoverTargetRef.current?.kind === "sketchPoint"
-              ? hoverTargetRef.current
-              : null;
+      );
+      const definition = pick.sketch?.displayDefinition;
+      const stack = pick.sketch?.stack ?? [];
+      const dragTarget = definition
+        ? resolveSketchDragTarget(stack, selectionRef.current, definition)
+        : null;
 
       if (point && dragTarget) {
         pendingSketchGeometryDragRef.current = {
@@ -2051,14 +2142,15 @@ export function ThreeCadViewport({
       }
 
       if (event.button !== 0) {
-        cancelSketchGeometryDragMove();
+        const gesturePhase = getSketchDragGesturePhase();
+        const actions = resolveSketchDragGesture(gesturePhase, {
+          kind: "rightButton",
+        });
+        applyDragGestureActions(actions, canvasElement);
         primaryPointerDownRef.current = null;
-        sketchGeometryDragRef.current = null;
-        pendingSketchGeometryDragRef.current = null;
         return;
       }
 
-      const activeSketchDrag = sketchGeometryDragRef.current;
       const activeSectionDrag = sectionDragRef.current !== null;
 
       if (activeSectionDrag) {
@@ -2082,23 +2174,26 @@ export function ThreeCadViewport({
         return;
       }
 
-      if (activeSketchDrag) {
-        const viewportRect = canvasElement.getBoundingClientRect();
-        const point = projectSketchPoint(
-          event.clientX,
-          event.clientY,
-          viewportRect,
-        );
-
-        cancelSketchGeometryDragMove();
-        if (point) {
-          sketchGeometryDragEndRef.current(point);
+      // Active drag or pending drag: delegate to the gesture reducer.
+      {
+        const gesturePhase = getSketchDragGesturePhase();
+        if (gesturePhase.kind === "active") {
+          const viewportRect = canvasElement.getBoundingClientRect();
+          const sketchPoint = projectSketchPoint(
+            event.clientX,
+            event.clientY,
+            viewportRect,
+          );
+          const actions = resolveSketchDragGesture(gesturePhase, {
+            kind: "pointerUp",
+            clientX: event.clientX,
+            clientY: event.clientY,
+            sketchPoint,
+          });
+          applyDragGestureActions(actions, canvasElement);
+          primaryPointerDownRef.current = null;
+          return;
         }
-
-        sketchGeometryDragRef.current = null;
-        primaryPointerDownRef.current = null;
-        pendingSketchGeometryDragRef.current = null;
-        return;
       }
 
       const pointerDown = primaryPointerDownRef.current;
@@ -2108,36 +2203,45 @@ export function ThreeCadViewport({
         return;
       }
 
+      // Check pending drag release (fast drag vs click).
+      const pending = pendingSketchGeometryDragRef.current;
+      if (pending) {
+        const gesturePhase: SketchDragGesturePhase = {
+          kind: "pending",
+          target: pending.target,
+          startPoint: pending.startPoint,
+          pointerDown,
+        };
+        const viewportRect = canvasElement.getBoundingClientRect();
+        const sketchPoint = projectSketchPoint(
+          event.clientX,
+          event.clientY,
+          viewportRect,
+        );
+        const actions = resolveSketchDragGesture(gesturePhase, {
+          kind: "pointerUp",
+          clientX: event.clientX,
+          clientY: event.clientY,
+          sketchPoint,
+        });
+        applyDragGestureActions(actions, canvasElement);
+        if (actions.consumed) {
+          return;
+        }
+        // Sub-threshold: fall through to click path (pending already cleared
+        // by applyDragGestureActions phase → idle).
+      } else {
+        pendingSketchGeometryDragRef.current = null;
+      }
+
       const dragDistance = Math.hypot(
         event.clientX - pointerDown.x,
         event.clientY - pointerDown.y,
       );
 
-      const pendingSketchGeometryDrag = pendingSketchGeometryDragRef.current;
-      pendingSketchGeometryDragRef.current = null;
-
-      if (pendingSketchGeometryDrag && dragDistance > 6) {
-        const viewportRect = canvasElement.getBoundingClientRect();
-        const point = projectSketchPoint(
-          event.clientX,
-          event.clientY,
-          viewportRect,
-        );
-
-        if (point) {
-          sketchGeometryDragStartRef.current(
-            pendingSketchGeometryDrag.target,
-            pendingSketchGeometryDrag.startPoint,
-          );
-          sketchGeometryDragEndRef.current(point);
-        }
-
-        return;
-      }
-
       const activeSketchSession = sketchSessionRef.current;
 
-      if (dragDistance > 6 || !activeSketchSession) {
+      if (dragDistance > SKETCH_DRAG_THRESHOLD_PX || !activeSketchSession) {
         return;
       }
 
@@ -2461,9 +2565,36 @@ export function ThreeCadViewport({
 
     const handleContextMenu = (event: Event) => event.preventDefault();
 
+    // D2: pointercancel cancels the drag.
+    const handlePointerCancel = () => {
+      const gesturePhase = getSketchDragGesturePhase();
+      const actions = resolveSketchDragGesture(gesturePhase, {
+        kind: "pointerCancel",
+      });
+      applyDragGestureActions(actions, canvasElement);
+      primaryPointerDownRef.current = null;
+    };
+
+    // D2: lost pointer capture (not caused by our own release) cancels the drag.
+    const handleLostPointerCapture = () => {
+      const gesturePhase = getSketchDragGesturePhase();
+      const actions = resolveSketchDragGesture(gesturePhase, {
+        kind: "lostPointerCapture",
+      });
+      applyDragGestureActions(actions, canvasElement);
+      if (gesturePhase.kind === "active") {
+        primaryPointerDownRef.current = null;
+      }
+    };
+
     canvasElement.addEventListener("pointerdown", handlePointerDown, true);
     canvasElement.addEventListener("pointermove", handlePointerMove);
     canvasElement.addEventListener("pointerleave", handlePointerLeave);
+    canvasElement.addEventListener("pointercancel", handlePointerCancel);
+    canvasElement.addEventListener(
+      "lostpointercapture",
+      handleLostPointerCapture,
+    );
     canvasElement.addEventListener("contextmenu", handleContextMenu);
     window.addEventListener("pointerup", handlePointerUp, true);
     window.addEventListener("click", handleClick, true);
@@ -2478,14 +2609,27 @@ export function ThreeCadViewport({
       ) {
         canvasElement.releasePointerCapture(sectionDragRef.current.pointerId);
       }
+      const dragPointerId = sketchGeometryDragPointerIdRef.current;
+      if (
+        dragPointerId !== null &&
+        canvasElement.hasPointerCapture(dragPointerId)
+      ) {
+        canvasElement.releasePointerCapture(dragPointerId);
+      }
       sectionDragRef.current = null;
       sectionDragOffsetRef.current = null;
       primaryPointerDownRef.current = null;
       sketchGeometryDragRef.current = null;
+      sketchGeometryDragPointerIdRef.current = null;
       pendingSketchGeometryDragRef.current = null;
       canvasElement.removeEventListener("pointerdown", handlePointerDown, true);
       canvasElement.removeEventListener("pointermove", handlePointerMove);
       canvasElement.removeEventListener("pointerleave", handlePointerLeave);
+      canvasElement.removeEventListener("pointercancel", handlePointerCancel);
+      canvasElement.removeEventListener(
+        "lostpointercapture",
+        handleLostPointerCapture,
+      );
       canvasElement.removeEventListener("contextmenu", handleContextMenu);
       window.removeEventListener("pointerup", handlePointerUp, true);
       window.removeEventListener("click", handleClick, true);

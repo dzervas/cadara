@@ -5112,3 +5112,139 @@ test("T10g-1: trimming a Circle-tool circle keeps the sketch accepted and a seco
     trimmed.definition.entityIds.length + 1,
   );
 });
+
+// T12c R-6: handleSketchGeometryDragCancelled restores pre-drag state.
+test("T12c R-6: cancelSketchGeometryDrag during drag restores definition, clears activeDrag, keeps activeTool", () => {
+  const def: SketchDefinition = {
+    schemaVersion: "sketch-definition/v1alpha2",
+    referenceIds: [],
+    references: [],
+    pointIds: ["sketch_point_a", "sketch_point_b"],
+    points: [
+      {
+        pointId: "sketch_point_a" as `sketch_point_${string}`,
+        label: "A",
+        target: { kind: "sketchPoint", sketchId: "sketch_draft" as `sketch_${string}`, pointId: "sketch_point_a" as `sketch_point_${string}` },
+        position: [0, 0],
+        isConstruction: false,
+      },
+      {
+        pointId: "sketch_point_b" as `sketch_point_${string}`,
+        label: "B",
+        target: { kind: "sketchPoint", sketchId: "sketch_draft" as `sketch_${string}`, pointId: "sketch_point_b" as `sketch_point_${string}` },
+        position: [4, 0],
+        isConstruction: false,
+      },
+    ],
+    entityIds: ["sketch_entity_line"],
+    entities: [
+      {
+        kind: "lineSegment",
+        entityId: "sketch_entity_line" as `sketch_entity_${string}`,
+        label: "Line",
+        target: { kind: "sketchEntity", sketchId: "sketch_draft" as `sketch_${string}`, entityId: "sketch_entity_line" as `sketch_entity_${string}` },
+        isConstruction: false,
+        startPointId: "sketch_point_a" as `sketch_point_${string}`,
+        endPointId: "sketch_point_b" as `sketch_point_${string}`,
+      },
+    ],
+    constraintIds: [],
+    constraints: [],
+    dimensionIds: [],
+    dimensions: [],
+  };
+  const session = withLiveSolveBasis(
+    {
+      ...createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
+      definition: def,
+    },
+    def,
+  );
+  const started = beginSketchGeometryDrag(
+    session,
+    { kind: "sketchPoint", sketchId: "sketch_draft" as `sketch_${string}`, pointId: "sketch_point_a" as `sketch_point_${string}` },
+    [0, 0],
+  );
+  expect(started.activeDrag, "drag must start").not.toBeNull();
+
+  const cancelled = cancelSketchGeometryDrag(started);
+  expect(cancelled.activeDrag, "activeDrag must be null after cancel.").toBe(
+    null,
+  );
+  expect(
+    cancelled.definition,
+    "Definition must be restored to preDragDefinition.",
+  ).toBe(started.activeDrag!.preDragDefinition);
+  expect(
+    cancelled.activeTool,
+    "activeTool must be preserved after cancel (null stays null).",
+  ).toBe(null);
+});
+
+// T12c R-6: tool switch mid-drag cancels the drag first.
+test("T12c R-6: cancel followed by tool switch leaves a consistent state", () => {
+  const def: SketchDefinition = {
+    schemaVersion: "sketch-definition/v1alpha2",
+    referenceIds: [],
+    references: [],
+    pointIds: ["sketch_point_a", "sketch_point_b"],
+    points: [
+      {
+        pointId: "sketch_point_a" as `sketch_point_${string}`,
+        label: "A",
+        target: { kind: "sketchPoint", sketchId: "sketch_draft" as `sketch_${string}`, pointId: "sketch_point_a" as `sketch_point_${string}` },
+        position: [0, 0],
+        isConstruction: false,
+      },
+      {
+        pointId: "sketch_point_b" as `sketch_point_${string}`,
+        label: "B",
+        target: { kind: "sketchPoint", sketchId: "sketch_draft" as `sketch_${string}`, pointId: "sketch_point_b" as `sketch_point_${string}` },
+        position: [4, 0],
+        isConstruction: false,
+      },
+    ],
+    entityIds: ["sketch_entity_line"],
+    entities: [
+      {
+        kind: "lineSegment",
+        entityId: "sketch_entity_line" as `sketch_entity_${string}`,
+        label: "Line",
+        target: { kind: "sketchEntity", sketchId: "sketch_draft" as `sketch_${string}`, entityId: "sketch_entity_line" as `sketch_entity_${string}` },
+        isConstruction: false,
+        startPointId: "sketch_point_a" as `sketch_point_${string}`,
+        endPointId: "sketch_point_b" as `sketch_point_${string}`,
+      },
+    ],
+    constraintIds: [],
+    constraints: [],
+    dimensionIds: [],
+    dimensions: [],
+  };
+  const session = withLiveSolveBasis(
+    {
+      ...createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
+      definition: def,
+    },
+    def,
+  );
+  let s = beginSketchGeometryDrag(
+    session,
+    { kind: "sketchPoint", sketchId: "sketch_draft" as `sketch_${string}`, pointId: "sketch_point_a" as `sketch_point_${string}` },
+    [0, 0],
+  );
+  expect(s.activeDrag).not.toBeNull();
+
+  // Simulate tool switch: cancel then begin tool.
+  s = cancelSketchGeometryDrag(s);
+  s = beginSketchTool(s, "circle");
+  expect(s.activeDrag).toBe(null);
+  expect(s.activeTool).toBe("circle");
+  expect(s.definition.pointIds.length).toBe(2);
+});

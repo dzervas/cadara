@@ -5,6 +5,7 @@ import {
   beginSketchAnnotationEdit,
   beginSketchGeometryDrag,
   beginSketchTool,
+  cancelSketchGeometryDrag,
   clearActiveSketchTool,
   confirmSketchDrawing,
   deleteSelectedSketchAnnotation,
@@ -539,6 +540,38 @@ export function handleSketchGeometryDragEnded(
     state.session,
     deriveSketchPointFromWorld(state.session.plane, event.point),
   );
+
+  return {
+    state: {
+      ...state,
+      session,
+      command: {
+        ...state.command,
+        phase: "editing",
+      },
+      preview: {
+        kind: "sketch",
+        label: getSketchSessionPreviewLabel(session),
+        target: session.planeTarget,
+      },
+    },
+    effects: [],
+  };
+}
+
+/**
+ * Cancel the active drag gesture: restore pre-drag state with no history
+ * entry (D2). Dispatched by Escape, pointercancel, lost pointer capture,
+ * tool switch, and Finish while a drag is active.
+ */
+export function handleSketchGeometryDragCancelled(
+  state: EditorState,
+): EditorTransitionResult {
+  if (state.kind !== "editingSketch") {
+    return { state, effects: [] };
+  }
+
+  const session = cancelSketchGeometryDrag(state.session);
 
   return {
     state: {
