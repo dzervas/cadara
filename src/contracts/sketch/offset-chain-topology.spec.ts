@@ -1799,13 +1799,14 @@ describe("declared multi-piece tube stability (L1b, bounded helper, not live)", 
   ] as const)(
     "native reversed multi-leaf spline at d = %s reaches J2′ on its actual side",
     (distance, side) => {
+      // Pinned on the pre-T11i native commit of 4 clicks (a 4th fit point
+      // at (3, 0)), which kept only these first 3 fit points.
       const spline = drawSpline(
         [],
         [
           [0, 0],
           [1, 0.3],
           [2, -0.2],
-          [3, 0],
         ],
       );
       const [start] = splineEnds(spline);
@@ -3200,9 +3201,9 @@ describe("T08b-a capacity: joint queries only on one whole-request meter (M0/M7)
         message: expect.stringContaining("cubic-tube-clearance-unproven"),
       });
     }
-    // Within one output (labelled: the native spline tool authors at most
-    // three fit points, so this source is reconstructed directly): a real
-    // owner offset of a self-crossing five-point source.
+    // Within one output (labelled: pinned when the native spline tool
+    // authored at most three fit points, so this source is reconstructed
+    // directly): a real owner offset of a self-crossing five-point source.
     const geometry = reconstructSpline({
       id: "seed",
       policy: "centripetal-mean-arm-v1",

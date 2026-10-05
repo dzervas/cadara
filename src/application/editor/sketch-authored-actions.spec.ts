@@ -14,6 +14,7 @@ import {
   acceptSketchDraw,
   beginSketchTool,
   createNewSketchSession,
+  finalizeSketchDraw,
   startSketchDraw,
   deleteSelectedSketchGeometry,
   selectSketchEditToolTarget,
@@ -928,6 +929,7 @@ test("T10g-3b: an applied spline Trim is one 'Trim' action; Undo/Redo restore it
     [24, 0],
   ] as const)
     session = acceptSketchDraw(session, point);
+  session = finalizeSketchDraw(session);
   for (const x of [21, 23])
     session = acceptSketchDraw(
       startSketchDraw(beginSketchTool(session, "line"), [x, -1]),
@@ -1378,5 +1380,170 @@ describe("T11h: Line chain history (T11-D11, D12)", () => {
       drawStartSnap: before.drawStartSnap,
       toolChain: before.toolChain,
     });
+  });
+});
+
+describe("T11i: fit-point spline history (T11-D10, D13, D14)", () => {
+  function undoLabels(f: Awaited<ReturnType<typeof fixture>>) {
+    return f.session.actionHistory?.undo.map((entry) => entry.label) ?? [];
+  }
+  function splines(f: Awaited<ReturnType<typeof fixture>>) {
+    return f.session.definition.entities.filter(
+      (entity) => entity.kind === "spline",
+    );
+  }
+  async function splineDraft(points: readonly (readonly [number, number])[]) {
+    const f = await fixture();
+    f.dispatch({ type: "tool.activated", toolId: "spline" });
+    for (const point of points)
+      f.dispatch({ type: "sketch.pointerReleased", point });
+    return f;
+  }
+
+  test.each([
+    ["Enter", "sketch.confirmRequested"],
+    ["Escape", "sketch.escapeRequested"],
+  ] as const)(
+    "2 points + %s finalize one spline as one action and keep Spline armed",
+    async (_key, type) => {
+      const f = await splineDraft([
+        [20, 20],
+        [30, 25],
+      ]);
+      expect(
+        f.session.actionAvailability?.canUndo,
+        "Fit-point clicks record nothing.",
+      ).toBe(false);
+
+      f.dispatch({ type });
+      expect(splines(f)).toHaveLength(1);
+      expect(undoLabels(f), "One action for the finalized spline.").toEqual([
+        "Create Sketch Geometry",
+      ]);
+      expect(f.session.activeTool, "Spline stays armed.").toBe("spline");
+      expect(f.session.status).toBe("idle");
+      expect(f.state.command.phase).toBe("collecting");
+
+      f.dispatch({ type: "sketch.escapeRequested" });
+      expect(f.session.activeTool, "A second Escape leaves Spline.").toBe(null);
+      expect(undoLabels(f)).toHaveLength(1);
+    },
+  );
+
+  test("5 fit points then Enter: one spline through all 5 points, one action", async () => {
+    const points = [
+      [20, 20],
+      [30, 25],
+      [40, 20],
+      [50, 25],
+      [60, 20],
+    ] as const;
+    const f = await splineDraft(points);
+    expect(splines(f), "No click commits the spline.").toEqual([]);
+    f.dispatch({ type: "sketch.confirmRequested" });
+
+    const [spline] = splines(f);
+    if (spline?.kind !== "spline") throw Error("Expected the spline.");
+    expect(
+      spline.pointOccurrences.map(
+        (occurrence) =>
+          f.session.definition.points.find(
+            ({ pointId }) => pointId === occurrence.pointId,
+          )?.position,
+      ),
+    ).toEqual(points);
+    expect(undoLabels(f)).toEqual(["Create Sketch Geometry"]);
+  });
+
+  test("1 point: Enter does nothing, Escape cancels without history, the next Escape exits", async () => {
+    const f = await splineDraft([[20, 20]]);
+    const before = projection(f.session);
+    const drafting = f.session;
+
+    f.dispatch({ type: "sketch.confirmRequested" });
+    expect(f.session, "Enter below the minimum is a no-op.").toEqual(drafting);
+
+    f.dispatch({ type: "sketch.escapeRequested" });
+    expect(f.session.activeTool).toBe("spline");
+    expect(f.session.status, "The 1-point draft is cancelled.").toBe("idle");
+    expect(f.session.toolPlacedPoints).toEqual([]);
+    expect(projection(f.session)).toEqual(before);
+    expect(f.session.actionAvailability?.canUndo).toBe(false);
+
+    f.dispatch({ type: "sketch.escapeRequested" });
+    expect(f.session.activeTool).toBe(null);
+    expect(f.session.actionAvailability?.canUndo).toBe(false);
+  });
+
+  test("a tool switch or Finish with an unfinalized 3-point spline discards it with no action (T11-D14)", async () => {
+    const draft = [
+      [20, 20],
+      [30, 25],
+      [40, 20],
+    ] as const;
+    const switched = await splineDraft(draft);
+    const before = projection(switched.session);
+    switched.dispatch({ type: "tool.activated", toolId: "circle" });
+    expect(switched.session.toolPlacedPoints).toEqual([]);
+    expect(projection(switched.session)).toEqual(before);
+    expect(switched.session.actionAvailability?.canUndo).toBe(false);
+
+    const finished = await splineDraft(draft);
+    const finishedBefore = projection(finished.session);
+    const event: EditorEvent = {
+      type: "tool.activated",
+      toolId: "finishSketch",
+    };
+    const result = finished.owner.transition(finished.state, event, (state) =>
+      transitionEditorState(state, event),
+    );
+    const commit = result.effects.find(
+      (effect) => effect.type === "sketch.commit",
+    );
+    expect(commit?.type).toBe("sketch.commit");
+    if (commit?.type === "sketch.commit")
+      expect(
+        projection(commit.session),
+        "Finish publishes the definition without the spline.",
+      ).toEqual(finishedBefore);
+    expect(
+      result.state.kind === "editingSketch"
+        ? result.state.session.actionAvailability?.canUndo
+        : null,
+      "The discarded spline adds no action.",
+    ).toBe(false);
+  });
+
+  test("Undo and Redo during a spline draft keep its placed fit points", async () => {
+    const f = await fixture();
+    f.dispatch({ type: "tool.activated", toolId: "circle" });
+    f.dispatch({ type: "sketch.pointerReleased", point: [40, 0] });
+    f.dispatch({ type: "sketch.pointerReleased", point: [43, 0] });
+    f.dispatch({ type: "tool.activated", toolId: "spline" });
+    f.dispatch({ type: "sketch.pointerReleased", point: [20, 20] });
+    f.dispatch({ type: "sketch.pointerReleased", point: [30, 25] });
+
+    f.dispatch({ type: "history.undoRequested" });
+    expect(
+      f.session.definition.entities.some((entity) => entity.kind === "circle"),
+    ).toBe(false);
+    expect(f.session.activeTool).toBe("spline");
+    expect(f.session.status).toBe("drawing");
+    expect(f.session.toolPlacedPoints).toEqual([
+      [20, 20],
+      [30, 25],
+    ]);
+    f.dispatch({ type: "history.redoRequested" });
+    expect(f.session.toolPlacedPoints).toEqual([
+      [20, 20],
+      [30, 25],
+    ]);
+
+    f.dispatch({ type: "sketch.confirmRequested" });
+    expect(splines(f)).toHaveLength(1);
+    expect(undoLabels(f)).toEqual([
+      "Create Sketch Geometry",
+      "Create Sketch Geometry",
+    ]);
   });
 });

@@ -9,6 +9,7 @@ import {
   acceptSketchDraw,
   beginSketchTool,
   createNewSketchSessionFromSupport,
+  finalizeSketchDraw,
   startSketchDraw,
 } from "@/domain/editor/sketch-session";
 import {
@@ -417,7 +418,7 @@ test("src/app/viewport-renderables.spec.ts", async () => {
       "Spline preview should render as viewport polyline feedback.",
     ).toBeTruthy();
 
-    session = acceptSketchDraw(session, [3, 0]);
+    session = finalizeSketchDraw(acceptSketchDraw(session, [3, 0]));
     const committedComposed = composeViewportRenderables({
       snapshotRenderables: [],
       previewRenderables: null,

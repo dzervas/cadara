@@ -720,6 +720,7 @@ export function beginSketchTool(
     activeDrag: null,
     activeSnap: null,
     drawStartSnap: null,
+    fitPointEndSnap: null,
   };
 }
 
@@ -759,11 +760,62 @@ export function escapeSketchDrawing(
 ): SketchDrawingEscapeStep {
   return resolveSketchDrawingEscapeStep({
     chainActive: isSketchToolChainActive(session),
-    // T11i adds fit-point finalize; until then the spline commits on its
-    // third click, so a spline draft with 1-2 points cancels.
-    finalizable: false,
+    finalizable: isSketchFitPointDraftFinalizable(session),
     incomplete: session.status === "drawing",
   });
+}
+
+/**
+ * Whether the armed tool is a fit-point tool (`lifecycle.kind:
+ * "fitPoints"`) drawing a draft with at least its minimum placed points.
+ */
+function isSketchFitPointDraftFinalizable(session: SketchSessionState) {
+  if (
+    session.status !== "drawing" ||
+    !isDrawingSketchTool(session.activeTool)
+  ) {
+    return false;
+  }
+
+  const { lifecycle } = getSketchToolDefinition(session.activeTool);
+  return (
+    typeof lifecycle === "object" &&
+    session.toolPlacedPoints.length >= lifecycle.minimum
+  );
+}
+
+/**
+ * Finalizes a viable fit-point draft (T11-D10, D13): one definition change
+ * through every placed point, with the start snap and the snap accepted on
+ * the last fit point; the tool stays armed and idle. Anything else is left
+ * unchanged (review A-9).
+ */
+export function finalizeSketchDraw(
+  session: SketchSessionState,
+): SketchSessionState {
+  if (
+    !isSketchFitPointDraftFinalizable(session) ||
+    !isDrawingSketchTool(session.activeTool)
+  ) {
+    return session;
+  }
+
+  const toolDefinition = getSketchToolDefinition(session.activeTool);
+  const activation = toolDefinition.activate();
+  const points = session.toolPlacedPoints;
+
+  return commitSketchDraw(
+    session,
+    toolDefinition,
+    {
+      state: { ...activation.state, placedPoints: points },
+      stagedEntities: [],
+      presentation: activation.presentation,
+    },
+    points[0]!,
+    points.at(-1)!,
+    session.fitPointEndSnap ?? null,
+  );
 }
 
 /**
@@ -813,6 +865,7 @@ export function clearActiveSketchTool(
     activeDrag: null,
     activeSnap: null,
     drawStartSnap: null,
+    fitPointEndSnap: null,
     toolChain: null,
   };
 }
@@ -2197,10 +2250,16 @@ export function acceptSketchDraw(
     state: getToolRuntimeState(session),
     point: endPoint,
   });
+  // The snap a newly placed fit point accepted, for the end of the finalize
+  // commit (an ignored release places nothing), on both branches below
+  // (T11i review A-4).
+  const fitPointEndSnap =
+    typeof toolDefinition.lifecycle === "object" &&
+    (result.state.placedPoints?.length ?? 0) > session.toolPlacedPoints.length
+      ? { fitPointEndSnap: snap.candidate }
+      : {};
 
-  const completedInvalidSpline =
-    session.activeTool === "spline" && result.state.status === "idle";
-  if (result.state.validationMessage && !completedInvalidSpline) {
+  if (result.state.validationMessage) {
     return {
       ...session,
       toolStagedEntities: [],
@@ -2215,6 +2274,7 @@ export function acceptSketchDraw(
         snap.candidate,
       ),
       activeSnap: snap.candidate,
+      ...fitPointEndSnap,
     };
   }
 
@@ -2236,6 +2296,7 @@ export function acceptSketchDraw(
         snap.candidate,
       ),
       activeSnap: snap.candidate,
+      ...fitPointEndSnap,
     };
   }
 
@@ -2473,6 +2534,7 @@ function commitSketchDraw(
       activeDrag: null,
       activeSnap: null,
       drawStartSnap: null,
+      fitPointEndSnap: null,
     },
     history.definition,
   );

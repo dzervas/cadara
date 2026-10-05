@@ -153,6 +153,7 @@ export {
   confirmSketchDrawing,
   deleteSketchReferenceTarget,
   escapeSketchDrawing,
+  finalizeSketchDraw,
   getSketchSessionPreviewLabel,
   getSketchToolPresentation,
   patchSketchDrawingToolValue,

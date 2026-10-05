@@ -378,16 +378,10 @@ export function cornerMatrixRows(): readonly CornerMatrixRow[] {
   add(
     "S1b",
     (h) => [
-      h.drawSpline(
-        [],
-        [
-          [0, 0],
-          [1, 0.4],
-          [2, -0.2],
-          [3, 0.3],
-          [4, 0],
-        ],
-      ),
+      // Pinned on the native commit of the 5 clicks of S1B_POINTS before
+      // T11i, which kept only the first 3 fit points; the tool now commits
+      // every fit point, so the row keeps its geometry explicitly.
+      h.drawSpline([], S1B_POINTS.slice(0, 3)),
     ],
     [0.01, -0.05],
   );
@@ -1674,12 +1668,12 @@ export function withLineLength(
 }
 
 /**
- * T08b-g2, labelled "native commit + appended fit points": the native
- * spline tool commits only its first three fit points (`MIN_SPLINE_POINTS`),
- * so a longer open spline is a native 3-point commit whose later fit points
- * are appended as `positionalClosureSpline` appends them (point records
- * cloned from the commit's own shape, automatic tangents). Nothing else is
- * changed.
+ * T08b-g2, labelled "native commit + appended fit points": pinned when the
+ * native spline tool committed only its first three fit points (before
+ * T11i), so a longer open spline is a native 3-point commit whose later fit
+ * points are appended as `positionalClosureSpline` appends them (point
+ * records cloned from the commit's own shape, automatic tangents). Nothing
+ * else is changed.
  */
 export function appendedFitPointsSpline(
   harness: NativeOffsetChainHarness,
@@ -1763,7 +1757,7 @@ export interface OffsetFrameDerivativeRow extends CornerMatrixRow {
   readonly covers: string;
 }
 
-/** The S1b fit points (the native tool commits only the first three). */
+/** The S1b fit points (before T11i the native tool committed the first three). */
 const S1B_POINTS: readonly Vector[] = [
   [0, 0],
   [1, 0.4],
@@ -2101,8 +2095,8 @@ export function deepTrimRows(): readonly CornerMatrixRow[] {
         [2, 0],
       ]),
     ],
-    // The design's "5-point" row as the native session authors it: the
-    // spline tool commits after three fit points, so it is the spline
+    // The design's "5-point" row as the native session authored it before
+    // T11i, when the spline tool committed after three fit points: the spline
     // (0,0)–(0.5,0.3)–(1,0.4) and an open line (2,0) → (0,0) sharing its start.
     [
       "SL h0.4 5pt",

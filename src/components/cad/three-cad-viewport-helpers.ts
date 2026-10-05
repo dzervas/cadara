@@ -1,6 +1,13 @@
 import * as THREE from "three";
 
-import type { SketchSessionDisplayRenderable } from "@/domain/editor/sketch-session";
+import type {
+  SketchSessionDisplayRenderable,
+  SketchSessionState,
+} from "@/domain/editor/sketch-session";
+import {
+  getSketchToolDefinition,
+  isRegisteredSketchToolId,
+} from "@/core/sketch-tools/registry";
 import type { SectionViewSession } from "@/core/section-view/session";
 import { getSectionPlaneOrigin } from "@/core/section-view/session";
 import {
@@ -123,6 +130,60 @@ export function isViewportNavigationPointerMove(buttons: number) {
   return (
     (buttons & (POINTER_BUTTON_SECONDARY | POINTER_BUTTON_AUXILIARY)) !== 0
   );
+}
+
+/**
+ * A fit-point release within this many client pixels of the previous one
+ * is the second release of a double-click, not a new fit point (T11-D13).
+ */
+export const SKETCH_FIT_POINT_RELEASE_DEDUP_PX = 4;
+
+type SketchFitPointSession = Pick<
+  SketchSessionState,
+  "activeTool" | "status"
+> | null;
+
+/** Whether the armed tool is a fit-point tool (Spline, `lifecycle.kind`). */
+function isSketchFitPointToolArmed(session: SketchFitPointSession) {
+  return (
+    session?.activeTool != null &&
+    isRegisteredSketchToolId(session.activeTool) &&
+    typeof getSketchToolDefinition(session.activeTool).lifecycle === "object"
+  );
+}
+
+/** Whether the armed fit-point tool has a draft (T11-D13). */
+export function isSketchFitPointDraftActive(session: SketchFitPointSession) {
+  return session?.status === "drawing" && isSketchFitPointToolArmed(session);
+}
+
+/**
+ * The viewport's fit-point release de-duplication (T11-D13): a release
+ * within `SKETCH_FIT_POINT_RELEASE_DEDUP_PX` of the previous fit-point
+ * release, while that draft is still drawing, is not dispatched (the
+ * double-click's `dblclick` finalizes instead). `record` is the release the
+ * next one is compared with, kept only while a fit-point tool is armed.
+ */
+export function resolveSketchFitPointRelease(input: {
+  session: SketchFitPointSession;
+  previous: { x: number; y: number } | null;
+  release: { x: number; y: number };
+}): { dispatch: boolean; record: { x: number; y: number } | null } {
+  const { session, previous, release } = input;
+
+  if (
+    previous &&
+    isSketchFitPointDraftActive(session) &&
+    Math.hypot(release.x - previous.x, release.y - previous.y) <=
+      SKETCH_FIT_POINT_RELEASE_DEDUP_PX
+  ) {
+    return { dispatch: false, record: previous };
+  }
+
+  return {
+    dispatch: true,
+    record: isSketchFitPointToolArmed(session) ? release : null,
+  };
 }
 
 export function getViewportPickTuning(

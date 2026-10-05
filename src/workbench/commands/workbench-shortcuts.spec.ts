@@ -154,8 +154,8 @@ test("src/workbench/commands/workbench-shortcuts.spec.ts", () => {
     "Escape should dispatch the sketch active-tool clear event when a sketch edit tool is active.",
   ).toBe("sketch.activeToolCleared");
 
-  // Enter (T11-D10): consumed only when a drawing step applies. Before
-  // T11h/T11i nothing applies, so a plain Enter keeps its native behaviour.
+  // Enter (T11-D10): consumed only when a drawing step applies. With a
+  // circle draft nothing applies, so a plain Enter keeps its native behaviour.
   const enterFixture = createFixture({
     mode: "sketch",
     sketchSession: createSketchSession("circle"),
@@ -206,6 +206,37 @@ test("src/workbench/commands/workbench-shortcuts.spec.ts", () => {
     enterOnButtonFixture.triggeredToolIds,
     "The shortcut layer should not re-activate the armed tool.",
   ).toEqual([]);
+
+  // T11i: Enter finalizes a spline draft with at least 2 fit points (on
+  // the canvas, as for a chain); with 1 point it is not consumed (A-9).
+  for (const [placed, applies] of [
+    [2, true],
+    [1, false],
+  ] as const) {
+    const splineFixture = createFixture({
+      mode: "sketch",
+      sketchSession: createSplineDraftSession(placed),
+    });
+    let splineEnterPrevented = 0;
+    const splineResult = splineFixture.press({
+      key: "Enter",
+      target: createTarget([{ tagName: "CANVAS" }, { tagName: "MAIN" }]),
+      preventDefault: () => {
+        splineEnterPrevented += 1;
+      },
+    });
+    expect(
+      splineResult.handled ? splineResult.commandId : null,
+      `Enter with a ${placed}-point spline draft.`,
+    ).toBe(applies ? "editor.confirm" : null);
+    expect(splineEnterPrevented).toBe(applies ? 1 : 0);
+    expect(
+      splineFixture.dispatchedEvents.map((event) => event.type),
+      applies
+        ? "Enter finalizes the spline through the confirm step."
+        : "Enter below the minimum dispatches nothing.",
+    ).toEqual(applies ? ["sketch.confirmRequested"] : []);
+  }
 
   // T11g review V-1: Enter on a menu item (the pick chooser, a toolbar
   // dropdown) or on a dialog button belongs to that control, even while a
@@ -543,6 +574,21 @@ function createLineChainSession() {
       ],
     },
   } as EditorViewState["sketchSession"];
+}
+
+/** An armed Spline drawing a draft with `placed` fit points (T11i). */
+function createSplineDraftSession(placed: number) {
+  return {
+    ...createSketchSession("spline"),
+    status: "drawing",
+    pointerDownPoint: [0, 0],
+    toolPlacedPoints: (
+      [
+        [0, 0],
+        [4, 2],
+      ] as const
+    ).slice(0, placed),
+  } as unknown as EditorViewState["sketchSession"];
 }
 
 function createTextTarget(target: {

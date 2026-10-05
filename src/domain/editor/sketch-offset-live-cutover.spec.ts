@@ -61,6 +61,7 @@ import {
 } from "@/contracts/solver/schema";
 import {
   acceptSketchDraw,
+  finalizeSketchDraw,
   beginSketchGeometryDrag,
   beginSketchTool,
   completeSketchOffsetPreviewPublication,
@@ -294,7 +295,8 @@ function drawSpline(
   let next = beginSketchTool(session, "spline");
   next = startSketchDraw(next, points[0]!);
   for (const point of points.slice(1)) next = acceptSketchDraw(next, point);
-  return next;
+  // A fit-point spline commits when it is finalized (T11i).
+  return finalizeSketchDraw(next);
 }
 
 function drawLine(

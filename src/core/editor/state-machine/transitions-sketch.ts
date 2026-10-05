@@ -11,6 +11,7 @@ import {
   deleteSelectedSketchGeometry,
   deleteSketchReferenceTarget,
   escapeSketchDrawing,
+  finalizeSketchDraw,
   finishSketchGeometryDrag,
   getConnectedSketchEntitySelectionTargets,
   getSketchSessionPreviewLabel,
@@ -305,10 +306,24 @@ function applySketchDrawingStep(
   step: SketchDrawingEscapeStep,
 ): EditorTransitionResult {
   switch (step) {
-    case "finalizeDraft":
-      // `escapeSketchDrawing` returns this only once T11i (fit-point
-      // finalize) lands.
-      throw new Error(`Sketch drawing step "${step}" is not available yet.`);
+    case "finalizeDraft": {
+      // One definition change (one action); the tool stays armed (T11-D10).
+      const session = finalizeSketchDraw(state.session);
+
+      return {
+        state: {
+          ...state,
+          session,
+          command: { ...state.command, phase: "collecting" },
+          preview: {
+            kind: "sketch",
+            label: getSketchSessionPreviewLabel(session),
+            target: session.planeTarget,
+          },
+        },
+        effects: [],
+      };
+    }
     case "endChain":
     case "cancelDraft": {
       // The draft and the chain never reached the definition (each committed

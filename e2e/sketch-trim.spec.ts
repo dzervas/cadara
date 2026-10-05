@@ -52,6 +52,8 @@ test("T10g-3b: a spline arch closed by a line and crossed by two lines: Trim rem
   await workbench.clickViewportAt({ x: 540, y: 620 });
   await workbench.clickViewportAt({ x: 760, y: 360 });
   await workbench.clickViewportAt({ x: 980, y: 620 });
+  // Enter finalizes the spline (T11i); a tool switch would discard it.
+  await page.keyboard.press("Enter");
   await expectStaged(workbench, 1);
   await workbench.activateTool("Create line geometry.");
   await workbench.clickViewportAt({ x: 980, y: 620 });
