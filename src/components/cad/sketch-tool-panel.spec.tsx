@@ -11,6 +11,7 @@ import {
   acceptSketchDraw,
   beginSketchTool,
   createNewSketchSessionFromSupport,
+  finalizeSketchDraw,
   getSketchToolPresentation,
   selectSketchEditToolTarget,
   startSketchDraw,
@@ -60,21 +61,24 @@ test("src/components/cad/sketch-tool-panel.spec.tsx", () => {
 // along a spline and the static offset of a projected spline are refused
 // with an explicit "not supported yet" message the user sees.
 test("the sketch tool panel shows the D6 not-supported-yet messages", () => {
-  const drawn = acceptSketchDraw(
+  // A fit-point spline commits when it is finalized (T11i).
+  const drawn = finalizeSketchDraw(
     acceptSketchDraw(
-      startSketchDraw(
-        beginSketchTool(
-          createNewSketchSessionFromSupport(
-            { kind: "construction", constructionId: "construction_plane-xy" },
-            OCC_KERNEL_SETTINGS,
+      acceptSketchDraw(
+        startSketchDraw(
+          beginSketchTool(
+            createNewSketchSessionFromSupport(
+              { kind: "construction", constructionId: "construction_plane-xy" },
+              OCC_KERNEL_SETTINGS,
+            ),
+            "spline",
           ),
-          "spline",
+          [0, 0],
         ),
-        [0, 0],
+        [1, 2],
       ),
-      [1, 2],
+      [2, 0],
     ),
-    [2, 0],
   );
   const spline = drawn.definition.entities.find(
     (entity) => entity.kind === "spline",

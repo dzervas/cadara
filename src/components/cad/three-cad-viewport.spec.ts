@@ -3,6 +3,7 @@ import { test, expect } from "vitest";
 import {
   cancelCoalescedSketchGeometryDragMove,
   getViewportPickTuning,
+  isSketchFitPointDraftActive,
   isViewportNavigationPointerMove,
   WORKSPACE_SCAFFOLD_RENDER_ORDER,
   configureWorkspaceScaffoldWireObject,
@@ -12,6 +13,7 @@ import {
   projectWorldPointToViewport,
   projectSceneTargetCentroidToViewport,
   resolveSectionScreenDragOffset,
+  resolveSketchFitPointRelease,
   resizeViewCubeRenderer,
   scheduleCoalescedSketchGeometryDragMove,
 } from "@/components/cad/three-cad-viewport-helpers";
@@ -817,4 +819,79 @@ test("src/components/cad/three-cad-viewport.spec.ts", () => {
   testViewCubeRequestsAnimatedTransition();
   testSketchEntryRequestsAnimatedFraming();
   testSketchExitRequestsRestoreTransition();
+});
+
+// T11-D13: the viewport's spline double-click wiring. The pointer-up path
+// dispatches a release only when `dispatch` is true and keeps `record` for
+// the next release; `dblclick` finalizes when a fit-point draft is active.
+test("a spline double-click's second release is not dispatched; dblclick finalizes only a spline draft (T11-D13)", () => {
+  const drawing = { activeTool: "spline", status: "drawing" } as const;
+  const armedIdle = { activeTool: "spline", status: "idle" } as const;
+  const lineChain = { activeTool: "line", status: "drawing" } as const;
+
+  // Double-click: the first release places a fit point, the second (same
+  // spot, the draft now drawing) is swallowed.
+  const first = resolveSketchFitPointRelease({
+    session: armedIdle,
+    previous: null,
+    release: { x: 100, y: 100 },
+  });
+  expect(first).toEqual({ dispatch: true, record: { x: 100, y: 100 } });
+  for (const release of [
+    { x: 100, y: 100 },
+    { x: 103, y: 102 },
+    { x: 104, y: 100 },
+  ]) {
+    expect(
+      resolveSketchFitPointRelease({
+        session: drawing,
+        previous: first.record,
+        release,
+      }),
+      `A release within 4 px (${JSON.stringify(release)}) is the double-click's second release.`,
+    ).toEqual({ dispatch: false, record: { x: 100, y: 100 } });
+  }
+  expect(
+    resolveSketchFitPointRelease({
+      session: drawing,
+      previous: first.record,
+      release: { x: 104, y: 101 },
+    }),
+    "Beyond 4 px a release adds the next fit point.",
+  ).toEqual({ dispatch: true, record: { x: 104, y: 101 } });
+
+  // After a finalize (Spline armed, idle) the same spot starts a new spline.
+  expect(
+    resolveSketchFitPointRelease({
+      session: armedIdle,
+      previous: { x: 100, y: 100 },
+      release: { x: 100, y: 100 },
+    }).dispatch,
+  ).toBe(true);
+  // Other tools are never de-duplicated and leave no record.
+  expect(
+    resolveSketchFitPointRelease({
+      session: lineChain,
+      previous: { x: 100, y: 100 },
+      release: { x: 100, y: 100 },
+    }),
+  ).toEqual({ dispatch: true, record: null });
+  expect(
+    resolveSketchFitPointRelease({
+      session: null,
+      previous: null,
+      release: { x: 1, y: 1 },
+    }),
+  ).toEqual({ dispatch: true, record: null });
+
+  expect(
+    isSketchFitPointDraftActive(drawing),
+    "dblclick with a spline draft finalizes (and is not a connected selection).",
+  ).toBe(true);
+  for (const session of [armedIdle, lineChain, null]) {
+    expect(
+      isSketchFitPointDraftActive(session),
+      `dblclick keeps its other behaviour for ${JSON.stringify(session)}.`,
+    ).toBe(false);
+  }
 });

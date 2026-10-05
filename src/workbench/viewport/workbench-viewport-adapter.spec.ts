@@ -138,6 +138,8 @@ test("workbench viewport adapter routes typed intents to editor events and comma
     } as PrimitiveRef & { kind: "dimension" },
   });
   handler({ type: "sketchToolPatched", patch: { radius: 12 } });
+  // T11-D13: a spline double-click finalizes through Enter's confirm step.
+  handler({ type: "sketchDrawFinalizeRequested" });
   handler({ type: "sectionOffsetChanged", offset: 3 });
   handler({ type: "lodTierChanged", tierId: "fine" });
   handler({ type: "canvasCreated" });
@@ -159,5 +161,6 @@ test("workbench viewport adapter routes typed intents to editor events and comma
       },
     },
     { type: "sketch.toolPatched", patch: { radius: 12 } },
+    { type: "sketch.confirmRequested" },
   ]);
 });

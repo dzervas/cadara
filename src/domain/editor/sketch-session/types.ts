@@ -331,6 +331,11 @@ export interface SketchSessionState {
   activeDrag: SketchGeometryDragState | null;
   activeSnap: SketchSnapCandidate | null;
   drawStartSnap: SketchSnapCandidate | null;
+  /**
+   * The snap accepted on a fit-point draft's last placed point: the end snap
+   * of its finalize commit (T11i). Absent or null otherwise.
+   */
+  fitPointEndSnap?: SketchSnapCandidate | null;
   /** The active Line chain; absent or null when no chain is active. */
   toolChain?: SketchToolChain | null;
   sequence: number;

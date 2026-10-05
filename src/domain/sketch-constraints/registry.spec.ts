@@ -14,6 +14,7 @@ import {
   selectSketchConstraintTarget,
   startSketchDraw,
   acceptSketchDraw,
+  finalizeSketchDraw,
   updateSketchReferenceProjection,
   updateSketchPointer,
 } from "@/domain/editor/sketch-session";
@@ -115,7 +116,9 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       session = acceptSketchDraw(session, point);
     }
 
-    return session;
+    // A fit-point spline commits only when finalized (T11i); for every other
+    // tool this is a no-op.
+    return finalizeSketchDraw(session);
   }
 
   function addProjectedReference(

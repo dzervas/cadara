@@ -3,6 +3,7 @@ import type {
   SketchDraftEntity,
   SketchToolCommitContribution,
   SketchToolDefinition,
+  SketchToolLifecycle,
   SketchToolRuntimeState,
 } from "@/core/sketch-tools/definition";
 import type { SketchToolPresentationSchema } from "@/core/sketch-tools/editor-schema";
@@ -12,12 +13,49 @@ import {
   tessellateCubicSpans,
 } from "@/contracts/sketch/spline-geometry";
 
-const MIN_SPLINE_POINTS = 3;
+// Fit points are added until the spline is finalized (Enter, double-click
+// or Escape) with at least `minimum` of them (T11-D10, D13).
+const lifecycle = {
+  kind: "fitPoints",
+  minimum: 2,
+} as const satisfies SketchToolLifecycle;
 
 function getPlacedPoints(
   state: SketchToolRuntimeState,
 ): readonly SketchPoint[] {
   return state.placedPoints ?? [];
+}
+
+/**
+ * The placed fit points plus the live pointer while drawing. A pointer on
+ * the last fit point (where a release is ignored) adds nothing, so the
+ * preview keeps refitting through the placed points.
+ */
+function getPreviewPoints(
+  state: SketchToolRuntimeState,
+): readonly SketchPoint[] {
+  const placedPoints = getPlacedPoints(state);
+
+  return state.livePoint &&
+    state.status === "drawing" &&
+    !isCoincidentWithLastFitPoint(placedPoints, state.livePoint)
+    ? [...placedPoints, state.livePoint]
+    : placedPoints;
+}
+
+/** Whether `point` would make a zero-length span after the last fit point. */
+function isCoincidentWithLastFitPoint(
+  placedPoints: readonly SketchPoint[],
+  point: SketchPoint,
+) {
+  const last = placedPoints.at(-1);
+
+  return (
+    last !== undefined &&
+    reconstructPreviewSpline([last, point]).diagnostics.some(
+      (diagnostic) => diagnostic.code === "coincident-points",
+    )
+  );
 }
 
 function reconstructPreviewSpline(points: readonly SketchPoint[]) {
@@ -89,10 +127,10 @@ function validateSpline(points: readonly SketchPoint[]) {
     return { valid: false, message: geometryMessage };
   }
 
-  if (points.length < MIN_SPLINE_POINTS) {
+  if (points.length < lifecycle.minimum) {
     return {
       valid: false,
-      message: `Spline requires ${MIN_SPLINE_POINTS} points.`,
+      message: `Spline requires ${lifecycle.minimum} points.`,
     };
   }
 
@@ -106,10 +144,7 @@ function buildSplinePresentation(
   state: SketchToolRuntimeState,
 ): SketchToolPresentationSchema {
   const placedPoints = getPlacedPoints(state);
-  const previewPoints =
-    state.livePoint && state.status === "drawing"
-      ? [...placedPoints, state.livePoint]
-      : placedPoints;
+  const previewPoints = getPreviewPoints(state);
   const validation = state.validationMessage
     ? [
         {
@@ -119,20 +154,23 @@ function buildSplinePresentation(
         },
       ]
     : [];
-  const ready = previewPoints.length >= MIN_SPLINE_POINTS;
+  const missing = lifecycle.minimum - placedPoints.length;
+  const ready = missing <= 0;
 
   return {
     prompts: [
       {
         id: "spline-prompt",
-        text: ready ? "Place final spline point" : "Place spline points",
+        text: ready
+          ? "Place more spline points or finish the spline"
+          : "Place spline points",
         tone: validation.length > 0 ? "warning" : "neutral",
       },
     ],
     steps: [
       {
         id: "spline-step",
-        label: `${Math.min(previewPoints.length, MIN_SPLINE_POINTS)}/${MIN_SPLINE_POINTS} points`,
+        label: `${placedPoints.length} point${placedPoints.length === 1 ? "" : "s"}`,
       },
     ],
     cursor: { id: "spline-cursor", label: "Spline point", icon: "crosshair" },
@@ -140,8 +178,8 @@ function buildSplinePresentation(
       {
         id: "spline-completion",
         text: ready
-          ? "Click to accept the spline"
-          : `Place ${MIN_SPLINE_POINTS - previewPoints.length} more point${MIN_SPLINE_POINTS - previewPoints.length === 1 ? "" : "s"}`,
+          ? "Press Enter, double-click or press Escape to finish the spline"
+          : `Place ${missing} more point${missing === 1 ? "" : "s"}`,
         ready,
       },
     ],
@@ -157,7 +195,7 @@ function buildSplinePresentation(
             {
               id: "spline-completion-cue",
               kind: "completionCue" as const,
-              label: ready ? "Accept spline" : "Add point",
+              label: ready ? "Add point or finish spline" : "Add point",
               point: previewPoints.at(-1)!,
               ready,
             },
@@ -168,8 +206,8 @@ function buildSplinePresentation(
     extension: {
       id: "spline-workflow",
       payload: {
-        pointCount: previewPoints.length,
-        minimumPointCount: MIN_SPLINE_POINTS,
+        pointCount: placedPoints.length,
+        minimumPointCount: lifecycle.minimum,
         readyToComplete: ready,
       },
     },
@@ -189,7 +227,7 @@ export const splineSketchToolDefinition: SketchToolDefinition<"spline"> = {
       variantIds: ["spline", "controlPointSpline"],
     },
   },
-  lifecycle: { kind: "fitPoints", minimum: 2 },
+  lifecycle,
   activate() {
     const state = createIdleState();
 
@@ -200,13 +238,10 @@ export const splineSketchToolDefinition: SketchToolDefinition<"spline"> = {
     };
   },
   pointerMove({ state, point }) {
-    const previewPoints =
-      point && state.status === "drawing"
-        ? [...getPlacedPoints(state), point]
-        : getPlacedPoints(state);
+    const movedState = { ...state, livePoint: point };
+    const previewPoints = getPreviewPoints(movedState);
     const nextState = {
-      ...state,
-      livePoint: point,
+      ...movedState,
       validationMessage: getSplineGeometryValidationMessage(previewPoints),
     };
 
@@ -225,10 +260,20 @@ export const splineSketchToolDefinition: SketchToolDefinition<"spline"> = {
       };
     }
 
-    const nextPoints = [...getPlacedPoints(state), point];
-    const complete = nextPoints.length >= MIN_SPLINE_POINTS;
+    const placedPoints = getPlacedPoints(state);
+    // A release on the last fit point is ignored; the draft goes on.
+    if (
+      state.status === "drawing" &&
+      isCoincidentWithLastFitPoint(placedPoints, point)
+    ) {
+      return splineSketchToolDefinition.pointerMove({ state, point });
+    }
+
+    // Each release adds a fit point; the spline never completes on a
+    // release, only when it is finalized.
+    const nextPoints = [...placedPoints, point];
     const nextState = {
-      status: complete ? "idle" : "drawing",
+      status: "drawing",
       pointerDownPoint: nextPoints[0] ?? point,
       livePoint: null,
       placedPoints: nextPoints,
@@ -237,17 +282,12 @@ export const splineSketchToolDefinition: SketchToolDefinition<"spline"> = {
 
     return {
       state: nextState,
-      stagedEntities: complete ? [] : buildSplinePreview(nextPoints),
+      stagedEntities: buildSplinePreview(nextPoints),
       presentation: buildSplinePresentation(nextState),
     };
   },
   getStagedEntities(state) {
-    const previewPoints =
-      state.livePoint && state.status === "drawing"
-        ? [...getPlacedPoints(state), state.livePoint]
-        : getPlacedPoints(state);
-
-    return buildSplinePreview(previewPoints);
+    return buildSplinePreview(getPreviewPoints(state));
   },
   validate(start, end) {
     return validateSpline([start, end]);
@@ -258,7 +298,7 @@ export const splineSketchToolDefinition: SketchToolDefinition<"spline"> = {
     points,
     factories,
   }): SketchToolCommitContribution {
-    const splinePoints = (points ?? []).slice(0, MIN_SPLINE_POINTS);
+    const splinePoints = points ?? [];
     const pointIds = splinePoints.map((_, index) =>
       factories.createPointId(`spline-${index + 1}`),
     );

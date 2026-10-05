@@ -27,6 +27,7 @@ import {
   acceptSketchDraw,
   beginSketchTool,
   completeSketchOffsetPreviewPublication,
+  finalizeSketchDraw,
   createNewSketchSessionFromSupport,
   createSketchSessionFromSnapshot,
   getSketchSessionDisplayRenderables,
@@ -515,7 +516,7 @@ describe("T11f contextual point markers (T11-D8)", () => {
     );
     session = startSketchDraw(session, [0, 0]);
     session = acceptSketchDraw(session, [1, 0.6]);
-    session = acceptSketchDraw(session, [2, -0.4]);
+    session = finalizeSketchDraw(acceptSketchDraw(session, [2, -0.4]));
     const seed = session.definition.entities[0]!;
     session = patchSketchEditToolValue(
       selectSketchEditToolTarget(

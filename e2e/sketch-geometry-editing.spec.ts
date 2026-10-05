@@ -100,6 +100,9 @@ test("active sketch curve picking selects semantic curves without pixel-perfect 
   await workbench.clickViewportAt({ x: 280, y: 520 });
   await workbench.clickViewportAt({ x: 420, y: 360 });
   await workbench.clickViewportAt({ x: 560, y: 520 });
+  // Enter finalizes the spline (T11i); the construction toggle would
+  // discard it.
+  await page.keyboard.press("Enter");
 
   await workbench.activateTool(
     "Toggle sketch geometry construction-only or mark new sketch geometry as construction.",

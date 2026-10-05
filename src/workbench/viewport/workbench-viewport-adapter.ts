@@ -195,6 +195,10 @@ export function createWorkbenchViewportIntentHandler({
       case "sketchPointerReleased":
         onSketchRelease(intent.point, intent.target);
         return;
+      case "sketchDrawFinalizeRequested":
+        // Enter's confirm step: finalizes a viable spline, else nothing.
+        dispatch({ type: "sketch.confirmRequested" });
+        return;
       case "sketchGeometryDragStarted":
         onSketchGeometryDragStart(intent.target, intent.point);
         return;

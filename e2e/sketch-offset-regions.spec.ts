@@ -184,6 +184,8 @@ test("an outward offset of a spline closed by a line commits a certified shell; 
   await workbench.clickViewportAt({ x: 600, y: 560 });
   await workbench.clickViewportAt({ x: 720, y: 440 });
   await workbench.clickViewportAt({ x: 840, y: 560 });
+  // Enter finalizes the spline (T11i); a tool switch would discard it.
+  await page.keyboard.press("Enter");
   await expectStaged(workbench, 1);
   await workbench.activateTool("Create line geometry.");
   await workbench.clickViewportAt({ x: 840, y: 560 });

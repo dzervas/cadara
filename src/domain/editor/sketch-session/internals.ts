@@ -1651,6 +1651,9 @@ export function reconcileSketchToolDraft(
     drawStartSnap: sketchSnapReferencesExist(definition, session.drawStartSnap)
       ? session.drawStartSnap
       : null,
+    ...(sketchSnapReferencesExist(definition, session.fitPointEndSnap ?? null)
+      ? {}
+      : { fitPointEndSnap: null }),
   };
 
   return session.toolChain && isSketchToolChainActive(session)

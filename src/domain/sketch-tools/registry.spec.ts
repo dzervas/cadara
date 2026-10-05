@@ -9,6 +9,7 @@ import {
   beginSketchTool,
   createNewSketchSessionFromSupport,
   deriveSketchDisplayEntities,
+  finalizeSketchDraw,
   getSketchSessionDerivedValidity,
   getSketchSessionDisplayRenderables,
   getSketchToolPresentation,
@@ -16,6 +17,7 @@ import {
   startSketchDraw,
   updateSketchPointer,
 } from "@/domain/editor/sketch-session";
+import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
 import {
   getRegisteredSketchToolDefinitions,
   getSketchToolDefinition,
@@ -397,7 +399,9 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
       session = acceptSketchDraw(session, point);
     }
 
-    return session;
+    // A fit-point spline commits only when finalized (T11i); for every other
+    // tool this is a no-op.
+    return finalizeSketchDraw(session);
   }
 
   function testPointAndMidpointLineConstructorsCommitDurableIntent() {
@@ -565,7 +569,7 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
     ).toBeTruthy();
   }
 
-  function testSplineCollectsThreePointsAndCommitsDurableGeometry() {
+  function testSplineCollectsFitPointsUntilFinalizedAndCommitsDurableGeometry() {
     let session = beginSketchTool(
       createNewSketchSessionFromSupport(
         {
@@ -586,7 +590,7 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
     ).toBe("drawing");
     expect(
       session.definition.entities.length,
-      "Spline should not commit before it has enough points.",
+      "Spline should not commit before it is finalized.",
     ).toBe(0);
     expect(
       session.toolStagedEntities.some(
@@ -595,20 +599,47 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
       "Spline should stage preview geometry while collecting points.",
     ).toBeTruthy();
 
+    // T11i: the third click no longer completes the spline (T11-D10).
     session = acceptSketchDraw(session, [3, 0]);
+    session = acceptSketchDraw(session, [4, 2]);
+    expect(
+      session.status,
+      "Further clicks keep adding fit points instead of committing.",
+    ).toBe("drawing");
+    expect(session.definition.entities).toHaveLength(0);
+    expect(session.toolPlacedPoints).toEqual([
+      [0, 0],
+      [1, 2],
+      [3, 0],
+      [4, 2],
+    ]);
+
+    session = finalizeSketchDraw(session);
 
     expect(
       session.status,
       "Spline should return to idle after its first complete curve.",
     ).toBe("idle");
+    expect(session.activeTool, "Spline stays armed after finalize.").toBe(
+      "spline",
+    );
     expect(
       session.definition.entities[0]?.kind,
       "Spline commit output should add a durable spline entity.",
     ).toBe("spline");
     expect(
-      session.definition.points.length,
-      "Spline commit output should add its fit points.",
-    ).toBe(3);
+      session.definition.points.map(({ position }) => position),
+      "Spline commit output should add all of its fit points (no 3-point cap).",
+    ).toEqual([
+      [0, 0],
+      [1, 2],
+      [3, 0],
+      [4, 2],
+    ]);
+    expect(
+      session.definition.entities[0]?.kind === "spline" &&
+        session.definition.entities[0].pointOccurrences.length,
+    ).toBe(4);
     expect(
       session.commitRequest?.definition.entities[0]?.kind,
       "Spline commit request should include durable spline geometry.",
@@ -619,7 +650,7 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
     ).toBe(0);
   }
 
-  function testSplineRetainsInvalidIntentWithoutTransientDuplicatePoints() {
+  function testSplineIgnoresCoincidentFitPointReleases() {
     const tool = getSketchToolDefinition("spline");
     const activated = tool.activate();
     const first = tool.pointerRelease({
@@ -634,47 +665,106 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
     expect(
       normalSecond.presentation.steps[0]?.label,
       "A released partial spline should count authored occurrences without appending its consumed live point.",
-    ).toBe("2/3 points");
+    ).toBe("2 points");
     expect(
       tool.getStagedEntities(normalSecond.state).length,
       "A normal released partial spline should retain its preview instead of reconstructing a duplicate live occurrence.",
     ).toBe(1);
 
+    // T11i: a release on the last fit point is ignored (T11-D13), so no
+    // coincident fit point is ever authored by the tool.
     const duplicateSecond = tool.pointerRelease({
       state: first.state,
       point: [0, 0],
     });
     expect(
+      duplicateSecond.state.placedPoints,
+      "A release on the last fit point adds no fit point.",
+    ).toEqual([[0, 0]]);
+    expect(
+      duplicateSecond.state.status,
+      "The ignored release keeps the draft.",
+    ).toBe("drawing");
+    expect(
       duplicateSecond.state.validationMessage,
-      "A coincident second fit point should receive immediate owner-consistent feedback.",
-    ).toBe("Spline has consecutive coincident fit points.");
+      "An ignored release is not an error.",
+    ).toBeNull();
 
-    const completedInvalid = tool.pointerRelease({
+    const afterIgnored = tool.pointerRelease({
       state: duplicateSecond.state,
       point: [2, 0],
     });
     expect(
-      completedInvalid.state.status,
-      "Three structurally supported fit points should complete even when owner reconstruction is invalid.",
-    ).toBe("idle");
+      afterIgnored.state.status,
+      "A release never completes the spline; it adds the next fit point.",
+    ).toBe("drawing");
+    expect(afterIgnored.state.placedPoints).toEqual([
+      [0, 0],
+      [2, 0],
+    ]);
 
-    const invalidSession = drawSketchTool("spline", [
+    const ignoredSession = drawSketchTool("spline", [
       [0, 0],
       [0, 0],
       [2, 0],
     ]);
-    const invalidSpline = invalidSession.definition.entities[0];
     expect(
-      invalidSpline?.kind === "spline" &&
-        invalidSession.definition.points.map(({ position }) => position),
-      "Committed invalid spline intent should retain both genuinely clicked coincident coordinates.",
+      ignoredSession.definition.points.map(({ position }) => position),
+      "The finalized spline keeps only the genuinely distinct fit points.",
+    ).toEqual([
+      [0, 0],
+      [2, 0],
+    ]);
+    const ignoredSolvedSpline = solveSketchDefinitionCore({
+      definition: ignoredSession.definition,
+      tolerances: {
+        coincidence: 1e-6,
+        angleRadians: 1e-6,
+        minimumSegmentLength: 1e-6,
+      },
+      modelingTolerance: 1e-3,
+      partialSolvePolicy: "bestEffort",
+    }).solvedSnapshot.solvedEntities.find((entity) => entity.kind === "spline");
+    expect(
+      ignoredSolvedSpline?.kind === "spline" &&
+        ignoredSolvedSpline.reconstruction.validity,
+      "The owner reconstructs the finalized spline as valid.",
+    ).toBe("valid");
+    expect(
+      getSketchSessionDerivedValidity(ignoredSession).state,
+      "An ignored duplicate click leaves no invalid derived state behind.",
+    ).not.toBe("invalid");
+
+    // Review R-1: the tool cannot author consecutive coincident fit points,
+    // but a restore (Undo, load) or a drag can. Move the middle fit point of
+    // a finalized spline onto the first and rebuild the session.
+    const distinctSession = drawSketchTool("spline", [
+      [0, 0],
+      [1, 0],
+      [2, 0],
+    ]);
+    const [firstFitPoint, middleFitPoint] = distinctSession.definition.points;
+    const coincidentSession = rebuildSessionForDefinition(distinctSession, {
+      definition: {
+        ...distinctSession.definition,
+        points: distinctSession.definition.points.map((point) =>
+          point.pointId === middleFitPoint!.pointId
+            ? { ...point, position: firstFitPoint!.position }
+            : point,
+        ),
+      },
+    });
+    const invalidSpline = coincidentSession.definition.entities[0];
+    expect(
+      coincidentSession.definition.points.map(({ position }) => position),
+      "premise: the restored spline has consecutive coincident fit points",
     ).toEqual([
       [0, 0],
       [0, 0],
       [2, 0],
     ]);
     const invalidSolvedSpline = solveSketchDefinitionCore({
-      definition: invalidSession.definition,
+      definition: coincidentSession.definition,
       tolerances: {
         coincidence: 1e-6,
         angleRadians: 1e-6,
@@ -691,8 +781,8 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
       "The reconstruction owner should diagnose the retained coincident occurrences.",
     ).toEqual([{ code: "coincident-points", spanIndex: 0 }]);
     expect(
-      getSketchSessionDerivedValidity(invalidSession).state,
-      "Completed invalid spline intent should become invalid derived state rather than a modal tool trap.",
+      getSketchSessionDerivedValidity(coincidentSession).state,
+      "A coincident spline from a restore becomes invalid derived state rather than a modal tool trap.",
     ).toBe("invalid");
 
     const nearDistinctSession = drawSketchTool("spline", [
@@ -728,37 +818,52 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
       state: first.state,
       point: [1, 0],
     });
-    const invalidLive = tool.pointerMove({
+    const liveOnLast = tool.pointerMove({
       state: distinctSecond.state,
       point: [1, 0],
     });
     expect(
-      invalidLive.state.validationMessage,
-      "An invalid live candidate should report feedback before release.",
-    ).toBe("Spline has consecutive coincident fit points.");
+      liveOnLast.state.validationMessage,
+      "A live pointer on the last fit point (where a release is ignored) is not an error.",
+    ).toBeNull();
+    expect(liveOnLast.presentation.validation).toEqual([]);
     expect(
-      invalidLive.presentation.validation?.[0]?.message,
-      "A structurally complete invalid candidate should keep its owner diagnostic visible.",
-    ).toBe("Spline has consecutive coincident fit points.");
+      liveOnLast.stagedEntities.map((entity) => entity.kind),
+      "The preview keeps refitting through the placed points.",
+    ).toEqual(["spline"]);
     expect(
-      invalidLive.presentation.completionHints?.[0],
-      "Structural completion guidance should match the release that will commit invalid authored intent.",
+      liveOnLast.presentation.completionHints?.[0],
+      "With the minimum placed, the guidance offers finalizing the spline.",
     ).toMatchObject({
-      text: "Click to accept the spline",
+      text: "Press Enter, double-click or press Escape to finish the spline",
       ready: true,
     });
     expect(
-      invalidLive.presentation.completionHints?.[0]?.text,
+      liveOnLast.presentation.completionHints?.[0]?.text,
       "A complete candidate should never request zero or a negative number of additional points.",
     ).not.toMatch(/Place (?:0|-\d+) more/);
+    expect(
+      tool.pointerMove({ state: first.state, point: [3, 0] }).presentation
+        .completionHints?.[0],
+      "Below the minimum, the guidance asks for the missing point.",
+    ).toMatchObject({ text: "Place 1 more point", ready: false });
     const validLive = tool.pointerMove({
-      state: invalidLive.state,
+      state: liveOnLast.state,
       point: [1.00005, 0],
     });
     expect(
       validLive.state.validationMessage,
-      "Live candidate validation should recompute instead of sticking to an earlier invalid position.",
+      "Live candidate validation should recompute instead of sticking to an earlier position.",
     ).toBeNull();
+    expect(
+      validLive.stagedEntities[0]?.kind === "spline" &&
+        validLive.stagedEntities[0].points.length,
+      "A live point just off the last fit point extends the preview.",
+    ).toBeGreaterThan(
+      liveOnLast.stagedEntities[0]?.kind === "spline"
+        ? liveOnLast.stagedEntities[0].points.length
+        : Infinity,
+    );
   }
 
   async function testAdvancedCurveConstructorsCommitDurableIntent() {
@@ -1041,7 +1146,9 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
     const ordinaryPreview = ordinaryPreviewSession.toolStagedEntities.find(
       (entity) => entity.id === "preview-spline" && entity.kind === "spline",
     );
-    const ordinaryCommitted = acceptSketchDraw(ordinaryPreviewSession, [2, 0]);
+    const ordinaryCommitted = finalizeSketchDraw(
+      acceptSketchDraw(ordinaryPreviewSession, [2, 0]),
+    );
     const ordinaryOutput = deriveSketchDisplayEntities(ordinaryCommitted).find(
       (entity) => entity.label === "Spline 1" && entity.kind === "spline",
     );
@@ -1113,8 +1220,8 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
   testPointAndMidpointLineConstructorsCommitDurableIntent();
   testRectangleConstructorsCommitDurableIntent();
   testCircleArcAndPolygonConstructorsCommitDurableIntent();
-  testSplineCollectsThreePointsAndCommitsDurableGeometry();
-  testSplineRetainsInvalidIntentWithoutTransientDuplicatePoints();
+  testSplineCollectsFitPointsUntilFinalizedAndCommitsDurableGeometry();
+  testSplineIgnoresCoincidentFitPointReleases();
   await testAdvancedCurveConstructorsCommitDurableIntent();
   testAdvancedToolValidationRejectsDegenerateInput();
   await testProfileTextCommitsEditableTextAndDerivedProfile();

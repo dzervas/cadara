@@ -173,10 +173,12 @@ import {
   createViewportInvalidationKey,
   createViewportBvhSceneKey,
   getViewportPickTuning,
+  isSketchFitPointDraftActive,
   isViewportNavigationPointerMove,
   projectWorldPointToViewport,
   projectSceneTargetCentroidToViewport,
   resolveSectionScreenDragOffset,
+  resolveSketchFitPointRelease,
   resizeViewCubeRenderer,
   scheduleCoalescedSketchGeometryDragMove,
 } from "@/components/cad/three-cad-viewport-helpers";
@@ -279,6 +281,10 @@ export function ThreeCadViewport({
   const onSketchRelease = useCallback(
     (point: readonly [number, number], target?: PrimitiveRef | null) =>
       onIntent({ type: "sketchPointerReleased", point, target }),
+    [onIntent],
+  );
+  const onSketchDrawFinalize = useCallback(
+    () => onIntent({ type: "sketchDrawFinalizeRequested" }),
     [onIntent],
   );
   const onSketchGeometryDragStart = useCallback(
@@ -410,6 +416,9 @@ export function ThreeCadViewport({
   // The repeated-click cycle (T11d): a pure reducer's state kept in a ref,
   // and the pick resolved at the last pointer-up for its `click`.
   const pickCycleRef = useRef<SketchPickCycle | null>(null);
+  // The last dispatched fit-point release, for the double-click
+  // de-duplication (T11-D13).
+  const fitPointReleaseRef = useRef<{ x: number; y: number } | null>(null);
   const releasedPickRef = useRef<{
     x: number;
     y: number;
@@ -507,6 +516,7 @@ export function ThreeCadViewport({
   const clearHoverRef = useRef(onClearHover);
   const sketchMoveRef = useRef(onSketchMove);
   const sketchReleaseRef = useRef(onSketchRelease);
+  const sketchDrawFinalizeRef = useRef(onSketchDrawFinalize);
   const sketchGeometryDragStartRef = useRef(onSketchGeometryDragStart);
   const sketchGeometryDragMoveRef = useRef(onSketchGeometryDragMove);
   const sketchGeometryDragEndRef = useRef(onSketchGeometryDragEnd);
@@ -735,6 +745,7 @@ export function ThreeCadViewport({
     clearHoverRef.current = onClearHover;
     sketchMoveRef.current = onSketchMove;
     sketchReleaseRef.current = onSketchRelease;
+    sketchDrawFinalizeRef.current = onSketchDrawFinalize;
     sketchGeometryDragStartRef.current = onSketchGeometryDragStart;
     sketchGeometryDragMoveRef.current = onSketchGeometryDragMove;
     sketchGeometryDragEndRef.current = onSketchGeometryDragEnd;
@@ -774,6 +785,7 @@ export function ThreeCadViewport({
     onSketchGeometryDragStart,
     onSketchMove,
     onSketchRelease,
+    onSketchDrawFinalize,
     onSectionClear,
     onSectionFlip,
     onSectionOffsetChange,
@@ -2165,7 +2177,19 @@ export function ThreeCadViewport({
           )
         : (pick.top?.target ?? null);
 
-      if (point) {
+      if (!point) {
+        return;
+      }
+
+      // A double-click's second release does not add a fit point; its
+      // `dblclick` finalizes the spline (T11-D13).
+      const fitPointRelease = resolveSketchFitPointRelease({
+        session: activeSketchSession,
+        previous: fitPointReleaseRef.current,
+        release: { x: event.clientX, y: event.clientY },
+      });
+      fitPointReleaseRef.current = fitPointRelease.record;
+      if (fitPointRelease.dispatch) {
         sketchReleaseRef.current(point, releaseTarget);
       }
     };
@@ -2391,6 +2415,13 @@ export function ThreeCadViewport({
           );
         }
 
+        return;
+      }
+
+      // A double-click with a spline draft finalizes it (Enter's step, so
+      // < 2 points does nothing), never a connected selection (T11-D13).
+      if (isSketchFitPointDraftActive(sketchSessionRef.current)) {
+        sketchDrawFinalizeRef.current();
         return;
       }
 
@@ -2659,6 +2690,9 @@ export function ThreeCadViewport({
             // chooser's anchor (T11e review A-1, re-review N-1).
             clearSketchPickHint();
             if (chooserRef.current) closeSketchPickChooser();
+            // The last fit-point release's screen point is stale too: a
+            // click at that pixel is a new sketch point (T11i review A-1).
+            fitPointReleaseRef.current = null;
           }}
         />
         <BodyLodWatcher

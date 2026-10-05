@@ -11,7 +11,9 @@ import {
   confirmSketchDrawing,
   createNewSketchSession,
   deleteSelectedSketchGeometry,
+  deriveSketchDisplayEntities,
   escapeSketchDrawing,
+  finalizeSketchDraw,
   focusSketchStyleTool,
   resolveSketchDrawingEscapeStep,
   startSketchDraw,
@@ -136,18 +138,232 @@ describe("Escape and Enter on every armed drawing tool", () => {
   }
 });
 
-test("before T11i a 2-point spline draft cancels on Escape and Enter does nothing", () => {
-  // The spline still commits on its third click until T11i, so the finalize
-  // step cannot apply yet (review A-12).
-  const twoPoints = acceptSketchDraw(
-    startSketchDraw(armed("spline"), [0, 0]),
-    [4, 2],
-  );
+// T11i (T11-D10, D13): the fit-point spline lifecycle.
+describe("fit-point spline (T11i)", () => {
+  type Session = ReturnType<typeof armed>;
 
-  expect(twoPoints.status).toBe("drawing");
-  expect(twoPoints.toolPlacedPoints).toHaveLength(2);
-  expect(escapeSketchDrawing(twoPoints)).toBe("cancelDraft");
-  expect(confirmSketchDrawing(twoPoints)).toBe(null);
+  function place(session: Session, points: readonly [number, number][]) {
+    return points.reduce(
+      (current, point) =>
+        current.status === "drawing"
+          ? acceptSketchDraw(current, point)
+          : startSketchDraw(current, point),
+      session,
+    );
+  }
+
+  function splines(session: Session) {
+    return session.definition.entities.flatMap((entity) =>
+      entity.kind === "spline" ? [entity] : [],
+    );
+  }
+
+  test("2 points finalize on Escape and on Enter; 1 point cancels on Escape and Enter does nothing (T11-D10, review A-9)", () => {
+    const one = place(armed("spline"), [[0, 0]]);
+    expect(one.status).toBe("drawing");
+    expect(escapeSketchDrawing(one), "1 point: Escape cancels.").toBe(
+      "cancelDraft",
+    );
+    expect(confirmSketchDrawing(one), "1 point: Enter does nothing.").toBe(
+      null,
+    );
+    expect(
+      finalizeSketchDraw(one),
+      "Finalizing below the minimum changes nothing.",
+    ).toBe(one);
+
+    const two = acceptSketchDraw(one, [4, 2]);
+    expect(two.status).toBe("drawing");
+    expect(two.toolPlacedPoints).toHaveLength(2);
+    expect(escapeSketchDrawing(two), "2 points: Escape finalizes.").toBe(
+      "finalizeDraft",
+    );
+    expect(confirmSketchDrawing(two), "2 points: Enter finalizes.").toBe(
+      "finalizeDraft",
+    );
+
+    const finalized = finalizeSketchDraw(two);
+    expect(splines(finalized), "One spline is committed.").toHaveLength(1);
+    expect(finalized.definition.points.map(({ position }) => position)).toEqual(
+      [
+        [0, 0],
+        [4, 2],
+      ],
+    );
+    expect(finalized.activeTool, "Spline stays armed.").toBe("spline");
+    expect(finalized.status).toBe("idle");
+    expect(finalized.toolPlacedPoints).toEqual([]);
+    expect(finalized.toolStagedEntities).toEqual([]);
+    expect(
+      escapeSketchDrawing(finalized),
+      "With no draft, the next Escape leaves Spline.",
+    ).toBe("exitTool");
+    expect(confirmSketchDrawing(finalized)).toBe(null);
+  });
+
+  test("keeps adding fit points past 3, ignores a release on the last fit point, and commits every point", () => {
+    const points: [number, number][] = [
+      [0, 0],
+      [1, 2],
+      [3, 0],
+      [4, 2],
+      [6, 1],
+    ];
+    let session = place(armed("spline"), points.slice(0, 3));
+    expect(session.status, "The third click does not commit.").toBe("drawing");
+    expect(splines(session)).toEqual([]);
+
+    const ignored = acceptSketchDraw(session, [3, 0]);
+    expect(
+      ignored.toolPlacedPoints,
+      "A release on the last fit point is ignored.",
+    ).toEqual(points.slice(0, 3));
+    expect(ignored.status).toBe("drawing");
+    expect(ignored.validationMessage).toBe(null);
+    expect(ignored.definition).toBe(session.definition);
+
+    session = place(ignored, points.slice(3));
+    expect(session.toolPlacedPoints).toEqual(points);
+    const finalized = finalizeSketchDraw(session);
+    const [spline] = splines(finalized);
+    expect(
+      finalized.definition.points.map(({ position }) => position),
+      "All 5 fit points are kept.",
+    ).toEqual(points);
+    expect(
+      spline?.pointOccurrences.map((occurrence) => occurrence.pointId),
+    ).toEqual(finalized.definition.points.map(({ pointId }) => pointId));
+  });
+
+  test("the preview refits a smooth owner curve through every placed point and the live pointer, not a polyline", () => {
+    const placed: [number, number][] = [
+      [0, 0],
+      [1, 2],
+      [3, 0],
+      [4, 2],
+    ];
+    const live: [number, number] = [6, 1];
+    const session = updateSketchPointer(place(armed("spline"), placed), live);
+    const preview = session.toolStagedEntities.find(
+      (entity) => entity.kind === "spline",
+    );
+    if (preview?.kind !== "spline") throw Error("Expected a spline preview.");
+
+    const distanceTo = ([x, y]: readonly [number, number]) =>
+      Math.min(...preview.points.map(([px, py]) => Math.hypot(px - x, py - y)));
+    for (const point of [...placed, live]) {
+      expect(
+        distanceTo(point),
+        `The preview passes through ${JSON.stringify(point)}.`,
+      ).toBeLessThan(1e-9);
+    }
+    expect(
+      preview.points.length,
+      "Sampled curve, far more samples than fit points.",
+    ).toBeGreaterThan(4 * (placed.length + 1));
+    // The first span bends away from its chord (0,0)–(1,2).
+    const chordDistance = ([x, y]: readonly [number, number]) =>
+      Math.abs(2 * x - y) / Math.hypot(2, 1);
+    expect(
+      Math.max(...preview.points.slice(0, 17).map(chordDistance)),
+      "The preview is a smooth curve, not the control polygon.",
+    ).toBeGreaterThan(0.01);
+
+    // The preview is exactly what finalizing at the live point commits.
+    const committed = finalizeSketchDraw(acceptSketchDraw(session, live));
+    expect(
+      deriveSketchDisplayEntities(committed).find(
+        (entity) => entity.kind === "spline",
+      )?.points,
+    ).toEqual(preview.points);
+  });
+
+  test("the finalize commit infers the start and end snaps; the last fit point's snap survives a later pointer move", () => {
+    let session = acceptSketchDraw(
+      startSketchDraw(armed("line"), [0, 0]),
+      [10, 0],
+    );
+    const [line] = session.definition.entities;
+    if (line?.kind !== "lineSegment") throw Error("Expected the line.");
+    session = beginSketchTool(session, "spline");
+    session = place(session, [
+      [0, 0],
+      [5, 6],
+      [10, 0],
+    ]);
+    // The pointer moves on before Enter.
+    session = updateSketchPointer(session, [20, 20]);
+    const finalized = finalizeSketchDraw(session);
+    const [spline] = splines(finalized);
+    const fitPointIds = spline?.pointOccurrences.map(
+      (occurrence) => occurrence.pointId,
+    );
+    expect(
+      finalized.definition.points
+        .filter(({ pointId }) => fitPointIds?.includes(pointId))
+        .map(({ position }) => position),
+    ).toEqual([
+      [0, 0],
+      [5, 6],
+      [10, 0],
+    ]);
+    expect(
+      finalized.definition.constraints
+        .filter((constraint) => constraint.kind === "coincident")
+        .map((constraint) =>
+          constraint.kind === "coincident"
+            ? [...constraint.pointIds].sort()
+            : [],
+        ),
+      "Coincident with the line's start (start snap) and end (end snap).",
+    ).toEqual([
+      [line.startPointId, fitPointIds![0]!].sort(),
+      [line.endPointId, fitPointIds![2]!].sort(),
+    ]);
+  });
+
+  test("a restore keeps the placed fit points and drops a last-point snap whose point was undone (T11-D12)", () => {
+    const empty = armed("spline");
+    let session = acceptSketchDraw(
+      startSketchDraw(beginSketchTool(empty, "line"), [0, 0]),
+      [10, 0],
+    );
+    session = place(beginSketchTool(session, "spline"), [
+      [5, 6],
+      [10.05, 0.05],
+    ]);
+    expect(
+      session.fitPointEndSnap?.sources,
+      "premise: the last fit point snapped onto the line end",
+    ).toContainEqual(expect.objectContaining({ kind: "localPoint" }));
+
+    // Undo the line: the draft keeps its positions, the stale snap goes.
+    const restored = rebuildSessionForDefinition(session, {
+      definition: empty.definition,
+    });
+    expect(restored.activeTool).toBe("spline");
+    expect(restored.status).toBe("drawing");
+    expect(restored.toolPlacedPoints).toEqual([
+      [5, 6],
+      [10, 0],
+    ]);
+    expect(restored.fitPointEndSnap ?? null).toBe(null);
+
+    const finalized = finalizeSketchDraw(restored);
+    expect(splines(finalized)).toHaveLength(1);
+    const pointIds = new Set(
+      finalized.definition.points.map(({ pointId }) => pointId),
+    );
+    expect(
+      finalized.definition.constraints.flatMap((constraint) =>
+        constraint.kind === "coincident" ? constraint.pointIds : [],
+      ),
+      "No inferred constraint references the undone point.",
+    ).toEqual([]);
+    expect(
+      finalized.definition.points.every(({ pointId }) => pointIds.has(pointId)),
+    ).toBe(true);
+  });
 });
 
 test("Point commits one point entity on a single click (T11-D19)", () => {

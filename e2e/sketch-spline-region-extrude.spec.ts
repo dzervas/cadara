@@ -22,8 +22,8 @@ test.use({ viewport: { width: 1440, height: 960 } });
 // bounded by spline spans → the workbench's extrude region selection → the
 // browser OCC worker on the shipped `public/cadara-occ` build, which builds
 // exact Bézier edges (T10c). Only the browser runtime proves the shipped
-// bindings end to end. The native spline tool draws open 3-point splines
-// only, so the closed splines are seeded through the operation history.
+// bindings end to end. The native spline tool draws open splines only, so
+// the closed splines are seeded through the operation history.
 
 type Point = readonly [number, number];
 type SketchId = `sketch_${string}`;

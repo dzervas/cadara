@@ -73,6 +73,8 @@ export type ViewportIntent =
       point: readonly [number, number];
       target?: PrimitiveRef | null;
     }
+  /** A double-click with a spline draft: finalize it (T11-D13). */
+  | { type: "sketchDrawFinalizeRequested" }
   | {
       type: "sketchGeometryDragStarted";
       target: PrimitiveRef;
