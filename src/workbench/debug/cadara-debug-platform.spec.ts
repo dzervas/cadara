@@ -75,6 +75,7 @@ test("src/app/cadara-debug-platform.spec.ts installs the formal dev namespace an
     refreshDocument: () => {
       refreshedDocuments += 1;
     },
+    getSketchSnapshot: () => null,
     exportSession: () =>
       createCadaraDebugSession({
         build: { version: "1.0.0", commit: "abc123", mode: "development" },

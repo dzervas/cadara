@@ -93,6 +93,9 @@ export function resolveSketchPickStack<
       case "sketchPoint":
         if (target.sketchId !== sketchId) return "referencePoint";
         return pointIds.has(target.pointId) ? "authoredPoint" : null;
+      case "sketchTangentHandle":
+        if (target.sketchId !== sketchId) return null;
+        return "authoredPoint";
       case "sketchEntity": {
         if (target.sketchId !== sketchId) return "referenceCurve";
         const entity = entities.get(target.entityId);

@@ -40,9 +40,15 @@ import {
 import {
   getSketchPointMarkerVisibility,
   getSketchRevealedPointIds,
+  getSketchRevealedHandleEntityIds,
+  getSketchHandleVisibility,
   getSketchToolMarkerPointIds,
   type SketchPointMarkerContext,
 } from "@/domain/editor/sketch-session/display";
+import {
+  reconstructSplineAggregate,
+  orderedSplineOccurrences,
+} from "@/contracts/sketch/spline-geometry";
 import { withLiveSolveBasis } from "@/domain/editor/sketch-session/internals";
 import { mapSketchPointToWorld } from "@/domain/editor/sketch-session/state";
 import { collectSketchInteractionGeometry } from "@/domain/sketch-interaction/geometry";
@@ -67,6 +73,17 @@ const entityRef = (
   kind: "sketchEntity",
   sketchId,
   entityId: entityId(name),
+});
+const handleRef = (
+  entityName: string,
+  occurrenceId: string,
+  pointName: string,
+): PrimitiveRef => ({
+  kind: "sketchTangentHandle",
+  sketchId: FIXTURE_SKETCH_ID,
+  entityId: entityId(entityName),
+  occurrenceId,
+  pointId: pointId(pointName),
 });
 
 /**
@@ -581,5 +598,224 @@ describe("T11f contextual point markers (T11-D8)", () => {
         "hovering the shell reveals its terminal",
       ).toBe(true);
     }
+  });
+});
+
+// ── T12d: tangent handle geometry and visibility ──────────────────────────
+
+/** A spline with 3 points: p0 automatic, p1 authored [1,0], p2 authored [0,0] (zero). */
+function handleSession() {
+  const sketch = makeSketchFixture();
+  sketch.point("h0", 0, 0);
+  sketch.point("h1", 3, 5);
+  sketch.point("h2", 6, 1);
+  sketch.spline("hspline", ["h0", "h1", "h2"], "open", [
+    undefined,
+    [1, 0] as readonly [number, number],
+    [0, 0] as readonly [number, number],
+  ]);
+  // An unrelated line so the spline isn't the only entity.
+  sketch.point("xa", -3, -1);
+  sketch.point("xb", -3, 4);
+  sketch.line("xline", "xa", "xb");
+  const input = sketch.build();
+  const opened = createSketchSessionFromSnapshot(
+    sketchSnapshotRecordForTest(input, [], createStandardPlaneDefinition("xy")),
+    OCC_KERNEL_SETTINGS,
+  );
+  return withLiveSolveBasis(opened, opened.definition);
+}
+
+function handleTipMarker(
+  renderables: readonly SketchSessionDisplayRenderable[],
+  pointName: string,
+) {
+  const marker = renderables.find(
+    (renderable) =>
+      renderable.geometry.kind === "marker" &&
+      renderable.target?.kind === "sketchTangentHandle" &&
+      renderable.target.pointId === pointId(pointName),
+  );
+  if (!marker) throw new Error(`No handle tip marker for point ${pointName}.`);
+  return marker;
+}
+
+/** Whether a handle renderable is visible given the context. */
+function handleShown(
+  renderables: readonly SketchSessionDisplayRenderable[],
+  marker: SketchSessionDisplayRenderable,
+  context: Partial<SketchPointMarkerContext>,
+) {
+  return getSketchHandleVisibility(
+    marker,
+    getSketchRevealedHandleEntityIds(renderables, {
+      ...emptyContext,
+      ...context,
+    }),
+  );
+}
+
+describe("T12d: tangent handle geometry (tip = fit point + visible vector)", () => {
+  test("automatic handle: tip = fit point + mean-arm reconstruction vector", () => {
+    const session = handleSession();
+    const renderables = getSketchSessionDisplayRenderables(session);
+    const tip0 = handleTipMarker(renderables, "h0");
+    expect(tip0.geometry.kind).toBe("marker");
+
+    // Compute the expected tip: fit point + mean-arm handle vector.
+    const splineEntity = session.definition.entities.find(
+      (e) => e.kind === "spline" && e.entityId === entityId("hspline"),
+    );
+    expect(splineEntity).toBeTruthy();
+    const occs = orderedSplineOccurrences(splineEntity!);
+    expect(occs).toBeTruthy();
+    const solved = session.liveSolve!.solvedSnapshot.solvedPoints;
+    const positions: Record<string, readonly [number, number]> = {};
+    for (const occ of occs!) {
+      const sp = solved.find((s) => s.pointId === occ.pointId);
+      if (sp) positions[occ.pointId] = sp.solvedPosition;
+    }
+    const reconstruction = reconstructSplineAggregate(splineEntity!, positions);
+    expect(reconstruction.validity).toBe("valid");
+    if (reconstruction.validity !== "valid") return;
+
+    // h0 is automatic: visible vector = reconstruction.handles[0]
+    const h0Pos = positions[pointId("h0")]!;
+    const autoVec = reconstruction.handles[0]!;
+    const expectedTipWorld = mapSketchPointToWorld(session.plane, [
+      h0Pos[0] + autoVec[0],
+      h0Pos[1] + autoVec[1],
+    ]);
+    const markerPos = (
+      tip0.geometry as { position: readonly [number, number, number] }
+    ).position;
+    expect(markerPos[0]).toBeCloseTo(expectedTipWorld[0], 10);
+    expect(markerPos[1]).toBeCloseTo(expectedTipWorld[1], 10);
+    expect(markerPos[2]).toBeCloseTo(expectedTipWorld[2], 10);
+    expect(
+      autoVec[0] !== 0 || autoVec[1] !== 0,
+      "The automatic handle vector should be non-zero for interior/endpoint with distinct points.",
+    ).toBe(true);
+  });
+
+  test("authored handle: tip = fit point + authored vector", () => {
+    const session = handleSession();
+    const renderables = getSketchSessionDisplayRenderables(session);
+    const tip1 = handleTipMarker(renderables, "h1");
+    const solved = session.liveSolve!.solvedSnapshot.solvedPoints;
+    const h1Pos = solved.find(
+      (s) => s.pointId === pointId("h1"),
+    )!.solvedPosition;
+    const expectedTipWorld = mapSketchPointToWorld(session.plane, [
+      h1Pos[0] + 1,
+      h1Pos[1] + 0,
+    ]);
+    const markerPos = (
+      tip1.geometry as { position: readonly [number, number, number] }
+    ).position;
+    expect(markerPos[0]).toBeCloseTo(expectedTipWorld[0], 10);
+    expect(markerPos[1]).toBeCloseTo(expectedTipWorld[1], 10);
+  });
+
+  test("zero authored handle: tip coincides with fit point", () => {
+    const session = handleSession();
+    const renderables = getSketchSessionDisplayRenderables(session);
+    const tip2 = handleTipMarker(renderables, "h2");
+    const solved = session.liveSolve!.solvedSnapshot.solvedPoints;
+    const h2Pos = solved.find(
+      (s) => s.pointId === pointId("h2"),
+    )!.solvedPosition;
+    const expectedTipWorld = mapSketchPointToWorld(session.plane, h2Pos);
+    const markerPos = (
+      tip2.geometry as { position: readonly [number, number, number] }
+    ).position;
+    expect(markerPos[0]).toBeCloseTo(expectedTipWorld[0], 10);
+    expect(markerPos[1]).toBeCloseTo(expectedTipWorld[1], 10);
+    // Zero handle: no handle line renderable.
+    const hasLine = renderables.some(
+      (r) =>
+        r.geometry.kind === "polyline" &&
+        r.target?.kind === "sketchTangentHandle" &&
+        r.target.pointId === pointId("h2"),
+    );
+    expect(hasLine, "A zero handle must produce no polyline.").toBe(false);
+  });
+});
+
+describe("T12d: tangent handle visibility rule table (D8)", () => {
+  test("handles visible only when spline entity, fit point, or handle is hovered/selected", () => {
+    const session = handleSession();
+    const renderables = getSketchSessionDisplayRenderables(session);
+    const tip0 = handleTipMarker(renderables, "h0");
+
+    // Nothing active → hidden.
+    expect(
+      handleShown(renderables, tip0, {}),
+      "nothing hovered or selected → hidden",
+    ).toBe(false);
+
+    // Spline entity hovered → visible.
+    expect(
+      handleShown(renderables, tip0, {
+        hoverTarget: entityRef("hspline"),
+      }),
+      "spline entity hovered → visible",
+    ).toBe(true);
+
+    // Spline entity in hover stack → visible.
+    expect(
+      handleShown(renderables, tip0, {
+        hoverStack: [entityRef("hspline")],
+      }),
+      "spline entity in hover stack → visible",
+    ).toBe(true);
+
+    // Fit point of the spline hovered → visible.
+    expect(
+      handleShown(renderables, tip0, {
+        hoverTarget: pointRef("h1"),
+      }),
+      "fit point of the spline hovered → visible",
+    ).toBe(true);
+
+    // A handle of the spline hovered → visible.
+    expect(
+      handleShown(renderables, tip0, {
+        hoverTarget: handleRef("hspline", "hspline_o0", "h0"),
+      }),
+      "a handle of the spline hovered → visible",
+    ).toBe(true);
+
+    // Spline entity selected → visible.
+    expect(
+      handleShown(renderables, tip0, {
+        selection: [entityRef("hspline")],
+      }),
+      "spline entity selected → visible",
+    ).toBe(true);
+
+    // Fit point selected → visible.
+    expect(
+      handleShown(renderables, tip0, {
+        selection: [pointRef("h0")],
+      }),
+      "fit point selected → visible",
+    ).toBe(true);
+
+    // Unrelated entity hovered → hidden.
+    expect(
+      handleShown(renderables, tip0, {
+        hoverTarget: entityRef("xline"),
+      }),
+      "unrelated entity hovered → hidden",
+    ).toBe(false);
+
+    // Unrelated point hovered → hidden.
+    expect(
+      handleShown(renderables, tip0, {
+        hoverTarget: pointRef("xa"),
+      }),
+      "unrelated point hovered → hidden",
+    ).toBe(false);
   });
 });

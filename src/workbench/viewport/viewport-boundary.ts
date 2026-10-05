@@ -80,8 +80,16 @@ export type ViewportIntent =
       target: PrimitiveRef;
       point: readonly [number, number];
     }
-  | { type: "sketchGeometryDragMoved"; point: readonly [number, number] }
-  | { type: "sketchGeometryDragEnded"; point: readonly [number, number] }
+  | {
+      type: "sketchGeometryDragMoved";
+      point: readonly [number, number];
+      exactZero?: boolean;
+    }
+  | {
+      type: "sketchGeometryDragEnded";
+      point: readonly [number, number];
+      exactZero?: boolean;
+    }
   | { type: "sketchGeometryDragCancelled" }
   | {
       type: "specialModeClicked";

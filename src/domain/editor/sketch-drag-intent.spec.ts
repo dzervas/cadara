@@ -662,6 +662,105 @@ test("T12c D10: resolveHandleFromTarget maps PrimitiveRef to the correct handle"
     }
   }
 
+  // T12d: sketchTangentHandle PrimitiveRef → tangentHandle drag handle.
+  function testSketchTangentHandleRefResolvesToTangentHandle() {
+    // Add a spline entity to the definition.
+    const splineDef: SketchDefinition = {
+      ...definition,
+      pointIds: [...definition.pointIds, "sp_0", "sp_1", "sp_2"],
+      points: [
+        ...definition.points,
+        {
+          pointId: "sp_0" as `sketch_point_${string}`,
+          label: "sp_0",
+          target: {
+            kind: "sketchPoint" as const,
+            sketchId: "sketch_primary" as `sketch_${string}`,
+            pointId: "sp_0" as `sketch_point_${string}`,
+          },
+          position: [0, 3] as const,
+          isConstruction: false,
+        },
+        {
+          pointId: "sp_1" as `sketch_point_${string}`,
+          label: "sp_1",
+          target: {
+            kind: "sketchPoint" as const,
+            sketchId: "sketch_primary" as `sketch_${string}`,
+            pointId: "sp_1" as `sketch_point_${string}`,
+          },
+          position: [2, 6] as const,
+          isConstruction: false,
+        },
+        {
+          pointId: "sp_2" as `sketch_point_${string}`,
+          label: "sp_2",
+          target: {
+            kind: "sketchPoint" as const,
+            sketchId: "sketch_primary" as `sketch_${string}`,
+            pointId: "sp_2" as `sketch_point_${string}`,
+          },
+          position: [5, 3] as const,
+          isConstruction: false,
+        },
+      ],
+      entityIds: [...definition.entityIds, "e_spline"],
+      entities: [
+        ...definition.entities,
+        {
+          kind: "spline",
+          entityId: "e_spline" as `sketch_entity_${string}`,
+          label: "Spline",
+          target: {
+            kind: "sketchEntity" as const,
+            sketchId: "sketch_primary" as `sketch_${string}`,
+            entityId: "e_spline" as `sketch_entity_${string}`,
+          },
+          isConstruction: false,
+          closure: "open",
+          interpolationPolicy: "centripetal-mean-arm-v1",
+          pointOccurrenceIds: ["occ_0", "occ_1", "occ_2"],
+          pointOccurrences: [
+            {
+              occurrenceId: "occ_0",
+              pointId: "sp_0" as `sketch_point_${string}`,
+              tangent: { kind: "automatic" as const },
+            },
+            {
+              occurrenceId: "occ_1",
+              pointId: "sp_1" as `sketch_point_${string}`,
+              tangent: {
+                kind: "authored" as const,
+                vector: [1, 0] as const,
+              },
+            },
+            {
+              occurrenceId: "occ_2",
+              pointId: "sp_2" as `sketch_point_${string}`,
+              tangent: { kind: "automatic" as const },
+            },
+          ],
+        } as import("@/contracts/sketch/schema").SketchEntityDefinition,
+      ],
+    };
+    const handle = resolveHandleFromTarget(splineDef, {
+      kind: "sketchTangentHandle",
+      sketchId: "sketch_primary" as `sketch_${string}`,
+      entityId: "e_spline" as `sketch_entity_${string}`,
+      occurrenceId: "occ_1",
+      pointId: "sp_1" as `sketch_point_${string}`,
+    });
+    expect(
+      handle,
+      "T12d: sketchTangentHandle PrimitiveRef should resolve to tangentHandle.",
+    ).toEqual({
+      kind: "tangentHandle",
+      entityId: "e_spline",
+      occurrenceId: "occ_1",
+      pointId: "sp_1",
+    });
+  }
+
   testLineBodyResolvesToEntityBody();
   testCircleBodyResolvesToRim();
   testArcBodyResolvesToRim();
@@ -672,4 +771,5 @@ test("T12c D10: resolveHandleFromTarget maps PrimitiveRef to the correct handle"
   testNonSketchTargetReturnsNull();
   testConstructionCurveIsDraggable();
   testD9RefusalsForEveryKind();
+  testSketchTangentHandleRefResolvesToTangentHandle();
 });

@@ -1900,7 +1900,11 @@ export function beginSketchGeometryDrag(
   }
 
   // D9: non-draggable targets return unchanged.
-  if (target.kind !== "sketchPoint" && target.kind !== "sketchEntity") {
+  if (
+    target.kind !== "sketchPoint" &&
+    target.kind !== "sketchEntity" &&
+    target.kind !== "sketchTangentHandle"
+  ) {
     return session;
   }
 

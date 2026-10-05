@@ -647,4 +647,142 @@ test("src/domain/editor/workbench-interactions.spec.ts", async () => {
   testEscapeDuringActiveDragCancelsDrag();
   testEscapeDuringDragBeatsReferencePicker();
   testD3SelectionInStackIsDragged();
+  testD3aSplineEntityDoesNotOverrideOwnSubTargets();
+
+  function testD3aSplineEntityDoesNotOverrideOwnSubTargets() {
+    const sketchId = "sketch_primary" as `sketch_${string}`;
+    const splineEntityId = "sketch_entity_spline" as `sketch_entity_${string}`;
+    const splineEntity: PrimitiveRef = {
+      kind: "sketchEntity",
+      sketchId,
+      entityId: splineEntityId,
+    };
+    const fitPointId = "sketch_point_sp0" as `sketch_point_${string}`;
+    const fitPoint: PrimitiveRef = {
+      kind: "sketchPoint",
+      sketchId,
+      pointId: fitPointId,
+    };
+    const handleTip: PrimitiveRef = {
+      kind: "sketchTangentHandle",
+      sketchId,
+      entityId: splineEntityId,
+      occurrenceId: "occ_0",
+      pointId: fitPointId,
+    };
+    const otherLineId = "sketch_entity_other_line" as `sketch_entity_${string}`;
+    const otherLine: PrimitiveRef = {
+      kind: "sketchEntity",
+      sketchId,
+      entityId: otherLineId,
+    };
+    const def: import("@/contracts/sketch/schema").SketchDefinition = {
+      schemaVersion: "sketch-definition/v1alpha2",
+      referenceIds: [],
+      references: [],
+      pointIds: [fitPointId, "sketch_point_sp1"],
+      points: [
+        {
+          pointId: fitPointId,
+          label: "sp0",
+          target: fitPoint,
+          position: [0, 0],
+          isConstruction: false,
+        },
+        {
+          pointId: "sketch_point_sp1" as `sketch_point_${string}`,
+          label: "sp1",
+          target: {
+            kind: "sketchPoint",
+            sketchId,
+            pointId: "sketch_point_sp1" as `sketch_point_${string}`,
+          },
+          position: [3, 5],
+          isConstruction: false,
+        },
+      ],
+      entityIds: [splineEntityId, otherLineId],
+      entities: [
+        {
+          kind: "spline",
+          entityId: splineEntityId,
+          label: "Spline",
+          target: splineEntity,
+          isConstruction: false,
+          closure: "open",
+          interpolationPolicy: "centripetal-mean-arm-v1",
+          pointOccurrenceIds: ["occ_0", "occ_1"],
+          pointOccurrences: [
+            {
+              occurrenceId: "occ_0",
+              pointId: fitPointId,
+              tangent: { kind: "authored", vector: [0, 0] as const },
+            },
+            {
+              occurrenceId: "occ_1",
+              pointId: "sketch_point_sp1" as `sketch_point_${string}`,
+              tangent: { kind: "automatic" },
+            },
+          ],
+        } as import("@/contracts/sketch/schema").SketchEntityDefinition,
+        {
+          kind: "lineSegment",
+          entityId: otherLineId,
+          label: "Line",
+          target: otherLine,
+          isConstruction: false,
+          startPointId: fitPointId,
+          endPointId: "sketch_point_sp1" as `sketch_point_${string}`,
+        } as import("@/contracts/sketch/schema").SketchEntityDefinition,
+      ],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+      dimensions: [],
+    };
+
+    // (a) Spline selected, press on its handle tip (spline curve also
+    //     in stack) → handle wins.
+    expect(
+      resolveSketchDragTarget(
+        [{ target: fitPoint }, { target: handleTip }, { target: splineEntity }],
+        [splineEntity],
+        def,
+      ),
+      "D3a(a): spline selected + handle in stack → handle.",
+    ).toEqual(handleTip);
+
+    // (b) Fit point selected, its zero handle coincident
+    //     (stack [fitPoint, handle]) → fit point wins.
+    expect(
+      resolveSketchDragTarget(
+        [{ target: fitPoint }, { target: handleTip }],
+        [fitPoint],
+        def,
+      ),
+      "D3a(b): fit point selected + zero handle in stack → fit point.",
+    ).toEqual(fitPoint);
+
+    // (c) Zero handle selected by cycling (stack [fitPoint, handle])
+    //     → handle wins.
+    expect(
+      resolveSketchDragTarget(
+        [{ target: fitPoint }, { target: handleTip }],
+        [handleTip],
+        def,
+      ),
+      "D3a(c): zero handle selected by cycling → handle.",
+    ).toEqual(handleTip);
+
+    // (d) An unrelated selected curve in the stack still wins over
+    //     stack[0] (unchanged D3).
+    expect(
+      resolveSketchDragTarget(
+        [{ target: fitPoint }, { target: otherLine }],
+        [otherLine],
+        def,
+      ),
+      "D3a(d): unrelated selected curve in stack → that curve (D3).",
+    ).toEqual(otherLine);
+  }
 });

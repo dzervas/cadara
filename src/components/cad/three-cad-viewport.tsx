@@ -115,8 +115,10 @@ import {
   type SketchPickCycle,
 } from "@/domain/sketch-interaction/pick-stack";
 import { getSketchSessionDisplayDefinition } from "@/domain/editor/sketch-session/internals";
+import { mapSketchPointToWorld } from "@/domain/editor/sketch-session/state";
 import {
   getSketchRevealedPointIds,
+  getSketchRevealedHandleEntityIds,
   getSketchToolMarkerPointIds,
 } from "@/domain/editor/sketch-session/display";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
@@ -180,6 +182,7 @@ import {
   projectWorldPointToViewport,
   projectSceneTargetCentroidToViewport,
   resolveSketchDragGesture,
+  shouldCaptureZeroTangentHandle,
   SKETCH_DRAG_THRESHOLD_PX,
   resolveSectionScreenDragOffset,
   resolveSketchFitPointRelease,
@@ -299,13 +302,13 @@ export function ThreeCadViewport({
     [onIntent],
   );
   const onSketchGeometryDragMove = useCallback(
-    (point: readonly [number, number]) =>
-      onIntent({ type: "sketchGeometryDragMoved", point }),
+    (point: readonly [number, number], options?: { exactZero?: boolean }) =>
+      onIntent({ type: "sketchGeometryDragMoved", point, ...options }),
     [onIntent],
   );
   const onSketchGeometryDragEnd = useCallback(
-    (point: readonly [number, number]) =>
-      onIntent({ type: "sketchGeometryDragEnded", point }),
+    (point: readonly [number, number], options?: { exactZero?: boolean }) =>
+      onIntent({ type: "sketchGeometryDragEnded", point, ...options }),
     [onIntent],
   );
   const onSketchGeometryDragCancel = useCallback(
@@ -403,6 +406,7 @@ export function ThreeCadViewport({
   const pendingSketchGeometryDragPointRef = useRef<
     readonly [number, number] | null
   >(null);
+  const pendingSketchGeometryDragExactZeroRef = useRef(false);
   const pendingSketchGeometryDragFrameIdRef = useRef<number | null>(null);
   const pendingSketchGeometryDragRef = useRef<{
     target: PrimitiveRef;
@@ -492,24 +496,31 @@ export function ThreeCadViewport({
     [markerActiveTool, markerDrawStartSnap],
   );
   // One revealed-point set per render, not a scan per marker (A-3).
-  const sketchMarkerContext = useMemo(
-    () => ({
-      revealedPointIds: getSketchRevealedPointIds(sketchDisplayRenderables, {
-        hoverStack: sketchHoverStack.targets,
-        hoverTarget,
-        selection,
-        toolPointIds: sketchMarkerToolPointIds,
-      }),
-      hoverTarget,
-    }),
-    [
+  const sketchMarkerContext = useMemo(() => {
+    const context = {
+      hoverStack: sketchHoverStack.targets,
       hoverTarget,
       selection,
-      sketchDisplayRenderables,
-      sketchHoverStack,
-      sketchMarkerToolPointIds,
-    ],
-  );
+      toolPointIds: sketchMarkerToolPointIds,
+    };
+    return {
+      revealedPointIds: getSketchRevealedPointIds(
+        sketchDisplayRenderables,
+        context,
+      ),
+      revealedHandleEntityIds: getSketchRevealedHandleEntityIds(
+        sketchDisplayRenderables,
+        context,
+      ),
+      hoverTarget,
+    };
+  }, [
+    hoverTarget,
+    selection,
+    sketchDisplayRenderables,
+    sketchHoverStack,
+    sketchMarkerToolPointIds,
+  ]);
   // The hint with the definition and tool it was computed for; it shows
   // only while both are current (review A-3).
   const [pickHint, setPickHint] = useState<{
@@ -563,6 +574,7 @@ export function ThreeCadViewport({
   const sectionViewRef = useRef(activeSectionView);
   const renderablesRef = useRef(renderables);
   const sketchDisplayRenderablesRef = useRef(sketchDisplayRenderables);
+  const sketchMarkerContextRef = useRef(sketchMarkerContext);
   const requestCameraTransition = useCallback(
     (targetFrame: ViewportCameraFrame, fromFrame?: ViewportCameraFrame) => {
       const camera = cameraRef.current;
@@ -647,14 +659,17 @@ export function ThreeCadViewport({
     [projectionMode],
   );
   const scheduleSketchGeometryDragMove = useCallback(
-    (point: readonly [number, number]) => {
+    (point: readonly [number, number], options?: { exactZero?: boolean }) => {
       scheduleCoalescedSketchGeometryDragMove({
         point,
+        exactZero: options?.exactZero,
         pendingPointRef: pendingSketchGeometryDragPointRef,
+        pendingExactZeroRef: pendingSketchGeometryDragExactZeroRef,
         pendingFrameIdRef: pendingSketchGeometryDragFrameIdRef,
         requestFrame: (callback) => window.requestAnimationFrame(callback),
         isDragActive: () => sketchGeometryDragRef.current !== null,
-        onMove: (latestPoint) => sketchGeometryDragMoveRef.current(latestPoint),
+        onMove: (latestPoint, opts) =>
+          sketchGeometryDragMoveRef.current(latestPoint, opts),
       });
     },
     [],
@@ -819,6 +834,7 @@ export function ThreeCadViewport({
     sectionViewRef.current = activeSectionView;
     renderablesRef.current = renderables;
     sketchDisplayRenderablesRef.current = sketchDisplayRenderables;
+    sketchMarkerContextRef.current = sketchMarkerContext;
     bvhSceneKeyRef.current = bvhSceneKey;
   }, [
     activeSectionBounds,
@@ -826,6 +842,7 @@ export function ThreeCadViewport({
     bvhSceneKey,
     renderables,
     sketchDisplayRenderables,
+    sketchMarkerContext,
   ]);
 
   useEffect(() => {
@@ -1521,6 +1538,8 @@ export function ThreeCadViewport({
           sketchDisplayRenderables: sketchDisplayRenderablesRef.current,
           acceptsTarget: acceptsViewportTarget,
           currentHoverTarget: hoverTargetRef.current,
+          revealedHandleEntityIds:
+            sketchMarkerContextRef.current?.revealedHandleEntityIds,
         }),
         ...collectProjectedSketchCurveCandidates({
           clientX,
@@ -1891,6 +1910,41 @@ export function ThreeCadViewport({
       }
     };
 
+    /** T12d D4: check whether the pointer is within 6 screen-px of a
+     *  tangent handle's fit point (for exact-zero capture). */
+    const isWithinZeroCaptureRadius = (
+      event: PointerEvent,
+      viewportRect: DOMRect,
+      handleTarget: import("@/contracts/shared/references").SketchTangentHandleRef,
+    ): boolean => {
+      const dragSession = sketchSessionRef.current;
+      if (!dragSession || !cameraRef.current) return false;
+      const ptId = handleTarget.pointId;
+      const solvedPt = dragSession.liveSolve?.solvedSnapshot.solvedPoints.find(
+        (sp) => sp.pointId === ptId,
+      );
+      const fitPos =
+        solvedPt?.solvedPosition ??
+        dragSession.definition.points.find((p) => p.pointId === ptId)?.position;
+      if (!fitPos) return false;
+      const fitWorld = mapSketchPointToWorld(dragSession.plane, fitPos);
+      const proj = new THREE.Vector3(
+        fitWorld[0],
+        fitWorld[1],
+        fitWorld[2],
+      ).project(cameraRef.current);
+      return shouldCaptureZeroTangentHandle(
+        {
+          x: event.clientX - viewportRect.left,
+          y: event.clientY - viewportRect.top,
+        },
+        {
+          x: ((proj.x + 1) / 2) * viewportRect.width,
+          y: ((-proj.y + 1) / 2) * viewportRect.height,
+        },
+      );
+    };
+
     const handlePointerMove = (event: PointerEvent) => {
       const viewportRect = canvasElement.getBoundingClientRect();
 
@@ -1940,6 +1994,28 @@ export function ThreeCadViewport({
             pointerId: event.pointerId,
             sketchPoint,
           });
+          // T12d D4: zero capture — when dragging a tangent handle and
+          // the pointer is within the screen-px threshold of the fit
+          // point, signal exactZero so the session stores exactly [0, 0].
+          let zeroCaptured = false;
+          if (
+            actions.scheduleDragMove &&
+            gesturePhase.kind === "active" &&
+            gesturePhase.target.kind === "sketchTangentHandle"
+          ) {
+            zeroCaptured = isWithinZeroCaptureRadius(
+              event,
+              viewportRect,
+              gesturePhase.target as import("@/contracts/shared/references").SketchTangentHandleRef,
+            );
+          }
+          if (zeroCaptured && actions.scheduleDragMove) {
+            scheduleSketchGeometryDragMove(actions.scheduleDragMove, {
+              exactZero: true,
+            });
+            // Skip the normal applyDragGestureActions scheduleDragMove.
+            actions.scheduleDragMove = null;
+          }
           applyDragGestureActions(actions, canvasElement);
           if (actions.consumed) {
             if (actions.preventDefault) {
@@ -2190,6 +2266,23 @@ export function ThreeCadViewport({
             clientY: event.clientY,
             sketchPoint,
           });
+          // T12d D4: zero capture on drag end.
+          if (
+            actions.endDrag &&
+            gesturePhase.target.kind === "sketchTangentHandle" &&
+            isWithinZeroCaptureRadius(
+              event,
+              viewportRect,
+              gesturePhase.target as import("@/contracts/shared/references").SketchTangentHandleRef,
+            )
+          ) {
+            // Signal exactZero through the end-drag dispatch.
+            sketchGeometryDragEndRef.current(actions.endDrag, {
+              exactZero: true,
+            });
+            // Suppress the normal endDrag dispatch in applyDragGestureActions.
+            actions.endDrag = null;
+          }
           applyDragGestureActions(actions, canvasElement);
           primaryPointerDownRef.current = null;
           return;

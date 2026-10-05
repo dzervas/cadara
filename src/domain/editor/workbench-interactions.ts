@@ -247,15 +247,56 @@ export function resolveSketchDragTarget(
   selection: readonly PrimitiveRef[],
   definition: SketchDefinition,
 ): PrimitiveRef | null {
-  // Selection-first: walk selection backwards (most recently selected first).
+  // D3: the selected draggable candidate in the pointer's stack wins
+  // (most recently selected first).
+  // D3a exception: a selected *spline entity* never overrides its own
+  // sub-targets (fit points and tangent-handle tips) that are in the
+  // stack — selecting the spline is how handles are revealed, so
+  // pressing a revealed handle or fit point drags that sub-target.
   for (let i = selection.length - 1; i >= 0; i--) {
     const sel = selection[i]!;
     if (
-      stack.some((entry) => primitiveRefEquals(entry.target, sel)) &&
-      resolveHandleFromTarget(definition, sel) !== null
+      !stack.some((entry) => primitiveRefEquals(entry.target, sel)) ||
+      resolveHandleFromTarget(definition, sel) === null
     ) {
-      return sel;
+      continue;
     }
+    // D3a: skip if sel is a spline entity and the stack contains one of
+    // its own sub-targets (a fit point or handle belonging to the spline).
+    if (sel.kind === "sketchEntity") {
+      const entity = definition.entities.find(
+        (e) => e.entityId === sel.entityId,
+      );
+      if (
+        entity?.kind === "spline" &&
+        stack.some(
+          (entry) =>
+            (entry.target.kind === "sketchTangentHandle" &&
+              entry.target.entityId === sel.entityId) ||
+            (entry.target.kind === "sketchPoint" &&
+              entity.pointOccurrences.some(
+                (occ) =>
+                  occ.pointId ===
+                  (entry.target as { pointId?: string }).pointId,
+              )),
+        )
+      ) {
+        continue;
+      }
+    }
+    return sel;
+  }
+  // T12d: a handle tip in the stack beats an arbitrary stack[0] entity
+  // (e.g. when the spline entity is in the stack from curve proximity
+  // but only the handle is the precise target).
+  const handleInStack = stack.find(
+    (entry) => entry.target.kind === "sketchTangentHandle",
+  );
+  if (
+    handleInStack &&
+    resolveHandleFromTarget(definition, handleInStack.target) !== null
+  ) {
+    return handleInStack.target;
   }
   // Fall back to stack[0].
   if (stack.length > 0) {

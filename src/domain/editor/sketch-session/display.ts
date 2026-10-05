@@ -27,12 +27,16 @@ import {
   tessellateCubicSpans,
   tessellateProjectedSpline,
   solvedCubicSpans,
+  orderedSplineOccurrences,
+  splineVisibleHandleVectors,
+  type SplineVector,
 } from "@/contracts/sketch/spline-geometry";
 import {
   projectedSplineIsClosed,
   type ProjectedSketchReferenceRecord,
 } from "@/contracts/solver/schema";
 import type { PrimitiveRef } from "@/core/editor/schema";
+import type { SketchTangentHandleRef } from "@/contracts/shared/references";
 import { solveReferenceImageOperationState } from "@/domain/reference-image-calibration/state";
 import {
   collectActiveReferenceImageOperations,
@@ -331,6 +335,13 @@ export function getStableSketchSessionDisplayRenderables(
       datumGuideExtent,
     ),
     ...pointRenderables,
+    ...createTangentHandleRenderables(
+      session,
+      sketchId,
+      displayDefinition,
+      solvedPointPositionsById,
+      constraintDisplaySummary,
+    ),
     ...referenceImageAnchorOverlayRenderables,
     ...entityRenderables,
     ...entityRenderables.flatMap(createOverconstraintDiagnosticRenderable),
@@ -380,6 +391,120 @@ export function getStableSketchSessionDisplayRenderables(
   stableDisplayCacheKey = stableKey;
   stableDisplayCacheRenderables = renderables;
 
+  return renderables;
+}
+
+/**
+ * Tangent-handle renderables for every spline occurrence (T12d, D8):
+ * a line from the fit point to the handle tip, and a small tip marker.
+ * The visible vector is the authored vector for authored tangents, or
+ * the mean-arm handle vector from the reconstruction for automatic ones.
+ * Exact zero: no line, the tip coincides with the fit point.
+ *
+ * Visibility: contextual, owned by the spline entity — shown when the
+ * spline, any of its fit points, or a handle is hovered/selected/dragged.
+ */
+function createTangentHandleRenderables(
+  session: SketchSessionState,
+  sketchId: SketchId,
+  displayDefinition: SketchDefinition,
+  solvedPointPositionsById: ReadonlyMap<SketchPointId, SketchPoint>,
+  constraintDisplaySummary: SketchConstraintDisplaySummary,
+): SketchSessionDisplayRenderable[] {
+  const renderables: SketchSessionDisplayRenderable[] = [];
+  for (const entity of displayDefinition.entities) {
+    if (entity.kind !== "spline") continue;
+    const occurrences = orderedSplineOccurrences(entity);
+    if (!occurrences || occurrences.length < 2) continue;
+    const positions: Record<string, SplineVector> = {};
+    for (const occ of occurrences) {
+      const pos = solvedPointPositionsById.get(occ.pointId as SketchPointId);
+      if (!pos) continue;
+      positions[occ.pointId] = pos;
+    }
+    const visibleVectors = splineVisibleHandleVectors(entity, positions);
+    if (!visibleVectors) continue;
+    for (let i = 0; i < occurrences.length; i++) {
+      const occ = occurrences[i]!;
+      const fitPointPos = solvedPointPositionsById.get(
+        occ.pointId as SketchPointId,
+      );
+      if (!fitPointPos) continue;
+      const isAuthored = occ.tangent.kind === "authored";
+      const visibleVector: SplineVector = visibleVectors[i]!;
+      const tipPosition: SketchPoint = [
+        fitPointPos[0] + visibleVector[0],
+        fitPointPos[1] + visibleVector[1],
+      ];
+      const isZero = visibleVector[0] === 0 && visibleVector[1] === 0;
+      const handleTarget: SketchTangentHandleRef = {
+        kind: "sketchTangentHandle",
+        sketchId,
+        entityId: entity.entityId as SketchEntityId,
+        occurrenceId: occ.occurrenceId,
+        pointId: occ.pointId as SketchPointId,
+      };
+      // Handle line: from fit point to tip (skip if zero).
+      if (!isZero) {
+        renderables.push(
+          withSketchConstraintDisplay(
+            {
+              id: `renderable_tangent_handle_line_${entity.entityId}_${occ.occurrenceId}` as RenderableId,
+              label: "Tangent handle",
+              target: handleTarget,
+              geometry: {
+                kind: "polyline" as const,
+                points: [
+                  mapSketchPointToWorld(session.plane, fitPointPos),
+                  mapSketchPointToWorld(session.plane, tipPosition),
+                ],
+                isClosed: false,
+              },
+              linePattern: isAuthored
+                ? ("solid" as const)
+                : ("dashed" as const),
+              role: "local" as const,
+              handleDisplay: {
+                visibility: "contextual" as const,
+                ownerEntityId: entity.entityId as SketchEntityId,
+                isAuthored,
+              },
+              strokeStyle: isAuthored
+                ? undefined
+                : { color: 0x888888, opacity: 0.6 },
+            },
+            constraintDisplaySummary,
+          ),
+        );
+      }
+      // Handle tip marker.
+      renderables.push(
+        withSketchConstraintDisplay(
+          {
+            id: `renderable_tangent_handle_tip_${entity.entityId}_${occ.occurrenceId}` as RenderableId,
+            label: "Tangent handle",
+            target: handleTarget,
+            geometry: {
+              kind: "marker" as const,
+              position: mapSketchPointToWorld(session.plane, tipPosition),
+              displayRadius: 0.12,
+            },
+            linePattern: "solid" as const,
+            role: "local" as const,
+            handleDisplay: {
+              visibility: "contextual" as const,
+              ownerEntityId: entity.entityId as SketchEntityId,
+              isAuthored,
+            },
+            strokeStyle: isAuthored
+              ? undefined
+              : { color: 0x888888, opacity: 0.6 },
+          },
+          constraintDisplaySummary,
+        ),
+      );
+    }
+  }
   return renderables;
 }
 
@@ -505,6 +630,89 @@ export function getSketchPointMarkerVisibility(
     target?.kind !== "sketchPoint" ||
     revealedPointIds.has(target.pointId)
   );
+}
+
+/**
+ * The entity ids (spline + fit-point owners) whose tangent handles are
+ * revealed (T12d, D8): a spline entity, one of its fit points or a handle
+ * is in the hover stack, is the hover target, is selected, or is being
+ * dragged.
+ */
+export function getSketchRevealedHandleEntityIds(
+  renderables: readonly SketchSessionDisplayRenderable[],
+  context: SketchPointMarkerContext,
+): ReadonlySet<SketchEntityId> {
+  const active = [
+    ...context.hoverStack,
+    ...(context.hoverTarget ? [context.hoverTarget] : []),
+    ...context.selection,
+  ];
+  const activeEntities = new Set<string>();
+  const activePoints = new Set<string>();
+  const activeHandles = new Set<string>();
+  for (const entry of active) {
+    if (entry.kind === "sketchEntity")
+      activeEntities.add(`${entry.sketchId}|${entry.entityId}`);
+    else if (entry.kind === "sketchPoint")
+      activePoints.add(`${entry.sketchId}|${entry.pointId}`);
+    else if (entry.kind === "sketchTangentHandle")
+      activeHandles.add(`${entry.sketchId}|${entry.entityId}`);
+  }
+  const revealed = new Set<SketchEntityId>();
+  // A handle entity is revealed if the spline, any of its fit points, or
+  // any of its handles is active.
+  for (const { handleDisplay, target } of renderables) {
+    if (!handleDisplay || !target) continue;
+    const entityId = handleDisplay.ownerEntityId;
+    if (revealed.has(entityId)) continue;
+    const sketchId =
+      target.kind === "sketchTangentHandle" ? target.sketchId : null;
+    if (!sketchId) continue;
+    if (
+      activeEntities.has(`${sketchId}|${entityId}`) ||
+      activeHandles.has(`${sketchId}|${entityId}`)
+    ) {
+      revealed.add(entityId);
+      continue;
+    }
+  }
+  // Also reveal if any fit point of the spline is active.
+  for (const { pointMarker, target } of renderables) {
+    if (
+      pointMarker?.visibility === "contextual" &&
+      target?.kind === "sketchPoint"
+    ) {
+      for (const ownerEntityId of pointMarker.ownerEntityIds) {
+        if (
+          !revealed.has(ownerEntityId) &&
+          activePoints.has(`${target.sketchId}|${target.pointId}`)
+        ) {
+          // This point is active AND owns a spline entity → reveal all handles
+          // of that entity.
+          for (const { handleDisplay: hd } of renderables) {
+            if (hd?.ownerEntityId === ownerEntityId) {
+              revealed.add(ownerEntityId);
+              break;
+            }
+          }
+        }
+      }
+    }
+  }
+  return revealed;
+}
+
+/**
+ * Whether a handle renderable is drawn (T12d, D8): only while its owning
+ * entity is revealed.
+ */
+export function getSketchHandleVisibility(
+  renderable: SketchSessionDisplayRenderable,
+  revealedHandleEntityIds: ReadonlySet<SketchEntityId>,
+): boolean {
+  const { handleDisplay } = renderable;
+  if (!handleDisplay) return true;
+  return revealedHandleEntityIds.has(handleDisplay.ownerEntityId);
 }
 
 /**

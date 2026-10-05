@@ -115,6 +115,22 @@ export function resolveHandleFromTarget(
     }
     return { kind: "point", pointId: target.pointId };
   }
+  if (target.kind === "sketchTangentHandle") {
+    const entity = definition.entities.find(
+      (entry) => entry.entityId === target.entityId,
+    );
+    if (!entity || entity.kind !== "spline") return null;
+    const occurrence = entity.pointOccurrences.find(
+      (occ) => occ.occurrenceId === target.occurrenceId,
+    );
+    if (!occurrence) return null;
+    return {
+      kind: "tangentHandle",
+      entityId: target.entityId,
+      occurrenceId: target.occurrenceId,
+      pointId: target.pointId,
+    };
+  }
   if (target.kind === "sketchEntity") {
     const entity = definition.entities.find(
       (entry) => entry.entityId === target.entityId,

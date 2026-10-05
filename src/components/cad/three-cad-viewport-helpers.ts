@@ -66,13 +66,19 @@ interface ViewCubeRenderer {
 
 export function scheduleCoalescedSketchGeometryDragMove(input: {
   point: readonly [number, number];
+  exactZero?: boolean;
   pendingPointRef: MutableRef<readonly [number, number] | null>;
+  pendingExactZeroRef: MutableRef<boolean>;
   pendingFrameIdRef: MutableRef<number | null>;
   requestFrame: (callback: FrameRequestCallback) => number;
   isDragActive: () => boolean;
-  onMove: (point: readonly [number, number]) => void;
+  onMove: (
+    point: readonly [number, number],
+    options?: { exactZero?: boolean },
+  ) => void;
 }) {
   input.pendingPointRef.current = input.point;
+  input.pendingExactZeroRef.current = input.exactZero ?? false;
 
   if (input.pendingFrameIdRef.current !== null) {
     return;
@@ -81,10 +87,12 @@ export function scheduleCoalescedSketchGeometryDragMove(input: {
   input.pendingFrameIdRef.current = input.requestFrame(() => {
     input.pendingFrameIdRef.current = null;
     const point = input.pendingPointRef.current;
+    const exactZero = input.pendingExactZeroRef.current;
     input.pendingPointRef.current = null;
+    input.pendingExactZeroRef.current = false;
 
     if (point && input.isDragActive()) {
-      input.onMove(point);
+      input.onMove(point, exactZero ? { exactZero: true } : undefined);
     }
   });
 }
@@ -780,4 +788,29 @@ export function isSketchDragHoverTarget(
     return false;
   }
   return resolveHandleFromTarget(definition, target) !== null;
+}
+
+/**
+ * Zero-capture threshold for tangent-handle drags (T12d, D4): while
+ * dragging a handle, the tip is within this many screen px of its fit
+ * point → send exact-zero. The threshold is zoom-dependent by design
+ * (the px→sketch conversion uses the current camera).
+ */
+export const TANGENT_HANDLE_ZERO_CAPTURE_PX = 6;
+
+/**
+ * Whether a tangent-handle drag should send the exact-zero request:
+ * the projected tip is within `TANGENT_HANDLE_ZERO_CAPTURE_PX` of
+ * the projected fit point. Both positions are in viewport px.
+ */
+export function shouldCaptureZeroTangentHandle(
+  tipScreenPx: { x: number; y: number },
+  fitPointScreenPx: { x: number; y: number },
+): boolean {
+  return (
+    Math.hypot(
+      tipScreenPx.x - fitPointScreenPx.x,
+      tipScreenPx.y - fitPointScreenPx.y,
+    ) <= TANGENT_HANDLE_ZERO_CAPTURE_PX
+  );
 }

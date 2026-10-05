@@ -152,6 +152,8 @@ export function getSketchPickTargetLabel(
         definition.points.find((entry) => entry.pointId === target.pointId)
           ?.label ?? "Point"
       );
+    case "sketchTangentHandle":
+      return "Tangent handle";
     case "sketchDatumReference":
       return target.datumId === "origin"
         ? "Origin"

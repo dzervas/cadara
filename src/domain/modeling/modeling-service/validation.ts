@@ -280,7 +280,8 @@ export function assertDurableRef(value: unknown): DurableRef {
   if (
     target.kind === "projectedReferenceGeometry" ||
     target.kind === "sketchDatumReference" ||
-    target.kind === "sketchExternalReference"
+    target.kind === "sketchExternalReference" ||
+    target.kind === "sketchTangentHandle"
   ) {
     throw new Error("Invalid durable reference payload.");
   }

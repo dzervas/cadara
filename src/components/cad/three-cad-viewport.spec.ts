@@ -7,7 +7,9 @@ import {
   isSketchFitPointDraftActive,
   isViewportNavigationPointerMove,
   resolveSketchDragGesture,
+  shouldCaptureZeroTangentHandle,
   SKETCH_DRAG_THRESHOLD_PX,
+  TANGENT_HANDLE_ZERO_CAPTURE_PX,
   WORKSPACE_SCAFFOLD_RENDER_ORDER,
   configureWorkspaceScaffoldWireObject,
   createRenderIdleTracker,
@@ -50,6 +52,7 @@ test("src/components/cad/three-cad-viewport.spec.ts", () => {
     const pendingPointRef = {
       current: null as readonly [number, number] | null,
     };
+    const pendingExactZeroRef = { current: false };
     const pendingFrameIdRef = { current: null as number | null };
     const frameCallbacks = new Map<number, FrameRequestCallback>();
     const movedPoints: readonly [number, number][] = [];
@@ -59,6 +62,7 @@ test("src/components/cad/three-cad-viewport.spec.ts", () => {
       scheduleCoalescedSketchGeometryDragMove({
         point,
         pendingPointRef,
+        pendingExactZeroRef,
         pendingFrameIdRef,
         requestFrame: (callback) => {
           const frameId = nextFrameId;
@@ -94,6 +98,7 @@ test("src/components/cad/three-cad-viewport.spec.ts", () => {
     const pendingPointRef = {
       current: null as readonly [number, number] | null,
     };
+    const pendingExactZeroRef = { current: false };
     const pendingFrameIdRef = { current: null as number | null };
     const frameCallbacks = new Map<number, FrameRequestCallback>();
     const cancelledFrames: number[] = [];
@@ -102,6 +107,7 @@ test("src/components/cad/three-cad-viewport.spec.ts", () => {
     scheduleCoalescedSketchGeometryDragMove({
       point: [4, 5],
       pendingPointRef,
+      pendingExactZeroRef,
       pendingFrameIdRef,
       requestFrame: (callback) => {
         frameCallbacks.set(7, callback);
@@ -1498,4 +1504,56 @@ test("T12c R-4: drag start preserves the pointer-down startPoint (grab offset)",
     actions.startDrag?.startPoint,
     "The drag start must carry the pointer-down projected point, not the target position.",
   ).toEqual([3.14, 2.72]);
+});
+
+// ── T12d: zero-capture helper ──────────────────────────────────────────
+
+test("T12d: zero capture inside threshold", () => {
+  expect(
+    shouldCaptureZeroTangentHandle({ x: 100, y: 200 }, { x: 100, y: 200 }),
+    "Coincident tip and fit point → capture.",
+  ).toBe(true);
+  expect(
+    shouldCaptureZeroTangentHandle(
+      { x: 100 + TANGENT_HANDLE_ZERO_CAPTURE_PX - 1, y: 200 },
+      { x: 100, y: 200 },
+    ),
+    "Within threshold → capture.",
+  ).toBe(true);
+});
+
+test("T12d: zero capture outside threshold", () => {
+  expect(
+    shouldCaptureZeroTangentHandle(
+      { x: 100 + TANGENT_HANDLE_ZERO_CAPTURE_PX + 1, y: 200 },
+      { x: 100, y: 200 },
+    ),
+    "Outside threshold → no capture.",
+  ).toBe(false);
+});
+
+test("T12d: same sketch distance, two zooms → different capture decisions", () => {
+  // The capture helper operates on screen px, but the *same sketch-space*
+  // distance maps to different screen-px distances at different zoom levels.
+  // At low zoom (zoomed out), 0.5 sketch units → 4 screen px → inside 6 px.
+  const lowZoomPxPerUnit = 8;
+  const sketchDistance = 0.5;
+  const lowZoomScreenPx = sketchDistance * lowZoomPxPerUnit; // 4 px
+  expect(
+    shouldCaptureZeroTangentHandle(
+      { x: 100 + lowZoomScreenPx, y: 200 },
+      { x: 100, y: 200 },
+    ),
+    "At low zoom, 0.5 sketch units → 4 screen px → captured.",
+  ).toBe(true);
+  // At high zoom (zoomed in), 0.5 sketch units → 40 screen px → outside 6 px.
+  const highZoomPxPerUnit = 80;
+  const highZoomScreenPx = sketchDistance * highZoomPxPerUnit; // 40 px
+  expect(
+    shouldCaptureZeroTangentHandle(
+      { x: 100 + highZoomScreenPx, y: 200 },
+      { x: 100, y: 200 },
+    ),
+    "At high zoom, 0.5 sketch units → 40 screen px → NOT captured.",
+  ).toBe(false);
 });

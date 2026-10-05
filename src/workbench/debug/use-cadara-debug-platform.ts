@@ -3,6 +3,7 @@ import { useEffect, useEffectEvent } from "react";
 import type {
   DeveloperDebugSession,
   EditorRuntimeTraceSnapshot,
+  SketchDebugSnapshot,
   WorkbenchDebugState,
 } from "@/domain/debug/debug-platform";
 import {
@@ -18,6 +19,7 @@ export function useCadaraDebugPlatform(input: {
   clearSelection: () => void;
   refreshDocument: () => void;
   exportSession: () => DeveloperDebugSession;
+  getSketchSnapshot: () => SketchDebugSnapshot | null;
 }) {
   const getState = useEffectEvent(input.getState);
   const getTrace = useEffectEvent(input.getTrace);
@@ -25,6 +27,7 @@ export function useCadaraDebugPlatform(input: {
   const clearSelection = useEffectEvent(input.clearSelection);
   const refreshDocument = useEffectEvent(input.refreshDocument);
   const exportSession = useEffectEvent(input.exportSession);
+  const getSketchSnapshot = useEffectEvent(input.getSketchSnapshot);
 
   useEffect(() => {
     if (typeof window === "undefined" || !isCadaraDebugPlatformEnabled()) {
@@ -43,6 +46,7 @@ export function useCadaraDebugPlatform(input: {
           refreshDocument();
         },
         exportSession: () => exportSession(),
+        getSketchSnapshot: () => getSketchSnapshot(),
       }),
     );
   }, []);
