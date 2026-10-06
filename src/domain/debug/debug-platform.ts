@@ -156,6 +156,23 @@ export interface SketchDebugSnapshot {
       tangent: { kind: string; vector?: readonly [number, number] };
     }[];
   }[];
+  /**
+   * T12g: per-offset-shell publication state from the solved snapshot.
+   * Each entry reports the shell entity id and whether it is `provisional`
+   * or `certified` (U-A: provisional while dragging, certified after
+   * release and publication round).
+   */
+  offsetShells?: {
+    entityId: string;
+    publication: "provisional" | "certified";
+  }[];
+  /**
+   * T12g: live region summary from the sketch session.
+   * `status` mirrors `SketchLiveRegions.status`; `count` is the number of
+   * current regions. During a drag the derivation is suppressed (U-A), so
+   * regions are `pending` or `unavailable` with a stale count.
+   */
+  liveRegions?: { status: string; count: number };
 }
 
 export interface CadaraDebugNamespace {

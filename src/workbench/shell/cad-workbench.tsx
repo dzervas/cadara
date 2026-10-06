@@ -822,6 +822,19 @@ export function CadWorkbench({
             })),
           };
         }),
+        offsetShells: sketchSession.liveSolve?.solvedSnapshot.solvedEntities
+          .filter(
+            (se): se is Extract<typeof se, { kind: "derivedPiecewiseCubic" }> =>
+              se.kind === "derivedPiecewiseCubic",
+          )
+          .map((se) => ({
+            entityId: se.entityId,
+            publication: se.publication,
+          })),
+        liveRegions: {
+          status: sketchSession.liveRegions.status,
+          count: sketchSession.liveRegions.regions.length,
+        },
       };
     },
   });
