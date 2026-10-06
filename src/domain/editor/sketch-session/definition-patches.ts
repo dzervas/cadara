@@ -67,6 +67,15 @@ export function applySolvedSketchToDefinition(
       point.solvedPosition,
     ]),
   );
+  // A circle's radius is a solver variable (its only one besides the centre
+  // point), so the accepted radius is written back like a point position.
+  const solvedCircleRadii = new Map(
+    solvedSnapshot.solvedEntities.flatMap((entity) =>
+      entity.kind === "circle"
+        ? [[entity.entityId, entity.solvedRadius] as const]
+        : [],
+    ),
+  );
   const solvedSplines = new Map(
     solvedSnapshot.solvedEntities.flatMap((entity) =>
       entity.kind === "spline" && entity.reconstruction.validity === "valid"
@@ -82,6 +91,10 @@ export function applySolvedSketchToDefinition(
       return position ? { ...point, position } : point;
     }),
     entities: definition.entities.map((entity) => {
+      if (entity.kind === "circle") {
+        const radius = solvedCircleRadii.get(entity.entityId);
+        return radius === undefined ? entity : { ...entity, radius };
+      }
       if (entity.kind !== "spline") return entity;
       const reconstruction = solvedSplines.get(entity.entityId);
       const ordered = orderedSplineOccurrences(entity);

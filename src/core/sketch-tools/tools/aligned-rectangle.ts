@@ -8,7 +8,6 @@ import type {
 } from "@/core/sketch-tools/definition";
 import type { SketchToolPresentationSchema } from "@/core/sketch-tools/editor-schema";
 import {
-  createDistanceDimension,
   createEqualLengthConstraint,
   createParallelConstraint,
   createPerpendicularConstraint,
@@ -413,22 +412,6 @@ export const alignedRectangleSketchToolDefinition: SketchToolDefinition<"aligned
             constraintId: factories.createConstraintId("aligned-rect-heights"),
             label: `Aligned rectangle ${sequence} equal heights`,
             entityIds: [entityIds[1], entityIds[3]],
-          }),
-        ],
-        dimensions: [
-          createDistanceDimension({
-            dimensionId: factories.createDimensionId("aligned-rect-width"),
-            label: `Aligned rectangle ${sequence} width`,
-            axis: "aligned",
-            pointIds: [cornerIds[0], cornerIds[1]],
-            value: corners.width,
-          }),
-          createDistanceDimension({
-            dimensionId: factories.createDimensionId("aligned-rect-height"),
-            label: `Aligned rectangle ${sequence} height`,
-            axis: "aligned",
-            pointIds: [cornerIds[1], cornerIds[2]],
-            value: corners.height,
           }),
         ],
       };

@@ -89,6 +89,7 @@ import {
   rebuildSessionForDefinition,
   getSketchSessionDerivationSettings,
   getSketchSessionPreviewBasis,
+  resolveSketchDefinitionForSolve,
 } from "./internals";
 import { updateReferenceImageOperationStates } from "./references";
 import {
@@ -2030,6 +2031,7 @@ function startDragWithIntent(
     session.projectedReferences,
     session.solverTolerances,
     getSketchSessionDerivationSettings(session),
+    session.documentVariables,
     intent,
     session.offsetPlans,
   );
@@ -2286,6 +2288,7 @@ export function applySketchGeometryDrag(
     session.projectedReferences,
     session.solverTolerances,
     getSketchSessionDerivationSettings(session),
+    session.documentVariables,
     drag.intent,
     dragTarget,
     drag.interactiveSolveSession,
@@ -2460,6 +2463,7 @@ export function solveDragEdit(
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
   tolerances: SolverTolerancePolicy,
   derivation: SketchDerivationSettings,
+  documentVariables: SketchSessionState["documentVariables"],
   intent: SketchDragIntent,
   dragTarget: SketchDragTarget,
   interactiveSolveSession: SketchCompiledSolveSession | null = null,
@@ -2479,6 +2483,7 @@ export function solveDragEdit(
       projectedReferences,
       tolerances,
       derivation,
+      documentVariables,
       intent,
     );
     if (started.kind === "unacceptable") {
@@ -2499,7 +2504,10 @@ export function solveDragEdit(
     ? updateCompiledSketchSolveSession(solveSession, dragTarget, 1e-4)
     : dragTarget.kind === "sketchPoint"
       ? solveSketchDefinitionWithDraggedPointTarget({
-          definition,
+          definition: resolveSketchDefinitionForSolve(
+            definition,
+            documentVariables,
+          ),
           projectedReferences,
           dragTarget,
           tolerances,
@@ -2837,6 +2845,7 @@ function startInteractiveSolveSessionForDrag(
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
   tolerances: SolverTolerancePolicy,
   derivation: SketchDerivationSettings,
+  documentVariables: SketchSessionState["documentVariables"],
   intent: SketchDragIntent,
   offsetPlans?: readonly SolvedOffsetFramePlanRecord[],
 ):
@@ -2862,10 +2871,15 @@ function startInteractiveSolveSessionForDrag(
   // session starts (g5a re-review advisory 5).
   const carried = offsetPlans ? carriedOffsetPlans(offsetPlans) : undefined;
 
+  // T13a: the program solves the resolved numeric values, exactly as the live
+  // solve does; authored (literal/expression) values stay in `definition`.
   const started = startCompiledSketchSolveSession({
     sessionId: `interactive_sketch_solve_drag_${sessionLabel}`,
     program: compileSketchSolveProgram({
-      definition,
+      definition: resolveSketchDefinitionForSolve(
+        definition,
+        documentVariables,
+      ),
       projectedReferences,
       tolerances,
       ...derivation,

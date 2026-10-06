@@ -7,7 +7,6 @@ import type {
 } from "@/core/sketch-tools/definition";
 import type { SketchToolPresentationSchema } from "@/core/sketch-tools/editor-schema";
 import {
-  createCircleRadiusDimension,
   createEqualLengthConstraint,
   createPointOnCurveConstraint,
   createTangentConstraint,
@@ -246,14 +245,6 @@ export function createRegularPolygonSketchToolDefinition(input: {
                     entityIds: [entityId, circleEntityId],
                   }),
                 )),
-          ],
-          dimensions: [
-            createCircleRadiusDimension({
-              dimensionId: factories.createDimensionId(`${input.id}-radius`),
-              label: `${input.name} ${sequence} radius`,
-              entityId: circleEntityId,
-              value: circleRadius,
-            }),
           ],
         };
       },

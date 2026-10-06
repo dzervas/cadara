@@ -6,10 +6,7 @@ import type {
   SketchToolRuntimeState,
 } from "@/core/sketch-tools/definition";
 import type { SketchToolPresentationSchema } from "@/core/sketch-tools/editor-schema";
-import {
-  createDistanceDimension,
-  createMidpointConstraint,
-} from "@/core/sketch-tools/constraints";
+import { createMidpointConstraint } from "@/core/sketch-tools/constraints";
 import { getAxisAlignedRectangleCorners } from "@/core/sketch-tools/geometry";
 import {
   createSketchToolDefinition,
@@ -323,22 +320,6 @@ export const centerPointRectangleSketchToolDefinition: SketchToolDefinition<"cen
               label: `Center rectangle ${sequence} center`,
               pointId: centerPointId,
               lineEntityId: entityIds[5],
-            }),
-          ],
-          dimensions: [
-            createDistanceDimension({
-              dimensionId: factories.createDimensionId("center-rect-width"),
-              label: `Center rectangle ${sequence} width`,
-              axis: "horizontal",
-              pointIds: [cornerIds[0], cornerIds[1]],
-              value: Math.abs(topRight[0] - bottomLeft[0]),
-            }),
-            createDistanceDimension({
-              dimensionId: factories.createDimensionId("center-rect-height"),
-              label: `Center rectangle ${sequence} height`,
-              axis: "vertical",
-              pointIds: [cornerIds[0], cornerIds[3]],
-              value: Math.abs(topRight[1] - bottomLeft[1]),
             }),
           ],
         };

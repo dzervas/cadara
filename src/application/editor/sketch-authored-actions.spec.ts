@@ -18,6 +18,8 @@ import {
   finalizeSketchDraw,
   startSketchDraw,
   deleteSelectedSketchGeometry,
+  patchSketchConstraintValue,
+  selectSketchConstraintTarget,
   selectSketchEditToolTarget,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
@@ -1066,12 +1068,28 @@ test.each([
 
 // Orchestrator [TECH] 2026-10-04: the radius → diameter rewrite of a trimmed
 // circle is part of the one "Trim" action; Undo restores the radius bitwise.
+// T13a: the radius is added deliberately with the Radius tool.
 test("T10g-1: Undo of a circle Trim restores its circleRadius dimension exactly; Redo restores the diameter", async () => {
   const f = await fixture();
   let session = acceptSketchDraw(
     startSketchDraw(beginSketchTool(f.session, "circle"), [20, 0]),
     [22, 0],
   );
+  session = patchSketchConstraintValue(
+    patchSketchConstraintValue(
+      selectSketchConstraintTarget(
+        beginSketchTool(session, "dimensionRadius"),
+        session.definition.entities.find((entity) => entity.kind === "circle")!
+          .target,
+      ),
+      { value: 2 },
+    ),
+    { intent: "commitConstraintValue" },
+  );
+  expect(
+    session.definition.dimensions.map((dimension) => dimension.kind),
+    "premise: only the deliberate radius",
+  ).toEqual(["circleRadius"]);
   for (const x of [21, 19])
     session = acceptSketchDraw(
       startSketchDraw(beginSketchTool(session, "line"), [x, -3]),
