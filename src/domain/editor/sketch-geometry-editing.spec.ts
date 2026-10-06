@@ -1317,7 +1317,9 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     ).toBeTruthy();
   }
 
-  function testRectangleToolDragTranslatesWholeRectangle() {
+  // T13a2 (issue 05): a size-free rectangle's corner drag resizes it with
+  // minimum motion; the opposite corner stays (re-pinned from "translates").
+  function testRectangleToolCornerDragResizesRectangle() {
     let session = createNewSketchSessionFromSupport(
       {
         kind: "construction",
@@ -1349,7 +1351,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
         )!,
       ),
       [2, 2],
-      "Dragging rectangle corner should translate bottom left.",
+      "The dragged bottom-left corner reaches the pointer.",
     );
     assertClosePoint(
       points.get(
@@ -1357,8 +1359,8 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
           id.startsWith("sketch_point_1_rect-bottom-right_"),
         )!,
       ),
-      [6, 2],
-      "Dragging rectangle corner should translate bottom right.",
+      [4, 2],
+      "Bottom right rises with the bottom side (horizontal held).",
     );
     assertClosePoint(
       points.get(
@@ -1366,8 +1368,8 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
           id.startsWith("sketch_point_1_rect-top-right_"),
         )!,
       ),
-      [6, 5],
-      "Dragging rectangle corner should translate top right.",
+      [4, 3],
+      "The opposite top-right corner stays (minimum motion).",
     );
     assertClosePoint(
       points.get(
@@ -1375,12 +1377,12 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
           id.startsWith("sketch_point_1_rect-top-left_"),
         )!,
       ),
-      [2, 5],
-      "Dragging rectangle corner should translate top left.",
+      [2, 3],
+      "Top left moves with the left side (vertical held).",
     );
     expect(
       session.validationMessage,
-      "Translatable rectangle drag should not leave blocked feedback.",
+      "A resizable rectangle drag should not leave blocked feedback.",
     ).toBe(null);
   }
 
@@ -5352,7 +5354,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
   testConnectedSketchSelectionSelectsRectangleFromAnyEdge();
   testConnectedSketchSelectionUsesLocalEntityTargetNamespace();
   testConnectedSketchSelectionSelectsBranchingComponentAndRejectsUnsupportedTargets();
-  testRectangleToolDragTranslatesWholeRectangle();
+  testRectangleToolCornerDragResizesRectangle();
   await testImmovableConstrainedDragBlocksWithoutChangingDraft();
   testFixedLogoLikeEndpointDragBlocksWithConstrainedFeedback();
   testPerpendicularSlideShowsNoConstrainedFeedback();
@@ -5739,13 +5741,9 @@ test("T13a Q2: an expression-valued dimension stays byte-identical through a dra
 // T13a (logic lane, session seam): a Rectangle-tool rectangle has no
 // automatic width/height, so a corner drag should resize both sides freely
 // while its horizontal/vertical relationships hold (issue 05: minimum motion).
-// KNOWN FAILURE, owned by follow-up slice "T13a2 (minimum-motion drag without
-// whole-component translation)": the solver's rigid-translation drag fast path
-// (`tryTranslateDraggedComponent`) translates any component whose constraints
-// are translation-invariant, so today the whole rectangle moves. When T13a2
-// fixes it this row passes, `test.fails` then reports it, and T13a2 turns it
-// back into a plain `test`.
-test.fails("T13a: a rectangle corner drag resizes both sides freely and keeps horizontal/vertical", () => {
+// T13a2 deleted the rigid-translation drag fast path that translated the
+// whole rectangle, so this row is a plain `test` again.
+test("T13a: a rectangle corner drag resizes both sides freely and keeps horizontal/vertical", () => {
   let session = createNewSketchSession(
     createStandardPlaneDefinition("xy"),
     OCC_KERNEL_SETTINGS,
@@ -6063,4 +6061,545 @@ test("T12c R-6: cancel followed by tool switch leaves a consistent state", () =>
   expect(s.activeDrag).toBe(null);
   expect(s.activeTool).toBe("circle");
   expect(s.definition.pointIds.length).toBe(2);
+});
+
+// T13a2 (logic lane, session seam): a commit of the Offset tool that waits
+// for the certified publication (outside the file-level test, as above).
+function commitOffsetForT13a2(session: SketchSessionState) {
+  let next = patchSketchEditToolValue(session, { intent: "commitOffset" });
+  for (let round = 0; round < 2; round += 1) {
+    const publication = next.activeEditTool?.offsetPublication;
+    if (publication?.status !== "pending") break;
+    const basis = publication.basis!;
+    next = completeSketchOffsetPreviewPublication(
+      next,
+      publication.derivationId,
+      publishSketchOffsets({
+        definition: basis.definition,
+        solvedSnapshot: basis.solvedSnapshot,
+        modelingTolerance: basis.modelingTolerance,
+        capabilities: {
+          query: createCertifiedNeutralCurveRequestQuery(),
+          certifier: createCertifiedCubicTubeChain(),
+        },
+      }),
+    );
+  }
+  return next;
+}
+
+// T13a2 c3 (logic lane, session seam): the drag frame solves only the
+// dragged component's variables. An offset seeded on the dragged rectangle
+// is solved with it (its outputs follow the resized rectangle), and an
+// unrelated line keeps its exact position.
+test("T13a2: a corner drag resizes a rectangle with its offset, follows the cursor every frame and leaves an unrelated component untouched", () => {
+  let session = createNewSketchSession(
+    createStandardPlaneDefinition("xy"),
+    OCC_KERNEL_SETTINGS,
+  );
+  session = acceptSketchDraw(
+    startSketchDraw(beginSketchTool(session, "rectangle"), [1, 1]),
+    [5, 4],
+  );
+  session = acceptSketchDraw(
+    startSketchDraw(beginSketchTool(session, "line"), [10, 0]),
+    [12, 0.5],
+  );
+  const sides = session.definition.entities
+    .filter((entity) => entity.label.startsWith("Rectangle"))
+    .map((entity) => entity.target);
+  expect(sides, "premise: four rectangle sides").toHaveLength(4);
+  session = patchSketchEditToolValue(
+    beginSketchTool(session, "offset", sides),
+    { value: 0.5 },
+  );
+  session = commitOffsetForT13a2(session);
+  session = beginSketchTool(session, "line");
+  const relationship = session.definition.derivedRelationships?.find(
+    (candidate) => candidate.kind === "offset",
+  );
+  expect(relationship, "premise: the offset is committed").toBeTruthy();
+  const drivenIds = new Set(
+    relationship!.outputs.flatMap((output) => output.outputPointIds),
+  );
+  expect(drivenIds.size, "premise: the offset has driven corners").toBe(4);
+  const unrelatedBefore = session.definition.points
+    .filter((point) => point.label.startsWith("Line"))
+    .map((point) => point.position);
+  expect(unrelatedBefore, "premise: the unrelated line").toHaveLength(2);
+
+  const corner = session.definition.points.find(
+    (point) => point.label === "Rectangle 1 top right",
+  )!;
+  let dragging = beginSketchGeometryDrag(session, corner.target, [5, 4]);
+  for (let frame = 1; frame <= 4; frame += 1) {
+    dragging = updateSketchGeometryDrag(dragging, [
+      5 + frame * 0.5,
+      4 + frame * 0.5,
+    ]);
+    expect(dragging.activeDrag?.status, `frame ${frame}`).toBe("dragging");
+    // Review A-1: phase A must solve the whole component (c3), not just the
+    // dragged point, for an interactive frame to follow the cursor.
+    const followed = dragging.definition.points.find(
+      (point) => point.pointId === corner.pointId,
+    )!.position;
+    expect(
+      Math.hypot(
+        followed[0] - (5 + frame * 0.5),
+        followed[1] - (4 + frame * 0.5),
+      ),
+      `frame ${frame}: the corner follows the cursor`,
+    ).toBeLessThan(1e-3);
+  }
+  const dragged = finishSketchGeometryDrag(dragging, [7, 6]);
+  const at = (label: string) =>
+    dragged.definition.points.find((point) => point.label === label)!.position;
+  // The release repeats the last frame's cursor, so it commits that frame
+  // (within the 1e-4 reach tolerance; review R-1).
+  expect(
+    Math.hypot(
+      at("Rectangle 1 top right")[0] - 7,
+      at("Rectangle 1 top right")[1] - 6,
+    ),
+    "the corner is at the cursor within the reach tolerance",
+  ).toBeLessThanOrEqual(1e-4);
+  expect(at("Rectangle 1 bottom left")[0], "opposite corner stays").toBeCloseTo(
+    1,
+    6,
+  );
+  expect(at("Rectangle 1 bottom left")[1]).toBeCloseTo(1, 6);
+  // The offset outputs are 0.5 from every side of the resized (≈ 6 × 5)
+  // rectangle: a box 1 smaller or larger in each direction, same centre.
+  const [right, top] = at("Rectangle 1 top right");
+  const [left, bottom] = at("Rectangle 1 bottom left");
+  const offsetCorners = dragged.definition.points
+    .filter((point) => drivenIds.has(point.pointId))
+    .map((point) => point.position);
+  const xs = offsetCorners.map((position) => position[0]);
+  const ys = offsetCorners.map((position) => position[1]);
+  const width = Math.max(...xs) - Math.min(...xs);
+  const height = Math.max(...ys) - Math.min(...ys);
+  expect(right! - left!, "the rectangle resized to width 6").toBeCloseTo(6, 3);
+  expect(
+    width - (right! - left!),
+    "offset width follows the resize",
+  ).toBeCloseTo(height - (top! - bottom!), 6);
+  expect(
+    Math.abs(width - (right! - left!)),
+    "offset is 0.5 from each side",
+  ).toBeCloseTo(1, 6);
+  expect((Math.max(...xs) + Math.min(...xs)) / 2).toBeCloseTo(
+    (right! + left!) / 2,
+    6,
+  );
+  expect((Math.max(...ys) + Math.min(...ys)) / 2).toBeCloseTo(
+    (top! + bottom!) / 2,
+    6,
+  );
+  expect(
+    dragged.definition.points
+      .filter((point) => point.label.startsWith("Line"))
+      .map((point) => point.position),
+    "the unrelated component is bit-for-bit unchanged",
+  ).toEqual(unrelatedBefore);
+});
+
+// T13a2 Q3 (logic lane, session seam): issue 05 forbids flips. Dragging a
+// rounded rectangle's bottom side far enough collapses a fillet; minimum
+// motion would carry it through zero radius (the arc's centre crosses its
+// tangent line, the arc turns inside out). That frame is blocked with the
+// drag feedback and the last accepted state is kept.
+test("T13a2: a rounded-rectangle drag that would flip a fillet is blocked at the flipping frame", () => {
+  let session = createNewSketchSession(
+    createStandardPlaneDefinition("xy"),
+    OCC_KERNEL_SETTINGS,
+  );
+  session = acceptSketchDraw(
+    startSketchDraw(beginSketchTool(session, "rectangle"), [0, 0]),
+    [2, 1],
+  );
+  const sides = session.definition.entities.filter(
+    (entity) => entity.kind === "lineSegment",
+  );
+  for (let corner = 0; corner < 4; corner += 1) {
+    session = selectSketchEditToolTarget(
+      selectSketchEditToolTarget(
+        beginSketchTool(session, "sketchFillet"),
+        sides[corner]!.target,
+      ),
+      sides[(corner + 1) % 4]!.target,
+    );
+    session = patchSketchEditToolValue(session, { value: 0.2 });
+    session = patchSketchEditToolValue(session, {
+      intent: "commitSketchEditOperator",
+    });
+  }
+  session = beginSketchTool(session, "line");
+  const tangents = session.definition.constraints.filter(
+    (constraint) => constraint.kind === "tangent",
+  );
+  expect(tangents, "premise: four fillets, two tangents each").toHaveLength(8);
+  // The side of each fillet's tangent line its centre lies on.
+  const sidesOf = (definition: SketchDefinition) =>
+    tangents.map((constraint) => {
+      const [first, second] = constraint.entityIds.map(
+        (id) => definition.entities.find((entity) => entity.entityId === id)!,
+      );
+      const line = (first!.kind === "lineSegment" ? first : second)!;
+      const arc = (first!.kind === "arc" ? first : second)!;
+      if (line.kind !== "lineSegment" || arc.kind !== "arc")
+        throw new Error("premise: line↔arc tangent");
+      const at = (id: string) =>
+        definition.points.find((point) => point.pointId === id)!.position;
+      const [a, b, c] = [
+        at(line.startPointId),
+        at(line.endPointId),
+        at(arc.centerPointId),
+      ];
+      return Math.sign(
+        (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]),
+      );
+    });
+  const initialSides = sidesOf(session.definition);
+  const bottom = session.definition.entities.find(
+    (entity) =>
+      entity.kind === "lineSegment" &&
+      [entity.startPointId, entity.endPointId].every(
+        (id) =>
+          session.definition.points.find((point) => point.pointId === id)!
+            .position[1] === 0,
+      ),
+  );
+  if (bottom?.kind !== "lineSegment") throw new Error("premise: bottom side");
+  const grabbed = [bottom.startPointId, bottom.endPointId]
+    .map(
+      (id) => session.definition.points.find((point) => point.pointId === id)!,
+    )
+    .reduce((left, right) =>
+      left.position[0] < right.position[0] ? left : right,
+    );
+
+  let dragging = beginSketchGeometryDrag(
+    session,
+    grabbed.target,
+    grabbed.position,
+  );
+  const statuses: (string | undefined)[] = [];
+  let firstBlocked = -1;
+  for (let frame = 1; frame <= 16; frame += 1) {
+    const before = dragging.definition;
+    dragging = updateSketchGeometryDrag(dragging, [
+      grabbed.position[0] + (1.0 * frame) / 16,
+      grabbed.position[1] + (0.6 * frame) / 16,
+    ]);
+    statuses.push(dragging.activeDrag?.status);
+    if (dragging.activeDrag?.status === "dragging") {
+      expect(
+        sidesOf(dragging.definition),
+        `frame ${frame}: no accepted frame flips a fillet`,
+      ).toEqual(initialSides);
+    } else if (firstBlocked < 0) {
+      firstBlocked = frame;
+      expect(dragging.activeDrag?.status, `frame ${frame}`).toBe("blocked");
+      expect(
+        dragging.activeDrag?.feedback,
+        "the blocked frame shows the drag feedback",
+      ).toBeTruthy();
+      expect(dragging.definition, "the last accepted state is kept").toBe(
+        before,
+      );
+    }
+  }
+  expect(
+    firstBlocked,
+    `a flipping frame is blocked (${statuses.join(",")})`,
+  ).toBeGreaterThan(1);
+  expect(
+    statuses
+      .slice(0, firstBlocked - 1)
+      .every((status) => status === "dragging"),
+    "frames before the flip are accepted",
+  ).toBe(true);
+});
+
+// T13a2 d1 (logic lane, session seam): only the release frame runs the
+// exact-reach step. On a rounded rectangle whose bottom side's right end is
+// fixed, the left end slides along the bottom (the cursor above it is
+// unreachable); an interactive frame at a reachable cursor keeps the soft
+// target's lag (above the 1e-4 reach tolerance, so no exact step ran), and
+// a release with an equally large jump to another reachable cursor lands
+// within the tolerance.
+test("T13a2: interactive drag frames skip the exact-reach step; the release frame reaches the cursor", () => {
+  let session = createNewSketchSession(
+    createStandardPlaneDefinition("xy"),
+    OCC_KERNEL_SETTINGS,
+  );
+  session = acceptSketchDraw(
+    startSketchDraw(beginSketchTool(session, "rectangle"), [0, 0]),
+    [2, 1],
+  );
+  const sides = session.definition.entities.filter(
+    (entity) => entity.kind === "lineSegment",
+  );
+  for (let corner = 0; corner < 4; corner += 1) {
+    session = selectSketchEditToolTarget(
+      selectSketchEditToolTarget(
+        beginSketchTool(session, "sketchFillet"),
+        sides[corner]!.target,
+      ),
+      sides[(corner + 1) % 4]!.target,
+    );
+    session = patchSketchEditToolValue(session, { value: 0.2 });
+    session = patchSketchEditToolValue(session, {
+      intent: "commitSketchEditOperator",
+    });
+  }
+  const bottom = session.definition.entities.find(
+    (entity) =>
+      entity.kind === "lineSegment" &&
+      [entity.startPointId, entity.endPointId].every(
+        (id) =>
+          session.definition.points.find((point) => point.pointId === id)!
+            .position[1] === 0,
+      ),
+  );
+  if (bottom?.kind !== "lineSegment") throw new Error("premise: bottom side");
+  const [left, right] = [bottom.startPointId, bottom.endPointId]
+    .map(
+      (id) => session.definition.points.find((point) => point.pointId === id)!,
+    )
+    .sort((a, b) => a.position[0] - b.position[0]);
+  session = selectSketchConstraintTarget(
+    beginSketchTool(session, "constraintFix"),
+    right!.target,
+  );
+  expect(
+    session.definition.constraints.some(
+      (constraint) => constraint.kind === "fixPoint",
+    ),
+    "premise: the bottom side's right end is fixed",
+  ).toBe(true);
+  session = beginSketchTool(session, "line");
+  const start = left!.position;
+  const position = (state: SketchSessionState) =>
+    state.definition.points.find((point) => point.pointId === left!.pointId)!
+      .position;
+
+  let dragging = beginSketchGeometryDrag(session, left!.target, start);
+  for (let frame = 1; frame <= 4; frame += 1) {
+    dragging = updateSketchGeometryDrag(dragging, [
+      start[0] + 0.05 * frame,
+      start[1] + 0.1,
+    ]);
+    expect(dragging.activeDrag?.status, `slide frame ${frame}`).toBe(
+      "dragging",
+    );
+    // The cursor, 0.1 above the bottom line, is unreachable: the end
+    // slides along the line (within the angular tolerance of horizontal).
+    expect(
+      Math.abs(position(dragging)[1] - start[1]),
+      `slide frame ${frame}: the end stays on the bottom line`,
+    ).toBeLessThan(0.01);
+  }
+  const reachable: [number, number] = [start[0] + 0.8, start[1]];
+  dragging = updateSketchGeometryDrag(dragging, reachable);
+  const interactiveLag = Math.hypot(
+    position(dragging)[0] - reachable[0],
+    position(dragging)[1] - reachable[1],
+  );
+  expect(
+    interactiveLag,
+    "an interactive frame keeps the soft-target lag (no exact-reach step)",
+  ).toBeGreaterThan(1e-4);
+  const release: [number, number] = [start[0], start[1]];
+  const released = finishSketchGeometryDrag(dragging, release);
+  expect(released.activeDrag).toBeNull();
+  expect(
+    Math.hypot(
+      position(released)[0] - release[0],
+      position(released)[1] - release[1],
+    ),
+    "the release frame reaches the cursor within the reach tolerance",
+  ).toBeLessThanOrEqual(1e-4);
+});
+
+// T13a2 review R-1 (logic lane, session seam): the Fillet-tool rounded
+// rectangle [0,0]–[2,1], r = 0.2, and its bottom side's left end.
+function roundedRectangleForT13a2Review() {
+  let session = createNewSketchSession(
+    createStandardPlaneDefinition("xy"),
+    OCC_KERNEL_SETTINGS,
+  );
+  session = acceptSketchDraw(
+    startSketchDraw(beginSketchTool(session, "rectangle"), [0, 0]),
+    [2, 1],
+  );
+  const sides = session.definition.entities.filter(
+    (entity) => entity.kind === "lineSegment",
+  );
+  for (let corner = 0; corner < 4; corner += 1) {
+    session = selectSketchEditToolTarget(
+      selectSketchEditToolTarget(
+        beginSketchTool(session, "sketchFillet"),
+        sides[corner]!.target,
+      ),
+      sides[(corner + 1) % 4]!.target,
+    );
+    session = patchSketchEditToolValue(session, { value: 0.2 });
+    session = patchSketchEditToolValue(session, {
+      intent: "commitSketchEditOperator",
+    });
+  }
+  session = beginSketchTool(session, "line");
+  const definition = session.definition;
+  const bottom = definition.entities.find(
+    (entity) =>
+      entity.kind === "lineSegment" &&
+      [entity.startPointId, entity.endPointId].every(
+        (id) =>
+          definition.points.find((point) => point.pointId === id)!
+            .position[1] === 0,
+      ),
+  );
+  if (bottom?.kind !== "lineSegment") throw new Error("premise: bottom side");
+  const grabbed = [bottom.startPointId, bottom.endPointId]
+    .map((id) => definition.points.find((point) => point.pointId === id)!)
+    .reduce((left, right) =>
+      left.position[0] < right.position[0] ? left : right,
+    );
+  // The smallest fillet "radius" seen through its tangents: the distance
+  // from each fillet centre to its tangent line.
+  const smallestFilletDistance = (state: SketchSessionState) =>
+    Math.min(
+      ...state.definition.constraints.flatMap((constraint) => {
+        if (constraint.kind !== "tangent") return [];
+        const [first, second] = constraint.entityIds.map(
+          (id) =>
+            state.definition.entities.find((entity) => entity.entityId === id)!,
+        );
+        const line = first!.kind === "lineSegment" ? first : second;
+        const arc = first!.kind === "arc" ? first : second;
+        if (line?.kind !== "lineSegment" || arc?.kind !== "arc") return [];
+        const at = (id: string) =>
+          state.definition.points.find((point) => point.pointId === id)!
+            .position;
+        const [a, b, c] = [
+          at(line.startPointId),
+          at(line.endPointId),
+          at(arc.centerPointId),
+        ];
+        return [
+          Math.abs(
+            (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]),
+          ) / Math.hypot(b[0] - a[0], b[1] - a[1]),
+        ];
+      }),
+    );
+  return { session, grabbed, smallestFilletDistance };
+}
+
+// R-1: after the guard blocks a collapsing fillet, dragging back toward the
+// start must keep following the cursor; no frame may claim "constrained"
+// (the point has a free DOF) and no accepted frame holds a collapsed fillet.
+test("T13a2 R-1: after a blocked fillet collapse, dragging back follows the cursor with no constrained cue", () => {
+  const { session, grabbed, smallestFilletDistance } =
+    roundedRectangleForT13a2Review();
+  const tau = OCC_KERNEL_SETTINGS.modelingTolerance;
+  const cursorAt = (step: number): [number, number] => [
+    grabbed.position[0] + (1.0 * step) / 16,
+    grabbed.position[1] + (0.6 * step) / 16,
+  ];
+  const lagOf = (state: SketchSessionState, cursor: [number, number]) => {
+    const position = state.definition.points.find(
+      (point) => point.pointId === grabbed.pointId,
+    )!.position;
+    return Math.hypot(position[0] - cursor[0], position[1] - cursor[1]);
+  };
+  let dragging = beginSketchGeometryDrag(
+    session,
+    grabbed.target,
+    grabbed.position,
+  );
+  let lastAcceptedStep = 0;
+  const trace: string[] = [];
+  const steps = [
+    ...Array.from({ length: 16 }, (_, index) => index + 1),
+    ...Array.from({ length: 16 }, (_, index) => 15 - index),
+  ];
+  steps.forEach((step, index) => {
+    const cursor = cursorAt(step);
+    dragging = updateSketchGeometryDrag(dragging, cursor);
+    const status = dragging.activeDrag?.status;
+    trace.push(
+      `${index + 1}:${status}/${dragging.activeDrag?.feedback?.kind ?? "-"}`,
+    );
+    expect(
+      dragging.activeDrag?.feedback?.kind,
+      `frame ${index + 1}: no constrained cue (${trace.join(" ")})`,
+    ).not.toBe("constrained");
+    if (status === "dragging") {
+      expect(
+        smallestFilletDistance(dragging),
+        `frame ${index + 1}: no accepted frame holds a collapsed fillet`,
+      ).toBeGreaterThanOrEqual(tau);
+      if (index < 16) lastAcceptedStep = step;
+    }
+    if (index >= 16 && step <= lastAcceptedStep) {
+      expect(status, `back frame ${index + 1} (${trace.join(" ")})`).toBe(
+        "dragging",
+      );
+      expect(
+        lagOf(dragging, cursor),
+        `back frame ${index + 1} follows the cursor`,
+      ).toBeLessThan(1e-3);
+    }
+  });
+  expect(
+    lastAcceptedStep,
+    "premise: the forward drag is blocked before its end",
+  ).toBeLessThan(16);
+});
+
+// R-1: a release after a blocked collapse (the reviewer's path: 16 frames
+// out, 8 back) commits the last displayed frame (within the reach
+// tolerance), never a jump to an escaped state.
+test("T13a2 R-1: the release after a blocked fillet collapse commits the last displayed frame", () => {
+  const { session, grabbed } = roundedRectangleForT13a2Review();
+  let dragging = beginSketchGeometryDrag(
+    session,
+    grabbed.target,
+    grabbed.position,
+  );
+  let blocked = false;
+  let cursor: [number, number] = [grabbed.position[0], grabbed.position[1]];
+  for (const step of [
+    ...Array.from({ length: 16 }, (_, index) => index + 1),
+    ...Array.from({ length: 8 }, (_, index) => 15 - index),
+  ]) {
+    cursor = [
+      grabbed.position[0] + (1.0 * step) / 16,
+      grabbed.position[1] + (0.6 * step) / 16,
+    ];
+    dragging = updateSketchGeometryDrag(dragging, cursor);
+    blocked ||= dragging.activeDrag?.status === "blocked";
+  }
+  expect(blocked, "premise: a frame was blocked").toBe(true);
+  const displayed = dragging.definition.points;
+  const released = finishSketchGeometryDrag(dragging, cursor);
+  expect(released.activeDrag).toBeNull();
+  const jump = Math.max(
+    ...displayed.map((point) => {
+      const committed = released.definition.points.find(
+        (candidate) => candidate.pointId === point.pointId,
+      )!.position;
+      return Math.hypot(
+        committed[0] - point.position[0],
+        committed[1] - point.position[1],
+      );
+    }),
+  );
+  expect(
+    jump,
+    "no committed jump from the last displayed frame",
+  ).toBeLessThanOrEqual(1e-4);
 });

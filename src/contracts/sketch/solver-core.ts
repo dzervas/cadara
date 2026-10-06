@@ -318,6 +318,10 @@ export interface SketchCompiledSolveSession {
   lastAcceptedSnapshot: SolvedSketchSnapshot;
   disposed: boolean;
   warmStarted: boolean;
+  /** T13a2 (c3): the last accepted drag frame's curvature estimate. */
+  dragCurvature?: SketchDragCurvature;
+  /** T13a2 (review R-1): the last accepted point-drag frame's target. */
+  lastPointDragTarget?: SketchDraggedPointTarget;
 }
 
 const WOLFE_C1 = 1e-4;
@@ -6094,28 +6098,66 @@ function solveBfgs(
   initialValues: Float64Array,
   constraints: ScalarConstraintRecord[],
 ) {
+  const { values, loss, perConstraint } = solveBfgsOver(
+    initialValues,
+    constraints,
+  );
+  return { values, loss, perConstraint };
+}
+
+/**
+ * BFGS over `variableIndices` (every index by default); the other indices
+ * keep their initial values and their gradient is not part of the stop test. T13a2 (c3): restricting to a set outside of
+ * which every constraint's gradient is zero leaves the iterates unchanged
+ * (the identity start keeps those coordinates decoupled), and
+ * `initialInverseHessian` only changes the path: the objective, the stop
+ * test and a reset to the identity on a failed line search are the same.
+ */
+function solveBfgsOver(
+  initialValues: Float64Array,
+  constraints: ScalarConstraintRecord[],
+  options: {
+    variableIndices?: readonly number[];
+    initialInverseHessian?: Float64Array[] | null;
+  } = {},
+) {
+  const indices =
+    options.variableIndices ??
+    Array.from({ length: initialValues.length }, (_, index) => index);
+  const dimension = indices.length;
+  const restrict = (full: Float64Array) => {
+    const restricted = zeroVector(dimension);
+    for (let index = 0; index < dimension; index += 1) {
+      restricted[index] = full[indices[index]!]!;
+    }
+    return restricted;
+  };
   let values = cloneValues(initialValues);
   let state = evaluateLoss(values, constraints);
-  const dimension = values.length;
-  let inverseHessian = identityMatrix(dimension);
+  let gradient = restrict(state.gradient);
+  let inverseHessian =
+    options.initialInverseHessian?.length === dimension
+      ? options.initialInverseHessian.map((row) => cloneValues(row))
+      : identityMatrix(dimension);
   let recentlyReset = false;
 
   for (let iteration = 0; iteration < 1000; iteration += 1) {
-    if (state.loss < BFGS_MIN_LOSS || uniformNorm(state.gradient) < 1e-8) {
+    // The stop test reads the gradient over the solved variables only:
+    // a held (e.g. pinned) variable's gradient cannot be reduced.
+    if (state.loss < BFGS_MIN_LOSS || uniformNorm(gradient) < 1e-8) {
       break;
     }
 
-    const searchDirection = multiplyMatrixVector(
-      inverseHessian,
-      state.gradient,
-    );
-    for (let index = 0; index < searchDirection.length; index += 1) {
+    const searchDirection = multiplyMatrixVector(inverseHessian, gradient);
+    const fullDirection = zeroVector(values.length);
+    for (let index = 0; index < dimension; index += 1) {
       searchDirection[index] = -searchDirection[index]!;
+      fullDirection[indices[index]!] = searchDirection[index]!;
     }
 
     const step = lineSearchWolfe(
       values,
-      searchDirection,
+      fullDirection,
       state.gradient,
       constraints,
     );
@@ -6134,8 +6176,9 @@ function solveBfgs(
       s[index] *= step.alpha;
     }
 
-    const y = cloneValues(step.next.gradient);
-    addScaled(y, -1, state.gradient);
+    const nextGradient = restrict(step.next.gradient);
+    const y = cloneValues(nextGradient);
+    addScaled(y, -1, gradient);
     let sDotY = dot(s, y);
     if (Math.abs(sDotY) < 1e-16) {
       sDotY += 1e-6;
@@ -6149,9 +6192,15 @@ function solveBfgs(
 
     values = step.nextValues;
     state = step.next;
+    gradient = nextGradient;
   }
 
-  return { values, loss: state.loss, perConstraint: state.perConstraint };
+  return {
+    values,
+    loss: state.loss,
+    perConstraint: state.perConstraint,
+    inverseHessian,
+  };
 }
 
 function solveGradientDescent(
@@ -8225,92 +8274,117 @@ function findComponentForPoint(
   );
 }
 
-function tryTranslateDraggedComponent(
-  session: SketchCompiledSolveSession,
-  component: SketchCompiledSolveComponent | null,
-  dragTarget: SketchDraggedPointTarget,
-  targetTolerance: number,
-): DraggedPointCandidate | null {
-  if (!component || component.pointIds.length === 0) {
-    return null;
-  }
-
-  const draggedPoint = session.program.system.pointRecords.get(
-    dragTarget.pointId,
+/**
+ * T13a2 (issue 05, Q3): the guarded arc quantities of one frame, each a
+ * signed value whose sign is the arc's orientation and whose magnitude is
+ * its radius:
+ * - `radius:<arc>`: an arc's radius variable where it is an authority
+ *   variable (radius through zero mirrors the arc);
+ * - `side:<tangent>`: for a line↔arc tangent, the signed distance from the
+ *   line to the arc's centre; the centre is a radius away from the line, so
+ *   the side changes only through radius zero (the arc turns inside out,
+ *   e.g. a collapsing fillet). A point-defined arc's radius is a distance
+ *   (never negative), so this is its radius-through-zero signal.
+ * The minor/major sweep (start×end about the centre) is deliberately not
+ * guarded: it changes on a legitimate sweep through 180° and is noise on a
+ * semicircle.
+ */
+function guardedArcQuantities(
+  program: SketchCompiledSolveProgram,
+  values: Float64Array,
+  snapshot: SolvedSketchSnapshot,
+) {
+  const signs = new Map<string, number>();
+  const authority = new Set(
+    program.system.parameterProjection.authorityVariableIndices,
   );
-  if (!draggedPoint) {
-    return null;
-  }
-
-  const currentValues =
-    session.program.system.parameterProjection.projectValues(session.values);
-  const delta = subtract(
-    dragTarget.position,
-    getPoint(currentValues, draggedPoint),
-  );
-  const candidateValues = cloneValues(session.values);
-
-  for (const pointId of component.pointIds) {
-    const point = session.program.system.pointRecords.get(pointId);
-    if (!point) {
-      continue;
+  for (const state of program.system.entityStates.values()) {
+    if (state.kind === "arc" && authority.has(state.baseIndex)) {
+      signs.set(`radius:${state.entityId}`, values[state.baseIndex]!);
     }
-    candidateValues[point.baseIndex] += delta[0];
-    candidateValues[point.baseIndex + 1] += delta[1];
   }
-
-  const fullState = evaluateLoss(
-    candidateValues,
-    session.program.system.scalarConstraints,
+  const points = new Map(
+    snapshot.solvedPoints.map((point) => [point.pointId, point.solvedPosition]),
   );
-  if (fullState.loss >= SOLVED_LOSS_THRESHOLD) {
-    return null;
-  }
-
-  const materialized = materializeSolveResult(
-    session.program,
-    candidateValues,
-    {
-      values: candidateValues,
-      loss: fullState.loss,
-      perConstraint: fullState.perConstraint,
-    },
+  const arcCenters = new Map(
+    snapshot.solvedEntities.flatMap((entity) =>
+      entity.kind === "arc" ? [[entity.entityId, entity.centerPosition]] : [],
+    ),
   );
-  const solvedPoint = materialized.solvedSnapshot.solvedPoints.find(
-    (point) => point.pointId === dragTarget.pointId,
+  const entities = new Map(
+    program.definition.entities.map((entity) => [entity.entityId, entity]),
   );
-  const targetDistance = solvedPoint
-    ? length(subtract(solvedPoint.solvedPosition, dragTarget.position))
-    : Number.POSITIVE_INFINITY;
-  const constraintsSatisfied =
-    materialized.solvedSnapshot.constraintStatuses.every((status) =>
-      isAcceptedConstraintStatus(status.status),
+  for (const constraint of program.definition.constraints) {
+    if (constraint.kind !== "tangent") continue;
+    const [first, second] = constraint.entityIds.map((id) => entities.get(id));
+    const line =
+      first?.kind === "lineSegment"
+        ? first
+        : second?.kind === "lineSegment"
+          ? second
+          : null;
+    const arc =
+      first?.kind === "arc" ? first : second?.kind === "arc" ? second : null;
+    if (!line || !arc) continue;
+    const center = arcCenters.get(arc.entityId);
+    const start = points.get(line.startPointId);
+    const end = points.get(line.endPointId);
+    if (!center || !start || !end) continue;
+    signs.set(
+      `side:${constraint.constraintId}`,
+      pointLineSignedDistance(center, start, end),
     );
-  const dimensionsSatisfied =
-    materialized.solvedSnapshot.dimensionStatuses.every(
-      (status) => status.status !== "unsatisfied",
-    );
-  const derivationsValid = !materialized.diagnostics.some(
-    (diagnostic) => diagnostic.severity === "error",
-  );
-
-  if (
-    session.program.validation.isValid &&
-    derivationsValid &&
-    targetDistance <= targetTolerance &&
-    constraintsSatisfied &&
-    dimensionsSatisfied
-  ) {
-    return { accepted: true, values: candidateValues, materialized };
   }
+  return signs;
+}
 
-  return null;
+/**
+ * Whether a frame flips or collapses a guarded arc relative to the last
+ * accepted frame (issue 05: no flips):
+ * - **flip**: exact sign comparison, no tolerance. A previous sign of 0 is
+ *   not compared (nothing to preserve); a next sign of 0 differs from a
+ *   previous ±1 and is a flip, e.g. a tangent line shortened through zero
+ *   length or a centre landing exactly on its tangent line.
+ * - **collapse** (review R-1): a magnitude (radius) falling below the
+ *   document modeling tolerance τ, the degenerate boundary (the same rule
+ *   as "no piece shorter than τ"). Minimum motion otherwise parks an arc at
+ *   radius ≈ 0, where the tangent residual's gradient degenerates and
+ *   later frames cannot leave it. It applies only when the previous
+ *   accepted magnitude was at least τ, so a sketch that already holds such
+ *   an arc is not frozen: that arc is then only flip-guarded.
+ */
+function guardedArcFlippedOrCollapsed(input: {
+  program: SketchCompiledSolveProgram;
+  previous: { values: Float64Array; snapshot: SolvedSketchSnapshot };
+  next: { values: Float64Array; snapshot: SolvedSketchSnapshot };
+}) {
+  const tau = input.program.modelingTolerance;
+  const previous = guardedArcQuantities(
+    input.program,
+    input.previous.values,
+    input.previous.snapshot,
+  );
+  const next = guardedArcQuantities(
+    input.program,
+    input.next.values,
+    input.next.snapshot,
+  );
+  return [...previous].some(([key, before]) => {
+    const after = next.get(key);
+    if (after === undefined) return false;
+    const flipped =
+      Math.sign(before) !== 0 && Math.sign(after) !== Math.sign(before);
+    const collapsed = Math.abs(before) >= tau && Math.abs(after) < tau;
+    return flipped || collapsed;
+  });
 }
 
 function createDraggedPointAcceptance(input: {
-  program: SketchCompiledSolveProgram;
+  session: SketchCompiledSolveSession;
+  values: Float64Array;
   materialized: SketchCoreSolveResult;
 }) {
+  const program = input.session.program;
   const constraintsSatisfied =
     input.materialized.solvedSnapshot.constraintStatuses.every((status) =>
       isAcceptedConstraintStatus(status.status),
@@ -8328,11 +8402,24 @@ function createDraggedPointAcceptance(input: {
   // close the dragged point reached the cursor. `targetDistance` is intentionally
   // dropped from acceptance so a feasible-but-lagging frame is `solved`, not
   // `blocked`; `blocked` is reserved for invalid/non-convergent solves.
+  // T13a2 (issue 05, no flips): a frame that flips or collapses a guarded
+  // arc relative to the last accepted frame is not accepted either.
   const accepted =
-    input.program.validation.isValid &&
+    program.validation.isValid &&
     derivationsValid &&
     constraintsSatisfied &&
-    dimensionsSatisfied;
+    dimensionsSatisfied &&
+    !guardedArcFlippedOrCollapsed({
+      program,
+      previous: {
+        values: input.session.values,
+        snapshot: input.session.lastAcceptedSnapshot,
+      },
+      next: {
+        values: input.values,
+        snapshot: input.materialized.solvedSnapshot,
+      },
+    });
 
   return { accepted };
 }
@@ -8356,7 +8443,12 @@ type DraggedPointCandidate = {
   accepted: boolean;
   values: Float64Array;
   materialized: SketchCoreSolveResult;
+  /** T13a2 (c3): phase A's curvature estimate, kept when the frame is accepted. */
+  curvature?: SketchDragCurvature;
 };
+
+/** T13a2 (c3): a BFGS inverse Hessian over one drag problem's variables. */
+type SketchDragCurvature = { key: string; inverseHessian: Float64Array[] };
 
 /** [TECH] G16⁗: a drag frame's candidate re-materialized and re-judged at `values`. */
 function reevaluateDraggedPointCandidate(
@@ -8366,7 +8458,8 @@ function reevaluateDraggedPointCandidate(
   const { materialized } = materializeDraggedPointCandidate(session, values);
   return {
     accepted: createDraggedPointAcceptance({
-      program: session.program,
+      session,
+      values,
       materialized,
     }).accepted,
     values,
@@ -8378,39 +8471,42 @@ function reevaluateDraggedPointCandidate(
  * [TECH] G16‴/G16⁗: one drag frame toward `dragTarget`, a solve whose start
  * state is the last accepted frame (`session.values`): its blocked set is
  * decided there, with one re-solve (from the frame's end values) when a
- * blocked offset builds at the end. `translate` tries the rigid-translation
- * fast path first. The session is not mutated.
+ * blocked offset builds at the end. `interactive` is a session update's
+ * frame (not a DOF probe): a preview frame (`null` tolerance) reuses the
+ * curvature (T13a2 c3), a frame with a tolerance (the release, a single
+ * solver call) runs the exact-reach step (d1) instead. The session is not
+ * mutated.
  */
 function solveDraggedPointFrameWithRebuild(input: {
   session: SketchCompiledSolveSession;
   component: SketchCompiledSolveComponent | null;
   dragTarget: SketchDraggedPointTarget;
-  translate?: { targetTolerance: number };
+  interactive?: { targetTolerance: number | null };
 }): DraggedPointCandidate | null {
-  const { session, component, dragTarget, translate } = input;
+  const { session, component, dragTarget, interactive } = input;
   return solveWithRebuildRetry<DraggedPointCandidate | null>({
     program: session.program,
     startValues: session.values,
     solve: () =>
-      // Rigid-translation fast path (D5): a verified optimization only. It
-      // succeeds exclusively when translating the whole component satisfies
-      // every authored constraint, i.e. the component is internally rigid
-      // and translation is the minimum-motion solution, so its result
-      // equals the general solve.
-      (translate
-        ? tryTranslateDraggedComponent(
-            session,
-            component,
-            dragTarget,
-            translate.targetTolerance,
-          )
-        : null) ?? solveDraggedPointFrame({ session, component, dragTarget }),
+      solveDraggedPointFrame({
+        session,
+        component,
+        dragTarget,
+        exactReachTolerance: interactive?.targetTolerance ?? undefined,
+        reuseCurvature: interactive?.targetTolerance === null,
+        repeatsAcceptedFrame:
+          interactive !== undefined &&
+          session.lastPointDragTarget?.pointId === dragTarget.pointId &&
+          session.lastPointDragTarget.position[0] === dragTarget.position[0] &&
+          session.lastPointDragTarget.position[1] === dragTarget.position[1],
+      }),
     retry: (from) =>
       solveDraggedPointFrame({
         session,
         component,
         dragTarget,
         startValues: from,
+        exactReachTolerance: interactive?.targetTolerance ?? undefined,
       }),
     valuesOf: (candidate) => candidate?.values ?? null,
     reevaluate: (values) => reevaluateDraggedPointCandidate(session, values),
@@ -8435,9 +8531,12 @@ function acceptDraggedPointCandidate(
   session: SketchCompiledSolveSession,
   values: Float64Array,
   materialized: SketchCoreSolveResult,
+  curvature?: SketchDragCurvature,
 ): SketchDraggedPointSolveResult {
   session.values = heldDrivenValues(session.program, values);
   session.lastAcceptedSnapshot = materialized.solvedSnapshot;
+  session.dragCurvature = curvature;
+  session.lastPointDragTarget = undefined;
   return {
     kind: "solved",
     solvedSnapshot: materialized.solvedSnapshot,
@@ -8497,6 +8596,34 @@ function createMinimumMotionAnchorConstraint(input: {
 // position instead of returning a compromise that violates authored constraints.
 // Neither phase seeds or accepts reflected/discontinuous branches (D4): the frame
 // is solved purely by continuous iteration from the previous accepted values.
+//
+// T13a2, with the BFGS strategy:
+// - c2: phase A runs BFGS without the Gauss–Newton fallback. Phase A's loss
+//   includes the soft cursor and anchor terms, so a converged frame can sit
+//   above SOLVED_LOSS_THRESHOLD and wrongly trigger the fallback; acceptance
+//   and phase B (which keeps the fallback, hard constraints only) judge it.
+// - c3: phase A solves only the component's (authority) variables. Every
+//   phase-A term's gradient is supported there: the component is the union
+//   of its equations' projected supports, and an offset/derived output is
+//   projected onto its seeds' authority variables, so relationships seeded in
+//   the component are solved with it. Outside it the gradient is zero, so
+//   the iterates equal the full solve's, and other components keep their
+//   previous values (only `affectedVariables` are copied back, as before):
+//   the restriction is bit-identical to the full solve. An interactive
+//   preview frame also reuses the previous accepted frame's inverse
+//   Hessian for the same drag problem (25–30 % faster frames). That keeps
+//   the objective, stop test and acceptance but changes the path, and with
+//   the 1e-6 anchor under the 1e-8 gradient stop the accepted frame moves
+//   by O(1e-3) on fillet/offset outlines (path dependence within the
+//   existing stop accuracy; accepted under D1 by the orchestrator). The
+//   release frame starts from the identity, so the committed state does
+//   not depend on the reuse path.
+// - d1: when a session update with a reach tolerance (the release frame of
+//   an editor drag, or a single solver call) has an accepted frame that
+//   leaves the dragged point farther than `targetTolerance` from the
+//   cursor, the point is pinned at the cursor and the other component
+//   variables are projected onto the hard constraints from that frame; the
+//   result replaces the frame only if the frame acceptance accepts it.
 
 /**
  * T12b: generalized drag frame solver that accepts pre-resolved constraints
@@ -8510,10 +8637,21 @@ function solveDragFrameGeneral(input: {
   draggedVariableIndices: number[];
   constraintLabel: string;
   startValues?: Float64Array;
+  /** T13a2 (d1): the cursor and the existing target tolerance. */
+  exactReach?: { position: SketchPoint2D; targetTolerance: number };
+  /** T13a2 (c3): reuse the session's curvature for this drag problem. */
+  reuseCurvature?: boolean;
+  /**
+   * T13a2 (review R-1): the target is the last accepted frame's; that frame
+   * is this frame's solution (a re-solve only re-walks the path), so only
+   * the exact-reach step runs on it.
+   */
+  repeatsAcceptedFrame?: boolean;
 }): DraggedPointCandidate | null {
   const { session, component } = input;
   const program = session.program;
   const parameterCount = program.system.parameterCount;
+  const bfgs = program.strategy === "bfgs";
 
   const componentConstraintSet = new Set(component?.equationIndices ?? []);
   const hardConstraints = program.system.scalarConstraints.filter((_, index) =>
@@ -8529,6 +8667,50 @@ function solveDragFrameGeneral(input: {
   );
 
   const previousFrame = cloneValues(session.values);
+  const candidateOf = (solved: Float64Array) => {
+    const candidate = cloneValues(session.values);
+    for (const index of affectedVariables) {
+      candidate[index] = solved[index]!;
+    }
+    return candidate;
+  };
+  const judge = (values: Float64Array) =>
+    reevaluateDraggedPointCandidate(session, values);
+  const exactReach = (candidate: DraggedPointCandidate) => {
+    if (!bfgs || !input.exactReach || !candidate.accepted) return candidate;
+    const [x, y] = input.draggedVariableIndices;
+    const affected = new Set(affectedVariables);
+    if (
+      x === undefined ||
+      y === undefined ||
+      !affected.has(x) ||
+      !affected.has(y)
+    )
+      return candidate;
+    const { position, targetTolerance } = input.exactReach;
+    const lag = Math.hypot(
+      candidate.values[x]! - position[0],
+      candidate.values[y]! - position[1],
+    );
+    if (lag <= targetTolerance) return candidate;
+    const pinned = cloneValues(candidate.values);
+    pinned[x] = position[0];
+    pinned[y] = position[1];
+    const projected = solveBfgsOver(pinned, hardConstraints, {
+      variableIndices: nonDraggedVariableIndices,
+    });
+    const reached = judge(candidateOf(projected.values));
+    return reached.accepted
+      ? { ...reached, curvature: candidate.curvature }
+      : candidate;
+  };
+
+  if (input.repeatsAcceptedFrame && input.startValues === undefined) {
+    return exactReach({
+      ...judge(cloneValues(session.values)),
+      curvature: session.dragCurvature,
+    });
+  }
 
   // Phase A: hard constraints + soft cursor target + uniform minimum motion.
   const phaseAConstraints: ScalarConstraintRecord[] = [
@@ -8543,47 +8725,47 @@ function solveDragFrameGeneral(input: {
       parameterProjection: program.system.parameterProjection,
     }),
   ];
-  const solvedA = solveSystemValues(
-    cloneValues(input.startValues ?? session.values),
-    phaseAConstraints,
-    program.strategy,
-  );
-  const candidateA = cloneValues(session.values);
-  for (const index of affectedVariables) {
-    candidateA[index] = solvedA.values[index]!;
+  const curvatureKey = `${input.constraintLabel}|${component?.componentId ?? "all"}|${input.draggedVariableIndices.join(",")}`;
+  const reuse =
+    input.reuseCurvature === true && input.startValues === undefined;
+  let curvature: SketchDragCurvature | undefined;
+  let solvedA: Float64Array;
+  if (bfgs) {
+    const solved = solveBfgsOver(
+      cloneValues(input.startValues ?? session.values),
+      phaseAConstraints,
+      {
+        variableIndices: affectedVariables,
+        initialInverseHessian:
+          reuse && session.dragCurvature?.key === curvatureKey
+            ? session.dragCurvature.inverseHessian
+            : null,
+      },
+    );
+    solvedA = solved.values;
+    curvature = reuse
+      ? { key: curvatureKey, inverseHessian: solved.inverseHessian }
+      : undefined;
+  } else {
+    solvedA = solveSystemValues(
+      cloneValues(input.startValues ?? session.values),
+      phaseAConstraints,
+      program.strategy,
+    ).values;
   }
-  const evalA = materializeDraggedPointCandidate(session, candidateA);
-  if (
-    createDraggedPointAcceptance({ program, materialized: evalA.materialized })
-      .accepted
-  ) {
-    return {
-      accepted: true,
-      values: candidateA,
-      materialized: evalA.materialized,
-    };
+  const candidateA = judge(candidateOf(solvedA));
+  if (candidateA.accepted) {
+    return exactReach({ ...candidateA, curvature });
   }
 
   // Phase B: project the phase-A candidate onto the hard-constraint manifold.
   const phaseBConstraints: ScalarConstraintRecord[] = [...hardConstraints];
   const solvedB = solveSystemValues(
-    cloneValues(candidateA),
+    cloneValues(candidateA.values),
     phaseBConstraints,
     program.strategy,
   );
-  const candidateB = cloneValues(session.values);
-  for (const index of affectedVariables) {
-    candidateB[index] = solvedB.values[index]!;
-  }
-  const evalB = materializeDraggedPointCandidate(session, candidateB);
-  return {
-    accepted: createDraggedPointAcceptance({
-      program,
-      materialized: evalB.materialized,
-    }).accepted,
-    values: candidateB,
-    materialized: evalB.materialized,
-  };
+  return exactReach({ ...judge(candidateOf(solvedB.values)), curvature });
 }
 
 function solveDraggedPointFrame(input: {
@@ -8591,6 +8773,9 @@ function solveDraggedPointFrame(input: {
   component: SketchCompiledSolveComponent | null;
   dragTarget: SketchDraggedPointTarget;
   startValues?: Float64Array;
+  exactReachTolerance?: number;
+  reuseCurvature?: boolean;
+  repeatsAcceptedFrame?: boolean;
 }): DraggedPointCandidate | null {
   const { session, component, dragTarget } = input;
   const constraint = createDragTargetConstraint(
@@ -8612,6 +8797,15 @@ function solveDraggedPointFrame(input: {
     draggedVariableIndices,
     constraintLabel: dragTarget.pointId,
     startValues: input.startValues,
+    exactReach:
+      input.exactReachTolerance === undefined
+        ? undefined
+        : {
+            position: dragTarget.position,
+            targetTolerance: input.exactReachTolerance,
+          },
+    reuseCurvature: input.reuseCurvature,
+    repeatsAcceptedFrame: input.repeatsAcceptedFrame,
   });
 }
 
@@ -8622,6 +8816,7 @@ function solveDragFrameGeneralWithRebuild(input: {
   session: SketchCompiledSolveSession;
   resolved: NonNullable<ReturnType<typeof resolveDragTargetFrame>>;
   constraintLabel: string;
+  reuseCurvature: boolean;
 }): DraggedPointCandidate | null {
   const { session, resolved, constraintLabel } = input;
   return solveWithRebuildRetry<DraggedPointCandidate | null>({
@@ -8634,6 +8829,7 @@ function solveDragFrameGeneralWithRebuild(input: {
         dragConstraints: resolved.constraints,
         draggedVariableIndices: resolved.draggedVariableIndices,
         constraintLabel,
+        reuseCurvature: input.reuseCurvature,
       }),
     retry: (from) =>
       solveDragFrameGeneral({
@@ -8716,10 +8912,18 @@ export function sketchDraggedPointHasFreeDof(
   return false;
 }
 
+/**
+ * One drag update. `targetTolerance` is the exact-reach (T13a2 d1)
+ * tolerance of a point drag. `null` marks an interactive preview frame: it
+ * skips the exact-reach step and reuses the previous frame's curvature
+ * (c3). A frame with a tolerance (the release frame, a single solver call)
+ * starts from the identity curvature and runs the exact-reach step, so the
+ * committed state carries no reuse path dependence (review R-1/R-3).
+ */
 export function updateCompiledSketchSolveSession(
   session: SketchCompiledSolveSession,
   dragTarget: SketchDragTarget,
-  targetTolerance = session.program.tolerances.coincidence,
+  targetTolerance: number | null = session.program.tolerances.coincidence,
 ): SketchDraggedPointSolveResult {
   if (session.disposed) {
     return {
@@ -8774,8 +8978,8 @@ export function updateCompiledSketchSolveSession(
     const stepTarget = interpolateDragTarget(dragTarget, motion, fraction);
 
     if (stepTarget.kind === "sketchPoint") {
-      // Point path: use the existing optimized path with rigid-translation
-      // fast path.
+      // Point path: the minimum-motion frame solve with the exact-reach
+      // step (T13a2 d1; whole-component translation is never shortcut).
       const component = findComponentForPoint(
         session.program,
         stepTarget.pointId,
@@ -8784,10 +8988,16 @@ export function updateCompiledSketchSolveSession(
         session,
         component,
         dragTarget: stepTarget,
-        translate: { targetTolerance },
+        interactive: { targetTolerance },
       });
       if (frame && frame.accepted) {
-        acceptDraggedPointCandidate(session, frame.values, frame.materialized);
+        acceptDraggedPointCandidate(
+          session,
+          frame.values,
+          frame.materialized,
+          frame.curvature,
+        );
+        session.lastPointDragTarget = stepTarget;
         lastAccepted = frame.materialized;
         continue;
       }
@@ -8815,9 +9025,15 @@ export function updateCompiledSketchSolveSession(
       session,
       resolved,
       constraintLabel: dragTargetLabel(dragTarget),
+      reuseCurvature: targetTolerance === null,
     });
     if (frame && frame.accepted) {
-      acceptDraggedPointCandidate(session, frame.values, frame.materialized);
+      acceptDraggedPointCandidate(
+        session,
+        frame.values,
+        frame.materialized,
+        frame.curvature,
+      );
       lastAccepted = frame.materialized;
       continue;
     }
@@ -9991,8 +10207,9 @@ function getEntityPoints(
 // trySolveDraggedPointAsComponentTranslation: the standalone rigid-translation
 // fallback with its own targetDistance-based acceptance model was retired by
 // minimum-motion-sketch-drag. Interactive drag solving
-// (updateCompiledSketchSolveSession) is now the single authority; rigid
-// translation survives only as its internal verified fast path.
+// (updateCompiledSketchSolveSession) is now the single authority; its
+// translation fast path was deleted too (T13a2): a rigid component translates
+// because translation is its minimum-motion solution.
 
 export function solveSketchDefinitionCore(input: {
   definition: SketchDefinition;
@@ -10059,8 +10276,8 @@ export function solveSketchDefinitionWithDraggedPointTarget(input: {
 
   // The interactive session is the single authority for drag results
   // (minimum-motion-sketch-drag). It already returns `solved` for every
-  // satisfiable sketch (sliding to the closest feasible position, or translating
-  // rigid components via its verified fast path) and reserves `blocked` for
+  // satisfiable sketch (sliding to the closest feasible position; a rigid
+  // component translates as its minimum-motion solution) and reserves `blocked` for
   // non-convergent/invalid frames. No separate translation fallback with its own
   // acceptance model runs here — that invisible second mechanism was removed.
   return interactive;
