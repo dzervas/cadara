@@ -32,6 +32,7 @@ import {
   patchSketchEditToolValue,
   getSketchSessionLiveRegionBasis,
   publishSketchLiveRegions,
+  patchSketchConstraintValue,
   selectSketchConstraintTarget,
   selectSketchEditToolTarget,
   startSketchDraw,
@@ -5462,10 +5463,11 @@ test("T10g-1 R-6: Trim needs the accepted live solve of the current definition",
   expect(applied.definition.entities).toHaveLength(4);
 });
 
-// Orchestrator [TECH] 2026-10-04 (logic lane, session seam): a Circle-tool
-// circle carries a `circleRadius`; after its Trim the sketch stays accepted
-// (the radius is now a diameter of the arc), so a second Trim still runs.
-test("T10g-1: trimming a Circle-tool circle keeps the sketch accepted and a second Trim in the same sketch succeeds", async () => {
+// Orchestrator [TECH] 2026-10-04 (logic lane, session seam): a circle that
+// carries a `circleRadius` (T13a: deliberately added with the Radius tool;
+// the Circle tool no longer authors one) stays accepted after its Trim (the
+// radius is now a diameter of the arc), so a second Trim still runs.
+test("T10g-1: trimming a circle with a Radius-tool dimension keeps the sketch accepted and a second Trim in the same sketch succeeds", async () => {
   let session = createNewSketchSession(
     createStandardPlaneDefinition("xy"),
     OCC_KERNEL_SETTINGS,
@@ -5477,9 +5479,27 @@ test("T10g-1: trimming a Circle-tool circle keeps the sketch accepted and a seco
   const circle = session.definition.entities.find(
     (entity) => entity.kind === "circle",
   )!;
+  expect(
+    session.definition.dimensions,
+    "premise: the Circle tool authors no dimension",
+  ).toEqual([]);
+  session = patchSketchConstraintValue(
+    patchSketchConstraintValue(
+      selectSketchConstraintTarget(
+        beginSketchTool(session, "dimensionRadius"),
+        circle.target,
+      ),
+      { value: 2 },
+    ),
+    { intent: "commitConstraintValue" },
+  );
   const radius = session.definition.dimensions.find(
     (dimension) => dimension.kind === "circleRadius",
   )!;
+  expect(radius.value, "premise: the deliberate radius").toEqual({
+    source: "literal",
+    value: 2,
+  });
   for (const x of [1, -1])
     session = acceptSketchDraw(
       startSketchDraw(beginSketchTool(session, "line"), [x, -3]),
@@ -5494,16 +5514,16 @@ test("T10g-1: trimming a Circle-tool circle keeps the sketch accepted and a seco
       (entity) => entity.entityId === circle.entityId,
     )?.kind,
   ).toBe("arc");
-  expect(radius.label, "premise: the Circle tool's default label").toMatch(
-    / radius$/,
+  // The Radius tool's "Radius N" label does not match the "… radius" rewrite
+  // (review A-3); its "Radius N" → "Diameter N" rewrite is T13l.
+  expect(radius.label, "premise: the Radius tool's label").toMatch(
+    /^Radius \d+$/,
   );
   expect(trimmed.definition.dimensions).toEqual([
     {
       ...radius,
       kind: "diameter",
-      // Review A-3: the default "… radius" label becomes "… diameter".
-      label: radius.label.replace(/ radius$/, " diameter"),
-      value: 2 * (radius.value as number),
+      value: { source: "literal", value: 4 },
     },
   ]);
   expect(trimmed.liveSolve?.accepted, "the trimmed sketch stays accepted").toBe(
@@ -5519,6 +5539,394 @@ test("T10g-1: trimming a Circle-tool circle keeps the sketch accepted and a seco
   expect(second.definition.entityIds.length).toBe(
     trimmed.definition.entityIds.length + 1,
   );
+});
+
+// T13a (logic lane, session seam): a Circle-tool circle has no automatic
+// size, so its rim drag grows the radius with the centre fixed; the same drag
+// after a deliberate Radius-tool dimension leaves the radius at its value.
+test("T13a: a freshly drawn circle's rim drag grows the radius with the centre fixed; a deliberate radius blocks it", () => {
+  let session = createNewSketchSession(
+    createStandardPlaneDefinition("xy"),
+    OCC_KERNEL_SETTINGS,
+  );
+  session = acceptSketchDraw(
+    startSketchDraw(beginSketchTool(session, "circle"), [1, 1]),
+    [3, 1],
+  );
+  session = beginSketchTool(session, "line");
+  const circle = session.definition.entities.find(
+    (entity) => entity.kind === "circle",
+  )!;
+  expect(session.definition.dimensions, "premise: no automatic size").toEqual(
+    [],
+  );
+  const rimDrag = (from: SketchSessionState) =>
+    finishSketchGeometryDrag(
+      beginSketchGeometryDrag(from, circle.target, [3, 1], {
+        kind: "rim",
+        entityId: circle.entityId,
+      }),
+      [5, 1],
+    );
+  const radiusOf = (state: SketchSessionState) => {
+    const entity = state.definition.entities.find(
+      (candidate) => candidate.entityId === circle.entityId,
+    );
+    return entity?.kind === "circle" ? entity.radius : null;
+  };
+  const centreOf = (state: SketchSessionState) =>
+    state.definition.points.find(
+      (point) =>
+        circle.kind === "circle" && point.pointId === circle.centerPointId,
+    )?.position;
+
+  const grown = rimDrag(session);
+  expect(radiusOf(grown), "the rim drag grows the radius to 4").toBeCloseTo(
+    4,
+    6,
+  );
+  expect(centreOf(grown)?.[0]).toBeCloseTo(1, 9);
+  expect(centreOf(grown)?.[1]).toBeCloseTo(1, 9);
+  expect(grown.definition.dimensions, "the drag authors nothing").toEqual([]);
+
+  const dimensioned = patchSketchConstraintValue(
+    patchSketchConstraintValue(
+      selectSketchConstraintTarget(
+        beginSketchTool(session, "dimensionRadius"),
+        circle.target,
+      ),
+      { value: 2 },
+    ),
+    { intent: "commitConstraintValue" },
+  );
+  const blocked = expectBlockedRimDrag(
+    beginSketchTool(dimensioned, "line"),
+    circle,
+  );
+  expect(
+    radiusOf(blocked),
+    "a deliberate radius keeps its value under a rim drag",
+  ).toBeCloseTo(2, 6);
+});
+
+/**
+ * T13a Q2: a rim drag of a circle whose size is driven by a deliberate
+ * dimension starts (no "can't be dragged until the sketch solves") and its
+ * frame is blocked with the constrained feedback cue; release keeps the size.
+ */
+function expectBlockedRimDrag(
+  session: SketchSessionState,
+  circle: SketchDefinition["entities"][number],
+) {
+  const begun = beginSketchGeometryDrag(session, circle.target, [3, 1], {
+    kind: "rim",
+    entityId: circle.entityId,
+  });
+  expect(begun.validationMessage, "the drag starts").toBeNull();
+  expect(begun.activeDrag?.intent.kind).toBe("radius");
+  const moved = updateSketchGeometryDrag(begun, [4, 1]);
+  expect(moved.activeDrag?.status, "the frame is blocked").toBe("blocked");
+  expect(
+    moved.activeDrag?.feedback?.kind,
+    "with the constrained cue, not a failed solve",
+  ).toBe("constrained");
+  const released = finishSketchGeometryDrag(moved, [5, 1]);
+  expect(released.definition.dimensions).toEqual(session.definition.dimensions);
+  return released;
+}
+
+function drawCircleAt11() {
+  const session = acceptSketchDraw(
+    startSketchDraw(
+      beginSketchTool(
+        createNewSketchSession(
+          createStandardPlaneDefinition("xy"),
+          OCC_KERNEL_SETTINGS,
+        ),
+        "circle",
+      ),
+      [1, 1],
+    ),
+    [3, 1],
+  );
+  return {
+    session,
+    circle: session.definition.entities.find(
+      (entity) => entity.kind === "circle",
+    )!,
+  };
+}
+
+test("T13a Q2: a Dimension-tool diameter blocks a rim drag as a constrained frame (not an unacceptable start)", () => {
+  const { session, circle } = drawCircleAt11();
+  const dimensioned = patchSketchConstraintValue(
+    patchSketchConstraintValue(
+      selectSketchConstraintTarget(
+        beginSketchTool(session, "dimensionDistance"),
+        circle.target,
+      ),
+      { value: 4 },
+    ),
+    { intent: "commitConstraintValue" },
+  );
+  expect(
+    dimensioned.definition.dimensions.map((dimension) => [
+      dimension.kind,
+      dimension.value,
+    ]),
+    "premise: an authored-value diameter",
+  ).toEqual([["diameter", { source: "literal", value: 4 }]]);
+  const released = expectBlockedRimDrag(
+    beginSketchTool(dimensioned, "line"),
+    circle,
+  );
+  const radius = released.definition.entities.find(
+    (entity) => entity.entityId === circle.entityId,
+  );
+  expect(radius?.kind === "circle" ? radius.radius : null).toBeCloseTo(2, 6);
+});
+
+test("T13a Q2: an expression-valued dimension stays byte-identical through a drag of other geometry", () => {
+  const drawn = drawCircleAt11().session;
+  const circle = drawn.definition.entities.find(
+    (entity) => entity.kind === "circle",
+  )!;
+  let session: SketchSessionState = {
+    ...drawn,
+    documentVariables: [
+      { variableId: "variable_d", name: "d", valueText: "4" },
+    ],
+  };
+  session = patchSketchConstraintValue(
+    patchSketchConstraintValue(
+      selectSketchConstraintTarget(
+        beginSketchTool(session, "dimensionDistance"),
+        circle.target,
+      ),
+      { value: "d" },
+    ),
+    { intent: "commitConstraintValue" },
+  );
+  expect(session.validationMessage).toBeNull();
+  session = acceptSketchDraw(
+    startSketchDraw(beginSketchTool(session, "line"), [6, 6]),
+    [9, 6],
+  );
+  session = beginSketchTool(session, "line");
+  const dimensionsBefore = JSON.stringify(session.definition.dimensions);
+  expect(
+    session.definition.dimensions.map((dimension) => dimension.value),
+    "premise: the expression is authored",
+  ).toEqual([{ source: "expression", valueText: "d" }]);
+  const end = session.definition.points.find(
+    (point) => point.label === "Line 3 end",
+  )!;
+  let dragging = beginSketchGeometryDrag(session, end.target, [9, 6]);
+  expect(dragging.validationMessage, "the drag starts").toBeNull();
+  dragging = updateSketchGeometryDrag(dragging, [9, 7]);
+  expect(dragging.activeDrag?.status).toBe("dragging");
+  const released = finishSketchGeometryDrag(dragging, [9, 8]);
+  const moved = released.definition.points.find(
+    (point) => point.pointId === end.pointId,
+  )!.position;
+  expect(moved[1], "the line end moved").toBeGreaterThan(7.9);
+  expect(
+    JSON.stringify(released.definition.dimensions),
+    "the expression dimension is untouched",
+  ).toBe(dimensionsBefore);
+});
+
+// T13a (logic lane, session seam): a Rectangle-tool rectangle has no
+// automatic width/height, so a corner drag should resize both sides freely
+// while its horizontal/vertical relationships hold (issue 05: minimum motion).
+// KNOWN FAILURE, owned by follow-up slice "T13a2 (minimum-motion drag without
+// whole-component translation)": the solver's rigid-translation drag fast path
+// (`tryTranslateDraggedComponent`) translates any component whose constraints
+// are translation-invariant, so today the whole rectangle moves. When T13a2
+// fixes it this row passes, `test.fails` then reports it, and T13a2 turns it
+// back into a plain `test`.
+test.fails("T13a: a rectangle corner drag resizes both sides freely and keeps horizontal/vertical", () => {
+  let session = createNewSketchSession(
+    createStandardPlaneDefinition("xy"),
+    OCC_KERNEL_SETTINGS,
+  );
+  session = acceptSketchDraw(
+    startSketchDraw(beginSketchTool(session, "rectangle"), [1, 1]),
+    [5, 4],
+  );
+  session = beginSketchTool(session, "line");
+  expect(session.definition.dimensions, "premise: no automatic size").toEqual(
+    [],
+  );
+  const corner = session.definition.points.find(
+    (point) => point.label === "Rectangle 1 top right",
+  )!;
+  const dragged = finishSketchGeometryDrag(
+    beginSketchGeometryDrag(session, corner.target, [5, 4]),
+    [7, 6],
+  );
+  const at = (label: string) =>
+    dragged.definition.points.find((point) => point.label === label)!.position;
+  const [bl, br, tr, tl] = [
+    "Rectangle 1 bottom left",
+    "Rectangle 1 bottom right",
+    "Rectangle 1 top right",
+    "Rectangle 1 top left",
+  ].map(at);
+  // The pointer is a soft target (minimum motion): within 1e-3 of it.
+  expect(tr![0], "the dragged corner follows the pointer").toBeCloseTo(7, 3);
+  expect(tr![1]).toBeCloseTo(6, 3);
+  expect(bl![0], "the opposite corner stays (minimum motion)").toBeCloseTo(1, 3);
+  expect(bl![1]).toBeCloseTo(1, 3);
+  expect(br![0] - bl![0], "width grows from 4 to 6").toBeCloseTo(6, 3);
+  expect(tl![1] - bl![1], "height grows from 3 to 5").toBeCloseTo(5, 3);
+  const tolerance = OCC_KERNEL_SETTINGS.modelingTolerance;
+  expect(Math.abs(br![1] - bl![1]), "bottom stays horizontal").toBeLessThan(
+    tolerance,
+  );
+  expect(Math.abs(tr![1] - tl![1]), "top stays horizontal").toBeLessThan(
+    tolerance,
+  );
+  expect(Math.abs(br![0] - tr![0]), "right stays vertical").toBeLessThan(
+    tolerance,
+  );
+  expect(Math.abs(bl![0] - tl![0]), "left stays vertical").toBeLessThan(
+    tolerance,
+  );
+  expect(
+    dragged.definition.constraints.map((constraint) => constraint.kind).sort(),
+  ).toEqual(["horizontal", "horizontal", "vertical", "vertical"]);
+  expect(dragged.definition.dimensions, "the drag authors nothing").toEqual([]);
+});
+
+// T13a review B-1 (logic lane, session seam): with any other requirement in
+// the sketch the rim drag goes through the solver; the accepted radius must
+// reach the authored definition, survive a fresh solve and be committed.
+test("T13a B-1: a circle drawn next to a rectangle keeps its rim-dragged radius in the definition, a fresh solve and the commit request", () => {
+  let session = createNewSketchSession(
+    createStandardPlaneDefinition("xy"),
+    OCC_KERNEL_SETTINGS,
+  );
+  session = acceptSketchDraw(
+    startSketchDraw(beginSketchTool(session, "rectangle"), [6, 0]),
+    [9, 3],
+  );
+  session = acceptSketchDraw(
+    startSketchDraw(beginSketchTool(session, "circle"), [1, 1]),
+    [3, 1],
+  );
+  session = beginSketchTool(session, "line");
+  expect(
+    session.definition.constraints.length,
+    "premise: the sketch has requirements (solver path)",
+  ).toBe(4);
+  const circle = session.definition.entities.find(
+    (entity) => entity.kind === "circle",
+  )!;
+  const radiusIn = (definition: SketchDefinition | undefined) => {
+    const entity = definition?.entities.find(
+      (candidate) => candidate.entityId === circle.entityId,
+    );
+    return entity?.kind === "circle" ? entity.radius : null;
+  };
+  let dragging = beginSketchGeometryDrag(session, circle.target, [3, 1], {
+    kind: "rim",
+    entityId: circle.entityId,
+  });
+  dragging = updateSketchGeometryDrag(dragging, [4, 1]);
+  const released = finishSketchGeometryDrag(dragging, [5, 1]);
+  expect(radiusIn(released.definition), "definition radius").toBeCloseTo(4, 3);
+  expect(
+    radiusIn(released.commitRequest?.definition),
+    "commit request radius",
+  ).toBeCloseTo(4, 3);
+  const fresh = withLiveSolveBasis(
+    released,
+    structuredClone(released.definition),
+  );
+  const solved = fresh.liveSolve?.solvedSnapshot.solvedEntities.find(
+    (entity) => entity.entityId === circle.entityId,
+  );
+  expect(fresh.liveSolve?.accepted).toBe(true);
+  expect(
+    solved?.kind === "circle" ? solved.solvedRadius : null,
+    "a fresh solve of the released definition keeps the radius",
+  ).toBeCloseTo(4, 3);
+  const centre = released.definition.points.find(
+    (point) => circle.kind === "circle" && point.pointId === circle.centerPointId,
+  )!.position;
+  expect(centre[0]).toBeCloseTo(1, 6);
+  expect(centre[1]).toBeCloseTo(1, 6);
+});
+
+// T13a review B-1 (logic lane, session seam): a circumscribed hexagon's free
+// construction circle changes size during a vertex drag; the released
+// definition must reproduce the released geometry on a fresh solve.
+test("T13a B-1: a centre-fixed circumscribed hexagon does not drift on a fresh solve after a vertex drag", () => {
+  let session = createNewSketchSession(
+    createStandardPlaneDefinition("xy"),
+    OCC_KERNEL_SETTINGS,
+  );
+  session = acceptSketchDraw(
+    startSketchDraw(beginSketchTool(session, "circumscribedPolygon"), [1, 1]),
+    [3, 1],
+  );
+  const centre = session.definition.points.find(
+    (point) => point.label === "Circumscribed Polygon 1 center",
+  )!;
+  session = selectSketchConstraintTarget(
+    beginSketchTool(session, "constraintFix"),
+    centre.target,
+  );
+  const vertex = session.definition.points.find(
+    (point) => point.label === "Circumscribed Polygon 1 vertex 1",
+  )!;
+  const target: [number, number] = [
+    vertex.position[0] - 0.3,
+    vertex.position[1] + 0.6,
+  ];
+  let dragging = beginSketchGeometryDrag(
+    beginSketchTool(session, "line"),
+    vertex.target,
+    vertex.position,
+  );
+  for (let step = 1; step < 8; step += 1)
+    dragging = updateSketchGeometryDrag(dragging, [
+      vertex.position[0] + (step / 8) * (target[0] - vertex.position[0]),
+      vertex.position[1] + (step / 8) * (target[1] - vertex.position[1]),
+    ]);
+  const released = finishSketchGeometryDrag(dragging, target);
+  const circleRadii = (state: SketchSessionState) =>
+    state.liveSolve!.solvedSnapshot.solvedEntities.flatMap((entity) =>
+      entity.kind === "circle" ? [entity.solvedRadius] : [],
+    );
+  const [releasedRadius] = circleRadii(released);
+  expect(
+    Math.abs(releasedRadius! - 2),
+    "premise: the drag changed the construction radius",
+  ).toBeGreaterThan(0.1);
+  const fresh = withLiveSolveBasis(
+    released,
+    structuredClone(released.definition),
+  );
+  expect(fresh.liveSolve?.accepted).toBe(true);
+  expect(circleRadii(fresh)[0]).toBeCloseTo(releasedRadius!, 6);
+  const releasedPoints = new Map(
+    released.liveSolve!.solvedSnapshot.solvedPoints.map((point) => [
+      point.pointId,
+      point.solvedPosition,
+    ]),
+  );
+  const drift = Math.max(
+    ...fresh.liveSolve!.solvedSnapshot.solvedPoints.map((point) => {
+      const before = releasedPoints.get(point.pointId)!;
+      return Math.hypot(
+        point.solvedPosition[0] - before[0],
+        point.solvedPosition[1] - before[1],
+      );
+    }),
+  );
+  expect(drift, "no point drifts on the fresh solve").toBeLessThan(1e-6);
 });
 
 // T12c R-6: handleSketchGeometryDragCancelled restores pre-drag state.

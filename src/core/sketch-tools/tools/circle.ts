@@ -66,20 +66,7 @@ function buildCirclePresentation(
       },
     ],
     steps: [{ id: "circle-step", label: isDrawing ? "Radius" : "Center" }],
-    controls: [
-      {
-        id: "circle-radius",
-        kind: "numeric",
-        label: "Radius",
-        value: radius,
-        unit: "mm",
-        disabled: true,
-        action: {
-          type: "patch",
-          patch: { radius },
-        },
-      },
-    ],
+    controls: [],
     measurements:
       radius === null
         ? []
@@ -173,15 +160,6 @@ export const circleSketchToolDefinition: SketchToolDefinition<"circle"> =
               centerPointId,
               radius,
             ),
-          ],
-          dimensions: [
-            {
-              dimensionId: factories.createDimensionId("radius"),
-              kind: "circleRadius",
-              label: `Circle ${sequence} radius`,
-              entityId,
-              value: radius,
-            },
           ],
         };
       },

@@ -17,7 +17,12 @@ import {
   startSketchDraw,
   updateSketchPointer,
 } from "@/domain/editor/sketch-session";
-import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
+import {
+  createSessionCommitFactories,
+  rebuildSessionForDefinition,
+} from "@/domain/editor/sketch-session/internals";
+import type { SketchId } from "@/contracts/shared/ids";
+import type { SketchSnapCandidate } from "@/domain/sketch-snapping/snap-candidates";
 import {
   getRegisteredSketchToolDefinitions,
   getSketchToolDefinition,
@@ -291,12 +296,19 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
       moved.presentation.prompts[0]?.text,
       "Circle presentation should update its prompt by interaction step.",
     ).toBe("Set radius");
+    // T13a D2: no typed size during creation; the diameter stays a passive
+    // measurement.
     expect(
-      moved.presentation.controls?.some(
-        (control) => control.id === "circle-radius",
-      ),
-      "Circle presentation should expose radius through a generic numeric control.",
-    ).toBeTruthy();
+      moved.presentation.controls ?? [],
+      "Circle presentation should expose no creation-time size control.",
+    ).toEqual([]);
+    expect(
+      moved.presentation.measurements?.map((entry) => [
+        entry.label,
+        entry.value,
+      ]),
+      "Circle presentation should keep the passive diameter readout.",
+    ).toEqual([["Diameter", 10]]);
     const diameterOverlay = moved.presentation.overlays?.find(
       (overlay) => overlay.id === "circle-diameter-overlay",
     );
@@ -327,6 +339,21 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
       (overlay) => overlay.id === "rectangle-height-overlay",
     );
 
+    // T13a D2: no typed width/height during creation; the readouts stay.
+    expect(
+      moved.presentation.controls ?? [],
+      "Rectangle presentation should expose no creation-time size controls.",
+    ).toEqual([]);
+    expect(
+      moved.presentation.measurements?.map((entry) => [
+        entry.label,
+        entry.value,
+      ]),
+      "Rectangle presentation should keep the passive width/height readouts.",
+    ).toEqual([
+      ["Width", 4],
+      ["Height", 3],
+    ]);
     expect(
       widthOverlay?.kind === "measurement" &&
         widthOverlay.value === 4 &&
@@ -366,8 +393,8 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
     ).toBe(4);
     expect(
       accepted.definition.dimensionIds.length,
-      "Rectangle commit output should add width and height dimensions.",
-    ).toBe(2);
+      "T13a: Rectangle commit output should add no sizing dimensions.",
+    ).toBe(0);
     expect(
       accepted.toolStagedEntities.length,
       "Accepted rectangle geometry should clear preview entities.",
@@ -1229,3 +1256,336 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
   testFullSplinePreviewsMatchCommittedGeometry();
   testGenericPresentationAccessFromSession();
 });
+
+// T13a (logic lane, tool commit-contribution seam): every primitive tool
+// authors exactly its primitive-defining relationships and no sizing
+// dimension (issue 06: draw freely, size afterwards with Dimension). Targets
+// are named by the authored labels; the arc endpoint bindings are the only
+// dimension-shaped records a primitive may author.
+const SOURCE_LINE_ID = "sketch_entity_t13a_source_line";
+const sides = (name: string, count = 6) =>
+  Array.from({ length: count }, (_, index) => `${name} side ${index + 1}`);
+const polygonEqualSides = (name: string) =>
+  sides(name)
+    .slice(1)
+    .map((side) => `equalLength ${name} side 1, ${side}`);
+const arcBindings = (name: string) => [
+  `arcStartPointCoincident ${name}, ${name} start`,
+  `arcEndPointCoincident ${name}, ${name} end`,
+];
+const primitiveRelationshipRows: readonly {
+  toolId: Parameters<typeof getSketchToolDefinition>[0];
+  points: readonly [number, number][];
+  sourceLine?: true;
+  relationships: readonly string[];
+}[] = [
+  {
+    toolId: "line",
+    points: [
+      [0, 0],
+      [4, 0],
+    ],
+    relationships: [],
+  },
+  {
+    toolId: "midpointLine",
+    points: [
+      [0, 0],
+      [4, 0],
+    ],
+    relationships: ["midpoint Midpoint line 1 midpoint, Midpoint line 1"],
+  },
+  {
+    toolId: "rectangle",
+    points: [
+      [0, 0],
+      [4, 3],
+    ],
+    relationships: [
+      "horizontal Rectangle 1 bottom",
+      "horizontal Rectangle 1 top",
+      "vertical Rectangle 1 right",
+      "vertical Rectangle 1 left",
+    ],
+  },
+  {
+    toolId: "centerPointRectangle",
+    points: [
+      [0, 0],
+      [4, 3],
+    ],
+    relationships: [
+      "horizontal Center rectangle 1 bottom",
+      "horizontal Center rectangle 1 top",
+      "vertical Center rectangle 1 right",
+      "vertical Center rectangle 1 left",
+      "midpoint Center rectangle 1 center, Center rectangle 1 diagonal",
+      "midpoint Center rectangle 1 center, Center rectangle 1 diagonal #2",
+    ],
+  },
+  {
+    toolId: "alignedRectangle",
+    points: [
+      [0, 0],
+      [4, 0],
+      [4, 3],
+    ],
+    relationships: [
+      "parallel Aligned rectangle 1 bottom, Aligned rectangle 1 top",
+      "parallel Aligned rectangle 1 right, Aligned rectangle 1 left",
+      "perpendicular Aligned rectangle 1 bottom, Aligned rectangle 1 right",
+      "equalLength Aligned rectangle 1 bottom, Aligned rectangle 1 top",
+      "equalLength Aligned rectangle 1 right, Aligned rectangle 1 left",
+    ],
+  },
+  {
+    toolId: "circle",
+    points: [
+      [0, 0],
+      [2, 0],
+    ],
+    relationships: [],
+  },
+  {
+    toolId: "threePointCircle",
+    points: [
+      [2, 0],
+      [0, 2],
+      [-2, 0],
+    ],
+    relationships: [1, 2, 3].map(
+      (index) =>
+        `pointOnCurve 3-point circle 1 point ${index}, 3-point circle 1`,
+    ),
+  },
+  {
+    toolId: "inscribedPolygon",
+    points: [
+      [0, 0],
+      [2, 0],
+    ],
+    relationships: [
+      ...polygonEqualSides("Inscribed Polygon 1"),
+      ...[1, 2, 3, 4, 5, 6].map(
+        (index) =>
+          `pointOnCurve Inscribed Polygon 1 vertex ${index}, Inscribed Polygon 1 construction circle`,
+      ),
+    ],
+  },
+  {
+    toolId: "circumscribedPolygon",
+    points: [
+      [0, 0],
+      [2, 0],
+    ],
+    relationships: [
+      ...polygonEqualSides("Circumscribed Polygon 1"),
+      ...sides("Circumscribed Polygon 1").map(
+        (side) =>
+          `tangent ${side}, Circumscribed Polygon 1 construction circle relation=external`,
+      ),
+    ],
+  },
+  {
+    toolId: "centerPointArc",
+    points: [
+      [0, 0],
+      [2, 0],
+      [0, 2],
+    ],
+    relationships: arcBindings("Center arc 1"),
+  },
+  {
+    toolId: "threePointArc",
+    points: [
+      [2, 0],
+      [-2, 0],
+      [0, 2],
+    ],
+    relationships: [
+      "pointOnCurve 3-point arc 1 through, 3-point arc 1",
+      ...arcBindings("3-point arc 1"),
+    ],
+  },
+  {
+    toolId: "tangentArc",
+    points: [
+      [0, 0],
+      [1, 1],
+      [2, 0],
+    ],
+    sourceLine: true,
+    relationships: [
+      "tangent Tangent arc 1, source line relation=external",
+      "pointOnCurve Tangent arc 1 start, source line",
+      ...arcBindings("Tangent arc 1"),
+    ],
+  },
+  {
+    toolId: "point",
+    points: [
+      [1, 1],
+      [1, 1],
+    ],
+    relationships: [],
+  },
+  {
+    toolId: "spline",
+    points: [
+      [0, 0],
+      [1, 1],
+      [2, 0],
+    ],
+    relationships: [],
+  },
+  {
+    toolId: "controlPointSpline",
+    points: [
+      [0, 0],
+      [1, 1],
+      [2, 0],
+      [3, 1],
+    ],
+    relationships: [],
+  },
+  {
+    toolId: "ellipse",
+    points: [
+      [0, 0],
+      [3, 0],
+      [0, 1],
+    ],
+    relationships: [],
+  },
+  {
+    toolId: "ellipticalArc",
+    points: [
+      [0, 0],
+      [3, 0],
+      [0, 1],
+      [3, 0],
+      [0, 1],
+    ],
+    relationships: [],
+  },
+  {
+    toolId: "conic",
+    points: [
+      [0, 0],
+      [1, 1],
+      [2, 0],
+    ],
+    relationships: [],
+  },
+  {
+    toolId: "bezierCurve",
+    points: [
+      [0, 0],
+      [1, 1],
+      [2, 0],
+      [3, 1],
+    ],
+    relationships: [],
+  },
+  {
+    toolId: "profileText",
+    points: [
+      [0, 0],
+      [1, 0],
+    ],
+    relationships: [],
+  },
+];
+
+test("T13a: the primitive relationship table covers every registered drawing tool", () => {
+  expect(primitiveRelationshipRows.map((row) => row.toolId).sort()).toEqual(
+    getRegisteredSketchToolDefinitions()
+      .map((definition) => definition.metadata.id)
+      .sort(),
+  );
+});
+
+test.each(primitiveRelationshipRows)(
+  "T13a: $toolId authors exactly its primitive-defining relationships and no sizing dimension",
+  ({ toolId, points, sourceLine, relationships }) => {
+    const contribution = getSketchToolDefinition(
+      toolId,
+    ).createCommitContribution({
+      sequence: 1,
+      start: points[0]!,
+      end: points.at(-1)!,
+      points,
+      isConstruction: false,
+      settings: toolId === "profileText" ? { text: "A" } : undefined,
+      acceptedSnaps: {
+        start: sourceLine
+          ? ({
+              key: "t13a-source-line",
+              kind: "nearestOnLine",
+              point: points[0]!,
+              rawPointer: points[0]!,
+              distance: 0,
+              priority: 0,
+              sources: [
+                {
+                  kind: "localEntity",
+                  entityId: SOURCE_LINE_ID,
+                  geometryKind: "lineSegment",
+                },
+              ],
+              preview: {},
+            } as unknown as SketchSnapCandidate)
+          : null,
+        end: null,
+      },
+      factories: createSessionCommitFactories(1, "sketch_draft" as SketchId),
+    });
+    expect(
+      contribution.entities.length,
+      "premise: the tool commits geometry",
+    ).toBeGreaterThan(0);
+    const labels = new Map<string, string>([[SOURCE_LINE_ID, "source line"]]);
+    const name = (id: string, label: string) => {
+      const used = [...labels.values()].filter(
+        (value) => value === label || value.startsWith(`${label} #`),
+      ).length;
+      labels.set(id, used === 0 ? label : `${label} #${used + 1}`);
+    };
+    for (const point of contribution.points) name(point.pointId, point.label);
+    for (const entity of contribution.entities)
+      name(entity.entityId, entity.label);
+    const describe = (record: Record<string, unknown>) => {
+      const targets: string[] = [];
+      const scalars: string[] = [];
+      const visit = (key: string, value: unknown) => {
+        if (typeof value === "string" && labels.has(value)) {
+          targets.push(labels.get(value)!);
+        } else if (Array.isArray(value)) {
+          value.forEach((item) => visit(key, item));
+        } else if (value && typeof value === "object") {
+          for (const [childKey, child] of Object.entries(value))
+            if (childKey !== "kind") visit(childKey, child);
+        } else if (value !== undefined) {
+          scalars.push(`${key}=${String(value)}`);
+        }
+      };
+      for (const [key, value] of Object.entries(record))
+        if (!["kind", "label", "constraintId", "dimensionId"].includes(key))
+          visit(key, value);
+      return [String(record.kind), targets.join(", "), ...scalars].join(" ");
+    };
+    expect(
+      [...(contribution.constraints ?? []), ...(contribution.dimensions ?? [])]
+        .map((record) => describe(record as never))
+        .sort(),
+    ).toEqual([...relationships].sort());
+    expect(
+      (contribution.dimensions ?? []).filter(
+        (dimension) =>
+          dimension.kind !== "arcStartPointCoincident" &&
+          dimension.kind !== "arcEndPointCoincident",
+      ),
+      "no sizing dimension",
+    ).toEqual([]);
+  },
+);

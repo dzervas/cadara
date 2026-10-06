@@ -118,26 +118,7 @@ function buildRectanglePresentation(
         label: isDrawing ? "Opposite corner" : "First corner",
       },
     ],
-    controls: [
-      {
-        id: "rectangle-width",
-        kind: "numeric",
-        label: "Width",
-        value: width,
-        unit: "mm",
-        disabled: true,
-        action: { type: "patch", patch: { width } },
-      },
-      {
-        id: "rectangle-height",
-        kind: "numeric",
-        label: "Height",
-        value: height,
-        unit: "mm",
-        disabled: true,
-        action: { type: "patch", patch: { height } },
-      },
-    ],
+    controls: [],
     measurements: isDrawing
       ? [
           {
@@ -321,24 +302,6 @@ export const rectangleSketchToolDefinition: SketchToolDefinition<"rectangle"> =
               kind: "vertical",
               label: `Rectangle ${sequence} left vertical`,
               entityId: entityIds[3],
-            },
-          ],
-          dimensions: [
-            {
-              dimensionId: factories.createDimensionId("width"),
-              kind: "distance",
-              label: `Rectangle ${sequence} width`,
-              axis: "horizontal",
-              pointIds: [cornerIds[0], cornerIds[1]],
-              value: Math.abs(topRight[0] - bottomLeft[0]),
-            },
-            {
-              dimensionId: factories.createDimensionId("height"),
-              kind: "distance",
-              label: `Rectangle ${sequence} height`,
-              axis: "vertical",
-              pointIds: [cornerIds[0], cornerIds[3]],
-              value: Math.abs(topRight[1] - bottomLeft[1]),
             },
           ],
         };

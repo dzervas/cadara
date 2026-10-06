@@ -7,10 +7,7 @@ import type {
   SketchToolValidationResult,
 } from "@/core/sketch-tools/definition";
 import type { SketchToolPresentationSchema } from "@/core/sketch-tools/editor-schema";
-import {
-  createArcEndpointDimensions,
-  createDistanceDimension,
-} from "@/core/sketch-tools/constraints";
+import { createArcEndpointDimensions } from "@/core/sketch-tools/constraints";
 import { pointsDistinct, sampleArcPoints } from "@/core/sketch-tools/geometry";
 import { distanceBetween } from "@/core/sketch-tools/shared";
 
@@ -292,22 +289,13 @@ export const centerPointArcSketchToolDefinition: SketchToolDefinition<"centerPoi
             "counterClockwise",
           ),
         ],
-        dimensions: [
-          createDistanceDimension({
-            dimensionId: factories.createDimensionId("center-arc-radius"),
-            label: `Center arc ${sequence} radius`,
-            axis: "aligned",
-            pointIds: [centerPointId, startPointId],
-            value: distanceBetween(arcPoints[0]!, arcPoints[1]!),
-          }),
-          ...createArcEndpointDimensions({
-            createDimensionId: factories.createDimensionId,
-            labelPrefix: `Center arc ${sequence}`,
-            entityId,
-            startPointId,
-            endPointId,
-          }),
-        ],
+        dimensions: createArcEndpointDimensions({
+          createDimensionId: factories.createDimensionId,
+          labelPrefix: `Center arc ${sequence}`,
+          entityId,
+          startPointId,
+          endPointId,
+        }),
       };
     },
   };

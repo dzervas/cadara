@@ -17,6 +17,7 @@ import {
   finalizeSketchDraw,
   updateSketchReferenceProjection,
   updateSketchPointer,
+  type SketchSessionState,
 } from "@/domain/editor/sketch-session";
 import {
   createStandardPlaneDefinition,
@@ -55,6 +56,26 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     session = acceptSketchDraw(session, [10, 6]);
 
     return session;
+  }
+
+  function commitDimensionWithTool(
+    session: SketchSessionState,
+    toolId: "dimensionDistance" | "dimensionRadius",
+    targets: readonly Parameters<typeof selectSketchConstraintTarget>[1][],
+    value: number,
+  ) {
+    let next = beginSketchTool(session, toolId);
+    for (const target of targets)
+      next = selectSketchConstraintTarget(next, target);
+    next = patchSketchConstraintValue(next, { value });
+    next = patchSketchConstraintValue(next, {
+      intent: "commitConstraintValue",
+    });
+    expect(
+      next.definition.dimensions.length,
+      `premise: ${toolId} authored one dimension`,
+    ).toBe(session.definition.dimensions.length + 1);
+    return next;
   }
 
   function createSessionWithTwoCircles() {
@@ -1025,10 +1046,19 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       circleSession.definition.constraints.length,
       "Fixing a circle should fix its center point.",
     ).toBe(1);
+    // T13a D4: circle dimensions default to diameter, so Fix authors the
+    // circle's current diameter (2r = 8), the only dimension in the sketch.
     expect(
-      circleSession.definition.dimensions[0]?.kind,
-      "Fixing a circle should add a radius dimension for the current size.",
-    ).toBe("circleRadius");
+      circleSession.definition.dimensions.map((dimension) => ({
+        kind: dimension.kind,
+        entityId: "entityId" in dimension ? dimension.entityId : null,
+        value: dimension.value,
+      })),
+      "Fixing a circle should add a diameter dimension for the current size.",
+    ).toEqual([{ kind: "diameter", entityId: circle.entityId, value: 8 }]);
+    expect(circleSession.definition.dimensions[0]?.label).toMatch(
+      /^Fixed diameter \d+$/,
+    );
   }
 
   function testNormalAuthoringCommitsValidTargetsAndRejectsInvalidTargets() {
@@ -1952,15 +1982,30 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     session = beginSketchTool(session, "rectangle");
     session = startSketchDraw(session, [0, 0]);
     session = acceptSketchDraw(session, [10, 5]);
+    expect(
+      session.definition.dimensions,
+      "T13a: the Rectangle tool authors no sizing dimension.",
+    ).toEqual([]);
+    const bottom = session.definition.entities.find((entity) =>
+      entity.label.endsWith(" bottom"),
+    )!;
+    // T13a: the width is dimensioned deliberately with the Dimension tool.
+    session = commitDimensionWithTool(
+      session,
+      "dimensionDistance",
+      [bottom.target],
+      10,
+    );
 
     const annotation = getSketchAnnotationDescriptors(session).find(
       (entry) =>
-        entry.glyphKind === "dimensionHorizontal" &&
-        entry.target.kind === "dimension",
+        entry.target.kind === "dimension" &&
+        entry.target.dimensionId ===
+          session.definition.dimensions[0]?.dimensionId,
     );
     expect(
       annotation?.target.kind,
-      "Rectangle width should expose an editable horizontal dimension.",
+      "Rectangle width should expose an editable dimension.",
     ).toBe("dimension");
 
     session = patchSketchDimensionAnnotationPlacement(session, {
@@ -1990,21 +2035,18 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       (entry) => entry.dimensionId === annotation.target.dimensionId,
     );
     expect(
-      dimension?.kind === "distance" &&
+      dimension?.kind === "lineLength" &&
+        dimension.entityId === bottom.entityId &&
         dimension.value.source === "literal" &&
         dimension.value.value === 20,
       "Width edit should update the durable dimension.",
     ).toBeTruthy();
-    expect(
-      dimension.pointIds.length,
-      "Width dimension should keep its point pair.",
-    ).toBe(2);
 
     const points = new Map(
       session.definition.points.map((point) => [point.pointId, point.position]),
     );
-    const left = points.get(dimension.pointIds[0]!);
-    const right = points.get(dimension.pointIds[1]!);
+    const left = points.get(bottom.startPointId);
+    const right = points.get(bottom.endPointId);
     expect(
       left && right,
       "Edited width dimension should reference solved draft points.",
@@ -2017,7 +2059,11 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       (entry) => entry.dimensionId === annotation.target.dimensionId,
     );
     expect(
-      payloadDimension?.kind === "distance" &&
+      Math.abs(left[1] - right[1]) < 1e-6,
+      "The rectangle bottom stays horizontal after the width edit.",
+    ).toBeTruthy();
+    expect(
+      payloadDimension?.kind === "lineLength" &&
         payloadDimension.value.source === "literal" &&
         payloadDimension.value.value === 20,
       "Width edit should update the durable sketch mutation payload.",
@@ -2036,6 +2082,16 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     session = beginSketchTool(session, "circle");
     session = startSketchDraw(session, [0, 0]);
     session = acceptSketchDraw(session, [10, 0]);
+    // T13a (review A-10): the radius is added deliberately with the Radius tool.
+    session = commitDimensionWithTool(
+      session,
+      "dimensionRadius",
+      [
+        session.definition.entities.find((entity) => entity.kind === "circle")!
+          .target,
+      ],
+      10,
+    );
 
     const annotation = getSketchAnnotationDescriptors(session).find(
       (entry) =>
@@ -2089,6 +2145,17 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     baseSession = beginSketchTool(baseSession, "circle");
     baseSession = startSketchDraw(baseSession, [0, 0]);
     baseSession = acceptSketchDraw(baseSession, [10, 0]);
+    // T13a: the radius is added deliberately with the Radius tool.
+    baseSession = commitDimensionWithTool(
+      baseSession,
+      "dimensionRadius",
+      [
+        baseSession.definition.entities.find(
+          (entity) => entity.kind === "circle",
+        )!.target,
+      ],
+      10,
+    );
 
     const annotation = getSketchAnnotationDescriptors(baseSession).find(
       (entry) =>

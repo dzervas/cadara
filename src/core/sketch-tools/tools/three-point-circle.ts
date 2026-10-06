@@ -7,10 +7,7 @@ import type {
   SketchToolValidationResult,
 } from "@/core/sketch-tools/definition";
 import type { SketchToolPresentationSchema } from "@/core/sketch-tools/editor-schema";
-import {
-  createCircleRadiusDimension,
-  createPointOnCurveConstraint,
-} from "@/core/sketch-tools/constraints";
+import { createPointOnCurveConstraint } from "@/core/sketch-tools/constraints";
 import {
   getCircumcircleFromPoints,
   pointsDistinct,
@@ -305,16 +302,6 @@ export const threePointCircleSketchToolDefinition: SketchToolDefinition<"threePo
             curveEntityId: entityId,
           }),
         ),
-        dimensions: [
-          createCircleRadiusDimension({
-            dimensionId: factories.createDimensionId(
-              "three-point-circle-radius",
-            ),
-            label: `3-point circle ${sequence} radius`,
-            entityId,
-            value: circle.radius,
-          }),
-        ],
       };
     },
   };

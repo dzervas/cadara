@@ -6006,19 +6006,19 @@ describe("T08b-g7b relationship-scoped solve-frame failures ([TECH] G16′, U-G9
       axis: "aligned",
       value: Math.hypot(at[0] - 0, at[1] - 1) + 0.05,
     } as unknown as SketchDefinition["dimensions"][number];
-    // The filleted rectangle's width and height dimensions are removed so
-    // the requirement is satisfiable by a shape change (the healthy control
-    // below solves it).
-    const kept = authored.dimensions.filter(
-      (dimension) =>
-        !(
-          dimension.dimensionId.startsWith("dimension_1_width") ||
-          dimension.dimensionId.startsWith("dimension_1_height")
-        ),
-    );
-    expect(kept.length, "premise: two rectangle sizes removed").toBe(
-      authored.dimensions.length - 2,
-    );
+    // The filleted rectangle has no width and height dimensions (T13a: the
+    // Rectangle tool authors none), so the requirement is satisfiable by a
+    // shape change (the healthy control below solves it).
+    const kept = authored.dimensions;
+    expect(
+      kept.filter(
+        (dimension) =>
+          dimension.kind === "distance" ||
+          dimension.kind === "lineLength" ||
+          dimension.kind === "lineDistance",
+      ),
+      "premise: no rectangle sizes",
+    ).toEqual([]);
     const definition: SketchDefinition = {
       ...authored,
       dimensionIds: [

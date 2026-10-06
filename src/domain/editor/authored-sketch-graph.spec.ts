@@ -32,7 +32,8 @@ test("rectangle candidates retain only their authored graph and deletion updates
   const source = rectangle();
   expect(source.definition.entities).toHaveLength(4);
   expect(source.definition.constraints).toHaveLength(4);
-  expect(source.definition.dimensions).toHaveLength(2);
+  // T13a: the Rectangle tool authors no sizing dimensions.
+  expect(source.definition.dimensions).toEqual([]);
   expect(source.definition).not.toHaveProperty("authoringOperations");
   const entityId = source.definition.entityIds[0]!;
   const deleted = deleteSelectedSketchGeometry(source, [
@@ -50,10 +51,22 @@ test("rectangle candidates retain only their authored graph and deletion updates
 });
 
 test("numeric edits update the current authored value rather than reconstruction metadata", () => {
-  const source = rectangle();
-  const dimension = source.definition.dimensions.find((d) =>
-    d.label.includes("width"),
+  // T13a: the width is dimensioned deliberately with the Dimension tool.
+  const drawn = rectangle();
+  const source = patchSketchConstraintValue(
+    patchSketchConstraintValue(
+      selectSketchConstraintTarget(
+        beginSketchTool(drawn, "dimensionDistance"),
+        drawn.definition.entities[0]!.target,
+      ),
+      { value: 4 },
+    ),
+    { intent: "commitConstraintValue" },
+  );
+  const dimension = source.definition.dimensions.find(
+    (d) => d.kind === "lineLength",
   )!;
+  expect(source.definition.dimensions, "premise: one width").toHaveLength(1);
   let edited = beginSketchAnnotationEdit(source, {
     kind: "dimension",
     sketchId: "sketch_draft",

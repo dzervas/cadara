@@ -2649,11 +2649,11 @@ const sketchConstraintDefinitions = [
         target.entity?.kind === "circle"
           ? [
               {
-                dimensionId: input.createDimensionId("fix-radius"),
-                kind: "circleRadius" as const,
-                label: `Fixed radius ${input.sequence}`,
+                dimensionId: input.createDimensionId("fix-diameter"),
+                kind: "diameter" as const,
+                label: `Fixed diameter ${input.sequence}`,
                 entityId: target.entity.entityId,
-                value: target.entity.radius,
+                value: target.entity.radius * 2,
               },
             ]
           : [];

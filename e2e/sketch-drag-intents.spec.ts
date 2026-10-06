@@ -109,6 +109,100 @@ async function finishSketch(workbench: SketchWorkbenchHarness) {
   await workbench.expectMachine("idle");
 }
 
+/**
+ * Polls the hover target at a viewport point until it does (`true`) or does
+ * not (`false`) name the circle entity: a live read of where the rim is,
+ * since the debug snapshot carries no radius.
+ */
+async function expectRimHover(
+  workbench: SketchWorkbenchHarness,
+  point: { x: number; y: number },
+  circleId: string,
+  onRim: boolean,
+) {
+  const hover = expect.poll(
+    async () => {
+      await workbench.hoverViewportAt(point);
+      await workbench.waitForAnimationFrames(2);
+      return workbench.currentHoverTarget();
+    },
+    {
+      message: `circle rim ${onRim ? "at" : "not at"} (${point.x},${point.y})`,
+      timeout: 10_000,
+    },
+  );
+  await (onRim ? hover.toContain(circleId) : hover.not.toContain(circleId));
+}
+
+async function liveCircleId(workbench: SketchWorkbenchHarness) {
+  const snap = await workbench.page.evaluate(
+    () => window.__cadaraDebug?.getSketchSnapshot() ?? null,
+  );
+  const circle = (
+    snap as { entities: Array<{ id: string; kind: string }> } | null
+  )?.entities.find((entity) => entity.kind === "circle");
+  if (!circle) throw new Error("No live circle.");
+  return circle.id;
+}
+
+/** Draws a Circle-tool circle (centre, rim click) and leaves the tool. */
+async function drawCircle(
+  workbench: SketchWorkbenchHarness,
+  centre: { x: number; y: number },
+  rim: { x: number; y: number },
+) {
+  await workbench.activateTool("Create circular geometry.");
+  await workbench.clickViewportAt(centre);
+  await workbench.clickViewportAt(rim);
+  await expect
+    .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
+    .toContain("1 entities staged");
+  await workbench.page.keyboard.press("Escape");
+  await expect.poll(() => workbench.currentPhase()).toBe("editing");
+}
+
+/** Sketch units of the only circle's radius, from its centre and the pixel radius (top plane, origin at the viewport centre). */
+async function sketchRadiusOf(
+  workbench: SketchWorkbenchHarness,
+  centre: { x: number; y: number },
+  pixelRadius: number,
+) {
+  const [point] = await readLivePoints(workbench);
+  return (pixelRadius * point!.position[0]) / (centre.x - 720);
+}
+
+/**
+ * T13a: adds a driving diameter deliberately through the visible Dimension
+ * tool (Distance variant on the circle rim, then placement, then a typed
+ * value) and leaves the tool.
+ */
+async function addDiameterWithDimensionTool(
+  workbench: SketchWorkbenchHarness,
+  rim: { x: number; y: number },
+  placement: { x: number; y: number },
+  diameter: number,
+) {
+  const page = workbench.page;
+  await workbench.activateTool("Create point-to-point distance dimensions.");
+  await page
+    .getByRole("menuitem", {
+      name: /Distance Create aligned distance dimensions/,
+    })
+    .click();
+  await workbench.clickViewportAt(rim);
+  await workbench.clickViewportAt(placement);
+  const floatingInput = page.locator("[data-sketch-viewport-floating-input]");
+  await expect(floatingInput).toBeVisible();
+  await floatingInput.locator("input").fill(diameter.toFixed(4));
+  await floatingInput.getByRole("button", { name: "Commit" }).click();
+  await expect(floatingInput).toBeHidden();
+  await expect(
+    page.locator('[data-sketch-annotation-kind="dimension"]'),
+  ).toHaveCount(1);
+  await page.keyboard.press("Escape");
+  await workbench.waitForAnimationFrames(2);
+}
+
 // Viewport 1440×960, centre (720,480). Top-plane sketch: origin at
 // viewport centre, sketch Y up / viewport Y down.
 
@@ -210,39 +304,42 @@ test("T12c: dragging a line body translates both endpoints by the pointer delta"
   expect(y1, "Point 1 Y below origin.").toBeLessThan(-1);
 });
 
-// ── Circle rim drag: dimensioned circle (blocked) ───────────────────────
+// ── Circle rim drag: freshly drawn circle (free size, T13a) ─────────────
 
-test("T12c: rim drag on a freshly drawn (radius-dimensioned) circle is blocked — radius and centre unchanged, no Undo step", async ({
+test("T13a: rim drag on a freshly drawn circle grows the radius, centre fixed, exactly one Undo step", async ({
   page,
 }) => {
   const workbench = new SketchWorkbenchHarness(page);
   await enterSketchMode(workbench);
+  await drawCircle(workbench, { x: 400, y: 400 }, { x: 500, y: 400 });
+  const [centreBefore] = await readLivePoints(workbench);
+  const circleId = await liveCircleId(workbench);
 
-  await workbench.activateTool("Create circular geometry.");
-  await workbench.clickViewportAt({ x: 400, y: 400 });
-  await workbench.clickViewportAt({ x: 500, y: 400 });
+  // Drag the rim 200 px outward (500 → 700): radius 100 px → 300 px.
+  await viewportDrag(workbench, { x: 500, y: 400 }, { x: 700, y: 400 });
+  await workbench.waitForAnimationFrames(3);
+  await expectRimHover(workbench, { x: 700, y: 400 }, circleId, true);
+
+  // Exactly one Undo step: the first Ctrl+Z undoes the drag (the circle
+  // stays, its rim back at the drawn 100 px: review A-2, no stale read),
+  // the second undoes the circle draw.
+  await page.keyboard.press("Control+z");
+  await workbench.waitForAnimationFrames(4);
   await expect
     .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
     .toContain("1 entities staged");
-  await page.keyboard.press("Escape");
-  await expect.poll(() => workbench.currentPhase()).toBe("editing");
-
-  // Attempt a rim drag outward.
-  await viewportDrag(workbench, { x: 500, y: 400 }, { x: 700, y: 400 });
-  await workbench.waitForAnimationFrames(3);
-
-  // Ctrl+Z should undo the circle draw (0 entities), not a drag.
-  // If the blocked drag had created an Undo step, we'd still see 1 entity.
+  await expectRimHover(workbench, { x: 500, y: 400 }, circleId, true);
+  await expectRimHover(workbench, { x: 700, y: 400 }, circleId, false);
   await page.keyboard.press("Control+z");
   await expect
     .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
     .toContain("0 entities staged");
-
-  // Redo to restore circle, finish, verify radius and centre unchanged.
   await page.keyboard.press("Control+Shift+z");
   await expect
     .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
     .toContain("1 entities staged");
+  await page.keyboard.press("Control+Shift+z");
+  await workbench.waitForAnimationFrames(4);
 
   await finishSketch(workbench);
   const committed = await readCommittedDefinition(workbench);
@@ -250,39 +347,114 @@ test("T12c: rim drag on a freshly drawn (radius-dimensioned) circle is blocked �
   const circle = committed!.entities.find((e) => e.kind === "circle");
   expect(circle).toBeDefined();
   const centre = committed!.points.find((p) => p.id === circle!.centerPointId)!;
-
-  // Radius should be the initial authored value (~2.4 units, < 4).
+  // The drawn radius is 100 px; the dragged one 300 px. Measured in units of
+  // the drawn radius (from the centre's own pixel → sketch scale).
+  const drawnRadius = (100 * centreBefore!.position[0]) / (400 - 720);
   expect(
-    circle!.radius!,
-    "Radius should NOT have grown (dimension blocks the drag).",
-  ).toBeLessThan(4);
-  // Centre should be in the drawn quadrant (negative X, positive Y).
-  expect(centre.position[0]).toBeLessThan(0);
-  expect(centre.position[1]).toBeGreaterThan(0);
+    circle!.radius! / drawnRadius,
+    "Radius grows to ~3× the drawn radius (rim drag after Redo).",
+  ).toBeGreaterThan(2.9);
+  expect(circle!.radius! / drawnRadius).toBeLessThan(3.1);
+  expect(centre.position[0], "Centre X fixed.").toBeCloseTo(
+    centreBefore!.position[0],
+    6,
+  );
+  expect(centre.position[1], "Centre Y fixed.").toBeCloseTo(
+    centreBefore!.position[1],
+    6,
+  );
 });
 
-// ── Circle rim drag: after deleting the radius dimension ────────────────
+// ── Circle rim drag in a sketch with other requirements (review B-1) ────
 
-test("T12c: after deleting the radius dimension, rim drag grows the radius while centre stays fixed", async ({
+test("T13a B-1: with a rectangle drawn first, a circle's rim drag keeps the grown radius through a later unrelated edit and Finish", async ({
   page,
 }) => {
   const workbench = new SketchWorkbenchHarness(page);
   await enterSketchMode(workbench);
+
+  // A rectangle first: its horizontal/vertical requirements put every later
+  // drag on the solver path.
+  await workbench.activateTool("Create rectangle geometry.");
+  await page.locator('[role="menuitem"][data-tool-id="rectangle"]').click();
+  await workbench.clickViewportAt({ x: 900, y: 250 });
+  await workbench.clickViewportAt({ x: 1050, y: 350 });
+  await expect
+    .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
+    .toContain("4 entities staged");
+  await page.keyboard.press("Escape");
+  await expect.poll(() => workbench.currentPhase()).toBe("editing");
 
   await workbench.activateTool("Create circular geometry.");
   await workbench.clickViewportAt({ x: 400, y: 400 });
   await workbench.clickViewportAt({ x: 500, y: 400 });
   await expect
     .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
-    .toContain("1 entities staged");
+    .toContain("5 entities staged");
   await page.keyboard.press("Escape");
   await expect.poll(() => workbench.currentPhase()).toBe("editing");
+  // The circle's centre is its only point, the last one added.
+  const centreBefore = (await readLivePoints(workbench)).at(-1)!;
+  const circleId = await liveCircleId(workbench);
 
-  // Select the radius dimension annotation and delete it.
-  // The annotation's aria-label matches "Circle 1 radius: NN.NN mm radius".
-  await page.locator('[aria-label*="radius"]').first().click();
+  await viewportDrag(workbench, { x: 500, y: 400 }, { x: 700, y: 400 });
+  await workbench.waitForAnimationFrames(3);
+  await expectRimHover(workbench, { x: 700, y: 400 }, circleId, true);
+
+  // A later unrelated edit re-solves the sketch from its definition.
+  await workbench.activateTool("Create line geometry.");
+  await workbench.clickViewportAt({ x: 900, y: 700 });
+  await workbench.clickViewportAt({ x: 1050, y: 700 });
+  await expect
+    .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
+    .toContain("6 entities staged");
+  await page.keyboard.press("Escape");
+  await expect.poll(() => workbench.currentPhase()).toBe("collecting");
+  await expectRimHover(workbench, { x: 700, y: 400 }, circleId, true);
+
+  await finishSketch(workbench);
+  const committed = await readCommittedDefinition(workbench);
+  expect(committed).not.toBeNull();
+  const circle = committed!.entities.find((e) => e.kind === "circle");
+  expect(circle).toBeDefined();
+  const centre = committed!.points.find((p) => p.id === circle!.centerPointId)!;
+  const drawnRadius = (100 * centre.position[0]) / (400 - 720);
+  expect(
+    circle!.radius! / drawnRadius,
+    "The committed radius is the dragged ~3× radius, not the drawn one.",
+  ).toBeGreaterThan(2.9);
+  expect(circle!.radius! / drawnRadius).toBeLessThan(3.1);
+  expect(centre.position[0]).toBeCloseTo(centreBefore.position[0], 6);
+  expect(centre.position[1]).toBeCloseTo(centreBefore.position[1], 6);
+});
+
+// ── Circle rim drag: after deleting the deliberately added diameter ─────
+
+test("T12c: after deleting the deliberately added diameter, rim drag grows the radius while centre stays fixed", async ({
+  page,
+}) => {
+  const workbench = new SketchWorkbenchHarness(page);
+  await enterSketchMode(workbench);
+  await drawCircle(workbench, { x: 400, y: 400 }, { x: 500, y: 400 });
+
+  // T13a: the diameter is added deliberately (the Circle tool authors none),
+  // at the drawn size so the rim stays at 500 px.
+  const radius = await sketchRadiusOf(workbench, { x: 400, y: 400 }, 100);
+  await addDiameterWithDimensionTool(
+    workbench,
+    { x: 500, y: 400 },
+    { x: 560, y: 320 },
+    2 * radius,
+  );
+
+  // Select the diameter annotation and delete it.
+  const diameterGlyph = page.locator(
+    '[data-sketch-annotation-kind="dimension"]',
+  );
+  await diameterGlyph.first().click();
   await workbench.waitForAnimationFrames(2);
   await page.keyboard.press("Delete");
+  await expect(diameterGlyph).toHaveCount(0);
   await workbench.waitForAnimationFrames(4);
 
   // Drag rim 200 px outward (500 → 700). Now unconstrained, the radius
@@ -444,22 +616,27 @@ test("T12f: dragging a fixed circle centre shows a feedback cue that disappears 
   await finishSketch(workbench);
 });
 
-test("T12f: dragging the rim of a freshly drawn (radius-dimensioned) circle shows a feedback cue, radius stays unchanged, no Undo step", async ({
+test("T12f: dragging the rim of a circle with a deliberately added diameter shows a feedback cue, the diameter blocks it, no Undo step", async ({
   page,
 }) => {
   const workbench = new SketchWorkbenchHarness(page);
   await enterSketchMode(workbench);
 
-  // Draw a circle at (500,400) with rim at (600,400). The circle tool
-  // auto-creates a radius dimension, so the rim is constrained.
-  await workbench.activateTool("Create circular geometry.");
-  await workbench.clickViewportAt({ x: 500, y: 400 });
-  await workbench.clickViewportAt({ x: 600, y: 400 });
-  await expect
-    .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
-    .toContain("1 entities staged");
-  await page.keyboard.press("Escape");
-  await expect.poll(() => workbench.currentPhase()).toBe("editing");
+  // Draw a circle at (500,400) with rim at (600,400), then dimension its
+  // diameter deliberately with the Dimension tool (T13a: the Circle tool
+  // authors no size) at the drawn size, so the rim stays at 600 px.
+  await drawCircle(workbench, { x: 500, y: 400 }, { x: 600, y: 400 });
+  const radius = await sketchRadiusOf(workbench, { x: 500, y: 400 }, 100);
+  const diameter = Number((2 * radius).toFixed(4));
+  await addDiameterWithDimensionTool(
+    workbench,
+    { x: 600, y: 400 },
+    { x: 660, y: 320 },
+    diameter,
+  );
+  const diameterGlyph = page.locator(
+    '[data-sketch-annotation-kind="dimension"]',
+  );
 
   const box = await workbench.viewport().boundingBox();
   if (!box) throw new Error("Viewport not visible.");
@@ -485,9 +662,6 @@ test("T12f: dragging the rim of a freshly drawn (radius-dimensioned) circle show
     .locator('[data-testid="sketch-drag-feedback-cue"]')
     .count();
 
-  // The rim drag on a dimensioned circle should produce a feedback cue.
-  // The cue depends on the rim pick succeeding (tessellation-dependent);
-  // when it does, it must appear and then clear.
   expect(
     cueDuringDrag,
     "T12f: feedback cue must appear during rim drag of a dimensioned circle.",
@@ -497,29 +671,58 @@ test("T12f: dragging the rim of a freshly drawn (radius-dimensioned) circle show
     "T12f: feedback cue must disappear after release.",
   ).toBe(0);
 
-  // Ctrl+Z should undo the circle draw (0 entities), not a drag — no Undo
-  // step was recorded for the blocked drag.
+  // No Undo step for the blocked drag: Ctrl+Z undoes the diameter addition
+  // (its annotation goes, the circle stays).
   await page.keyboard.press("Control+z");
-  await expect
-    .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
-    .toContain("0 entities staged");
-
-  // Redo, finish, verify radius unchanged.
-  await page.keyboard.press("Control+Shift+z");
+  await expect(diameterGlyph).toHaveCount(0);
   await expect
     .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
     .toContain("1 entities staged");
+
+  // Redo, finish, verify the diameter and the radius unchanged.
+  await page.keyboard.press("Control+Shift+z");
+  await expect(diameterGlyph).toHaveCount(1);
 
   await finishSketch(workbench);
   const committed = await readCommittedDefinition(workbench);
   expect(committed).not.toBeNull();
   const circle = committed!.entities.find((e) => e.kind === "circle");
   expect(circle).toBeDefined();
-  // Radius should be the initial authored value (~2.4 units, < 4).
   expect(
     circle!.radius!,
-    "Radius must NOT have grown (dimension blocks the drag).",
-  ).toBeLessThan(4);
+    "Radius must NOT have grown (the deliberate diameter blocks the drag).",
+  ).toBeCloseTo(diameter / 2, 3);
+  const diameters = await page.evaluate((storageKey) => {
+    const payload = JSON.parse(
+      window.localStorage.getItem(storageKey) ?? "{}",
+    ) as {
+      entries?: Array<{
+        kind: string;
+        payload?: {
+          definition?: {
+            dimensions?: Array<{
+              kind: string;
+              value?: number | { value?: number };
+            }>;
+          };
+        };
+      }>;
+    };
+    return (
+      payload.entries
+        ?.filter((entry) => entry.kind === "commitSketch")
+        .at(-1)
+        ?.payload?.definition?.dimensions?.map((dimension) => [
+          dimension.kind,
+          typeof dimension.value === "number"
+            ? dimension.value
+            : (dimension.value?.value ?? null),
+        ]) ?? []
+    );
+  }, MODELING_OPERATION_HISTORY_STORAGE_KEY);
+  expect(diameters, "The deliberate diameter keeps its value.").toEqual([
+    ["diameter", diameter],
+  ]);
 });
 
 // ── T12g: repeated gestures → two Undo steps ────────────────────────────

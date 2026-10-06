@@ -104,38 +104,6 @@ export function createTangentConstraint(input: {
   };
 }
 
-export function createDistanceDimension(input: {
-  dimensionId: DimensionId;
-  label: string;
-  axis: "aligned" | "horizontal" | "vertical";
-  pointIds: readonly [SketchPointId, SketchPointId];
-  value: number;
-}): DimensionDefinition {
-  return {
-    dimensionId: input.dimensionId,
-    kind: "distance",
-    label: input.label,
-    axis: input.axis,
-    pointIds: input.pointIds,
-    value: input.value,
-  };
-}
-
-export function createCircleRadiusDimension(input: {
-  dimensionId: DimensionId;
-  label: string;
-  entityId: SketchEntityId;
-  value: number;
-}): DimensionDefinition {
-  return {
-    dimensionId: input.dimensionId,
-    kind: "circleRadius",
-    label: input.label,
-    entityId: input.entityId,
-    value: input.value,
-  };
-}
-
 export function createArcEndpointDimensions(input: {
   createDimensionId: (suffix: string) => DimensionId;
   labelPrefix: string;
