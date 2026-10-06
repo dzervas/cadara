@@ -247,6 +247,21 @@ export function beginSketchReferenceTool(
   };
 }
 
+/** The label of an edit operator's single value (Offset: "Distance"). */
+export function getSketchEditToolValueLabel(
+  toolId: SketchEditToolState["toolId"],
+) {
+  return toolId === "sketchFillet"
+    ? "Radius"
+    : toolId === "sketchChamfer"
+      ? "Distance"
+      : toolId === "sketchSlot"
+        ? "Width"
+        : toolId === "sketchCircularPattern"
+          ? "Angle"
+          : "Distance";
+}
+
 export function buildSketchEditToolPresentation(
   state: SketchEditToolState,
   validationMessage: string | null = null,
@@ -267,16 +282,7 @@ export function buildSketchEditToolPresentation(
     state.toolId === "sketchLinearPattern" ||
     state.toolId === "sketchCircularPattern" ||
     state.toolId === "sketchTransform";
-  const numericLabel =
-    state.toolId === "sketchFillet"
-      ? "Radius"
-      : state.toolId === "sketchChamfer"
-        ? "Distance"
-        : state.toolId === "sketchSlot"
-          ? "Width"
-          : state.toolId === "sketchCircularPattern"
-            ? "Angle"
-            : "Distance";
+  const numericLabel = getSketchEditToolValueLabel(state.toolId);
   const numericUnit = state.toolId === "sketchCircularPattern" ? "rad" : "mm";
   const isReady =
     hasSelection && previewEntities.length > 0 && validationMessage === null;
@@ -390,6 +396,7 @@ export function buildSketchEditToolPresentation(
                 : String(state.offsetDistance),
             unit: "mm",
             min: 0,
+            numericOnly: true,
             confirmLabel: "Create",
             cancelLabel: "Cancel",
             placement: "target",
@@ -406,6 +413,7 @@ export function buildSketchEditToolPresentation(
               value: state.toolValue === null ? null : String(state.toolValue),
               unit: numericUnit,
               min: 0,
+              numericOnly: true,
               confirmLabel: "Create",
               cancelLabel: "Cancel",
               placement: "target",

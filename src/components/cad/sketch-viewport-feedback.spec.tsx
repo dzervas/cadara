@@ -3,6 +3,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { SketchViewportFeedbackLayer } from "@/components/cad/sketch-viewport-feedback";
 import type { SketchToolPresentationSchema } from "@/core/sketch-tools/editor-schema";
+import type { PrimitiveRef } from "@/core/editor/schema";
+import { buildSketchEditToolPresentation } from "@/domain/editor/sketch-session/tools";
 
 test("src/components/cad/sketch-viewport-feedback.spec.tsx", () => {
   const schema: SketchToolPresentationSchema = {
@@ -317,4 +319,66 @@ test("src/components/cad/sketch-viewport-feedback.spec.tsx", () => {
       markup.includes("Midpoint"),
     "Viewport feedback should render transient snap indicators and labels.",
   ).toBeTruthy();
+});
+
+test("T13b A6 (D29): edit-tool floating inputs offer no variable datalist; dimension inputs still do", () => {
+  const target = {
+    kind: "sketchEntity",
+    sketchId: "sketch_t13b",
+    entityId: "sketch_entity_t13b",
+  } as unknown as PrimitiveRef;
+  const render = (
+    floatingInput: SketchToolPresentationSchema["floatingInput"],
+  ) =>
+    renderToStaticMarkup(
+      <SketchViewportFeedbackLayer
+        schema={{ prompts: [], overlays: [], floatingInput }}
+        projections={[
+          { id: `floating-input:${floatingInput!.id}`, x: 180, y: 90 },
+        ]}
+        documentVariableNames={["w"]}
+        onPatch={() => undefined}
+      />,
+    );
+  const editInputs = (
+    ["offset", "sketchFillet", "sketchCircularPattern"] as const
+  ).map(
+    (toolId) =>
+      buildSketchEditToolPresentation({
+        toolId,
+        hoverTarget: null,
+        selectedTarget: target,
+        selectedTargets: [target],
+        offsetDistance: 1,
+        offsetSide: "left",
+        toolValue: 1,
+      }).floatingInput,
+  );
+  for (const input of editInputs) {
+    expect(input, "premise: the edit tool shows a floating input").toBeTruthy();
+    const markup = render(input);
+    expect(
+      markup.includes(`data-sketch-viewport-floating-input="${input!.id}"`),
+    ).toBe(true);
+    expect(
+      markup.includes("<datalist") || markup.includes(" list="),
+      `${input!.id}: an operation parameter takes plain numbers, so no variable suggestions`,
+    ).toBe(false);
+  }
+
+  const dimension = render({
+    id: "dimensionDistance-value-input",
+    label: "Distance",
+    value: null,
+    confirmLabel: "Commit",
+    cancelLabel: "Cancel",
+    submitAction: { type: "patch", patch: { intent: "commitConstraintValue" } },
+    cancelAction: { type: "patch", patch: { intent: "cancelConstraintValue" } },
+  });
+  expect(
+    dimension.includes(
+      '<datalist id="dimensionDistance-value-input-variables">',
+    ) && dimension.includes('<option value="w">'),
+    "a dimension value still offers the document variables",
+  ).toBe(true);
 });

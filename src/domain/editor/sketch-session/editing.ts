@@ -89,6 +89,7 @@ import {
   rebuildSessionForDefinition,
   getSketchSessionDerivationSettings,
   getSketchSessionPreviewBasis,
+  parseOperationParameter,
   resolveSketchDefinitionForSolve,
 } from "./internals";
 import { updateReferenceImageOperationStates } from "./references";
@@ -98,6 +99,7 @@ import {
 } from "./state";
 import {
   buildSketchEditToolPresentation,
+  getSketchEditToolValueLabel,
   selectSketchEditTarget,
 } from "./tools";
 import {
@@ -487,7 +489,7 @@ export function getOffsetPreview(
   if (gate) return refusedEditOperation(gate.message);
 
   return createSketchOffsetDerivationContribution({
-    definition: session.definition,
+    definition: offsetSeedDefinition(session),
     entityIds: seedEntityIds,
     distance: activeEditTool.offsetDistance,
     side: activeEditTool.offsetSide,
@@ -496,6 +498,26 @@ export function getOffsetPreview(
     modelingTolerance: session.modelingTolerance,
     ...(plan ? { plan } : {}),
   });
+}
+
+/**
+ * T13b (B2, D28): the definition an Offset is created on. With an accepted
+ * live solve of the current definition, the authored definition at that
+ * solve's solved positions (radii, spline handles): the geometry the user
+ * sees and the edit-query tools (Trim, Extend, Split) query, so the
+ * preview's frame is the one its committed solve rebuilds. Otherwise the
+ * authored definition, and the preview's own solve refuses as before
+ * (U-G1). Only the contribution reads it; the commit adds that to the
+ * authored definition.
+ */
+function offsetSeedDefinition(session: SketchSessionState): SketchDefinition {
+  return session.liveSolve && hasAcceptedLiveSolveOfDefinition(session)
+    ? applySolvedSketchToDefinition(
+        session.definition,
+        session.liveSolve.solvedSnapshot,
+        getSketchSessionDerivationSettings(session),
+      )
+    : session.definition;
 }
 
 const OFFSET_PREVIEW_UNACCEPTED_MESSAGE =
@@ -763,7 +785,7 @@ export function updateSketchOffsetPointer(
 
   // [TECH] G9: the side on the declared (N2) traversal of the exact sources.
   const side = offsetSideForSketchPoint({
-    definition: session.definition,
+    definition: offsetSeedDefinition(session),
     entityIds,
     point,
   });
@@ -1708,14 +1730,16 @@ export function patchSketchEditToolValue(
   }
 
   if ("value" in patch && patch.intent !== "commitOffset") {
+    const distance =
+      patch.intent === "setOffsetSide"
+        ? null
+        : parseOperationParameter(
+            patch.value,
+            getSketchEditToolValueLabel("offset").toLowerCase(),
+          );
     const nextEditTool = {
       ...activeEditTool,
-      offsetDistance:
-        patch.intent === "setOffsetSide"
-          ? activeEditTool.offsetDistance
-          : typeof patch.value === "number"
-            ? patch.value
-            : null,
+      offsetDistance: distance ? distance.value : activeEditTool.offsetDistance,
       offsetSide:
         patch.intent === "setOffsetSide" &&
         (patch.value === "left" || patch.value === "right")
@@ -1733,10 +1757,11 @@ export function patchSketchEditToolValue(
       ...session,
       activeEditTool: stagedEditTool,
       toolStagedEntities: preview.previewEntities,
-      validationMessage: preview.valid ? null : preview.message,
+      validationMessage:
+        distance?.message ?? (preview.valid ? null : preview.message),
       toolPresentation: buildSketchEditToolPresentation(
         nextEditTool,
-        preview.message,
+        distance?.message ?? preview.message,
         preview.previewEntities,
       ),
     };
@@ -1818,20 +1843,22 @@ export function patchSketchEditOperatorValue(
   }
 
   if ("value" in patch && patch.intent !== "commitSketchEditOperator") {
-    const nextEditTool = {
-      ...activeEditTool,
-      toolValue: typeof patch.value === "number" ? patch.value : null,
-    };
+    const value = parseOperationParameter(
+      patch.value,
+      getSketchEditToolValueLabel(activeEditTool.toolId).toLowerCase(),
+    );
+    const nextEditTool = { ...activeEditTool, toolValue: value.value };
     const preview = getSketchEditOperatorResult(session, nextEditTool);
 
     return {
       ...session,
       activeEditTool: nextEditTool,
       toolStagedEntities: preview.previewEntities,
-      validationMessage: preview.valid ? null : preview.message,
+      validationMessage:
+        value.message ?? (preview.valid ? null : preview.message),
       toolPresentation: buildSketchEditToolPresentation(
         nextEditTool,
-        preview.message,
+        value.message ?? preview.message,
         preview.previewEntities,
       ),
     };

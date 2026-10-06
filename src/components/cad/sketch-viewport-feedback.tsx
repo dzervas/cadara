@@ -614,7 +614,8 @@ function ViewportFloatingInput({
   documentVariableNames: readonly string[];
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const variableNames = documentVariableNames;
+  // T13b (D29): operation parameters take plain numbers, not variables.
+  const variableNames = descriptor.numericOnly ? [] : documentVariableNames;
   const suggestionsId = `${descriptor.id}-variables`;
 
   useEffect(() => {
