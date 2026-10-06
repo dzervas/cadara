@@ -50,6 +50,18 @@ async function viewportDrag(
   await workbench.page.mouse.up();
 }
 
+type LivePoint = { id: string; position: readonly [number, number] };
+
+async function readLivePoints(
+  workbench: SketchWorkbenchHarness,
+): Promise<LivePoint[]> {
+  const snap = await workbench.page.evaluate(
+    () => window.__cadaraDebug?.getSketchSnapshot() ?? null,
+  );
+  if (!snap) throw new Error("No live sketch snapshot.");
+  return (snap as { points: LivePoint[] }).points;
+}
+
 async function readCommittedDefinition(workbench: SketchWorkbenchHarness) {
   return workbench.page.evaluate((storageKey) => {
     const serialized = window.localStorage.getItem(storageKey);
@@ -508,4 +520,255 @@ test("T12f: dragging the rim of a freshly drawn (radius-dimensioned) circle show
     circle!.radius!,
     "Radius must NOT have grown (dimension blocks the drag).",
   ).toBeLessThan(4);
+});
+
+// ── T12g: repeated gestures → two Undo steps ────────────────────────────
+
+test("T12g: two consecutive drags of different targets in one sketch produce two Undo steps; each Undo restores the prior state, two Redos restore the final state", async ({
+  page,
+}) => {
+  const workbench = new SketchWorkbenchHarness(page);
+  await enterSketchMode(workbench);
+  // Draw two separate lines:
+  //   Line 1: (300,300) to (500,300) — body midpoint (400,300)
+  //   Line 2: (600,500) to (800,500) — body midpoint (700,500)
+  await drawLine(workbench, { x: 300, y: 300 }, { x: 500, y: 300 });
+  // Second line: inline to avoid drawLine's "1 entities staged" assertion.
+  await workbench.activateTool("Create line geometry.");
+  await workbench.clickViewportAt({ x: 600, y: 500 });
+  await workbench.clickViewportAt({ x: 800, y: 500 });
+  await expect
+    .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
+    .toContain("2 entities staged");
+  await workbench.page.keyboard.press("Escape");
+  await expect
+    .poll(() => workbench.currentPhase(), { timeout: 5_000 })
+    .toMatch(/collecting|editing/);
+
+  // Read initial geometry (4 points: 2 per line).
+  const snap0 = await readLivePoints(workbench);
+  expect(snap0.length).toBeGreaterThanOrEqual(4);
+
+  // ── Drag 1: body of line 1 down 80px (400,300 → 400,380). ──
+  await viewportDrag(workbench, { x: 400, y: 300 }, { x: 400, y: 380 });
+  await workbench.waitForAnimationFrames(4);
+  const snap1 = await readLivePoints(workbench);
+  // Line 1's points (indices 0,1) should have moved down.
+  expect(
+    snap1[0]!.position[1],
+    "After drag 1, line 1 point 0 Y should be below initial.",
+  ).toBeLessThan(snap0[0]!.position[1] - 0.5);
+  expect(
+    snap1[1]!.position[1],
+    "After drag 1, line 1 point 1 Y should be below initial.",
+  ).toBeLessThan(snap0[1]!.position[1] - 0.5);
+  // Line 2's points (indices 2,3) should be unchanged.
+  expect(
+    Math.abs(snap1[2]!.position[1] - snap0[2]!.position[1]),
+    "After drag 1, line 2 point 0 Y should be unchanged.",
+  ).toBeLessThan(0.1);
+
+  // ── Drag 2: body of line 2 up 80px (700,500 → 700,420). ──
+  await viewportDrag(workbench, { x: 700, y: 500 }, { x: 700, y: 420 });
+  await workbench.waitForAnimationFrames(4);
+  const snap2 = await readLivePoints(workbench);
+  // Line 2's points should have moved up.
+  expect(
+    snap2[2]!.position[1],
+    "After drag 2, line 2 point 0 Y should be above its drag 1 position.",
+  ).toBeGreaterThan(snap1[2]!.position[1] + 0.5);
+  // Line 1's points should be unchanged from drag 1.
+  expect(
+    Math.abs(snap2[0]!.position[1] - snap1[0]!.position[1]),
+    "After drag 2, line 1 point 0 Y should be unchanged.",
+  ).toBeLessThan(0.3);
+
+  // ── Undo 1: should restore state after drag 1 (before drag 2). ──
+  await page.keyboard.press("Control+z");
+  await workbench.waitForAnimationFrames(4);
+  const afterUndo1 = await readLivePoints(workbench);
+  for (const pt of afterUndo1) {
+    const s1Pt = snap1.find((p) => p.id === pt.id)!;
+    expect(
+      Math.abs(pt.position[0] - s1Pt.position[0]),
+      `Undo 1: point ${pt.id} X should match state after drag 1.`,
+    ).toBeLessThan(0.3);
+    expect(
+      Math.abs(pt.position[1] - s1Pt.position[1]),
+      `Undo 1: point ${pt.id} Y should match state after drag 1.`,
+    ).toBeLessThan(0.3);
+  }
+
+  // ── Undo 2: should restore initial state (before any drag). ──
+  await page.keyboard.press("Control+z");
+  await workbench.waitForAnimationFrames(4);
+  const afterUndo2 = await readLivePoints(workbench);
+  for (const pt of afterUndo2) {
+    const s0Pt = snap0.find((p) => p.id === pt.id)!;
+    expect(
+      Math.abs(pt.position[0] - s0Pt.position[0]),
+      `Undo 2: point ${pt.id} X should match initial state.`,
+    ).toBeLessThan(0.3);
+    expect(
+      Math.abs(pt.position[1] - s0Pt.position[1]),
+      `Undo 2: point ${pt.id} Y should match initial state.`,
+    ).toBeLessThan(0.3);
+  }
+
+  // ── Redo twice: should restore the final state. ──
+  await page.keyboard.press("Control+Shift+z");
+  await workbench.waitForAnimationFrames(4);
+  await page.keyboard.press("Control+Shift+z");
+  await workbench.waitForAnimationFrames(4);
+  const afterRedos = await readLivePoints(workbench);
+  for (const pt of afterRedos) {
+    const s2Pt = snap2.find((p) => p.id === pt.id)!;
+    expect(
+      Math.abs(pt.position[0] - s2Pt.position[0]),
+      `Redo 2: point ${pt.id} X should match final state.`,
+    ).toBeLessThan(0.3);
+    expect(
+      Math.abs(pt.position[1] - s2Pt.position[1]),
+      `Redo 2: point ${pt.id} Y should match final state.`,
+    ).toBeLessThan(0.3);
+  }
+
+  await finishSketch(workbench);
+});
+
+// ── T12g: same world-space displacement at two zoom levels ──────────────
+
+test("T12g: the same world-space displacement applied at 1× and ~2× zoom gives the same committed geometry within 1-px quantization tolerance", async ({
+  page,
+}) => {
+  // Viewport 1440×960; sketch origin at viewport centre (720,480).
+  // Zoom centred on the origin keeps it at (720,480) on screen.
+  const workbench = new SketchWorkbenchHarness(page);
+  await enterSketchMode(workbench);
+  await drawLine(workbench, { x: 720, y: 480 }, { x: 920, y: 480 });
+
+  // ── Measure world-units-per-pixel at 1× zoom empirically. ──
+  // Drag point 0 exactly 100px right, observe world delta.
+  const init1x = await readLivePoints(workbench);
+  await viewportDrag(workbench, { x: 720, y: 480 }, { x: 820, y: 480 });
+  await workbench.waitForAnimationFrames(4);
+  const after1x = await readLivePoints(workbench);
+  const delta1x = after1x[0]!.position[0] - init1x[0]!.position[0];
+  const wupp1x = delta1x / 100; // world-units-per-pixel at 1×
+  expect(
+    delta1x,
+    "1× drag must produce a positive displacement.",
+  ).toBeGreaterThan(0.5);
+  await page.keyboard.press("Control+z");
+  await workbench.waitForAnimationFrames(4);
+
+  // ── Zoom in at the origin. ──
+  const box = await workbench.viewport().boundingBox();
+  if (!box) throw new Error("No viewport.");
+  await page.mouse.move(box.x + 720, box.y + 480);
+  for (let i = 0; i < 7; i++) {
+    await page.mouse.wheel(0, -120);
+  }
+  await workbench.waitForAnimationFrames(6);
+
+  // ── Measure world-units-per-pixel at the zoomed level. ──
+  // Probe: drag point 0 by 60px right, observe world delta, undo.
+  const initProbe = await readLivePoints(workbench);
+  await viewportDrag(workbench, { x: 720, y: 480 }, { x: 780, y: 480 });
+  await workbench.waitForAnimationFrames(4);
+  const afterProbe = await readLivePoints(workbench);
+  const deltaProbe = afterProbe[0]!.position[0] - initProbe[0]!.position[0];
+  const wupp2x = deltaProbe / 60; // world-units-per-pixel at zoomed level
+  expect(
+    wupp2x,
+    "Zoomed wupp must be smaller than 1× (zoom happened).",
+  ).toBeLessThan(wupp1x * 0.9);
+  await page.keyboard.press("Control+z");
+  await workbench.waitForAnimationFrames(4);
+
+  // ── Apply the same world-space displacement (delta1x) at zoomed level. ──
+  const pixelsNeeded = Math.round(delta1x / wupp2x);
+  const init2x = await readLivePoints(workbench);
+  await viewportDrag(
+    workbench,
+    { x: 720, y: 480 },
+    { x: 720 + pixelsNeeded, y: 480 },
+  );
+  await workbench.waitForAnimationFrames(4);
+  const after2x = await readLivePoints(workbench);
+  const delta2x = after2x[0]!.position[0] - init2x[0]!.position[0];
+
+  // Tolerance: ±1 pixel at the coarser (1×) zoom = wupp1x world units.
+  // At the default orthographic camera (frustum 32, viewport 960px):
+  // wupp1x ≈ 32/1/960 ≈ 0.033 world units.
+  const tolerance = wupp1x;
+  expect(
+    Math.abs(delta2x - delta1x),
+    `World-space X displacement must match: 1×=${delta1x.toFixed(4)}, ` +
+      `2×=${delta2x.toFixed(4)}, tol=${tolerance.toFixed(4)} (1px at 1×).`,
+  ).toBeLessThan(tolerance);
+
+  await finishSketch(workbench);
+});
+
+test("T12g: a press within the grab radius but off the point does not cause a position jump at either zoom level", async ({
+  page,
+}) => {
+  const workbench = new SketchWorkbenchHarness(page);
+  await enterSketchMode(workbench);
+  // Place point 0 at the viewport centre (720,480) = sketch origin.
+  // Zoom at (720,480) keeps the origin at the same screen pixel.
+  await drawLine(workbench, { x: 720, y: 480 }, { x: 920, y: 480 });
+
+  // Read initial.
+  const initPts = await readLivePoints(workbench);
+
+  // ── Test at 1× zoom: press 8px from point 0, release immediately. ──
+  // The grab radius is 12px (entry), so 8px is within grab but offset.
+  // A no-movement release (press and up at the same spot) should not move
+  // the point.
+  const box = await workbench.viewport().boundingBox();
+  if (!box) throw new Error("No viewport.");
+  await page.mouse.move(box.x + 728, box.y + 480);
+  await page.mouse.down();
+  await workbench.waitForAnimationFrames(2);
+  await page.mouse.up();
+  await workbench.waitForAnimationFrames(4);
+
+  const afterClick1x = await readLivePoints(workbench);
+  expect(
+    Math.abs(afterClick1x[0]!.position[0] - initPts[0]!.position[0]),
+    "1× zoom: off-centre press-release must not jump point X.",
+  ).toBeLessThan(0.05);
+  expect(
+    Math.abs(afterClick1x[0]!.position[1] - initPts[0]!.position[1]),
+    "1× zoom: off-centre press-release must not jump point Y.",
+  ).toBeLessThan(0.05);
+
+  // ── Zoom in at the origin (720,480) and repeat. ──
+  await page.mouse.move(box.x + 720, box.y + 480);
+  for (let i = 0; i < 7; i++) {
+    await page.mouse.wheel(0, -120);
+  }
+  await workbench.waitForAnimationFrames(6);
+
+  // After zoom centred on the origin, the origin is still at (720,480).
+  // Press 8px to the right of (720,480).
+  await page.mouse.move(box.x + 728, box.y + 480);
+  await page.mouse.down();
+  await workbench.waitForAnimationFrames(2);
+  await page.mouse.up();
+  await workbench.waitForAnimationFrames(4);
+
+  const afterClick2x = await readLivePoints(workbench);
+  expect(
+    Math.abs(afterClick2x[0]!.position[0] - initPts[0]!.position[0]),
+    "2× zoom: off-centre press-release must not jump point X.",
+  ).toBeLessThan(0.05);
+  expect(
+    Math.abs(afterClick2x[0]!.position[1] - initPts[0]!.position[1]),
+    "2× zoom: off-centre press-release must not jump point Y.",
+  ).toBeLessThan(0.05);
+
+  await finishSketch(workbench);
 });
