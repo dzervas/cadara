@@ -53,7 +53,6 @@ export interface SketchConstraintValueSpec {
   label: string;
   unit?: string;
   min?: number;
-  defaultValue: number;
 }
 
 export interface SketchConstraintMetadata<
@@ -117,6 +116,8 @@ export interface SketchConstraintCommitInput {
 export interface SketchConstraintCommitContribution {
   constraints?: ConstraintDefinition[];
   dimensions?: DimensionDefinition[];
+  /** Why the selected targets author nothing (shown instead of the generic message). */
+  refusal?: string;
 }
 
 export interface SketchConstraintDefinition<
@@ -142,6 +143,15 @@ export interface SketchConstraintDefinition<
   canSelectMoreTargets?(
     selectedTargets: readonly SketchConstraintTargetRecord[],
   ): boolean;
+  /**
+   * T13c (D5): the current measured quantity of the complete targets, in the
+   * value spec's unit (degrees for angles), with the solver's semantics, so
+   * committing it untouched authors an already satisfied value.
+   */
+  measureValue?(
+    selectedTargets: readonly SketchConstraintTargetRecord[],
+    pointer: SketchPoint2D | null,
+  ): number | null;
   createCommitContribution(
     input: SketchConstraintCommitInput,
   ): SketchConstraintCommitContribution;

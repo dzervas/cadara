@@ -21,6 +21,7 @@ import type {
   SketchToolOverlayDescriptor,
 } from "@/core/sketch-tools/editor-schema";
 import type {
+  SketchConstraintCommitContribution,
   SketchConstraintCommitInput,
   SketchConstraintDefinition,
   SketchConstraintPreviewInput,
@@ -782,27 +783,27 @@ function getLineDimensionPlacement(
 type DimensionDistanceIntent =
   | {
       kind: "diameter";
-      valueSpec: { label: "Diameter"; unit: "mm"; min: 0.01; defaultValue: 10 };
+      valueSpec: { label: "Diameter"; unit: "mm"; min: 0.01 };
     }
   | {
       kind: "lineLength";
-      valueSpec: { label: "Length"; unit: "mm"; min: 0.01; defaultValue: 10 };
+      valueSpec: { label: "Length"; unit: "mm"; min: 0.01 };
     }
   | {
       kind: "lineDistance";
-      valueSpec: { label: "Distance"; unit: "mm"; min: 0.01; defaultValue: 10 };
+      valueSpec: { label: "Distance"; unit: "mm"; min: 0.01 };
     }
   | {
       kind: "linePointDistance";
-      valueSpec: { label: "Distance"; unit: "mm"; min: 0.01; defaultValue: 10 };
+      valueSpec: { label: "Distance"; unit: "mm"; min: 0.01 };
     }
   | {
       kind: "lineAngle";
-      valueSpec: { label: "Angle"; unit: "deg"; min: 0.1; defaultValue: 90 };
+      valueSpec: { label: "Angle"; unit: "deg"; min: 0.1 };
     }
   | {
       kind: "pointDistance";
-      valueSpec: { label: "Distance"; unit: "mm"; min: 0.01; defaultValue: 10 };
+      valueSpec: { label: "Distance"; unit: "mm"; min: 0.01 };
     };
 
 function getDimensionDistanceIntent(
@@ -817,14 +818,14 @@ function getDimensionDistanceIntent(
   if (first.circle && !second) {
     return {
       kind: "diameter",
-      valueSpec: { label: "Diameter", unit: "mm", min: 0.01, defaultValue: 10 },
+      valueSpec: { label: "Diameter", unit: "mm", min: 0.01 },
     };
   }
 
   if (first.entity?.kind === "lineSegment" && !second) {
     return {
       kind: "lineLength",
-      valueSpec: { label: "Length", unit: "mm", min: 0.01, defaultValue: 10 },
+      valueSpec: { label: "Length", unit: "mm", min: 0.01 },
     };
   }
 
@@ -840,7 +841,6 @@ function getDimensionDistanceIntent(
             label: "Distance",
             unit: "mm",
             min: 0.01,
-            defaultValue: 10,
           },
         }
       : {
@@ -849,7 +849,6 @@ function getDimensionDistanceIntent(
             label: "Angle",
             unit: "deg",
             min: 0.1,
-            defaultValue: 90,
           },
         };
   }
@@ -857,7 +856,7 @@ function getDimensionDistanceIntent(
   if ((first.line && !second.line) || (!first.line && second.line)) {
     return {
       kind: "linePointDistance",
-      valueSpec: { label: "Distance", unit: "mm", min: 0.01, defaultValue: 10 },
+      valueSpec: { label: "Distance", unit: "mm", min: 0.01 },
     };
   }
 
@@ -867,11 +866,158 @@ function getDimensionDistanceIntent(
   ) {
     return {
       kind: "pointDistance",
-      valueSpec: { label: "Distance", unit: "mm", min: 0.01, defaultValue: 10 },
+      valueSpec: { label: "Distance", unit: "mm", min: 0.01 },
     };
   }
 
   return null;
+}
+
+/**
+ * T13c (D5): the solver's line-angle measure — each line's direction points
+ * from the lines' intersection towards the line's midpoint (`lineAngleRadians`
+ * in solver-core), in degrees.
+ */
+function measureLineAngleDegrees(
+  first: NonNullable<SketchConstraintTargetRecord["line"]>,
+  second: NonNullable<SketchConstraintTargetRecord["line"]>,
+) {
+  const center = lineIntersection(first, second);
+  const direction = (
+    line: NonNullable<SketchConstraintTargetRecord["line"]>,
+  ) => {
+    const unit = normalize(lineVector(line));
+    if (!center) {
+      return unit;
+    }
+    const middle = midpoint(line.start, line.end);
+    const toward = [middle[0] - center[0], middle[1] - center[1]] as const;
+    const dot = toward[0] * unit[0] + toward[1] * unit[1];
+    return dot >= 0 ? unit : ([-unit[0], -unit[1]] as const);
+  };
+  const firstUnit = direction(first);
+  const secondUnit = direction(second);
+  const dot = Math.max(
+    -1,
+    Math.min(1, firstUnit[0] * secondUnit[0] + firstUnit[1] * secondUnit[1]),
+  );
+  return (Math.acos(dot) * 180) / Math.PI;
+}
+
+/**
+ * T13c (D5): a point pair's measured distance along the dimension's axis.
+ * Horizontal and vertical pairs are authored in increasing order along their
+ * axis (`orderPointPairAlongAxis`), so their measure is non-negative.
+ */
+function measurePointPairDistance(
+  first: readonly [number, number],
+  second: readonly [number, number],
+  axis: "aligned" | "horizontal" | "vertical",
+) {
+  return axis === "aligned"
+    ? distanceBetween(first, second)
+    : Math.abs(
+        second[axis === "horizontal" ? 0 : 1] -
+          first[axis === "horizontal" ? 0 : 1],
+      );
+}
+
+/**
+ * T13c (D5): a signed horizontal/vertical point-pair dimension measures
+ * `second - first` along its axis, so the pair is authored in increasing
+ * order along the axis: the measured value is non-negative and a typed
+ * positive value keeps the points on their current sides. The annotation
+ * offset is measured from the picked first point (perpendicular to the
+ * axis); when the pair is swapped it is re-based on the stored first point,
+ * so the dimension line stays where the user placed it (review R-1).
+ */
+function orderPointPairAlongAxis<T>(
+  first: { anchor: readonly [number, number]; id: T },
+  second: { anchor: readonly [number, number]; id: T },
+  axis: "horizontal" | "vertical",
+  placement: SketchConstraintCommitInput["annotationPlacement"],
+): {
+  pointIds: [T, T];
+  annotationPlacement: DimensionLineAnnotationPlacement | undefined;
+} {
+  const along = axis === "horizontal" ? 0 : 1;
+  const across = axis === "horizontal" ? 1 : 0;
+  const linePlacement =
+    placement?.kind === "dimensionLine" ? placement : undefined;
+  if (second.anchor[along] >= first.anchor[along]) {
+    return {
+      pointIds: [first.id, second.id],
+      annotationPlacement: linePlacement,
+    };
+  }
+  return {
+    pointIds: [second.id, first.id],
+    annotationPlacement: linePlacement && {
+      ...linePlacement,
+      offset:
+        linePlacement.offset + first.anchor[across] - second.anchor[across],
+    },
+  };
+}
+
+function measureDimensionDistanceTargets(
+  selectedTargets: readonly SketchConstraintTargetRecord[],
+  pointer: readonly [number, number] | null,
+): number | null {
+  const intent = getDimensionDistanceIntent(selectedTargets);
+  const [first, second] = selectedTargets;
+
+  if (!intent || !first) {
+    return null;
+  }
+
+  switch (intent.kind) {
+    case "diameter":
+      return first.circle ? first.circle.radius * 2 : null;
+    case "lineLength":
+      return first.line
+        ? distanceBetween(first.line.start, first.line.end)
+        : null;
+    case "lineDistance":
+      return first.line && second?.line
+        ? Math.abs(
+            pointLineSignedDistance(
+              second.line.start,
+              first.line.start,
+              first.line.end,
+            ),
+          )
+        : null;
+    case "lineAngle":
+      return first.line && second?.line
+        ? measureLineAngleDegrees(first.line, second.line)
+        : null;
+    case "linePointDistance": {
+      const lineTarget = first.line ? first : second;
+      const pointTarget = first.line ? second : first;
+      return lineTarget?.line && pointTarget
+        ? Math.abs(
+            pointLineSignedDistance(
+              pointTarget.anchor,
+              lineTarget.line.start,
+              lineTarget.line.end,
+            ),
+          )
+        : null;
+    }
+    case "pointDistance":
+      return second
+        ? measurePointPairDistance(
+            first.anchor,
+            second.anchor,
+            selectPointToPointDimensionReference({
+              first: first.anchor,
+              second: second.anchor,
+              pointer,
+            }),
+          )
+        : null;
+  }
 }
 
 function getPointPairDimensionPlacement(input: {
@@ -1652,6 +1798,71 @@ function buildSinglePreview(
   ];
 }
 
+/**
+ * T13c (D8): the local `tangent` between a line and a circle/arc or between
+ * two circles/arcs. Line↔line is refused: the solver reads a line↔line
+ * tangent as satisfied without solving it. Two circles/arcs keep their
+ * current relation (external when the centre distance is nearer the radius
+ * sum, internal when nearer the radius difference), so committing moves as
+ * little as possible.
+ */
+function createLocalTangentContribution(
+  input: SketchConstraintCommitInput,
+  first: SketchConstraintTargetRecord,
+  second: SketchConstraintTargetRecord,
+): SketchConstraintCommitContribution {
+  const firstEntity = first.entity;
+  const secondEntity = second.entity;
+
+  if (!firstEntity || !secondEntity) {
+    return {};
+  }
+
+  if (
+    firstEntity.kind === "lineSegment" &&
+    secondEntity.kind === "lineSegment"
+  ) {
+    return { refusal: "Tangent needs a circle or arc." };
+  }
+
+  const isTangentCurve = (target: SketchConstraintTargetRecord) =>
+    target.entity?.kind === "lineSegment" || Boolean(target.circle);
+
+  if (!isTangentCurve(first) || !isTangentCurve(second)) {
+    return {};
+  }
+
+  const relation =
+    first.circle && second.circle
+      ? (() => {
+          const centerDistance = distanceBetween(
+            first.circle.center,
+            second.circle.center,
+          );
+          const external = Math.abs(
+            centerDistance - (first.circle.radius + second.circle.radius),
+          );
+          const internal = Math.abs(
+            centerDistance -
+              Math.abs(first.circle.radius - second.circle.radius),
+          );
+          return internal < external ? "internal" : "external";
+        })()
+      : "external";
+
+  return {
+    constraints: [
+      {
+        constraintId: input.createConstraintId("tangent"),
+        kind: "tangent",
+        label: `Tangent ${input.sequence}`,
+        entityIds: [firstEntity.entityId, secondEntity.entityId],
+        relation,
+      },
+    ],
+  };
+}
+
 const sketchConstraintDefinitions = [
   {
     metadata: {
@@ -2010,7 +2221,7 @@ const sketchConstraintDefinitions = [
     metadata: {
       id: "constraintTangent",
       name: "Tangent",
-      tooltip: "Constrain local curves tangent to projected circles or arcs.",
+      tooltip: "Constrain a line, circle or arc tangent to a circle or arc.",
       icon: "constraintTangent",
       group: "constraints",
       modes: ["sketch"],
@@ -2018,13 +2229,13 @@ const sketchConstraintDefinitions = [
     steps: [
       {
         id: "curve-a",
-        label: "Select local curve",
+        label: "Select a line, circle or arc",
         acceptedKinds: ["line", "circle"],
       },
       {
         id: "curve-b",
-        label: "Select projected circle or arc",
-        acceptedKinds: ["circle"],
+        label: "Select a circle or arc",
+        acceptedKinds: ["line", "circle"],
       },
     ],
     resolveTarget(definition, target, projectedReferences) {
@@ -2039,7 +2250,7 @@ const sketchConstraintDefinitions = [
         "Tangent preview",
         input.selectedTargets.length >= 2
           ? formatSelectedLabels(input.selectedTargets)
-          : "Select a local curve and projected circle",
+          : "Select a line, circle or arc and a circle or arc",
         input,
       );
     },
@@ -2063,7 +2274,11 @@ const sketchConstraintDefinitions = [
             : null;
       const curve = local ? localEntityOperand(local) : null;
 
-      if (!curve || !projected) {
+      if (!projected) {
+        return createLocalTangentContribution(input, first, second);
+      }
+
+      if (!curve) {
         return {};
       }
 
@@ -2686,7 +2901,6 @@ const sketchConstraintDefinitions = [
       label: "Distance",
       unit: "mm",
       min: 0.01,
-      defaultValue: 10,
     },
     resolveTarget(definition, target, projectedReferences) {
       return createCompositeResolver([
@@ -2707,6 +2921,9 @@ const sketchConstraintDefinitions = [
     canSelectMoreTargets(selectedTargets) {
       const [first, second] = selectedTargets;
       return Boolean(first?.line && !second);
+    },
+    measureValue(selectedTargets, pointer) {
+      return measureDimensionDistanceTargets(selectedTargets, pointer);
     },
     createCommitContribution(input) {
       const [first, second] = input.selectedTargets;
@@ -2871,12 +3088,21 @@ const sketchConstraintDefinitions = [
                   kind: "distance",
                   label: `Distance ${input.sequence}`,
                   axis,
-                  pointIds: [first.point.pointId, second.point.pointId],
                   value: input.value,
-                  annotationPlacement:
-                    input.annotationPlacement?.kind === "dimensionLine"
-                      ? input.annotationPlacement
-                      : undefined,
+                  ...(axis === "aligned"
+                    ? {
+                        pointIds: [first.point.pointId, second.point.pointId],
+                        annotationPlacement:
+                          input.annotationPlacement?.kind === "dimensionLine"
+                            ? input.annotationPlacement
+                            : undefined,
+                      }
+                    : orderPointPairAlongAxis(
+                        { anchor: first.anchor, id: first.point.pointId },
+                        { anchor: second.anchor, id: second.point.pointId },
+                        axis,
+                        input.annotationPlacement,
+                      )),
                 },
               ],
             }
@@ -2933,7 +3159,6 @@ const sketchConstraintDefinitions = [
       label: "Horizontal distance",
       unit: "mm",
       min: 0.01,
-      defaultValue: 10,
     },
     resolveTarget(definition, target) {
       return resolvePointTarget(definition, target);
@@ -2944,6 +3169,12 @@ const sketchConstraintDefinitions = [
         unit: "mm",
         fixedReferenceKind: "horizontal",
       });
+    },
+    measureValue(selectedTargets) {
+      const [first, second] = selectedTargets;
+      return first && second
+        ? measurePointPairDistance(first.anchor, second.anchor, "horizontal")
+        : null;
     },
     createCommitContribution(input) {
       const [first, second] = input.selectedTargets;
@@ -2962,12 +3193,13 @@ const sketchConstraintDefinitions = [
               dimensionId: input.createDimensionId("horizontal-distance"),
               kind: "horizontalDistance",
               label: `Horizontal distance ${input.sequence}`,
-              pointIds: [first.point.pointId, second.point.pointId],
               value: input.value,
-              annotationPlacement:
-                input.annotationPlacement?.kind === "dimensionLine"
-                  ? input.annotationPlacement
-                  : undefined,
+              ...orderPointPairAlongAxis(
+                { anchor: first.anchor, id: first.point.pointId },
+                { anchor: second.anchor, id: second.point.pointId },
+                "horizontal",
+                input.annotationPlacement,
+              ),
             },
           ],
         };
@@ -3039,7 +3271,6 @@ const sketchConstraintDefinitions = [
       label: "Vertical distance",
       unit: "mm",
       min: 0.01,
-      defaultValue: 10,
     },
     resolveTarget(definition, target) {
       return resolvePointTarget(definition, target);
@@ -3050,6 +3281,12 @@ const sketchConstraintDefinitions = [
         unit: "mm",
         fixedReferenceKind: "vertical",
       });
+    },
+    measureValue(selectedTargets) {
+      const [first, second] = selectedTargets;
+      return first && second
+        ? measurePointPairDistance(first.anchor, second.anchor, "vertical")
+        : null;
     },
     createCommitContribution(input) {
       const [first, second] = input.selectedTargets;
@@ -3068,12 +3305,13 @@ const sketchConstraintDefinitions = [
               dimensionId: input.createDimensionId("vertical-distance"),
               kind: "verticalDistance",
               label: `Vertical distance ${input.sequence}`,
-              pointIds: [first.point.pointId, second.point.pointId],
               value: input.value,
-              annotationPlacement:
-                input.annotationPlacement?.kind === "dimensionLine"
-                  ? input.annotationPlacement
-                  : undefined,
+              ...orderPointPairAlongAxis(
+                { anchor: first.anchor, id: first.point.pointId },
+                { anchor: second.anchor, id: second.point.pointId },
+                "vertical",
+                input.annotationPlacement,
+              ),
             },
           ],
         };
@@ -3140,13 +3378,15 @@ const sketchConstraintDefinitions = [
       label: "Radius",
       unit: "mm",
       min: 0.01,
-      defaultValue: 5,
     },
     resolveTarget(definition, target) {
       return resolveCircleTarget(definition, target);
     },
     buildPreview(input) {
       return buildRadiusPreview(input);
+    },
+    measureValue(selectedTargets) {
+      return selectedTargets[0]?.circle?.radius ?? null;
     },
     createCommitContribution(input) {
       const [circle] = input.selectedTargets;

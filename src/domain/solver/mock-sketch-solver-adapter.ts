@@ -44,6 +44,7 @@ import {
 import {
   compileSketchSolveProgram,
   createCompiledSketchSolveSession,
+  unsatisfiedRequirementDiagnostics,
   updateCompiledSketchSolveSession,
   type SketchCompiledSolveSession,
 } from "@/contracts/sketch/solver-core";
@@ -1288,6 +1289,14 @@ function solveDefinition(
         } as const;
     }
   });
+  // T13c (D7, A-7): the core solver's targeted unsatisfied-requirement warnings.
+  validationDiagnostics.push(
+    ...unsatisfiedRequirementDiagnostics(
+      definition,
+      constraintStatuses,
+      dimensionStatuses,
+    ),
+  );
   const errorCount = validationDiagnostics.filter(
     (diagnostic) => diagnostic.severity === "error",
   ).length;

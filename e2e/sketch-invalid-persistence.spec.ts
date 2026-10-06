@@ -87,8 +87,12 @@ test("nonconverged authored sketch finishes, saves, reopens, and re-enters with 
     .getByRole("button", { name: /Select .*Double-click to reopen\./ })
     .first();
   await sketchButton.dblclick();
+  // T13c (review R-2): the reopened sketch's status explains the conflict.
   await expect(
-    page.getByRole("status").filter({ hasText: /residual|invalid/i }),
+    page.getByRole("status").filter({
+      hasText:
+        "Conflicting point requirement A, Conflicting point requirement B conflict. The sketch is invalid; profiles from it are blocked.",
+    }),
   ).toBeVisible({ timeout: 15_000 });
   await page
     .locator('button[aria-label="Finish Sketch"], button[data-tool-tooltip="Finish Sketch"]')
@@ -109,7 +113,11 @@ test("nonconverged authored sketch finishes, saves, reopens, and re-enters with 
     .getByRole("button", { name: /Select .*Double-click to reopen\./ })
     .first()
     .dblclick();
+  // T13c (review R-2): the reopened sketch's status explains the conflict.
   await expect(
-    page.getByRole("status").filter({ hasText: /residual|invalid/i }),
+    page.getByRole("status").filter({
+      hasText:
+        "Conflicting point requirement A, Conflicting point requirement B conflict. The sketch is invalid; profiles from it are blocked.",
+    }),
   ).toBeVisible({ timeout: 15_000 });
 });

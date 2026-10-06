@@ -13,6 +13,7 @@ import { runEditorEffect } from "./effect-registry";
 import { querySketchEditIntersectionsForTest } from "@/domain/editor/state-machine-test-builder";
 import {
   acceptSketchDraw,
+  beginSketchAnnotationEdit,
   beginSketchTool,
   createNewSketchSession,
   finalizeSketchDraw,
@@ -1988,4 +1989,115 @@ describe("T12e: tangent reset-to-automatic and set-to-zero actions", () => {
 
     expect(undoLabels(f), "No-op records nothing.").toEqual(labelsBefore);
   });
+});
+
+// T13c D6 (application seam, action owner): confirming a conflicting value
+// in an existing dimension's edit popup is one authored action that leaves
+// the sketch invalid; Undo restores the solved sketch, Redo the invalid edit.
+test("T13c D6: a confirmed conflicting annotation edit is one invalid action; Undo restores a solved sketch", async () => {
+  const f = await fixture();
+  let session = acceptSketchDraw(
+    startSketchDraw(beginSketchTool(f.session, "rectangle"), [20, 1]),
+    [24, 4],
+  );
+  const side = (label: string) =>
+    session.definition.entities.find((entity) => entity.label.endsWith(label))!
+      .target;
+  for (const label of ["bottom", "top"])
+    session = patchSketchConstraintValue(
+      patchSketchConstraintValue(
+        selectSketchConstraintTarget(
+          beginSketchTool(session, "dimensionDistance"),
+          side(label),
+        ),
+        { value: 4 },
+      ),
+      { intent: "commitConstraintValue" },
+    );
+  f.apply({ type: "selection.cleared" }, session);
+  expect(f.session.liveSolve?.accepted, "premise: solved").toBe(true);
+  const before = projection(f.session);
+  const undoDepth = f.session.actionHistory?.undo.length ?? 0;
+  const top = f.session.definition.dimensions[1]!;
+  const edited = patchSketchConstraintValue(
+    patchSketchConstraintValue(
+      beginSketchAnnotationEdit(f.session, {
+        kind: "dimension",
+        sketchId: f.session.actionContextId,
+        dimensionId: top.dimensionId,
+      } as Parameters<typeof beginSketchAnnotationEdit>[1]),
+      { value: "6" },
+    ),
+    { intent: "commitAnnotationValue" },
+  );
+  f.apply({ type: "selection.cleared" }, edited);
+  const after = projection(f.session);
+  expect(after).not.toEqual(before);
+  expect(f.session.actionHistory?.undo.length).toBe(undoDepth + 1);
+  expect(f.session.liveSolve?.accepted, "the edit leaves it invalid").toBe(
+    false,
+  );
+  expect(f.session.validationMessage).toContain("conflicts with");
+  const undone = f.apply({ type: "history.undoRequested" });
+  expect(projection(undone)).toEqual(before);
+  expect(undone.liveSolve?.accepted, "Undo restores a solved sketch").toBe(
+    true,
+  );
+  const redone = f.apply({ type: "history.redoRequested" });
+  expect(projection(redone)).toEqual(after);
+  expect(redone.liveSolve?.accepted).toBe(false);
+});
+
+// T13c review R-2: Undo/Redo show the same invalid-sketch feedback as the
+// commit: Redo of a conflicting edit explains the conflict again.
+test("T13c R-2: Redo of a conflicting annotation edit shows the conflict explanation", async () => {
+  const f = await fixture();
+  let session = acceptSketchDraw(
+    startSketchDraw(beginSketchTool(f.session, "rectangle"), [20, 1]),
+    [24, 4],
+  );
+  const side = (label: string) =>
+    session.definition.entities.find((entity) => entity.label.endsWith(label))!
+      .target;
+  for (const label of ["bottom", "top"])
+    session = patchSketchConstraintValue(
+      patchSketchConstraintValue(
+        selectSketchConstraintTarget(
+          beginSketchTool(session, "dimensionDistance"),
+          side(label),
+        ),
+        { value: 4 },
+      ),
+      { intent: "commitConstraintValue" },
+    );
+  f.apply({ type: "selection.cleared" }, session);
+  const top = f.session.definition.dimensions[1]!;
+  f.apply(
+    { type: "selection.cleared" },
+    patchSketchConstraintValue(
+      patchSketchConstraintValue(
+        beginSketchAnnotationEdit(f.session, {
+          kind: "dimension",
+          sketchId: f.session.actionContextId,
+          dimensionId: top.dimensionId,
+        } as Parameters<typeof beginSketchAnnotationEdit>[1]),
+        { value: "6" },
+      ),
+      { intent: "commitAnnotationValue" },
+    ),
+  );
+  const explanation = f.session.validationMessage;
+  expect(explanation, "premise: the commit explains").toMatch(
+    /conflicts? with .*The sketch is invalid; profiles from it are blocked\./,
+  );
+  expect(f.apply({ type: "history.undoRequested" }).validationMessage).toBe(
+    null,
+  );
+  const redone = f.apply({ type: "history.redoRequested" });
+  expect(redone.validationMessage).toMatch(
+    new RegExp(`^${top.label} \\(6 mm\\)|, ${top.label} \\(6 mm\\)`),
+  );
+  expect(redone.validationMessage).toContain(
+    "The sketch is invalid; profiles from it are blocked. Change or delete one of them, or Undo.",
+  );
 });

@@ -655,7 +655,11 @@ test("EditorEventLoop Undo and Redo recompute equivalent invalid diagnostics and
   ).toBe(true);
   expect(isSketchProfileOutputCurrent(invalidValidity)).toBe(false);
   const invalidFeedback = getSketchSessionPreviewLabel(currentSession());
-  expect(invalidFeedback).toMatch(/residual/i);
+  // T13c (D7, review R-2): the invalid feedback is the conflict explanation
+  // naming both conflicting requirements, not the raw residual.
+  expect(invalidFeedback).toBe(
+    "Conflicting event-loop point A, Conflicting event-loop point B conflict. The sketch is invalid; profiles from it are blocked. Change or delete one of them, or Undo.",
+  );
 
   applyDefinitionAction(2);
   expect(

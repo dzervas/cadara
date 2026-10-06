@@ -10,6 +10,7 @@ import { stripReferenceImageRuntimeState } from "@/domain/reference-image-calibr
 import type { SketchSessionState } from "./types";
 import {
   appendDefinition,
+  getSketchSessionInvalidFeedback,
   mergeDerivedProjectedReferences,
   rebuildSessionCommitRequest,
   withLiveSolveBasis,
@@ -123,7 +124,7 @@ export function updateSketchReferenceProjection(
     ],
   );
   const projectionDiagnostics = [...diagnostics, ...referenceDiagnostics];
-  return withLiveSolveBasis(
+  const based = withLiveSolveBasis(
     {
       ...session,
       projectedReferences: mergedProjectedReferences,
@@ -135,4 +136,9 @@ export function updateSketchReferenceProjection(
     },
     session.definition,
   );
+  // T13c (R-2): a (re)opened invalid sketch says why, as after Undo/Redo.
+  return based.validationMessage === null &&
+    based.liveRegions.status === "unavailable"
+    ? { ...based, validationMessage: getSketchSessionInvalidFeedback(based) }
+    : based;
 }

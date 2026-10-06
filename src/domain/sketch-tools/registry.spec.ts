@@ -1384,6 +1384,12 @@ const primitiveRelationshipRows: readonly {
         (side) =>
           `tangent ${side}, Circumscribed Polygon 1 construction circle relation=external`,
       ),
+      // T13c (A-2): vertices on a concentric construction circumcircle keep
+      // the tangent lengths equal (regular under drags).
+      ...[1, 2, 3, 4, 5, 6].map(
+        (index) =>
+          `pointOnCurve Circumscribed Polygon 1 vertex ${index}, Circumscribed Polygon 1 construction circumcircle`,
+      ),
     ],
   },
   {

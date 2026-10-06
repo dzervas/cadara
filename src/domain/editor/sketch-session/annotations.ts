@@ -63,7 +63,7 @@ import type {
   SketchSessionState,
 } from "./types";
 import {
-  ANNOTATION_EDIT_SOLVE_BLOCKED_MESSAGE,
+  getSketchSessionInvalidFeedback,
   withLiveSolveBasis,
   resolveSketchDefinitionForSolve,
   getTargetKey,
@@ -562,10 +562,8 @@ export function commitSketchAnnotationEditValue(
     };
   }
 
-  const nextFullDefinition = solved.definition;
-  const nextDefinition = nextFullDefinition;
-
-  return withLiveSolveBasis(
+  const nextDefinition = solved.definition;
+  const committed = withLiveSolveBasis(
     {
       ...session,
       definition: nextDefinition,
@@ -579,8 +577,22 @@ export function commitSketchAnnotationEditValue(
       commitRequest: rebuildSessionCommitRequest(session, nextDefinition),
     },
     nextDefinition,
-    solved.solvedSnapshot,
+    solved.kind === "accepted" ? solved.solvedSnapshot : undefined,
   );
+
+  // T13c (D6, D7): a confirmed conflicting value is retained as authored and
+  // leaves the sketch invalid; the status text explains which requirements
+  // conflict and how to recover.
+  return {
+    ...committed,
+    validationMessage: committed.liveSolve?.accepted
+      ? null
+      : getSketchSessionInvalidFeedback(committed, [
+          edit.target.kind === "constraint"
+            ? edit.target.constraintId
+            : edit.target.dimensionId,
+        ]),
+  };
 }
 
 export function solveEditedAnnotationDefinition(
@@ -608,7 +620,7 @@ export function solveEditedAnnotationDefinition(
     projectedReferences,
     tolerances,
     ...derivation,
-    partialSolvePolicy: "failOnConflict",
+    partialSolvePolicy: "bestEffort",
   });
   const constraintsSatisfied = solved.solvedSnapshot.constraintStatuses.every(
     (status) => isAcceptedConstraintStatus(status.status),
@@ -622,11 +634,10 @@ export function solveEditedAnnotationDefinition(
     !constraintsSatisfied ||
     !dimensionsSatisfied
   ) {
-    return {
-      kind: "blocked" as const,
-      message:
-        solved.diagnostics[0]?.message ?? ANNOTATION_EDIT_SOLVE_BLOCKED_MESSAGE,
-    };
+    // T13c (D6): the same retention rule as creating a conflicting
+    // dimension: the authored edit is kept unchanged and the sketch reads
+    // invalid until the user corrects or undoes it.
+    return { kind: "retained" as const, definition };
   }
 
   return {

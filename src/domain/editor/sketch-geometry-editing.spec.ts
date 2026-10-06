@@ -5927,6 +5927,110 @@ test("T13a B-1: a centre-fixed circumscribed hexagon does not drift on a fresh s
   expect(drift, "no point drifts on the fresh solve").toBeLessThan(1e-6);
 });
 
+// T13c A-2 (logic lane, session drag seam): a regular polygon stays regular
+// under a vertex drag. Equal sides tangent to the incircle alone let the
+// tangent lengths alternate (a, s − a); the circumscribed polygon's vertices
+// also lie on a concentric construction circumcircle. A rectangle drawn
+// first makes the sketch multi-entity.
+function polygonRegularityAfterVertexDrag(
+  toolId: "inscribedPolygon" | "circumscribedPolygon",
+  name: string,
+) {
+  let session = createNewSketchSession(
+    createStandardPlaneDefinition("xy"),
+    OCC_KERNEL_SETTINGS,
+  );
+  session = acceptSketchDraw(
+    startSketchDraw(beginSketchTool(session, "rectangle"), [10, 10]),
+    [14, 13],
+  );
+  session = acceptSketchDraw(
+    startSketchDraw(beginSketchTool(session, toolId), [1, 1]),
+    [3, 1],
+  );
+  // The polygon's label prefix ("<name> <sequence>").
+  const prefix = session.definition.points
+    .find(
+      (point) =>
+        point.label.startsWith(name) && point.label.endsWith(" center"),
+    )!
+    .label.replace(/ center$/, "");
+  const vertex = session.definition.points.find(
+    (point) => point.label === `${prefix} vertex 1`,
+  )!;
+  const target: [number, number] = [
+    vertex.position[0] - 0.3,
+    vertex.position[1] + 0.6,
+  ];
+  let dragging = beginSketchGeometryDrag(
+    beginSketchTool(session, "line"),
+    vertex.target,
+    vertex.position,
+  );
+  for (let step = 1; step < 8; step += 1)
+    dragging = updateSketchGeometryDrag(dragging, [
+      vertex.position[0] + (step / 8) * (target[0] - vertex.position[0]),
+      vertex.position[1] + (step / 8) * (target[1] - vertex.position[1]),
+    ]);
+  const released = finishSketchGeometryDrag(dragging, target);
+  const at = (label: string) =>
+    released.definition.points.find((point) => point.label === label)!.position;
+  const center = at(`${prefix} center`);
+  const vertices = [1, 2, 3, 4, 5, 6].map((index) =>
+    at(`${prefix} vertex ${index}`),
+  );
+  const sides = vertices.map((start, index) => {
+    const end = vertices[(index + 1) % 6]!;
+    const length = Math.hypot(end[0] - start[0], end[1] - start[1]);
+    const unit = [(end[0] - start[0]) / length, (end[1] - start[1]) / length];
+    // Distance along the side from its start to the foot of the centre.
+    const tangentLength =
+      (center[0] - start[0]) * unit[0]! + (center[1] - start[1]) * unit[1]!;
+    return { length, tangentLength };
+  });
+  const vertexRadii = vertices.map((point) =>
+    Math.hypot(point[0] - center[0], point[1] - center[1]),
+  );
+  const spread = (values: number[]) =>
+    Math.max(...values) - Math.min(...values);
+  return {
+    released,
+    vertexMoved: Math.hypot(
+      at(`${prefix} vertex 1`)[0] - vertex.position[0],
+      at(`${prefix} vertex 1`)[1] - vertex.position[1],
+    ),
+    lengthSpread: spread(sides.map((side) => side.length)),
+    tangentLengthSpread: spread(sides.map((side) => side.tangentLength)),
+    radiusSpread: spread(vertexRadii),
+  };
+}
+
+test("T13c A-2: a circumscribed hexagon stays regular under a vertex drag (tangent lengths do not alternate)", () => {
+  const result = polygonRegularityAfterVertexDrag(
+    "circumscribedPolygon",
+    "Circumscribed Polygon",
+  );
+  expect(result.released.liveSolve?.accepted).toBe(true);
+  expect(result.vertexMoved, "premise: the vertex moved").toBeGreaterThan(0.1);
+  expect(result.lengthSpread, "equal sides").toBeLessThan(1e-4);
+  expect(result.tangentLengthSpread, "equal tangent lengths").toBeLessThan(
+    1e-4,
+  );
+  expect(result.radiusSpread, "vertices on one circle").toBeLessThan(1e-4);
+});
+
+test("T13c A-2: an inscribed hexagon (equal chords on a circle) stays regular under a vertex drag", () => {
+  const result = polygonRegularityAfterVertexDrag(
+    "inscribedPolygon",
+    "Inscribed Polygon",
+  );
+  expect(result.released.liveSolve?.accepted).toBe(true);
+  expect(result.vertexMoved, "premise: the vertex moved").toBeGreaterThan(0.1);
+  expect(result.lengthSpread, "equal sides").toBeLessThan(1e-4);
+  expect(result.tangentLengthSpread, "symmetric sides").toBeLessThan(1e-4);
+  expect(result.radiusSpread, "vertices on one circle").toBeLessThan(1e-4);
+});
+
 // T12c R-6: handleSketchGeometryDragCancelled restores pre-drag state.
 test("T12c R-6: cancelSketchGeometryDrag during drag restores definition, clears activeDrag, keeps activeTool", () => {
   const def: SketchDefinition = {

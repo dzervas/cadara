@@ -3,9 +3,11 @@ import { describe, expect, test } from "vitest";
 
 import type { NeutralCurveQueryCapability } from "@/contracts/modeling/neutral-curve-query";
 import type {
+  ConstraintId,
   DocumentId,
   RequestId,
   SketchEntityId,
+  SketchPointId,
 } from "@/contracts/shared/ids";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import {
@@ -157,6 +159,101 @@ describe("querySketchEditIntersections adapters (T10g-1)", () => {
     expect(core.solvedSnapshot.dimensionStatuses[0]!.status).not.toBe(
       "unsatisfied",
     );
+  });
+
+  test("T13c D7 parity (A-7): core and mock emit one targeted solver-requirement-unsatisfied warning per unsatisfied requirement", async () => {
+    const sketch = makeSketchFixture();
+    sketch.point("a", 0, 0);
+    sketch.point("b", 1, 0);
+    sketch.point("c", 5, 5);
+    sketch.point("d", 6, 5);
+    sketch.line("other", "c", "d");
+    const definition = sketch.definition();
+    const point = (name: string) => `sketch_point_${name}` as SketchPointId;
+    const constraints = [
+      {
+        constraintId: "constraint_join" as ConstraintId,
+        kind: "coincident" as const,
+        label: "Join",
+        pointIds: [point("a"), point("b")] as const,
+      },
+      {
+        constraintId: "constraint_fix_a" as ConstraintId,
+        kind: "fixPoint" as const,
+        label: "Fix A",
+        pointId: point("a"),
+        position: [0, 0] as const,
+      },
+      {
+        constraintId: "constraint_fix_b" as ConstraintId,
+        kind: "fixPoint" as const,
+        label: "Fix B",
+        pointId: point("b"),
+        position: [1, 0] as const,
+      },
+    ];
+    const solve = {
+      contractVersion: CONTRACT_VERSION,
+      solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+      requestId: "request_solve" as RequestId,
+      documentId: DOCUMENT,
+      revisionId:
+        "rev_trim" as QuerySketchEditIntersectionsRequest["revisionId"],
+      sketchId:
+        "sketch_arrangement" as QuerySketchEditIntersectionsRequest["sketchId"],
+      plane: DEFAULT_MOCK_SKETCH_PLANE_FRAME,
+      tolerances: {
+        coincidence: 1e-6,
+        angleRadians: 1e-6,
+        minimumSegmentLength: 1e-6,
+      },
+      modelingTolerance: 1e-3,
+      partialSolvePolicy: "bestEffort" as const,
+      definition: {
+        ...definition,
+        constraintIds: constraints.map((constraint) => constraint.constraintId),
+        constraints,
+      },
+      projectedReferences: [],
+    };
+    const core = await real(
+      createCertifiedNeutralCurveQueryCapabilityForTest(),
+    ).solveSketch(solve);
+    const mock = await new MockSketchSolverAdapter({
+      documentId: DOCUMENT,
+      revisionId: "rev_trim",
+      neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+    }).solveSketch(solve);
+    for (const [name, response] of [
+      ["core", core],
+      ["mock", mock],
+    ] as const) {
+      const unsatisfied = response.solvedSnapshot.constraintStatuses
+        .filter((entry) => entry.status === "unsatisfied")
+        .map((entry) => entry.constraintId);
+      expect(unsatisfied, `${name}: the join is unsatisfied`).toContain(
+        "constraint_join",
+      );
+      expect(
+        response.solvedSnapshot.diagnostics
+          .filter(
+            (diagnostic) =>
+              diagnostic.code === "solver-requirement-unsatisfied",
+          )
+          .map((diagnostic) => [diagnostic.severity, diagnostic.target]),
+        `${name}: one targeted warning per unsatisfied requirement`,
+      ).toEqual(
+        unsatisfied.map((constraintId) => [
+          "warning",
+          { kind: "constraint", constraintId },
+        ]),
+      );
+    }
+    expect(
+      core.solvedSnapshot.diagnostics.find(
+        (diagnostic) => diagnostic.code === "solver-requirement-unsatisfied",
+      )?.message,
+    ).toBe("Join is not satisfied within its authored tolerance.");
   });
 
   test("a request for another document is rejected before any query", async () => {

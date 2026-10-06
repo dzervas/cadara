@@ -5,8 +5,10 @@ import type {
   SketchPoint,
 } from "@/contracts/modeling/schema";
 import {
+  createLiteralAuthoredValue,
   getAuthoredFormText,
   getAuthoredLiteralValue,
+  type MaybeAuthoredValue,
 } from "@/contracts/modeling/authored-values";
 import type { DimensionId } from "@/contracts/shared/ids";
 import type {
@@ -41,6 +43,7 @@ import type {
 } from "./types";
 import {
   applySketchContribution,
+  getSketchSessionInvalidFeedback,
   createConstraintId,
   createDimensionId,
   createSketchDimensionRef,
@@ -60,6 +63,7 @@ import {
   applySolvedSketchToDefinition,
   addAnchorOffset,
 } from "./definition-patches";
+import { getConstraintDedupeKey } from "./tools";
 
 export function buildConstraintSelectionGuide(
   toolId: SketchConstraintToolId,
@@ -95,16 +99,24 @@ export function buildConstraintToolPresentation(
     authoring.selectedTargets,
     authoring.hoverTarget,
   );
+  const needsValue =
+    Boolean(valueSpec) &&
+    isSketchConstraintReadyForValue(definition, authoring.selectedTargets);
+  // T13c (D5): until the annotation is pinned (and the value input opens),
+  // the preview reads the measured quantity at the current pointer.
   const overlays = definition.buildPreview({
     selectedTargets: authoring.selectedTargets,
     hoverTarget: authoring.hoverTarget,
     pointer: authoring.pointer,
-    value: getAuthoredLiteralValue(authoring.pendingValue),
+    value:
+      needsValue && !authoring.isPreviewPinned
+        ? (definition.measureValue?.(
+            authoring.selectedTargets,
+            authoring.pointer,
+          ) ?? null)
+        : getAuthoredLiteralValue(authoring.pendingValue),
     annotationPlacement: authoring.pendingAnnotationPlacement,
   });
-  const needsValue =
-    Boolean(valueSpec) &&
-    isSketchConstraintReadyForValue(definition, authoring.selectedTargets);
   const promptText = needsValue
     ? authoring.isPreviewPinned
       ? `Enter ${valueSpec?.label.toLowerCase() ?? "value"}`
@@ -119,7 +131,10 @@ export function buildConstraintToolPresentation(
           value:
             authoring.pendingValue === null
               ? null
-              : getAuthoredFormText(authoring.pendingValue),
+              : getAuthoredFormText(
+                  authoring.pendingValue,
+                  formatMeasuredValueText,
+                ),
           unit: valueSpec.unit,
           min: valueSpec.min,
           confirmLabel: "Commit",
@@ -302,14 +317,13 @@ export function activateSketchConstraintTool(
   session: SketchSessionState,
   toolId: SketchConstraintToolId,
 ): SketchSessionState {
-  const definition = getSketchConstraintDefinition(toolId);
   const authoring: SketchConstraintAuthoringState = {
     toolId,
     selectedTargets: [],
     hoverTarget: null,
     pointer: null,
     isPreviewPinned: false,
-    pendingValue: normalizeConstraintValue(definition.valueSpec?.defaultValue),
+    pendingValue: null,
     pendingAnnotationPlacement: null,
   };
 
@@ -481,6 +495,11 @@ export function pinSketchConstraintPreview(
     ...authoring,
     pointer: point ?? authoring.pointer,
     isPreviewPinned: true,
+    pendingValue: measureSketchConstraintValue(
+      session,
+      authoring,
+      point ?? authoring.pointer,
+    ),
     pendingAnnotationPlacement: inferDimensionAnnotationPlacement(
       authoring.selectedTargets,
       point ?? authoring.pointer,
@@ -526,10 +545,15 @@ export function patchSketchConstraintValue(
       typeof patch.point[1] === "number"
         ? ([patch.point[0], patch.point[1]] as SketchPoint)
         : authoring.pointer;
+    const pins = readyForValue && !authoring.isPreviewPinned;
     const nextAuthoring = {
       ...authoring,
       pointer: point,
       isPreviewPinned: readyForValue ? true : authoring.isPreviewPinned,
+      // T13c (D5): the value input opens prefilled with the measured value.
+      pendingValue: pins
+        ? measureSketchConstraintValue(session, authoring, point)
+        : authoring.pendingValue,
       pendingAnnotationPlacement: inferDimensionAnnotationPlacement(
         authoring.selectedTargets,
         point,
@@ -666,10 +690,41 @@ export function commitSketchConstraintAuthoring(
     createDimensionId: (suffix) =>
       createDimensionId(session.sequence + 1, suffix),
   });
-  if (
-    (contribution.constraints?.length ?? 0) === 0 &&
-    (contribution.dimensions?.length ?? 0) === 0
-  ) {
+  // T13c (D8): a constraint identical to an existing one (same dedupe key)
+  // is a no-op; it is not authored again.
+  const existingByKey = new Map(
+    session.definition.constraints.map((constraint) => [
+      getConstraintDedupeKey(constraint),
+      constraint,
+    ]),
+  );
+  const constraints = (contribution.constraints ?? []).filter(
+    (constraint) => !existingByKey.has(getConstraintDedupeKey(constraint)),
+  );
+  const dimensions = contribution.dimensions ?? [];
+  if (constraints.length === 0 && dimensions.length === 0) {
+    const duplicates = (contribution.constraints ?? []).flatMap(
+      (constraint) =>
+        existingByKey.get(getConstraintDedupeKey(constraint)) ?? [],
+    );
+    const refusal =
+      duplicates.length > 0
+        ? `Already constrained: ${[...new Set(duplicates.map((constraint) => constraint.label))].join(", ")}`
+        : (contribution.refusal ?? null);
+
+    if (refusal) {
+      // The tool restarts with nothing authored and says why.
+      const restarted = activateSketchConstraintTool(session, authoring.toolId);
+      return {
+        ...restarted,
+        validationMessage: refusal,
+        toolPresentation: buildConstraintToolPresentation(
+          restarted.constraintAuthoring!,
+          refusal,
+        ),
+      };
+    }
+
     const validationMessage = `${definition.metadata.name} needs the supported target combination.`;
 
     return {
@@ -685,7 +740,8 @@ export function commitSketchConstraintAuthoring(
   const history = applySketchContribution(session, {
     points: [],
     entities: [],
-    ...contribution,
+    constraints,
+    dimensions,
   });
   const solvedDefinition = solveCommittedConstraintDefinition(
     history.definition,
@@ -695,7 +751,7 @@ export function commitSketchConstraintAuthoring(
     getSketchSessionDerivationSettings(session),
   );
 
-  return withLiveSolveBasis(
+  const committed = withLiveSolveBasis(
     {
       ...session,
       toolStagedEntities: [],
@@ -717,4 +773,59 @@ export function commitSketchConstraintAuthoring(
     solvedDefinition.definition,
     solvedDefinition.solvedSnapshot,
   );
+
+  // T13c (D7): a commit that leaves requirements unsatisfied is retained and
+  // explained (the new requirement named first); otherwise no message.
+  return {
+    ...committed,
+    validationMessage: committed.liveSolve?.accepted
+      ? null
+      : getSketchSessionInvalidFeedback(committed, [
+          ...constraints.map((constraint) => constraint.constraintId),
+          ...dimensions.map((dimension) => dimension.dimensionId),
+        ]),
+  };
+}
+
+/**
+ * T13c (D5): the measured quantity of the authoring targets, read from the
+ * live solve's positions when it is current (accepted, or the best-effort
+ * solve the viewport displays), else from the authored definition.
+ */
+function measureSketchConstraintValue(
+  session: SketchSessionState,
+  authoring: SketchConstraintAuthoringState,
+  pointer: SketchPoint | null,
+): MaybeAuthoredValue<number> | null {
+  const definition = getSketchConstraintDefinition(authoring.toolId);
+  if (!definition.measureValue) {
+    return authoring.pendingValue;
+  }
+  const liveSolve = session.liveSolve;
+  const basis =
+    liveSolve && liveSolve.sourceDefinition === session.definition
+      ? applySolvedSketchToDefinition(
+          session.definition,
+          liveSolve.solvedSnapshot,
+          getSketchSessionDerivationSettings(session),
+        )
+      : session.definition;
+  const targets = authoring.selectedTargets.map(
+    (entry) =>
+      resolveSketchConstraintTarget(
+        authoring.toolId,
+        basis,
+        entry.target,
+        session.projectedReferences,
+      ) ?? entry,
+  );
+  const measured = definition.measureValue(targets, pointer);
+  return measured === null || !Number.isFinite(measured)
+    ? null
+    : createLiteralAuthoredValue(measured);
+}
+
+/** Display text of a measured prefill: the exact value is committed. */
+function formatMeasuredValueText(value: number) {
+  return String(Number(value.toFixed(6)));
 }
