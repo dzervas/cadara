@@ -1840,6 +1840,29 @@ export function normalizeConstraintValue(value: unknown) {
     : createExpressionAuthoredValue(trimmed);
 }
 
+/**
+ * T13b (D3, D29): an edit operation parameter (Offset distance, Fillet
+ * radius, Chamfer distance, Slot width, pattern and transform values) from a
+ * tool patch value. A number is kept (NaN clears it); a string is trimmed and
+ * read with a finite `Number(...)`. Empty clears the value. Operation
+ * parameters are plain numbers (no expressions), so any other string clears
+ * it with a message naming `field`.
+ */
+export function parseOperationParameter(
+  value: unknown,
+  field: string,
+): { readonly value: number | null; readonly message: string | null } {
+  if (typeof value === "number")
+    return { value: Number.isNaN(value) ? null : value, message: null };
+  if (typeof value !== "string") return { value: null, message: null };
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return { value: null, message: null };
+  const numericValue = Number(trimmed);
+  return Number.isFinite(numericValue)
+    ? { value: numericValue, message: null }
+    : { value: null, message: `Enter a number for the ${field}.` };
+}
+
 export function getTargetKey(target: PrimitiveRef) {
   switch (target.kind) {
     case "sketchPoint":

@@ -6603,3 +6603,86 @@ test("T13a2 R-1: the release after a blocked fillet collapse commits the last di
     "no committed jump from the last displayed frame",
   ).toBeLessThanOrEqual(1e-4);
 });
+
+function t13bRectangle() {
+  const rectangle = acceptSketchDraw(
+    startSketchDraw(
+      beginSketchTool(
+        createNewSketchSession(
+          createStandardPlaneDefinition("xy"),
+          OCC_KERNEL_SETTINGS,
+        ),
+        "rectangle",
+      ),
+      [0, 0],
+    ),
+    [4, 2],
+  );
+  const lines = rectangle.definition.entities.filter(
+    (entity) => entity.kind === "lineSegment",
+  );
+  return {
+    rectangle,
+    line: lines[0]!.target,
+    corner: [lines[0]!.target, lines[1]!.target],
+  };
+}
+
+test.each([
+  { toolId: "offset", corner: false, field: "distance" },
+  { toolId: "sketchFillet", corner: true, field: "radius" },
+  { toolId: "sketchChamfer", corner: true, field: "distance" },
+  { toolId: "sketchSlot", corner: false, field: "width" },
+  { toolId: "sketchLinearPattern", corner: false, field: "distance" },
+  { toolId: "sketchCircularPattern", corner: false, field: "angle" },
+  { toolId: "sketchTransform", corner: false, field: "distance" },
+] as const)(
+  "T13b A6 (D29): $toolId: a typed floating-input string sets the value; empty clears it; a non-number clears it with a message naming the $field",
+  ({ toolId, corner, field }) => {
+    const { rectangle, line, corner: cornerTargets } = t13bRectangle();
+    let selected = beginSketchTool(rectangle, toolId);
+    for (const target of corner ? cornerTargets : [line])
+      selected = selectSketchEditToolTarget(selected, target);
+    const valueOf = (session: SketchSessionState) =>
+      toolId === "offset"
+        ? session.activeEditTool!.offsetDistance
+        : session.activeEditTool!.toolValue;
+    const messages = (session: SketchSessionState) => [
+      session.validationMessage,
+      ...(session.toolPresentation?.validation ?? []).map(
+        (entry) => entry.message,
+      ),
+    ];
+
+    const typed = patchSketchEditToolValue(selected, { value: " 0.25 " });
+    expect(valueOf(typed), `${toolId}: "0.25" sets the value`).toBe(0.25);
+    expect(typed.validationMessage, `${toolId}: valid`).toBeNull();
+    expect(
+      typed.toolStagedEntities.length,
+      `${toolId}: previews the typed value`,
+    ).toBeGreaterThan(0);
+
+    const cleared = patchSketchEditToolValue(typed, { value: "" });
+    expect(valueOf(cleared), `${toolId}: "" clears the value`).toBeNull();
+    expect(
+      valueOf(patchSketchEditToolValue(typed, { value: "  " })),
+      `${toolId}: blank clears the value (never Number("  ") = 0)`,
+    ).toBeNull();
+    expect(
+      messages(cleared),
+      `${toolId}: "" is not a parse error`,
+    ).not.toContain(`Enter a number for the ${field}.`);
+
+    const invalid = patchSketchEditToolValue(typed, { value: "w + 1" });
+    expect(valueOf(invalid), `${toolId}: a non-number clears it`).toBeNull();
+    expect(messages(invalid), `${toolId}: the message names the field`).toEqual(
+      [`Enter a number for the ${field}.`, `Enter a number for the ${field}.`],
+    );
+
+    const numeric = patchSketchEditToolValue(invalid, { value: 0.5 });
+    expect(valueOf(numeric), `${toolId}: the panel's number still works`).toBe(
+      0.5,
+    );
+    expect(numeric.validationMessage).toBeNull();
+  },
+);

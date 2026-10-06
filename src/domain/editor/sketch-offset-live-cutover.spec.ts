@@ -71,8 +71,11 @@ import {
   finishSketchGeometryDrag,
   getSketchSessionDerivedValidity,
   getSketchSessionDisplayRenderables,
+  hasAcceptedLiveSolveOfDefinition,
+  patchSketchConstraintValue,
   patchSketchEditToolValue,
   publishSketchLiveRegions,
+  selectSketchConstraintTarget,
   selectSketchEditToolTarget,
   startSketchDraw,
   updateSketchGeometryDrag,
@@ -135,6 +138,7 @@ import {
   withoutFilletRelationships,
 } from "@/contracts/sketch/offset-chain.fixtures";
 import {
+  applySketchContribution,
   createSessionCommitFactories,
   rebuildSessionForDefinition,
   withLiveSolveBasis,
@@ -8157,4 +8161,338 @@ describe("T12f B13: drag driving an offset line output below \u03c4", () => {
       "B13: the offset must report derived-offset-joint-unsatisfied.",
     ).toBe("derived-offset-joint-unsatisfied");
   });
+});
+
+/**
+ * T13b (B2): a saved sketch whose rectangle carries a Fillet authored before
+ * T08b-g7-F (documents are not migrated) and a line Distance dimension
+ * authored with the Dimension tool as the document variable `w`.
+ */
+function savedVariableFilletSketch() {
+  let session = acceptSketchDraw(
+    startSketchDraw(beginSketchTool(newSession(), "rectangle"), [0, 0]),
+    [2, 1],
+  );
+  const lines = session.definition.entities
+    .filter((entity) => entity.kind === "lineSegment")
+    .map((entity) => entity.entityId);
+  const filleted = createSketchFilletMutation({
+    definition: session.definition,
+    entityIds: [lines[0]!, lines[1]!],
+    radius: 0.2,
+    sequence: 90,
+    factories: createSessionCommitFactories(90, session.sketchId!),
+  });
+  if (!filleted.valid || !filleted.definition)
+    throw new Error(`fillet: ${filleted.message}`);
+  session = rebuildSessionForDefinition(session, {
+    definition: withoutFilletRelationships(filleted.definition),
+  });
+  const line = session.definition.entities.find(
+    (entity) => entity.entityId === lines[0],
+  );
+  if (line?.kind !== "lineSegment") throw new Error("Expected a line.");
+  const at = (pointId: SketchPointId) =>
+    session.definition.points.find((point) => point.pointId === pointId)!
+      .position;
+  const [a, b] = [at(line.startPointId), at(line.endPointId)];
+  const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  session = dimensionLine(
+    { ...session, documentVariables: [variableW(length)] },
+    line.entityId,
+    "w",
+  );
+  expect(session.validationMessage, "premise: `w` is authored").toBeNull();
+  return { saved: session, line: line.entityId, length };
+}
+
+const variableW = (value: number) => ({
+  variableId: "variable_w" as never,
+  name: "w",
+  valueText: String(value),
+});
+
+function dimensionLine(
+  session: SketchSessionState,
+  lineId: SketchEntityId,
+  value: string,
+) {
+  const line = session.definition.entities.find(
+    (entity) => entity.entityId === lineId,
+  )!;
+  return patchSketchConstraintValue(
+    patchSketchConstraintValue(
+      selectSketchConstraintTarget(
+        beginSketchTool(session, "dimensionDistance"),
+        line.target,
+      ),
+      { value },
+    ),
+    { intent: "commitConstraintValue" },
+  );
+}
+
+/**
+ * The user changed `w` in the document and reopens the sketch through the
+ * editor's normal entry (`effect.sketchSessionOpened` → `enterSketchEditing`,
+ * with the document's variables as `openSketchSessionFromSelection` sets them).
+ */
+function reopenWithVariable(saved: SketchSessionState, w: number) {
+  const live = saved.liveSolve!;
+  const raw = createSketchSessionFromSnapshot(
+    {
+      sketchId: saved.actionContextId,
+      label: "Sketch T13b",
+      plane: saved.plane,
+      ownerFeatureId: null,
+      sketch: {
+        definition: live.sourceDefinition,
+        solvedSnapshot: live.solvedSnapshot,
+        regions: saved.liveRegions.regions,
+        projectedReferences: [],
+        derivedValidity: getSketchSessionDerivedValidity(saved),
+      },
+    } as never,
+    OCC_KERNEL_SETTINGS,
+  );
+  const command: SelectionCommandEditorState = {
+    ...initialEditorState,
+    kind: "selectionCommand",
+    mode: "part",
+    document: { documentId: "doc_workspace", revisionId: "rev_0001" },
+    command: {
+      commandSessionId: "command_t13b",
+      toolId: "sketch",
+      phase: "collecting",
+    },
+    pendingRequestId: "request_t13b_open",
+  };
+  const opened = transitionEditorState(command, {
+    type: "effect.sketchSessionOpened",
+    requestId: "request_t13b_open",
+    documentId: "doc_workspace",
+    revisionId: "rev_0001",
+    commandSessionId: "command_t13b",
+    session: { ...raw, documentVariables: [variableW(w)] },
+  });
+  if (opened.state.kind !== "editingSketch")
+    throw new Error("Expected sketch state.");
+  return opened.state.session;
+}
+
+/** The largest distance between an authored point and its live solved position. */
+function authoredToSolved(session: SketchSessionState) {
+  const solved = new Map(
+    session.liveSolve!.solvedSnapshot.solvedPoints.map((point) => [
+      point.pointId,
+      point.solvedPosition,
+    ]),
+  );
+  return Math.max(
+    ...session.definition.points.map((point) => {
+      const position = solved.get(point.pointId)!;
+      return Math.hypot(
+        position[0] - point.position[0],
+        position[1] - point.position[1],
+      );
+    }),
+  );
+}
+
+/** Offset over the whole outline, staged and asked to commit (U-G3). */
+function offsetOutline(
+  session: SketchSessionState,
+  distance: number,
+  side: "left" | "right",
+) {
+  const seeds = session.definition.entities
+    .filter((entity) => entity.kind === "lineSegment" || entity.kind === "arc")
+    .map((entity) => entity.entityId);
+  let staged = beginSketchTool(session, "offset");
+  for (const entityId of seeds)
+    staged = selectSketchEditToolTarget(
+      staged,
+      staged.definition.entities.find((entity) => entity.entityId === entityId)!
+        .target,
+    );
+  staged = patchSketchEditToolValue(staged, {
+    intent: "setOffsetSide",
+    value: side,
+  });
+  staged = patchSketchEditToolValue(staged, { value: distance });
+  return { staged, committed: commitCertified(staged) };
+}
+
+describe("T13b B2: Offset creation seeds from the live accepted solve ([TECH] D28)", () => {
+  // d > 0 on the left is inward on this outline. Base (authored seeds):
+  // every outward cell fails the preview check with D5 "now needs an offset
+  // arc" and commits nothing (T13b-evidence/probes/b2-base.json).
+  const CELLS = [
+    { delta: 0.05, distance: 0.01, side: "right" },
+    { delta: 0.05, distance: 0.1, side: "right" },
+    { delta: 0.2, distance: 0.01, side: "right" },
+    { delta: 0.2, distance: 0.1, side: "right" },
+    { delta: 0.05, distance: 0.01, side: "left" },
+    { delta: 0.05, distance: 0.1, side: "left" },
+    { delta: 0.2, distance: 0.01, side: "left" },
+  ] as const;
+
+  test.each(CELLS)(
+    "reopened after `w` += $delta, Offset $distance on the $side: the preview certifies, the commit lands and the live round certifies (no D5 kink)",
+    ({ delta, distance, side }) => {
+      const { saved, length } = savedVariableFilletSketch();
+      const reopened = reopenWithVariable(saved, length + delta);
+      expect(
+        hasAcceptedLiveSolveOfDefinition(reopened),
+        "premise: the reopened live solve is accepted and current",
+      ).toBe(true);
+      expect(
+        authoredToSolved(reopened),
+        "premise: the authored positions are not the solved ones",
+      ).toBeGreaterThan(delta / 2);
+
+      const { committed } = offsetOutline(reopened, distance, side);
+      expect(committed.validationMessage).toBeNull();
+      const derivationId = offsetIdsOf(committed.definition)[0];
+      expect(derivationId, "the Offset is committed").toBeTruthy();
+      let current = committed;
+      let publication = livePublications(current)[0]!;
+      if (publication.status === "planChanged") {
+        current = publishSketchLiveRegions(current, [], [], [publication]);
+        publication = livePublications(current)[0]!;
+      }
+      expect(
+        publication.status,
+        `${publication.diagnostic?.code}: ${publication.diagnostic?.message}`,
+      ).toBe("certified");
+    },
+    120_000,
+  );
+
+  // Known pre-existing defect (routed; T13b review R-1): on a legacy fillet
+  // without its relationships (authored before T08b-g7-F), adding the Offset
+  // to the solve moves the unbound source arc ~0.02 even from a fully solved
+  // start, which changes the corner topology, so the preview check reports
+  // D5. It does not depend on the creation basis: it fails without a reopen
+  // (authored = solved) as well; a current fillet certifies.
+  test.each([
+    {
+      variant: "reopened with `w` += 0.2",
+      open: (saved: SketchSessionState, length: number) =>
+        reopenWithVariable(saved, length + 0.2),
+    },
+    {
+      variant: "`w` += 0.2 changed inside the sketch (no reopen)",
+      open: (saved: SketchSessionState, length: number, line: SketchEntityId) =>
+        dimensionLine(
+          { ...saved, documentVariables: [variableW(length + 0.2)] },
+          line,
+          "w",
+        ),
+    },
+  ])(
+    "known defect (routed): an inward Offset 0.1 on a legacy unbound fillet, $variant, fails D5 because the Offset's solve moves the source",
+    ({ open }) => {
+      const { saved, length, line } = savedVariableFilletSketch();
+      const reopened = open(saved, length, line);
+      expect(
+        hasAcceptedLiveSolveOfDefinition(reopened),
+        "premise: accepted and current",
+      ).toBe(true);
+      const { staged, committed } = offsetOutline(reopened, 0.1, "left");
+      const basis = staged.activeEditTool!.offsetPublication!.basis!;
+      const live = new Map(
+        reopened.liveSolve!.solvedSnapshot.solvedPoints.map((point) => [
+          point.pointId,
+          point.solvedPosition,
+        ]),
+      );
+      const sourceMove = Math.max(
+        ...basis.solvedSnapshot.solvedPoints.flatMap((point) => {
+          const other = live.get(point.pointId);
+          return other
+            ? [
+                Math.hypot(
+                  other[0] - point.solvedPosition[0],
+                  other[1] - point.solvedPosition[1],
+                ),
+              ]
+            : [];
+        }),
+      );
+      expect(sourceMove).toBeGreaterThan(0.02);
+      expect(offsetIdsOf(committed.definition)).toEqual([]);
+      expect(committed.validationMessage).toContain("now needs an offset arc");
+    },
+    120_000,
+  );
+
+  test("the committed authored definition is the reopened authored definition plus the Offset contribution (no solved positions written back)", () => {
+    const { saved, length } = savedVariableFilletSketch();
+    const reopened = reopenWithVariable(saved, length + 0.2);
+    expect(authoredToSolved(reopened)).toBeGreaterThan(0.1);
+    const { staged } = offsetOutline(reopened, 0.1, "right");
+    // commitCertified, keeping the contribution its completion commits.
+    let committed = patchSketchEditToolValue(staged, {
+      intent: "commitOffset",
+    });
+    let contribution =
+      committed.activeEditTool!.offsetPublication!.contribution;
+    while (committed.activeEditTool?.offsetPublication?.status === "pending") {
+      contribution = committed.activeEditTool.offsetPublication.contribution;
+      const { derivationId, publications } = previewPublications(committed);
+      committed = completeSketchOffsetPreviewPublication(
+        committed,
+        derivationId,
+        publications,
+      );
+    }
+    expect(offsetIdsOf(committed.definition)).toHaveLength(1);
+    expect(committed.definition).toEqual(
+      applySketchContribution(reopened, contribution).definition,
+    );
+    for (const point of reopened.definition.points)
+      expect(
+        committed.definition.points.find(
+          (candidate) => candidate.pointId === point.pointId,
+        )!.position,
+        `${point.label} keeps its authored position`,
+      ).toEqual(point.position);
+  }, 120_000);
+
+  test("without an accepted live solve the Offset keeps today's refusal and builds on the authored positions", () => {
+    const { saved, length, line } = savedVariableFilletSketch();
+    const reopened = reopenWithVariable(saved, length + 0.2);
+    // A deliberate conflicting second length on the same line (retained, T13).
+    const conflicting = dimensionLine(reopened, line, String(length + 1));
+    expect(conflicting.liveSolve!.accepted, "premise: not accepted").toBe(
+      false,
+    );
+    const { staged, committed } = offsetOutline(conflicting, 0.1, "right");
+    const publication = staged.activeEditTool!.offsetPublication!;
+    expect(publication.status).toBe("failed");
+    expect(publication.message).toBe(
+      "The offset can be checked only when every sketch constraint is solved.",
+    );
+    expect(offsetIdsOf(committed.definition)).toEqual([]);
+    const authored = createSketchOffsetDerivationContribution({
+      definition: conflicting.definition,
+      entityIds: (
+        publication.contribution.derivedRelationships![0] as {
+          seedEntityIds: readonly SketchEntityId[];
+        }
+      ).seedEntityIds,
+      distance: 0.1,
+      side: "right",
+      sequence: conflicting.sequence + 1,
+      factories: createSessionCommitFactories(
+        conflicting.sequence + 1,
+        conflicting.sketchId!,
+      ),
+      modelingTolerance: conflicting.modelingTolerance,
+    });
+    expect(
+      publication.contribution.points.map((point) => point.position),
+    ).toEqual(authored.contribution!.points.map((point) => point.position));
+  }, 120_000);
 });

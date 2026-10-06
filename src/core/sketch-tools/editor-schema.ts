@@ -245,6 +245,11 @@ export interface SketchToolFloatingInputDescriptor {
   confirmLabel: string;
   cancelLabel: string;
   min?: number;
+  /**
+   * An edit operation parameter (T13b, D29): plain numbers only, so no
+   * document-variable suggestions are offered.
+   */
+  numericOnly?: true;
   anchor?: SketchToolAnchorDescriptor;
   placement?: "cursor" | "previewReference" | "target";
   submitAction: SketchToolActionDescriptor;

@@ -403,3 +403,59 @@ test("T11a: a reopened sketch's certified offset output is snapped to with no pr
     }),
   ]);
 });
+
+test("T13b A6: a distance typed into the Offset floating input (not the tool panel) commits the offset at that distance", async ({
+  page,
+}) => {
+  const workbench = new FeatureWorkbenchHarness(page);
+  await startTopPlaneSketch(page, workbench);
+  await workbench.activateTool("Create rectangle geometry.");
+  await page.locator('[role="menuitem"][data-tool-id="rectangle"]').click();
+  await workbench.clickViewportAt({ x: 640, y: 420 });
+  await workbench.clickViewportAt({ x: 860, y: 580 });
+  await expectStaged(workbench, 4);
+  await workbench.activateTool(OFFSET_TOOL);
+  for (const point of [
+    { x: 750, y: 420 },
+    { x: 860, y: 500 },
+    { x: 750, y: 580 },
+    { x: 640, y: 500 },
+  ])
+    await workbench.clickViewportAt(point);
+  await workbench.hoverViewportAt({ x: 750, y: 470 });
+
+  const floatingInput = page.locator(
+    '[data-sketch-viewport-floating-input="offset-distance-input"]',
+  );
+  await expect(floatingInput).toBeVisible();
+  // D29: an operation parameter offers no variable suggestions.
+  await expect(floatingInput.locator("datalist")).toHaveCount(0);
+  await floatingInput.locator("input").fill("0.35");
+  await expect(
+    page.getByRole("textbox", { name: "Distance" }),
+    "the typed string set the tool's distance",
+  ).toHaveValue("0.35");
+  await floatingInput
+    .getByRole("button", { name: "Create" })
+    .click({ timeout: 5_000 });
+  await expectStaged(workbench, 8, 60_000);
+  await workbench.activateTool("Exit the active sketch.");
+  await workbench.expectMachine("idle");
+
+  const saved = (await lastCommittedSketch(page)) as
+    | (CommittedSketchDefinition & {
+        derivedRelationships?: Array<{ kind: string; distance: unknown }>;
+      })
+    | null;
+  const offset = saved?.derivedRelationships?.find(
+    (relationship) => relationship.kind === "offset",
+  );
+  const distance =
+    typeof offset?.distance === "number"
+      ? offset.distance
+      : (offset?.distance as { value?: number } | undefined)?.value;
+  expect(
+    Math.abs(distance ?? Number.NaN),
+    `the committed offset distance (${JSON.stringify(offset?.distance)})`,
+  ).toBeCloseTo(0.35, 12);
+});
