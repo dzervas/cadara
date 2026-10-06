@@ -2292,6 +2292,7 @@ export function applySketchGeometryDrag(
     drag.intent,
     dragTarget,
     drag.interactiveSolveSession,
+    complete,
   );
 
   if (edit.kind === "blocked") {
@@ -2467,6 +2468,7 @@ export function solveDragEdit(
   intent: SketchDragIntent,
   dragTarget: SketchDragTarget,
   interactiveSolveSession: SketchCompiledSolveSession | null = null,
+  complete = true,
 ): SolveDragEditResult {
   // Unconstrained fast path: no constraints or dimensions.
   if (
@@ -2501,7 +2503,12 @@ export function solveDragEdit(
   }
 
   const solved = solveSession
-    ? updateCompiledSketchSolveSession(solveSession, dragTarget, 1e-4)
+    ? updateCompiledSketchSolveSession(
+        solveSession,
+        dragTarget,
+        // T13a2: only the release frame runs the exact-reach step.
+        complete ? 1e-4 : null,
+      )
     : dragTarget.kind === "sketchPoint"
       ? solveSketchDefinitionWithDraggedPointTarget({
           definition: resolveSketchDefinitionForSolve(
