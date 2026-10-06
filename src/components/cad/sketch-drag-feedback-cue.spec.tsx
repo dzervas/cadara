@@ -49,9 +49,7 @@ test("T12f: drag feedback cue is hidden when feedback is null", () => {
 
 test("T12f: drag feedback cue is non-interactive (pointer-events-none)", () => {
   const markup = renderToStaticMarkup(
-    <SketchDragFeedbackCue
-      cue={{ x: 100, y: 100, text: "Constrained." }}
-    />,
+    <SketchDragFeedbackCue cue={{ x: 100, y: 100, text: "Constrained." }} />,
   );
   expect(
     markup.includes("pointer-events-none"),

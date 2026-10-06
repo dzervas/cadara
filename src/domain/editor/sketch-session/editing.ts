@@ -2638,12 +2638,9 @@ function detectConstrainedMovementFeedback(
       );
       if (!entity || (entity.kind !== "circle" && entity.kind !== "arc"))
         return null;
-      const currentRadius =
-        entity.kind === "circle" ? entity.radius : null;
+      const currentRadius = entity.kind === "circle" ? entity.radius : null;
       if (currentRadius === null) return null;
-      const requestedDelta = Math.abs(
-        dragTarget.targetRadius - currentRadius,
-      );
+      const requestedDelta = Math.abs(dragTarget.targetRadius - currentRadius);
       const solvedEntity = solvedSnapshot.solvedEntities?.find(
         (e) => e.entityId === intent.entityId,
       );
@@ -2690,9 +2687,7 @@ function dragFeedbackTarget(
 ): SketchPoint {
   switch (intent.kind) {
     case "point": {
-      const p = definition.points.find(
-        (pt) => pt.pointId === intent.pointId,
-      );
+      const p = definition.points.find((pt) => pt.pointId === intent.pointId);
       return p?.position ?? [0, 0];
     }
     case "translate": {
@@ -2710,8 +2705,7 @@ function dragFeedbackTarget(
       const center = definition.points.find(
         (p) => p.pointId === entity.centerPointId,
       );
-      const radius =
-        entity.kind === "circle" ? entity.radius : 1;
+      const radius = entity.kind === "circle" ? entity.radius : 1;
       return center
         ? [center.position[0] + radius, center.position[1]]
         : [0, 0];
@@ -2725,9 +2719,7 @@ function dragFeedbackTarget(
         (o) => o.occurrenceId === intent.occurrenceId,
       );
       if (!occ) return [0, 0];
-      const fitPoint = definition.points.find(
-        (p) => p.pointId === occ.pointId,
-      );
+      const fitPoint = definition.points.find((p) => p.pointId === occ.pointId);
       if (!fitPoint) return [0, 0];
       if (occ.tangent.kind === "authored") {
         return [

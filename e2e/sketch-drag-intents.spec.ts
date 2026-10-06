@@ -509,5 +509,3 @@ test("T12f: dragging the rim of a freshly drawn (radius-dimensioned) circle show
     "Radius must NOT have grown (dimension blocks the drag).",
   ).toBeLessThan(4);
 });
-
-
