@@ -2,7 +2,10 @@ import type {
   DocumentVariableRecord,
   SketchPoint,
 } from "@/contracts/modeling/schema";
-import { isAcceptedConstraintStatus } from "@/contracts/sketch/schema";
+import {
+  isAcceptedConstraintStatus,
+  isReferenceDimension,
+} from "@/contracts/sketch/schema";
 import {
   createExpressionAuthoredValue,
   createLiteralAuthoredValue,
@@ -1711,7 +1714,8 @@ function formatSketchRequirement(
   const value =
     "dimensionId" in requirement
       ? requirement.kind === "arcStartPointCoincident" ||
-        requirement.kind === "arcEndPointCoincident"
+        requirement.kind === "arcEndPointCoincident" ||
+        isReferenceDimension(requirement)
         ? null
         : requirement.kind === "lineAngle"
           ? formatRequirementValue(requirement.valueRadians, "deg")

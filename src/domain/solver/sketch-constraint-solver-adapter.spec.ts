@@ -27,6 +27,11 @@ import {
 } from "@/domain/solver/mock-sketch-solver-adapter";
 import type { DimensionId } from "@/contracts/shared/ids";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import {
+  makeReferenceDimensionCases,
+  makeReferenceDimensionSketch,
+  withDimensions,
+} from "@/contracts/sketch/reference-dimension.fixtures";
 
 // Adapter conformance (logic lane): `querySketchEditIntersections` on the
 // real adapter (in-thread, no worker) and the mock adapter, which both run
@@ -254,6 +259,77 @@ describe("querySketchEditIntersections adapters (T10g-1)", () => {
         (diagnostic) => diagnostic.code === "solver-requirement-unsatisfied",
       )?.message,
     ).toBe("Join is not satisfied within its authored tolerance.");
+  });
+
+  test("T13d D10 parity: core and mock report every reference dimension driven with the same measured value and info diagnostics", async () => {
+    const cases = makeReferenceDimensionCases();
+    const solve = {
+      contractVersion: CONTRACT_VERSION,
+      solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+      requestId: "request_solve" as RequestId,
+      documentId: DOCUMENT,
+      revisionId:
+        "rev_trim" as QuerySketchEditIntersectionsRequest["revisionId"],
+      sketchId:
+        "sketch_arrangement" as QuerySketchEditIntersectionsRequest["sketchId"],
+      plane: DEFAULT_MOCK_SKETCH_PLANE_FRAME,
+      tolerances: {
+        coincidence: 1e-6,
+        angleRadians: 1e-6,
+        minimumSegmentLength: 1e-6,
+      },
+      modelingTolerance: 1e-3,
+      partialSolvePolicy: "bestEffort" as const,
+      definition: withDimensions(
+        makeReferenceDimensionSketch(),
+        cases.map((entry) => entry.reference),
+      ),
+      projectedReferences: [],
+    };
+    const core = await real(
+      createCertifiedNeutralCurveQueryCapabilityForTest(),
+    ).solveSketch(solve);
+    const mock = await new MockSketchSolverAdapter({
+      documentId: DOCUMENT,
+      revisionId: "rev_trim",
+      neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+    }).solveSketch(solve);
+    for (const [name, response] of [
+      ["core", core],
+      ["mock", mock],
+    ] as const) {
+      expect(response.status.solveState, name).toBe("solved");
+      for (const entry of cases) {
+        const status = response.solvedSnapshot.dimensionStatuses.find(
+          (candidate) => candidate.dimensionId === entry.reference.dimensionId,
+        );
+        expect(status?.status, `${name}: ${entry.name}`).toBe("driven");
+        if (entry.measured === null)
+          expect(status?.solvedValue, `${name}: ${entry.name}`).toBeNull();
+        else
+          expect(status?.solvedValue, `${name}: ${entry.name}`).toBeCloseTo(
+            entry.measured,
+            9,
+          );
+      }
+      expect(
+        response.solvedSnapshot.diagnostics
+          .filter((diagnostic) => diagnostic.severity !== "info")
+          .map((diagnostic) => diagnostic.code),
+        `${name}: no warning or error`,
+      ).toEqual([]);
+    }
+    // Review A-1: a reference constrains nothing in either adapter.
+    expect(mock.solvedSnapshot.status, "core and mock sketch status").toEqual(
+      core.solvedSnapshot.status,
+    );
+    expect(core.solvedSnapshot.status.constraintState).toBe("underConstrained");
+    const infos = (response: typeof core) =>
+      response.solvedSnapshot.diagnostics.filter(
+        (diagnostic) => diagnostic.code === "reference-dimension-undefined",
+      );
+    expect(infos(mock)).toEqual(infos(core));
+    expect(infos(core)).toHaveLength(1);
   });
 
   test("a request for another document is rejected before any query", async () => {

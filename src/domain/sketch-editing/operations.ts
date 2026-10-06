@@ -618,7 +618,11 @@ export function createSketchTrimMutation(input: {
                 kind: "diameter" as const,
                 // Review A-3: the default label ("Circle N radius") follows.
                 label: dimension.label.replace(/ radius$/, " diameter"),
-                value: doubledDimensionValue(dimension.value),
+                // T13d: a reference radius stays a reference (the marker is
+                // spread); a value it kept (ignored, D9′) doubles too.
+                ...(dimension.value === undefined
+                  ? {}
+                  : { value: doubledDimensionValue(dimension.value) }),
               }
             : dimension,
         )

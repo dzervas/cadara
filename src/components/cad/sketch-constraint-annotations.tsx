@@ -360,6 +360,11 @@ function getAnnotationConstraintColor(annotation: SketchAnnotationDescriptor) {
     return `var(${getSketchRenderingPaletteToken("overconstrained")})`;
   }
 
+  // T13d (D12): a reference dimension only measures; it reads muted.
+  if (annotation.reference) {
+    return "var(--cad-muted-foreground)";
+  }
+
   if (annotation.constraintDisplay?.state === "constrained") {
     return `var(${getSketchRenderingPaletteToken("constrained")})`;
   }

@@ -105,6 +105,8 @@ export interface SketchAnnotationDescriptor {
   detail: string;
   status: "constraint" | "dimension";
   visibleLabel?: string;
+  /** T13d (D12): a reference (non-driving) dimension, shown in the muted tone. */
+  reference?: true;
   dragHandle?: SketchDimensionAnnotationDragHandle;
 }
 

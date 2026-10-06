@@ -1,5 +1,8 @@
 import type { SketchDerivationSettings } from "@/contracts/sketch/derived-geometry";
-import { isAcceptedConstraintStatus } from "@/contracts/sketch/schema";
+import {
+  isAcceptedConstraintStatus,
+  isReferenceDimension,
+} from "@/contracts/sketch/schema";
 import type {
   DocumentVariableRecord,
   SketchPoint,
@@ -158,6 +161,14 @@ export function patchSketchAnnotationEditValue(
       activeAnnotationEdit: nextEdit,
       toolPresentation: buildAnnotationEditPresentation(session, nextEdit),
     };
+  }
+
+  if (intent === "makeAnnotationReference") {
+    return commitEditedAnnotationDefinition(
+      session,
+      edit,
+      makeReferenceDimensionInDefinition(session.definition, edit.target),
+    );
   }
 
   if (intent !== "commitAnnotationValue") {
@@ -532,12 +543,142 @@ export function commitSketchAnnotationEditValue(
     pendingValue: MaybeAuthoredValue<number>;
   },
 ): SketchSessionState {
-  const updatedFullDefinition = updateAnnotationValueInDefinition(
-    session.definition,
-    edit.target,
-    edit.pendingValue,
+  const target = edit.target;
+  const madeDriving =
+    target.kind === "dimension"
+      ? session.definition.dimensions.find(
+          (dimension) =>
+            dimension.dimensionId === target.dimensionId &&
+            isReferenceDimension(dimension),
+        )
+      : undefined;
+  // T13d review R-1: a reference shows (and prefills) magnitudes; making a
+  // signed point-pair reference driving keeps the current geometry by
+  // storing its points in the measured direction.
+  const signedMeasured =
+    madeDriving && getSignedPointPairAxis(madeDriving)
+      ? getReferenceMeasuredValues(session).get(madeDriving.dimensionId)
+      : undefined;
+  return commitEditedAnnotationDefinition(
+    session,
+    edit,
+    orientSignedPointPairDimension(
+      updateAnnotationValueInDefinition(
+        session.definition,
+        edit.target,
+        edit.pendingValue,
+      ),
+      target,
+      signedMeasured !== undefined &&
+        signedMeasured !== null &&
+        signedMeasured < 0
+        ? -1
+        : 1,
+    ),
   );
+}
 
+/** The axis of a signed point-pair dimension (h/v `distance`, `horizontal/verticalDistance`). */
+function getSignedPointPairAxis(
+  dimension: DimensionDefinition,
+): "horizontal" | "vertical" | null {
+  switch (dimension.kind) {
+    case "distance":
+      return dimension.axis === "aligned" ? null : dimension.axis;
+    case "horizontalDistance":
+      return "horizontal";
+    case "verticalDistance":
+      return "vertical";
+    default:
+      return null;
+  }
+}
+
+/**
+ * T13d review R-1: `measuredSign` is the sign of the reference's measured
+ * value in its stored point order (the popup shows magnitudes). The
+ * committed signed value is `typed × measuredSign`; when it is negative the
+ * two points are swapped (the dimension line offset re-based onto the new
+ * first point, as the Dimension tool does) and the magnitude stored, so the
+ * same geometry is driven with a positive value and nothing moves.
+ */
+function orientSignedPointPairDimension(
+  definition: SketchDefinition,
+  target: SketchConstraintRef | SketchDimensionRef,
+  measuredSign: 1 | -1,
+): SketchDefinition {
+  if (target.kind !== "dimension") {
+    return definition;
+  }
+  const dimensions = definition.dimensions.map(
+    (dimension): DimensionDefinition => {
+      if (
+        dimension.dimensionId !== target.dimensionId ||
+        isReferenceDimension(dimension) ||
+        (dimension.kind !== "distance" &&
+          dimension.kind !== "horizontalDistance" &&
+          dimension.kind !== "verticalDistance")
+      ) {
+        return dimension;
+      }
+      const axis = getSignedPointPairAxis(dimension);
+      const literal = getAuthoredLiteralValue(dimension.value);
+      const signed = literal === null ? measuredSign : literal * measuredSign;
+      if (!axis || signed >= 0) {
+        return dimension;
+      }
+      const [firstId, secondId] = dimension.pointIds;
+      const first = getPointPosition(definition, firstId);
+      const second = getPointPosition(definition, secondId);
+      const across = axis === "horizontal" ? 1 : 0;
+      const placement = dimension.annotationPlacement;
+      return {
+        ...dimension,
+        pointIds: [secondId, firstId],
+        value:
+          literal === null
+            ? dimension.value
+            : createLiteralAuthoredValue(Math.abs(literal)),
+        ...(placement && first && second
+          ? {
+              annotationPlacement: {
+                ...placement,
+                offset: placement.offset + first[across] - second[across],
+              },
+            }
+          : {}),
+      };
+    },
+  );
+  return dimensions.some(
+    (dimension, index) => dimension !== definition.dimensions[index],
+  )
+    ? { ...definition, dimensions }
+    : definition;
+}
+
+/** The solve's (signed) measured value of each reference dimension. */
+function getReferenceMeasuredValues(session: SketchSessionState) {
+  return new Map(
+    buildSketchAnnotationDescriptors(
+      session,
+    ).solvedSnapshot.dimensionStatuses.map((entry) => [
+      entry.dimensionId,
+      entry.solvedValue,
+    ]),
+  );
+}
+
+/**
+ * Commits an annotation edit (a value, or T13d's Make reference / Make
+ * driving) as one authored change. A conflicting result is retained
+ * (T13c D6) and explained (D7).
+ */
+function commitEditedAnnotationDefinition(
+  session: SketchSessionState,
+  edit: SketchAnnotationEditState,
+  updatedFullDefinition: SketchDefinition,
+): SketchSessionState {
   if (updatedFullDefinition === session.definition) {
     return session;
   }
@@ -688,46 +829,51 @@ export function updateAnnotationValueInDefinition(
   }
 
   let editedCircleRadiusEntityId: SketchEntityId | null = null;
-  const dimensions = definition.dimensions.map((dimension) => {
-    if (dimension.dimensionId !== target.dimensionId) {
-      return dimension;
-    }
-
-    switch (dimension.kind) {
-      case "distance":
-      case "pointDatumDistance":
-      case "horizontalDistance":
-      case "verticalDistance":
-      case "circleRadius":
-      case "diameter":
-      case "lineLength":
-      case "lineDistance":
-      case "linePointDistance":
-        if (dimension.kind === "circleRadius") {
-          editedCircleRadiusEntityId = dimension.entityId;
-        }
-
-        return {
-          ...dimension,
-          value,
-        };
-      case "lineAngle": {
-        const literalValue = getAuthoredLiteralValue(value);
-        return {
-          ...dimension,
-          valueRadians:
-            literalValue === null ? value : (literalValue * Math.PI) / 180,
-        };
-      }
-      case "arcStartPointCoincident":
-      case "arcEndPointCoincident":
+  const dimensions = definition.dimensions.map(
+    (dimension): DimensionDefinition => {
+      if (dimension.dimensionId !== target.dimensionId) {
         return dimension;
-      default: {
-        const exhaustive: never = dimension;
-        return exhaustive;
       }
-    }
-  });
+
+      switch (dimension.kind) {
+        case "distance":
+        case "pointDatumDistance":
+        case "horizontalDistance":
+        case "verticalDistance":
+        case "circleRadius":
+        case "diameter":
+        case "lineLength":
+        case "lineDistance":
+        case "linePointDistance":
+          if (dimension.kind === "circleRadius") {
+            editedCircleRadiusEntityId = dimension.entityId;
+          }
+
+          // T13d: committing a value on a reference dimension makes it
+          // driving. (The spread widens `kind` to the case union; each member
+          // keeps its own kind at runtime.)
+          return {
+            ...withoutReferenceMarker(dimension),
+            value,
+          } as DimensionDefinition;
+        case "lineAngle": {
+          const literalValue = getAuthoredLiteralValue(value);
+          return {
+            ...withoutReferenceMarker(dimension),
+            valueRadians:
+              literalValue === null ? value : (literalValue * Math.PI) / 180,
+          };
+        }
+        case "arcStartPointCoincident":
+        case "arcEndPointCoincident":
+          return dimension;
+        default: {
+          const exhaustive: never = dimension;
+          return exhaustive;
+        }
+      }
+    },
+  );
   const edited = dimensions.some(
     (dimension, index) => dimension !== definition.dimensions[index],
   );
@@ -747,6 +893,49 @@ export function updateAnnotationValueInDefinition(
         dimensions,
       }
     : definition;
+}
+
+function withoutReferenceMarker<TDimension extends DimensionDefinition>(
+  dimension: TDimension,
+): TDimension {
+  if (!isReferenceDimension(dimension)) {
+    return dimension;
+  }
+  const driving = { ...dimension };
+  delete (driving as { reference?: true }).reference;
+  return driving;
+}
+
+/**
+ * T13d (D9′): the dimension as a reference: it only measures; its stored
+ * value is kept and ignored. Arc endpoint bindings and constraints are left
+ * unchanged (they cannot be references).
+ */
+export function makeReferenceDimensionInDefinition(
+  definition: SketchDefinition,
+  target: SketchConstraintRef | SketchDimensionRef,
+): SketchDefinition {
+  if (target.kind !== "dimension") {
+    return definition;
+  }
+  let edited = false;
+  const dimensions = definition.dimensions.map(
+    (dimension): DimensionDefinition => {
+      if (
+        dimension.dimensionId !== target.dimensionId ||
+        isReferenceDimension(dimension) ||
+        dimension.kind === "arcStartPointCoincident" ||
+        dimension.kind === "arcEndPointCoincident"
+      ) {
+        return dimension;
+      }
+      edited = true;
+      // D9′: the stored value is kept untouched (ignored while a reference),
+      // so a concurrent value edit still merges into a valid document.
+      return { ...dimension, reference: true };
+    },
+  );
+  return edited ? { ...definition, dimensions } : definition;
 }
 
 export function updateDimensionAnnotationPlacementInDefinition(
@@ -938,6 +1127,7 @@ export function buildAnnotationEditPresentation(
 ): SketchToolPresentationSchema {
   const editable = getEditableAnnotationValue(session, edit.target);
   const label = editable?.label ?? "Value";
+  const reference = editable?.reference ?? null;
 
   return {
     prompts: [
@@ -948,14 +1138,41 @@ export function buildAnnotationEditPresentation(
     ],
     floatingInput: {
       id: `annotation-edit-${getTargetKey(edit.target)}`,
-      label,
+      label: reference ? `${label} (reference)` : label,
       value:
         edit.pendingValue === null
           ? null
-          : getAuthoredFormText(edit.pendingValue),
+          : reference &&
+              reference.measuredValue !== null &&
+              getAuthoredLiteralValue(edit.pendingValue) ===
+                reference.measuredValue
+            ? formatMeasuredEditText(reference.measuredValue)
+            : getAuthoredFormText(edit.pendingValue),
       unit: editable?.unit,
       min: editable?.min,
-      confirmLabel: "Save",
+      // T13d: a reference dimension's popup shows its measured value
+      // read-only; confirming commits it as driving with the typed (by
+      // default the measured) value. A driving dimension offers Make reference.
+      ...(reference
+        ? {
+            readout: `Measured ${
+              reference.measuredValue === null
+                ? "—"
+                : `${reference.measuredValue.toFixed(2)} ${editable?.unit ?? ""}`.trim()
+            }`,
+          }
+        : editable?.canBeReference
+          ? {
+              secondaryAction: {
+                label: "Make reference",
+                action: {
+                  type: "patch" as const,
+                  patch: { intent: "makeAnnotationReference" },
+                },
+              },
+            }
+          : {}),
+      confirmLabel: reference ? "Make driving" : "Save",
       cancelLabel: "Cancel",
       anchor: editable?.anchor,
       placement: "target",
@@ -980,19 +1197,34 @@ export function buildAnnotationEditPresentation(
   };
 }
 
+/** Display text of a measured value; the exact value is what gets committed. */
+function formatMeasuredEditText(value: number) {
+  return String(Number(value.toFixed(6)));
+}
+
 export function getEditableAnnotationValue(
   session: SketchSessionState,
   target: SketchConstraintRef | SketchDimensionRef,
 ): {
   label: string;
-  value: MaybeAuthoredValue<number>;
+  /** The edit's initial value; a reference dimension's is its measured value. */
+  value: MaybeAuthoredValue<number> | null;
   unit?: string;
   min?: number;
   anchor?: SketchToolAnchorDescriptor;
+  /** T13d: a driving numeric dimension, which can be made a reference. */
+  canBeReference?: true;
+  /** T13d: a reference dimension and its measured value (display units). */
+  reference?: { measuredValue: number | null };
 } | null {
-  const annotation = getSketchAnnotationDescriptors(session).find(
+  const { descriptors, solvedSnapshot } =
+    buildSketchAnnotationDescriptors(session);
+  const annotation = descriptors.find(
     (entry) => getTargetKey(entry.target) === getTargetKey(target),
   );
+  const anchor = annotation
+    ? addAnchorOffset(annotation.anchor, { x: 18, y: -18 })
+    : undefined;
 
   if (target.kind === "constraint") {
     const constraint = session.definition.constraints.find(
@@ -1007,9 +1239,7 @@ export function getEditableAnnotationValue(
       label: "Angle",
       value: (constraint.valueRadians * 180) / Math.PI,
       unit: "deg",
-      anchor: annotation
-        ? addAnchorOffset(annotation.anchor, { x: 18, y: -18 })
-        : undefined,
+      anchor,
     };
   }
 
@@ -1017,106 +1247,98 @@ export function getEditableAnnotationValue(
     (entry) => entry.dimensionId === target.dimensionId,
   );
 
-  if (!dimension) {
+  if (
+    !dimension ||
+    dimension.kind === "arcStartPointCoincident" ||
+    dimension.kind === "arcEndPointCoincident"
+  ) {
     return null;
   }
 
+  const label = getDimensionEditLabel(dimension);
+  const angle = dimension.kind === "lineAngle";
+  const unit = angle ? "deg" : "mm";
+  const min = angle ? 0.1 : 0.01;
+
+  if (isReferenceDimension(dimension)) {
+    const solvedValue =
+      solvedSnapshot.dimensionStatuses.find(
+        (entry) => entry.dimensionId === dimension.dimensionId,
+      )?.solvedValue ?? null;
+    // Review R-1: magnitudes (a signed point pair may measure negative).
+    const measuredValue =
+      solvedValue === null
+        ? null
+        : angle
+          ? (solvedValue * 180) / Math.PI
+          : Math.abs(solvedValue);
+    return {
+      label,
+      value:
+        measuredValue === null
+          ? null
+          : createLiteralAuthoredValue(measuredValue),
+      unit,
+      min,
+      anchor,
+      reference: { measuredValue },
+    };
+  }
+
+  if (dimension.kind === "lineAngle") {
+    const literalRadians = getAuthoredLiteralValue(dimension.valueRadians);
+    return {
+      label,
+      value:
+        literalRadians === null
+          ? dimension.valueRadians
+          : createLiteralAuthoredValue((literalRadians * 180) / Math.PI),
+      unit,
+      min,
+      anchor,
+      canBeReference: true,
+    };
+  }
+
+  return {
+    label,
+    value: dimension.value,
+    unit,
+    min,
+    anchor,
+    canBeReference: true,
+  };
+}
+
+function getDimensionEditLabel(
+  dimension: Exclude<
+    DimensionDefinition,
+    { kind: "arcStartPointCoincident" | "arcEndPointCoincident" }
+  >,
+) {
   switch (dimension.kind) {
     case "distance":
     case "pointDatumDistance":
-      return {
-        label:
-          dimension.axis === "horizontal"
-            ? "Horizontal distance"
-            : dimension.axis === "vertical"
-              ? "Vertical distance"
-              : "Distance",
-        value: dimension.value,
-        unit: "mm",
-        min: 0.01,
-        anchor: annotation
-          ? addAnchorOffset(annotation.anchor, { x: 18, y: -18 })
-          : undefined,
-      };
+      return dimension.axis === "horizontal"
+        ? "Horizontal distance"
+        : dimension.axis === "vertical"
+          ? "Vertical distance"
+          : "Distance";
     case "horizontalDistance":
-      return {
-        label: "Horizontal distance",
-        value: dimension.value,
-        unit: "mm",
-        min: 0.01,
-        anchor: annotation
-          ? addAnchorOffset(annotation.anchor, { x: 18, y: -18 })
-          : undefined,
-      };
+      return "Horizontal distance";
     case "verticalDistance":
-      return {
-        label: "Vertical distance",
-        value: dimension.value,
-        unit: "mm",
-        min: 0.01,
-        anchor: annotation
-          ? addAnchorOffset(annotation.anchor, { x: 18, y: -18 })
-          : undefined,
-      };
+      return "Vertical distance";
     case "circleRadius":
-      return {
-        label: "Radius",
-        value: dimension.value,
-        unit: "mm",
-        min: 0.01,
-        anchor: annotation
-          ? addAnchorOffset(annotation.anchor, { x: 18, y: -18 })
-          : undefined,
-      };
+      return "Radius";
     case "diameter":
-      return {
-        label: "Diameter",
-        value: dimension.value,
-        unit: "mm",
-        min: 0.01,
-        anchor: annotation
-          ? addAnchorOffset(annotation.anchor, { x: 18, y: -18 })
-          : undefined,
-      };
+      return "Diameter";
     case "lineLength":
-      return {
-        label: "Length",
-        value: dimension.value,
-        unit: "mm",
-        min: 0.01,
-        anchor: annotation
-          ? addAnchorOffset(annotation.anchor, { x: 18, y: -18 })
-          : undefined,
-      };
+      return "Length";
     case "lineDistance":
     case "linePointDistance":
-      return {
-        label: "Distance",
-        value: dimension.value,
-        unit: "mm",
-        min: 0.01,
-        anchor: annotation
-          ? addAnchorOffset(annotation.anchor, { x: 18, y: -18 })
-          : undefined,
-      };
-    case "lineAngle": {
-      const literalRadians = getAuthoredLiteralValue(dimension.valueRadians);
-      return {
-        label: "Angle",
-        value:
-          literalRadians === null
-            ? dimension.valueRadians
-            : createLiteralAuthoredValue((literalRadians * 180) / Math.PI),
-        unit: "deg",
-        min: 0.1,
-        anchor: annotation
-          ? addAnchorOffset(annotation.anchor, { x: 18, y: -18 })
-          : undefined,
-      };
-    }
-    case "arcStartPointCoincident":
-    case "arcEndPointCoincident":
-      return null;
+      return "Distance";
+    case "lineAngle":
+      return "Angle";
   }
 }
 
@@ -1197,10 +1419,17 @@ function resolveDimensionEffectiveValues(
   }
 
   for (const dimension of resolved.definition.dimensions) {
-    if (dimension.kind === "lineAngle") {
-      effectiveValues.set(dimension.dimensionId, dimension.valueRadians);
-    } else if ("value" in dimension) {
-      effectiveValues.set(dimension.dimensionId, dimension.value);
+    if (isReferenceDimension(dimension)) {
+      continue;
+    }
+    const value =
+      dimension.kind === "lineAngle"
+        ? dimension.valueRadians
+        : "value" in dimension
+          ? dimension.value
+          : undefined;
+    if (value !== undefined) {
+      effectiveValues.set(dimension.dimensionId, value);
     }
   }
 
@@ -1210,6 +1439,13 @@ function resolveDimensionEffectiveValues(
 export function getSketchAnnotationDescriptors(
   session: SketchSessionState,
 ): SketchAnnotationDescriptor[] {
+  return buildSketchAnnotationDescriptors(session).descriptors;
+}
+
+function buildSketchAnnotationDescriptors(session: SketchSessionState): {
+  descriptors: SketchAnnotationDescriptor[];
+  solvedSnapshot: SolvedSketchSnapshot;
+} {
   const sketchId = session.sketchId ?? ("sketch_draft" as SketchId);
   const resolvedDimensionValues = resolveDimensionEffectiveValues(session);
   const solved = solveSketchDefinitionCore({
@@ -1227,8 +1463,19 @@ export function getSketchAnnotationDescriptors(
     definition: session.definition,
     solvedSnapshot: solved.solvedSnapshot,
   });
+  // T13d (D12): a reference dimension shows the solve's measured value.
+  const measuredValues = new Map(
+    solved.solvedSnapshot.dimensionStatuses.map((entry) => [
+      entry.dimensionId,
+      entry.solvedValue,
+    ]),
+  );
+  const dimensionDisplayValue = (dimension: DimensionDefinition) =>
+    isReferenceDimension(dimension)
+      ? (measuredValues.get(dimension.dimensionId) ?? null)
+      : resolvedDimensionValues.get(dimension.dimensionId);
 
-  return [
+  const descriptors: SketchAnnotationDescriptor[] = [
     ...session.definition.constraints.map((constraint) => ({
       id: constraint.constraintId,
       target: createSketchConstraintRef(sketchId, constraint.constraintId),
@@ -1264,18 +1511,17 @@ export function getSketchAnnotationDescriptors(
         constraintDisplaySummary,
       ),
       label: dimension.label,
-      detail: describeDimension(
-        dimension,
-        resolvedDimensionValues.get(dimension.dimensionId),
-      ),
+      detail: describeDimension(dimension, dimensionDisplayValue(dimension)),
       status: "dimension" as const,
       visibleLabel: formatDimensionVisibleLabel(
         dimension,
-        resolvedDimensionValues.get(dimension.dimensionId),
+        dimensionDisplayValue(dimension),
       ),
+      ...(isReferenceDimension(dimension) ? { reference: true as const } : {}),
       dragHandle: createDimensionAnnotationDragHandle(dimension),
     })),
   ];
+  return { descriptors, solvedSnapshot: solved.solvedSnapshot };
 }
 
 export function createDimensionAnnotationDragHandle(
@@ -1972,7 +2218,7 @@ export function buildCommittedDimensionOverlays(
               referenceKind: axis,
               start: line.start,
               end: line.end,
-              value: dimension.value,
+              value: isReferenceDimension(dimension) ? null : dimension.value,
               unit: "mm",
               labelAnchor: {
                 kind: "sketchPoint",
@@ -2025,7 +2271,7 @@ export function buildCommittedDimensionOverlays(
               referenceKind: dimension.axis,
               start: line.start,
               end: line.end,
-              value: dimension.value,
+              value: isReferenceDimension(dimension) ? null : dimension.value,
               unit: "mm",
               labelAnchor: {
                 kind: "sketchPoint",
@@ -2078,7 +2324,7 @@ export function buildCommittedDimensionOverlays(
                 dimension.kind === "diameter" ? "diameter" : "radius",
               start,
               end,
-              value: dimension.value,
+              value: isReferenceDimension(dimension) ? null : dimension.value,
               unit: "mm",
               labelAnchor: {
                 kind: "sketchPoint",
@@ -2109,7 +2355,7 @@ export function buildCommittedDimensionOverlays(
               referenceKind: "lineLength",
               start: line.start,
               end: line.end,
-              value: dimension.value,
+              value: isReferenceDimension(dimension) ? null : dimension.value,
               unit: "mm",
               labelAnchor: {
                 kind: "sketchPoint",
@@ -2164,7 +2410,7 @@ export function buildCommittedDimensionOverlays(
               referenceKind: "lineDistance",
               start: line.start,
               end: line.end,
-              value: dimension.value,
+              value: isReferenceDimension(dimension) ? null : dimension.value,
               unit: "mm",
               labelAnchor: {
                 kind: "sketchPoint",
@@ -2202,7 +2448,7 @@ export function buildCommittedDimensionOverlays(
               referenceKind: "pointLineDistance",
               start: line.start,
               end: line.end,
-              value: dimension.value,
+              value: isReferenceDimension(dimension) ? null : dimension.value,
               unit: "mm",
               labelAnchor: {
                 kind: "sketchPoint",
@@ -3122,28 +3368,60 @@ function formatAuthoredDimensionDegrees(
     ? getAuthoredFormText(value)
     : ((literal * 180) / Math.PI).toFixed(digits);
 }
+/**
+ * T13d (D12): a reference dimension's measured value in parentheses, e.g.
+ * "(24.00)" or "(60.0°)"; "(—)" when the quantity is undefined.
+ */
+function formatReferenceDimensionValue(
+  dimension: DimensionDefinition,
+  measuredValue: number | null,
+) {
+  if (measuredValue === null) {
+    return "(—)";
+  }
+  return dimension.kind === "lineAngle"
+    ? `(${((measuredValue * 180) / Math.PI).toFixed(1)}°)`
+    : `(${Math.abs(measuredValue).toFixed(2)})`;
+}
+
+function getDimensionQuantityNoun(dimension: DimensionDefinition) {
+  switch (dimension.kind) {
+    case "circleRadius":
+      return "radius";
+    case "diameter":
+      return "diameter";
+    case "lineLength":
+      return "length";
+    case "lineAngle":
+      return "angle";
+    default:
+      return "distance";
+  }
+}
+
 export function describeDimension(
   dimension: DimensionDefinition,
-  resolvedValue?: number,
+  resolvedValue?: number | null,
 ) {
+  if (isReferenceDimension(dimension)) {
+    // Review A-5: the angle's "°" is its unit.
+    const unit = dimension.kind === "lineAngle" ? "" : " mm";
+    return `${formatReferenceDimensionValue(dimension, resolvedValue ?? null)}${unit} reference ${getDimensionQuantityNoun(dimension)}`;
+  }
+  const resolved = resolvedValue ?? undefined;
   switch (dimension.kind) {
     case "distance":
     case "pointDatumDistance":
-      return `${formatAuthoredDimensionNumber(dimension.value, 2, resolvedValue)} mm distance`;
     case "horizontalDistance":
     case "verticalDistance":
-      return `${formatAuthoredDimensionNumber(dimension.value, 2, resolvedValue)} mm distance`;
     case "circleRadius":
-      return `${formatAuthoredDimensionNumber(dimension.value, 2, resolvedValue)} mm radius`;
     case "diameter":
-      return `${formatAuthoredDimensionNumber(dimension.value, 2, resolvedValue)} mm diameter`;
     case "lineLength":
-      return `${formatAuthoredDimensionNumber(dimension.value, 2, resolvedValue)} mm length`;
     case "lineDistance":
     case "linePointDistance":
-      return `${formatAuthoredDimensionNumber(dimension.value, 2, resolvedValue)} mm distance`;
+      return `${formatAuthoredDimensionNumber(dimension.value, 2, resolved)} mm ${getDimensionQuantityNoun(dimension)}`;
     case "lineAngle":
-      return `${formatAuthoredDimensionDegrees(dimension.valueRadians, 1, resolvedValue)} deg angle`;
+      return `${formatAuthoredDimensionDegrees(dimension.valueRadians, 1, resolved)} deg angle`;
     case "arcStartPointCoincident":
       return "Arc start coincident";
     case "arcEndPointCoincident":
@@ -3153,8 +3431,12 @@ export function describeDimension(
 
 export function formatDimensionVisibleLabel(
   dimension: DimensionDefinition,
-  resolvedValue?: number,
+  resolvedValue?: number | null,
 ) {
+  if (isReferenceDimension(dimension)) {
+    return formatReferenceDimensionValue(dimension, resolvedValue ?? null);
+  }
+  const resolved = resolvedValue ?? undefined;
   switch (dimension.kind) {
     case "distance":
     case "pointDatumDistance":
@@ -3165,9 +3447,9 @@ export function formatDimensionVisibleLabel(
     case "lineLength":
     case "lineDistance":
     case "linePointDistance":
-      return formatAuthoredDimensionNumber(dimension.value, 2, resolvedValue);
+      return formatAuthoredDimensionNumber(dimension.value, 2, resolved);
     case "lineAngle":
-      return `${formatAuthoredDimensionDegrees(dimension.valueRadians, 1, resolvedValue)}°`;
+      return `${formatAuthoredDimensionDegrees(dimension.valueRadians, 1, resolved)}°`;
     case "arcStartPointCoincident":
     case "arcEndPointCoincident":
       return "Coincident";

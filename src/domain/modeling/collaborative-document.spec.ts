@@ -14,6 +14,18 @@ import type { AuthoredModelDocument } from "@/contracts/modeling/authored-docume
 import { createNewSketchSession } from "@/domain/editor/sketch-session";
 import { createStandardPlaneDefinition } from "./opencascade-kernel-seed";
 import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
+import { parseAuthoredModelDocument } from "@/contracts/modeling/authored-document.runtime-schema";
+import { isReferenceDimension } from "@/contracts/sketch/schema";
+import {
+  makeReferenceDimensionCases,
+  makeReferenceDimensionSketch,
+  withDimensions,
+} from "@/contracts/sketch/reference-dimension.fixtures";
+import {
+  makeReferenceDimensionInDefinition,
+  updateAnnotationValueInDefinition,
+} from "@/domain/editor/sketch-session/annotations";
 
 async function fixture() {
   const seed = await createSeedAuthoredModelDocument();
@@ -267,4 +279,47 @@ test("stale candidate field conflict applies none of its writes inside an Autome
     materializeCollaborativeDocument(after).sketches[0]!.definition.points[0]!
       .position,
   ).toEqual({ x: 50, y: 2 });
+});
+
+// T13d review A-2 (D9′), collaborative seam: one peer's Make reference and
+// another peer's concurrent value edit of the same dimension merge into a
+// document that opens, with the dimension a reference (the reference wins;
+// the merged value is kept and ignored).
+test("T13d D9′: concurrent Make reference and value edit merge into an openable document whose dimension is a reference", async () => {
+  const seed = await fixture();
+  const diameter = makeReferenceDimensionCases().find(
+    (entry) => entry.name === "diameter (circle)",
+  )!.driving;
+  seed.sketches[0]!.definition = withDimensions(
+    makeReferenceDimensionSketch(),
+    [diameter],
+  );
+  expect(parseAuthoredModelDocument(structuredClone(seed)).ok, "premise").toBe(
+    true,
+  );
+  const target = {
+    kind: "dimension",
+    sketchId: "sketch_merge",
+    dimensionId: diameter.dimensionId,
+  } as const;
+  const base = Automerge.from(createCollaborativeDocument(seed));
+  const a = change(Automerge.clone(base), seed, (document) => {
+    document.sketches[0]!.definition = makeReferenceDimensionInDefinition(
+      document.sketches[0]!.definition,
+      target,
+    );
+  });
+  const b = change(Automerge.clone(base), seed, (document) => {
+    document.sketches[0]!.definition = updateAnnotationValueInDefinition(
+      document.sketches[0]!.definition,
+      target,
+      createLiteralAuthoredValue(7),
+    );
+  });
+  const merged = materializeCollaborativeDocument(Automerge.merge(a, b));
+  const parsed = parseAuthoredModelDocument(structuredClone(merged));
+  expect(parsed.ok, "the merged document opens").toBe(true);
+  const dimension = merged.sketches[0]!.definition.dimensions[0]!;
+  expect(isReferenceDimension(dimension), "the reference wins").toBe(true);
+  expect(dimension).toMatchObject({ value: createLiteralAuthoredValue(7) });
 });

@@ -4,9 +4,19 @@ import {
   validateSketchDefinition,
   validateSketchRecord,
 } from "@/contracts/sketch/runtime-schema";
-import type { SketchDefinition } from "@/contracts/sketch/schema";
+import type {
+  DimensionDefinition,
+  SketchDefinition,
+} from "@/contracts/sketch/schema";
+import {
+  makeReferenceDimensionCases,
+  makeReferenceDimensionSketch,
+  withDimensions,
+} from "@/contracts/sketch/reference-dimension.fixtures";
 import { reconstructSplineAggregate } from "@/contracts/sketch/spline-geometry";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import { createAuthoredModelDocumentFromSnapshot } from "@/contracts/modeling/authored-document";
+import { parseAuthoredModelDocument } from "@/contracts/modeling/authored-document.runtime-schema";
 
 // Lane: logic. Seam: strict current sketch-record runtime contract.
 test("invalid and stale sketch derivations cannot carry consumable regions", async () => {
@@ -262,5 +272,153 @@ test("T10g option B: endSpanParameterLengths is structural here; a bad value loa
         diagnostics: [{ code: "invalid-end-span-parameter-length" }],
         spans: [],
       });
+  }
+});
+
+// T13d (D9), contract seam: a numeric dimension is driving (value) or a
+// reference (`reference: true`, no value), never both; arc endpoint bindings
+// cannot be references; the same-version JSON round trip keeps the marker.
+test("T13d D9′: validation accepts driving and reference shapes of every numeric kind and rejects invalid ones", () => {
+  const cases = makeReferenceDimensionCases();
+  const sketch = makeReferenceDimensionSketch();
+  const check = (dimensions: readonly unknown[]) =>
+    validateSketchDefinition(
+      JSON.parse(
+        JSON.stringify(
+          withDimensions(sketch, dimensions as DimensionDefinition[]),
+        ),
+      ),
+    ).success;
+
+  for (const entry of cases) {
+    expect(check([entry.driving]), `${entry.name}: driving`).toBe(true);
+    expect(check([entry.reference]), `${entry.name}: reference`).toBe(true);
+    const valueKey =
+      entry.driving.kind === "lineAngle" ? "valueRadians" : "value";
+    // D9′ (review A-2): a reference may keep its last driving value.
+    expect(
+      check([{ ...entry.reference, [valueKey]: 1 }]),
+      `${entry.name}: a reference keeping a value is accepted`,
+    ).toBe(true);
+    expect(
+      check([{ ...entry.driving, reference: true }]),
+      `${entry.name}: a driving dimension marked reference is a reference`,
+    ).toBe(true);
+    expect(
+      check([{ ...entry.reference, reference: "yes" }]),
+      `${entry.name}: a non-true marker is rejected`,
+    ).toBe(false);
+    expect(
+      check([{ ...entry.reference, reference: false }]),
+      `${entry.name}: reference: false is rejected`,
+    ).toBe(false);
+    expect(
+      check([{ ...entry.driving, reference: false }]),
+      `${entry.name}: a driving dimension with reference: false is rejected`,
+    ).toBe(false);
+    const neither: Record<string, unknown> = { ...entry.driving };
+    delete neither[valueKey];
+    expect(
+      check([neither]),
+      `${entry.name}: neither a value nor the reference marker is rejected`,
+    ).toBe(false);
+  }
+
+  const binding = {
+    dimensionId: "dimension_arc_start",
+    kind: "arcStartPointCoincident",
+    label: "Arc start",
+    entityId: "sketch_entity_arc",
+    pointId: "sketch_point_g",
+  };
+  expect(check([binding]), "premise: the binding is valid").toBe(true);
+  expect(
+    check([{ ...binding, reference: true }]),
+    "an arc endpoint binding cannot be a reference",
+  ).toBe(false);
+  expect(
+    check([{ ...binding, kind: "arcEndPointCoincident", reference: true }]),
+  ).toBe(false);
+
+  const roundTrip = JSON.parse(
+    JSON.stringify(
+      withDimensions(
+        sketch,
+        cases.map((entry) => entry.reference),
+      ),
+    ),
+  );
+  const validated = validateSketchDefinition(roundTrip);
+  expect(validated.success).toBe(true);
+  expect(
+    validated.success && validated.data.dimensions,
+    "same-version round trip keeps every reference dimension exactly",
+  ).toEqual(cases.map((entry) => entry.reference));
+});
+
+// T13d (D9), contract seam: the stored-record and authored-document entry
+// points (persistence, collaborative sync, file open, modeling service and
+// the OCC adapter all parse documents through parseAuthoredModelDocument)
+// enforce the same one-representation invariant.
+test("T13d D9′: sketch records and authored documents carry reference dimensions and reject invalid shapes", async () => {
+  const snapshot = await new MockKernelAdapter().getDocumentSnapshot({
+    contractVersion: "modeling-contract/v1alpha1",
+    documentId: "doc_workspace",
+  });
+  const cases = makeReferenceDimensionCases();
+  const sketch = makeReferenceDimensionSketch();
+  const circle = cases.find((entry) => entry.name === "circleRadius")!;
+  const shapes = {
+    reference: [circle.reference, ...cases.map((entry) => entry.driving)],
+    neither: [{ ...circle.reference, reference: undefined }],
+    falseMarker: [{ ...circle.reference, reference: false }],
+  };
+  const record = (dimensions: readonly unknown[]) => {
+    const current = structuredClone(
+      snapshot.snapshot.document.sketches[0]!.sketch,
+    );
+    current.definition = withDimensions(
+      sketch,
+      dimensions as DimensionDefinition[],
+    );
+    return JSON.parse(JSON.stringify(current));
+  };
+  const document = (dimensions: readonly unknown[]) => {
+    const authored = createAuthoredModelDocumentFromSnapshot(snapshot.snapshot);
+    authored.sketches[0]!.definition = withDimensions(
+      sketch,
+      dimensions as DimensionDefinition[],
+    );
+    return JSON.parse(JSON.stringify(authored));
+  };
+  expect(validateSketchRecord(record(shapes.reference)).success).toBe(true);
+  // D9′ (review A-2): a reference that kept a value opens, as a reference.
+  const kept = { ...circle.reference, value: 2 };
+  expect(validateSketchRecord(record([kept])).success).toBe(true);
+  const keptDocument = parseAuthoredModelDocument(document([kept]));
+  expect(keptDocument.ok).toBe(true);
+  expect(
+    keptDocument.ok &&
+      keptDocument.document.sketches[0]!.definition.dimensions[0],
+  ).toEqual(kept);
+  const parsed = parseAuthoredModelDocument(document(shapes.reference));
+  expect(
+    parsed.ok,
+    "an authored document opens with a reference dimension",
+  ).toBe(true);
+  expect(
+    parsed.ok && parsed.document.sketches[0]!.definition.dimensions[0],
+    "the document round trip keeps the reference dimension",
+  ).toEqual(circle.reference);
+  for (const [name, dimensions] of Object.entries(shapes)) {
+    if (name === "reference") continue;
+    expect(
+      validateSketchRecord(record(dimensions)).success,
+      `record: ${name}`,
+    ).toBe(false);
+    expect(
+      parseAuthoredModelDocument(document(dimensions)).ok,
+      `document: ${name}`,
+    ).toBe(false);
   }
 });

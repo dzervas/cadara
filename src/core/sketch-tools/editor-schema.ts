@@ -250,6 +250,10 @@ export interface SketchToolFloatingInputDescriptor {
    * document-variable suggestions are offered.
    */
   numericOnly?: true;
+  /** T13d: a read-only line shown above the input (a reference dimension's measured value). */
+  readout?: string;
+  /** T13d: one extra one-action control (a driving dimension's Make reference). */
+  secondaryAction?: { label: string; action: SketchToolActionDescriptor };
   anchor?: SketchToolAnchorDescriptor;
   placement?: "cursor" | "previewReference" | "target";
   submitAction: SketchToolActionDescriptor;

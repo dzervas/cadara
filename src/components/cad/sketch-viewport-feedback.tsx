@@ -3,6 +3,7 @@ import {
   useRef,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { Button } from "@mantine/core";
 
 import type {
   SketchToolOverlayDragHandle,
@@ -641,6 +642,11 @@ function ViewportFloatingInput({
       <div className="text-sm font-medium text-[var(--cad-foreground)]">
         {descriptor.label}
       </div>
+      {descriptor.readout ? (
+        <div className="mt-1 font-mono" data-floating-input-readout>
+          {descriptor.readout}
+        </div>
+      ) : null}
       <input
         ref={inputRef}
         className="mt-2 h-9 w-full rounded-md border border-[var(--cad-border)] bg-[var(--cad-surface)] px-2 font-mono text-[13px] text-[var(--cad-foreground)] outline-none focus-visible:border-[var(--cad-accent)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--cad-accent)]"
@@ -674,6 +680,18 @@ function ViewportFloatingInput({
           {descriptor.confirmLabel}
         </button>
       </div>
+      {descriptor.secondaryAction ? (
+        <Button
+          className="mt-2"
+          fullWidth
+          size="compact-xs"
+          variant="subtle"
+          color="gray"
+          onClick={() => onPatch(descriptor.secondaryAction!.action.patch)}
+        >
+          {descriptor.secondaryAction.label}
+        </Button>
+      ) : null}
     </div>
   );
 }

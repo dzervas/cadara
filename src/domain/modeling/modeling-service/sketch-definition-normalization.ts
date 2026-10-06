@@ -1,6 +1,7 @@
 import type {
   ConstraintDefinition,
   DimensionDefinition,
+  ReferenceDimensionDefinition,
 } from "@/contracts/sketch/schema";
 import {
   createLiteralAuthoredValue,
@@ -428,6 +429,44 @@ export function normalizeConstraintDefinitionCore(
 export function normalizeDimensionDefinitionCore(
   value: unknown,
 ): DimensionDefinition {
+  if (!isRecord(value) || value.reference === undefined) {
+    return normalizeDrivingDimensionDefinition(value);
+  }
+
+  // T13d (D9′): a reference dimension is a numeric kind with `reference: true`;
+  // it may keep its last driving value (normalized, then ignored). A marker
+  // other than `true`, or one on an arc endpoint binding, is rejected.
+  if (value.reference !== true) {
+    throw new Error(
+      "Invalid dimension reference marker: only `reference: true` is allowed.",
+    );
+  }
+  if (
+    value.kind === "arcStartPointCoincident" ||
+    value.kind === "arcEndPointCoincident"
+  ) {
+    throw new Error(
+      "Invalid reference dimension payload: arc endpoint bindings cannot be reference dimensions.",
+    );
+  }
+
+  const valueKey = value.kind === "lineAngle" ? "valueRadians" : "value";
+  if (value[valueKey] !== undefined) {
+    return {
+      ...normalizeDrivingDimensionDefinition(value),
+      reference: true,
+    } as ReferenceDimensionDefinition;
+  }
+  const normalized: Record<string, unknown> = {
+    ...normalizeDrivingDimensionDefinition({ ...value, [valueKey]: 0 }),
+  };
+  delete normalized[valueKey];
+  return { ...normalized, reference: true } as ReferenceDimensionDefinition;
+}
+
+function normalizeDrivingDimensionDefinition(
+  value: unknown,
+): DimensionDefinition {
   if (
     !isRecord(value) ||
     !isString(value.dimensionId) ||
@@ -458,6 +497,37 @@ export function normalizeDimensionDefinitionCore(
         assertSketchPointId(value.pointIds[0]),
         assertSketchPointId(value.pointIds[1]),
       ],
+      value: normalizeSketchDimensionAuthoredValue(value.value),
+      annotationPlacement: normalizeDimensionLineAnnotationPlacement(
+        value.annotationPlacement,
+      ),
+    };
+  }
+
+  // T13d: the origin-datum distance had no normalization branch, so a sketch
+  // carrying one (driving or reference) failed to normalize.
+  if (value.kind === "pointDatumDistance") {
+    const datum = isRecord(value.datum)
+      ? normalizeSketchPointConstraintOperand(value.datum)
+      : null;
+    if (
+      (value.axis !== "aligned" &&
+        value.axis !== "horizontal" &&
+        value.axis !== "vertical") ||
+      !isRecord(value.point) ||
+      datum?.kind !== "sketchDatum" ||
+      (!isAuthoredValue(value.value) && typeof value.value !== "number")
+    ) {
+      throw new Error("Invalid point-datum distance dimension payload.");
+    }
+
+    return {
+      dimensionId: assertDimensionId(value.dimensionId),
+      kind: "pointDatumDistance",
+      label: value.label,
+      axis: value.axis,
+      point: normalizeLocalPointConstraintOperand(value.point),
+      datum,
       value: normalizeSketchDimensionAuthoredValue(value.value),
       annotationPlacement: normalizeDimensionLineAnnotationPlacement(
         value.annotationPlacement,

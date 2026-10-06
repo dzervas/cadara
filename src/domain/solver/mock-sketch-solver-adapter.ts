@@ -44,11 +44,14 @@ import {
 import {
   compileSketchSolveProgram,
   createCompiledSketchSolveSession,
+  measureReferenceDimensionsAtAuthoredPositions,
+  undefinedReferenceDimensionDiagnostics,
   unsatisfiedRequirementDiagnostics,
   updateCompiledSketchSolveSession,
   type SketchCompiledSolveSession,
 } from "@/contracts/sketch/solver-core";
 import {
+  isReferenceDimension,
   SOLVED_SKETCH_SCHEMA_VERSION,
   type ProjectedSketchGeometryRef,
   type SketchDefinition,
@@ -1117,6 +1120,7 @@ function solveDefinition(
   partialSolvePolicy: SolveSketchRequest["partialSolvePolicy"],
   modelingTolerance: number,
   offsetPlans: SolveSketchRequest["offsetPlans"],
+  tolerances: SolveSketchRequest["tolerances"],
 ) {
   // T08b-g5: offsets come from the shared contracts solve frame at τ.
   const hasOffsets = (authoredDefinition.derivedRelationships ?? []).some(
@@ -1226,7 +1230,20 @@ function solveDefinition(
         } as const;
     }
   });
+  // T13d (D10): reference dimensions are `driven` with the core solver's
+  // measurement of the (unsolved) authored positions; they never drive.
+  const referenceStatuses = new Map(
+    measureReferenceDimensionsAtAuthoredPositions({
+      definition,
+      projectedReferences,
+      tolerances,
+      modelingTolerance,
+    }).map((entry) => [entry.dimensionId, entry]),
+  );
   const dimensionStatuses = definition.dimensions.map((dimension) => {
+    if (isReferenceDimension(dimension)) {
+      return referenceStatuses.get(dimension.dimensionId)!;
+    }
     switch (dimension.kind) {
       case "distance": {
         const left = points.get(dimension.pointIds[0]);
@@ -1296,6 +1313,7 @@ function solveDefinition(
       constraintStatuses,
       dimensionStatuses,
     ),
+    ...undefinedReferenceDimensionDiagnostics(definition, dimensionStatuses),
   );
   const errorCount = validationDiagnostics.filter(
     (diagnostic) => diagnostic.severity === "error",
@@ -1309,7 +1327,11 @@ function solveDefinition(
       constraintState: "inconsistent",
     };
   } else if (
-    definition.constraints.length + definition.dimensions.length ===
+    // T13d review A-1: as the core, a reference dimension constrains nothing.
+    definition.constraints.length +
+      definition.dimensions.filter(
+        (dimension) => !isReferenceDimension(dimension),
+      ).length ===
     0
   ) {
     status = {
@@ -1445,6 +1467,7 @@ export class MockSketchSolverAdapter implements SketchSolverAdapter {
       request.partialSolvePolicy,
       request.modelingTolerance,
       request.offsetPlans,
+      request.tolerances,
     );
     return {
       ...base,
