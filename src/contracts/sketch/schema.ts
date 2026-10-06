@@ -547,15 +547,20 @@ export type DimensionAnnotationPlacement =
 export type SketchDimensionAuthoredValue = any;
 export type SketchDimensionNumericValue = number;
 
-type NumericDimensionWithValue<TKind extends DimensionDefinition["kind"]> =
-  Omit<Extract<DimensionDefinition, { kind: TKind }>, "value"> & {
-    value: SketchDimensionNumericValue;
-  };
+type NumericDimensionWithValue<
+  TKind extends DrivingDimensionDefinition["kind"],
+> = Omit<Extract<DrivingDimensionDefinition, { kind: TKind }>, "value"> & {
+  value?: SketchDimensionNumericValue;
+};
 
-type NumericDimensionWithRadians<TKind extends DimensionDefinition["kind"]> =
-  Omit<Extract<DimensionDefinition, { kind: TKind }>, "valueRadians"> & {
-    valueRadians: SketchDimensionNumericValue;
-  };
+type NumericDimensionWithRadians<
+  TKind extends DrivingDimensionDefinition["kind"],
+> = Omit<
+  Extract<DrivingDimensionDefinition, { kind: TKind }>,
+  "valueRadians"
+> & {
+  valueRadians?: SketchDimensionNumericValue;
+};
 
 export type NumericDimensionDefinition =
   | NumericDimensionWithValue<"distance">
@@ -568,6 +573,7 @@ export type NumericDimensionDefinition =
   | NumericDimensionWithRadians<"lineAngle">
   | NumericDimensionWithValue<"horizontalDistance">
   | NumericDimensionWithValue<"verticalDistance">
+  | ReferenceDimensionDefinition
   | Extract<
       DimensionDefinition,
       { kind: "arcStartPointCoincident" | "arcEndPointCoincident" }
@@ -899,6 +905,15 @@ export type ConstraintDefinition =
 /**
  * Durable authored dimension definition.
  * Dimensions are solver-facing authored inputs and must not be inferred from UI state.
+ *
+ * T13d (D9′): every numeric kind is either driving (no marker; it must
+ * carry `value` / `valueRadians`) or a reference (`reference: true`: it only
+ * measures, never drives the solve, and reports status `driven`). A
+ * reference may keep its last driving value (so a concurrent Make reference
+ * and value edit still merges into an openable document); the reference
+ * wins and that value is ignored by the solver, display and status. "A
+ * driving dimension has a value" is a runtime invariant
+ * (`validateSketchDefinition`); arc endpoint bindings cannot be references.
  */
 export type DimensionDefinition =
   | {
@@ -911,7 +926,9 @@ export type DimensionDefinition =
       /** Two referenced points whose solved separation must match `value`. */
       pointIds: readonly [SketchPointId, SketchPointId];
       /** Requested dimension value in sketch-plane units. */
-      value: SketchDimensionAuthoredValue;
+      value?: SketchDimensionAuthoredValue;
+      /** T13d (D9′): a reference (non-driving) dimension; any `value` is ignored. */
+      reference?: true;
       /** Optional persisted sketch-plane annotation placement. */
       annotationPlacement?: DimensionLineAnnotationPlacement;
     }
@@ -927,7 +944,9 @@ export type DimensionDefinition =
       /** Sketch origin datum referenced by the dimension. */
       datum: SketchDatumConstraintOperand;
       /** Requested dimension value in sketch-plane units. */
-      value: SketchDimensionAuthoredValue;
+      value?: SketchDimensionAuthoredValue;
+      /** T13d (D9′): a reference (non-driving) dimension; any `value` is ignored. */
+      reference?: true;
       /** Optional persisted sketch-plane annotation placement. */
       annotationPlacement?: DimensionLineAnnotationPlacement;
     }
@@ -939,7 +958,9 @@ export type DimensionDefinition =
       /** Referenced circle entity whose solved radius must match `value`. */
       entityId: SketchEntityId;
       /** Requested radius value in sketch-plane units. */
-      value: SketchDimensionAuthoredValue;
+      value?: SketchDimensionAuthoredValue;
+      /** T13d (D9′): a reference (non-driving) dimension; any `value` is ignored. */
+      reference?: true;
       /** Optional persisted sketch-plane annotation placement. */
       annotationPlacement?: DimensionLineAnnotationPlacement;
     }
@@ -951,7 +972,9 @@ export type DimensionDefinition =
       /** Referenced circle or arc entity whose solved diameter must match `value`. */
       entityId: SketchEntityId;
       /** Requested diameter value in sketch-plane units. */
-      value: SketchDimensionAuthoredValue;
+      value?: SketchDimensionAuthoredValue;
+      /** T13d (D9′): a reference (non-driving) dimension; any `value` is ignored. */
+      reference?: true;
       /** Optional persisted sketch-plane annotation placement. */
       annotationPlacement?: DimensionLineAnnotationPlacement;
     }
@@ -963,7 +986,9 @@ export type DimensionDefinition =
       /** Referenced local line segment whose solved endpoint separation must match `value`. */
       entityId: SketchEntityId;
       /** Requested line length in sketch-plane units. */
-      value: SketchDimensionAuthoredValue;
+      value?: SketchDimensionAuthoredValue;
+      /** T13d (D9′): a reference (non-driving) dimension; any `value` is ignored. */
+      reference?: true;
       /** Optional persisted sketch-plane annotation placement. */
       annotationPlacement?: DimensionLineAnnotationPlacement;
     }
@@ -978,7 +1003,9 @@ export type DimensionDefinition =
         SketchCurveConstraintOperand,
       ];
       /** Requested perpendicular distance in sketch-plane units. */
-      value: SketchDimensionAuthoredValue;
+      value?: SketchDimensionAuthoredValue;
+      /** T13d (D9′): a reference (non-driving) dimension; any `value` is ignored. */
+      reference?: true;
       /** Optional persisted sketch-plane annotation placement. */
       annotationPlacement?: DimensionLineAnnotationPlacement;
     }
@@ -992,7 +1019,9 @@ export type DimensionDefinition =
       /** Sketch-space point reference. */
       point: SketchPointConstraintOperand;
       /** Requested perpendicular distance in sketch-plane units. */
-      value: SketchDimensionAuthoredValue;
+      value?: SketchDimensionAuthoredValue;
+      /** T13d (D9′): a reference (non-driving) dimension; any `value` is ignored. */
+      reference?: true;
       /** Optional persisted sketch-plane annotation placement. */
       annotationPlacement?: DimensionLineAnnotationPlacement;
     }
@@ -1007,7 +1036,9 @@ export type DimensionDefinition =
         SketchCurveConstraintOperand,
       ];
       /** Requested enclosed angle in radians. */
-      valueRadians: SketchDimensionAuthoredValue;
+      valueRadians?: SketchDimensionAuthoredValue;
+      /** T13d (D9′): a reference (non-driving) dimension; any `valueRadians` is ignored. */
+      reference?: true;
       /** Optional persisted sketch-plane annotation placement. */
       annotationPlacement?: DimensionAngleAnnotationPlacement;
     }
@@ -1019,7 +1050,9 @@ export type DimensionDefinition =
       /** Two referenced points whose solved horizontal separation must match `value`. */
       pointIds: readonly [SketchPointId, SketchPointId];
       /** Requested signed horizontal distance in sketch-plane units. */
-      value: SketchDimensionAuthoredValue;
+      value?: SketchDimensionAuthoredValue;
+      /** T13d (D9′): a reference (non-driving) dimension; any `value` is ignored. */
+      reference?: true;
       /** Optional persisted sketch-plane annotation placement. */
       annotationPlacement?: DimensionLineAnnotationPlacement;
     }
@@ -1031,7 +1064,9 @@ export type DimensionDefinition =
       /** Two referenced points whose solved vertical separation must match `value`. */
       pointIds: readonly [SketchPointId, SketchPointId];
       /** Requested signed vertical distance in sketch-plane units. */
-      value: SketchDimensionAuthoredValue;
+      value?: SketchDimensionAuthoredValue;
+      /** T13d (D9′): a reference (non-driving) dimension; any `value` is ignored. */
+      reference?: true;
       /** Optional persisted sketch-plane annotation placement. */
       annotationPlacement?: DimensionLineAnnotationPlacement;
     }
@@ -1055,6 +1090,36 @@ export type DimensionDefinition =
       /** Referenced authored point that must coincide with the solved arc end point. */
       pointId: SketchPointId;
     };
+
+type NumericDimensionKind = Exclude<
+  DimensionDefinition["kind"],
+  "arcStartPointCoincident" | "arcEndPointCoincident"
+>;
+
+/** A driving numeric dimension of each kind (TypeScript view; value present). */
+export type DrivingDimensionDefinition = {
+  [TKind in NumericDimensionKind]: Omit<
+    Extract<DimensionDefinition, { kind: TKind }>,
+    "reference"
+  >;
+}[NumericDimensionKind];
+
+/**
+ * A reference dimension of each numeric kind (TypeScript view; a kept value
+ * is ignored).
+ */
+export type ReferenceDimensionDefinition = {
+  [TKind in NumericDimensionKind]: Omit<
+    Extract<DimensionDefinition, { kind: TKind }>,
+    "reference"
+  > & { reference: true };
+}[NumericDimensionKind];
+
+export function isReferenceDimension<TDimension extends { kind: string }>(
+  dimension: TDimension,
+): dimension is TDimension & { reference: true } {
+  return "reference" in dimension && dimension.reference === true;
+}
 
 /**
  * Durable authored external sketch reference definition.

@@ -2101,3 +2101,71 @@ test("T13c R-2: Redo of a conflicting annotation edit shows the conflict explana
     "The sketch is invalid; profiles from it are blocked. Change or delete one of them, or Undo.",
   );
 });
+
+// T13d (application seam, action owner): Make reference and Make driving are
+// each one authored action; Undo and Redo restore each state exactly.
+test("T13d: Make reference and Make driving are one action each; Undo/Redo restore them exactly", async () => {
+  const f = await fixture();
+  let session = acceptSketchDraw(
+    startSketchDraw(beginSketchTool(f.session, "rectangle"), [20, 1]),
+    [24, 4],
+  );
+  const bottom = session.definition.entities.find((entity) =>
+    entity.label.endsWith("bottom"),
+  )!.target;
+  session = patchSketchConstraintValue(
+    patchSketchConstraintValue(
+      selectSketchConstraintTarget(
+        beginSketchTool(session, "dimensionDistance"),
+        bottom,
+      ),
+      { value: 4 },
+    ),
+    { intent: "commitConstraintValue" },
+  );
+  f.apply({ type: "selection.cleared" }, session);
+  const driving = projection(f.session);
+  const depth = f.session.actionHistory?.undo.length ?? 0;
+  const edit = (from: SketchSessionState) =>
+    beginSketchAnnotationEdit(from, {
+      kind: "dimension",
+      sketchId: from.actionContextId,
+      dimensionId: from.definition.dimensions[0]!.dimensionId,
+    } as Parameters<typeof beginSketchAnnotationEdit>[1]);
+
+  f.apply(
+    { type: "selection.cleared" },
+    patchSketchConstraintValue(edit(f.session), {
+      intent: "makeAnnotationReference",
+    }),
+  );
+  const reference = projection(f.session);
+  // D9′: the stored value is kept (ignored while a reference).
+  expect(f.session.definition.dimensions[0]).toHaveProperty("value");
+  expect(f.session.definition.dimensions[0]).toHaveProperty("reference", true);
+  expect(f.session.actionHistory?.undo.length).toBe(depth + 1);
+
+  f.apply(
+    { type: "selection.cleared" },
+    patchSketchConstraintValue(edit(f.session), {
+      intent: "commitAnnotationValue",
+    }),
+  );
+  const drivingAgain = projection(f.session);
+  expect(f.session.definition.dimensions[0]).not.toHaveProperty("reference");
+  expect(f.session.actionHistory?.undo.length).toBe(depth + 2);
+
+  expect(projection(f.apply({ type: "history.undoRequested" }))).toEqual(
+    reference,
+  );
+  expect(projection(f.apply({ type: "history.undoRequested" }))).toEqual(
+    driving,
+  );
+  expect(projection(f.apply({ type: "history.redoRequested" }))).toEqual(
+    reference,
+  );
+  expect(projection(f.apply({ type: "history.redoRequested" }))).toEqual(
+    drivingAgain,
+  );
+  expect(f.session.liveSolve?.accepted).toBe(true);
+});

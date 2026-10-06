@@ -13,6 +13,11 @@ import {
   resolveSketchDimensionValues,
 } from "@/domain/modeling/sketch-dimension-expressions";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import {
+  makeReferenceDimensionCases,
+  makeReferenceDimensionSketch,
+  withDimensions,
+} from "@/contracts/sketch/reference-dimension.fixtures";
 
 test("src/domain/modeling/sketch-dimension-expressions.spec.ts", () => {
   const variables: DocumentVariableRecord[] = [
@@ -209,6 +214,100 @@ test("src/domain/modeling/sketch-dimension-expressions.spec.ts offset derivation
       composed.definition.derivedRelationships[0].distance,
     "The dimension resolution path should also resolve derivation distances.",
   ).toBe(1.5);
+});
+
+// T13d (D9, R-1), logic lane: the modeling-service normalization rebuilds
+// dimensions field by field; it must carry `reference` for every numeric
+// kind and reject mixed shapes. Expression resolution skips references.
+test("T13d R-1: normalization keeps reference dimensions of every numeric kind and rejects invalid shapes", () => {
+  for (const entry of makeReferenceDimensionCases()) {
+    expect(
+      normalizeDimensionDefinitionCore(
+        JSON.parse(JSON.stringify(entry.reference)),
+      ),
+      `${entry.name}: the reference round-trips exactly`,
+    ).toEqual(entry.reference);
+    const driving = normalizeDimensionDefinitionCore(
+      JSON.parse(JSON.stringify(entry.driving)),
+    );
+    expect("reference" in driving, `${entry.name}: driving stays driving`).toBe(
+      false,
+    );
+    const valueKey =
+      entry.driving.kind === "lineAngle" ? "valueRadians" : "value";
+    expect(
+      (driving as Record<string, unknown>)[valueKey],
+      `${entry.name}: the driving value is kept`,
+    ).toEqual(
+      createLiteralAuthoredValue(
+        (entry.driving as Record<string, number>)[valueKey]!,
+      ),
+    );
+    // D9′ (review A-2/A-3): a kept value normalizes with the marker; an
+    // explicitly undefined value is no value.
+    expect(
+      normalizeDimensionDefinitionCore({ ...entry.reference, [valueKey]: 1 }),
+      `${entry.name}: a reference keeping a value normalizes`,
+    ).toMatchObject({
+      reference: true,
+      [valueKey]: createLiteralAuthoredValue(1),
+    });
+    expect(
+      normalizeDimensionDefinitionCore({
+        ...entry.reference,
+        [valueKey]: undefined,
+      }),
+      `${entry.name}: { reference: true, value: undefined } normalizes`,
+    ).toEqual(entry.reference);
+    for (const [shape, payload] of [
+      [
+        "neither a value nor the marker",
+        { ...entry.reference, reference: undefined },
+      ],
+      ["reference: false", { ...entry.reference, reference: false }],
+      ["reference: false with a value", { ...entry.driving, reference: false }],
+      ["reference: 'yes'", { ...entry.reference, reference: "yes" }],
+    ] as const)
+      expect(
+        () => normalizeDimensionDefinitionCore(payload),
+        `${entry.name}: ${shape} is rejected`,
+      ).toThrow();
+  }
+  expect(() =>
+    normalizeDimensionDefinitionCore({
+      dimensionId: "dimension_arc_start",
+      kind: "arcStartPointCoincident",
+      label: "Arc start",
+      entityId: "sketch_entity_arc",
+      pointId: "sketch_point_g",
+      reference: true,
+    }),
+  ).toThrow(/arc endpoint bindings cannot be reference/);
+});
+
+test("T13d R-1: expression resolution skips reference dimensions and still resolves driving ones", () => {
+  const cases = makeReferenceDimensionCases();
+  const references = cases.map((entry) => entry.reference);
+  const width = normalizeDimensionDefinitionCore({
+    dimensionId: "dimension_width_expr",
+    kind: "lineLength",
+    label: "Width",
+    entityId: "sketch_entity_bottom",
+    value: createExpressionAuthoredValue("width"),
+  });
+  const resolved = resolveSketchDimensionValues({
+    definition: withDimensions(makeReferenceDimensionSketch(), [
+      ...references,
+      width,
+    ]),
+    variables: [
+      { variableId: "variable_width", name: "width", valueText: "4" },
+    ],
+  });
+  expect(resolved.ok, "references need no value to resolve").toBe(true);
+  if (!resolved.ok) return;
+  expect(resolved.definition.dimensions.slice(0, -1)).toEqual(references);
+  expect(resolved.definition.dimensions.at(-1)).toMatchObject({ value: 4 });
 });
 
 function createSketchDefinition(input: {

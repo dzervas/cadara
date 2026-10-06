@@ -4,7 +4,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { SketchConstraintAnnotations } from "@/components/cad/sketch-constraint-annotations";
 import { resolveSketchAnnotationVisibility } from "@/components/cad/sketch-constraint-annotation-visibility";
 import { getAnnotationProjectionId } from "@/components/cad/sketch-viewport-feedback-model";
-import type { SketchAnnotationDescriptor } from "@/domain/editor/sketch-session";
+import {
+  getSketchAnnotationDescriptors,
+  type SketchAnnotationDescriptor,
+} from "@/domain/editor/sketch-session";
+import { makeCircleWithDiameterSession } from "@/components/cad/sketch-reference-dimension.fixtures";
 
 test("src/components/cad/sketch-constraint-annotations.spec.tsx", () => {
   const annotation: SketchAnnotationDescriptor = {
@@ -362,4 +366,51 @@ test("src/components/cad/sketch-constraint-annotations.spec.tsx visibility", () 
       markup.includes(">10.00<"),
     "Dimension annotations should render fully visible alongside faded constraints.",
   ).toBeTruthy();
+});
+
+// T13d (D12), UI lane: a reference dimension chip shows its measured value
+// in parentheses in the muted tone, and its accessible name says
+// "reference"; a driving chip keeps its value and constraint tone.
+test("T13d D12: reference dimension chips read '(value)', muted, with 'reference' in the accessible name", () => {
+  const session = makeCircleWithDiameterSession({ reference: true });
+  const annotations = getSketchAnnotationDescriptors(session).filter(
+    (entry) => entry.status === "dimension",
+  );
+  const markup = renderToStaticMarkup(
+    <SketchConstraintAnnotations
+      annotations={annotations}
+      projections={annotations.map((entry, index) => ({
+        id: getAnnotationProjectionId(entry.id),
+        x: 100 + index * 60,
+        y: 80,
+      }))}
+      hoveredAnnotation={null}
+      selectedAnnotation={null}
+      hoverTarget={null}
+      selection={[]}
+      onHover={() => undefined}
+      onClearHover={() => undefined}
+      onSelect={() => undefined}
+      onEdit={() => undefined}
+    />,
+  );
+  const chip = (index: number) =>
+    markup
+      .split("<button")
+      .find((button) =>
+        button.includes(
+          `aria-label="${session.definition.dimensions[index]!.label}:`,
+        ),
+      );
+  const reference = chip(0);
+  expect(reference, "premise: the reference chip renders").toBeTruthy();
+  expect(reference).toContain(
+    `aria-label="${session.definition.dimensions[0]!.label}: (5.00) mm reference diameter"`,
+  );
+  expect(reference).toContain(">(5.00)</span>");
+  expect(reference).toContain("color:var(--cad-muted-foreground)");
+  const driving = chip(1);
+  expect(driving, "premise: the driving chip renders").toBeTruthy();
+  expect(driving).toContain(">4.00</span>");
+  expect(driving).not.toContain("--cad-muted-foreground");
 });

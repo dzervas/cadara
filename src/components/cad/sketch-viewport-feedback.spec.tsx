@@ -1,10 +1,15 @@
 import { test, expect } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
+import { MantineProvider } from "@mantine/core";
 
 import { SketchViewportFeedbackLayer } from "@/components/cad/sketch-viewport-feedback";
 import type { SketchToolPresentationSchema } from "@/core/sketch-tools/editor-schema";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import { buildSketchEditToolPresentation } from "@/domain/editor/sketch-session/tools";
+import {
+  editDimension,
+  makeCircleWithDiameterSession,
+} from "@/components/cad/sketch-reference-dimension.fixtures";
 
 test("src/components/cad/sketch-viewport-feedback.spec.tsx", () => {
   const schema: SketchToolPresentationSchema = {
@@ -381,4 +386,51 @@ test("T13b A6 (D29): edit-tool floating inputs offer no variable datalist; dimen
     ) && dimension.includes('<option value="w">'),
     "a dimension value still offers the document variables",
   ).toBe(true);
+});
+
+// T13d, UI lane: the dimension edit popup renders Make reference on a
+// driving dimension and, on a reference, its measured readout plus Make
+// driving; each control dispatches its patch.
+test("T13d: the dimension edit popup renders Make reference / Make driving controls", () => {
+  const render = (
+    floatingInput: SketchToolPresentationSchema["floatingInput"],
+  ) =>
+    renderToStaticMarkup(
+      <MantineProvider>
+        <SketchViewportFeedbackLayer
+          schema={{ prompts: [], overlays: [], floatingInput }}
+          projections={[
+            { id: `floating-input:${floatingInput!.id}`, x: 180, y: 90 },
+          ]}
+          documentVariableNames={[]}
+          onPatch={() => undefined}
+        />
+      </MantineProvider>,
+    );
+  const driving = editDimension(
+    makeCircleWithDiameterSession({ reference: false }),
+    0,
+  ).toolPresentation?.floatingInput;
+  const drivingMarkup = render(driving);
+  expect(drivingMarkup).toContain("Make reference");
+  expect(drivingMarkup).toContain(">Save<");
+  expect(drivingMarkup).not.toContain("data-floating-input-readout");
+
+  const reference = editDimension(
+    makeCircleWithDiameterSession({ reference: true }),
+    0,
+  ).toolPresentation?.floatingInput;
+  const referenceMarkup = render(reference);
+  expect(referenceMarkup).toContain("Diameter (reference)");
+  expect(referenceMarkup).toMatch(
+    /data-floating-input-readout="true">Measured 5\.00 mm</,
+  );
+  expect(referenceMarkup).toContain(">Make driving<");
+  expect(referenceMarkup).not.toContain("Make reference");
+  expect(reference?.submitAction.patch).toEqual({
+    intent: "commitAnnotationValue",
+  });
+  expect(driving?.secondaryAction?.action.patch).toEqual({
+    intent: "makeAnnotationReference",
+  });
 });

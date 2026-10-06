@@ -20,6 +20,7 @@ import type {
 } from "@/contracts/sketch/schema";
 import {
   isAcceptedConstraintStatus,
+  isReferenceDimension,
   SOLVED_SKETCH_SCHEMA_VERSION,
 } from "@/contracts/sketch/schema";
 import {
@@ -411,6 +412,60 @@ export function unsatisfiedRequirementDiagnostics(
         : [],
     ),
   ];
+}
+
+/**
+ * T13d (D9): a driving dimension's numeric value (references never reach
+ * here; the binding kinds have none). A driving dimension without one breaks
+ * the validated contract, so it throws instead of solving with NaN.
+ */
+function getDrivingDimensionValue(dimension: DimensionDefinition): number {
+  if (
+    dimension.kind === "arcStartPointCoincident" ||
+    dimension.kind === "arcEndPointCoincident"
+  ) {
+    return 0;
+  }
+  const value =
+    "valueRadians" in dimension
+      ? dimension.valueRadians
+      : "value" in dimension
+        ? dimension.value
+        : undefined;
+  if (value === undefined) {
+    throw new Error(`Driving dimension ${dimension.dimensionId} has no value.`);
+  }
+  return value;
+}
+
+/**
+ * T13d (D10): one info diagnostic per reference dimension whose measured
+ * quantity is undefined (e.g. a line distance between non-parallel lines).
+ * Never a warning or error: a reference never counts against the solve.
+ * Shared with the mock solver adapter (parity).
+ */
+export function undefinedReferenceDimensionDiagnostics(
+  definition: Pick<SketchDefinition, "dimensions">,
+  dimensionStatuses: readonly DimensionStatusRecord[],
+): SketchSolveDiagnostic[] {
+  const labels = new Map(
+    definition.dimensions.map((dimension) => [
+      dimension.dimensionId,
+      dimension.label,
+    ]),
+  );
+  return dimensionStatuses.flatMap((entry) =>
+    entry.status === "driven" && entry.solvedValue === null
+      ? [
+          makeDiagnostic(
+            "reference-dimension-undefined",
+            "info",
+            `${labels.get(entry.dimensionId) ?? entry.dimensionId} has no measurable value for its current geometry.`,
+            { kind: "dimension", dimensionId: entry.dimensionId },
+          ),
+        ]
+      : [],
+  );
 }
 
 function zeroVector(length: number) {
@@ -3978,6 +4033,12 @@ function buildSystem(
   }
 
   for (const dimension of definition.dimensions) {
+    // T13d (D10): a reference dimension measures its targets and compiles no
+    // residual, so it never drives (or over-constrains) the solve.
+    if (isReferenceDimension(dimension)) {
+      continue;
+    }
+    const drivingValue = getDrivingDimensionValue(dimension);
     if (dimension.kind === "distance") {
       const left = pointRecords.get(dimension.pointIds[0]);
       const right = pointRecords.get(dimension.pointIds[1]);
@@ -3999,11 +4060,11 @@ function buildSystem(
             const current = length(delta);
             if (current < DEGENERATE_NORM_EPSILON) {
               return {
-                residual: 0.5 * dimension.value * dimension.value,
+                residual: 0.5 * drivingValue * drivingValue,
                 gradient,
               };
             }
-            const err = current - dimension.value;
+            const err = current - drivingValue;
             const coeffX = (err * delta[0]) / current;
             const coeffY = (err * delta[1]) / current;
             addPointGradient(gradient, left, coeffX, coeffY);
@@ -4012,7 +4073,7 @@ function buildSystem(
           }
 
           const index = dimension.axis === "horizontal" ? 0 : 1;
-          const err = delta[index] - dimension.value;
+          const err = delta[index] - drivingValue;
           if (index === 0) {
             addPointGradient(gradient, left, -err, 0);
             addPointGradient(gradient, right, err, 0);
@@ -4046,7 +4107,7 @@ function buildSystem(
           const delta = subtract(b, a);
           const err =
             (dimension.kind === "horizontalDistance" ? delta[0] : delta[1]) -
-            dimension.value;
+            drivingValue;
           if (dimension.kind === "horizontalDistance") {
             addPointGradient(gradient, left, -err, 0);
             addPointGradient(gradient, right, err, 0);
@@ -4075,11 +4136,11 @@ function buildSystem(
           const gradient = zeroVector(parameterCount);
           const circleState = entityStates.get(entity.entityId);
           if (!circleState || circleState.kind !== "circle") {
-            const err = entity.radius - dimension.value;
+            const err = entity.radius - drivingValue;
             return { residual: 0.5 * err * err, gradient };
           }
 
-          const err = getCircleRadius(values, circleState) - dimension.value;
+          const err = getCircleRadius(values, circleState) - drivingValue;
           gradient[circleState.baseIndex] = err;
           return { residual: 0.5 * err * err, gradient };
         },
@@ -4104,8 +4165,8 @@ function buildSystem(
           evaluateResidual(values) {
             const circleLike = getLocalCircleLike(values, entity);
             return circleLike
-              ? circleLike.radius * 2 - dimension.value
-              : dimension.value;
+              ? circleLike.radius * 2 - drivingValue
+              : drivingValue;
           },
         }),
       );
@@ -4128,14 +4189,14 @@ function buildSystem(
           evaluateResidual(values) {
             const localPoint = getPoint(values, point);
             if (dimension.axis === "horizontal") {
-              return Math.abs(localPoint[0] - datumPoint[0]) - dimension.value;
+              return Math.abs(localPoint[0] - datumPoint[0]) - drivingValue;
             }
 
             if (dimension.axis === "vertical") {
-              return Math.abs(localPoint[1] - datumPoint[1]) - dimension.value;
+              return Math.abs(localPoint[1] - datumPoint[1]) - drivingValue;
             }
 
-            return length(subtract(localPoint, datumPoint)) - dimension.value;
+            return length(subtract(localPoint, datumPoint)) - drivingValue;
           },
         }),
       );
@@ -4159,7 +4220,7 @@ function buildSystem(
           evaluateResidual(values) {
             return (
               length(subtract(getPoint(values, end), getPoint(values, start))) -
-              dimension.value
+              drivingValue
             );
           },
         }),
@@ -4222,7 +4283,7 @@ function buildSystem(
                 pointRecords,
                 options.projectedReferences ?? [],
               );
-              if (!first || !second) return dimension.value;
+              if (!first || !second) return drivingValue;
               return component === "parallel"
                 ? lineParallelResidual(
                     first.start,
@@ -4236,7 +4297,7 @@ function buildSystem(
                       first.start,
                       first.end,
                     ),
-                  ) - dimension.value;
+                  ) - drivingValue;
             },
           }),
         );
@@ -4270,8 +4331,8 @@ function buildSystem(
             );
             return line && point
               ? Math.abs(pointLineSignedDistance(point, line.start, line.end)) -
-                  dimension.value
-              : dimension.value;
+                  drivingValue
+              : drivingValue;
           },
         }),
       );
@@ -4331,7 +4392,7 @@ function buildSystem(
               options.projectedReferences ?? [],
             );
             if (!first || !second) {
-              return dimension.valueRadians;
+              return drivingValue;
             }
 
             const angle = lineAngleRadians(
@@ -4341,10 +4402,10 @@ function buildSystem(
               second.end,
             );
             if (angle === null || angle <= DEGENERATE_NORM_EPSILON) {
-              return dimension.valueRadians;
+              return drivingValue;
             }
 
-            return angle - dimension.valueRadians;
+            return angle - drivingValue;
           },
         }),
       );
@@ -7448,6 +7509,9 @@ function materializeSolveResult(
     return status ? { ...entry, status } : entry;
   });
   diagnostics.push(...blockedRequirementDiagnostics(definition, blocked));
+  diagnostics.push(
+    ...undefinedReferenceDimensionDiagnostics(definition, dimensionStatuses),
+  );
 
   // B12: flag any solved circle whose radius ended up non-positive.
   const solvedRadiusDiagnostics: SketchSolveDiagnostic[] = [];
@@ -10202,6 +10266,15 @@ function buildDimensionStatuses(
       solvedValue = state?.kind === "arc" ? 0 : null;
     }
 
+    // T13d (D10): a reference dimension only reports its measured quantity.
+    if (isReferenceDimension(dimension)) {
+      return {
+        dimensionId: dimension.dimensionId,
+        status: "driven" as const,
+        solvedValue,
+      };
+    }
+
     const residualTolerance =
       dimension.kind === "lineAngle"
         ? tolerance.angleRadians
@@ -10366,6 +10439,41 @@ export function validateSketchDefinitionCore(input: {
       validation.isValid,
     diagnostics: [...derived.diagnostics, ...validation.diagnostics],
   };
+}
+
+/**
+ * T13d (D10): the `driven` status of each reference dimension measured at the
+ * definition's authored positions, with the core solver's measurement and
+ * conventions. The mock solver adapter (which does not solve) reports these
+ * for parity.
+ */
+export function measureReferenceDimensionsAtAuthoredPositions(input: {
+  definition: SketchDefinition;
+  projectedReferences: readonly ProjectedSketchReferenceRecord[];
+  tolerances: SketchSolveTolerancePolicy;
+  modelingTolerance: number;
+}): DimensionStatusRecord[] {
+  const dimensions = input.definition.dimensions.filter((dimension) =>
+    isReferenceDimension(dimension),
+  );
+  if (dimensions.length === 0) {
+    return [];
+  }
+  const definition = { ...input.definition, dimensions };
+  const system = buildSystem(definition, {
+    projectedReferences: input.projectedReferences,
+    tolerances: input.tolerances,
+    modelingTolerance: input.modelingTolerance,
+  });
+  return buildDimensionStatuses(
+    definition,
+    system.pointRecords,
+    system.entityStates,
+    system.initialValues,
+    new Map(),
+    input.tolerances,
+    input.projectedReferences,
+  );
 }
 
 export function getSketchSolveInitialValuesForTest(

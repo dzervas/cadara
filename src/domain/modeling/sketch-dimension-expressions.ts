@@ -17,6 +17,7 @@ import type {
   NumericSketchDefinition,
   SketchDefinition,
 } from "@/contracts/sketch/schema";
+import { isReferenceDimension } from "@/contracts/sketch/schema";
 import {
   createDocumentVariableExpressionDiagnostics,
   evaluateDocumentVariableExpressions,
@@ -128,6 +129,10 @@ function resolveDimension(
 ):
   | { ok: true; dimension: NumericDimensionDefinition }
   | { ok: false; diagnostics: ModelingDiagnostic[] } {
+  // T13d (D9): a reference dimension has no value to resolve.
+  if (isReferenceDimension(dimension)) {
+    return { ok: true, dimension };
+  }
   switch (dimension.kind) {
     case "arcStartPointCoincident":
     case "arcEndPointCoincident":

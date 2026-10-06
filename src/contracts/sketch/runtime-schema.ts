@@ -341,6 +341,7 @@ function validateSketchDefinitionInvariants(definition: SketchDefinition) {
   });
 
   issues.push(...validateOffsetShellInvariants(definition));
+  issues.push(...validateDimensionValueInvariants(definition));
 
   const pointIds = new Set(definition.points.map((point) => point.pointId));
   const entityIds = new Set(
@@ -395,6 +396,55 @@ function validateSketchDefinitionInvariants(definition: SketchDefinition) {
   });
 
   return issues;
+}
+
+/**
+ * T13d (D9′): a driving numeric dimension (no marker) carries its value; a
+ * reference (`reference: true`) may or may not keep its last driving value,
+ * which is then ignored (the reference wins). Typia enforces the shapes it
+ * can see; authored dimension values are typed `any` (transitional
+ * wrappers), which hides an absent value and a non-`true` marker from it, so
+ * those are checked here.
+ */
+function validateDimensionValueInvariants(
+  definition: SketchDefinition,
+): ContractValidationIssue[] {
+  return definition.dimensions.flatMap(
+    (dimension, index): ContractValidationIssue[] => {
+      if (
+        dimension.kind === "arcStartPointCoincident" ||
+        dimension.kind === "arcEndPointCoincident"
+      ) {
+        return [];
+      }
+      const record = dimension as Record<string, unknown>;
+      const valueKey =
+        dimension.kind === "lineAngle" ? "valueRadians" : "value";
+      const reference = "reference" in record ? record.reference : undefined;
+      if (reference !== undefined && reference !== true) {
+        return [
+          {
+            path: `dimensions.${index}.reference`,
+            expected: "true or absent",
+            value: reference,
+            message:
+              "A dimension's reference marker must be `true`; omit it for a driving dimension.",
+          },
+        ];
+      }
+      return reference !== true && record[valueKey] === undefined
+        ? [
+            {
+              path: `dimensions.${index}.${valueKey}`,
+              expected: "a driving value",
+              value: record[valueKey],
+              message:
+                "A driving numeric dimension must carry its value; a dimension without one must be `reference: true`.",
+            },
+          ]
+        : [];
+    },
+  );
 }
 
 /**
