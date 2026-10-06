@@ -75,3 +75,24 @@ export function makeCircleWithDiameterSession(options: { reference: boolean }) {
       })
     : session;
 }
+
+/**
+ * T13e UI spec support: the Dimension tool's value input opened on the
+ * session's top side (determined by the driving bottom width, so it opens in
+ * Reference mode) or its right side (independent, driving mode).
+ */
+export function openDimensionInput(
+  session: SketchSessionState,
+  label: "Rectangle 1 top" | "Rectangle 1 right",
+) {
+  const side = session.definition.entities.find(
+    (entity) => entity.label === label,
+  )!;
+  return pinSketchConstraintPreview(
+    selectSketchConstraintTarget(
+      beginSketchTool(session, "dimensionDistance"),
+      side.target,
+    ),
+    label === "Rectangle 1 top" ? [3, 6] : [6, 2],
+  );
+}

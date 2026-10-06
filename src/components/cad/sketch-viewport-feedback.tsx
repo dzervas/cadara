@@ -3,7 +3,7 @@ import {
   useRef,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { Button } from "@mantine/core";
+import { Button, Switch } from "@mantine/core";
 
 import type {
   SketchToolOverlayDragHandle,
@@ -621,7 +621,8 @@ function ViewportFloatingInput({
 
   useEffect(() => {
     inputRef.current?.focus({ preventScroll: true });
-  }, [descriptor.id]);
+    // T13e: leaving Reference mode remounts the input; focus it to type.
+  }, [descriptor.id, descriptor.readOnly]);
 
   if (!projection) {
     return null;
@@ -652,11 +653,23 @@ function ViewportFloatingInput({
         className="mt-2 h-9 w-full rounded-md border border-[var(--cad-border)] bg-[var(--cad-surface)] px-2 font-mono text-[13px] text-[var(--cad-foreground)] outline-none focus-visible:border-[var(--cad-accent)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--cad-accent)]"
         list={variableNames.length > 0 ? suggestionsId : undefined}
         defaultValue={descriptor.value ?? ""}
-        key={descriptor.id}
+        readOnly={descriptor.readOnly}
+        aria-readonly={descriptor.readOnly}
+        // T13e: toggling Reference mode remounts the input on its value.
+        key={`${descriptor.id}:${descriptor.readOnly ? "reference" : "value"}`}
         onChange={(event) => {
           onPatch({ value: event.currentTarget.value });
         }}
       />
+      {descriptor.modeSwitch ? (
+        <Switch
+          className="mt-2"
+          size="xs"
+          label={descriptor.modeSwitch.label}
+          checked={descriptor.modeSwitch.checked}
+          onChange={() => onPatch(descriptor.modeSwitch!.action.patch)}
+        />
+      ) : null}
       {variableNames.length > 0 ? (
         <datalist id={suggestionsId}>
           {variableNames.map((name) => (

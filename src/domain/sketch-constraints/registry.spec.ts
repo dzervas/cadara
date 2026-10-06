@@ -2514,6 +2514,17 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       "Clicking or dragging an uncommitted angle preview handle should pin the preview and open value entry.",
     ).toBeTruthy();
 
+    // T13e (D11): the angle between a horizontal and a vertical line is
+    // already determined, so the input opens in Reference mode; the "Make
+    // driving" switch authors the driving angle this row checks.
+    expect(
+      angleSession.constraintAuthoring?.redundancy,
+      "premise: the 90° angle is offered as a reference",
+    ).toBe("determined");
+    angleSession = patchSketchConstraintValue(angleSession, {
+      intent: "setConstraintValueMode",
+      reference: false,
+    });
     angleSession = patchSketchConstraintValue(angleSession, { value: 90 });
     angleSession = patchSketchConstraintValue(angleSession, {
       intent: "commitConstraintValue",

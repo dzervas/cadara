@@ -254,6 +254,14 @@ export interface SketchToolFloatingInputDescriptor {
   readout?: string;
   /** T13d: one extra one-action control (a driving dimension's Make reference). */
   secondaryAction?: { label: string; action: SketchToolActionDescriptor };
+  /** T13e (D11): the value is shown but not editable (Reference mode). */
+  readOnly?: true;
+  /** T13e (D11): a visible on/off switch (the new dimension's "Make driving"). */
+  modeSwitch?: {
+    label: string;
+    checked: boolean;
+    action: SketchToolActionDescriptor;
+  };
   anchor?: SketchToolAnchorDescriptor;
   placement?: "cursor" | "previewReference" | "target";
   submitAction: SketchToolActionDescriptor;

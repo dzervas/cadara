@@ -12,10 +12,14 @@ import {
 } from "@/contracts/modeling/authored-values";
 import type { DimensionId } from "@/contracts/shared/ids";
 import type {
+  DimensionDefinition,
   SketchDefinition,
   SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
-import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import {
+  probeSketchDimensionRedundancy,
+  solveSketchDefinitionCore,
+} from "@/contracts/sketch/solver-core";
 import type {
   ProjectedSketchReferenceRecord,
   SolverTolerancePolicy,
@@ -137,7 +141,8 @@ export function buildConstraintToolPresentation(
                 ),
           unit: valueSpec.unit,
           min: valueSpec.min,
-          confirmLabel: "Commit",
+          ...getConstraintValueModePresentation(authoring),
+          confirmLabel: authoring.authorsReference ? "Add reference" : "Commit",
           cancelLabel: "Cancel",
           anchor: getConstraintFloatingInputAnchor(authoring, overlays),
           placement: "previewReference",
@@ -505,11 +510,12 @@ export function pinSketchConstraintPreview(
       point ?? authoring.pointer,
     ),
   };
+  const probed = withConstraintRedundancy(session, nextAuthoring);
 
   return {
     ...session,
-    toolPresentation: buildConstraintToolPresentation(nextAuthoring),
-    constraintAuthoring: nextAuthoring,
+    toolPresentation: buildConstraintToolPresentation(probed),
+    constraintAuthoring: probed,
   };
 }
 
@@ -546,7 +552,7 @@ export function patchSketchConstraintValue(
         ? ([patch.point[0], patch.point[1]] as SketchPoint)
         : authoring.pointer;
     const pins = readyForValue && !authoring.isPreviewPinned;
-    const nextAuthoring = {
+    const placed = {
       ...authoring,
       pointer: point,
       isPreviewPinned: readyForValue ? true : authoring.isPreviewPinned,
@@ -559,6 +565,32 @@ export function patchSketchConstraintValue(
         point,
       ),
     };
+    const nextAuthoring = pins
+      ? withConstraintRedundancy(session, placed)
+      : placed;
+
+    return {
+      ...session,
+      toolPresentation: buildConstraintToolPresentation(nextAuthoring),
+      constraintAuthoring: nextAuthoring,
+    };
+  }
+
+  if (intent === "setConstraintValueMode") {
+    if (authoring.redundancy !== "determined") {
+      return session;
+    }
+    // T13e (D11): leaving Reference mode keeps the measured value for the
+    // user to change (a different value is a retained conflict); returning
+    // to it restores the measured value.
+    const authorsReference = patch.reference === true;
+    const nextAuthoring = {
+      ...authoring,
+      authorsReference,
+      pendingValue: authorsReference
+        ? measureSketchConstraintValue(session, authoring, authoring.pointer)
+        : authoring.pendingValue,
+    };
 
     return {
       ...session,
@@ -568,6 +600,10 @@ export function patchSketchConstraintValue(
   }
 
   if ("value" in patch) {
+    if (authoring.authorsReference) {
+      // Reference mode: the measured value is read-only.
+      return session;
+    }
     const nextAuthoring = {
       ...authoring,
       pendingValue: normalizeConstraintValue(patch.value),
@@ -679,17 +715,7 @@ export function commitSketchConstraintAuthoring(
   }
 
   const definition = getSketchConstraintDefinition(authoring.toolId);
-  const contribution = definition.createCommitContribution({
-    sequence: session.sequence + 1,
-    selectedTargets: authoring.selectedTargets,
-    pointer: authoring.pointer,
-    value: authoring.pendingValue,
-    annotationPlacement: authoring.pendingAnnotationPlacement,
-    createConstraintId: (suffix) =>
-      createConstraintId(session.sequence + 1, suffix),
-    createDimensionId: (suffix) =>
-      createDimensionId(session.sequence + 1, suffix),
-  });
+  const contribution = createConstraintCommitContribution(session, authoring);
   // T13c (D8): a constraint identical to an existing one (same dedupe key)
   // is a no-op; it is not authored again.
   const existingByKey = new Map(
@@ -701,7 +727,10 @@ export function commitSketchConstraintAuthoring(
   const constraints = (contribution.constraints ?? []).filter(
     (constraint) => !existingByKey.has(getConstraintDedupeKey(constraint)),
   );
-  const dimensions = contribution.dimensions ?? [];
+  // T13e (D11): a commit in Reference mode authors a reference dimension.
+  const dimensions = (contribution.dimensions ?? []).map((dimension) =>
+    authoring.authorsReference ? toReferenceDimension(dimension) : dimension,
+  );
   if (constraints.length === 0 && dimensions.length === 0) {
     const duplicates = (contribution.constraints ?? []).flatMap(
       (constraint) =>
@@ -824,6 +853,180 @@ function measureSketchConstraintValue(
     ? null
     : createLiteralAuthoredValue(measured);
 }
+
+function createConstraintCommitContribution(
+  session: SketchSessionState,
+  authoring: SketchConstraintAuthoringState,
+) {
+  return getSketchConstraintDefinition(
+    authoring.toolId,
+  ).createCommitContribution({
+    sequence: session.sequence + 1,
+    selectedTargets: authoring.selectedTargets,
+    pointer: authoring.pointer,
+    value: authoring.pendingValue,
+    annotationPlacement: authoring.pendingAnnotationPlacement,
+    createConstraintId: (suffix) =>
+      createConstraintId(session.sequence + 1, suffix),
+    createDimensionId: (suffix) =>
+      createDimensionId(session.sequence + 1, suffix),
+  });
+}
+
+/** T13d (D9): a reference dimension carries the marker and no value. */
+function toReferenceDimension(
+  dimension: SketchDefinition["dimensions"][number],
+): SketchDefinition["dimensions"][number] {
+  if (
+    dimension.kind === "arcStartPointCoincident" ||
+    dimension.kind === "arcEndPointCoincident"
+  ) {
+    return dimension;
+  }
+  const reference = { ...dimension, reference: true as const };
+  delete (reference as { value?: unknown }).value;
+  delete (reference as { valueRadians?: unknown }).valueRadians;
+  return reference;
+}
+
+/**
+ * T13e (D11): the probe verdicts per definition identity, candidate,
+ * document variables, tolerances and projected references, so reopening
+ * the input on the same targets never re-runs the trial solves.
+ */
+const redundancyCache = new WeakMap<
+  SketchDefinition,
+  Map<string, "determined" | "independent">
+>();
+
+/**
+ * T13e (D11): run the determined-quantity probe once, when the value input
+ * opens (the candidate dimension, including the Distance tool's
+ * pointer-chosen axis, is complete only then). A determined quantity opens in
+ * Reference mode; an unaccepted live solve skips the probe.
+ */
+function withConstraintRedundancy(
+  session: SketchSessionState,
+  authoring: SketchConstraintAuthoringState,
+): SketchConstraintAuthoringState {
+  if (!session.liveSolve?.accepted) {
+    return {
+      ...authoring,
+      redundancy: "invalidSketch",
+      authorsReference: false,
+    };
+  }
+  const candidate = createConstraintCommitContribution(session, authoring)
+    .dimensions?.[0];
+  if (
+    !candidate ||
+    candidate.kind === "arcStartPointCoincident" ||
+    candidate.kind === "arcEndPointCoincident"
+  ) {
+    return authoring;
+  }
+  // The key is the candidate's structure (its kind and targets: the fresh
+  // id, label, value and placement never change the verdict) plus the
+  // probe's other inputs besides the definition (review A-1/A-1′): document
+  // variables, tolerances and the projected references (a projection lands
+  // asynchronously on the same definition).
+  const structural: Record<string, unknown> = {
+    ...toReferenceDimension(candidate),
+  };
+  delete structural.dimensionId;
+  delete structural.label;
+  delete structural.annotationPlacement;
+  const key = JSON.stringify([
+    structural,
+    session.documentVariables,
+    session.solverTolerances,
+    session.modelingTolerance,
+    session.projectedReferences,
+  ]);
+  const cached = redundancyCache.get(session.definition)?.get(key);
+  const redundancy = cached ?? probeConstraintRedundancy(session, candidate);
+  if (!cached) {
+    const entries = redundancyCache.get(session.definition) ?? new Map();
+    entries.set(key, redundancy);
+    redundancyCache.set(session.definition, entries);
+  }
+  return {
+    ...authoring,
+    redundancy,
+    authorsReference: redundancy === "determined",
+  };
+}
+
+function probeConstraintRedundancy(
+  session: SketchSessionState,
+  candidate: DimensionDefinition,
+): "determined" | "independent" {
+  const settings = getSketchSessionDerivationSettings(session);
+  const liveSolve = session.liveSolve!;
+  const basis =
+    liveSolve.sourceDefinition === session.definition
+      ? applySolvedSketchToDefinition(
+          session.definition,
+          liveSolve.solvedSnapshot,
+          settings,
+        )
+      : session.definition;
+  const probe = probeSketchDimensionRedundancy({
+    definition: resolveSketchDefinitionForSolve(
+      basis,
+      session.documentVariables,
+    ),
+    // The probe sets the candidate's trial values itself.
+    candidate,
+    projectedReferences: session.projectedReferences,
+    tolerances: session.solverTolerances,
+    ...settings,
+  });
+  return probe.kind === "determined" ? "determined" : "independent";
+}
+
+/**
+ * T13e (D11): the value input's Reference-mode presentation: a determined
+ * quantity shows the note and a visible "Make driving" switch, its measured
+ * value read-only while in Reference mode; an invalid sketch says why the
+ * check was skipped.
+ */
+export function getConstraintValueModePresentation(
+  authoring: Pick<
+    SketchConstraintAuthoringState,
+    "redundancy" | "authorsReference"
+  >,
+): Pick<
+  SketchToolFloatingInputDescriptor,
+  "readout" | "readOnly" | "modeSwitch"
+> {
+  if (authoring.redundancy === "invalidSketch") {
+    return { readout: CONSTRAINT_REDUNDANCY_UNCHECKED_NOTE };
+  }
+  if (authoring.redundancy !== "determined") {
+    return {};
+  }
+  return {
+    readout: CONSTRAINT_DETERMINED_NOTE,
+    ...(authoring.authorsReference ? { readOnly: true as const } : {}),
+    modeSwitch: {
+      label: "Make driving",
+      checked: !authoring.authorsReference,
+      action: {
+        type: "patch",
+        patch: {
+          intent: "setConstraintValueMode",
+          reference: !authoring.authorsReference,
+        },
+      },
+    },
+  };
+}
+
+export const CONSTRAINT_DETERMINED_NOTE =
+  "Already determined by other requirements";
+export const CONSTRAINT_REDUNDANCY_UNCHECKED_NOTE =
+  "Can't check redundancy while the sketch is invalid";
 
 /** Display text of a measured prefill: the exact value is committed. */
 function formatMeasuredValueText(value: number) {

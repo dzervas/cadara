@@ -378,20 +378,38 @@ test("T13c: a width-only rectangle dimension leaves the height free (a height dr
 
 // --- D6/D7: retained conflicts with explanation ----------------------------
 
+/**
+ * T13e (D11): a determined quantity opens in Reference mode; the "Make
+ * driving" switch authors it as a (redundant) driving dimension instead.
+ */
+function makeDriving(session: SketchSessionState) {
+  const input = session.toolPresentation?.floatingInput;
+  expect(input?.modeSwitch?.label, "premise: offered as a reference").toBe(
+    "Make driving",
+  );
+  return patchSketchConstraintValue(session, input!.modeSwitch!.action.patch);
+}
+
 function rectangleWithBottomAndTopLengths() {
   let session = rectangleAndCircle();
-  for (const [label, placement] of [
-    ["Rectangle 1 bottom", [3, 0]],
-    ["Rectangle 1 top", [3, 5]],
-  ] as const)
-    session = commitValue(
+  session = commitValue(
+    openDimensionInput(
+      session,
+      "dimensionDistance",
+      [entity(session, "Rectangle 1 bottom").target],
+      [3, 0],
+    ),
+  );
+  session = commitValue(
+    makeDriving(
       openDimensionInput(
         session,
         "dimensionDistance",
-        [entity(session, label).target],
-        placement,
+        [entity(session, "Rectangle 1 top").target],
+        [3, 5],
       ),
-    );
+    ),
+  );
   expect(session.liveSolve?.accepted, "premise: redundant, consistent").toBe(
     true,
   );
@@ -471,11 +489,13 @@ test("T13c D7: creating a conflicting dimension is retained and explained, with 
   );
   const conflicting = commitValue(
     patchSketchConstraintValue(
-      openDimensionInput(
-        session,
-        "dimensionDistance",
-        [entity(session, "Rectangle 1 top").target],
-        [3, 5],
+      makeDriving(
+        openDimensionInput(
+          session,
+          "dimensionDistance",
+          [entity(session, "Rectangle 1 top").target],
+          [3, 5],
+        ),
       ),
       { value: "6" },
     ),
