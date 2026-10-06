@@ -76,7 +76,7 @@ import {
   withLiveSolveBasis,
   getCommittedSketchToolChainSegments,
   getSessionSketchId,
-  getSketchSessionRegionDiagnostics,
+  getSketchSessionInvalidFeedback,
   getTargetKey,
   isDrawingSketchTool,
   isSketchToolChainActive,
@@ -2768,11 +2768,11 @@ export function getSketchSessionPreviewLabel(
     );
   }
 
-  const regionDiagnostic = getSketchSessionRegionDiagnostics(session).find(
-    (diagnostic) => diagnostic.severity !== "info",
-  );
-  if (regionDiagnostic) {
-    return regionDiagnostic.message;
+  // T13c (R-2): the conflict explanation first, else the first non-info
+  // region/validity diagnostic.
+  const invalidFeedback = getSketchSessionInvalidFeedback(session);
+  if (invalidFeedback) {
+    return invalidFeedback;
   }
 
   if (session.activeDrag?.status === "dragging") {

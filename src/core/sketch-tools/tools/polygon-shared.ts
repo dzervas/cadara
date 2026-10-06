@@ -180,6 +180,14 @@ export function createRegularPolygonSketchToolDefinition(input: {
         const circleEntityId = factories.createEntityId(
           `${input.id}-construction-circle`,
         );
+        // T13c (A-2): equal sides tangent to the incircle still leave the
+        // tangent lengths free to alternate (a, s − a). Putting the vertices
+        // on a concentric construction circumcircle as well makes every side
+        // a chord at the inradius, so the polygon stays regular.
+        const circumcircleEntityId =
+          input.mode === "circumscribed"
+            ? factories.createEntityId(`${input.id}-construction-circumcircle`)
+            : null;
 
         return {
           points: [
@@ -206,6 +214,19 @@ export function createRegularPolygonSketchToolDefinition(input: {
               ),
               isConstruction: true,
             },
+            ...(circumcircleEntityId
+              ? [
+                  {
+                    ...factories.createCircleEntity(
+                      `${input.name} ${sequence} construction circumcircle`,
+                      circumcircleEntityId,
+                      centerPointId,
+                      vertexRadius,
+                    ),
+                    isConstruction: true,
+                  },
+                ]
+              : []),
             ...vertices.map((_, index) =>
               factories.createLineEntity(
                 `${input.name} ${sequence} side ${index + 1}`,
@@ -236,15 +257,27 @@ export function createRegularPolygonSketchToolDefinition(input: {
                     curveEntityId: circleEntityId,
                   }),
                 )
-              : entityIds.map((entityId, index) =>
-                  createTangentConstraint({
-                    constraintId: factories.createConstraintId(
-                      `${input.id}-side-tangent-${index + 1}`,
-                    ),
-                    label: `${input.name} ${sequence} tangent side`,
-                    entityIds: [entityId, circleEntityId],
-                  }),
-                )),
+              : [
+                  ...entityIds.map((entityId, index) =>
+                    createTangentConstraint({
+                      constraintId: factories.createConstraintId(
+                        `${input.id}-side-tangent-${index + 1}`,
+                      ),
+                      label: `${input.name} ${sequence} tangent side`,
+                      entityIds: [entityId, circleEntityId],
+                    }),
+                  ),
+                  ...vertexPointIds.map((pointId, index) =>
+                    createPointOnCurveConstraint({
+                      constraintId: factories.createConstraintId(
+                        `${input.id}-vertex-on-circumcircle-${index + 1}`,
+                      ),
+                      label: `${input.name} ${sequence} vertex on circumcircle`,
+                      pointId,
+                      curveEntityId: circumcircleEntityId!,
+                    }),
+                  ),
+                ]),
           ],
         };
       },

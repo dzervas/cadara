@@ -6,6 +6,9 @@ import { isAcceptedConstraintStatus } from "@/contracts/sketch/schema";
 import {
   createExpressionAuthoredValue,
   createLiteralAuthoredValue,
+  getAuthoredLiteralValue,
+  isExpressionAuthoredValue,
+  type MaybeAuthoredValue,
 } from "@/contracts/modeling/authored-values";
 import type { ReferenceImageOperationState } from "@/contracts/reference-image/schema";
 import type {
@@ -39,6 +42,8 @@ import {
 } from "@/contracts/sketch/offset-publication";
 import type { SketchOffsetPublicationRecord } from "@/contracts/solver/schema";
 import {
+  type ConstraintDefinition,
+  type DimensionDefinition,
   type RegionRecord,
   type SketchDefinition,
   type SketchDerivedValidity,
@@ -110,8 +115,6 @@ export const CONSTRAINED_DRAG_BLOCKED_MESSAGE =
 // free DOF (no feedback) is then decided by a solver mobility probe.
 export const CONSTRAINED_DRAG_REQUEST_EPSILON = 1e-3;
 export const CONSTRAINED_DRAG_MOVE_FRACTION = 0.01;
-export const ANNOTATION_EDIT_SOLVE_BLOCKED_MESSAGE =
-  "Could not solve the edited constraint value.";
 export const REFERENCE_IMAGE_ANCHOR_MARKER_RADIUS = 0.28;
 export const REFERENCE_IMAGE_ANCHOR_OVERLAY_RADIUS = 0.4;
 export const REFERENCE_IMAGE_ANCHOR_MARKER_COLOR = 0xf6c453;
@@ -1623,12 +1626,116 @@ export function rebuildSessionForDefinition(
     ...rebuilt,
     validationMessage:
       rebuilt.liveRegions.status === "unavailable"
-        ? (getSketchSessionDerivedValidity(rebuilt).diagnostics.find(
-            (diagnostic) => diagnostic.severity !== "info",
-          )?.message ??
+        ? (getSketchSessionInvalidFeedback(rebuilt) ??
           "Sketch profiles are unavailable until the sketch is corrected.")
         : null,
   };
+}
+
+/**
+ * T13c (D7, review R-2): the one invalid-sketch feedback text: the conflict
+ * explanation when requirements are unsatisfied, else the first non-info
+ * diagnostic of the session's derived validity. Used after commits,
+ * Undo/Redo, reopen (projection re-basing) and by the preview label, so
+ * every path shows the same text for the same invalid state.
+ */
+export function getSketchSessionInvalidFeedback(
+  session: SketchSessionState,
+  subjectIds: readonly string[] = [],
+): string | null {
+  return (
+    describeSketchSessionUnsatisfiedRequirements(session, subjectIds) ??
+    getSketchSessionDerivedValidity(session).diagnostics.find(
+      (diagnostic) => diagnostic.severity !== "info",
+    )?.message ??
+    null
+  );
+}
+
+/**
+ * T13c (D7): the conflict explanation of the session's live solve, naming
+ * every requirement whose status is `unsatisfied` (never `constraintState`,
+ * review A-1). `subjectIds` are the requirements the user just authored or
+ * edited; an unsatisfied subject is named first, as the one that conflicts.
+ * Null when no requirement is unsatisfied.
+ */
+export function describeSketchSessionUnsatisfiedRequirements(
+  session: Pick<SketchSessionState, "definition" | "liveSolve">,
+  subjectIds: readonly string[] = [],
+): string | null {
+  const snapshot = session.liveSolve?.solvedSnapshot;
+  if (!snapshot) {
+    return null;
+  }
+  const unsatisfiedIds = new Set<string>([
+    ...snapshot.constraintStatuses.flatMap((entry) =>
+      entry.status === "unsatisfied" ? [entry.constraintId] : [],
+    ),
+    ...snapshot.dimensionStatuses.flatMap((entry) =>
+      entry.status === "unsatisfied" ? [entry.dimensionId] : [],
+    ),
+  ]);
+  const requirements = [
+    ...session.definition.constraints.map((constraint) => ({
+      id: constraint.constraintId as string,
+      text: formatSketchRequirement(constraint),
+    })),
+    ...session.definition.dimensions.map((dimension) => ({
+      id: dimension.dimensionId as string,
+      text: formatSketchRequirement(dimension),
+    })),
+  ].filter((requirement) => unsatisfiedIds.has(requirement.id));
+  if (requirements.length === 0) {
+    return null;
+  }
+  const subjects = requirements.filter((requirement) =>
+    subjectIds.includes(requirement.id),
+  );
+  const others = requirements.filter(
+    (requirement) => !subjectIds.includes(requirement.id),
+  );
+  const list = (entries: typeof requirements) =>
+    entries.map((entry) => entry.text).join(", ");
+  const statement =
+    requirements.length === 1
+      ? `${requirements[0]!.text} cannot be satisfied.`
+      : subjects.length > 0 && others.length > 0
+        ? `${list(subjects)} ${subjects.length === 1 ? "conflicts" : "conflict"} with ${list(others)}.`
+        : `${list(requirements)} conflict.`;
+  return `${statement} The sketch is invalid; profiles from it are blocked. Change or delete ${requirements.length === 1 ? "it" : "one of them"}, or Undo.`;
+}
+
+function formatSketchRequirement(
+  requirement: ConstraintDefinition | DimensionDefinition,
+): string {
+  const value =
+    "dimensionId" in requirement
+      ? requirement.kind === "arcStartPointCoincident" ||
+        requirement.kind === "arcEndPointCoincident"
+        ? null
+        : requirement.kind === "lineAngle"
+          ? formatRequirementValue(requirement.valueRadians, "deg")
+          : formatRequirementValue(requirement.value, "mm")
+      : requirement.kind === "angle"
+        ? formatRequirementValue(requirement.valueRadians, "deg")
+        : null;
+  return value === null ? requirement.label : `${requirement.label} (${value})`;
+}
+
+function formatRequirementValue(
+  value: MaybeAuthoredValue<number>,
+  unit: "mm" | "deg",
+): string {
+  if (isExpressionAuthoredValue(value)) {
+    return value.valueText;
+  }
+  const literal = getAuthoredLiteralValue(value);
+  if (literal === null) {
+    return "?";
+  }
+  const display = unit === "deg" ? (literal * 180) / Math.PI : literal;
+  const rounded = Number(display.toFixed(3));
+  return unit === "deg" ? `${rounded}°` : `${rounded} mm`;
 }
 
 /**

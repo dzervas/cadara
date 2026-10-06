@@ -362,6 +362,57 @@ function makeDiagnostic(
   return { code, severity, message, target };
 }
 
+/**
+ * T13c (D7): one `solver-requirement-unsatisfied` warning per requirement
+ * whose status is `unsatisfied`, targeted at that constraint or dimension, so
+ * the reason is geometry-linked and recomputed with every solve (incl. after
+ * reopen). Shared with the mock solver adapter (A-7 parity).
+ */
+export function unsatisfiedRequirementDiagnostics(
+  definition: Pick<SketchDefinition, "constraints" | "dimensions">,
+  constraintStatuses: readonly ConstraintStatusRecord[],
+  dimensionStatuses: readonly DimensionStatusRecord[],
+): SketchSolveDiagnostic[] {
+  const constraintLabels = new Map(
+    definition.constraints.map((constraint) => [
+      constraint.constraintId,
+      constraint.label,
+    ]),
+  );
+  const dimensionLabels = new Map(
+    definition.dimensions.map((dimension) => [
+      dimension.dimensionId,
+      dimension.label,
+    ]),
+  );
+  return [
+    ...constraintStatuses.flatMap((entry) =>
+      entry.status === "unsatisfied"
+        ? [
+            makeDiagnostic(
+              "solver-requirement-unsatisfied",
+              "warning",
+              `${constraintLabels.get(entry.constraintId) ?? entry.constraintId} is not satisfied within its authored tolerance.`,
+              { kind: "constraint", constraintId: entry.constraintId },
+            ),
+          ]
+        : [],
+    ),
+    ...dimensionStatuses.flatMap((entry) =>
+      entry.status === "unsatisfied"
+        ? [
+            makeDiagnostic(
+              "solver-requirement-unsatisfied",
+              "warning",
+              `${dimensionLabels.get(entry.dimensionId) ?? entry.dimensionId} is not satisfied within its authored tolerance.`,
+              { kind: "dimension", dimensionId: entry.dimensionId },
+            ),
+          ]
+        : [],
+    ),
+  ];
+}
+
 function zeroVector(length: number) {
   return new Float64Array(length);
 }
@@ -7461,13 +7512,22 @@ function materializeSolveResult(
       );
     }
     if (!requirementsSatisfied) {
+      const targeted = unsatisfiedRequirementDiagnostics(
+        definition,
+        constraintStatuses,
+        dimensionStatuses,
+      );
       diagnostics.push(
-        makeDiagnostic(
-          "solver-requirement-unsatisfied",
-          "warning",
-          "Sketch solve ended with one or more requirements outside their authored tolerance.",
-          null,
-        ),
+        ...(targeted.length > 0
+          ? targeted
+          : [
+              makeDiagnostic(
+                "solver-requirement-unsatisfied",
+                "warning",
+                "Sketch solve ended with one or more requirements outside their authored tolerance.",
+                null,
+              ),
+            ]),
       );
     }
     status = {
