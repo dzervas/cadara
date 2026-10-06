@@ -87,6 +87,14 @@ export interface SketchConstraintAuthoringState {
   isPreviewPinned: boolean;
   pendingValue: MaybeAuthoredValue<number> | null;
   pendingAnnotationPlacement: DimensionAnnotationPlacement | null;
+  /**
+   * T13e (D11): the determined-quantity probe's verdict, taken once when the
+   * value input opens. `invalidSketch`: the live solve was not accepted, so
+   * redundancy could not be checked.
+   */
+  redundancy?: "determined" | "independent" | "invalidSketch";
+  /** T13e (D11): the input is in Reference mode (commit authors a reference). */
+  authorsReference?: boolean;
 }
 
 export interface SketchAnnotationEditState {

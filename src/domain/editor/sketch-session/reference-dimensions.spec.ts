@@ -263,7 +263,12 @@ test("T13d: Make driving with a conflicting typed value is retained as an invali
     [entity(session, "Rectangle 1 top").target],
     [3, 5],
   );
-  session = makeReference(session, 2);
+  // T13e (D11): the determined top length is offered, and committed, as a
+  // reference already (no Make reference step).
+  expect(
+    isReferenceDimension(session.definition.dimensions[2]!),
+    "premise: the top length is a reference",
+  ).toBe(true);
   expect(session.liveSolve?.accepted, "premise: solved").toBe(true);
   const top = session.definition.dimensions[2]!;
   const editing = patchSketchConstraintValue(openEdit(session, top), {

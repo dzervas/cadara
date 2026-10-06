@@ -646,10 +646,15 @@ test("T13c: measured prefill, width-only rectangle, blocked rim, retained and ex
   await workbench.clickViewportAt({ x: 470, y: 320 });
   await workbench.clickViewportAt({ x: 450, y: 400 });
   await expect(floatingInput).toBeVisible();
+  // T13e (D11): the radius is determined by the diameter, so the input opens
+  // in Reference mode; Make driving authors the redundant driving radius.
+  const radiusValue = floatingInput.locator("input:not([role='switch'])");
   expect(
-    Number(await floatingInput.locator("input").inputValue()),
+    Number(await radiusValue.inputValue()),
     "measured radius prefill",
   ).toBeCloseTo(diameter / 2, 4);
+  await floatingInput.getByRole("switch", { name: "Make driving" }).check();
+  await expect(radiusValue).toBeEditable();
   await floatingInput.getByRole("button", { name: "Commit" }).click();
   await expect(floatingInput).toBeHidden();
   await page.keyboard.press("Escape");

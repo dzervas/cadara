@@ -9,7 +9,9 @@ import { buildSketchEditToolPresentation } from "@/domain/editor/sketch-session/
 import {
   editDimension,
   makeCircleWithDiameterSession,
+  openDimensionInput,
 } from "@/components/cad/sketch-reference-dimension.fixtures";
+import { patchSketchConstraintValue } from "@/domain/editor/sketch-session";
 
 test("src/components/cad/sketch-viewport-feedback.spec.tsx", () => {
   const schema: SketchToolPresentationSchema = {
@@ -433,4 +435,65 @@ test("T13d: the dimension edit popup renders Make reference / Make driving contr
   expect(driving?.secondaryAction?.action.patch).toEqual({
     intent: "makeAnnotationReference",
   });
+});
+
+// T13e (D11), UI lane: the Dimension tool's value input in Reference mode
+// (an already-determined quantity) renders the measured value read-only, the
+// note and an unchecked "Make driving" switch; after the switch it is
+// editable with the switch on; an independent quantity shows neither.
+test("T13e: the dimension value input renders Reference mode with a read-only measured value, the note and a Make driving switch", () => {
+  const render = (
+    floatingInput: SketchToolPresentationSchema["floatingInput"],
+  ) =>
+    renderToStaticMarkup(
+      <MantineProvider>
+        <SketchViewportFeedbackLayer
+          schema={{ prompts: [], overlays: [], floatingInput }}
+          projections={[
+            { id: `floating-input:${floatingInput!.id}`, x: 180, y: 90 },
+          ]}
+          documentVariableNames={[]}
+          onPatch={() => undefined}
+        />
+      </MantineProvider>,
+    );
+  const session = makeCircleWithDiameterSession({ reference: false });
+  const opened = openDimensionInput(session, "Rectangle 1 top");
+  const reference = opened.toolPresentation?.floatingInput;
+  const referenceMarkup = render(reference);
+  const valueInput = (markup: string) =>
+    markup.match(/<input[^>]*value="4"[^>]*>/)?.[0] ?? "";
+  expect(valueInput(referenceMarkup), "the measured value").not.toBe("");
+  expect(valueInput(referenceMarkup)).toContain('readOnly=""');
+  expect(valueInput(referenceMarkup)).toContain('aria-readonly="true"');
+  expect(referenceMarkup).toMatch(
+    /data-floating-input-readout="true">Already determined by other requirements</,
+  );
+  const switchInput = (markup: string) =>
+    markup.match(/<input[^>]*role="switch"[^>]*>/)?.[0] ?? "";
+  expect(switchInput(referenceMarkup), "a visible switch").not.toBe("");
+  expect(switchInput(referenceMarkup)).not.toContain('checked=""');
+  expect(referenceMarkup).toContain(">Make driving<");
+  expect(referenceMarkup).toContain(">Add reference<");
+  expect(reference?.modeSwitch?.action.patch).toEqual({
+    intent: "setConstraintValueMode",
+    reference: false,
+  });
+
+  const driving = patchSketchConstraintValue(
+    opened,
+    reference!.modeSwitch!.action.patch,
+  ).toolPresentation?.floatingInput;
+  const drivingMarkup = render(driving);
+  expect(valueInput(drivingMarkup)).not.toContain("readOnly");
+  expect(switchInput(drivingMarkup)).toContain('checked=""');
+  expect(drivingMarkup).toContain(">Commit<");
+
+  const independentMarkup = render(
+    openDimensionInput(session, "Rectangle 1 right").toolPresentation
+      ?.floatingInput,
+  );
+  expect(independentMarkup).not.toContain('role="switch"');
+  expect(independentMarkup).not.toContain("data-floating-input-readout");
+  expect(independentMarkup).not.toContain("readOnly");
 });
