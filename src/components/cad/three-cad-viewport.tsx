@@ -502,14 +502,16 @@ export function ThreeCadViewport({
     setSketchHoverStack(EMPTY_SKETCH_HOVER_STACK);
   }
   const markerActiveTool = sketchSession?.activeTool ?? null;
-  const markerDrawStartSnap = sketchSession?.drawStartSnap ?? null;
+  const markerStartPointId = sketchSession?.toolStartPointId ?? null;
+  const markerPlacements = sketchSession?.toolPlacements;
   const sketchMarkerToolPointIds = useMemo(
     () =>
       getSketchToolMarkerPointIds({
         activeTool: markerActiveTool,
-        drawStartSnap: markerDrawStartSnap,
+        toolStartPointId: markerStartPointId,
+        toolPlacements: markerPlacements,
       }),
-    [markerActiveTool, markerDrawStartSnap],
+    [markerActiveTool, markerStartPointId, markerPlacements],
   );
   // One revealed-point set per render, not a scan per marker (A-3).
   const sketchMarkerContext = useMemo(() => {

@@ -22,7 +22,6 @@ import {
   rebuildSessionForDefinition,
 } from "@/domain/editor/sketch-session/internals";
 import type { SketchId } from "@/contracts/shared/ids";
-import type { SketchSnapCandidate } from "@/domain/sketch-snapping/snap-candidates";
 import {
   getRegisteredSketchToolDefinitions,
   getSketchToolDefinition,
@@ -1523,27 +1522,8 @@ test.each(primitiveRelationshipRows)(
       points,
       isConstruction: false,
       settings: toolId === "profileText" ? { text: "A" } : undefined,
-      acceptedSnaps: {
-        start: sourceLine
-          ? ({
-              key: "t13a-source-line",
-              kind: "nearestOnLine",
-              point: points[0]!,
-              rawPointer: points[0]!,
-              distance: 0,
-              priority: 0,
-              sources: [
-                {
-                  kind: "localEntity",
-                  entityId: SOURCE_LINE_ID,
-                  geometryKind: "lineSegment",
-                },
-              ],
-              preview: {},
-            } as unknown as SketchSnapCandidate)
-          : null,
-        end: null,
-      },
+      // R-7: the Tangent arc's structural tangent source.
+      tangentSourceEntityId: sourceLine ? SOURCE_LINE_ID : null,
       factories: createSessionCommitFactories(1, "sketch_draft" as SketchId),
     });
     expect(

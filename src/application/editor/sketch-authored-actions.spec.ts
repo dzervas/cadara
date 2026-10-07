@@ -1683,7 +1683,7 @@ describe("T11h: Line chain history (T11-D11, D12)", () => {
         activeTool: after.activeTool,
         status: after.status,
         pointerDownPoint: after.pointerDownPoint,
-        drawStartSnap: after.drawStartSnap,
+        toolStartPointId: after.toolStartPointId,
         toolChain: after.toolChain,
       },
       "The chain and its anchor are unchanged.",
@@ -1691,7 +1691,7 @@ describe("T11h: Line chain history (T11-D11, D12)", () => {
       activeTool: before.activeTool,
       status: before.status,
       pointerDownPoint: before.pointerDownPoint,
-      drawStartSnap: before.drawStartSnap,
+      toolStartPointId: before.toolStartPointId,
       toolChain: before.toolChain,
     });
   });

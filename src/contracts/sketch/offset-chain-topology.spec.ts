@@ -65,7 +65,10 @@ import {
   createSketchOffsetDerivationContribution,
   createSketchSlotContribution,
 } from "@/domain/sketch-editing/operations";
-import { appendInferredSnapConstraints } from "@/domain/editor/sketch-session/tools";
+import {
+  bindPlacementInferences,
+  inferPlacementFromCandidate,
+} from "@/domain/sketch-inference/placement-inference";
 import {
   createSessionCommitFactories,
   createSketchPointRef,
@@ -173,6 +176,23 @@ function createNativeToolAuthoring(sketchId: string): NativeToolAuthoring {
     sources: [{ kind: "localPoint" as const, pointId }],
     preview: { label: "endpoint", glyph: "endpoint" as const },
   });
+  /** One placed click's inference at an endpoint snap (T13-D15). */
+  const place = (
+    definition: SketchDefinition,
+    toolId: "line" | "spline" | "centerPointArc",
+    point: Vector,
+    pointId: SketchPointId | undefined,
+  ) =>
+    pointId
+      ? inferPlacementFromCandidate(
+          { toolId, role: "point", definition },
+          {
+            candidate: endpointSnap(pointId, point),
+            rawPosition: point,
+            sketchUnitsPerPixel: null,
+          },
+        )
+      : null;
   const infer = (
     previousDefinition: SketchDefinition,
     activeTool: "line" | "spline",
@@ -181,16 +201,26 @@ function createNativeToolAuthoring(sketchId: string): NativeToolAuthoring {
     start: Vector,
     end: Vector,
     snaps: EndpointSnaps,
-  ) =>
-    appendInferredSnapConstraints({
-      previousDefinition,
+  ) => {
+    // The start snap is the arc's start click (after its centre), the end
+    // snap the last click.
+    const startIndex = (activeTool as string) === "centerPointArc" ? 1 : 0;
+    const { placementPointIds } = patch as unknown as {
+      placementPointIds: readonly unknown[];
+    };
+    return bindPlacementInferences({
       patch,
-      activeTool,
-      startSnap: snaps.start ? endpointSnap(snaps.start, start) : null,
-      endSnap: snaps.end ? endpointSnap(snaps.end, end) : null,
+      placements: placementPointIds.map((_, index) =>
+        index === startIndex
+          ? place(previousDefinition, activeTool, start, snaps.start)
+          : index === placementPointIds.length - 1
+            ? place(previousDefinition, activeTool, end, snaps.end)
+            : null,
+      ),
       sequence,
       createConstraintId: (name: string) => `constraint_${name}` as never,
     });
+  };
   return {
     line: ({ previousDefinition, sequence, start, end, snaps }) =>
       infer(
@@ -7134,6 +7164,23 @@ function createNativeArcAuthoring(sketchId: string): NativeArcAuthoring {
     sources: [{ kind: "localPoint" as const, pointId }],
     preview: { label: "endpoint", glyph: "endpoint" as const },
   });
+  /** One placed click's inference at an endpoint snap (T13-D15). */
+  const place = (
+    definition: SketchDefinition,
+    toolId: "line" | "spline" | "centerPointArc",
+    point: Vector,
+    pointId: SketchPointId | undefined,
+  ) =>
+    pointId
+      ? inferPlacementFromCandidate(
+          { toolId, role: "point", definition },
+          {
+            candidate: endpointSnap(pointId, point),
+            rawPosition: point,
+            sketchUnitsPerPixel: null,
+          },
+        )
+      : null;
   const infer = (
     previousDefinition: SketchDefinition,
     activeTool: "line" | "spline" | "centerPointArc",
@@ -7142,17 +7189,27 @@ function createNativeArcAuthoring(sketchId: string): NativeArcAuthoring {
     start: Vector,
     end: Vector,
     snaps: EndpointSnaps,
-  ) =>
-    appendInferredSnapConstraints({
-      previousDefinition,
+  ) => {
+    // The start snap is the arc's start click (after its centre), the end
+    // snap the last click.
+    const startIndex = (activeTool as string) === "centerPointArc" ? 1 : 0;
+    const { placementPointIds } = patch as unknown as {
+      placementPointIds: readonly unknown[];
+    };
+    return bindPlacementInferences({
       patch: patch as never,
-      activeTool: activeTool as never,
-      startSnap: snaps.start ? endpointSnap(snaps.start, start) : null,
-      endSnap: snaps.end ? endpointSnap(snaps.end, end) : null,
+      placements: placementPointIds.map((_, index) =>
+        index === startIndex
+          ? place(previousDefinition, activeTool, start, snaps.start)
+          : index === placementPointIds.length - 1
+            ? place(previousDefinition, activeTool, end, snaps.end)
+            : null,
+      ),
       sequence,
       createConstraintId: (name: string) =>
         `constraint_${sequence}_${name}` as never,
     }) as Authored;
+  };
   return {
     line: ({ previousDefinition, sequence, start, end, snaps }) =>
       infer(

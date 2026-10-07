@@ -3,7 +3,10 @@ import type { SketchDefinition } from "@/contracts/sketch/schema";
 import type { SketchToolCommitContribution } from "@/core/sketch-tools/definition";
 import { splineSketchToolDefinition } from "@/core/sketch-tools/tools/spline";
 import { lineSketchToolDefinition } from "@/core/sketch-tools/tools/line";
-import { appendInferredSnapConstraints } from "@/domain/editor/sketch-session/tools";
+import {
+  bindPlacementInferences,
+  inferPlacementFromCandidate,
+} from "@/domain/sketch-inference/placement-inference";
 import { createSessionCommitFactories } from "@/domain/editor/sketch-session/internals";
 import { extractDeclaredOffsetChainConnectivity } from "@/contracts/sketch/offset-chain-connectivity";
 import type {
@@ -41,6 +44,35 @@ function endpointSnap(id: SketchPointId, point: readonly [number, number]) {
   };
 }
 
+/**
+ * The commit binding of a native line/spline whose start click snapped onto
+ * the existing point `startId` at `start` (T13-D15).
+ */
+function bindStartSnap(
+  previousDefinition: SketchDefinition,
+  toolId: "line" | "spline",
+  patch: ReturnType<typeof lineSketchToolDefinition.createCommitContribution>,
+  startId: SketchPointId,
+  start: readonly [number, number],
+) {
+  const startPlacement = inferPlacementFromCandidate(
+    { toolId, role: "point", definition: previousDefinition },
+    {
+      candidate: endpointSnap(startId, start),
+      rawPosition: start,
+      sketchUnitsPerPixel: null,
+    },
+  );
+  return bindPlacementInferences({
+    patch,
+    placements: patch.placementPointIds.map((_, index) =>
+      index === 0 ? startPlacement : null,
+    ),
+    sequence: 2,
+    createConstraintId: constraintId,
+  });
+}
+
 function committedSpline(factory = factories(1)) {
   return splineSketchToolDefinition.createCommitContribution({
     sequence: 1,
@@ -71,15 +103,13 @@ describe("declared offset-chain connectivity", () => {
       isConstruction: false,
       factories: factory,
     });
-    const authoredLine = appendInferredSnapConstraints({
-      previousDefinition: definition(spline) as SketchDefinition,
-      patch: line,
-      activeTool: "line",
-      startSnap: endpointSnap(endpointId, [2, 0]),
-      endSnap: null,
-      sequence: 2,
-      createConstraintId: constraintId,
-    });
+    const authoredLine = bindStartSnap(
+      definition(spline) as SketchDefinition,
+      "line",
+      line,
+      endpointId,
+      [2, 0],
+    );
     const lineEntity = authoredLine.entities[0]!;
     expect(lineEntity.kind).toBe("lineSegment");
     if (lineEntity.kind !== "lineSegment") return;
@@ -128,15 +158,13 @@ describe("declared offset-chain connectivity", () => {
       isConstruction: false,
       factories: factory,
     });
-    const authoredSecond = appendInferredSnapConstraints({
-      previousDefinition: definition(first) as SketchDefinition,
-      patch: second,
-      activeTool: "spline",
-      startSnap: endpointSnap(endpointId, [2, 0]),
-      endSnap: null,
-      sequence: 2,
-      createConstraintId: constraintId,
-    });
+    const authoredSecond = bindStartSnap(
+      definition(first) as SketchDefinition,
+      "spline",
+      second,
+      endpointId,
+      [2, 0],
+    );
     const secondEntity = authoredSecond.entities[0]!;
     expect(secondEntity.kind).toBe("spline");
     if (secondEntity.kind !== "spline") return;
@@ -868,15 +896,13 @@ describe("declared offset-chain connectivity", () => {
       isConstruction: false,
       factories: factory,
     });
-    const authoredLine = appendInferredSnapConstraints({
-      previousDefinition: definition(spline) as SketchDefinition,
-      patch: line,
-      activeTool: "line",
-      startSnap: endpointSnap(fitPointId, [1, 0]),
-      endSnap: null,
-      sequence: 2,
-      createConstraintId: constraintId,
-    });
+    const authoredLine = bindStartSnap(
+      definition(spline) as SketchDefinition,
+      "line",
+      line,
+      fitPointId,
+      [1, 0],
+    );
     const lineEntity = authoredLine.entities[0]!;
     expect(lineEntity.kind).toBe("lineSegment");
     if (lineEntity.kind !== "lineSegment") return;

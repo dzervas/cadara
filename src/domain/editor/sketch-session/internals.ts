@@ -98,7 +98,16 @@ import type {
 } from "@/core/sketch-tools/definition";
 import { sampleArcPoints } from "@/core/sketch-tools/geometry";
 import { getSketchToolDefinition } from "@/core/sketch-tools/registry";
-import type { SketchSnapCandidate } from "@/domain/sketch-snapping/snap-candidates";
+import type {
+  SketchToolOverlayDescriptor,
+  SketchToolPresentationSchema,
+} from "@/core/sketch-tools/editor-schema";
+import {
+  getStructuralTangentSourceEntityId,
+  inferPlacement,
+  inferPlacementFromCandidate,
+  type PlacementInference,
+} from "@/domain/sketch-inference/placement-inference";
 import type {
   SketchAuthoringToolId,
   SketchLiveRegionBasis,
@@ -1763,27 +1772,24 @@ function formatRequirementValue(
 
 /**
  * Reconciles the armed drawing tool's draft with a restored definition
- * (T11-D12: Undo, Redo and every other restore). A snap that references a
- * point or entity the definition no longer has is dropped and its raw
- * position kept, so a commit never reuses a deleted id. An active Line
- * chain keeps its records and is restaged from its committed prefix
+ * (T11-D12: Undo, Redo and every other restore). T13-D21: each placed
+ * click's inference is recomputed through the owner at its raw position,
+ * with its stored scale, against the restored geometry, so a point an Undo
+ * moved or removed no longer pulls the commit; the click's position and
+ * badge follow the recomputed inference. An active Line chain keeps its
+ * records and is restaged from its committed prefix
  * (`restageSketchToolChain`).
  */
 export function reconcileSketchToolDraft(
   session: SketchSessionState,
 ): SketchSessionState {
-  const { definition } = session;
+  const placements = session.toolPlacements ?? [];
   const reconciled: SketchSessionState = {
     ...session,
-    activeSnap: sketchSnapReferencesExist(definition, session.activeSnap)
-      ? session.activeSnap
-      : null,
-    drawStartSnap: sketchSnapReferencesExist(definition, session.drawStartSnap)
-      ? session.drawStartSnap
-      : null,
-    ...(sketchSnapReferencesExist(definition, session.fitPointEndSnap ?? null)
-      ? {}
-      : { fitPointEndSnap: null }),
+    activeInference: null,
+    ...(placements.length > 0 && isDrawingSketchTool(session.activeTool)
+      ? reinferSketchToolPlacements(session, session.activeTool, placements)
+      : {}),
   };
 
   return session.toolChain && isSketchToolChainActive(session)
@@ -1791,19 +1797,119 @@ export function reconcileSketchToolDraft(
     : reconciled;
 }
 
-function sketchSnapReferencesExist(
-  definition: SketchDefinition,
-  snap: SketchSnapCandidate | null,
-) {
-  return (snap?.sources ?? []).every((source) =>
-    source.kind === "localPoint"
-      ? definition.points.some((point) => point.pointId === source.pointId)
-      : source.kind === "localEntity"
-        ? definition.entities.some(
-            (entity) => entity.entityId === source.entityId,
-          )
-        : true,
+function reinferSketchToolPlacements(
+  session: SketchSessionState,
+  toolId: SketchToolId,
+  placements: readonly PlacementInference[],
+): Partial<SketchSessionState> {
+  const toolDefinition = getSketchToolDefinition(toolId);
+  const solvedSnapshot = getSketchSessionSolvedSnapshot(session);
+  const recomputed = placements.map((placement) =>
+    inferPlacement({
+      toolId,
+      role: placement.role,
+      definition: session.definition,
+      projectedReferences: session.projectedReferences,
+      pointer: placement.rawPosition,
+      solvedSnapshot,
+      sketchUnitsPerPixel: placement.sketchUnitsPerPixel,
+      // Only a Line end aligns to its start, and a Line end commits at once.
+      anchor: null,
+      activeCandidateKey: placement.candidate?.key ?? null,
+    }),
   );
+  const positions = recomputed.map((placement) => placement.position);
+  const pointerDownPoint = positions[0] ?? session.pointerDownPoint;
+  const toolPlacedPoints =
+    session.toolPlacedPoints.length > 0 ? positions : session.toolPlacedPoints;
+
+  return {
+    toolPlacements: recomputed,
+    pointerDownPoint,
+    toolPlacedPoints,
+    // The badges show the recomputed inferences at once, without a pointer
+    // move (T13g review RQ-1).
+    toolPresentation: withPlacementPresentation(
+      toolDefinition.getPresentation({
+        status: session.status === "drawing" ? "drawing" : "idle",
+        pointerDownPoint,
+        livePoint: session.livePoint,
+        placedPoints: toolPlacedPoints,
+        settings: session.toolSettings,
+        validationMessage: session.validationMessage,
+      }),
+      recomputed,
+      null,
+    ),
+    ...(toolDefinition.structuralTangentSource
+      ? {
+          toolTangentSourceEntityId: getStructuralTangentSourceEntityId(
+            recomputed[0]?.candidate ?? null,
+          ),
+        }
+      : {}),
+  };
+}
+
+/**
+ * The draft's placement badges (T13-D15): every placed click keeps its
+ * snap glyph and inference text, so every requirement the commit will
+ * author is visible before the final click; `active` is the live one.
+ */
+export function withPlacementPresentation(
+  presentation: SketchToolPresentationSchema,
+  placements: readonly PlacementInference[],
+  active: PlacementInference | null,
+): SketchToolPresentationSchema {
+  const overlays = [
+    ...(active ? getPlacementOverlays("active-snap", active) : []),
+    ...placements.flatMap((placement, index) =>
+      getPlacementOverlays(`placement-${index + 1}-snap`, placement),
+    ),
+  ];
+
+  return overlays.length === 0
+    ? presentation
+    : {
+        ...presentation,
+        overlays: [...(presentation.overlays ?? []), ...overlays],
+      };
+}
+
+function getPlacementOverlays(
+  id: string,
+  inference: PlacementInference,
+): SketchToolOverlayDescriptor[] {
+  const { candidate } = inference;
+  if (!candidate) {
+    return [];
+  }
+
+  return [
+    ...(inference.requirements.length > 0
+      ? [
+          {
+            id: `${id}-inferred-constraint`,
+            kind: "constraintPreview" as const,
+            label: "Inferred constraint",
+            detail: inference.text,
+            anchor: {
+              kind: "sketchPoint" as const,
+              point: candidate.point,
+              offset: { x: 18, y: 18 },
+            },
+          },
+        ]
+      : []),
+    {
+      id,
+      kind: "snapIndicator",
+      label: inference.text,
+      point: candidate.point,
+      candidateKind: candidate.kind,
+      glyphKind: candidate.preview.glyph,
+    },
+  ];
 }
 
 /**
@@ -1843,8 +1949,8 @@ export function getCommittedSketchToolChainSegments(
  * Stages the next segment of a chain (T11-D11/D12): the draft starts at the
  * anchor, the end point of the last committed segment (or the chain start
  * when no segment is committed), at its current definition position. The
- * anchor is the draft's start snap at that point (review A-4), so the next
- * segment reuses its id. A chain start whose point no longer exists keeps
+ * anchor is the draft's structural start (T13-D20: not a snap, never
+ * suppressed), so the next segment reuses its id. A chain start whose point no longer exists keeps
  * only its position. The rubber band is restaged from `livePoint`.
  */
 export function restageSketchToolChain(
@@ -1897,30 +2003,27 @@ export function restageSketchToolChain(
     ),
     validationMessage: result.state.validationMessage,
     toolPresentation: result.presentation,
-    activeSnap: null,
-    drawStartSnap: anchorPoint
-      ? createSketchPointAnchorSnap(anchorPoint.pointId, anchor)
-      : null,
-  };
-}
-
-/**
- * A snap at an existing local point, for a draft that starts there: the
- * commit reuses that point id and infers no constraint for it
- * (`normalizeLinePatchEndpointReuse`, review A-4).
- */
-function createSketchPointAnchorSnap(
-  pointId: SketchPointId,
-  position: SketchPoint,
-): SketchSnapCandidate {
-  return {
-    key: `endpoint:anchor:local-point:${pointId}`,
-    kind: "endpoint",
-    point: position,
-    rawPointer: position,
-    distance: 0,
-    sources: [{ kind: "localPoint", pointId }],
-    preview: { label: "Endpoint", glyph: "endpoint" },
+    activeInference: null,
+    // D20: the next segment starts structurally at the anchor's id; a
+    // vanished chain start is a placement at its position that authors
+    // nothing.
+    toolPlacements: anchorPoint
+      ? []
+      : [
+          inferPlacementFromCandidate(
+            {
+              toolId: session.activeTool,
+              role: "point",
+              definition: session.definition,
+            },
+            {
+              candidate: null,
+              rawPosition: anchor,
+              sketchUnitsPerPixel: session.sketchUnitsPerPixel ?? null,
+            },
+          ),
+        ],
+    toolStartPointId: anchorPoint?.pointId ?? null,
   };
 }
 

@@ -1,7 +1,7 @@
 import type { SketchPoint } from "@/contracts/modeling/schema";
 import type {
   SketchDraftEntity,
-  SketchToolCommitContribution,
+  SketchToolDrawContribution,
   SketchToolDefinition,
   SketchToolRuntimeState,
   SketchToolValidationResult,
@@ -307,18 +307,20 @@ export const alignedRectangleSketchToolDefinition: SketchToolDefinition<"aligned
           };
     },
     getPresentation: buildAlignedRectanglePresentation,
+    // The third click only picks the height.
+    placementRole: (index) => (index === 2 ? "shape" : "point"),
     createCommitContribution({
       sequence,
       points,
       factories,
-    }): SketchToolCommitContribution {
+    }): SketchToolDrawContribution {
       const corners = getAlignedRectangleCorners(
         points?.[0] ?? [0, 0],
         points?.[1] ?? [0, 0],
         points?.[2] ?? [0, 0],
       );
       if (!corners) {
-        return { points: [], entities: [] };
+        return { points: [], entities: [], placementPointIds: [] };
       }
 
       const cornerIds = [
@@ -414,6 +416,7 @@ export const alignedRectangleSketchToolDefinition: SketchToolDefinition<"aligned
             entityIds: [entityIds[1], entityIds[3]],
           }),
         ],
+        placementPointIds: [cornerIds[0], cornerIds[1], null],
       };
     },
   };

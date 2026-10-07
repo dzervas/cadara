@@ -708,7 +708,7 @@ test("src/domain/editor/reference-image-operations.spec.ts reuses bound anchor p
   session = beginSketchTool(session, "line");
   session = startSketchDraw(session, [66.08, 23.76]);
   expect(
-    session.activeSnap?.kind,
+    session.activeInference?.candidate?.kind,
     "Bound anchor points should participate in ordinary endpoint snapping.",
   ).toBe("endpoint");
   session = acceptSketchDraw(session, [66.76, -22.65]);

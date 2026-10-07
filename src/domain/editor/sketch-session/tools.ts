@@ -1,17 +1,10 @@
 import type { SketchPoint } from "@/contracts/modeling/schema";
 import type {
-  ConstraintId,
   ReferenceId,
   SketchEntityId,
   SketchId,
-  SketchPointId,
 } from "@/contracts/shared/ids";
 import type {
-  ConstraintDefinition,
-  ProjectedSketchGeometryConstraintOperand,
-  ProjectedSketchGeometryRef,
-  ReadOnlySketchCurveConstraintOperand,
-  ReadOnlySketchPointConstraintOperand,
   SketchDefinition,
   SketchReferenceDefinition,
 } from "@/contracts/sketch/schema";
@@ -30,23 +23,22 @@ import {
   isRegisteredSketchEditToolId,
 } from "@/core/sketch-edit-tools/registry";
 import {
-  type SketchSnapCandidate,
-  type SketchSnapSourceRef,
-  collectSketchSnapGeometries,
-  resolveSketchSnap,
-} from "@/domain/sketch-snapping/snap-candidates";
+  bindPlacementInferences,
+  getStructuralTangentSourceEntityId,
+  inferPlacement,
+  type PlacementInference,
+} from "@/domain/sketch-inference/placement-inference";
 import { buildSketchStylePresentation } from "@/domain/sketch-styles/definition";
 import type {
   SketchDraftEntity,
   SketchToolCommitContribution,
   SketchToolDefinition,
-  SketchToolId,
   SketchToolPointerResult,
+  SketchToolRuntimeState,
 } from "@/core/sketch-tools/definition";
 import type {
   SketchToolAnchorDescriptor,
   SketchToolControlValue,
-  SketchToolOverlayDescriptor,
   SketchToolPresentationSchema,
 } from "@/core/sketch-tools/editor-schema";
 import { getSketchToolDefinition } from "@/core/sketch-tools/registry";
@@ -83,6 +75,7 @@ import {
   rebuildSessionCommitRequest,
   restageSketchToolChain,
   withConstructionFlag,
+  withPlacementPresentation,
 } from "./internals";
 import { getSketchSessionDisplaySolvedSnapshot } from "./display";
 import { buildCommittedDimensionOverlays } from "./annotations";
@@ -187,8 +180,10 @@ export function beginSketchConstructionTool(
       activeEditTarget: null,
       activeStyleFocus: null,
       activeDrag: null,
-      activeSnap: null,
-      drawStartSnap: null,
+      activeInference: null,
+      toolPlacements: [],
+      toolStartPointId: null,
+      toolTangentSourceEntityId: null,
     };
   }
 
@@ -211,8 +206,10 @@ export function beginSketchConstructionTool(
     activeEditTarget: null,
     activeStyleFocus: null,
     activeDrag: null,
-    activeSnap: null,
-    drawStartSnap: null,
+    activeInference: null,
+    toolPlacements: [],
+    toolStartPointId: null,
+    toolTangentSourceEntityId: null,
   };
 }
 
@@ -242,8 +239,10 @@ export function beginSketchReferenceTool(
     activeEditTarget: null,
     activeStyleFocus: null,
     activeDrag: null,
-    activeSnap: null,
-    drawStartSnap: null,
+    activeInference: null,
+    toolPlacements: [],
+    toolStartPointId: null,
+    toolTangentSourceEntityId: null,
   };
 }
 
@@ -655,8 +654,10 @@ export function beginSketchEditTool(
     activeEditTarget: null,
     activeStyleFocus: null,
     activeDrag: null,
-    activeSnap: null,
-    drawStartSnap: null,
+    activeInference: null,
+    toolPlacements: [],
+    toolStartPointId: null,
+    toolTangentSourceEntityId: null,
   };
 
   const adoptedTargets = adoptCompatibleSketchEditToolTargets(
@@ -726,9 +727,10 @@ export function beginSketchTool(
     activeEditTarget: null,
     activeStyleFocus: null,
     activeDrag: null,
-    activeSnap: null,
-    drawStartSnap: null,
-    fitPointEndSnap: null,
+    activeInference: null,
+    toolPlacements: [],
+    toolStartPointId: null,
+    toolTangentSourceEntityId: null,
   };
 }
 
@@ -822,7 +824,7 @@ export function finalizeSketchDraw(
     },
     points[0]!,
     points.at(-1)!,
-    session.fitPointEndSnap ?? null,
+    session.toolPlacements ?? [],
   );
 }
 
@@ -871,9 +873,10 @@ export function clearActiveSketchTool(
     activeEditTarget: null,
     activeStyleFocus: null,
     activeDrag: null,
-    activeSnap: null,
-    drawStartSnap: null,
-    fitPointEndSnap: null,
+    activeInference: null,
+    toolPlacements: [],
+    toolStartPointId: null,
+    toolTangentSourceEntityId: null,
     toolChain: null,
   };
 }
@@ -928,21 +931,21 @@ export function updateSketchPointer(
       ...session,
       toolPresentation: buildConstraintToolPresentation(nextAuthoring),
       constraintAuthoring: nextAuthoring,
-      activeSnap: null,
+      activeInference: null,
     };
   }
 
   if (!isDrawingSketchTool(session.activeTool)) {
-    return session.activeSnap || session.drawStartSnap
-      ? { ...session, activeSnap: null, drawStartSnap: null }
+    return session.activeInference
+      ? { ...session, activeInference: null }
       : session;
   }
 
   const toolDefinition = getSketchToolDefinition(session.activeTool);
-  const snap = resolveSessionSnap(session, point);
+  const inference = previewSketchPlacement(session, point);
   const result = toolDefinition.pointerMove({
     state: getToolRuntimeState(session),
-    point: snap.point,
+    point: inference?.position ?? point,
   });
 
   const nextSession: SketchSessionState = {
@@ -957,8 +960,12 @@ export function updateSketchPointer(
       session.constructionModifierActive,
     ),
     validationMessage: result.state.validationMessage,
-    toolPresentation: withSnapPresentation(result.presentation, snap.candidate),
-    activeSnap: snap.candidate,
+    toolPresentation: withPlacementPresentation(
+      result.presentation,
+      session.toolPlacements ?? [],
+      inference,
+    ),
+    activeInference: inference,
   };
 
   return sketchPointerPreviewStateEqual(session, nextSession)
@@ -977,7 +984,8 @@ function sketchPointerPreviewStateEqual(
     sketchPointArraysEqual(current.toolPlacedPoints, next.toolPlacedPoints) &&
     current.toolSettings === next.toolSettings &&
     current.validationMessage === next.validationMessage &&
-    current.activeSnap?.key === next.activeSnap?.key &&
+    current.activeInference?.candidate?.key ===
+      next.activeInference?.candidate?.key &&
     sketchDraftEntitiesEqual(
       current.toolStagedEntities,
       next.toolStagedEntities,
@@ -1379,796 +1387,64 @@ export function toggleConstructionTargetInDefinition(
   };
 }
 
-export const SNAP_INFERENCE_EPSILON = 1e-6;
+/**
+ * Keep the constraint de-duplication helpers on this module's surface (the
+ * constraint tools use them, T13-D8); the inference owner defines them.
+ */
+export {
+  dedupeConstraints,
+  getConstraintDedupeKey,
+} from "@/domain/sketch-inference/placement-inference";
 
-export function pointsAlmostEqual(left: SketchPoint, right: SketchPoint) {
-  return (
-    Math.hypot(left[0] - right[0], left[1] - right[1]) <= SNAP_INFERENCE_EPSILON
-  );
-}
-
-export function projectedKindForSource(
-  source: Extract<SketchSnapSourceRef, { kind: "projectedGeometry" }>,
-): NonNullable<ProjectedSketchGeometryRef["kind"]> {
-  switch (source.geometryKind) {
-    case "point":
-      return "projectedPoint";
-    case "lineSegment":
-      return "projectedLineSegment";
-    case "circle":
-      return "projectedCircle";
-    case "arc":
-      return "projectedArc";
-    case "spline":
-      return "projectedSpline";
-  }
-}
-
-export function projectedOperandFromSource(
-  source: Extract<SketchSnapSourceRef, { kind: "projectedGeometry" }>,
-): ProjectedSketchGeometryConstraintOperand {
-  return {
-    kind: "projectedGeometry",
-    reference: {
-      kind: projectedKindForSource(source),
-      referenceId: source.referenceId,
-      geometryId: source.geometryId,
-    },
-  };
-}
-
-export function pointReadOnlyOperandFromSource(
-  source: Extract<
-    SketchSnapSourceRef,
-    { kind: "projectedGeometry" | "sketchDatum" }
-  >,
-): ReadOnlySketchPointConstraintOperand {
-  if (source.kind === "sketchDatum") {
-    return {
-      kind: "sketchDatum",
-      datum: source.datumId,
-    };
-  }
-
-  return projectedOperandFromSource(source);
-}
-
-export function curveReadOnlyOperandFromSource(
-  source: Extract<
-    SketchSnapSourceRef,
-    { kind: "projectedGeometry" | "sketchDatum" }
-  >,
-): ReadOnlySketchCurveConstraintOperand {
-  if (source.kind === "sketchDatum") {
-    return {
-      kind: "sketchDatum",
-      datum: source.datumId,
-    };
-  }
-
-  return projectedOperandFromSource(source);
-}
-
-export function localPointOperand(
-  pointId: SketchPointId,
-): Extract<ConstraintDefinition, { kind: "midpoint" }>["point"] {
-  return { kind: "localPoint", pointId };
-}
-
-export function localEntityOperand(
-  entityId: SketchEntityId,
-): Extract<ConstraintDefinition, { kind: "midpoint" }>["line"] {
-  return { kind: "localEntity", entityId };
-}
-
-export function getEntityEndpointAtPoint(
-  definition: SketchDefinition,
-  entityId: SketchEntityId,
-  point: SketchPoint,
-): SketchPointId | null {
-  const entity = definition.entities.find(
-    (entry) => entry.entityId === entityId,
-  );
-
-  if (!entity) {
-    return null;
-  }
-
-  const candidatePointIds =
-    entity.kind === "lineSegment"
-      ? [entity.startPointId, entity.endPointId]
-      : entity.kind === "arc"
-        ? [entity.startPointId, entity.endPointId]
-        : entity.kind === "point"
-          ? [entity.pointId]
-          : [];
-
-  for (const pointId of candidatePointIds) {
-    const candidate = definition.points.find(
-      (entry) => entry.pointId === pointId,
-    );
-    if (candidate && pointsAlmostEqual(candidate.position, point)) {
-      return pointId;
-    }
-  }
-
-  return null;
-}
-
-export function getEntityCenterPointId(
-  definition: SketchDefinition,
-  entityId: SketchEntityId,
-): SketchPointId | null {
-  const entity = definition.entities.find(
-    (entry) => entry.entityId === entityId,
-  );
-
-  return entity?.kind === "circle" || entity?.kind === "arc"
-    ? entity.centerPointId
-    : null;
-}
-
-export function getPatchPointIdsAtPosition(
-  patch: SketchToolCommitContribution,
-  point: SketchPoint,
-): SketchPointId[] {
-  return patch.points
-    .filter((candidate) => pointsAlmostEqual(candidate.position, point))
-    .map((candidate) => candidate.pointId);
-}
-
-export function resolveReusableLocalSnapPointId(input: {
-  previousDefinition: SketchDefinition;
-  candidate: SketchSnapCandidate | null;
-}): SketchPointId | null {
-  const { candidate, previousDefinition } = input;
-  if (!candidate || candidate.kind !== "endpoint") {
-    return null;
-  }
-
-  for (const source of candidate.sources) {
-    if (source.kind === "localPoint") {
-      return source.pointId;
-    }
-
-    if (source.kind === "localEntity") {
-      const pointId = getEntityEndpointAtPoint(
-        previousDefinition,
-        source.entityId,
-        candidate.point,
-      );
-      if (pointId) {
-        return pointId;
-      }
-    }
-  }
-
-  return null;
-}
-
-export function normalizeLinePatchEndpointReuse(input: {
-  previousDefinition: SketchDefinition;
-  patch: SketchToolCommitContribution;
-  startSnap: SketchSnapCandidate | null;
-  endSnap: SketchSnapCandidate | null;
-}): SketchToolCommitContribution {
-  const lineEntity = input.patch.entities.find(
-    (entity) => entity.kind === "lineSegment",
-  );
-  if (!lineEntity) {
-    return input.patch;
-  }
-
-  const replacements = new Map<SketchPointId, SketchPointId>();
-  const startPointId = resolveReusableLocalSnapPointId({
-    previousDefinition: input.previousDefinition,
-    candidate: input.startSnap,
-  });
-  const endPointId = resolveReusableLocalSnapPointId({
-    previousDefinition: input.previousDefinition,
-    candidate: input.endSnap,
-  });
-
-  if (startPointId && startPointId !== lineEntity.startPointId) {
-    replacements.set(lineEntity.startPointId, startPointId);
-  }
-
-  if (endPointId && endPointId !== lineEntity.endPointId) {
-    replacements.set(lineEntity.endPointId, endPointId);
-  }
-
-  if (replacements.size === 0) {
-    return input.patch;
-  }
-
-  return {
-    ...input.patch,
-    points: input.patch.points.filter(
-      (point) => !replacements.has(point.pointId),
-    ),
-    entities: input.patch.entities.map((entity) => {
-      if (entity.kind !== "lineSegment") {
-        return entity;
-      }
-
-      return {
-        ...entity,
-        startPointId:
-          replacements.get(entity.startPointId) ?? entity.startPointId,
-        endPointId: replacements.get(entity.endPointId) ?? entity.endPointId,
-      };
-    }),
-  };
-}
-
-export function getPatchLineEntityId(
-  patch: SketchToolCommitContribution,
-): SketchEntityId | null {
-  return (
-    patch.entities.find((entity) => entity.kind === "lineSegment")?.entityId ??
-    null
-  );
-}
-
-export function getPatchCircleLikeEntityAtCenter(
-  patch: SketchToolCommitContribution,
-  pointId: SketchPointId,
-): SketchEntityId | null {
-  return (
-    patch.entities.find(
-      (entity) =>
-        (entity.kind === "circle" || entity.kind === "arc") &&
-        entity.centerPointId === pointId,
-    )?.entityId ?? null
-  );
-}
-
-export function addConstraint(
-  constraints: ConstraintDefinition[],
-  constraint: ConstraintDefinition | null,
+/**
+ * How many clicks of the armed drawing tool's draft are placed: a drawing
+ * two-click tool (or Line chain) has its start, a fixed-point or fit-point
+ * tool its placed points.
+ */
+function getPlacedClickCount(
+  state: Pick<SketchToolRuntimeState, "status" | "placedPoints">,
 ) {
-  if (constraint) {
-    constraints.push(constraint);
-  }
+  return state.status === "drawing"
+    ? Math.max(1, state.placedPoints?.length ?? 0)
+    : 0;
 }
 
-export function inferPointSnapConstraints(input: {
-  previousDefinition: SketchDefinition;
-  patch: SketchToolCommitContribution;
-  candidate: SketchSnapCandidate;
-  snapRole: "start" | "end";
-  pointId: SketchPointId;
-  sequence: number;
-  createConstraintId: (suffix: string) => ConstraintId;
-}): ConstraintDefinition[] {
-  const constraints: ConstraintDefinition[] = [];
-  const localPoint = localPointOperand(input.pointId);
-  const createId = (suffix: string) =>
-    input.createConstraintId(`${input.snapRole}-${input.pointId}-${suffix}`);
-  const localCircleLikeEntityId = getPatchCircleLikeEntityAtCenter(
-    input.patch,
-    input.pointId,
-  );
+/**
+ * T13-D15: the live inference of the armed drawing tool's next click at
+ * `point`, through the one owner: where it places and what its commit will
+ * author. Null without a pointer or a drawing tool.
+ */
+export function previewSketchPlacement(
+  session: SketchSessionState,
+  point: SketchPoint | null,
+): PlacementInference | null {
+  if (!point || !isDrawingSketchTool(session.activeTool)) {
+    return null;
+  }
 
-  const addPointOnSource = (source: SketchSnapSourceRef, index: number) => {
-    if (source.kind === "localEntity") {
-      addConstraint(constraints, {
-        constraintId: createId(`inferred-point-on-${index}`),
-        kind: "pointOnCurve",
-        label: `Inferred point on curve ${input.sequence}`,
-        point: localPoint,
-        curve: localEntityOperand(source.entityId),
-      });
-      return;
-    }
-
-    if (source.kind === "projectedGeometry") {
-      addConstraint(constraints, {
-        constraintId: createId(`inferred-point-on-projected-${index}`),
-        kind: "pointOnProjectedCurve",
-        label: `Inferred point on projected curve ${input.sequence}`,
-        point: localPoint,
-        projectedCurve: projectedOperandFromSource(source),
-      });
-      return;
-    }
-
-    if (
-      source.kind === "sketchDatum" &&
-      source.geometryKind === "lineSegment"
-    ) {
-      addConstraint(constraints, {
-        constraintId: createId(`inferred-point-on-datum-${index}`),
-        kind: "pointOnProjectedCurve",
-        label: `Inferred point on sketch datum ${input.sequence}`,
-        point: localPoint,
-        projectedCurve: curveReadOnlyOperandFromSource(source),
-      });
-    }
-  };
-
-  input.candidate.sources.forEach((source, index) => {
-    if (source.kind === "transientAnchor") {
-      return;
-    }
-
-    if (input.candidate.kind === "endpoint") {
-      if (source.kind === "localPoint") {
-        addConstraint(constraints, {
-          constraintId: createId(`inferred-coincident-${index}`),
-          kind: "coincident",
-          label: `Inferred coincident ${input.sequence}`,
-          pointIds: [input.pointId, source.pointId],
-        });
-        return;
-      }
-
-      if (source.kind === "localEntity") {
-        const endpointId = getEntityEndpointAtPoint(
-          input.previousDefinition,
-          source.entityId,
-          input.candidate.point,
-        );
-        if (endpointId) {
-          addConstraint(constraints, {
-            constraintId: createId(`inferred-coincident-endpoint-${index}`),
-            kind: "coincident",
-            label: `Inferred coincident ${input.sequence}`,
-            pointIds: [input.pointId, endpointId],
-          });
-        }
-        return;
-      }
-
-      if (
-        (source.kind === "projectedGeometry" &&
-          source.geometryKind === "point") ||
-        (source.kind === "sketchDatum" && source.datumId === "origin")
-      ) {
-        addConstraint(constraints, {
-          constraintId: createId(
-            source.kind === "sketchDatum"
-              ? `inferred-coincident-datum-${index}`
-              : `inferred-coincident-projected-${index}`,
-          ),
-          kind: "coincidentProjectedPoint",
-          label:
-            source.kind === "sketchDatum"
-              ? `Inferred coincident sketch datum ${input.sequence}`
-              : `Inferred coincident projected point ${input.sequence}`,
-          point: localPoint,
-          projectedPoint: pointReadOnlyOperandFromSource(source),
-        });
-      }
-      return;
-    }
-
-    if (input.candidate.kind === "center") {
-      if (source.kind === "localEntity") {
-        if (
-          localCircleLikeEntityId &&
-          (source.geometryKind === "circle" || source.geometryKind === "arc")
-        ) {
-          addConstraint(constraints, {
-            constraintId: createId(`inferred-concentric-${index}`),
-            kind: "concentric",
-            label: `Inferred concentric ${input.sequence}`,
-            entityIds: [localCircleLikeEntityId, source.entityId],
-          });
-          return;
-        }
-
-        const centerPointId = getEntityCenterPointId(
-          input.previousDefinition,
-          source.entityId,
-        );
-        if (centerPointId) {
-          addConstraint(constraints, {
-            constraintId: createId(`inferred-coincident-center-${index}`),
-            kind: "coincident",
-            label: `Inferred center coincident ${input.sequence}`,
-            pointIds: [input.pointId, centerPointId],
-          });
-        }
-        return;
-      }
-
-      if (
-        source.kind === "projectedGeometry" &&
-        localCircleLikeEntityId &&
-        (source.geometryKind === "circle" || source.geometryKind === "arc")
-      ) {
-        addConstraint(constraints, {
-          constraintId: createId(`inferred-concentric-projected-${index}`),
-          kind: "concentricProjectedCurve",
-          label: `Inferred concentric projected curve ${input.sequence}`,
-          curve: localEntityOperand(localCircleLikeEntityId),
-          projectedCurve: projectedOperandFromSource(source),
-        });
-        return;
-      }
-
-      if (
-        (source.kind === "projectedGeometry" &&
-          source.geometryKind === "point") ||
-        (source.kind === "sketchDatum" && source.datumId === "origin")
-      ) {
-        addConstraint(constraints, {
-          constraintId: createId(
-            source.kind === "sketchDatum"
-              ? `inferred-coincident-datum-center-${index}`
-              : `inferred-coincident-projected-center-${index}`,
-          ),
-          kind: "coincidentProjectedPoint",
-          label:
-            source.kind === "sketchDatum"
-              ? `Inferred sketch datum center coincident ${input.sequence}`
-              : `Inferred projected center coincident ${input.sequence}`,
-          point: localPoint,
-          projectedPoint: pointReadOnlyOperandFromSource(source),
-        });
-      }
-      return;
-    }
-
-    if (input.candidate.kind === "midpoint") {
-      if (
-        source.kind === "localEntity" &&
-        source.geometryKind === "lineSegment"
-      ) {
-        addConstraint(constraints, {
-          constraintId: createId(`inferred-midpoint-${index}`),
-          kind: "midpoint",
-          label: `Inferred midpoint ${input.sequence}`,
-          point: localPoint,
-          line: localEntityOperand(source.entityId),
-        });
-        return;
-      }
-
-      // Datum axes give no midpoint candidates (unbounded lines, T13f).
-      if (
-        source.kind === "projectedGeometry" &&
-        source.geometryKind === "lineSegment"
-      ) {
-        addConstraint(constraints, {
-          constraintId: createId(`inferred-midpoint-projected-${index}`),
-          kind: "midpointProjectedLine",
-          label: `Inferred projected midpoint ${input.sequence}`,
-          point: localPoint,
-          projectedLine: curveReadOnlyOperandFromSource(source),
-        });
-      }
-      return;
-    }
-
-    if (
-      input.candidate.kind === "nearestOnLine" ||
-      input.candidate.kind === "nearestOnCircle" ||
-      input.candidate.kind === "nearestOnArc" ||
-      input.candidate.kind === "intersection"
-    ) {
-      addPointOnSource(source, index);
-    }
+  const index = getPlacedClickCount({
+    status: session.status === "drawing" ? "drawing" : "idle",
+    placedPoints: session.toolPlacedPoints,
   });
-
-  return constraints;
-}
-
-export function inferLineSnapConstraints(input: {
-  patch: SketchToolCommitContribution;
-  candidate: SketchSnapCandidate | null;
-  endPointId: SketchPointId | null;
-  sequence: number;
-  createConstraintId: (suffix: string) => ConstraintId;
-}): ConstraintDefinition[] {
-  const candidate = input.candidate;
-  const lineEntityId = getPatchLineEntityId(input.patch);
-  if (!candidate || !lineEntityId || !input.endPointId) {
-    return [];
-  }
-
-  const constraints: ConstraintDefinition[] = [];
-  const localLine = localEntityOperand(lineEntityId);
-  const localEndPoint = localPointOperand(input.endPointId);
-
-  if (candidate.kind === "horizontalAlignment") {
-    addConstraint(constraints, {
-      constraintId: input.createConstraintId("inferred-horizontal"),
-      kind: "horizontal",
-      label: `Inferred horizontal ${input.sequence}`,
-      entityId: lineEntityId,
-    });
-  }
-
-  if (candidate.kind === "verticalAlignment") {
-    addConstraint(constraints, {
-      constraintId: input.createConstraintId("inferred-vertical"),
-      kind: "vertical",
-      label: `Inferred vertical ${input.sequence}`,
-      entityId: lineEntityId,
-    });
-  }
-
-  candidate.sources.forEach((source, index) => {
-    if (source.kind === "transientAnchor") {
-      return;
-    }
-
-    if (
-      candidate.kind === "perpendicularFoot" &&
-      (source.kind === "localEntity" ||
-        source.kind === "projectedGeometry" ||
-        source.kind === "sketchDatum") &&
-      source.geometryKind === "lineSegment"
-    ) {
-      if (source.kind === "localEntity") {
-        addConstraint(constraints, {
-          constraintId: input.createConstraintId(
-            `inferred-perpendicular-${index}`,
-          ),
-          kind: "perpendicular",
-          label: `Inferred perpendicular ${input.sequence}`,
-          entityIds: [lineEntityId, source.entityId],
-        });
-        addConstraint(constraints, {
-          constraintId: input.createConstraintId(
-            `inferred-foot-on-line-${index}`,
-          ),
-          kind: "pointOnCurve",
-          label: `Inferred perpendicular foot ${input.sequence}`,
-          point: localEndPoint,
-          curve: localEntityOperand(source.entityId),
-        });
-        return;
-      }
-
-      if (
-        source.kind === "projectedGeometry" ||
-        source.kind === "sketchDatum"
-      ) {
-        addConstraint(constraints, {
-          constraintId: input.createConstraintId(
-            source.kind === "sketchDatum"
-              ? `inferred-perpendicular-datum-${index}`
-              : `inferred-perpendicular-projected-${index}`,
-          ),
-          kind: "perpendicularProjectedLine",
-          label:
-            source.kind === "sketchDatum"
-              ? `Inferred perpendicular sketch datum ${input.sequence}`
-              : `Inferred perpendicular projected line ${input.sequence}`,
-          line: localLine,
-          projectedLine: curveReadOnlyOperandFromSource(source),
-        });
-        addConstraint(constraints, {
-          constraintId: input.createConstraintId(
-            source.kind === "sketchDatum"
-              ? `inferred-foot-on-datum-${index}`
-              : `inferred-foot-on-projected-${index}`,
-          ),
-          kind: "pointOnProjectedCurve",
-          label:
-            source.kind === "sketchDatum"
-              ? `Inferred perpendicular foot sketch datum ${input.sequence}`
-              : `Inferred perpendicular foot projected ${input.sequence}`,
-          point: localEndPoint,
-          projectedCurve: curveReadOnlyOperandFromSource(source),
-        });
-      }
-      return;
-    }
-
-    if (
-      candidate.kind === "tangent" &&
-      (source.kind === "localEntity" || source.kind === "projectedGeometry") &&
-      (source.geometryKind === "circle" || source.geometryKind === "arc")
-    ) {
-      if (source.kind === "localEntity") {
-        addConstraint(constraints, {
-          constraintId: input.createConstraintId(`inferred-tangent-${index}`),
-          kind: "tangent",
-          label: `Inferred tangent ${input.sequence}`,
-          entityIds: [lineEntityId, source.entityId],
-          relation: "external",
-        });
-        addConstraint(constraints, {
-          constraintId: input.createConstraintId(
-            `inferred-tangent-point-on-${index}`,
-          ),
-          kind: "pointOnCurve",
-          label: `Inferred tangent point ${input.sequence}`,
-          point: localEndPoint,
-          curve: localEntityOperand(source.entityId),
-        });
-        return;
-      }
-
-      if (source.kind === "projectedGeometry") {
-        addConstraint(constraints, {
-          constraintId: input.createConstraintId(
-            `inferred-tangent-projected-${index}`,
-          ),
-          kind: "tangentProjectedCurve",
-          label: `Inferred tangent projected curve ${input.sequence}`,
-          curve: localLine,
-          projectedCurve: projectedOperandFromSource(source),
-          relation: "external",
-        });
-        addConstraint(constraints, {
-          constraintId: input.createConstraintId(
-            `inferred-tangent-point-projected-${index}`,
-          ),
-          kind: "pointOnProjectedCurve",
-          label: `Inferred tangent point projected ${input.sequence}`,
-          point: localEndPoint,
-          projectedCurve: projectedOperandFromSource(source),
-        });
-      }
-    }
+  return inferPlacement({
+    toolId: session.activeTool,
+    role: getSketchToolDefinition(session.activeTool).placementRole(index),
+    definition: session.definition,
+    projectedReferences: session.projectedReferences,
+    lineStartPointId:
+      index === 1
+        ? (session.toolStartPointId ??
+          session.toolPlacements?.[0]?.requirements.find(
+            (requirement) => requirement.kind === "joins",
+          )?.pointId ??
+          null)
+        : null,
+    pointer: point,
+    solvedSnapshot: getSketchSessionDisplaySolvedSnapshot(session),
+    sketchUnitsPerPixel: session.sketchUnitsPerPixel ?? null,
+    anchor: session.status === "drawing" ? session.pointerDownPoint : null,
+    activeCandidateKey: session.activeInference?.candidate?.key ?? null,
   });
-
-  return constraints;
-}
-
-export function appendInferredSnapConstraints(input: {
-  previousDefinition: SketchDefinition;
-  patch: SketchToolCommitContribution;
-  activeTool: SketchToolId;
-  startSnap: SketchSnapCandidate | null;
-  endSnap: SketchSnapCandidate | null;
-  sequence: number;
-  createConstraintId: (suffix: string) => ConstraintId;
-}): SketchToolCommitContribution {
-  const patch =
-    input.activeTool === "line"
-      ? normalizeLinePatchEndpointReuse({
-          previousDefinition: input.previousDefinition,
-          patch: input.patch,
-          startSnap: input.startSnap,
-          endSnap: input.endSnap,
-        })
-      : input.patch;
-  const constraints = [...(patch.constraints ?? [])];
-
-  for (const [snapRole, snap] of [
-    ["start", input.startSnap],
-    ["end", input.endSnap],
-  ] as const) {
-    if (!snap) {
-      continue;
-    }
-
-    for (const pointId of getPatchPointIdsAtPosition(patch, snap.point)) {
-      constraints.push(
-        ...inferPointSnapConstraints({
-          previousDefinition: input.previousDefinition,
-          patch,
-          candidate: snap,
-          snapRole,
-          pointId,
-          sequence: input.sequence,
-          createConstraintId: input.createConstraintId,
-        }),
-      );
-    }
-  }
-
-  if (input.activeTool === "line") {
-    const endPointId =
-      patch.entities.find((entity) => entity.kind === "lineSegment")
-        ?.endPointId ?? null;
-    constraints.push(
-      ...inferLineSnapConstraints({
-        patch,
-        candidate: input.endSnap,
-        endPointId,
-        sequence: input.sequence,
-        createConstraintId: input.createConstraintId,
-      }),
-    );
-  }
-
-  const uniqueConstraints = dedupeConstraints(constraints);
-
-  return uniqueConstraints.length === (patch.constraints ?? []).length
-    ? patch
-    : {
-        ...patch,
-        constraints: uniqueConstraints,
-      };
-}
-
-export function dedupeConstraints(constraints: ConstraintDefinition[]) {
-  const seen = new Set<string>();
-  const uniqueConstraints: ConstraintDefinition[] = [];
-
-  for (const constraint of constraints) {
-    const key = getConstraintDedupeKey(constraint);
-    if (seen.has(key)) {
-      continue;
-    }
-
-    seen.add(key);
-    uniqueConstraints.push(constraint);
-  }
-
-  return uniqueConstraints;
-}
-
-export function getConstraintDedupeKey(
-  constraint: ConstraintDefinition,
-): string {
-  const readOnlyOperandKey = (operand: {
-    kind: string;
-    reference?: { referenceId: ReferenceId; geometryId: string };
-    datum?: "origin" | "xAxis" | "yAxis";
-  }) =>
-    operand.kind === "projectedGeometry"
-      ? `${operand.reference!.referenceId}:${operand.reference!.geometryId}`
-      : `datum:${operand.datum}`;
-
-  switch (constraint.kind) {
-    case "coincident":
-      return `${constraint.kind}:${[...constraint.pointIds].sort().join(":")}`;
-    case "equalOffset":
-      return `${constraint.kind}:${constraint.pairs
-        .map(
-          (pair) => `${pair.seedEntityId}:${pair.offsetEntityId}:${pair.side}`,
-        )
-        .join(":")}`;
-    case "parallel":
-    case "perpendicular":
-    case "equalLength":
-    case "tangent":
-    case "concentric":
-      return `${constraint.kind}:${[...constraint.entityIds].sort().join(":")}`;
-    case "horizontal":
-    case "vertical":
-      return `${constraint.kind}:${constraint.entityId}`;
-    case "midpoint":
-      return `${constraint.kind}:${constraint.point.pointId}:${constraint.line.entityId}`;
-    case "pointOnCurve":
-      return `${constraint.kind}:${constraint.point.pointId}:${constraint.curve.entityId}`;
-    case "collinear":
-      return `${constraint.kind}:${collinearTargetKey(constraint.target)}:${constraint.line.entityId}`;
-    case "collinearProjectedLine":
-      return `${constraint.kind}:${collinearTargetKey(constraint.target)}:${readOnlyOperandKey(constraint.projectedLine)}`;
-    case "fixPoint":
-      return `${constraint.kind}:${constraint.pointId}:${constraint.position.join(":")}`;
-    case "angle":
-      return `${constraint.kind}:${constraint.pointIds.join(":")}:${constraint.valueRadians}`;
-    case "coincidentProjectedPoint":
-      return `${constraint.kind}:${constraint.point.pointId}:${readOnlyOperandKey(constraint.projectedPoint)}`;
-    case "pointOnProjectedCurve":
-      return `${constraint.kind}:${constraint.point.pointId}:${readOnlyOperandKey(constraint.projectedCurve)}`;
-    case "midpointProjectedLine":
-      return `${constraint.kind}:${constraint.point.pointId}:${readOnlyOperandKey(constraint.projectedLine)}`;
-    case "parallelProjectedLine":
-    case "perpendicularProjectedLine":
-      return `${constraint.kind}:${constraint.line.entityId}:${readOnlyOperandKey(constraint.projectedLine)}`;
-    case "tangentProjectedCurve":
-    case "concentricProjectedCurve":
-      return `${constraint.kind}:${constraint.curve.entityId}:${constraint.projectedCurve.reference.referenceId}:${constraint.projectedCurve.reference.geometryId}`;
-    case "normal":
-      return `${constraint.kind}:${constraint.line.entityId}:${constraint.curve.entityId}:${constraint.point.pointId}`;
-    case "normalProjectedCurve":
-      return `${constraint.kind}:${constraint.line.entityId}:${constraint.projectedCurve.reference.referenceId}:${constraint.projectedCurve.reference.geometryId}:${constraint.point.pointId}`;
-    case "symmetric":
-      return `${constraint.kind}:${[...constraint.pointIds].sort().join(":")}:${constraint.axis.entityId}`;
-    case "symmetricProjectedLine":
-      return `${constraint.kind}:${[...constraint.pointIds].sort().join(":")}:${readOnlyOperandKey(constraint.projectedLine)}`;
-  }
-}
-
-function collinearTargetKey(operand: {
-  kind: string;
-  pointId?: string;
-  entityId?: string;
-}) {
-  return operand.kind === "localPoint"
-    ? `point:${operand.pointId}`
-    : `entity:${operand.entityId}`;
 }
 
 export function startSketchDraw(
@@ -2179,7 +1455,8 @@ export function startSketchDraw(
     return session;
   }
   const toolDefinition = getSketchToolDefinition(session.activeTool);
-  const snap = resolveSessionSnap(session, point);
+  const inference = previewSketchPlacement(session, point)!;
+  const startPoint = inference.position;
   const result = toolDefinition.pointerRelease({
     state: {
       status: "idle",
@@ -2188,10 +1465,20 @@ export function startSketchDraw(
       placedPoints: [],
       settings: session.toolSettings,
       validationMessage: null,
-    } satisfies import("@/core/sketch-tools/definition").SketchToolRuntimeState,
-    point: snap.point,
+    } satisfies SketchToolRuntimeState,
+    point: startPoint,
   });
-  const startPoint = snap.point ?? point;
+  // A draft started from idle never continues a chain (review R-1).
+  const fresh: SketchSessionState = {
+    ...session,
+    toolChain: null,
+    toolStartPointId: null,
+    toolPlacements: [],
+    // R-7: a Tangent arc records its tangent source at its first click.
+    toolTangentSourceEntityId: toolDefinition.structuralTangentSource
+      ? getStructuralTangentSourceEntityId(inference.candidate)
+      : null,
+  };
 
   // A one-click tool (Point, T11-D19) completes on its first release.
   if (
@@ -2199,17 +1486,18 @@ export function startSketchDraw(
     result.state.validationMessage === null
   ) {
     return commitSketchDraw(
-      { ...session, drawStartSnap: null, toolChain: null },
+      fresh,
       toolDefinition,
       result,
       startPoint,
       startPoint,
-      snap.candidate,
+      [inference],
     );
   }
 
+  const placements = getPlacedClickCount(result.state) > 0 ? [inference] : [];
   return {
-    ...session,
+    ...fresh,
     status: result.state.status,
     pointerDownPoint: result.state.pointerDownPoint,
     livePoint: result.state.livePoint,
@@ -2220,11 +1508,13 @@ export function startSketchDraw(
       session.constructionModifierActive,
     ),
     validationMessage: result.state.validationMessage,
-    toolPresentation: withSnapPresentation(result.presentation, snap.candidate),
-    activeSnap: snap.candidate,
-    drawStartSnap: snap.candidate,
-    // A draft started from idle never continues a chain (review R-1).
-    toolChain: null,
+    toolPresentation: withPlacementPresentation(
+      result.presentation,
+      placements,
+      placements.length > 0 ? null : inference,
+    ),
+    activeInference: inference,
+    toolPlacements: placements,
   };
 }
 
@@ -2241,59 +1531,45 @@ export function acceptSketchDraw(
 
   const startPoint = session.pointerDownPoint;
   const toolDefinition = getSketchToolDefinition(session.activeTool);
-  const snap = resolveSessionSnap(session, point);
-  const endPoint = snap.point ?? point;
+  // The release commits the inference the preview shows at the (flushed)
+  // release point, with the same hysteresis state (D15).
+  const inference = previewSketchPlacement(session, point)!;
+  const endPoint = inference.position;
+  const runtimeState = getToolRuntimeState(session);
   const result = toolDefinition.pointerRelease({
-    state: getToolRuntimeState(session),
+    state: runtimeState,
     point: endPoint,
   });
-  // The snap a newly placed fit point accepted, for the end of the finalize
-  // commit (an ignored release places nothing), on both branches below
-  // (T11i review A-4).
-  const fitPointEndSnap =
-    typeof toolDefinition.lifecycle === "object" &&
-    (result.state.placedPoints?.length ?? 0) > session.toolPlacedPoints.length
-      ? { fitPointEndSnap: snap.candidate }
-      : {};
+  const previousPlacements = session.toolPlacements ?? [];
+  // An ignored or refused release places nothing.
+  const placed =
+    getPlacedClickCount(result.state) > getPlacedClickCount(runtimeState);
+  const placements = placed
+    ? [...previousPlacements, inference]
+    : previousPlacements;
 
-  if (result.state.validationMessage) {
+  if (result.state.validationMessage || result.state.status !== "idle") {
     return {
       ...session,
-      toolStagedEntities: [],
+      toolStagedEntities: result.state.validationMessage
+        ? []
+        : withConstructionFlag(
+            result.stagedEntities,
+            session.constructionModifierActive,
+          ),
       status: result.state.status,
       pointerDownPoint: result.state.pointerDownPoint,
       livePoint: result.state.livePoint,
       toolPlacedPoints: result.state.placedPoints ?? session.toolPlacedPoints,
       toolSettings: result.state.settings ?? session.toolSettings,
       validationMessage: result.state.validationMessage,
-      toolPresentation: withSnapPresentation(
+      toolPresentation: withPlacementPresentation(
         result.presentation,
-        snap.candidate,
+        placements,
+        placed ? null : inference,
       ),
-      activeSnap: snap.candidate,
-      ...fitPointEndSnap,
-    };
-  }
-
-  if (result.state.status !== "idle") {
-    return {
-      ...session,
-      toolStagedEntities: withConstructionFlag(
-        result.stagedEntities,
-        session.constructionModifierActive,
-      ),
-      status: result.state.status,
-      pointerDownPoint: result.state.pointerDownPoint,
-      livePoint: result.state.livePoint,
-      toolPlacedPoints: result.state.placedPoints ?? session.toolPlacedPoints,
-      toolSettings: result.state.settings ?? session.toolSettings,
-      validationMessage: null,
-      toolPresentation: withSnapPresentation(
-        result.presentation,
-        snap.candidate,
-      ),
-      activeSnap: snap.candidate,
-      ...fitPointEndSnap,
+      activeInference: inference,
+      toolPlacements: placements,
     };
   }
 
@@ -2303,13 +1579,15 @@ export function acceptSketchDraw(
     result,
     startPoint,
     endPoint,
-    snap.candidate,
+    [...previousPlacements, inference],
   );
 }
 
 /**
  * Commits a completed draw as one definition change. The release `result`
- * completed the tool; `endSnap` is the snap accepted on that release.
+ * completed the tool; `placements` are the inferences of every placed click
+ * (the last one the release's), which the commit binds unchanged (D15). A
+ * Line chain segment starts structurally at `toolStartPointId` (D20).
  */
 function commitSketchDraw(
   session: SketchSessionState,
@@ -2317,7 +1595,7 @@ function commitSketchDraw(
   result: SketchToolPointerResult,
   startPoint: SketchPoint,
   endPoint: SketchPoint,
-  endSnap: SketchSnapCandidate | null,
+  placements: readonly PlacementInference[],
 ): SketchSessionState {
   const nextSequence = session.sequence + 1;
   const sketchId = session.sketchId ?? ("sketch_draft" as SketchId);
@@ -2328,10 +1606,7 @@ function commitSketchDraw(
     points: result.state.placedPoints ?? [startPoint, endPoint],
     settings: result.state.settings ?? session.toolSettings,
     isConstruction: session.constructionModifierActive,
-    acceptedSnaps: {
-      start: session.drawStartSnap,
-      end: endSnap,
-    },
+    tangentSourceEntityId: session.toolTangentSourceEntityId ?? null,
     factories: {
       createPointId: (suffix) => createPointId(nextSequence, suffix),
       createEntityId: (suffix) => createEntityId(nextSequence, suffix),
@@ -2486,12 +1761,11 @@ function commitSketchDraw(
         ),
     },
   });
-  const definitionPatch = appendInferredSnapConstraints({
-    previousDefinition: session.definition,
+  const structuralStartPointId = session.toolStartPointId ?? null;
+  const definitionPatch = bindPlacementInferences({
     patch: baseDefinitionPatch,
-    activeTool: toolDefinition.metadata.id,
-    startSnap: session.drawStartSnap,
-    endSnap,
+    placements: structuralStartPointId ? [null, ...placements] : placements,
+    structuralStartPointId,
     sequence: nextSequence,
     createConstraintId: (suffix) => createConstraintId(nextSequence, suffix),
   });
@@ -2529,9 +1803,10 @@ function commitSketchDraw(
       activeEditTool: null,
       activeEditTarget: null,
       activeDrag: null,
-      activeSnap: null,
-      drawStartSnap: null,
-      fitPointEndSnap: null,
+      activeInference: null,
+      toolPlacements: [],
+      toolStartPointId: null,
+      toolTangentSourceEntityId: null,
     },
     history.definition,
   );
@@ -2597,107 +1872,6 @@ export function setSketchSnapScale(
   return (session.sketchUnitsPerPixel ?? null) === sketchUnitsPerPixel
     ? session
     : { ...session, sketchUnitsPerPixel };
-}
-
-export function resolveSessionSnap(
-  session: SketchSessionState,
-  point: SketchPoint | null,
-): { point: SketchPoint | null; candidate: SketchSnapCandidate | null } {
-  if (!point || !isDrawingSketchTool(session.activeTool)) {
-    return { point, candidate: null };
-  }
-
-  const snap = resolveSketchSnap({
-    pointer: point,
-    geometries: collectSketchSnapGeometries({
-      definition: session.definition,
-      projectedReferences: session.projectedReferences,
-      solvedSnapshot: getSketchSessionDisplaySolvedSnapshot(session),
-    }),
-    sketchUnitsPerPixel: session.sketchUnitsPerPixel ?? null,
-    activeAnchor:
-      session.status === "drawing" ? session.pointerDownPoint : null,
-    activeCandidateKey: session.activeSnap?.key ?? null,
-  });
-
-  return {
-    point: snap.snappedPoint,
-    candidate: snap.activeCandidate,
-  };
-}
-
-export function withSnapPresentation(
-  presentation: SketchToolPresentationSchema,
-  candidate: SketchSnapCandidate | null,
-): SketchToolPresentationSchema {
-  if (!candidate) {
-    return presentation;
-  }
-
-  return {
-    ...presentation,
-    overlays: [
-      ...(presentation.overlays ?? []),
-      ...getSnapConstraintPreviewOverlays(candidate),
-      {
-        id: "active-snap",
-        kind: "snapIndicator",
-        label: candidate.preview.label,
-        point: candidate.point,
-        candidateKind: candidate.kind,
-        glyphKind: candidate.preview.glyph,
-      },
-    ],
-  };
-}
-
-export function getSnapConstraintPreviewOverlays(
-  candidate: SketchSnapCandidate,
-): SketchToolOverlayDescriptor[] {
-  const detail = getSnapConstraintPreviewDetail(candidate);
-
-  return detail
-    ? [
-        {
-          id: "active-snap-inferred-constraint",
-          kind: "constraintPreview",
-          label: "Inferred constraint",
-          detail,
-          anchor: {
-            kind: "sketchPoint",
-            point: candidate.point,
-            offset: { x: 18, y: 18 },
-          },
-        },
-      ]
-    : [];
-}
-
-export function getSnapConstraintPreviewDetail(candidate: SketchSnapCandidate) {
-  switch (candidate.kind) {
-    case "endpoint":
-      return "Coincident";
-    case "center":
-      return "Concentric or coincident center";
-    case "midpoint":
-      return "Midpoint";
-    case "nearestOnLine":
-      return "Point on line";
-    case "nearestOnCircle":
-      return "Point on circle";
-    case "nearestOnArc":
-      return "Point on arc";
-    case "intersection":
-      return "Point on intersecting curves";
-    case "horizontalAlignment":
-      return "Horizontal";
-    case "verticalAlignment":
-      return "Vertical";
-    case "perpendicularFoot":
-      return "Perpendicular";
-    case "tangent":
-      return "Tangent";
-  }
 }
 
 export function getToolRuntimeState(
@@ -2896,6 +2070,11 @@ export function patchSketchDrawingToolValue(
       toolDefinition.getStagedEntities(runtimeState),
       session.constructionModifierActive,
     ),
-    toolPresentation: toolDefinition.getPresentation(runtimeState),
+    // The placed clicks keep their badges (T13g review RQ-1).
+    toolPresentation: withPlacementPresentation(
+      toolDefinition.getPresentation(runtimeState),
+      session.toolPlacements ?? [],
+      null,
+    ),
   };
 }

@@ -44,7 +44,7 @@ import type {
   SketchToolControlValue,
   SketchToolPresentationSchema,
 } from "@/core/sketch-tools/editor-schema";
-import type { SketchSnapCandidate } from "@/domain/sketch-snapping/snap-candidates";
+import type { PlacementInference } from "@/domain/sketch-inference/placement-inference";
 import type { SketchStyleFocus } from "@/domain/sketch-styles/definition";
 import type { OffsetSide } from "@/domain/sketch-editing/operations";
 import type { SketchEditToolId } from "@/core/sketch-edit-tools/definition";
@@ -370,19 +370,34 @@ export interface SketchSessionState {
   activeStyleFocus: SketchStyleFocus | null;
   activeSpecialMode: ActiveSketchSpecialModeSession | null;
   activeDrag: SketchGeometryDragState | null;
-  activeSnap: SketchSnapCandidate | null;
-  drawStartSnap: SketchSnapCandidate | null;
+  /**
+   * T13-D15: the live inference of the armed drawing tool's next click at
+   * the pointer (its candidate is the snap hysteresis state). Absent or null
+   * without one.
+   */
+  activeInference?: PlacementInference | null;
+  /**
+   * T13-D15: the inference each placed click of the draft committed to, in
+   * click order; the commit authors exactly their requirements. A Line chain
+   * segment's structural start is not a placement (`toolStartPointId`).
+   */
+  toolPlacements?: readonly PlacementInference[];
+  /**
+   * T13-D20: the existing point the draft starts from structurally, a Line
+   * chain's anchor (its last segment's end point): never a snap.
+   */
+  toolStartPointId?: SketchPointId | null;
+  /**
+   * T13 review R-7: the curve a Tangent arc draft starts tangent to,
+   * recorded at its first click; structural, never a snap.
+   */
+  toolTangentSourceEntityId?: SketchEntityId | null;
   /**
    * Sketch units per screen pixel at the latest sketch pointer event
    * (T13-D13): snap tolerances are screen pixels. Absent or null: no measured
    * scale, nothing snaps.
    */
   sketchUnitsPerPixel?: number | null;
-  /**
-   * The snap accepted on a fit-point draft's last placed point: the end snap
-   * of its finalize commit (T11i). Absent or null otherwise.
-   */
-  fitPointEndSnap?: SketchSnapCandidate | null;
   /** The active Line chain; absent or null when no chain is active. */
   toolChain?: SketchToolChain | null;
   sequence: number;

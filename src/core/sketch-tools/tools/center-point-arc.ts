@@ -1,7 +1,7 @@
 import type { SketchPoint } from "@/contracts/modeling/schema";
 import type {
   SketchDraftEntity,
-  SketchToolCommitContribution,
+  SketchToolDrawContribution,
   SketchToolDefinition,
   SketchToolRuntimeState,
   SketchToolValidationResult,
@@ -246,14 +246,16 @@ export const centerPointArcSketchToolDefinition: SketchToolDefinition<"centerPoi
         : { valid: false, message: "Arc radius must be greater than zero." };
     },
     getPresentation: buildCenterPointArcPresentation,
+    // The first click is the new arc's centre.
+    placementRole: (index) => (index === 0 ? "center" : "point"),
     createCommitContribution({
       sequence,
       points,
       factories,
-    }): SketchToolCommitContribution {
+    }): SketchToolDrawContribution {
       const arcPoints = (points ?? []).slice(0, REQUIRED_POINTS);
       if (arcPoints.length < REQUIRED_POINTS) {
-        return { points: [], entities: [] };
+        return { points: [], entities: [], placementPointIds: [] };
       }
 
       const centerPointId = factories.createPointId("center-arc-center");
@@ -296,6 +298,7 @@ export const centerPointArcSketchToolDefinition: SketchToolDefinition<"centerPoi
           startPointId,
           endPointId,
         }),
+        placementPointIds: [centerPointId, startPointId, endPointId],
       };
     },
   };
