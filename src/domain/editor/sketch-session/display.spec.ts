@@ -373,36 +373,32 @@ describe("T11f contextual point markers (T11-D8)", () => {
 
   test("a drawing tool's draft start point is a tool anchor; without an active tool there is none", () => {
     const session = markerSession({ conflict: false });
-    const drawStartSnap = {
-      key: "endpoint:lb",
-      kind: "endpoint",
-      point: [3.3, 1.7],
-      rawPointer: [3.3, 1.7],
-      distance: 0,
-      priority: 0,
-      sources: [
-        { kind: "localPoint", pointId: pointId("lb") },
-        {
-          kind: "localEntity",
-          entityId: entityId("line"),
-          geometryKind: "lineSegment",
-        },
-      ],
-      preview: {},
-    } as unknown as SketchSessionState["drawStartSnap"];
+    // A Line chain's structural start (T13-D20) and a first placement
+    // that joins an existing point (T13-D15) are both the draft's anchor.
+    const joinedPlacement = {
+      requirements: [{ kind: "joins", pointId: pointId("lb") }],
+    } as unknown as NonNullable<SketchSessionState["toolPlacements"]>[number];
 
     expect([
       ...getSketchToolMarkerPointIds({
         ...session,
         activeTool: "line",
-        drawStartSnap,
+        toolStartPointId: pointId("lb"),
+      }),
+    ]).toEqual([pointId("lb")]);
+    expect([
+      ...getSketchToolMarkerPointIds({
+        ...session,
+        activeTool: "line",
+        toolPlacements: [joinedPlacement],
       }),
     ]).toEqual([pointId("lb")]);
     expect(
       getSketchToolMarkerPointIds({
         ...session,
         activeTool: null,
-        drawStartSnap,
+        toolStartPointId: pointId("lb"),
+        toolPlacements: [joinedPlacement],
       }).size,
     ).toBe(0);
     expect(

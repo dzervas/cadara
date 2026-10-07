@@ -1,8 +1,7 @@
 import type { SketchPoint } from "@/contracts/modeling/schema";
-import type { SketchSnapCandidate } from "@/domain/sketch-snapping/snap-candidates";
 import type {
   SketchDraftEntity,
-  SketchToolCommitContribution,
+  SketchToolDrawContribution,
   SketchToolDefinition,
   SketchToolRuntimeState,
   SketchToolValidationResult,
@@ -248,28 +247,28 @@ export const tangentArcSketchToolDefinition: SketchToolDefinition<"tangentArc"> 
       return validateTangentArc([start, end]);
     },
     getPresentation: buildTangentArcPresentation,
+    // Start, tangent direction (shape only), end.
+    placementRole: (index) => (index === 1 ? "shape" : "point"),
+    structuralTangentSource: true,
     createCommitContribution({
       sequence,
       points,
-      acceptedSnaps,
+      tangentSourceEntityId,
       factories,
-    }): SketchToolCommitContribution {
+    }): SketchToolDrawContribution {
       const arcPoints = (points ?? []).slice(0, REQUIRED_POINTS);
       const circle =
         arcPoints.length === REQUIRED_POINTS
           ? getTangentArcCircle(arcPoints[0]!, arcPoints[1]!, arcPoints[2]!)
           : null;
       if (!circle) {
-        return { points: [], entities: [] };
+        return { points: [], entities: [], placementPointIds: [] };
       }
 
       const centerPointId = factories.createPointId("tangent-arc-center");
       const startPointId = factories.createPointId("tangent-arc-start");
       const endPointId = factories.createPointId("tangent-arc-end");
       const entityId = factories.createEntityId("tangent-arc");
-      const tangentSourceEntityId = getLocalTangentSourceEntityId(
-        acceptedSnaps?.start ?? null,
-      );
 
       return {
         points: [
@@ -300,6 +299,7 @@ export const tangentArcSketchToolDefinition: SketchToolDefinition<"tangentArc"> 
           ),
         ],
         constraints: [
+          // R-7: the source recorded at the first click, never suppressed.
           ...(tangentSourceEntityId
             ? [
                 createTangentConstraint({
@@ -326,18 +326,7 @@ export const tangentArcSketchToolDefinition: SketchToolDefinition<"tangentArc"> 
           startPointId,
           endPointId,
         }),
+        placementPointIds: [startPointId, null, endPointId],
       };
     },
   };
-
-function getLocalTangentSourceEntityId(candidate: SketchSnapCandidate | null) {
-  const source = candidate?.sources.find(
-    (entry) =>
-      entry.kind === "localEntity" &&
-      (entry.geometryKind === "lineSegment" ||
-        entry.geometryKind === "circle" ||
-        entry.geometryKind === "arc"),
-  );
-
-  return source?.kind === "localEntity" ? source.entityId : null;
-}

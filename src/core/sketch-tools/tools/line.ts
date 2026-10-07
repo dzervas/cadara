@@ -1,7 +1,7 @@
 import type { SketchPoint } from "@/contracts/modeling/schema";
 import type {
   SketchDraftEntity,
-  SketchToolCommitContribution,
+  SketchToolDrawContribution,
   SketchToolDefinition,
   SketchToolPointerResult,
   SketchToolRuntimeState,
@@ -145,12 +145,13 @@ const lineToolDefinition: SketchToolDefinition<"line"> =
       buildPreview: buildLinePreview,
       buildPresentation: buildLinePresentation,
       validate: validateLine,
+      placementRole: () => "point",
       createCommitContribution({
         sequence,
         start,
         end,
         factories,
-      }): SketchToolCommitContribution {
+      }): SketchToolDrawContribution {
         const startPointId = factories.createPointId("line-start");
         const endPointId = factories.createPointId("line-end");
         const entityId = factories.createEntityId("line");
@@ -172,6 +173,7 @@ const lineToolDefinition: SketchToolDefinition<"line"> =
               endPointId,
             ),
           ],
+          placementPointIds: [startPointId, endPointId],
         };
       },
     },

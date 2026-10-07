@@ -96,7 +96,7 @@ import {
   type SketchEditorState,
 } from "@/core/editor/state-machine";
 import { runEditorEffect } from "@/application/editor/effect-registry";
-import { resolveSessionSnap } from "@/domain/editor/sketch-session/tools";
+import { previewSketchPlacement } from "@/domain/editor/sketch-session/tools";
 import { TRIM_TOO_FEW_CUTS_MESSAGE } from "@/contracts/sketch/edit-intersections";
 import {
   DERIVED_SHELL_DELETE_MESSAGE,
@@ -7833,10 +7833,10 @@ function snapsTo(session: SketchSessionState, entityId: SketchEntityId) {
     session.definition.points.find((point) => point.pointId === pointId)!
       .position;
   const [start, end] = [at(entity.startPointId), at(entity.endPointId)];
-  const { candidate } = resolveSessionSnap(beginSketchTool(session, "line"), [
+  const candidate = previewSketchPlacement(beginSketchTool(session, "line"), [
     start[0] + 0.3 * (end[0] - start[0]),
     start[1] + 0.3 * (end[1] - start[1]),
-  ]);
+  ])?.candidate;
   return (
     candidate?.sources.some(
       (source) => source.kind === "localEntity" && source.entityId === entityId,

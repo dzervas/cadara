@@ -80,8 +80,10 @@ function scrubSessionForSpecialMode(
     activeEditTarget: null,
     activeStyleFocus: null,
     activeDrag: null,
-    activeSnap: null,
-    drawStartSnap: null,
+    activeInference: null,
+    toolPlacements: [],
+    toolStartPointId: null,
+    toolTangentSourceEntityId: null,
     validationMessage: null,
   };
 }

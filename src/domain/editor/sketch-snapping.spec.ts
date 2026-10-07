@@ -81,7 +81,7 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
 
     session = startSketchDraw(session, [1, 1.04]);
     expect(
-      session.activeSnap?.kind,
+      session.activeInference?.candidate?.kind,
       "Starting a new line near an existing line midpoint should activate midpoint snap.",
     ).toBe("midpoint");
     assertClosePoint(
@@ -92,14 +92,16 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
     expect(
       session.toolPresentation?.overlays?.some(
         (overlay) =>
-          overlay.kind === "snapIndicator" && overlay.label === "Midpoint",
+          overlay.kind === "snapIndicator" &&
+          overlay.candidateKind === "midpoint" &&
+          overlay.label === "Midpoint of Line 1",
       ),
       "Active snap should be exposed as transient viewport feedback.",
     ).toBeTruthy();
 
     session = updateSketchPointer(session, [3, 1.04]);
     expect(
-      session.activeSnap?.kind,
+      session.activeInference?.candidate?.kind,
       "Line preview should snap horizontally from the snapped start.",
     ).toBe("horizontalAlignment");
     assertClosePoint(
@@ -158,7 +160,7 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
       "Accepted horizontal snap should append a durable horizontal constraint.",
     ).toBeTruthy();
     expect(
-      session.activeSnap,
+      session.activeInference?.candidate ?? null,
       "Accepted draw commits should clear transient snap state.",
     ).toBe(null);
   }
@@ -175,7 +177,7 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [2.04, 0.02]);
     expect(
-      session.activeSnap?.kind,
+      session.activeInference?.candidate?.kind,
       "Starting near an existing endpoint should activate endpoint snap.",
     ).toBe("endpoint");
     session = updateSketchPointer(session, [3, 1]);
@@ -238,7 +240,7 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
     session = startSketchDraw(session, [1.08, 0.3]);
 
     expect(
-      session.activeSnap?.kind,
+      session.activeInference?.candidate?.kind,
       "Projected reference geometry should feed snap candidates.",
     ).toBe("nearestOnLine");
     assertClosePoint(
@@ -247,7 +249,7 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
       "Line start should snap onto projected reference geometry.",
     );
     expect(
-      session.activeSnap.sources.some(
+      session.activeInference!.candidate!.sources.some(
         (source) => source.kind === "projectedGeometry",
       ),
       "Projected snap metadata should identify the derived reference geometry source.",
@@ -339,12 +341,12 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [0.54, 0.23]);
     expect(
-      session.activeSnap?.kind,
+      session.activeInference?.candidate?.kind,
       "Line start should snap onto the existing line.",
     ).toBe("nearestOnLine");
     session = updateSketchPointer(session, [1.48, 0.76]);
     expect(
-      session.activeSnap?.kind,
+      session.activeInference?.candidate?.kind,
       "Line end should snap onto the same existing line.",
     ).toBe("nearestOnLine");
     session = acceptSketchDraw(session, [1.48, 0.76]);
@@ -529,7 +531,7 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
     originSession = beginSketchTool(originSession, "line");
     originSession = startSketchDraw(originSession, [0.04, 0.03]);
     expect(
-      originSession.activeSnap?.kind,
+      originSession.activeInference?.candidate?.kind,
       "Starting near the sketch origin should activate datum-origin snap.",
     ).toBe("endpoint");
     assertClosePoint(
@@ -565,9 +567,12 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
     );
     exactSession = beginSketchTool(exactSession, "line");
     exactSession = startSketchDraw(exactSession, [0, 0]);
-    expect(exactSession.activeSnap?.distance, "premise: distance 0").toBe(0);
     expect(
-      exactSession.activeSnap?.sources,
+      exactSession.activeInference?.candidate?.distance,
+      "premise: distance 0",
+    ).toBe(0);
+    expect(
+      exactSession.activeInference?.candidate?.sources,
       "premise: the exact origin snap is shown",
     ).toEqual([
       { kind: "sketchDatum", datumId: "origin", geometryKind: "point" },
@@ -608,7 +613,7 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
     axisSession = startSketchDraw(axisSession, [2, 1]);
     axisSession = updateSketchPointer(axisSession, [4, 0.04]);
     expect(
-      axisSession.activeSnap?.kind,
+      axisSession.activeInference?.candidate?.kind,
       "Moving near a sketch datum axis should activate an on-axis snap.",
     ).toBe("nearestOnLine");
     assertClosePoint(
@@ -699,7 +704,7 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
     perpendicularSession = startSketchDraw(perpendicularSession, [0.5, 1]);
     perpendicularSession = updateSketchPointer(perpendicularSession, [1, 1]);
     expect(
-      perpendicularSession.activeSnap?.kind,
+      perpendicularSession.activeInference?.candidate?.kind,
       "Projected line should provide a perpendicular-foot snap.",
     ).toBe("perpendicularFoot");
     perpendicularSession = acceptSketchDraw(perpendicularSession, [1, 1]);
@@ -753,7 +758,7 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
       [0.9428090415820634, 0.33333333333333337],
     );
     expect(
-      tangentSession.activeSnap?.kind,
+      tangentSession.activeInference?.candidate?.kind,
       "Projected circle should provide a tangent snap.",
     ).toBe("tangent");
     tangentSession = acceptSketchDraw(

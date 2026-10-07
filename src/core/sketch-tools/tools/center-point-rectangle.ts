@@ -1,7 +1,7 @@
 import type { SketchPoint } from "@/contracts/modeling/schema";
 import type {
   SketchDraftEntity,
-  SketchToolCommitContribution,
+  SketchToolDrawContribution,
   SketchToolDefinition,
   SketchToolRuntimeState,
 } from "@/core/sketch-tools/definition";
@@ -176,12 +176,13 @@ export const centerPointRectangleSketchToolDefinition: SketchToolDefinition<"cen
       buildPreview: buildCenterPointRectanglePreview,
       buildPresentation: buildCenterPointRectanglePresentation,
       validate: validateCenterPointRectangle,
+      placementRole: () => "point",
       createCommitContribution({
         sequence,
         start,
         end,
         factories,
-      }): SketchToolCommitContribution {
+      }): SketchToolDrawContribution {
         const { bottomLeft, bottomRight, topRight, topLeft, center } =
           getAxisAlignedRectangleCorners(start, end);
         const cornerIds = [
@@ -321,6 +322,20 @@ export const centerPointRectangleSketchToolDefinition: SketchToolDefinition<"cen
               pointId: centerPointId,
               lineEntityId: entityIds[5],
             }),
+          ],
+          // The first click is the centre, the second the corner at its
+          // position (bottom-left, bottom-right, top-right, top-left).
+          placementPointIds: [
+            centerPointId,
+            cornerIds[
+              end[0] <= start[0]
+                ? end[1] <= start[1]
+                  ? 0
+                  : 3
+                : end[1] <= start[1]
+                  ? 1
+                  : 2
+            ],
           ],
         };
       },

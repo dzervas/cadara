@@ -12,7 +12,6 @@ import type {
   SketchToolControlValue,
   SketchToolPresentationSchema,
 } from "@/core/sketch-tools/editor-schema";
-import type { SketchSnapCandidate } from "@/domain/sketch-snapping/snap-candidates";
 
 export type SketchToolId =
   | "point"
@@ -200,10 +199,11 @@ export interface SketchToolCommitInput {
   points?: readonly SketchPoint[];
   settings?: Record<string, SketchToolControlValue>;
   isConstruction: boolean;
-  acceptedSnaps?: {
-    start: SketchSnapCandidate | null;
-    end: SketchSnapCandidate | null;
-  };
+  /**
+   * The curve a tool with a structural tangent source (Tangent arc) starts
+   * tangent to (T13 review R-7): recorded from its first click, not a snap.
+   */
+  tangentSourceEntityId?: SketchEntityId | null;
   factories: SketchToolCommitFactories;
 }
 
@@ -213,6 +213,24 @@ export interface SketchToolCommitContribution {
   constraints?: ConstraintDefinition[];
   dimensions?: DimensionDefinition[];
   derivedRelationships?: SketchDerivationDefinition[];
+}
+
+/**
+ * What one click of a drawing tool becomes (T13-D16), known before the
+ * click: an authored `point` of the primitive, the `center` point of the
+ * tool's new circle or arc, or a `shape` click that only sizes or orients
+ * the primitive (circle and polygon rim, aligned-rectangle height, tangent
+ * direction…) and authors no point.
+ */
+export type SketchPlacementRole = "point" | "center" | "shape";
+
+/**
+ * A drawing tool's commit (T13-D16): `placementPointIds[i]` is the point
+ * click `i` of the input `points` became, or `null` for a `shape` click.
+ * Inferred requirements bind to these ids, never to positions.
+ */
+export interface SketchToolDrawContribution extends SketchToolCommitContribution {
+  placementPointIds: readonly (SketchPointId | null)[];
 }
 
 /**
@@ -239,7 +257,14 @@ export interface SketchToolDefinition<
   ): readonly SketchDraftEntity[];
   validate(start: SketchPoint, end: SketchPoint): SketchToolValidationResult;
   getPresentation(state: SketchToolRuntimeState): SketchToolPresentationSchema;
+  /** What click `index` of a draft becomes (T13-D16). */
+  placementRole(index: number): SketchPlacementRole;
+  /**
+   * The first click's curve is the tool's tangent source (Tangent arc, T13
+   * review R-7): structural, recorded on the tool state, never a snap.
+   */
+  structuralTangentSource?: true;
   createCommitContribution(
     input: SketchToolCommitInput,
-  ): SketchToolCommitContribution;
+  ): SketchToolDrawContribution;
 }

@@ -40,8 +40,10 @@ export function focusSketchStyleTool(
     activeEditTool: null,
     activeEditTarget: null,
     activeDrag: null,
-    activeSnap: null,
-    drawStartSnap: null,
+    activeInference: null,
+    toolPlacements: [],
+    toolStartPointId: null,
+    toolTangentSourceEntityId: null,
     toolChain: null,
   };
 }

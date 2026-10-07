@@ -11,7 +11,22 @@ import {
   makeCircleWithDiameterSession,
   openDimensionInput,
 } from "@/components/cad/sketch-reference-dimension.fixtures";
-import { patchSketchConstraintValue } from "@/domain/editor/sketch-session";
+import {
+  acceptSketchDraw,
+  beginSketchTool,
+  createNewSketchSession,
+  patchSketchConstraintValue,
+  startSketchDraw,
+  updateSketchPointer,
+} from "@/domain/editor/sketch-session";
+import {
+  SPEC_SKETCH_UNITS_PER_PIXEL,
+  withSketchSnapScale,
+} from "@/domain/editor/sketch-session/test-snap-scale";
+import {
+  createStandardPlaneDefinition,
+  OCC_KERNEL_SETTINGS,
+} from "@/domain/modeling/opencascade-kernel-seed";
 
 test("src/components/cad/sketch-viewport-feedback.spec.tsx", () => {
   const schema: SketchToolPresentationSchema = {
@@ -496,4 +511,49 @@ test("T13e: the dimension value input renders Reference mode with a read-only me
   expect(independentMarkup).not.toContain('role="switch"');
   expect(independentMarkup).not.toContain("data-floating-input-readout");
   expect(independentMarkup).not.toContain("readOnly");
+});
+
+// T13g, UI lane: the viewport renders the inference text of the live
+// placement and of every placed click of an unfinished draft (D15), so all
+// the requirements the commit will author are visible before the last click.
+test("T13g: placement inference badges render their requirement text", () => {
+  let session = withSketchSnapScale(
+    createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
+    SPEC_SKETCH_UNITS_PER_PIXEL,
+  );
+  session = acceptSketchDraw(
+    startSketchDraw(beginSketchTool(session, "line"), [2, 2]),
+    [6, 2.5],
+  );
+  session = beginSketchTool(session, "threePointArc");
+  session = startSketchDraw(session, [6.02, 2.51]);
+  session = updateSketchPointer(session, [4.01, 2.27]);
+  const overlays = session.toolPresentation?.overlays ?? [];
+  const markup = renderToStaticMarkup(
+    <SketchViewportFeedbackLayer
+      schema={session.toolPresentation!}
+      projections={overlays.map((overlay, index) => ({
+        id: `overlay:${overlay.id}`,
+        x: 100 + index * 10,
+        y: 100,
+      }))}
+      onPatch={() => undefined}
+    />,
+  );
+
+  expect(
+    markup.includes("Coincident · Line 1 end"),
+    "the placed first click keeps its badge text",
+  ).toBe(true);
+  expect(
+    markup.includes("Midpoint of Line 1"),
+    "the live placement shows its requirement",
+  ).toBe(true);
+  expect(
+    markup.match(/data-sketch-viewport-geometry="snapIndicator"/g)?.length,
+    "one glyph per placement",
+  ).toBe(2);
 });

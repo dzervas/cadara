@@ -1,7 +1,7 @@
 import type { SketchPoint } from "@/contracts/modeling/schema";
 import type {
   SketchDraftEntity,
-  SketchToolCommitContribution,
+  SketchToolDrawContribution,
   SketchToolDefinition,
   SketchToolRuntimeState,
 } from "@/core/sketch-tools/definition";
@@ -26,6 +26,19 @@ function getRectangleCorners(start: SketchPoint, end: SketchPoint) {
     topRight,
     topLeft,
   };
+}
+
+/**
+ * The index, in bottom-left, bottom-right, top-right, top-left order, of the
+ * corner at `corner` of the rectangle spanned with `opposite`.
+ */
+function getRectangleCornerIndex(
+  corner: SketchPoint,
+  opposite: SketchPoint,
+): 0 | 1 | 2 | 3 {
+  const left = corner[0] <= opposite[0];
+  const bottom = corner[1] <= opposite[1];
+  return left ? (bottom ? 0 : 3) : bottom ? 1 : 2;
 }
 
 function buildRectanglePreview(
@@ -208,12 +221,13 @@ export const rectangleSketchToolDefinition: SketchToolDefinition<"rectangle"> =
       buildPreview: buildRectanglePreview,
       buildPresentation: buildRectanglePresentation,
       validate: validateRectangle,
+      placementRole: () => "point",
       createCommitContribution({
         sequence,
         start,
         end,
         factories,
-      }): SketchToolCommitContribution {
+      }): SketchToolDrawContribution {
         const { bottomLeft, bottomRight, topRight, topLeft } =
           getRectangleCorners(start, end);
         const cornerIds = [
@@ -303,6 +317,11 @@ export const rectangleSketchToolDefinition: SketchToolDefinition<"rectangle"> =
               label: `Rectangle ${sequence} left vertical`,
               entityId: entityIds[3],
             },
+          ],
+          // Each click is the corner at its own position.
+          placementPointIds: [
+            cornerIds[getRectangleCornerIndex(start, end)],
+            cornerIds[getRectangleCornerIndex(end, start)],
           ],
         };
       },

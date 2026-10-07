@@ -5,11 +5,12 @@ import {
 } from "@/domain/sketch/point-math";
 import type {
   SketchDraftEntity,
-  SketchToolCommitContribution,
   SketchToolCommitInput,
   SketchToolDefinition,
+  SketchToolDrawContribution,
   SketchToolLifecycle,
   SketchToolMetadata,
+  SketchPlacementRole,
   SketchToolPointerInput,
   SketchToolPointerResult,
   SketchToolRuntimeState,
@@ -177,9 +178,10 @@ export function createSketchToolDefinition<
       state: SketchToolRuntimeState,
     ): SketchToolPresentationSchema;
     validate(start: SketchPoint, end: SketchPoint): SketchToolValidationResult;
+    placementRole(index: number): SketchPlacementRole;
     createCommitContribution(
       input: SketchToolCommitInput,
-    ): SketchToolCommitContribution;
+    ): SketchToolDrawContribution;
   },
 ): SketchToolDefinition<TToolId> {
   return {
@@ -217,6 +219,7 @@ export function createSketchToolDefinition<
     },
     validate: input.validate,
     getPresentation: input.buildPresentation,
+    placementRole: input.placementRole,
     createCommitContribution: input.createCommitContribution,
   };
 }

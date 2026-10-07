@@ -1,7 +1,7 @@
 import type { SketchPoint } from "@/contracts/modeling/schema";
 import type {
   SketchDraftEntity,
-  SketchToolCommitContribution,
+  SketchToolDrawContribution,
   SketchToolDefinition,
   SketchToolRuntimeState,
 } from "@/core/sketch-tools/definition";
@@ -125,12 +125,13 @@ export const midpointLineSketchToolDefinition: SketchToolDefinition<"midpointLin
       buildPreview: buildMidpointLinePreview,
       buildPresentation: buildMidpointLinePresentation,
       validate: validateMidpointLine,
+      placementRole: () => "point",
       createCommitContribution({
         sequence,
         start,
         end,
         factories,
-      }): SketchToolCommitContribution {
+      }): SketchToolDrawContribution {
         const reflected = mirrorPointAcrossCenter(start, end);
         const midpointId = factories.createPointId("midpoint-line-midpoint");
         const startPointId = factories.createPointId("midpoint-line-start");
@@ -173,6 +174,8 @@ export const midpointLineSketchToolDefinition: SketchToolDefinition<"midpointLin
               lineEntityId: entityId,
             }),
           ],
+          // The first click places the midpoint, the second the end.
+          placementPointIds: [midpointId, endPointId],
         };
       },
     },

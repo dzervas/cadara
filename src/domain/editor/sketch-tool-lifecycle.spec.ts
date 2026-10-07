@@ -340,7 +340,7 @@ describe("fit-point spline (T11i)", () => {
       [10.05, 0.05],
     ]);
     expect(
-      session.fitPointEndSnap?.sources,
+      session.toolPlacements?.at(-1)?.candidate?.sources,
       "premise: the last fit point snapped onto the line end",
     ).toContainEqual(expect.objectContaining({ kind: "localPoint" }));
 
@@ -354,7 +354,24 @@ describe("fit-point spline (T11i)", () => {
       [5, 6],
       [10, 0],
     ]);
-    expect(restored.fitPointEndSnap ?? null).toBe(null);
+    // T13-D21: the last placement is recomputed at its raw pointer against
+    // the restored geometry: the line end is gone, so the badge and the
+    // finalize show and author what is there now (the X axis), never the
+    // undone point.
+    const lastPlacement = restored.toolPlacements?.at(-1);
+    expect(
+      lastPlacement?.candidate?.sources.some(
+        (source) => source.kind === "localPoint",
+      ),
+    ).toBe(false);
+    expect(lastPlacement?.text).toBe("On Sketch X axis");
+    const badge = restored.toolPresentation?.overlays?.find(
+      (overlay) => overlay.id === "placement-2-snap",
+    );
+    expect(
+      badge?.kind === "snapIndicator" ? badge.label : null,
+      "the rendered badge follows the recomputed inference without a pointer move",
+    ).toBe("On Sketch X axis");
 
     const finalized = finalizeSketchDraw(restored);
     expect(splines(finalized)).toHaveLength(1);
@@ -461,9 +478,7 @@ describe("Line chain (T11-D11)", () => {
   }
 
   function anchorPointIds(session: Session) {
-    return (session.drawStartSnap?.sources ?? []).flatMap((source) =>
-      source.kind === "localPoint" ? [source.pointId] : [],
-    );
+    return [...getSketchToolMarkerPointIds(session)];
   }
 
   function draw(session: Session, points: readonly [number, number][]) {
@@ -602,7 +617,8 @@ describe("Line chain (T11-D11)", () => {
     expect(restarted.activeTool).toBe("line");
     expect(restarted.status).toBe("idle");
     expect(restarted.toolChain ?? null).toBe(null);
-    expect(restarted.drawStartSnap).toBe(null);
+    expect(restarted.toolStartPointId ?? null).toBe(null);
+    expect(restarted.toolPlacements ?? []).toEqual([]);
     expect(restarted.definition).toBe(chained.definition);
   });
 });
@@ -617,9 +633,7 @@ describe("Line chain reconcile on restore (T11-D12)", () => {
   }
 
   function anchorPointIds(session: Session) {
-    return (session.drawStartSnap?.sources ?? []).flatMap((source) =>
-      source.kind === "localPoint" ? [source.pointId] : [],
-    );
+    return [...getSketchToolMarkerPointIds(session)];
   }
 
   /** The definitions after the start click and after each of 3 segments. */
@@ -725,8 +739,8 @@ describe("Line chain reconcile on restore (T11-D12)", () => {
     expect(undone.status, "Only the chain start is placed.").toBe("drawing");
     expect(undone.pointerDownPoint).toEqual([20, 20]);
     expect(
-      undone.drawStartSnap,
-      "The start point no longer exists, so no snap keeps its id.",
+      undone.toolStartPointId ?? null,
+      "The start point no longer exists, so no structural start keeps its id.",
     ).toBe(null);
 
     const next = acceptSketchDraw(undone, [30, 20]);
@@ -786,7 +800,7 @@ describe("Line chain reconcile on restore (T11-D12)", () => {
       [10, 0],
     );
     expect(
-      circleDraft.drawStartSnap?.sources.some(
+      circleDraft.toolPlacements?.[0]?.candidate?.sources.some(
         (source) =>
           source.kind === "localPoint" || source.kind === "localEntity",
       ),
@@ -800,9 +814,13 @@ describe("Line chain reconcile on restore (T11-D12)", () => {
     expect(undone.pointerDownPoint, "Its raw position is kept.").toEqual([
       10, 0,
     ]);
-    expect(undone.drawStartSnap, "A snap on a missing point is dropped.").toBe(
-      null,
-    );
+    expect(
+      undone.toolPlacements?.[0]?.candidate?.sources.some(
+        (source) =>
+          source.kind === "localPoint" || source.kind === "localEntity",
+      ) ?? false,
+      "A snap on a missing point is dropped: the recomputed inference (D21) names no local geometry.",
+    ).toBe(false);
 
     const committed = acceptSketchDraw(undone, [13, 0]);
     const knownPointIds = new Set(
@@ -834,9 +852,7 @@ describe("Line chain review fixes", () => {
   }
 
   function anchorPointIds(session: Session) {
-    return (session.drawStartSnap?.sources ?? []).flatMap((source) =>
-      source.kind === "localPoint" ? [source.pointId] : [],
-    );
+    return [...getSketchToolMarkerPointIds(session)];
   }
 
   function expectNoChain(session: Session, message: string) {
@@ -902,7 +918,8 @@ describe("Line chain review fixes", () => {
       pointerDownPoint: null,
       livePoint: null,
       toolStagedEntities: [],
-      drawStartSnap: null,
+      toolStartPointId: null,
+      toolPlacements: [],
     };
     const started = startSketchDraw(stale, [100, 100]);
     expect(started.toolChain ?? null).toBe(null);

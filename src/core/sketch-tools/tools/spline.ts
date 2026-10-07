@@ -1,7 +1,7 @@
 import type { SketchPoint } from "@/contracts/modeling/schema";
 import type {
   SketchDraftEntity,
-  SketchToolCommitContribution,
+  SketchToolDrawContribution,
   SketchToolDefinition,
   SketchToolLifecycle,
   SketchToolRuntimeState,
@@ -293,11 +293,12 @@ export const splineSketchToolDefinition: SketchToolDefinition<"spline"> = {
     return validateSpline([start, end]);
   },
   getPresentation: buildSplinePresentation,
+  placementRole: () => "point",
   createCommitContribution({
     sequence,
     points,
     factories,
-  }): SketchToolCommitContribution {
+  }): SketchToolDrawContribution {
     const splinePoints = points ?? [];
     const pointIds = splinePoints.map((_, index) =>
       factories.createPointId(`spline-${index + 1}`),
@@ -315,6 +316,7 @@ export const splineSketchToolDefinition: SketchToolDefinition<"spline"> = {
       entities: [
         factories.createSplineEntity(`Spline ${sequence}`, entityId, pointIds),
       ],
+      placementPointIds: pointIds,
     };
   },
 };

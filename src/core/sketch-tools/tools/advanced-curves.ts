@@ -1,7 +1,8 @@
 import type { SketchPoint } from "@/contracts/modeling/schema";
 import type {
   SketchDraftEntity,
-  SketchToolCommitContribution,
+  SketchPlacementRole,
+  SketchToolDrawContribution,
   SketchToolDefinition,
   SketchToolRuntimeState,
   SketchToolValidationResult,
@@ -31,6 +32,8 @@ type FixedPointToolConfig = {
   prompt: string;
   readyPrompt: string;
   cursorLabel: string;
+  /** What click `index` becomes (T13-D16). */
+  placementRole(index: number): SketchPlacementRole;
   validate(
     points: readonly SketchPoint[],
     state: SketchToolRuntimeState,
@@ -46,7 +49,7 @@ type FixedPointToolConfig = {
     factories: Parameters<
       SketchToolDefinition["createCommitContribution"]
     >[0]["factories"];
-  }): SketchToolCommitContribution;
+  }): SketchToolDrawContribution;
   controls?(
     state: SketchToolRuntimeState,
   ): SketchToolPresentationSchema["controls"];
@@ -247,6 +250,7 @@ function createFixedPointTool<
     getPresentation(state) {
       return buildFixedPointPresentation(state, config);
     },
+    placementRole: config.placementRole,
     createCommitContribution({ sequence, points, settings, factories }) {
       return config.createCommitContribution({
         sequence,
@@ -543,6 +547,8 @@ export const ellipseSketchToolDefinition = createFixedPointTool(
     prompt: "Pick ellipse points",
     readyPrompt: "Place ellipse",
     cursorLabel: "Ellipse point",
+    // Centre, major axis end, minor radius (shape only).
+    placementRole: (index) => (index === 2 ? "shape" : "point"),
     validate(points) {
       if (points.length < 3) {
         return {
@@ -618,6 +624,7 @@ export const ellipseSketchToolDefinition = createFixedPointTool(
             minorRadiusFromPoint(points[0]!, points[1]!, points[2]!),
           ),
         ],
+        placementPointIds: [centerPointId, majorPointId, null],
       };
     },
   },
@@ -639,6 +646,8 @@ export const ellipticalArcSketchToolDefinition = createFixedPointTool(
     prompt: "Pick elliptical arc points",
     readyPrompt: "Place elliptical arc",
     cursorLabel: "Elliptical arc point",
+    // Centre, major axis end, minor radius (shape only), start, end.
+    placementRole: (index) => (index === 2 ? "shape" : "point"),
     validate(points) {
       if (points.length < 5) {
         return {
@@ -745,6 +754,13 @@ export const ellipticalArcSketchToolDefinition = createFixedPointTool(
             "counterClockwise",
           ),
         ],
+        placementPointIds: [
+          centerPointId,
+          majorPointId,
+          null,
+          startPointId,
+          endPointId,
+        ],
       };
     },
   },
@@ -766,6 +782,7 @@ export const conicSketchToolDefinition = createFixedPointTool(
     prompt: "Pick conic points",
     readyPrompt: "Place conic",
     cursorLabel: "Conic point",
+    placementRole: () => "point",
     validate(points) {
       return points.length >= 3 && distinctPoints(points.slice(0, 3))
         ? { valid: true, message: null }
@@ -819,6 +836,7 @@ export const conicSketchToolDefinition = createFixedPointTool(
             0.5,
           ),
         ],
+        placementPointIds: [startPointId, controlPointId, endPointId],
       };
     },
   },
@@ -840,6 +858,7 @@ export const bezierCurveSketchToolDefinition = createFixedPointTool(
     prompt: "Pick Bezier control points",
     readyPrompt: "Place Bezier curve",
     cursorLabel: "Bezier control point",
+    placementRole: () => "point",
     validate(points) {
       return points.length >= 4 && distinctPoints(points.slice(0, 4))
         ? { valid: true, message: null }
@@ -885,6 +904,7 @@ export const bezierCurveSketchToolDefinition = createFixedPointTool(
             3,
           ),
         ],
+        placementPointIds: pointIds,
       };
     },
   },
@@ -907,6 +927,7 @@ export const controlPointSplineSketchToolDefinition = createFixedPointTool(
     prompt: "Pick spline control points",
     readyPrompt: "Place control-point spline",
     cursorLabel: "Spline control point",
+    placementRole: () => "point",
     validate(points) {
       return points.length >= 4 && distinctPoints(points.slice(0, 4))
         ? { valid: true, message: null }
@@ -953,6 +974,7 @@ export const controlPointSplineSketchToolDefinition = createFixedPointTool(
             3,
           ),
         ],
+        placementPointIds: pointIds,
       };
     },
   },
@@ -974,6 +996,8 @@ export const profileTextSketchToolDefinition = createFixedPointTool(
     prompt: "Pick text anchor and height",
     readyPrompt: "Place text",
     cursorLabel: "Text point",
+    // Anchor, then the height and rotation pick (shape only).
+    placementRole: (index) => (index === 1 ? "shape" : "point"),
     controls(state) {
       return [
         {
@@ -1064,6 +1088,8 @@ export const profileTextSketchToolDefinition = createFixedPointTool(
             getVerticalAlign(state),
           ),
         ],
+        // The second click only sets the height and rotation.
+        placementPointIds: [anchorPointId, null],
       };
     },
   },

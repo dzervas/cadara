@@ -1,7 +1,7 @@
 import type { SketchPoint } from "@/contracts/modeling/schema";
 import type {
   SketchDraftEntity,
-  SketchToolCommitContribution,
+  SketchToolDrawContribution,
   SketchToolDefinition,
   SketchToolRuntimeState,
 } from "@/core/sketch-tools/definition";
@@ -124,11 +124,12 @@ export const pointSketchToolDefinition: SketchToolDefinition<"point"> = {
     return { valid: true, message: null };
   },
   getPresentation: buildPointPresentation,
+  placementRole: () => "point",
   createCommitContribution({
     sequence,
     end,
     factories,
-  }): SketchToolCommitContribution {
+  }): SketchToolDrawContribution {
     const pointId = factories.createPointId("point");
     const entityId = factories.createEntityId("point");
 
@@ -137,6 +138,7 @@ export const pointSketchToolDefinition: SketchToolDefinition<"point"> = {
       entities: [
         factories.createPointEntity(`Point ${sequence}`, entityId, pointId),
       ],
+      placementPointIds: [pointId],
     };
   },
 };

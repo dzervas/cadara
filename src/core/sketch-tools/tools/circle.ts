@@ -1,7 +1,7 @@
 import type { SketchPoint } from "@/contracts/modeling/schema";
 import type {
   SketchDraftEntity,
-  SketchToolCommitContribution,
+  SketchToolDrawContribution,
   SketchToolDefinition,
   SketchToolRuntimeState,
 } from "@/core/sketch-tools/definition";
@@ -135,12 +135,14 @@ export const circleSketchToolDefinition: SketchToolDefinition<"circle"> =
       buildPreview: buildCirclePreview,
       buildPresentation: buildCirclePresentation,
       validate: validateCircle,
+      // The centre is the new circle's centre; the rim click only sizes it.
+      placementRole: (index) => (index === 0 ? "center" : "shape"),
       createCommitContribution({
         sequence,
         start,
         end,
         factories,
-      }): SketchToolCommitContribution {
+      }): SketchToolDrawContribution {
         const centerPointId = factories.createPointId("circle-center");
         const radius = distanceBetween(start, end);
         const entityId = factories.createEntityId("circle");
@@ -161,6 +163,7 @@ export const circleSketchToolDefinition: SketchToolDefinition<"circle"> =
               radius,
             ),
           ],
+          placementPointIds: [centerPointId, null],
         };
       },
     },

@@ -1,7 +1,7 @@
 import type { SketchPoint } from "@/contracts/modeling/schema";
 import type {
   SketchDraftEntity,
-  SketchToolCommitContribution,
+  SketchToolDrawContribution,
   SketchToolDefinition,
   SketchToolRuntimeState,
   SketchToolValidationResult,
@@ -246,11 +246,12 @@ export const threePointArcSketchToolDefinition: SketchToolDefinition<"threePoint
       return validateThreePointArc([start, end]);
     },
     getPresentation: buildThreePointArcPresentation,
+    placementRole: () => "point",
     createCommitContribution({
       sequence,
       points,
       factories,
-    }): SketchToolCommitContribution {
+    }): SketchToolDrawContribution {
       const arcPoints = (points ?? []).slice(0, REQUIRED_POINTS);
       const circle =
         arcPoints.length === REQUIRED_POINTS
@@ -261,7 +262,7 @@ export const threePointArcSketchToolDefinition: SketchToolDefinition<"threePoint
             )
           : null;
       if (!circle) {
-        return { points: [], entities: [] };
+        return { points: [], entities: [], placementPointIds: [] };
       }
 
       const centerPointId = factories.createPointId("three-point-arc-center");
@@ -326,6 +327,7 @@ export const threePointArcSketchToolDefinition: SketchToolDefinition<"threePoint
           startPointId,
           endPointId,
         }),
+        placementPointIds: [startPointId, throughPointId, endPointId],
       };
     },
   };

@@ -717,18 +717,27 @@ export function getSketchHandleVisibility(
 
 /**
  * The active tool's draft anchor points (T11-D8): the existing point a
- * drawing tool's draft starts from (`drawStartSnap`), which is also where a
- * Line chain continues (review A-4).
+ * drawing tool's draft starts from, a Line chain's structural start
+ * (T13-D20) or the point its first placement joins or is coincident with.
  */
 export function getSketchToolMarkerPointIds(
-  session: Pick<SketchSessionState, "activeTool" | "drawStartSnap">,
+  session: Pick<
+    SketchSessionState,
+    "activeTool" | "toolStartPointId" | "toolPlacements"
+  >,
 ): ReadonlySet<SketchPointId> {
+  if (session.activeTool === null) {
+    return new Set();
+  }
+  if (session.toolStartPointId) {
+    return new Set([session.toolStartPointId]);
+  }
   return new Set(
-    session.activeTool === null
-      ? []
-      : (session.drawStartSnap?.sources ?? []).flatMap((source) =>
-          source.kind === "localPoint" ? [source.pointId] : [],
-        ),
+    (session.toolPlacements?.[0]?.requirements ?? []).flatMap((requirement) =>
+      requirement.kind === "joins" || requirement.kind === "coincident"
+        ? [requirement.pointId]
+        : [],
+    ),
   );
 }
 

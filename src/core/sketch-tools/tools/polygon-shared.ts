@@ -1,7 +1,7 @@
 import type { SketchPoint } from "@/contracts/modeling/schema";
 import type {
   SketchDraftEntity,
-  SketchToolCommitContribution,
+  SketchToolDrawContribution,
   SketchToolDefinition,
   SketchToolRuntimeState,
 } from "@/core/sketch-tools/definition";
@@ -149,14 +149,17 @@ export function createRegularPolygonSketchToolDefinition(input: {
       buildPreview,
       buildPresentation,
       validate,
+      // The centre is the construction circle's centre; the rim click only
+      // sizes the polygon.
+      placementRole: (index) => (index === 0 ? "center" : "shape"),
       createCommitContribution({
         sequence,
         start,
         end,
         factories,
-      }): SketchToolCommitContribution {
+      }): SketchToolDrawContribution {
         if (!pointsDistinct(start, end)) {
-          return { points: [], entities: [] };
+          return { points: [], entities: [], placementPointIds: [] };
         }
 
         const circleRadius = distanceBetween(start, end);
@@ -279,6 +282,7 @@ export function createRegularPolygonSketchToolDefinition(input: {
                   ),
                 ]),
           ],
+          placementPointIds: [centerPointId, null],
         };
       },
     },
