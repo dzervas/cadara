@@ -76,8 +76,16 @@ test("src/domain/editor/runtime-machine.spec.ts", async () => {
     await waitForState(actor, (state) => state.kind === "editingSketch");
 
     actor.dispatch({ type: "tool.activated", toolId: "line" });
-    actor.dispatch({ type: "sketch.pointerReleased", point: [0, 0] });
-    actor.dispatch({ type: "sketch.pointerReleased", point: [1, 0.3] });
+    actor.dispatch({
+      type: "sketch.pointerReleased",
+      point: [0, 0],
+      sketchUnitsPerPixel: null,
+    });
+    actor.dispatch({
+      type: "sketch.pointerReleased",
+      point: [1, 0.3],
+      sketchUnitsPerPixel: null,
+    });
     // End the line chain (T11-D11) so the drag starts from an idle tool.
     actor.dispatch({ type: "sketch.escapeRequested" });
 
@@ -433,8 +441,16 @@ test("src/domain/editor/runtime-machine.spec.ts forwards connected sketch select
     await waitForState(actor, (state) => state.kind === "editingSketch");
 
     actor.dispatch({ type: "tool.activated", toolId: "rectangle" });
-    actor.dispatch({ type: "sketch.pointerReleased", point: [0, 0] });
-    actor.dispatch({ type: "sketch.pointerReleased", point: [4, 3] });
+    actor.dispatch({
+      type: "sketch.pointerReleased",
+      point: [0, 0],
+      sketchUnitsPerPixel: null,
+    });
+    actor.dispatch({
+      type: "sketch.pointerReleased",
+      point: [4, 3],
+      sketchUnitsPerPixel: null,
+    });
 
     const rectangleState = await waitForState(
       actor,

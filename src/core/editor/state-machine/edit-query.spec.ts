@@ -31,6 +31,10 @@ import type {
   EditorEvent,
   SketchEditorState,
 } from "./types";
+import {
+  SPEC_SKETCH_UNITS_PER_PIXEL,
+  withSketchSnapScale,
+} from "@/domain/editor/sketch-session/test-snap-scale";
 
 // Logic lane (core seam): the Trim tool's exact edit query through the
 // post-transition emitter, the effect executor and the result handlers
@@ -53,9 +57,12 @@ const draw = (
 
 /** A horizontal target (0,0)→(4,0) crossed by vertical lines at x = 1 and 3. */
 async function trimState() {
-  let session = createNewSketchSession(
-    createStandardPlaneDefinition("xy"),
-    OCC_KERNEL_SETTINGS,
+  let session = withSketchSnapScale(
+    createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
+    SPEC_SKETCH_UNITS_PER_PIXEL,
   );
   session = draw(session, [0, 0], [4, 0]);
   const target = session.definition.entities[0]!.entityId;
@@ -390,9 +397,12 @@ describe.each([
   /** Targets T1 (0,0)→(length,0) and T2 (0,2)→(length,2); boundary B x = `x`, y ∈ [−1, 3]. */
   async function lineEditState() {
     const { state } = await trimState();
-    let session = createNewSketchSession(
-      createStandardPlaneDefinition("xy"),
-      OCC_KERNEL_SETTINGS,
+    let session = withSketchSnapScale(
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
+      SPEC_SKETCH_UNITS_PER_PIXEL,
     );
     session = draw(session, [0, 0], [length, 0]);
     session = draw(session, [0, 2], [length, 2]);

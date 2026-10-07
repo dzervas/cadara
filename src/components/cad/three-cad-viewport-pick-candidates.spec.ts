@@ -1497,7 +1497,8 @@ test("display, pick, snap, measure and vector export (model and SVG) of one spli
       definition: record.sketch.definition,
       solvedSnapshot: record.sketch.solvedSnapshot,
     }),
-    tolerance: 1,
+    // A 10 px curve radius covering 1 unit, the reach this row was written for.
+    sketchUnitsPerPixel: 0.1,
   }).candidates.find((candidate) => candidate.kind === "nearestOnSpline");
   expect(snap?.point, "Snap is the same exact closest point.").toEqual(
     exact.point,

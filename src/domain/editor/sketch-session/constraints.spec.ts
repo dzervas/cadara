@@ -32,11 +32,18 @@ import { updateSketchReferenceProjection } from "@/domain/editor/sketch-session/
 import { createSketchSessionFromSnapshot } from "@/domain/editor/sketch-session";
 import { makeSketchFixture } from "@/contracts/sketch/region-extraction.fixtures";
 import { sketchSnapshotRecordForTest } from "@/contracts/sketch/region-record.fixtures";
+import {
+  SPEC_SKETCH_UNITS_PER_PIXEL,
+  withSketchSnapScale,
+} from "@/domain/editor/sketch-session/test-snap-scale";
 
 function newSession() {
-  return createNewSketchSession(
-    createStandardPlaneDefinition("xy"),
-    OCC_KERNEL_SETTINGS,
+  return withSketchSnapScale(
+    createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
+    SPEC_SKETCH_UNITS_PER_PIXEL,
   );
 }
 
@@ -792,13 +799,16 @@ test("T13c R-2: reopening a sketch with conflicting dimensions shows the explana
   sketch.line("m", "g", "h");
   sketch.lineLength("l", 2);
   sketch.lineLength("l", 9);
-  const opened = createSketchSessionFromSnapshot(
-    sketchSnapshotRecordForTest(
-      sketch.build(),
-      [],
-      createStandardPlaneDefinition("xy"),
+  const opened = withSketchSnapScale(
+    createSketchSessionFromSnapshot(
+      sketchSnapshotRecordForTest(
+        sketch.build(),
+        [],
+        createStandardPlaneDefinition("xy"),
+      ),
+      OCC_KERNEL_SETTINGS,
     ),
-    OCC_KERNEL_SETTINGS,
+    SPEC_SKETCH_UNITS_PER_PIXEL,
   );
   // Reopen with no references bases the session on its projections now.
   const reopened = updateSketchReferenceProjection(opened, [], []);
@@ -1038,22 +1048,25 @@ test("T13e2: a diameter conflicting with a slot held by parallel lines and a lin
     },
   ] as unknown as typeof base.dimensions;
   const opened = updateSketchReferenceProjection(
-    createSketchSessionFromSnapshot(
-      sketchSnapshotRecordForTest(
-        {
-          ...sketch.build(),
-          definition: {
-            ...base,
-            constraintIds: constraints.map((entry) => entry.constraintId),
-            constraints,
-            dimensionIds: dimensions.map((entry) => entry.dimensionId),
-            dimensions,
+    withSketchSnapScale(
+      createSketchSessionFromSnapshot(
+        sketchSnapshotRecordForTest(
+          {
+            ...sketch.build(),
+            definition: {
+              ...base,
+              constraintIds: constraints.map((entry) => entry.constraintId),
+              constraints,
+              dimensionIds: dimensions.map((entry) => entry.dimensionId),
+              dimensions,
+            },
           },
-        },
-        [],
-        createStandardPlaneDefinition("xy"),
+          [],
+          createStandardPlaneDefinition("xy"),
+        ),
+        OCC_KERNEL_SETTINGS,
       ),
-      OCC_KERNEL_SETTINGS,
+      SPEC_SKETCH_UNITS_PER_PIXEL,
     ),
     [],
     [],

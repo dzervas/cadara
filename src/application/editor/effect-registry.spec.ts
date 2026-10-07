@@ -37,6 +37,10 @@ import type {
 import { withLiveSolveBasis } from "@/domain/editor/sketch-session";
 import { openSketchSessionFromSelection } from "@/domain/editor/sketch-session-controller";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
+import {
+  SPEC_SKETCH_UNITS_PER_PIXEL,
+  withSketchSnapScale,
+} from "@/domain/editor/sketch-session/test-snap-scale";
 
 test("commits the current authored sketch after deletion without resurrecting a history tail", async () => {
   function addLine(
@@ -48,12 +52,15 @@ test("commits the current authored sketch after deletion without resurrecting a 
     return acceptSketchDraw(startSketchDraw(withTool, start), end);
   }
 
-  let session = createNewSketchSessionFromSupport(
-    {
-      kind: "construction",
-      constructionId: "construction_plane-xy",
-    },
-    OCC_KERNEL_SETTINGS,
+  let session = withSketchSnapScale(
+    createNewSketchSessionFromSupport(
+      {
+        kind: "construction",
+        constructionId: "construction_plane-xy",
+      },
+      OCC_KERNEL_SETTINGS,
+    ),
+    SPEC_SKETCH_UNITS_PER_PIXEL,
   );
   session = addLine(session, [0, 0], [1, 0]);
   session = addLine(session, [0, 1], [1, 1]);
@@ -121,13 +128,16 @@ test("commits the current authored sketch after deletion without resurrecting a 
 });
 
 test("sketch reference projection uses the live session's document tolerance policy", async () => {
-  const session = createNewSketchSessionFromSupport(
-    { kind: "construction", constructionId: "construction_plane-xy" },
-    {
-      linearUnit: "millimeter",
-      modelingTolerance: 0.02,
-      angularToleranceRadians: 0.003,
-    },
+  const session = withSketchSnapScale(
+    createNewSketchSessionFromSupport(
+      { kind: "construction", constructionId: "construction_plane-xy" },
+      {
+        linearUnit: "millimeter",
+        modelingTolerance: 0.02,
+        angularToleranceRadians: 0.003,
+      },
+    ),
+    SPEC_SKETCH_UNITS_PER_PIXEL,
   );
   const referenced = {
     ...session,
@@ -182,9 +192,12 @@ test("sketch reference projection uses the live session's document tolerance pol
 });
 
 test("live region derivation goes through the modeling service sketch solver boundary and completes as sketchRegionsDerived", async () => {
-  let session = createNewSketchSessionFromSupport(
-    { kind: "construction", constructionId: "construction_plane-xy" },
-    OCC_KERNEL_SETTINGS,
+  let session = withSketchSnapScale(
+    createNewSketchSessionFromSupport(
+      { kind: "construction", constructionId: "construction_plane-xy" },
+      OCC_KERNEL_SETTINGS,
+    ),
+    SPEC_SKETCH_UNITS_PER_PIXEL,
   );
   session = acceptSketchDraw(
     startSketchDraw(beginSketchTool(session, "rectangle"), [0, 0]),
@@ -310,9 +323,12 @@ test("live region derivation goes through the modeling service sketch solver bou
 // derivation-worker boundary as plain data and are validated before the
 // reducer can flip any shell to certified.
 test("a derive response whose offset publications fail validation rejects instead of reaching the reducer (G17)", async () => {
-  let session = createNewSketchSessionFromSupport(
-    { kind: "construction", constructionId: "construction_plane-xy" },
-    OCC_KERNEL_SETTINGS,
+  let session = withSketchSnapScale(
+    createNewSketchSessionFromSupport(
+      { kind: "construction", constructionId: "construction_plane-xy" },
+      OCC_KERNEL_SETTINGS,
+    ),
+    SPEC_SKETCH_UNITS_PER_PIXEL,
   );
   session = acceptSketchDraw(
     startSketchDraw(beginSketchTool(session, "rectangle"), [0, 0]),
@@ -413,9 +429,12 @@ test("two documents with different tolerances reach the live region queries with
     const session = acceptSketchDraw(
       startSketchDraw(
         beginSketchTool(
-          createNewSketchSessionFromSupport(
-            { kind: "construction", constructionId: "construction_plane-xy" },
-            { ...OCC_KERNEL_SETTINGS, modelingTolerance },
+          withSketchSnapScale(
+            createNewSketchSessionFromSupport(
+              { kind: "construction", constructionId: "construction_plane-xy" },
+              { ...OCC_KERNEL_SETTINGS, modelingTolerance },
+            ),
+            SPEC_SKETCH_UNITS_PER_PIXEL,
           ),
           "rectangle",
         ),

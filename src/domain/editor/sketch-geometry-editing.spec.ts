@@ -61,6 +61,10 @@ import { toolDefinitions } from "@/core/tools/tool-registry";
 import { publishSketchOffsets } from "@/contracts/sketch/offset-publication";
 import { createCertifiedNeutralCurveRequestQuery } from "@/domain/modeling/neutral-curve-certification/query";
 import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
+import {
+  SPEC_SKETCH_UNITS_PER_PIXEL,
+  withSketchSnapScale,
+} from "@/domain/editor/sketch-session/test-snap-scale";
 
 test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
   function assertClosePoint(
@@ -2548,7 +2552,9 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       (p) => p.pointId === lineEndPointId,
     )!.position;
 
-    // Now draw a spline starting from that endpoint.
+    // Now draw a spline starting from that endpoint: the shared end comes
+    // from the endpoint snap, which needs a screen scale (T13f R-6).
+    session = withSketchSnapScale(session, SPEC_SKETCH_UNITS_PER_PIXEL);
     session = beginSketchTool(session, "spline");
     session = startSketchDraw(session, [lineEndPos[0], lineEndPos[1]]);
     session = acceptSketchDraw(session, [lineEndPos[0] + 2, lineEndPos[1] + 3]);

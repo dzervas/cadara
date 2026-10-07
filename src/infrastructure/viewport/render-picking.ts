@@ -12,6 +12,7 @@ import type {
 } from "@/contracts/render/schema";
 import type { ViewportRenderableOrigin } from "@/core/workspace/viewport-renderables";
 import type { SketchPickStackCandidate } from "@/domain/sketch-interaction/pick-stack";
+import { SKETCH_POINT_RADII_PX } from "@/domain/sketch-interaction/screen-radii";
 import { workbenchGeometryHighlightColors } from "@/theme/workbench-theme";
 
 export type WorkspaceSemanticClass =
@@ -72,8 +73,10 @@ export const DEFAULT_LINE_PICK_THRESHOLD = 0.75;
 export const DEFAULT_PROJECTED_POINT_PICK_ENTER_RADIUS_PX = 48;
 export const DEFAULT_PROJECTED_POINT_PICK_EXIT_RADIUS_PX = 56;
 /** Sketch display points (T11-D2); feature vertices keep the radii above. */
-export const DEFAULT_SKETCH_POINT_PICK_ENTER_RADIUS_PX = 12;
-export const DEFAULT_SKETCH_POINT_PICK_EXIT_RADIUS_PX = 16;
+export const DEFAULT_SKETCH_POINT_PICK_ENTER_RADIUS_PX =
+  SKETCH_POINT_RADII_PX.enter;
+export const DEFAULT_SKETCH_POINT_PICK_EXIT_RADIUS_PX =
+  SKETCH_POINT_RADII_PX.exit;
 
 /**
  * Projected feature (model) vertex radii: in sketch mode they are reference

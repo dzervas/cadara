@@ -67,10 +67,16 @@ export type ViewportIntent =
       target: Extract<PrimitiveRef, { kind: "constraint" | "dimension" }>;
     }
   | { type: "hoverCleared" }
-  | { type: "sketchPointerMoved"; point: readonly [number, number] }
+  /** `sketchUnitsPerPixel`: the screen scale at the pointer (T13-D13). */
+  | {
+      type: "sketchPointerMoved";
+      point: readonly [number, number];
+      sketchUnitsPerPixel: number | null;
+    }
   | {
       type: "sketchPointerReleased";
       point: readonly [number, number];
+      sketchUnitsPerPixel: number | null;
       target?: PrimitiveRef | null;
     }
   /** A double-click with a spline draft: finalize it (T11-D13). */

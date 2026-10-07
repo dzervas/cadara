@@ -1692,10 +1692,6 @@ export function inferPointSnapConstraints(input: {
       return;
     }
 
-    if (source.kind === "sketchDatum" && input.candidate.distance <= 1e-9) {
-      return;
-    }
-
     if (input.candidate.kind === "endpoint") {
       if (source.kind === "localPoint") {
         addConstraint(constraints, {
@@ -1830,22 +1826,15 @@ export function inferPointSnapConstraints(input: {
         return;
       }
 
+      // Datum axes give no midpoint candidates (unbounded lines, T13f).
       if (
-        (source.kind === "projectedGeometry" &&
-          source.geometryKind === "lineSegment") ||
-        (source.kind === "sketchDatum" && source.geometryKind === "lineSegment")
+        source.kind === "projectedGeometry" &&
+        source.geometryKind === "lineSegment"
       ) {
         addConstraint(constraints, {
-          constraintId: createId(
-            source.kind === "sketchDatum"
-              ? `inferred-midpoint-datum-${index}`
-              : `inferred-midpoint-projected-${index}`,
-          ),
+          constraintId: createId(`inferred-midpoint-projected-${index}`),
           kind: "midpointProjectedLine",
-          label:
-            source.kind === "sketchDatum"
-              ? `Inferred sketch datum midpoint ${input.sequence}`
-              : `Inferred projected midpoint ${input.sequence}`,
+          label: `Inferred projected midpoint ${input.sequence}`,
           point: localPoint,
           projectedLine: curveReadOnlyOperandFromSource(source),
         });
@@ -2597,6 +2586,19 @@ function continueSketchToolChain(
   });
 }
 
+/**
+ * Stores the screen scale a sketch pointer event measured (T13-D13); snapping
+ * resolves against the latest one, and `null` disables it.
+ */
+export function setSketchSnapScale(
+  session: SketchSessionState,
+  sketchUnitsPerPixel: number | null,
+): SketchSessionState {
+  return (session.sketchUnitsPerPixel ?? null) === sketchUnitsPerPixel
+    ? session
+    : { ...session, sketchUnitsPerPixel };
+}
+
 export function resolveSessionSnap(
   session: SketchSessionState,
   point: SketchPoint | null,
@@ -2612,7 +2614,7 @@ export function resolveSessionSnap(
       projectedReferences: session.projectedReferences,
       solvedSnapshot: getSketchSessionDisplaySolvedSnapshot(session),
     }),
-    activeTool: session.activeTool,
+    sketchUnitsPerPixel: session.sketchUnitsPerPixel ?? null,
     activeAnchor:
       session.status === "drawing" ? session.pointerDownPoint : null,
     activeCandidateKey: session.activeSnap?.key ?? null,

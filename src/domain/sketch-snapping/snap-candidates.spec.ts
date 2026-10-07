@@ -1,12 +1,17 @@
 import { test, expect, assert } from "vitest";
 
-import type { SketchDefinition } from "@/contracts/sketch/schema";
+import type {
+  SketchDefinition,
+  SketchPoint2D,
+} from "@/contracts/sketch/schema";
+import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
 import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
 import {
   collectSketchSnapGeometries,
   resolveSketchSnap,
   type SketchSnapGeometry,
 } from "@/domain/sketch-snapping/snap-candidates";
+import { SKETCH_CURVE_RADII_PX } from "@/domain/sketch-interaction/screen-radii";
 import {
   makeSketchFixture,
   neutralSpan,
@@ -31,6 +36,13 @@ import {
   type SolvedCubicSpan,
   type SplineVector,
 } from "@/contracts/sketch/spline-geometry";
+
+/**
+ * The screen scale these rows use (T13-D13): a 10 px curve radius covers
+ * 0.2 sketch units, the sketch-unit tolerance they were written for (points
+ * reach 0.24, alignments 0.16).
+ */
+const UNITS_PER_PIXEL_02 = 0.2 / SKETCH_CURVE_RADII_PX.enter;
 
 test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
   function assertClosePoint(
@@ -215,8 +227,7 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
     const circleCenter = resolveSketchSnap({
       pointer: [4, 0.03],
       geometries: localGeometries,
-      tolerance: 0.2,
-      activeTool: "line",
+      sketchUnitsPerPixel: UNITS_PER_PIXEL_02,
     });
     expect(
       circleCenter.activeCandidate?.kind,
@@ -239,8 +250,7 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
     const arcCenter = resolveSketchSnap({
       pointer: [8.03, 0],
       geometries: localGeometries,
-      tolerance: 0.2,
-      activeTool: "line",
+      sketchUnitsPerPixel: UNITS_PER_PIXEL_02,
     });
     expect(
       arcCenter.activeCandidate?.kind,
@@ -257,8 +267,7 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
     const result = resolveSketchSnap({
       pointer: [1, 0.04],
       geometries: localGeometries,
-      tolerance: 0.2,
-      activeTool: "line",
+      sketchUnitsPerPixel: UNITS_PER_PIXEL_02,
     });
 
     expect(
@@ -282,8 +291,7 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
     const result = resolveSketchSnap({
       pointer: [1.1, 0.5],
       geometries,
-      tolerance: 0.2,
-      activeTool: "line",
+      sketchUnitsPerPixel: UNITS_PER_PIXEL_02,
     });
 
     expect(
@@ -316,8 +324,7 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
     const origin = resolveSketchSnap({
       pointer: [0.04, 0.03],
       geometries: datumOnlyGeometries,
-      tolerance: 0.2,
-      activeTool: "line",
+      sketchUnitsPerPixel: UNITS_PER_PIXEL_02,
     });
     expect(
       origin.activeCandidate?.kind,
@@ -339,8 +346,7 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
     const axis = resolveSketchSnap({
       pointer: [3, 0.04],
       geometries: datumOnlyGeometries,
-      tolerance: 0.2,
-      activeTool: "line",
+      sketchUnitsPerPixel: UNITS_PER_PIXEL_02,
     });
     expect(
       axis.activeCandidate?.kind,
@@ -363,8 +369,7 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
     const circle = resolveSketchSnap({
       pointer: [4.05, 1.12],
       geometries: localGeometries,
-      tolerance: 0.2,
-      activeTool: "line",
+      sketchUnitsPerPixel: UNITS_PER_PIXEL_02,
     });
     expect(
       circle.activeCandidate?.kind,
@@ -379,8 +384,7 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
     const arc = resolveSketchSnap({
       pointer: [6.72, 0.72],
       geometries,
-      tolerance: 0.2,
-      activeTool: "line",
+      sketchUnitsPerPixel: UNITS_PER_PIXEL_02,
     });
     expect(
       arc.activeCandidate?.kind,
@@ -394,12 +398,13 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
   }
 
   function testAlignmentAndTangentCandidates() {
+    // The anchor sits off the datum axes: an axis under the pointer is an
+    // on-curve snap, which outranks alignment (T13-D14, row below).
     const horizontal = resolveSketchSnap({
-      pointer: [2.5, 0.04],
+      pointer: [2.5, 0.54],
       geometries,
-      activeAnchor: [0, 0],
-      activeTool: "line",
-      tolerance: 0.2,
+      activeAnchor: [0.5, 0.5],
+      sketchUnitsPerPixel: UNITS_PER_PIXEL_02,
     });
     expect(
       horizontal.activeCandidate?.kind,
@@ -407,16 +412,15 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
     ).toBe("horizontalAlignment");
     assertClosePoint(
       horizontal.snappedPoint,
-      [2.5, 0],
+      [2.5, 0.5],
       "Horizontal alignment should lock the pointer y coordinate.",
     );
 
     const vertical = resolveSketchSnap({
-      pointer: [0.04, 2.5],
+      pointer: [0.54, 2.5],
       geometries,
-      activeAnchor: [0, 0],
-      activeTool: "line",
-      tolerance: 0.2,
+      activeAnchor: [0.5, 0.5],
+      sketchUnitsPerPixel: UNITS_PER_PIXEL_02,
     });
     expect(
       vertical.activeCandidate?.kind,
@@ -424,7 +428,7 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
     ).toBe("verticalAlignment");
     assertClosePoint(
       vertical.snappedPoint,
-      [0, 2.5],
+      [0.5, 2.5],
       "Vertical alignment should lock the pointer x coordinate.",
     );
 
@@ -432,8 +436,7 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
       pointer: [3.5, 0.8660254037844386],
       geometries,
       activeAnchor: [2, 0],
-      activeTool: "line",
-      tolerance: 0.2,
+      sketchUnitsPerPixel: UNITS_PER_PIXEL_02,
     });
     expect(
       tangent.activeCandidate?.kind,
@@ -462,8 +465,7 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
       pointer: [1, 1],
       geometries: [lineGeometry],
       activeAnchor: [0, 2],
-      activeTool: "line",
-      tolerance: 0.2,
+      sketchUnitsPerPixel: UNITS_PER_PIXEL_02,
     });
     expect(
       valid.activeCandidate?.kind,
@@ -479,8 +481,7 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
       pointer: [4, 4],
       geometries: [lineGeometry],
       activeAnchor: [7, 5],
-      activeTool: "line",
-      tolerance: 0.2,
+      sketchUnitsPerPixel: UNITS_PER_PIXEL_02,
     });
     expect(
       outside.candidates.every(
@@ -494,8 +495,7 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
     const intersections = resolveSketchSnap({
       pointer: [1, 0.04],
       geometries,
-      tolerance: 0.2,
-      activeTool: "line",
+      sketchUnitsPerPixel: UNITS_PER_PIXEL_02,
     });
     expect(
       intersections.candidates.some(
@@ -503,60 +503,6 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
       ),
       "Candidate list should include curve intersections within tolerance.",
     ).toBeTruthy();
-  }
-
-  function testHysteresisKeepsNearbyPreviousCandidate() {
-    const competingPoints: SketchSnapGeometry[] = [
-      {
-        kind: "point",
-        source: {
-          kind: "localPoint",
-          pointId: "sketch_point_hysteresis_a",
-        },
-        point: [0, 0],
-        label: "Hysteresis A",
-      },
-      {
-        kind: "point",
-        source: {
-          kind: "localPoint",
-          pointId: "sketch_point_hysteresis_b",
-        },
-        point: [0.1, 0],
-        label: "Hysteresis B",
-      },
-    ];
-    const baseline = resolveSketchSnap({
-      pointer: [0.04, 0],
-      geometries: competingPoints,
-      tolerance: 0.2,
-      activeTool: "line",
-    });
-    assertClosePoint(
-      baseline.snappedPoint,
-      [0, 0],
-      "Baseline snap should choose the closest point without hysteresis.",
-    );
-
-    const previous = baseline.candidates.find(
-      (candidate) => candidate.point[0] === 0.1,
-    );
-    expect(
-      previous,
-      "Expected a nearby previous candidate for hysteresis.",
-    ).toBeTruthy();
-
-    const hysteresis = resolveSketchSnap({
-      pointer: [0.04, 0],
-      geometries: competingPoints,
-      tolerance: 0.2,
-      activeTool: "line",
-      activeCandidateKey: previous?.key,
-    });
-    expect(
-      hysteresis.activeCandidate?.key,
-      "Active candidate hysteresis should keep a nearby previous candidate stable.",
-    ).toBe(previous?.key);
   }
 
   testCenterCandidates();
@@ -567,7 +513,6 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
   testAlignmentAndTangentCandidates();
   testPerpendicularFootCandidates();
   testIntersectionsAndHysteresis();
-  testHysteresisKeepsNearbyPreviousCandidate();
 });
 
 // Lane: logic (docs/testing.md). Seam: `collectSketchSnapGeometries` +
@@ -668,7 +613,7 @@ test("nearest-on-spline snaps lie on the solved spans and are the exact closest 
     const snap = resolveSketchSnap({
       pointer,
       geometries: [spline],
-      tolerance: 0.2,
+      sketchUnitsPerPixel: UNITS_PER_PIXEL_02,
     });
     const nearest = snap.candidates.find(
       (candidate) => candidate.kind === "nearestOnSpline",
@@ -687,12 +632,12 @@ test("nearest-on-spline snaps lie on the solved spans and are the exact closest 
   const atStart = resolveSketchSnap({
     pointer: [0.05, 0.05],
     geometries: [spline],
-    tolerance: 0.2,
+    sketchUnitsPerPixel: UNITS_PER_PIXEL_02,
   }).candidates.filter((candidate) => candidate.kind === "endpoint");
   const atEnd = resolveSketchSnap({
     pointer: [9.95, 3.05],
     geometries: [spline],
-    tolerance: 0.2,
+    sketchUnitsPerPixel: UNITS_PER_PIXEL_02,
   }).candidates.filter((candidate) => candidate.kind === "endpoint");
   expect(atStart.map((candidate) => candidate.point)).toEqual([
     spans[0]!.poles[0],
@@ -705,7 +650,7 @@ test("nearest-on-spline snaps lie on the solved spans and are the exact closest 
     resolveSketchSnap({
       pointer: [5, 20],
       geometries: [spline],
-      tolerance: 0.2,
+      sketchUnitsPerPixel: UNITS_PER_PIXEL_02,
     }).candidates,
     "a pointer beyond the tolerance of every pole box snaps to nothing",
   ).toEqual([]);
@@ -736,7 +681,7 @@ test("a trimmed derived shell's end points are its drawn domain ends", () => {
   const ends = resolveSketchSnap({
     pointer: start,
     geometries: [geometry],
-    tolerance: 0.1,
+    sketchUnitsPerPixel: UNITS_PER_PIXEL_02 / 2,
   }).candidates.filter((candidate) => candidate.kind === "endpoint");
   expect(ends).toHaveLength(1);
   expect(
@@ -746,7 +691,7 @@ test("a trimmed derived shell's end points are its drawn domain ends", () => {
     resolveSketchSnap({
       pointer: [0, 0],
       geometries: [geometry],
-      tolerance: 0.1,
+      sketchUnitsPerPixel: UNITS_PER_PIXEL_02 / 2,
     }).candidates,
     "the trimmed-off tail gives no end point and no nearest point",
   ).toEqual([]);
@@ -805,7 +750,7 @@ test("projected splines snap along their neutral spans (or source samples); datu
     resolveSketchSnap({
       pointer: [-0.5, 1.05],
       geometries: [samples!],
-      tolerance: 0.2,
+      sketchUnitsPerPixel: UNITS_PER_PIXEL_02,
     }).activeCandidate?.point,
     "source samples are their own polyline",
   ).toEqual([-0.5, 1]);
@@ -888,4 +833,271 @@ test("with a not-accepted solve a spline snaps along the authored reconstruction
       tessellateCubicSpans(snap.spans).map((point) => [...point]),
     "Snap's spans draw exactly the displayed polyline.",
   ).toEqual(drawn);
+});
+
+// Lane: logic (docs/testing.md). Seam: `resolveSketchSnap` (T13f): snap
+// tolerances in screen pixels (T13-D13) and class-first ordering (T13-D14).
+function pointSnap(id: string, point: SketchPoint2D): SketchSnapGeometry {
+  return {
+    kind: "point",
+    source: { kind: "localPoint", pointId: id as SketchPointId },
+    point,
+    label: id,
+  };
+}
+
+function lineSnap(
+  id: string,
+  start: SketchPoint2D,
+  end: SketchPoint2D,
+): SketchSnapGeometry {
+  return {
+    kind: "lineSegment",
+    source: {
+      kind: "localEntity",
+      entityId: id as SketchEntityId,
+      geometryKind: "lineSegment",
+    },
+    start,
+    end,
+    label: id,
+  };
+}
+
+/** The datum origin and axes (no local geometry). */
+function datumSnaps() {
+  return collectSketchSnapGeometries({
+    definition: makeSketchFixture().definition(),
+  });
+}
+
+test("snap tolerances are screen pixels: the same screen offset decides the same at two zoom levels (T13-D13)", () => {
+  const point = pointSnap("sketch_point_p", [5, 5]);
+  for (const unitsPerPixel of [0.01, 0.5]) {
+    const at = (px: number) =>
+      resolveSketchSnap({
+        pointer: [5 + px * unitsPerPixel, 5],
+        geometries: [point],
+        sketchUnitsPerPixel: unitsPerPixel,
+      }).activeCandidate;
+    expect(at(11)?.kind, `11 px snaps at ${unitsPerPixel} units/px`).toBe(
+      "endpoint",
+    );
+    expect(at(13), `13 px does not snap at ${unitsPerPixel} units/px`).toBe(
+      null,
+    );
+  }
+
+  // One sketch-space offset of 0.5 units: 10 px zoomed out, 50 px zoomed in.
+  const pointer: SketchPoint2D = [5.5, 5];
+  expect(
+    resolveSketchSnap({
+      pointer,
+      geometries: [point],
+      sketchUnitsPerPixel: 0.05,
+    }).activeCandidate?.kind,
+    "0.5 units at 0.05 units/px (10 px) snaps",
+  ).toBe("endpoint");
+  expect(
+    resolveSketchSnap({
+      pointer,
+      geometries: [point],
+      sketchUnitsPerPixel: 0.01,
+    }).activeCandidate,
+    "0.5 units at 0.01 units/px (50 px) does not",
+  ).toBe(null);
+});
+
+test("without a measured screen scale nothing snaps (T13-D13)", () => {
+  const result = resolveSketchSnap({
+    pointer: [5, 5],
+    geometries: [pointSnap("sketch_point_p", [5, 5]), ...datumSnaps()],
+    activeAnchor: [0, 5],
+    sketchUnitsPerPixel: null,
+  });
+  expect(result.activeCandidate).toBe(null);
+  expect(result.candidates).toEqual([]);
+  expect(result.snappedPoint).toEqual([5, 5]);
+});
+
+test("each snap class enters at its pixel radius and an active candidate stays until its exit radius (T13-D13 hysteresis, as pick)", () => {
+  const unitsPerPixel = 0.01;
+  const rows: {
+    kind: string;
+    enter: number;
+    exit: number;
+    geometries: SketchSnapGeometry[];
+    anchor: SketchPoint2D | null;
+    pointerAt: (px: number) => SketchPoint2D;
+  }[] = [
+    {
+      kind: "endpoint",
+      enter: 12,
+      exit: 16,
+      geometries: [pointSnap("sketch_point_p", [10, 10])],
+      anchor: null,
+      pointerAt: (px) => [10 + px * unitsPerPixel, 10],
+    },
+    {
+      kind: "nearestOnLine",
+      enter: 10,
+      exit: 14,
+      geometries: [lineSnap("sketch_entity_l", [5, 10], [15, 10])],
+      anchor: null,
+      pointerAt: (px) => [13, 10 + px * unitsPerPixel],
+    },
+    {
+      // The foot from (13, 0) onto the line is (13, 10); the pointer slides
+      // along the line, so on-line stays at distance 0 below it.
+      kind: "perpendicularFoot",
+      enter: 10,
+      exit: 14,
+      geometries: [lineSnap("sketch_entity_l", [5, 10], [15, 10])],
+      anchor: [13, 0],
+      pointerAt: (px) => [13 + px * unitsPerPixel, 10],
+    },
+    {
+      kind: "horizontalAlignment",
+      enter: 8,
+      exit: 12,
+      geometries: [],
+      anchor: [0, 3],
+      pointerAt: (px) => [10, 3 + px * unitsPerPixel],
+    },
+  ];
+
+  for (const row of rows) {
+    const resolve = (px: number, activeCandidateKey: string | null = null) =>
+      resolveSketchSnap({
+        pointer: row.pointerAt(px),
+        geometries: row.geometries,
+        activeAnchor: row.anchor,
+        sketchUnitsPerPixel: unitsPerPixel,
+        activeCandidateKey,
+      }).activeCandidate;
+    const entered = resolve(row.enter - 1);
+    expect(entered?.kind, `${row.kind} enters inside ${row.enter} px`).toBe(
+      row.kind,
+    );
+    const between = (row.enter + row.exit) / 2;
+    expect(
+      resolve(between)?.kind,
+      `${row.kind} does not enter at ${between} px`,
+    ).not.toBe(row.kind);
+    expect(
+      resolve(between, entered!.key)?.key,
+      `an active ${row.kind} stays at ${between} px`,
+    ).toBe(entered!.key);
+    expect(
+      resolve(row.exit + 1, entered!.key)?.kind,
+      `an active ${row.kind} leaves beyond ${row.exit} px`,
+    ).not.toBe(row.kind);
+  }
+
+  // Staying eligible is all hysteresis does: a nearer point still wins.
+  const a = pointSnap("sketch_point_a", [0, 0]);
+  const b = pointSnap("sketch_point_b", [0.2, 0]);
+  const activeA = resolveSketchSnap({
+    pointer: [0.05, 0],
+    geometries: [a, b],
+    sketchUnitsPerPixel: unitsPerPixel,
+  }).activeCandidate;
+  expect(activeA?.point).toEqual([0, 0]);
+  expect(
+    resolveSketchSnap({
+      pointer: [0.13, 0],
+      geometries: [a, b],
+      sketchUnitsPerPixel: unitsPerPixel,
+      activeCandidateKey: activeA!.key,
+    }).activeCandidate?.point,
+    "the active point (13 px) yields to a nearer point (7 px)",
+  ).toEqual([0.2, 0]);
+});
+
+test("snap classes rank before distance: point-like > constructed > on-curve > alignment (T13-D14)", () => {
+  const unitsPerPixel = 0.01;
+  const resolve = (
+    pointer: SketchPoint2D,
+    geometries: SketchSnapGeometry[],
+    activeAnchor: SketchPoint2D | null = null,
+  ) =>
+    resolveSketchSnap({
+      pointer,
+      geometries,
+      activeAnchor,
+      sketchUnitsPerPixel: unitsPerPixel,
+    }).activeCandidate;
+
+  // T11a offset corner: the line under the pointer is nearer than its end.
+  const corner = resolve(
+    [9.95, 0.02],
+    [lineSnap("sketch_entity_l", [0, 0], [10, 0])],
+  );
+  expect(corner?.kind, "an endpoint beats a nearer on-line snap").toBe(
+    "endpoint",
+  );
+  expect(corner?.point).toEqual([10, 0]);
+
+  // On a side of a closing rectangle the side beats a nearer alignment.
+  const side = resolve(
+    [3, 1.03],
+    [lineSnap("sketch_entity_side", [0, 1], [10, 1])],
+    [0, 1.05],
+  );
+  expect(side?.kind, "on-curve beats a nearer alignment").toBe("nearestOnLine");
+  expect(side?.point).toEqual([3, 1]);
+
+  // A tangent or perpendicular foot beats a nearer curve.
+  const foot = resolve(
+    [3.05, 1],
+    [lineSnap("sketch_entity_side", [0, 1], [10, 1])],
+    [3, 0],
+  );
+  expect(foot?.kind, "a constructed point beats a nearer on-line snap").toBe(
+    "perpendicularFoot",
+  );
+
+  // Datums: a local point beats the nearer X axis; the origin beats a nearer
+  // local line (the datum filter is gone, class order does both).
+  const nearAxis = resolve(
+    [3.02, 0.01],
+    [pointSnap("sketch_point_p", [3, 0.06]), ...datumSnaps()],
+  );
+  expect(nearAxis?.kind, "a point beats a nearer datum axis").toBe("endpoint");
+  expect(nearAxis?.point).toEqual([3, 0.06]);
+  const nearOrigin = resolve(
+    [0.03, 0.012],
+    // The origin alone: the axes would cross the line near it.
+    [
+      lineSnap("sketch_entity_l", [-5, 0.01], [3, 0.01]),
+      ...datumSnaps().filter((geometry) => geometry.kind === "point"),
+    ],
+  );
+  expect(nearOrigin?.kind, "the origin beats a nearer local line").toBe(
+    "endpoint",
+  );
+  expect(
+    nearOrigin?.sources.some(
+      (source) => source.kind === "sketchDatum" && source.datumId === "origin",
+    ),
+  ).toBe(true);
+
+  // A datum axis is an unbounded line: its drawn end (the display extent,
+  // 10 units here) is no endpoint, so it cannot outrank the axis itself.
+  const axisEnd = resolve([10.01, 0.01], datumSnaps());
+  expect(axisEnd?.kind, "the drawn end of a datum axis is on-line").toBe(
+    "nearestOnLine",
+  );
+  expect(axisEnd?.sources).toEqual([
+    { kind: "sketchDatum", datumId: "xAxis", geometryKind: "lineSegment" },
+  ]);
+
+  // Within a class: distance, then source (a local point over the origin).
+  const shared = resolve(
+    [0.02, 0.02],
+    [pointSnap("sketch_point_o", [0, 0]), ...datumSnaps()],
+  );
+  expect(shared?.sources).toEqual([
+    { kind: "localPoint", pointId: "sketch_point_o" },
+  ]);
 });

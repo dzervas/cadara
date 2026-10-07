@@ -36,6 +36,10 @@ import {
 } from "@/core/tools/tool-registry";
 import { mapSketchPointToWorkspaceWorld } from "@/core/workspace/sketch-plane-mapping";
 import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
+import {
+  SPEC_SKETCH_UNITS_PER_PIXEL,
+  withSketchSnapScale,
+} from "@/domain/editor/sketch-session/test-snap-scale";
 
 test("src/domain/sketch-constraints/registry.spec.ts", async () => {
   function createSessionWithTwoLines() {
@@ -2412,12 +2416,17 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       "Line and point targets should commit a durable line-to-point distance dimension in either selection order.",
     ).toBeTruthy();
 
-    let angleSession = createNewSketchSessionFromSupport(
-      {
-        kind: "construction",
-        constructionId: "construction_plane-xy",
-      },
-      OCC_KERNEL_SETTINGS,
+    // The lines' horizontal and vertical relations come from snapping (the
+    // angle is then determined), which needs a screen scale (T13f R-6).
+    let angleSession = withSketchSnapScale(
+      createNewSketchSessionFromSupport(
+        {
+          kind: "construction",
+          constructionId: "construction_plane-xy",
+        },
+        OCC_KERNEL_SETTINGS,
+      ),
+      SPEC_SKETCH_UNITS_PER_PIXEL,
     );
     angleSession = beginSketchTool(angleSession, "line");
     angleSession = startSketchDraw(angleSession, [0, 0]);

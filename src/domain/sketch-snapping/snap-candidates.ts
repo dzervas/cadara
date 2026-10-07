@@ -17,7 +17,6 @@ import type {
   SketchEntityId,
   SketchPointId,
 } from "@/contracts/shared/ids";
-import type { SketchToolId } from "@/core/sketch-tools/definition";
 import { distanceBetween, midpoint } from "@/domain/sketch/point-math";
 import {
   closestPointOnSolvedCubicSpans,
@@ -30,8 +29,12 @@ import {
   type SolvedCubicSpan,
 } from "@/contracts/sketch/spline-geometry";
 import { isAcceptedSketchSolve } from "@/domain/editor/sketch-session/internals";
+import {
+  SKETCH_ALIGNMENT_SNAP_RADII_PX,
+  SKETCH_CURVE_RADII_PX,
+  SKETCH_POINT_RADII_PX,
+} from "@/domain/sketch-interaction/screen-radii";
 
-const DEFAULT_SNAP_TOLERANCE = 0.18;
 const DEFAULT_SKETCH_DATUM_AXIS_EXTENT = 10;
 const EPSILON = 1e-9;
 const TWO_PI = Math.PI * 2;
@@ -98,7 +101,6 @@ export interface SketchSnapCandidate {
   point: SketchPoint2D;
   rawPointer: SketchPoint2D;
   distance: number;
-  priority: number;
   sources: readonly SketchSnapSourceRef[];
   preview: SketchSnapPreviewMetadata;
 }
@@ -157,9 +159,13 @@ export type SketchSnapGeometry =
 export interface ResolveSketchSnapInput {
   pointer: SketchPoint2D;
   geometries: readonly SketchSnapGeometry[];
-  activeTool?: SketchToolId | null;
   activeAnchor?: SketchPoint2D | null;
-  tolerance?: number;
+  /**
+   * Sketch units per screen pixel at the pointer (T13-D13): tolerances are
+   * screen pixels. `null` (no measured scale): nothing snaps.
+   */
+  sketchUnitsPerPixel: number | null;
+  /** The active candidate, which stays eligible up to its exit radius. */
   activeCandidateKey?: string | null;
 }
 
@@ -546,35 +552,34 @@ function getSketchDatumAxisExtent(
 export function resolveSketchSnap(
   input: ResolveSketchSnapInput,
 ): SketchSnapResult {
-  const tolerance = input.tolerance ?? DEFAULT_SNAP_TOLERANCE;
+  const unitsPerPixel = input.sketchUnitsPerPixel;
+  if (unitsPerPixel === null) {
+    return {
+      rawPoint: input.pointer,
+      snappedPoint: input.pointer,
+      activeCandidate: null,
+      candidates: [],
+    };
+  }
+
+  // Collect within the largest exit radius, then apply each class's radius.
+  const reach = SKETCH_POINT_RADII_PX.exit * unitsPerPixel;
   const candidates = rankSnapCandidates(
-    filterDatumAxisCurveCandidates([
-      ...collectPointCandidates(
-        input.pointer,
-        input.geometries,
-        tolerance,
-        input.activeTool,
-      ),
-      ...collectCurveCandidates(
-        input.pointer,
-        input.geometries,
-        tolerance,
-        input.activeTool,
-      ),
-      ...collectIntersectionCandidates(
-        input.pointer,
-        input.geometries,
-        tolerance,
-        input.activeTool,
-      ),
-      ...collectActiveAnchorCandidates(input, tolerance),
-    ]),
+    [
+      ...collectPointCandidates(input.pointer, input.geometries, reach),
+      ...collectCurveCandidates(input.pointer, input.geometries, reach),
+      ...collectIntersectionCandidates(input.pointer, input.geometries, reach),
+      ...collectActiveAnchorCandidates(input, reach),
+    ].filter(
+      (candidate) =>
+        candidate.distance <=
+        getSnapRadiiPx(candidate.kind)[
+          candidate.key === input.activeCandidateKey ? "exit" : "enter"
+        ] *
+          unitsPerPixel,
+    ),
   );
-  const activeCandidate = selectActiveCandidate(
-    candidates,
-    input.activeCandidateKey,
-    tolerance,
-  );
+  const activeCandidate = candidates[0] ?? null;
 
   return {
     rawPoint: input.pointer,
@@ -584,44 +589,46 @@ export function resolveSketchSnap(
   };
 }
 
-function filterDatumAxisCurveCandidates(
-  candidates: readonly SketchSnapCandidate[],
-) {
-  const hasPointLikeSnap = candidates.some(
-    (candidate) =>
-      !candidate.sources.some(
-        (source) =>
-          source.kind === "sketchDatum" &&
-          source.geometryKind === "lineSegment",
-      ) &&
-      (candidate.kind === "endpoint" ||
-        candidate.kind === "center" ||
-        candidate.kind === "midpoint" ||
-        candidate.kind === "intersection"),
-  );
-
-  if (!hasPointLikeSnap) {
-    return candidates;
+/**
+ * Snap classes in priority order (T13-D14): point-like, constructed points,
+ * on-curve, alignment.
+ */
+function getSnapClass(kind: SketchSnapCandidateKind) {
+  switch (kind) {
+    case "endpoint":
+    case "intersection":
+    case "center":
+    case "midpoint":
+      return 0;
+    case "tangent":
+    case "perpendicularFoot":
+      return 1;
+    case "nearestOnLine":
+    case "nearestOnCircle":
+    case "nearestOnArc":
+    case "nearestOnSpline":
+      return 2;
+    case "horizontalAlignment":
+    case "verticalAlignment":
+      return 3;
   }
+}
 
-  return candidates.filter(
-    (candidate) =>
-      !(
-        candidate.kind === "nearestOnLine" &&
-        candidate.sources.some(
-          (source) =>
-            source.kind === "sketchDatum" &&
-            source.geometryKind === "lineSegment",
-        )
-      ),
-  );
+function getSnapRadiiPx(kind: SketchSnapCandidateKind) {
+  switch (getSnapClass(kind)) {
+    case 0:
+      return SKETCH_POINT_RADII_PX;
+    case 3:
+      return SKETCH_ALIGNMENT_SNAP_RADII_PX;
+    default:
+      return SKETCH_CURVE_RADII_PX;
+  }
 }
 
 function collectPointCandidates(
   pointer: SketchPoint2D,
   geometries: readonly SketchSnapGeometry[],
-  tolerance: number,
-  activeTool: SketchToolId | null | undefined,
+  reach: number,
 ): SketchSnapCandidate[] {
   const candidates: SketchSnapCandidate[] = [];
 
@@ -632,8 +639,6 @@ function collectPointCandidates(
           kind: "endpoint",
           point: geometry.point,
           pointer,
-          tolerance,
-          activeTool,
           sources: [geometry.source],
         }),
       );
@@ -641,29 +646,29 @@ function collectPointCandidates(
     }
 
     if (geometry.kind === "lineSegment") {
+      // A datum axis is an unbounded line drawn to a display extent: its
+      // drawn ends and their midpoint are not points of the sketch.
+      if (geometry.source.kind === "sketchDatum") {
+        continue;
+      }
+
       candidates.push(
         createCandidate({
           kind: "endpoint",
           point: geometry.start,
           pointer,
-          tolerance,
-          activeTool,
           sources: [geometry.source],
         }),
         createCandidate({
           kind: "endpoint",
           point: geometry.end,
           pointer,
-          tolerance,
-          activeTool,
           sources: [geometry.source],
         }),
         createCandidate({
           kind: "midpoint",
           point: midpoint(geometry.start, geometry.end),
           pointer,
-          tolerance,
-          activeTool,
           sources: [geometry.source],
         }),
       );
@@ -678,8 +683,6 @@ function collectPointCandidates(
               kind: "endpoint",
               point,
               pointer,
-              tolerance,
-              activeTool,
               sources: [geometry.source],
             }),
           );
@@ -693,8 +696,6 @@ function collectPointCandidates(
         kind: "center",
         point: geometry.center,
         pointer,
-        tolerance,
-        activeTool,
         sources: [geometry.source],
       }),
     );
@@ -705,30 +706,25 @@ function collectPointCandidates(
           kind: "endpoint",
           point: geometry.start,
           pointer,
-          tolerance,
-          activeTool,
           sources: [geometry.source],
         }),
         createCandidate({
           kind: "endpoint",
           point: geometry.end,
           pointer,
-          tolerance,
-          activeTool,
           sources: [geometry.source],
         }),
       );
     }
   }
 
-  return candidates.filter((candidate) => candidate.distance <= tolerance);
+  return candidates.filter((candidate) => candidate.distance <= reach);
 }
 
 function collectCurveCandidates(
   pointer: SketchPoint2D,
   geometries: readonly SketchSnapGeometry[],
-  tolerance: number,
-  activeTool: SketchToolId | null | undefined,
+  reach: number,
 ): SketchSnapCandidate[] {
   const candidates: SketchSnapCandidate[] = [];
 
@@ -744,8 +740,6 @@ function collectCurveCandidates(
           kind: "nearestOnLine",
           point,
           pointer,
-          tolerance,
-          activeTool,
           sources: [geometry.source],
         }),
       );
@@ -763,8 +757,6 @@ function collectCurveCandidates(
           kind: "nearestOnCircle",
           point,
           pointer,
-          tolerance,
-          activeTool,
           sources: [geometry.source],
         }),
       );
@@ -778,8 +770,6 @@ function collectCurveCandidates(
           kind: "nearestOnArc",
           point,
           pointer,
-          tolerance,
-          activeTool,
           sources: [geometry.source],
         }),
       );
@@ -787,29 +777,26 @@ function collectCurveCandidates(
     }
 
     if (geometry.kind === "spline" || geometry.kind === "sampledSpline") {
-      const point = nearestPointOnSpline(pointer, geometry, tolerance);
+      const point = nearestPointOnSpline(pointer, geometry, reach);
       if (!point) continue;
       candidates.push(
         createCandidate({
           kind: "nearestOnSpline",
           point,
           pointer,
-          tolerance,
-          activeTool,
           sources: [geometry.source],
         }),
       );
     }
   }
 
-  return candidates.filter((candidate) => candidate.distance <= tolerance);
+  return candidates.filter((candidate) => candidate.distance <= reach);
 }
 
 function collectIntersectionCandidates(
   pointer: SketchPoint2D,
   geometries: readonly SketchSnapGeometry[],
-  tolerance: number,
-  activeTool: SketchToolId | null | undefined,
+  reach: number,
 ): SketchSnapCandidate[] {
   const curves = geometries.filter(isCurveGeometry);
   const candidates: SketchSnapCandidate[] = [];
@@ -833,8 +820,6 @@ function collectIntersectionCandidates(
             kind: "intersection",
             point,
             pointer,
-            tolerance,
-            activeTool,
             sources: [left.source, right.source],
           }),
         );
@@ -842,12 +827,12 @@ function collectIntersectionCandidates(
     }
   }
 
-  return candidates.filter((candidate) => candidate.distance <= tolerance);
+  return candidates.filter((candidate) => candidate.distance <= reach);
 }
 
 function collectActiveAnchorCandidates(
   input: ResolveSketchSnapInput,
-  tolerance: number,
+  reach: number,
 ): SketchSnapCandidate[] {
   if (!input.activeAnchor) {
     return [];
@@ -863,16 +848,12 @@ function collectActiveAnchorCandidates(
       kind: "horizontalAlignment",
       point: [pointer[0], input.activeAnchor[1]],
       pointer,
-      tolerance,
-      activeTool: input.activeTool,
       sources: [activeAnchorSource],
     }),
     createCandidate({
       kind: "verticalAlignment",
       point: [input.activeAnchor[0], pointer[1]],
       pointer,
-      tolerance,
-      activeTool: input.activeTool,
       sources: [activeAnchorSource],
     }),
   ];
@@ -891,8 +872,6 @@ function collectActiveAnchorCandidates(
             kind: "perpendicularFoot",
             point: foot,
             pointer,
-            tolerance,
-            activeTool: input.activeTool,
             sources: [activeAnchorSource, geometry.source],
           }),
         );
@@ -910,8 +889,6 @@ function collectActiveAnchorCandidates(
             kind: "tangent",
             point,
             pointer,
-            tolerance,
-            activeTool: input.activeTool,
             sources: [activeAnchorSource, geometry.source],
           }),
         );
@@ -919,19 +896,16 @@ function collectActiveAnchorCandidates(
     }
   }
 
-  return candidates.filter((candidate) => candidate.distance <= tolerance);
+  return candidates.filter((candidate) => candidate.distance <= reach);
 }
 
 function createCandidate(input: {
   kind: SketchSnapCandidateKind;
   point: SketchPoint2D;
   pointer: SketchPoint2D;
-  tolerance: number;
-  activeTool: SketchToolId | null | undefined;
   sources: readonly SketchSnapSourceRef[];
 }): SketchSnapCandidate {
   const distance = distanceBetween(input.pointer, input.point);
-  const priority = getCandidatePriority(input.kind, input.activeTool);
   const sources = [...input.sources].sort((left, right) =>
     sourceKey(left).localeCompare(sourceKey(right)),
   );
@@ -947,7 +921,6 @@ function createCandidate(input: {
     point: input.point,
     rawPointer: input.pointer,
     distance,
-    priority,
     sources,
     preview: getCandidatePreview(input.kind),
   };
@@ -964,39 +937,7 @@ function candidateKeyNeedsPoint(kind: SketchSnapCandidateKind) {
 }
 
 function rankSnapCandidates(candidates: readonly SketchSnapCandidate[]) {
-  return dedupeCandidates(candidates).sort(
-    (left, right) =>
-      compareDistance(left.distance, right.distance) ||
-      sourcePreference(left) - sourcePreference(right) ||
-      left.priority - right.priority ||
-      left.key.localeCompare(right.key),
-  );
-}
-
-function selectActiveCandidate(
-  candidates: readonly SketchSnapCandidate[],
-  activeCandidateKey: string | null | undefined,
-  tolerance: number,
-) {
-  const best = candidates[0] ?? null;
-
-  if (!best || !activeCandidateKey) {
-    return best;
-  }
-
-  const previous = candidates.find(
-    (candidate) => candidate.key === activeCandidateKey,
-  );
-
-  if (
-    previous &&
-    previous.distance <= tolerance * 1.35 &&
-    previous.distance <= best.distance + tolerance * 0.15
-  ) {
-    return previous;
-  }
-
-  return best;
+  return dedupeCandidates(candidates).sort(compareCandidate);
 }
 
 function dedupeCandidates(candidates: readonly SketchSnapCandidate[]) {
@@ -1012,50 +953,24 @@ function dedupeCandidates(candidates: readonly SketchSnapCandidate[]) {
   return [...byKey.values()];
 }
 
+/**
+ * T13-D14: class first, then distance (screen distance; the scale is
+ * uniform), then source, then the stable key.
+ */
 function compareCandidate(
   left: SketchSnapCandidate,
   right: SketchSnapCandidate,
 ) {
   return (
+    getSnapClass(left.kind) - getSnapClass(right.kind) ||
     compareDistance(left.distance, right.distance) ||
     sourcePreference(left) - sourcePreference(right) ||
-    left.priority - right.priority ||
     left.key.localeCompare(right.key)
   );
 }
 
 function compareDistance(left: number, right: number) {
   return Math.abs(left - right) <= EPSILON ? 0 : left - right;
-}
-
-function getCandidatePriority(
-  kind: SketchSnapCandidateKind,
-  activeTool: SketchToolId | null | undefined,
-) {
-  const basePriority: Record<SketchSnapCandidateKind, number> = {
-    endpoint: 10,
-    intersection: 12,
-    center: 14,
-    midpoint: 16,
-    tangent: 18,
-    perpendicularFoot: 20,
-    horizontalAlignment: 24,
-    verticalAlignment: 24,
-    nearestOnLine: 34,
-    nearestOnCircle: 36,
-    nearestOnArc: 38,
-    nearestOnSpline: 40,
-  };
-  const activeDrawingBoost =
-    (activeTool === "line" || activeTool === "rectangle") &&
-    (kind === "horizontalAlignment" ||
-      kind === "verticalAlignment" ||
-      kind === "perpendicularFoot" ||
-      kind === "tangent")
-      ? -4
-      : 0;
-
-  return basePriority[kind] + activeDrawingBoost;
 }
 
 function getCandidatePreview(

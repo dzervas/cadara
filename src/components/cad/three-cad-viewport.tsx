@@ -55,6 +55,7 @@ import {
   updatePointerFromClientPoint,
 } from "@/components/cad/three-cad-viewport-pick-candidates";
 import { SketchPickHint } from "@/components/cad/sketch-pick-hint";
+import { computeSketchUnitsPerPixel } from "@/components/cad/sketch-snap-scale";
 import {
   SketchPickChooser,
   type SketchPickChooserModel,
@@ -284,13 +285,22 @@ export function ThreeCadViewport({
     [onIntent],
   );
   const onSketchMove = useCallback(
-    (point: readonly [number, number]) =>
-      onIntent({ type: "sketchPointerMoved", point }),
+    (point: readonly [number, number], sketchUnitsPerPixel: number | null) =>
+      onIntent({ type: "sketchPointerMoved", point, sketchUnitsPerPixel }),
     [onIntent],
   );
   const onSketchRelease = useCallback(
-    (point: readonly [number, number], target?: PrimitiveRef | null) =>
-      onIntent({ type: "sketchPointerReleased", point, target }),
+    (
+      point: readonly [number, number],
+      sketchUnitsPerPixel: number | null,
+      target?: PrimitiveRef | null,
+    ) =>
+      onIntent({
+        type: "sketchPointerReleased",
+        point,
+        sketchUnitsPerPixel,
+        target,
+      }),
     [onIntent],
   );
   const onSketchDrawFinalize = useCallback(
@@ -1842,6 +1852,26 @@ export function ThreeCadViewport({
       ]);
     };
 
+    /** The screen scale snapping uses at a sketch pointer event (T13-D13). */
+    const measureSketchUnitsPerPixel = (
+      clientX: number,
+      clientY: number,
+      viewportRect: DOMRectReadOnly,
+    ) => {
+      const camera = cameraRef.current;
+      const activeSketchSession = sketchSessionRef.current;
+
+      return camera && activeSketchSession
+        ? computeSketchUnitsPerPixel({
+            camera,
+            viewportRect,
+            plane: activeSketchSession.plane,
+            clientX,
+            clientY,
+          })
+        : null;
+    };
+
     projectSketchClientPointRef.current = (clientX, clientY) =>
       projectSketchPoint(
         clientX,
@@ -2144,7 +2174,14 @@ export function ThreeCadViewport({
       );
 
       if (point) {
-        sketchMoveRef.current(point);
+        sketchMoveRef.current(
+          point,
+          measureSketchUnitsPerPixel(
+            event.clientX,
+            event.clientY,
+            viewportRect,
+          ),
+        );
       }
     };
 
@@ -2419,7 +2456,15 @@ export function ThreeCadViewport({
       });
       fitPointReleaseRef.current = fitPointRelease.record;
       if (fitPointRelease.dispatch) {
-        sketchReleaseRef.current(point, releaseTarget);
+        sketchReleaseRef.current(
+          point,
+          measureSketchUnitsPerPixel(
+            event.clientX,
+            event.clientY,
+            viewportRect,
+          ),
+          releaseTarget,
+        );
       }
     };
 

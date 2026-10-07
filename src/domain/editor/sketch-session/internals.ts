@@ -1919,7 +1919,6 @@ function createSketchPointAnchorSnap(
     point: position,
     rawPointer: position,
     distance: 0,
-    priority: 0,
     sources: [{ kind: "localPoint", pointId }],
     preview: { label: "Endpoint", glyph: "endpoint" },
   };

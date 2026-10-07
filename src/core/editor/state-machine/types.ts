@@ -381,6 +381,11 @@ export interface SketchPointerMovedEvent {
   type: "sketch.pointerMoved";
   /** Pointer location in the active sketch plane coordinate frame. */
   point: readonly [number, number];
+  /**
+   * Sketch units per screen pixel at the pointer (T13-D13), or null when the
+   * viewport could not measure it (nothing snaps).
+   */
+  sketchUnitsPerPixel: number | null;
 }
 
 /** Finalizes a sketch pointer release in sketch-plane coordinates. */
@@ -388,6 +393,8 @@ export interface SketchPointerReleasedEvent {
   type: "sketch.pointerReleased";
   /** Release location in the active sketch plane coordinate frame. */
   point: readonly [number, number];
+  /** Sketch units per screen pixel at the release, as on `sketch.pointerMoved`. */
+  sketchUnitsPerPixel: number | null;
   /** Durable target under the release point, when the viewport could resolve one. */
   target?: PrimitiveRef | null;
 }

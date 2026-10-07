@@ -8,14 +8,21 @@ import {
   startSketchDraw,
 } from "./sketch-session";
 import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+import {
+  SPEC_SKETCH_UNITS_PER_PIXEL,
+  withSketchSnapScale,
+} from "@/domain/editor/sketch-session/test-snap-scale";
 
 test("sketch contents reflect current authored records rather than a replay cursor", () => {
-  let session = createNewSketchSessionFromSupport(
-    {
-      kind: "construction",
-      constructionId: "construction_plane-xy",
-    },
-    OCC_KERNEL_SETTINGS,
+  let session = withSketchSnapScale(
+    createNewSketchSessionFromSupport(
+      {
+        kind: "construction",
+        constructionId: "construction_plane-xy",
+      },
+      OCC_KERNEL_SETTINGS,
+    ),
+    SPEC_SKETCH_UNITS_PER_PIXEL,
   );
   for (const y of [0, 1])
     session = acceptSketchDraw(

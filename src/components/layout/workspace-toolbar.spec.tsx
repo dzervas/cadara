@@ -24,6 +24,10 @@ import {
 import { EditorContext } from "@/hooks/editor-context";
 import { WorkbenchCommandProvider } from "@/hooks/workbench-command-provider";
 import { workbenchTheme } from "@/theme/workbench-theme";
+import {
+  SPEC_SKETCH_UNITS_PER_PIXEL,
+  withSketchSnapScale,
+} from "@/domain/editor/sketch-session/test-snap-scale";
 
 test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
   function getToolMarkup(markup: string, toolId: string) {
@@ -199,9 +203,12 @@ test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
         toolId: "line",
         phase: "editing",
       },
-      sketchSession: createNewSketchSession(
-        createStandardPlaneDefinition("xy"),
-        OCC_KERNEL_SETTINGS,
+      sketchSession: withSketchSnapScale(
+        createNewSketchSession(
+          createStandardPlaneDefinition("xy"),
+          OCC_KERNEL_SETTINGS,
+        ),
+        SPEC_SKETCH_UNITS_PER_PIXEL,
       ),
     },
   });
@@ -252,9 +259,12 @@ test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
   ).toBeTruthy();
 
   let styledSession = toggleSketchSvgRendering(
-    createNewSketchSession(
-      createStandardPlaneDefinition("xy"),
-      OCC_KERNEL_SETTINGS,
+    withSketchSnapScale(
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
+      SPEC_SKETCH_UNITS_PER_PIXEL,
     ),
   );
   styledSession = beginSketchTool(styledSession, "line");
@@ -293,9 +303,12 @@ test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
     "Fill and Stroke should remain available while Stroke shows active for a selected sketch entity.",
   ).toBeFalsy();
 
-  const baseSvgDisabledSession = createNewSketchSession(
-    createStandardPlaneDefinition("xy"),
-    OCC_KERNEL_SETTINGS,
+  const baseSvgDisabledSession = withSketchSnapScale(
+    createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
+    SPEC_SKETCH_UNITS_PER_PIXEL,
   );
   const svgDisabledSession = {
     ...baseSvgDisabledSession,
@@ -330,9 +343,12 @@ test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
   ).toBeTruthy();
 
   const constructionSession = {
-    ...createNewSketchSession(
-      createStandardPlaneDefinition("xy"),
-      OCC_KERNEL_SETTINGS,
+    ...withSketchSnapScale(
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
+      SPEC_SKETCH_UNITS_PER_PIXEL,
     ),
     constructionModifierActive: true,
   };

@@ -23,6 +23,7 @@ import {
   patchSketchEditToolValue,
   patchSketchStyleValue,
   pinSketchConstraintPreview,
+  setSketchSnapScale,
   shouldDeferSketchConstraintPreviewPinToSelection,
   startSketchDraw,
   updateSketchGeometryDrag,
@@ -68,7 +69,7 @@ export function handleSketchPointerMoved(
   }
 
   const session = updateSketchPointer(
-    state.session,
+    setSketchSnapScale(state.session, event.sketchUnitsPerPixel),
     deriveSketchPointFromWorld(state.session.plane, event.point),
   );
 
@@ -99,16 +100,14 @@ export function handleSketchPointerReleased(
   }
 
   const point = deriveSketchPointFromWorld(state.session.plane, event.point);
-  const session = state.session.constraintAuthoring
-    ? shouldDeferSketchConstraintPreviewPinToSelection(
-        state.session,
-        event.target,
-      )
-      ? state.session
-      : pinSketchConstraintPreview(state.session, point)
-    : state.session.status === "drawing"
-      ? acceptSketchDraw(state.session, point)
-      : startSketchDraw(state.session, point);
+  const scaled = setSketchSnapScale(state.session, event.sketchUnitsPerPixel);
+  const session = scaled.constraintAuthoring
+    ? shouldDeferSketchConstraintPreviewPinToSelection(scaled, event.target)
+      ? scaled
+      : pinSketchConstraintPreview(scaled, point)
+    : scaled.status === "drawing"
+      ? acceptSketchDraw(scaled, point)
+      : startSketchDraw(scaled, point);
 
   return {
     state: {

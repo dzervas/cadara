@@ -25,6 +25,10 @@ import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
 } from "@/domain/modeling/opencascade-kernel-seed";
+import {
+  SPEC_SKETCH_UNITS_PER_PIXEL,
+  withSketchSnapScale,
+} from "@/domain/editor/sketch-session/test-snap-scale";
 
 // T11g (T11-D9, D10, D19, D20): the lifecycle metadata of every drawing
 // tool and the Escape/Enter steps an armed tool takes.
@@ -54,9 +58,12 @@ const expectedLifecycles: Record<SketchToolId, SketchToolLifecycle> = {
 
 function armed(toolId: SketchToolId) {
   return beginSketchTool(
-    createNewSketchSession(
-      createStandardPlaneDefinition("xy"),
-      OCC_KERNEL_SETTINGS,
+    withSketchSnapScale(
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
+      SPEC_SKETCH_UNITS_PER_PIXEL,
     ),
     toolId,
   );
