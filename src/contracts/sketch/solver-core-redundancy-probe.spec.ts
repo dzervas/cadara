@@ -16,6 +16,7 @@ import type {
 import {
   probeSketchDimensionRedundancy,
   solveSketchDefinitionCore,
+  traceSketchSolverForTest,
   type SketchSolveStrategy,
 } from "@/contracts/sketch/solver-core";
 import { makeSketchFixture } from "@/contracts/sketch/region-extraction.fixtures";
@@ -370,41 +371,57 @@ test("T13e review B-1: the trials run BFGS without the Gauss–Newton fallback, 
     [],
     [lineLength("width", "bottom", 4)],
   );
-  const verdict = probe(sized, lineLength("top", "top", 4));
-  expect(verdict).toMatchObject({
+  // T13e2: the strategy is observed through the solver trace (a rejected
+  // result is re-solved with the minimum-motion anchor under both
+  // strategies, so the final values no longer tell them apart): the probe's
+  // trials record no Gauss–Newton fallback run at all, while the same
+  // rejected trial under the normal strategy runs one.
+  const traced = traceSketchSolverForTest(() =>
+    probe(sized, lineLength("top", "top", 4)),
+  );
+  expect(traced.result).toMatchObject({
     kind: "determined",
     trialStrategy: "bfgsWithoutFallback",
   });
-  // The strategy is observable: on the rejected trial (top at m + δ) the
-  // fallback moves the inconsistent solve, BFGS alone does not.
+  expect(
+    traced.gaussNewtonFallbacks,
+    "the probe's trials never reach the Gauss–Newton fallback",
+  ).toEqual([]);
   const trial = withRequirements(sized, [], [lineLength("top", "top", 4.012)]);
   const solvedTop = (strategy: SketchSolveStrategy) =>
-    solveSketchDefinitionCore({
-      definition: trial,
-      tolerances: TOLERANCES,
-      modelingTolerance: TAU,
-      partialSolvePolicy: "bestEffort",
-      strategy,
-    }).solvedSnapshot.dimensionStatuses.find(
-      (status) => status.dimensionId === dimensionId("top"),
-    )!;
+    traceSketchSolverForTest(
+      () =>
+        solveSketchDefinitionCore({
+          definition: trial,
+          tolerances: TOLERANCES,
+          modelingTolerance: TAU,
+          partialSolvePolicy: "bestEffort",
+          strategy,
+        }).solvedSnapshot.dimensionStatuses.find(
+          (status) => status.dimensionId === dimensionId("top"),
+        )!,
+    );
   const withoutFallback = solvedTop("bfgsWithoutFallback");
   const withFallback = solvedTop("bfgs");
-  expect(withoutFallback.status, "the trial is rejected either way").toBe(
-    "unsatisfied",
-  );
-  expect(withFallback.status).toBe("unsatisfied");
   expect(
-    Math.abs(withoutFallback.solvedValue! - withFallback.solvedValue!),
-    "the fallback changes the inconsistent result",
-  ).toBeGreaterThan(1e-9);
+    withoutFallback.result.status,
+    "the trial is rejected either way",
+  ).toBe("unsatisfied");
+  expect(withFallback.result.status).toBe("unsatisfied");
+  expect(withoutFallback.gaussNewtonFallbacks).toEqual([]);
+  expect(
+    withFallback.gaussNewtonFallbacks.filter((run) => !run.skipped),
+    "the normal strategy runs the fallback on the rejected trial",
+  ).not.toEqual([]);
 });
 
-test("T13e review R-2 (documented miss): a thin rectangle's width determined by its height and diagonal (gains ≈ 10 > A) reads independent", () => {
+test("T13e2 (A1): a thin rectangle's width determined by its height and diagonal (gains ≈ 10 > A) reads determined (was the T13e review R-2 documented miss)", () => {
   // Width 1, height 9.95: w = √(d² − h²), so ∂w/∂d ≈ d/w ≈ 10. The first-order
-  // bound is ≈ 0.032 (review); the heuristic δ = 2·(1+6)·τ = 0.014 is below
-  // it, so the conflict hides in the tolerances. Benign: a consistent
-  // redundant driving width. Premise: at twice the bound both sides reject.
+  // bound is ≈ 0.032 (review) and the heuristic δ = 2·(1+6)·τ = 0.014 is
+  // below it. T13e read this independent: the 1 mm horizontal sides could
+  // tilt up to τ/1 mm = 1e-3 rad within |Δ| ≤ τ and absorb the trial. Judged
+  // by direction as well (T13e2 A1) they cannot, and both trials reject.
+  // Premise: at twice the bound both sides reject.
   const sketch = rectangleSketch(1, 9.95);
   const sized = withRequirements(
     sketch,
@@ -429,7 +446,7 @@ test("T13e review R-2 (documented miss): a thin rectangle's width determined by 
       `premise: the width is determined (${width} conflicts)`,
     ).toBe(false);
   const verdict = probe(sized, lineLength("width", "bottom", 1));
-  expect(verdict.kind).toBe("independent");
+  expect(verdict.kind).toBe("determined");
   expect("delta" in verdict && verdict.delta).toBeLessThan(0.032);
 });
 
