@@ -67,6 +67,7 @@ import type {
 } from "./types";
 import {
   getSketchSessionInvalidFeedback,
+  hasAcceptedLiveSolveOfDefinition,
   withLiveSolveBasis,
   resolveSketchDefinitionForSolve,
   getTargetKey,
@@ -728,11 +729,17 @@ function commitEditedAnnotationDefinition(
     ...committed,
     validationMessage: committed.liveSolve?.accepted
       ? null
-      : getSketchSessionInvalidFeedback(committed, [
-          edit.target.kind === "constraint"
-            ? edit.target.constraintId
-            : edit.target.dimensionId,
-        ]),
+      : getSketchSessionInvalidFeedback(
+          committed,
+          [
+            edit.target.kind === "constraint"
+              ? edit.target.constraintId
+              : edit.target.dimensionId,
+          ],
+          // T13e2 (review R-1): the edit caused the invalidity only if the
+          // sketch was accepted before it.
+          hasAcceptedLiveSolveOfDefinition(session),
+        ),
   };
 }
 

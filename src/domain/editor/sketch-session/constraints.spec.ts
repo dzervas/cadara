@@ -807,3 +807,396 @@ test("T13c R-2: reopening a sketch with conflicting dimensions shows the explana
     "dimension_0 (2 mm), dimension_1 (9 mm) conflict. The sketch is invalid; profiles from it are blocked. Change or delete one of them, or Undo.",
   );
 });
+
+// --- T13e2: conflicts the solver used to accept -----------------------------
+
+/** Every line of the authored definition, as its length. */
+function authoredLineLengths(session: SketchSessionState) {
+  const at = (pointId: string) =>
+    session.definition.points.find((point) => point.pointId === pointId)!
+      .position;
+  return session.definition.entities.flatMap((candidate) => {
+    if (candidate.kind !== "lineSegment") return [];
+    const start = at(candidate.startPointId);
+    const end = at(candidate.endPointId);
+    return [Math.hypot(end[0] - start[0], end[1] - start[1])];
+  });
+}
+
+/** The largest distance a live-solve point moved from its authored position. */
+function liveSolveLargestMove(session: SketchSessionState) {
+  const authored = positions(session);
+  return Math.max(
+    ...session.liveSolve!.solvedSnapshot.solvedPoints.map((entry) => {
+      const start = authored[entry.pointId]!;
+      return Math.hypot(
+        entry.solvedPosition[0] - start[0],
+        entry.solvedPosition[1] - start[1],
+      );
+    }),
+  );
+}
+
+/**
+ * T13e2 (decision 4): the explanation names the just-committed requirement
+ * first, even when the conflict left it satisfied, then exactly the
+ * unsatisfied requirements; the solver diagnostics target the latter.
+ */
+function expectCommittedConflictExplanation(
+  session: SketchSessionState,
+  subjectId: string,
+  subjectText: string,
+) {
+  const message = session.validationMessage ?? "";
+  expect(message.startsWith(`${subjectText} conflicts with `), message).toBe(
+    true,
+  );
+  const others = unsatisfiedIds(session).filter((id) => id !== subjectId);
+  expect(
+    others.length,
+    "the conflict involves other requirements",
+  ).toBeGreaterThan(0);
+  const named = [
+    ...session.definition.constraints.map((c) => [c.constraintId, c.label]),
+    ...session.definition.dimensions.map((d) => [d.dimensionId, d.label]),
+  ]
+    .filter(
+      ([id, label]) =>
+        id !== subjectId && new RegExp(`\\b${label}\\b`).test(message),
+    )
+    .map(([id]) => id!)
+    .sort();
+  expect(named, "the message then names exactly the unsatisfied set").toEqual(
+    others,
+  );
+  expect(message).toContain(
+    "The sketch is invalid; profiles from it are blocked. Change or delete one of them, or Undo.",
+  );
+}
+
+test("T13e2: a conflicting 95° corner angle on a rectangle is a rejected, explained edit naming the angle first; no side collapses", () => {
+  const session = rectangleAndCircle();
+  const opened = openDimensionInput(
+    session,
+    "dimensionDistance",
+    [
+      entity(session, "Rectangle 1 bottom").target,
+      entity(session, "Rectangle 1 right").target,
+    ],
+    [4, 2],
+  );
+  // The corner angle of an h/v rectangle is determined (T13e D11; before
+  // T13e2 the probe read it independent because a collapsed side absorbed
+  // the trial).
+  expect(opened.constraintAuthoring?.redundancy).toBe("determined");
+  const committed = commitValue(
+    patchSketchConstraintValue(makeDriving(opened), { value: "95" }),
+  );
+  const angle = committed.definition.dimensions.at(-1)!;
+  expect(angle.kind).toBe("lineAngle");
+  expect(committed.liveSolve?.accepted, "the conflict is rejected").toBe(false);
+  expect(unsatisfiedIds(committed).length).toBeGreaterThan(0);
+  expectCommittedConflictExplanation(
+    committed,
+    angle.dimensionId,
+    `${angle.label} (95°)`,
+  );
+  expect(positions(committed), "the authored geometry is unchanged").toEqual(
+    positions(session),
+  );
+  for (const sideLength of authoredLineLengths(committed))
+    expect(sideLength).toBeGreaterThan(
+      session.solverTolerances.minimumSegmentLength,
+    );
+
+  // The same explanation for an annotation edit of a satisfied angle.
+  const square = commitValue(
+    patchSketchConstraintValue(
+      makeDriving(
+        openDimensionInput(
+          session,
+          "dimensionDistance",
+          [
+            entity(session, "Rectangle 1 bottom").target,
+            entity(session, "Rectangle 1 right").target,
+          ],
+          [4, 2],
+        ),
+      ),
+      { value: "90" },
+    ),
+  );
+  expect(square.liveSolve?.accepted, "premise: 90° is consistent").toBe(true);
+  const right = square.definition.dimensions.at(-1)!;
+  const edited = patchSketchConstraintValue(
+    patchSketchConstraintValue(
+      beginSketchAnnotationEdit(square, {
+        kind: "dimension",
+        sketchId: square.sketchId!,
+        dimensionId: right.dimensionId,
+      } as Parameters<typeof beginSketchAnnotationEdit>[1]),
+      { value: "95" },
+    ),
+    { intent: "commitAnnotationValue" },
+  );
+  expect(edited.liveSolve?.accepted).toBe(false);
+  expectCommittedConflictExplanation(
+    edited,
+    right.dimensionId,
+    `${right.label} (95°)`,
+  );
+  expect(positions(edited)).toEqual(positions(square));
+});
+
+test("T13e2: a diameter conflicting with a circle tangent to both sides of a height-sized rectangle is rejected with no large move", () => {
+  let session = draw(newSession(), "rectangle", [
+    [0, 0],
+    [6, 4],
+  ]);
+  session = draw(session, "circle", [
+    [3, 2],
+    [4.8, 2],
+  ]);
+  for (const side of ["Rectangle 1 bottom", "Rectangle 1 top"])
+    session = beginSketchTool(
+      tangentTool(session, entity(session, side).target, circleTarget(session)),
+      "line",
+    );
+  session = commitValue(
+    openDimensionInput(
+      session,
+      "dimensionDistance",
+      [entity(session, "Rectangle 1 right").target],
+      [7, 2],
+    ),
+  );
+  expect(session.liveSolve?.accepted, "premise: the slot solves").toBe(true);
+  const opened = openDimensionInput(
+    session,
+    "dimensionDistance",
+    [circleTarget(session)],
+    [5, 5],
+  );
+  expect(opened.constraintAuthoring?.redundancy).toBe("determined");
+  const gap = prefilledValue(opened);
+  const committed = commitValue(
+    patchSketchConstraintValue(makeDriving(opened), {
+      value: String(gap + 0.016),
+    }),
+  );
+  const added = committed.definition.dimensions.at(-1)!;
+  expect(added.kind).toBe("diameter");
+  expect(committed.liveSolve?.accepted, "the conflict is rejected").toBe(false);
+  expect(
+    committed.validationMessage?.startsWith(`${added.label} (`),
+    committed.validationMessage ?? "",
+  ).toBe(true);
+  expect(positions(committed), "the authored geometry is unchanged").toEqual(
+    positions(session),
+  );
+  // Before T13e2 this commit was accepted and moved the geometry ≈ 7 m.
+  expect(liveSolveLargestMove(committed)).toBeLessThan(10);
+});
+
+test("T13e2: a diameter conflicting with a slot held by parallel lines and a line distance is rejected with no large move", () => {
+  const sketch = makeSketchFixture();
+  sketch.point("a0", 0, 0);
+  sketch.point("a1", 6, 0);
+  sketch.point("b0", 0, 4);
+  sketch.point("b1", 6, 4);
+  sketch.point("c", 3, 2);
+  sketch.line("A", "a0", "a1");
+  sketch.line("B", "b0", "b1");
+  sketch.circle("circle", "c", 2);
+  const base = sketch.definition();
+  const lines = [
+    { kind: "localEntity", entityId: "sketch_entity_A" },
+    { kind: "localEntity", entityId: "sketch_entity_B" },
+  ];
+  const constraints = [
+    {
+      constraintId: "constraint_slot_parallel",
+      kind: "parallel",
+      label: "Parallel",
+      entityIds: ["sketch_entity_A", "sketch_entity_B"],
+    },
+    ...["A", "B"].map((line) => ({
+      constraintId: `constraint_slot_tangent_${line}`,
+      kind: "tangent",
+      label: `Tangent ${line}`,
+      entityIds: [`sketch_entity_${line}`, "sketch_entity_circle"],
+      relation: "external",
+    })),
+  ] as unknown as typeof base.constraints;
+  const dimensions = [
+    {
+      dimensionId: "dimension_slot_gap",
+      kind: "lineDistance",
+      label: "Gap",
+      lines,
+      value: 4,
+    },
+  ] as unknown as typeof base.dimensions;
+  const opened = updateSketchReferenceProjection(
+    createSketchSessionFromSnapshot(
+      sketchSnapshotRecordForTest(
+        {
+          ...sketch.build(),
+          definition: {
+            ...base,
+            constraintIds: constraints.map((entry) => entry.constraintId),
+            constraints,
+            dimensionIds: dimensions.map((entry) => entry.dimensionId),
+            dimensions,
+          },
+        },
+        [],
+        createStandardPlaneDefinition("xy"),
+      ),
+      OCC_KERNEL_SETTINGS,
+    ),
+    [],
+    [],
+  );
+  expect(opened.liveSolve?.accepted, "premise: the slot solves").toBe(true);
+  const committed = commitValue(
+    patchSketchConstraintValue(
+      makeDriving(
+        openDimensionInput(
+          opened,
+          "dimensionDistance",
+          [circleTarget(opened)],
+          [5, 5],
+        ),
+      ),
+      { value: "4.1" },
+    ),
+  );
+  const added = committed.definition.dimensions.at(-1)!;
+  expect(added.kind).toBe("diameter");
+  expect(committed.liveSolve?.accepted, "the conflict is rejected").toBe(false);
+  expect(
+    committed.validationMessage?.startsWith(`${added.label} (4.1 mm)`),
+    committed.validationMessage ?? "",
+  ).toBe(true);
+  expect(positions(committed)).toEqual(positions(opened));
+  // Before T13e2 this commit was accepted and moved the geometry ≈ 3 m.
+  expect(liveSolveLargestMove(committed)).toBeLessThan(10);
+});
+
+test("T13e2 (review R-1): a satisfied, unrelated commit into an already invalid sketch is not blamed for the existing conflict", () => {
+  let session = rectangleAndCircle();
+  session = commitValue(
+    openDimensionInput(
+      session,
+      "dimensionDistance",
+      [entity(session, "Rectangle 1 bottom").target],
+      [3, 0],
+    ),
+  );
+  const invalid = commitValue(
+    patchSketchConstraintValue(
+      makeDriving(
+        openDimensionInput(
+          session,
+          "dimensionDistance",
+          [entity(session, "Rectangle 1 top").target],
+          [3, 5],
+        ),
+      ),
+      { value: "6" },
+    ),
+  );
+  expect(invalid.liveSolve?.accepted, "premise: two widths conflict").toBe(
+    false,
+  );
+  const conflict = unsatisfiedIds(invalid);
+
+  // The far circle at its current diameter: satisfied and independent.
+  const committed = commitValue(
+    openDimensionInput(
+      invalid,
+      "dimensionDistance",
+      [circleTarget(invalid)],
+      [15, 3],
+    ),
+  );
+  const diameter = committed.definition.dimensions.at(-1)!;
+  expect(diameter.kind).toBe("diameter");
+  expect(unsatisfiedIds(committed), "the conflict is unchanged").toEqual(
+    conflict,
+  );
+  const message = committed.validationMessage ?? "";
+  expect(message, "the unrelated diameter is not named").not.toContain(
+    diameter.label,
+  );
+  for (const id of conflict)
+    expect(message, "every conflicting requirement is named").toContain(
+      requirementLabel(committed, id),
+    );
+  expect(
+    message,
+    "the base wording: the conflicting set conflicts, no subject",
+  ).toContain(
+    " conflict. The sketch is invalid; profiles from it are blocked. Change or delete one of them, or Undo.",
+  );
+  expect(message).not.toContain(" conflicts with ");
+});
+
+test("T13e2 (re-review A-2): an annotation edit of a satisfied, unrelated dimension in an already invalid sketch is not blamed for the existing conflict", () => {
+  let session = rectangleAndCircle();
+  session = commitValue(
+    openDimensionInput(
+      session,
+      "dimensionDistance",
+      [circleTarget(session)],
+      [15, 3],
+    ),
+  );
+  const diameter = session.definition.dimensions.at(-1)!;
+  expect(diameter.kind).toBe("diameter");
+  session = commitValue(
+    openDimensionInput(
+      session,
+      "dimensionDistance",
+      [entity(session, "Rectangle 1 bottom").target],
+      [3, 0],
+    ),
+  );
+  const invalid = commitValue(
+    patchSketchConstraintValue(
+      makeDriving(
+        openDimensionInput(
+          session,
+          "dimensionDistance",
+          [entity(session, "Rectangle 1 top").target],
+          [3, 5],
+        ),
+      ),
+      { value: "6" },
+    ),
+  );
+  expect(invalid.liveSolve?.accepted, "premise: two widths conflict").toBe(
+    false,
+  );
+  const conflict = unsatisfiedIds(invalid);
+  const edited = patchSketchConstraintValue(
+    patchSketchConstraintValue(
+      beginSketchAnnotationEdit(invalid, {
+        kind: "dimension",
+        sketchId: invalid.sketchId!,
+        dimensionId: diameter.dimensionId,
+      } as Parameters<typeof beginSketchAnnotationEdit>[1]),
+      { value: "6" },
+    ),
+    { intent: "commitAnnotationValue" },
+  );
+  expect(unsatisfiedIds(edited), "the conflict is unchanged").toEqual(conflict);
+  const message = edited.validationMessage ?? "";
+  expect(message, "the edited diameter is not named").not.toContain(
+    diameter.label,
+  );
+  expect(message).not.toContain(" conflicts with ");
+  for (const id of conflict)
+    expect(message).toContain(requirementLabel(edited, id));
+});

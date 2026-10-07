@@ -6472,6 +6472,107 @@ function symmetricPseudoInverse(matrix: Float64Array[], epsilon: number) {
   return result;
 }
 
+/**
+ * T13e2 (C2): solves A·x = b for a symmetric positive semidefinite A by a
+ * Cholesky factorization with diagonal pivoting, P·A·Pᵀ = L·Lᵀ, that stops
+ * at pivots ≤ `epsilon`·(largest pivot) (rank-revealing). The variables
+ * beyond the numerical rank get 0, so the result is a basic solution of the
+ * retained block (not the minimum-norm one the pseudo-inverse gives); for a
+ * right-hand side in the range of A it solves A·x = b up to rounding (review
+ * B-1: the Schur update keeps the trailing block symmetric, because a later
+ * pivot swap reads either triangle). O(n³/3), where the classic Jacobi
+ * pseudo-inverse is about O(n⁴).
+ */
+function solvePivotedCholesky(
+  matrix: Float64Array[],
+  rhs: Float64Array,
+  epsilon: number,
+) {
+  const size = rhs.length;
+  const factor = matrix.map((row) => cloneValues(row));
+  const order = Array.from({ length: size }, (_, index) => index);
+  let rank = 0;
+  let largestPivot = 0;
+  for (let step = 0; step < size; step += 1) {
+    let best = step;
+    for (let index = step + 1; index < size; index += 1) {
+      if (
+        factor[order[index]!]![order[index]!]! >
+        factor[order[best]!]![order[best]!]!
+      )
+        best = index;
+    }
+    [order[step], order[best]] = [order[best]!, order[step]!];
+    const pivotIndex = order[step]!;
+    const pivot = factor[pivotIndex]![pivotIndex]!;
+    if (step === 0) largestPivot = pivot;
+    if (!(pivot > 0) || pivot <= epsilon * largestPivot) break;
+    const root = Math.sqrt(pivot);
+    factor[pivotIndex]![pivotIndex] = root;
+    for (let index = step + 1; index < size; index += 1)
+      factor[order[index]!]![pivotIndex] =
+        factor[order[index]!]![pivotIndex]! / root;
+    for (let column = step + 1; column < size; column += 1) {
+      const columnIndex = order[column]!;
+      const scale = factor[columnIndex]![pivotIndex]!;
+      if (scale === 0) continue;
+      for (let row = column; row < size; row += 1) {
+        const rowIndex = order[row]!;
+        const updated =
+          factor[rowIndex]![columnIndex]! -
+          factor[rowIndex]![pivotIndex]! * scale;
+        factor[rowIndex]![columnIndex] = updated;
+        factor[columnIndex]![rowIndex] = updated;
+      }
+    }
+    rank += 1;
+  }
+  const forward = new Float64Array(rank);
+  for (let step = 0; step < rank; step += 1) {
+    let sum = rhs[order[step]!]!;
+    for (let inner = 0; inner < step; inner += 1)
+      sum -= factor[order[step]!]![order[inner]!]! * forward[inner]!;
+    forward[step] = sum / factor[order[step]!]![order[step]!]!;
+  }
+  const solution = zeroVector(size);
+  for (let step = rank - 1; step >= 0; step -= 1) {
+    let sum = forward[step]!;
+    for (let inner = step + 1; inner < rank; inner += 1)
+      sum -= factor[order[inner]!]![order[step]!]! * solution[order[inner]!]!;
+    solution[order[step]!] = sum / factor[order[step]!]![order[step]!]!;
+  }
+  return solution;
+}
+
+/** T13e2 (review B-1): the fallback's linear solve, for a reference check. */
+export function solvePivotedCholeskyForTest(
+  matrix: readonly (readonly number[])[],
+  rhs: readonly number[],
+  epsilon: number,
+): number[] {
+  return Array.from(
+    solvePivotedCholesky(
+      matrix.map((row) => Float64Array.from(row)),
+      Float64Array.from(rhs),
+      epsilon,
+    ),
+  );
+}
+
+/** T13e2 (C2): JᵀJ accumulated from each row's nonzeros (the rows are sparse). */
+function sparseNormalMatrix(jacobian: readonly Float64Array[], size: number) {
+  const normal = Array.from({ length: size }, () => zeroVector(size));
+  for (const row of jacobian) {
+    const nonzero: number[] = [];
+    for (let index = 0; index < size; index += 1)
+      if (row[index] !== 0) nonzero.push(index);
+    for (const first of nonzero)
+      for (const second of nonzero)
+        normal[first]![second] += row[first]! * row[second]!;
+  }
+  return normal;
+}
+
 function solveGaussNewtonLike(
   initialValues: Float64Array,
   constraints: ScalarConstraintRecord[],
@@ -6481,16 +6582,38 @@ function solveGaussNewtonLike(
     stepSize: number;
     damping: number;
     pseudoInverseEpsilon: number;
+    /**
+     * T13e2 (C2): how the damped normal equations are solved. The
+     * Gauss–Newton fallback uses the pivoted Cholesky; the explicit
+     * strategies keep the Jacobi pseudo-inverse.
+     */
+    linearSolve?: "pseudoInverse" | "pivotedCholesky";
+    /**
+     * T13e2 (C1): only a strict loss decrease is progress (the fallback). An
+     * equal loss is otherwise accepted, so a stalled inconsistent system runs
+     * to `maxIterations`; the explicit strategies keep that behaviour.
+     */
+    strictDecrease?: boolean;
+    /**
+     * T13e2 (review A-1): the fallback's goal is an accepted result, so it
+     * stops at the first accepted iterate instead of polishing a rescue to
+     * `minLoss` or the iteration cap.
+     */
+    stopWhenAccepted?: (solved: SolvedSystemValues) => boolean;
   },
 ) {
   let values = cloneValues(initialValues);
   let state = evaluateLoss(values, constraints);
+  const startLoss = state.loss;
+  const cholesky = options.linearSolve === "pivotedCholesky";
+  let iterations = 0;
 
   for (
     let iteration = 0;
     iteration < options.maxIterations && state.loss > options.minLoss;
     iteration += 1
   ) {
+    iterations += 1;
     const jacobian = state.evaluations.map((evaluation) =>
       cloneValues(evaluation.gradient),
     );
@@ -6498,16 +6621,27 @@ function solveGaussNewtonLike(
       state.evaluations.map((evaluation) => evaluation.residual),
     );
     const jT = transpose(jacobian);
-    const normal = multiplyMatrices(jT, jacobian);
+    const normal = cholesky
+      ? sparseNormalMatrix(jacobian, values.length)
+      : multiplyMatrices(jT, jacobian);
     const normalWithDamping = addDiagonal(
       normal,
       options.damping + options.pseudoInverseEpsilon,
     );
     const rhs = multiplyMatrixVector(jT, losses);
-    const delta = multiplyMatrixVector(
-      symmetricPseudoInverse(normalWithDamping, options.pseudoInverseEpsilon),
-      rhs,
-    );
+    const delta = cholesky
+      ? solvePivotedCholesky(
+          normalWithDamping,
+          rhs,
+          options.pseudoInverseEpsilon,
+        )
+      : multiplyMatrixVector(
+          symmetricPseudoInverse(
+            normalWithDamping,
+            options.pseudoInverseEpsilon,
+          ),
+          rhs,
+        );
 
     if (!Array.from(delta).every(Number.isFinite)) {
       break;
@@ -6524,7 +6658,12 @@ function solveGaussNewtonLike(
       }
 
       const nextState = evaluateLoss(nextValues, constraints);
-      if (Number.isFinite(nextState.loss) && nextState.loss <= state.loss) {
+      if (
+        Number.isFinite(nextState.loss) &&
+        (options.strictDecrease
+          ? nextState.loss < state.loss
+          : nextState.loss <= state.loss)
+      ) {
         values = nextValues;
         state = nextState;
         accepted = true;
@@ -6533,34 +6672,113 @@ function solveGaussNewtonLike(
       stepScale *= 0.5;
     }
 
-    if (!accepted) {
+    if (
+      !accepted ||
+      options.stopWhenAccepted?.({
+        values,
+        loss: state.loss,
+        perConstraint: state.perConstraint,
+      })
+    ) {
       break;
     }
   }
 
-  return { values, loss: state.loss, perConstraint: state.perConstraint };
+  return {
+    values,
+    loss: state.loss,
+    perConstraint: state.perConstraint,
+    iterations,
+    startLoss,
+  };
 }
 
 type SolvedSystemValues = ReturnType<typeof solveBfgs>;
 
+/** T13e2: one Gauss–Newton fallback run, as recorded by `traceSketchSolverForTest`. */
+export interface SketchGaussNewtonFallbackTrace {
+  /** BFGS was already accepted, so no Gauss–Newton ran (C3). */
+  skipped: boolean;
+  /** BFGS's end loss. */
+  bfgsLoss: number;
+  /**
+   * The loss Gauss–Newton evaluated at its own start values (C1: equal to
+   * `bfgsLoss`, since it continues from BFGS's end values); null if skipped.
+   */
+  startLoss: number | null;
+  /** Gauss–Newton iterations, including a final one without progress. */
+  iterations: number;
+  linearSolve: "pseudoInverse" | "pivotedCholesky";
+}
+
+let gaussNewtonFallbackTrace: SketchGaussNewtonFallbackTrace[] | null = null;
+
+/**
+ * T13e2: runs `run` and returns the Gauss–Newton fallback runs it made, so
+ * specs can pin the fallback's behaviour without timing it.
+ */
+export function traceSketchSolverForTest<T>(run: () => T): {
+  result: T;
+  gaussNewtonFallbacks: SketchGaussNewtonFallbackTrace[];
+} {
+  const previous = gaussNewtonFallbackTrace;
+  const trace: SketchGaussNewtonFallbackTrace[] = [];
+  gaussNewtonFallbackTrace = trace;
+  try {
+    return { result: run(), gaussNewtonFallbacks: trace };
+  } finally {
+    gaussNewtonFallbackTrace = previous;
+  }
+}
+
+/**
+ * BFGS, then (when it is not accepted) Gauss–Newton as a polish or saddle
+ * escape. T13e2:
+ * - C3: an accepted BFGS result is returned as is. Without an acceptance
+ *   callback (drag phase B) a low loss stands for acceptance, as before.
+ * - C1: Gauss–Newton continues from BFGS's end values, not from the start:
+ *   restarted from the start it re-solved the whole problem on the
+ *   half-squared rows (hundreds of iterations on an inconsistent sketch)
+ *   and never beat BFGS there.
+ * - C2: its normal equations are solved by a pivoted Cholesky.
+ * - Review A-1: with an acceptance callback it stops at the first accepted
+ *   iterate (a rescue no longer polishes to the 1000-iteration cap).
+ */
 function solveBfgsWithGaussNewtonFallback(
   initialValues: Float64Array,
   constraints: ScalarConstraintRecord[],
-  isAccepted: (solved: SolvedSystemValues) => boolean,
+  isAccepted?: (solved: SolvedSystemValues) => boolean,
 ) {
   const bfgs = solveBfgs(initialValues, constraints);
   // A low total loss is not acceptance: each requirement is judged against
   // its own document tolerance, which can be tighter than this threshold.
-  if (bfgs.loss < SOLVED_LOSS_THRESHOLD && isAccepted(bfgs)) {
+  if (isAccepted ? isAccepted(bfgs) : bfgs.loss < SOLVED_LOSS_THRESHOLD) {
+    gaussNewtonFallbackTrace?.push({
+      skipped: true,
+      bfgsLoss: bfgs.loss,
+      startLoss: null,
+      iterations: 0,
+      linearSolve: "pivotedCholesky",
+    });
     return bfgs;
   }
 
-  const gaussNewton = solveGaussNewtonLike(initialValues, constraints, {
+  const gaussNewton = solveGaussNewtonLike(bfgs.values, constraints, {
     maxIterations: 1000,
     minLoss: 1e-14,
     stepSize: 1,
     damping: 0,
     pseudoInverseEpsilon: 1e-12,
+    linearSolve: "pivotedCholesky",
+    strictDecrease: true,
+    ...(isAccepted ? { stopWhenAccepted: isAccepted } : {}),
+  });
+  gaussNewtonFallbackTrace?.push({
+    skipped: false,
+    bfgsLoss: bfgs.loss,
+    startLoss: gaussNewton.startLoss,
+    iterations: gaussNewton.iterations,
+    linearSolve: "pivotedCholesky",
   });
   return gaussNewton.loss < bfgs.loss ? gaussNewton : bfgs;
 }
@@ -6569,7 +6787,8 @@ function solveSystemValues(
   initialValues: Float64Array,
   constraints: ScalarConstraintRecord[],
   strategy: SketchSolveStrategy,
-  isAccepted: (solved: SolvedSystemValues) => boolean = () => true,
+  /** Absent (drag phase B): a low loss stands for acceptance. */
+  isAccepted?: (solved: SolvedSystemValues) => boolean,
 ) {
   return strategy === "gradientDescent"
     ? solveGradientDescent(initialValues, constraints)
@@ -7492,6 +7711,13 @@ function materializeSolveResult(
   // but only when the relationship already failed at the solve's start
   // ([TECH] G16‴); one that failed during the solve is `unsatisfied`.
   const blocked = offsetBlockedRequirements(program, values);
+  const levers = lineExtensionLevers(
+    definition,
+    program.system.pointRecords,
+    program.system.entityStates,
+    projectedValues,
+    program.projectedReferences,
+  );
   const constraintStatuses = buildConstraintStatuses(
     definition,
     program.system.pointRecords,
@@ -7500,6 +7726,7 @@ function materializeSolveResult(
     program.tolerances,
     solved.perConstraint,
     program.projectedReferences,
+    levers,
   ).map((entry) => {
     const status = offsetRequirementStatus(blocked.get(entry.constraintId));
     return status ? { ...entry, status } : entry;
@@ -7512,6 +7739,7 @@ function materializeSolveResult(
     solved.perConstraint,
     program.tolerances,
     program.projectedReferences,
+    levers,
   ).map((entry) => {
     const status = offsetRequirementStatus(blocked.get(entry.dimensionId));
     return status ? { ...entry, status } : entry;
@@ -7522,10 +7750,10 @@ function materializeSolveResult(
   );
 
   // B12: flag any solved circle whose radius ended up non-positive.
-  const solvedRadiusDiagnostics: SketchSolveDiagnostic[] = [];
+  const solvedGeometryDiagnostics: SketchSolveDiagnostic[] = [];
   for (const entity of solvedEntities) {
     if (entity.kind === "circle" && entity.solvedRadius <= 0) {
-      solvedRadiusDiagnostics.push(
+      solvedGeometryDiagnostics.push(
         makeDiagnostic(
           "invalid-solved-circle-radius",
           "error",
@@ -7535,12 +7763,57 @@ function materializeSolveResult(
       );
     }
   }
-  diagnostics.push(...solvedRadiusDiagnostics);
+  // T13e2 (A2): a solved local line shorter than the minimum segment length
+  // is degenerate geometry, as the authored-input check reads it. Offset
+  // outputs are relationship-owned (their frame reports them, T10i).
+  const offsetOutputLineIds = new Set(
+    (definition.derivedRelationships ?? []).flatMap((relationship) =>
+      relationship.kind === "offset"
+        ? relationship.outputs.map((output) => output.outputEntityId)
+        : [],
+    ),
+  );
+  const authoredDegenerateLineIds = new Set(
+    program.validation.diagnostics.flatMap((diagnostic) =>
+      diagnostic.code === "degenerate-line-segment" &&
+      diagnostic.target?.kind === "entity"
+        ? [diagnostic.target.entityId]
+        : [],
+    ),
+  );
+  for (const entity of definition.entities) {
+    if (
+      entity.kind !== "lineSegment" ||
+      offsetOutputLineIds.has(entity.entityId) ||
+      authoredDegenerateLineIds.has(entity.entityId)
+    )
+      continue;
+    const start = program.system.pointRecords.get(entity.startPointId);
+    const end = program.system.pointRecords.get(entity.endPointId);
+    if (!start || !end) continue;
+    const solvedLength = length(
+      subtract(
+        getPoint(projectedValues, end),
+        getPoint(projectedValues, start),
+      ),
+    );
+    if (solvedLength < program.tolerances.minimumSegmentLength) {
+      solvedGeometryDiagnostics.push(
+        makeDiagnostic(
+          "degenerate-solved-line-segment",
+          "error",
+          `Line ${entity.entityId} solved to length ${solvedLength}, shorter than the minimum segment length tolerance.`,
+          { kind: "entity", entityId: entity.entityId },
+        ),
+      );
+    }
+  }
+  diagnostics.push(...solvedGeometryDiagnostics);
 
   const geometryValid = ![
     ...projectionDiagnostics,
     ...commonCircleDiagnostics,
-    ...solvedRadiusDiagnostics,
+    ...solvedGeometryDiagnostics,
   ].some((diagnostic) => diagnostic.severity === "error");
   const requirementsSatisfied =
     geometryValid &&
@@ -7859,7 +8132,29 @@ function solveWithRebuildRetry<T>(input: {
   return input.isAccepted(retried) ? retried : kept;
 }
 
-/** One batch solve of `program` from `startValues` (no rebuild handling). */
+/**
+ * One batch solve of `program` from `startValues` (no rebuild handling).
+ *
+ * T13e2 (B4): a rejected result is re-solved with the drag minimum-motion
+ * term anchored at the start (`createMinimumMotionAnchorConstraint`,
+ * `DRAG_MINIMUM_MOTION_EPSILON`), and that result is reported. An
+ * inconsistent system has no exact solution, and the plain least-squares
+ * descent can slide towards an unattained infimum (kilometres along a
+ * line's extension); the anchored solve is the nearest compromise. Only the
+ * components holding an unsatisfied requirement (or a degenerate solved
+ * line) are re-solved, from their start values; every other component keeps
+ * its plain solution, so a consistent part that needs a large move is not
+ * pulled back by the anchor. The anchor only changes rejected results (it
+ * may also find an accepted one near the start). Statuses are judged on the
+ * hard requirements alone. A solve whose start already has a failing offset
+ * relationship is left to the [TECH] G16‴/G16⁗ blocked-set and rebuild
+ * handling, unchanged. Only the normal `"bfgs"` strategy re-solves: the
+ * explicit Gauss–Newton/Levenberg–Marquardt/gradient strategies keep their
+ * own result (the re-solve is a BFGS solve), and the redundancy probe's
+ * `"bfgsWithoutFallback"` trials only need the verdict, which is never
+ * displayed or stored (the re-solve would double the cost of a rejected
+ * trial).
+ */
 function solveProgramValues(
   program: SketchCompiledSolveProgram,
   startValues: Float64Array,
@@ -7870,9 +8165,88 @@ function solveProgramValues(
     program.strategy,
     (candidate) => isAcceptableSolvedValues(program, candidate),
   );
-  return {
+  const plain = {
     solved,
     result: materializeSolveResult(program, solved.values, solved),
+  };
+  const snapshot = plain.result.solvedSnapshot;
+  if (
+    isAcceptableSolvedSnapshot(snapshot) ||
+    program.strategy !== "bfgs" ||
+    program.system.parameterProjection.offsetFailuresAt(startValues).size > 0
+  ) {
+    return plain;
+  }
+  const unsatisfiedIds = new Set<string>([
+    ...snapshot.constraintStatuses.flatMap((entry) =>
+      entry.status === "unsatisfied" ? [entry.constraintId] : [],
+    ),
+    ...snapshot.dimensionStatuses.flatMap((entry) =>
+      entry.status === "unsatisfied" ? [entry.dimensionId] : [],
+    ),
+  ]);
+  const degenerateVariables = new Set(
+    snapshot.diagnostics.flatMap((diagnostic) => {
+      if (
+        diagnostic.code !== "degenerate-solved-line-segment" ||
+        diagnostic.target?.kind !== "entity"
+      )
+        return [];
+      const entityId = diagnostic.target.entityId;
+      const line = program.definition.entities.find(
+        (entity) => entity.entityId === entityId,
+      );
+      return line?.kind === "lineSegment"
+        ? [line.startPointId, line.endPointId].flatMap((pointId) =>
+            pointVariableIndices(program.system.pointRecords.get(pointId)),
+          )
+        : [];
+    }),
+  );
+  const conflicted = program.components.filter(
+    (component) =>
+      component.equationIndices.some((equationIndex) =>
+        unsatisfiedIds.has(program.system.scalarConstraints[equationIndex]!.id),
+      ) ||
+      component.variableIndices.some((index) => degenerateVariables.has(index)),
+  );
+  if (conflicted.length === 0) {
+    return plain;
+  }
+  const variableIndices = uniqueSortedIndices(
+    conflicted.flatMap((component) => [...component.variableIndices]),
+  );
+  const anchor = createMinimumMotionAnchorConstraint({
+    id: "constraint_commit_minimum_motion" as ConstraintId,
+    parameterCount: program.system.parameterCount,
+    anchorValues: startValues,
+    variableIndices,
+    weight: DRAG_MINIMUM_MOTION_EPSILON,
+    parameterProjection: program.system.parameterProjection,
+  });
+  const restart = cloneValues(solved.values);
+  for (const index of variableIndices) restart[index] = startValues[index]!;
+  const anchoredValues = solveBfgsOver(
+    restart,
+    [
+      ...conflicted.flatMap((component) =>
+        component.equationIndices.map(
+          (equationIndex) => program.system.scalarConstraints[equationIndex]!,
+        ),
+      ),
+      anchor,
+    ],
+    { variableIndices },
+  ).values;
+  const state = evaluateLoss(anchoredValues, program.system.scalarConstraints);
+  const anchored: SolvedSystemValues = {
+    values: anchoredValues,
+    loss: state.loss,
+    perConstraint: state.perConstraint,
+  };
+  return {
+    solved: anchored,
+    result: materializeSolveResult(program, anchored.values, anchored),
   };
 }
 
@@ -9688,6 +10062,190 @@ function buildSolvedEntities(
   return solved;
 }
 
+/**
+ * T13e2 (B1): per local line, how far beyond its segment the requirements
+ * rely on its infinite extension (0 when every use lies on the segment).
+ * An orientation requirement on that line must keep its positional effect
+ * over that lever within the coincidence tolerance (see
+ * `orientationLeverWithinTolerance`); otherwise a conflict is absorbed by a
+ * tilt that is tiny at the segment but large at a far contact, and the solve
+ * slides kilometres along the extension.
+ *
+ * The uses: a line ↔ circle/arc tangency (local or projected curve: the
+ * centre's foot), point-on-line, collinear (the target point, or the
+ * target line's endpoints), normal to a local or projected curve
+ * (its centre and the contact point), symmetric about a line (both
+ * points) and the line-point distance dimension (the point); each is
+ * pinned by a far-basin row. Projected and datum lines are fixed, so only
+ * local lines carry a lever; the midpoint constraint uses the segment
+ * itself. Line distance and equal offset are not sources (no solve reaches
+ * a far basin through their own measurement, T13e2 re-review evidence);
+ * their parallel prerequisites are judged over the lever the lines get
+ * from the other uses.
+ */
+function lineExtensionLevers(
+  definition: SketchDefinition,
+  pointRecords: Map<SketchPointId, SolverPointRecord>,
+  entityStates: Map<SketchEntityId, SolverEntityState>,
+  values: Float64Array,
+  projectedReferences: readonly ProjectedSketchReferenceRecord[],
+): ReadonlyMap<SketchEntityId, number> {
+  const levers = new Map<SketchEntityId, number>();
+  const lineEntityMap = new Map(
+    definition.entities.flatMap((entity) =>
+      entity.kind === "lineSegment" ? [[entity.entityId, entity] as const] : [],
+    ),
+  );
+  const entityById = new Map(
+    definition.entities.map((entity) => [entity.entityId, entity] as const),
+  );
+  const pointAt = (pointId: SketchPointId) => {
+    const record = pointRecords.get(pointId);
+    return record ? getPoint(values, record) : null;
+  };
+  const linePoints = (entityId: SketchEntityId) => {
+    const line = lineEntityMap.get(entityId);
+    const start = line && pointAt(line.startPointId);
+    const end = line && pointAt(line.endPointId);
+    return start && end ? ([start, end] as const) : null;
+  };
+  const relyOn = (entityId: SketchEntityId, point: SketchPoint2D | null) => {
+    const segment = linePoints(entityId);
+    if (!segment || !point) return;
+    const [start, end] = segment;
+    const segmentLength = length(subtract(end, start));
+    if (!(segmentLength > 0)) return;
+    const along =
+      ((point[0] - start[0]) * (end[0] - start[0]) +
+        (point[1] - start[1]) * (end[1] - start[1])) /
+      segmentLength;
+    const beyond = Math.max(0, -along, along - segmentLength);
+    if (beyond > (levers.get(entityId) ?? 0)) levers.set(entityId, beyond);
+  };
+  const relyOnLine = (entityId: SketchEntityId, otherId: SketchEntityId) => {
+    for (const point of linePoints(otherId) ?? []) relyOn(entityId, point);
+  };
+  const localCenter = (entityId: SketchEntityId) => {
+    const entity = entityById.get(entityId);
+    return entity
+      ? (getLocalCircleLikeGeometry(values, entity, pointRecords, entityStates)
+          ?.center ?? null)
+      : null;
+  };
+  const projectedCenter = (
+    reference: Parameters<typeof findProjectedGeometry>[1],
+  ) => {
+    const projected = findProjectedGeometry(projectedReferences, reference);
+    return projected
+      ? (projectedCircleLikeGeometry(projected)?.center ?? null)
+      : null;
+  };
+
+  for (const constraint of definition.constraints) {
+    switch (constraint.kind) {
+      case "tangent": {
+        const [first, second] = constraint.entityIds;
+        if (lineEntityMap.has(first)) relyOn(first, localCenter(second));
+        if (lineEntityMap.has(second)) relyOn(second, localCenter(first));
+        break;
+      }
+      case "tangentProjectedCurve":
+        relyOn(
+          constraint.curve.entityId,
+          projectedCenter(constraint.projectedCurve.reference),
+        );
+        break;
+      case "pointOnCurve":
+        relyOn(constraint.curve.entityId, pointAt(constraint.point.pointId));
+        break;
+      case "collinear":
+        if (constraint.target.kind === "localPoint") {
+          relyOn(constraint.line.entityId, pointAt(constraint.target.pointId));
+        } else {
+          // The residual reads the line's extension at the target's
+          // endpoints, never the target's extension.
+          relyOnLine(constraint.line.entityId, constraint.target.entityId);
+        }
+        break;
+      case "normal":
+        relyOn(
+          constraint.line.entityId,
+          localCenter(constraint.curve.entityId),
+        );
+        relyOn(constraint.line.entityId, pointAt(constraint.point.pointId));
+        break;
+      case "normalProjectedCurve":
+        relyOn(
+          constraint.line.entityId,
+          projectedCenter(constraint.projectedCurve.reference),
+        );
+        relyOn(constraint.line.entityId, pointAt(constraint.point.pointId));
+        break;
+      case "symmetric":
+        for (const pointId of constraint.pointIds)
+          relyOn(constraint.axis.entityId, pointAt(pointId));
+        break;
+      default:
+        break;
+    }
+  }
+  for (const dimension of definition.dimensions) {
+    if (dimension.kind === "linePointDistance") {
+      if (dimension.line.kind === "localEntity")
+        relyOn(
+          dimension.line.entityId,
+          resolvePointDimensionOperand(
+            values,
+            dimension.point,
+            pointRecords,
+            projectedReferences,
+          ),
+        );
+    }
+  }
+  return levers;
+}
+
+/**
+ * T13e2 (B1): an orientation requirement's angular deviation, carried over
+ * the lever of its lines' extensions, stays within the coincidence
+ * tolerance. Always true without a lever.
+ */
+function orientationLeverWithinTolerance(
+  deviation: number,
+  lever: number,
+  tolerance: SketchSolveTolerancePolicy,
+) {
+  return lever <= 0 || deviation * lever <= tolerance.coincidence;
+}
+
+/**
+ * T13e2 (A1, B1): a horizontal/vertical line is judged by its endpoint
+ * offset (|Δ| ≤ coincidence, as before), by its direction (asin(|Δ|/ℓ) ≤
+ * angleRadians, the tolerance parallel and perpendicular use; a positional
+ * check alone lets a line about τ long take any direction) and over the
+ * lever of its extension (|Δ|/ℓ·(ℓ + lever) ≤ coincidence).
+ */
+function axisAlignedLineWithinTolerance(
+  kind: "horizontal" | "vertical",
+  start: SketchPoint2D,
+  end: SketchPoint2D,
+  lever: number,
+  tolerance: SketchSolveTolerancePolicy,
+) {
+  const offset = Math.abs(
+    kind === "horizontal" ? end[1] - start[1] : end[0] - start[0],
+  );
+  const lineLength = length(subtract(end, start));
+  if (!(lineLength > 0)) return false;
+  const sine = Math.min(1, offset / lineLength);
+  return (
+    offset <= tolerance.coincidence &&
+    Math.asin(sine) <= tolerance.angleRadians &&
+    sine * (lineLength + lever) <= tolerance.coincidence
+  );
+}
+
 function buildConstraintStatuses(
   definition: SketchDefinition,
   pointRecords: Map<SketchPointId, SolverPointRecord>,
@@ -9696,6 +10254,7 @@ function buildConstraintStatuses(
   tolerance: SketchSolveTolerancePolicy,
   perConstraint: Map<string, number>,
   projectedReferences: readonly ProjectedSketchReferenceRecord[] = [],
+  levers: ReadonlyMap<SketchEntityId, number> = new Map(),
 ): ConstraintStatusRecord[] {
   const lineEntityMap = new Map(
     definition.entities
@@ -9821,6 +10380,18 @@ function buildConstraintStatuses(
           Number.isFinite(second.signedDistance) &&
           firstAngularError <= tolerance.angleRadians &&
           secondAngularError <= tolerance.angleRadians &&
+          // T13e2 (re-review RR-1): each pair's parallelism is an
+          // orientation requirement, judged over its lines' lever.
+          constraint.pairs.every((pair, index) =>
+            orientationLeverWithinTolerance(
+              index === 0 ? firstAngularError : secondAngularError,
+              Math.max(
+                levers.get(pair.seedEntityId) ?? 0,
+                levers.get(pair.offsetEntityId) ?? 0,
+              ),
+              tolerance,
+            ),
+          ) &&
           Math.abs(first.signedDistance - second.signedDistance) <=
             tolerance.coincidence
             ? "satisfied"
@@ -9839,9 +10410,12 @@ function buildConstraintStatuses(
         if (!start || !end) {
           status = "conflicting";
         } else {
-          status = isConstraintResidualWithinTolerance(
-            residual,
-            residualTolerance,
+          status = axisAlignedLineWithinTolerance(
+            constraint.kind,
+            getPoint(values, start),
+            getPoint(values, end),
+            levers.get(constraint.entityId) ?? 0,
+            tolerance,
           )
             ? "satisfied"
             : "unsatisfied";
@@ -10114,6 +10688,25 @@ function buildConstraintStatuses(
       status = "unsatisfied";
     }
 
+    // T13e2 (B1): a relative orientation over its lines' extension lever.
+    const leverLineIds =
+      constraint.kind === "parallel" || constraint.kind === "perpendicular"
+        ? constraint.entityIds
+        : constraint.kind === "parallelProjectedLine" ||
+            constraint.kind === "perpendicularProjectedLine"
+          ? [constraint.line.entityId]
+          : [];
+    if (
+      status === "satisfied" &&
+      !orientationLeverWithinTolerance(
+        Math.asin(Math.min(1, Math.sqrt(2 * residual))),
+        Math.max(0, ...leverLineIds.map((id) => levers.get(id) ?? 0)),
+        tolerance,
+      )
+    ) {
+      status = "unsatisfied";
+    }
+
     return {
       constraintId: constraint.constraintId,
       status,
@@ -10129,6 +10722,7 @@ function buildDimensionStatuses(
   perConstraint: Map<string, number>,
   tolerance: SketchSolveTolerancePolicy,
   projectedReferences: readonly ProjectedSketchReferenceRecord[] = [],
+  levers: ReadonlyMap<SketchEntityId, number> = new Map(),
 ): DimensionStatusRecord[] {
   const entityMap = new Map(
     definition.entities.map((entity) => [entity.entityId, entity]),
@@ -10146,6 +10740,7 @@ function buildDimensionStatuses(
 
   return definition.dimensions.map((dimension) => {
     let solvedValue: number | null = null;
+    let orientationOverLever = false;
     if (dimension.kind === "distance") {
       const left = pointRecords.get(dimension.pointIds[0]);
       const right = pointRecords.get(dimension.pointIds[1]);
@@ -10230,6 +10825,33 @@ function buildDimensionStatuses(
               pointLineSignedDistance(second.start, first.start, first.end),
             )
           : null;
+      // T13e2 (re-review RR-2): its parallel prerequisite is an orientation
+      // requirement too, judged over its lines' extension lever.
+      if (first && second && solvedValue !== null)
+        orientationOverLever = !orientationLeverWithinTolerance(
+          Math.asin(
+            Math.min(
+              1,
+              Math.abs(
+                lineParallelResidual(
+                  first.start,
+                  first.end,
+                  second.start,
+                  second.end,
+                ),
+              ),
+            ),
+          ),
+          Math.max(
+            0,
+            ...dimension.lines.map((operand) =>
+              operand.kind === "localEntity"
+                ? (levers.get(operand.entityId) ?? 0)
+                : 0,
+            ),
+          ),
+          tolerance,
+        );
     } else if (dimension.kind === "linePointDistance") {
       const line = resolveLineDimensionOperand(
         values,
@@ -10297,7 +10919,22 @@ function buildDimensionStatuses(
         !isConstraintResidualWithinTolerance(
           perConstraint.get(dimension.dimensionId) ?? 0,
           residualTolerance,
-        )
+        ) ||
+        orientationOverLever ||
+        // T13e2 (B1): an angle over its lines' extension lever.
+        (dimension.kind === "lineAngle" &&
+          !orientationLeverWithinTolerance(
+            Math.sqrt(2 * (perConstraint.get(dimension.dimensionId) ?? 0)),
+            Math.max(
+              0,
+              ...dimension.lines.map((operand) =>
+                operand.kind === "localEntity"
+                  ? (levers.get(operand.entityId) ?? 0)
+                  : 0,
+              ),
+            ),
+            tolerance,
+          ))
           ? "unsatisfied"
           : "driving",
       solvedValue,

@@ -48,6 +48,7 @@ import type {
 import {
   applySketchContribution,
   getSketchSessionInvalidFeedback,
+  hasAcceptedLiveSolveOfDefinition,
   createConstraintId,
   createDimensionId,
   createSketchDimensionRef,
@@ -809,10 +810,16 @@ export function commitSketchConstraintAuthoring(
     ...committed,
     validationMessage: committed.liveSolve?.accepted
       ? null
-      : getSketchSessionInvalidFeedback(committed, [
-          ...constraints.map((constraint) => constraint.constraintId),
-          ...dimensions.map((dimension) => dimension.dimensionId),
-        ]),
+      : getSketchSessionInvalidFeedback(
+          committed,
+          [
+            ...constraints.map((constraint) => constraint.constraintId),
+            ...dimensions.map((dimension) => dimension.dimensionId),
+          ],
+          // T13e2 (review R-1): the commit caused the invalidity only if
+          // the sketch was accepted before it.
+          hasAcceptedLiveSolveOfDefinition(session),
+        ),
   };
 }
 

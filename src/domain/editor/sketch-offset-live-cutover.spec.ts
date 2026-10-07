@@ -5941,8 +5941,13 @@ describe("T08b-g7b relationship-scoped solve-frame failures ([TECH] G16′, U-G9
           [first, second].find((id) => diagnostic.message.includes(id!)),
         ]);
     const snapshot = solve(unaccepted).solvedSnapshot;
+    // T13e2 (A2): the conflicting fixes collapse the unrelated rectangle's
+    // top and bottom (≈ 1e-10 mm); the snapshot reports each solved line
+    // below the minimum segment length as degenerate geometry.
     expect(codes(snapshot)).toEqual([
       [OFFSET_REQUIREMENT_BLOCKED, second],
+      ["degenerate-solved-line-segment", undefined],
+      ["degenerate-solved-line-segment", undefined],
       [OFFSET_DIAGNOSTIC_CODES.arcCollapse, first],
       [OFFSET_DIAGNOSTIC_CODES.arcCollapse, second],
     ]);

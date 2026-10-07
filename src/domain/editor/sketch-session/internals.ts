@@ -1645,9 +1645,14 @@ export function rebuildSessionForDefinition(
 export function getSketchSessionInvalidFeedback(
   session: SketchSessionState,
   subjectIds: readonly string[] = [],
+  commitCausedInvalidity = false,
 ): string | null {
   return (
-    describeSketchSessionUnsatisfiedRequirements(session, subjectIds) ??
+    describeSketchSessionUnsatisfiedRequirements(
+      session,
+      subjectIds,
+      commitCausedInvalidity,
+    ) ??
     getSketchSessionDerivedValidity(session).diagnostics.find(
       (diagnostic) => diagnostic.severity !== "info",
     )?.message ??
@@ -1659,12 +1664,18 @@ export function getSketchSessionInvalidFeedback(
  * T13c (D7): the conflict explanation of the session's live solve, naming
  * every requirement whose status is `unsatisfied` (never `constraintState`,
  * review A-1). `subjectIds` are the requirements the user just authored or
- * edited; an unsatisfied subject is named first, as the one that conflicts.
- * Null when no requirement is unsatisfied.
+ * edited; an unsatisfied subject is named first, as the one that
+ * conflicts. When `commitCausedInvalidity` (the sketch was accepted before
+ * the commit), every subject is named first even if it reads satisfied
+ * (T13e2: a conflict can leave the just-committed requirement satisfied and
+ * its residual on the others, e.g. a corner angle against Horizontal and
+ * Vertical); a commit into an already-invalid sketch never blames a
+ * satisfied subject (review R-1). Null when no requirement is unsatisfied.
  */
 export function describeSketchSessionUnsatisfiedRequirements(
   session: Pick<SketchSessionState, "definition" | "liveSolve">,
   subjectIds: readonly string[] = [],
+  commitCausedInvalidity = false,
 ): string | null {
   const snapshot = session.liveSolve?.solvedSnapshot;
   if (!snapshot) {
@@ -1678,7 +1689,10 @@ export function describeSketchSessionUnsatisfiedRequirements(
       entry.status === "unsatisfied" ? [entry.dimensionId] : [],
     ),
   ]);
-  const requirements = [
+  if (unsatisfiedIds.size === 0) {
+    return null;
+  }
+  const named = [
     ...session.definition.constraints.map((constraint) => ({
       id: constraint.constraintId as string,
       text: formatSketchRequirement(constraint),
@@ -1687,16 +1701,21 @@ export function describeSketchSessionUnsatisfiedRequirements(
       id: dimension.dimensionId as string,
       text: formatSketchRequirement(dimension),
     })),
-  ].filter((requirement) => unsatisfiedIds.has(requirement.id));
+  ];
+  const subjects = named.filter(
+    (requirement) =>
+      subjectIds.includes(requirement.id) &&
+      (commitCausedInvalidity || unsatisfiedIds.has(requirement.id)),
+  );
+  const others = named.filter(
+    (requirement) =>
+      unsatisfiedIds.has(requirement.id) &&
+      !subjectIds.includes(requirement.id),
+  );
+  const requirements = [...subjects, ...others];
   if (requirements.length === 0) {
     return null;
   }
-  const subjects = requirements.filter((requirement) =>
-    subjectIds.includes(requirement.id),
-  );
-  const others = requirements.filter(
-    (requirement) => !subjectIds.includes(requirement.id),
-  );
   const list = (entries: typeof requirements) =>
     entries.map((entry) => entry.text).join(", ");
   const statement =
