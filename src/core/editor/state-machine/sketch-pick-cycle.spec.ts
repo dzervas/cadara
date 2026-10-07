@@ -25,6 +25,10 @@ import { transitionEditorState } from "./reducer-root";
 import { initialEditorState } from "./state-creators";
 import type { SketchAuthoringToolId } from "@/domain/editor/sketch-session";
 import type { SketchEditorState } from "./types";
+import {
+  SPEC_SKETCH_UNITS_PER_PIXEL,
+  withSketchSnapScale,
+} from "@/domain/editor/sketch-session/test-snap-scale";
 
 // Logic lane (core seam): a repeated-click cycle selection
 // (`viewport.selectionRequested` with `cycleReplaces`, T11d) through the
@@ -47,9 +51,12 @@ const draw = (
  * sketch selection filter.
  */
 async function makeOverlapState(toolId: SketchAuthoringToolId | null = null) {
-  let session = createNewSketchSession(
-    createStandardPlaneDefinition("xy"),
-    OCC_KERNEL_SETTINGS,
+  let session = withSketchSnapScale(
+    createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
+    SPEC_SKETCH_UNITS_PER_PIXEL,
   );
   session = draw(session, [-4, 0], [4, 0]);
   session = draw(session, [-4, 0.001], [4, 0.001]);

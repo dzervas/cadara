@@ -373,6 +373,12 @@ export interface SketchSessionState {
   activeSnap: SketchSnapCandidate | null;
   drawStartSnap: SketchSnapCandidate | null;
   /**
+   * Sketch units per screen pixel at the latest sketch pointer event
+   * (T13-D13): snap tolerances are screen pixels. Absent or null: no measured
+   * scale, nothing snaps.
+   */
+  sketchUnitsPerPixel?: number | null;
+  /**
    * The snap accepted on a fit-point draft's last placed point: the end snap
    * of its finalize commit (T11i). Absent or null otherwise.
    */

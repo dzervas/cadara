@@ -185,6 +185,10 @@ import {
   lineOracle,
   type OracleCurve,
 } from "@/contracts/sketch/region-extraction.fixtures";
+import {
+  SPEC_SKETCH_UNITS_PER_PIXEL,
+  withSketchSnapScale,
+} from "@/domain/editor/sketch-session/test-snap-scale";
 
 /**
  * T08b-g7b fabricated triggers (spec-only): when a toggle names a
@@ -308,8 +312,15 @@ function drawLine(
   start: readonly [number, number],
   end: readonly [number, number],
 ) {
+  // A line closes a loop by snapping onto the ends it meets (T13f R-6).
   return acceptSketchDraw(
-    startSketchDraw(beginSketchTool(session, "line"), start),
+    startSketchDraw(
+      beginSketchTool(
+        withSketchSnapScale(session, SPEC_SKETCH_UNITS_PER_PIXEL),
+        "line",
+      ),
+      start,
+    ),
     end,
   );
 }
@@ -448,9 +459,11 @@ function withInsertedSeedOccurrence(
  * certifier's witness bounds, so its first publication is `planChanged`.
  */
 function ss60TwoSplines() {
+  // The middle fit point is (1, 0): a horizontal-alignment snap placed it
+  // there before snapping needed a screen scale (T13f R-6).
   const drawn = drawSpline(newSession(), [
     [0, 0],
-    [1, 0.1],
+    [1, 0],
     [2, 0],
   ]);
   const first = drawn.definition.entities[0]!;
@@ -7742,21 +7755,24 @@ async function reopenCertified(withReference: boolean) {
         references: [...live.sourceDefinition.references, reference],
       }
     : live.sourceDefinition;
-  const raw = createSketchSessionFromSnapshot(
-    {
-      sketchId: states.certified.actionContextId,
-      label: "Sketch T11a",
-      plane: states.certified.plane,
-      ownerFeatureId: null,
-      sketch: {
-        definition,
-        solvedSnapshot: live.solvedSnapshot,
-        regions: states.certified.liveRegions.regions,
-        projectedReferences: [],
-        derivedValidity: getSketchSessionDerivedValidity(states.certified),
-      },
-    } as never,
-    OCC_KERNEL_SETTINGS,
+  const raw = withSketchSnapScale(
+    createSketchSessionFromSnapshot(
+      {
+        sketchId: states.certified.actionContextId,
+        label: "Sketch T11a",
+        plane: states.certified.plane,
+        ownerFeatureId: null,
+        sketch: {
+          definition,
+          solvedSnapshot: live.solvedSnapshot,
+          regions: states.certified.liveRegions.regions,
+          projectedReferences: [],
+          derivedValidity: getSketchSessionDerivedValidity(states.certified),
+        },
+      } as never,
+      OCC_KERNEL_SETTINGS,
+    ),
+    SPEC_SKETCH_UNITS_PER_PIXEL,
   );
   expect(raw.liveSolve, "premise: a raw reopened session").toBe(null);
   const command: SelectionCommandEditorState = {

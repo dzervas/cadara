@@ -36,6 +36,10 @@ import {
 } from "@/domain/editor/sketch-session/references";
 import { createReferenceImageOperation } from "@/domain/reference-image/operations";
 import { reconstructSplineAggregate } from "@/contracts/sketch/spline-geometry";
+import {
+  SPEC_SKETCH_UNITS_PER_PIXEL,
+  withSketchSnapScale,
+} from "@/domain/editor/sketch-session/test-snap-scale";
 
 function line(session: SketchSessionState) {
   return acceptSketchDraw(
@@ -72,9 +76,12 @@ function remapTestSketchIds<T>(value: T, nextSketchId: string): T {
 async function fixture(constrained = false) {
   const owner = new SketchAuthoredActions();
   const session = line(
-    createNewSketchSession(
-      createStandardPlaneDefinition("xy"),
-      OCC_KERNEL_SETTINGS,
+    withSketchSnapScale(
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
+      SPEC_SKETCH_UNITS_PER_PIXEL,
     ),
   );
   if (!constrained)
@@ -578,15 +585,21 @@ test("compensation restores every authored sketch field captured by the owner", 
 
 test("creation IDs do not collide in independent drafts with identical counters", () => {
   const a = line(
-    createNewSketchSession(
-      createStandardPlaneDefinition("xy"),
-      OCC_KERNEL_SETTINGS,
+    withSketchSnapScale(
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
+      SPEC_SKETCH_UNITS_PER_PIXEL,
     ),
   );
   const b = line(
-    createNewSketchSession(
-      createStandardPlaneDefinition("xy"),
-      OCC_KERNEL_SETTINGS,
+    withSketchSnapScale(
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
+      SPEC_SKETCH_UNITS_PER_PIXEL,
     ),
   );
   const ids = new Set([
@@ -1244,8 +1257,16 @@ describe("T11g: drawing-tool lifecycle history boundaries (T11-D10, D14, D19)", 
       [20, 0],
       [40, 0],
     ]) {
-      f.dispatch({ type: "sketch.pointerReleased", point: [x, y] });
-      f.dispatch({ type: "sketch.pointerReleased", point: [x + 3, y] });
+      f.dispatch({
+        type: "sketch.pointerReleased",
+        sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
+        point: [x, y],
+      });
+      f.dispatch({
+        type: "sketch.pointerReleased",
+        sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
+        point: [x + 3, y],
+      });
     }
 
     expect(
@@ -1273,7 +1294,11 @@ describe("T11g: drawing-tool lifecycle history boundaries (T11-D10, D14, D19)", 
     expect(selected, "The line is selected while Circle is armed.").toEqual([
       lineTarget,
     ]);
-    f.dispatch({ type: "sketch.pointerReleased", point: [20, 0] });
+    f.dispatch({
+      type: "sketch.pointerReleased",
+      sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
+      point: [20, 0],
+    });
     expect(f.session.status).toBe("drawing");
 
     f.dispatch({ type: "sketch.escapeRequested" });
@@ -1304,10 +1329,22 @@ describe("T11g: drawing-tool lifecycle history boundaries (T11-D10, D14, D19)", 
 
     // The cancelled circle starts afresh: one later circle is one action.
     f.dispatch({ type: "tool.activated", toolId: "circle" });
-    f.dispatch({ type: "sketch.pointerReleased", point: [20, 0] });
+    f.dispatch({
+      type: "sketch.pointerReleased",
+      sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
+      point: [20, 0],
+    });
     f.dispatch({ type: "sketch.escapeRequested" });
-    f.dispatch({ type: "sketch.pointerReleased", point: [30, 0] });
-    f.dispatch({ type: "sketch.pointerReleased", point: [33, 0] });
+    f.dispatch({
+      type: "sketch.pointerReleased",
+      sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
+      point: [30, 0],
+    });
+    f.dispatch({
+      type: "sketch.pointerReleased",
+      sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
+      point: [33, 0],
+    });
     const circles = f.session.definition.entities.filter(
       (entity) => entity.kind === "circle",
     );
@@ -1359,7 +1396,11 @@ describe("T11g: drawing-tool lifecycle history boundaries (T11-D10, D14, D19)", 
   test("Enter with an incomplete discrete draft changes nothing and records nothing", async () => {
     const f = await fixture();
     f.dispatch({ type: "tool.activated", toolId: "circle" });
-    f.dispatch({ type: "sketch.pointerReleased", point: [20, 0] });
+    f.dispatch({
+      type: "sketch.pointerReleased",
+      sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
+      point: [20, 0],
+    });
     const drafting = f.session;
 
     f.dispatch({ type: "sketch.confirmRequested" });
@@ -1378,7 +1419,11 @@ describe("T11g: drawing-tool lifecycle history boundaries (T11-D10, D14, D19)", 
       const f = await fixture();
       const before = projection(f.session);
       f.dispatch({ type: "tool.activated", toolId: "circle" });
-      f.dispatch({ type: "sketch.pointerReleased", point: [20, 0] });
+      f.dispatch({
+        type: "sketch.pointerReleased",
+        sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
+        point: [20, 0],
+      });
       f.dispatch({ type: "tool.activated", toolId });
 
       expect(f.session.activeTool).toBe(toolId);
@@ -1393,7 +1438,11 @@ describe("T11g: drawing-tool lifecycle history boundaries (T11-D10, D14, D19)", 
     const f = await fixture();
     const before = projection(f.session);
     f.dispatch({ type: "tool.activated", toolId: "circle" });
-    f.dispatch({ type: "sketch.pointerReleased", point: [20, 0] });
+    f.dispatch({
+      type: "sketch.pointerReleased",
+      sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
+      point: [20, 0],
+    });
     const event: EditorEvent = {
       type: "tool.activated",
       toolId: "finishSketch",
@@ -1419,7 +1468,11 @@ describe("T11g: drawing-tool lifecycle history boundaries (T11-D10, D14, D19)", 
   test("Point places one point per click, one action each (T11-D19)", async () => {
     const f = await fixture();
     f.dispatch({ type: "tool.activated", toolId: "point" });
-    f.dispatch({ type: "sketch.pointerReleased", point: [20, 5] });
+    f.dispatch({
+      type: "sketch.pointerReleased",
+      sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
+      point: [20, 5],
+    });
 
     const points = () =>
       f.session.definition.entities.filter((entity) => entity.kind === "point");
@@ -1427,7 +1480,11 @@ describe("T11g: drawing-tool lifecycle history boundaries (T11-D10, D14, D19)", 
     expect(f.session.status).toBe("idle");
     expect(undoLabels(f)).toEqual(["Create Sketch Geometry"]);
 
-    f.dispatch({ type: "sketch.pointerReleased", point: [30, 5] });
+    f.dispatch({
+      type: "sketch.pointerReleased",
+      sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
+      point: [30, 5],
+    });
     expect(points()).toHaveLength(2);
     expect(undoLabels(f)).toEqual([
       "Create Sketch Geometry",
@@ -1457,7 +1514,11 @@ describe("T11h: Line chain history (T11-D11, D12)", () => {
       [31, 31],
       [42, 33],
     ] as const) {
-      f.dispatch({ type: "sketch.pointerReleased", point });
+      f.dispatch({
+        type: "sketch.pointerReleased",
+        sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
+        point,
+      });
     }
     return f;
   }
@@ -1481,8 +1542,16 @@ describe("T11h: Line chain history (T11-D11, D12)", () => {
     expect(projection(f.session)).toEqual(committed);
     expect(undoLabels(f), "Ending the chain records nothing.").toHaveLength(3);
 
-    f.dispatch({ type: "sketch.pointerReleased", point: [60, 60] });
-    f.dispatch({ type: "sketch.pointerReleased", point: [70, 60] });
+    f.dispatch({
+      type: "sketch.pointerReleased",
+      sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
+      point: [60, 60],
+    });
+    f.dispatch({
+      type: "sketch.pointerReleased",
+      sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
+      point: [70, 60],
+    });
     expect(undoLabels(f)).toHaveLength(4);
     const fourth = projection(f.session);
     f.dispatch({ type: "sketch.escapeRequested" });
@@ -1519,7 +1588,11 @@ describe("T11h: Line chain history (T11-D11, D12)", () => {
     ]);
     expect(f.session.status).toBe("drawing");
 
-    f.dispatch({ type: "sketch.pointerReleased", point: [20, 40] });
+    f.dispatch({
+      type: "sketch.pointerReleased",
+      sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
+      point: [20, 40],
+    });
     const added = chainLines(f).at(-1);
     expect(chainLines(f)).toHaveLength(3);
     expect(added?.entityId).not.toBe(third?.entityId);
@@ -1538,8 +1611,16 @@ describe("T11h: Line chain history (T11-D11, D12)", () => {
   test("Undo past the first segment leaves Line armed with only the chain start placed", async () => {
     const f = await fixture();
     f.dispatch({ type: "tool.activated", toolId: "line" });
-    f.dispatch({ type: "sketch.pointerReleased", point: [20, 20] });
-    f.dispatch({ type: "sketch.pointerReleased", point: [30, 21] });
+    f.dispatch({
+      type: "sketch.pointerReleased",
+      sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
+      point: [20, 20],
+    });
+    f.dispatch({
+      type: "sketch.pointerReleased",
+      sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
+      point: [30, 21],
+    });
     const before = chainLines(f)[0];
 
     f.dispatch({ type: "history.undoRequested" });
@@ -1548,7 +1629,11 @@ describe("T11h: Line chain history (T11-D11, D12)", () => {
     expect(f.session.status).toBe("drawing");
     expect(f.session.pointerDownPoint).toEqual([20, 20]);
 
-    f.dispatch({ type: "sketch.pointerReleased", point: [20, 40] });
+    f.dispatch({
+      type: "sketch.pointerReleased",
+      sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
+      point: [20, 40],
+    });
     const [line] = chainLines(f);
     expect(line?.startPointId, "The undone start id is not reused.").not.toBe(
       before?.startPointId,
@@ -1625,7 +1710,11 @@ describe("T11i: fit-point spline history (T11-D10, D13, D14)", () => {
     const f = await fixture();
     f.dispatch({ type: "tool.activated", toolId: "spline" });
     for (const point of points)
-      f.dispatch({ type: "sketch.pointerReleased", point });
+      f.dispatch({
+        type: "sketch.pointerReleased",
+        sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
+        point,
+      });
     return f;
   }
 
@@ -1746,11 +1835,27 @@ describe("T11i: fit-point spline history (T11-D10, D13, D14)", () => {
   test("Undo and Redo during a spline draft keep its placed fit points", async () => {
     const f = await fixture();
     f.dispatch({ type: "tool.activated", toolId: "circle" });
-    f.dispatch({ type: "sketch.pointerReleased", point: [40, 0] });
-    f.dispatch({ type: "sketch.pointerReleased", point: [43, 0] });
+    f.dispatch({
+      type: "sketch.pointerReleased",
+      sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
+      point: [40, 0],
+    });
+    f.dispatch({
+      type: "sketch.pointerReleased",
+      sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
+      point: [43, 0],
+    });
     f.dispatch({ type: "tool.activated", toolId: "spline" });
-    f.dispatch({ type: "sketch.pointerReleased", point: [20, 20] });
-    f.dispatch({ type: "sketch.pointerReleased", point: [30, 25] });
+    f.dispatch({
+      type: "sketch.pointerReleased",
+      sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
+      point: [20, 20],
+    });
+    f.dispatch({
+      type: "sketch.pointerReleased",
+      sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
+      point: [30, 25],
+    });
 
     f.dispatch({ type: "history.undoRequested" });
     expect(
@@ -1788,9 +1893,21 @@ describe("T12e: tangent reset-to-automatic and set-to-zero actions", () => {
     const f = await fixture();
     // Create a 3-point spline.
     f.dispatch({ type: "tool.activated", toolId: "spline" });
-    f.dispatch({ type: "sketch.pointerReleased", point: [0, 0] });
-    f.dispatch({ type: "sketch.pointerReleased", point: [10, 5] });
-    f.dispatch({ type: "sketch.pointerReleased", point: [20, 0] });
+    f.dispatch({
+      type: "sketch.pointerReleased",
+      sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
+      point: [0, 0],
+    });
+    f.dispatch({
+      type: "sketch.pointerReleased",
+      sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
+      point: [10, 5],
+    });
+    f.dispatch({
+      type: "sketch.pointerReleased",
+      sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
+      point: [20, 0],
+    });
     f.dispatch({ type: "sketch.confirmRequested" });
     // Clear the active tool so selection works normally.
     f.dispatch({ type: "sketch.escapeRequested" });

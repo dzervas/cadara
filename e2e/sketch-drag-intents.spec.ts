@@ -841,19 +841,71 @@ test("T12g: two consecutive drags of different targets in one sketch produce two
 
 // ── T12g: same world-space displacement at two zoom levels ──────────────
 
+// Wheel zoom keeps the viewport centre (the sketch origin) fixed. The line
+// starts off the origin and the axes: a point placed on the origin snaps to it
+// and is fixed there (T13-D19), so it could not be dragged.
+const ZOOM_CENTRE = { x: 720, y: 480 };
+const LINE_START = { x: 800, y: 400 };
+const LINE_END = { x: 1000, y: 400 };
+
+async function zoomInAtCentre(workbench: SketchWorkbenchHarness) {
+  await workbench.hoverViewportAt(ZOOM_CENTRE);
+  for (let i = 0; i < 7; i++) {
+    await workbench.page.mouse.wheel(0, -120);
+  }
+  await workbench.waitForAnimationFrames(6);
+}
+
+/**
+ * The screen position of the line's start after a zoom about the centre: it
+ * moved outward along the ray from the centre, so hover along that ray (Line
+ * is armed) until the endpoint snap shows, and read its indicator.
+ */
+async function locateLineStart(workbench: SketchWorkbenchHarness) {
+  // A geometry drag disarms the drawing tool (`startDragWithIntent` sets
+  // `activeTool: null`), so re-arm Line to get hover snaps again.
+  await workbench.activateTool("Create line geometry.");
+  const viewport = await workbench.viewport().boundingBox();
+  if (!viewport) throw new Error("No viewport.");
+  const dx = LINE_START.x - ZOOM_CENTRE.x;
+  const dy = LINE_START.y - ZOOM_CENTRE.y;
+  const length = Math.hypot(dx, dy);
+  for (let radius = length; radius < 400; radius += 10) {
+    await workbench.hoverViewportAt({
+      x: ZOOM_CENTRE.x + (dx / length) * radius,
+      y: ZOOM_CENTRE.y + (dy / length) * radius,
+    });
+    await workbench.waitForAnimationFrames(2);
+    const indicator = workbench.page.locator(
+      '[data-sketch-viewport-geometry="snapIndicator"][data-sketch-snap-kind="endpoint"]',
+    );
+    if ((await indicator.count()) > 0) {
+      const box = await indicator.first().boundingBox();
+      if (!box) throw new Error("Snap indicator not visible.");
+      return {
+        x: Math.round(box.x + box.width / 2 - viewport.x),
+        y: Math.round(box.y + box.height / 2 - viewport.y),
+      };
+    }
+  }
+  throw new Error("The line start was not found after zooming.");
+}
+
 test("T12g: the same world-space displacement applied at 1× and ~2× zoom gives the same committed geometry within 1-px quantization tolerance", async ({
   page,
 }) => {
   // Viewport 1440×960; sketch origin at viewport centre (720,480).
-  // Zoom centred on the origin keeps it at (720,480) on screen.
   const workbench = new SketchWorkbenchHarness(page);
   await enterSketchMode(workbench);
-  await drawLine(workbench, { x: 720, y: 480 }, { x: 920, y: 480 });
+  await drawLine(workbench, LINE_START, LINE_END);
 
   // ── Measure world-units-per-pixel at 1× zoom empirically. ──
   // Drag point 0 exactly 100px right, observe world delta.
   const init1x = await readLivePoints(workbench);
-  await viewportDrag(workbench, { x: 720, y: 480 }, { x: 820, y: 480 });
+  await viewportDrag(workbench, LINE_START, {
+    x: LINE_START.x + 100,
+    y: LINE_START.y,
+  });
   await workbench.waitForAnimationFrames(4);
   const after1x = await readLivePoints(workbench);
   const delta1x = after1x[0]!.position[0] - init1x[0]!.position[0];
@@ -865,19 +917,14 @@ test("T12g: the same world-space displacement applied at 1× and ~2× zoom gives
   await page.keyboard.press("Control+z");
   await workbench.waitForAnimationFrames(4);
 
-  // ── Zoom in at the origin. ──
-  const box = await workbench.viewport().boundingBox();
-  if (!box) throw new Error("No viewport.");
-  await page.mouse.move(box.x + 720, box.y + 480);
-  for (let i = 0; i < 7; i++) {
-    await page.mouse.wheel(0, -120);
-  }
-  await workbench.waitForAnimationFrames(6);
+  // ── Zoom in at the centre; find point 0 on screen again. ──
+  await zoomInAtCentre(workbench);
+  const start2x = await locateLineStart(workbench);
 
   // ── Measure world-units-per-pixel at the zoomed level. ──
   // Probe: drag point 0 by 60px right, observe world delta, undo.
   const initProbe = await readLivePoints(workbench);
-  await viewportDrag(workbench, { x: 720, y: 480 }, { x: 780, y: 480 });
+  await viewportDrag(workbench, start2x, { x: start2x.x + 60, y: start2x.y });
   await workbench.waitForAnimationFrames(4);
   const afterProbe = await readLivePoints(workbench);
   const deltaProbe = afterProbe[0]!.position[0] - initProbe[0]!.position[0];
@@ -892,11 +939,10 @@ test("T12g: the same world-space displacement applied at 1× and ~2× zoom gives
   // ── Apply the same world-space displacement (delta1x) at zoomed level. ──
   const pixelsNeeded = Math.round(delta1x / wupp2x);
   const init2x = await readLivePoints(workbench);
-  await viewportDrag(
-    workbench,
-    { x: 720, y: 480 },
-    { x: 720 + pixelsNeeded, y: 480 },
-  );
+  await viewportDrag(workbench, start2x, {
+    x: start2x.x + pixelsNeeded,
+    y: start2x.y,
+  });
   await workbench.waitForAnimationFrames(4);
   const after2x = await readLivePoints(workbench);
   const delta2x = after2x[0]!.position[0] - init2x[0]!.position[0];
@@ -919,9 +965,7 @@ test("T12g: a press within the grab radius but off the point does not cause a po
 }) => {
   const workbench = new SketchWorkbenchHarness(page);
   await enterSketchMode(workbench);
-  // Place point 0 at the viewport centre (720,480) = sketch origin.
-  // Zoom at (720,480) keeps the origin at the same screen pixel.
-  await drawLine(workbench, { x: 720, y: 480 }, { x: 920, y: 480 });
+  await drawLine(workbench, LINE_START, LINE_END);
 
   // Read initial.
   const initPts = await readLivePoints(workbench);
@@ -932,7 +976,7 @@ test("T12g: a press within the grab radius but off the point does not cause a po
   // the point.
   const box = await workbench.viewport().boundingBox();
   if (!box) throw new Error("No viewport.");
-  await page.mouse.move(box.x + 728, box.y + 480);
+  await page.mouse.move(box.x + LINE_START.x + 8, box.y + LINE_START.y);
   await page.mouse.down();
   await workbench.waitForAnimationFrames(2);
   await page.mouse.up();
@@ -948,16 +992,11 @@ test("T12g: a press within the grab radius but off the point does not cause a po
     "1× zoom: off-centre press-release must not jump point Y.",
   ).toBeLessThan(0.05);
 
-  // ── Zoom in at the origin (720,480) and repeat. ──
-  await page.mouse.move(box.x + 720, box.y + 480);
-  for (let i = 0; i < 7; i++) {
-    await page.mouse.wheel(0, -120);
-  }
-  await workbench.waitForAnimationFrames(6);
-
-  // After zoom centred on the origin, the origin is still at (720,480).
-  // Press 8px to the right of (720,480).
-  await page.mouse.move(box.x + 728, box.y + 480);
+  // ── Zoom in at the centre, find point 0 again and repeat. ──
+  await zoomInAtCentre(workbench);
+  const start2x = await locateLineStart(workbench);
+  // Press 8px to the right of point 0.
+  await page.mouse.move(box.x + start2x.x + 8, box.y + start2x.y);
   await page.mouse.down();
   await workbench.waitForAnimationFrames(2);
   await page.mouse.up();

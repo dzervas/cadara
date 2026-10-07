@@ -11,6 +11,10 @@ import {
   updateSketchPointer,
 } from "@/domain/editor/sketch-session";
 import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+import {
+  SPEC_SKETCH_UNITS_PER_PIXEL,
+  withSketchSnapScale,
+} from "@/domain/editor/sketch-session/test-snap-scale";
 
 test("src/domain/editor/sketch-snapping.spec.ts", () => {
   function assertClosePoint(
@@ -29,17 +33,20 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
     ).toBeTruthy();
   }
 
-  function createSketchLineSession() {
-    let session = createNewSketchSessionFromSupport(
-      {
-        kind: "construction",
-        constructionId: "construction_plane-xy",
-      },
-      OCC_KERNEL_SETTINGS,
+  function createSketchLineSession(y = 0) {
+    let session = withSketchSnapScale(
+      createNewSketchSessionFromSupport(
+        {
+          kind: "construction",
+          constructionId: "construction_plane-xy",
+        },
+        OCC_KERNEL_SETTINGS,
+      ),
+      SPEC_SKETCH_UNITS_PER_PIXEL,
     );
     session = beginSketchTool(session, "line");
-    session = startSketchDraw(session, [0, 0]);
-    session = acceptSketchDraw(session, [2, 0]);
+    session = startSketchDraw(session, [0, y]);
+    session = acceptSketchDraw(session, [2, y]);
 
     return session;
   }
@@ -68,16 +75,18 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
   }
 
   function testLocalSnapPreviewAndCommit() {
-    let session = createSketchLineSession();
+    // Off the X axis: an axis under the pointer is an on-curve snap, which
+    // outranks the horizontal alignment this row is about (T13-D14).
+    let session = createSketchLineSession(1);
 
-    session = startSketchDraw(session, [1, 0.04]);
+    session = startSketchDraw(session, [1, 1.04]);
     expect(
       session.activeSnap?.kind,
       "Starting a new line near an existing line midpoint should activate midpoint snap.",
     ).toBe("midpoint");
     assertClosePoint(
       session.pointerDownPoint,
-      [1, 0],
+      [1, 1],
       "Line start should use the snapped midpoint coordinate.",
     );
     expect(
@@ -88,14 +97,14 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
       "Active snap should be exposed as transient viewport feedback.",
     ).toBeTruthy();
 
-    session = updateSketchPointer(session, [3, 0.04]);
+    session = updateSketchPointer(session, [3, 1.04]);
     expect(
       session.activeSnap?.kind,
       "Line preview should snap horizontally from the snapped start.",
     ).toBe("horizontalAlignment");
     assertClosePoint(
       session.livePoint,
-      [3, 0],
+      [3, 1],
       "Line preview should use the snap-adjusted endpoint.",
     );
 
@@ -105,16 +114,16 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
     expect(preview?.kind, "Expected a transient preview line.").toBe("line");
     assertClosePoint(
       preview.start,
-      [1, 0],
+      [1, 1],
       "Preview line should start at the snapped midpoint.",
     );
     assertClosePoint(
       preview.end,
-      [3, 0],
+      [3, 1],
       "Preview line should end at the snapped horizontal point.",
     );
 
-    session = acceptSketchDraw(session, [3, 0.04]);
+    session = acceptSketchDraw(session, [3, 1.04]);
     const committed = session.definition.entities.at(-1);
     expect(
       committed?.kind,
@@ -128,12 +137,12 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
     );
     assertClosePoint(
       start?.position,
-      [1, 0],
+      [1, 1],
       "Committed line start should use the snapped midpoint.",
     );
     assertClosePoint(
       end?.position,
-      [3, 0],
+      [3, 1],
       "Committed line end should use the snapped horizontal point.",
     );
     expect(
@@ -211,12 +220,15 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
         diagnostics: [],
       },
     ];
-    let session = createNewSketchSessionFromSupport(
-      {
-        kind: "construction",
-        constructionId: "construction_plane-xy",
-      },
-      OCC_KERNEL_SETTINGS,
+    let session = withSketchSnapScale(
+      createNewSketchSessionFromSupport(
+        {
+          kind: "construction",
+          constructionId: "construction_plane-xy",
+        },
+        OCC_KERNEL_SETTINGS,
+      ),
+      SPEC_SKETCH_UNITS_PER_PIXEL,
     );
     session = {
       ...session,
@@ -273,12 +285,15 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
       source: { kind: "edge" as const, bodyId: "body_1", edgeId: "edge_1" },
       projectionMode: "projectAlongPlaneNormal" as const,
     };
-    let session = createNewSketchSessionFromSupport(
-      {
-        kind: "construction",
-        constructionId: "construction_plane-xy",
-      },
-      OCC_KERNEL_SETTINGS,
+    let session = withSketchSnapScale(
+      createNewSketchSessionFromSupport(
+        {
+          kind: "construction",
+          constructionId: "construction_plane-xy",
+        },
+        OCC_KERNEL_SETTINGS,
+      ),
+      SPEC_SKETCH_UNITS_PER_PIXEL,
     );
     session = {
       ...session,
@@ -307,12 +322,15 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
   }
 
   function testBothEndpointsSnappedToSameLineUseUniqueConstraintIds() {
-    let session = createNewSketchSessionFromSupport(
-      {
-        kind: "construction",
-        constructionId: "construction_plane-xy",
-      },
-      OCC_KERNEL_SETTINGS,
+    let session = withSketchSnapScale(
+      createNewSketchSessionFromSupport(
+        {
+          kind: "construction",
+          constructionId: "construction_plane-xy",
+        },
+        OCC_KERNEL_SETTINGS,
+      ),
+      SPEC_SKETCH_UNITS_PER_PIXEL,
     );
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [0, 0]);
@@ -374,12 +392,15 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
       },
     ];
     let session = addProjectedLineReference(
-      createNewSketchSessionFromSupport(
-        {
-          kind: "construction",
-          constructionId: "construction_plane-xy",
-        },
-        OCC_KERNEL_SETTINGS,
+      withSketchSnapScale(
+        createNewSketchSessionFromSupport(
+          {
+            kind: "construction",
+            constructionId: "construction_plane-xy",
+          },
+          OCC_KERNEL_SETTINGS,
+        ),
+        SPEC_SKETCH_UNITS_PER_PIXEL,
       ),
       projectedReferences,
     );
@@ -418,12 +439,15 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
       },
     ];
     let session = addProjectedLineReference(
-      createNewSketchSessionFromSupport(
-        {
-          kind: "construction",
-          constructionId: "construction_plane-xy",
-        },
-        OCC_KERNEL_SETTINGS,
+      withSketchSnapScale(
+        createNewSketchSessionFromSupport(
+          {
+            kind: "construction",
+            constructionId: "construction_plane-xy",
+          },
+          OCC_KERNEL_SETTINGS,
+        ),
+        SPEC_SKETCH_UNITS_PER_PIXEL,
       ),
       projectedReferences,
     );
@@ -461,12 +485,15 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
       },
     ];
     let session = addProjectedLineReference(
-      createNewSketchSessionFromSupport(
-        {
-          kind: "construction",
-          constructionId: "construction_plane-xy",
-        },
-        OCC_KERNEL_SETTINGS,
+      withSketchSnapScale(
+        createNewSketchSessionFromSupport(
+          {
+            kind: "construction",
+            constructionId: "construction_plane-xy",
+          },
+          OCC_KERNEL_SETTINGS,
+        ),
+        SPEC_SKETCH_UNITS_PER_PIXEL,
       ),
       projectedReferences,
     );
@@ -489,12 +516,15 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
   }
 
   function testSketchDatumSnapsCommitDerivedReferenceConstraints() {
-    let originSession = createNewSketchSessionFromSupport(
-      {
-        kind: "construction",
-        constructionId: "construction_plane-xy",
-      },
-      OCC_KERNEL_SETTINGS,
+    let originSession = withSketchSnapScale(
+      createNewSketchSessionFromSupport(
+        {
+          kind: "construction",
+          constructionId: "construction_plane-xy",
+        },
+        OCC_KERNEL_SETTINGS,
+      ),
+      SPEC_SKETCH_UNITS_PER_PIXEL,
     );
     originSession = beginSketchTool(originSession, "line");
     originSession = startSketchDraw(originSession, [0.04, 0.03]);
@@ -521,12 +551,58 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
       "Accepted datum-origin snap should constrain the authored endpoint to the sketch origin.",
     ).toBeTruthy();
 
-    let axisSession = createNewSketchSessionFromSupport(
-      {
-        kind: "construction",
-        constructionId: "construction_plane-xy",
-      },
-      OCC_KERNEL_SETTINGS,
+    // T13-D19: an exact origin or axis placement is the same snap at distance
+    // 0 and authors the same constraint (shown == authored).
+    let exactSession = withSketchSnapScale(
+      createNewSketchSessionFromSupport(
+        {
+          kind: "construction",
+          constructionId: "construction_plane-xy",
+        },
+        OCC_KERNEL_SETTINGS,
+      ),
+      SPEC_SKETCH_UNITS_PER_PIXEL,
+    );
+    exactSession = beginSketchTool(exactSession, "line");
+    exactSession = startSketchDraw(exactSession, [0, 0]);
+    expect(exactSession.activeSnap?.distance, "premise: distance 0").toBe(0);
+    expect(
+      exactSession.activeSnap?.sources,
+      "premise: the exact origin snap is shown",
+    ).toEqual([
+      { kind: "sketchDatum", datumId: "origin", geometryKind: "point" },
+    ]);
+    exactSession = acceptSketchDraw(exactSession, [3, 2]);
+    const exactLine = exactSession.definition.entities.at(-1);
+    expect(exactLine?.kind).toBe("lineSegment");
+    expect(
+      exactSession.definition.constraints.map((constraint) =>
+        constraint.kind === "coincidentProjectedPoint"
+          ? [
+              constraint.kind,
+              constraint.point.pointId,
+              constraint.projectedPoint,
+            ]
+          : [constraint.kind],
+      ),
+      "An exact origin snap authors the origin coincidence at distance 0.",
+    ).toEqual([
+      [
+        "coincidentProjectedPoint",
+        exactLine?.kind === "lineSegment" ? exactLine.startPointId : null,
+        { kind: "sketchDatum", datum: "origin" },
+      ],
+    ]);
+
+    let axisSession = withSketchSnapScale(
+      createNewSketchSessionFromSupport(
+        {
+          kind: "construction",
+          constructionId: "construction_plane-xy",
+        },
+        OCC_KERNEL_SETTINGS,
+      ),
+      SPEC_SKETCH_UNITS_PER_PIXEL,
     );
     axisSession = beginSketchTool(axisSession, "line");
     axisSession = startSketchDraw(axisSession, [2, 1]);
@@ -552,6 +628,39 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
       axisConstraint,
       "Accepted datum-axis snap should constrain the authored endpoint onto the sketch axis.",
     ).toBeTruthy();
+
+    let exactAxisSession = withSketchSnapScale(
+      createNewSketchSessionFromSupport(
+        {
+          kind: "construction",
+          constructionId: "construction_plane-xy",
+        },
+        OCC_KERNEL_SETTINGS,
+      ),
+      SPEC_SKETCH_UNITS_PER_PIXEL,
+    );
+    exactAxisSession = beginSketchTool(exactAxisSession, "line");
+    exactAxisSession = startSketchDraw(exactAxisSession, [2, 1]);
+    exactAxisSession = acceptSketchDraw(exactAxisSession, [4, 0]);
+    const exactAxisLine = exactAxisSession.definition.entities.at(-1);
+    expect(
+      exactAxisSession.definition.constraints.map((constraint) =>
+        constraint.kind === "pointOnProjectedCurve"
+          ? [
+              constraint.kind,
+              constraint.point.pointId,
+              constraint.projectedCurve,
+            ]
+          : [constraint.kind],
+      ),
+      "An exact X-axis snap authors the point-on-axis constraint at distance 0.",
+    ).toEqual([
+      [
+        "pointOnProjectedCurve",
+        exactAxisLine?.kind === "lineSegment" ? exactAxisLine.endPointId : null,
+        { kind: "sketchDatum", datum: "xAxis" },
+      ],
+    ]);
   }
 
   function testProjectedPerpendicularAndTangentSnapsCommitDerivedReferenceConstraints() {
@@ -571,24 +680,29 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
       },
     ];
     let perpendicularSession = addProjectedLineReference(
-      createNewSketchSessionFromSupport(
-        {
-          kind: "construction",
-          constructionId: "construction_plane-xy",
-        },
-        OCC_KERNEL_SETTINGS,
+      withSketchSnapScale(
+        createNewSketchSessionFromSupport(
+          {
+            kind: "construction",
+            constructionId: "construction_plane-xy",
+          },
+          OCC_KERNEL_SETTINGS,
+        ),
+        SPEC_SKETCH_UNITS_PER_PIXEL,
       ),
       projectedLineReferences,
     );
 
+    // Off the X axis: the projected line crosses it at (1, 0), and an
+    // intersection outranks a perpendicular foot (T13-D14).
     perpendicularSession = beginSketchTool(perpendicularSession, "line");
-    perpendicularSession = startSketchDraw(perpendicularSession, [0, 0]);
-    perpendicularSession = updateSketchPointer(perpendicularSession, [1, 0]);
+    perpendicularSession = startSketchDraw(perpendicularSession, [0.5, 1]);
+    perpendicularSession = updateSketchPointer(perpendicularSession, [1, 1]);
     expect(
       perpendicularSession.activeSnap?.kind,
       "Projected line should provide a perpendicular-foot snap.",
     ).toBe("perpendicularFoot");
-    perpendicularSession = acceptSketchDraw(perpendicularSession, [1, 0]);
+    perpendicularSession = acceptSketchDraw(perpendicularSession, [1, 1]);
 
     expect(
       perpendicularSession.definition.constraints.some(
@@ -619,12 +733,15 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
       },
     ];
     let tangentSession = addProjectedLineReference(
-      createNewSketchSessionFromSupport(
-        {
-          kind: "construction",
-          constructionId: "construction_plane-xy",
-        },
-        OCC_KERNEL_SETTINGS,
+      withSketchSnapScale(
+        createNewSketchSessionFromSupport(
+          {
+            kind: "construction",
+            constructionId: "construction_plane-xy",
+          },
+          OCC_KERNEL_SETTINGS,
+        ),
+        SPEC_SKETCH_UNITS_PER_PIXEL,
       ),
       projectedCircleReferences,
     );
@@ -650,9 +767,13 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
       ),
       "Accepted projected tangent snap should append a durable tangent projected constraint.",
     ).toBeTruthy();
+    // The start on the Y axis adds a datum point-on-curve (T13-D19); the
+    // tangent endpoint's one names the projected circle.
     expect(
       tangentSession.definition.constraints.some(
-        (constraint) => constraint.kind === "pointOnProjectedCurve",
+        (constraint) =>
+          constraint.kind === "pointOnProjectedCurve" &&
+          constraint.projectedCurve.kind === "projectedGeometry",
       ),
       "Accepted projected tangent snap should keep the tangent endpoint on the projected curve.",
     ).toBeTruthy();

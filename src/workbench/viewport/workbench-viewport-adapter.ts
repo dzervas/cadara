@@ -103,9 +103,13 @@ interface WorkbenchViewportIntentActions {
   onConnectedSketchSelect: (target: PrimitiveRef) => void;
   onDeselect: () => void;
   onClearHover: () => void;
-  onSketchMove: (point: readonly [number, number]) => void;
+  onSketchMove: (
+    point: readonly [number, number],
+    sketchUnitsPerPixel: number | null,
+  ) => void;
   onSketchRelease: (
     point: readonly [number, number],
+    sketchUnitsPerPixel: number | null,
     target?: PrimitiveRef | null,
   ) => void;
   onSketchGeometryDragStart: (
@@ -196,10 +200,14 @@ export function createWorkbenchViewportIntentHandler({
         onClearHover();
         return;
       case "sketchPointerMoved":
-        onSketchMove(intent.point);
+        onSketchMove(intent.point, intent.sketchUnitsPerPixel);
         return;
       case "sketchPointerReleased":
-        onSketchRelease(intent.point, intent.target);
+        onSketchRelease(
+          intent.point,
+          intent.sketchUnitsPerPixel,
+          intent.target,
+        );
         return;
       case "sketchDrawFinalizeRequested":
         // Enter's confirm step: finalizes a viable spline, else nothing.

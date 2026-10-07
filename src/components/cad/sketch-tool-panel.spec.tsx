@@ -22,6 +22,10 @@ import {
   PROJECTED_SPLINE_OFFSET_UNSUPPORTED_MESSAGE,
   SPLINE_SLOT_UNSUPPORTED_MESSAGE,
 } from "@/domain/sketch-editing/operations";
+import {
+  SPEC_SKETCH_UNITS_PER_PIXEL,
+  withSketchSnapScale,
+} from "@/domain/editor/sketch-session/test-snap-scale";
 
 test("src/components/cad/sketch-tool-panel.spec.tsx", () => {
   const markup = renderToStaticMarkup(
@@ -67,9 +71,15 @@ test("the sketch tool panel shows the D6 not-supported-yet messages", () => {
       acceptSketchDraw(
         startSketchDraw(
           beginSketchTool(
-            createNewSketchSessionFromSupport(
-              { kind: "construction", constructionId: "construction_plane-xy" },
-              OCC_KERNEL_SETTINGS,
+            withSketchSnapScale(
+              createNewSketchSessionFromSupport(
+                {
+                  kind: "construction",
+                  constructionId: "construction_plane-xy",
+                },
+                OCC_KERNEL_SETTINGS,
+              ),
+              SPEC_SKETCH_UNITS_PER_PIXEL,
             ),
             "spline",
           ),
@@ -145,9 +155,12 @@ test("the sketch tool panel shows the D6 not-supported-yet messages", () => {
 // state from the session's tool presentation (T10g-1): the edit waits for its
 // exact intersections and the user sees that it is being checked.
 test("the sketch tool panel shows Trim's 'Checking intersections…' while its query is pending", () => {
-  let drawn = createNewSketchSessionFromSupport(
-    { kind: "construction", constructionId: "construction_plane-xy" },
-    OCC_KERNEL_SETTINGS,
+  let drawn = withSketchSnapScale(
+    createNewSketchSessionFromSupport(
+      { kind: "construction", constructionId: "construction_plane-xy" },
+      OCC_KERNEL_SETTINGS,
+    ),
+    SPEC_SKETCH_UNITS_PER_PIXEL,
   );
   for (const [start, end] of [
     [
@@ -186,9 +199,12 @@ test("the sketch tool panel shows Trim's 'Checking intersections…' while its q
 test.each(["sketchExtend", "sketchSplit"] as const)(
   "the sketch tool panel shows %s's 'Checking intersections…' while its query is pending",
   (toolId) => {
-    let drawn = createNewSketchSessionFromSupport(
-      { kind: "construction", constructionId: "construction_plane-xy" },
-      OCC_KERNEL_SETTINGS,
+    let drawn = withSketchSnapScale(
+      createNewSketchSessionFromSupport(
+        { kind: "construction", constructionId: "construction_plane-xy" },
+        OCC_KERNEL_SETTINGS,
+      ),
+      SPEC_SKETCH_UNITS_PER_PIXEL,
     );
     for (const [start, end] of [
       [

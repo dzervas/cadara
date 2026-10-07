@@ -87,6 +87,10 @@ import {
   createScopedImportProviderRegistryForTest,
   createScopedSketchSpecialModeRegistryForTest,
 } from "@/domain/extensions/test-registry-composition";
+import {
+  SPEC_SKETCH_UNITS_PER_PIXEL,
+  withSketchSnapScale,
+} from "@/domain/editor/sketch-session/test-snap-scale";
 
 test("src/contracts/editor/state-machine.spec.ts", async () => {
   function createSelectionCatalog(): SelectionTargetCatalog {
@@ -698,9 +702,12 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
   }
 
   function createOffsetFixtureSketchSession() {
-    let session = createNewSketchSession(
-      createStandardPlaneDefinition("xy"),
-      OCC_KERNEL_SETTINGS,
+    let session = withSketchSnapScale(
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
+      SPEC_SKETCH_UNITS_PER_PIXEL,
     );
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [0, 0]);
@@ -1413,19 +1420,9 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       key: "yz",
     };
 
-    const session = createSketchSessionFromSnapshot(
-      {
-        ownerDocumentId: "doc_workspace",
-        ownerRevisionId: "rev_1",
-        ownerFeatureId: null,
-        ownerSketchId: "sketch_yz",
-        ownerBodyId: null,
-        sketchId: "sketch_yz",
-        label: "Sketch YZ",
-        plane: yzPlane,
-        planeTarget: yzPlane.support,
-        planeKey: "yz",
-        sketch: {
+    const session = withSketchSnapScale(
+      createSketchSessionFromSnapshot(
+        {
           ownerDocumentId: "doc_workspace",
           ownerRevisionId: "rev_1",
           ownerFeatureId: null,
@@ -1433,37 +1430,50 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
           ownerBodyId: null,
           sketchId: "sketch_yz",
           label: "Sketch YZ",
-          planeSupport: yzPlane.support,
-          definition: {
-            schemaVersion: "sketch-definition/v1alpha2",
-            referenceIds: [],
-            references: [],
-            pointIds: [],
-            points: [],
-            entityIds: [],
-            entities: [],
-            constraintIds: [],
-            constraints: [],
-            dimensionIds: [],
-            dimensions: [],
-          },
-          solvedSnapshot: {
-            schemaVersion: "solved-sketch/v1alpha2",
-            status: {
-              solveState: "solved",
-              constraintState: "underConstrained",
+          plane: yzPlane,
+          planeTarget: yzPlane.support,
+          planeKey: "yz",
+          sketch: {
+            ownerDocumentId: "doc_workspace",
+            ownerRevisionId: "rev_1",
+            ownerFeatureId: null,
+            ownerSketchId: "sketch_yz",
+            ownerBodyId: null,
+            sketchId: "sketch_yz",
+            label: "Sketch YZ",
+            planeSupport: yzPlane.support,
+            definition: {
+              schemaVersion: "sketch-definition/v1alpha2",
+              referenceIds: [],
+              references: [],
+              pointIds: [],
+              points: [],
+              entityIds: [],
+              entities: [],
+              constraintIds: [],
+              constraints: [],
+              dimensionIds: [],
+              dimensions: [],
             },
-            solvedEntities: [],
-            solvedPoints: [],
-            constraintStatuses: [],
-            dimensionStatuses: [],
-            diagnostics: [],
+            solvedSnapshot: {
+              schemaVersion: "solved-sketch/v1alpha2",
+              status: {
+                solveState: "solved",
+                constraintState: "underConstrained",
+              },
+              solvedEntities: [],
+              solvedPoints: [],
+              constraintStatuses: [],
+              dimensionStatuses: [],
+              diagnostics: [],
+            },
+            derivedValidity: { state: "current", diagnostics: [] },
+            regions: [],
           },
-          derivedValidity: { state: "current", diagnostics: [] },
-          regions: [],
         },
-      },
-      OCC_KERNEL_SETTINGS,
+        OCC_KERNEL_SETTINGS,
+      ),
+      SPEC_SKETCH_UNITS_PER_PIXEL,
     );
 
     const worldPoint = mapSketchPointToWorld(session.plane, [2, 3]);
@@ -2522,9 +2532,12 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       "Selection clearing should remove active-command hover.",
     ).toBe(null);
 
-    const sketchSession = createNewSketchSession(
-      createStandardPlaneDefinition("xy"),
-      OCC_KERNEL_SETTINGS,
+    const sketchSession = withSketchSnapScale(
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
+      SPEC_SKETCH_UNITS_PER_PIXEL,
     );
     const sketchState: SketchEditorState = {
       ...selectedState,
@@ -3842,9 +3855,12 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       documentId: "doc_workspace",
       revisionId: "rev_1",
       commandSessionId: openEffect.commandSessionId,
-      session: createNewSketchSession(
-        createStandardPlaneDefinition("xy"),
-        OCC_KERNEL_SETTINGS,
+      session: withSketchSnapScale(
+        createNewSketchSession(
+          createStandardPlaneDefinition("xy"),
+          OCC_KERNEL_SETTINGS,
+        ),
+        SPEC_SKETCH_UNITS_PER_PIXEL,
       ),
     });
 
@@ -3919,9 +3935,12 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       documentId: "doc_workspace",
       revisionId: "rev_1",
       commandSessionId: openEffect.commandSessionId,
-      session: createNewSketchSession(
-        createStandardPlaneDefinition("xy"),
-        OCC_KERNEL_SETTINGS,
+      session: withSketchSnapScale(
+        createNewSketchSession(
+          createStandardPlaneDefinition("xy"),
+          OCC_KERNEL_SETTINGS,
+        ),
+        SPEC_SKETCH_UNITS_PER_PIXEL,
       ),
     });
     const withTool = transitionEditorState(opened.state, {
@@ -4101,9 +4120,12 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       documentId: "doc_workspace",
       revisionId: "rev_1",
       commandSessionId: openEffect.commandSessionId,
-      session: createNewSketchSession(
-        createStandardPlaneDefinition("xy"),
-        OCC_KERNEL_SETTINGS,
+      session: withSketchSnapScale(
+        createNewSketchSession(
+          createStandardPlaneDefinition("xy"),
+          OCC_KERNEL_SETTINGS,
+        ),
+        SPEC_SKETCH_UNITS_PER_PIXEL,
       ),
     });
     const withTool = transitionEditorState(opened.state, {
@@ -4201,9 +4223,12 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     }
 
     let styledSession = toggleSketchSvgRendering(
-      createNewSketchSession(
-        createStandardPlaneDefinition("xy"),
-        OCC_KERNEL_SETTINGS,
+      withSketchSnapScale(
+        createNewSketchSession(
+          createStandardPlaneDefinition("xy"),
+          OCC_KERNEL_SETTINGS,
+        ),
+        SPEC_SKETCH_UNITS_PER_PIXEL,
       ),
     );
     styledSession = beginSketchTool(styledSession, "line");
@@ -4324,9 +4349,12 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     secondPointTarget: PrimitiveRef;
     lineTarget: PrimitiveRef;
   } {
-    let session = createNewSketchSession(
-      createStandardPlaneDefinition("xy"),
-      OCC_KERNEL_SETTINGS,
+    let session = withSketchSnapScale(
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
+      SPEC_SKETCH_UNITS_PER_PIXEL,
     );
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [0, 0]);
@@ -4448,6 +4476,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
 
     const moved = transitionEditorState(selectedSecond.state, {
       type: "sketch.pointerMoved",
+      sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
       point: mapSketchPointToWorld(selectedSecond.state.session.plane, [5, 3]),
     });
     expect(
@@ -4479,9 +4508,12 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
   }
 
   function testDimensionReleaseOverSecondLineDefersToAngleSelection() {
-    let session = createNewSketchSession(
-      createStandardPlaneDefinition("xy"),
-      OCC_KERNEL_SETTINGS,
+    let session = withSketchSnapScale(
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
+      SPEC_SKETCH_UNITS_PER_PIXEL,
     );
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [0, 0]);
@@ -4540,6 +4572,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
 
     const releaseOverSecond = transitionEditorState(selectedFirst.state, {
       type: "sketch.pointerReleased",
+      sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
       point: mapSketchPointToWorld(selectedFirst.state.session.plane, [5, 0]),
       target: secondLineTarget,
     });
@@ -4575,6 +4608,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
 
     const moved = transitionEditorState(selectedSecond.state, {
       type: "sketch.pointerMoved",
+      sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
       point: mapSketchPointToWorld(selectedSecond.state.session.plane, [8, 3]),
     });
     expect(
@@ -4598,6 +4632,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
 
     const placed = transitionEditorState(moved.state, {
       type: "sketch.pointerReleased",
+      sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
       point: mapSketchPointToWorld(moved.state.session.plane, [4, -1]),
       target: null,
     });
@@ -4699,9 +4734,12 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       dimensions: [],
     };
     const session = {
-      ...createNewSketchSession(
-        createStandardPlaneDefinition("xy"),
-        OCC_KERNEL_SETTINGS,
+      ...withSketchSnapScale(
+        createNewSketchSession(
+          createStandardPlaneDefinition("xy"),
+          OCC_KERNEL_SETTINGS,
+        ),
+        SPEC_SKETCH_UNITS_PER_PIXEL,
       ),
       sketchId,
       definition,
@@ -4769,9 +4807,12 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
   }
 
   function testConnectedSketchSelectionEventWorksAfterRectangleToolAcceptsShape() {
-    let session = createNewSketchSession(
-      createStandardPlaneDefinition("xy"),
-      OCC_KERNEL_SETTINGS,
+    let session = withSketchSnapScale(
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
+      SPEC_SKETCH_UNITS_PER_PIXEL,
     );
     session = beginSketchTool(session, "rectangle");
     session = startSketchDraw(session, [0, 0]);
@@ -4953,9 +4994,12 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
 
   function testSketchImageDeletionUsesCurrentAuthoredState() {
     const baseSession = appendReferenceImageOperations(
-      createNewSketchSession(
-        createStandardPlaneDefinition("xy"),
-        OCC_KERNEL_SETTINGS,
+      withSketchSnapScale(
+        createNewSketchSession(
+          createStandardPlaneDefinition("xy"),
+          OCC_KERNEL_SETTINGS,
+        ),
+        SPEC_SKETCH_UNITS_PER_PIXEL,
       ),
       [
         createReferenceImageOperation({
@@ -5029,9 +5073,12 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
   }
 
   function testCommittedDimensionAnnotationEditRequestOpensAndCommitsValueForm() {
-    let session = createNewSketchSession(
-      createStandardPlaneDefinition("xy"),
-      OCC_KERNEL_SETTINGS,
+    let session = withSketchSnapScale(
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
+      SPEC_SKETCH_UNITS_PER_PIXEL,
     );
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [0, 0]);
@@ -5138,9 +5185,12 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
   }
 
   function testSketchStylePatchRoutesThroughSelectionAndUpdatesCommitRequest() {
-    let session = createNewSketchSession(
-      createStandardPlaneDefinition("xy"),
-      OCC_KERNEL_SETTINGS,
+    let session = withSketchSnapScale(
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
+      SPEC_SKETCH_UNITS_PER_PIXEL,
     );
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [0, 0]);
@@ -5204,9 +5254,12 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
   }
 
   function testRejectedSketchCommitShowsValidationMessage() {
-    const session = createNewSketchSession(
-      createStandardPlaneDefinition("xy"),
-      OCC_KERNEL_SETTINGS,
+    const session = withSketchSnapScale(
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
+      SPEC_SKETCH_UNITS_PER_PIXEL,
     );
     const diagnostic: ModelingDiagnostic = {
       code: "mock-invalid-sketch",
@@ -5264,9 +5317,12 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
   }
 
   function testSketchCommitConflictRefreshesBeforeRetry() {
-    let session = createNewSketchSession(
-      createStandardPlaneDefinition("xy"),
-      OCC_KERNEL_SETTINGS,
+    let session = withSketchSnapScale(
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
+      SPEC_SKETCH_UNITS_PER_PIXEL,
     );
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [0, 0]);
@@ -5480,9 +5536,12 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
         documentId: "doc_workspace",
       })
     ).snapshot;
-    const session = createNewSketchSession(
-      createStandardPlaneDefinition("xy"),
-      OCC_KERNEL_SETTINGS,
+    const session = withSketchSnapScale(
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
+      SPEC_SKETCH_UNITS_PER_PIXEL,
     );
     const sketchState: SketchEditorState = {
       ...initialEditorState,

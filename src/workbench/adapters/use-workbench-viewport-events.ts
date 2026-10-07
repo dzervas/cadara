@@ -88,14 +88,23 @@ export function useWorkbenchViewportEvents({
       ) {
         dispatch({ type: "sketch.geometryDragStarted", target, point });
       },
-      handleSketchMove(point: readonly [number, number]) {
-        dispatch({ type: "sketch.pointerMoved", point });
+      handleSketchMove(
+        point: readonly [number, number],
+        sketchUnitsPerPixel: number | null,
+      ) {
+        dispatch({ type: "sketch.pointerMoved", point, sketchUnitsPerPixel });
       },
       handleSketchRelease(
         point: readonly [number, number],
+        sketchUnitsPerPixel: number | null,
         target?: PrimitiveRef | null,
       ) {
-        dispatch({ type: "sketch.pointerReleased", point, target });
+        dispatch({
+          type: "sketch.pointerReleased",
+          point,
+          sketchUnitsPerPixel,
+          target,
+        });
       },
       handleSketchSpecialModeClick(
         point: readonly [number, number],

@@ -20,9 +20,21 @@ test("src/application/editor/sketch-pointer-preview-scheduler.spec.ts coalesces 
     },
   });
 
-  scheduler.dispatch({ type: "sketch.pointerMoved", point: [1, 1] });
-  scheduler.dispatch({ type: "sketch.pointerMoved", point: [2, 2] });
-  scheduler.dispatch({ type: "sketch.pointerMoved", point: [3, 3] });
+  scheduler.dispatch({
+    type: "sketch.pointerMoved",
+    point: [1, 1],
+    sketchUnitsPerPixel: null,
+  });
+  scheduler.dispatch({
+    type: "sketch.pointerMoved",
+    point: [2, 2],
+    sketchUnitsPerPixel: null,
+  });
+  scheduler.dispatch({
+    type: "sketch.pointerMoved",
+    point: [3, 3],
+    sketchUnitsPerPixel: null,
+  });
 
   expect(
     dispatched.length,
@@ -58,8 +70,16 @@ test("src/application/editor/sketch-pointer-preview-scheduler.spec.ts flushes pe
     },
   });
 
-  scheduler.dispatch({ type: "sketch.pointerMoved", point: [4, 5] });
-  scheduler.dispatch({ type: "sketch.pointerReleased", point: [6, 7] });
+  scheduler.dispatch({
+    type: "sketch.pointerMoved",
+    point: [4, 5],
+    sketchUnitsPerPixel: null,
+  });
+  scheduler.dispatch({
+    type: "sketch.pointerReleased",
+    point: [6, 7],
+    sketchUnitsPerPixel: null,
+  });
 
   expect(
     cancelledFrames[0],

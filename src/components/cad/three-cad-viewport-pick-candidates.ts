@@ -65,10 +65,13 @@ import {
   type PickCandidate,
 } from "@/infrastructure/viewport/render-picking";
 import type { ViewportCamera } from "@/infrastructure/viewport/viewport-projection";
+import { SKETCH_CURVE_RADII_PX } from "@/domain/sketch-interaction/screen-radii";
 import type { ViewportRenderableRecord } from "@/core/workspace/viewport-renderables";
 
-export const DEFAULT_PROJECTED_SKETCH_CURVE_PICK_ENTER_RADIUS_PX = 10;
-export const DEFAULT_PROJECTED_SKETCH_CURVE_PICK_EXIT_RADIUS_PX = 14;
+export const DEFAULT_PROJECTED_SKETCH_CURVE_PICK_ENTER_RADIUS_PX =
+  SKETCH_CURVE_RADII_PX.enter;
+export const DEFAULT_PROJECTED_SKETCH_CURVE_PICK_EXIT_RADIUS_PX =
+  SKETCH_CURVE_RADII_PX.exit;
 /**
  * Below this angle between the pointer ray and the sketch plane (1°), the
  * sketch-plane metric is ill-conditioned: geometry that still uses the
@@ -84,7 +87,7 @@ export const DEFAULT_PROJECTED_SKETCH_CURVE_PICK_EXIT_RADIUS_PX = 14;
  * Lines, polylines, arcs, circles and cubic spans wholly in front of the
  * camera are exact at every angle, under any camera.
  */
-const SKETCH_CURVE_PICK_GRAZING_SINE = Math.sin(Math.PI / 180);
+export const SKETCH_CURVE_PICK_GRAZING_SINE = Math.sin(Math.PI / 180);
 
 export function collectProjectedVertexCandidates({
   clientX,

@@ -37,11 +37,18 @@ import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
 } from "@/domain/modeling/opencascade-kernel-seed";
+import {
+  SPEC_SKETCH_UNITS_PER_PIXEL,
+  withSketchSnapScale,
+} from "@/domain/editor/sketch-session/test-snap-scale";
 
 function newSession() {
-  return createNewSketchSession(
-    createStandardPlaneDefinition("xy"),
-    OCC_KERNEL_SETTINGS,
+  return withSketchSnapScale(
+    createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
+    SPEC_SKETCH_UNITS_PER_PIXEL,
   );
 }
 
@@ -543,13 +550,16 @@ test("T13e re-review A-1′: the verdict is recomputed when a projection result 
         ],
       },
     ] as never as ProjectedSketchReferenceRecord[];
-  const opened = createSketchSessionFromSnapshot(
-    sketchSnapshotRecordForTest(
-      { ...built, definition },
-      [],
-      createStandardPlaneDefinition("xy"),
+  const opened = withSketchSnapScale(
+    createSketchSessionFromSnapshot(
+      sketchSnapshotRecordForTest(
+        { ...built, definition },
+        [],
+        createStandardPlaneDefinition("xy"),
+      ),
+      OCC_KERNEL_SETTINGS,
     ),
-    OCC_KERNEL_SETTINGS,
+    SPEC_SKETCH_UNITS_PER_PIXEL,
   );
   const wide = updateSketchReferenceProjection(
     opened,
