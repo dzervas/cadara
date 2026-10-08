@@ -4,7 +4,13 @@ import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import type { PrimitiveRef } from "@/core/editor/schema";
-import type { SketchEntityId, SketchId } from "@/contracts/shared/ids";
+import type {
+  SketchEntityId,
+  SketchId,
+  SketchPointId,
+} from "@/contracts/shared/ids";
+import { findNearGapEndpoints } from "@/domain/sketch-interaction/near-gap";
+import { makeSketchFixture } from "@/contracts/sketch/region-extraction.fixtures";
 import {
   createLineEntityDefinition,
   createPointDefinition,
@@ -16,7 +22,9 @@ import {
 } from "@/domain/modeling/opencascade-kernel-seed";
 import { SketchPickHint } from "@/components/cad/sketch-pick-hint";
 import {
+  createSketchNearGapHint,
   createSketchPickHint,
+  getSketchNearGapHintText,
   getSketchPickHintText,
   getSketchPickTargetLabel,
   handleSketchPickChooserKeyDown,
@@ -227,4 +235,121 @@ test("T11e review A-5(b)/R-1: the open chooser consumes Escape before the global
     press("ArrowDown", true),
     "Arrow keys are the menu's: no close, not stopped.",
   ).toMatchObject({ closed: 0, stopped: false });
+});
+
+// T13k (D26). Seam: the near-gap hint's model (which end it is about, its
+// partner's label by role, and whether Merge Points would refuse the pair)
+// over real near gaps, and its chip with or without the Merge… button.
+function nearGapFixture(bridge = false) {
+  const f = makeSketchFixture();
+  f.point("a", 0, 0);
+  f.point("b", 4, 0);
+  f.point("c", 4.03, 0);
+  f.point("d", 4.03, 3);
+  f.point("g", 4.08, -3);
+  f.point("e", 4.08, 0);
+  f.line("L1", "a", "b");
+  f.line("L2", "c", "d");
+  f.line("L3", "g", "e");
+  // Review A3: a construction bridge b–c, so merging them would collapse it.
+  if (bridge) f.line("tiny", "b", "c", true);
+  const definition = f.definition();
+  const gaps = findNearGapEndpoints(
+    definition,
+    f.build().solvedSnapshot,
+    new Map(definition.points.map((point) => [point.pointId, point.position])),
+    ([x, y]) => ({ x: x * 100, y: -y * 100 }),
+  );
+  return { definition, gaps };
+}
+const fp = (name: string) => `sketch_point_${name}` as SketchPointId;
+
+test("T13k: the near-gap hint names the partner by its role; hovered end first, then the latest selected", () => {
+  const { definition, gaps } = nearGapFixture();
+  // b~c 3 px, c~e 5 px, b~e 8 px.
+  expect(gaps).toHaveLength(3);
+  const hint = createSketchNearGapHint({
+    gaps,
+    pointIds: [fp("a"), fp("e"), fp("b")],
+    definition,
+  });
+  expect(
+    hint,
+    "the first listed end of a near gap (e), with its nearest partner (c, the start of L2)",
+  ).toEqual({
+    sourcePointId: fp("e"),
+    destinationPointId: fp("c"),
+    partnerLabel: "L2 start",
+    mergeRefusal: null,
+  });
+  expect(getSketchNearGapHintText(hint!)).toBe(
+    "Near gap to L2 start \u2014 not joined",
+  );
+  expect(
+    createSketchNearGapHint({ gaps, pointIds: [fp("c")], definition }),
+    "review Q3: b is the end of L1",
+  ).toEqual({
+    sourcePointId: fp("c"),
+    destinationPointId: fp("b"),
+    partnerLabel: "L1 end",
+    mergeRefusal: null,
+  });
+  expect(
+    createSketchNearGapHint({ gaps, pointIds: [fp("a")], definition }),
+    "an end without a near gap shows none",
+  ).toBeNull();
+});
+
+test("T13k review A3: a pair Merge Points would refuse keeps its hint but is not offered Merge…", () => {
+  const { definition, gaps } = nearGapFixture(true);
+  const hint = createSketchNearGapHint({
+    gaps,
+    pointIds: [fp("c")],
+    definition,
+  });
+  expect(hint).toEqual({
+    sourcePointId: fp("c"),
+    destinationPointId: fp("b"),
+    partnerLabel: "L1 end",
+    mergeRefusal:
+      "Both points are ends of tiny; merging them would collapse it.",
+  });
+  const markup = render(
+    <SketchPickHint hint={null} nearGap={hint} onMerge={() => undefined} />,
+  );
+  expect(markup).toContain("Near gap to L1 end \u2014 not joined");
+  expect(markup).not.toContain("<button");
+  expect(markup).not.toContain("Merge…");
+});
+
+test("T13k: the near-gap chip renders its text and a Merge… button, beside or without the overlap hint", () => {
+  const nearGap = {
+    sourcePointId: "p_c" as SketchPointId,
+    destinationPointId: "p_a" as SketchPointId,
+    partnerLabel: "Line 4 end",
+    mergeRefusal: null,
+  };
+  const alone = render(
+    <SketchPickHint hint={null} nearGap={nearGap} onMerge={() => undefined} />,
+  );
+  expect(alone).toContain('data-testid="sketch-near-gap-hint"');
+  expect(alone).toContain("Near gap to Line 4 end \u2014 not joined");
+  expect(alone).toMatch(/<button[^>]*>.*Merge….*<\/button>/);
+  expect(alone, "the chip takes the pointer for its button").toMatch(
+    /class="pointer-events-auto [^"]*" role="status" data-testid="sketch-near-gap-hint"/,
+  );
+  expect(alone).not.toContain('data-testid="sketch-pick-hint"');
+  const both = render(
+    <SketchPickHint
+      hint={{ label: "Line 2", more: 1, cycles: true }}
+      nearGap={nearGap}
+    />,
+  );
+  expect(both.indexOf('data-testid="sketch-pick-hint"')).toBeGreaterThan(-1);
+  expect(both.indexOf('data-testid="sketch-near-gap-hint"')).toBeGreaterThan(
+    both.indexOf('data-testid="sketch-pick-hint"'),
+  );
+  expect(render(<SketchPickHint hint={null} nearGap={null} />)).not.toContain(
+    'role="status"',
+  );
 });
