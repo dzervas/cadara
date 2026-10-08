@@ -165,6 +165,7 @@ export {
   resolveSketchDrawingEscapeStep,
   selectSketchEditTarget,
   selectSketchReferenceTarget,
+  setSketchInferenceSuppression,
   setSketchSnapScale,
   startSketchDraw,
   toggleSketchConstructionTarget,

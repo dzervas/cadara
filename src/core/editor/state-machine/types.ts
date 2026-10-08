@@ -512,6 +512,16 @@ export interface SketchConfirmRequestedEvent {
   type: "sketch.confirmRequested";
 }
 
+/**
+ * T13-D22: Shift was pressed or released (or its held state was reset by a
+ * window blur or a hidden page). The live placement preview is recomputed
+ * at the last pointer; nothing is authored.
+ */
+export interface SketchInferenceSuppressionChangedEvent {
+  type: "sketch.inferenceSuppressionChanged";
+  held: boolean;
+}
+
 /** Moves the active sketch-local history cursor. */
 
 /** Moves the document-level authored history cursor through the editor runtime. */
@@ -678,6 +688,7 @@ export type EditorEvent =
   | SketchActiveToolClearedEvent
   | SketchEscapeRequestedEvent
   | SketchConfirmRequestedEvent
+  | SketchInferenceSuppressionChangedEvent
   | DocumentHistoryCursorRequestedEvent
   | HistoryUndoRequestedEvent
   | HistoryRedoRequestedEvent

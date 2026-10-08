@@ -213,6 +213,12 @@ export function createWorkbenchViewportIntentHandler({
         // Enter's confirm step: finalizes a viable spline, else nothing.
         dispatch({ type: "sketch.confirmRequested" });
         return;
+      case "sketchInferenceSuppressionChanged":
+        dispatch({
+          type: "sketch.inferenceSuppressionChanged",
+          held: intent.held,
+        });
+        return;
       case "sketchGeometryDragStarted":
         onSketchGeometryDragStart(intent.target, intent.point);
         return;

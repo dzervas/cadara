@@ -58,13 +58,13 @@ export function SketchToolPanel({ schema, onPatch }: SketchToolPanelProps) {
     return null;
   }
 
-  const pointerEventsClassName =
-    controlGroups.length > 0 ? "pointer-events-auto" : "pointer-events-none";
-
+  // Only the controls take the pointer: the rest of the panel stays
+  // click-through to the viewport (every drawing tool has the T13-D22
+  // "Snap & infer" control, so a whole-panel capture would block placement).
   return (
     <Paper
       component="div"
-      className={`${pointerEventsClassName} absolute z-20 max-w-[calc(100vw-32px)] overflow-hidden rounded-[6px] text-xs text-[var(--workbench-shell-text-muted)]`}
+      className={`pointer-events-none absolute z-20 max-w-[calc(100vw-32px)] overflow-hidden rounded-[6px] text-xs text-[var(--workbench-shell-text-muted)]`}
       style={{
         left: VIEWPORT_FLOATING_PANEL_LEFT_PX,
         top: VIEWPORT_FLOATING_PANEL_TOP_STYLE,
@@ -132,7 +132,7 @@ export function SketchToolPanel({ schema, onPatch }: SketchToolPanelProps) {
           </div>
         ))}
         {controlGroups.length > 0 ? (
-          <div className="grid gap-3 border-t border-[var(--workbench-shell-border)] pt-2">
+          <div className="pointer-events-auto grid gap-3 border-t border-[var(--workbench-shell-border)] pt-2">
             {controlGroups.map((group) => (
               <div key={group.id} className="grid gap-0.5">
                 <p className={SECTION_HEADER_CLASSES}>{group.label}</p>
@@ -250,6 +250,7 @@ function SketchToolControlField({
               id={control.id}
               disabled={control.disabled}
               checked={control.value}
+              description={control.hint}
               size="xs"
               color="workbench"
               onChange={(event) => {
@@ -257,6 +258,10 @@ function SketchToolControlField({
                   ...control.action.patch,
                   value: event.currentTarget.checked,
                 });
+                // A focused switch is an input, which the shortcut resolver
+                // treats as text editing: give the shortcuts back (Escape,
+                // Enter…) once it has been flipped (T13h review A-1).
+                event.currentTarget.blur();
               }}
             />
           </div>

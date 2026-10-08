@@ -12,7 +12,9 @@ import {
   beginSketchTool,
   createNewSketchSession,
   finalizeSketchDraw,
+  getSketchToolPresentation,
   patchSketchDrawingToolValue,
+  setSketchInferenceSuppression,
   startSketchDraw,
   updateSketchPointer,
 } from "@/domain/editor/sketch-session";
@@ -569,7 +571,10 @@ describe("T13g shown == authored: tool × placement role × candidate kind", () 
       [6.5, 3.5],
       [7, 6],
     ]);
-    expect(result.shown[0]!.detail).toBe(`On ${entityLabel(line1.entityId)}`);
+    // T13h: the pre-click text also names the structural tangent source.
+    expect(result.shown[0]!.detail).toBe(
+      `On ${entityLabel(line1.entityId)}, Tangent to ${entityLabel(line1.entityId)}`,
+    );
     expect(result.requirements).toEqual([`pointOnCurve:${line1.entityId}`]);
     expect(
       result.authored,
@@ -821,5 +826,399 @@ describe("T13g commit binding (D16)", () => {
     expect(atB(true).text).toBe(
       "Snap position only — Point B is already coincident with the line start",
     );
+  });
+});
+
+// T13h (T13-D22, R-7): suppression frees new placements only; structural
+// relations (chain continuity, a Tangent arc's source pick) are untouched.
+// The Tangent-arc source rules (a) end point, (b) centre are pinned here.
+describe("T13h placement inference suppression (D22) and the Tangent arc source", () => {
+  const FREE = "Free placement (inference off)";
+
+  /** The live placement's text, from the overlay the viewport renders. */
+  function activeText(session: Session) {
+    const overlays = session.toolPresentation?.overlays ?? [];
+    const snap = overlays.find((overlay) => overlay.id === "active-snap");
+    const free = overlays.find(
+      (overlay) => overlay.id === "active-snap-suppressed",
+    );
+    return snap?.kind === "snapIndicator"
+      ? snap.label
+      : free?.kind === "referenceLabel"
+        ? free.label
+        : null;
+  }
+
+  function held(session: Session, value = true) {
+    return setSketchInferenceSuppression(session, { held: value });
+  }
+
+  function newConstraints(before: SketchDefinition, after: SketchDefinition) {
+    return after.constraints.filter(
+      (constraint) =>
+        !before.constraints.some(
+          (old) => old.constraintId === constraint.constraintId,
+        ),
+    );
+  }
+
+  function positionOf(definition: SketchDefinition, pointId: SketchPointId) {
+    return definition.points.find((point) => point.pointId === pointId)
+      ?.position;
+  }
+
+  test("a modifier change alone recomputes the preview: Shift and the toggle each suppress, release restores", () => {
+    const { session, line1, pointLabel } = fixture();
+    const coincident = `Coincident · ${pointLabel(line1.endPointId)}`;
+    const hovering = updateSketchPointer(
+      beginSketchTool(session, "point"),
+      [6.05, 3.05],
+    );
+    expect(activeText(hovering), "premise").toBe(coincident);
+
+    const shift = held(hovering);
+    expect(shift.inferenceSuppressionHeld).toBe(true);
+    expect(activeText(shift), "Shift alone, no pointer motion").toBe(FREE);
+    expect(shift.activeInference?.position, "the raw pointer").toEqual([
+      6.05, 3.05,
+    ]);
+    expect(shift.activeInference?.requirements).toEqual([]);
+    expect(activeText(held(shift, false)), "release restores").toBe(coincident);
+
+    const toggled = setSketchInferenceSuppression(hovering, {
+      inferenceEnabled: false,
+    });
+    expect(toggled.inferenceSuppressionToggled).toBe(true);
+    expect(activeText(toggled), "the toggle suppresses like Shift").toBe(FREE);
+    expect(
+      activeText(held(held(toggled), false)),
+      "releasing Shift keeps the toggle's suppression (Shift or toggle)",
+    ).toBe(FREE);
+    expect(
+      activeText(
+        setSketchInferenceSuppression(toggled, { inferenceEnabled: true }),
+      ),
+    ).toBe(coincident);
+    expect(
+      held(hovering, false),
+      "an unchanged held state changes nothing",
+    ).toBe(hovering);
+    expect(
+      beginSketchTool(toggled, "line").inferenceSuppressionToggled,
+      "the toggle is kept across tool switches",
+    ).toBe(true);
+    expect(
+      activeText(
+        updateSketchPointer(beginSketchTool(toggled, "point"), [30, 30]),
+      ),
+      "nothing to suppress in empty space: no free-placement label",
+    ).toBe(null);
+  });
+
+  test("under suppression a click places at the raw pointer and authors no inferred requirement; existing constraints are untouched", () => {
+    const { session, line1 } = fixture();
+    const before = session.definition;
+    const point = drawFree(held(session), "point", [[6.05, 3.05]]);
+    const placed = point.definition.entities.find(
+      (entity) =>
+        entity.kind === "point" &&
+        !before.entities.some((old) => old.entityId === entity.entityId),
+    );
+    if (placed?.kind !== "point") throw new Error("expected the point");
+    expect(positionOf(point.definition, placed.pointId)).toEqual([6.05, 3.05]);
+    expect(newConstraints(before, point.definition)).toEqual([]);
+
+    // A Line whose start would join Line 1's end and whose end would be
+    // its midpoint: neither is authored, both ends are raw.
+    const line = drawFree(held(session), "line", [
+      [6.05, 3.02],
+      [4.02, 2.53],
+    ]);
+    const added = line.definition.entities.find(
+      (entity) =>
+        entity.kind === "lineSegment" &&
+        !before.entities.some((old) => old.entityId === entity.entityId),
+    );
+    if (added?.kind !== "lineSegment") throw new Error("expected the line");
+    expect(added.startPointId, "no join").not.toBe(line1.endPointId);
+    expect(positionOf(line.definition, added.startPointId)).toEqual([
+      6.05, 3.02,
+    ]);
+    expect(positionOf(line.definition, added.endPointId)).toEqual([4.02, 2.53]);
+    expect(newConstraints(before, line.definition)).toEqual([]);
+    expect(
+      line.definition.constraints.slice(0, before.constraints.length),
+      "existing constraints are unchanged",
+    ).toEqual(before.constraints);
+  });
+
+  test("with Shift held a Line chain still continues structurally; closing onto its start is a suppressed inference", () => {
+    const session = held(
+      withSketchSnapScale(blank(), SPEC_SKETCH_UNITS_PER_PIXEL),
+    );
+    const chained = drawFree(session, "line", [
+      [30, 30],
+      [33, 30.5],
+      [33.5, 33.5],
+      [30.02, 30.01],
+    ]);
+    const [first, second, third] = chained.definition.entities.filter(
+      (entity) => entity.kind === "lineSegment",
+    );
+    if (
+      first?.kind !== "lineSegment" ||
+      second?.kind !== "lineSegment" ||
+      third?.kind !== "lineSegment"
+    ) {
+      throw new Error("expected three lines");
+    }
+    expect(second.startPointId, "continuation is structural").toBe(
+      first.endPointId,
+    );
+    expect(third.startPointId).toBe(second.endPointId);
+    expect(third.endPointId, "the closure is not inferred").not.toBe(
+      first.startPointId,
+    );
+    expect(positionOf(chained.definition, third.endPointId)).toEqual([
+      30.02, 30.01,
+    ]);
+    expect(chained.definition.constraints).toEqual([]);
+  });
+
+  test("with Shift held a Tangent arc keeps its source pick (R-7); its other clicks are free", () => {
+    const { session, line1, circle } = fixture();
+    const before = session.definition;
+    // The end click would be on Circle 2 without suppression.
+    const { session: after, shown } = draw(held(session), "tangentArc", [
+      [4.5, 2.64],
+      [6.5, 3.5],
+      [12.02, 10],
+    ]);
+    expect(shown[0]!.label, "the source pick is shown as usual").toBe(
+      `On ${line1.label}, Tangent to ${line1.label}`,
+    );
+    let beforeEnd = beginSketchTool(held(session), "tangentArc");
+    beforeEnd = startSketchDraw(beforeEnd, [4.5, 2.64]);
+    beforeEnd = acceptSketchDraw(beforeEnd, [6.5, 3.5]);
+    expect(
+      activeText(updateSketchPointer(beforeEnd, [12.02, 10])),
+      "the end click is free",
+    ).toBe(FREE);
+    const authored = authoredRelations(before, after.definition).constraints;
+    expect(authored.sort()).toEqual([
+      `pointOnCurve:${line1.entityId}`,
+      `tangent:${line1.entityId}`,
+    ]);
+    expect(authored).not.toContain(`pointOnCurve:${circle.entityId}`);
+    const arc = after.definition.entities.find(
+      (entity) => entity.kind === "arc" && entity.label.startsWith("Tangent"),
+    );
+    if (arc?.kind !== "arc") throw new Error("expected the arc");
+    expect(positionOf(after.definition, arc.endPointId)).toEqual([12.02, 10]);
+  });
+
+  // T13h review R-1: the source pick is what suppression keeps on a Tangent
+  // arc's first click; with no source to pick, that click is free.
+  test.each([
+    ["the sketch origin", [0.02, 0.01], [-2, 1], [-3, 3]],
+    [
+      "a circle centre (rule (b): no source)",
+      [10.02, 10.02],
+      [12, 9],
+      [14, 12],
+    ],
+  ] as const)(
+    "with Shift held a Tangent arc started at %s is free: raw position, nothing authored",
+    (_where, start, through, end) => {
+      const { session } = fixture();
+      const before = session.definition;
+      const hovered = updateSketchPointer(
+        beginSketchTool(held(session), "tangentArc"),
+        [...start],
+      );
+      expect(activeText(hovered)).toBe(FREE);
+      const after = drawFree(held(session), "tangentArc", [
+        [...start],
+        [...through],
+        [...end],
+      ]);
+      expect(newConstraints(before, after.definition)).toEqual([]);
+      const arc = after.definition.entities.find(
+        (entity) =>
+          entity.kind === "arc" &&
+          !before.entities.some((old) => old.entityId === entity.entityId),
+      );
+      if (arc?.kind !== "arc") throw new Error("expected the arc");
+      expect(positionOf(after.definition, arc.startPointId)).toEqual(start);
+    },
+  );
+
+  // T13h review A-6: the viewport keys its feedback projection on the
+  // presentation's identity, so the toggle must not make it new per read.
+  test("the presentation with the 'Snap & infer' control is one object per session presentation and toggle value", () => {
+    const { session } = fixture();
+    const hovering = updateSketchPointer(
+      beginSketchTool(session, "point"),
+      [6.05, 3.05],
+    );
+    expect(hovering.toolPresentation, "premise").not.toBe(null);
+    const shown = getSketchToolPresentation(hovering);
+    expect(getSketchToolPresentation(hovering)).toBe(shown);
+    expect(getSketchToolPresentation({ ...hovering })).toBe(shown);
+    const toggled = { ...hovering, inferenceSuppressionToggled: true };
+    const off = getSketchToolPresentation(toggled);
+    expect(off).not.toBe(shown);
+    expect(
+      off?.controls?.find((control) => control.id === "sketch-snap-inference")
+        ?.value,
+    ).toBe(false);
+    expect(getSketchToolPresentation(toggled)).toBe(off);
+  });
+
+  // T13h review A-4: an Undo reconcile re-infers each click with its own
+  // suppression, so a free click stays free.
+  test("a free placement stays free after an Undo reconcile", () => {
+    const { session, line1 } = fixture();
+    let draft = beginSketchTool(held(session), "spline");
+    draft = startSketchDraw(draft, [6.02, 3.01]);
+    draft = acceptSketchDraw(draft, [7, 5]);
+    draft = held(draft, false);
+    const restored = rebuildSessionForDefinition(draft, {
+      definition: session.definition,
+    });
+    expect(
+      restored.toolPlacements?.[0],
+      "the click by Line 1's end stays at the raw pointer",
+    ).toMatchObject({ suppressed: true, position: [6.02, 3.01] });
+    expect(
+      restored.toolPresentation?.overlays?.some(
+        (overlay) => overlay.id === "placement-1-snap",
+      ),
+      "no badge",
+    ).toBe(false);
+    const finalized = finalizeSketchDraw(restored);
+    expect(
+      newConstraints(session.definition, finalized.definition),
+      `nothing authored on ${line1.label}`,
+    ).toEqual([]);
+  });
+
+  test("Tangent arc (a): started on a line end, the single line ending there is the source, shown and authored", () => {
+    const { session, line1, pointLabel } = fixture();
+    const result = drawAndCompare(session, "tangentArc", [
+      [6.02, 3.01],
+      [8, 3.6],
+      [9, 6],
+    ]);
+    expect(result.shown[0]!.detail).toBe(
+      `Coincident · ${pointLabel(line1.endPointId)}, On ${line1.label}, Tangent to ${line1.label}`,
+    );
+    expect(result.authored).toEqual(
+      [
+        `coincident:${line1.endPointId}`,
+        `pointOnCurve:${line1.entityId}`,
+        `tangent:${line1.entityId}`,
+      ].sort(),
+    );
+    expect(result.after.liveSolve?.accepted, "the end-tangent arc solves").toBe(
+      true,
+    );
+  });
+
+  test("Tangent arc (a): at an end shared by two lines the source is the line hovered just before, else none", () => {
+    const base = withSketchSnapScale(blank(), SPEC_SKETCH_UNITS_PER_PIXEL);
+    // A chain: Line A (40,40)→(44,41), Line B (44,41)→(46,45) share P.
+    const chained = drawFree(base, "line", [
+      [40, 40],
+      [44, 41],
+      [46, 45],
+    ]);
+    const [lineA, lineB] = chained.definition.entities.filter(
+      (entity) => entity.kind === "lineSegment",
+    );
+    if (lineA?.kind !== "lineSegment" || lineB?.kind !== "lineSegment") {
+      throw new Error("expected two lines");
+    }
+    const atShared = (hovered: Click | null) => {
+      let draft = beginSketchTool(chained, "tangentArc");
+      if (hovered) draft = updateSketchPointer(draft, [...hovered]);
+      draft = updateSketchPointer(draft, [44.02, 41.01]);
+      return {
+        text: activeText(draft),
+        source: startSketchDraw(draft, [44.02, 41.01])
+          .toolTangentSourceEntityId,
+      };
+    };
+    const coincident = `Coincident · ${
+      chained.definition.points.find(
+        (point) => point.pointId === lineA.endPointId,
+      )!.label
+    }`;
+
+    expect(atShared([43, 40.76]), "from along Line A").toEqual({
+      text: `${coincident}, On ${lineA.label}, Tangent to ${lineA.label}`,
+      source: lineA.entityId,
+    });
+    expect(atShared([44.5, 42.01]), "from along Line B").toEqual({
+      text: `${coincident}, On ${lineB.label}, Tangent to ${lineB.label}`,
+      source: lineB.entityId,
+    });
+    expect(atShared(null), "straight onto the shared end: ambiguous").toEqual({
+      text: coincident,
+      source: null,
+    });
+  });
+
+  test("Tangent arc (b): started on a circle centre, the circle is not a tangent source", () => {
+    const { session, circle } = fixture();
+    const result = drawAndCompare(session, "tangentArc", [
+      [10.02, 10.02],
+      [12, 9],
+      [14, 12],
+    ]);
+    expect(result.authored, "only the shown centre coincident").toEqual([
+      `coincident:${circle.centerPointId}`,
+    ]);
+    expect(result.shown[0]!.detail).toBe(`Coincident with Circle 2 centre`);
+  });
+
+  test("coverage: a construction target is named '(construction)' and the relation is authored", () => {
+    const { session, line1 } = fixture();
+    const construction = rebuildSessionForDefinition(session, {
+      definition: {
+        ...session.definition,
+        entities: session.definition.entities.map((entity) =>
+          entity.entityId === line1.entityId
+            ? { ...entity, isConstruction: true }
+            : entity,
+        ),
+      },
+    });
+    const result = drawAndCompare(construction, "point", [[4.5, 2.64]]);
+    expect(result.shown[0]!.label).toBe(`On ${line1.label} (construction)`);
+    expect(result.authored).toEqual([`pointOnCurve:${line1.entityId}`]);
+    expect(result.requirements).toEqual(result.authored);
+  });
+
+  test("coverage: a release inside the exit radius keeps the shown snap (hysteresis): shown == committed", () => {
+    const { session, line1, pointLabel } = fixture();
+    // Enter 12 px = 0.18, exit 16 px = 0.24 at the spec scale.
+    const fresh = updateSketchPointer(
+      beginSketchTool(session, "point"),
+      [6.21, 3],
+    );
+    expect(activeText(fresh), "premise: 0.21 away does not enter").toBe(null);
+
+    const hovered = updateSketchPointer(
+      beginSketchTool(session, "point"),
+      [6.1, 3],
+    );
+    const shown = activeText(hovered);
+    expect(shown).toBe(`Coincident · ${pointLabel(line1.endPointId)}`);
+    const committed = startSketchDraw(hovered, [6.21, 3]);
+    expect(
+      authoredRelations(session.definition, committed.definition).constraints,
+      "the release authors what was shown",
+    ).toEqual([`coincident:${line1.endPointId}`]);
   });
 });

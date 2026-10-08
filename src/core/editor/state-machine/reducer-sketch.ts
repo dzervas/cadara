@@ -5,6 +5,7 @@ import {
   adoptCompatibleSketchEditToolTargets,
   beginSketchTool,
   cancelSketchGeometryDrag,
+  finalizeSketchDraw,
   focusSketchStyleTool,
   getSketchSessionPreviewLabel,
   isSketchSvgRenderingEnabled,
@@ -42,6 +43,7 @@ import {
   handleSketchActiveToolCleared,
   handleSketchEscapeRequested,
   handleSketchConfirmRequested,
+  handleSketchInferenceSuppressionChanged,
   handleSketchAnnotationDeleteRequested,
   handleSketchAnnotationEditRequested,
   handleSketchConnectedSelectionRequested,
@@ -75,6 +77,19 @@ function createSketchPreviewState(
   };
 }
 
+/**
+ * Finish, by any path (T13-D23, amending T11-D14 for viable drafts): a
+ * viable fit-point draft is first finalized as its own creation action,
+ * then the sketch is published. Any other unfinished draft is discarded:
+ * the commit request never includes it.
+ */
+function finishSketchSession(state: SketchEditorState): EditorTransitionResult {
+  const session = finalizeSketchDraw(state.session);
+  return emitSketchCommit(
+    session === state.session ? state : { ...state, session },
+  );
+}
+
 function handleEditingSketchToolActivation(
   state: SketchEditorState,
   event: Extract<SketchEvent, { type: "tool.activated" }>,
@@ -86,7 +101,7 @@ function handleEditingSketchToolActivation(
   }
 
   if (event.toolId === "finishSketch") {
-    return emitSketchCommit(state);
+    return finishSketchSession(state);
   }
 
   if (event.toolId === "svgRendering") {
@@ -243,7 +258,7 @@ export function reduceSketchWorkflow(
         );
       }
 
-      return emitSketchCommit(state);
+      return finishSketchSession(state);
     case "sketch.connectedSelectionRequested":
       return handleSketchConnectedSelectionRequested(state, event);
     case "sketch.specialModeEntered":
@@ -299,6 +314,10 @@ export function reduceSketchWorkflow(
       return handleSketchEscapeRequested(state);
     case "sketch.confirmRequested":
       return handleSketchConfirmRequested(state);
+    case "sketch.inferenceSuppressionChanged":
+      return handleSketchInferenceSuppressionChanged(state, {
+        held: event.held,
+      });
     case "sketch.annotationDeleteRequested":
       return handleSketchAnnotationDeleteRequested(state);
     case "sketch.annotationEditRequested":

@@ -82,6 +82,16 @@ function restoreAfterReducer(
 const ANNOTATION_DRAG_THRESHOLD_PX = 6;
 
 function actionLabel(event: EditorEvent, before: EditorState) {
+  // T13-D23: Finish's own definition change is the finalized spline (a
+  // commit request with a special mode open commits that mode instead).
+  if (
+    (event.type === "tool.activated" && event.toolId === "finishSketch") ||
+    (event.type === "command.commitRequested" &&
+      before.kind === "editingSketch" &&
+      !before.session.activeSpecialMode)
+  ) {
+    return "Create Sketch Geometry";
+  }
   switch (event.type) {
     case "sketch.geometryDragEnded":
       return "Move Sketch Geometry";

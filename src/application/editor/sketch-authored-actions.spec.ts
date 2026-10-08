@@ -17,6 +17,7 @@ import {
   beginSketchTool,
   createNewSketchSession,
   finalizeSketchDraw,
+  getSketchToolPresentation,
   startSketchDraw,
   deleteSelectedSketchGeometry,
   patchSketchConstraintValue,
@@ -1793,7 +1794,7 @@ describe("T11i: fit-point spline history (T11-D10, D13, D14)", () => {
     expect(f.session.actionAvailability?.canUndo).toBe(false);
   });
 
-  test("a tool switch or Finish with an unfinalized 3-point spline discards it with no action (T11-D14)", async () => {
+  test("a tool switch with an unfinalized 3-point spline still discards it with no action (T11-D14, T13 A-9)", async () => {
     const draft = [
       [20, 20],
       [30, 25],
@@ -1805,14 +1806,70 @@ describe("T11i: fit-point spline history (T11-D10, D13, D14)", () => {
     expect(switched.session.toolPlacedPoints).toEqual([]);
     expect(projection(switched.session)).toEqual(before);
     expect(switched.session.actionAvailability?.canUndo).toBe(false);
+  });
 
-    const finished = await splineDraft(draft);
-    const finishedBefore = projection(finished.session);
+  // T13-D23 (amends T11-D14 for viable drafts): Finish, by any path, first
+  // finalizes a viable fit-point draft as its own creation action, then
+  // publishes; the publication is the document's later "Publish Sketch".
+  test.each([
+    [
+      "the Finish tool (Shift+Enter)",
+      { type: "tool.activated", toolId: "finishSketch" },
+    ],
+    [
+      "the commit request",
+      { type: "command.commitRequested", commandSessionId: "command_test" },
+    ],
+  ] as const)(
+    "Finish by %s with a 3-point spline draft finalizes it as one creation action, then publishes it (T13-D23)",
+    async (_path, event) => {
+      const draft = [
+        [20, 20],
+        [30, 25],
+        [40, 20],
+      ] as const;
+      const finished = await splineDraft(draft);
+      const result = finished.owner.transition(
+        finished.state,
+        event as EditorEvent,
+        (state) => transitionEditorState(state, event as EditorEvent),
+      );
+      const commit = result.effects.find(
+        (effect) => effect.type === "sketch.commit",
+      );
+      if (commit?.type !== "sketch.commit") throw Error("Expected the commit.");
+      const published = commit.session.commitRequest?.definition;
+      const [spline] =
+        published?.entities.filter((entity) => entity.kind === "spline") ?? [];
+      if (spline?.kind !== "spline") throw Error("Expected the spline.");
+      expect(
+        spline.pointOccurrences.map(
+          (occurrence) =>
+            published!.points.find(
+              ({ pointId }) => pointId === occurrence.pointId,
+            )?.position,
+        ),
+        "Finish publishes the spline through every placed fit point.",
+      ).toEqual(draft);
+      if (result.state.kind !== "editingSketch") throw Error("Expected sketch");
+      expect(
+        result.state.session.actionHistory?.undo.map((entry) => entry.label),
+        "The finalized spline is one creation action, before the publication.",
+      ).toEqual(["Create Sketch Geometry"]);
+      expect(projection(commit.session)).toEqual(
+        projection(result.state.session),
+      );
+    },
+  );
+
+  test("Finish with a non-viable 1-point spline draft discards it with no action (T11-D14 kept)", async () => {
+    const f = await splineDraft([[20, 20]]);
+    const before = projection(f.session);
     const event: EditorEvent = {
       type: "tool.activated",
       toolId: "finishSketch",
     };
-    const result = finished.owner.transition(finished.state, event, (state) =>
+    const result = f.owner.transition(f.state, event, (state) =>
       transitionEditorState(state, event),
     );
     const commit = result.effects.find(
@@ -1820,15 +1877,11 @@ describe("T11i: fit-point spline history (T11-D10, D13, D14)", () => {
     );
     expect(commit?.type).toBe("sketch.commit");
     if (commit?.type === "sketch.commit")
-      expect(
-        projection(commit.session),
-        "Finish publishes the definition without the spline.",
-      ).toEqual(finishedBefore);
+      expect(projection(commit.session)).toEqual(before);
     expect(
       result.state.kind === "editingSketch"
         ? result.state.session.actionAvailability?.canUndo
         : null,
-      "The discarded spline adds no action.",
     ).toBe(false);
   });
 
@@ -2285,4 +2338,120 @@ test("T13d: Make reference and Make driving are one action each; Undo/Redo resto
     drivingAgain,
   );
   expect(f.session.liveSolve?.accepted).toBe(true);
+});
+
+// T13-D22: Shift (the viewport's `sketch.inferenceSuppressionChanged`) and
+// the "Snap & infer" toggle (a tool patch) are session UI state: the reducer
+// recomputes the live preview at the last pointer, nothing is authored and
+// no action is recorded; the toggle survives tool switches.
+describe("T13h: inference suppression through the reducer", () => {
+  function activeOverlay(f: Awaited<ReturnType<typeof fixture>>) {
+    const overlays = f.session.toolPresentation?.overlays ?? [];
+    return (
+      overlays.find(
+        (overlay) =>
+          overlay.id === "active-snap" ||
+          overlay.id === "active-snap-suppressed",
+      ) ?? null
+    );
+  }
+
+  test("Shift pressed and released over a hovered snap recomputes the preview without pointer motion, with no action", async () => {
+    const f = await fixture();
+    const before = projection(f.session);
+    f.dispatch({ type: "tool.activated", toolId: "point" });
+    f.dispatch({
+      type: "sketch.pointerMoved",
+      sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
+      point: [12.05, 0.05],
+    });
+    expect(activeOverlay(f)?.label, "premise").toMatch(/^Coincident · /);
+
+    f.dispatch({ type: "sketch.inferenceSuppressionChanged", held: true });
+    expect(f.session.inferenceSuppressionHeld).toBe(true);
+    expect(activeOverlay(f)).toMatchObject({
+      kind: "referenceLabel",
+      label: "Free placement (inference off)",
+    });
+    expect(f.state.preview).toMatchObject({ kind: "sketch" });
+
+    f.dispatch({ type: "sketch.inferenceSuppressionChanged", held: false });
+    expect(activeOverlay(f)?.label).toMatch(/^Coincident · /);
+    expect(projection(f.session)).toEqual(before);
+    expect(f.session.actionAvailability?.canUndo).toBe(false);
+  });
+
+  test("a Shift change while Finish's commit is pending keeps the 'Committing' preview (T13h review A-7)", async () => {
+    const f = await fixture();
+    f.dispatch({ type: "tool.activated", toolId: "point" });
+    f.dispatch({
+      type: "sketch.pointerMoved",
+      sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
+      point: [12.05, 0.05],
+    });
+    f.dispatch({ type: "tool.activated", toolId: "finishSketch" });
+    expect(f.state.pendingCommitRequestId, "premise").not.toBe(null);
+    const committing = f.state.preview;
+    expect(committing).toMatchObject({
+      label: "Committing accepted sketch geometry",
+    });
+
+    f.dispatch({ type: "sketch.inferenceSuppressionChanged", held: true });
+    expect(f.session.inferenceSuppressionHeld, "the held state is kept").toBe(
+      true,
+    );
+    expect(f.state.preview).toBe(committing);
+  });
+
+  test("the 'Snap & infer' toggle suppresses, records no action, and is kept across tool switches", async () => {
+    const f = await fixture();
+    f.dispatch({ type: "tool.activated", toolId: "point" });
+    const toggle = () =>
+      getSketchToolPresentation(f.session)?.controls?.find(
+        (control) => control.id === "sketch-snap-inference",
+      );
+    expect(toggle()).toMatchObject({
+      kind: "toggle",
+      label: "Snap & infer",
+      value: true,
+    });
+
+    f.dispatch({
+      type: "sketch.toolPatched",
+      patch: { ...toggle()!.action.patch, value: false },
+    });
+    expect(f.session.inferenceSuppressionToggled).toBe(true);
+    expect(toggle()?.value).toBe(false);
+    expect(f.session.actionAvailability?.canUndo, "no action").toBe(false);
+
+    f.dispatch({ type: "tool.activated", toolId: "line" });
+    expect(f.session.inferenceSuppressionToggled, "kept").toBe(true);
+    f.dispatch({
+      type: "sketch.pointerMoved",
+      sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
+      point: [12.05, 0.05],
+    });
+    expect(activeOverlay(f)?.label).toBe("Free placement (inference off)");
+    f.dispatch({
+      type: "sketch.pointerReleased",
+      sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
+      point: [12.05, 0.05],
+    });
+    f.dispatch({
+      type: "sketch.pointerReleased",
+      sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
+      point: [20, 5],
+    });
+    const original = f.session.definition.entities.find(
+      (entity) => entity.kind === "lineSegment",
+    );
+    const drawn = f.session.definition.entities.filter(
+      (entity) => entity.kind === "lineSegment",
+    )[1];
+    if (original?.kind !== "lineSegment" || drawn?.kind !== "lineSegment")
+      throw Error("Expected the lines.");
+    expect(drawn.startPointId, "the toggle-off draw does not join").not.toBe(
+      original.endPointId,
+    );
+  });
 });
