@@ -4,7 +4,13 @@ import {
   VIEWPORT_SKETCH_TOOL_PANEL_WIDTH_PX,
 } from "@/components/cad/viewport-overlay-layout";
 import { getPrimitiveRefKey, type PrimitiveRef } from "@/core/editor/schema";
+import type { SketchPointId } from "@/contracts/shared/ids";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
+import { createSketchMergePointsMutation } from "@/domain/sketch-editing/merge-points";
+import {
+  findSketchNearGapAt,
+  type SketchNearGap,
+} from "@/domain/sketch-interaction/near-gap";
 import type { SketchPickClass } from "@/domain/sketch-interaction/pick-stack";
 
 /**
@@ -58,6 +64,60 @@ export function getSketchPickHintText(hint: SketchPickHintModel) {
     `${hint.more} more here${hint.cycles ? " — click again to cycle" : ""}`,
     "Alt+click to choose",
   ].join(" · ");
+}
+
+/**
+ * The near-gap hint (T13k, D26): the end it is about (the Merge… source)
+ * and its nearest partner (the staged destination).
+ */
+export interface SketchNearGapHintModel {
+  readonly sourcePointId: SketchPointId;
+  readonly destinationPointId: SketchPointId;
+  /** The partner end by its role, e.g. "Line 4 start" (review Q3). */
+  readonly partnerLabel: string;
+  /**
+   * Why Merge Points would refuse this pair, or null when it can merge.
+   * A refused pair is not offered Merge…; the chip still states the gap.
+   */
+  readonly mergeRefusal: string | null;
+}
+
+/**
+ * The near-gap hint for the first of `pointIds` (the hovered end, then the
+ * selected ones) that is an end of a near gap; null when none is.
+ */
+export function createSketchNearGapHint({
+  gaps,
+  pointIds,
+  definition,
+}: {
+  gaps: readonly SketchNearGap[];
+  pointIds: readonly SketchPointId[];
+  definition: SketchDefinition;
+}): SketchNearGapHintModel | null {
+  for (const pointId of pointIds) {
+    const at = findSketchNearGapAt(gaps, pointId);
+    if (!at) continue;
+    const curve = definition.entities.find(
+      (entity) => entity.entityId === at.partner.entityId,
+    );
+    const merge = createSketchMergePointsMutation({
+      definition,
+      sourcePointId: at.end.pointId,
+      destinationPointId: at.partner.pointId,
+    });
+    return {
+      sourcePointId: at.end.pointId,
+      destinationPointId: at.partner.pointId,
+      partnerLabel: `${curve?.label ?? "Curve"} ${at.partner.role}`,
+      mergeRefusal: merge.valid ? null : merge.message,
+    };
+  }
+  return null;
+}
+
+export function getSketchNearGapHintText(hint: SketchNearGapHintModel) {
+  return `Near gap to ${hint.partnerLabel} \u2014 not joined`;
 }
 
 /** One candidate chooser item (T11e, T11-D6): label plus class tag. */

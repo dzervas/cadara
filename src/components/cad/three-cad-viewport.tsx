@@ -55,12 +55,14 @@ import {
   updatePointerFromClientPoint,
 } from "@/components/cad/three-cad-viewport-pick-candidates";
 import { SketchPickHint } from "@/components/cad/sketch-pick-hint";
+import { SketchNearGapGlyphs } from "@/components/cad/sketch-near-gap-glyphs";
 import { computeSketchUnitsPerPixel } from "@/components/cad/sketch-snap-scale";
 import {
   SketchPickChooser,
   type SketchPickChooserModel,
 } from "@/components/cad/sketch-pick-chooser";
 import {
+  createSketchNearGapHint,
   createSketchPickChooserItems,
   createSketchPickHint,
   getSketchPickHintText,
@@ -116,7 +118,16 @@ import {
   type SketchPickClass,
   type SketchPickCycle,
 } from "@/domain/sketch-interaction/pick-stack";
-import { getSketchSessionDisplayDefinition } from "@/domain/editor/sketch-session/internals";
+import {
+  findNearGapEndpoints,
+  getSketchNearGapBasis,
+  type SketchNearGap,
+} from "@/domain/sketch-interaction/near-gap";
+import {
+  createSketchPointRef,
+  getSketchSessionDisplayDefinition,
+} from "@/domain/editor/sketch-session/internals";
+import type { SketchId } from "@/contracts/shared/ids";
 import { mapSketchPointToWorld } from "@/domain/editor/sketch-session/state";
 import {
   getSketchRevealedPointIds,
@@ -215,6 +226,7 @@ interface SketchHoverStack {
 }
 
 const EMPTY_SKETCH_HOVER_STACK: SketchHoverStack = { key: "", targets: [] };
+const EMPTY_SKETCH_NEAR_GAPS: readonly SketchNearGap[] = [];
 
 interface ThreeCadViewportProps {
   model: ViewportModel;
@@ -412,6 +424,8 @@ export function ThreeCadViewport({
     useState<SketchViewportFeedbackProjection[]>([]);
   const [specialModeFeedbackProjections, setSpecialModeFeedbackProjections] =
     useState<SketchSpecialModeFeedbackProjection[]>([]);
+  // T13k (D26): the near gaps at their current screen positions.
+  const [sketchNearGaps, setSketchNearGaps] = useState(EMPTY_SKETCH_NEAR_GAPS);
   const [dragFeedbackCue, setDragFeedbackCue] = useState<{
     x: number;
     y: number;
@@ -940,6 +954,80 @@ export function ThreeCadViewport({
   // pick (T11e review B-1).
   const sketchDefinition = sketchSession?.definition ?? null;
   const sketchActiveTool = sketchSession?.activeTool ?? null;
+  // T13k review R1: near gaps need the accepted live solve of the current
+  // definition (its declared join classes); without one there are none.
+  const sketchLiveSolve = sketchSession?.liveSolve ?? null;
+  const sketchNearGapBasis = useMemo(
+    () =>
+      sketchDefinition
+        ? getSketchNearGapBasis({
+            definition: sketchDefinition,
+            liveSolve: sketchLiveSolve,
+          })
+        : null,
+    [sketchDefinition, sketchLiveSolve],
+  );
+  // T13k (D26): the displayed world position of each point of this sketch
+  // (its point markers), for the near-gap pass.
+  const sketchNearGapPositions = useMemo(
+    () =>
+      new Map(
+        sketchDisplayRenderables.flatMap((renderable) =>
+          renderable.target?.kind === "sketchPoint" &&
+          renderable.target.sketchId === sketchHoverScope &&
+          renderable.geometry.kind === "marker"
+            ? [[renderable.target.pointId, renderable.geometry.position]]
+            : [],
+        ),
+      ),
+    [sketchDisplayRenderables, sketchHoverScope],
+  );
+  // The near-gap hint's hovered end is sticky like the overlap hint (T11e):
+  // it stays while nothing is hovered (empty space, the chip itself) and is
+  // replaced by the next hovered target. Adjusted while rendering.
+  const [nearGapHover, setNearGapHover] = useState<{
+    scope: string | null;
+    target: PrimitiveRef | null;
+  }>({ scope: null, target: null });
+  if (
+    hoverTarget !== null &&
+    (nearGapHover.scope !== sketchHoverScope ||
+      !nearGapHover.target ||
+      !primitiveRefEquals(nearGapHover.target, hoverTarget))
+  ) {
+    setNearGapHover({ scope: sketchHoverScope, target: hoverTarget });
+  }
+  // Hovering or selecting an end of a near gap shows the hint with Merge…
+  // (T13k, D26); only while no tool is active.
+  // Memoised: the hint runs the merge refusal check for its pair.
+  const nearGapHint = useMemo(
+    () =>
+      sketchDefinition && sketchActiveTool === null
+        ? createSketchNearGapHint({
+            gaps: sketchNearGaps,
+            pointIds: [
+              ...(nearGapHover.scope === sketchHoverScope
+                ? [nearGapHover.target]
+                : []),
+              ...[...selection].reverse(),
+            ].flatMap((target) =>
+              target?.kind === "sketchPoint" &&
+              target.sketchId === sketchHoverScope
+                ? [target.pointId]
+                : [],
+            ),
+            definition: sketchDefinition,
+          })
+        : null,
+    [
+      nearGapHover,
+      selection,
+      sketchActiveTool,
+      sketchDefinition,
+      sketchHoverScope,
+      sketchNearGaps,
+    ],
+  );
   useEffect(() => {
     pickCycleRef.current = null;
     pickHintTextRef.current = null;
@@ -1108,6 +1196,7 @@ export function ThreeCadViewport({
       setSketchFeedbackProjections([]);
       setSketchAnnotationProjections([]);
       setSpecialModeFeedbackProjections([]);
+      setSketchNearGaps(EMPTY_SKETCH_NEAR_GAPS);
       return;
     }
 
@@ -1221,8 +1310,34 @@ export function ThreeCadViewport({
     } else {
       setDragFeedbackCue(null);
     }
+
+    // T13k (D26): near gaps, recomputed on every camera or geometry change.
+    const nearGaps = sketchNearGapBasis
+      ? findNearGapEndpoints(
+          sketchNearGapBasis.definition,
+          sketchNearGapBasis.solved,
+          sketchNearGapPositions,
+          (point: WorkspaceVec3) =>
+            projectSketchFeedbackAnchor({
+              anchor: { kind: "worldPoint", point },
+              plane,
+              viewport: { width: rect.width, height: rect.height },
+              projectWorldPoint: (world: WorkspaceVec3) => {
+                const projected = new THREE.Vector3(
+                  world[0],
+                  world[1],
+                  world[2],
+                ).project(camera);
+                return { x: projected.x, y: projected.y, z: projected.z };
+              },
+            }),
+        )
+      : [];
+    setSketchNearGaps(nearGaps.length > 0 ? nearGaps : EMPTY_SKETCH_NEAR_GAPS);
   }, [
     sketchAnnotations,
+    sketchNearGapBasis,
+    sketchNearGapPositions,
     sketchSession?.activeDrag?.feedback,
     sketchSession?.plane,
     sketchToolPresentation,
@@ -3144,8 +3259,25 @@ export function ThreeCadViewport({
               clearSketchPickHint();
             }
           }}
+          nearGap={nearGapHint}
+          onMerge={() => {
+            if (!nearGapHint || !sketchHoverScope) return;
+            const sketchId = sketchHoverScope as SketchId;
+            // Arms Merge Points source → staged destination; the merge
+            // itself still needs Enter or the floating Merge (T13k).
+            onIntent({
+              type: "sketchMergeOffered",
+              source: createSketchPointRef(sketchId, nearGapHint.sourcePointId),
+              destination: createSketchPointRef(
+                sketchId,
+                nearGapHint.destinationPointId,
+              ),
+            });
+            focusCanvas();
+          }}
         />
       </div>
+      <SketchNearGapGlyphs gaps={sketchSession ? sketchNearGaps : []} />
       <SketchPickChooser
         chooser={sketchSession ? chooser : null}
         onPick={pickFromSketchPickChooser}

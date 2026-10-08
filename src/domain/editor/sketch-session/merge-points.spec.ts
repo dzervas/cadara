@@ -30,7 +30,10 @@ import {
 } from "@/domain/editor/sketch-session/selection";
 import { createSketchMergePointsMutation } from "@/domain/sketch-editing/merge-points";
 import { normalizeSketchDefinition } from "@/domain/modeling/modeling-service/normalization";
-import { getEnterEvent } from "@/domain/editor/workbench-interactions";
+import {
+  getEnterEvent,
+  getSketchMergeOfferEvents,
+} from "@/domain/editor/workbench-interactions";
 import {
   initialEditorState,
   transitionEditorState,
@@ -503,5 +506,102 @@ describe("selection-first activation (T13j)", () => {
     expect(next.toolPresentation?.prompts[0]?.text).toBe(
       "Pick the destination for a2",
     );
+  });
+});
+
+// T13k (D26). Seam: the near-gap hint's Merge… events
+// (`getSketchMergeOfferEvents`) through the real editor reducer.
+describe("Merge… from the near-gap hint (T13k)", () => {
+  async function editing(selection: readonly PrimitiveRef[]) {
+    const session = open();
+    return {
+      ...initialEditorState,
+      kind: "editingSketch",
+      mode: "sketch",
+      snapshot: await createSeedDocumentSnapshot(),
+      document: { documentId: "doc_workspace", revisionId: "rev_1" },
+      command: {
+        commandSessionId: "command_test",
+        toolId: "sketch",
+        phase: "editing",
+      },
+      session,
+      selection: [...selection],
+      pendingCommitRequestId: null,
+      pendingImportRequestId: null,
+      pendingProjectionRequestId: null,
+    } as SketchEditorState;
+  }
+  const run = (
+    state: SketchEditorState,
+    events: Parameters<typeof transitionEditorState>[1][],
+  ) => {
+    const next = events.reduce(
+      (current, event) => transitionEditorState(current, event).state,
+      state as Parameters<typeof transitionEditorState>[0],
+    );
+    if (next.kind !== "editingSketch") throw new Error("Expected sketch");
+    return next;
+  };
+
+  test("arms Merge Points with the hovered end as source and stages its partner as the destination; nothing merges until Enter", async () => {
+    const session = open();
+    // A point selected before would be adopted as the source by plain
+    // activation; the offer starts from a clean selection instead.
+    const before = await editing([point(session, "b")]);
+    const armed = run(
+      before,
+      getSketchMergeOfferEvents(point(session, "a2"), point(session, "a")),
+    );
+    expect(armed.command.toolId).toBe("sketchMergePoints");
+    expect(armed.session.activeTool).toBe("sketchMergePoints");
+    expect(armed.session.activeEditTool?.selectedTargets).toEqual([
+      point(session, "a2"),
+      point(session, "a"),
+    ]);
+    expect(armed.session.toolPresentation?.prompts[0]?.text).toBe(
+      "Merge a2 into a \u2014 Enter or Merge to confirm",
+    );
+    expect(armed.session.toolPresentation?.overlays?.[0]).toEqual(
+      expect.objectContaining({
+        label: "Destination",
+        anchor: expect.objectContaining({ point: [0, 0] }),
+      }),
+    );
+    // The Merge… click itself changes no geometry and requests no commit.
+    expect(armed.session.definition).toBe(before.session.definition);
+    expect(armed.session.sequence).toBe(before.session.sequence);
+    expect(armed.session.commitRequest).toBe(before.session.commitRequest);
+    expect(armed.session.toolPresentation?.floatingInput).toEqual(
+      expect.objectContaining({ confirmOnly: true, confirmLabel: "Merge" }),
+    );
+
+    // The explicit confirm merges.
+    const enter = getEnterEvent({ sketchSession: armed.session });
+    expect(enter).toEqual({
+      type: "sketch.toolPatched",
+      patch: { intent: "mergePoints" },
+    });
+    const merged = run(armed, [enter!]);
+    expect(merged.session.definition.pointIds).not.toContain(pid("a2"));
+    expect(merged.session.toolPresentation?.prompts[0]?.text).toBe(
+      "Merged a2 into a.",
+    );
+  });
+
+  test("the user can still pick another destination instead of the suggested one", async () => {
+    const session = open();
+    const armed = run(
+      await editing([]),
+      getSketchMergeOfferEvents(point(session, "a2"), point(session, "a")),
+    );
+    const other = run(armed, [
+      { type: "viewport.selectionRequested", target: point(session, "b") },
+    ]);
+    expect(other.session.activeEditTool?.selectedTargets).toEqual([
+      point(session, "a2"),
+      point(session, "b"),
+    ]);
+    expect(other.session.definition).toBe(armed.session.definition);
   });
 });

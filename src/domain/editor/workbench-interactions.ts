@@ -129,6 +129,24 @@ export function getEnterEvent(
     : null;
 }
 
+/**
+ * The near-gap hint's Merge… (T13k, D26): arm Merge Points with the hovered
+ * end as the source and stage its partner as the destination, through the
+ * same events as clearing the selection, activating the tool and clicking
+ * both points. Nothing merges until Enter or the floating Merge confirms.
+ */
+export function getSketchMergeOfferEvents(
+  source: PrimitiveRef,
+  destination: PrimitiveRef,
+): EditorEvent[] {
+  return [
+    { type: "selection.cleared" },
+    { type: "tool.activated", toolId: "sketchMergePoints" },
+    { type: "viewport.selectionRequested", target: source },
+    { type: "viewport.selectionRequested", target: destination },
+  ];
+}
+
 export function shouldViewportClickRequestSelection(
   activeSketchTool: SketchAuthoringToolId | null | undefined,
 ) {

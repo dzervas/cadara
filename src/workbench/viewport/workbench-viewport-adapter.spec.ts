@@ -164,3 +164,41 @@ test("workbench viewport adapter routes typed intents to editor events and comma
     { type: "sketch.confirmRequested" },
   ]);
 });
+
+// T13k (D26). Lane: ui (src/workbench). Seam: the adapter's routing of the
+// near-gap hint's Merge… intent to the editor events that arm Merge Points.
+test("T13k: the near-gap Merge… intent dispatches the merge-offer events, in order", () => {
+  const dispatched: unknown[] = [];
+  const others: string[] = [];
+  const actions = new Proxy(
+    { dispatch: (event: unknown) => dispatched.push(event) },
+    {
+      get: (target, key) =>
+        key in target
+          ? target[key as "dispatch"]
+          : () => others.push(String(key)),
+    },
+  ) as unknown as Parameters<typeof createWorkbenchViewportIntentHandler>[0];
+  const source = {
+    kind: "sketchPoint",
+    sketchId: "sketch_1",
+    pointId: "sketch_point_a2",
+  } as PrimitiveRef;
+  const destination = {
+    kind: "sketchPoint",
+    sketchId: "sketch_1",
+    pointId: "sketch_point_a",
+  } as PrimitiveRef;
+  createWorkbenchViewportIntentHandler(actions)({
+    type: "sketchMergeOffered",
+    source,
+    destination,
+  });
+  expect(dispatched).toEqual([
+    { type: "selection.cleared" },
+    { type: "tool.activated", toolId: "sketchMergePoints" },
+    { type: "viewport.selectionRequested", target: source },
+    { type: "viewport.selectionRequested", target: destination },
+  ]);
+  expect(others).toEqual([]);
+});

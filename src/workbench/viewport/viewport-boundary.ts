@@ -128,6 +128,12 @@ export type ViewportIntent =
   | { type: "sectionFlipRequested" }
   | { type: "sectionClearRequested" }
   | { type: "sketchToolPatched"; patch: Record<string, unknown> }
+  /** The near-gap hint's Merge…: arm Merge Points source → destination (T13k). */
+  | {
+      type: "sketchMergeOffered";
+      source: PrimitiveRef;
+      destination: PrimitiveRef;
+    }
   | { type: "lodTierChanged"; tierId: OccTessellationTierId }
   | { type: "canvasCreated" }
   | { type: "firstNonEmptyGeometryFrame" };

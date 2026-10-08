@@ -16,6 +16,7 @@ import type {
 import type { MeasurementWitness } from "@/domain/measure/measurement";
 import type { OccTessellationTierId } from "@/domain/modeling/occ/tessellation";
 import type { ViewportRenderableRecord } from "@/core/workspace/viewport-renderables";
+import { getSketchMergeOfferEvents } from "@/domain/editor/workbench-interactions";
 import type {
   ViewportCommand,
   ViewportIntent,
@@ -263,6 +264,13 @@ export function createWorkbenchViewportIntentHandler({
         return;
       case "sketchToolPatched":
         dispatch({ type: "sketch.toolPatched", patch: intent.patch });
+        return;
+      case "sketchMergeOffered":
+        for (const event of getSketchMergeOfferEvents(
+          intent.source,
+          intent.destination,
+        ))
+          dispatch(event);
         return;
       case "lodTierChanged":
         onLodTierChange(intent.tierId);
