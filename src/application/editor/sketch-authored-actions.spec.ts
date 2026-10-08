@@ -43,6 +43,7 @@ import { createReferenceImageOperation } from "@/domain/reference-image/operatio
 import { reconstructSplineAggregate } from "@/contracts/sketch/spline-geometry";
 import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
 import type { PrimitiveRef } from "@/core/editor/schema";
+import { getEscapeEvent } from "@/domain/editor/workbench-interactions";
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,
@@ -2724,5 +2725,286 @@ describe("T13j: Merge Points is one action", () => {
     expect(f.session.activeEditTool).toBeNull();
     expect(projection(f.session)).toEqual(before);
     expect(undoLabels(f.session)).toEqual(labels);
+  });
+});
+
+/** The Dimension tool armed on the fixture's line, before any placement. */
+function dimensionToolSession(session: SketchSessionState) {
+  return selectSketchConstraintTarget(
+    beginSketchTool(session, "dimensionDistance"),
+    {
+      kind: "sketchEntity",
+      sketchId: session.actionContextId,
+      entityId: session.definition.entities[0]!.entityId,
+    } as PrimitiveRef,
+  );
+}
+
+describe("T14a: a pending label gesture is a first-class gesture (T-19, C1)", () => {
+  function undoLabels(f: Awaited<ReturnType<typeof fixture>>) {
+    return f.session.actionHistory?.undo.map((entry) => entry.label) ?? [];
+  }
+
+  /** A placed dimension label, selected the way the chip selects it before `start`. */
+  async function labelFixture() {
+    const f = await fixture();
+    f.apply({ type: "selection.cleared" }, mutations.annotation(f.session));
+    f.dispatch({ type: "sketch.activeToolCleared" });
+    f.dispatch({
+      type: "viewport.selectionRequested",
+      target: {
+        kind: "dimension",
+        sketchId: f.session.actionContextId,
+        dimensionId: "dimension_annotation",
+      } as PrimitiveRef,
+    });
+    const drag = (
+      gesturePhase: "start" | "move" | "end" | "cancel",
+      point: readonly [number, number],
+    ) =>
+      f.dispatch({
+        type: "sketch.toolPatched",
+        patch: {
+          intent: "setDimensionAnnotationPlacement",
+          dimensionId: "dimension_annotation",
+          point,
+          gesturePhase,
+          clientPoint: point,
+        },
+      });
+    const placed = projection(f.session);
+    const labels = undoLabels(f);
+    const startDrag = () => {
+      drag("start", [6, 20]);
+      drag("move", [6, 40]);
+      expect(
+        projection(f.session),
+        "The label preview moved during the drag.",
+      ).not.toEqual(placed);
+    };
+    /** The chip keeps reporting a drag the editor already abandoned. */
+    const finishAbandonedDrag = () => {
+      drag("move", [6, 50]);
+      drag("end", [6, 50]);
+    };
+    return { f, drag, placed, labels, startDrag, finishAbandonedDrag };
+  }
+
+  test("idle Escape mid label drag cancels it: label restored, no entry, the abandoned release records nothing", async () => {
+    const { f, placed, labels, startDrag, finishAbandonedDrag } =
+      await labelFixture();
+    startDrag();
+    const escape = getEscapeEvent({
+      activeCommand: null,
+      activeReferencePickerFieldId: null,
+      selection: f.state.selection,
+      sketchSession: f.session,
+    });
+    expect(escape, "Idle Escape with the label selected.").toEqual({
+      type: "selection.cleared",
+    });
+    f.dispatch(escape!);
+    expect(projection(f.session), "Escape restores the label.").toEqual(placed);
+    expect(undoLabels(f), "Escape records nothing.").toEqual(labels);
+    expect(f.state.selection, "Escape still clears the selection.").toEqual([]);
+    finishAbandonedDrag();
+    expect(projection(f.session)).toEqual(placed);
+    expect(undoLabels(f), "The cancelled drag never resumes.").toEqual(labels);
+  });
+
+  test("viewport.hoverCleared mid label drag records no entry", async () => {
+    const { f, placed, labels, startDrag, finishAbandonedDrag } =
+      await labelFixture();
+    startDrag();
+    f.dispatch({ type: "viewport.hoverCleared" });
+    expect(undoLabels(f), "A hover change is not an action.").toEqual(labels);
+    expect(projection(f.session)).toEqual(placed);
+    finishAbandonedDrag();
+    expect(undoLabels(f)).toEqual(labels);
+    expect(projection(f.session)).toEqual(placed);
+  });
+
+  test("Delete mid label drag cancels the drag first, then deletes as its own single action", async () => {
+    const { f, placed, labels, startDrag, finishAbandonedDrag } =
+      await labelFixture();
+    startDrag();
+    f.dispatch({ type: "sketch.annotationDeleteRequested" });
+    expect(f.session.definition.dimensions).toEqual([]);
+    expect(undoLabels(f)).toEqual([...labels, "Delete Sketch Item"]);
+    finishAbandonedDrag();
+    expect(undoLabels(f)).toEqual([...labels, "Delete Sketch Item"]);
+    f.dispatch({ type: "history.undoRequested" });
+    expect(
+      projection(f.session),
+      "Undo of the delete restores the accepted label, never the preview.",
+    ).toEqual(placed);
+  });
+
+  test("Undo mid label drag cancels the drag and undoes the prior action; the abandoned release keeps Redo", async () => {
+    const { f, labels, startDrag, finishAbandonedDrag } = await labelFixture();
+    const beforeConstruction = projection(f.session);
+    f.apply({ type: "selection.cleared" }, mutations.construction(f.session));
+    const constructed = projection(f.session);
+    startDrag();
+    f.dispatch({ type: "history.undoRequested" });
+    expect(
+      projection(f.session),
+      "Undo acts on the prior action against the restored label.",
+    ).toEqual(beforeConstruction);
+    expect(undoLabels(f)).toEqual(labels);
+    finishAbandonedDrag();
+    expect(projection(f.session)).toEqual(beforeConstruction);
+    expect(
+      f.session.actionAvailability,
+      "The abandoned release neither records nor clears Redo.",
+    ).toEqual({ canUndo: true, canRedo: true });
+    f.dispatch({ type: "history.redoRequested" });
+    expect(projection(f.session)).toEqual(constructed);
+  });
+
+  test("a moved release is exactly one 'Move Dimension Label' and never moves geometry", async () => {
+    const { f, drag, placed, labels, startDrag } = await labelFixture();
+    const geometry = {
+      points: f.session.definition.points,
+      entities: f.session.definition.entities,
+    };
+    startDrag();
+    drag("move", [6, 50]);
+    drag("end", [6, 50]);
+    expect(undoLabels(f)).toEqual([...labels, "Move Dimension Label"]);
+    expect(projection(f.session)).not.toEqual(placed);
+    expect({
+      points: f.session.definition.points,
+      entities: f.session.definition.entities,
+    }).toEqual(geometry);
+  });
+
+  test.each(["cancel", "no-move end"] as const)(
+    "a %s restores the label with no entry and no derivation (generation and live solve unchanged)",
+    async (exit) => {
+      const { f, drag, placed, labels, startDrag } = await labelFixture();
+      const liveSolve = f.session.liveSolve;
+      const generation = f.session.liveRegions.generation;
+      if (exit === "cancel") {
+        startDrag();
+        drag("cancel", [6, 40]);
+      } else {
+        drag("start", [6, 20]);
+        drag("end", [8, 22]);
+      }
+      expect(projection(f.session)).toEqual(placed);
+      expect(undoLabels(f)).toEqual(labels);
+      expect(
+        f.session.liveRegions.generation,
+        "Restoring a label never re-bases the live solve.",
+      ).toBe(generation);
+      expect(f.session.liveSolve).toBe(liveSolve);
+    },
+  );
+
+  test("a background result that rebuilds the tool presentation mid label drag is kept by a later cancel (review A-1)", async () => {
+    const { f, drag, placed, startDrag } = await labelFixture();
+    startDrag();
+    const rebuilt = dimensionToolSession(f.session).toolPresentation;
+    expect(rebuilt, "A real presentation to rebuild to.").not.toBe(null);
+    expect(f.session.toolPresentation).not.toBe(rebuilt);
+    f.apply(
+      {
+        type: "effect.sketchRegionsDerived",
+        requestId: "request_stale",
+        documentId: "doc_workspace",
+        commandSessionId: f.state.command.commandSessionId,
+        baseRevisionId: "rev_1",
+        generation: 0,
+        regions: [],
+        diagnostics: [],
+        offsetPublications: [],
+      } as EditorEvent,
+      { ...f.session, toolPresentation: rebuilt },
+    );
+    drag("cancel", [6, 40]);
+    expect(projection(f.session)).toEqual(placed);
+    expect(
+      f.session.toolPresentation,
+      "The cancel keeps the presentation the background result rebuilt.",
+    ).toBe(rebuilt);
+  });
+
+  test("a background region result mid label drag keeps the drag; the release is one action", async () => {
+    const { f, drag, labels, startDrag } = await labelFixture();
+    startDrag();
+    const preview = projection(f.session);
+    f.dispatch({
+      type: "effect.sketchRegionsDerived",
+      requestId: "request_stale",
+      documentId: "doc_workspace",
+      commandSessionId: f.state.command.commandSessionId,
+      baseRevisionId: "rev_1",
+      generation: 0,
+      regions: [],
+      diagnostics: [],
+      offsetPublications: [],
+    } as EditorEvent);
+    expect(undoLabels(f), "A background result is not an action.").toEqual(
+      labels,
+    );
+    expect(projection(f.session), "The drag continues.").toEqual(preview);
+    drag("end", [6, 40]);
+    expect(undoLabels(f)).toEqual([...labels, "Move Dimension Label"]);
+  });
+});
+
+describe("T14a review B-1: the Dimension tool's preview handle is tool state, not a label gesture", () => {
+  async function dimensionToolFixture() {
+    const f = await fixture();
+    f.apply({ type: "selection.cleared" }, dimensionToolSession(f.session));
+    const before = projection(f.session);
+    const drag = (
+      gesturePhase: "start" | "move" | "end" | "cancel",
+      point: readonly [number, number],
+    ) =>
+      f.dispatch({
+        type: "sketch.toolPatched",
+        patch: {
+          intent: "setConstraintAnnotationPlacement",
+          handleId: "line-length-preview-drag",
+          handleKind: "dimensionLine",
+          point,
+          gesturePhase,
+          clientPoint: [point[0] * 10, point[1] * 10],
+        },
+      });
+    return { f, before, drag };
+  }
+
+  test("the placement click (start + no-move end on the handle) pins the preview and shows the value input", async () => {
+    const { f, before, drag } = await dimensionToolFixture();
+    expect(f.session.toolPresentation?.floatingInput ?? null).toBe(null);
+    drag("start", [6, 5]);
+    drag("end", [6, 5]);
+    expect(f.session.constraintAuthoring?.isPreviewPinned).toBe(true);
+    expect(
+      f.session.toolPresentation?.floatingInput,
+      "The value input appears with the measured value.",
+    ).toMatchObject({ value: "12" });
+    expect(f.session.activeTool).toBe("dimensionDistance");
+    expect(projection(f.session)).toEqual(before);
+    expect(f.session.actionAvailability?.canUndo).toBe(false);
+  });
+
+  test("a cancelled handle drag stays pinned where it was moved, with the value input (base behaviour)", async () => {
+    const { f, before, drag } = await dimensionToolFixture();
+    drag("start", [6, 5]);
+    drag("move", [6, 9]);
+    drag("cancel", [6, 9]);
+    expect(f.session.constraintAuthoring).toMatchObject({
+      isPreviewPinned: true,
+      pointer: [6, 9],
+    });
+    expect(f.session.toolPresentation?.floatingInput).toMatchObject({
+      value: "12",
+    });
+    expect(projection(f.session)).toEqual(before);
+    expect(f.session.actionAvailability?.canUndo).toBe(false);
   });
 });
