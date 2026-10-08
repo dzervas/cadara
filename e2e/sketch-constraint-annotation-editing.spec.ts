@@ -421,6 +421,9 @@ test("edited circle radius annotation solves and still finishes the sketch", asy
   await floatingInput.getByRole("button", { name: "Save" }).click();
 
   await expect(floatingInput).toBeHidden();
+  // T14d (review B-1, orchestrator decision): the grown circle's label anchor
+  // is off-screen, so the chip is not rendered; zoom out until it is back.
+  await zoomOutUntilVisible(workbench, radiusGlyph);
   await expect(radiusGlyph).toHaveAttribute("aria-label", /18\.00/);
 
   await workbench.activateTool("Exit the active sketch.");
@@ -515,6 +518,9 @@ test("edited circle diameter annotation (added with the Dimension tool) solves a
   await floatingInput.getByRole("button", { name: "Save" }).click();
 
   await expect(floatingInput).toBeHidden();
+  // T14d (review B-1, orchestrator decision): the grown circle's label anchor
+  // is off-screen, so the chip is not rendered; zoom out until it is back.
+  await zoomOutUntilVisible(workbench, diameterGlyph);
   await expect(diameterGlyph).toHaveAttribute("aria-label", /18\.00/);
 
   await workbench.activateTool("Exit the active sketch.");
@@ -551,6 +557,23 @@ test("edited circle diameter annotation (added with the Dimension tool) solves a
 
   expect(committedDimensions).toEqual([["diameter", 18]]);
 });
+
+/** Wheel-zooms out over the canvas centre until `locator` renders. */
+async function zoomOutUntilVisible(
+  workbench: SketchWorkbenchHarness,
+  locator: import("@playwright/test").Locator,
+) {
+  const box = (await workbench.viewport().boundingBox())!;
+  await workbench.page.mouse.move(
+    box.x + box.width / 2,
+    box.y + box.height / 2,
+  );
+  for (let step = 0; step < 12 && (await locator.count()) === 0; step += 1) {
+    await workbench.page.mouse.wheel(0, 400);
+    await workbench.waitForAnimationFrames(10);
+  }
+  await expect(locator).toBeVisible();
+}
 
 type LivePoint = { id: string; position: readonly [number, number] };
 

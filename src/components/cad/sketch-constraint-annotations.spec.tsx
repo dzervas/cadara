@@ -32,6 +32,17 @@ import {
   type DimensionAnnotationPointerEvent,
 } from "@/components/cad/three-cad-viewport-annotation-drag";
 
+/**
+ * T14d: a canvas wide enough for the fixtures below; no top overlay inset, so
+ * the anchors these rows use (y = 80) are inside it.
+ */
+const TEST_LAYOUT_VIEWPORT = {
+  width: 4000,
+  height: 1000,
+  topInset: 0,
+  bottomInset: 0,
+};
+
 test("src/components/cad/sketch-constraint-annotations.spec.tsx", () => {
   const annotation: SketchAnnotationDescriptor = {
     id: "constraint_1_parallel",
@@ -155,6 +166,8 @@ test("src/components/cad/sketch-constraint-annotations.spec.tsx", () => {
 
   const markup = renderToStaticMarkup(
     <SketchConstraintAnnotations
+      viewport={TEST_LAYOUT_VIEWPORT}
+      obstacles={[]}
       annotations={[
         annotation,
         dimensionAnnotation,
@@ -231,12 +244,27 @@ test("src/components/cad/sketch-constraint-annotations.spec.tsx", () => {
       markup.includes("/icons/sketch-fix.svg"),
     "New committed constraint glyphs should use their dedicated toolbar SVG assets.",
   ).toBeTruthy();
+  // T14d re-pin (was `left:120px`/`left:158px`, the fixed 38 px ring step):
+  // colliding anchors give labels whose estimated rects keep the 6 px gap,
+  // all inside the viewport, and the first (the problem) at its anchor.
+  const placed = renderedLabelRects(markup, [
+    annotation,
+    dimensionAnnotation,
+    angleDimensionAnnotation,
+    horizontalAnnotation,
+    verticalAnnotation,
+    ...newGlyphAnnotations,
+  ]);
+  expect(placed, "every annotation renders").toHaveLength(11);
+  expectLabelsSeparated(
+    placed,
+    "Committed annotation glyphs should offset colliding projected anchors without overlapping.",
+  );
+  expectLabelsInside(placed, TEST_LAYOUT_VIEWPORT);
   expect(
-    markup.includes("left:120px") &&
-      markup.includes("left:158px") &&
-      markup.includes("top:80px"),
-    "Committed annotation glyphs should offset colliding projected anchors.",
-  ).toBeTruthy();
+    placed.find((entry) => entry.id === annotation.id)?.centre,
+    "the first-placed label (the problem) sits at its anchor",
+  ).toEqual({ x: 120, y: 80 });
   expect(
     markup.includes("Parallel: Parallel lines") &&
       markup.includes("Distance: 10.00 mm distance"),
@@ -363,6 +391,8 @@ test("src/components/cad/sketch-constraint-annotations.spec.tsx visibility", () 
 
   const markup = renderToStaticMarkup(
     <SketchConstraintAnnotations
+      viewport={TEST_LAYOUT_VIEWPORT}
+      obstacles={[]}
       annotations={[constraintAnnotation, dimensionAnnotation]}
       projections={[
         {
@@ -438,6 +468,8 @@ test("T13d D12: reference dimension chips read '(value)', muted, with 'reference
   );
   const markup = renderToStaticMarkup(
     <SketchConstraintAnnotations
+      viewport={TEST_LAYOUT_VIEWPORT}
+      obstacles={[]}
       annotations={annotations}
       projections={annotations.map((entry, index) => ({
         id: getAnnotationProjectionId(entry.id),
@@ -533,6 +565,8 @@ function renderAnnotations(
 ) {
   return renderToStaticMarkup(
     <SketchConstraintAnnotations
+      viewport={TEST_LAYOUT_VIEWPORT}
+      obstacles={[]}
       annotations={annotations}
       projections={annotations.map((entry, index) => ({
         id: getAnnotationProjectionId(entry.id),
@@ -1203,6 +1237,8 @@ test("T14c: newly pinned siblings never displace an always-visible chip; preview
   ) =>
     renderToStaticMarkup(
       <SketchConstraintAnnotations
+        viewport={TEST_LAYOUT_VIEWPORT}
+        obstacles={[]}
         annotations={annotations}
         projections={annotations.map((entry) => ({
           id: getAnnotationProjectionId(entry.id),
@@ -1244,7 +1280,16 @@ test("T14c: newly pinned siblings never displace an always-visible chip; preview
     leftOf(selected, "dimensionDistance"),
     "the selected chip stays where it was clicked",
   ).toBe("200");
-  expect(leftOf(selected, "constraintFixed")).not.toBe("200");
+  expect(
+    renderedLabelRects(selected, [vertical, length]).find(
+      (entry) => entry.id === vertical.id,
+    )?.centre,
+    "the newly pinned sibling is displaced off the shared anchor",
+  ).not.toEqual({ x: 200, y: 80 });
+  expectLabelsSeparated(
+    renderedLabelRects(selected, [vertical, length]),
+    "the sibling does not overlap the chip",
+  );
 
   const preview = makeConstraintDescriptor("constraint_preview", [
     {
@@ -1270,4 +1315,302 @@ test("T14c: newly pinned siblings never displace an always-visible chip; preview
     )?.[1],
     "a hover preview never displaces a pinned control",
   ).toBe("200");
+});
+
+/** Rendered labels: id, placed centre and estimated rect (T14d). */
+function renderedLabelRects(
+  markup: string,
+  annotations: readonly SketchAnnotationDescriptor[],
+) {
+  return annotations.flatMap((annotation) => {
+    const tag = renderedAnnotationTags(markup).find((entry) =>
+      entry.includes(`data-sketch-annotation-glyph="${annotation.glyphKind}"`),
+    );
+    const match = tag ? /left:([\d.]+)px;top:([\d.]+)px/.exec(tag) : null;
+    if (!match) return [];
+    const centre = { x: Number(match[1]), y: Number(match[2]) };
+    // The rendered box: a 32 × 32 glyph; a chip is its 40 px frame plus
+    // 7 px per label character (T14d estimate, pinned against the DOM in E2E).
+    const width =
+      annotation.status === "dimension"
+        ? 40 + [...(annotation.visibleLabel ?? "")].length * 7
+        : 32;
+    const height = 32;
+    return [
+      {
+        id: annotation.id,
+        centre,
+        rect: {
+          x: centre.x - width / 2,
+          y: centre.y - height / 2,
+          width,
+          height,
+        },
+      },
+    ];
+  });
+}
+
+function expectLabelsSeparated(
+  placed: ReturnType<typeof renderedLabelRects>,
+  message: string,
+) {
+  for (const [index, left] of placed.entries()) {
+    for (const right of placed.slice(index + 1)) {
+      const gap = Math.max(
+        right.rect.x - (left.rect.x + left.rect.width),
+        left.rect.x - (right.rect.x + right.rect.width),
+        right.rect.y - (left.rect.y + left.rect.height),
+        left.rect.y - (right.rect.y + right.rect.height),
+      );
+      expect(
+        gap,
+        `${message} (${left.id} / ${right.id})`,
+      ).toBeGreaterThanOrEqual(6 - 1e-6);
+    }
+  }
+}
+
+function expectLabelsInside(
+  placed: ReturnType<typeof renderedLabelRects>,
+  viewport: {
+    width: number;
+    height: number;
+    topInset: number;
+    bottomInset: number;
+  },
+) {
+  for (const { id, rect } of placed) {
+    expect(rect.x, `${id} inside (left)`).toBeGreaterThanOrEqual(8);
+    expect(rect.y, `${id} inside (top)`).toBeGreaterThanOrEqual(
+      viewport.topInset + 8,
+    );
+    expect(rect.x + rect.width, `${id} inside (right)`).toBeLessThanOrEqual(
+      viewport.width - 8,
+    );
+    expect(rect.y + rect.height, `${id} inside (bottom)`).toBeLessThanOrEqual(
+      viewport.height - 8,
+    );
+  }
+}
+
+// T14d, UI lane (component layout seam): the annotation layer feeds the
+// layout with estimated extents, the viewport and the obstacles, and ranks by
+// class (problem > dimension > pinned > preview); selection never changes the
+// rank, so a click never reorders labels under the pointer (orchestrator
+// option (c)).
+function renderLaidOut(
+  annotations: readonly SketchAnnotationDescriptor[],
+  anchors: readonly { x: number; y: number }[],
+  context: {
+    selection?: readonly PrimitiveRef[];
+    annotationContext?: SketchAnnotationContext | null;
+    hoverTarget?: PrimitiveRef | null;
+    viewport?: {
+      width: number;
+      height: number;
+      topInset: number;
+      bottomInset: number;
+    };
+    obstacles?: readonly {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    }[];
+  } = {},
+) {
+  return renderToStaticMarkup(
+    <SketchConstraintAnnotations
+      viewport={context.viewport ?? TEST_LAYOUT_VIEWPORT}
+      obstacles={context.obstacles ?? []}
+      annotations={annotations}
+      projections={annotations.map((entry, index) => ({
+        id: getAnnotationProjectionId(entry.id),
+        ...anchors[index]!,
+      }))}
+      hoveredAnnotation={null}
+      hoverTarget={context.hoverTarget ?? null}
+      selection={context.selection ?? []}
+      annotationContext={context.annotationContext ?? null}
+      definition={null}
+      interactive
+      onHover={() => undefined}
+      onClearHover={() => undefined}
+      onSelect={() => undefined}
+      onEdit={() => undefined}
+    />,
+  );
+}
+
+const T14D_EDGE: PrimitiveRef = {
+  kind: "sketchEntity",
+  sketchId: "sketch_draft",
+  entityId: "sketch_entity_1_line",
+};
+
+function makeDimensionDescriptor(id: string, visibleLabel: string) {
+  return makeConstraintDescriptor(id, [T14D_EDGE], {
+    target: { kind: "dimension", sketchId: "sketch_draft", dimensionId: id },
+    glyphKind: id.endsWith("angle") ? "dimensionAngle" : "dimensionDistance",
+    status: "dimension",
+    visibleLabel,
+  } as Partial<SketchAnnotationDescriptor>);
+}
+
+test("T14d: two colliding chips: clicking (selecting) chip B keeps A and B in place", () => {
+  const a = makeDimensionDescriptor("dimension_a_distance", "10.00");
+  const b = makeDimensionDescriptor("dimension_b_angle", "90.0°");
+  const anchors = [
+    { x: 500, y: 400 },
+    { x: 500, y: 400 },
+  ];
+  const idle = renderedLabelRects(renderLaidOut([a, b], anchors), [a, b]);
+  expect(idle, "premise: both chips render").toHaveLength(2);
+  expectLabelsSeparated(idle, "premise: the chips do not overlap");
+  expect(
+    idle[1]!.centre,
+    "premise: B is displaced off the shared anchor",
+  ).not.toEqual({ x: 500, y: 400 });
+
+  const clicked = renderedLabelRects(
+    renderLaidOut([a, b], anchors, {
+      selection: [b.target],
+      annotationContext: { owners: [T14D_EDGE], last: b.target },
+    }),
+    [a, b],
+  );
+  expect(clicked, "selecting B moves neither chip").toEqual(idle);
+});
+
+test("T14d: clicking a pinned glyph among colliding siblings moves no rendered label", () => {
+  const siblings = [
+    "c_parallel",
+    "c_perpendicular",
+    "c_horizontal",
+    "c_fixed",
+  ].map((id, index) =>
+    makeConstraintDescriptor(`constraint_${id}`, [T14D_EDGE], {
+      glyphKind: (
+        [
+          "constraintParallel",
+          "constraintPerpendicular",
+          "constraintHorizontal",
+          "constraintFixed",
+        ] as const
+      )[index],
+    }),
+  );
+  const chipOnTop = makeDimensionDescriptor("dimension_z_distance", "(24.00)");
+  const annotations = [...siblings, chipOnTop];
+  const anchors = annotations.map(() => ({ x: 600, y: 300 }));
+  const pinnedByEdge = renderedLabelRects(
+    renderLaidOut(annotations, anchors, { selection: [T14D_EDGE] }),
+    annotations,
+  );
+  expect(pinnedByEdge, "premise: the edge pins every sibling").toHaveLength(5);
+  expectLabelsSeparated(pinnedByEdge, "premise: no overlap");
+
+  // Click the last-placed sibling (highest id), then another one.
+  for (const clicked of [siblings[3]!, siblings[1]!]) {
+    expect(
+      renderedLabelRects(
+        renderLaidOut(annotations, anchors, {
+          selection: [clicked.target],
+          annotationContext: { owners: [T14D_EDGE], last: clicked.target },
+        }),
+        annotations,
+      ),
+      `clicking ${clicked.id} moves no label`,
+    ).toEqual(pinnedByEdge);
+  }
+});
+
+test("T14d: a problem outranks a dimension and a pinned glyph whatever the input order; a hover preview moves nothing", () => {
+  // Review A-2: ids sort against the rank (pinned < dimension < problem), so
+  // only the class can put the problem first.
+  const problem = makeConstraintDescriptor("problem_z_parallel", [T14D_EDGE], {
+    glyphKind: "constraintParallel",
+    constraintDisplay: {
+      state: "overconstrained",
+      isAffectedOverconstraint: true,
+    },
+  });
+  const dimension = makeDimensionDescriptor("dimension_y_distance", "(24.00)");
+  const pinned = makeConstraintDescriptor("constraint_x_pinned", [T14D_EDGE], {
+    glyphKind: "constraintHorizontal",
+  });
+  const preview = makeConstraintDescriptor(
+    "constraint_a_preview",
+    [
+      {
+        kind: "sketchEntity",
+        sketchId: "sketch_draft",
+        entityId: "sketch_entity_9_line",
+      },
+    ],
+    { glyphKind: "constraintVertical" },
+  );
+  const all = [preview, pinned, dimension, problem];
+  const anchors = all.map(() => ({ x: 300, y: 300 }));
+  const hovered = renderedLabelRects(
+    renderLaidOut(all, anchors, {
+      selection: [T14D_EDGE],
+      hoverTarget: {
+        kind: "sketchEntity",
+        sketchId: "sketch_draft",
+        entityId: "sketch_entity_9_line",
+      },
+    }),
+    all,
+  );
+  expect(hovered).toHaveLength(4);
+  expectLabelsSeparated(hovered, "no overlap");
+  const centreOf = (id: string) =>
+    hovered.find((entry) => entry.id === id)?.centre;
+  expect(centreOf(problem.id), "the problem keeps the anchor").toEqual({
+    x: 300,
+    y: 300,
+  });
+  const withoutPreview = renderedLabelRects(
+    renderLaidOut(all.slice(1), anchors.slice(1), { selection: [T14D_EDGE] }),
+    all,
+  );
+  expect(
+    hovered.filter((entry) => entry.id !== preview.id),
+    "A-14: the hover preview moved no higher-priority label",
+  ).toEqual(withoutPreview);
+});
+
+test("T14d: labels avoid the obstacles they are given and clamp into the viewport", () => {
+  const dimension = makeDimensionDescriptor("dimension_a_distance", "(24.00)");
+  const glyphAtEdge = makeConstraintDescriptor(
+    "constraint_b_edge",
+    [T14D_EDGE],
+    {
+      glyphKind: "constraintHorizontal",
+    },
+  );
+  const viewport = { width: 800, height: 600, topInset: 76, bottomInset: 60 };
+  const panel = { x: 268, y: 76, width: 260, height: 140 };
+  const placed = renderedLabelRects(
+    renderLaidOut(
+      [dimension, glyphAtEdge],
+      [
+        { x: 300, y: 150 },
+        { x: 795, y: 80 },
+      ],
+      { selection: [T14D_EDGE], viewport, obstacles: [panel] },
+    ),
+    [dimension, glyphAtEdge],
+  );
+  expect(placed).toHaveLength(2);
+  expectLabelsInside(placed, viewport);
+  const chipRect = placed[0]!.rect;
+  expect(
+    chipRect.x + chipRect.width <= panel.x ||
+      chipRect.x >= panel.x + panel.width ||
+      chipRect.y >= panel.y + panel.height,
+    "the chip is not under the tool panel",
+  ).toBe(true);
 });

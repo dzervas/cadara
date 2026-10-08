@@ -11,8 +11,12 @@ const CHIP_STYLE = {
   background: "var(--workbench-shell-surface-panel-elev)",
   boxShadow: "var(--workbench-shell-elevation-md)",
 };
+// T14d re-review RR-2: one line per chip (the label truncates with an
+// ellipsis, its full text in `title`), so the hint column always fits the
+// slot the annotation layout reserves for it.
 const CHIP_CLASS =
-  "flex items-center gap-2 rounded-[6px] px-2.5 py-1 text-xs text-[var(--workbench-shell-text-muted)]";
+  "flex max-w-full items-center gap-2 rounded-[6px] px-2.5 py-1 text-xs whitespace-nowrap text-[var(--workbench-shell-text-muted)]";
+const LABEL_CLASS = "min-w-0 truncate";
 
 /**
  * The hint chips at the viewport's top-left: the overlap hint, whose
@@ -43,9 +47,16 @@ export function SketchPickHint({
           className={`${onChoose ? "pointer-events-auto" : "pointer-events-none"} ${CHIP_CLASS}`}
           style={CHIP_STYLE}
         >
-          <span>{getSketchPickHintText(hint)}</span>
+          <span className={LABEL_CLASS} title={getSketchPickHintText(hint)}>
+            {getSketchPickHintText(hint)}
+          </span>
           {onChoose ? (
-            <Button size="compact-xs" variant="default" onClick={onChoose}>
+            <Button
+              className="shrink-0"
+              size="compact-xs"
+              variant="default"
+              onClick={onChoose}
+            >
               Choose…
             </Button>
           ) : null}
@@ -59,9 +70,19 @@ export function SketchPickHint({
           className={`pointer-events-auto ${CHIP_CLASS}`}
           style={CHIP_STYLE}
         >
-          <span>{getSketchNearGapHintText(nearGap)}</span>
+          <span
+            className={LABEL_CLASS}
+            title={getSketchNearGapHintText(nearGap)}
+          >
+            {getSketchNearGapHintText(nearGap)}
+          </span>
           {nearGap.mergeRefusal === null ? (
-            <Button size="compact-xs" variant="default" onClick={onMerge}>
+            <Button
+              className="shrink-0"
+              size="compact-xs"
+              variant="default"
+              onClick={onMerge}
+            >
               Merge…
             </Button>
           ) : null}
