@@ -589,6 +589,14 @@ export function canAppendSketchEditToolActivationTarget(
     );
   }
 
+  // T13j: Merge Points adopts this sketch's selected points, in order.
+  if (target.kind === "sketchPoint") {
+    return (
+      toolId === "sketchMergePoints" &&
+      target.sketchId === (session.sketchId ?? "sketch_draft")
+    );
+  }
+
   if (target.kind !== "sketchEntity") {
     return false;
   }

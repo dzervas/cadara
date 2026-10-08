@@ -395,6 +395,7 @@ const toolbarSections = [
       "sketchExtend",
       "sketchSplit",
       "sketchSlot",
+      "sketchMergePoints",
       "construction",
       "projectReference",
       "importImage",

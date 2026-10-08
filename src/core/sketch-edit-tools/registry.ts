@@ -164,6 +164,29 @@ export const sketchEditToolDefinitions = [
   },
   {
     metadata: {
+      id: "sketchMergePoints",
+      group: "sketchOps",
+      name: "Merge Points",
+      tooltip:
+        "Merge two sketch points: the first into the second (the destination).",
+      icon: "sketchMergePoints",
+      modes: ["sketch"],
+      selection: {
+        label: "Source point, then destination",
+        acceptedKinds: ["point"],
+        requiredCount: 2,
+      },
+      previewLabel: "Merge preview",
+      validationMessages: {
+        emptySelection: "Pick the point to merge (source).",
+        unsupportedTarget:
+          "Merge Points takes curve ends and points of this sketch.",
+      },
+      mutationContract: "mergePoints",
+    },
+  },
+  {
+    metadata: {
       id: "sketchMirror",
       group: "sketchOps",
       name: "Sketch Mirror",

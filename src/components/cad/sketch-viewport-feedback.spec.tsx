@@ -557,3 +557,50 @@ test("T13g: placement inference badges render their requirement text", () => {
     "one glyph per placement",
   ).toBe(2);
 });
+
+// T13j, UI lane: a confirm-only floating input (Merge Points) renders its
+// label, readout and Merge/Cancel buttons but no text field, so no focused
+// input swallows Enter.
+test("T13j: a confirm-only floating input renders no text field", () => {
+  const render = (confirmOnly: boolean) =>
+    renderToStaticMarkup(
+      <SketchViewportFeedbackLayer
+        schema={{
+          prompts: [],
+          overlays: [],
+          floatingInput: {
+            id: "merge-points-confirm",
+            label: "Merge Points",
+            value: null,
+            readout: "a2 \u2192 a",
+            ...(confirmOnly ? { confirmOnly: true as const } : {}),
+            confirmLabel: "Merge",
+            cancelLabel: "Cancel",
+            submitAction: { type: "patch", patch: { intent: "mergePoints" } },
+            cancelAction: {
+              type: "patch",
+              patch: { intent: "cancelSketchEditOperator" },
+            },
+          },
+        }}
+        projections={[
+          { id: "floating-input:merge-points-confirm", x: 180, y: 90 },
+        ]}
+        documentVariableNames={["w"]}
+        onPatch={() => undefined}
+      />,
+    );
+  const markup = render(true);
+  expect(markup).toContain(
+    'data-sketch-viewport-floating-input="merge-points-confirm"',
+  );
+  expect(markup).toContain(">Merge Points<");
+  expect(markup).toMatch(/data-floating-input-readout="true">a2 \u2192 a</);
+  expect(markup).toContain(">Merge<");
+  expect(markup).toContain(">Cancel<");
+  expect(markup, "no text field").not.toContain("<input");
+  expect(markup, "no variable suggestions").not.toContain("<datalist");
+  expect(render(false), "premise: the default renders the field").toContain(
+    "<input",
+  );
+});

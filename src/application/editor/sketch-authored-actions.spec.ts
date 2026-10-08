@@ -1,5 +1,9 @@
 import { describe, expect, test } from "vitest";
-import type { SketchId } from "@/contracts/shared/ids";
+import type {
+  SketchEntityId,
+  SketchId,
+  SketchPointId,
+} from "@/contracts/shared/ids";
 import { SketchAuthoredActions } from "./sketch-authored-actions";
 import {
   emitPendingSketchEditQuery,
@@ -37,6 +41,8 @@ import {
 } from "@/domain/editor/sketch-session/references";
 import { createReferenceImageOperation } from "@/domain/reference-image/operations";
 import { reconstructSplineAggregate } from "@/contracts/sketch/spline-geometry";
+import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
+import type { PrimitiveRef } from "@/core/editor/schema";
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,
@@ -2453,5 +2459,206 @@ describe("T13h: inference suppression through the reducer", () => {
     expect(drawn.startPointId, "the toggle-off draw does not join").not.toBe(
       original.endPointId,
     );
+  });
+});
+
+// T13j (D25): Merge Points through the real reducer inside the action owner.
+describe("T13j: Merge Points is one action", () => {
+  async function gap() {
+    const f = await fixture();
+    const free = { ...f.session, inferenceSuppressionToggled: true };
+    f.apply(
+      { type: "selection.cleared" },
+      {
+        ...acceptSketchDraw(
+          startSketchDraw(beginSketchTool(free, "line"), [12.01, 0]),
+          [20, 5],
+        ),
+        inferenceSuppressionToggled: false,
+      },
+    );
+    const [first, second] = f.session.definition.entities;
+    if (first?.kind !== "lineSegment" || second?.kind !== "lineSegment")
+      throw Error("Expected two lines.");
+    expect(second.startPointId, "premise: not joined").not.toBe(
+      first.endPointId,
+    );
+    const ref = (pointId: SketchPointId): PrimitiveRef => ({
+      kind: "sketchPoint",
+      sketchId: f.session.sketchId ?? ("sketch_draft" as SketchId),
+      pointId,
+    });
+    const pickPair = (
+      source: SketchPointId = second.startPointId,
+      destination: SketchPointId = first.endPointId,
+    ) => {
+      f.dispatch({ type: "tool.activated", toolId: "sketchMergePoints" });
+      f.dispatch({ type: "viewport.selectionRequested", target: ref(source) });
+      f.dispatch({
+        type: "viewport.selectionRequested",
+        target: ref(destination),
+      });
+    };
+    return { f, first, second, pickPair };
+  }
+  const prompt = (session: SketchSessionState) =>
+    session.toolPresentation?.prompts[0]?.text;
+  const undoLabels = (session: SketchSessionState) =>
+    session.actionHistory?.undo.map((entry) => entry.label) ?? [];
+
+  test("confirm authors one 'Merge Points' action; Undo and Redo restore it exactly", async () => {
+    const { f, first, second, pickPair } = await gap();
+    const before = projection(f.session);
+    const labels = undoLabels(f.session);
+    pickPair();
+    expect(projection(f.session), "picking authors nothing").toEqual(before);
+    expect(f.state.selection, "the destination carries the selection").toEqual([
+      {
+        kind: "sketchPoint",
+        sketchId: f.session.sketchId ?? "sketch_draft",
+        pointId: first.endPointId,
+      },
+    ]);
+    f.dispatch({
+      type: "sketch.toolPatched",
+      patch: { intent: "mergePoints" },
+    });
+    const after = projection(f.session);
+    expect(f.session.definition.pointIds).not.toContain(second.startPointId);
+    expect(undoLabels(f.session)).toEqual([...labels, "Merge Points"]);
+    expect(projection(f.apply({ type: "history.undoRequested" }))).toEqual(
+      before,
+    );
+    expect(projection(f.apply({ type: "history.redoRequested" }))).toEqual(
+      after,
+    );
+  });
+
+  test("Undo restores an absorbed coincident (review R-4.4)", async () => {
+    const { f, first, second, pickPair } = await gap();
+    const definition = f.session.definition;
+    f.apply(
+      { type: "selection.cleared" },
+      rebuildSessionForDefinition(f.session, {
+        definition: {
+          ...definition,
+          constraintIds: [...definition.constraintIds, "constraint_join"],
+          constraints: [
+            ...definition.constraints,
+            {
+              constraintId: "constraint_join",
+              kind: "coincident",
+              label: "Join",
+              pointIds: [second.startPointId, first.endPointId],
+            },
+          ],
+        },
+      }),
+    );
+    const before = projection(f.session);
+    pickPair();
+    f.dispatch({
+      type: "sketch.toolPatched",
+      patch: { intent: "mergePoints" },
+    });
+    expect(f.session.definition.constraintIds).not.toContain("constraint_join");
+    expect(prompt(f.session)).toMatch(
+      / 1 coincident between them is now part of the merge\.$/,
+    );
+    const undone = f.apply({ type: "history.undoRequested" });
+    expect(projection(undone)).toEqual(before);
+    expect(undone.definition.constraints).toContainEqual(
+      expect.objectContaining({
+        constraintId: "constraint_join",
+        pointIds: [second.startPointId, first.endPointId],
+      }),
+    );
+  });
+
+  test("R-5: a spline closed by merge is announced, and Undo reopens it exactly", async () => {
+    const { f, pickPair } = await gap();
+    const sketchId = f.session.sketchId ?? ("sketch_draft" as SketchId);
+    const ids = [0, 1, 2, 3].map(
+      (index) => `sketch_point_loop_${index}` as SketchPointId,
+    );
+    const positions: [number, number][] = [
+      [30, 0],
+      [34, 0],
+      [32, 3],
+      [30.02, 0.01],
+    ];
+    const definition = f.session.definition;
+    const spline = {
+      kind: "spline",
+      entityId: "sketch_entity_loop" as SketchEntityId,
+      label: "Loop",
+      target: {
+        kind: "sketchEntity",
+        sketchId,
+        entityId: "sketch_entity_loop" as SketchEntityId,
+      },
+      isConstruction: false,
+      pointOccurrenceIds: ids.map((_, index) => `loop_o${index}`),
+      pointOccurrences: ids.map((pointId, index) => ({
+        occurrenceId: `loop_o${index}`,
+        pointId,
+        tangent: { kind: "automatic" },
+      })),
+      closure: "open",
+      interpolationPolicy: "centripetal-mean-arm-v1",
+    } satisfies SketchSessionState["definition"]["entities"][number];
+    f.apply(
+      { type: "selection.cleared" },
+      rebuildSessionForDefinition(f.session, {
+        definition: {
+          ...definition,
+          pointIds: [...definition.pointIds, ...ids],
+          points: [
+            ...definition.points,
+            ...ids.map((pointId, index) => ({
+              pointId,
+              label: `Loop ${index}`,
+              target: { kind: "sketchPoint" as const, sketchId, pointId },
+              position: positions[index]!,
+              isConstruction: false,
+            })),
+          ],
+          entityIds: [...definition.entityIds, spline.entityId],
+          entities: [...definition.entities, spline],
+        },
+      }),
+    );
+    const before = projection(f.session);
+    pickPair(ids[3], ids[0]);
+    f.dispatch({
+      type: "sketch.toolPatched",
+      patch: { intent: "mergePoints" },
+    });
+    const closed = f.session.definition.entities.find(
+      (entity) => entity.entityId === spline.entityId,
+    );
+    expect(closed?.kind === "spline" && closed.closure).toBe("positional");
+    expect(prompt(f.session)).toBe(
+      "Merged Loop 3 into Loop 0. Loop is now closed.",
+    );
+    const undone = f.apply({ type: "history.undoRequested" });
+    expect(projection(undone)).toEqual(before);
+    expect(undone.definition.entities).toContainEqual(spline);
+  });
+
+  test("cancel and Escape author nothing", async () => {
+    const { f, pickPair } = await gap();
+    const before = projection(f.session);
+    const labels = undoLabels(f.session);
+    pickPair();
+    f.dispatch({
+      type: "sketch.toolPatched",
+      patch: { intent: "cancelSketchEditOperator" },
+    });
+    pickPair();
+    f.dispatch({ type: "sketch.activeToolCleared" });
+    expect(f.session.activeEditTool).toBeNull();
+    expect(projection(f.session)).toEqual(before);
+    expect(undoLabels(f.session)).toEqual(labels);
   });
 });

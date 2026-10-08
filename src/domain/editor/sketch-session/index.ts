@@ -92,6 +92,7 @@ export {
   deleteSelectedSketchGeometry,
   failSketchEditQuery,
   finishSketchGeometryDrag,
+  isSketchMergePointsReady,
   patchSketchEditToolValue,
   refreshSketchEditToolAfterOffsetRound,
   selectSketchEditToolTarget,
