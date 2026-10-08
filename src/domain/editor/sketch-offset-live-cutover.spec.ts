@@ -8517,3 +8517,50 @@ describe("T13b B2: Offset creation seeds from the live accepted solve ([TECH] D2
     ).toEqual(authored.contribution!.points.map((point) => point.position));
   }, 120_000);
 });
+
+// T13h coverage row (T13g review): a placement on a certified offset shell
+// is inferred like any curve: shown "On <shell>", authored as
+// pointOnCurve(shell), and the solve accepts it.
+describe("T13h placement inference on a certified offset shell", () => {
+  test("a Point on the certified shell authors pointOnCurve(shell) and solves", async () => {
+    const { committed } = offsetSplineSession();
+    const { session } = await liveRound(committed);
+    const shell = shellRecord(session.liveSolve!.solvedSnapshot);
+    expect(shell.publication, "premise: certified").toBe("certified");
+    const [p0, p1, p2, p3] =
+      shell.spans[Math.floor(shell.spans.length / 2)]!.poles;
+    // The span's Bézier midpoint, a point on the shell.
+    const onShell: [number, number] = [
+      (p0[0] + 3 * p1[0] + 3 * p2[0] + p3[0]) / 8,
+      (p0[1] + 3 * p1[1] + 3 * p2[1] + p3[1]) / 8,
+    ];
+    const shellId = shellIdOf(session);
+    const shellLabel = session.definition.entities.find(
+      (entity) => entity.entityId === shellId,
+    )!.label;
+
+    const hovered = updateSketchPointer(
+      beginSketchTool(
+        withSketchSnapScale(session, SPEC_SKETCH_UNITS_PER_PIXEL),
+        "point",
+      ),
+      onShell,
+    );
+    expect(hovered.activeInference?.text).toBe(`On ${shellLabel}`);
+    const placed = startSketchDraw(hovered, onShell);
+    const added = placed.definition.constraints.filter(
+      (constraint) =>
+        !session.definition.constraints.some(
+          (old) => old.constraintId === constraint.constraintId,
+        ),
+    );
+    expect(
+      added.map((constraint) =>
+        constraint.kind === "pointOnCurve"
+          ? `pointOnCurve:${constraint.curve.entityId}`
+          : constraint.kind,
+      ),
+    ).toEqual([`pointOnCurve:${shellId}`]);
+    expect(placed.liveSolve?.accepted, "the shell relation solves").toBe(true);
+  });
+});

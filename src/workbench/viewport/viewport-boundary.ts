@@ -81,6 +81,8 @@ export type ViewportIntent =
     }
   /** A double-click with a spline draft: finalize it (T11-D13). */
   | { type: "sketchDrawFinalizeRequested" }
+  /** Shift pressed or released over a sketch (T13-D22). */
+  | { type: "sketchInferenceSuppressionChanged"; held: boolean }
   | {
       type: "sketchGeometryDragStarted";
       target: PrimitiveRef;

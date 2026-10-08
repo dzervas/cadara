@@ -23,6 +23,7 @@ import {
   patchSketchEditToolValue,
   patchSketchStyleValue,
   pinSketchConstraintPreview,
+  setSketchInferenceSuppression,
   setSketchSnapScale,
   shouldDeferSketchConstraintPreviewPinToSelection,
   startSketchDraw,
@@ -127,12 +128,52 @@ export function handleSketchPointerReleased(
   };
 }
 
+/**
+ * T13-D22: Shift pressed or released (the toggle arrives as the
+ * `setSnapInference` tool patch). Session UI state only: no action.
+ */
+export function handleSketchInferenceSuppressionChanged(
+  state: EditorState,
+  change: { held: boolean } | { inferenceEnabled: boolean },
+): EditorTransitionResult {
+  if (state.kind !== "editingSketch") {
+    return { state, effects: [] };
+  }
+
+  const session = setSketchInferenceSuppression(state.session, change);
+  if (session === state.session) {
+    return { state, effects: [] };
+  }
+
+  return {
+    state: {
+      ...state,
+      session,
+      // A pending commit keeps its "Committing…" label (T13h review A-7).
+      preview: state.pendingCommitRequestId
+        ? state.preview
+        : {
+            kind: "sketch",
+            label: getSketchSessionPreviewLabel(session),
+            target: session.planeTarget,
+          },
+    },
+    effects: [],
+  };
+}
+
 export function handleSketchToolPatched(
   state: EditorState,
   event: Extract<EditorEvent, { type: "sketch.toolPatched" }>,
 ): EditorTransitionResult {
   if (state.kind !== "editingSketch") {
     return { state, effects: [] };
+  }
+
+  if (event.patch.intent === "setSnapInference") {
+    return handleSketchInferenceSuppressionChanged(state, {
+      inferenceEnabled: event.patch.value === true,
+    });
   }
 
   if (event.patch.intent === "setDimensionAnnotationPlacement") {

@@ -24,7 +24,6 @@ import {
 } from "@/core/sketch-edit-tools/registry";
 import {
   bindPlacementInferences,
-  getStructuralTangentSourceEntityId,
   inferPlacement,
   type PlacementInference,
 } from "@/domain/sketch-inference/placement-inference";
@@ -71,6 +70,7 @@ import {
   getSketchSessionInvalidFeedback,
   getTargetKey,
   isDrawingSketchTool,
+  isSketchInferenceSuppressed,
   isSketchToolChainActive,
   rebuildSessionCommitRequest,
   restageSketchToolChain,
@@ -1426,9 +1426,22 @@ export function previewSketchPlacement(
     status: session.status === "drawing" ? "drawing" : "idle",
     placedPoints: session.toolPlacedPoints,
   });
+  const toolDefinition = getSketchToolDefinition(session.activeTool);
+  // R-7: a Tangent arc's first click picks its tangent source; the pick is
+  // structural, so suppression keeps it (the owner frees the rest).
+  const tangentSourcePick =
+    Boolean(toolDefinition.structuralTangentSource) && index === 0;
   return inferPlacement({
     toolId: session.activeTool,
-    role: getSketchToolDefinition(session.activeTool).placementRole(index),
+    role: toolDefinition.placementRole(index),
+    ...(tangentSourcePick
+      ? {
+          tangentSource: {
+            previousEntityId:
+              session.activeInference?.tangentSourceEntityId ?? null,
+          },
+        }
+      : {}),
     definition: session.definition,
     projectedReferences: session.projectedReferences,
     lineStartPointId:
@@ -1444,7 +1457,38 @@ export function previewSketchPlacement(
     sketchUnitsPerPixel: session.sketchUnitsPerPixel ?? null,
     anchor: session.status === "drawing" ? session.pointerDownPoint : null,
     activeCandidateKey: session.activeInference?.candidate?.key ?? null,
+    suppressed: isSketchInferenceSuppressed(session),
   });
+}
+
+/**
+ * T13-D22: records Shift held (`held`) or the "Snap & infer" toggle
+ * (`inferenceEnabled`). Session UI state only: nothing is authored. When the
+ * effective suppression changes, the live placement preview is recomputed
+ * at the last pointer, with no pointer motion.
+ */
+export function setSketchInferenceSuppression(
+  session: SketchSessionState,
+  change: { held: boolean } | { inferenceEnabled: boolean },
+): SketchSessionState {
+  const next: SketchSessionState =
+    "held" in change
+      ? { ...session, inferenceSuppressionHeld: change.held }
+      : { ...session, inferenceSuppressionToggled: !change.inferenceEnabled };
+  if (
+    Boolean(next.inferenceSuppressionHeld) ===
+      Boolean(session.inferenceSuppressionHeld) &&
+    Boolean(next.inferenceSuppressionToggled) ===
+      Boolean(session.inferenceSuppressionToggled)
+  ) {
+    return session;
+  }
+
+  const pointer = session.activeInference?.rawPosition ?? null;
+  return pointer &&
+    isSketchInferenceSuppressed(next) !== isSketchInferenceSuppressed(session)
+    ? updateSketchPointer(next, pointer)
+    : next;
 }
 
 export function startSketchDraw(
@@ -1475,9 +1519,7 @@ export function startSketchDraw(
     toolStartPointId: null,
     toolPlacements: [],
     // R-7: a Tangent arc records its tangent source at its first click.
-    toolTangentSourceEntityId: toolDefinition.structuralTangentSource
-      ? getStructuralTangentSourceEntityId(inference.candidate)
-      : null,
+    toolTangentSourceEntityId: inference.tangentSourceEntityId ?? null,
   };
 
   // A one-click tool (Point, T11-D19) completes on its first release.
@@ -2029,13 +2071,50 @@ export function getSketchToolPresentation(
     return overlays.length > 0 ? { prompts: [], overlays } : null;
   }
 
-  return (
+  const presentation =
     session.toolPresentation ??
     getSketchToolDefinition(session.activeTool).getPresentation(
       getToolRuntimeState(session),
-    )
-  );
+    );
+  // T13-D22: every drawing tool shows the visible suppression control.
+  const inferenceEnabled = !session.inferenceSuppressionToggled;
+  const cached = snapInferencePresentations.get(presentation);
+  if (cached?.inferenceEnabled === inferenceEnabled) {
+    return cached.presentation;
+  }
+  const withToggle: SketchToolPresentationSchema = {
+    ...presentation,
+    controls: [
+      ...(presentation.controls ?? []),
+      {
+        id: "sketch-snap-inference",
+        kind: "toggle",
+        label: "Snap & infer",
+        hint: "Hold Shift to place freely",
+        value: inferenceEnabled,
+        action: { type: "patch", patch: { intent: "setSnapInference" } },
+      },
+    ],
+  };
+  snapInferencePresentations.set(presentation, {
+    inferenceEnabled,
+    presentation: withToggle,
+  });
+  return withToggle;
 }
+
+/**
+ * The toggle-augmented presentation per session presentation, so a render
+ * that reads it twice gets the same object (the viewport keys feedback
+ * projection on its identity).
+ */
+const snapInferencePresentations = new WeakMap<
+  SketchToolPresentationSchema,
+  {
+    inferenceEnabled: boolean;
+    presentation: SketchToolPresentationSchema;
+  }
+>();
 
 export function patchSketchDrawingToolValue(
   session: SketchSessionState,

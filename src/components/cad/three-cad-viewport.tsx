@@ -155,6 +155,7 @@ import {
   getSectionRenderableBounds,
 } from "@/infrastructure/section-view/rendering";
 import { projectSketchFeedbackAnchor } from "@/core/workspace/sketch-feedback-projection";
+import { useSketchInferenceSuppression } from "@/components/cad/use-sketch-inference-suppression";
 import {
   mapWorldPointToWorkspaceSketch,
   type WorkspaceVec3,
@@ -382,6 +383,17 @@ export function ThreeCadViewport({
     [onIntent],
   );
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  // T13-D22: Shift held suppresses placement inference.
+  const onSketchInferenceHeldChange = useCallback(
+    (held: boolean) =>
+      onIntent({ type: "sketchInferenceSuppressionChanged", held }),
+    [onIntent],
+  );
+  useSketchInferenceSuppression(
+    sketchSession !== null,
+    viewportRef,
+    onSketchInferenceHeldChange,
+  );
   const viewCubeRef = useRef<HTMLDivElement | null>(null);
   const canvasElementRef = useRef<HTMLCanvasElement | null>(null);
   const cameraRef = useRef<ViewportCamera | null>(null);

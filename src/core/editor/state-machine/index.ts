@@ -41,6 +41,7 @@ export type {
   SketchActiveToolClearedEvent,
   SketchEscapeRequestedEvent,
   SketchConfirmRequestedEvent,
+  SketchInferenceSuppressionChangedEvent,
   DocumentHistoryCursorRequestedEvent,
   HistoryUndoRequestedEvent,
   HistoryRedoRequestedEvent,

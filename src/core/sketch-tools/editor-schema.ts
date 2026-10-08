@@ -92,6 +92,8 @@ export type SketchToolControlDescriptor =
       id: string;
       kind: "toggle";
       label: string;
+      /** A short line under the switch (T13-D22: "Hold Shift to place freely"). */
+      hint?: string;
       value: boolean;
       disabled?: boolean;
       action: SketchToolActionDescriptor;

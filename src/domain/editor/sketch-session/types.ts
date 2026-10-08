@@ -398,6 +398,16 @@ export interface SketchSessionState {
    * scale, nothing snaps.
    */
   sketchUnitsPerPixel?: number | null;
+  /**
+   * T13-D22: Shift is held (the viewport's key and pointer state). Session UI
+   * state, never authored; absent means false.
+   */
+  inferenceSuppressionHeld?: boolean;
+  /**
+   * T13-D22: the "Snap & infer" toggle is off. Session UI state, never
+   * authored: kept across tool switches, gone with the session.
+   */
+  inferenceSuppressionToggled?: boolean;
   /** The active Line chain; absent or null when no chain is active. */
   toolChain?: SketchToolChain | null;
   sequence: number;

@@ -95,11 +95,23 @@ export interface PlacementInference {
   /** Where the click places its point: the candidate's point, else raw. */
   position: SketchPoint;
   candidate: SketchSnapCandidate | null;
-  /** Inference suppressed for this placement (set by T13h; false here). */
+  /**
+   * T13-D22: inference was suppressed for this placement (Shift held or the
+   * "Snap & infer" toggle off): no candidate, no requirement, raw position.
+   */
   suppressed: boolean;
   role: SketchPlacementRole;
   requirements: readonly InferredRequirement[];
-  /** The preview text: names every requirement; empty without a candidate. */
+  /**
+   * R-7: the curve a Tangent arc's first click starts tangent to (the tool
+   * authors the tangency structurally); absent for every other placement.
+   */
+  tangentSourceEntityId?: SketchEntityId | null;
+  /**
+   * The preview text: names every requirement (and a Tangent arc's source);
+   * empty without a candidate. Under suppression it says so when a snap
+   * was there to suppress.
+   */
   text: string;
   /** The screen scale the snap resolved at (Undo reconcile, D21). */
   sketchUnitsPerPixel: number | null;
@@ -116,9 +128,18 @@ export interface PlacementInferenceContext {
    * chain anchor or a joined start), for D18.
    */
   lineStartPointId?: SketchPointId | null;
+  /**
+   * R-7, Tangent arc first click only: the source the previous inference of
+   * this click chose (the hovered owner), which breaks a tie between curves
+   * ending at one point.
+   */
+  tangentSource?: { previousEntityId: SketchEntityId | null };
 }
 
 export const SNAP_POSITION_ONLY_TEXT = "Snap position only — no relation";
+
+/** T13-D22: what a suppressed placement says where a snap was available. */
+export const FREE_PLACEMENT_TEXT = "Free placement (inference off)";
 
 /**
  * The inference of one placement at `pointer`: resolves the snap (D13/D14;
@@ -134,6 +155,12 @@ export function inferPlacement(
     anchor: SketchPoint | null;
     /** The previous candidate, kept up to its exit radius (hysteresis). */
     activeCandidateKey: string | null;
+    /**
+     * T13-D22: place at the raw pointer and author nothing. A chain start is
+     * the caller's (structural); a Tangent arc's tangent-source pick is kept
+     * here (R-7), and nothing else on that click is.
+     */
+    suppressed?: boolean;
   },
 ): PlacementInference {
   const snap = resolveSketchSnap({
@@ -147,6 +174,31 @@ export function inferPlacement(
     activeAnchor: input.toolId === "line" ? input.anchor : null,
     activeCandidateKey: input.activeCandidateKey,
   });
+
+  if (input.suppressed) {
+    // R-7 (T13h review R-1): the tangent-source pick is structural and
+    // survives suppression; without a source, the click is free.
+    if (input.tangentSource) {
+      const inferred = inferPlacementFromCandidate(input, {
+        candidate: snap.activeCandidate,
+        rawPosition: input.pointer,
+        sketchUnitsPerPixel: input.sketchUnitsPerPixel,
+      });
+      if (inferred.tangentSourceEntityId) {
+        return inferred;
+      }
+    }
+    return {
+      rawPosition: input.pointer,
+      position: input.pointer,
+      candidate: null,
+      suppressed: true,
+      role: input.role,
+      requirements: [],
+      text: snap.activeCandidate ? FREE_PLACEMENT_TEXT : "",
+      sketchUnitsPerPixel: input.sketchUnitsPerPixel,
+    };
+  }
 
   return inferPlacementFromCandidate(input, {
     candidate: snap.activeCandidate,
@@ -168,6 +220,32 @@ export function inferPlacementFromCandidate(
   const derived = candidate
     ? deriveRequirements(context, candidate)
     : { requirements: [], emptyText: "" };
+  const tangentSourceEntityId = context.tangentSource
+    ? getStructuralTangentSourceEntityId(
+        context.definition,
+        candidate,
+        context.tangentSource.previousEntityId,
+      )
+    : null;
+  const sourceLabel = tangentSourceEntityId
+    ? createLabels(context.definition).entity(tangentSourceEntityId)
+    : null;
+  // The Tangent arc authors its start on the source too (T13h review A-5):
+  // named unless an inferred requirement already says so.
+  const sourceOnText =
+    tangentSourceEntityId &&
+    !derived.requirements.some(
+      (requirement) =>
+        requirement.kind === "pointOnCurve" &&
+        requirement.entityId === tangentSourceEntityId,
+    )
+      ? [`On ${sourceLabel}`]
+      : [];
+  const texts = [
+    ...derived.requirements.map((requirement) => requirement.text),
+    ...sourceOnText,
+    ...(sourceLabel ? [`Tangent to ${sourceLabel}`] : []),
+  ];
 
   return {
     rawPosition: input.rawPosition,
@@ -176,22 +254,61 @@ export function inferPlacementFromCandidate(
     suppressed: false,
     role: context.role,
     requirements: derived.requirements,
-    text:
-      derived.requirements.length > 0
-        ? derived.requirements.map((requirement) => requirement.text).join(", ")
-        : derived.emptyText,
+    ...(context.tangentSource ? { tangentSourceEntityId } : {}),
+    text: texts.length > 0 ? texts.join(", ") : derived.emptyText,
     sketchUnitsPerPixel: input.sketchUnitsPerPixel,
   };
 }
 
 /**
- * The tangent source a Tangent arc records at its first click (R-7): the
- * first local line, circle or arc the click's candidate is on.
+ * The tangent source a Tangent arc records at its first click (R-7).
+ * - On a line, circle or arc: the first local one the candidate is on.
+ * - On a curve's end point: the single non-construction line or arc ending
+ *   there; when several end there, the one the click was on just before it
+ *   snapped to the end (`previousEntityId`, the hovered owner), else none.
+ * - On a circle or arc centre: none (a centre is not on the curve).
  */
-export function getStructuralTangentSourceEntityId(
+function getStructuralTangentSourceEntityId(
+  definition: SketchDefinition,
   candidate: SketchSnapCandidate | null,
+  previousEntityId: SketchEntityId | null,
 ): SketchEntityId | null {
-  const source = candidate?.sources.find(
+  if (!candidate || candidate.kind === "center") {
+    return null;
+  }
+
+  if (candidate.kind === "endpoint") {
+    const pointIds = new Set(
+      candidate.sources.flatMap((source) =>
+        source.kind === "localPoint"
+          ? [source.pointId]
+          : source.kind === "localEntity"
+            ? [
+                getEntityEndpointAtPoint(
+                  definition,
+                  source.entityId,
+                  candidate.point,
+                ),
+              ].filter((pointId) => pointId !== null)
+            : [],
+      ),
+    );
+    const ending = definition.entities.flatMap((entity) =>
+      (entity.kind === "lineSegment" || entity.kind === "arc") &&
+      !entity.isConstruction &&
+      (pointIds.has(entity.startPointId) || pointIds.has(entity.endPointId))
+        ? [entity.entityId]
+        : [],
+    );
+    if (ending.length === 1) {
+      return ending[0]!;
+    }
+    return previousEntityId && ending.includes(previousEntityId)
+      ? previousEntityId
+      : null;
+  }
+
+  const source = candidate.sources.find(
     (entry) =>
       entry.kind === "localEntity" &&
       (entry.geometryKind === "lineSegment" ||

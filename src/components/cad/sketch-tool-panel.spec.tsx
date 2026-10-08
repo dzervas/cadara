@@ -14,6 +14,7 @@ import {
   finalizeSketchDraw,
   getSketchToolPresentation,
   selectSketchEditToolTarget,
+  setSketchInferenceSuppression,
   startSketchDraw,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
@@ -241,3 +242,73 @@ test.each(["sketchExtend", "sketchSplit"] as const)(
     expect(markup).toContain("Checking intersections…");
   },
 );
+
+// Lane: UI (docs/testing.md). Seam: the panel renders the session's tool
+// presentation (T13-D22): every drawing tool shows the visible "Snap &
+// infer" switch with its Shift hint, reflecting the session toggle; edit and
+// constraint tools do not show it.
+test("the sketch tool panel shows the 'Snap & infer' switch for drawing tools only", () => {
+  const session = createNewSketchSessionFromSupport(
+    { kind: "construction", constructionId: "construction_plane-xy" },
+    OCC_KERNEL_SETTINGS,
+  );
+  const render = (state: SketchSessionState) =>
+    renderToStaticMarkup(
+      <MantineProvider>
+        <SketchToolPanel
+          schema={getSketchToolPresentation(state)}
+          onPatch={() => undefined}
+        />
+      </MantineProvider>,
+    );
+  const switchInput = (markup: string) =>
+    markup.match(/<input[^>]*id="sketch-snap-inference"[^>]*>/)?.[0] ?? null;
+
+  for (const toolId of ["line", "circle", "spline", "point"] as const) {
+    const markup = render(beginSketchTool(session, toolId));
+    expect(markup, `${toolId}: labelled`).toContain("Snap &amp; infer");
+    expect(markup, `${toolId}: hint`).toContain("Hold Shift to place freely");
+    expect(switchInput(markup), `${toolId}: on by default`).toContain(
+      'checked=""',
+    );
+    // The switch must not turn the prompt panel into a click blocker over
+    // the viewport: only the controls block takes the pointer.
+    const panelClass = markup.match(
+      /<div[^>]*class="([^"]*absolute z-20[^"]*)"/,
+    )?.[1];
+    expect(panelClass, `${toolId}: the panel is click-through`).toContain(
+      "pointer-events-none",
+    );
+    expect(
+      markup.split("pointer-events-auto").length - 1,
+      `${toolId}: one interactive block`,
+    ).toBe(1);
+    expect(
+      markup.indexOf("pointer-events-auto"),
+      `${toolId}: it holds the switch`,
+    ).toBeLessThan(markup.indexOf('id="sketch-snap-inference"'));
+  }
+  const off = render(
+    beginSketchTool(
+      setSketchInferenceSuppression(beginSketchTool(session, "line"), {
+        inferenceEnabled: false,
+      }),
+      "circle",
+    ),
+  );
+  expect(switchInput(off), "the session toggle is off").not.toContain(
+    'checked=""',
+  );
+  for (const toolId of [
+    "trim",
+    "offset",
+    "constraintHorizontal",
+    "dimensionDistance",
+  ] as const) {
+    const markup = render(beginSketchTool(session, toolId));
+    expect(markup, `${toolId}: premise, its panel renders`).toContain("Paper");
+    expect(markup, `${toolId}: no inference switch`).not.toContain(
+      "Snap &amp; infer",
+    );
+  }
+});

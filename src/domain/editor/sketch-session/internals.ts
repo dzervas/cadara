@@ -103,7 +103,6 @@ import type {
   SketchToolPresentationSchema,
 } from "@/core/sketch-tools/editor-schema";
 import {
-  getStructuralTangentSourceEntityId,
   inferPlacement,
   inferPlacementFromCandidate,
   type PlacementInference,
@@ -1804,10 +1803,18 @@ function reinferSketchToolPlacements(
 ): Partial<SketchSessionState> {
   const toolDefinition = getSketchToolDefinition(toolId);
   const solvedSnapshot = getSketchSessionSolvedSnapshot(session);
-  const recomputed = placements.map((placement) =>
+  const recomputed = placements.map((placement, index) =>
     inferPlacement({
       toolId,
       role: placement.role,
+      // R-7: a Tangent arc's first click re-picks its source structurally.
+      ...(toolDefinition.structuralTangentSource && index === 0
+        ? {
+            tangentSource: {
+              previousEntityId: session.toolTangentSourceEntityId ?? null,
+            },
+          }
+        : {}),
       definition: session.definition,
       projectedReferences: session.projectedReferences,
       pointer: placement.rawPosition,
@@ -1816,6 +1823,8 @@ function reinferSketchToolPlacements(
       // Only a Line end aligns to its start, and a Line end commits at once.
       anchor: null,
       activeCandidateKey: placement.candidate?.key ?? null,
+      // T13-D22: a click placed free stays free.
+      suppressed: placement.suppressed,
     }),
   );
   const positions = recomputed.map((placement) => placement.position);
@@ -1843,9 +1852,8 @@ function reinferSketchToolPlacements(
     ),
     ...(toolDefinition.structuralTangentSource
       ? {
-          toolTangentSourceEntityId: getStructuralTangentSourceEntityId(
-            recomputed[0]?.candidate ?? null,
-          ),
+          toolTangentSourceEntityId:
+            recomputed[0]?.tangentSourceEntityId ?? null,
         }
       : {}),
   };
@@ -1862,7 +1870,11 @@ export function withPlacementPresentation(
   active: PlacementInference | null,
 ): SketchToolPresentationSchema {
   const overlays = [
-    ...(active ? getPlacementOverlays("active-snap", active) : []),
+    ...(active?.suppressed && active.text
+      ? [getSuppressedPlacementOverlay(active)]
+      : active
+        ? getPlacementOverlays("active-snap", active)
+        : []),
     ...placements.flatMap((placement, index) =>
       getPlacementOverlays(`placement-${index + 1}-snap`, placement),
     ),
@@ -1876,6 +1888,37 @@ export function withPlacementPresentation(
       };
 }
 
+/**
+ * T13-D22: the live placement under suppression says it is free where a
+ * snap was available, at the raw pointer (it has no snap glyph).
+ */
+function getSuppressedPlacementOverlay(
+  inference: PlacementInference,
+): SketchToolOverlayDescriptor {
+  return {
+    id: "active-snap-suppressed",
+    kind: "referenceLabel",
+    label: inference.text,
+    anchor: {
+      kind: "sketchPoint",
+      point: inference.rawPosition,
+      offset: { x: 18, y: -18 },
+    },
+  };
+}
+
+/** T13-D22: Shift held or the "Snap & infer" toggle off. */
+export function isSketchInferenceSuppressed(
+  session: Pick<
+    SketchSessionState,
+    "inferenceSuppressionHeld" | "inferenceSuppressionToggled"
+  >,
+) {
+  return Boolean(
+    session.inferenceSuppressionHeld || session.inferenceSuppressionToggled,
+  );
+}
+
 function getPlacementOverlays(
   id: string,
   inference: PlacementInference,
@@ -1886,7 +1929,7 @@ function getPlacementOverlays(
   }
 
   return [
-    ...(inference.requirements.length > 0
+    ...(inference.requirements.length > 0 || inference.tangentSourceEntityId
       ? [
           {
             id: `${id}-inferred-constraint`,
