@@ -30,6 +30,8 @@ export interface ViewportModel {
   sketchDisplayRenderables: SketchSessionDisplayRenderable[];
   sketchAnnotations: SketchAnnotationDescriptor[];
   selection: PrimitiveRef[];
+  /** T14c: the sketch's annotation selection lifecycle (owners, last). */
+  annotationContext: EditorViewState["annotationContext"];
   sketchToolPresentation: SketchToolPresentationSchema | null;
   documentVariableNames: readonly string[];
   specialModePresentation: SketchSpecialModeViewportPresentation | null;

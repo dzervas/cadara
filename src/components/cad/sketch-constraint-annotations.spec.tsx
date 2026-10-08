@@ -16,6 +16,7 @@ import {
   finalizeSketchDraw,
   getSketchAnnotationDescriptors,
   startSketchDraw,
+  type SketchAnnotationContext,
   type SketchAnnotationDescriptor,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
@@ -25,6 +26,7 @@ import {
   OCC_KERNEL_SETTINGS,
 } from "@/domain/modeling/opencascade-kernel-seed";
 import { makeCircleWithDiameterSession } from "@/components/cad/sketch-reference-dimension.fixtures";
+import { makeAnnotationLifecycleState } from "@/domain/editor/annotation-lifecycle.fixtures";
 import {
   DimensionAnnotationLabelDrag,
   type DimensionAnnotationPointerEvent,
@@ -186,9 +188,9 @@ test("src/components/cad/sketch-constraint-annotations.spec.tsx", () => {
         })),
       ]}
       hoveredAnnotation={annotation.target}
-      selectedAnnotation={annotation.target}
       hoverTarget={null}
-      selection={[]}
+      selection={[annotation.target]}
+      annotationContext={{ owners: [], last: annotation.target }}
       definition={null}
       interactive
       onHover={() => undefined}
@@ -296,7 +298,7 @@ test("src/components/cad/sketch-constraint-annotations.spec.tsx visibility", () 
     visibleLabel: "10.00",
   };
   const idleContext = {
-    selectedAnnotation: null,
+    annotationContext: null,
     hoverTarget: null,
     selection: [],
     definition: null,
@@ -341,7 +343,7 @@ test("src/components/cad/sketch-constraint-annotations.spec.tsx visibility", () 
   expect(
     resolveSketchAnnotationVisibility(constraintAnnotation, {
       ...idleContext,
-      selectedAnnotation: constraintAnnotation.target,
+      selection: [constraintAnnotation.target],
     }),
     "The selected annotation stays pinned.",
   ).toBe("pinned");
@@ -375,9 +377,9 @@ test("src/components/cad/sketch-constraint-annotations.spec.tsx visibility", () 
         },
       ]}
       hoveredAnnotation={null}
-      selectedAnnotation={null}
       hoverTarget={lineRef}
       selection={[]}
+      annotationContext={null}
       definition={null}
       interactive
       onHover={() => undefined}
@@ -443,9 +445,9 @@ test("T13d D12: reference dimension chips read '(value)', muted, with 'reference
         y: 80,
       }))}
       hoveredAnnotation={null}
-      selectedAnnotation={null}
       hoverTarget={null}
       selection={[]}
+      annotationContext={null}
       definition={null}
       interactive
       onHover={() => undefined}
@@ -522,7 +524,7 @@ function renderAnnotations(
   annotations: readonly SketchAnnotationDescriptor[],
   context: {
     hoveredAnnotation?: SketchAnnotationDescriptor["target"] | null;
-    selectedAnnotation?: SketchAnnotationDescriptor["target"] | null;
+    annotationContext?: SketchAnnotationContext | null;
     hoverTarget?: PrimitiveRef | null;
     selection?: readonly PrimitiveRef[];
     definition?: SketchSessionState["definition"] | null;
@@ -538,7 +540,7 @@ function renderAnnotations(
         y: 80,
       }))}
       hoveredAnnotation={context.hoveredAnnotation ?? null}
-      selectedAnnotation={context.selectedAnnotation ?? null}
+      annotationContext={context.annotationContext ?? null}
       hoverTarget={context.hoverTarget ?? null}
       selection={context.selection ?? []}
       definition={context.definition ?? null}
@@ -594,9 +596,10 @@ test("T14b T-5/R-6: outside the idle select context every annotation class rende
     selected,
     hovered,
   ];
+  // T14c: the active annotation is `selection[0]`; the line is its owner.
   const context = {
-    selection: [line],
-    selectedAnnotation: selected.target,
+    selection: [selected.target],
+    annotationContext: { owners: [line], last: selected.target },
     hoveredAnnotation: hovered.target,
   };
 
@@ -693,7 +696,7 @@ test("T14b T-4: hovering a line previews the annotations on its end points; a po
     selection: readonly PrimitiveRef[] = [],
   ) =>
     resolveSketchAnnotationVisibility(annotation, {
-      selectedAnnotation: null,
+      annotationContext: null,
       hoverTarget,
       selection,
       definition: session.definition,
@@ -763,7 +766,7 @@ test("T14b T-4: hovering a tangent handle previews its spline's and its fit poin
   ]);
   const visibility = (annotation: SketchAnnotationDescriptor) =>
     resolveSketchAnnotationVisibility(annotation, {
-      selectedAnnotation: null,
+      annotationContext: null,
       hoverTarget: handle,
       selection: [],
       definition: session.definition,
@@ -986,7 +989,7 @@ test("T14b review A-1: a label drag whose chip turns passive mid drag reports ca
   const h = makeLabelDragHarness();
   const layer = (interactive: boolean) =>
     resolveSketchAnnotationLayer([h.annotation], {
-      selectedAnnotation: null,
+      annotationContext: null,
       hoveredAnnotation: null,
       hoverTarget: null,
       selection: [],
@@ -1019,7 +1022,7 @@ test("T14b review A-2: the annotation hover is stale once its chip is not a cont
     interactive: boolean;
   }) =>
     resolveSketchAnnotationLayer([glyph], {
-      selectedAnnotation: null,
+      annotationContext: null,
       hoveredAnnotation: context.hovered ? glyph.target : null,
       hoverTarget: context.hovered ? glyph.target : null,
       selection: context.selection,
@@ -1043,4 +1046,228 @@ test("T14b review A-2: the annotation hover is stale once its chip is not a cont
     stale({ hovered: false, selection: [line], interactive: false }),
     "No annotation hover, nothing to clear.",
   ).toBe(false);
+});
+
+// T14c (R-5, §2.4), UI lane (component markup seam): after the first blank
+// the retained owners keep their contextual annotations pinned and
+// interactive (the sibling-reselection defect), and the last selected
+// annotation renders subdued; the active annotation renders selected.
+test("T14c R-5: after the first blank the retained siblings and the subdued `last` are interactive buttons", async () => {
+  const { state, g, a } = await makeAnnotationLifecycleState();
+  const annotations = getSketchAnnotationDescriptors(state.session);
+
+  const markup = renderAnnotations(annotations, {
+    selection: [],
+    annotationContext: { owners: [g], last: a },
+    definition: state.session.definition,
+    interactive: true,
+  });
+  const tags = renderedAnnotationTags(markup);
+  const labelOf = (tag: string) => /aria-label="([^":]*):/.exec(tag)?.[1];
+
+  expect(
+    tags.map(labelOf).sort(),
+    "A (Horizontal on G) and its siblings B (Fix on G's start) and C (Parallel G, H); not D (Horizontal on K)",
+  ).toEqual(["Fix", "Horizontal", "Parallel"]);
+  for (const tag of tags) {
+    expect(tag).toMatch(/^<button /);
+    expect(tag).toContain('data-sketch-annotation-visibility="pinned"');
+    expect(tag).toContain('data-sketch-annotation-interactive="true"');
+  }
+  const last = tags.filter((tag) =>
+    tag.includes('data-sketch-annotation-selection="last"'),
+  );
+  expect(last.map(labelOf), "exactly A is the subdued last").toEqual([
+    "Horizontal",
+  ]);
+  expect(last[0]).toContain("opacity-80");
+  expect(last[0]).not.toContain("border-[var(--cad-accent)]");
+  expect(markup, "no annotation is active after the blank").not.toContain(
+    'data-sketch-annotation-selection="active"',
+  );
+});
+
+test("T14c: the active annotation renders selected (not subdued); with a tool armed it stays visible but passive (A2)", async () => {
+  const { state, g, h, a, c } = await makeAnnotationLifecycleState();
+  const annotations = getSketchAnnotationDescriptors(state.session);
+
+  const active = renderedAnnotationTags(
+    renderAnnotations(annotations, {
+      selection: [a],
+      annotationContext: { owners: [g], last: a },
+      definition: state.session.definition,
+      interactive: true,
+    }),
+  );
+  const selected = active.filter((tag) =>
+    tag.includes('data-sketch-annotation-selection="active"'),
+  );
+  expect(selected).toHaveLength(1);
+  expect(selected[0]).toMatch(/^<button /);
+  expect(selected[0]).toContain("Horizontal");
+  expect(selected[0]).toContain("border-[var(--cad-accent)]");
+  expect(selected[0]).not.toContain("opacity-80");
+  expect(
+    active.some((tag) =>
+      tag.includes('data-sketch-annotation-selection="last"'),
+    ),
+    "the active annotation is not also rendered as the subdued last",
+  ).toBe(false);
+
+  const armed = renderedAnnotationTags(
+    renderAnnotations(annotations, {
+      selection: [c],
+      annotationContext: { owners: [g, h], last: c },
+      definition: state.session.definition,
+      interactive: false,
+    }),
+  );
+  const refused = armed.filter((tag) =>
+    tag.includes('data-sketch-annotation-selection="active"'),
+  );
+  expect(refused, "the existing duplicate is shown selected").toHaveLength(1);
+  expect(refused[0]).toMatch(/^<div /);
+  expect(refused[0]).toContain('aria-hidden="true"');
+  expect(refused[0]).toContain("pointer-events-none");
+});
+
+// T14c (T14b review A-5, decided), UI lane (visibility module seam): the
+// datum asymmetry is deliberate. Selecting a datum axis or origin (or
+// retaining it as an owner) pins the constraints that reference it; hovering
+// it previews nothing, since datums are hovered constantly while drawing.
+test("T14c datum asymmetry: a selected or retained datum pins its constraints; a hovered datum previews nothing", () => {
+  const xAxis: PrimitiveRef = {
+    kind: "sketchDatumReference",
+    sketchId: "sketch_draft",
+    datumId: "xAxis",
+    geometryKind: "lineSegment",
+  } as PrimitiveRef;
+  const point: PrimitiveRef = {
+    kind: "sketchPoint",
+    sketchId: "sketch_draft",
+    pointId: "sketch_point_1",
+  } as PrimitiveRef;
+  const onAxis = makeConstraintDescriptor("constraint_on_axis", [point, xAxis]);
+  const base = {
+    hoverTarget: null,
+    selection: [],
+    annotationContext: null,
+    definition: null,
+  };
+
+  expect(
+    resolveSketchAnnotationVisibility(onAxis, { ...base, selection: [xAxis] }),
+    "selecting the datum pins the constraint referencing it",
+  ).toBe("pinned");
+  expect(
+    resolveSketchAnnotationVisibility(onAxis, {
+      ...base,
+      annotationContext: { owners: [xAxis], last: null },
+    }),
+    "a retained datum owner pins it too",
+  ).toBe("pinned");
+  expect(
+    resolveSketchAnnotationVisibility(onAxis, { ...base, hoverTarget: xAxis }),
+    "hovering the datum previews nothing",
+  ).toBe("hidden");
+  expect(
+    resolveSketchAnnotationVisibility(onAxis, { ...base, hoverTarget: point }),
+    "premise: hovering the point does preview it",
+  ).toBe("preview");
+});
+
+// T14c, UI lane (component layout-order seam): selecting a dimension chip
+// pins its siblings (its affected geometry becomes the owners, §2.4); those
+// newly pinned glyphs must not displace the chip just clicked, or the second
+// click of a double-click (edit) misses it.
+test("T14c: newly pinned siblings never displace an always-visible chip; previews never displace pinned controls", () => {
+  const edge: PrimitiveRef = {
+    kind: "sketchEntity",
+    sketchId: "sketch_draft",
+    entityId: "sketch_entity_2_line",
+  };
+  const vertical = makeConstraintDescriptor("constraint_vertical", [edge]);
+  const length = makeConstraintDescriptor("dimension_length", [edge], {
+    target: {
+      kind: "dimension",
+      sketchId: "sketch_draft",
+      dimensionId: "dimension_length",
+    },
+    glyphKind: "dimensionDistance",
+    status: "dimension",
+    visibleLabel: "3.60",
+  } as Partial<SketchAnnotationDescriptor>);
+  const render = (
+    annotations: readonly SketchAnnotationDescriptor[],
+    context: Parameters<typeof renderAnnotations>[1],
+  ) =>
+    renderToStaticMarkup(
+      <SketchConstraintAnnotations
+        annotations={annotations}
+        projections={annotations.map((entry) => ({
+          id: getAnnotationProjectionId(entry.id),
+          x: 200,
+          y: 80,
+        }))}
+        hoveredAnnotation={null}
+        hoverTarget={context.hoverTarget ?? null}
+        selection={context.selection ?? []}
+        annotationContext={context.annotationContext ?? null}
+        definition={null}
+        interactive={context.interactive}
+        onHover={() => undefined}
+        onClearHover={() => undefined}
+        onSelect={() => undefined}
+        onEdit={() => undefined}
+      />,
+    );
+  const leftOf = (markup: string, glyph: string) =>
+    /left:(\d+)px/.exec(renderedAnnotation(markup, glyph) ?? "")?.[1];
+
+  expect(
+    leftOf(
+      render([vertical, length], { interactive: true }),
+      "dimensionDistance",
+    ),
+    "premise: alone, the chip sits at its anchor",
+  ).toBe("200");
+  const selected = render([vertical, length], {
+    selection: [length.target],
+    annotationContext: { owners: [edge], last: length.target },
+    interactive: true,
+  });
+  expect(
+    renderedAnnotation(selected, "constraintFixed"),
+    "premise: the sibling is pinned",
+  ).toBeTruthy();
+  expect(
+    leftOf(selected, "dimensionDistance"),
+    "the selected chip stays where it was clicked",
+  ).toBe("200");
+  expect(leftOf(selected, "constraintFixed")).not.toBe("200");
+
+  const preview = makeConstraintDescriptor("constraint_preview", [
+    {
+      kind: "sketchEntity",
+      sketchId: "sketch_draft",
+      entityId: "sketch_entity_9_line",
+    },
+  ]);
+  const hovered = render([preview, vertical], {
+    selection: [edge],
+    hoverTarget: {
+      kind: "sketchEntity",
+      sketchId: "sketch_draft",
+      entityId: "sketch_entity_9_line",
+    },
+    interactive: true,
+  });
+  expect(
+    /left:(\d+)px/.exec(
+      renderedAnnotationTags(hovered).find((tag) =>
+        tag.includes('data-sketch-annotation-visibility="pinned"'),
+      ) ?? "",
+    )?.[1],
+    "a hover preview never displaces a pinned control",
+  ).toBe("200");
 });

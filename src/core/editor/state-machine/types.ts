@@ -16,6 +16,7 @@ import type {
 } from "@/core/editor/schema";
 import type { SectionViewSession, Vec3 } from "@/core/section-view/session";
 import type {
+  SketchAnnotationContext,
   SketchLiveRegionBasis,
   SketchSessionState,
 } from "@/domain/editor/sketch-session";
@@ -169,6 +170,13 @@ export interface SketchEditorState extends EditorStateBase {
   command: EditorActiveCommand;
   /** Transient editor-owned sketch session and draft geometry. */
   session: SketchSessionState;
+  /**
+   * T14c (T-3/R-7): the annotation selection lifecycle next to `selection`
+   * (the active annotation is `selection[0]`): the retained owners and the
+   * last selected annotation. Never in the session, never authored, never in
+   * history; absent or null without one.
+   */
+  annotationContext?: SketchAnnotationContext | null;
   /** Explicit correlation ID for an in-flight sketch commit request. */
   pendingCommitRequestId: RequestId | null;
   /** Explicit correlation ID for an in-flight sketch reference projection request. */
@@ -1502,6 +1510,8 @@ export interface EditorViewState {
   activeReferencePickerFieldId: string | null;
   /** Active sketch session, or null when not editing a sketch. */
   sketchSession: SketchSessionState | null;
+  /** T14c: the sketch's annotation selection lifecycle, or null. */
+  annotationContext: SketchAnnotationContext | null;
   /** Active temporary section-view session, or null when inactive. */
   activeSectionView?: SectionViewSession | null;
   /** Last loaded document snapshot owned by the machine. */

@@ -36,7 +36,6 @@ export function focusSketchStyleTool(
     toolPresentation: null,
     constraintAuthoring: null,
     activeAnnotationEdit: null,
-    selectedAnnotation: null,
     activeEditTool: null,
     activeEditTarget: null,
     activeDrag: null,

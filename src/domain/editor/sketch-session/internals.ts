@@ -1642,7 +1642,6 @@ export function rebuildSessionForDefinition(
         ),
         toolStagedEntities: [],
         activeAnnotationEdit: null,
-        selectedAnnotation: null,
         activeEditTarget: null,
         activeDrag: null,
         commitRequest: rebuildSessionCommitRequest(session, definition),

@@ -106,6 +106,18 @@ export interface SketchAnnotationEditState {
   pendingValue: MaybeAuthoredValue<number> | null;
 }
 
+/**
+ * T14c (T-3/R-7): the annotation selection lifecycle, owned by the editor
+ * state next to `selection` (never the session, so lifecycle clicks keep the
+ * session object). `owners` is the retained geometry whose contextual
+ * annotations stay pinned; `last` the last selected annotation, rendered
+ * subdued while it is not the active selection (`selection[0]`).
+ */
+export interface SketchAnnotationContext {
+  owners: readonly PrimitiveRef[];
+  last: SketchConstraintRef | SketchDimensionRef | null;
+}
+
 export interface SketchAnnotationDescriptor {
   id: string;
   target: SketchConstraintRef | SketchDimensionRef;
@@ -393,7 +405,6 @@ export interface SketchSessionState {
   toolPresentation: SketchToolPresentationSchema | null;
   constraintAuthoring: SketchConstraintAuthoringState | null;
   activeAnnotationEdit: SketchAnnotationEditState | null;
-  selectedAnnotation: SketchConstraintRef | SketchDimensionRef | null;
   activeEditTool: SketchEditToolState | null;
   activeEditTarget: SketchPointRef | null;
   activeStyleFocus: SketchStyleFocus | null;

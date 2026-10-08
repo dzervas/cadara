@@ -186,6 +186,7 @@ export function CadWorkbench({
       selection,
       hoverTarget,
       sketchSession,
+      annotationContext,
       activeEditSession,
       activeSketchPlaneEditSession,
       activeImportSession,
@@ -956,6 +957,7 @@ export function CadWorkbench({
     requestUndo,
     selection,
     sketchSession,
+    annotationContext,
   });
   const tabAtIndex = (index: number) => tabsState.tabs[index] ?? null;
   const shortcutCommandHandlers = {
@@ -1205,6 +1207,7 @@ export function CadWorkbench({
         sketchDisplayRenderables: viewportRenderables.sketchDisplayRenderables,
         sketchAnnotations,
         selection: visibleSelection,
+        annotationContext,
         sketchToolPresentation,
         documentVariableNames:
           snapshot?.document.variables.map((variable) => variable.name) ?? [],
@@ -1222,6 +1225,7 @@ export function CadWorkbench({
     [
       acceptsSpecialModeTarget,
       activeSectionView,
+      annotationContext,
       machineState.kind,
       measurementViewModel?.witnesses,
       mode,

@@ -5,10 +5,13 @@ import type {
 import type { SketchDefinition } from "@/contracts/sketch/schema";
 import { type PrimitiveRef, getPrimitiveRefKey } from "@/core/editor/schema";
 import {
-  getSketchEntityDefiningPointIds,
+  getSketchAnnotationContextRefs,
+  type SketchAnnotationContext,
   type SketchAnnotationDescriptor,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
+
+export { getSketchAnnotationContextRefs };
 
 /**
  * T14b (T-1): `pinned` annotations are full controls (interactive only in the
@@ -18,9 +21,11 @@ import {
 export type SketchAnnotationVisibility = "pinned" | "preview" | "hidden";
 
 interface SketchAnnotationVisibilityContext {
-  selectedAnnotation: SketchConstraintRef | SketchDimensionRef | null;
   hoverTarget: PrimitiveRef | null;
+  /** The active selection: an annotation in it is the active annotation. */
   selection: readonly PrimitiveRef[];
+  /** T14c: the retained owners and the last selected annotation. */
+  annotationContext: SketchAnnotationContext | null;
   definition: SketchDefinition | null;
 }
 
@@ -38,8 +43,12 @@ export function resolveSketchAnnotationVisibility(
 function createSketchAnnotationVisibilityResolver(
   context: SketchAnnotationVisibilityContext,
 ) {
+  // T14c: the selection and the retained owners both pin `ctx()`.
   const pinnedGeometry = new Set(
-    context.selection.flatMap((target) =>
+    [
+      ...context.selection,
+      ...(context.annotationContext?.owners ?? []),
+    ].flatMap((target) =>
       [
         target,
         ...getSketchAnnotationContextRefs(target, context.definition),
@@ -68,7 +77,13 @@ function createSketchAnnotationVisibilityResolver(
     if (
       annotation.status === "dimension" ||
       annotation.constraintDisplay?.isAffectedOverconstraint ||
-      annotationTargetsEqual(context.selectedAnnotation, annotation.target) ||
+      context.selection.some((target) =>
+        annotationTargetsEqual(target, annotation.target),
+      ) ||
+      annotationTargetsEqual(
+        context.annotationContext?.last ?? null,
+        annotation.target,
+      ) ||
       affects(annotation, pinnedGeometry)
     ) {
       return "pinned";
@@ -82,6 +97,10 @@ export interface SketchAnnotationLayerItem {
   annotation: SketchAnnotationDescriptor;
   visibility: Exclude<SketchAnnotationVisibility, "hidden">;
   isInteractive: boolean;
+  /** In the active selection. */
+  isSelected: boolean;
+  /** T14c: the context's last annotation while it is not selected. */
+  isLast: boolean;
 }
 
 /**
@@ -109,6 +128,18 @@ export function resolveSketchAnnotationLayer(
               annotation,
               visibility,
               isInteractive: context.interactive && visibility === "pinned",
+              isSelected: context.selection.some((target) =>
+                annotationTargetsEqual(target, annotation.target),
+              ),
+              // T14c: the last selected annotation, subdued while inactive.
+              isLast:
+                annotationTargetsEqual(
+                  context.annotationContext?.last ?? null,
+                  annotation.target,
+                ) &&
+                !context.selection.some((target) =>
+                  annotationTargetsEqual(target, annotation.target),
+                ),
             },
           ];
     },
@@ -128,50 +159,6 @@ export function resolveSketchAnnotationLayer(
         annotationTargetsEqual(context.hoveredAnnotation, annotation.target),
       ),
   };
-}
-
-/**
- * T14b (T-4) `ctx(G)`: the geometry whose contextual annotations a hover or
- * selection of G shows. An entity brings its defining points (line ends,
- * arc/circle centre and ends, fit points); a tangent handle its fit point and
- * spline; a region, face, image or datum nothing.
- */
-export function getSketchAnnotationContextRefs(
-  target: PrimitiveRef,
-  definition: SketchDefinition | null,
-): readonly PrimitiveRef[] {
-  switch (target.kind) {
-    case "sketchEntity":
-      return [
-        target,
-        ...(definition
-          ? getSketchEntityDefiningPointIds(definition, target.entityId)
-          : []
-        ).map((pointId) => ({
-          kind: "sketchPoint" as const,
-          sketchId: target.sketchId,
-          pointId,
-        })),
-      ];
-    case "sketchPoint":
-    case "projectedReferenceGeometry":
-      return [target];
-    case "sketchTangentHandle":
-      return [
-        {
-          kind: "sketchPoint",
-          sketchId: target.sketchId,
-          pointId: target.pointId,
-        },
-        {
-          kind: "sketchEntity",
-          sketchId: target.sketchId,
-          entityId: target.entityId,
-        },
-      ];
-    default:
-      return [];
-  }
 }
 
 /**
@@ -195,14 +182,21 @@ export function isSketchAnnotationIdleContext(
 }
 
 export function annotationTargetsEqual(
-  left: SketchConstraintRef | SketchDimensionRef | null,
+  left: PrimitiveRef | null,
   right: SketchConstraintRef | SketchDimensionRef,
 ) {
-  if (!left || left.kind !== right.kind || left.sketchId !== right.sketchId) {
-    return false;
+  if (left?.kind === "constraint") {
+    return (
+      right.kind === "constraint" &&
+      left.sketchId === right.sketchId &&
+      left.constraintId === right.constraintId
+    );
   }
 
-  return left.kind === "constraint"
-    ? right.kind === "constraint" && left.constraintId === right.constraintId
-    : right.kind === "dimension" && left.dimensionId === right.dimensionId;
+  return (
+    left?.kind === "dimension" &&
+    right.kind === "dimension" &&
+    left.sketchId === right.sketchId &&
+    left.dimensionId === right.dimensionId
+  );
 }

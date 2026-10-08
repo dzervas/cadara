@@ -856,3 +856,50 @@ test("T14b R-1: Escape with an open annotation edit cancels the edit", () => {
     "The edit is closed.",
   ).toBeNull();
 });
+
+// T14c (T-6/R-9), logic lane (canvas click intent seam): with no tool and
+// an annotation active, a click whose top pick is a region or anything
+// below it (image, face, plane) is the first-stage blank; the viewport then
+// resets its pick cycle (the `clearSelection` path) and does not select it.
+test("T14c R-9: a region-or-lower click with an annotation active is a first-stage blank; otherwise it selects", () => {
+  const intent = (
+    topPickClass:
+      | "region"
+      | "referenceImage"
+      | "face"
+      | "constructionPlane"
+      | "authoredCurve"
+      | "referenceCurve",
+    activeAnnotation: boolean,
+    activeSketchTool: "line" | null = null,
+  ) =>
+    getViewportCanvasClickIntent({
+      activeSketchTool,
+      hasResolvedTarget: true,
+      activeAnnotation,
+      topPickClass,
+    });
+
+  for (const blankClass of [
+    "region",
+    "referenceImage",
+    "face",
+    "constructionPlane",
+  ] as const) {
+    expect(intent(blankClass, true), blankClass).toBe("clearSelection");
+    expect(
+      intent(blankClass, false),
+      `${blankClass}: the second stage selects`,
+    ).toBe("selectTarget");
+  }
+  expect(intent("authoredCurve", true), "geometry always selects").toBe(
+    "selectTarget",
+  );
+  expect(intent("referenceCurve", true), "a datum axis selects").toBe(
+    "selectTarget",
+  );
+  expect(
+    intent("region", true, "line"),
+    "with a tool armed the tool owns the click",
+  ).toBe("ignore");
+});

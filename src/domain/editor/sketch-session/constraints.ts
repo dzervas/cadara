@@ -25,6 +25,7 @@ import type {
   SolverTolerancePolicy,
 } from "@/contracts/solver/schema";
 import type { PrimitiveRef } from "@/core/editor/schema";
+import type { SketchConstraintRef } from "@/contracts/shared/references";
 import type {
   SketchConstraintTargetRecord,
   SketchConstraintToolId,
@@ -51,6 +52,7 @@ import {
   hasAcceptedLiveSolveOfDefinition,
   createConstraintId,
   createDimensionId,
+  createSketchConstraintRef,
   createSketchDimensionRef,
   withLiveSolveBasis,
   resolveSketchDefinitionForSolve,
@@ -349,7 +351,6 @@ export function activateSketchConstraintTool(
     toolPresentation: buildConstraintToolPresentation(authoring),
     constraintAuthoring: authoring,
     activeAnnotationEdit: null,
-    selectedAnnotation: null,
     activeEditTool: null,
     activeEditTarget: null,
     activeStyleFocus: null,
@@ -398,10 +399,22 @@ export function selectSketchConstraintTarget(
   session: SketchSessionState,
   target: PrimitiveRef,
 ): SketchSessionState {
+  return authorSketchConstraintTarget(session, target).session;
+}
+
+/**
+ * A constraint tool's pick (`selectSketchConstraintTarget`), with the existing
+ * constraints a refused duplicate commit matched (T14c A2/T-14: the editor
+ * selects the first one); empty unless the pick was refused as a duplicate.
+ */
+export function authorSketchConstraintTarget(
+  session: SketchSessionState,
+  target: PrimitiveRef,
+): ConstraintCommitResult {
   const authoring = session.constraintAuthoring;
 
   if (!authoring) {
-    return session;
+    return { session, duplicates: [] };
   }
 
   const definition = getSketchConstraintDefinition(authoring.toolId);
@@ -415,7 +428,7 @@ export function selectSketchConstraintTarget(
         authoring.selectedTargets,
       ))
   ) {
-    return session;
+    return { session, duplicates: [] };
   }
 
   const resolved = resolveSketchConstraintTarget(
@@ -429,12 +442,15 @@ export function selectSketchConstraintTarget(
     const validationMessage = `${definition.metadata.name} needs the supported target combination.`;
 
     return {
-      ...session,
-      validationMessage,
-      toolPresentation: buildConstraintToolPresentation(
-        authoring,
+      session: {
+        ...session,
         validationMessage,
-      ),
+        toolPresentation: buildConstraintToolPresentation(
+          authoring,
+          validationMessage,
+        ),
+      },
+      duplicates: [],
     };
   }
 
@@ -443,7 +459,7 @@ export function selectSketchConstraintTarget(
       (entry) => getTargetKey(entry.target) === getTargetKey(resolved.target),
     )
   ) {
-    return session;
+    return { session, duplicates: [] };
   }
 
   const nextTargets = [...authoring.selectedTargets, resolved].slice(
@@ -475,14 +491,13 @@ export function selectSketchConstraintTarget(
       pendingAnnotationPlacement,
     },
     activeAnnotationEdit: null,
-    selectedAnnotation: null,
   };
 
   if (!definition.valueSpec && nextTargets.length >= definition.steps.length) {
-    return commitSketchConstraintAuthoring(nextSession);
+    return commitConstraintAuthoring(nextSession);
   }
 
-  return nextSession;
+  return { session: nextSession, duplicates: [] };
 }
 
 export function pinSketchConstraintPreview(
@@ -711,10 +726,21 @@ export function solveCommittedConstraintDefinition(
 export function commitSketchConstraintAuthoring(
   session: SketchSessionState,
 ): SketchSessionState {
+  return commitConstraintAuthoring(session).session;
+}
+
+export interface ConstraintCommitResult {
+  session: SketchSessionState;
+  duplicates: readonly SketchConstraintRef[];
+}
+
+function commitConstraintAuthoring(
+  session: SketchSessionState,
+): ConstraintCommitResult {
   const authoring = session.constraintAuthoring;
 
   if (!authoring) {
-    return session;
+    return { session, duplicates: [] };
   }
 
   const definition = getSketchConstraintDefinition(authoring.toolId);
@@ -747,12 +773,20 @@ export function commitSketchConstraintAuthoring(
     if (refusal) {
       // The tool restarts with nothing authored and says why.
       const restarted = activateSketchConstraintTool(session, authoring.toolId);
+      const sketchId = getSessionSketchId(session);
       return {
-        ...restarted,
-        validationMessage: refusal,
-        toolPresentation: buildConstraintToolPresentation(
-          restarted.constraintAuthoring!,
-          refusal,
+        session: {
+          ...restarted,
+          validationMessage: refusal,
+          toolPresentation: buildConstraintToolPresentation(
+            restarted.constraintAuthoring!,
+            refusal,
+          ),
+        },
+        duplicates: [
+          ...new Set(duplicates.map((constraint) => constraint.constraintId)),
+        ].map((constraintId) =>
+          createSketchConstraintRef(sketchId, constraintId),
         ),
       };
     }
@@ -760,12 +794,15 @@ export function commitSketchConstraintAuthoring(
     const validationMessage = `${definition.metadata.name} needs the supported target combination.`;
 
     return {
-      ...session,
-      validationMessage,
-      toolPresentation: buildConstraintToolPresentation(
-        authoring,
+      session: {
+        ...session,
         validationMessage,
-      ),
+        toolPresentation: buildConstraintToolPresentation(
+          authoring,
+          validationMessage,
+        ),
+      },
+      duplicates: [],
     };
   }
 
@@ -796,7 +833,6 @@ export function commitSketchConstraintAuthoring(
         session,
         solvedDefinition.definition,
       ),
-      selectedAnnotation: null,
       toolPresentation: null,
       activeTool: null,
       activeEditTarget: null,
@@ -809,19 +845,22 @@ export function commitSketchConstraintAuthoring(
   // T13c (D7): a commit that leaves requirements unsatisfied is retained and
   // explained (the new requirement named first); otherwise no message.
   return {
-    ...committed,
-    validationMessage: committed.liveSolve?.accepted
-      ? null
-      : getSketchSessionInvalidFeedback(
-          committed,
-          [
-            ...constraints.map((constraint) => constraint.constraintId),
-            ...dimensions.map((dimension) => dimension.dimensionId),
-          ],
-          // T13e2 (review R-1): the commit caused the invalidity only if
-          // the sketch was accepted before it.
-          hasAcceptedLiveSolveOfDefinition(session),
-        ),
+    session: {
+      ...committed,
+      validationMessage: committed.liveSolve?.accepted
+        ? null
+        : getSketchSessionInvalidFeedback(
+            committed,
+            [
+              ...constraints.map((constraint) => constraint.constraintId),
+              ...dimensions.map((dimension) => dimension.dimensionId),
+            ],
+            // T13e2 (review R-1): the commit caused the invalidity only if
+            // the sketch was accepted before it.
+            hasAcceptedLiveSolveOfDefinition(session),
+          ),
+    },
+    duplicates: [],
   };
 }
 

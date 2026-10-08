@@ -100,10 +100,6 @@ import {
   type Vec3,
 } from "@/core/section-view/session";
 import type { SketchSpecialModeHandleRef } from "@/core/sketch-special-modes/schema";
-import type {
-  SketchConstraintRef,
-  SketchDimensionRef,
-} from "@/contracts/shared/references";
 import {
   collectBindings,
   collectRaycastPickCandidates,
@@ -248,6 +244,7 @@ export function ThreeCadViewport({
     sketchDisplayRenderables,
     sketchAnnotations,
     selection,
+    annotationContext,
     sketchToolPresentation,
     specialModePresentation,
     hasNonEmptyCommittedGeometry,
@@ -2712,8 +2709,12 @@ export function ThreeCadViewport({
           ? isSeededDatumPlaneRenderable(resolvedTarget.renderable)
           : false,
         selectionFilterKind: selectionFilterRef.current?.kind ?? null,
+        activeAnnotation: isAnnotationTarget(selectionRef.current[0] ?? null),
+        topPickClass: pick.sketch?.stack[0]?.pickClass ?? null,
       });
 
+      // A consumed first-stage blank (T14c R-9) resets the cycle too; the
+      // hint was cleared above.
       if (intent === "clearSelection") {
         pickCycleRef.current = null;
         deselectRef.current();
@@ -3344,13 +3345,9 @@ export function ThreeCadViewport({
         annotations={sketchAnnotations}
         projections={sketchAnnotationProjections}
         hoveredAnnotation={isAnnotationTarget(hoverTarget) ? hoverTarget : null}
-        selectedAnnotation={
-          isAnnotationTarget(selection[0] ?? null)
-            ? (selection[0] as SketchConstraintRef | SketchDimensionRef)
-            : null
-        }
         hoverTarget={hoverTarget}
         selection={selection}
+        annotationContext={annotationContext}
         definition={sketchSession?.definition ?? null}
         interactive={isSketchAnnotationIdleContext(
           sketchSession,
@@ -3366,7 +3363,13 @@ export function ThreeCadViewport({
           }
           clearHoverRef.current();
         }}
-        onSelect={(target) => selectRef.current(target)}
+        onSelect={(target) => {
+          // T-2: an annotation click resets the pick cycle and clears the
+          // sticky overlap hint, as a canvas click does.
+          pickCycleRef.current = null;
+          clearSketchPickHint();
+          selectRef.current(target);
+        }}
         onEdit={(target) => annotationEditRef.current(target)}
         onDimensionDrag={(handle, clientX, clientY, gesturePhase) => {
           const point = projectSketchClientPointRef.current(clientX, clientY);

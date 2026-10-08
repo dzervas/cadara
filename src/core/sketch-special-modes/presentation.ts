@@ -75,7 +75,6 @@ function scrubSessionForSpecialMode(
     toolPresentation: null,
     constraintAuthoring: null,
     activeAnnotationEdit: null,
-    selectedAnnotation: null,
     activeEditTool: null,
     activeEditTarget: null,
     activeStyleFocus: null,

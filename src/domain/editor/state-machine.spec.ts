@@ -4961,10 +4961,14 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       selected.state.kind,
       "Selecting an annotation should stay in sketch editing.",
     ).toBe("editingSketch");
+    // T14c: the editor selection is the only annotation selection; the
+    // lifecycle context remembers it as the last selected annotation.
     expect(
-      selected.state.session.selectedAnnotation &&
+      selected.state.selection.length === 1 &&
+        primitiveRefEquals(selected.state.selection[0]!, annotation.target) &&
+        selected.state.annotationContext?.last != null &&
         primitiveRefEquals(
-          selected.state.session.selectedAnnotation,
+          selected.state.annotationContext.last,
           annotation.target,
         ),
       "Viewport annotation selection should select the durable annotation target.",

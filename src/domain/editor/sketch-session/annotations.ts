@@ -48,7 +48,7 @@ import {
   type ProjectedSketchReferenceRecord,
   type SolverTolerancePolicy,
 } from "@/contracts/solver/schema";
-import type { PrimitiveRef } from "@/core/editor/schema";
+import { getPrimitiveRefKey, type PrimitiveRef } from "@/core/editor/schema";
 import type {
   SketchStylePatch,
   SketchStyleToolId,
@@ -58,7 +58,9 @@ import type {
   SketchToolOverlayDescriptor,
   SketchToolPresentationSchema,
 } from "@/core/sketch-tools/editor-schema";
+import { getSketchEntityDefiningPointIds } from "./drag-intent";
 import type {
+  SketchAnnotationContext,
   SketchAnnotationDescriptor,
   SketchAnnotationEditState,
   SketchAnnotationGlyphKind,
@@ -102,7 +104,6 @@ export function beginSketchAnnotationEdit(
       status: "idle",
       toolPresentation: null,
       activeAnnotationEdit: null,
-      selectedAnnotation: target,
       activeEditTarget: null,
       activeDrag: null,
       validationMessage: null,
@@ -126,7 +127,6 @@ export function beginSketchAnnotationEdit(
     toolPresentation: buildAnnotationEditPresentation(session, edit),
     constraintAuthoring: null,
     activeAnnotationEdit: edit,
-    selectedAnnotation: target,
     activeEditTarget: null,
     activeDrag: null,
     validationMessage: null,
@@ -1349,48 +1349,193 @@ function getDimensionEditLabel(
   }
 }
 
+/**
+ * T14c: selecting an annotation drops any open annotation edit, point edit
+ * target or drag. With none open the session object is kept, so a lifecycle
+ * click never re-runs anything keyed on the session (R-7).
+ */
 export function selectSketchAnnotation(
   session: SketchSessionState,
-  target: SketchConstraintRef | SketchDimensionRef | null,
 ): SketchSessionState {
-  return {
-    ...session,
-    selectedAnnotation: target,
-    activeAnnotationEdit: null,
-    activeEditTarget: null,
-    activeDrag: null,
-  };
+  return session.activeAnnotationEdit ||
+    session.activeEditTarget ||
+    session.activeDrag
+    ? {
+        ...session,
+        activeAnnotationEdit: null,
+        activeEditTarget: null,
+        activeDrag: null,
+      }
+    : session;
 }
 
+/**
+ * T14b (T-4) `ctx(G)`: the geometry whose contextual annotations a hover or
+ * selection of G shows. An entity brings its defining points (line ends,
+ * arc/circle centre and ends, fit points); a tangent handle its fit point and
+ * spline; a region, face, image or datum nothing.
+ */
+export function getSketchAnnotationContextRefs(
+  target: PrimitiveRef,
+  definition: SketchDefinition | null,
+): readonly PrimitiveRef[] {
+  switch (target.kind) {
+    case "sketchEntity":
+      return [
+        target,
+        ...(definition
+          ? getSketchEntityDefiningPointIds(definition, target.entityId)
+          : []
+        ).map((pointId) => ({
+          kind: "sketchPoint" as const,
+          sketchId: target.sketchId,
+          pointId,
+        })),
+      ];
+    case "sketchPoint":
+    case "projectedReferenceGeometry":
+      return [target];
+    case "sketchTangentHandle":
+      return [
+        {
+          kind: "sketchPoint",
+          sketchId: target.sketchId,
+          pointId: target.pointId,
+        },
+        {
+          kind: "sketchEntity",
+          sketchId: target.sketchId,
+          entityId: target.entityId,
+        },
+      ];
+    default:
+      return [];
+  }
+}
+
+/**
+ * The geometry an annotation of the session's definition affects, or null
+ * when the definition no longer holds it.
+ */
+export function getSketchAnnotationAffectedGeometryRefs(
+  session: SketchSessionState,
+  target: SketchConstraintRef | SketchDimensionRef,
+): readonly PrimitiveRef[] | null {
+  const sketchId = session.sketchId ?? ("sketch_draft" as SketchId);
+  if (target.kind === "constraint") {
+    const constraint = session.definition.constraints.find(
+      (entry) => entry.constraintId === target.constraintId,
+    );
+    return constraint
+      ? getConstraintAffectedGeometryRefs(sketchId, constraint)
+      : null;
+  }
+  const dimension = session.definition.dimensions.find(
+    (entry) => entry.dimensionId === target.dimensionId,
+  );
+  return dimension
+    ? getDimensionAffectedGeometryRefs(sketchId, dimension)
+    : null;
+}
+
+/**
+ * T14c: whether an annotation is one of the contextual annotations the
+ * owners pin, i.e. it affects a selected owner itself or `ctx()` of one (the
+ * same rule the annotation layer pins by).
+ */
+export function isSketchAnnotationInContext(
+  session: SketchSessionState,
+  target: SketchConstraintRef | SketchDimensionRef,
+  owners: readonly PrimitiveRef[],
+) {
+  const pinned = new Set(
+    owners.flatMap((owner) =>
+      [owner, ...getSketchAnnotationContextRefs(owner, session.definition)].map(
+        getPrimitiveRefKey,
+      ),
+    ),
+  );
+  return (
+    getSketchAnnotationAffectedGeometryRefs(session, target)?.some((ref) =>
+      pinned.has(getPrimitiveRefKey(ref)),
+    ) ?? false
+  );
+}
+
+/**
+ * T14c: the lifecycle context without the refs the session's definition no
+ * longer holds (after a deletion, Undo or Redo); null once nothing is left.
+ */
+export function pruneSketchAnnotationContext(
+  context: SketchAnnotationContext | null,
+  session: SketchSessionState,
+): SketchAnnotationContext | null {
+  if (!context) {
+    return null;
+  }
+
+  const { definition } = session;
+  const pointIds = new Set(definition.points.map((point) => point.pointId));
+  const entityIds = new Set(definition.entityIds);
+  const owners = context.owners.filter((owner) => {
+    switch (owner.kind) {
+      case "sketchPoint":
+        return pointIds.has(owner.pointId);
+      case "sketchEntity":
+        return entityIds.has(owner.entityId);
+      case "sketchTangentHandle":
+        return entityIds.has(owner.entityId) && pointIds.has(owner.pointId);
+      default:
+        return true;
+    }
+  });
+  const last =
+    context.last &&
+    getSketchAnnotationAffectedGeometryRefs(session, context.last)
+      ? context.last
+      : null;
+
+  if (owners.length === 0 && last === null) {
+    return null;
+  }
+
+  return owners.length === context.owners.length && last === context.last
+    ? context
+    : { owners, last };
+}
+
+/**
+ * Deletes the annotation the selection holds (`selection[0]`, T14c: the
+ * editor selection is the only annotation selection).
+ */
 export function deleteSelectedSketchAnnotation(
   session: SketchSessionState,
+  selection: readonly PrimitiveRef[],
 ): SketchSessionState {
-  const selectedAnnotation = session.selectedAnnotation;
+  const selected = selection[0];
 
-  if (!selectedAnnotation) {
+  if (selected?.kind !== "constraint" && selected?.kind !== "dimension") {
     return session;
   }
 
   const nextFullDefinition =
-    selectedAnnotation.kind === "constraint"
+    selected.kind === "constraint"
       ? {
           ...session.definition,
           constraintIds: session.definition.constraintIds.filter(
-            (constraintId) => constraintId !== selectedAnnotation.constraintId,
+            (constraintId) => constraintId !== selected.constraintId,
           ),
           constraints: session.definition.constraints.filter(
-            (constraint) =>
-              constraint.constraintId !== selectedAnnotation.constraintId,
+            (constraint) => constraint.constraintId !== selected.constraintId,
           ),
         }
       : {
           ...session.definition,
           dimensionIds: session.definition.dimensionIds.filter(
-            (dimensionId) => dimensionId !== selectedAnnotation.dimensionId,
+            (dimensionId) => dimensionId !== selected.dimensionId,
           ),
           dimensions: session.definition.dimensions.filter(
-            (dimension) =>
-              dimension.dimensionId !== selectedAnnotation.dimensionId,
+            (dimension) => dimension.dimensionId !== selected.dimensionId,
           ),
         };
   const nextDefinition = nextFullDefinition;
@@ -1402,7 +1547,6 @@ export function deleteSelectedSketchAnnotation(
       sequence: session.sequence + 1,
       toolStagedEntities: [],
       activeAnnotationEdit: null,
-      selectedAnnotation: null,
       activeEditTarget: null,
       activeSpecialMode: null,
       activeDrag: null,

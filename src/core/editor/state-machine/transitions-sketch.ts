@@ -9,6 +9,7 @@ import {
   clearActiveSketchTool,
   confirmSketchDrawing,
   deleteSelectedSketchAnnotation,
+  pruneSketchAnnotationContext,
   deleteSelectedSketchGeometry,
   deleteSketchReferenceTarget,
   escapeSketchDrawing,
@@ -59,6 +60,10 @@ import {
   emitSketchSpecialModeEffect,
 } from "./effect-emitters";
 import { enterSketchEditing, withPreview } from "./state-creators";
+import {
+  getSketchAnnotationSelectionContext,
+  getSketchGeometrySelectionContext,
+} from "./transitions-viewport";
 import { deriveSketchPointFromWorld, nextRequestId } from "./utility-helpers";
 
 export function handleSketchPointerMoved(
@@ -312,6 +317,7 @@ export function handleSketchActiveToolCleared(
       ...state,
       selection: [],
       hoverTarget: null,
+      annotationContext: null,
       session,
       command: {
         ...state.command,
@@ -435,11 +441,17 @@ export function handleSketchAnnotationDeleteRequested(
     ? deleteSketchReferenceTarget(state.session, referenceTarget)
     : isEditableSketchGeometrySelection(state.session, state.selection)
       ? deleteSelectedSketchGeometry(state.session, state.selection)
-      : deleteSelectedSketchAnnotation(state.session);
+      : deleteSelectedSketchAnnotation(state.session, state.selection);
   const nextState: SketchEditorState = {
     ...state,
     selection: [],
     hoverTarget: null,
+    // T14c: deleted refs leave the context; deleting the active annotation
+    // keeps its owners, so its siblings stay reachable.
+    annotationContext: pruneSketchAnnotationContext(
+      state.annotationContext ?? null,
+      session,
+    ),
     session,
     preview: {
       kind: "sketch",
@@ -468,6 +480,10 @@ export function handleSketchAnnotationEditRequested(
       ...state,
       selection: [event.target],
       hoverTarget: event.target,
+      annotationContext: getSketchAnnotationSelectionContext(
+        state,
+        event.target,
+      ),
       session,
       preview: {
         kind: "sketch",
@@ -514,6 +530,7 @@ export function handleSketchConnectedSelectionRequested(
       ...state,
       selection: targets,
       hoverTarget: event.target,
+      annotationContext: getSketchGeometrySelectionContext(state, targets),
       preview: {
         kind: "sketch",
         label: getSketchSessionPreviewLabel(state.session),
@@ -802,6 +819,7 @@ export function handleSketchSpecialModeEntered(
         session.activeSpecialMode?.operationTarget ?? state.selection[0],
       ].flatMap((target) => (target ? [target] : [])),
       hoverTarget: null,
+      annotationContext: null,
       selectionFilter:
         getSketchSpecialModeSelectionFilter(
           session,
@@ -909,6 +927,8 @@ export function handleSketchSpecialModeDoubleClickRequested(
           session.activeSpecialMode?.operationTarget ?? state.selection[0],
         ].flatMap((target) => (target ? [target] : [])),
         hoverTarget: null,
+        // T14c review R-1: the canvas entry drops the context too.
+        annotationContext: null,
         selectionFilter:
           getSketchSpecialModeSelectionFilter(
             session,
