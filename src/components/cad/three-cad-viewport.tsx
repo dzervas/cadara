@@ -22,6 +22,9 @@ import { resolveSketchRenderingPalette } from "@/components/cad/sketch-rendering
 import {
   collectSketchViewportFeedbackAnchors,
   getAnnotationProjectionId,
+  getSketchToolLabelObstacles,
+  type SketchAnnotationLayoutObstacle,
+  type SketchAnnotationLayoutViewport,
   type SketchViewportFeedbackProjection,
 } from "@/components/cad/sketch-viewport-feedback-model";
 import {
@@ -56,7 +59,10 @@ import {
   updatePointerFromClientPoint,
 } from "@/components/cad/three-cad-viewport-pick-candidates";
 import { SketchPickHint } from "@/components/cad/sketch-pick-hint";
-import { SketchNearGapGlyphs } from "@/components/cad/sketch-near-gap-glyphs";
+import {
+  SKETCH_NEAR_GAP_GLYPH_MIN_PX,
+  SketchNearGapGlyphs,
+} from "@/components/cad/sketch-near-gap-glyphs";
 import { computeSketchUnitsPerPixel } from "@/components/cad/sketch-snap-scale";
 import {
   SketchPickChooser,
@@ -179,6 +185,7 @@ import {
   LEGACY_VIEWPORT_LEFT_INSET_PX,
   LEGACY_VIEWPORT_WIDTH_PX,
   VIEWPORT_CANVAS_TOP_INSET_PX,
+  VIEWPORT_OVERLAY_TOP_INSET_PX,
   VIEWPORT_OVERLAY_TOP_INSET_STYLE,
   VIEW_CUBE_SIZE_PX,
 } from "@/components/cad/viewport-overlay-layout";
@@ -224,6 +231,137 @@ interface SketchHoverStack {
 
 const EMPTY_SKETCH_HOVER_STACK: SketchHoverStack = { key: "", targets: [] };
 const EMPTY_SKETCH_NEAR_GAPS: readonly SketchNearGap[] = [];
+
+interface SketchAnnotationDomFrame {
+  viewport: SketchAnnotationLayoutViewport;
+  obstacles: readonly SketchAnnotationLayoutObstacle[];
+}
+
+const EMPTY_SKETCH_ANNOTATION_DOM_FRAME: SketchAnnotationDomFrame = {
+  viewport: {
+    width: 0,
+    height: 0,
+    topInset: VIEWPORT_OVERLAY_TOP_INSET_PX,
+    bottomInset: 0,
+  },
+  obstacles: [],
+};
+
+/**
+ * T14d: the marker attributes the workbench puts on `display: contents`
+ * wrappers; the rects of their children are what the annotation layout reads.
+ * `obstacles`: transient panels labels move clear of (left tool panel stack).
+ * `chrome`: workbench chrome over the canvas (not usable canvas: anchors in it
+ * are not rendered). `bottom-band`: full-width chrome along the bottom edge
+ * (timeline, tabs); its top is the bottom of the usable band.
+ */
+const SKETCH_ANNOTATION_DOM_MARKERS = [
+  "data-viewport-annotation-obstacles",
+  "data-viewport-annotation-chrome",
+  "data-viewport-annotation-bottom-band",
+] as const;
+
+/**
+ * T14b/T14d review R-2: the pick hint's slot (overlap and near-gap chips,
+ * `SKETCH_PICK_HINT_LEFT_PX`, top inset), reserved for the whole sketch
+ * session so a hint appearing on hover never moves a label. The hint column
+ * is capped at this width; two chips fit in this height.
+ */
+const SKETCH_PICK_HINT_SLOT_WIDTH_PX = 420;
+const SKETCH_PICK_HINT_SLOT_HEIGHT_PX = 72;
+
+/**
+ * T14d: one read of the canvas rect, the top overlay inset (a CSS variable
+ * that grows when the toolbar wraps), the bottom band, and the floating DOM
+ * the annotation layout avoids, in canvas px.
+ */
+function readSketchAnnotationDomFrame(
+  canvasElement: HTMLCanvasElement,
+  viewportElement: HTMLElement,
+  viewCubeColumn: HTMLElement | null,
+): SketchAnnotationDomFrame {
+  const canvasRect = canvasElement.getBoundingClientRect();
+  const topInset = Number.parseFloat(
+    getComputedStyle(viewportElement).getPropertyValue(
+      "--workbench-viewport-overlay-top",
+    ),
+  );
+  const root = viewportElement.parentElement;
+  const rectsOf = (elements: Iterable<Element>) =>
+    [...elements].flatMap((element) => {
+      const rect = element.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0
+        ? [
+            {
+              x: rect.left - canvasRect.left,
+              y: rect.top - canvasRect.top,
+              width: rect.width,
+              height: rect.height,
+            },
+          ]
+        : [];
+    });
+  const [panels, chrome, bottomBand] = SKETCH_ANNOTATION_DOM_MARKERS.map(
+    (marker) => rectsOf(root?.querySelectorAll(`[${marker}] > *`) ?? []),
+  );
+  // Re-review RR-1: the history Actions strip draws above its band element's
+  // box, so it is chrome of its own (it changes with the session's actions,
+  // which re-runs this read).
+  const overflowingBandChrome = rectsOf(
+    root?.querySelectorAll(
+      "[data-viewport-annotation-bottom-band] [data-history-actions]",
+    ) ?? [],
+  );
+  const bandTop = Math.min(
+    canvasRect.height,
+    ...bottomBand!.map((rect) => rect.y),
+  );
+
+  return {
+    viewport: {
+      width: canvasRect.width,
+      height: canvasRect.height,
+      topInset: Number.isFinite(topInset)
+        ? topInset
+        : VIEWPORT_OVERLAY_TOP_INSET_PX,
+      bottomInset: Math.max(0, canvasRect.height - bandTop),
+    },
+    obstacles: [
+      ...panels!,
+      ...[
+        ...chrome!,
+        ...overflowingBandChrome,
+        ...rectsOf(viewCubeColumn ? [viewCubeColumn] : []),
+      ].map((rect) => ({ ...rect, chrome: true })),
+    ],
+  };
+}
+
+function sketchAnnotationDomFramesEqual(
+  left: SketchAnnotationDomFrame,
+  right: SketchAnnotationDomFrame,
+) {
+  const rectsEqual = (
+    a: SketchAnnotationLayoutObstacle,
+    b: SketchAnnotationLayoutObstacle,
+  ) =>
+    a.x === b.x &&
+    a.y === b.y &&
+    a.width === b.width &&
+    a.height === b.height &&
+    a.chrome === b.chrome;
+
+  return (
+    left.viewport.width === right.viewport.width &&
+    left.viewport.height === right.viewport.height &&
+    left.viewport.topInset === right.viewport.topInset &&
+    left.viewport.bottomInset === right.viewport.bottomInset &&
+    left.obstacles.length === right.obstacles.length &&
+    left.obstacles.every((rect, index) =>
+      rectsEqual(rect, right.obstacles[index]!),
+    )
+  );
+}
 
 interface ThreeCadViewportProps {
   model: ViewportModel;
@@ -424,6 +562,12 @@ export function ThreeCadViewport({
     useState<SketchSpecialModeFeedbackProjection[]>([]);
   // T13k (D26): the near gaps at their current screen positions.
   const [sketchNearGaps, setSketchNearGaps] = useState(EMPTY_SKETCH_NEAR_GAPS);
+  // T14d: the canvas size, top overlay inset and floating DOM obstacles the
+  // annotation layout reads (one DOM read per render, see below).
+  const [sketchAnnotationDomFrame, setSketchAnnotationDomFrame] =
+    useState<SketchAnnotationDomFrame>(EMPTY_SKETCH_ANNOTATION_DOM_FRAME);
+  const sketchAnnotationDomFrameRef = useRef(sketchAnnotationDomFrame);
+  const viewCubeColumnRef = useRef<HTMLDivElement | null>(null);
   const [dragFeedbackCue, setDragFeedbackCue] = useState<{
     x: number;
     y: number;
@@ -1343,6 +1487,108 @@ export function ThreeCadViewport({
   ]);
   const updateSketchFeedbackProjectionsRef = useRef(
     updateSketchFeedbackProjections,
+  );
+
+  // T14d (A-11, review B-1): the floating DOM the annotation layout reads:
+  // the workbench's marked wrappers (left tool panel stack; chrome: parts
+  // panel, notifications, debugger, variables; bottom band: timeline, tabs),
+  // the view-cube column, the canvas size and top overlay inset. One read
+  // after each commit that can move them (a projection pass, i.e. a camera
+  // change or resize; the session and selection the workbench panels render
+  // from) or when the chrome itself changes (observers below), before paint;
+  // state only changes when a rect does.
+  const [sketchAnnotationDomVersion, setSketchAnnotationDomVersion] =
+    useState(0);
+  const sketchSessionOpen = sketchSession !== null;
+  useEffect(() => {
+    const root = viewportRef.current?.parentElement;
+    if (!sketchSessionOpen || !root) {
+      return;
+    }
+    const bump = () => setSketchAnnotationDomVersion((version) => version + 1);
+    const resizeObserver = new ResizeObserver(bump);
+    const wrappers = root.querySelectorAll(
+      SKETCH_ANNOTATION_DOM_MARKERS.map((marker) => `[${marker}]`).join(","),
+    );
+    const observeChildren = () => {
+      resizeObserver.disconnect();
+      wrappers.forEach((wrapper) =>
+        [...wrapper.children].forEach((child) => resizeObserver.observe(child)),
+      );
+    };
+    // A chrome element mounting or unmounting (a notification, the
+    // variables panel) changes a wrapper's children.
+    const mutationObserver = new MutationObserver(() => {
+      observeChildren();
+      bump();
+    });
+    wrappers.forEach((wrapper) =>
+      mutationObserver.observe(wrapper, { childList: true }),
+    );
+    observeChildren();
+    return () => {
+      mutationObserver.disconnect();
+      resizeObserver.disconnect();
+    };
+  }, [sketchSessionOpen]);
+  useLayoutEffect(() => {
+    const canvasElement = canvasElementRef.current;
+    const viewportElement = viewportRef.current;
+    const next =
+      sketchSession && canvasElement && viewportElement
+        ? readSketchAnnotationDomFrame(
+            canvasElement,
+            viewportElement,
+            viewCubeColumnRef.current,
+          )
+        : EMPTY_SKETCH_ANNOTATION_DOM_FRAME;
+
+    if (
+      !sketchAnnotationDomFramesEqual(sketchAnnotationDomFrameRef.current, next)
+    ) {
+      sketchAnnotationDomFrameRef.current = next;
+      setSketchAnnotationDomFrame(next);
+    }
+  }, [
+    selection,
+    sketchAnnotationDomVersion,
+    sketchAnnotationProjections,
+    sketchSession,
+  ]);
+  // T14d (A4): near-gap rings and the active tool's labels are obstacles too
+  // (both layers stay `pointer-events-none`; the layout only avoids them).
+  const sketchAnnotationObstacles = useMemo(
+    () => [
+      ...sketchNearGaps.map(({ a, b, distancePx }) => {
+        // The ring `SketchNearGapGlyphs` draws.
+        const size = Math.max(SKETCH_NEAR_GAP_GLYPH_MIN_PX, distancePx + 10);
+        return {
+          x: (a.screen.x + b.screen.x) / 2 - size / 2,
+          y: (a.screen.y + b.screen.y) / 2 - size / 2,
+          width: size,
+          height: size,
+        };
+      }),
+      ...getSketchToolLabelObstacles(
+        sketchToolPresentation,
+        sketchFeedbackProjections,
+      ),
+      ...sketchAnnotationDomFrame.obstacles,
+      // Review R-2: the hint slot, reserved while the sketch is open.
+      {
+        x: SKETCH_PICK_HINT_LEFT_PX,
+        y: sketchAnnotationDomFrame.viewport.topInset,
+        width: SKETCH_PICK_HINT_SLOT_WIDTH_PX,
+        height: SKETCH_PICK_HINT_SLOT_HEIGHT_PX,
+      },
+    ],
+    [
+      sketchAnnotationDomFrame.obstacles,
+      sketchAnnotationDomFrame.viewport.topInset,
+      sketchFeedbackProjections,
+      sketchNearGaps,
+      sketchToolPresentation,
+    ],
   );
 
   useEffect(() => {
@@ -3211,6 +3457,7 @@ export function ThreeCadViewport({
         />
       </Canvas>
       <div
+        ref={viewCubeColumnRef}
         className="pointer-events-none absolute right-4 z-20 flex flex-col items-end gap-1"
         style={{
           top: VIEWPORT_OVERLAY_TOP_INSET_STYLE,
@@ -3251,6 +3498,7 @@ export function ThreeCadViewport({
       <div
         className="pointer-events-none absolute z-20"
         style={{
+          maxWidth: SKETCH_PICK_HINT_SLOT_WIDTH_PX,
           left: SKETCH_PICK_HINT_LEFT_PX,
           top: VIEWPORT_OVERLAY_TOP_INSET_STYLE,
         }}
@@ -3344,6 +3592,8 @@ export function ThreeCadViewport({
       <SketchConstraintAnnotations
         annotations={sketchAnnotations}
         projections={sketchAnnotationProjections}
+        viewport={sketchAnnotationDomFrame.viewport}
+        obstacles={sketchAnnotationObstacles}
         hoveredAnnotation={isAnnotationTarget(hoverTarget) ? hoverTarget : null}
         hoverTarget={hoverTarget}
         selection={selection}
@@ -3371,6 +3621,28 @@ export function ThreeCadViewport({
           selectRef.current(target);
         }}
         onEdit={(target) => annotationEditRef.current(target)}
+        onWheel={(event) => {
+          // T14b review A-6: the camera controls listen on the canvas only;
+          // a wheel over an interactive chip zooms as it would beside it.
+          canvasElementRef.current?.dispatchEvent(
+            new WheelEvent("wheel", {
+              bubbles: true,
+              cancelable: true,
+              deltaX: event.deltaX,
+              deltaY: event.deltaY,
+              deltaZ: event.deltaZ,
+              deltaMode: event.deltaMode,
+              clientX: event.clientX,
+              clientY: event.clientY,
+              screenX: event.screenX,
+              screenY: event.screenY,
+              ctrlKey: event.ctrlKey,
+              shiftKey: event.shiftKey,
+              altKey: event.altKey,
+              metaKey: event.metaKey,
+            }),
+          );
+        }}
         onDimensionDrag={(handle, clientX, clientY, gesturePhase) => {
           const point = projectSketchClientPointRef.current(clientX, clientY);
           if (point) {

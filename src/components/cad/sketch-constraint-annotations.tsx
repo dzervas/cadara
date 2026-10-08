@@ -1,4 +1,10 @@
-import { useEffect, useEffectEvent, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+} from "react";
 
 import type {
   SketchAnnotationContext,
@@ -16,8 +22,11 @@ import {
   resolveSketchAnnotationLayer,
 } from "@/components/cad/sketch-constraint-annotation-visibility";
 import {
+  estimateSketchAnnotationExtent,
   getAnnotationProjectionId,
-  layoutSketchAnnotationProjections,
+  layoutSketchAnnotations,
+  type SketchAnnotationLayoutObstacle,
+  type SketchAnnotationLayoutViewport,
   type SketchViewportFeedbackProjection,
 } from "@/components/cad/sketch-viewport-feedback-model";
 import { getSketchRenderingPaletteToken } from "@/components/cad/sketch-rendering-palette";
@@ -29,6 +38,10 @@ import {
 interface SketchConstraintAnnotationsProps {
   annotations: readonly SketchAnnotationDescriptor[];
   projections: readonly SketchViewportFeedbackProjection[];
+  /** T14d: the canvas the labels are clamped into. */
+  viewport: SketchAnnotationLayoutViewport;
+  /** T14d (A4/A-11): screen rects the labels avoid (near-gap rings, tool labels, floating panels, hint chip). */
+  obstacles: readonly SketchAnnotationLayoutObstacle[];
   hoveredAnnotation: SketchConstraintRef | SketchDimensionRef | null;
   hoverTarget: PrimitiveRef | null;
   /** The active selection; an annotation in it is the active annotation. */
@@ -44,11 +57,15 @@ interface SketchConstraintAnnotationsProps {
   onSelect: (target: SketchConstraintRef | SketchDimensionRef) => void;
   onEdit: (target: SketchConstraintRef | SketchDimensionRef) => void;
   onDimensionDrag?: DimensionAnnotationDragListener;
+  /** T14b review A-6: a wheel over a control is forwarded (camera zoom). */
+  onWheel?: (event: WheelEvent) => void;
 }
 
 export function SketchConstraintAnnotations({
   annotations,
   projections,
+  viewport,
+  obstacles,
   hoveredAnnotation,
   hoverTarget,
   selection,
@@ -60,8 +77,62 @@ export function SketchConstraintAnnotations({
   onSelect,
   onEdit,
   onDimensionDrag,
+  onWheel,
 }: SketchConstraintAnnotationsProps) {
   const [labelDrag] = useState(() => new DimensionAnnotationLabelDrag());
+  // T14b review A-6 / T14d review R-3: a wheel over a control is forwarded
+  // and its native default (page zoom on Ctrl+wheel or a trackpad pinch) is
+  // prevented, which React's passive `onWheel` cannot do.
+  const onWheelRef = useRef(onWheel);
+  useEffect(() => {
+    onWheelRef.current = onWheel;
+  });
+  const layerRef = useCallback((element: HTMLDivElement | null) => {
+    if (!element) {
+      return;
+    }
+    const listener = (event: WheelEvent) => {
+      event.preventDefault();
+      onWheelRef.current?.(event);
+    };
+    element.addEventListener("wheel", listener, { passive: false });
+    return () => element.removeEventListener("wheel", listener);
+  }, []);
+  // T14d (A-7): the chip being dragged keeps its dragged position: where it
+  // was when the drag started, moved with its anchor (the label placement
+  // the drag writes). It is placed first and never re-placed by the layout.
+  const [labelDragOffset, setLabelDragOffset] = useState<{
+    handleId: string;
+    dx: number;
+    dy: number;
+  } | null>(null);
+  const onTrackedDimensionDrag: DimensionAnnotationDragListener = (
+    handle,
+    clientX,
+    clientY,
+    phase,
+  ) => {
+    if (phase === "start") {
+      const annotation = annotations.find(
+        (entry) => entry.dragHandle?.id === handle.id,
+      );
+      const id = annotation ? getAnnotationProjectionId(annotation.id) : null;
+      const placed = id ? projectionById.get(id) : undefined;
+      const anchor = id ? anchorById.get(id) : undefined;
+      setLabelDragOffset(
+        placed && anchor
+          ? {
+              handleId: handle.id,
+              dx: placed.x - anchor.x,
+              dy: placed.y - anchor.y,
+            }
+          : { handleId: handle.id, dx: 0, dy: 0 },
+      );
+    } else if (phase === "end" || phase === "cancel") {
+      setLabelDragOffset(null);
+    }
+    onDimensionDrag?.(handle, clientX, clientY, phase);
+  };
 
   const layer = resolveSketchAnnotationLayer(annotations, {
     hoveredAnnotation,
@@ -73,31 +144,51 @@ export function SketchConstraintAnnotations({
   });
   const visibleAnnotations = layer.items;
 
-  // T14c: the greedy layout places earlier items first. Always-visible
-  // annotations (dimensions, problems) go first and hover previews last, so
-  // the controls a selection newly pins (an annotation's siblings) never
-  // displace a chip that was already on screen (the one just clicked).
-  const layoutRankByProjectionId = new Map(
-    visibleAnnotations.map(({ annotation, visibility }) => [
-      getAnnotationProjectionId(annotation.id),
-      annotation.status === "dimension" ||
-      annotation.constraintDisplay?.isAffectedOverconstraint
-        ? 0
-        : visibility === "pinned"
-          ? 1
-          : 2,
-    ]),
+  // T14d (T-8): one pure layout pass over the rendered labels, by priority
+  // (problem > dimension > pinned/last/active glyph > preview; selection never
+  // changes the rank), so a click never reorders labels under the pointer and
+  // a newly pinned glyph or a hover preview never displaces a chip (A-14).
+  const anchorById = new Map(
+    projections.map((projection) => [projection.id, projection]),
   );
   const projectionById = new Map(
-    layoutSketchAnnotationProjections(
-      projections
-        .filter((projection) => layoutRankByProjectionId.has(projection.id))
-        .sort(
-          (left, right) =>
-            layoutRankByProjectionId.get(left.id)! -
-            layoutRankByProjectionId.get(right.id)!,
-        ),
-    ).map((projection) => [projection.id, projection]),
+    layoutSketchAnnotations(
+      visibleAnnotations.flatMap(({ annotation, visibility }) => {
+        const id = getAnnotationProjectionId(annotation.id);
+        const anchor = anchorById.get(id);
+        if (!anchor) {
+          return [];
+        }
+        const isProblem =
+          annotation.constraintDisplay?.isAffectedOverconstraint === true;
+        const isDimension = annotation.status === "dimension";
+        return [
+          {
+            id,
+            anchor,
+            ...estimateSketchAnnotationExtent(annotation),
+            priority: isProblem
+              ? "problem"
+              : isDimension
+                ? "dimension"
+                : visibility === "pinned"
+                  ? "pinned"
+                  : "preview",
+            keepWhenUnplaceable: isProblem || isDimension,
+            fixed:
+              labelDragOffset &&
+              annotation.dragHandle?.id === labelDragOffset.handleId
+                ? {
+                    x: anchor.x + labelDragOffset.dx,
+                    y: anchor.y + labelDragOffset.dy,
+                  }
+                : null,
+          } as const,
+        ];
+      }),
+      viewport,
+      obstacles,
+    ).map((placement) => [placement.id, placement]),
   );
   // T14a C2: a drag whose chip unmounts, or whose layer unmounts, cancels; a
   // chip that turns passive (T14b T-5) no longer carries its drag either.
@@ -132,6 +223,7 @@ export function SketchConstraintAnnotations({
     <div
       className="pointer-events-none absolute inset-0 z-30"
       data-sketch-annotation-layer=""
+      ref={layerRef}
     >
       {visibleAnnotations.map(
         ({ annotation, visibility, isInteractive, isSelected, isLast }) => {
@@ -155,7 +247,9 @@ export function SketchConstraintAnnotations({
           const iconSrc = getAnnotationGlyphIconSrc(annotation.glyphKind);
           const isDimension = annotation.status === "dimension";
           const className = `absolute flex h-8 items-center rounded border shadow-[var(--cad-panel-shadow)] ${
-            isDimension ? "min-w-8 gap-1.5 px-2" : "w-8 justify-center p-1"
+            isDimension
+              ? "min-w-8 gap-1.5 whitespace-nowrap px-2"
+              : "w-8 justify-center p-1"
           } ${
             isInteractive
               ? "pointer-events-auto transition"
@@ -243,7 +337,7 @@ export function SketchConstraintAnnotations({
                   annotation,
                   event,
                   onSelect,
-                  onDimensionDrag,
+                  onTrackedDimensionDrag,
                 )
               }
               onPointerUp={(event) => labelDrag.pointerEnd(event, "end")}

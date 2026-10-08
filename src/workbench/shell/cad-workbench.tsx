@@ -1330,84 +1330,100 @@ export function CadWorkbench({
                 <Loader color="gray" size="lg" />
               </div>
             ) : null}
-            <SketchToolPanel
-              schema={sketchToolPresentation}
-              onPatch={(patch) =>
-                dispatch({ type: "sketch.toolPatched", patch })
-              }
-            />
-            {sketchTangentActionState && sketchTangentActionState.visible ? (
-              <SketchTangentActions
-                resetEnabled={sketchTangentActionState.resetEnabled}
-                zeroEnabled={sketchTangentActionState.zeroEnabled}
-                onReset={() =>
-                  dispatch({
-                    type: "sketch.toolPatched",
-                    patch: { intent: "resetTangentToAutomatic" },
-                  })
-                }
-                onZero={() =>
-                  dispatch({
-                    type: "sketch.toolPatched",
-                    patch: { intent: "setTangentToZero" },
-                  })
+            {/* T14d (A-11): the left floating panel stack. The sketch
+                annotation layout avoids the rects of the children of every
+                `data-viewport-annotation-obstacles` wrapper (read by the
+                viewport once per render). */}
+            <div className="contents" data-viewport-annotation-obstacles="">
+              <SketchToolPanel
+                schema={sketchToolPresentation}
+                onPatch={(patch) =>
+                  dispatch({ type: "sketch.toolPatched", patch })
                 }
               />
-            ) : null}
-            <SketchSpecialModePanel
-              schema={sketchSpecialModePanel}
-              onAction={(action) =>
-                dispatch({
-                  type: "sketch.specialModePanelActionInvoked",
-                  action,
-                })
-              }
-            />
-            {restoreMessage ? (
-              <WorkbenchNotification
-                type="error"
-                title="History restore failed"
-                message={restoreMessage}
-                placement={{
-                  kind: "viewport",
-                  right: notificationRightOffset,
-                  top: WORKBENCH_STATUS_TOP_STYLE,
-                }}
-                action={{
-                  label: "Reset stored history",
-                  onClick: () => {
-                    modelingService.resetOperationHistory();
-                    setRestoreMessage(null);
-                  },
-                }}
-                onDismiss={() => setRestoreMessage(null)}
+              {sketchTangentActionState && sketchTangentActionState.visible ? (
+                <SketchTangentActions
+                  resetEnabled={sketchTangentActionState.resetEnabled}
+                  zeroEnabled={sketchTangentActionState.zeroEnabled}
+                  onReset={() =>
+                    dispatch({
+                      type: "sketch.toolPatched",
+                      patch: { intent: "resetTangentToAutomatic" },
+                    })
+                  }
+                  onZero={() =>
+                    dispatch({
+                      type: "sketch.toolPatched",
+                      patch: { intent: "setTangentToZero" },
+                    })
+                  }
+                />
+              ) : null}
+              <SketchSpecialModePanel
+                schema={sketchSpecialModePanel}
+                onAction={(action) =>
+                  dispatch({
+                    type: "sketch.specialModePanelActionInvoked",
+                    action,
+                  })
+                }
               />
-            ) : null}
-            {workbenchStatusNotification ? (
-              <WorkbenchNotification
-                {...workbenchStatusNotification}
-                placement={{
-                  kind: "viewport",
-                  right: notificationRightOffset,
-                  top: restoreMessage
-                    ? WORKBENCH_STATUS_TOP_WITH_RESTORE_STYLE
-                    : WORKBENCH_STATUS_TOP_STYLE,
-                }}
-                onDismiss={() => setWorkbenchStatusNotification(null)}
-              />
-            ) : null}
-            {sketchSession?.validationMessage ? (
-              <div
-                role="status"
-                className="pointer-events-none absolute z-20 max-w-sm rounded-md border border-(--cad-border-strong) bg-(--cad-surface-overlay) px-3 py-2 text-xs text-(--cad-foreground) shadow-(--cad-panel-shadow)"
-                style={{
-                  left: VIEWPORT_FLOATING_PANEL_LEFT_PX,
-                  top: VIEWPORT_FLOATING_PANEL_TOP_STYLE,
-                }}
-              >
-                {sketchSession.validationMessage}
-              </div>
-            ) : null}
+            </div>
+            {/* T14d review B-1: workbench chrome over the canvas. The
+                annotation layout never places a label over the children of
+                a `data-viewport-annotation-chrome` wrapper and does not
+                render a label anchored under them; the
+                `data-viewport-annotation-bottom-band` children bound the
+                usable canvas from below. */}
+            <div className="contents" data-viewport-annotation-chrome="">
+              {restoreMessage ? (
+                <WorkbenchNotification
+                  type="error"
+                  title="History restore failed"
+                  message={restoreMessage}
+                  placement={{
+                    kind: "viewport",
+                    right: notificationRightOffset,
+                    top: WORKBENCH_STATUS_TOP_STYLE,
+                  }}
+                  action={{
+                    label: "Reset stored history",
+                    onClick: () => {
+                      modelingService.resetOperationHistory();
+                      setRestoreMessage(null);
+                    },
+                  }}
+                  onDismiss={() => setRestoreMessage(null)}
+                />
+              ) : null}
+              {workbenchStatusNotification ? (
+                <WorkbenchNotification
+                  {...workbenchStatusNotification}
+                  placement={{
+                    kind: "viewport",
+                    right: notificationRightOffset,
+                    top: restoreMessage
+                      ? WORKBENCH_STATUS_TOP_WITH_RESTORE_STYLE
+                      : WORKBENCH_STATUS_TOP_STYLE,
+                  }}
+                  onDismiss={() => setWorkbenchStatusNotification(null)}
+                />
+              ) : null}
+            </div>
+            <div className="contents" data-viewport-annotation-obstacles="">
+              {sketchSession?.validationMessage ? (
+                <div
+                  role="status"
+                  className="pointer-events-none absolute z-20 max-w-sm rounded-md border border-(--cad-border-strong) bg-(--cad-surface-overlay) px-3 py-2 text-xs text-(--cad-foreground) shadow-(--cad-panel-shadow)"
+                  style={{
+                    left: VIEWPORT_FLOATING_PANEL_LEFT_PX,
+                    top: VIEWPORT_FLOATING_PANEL_TOP_STYLE,
+                  }}
+                >
+                  {sketchSession.validationMessage}
+                </div>
+              ) : null}
+            </div>
             {activeImportSession ? (
               <WorkbenchInspectorOverlay>
                 <ImportInspector onCommit={() => void commitImportSession()} />
@@ -1475,76 +1491,91 @@ export function CadWorkbench({
               onDownloadBugReportState={handleDownloadBugReportState}
             />
 
-            <FloatingPartsTree
-              snapshot={snapshot}
-              hiddenTargetKeys={effectiveHiddenTargetKeys}
-              objectLabelOverrides={objectLabelOverrides}
-              visibleSelection={visibleSelection}
-              onSelectTarget={handleShellSelect}
-              onReopenTarget={handleNavigationReopen}
-              onChangeSketchPlaneTarget={handleSketchPlaneEditRequest}
-              onObjectDelete={handleDeleteTarget}
-              onObjectExport={handleObjectExport}
-              onRenameTarget={handleTargetRename}
-              onToggleTargetVisibility={handleTargetVisibilityToggle}
-            />
-
-            <WorkbenchVariablesFab
-              open={variablesPanelOpen}
-              onToggle={() => setVariablesPanelOpen((current) => !current)}
-            />
-            {variablesPanelOpen ? (
-              <WorkbenchVariablesPanel
+            <div className="contents" data-viewport-annotation-chrome="">
+              <FloatingPartsTree
                 snapshot={snapshot}
-                invalidVariableValueMessages={invalidVariableValueMessages}
-                onAddVariable={handleVariableAdd}
-                onUpdateVariable={handleVariableUpdate}
-                onClose={() => setVariablesPanelOpen(false)}
+                hiddenTargetKeys={effectiveHiddenTargetKeys}
+                objectLabelOverrides={objectLabelOverrides}
+                visibleSelection={visibleSelection}
+                onSelectTarget={handleShellSelect}
+                onReopenTarget={handleNavigationReopen}
+                onChangeSketchPlaneTarget={handleSketchPlaneEditRequest}
+                onObjectDelete={handleDeleteTarget}
+                onObjectExport={handleObjectExport}
+                onRenameTarget={handleTargetRename}
+                onToggleTargetVisibility={handleTargetVisibilityToggle}
               />
-            ) : null}
 
+              <WorkbenchVariablesFab
+                open={variablesPanelOpen}
+                onToggle={() => setVariablesPanelOpen((current) => !current)}
+              />
+              {variablesPanelOpen ? (
+                <WorkbenchVariablesPanel
+                  snapshot={snapshot}
+                  invalidVariableValueMessages={invalidVariableValueMessages}
+                  onAddVariable={handleVariableAdd}
+                  onUpdateVariable={handleVariableUpdate}
+                  onClose={() => setVariablesPanelOpen(false)}
+                />
+              ) : null}
+            </div>
             <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col">
               <div className="flex flex-col gap-3">
                 <div className="flex items-end gap-3 px-4">
-                  <WorkbenchStateDebugger state={debuggerState} />
-                  <MeasurementPanel measurement={measurementViewModel} />
+                  <div className="contents" data-viewport-annotation-chrome="">
+                    <WorkbenchStateDebugger state={debuggerState} />
+                    <MeasurementPanel measurement={measurementViewModel} />
+                  </div>
                 </div>
-                <HistoryTimelineShell
-                  snapshot={snapshot}
-                  sketchSession={sketchSession}
-                  historyHighlightFeatureIds={historyHighlightFeatureIds}
-                  visibleSelection={visibleSelection}
-                  onSelectTarget={handleShellSelect}
-                  onReopenTarget={handleNavigationReopen}
-                  onChangeSketchPlaneTarget={handleSketchPlaneEditRequest}
-                  onDocumentCursorRequested={handleTimelineCursorRequested}
-                  documentCursorDisabled={!history.canUndo && !history.canRedo}
-                  onDocumentHistoryReorder={handleDocumentHistoryReorder}
-                  documentHistoryReorderDisabled={
-                    Boolean(sketchSession) ||
-                    isDocumentHistoryReorderRunning ||
-                    isUndoRedoRunning ||
-                    (!history.canUndo && !history.canRedo)
-                  }
-                  onDeleteDocumentItem={handleDocumentHistoryDelete}
-                  onExportDocumentItem={handleDocumentHistoryExport}
-                  onRenameDocumentItem={handleDocumentHistoryRename}
-                  onSuppressFeature={handleFeatureSuppressionRequested}
-                  actionHistory={contextualActionHistory}
-                  actionHistoryDisabled={isUndoRedoRunning}
-                  onUndoAction={requestUndo}
-                  onRedoAction={requestRedo}
-                />
+                <div
+                  className="contents"
+                  data-viewport-annotation-bottom-band=""
+                >
+                  <HistoryTimelineShell
+                    snapshot={snapshot}
+                    sketchSession={sketchSession}
+                    historyHighlightFeatureIds={historyHighlightFeatureIds}
+                    visibleSelection={visibleSelection}
+                    onSelectTarget={handleShellSelect}
+                    onReopenTarget={handleNavigationReopen}
+                    onChangeSketchPlaneTarget={handleSketchPlaneEditRequest}
+                    onDocumentCursorRequested={handleTimelineCursorRequested}
+                    documentCursorDisabled={
+                      !history.canUndo && !history.canRedo
+                    }
+                    onDocumentHistoryReorder={handleDocumentHistoryReorder}
+                    documentHistoryReorderDisabled={
+                      Boolean(sketchSession) ||
+                      isDocumentHistoryReorderRunning ||
+                      isUndoRedoRunning ||
+                      (!history.canUndo && !history.canRedo)
+                    }
+                    onDeleteDocumentItem={handleDocumentHistoryDelete}
+                    onExportDocumentItem={handleDocumentHistoryExport}
+                    onRenameDocumentItem={handleDocumentHistoryRename}
+                    onSuppressFeature={handleFeatureSuppressionRequested}
+                    actionHistory={contextualActionHistory}
+                    actionHistoryDisabled={isUndoRedoRunning}
+                    onUndoAction={requestUndo}
+                    onRedoAction={requestRedo}
+                  />
+                </div>
               </div>
               <div className="pointer-events-auto mt-3">
-                <DocumentTabsBar
-                  ref={tabsBarRef}
-                  state={tabsState}
-                  onActivate={onActivateDocumentTab}
-                  onClose={handleTabClose}
-                  onReorder={handleTabReorder}
-                  onRename={handleTabRename}
-                />
+                <div
+                  className="contents"
+                  data-viewport-annotation-bottom-band=""
+                >
+                  <DocumentTabsBar
+                    ref={tabsBarRef}
+                    state={tabsState}
+                    onActivate={onActivateDocumentTab}
+                    onClose={handleTabClose}
+                    onReorder={handleTabReorder}
+                    onRename={handleTabRename}
+                  />
+                </div>
               </div>
             </div>
           </main>

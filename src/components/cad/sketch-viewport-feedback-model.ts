@@ -10,11 +10,6 @@ export interface SketchViewportFeedbackProjection {
   y: number;
 }
 
-export interface SketchViewportFeedbackLayoutProjection extends SketchViewportFeedbackProjection {
-  sourceX: number;
-  sourceY: number;
-}
-
 interface SketchViewportFeedbackAnchor {
   id: string;
   anchor: SketchToolAnchorDescriptor;
@@ -62,86 +57,349 @@ export function getAnnotationProjectionId(annotationId: string) {
   return `annotation:${annotationId}`;
 }
 
-export function layoutSketchAnnotationProjections(
-  projections: readonly SketchViewportFeedbackProjection[],
-): SketchViewportFeedbackLayoutProjection[] {
-  const placed: SketchViewportFeedbackLayoutProjection[] = [];
+/** A screen rect in canvas px: `x`/`y` is the top-left corner. */
+export interface SketchAnnotationLayoutRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
 
-  for (const projection of projections) {
-    const candidate = findNonOverlappingAnnotationPosition(
-      projection,
-      placed,
-      projections.length,
+/**
+ * A rect the labels keep clear of. `chrome` marks workbench chrome floating
+ * over the canvas (parts panel, view-cube column, notifications, debugger,
+ * variables button): it is not usable canvas, so a label anchored in it is
+ * not rendered, and no label is ever placed over it, not even as a fallback.
+ */
+export interface SketchAnnotationLayoutObstacle extends SketchAnnotationLayoutRect {
+  chrome?: boolean;
+}
+
+/**
+ * T14d (T-8) layout priority, highest first: a problem, a dimension, a
+ * pinned constraint glyph (including the active and last one), a hover
+ * preview. Selection never changes the rank (orchestrator, option (c)), so a
+ * click never reorders labels under the pointer; dimensions rank above pinned
+ * glyphs, so pinning a context never moves a chip the user is about to click.
+ */
+export type SketchAnnotationLayoutPriority =
+  | "problem"
+  | "dimension"
+  | "pinned"
+  | "preview";
+
+const SKETCH_ANNOTATION_LAYOUT_PRIORITY_RANK: Record<
+  SketchAnnotationLayoutPriority,
+  number
+> = { problem: 0, dimension: 1, pinned: 2, preview: 3 };
+
+export interface SketchAnnotationLayoutItem {
+  id: string;
+  /** The projected anchor (the label centre when nothing is in the way). */
+  anchor: { x: number; y: number };
+  width: number;
+  height: number;
+  priority: SketchAnnotationLayoutPriority;
+  /** Problems and dimensions stay at their clamped anchor when no candidate is free; anything else is dropped. */
+  keepWhenUnplaceable: boolean;
+  /** A-7: placed here (centre) as is, before everything else, and avoided by every other item. */
+  fixed?: { x: number; y: number } | null;
+}
+
+export interface SketchAnnotationLayoutViewport {
+  width: number;
+  height: number;
+  /** The top overlay row (toolbar) the labels stay below. */
+  topInset: number;
+  /** The bottom band (history timeline, document tabs) the labels stay above. */
+  bottomInset: number;
+}
+
+/** A placed label: its centre. */
+export interface SketchAnnotationPlacement {
+  id: string;
+  x: number;
+  y: number;
+}
+
+export const SKETCH_ANNOTATION_LAYOUT_GAP_PX = 6;
+export const SKETCH_ANNOTATION_LAYOUT_EDGE_INSET_PX = 8;
+const SKETCH_ANNOTATION_LAYOUT_RING_CAP = 6;
+const SKETCH_ANNOTATION_LAYOUT_EPSILON_PX = 1e-6;
+/** Constraint glyphs are `h-8 w-8` buttons. */
+export const SKETCH_ANNOTATION_GLYPH_SIZE_PX = 32;
+/**
+ * Dimension chip frame: 2 px border + 16 px padding + 16 px icon + 6 px gap.
+ * The 11 px monospace label is estimated at 7 px per character, calibrated on
+ * the measured 110 px "Coincident" chip (40 + 10 × 7) and rounded up from
+ * the nominal 6.6 px (review A-6); the E2E bounding-box row pins it.
+ */
+const SKETCH_ANNOTATION_CHIP_FRAME_PX = 40;
+const SKETCH_ANNOTATION_CHIP_CHAR_PX = 7;
+
+/** The estimated extent of an annotation label (no DOM measurement, T-8). */
+export function estimateSketchAnnotationExtent(annotation: {
+  status: string;
+  visibleLabel?: string;
+}) {
+  return annotation.status === "dimension"
+    ? {
+        width: Math.ceil(
+          SKETCH_ANNOTATION_CHIP_FRAME_PX +
+            [...(annotation.visibleLabel ?? "")].length *
+              SKETCH_ANNOTATION_CHIP_CHAR_PX,
+        ),
+        height: SKETCH_ANNOTATION_GLYPH_SIZE_PX,
+      }
+    : {
+        width: SKETCH_ANNOTATION_GLYPH_SIZE_PX,
+        height: SKETCH_ANNOTATION_GLYPH_SIZE_PX,
+      };
+}
+
+/**
+ * T14d (T-8): places annotation labels in a stable order (fixed items, then
+ * priority, then id). The usable area is the canvas between the top and
+ * bottom chrome bands minus the `chrome` obstacles: a label whose anchor is
+ * outside it is not rendered (problems included; off-screen anchors are not
+ * pulled in). Each other label takes the first candidate from its anchor
+ * outward (8 directions on up to 6 rings, ring step = its own size + 6 px
+ * gap), clamped 8 px inside the usable band, whose rect keeps the gap to
+ * every placed label and obstacle. With no free candidate, a problem or
+ * dimension takes the first candidate that only keeps clear of the chrome;
+ * otherwise it is dropped. A lower-priority item never moves a
+ * higher-priority one (A-14). Pure: a function of its inputs only.
+ */
+export function layoutSketchAnnotations(
+  items: readonly SketchAnnotationLayoutItem[],
+  viewport: SketchAnnotationLayoutViewport,
+  obstacles: readonly SketchAnnotationLayoutObstacle[],
+): SketchAnnotationPlacement[] {
+  const chrome = obstacles.filter((obstacle) => obstacle.chrome);
+  const taken: SketchAnnotationLayoutRect[] = [...obstacles];
+  const placements: SketchAnnotationPlacement[] = [];
+  const ordered = [...items].sort(
+    (left, right) =>
+      Number(!left.fixed) - Number(!right.fixed) ||
+      SKETCH_ANNOTATION_LAYOUT_PRIORITY_RANK[left.priority] -
+        SKETCH_ANNOTATION_LAYOUT_PRIORITY_RANK[right.priority] ||
+      (left.id < right.id ? -1 : left.id > right.id ? 1 : 0),
+  );
+  const clear = (
+    candidate: { x: number; y: number },
+    item: SketchAnnotationLayoutItem,
+    rects: readonly SketchAnnotationLayoutRect[],
+  ) =>
+    !rects.some((rect) =>
+      layoutRectsTooClose(layoutRectAt(candidate, item), rect),
     );
-    placed.push({
-      ...projection,
-      sourceX: projection.x,
-      sourceY: projection.y,
-      x: candidate.x,
-      y: candidate.y,
-    });
+
+  for (const item of ordered) {
+    let centre: { x: number; y: number } | null = null;
+
+    if (item.fixed) {
+      centre = item.fixed;
+    } else if (isUsableAnchor(item.anchor, viewport, chrome)) {
+      const candidates = getSketchAnnotationLayoutCandidates(item).map(
+        (candidate) => clampLayoutCentre(candidate, item, viewport),
+      );
+      centre =
+        candidates.find((candidate) => clear(candidate, item, taken)) ??
+        (item.keepWhenUnplaceable
+          ? (candidates.find((candidate) => clear(candidate, item, chrome)) ??
+            null)
+          : null);
+    }
+
+    if (centre) {
+      taken.push(layoutRectAt(centre, item));
+      placements.push({ id: item.id, x: centre.x, y: centre.y });
+    }
   }
 
-  return placed;
+  return placements;
 }
 
-const ANNOTATION_LABEL_SIZE_PX = 32;
-const ANNOTATION_LABEL_GAP_PX = 6;
-const ANNOTATION_LABEL_STEP_PX =
-  ANNOTATION_LABEL_SIZE_PX + ANNOTATION_LABEL_GAP_PX;
-
-function findNonOverlappingAnnotationPosition(
-  projection: SketchViewportFeedbackProjection,
-  placed: readonly SketchViewportFeedbackLayoutProjection[],
-  totalProjectionCount: number,
+/** Inside the band between the top and bottom chrome, and not under chrome. */
+function isUsableAnchor(
+  anchor: { x: number; y: number },
+  viewport: SketchAnnotationLayoutViewport,
+  chrome: readonly SketchAnnotationLayoutRect[],
 ) {
-  const candidates = createAnnotationLayoutCandidates(totalProjectionCount).map(
-    (offset) => ({
-      x: projection.x + offset.x,
-      y: projection.y + offset.y,
-    }),
-  );
-
   return (
-    candidates.find(
-      (candidate) =>
-        !placed.some((entry) => annotationLabelsOverlap(candidate, entry)),
-    ) ??
-    candidates[0] ??
-    projection
+    anchor.x >= 0 &&
+    anchor.x <= viewport.width &&
+    anchor.y >= viewport.topInset &&
+    anchor.y <= viewport.height - viewport.bottomInset &&
+    !chrome.some(
+      (rect) =>
+        anchor.x >= rect.x &&
+        anchor.x <= rect.x + rect.width &&
+        anchor.y >= rect.y &&
+        anchor.y <= rect.y + rect.height,
+    )
   );
 }
 
-function createAnnotationLayoutCandidates(totalProjectionCount: number) {
-  const candidates = [{ x: 0, y: 0 }];
-  const ringCount = Math.max(totalProjectionCount, 1);
+const SKETCH_ANNOTATION_LAYOUT_DIRECTIONS = [
+  [1, 0],
+  [0, -1],
+  [-1, 0],
+  [0, 1],
+  [1, -1],
+  [-1, -1],
+  [-1, 1],
+  [1, 1],
+] as const;
 
-  for (let ring = 1; ring <= ringCount; ring += 1) {
-    const radius = ring * ANNOTATION_LABEL_STEP_PX;
+function getSketchAnnotationLayoutCandidates(item: SketchAnnotationLayoutItem) {
+  const stepX = item.width + SKETCH_ANNOTATION_LAYOUT_GAP_PX;
+  const stepY = item.height + SKETCH_ANNOTATION_LAYOUT_GAP_PX;
+  const candidates = [item.anchor];
 
-    candidates.push(
-      { x: radius, y: 0 },
-      { x: 0, y: -radius },
-      { x: -radius, y: 0 },
-      { x: 0, y: radius },
-      { x: radius, y: -radius },
-      { x: -radius, y: -radius },
-      { x: -radius, y: radius },
-      { x: radius, y: radius },
-    );
+  for (let ring = 1; ring <= SKETCH_ANNOTATION_LAYOUT_RING_CAP; ring += 1) {
+    for (const [dx, dy] of SKETCH_ANNOTATION_LAYOUT_DIRECTIONS) {
+      candidates.push({
+        x: item.anchor.x + dx * ring * stepX,
+        y: item.anchor.y + dy * ring * stepY,
+      });
+    }
   }
 
   return candidates;
 }
 
-function annotationLabelsOverlap(
-  left: Pick<SketchViewportFeedbackProjection, "x" | "y">,
-  right: Pick<SketchViewportFeedbackProjection, "x" | "y">,
+function clampLayoutCentre(
+  centre: { x: number; y: number },
+  item: Pick<SketchAnnotationLayoutItem, "width" | "height">,
+  viewport: SketchAnnotationLayoutViewport,
 ) {
+  const inset = SKETCH_ANNOTATION_LAYOUT_EDGE_INSET_PX;
+  const clamp = (value: number, low: number, high: number) =>
+    Math.max(low, Math.min(value, high));
+
+  return {
+    x: clamp(
+      centre.x,
+      inset + item.width / 2,
+      viewport.width - inset - item.width / 2,
+    ),
+    y: clamp(
+      centre.y,
+      viewport.topInset + inset + item.height / 2,
+      viewport.height - viewport.bottomInset - inset - item.height / 2,
+    ),
+  };
+}
+
+function layoutRectAt(
+  centre: { x: number; y: number },
+  item: Pick<SketchAnnotationLayoutItem, "width" | "height">,
+): SketchAnnotationLayoutRect {
+  return {
+    x: centre.x - item.width / 2,
+    y: centre.y - item.height / 2,
+    width: item.width,
+    height: item.height,
+  };
+}
+
+/** Closer than the 6 px gap (touching at exactly the gap is fine). */
+function layoutRectsTooClose(
+  left: SketchAnnotationLayoutRect,
+  right: SketchAnnotationLayoutRect,
+) {
+  const gap =
+    SKETCH_ANNOTATION_LAYOUT_GAP_PX - SKETCH_ANNOTATION_LAYOUT_EPSILON_PX;
+
   return (
-    Math.abs(left.x - right.x) < ANNOTATION_LABEL_STEP_PX &&
-    Math.abs(left.y - right.y) < ANNOTATION_LABEL_STEP_PX
+    left.x < right.x + right.width + gap &&
+    right.x < left.x + left.width + gap &&
+    left.y < right.y + right.height + gap &&
+    right.y < left.y + left.height + gap
   );
+}
+
+/**
+ * T14d (A4): the active tool's on-canvas labels (`referenceLabel` such as
+ * Merge "Source"/"Destination", measurement, snap and dimension-preview
+ * labels) as layout obstacles, at their projections with an estimated extent
+ * (`px-2 py-1` border box, 11 px text, at most 180 px wide). The labels
+ * themselves stay `pointer-events-none`; the layout only avoids them.
+ */
+export function getSketchToolLabelObstacles(
+  schema: SketchToolPresentationSchema | null,
+  projections: readonly SketchViewportFeedbackProjection[],
+): SketchAnnotationLayoutRect[] {
+  const projectionById = new Map(
+    projections.map((projection) => [projection.id, projection]),
+  );
+
+  return (schema?.overlays ?? []).flatMap((overlay) => {
+    const parts = getSketchToolOverlayLabelParts(overlay);
+    const projection = projectionById.get(getOverlayProjectionId(overlay.id));
+
+    if (!parts || !projection) {
+      return [];
+    }
+
+    const width = Math.min(
+      SKETCH_TOOL_LABEL_MAX_WIDTH_PX,
+      SKETCH_TOOL_LABEL_FRAME_PX +
+        parts.reduce(
+          (total, part) =>
+            total + [...part].length * SKETCH_ANNOTATION_CHIP_CHAR_PX,
+          0,
+        ) +
+        (parts.length - 1) * SKETCH_TOOL_LABEL_PART_GAP_PX,
+    );
+
+    return [
+      layoutRectAt(projection, { width, height: SKETCH_TOOL_LABEL_HEIGHT_PX }),
+    ];
+  });
+}
+
+/** 16 px padding + 2 px border. */
+const SKETCH_TOOL_LABEL_FRAME_PX = 18;
+/** 11 px text + 8 px padding + 2 px border, rounded up. */
+const SKETCH_TOOL_LABEL_HEIGHT_PX = 22;
+const SKETCH_TOOL_LABEL_MAX_WIDTH_PX = 180;
+/** `ml-2` between a label and its value. */
+const SKETCH_TOOL_LABEL_PART_GAP_PX = 8;
+
+/** The text parts of a rendered tool label (`SketchViewportFeedbackLayer`), or null when it renders none. */
+function getSketchToolOverlayLabelParts(
+  overlay: SketchToolOverlayDescriptor,
+): string[] | null {
+  switch (overlay.kind) {
+    case "measurement":
+      return [
+        overlay.label,
+        `${overlay.value.toFixed(2)} ${overlay.unit ?? ""}`,
+      ];
+    case "dimensionLine":
+      return overlay.dragHandle
+        ? [
+            overlay.label,
+            ...(overlay.value === null || overlay.value === undefined
+              ? []
+              : [`${overlay.value.toFixed(2)} ${overlay.unit ?? ""}`]),
+          ]
+        : null;
+    case "angleArc":
+      return overlay.dragHandle
+        ? [
+            overlay.label,
+            ...(overlay.referenceLabel ? [overlay.referenceLabel] : []),
+          ]
+        : null;
+    case "referenceLabel":
+    case "snapIndicator":
+      return [overlay.label];
+    default:
+      return null;
+  }
 }
 
 function getOverlayAnchor(
