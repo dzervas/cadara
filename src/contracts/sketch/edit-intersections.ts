@@ -89,6 +89,40 @@ export type SketchEditOperation =
       boundaryEntityId: SketchEntityId;
     };
 
+/**
+ * T13i (snap candidates): Trim's cuts and cutters on the target, without
+ * Trim's refusals (any number of cuts, no kept-piece length check). It
+ * edits nothing, so it is not an edit tool operation.
+ */
+export interface SketchIntersectOperation {
+  kind: "intersect";
+  targetEntityId: SketchEntityId;
+}
+
+/** A query of the service: an edit operation or (T13i) an intersect. */
+type SketchCutQueryInput = Omit<SketchEditIntersectionInput, "operation"> & {
+  operation: SketchEditOperation | SketchIntersectOperation;
+};
+
+/**
+ * T13i: one accepted pair, the spline targets of its snap query and the
+ * stage's cutters (review A-3): `curves` (every cutter but splines, cheap,
+ * published first) or `splines` (only spline cutters).
+ */
+export interface SketchSnapIntersectionInput extends Omit<
+  SketchEditIntersectionInput,
+  "operation"
+> {
+  targetEntityIds: SketchEntityId[];
+  cutters: "curves" | "splines";
+}
+
+/** T13i: one target's `intersect` result. */
+export interface SketchSnapIntersectionTargetResult {
+  targetEntityId: SketchEntityId;
+  result: SketchEditIntersectionResult;
+}
+
 /** Q1b tie of a new end: a cutter's end point (R-2), or onto the cutter. */
 export type SketchEditTie =
   | { kind: "coincident"; pointId: SketchPointId }
@@ -172,7 +206,12 @@ export const EXTEND_NO_INTERSECTION_MESSAGE =
 export const SPLIT_NO_CROSSING_MESSAGE =
   "Sketch split needs a boundary crossing inside the selected curve.";
 
-const TOOL_NAMES = { trim: "Trim", extend: "Extend", split: "Split" } as const;
+const TOOL_NAMES = {
+  trim: "Trim",
+  intersect: "Intersect",
+  extend: "Extend",
+  split: "Split",
+} as const;
 
 /** The exact-request memo capacity of one call (edit lane, A-3: no shared memo). */
 const QUERY_MEMO_CAPACITY = 256;
@@ -217,14 +256,26 @@ const fail = (
 };
 
 export async function querySketchEditIntersections(
-  input: SketchEditIntersectionInput,
+  input: SketchCutQueryInput,
   queries: NeutralCurveQueryCapability,
+): Promise<SketchEditIntersectionResult> {
+  return runQuery(input, queries);
+}
+
+/**
+ * `allowCutter` (snap batch only, internal): restricts the operation's
+ * cutter set; absent, it is the operation's own (Trim's for intersect).
+ */
+async function runQuery(
+  input: SketchCutQueryInput,
+  queries: NeutralCurveQueryCapability,
+  allowCutter?: (entityId: SketchEntityId) => boolean,
 ): Promise<SketchEditIntersectionResult> {
   const context = { nonAcceptedNearTarget: [] as SketchEntityId[] };
   try {
     return input.operation.kind === "extend"
       ? await queryExtend(input, input.operation, queries)
-      : await queryCuts(input, queries, context);
+      : await queryCuts(input, queries, context, allowCutter);
   } catch (error) {
     if (error instanceof EditFailure)
       return {
@@ -235,12 +286,50 @@ export async function querySketchEditIntersections(
   }
 }
 
+/**
+ * T13i: the `intersect` result of each target on one accepted pair, in
+ * request order (snap candidates; each target is all-or-nothing, like
+ * Trim), restricted to the stage's cutters (review A-3).
+ * Review R-1: each spline pair is computed once per batch. Targets run in
+ * entity-id order, and a later target does not cut with an earlier target
+ * whose result verified: that crossing is already the earlier target's cut
+ * (`getSketchExactIntersections` keeps it from the smaller id). An earlier
+ * target that failed stays a cutter, so its crossings are still found.
+ */
+export async function querySketchSnapIntersections(
+  input: SketchSnapIntersectionInput,
+  queries: NeutralCurveQueryCapability,
+): Promise<SketchSnapIntersectionTargetResult[]> {
+  const { targetEntityIds, cutters, ...basis } = input;
+  const kinds = new Map(
+    basis.definition.entities.map((entity) => [entity.entityId, entity.kind]),
+  );
+  const verified = new Set<SketchEntityId>();
+  const results = new Map<SketchEntityId, SketchEditIntersectionResult>();
+  for (const targetEntityId of [...targetEntityIds].sort()) {
+    const result = await runQuery(
+      { ...basis, operation: { kind: "intersect", targetEntityId } },
+      queries,
+      (cutter) =>
+        cutters === "curves"
+          ? kinds.get(cutter) !== "spline"
+          : kinds.get(cutter) === "spline" && !verified.has(cutter),
+    );
+    if (result.kind === "verified") verified.add(targetEntityId);
+    results.set(targetEntityId, result);
+  }
+  return targetEntityIds.map((targetEntityId) => ({
+    targetEntityId,
+    result: results.get(targetEntityId)!,
+  }));
+}
+
 /** Why the target or boundary is unsupported (Split/Extend: lines only, Q-g3), else null. */
 function lineOperationRefusal(
   definition: SketchDefinition,
-  operation: SketchEditOperation,
+  operation: SketchCutQueryInput["operation"],
 ) {
-  if (operation.kind === "trim") return null;
+  if (operation.kind === "trim" || operation.kind === "intersect") return null;
   const isLine = (entityId: SketchEntityId) =>
     definition.entities.find((entity) => entity.entityId === entityId)?.kind ===
     "lineSegment";
@@ -253,7 +342,7 @@ function lineOperationRefusal(
 
 /** The target's branches, or the failure for an invalid or unsupported target. */
 function targetBranchesOf(
-  input: SketchEditIntersectionInput,
+  input: SketchCutQueryInput,
   all: readonly Branch[],
   obstacles: readonly {
     entityId: SketchEntityId | null;
@@ -346,11 +435,15 @@ function keptPieces(
   ];
 }
 
-/** Trim (every cut by every other curve) and Split (the cut by the boundary). */
+/**
+ * Trim (every cut by every other curve), Split (the cut by the boundary) and
+ * (T13i) Intersect (Trim's cuts, no refusal of their number or pieces).
+ */
 async function queryCuts(
-  input: SketchEditIntersectionInput,
+  input: SketchCutQueryInput,
   queries: NeutralCurveQueryCapability,
   context: { nonAcceptedNearTarget: SketchEntityId[] },
+  allowCutter?: (entityId: SketchEntityId) => boolean,
 ): Promise<SketchEditIntersectionResult> {
   const { definition, solvedSnapshot: solved, modelingTolerance } = input;
   const { operation } = input;
@@ -401,7 +494,9 @@ async function queryCuts(
       branch.entityId !== null &&
       branch.entityId !== targetId &&
       !nonAccepted.has(branch.entityId) &&
+      (allowCutter?.(branch.entityId) ?? true) &&
       (operation.kind === "trim" ||
+        operation.kind === "intersect" ||
         branch.entityId === operation.boundaryEntityId),
   );
   // Re-indexed to the target and cutter branches only.
@@ -699,20 +794,23 @@ async function queryCuts(
   // splines the fit-point polyline, T10g-3b). This checks the result
   // against the solver's own policy; the exact classification of the cuts
   // is unchanged. Split keeps today's refusal of a crossing at an end.
-  const tooShort = keptPieces(definition, solved, targetId, ordered, cuts).some(
-    (polyline) =>
-      polyline
-        .slice(1)
-        .reduce(
-          (length, to, index) =>
-            length +
-            Math.hypot(
-              to[0] - polyline[index]![0],
-              to[1] - polyline[index]![1],
-            ),
-          0,
-        ) < modelingTolerance,
-  );
+  // Intersect keeps no piece.
+  const tooShort =
+    operation.kind !== "intersect" &&
+    keptPieces(definition, solved, targetId, ordered, cuts).some(
+      (polyline) =>
+        polyline
+          .slice(1)
+          .reduce(
+            (length, to, index) =>
+              length +
+              Math.hypot(
+                to[0] - polyline[index]![0],
+                to[1] - polyline[index]![1],
+              ),
+            0,
+          ) < modelingTolerance,
+    );
   if (tooShort && operation.kind === "split")
     fail("edit-no-crossing", SPLIT_NO_CROSSING_MESSAGE, [
       targetId,
@@ -893,7 +991,7 @@ async function queryCuts(
  *   certified root, so a miss reads as "no intersection".
  */
 async function queryExtend(
-  input: SketchEditIntersectionInput,
+  input: SketchCutQueryInput,
   operation: Extract<SketchEditOperation, { kind: "extend" }>,
   queries: NeutralCurveQueryCapability,
 ): Promise<SketchEditIntersectionResult> {

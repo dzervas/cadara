@@ -1,3 +1,4 @@
+import type { SketchSnapIntersectionTargetResult } from "@/contracts/sketch/edit-intersections";
 import {
   nonAcceptedOffsetOutputPoints,
   nonAcceptedOffsetOutputs,
@@ -167,6 +168,20 @@ export interface ResolveSketchSnapInput {
   sketchUnitsPerPixel: number | null;
   /** The active candidate, which stays eligible up to its exit radius. */
   activeCandidateKey?: string | null;
+  /**
+   * T13i (D24): exact spline intersections of the current accepted basis
+   * (`getSketchSnapIntersections`); offered as `intersection` candidates.
+   */
+  exactIntersections?: readonly SketchExactIntersection[];
+}
+
+/**
+ * T13i (D24): a crossing of a spline and another local curve, at the exact
+ * edit-intersection service cut position (no new tolerance).
+ */
+export interface SketchExactIntersection {
+  point: SketchPoint2D;
+  sources: readonly [SketchSnapSourceRef, SketchSnapSourceRef];
 }
 
 export interface SketchSnapResult {
@@ -569,6 +584,15 @@ export function resolveSketchSnap(
       ...collectPointCandidates(input.pointer, input.geometries, reach),
       ...collectCurveCandidates(input.pointer, input.geometries, reach),
       ...collectIntersectionCandidates(input.pointer, input.geometries, reach),
+      ...(input.exactIntersections ?? []).flatMap((intersection) => {
+        const candidate = createCandidate({
+          kind: "intersection",
+          point: intersection.point,
+          pointer: input.pointer,
+          sources: intersection.sources,
+        });
+        return candidate.distance <= reach ? [candidate] : [];
+      }),
       ...collectActiveAnchorCandidates(input, reach),
     ].filter(
       (candidate) =>
@@ -1473,4 +1497,164 @@ function cross(left: SketchPoint2D, right: SketchPoint2D) {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+type SolvedEntityRecord = SolvedSketchSnapshot["solvedEntities"][number];
+type Box = { min: SketchPoint2D; max: SketchPoint2D };
+
+/**
+ * T13i (D24): the spline targets of one stage of a basis's snap query: every
+ * local spline with a valid reconstruction whose pole box meets the box of
+ * a stage cutter (`curves`: a line, circle or arc; `splines`: another
+ * spline), each box widened by the modeling tolerance. Box overlap is the
+ * only cap. Offset shells are neither targets nor cutters of the service,
+ * so they are not considered (recorded).
+ */
+export function getSketchSnapIntersectionTargets(
+  definition: SketchDefinition,
+  solvedSnapshot: SolvedSketchSnapshot,
+  modelingTolerance: number,
+  cutters: "curves" | "splines",
+): SketchEntityId[] {
+  const kinds = new Map(
+    definition.entities.map((entity) => [entity.entityId, entity.kind]),
+  );
+  const boxes = solvedSnapshot.solvedEntities.flatMap((record) => {
+    if (kinds.get(record.entityId) !== record.kind) return [];
+    const box = solvedEntityBox(record);
+    return box
+      ? [
+          {
+            entityId: record.entityId,
+            spline: record.kind === "spline",
+            box: {
+              min: [
+                box.min[0] - modelingTolerance,
+                box.min[1] - modelingTolerance,
+              ] as SketchPoint2D,
+              max: [
+                box.max[0] + modelingTolerance,
+                box.max[1] + modelingTolerance,
+              ] as SketchPoint2D,
+            },
+          },
+        ]
+      : [];
+  });
+  return boxes.flatMap((target) =>
+    target.spline &&
+    boxes.some(
+      (other) =>
+        other.entityId !== target.entityId &&
+        other.spline === (cutters === "splines") &&
+        other.box.min[0] <= target.box.max[0] &&
+        target.box.min[0] <= other.box.max[0] &&
+        other.box.min[1] <= target.box.max[1] &&
+        target.box.min[1] <= other.box.max[1],
+    )
+      ? [target.entityId]
+      : [],
+  );
+}
+
+function solvedEntityBox(record: SolvedEntityRecord): Box | null {
+  switch (record.kind) {
+    case "lineSegment":
+      return pointsBox([record.startPosition, record.endPosition]);
+    case "circle":
+      return circleBox(record.centerPosition, record.solvedRadius);
+    case "arc":
+      // Conservative: the arc's full circle.
+      return circleBox(
+        record.centerPosition,
+        distanceBetween(record.centerPosition, record.startPosition),
+      );
+    case "spline": {
+      const bounds = cubicSpansPoleBounds(solvedCubicSpans(record));
+      return bounds
+        ? {
+            min: [bounds.min[0], bounds.min[1]],
+            max: [bounds.max[0], bounds.max[1]],
+          }
+        : null;
+    }
+    default:
+      return null;
+  }
+}
+
+function pointsBox(points: readonly SketchPoint2D[]): Box {
+  const xs = points.map((point) => point[0]);
+  const ys = points.map((point) => point[1]);
+  return {
+    min: [Math.min(...xs), Math.min(...ys)],
+    max: [Math.max(...xs), Math.max(...ys)],
+  };
+}
+
+function circleBox(center: SketchPoint2D, radius: number): Box {
+  return {
+    min: [center[0] - radius, center[1] - radius],
+    max: [center[0] + radius, center[1] + radius],
+  };
+}
+
+/**
+ * T13i (D24): the snap candidates of a basis's snap query results. Each
+ * verified cut gives one intersection per cutter at the cut's exact
+ * `position`, sources the spline target and that cutter. Not offered (they
+ * are endpoint candidates already): a cut at a fit point (knot) and a cut
+ * where a cutter's end point lies (a `coincident` tie). A failed target
+ * gives nothing (all-or-nothing, like Trim). A spline-spline crossing is
+ * taken once: from the target with the smaller id when the other target's
+ * query verified too (review R-1: the batch then does not even compute it
+ * from the larger id).
+ * Review A-8 (intended): a crossing within ulps of another spline's interior
+ * fit point, whose certified enclosure excludes the knot, is offered as an
+ * intersection; the fit point's `endpoint` candidate wins that tie (same
+ * class, equal distance, `localPoint` source first), so it authors the
+ * coincident, not two on-curve relations. A ranking change must keep that.
+ */
+export function getSketchExactIntersections(
+  definition: SketchDefinition,
+  targets: readonly SketchSnapIntersectionTargetResult[],
+): SketchExactIntersection[] {
+  const entities = new Map(
+    definition.entities.map((entity) => [entity.entityId, entity]),
+  );
+  const verifiedTargets = new Set(
+    targets.flatMap((target) =>
+      target.result.kind === "verified" ? [target.targetEntityId] : [],
+    ),
+  );
+  const sourceOf = (entityId: SketchEntityId): SketchSnapSourceRef | null => {
+    const kind = entities.get(entityId)?.kind;
+    return kind === "lineSegment" ||
+      kind === "circle" ||
+      kind === "arc" ||
+      kind === "spline"
+      ? { kind: "localEntity", entityId, geometryKind: kind }
+      : null;
+  };
+  return targets.flatMap(({ targetEntityId, result }) => {
+    const target = sourceOf(targetEntityId);
+    if (result.kind !== "verified" || !target) return [];
+    return result.cuts.flatMap((cut) => {
+      if (
+        cut.knotOccurrenceIndex !== null ||
+        cut.cutters.some((cutter) => cutter.tie?.kind === "coincident")
+      )
+        return [];
+      return cut.cutters.flatMap((cutter): SketchExactIntersection[] => {
+        const other = sourceOf(cutter.entityId);
+        if (
+          !other ||
+          (verifiedTargets.has(cutter.entityId) &&
+            cutter.entityId < targetEntityId)
+        )
+          return [];
+        return [{ point: cut.position, sources: [target, other] }];
+      });
+    });
+  });
 }

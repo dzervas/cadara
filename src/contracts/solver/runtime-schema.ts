@@ -7,6 +7,7 @@ import type {
   FinalizeInteractiveSketchSolveSessionRequest,
   ProjectSketchExternalReferencesRequest,
   QuerySketchEditIntersectionsResponse,
+  QuerySketchSnapIntersectionsResponse,
   ResolveSketchReferenceRequest,
   SketchSolverRequestBase,
   SolveSketchRequest,
@@ -42,6 +43,8 @@ const offsetPublicationsValidator =
   typia.createValidateEquals<SketchOffsetPublicationRecord[]>();
 const querySketchEditIntersectionsResponseValidator =
   typia.createValidateEquals<QuerySketchEditIntersectionsResponse>();
+const querySketchSnapIntersectionsResponseValidator =
+  typia.createValidateEquals<QuerySketchSnapIntersectionsResponse>();
 
 export function validateSketchSolverEnvelope(
   value: unknown,
@@ -289,6 +292,17 @@ export function requireQuerySketchEditIntersectionsResponse(
     querySketchEditIntersectionsResponseValidator,
     value,
     "Query sketch edit intersections response",
+  );
+}
+
+/** T13i: a snap-intersection response is validated like an edit-intersection one. */
+export function requireQuerySketchSnapIntersectionsResponse(
+  value: unknown,
+): QuerySketchSnapIntersectionsResponse {
+  return requireContract(
+    querySketchSnapIntersectionsResponseValidator,
+    value,
+    "Query sketch snap intersections response",
   );
 }
 

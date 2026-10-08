@@ -115,6 +115,7 @@ import type {
   SketchToolChain,
 } from "./types";
 import { buildCommitRequest } from "./history";
+import type { SketchExactIntersection } from "@/domain/sketch-snapping/snap-candidates";
 
 export const CONSTRAINED_DRAG_BLOCKED_MESSAGE =
   "Geometry is constrained and cannot move to that position.";
@@ -455,6 +456,22 @@ export function hasAcceptedLiveSolveOfDefinition(session: SketchSessionState) {
     session.liveSolve.accepted &&
     session.liveSolve.sourceDefinition === session.definition
   );
+}
+
+/**
+ * T13i (D24): the exact spline intersections the snap offers now: those of
+ * the answered stages of the cache of the accepted live solve of the
+ * current definition (review A-3); none for a stale basis.
+ */
+export function getSketchSessionSnapIntersections(
+  session: SketchSessionState,
+): readonly SketchExactIntersection[] {
+  const cache = session.snapIntersections;
+  return cache &&
+    hasAcceptedLiveSolveOfDefinition(session) &&
+    cache.solvedSnapshot === session.liveSolve!.solvedSnapshot
+    ? cache.intersections
+    : [];
 }
 
 /**
@@ -1819,6 +1836,7 @@ function reinferSketchToolPlacements(
       projectedReferences: session.projectedReferences,
       pointer: placement.rawPosition,
       solvedSnapshot,
+      exactIntersections: getSketchSessionSnapIntersections(session),
       sketchUnitsPerPixel: placement.sketchUnitsPerPixel,
       // Only a Line end aligns to its start, and a Line end commits at once.
       anchor: null,

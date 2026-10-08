@@ -13,6 +13,7 @@ import type {
   FinalizeInteractiveSketchSolveSessionRequest,
   ProjectSketchExternalReferencesRequest,
   QuerySketchEditIntersectionsRequest,
+  QuerySketchSnapIntersectionsRequest,
   ResolveSketchReferenceRequest,
   SolveSketchRequest,
   StartInteractiveSketchSolveSessionRequest,
@@ -202,6 +203,18 @@ class InstrumentedSketchSolverAdapter implements SketchSolverAdapter {
       (response) => ({
         ...definitionAttributes(request),
         "cadara.result": response.result.kind,
+      }),
+    );
+  }
+
+  querySketchSnapIntersections(request: QuerySketchSnapIntersectionsRequest) {
+    return this.measure(
+      "querySketchSnapIntersections",
+      request,
+      () => this.inner.querySketchSnapIntersections(request),
+      (response) => ({
+        ...definitionAttributes(request),
+        "cadara.target_count": response.targets.length,
       }),
     );
   }

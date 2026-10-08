@@ -3,6 +3,8 @@ import type {
   DeriveSketchRegionsResponse,
   QuerySketchEditIntersectionsRequest,
   QuerySketchEditIntersectionsResponse,
+  QuerySketchSnapIntersectionsRequest,
+  QuerySketchSnapIntersectionsResponse,
 } from "@/contracts/solver/schema";
 import type { DocumentId } from "@/contracts/shared/ids";
 import {
@@ -14,10 +16,11 @@ import {
   type SketchRegionDerivationDelegate,
 } from "@/domain/solver/sketch-constraint-solver-adapter";
 
-/** A region derivation or (T10g-1) an edit-intersection query. */
+/** A region derivation, (T10g-1) an edit-intersection or (T13i) a snap-intersection query. */
 type DerivationRequest =
   | DeriveSketchRegionsRequest
-  | QuerySketchEditIntersectionsRequest;
+  | QuerySketchEditIntersectionsRequest
+  | QuerySketchSnapIntersectionsRequest;
 
 /** Runs one request on a lane's worker client. */
 type DerivationCall = (client: OccWorkerClient) => Promise<unknown>;
@@ -70,7 +73,9 @@ export const SKETCH_REGION_DERIVATION_MINIMUM_SUPERSEDE_AGE_MS = 250;
  *   live region derivation never supersede each other; each lane supersedes
  *   only its own requests. T10g-1: edit-intersection queries run in a third
  *   lane, `editQuery`, with its own worker, query memo and lazy OCC load
- *   (design review A-3).
+ *   (design review A-3). T13i (T13 review R-3): spline intersection snap
+ *   queries run in a fourth lane, `snapQuery`, so a snap query never
+ *   cancels or delays a Trim/Extend/Split query, and vice versa.
  * - `dispose()` settles every request: a waiting one and a running one
  *   reject with `SketchRegionDerivationDisposedError`, and no timer stays
  *   scheduled.
@@ -119,6 +124,16 @@ export class SketchRegionDerivationWorkerPool implements SketchRegionDerivationD
       request,
       (client) => client.querySketchEditIntersections(request),
     ) as Promise<QuerySketchEditIntersectionsResponse>;
+  }
+
+  querySketchSnapIntersections(
+    request: QuerySketchSnapIntersectionsRequest,
+  ): Promise<QuerySketchSnapIntersectionsResponse> {
+    return this.submit(
+      `${request.documentId}\u0000snapQuery`,
+      request,
+      (client) => client.querySketchSnapIntersections(request),
+    ) as Promise<QuerySketchSnapIntersectionsResponse>;
   }
 
   /** One worker lane per document and request kind (carried explicitly by the request). */

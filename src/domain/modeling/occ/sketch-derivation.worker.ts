@@ -1,8 +1,9 @@
 /**
  * Dedicated live sketch-region derivation worker. It speaks the OCC worker
  * protocol (same envelope validation and failure normalization) but answers
- * only `deriveSketchRegions` and (T10g-1, the `editQuery` lane)
- * `querySketchEditIntersections`, so a long derivation never queues ahead of the
+ * only `deriveSketchRegions`, (T10g-1, the `editQuery` lane)
+ * `querySketchEditIntersections` and (T13i, the `snapQuery` lane)
+ * `querySketchSnapIntersections`, so a long derivation never queues ahead of the
  * OCC kernel worker's feature preview/commit, and the main thread can
  * `terminate()` it when a newer derivation supersedes it.
  *
@@ -90,17 +91,20 @@ async function handleRequest(request: OccWorkerRequest) {
   const { operation } = request;
   if (
     operation.kind !== "deriveSketchRegions" &&
-    operation.kind !== "querySketchEditIntersections"
+    operation.kind !== "querySketchEditIntersections" &&
+    operation.kind !== "querySketchSnapIntersections"
   ) {
     throw new Error(
-      `The sketch-derivation worker only answers deriveSketchRegions and querySketchEditIntersections, not ${operation.kind}.`,
+      `The sketch-derivation worker only answers deriveSketchRegions, querySketchEditIntersections and querySketchSnapIntersections, not ${operation.kind}.`,
     );
   }
   const solver = getSolver(operation.request.documentId);
   const payload =
     operation.kind === "deriveSketchRegions"
       ? await solver.deriveSketchRegions(operation.request)
-      : await solver.querySketchEditIntersections(operation.request);
+      : operation.kind === "querySketchEditIntersections"
+        ? await solver.querySketchEditIntersections(operation.request)
+        : await solver.querySketchSnapIntersections(operation.request);
   workerScope.postMessage({
     kind: "invoked",
     requestId: request.requestId,

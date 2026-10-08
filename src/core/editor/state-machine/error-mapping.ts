@@ -178,6 +178,16 @@ export function createEditorEffectFailureEvent(
         queryId: effect.queryId,
         message: appError.message,
       };
+    case "sketch.querySnapIntersections":
+      return {
+        type: "effect.sketchSnapIntersectionsQueryFailed",
+        requestId: effect.requestId,
+        documentId: effect.documentId,
+        commandSessionId: effect.commandSessionId,
+        baseRevisionId: effect.baseRevisionId,
+        queryId: effect.queryId,
+        message: appError.message,
+      };
     case "sketch.deriveRegions":
       return {
         type: "effect.sketchRegionDerivationFailed",

@@ -13,6 +13,8 @@ import {
   type DeriveSketchRegionsResponse,
   type QuerySketchEditIntersectionsRequest,
   type QuerySketchEditIntersectionsResponse,
+  type QuerySketchSnapIntersectionsRequest,
+  type QuerySketchSnapIntersectionsResponse,
 } from "@/contracts/solver/schema";
 import type { DocumentId, RequestId } from "@/contracts/shared/ids";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
@@ -53,7 +55,10 @@ class FakeDerivationWorker implements OccWorkerLike {
     this.terminated = true;
   }
   respond(
-    payload: DeriveSketchRegionsResponse | QuerySketchEditIntersectionsResponse,
+    payload:
+      | DeriveSketchRegionsResponse
+      | QuerySketchEditIntersectionsResponse
+      | QuerySketchSnapIntersectionsResponse,
     index = 0,
   ) {
     const posted = this.posted[index]!;
@@ -508,4 +513,111 @@ test("T10g-1: an edit-intersection query runs in its own editQuery lane; only a 
   await newerLiveDone;
   workers[1]!.respond(responseFor(makeRequest("request_preview")));
   await preview;
+});
+
+// T13i (T13 review R-3): spline intersection snap queries run in a fourth
+// lane. A snap query must never cancel or delay a user's Trim/Extend/Split
+// query (nor the reverse); only a newer snap query supersedes one.
+test("T13i: a snap-intersection query runs in its own snapQuery lane; it never supersedes an edit query, nor an edit query it", async () => {
+  const { pool, workers } = makePool();
+  const editRequest = (
+    requestId: string,
+  ): QuerySketchEditIntersectionsRequest => {
+    const base = makeRequest(requestId);
+    return {
+      ...base,
+      operation: {
+        kind: "trim",
+        targetEntityId: base.definition.entityIds[0]!,
+      },
+    };
+  };
+  const snapRequest = (
+    requestId: string,
+  ): QuerySketchSnapIntersectionsRequest => {
+    const base = makeRequest(requestId);
+    return {
+      ...base,
+      targetEntityIds: [base.definition.entityIds[0]!],
+      cutters: "curves",
+    };
+  };
+  const base = (request: { requestId: RequestId } & object) => {
+    const { documentId, revisionId, sketchId } =
+      request as DeriveSketchRegionsRequest;
+    return {
+      contractVersion: CONTRACT_VERSION,
+      solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+      requestId: request.requestId,
+      documentId,
+      revisionId,
+      sketchId,
+    };
+  };
+
+  const edit = editRequest("request_edit_1");
+  const editDone = pool.querySketchEditIntersections(edit);
+  const snap = snapRequest("request_snap_1");
+  const snapDone = pool.querySketchSnapIntersections(snap);
+  expect(workers, "the snap query gets its own worker").toHaveLength(2);
+  expect(
+    workers[1]!.posted[0]!.kind === "invoke" &&
+      workers[1]!.posted[0]!.operation,
+  ).toEqual({ kind: "querySketchSnapIntersections", request: snap });
+  const validation = validateOccWorkerRequestEnvelope(
+    structuredClone(workers[1]!.posted[0]!),
+  );
+  expect(validation.success ? [] : validation.errors).toEqual([]);
+  expect(
+    workers[0]!.terminated,
+    "a snap query does not terminate the in-flight edit query",
+  ).toBe(false);
+
+  // A newer edit query supersedes the edit lane only.
+  const newerEdit = editRequest("request_edit_2");
+  const newerEditDone = pool.querySketchEditIntersections(newerEdit);
+  await expect(editDone).rejects.toMatchObject({
+    requestId: "request_edit_1",
+    supersededBy: "request_edit_2",
+  });
+  expect(
+    workers[1]!.terminated,
+    "an edit query does not terminate the in-flight snap query",
+  ).toBe(false);
+
+  // A newer snap query (a newer basis) supersedes the snap lane only.
+  const newerSnap = snapRequest("request_snap_2");
+  const newerSnapDone = pool.querySketchSnapIntersections(newerSnap);
+  await expect(snapDone).rejects.toMatchObject({
+    requestId: "request_snap_1",
+    supersededBy: "request_snap_2",
+  });
+  const editWorker = workers[2]!;
+  const snapWorker = workers[3]!;
+  expect(
+    editWorker.terminated,
+    "the newer snap query leaves the newer edit query running",
+  ).toBe(false);
+  expect(editWorker.posted[0]!.requestId).not.toBe(
+    snapWorker.posted[0]!.requestId,
+  );
+
+  const snapResponse: QuerySketchSnapIntersectionsResponse = {
+    ...base(newerSnap),
+    targets: [],
+  };
+  snapWorker.respond(snapResponse);
+  expect(await newerSnapDone).toBe(snapResponse);
+  const editResponse: QuerySketchEditIntersectionsResponse = {
+    ...base(newerEdit),
+    result: {
+      kind: "failed",
+      code: "edit-too-few-cuts",
+      message: "fake",
+      entityIds: [],
+      nonAcceptedNearTarget: [],
+    },
+  };
+  editWorker.respond(editResponse);
+  expect(await newerEditDone).toBe(editResponse);
 });

@@ -5,6 +5,7 @@ import type {
   DeriveSketchRegionsRequest,
   ProjectSketchExternalReferencesRequest,
   QuerySketchEditIntersectionsRequest,
+  QuerySketchSnapIntersectionsRequest,
   ResolveSketchReferenceRequest,
 } from "@/contracts/solver/schema";
 import type { RequestId } from "@/contracts/shared/ids";
@@ -34,6 +35,11 @@ export function createSketchSolverService(
     querySketchEditIntersections(input) {
       return adapter.querySketchEditIntersections(
         withContractVersion<QuerySketchEditIntersectionsRequest>(input),
+      );
+    },
+    querySketchSnapIntersections(input) {
+      return adapter.querySketchSnapIntersections(
+        withContractVersion<QuerySketchSnapIntersectionsRequest>(input),
       );
     },
     projectExternalReferences(input) {

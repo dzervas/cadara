@@ -32,12 +32,14 @@ import { resolveSketchDerivationDistances } from "@/domain/modeling/sketch-dimen
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import {
   requireQuerySketchEditIntersectionsResponse,
+  requireQuerySketchSnapIntersectionsResponse,
   requireSketchOffsetPublications,
 } from "@/contracts/solver/runtime-schema";
 import type {
   DeriveSketchRegionsRequest,
   ProjectedSketchReferenceRecord,
   QuerySketchEditIntersectionsRequest,
+  QuerySketchSnapIntersectionsRequest,
   SolverTolerancePolicy,
 } from "@/contracts/solver/schema";
 import type {
@@ -443,6 +445,49 @@ export function createEffectExecutor(runtime: EditorEffectRuntime) {
           result,
         };
       }
+      case "sketch.querySnapIntersections": {
+        // T13i: the derivation worker's `snapQuery` lane. Real failures
+        // reach the event loop's error reporting (never silenced).
+        if (!runtime.querySketchSnapIntersections) {
+          throw new Error(
+            "Sketch snap-intersection queries are not available.",
+          );
+        }
+        let targets: Awaited<
+          ReturnType<
+            NonNullable<EditorEffectRuntime["querySketchSnapIntersections"]>
+          >
+        >;
+        try {
+          targets = await runtime.querySketchSnapIntersections({
+            requestId: effect.requestId,
+            documentId: effect.documentId,
+            baseRevisionId: effect.baseRevisionId,
+            sketchId: effect.sketchId,
+            input: effect.input,
+          });
+        } catch (error: unknown) {
+          if (!(error instanceof SketchRegionDerivationSupersededError)) {
+            throw error;
+          }
+          // Superseded by the snap query of a newer basis (this lane only);
+          // the reducer drops this stale request's failure event.
+          return createEditorEffectFailureEvent(
+            effect,
+            error,
+            "Sketch snap-intersection query was superseded.",
+          );
+        }
+        return {
+          type: "effect.sketchSnapIntersectionsQueried",
+          requestId: effect.requestId,
+          documentId: effect.documentId,
+          commandSessionId: effect.commandSessionId,
+          baseRevisionId: effect.baseRevisionId,
+          queryId: effect.queryId,
+          targets,
+        };
+      }
       case "sketch.importReferenceImages": {
         try {
           if (!runtime.importSketchReferenceImages) {
@@ -605,6 +650,9 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
     }>;
     querySketchEditIntersections(
       input: Omit<QuerySketchEditIntersectionsRequest, "contractVersion">,
+    ): Promise<unknown>;
+    querySketchSnapIntersections(
+      input: Omit<QuerySketchSnapIntersectionsRequest, "contractVersion">,
     ): Promise<unknown>;
     createCommitCorrelation(requestId: RequestId): {
       requestId: RequestId;
@@ -913,6 +961,25 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
           ...input.input,
         }),
       ).result;
+    },
+    async querySketchSnapIntersections(input) {
+      if (!modelingService.sketchSolver) {
+        throw new Error(
+          "Sketch snap-intersection queries require the modeling service sketch solver.",
+        );
+      }
+      // Crosses the derivation-worker boundary as plain data: validated
+      // before any candidate is offered (T13i).
+      return requireQuerySketchSnapIntersectionsResponse(
+        await modelingService.sketchSolver.querySketchSnapIntersections({
+          solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+          requestId: input.requestId,
+          documentId: input.documentId,
+          revisionId: input.baseRevisionId,
+          sketchId: input.sketchId,
+          ...input.input,
+        }),
+      ).targets;
     },
     async runSketchSpecialModeEffect() {
       throw new Error("No sketch special mode runtime has been registered.");

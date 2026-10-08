@@ -55,7 +55,11 @@ import type {
   SketchDerivedValidity,
 } from "@/contracts/sketch/schema";
 import type { RegionBoundaryBasis } from "@/contracts/sketch/region-boundary-curves";
-import type { SketchEditIntersectionInput } from "@/contracts/sketch/edit-intersections";
+import type {
+  SketchEditIntersectionInput,
+  SketchSnapIntersectionInput,
+} from "@/contracts/sketch/edit-intersections";
+import type { SketchExactIntersection } from "@/domain/sketch-snapping/snap-candidates";
 
 export type {
   SketchDraftEntity,
@@ -287,6 +291,28 @@ export interface SketchEditQueryState {
   } | null;
 }
 
+/**
+ * T13i (D24 with T13 review R-3): the spline intersection snap cache of one
+ * accepted live basis, queried in two stages (review A-3: spline ×
+ * line/circle/arc, then spline × spline). Its `intersections` are those of
+ * the answered stages, offered only while `solvedSnapshot` is still the live
+ * solve of the current definition; a pending stage adds none (no
+ * approximation).
+ */
+export interface SketchSnapIntersectionCache {
+  /** The basis identity: the accepted live solve snapshot queried. */
+  solvedSnapshot: SolvedSketchSnapshot;
+  /** The current stage's query. */
+  queryId: string;
+  /** The current stage; null when no stage has targets (nothing asked). */
+  stage: "curves" | "splines" | null;
+  /** The current stage's batched query; null when nothing is asked. */
+  input: SketchSnapIntersectionInput | null;
+  /** `ready`: every stage answered; `failed`: a stage's query failed. */
+  status: "pending" | "ready" | "failed";
+  intersections: readonly SketchExactIntersection[];
+}
+
 export interface SketchEditToolState {
   toolId: SketchEditToolId;
   hoverTarget: PrimitiveRef | null;
@@ -408,6 +434,8 @@ export interface SketchSessionState {
    * authored: kept across tool switches, gone with the session.
    */
   inferenceSuppressionToggled?: boolean;
+  /** T13i: the spline intersection snap cache; absent or null before a query. */
+  snapIntersections?: SketchSnapIntersectionCache | null;
   /** The active Line chain; absent or null when no chain is active. */
   toolChain?: SketchToolChain | null;
   sequence: number;

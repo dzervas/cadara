@@ -30,6 +30,8 @@ import type { ReferenceImagePayload } from "@/contracts/reference-image/schema";
 import type {
   SketchEditIntersectionInput,
   SketchEditIntersectionResult,
+  SketchSnapIntersectionInput,
+  SketchSnapIntersectionTargetResult,
 } from "@/contracts/sketch/edit-intersections";
 import type { AuthoredActionSketch } from "@/contracts/modeling/authored-actions";
 import type { ImportReviewEnvelope } from "@/contracts/import/review";
@@ -182,6 +184,11 @@ export interface SketchEditorState extends EditorStateBase {
   } | null;
   /** T10g-1: the in-flight exact edit-intersection query of the Trim tool, if any. */
   pendingEditQueryRequest?: {
+    requestId: RequestId;
+    queryId: string;
+  } | null;
+  /** T13i: the in-flight spline intersection snap query, if any. */
+  pendingSnapQueryRequest?: {
     requestId: RequestId;
     queryId: string;
   } | null;
@@ -947,6 +954,25 @@ export type EditorEvent =
       result: SketchEditIntersectionResult;
     }
   | {
+      /** T13i: the spline intersection snap candidates of one accepted basis. */
+      type: "effect.sketchSnapIntersectionsQueried";
+      requestId: RequestId;
+      documentId: DocumentId;
+      commandSessionId: CommandSessionId;
+      baseRevisionId: RevisionId;
+      queryId: string;
+      targets: SketchSnapIntersectionTargetResult[];
+    }
+  | {
+      type: "effect.sketchSnapIntersectionsQueryFailed";
+      requestId: RequestId;
+      documentId: DocumentId;
+      commandSessionId: CommandSessionId;
+      baseRevisionId: RevisionId;
+      queryId: string;
+      message: string;
+    }
+  | {
       type: "effect.sketchEditIntersectionsQueryFailed";
       requestId: RequestId;
       documentId: DocumentId;
@@ -1230,6 +1256,21 @@ export type EditorEffect =
       input: SketchEditIntersectionInput;
     }
   | {
+      /**
+       * T13i: the spline intersection snap candidates of one accepted live
+       * basis, batched (the derivation worker's `snapQuery` lane).
+       */
+      type: "sketch.querySnapIntersections";
+      background: true;
+      requestId: RequestId;
+      commandSessionId: CommandSessionId;
+      documentId: DocumentId;
+      baseRevisionId: RevisionId;
+      queryId: string;
+      sketchId: SketchId;
+      input: SketchSnapIntersectionInput;
+    }
+  | {
       type: "sketch.importReferenceImages";
       requestId: RequestId;
       commandSessionId: CommandSessionId;
@@ -1354,6 +1395,14 @@ export interface EditorEffectRuntime {
     sketchId: SketchId;
     input: SketchEditIntersectionInput;
   }): Promise<SketchEditIntersectionResult>;
+  /** T13i: the spline intersection snap candidates of one accepted pair. */
+  querySketchSnapIntersections?(input: {
+    requestId: RequestId;
+    documentId: DocumentId;
+    baseRevisionId: RevisionId;
+    sketchId: SketchId;
+    input: SketchSnapIntersectionInput;
+  }): Promise<SketchSnapIntersectionTargetResult[]>;
   /** Imports one or more reference images into the active sketch workflow. */
   importSketchReferenceImages?(input: {
     requestId: RequestId;
