@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, test } from "vitest";
 import {
   clippedSolvedCubicSpanPoles,
@@ -2100,5 +2101,222 @@ describe("option B: fixed end-span parameter lengths (T10g-3a)", () => {
         [cutIn(spans, 1, 0.5), cutIn(spans, 4, 0.5)],
       ),
     ).toBeNull();
+  });
+});
+
+// T13m (Split of a smooth closed spline): the piece builder wraps through
+// the seam; every non-wrapping piece is bitwise what it was at T13l.
+describe("T13m: wrapping pieces of a smooth closure", () => {
+  /** The wrapping piece vs the original at (tFrom + s) mod period, ≤ 1e-12·scale. */
+  function expectWrapReproduces(
+    original: readonly SplineSpan[],
+    piece: readonly SplineSpan[],
+    tFrom: number,
+  ) {
+    const period = original.at(-1)!.interval[1];
+    const scale = Math.max(
+      ...original.flatMap((span) =>
+        span.poles.flatMap((pole) => pole.map(Math.abs)),
+      ),
+    );
+    let worst = 0;
+    for (const span of piece)
+      for (let step = 0; step <= 64; step++) {
+        const u = step / 64;
+        const unrolled =
+          tFrom + span.interval[0] + u * (span.interval[1] - span.interval[0]);
+        const t = Math.min(
+          period,
+          unrolled >= period ? unrolled - period : unrolled,
+        );
+        const here = evaluateSplineSpan(span, { kind: "local", value: u });
+        worst = Math.max(
+          worst,
+          Math.hypot(...sub(here.position, originalAt(original, t))),
+        );
+      }
+    expect(worst / scale).toBeLessThanOrEqual(1e-12);
+    return worst / scale;
+  }
+
+  test("from = to inside a span: one open piece Q → … → Q around the whole loop, reproducing it", () => {
+    const smooth = editSpline(rg1.slice(0, 6), "smooth", { 2: [0.5, 0.7] });
+    const original = geometryOf(smooth).spans;
+    const period = original.at(-1)!.interval[1];
+    for (const k of [0, 2, 5]) {
+      const cut = cutIn(original, k, 0.4);
+      const piece = splineAggregatePiece(
+        smooth.aggregate,
+        smooth.positions,
+        cut,
+        cut,
+      )!;
+      // Q, P_{k+1} … P_k (all six, wrapping), Q.
+      expect(
+        piece.occurrences.map((entry) =>
+          entry.kind === "original" ? entry.occurrenceId : "Q",
+        ),
+      ).toEqual([
+        "Q",
+        ...Array.from({ length: 6 }, (_, i) => `occ-${(k + 1 + i) % 6}`),
+        "Q",
+      ]);
+      const [first, last] = [piece.occurrences[0]!, piece.occurrences.at(-1)!];
+      expect(first.kind === "cut" && last.kind === "cut").toBe(true);
+      if (first.kind === "cut" && last.kind === "cut")
+        expect(first.position).toEqual(last.position);
+      const geometry = geometryOf(pieceSpline(piece, smooth.positions));
+      expect(geometry.spans).toHaveLength(7);
+      expect(geometry.spans.at(-1)!.interval[1]).toBeCloseTo(period, 12);
+      expectWrapReproduces(original, geometry.spans, cut.representative);
+      // Fit points away from the cut keep their tangent object (identity
+      // contract), the authored P₂ included unless it is next to the cut.
+      const kept = piece.occurrences.filter(
+        (entry, index) =>
+          entry.kind === "original" &&
+          index > 1 &&
+          index < piece.occurrences.length - 2,
+      );
+      for (const entry of kept)
+        expect(entry.tangent).toBe(
+          smooth.aggregate.pointOccurrences.find(
+            (occurrence) =>
+              entry.kind === "original" &&
+              occurrence.occurrenceId === entry.occurrenceId,
+          )!.tangent,
+        );
+    }
+  });
+
+  test("from = to at a knot: the knot's occurrence starts and ends the piece (no field), reproducing the loop", () => {
+    const smooth = editSpline(rg1.slice(0, 6), "smooth");
+    const original = geometryOf(smooth).spans;
+    for (const j of [0, 3]) {
+      const cut = cutAtKnot(original, j);
+      const piece = splineAggregatePiece(
+        smooth.aggregate,
+        smooth.positions,
+        cut,
+        cut,
+      )!;
+      expect(
+        piece.occurrences.map((entry) =>
+          entry.kind === "original" ? entry.occurrenceId : "Q",
+        ),
+      ).toEqual(Array.from({ length: 7 }, (_, i) => `occ-${(j + i) % 6}`));
+      expect(piece.endSpanParameterLengths).toBeUndefined();
+      // The repeated end gets a fresh occurrence id (the caller's job).
+      const renamed = {
+        ...piece,
+        occurrences: piece.occurrences.map((entry, index) =>
+          index === 6 && entry.kind === "original"
+            ? { ...entry, occurrenceId: "occ-end" }
+            : entry,
+        ),
+      };
+      const geometry = geometryOf(pieceSpline(renamed, smooth.positions));
+      expect(geometry.spans).toHaveLength(6);
+      expectWrapReproduces(original, geometry.spans, cut.representative);
+    }
+  });
+
+  test("a piece from late to early wraps across the seam; a positional or open spline never wraps", () => {
+    const smooth = editSpline(rg1.slice(0, 6), "smooth");
+    const original = geometryOf(smooth).spans;
+    const from = cutIn(original, 4, 0.5);
+    const piece = splineAggregatePiece(
+      smooth.aggregate,
+      smooth.positions,
+      from,
+      cutIn(original, 1, 0.5),
+    )!;
+    expect(
+      piece.occurrences.map((entry) =>
+        entry.kind === "original" ? entry.occurrenceId : "Q",
+      ),
+    ).toEqual(["Q", "occ-5", "occ-0", "occ-1", "Q"]);
+    expectWrapReproduces(
+      original,
+      geometryOf(pieceSpline(piece, smooth.positions)).spans,
+      from.representative,
+    );
+    const loop = editSpline(
+      [
+        [0, 0],
+        [2, 1],
+        [3, 3],
+        [1, 4],
+        [-1, 2],
+        [0, 0],
+      ],
+      "positional",
+    );
+    const loopSpans = geometryOf(loop).spans;
+    const cut = cutIn(loopSpans, 2, 0.5);
+    expect(() =>
+      splineAggregatePiece(loop.aggregate, loop.positions, cut, cut),
+    ).toThrow(RangeError);
+    const open = editSpline(rg1);
+    const openSpans = geometryOf(open).spans;
+    expect(() =>
+      splineAggregatePiece(
+        open.aggregate,
+        open.positions,
+        cutIn(openSpans, 3, 0.5),
+        cutIn(openSpans, 1, 0.5),
+      ),
+    ).toThrow(RangeError);
+  });
+
+  test("approval (1): every non-wrapping piece is bitwise what the T13l builder produced (828 pieces, pinned digest)", () => {
+    const loop: V[] = [
+      [0, 0],
+      [2, 1],
+      [3, 3],
+      [1, 4],
+      [-1, 2],
+      [0, 0],
+    ];
+    const pieces: unknown[] = [];
+    for (const [points, closure, handles] of [
+      [rg1, "open", { 3: [0.9, -0.4] as V }],
+      [loop, "positional", {}],
+      [rg1.slice(0, 6), "smooth", { 2: [0.5, 0.7] as V }],
+    ] as const) {
+      const spline = editSpline(points, closure, handles);
+      const spans = geometryOf(spline).spans;
+      const cuts: (SplineCut | null)[] = closure === "smooth" ? [] : [null];
+      spans.forEach((span, k) => {
+        cuts.push(cutAtKnot(spans, k));
+        for (const f of [0.25, 0.5, 0.9])
+          cuts.push({
+            representative:
+              span.interval[0] + f * (span.interval[1] - span.interval[0]),
+            knotOccurrenceIndex: null,
+          });
+      });
+      if (closure !== "smooth") cuts.push(null);
+      for (let a = 0; a < cuts.length; a++)
+        for (let b = a + 1; b < cuts.length; b++) {
+          if (a === 0 && closure !== "smooth" && b === cuts.length - 1)
+            continue;
+          const lo = cuts[a]?.representative ?? spans[0]!.interval[0];
+          const hi = cuts[b]?.representative ?? spans.at(-1)!.interval[1];
+          if (!(lo < hi)) continue;
+          pieces.push(
+            splineAggregatePiece(
+              spline.aggregate,
+              spline.positions,
+              cuts[a]!,
+              cuts[b]!,
+            ),
+          );
+        }
+    }
+    expect(pieces).toHaveLength(828);
+    // This row run against base c8a868a1 gives this digest (T13m.md).
+    expect(
+      createHash("sha256").update(JSON.stringify(pieces)).digest("hex"),
+    ).toBe("615fe84e66975a5fa5b6d0d9712433a9499a7181cfdca60d3fbcf4572e4d1a1f");
   });
 });

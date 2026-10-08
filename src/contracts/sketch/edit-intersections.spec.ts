@@ -8,6 +8,7 @@ import {
   EXTEND_TARGET_UNSUPPORTED_MESSAGE,
   querySketchEditIntersections,
   querySketchSnapIntersections,
+  SPLIT_CIRCLE_NEEDS_TWO_MESSAGE,
   SPLIT_NO_CROSSING_MESSAGE,
   SPLIT_TARGET_UNSUPPORTED_MESSAGE,
   TRIM_TOO_FEW_CUTS_MESSAGE,
@@ -977,18 +978,41 @@ describe("Extend and Split (T10g-2)", () => {
     circleBoundary.line("target", "t0", "t1");
     circleBoundary.point("c", 2, 0);
     circleBoundary.circle("boundary", "c", 1);
-    for (const sketch of [arcTarget, circleBoundary]) {
+    for (const sketch of [arcTarget, circleBoundary])
       expect(await edit(sketch, "extend")).toMatchObject({
         kind: "failed",
         code: "edit-target-unsupported",
         message: EXTEND_TARGET_UNSUPPORTED_MESSAGE,
       });
+    // T13m (Q1): Split now takes both; the arc misses x = 3 and the circle
+    // boundary splits the line at its first crossing (no pick).
+    expect(await edit(arcTarget, "split")).toEqual(
+      failure("edit-no-crossing", SPLIT_NO_CROSSING_MESSAGE),
+    );
+    expect(verified(await edit(circleBoundary, "split")).cuts).toMatchObject([
+      { position: [1, 0] },
+    ]);
+    // An ellipse is no Split target or boundary.
+    const ellipseTarget = makeSketchFixture();
+    ellipseTarget.point("c", 0, 0);
+    ellipseTarget.point("m", 2, 0);
+    ellipseTarget.ellipse("target", "c", "m", 1);
+    ellipseTarget.point("b0", 1, -2);
+    ellipseTarget.point("b1", 1, 2);
+    ellipseTarget.line("boundary", "b0", "b1");
+    const ellipseBoundary = makeSketchFixture();
+    ellipseBoundary.point("t0", -3, 0);
+    ellipseBoundary.point("t1", 3, 0);
+    ellipseBoundary.line("target", "t0", "t1");
+    ellipseBoundary.point("c", 0, 0);
+    ellipseBoundary.point("m", 2, 0);
+    ellipseBoundary.ellipse("boundary", "c", "m", 1);
+    for (const sketch of [ellipseTarget, ellipseBoundary])
       expect(await edit(sketch, "split")).toMatchObject({
         kind: "failed",
         code: "edit-target-unsupported",
         message: SPLIT_TARGET_UNSUPPORTED_MESSAGE,
       });
-    }
   });
 });
 
@@ -1204,23 +1228,22 @@ describe("Intersect (T13i snap candidates)", () => {
     ).toMatchObject({ kind: "failed", code: "edit-too-few-cuts" });
   });
 
-  test("Split and Extend of a spline target keep their unsupported refusals", async () => {
+  test("Extend of a spline target keeps its unsupported refusal; Split (T13m) cuts it at the crossing", async () => {
     const sketch = splineWithVerticals([1]);
-    for (const kind of ["split", "extend"] as const)
-      expect(
-        await query(sketch, {
-          kind,
-          targetEntityId: entity("target"),
-          boundaryEntityId: entity("v0"),
-        }),
-      ).toMatchObject({
-        kind: "failed",
-        code: "edit-target-unsupported",
-        message:
-          kind === "split"
-            ? SPLIT_TARGET_UNSUPPORTED_MESSAGE
-            : EXTEND_TARGET_UNSUPPORTED_MESSAGE,
-      });
+    const operation = (kind: "split" | "extend") =>
+      ({
+        kind,
+        targetEntityId: entity("target"),
+        boundaryEntityId: entity("v0"),
+      }) as const;
+    expect(await query(sketch, operation("extend"))).toMatchObject({
+      kind: "failed",
+      code: "edit-target-unsupported",
+      message: EXTEND_TARGET_UNSUPPORTED_MESSAGE,
+    });
+    const split = verified(await query(sketch, operation("split")));
+    expect(split.cuts).toHaveLength(1);
+    expect(Math.abs(split.cuts[0]!.position[0] - 1)).toBeLessThan(1e-12);
   });
 
   test("querySketchSnapIntersections: one intersect result per target, in request order; the curves stage is intersect without spline cutters", async () => {
@@ -1255,5 +1278,452 @@ describe("Intersect (T13i snap candidates)", () => {
         ),
         "only the line cuts in the curves stage",
       ).toEqual([[entity("v0")]]);
+  });
+});
+
+// T13m (user decision Q1): Split of arc, circle and spline targets by any
+// Trim cutter kind, at one crossing (a circle at two) chosen by the
+// boundary click. Contract seam, kernel-free certified capability.
+describe("Split of arc, circle and spline targets (T13m)", () => {
+  async function split(
+    sketch: SketchFixture,
+    pick?: [number, number],
+    target = "target",
+    boundary = "boundary",
+  ) {
+    const input = sketch.build();
+    return querySketchEditIntersections(
+      {
+        definition: input.definition,
+        solvedSnapshot: input.solvedSnapshot,
+        projectedReferences: [],
+        modelingTolerance: input.modelingTolerance,
+        operation: {
+          kind: "split",
+          targetEntityId: entity(target),
+          boundaryEntityId: entity(boundary),
+          ...(pick ? { pick } : {}),
+        },
+      },
+      createCertifiedNeutralCurveQueryCapabilityForTest(),
+    );
+  }
+  /** Every crossing of the target with the boundary (Trim's cuts, no refusal). */
+  async function crossings(sketch: SketchFixture) {
+    const input = sketch.build();
+    return verified(
+      await querySketchEditIntersections(
+        {
+          definition: input.definition,
+          solvedSnapshot: input.solvedSnapshot,
+          projectedReferences: [],
+          modelingTolerance: input.modelingTolerance,
+          operation: { kind: "intersect", targetEntityId: entity("target") },
+        },
+        createCertifiedNeutralCurveQueryCapabilityForTest(),
+      ),
+    ).cuts;
+  }
+  const near = (actual: readonly number[], expected: readonly number[]) =>
+    Math.hypot(actual[0]! - expected[0]!, actual[1]! - expected[1]!);
+  /** The upper half of the circle r = 2 at the origin: (2,0) → (−2,0) ccw, or reversed cw. */
+  function upperArc(
+    sweep: "counterClockwise" | "clockwise" = "counterClockwise",
+  ) {
+    const sketch = makeSketchFixture();
+    sketch.point("o", 0, 0);
+    sketch.point("a", 2, 0);
+    sketch.point("b", -2, 0);
+    if (sweep === "counterClockwise") sketch.arc("target", "o", "a", "b");
+    else sketch.arc("target", "o", "b", "a", "clockwise");
+    return sketch;
+  }
+  const failure = (code: string, message: string) => ({
+    kind: "failed",
+    code,
+    message,
+    entityIds: [entity("target"), entity("boundary")],
+    nonAcceptedNearTarget: [],
+  });
+
+  test("arc target by a line, an arc, a circle and a spline: one cut on the arc at the crossing, tied pointOnCurve to the boundary", async () => {
+    const cases: [string, (sketch: SketchFixture) => void, [number, number]][] =
+      [
+        [
+          "line",
+          (sketch) => {
+            sketch.point("b0", 1, 0.5);
+            sketch.point("b1", 1, 3);
+            sketch.line("boundary", "b0", "b1");
+          },
+          [1, Math.sqrt(3)],
+        ],
+        [
+          "arc",
+          (sketch) => {
+            // Centre (0,2), r 1, from (0,1) to (1,2) ccw: x ≥ 0, y ≤ 2.
+            sketch.point("c", 0, 2);
+            sketch.point("c0", 0, 1);
+            sketch.point("c1", 1, 2);
+            sketch.arc("boundary", "c", "c0", "c1");
+          },
+          [Math.sqrt(4 - 1.75 ** 2), 1.75],
+        ],
+        [
+          "circle",
+          (sketch) => {
+            // Centre (2,2), r 2: meets the target circle at (2,0) (the arc's
+            // start, an end contact: no cut) and (0,2).
+            sketch.point("c", 2, 2);
+            sketch.circle("boundary", "c", 2);
+          },
+          [0, 2],
+        ],
+        [
+          "spline",
+          (sketch) => {
+            sketch.point("s0", 0.5, 1);
+            sketch.point("s1", 1.5, 1.6);
+            sketch.point("s2", 2.5, 3);
+            sketch.spline("boundary", ["s0", "s1", "s2"], "open");
+          },
+          [Number.NaN, Number.NaN],
+        ],
+      ];
+    for (const [kind, add, expected] of cases) {
+      const sketch = upperArc();
+      add(sketch);
+      const result = verified(await split(sketch));
+      expect(result.cuts, kind).toHaveLength(1);
+      const [cut] = result.cuts;
+      expect(result.parameterOrder).toBe("increasing");
+      expect(Math.hypot(...cut!.position), `${kind}: on the arc`).toBeCloseTo(
+        2,
+        12,
+      );
+      expect(cut!.position[1], kind).toBeGreaterThan(0);
+      if (!Number.isNaN(expected[0]))
+        expect(near(cut!.position, expected), kind).toBeLessThan(1e-12);
+      expect(cut!.cutters, kind).toEqual([
+        { entityId: entity("boundary"), tie: { kind: "pointOnCurve" } },
+      ]);
+    }
+  });
+
+  test("a clockwise arc reports its cut in its own traversal (decreasing angle)", async () => {
+    const sketch = upperArc("clockwise");
+    sketch.point("b0", 1, 0.5);
+    sketch.point("b1", 1, 3);
+    sketch.line("boundary", "b0", "b1");
+    const result = verified(await split(sketch));
+    expect(result.parameterOrder).toBe("decreasing");
+    expect(near(result.cuts[0]!.position, [1, Math.sqrt(3)])).toBeLessThan(
+      1e-12,
+    );
+  });
+
+  test("multi-crossing rule: the crossing nearest the boundary click wins; no click: the first along the target's traversal; an equidistant click: the first", async () => {
+    // A line (0,0)→(4,0) crossed twice by the circle centre (2,0) r 1.
+    const lineByCircle = () => {
+      const sketch = makeSketchFixture();
+      sketch.point("t0", 0, 0);
+      sketch.point("t1", 4, 0);
+      sketch.line("target", "t0", "t1");
+      sketch.point("c", 2, 0);
+      sketch.circle("boundary", "c", 1);
+      return sketch;
+    };
+    expect(
+      (await crossings(lineByCircle())).map((cut) => cut.position),
+    ).toEqual([
+      [1, 0],
+      [3, 0],
+    ]);
+    const at = async (pick?: [number, number]) =>
+      verified(await split(lineByCircle(), pick)).cuts.map(
+        (cut) => cut.position,
+      );
+    expect(await at()).toEqual([[1, 0]]);
+    expect(await at([2.9, 0.8])).toEqual([[3, 0]]);
+    expect(await at([1.2, -0.9])).toEqual([[1, 0]]);
+    expect(await at([2, 1])).toEqual([[1, 0]]);
+    // The same on an arc crossed twice by a line (y = 1): (√3, 1), (−√3, 1).
+    const arcByLine = () => {
+      const sketch = upperArc();
+      sketch.point("b0", -3, 1);
+      sketch.point("b1", 3, 1);
+      sketch.line("boundary", "b0", "b1");
+      return sketch;
+    };
+    const first = verified(await split(arcByLine())).cuts;
+    expect(first).toHaveLength(1);
+    expect(near(first[0]!.position, [Math.sqrt(3), 1])).toBeLessThan(1e-12);
+    const picked = verified(await split(arcByLine(), [-1.5, 1])).cuts;
+    expect(near(picked[0]!.position, [-Math.sqrt(3), 1])).toBeLessThan(1e-12);
+  });
+
+  test("R-3 data stay on the reported cut: an incidence at a crossing Split didn't cut at is no cut", async () => {
+    const sketch = makeSketchFixture();
+    sketch.point("t0", 0, 0);
+    sketch.point("t1", 4, 0);
+    sketch.line("target", "t0", "t1");
+    sketch.point("c", 2, 0);
+    sketch.circle("boundary", "c", 1);
+    sketch.point("j0", 3, 0);
+    sketch.point("j1", 3, 2);
+    sketch.line("junction", "j0", "j1");
+    const atThree = sketch.pointOnCurve("j0", "target");
+    const result = verified(await split(sketch, [1, 0]));
+    expect(result.cuts.map((cut) => cut.position)).toEqual([[1, 0]]);
+    expect(result.incidences).toEqual([
+      {
+        constraintId: atThree,
+        pointId: point("j0"),
+        parameter: 0.75,
+        cut: null,
+      },
+    ]);
+  });
+
+  test("review R-1: an incidence's cut index refers to the selected cuts: a boundary arc whose ends lie on the target (two declared-join crossings) reports the pointOnCurve at the cut crossing as cut 0 and the other as no cut, for either pick", async () => {
+    const sketch = () => {
+      const fixture = makeSketchFixture();
+      fixture.point("t0", 0, 0);
+      fixture.point("t1", 4, 0);
+      fixture.line("target", "t0", "t1");
+      fixture.point("c", 2, 0);
+      fixture.point("a0", 3, 0);
+      fixture.point("a1", 1, 0);
+      fixture.arc("boundary", "c", "a0", "a1");
+      return fixture;
+    };
+    const incidences = async (pick?: [number, number]) => {
+      const fixture = sketch();
+      fixture.pointOnCurve("a0", "target");
+      fixture.pointOnCurve("a1", "target");
+      const result = verified(await split(fixture, pick));
+      expect(result.cuts, `pick ${pick}`).toHaveLength(1);
+      return result.incidences.map((incidence) => [
+        incidence.pointId,
+        incidence.parameter,
+        incidence.cut,
+      ]);
+    };
+    expect(await incidences([3.1, 0.1])).toEqual([
+      [point("a0"), 0.75, 0],
+      [point("a1"), 0.25, null],
+    ]);
+    for (const pick of [[0.9, 0.1] as [number, number], undefined])
+      expect(await incidences(pick), `pick ${pick}`).toEqual([
+        [point("a0"), 0.75, null],
+        [point("a1"), 0.25, 0],
+      ]);
+  });
+
+  test("review A-1: with no click, a first crossing that leaves a sub-τ piece is skipped for the next one (deterministic); a click on it still refuses; all sub-τ refuses", async () => {
+    // A line (0,0)→(10,0) and a circle (3.0001, 0) r 3: crossings at x =
+    // 0.0001 (1e-4 from the start, under τ = 1e-3) and 6.0001.
+    const sketch = (centre: number, radius: number) => {
+      const fixture = makeSketchFixture();
+      fixture.point("t0", 0, 0);
+      fixture.point("t1", 10, 0);
+      fixture.line("target", "t0", "t1");
+      fixture.point("c", centre, 0);
+      fixture.circle("boundary", "c", radius);
+      return fixture;
+    };
+    const noPick = verified(await split(sketch(3.0001, 3))).cuts;
+    expect(noPick).toHaveLength(1);
+    expect(Math.abs(noPick[0]!.position[0] - 6.0001)).toBeLessThan(1e-12);
+    expect(await split(sketch(3.0001, 3), [0.1, 0.1])).toEqual(
+      failure("edit-no-crossing", SPLIT_NO_CROSSING_MESSAGE),
+    );
+    // Crossings at 1e-4 and 10 − 1e-4: both leave a sub-τ piece.
+    expect(await split(sketch(5, 5 - 1e-4))).toEqual(
+      failure("edit-no-crossing", SPLIT_NO_CROSSING_MESSAGE),
+    );
+  });
+
+  test("circle rule (Trim's closed-curve rule): one crossing is refused; two give both cuts; four give the two nearest the click (no click: the first two from the seam)", async () => {
+    const circle = () => {
+      const sketch = makeSketchFixture();
+      sketch.point("o", 0, 0);
+      sketch.circle("target", "o", 2);
+      return sketch;
+    };
+    // A spoke from the centre crosses once.
+    const once = circle();
+    once.point("b0", 0, 0.5);
+    once.point("b1", 0, 3);
+    once.line("boundary", "b0", "b1");
+    expect(await split(once)).toEqual(
+      failure("edit-circle-split-needs-two", SPLIT_CIRCLE_NEEDS_TWO_MESSAGE),
+    );
+    expect(SPLIT_CIRCLE_NEEDS_TWO_MESSAGE).toBe(
+      "Split needs two crossings to split a circle.",
+    );
+    // A chord y = 1 crosses twice.
+    const twice = circle();
+    twice.point("b0", -3, 1);
+    twice.point("b1", 3, 1);
+    twice.line("boundary", "b0", "b1");
+    const two = verified(await split(twice, [3, 1]));
+    expect(two.cuts).toHaveLength(2);
+    expect(near(two.cuts[0]!.position, [Math.sqrt(3), 1])).toBeLessThan(1e-12);
+    expect(near(two.cuts[1]!.position, [-Math.sqrt(3), 1])).toBeLessThan(1e-12);
+    // A wavy spline dips into the circle twice: four crossings.
+    const wavy = () => {
+      const sketch = circle();
+      for (const [index, [x, y]] of [
+        [-3, 0],
+        [-1, 0],
+        [0, 3],
+        [1, 0],
+        [3, 0],
+      ].entries())
+        sketch.point(`w${index}`, x!, y!);
+      sketch.spline("boundary", ["w0", "w1", "w2", "w3", "w4"], "open");
+      return sketch;
+    };
+    const all = await crossings(wavy());
+    expect(all).toHaveLength(4);
+    const noPick = verified(await split(wavy())).cuts;
+    expect(noPick.map((cut) => cut.position)).toEqual(
+      all.slice(0, 2).map((cut) => cut.position),
+    );
+    for (const pick of [
+      [-2.5, 0.3],
+      [0.3, 2.5],
+      [2, -0.2],
+    ] as [number, number][]) {
+      const nearest = [...all]
+        .map((cut, index) => ({ index, d: near(cut.position, pick) }))
+        .sort((left, right) => left.d - right.d)
+        .slice(0, 2)
+        .map((entry) => entry.index)
+        .sort((left, right) => left - right);
+      expect(
+        verified(await split(wavy(), pick)).cuts.map((cut) => cut.position),
+        `pick ${pick}`,
+      ).toEqual(nearest.map((index) => all[index]!.position));
+    }
+  });
+
+  test("open spline by a line and by a spline: one cut at the crossing", async () => {
+    const target = () => {
+      const sketch = makeSketchFixture();
+      sketch.point("s0", 0, 0);
+      sketch.point("s1", 2, 3);
+      sketch.point("s2", 4, 0);
+      sketch.spline("target", ["s0", "s1", "s2"], "open");
+      return sketch;
+    };
+    const byLine = target();
+    byLine.point("b0", 1, -1);
+    byLine.point("b1", 1, 5);
+    byLine.line("boundary", "b0", "b1");
+    const lineCut = verified(await split(byLine)).cuts;
+    expect(lineCut).toHaveLength(1);
+    expect(Math.abs(lineCut[0]!.position[0] - 1)).toBeLessThan(1e-12);
+    const bySpline = target();
+    bySpline.point("w0", 0, 2);
+    bySpline.point("w1", 2, 1);
+    bySpline.point("w2", 3, 4);
+    bySpline.spline("boundary", ["w0", "w1", "w2"], "open");
+    const all = await crossings(bySpline);
+    expect(all.length).toBeGreaterThanOrEqual(1);
+    const splineCut = verified(await split(bySpline)).cuts;
+    expect(splineCut).toEqual([all[0]]);
+    expect(splineCut[0]!.cutters).toEqual([
+      { entityId: entity("boundary"), tie: { kind: "pointOnCurve" } },
+    ]);
+    // Spline pairs are certified slowly (T13i: 1.3–10 s per pair).
+  }, 120_000);
+
+  test("closed splines: one cut (nearest the click); a smooth loop's one piece runs through every knot (never sub-τ); a positional corner cut leaves a zero piece (no crossing)", async () => {
+    for (const closure of ["smooth", "positional"] as const) {
+      const sketch = makeSketchFixture();
+      sketch.point("p0", 1, 0);
+      sketch.point("p1", 0, 1);
+      sketch.point("p2", -1, 0);
+      sketch.point("p3", 0, -1);
+      sketch.spline(
+        "target",
+        closure === "smooth"
+          ? ["p0", "p1", "p2", "p3"]
+          : ["p0", "p1", "p2", "p3", "p0"],
+        closure,
+      );
+      sketch.point("a", -2, 0.3);
+      sketch.point("b", 2, 0.3);
+      sketch.line("boundary", "a", "b");
+      const all = await crossings(sketch);
+      expect(all, closure).toHaveLength(2);
+      expect(verified(await split(sketch)).cuts, closure).toEqual([all[0]]);
+      expect(verified(await split(sketch, [-1, 0.3])).cuts, closure).toEqual([
+        all[1],
+      ]);
+    }
+    // Through the seam knot p0 = (1,0) and the opposite knot (y = 0).
+    for (const closure of ["smooth", "positional"] as const) {
+      const sketch = makeSketchFixture();
+      sketch.point("p0", 1, 0);
+      sketch.point("p1", 0, 1);
+      sketch.point("p2", -1, 0);
+      sketch.point("p3", 0, -1);
+      sketch.spline(
+        "target",
+        closure === "smooth"
+          ? ["p0", "p1", "p2", "p3"]
+          : ["p0", "p1", "p2", "p3", "p0"],
+        closure,
+      );
+      sketch.point("a", 0.5, 0);
+      sketch.point("b", 2, 0);
+      sketch.line("boundary", "a", "b");
+      const result = await split(sketch);
+      if (closure === "smooth") {
+        const [cut] = verified(result).cuts;
+        expect(cut!.knotOccurrenceIndex).toBe(0);
+        expect(cut!.position).toEqual([1, 0]);
+      } else
+        expect(result, "positional corner").toEqual(
+          failure("edit-no-crossing", SPLIT_NO_CROSSING_MESSAGE),
+        );
+    }
+  });
+
+  test("sub-τ refusal: a crossing closer than the modeling tolerance (1e-3) to an arc's or an open spline's end is no crossing; 2e-3 away splits", async () => {
+    for (const [offset, splits] of [
+      [1e-4, false],
+      [2e-3, true],
+    ] as const) {
+      // A vertical line near the arc's start (2,0): the chord to the cut.
+      const x = Math.sqrt(4 - offset ** 2);
+      const arc = upperArc();
+      arc.point("b0", 0, offset);
+      arc.point("b1", 3, offset);
+      arc.line("boundary", "b0", "b1");
+      const arcResult = await split(arc, [x, offset]);
+      if (splits) expect(verified(arcResult).cuts).toHaveLength(1);
+      else
+        expect(arcResult).toEqual(
+          failure("edit-no-crossing", SPLIT_NO_CROSSING_MESSAGE),
+        );
+      const spline = makeSketchFixture();
+      spline.point("s0", 0, 0);
+      spline.point("s1", 2, 3);
+      spline.point("s2", 4, 0);
+      spline.spline("target", ["s0", "s1", "s2"], "open");
+      spline.point("b0", offset, -1);
+      spline.point("b1", offset, 5);
+      spline.line("boundary", "b0", "b1");
+      const splineResult = await split(spline);
+      if (splits) expect(verified(splineResult).cuts).toHaveLength(1);
+      else
+        expect(splineResult).toEqual(
+          failure("edit-no-crossing", SPLIT_NO_CROSSING_MESSAGE),
+        );
+    }
   });
 });

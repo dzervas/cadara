@@ -521,9 +521,14 @@ export interface SplineTrim<TPointId extends string = string> {
  * away are bitwise. A cut very near a knot yields a micro end span (and Q
  * next to P_j), which fails closed downstream at kernel resolution like a
  * micro line piece; the builder doesn't refuse it. The piece never wraps a
- * closure's seam or corner. Null when the original doesn't reconstruct; a
- * cut that is not inside the spline, out of order, or whose knot index
- * disagrees with its parameter throws.
+ * positional closure's corner. T13m (Split): on a smooth closure a `to` at or
+ * before `from` wraps through the seam (`from` = `to`: the whole loop as one
+ * open piece starting and ending at that cut); every kept fit point next to
+ * the seam keeps its tangent like any interior one. A wrapping piece cut at
+ * a knot lists that knot's occurrence at both ends (same occurrence id; the
+ * caller gives the end a fresh one). Null when the original doesn't
+ * reconstruct; a cut that is not inside the spline, out of order (except a
+ * smooth wrap), or whose knot index disagrees with its parameter throws.
  */
 export function splineAggregatePiece<TPointId extends string>(
   aggregate: AuthoredSplineAggregate<TPointId>,
@@ -645,25 +650,31 @@ function splinePiece<TPointId extends string>(
   const end = to && locate(to);
   const tFrom = start?.t ?? spans[0]!.interval[0];
   const tTo = end?.t ?? spans[count - 1]!.interval[1];
-  if (!(tFrom < tTo))
+  // T13m: a smooth closure's piece wraps through its seam when it ends at or
+  // before its start (in the unrolled parameter, `to` lies one period on).
+  const wrap = wrapped && !(tFrom < tTo);
+  if (!wrap && !(tFrom < tTo))
     throw new RangeError("Spline piece must have a positive parameter range");
   const startCut = start?.span ?? null;
   const endCut = end?.span ?? null;
   // Original occurrences kept, in order (a piece never wraps: first ≤ last + 1).
   const first = start === null ? 0 : (start.knot ?? startCut! + 1);
-  const last = end === null ? n - 1 : (end.knot ?? endCut!);
+  // Unrolled: a wrapping piece's indices run past n − 1 (taken mod n).
+  const last = (end === null ? n - 1 : (end.knot ?? endCut!)) + (wrap ? n : 0);
   const offset = startCut === null ? 0 : 1;
   const spanCount = last - first + offset + (endCut === null ? 0 : 1);
   const single = spanCount === 1 && (startCut !== null || endCut !== null);
   // Parameter length of each piece span: Δ at a cut, else the original h.
   const pieceLengths = Array.from({ length: spanCount }, (_, m) =>
     single
-      ? tTo - tFrom
+      ? (wrap
+          ? tTo + (spans[count - 1]!.interval[1] - spans[0]!.interval[0])
+          : tTo) - tFrom
       : m === 0 && startCut !== null
         ? spans[startCut]!.interval[1] - tFrom
         : m === spanCount - 1 && endCut !== null
           ? tTo - spans[endCut]!.interval[0]
-          : lengths[first + m - offset]!,
+          : lengths[(first + m - offset) % n]!,
   );
   const fixedStart =
     startCut !== null ||
@@ -691,7 +702,7 @@ function splinePiece<TPointId extends string>(
   if (startCut !== null)
     occurrences.push(cutPoint(startCut, tFrom, pieceLengths[0]!));
   for (let i = first; i <= last; i++) {
-    const point = input.points[i]!;
+    const point = input.points[i % n]!;
     const m = i - first + offset;
     const isEnd = m === 0 || m === spanCount;
     const nextToCut =
@@ -707,7 +718,7 @@ function splinePiece<TPointId extends string>(
       pointId: point.id as TPointId,
       tangent:
         nextToCut || newEnd
-          ? { kind: "authored", vector: scale(derivatives[i]!, arm / 3) }
+          ? { kind: "authored", vector: scale(derivatives[i % n]!, arm / 3) }
           : point.tangent,
     });
   }
