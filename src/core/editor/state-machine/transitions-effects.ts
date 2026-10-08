@@ -8,7 +8,9 @@ import {
 import {
   completeSketchOffsetPreviewPublication,
   completeSketchEditQuery,
+  completeSketchSnapIntersectionQuery,
   failSketchEditQuery,
+  failSketchSnapIntersectionQuery,
   failSketchLiveRegions,
   getSketchSessionPreviewLabel,
   publishSketchLiveRegions,
@@ -1040,6 +1042,74 @@ export function handleEffectSketchEditIntersectionsQueryFailed(
       ...state,
       pendingEditQueryRequest: null,
       session: failSketchEditQuery(state.session, event.queryId, event.message),
+    },
+    effects: [],
+  };
+}
+
+function isPendingSnapQueryResult(
+  state: EditorState,
+  event: Extract<
+    EditorEvent,
+    {
+      type:
+        | "effect.sketchSnapIntersectionsQueried"
+        | "effect.sketchSnapIntersectionsQueryFailed";
+    }
+  >,
+): state is SketchEditorState {
+  return (
+    state.kind === "editingSketch" &&
+    state.command.commandSessionId === event.commandSessionId &&
+    state.pendingSnapQueryRequest?.requestId === event.requestId
+  );
+}
+
+/**
+ * T13i: the spline intersection snap candidates of the pending query (a
+ * stale request is dropped; the session drops a result whose query is no
+ * longer the cache's pending one).
+ */
+export function handleEffectSketchSnapIntersectionsQueried(
+  state: EditorState,
+  event: Extract<
+    EditorEvent,
+    { type: "effect.sketchSnapIntersectionsQueried" }
+  >,
+): EditorTransitionResult {
+  if (!isPendingSnapQueryResult(state, event)) {
+    return { state, effects: [] };
+  }
+  return {
+    state: {
+      ...state,
+      pendingSnapQueryRequest: null,
+      session: completeSketchSnapIntersectionQuery(
+        state.session,
+        event.queryId,
+        event.targets,
+      ),
+    },
+    effects: [],
+  };
+}
+
+/** T13i: a failed snap query offers no spline intersections for its basis. */
+export function handleEffectSketchSnapIntersectionsQueryFailed(
+  state: EditorState,
+  event: Extract<
+    EditorEvent,
+    { type: "effect.sketchSnapIntersectionsQueryFailed" }
+  >,
+): EditorTransitionResult {
+  if (!isPendingSnapQueryResult(state, event)) {
+    return { state, effects: [] };
+  }
+  return {
+    state: {
+      ...state,
+      pendingSnapQueryRequest: null,
+      session: failSketchSnapIntersectionQuery(state.session, event.queryId),
     },
     effects: [],
   };

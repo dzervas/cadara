@@ -8,9 +8,17 @@ import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
 import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
 import {
   collectSketchSnapGeometries,
+  getSketchExactIntersections,
+  getSketchSnapIntersectionTargets,
   resolveSketchSnap,
   type SketchSnapGeometry,
 } from "@/domain/sketch-snapping/snap-candidates";
+import type { NeutralCurveQueryCapability } from "@/contracts/modeling/neutral-curve-query";
+import {
+  querySketchEditIntersections,
+  querySketchSnapIntersections,
+} from "@/contracts/sketch/edit-intersections";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { SKETCH_CURVE_RADII_PX } from "@/domain/sketch-interaction/screen-radii";
 import {
   makeSketchFixture,
@@ -1101,3 +1109,103 @@ test("snap classes rank before distance: point-like > constructed > on-curve > a
     { kind: "localPoint", pointId: "sketch_point_o" },
   ]);
 });
+
+// T13i review R-1 / A-3 (logic lane, seam: the snap batch
+// `querySketchSnapIntersections` and `getSketchExactIntersections`): the
+// staged batch (spline × line/circle/arc, then spline × spline) offers the
+// same candidates, bitwise, as one unstaged intersect per target, and each
+// spline pair is computed in one direction only.
+test("T13i R-1/A-3: the staged snap batch computes each spline pair once and offers today's candidates bitwise", async () => {
+  const sketch = makeSketchFixture();
+  sketch.point("a0", 0, 0);
+  sketch.point("a1", 2, 3);
+  sketch.point("a2", 4, 0);
+  sketch.spline("a", ["a0", "a1", "a2"], "open");
+  sketch.point("b0", -1, 1);
+  sketch.point("b1", 2, 1.2);
+  sketch.point("b2", 5, 1);
+  sketch.spline("b", ["b0", "b1", "b2"], "open");
+  sketch.point("l0", 2.5, -1);
+  sketch.point("l1", 2.5, 4);
+  sketch.line("line", "l0", "l1");
+  const input = sketch.build();
+  const basis = {
+    definition: input.definition,
+    solvedSnapshot: input.solvedSnapshot,
+    projectedReferences: [],
+    modelingTolerance: input.modelingTolerance,
+  };
+  const [a, b, line] = ["a", "b", "line"].map(
+    (name) => `sketch_entity_${name}` as SketchEntityId,
+  );
+  const splineIds = new Set<string>([a!, b!]);
+  const certified = createCertifiedNeutralCurveQueryCapabilityForTest();
+  const splinePairs: string[] = [];
+  const spied: NeutralCurveQueryCapability = {
+    queryNeutralCurves: (request) => {
+      const first = request.first.provenance.sourceEntityId;
+      const second = request.second.provenance.sourceEntityId;
+      if (splineIds.has(first) && splineIds.has(second))
+        splinePairs.push(`${first}→${second}`);
+      return certified.queryNeutralCurves(request);
+    },
+    queryNeutralCurveSelfIntersections: (request) =>
+      certified.queryNeutralCurveSelfIntersections(request),
+    queryNeutralCurveJoin: (request) =>
+      certified.queryNeutralCurveJoin(request),
+  };
+  expect(
+    getSketchSnapIntersectionTargets(
+      input.definition,
+      input.solvedSnapshot,
+      input.modelingTolerance,
+      "curves",
+    ).sort(),
+  ).toEqual([a, b]);
+
+  const curves = await querySketchSnapIntersections(
+    { ...basis, targetEntityIds: [b!, a!], cutters: "curves" },
+    spied,
+  );
+  expect(splinePairs, "the curves stage asks no spline pair").toEqual([]);
+  const splines = await querySketchSnapIntersections(
+    { ...basis, targetEntityIds: [b!, a!], cutters: "splines" },
+    spied,
+  );
+  expect(
+    [...new Set(splinePairs)],
+    "the spline pair is queried in one direction only",
+  ).toHaveLength(1);
+  const staged = [
+    ...getSketchExactIntersections(input.definition, curves),
+    ...getSketchExactIntersections(input.definition, splines),
+  ];
+
+  // Today's unstaged batch: one plain intersect per target, every cutter.
+  const unstaged = getSketchExactIntersections(
+    input.definition,
+    await Promise.all(
+      [a!, b!].map(async (targetEntityId) => ({
+        targetEntityId,
+        result: await querySketchEditIntersections(
+          { ...basis, operation: { kind: "intersect", targetEntityId } },
+          certified,
+        ),
+      })),
+    ),
+  );
+  const key = (intersection: { point: readonly number[]; sources: unknown }) =>
+    JSON.stringify(intersection);
+  expect(staged.map(key).sort(), "the same candidates, bitwise").toEqual(
+    unstaged.map(key).sort(),
+  );
+  expect(
+    staged.filter(({ sources }) =>
+      sources.some(
+        (source) => source.kind === "localEntity" && source.entityId === line,
+      ),
+    ),
+    "the line crosses each spline once (curves stage)",
+  ).toHaveLength(2);
+  expect(staged.length, "and the splines cross twice").toBe(4);
+}, 120_000);

@@ -2,6 +2,8 @@ import type { SplineSpan } from "@/contracts/sketch/spline-geometry";
 import type {
   SketchEditIntersectionInput,
   SketchEditIntersectionResult,
+  SketchSnapIntersectionInput,
+  SketchSnapIntersectionTargetResult,
 } from "@/contracts/sketch/edit-intersections";
 import type {
   DocumentId,
@@ -604,6 +606,21 @@ export interface QuerySketchEditIntersectionsRequest
 /** The verified cuts or the named failure; validated at the transport boundary. */
 export interface QuerySketchEditIntersectionsResponse extends SketchSolverResponseBase {
   result: SketchEditIntersectionResult;
+}
+
+/**
+ * T13i (D24 with T13 review R-3): the spline intersection snap candidates of
+ * one accepted live pair, batched: one `intersect` edit-intersection query
+ * per target, all in one request. A terminable runtime runs it in its own
+ * `snapQuery` lane per document, superseding only its own requests (never
+ * the `editQuery` lane).
+ */
+export interface QuerySketchSnapIntersectionsRequest
+  extends SketchSolverRequestBase, SketchSnapIntersectionInput {}
+
+/** Each target's `intersect` result, in request order; validated at the transport boundary. */
+export interface QuerySketchSnapIntersectionsResponse extends SketchSolverResponseBase {
+  targets: SketchSnapIntersectionTargetResult[];
 }
 
 /**

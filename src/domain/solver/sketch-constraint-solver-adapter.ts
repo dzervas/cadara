@@ -13,6 +13,8 @@ import {
   type ProjectSketchExternalReferencesResponse,
   type QuerySketchEditIntersectionsRequest,
   type QuerySketchEditIntersectionsResponse,
+  type QuerySketchSnapIntersectionsRequest,
+  type QuerySketchSnapIntersectionsResponse,
   type ResolveSketchReferenceRequest,
   type ResolveSketchReferenceResponse,
   type SketchSolverRequestBase,
@@ -47,7 +49,10 @@ import {
   publishSketchOffsets,
 } from "@/contracts/sketch/offset-publication";
 import { offsetArrangementInput } from "@/contracts/sketch/region-extraction";
-import { querySketchEditIntersections } from "@/contracts/sketch/edit-intersections";
+import {
+  querySketchEditIntersections,
+  querySketchSnapIntersections,
+} from "@/contracts/sketch/edit-intersections";
 import type { OffsetPublicationCapabilities } from "@/contracts/sketch/offset-publication";
 import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
 import { createCertifiedNeutralCurveRequestQuery } from "@/domain/modeling/neutral-curve-certification/query";
@@ -61,7 +66,9 @@ import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
  */
 export type SketchRegionDerivationDelegate = Pick<
   SketchSolverAdapter,
-  "deriveSketchRegions" | "querySketchEditIntersections"
+  | "deriveSketchRegions"
+  | "querySketchEditIntersections"
+  | "querySketchSnapIntersections"
 >;
 
 type DerivationRequestIdentity = Pick<
@@ -123,6 +130,7 @@ function makeResponseBase(
     | DisposeInteractiveSketchSolveSessionRequest
     | DeriveSketchRegionsRequest
     | QuerySketchEditIntersectionsRequest
+    | QuerySketchSnapIntersectionsRequest
     | ResolveSketchReferenceRequest,
 ): SketchSolverResponseBase {
   return {
@@ -198,6 +206,7 @@ function assertSupportedRequest(
     | DisposeInteractiveSketchSolveSessionRequest
     | DeriveSketchRegionsRequest
     | QuerySketchEditIntersectionsRequest
+    | QuerySketchSnapIntersectionsRequest
     | ResolveSketchReferenceRequest,
   options: SketchConstraintSolverAdapterOptions,
 ) {
@@ -584,6 +593,35 @@ export class SketchConstraintSolverAdapter implements SketchSolverAdapter {
       ...makeResponseBase(request),
       result: await querySketchEditIntersections(
         request,
+        this.options.neutralCurveQueries,
+      ),
+    };
+  }
+
+  /**
+   * T13i: forwarded to the delegate (the worker pool's `snapQuery` lane)
+   * when present, otherwise the contract function on this thread.
+   */
+  async querySketchSnapIntersections(
+    request: QuerySketchSnapIntersectionsRequest,
+  ): Promise<QuerySketchSnapIntersectionsResponse> {
+    assertSupportedRequest(request, this.options);
+    assertDocumentModelingTolerance(request.modelingTolerance);
+    if (this.options.regionDerivation)
+      return this.options.regionDerivation.querySketchSnapIntersections(
+        request,
+      );
+    return {
+      ...makeResponseBase(request),
+      targets: await querySketchSnapIntersections(
+        {
+          definition: request.definition,
+          solvedSnapshot: request.solvedSnapshot,
+          projectedReferences: request.projectedReferences,
+          modelingTolerance: request.modelingTolerance,
+          targetEntityIds: request.targetEntityIds,
+          cutters: request.cutters,
+        },
         this.options.neutralCurveQueries,
       ),
     };

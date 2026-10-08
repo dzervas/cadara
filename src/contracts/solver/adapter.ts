@@ -9,6 +9,8 @@ import type {
   ProjectSketchExternalReferencesResponse,
   QuerySketchEditIntersectionsRequest,
   QuerySketchEditIntersectionsResponse,
+  QuerySketchSnapIntersectionsRequest,
+  QuerySketchSnapIntersectionsResponse,
   ResolveSketchReferenceRequest,
   ResolveSketchReferenceResponse,
   SolveSketchRequest,
@@ -93,6 +95,15 @@ export interface SketchSolverAdapter {
   querySketchEditIntersections(
     request: QuerySketchEditIntersectionsRequest,
   ): Promise<QuerySketchEditIntersectionsResponse>;
+  /**
+   * T13i: the spline intersection snap candidates of one accepted pair (one
+   * `intersect` query per target, same contract function). A terminable
+   * runtime runs it in its own `snapQuery` lane per document, superseding
+   * only its own requests.
+   */
+  querySketchSnapIntersections(
+    request: QuerySketchSnapIntersectionsRequest,
+  ): Promise<QuerySketchSnapIntersectionsResponse>;
   /**
    * Resolves a sketch-local target and reports whether it is still valid.
    * Implementers must not silently remap invalid targets to surviving geometry.

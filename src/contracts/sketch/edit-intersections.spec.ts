@@ -7,6 +7,7 @@ import {
   EXTEND_NO_INTERSECTION_MESSAGE,
   EXTEND_TARGET_UNSUPPORTED_MESSAGE,
   querySketchEditIntersections,
+  querySketchSnapIntersections,
   SPLIT_NO_CROSSING_MESSAGE,
   SPLIT_TARGET_UNSUPPORTED_MESSAGE,
   TRIM_TOO_FEW_CUTS_MESSAGE,
@@ -1104,5 +1105,155 @@ describe("Trim kept-piece length (T10g-2 review A-1)", () => {
     );
     const kept = verified(await trim(closedSpline(1e-2), "target"));
     expect(kept.cuts.map((cut) => cut.knotOccurrenceIndex)).toEqual([null, 1]);
+  });
+});
+
+// T13i (D24, orchestrator decision (a)): `intersect` is Trim's cut query on
+// the target without Trim's refusals; it feeds spline intersection snaps.
+// Trim, Split and Extend keep their refusals on the same fixtures.
+describe("Intersect (T13i snap candidates)", () => {
+  async function query(
+    sketch: SketchFixture,
+    operation: Parameters<typeof querySketchEditIntersections>[0]["operation"],
+  ) {
+    const input = sketch.build();
+    return querySketchEditIntersections(
+      {
+        definition: input.definition,
+        solvedSnapshot: input.solvedSnapshot,
+        projectedReferences: [],
+        modelingTolerance: input.modelingTolerance,
+        operation,
+      },
+      createCertifiedNeutralCurveQueryCapabilityForTest(),
+    );
+  }
+  /** Spline (0,0)→(2,3)→(4,0) crossed by vertical lines at `xs`. */
+  function splineWithVerticals(xs: readonly number[]) {
+    const sketch = makeSketchFixture();
+    sketch.point("s0", 0, 0);
+    sketch.point("s1", 2, 3);
+    sketch.point("s2", 4, 0);
+    sketch.spline("target", ["s0", "s1", "s2"], "open");
+    xs.forEach((x, index) => {
+      sketch.point(`v${index}a`, x, -1);
+      sketch.point(`v${index}b`, x, 5);
+      sketch.line(`v${index}`, `v${index}a`, `v${index}b`);
+    });
+    return sketch;
+  }
+  const intersect = {
+    kind: "intersect",
+    targetEntityId: entity("target"),
+  } as const;
+
+  test("one crossing: Trim still refuses (edit-too-few-cuts); intersect verifies the one cut at the evaluator position", async () => {
+    const sketch = splineWithVerticals([1]);
+    expect(
+      await query(sketch, { kind: "trim", targetEntityId: entity("target") }),
+    ).toEqual({
+      kind: "failed",
+      code: "edit-too-few-cuts",
+      message: TRIM_TOO_FEW_CUTS_MESSAGE,
+      entityIds: [entity("target")],
+      nonAcceptedNearTarget: [],
+    });
+    const result = verified(await query(sketch, intersect));
+    expect(result.cuts).toHaveLength(1);
+    const [cut] = result.cuts;
+    expect(cut!.cutters).toEqual([
+      { entityId: entity("v0"), tie: { kind: "pointOnCurve" } },
+    ]);
+    const host = targetCurve(sketch, "target").find(
+      (branch) =>
+        branch.domain[0] <= cut!.representative &&
+        cut!.representative <= branch.domain[1],
+    )!;
+    const evaluated = evaluateNeutralCurve(host.curve, cut!.representative);
+    expect(cut!.position, "the sole evaluator's value, bitwise").toEqual([
+      evaluated[0],
+      evaluated[1],
+    ]);
+    expect(Math.abs(cut!.position[0] - 1)).toBeLessThan(1e-12);
+  });
+
+  test("two crossings: intersect's cuts are Trim's cuts, bitwise", async () => {
+    const sketch = splineWithVerticals([1, 3]);
+    const trimmed = verified(
+      await query(sketch, { kind: "trim", targetEntityId: entity("target") }),
+    );
+    const intersected = verified(await query(sketch, intersect));
+    expect(intersected.cuts).toEqual(trimmed.cuts);
+  });
+
+  test("a crossing within the modeling tolerance of an end: Trim refuses (edit-piece-too-short), intersect keeps the cut", async () => {
+    const sketch = splineWithVerticals([1e-4, 3]);
+    expect(
+      await query(sketch, { kind: "trim", targetEntityId: entity("target") }),
+    ).toMatchObject({ kind: "failed", code: "edit-piece-too-short" });
+    const result = verified(await query(sketch, intersect));
+    expect(result.cuts).toHaveLength(2);
+    expect(Math.abs(result.cuts[0]!.position[0] - 1e-4)).toBeLessThan(1e-15);
+  });
+
+  test("no crossing: intersect verifies no cut (Trim refuses)", async () => {
+    const sketch = splineWithVerticals([9]);
+    expect(verified(await query(sketch, intersect)).cuts).toEqual([]);
+    expect(
+      await query(sketch, { kind: "trim", targetEntityId: entity("target") }),
+    ).toMatchObject({ kind: "failed", code: "edit-too-few-cuts" });
+  });
+
+  test("Split and Extend of a spline target keep their unsupported refusals", async () => {
+    const sketch = splineWithVerticals([1]);
+    for (const kind of ["split", "extend"] as const)
+      expect(
+        await query(sketch, {
+          kind,
+          targetEntityId: entity("target"),
+          boundaryEntityId: entity("v0"),
+        }),
+      ).toMatchObject({
+        kind: "failed",
+        code: "edit-target-unsupported",
+        message:
+          kind === "split"
+            ? SPLIT_TARGET_UNSUPPORTED_MESSAGE
+            : EXTEND_TARGET_UNSUPPORTED_MESSAGE,
+      });
+  });
+
+  test("querySketchSnapIntersections: one intersect result per target, in request order; the curves stage is intersect without spline cutters", async () => {
+    const sketch = splineWithVerticals([1]);
+    sketch.point("w0", 0, 1);
+    sketch.point("w1", 2, 3.5);
+    sketch.point("w2", 4, 1);
+    sketch.spline("other", ["w0", "w1", "w2"], "open");
+    const input = sketch.build();
+    const basis = {
+      definition: input.definition,
+      solvedSnapshot: input.solvedSnapshot,
+      projectedReferences: [],
+      modelingTolerance: input.modelingTolerance,
+    };
+    const targets = await querySketchSnapIntersections(
+      {
+        ...basis,
+        targetEntityIds: [entity("target"), entity("other")],
+        cutters: "curves",
+      },
+      createCertifiedNeutralCurveQueryCapabilityForTest(),
+    );
+    expect(targets.map((target) => target.targetEntityId)).toEqual([
+      entity("target"),
+      entity("other"),
+    ]);
+    for (const target of targets)
+      expect(
+        verified(target.result).cuts.map((cut) =>
+          cut.cutters.map((cutter) => cutter.entityId),
+        ),
+        "only the line cuts in the curves stage",
+      ).toEqual([[entity("v0")]]);
   });
 });

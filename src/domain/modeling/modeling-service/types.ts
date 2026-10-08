@@ -21,6 +21,7 @@ import type {
   ValidateSketchRequest,
   DeriveSketchRegionsRequest,
   QuerySketchEditIntersectionsRequest,
+  QuerySketchSnapIntersectionsRequest,
   ProjectSketchExternalReferencesRequest,
   ResolveSketchReferenceRequest,
 } from "@/contracts/solver/schema";
@@ -177,6 +178,10 @@ export interface SketchSolverService {
   querySketchEditIntersections(
     input: Omit<QuerySketchEditIntersectionsRequest, "contractVersion">,
   ): ReturnType<SketchSolverBoundary["querySketchEditIntersections"]>;
+  /** T13i: the spline intersection snap candidates of one accepted pair. */
+  querySketchSnapIntersections(
+    input: Omit<QuerySketchSnapIntersectionsRequest, "contractVersion">,
+  ): ReturnType<SketchSolverBoundary["querySketchSnapIntersections"]>;
   projectExternalReferences(
     input: Omit<ProjectSketchExternalReferencesRequest, "contractVersion">,
   ): ReturnType<SketchSolverBoundary["projectExternalReferences"]>;

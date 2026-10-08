@@ -14,6 +14,8 @@ import {
   type ProjectSketchExternalReferencesResponse,
   type QuerySketchEditIntersectionsRequest,
   type QuerySketchEditIntersectionsResponse,
+  type QuerySketchSnapIntersectionsRequest,
+  type QuerySketchSnapIntersectionsResponse,
   type ResolveSketchReferenceRequest,
   type ResolveSketchReferenceResponse,
   type SketchPlaneFrame,
@@ -36,7 +38,10 @@ import {
   type SketchArrangementDeriver,
 } from "@/contracts/sketch/region-extraction";
 import { assertDocumentModelingTolerance } from "@/domain/solver/sketch-constraint-solver-adapter";
-import { querySketchEditIntersections } from "@/contracts/sketch/edit-intersections";
+import {
+  querySketchEditIntersections,
+  querySketchSnapIntersections,
+} from "@/contracts/sketch/edit-intersections";
 import {
   orderedSplineOccurrences,
   reconstructSplineAggregate,
@@ -123,6 +128,7 @@ function makeResponseBase(
     | DisposeInteractiveSketchSolveSessionRequest
     | DeriveSketchRegionsRequest
     | QuerySketchEditIntersectionsRequest
+    | QuerySketchSnapIntersectionsRequest
     | ResolveSketchReferenceRequest,
 ): SketchSolverResponseBase {
   return {
@@ -184,6 +190,7 @@ function assertSupportedRequest(
     | DisposeInteractiveSketchSolveSessionRequest
     | DeriveSketchRegionsRequest
     | QuerySketchEditIntersectionsRequest
+    | QuerySketchSnapIntersectionsRequest
     | ResolveSketchReferenceRequest,
   options: MockSketchSolverAdapterOptions,
 ): void {
@@ -1738,6 +1745,28 @@ export class MockSketchSolverAdapter implements SketchSolverAdapter {
       ...makeResponseBase(request),
       result: await querySketchEditIntersections(
         request,
+        this.options.neutralCurveQueries,
+      ),
+    };
+  }
+
+  /** T13i: the same contract function as the real adapter (mock parity). */
+  async querySketchSnapIntersections(
+    request: QuerySketchSnapIntersectionsRequest,
+  ): Promise<QuerySketchSnapIntersectionsResponse> {
+    assertSupportedRequest(request, this.options);
+    assertDocumentModelingTolerance(request.modelingTolerance);
+    return {
+      ...makeResponseBase(request),
+      targets: await querySketchSnapIntersections(
+        {
+          definition: request.definition,
+          solvedSnapshot: request.solvedSnapshot,
+          projectedReferences: request.projectedReferences,
+          modelingTolerance: request.modelingTolerance,
+          targetEntityIds: request.targetEntityIds,
+          cutters: request.cutters,
+        },
         this.options.neutralCurveQueries,
       ),
     };

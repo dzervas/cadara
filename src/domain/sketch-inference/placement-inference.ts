@@ -24,6 +24,7 @@ import type {
 import {
   collectSketchSnapGeometries,
   resolveSketchSnap,
+  type SketchExactIntersection,
   type SketchSnapCandidate,
   type SketchSnapSourceRef,
 } from "@/domain/sketch-snapping/snap-candidates";
@@ -150,6 +151,8 @@ export function inferPlacement(
   input: PlacementInferenceContext & {
     pointer: SketchPoint;
     solvedSnapshot: SolvedSketchSnapshot | null;
+    /** T13i (D24): the exact spline intersections of the accepted basis. */
+    exactIntersections?: readonly SketchExactIntersection[];
     sketchUnitsPerPixel: number | null;
     /** The draft start a Line end aligns to (ignored for other tools). */
     anchor: SketchPoint | null;
@@ -173,6 +176,7 @@ export function inferPlacement(
     sketchUnitsPerPixel: input.sketchUnitsPerPixel,
     activeAnchor: input.toolId === "line" ? input.anchor : null,
     activeCandidateKey: input.activeCandidateKey,
+    exactIntersections: input.exactIntersections ?? [],
   });
 
   if (input.suppressed) {

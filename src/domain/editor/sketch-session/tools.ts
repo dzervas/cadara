@@ -41,11 +41,17 @@ import type {
   SketchToolPresentationSchema,
 } from "@/core/sketch-tools/editor-schema";
 import { getSketchToolDefinition } from "@/core/sketch-tools/registry";
+import type { SketchSnapIntersectionTargetResult } from "@/contracts/sketch/edit-intersections";
+import {
+  getSketchExactIntersections,
+  getSketchSnapIntersectionTargets,
+} from "@/domain/sketch-snapping/snap-candidates";
 import type {
   SketchAuthoringToolId,
   SketchConstraintAuthoringState,
   SketchEditToolState,
   SketchSessionState,
+  SketchSnapIntersectionCache,
 } from "./types";
 import {
   applySketchContribution,
@@ -68,7 +74,9 @@ import {
   getCommittedSketchToolChainSegments,
   getSessionSketchId,
   getSketchSessionInvalidFeedback,
+  getSketchSessionSnapIntersections,
   getTargetKey,
+  hasAcceptedLiveSolveOfDefinition,
   isDrawingSketchTool,
   isSketchInferenceSuppressed,
   isSketchToolChainActive,
@@ -1454,6 +1462,7 @@ export function previewSketchPlacement(
         : null,
     pointer: point,
     solvedSnapshot: getSketchSessionDisplaySolvedSnapshot(session),
+    exactIntersections: getSketchSessionSnapIntersections(session),
     sketchUnitsPerPixel: session.sketchUnitsPerPixel ?? null,
     anchor: session.status === "drawing" ? session.pointerDownPoint : null,
     activeCandidateKey: session.activeInference?.candidate?.key ?? null,
@@ -1489,6 +1498,163 @@ export function setSketchInferenceSuppression(
     isSketchInferenceSuppressed(next) !== isSketchInferenceSuppressed(session)
     ? updateSketchPointer(next, pointer)
     : next;
+}
+
+/**
+ * T13i: the accepted live basis a snap query may run on while a drawing tool
+ * is armed: the accepted live solve of the current definition (with offset
+ * relationships, once its publication round is current, as for Trim).
+ */
+function getSnapQueryBasis(session: SketchSessionState) {
+  const liveSolve = session.liveSolve;
+  return isDrawingSketchTool(session.activeTool) &&
+    liveSolve &&
+    hasAcceptedLiveSolveOfDefinition(session) &&
+    !(
+      (session.definition.derivedRelationships ?? []).some(
+        (relationship) => relationship.kind === "offset",
+      ) && session.liveRegions.status === "pending"
+    )
+    ? liveSolve
+    : null;
+}
+
+/** The stage of `cache`'s basis after `cutters` (A-3), or the ready cache. */
+function nextSnapStage(
+  cache: Omit<
+    SketchSnapIntersectionCache,
+    "queryId" | "input" | "status" | "stage"
+  >,
+  liveSolve: NonNullable<SketchSessionState["liveSolve"]>,
+  modelingTolerance: number,
+  stages: readonly ("curves" | "splines")[],
+): SketchSnapIntersectionCache {
+  for (const cutters of stages) {
+    const targetEntityIds = getSketchSnapIntersectionTargets(
+      liveSolve.definition,
+      liveSolve.solvedSnapshot,
+      modelingTolerance,
+      cutters,
+    );
+    if (targetEntityIds.length > 0)
+      return {
+        ...cache,
+        queryId: `snap-query-${crypto.randomUUID()}`,
+        stage: cutters,
+        status: "pending",
+        input: {
+          definition: liveSolve.definition,
+          solvedSnapshot: liveSolve.solvedSnapshot,
+          projectedReferences: liveSolve.projectedReferences,
+          modelingTolerance,
+          targetEntityIds,
+          cutters,
+        },
+      };
+  }
+  return {
+    ...cache,
+    queryId: `snap-query-${crypto.randomUUID()}`,
+    stage: null,
+    status: "ready",
+    input: null,
+  };
+}
+
+/**
+ * T13i (D24 with T13 review R-3): the spline intersection snap cache of the
+ * accepted live basis (`getSnapQueryBasis`), planned once per basis while a
+ * drawing tool is armed. A new basis replaces the cache with its first
+ * pending stage (review A-3: spline × line/circle/arc first, then spline ×
+ * spline; each stage's targets are `getSketchSnapIntersectionTargets`), or
+ * a ready empty cache when no spline box meets another curve. Unchanged
+ * otherwise.
+ */
+export function planSketchSnapIntersectionQuery(
+  session: SketchSessionState,
+): SketchSessionState {
+  const liveSolve = getSnapQueryBasis(session);
+  if (
+    !liveSolve ||
+    session.snapIntersections?.solvedSnapshot === liveSolve.solvedSnapshot
+  ) {
+    return session;
+  }
+  return {
+    ...session,
+    snapIntersections: nextSnapStage(
+      { solvedSnapshot: liveSolve.solvedSnapshot, intersections: [] },
+      liveSolve,
+      session.modelingTolerance,
+      ["curves", "splines"],
+    ),
+  };
+}
+
+/**
+ * T13i: the pending stage the editor must issue: the current basis's
+ * pending stage when it is not the query in flight (`inFlightQueryId`), e.g.
+ * a new basis, the next stage, or a stage restored by Undo. Else null.
+ */
+export function getSketchSnapIntersectionQueryToIssue(
+  session: SketchSessionState,
+  inFlightQueryId: string | null,
+): SketchSnapIntersectionCache | null {
+  const cache = session.snapIntersections;
+  return cache?.status === "pending" &&
+    cache.queryId !== inFlightQueryId &&
+    getSnapQueryBasis(session)?.solvedSnapshot === cache.solvedSnapshot
+    ? cache
+    : null;
+}
+
+/**
+ * T13i: the results of the snap stage `queryId` (dropped unless it is the
+ * cache's pending stage). Its intersections are offered at once (review
+ * A-3: spline × line/circle/arc never wait for spline × spline); after the
+ * `curves` stage the `splines` stage follows when there is one. The live
+ * placement preview is recomputed at the last pointer, so a crossing
+ * already hovered shows without pointer motion.
+ */
+export function completeSketchSnapIntersectionQuery(
+  session: SketchSessionState,
+  queryId: string,
+  targets: readonly SketchSnapIntersectionTargetResult[],
+): SketchSessionState {
+  const cache = session.snapIntersections;
+  if (!cache || cache.queryId !== queryId || cache.status !== "pending")
+    return session;
+  const published = {
+    solvedSnapshot: cache.solvedSnapshot,
+    intersections: [
+      ...cache.intersections,
+      ...getSketchExactIntersections(cache.input!.definition, targets),
+    ],
+  };
+  const liveSolve = session.liveSolve;
+  const next: SketchSessionState = {
+    ...session,
+    snapIntersections:
+      cache.stage === "curves" &&
+      liveSolve?.solvedSnapshot === cache.solvedSnapshot
+        ? nextSnapStage(published, liveSolve, session.modelingTolerance, [
+            "splines",
+          ])
+        : { ...cache, ...published, status: "ready" },
+  };
+  const pointer = session.activeInference?.rawPosition ?? null;
+  return pointer ? updateSketchPointer(next, pointer) : next;
+}
+
+/** T13i: a failed snap query offers no spline intersections for its basis. */
+export function failSketchSnapIntersectionQuery(
+  session: SketchSessionState,
+  queryId: string,
+): SketchSessionState {
+  const cache = session.snapIntersections;
+  if (!cache || cache.queryId !== queryId || cache.status !== "pending")
+    return session;
+  return { ...session, snapIntersections: { ...cache, status: "failed" } };
 }
 
 export function startSketchDraw(

@@ -6,6 +6,8 @@ import {
 } from "@/domain/editor/feature-editing";
 import {
   getSketchSessionLiveRegionBasis,
+  getSketchSnapIntersectionQueryToIssue,
+  planSketchSnapIntersectionQuery,
   updateSketchReferenceProjection,
   withLiveSolveBasis,
   type SketchSessionState,
@@ -691,6 +693,68 @@ export function emitPendingSketchEditQuery(
         queryId: inFlight.queryId,
         sketchId: state.session.sketchId ?? ("sketch_draft" as SketchId),
         input: inFlight.input,
+      },
+    ],
+  };
+}
+
+/**
+ * Post-transition hook (T13i, D24 with T13 review R-3): plans the spline
+ * intersection snap cache of the accepted live basis
+ * (`planSketchSnapIntersectionQuery`) and emits its pending stage once, on
+ * its own `snapQuery` lane (`getSketchSnapIntersectionQueryToIssue`). A
+ * newer basis or stage replaces the pending request; the older result fails
+ * the request/query-id checks and is dropped. Idempotent.
+ */
+export function emitPendingSketchSnapQuery(
+  result: EditorTransitionResult,
+): EditorTransitionResult {
+  const state = result.state;
+  if (
+    state.kind !== "editingSketch" ||
+    state.document.documentId === null ||
+    state.document.revisionId === null
+  )
+    return result;
+  const session = planSketchSnapIntersectionQuery(state.session);
+  const inFlight = state.pendingSnapQueryRequest?.queryId ?? null;
+  const stage = getSketchSnapIntersectionQueryToIssue(session, inFlight);
+  if (!stage) {
+    // A basis with nothing (more) to ask forgets the older request.
+    const forget =
+      session !== state.session &&
+      session.snapIntersections?.status !== "pending";
+    return session === state.session
+      ? result
+      : {
+          ...result,
+          state: {
+            ...state,
+            session,
+            ...(forget ? { pendingSnapQueryRequest: null } : {}),
+          },
+        };
+  }
+  const requestId = nextRequestId(state, "sketch-snap-query");
+  return {
+    state: {
+      ...state,
+      session,
+      nextRequestSequence: state.nextRequestSequence + 1,
+      pendingSnapQueryRequest: { requestId, queryId: stage.queryId },
+    },
+    effects: [
+      ...result.effects,
+      {
+        type: "sketch.querySnapIntersections",
+        background: true,
+        requestId,
+        commandSessionId: state.command.commandSessionId,
+        documentId: state.document.documentId,
+        baseRevisionId: state.document.revisionId,
+        queryId: stage.queryId,
+        sketchId: state.session.sketchId ?? ("sketch_draft" as SketchId),
+        input: stage.input!,
       },
     ],
   };

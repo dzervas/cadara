@@ -66,6 +66,29 @@ export const querySketchEditIntersectionsForTest: NonNullable<
   ).result;
 
 /**
+ * T13i: fake-runtime `querySketchSnapIntersections` backed by the production
+ * solver adapter (in-thread, kernel-free certified capability).
+ */
+export const querySketchSnapIntersectionsForTest: NonNullable<
+  EditorEffectRuntime["querySketchSnapIntersections"]
+> = async (input) =>
+  (
+    await new SketchConstraintSolverAdapter({
+      documentId: input.documentId,
+      revisionId: null,
+      neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+    }).querySketchSnapIntersections({
+      contractVersion: "modeling-contract/v1alpha1",
+      solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+      requestId: input.requestId,
+      documentId: input.documentId,
+      revisionId: input.baseRevisionId,
+      sketchId: input.sketchId,
+      ...input.input,
+    })
+  ).targets;
+
+/**
  * T10g-1 (session seam): answers the Trim tool's in-flight queries with the
  * one contract function, as the editor loop does, until none is in flight.
  */
