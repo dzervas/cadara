@@ -4,7 +4,10 @@ import {
   selectSketchEditTarget,
   selectSketchEditToolTarget,
   selectSketchAnnotation,
-  selectSketchConstraintTarget,
+  authorSketchConstraintTarget,
+  getSketchAnnotationAffectedGeometryRefs,
+  isSketchAnnotationInContext,
+  type SketchAnnotationContext,
   selectSketchReferenceTarget,
   shouldPinSketchConstraintPreviewBeforeSelection,
   pinSketchConstraintPreview,
@@ -25,6 +28,7 @@ import {
   withoutSketchSelectionCyclePick,
 } from "@/domain/editor/sketch-session/selection";
 import { createSectionViewSession } from "@/core/section-view/session";
+import { resolveSketchConstraintTarget } from "@/core/sketch-constraints/registry";
 import {
   getDefaultSelectionFilterForMode,
   getSelectionFilterRejectionLabel,
@@ -35,6 +39,10 @@ import {
   sketchStartSelectionFilter,
 } from "@/core/editor/schema";
 import type { PrimitiveRef } from "@/core/editor/schema";
+import type {
+  SketchConstraintRef,
+  SketchDimensionRef,
+} from "@/contracts/shared/references";
 import { resolveMeasureSelectionCandidate } from "@/domain/measure/measurement";
 import { createFeatureEditorReferenceSelectionPatch } from "@/core/feature-authoring/form-events";
 import {
@@ -303,6 +311,7 @@ export function handleSelectionCleared(
         ...state,
         selection: [],
         hoverTarget: null,
+        annotationContext: null,
         session,
         preview: {
           kind: "sketch",
@@ -322,6 +331,7 @@ export function handleSelectionCleared(
         ...state,
         selection: [],
         hoverTarget: null,
+        annotationContext: null,
         session,
         preview: {
           kind: "sketch",
@@ -344,6 +354,7 @@ export function handleSelectionCleared(
         ...state,
         selection: [],
         hoverTarget: null,
+        annotationContext: null,
         session,
         preview: {
           kind: "sketch",
@@ -355,11 +366,24 @@ export function handleSelectionCleared(
     };
   }
 
-  const clearedState = {
-    ...state,
-    selection: [],
-    hoverTarget: null,
-  };
+  const clearedState: EditorState =
+    state.kind === "editingSketch"
+      ? {
+          ...state,
+          selection: [],
+          hoverTarget: null,
+          // T14c two-stage clear: a blank with an active annotation clears
+          // only the annotation (owners and `last` stay, siblings reachable);
+          // any other blank, including the second, drops the context.
+          annotationContext: isAnnotationRef(state.selection[0])
+            ? (state.annotationContext ?? null)
+            : null,
+        }
+      : {
+          ...state,
+          selection: [],
+          hoverTarget: null,
+        };
 
   return {
     state: withPreview(
@@ -780,22 +804,66 @@ function selectEditingSketchViewportTarget(
   }
 
   if (event.target.kind === "constraint" || event.target.kind === "dimension") {
-    const session = selectSketchAnnotation(state.session, event.target);
     return {
-      state: applySketchSelectionState(state, session, event.target),
+      state: {
+        ...applySketchSelectionState(
+          state,
+          selectSketchAnnotation(state.session),
+          event.target,
+        ),
+        annotationContext: getSketchAnnotationSelectionContext(
+          state,
+          event.target,
+        ),
+      },
       effects: [],
     };
   }
 
   if (state.session.constraintAuthoring) {
-    const session = selectSketchConstraintTarget(state.session, event.target);
-    return {
-      state: applySketchSelectionState(
-        state,
-        session,
+    const authoring = state.session.constraintAuthoring;
+    // Review A-6: the owners are the resolved picks, the current one too.
+    const current =
+      resolveSketchConstraintTarget(
+        authoring.toolId,
+        state.session.definition,
         event.target,
-        "collecting",
-      ),
+        state.session.projectedReferences,
+      )?.target ?? event.target;
+    const picked = [
+      ...authoring.selectedTargets.map((entry) => entry.target),
+      current,
+    ];
+    const { session, duplicates } = authorSketchConstraintTarget(
+      state.session,
+      event.target,
+    );
+    const existing = duplicates[0];
+    // T14c (A2/T-14): a refused duplicate selects the existing constraint
+    // (passive while the tool stays armed, linked-highlighted); the next
+    // pick starts a fresh pick set (A-10).
+    if (existing) {
+      return {
+        state: {
+          ...applySketchSelectionState(state, session, existing, "collecting"),
+          annotationContext: {
+            owners: picked,
+            last: existing,
+          },
+        },
+        effects: [],
+      };
+    }
+    return {
+      state: {
+        ...applySketchSelectionState(
+          state,
+          session,
+          event.target,
+          "collecting",
+        ),
+        annotationContext: null,
+      },
       effects: [],
     };
   }
@@ -803,7 +871,12 @@ function selectEditingSketchViewportTarget(
   if (event.target.kind === "sketchPoint") {
     const session = selectSketchEditTarget(state.session, event.target);
     return {
-      state: applySketchSelectionState(state, session, event.target),
+      state: {
+        ...applySketchSelectionState(state, session, event.target),
+        annotationContext: getSketchGeometrySelectionContext(state, [
+          event.target,
+        ]),
+      },
       effects: [],
     };
   }
@@ -824,8 +897,60 @@ function selectEditingSketchViewportTarget(
       ...state,
       selection: candidate.nextSelection,
       hoverTarget: event.target,
+      annotationContext: getSketchGeometrySelectionContext(
+        state,
+        candidate.nextSelection,
+      ),
     },
     effects: [],
+  };
+}
+
+function isAnnotationRef(
+  target: PrimitiveRef | undefined,
+): target is SketchConstraintRef | SketchDimensionRef {
+  return target?.kind === "constraint" || target?.kind === "dimension";
+}
+
+/**
+ * T14c (§2.4): selecting annotation A makes it the active selection and the
+ * context's `last`. The owners stay when A is one of their contextual
+ * annotations (a pinned sibling); otherwise (a list, problem or history pick)
+ * A's own affected geometry becomes the owners.
+ */
+export function getSketchAnnotationSelectionContext(
+  state: SketchEditorState,
+  target: SketchConstraintRef | SketchDimensionRef,
+): SketchAnnotationContext {
+  const owners = state.annotationContext?.owners ?? [];
+  return {
+    owners: isSketchAnnotationInContext(state.session, target, owners)
+      ? owners
+      : (getSketchAnnotationAffectedGeometryRefs(state.session, target) ?? []),
+    last: target,
+  };
+}
+
+/**
+ * T14c (§2.4): selecting geometry makes it the owners; `last` is kept only
+ * when it is one of the new owners' contextual annotations.
+ */
+export function getSketchGeometrySelectionContext(
+  state: SketchEditorState,
+  selection: readonly PrimitiveRef[],
+): SketchAnnotationContext | null {
+  const owners = selection.filter((target) => !isAnnotationRef(target));
+  if (owners.length === 0) {
+    return null;
+  }
+
+  const last = state.annotationContext?.last ?? null;
+  return {
+    owners,
+    last:
+      last && isSketchAnnotationInContext(state.session, last, owners)
+        ? last
+        : null,
   };
 }
 

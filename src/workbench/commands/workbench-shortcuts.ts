@@ -27,6 +27,8 @@ export interface WorkbenchShortcutHandlerOptions {
   requestUndo?: () => void;
   selection: EditorViewState["selection"];
   sketchSession: EditorViewState["sketchSession"];
+  /** T14c: a retained annotation context is Escape's second stage. */
+  annotationContext?: EditorViewState["annotationContext"];
   activateTool: WorkbenchCommandHandlers["activateTool"];
 }
 
@@ -48,6 +50,7 @@ export function createWorkbenchShortcutCommandHandlers({
   requestUndo,
   selection,
   sketchSession,
+  annotationContext = null,
   activateTool,
 }: WorkbenchShortcutHandlerOptions): ShortcutCommandHandlers {
   const commandHandlers: ShortcutCommandHandlers = {
@@ -58,6 +61,7 @@ export function createWorkbenchShortcutCommandHandlers({
           activeReferencePickerFieldId,
           selection,
           sketchSession,
+          annotationContext,
         });
 
         if (escapeEvent) {
@@ -70,6 +74,7 @@ export function createWorkbenchShortcutCommandHandlers({
           activeReferencePickerFieldId,
           selection,
           sketchSession,
+          annotationContext,
         }) !== null,
     },
     // Enabled only when it applies, so an unused Enter keeps its native

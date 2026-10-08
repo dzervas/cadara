@@ -20,6 +20,10 @@ import {
 import { isRegisteredSketchEditToolId } from "@/core/sketch-edit-tools/registry";
 import { isRegisteredSketchConstraintToolId } from "@/core/sketch-constraints/registry";
 import { isRegisteredSketchToolId } from "@/core/sketch-tools/registry";
+import {
+  SKETCH_PICK_CLASSES,
+  type SketchPickClass,
+} from "@/domain/sketch-interaction/pick-stack";
 
 export function getNavigationReopenRequest(
   snapshot: WorkspaceSnapshot | null,
@@ -67,7 +71,8 @@ export function getEscapeEvent(
     | "activeReferencePickerFieldId"
     | "selection"
     | "sketchSession"
-  >,
+  > &
+    Partial<Pick<EditorViewState, "annotationContext">>,
 ): EditorEvent | null {
   // Escape during an active drag cancels the drag and does nothing else (D2).
   if (state.sketchSession?.activeDrag) {
@@ -112,7 +117,9 @@ export function getEscapeEvent(
     };
   }
 
-  if (state.selection.length > 0) {
+  // T14c: the active annotation (or geometry) is the first stage; a
+  // retained annotation context is the second.
+  if (state.selection.length > 0 || state.annotationContext) {
     return { type: "selection.cleared" };
   }
 
@@ -229,11 +236,17 @@ export function getViewportCanvasClickIntent({
   hasResolvedTarget,
   isBackgroundDatumTarget = false,
   selectionFilterKind = null,
+  activeAnnotation = false,
+  topPickClass = null,
 }: {
   activeSketchTool: SketchAuthoringToolId | null | undefined;
   hasResolvedTarget: boolean;
   isBackgroundDatumTarget?: boolean;
   selectionFilterKind?: SelectionFilter["kind"] | null;
+  /** T14c: an annotation is the active selection (`selection[0]`). */
+  activeAnnotation?: boolean;
+  /** T14c: the pick class of the top of the sketch pick stack. */
+  topPickClass?: SketchPickClass | null;
 }): ViewportCanvasClickIntent {
   if (
     !hasResolvedTarget ||
@@ -241,7 +254,16 @@ export function getViewportCanvasClickIntent({
       shouldTreatBackgroundDatumClickAsEmpty(
         activeSketchTool,
         selectionFilterKind,
-      ))
+      )) ||
+    // T14c (T-6/R-9): with no tool and an annotation active, a click whose
+    // top pick is a region or anything below it (image, face, plane) is the
+    // first-stage blank: it only clears the annotation, so its siblings stay
+    // reachable. The next such click selects it as usual.
+    (activeAnnotation &&
+      activeSketchTool == null &&
+      topPickClass !== null &&
+      SKETCH_PICK_CLASSES.indexOf(topPickClass) >=
+        SKETCH_PICK_CLASSES.indexOf("region"))
   ) {
     return "clearSelection";
   }

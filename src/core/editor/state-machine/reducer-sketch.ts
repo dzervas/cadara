@@ -85,9 +85,9 @@ function createSketchPreviewState(
  */
 function finishSketchSession(state: SketchEditorState): EditorTransitionResult {
   const session = finalizeSketchDraw(state.session);
-  return emitSketchCommit(
-    session === state.session ? state : { ...state, session },
-  );
+  // T14c: Finish drops the annotation context (a reopened sketch starts
+  // without one).
+  return emitSketchCommit({ ...state, session, annotationContext: null });
 }
 
 function handleEditingSketchToolActivation(
@@ -205,8 +205,16 @@ export function reduceSketchWorkflow(
   ) => EditorTransitionResult,
 ): EditorTransitionResult | null {
   switch (event.type) {
-    case "tool.activated":
-      return handleEditingSketchToolActivation(state, event);
+    case "tool.activated": {
+      // T14c: activating any sketch tool drops the annotation context.
+      const result = handleEditingSketchToolActivation(state, event);
+      return result?.state.kind === "editingSketch"
+        ? {
+            ...result,
+            state: { ...result.state, annotationContext: null },
+          }
+        : result;
+    }
     case "history.undoRequested":
     case "history.redoRequested":
       return { state, effects: [] };

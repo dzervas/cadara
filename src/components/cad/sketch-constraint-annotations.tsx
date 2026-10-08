@@ -1,6 +1,9 @@
 import { useEffect, useEffectEvent, useState } from "react";
 
-import type { SketchAnnotationDescriptor } from "@/domain/editor/sketch-session";
+import type {
+  SketchAnnotationContext,
+  SketchAnnotationDescriptor,
+} from "@/domain/editor/sketch-session";
 import type {
   SketchConstraintRef,
   SketchDimensionRef,
@@ -27,9 +30,11 @@ interface SketchConstraintAnnotationsProps {
   annotations: readonly SketchAnnotationDescriptor[];
   projections: readonly SketchViewportFeedbackProjection[];
   hoveredAnnotation: SketchConstraintRef | SketchDimensionRef | null;
-  selectedAnnotation: SketchConstraintRef | SketchDimensionRef | null;
   hoverTarget: PrimitiveRef | null;
+  /** The active selection; an annotation in it is the active annotation. */
   selection: readonly PrimitiveRef[];
+  /** T14c: the retained owners and last annotation (two-stage clear). */
+  annotationContext: SketchAnnotationContext | null;
   /** The sketch whose entities give a hovered or selected entity its points (T-4). */
   definition: SketchDefinition | null;
   /** T14b (T-5/R-6): the idle select context; otherwise every annotation is passive. */
@@ -45,9 +50,9 @@ export function SketchConstraintAnnotations({
   annotations,
   projections,
   hoveredAnnotation,
-  selectedAnnotation,
   hoverTarget,
   selection,
+  annotationContext,
   definition,
   interactive,
   onHover,
@@ -59,25 +64,39 @@ export function SketchConstraintAnnotations({
   const [labelDrag] = useState(() => new DimensionAnnotationLabelDrag());
 
   const layer = resolveSketchAnnotationLayer(annotations, {
-    selectedAnnotation,
     hoveredAnnotation,
     hoverTarget,
     selection,
+    annotationContext,
     definition,
     interactive,
   });
   const visibleAnnotations = layer.items;
 
-  const visibleProjectionIds = new Set(
-    visibleAnnotations.map(({ annotation }) =>
+  // T14c: the greedy layout places earlier items first. Always-visible
+  // annotations (dimensions, problems) go first and hover previews last, so
+  // the controls a selection newly pins (an annotation's siblings) never
+  // displace a chip that was already on screen (the one just clicked).
+  const layoutRankByProjectionId = new Map(
+    visibleAnnotations.map(({ annotation, visibility }) => [
       getAnnotationProjectionId(annotation.id),
-    ),
+      annotation.status === "dimension" ||
+      annotation.constraintDisplay?.isAffectedOverconstraint
+        ? 0
+        : visibility === "pinned"
+          ? 1
+          : 2,
+    ]),
   );
   const projectionById = new Map(
     layoutSketchAnnotationProjections(
-      projections.filter((projection) =>
-        visibleProjectionIds.has(projection.id),
-      ),
+      projections
+        .filter((projection) => layoutRankByProjectionId.has(projection.id))
+        .sort(
+          (left, right) =>
+            layoutRankByProjectionId.get(left.id)! -
+            layoutRankByProjectionId.get(right.id)!,
+        ),
     ).map((projection) => [projection.id, projection]),
   );
   // T14a C2: a drag whose chip unmounts, or whose layer unmounts, cancels; a
@@ -114,135 +133,145 @@ export function SketchConstraintAnnotations({
       className="pointer-events-none absolute inset-0 z-30"
       data-sketch-annotation-layer=""
     >
-      {visibleAnnotations.map(({ annotation, visibility, isInteractive }) => {
-        const projection = projectionById.get(
-          getAnnotationProjectionId(annotation.id),
-        );
+      {visibleAnnotations.map(
+        ({ annotation, visibility, isInteractive, isSelected, isLast }) => {
+          const projection = projectionById.get(
+            getAnnotationProjectionId(annotation.id),
+          );
 
-        if (!projection) {
-          return null;
-        }
+          if (!projection) {
+            return null;
+          }
 
-        const isSelected = annotationTargetsEqual(
-          selectedAnnotation,
-          annotation.target,
-        );
-        const isHovered =
-          isInteractive &&
-          annotationTargetsEqual(hoveredAnnotation, annotation.target);
-        const iconSrc = getAnnotationGlyphIconSrc(annotation.glyphKind);
-        const isDimension = annotation.status === "dimension";
-        const className = `absolute flex h-8 items-center rounded border shadow-[var(--cad-panel-shadow)] ${
-          isDimension ? "min-w-8 gap-1.5 px-2" : "w-8 justify-center p-1"
-        } ${
-          isInteractive
-            ? "pointer-events-auto transition"
-            : visibility === "preview"
-              ? "pointer-events-none opacity-60"
-              : "pointer-events-none"
-        } ${
-          isSelected
-            ? "border-[var(--cad-accent)] bg-[var(--cad-surface-elevated)]"
-            : isHovered
-              ? "border-[var(--cad-border-strong)] bg-[var(--cad-surface-overlay)]"
-              : `border-[var(--cad-border)] bg-[var(--cad-surface-overlay)]${
-                  isInteractive
-                    ? " hover:border-[var(--cad-border-strong)]"
-                    : ""
-                }`
-        }`;
-        const style = {
-          left: projection.x,
-          top: projection.y,
-          transform: "translate(-50%, -50%)",
-          borderColor: getAnnotationConstraintColor(annotation),
-          color: getAnnotationConstraintColor(annotation),
-        };
-        const content = (
-          <>
-            <img
-              alt=""
-              aria-hidden="true"
-              className={isDimension ? "h-4 w-4 shrink-0" : "h-5 w-5"}
-              draggable={false}
-              src={iconSrc}
-            />
-            {isDimension ? (
-              <span className="font-mono text-[11px] leading-none">
-                {annotation.visibleLabel}
-              </span>
-            ) : null}
-          </>
-        );
+          const isHovered =
+            isInteractive &&
+            annotationTargetsEqual(hoveredAnnotation, annotation.target);
+          // T14c: the active annotation, or the subdued last selected one.
+          const selectionState = isSelected
+            ? "active"
+            : isLast
+              ? "last"
+              : undefined;
+          const iconSrc = getAnnotationGlyphIconSrc(annotation.glyphKind);
+          const isDimension = annotation.status === "dimension";
+          const className = `absolute flex h-8 items-center rounded border shadow-[var(--cad-panel-shadow)] ${
+            isDimension ? "min-w-8 gap-1.5 px-2" : "w-8 justify-center p-1"
+          } ${
+            isInteractive
+              ? "pointer-events-auto transition"
+              : visibility === "preview"
+                ? "pointer-events-none opacity-60"
+                : "pointer-events-none"
+          } ${
+            isSelected
+              ? "border-[var(--cad-accent)] bg-[var(--cad-surface-elevated)]"
+              : isLast
+                ? "border-[var(--cad-border-strong)] bg-[var(--cad-surface-elevated)] opacity-80"
+                : isHovered
+                  ? "border-[var(--cad-border-strong)] bg-[var(--cad-surface-overlay)]"
+                  : `border-[var(--cad-border)] bg-[var(--cad-surface-overlay)]${
+                      isInteractive
+                        ? " hover:border-[var(--cad-border-strong)]"
+                        : ""
+                    }`
+          }`;
+          const style = {
+            left: projection.x,
+            top: projection.y,
+            transform: "translate(-50%, -50%)",
+            borderColor: getAnnotationConstraintColor(annotation),
+            color: getAnnotationConstraintColor(annotation),
+          };
+          const content = (
+            <>
+              <img
+                alt=""
+                aria-hidden="true"
+                className={isDimension ? "h-4 w-4 shrink-0" : "h-5 w-5"}
+                draggable={false}
+                src={iconSrc}
+              />
+              {isDimension ? (
+                <span className="font-mono text-[11px] leading-none">
+                  {annotation.visibleLabel}
+                </span>
+              ) : null}
+            </>
+          );
 
-        // T14b (T-1, T-5): a preview, or any annotation outside the idle
-        // select context, is passive markup: no button, no name, no title, no
-        // handlers, no tab stop; the canvas under it owns the pointer.
-        if (!isInteractive) {
+          // T14b (T-1, T-5): a preview, or any annotation outside the idle
+          // select context, is passive markup: no button, no name, no title, no
+          // handlers, no tab stop; the canvas under it owns the pointer.
+          if (!isInteractive) {
+            return (
+              <div
+                key={annotation.id}
+                aria-hidden="true"
+                data-sketch-annotation-glyph={annotation.glyphKind}
+                data-sketch-annotation-kind={annotation.status}
+                data-sketch-annotation-visibility={visibility}
+                data-sketch-annotation-interactive="false"
+                data-sketch-annotation-selection={selectionState}
+                className={className}
+                style={style}
+              >
+                {content}
+              </div>
+            );
+          }
+
           return (
-            <div
+            <button
               key={annotation.id}
-              aria-hidden="true"
+              type="button"
               data-sketch-annotation-glyph={annotation.glyphKind}
               data-sketch-annotation-kind={annotation.status}
               data-sketch-annotation-visibility={visibility}
-              data-sketch-annotation-interactive="false"
+              data-sketch-annotation-interactive="true"
+              data-sketch-annotation-selection={selectionState}
               className={className}
               style={style}
+              aria-label={`${annotation.label}: ${annotation.detail}`}
+              title={`${annotation.label}: ${annotation.detail}`}
+              onPointerEnter={() => onHover(annotation.target)}
+              onPointerLeave={onClearHover}
+              onPointerDown={(event) =>
+                labelDrag.pointerDown(annotation, event)
+              }
+              onPointerMove={(event) =>
+                labelDrag.pointerMove(
+                  annotation,
+                  event,
+                  onSelect,
+                  onDimensionDrag,
+                )
+              }
+              onPointerUp={(event) => labelDrag.pointerEnd(event, "end")}
+              onPointerCancel={(event) => labelDrag.pointerEnd(event, "cancel")}
+              onLostPointerCapture={(event) =>
+                labelDrag.lostPointerCapture(event)
+              }
+              onClick={(event) => {
+                if (
+                  labelDrag.consumeClickSuppression(annotation.dragHandle?.id)
+                ) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  return;
+                }
+
+                onSelect(annotation.target);
+              }}
+              onDoubleClick={(event) => {
+                event.preventDefault();
+                onEdit(annotation.target);
+              }}
             >
               {content}
-            </div>
+            </button>
           );
-        }
-
-        return (
-          <button
-            key={annotation.id}
-            type="button"
-            data-sketch-annotation-glyph={annotation.glyphKind}
-            data-sketch-annotation-kind={annotation.status}
-            data-sketch-annotation-visibility={visibility}
-            data-sketch-annotation-interactive="true"
-            className={className}
-            style={style}
-            aria-label={`${annotation.label}: ${annotation.detail}`}
-            title={`${annotation.label}: ${annotation.detail}`}
-            onPointerEnter={() => onHover(annotation.target)}
-            onPointerLeave={onClearHover}
-            onPointerDown={(event) => labelDrag.pointerDown(annotation, event)}
-            onPointerMove={(event) =>
-              labelDrag.pointerMove(
-                annotation,
-                event,
-                onSelect,
-                onDimensionDrag,
-              )
-            }
-            onPointerUp={(event) => labelDrag.pointerEnd(event, "end")}
-            onPointerCancel={(event) => labelDrag.pointerEnd(event, "cancel")}
-            onLostPointerCapture={(event) =>
-              labelDrag.lostPointerCapture(event)
-            }
-            onClick={(event) => {
-              if (
-                labelDrag.consumeClickSuppression(annotation.dragHandle?.id)
-              ) {
-                event.preventDefault();
-                event.stopPropagation();
-                return;
-              }
-
-              onSelect(annotation.target);
-            }}
-            onDoubleClick={(event) => {
-              event.preventDefault();
-              onEdit(annotation.target);
-            }}
-          >
-            {content}
-          </button>
-        );
-      })}
+        },
+      )}
     </div>
   );
 }

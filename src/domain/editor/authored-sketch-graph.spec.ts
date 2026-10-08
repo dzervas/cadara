@@ -8,7 +8,6 @@ import {
   deleteSelectedSketchGeometry,
   deriveSketchDisplayEntities,
   patchSketchConstraintValue,
-  selectSketchAnnotation,
   selectSketchConstraintTarget,
   startSketchDraw,
 } from "@/domain/editor/sketch-session";
@@ -106,12 +105,13 @@ test("constraint add/delete/add uses fresh identity without resurrecting a delet
     (c) => c.kind === "equalLength",
   )!;
   expect(original).toBeDefined();
-  session = selectSketchAnnotation(session, {
-    kind: "constraint",
-    sketchId: "sketch_draft",
-    constraintId: original.constraintId,
-  });
-  session = deleteSelectedSketchAnnotation(session);
+  session = deleteSelectedSketchAnnotation(session, [
+    {
+      kind: "constraint",
+      sketchId: "sketch_draft",
+      constraintId: original.constraintId,
+    },
+  ]);
   expect(session.definition.constraintIds).not.toContain(original.constraintId);
   add();
   const recreated = session.definition.constraints.filter(

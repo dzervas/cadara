@@ -7,12 +7,17 @@ import type {
 import { SketchAuthoredActions } from "./sketch-authored-actions";
 import {
   emitPendingSketchEditQuery,
+  emitPendingSketchOffsetPreviewPublication,
+  emitPendingSketchRegionDerivation,
+  emitPendingSketchSnapQuery,
   initialEditorState,
   transitionEditorState,
   type EditorEffectRuntime,
   type EditorEvent,
+  type EditorState,
   type SketchEditorState,
 } from "@/core/editor/state-machine";
+import { makeAnnotationLifecycleState } from "@/domain/editor/annotation-lifecycle.fixtures";
 import { runEditorEffect } from "./effect-registry";
 import { querySketchEditIntersectionsForTest } from "@/domain/editor/state-machine-test-builder";
 import {
@@ -3006,5 +3011,220 @@ describe("T14a review B-1: the Dimension tool's preview handle is tool state, no
     });
     expect(projection(f.session)).toEqual(before);
     expect(f.session.actionAvailability?.canUndo).toBe(false);
+  });
+});
+
+// T14c, logic lane (action-owner seam `SketchAuthoredActions` around the real
+// reducer): the annotation selection lifecycle is editor state, never an
+// action; Undo and Redo prune refs their restored definition no longer holds.
+describe("T14c: the annotation lifecycle adds no history; Undo and Redo prune its context", () => {
+  async function lifecycle() {
+    const fixture = await makeAnnotationLifecycleState();
+    const owner = new SketchAuthoredActions();
+    let state: EditorState = fixture.state;
+    const dispatch = (event: EditorEvent) => {
+      state = owner.transition(state, event, (current) =>
+        transitionEditorState(current, event),
+      ).state;
+      if (state.kind !== "editingSketch") throw Error("Expected sketch state");
+      return state;
+    };
+    dispatch({ type: "selection.cleared" });
+    const select = (target: PrimitiveRef) =>
+      dispatch({ type: "viewport.selectionRequested", target });
+    const undoLabels = () =>
+      (state as SketchEditorState).session.actionHistory?.undo.map(
+        (entry) => entry.label,
+      ) ?? [];
+    return { ...fixture, dispatch, select, undoLabels };
+  }
+
+  test("selecting geometry and annotations and the two-stage clear record no action", async () => {
+    const f = await lifecycle();
+    f.select(f.g);
+    f.select(f.a);
+    f.dispatch({ type: "selection.cleared" });
+    f.select(f.b);
+    f.dispatch({ type: "selection.cleared" });
+    const cleared = f.dispatch({ type: "selection.cleared" });
+    expect(cleared.annotationContext ?? null, "premise: cleared").toBe(null);
+    expect(f.undoLabels(), "no lifecycle event is an action").toEqual([]);
+
+    f.select(f.d);
+    f.dispatch({ type: "sketch.annotationDeleteRequested" });
+    expect(f.undoLabels(), "contrast: a Delete is one action").toEqual([
+      "Delete Sketch Item",
+    ]);
+  });
+
+  // Review R-4 (R-7 option (b)), event-loop seam: the composition
+  // `EditorEventLoop.transition` runs (the action owner around the reducer,
+  // then the four post-transition hooks). Lifecycle clicks and hover keep the
+  // session object, so the descriptor solve memoised on it never re-runs;
+  // ledger changes still renew it.
+  test("R-7 at the event-loop seam: lifecycle clicks and hover keep the session object; ledger changes renew it", async () => {
+    const f = await makeAnnotationLifecycleState();
+    const owner = new SketchAuthoredActions();
+    let state: EditorState = f.state;
+    const dispatch = (event: EditorEvent) => {
+      state = emitPendingSketchSnapQuery(
+        emitPendingSketchEditQuery(
+          emitPendingSketchOffsetPreviewPublication(
+            emitPendingSketchRegionDerivation(
+              owner.transition(state, event, (current) =>
+                transitionEditorState(current, event),
+              ),
+            ),
+          ),
+        ),
+      ).state;
+      if (state.kind !== "editingSketch") throw Error("Expected sketch state");
+      return state;
+    };
+    dispatch({ type: "selection.cleared" });
+    dispatch({ type: "selection.cleared" });
+
+    for (const [name, event] of [
+      ["select G", { type: "viewport.selectionRequested", target: f.g }],
+      ["select A", { type: "viewport.selectionRequested", target: f.a }],
+      ["first blank", { type: "selection.cleared" }],
+      [
+        "select sibling B",
+        { type: "viewport.selectionRequested", target: f.b },
+      ],
+      ["first blank", { type: "selection.cleared" }],
+      ["second blank", { type: "selection.cleared" }],
+      ["hover", { type: "viewport.hovered", target: f.h }],
+      ["hover cleared", { type: "viewport.hoverCleared" }],
+    ] as const) {
+      const before = (state as SketchEditorState).session;
+      expect(dispatch(event).session, name).toBe(before);
+    }
+
+    dispatch({ type: "viewport.selectionRequested", target: f.d });
+    const beforeDelete = (state as SketchEditorState).session;
+    const deleted = dispatch({ type: "sketch.annotationDeleteRequested" });
+    expect(deleted.session).not.toBe(beforeDelete);
+    expect(deleted.session.actionAvailability).toEqual({
+      canUndo: true,
+      canRedo: false,
+    });
+    const undone = dispatch({ type: "history.undoRequested" });
+    expect(undone.session.actionAvailability).toEqual({
+      canUndo: false,
+      canRedo: true,
+    });
+    expect(undone.session.actionHistory?.redo.map((e) => e.label)).toEqual([
+      "Delete Sketch Item",
+    ]);
+  });
+
+  // Review R-4 condition: the comparison covers whole entries, so a blocked
+  // mark written after `withAvailability` is still cleared by the next event.
+  test("R-7 option (b): a blocked-Undo mark is cleared by the next event", async () => {
+    const f = await fixture();
+    f.apply({ type: "selection.cleared" }, mutations.construction(f.session));
+    const peer = {
+      ...f.session,
+      definition: {
+        ...f.session.definition,
+        entities: f.session.definition.entities.map((entity) => ({
+          ...entity,
+          isConstruction: false,
+        })),
+      },
+    };
+    const opened = f.owner.transition(
+      initialEditorState,
+      { type: "selection.cleared" },
+      () => ({ state: { ...f.state, session: peer }, effects: [] }),
+    );
+    const blocked = f.owner.transition(
+      opened.state,
+      { type: "history.undoRequested" },
+      (current) => ({ state: current, effects: [] }),
+    );
+    if (blocked.state.kind !== "editingSketch") throw Error("Expected sketch");
+    expect(
+      blocked.state.session.actionHistory?.undo.at(-1)?.blockedReason,
+      "premise: the Undo is marked blocked",
+    ).toBe("expected-state-changed");
+
+    const next = f.owner.transition(
+      blocked.state,
+      { type: "selection.cleared" },
+      (current) => ({ state: current, effects: [] }),
+    );
+    if (next.state.kind !== "editingSketch") throw Error("Expected sketch");
+    expect(next.state.session.actionHistory?.undo.at(-1)).toEqual({
+      sequence: blocked.state.session.actionHistory!.undo.at(-1)!.sequence,
+      label: blocked.state.session.actionHistory!.undo.at(-1)!.label,
+    });
+  });
+
+  test("Redo of a deletion prunes `last` and owners; Undo of a creation prunes `last`", async () => {
+    const f = await lifecycle();
+    f.select(f.g);
+    f.select(f.a);
+    const deleted = f.dispatch({ type: "sketch.annotationDeleteRequested" });
+    expect(deleted.annotationContext).toEqual({ owners: [f.g], last: null });
+
+    f.dispatch({ type: "history.undoRequested" });
+    const reselected = f.select(f.a);
+    expect(reselected.annotationContext, "premise: A is back").toEqual({
+      owners: [f.g],
+      last: f.a,
+    });
+    const redone = f.dispatch({ type: "history.redoRequested" });
+    expect(
+      redone.session.definition.constraintIds,
+      "premise: Redo deleted A again",
+    ).not.toContain(f.a.constraintId);
+    expect(
+      redone.annotationContext,
+      "Redo prunes the deleted `last`; G stays the owner",
+    ).toEqual({ owners: [f.g], last: null });
+
+    f.dispatch({ type: "selection.cleared" });
+    f.select(f.k);
+    f.dispatch({ type: "sketch.annotationDeleteRequested" });
+    f.dispatch({ type: "history.undoRequested" });
+    expect(f.select(f.k).annotationContext, "premise: K is back").toEqual({
+      owners: [f.k],
+      last: null,
+    });
+    const kRedone = f.dispatch({ type: "history.redoRequested" });
+    expect(
+      kRedone.annotationContext ?? null,
+      "Redo deleting the owner drops the context",
+    ).toBe(null);
+
+    f.dispatch({ type: "tool.activated", toolId: "constraintHorizontal" });
+    const created = f.select(f.h);
+    const horizontal = created.session.definition.constraints.find(
+      (constraint) =>
+        constraint.kind === "horizontal" &&
+        constraint.entityId === (f.h as { entityId: string }).entityId,
+    );
+    expect(horizontal, "premise: a Horizontal on H was authored").toBeTruthy();
+    f.select(f.h);
+    const target = {
+      kind: "constraint",
+      sketchId: "sketch_draft",
+      constraintId: horizontal!.constraintId,
+    } as const;
+    expect(f.select(target).annotationContext).toEqual({
+      owners: [f.h],
+      last: target,
+    });
+    const undone = f.dispatch({ type: "history.undoRequested" });
+    expect(
+      undone.session.definition.constraintIds,
+      "premise: Undo removed it",
+    ).not.toContain(horizontal!.constraintId);
+    expect(
+      undone.annotationContext,
+      "Undo prunes the removed `last`; H stays the owner",
+    ).toEqual({ owners: [f.h], last: null });
   });
 });

@@ -12,6 +12,7 @@ export type {
   SketchAuthoringToolId,
   SketchSessionStatus,
   SketchConstraintAuthoringState,
+  SketchAnnotationContext,
   SketchAnnotationEditState,
   SketchAnnotationDescriptor,
   SketchDimensionAnnotationDragHandle,
@@ -56,7 +57,11 @@ export {
 export {
   beginSketchAnnotationEdit,
   deleteSelectedSketchAnnotation,
+  getSketchAnnotationAffectedGeometryRefs,
+  getSketchAnnotationContextRefs,
   getSketchAnnotationDescriptors,
+  isSketchAnnotationInContext,
+  pruneSketchAnnotationContext,
   selectSketchAnnotation,
 } from "./annotations";
 
@@ -70,6 +75,7 @@ export {
   patchSketchConstraintValue,
   patchSketchDimensionAnnotationPlacement,
   pinSketchConstraintPreview,
+  authorSketchConstraintTarget,
   selectSketchConstraintTarget,
   shouldDeferSketchConstraintPreviewPinToSelection,
   shouldPinSketchConstraintPreviewBeforeSelection,

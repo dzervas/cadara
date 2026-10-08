@@ -10,7 +10,6 @@ import {
   patchSketchConstraintValue,
   patchSketchDimensionAnnotationPlacement,
   pinSketchConstraintPreview,
-  selectSketchAnnotation,
   selectSketchConstraintTarget,
   startSketchDraw,
   acceptSketchDraw,
@@ -1251,8 +1250,7 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       "Constraint descriptors should expose affected sketch geometry refs.",
     ).toBeTruthy();
 
-    session = selectSketchAnnotation(session, annotation.target);
-    session = deleteSelectedSketchAnnotation(session);
+    session = deleteSelectedSketchAnnotation(session, [annotation.target]);
 
     expect(
       session.definition.constraintIds.length,
@@ -1905,8 +1903,7 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       "Dimension descriptors should expose affected sketch point refs.",
     ).toBeTruthy();
 
-    session = selectSketchAnnotation(session, annotation!.target);
-    session = deleteSelectedSketchAnnotation(session);
+    session = deleteSelectedSketchAnnotation(session, [annotation!.target]);
 
     expect(
       session.definition.dimensionIds.length,

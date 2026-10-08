@@ -9,7 +9,10 @@ import type {
   EditorTransitionResult,
 } from "@/core/editor/state-machine";
 import { stableJsonValue } from "@/contracts/modeling/authored-document-serialization";
-import type { SketchSessionState } from "@/domain/editor/sketch-session";
+import {
+  pruneSketchAnnotationContext,
+  type SketchSessionState,
+} from "@/domain/editor/sketch-session";
 import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
 import {
   AuthoredActionHistory,
@@ -127,6 +130,27 @@ function restoreAfterReducer(
 }
 
 const ANNOTATION_DRAG_THRESHOLD_PX = 6;
+
+type ActionHistoryEntries = NonNullable<
+  SketchSessionState["actionHistory"]
+>["undo"];
+
+/** Whole-entry equality, including an absent `blockedReason`. */
+function sameActionHistoryEntries(
+  stored: ActionHistoryEntries | undefined,
+  next: readonly { sequence: number; label: string }[],
+) {
+  return (
+    stored !== undefined &&
+    stored.length === next.length &&
+    stored.every(
+      (entry, index) =>
+        entry.sequence === next[index]!.sequence &&
+        entry.label === next[index]!.label &&
+        entry.blockedReason === undefined,
+    )
+  );
+}
 
 function actionLabel(event: EditorEvent, before: EditorState) {
   // T13-D23: Finish's own definition change is the finalized spline (a
@@ -526,11 +550,18 @@ export class SketchAuthoredActions {
         restored.data &&
         "definition" in restored.data
       ) {
+        const session = restoreAuthoredSession(state.session, restored);
         restoreAfterReducer(before, result, {
           ...state,
           selection: [],
           hoverTarget: null,
-          session: restoreAuthoredSession(state.session, restored),
+          // T14c: refs the restored definition no longer holds leave the
+          // annotation context.
+          annotationContext: pruneSketchAnnotationContext(
+            state.annotationContext ?? null,
+            session,
+          ),
+          session,
         });
       }
       return this.withAvailability(result, identity);
@@ -624,27 +655,35 @@ export class SketchAuthoredActions {
   ): EditorTransitionResult {
     if (result.state.kind !== "editingSketch") return result;
     const entries = this.history.entries(identity);
+    const actionAvailability = {
+      canUndo: entries.undo.length > 0,
+      canRedo: entries.redo.length > 0,
+    };
+    const actionHistory = {
+      undo: entries.undo.map(({ sequence, label }) => ({ sequence, label })),
+      redo: entries.redo.map(({ sequence, label }) => ({ sequence, label })),
+    };
+    const session = result.state.session;
+    // T14c (R-7 option (b)): an unchanged ledger keeps the session object, so
+    // nothing keyed on it (the annotation descriptor solve) re-runs for
+    // lifecycle clicks or hover. The comparison covers the whole stored
+    // entries, so a `blockedReason` mark is still cleared by the next event.
+    if (
+      session.actionAvailability?.canUndo === actionAvailability.canUndo &&
+      session.actionAvailability.canRedo === actionAvailability.canRedo &&
+      sameActionHistoryEntries(
+        session.actionHistory?.undo,
+        actionHistory.undo,
+      ) &&
+      sameActionHistoryEntries(session.actionHistory?.redo, actionHistory.redo)
+    ) {
+      return result;
+    }
     return {
       ...result,
       state: {
         ...result.state,
-        session: {
-          ...result.state.session,
-          actionAvailability: {
-            canUndo: entries.undo.length > 0,
-            canRedo: entries.redo.length > 0,
-          },
-          actionHistory: {
-            undo: entries.undo.map(({ sequence, label }) => ({
-              sequence,
-              label,
-            })),
-            redo: entries.redo.map(({ sequence, label }) => ({
-              sequence,
-              label,
-            })),
-          },
-        },
+        session: { ...session, actionAvailability, actionHistory },
       },
     };
   }
