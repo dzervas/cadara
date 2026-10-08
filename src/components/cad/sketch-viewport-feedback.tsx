@@ -622,10 +622,13 @@ function ViewportFloatingInput({
       : documentVariableNames;
   const suggestionsId = `${descriptor.id}-variables`;
 
+  // The input renders once its anchor is projected, which can be a render
+  // after the descriptor appears (T14b review R-1): focus it then.
+  const placed = projection !== undefined;
   useEffect(() => {
     inputRef.current?.focus({ preventScroll: true });
     // T13e: leaving Reference mode remounts the input; focus it to type.
-  }, [descriptor.id, descriptor.readOnly]);
+  }, [descriptor.id, descriptor.readOnly, placed]);
 
   if (!projection) {
     return null;
@@ -663,6 +666,14 @@ function ViewportFloatingInput({
           key={`${descriptor.id}:${descriptor.readOnly ? "reference" : "value"}`}
           onChange={(event) => {
             onPatch({ value: event.currentTarget.value });
+          }}
+          // T14b review R-1: shortcuts skip a focused text input, so Escape
+          // here is the popup's own Cancel.
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              onPatch(descriptor.cancelAction.patch);
+            }
           }}
         />
       )}

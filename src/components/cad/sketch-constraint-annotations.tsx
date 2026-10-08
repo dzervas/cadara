@@ -1,15 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect, useEffectEvent, useState } from "react";
 
 import type { SketchAnnotationDescriptor } from "@/domain/editor/sketch-session";
 import type {
   SketchConstraintRef,
   SketchDimensionRef,
 } from "@/contracts/shared/references";
+import type { SketchDefinition } from "@/contracts/sketch/schema";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import { getToolIconSrc } from "@/core/tools/tool-icons";
 import {
   annotationTargetsEqual,
-  resolveSketchAnnotationVisibility,
+  resolveSketchAnnotationLayer,
 } from "@/components/cad/sketch-constraint-annotation-visibility";
 import {
   getAnnotationProjectionId,
@@ -29,6 +30,10 @@ interface SketchConstraintAnnotationsProps {
   selectedAnnotation: SketchConstraintRef | SketchDimensionRef | null;
   hoverTarget: PrimitiveRef | null;
   selection: readonly PrimitiveRef[];
+  /** The sketch whose entities give a hovered or selected entity its points (T-4). */
+  definition: SketchDefinition | null;
+  /** T14b (T-5/R-6): the idle select context; otherwise every annotation is passive. */
+  interactive: boolean;
   onHover: (target: SketchConstraintRef | SketchDimensionRef) => void;
   onClearHover: () => void;
   onSelect: (target: SketchConstraintRef | SketchDimensionRef) => void;
@@ -43,6 +48,8 @@ export function SketchConstraintAnnotations({
   selectedAnnotation,
   hoverTarget,
   selection,
+  definition,
+  interactive,
   onHover,
   onClearHover,
   onSelect,
@@ -51,16 +58,15 @@ export function SketchConstraintAnnotations({
 }: SketchConstraintAnnotationsProps) {
   const [labelDrag] = useState(() => new DimensionAnnotationLabelDrag());
 
-  const visibleAnnotations = annotations.flatMap((annotation) => {
-    const visibility = resolveSketchAnnotationVisibility(annotation, {
-      hoveredAnnotation,
-      selectedAnnotation,
-      hoverTarget,
-      selection,
-    });
-
-    return visibility === "hidden" ? [] : [{ annotation, visibility }];
+  const layer = resolveSketchAnnotationLayer(annotations, {
+    selectedAnnotation,
+    hoveredAnnotation,
+    hoverTarget,
+    selection,
+    definition,
+    interactive,
   });
+  const visibleAnnotations = layer.items;
 
   const visibleProjectionIds = new Set(
     visibleAnnotations.map(({ annotation }) =>
@@ -74,10 +80,12 @@ export function SketchConstraintAnnotations({
       ),
     ).map((projection) => [projection.id, projection]),
   );
-  // T14a C2: a drag whose chip unmounts, or whose layer unmounts, cancels.
+  // T14a C2: a drag whose chip unmounts, or whose layer unmounts, cancels; a
+  // chip that turns passive (T14b T-5) no longer carries its drag either.
   const renderedDragHandleIds = visibleAnnotations
     .flatMap(({ annotation }) =>
       annotation.dragHandle &&
+      layer.dragHandleIds.has(annotation.dragHandle.id) &&
       projectionById.has(getAnnotationProjectionId(annotation.id))
         ? [annotation.dragHandle.id]
         : [],
@@ -86,6 +94,15 @@ export function SketchConstraintAnnotations({
   useEffect(() => {
     labelDrag.retainHandles(new Set(renderedDragHandleIds.split("\n")));
   }, [labelDrag, renderedDragHandleIds]);
+  // T14b review A-2: an annotation hover whose chip turned passive or went
+  // away gets no pointer leave; clear it once.
+  const hoverIsStale = layer.hoverIsStale;
+  const clearStaleHover = useEffectEvent(onClearHover);
+  useEffect(() => {
+    if (hoverIsStale) {
+      clearStaleHover();
+    }
+  }, [hoverIsStale]);
   useEffect(() => () => labelDrag.cancel(), [labelDrag]);
 
   if (visibleAnnotations.length === 0) {
@@ -93,8 +110,11 @@ export function SketchConstraintAnnotations({
   }
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-30">
-      {visibleAnnotations.map(({ annotation, visibility }) => {
+    <div
+      className="pointer-events-none absolute inset-0 z-30"
+      data-sketch-annotation-layer=""
+    >
+      {visibleAnnotations.map(({ annotation, visibility, isInteractive }) => {
         const projection = projectionById.get(
           getAnnotationProjectionId(annotation.id),
         );
@@ -107,29 +127,73 @@ export function SketchConstraintAnnotations({
           selectedAnnotation,
           annotation.target,
         );
-        const isHovered = annotationTargetsEqual(
-          hoveredAnnotation,
-          annotation.target,
-        );
+        const isHovered =
+          isInteractive &&
+          annotationTargetsEqual(hoveredAnnotation, annotation.target);
         const iconSrc = getAnnotationGlyphIconSrc(annotation.glyphKind);
         const isDimension = annotation.status === "dimension";
-        const baseClassName = isDimension
-          ? `pointer-events-auto absolute flex h-8 min-w-8 items-center gap-1.5 rounded border px-2 shadow-[var(--cad-panel-shadow)] transition ${
-              isSelected
-                ? "border-[var(--cad-accent)] bg-[var(--cad-surface-elevated)]"
-                : isHovered
-                  ? "border-[var(--cad-border-strong)] bg-[var(--cad-surface-overlay)]"
-                  : "border-[var(--cad-border)] bg-[var(--cad-surface-overlay)] hover:border-[var(--cad-border-strong)]"
-            }`
-          : `pointer-events-auto absolute flex h-8 w-8 items-center justify-center rounded border p-1 shadow-[var(--cad-panel-shadow)] transition ${
-              visibility === "faded" ? "opacity-60 hover:opacity-100 " : ""
-            }${
-              isSelected
-                ? "border-[var(--cad-accent)] bg-[var(--cad-surface-elevated)]"
-                : isHovered
-                  ? "border-[var(--cad-border-strong)] bg-[var(--cad-surface-overlay)]"
-                  : "border-[var(--cad-border)] bg-[var(--cad-surface-overlay)] hover:border-[var(--cad-border-strong)]"
-            }`;
+        const className = `absolute flex h-8 items-center rounded border shadow-[var(--cad-panel-shadow)] ${
+          isDimension ? "min-w-8 gap-1.5 px-2" : "w-8 justify-center p-1"
+        } ${
+          isInteractive
+            ? "pointer-events-auto transition"
+            : visibility === "preview"
+              ? "pointer-events-none opacity-60"
+              : "pointer-events-none"
+        } ${
+          isSelected
+            ? "border-[var(--cad-accent)] bg-[var(--cad-surface-elevated)]"
+            : isHovered
+              ? "border-[var(--cad-border-strong)] bg-[var(--cad-surface-overlay)]"
+              : `border-[var(--cad-border)] bg-[var(--cad-surface-overlay)]${
+                  isInteractive
+                    ? " hover:border-[var(--cad-border-strong)]"
+                    : ""
+                }`
+        }`;
+        const style = {
+          left: projection.x,
+          top: projection.y,
+          transform: "translate(-50%, -50%)",
+          borderColor: getAnnotationConstraintColor(annotation),
+          color: getAnnotationConstraintColor(annotation),
+        };
+        const content = (
+          <>
+            <img
+              alt=""
+              aria-hidden="true"
+              className={isDimension ? "h-4 w-4 shrink-0" : "h-5 w-5"}
+              draggable={false}
+              src={iconSrc}
+            />
+            {isDimension ? (
+              <span className="font-mono text-[11px] leading-none">
+                {annotation.visibleLabel}
+              </span>
+            ) : null}
+          </>
+        );
+
+        // T14b (T-1, T-5): a preview, or any annotation outside the idle
+        // select context, is passive markup: no button, no name, no title, no
+        // handlers, no tab stop; the canvas under it owns the pointer.
+        if (!isInteractive) {
+          return (
+            <div
+              key={annotation.id}
+              aria-hidden="true"
+              data-sketch-annotation-glyph={annotation.glyphKind}
+              data-sketch-annotation-kind={annotation.status}
+              data-sketch-annotation-visibility={visibility}
+              data-sketch-annotation-interactive="false"
+              className={className}
+              style={style}
+            >
+              {content}
+            </div>
+          );
+        }
 
         return (
           <button
@@ -138,14 +202,9 @@ export function SketchConstraintAnnotations({
             data-sketch-annotation-glyph={annotation.glyphKind}
             data-sketch-annotation-kind={annotation.status}
             data-sketch-annotation-visibility={visibility}
-            className={baseClassName}
-            style={{
-              left: projection.x,
-              top: projection.y,
-              transform: "translate(-50%, -50%)",
-              borderColor: getAnnotationConstraintColor(annotation),
-              color: getAnnotationConstraintColor(annotation),
-            }}
+            data-sketch-annotation-interactive="true"
+            className={className}
+            style={style}
             aria-label={`${annotation.label}: ${annotation.detail}`}
             title={`${annotation.label}: ${annotation.detail}`}
             onPointerEnter={() => onHover(annotation.target)}
@@ -180,18 +239,7 @@ export function SketchConstraintAnnotations({
               onEdit(annotation.target);
             }}
           >
-            <img
-              alt=""
-              aria-hidden="true"
-              className={isDimension ? "h-4 w-4 shrink-0" : "h-5 w-5"}
-              draggable={false}
-              src={iconSrc}
-            />
-            {annotation.status === "dimension" ? (
-              <span className="font-mono text-[11px] leading-none">
-                {annotation.visibleLabel}
-              </span>
-            ) : null}
+            {content}
           </button>
         );
       })}
@@ -260,7 +308,5 @@ function getAnnotationGlyphIconSrc(
       return getToolIconSrc("dimension");
     case "dimensionAngle":
       return "/icons/drawing-angular-dim-line-to-line.svg";
-    case "dimensionCoincident":
-      return getToolIconSrc("dimension");
   }
 }

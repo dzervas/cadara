@@ -78,6 +78,15 @@ export function getEscapeEvent(
     return { type: "form.referencePickerCancelled" };
   }
 
+  // T14b review R-1: an open annotation edit (its value popup) is the
+  // innermost stage; Escape cancels it, as its Cancel button does.
+  if (state.sketchSession?.activeAnnotationEdit) {
+    return {
+      type: "sketch.toolPatched",
+      patch: { intent: "cancelAnnotationValue" },
+    };
+  }
+
   // Drawing tools take Escape in steps (T11-D10); edit, constraint and
   // special-mode tools keep the single-Escape exit.
   if (

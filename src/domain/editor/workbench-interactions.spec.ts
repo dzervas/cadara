@@ -3,7 +3,15 @@ import {
   getEditorViewState,
   initialEditorState,
 } from "@/domain/editor/state-machine";
-import { createNewSketchSession } from "@/domain/editor/sketch-session";
+import {
+  acceptSketchDraw,
+  beginSketchAnnotationEdit,
+  beginSketchTool,
+  createNewSketchSession,
+  patchSketchConstraintValue,
+  selectSketchConstraintTarget,
+  startSketchDraw,
+} from "@/domain/editor/sketch-session";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import {
   createStandardPlaneDefinition,
@@ -785,4 +793,66 @@ test("src/domain/editor/workbench-interactions.spec.ts", async () => {
       "D3a(d): unrelated selected curve in stack → that curve (D3).",
     ).toEqual(otherLine);
   }
+});
+
+// T14b review R-1, logic lane (Escape resolver seam `getEscapeEvent`): an
+// open annotation edit is the innermost Escape stage; Escape is its Cancel
+// (the same patch), ahead of clearing the selection, and it closes the edit.
+test("T14b R-1: Escape with an open annotation edit cancels the edit", () => {
+  let session = createNewSketchSession(
+    createStandardPlaneDefinition("xy"),
+    OCC_KERNEL_SETTINGS,
+  );
+  session = acceptSketchDraw(
+    startSketchDraw(beginSketchTool(session, "line"), [0, 0]),
+    [10, 0],
+  );
+  const [start, end] = session.definition.pointIds;
+  session = beginSketchTool(session, "dimensionDistance");
+  for (const pointId of [start!, end!]) {
+    session = selectSketchConstraintTarget(session, {
+      kind: "sketchPoint",
+      sketchId: "sketch_draft",
+      pointId,
+    });
+  }
+  session = patchSketchConstraintValue(session, { value: 24 });
+  session = patchSketchConstraintValue(session, {
+    intent: "commitConstraintValue",
+  });
+  const dimension = {
+    kind: "dimension" as const,
+    sketchId: "sketch_draft" as const,
+    dimensionId: session.definition.dimensions[0]!.dimensionId,
+  };
+  const editing = beginSketchAnnotationEdit(
+    { ...session, activeTool: null },
+    dimension,
+  );
+  expect(
+    editing.activeAnnotationEdit,
+    "premise: the edit is open",
+  ).toBeTruthy();
+
+  const event = getEscapeEvent({
+    activeCommand: {
+      commandSessionId: "command_sketch-1",
+      toolId: "sketch",
+      phase: "editing",
+    },
+    activeReferencePickerFieldId: null,
+    selection: [dimension],
+    sketchSession: editing,
+  });
+  expect(event, "Escape is the edit popup's Cancel.").toEqual({
+    type: "sketch.toolPatched",
+    patch: editing.toolPresentation?.floatingInput?.cancelAction.patch,
+  });
+  expect(
+    patchSketchConstraintValue(
+      editing,
+      (event as { patch: Record<string, unknown> }).patch,
+    ).activeAnnotationEdit,
+    "The edit is closed.",
+  ).toBeNull();
 });

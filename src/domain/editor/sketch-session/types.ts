@@ -147,8 +147,7 @@ export type SketchAnnotationGlyphKind =
   | "dimensionHorizontal"
   | "dimensionVertical"
   | "dimensionRadius"
-  | "dimensionAngle"
-  | "dimensionCoincident";
+  | "dimensionAngle";
 
 /**
  * Structured drag feedback for the viewport cue (issue 05). Present when
