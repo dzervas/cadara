@@ -72,9 +72,13 @@ export interface SketchEditIntersectionInput {
 
 /**
  * Trim: the cutters are every other sketch curve (A4). Split and Extend
- * (T10g-2, user decision Q-g3: today's kinds, a line target with a line
- * boundary): the one cutter is the boundary, as its infinite line for
- * Extend ([TECH] T-g10).
+ * (T10g-2): the one cutter is the boundary, as its infinite line for Extend
+ * ([TECH] T-g10; Extend stays a line target with a line boundary, Q-g3).
+ * Split (T13m, user decision Q1): a line, arc, circle or spline target cut
+ * by a line (its segment), arc, circle or spline boundary at one crossing
+ * (a circle at two): the crossing nearest `pick`, the boundary click in
+ * sketch coordinates (ties and no pick: the first along the target's
+ * traversal).
  */
 export type SketchEditOperation =
   | { kind: "trim"; targetEntityId: SketchEntityId }
@@ -87,6 +91,7 @@ export type SketchEditOperation =
       kind: "split";
       targetEntityId: SketchEntityId;
       boundaryEntityId: SketchEntityId;
+      pick?: [number, number];
     };
 
 /**
@@ -163,7 +168,8 @@ export type SketchEditFailureCode =
   | "edit-too-few-cuts"
   | "edit-no-crossing"
   | "edit-extend-ambiguous"
-  | "edit-piece-too-short";
+  | "edit-piece-too-short"
+  | "edit-circle-split-needs-two";
 
 export type SketchEditIntersectionResult =
   | {
@@ -200,11 +206,25 @@ export const TRIM_TOO_FEW_CUTS_MESSAGE =
 export const EXTEND_TARGET_UNSUPPORTED_MESSAGE =
   "Sketch extend currently supports a line extended to another line.";
 export const SPLIT_TARGET_UNSUPPORTED_MESSAGE =
-  "Sketch split currently supports a line split by another line.";
+  "Sketch split supports line, arc, circle, and spline entities split by a line, arc, circle, or spline.";
 export const EXTEND_NO_INTERSECTION_MESSAGE =
   "Sketch extend needs an intersection outside the selected curve.";
 export const SPLIT_NO_CROSSING_MESSAGE =
   "Sketch split needs a boundary crossing inside the selected curve.";
+/** T13m (T10g design §2.9): one cut can't split a circle (Trim's closed-curve rule). */
+export const SPLIT_CIRCLE_NEEDS_TWO_MESSAGE =
+  "Split needs two crossings to split a circle.";
+
+/**
+ * The entity kinds Split cuts and cuts with (T13m, user decision Q1): the
+ * one source for the service and the session's click gate.
+ */
+export const SPLIT_ENTITY_KINDS: ReadonlySet<string> = new Set([
+  "lineSegment",
+  "arc",
+  "circle",
+  "spline",
+]);
 
 const TOOL_NAMES = {
   trim: "Trim",
@@ -324,16 +344,26 @@ export async function querySketchSnapIntersections(
   }));
 }
 
-/** Why the target or boundary is unsupported (Split/Extend: lines only, Q-g3), else null. */
+/**
+ * Why the target or boundary is unsupported (Extend: lines only, Q-g3;
+ * Split: `SPLIT_ENTITY_KINDS`, T13m), else null.
+ */
 function lineOperationRefusal(
   definition: SketchDefinition,
   operation: SketchCutQueryInput["operation"],
 ) {
   if (operation.kind === "trim" || operation.kind === "intersect") return null;
-  const isLine = (entityId: SketchEntityId) =>
-    definition.entities.find((entity) => entity.entityId === entityId)?.kind ===
-    "lineSegment";
-  if (isLine(operation.targetEntityId) && isLine(operation.boundaryEntityId))
+  const kinds: ReadonlySet<string> =
+    operation.kind === "extend" ? new Set(["lineSegment"]) : SPLIT_ENTITY_KINDS;
+  const supported = (entityId: SketchEntityId) =>
+    kinds.has(
+      definition.entities.find((entity) => entity.entityId === entityId)
+        ?.kind ?? "",
+    );
+  if (
+    supported(operation.targetEntityId) &&
+    supported(operation.boundaryEntityId)
+  )
     return null;
   return operation.kind === "extend"
     ? EXTEND_TARGET_UNSUPPORTED_MESSAGE
@@ -385,7 +415,9 @@ function targetBranchesOf(
  * polyline runs through the piece's fit points (its ends and every knot
  * strictly inside), each chord at most the arc between them, so its length
  * is a lower bound of the piece's curve length. Ends are the solved target
- * end points and the cuts' `position`s.
+ * end points and the cuts' `position`s. T13m: a Split of a closed spline at
+ * its one cut keeps a positional closure's [start, c] and [c, end] (split at
+ * the corner, T-g14) and a smooth closure's whole loop from c to c.
  */
 function keptPieces(
   definition: SketchDefinition,
@@ -393,6 +425,7 @@ function keptPieces(
   targetId: SketchEntityId,
   ordered: readonly Branch[],
   cuts: readonly SketchEditCut[],
+  split: boolean,
 ): (readonly (readonly [number, number])[])[] {
   const entity = definition.entities.find(
     (candidate) => candidate.entityId === targetId,
@@ -418,7 +451,14 @@ function keptPieces(
       end,
     ];
     const [c1, c2] = [cuts[0]!.representative, cuts.at(-1)!.representative];
-    return entity.closure === "open"
+    if (split && entity.closure === "smooth")
+      return [
+        [
+          ...polyline(c1, domainEnd, first, ordered.at(-1)!.portPositions.end!),
+          ...polyline(domainStart, c2, ordered[0]!.portPositions.start!, last),
+        ],
+      ];
+    return entity.closure === "open" || split
       ? [
           polyline(domainStart, c1, ordered[0]!.portPositions.start!, first),
           polyline(c2, domainEnd, last, ordered.at(-1)!.portPositions.end!),
@@ -777,16 +817,10 @@ async function queryCuts(
     clusters[0]!.push(...last);
     wrapFrom = Math.min(wrapFrom, ...last.map((member) => member.enclosure[0]));
   }
-  const cuts = clusters.map((cluster) => cutOf(cluster));
-  if (parameterOrder === "decreasing") cuts.reverse();
-  if (operation.kind === "trim" && cuts.length < 2)
+  const allCuts = clusters.map((cluster) => cutOf(cluster));
+  if (parameterOrder === "decreasing") allCuts.reverse();
+  if (operation.kind === "trim" && allCuts.length < 2)
     fail("edit-too-few-cuts", TRIM_TOO_FEW_CUTS_MESSAGE, [targetId]);
-  // Split keeps today's semantics: exactly one crossing inside the target.
-  if (operation.kind === "split" && cuts.length !== 1)
-    fail("edit-no-crossing", SPLIT_NO_CROSSING_MESSAGE, [
-      targetId,
-      operation.boundaryEntityId,
-    ]);
   // Review R-1/A-1: a kept piece must be a valid solver curve. Its end
   // positions (the solved target ends and the cuts' evaluator positions)
   // must be at least the solver's minimum segment length apart
@@ -795,9 +829,16 @@ async function queryCuts(
   // against the solver's own policy; the exact classification of the cuts
   // is unchanged. Split keeps today's refusal of a crossing at an end.
   // Intersect keeps no piece.
-  const tooShort =
+  const leavesShortPiece = (chosen: readonly SketchEditCut[]) =>
     operation.kind !== "intersect" &&
-    keptPieces(definition, solved, targetId, ordered, cuts).some(
+    keptPieces(
+      definition,
+      solved,
+      targetId,
+      ordered,
+      chosen,
+      operation.kind === "split",
+    ).some(
       (polyline) =>
         polyline
           .slice(1)
@@ -811,6 +852,51 @@ async function queryCuts(
             0,
           ) < modelingTolerance,
     );
+  // T13m (Q1): Split cuts at one crossing, the one nearest the boundary
+  // click (ties: the first along the target's traversal). A circle needs
+  // two (Trim's closed-curve rule: one cut leaves an arc with coincident
+  // ends): the two nearest the click, in traversal order. Review A-1: with
+  // no click, the first crossing (circle: pair, in lexicographic order of
+  // the traversal) that leaves no sub-τ piece; if none does, the first.
+  let selected = allCuts.map((_, index) => index);
+  if (operation.kind === "split") {
+    const boundaryIds = [targetId, operation.boundaryEntityId];
+    if (allCuts.length === 0)
+      fail("edit-no-crossing", SPLIT_NO_CROSSING_MESSAGE, boundaryIds);
+    const needed = circle ? 2 : 1;
+    if (allCuts.length < needed)
+      fail(
+        "edit-circle-split-needs-two",
+        SPLIT_CIRCLE_NEEDS_TWO_MESSAGE,
+        boundaryIds,
+      );
+    const pick = operation.pick;
+    if (pick) {
+      const distance = (index: number) =>
+        Math.hypot(
+          allCuts[index]!.position[0] - pick[0],
+          allCuts[index]!.position[1] - pick[1],
+        );
+      // `sort` is stable: equal distances keep the traversal order.
+      selected = [...selected]
+        .sort((left, right) => distance(left) - distance(right))
+        .slice(0, needed)
+        .sort((left, right) => left - right);
+    } else {
+      const candidates = selected.flatMap((first) =>
+        needed === 1
+          ? [[first]]
+          : selected.slice(first + 1).map((second) => [first, second]),
+      );
+      selected =
+        candidates.find(
+          (candidate) =>
+            !leavesShortPiece(candidate.map((index) => allCuts[index]!)),
+        ) ?? candidates[0]!;
+    }
+  }
+  const cuts = selected.map((index) => allCuts[index]!);
+  const tooShort = leavesShortPiece(cuts);
   if (tooShort && operation.kind === "split")
     fail("edit-no-crossing", SPLIT_NO_CROSSING_MESSAGE, [
       targetId,
@@ -942,8 +1028,10 @@ async function queryCuts(
       if (!position) return [];
       const { parameter } = incidenceOnHosts(ordered, position);
       const root = declarations.classes.find(constraint.point.pointId);
+      // Indexed into the reported (selected) cuts; a class at a crossing
+      // Split didn't cut at is no cut.
       const byClass = satisfied.has(constraint.constraintId)
-        ? cutClasses.findIndex((classes) => classes.has(root))
+        ? selected.indexOf(cutClasses.findIndex((classes) => classes.has(root)))
         : -1;
       const byEnclosure = cuts.findIndex(
         (cut) =>

@@ -3,6 +3,7 @@ import type {
   SketchEditToolId,
 } from "@/core/sketch-edit-tools/definition";
 import { createRegistry } from "@/core/tools/registry-factory";
+import { SPLIT_TARGET_UNSUPPORTED_MESSAGE } from "@/contracts/sketch/edit-intersections";
 
 export const sketchEditToolDefinitions = [
   {
@@ -126,14 +127,14 @@ export const sketchEditToolDefinitions = [
       modes: ["sketch"],
       selection: {
         label: "Split target and boundary",
-        acceptedKinds: ["line"],
+        acceptedKinds: ["line", "circle", "arc", "spline"],
         requiredCount: 2,
       },
       previewLabel: "Split preview",
       validationMessages: {
-        emptySelection: "Select a sketch line, then a crossing boundary line.",
-        unsupportedTarget:
-          "Sketch split currently supports a line split by another line.",
+        emptySelection:
+          "Select a sketch curve, then click the boundary curve where it crosses.",
+        unsupportedTarget: SPLIT_TARGET_UNSUPPORTED_MESSAGE,
       },
       mutationContract: "splitCurveAtBoundary",
     },

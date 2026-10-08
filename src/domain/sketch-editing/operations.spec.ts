@@ -2541,6 +2541,8 @@ describe("createSketchTrimMutation (T10g-1 exact Trim, Q1b ties, review R-3)", (
     kind: "extend" | "split",
     target: string,
     boundary: string,
+    /** T13m: Split's boundary click. */
+    pick?: [number, number],
   ) {
     const result = await querySketchEditIntersections(
       {
@@ -2552,6 +2554,7 @@ describe("createSketchTrimMutation (T10g-1 exact Trim, Q1b ties, review R-3)", (
           kind,
           targetEntityId: entity(target),
           boundaryEntityId: entity(boundary),
+          ...(kind === "split" && pick ? { pick } : {}),
         },
       },
       queries,
@@ -3248,5 +3251,686 @@ describe("createSketchTrimMutation (T10g-1 exact Trim, Q1b ties, review R-3)", (
     expect(tangentsOf(bothSplit.after)).toEqual({
       "Tangent 1": [entity("line"), entity("arc")],
     });
+  });
+
+  // ---------------------------------------------------------------------
+  // T13m (user decision Q1): Split of arc, circle and spline targets.
+  // ---------------------------------------------------------------------
+
+  /** The upper half of the circle r = 2 at the origin, (2,0) → (−2,0) ccw (or reversed, cw). */
+  function upperArc(
+    sweep: "counterClockwise" | "clockwise" = "counterClockwise",
+  ) {
+    const sketch = makeSketchFixture();
+    sketch.point("o", 0, 0);
+    sketch.point("a", 2, 0);
+    sketch.point("b", -2, 0);
+    if (sweep === "counterClockwise") sketch.arc("target", "o", "a", "b");
+    else sketch.arc("target", "o", "b", "a", "clockwise");
+    return sketch;
+  }
+  /** The ties Split authored: [point, kind, curve or other point]. */
+  const splitTies = (before: SketchDefinition, after: SketchDefinition) =>
+    newTies(before, after);
+  const entityOf = (definition: SketchDefinition, entityId: string) =>
+    definition.entities.find((candidate) => candidate.entityId === entityId);
+
+  test("T13m: Split an arc by a line, an arc, a circle and a spline: the original id keeps start→Q, a new `split-arc` (same centre and sweep) runs Q→end, sharing Q = cut.position, tied once; solved in place", async () => {
+    const boundaries: [
+      string,
+      (sketch: ReturnType<typeof makeSketchFixture>) => void,
+    ][] = [
+      [
+        "line",
+        (sketch) => {
+          sketch.point("b0", 1, 0.5);
+          sketch.point("b1", 1, 3);
+          sketch.line("boundary", "b0", "b1");
+        },
+      ],
+      [
+        "arc",
+        (sketch) => {
+          sketch.point("c", 0, 2);
+          sketch.point("c0", 0, 1);
+          sketch.point("c1", 1, 2);
+          sketch.arc("boundary", "c", "c0", "c1");
+        },
+      ],
+      [
+        "circle",
+        (sketch) => {
+          sketch.point("c", 2, 2);
+          sketch.circle("boundary", "c", 2);
+        },
+      ],
+      [
+        "spline",
+        (sketch) => {
+          sketch.point("s0", 0.5, 1);
+          sketch.point("s1", 1.5, 1.6);
+          sketch.point("s2", 2.5, 3);
+          sketch.spline("boundary", ["s0", "s1", "s2"], "open");
+        },
+      ],
+    ];
+    for (const [kind, add] of boundaries) {
+      const sketch = upperArc();
+      add(sketch);
+      const before = sketch.definition();
+      const { result, after } = await lineEdit(
+        before,
+        "split",
+        "target",
+        "boundary",
+      );
+      const kept = entityOf(after, entity("target"));
+      const piece = after.entities.at(-1);
+      if (kept?.kind !== "arc" || piece?.kind !== "arc")
+        throw new Error(`${kind}: arcs`);
+      expect(piece.entityId, kind).toMatch(/split-arc/);
+      expect(piece.label, kind).toBe("target split");
+      expect(
+        [
+          kept.startPointId,
+          kept.endPointId,
+          piece.startPointId,
+          piece.endPointId,
+        ],
+        kind,
+      ).toEqual([
+        "sketch_point_a",
+        piece.startPointId,
+        kept.endPointId,
+        "sketch_point_b",
+      ]);
+      expect([piece.centerPointId, piece.sweepDirection], kind).toEqual([
+        "sketch_point_o",
+        "counterClockwise",
+      ]);
+      expect(positionOf(after, piece.startPointId), kind).toEqual(
+        result.cuts[0]!.position,
+      );
+      expect(splitTies(before, after), kind).toEqual([
+        [piece.startPointId, "pointOnCurve", entity("boundary")],
+      ]);
+      expect(accepted(after), `${kind}: accepted`).toBe(true);
+      expect(displacement(after), kind).toBeLessThan(1e-9);
+      const gaps = arcEndGaps(after);
+      expect(
+        Math.max(gaps[kept.entityId]!, gaps[piece.entityId]!),
+        `${kind}: each arc ends at its own end points`,
+      ).toBeLessThan(1e-9);
+    }
+  });
+
+  test("T13m: the boundary click picks the crossing (a line crossed twice by a circle: click near (3,0) → Q = (3,0); no click → (1,0))", async () => {
+    const sketch = makeSketchFixture();
+    sketch.point("t0", 0, 0);
+    sketch.point("t1", 4, 0);
+    sketch.line("target", "t0", "t1");
+    sketch.point("c", 2, 0);
+    sketch.circle("boundary", "c", 1);
+    const before = sketch.definition();
+    for (const [pick, x] of [
+      [[2.9, 0.7], 3],
+      [undefined, 1],
+    ] as const) {
+      const { after } = await lineEdit(
+        before,
+        "split",
+        "target",
+        "boundary",
+        pick ? [pick[0], pick[1]] : undefined,
+      );
+      const piece = after.entities.at(-1);
+      if (piece?.kind !== "lineSegment") throw new Error("line piece");
+      expect(positionOf(after, piece.startPointId)).toEqual([x, 0]);
+      expect(accepted(after)).toBe(true);
+    }
+  });
+
+  test("T13m R-3 on a clockwise arc: a `pointOnCurve` beyond the cut along the traversal moves to the new piece; one before stays; accepted", async () => {
+    const sketch = upperArc("clockwise");
+    sketch.point("b0", 1, 0.5);
+    sketch.point("b1", 1, 3);
+    sketch.line("boundary", "b0", "b1");
+    // (−2,0) → (2,0) clockwise over the top: 120° comes before the cut at
+    // 60° (x = 1), 30° after it.
+    sketch.point("early", -1, Math.sqrt(3));
+    const early = sketch.pointOnCurve("early", "target");
+    sketch.point("late", Math.sqrt(3), 1);
+    const late = sketch.pointOnCurve("late", "target");
+    const before = sketch.definition();
+    expect(accepted(before), "premise").toBe(true);
+    const { after } = await lineEdit(before, "split", "target", "boundary");
+    const piece = after.entities.at(-1)!;
+    const curveOf = (constraintId: string) => {
+      const constraint = after.constraints.find(
+        (candidate) => candidate.constraintId === constraintId,
+      );
+      return constraint?.kind === "pointOnCurve"
+        ? constraint.curve.entityId
+        : null;
+    };
+    expect(curveOf(early)).toBe(entity("target"));
+    expect(curveOf(late)).toBe(piece.entityId);
+    expect(accepted(after)).toBe(true);
+    expect(displacement(after)).toBeLessThan(1e-6);
+  });
+
+  test("T13m D27 on an arc: Split of a fillet arc: endpoint bindings rebuilt per piece, the tangent follows the piece touching its line, a diameter stays on the original id; solved in place", async () => {
+    const { definition: filleted, arc } = filletedCorner((sketch) => {
+      sketch.point("v0", 1, -1);
+      sketch.point("v1", 1, 0.9);
+      sketch.line("v", "v0", "v1");
+    });
+    const diameter = {
+      dimensionId: "dimension_diameter" as DimensionId,
+      kind: "diameter" as const,
+      label: "Diameter 1",
+      entityId: arc.entityId,
+      value: 4,
+    };
+    const definition = {
+      ...filleted,
+      dimensionIds: [...filleted.dimensionIds, diameter.dimensionId],
+      dimensions: [...filleted.dimensions, diameter],
+    } as SketchDefinition;
+    expect(accepted(definition), "premise").toBe(true);
+    const { after } = await lineEdit(
+      definition,
+      "split",
+      arc.entityId.replace("sketch_entity_", ""),
+      "v",
+    );
+    const kept = entityOf(after, arc.entityId);
+    const piece = after.entities.at(-1);
+    if (kept?.kind !== "arc" || piece?.kind !== "arc") throw new Error("arcs");
+    expect(kept.startPointId, "the original keeps tA").toBe(arc.startPointId);
+    expect(piece.endPointId, "the piece keeps tB").toBe(arc.endPointId);
+    const [startBinding, endBinding] = filleted.dimensions;
+    expect(after.dimensions).toEqual([
+      { ...startBinding, pointId: kept.startPointId },
+      { ...endBinding, pointId: kept.endPointId },
+      diameter,
+      expect.objectContaining({
+        kind: "arcStartPointCoincident",
+        entityId: piece.entityId,
+        pointId: piece.startPointId,
+        label: `${piece.label} start`,
+      }),
+      expect.objectContaining({
+        kind: "arcEndPointCoincident",
+        entityId: piece.entityId,
+        pointId: piece.endPointId,
+        label: `${piece.label} end`,
+      }),
+    ]);
+    expect(after.dimensionIds).toEqual(
+      after.dimensions.map((dimension) => dimension.dimensionId),
+    );
+    expect(tangentsOf(after)).toEqual({
+      "Fillet 1 tangent A": [arc.entityId, entity("ba")],
+      "Fillet 1 tangent B": [piece.entityId, entity("ac")],
+    });
+    const solved = solve(after);
+    expect(solved.status.solveState).toBe("solved");
+    expect(accepted(after)).toBe(true);
+    expect(displacement(after)).toBeLessThan(1e-9);
+    const gaps = arcEndGaps(after);
+    expect(Math.max(gaps[kept.entityId]!, gaps[piece.entityId]!)).toBeLessThan(
+      1e-9,
+    );
+  });
+
+  test("T13m known limit (routed to the certifier owner): a half disk whose arc is Split loses its region, the two co-circular arcs' shared end being an uncertain declared join; a split line in the same profile keeps it", async () => {
+    const disk = upperArc();
+    disk.line("diameter", "a", "b");
+    disk.point("v0", 1, 0.5);
+    disk.point("v1", 1, 3);
+    disk.line("boundary", "v0", "v1");
+    const before = disk.definition();
+    expect(await regions(before)).toBe(1);
+    const { after } = await lineEdit(before, "split", "target", "boundary");
+    expect(accepted(after)).toBe(true);
+    expect(await regions(after)).toBe(0);
+    // Review R-3: exactly that cause, the co-circular declared join.
+    const derived = await deriver.derive({
+      documentId: "doc_trim",
+      revisionId: "rev_trim",
+      sketchId: FIXTURE_SKETCH_ID,
+      definition: after,
+      solvedSnapshot: solve(after),
+      projectedReferences: [],
+      modelingTolerance: 1e-3,
+    });
+    expect(derived.diagnostics.map((entry) => entry.code)).toContain(
+      "region-join-uncertain",
+    );
+    expect(JSON.stringify(derived.diagnostics)).toContain(
+      "coincident-circle-supports",
+    );
+    // The same profile with its diameter split instead keeps its region.
+    const spoke = upperArc();
+    spoke.line("diameter", "a", "b");
+    spoke.point("s0", 1, -1);
+    spoke.point("s1", 1, 0.5);
+    spoke.line("boundary", "s0", "s1");
+    const split = await lineEdit(
+      spoke.definition(),
+      "split",
+      "diameter",
+      "boundary",
+    );
+    expect(await regions(split.after)).toBe(1);
+  });
+
+  test("T13m circle crossed twice: the original id becomes the ccw arc Q₁→Q₂, a new `split-arc` the ccw arc Q₂→Q₁; both bound to their ends; radius → diameter; R-3 by angle; solved in place; known limit: its regions are lost (co-circular join)", async () => {
+    const sketch = makeSketchFixture();
+    sketch.point("o", 0, 0);
+    sketch.circle("target", "o", 2);
+    sketch.point("b0", -3, 1);
+    sketch.point("b1", 3, 1);
+    sketch.line("boundary", "b0", "b1");
+    sketch.point("top", 0, 2);
+    const top = sketch.pointOnCurve("top", "target");
+    sketch.point("bottom", 0, -2);
+    const bottom = sketch.pointOnCurve("bottom", "target");
+    const radius = {
+      dimensionId: "dimension_radius" as DimensionId,
+      kind: "circleRadius" as const,
+      label: "Radius 7",
+      entityId: entity("target"),
+      value: 2,
+    };
+    const before = {
+      ...sketch.definition(),
+      dimensionIds: [radius.dimensionId],
+      dimensions: [radius],
+    } as SketchDefinition;
+    expect(accepted(before), "premise").toBe(true);
+    const regionsBefore = await regions(before);
+    const { result, after } = await lineEdit(
+      before,
+      "split",
+      "target",
+      "boundary",
+    );
+    expect(result.cuts).toHaveLength(2);
+    const kept = entityOf(after, entity("target"));
+    const piece = after.entities.at(-1);
+    if (kept?.kind !== "arc" || piece?.kind !== "arc") throw new Error("arcs");
+    expect(piece.entityId).toMatch(/split-arc/);
+    expect([kept.sweepDirection, piece.sweepDirection]).toEqual([
+      "counterClockwise",
+      "counterClockwise",
+    ]);
+    expect([piece.startPointId, piece.endPointId]).toEqual([
+      kept.endPointId,
+      kept.startPointId,
+    ]);
+    expect(positionOf(after, kept.startPointId)).toEqual(
+      result.cuts[0]!.position,
+    );
+    expect(positionOf(after, kept.endPointId)).toEqual(
+      result.cuts[1]!.position,
+    );
+    expect(positionOf(after, kept.startPointId)[0]).toBeGreaterThan(0);
+    expect(splitTies(before, after)).toEqual([
+      [kept.startPointId, "pointOnCurve", entity("boundary")],
+      [kept.endPointId, "pointOnCurve", entity("boundary")],
+    ]);
+    const curveOf = (constraintId: string) => {
+      const constraint = after.constraints.find(
+        (candidate) => candidate.constraintId === constraintId,
+      );
+      return constraint?.kind === "pointOnCurve"
+        ? constraint.curve.entityId
+        : null;
+    };
+    expect(curveOf(top)).toBe(entity("target"));
+    expect(curveOf(bottom)).toBe(piece.entityId);
+    expect(after.dimensions).toEqual([
+      {
+        dimensionId: "dimension_radius",
+        kind: "diameter",
+        label: "Diameter 7",
+        entityId: entity("target"),
+        value: 4,
+      },
+      ...[kept, piece].flatMap((arc) => [
+        expect.objectContaining({
+          kind: "arcStartPointCoincident",
+          entityId: arc.entityId,
+          pointId: arc.startPointId,
+        }),
+        expect.objectContaining({
+          kind: "arcEndPointCoincident",
+          entityId: arc.entityId,
+          pointId: arc.endPointId,
+        }),
+      ]),
+    ]);
+    expect(accepted(after)).toBe(true);
+    expect(displacement(after)).toBeLessThan(1e-9);
+    const gaps = arcEndGaps(after);
+    expect(Math.max(gaps[kept.entityId]!, gaps[piece.entityId]!)).toBeLessThan(
+      1e-9,
+    );
+    const derived = await deriver.derive({
+      documentId: "doc_trim",
+      revisionId: "rev_trim",
+      sketchId: FIXTURE_SKETCH_ID,
+      definition: after,
+      solvedSnapshot: solve(after),
+      projectedReferences: [],
+      modelingTolerance: 1e-3,
+    });
+    // Known limit (routed to the certifier owner, T10g design known issue
+    // 2): two co-circular arcs joined at a shared end are an uncertain
+    // declared join, so the circle's regions are lost after the Split.
+    expect(regionsBefore).toBe(2);
+    expect(await regions(after)).toBe(0);
+    expect(derived.diagnostics.map((entry) => entry.code)).toContain(
+      "region-join-uncertain",
+    );
+    expect(JSON.stringify(derived.diagnostics)).toContain(
+      "coincident-circle-supports",
+    );
+  });
+
+  test("T13m open spline by a line: the original id keeps [S₀, Q], a new `split-spline` keeps [Q, end] (reusing the occurrence ids), sharing Q = cut.position bitwise; both reproduce the original ≤ 1e-12·scale; tied once; R-3; no fit point freed; solved in place", async () => {
+    const sketch = makeSketchFixture();
+    const fit: P[] = [
+      [0, 0],
+      [1, 2],
+      [2, 2.5],
+      [3, 2],
+      [4, 0],
+      [5, -1],
+    ];
+    fit.forEach((at, index) => sketch.point(`s${index}`, ...at));
+    sketch.spline(
+      "target",
+      fit.map((_, index) => `s${index}`),
+      "open",
+      [undefined, undefined, undefined, undefined, [0.6, -0.9]] as never,
+    );
+    sketch.point("b0", 2.5, -1);
+    sketch.point("b1", 2.5, 4);
+    sketch.line("boundary", "b0", "b1");
+    sketch.point("k0", 4, 0);
+    sketch.point("k1", 4, 3);
+    sketch.line("beyond", "k0", "k1");
+    const beyond = sketch.pointOnCurve("k0", "target");
+    const before = sketch.definition();
+    expect(accepted(before), "premise").toBe(true);
+    const solvedSnapshot = solve(before);
+    const original = splineOf(before, "target");
+    const { result, after } = await lineEdit(
+      before,
+      "split",
+      "target",
+      "boundary",
+    );
+    const [cut] = result.cuts;
+    expect(cut!.knotOccurrenceIndex).toBeNull();
+    const a = splineOf(after, "target");
+    const pieceId = after.entityIds.at(-1)!;
+    expect(pieceId).toMatch(/split-spline/);
+    const b = after.entities.at(-1) as Spline;
+    expect([b.label, a.closure, b.closure]).toEqual([
+      "target split",
+      "open",
+      "open",
+    ]);
+    const [q] = newPoints(before, after);
+    expect(newPoints(before, after)).toHaveLength(1);
+    expect(q!.position, "Q is the service's position bitwise").toEqual(
+      cut!.position,
+    );
+    expect(a.pointOccurrences.map(({ pointId }) => pointId)).toEqual([
+      "sketch_point_s0",
+      "sketch_point_s1",
+      "sketch_point_s2",
+      q!.pointId,
+    ]);
+    expect(b.pointOccurrences.map(({ pointId }) => pointId)).toEqual([
+      q!.pointId,
+      "sketch_point_s3",
+      "sketch_point_s4",
+      "sketch_point_s5",
+    ]);
+    expect(b.pointOccurrenceIds.slice(1)).toEqual(
+      original.pointOccurrenceIds.slice(3),
+    );
+    expect(
+      b.pointOccurrences[2]!.tangent,
+      "an untouched authored tangent keeps its authored vector",
+    ).toBe(original.pointOccurrences[4]!.tangent);
+    const scale = 5;
+    expect(
+      reproductionError(before, solvedSnapshot, after, "target", 0),
+    ).toBeLessThanOrEqual(1e-12 * scale);
+    expect(
+      reproductionError(
+        before,
+        solvedSnapshot,
+        after,
+        pieceId.replace("sketch_entity_", ""),
+        cut!.representative,
+      ),
+    ).toBeLessThanOrEqual(1e-12 * scale);
+    expect(splitTies(before, after)).toEqual([
+      [q!.pointId, "pointOnCurve", entity("boundary")],
+    ]);
+    const moved = after.constraints.find(
+      (constraint) => constraint.constraintId === beyond,
+    );
+    expect(
+      moved?.kind === "pointOnCurve" ? moved.curve.entityId : null,
+      "R-3: a point beyond the cut moves to the new piece",
+    ).toBe(pieceId);
+    expect(freePoints(after)).toEqual([]);
+    expect(accepted(after)).toBe(true);
+    expect(displacement(after)).toBeLessThan(1e-9);
+  });
+
+  test("T13m open spline by a spline: two splines sharing Q = cut.position, tied once to the boundary spline; solved in place", async () => {
+    const sketch = makeSketchFixture();
+    sketch.point("s0", 0, 0);
+    sketch.point("s1", 2, 3);
+    sketch.point("s2", 4, 0);
+    sketch.spline("target", ["s0", "s1", "s2"], "open");
+    sketch.point("w0", 0, 2);
+    sketch.point("w1", 2, 1);
+    sketch.point("w2", 3, 4);
+    sketch.spline("boundary", ["w0", "w1", "w2"], "open");
+    const before = sketch.definition();
+    const { result, after } = await lineEdit(
+      before,
+      "split",
+      "target",
+      "boundary",
+    );
+    const [q] = newPoints(before, after);
+    expect(q!.position).toEqual(result.cuts[0]!.position);
+    const a = splineOf(after, "target");
+    const b = after.entities.at(-1) as Spline;
+    expect(a.pointOccurrences.at(-1)!.pointId).toBe(q!.pointId);
+    expect(b.pointOccurrences[0]!.pointId).toBe(q!.pointId);
+    expect(splitTies(before, after)).toEqual([
+      [q!.pointId, "pointOnCurve", entity("boundary")],
+    ]);
+    expect(accepted(after)).toBe(true);
+    expect(displacement(after)).toBeLessThan(1e-9);
+    // Spline pairs are certified slowly (T13i: 1.3–10 s per pair).
+  }, 120_000);
+
+  test("T13m closed splines by y = 0.3: a smooth loop becomes one open spline (same id) Q → … → Q′ around the whole loop, both ends tied, reproducing it; a positional loop becomes two splines meeting at Q and at the corner; solved in place", async () => {
+    for (const closure of ["smooth", "positional"] as const) {
+      const sketch = makeSketchFixture();
+      sketch.point("p0", 1, 0);
+      sketch.point("p1", 0, 1);
+      sketch.point("p2", -1, 0);
+      sketch.point("p3", 0, -1);
+      sketch.spline(
+        "target",
+        closure === "smooth"
+          ? ["p0", "p1", "p2", "p3"]
+          : ["p0", "p1", "p2", "p3", "p0"],
+        closure,
+      );
+      sketch.point("a", -2, 0.3);
+      sketch.point("b", 2, 0.3);
+      sketch.line("chord", "a", "b");
+      const before = sketch.definition();
+      const solvedSnapshot = solve(before);
+      const { result, after } = await lineEdit(
+        before,
+        "split",
+        "target",
+        "chord",
+      );
+      const [cut] = result.cuts;
+      expect(
+        cut!.position[0],
+        `${closure}: first in traversal`,
+      ).toBeGreaterThan(0);
+      const added = newPoints(before, after);
+      expect(freePoints(after), closure).toEqual([]);
+      expect(accepted(after), `${closure}: accepted`).toBe(true);
+      expect(displacement(after), closure).toBeLessThan(1e-9);
+      if (closure === "smooth") {
+        expect(after.entityIds).toEqual(before.entityIds);
+        const loop = splineOf(after, "target");
+        const [q, qEnd] = added;
+        expect(added).toHaveLength(2);
+        expect([q!.position, qEnd!.position]).toEqual([
+          cut!.position,
+          cut!.position,
+        ]);
+        expect(loop.closure).toBe("open");
+        expect(loop.pointOccurrences.map(({ pointId }) => pointId)).toEqual([
+          q!.pointId,
+          "sketch_point_p1",
+          "sketch_point_p2",
+          "sketch_point_p3",
+          "sketch_point_p0",
+          qEnd!.pointId,
+        ]);
+        expect(new Set(loop.pointOccurrenceIds).size).toBe(6);
+        expect(splitTies(before, after)).toEqual([
+          [q!.pointId, "pointOnCurve", entity("chord")],
+          [qEnd!.pointId, "pointOnCurve", entity("chord")],
+        ]);
+        // The piece vs the original loop at (c + t) mod period.
+        const record = solvedSnapshot.solvedEntities.find(
+          (candidate) => candidate.entityId === entity("target"),
+        );
+        if (
+          record?.kind !== "spline" ||
+          record.reconstruction.validity !== "valid"
+        )
+          throw new Error("original");
+        const spans = record.reconstruction.spans;
+        const period = spans.at(-1)!.interval[1];
+        const positions = Object.fromEntries([
+          ...solvedSnapshot.solvedPoints.map(
+            (entry) => [entry.pointId, entry.solvedPosition] as const,
+          ),
+          ...added.map((entry) => [entry.pointId, entry.position] as const),
+        ]) as Record<SketchPointId, SketchPoint>;
+        const piece = reconstructSplineAggregate(loop, positions);
+        if (piece.validity !== "valid") throw new Error("piece");
+        let worst = 0;
+        for (const span of piece.spans)
+          for (let k = 0; k <= 64; k++) {
+            const u = k / 64;
+            const unrolled =
+              cut!.representative +
+              span.interval[0] +
+              u * (span.interval[1] - span.interval[0]);
+            const t = Math.min(
+              period,
+              unrolled >= period ? unrolled - period : unrolled,
+            );
+            const host = spans.find((entry) => t <= entry.interval[1])!;
+            const expected = evaluateSplineSpan(host, {
+              kind: "source",
+              value: Math.max(t, host.interval[0]),
+            }).position;
+            const at = evaluateSplineSpan(span, {
+              kind: "local",
+              value: u,
+            }).position;
+            worst = Math.max(
+              worst,
+              Math.hypot(at[0] - expected[0], at[1] - expected[1]),
+            );
+          }
+        expect(
+          worst,
+          "the open loop reproduces the closed one",
+        ).toBeLessThanOrEqual(1e-12);
+      } else {
+        const [q] = added;
+        expect(added).toHaveLength(1);
+        const first = splineOf(after, "target");
+        const second = after.entities.at(-1) as Spline;
+        expect(second.entityId).toMatch(/split-spline/);
+        expect(first.pointOccurrences.map(({ pointId }) => pointId)).toEqual([
+          "sketch_point_p0",
+          q!.pointId,
+        ]);
+        expect(second.pointOccurrences.map(({ pointId }) => pointId)).toEqual([
+          q!.pointId,
+          "sketch_point_p1",
+          "sketch_point_p2",
+          "sketch_point_p3",
+          "sketch_point_p0",
+        ]);
+        expect(splitTies(before, after)).toEqual([
+          [q!.pointId, "pointOnCurve", entity("chord")],
+        ]);
+      }
+    }
+  });
+
+  test("T13m smooth loop cut at a knot (y = 0 through the seam p0): the loop opens at p0 — it starts on p0 and ends on a new point at p0's position, both tied; solved in place", async () => {
+    const sketch = makeSketchFixture();
+    sketch.point("p0", 1, 0);
+    sketch.point("p1", 0, 1);
+    sketch.point("p2", -1, 0);
+    sketch.point("p3", 0, -1);
+    sketch.spline("target", ["p0", "p1", "p2", "p3"], "smooth");
+    sketch.point("a", 0.5, 0);
+    sketch.point("b", 2, 0);
+    sketch.line("ray", "a", "b");
+    const before = sketch.definition();
+    const { result, after } = await lineEdit(before, "split", "target", "ray");
+    expect(result.cuts[0]!.knotOccurrenceIndex).toBe(0);
+    const added = newPoints(before, after);
+    expect(added).toHaveLength(1);
+    const [end] = added;
+    expect(end!.position).toEqual(positionOf(before, "sketch_point_p0"));
+    const loop = splineOf(after, "target");
+    expect(loop.closure).toBe("open");
+    expect(loop.pointOccurrences.map(({ pointId }) => pointId)).toEqual([
+      "sketch_point_p0",
+      "sketch_point_p1",
+      "sketch_point_p2",
+      "sketch_point_p3",
+      end!.pointId,
+    ]);
+    expect(new Set(loop.pointOccurrenceIds).size).toBe(5);
+    expect(loop.endSpanParameterLengths).toBeUndefined();
+    expect(splitTies(before, after)).toEqual([
+      ["sketch_point_p0", "pointOnCurve", entity("ray")],
+      [end!.pointId, "pointOnCurve", entity("ray")],
+    ]);
+    expect(accepted(after)).toBe(true);
+    expect(displacement(after)).toBeLessThan(1e-9);
   });
 });

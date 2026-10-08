@@ -19,9 +19,11 @@ import {
   orderedSplineOccurrences,
   orderedSplinePointIds,
   reconstructSplineAggregate,
+  splineAggregatePiece,
   trimSplineAggregate,
   type SolvedCubicSpan,
   type SplineCut,
+  type SplinePiece,
 } from "@/contracts/sketch/spline-geometry";
 import {
   offsetLinePoints,
@@ -59,6 +61,7 @@ import {
   EXTEND_TARGET_UNSUPPORTED_MESSAGE,
   SPLIT_TARGET_UNSUPPORTED_MESSAGE,
   type SketchEditCut,
+  type SketchEditIncidence,
   type SketchEditIntersectionResult,
 } from "@/contracts/sketch/edit-intersections";
 import { distanceBetween as distanceBetweenPoints } from "@/domain/sketch/point-math";
@@ -542,13 +545,15 @@ type ArcBindingKind = "arcStartPointCoincident" | "arcEndPointCoincident";
  * piece's own end points. The original id's bindings of `kinds` keep their
  * ids and now name its own start/end point; a missing one of `kinds` on it
  * and every one of `kinds` on the new piece are created
- * (`createArcEndpointDimensions`, ids `trim-arc-start/end`).
+ * (`createArcEndpointDimensions`, ids `<idTag>-arc-start/end`; `trim` by
+ * default, `split` for Split).
  */
 function rebuiltArcBindings(input: {
   dimensions: SketchDefinition["dimensions"];
   kinds: ReadonlySet<ArcBindingKind>;
   arcs: readonly Extract<SketchEntityDefinition, { kind: "arc" }>[];
   factories: SketchEditOperationFactories;
+  idTag?: string;
 }) {
   const ownPoint = (
     arc: Extract<SketchEntityDefinition, { kind: "arc" }>,
@@ -570,7 +575,7 @@ function rebuiltArcBindings(input: {
   const added = input.arcs.flatMap((arc) =>
     createArcEndpointDimensions({
       createDimensionId: (suffix) =>
-        input.factories.createDimensionId(`trim-${suffix}`),
+        input.factories.createDimensionId(`${input.idTag ?? "trim"}-${suffix}`),
       labelPrefix: arc.label,
       entityId: arc.entityId,
       startPointId: arc.startPointId,
@@ -756,31 +761,9 @@ export function createSketchTrimMutation(input: {
         piece,
       })
     : definition.constraints;
-  // Orchestrator [TECH] 2026-10-04: a circle's `circleRadius` dimensions
-  // (the Circle tool authors one) cannot drive the arc it becomes; each
-  // becomes the same-id `diameter` (which drives arcs) of twice its value.
   const converted =
     entity.kind === "circle"
-      ? definition.dimensions.map((dimension) =>
-          dimension.kind === "circleRadius" &&
-          dimension.entityId === entity.entityId
-            ? {
-                ...dimension,
-                kind: "diameter" as const,
-                // Review A-3 / T13l (review A4): only the default labels
-                // follow (the Circle tool's legacy "Circle N radius", the
-                // Radius tool's "Radius N"); a user label is kept.
-                label: dimension.label
-                  .replace(/^(Circle \d+) radius$/, "$1 diameter")
-                  .replace(/^Radius (\d+)$/, "Diameter $1"),
-                // T13d: a reference radius stays a reference (the marker is
-                // spread); a value it kept (ignored, D9′) doubles too.
-                ...(dimension.value === undefined
-                  ? {}
-                  : { value: doubledDimensionValue(dimension.value) }),
-              }
-            : dimension,
-        )
+      ? circleRadiiAsDiameters(definition, entity.entityId)
       : definition.dimensions;
   // D27: each resulting arc is bound to its own end points. An arc target's
   // pieces carry the binding kinds it carried; a circle's arc gains both
@@ -834,6 +817,37 @@ export function createSketchTrimMutation(input: {
 }
 
 /**
+ * Orchestrator [TECH] 2026-10-04: a circle's `circleRadius` dimensions (the
+ * Circle tool authors one) cannot drive the arc it becomes (Trim, T13m
+ * Split); each becomes the same-id `diameter` (which drives arcs) of twice
+ * its value.
+ */
+function circleRadiiAsDiameters(
+  definition: SketchDefinition,
+  circleId: SketchEntityId,
+) {
+  return definition.dimensions.map((dimension) =>
+    dimension.kind === "circleRadius" && dimension.entityId === circleId
+      ? {
+          ...dimension,
+          kind: "diameter" as const,
+          // Review A-3 / T13l (review A4): only the default labels follow
+          // (the Circle tool's legacy "Circle N radius", the Radius tool's
+          // "Radius N"); a user label is kept.
+          label: dimension.label
+            .replace(/^(Circle \d+) radius$/, "$1 diameter")
+            .replace(/^Radius (\d+)$/, "Diameter $1"),
+          // T13d: a reference radius stays a reference (the marker is
+          // spread); a value it kept (ignored, D9′) doubles too.
+          ...(dimension.value === undefined
+            ? {}
+            : { value: doubledDimensionValue(dimension.value) }),
+        }
+      : dimension,
+  );
+}
+
+/**
  * Review R-3: the target's constraints with every `pointOnCurve` that
  * belongs to the last cut, or (away from every cut) whose parameter lies
  * beyond the last cut, moved to the new piece `pieceId`; everything else
@@ -870,6 +884,53 @@ function retargetedTrimConstraints(
 }
 
 /**
+ * The SOLVED input a spline edit is rebuilt from (T10g-3a review A-1): the
+ * entity with each authored tangent replaced by its solved handle, the
+ * solved positions and the ordered occurrences; null when the solved
+ * spline didn't reconstruct.
+ */
+function solvedSplineEditInput(
+  entity: Extract<SketchEntityDefinition, { kind: "spline" }>,
+  solvedSnapshot: SolvedSketchSnapshot,
+) {
+  const solved = solvedSnapshot.solvedEntities.find(
+    (candidate) => candidate.entityId === entity.entityId,
+  );
+  const ordered = orderedSplineOccurrences(entity);
+  if (
+    solved?.kind !== "spline" ||
+    solved.reconstruction.validity !== "valid" ||
+    !ordered
+  )
+    return null;
+  const { handles } = solved.reconstruction;
+  const indexOf = new Map(
+    ordered.map((occurrence, index) => [occurrence.occurrenceId, index]),
+  );
+  const solvedEntity = {
+    ...entity,
+    pointOccurrences: entity.pointOccurrences.map((occurrence) =>
+      occurrence.tangent.kind === "authored"
+        ? {
+            ...occurrence,
+            tangent: {
+              kind: "authored" as const,
+              vector: handles[indexOf.get(occurrence.occurrenceId)!]!,
+            },
+          }
+        : occurrence,
+    ),
+  };
+  const positions = Object.fromEntries(
+    solvedSnapshot.solvedPoints.map((point) => [
+      point.pointId,
+      point.solvedPosition,
+    ]),
+  ) as Record<SketchPointId, SketchPoint>;
+  return { ordered, solvedEntity, positions };
+}
+
+/**
  * The exact spline Trim (T10g design §3.1/§4.3–§4.5, option B; T10g-3b).
  * The pieces come from `trimSplineAggregate` on the SOLVED input the cuts
  * were certified on (T10g-3a review A-1): solved fit-point positions, the
@@ -900,40 +961,10 @@ function createSplineTrimMutation(input: {
   factories: SketchEditOperationFactories;
 }): SketchMutationResult {
   const { definition, entity, intersections, factories } = input;
-  const solved = input.solvedSnapshot.solvedEntities.find(
-    (candidate) => candidate.entityId === entity.entityId,
-  );
-  const ordered = orderedSplineOccurrences(entity);
-  if (
-    solved?.kind !== "spline" ||
-    solved.reconstruction.validity !== "valid" ||
-    !ordered
-  )
+  const solvedInput = solvedSplineEditInput(entity, input.solvedSnapshot);
+  if (!solvedInput)
     return fail(splineTrimCutMismatchMessage(entity.label), definition);
-  const { handles } = solved.reconstruction;
-  const indexOf = new Map(
-    ordered.map((occurrence, index) => [occurrence.occurrenceId, index]),
-  );
-  const solvedEntity = {
-    ...entity,
-    pointOccurrences: entity.pointOccurrences.map((occurrence) =>
-      occurrence.tangent.kind === "authored"
-        ? {
-            ...occurrence,
-            tangent: {
-              kind: "authored" as const,
-              vector: handles[indexOf.get(occurrence.occurrenceId)!]!,
-            },
-          }
-        : occurrence,
-    ),
-  };
-  const positions = Object.fromEntries(
-    input.solvedSnapshot.solvedPoints.map((point) => [
-      point.pointId,
-      point.solvedPosition,
-    ]),
-  ) as Record<SketchPointId, SketchPoint>;
+  const { ordered, solvedEntity, positions } = solvedInput;
   const { cuts } = intersections;
   const ends = [
     { cut: cuts[0]!, tag: "start" },
@@ -1984,16 +2015,25 @@ export function createSketchExtendMutation(input: {
 }
 
 /**
- * The exact Split (T10g-2; design §3.1, Q-g3: a line split by a line at its
- * one crossing): the original id keeps start→Q and a new `split-line`
- * piece runs Q→end, sharing the one new `split-point` Q at the cut's
- * `position`, tied once to the boundary (Q1b). Review R-3: a target
- * `pointOnCurve` at the cut stays on the earlier piece (the original id);
- * one away from the cut moves to the new piece when its parameter lies
- * beyond the cut's enclosure. D27 (T13l): a target `tangent` moves to the
- * new piece when that piece touches the tangent partner
- * (`retargetedTangents` on `solvedSnapshot`, the snapshot the cut was
- * certified on).
+ * The exact Split (T10g-2; T13m, user decision Q1): the target is cut at
+ * the verified cut(s) of its boundary and every piece is kept.
+ * - **line/arc** (one cut): the original id keeps start→Q and a new
+ *   `split-line`/`split-arc` piece (same centre and sweep) runs Q→end,
+ *   sharing the one new `split-point` Q at the cut's `position`, tied once
+ *   to the boundary (Q1b). Review R-3: a target `pointOnCurve` at the cut
+ *   stays on the earlier piece (the original id); one away from the cut
+ *   moves to the new piece when its parameter lies beyond the cut's
+ *   enclosure along the traversal. D27 (T13l): arc endpoint bindings are
+ *   rebuilt per piece (`rebuiltArcBindings`, the kinds the target carried)
+ *   and a `tangent` follows the piece that touches its partner
+ *   (`retargetedTangents` on `solvedSnapshot`, the snapshot the cut was
+ *   certified on); every other dimension stays on the original id.
+ * - **circle** (two cuts c₁ < c₂ from the seam): the original id becomes the
+ *   ccw arc Q₁→Q₂ and a new `split-arc` the ccw arc Q₂→Q₁, as Trim's circle
+ *   (its radius dimensions become diameters; both arcs bound to their own
+ *   ends). A `pointOnCurve` away from both cuts moves to the new arc when
+ *   its angle lies outside (c₁, c₂).
+ * - **spline**: `createSplineSplitMutation`.
  */
 export function createSketchSplitMutation(input: {
   definition: SketchDefinition;
@@ -2007,54 +2047,149 @@ export function createSketchSplitMutation(input: {
   const entity = definition.entities.find(
     (candidate) => candidate.entityId === input.targetEntityId,
   );
-  if (entity?.kind !== "lineSegment")
+  if (entity?.kind === "spline")
+    return createSplineSplitMutation({ ...input, entity });
+  if (
+    entity?.kind !== "lineSegment" &&
+    entity?.kind !== "arc" &&
+    entity?.kind !== "circle"
+  )
     return fail(SPLIT_TARGET_UNSUPPORTED_MESSAGE, definition);
-  const cut = intersections.cuts[0]!;
-  const pointId = factories.createPointId("split-point");
-  const pieceId = factories.createEntityId("split-line");
-  const ties = cutTies({
-    definition,
-    cut,
-    pointId,
-    idTag: "split",
-    label: `${entity.label} split`,
-    factories,
-  });
-  const piece = {
-    ...factories.createLineEntity(
-      `${entity.label} split`,
-      pieceId,
-      pointId,
-      entity.endPointId,
-    ),
-    isConstruction: entity.isConstruction,
-    style: entity.style,
-  };
+  const { cuts } = intersections;
+  const ends = (entity.kind === "circle" ? ["start", "end"] : ["point"]).map(
+    (tag, index) => {
+      const pointId = factories.createPointId(`split-${tag}`);
+      return {
+        cut: cuts[index]!,
+        pointId,
+        point: factories.createPoint(
+          `Split ${input.sequence} ${tag}`,
+          pointId,
+          cuts[index]!.position,
+        ),
+        ties: cutTies({
+          definition,
+          cut: cuts[index]!,
+          pointId,
+          idTag: entity.kind === "circle" ? `split-${tag}` : "split",
+          label:
+            entity.kind === "circle"
+              ? `${entity.label} split ${tag}`
+              : `${entity.label} split`,
+          factories,
+        }),
+      };
+    },
+  );
+  const pieceId = factories.createEntityId(
+    entity.kind === "lineSegment" ? "split-line" : "split-arc",
+  );
+  const style = { isConstruction: entity.isConstruction, style: entity.style };
+  let kept: SketchEntityDefinition;
+  let piece: SketchEntityDefinition;
+  let movesToPiece: (incidence: SketchEditIncidence) => boolean;
+  if (entity.kind === "circle") {
+    const [start, end] = ends as [(typeof ends)[0], (typeof ends)[0]];
+    kept = {
+      ...factories.createArcEntity(
+        entity.label,
+        entity.entityId,
+        entity.centerPointId,
+        start.pointId,
+        end.pointId,
+        "counterClockwise",
+      ),
+      ...style,
+    };
+    piece = {
+      ...factories.createArcEntity(
+        `${entity.label} split`,
+        pieceId,
+        entity.centerPointId,
+        end.pointId,
+        start.pointId,
+        "counterClockwise",
+      ),
+      ...style,
+    };
+    const [from, to] = [start.cut.representative, end.cut.representative];
+    movesToPiece = (incidence) =>
+      incidence.cut === null &&
+      !(from < incidence.parameter && incidence.parameter < to);
+  } else {
+    const [{ cut, pointId }] = ends as [(typeof ends)[0]];
+    kept = { ...entity, endPointId: pointId };
+    piece = {
+      ...(entity.kind === "lineSegment"
+        ? factories.createLineEntity(
+            `${entity.label} split`,
+            pieceId,
+            pointId,
+            entity.endPointId,
+          )
+        : factories.createArcEntity(
+            `${entity.label} split`,
+            pieceId,
+            entity.centerPointId,
+            pointId,
+            entity.endPointId,
+            entity.sweepDirection,
+          )),
+      ...style,
+    };
+    movesToPiece = (incidence) =>
+      incidence.cut === null &&
+      (intersections.parameterOrder === "increasing"
+        ? incidence.parameter > cut.enclosure[1]
+        : incidence.parameter < cut.enclosure[0]);
+  }
   const retargeted = new Set(
     intersections.incidences.flatMap((incidence) =>
-      incidence.cut === null && incidence.parameter > cut.enclosure[1]
-        ? [incidence.constraintId]
-        : [],
+      movesToPiece(incidence) ? [incidence.constraintId] : [],
     ),
   );
+  const { dimensions, added } = rebuiltArcBindings({
+    dimensions:
+      entity.kind === "circle"
+        ? circleRadiiAsDiameters(definition, entity.entityId)
+        : definition.dimensions,
+    kinds: new Set<ArcBindingKind>(
+      entity.kind === "circle"
+        ? ["arcStartPointCoincident", "arcEndPointCoincident"]
+        : definition.dimensions.flatMap((dimension) =>
+            (dimension.kind === "arcStartPointCoincident" ||
+              dimension.kind === "arcEndPointCoincident") &&
+            dimension.entityId === entity.entityId
+              ? [dimension.kind]
+              : [],
+          ),
+    ),
+    arcs: [kept, piece].filter(
+      (arc): arc is Extract<SketchEntityDefinition, { kind: "arc" }> =>
+        arc.kind === "arc",
+    ),
+    factories,
+    idTag: "split",
+  });
+  const ties = ends.flatMap((end) => end.ties);
   return {
     changed: true,
     message: null,
     definition: {
       ...definition,
-      ...withAppendedTrimPoints(definition, [
-        factories.createPoint(
-          `Split ${input.sequence} point`,
-          pointId,
-          cut.position,
-        ),
-      ]),
+      ...withAppendedTrimPoints(
+        definition,
+        ends.map((end) => end.point),
+      ),
+      dimensionIds: [
+        ...definition.dimensionIds,
+        ...added.map((dimension) => dimension.dimensionId),
+      ],
+      dimensions,
       entityIds: [...definition.entityIds, pieceId],
       entities: [
         ...definition.entities.map((candidate) =>
-          candidate.entityId === entity.entityId
-            ? { ...entity, endPointId: pointId }
-            : candidate,
+          candidate.entityId === entity.entityId ? kept : candidate,
         ),
         piece,
       ],
@@ -2076,11 +2211,239 @@ export function createSketchSplitMutation(input: {
           ),
           solvedSnapshot: input.solvedSnapshot,
           targetId: entity.entityId,
-          kept: { ...entity, endPointId: pointId },
+          kept,
           piece,
         }),
         ...ties,
       ],
+    },
+  };
+}
+
+/** T13m: a spline Split piece's new fit point is not the service's cut position bitwise. */
+export function splineSplitCutMismatchMessage(label: string) {
+  return `Split could not rebuild ${label} exactly at its cut (edit-cut-position-mismatch). Nothing was changed.`;
+}
+
+/**
+ * The exact spline Split (T13m, user decision Q1; option B pieces from
+ * `splineAggregatePiece` on the SOLVED input the cut was certified on, as
+ * the spline Trim).
+ * - **Open:** the original id keeps [start, c] and a new `split-spline`
+ *   (reusing the original occurrence ids, §4.4) keeps [c, end].
+ * - **Positional closure:** the same two pieces; they meet at c and at the
+ *   corner, whose point both keep (T-g14: split at the corner).
+ * - **Smooth closure:** one open spline (same id) around the whole loop
+ *   from c to c. Its start is the cut's point and its end a new
+ *   `split-end` point at the same position, so the loop opens there.
+ * - The cut's point is a new `split-point` Q at the cut's `position` (the
+ *   owner's Q must equal it bitwise, else it fails closed), or a knot cut's
+ *   fit point. Every new end is tied to the boundary (Q1b; a tie that
+ *   exists already is skipped).
+ * - Review R-3 as for a line (open, positional); one smooth piece moves
+ *   nothing. D27 tangents as in Trim. No fit point is freed.
+ */
+function createSplineSplitMutation(input: {
+  definition: SketchDefinition;
+  entity: Extract<SketchEntityDefinition, { kind: "spline" }>;
+  intersections: Extract<SketchEditIntersectionResult, { kind: "verified" }>;
+  solvedSnapshot: SolvedSketchSnapshot;
+  sequence: number;
+  factories: SketchEditOperationFactories;
+}): SketchMutationResult {
+  const { definition, entity, intersections, factories } = input;
+  const mismatch = () =>
+    fail(splineSplitCutMismatchMessage(entity.label), definition);
+  const solvedInput = solvedSplineEditInput(entity, input.solvedSnapshot);
+  if (!solvedInput) return mismatch();
+  const { ordered, solvedEntity, positions } = solvedInput;
+  const cut = intersections.cuts[0]!;
+  const splineCut: SplineCut = {
+    representative: cut.representative,
+    knotOccurrenceIndex: cut.knotOccurrenceIndex,
+  };
+  const smooth = entity.closure === "smooth";
+  const piece = (from: SplineCut | null, to: SplineCut | null) =>
+    splineAggregatePiece(solvedEntity, positions, from, to);
+  const pieces = smooth
+    ? [piece(splineCut, splineCut)]
+    : [piece(null, splineCut), piece(splineCut, null)];
+  if (pieces.some((entry) => !entry)) return mismatch();
+  const built = pieces as SplinePiece<SketchPointId>[];
+  // Review A-1 (as Trim): Q is the owner's evaluation on the solved input;
+  // it must be the service's evaluator position bitwise (no tolerance).
+  const cutOccurrences = built.flatMap((entry) =>
+    entry.occurrences.filter((occurrence) => occurrence.kind === "cut"),
+  );
+  if (
+    cutOccurrences.some(
+      (occurrence) =>
+        occurrence.kind !== "cut" ||
+        occurrence.position[0] !== cut.position[0] ||
+        occurrence.position[1] !== cut.position[1],
+    )
+  )
+    return mismatch();
+
+  const newPoint = (tag: string, position: SketchPoint) => {
+    const pointId = factories.createPointId(`split-${tag}`);
+    return factories.createPoint(
+      `Split ${input.sequence} ${tag}`,
+      pointId,
+      position,
+    );
+  };
+  const knotPointId =
+    cut.knotOccurrenceIndex === null
+      ? null
+      : ordered[cut.knotOccurrenceIndex]!.pointId;
+  const cutPoint = knotPointId ? null : newPoint("point", cut.position);
+  const cutPointId = knotPointId ?? cutPoint!.pointId;
+  const endPoint = smooth
+    ? newPoint("end", knotPointId ? positions[knotPointId]! : cut.position)
+    : null;
+
+  const authoredTangent = new Map(
+    entity.pointOccurrences.map((occurrence) => [
+      occurrence.occurrenceId,
+      occurrence.tangent,
+    ]),
+  );
+  const solvedTangent = new Map(
+    solvedEntity.pointOccurrences.map((occurrence) => [
+      occurrence.occurrenceId,
+      occurrence.tangent,
+    ]),
+  );
+  const splineOf = (
+    base: Extract<SketchEntityDefinition, { kind: "spline" }>,
+    built: SplinePiece<SketchPointId>,
+  ): Extract<SketchEntityDefinition, { kind: "spline" }> => {
+    const last = built.occurrences.length - 1;
+    const pointOccurrences = built.occurrences.map((occurrence, index) => {
+      // A smooth loop's end opens at its own new point (a fresh occurrence;
+      // at a knot the builder repeats the start occurrence there).
+      if (endPoint && index === last)
+        return {
+          occurrenceId: `spline_occurrence_${crypto.randomUUID()}`,
+          pointId: endPoint.pointId,
+          tangent: occurrence.tangent,
+        };
+      if (occurrence.kind === "cut")
+        return {
+          occurrenceId: `spline_occurrence_${crypto.randomUUID()}`,
+          pointId: cutPointId,
+          tangent: occurrence.tangent,
+        };
+      return {
+        occurrenceId: occurrence.occurrenceId,
+        pointId: occurrence.pointId,
+        tangent:
+          occurrence.tangent === solvedTangent.get(occurrence.occurrenceId)
+            ? authoredTangent.get(occurrence.occurrenceId)!
+            : occurrence.tangent,
+      };
+    });
+    const spline = {
+      ...base,
+      pointOccurrenceIds: pointOccurrences.map(
+        (occurrence) => occurrence.occurrenceId,
+      ),
+      pointOccurrences,
+      closure: "open" as const,
+      endSpanParameterLengths: built.endSpanParameterLengths,
+    };
+    if (!built.endSpanParameterLengths) delete spline.endSpanParameterLengths;
+    return spline;
+  };
+  const updated = splineOf(entity, built[0]!);
+  const pieceId =
+    built.length > 1 ? factories.createEntityId("split-spline") : null;
+  const second = pieceId
+    ? splineOf(
+        {
+          ...entity,
+          entityId: pieceId,
+          label: `${entity.label} split`,
+          target: factories.createSplineEntity(
+            `${entity.label} split`,
+            pieceId,
+            [],
+          ).target,
+        },
+        built[1]!,
+      )
+    : null;
+
+  const existing = definition.constraints;
+  const ties = [
+    { pointId: cutPointId, idTag: "split", tag: "" },
+    ...(endPoint
+      ? [{ pointId: endPoint.pointId, idTag: "split-end", tag: " end" }]
+      : []),
+  ]
+    .flatMap(({ pointId, idTag, tag }) =>
+      cutTies({
+        definition,
+        cut,
+        pointId,
+        idTag,
+        label: `${entity.label} split${tag}`,
+        factories,
+      }),
+    )
+    .filter((tie) =>
+      tie.kind === "coincident"
+        ? tie.pointIds[0] !== tie.pointIds[1] &&
+          !existing.some(
+            (constraint) =>
+              constraint.kind === "coincident" &&
+              constraint.pointIds.includes(tie.pointIds[0]) &&
+              constraint.pointIds.includes(tie.pointIds[1]),
+          )
+        : tie.kind !== "pointOnCurve" ||
+          !existing.some(
+            (constraint) =>
+              constraint.kind === "pointOnCurve" &&
+              constraint.point.pointId === tie.point.pointId &&
+              constraint.curve.entityId === tie.curve.entityId,
+          ),
+    );
+  const constraints = second
+    ? retargetedTangents({
+        definition,
+        constraints: retargetedTrimConstraints(
+          definition,
+          intersections,
+          second.entityId,
+        ),
+        solvedSnapshot: input.solvedSnapshot,
+        targetId: entity.entityId,
+        kept: updated,
+        piece: second,
+      })
+    : existing;
+  const added = [cutPoint, endPoint].flatMap((point) => point ?? []);
+  return {
+    changed: true,
+    message: null,
+    definition: {
+      ...definition,
+      ...withAppendedTrimPoints(definition, added),
+      entityIds: second
+        ? [...definition.entityIds, second.entityId]
+        : definition.entityIds,
+      entities: [
+        ...definition.entities.map((candidate) =>
+          candidate.entityId === entity.entityId ? updated : candidate,
+        ),
+        ...(second ? [second] : []),
+      ],
+      constraintIds: [
+        ...definition.constraintIds,
+        ...ties.map((tie) => tie.constraintId),
+      ],
+      constraints: [...constraints, ...ties],
     },
   };
 }

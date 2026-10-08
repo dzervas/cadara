@@ -95,6 +95,7 @@ import {
 import {
   selectSketchEditToolTarget,
   updateSketchOffsetPointer,
+  updateSketchSplitPointer,
 } from "./editing";
 import { isSketchConstructionSelected } from "./state";
 import { getSketchStyleTargetDefinition } from "./styles";
@@ -903,6 +904,10 @@ export function updateSketchPointer(
 ): SketchSessionState {
   if (session.activeEditTool?.toolId === "offset") {
     return updateSketchOffsetPointer(session, point);
+  }
+
+  if (session.activeEditTool?.toolId === "sketchSplit") {
+    return updateSketchSplitPointer(session, point);
   }
 
   if (

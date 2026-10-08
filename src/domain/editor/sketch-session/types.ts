@@ -270,6 +270,8 @@ export interface SketchEditQueryClick {
   entity: SketchEntityDefinition;
   /** Extend/Split: the boundary and its entity object at click time. */
   boundary?: { entityId: SketchEntityId; entity: SketchEntityDefinition };
+  /** T13m: Split's boundary click (the last sketch pointer), when known. */
+  pick?: SketchPoint;
 }
 
 /**
@@ -325,6 +327,8 @@ export interface SketchEditToolState {
   offsetPublication?: SketchOffsetPreviewPublication;
   /** T10g-1/T10g-2: queued and in-flight clicks (Trim, Extend, Split only). */
   editQuery?: SketchEditQueryState;
+  /** T13m: the last sketch pointer while Split is active (its click position). */
+  pointer?: SketchPoint;
 }
 
 /**

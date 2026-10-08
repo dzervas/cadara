@@ -63,6 +63,7 @@ import type { SketchDraftEntity } from "@/core/sketch-tools/definition";
 import type { SketchToolPresentationSchema } from "@/core/sketch-tools/editor-schema";
 import {
   EXTEND_TARGET_UNSUPPORTED_MESSAGE,
+  SPLIT_ENTITY_KINDS,
   SPLIT_TARGET_UNSUPPORTED_MESSAGE,
   type SketchEditIntersectionInput,
   type SketchEditIntersectionResult,
@@ -1444,6 +1445,26 @@ function withEditQuery(
   };
 }
 
+/**
+ * T13m: Split records the last sketch pointer (the preview scheduler
+ * flushes a pending move before any other event, so at a selection it is
+ * the click position); none while the pointer is off the sketch.
+ */
+export function updateSketchSplitPointer(
+  session: SketchSessionState,
+  point: SketchPoint | null,
+): SketchSessionState {
+  const tool = session.activeEditTool;
+  if (tool?.toolId !== "sketchSplit") return session;
+  if (!point) {
+    if (!tool.pointer) return session;
+    const withoutPointer = { ...tool };
+    delete withoutPointer.pointer;
+    return { ...session, activeEditTool: withoutPointer };
+  }
+  return { ...session, activeEditTool: { ...tool, pointer: point } };
+}
+
 /** The click's entity ids: the target, then the Extend/Split boundary. */
 function clickEntityIds(click: SketchEditQueryClick) {
   return click.boundary
@@ -1471,11 +1492,14 @@ function editQueryClickRefusal(
   const kindRefusal =
     toolId === "trim"
       ? trimTargetRefusal(click.entity)
-      : click.entity.kind === "lineSegment" &&
+      : toolId === "sketchExtend"
+        ? click.entity.kind === "lineSegment" &&
           click.boundary?.entity.kind === "lineSegment"
-        ? null
-        : toolId === "sketchExtend"
-          ? EXTEND_TARGET_UNSUPPORTED_MESSAGE
+          ? null
+          : EXTEND_TARGET_UNSUPPORTED_MESSAGE
+        : SPLIT_ENTITY_KINDS.has(click.entity.kind) &&
+            SPLIT_ENTITY_KINDS.has(click.boundary?.entity.kind ?? "")
+          ? null
           : SPLIT_TARGET_UNSUPPORTED_MESSAGE;
   return (
     kindRefusal ??
@@ -1602,6 +1626,8 @@ export function advanceSketchEditQueryQueue(
           kind: kind as "extend" | "split",
           targetEntityId: head.targetEntityId,
           boundaryEntityId: head.boundary.entityId,
+          // T13m: Split cuts at the crossing nearest its boundary click.
+          ...(head.pick ? { pick: [head.pick[0], head.pick[1]] } : {}),
         }
       : { kind: "trim", targetEntityId: head.targetEntityId };
     return withEditQuery(
@@ -1862,10 +1888,12 @@ function selectSketchEditQueryTargets(
   const message = editSelectionMessage(session, tool);
   if (click && !message) {
     const reset = { ...tool, selectedTarget: null, selectedTargets: [] };
+    // T13m: the completing click is the boundary's; Split records where.
+    const pick = tool.toolId === "sketchSplit" ? tool.pointer : undefined;
     return queueSketchEditQueryClick(
       { ...session, activeEditTool: reset, toolStagedEntities: [] },
       reset,
-      click,
+      pick ? { ...click, pick } : click,
     );
   }
   return {

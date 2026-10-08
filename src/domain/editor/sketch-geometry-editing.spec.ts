@@ -4780,7 +4780,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     ).toEqual([["pointOnCurve", "sketch_entity_cd"]]);
     expect(splitSession.liveSolve?.accepted).toBe(true);
 
-    // Q-g3: other kinds keep today's messages; nothing is queried or authored.
+    // Q-g3: unsupported kinds are refused; nothing is queried or authored.
     const circleDefinition = makeDefinition({
       pointIds: ["sketch_point_a", "sketch_point_b", "sketch_point_center"],
       points: [
@@ -4794,23 +4794,47 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
         makeCircle("sketch_entity_circle", "Circle", "sketch_point_center", 1),
       ],
     });
-    for (const [toolId, message] of [
+    // T13m (Q1): Split takes a circle boundary now; an ellipse is refused.
+    const ellipseDefinition = {
+      ...circleDefinition,
+      pointIds: [...circleDefinition.pointIds, "sketch_point_major" as const],
+      points: [
+        ...circleDefinition.points,
+        makePoint("sketch_point_major", "Major", 6, 0),
+      ],
+      entities: [
+        circleDefinition.entities[0]!,
+        {
+          kind: "ellipse" as const,
+          entityId: "sketch_entity_circle" as const,
+          label: "Ellipse",
+          target: circleDefinition.entities[1]!.target,
+          isConstruction: false,
+          centerPointId: "sketch_point_center" as const,
+          majorAxisPointId: "sketch_point_major" as const,
+          minorRadius: 1,
+        },
+      ],
+    };
+    for (const [toolId, message, definition] of [
       [
         "sketchExtend",
         "Sketch extend currently supports a line extended to another line.",
+        circleDefinition,
       ],
       [
         "sketchSplit",
-        "Sketch split currently supports a line split by another line.",
+        "Sketch split supports line, arc, circle, and spline entities split by a line, arc, circle, or spline.",
+        ellipseDefinition,
       ],
     ] as const) {
       const begun = beginSketchTool(
-        openSessionFromDefinition(circleDefinition),
+        openSessionFromDefinition(definition),
         toolId,
       );
       const refused = selectSketchEditToolTarget(
-        selectSketchEditToolTarget(begun, circleDefinition.entities[0]!.target),
-        circleDefinition.entities[1]!.target,
+        selectSketchEditToolTarget(begun, definition.entities[0]!.target),
+        definition.entities[1]!.target,
       );
       expect(refused.validationMessage, `${toolId}: today's message`).toBe(
         message,
@@ -6812,3 +6836,75 @@ test.each([
     expect(numeric.validationMessage).toBeNull();
   },
 );
+
+// T13m (orchestrator decision (B), logic lane, session seam): Split records
+// the last sketch pointer as its boundary click, and the operation carries
+// it as `pick`; the crossing nearest it is cut. No pointer (a selection
+// adopted at activation) or a cleared one: no pick (the first crossing along
+// the target). Review R-2: the browser never sends a null pointer (after the
+// pointer leaves the canvas the last on-canvas one is kept), so the
+// cleared case drives `updateSketchPointer(…, null)` synthetically.
+test("T13m: Split's boundary click (the last sketch pointer) picks the crossing; with no pointer, or a synthetically cleared one, the first crossing is cut; other tools record nothing", async () => {
+  let session = createNewSketchSession(
+    createStandardPlaneDefinition("xy"),
+    OCC_KERNEL_SETTINGS,
+  );
+  session = acceptSketchDraw(
+    startSketchDraw(beginSketchTool(session, "line"), [0, 0]),
+    [4, 0],
+  );
+  session = acceptSketchDraw(
+    startSketchDraw(beginSketchTool(session, "circle"), [2, 0]),
+    [3, 0],
+  );
+  const [line, circle] = session.definition.entities;
+  expect([line!.kind, circle!.kind], "premise").toEqual([
+    "lineSegment",
+    "circle",
+  ]);
+  const splitWith = async (
+    pointer: [number, number] | null | "clearedSynthetically",
+  ) => {
+    let split = selectSketchEditToolTarget(
+      beginSketchTool(session, "sketchSplit"),
+      line!.target,
+    );
+    if (pointer === "clearedSynthetically")
+      split = updateSketchPointer(updateSketchPointer(split, [2.9, 0.5]), null);
+    else if (pointer) split = updateSketchPointer(split, pointer);
+    const clicked = selectSketchEditToolTarget(split, circle!.target);
+    const operation =
+      clicked.activeEditTool?.editQuery?.inFlight?.input.operation;
+    const applied = await completeSketchEditQueriesForTest(clicked);
+    const piece = applied.definition.entities.at(-1);
+    if (piece?.kind !== "lineSegment") throw new Error("split line piece");
+    return {
+      operation,
+      at: applied.definition.points.find(
+        (point) => point.pointId === piece.startPointId,
+      )!.position,
+    };
+  };
+  const picked = await splitWith([2.9, 0.5]);
+  expect(picked.operation).toEqual({
+    kind: "split",
+    targetEntityId: line!.entityId,
+    boundaryEntityId: circle!.entityId,
+    pick: [2.9, 0.5],
+  });
+  expect(picked.at[0]).toBeCloseTo(3, 9);
+  for (const pointer of [null, "clearedSynthetically"] as const) {
+    const first = await splitWith(pointer);
+    expect(first.operation, `${pointer}`).toEqual({
+      kind: "split",
+      targetEntityId: line!.entityId,
+      boundaryEntityId: circle!.entityId,
+    });
+    expect(first.at[0], `${pointer}`).toBeCloseTo(1, 9);
+  }
+  // Trim records no pointer.
+  const trim = beginSketchTool(session, "trim");
+  expect(updateSketchPointer(trim, [1, 1]).activeEditTool).toBe(
+    trim.activeEditTool,
+  );
+});
