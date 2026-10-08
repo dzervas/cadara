@@ -8,9 +8,13 @@ import type {
   EditorState,
   EditorTransitionResult,
 } from "@/core/editor/state-machine";
+import { stableJsonValue } from "@/contracts/modeling/authored-document-serialization";
 import type { SketchSessionState } from "@/domain/editor/sketch-session";
 import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
-import { AuthoredActionHistory } from "@/domain/modeling/authored-action-history";
+import {
+  AuthoredActionHistory,
+  encodeAuthoredActionState,
+} from "@/domain/modeling/authored-action-history";
 
 function authoredState(
   documentId: DocumentId,
@@ -51,6 +55,49 @@ function restoreAuthoredSession(
     definition: state.data.definition,
   });
 }
+
+/** The session fields a label placement frame rewrites (`patchSketchDimensionAnnotationPlacement`). */
+type AnnotationGestureBasis = Pick<
+  SketchSessionState,
+  "definition" | "commitRequest" | "toolPresentation"
+>;
+
+interface AnnotationGesture {
+  startPoint: readonly [number, number] | null;
+  basis: AnnotationGestureBasis;
+}
+
+/**
+ * T14a C1: label frames keep the live solve and regions, so putting back the
+ * pre-gesture basis restores the accepted state without re-basing (no
+ * generation bump, no derivation). That holds only when the basis is the
+ * accepted state; otherwise the session is rebuilt from the accepted state.
+ */
+function restoreAnnotationGesture(
+  session: SketchSessionState,
+  accepted: AuthoredActionState,
+  gesture: AnnotationGesture,
+) {
+  const restored = { ...session, ...gesture.basis };
+  const encoded = (state: AuthoredActionState) =>
+    JSON.stringify(stableJsonValue(encodeAuthoredActionState(state)));
+  return encoded(authoredState(accepted.documentId, restored)) ===
+    encoded(accepted)
+    ? restored
+    : restoreAuthoredSession(session, accepted);
+}
+
+/**
+ * T14a (T-19): results of background derivations that never change the
+ * authored definition. They keep a pending label gesture and enter no
+ * ledger entry; every other non-frame event cancels the gesture first.
+ */
+const ANNOTATION_GESTURE_NEUTRAL_EVENTS = new Set<EditorEvent["type"]>([
+  "effect.sketchRegionsDerived",
+  "effect.sketchRegionDerivationFailed",
+  "effect.sketchSnapIntersectionsQueried",
+  "effect.sketchSnapIntersectionsQueryFailed",
+]);
 
 /**
  * Replaces the reducer's state with a session restored after the reducer
@@ -159,11 +206,16 @@ function replaceSemanticSketchIdentity<T>(
   ) as T;
 }
 
+/**
+ * The phase of a dimension label gesture frame. The Dimension tool's preview
+ * handle (`setConstraintAnnotationPlacement`) only moves tool state, never
+ * authored state, so its frames go straight to the reducer (T14a review B-1:
+ * its no-move end is the placement click that pins the value input).
+ */
 function annotationGesturePhase(event: EditorEvent) {
   if (
     event.type !== "sketch.toolPatched" ||
-    (event.patch.intent !== "setDimensionAnnotationPlacement" &&
-      event.patch.intent !== "setConstraintAnnotationPlacement")
+    event.patch.intent !== "setDimensionAnnotationPlacement"
   ) {
     return null;
   }
@@ -198,10 +250,7 @@ export class SketchAuthoredActions {
     string,
     Extract<AuthoredActionState, { context: { kind: "sketch" } }>["data"]
   >();
-  private readonly annotationGestures = new Map<
-    string,
-    readonly [number, number] | null
-  >();
+  private readonly annotationGestures = new Map<string, AnnotationGesture>();
 
   reset() {
     this.history = new AuthoredActionHistory();
@@ -247,14 +296,23 @@ export class SketchAuthoredActions {
     }
     const annotationPhase = annotationGesturePhase(event);
     const annotationClientPoint = annotationGestureClientPoint(event);
-    if (beforeKey && annotationPhase === "start") {
-      this.annotationGestures.set(beforeKey, annotationClientPoint);
-    } else if (
-      beforeKey &&
-      annotationPhase === "move" &&
-      !this.annotationGestures.has(beforeKey)
-    ) {
-      this.annotationGestures.set(beforeKey, annotationClientPoint);
+    const pendingGesture = beforeKey
+      ? this.annotationGestures.get(beforeKey)
+      : undefined;
+    if (before.kind === "editingSketch" && beforeKey) {
+      // T14a: frames of a gesture that was never started or was already
+      // cancelled (the chip keeps reporting it) change nothing.
+      if (annotationPhase && annotationPhase !== "start" && !pendingGesture)
+        return { state: before, effects: [] };
+      if (annotationPhase === "start")
+        this.annotationGestures.set(beforeKey, {
+          startPoint: annotationClientPoint,
+          basis: pendingGesture?.basis ?? {
+            definition: before.session.definition,
+            commitRequest: before.session.commitRequest,
+            toolPresentation: before.session.toolPresentation,
+          },
+        });
     }
     const leavesGesture =
       event.type === "command.cancelled" ||
@@ -262,29 +320,54 @@ export class SketchAuthoredActions {
       event.type === "tool.activated" ||
       event.type === "sketch.activeToolCleared" ||
       event.type === "sketch.escapeRequested";
-    const hasAnnotationGesture =
-      beforeKey !== null && this.annotationGestures.has(beforeKey);
-    const annotationStartPoint = beforeKey
-      ? this.annotationGestures.get(beforeKey)
-      : undefined;
     const annotationMoved =
       annotationPhase === "end" &&
-      annotationStartPoint !== undefined &&
-      (annotationStartPoint === null ||
+      pendingGesture !== undefined &&
+      (pendingGesture.startPoint === null ||
         annotationClientPoint === null ||
         Math.hypot(
-          annotationClientPoint[0] - annotationStartPoint[0],
-          annotationClientPoint[1] - annotationStartPoint[1],
+          annotationClientPoint[0] - pendingGesture.startPoint[0],
+          annotationClientPoint[1] - pendingGesture.startPoint[1],
         ) >= ANNOTATION_DRAG_THRESHOLD_PX);
+
+    // T14a (T-19): a pending label gesture is a gesture like a drag. A
+    // cancel frame or any event that is not one of its frames (Escape,
+    // hover, Delete, Undo, selection, tools, Finish, ...) cancels it first,
+    // then is handled against the restored accepted state.
+    if (
+      before.kind === "editingSketch" &&
+      beforeKey &&
+      pendingGesture &&
+      (annotationPhase === "cancel" ||
+        (annotationPhase === null &&
+          !ANNOTATION_GESTURE_NEUTRAL_EVENTS.has(event.type)))
+    ) {
+      this.annotationGestures.delete(beforeKey);
+      const accepted = this.accepted.get(beforeKey);
+      if (accepted) {
+        before = {
+          ...before,
+          session: restoreAnnotationGesture(
+            before.session,
+            accepted,
+            pendingGesture,
+          ),
+        };
+      }
+      if (annotationPhase === "cancel")
+        return this.withAvailability(
+          { state: before, effects: [] },
+          beforeIdentity!,
+        );
+    }
 
     // Leaving a pointer gesture must not publish its preview through Finish or a tool switch.
     if (
       before.kind === "editingSketch" &&
       beforeKey &&
       (before.session.activeDrag ||
-        before.session.activeSpecialMode?.activeDragHandle ||
-        hasAnnotationGesture) &&
-      (leavesGesture || annotationPhase === "cancel")
+        before.session.activeSpecialMode?.activeDragHandle) &&
+      leavesGesture
     ) {
       const accepted = this.accepted.get(beforeKey);
       if (accepted) {
@@ -293,7 +376,6 @@ export class SketchAuthoredActions {
           session: restoreAuthoredSession(before.session, accepted),
         };
       }
-      this.annotationGestures.delete(beforeKey);
     }
     const result = reduce(before);
     if (
@@ -351,23 +433,38 @@ export class SketchAuthoredActions {
       return this.withAvailability(result, identity);
     }
     const expected = this.accepted.get(key)!;
-    if (annotationPhase === "start" || annotationPhase === "move") {
+    const neutralGesture = ANNOTATION_GESTURE_NEUTRAL_EVENTS.has(event.type)
+      ? this.annotationGestures.get(key)
+      : undefined;
+    // Review A-1: a neutral result may rebuild the tool presentation; a
+    // later cancel restores that one, not the pre-gesture one.
+    if (
+      neutralGesture &&
+      before.kind === "editingSketch" &&
+      state.session.toolPresentation !== before.session.toolPresentation
+    ) {
+      neutralGesture.basis = {
+        ...neutralGesture.basis,
+        toolPresentation: state.session.toolPresentation,
+      };
+    }
+    if (
+      annotationPhase === "start" ||
+      annotationPhase === "move" ||
+      neutralGesture
+    ) {
       return this.withAvailability(result, identity);
     }
-    if (annotationPhase === "cancel") {
-      this.annotationGestures.delete(key);
-      restoreAfterReducer(before, result, {
-        ...state,
-        session: restoreAuthoredSession(state.session, expected),
-      });
-      return this.withAvailability(result, identity);
-    }
-    if (annotationPhase === "end") {
+    if (annotationPhase === "end" && pendingGesture) {
       this.annotationGestures.delete(key);
       if (!annotationMoved) {
         restoreAfterReducer(before, result, {
           ...state,
-          session: restoreAuthoredSession(state.session, expected),
+          session: restoreAnnotationGesture(
+            state.session,
+            expected,
+            pendingGesture,
+          ),
         });
         return this.withAvailability(result, identity);
       }

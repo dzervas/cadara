@@ -9,6 +9,10 @@ import {
   type SketchAnnotationDescriptor,
 } from "@/domain/editor/sketch-session";
 import { makeCircleWithDiameterSession } from "@/components/cad/sketch-reference-dimension.fixtures";
+import {
+  DimensionAnnotationLabelDrag,
+  type DimensionAnnotationPointerEvent,
+} from "@/components/cad/three-cad-viewport-annotation-drag";
 
 test("src/components/cad/sketch-constraint-annotations.spec.tsx", () => {
   const annotation: SketchAnnotationDescriptor = {
@@ -413,4 +417,145 @@ test("T13d D12: reference dimension chips read '(value)', muted, with 'reference
   expect(driving, "premise: the driving chip renders").toBeTruthy();
   expect(driving).toContain(">4.00</span>");
   expect(driving).not.toContain("--cad-muted-foreground");
+});
+
+/** The chip's label drag driven with pointer events (T14a C1/C2, review R-5). */
+function makeLabelDragHarness() {
+  const annotation: SketchAnnotationDescriptor = {
+    id: "dimension_1_distance",
+    target: {
+      kind: "dimension",
+      sketchId: "sketch_draft",
+      dimensionId: "dimension_1_distance",
+    },
+    glyphKind: "dimensionDistance",
+    anchor: { kind: "sketchPoint", point: [5, 2], offset: { x: 0, y: -28 } },
+    affectedGeometryRefs: [],
+    label: "Distance",
+    detail: "10.00 mm distance",
+    status: "dimension",
+    visibleLabel: "10.00",
+    dragHandle: {
+      id: "dimension_1_distance-annotation-drag",
+      dimensionId: "dimension_1_distance",
+    },
+  };
+  const drag = new DimensionAnnotationLabelDrag();
+  const captured = new Set<number>();
+  const selected: unknown[] = [];
+  const phases: string[] = [];
+  const pointer = (
+    clientX: number,
+    clientY: number,
+  ): DimensionAnnotationPointerEvent => ({
+    pointerId: 1,
+    clientX,
+    clientY,
+    button: 0,
+    isPrimary: true,
+    currentTarget: {
+      setPointerCapture: (id) => void captured.add(id),
+      hasPointerCapture: (id) => captured.has(id),
+      releasePointerCapture: (id) => void captured.delete(id),
+    },
+    preventDefault: () => undefined,
+    stopPropagation: () => undefined,
+  });
+  return {
+    annotation,
+    drag,
+    captured,
+    selected,
+    phases,
+    down: (x: number, y: number) => drag.pointerDown(annotation, pointer(x, y)),
+    move: (x: number, y: number) =>
+      drag.pointerMove(
+        annotation,
+        pointer(x, y),
+        (target) => selected.push(target),
+        (_handle, clientX, clientY, phase) =>
+          phases.push(`${phase} ${clientX},${clientY}`),
+      ),
+    up: (x: number, y: number) => drag.pointerEnd(pointer(x, y), "end"),
+  };
+}
+
+test("T14a: a label press and release within 6 px is a click: no gesture, the click selects", () => {
+  const h = makeLabelDragHarness();
+  h.down(10, 10);
+  h.move(13, 14);
+  h.up(13, 14);
+  expect(h.phases, "No gesture below the threshold.").toEqual([]);
+  expect(h.selected, "The drag does not select; the click does.").toEqual([]);
+  expect(
+    h.drag.consumeClickSuppression(h.annotation.dragHandle?.id),
+    "The click is not suppressed, so it selects.",
+  ).toBe(false);
+  expect(h.captured.size, "The capture is released.").toBe(0);
+});
+
+test("T14a: a label drag past 6 px selects once and reports start, move and end; its click is suppressed once", () => {
+  const h = makeLabelDragHarness();
+  h.down(10, 10);
+  h.move(20, 10);
+  h.move(30, 10);
+  h.up(30, 10);
+  expect(h.selected).toEqual([h.annotation.target]);
+  expect(h.phases).toEqual([
+    "start 10,10",
+    "move 20,10",
+    "move 30,10",
+    "end 30,10",
+  ]);
+  expect(h.drag.consumeClickSuppression(h.annotation.dragHandle?.id)).toBe(
+    true,
+  );
+  expect(h.drag.consumeClickSuppression(h.annotation.dragHandle?.id)).toBe(
+    false,
+  );
+  expect(h.captured.size).toBe(0);
+  h.drag.lostPointerCapture({ pointerId: 1 });
+  expect(
+    h.phases,
+    "The capture loss that follows a release reports nothing.",
+  ).toHaveLength(4);
+});
+
+test("T14a: lostpointercapture mid label drag reports cancel and ends the drag", () => {
+  const h = makeLabelDragHarness();
+  h.down(10, 10);
+  h.move(30, 10);
+  h.drag.lostPointerCapture({ pointerId: 1 });
+  h.move(40, 10);
+  h.up(40, 10);
+  expect(h.phases).toEqual(["start 10,10", "move 30,10", "cancel 30,10"]);
+});
+
+test("T14a: a label drag whose chip or layer unmounts reports cancel", () => {
+  const h = makeLabelDragHarness();
+  const handleId = h.annotation.dragHandle!.id;
+  h.down(10, 10);
+  h.move(30, 10);
+  h.drag.retainHandles(new Set([handleId]));
+  expect(h.phases, "A still-rendered chip keeps its drag.").toEqual([
+    "start 10,10",
+    "move 30,10",
+  ]);
+  h.drag.retainHandles(new Set());
+  expect(h.phases.at(-1), "The chip unmounted.").toBe("cancel 30,10");
+
+  const layer = makeLabelDragHarness();
+  layer.down(10, 10);
+  layer.move(30, 10);
+  layer.drag.cancel();
+  layer.up(30, 10);
+  expect(layer.phases, "The layer unmounted.").toEqual([
+    "start 10,10",
+    "move 30,10",
+    "cancel 30,10",
+  ]);
+  const pressed = makeLabelDragHarness();
+  pressed.down(10, 10);
+  pressed.drag.cancel();
+  expect(pressed.phases, "A press without a drag reports nothing.").toEqual([]);
 });

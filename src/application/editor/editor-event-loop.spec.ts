@@ -1100,7 +1100,7 @@ test("EditorEventLoop keeps drag regions stale until the drag completes, then de
 });
 
 test.each([false, true])(
-  "EditorEventLoop derives a restored annotation-gesture basis once (T10 A11/A13, supersede=%s)",
+  "EditorEventLoop derives nothing for a cancelled or unmoved annotation gesture; live regions stay current (T10 A11/A13, T14a C1, supersede=%s)",
   async (supersede) => {
     const snapshot = await createSeedDocumentSnapshot();
     const sketch = snapshot.document.sketches[0]!;
@@ -1116,7 +1116,7 @@ test.each([false, true])(
 
     const dimension = currentSketch().session.definition.dimensions[0]!;
     const patch = (
-      gesturePhase: "start" | "move" | "cancel",
+      gesturePhase: "start" | "move" | "end" | "cancel",
       point: readonly [number, number],
     ) =>
       loop.dispatch({
@@ -1129,18 +1129,57 @@ test.each([false, true])(
           clientPoint: point,
         },
       });
+    const placement = () =>
+      currentSketch().session.definition.dimensions[0]!.annotationPlacement;
+    /** A label restore re-bases nothing: no request, same generation, regions current. */
+    const expectNoDerivation = async (
+      derivationCount: number,
+      generation: number,
+      message: string,
+    ) => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(derivations, message).toHaveLength(derivationCount);
+      expect(currentSketch().pendingRegionRequest, message).toBe(null);
+      expect(currentSketch().session.liveRegions.generation, message).toBe(
+        generation,
+      );
+      expect(currentSketch().session.liveRegions.status, message).toBe(
+        "current",
+      );
+    };
+    const original = placement();
+    const generation = currentSketch().session.liveRegions.generation;
+
     patch("start", [20, 10]);
     patch("move", [30, 15]);
     patch("cancel", [30, 15]);
-    await waitForCondition(() => derivations.length === 3);
-    const restored = currentSketch();
-    expect(restored.pendingRegionRequest).toEqual({
-      requestId: derivations[2]!.input.requestId,
-      generation: restored.session.liveRegions.generation,
-    });
-    expect(derivations[2]!.input.basis.definition).toBe(
-      restored.session.liveSolve!.definition,
+    expect(placement()).toEqual(original);
+    await expectNoDerivation(2, generation, "A cancel derives nothing.");
+
+    patch("start", [20, 10]);
+    patch("end", [22, 12]);
+    expect(placement()).toEqual(original);
+    await expectNoDerivation(2, generation, "A no-move end derives nothing.");
+
+    patch("start", [20, 10]);
+    patch("move", [40, 30]);
+    patch("end", [40, 30]);
+    const moved = placement();
+    expect(moved).not.toEqual(original);
+    expect(currentSketch().session.actionAvailability?.canUndo).toBe(true);
+    patch("start", [40, 30]);
+    patch("move", [60, 40]);
+    patch("cancel", [60, 40]);
+    expect(placement()).toEqual(moved);
+    await expectNoDerivation(
+      2,
+      generation,
+      "A cancel after a moved label derives nothing.",
     );
+
+    // Undo re-bases once; a later label cancel derives nothing (review A-3).
+    loop.dispatch({ type: "history.undoRequested" });
+    await waitForCondition(() => derivations.length === 3);
     derivations[2]!.resolve({
       regions: sketch.sketch.regions,
       diagnostics: [],
@@ -1151,11 +1190,17 @@ test.each([false, true])(
         state.kind === "editingSketch" &&
         state.session.liveRegions.status === "current",
     );
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(
-      derivations,
-      "The cancel restores after the reducer; the reducer's request for the superseded basis is dropped, so the restored basis derives once.",
-    ).toHaveLength(3);
+    expect(placement()).toEqual(original);
+    const undoneGeneration = currentSketch().session.liveRegions.generation;
+    patch("start", [20, 10]);
+    patch("move", [30, 15]);
+    patch("cancel", [30, 15]);
+    expect(placement()).toEqual(original);
+    await expectNoDerivation(
+      3,
+      undoneGeneration,
+      "Undo then a label cancel derives nothing more.",
+    );
     loop.stop();
   },
 );

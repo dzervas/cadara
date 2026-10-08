@@ -34,6 +34,70 @@ async function addDimensionWithTool(
   await page.keyboard.press("Escape");
 }
 
+test("T14a review B-1: gliding the mouse to the placement point and clicking on the preview handle shows the value input", async ({
+  page,
+}) => {
+  const workbench = new SketchWorkbenchHarness(page);
+
+  await workbench.open();
+  await workbench.activateTool("Start a new sketch.");
+  await page
+    .getByRole("button", { name: /Top Plane/ })
+    .first()
+    .click();
+  await workbench.expectSketchSessionActive();
+
+  const canvas = page.locator("main canvas").first();
+  await workbench.activateTool("Create line geometry.");
+  await canvas.click({ position: { x: 560, y: 460 }, force: true });
+  await canvas.click({ position: { x: 760, y: 460 }, force: true });
+  await expect
+    .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
+    .toContain("1 entities staged");
+
+  await workbench.activateTool("Create point-to-point distance dimensions.");
+  await page
+    .getByRole("menuitem", {
+      name: /Distance Create aligned distance dimensions/,
+    })
+    .click();
+  await canvas.click({ position: { x: 560, y: 460 }, force: true });
+  await canvas.click({ position: { x: 760, y: 460 }, force: true });
+
+  // A mouse user glides to the placement point; the preview (and its drag
+  // handle) follows the pointer, so the click lands on the handle.
+  const box = (await canvas.boundingBox())!;
+  await page.mouse.move(box.x + 700, box.y + 470);
+  await page.mouse.move(box.x + 660, box.y + 400, { steps: 12 });
+  await workbench.waitForAnimationFrames(3);
+  await page.evaluate(() => {
+    window.addEventListener(
+      "pointerdown",
+      (event) => {
+        (window as unknown as { __pointerdownHandle: string | null })
+          .__pointerdownHandle = (event.target as Element).getAttribute(
+          "data-sketch-viewport-drag-handle",
+        );
+      },
+      { capture: true, once: true },
+    );
+  });
+  await page.mouse.down();
+  await page.mouse.up();
+
+  expect(
+    await page.evaluate(
+      () =>
+        (window as unknown as { __pointerdownHandle: string | null })
+          .__pointerdownHandle,
+    ),
+    "The click lands on the preview's drag handle.",
+  ).not.toBe(null);
+  await expect(
+    page.locator("[data-sketch-viewport-floating-input]"),
+  ).toBeVisible();
+});
+
 test("committed distance annotation input keeps Backspace local and saves durable value edits", async ({
   page,
 }) => {

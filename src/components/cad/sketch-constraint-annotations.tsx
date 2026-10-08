@@ -1,13 +1,6 @@
-import {
-  useRef,
-  type MutableRefObject,
-  type PointerEvent as ReactPointerEvent,
-} from "react";
+import { useEffect, useState } from "react";
 
-import type {
-  SketchAnnotationDescriptor,
-  SketchDimensionAnnotationDragHandle,
-} from "@/domain/editor/sketch-session";
+import type { SketchAnnotationDescriptor } from "@/domain/editor/sketch-session";
 import type {
   SketchConstraintRef,
   SketchDimensionRef,
@@ -24,6 +17,10 @@ import {
   type SketchViewportFeedbackProjection,
 } from "@/components/cad/sketch-viewport-feedback-model";
 import { getSketchRenderingPaletteToken } from "@/components/cad/sketch-rendering-palette";
+import {
+  DimensionAnnotationLabelDrag,
+  type DimensionAnnotationDragListener,
+} from "@/components/cad/three-cad-viewport-annotation-drag";
 
 interface SketchConstraintAnnotationsProps {
   annotations: readonly SketchAnnotationDescriptor[];
@@ -36,15 +33,8 @@ interface SketchConstraintAnnotationsProps {
   onClearHover: () => void;
   onSelect: (target: SketchConstraintRef | SketchDimensionRef) => void;
   onEdit: (target: SketchConstraintRef | SketchDimensionRef) => void;
-  onDimensionDrag?: (
-    handle: SketchDimensionAnnotationDragHandle,
-    clientX: number,
-    clientY: number,
-    phase: "start" | "move" | "end" | "cancel",
-  ) => void;
+  onDimensionDrag?: DimensionAnnotationDragListener;
 }
-
-const DIMENSION_ANNOTATION_DRAG_THRESHOLD_PX = 6;
 
 export function SketchConstraintAnnotations({
   annotations,
@@ -59,15 +49,7 @@ export function SketchConstraintAnnotations({
   onEdit,
   onDimensionDrag,
 }: SketchConstraintAnnotationsProps) {
-  const dragStateRef = useRef<{
-    handle: SketchDimensionAnnotationDragHandle;
-    pointerId: number;
-    startX: number;
-    startY: number;
-    dragging: boolean;
-    target: SketchConstraintRef | SketchDimensionRef;
-  } | null>(null);
-  const suppressClickHandleIdRef = useRef<string | null>(null);
+  const [labelDrag] = useState(() => new DimensionAnnotationLabelDrag());
 
   const visibleAnnotations = annotations.flatMap((annotation) => {
     const visibility = resolveSketchAnnotationVisibility(annotation, {
@@ -79,10 +61,6 @@ export function SketchConstraintAnnotations({
 
     return visibility === "hidden" ? [] : [{ annotation, visibility }];
   });
-
-  if (visibleAnnotations.length === 0) {
-    return null;
-  }
 
   const visibleProjectionIds = new Set(
     visibleAnnotations.map(({ annotation }) =>
@@ -96,6 +74,23 @@ export function SketchConstraintAnnotations({
       ),
     ).map((projection) => [projection.id, projection]),
   );
+  // T14a C2: a drag whose chip unmounts, or whose layer unmounts, cancels.
+  const renderedDragHandleIds = visibleAnnotations
+    .flatMap(({ annotation }) =>
+      annotation.dragHandle &&
+      projectionById.has(getAnnotationProjectionId(annotation.id))
+        ? [annotation.dragHandle.id]
+        : [],
+    )
+    .join("\n");
+  useEffect(() => {
+    labelDrag.retainHandles(new Set(renderedDragHandleIds.split("\n")));
+  }, [labelDrag, renderedDragHandleIds]);
+  useEffect(() => () => labelDrag.cancel(), [labelDrag]);
+
+  if (visibleAnnotations.length === 0) {
+    return null;
+  }
 
   return (
     <div className="pointer-events-none absolute inset-0 z-30">
@@ -155,43 +150,23 @@ export function SketchConstraintAnnotations({
             title={`${annotation.label}: ${annotation.detail}`}
             onPointerEnter={() => onHover(annotation.target)}
             onPointerLeave={onClearHover}
-            onPointerDown={(event) =>
-              handleDimensionPointerDown(annotation, event, dragStateRef)
-            }
+            onPointerDown={(event) => labelDrag.pointerDown(annotation, event)}
             onPointerMove={(event) =>
-              handleDimensionPointerMove(
+              labelDrag.pointerMove(
                 annotation,
                 event,
-                dragStateRef,
                 onSelect,
                 onDimensionDrag,
               )
             }
-            onPointerUp={(event) =>
-              handleDimensionPointerEnd(
-                event,
-                dragStateRef,
-                suppressClickHandleIdRef,
-                onDimensionDrag,
-                "end",
-              )
-            }
-            onPointerCancel={(event) =>
-              handleDimensionPointerEnd(
-                event,
-                dragStateRef,
-                suppressClickHandleIdRef,
-                onDimensionDrag,
-                "cancel",
-              )
+            onPointerUp={(event) => labelDrag.pointerEnd(event, "end")}
+            onPointerCancel={(event) => labelDrag.pointerEnd(event, "cancel")}
+            onLostPointerCapture={(event) =>
+              labelDrag.lostPointerCapture(event)
             }
             onClick={(event) => {
-              const suppressHandleId = suppressClickHandleIdRef.current;
-              suppressClickHandleIdRef.current = null;
-
               if (
-                suppressHandleId &&
-                suppressHandleId === annotation.dragHandle?.id
+                labelDrag.consumeClickSuppression(annotation.dragHandle?.id)
               ) {
                 event.preventDefault();
                 event.stopPropagation();
@@ -222,137 +197,6 @@ export function SketchConstraintAnnotations({
       })}
     </div>
   );
-}
-
-function handleDimensionPointerDown(
-  annotation: SketchAnnotationDescriptor,
-  event: ReactPointerEvent<HTMLButtonElement>,
-  dragStateRef: MutableRefObject<{
-    handle: SketchDimensionAnnotationDragHandle;
-    pointerId: number;
-    startX: number;
-    startY: number;
-    dragging: boolean;
-    target: SketchConstraintRef | SketchDimensionRef;
-  } | null>,
-) {
-  if (
-    annotation.status !== "dimension" ||
-    !annotation.dragHandle ||
-    event.button !== 0 ||
-    !event.isPrimary
-  ) {
-    return;
-  }
-
-  dragStateRef.current = {
-    handle: annotation.dragHandle,
-    pointerId: event.pointerId,
-    startX: event.clientX,
-    startY: event.clientY,
-    dragging: false,
-    target: annotation.target,
-  };
-  event.currentTarget.setPointerCapture(event.pointerId);
-}
-
-function handleDimensionPointerMove(
-  annotation: SketchAnnotationDescriptor,
-  event: ReactPointerEvent<HTMLButtonElement>,
-  dragStateRef: MutableRefObject<{
-    handle: SketchDimensionAnnotationDragHandle;
-    pointerId: number;
-    startX: number;
-    startY: number;
-    dragging: boolean;
-    target: SketchConstraintRef | SketchDimensionRef;
-  } | null>,
-  onSelect: (target: SketchConstraintRef | SketchDimensionRef) => void,
-  onDimensionDrag?: (
-    handle: SketchDimensionAnnotationDragHandle,
-    clientX: number,
-    clientY: number,
-    phase: "start" | "move" | "end" | "cancel",
-  ) => void,
-) {
-  if (annotation.status !== "dimension" || !annotation.dragHandle) {
-    return;
-  }
-
-  const dragState = dragStateRef.current;
-  if (
-    !dragState ||
-    dragState.pointerId !== event.pointerId ||
-    dragState.handle.id !== annotation.dragHandle.id
-  ) {
-    return;
-  }
-
-  const dragDistance = Math.hypot(
-    event.clientX - dragState.startX,
-    event.clientY - dragState.startY,
-  );
-  if (
-    !dragState.dragging &&
-    dragDistance <= DIMENSION_ANNOTATION_DRAG_THRESHOLD_PX
-  ) {
-    return;
-  }
-
-  if (!dragState.dragging) {
-    dragState.dragging = true;
-    onSelect(dragState.target);
-    onDimensionDrag?.(
-      dragState.handle,
-      dragState.startX,
-      dragState.startY,
-      "start",
-    );
-  }
-
-  event.preventDefault();
-  event.stopPropagation();
-  onDimensionDrag?.(dragState.handle, event.clientX, event.clientY, "move");
-}
-
-function handleDimensionPointerEnd(
-  event: ReactPointerEvent<HTMLButtonElement>,
-  dragStateRef: MutableRefObject<{
-    handle: SketchDimensionAnnotationDragHandle;
-    pointerId: number;
-    startX: number;
-    startY: number;
-    dragging: boolean;
-    target: SketchConstraintRef | SketchDimensionRef;
-  } | null>,
-  suppressClickHandleIdRef: MutableRefObject<string | null>,
-  onDimensionDrag:
-    | ((
-        handle: SketchDimensionAnnotationDragHandle,
-        clientX: number,
-        clientY: number,
-        phase: "start" | "move" | "end" | "cancel",
-      ) => void)
-    | undefined,
-  phase: "end" | "cancel",
-) {
-  const dragState = dragStateRef.current;
-  if (!dragState || dragState.pointerId !== event.pointerId) {
-    return;
-  }
-
-  if (dragState.dragging) {
-    event.preventDefault();
-    event.stopPropagation();
-    suppressClickHandleIdRef.current = dragState.handle.id;
-    onDimensionDrag?.(dragState.handle, event.clientX, event.clientY, phase);
-  }
-
-  if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-    event.currentTarget.releasePointerCapture(event.pointerId);
-  }
-
-  dragStateRef.current = null;
 }
 
 function getAnnotationConstraintColor(annotation: SketchAnnotationDescriptor) {
