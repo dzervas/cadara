@@ -37,6 +37,7 @@ import {
   splineSourceSpanPairs,
 } from "@/contracts/sketch/offset-derivation-outputs";
 import { canonicalArcSupport } from "@/contracts/sketch/canonical-arc-support";
+import { declaredJoinClasses } from "@/contracts/sketch/region-extraction";
 import {
   projectedSplineIsClosed,
   type ProjectedSketchReferenceGeometry,
@@ -449,6 +450,140 @@ function doubledDimensionValue(value: unknown) {
   throw new Error(`A dimension value must be a number or an authored value.`);
 }
 
+/** The [start, end] point ids of a local curve (none for closed or end-less kinds). */
+function curveEndPointIds(entity: SketchEntityDefinition): SketchPointId[] {
+  switch (entity.kind) {
+    case "lineSegment":
+    case "arc":
+    case "ellipticalArc":
+    case "conic":
+      return [entity.startPointId, entity.endPointId];
+    case "bezierCurve":
+      return [entity.controlPointIds[0]!, entity.controlPointIds.at(-1)!];
+    case "spline": {
+      if (entity.closure !== "open") return [];
+      const occurrences = orderedSplineOccurrences(entity) ?? [];
+      return occurrences.length < 2
+        ? []
+        : [occurrences[0]!.pointId, occurrences.at(-1)!.pointId];
+    }
+    default:
+      return [];
+  }
+}
+
+/**
+ * D27: the constraints with every `tangent` on the cut target `targetId`
+ * moved to the new piece when the piece shares an end point with the
+ * tangent partner (the same point id, or one satisfied declared join class
+ * of `solved`) and the original id's piece (`kept`) does not; every other
+ * tangent stays on the original id. Review A1: a partner end point held on
+ * a piece by a `pointOnCurve` of `constraints` (already retargeted, R-3)
+ * also touches that piece (a Tangent arc started mid-line).
+ */
+function retargetedTangents(input: {
+  definition: SketchDefinition;
+  constraints: readonly ConstraintDefinition[];
+  solvedSnapshot: SolvedSketchSnapshot;
+  targetId: SketchEntityId;
+  kept: SketchEntityDefinition;
+  piece: SketchEntityDefinition;
+}): ConstraintDefinition[] {
+  const classes = declaredJoinClasses(input.definition, input.solvedSnapshot);
+  const touches = (
+    curve: SketchEntityDefinition,
+    partnerEnds: readonly SketchPointId[],
+  ) =>
+    partnerEnds.some(
+      (partnerEnd) =>
+        curveEndPointIds(curve).some(
+          (end) => classes.find(end) === classes.find(partnerEnd),
+        ) ||
+        input.constraints.some(
+          (constraint) =>
+            constraint.kind === "pointOnCurve" &&
+            constraint.point.kind === "localPoint" &&
+            constraint.curve.kind === "localEntity" &&
+            constraint.curve.entityId === curve.entityId &&
+            classes.find(constraint.point.pointId) === classes.find(partnerEnd),
+        ),
+    );
+  return input.constraints.map((constraint) => {
+    if (
+      constraint.kind !== "tangent" ||
+      !constraint.entityIds.includes(input.targetId)
+    )
+      return constraint;
+    const partnerId = constraint.entityIds.find((id) => id !== input.targetId);
+    const partner = input.definition.entities.find(
+      (candidate) => candidate.entityId === partnerId,
+    );
+    if (!partner) return constraint;
+    const partnerEnds = curveEndPointIds(partner);
+    const follow = (id: SketchEntityId) =>
+      id === input.targetId ? input.piece.entityId : id;
+    return touches(input.piece, partnerEnds) &&
+      !touches(input.kept, partnerEnds)
+      ? {
+          ...constraint,
+          entityIds: [
+            follow(constraint.entityIds[0]),
+            follow(constraint.entityIds[1]),
+          ],
+        }
+      : constraint;
+  });
+}
+
+type ArcBindingKind = "arcStartPointCoincident" | "arcEndPointCoincident";
+
+/**
+ * D27: arc endpoint bindings rebuilt per resulting arc piece from each
+ * piece's own end points. The original id's bindings of `kinds` keep their
+ * ids and now name its own start/end point; a missing one of `kinds` on it
+ * and every one of `kinds` on the new piece are created
+ * (`createArcEndpointDimensions`, ids `trim-arc-start/end`).
+ */
+function rebuiltArcBindings(input: {
+  dimensions: SketchDefinition["dimensions"];
+  kinds: ReadonlySet<ArcBindingKind>;
+  arcs: readonly Extract<SketchEntityDefinition, { kind: "arc" }>[];
+  factories: SketchEditOperationFactories;
+}) {
+  const ownPoint = (
+    arc: Extract<SketchEntityDefinition, { kind: "arc" }>,
+    kind: ArcBindingKind,
+  ) => (kind === "arcStartPointCoincident" ? arc.startPointId : arc.endPointId);
+  const byId = new Map(input.arcs.map((arc) => [arc.entityId, arc]));
+  const present = new Set<string>();
+  const dimensions = input.dimensions.map((dimension) => {
+    if (
+      dimension.kind !== "arcStartPointCoincident" &&
+      dimension.kind !== "arcEndPointCoincident"
+    )
+      return dimension;
+    const arc = byId.get(dimension.entityId);
+    if (!arc) return dimension;
+    present.add(`${arc.entityId}|${dimension.kind}`);
+    return { ...dimension, pointId: ownPoint(arc, dimension.kind) };
+  });
+  const added = input.arcs.flatMap((arc) =>
+    createArcEndpointDimensions({
+      createDimensionId: (suffix) =>
+        input.factories.createDimensionId(`trim-${suffix}`),
+      labelPrefix: arc.label,
+      entityId: arc.entityId,
+      startPointId: arc.startPointId,
+      endPointId: arc.endPointId,
+    }).filter(
+      (dimension) =>
+        input.kinds.has(dimension.kind as ArcBindingKind) &&
+        !present.has(`${arc.entityId}|${dimension.kind}`),
+    ),
+  );
+  return { dimensions: [...dimensions, ...added], added };
+}
+
 /**
  * Q1b: the ties of a new point `pointId` at `cut`, one per tied cutter
  * (`coincident` with a cutter end point, else `pointOnCurve`), with ids
@@ -506,8 +641,13 @@ function cutTies(input: {
  *   parameter lies beyond the last cut; everything else stays on the
  *   original id (which keeps the first piece);
  * - a circle's `circleRadius` dimensions become `diameter` dimensions (same
- *   id and placement, value doubled; a default "… radius" label becomes
- *   "… diameter");
+ *   id and placement, value doubled; the default labels "Circle N radius"
+ *   and "Radius N" become "Circle N diameter" and "Diameter N");
+ * - D27 (T13l): arc endpoint bindings are rebuilt per resulting arc from its
+ *   own end points (`rebuiltArcBindings`; a circle's arc gains both), and a
+ *   `tangent` follows the piece that touches its partner
+ *   (`retargetedTangents`). Every other dimension stays on the original id,
+ *   retained even when it now conflicts (the solve explains it, T13c D7);
  * - a spline (T10g-3b, option B): `createSplineTrimMutation`.
  * `solvedSnapshot` is the snapshot the intersections were certified on.
  */
@@ -603,12 +743,23 @@ export function createSketchTrimMutation(input: {
     };
   }
   const constraints = piece
-    ? retargetedTrimConstraints(definition, intersections, piece.entityId)
+    ? retargetedTangents({
+        definition,
+        constraints: retargetedTrimConstraints(
+          definition,
+          intersections,
+          piece.entityId,
+        ),
+        solvedSnapshot: input.solvedSnapshot,
+        targetId: entity.entityId,
+        kept: updated,
+        piece,
+      })
     : definition.constraints;
   // Orchestrator [TECH] 2026-10-04: a circle's `circleRadius` dimensions
   // (the Circle tool authors one) cannot drive the arc it becomes; each
   // becomes the same-id `diameter` (which drives arcs) of twice its value.
-  const dimensions =
+  const converted =
     entity.kind === "circle"
       ? definition.dimensions.map((dimension) =>
           dimension.kind === "circleRadius" &&
@@ -616,8 +767,12 @@ export function createSketchTrimMutation(input: {
             ? {
                 ...dimension,
                 kind: "diameter" as const,
-                // Review A-3: the default label ("Circle N radius") follows.
-                label: dimension.label.replace(/ radius$/, " diameter"),
+                // Review A-3 / T13l (review A4): only the default labels
+                // follow (the Circle tool's legacy "Circle N radius", the
+                // Radius tool's "Radius N"); a user label is kept.
+                label: dimension.label
+                  .replace(/^(Circle \d+) radius$/, "$1 diameter")
+                  .replace(/^Radius (\d+)$/, "Diameter $1"),
                 // T13d: a reference radius stays a reference (the marker is
                 // spread); a value it kept (ignored, D9′) doubles too.
                 ...(dimension.value === undefined
@@ -627,12 +782,38 @@ export function createSketchTrimMutation(input: {
             : dimension,
         )
       : definition.dimensions;
+  // D27: each resulting arc is bound to its own end points. An arc target's
+  // pieces carry the binding kinds it carried; a circle's arc gains both
+  // (probe P5: unbound, it detaches from its end points under an edit).
+  const { dimensions, added } = rebuiltArcBindings({
+    dimensions: converted,
+    kinds: new Set<ArcBindingKind>(
+      entity.kind === "circle"
+        ? ["arcStartPointCoincident", "arcEndPointCoincident"]
+        : definition.dimensions.flatMap((dimension) =>
+            (dimension.kind === "arcStartPointCoincident" ||
+              dimension.kind === "arcEndPointCoincident") &&
+            dimension.entityId === entity.entityId
+              ? [dimension.kind]
+              : [],
+          ),
+    ),
+    arcs: [updated, ...(piece ? [piece] : [])].filter(
+      (arc): arc is Extract<SketchEntityDefinition, { kind: "arc" }> =>
+        arc.kind === "arc",
+    ),
+    factories,
+  });
   return {
     changed: true,
     message: null,
     definition: {
       ...definition,
       ...withAppendedTrimPoints(definition, [start.point, end.point]),
+      dimensionIds: [
+        ...definition.dimensionIds,
+        ...added.map((dimension) => dimension.dimensionId),
+      ],
       dimensions,
       entityIds: piece
         ? [...definition.entityIds, piece.entityId]
@@ -900,8 +1081,22 @@ function createSplineTrimMutation(input: {
               constraint.curve.entityId === tie.curve.entityId,
           ),
     );
+  // Review A3: unreachable today (the solver supports `tangent` only on
+  // lines, circles and arcs; a spline tangent is `missing-tangent-entity`),
+  // kept so the D27 rule holds once spline tangents exist.
   const constraints = piece
-    ? retargetedTrimConstraints(definition, intersections, piece.entityId)
+    ? retargetedTangents({
+        definition,
+        constraints: retargetedTrimConstraints(
+          definition,
+          intersections,
+          piece.entityId,
+        ),
+        solvedSnapshot: input.solvedSnapshot,
+        targetId: entity.entityId,
+        kept: updated,
+        piece,
+      })
     : existing;
   return {
     changed: true,
@@ -1795,12 +1990,16 @@ export function createSketchExtendMutation(input: {
  * `position`, tied once to the boundary (Q1b). Review R-3: a target
  * `pointOnCurve` at the cut stays on the earlier piece (the original id);
  * one away from the cut moves to the new piece when its parameter lies
- * beyond the cut's enclosure.
+ * beyond the cut's enclosure. D27 (T13l): a target `tangent` moves to the
+ * new piece when that piece touches the tangent partner
+ * (`retargetedTangents` on `solvedSnapshot`, the snapshot the cut was
+ * certified on).
  */
 export function createSketchSplitMutation(input: {
   definition: SketchDefinition;
   targetEntityId: SketchEntityId;
   intersections: Extract<SketchEditIntersectionResult, { kind: "verified" }>;
+  solvedSnapshot: SolvedSketchSnapshot;
   sequence: number;
   factories: SketchEditOperationFactories;
 }): SketchMutationResult {
@@ -1864,15 +2063,22 @@ export function createSketchSplitMutation(input: {
         ...ties.map((tie) => tie.constraintId),
       ],
       constraints: [
-        ...definition.constraints.map((constraint) =>
-          constraint.kind === "pointOnCurve" &&
-          retargeted.has(constraint.constraintId)
-            ? {
-                ...constraint,
-                curve: { ...constraint.curve, entityId: pieceId },
-              }
-            : constraint,
-        ),
+        ...retargetedTangents({
+          definition,
+          constraints: definition.constraints.map((constraint) =>
+            constraint.kind === "pointOnCurve" &&
+            retargeted.has(constraint.constraintId)
+              ? {
+                  ...constraint,
+                  curve: { ...constraint.curve, entityId: pieceId },
+                }
+              : constraint,
+          ),
+          solvedSnapshot: input.solvedSnapshot,
+          targetId: entity.entityId,
+          kept: { ...entity, endPointId: pointId },
+          piece,
+        }),
         ...ties,
       ],
     },
