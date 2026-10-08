@@ -1500,33 +1500,51 @@ function buildSketchAnnotationDescriptors(session: SketchSessionState): {
       detail: describeConstraint(constraint),
       status: "constraint" as const,
     })),
-    ...session.definition.dimensions.map((dimension) => ({
-      id: dimension.dimensionId,
-      target: createSketchDimensionRef(sketchId, dimension.dimensionId),
-      glyphKind: getDimensionGlyphKind(dimension),
-      anchor: createDimensionAnnotationAnchor(
-        session,
-        session.definition,
-        dimension,
-      ),
-      affectedGeometryRefs: getDimensionAffectedGeometryRefs(
-        sketchId,
-        dimension,
-      ),
-      constraintDisplay: getSketchConstraintDisplayForTarget(
-        createSketchDimensionRef(sketchId, dimension.dimensionId),
-        constraintDisplaySummary,
-      ),
-      label: dimension.label,
-      detail: describeDimension(dimension, dimensionDisplayValue(dimension)),
-      status: "dimension" as const,
-      visibleLabel: formatDimensionVisibleLabel(
-        dimension,
-        dimensionDisplayValue(dimension),
-      ),
-      ...(isReferenceDimension(dimension) ? { reference: true as const } : {}),
-      dragHandle: createDimensionAnnotationDragHandle(dimension),
-    })),
+    ...session.definition.dimensions.map((dimension) => {
+      const annotation = {
+        id: dimension.dimensionId,
+        target: createSketchDimensionRef(sketchId, dimension.dimensionId),
+        glyphKind: getDimensionGlyphKind(dimension),
+        anchor: createDimensionAnnotationAnchor(
+          session,
+          session.definition,
+          dimension,
+        ),
+        affectedGeometryRefs: getDimensionAffectedGeometryRefs(
+          sketchId,
+          dimension,
+        ),
+        constraintDisplay: getSketchConstraintDisplayForTarget(
+          createSketchDimensionRef(sketchId, dimension.dimensionId),
+          constraintDisplaySummary,
+        ),
+        label: dimension.label,
+        detail: describeDimension(dimension, dimensionDisplayValue(dimension)),
+      };
+
+      // T14b (T-7): an arc's end binding ties the arc to its own end point.
+      // It reads as a contextual Coincident constraint, never as an
+      // always-visible dimension chip (display only; the schema is unchanged).
+      if (
+        dimension.kind === "arcStartPointCoincident" ||
+        dimension.kind === "arcEndPointCoincident"
+      ) {
+        return { ...annotation, status: "constraint" as const };
+      }
+
+      return {
+        ...annotation,
+        status: "dimension" as const,
+        visibleLabel: formatDimensionVisibleLabel(
+          dimension,
+          dimensionDisplayValue(dimension),
+        ),
+        ...(isReferenceDimension(dimension)
+          ? { reference: true as const }
+          : {}),
+        dragHandle: createDimensionAnnotationDragHandle(dimension),
+      };
+    }),
   ];
   return { descriptors, solvedSnapshot: solved.solvedSnapshot };
 }
@@ -1634,7 +1652,7 @@ export function getDimensionGlyphKind(
       return "dimensionAngle";
     case "arcStartPointCoincident":
     case "arcEndPointCoincident":
-      return "dimensionCoincident";
+      return "constraintCoincident";
   }
 }
 

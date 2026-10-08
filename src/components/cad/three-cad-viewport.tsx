@@ -16,6 +16,7 @@ import { SketchViewportFeedbackLayer } from "@/components/cad/sketch-viewport-fe
 import { SketchDragFeedbackCue } from "@/components/cad/sketch-drag-feedback-cue";
 import { SketchSpecialModeViewportFeedback } from "@/components/cad/sketch-special-mode-viewport-feedback";
 import { SketchConstraintAnnotations } from "@/components/cad/sketch-constraint-annotations";
+import { isSketchAnnotationIdleContext } from "@/components/cad/sketch-constraint-annotation-visibility";
 import { shouldApplySketchDisplayStyles } from "@/components/cad/sketch-display-style";
 import { resolveSketchRenderingPalette } from "@/components/cad/sketch-rendering-palette";
 import {
@@ -2597,13 +2598,23 @@ export function ThreeCadViewport({
       }
     };
 
-    const handlePointerLeave = () => {
+    const handlePointerLeave = (event: PointerEvent) => {
       if (sectionDragRef.current === null && !sketchGeometryDragRef.current) {
         cancelSketchGeometryDragMove();
         primaryPointerDownRef.current = null;
         pendingSketchGeometryDragRef.current = null;
       }
       updateSketchHoverStack([]);
+      // T14b (T-18/R-2): annotation hover is its own channel. A leave into an
+      // interactive annotation hands the hover to it: the chip's own enter and
+      // leave own it (React dispatches that enter before this native leave).
+      if (
+        event.relatedTarget instanceof Element &&
+        event.relatedTarget.closest("[data-sketch-annotation-layer]")
+      ) {
+        lastPickedTargetRef.current = null;
+        return;
+      }
       clearHover();
     };
 
@@ -3340,6 +3351,11 @@ export function ThreeCadViewport({
         }
         hoverTarget={hoverTarget}
         selection={selection}
+        definition={sketchSession?.definition ?? null}
+        interactive={isSketchAnnotationIdleContext(
+          sketchSession,
+          chooser !== null,
+        )}
         onHover={(target) => {
           hoverTargetRef.current = target;
           hoverRef.current(target);
