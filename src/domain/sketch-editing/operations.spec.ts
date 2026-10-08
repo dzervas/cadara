@@ -24,8 +24,12 @@ import {
 } from "@/contracts/sketch/edit-intersections";
 import { createSketchArrangementDeriver } from "@/contracts/sketch/region-extraction";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { createArcEndpointDimensions } from "@/core/sketch-tools/constraints";
 import { isAcceptedConstraintStatus } from "@/contracts/sketch/schema";
-import { createSessionCommitFactories } from "@/domain/editor/sketch-session/internals";
+import {
+  createSessionCommitFactories,
+  describeSketchSessionUnsatisfiedRequirements,
+} from "@/domain/editor/sketch-session/internals";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { resolveSketchDimensionValues } from "@/domain/modeling/sketch-dimension-expressions";
 import type { DimensionId, DocumentVariableId } from "@/contracts/shared/ids";
@@ -324,6 +328,18 @@ test("src/domain/sketch-editing/operations.spec.ts", async () => {
     ).toBe(3);
   }
 
+  const solveLines = (definition: SketchDefinition) =>
+    solveSketchDefinitionCore({
+      definition,
+      tolerances: {
+        coincidence: 1e-6,
+        angleRadians: 1e-6,
+        minimumSegmentLength: 1e-6,
+      },
+      modelingTolerance: 1e-3,
+      partialSolvePolicy: "bestEffort",
+    }).solvedSnapshot;
+
   /**
    * T10g-2: the verified edit intersections of an Extend/Split of AB by CD
    * on the definition's accepted solve (the one contract function).
@@ -335,16 +351,7 @@ test("src/domain/sketch-editing/operations.spec.ts", async () => {
     const result = await querySketchEditIntersections(
       {
         definition,
-        solvedSnapshot: solveSketchDefinitionCore({
-          definition,
-          tolerances: {
-            coincidence: 1e-6,
-            angleRadians: 1e-6,
-            minimumSegmentLength: 1e-6,
-          },
-          modelingTolerance: 1e-3,
-          partialSolvePolicy: "bestEffort",
-        }).solvedSnapshot,
+        solvedSnapshot: solveLines(definition),
         projectedReferences: [],
         modelingTolerance: 1e-3,
         operation: {
@@ -407,6 +414,7 @@ test("src/domain/sketch-editing/operations.spec.ts", async () => {
       definition: crossing,
       targetEntityId: "sketch_entity_ab" as SketchEntityId,
       intersections: await lineEditIntersections(crossing, "split"),
+      solvedSnapshot: solveLines(crossing),
       sequence: 10,
       factories: createFactories(),
     });
@@ -1724,6 +1732,10 @@ describe("createSketchTrimMutation (T10g-1 exact Trim, Q1b ties, review R-3)", (
         "target",
         await intersections(resolved(definition), "target"),
       );
+      const arc = after.entities.find(
+        (candidate) => candidate.entityId === entity("target"),
+      );
+      if (arc?.kind !== "arc") throw new Error("arc");
       expect(after.dimensions).toEqual([
         {
           dimensionId: "dimension_radius",
@@ -1734,6 +1746,17 @@ describe("createSketchTrimMutation (T10g-1 exact Trim, Q1b ties, review R-3)", (
           value: doubled,
           annotationPlacement: placement,
         },
+        // T13l (P5): the arc gains its two endpoint bindings.
+        expect.objectContaining({
+          kind: "arcStartPointCoincident",
+          entityId: arc.entityId,
+          pointId: arc.startPointId,
+        }),
+        expect.objectContaining({
+          kind: "arcEndPointCoincident",
+          entityId: arc.entityId,
+          pointId: arc.endPointId,
+        }),
       ]);
       const numeric = resolved(after);
       expect(
@@ -2542,6 +2565,7 @@ describe("createSketchTrimMutation (T10g-1 exact Trim, Q1b ties, review R-3)", (
       definition,
       targetEntityId: entity(target),
       intersections: result,
+      solvedSnapshot: solve(definition),
       sequence: 1,
       factories: createSessionCommitFactories(1, FIXTURE_SKETCH_ID as SketchId),
     });
@@ -2683,5 +2707,546 @@ describe("createSketchTrimMutation (T10g-1 exact Trim, Q1b ties, review R-3)", (
         ),
     ).toEqual([[piece.startPointId, entity("boundary")]]);
     expect(accepted(after)).toBe(true);
+  });
+
+  // ---------------------------------------------------------------------
+  // T13l (D27; C1–C3): Trim/Split reference retargeting.
+  // ---------------------------------------------------------------------
+
+  /** Per arc, the largest gap between its solved ends and its end points. */
+  const arcEndGaps = (definition: SketchDefinition) => {
+    const solved = solve(definition);
+    const at = (pointId: string) =>
+      solved.solvedPoints.find((point) => point.pointId === pointId)!
+        .solvedPosition;
+    return Object.fromEntries(
+      definition.entities.flatMap((candidate) => {
+        if (candidate.kind !== "arc") return [];
+        const arc = solved.solvedEntities.find(
+          (entry) => entry.entityId === candidate.entityId,
+        );
+        if (arc?.kind !== "arc") throw new Error("solved arc");
+        const gap = (a: readonly number[], b: readonly number[]) =>
+          Math.hypot(a[0]! - b[0]!, a[1]! - b[1]!);
+        return [
+          [
+            candidate.entityId,
+            Math.max(
+              gap(arc.startPosition, at(candidate.startPointId)),
+              gap(arc.endPosition, at(candidate.endPointId)),
+            ),
+          ],
+        ];
+      }),
+    ) as Record<string, number>;
+  };
+  const withConstraints = (
+    definition: SketchDefinition,
+    constraints: SketchDefinition["constraints"],
+  ): SketchDefinition => ({
+    ...definition,
+    constraintIds: [
+      ...definition.constraintIds,
+      ...constraints.map((constraint) => constraint.constraintId),
+    ],
+    constraints: [...definition.constraints, ...constraints],
+  });
+  const fixPoint = (pointId: string, position: P) =>
+    ({
+      constraintId: `constraint_fix_${pointId}`,
+      kind: "fixPoint",
+      label: `Fix ${pointId}`,
+      pointId,
+      position,
+    }) as SketchDefinition["constraints"][number];
+  const tangentsOf = (definition: SketchDefinition) =>
+    Object.fromEntries(
+      definition.constraints.flatMap((constraint) =>
+        constraint.kind === "tangent"
+          ? [[constraint.label, constraint.entityIds]]
+          : [],
+      ),
+    );
+
+  /**
+   * A corner B(4,0)→A(0,0) and A→C(0,4) rounded by a radius-2 Fillet
+   * (centre (2,2), tangent points tA = (2,0) on BA, tB = (0,2) on AC): the
+   * Fillet's own arc, 2 tangents and 2 endpoint bindings.
+   */
+  function filletedCorner(
+    extra?: (sketch: ReturnType<typeof makeSketchFixture>) => void,
+  ) {
+    const sketch = makeSketchFixture();
+    sketch.point("b", 4, 0);
+    sketch.point("a", 0, 0);
+    sketch.point("c", 0, 4);
+    sketch.line("ba", "b", "a");
+    sketch.line("ac", "a", "c");
+    extra?.(sketch);
+    const fillet = createSketchFilletMutation({
+      definition: sketch.definition(),
+      entityIds: [entity("ba"), entity("ac")],
+      radius: 2,
+      sequence: 1,
+      factories: createSessionCommitFactories(1, FIXTURE_SKETCH_ID as SketchId),
+    });
+    if (!fillet.definition) throw new Error(fillet.message ?? "fillet");
+    const arc = fillet.definition.entities.find(
+      (candidate) => candidate.kind === "arc",
+    );
+    if (arc?.kind !== "arc") throw new Error("fillet arc");
+    return { definition: fillet.definition, arc };
+  }
+
+  test("T13l C2 (T08b-g7-F A3): trim a fillet arc: endpoint dims follow the new endpoints; solve stays solved/satisfied; each tangent is on the piece that touches its line", async () => {
+    // Two short cutters cross the fillet arc at 240° (x = 1) and 210° (y = 1).
+    const { definition, arc } = filletedCorner((sketch) => {
+      sketch.point("v0", 1, -1);
+      sketch.point("v1", 1, 0.9);
+      sketch.line("v", "v0", "v1");
+      sketch.point("h0", -1, 1);
+      sketch.point("h1", 0.9, 1);
+      sketch.line("h", "h0", "h1");
+    });
+    expect(
+      definition.dimensions.map((dimension) => dimension.kind),
+      "premise: the Fillet's two endpoint bindings",
+    ).toEqual(["arcStartPointCoincident", "arcEndPointCoincident"]);
+    expect(accepted(definition), "premise: the fillet solves").toBe(true);
+    const result = await intersections(
+      definition,
+      arc.entityId.replace("sketch_entity_", ""),
+    );
+    expect(result.cuts).toHaveLength(2);
+    const after = apply(
+      definition,
+      arc.entityId.replace("sketch_entity_", ""),
+      result,
+    );
+    const kept = after.entities.find(
+      (candidate) => candidate.entityId === arc.entityId,
+    );
+    const piece = after.entities.at(-1);
+    if (kept?.kind !== "arc" || piece?.kind !== "arc") throw new Error("arcs");
+    expect(kept.startPointId, "the original keeps tA").toBe(arc.startPointId);
+    expect(piece.endPointId, "the piece keeps tB").toBe(arc.endPointId);
+    const solved = solve(after);
+    expect(solved.status.solveState).toBe("solved");
+    expect(accepted(after), "every constraint is satisfied").toBe(true);
+    expect(
+      solved.dimensionStatuses.every((entry) => entry.status === "driving"),
+      "every binding drives",
+    ).toBe(true);
+    expect(
+      displacement(after),
+      "satisfied where the Trim placed it: the solve moves nothing",
+    ).toBeLessThan(1e-9);
+    const gaps = arcEndGaps(after);
+    expect(
+      Math.max(gaps[kept.entityId]!, gaps[piece.entityId]!),
+      "both arcs end at their own end points (base: the old end binding kept the trimmed arc spanning to tB)",
+    ).toBeLessThan(1e-9);
+    const [startBinding, endBinding] = definition.dimensions;
+    expect(
+      after.dimensions,
+      "each arc is bound to its own end points; the original keeps its binding ids",
+    ).toEqual([
+      { ...startBinding, pointId: kept.startPointId },
+      { ...endBinding, pointId: kept.endPointId },
+      expect.objectContaining({
+        kind: "arcStartPointCoincident",
+        entityId: piece.entityId,
+        pointId: piece.startPointId,
+        label: `${piece.label} start`,
+      }),
+      expect.objectContaining({
+        kind: "arcEndPointCoincident",
+        entityId: piece.entityId,
+        pointId: piece.endPointId,
+        label: `${piece.label} end`,
+      }),
+    ]);
+    expect(after.dimensionIds).toEqual(
+      after.dimensions.map((dimension) => dimension.dimensionId),
+    );
+    expect(new Set(after.dimensionIds).size).toBe(4);
+    expect(
+      tangentsOf(after),
+      "tangent A stays, tangent B follows tB's piece",
+    ).toEqual({
+      "Fillet 1 tangent A": [arc.entityId, entity("ba")],
+      "Fillet 1 tangent B": [piece.entityId, entity("ac")],
+    });
+  });
+
+  test("T13l P5: a circle trimmed to an arc is bound to its own end points, so it stays attached under a deforming edit (unbound it detaches by 0.77)", async () => {
+    const sketch = makeSketchFixture();
+    sketch.point("o", 0, 0);
+    sketch.circle("target", "o", 2);
+    for (const x of [-1, 1]) {
+      sketch.point(`x${x}a`, x, -3);
+      sketch.point(`x${x}b`, x, 3);
+      sketch.line(`x${x}`, `x${x}a`, `x${x}b`);
+    }
+    const after = await trim(sketch.definition(), "target");
+    const arc = after.entities.find(
+      (candidate) => candidate.entityId === entity("target"),
+    );
+    if (arc?.kind !== "arc") throw new Error("arc");
+    expect(accepted(after)).toBe(true);
+    // The edit: the centre held, the arc's start point dragged along its
+    // cutter to (1, 2.5) (probe P5; a rigid translation hides the gap).
+    const edited = withConstraints(after, [
+      fixPoint("sketch_point_o", [0, 0]),
+      fixPoint(arc.startPointId, [1, 2.5]),
+    ]);
+    expect(accepted(edited)).toBe(true);
+    expect(arcEndGaps(edited)[arc.entityId]).toBeLessThan(1e-6);
+    expect(after.dimensions).toEqual([
+      expect.objectContaining({
+        kind: "arcStartPointCoincident",
+        entityId: arc.entityId,
+        pointId: arc.startPointId,
+        label: "target start",
+      }),
+      expect.objectContaining({
+        kind: "arcEndPointCoincident",
+        entityId: arc.entityId,
+        pointId: arc.endPointId,
+        label: "target end",
+      }),
+    ]);
+  });
+
+  test("T13l (C1 A-3, T13a A-1): the circle → arc rewrite relabels the Radius tool's 'Radius N' and the legacy 'Circle N radius'; other labels are kept; a reference radius stays a reference", async () => {
+    const sketch = makeSketchFixture();
+    sketch.point("o", 0, 0);
+    sketch.circle("target", "o", 2);
+    for (const x of [-1, 1]) {
+      sketch.point(`x${x}a`, x, -3);
+      sketch.point(`x${x}b`, x, 3);
+      sketch.line(`x${x}`, `x${x}a`, `x${x}b`);
+    }
+    const base = sketch.definition();
+    for (const [label, value, expected] of [
+      ["Radius 7", 2, { label: "Diameter 7", value: 4 }],
+      ["Circle 3 radius", 2, { label: "Circle 3 diameter", value: 4 }],
+      ["Radius 7 of hole", 2, { label: "Radius 7 of hole", value: 4 }],
+      // Review A4: a user label ending in " radius" is left alone.
+      ["Inner radius", 2, { label: "Inner radius", value: 4 }],
+      ["Radius 12", undefined, { label: "Diameter 12", reference: true }],
+    ] as const) {
+      const radius = {
+        dimensionId: "dimension_radius" as DimensionId,
+        kind: "circleRadius" as const,
+        label,
+        entityId: entity("target"),
+        ...(value === undefined ? { reference: true as const } : { value }),
+      };
+      const definition = {
+        ...base,
+        dimensionIds: [radius.dimensionId],
+        dimensions: [radius],
+      } as SketchDefinition;
+      const after = await trim(definition, "target");
+      expect(after.dimensions[0], label).toEqual({
+        dimensionId: "dimension_radius",
+        kind: "diameter",
+        entityId: entity("target"),
+        ...expected,
+      });
+      expect(accepted(after), `${label}: solves`).toBe(true);
+    }
+  });
+
+  test("T13l (D27): dimensions stay on the original id through Trim; a resulting conflict is retained and explained, not deleted", async () => {
+    const sketch = makeSketchFixture();
+    sketch.point("t0", 0, 0);
+    sketch.point("t1", 4, 0);
+    sketch.line("target", "t0", "t1");
+    for (const x of [1, 3]) {
+      sketch.point(`c${x}a`, x, -1);
+      sketch.point(`c${x}b`, x, 1);
+      sketch.line(`c${x}`, `c${x}a`, `c${x}b`);
+    }
+    const length = sketch.lineLength("target", 4);
+    const definition = withConstraints(sketch.definition(), [
+      {
+        constraintId: "constraint_horizontal",
+        kind: "horizontal",
+        label: "Horizontal 1",
+        entityId: entity("target"),
+      } as SketchDefinition["constraints"][number],
+      fixPoint("sketch_point_t0", [0, 0]),
+      fixPoint("sketch_point_c1a", [1, -1]),
+      fixPoint("sketch_point_c1b", [1, 1]),
+    ]);
+    expect(accepted(definition), "premise: solves before the Trim").toBe(true);
+    const after = await trim(definition, "target");
+    expect(after.dimensions, "retained on the original id, unchanged").toEqual(
+      definition.dimensions,
+    );
+    const solved = solve(after);
+    expect(
+      solved.dimensionStatuses.find((entry) => entry.dimensionId === length)
+        ?.status,
+      "the kept piece (length 1) conflicts with its length 4",
+    ).toBe("unsatisfied");
+    expect(
+      solved.diagnostics.some(
+        (diagnostic) =>
+          diagnostic.target?.kind === "dimension" &&
+          diagnostic.target.dimensionId === length,
+      ),
+      "the solve explains it per requirement (T13c D7)",
+    ).toBe(true);
+    expect(
+      describeSketchSessionUnsatisfiedRequirements({
+        definition: after,
+        liveSolve: { solvedSnapshot: solved } as never,
+      }),
+      "the session explanation names it and blocks profiles",
+    ).toMatch(
+      new RegExp(
+        `${length} \\(4 mm\\).* The sketch is invalid; profiles from it are blocked\\.`,
+      ),
+    );
+  });
+
+  test("T13l review A1: Split/Trim a line under a mid-line tangent arc: the tangent follows the piece its start point's `pointOnCurve` moved to; still tangent after the piece tilts", async () => {
+    // The Tangent arc tool's shape when its first click is mid-line: a new
+    // start point on the line (`pointOnCurve`), tangent to it, bound.
+    const sketch = makeSketchFixture();
+    sketch.point("l0", 0, 0);
+    sketch.point("l1", 6, 0);
+    sketch.line("line", "l0", "l1");
+    sketch.point("ac", 3, 2);
+    sketch.point("as", 3, 0);
+    sketch.point("ae", 5, 2);
+    sketch.arc("arc", "ac", "as", "ae");
+    const onLine = sketch.pointOnCurve("as", "line");
+    for (const x of [1, 2]) {
+      sketch.point(`s${x}a`, x, -1);
+      sketch.point(`s${x}b`, x, 1);
+      sketch.line(`s${x}`, `s${x}a`, `s${x}b`);
+    }
+    const bindings = createArcEndpointDimensions({
+      createDimensionId: (suffix) => `dimension_${suffix}` as DimensionId,
+      labelPrefix: "arc",
+      entityId: entity("arc"),
+      startPointId: "sketch_point_as" as SketchPointId,
+      endPointId: "sketch_point_ae" as SketchPointId,
+    });
+    const definition = withConstraints(
+      {
+        ...sketch.definition(),
+        dimensionIds: bindings.map((dimension) => dimension.dimensionId),
+        dimensions: bindings,
+      },
+      [
+        {
+          constraintId: "constraint_tangent",
+          kind: "tangent",
+          label: "Tangent 1",
+          entityIds: [entity("arc"), entity("line")],
+          relation: "external",
+        } as SketchDefinition["constraints"][number],
+      ],
+    );
+    expect(accepted(definition), "premise: the tangent arc solves").toBe(true);
+    const curveOf = (after: SketchDefinition) => {
+      const constraint = after.constraints.find(
+        (candidate) => candidate.constraintId === onLine,
+      );
+      return constraint?.kind === "pointOnCurve"
+        ? constraint.curve.entityId
+        : null;
+    };
+
+    // Split at x = 1: the arc start lies on the tail Q → l1.
+    const { after } = await lineEdit(definition, "split", "line", "s1");
+    const tail = after.entities.at(-1)!;
+    if (tail.kind !== "lineSegment") throw new Error("tail");
+    expect(curveOf(after), "premise: R-3 moved the incidence").toBe(
+      tail.entityId,
+    );
+    expect(tangentsOf(after)).toEqual({
+      "Tangent 1": [entity("arc"), tail.entityId],
+    });
+    expect(accepted(after)).toBe(true);
+    // Tilt the tail (its far end to (6, 1); head and boundary held).
+    const tilted = withConstraints(after, [
+      fixPoint("sketch_point_l0", [0, 0]),
+      fixPoint("sketch_point_l1", [6, 1]),
+      fixPoint("sketch_point_s1a", [1, -1]),
+      fixPoint("sketch_point_s1b", [1, 1]),
+    ]);
+    const solved = solve(tilted);
+    expect(solved.status.solveState).toBe("solved");
+    const at = (pointId: string) =>
+      solved.solvedPoints.find((point) => point.pointId === pointId)!
+        .solvedPosition;
+    const centre = at("sketch_point_ac");
+    const start = at("sketch_point_as");
+    const q = at(tail.startPointId);
+    const end = at("sketch_point_l1");
+    const radial = [start[0] - centre[0], start[1] - centre[1]] as const;
+    const direction = [end[0] - q[0], end[1] - q[1]] as const;
+    const radius = Math.hypot(...radial);
+    const length = Math.hypot(...direction);
+    expect(
+      Math.abs(
+        Math.abs(
+          direction[0] * (centre[1] - q[1]) - direction[1] * (centre[0] - q[0]),
+        ) /
+          length -
+          radius,
+      ),
+      "the tilted tail's line is at the arc's radius from its centre (tangent)",
+    ).toBeLessThan(1e-5);
+    // The contact may slide ±√(2rτ) along a tangent line, so the angle is
+    // judged at that scale (base: cos 0.24, ~14° off the tail).
+    expect(
+      Math.abs(radial[0] * direction[0] + radial[1] * direction[1]) /
+        radius /
+        length,
+      "the arc meets the tilted tail it sits on tangentially",
+    ).toBeLessThan(1e-2);
+
+    // Trim at x = 1 and 2: the arc start lies on the kept piece beyond.
+    const trimmed = await trim(definition, "line");
+    const piece = trimmed.entities.at(-1)!;
+    expect(curveOf(trimmed)).toBe(piece.entityId);
+    expect(tangentsOf(trimmed)).toEqual({
+      "Tangent 1": [entity("arc"), piece.entityId],
+    });
+    expect(accepted(trimmed)).toBe(true);
+  });
+
+  test("T13l review A2: Trim of an arc keeps exactly the binding kinds it carried: start only → each piece a start binding; unbound → pieces unbound (T17 owns never-bound arcs)", async () => {
+    const sketch = makeSketchFixture();
+    sketch.point("o", 0, 0);
+    sketch.point("a0", 2, 0);
+    sketch.point("a1", -2, 0);
+    sketch.arc("target", "o", "a0", "a1");
+    for (const x of [-1, 1]) {
+      sketch.point(`x${x}a`, x, -1);
+      sketch.point(`x${x}b`, x, 3);
+      sketch.line(`x${x}`, `x${x}a`, `x${x}b`);
+    }
+    const unbound = sketch.definition();
+    const [startBinding] = createArcEndpointDimensions({
+      createDimensionId: (suffix) => `dimension_${suffix}` as DimensionId,
+      labelPrefix: "target",
+      entityId: entity("target"),
+      startPointId: "sketch_point_a0" as SketchPointId,
+      endPointId: "sketch_point_a1" as SketchPointId,
+    });
+    const startOnly = {
+      ...unbound,
+      dimensionIds: [startBinding!.dimensionId],
+      dimensions: [startBinding!],
+    };
+    const after = await trim(startOnly, "target");
+    const piece = after.entities.at(-1)!;
+    if (piece.kind !== "arc") throw new Error("piece");
+    expect(after.dimensions).toEqual([
+      startBinding,
+      expect.objectContaining({
+        kind: "arcStartPointCoincident",
+        entityId: piece.entityId,
+        pointId: piece.startPointId,
+      }),
+    ]);
+    expect(accepted(after)).toBe(true);
+    const unboundAfter = await trim(unbound, "target");
+    expect(unboundAfter.entities.at(-1)!.kind).toBe("arc");
+    expect(unboundAfter.dimensions).toEqual([]);
+    expect(unboundAfter.dimensionIds).toEqual([]);
+  });
+
+  test("T13l C3 (D27): Split of a filleted line moves the fillet tangent to the piece that touches the fillet (same id, or one satisfied coincident class); otherwise it stays", async () => {
+    // Same id: BA is B(4,0) → tA after the Fillet; split at x = 3 the new
+    // piece Q → tA touches the fillet arc.
+    const { definition: filleted, arc } = filletedCorner((sketch) => {
+      sketch.point("s0", 3, -1);
+      sketch.point("s1", 3, 1);
+      sketch.line("s", "s0", "s1");
+    });
+    const split = await lineEdit(filleted, "split", "ba", "s");
+    const piece = split.after.entities.at(-1)!;
+    expect(piece.entityId).toMatch(/split-line/);
+    expect(tangentsOf(split.after)).toEqual({
+      "Fillet 1 tangent A": [arc.entityId, piece.entityId],
+      "Fillet 1 tangent B": [arc.entityId, entity("ac")],
+    });
+    expect(accepted(split.after)).toBe(true);
+    expect(displacement(split.after)).toBeLessThan(1e-9);
+
+    // AC is tB → C: split at y = 3 the original id keeps tB, so tangent B
+    // stays.
+    const { definition: filleted2 } = filletedCorner((sketch) => {
+      sketch.point("s0", -1, 3);
+      sketch.point("s1", 1, 3);
+      sketch.line("s", "s0", "s1");
+    });
+    const stays = await lineEdit(filleted2, "split", "ac", "s");
+    expect(tangentsOf(stays.after)).toEqual(tangentsOf(filleted2));
+
+    // A satisfied coincident class: the line ends at p, the arc starts at a
+    // distinct q, coincident(p, q); split at x = 3 the piece Q → p touches.
+    const sketch = makeSketchFixture();
+    sketch.point("l0", 4, 0);
+    sketch.point("p", 2, 0);
+    sketch.line("line", "l0", "p");
+    sketch.point("o", 2, 2);
+    sketch.point("q", 2, 0);
+    sketch.point("r", 0, 2);
+    sketch.arc("arc", "o", "q", "r", "clockwise");
+    sketch.coincident("p", "q");
+    sketch.point("s0", 3, -1);
+    sketch.point("s1", 3, 1);
+    sketch.line("s", "s0", "s1");
+    const joined = withConstraints(sketch.definition(), [
+      {
+        constraintId: "constraint_tangent",
+        kind: "tangent",
+        label: "Tangent 1",
+        entityIds: [entity("line"), entity("arc")],
+        relation: "external",
+      } as SketchDefinition["constraints"][number],
+    ]);
+    expect(accepted(joined), "premise: the coincident is satisfied").toBe(true);
+    const classSplit = await lineEdit(joined, "split", "line", "s");
+    expect(tangentsOf(classSplit.after)).toEqual({
+      "Tangent 1": [classSplit.after.entities.at(-1)!.entityId, entity("arc")],
+    });
+    expect(accepted(classSplit.after)).toBe(true);
+
+    // Both pieces touch the partner (it spans both ends of the target):
+    // ambiguous, so the tangent stays on the original id.
+    const both = makeSketchFixture();
+    both.point("p", 2, 0);
+    both.point("p2", -2, 0);
+    both.line("line", "p", "p2");
+    both.point("o", 0, 0);
+    both.arc("arc", "o", "p", "p2");
+    both.point("s0", 1, -1);
+    both.point("s1", 1, 1);
+    both.line("s", "s0", "s1");
+    const spanned = withConstraints(both.definition(), [
+      {
+        constraintId: "constraint_tangent",
+        kind: "tangent",
+        label: "Tangent 1",
+        entityIds: [entity("line"), entity("arc")],
+        relation: "external",
+      } as SketchDefinition["constraints"][number],
+    ]);
+    const bothSplit = await lineEdit(spanned, "split", "line", "s");
+    expect(bothSplit.after.entities.at(-1)!.entityId).toMatch(/split-line/);
+    expect(tangentsOf(bothSplit.after)).toEqual({
+      "Tangent 1": [entity("line"), entity("arc")],
+    });
   });
 });

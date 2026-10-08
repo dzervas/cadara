@@ -5522,18 +5522,34 @@ test("T10g-1: trimming a circle with a Radius-tool dimension keeps the sketch ac
       (entity) => entity.entityId === circle.entityId,
     )?.kind,
   ).toBe("arc");
-  // The Radius tool's "Radius N" label does not match the "… radius" rewrite
-  // (review A-3); its "Radius N" → "Diameter N" rewrite is T13l.
+  // T13l (C1 A-3, T13a A-1): the Radius tool's "Radius N" label follows the
+  // rewrite to "Diameter N"; the arc gains its endpoint bindings (P5).
   expect(radius.label, "premise: the Radius tool's label").toMatch(
     /^Radius \d+$/,
   );
+  const arc = trimmed.definition.entities.find(
+    (entity) => entity.entityId === circle.entityId,
+  );
+  if (arc?.kind !== "arc") throw new Error("arc");
   expect(trimmed.definition.dimensions).toEqual([
     {
       ...radius,
       kind: "diameter",
+      label: radius.label.replace("Radius", "Diameter"),
       value: { source: "literal", value: 4 },
     },
+    expect.objectContaining({
+      kind: "arcStartPointCoincident",
+      entityId: arc.entityId,
+      pointId: arc.startPointId,
+    }),
+    expect.objectContaining({
+      kind: "arcEndPointCoincident",
+      entityId: arc.entityId,
+      pointId: arc.endPointId,
+    }),
   ]);
+  expect(trimmed.definition.dimensions[0]!.label).toMatch(/^Diameter \d+$/);
   expect(trimmed.liveSolve?.accepted, "the trimmed sketch stays accepted").toBe(
     true,
   );

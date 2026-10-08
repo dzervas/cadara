@@ -1659,7 +1659,11 @@ function buildEditQueryMutation(
     case "extend":
       return createSketchExtendMutation({ ...common, sequence });
     case "split":
-      return createSketchSplitMutation({ ...common, sequence });
+      return createSketchSplitMutation({
+        ...common,
+        sequence,
+        solvedSnapshot: input.solvedSnapshot,
+      });
   }
 }
 
