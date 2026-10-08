@@ -13,6 +13,7 @@ import {
   confirmSketchDrawing,
   getActiveSketchStyleToolId,
   isSketchConstructionSelected,
+  isSketchMergePointsReady,
   type SketchAuthoringToolId,
   type SketchSessionStatus,
 } from "@/domain/editor/sketch-session";
@@ -110,13 +111,16 @@ export function getEscapeEvent(
 }
 
 /**
- * Enter ends a Line chain or finalizes a viable fit-point draft; otherwise it
- * is not consumed (T11-D10).
+ * Enter ends a Line chain or finalizes a viable fit-point draft, or confirms
+ * a ready Merge Points (T13j); otherwise it is not consumed (T11-D10).
  */
 export function getEnterEvent(
   state: Pick<EditorViewState, "sketchSession">,
 ): EditorEvent | null {
   const session = state.sketchSession;
+
+  if (session && isSketchMergePointsReady(session))
+    return { type: "sketch.toolPatched", patch: { intent: "mergePoints" } };
 
   return session?.activeTool &&
     isRegisteredSketchToolId(session.activeTool) &&

@@ -258,6 +258,11 @@ export interface SketchToolFloatingInputDescriptor {
   secondaryAction?: { label: string; action: SketchToolActionDescriptor };
   /** T13e (D11): the value is shown but not editable (Reference mode). */
   readOnly?: true;
+  /**
+   * T13j: a confirmation with no text field (Merge Points): only the label,
+   * readout and buttons, so no focused input swallows Enter.
+   */
+  confirmOnly?: true;
   /** T13e (D11): a visible on/off switch (the new dimension's "Make driving"). */
   modeSwitch?: {
     label: string;

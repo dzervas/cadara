@@ -616,7 +616,10 @@ function ViewportFloatingInput({
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   // T13b (D29): operation parameters take plain numbers, not variables.
-  const variableNames = descriptor.numericOnly ? [] : documentVariableNames;
+  const variableNames =
+    descriptor.numericOnly || descriptor.confirmOnly
+      ? []
+      : documentVariableNames;
   const suggestionsId = `${descriptor.id}-variables`;
 
   useEffect(() => {
@@ -648,19 +651,21 @@ function ViewportFloatingInput({
           {descriptor.readout}
         </div>
       ) : null}
-      <input
-        ref={inputRef}
-        className="mt-2 h-9 w-full rounded-md border border-[var(--cad-border)] bg-[var(--cad-surface)] px-2 font-mono text-[13px] text-[var(--cad-foreground)] outline-none focus-visible:border-[var(--cad-accent)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--cad-accent)]"
-        list={variableNames.length > 0 ? suggestionsId : undefined}
-        defaultValue={descriptor.value ?? ""}
-        readOnly={descriptor.readOnly}
-        aria-readonly={descriptor.readOnly}
-        // T13e: toggling Reference mode remounts the input on its value.
-        key={`${descriptor.id}:${descriptor.readOnly ? "reference" : "value"}`}
-        onChange={(event) => {
-          onPatch({ value: event.currentTarget.value });
-        }}
-      />
+      {descriptor.confirmOnly ? null : (
+        <input
+          ref={inputRef}
+          className="mt-2 h-9 w-full rounded-md border border-[var(--cad-border)] bg-[var(--cad-surface)] px-2 font-mono text-[13px] text-[var(--cad-foreground)] outline-none focus-visible:border-[var(--cad-accent)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--cad-accent)]"
+          list={variableNames.length > 0 ? suggestionsId : undefined}
+          defaultValue={descriptor.value ?? ""}
+          readOnly={descriptor.readOnly}
+          aria-readonly={descriptor.readOnly}
+          // T13e: toggling Reference mode remounts the input on its value.
+          key={`${descriptor.id}:${descriptor.readOnly ? "reference" : "value"}`}
+          onChange={(event) => {
+            onPatch({ value: event.currentTarget.value });
+          }}
+        />
+      )}
       {descriptor.modeSwitch ? (
         <Switch
           className="mt-2"

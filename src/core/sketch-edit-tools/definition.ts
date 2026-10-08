@@ -11,7 +11,8 @@ export type SketchEditToolId =
   | "sketchMirror"
   | "sketchLinearPattern"
   | "sketchCircularPattern"
-  | "sketchTransform";
+  | "sketchTransform"
+  | "sketchMergePoints";
 
 export type SketchEditMutationContract =
   | "trimAtIntersections"
@@ -24,7 +25,8 @@ export type SketchEditMutationContract =
   | "createDerivedMirror"
   | "createDerivedLinearPattern"
   | "createDerivedCircularPattern"
-  | "createDerivedTransform";
+  | "createDerivedTransform"
+  | "mergePoints";
 
 export interface SketchEditToolSelectionRequirement {
   label: string;

@@ -90,7 +90,7 @@ const IMMEDIATE_ACTION_EDIT_TOOLS = new Set([
  * | construction toggle picking | `replaceLastAdded` (it records no list and exits after its one toggle, so it never cycles) |
  * | reference picker | `replace` |
  * | Trim, Extend, Split, Sketch Mirror | `none` |
- * | other edit tools (Offset targets, Fillet, Chamfer, Slot, patterns, Transform) | `replaceLastAdded` |
+ * | other edit tools (Offset targets, Fillet, Chamfer, Slot, patterns, Transform, Merge Points) | `replaceLastAdded` |
  * | constraint authoring that auto-commits, or whose next click pins the preview | `none` |
  * | other constraint authoring | `replaceLastAdded` |
  * | no tool, single-slot filter | `replace` |
@@ -181,6 +181,17 @@ export function isSketchSelectionCycleTargetEligible(
       target.sketchId === sketchId
     );
   const editTool = session.activeEditTool;
+  // T13j (review R-2): Merge Points picks only this sketch's points and
+  // Point-tool entities, so a cycle never lands on a curve it refuses.
+  if (editTool?.toolId === "sketchMergePoints")
+    return target.kind === "sketchPoint"
+      ? target.sketchId === sketchId
+      : target.kind === "sketchEntity" &&
+          target.sketchId === sketchId &&
+          session.definition.entities.some(
+            (entity) =>
+              entity.entityId === target.entityId && entity.kind === "point",
+          );
   if (editTool)
     return (
       target.kind === "sketchEntity" ||

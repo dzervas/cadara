@@ -101,6 +101,7 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
         "sketchExtend",
         "sketchFillet",
         "sketchLinearPattern",
+        "sketchMergePoints",
         "sketchMirror",
         "sketchSlot",
         "sketchSplit",
@@ -202,7 +203,8 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
           section.toolIds.includes("sketchChamfer") &&
           section.toolIds.includes("sketchExtend") &&
           section.toolIds.includes("sketchSplit") &&
-          section.toolIds.includes("sketchSlot"),
+          section.toolIds.includes("sketchSlot") &&
+          section.toolIds.includes("sketchMergePoints"),
       ),
       "Sketch toolbar should include the sketch edit operators.",
     ).toBeTruthy();

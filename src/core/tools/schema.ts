@@ -66,6 +66,7 @@ export type ToolIconId =
   | "sketchExtend"
   | "sketchSplit"
   | "sketchSlot"
+  | "sketchMergePoints"
   | "finishSketch"
   | "import"
   | "search"

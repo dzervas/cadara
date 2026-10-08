@@ -107,7 +107,7 @@ const editorCommands = [
   },
   {
     id: "editor.confirm",
-    label: "End Chain / Finalize Spline",
+    label: "Confirm (End Chain, Finalize Spline, Merge)",
     category: "Sketch",
     scope: "sketch",
     defaultShortcuts: ["enter"],
