@@ -3057,6 +3057,73 @@ describe("T14c: the annotation lifecycle adds no history; Undo and Redo prune it
     ]);
   });
 
+  // T14g (T-10): the radial wheel is editor UI state too: opening, choosing
+  // spokes, "More…", closing and the first blank record nothing and keep the
+  // session object; Undo/Redo close an open wheel (its spokes are the
+  // pre-restore cluster).
+  test("T14g: wheel events record no action and keep the session; Undo and Redo close the wheel", async () => {
+    const f = await lifecycle();
+    f.select(f.g);
+    const steps: [string, EditorEvent][] = [
+      [
+        "open",
+        {
+          type: "sketch.annotationWheelOpened",
+          clusterKey: "k",
+          members: [f.a, f.b],
+        },
+      ],
+      ["spoke A", { type: "viewport.selectionRequested", target: f.a }],
+      ["spoke B", { type: "viewport.selectionRequested", target: f.b }],
+      [
+        "More…",
+        { type: "sketch.annotationWheelListFilterChanged", filtered: true },
+      ],
+      ["close", { type: "sketch.annotationWheelClosed" }],
+      [
+        "reopen",
+        {
+          type: "sketch.annotationWheelOpened",
+          clusterKey: "k",
+          members: [f.a, f.b],
+        },
+      ],
+      ["first blank", { type: "selection.cleared" }],
+    ];
+    for (const [name, event] of steps) {
+      const before = f.dispatch({ type: "viewport.hoverCleared" }).session;
+      expect(f.dispatch(event).session, name).toBe(before);
+    }
+    expect(f.undoLabels(), "no wheel event is an action").toEqual([]);
+
+    f.dispatch({
+      type: "sketch.annotationWheelOpened",
+      clusterKey: "k",
+      members: [f.a, f.b],
+    });
+    f.select(f.a);
+    const deleted = f.dispatch({ type: "sketch.annotationDeleteRequested" });
+    expect(deleted.annotationContext?.wheel, "premise: shrunk, open").toEqual({
+      clusterKey: "k",
+      members: [f.b],
+    });
+    expect(f.undoLabels()).toEqual(["Delete Sketch Item"]);
+    const undone = f.dispatch({ type: "history.undoRequested" });
+    expect(undone.annotationContext?.wheel, "Undo closes the wheel").toBe(
+      undefined,
+    );
+    expect(undone.annotationContext?.owners).toEqual([f.g]);
+    f.dispatch({
+      type: "sketch.annotationWheelOpened",
+      clusterKey: "k",
+      members: [f.a, f.b],
+    });
+    const redone = f.dispatch({ type: "history.redoRequested" });
+    expect(redone.annotationContext?.wheel, "Redo closes the wheel").toBe(
+      undefined,
+    );
+  });
+
   // Review R-4 (R-7 option (b)), event-loop seam: the composition
   // `EditorEventLoop.transition` runs (the action owner around the reducer,
   // then the four post-transition hooks). Lifecycle clicks and hover keep the

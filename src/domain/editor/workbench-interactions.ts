@@ -117,6 +117,11 @@ export function getEscapeEvent(
     };
   }
 
+  // T14g (T-10): an open wheel is its own stage, before the context stages.
+  if (state.annotationContext?.wheel) {
+    return { type: "sketch.annotationWheelClosed" };
+  }
+
   // T14c: the active annotation (or geometry) is the first stage; a
   // retained annotation context is the second.
   if (state.selection.length > 0 || state.annotationContext) {
@@ -243,7 +248,10 @@ export function getViewportCanvasClickIntent({
   hasResolvedTarget: boolean;
   isBackgroundDatumTarget?: boolean;
   selectionFilterKind?: SelectionFilter["kind"] | null;
-  /** T14c: an annotation is the active selection (`selection[0]`). */
+  /**
+   * T14c: an annotation is the active selection (`selection[0]`); T14g: or
+   * a radial wheel is open (plan §2.4: "a constraint or wheel is active").
+   */
   activeAnnotation?: boolean;
   /** T14c: the pick class of the top of the sketch pick stack. */
   topPickClass?: SketchPickClass | null;

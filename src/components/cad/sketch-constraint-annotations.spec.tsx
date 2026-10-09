@@ -2161,3 +2161,254 @@ test("T14f review R-3: with Show all on, a selected small entity elsewhere does 
   });
   expect(denseButtons(selected)).toHaveLength(2);
 });
+
+// T14g (T-10), ui lane, the annotation layer markup seam: an open wheel
+// (`annotationContext.wheel`) renders its cluster as spokes around the
+// centre (no `+N`, no expanded glyphs of that cluster), passive outside the
+// idle context; a wheel whose spokes fit K does not render; the wheel is an
+// obstacle no other label is placed into. The static render has no pointer
+// point, so the centre is the members' anchor (600, 400).
+function wheelContext(
+  members: readonly SketchAnnotationDescriptor[],
+  extra: Partial<SketchAnnotationContext> = {},
+): SketchAnnotationContext {
+  return {
+    owners: [T14F_POINT],
+    last: null,
+    wheel: {
+      clusterKey: getAnnotationProjectionId(members[0]!.id),
+      members: members.map((member) => member.target),
+    },
+    ...extra,
+  };
+}
+
+/** Every wheel slot's opening tag: `slot@x,y name`. */
+function wheelSlots(markup: string) {
+  return [
+    ...markup.matchAll(
+      /<(button|div)[^>]*data-sketch-annotation-wheel-slot="(\w+)"[^>]*>/g,
+    ),
+  ].map((match) => {
+    const position = /left:([\d.]+)px;top:([\d.]+)px/.exec(match[0]);
+    const name = /aria-label="([^"]*)"/.exec(match[0]);
+    return {
+      tag: match[0],
+      slot: match[2],
+      x: Number(position?.[1]),
+      y: Number(position?.[2]),
+      name: name?.[1] ?? null,
+    };
+  });
+}
+
+test("T14g: an open wheel renders every cluster member as a spoke on the 82 px radius around the `−N` centre; the cluster's glyphs and `+N` give way", () => {
+  const dense = makeDenseConstraints(10);
+  const markup = renderDense(dense, {
+    selection: [T14F_POINT],
+    annotationContext: wheelContext(dense),
+  });
+  expect(overflowTags(markup), "no `+N` while its wheel is open").toEqual([]);
+  expect(denseButtons(markup), "no expanded glyph outside the wheel").toEqual(
+    [],
+  );
+  expect(markup).toContain('role="group" aria-label="Constraint wheel"');
+  const slots = wheelSlots(markup);
+  const [centre, ...spokes] = slots;
+  expect(centre).toMatchObject({
+    slot: "centre",
+    x: 600,
+    y: 400,
+    name: "Collapse the constraint wheel",
+  });
+  expect(centre!.tag).toMatch(/^<button/);
+  expect(markup, "`−N` = members − K").toContain(">−6</button>");
+  expect(spokes.map((spoke) => spoke.name?.replace(/:.*$/, ""))).toEqual(
+    dense.map((entry) => entry.id),
+  );
+  for (const spoke of spokes) {
+    expect(spoke.tag).toMatch(/^<button/);
+    expect(spoke.tag).toContain("pointer-events-auto");
+    expect(spoke.tag).toContain("width:28px;height:28px");
+    expect(Math.hypot(spoke.x - 600, spoke.y - 400)).toBeCloseTo(82, 9);
+  }
+  expect(spokes[0], "the first spoke at −π/2").toMatchObject({
+    x: 600,
+    y: 318,
+  });
+});
+
+test("T14g: the active spoke sits in the centre (active styling) and the other N − 1 stay radial; another one swaps", () => {
+  const dense = makeDenseConstraints(10);
+  const render = (active: SketchAnnotationDescriptor) =>
+    wheelSlots(
+      renderDense(dense, {
+        selection: [active.target],
+        annotationContext: wheelContext(dense, { last: active.target }),
+      }),
+    );
+  const [centre, ...spokes] = render(dense[3]!);
+  expect(centre).toMatchObject({ slot: "centre", x: 600, y: 400 });
+  expect(centre!.name).toMatch(/^constraint_c03:/);
+  expect(centre!.tag).toContain('data-sketch-annotation-selection="active"');
+  expect(spokes).toHaveLength(9);
+  expect(spokes.map((spoke) => spoke.name?.replace(/:.*$/, ""))).not.toContain(
+    "constraint_c03",
+  );
+
+  const [swappedCentre, ...swapped] = render(dense[7]!);
+  expect(swappedCentre!.name).toMatch(/^constraint_c07:/);
+  expect(
+    swapped.map((spoke) => spoke.name?.replace(/:.*$/, "")),
+    "c03 is back on the wheel, c07 left it",
+  ).toEqual(dense.filter((_, index) => index !== 7).map((entry) => entry.id));
+});
+
+test("T14g (T-5): outside the idle select context the wheel is passive markup", () => {
+  const dense = makeDenseConstraints(10);
+  const markup = renderDense(dense, {
+    selection: [T14F_POINT],
+    annotationContext: wheelContext(dense),
+    interactive: false,
+  });
+  expect(markup).not.toContain("<button");
+  const slots = wheelSlots(markup);
+  expect(slots).toHaveLength(11);
+  for (const slot of slots) {
+    expect(slot.tag).toMatch(/^<div aria-hidden="true"/);
+    expect(slot.tag).toContain("pointer-events-none");
+    expect(slot.name).toBe(null);
+  }
+});
+
+test("T14g: a wheel whose remaining spokes fit K (a delete left N − 1 ≤ K) does not render; the cluster renders expanded", () => {
+  const dense = makeDenseConstraints(5);
+  const open = renderDense(dense, {
+    selection: [T14F_POINT],
+    annotationContext: wheelContext(dense),
+  });
+  expect(wheelSlots(open), "premise: 5 > K = 4, open").toHaveLength(6);
+  const remaining = dense.slice(1);
+  const stale = renderDense(remaining, {
+    selection: [T14F_POINT],
+    annotationContext: wheelContext(remaining),
+  });
+  expect(wheelSlots(stale)).toEqual([]);
+  expect(denseButtons(stale), "the 4 render expanded").toHaveLength(4);
+  expect(overflowTags(stale)).toEqual([]);
+});
+
+test('T14g: beyond 12 radial spokes the last spoke is "More…"', () => {
+  const dense = makeDenseConstraints(15);
+  const slots = wheelSlots(
+    renderDense(dense, {
+      selection: [T14F_POINT],
+      annotationContext: wheelContext(dense),
+    }),
+  );
+  expect(slots).toHaveLength(13);
+  expect(slots.slice(1, 12).map((slot) => slot.slot)).toEqual(
+    Array(11).fill("spoke"),
+  );
+  expect(slots[12]).toMatchObject({
+    slot: "more",
+    name: "More: 4 more in the Constraints list",
+  });
+});
+
+test("T14g (A-2): a dimension chip and another cluster's glyph anchored on a spoke are placed outside the open wheel; with it closed they sit at their anchors", () => {
+  const dense = makeDenseConstraints(10);
+  const chip = makeConstraintDescriptor("dimension_on_spoke", [T14F_POINT], {
+    target: {
+      kind: "dimension",
+      sketchId: "sketch_draft",
+      dimensionId: "dimension_on_spoke",
+    },
+    status: "dimension",
+    visibleLabel: "24.00",
+  } as Partial<SketchAnnotationDescriptor>);
+  const annotations = [...dense, chip];
+  const anchors = [
+    ...dense.map(() => ({ x: 600, y: 400 })),
+    { x: 600, y: 318 },
+  ];
+  const tagOf = (markup: string) =>
+    renderedAnnotationTags(markup).find((tag) =>
+      tag.includes('data-sketch-annotation-kind="dimension"'),
+    )!;
+  const centreOf = (tag: string) => {
+    const position = /left:([\d.]+)px;top:([\d.]+)px/.exec(tag)!;
+    return { x: Number(position[1]), y: Number(position[2]) };
+  };
+  const closed = renderDense(annotations, {
+    selection: [T14F_POINT],
+    anchors,
+  });
+  expect(centreOf(tagOf(closed)), "premise: on its anchor").toEqual({
+    x: 600,
+    y: 318,
+  });
+  const openMarkup = renderDense(annotations, {
+    selection: [T14F_POINT],
+    annotationContext: wheelContext(dense),
+    anchors,
+  });
+  const open = centreOf(tagOf(openMarkup));
+  const slots = wheelSlots(openMarkup);
+  expect(slots, "premise: the wheel is open").toHaveLength(11);
+  // Review R-2: the chip (75 × 32: "24.00" at 40 + 5 × 7 px) is clear of
+  // every 28 px slot by the 6 px layout gap.
+  for (const slot of slots) {
+    const clear =
+      Math.abs(open.x - slot.x) >= 37.5 + 14 + 6 - 1e-6 ||
+      Math.abs(open.y - slot.y) >= 16 + 14 + 6 - 1e-6;
+    expect(
+      clear,
+      `chip at ${JSON.stringify(open)} is clear of the slot at ${slot.x},${slot.y}`,
+    ).toBe(true);
+  }
+});
+
+test("T14g review R-2: a glyph inside the wheel's 192 px square but clear of every slot keeps its place when the wheel opens", () => {
+  const dense = makeDenseConstraints(10);
+  const near = makeConstraintDescriptor("constraint_near", [T14F_POINT]);
+  const annotations = [...dense, near];
+  // (690, 490): inside the ±96 px square around the centre (600, 400), and
+  // ≥ 6 px clear of every 28 px slot (the nearest are the 18° and 54° spokes).
+  const anchors = [
+    ...dense.map(() => ({ x: 600, y: 400 })),
+    { x: 690, y: 490 },
+  ];
+  const placedNear = (markup: string) => {
+    const tag = renderedAnnotationTags(markup).find((entry) =>
+      entry.includes('aria-label="constraint_near:'),
+    )!;
+    const position = /left:([\d.]+)px;top:([\d.]+)px/.exec(tag)!;
+    return { x: Number(position[1]), y: Number(position[2]) };
+  };
+  const closed = renderDense(annotations, { selection: [T14F_POINT], anchors });
+  expect(placedNear(closed), "premise: on its anchor").toEqual({
+    x: 690,
+    y: 490,
+  });
+  const markup = renderDense(annotations, {
+    selection: [T14F_POINT],
+    annotationContext: wheelContext(dense),
+    anchors,
+  });
+  const slots = wheelSlots(markup);
+  expect(slots, "premise: the wheel is open").toHaveLength(11);
+  for (const slot of slots) {
+    const clear =
+      Math.abs(slot.x - 690) >= 14 + 16 + 6 ||
+      Math.abs(slot.y - 490) >= 14 + 16 + 6;
+    expect(clear, `premise: clear of the slot at ${slot.x},${slot.y}`).toBe(
+      true,
+    );
+  }
+  expect(
+    Math.abs(690 - 600) - 16 < 96 && Math.abs(490 - 400) - 16 < 96,
+    "premise: inside the old 192 px square",
+  ).toBe(true);
+  expect(placedNear(markup), "it did not move").toEqual({ x: 690, y: 490 });
+});

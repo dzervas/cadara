@@ -21,9 +21,13 @@ import {
   resolveSketchAnnotationLayer,
 } from "@/components/cad/sketch-constraint-annotation-visibility";
 import {
+  getSketchAnnotationClusterSignature,
   getSketchAnnotationContextExtent,
+  getSketchAnnotationWheelObstacles,
   isSketchAnnotationHoverUnplaced,
   layoutSketchAnnotationClusters,
+  layoutSketchAnnotationWheel,
+  SKETCH_ANNOTATION_WHEEL_DOUBLE_CLICK_MS,
   resolveSketchAnnotationDenseLimit,
   type SketchAnnotationClusterGroup,
   type SketchAnnotationClusterLayoutItem,
@@ -41,6 +45,7 @@ import {
   getAnnotationConstraintColor,
   getAnnotationGlyphIconSrc,
 } from "@/components/cad/sketch-annotation-glyph";
+import { SketchAnnotationWheel } from "@/components/cad/sketch-annotation-wheel";
 import {
   DimensionAnnotationLabelDrag,
   type DimensionAnnotationDragListener,
@@ -78,6 +83,15 @@ interface SketchConstraintAnnotationsProps {
   onDimensionDrag?: DimensionAnnotationDragListener;
   /** T14b review A-6: a wheel over a control is forwarded (camera zoom). */
   onWheel?: (event: WheelEvent) => void;
+  /** T14g (T-10): a pinned, idle `+N` opens its cluster's radial wheel. */
+  onOpenAnnotationWheel?: (
+    clusterKey: string,
+    members: readonly (SketchConstraintRef | SketchDimensionRef)[],
+  ) => void;
+  /** T14g: `−N`, or the open wheel no longer has more spokes than K. */
+  onCloseAnnotationWheel?: () => void;
+  /** T14g: "More…" narrows the Constraints list to the wheel's members. */
+  onAnnotationWheelListFilter?: (filtered: boolean) => void;
 }
 
 export function SketchConstraintAnnotations({
@@ -99,8 +113,45 @@ export function SketchConstraintAnnotations({
   onEdit,
   onDimensionDrag,
   onWheel,
+  onOpenAnnotationWheel,
+  onCloseAnnotationWheel,
+  onAnnotationWheelListFilter,
 }: SketchConstraintAnnotationsProps) {
   const [labelDrag] = useState(() => new DimensionAnnotationLabelDrag());
+  // T14g (T-10): the open wheel's activating point (viewport-local UI
+  // state; the editor holds only which cluster is open) and, while one of
+  // the wheel's controls holds the focus, the wheel's members (layout ids)
+  // and the focused spoke's annotation id (null: `−N` or "More…").
+  const [wheelPoint, setWheelPoint] = useState<{
+    clusterKey: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  // Review R-4: a mouse click that selects a spoke holds the ring's previous
+  // centre for the double-click interval, so the spoke stays under the
+  // pointer and a second click (and `dblclick`) lands on the same button;
+  // the selected spoke then moves to the centre.
+  const [wheelCentreHold, setWheelCentreHold] = useState<{
+    clusterKey: string;
+    centreId: string | null;
+  } | null>(null);
+  useEffect(() => {
+    if (wheelCentreHold === null) {
+      return;
+    }
+    const timer = window.setTimeout(
+      () => setWheelCentreHold(null),
+      SKETCH_ANNOTATION_WHEEL_DOUBLE_CLICK_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [wheelCentreHold]);
+  const wheelFocusRef = useRef<{
+    members: readonly string[];
+    annotationId: string | null;
+  } | null>(null);
+  // Set when the activated `+N` held the focus: the wheel's first control
+  // takes it once open (the `+N` itself gives way to the wheel).
+  const focusWheelOnOpenRef = useRef(false);
   // T14e: the annotation hover this layer set (a control's pointer enter).
   // Only that one can go stale here; a Constraints list row's hover of an
   // annotation the layer does not render as a control is the list's.
@@ -114,7 +165,9 @@ export function SketchConstraintAnnotations({
   useEffect(() => {
     onWheelRef.current = onWheel;
   });
+  const layerElementRef = useRef<HTMLDivElement | null>(null);
   const layerRef = useCallback((element: HTMLDivElement | null) => {
+    layerElementRef.current = element;
     if (!element) {
       return;
     }
@@ -123,7 +176,10 @@ export function SketchConstraintAnnotations({
       onWheelRef.current?.(event);
     };
     element.addEventListener("wheel", listener, { passive: false });
-    return () => element.removeEventListener("wheel", listener);
+    return () => {
+      element.removeEventListener("wheel", listener);
+      layerElementRef.current = null;
+    };
   }, []);
   // T14d (A-7): the chip being dragged keeps its dragged position: where it
   // was when the drag started, moved with its anchor (the label placement
@@ -295,14 +351,87 @@ export function SketchConstraintAnnotations({
   const previewContext = resolveGroupContext("preview");
   const pinnedExtent = pinnedContext.extent;
   const limits = { pinned: pinnedContext.limit, preview: previewContext.limit };
+  // T14g (T-10): the open wheel. Its spokes are the cluster's members that
+  // are still pinned; while they exceed K the cluster renders as the wheel
+  // (its glyphs and `+N` give way), otherwise the wheel is stale (a delete
+  // left N − 1 ≤ K, or the members stopped being pinned) and closes. The
+  // wheel's envelope is an obstacle placed before every other label (A-2).
+  const wheel = annotationContext?.wheel ?? null;
+  const wheelItems = wheel
+    ? visibleAnnotations.filter(
+        (item) =>
+          item.visibility === "pinned" &&
+          wheel.members.some((member) =>
+            annotationTargetsEqual(member, item.annotation.target),
+          ),
+      )
+    : [];
+  const wheelIds = wheelItems.map(({ annotation }) =>
+    getAnnotationProjectionId(annotation.id),
+  );
+  // T-10 (review R-1): a camera change closes the wheel in the viewport,
+  // on the gesture's start; the damped tail of an earlier gesture leaves
+  // the centre where it opened while the cluster settles.
+  const wheelIsOpen = wheel !== null && wheelItems.length > limits.pinned;
+  const wheelAnchors = wheelIds.flatMap((id) => {
+    const anchor = anchorById.get(id);
+    return anchor ? [anchor] : [];
+  });
+  const wheelLayout =
+    wheel && wheelIsOpen
+      ? layoutSketchAnnotationWheel({
+          point:
+            wheelPoint?.clusterKey === wheel.clusterKey
+              ? wheelPoint
+              : {
+                  x:
+                    wheelAnchors.reduce(
+                      (total, anchor) => total + anchor.x,
+                      0,
+                    ) / Math.max(1, wheelAnchors.length),
+                  y:
+                    wheelAnchors.reduce(
+                      (total, anchor) => total + anchor.y,
+                      0,
+                    ) / Math.max(1, wheelAnchors.length),
+                },
+          memberIds: wheelIds,
+          activeId:
+            wheelCentreHold?.clusterKey === wheel.clusterKey
+              ? wheelCentreHold.centreId
+              : (wheelIds[wheelItems.findIndex((item) => item.isSelected)] ??
+                null),
+          viewport,
+          obstacles,
+        })
+      : null;
+  const wheelIdSet = new Set(wheelLayout ? wheelIds : []);
   const clustered = layoutSketchAnnotationClusters(
-    layoutItems,
+    wheelLayout
+      ? layoutItems.filter((item) => !wheelIdSet.has(item.id))
+      : layoutItems,
     limits,
     denseState.expanded,
     viewport,
-    obstacles,
+    wheelLayout
+      ? [...obstacles, ...getSketchAnnotationWheelObstacles(wheelLayout)]
+      : obstacles,
   );
-  const expandedKey = [...clustered.expanded]
+  // T14g: the wheel's cluster keeps its pre-wheel expanded set while the
+  // wheel is open, so on closing the other expanded glyphs keep their
+  // places where possible (the selected spoke, now `last`, takes one slot).
+  const wheelSignature = wheelLayout
+    ? getSketchAnnotationClusterSignature(wheelIds)
+    : null;
+  const carriedExpansion =
+    wheelSignature !== null
+      ? denseState.expanded.get(wheelSignature)
+      : undefined;
+  const nextExpanded: SketchAnnotationPreferredExpansion =
+    wheelSignature !== null && carriedExpansion
+      ? new Map([...clustered.expanded, [wheelSignature, carriedExpansion]])
+      : clustered.expanded;
+  const expandedKey = [...nextExpanded]
     .map(([signature, ids]) => `${signature}=${ids.join("\n")}`)
     .sort()
     .join("\n\n");
@@ -318,7 +447,7 @@ export function SketchConstraintAnnotations({
         pinned: { key: pinnedContext.key, limit: limits.pinned },
         preview: { key: previewContext.key, limit: limits.preview },
       },
-      expanded: clustered.expanded,
+      expanded: nextExpanded,
       expandedKey,
     });
   }
@@ -341,12 +470,25 @@ export function SketchConstraintAnnotations({
   // away gets no pointer leave; clear it once.
   // Review R-1: a hovered control that collapsed into a `+N` (or that the
   // ring cap dropped) unmounted without a pointer leave: its hover is stale.
+  // T14g: a wheel spoke is a placed control too.
+  const wheelPlacements = new Map<string, { x: number; y: number }>(
+    wheelLayout
+      ? [
+          ...(wheelLayout.centreId !== null
+            ? [[wheelLayout.centreId, wheelLayout.centre] as const]
+            : []),
+          ...wheelLayout.spokes.flatMap((spoke) =>
+            spoke.kind === "member" ? [[spoke.id, spoke] as const] : [],
+          ),
+        ]
+      : [],
+  );
   const hoverIsStale =
     layer.hoverIsStale ||
     isSketchAnnotationHoverUnplaced(
       hoveredAnnotation,
       visibleAnnotations,
-      projectionById,
+      new Map([...projectionById, ...wheelPlacements]),
     );
   const clearStaleHover = useEffectEvent(() => {
     if (annotationTargetsEqual(ownedHoverRef.current, hoveredAnnotation!)) {
@@ -360,6 +502,90 @@ export function SketchConstraintAnnotations({
     }
   }, [hoverIsStale]);
   useEffect(() => () => labelDrag.cancel(), [labelDrag]);
+  // T14g: a wheel whose remaining spokes fit K (a delete) or that lost its
+  // pinned members closes; the cluster then renders expanded or collapsed.
+  const wheelIsStale = wheel !== null && !wheelIsOpen;
+  const closeStaleWheel = useEffectEvent(() => onCloseAnnotationWheel?.());
+  useEffect(() => {
+    if (wheelIsStale) {
+      closeStaleWheel();
+    }
+  }, [wheelIsStale]);
+  // T14g: closing the wheel with the focus on one of its controls (Escape,
+  // `−N`, review R-3: a Delete that leaves N − 1 ≤ K) hands the focus to
+  // the cluster's `+N` (found by its members: a deleted spoke can change the
+  // cluster's key) or, with no `+N` left, its first glyph; never to the
+  // page body.
+  const focusCluster = useEffectEvent((members: readonly string[]) => {
+    const chip = clustered.chips.find((entry) =>
+      entry.memberIds.some((id) => members.includes(id)),
+    );
+    const element = layerElementRef.current;
+    const target = chip
+      ? element?.querySelector<HTMLElement>(
+          `[data-sketch-annotation-cluster="${CSS.escape(chip.key)}"]`,
+        )
+      : [
+          ...(element?.querySelectorAll<HTMLElement>(
+            "button[data-sketch-annotation-id]",
+          ) ?? []),
+        ].find((button) =>
+          members.includes(
+            getAnnotationProjectionId(
+              button.getAttribute("data-sketch-annotation-id")!,
+            ),
+          ),
+        );
+    target?.focus();
+  });
+  const openWheelKey = wheelLayout && wheel ? wheel.clusterKey : null;
+  useEffect(() => {
+    if (openWheelKey !== null) {
+      if (focusWheelOnOpenRef.current) {
+        focusWheelOnOpenRef.current = false;
+        layerElementRef.current
+          ?.querySelector<HTMLElement>(
+            `[data-sketch-annotation-wheel="${CSS.escape(openWheelKey)}"] button`,
+          )
+          ?.focus();
+      }
+      return;
+    }
+    const focus = wheelFocusRef.current;
+    wheelFocusRef.current = null;
+    if (focus !== null) {
+      focusCluster(focus.members);
+    }
+  }, [openWheelKey]);
+  // Review R-3: Delete on the focused spoke (the centre) removes its button;
+  // while the wheel stays open its new centre control (`−N`) takes the
+  // focus the deletion dropped to the page body.
+  const annotationIds = visibleAnnotations
+    .map((item) => item.annotation.id)
+    .join("\n");
+  useEffect(() => {
+    const focusedId = wheelFocusRef.current?.annotationId ?? null;
+    if (
+      openWheelKey === null ||
+      focusedId === null ||
+      annotationIds.split("\n").includes(focusedId) ||
+      (document.activeElement !== null &&
+        document.activeElement !== document.body)
+    ) {
+      return;
+    }
+    layerElementRef.current
+      ?.querySelector<HTMLElement>(
+        `[data-sketch-annotation-wheel="${CSS.escape(openWheelKey)}"] [data-sketch-annotation-wheel-slot="centre"]`,
+      )
+      ?.focus();
+  }, [openWheelKey, annotationIds]);
+  const itemById = new Map(
+    visibleAnnotations.map((item) => [
+      getAnnotationProjectionId(item.annotation.id),
+      item,
+    ]),
+  );
 
   if (visibleAnnotations.length === 0) {
     return null;
@@ -469,6 +695,7 @@ export function SketchConstraintAnnotations({
             <button
               key={annotation.id}
               type="button"
+              data-sketch-annotation-id={annotation.id}
               data-sketch-annotation-glyph={annotation.glyphKind}
               data-sketch-annotation-kind={annotation.status}
               data-sketch-annotation-visibility={visibility}
@@ -526,7 +753,7 @@ export function SketchConstraintAnnotations({
       {clustered.chips.map((chip) => {
         // T14f (T-9, T-5): a cluster's `+N` is passive in a preview or
         // outside the idle context; pinned and idle, it is a focusable
-        // control (activating it opens the wheel in T14g; nothing yet).
+        // control that opens the cluster's radial wheel (T14g).
         const isInteractive = interactive && chip.group === "pinned";
         const label = `${chip.count} more constraint${chip.count === 1 ? "" : "s"}`;
         const className = `absolute flex h-8 w-8 items-center justify-center rounded border border-[var(--cad-border)] bg-[var(--cad-surface-overlay)] font-mono text-[11px] leading-none text-[var(--cad-foreground)] shadow-[var(--cad-panel-shadow)] ${
@@ -557,6 +784,29 @@ export function SketchConstraintAnnotations({
             title={label}
             className={className}
             style={style}
+            onClick={(event) => {
+              // T14g (T-10): the wheel centres on the activating pointer;
+              // a keyboard activation (no pointer) on the chip's centre.
+              const box = layerElementRef.current?.getBoundingClientRect();
+              focusWheelOnOpenRef.current =
+                document.activeElement === event.currentTarget;
+              setWheelPoint({
+                clusterKey: chip.key,
+                ...(event.detail === 0 || !box
+                  ? { x: chip.x, y: chip.y }
+                  : {
+                      x: event.clientX - box.left,
+                      y: event.clientY - box.top,
+                    }),
+              });
+              onOpenAnnotationWheel?.(
+                chip.key,
+                chip.memberIds.flatMap((id) => {
+                  const item = itemById.get(id);
+                  return item ? [item.annotation.target] : [];
+                }),
+              );
+            }}
           >
             +{chip.count}
           </button>
@@ -572,6 +822,41 @@ export function SketchConstraintAnnotations({
           </div>
         );
       })}
+      {wheel && wheelLayout ? (
+        <SketchAnnotationWheel
+          clusterKey={wheel.clusterKey}
+          layout={wheelLayout}
+          items={itemById}
+          collapseCount={Math.max(1, wheelItems.length - limits.pinned)}
+          interactive={interactive}
+          hoveredAnnotation={hoveredAnnotation}
+          onHover={(target) => {
+            ownedHoverRef.current = target;
+            onHover(target);
+          }}
+          onClearHover={() => {
+            ownedHoverRef.current = null;
+            onClearHover();
+          }}
+          onSelect={(target, clickCount) => {
+            if (clickCount === 1) {
+              setWheelCentreHold({
+                clusterKey: wheel.clusterKey,
+                centreId: wheelLayout.centreId,
+              });
+            }
+            onSelect(target);
+          }}
+          onEdit={onEdit}
+          onCollapse={() => onCloseAnnotationWheel?.()}
+          onMore={() => onAnnotationWheelListFilter?.(true)}
+          onFocusWithinChange={(focused) => {
+            wheelFocusRef.current = focused
+              ? { members: wheelIds, annotationId: focused.annotationId }
+              : null;
+          }}
+        />
+      ) : null}
     </div>
   );
 }

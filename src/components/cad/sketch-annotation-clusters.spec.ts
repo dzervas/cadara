@@ -1,7 +1,12 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  SKETCH_ANNOTATION_WHEEL_RADIUS_PX,
+  SKETCH_ANNOTATION_WHEEL_SPOKE_PX,
+  clampSketchAnnotationWheelCentre,
   clusterSketchAnnotations,
+  getSketchAnnotationWheelObstacles,
+  layoutSketchAnnotationWheel,
   getSketchAnnotationContextExtent,
   getSketchAnnotationOverflowChipId,
   layoutSketchAnnotationClusters,
@@ -472,5 +477,282 @@ describe("T14f review R-1: a hovered control without a placed label is stale", (
     expect(isSketchAnnotationHoverUnplaced(null, items, placements)).toBe(
       false,
     );
+  });
+});
+
+// T14g (T-10), same lane and seam: the pure wheel geometry (centre clamp,
+// spoke positions, envelope, the active spoke in the centre, "More…").
+describe("T14g radial wheel geometry", () => {
+  const near = (actual: number, expected: number) =>
+    expect(Math.abs(actual - expected)).toBeLessThan(1e-9);
+
+  test("the centre is the activating point when the whole wheel fits; otherwise it moves only as far as needed, at every edge and corner", () => {
+    const at = (x: number, y: number) =>
+      clampSketchAnnotationWheelCentre({ x, y }, VIEWPORT, []);
+    expect(at(500, 400), "inside: the pointer itself").toEqual({
+      x: 500,
+      y: 400,
+    });
+    // Usable band: x ∈ [100, 1100], y ∈ [76 + 100, 800 − 120 − 100] = [176, 580].
+    expect(at(30, 400), "left edge").toEqual({ x: 100, y: 400 });
+    expect(at(1170, 400), "right edge").toEqual({ x: 1100, y: 400 });
+    expect(at(500, 90), "under the top inset").toEqual({ x: 500, y: 176 });
+    expect(at(500, 700), "in the bottom band").toEqual({ x: 500, y: 580 });
+    expect(at(10, 10), "top-left corner").toEqual({ x: 100, y: 176 });
+    expect(at(1199, 10), "top-right corner").toEqual({ x: 1100, y: 176 });
+    expect(at(10, 799), "bottom-left corner").toEqual({ x: 100, y: 580 });
+    expect(at(1199, 799), "bottom-right corner").toEqual({ x: 1100, y: 580 });
+    expect(at(101, 177), "just inside: unchanged").toEqual({ x: 101, y: 177 });
+  });
+
+  test("the wheel never covers chrome: it moves off a chrome rect by the least distance, and ignores non-chrome obstacles", () => {
+    const panel = { x: 900, y: 76, width: 300, height: 400, chrome: true };
+    expect(
+      clampSketchAnnotationWheelCentre({ x: 950, y: 300 }, VIEWPORT, [panel]),
+      "beside a right-side panel: pushed left to 100 px from its edge",
+    ).toEqual({ x: 800, y: 300 });
+    expect(
+      clampSketchAnnotationWheelCentre({ x: 1000, y: 560 }, VIEWPORT, [panel]),
+      "near the panel's bottom: 16 px down beats 200 px left",
+    ).toEqual({ x: 1000, y: 576 });
+    expect(
+      clampSketchAnnotationWheelCentre({ x: 850, y: 300 }, VIEWPORT, [
+        { ...panel, chrome: undefined },
+      ]),
+      "a non-chrome obstacle (a floating tool panel) does not move it",
+    ).toEqual({ x: 850, y: 300 });
+    const left = { x: 0, y: 76, width: 260, height: 604, chrome: true };
+    expect(
+      clampSketchAnnotationWheelCentre({ x: 120, y: 300 }, VIEWPORT, [left]),
+      "off the left parts panel",
+    ).toEqual({ x: 360, y: 300 });
+    for (const point of [
+      { x: 950, y: 300 },
+      { x: 1100, y: 100 },
+      { x: 120, y: 300 },
+    ]) {
+      const centre = clampSketchAnnotationWheelCentre(point, VIEWPORT, [
+        panel,
+        left,
+      ]);
+      for (const rect of [panel, left]) {
+        const clear =
+          centre.x + 100 <= rect.x ||
+          centre.x - 100 >= rect.x + rect.width ||
+          centre.y + 100 <= rect.y ||
+          centre.y - 100 >= rect.y + rect.height;
+        expect(clear, `${JSON.stringify(point)} clears the chrome`).toBe(true);
+      }
+    }
+  });
+
+  test("spokes: 82 px radius from −π/2, evenly spaced clockwise in id order, 28 px each, envelope ≤ 192 px; with no active spoke the centre is `−N`", () => {
+    const wheel = layoutSketchAnnotationWheel({
+      point: { x: 500, y: 400 },
+      memberIds: [id(3), id(0), id(2), id(1)],
+      activeId: null,
+      viewport: VIEWPORT,
+      obstacles: [],
+    });
+    expect(wheel.centre).toEqual({ x: 500, y: 400 });
+    expect(wheel.centreId, "the `−N` toggle").toBe(null);
+    expect(
+      wheel.spokes.map((spoke) => spoke.kind === "member" && spoke.id),
+    ).toEqual(glyphIds(4));
+    const expected = [
+      [500, 318],
+      [582, 400],
+      [500, 482],
+      [418, 400],
+    ];
+    wheel.spokes.forEach((spoke, index) => {
+      near(spoke.x, expected[index]![0]!);
+      near(spoke.y, expected[index]![1]!);
+    });
+    expect(SKETCH_ANNOTATION_WHEEL_RADIUS_PX).toBe(82);
+    expect(SKETCH_ANNOTATION_WHEEL_SPOKE_PX).toBe(28);
+
+    const ten = layoutSketchAnnotationWheel({
+      point: { x: 500, y: 400 },
+      memberIds: glyphIds(10),
+      activeId: null,
+      viewport: VIEWPORT,
+      obstacles: [],
+    });
+    const xs = ten.spokes.map((spoke) => spoke.x);
+    const ys = ten.spokes.map((spoke) => spoke.y);
+    const width = Math.max(...xs) - Math.min(...xs) + 28;
+    const height = Math.max(...ys) - Math.min(...ys) + 28;
+    expect(width, "envelope width").toBeLessThanOrEqual(192);
+    expect(height, "envelope height").toBeLessThanOrEqual(192);
+    ten.spokes.forEach((spoke, index) => {
+      near(Math.hypot(spoke.x - 500, spoke.y - 400), 82);
+      near(
+        Math.atan2(spoke.y - 400, spoke.x - 500),
+        Math.atan2(
+          Math.sin(-Math.PI / 2 + (index * 2 * Math.PI) / 10),
+          Math.cos(-Math.PI / 2 + (index * 2 * Math.PI) / 10),
+        ),
+      );
+    });
+    // Review R-2: one 28 px obstacle per occupied slot (centre first).
+    expect(
+      getSketchAnnotationWheelObstacles(ten),
+      "one layout obstacle per slot",
+    ).toEqual(
+      [ten.centre, ...ten.spokes].map((slot) => ({
+        x: slot.x - 14,
+        y: slot.y - 14,
+        width: 28,
+        height: 28,
+      })),
+    );
+  });
+
+  test("the active spoke takes the centre and the other N − 1 stay radial; choosing another swaps them", () => {
+    const members = glyphIds(5);
+    const first = layoutSketchAnnotationWheel({
+      point: { x: 500, y: 400 },
+      memberIds: members,
+      activeId: id(2),
+      viewport: VIEWPORT,
+      obstacles: [],
+    });
+    expect(first.centreId).toBe(id(2));
+    expect(
+      first.spokes.map((spoke) => spoke.kind === "member" && spoke.id),
+    ).toEqual([id(0), id(1), id(3), id(4)]);
+    near(first.spokes[1]!.x, 582);
+    near(first.spokes[1]!.y, 400);
+    const swapped = layoutSketchAnnotationWheel({
+      point: { x: 500, y: 400 },
+      memberIds: members,
+      activeId: id(4),
+      viewport: VIEWPORT,
+      obstacles: [],
+    });
+    expect(swapped.centreId).toBe(id(4));
+    expect(
+      swapped.spokes.map((spoke) => spoke.kind === "member" && spoke.id),
+      "the previous centre is back on the wheel",
+    ).toEqual([id(0), id(1), id(2), id(3)]);
+    expect(swapped.centre, "the centre point is unchanged").toEqual(
+      first.centre,
+    );
+    expect(
+      layoutSketchAnnotationWheel({
+        point: { x: 500, y: 400 },
+        memberIds: members,
+        activeId: "annotation:elsewhere",
+        viewport: VIEWPORT,
+        obstacles: [],
+      }).centreId,
+      "an active annotation outside the wheel leaves the `−N` centre",
+    ).toBe(null);
+  });
+
+  test('beyond 12 radial spokes the 12th is "More…" for the rest', () => {
+    const twelve = layoutSketchAnnotationWheel({
+      point: { x: 500, y: 400 },
+      memberIds: glyphIds(12),
+      activeId: null,
+      viewport: VIEWPORT,
+      obstacles: [],
+    });
+    expect(twelve.spokes.every((spoke) => spoke.kind === "member")).toBe(true);
+    expect(twelve.spokes).toHaveLength(12);
+    const thirteenActive = layoutSketchAnnotationWheel({
+      point: { x: 500, y: 400 },
+      memberIds: glyphIds(13),
+      activeId: id(0),
+      viewport: VIEWPORT,
+      obstacles: [],
+    });
+    expect(
+      thirteenActive.spokes.every((spoke) => spoke.kind === "member"),
+      "13 members with one in the centre: 12 radial, no More…",
+    ).toBe(true);
+    const fifteen = layoutSketchAnnotationWheel({
+      point: { x: 500, y: 400 },
+      memberIds: glyphIds(15),
+      activeId: null,
+      viewport: VIEWPORT,
+      obstacles: [],
+    });
+    expect(fifteen.spokes).toHaveLength(12);
+    expect(
+      fifteen.spokes
+        .slice(0, 11)
+        .map((spoke) => spoke.kind === "member" && spoke.id),
+    ).toEqual(glyphIds(11));
+    const more = fifteen.spokes[11]!;
+    expect(more.kind).toBe("more");
+    expect(more.kind === "more" && more.ids).toEqual([
+      id(11),
+      id(12),
+      id(13),
+      id(14),
+    ]);
+    near(Math.hypot(more.x - 500, more.y - 400), 82);
+  });
+
+  test("A-2: the open wheel's slots are obstacles placed before every label: no dimension chip or glyph is placed into one", () => {
+    const wheel = layoutSketchAnnotationWheel({
+      point: { x: 500, y: 400 },
+      memberIds: glyphIds(6),
+      activeId: null,
+      viewport: VIEWPORT,
+      obstacles: [],
+    });
+    const slots = getSketchAnnotationWheelObstacles(wheel);
+    const others: SketchAnnotationClusterLayoutItem[] = [
+      {
+        id: "annotation:dim",
+        anchor: { x: 560, y: 380 },
+        width: 89,
+        height: 32,
+        priority: "dimension",
+        keepWhenUnplaceable: true,
+        cluster: null,
+      },
+      {
+        id: "annotation:problem",
+        anchor: { x: 500, y: 320 },
+        width: 32,
+        height: 32,
+        priority: "problem",
+        keepWhenUnplaceable: true,
+        cluster: null,
+      },
+      {
+        id: "annotation:glyph",
+        anchor: { x: 430, y: 430 },
+        width: 32,
+        height: 32,
+        priority: "pinned",
+        keepWhenUnplaceable: false,
+        cluster: { group: "pinned", mustExpand: false },
+      },
+    ];
+    const { placements } = layoutSketchAnnotationClusters(
+      others,
+      LIMITS_4,
+      new Map(),
+      VIEWPORT,
+      slots,
+    );
+    for (const item of others) {
+      const placed = placements.get(item.id);
+      expect(placed, `${item.id} is placed`).toBeDefined();
+      // Review R-2: clear of every slot by the 6 px layout gap.
+      for (const slot of slots) {
+        const clear =
+          placed!.x + item.width / 2 + 6 <= slot.x + 1e-6 ||
+          placed!.x - item.width / 2 - 6 >= slot.x + slot.width - 1e-6 ||
+          placed!.y + item.height / 2 + 6 <= slot.y + 1e-6 ||
+          placed!.y - item.height / 2 - 6 >= slot.y + slot.height - 1e-6;
+        expect(clear, `${item.id} stays out of every wheel slot`).toBe(true);
+      }
+    }
   });
 });

@@ -116,6 +116,21 @@ export interface SketchAnnotationEditState {
 export interface SketchAnnotationContext {
   owners: readonly PrimitiveRef[];
   last: SketchConstraintRef | SketchDimensionRef | null;
+  /** T14g (T-10): the open radial wheel; absent while none is open. */
+  wheel?: SketchAnnotationWheel;
+}
+
+/**
+ * T14g (T-10): a dense cluster's radial wheel. `clusterKey` is the layer's
+ * cluster key (its lowest member's layout id); `members` are the cluster's
+ * annotations when it opened, so the editor knows which selections keep it
+ * open. Its screen centre is viewport-local UI state, not stored here.
+ * `listFiltered`: "More…" narrowed the Constraints list to the members.
+ */
+export interface SketchAnnotationWheel {
+  clusterKey: string;
+  members: readonly (SketchConstraintRef | SketchDimensionRef)[];
+  listFiltered?: true;
 }
 
 export interface SketchAnnotationDescriptor {

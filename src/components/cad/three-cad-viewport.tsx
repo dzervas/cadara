@@ -757,6 +757,30 @@ export function ThreeCadViewport({
     [],
   );
   const selectionRef = useRef(selection);
+  // T14g (T-10): whether the radial annotation wheel is open (the chooser
+  // closes it; it also makes a region click a first-stage blank). Review
+  // R-1: a camera change that starts after it opened closes it (a camera
+  // controls gesture start, a mouse-wheel zoom included; a programmatic
+  // transition such as the view cube; a projection switch; a window
+  // resize); the damped tail of a gesture that ended earlier does not.
+  // Stable (read through refs), so the chooser callbacks and the canvas
+  // listeners that depend on it are not re-created.
+  const annotationWheelOpenRef = useRef(false);
+  const annotationWheelIntentRef = useRef(onIntent);
+  useEffect(() => {
+    annotationWheelOpenRef.current = Boolean(annotationContext?.wheel);
+    annotationWheelIntentRef.current = onIntent;
+  });
+  const closeAnnotationWheel = useCallback(() => {
+    if (annotationWheelOpenRef.current) {
+      annotationWheelOpenRef.current = false;
+      annotationWheelIntentRef.current({ type: "annotationWheelClosed" });
+    }
+  }, []);
+  useEffect(() => {
+    window.addEventListener("resize", closeAnnotationWheel);
+    return () => window.removeEventListener("resize", closeAnnotationWheel);
+  }, [closeAnnotationWheel]);
   const sketchSessionRef = useRef(sketchSession);
   const acceptsSpecialModeTargetRef = useRef(
     capabilities.acceptsSpecialModeTarget,
@@ -779,6 +803,7 @@ export function ThreeCadViewport({
         return;
       }
 
+      closeAnnotationWheel();
       cameraTransitionControllerRef.current.start({
         fromFrame: transitionStartFrame,
         toFrame: targetFrame,
@@ -792,7 +817,7 @@ export function ThreeCadViewport({
         setProjectionMode(targetFrame.projectionMode);
       }
     },
-    [],
+    [closeAnnotationWheel],
   );
   const handleControlsRef = useCallback((controls: unknown) => {
     const nextControls = controls as ViewportCameraControls | null;
@@ -836,6 +861,7 @@ export function ThreeCadViewport({
       }
 
       cameraTransitionControllerRef.current.cancel();
+      closeAnnotationWheel();
       if (cameraRef.current && controlsRef.current) {
         pendingProjectionFrameRef.current = captureViewportCameraFrame(
           cameraRef.current,
@@ -846,7 +872,7 @@ export function ThreeCadViewport({
       projectionModeRef.current = nextMode;
       setProjectionMode(nextMode);
     },
-    [projectionMode],
+    [closeAnnotationWheel, projectionMode],
   );
   const scheduleSketchGeometryDragMove = useCallback(
     (point: readonly [number, number], options?: { exactZero?: boolean }) => {
@@ -1288,9 +1314,11 @@ export function ThreeCadViewport({
           definition: sketch.displayDefinition,
         }),
       });
+      // T14g (T-10): opening the chooser closes the wheel.
+      closeAnnotationWheel();
       return true;
     },
-    [closeSketchPickChooser, detachSketchPickChooser],
+    [closeAnnotationWheel, closeSketchPickChooser, detachSketchPickChooser],
   );
 
   /**
@@ -3029,7 +3057,10 @@ export function ThreeCadViewport({
           ? isSeededDatumPlaneRenderable(resolvedTarget.renderable)
           : false,
         selectionFilterKind: selectionFilterRef.current?.kind ?? null,
-        activeAnnotation: isAnnotationTarget(selectionRef.current[0] ?? null),
+        // T14g: an open wheel makes it a first-stage blank too.
+        activeAnnotation:
+          isAnnotationTarget(selectionRef.current[0] ?? null) ||
+          annotationWheelOpenRef.current,
         topPickClass: pick.sketch?.stack[0]?.pickClass ?? null,
       });
 
@@ -3518,7 +3549,10 @@ export function ThreeCadViewport({
         <OrbitControls
           ref={handleControlsRef}
           makeDefault
-          onStart={() => cameraTransitionControllerRef.current.cancel()}
+          onStart={() => {
+            cameraTransitionControllerRef.current.cancel();
+            closeAnnotationWheel();
+          }}
           target={[0, 0, 4]}
           enableDamping
           dampingFactor={0.08}
@@ -3697,6 +3731,22 @@ export function ThreeCadViewport({
           selectRef.current(target);
         }}
         onEdit={(target) => annotationEditRef.current(target)}
+        onOpenAnnotationWheel={(clusterKey, members) => {
+          // T14g (T-10): opening the wheel resets the pick cycle and clears
+          // the sticky hint; the chooser cannot be open (`+N` is passive
+          // while it is, T-5).
+          pickCycleRef.current = null;
+          clearSketchPickHint();
+          annotationWheelOpenRef.current = true;
+          onIntent({ type: "annotationWheelOpened", clusterKey, members });
+        }}
+        onCloseAnnotationWheel={() => {
+          annotationWheelOpenRef.current = false;
+          onIntent({ type: "annotationWheelClosed" });
+        }}
+        onAnnotationWheelListFilter={(filtered) =>
+          onIntent({ type: "annotationWheelListFilterChanged", filtered })
+        }
         onWheel={(event) => {
           // T14b review A-6: the camera controls listen on the canvas only;
           // a wheel over an interactive chip zooms as it would beside it.

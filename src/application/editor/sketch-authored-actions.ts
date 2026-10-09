@@ -11,6 +11,7 @@ import type {
 import { stableJsonValue } from "@/contracts/modeling/authored-document-serialization";
 import {
   pruneSketchAnnotationContext,
+  withoutSketchAnnotationWheel,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
 import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
@@ -556,10 +557,13 @@ export class SketchAuthoredActions {
           selection: [],
           hoverTarget: null,
           // T14c: refs the restored definition no longer holds leave the
-          // annotation context.
-          annotationContext: pruneSketchAnnotationContext(
-            state.annotationContext ?? null,
-            session,
+          // annotation context. T14g: an open wheel closes (its spokes are
+          // the pre-restore cluster).
+          annotationContext: withoutSketchAnnotationWheel(
+            pruneSketchAnnotationContext(
+              state.annotationContext ?? null,
+              session,
+            ),
           ),
           session,
         });
