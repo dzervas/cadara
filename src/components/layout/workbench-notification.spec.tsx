@@ -13,7 +13,6 @@ test("src/components/layout/workbench-notification.spec.tsx", () => {
       title="Workbench action"
       message="Saved the document."
       onDismiss={() => undefined}
-      placement={{ kind: "viewport", right: 152, top: 16 }}
     />,
   );
   expect(
@@ -52,10 +51,13 @@ test("src/components/layout/workbench-notification.spec.tsx", () => {
     infoMarkup.includes("Dismiss notification"),
     "Dismissible notifications should render a dismiss control.",
   ).toBeTruthy();
+  // T14e review R-1: workbench notifications sit in the right-side column's
+  // flow; without a placement the notification positions nothing itself.
   expect(
-    infoMarkup.includes("right:152px") && infoMarkup.includes("top:16px"),
-    "Viewport notifications should render viewport placement.",
-  ).toBeTruthy();
+    /class="[^"]*\b(absolute|fixed)\b/.test(infoMarkup) ||
+      /style="[^"]*\b(right|top):/.test(infoMarkup),
+    "A notification without a placement renders in flow (no absolute/fixed position, no right/top).",
+  ).toBeFalsy();
 
   const warningMarkup = renderNotification(
     <WorkbenchNotification

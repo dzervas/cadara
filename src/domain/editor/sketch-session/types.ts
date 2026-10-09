@@ -132,6 +132,25 @@ export interface SketchAnnotationDescriptor {
   /** T13d (D12): a reference (non-driving) dimension, shown in the muted tone. */
   reference?: true;
   dragHandle?: SketchDimensionAnnotationDragHandle;
+  /**
+   * T14e (Q1/A-9): an arc's own end binding. Never drawn in the viewport
+   * unless it is a problem (and never by Show all); listed under its arc,
+   * with no one-click delete. Display only: the record is unchanged.
+   */
+  arcBinding?: { arc: PrimitiveRef; arcLabel: string };
+  /** T14e (T-17): present exactly on a problem annotation. */
+  problem?: SketchAnnotationProblem;
+}
+
+/**
+ * T14e (T-17): why an annotation is a problem: its requirement conflicts
+ * (unsatisfied), is blocked by a failed offset relationship, or carries a
+ * solver error. `explanation` is the T13 D7 conflict explanation, or the
+ * targeted diagnostic's message, when available.
+ */
+export interface SketchAnnotationProblem {
+  status: "conflict" | "blocked" | "error";
+  explanation: string | null;
 }
 
 export interface SketchDimensionAnnotationDragHandle {

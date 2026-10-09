@@ -561,6 +561,7 @@ function renderAnnotations(
     selection?: readonly PrimitiveRef[];
     definition?: SketchSessionState["definition"] | null;
     interactive: boolean;
+    showAll?: boolean;
   },
 ) {
   return renderToStaticMarkup(
@@ -579,6 +580,7 @@ function renderAnnotations(
       selection={context.selection ?? []}
       definition={context.definition ?? null}
       interactive={context.interactive}
+      showAll={context.showAll}
       onHover={() => undefined}
       onClearHover={() => undefined}
       onSelect={() => undefined}
@@ -832,8 +834,10 @@ test("T14b T-4: hovering a tangent handle previews its spline's and its fit poin
 });
 
 // T14b T-7, UI lane (component over real descriptors): an arc's end bindings
-// are contextual Coincident constraint glyphs, never always-visible chips.
-test("T14b T-7: a three-point arc renders no always-visible chip; its bindings preview as Coincident constraints on hover", () => {
+// are never always-visible chips. T14e (Q1/A-9) re-pin: they are not drawn
+// in the viewport at all unless they are a problem: not on hover, not when
+// the arc is selected, not with Show all.
+test("T14b T-7 / T14e Q1: a three-point arc renders no chip; its bindings render on no hover, selection or Show all", () => {
   const session = drawnSession("threePointArc", [
     [2, 0],
     [-2, 0],
@@ -841,39 +845,139 @@ test("T14b T-7: a three-point arc renders no always-visible chip; its bindings p
   ]);
   const arc = session.definition.entities[0]!;
   const annotations = getSketchAnnotationDescriptors(session);
-
   expect(
-    renderedAnnotationTags(
+    annotations.filter((annotation) => annotation.arcBinding),
+    "premise: two binding descriptors",
+  ).toHaveLength(2);
+
+  for (const [name, context] of [
+    ["nothing hovered or selected", {}],
+    ["the arc hovered", { hoverTarget: arc.target }],
+    [
+      "the arc selected",
+      {
+        selection: [arc.target],
+        annotationContext: { owners: [arc.target], last: null },
+      },
+    ],
+    ["Show all", { showAll: true }],
+    [
+      "a binding selected from the list",
+      {
+        selection: [annotations[0]!.target],
+        annotationContext: {
+          owners: annotations[0]!.affectedGeometryRefs,
+          last: annotations[0]!.target,
+        },
+      },
+    ],
+  ] as const) {
+    const tags = renderedAnnotationTags(
       renderAnnotations(annotations, {
+        ...context,
         definition: session.definition,
         interactive: true,
       }),
-    ),
-    "Nothing is visible with nothing hovered or selected.",
-  ).toEqual([]);
-  const hovered = renderedAnnotationTags(
-    renderAnnotations(annotations, {
-      hoverTarget: arc.target,
-      definition: session.definition,
-      interactive: true,
-    }),
+    );
+    expect(
+      tags.filter((tag) =>
+        tag.includes('data-sketch-annotation-glyph="constraintCoincident"'),
+      ),
+      `${name}: no binding renders`,
+    ).toEqual([]);
+    expect(
+      tags.some((tag) =>
+        tag.includes('data-sketch-annotation-kind="dimension"'),
+      ),
+      `${name}: no chip`,
+    ).toBe(false);
+    if (name === "Show all") {
+      expect(
+        tags.map(
+          (tag) => /data-sketch-annotation-glyph="(\w+)"/.exec(tag)?.[1],
+        ),
+        "contrast: Show all draws the arc's other constraint",
+      ).toEqual(["constraintPierce"]);
+    }
+  }
+});
+
+// T14e (Q1, T-17), UI lane (layer model seam): a binding that is a problem is
+// drawn like every problem: pinned with nothing selected, interactive idle.
+test("T14e Q1/T-17: a problem arc binding is drawn pinned; a quiet one never", () => {
+  const arc: PrimitiveRef = {
+    kind: "sketchEntity",
+    sketchId: "sketch_draft",
+    entityId: "sketch_entity_arc",
+  };
+  const binding = { arc, arcLabel: "Arc 1" };
+  const quiet = makeConstraintDescriptor("constraint_quiet_binding", [arc], {
+    glyphKind: "constraintCoincident",
+    arcBinding: binding,
+  });
+  const problem = makeConstraintDescriptor(
+    "constraint_problem_binding",
+    [arc],
+    {
+      glyphKind: "constraintCoincident",
+      arcBinding: binding,
+      constraintDisplay: {
+        state: "overconstrained",
+        isAffectedOverconstraint: true,
+      },
+      problem: { status: "conflict", explanation: null },
+    },
   );
-  const bindings = hovered.filter((tag) =>
-    tag.includes('data-sketch-annotation-glyph="constraintCoincident"'),
+  const items = resolveSketchAnnotationLayer([quiet, problem], {
+    annotationContext: null,
+    hoveredAnnotation: null,
+    hoverTarget: arc,
+    selection: [arc],
+    definition: null,
+    interactive: true,
+    showAll: true,
+  }).items;
+  expect(
+    items.map((item) => [
+      item.annotation.id,
+      item.visibility,
+      item.isInteractive,
+    ]),
+  ).toEqual([["constraint_problem_binding", "pinned", true]]);
+});
+
+// T14e (T-11/A-8, T-5 unchanged), UI lane (component markup seam): Show all
+// pins every drawn annotation with nothing selected or hovered: controls in
+// the idle select context, passive markup otherwise.
+test("T14e T-11: Show all pins every constraint (buttons when idle, passive otherwise); off, they stay hidden", async () => {
+  const { state } = await makeAnnotationLifecycleState();
+  const annotations = getSketchAnnotationDescriptors(state.session);
+  expect(annotations, "premise: four constraints").toHaveLength(4);
+  const render = (showAll: boolean, interactive: boolean) =>
+    renderedAnnotationTags(
+      renderAnnotations(annotations, {
+        definition: state.session.definition,
+        interactive,
+        showAll,
+      }),
+    );
+
+  expect(render(false, true), "off: nothing selected, nothing shows").toEqual(
+    [],
   );
-  expect(bindings, "both bindings preview").toHaveLength(2);
-  expect(
-    bindings.every(
-      (tag) =>
-        tag.startsWith("<div") &&
-        tag.includes('data-sketch-annotation-kind="constraint"'),
-    ),
-  ).toBe(true);
-  expect(
-    hovered.some((tag) =>
-      tag.includes('data-sketch-annotation-kind="dimension"'),
-    ),
-  ).toBe(false);
+  const idle = render(true, true);
+  expect(idle).toHaveLength(4);
+  for (const tag of idle) {
+    expect(tag).toMatch(/^<button /);
+    expect(tag).toContain('data-sketch-annotation-visibility="pinned"');
+    expect(tag).toContain('data-sketch-annotation-interactive="true"');
+  }
+  const armed = render(true, false);
+  expect(armed, "still all visible with a tool armed").toHaveLength(4);
+  for (const tag of armed) {
+    expect(tag).toMatch(/^<div /);
+    expect(tag).toContain('data-sketch-annotation-interactive="false"');
+  }
 });
 
 /** The chip's label drag driven with pointer events (T14a C1/C2, review R-5). */
@@ -1613,4 +1717,48 @@ test("T14d: labels avoid the obstacles they are given and clamp into the viewpor
       chipRect.y >= panel.y + panel.height,
     "the chip is not under the tool panel",
   ).toBe(true);
+});
+
+// T14e (T14d re-review note), UI lane (component layout seam): a glyph
+// selected from the Constraints list may not be under the pointer; it is
+// identifiable by its active styling, and its rank is not raised: it is
+// placed where it is when merely pinned by its owner.
+test("T14e: a glyph selected from the list renders active at the place it has when merely pinned", () => {
+  const siblings = ["c_parallel", "c_perpendicular", "c_horizontal"].map(
+    (id, index) =>
+      makeConstraintDescriptor(`constraint_${id}`, [T14D_EDGE], {
+        glyphKind: (
+          [
+            "constraintParallel",
+            "constraintPerpendicular",
+            "constraintHorizontal",
+          ] as const
+        )[index],
+      }),
+  );
+  const anchors = siblings.map(() => ({ x: 600, y: 300 }));
+  const pinned = renderedLabelRects(
+    renderLaidOut(siblings, anchors, { selection: [T14D_EDGE] }),
+    siblings,
+  );
+  expect(pinned, "premise: all three pinned by their edge").toHaveLength(3);
+
+  // The list selects the last-ranked sibling: selection = [it], owners = its
+  // affected geometry (T14c "select an annotation").
+  const listed = siblings[2]!;
+  const markup = renderLaidOut(siblings, anchors, {
+    selection: [listed.target],
+    annotationContext: { owners: [T14D_EDGE], last: listed.target },
+  });
+  expect(renderedLabelRects(markup, siblings), "no label moved").toEqual(
+    pinned,
+  );
+  const active = renderedAnnotationTags(markup).filter((tag) =>
+    tag.includes('data-sketch-annotation-selection="active"'),
+  );
+  expect(active, "exactly the listed glyph is active").toHaveLength(1);
+  expect(active[0]).toContain(
+    'data-sketch-annotation-glyph="constraintHorizontal"',
+  );
+  expect(active[0]).toContain("border-[var(--cad-accent)]");
 });

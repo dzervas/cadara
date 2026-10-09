@@ -6,6 +6,7 @@ import type { SketchDefinition } from "@/contracts/sketch/schema";
 import { type PrimitiveRef, getPrimitiveRefKey } from "@/core/editor/schema";
 import {
   getSketchAnnotationContextRefs,
+  isSketchAnnotationDrawnInViewport,
   type SketchAnnotationContext,
   type SketchAnnotationDescriptor,
   type SketchSessionState,
@@ -27,6 +28,8 @@ interface SketchAnnotationVisibilityContext {
   /** T14c: the retained owners and the last selected annotation. */
   annotationContext: SketchAnnotationContext | null;
   definition: SketchDefinition | null;
+  /** T14e (T-11): the Show all switch pins every drawn annotation. */
+  showAll?: boolean;
 }
 
 export function resolveSketchAnnotationVisibility(
@@ -74,7 +77,12 @@ function createSketchAnnotationVisibilityResolver(
   return (
     annotation: SketchAnnotationDescriptor,
   ): SketchAnnotationVisibility => {
+    // T14e (Q1/A-9): an arc's own end binding is drawn only as a problem.
+    if (!isSketchAnnotationDrawnInViewport(annotation)) {
+      return "hidden";
+    }
     if (
+      context.showAll ||
       annotation.status === "dimension" ||
       annotation.constraintDisplay?.isAffectedOverconstraint ||
       context.selection.some((target) =>

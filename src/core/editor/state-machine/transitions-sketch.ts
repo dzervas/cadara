@@ -167,6 +167,19 @@ export function handleSketchInferenceSuppressionChanged(
   };
 }
 
+/**
+ * T14e (T-11): the Show all switch. Editor UI state only: the session (and
+ * so the authored state, history and the descriptor memo) is untouched.
+ */
+export function handleSketchShowAllAnnotationsChanged(
+  state: SketchEditorState,
+  event: Extract<EditorEvent, { type: "sketch.showAllAnnotationsChanged" }>,
+): EditorTransitionResult {
+  return (state.showAllAnnotations ?? false) === event.showAll
+    ? { state, effects: [] }
+    : { state: { ...state, showAllAnnotations: event.showAll }, effects: [] };
+}
+
 export function handleSketchToolPatched(
   state: EditorState,
   event: Extract<EditorEvent, { type: "sketch.toolPatched" }>,

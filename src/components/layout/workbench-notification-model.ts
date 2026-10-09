@@ -7,9 +7,11 @@ export interface WorkbenchNotificationAction {
   onClick: () => void;
 }
 
-export type WorkbenchNotificationPlacement =
-  | { kind: "viewport"; top: number | string; right: number | string }
-  | { kind: "app-top-center" };
+/**
+ * Without a placement a notification renders in its host's flow (the
+ * workbench's right-side column, T14e).
+ */
+export type WorkbenchNotificationPlacement = { kind: "app-top-center" };
 
 export interface WorkbenchNotificationModel {
   type: WorkbenchNotificationType;

@@ -177,6 +177,13 @@ export interface SketchEditorState extends EditorStateBase {
    * history; absent or null without one.
    */
   annotationContext?: SketchAnnotationContext | null;
+  /**
+   * T14e (T-11/A-8): the Constraints panel's Show all switch: every
+   * annotation (but an arc's own end bindings) is pinned. Editor UI state of
+   * the open sketch: never authored, never in history; kept across tool
+   * switches and special modes, gone with the sketch. Absent = off.
+   */
+  showAllAnnotations?: boolean;
   /** Explicit correlation ID for an in-flight sketch commit request. */
   pendingCommitRequestId: RequestId | null;
   /** Explicit correlation ID for an in-flight sketch reference projection request. */
@@ -537,6 +544,12 @@ export interface SketchInferenceSuppressionChangedEvent {
   held: boolean;
 }
 
+/** T14e (T-11): the Constraints panel's Show all switch was set. */
+export interface SketchShowAllAnnotationsChangedEvent {
+  type: "sketch.showAllAnnotationsChanged";
+  showAll: boolean;
+}
+
 /** Moves the active sketch-local history cursor. */
 
 /** Moves the document-level authored history cursor through the editor runtime. */
@@ -704,6 +717,7 @@ export type EditorEvent =
   | SketchEscapeRequestedEvent
   | SketchConfirmRequestedEvent
   | SketchInferenceSuppressionChangedEvent
+  | SketchShowAllAnnotationsChangedEvent
   | DocumentHistoryCursorRequestedEvent
   | HistoryUndoRequestedEvent
   | HistoryRedoRequestedEvent
@@ -1512,6 +1526,8 @@ export interface EditorViewState {
   sketchSession: SketchSessionState | null;
   /** T14c: the sketch's annotation selection lifecycle, or null. */
   annotationContext: SketchAnnotationContext | null;
+  /** T14e: the open sketch's Show all switch (false outside a sketch). */
+  showAllAnnotations: boolean;
   /** Active temporary section-view session, or null when inactive. */
   activeSectionView?: SectionViewSession | null;
   /** Last loaded document snapshot owned by the machine. */

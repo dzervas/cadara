@@ -32,6 +32,7 @@ interface WorkbenchViewportModelInput {
   sketchAnnotations: SketchAnnotationDescriptor[];
   selection: PrimitiveRef[];
   annotationContext: EditorViewState["annotationContext"];
+  showAllAnnotations: boolean;
   sketchToolPresentation: SketchToolPresentationSchema | null;
   documentVariableNames: readonly string[];
   specialModePresentation: SketchSpecialModeViewportPresentation | null;
@@ -53,6 +54,7 @@ export function createWorkbenchViewportModel({
   sketchAnnotations,
   selection,
   annotationContext,
+  showAllAnnotations,
   sketchToolPresentation,
   documentVariableNames,
   specialModePresentation,
@@ -73,6 +75,7 @@ export function createWorkbenchViewportModel({
     sketchAnnotations,
     selection,
     annotationContext,
+    showAllAnnotations,
     sketchToolPresentation,
     documentVariableNames,
     specialModePresentation,

@@ -6,6 +6,7 @@ import { appVersion, gitCommit } from "@/build-info";
 import { ThreeCadViewport } from "@/components/cad/three-cad-viewport";
 import { SketchSpecialModePanel } from "@/components/cad/sketch-special-mode-panel";
 import { SketchTangentActions } from "@/components/cad/sketch-tangent-actions";
+import { SketchConstraintList } from "@/components/cad/sketch-constraint-list";
 import { splineVisibleHandleVectors } from "@/contracts/sketch/spline-geometry";
 import { SketchToolPanel } from "@/components/cad/sketch-tool-panel";
 import { FeatureInspector } from "@/components/layout/feature-inspector";
@@ -26,7 +27,11 @@ import {
 } from "@/components/layout/document-file-menu";
 import { WorkbenchInspectorOverlay } from "@/components/layout/workbench-inspector-overlay";
 import { WorkspaceToolbar } from "@/components/layout/workspace-toolbar";
-import { WorkbenchVariablesFab } from "@/components/layout/workbench-variables-fab";
+import {
+  WORKBENCH_VARIABLES_FAB_BOTTOM_PX,
+  WORKBENCH_VARIABLES_FAB_SIZE_PX,
+  WorkbenchVariablesFab,
+} from "@/components/layout/workbench-variables-fab";
 import { WorkbenchVariablesPanel } from "@/components/layout/workbench-variables-panel";
 import {
   WorkbenchStateDebugger,
@@ -76,6 +81,7 @@ import { ok } from "@/contracts/errors";
 import {
   computeSketchTangentActionState,
   getSketchAnnotationDescriptors,
+  getSketchAnnotationListRows,
   getSketchToolPresentation,
 } from "@/domain/editor/sketch-session";
 import {
@@ -131,10 +137,11 @@ import {
 } from "@/workbench/viewport/workbench-viewport-adapter";
 import type { ViewportSpecialModeTargetInput } from "@/workbench/viewport/viewport-boundary";
 import {
-  WORKBENCH_STATUS_TOP_STYLE,
-  WORKBENCH_STATUS_TOP_WITH_RESTORE_STYLE,
+  VIEW_CUBE_SIZE_PX,
   VIEWPORT_FLOATING_PANEL_LEFT_PX,
   VIEWPORT_FLOATING_PANEL_TOP_STYLE,
+  VIEWPORT_OVERLAY_GAP_PX,
+  WORKBENCH_STATUS_TOP_STYLE,
   getWorkbenchNotificationRightOffsetPx,
 } from "@/components/cad/viewport-overlay-layout";
 import { createBugReportPayload } from "@/domain/bug-reporting/report";
@@ -150,6 +157,23 @@ type FeatureHistoryItem = Extract<
 >;
 type SketchHistoryItem = Extract<DocumentHistoryItemRecord, { kind: "sketch" }>;
 type BrowserTabCloseSaveAction = "downloadCopy" | "saveLinked";
+
+/**
+ * T14e: the height of the view-cube column (`three-cad-viewport.tsx`: the
+ * 120 px cube, `gap-1` and the projection selector), as measured in the
+ * browser (review A-1: 154 px). Its section controls never show in a sketch
+ * (a section view is its own editor state).
+ */
+const VIEW_CUBE_COLUMN_RESERVE_PX = 154;
+/**
+ * T14e review B-1: the right-side column ends above the Variables FAB and a
+ * gap, which also keeps it above the bottom history/timeline/tabs stack the
+ * FAB clears.
+ */
+const VARIABLES_FAB_RESERVE_PX =
+  WORKBENCH_VARIABLES_FAB_BOTTOM_PX +
+  WORKBENCH_VARIABLES_FAB_SIZE_PX +
+  VIEWPORT_OVERLAY_GAP_PX;
 
 interface CadWorkbenchProps {
   tabsState: WorkbenchTabsState;
@@ -187,6 +211,7 @@ export function CadWorkbench({
       hoverTarget,
       sketchSession,
       annotationContext,
+      showAllAnnotations,
       activeEditSession,
       activeSketchPlaneEditSession,
       activeImportSession,
@@ -217,9 +242,6 @@ export function CadWorkbench({
     useState(false);
   const snapshotRef = useRef(snapshot);
   const firstSnapshotReadyRecordedRef = useRef(false);
-  const notificationRightOffset = getWorkbenchNotificationRightOffsetPx({
-    reserveViewCube: true,
-  });
   // TODO: Replace with the cloud-save capability flag when cloud persistence is implemented.
   const cloudSaveEnabled = false;
   const {
@@ -688,6 +710,21 @@ export function CadWorkbench({
   const sketchAnnotations = useMemo(
     () => (sketchSession ? getSketchAnnotationDescriptors(sketchSession) : []),
     [sketchSession],
+  );
+  // As the history strip: select it, then delete the selection (one
+  // action); the row goes with its hover. Stable, so the list's memoized
+  // rows re-render only when their own props change (review A-2).
+  const handleConstraintListDelete = useCallback(
+    (target: PrimitiveRef) => {
+      handleViewportSelect(target);
+      dispatch({ type: "sketch.annotationDeleteRequested" });
+      handleViewportHoverClear();
+    },
+    [dispatch, handleViewportHoverClear, handleViewportSelect],
+  );
+  const sketchAnnotationListRows = useMemo(
+    () => getSketchAnnotationListRows(sketchAnnotations),
+    [sketchAnnotations],
   );
 
   const debuggerState: WorkbenchStateDebuggerModel = {
@@ -1208,6 +1245,7 @@ export function CadWorkbench({
         sketchAnnotations,
         selection: visibleSelection,
         annotationContext,
+        showAllAnnotations,
         sketchToolPresentation,
         documentVariableNames:
           snapshot?.document.variables.map((variable) => variable.name) ?? [],
@@ -1227,6 +1265,7 @@ export function CadWorkbench({
       activeSectionView,
       annotationContext,
       machineState.kind,
+      showAllAnnotations,
       measurementViewModel?.witnesses,
       mode,
       selectionCatalog,
@@ -1374,41 +1413,82 @@ export function CadWorkbench({
                 a `data-viewport-annotation-chrome` wrapper and does not
                 render a label anchored under them; the
                 `data-viewport-annotation-bottom-band` children bound the
-                usable canvas from below. */}
-            <div className="contents" data-viewport-annotation-chrome="">
-              {restoreMessage ? (
-                <WorkbenchNotification
-                  type="error"
-                  title="History restore failed"
-                  message={restoreMessage}
-                  placement={{
-                    kind: "viewport",
-                    right: notificationRightOffset,
-                    top: WORKBENCH_STATUS_TOP_STYLE,
-                  }}
-                  action={{
-                    label: "Reset stored history",
-                    onClick: () => {
-                      modelingService.resetOperationHistory();
-                      setRestoreMessage(null);
-                    },
-                  }}
-                  onDismiss={() => setRestoreMessage(null)}
-                />
-              ) : null}
-              {workbenchStatusNotification ? (
-                <WorkbenchNotification
-                  {...workbenchStatusNotification}
-                  placement={{
-                    kind: "viewport",
-                    right: notificationRightOffset,
-                    top: restoreMessage
-                      ? WORKBENCH_STATUS_TOP_WITH_RESTORE_STYLE
-                      : WORKBENCH_STATUS_TOP_STYLE,
-                  }}
-                  onDismiss={() => setWorkbenchStatusNotification(null)}
-                />
-              ) : null}
+                usable canvas from below.
+                T14e (T-12/Q2, R-4): the right-side column. Row 1: the
+                notifications beside the view-cube column's reserve (this
+                grid is the source of truth for their right offset: inset +
+                cube + gap); row 2: the sketch's Constraints panel under both,
+                right-aligned with the cube column. The panel sits below the
+                cube and every notification by flow, so neither covers the
+                other. Review B-1: the column ends above the Variables FAB (and
+                so the bottom stack); the panel takes the height left and its
+                list scrolls. Notifications stay above the Variables panel
+                (z 27) and FAB (z 28); the Constraints panel stays below them,
+                so the open Variables panel draws over it. */}
+            <div
+              className="pointer-events-none absolute grid items-start justify-items-end"
+              style={{
+                right: getWorkbenchNotificationRightOffsetPx({
+                  reserveViewCube: false,
+                }),
+                top: WORKBENCH_STATUS_TOP_STYLE,
+                bottom: VARIABLES_FAB_RESERVE_PX,
+                gridTemplateColumns: `auto ${VIEW_CUBE_SIZE_PX}px`,
+                gridTemplateRows: "auto minmax(0, 1fr)",
+                gap: VIEWPORT_OVERLAY_GAP_PX,
+              }}
+            >
+              <div className="contents" data-viewport-annotation-chrome="">
+                <div className="pointer-events-auto relative z-30 col-start-1 row-start-1 flex flex-col items-end gap-2">
+                  {restoreMessage ? (
+                    <WorkbenchNotification
+                      type="error"
+                      title="History restore failed"
+                      message={restoreMessage}
+                      action={{
+                        label: "Reset stored history",
+                        onClick: () => {
+                          modelingService.resetOperationHistory();
+                          setRestoreMessage(null);
+                        },
+                      }}
+                      onDismiss={() => setRestoreMessage(null)}
+                    />
+                  ) : null}
+                  {workbenchStatusNotification ? (
+                    <WorkbenchNotification
+                      {...workbenchStatusNotification}
+                      onDismiss={() => setWorkbenchStatusNotification(null)}
+                    />
+                  ) : null}
+                </div>
+              </div>
+              <div
+                aria-hidden="true"
+                className="col-start-2 row-start-1"
+                style={{ height: VIEW_CUBE_COLUMN_RESERVE_PX }}
+              />
+              <div className="contents" data-viewport-annotation-chrome="">
+                {sketchSession ? (
+                  <SketchConstraintList
+                    className="relative z-[26] col-span-2 row-start-2 max-h-full"
+                    rows={sketchAnnotationListRows}
+                    selection={selection}
+                    hoverTarget={hoverTarget}
+                    showAll={showAllAnnotations}
+                    onShowAllChange={(showAll) =>
+                      dispatch({
+                        type: "sketch.showAllAnnotationsChanged",
+                        showAll,
+                      })
+                    }
+                    onHover={handleViewportHover}
+                    onClearHover={handleViewportHoverClear}
+                    onSelect={handleViewportSelect}
+                    onDelete={handleConstraintListDelete}
+                  />
+                ) : null}
+              </div>
             </div>
             <div className="contents" data-viewport-annotation-obstacles="">
               {sketchSession?.validationMessage ? (

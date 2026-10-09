@@ -15,6 +15,7 @@ export type {
   SketchAnnotationContext,
   SketchAnnotationEditState,
   SketchAnnotationDescriptor,
+  SketchAnnotationProblem,
   SketchDimensionAnnotationDragHandle,
   SketchAnnotationGlyphKind,
   SketchDragFeedback,
@@ -46,6 +47,7 @@ export {
   resolveHandleFromTarget,
   resolveSketchDragIntent,
 } from "./drag-intent";
+export type { SketchAnnotationListRow } from "./annotations";
 
 export {
   createProjectedPrimitiveRef,
@@ -60,6 +62,8 @@ export {
   getSketchAnnotationAffectedGeometryRefs,
   getSketchAnnotationContextRefs,
   getSketchAnnotationDescriptors,
+  getSketchAnnotationListRows,
+  isSketchAnnotationDrawnInViewport,
   isSketchAnnotationInContext,
   pruneSketchAnnotationContext,
   selectSketchAnnotation,
