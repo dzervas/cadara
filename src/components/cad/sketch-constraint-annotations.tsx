@@ -15,15 +15,24 @@ import type {
   SketchDimensionRef,
 } from "@/contracts/shared/references";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
-import type { PrimitiveRef } from "@/core/editor/schema";
+import { getPrimitiveRefKey, type PrimitiveRef } from "@/core/editor/schema";
 import {
   annotationTargetsEqual,
   resolveSketchAnnotationLayer,
 } from "@/components/cad/sketch-constraint-annotation-visibility";
 import {
+  getSketchAnnotationContextExtent,
+  isSketchAnnotationHoverUnplaced,
+  layoutSketchAnnotationClusters,
+  resolveSketchAnnotationDenseLimit,
+  type SketchAnnotationClusterGroup,
+  type SketchAnnotationClusterLayoutItem,
+  type SketchAnnotationDenseLimit,
+  type SketchAnnotationPreferredExpansion,
+} from "@/components/cad/sketch-annotation-clusters";
+import {
   estimateSketchAnnotationExtent,
   getAnnotationProjectionId,
-  layoutSketchAnnotations,
   type SketchAnnotationLayoutObstacle,
   type SketchAnnotationLayoutViewport,
   type SketchViewportFeedbackProjection,
@@ -56,6 +65,12 @@ interface SketchConstraintAnnotationsProps {
   interactive: boolean;
   /** T14e (T-11): the Show all switch; every drawn annotation is pinned. */
   showAll?: boolean;
+  /**
+   * T14f (T-9): each entity's screen bounding-box diagonal in px, keyed by
+   * primitive ref key; it sets the dense limit (K = 4, or 2 for a small
+   * context). Absent: the limit stays at its previous value (initially 4).
+   */
+  entityScreenExtents?: ReadonlyMap<string, number>;
   onHover: (target: SketchConstraintRef | SketchDimensionRef) => void;
   onClearHover: () => void;
   onSelect: (target: SketchConstraintRef | SketchDimensionRef) => void;
@@ -77,6 +92,7 @@ export function SketchConstraintAnnotations({
   definition,
   interactive,
   showAll = false,
+  entityScreenExtents,
   onHover,
   onClearHover,
   onSelect,
@@ -163,45 +179,150 @@ export function SketchConstraintAnnotations({
   const anchorById = new Map(
     projections.map((projection) => [projection.id, projection]),
   );
-  const projectionById = new Map(
-    layoutSketchAnnotations(
-      visibleAnnotations.flatMap(({ annotation, visibility }) => {
-        const id = getAnnotationProjectionId(annotation.id);
-        const anchor = anchorById.get(id);
-        if (!anchor) {
-          return [];
-        }
-        const isProblem =
-          annotation.constraintDisplay?.isAffectedOverconstraint === true;
-        const isDimension = annotation.status === "dimension";
-        return [
-          {
-            id,
-            anchor,
-            ...estimateSketchAnnotationExtent(annotation),
-            priority: isProblem
-              ? "problem"
-              : isDimension
-                ? "dimension"
-                : visibility === "pinned"
-                  ? "pinned"
-                  : "preview",
-            keepWhenUnplaceable: isProblem || isDimension,
-            fixed:
-              labelDragOffset &&
-              annotation.dragHandle?.id === labelDragOffset.handleId
-                ? {
-                    x: anchor.x + labelDragOffset.dx,
-                    y: anchor.y + labelDragOffset.dy,
-                  }
-                : null,
-          } as const,
-        ];
-      }),
-      viewport,
-      obstacles,
-    ).map((placement) => [placement.id, placement]),
+  const layoutItems = visibleAnnotations.flatMap(
+    ({
+      annotation,
+      visibility,
+      isSelected,
+      isLast,
+    }): SketchAnnotationClusterLayoutItem[] => {
+      const id = getAnnotationProjectionId(annotation.id);
+      const anchor = anchorById.get(id);
+      if (!anchor) {
+        return [];
+      }
+      const isProblem =
+        annotation.constraintDisplay?.isAffectedOverconstraint === true;
+      const isDimension = annotation.status === "dimension";
+      return [
+        {
+          id,
+          anchor,
+          ...estimateSketchAnnotationExtent(annotation),
+          priority: isProblem
+            ? "problem"
+            : isDimension
+              ? "dimension"
+              : visibility,
+          keepWhenUnplaceable: isProblem || isDimension,
+          fixed:
+            labelDragOffset &&
+            annotation.dragHandle?.id === labelDragOffset.handleId
+              ? {
+                  x: anchor.x + labelDragOffset.dx,
+                  y: anchor.y + labelDragOffset.dy,
+                }
+              : null,
+          // T14f (T-9): dimensions and problems are never clustered.
+          cluster:
+            isProblem || isDimension
+              ? null
+              : { group: visibility, mustExpand: isSelected || isLast },
+        },
+      ];
+    },
   );
+
+  // T14f (T-9, A-5): one dense limit per group from its context's screen
+  // extent, with hysteresis inside one context. Pinned: the selected
+  // geometry and the retained owners, or, with Show all on (review R-3) or no
+  // owner, the geometry the group's glyphs affect; a preview: the hovered
+  // geometry. A new context starts fresh (the 160 px rule; review A-1). The
+  // limits and the expanded sets per cluster membership (kept so a click
+  // never swaps expanded glyphs) are layout state, adjusted while rendering;
+  // never authored.
+  const [denseState, setDenseState] = useState<{
+    contexts: Record<
+      SketchAnnotationClusterGroup,
+      { key: string; limit: SketchAnnotationDenseLimit } | null
+    >;
+    expanded: SketchAnnotationPreferredExpansion;
+    expandedKey: string;
+  }>({
+    contexts: { pinned: null, preview: null },
+    expanded: new Map(),
+    expandedKey: "",
+  });
+  const resolveGroupContext = (group: SketchAnnotationClusterGroup) => {
+    const owners: PrimitiveRef[] =
+      group === "pinned"
+        ? showAll
+          ? []
+          : [
+              ...selection.filter(
+                (target) =>
+                  target.kind !== "constraint" && target.kind !== "dimension",
+              ),
+              ...(annotationContext?.owners ?? []),
+            ]
+        : hoverTarget &&
+            hoverTarget.kind !== "constraint" &&
+            hoverTarget.kind !== "dimension"
+          ? [hoverTarget]
+          : [];
+    const affected = layoutItems.flatMap((item) =>
+      item.cluster?.group === group ? (affectedById.get(item.id) ?? []) : [],
+    );
+    const context = owners.length > 0 ? owners : affected;
+    const key = [...new Set(context.map(getPrimitiveRefKey))].sort().join("|");
+    const measure = (refs: readonly PrimitiveRef[]) =>
+      entityScreenExtents && refs.length > 0
+        ? getSketchAnnotationContextExtent(
+            refs,
+            definition,
+            entityScreenExtents,
+          )
+        : null;
+    const extent =
+      measure(context) ?? (owners.length > 0 ? measure(affected) : null);
+    const previous = denseState.contexts[group];
+    return {
+      key,
+      extent,
+      limit: resolveSketchAnnotationDenseLimit(
+        extent,
+        previous?.key === key ? previous.limit : null,
+      ),
+    };
+  };
+  const affectedById = new Map(
+    visibleAnnotations.map(({ annotation }) => [
+      getAnnotationProjectionId(annotation.id),
+      annotation.affectedGeometryRefs,
+    ]),
+  );
+  const pinnedContext = resolveGroupContext("pinned");
+  const previewContext = resolveGroupContext("preview");
+  const pinnedExtent = pinnedContext.extent;
+  const limits = { pinned: pinnedContext.limit, preview: previewContext.limit };
+  const clustered = layoutSketchAnnotationClusters(
+    layoutItems,
+    limits,
+    denseState.expanded,
+    viewport,
+    obstacles,
+  );
+  const expandedKey = [...clustered.expanded]
+    .map(([signature, ids]) => `${signature}=${ids.join("\n")}`)
+    .sort()
+    .join("\n\n");
+  if (
+    pinnedContext.key !== denseState.contexts.pinned?.key ||
+    limits.pinned !== denseState.contexts.pinned?.limit ||
+    previewContext.key !== denseState.contexts.preview?.key ||
+    limits.preview !== denseState.contexts.preview?.limit ||
+    expandedKey !== denseState.expandedKey
+  ) {
+    setDenseState({
+      contexts: {
+        pinned: { key: pinnedContext.key, limit: limits.pinned },
+        preview: { key: previewContext.key, limit: limits.preview },
+      },
+      expanded: clustered.expanded,
+      expandedKey,
+    });
+  }
+  const projectionById = clustered.placements;
   // T14a C2: a drag whose chip unmounts, or whose layer unmounts, cancels; a
   // chip that turns passive (T14b T-5) no longer carries its drag either.
   const renderedDragHandleIds = visibleAnnotations
@@ -218,7 +339,15 @@ export function SketchConstraintAnnotations({
   }, [labelDrag, renderedDragHandleIds]);
   // T14b review A-2: an annotation hover whose chip turned passive or went
   // away gets no pointer leave; clear it once.
-  const hoverIsStale = layer.hoverIsStale;
+  // Review R-1: a hovered control that collapsed into a `+N` (or that the
+  // ring cap dropped) unmounted without a pointer leave: its hover is stale.
+  const hoverIsStale =
+    layer.hoverIsStale ||
+    isSketchAnnotationHoverUnplaced(
+      hoveredAnnotation,
+      visibleAnnotations,
+      projectionById,
+    );
   const clearStaleHover = useEffectEvent(() => {
     if (annotationTargetsEqual(ownedHoverRef.current, hoveredAnnotation!)) {
       ownedHoverRef.current = null;
@@ -240,6 +369,11 @@ export function SketchConstraintAnnotations({
     <div
       className="pointer-events-none absolute inset-0 z-30"
       data-sketch-annotation-layer=""
+      data-sketch-annotation-pinned-limit={limits.pinned}
+      data-sketch-annotation-preview-limit={limits.preview}
+      data-sketch-annotation-pinned-extent={
+        pinnedExtent === null ? undefined : Math.round(pinnedExtent)
+      }
       ref={layerRef}
     >
       {visibleAnnotations.map(
@@ -389,6 +523,55 @@ export function SketchConstraintAnnotations({
           );
         },
       )}
+      {clustered.chips.map((chip) => {
+        // T14f (T-9, T-5): a cluster's `+N` is passive in a preview or
+        // outside the idle context; pinned and idle, it is a focusable
+        // control (activating it opens the wheel in T14g; nothing yet).
+        const isInteractive = interactive && chip.group === "pinned";
+        const label = `${chip.count} more constraint${chip.count === 1 ? "" : "s"}`;
+        const className = `absolute flex h-8 w-8 items-center justify-center rounded border border-[var(--cad-border)] bg-[var(--cad-surface-overlay)] font-mono text-[11px] leading-none text-[var(--cad-foreground)] shadow-[var(--cad-panel-shadow)] ${
+          isInteractive
+            ? "pointer-events-auto transition hover:border-[var(--cad-border-strong)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--cad-accent)]"
+            : chip.group === "preview"
+              ? "pointer-events-none opacity-60"
+              : "pointer-events-none"
+        }`;
+        const style = {
+          left: chip.x,
+          top: chip.y,
+          transform: "translate(-50%, -50%)",
+        };
+        const attributes = {
+          "data-sketch-annotation-overflow": chip.count,
+          "data-sketch-annotation-cluster": chip.key,
+          "data-sketch-annotation-visibility": chip.group,
+          "data-sketch-annotation-interactive": String(isInteractive),
+        };
+
+        return isInteractive ? (
+          <button
+            key={chip.id}
+            type="button"
+            {...attributes}
+            aria-label={label}
+            title={label}
+            className={className}
+            style={style}
+          >
+            +{chip.count}
+          </button>
+        ) : (
+          <div
+            key={chip.id}
+            aria-hidden="true"
+            {...attributes}
+            className={className}
+            style={style}
+          >
+            +{chip.count}
+          </div>
+        );
+      })}
     </div>
   );
 }

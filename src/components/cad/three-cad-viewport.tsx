@@ -559,6 +559,9 @@ export function ThreeCadViewport({
   >([]);
   const [sketchAnnotationProjections, setSketchAnnotationProjections] =
     useState<SketchViewportFeedbackProjection[]>([]);
+  const [sketchEntityScreenExtents, setSketchEntityScreenExtents] = useState<
+    ReadonlyMap<string, number>
+  >(() => new Map());
   const [specialModeFeedbackProjections, setSpecialModeFeedbackProjections] =
     useState<SketchSpecialModeFeedbackProjection[]>([]);
   // T13k (D26): the near gaps at their current screen positions.
@@ -1429,6 +1432,62 @@ export function ThreeCadViewport({
       }),
     );
 
+    // T14f (T-9): every displayed curve's screen bounding-box diagonal, the
+    // context extent that picks the annotation dense limit (K = 4 or 2).
+    const entityScreenBounds = new Map<
+      string,
+      { minX: number; minY: number; maxX: number; maxY: number }
+    >();
+    for (const renderable of sketchDisplayRenderables) {
+      if (!renderable.target || renderable.geometry.kind !== "polyline") {
+        continue;
+      }
+      const key = getPrimitiveRefKey(renderable.target);
+      for (const point of renderable.geometry.points) {
+        const screenPoint = projectSketchFeedbackAnchor({
+          anchor: { kind: "worldPoint", point },
+          plane,
+          viewport: { width: rect.width, height: rect.height },
+          projectWorldPoint: (world: WorkspaceVec3) => {
+            const projected = new THREE.Vector3(
+              world[0],
+              world[1],
+              world[2],
+            ).project(camera);
+            return { x: projected.x, y: projected.y, z: projected.z };
+          },
+        });
+        if (!screenPoint) {
+          continue;
+        }
+        const bounds = entityScreenBounds.get(key);
+        entityScreenBounds.set(
+          key,
+          bounds
+            ? {
+                minX: Math.min(bounds.minX, screenPoint.x),
+                minY: Math.min(bounds.minY, screenPoint.y),
+                maxX: Math.max(bounds.maxX, screenPoint.x),
+                maxY: Math.max(bounds.maxY, screenPoint.y),
+              }
+            : {
+                minX: screenPoint.x,
+                minY: screenPoint.y,
+                maxX: screenPoint.x,
+                maxY: screenPoint.y,
+              },
+        );
+      }
+    }
+    setSketchEntityScreenExtents(
+      new Map(
+        [...entityScreenBounds].map(([key, bounds]) => [
+          key,
+          Math.hypot(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY),
+        ]),
+      ),
+    );
+
     // T12f: project the drag feedback cue (issue 05 local diagnostic).
     const dragFeedback = sketchSession?.activeDrag?.feedback;
     if (dragFeedback) {
@@ -1479,6 +1538,7 @@ export function ThreeCadViewport({
     setSketchNearGaps(nearGaps.length > 0 ? nearGaps : EMPTY_SKETCH_NEAR_GAPS);
   }, [
     sketchAnnotations,
+    sketchDisplayRenderables,
     sketchNearGapBasis,
     sketchNearGapPositions,
     sketchSession?.activeDrag?.feedback,
@@ -3613,6 +3673,7 @@ export function ThreeCadViewport({
         selection={selection}
         annotationContext={annotationContext}
         showAll={showAllAnnotations}
+        entityScreenExtents={sketchEntityScreenExtents}
         definition={sketchSession?.definition ?? null}
         interactive={isSketchAnnotationIdleContext(
           sketchSession,
