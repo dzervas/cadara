@@ -43,12 +43,7 @@ export const VIEWPORT_CANVAS_TOP_INSET_PX = 0;
 export const LEGACY_VIEWPORT_LEFT_INSET_PX = 180;
 export const LEGACY_VIEWPORT_WIDTH_PX = 1080;
 export const LEGACY_VIEWPORT_HEIGHT_PX = 912;
-export const WORKBENCH_STATUS_TOP_PX = VIEWPORT_OVERLAY_TOP_INSET_PX;
-export const WORKBENCH_STATUS_TOP_WITH_RESTORE_PX =
-  WORKBENCH_STATUS_TOP_PX + 60;
 export const WORKBENCH_STATUS_TOP_STYLE = VIEWPORT_OVERLAY_TOP_INSET_STYLE;
-export const WORKBENCH_STATUS_TOP_WITH_RESTORE_STYLE =
-  "calc(var(--workbench-viewport-overlay-top, 76px) + 60px)";
 
 export function getWorkbenchNotificationRightOffsetPx(options: {
   reserveViewCube: boolean;

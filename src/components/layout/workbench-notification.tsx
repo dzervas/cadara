@@ -71,7 +71,6 @@ export function WorkbenchNotification({
         .join(" ")}
       style={{
         ...getNotificationStyle(type),
-        ...getPlacementStyle(placement),
         ...style,
       }}
     >
@@ -144,24 +143,7 @@ function getPlacementClassName(
     return "fixed left-1/2 top-3 w-[min(720px,calc(100vw-24px))] -translate-x-1/2";
   }
 
-  if (placement?.kind === "viewport") {
-    return "absolute";
-  }
-
   return "";
-}
-
-function getPlacementStyle(
-  placement: WorkbenchNotificationPlacement | undefined,
-): CSSProperties {
-  if (placement?.kind !== "viewport") {
-    return {};
-  }
-
-  return {
-    right: placement.right,
-    top: placement.top,
-  };
 }
 
 function getNotificationStyle(type: WorkbenchNotificationType) {

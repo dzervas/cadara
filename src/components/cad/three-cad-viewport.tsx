@@ -383,6 +383,7 @@ export function ThreeCadViewport({
     sketchAnnotations,
     selection,
     annotationContext,
+    showAllAnnotations,
     sketchToolPresentation,
     specialModePresentation,
     hasNonEmptyCommittedGeometry,
@@ -2858,6 +2859,19 @@ export function ThreeCadViewport({
         lastPickedTargetRef.current = null;
         return;
       }
+      // T14e: the same hand-over to the Constraints list. React dispatches
+      // the row's `onPointerEnter` while handling the native `pointerout`,
+      // which fires before this native `pointerleave`, so the row's hover is
+      // already the editor's: it must not be cleared here. The canvas
+      // forgets its own hover, so its next pick is dispatched again.
+      if (
+        event.relatedTarget instanceof Element &&
+        event.relatedTarget.closest("[data-sketch-constraint-list]")
+      ) {
+        lastPickedTargetRef.current = null;
+        hoverTargetRef.current = null;
+        return;
+      }
       clearHover();
     };
 
@@ -3598,6 +3612,7 @@ export function ThreeCadViewport({
         hoverTarget={hoverTarget}
         selection={selection}
         annotationContext={annotationContext}
+        showAll={showAllAnnotations}
         definition={sketchSession?.definition ?? null}
         interactive={isSketchAnnotationIdleContext(
           sketchSession,

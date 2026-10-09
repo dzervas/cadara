@@ -65,6 +65,10 @@ export function getEditorViewState(state: EditorState) {
     sketchSession: state.kind === "editingSketch" ? state.session : null,
     annotationContext:
       state.kind === "editingSketch" ? (state.annotationContext ?? null) : null,
+    showAllAnnotations:
+      state.kind === "editingSketch"
+        ? (state.showAllAnnotations ?? false)
+        : false,
     activeSectionView:
       state.kind === "inspectingSection" ? state.section : null,
     snapshot: state.snapshot,

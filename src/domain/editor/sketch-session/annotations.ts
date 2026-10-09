@@ -64,10 +64,12 @@ import type {
   SketchAnnotationDescriptor,
   SketchAnnotationEditState,
   SketchAnnotationGlyphKind,
+  SketchAnnotationProblem,
   SketchDimensionAnnotationDragHandle,
   SketchSessionState,
 } from "./types";
 import {
+  describeSketchSessionUnsatisfiedRequirements,
   getSketchSessionInvalidFeedback,
   hasAcceptedLiveSolveOfDefinition,
   withLiveSolveBasis,
@@ -1625,26 +1627,40 @@ function buildSketchAnnotationDescriptors(session: SketchSessionState): {
     isReferenceDimension(dimension)
       ? (measuredValues.get(dimension.dimensionId) ?? null)
       : resolvedDimensionValues.get(dimension.dimensionId);
+  const problemOf = createSketchAnnotationProblemResolver(
+    session,
+    solved.solvedSnapshot,
+  );
 
   const descriptors: SketchAnnotationDescriptor[] = [
-    ...session.definition.constraints.map((constraint) => ({
-      id: constraint.constraintId,
-      target: createSketchConstraintRef(sketchId, constraint.constraintId),
-      glyphKind: getConstraintGlyphKind(constraint),
-      anchor: createConstraintAnnotationAnchor(session, constraint),
-      affectedGeometryRefs: getConstraintAffectedGeometryRefs(
-        sketchId,
-        constraint,
-      ),
-      constraintDisplay: getSketchConstraintDisplayForTarget(
+    ...session.definition.constraints.map((constraint) => {
+      const constraintDisplay = getSketchConstraintDisplayForTarget(
         createSketchConstraintRef(sketchId, constraint.constraintId),
         constraintDisplaySummary,
-      ),
-      label: constraint.label,
-      detail: describeConstraint(constraint),
-      status: "constraint" as const,
-    })),
+      );
+      return {
+        id: constraint.constraintId,
+        target: createSketchConstraintRef(sketchId, constraint.constraintId),
+        glyphKind: getConstraintGlyphKind(constraint),
+        anchor: createConstraintAnnotationAnchor(session, constraint),
+        affectedGeometryRefs: getConstraintAffectedGeometryRefs(
+          sketchId,
+          constraint,
+        ),
+        constraintDisplay,
+        label: constraint.label,
+        detail: describeConstraint(constraint),
+        status: "constraint" as const,
+        ...(constraintDisplay.isAffectedOverconstraint
+          ? { problem: problemOf(constraint.constraintId) }
+          : {}),
+      };
+    }),
     ...session.definition.dimensions.map((dimension) => {
+      const constraintDisplay = getSketchConstraintDisplayForTarget(
+        createSketchDimensionRef(sketchId, dimension.dimensionId),
+        constraintDisplaySummary,
+      );
       const annotation = {
         id: dimension.dimensionId,
         target: createSketchDimensionRef(sketchId, dimension.dimensionId),
@@ -1658,22 +1674,33 @@ function buildSketchAnnotationDescriptors(session: SketchSessionState): {
           sketchId,
           dimension,
         ),
-        constraintDisplay: getSketchConstraintDisplayForTarget(
-          createSketchDimensionRef(sketchId, dimension.dimensionId),
-          constraintDisplaySummary,
-        ),
+        constraintDisplay,
         label: dimension.label,
         detail: describeDimension(dimension, dimensionDisplayValue(dimension)),
+        ...(constraintDisplay.isAffectedOverconstraint
+          ? { problem: problemOf(dimension.dimensionId) }
+          : {}),
       };
 
       // T14b (T-7): an arc's end binding ties the arc to its own end point.
-      // It reads as a contextual Coincident constraint, never as an
-      // always-visible dimension chip (display only; the schema is unchanged).
+      // It reads as a Coincident constraint, never as an always-visible
+      // dimension chip (display only; the schema is unchanged). T14e (Q1):
+      // it names its arc, for the viewport policy and the list grouping.
       if (
         dimension.kind === "arcStartPointCoincident" ||
         dimension.kind === "arcEndPointCoincident"
       ) {
-        return { ...annotation, status: "constraint" as const };
+        return {
+          ...annotation,
+          status: "constraint" as const,
+          arcBinding: {
+            arc: createSketchEntityRef(sketchId, dimension.entityId),
+            arcLabel:
+              session.definition.entities.find(
+                (entity) => entity.entityId === dimension.entityId,
+              )?.label ?? "Arc",
+          },
+        };
       }
 
       return {
@@ -1691,6 +1718,129 @@ function buildSketchAnnotationDescriptors(session: SketchSessionState): {
     }),
   ];
   return { descriptors, solvedSnapshot: solved.solvedSnapshot };
+}
+
+/**
+ * T14e (T-17): why a problem annotation is one, from the descriptor solve's
+ * requirement statuses and error diagnostics. A conflict carries the T13 D7
+ * explanation of the session's live solve (the same text as the status box);
+ * a blocked or erroring requirement its targeted diagnostic's message.
+ */
+function createSketchAnnotationProblemResolver(
+  session: SketchSessionState,
+  snapshot: SolvedSketchSnapshot,
+) {
+  const statuses = new Map<string, string>([
+    ...snapshot.constraintStatuses.map(
+      (entry) => [entry.constraintId as string, entry.status] as const,
+    ),
+    ...snapshot.dimensionStatuses.map(
+      (entry) => [entry.dimensionId as string, entry.status] as const,
+    ),
+  ]);
+  const diagnosticMessages = new Map<string, string>();
+  for (const diagnostic of snapshot.diagnostics) {
+    const id =
+      diagnostic.target?.kind === "constraint"
+        ? diagnostic.target.constraintId
+        : diagnostic.target?.kind === "dimension"
+          ? diagnostic.target.dimensionId
+          : null;
+    if (id && diagnostic.severity !== "info" && !diagnosticMessages.has(id)) {
+      diagnosticMessages.set(id, diagnostic.message);
+    }
+  }
+  let conflictExplanation: string | null | undefined;
+
+  return (id: string): SketchAnnotationProblem => {
+    const status = statuses.get(id);
+    if (status === "blocked") {
+      return {
+        status: "blocked",
+        explanation: diagnosticMessages.get(id) ?? null,
+      };
+    }
+    if (status === "unsatisfied" || status === "conflicting") {
+      conflictExplanation ??=
+        describeSketchSessionUnsatisfiedRequirements(session);
+      return { status: "conflict", explanation: conflictExplanation };
+    }
+    return { status: "error", explanation: diagnosticMessages.get(id) ?? null };
+  };
+}
+
+/**
+ * T14e (Q1/A-9): whether an annotation is drawn in the viewport at all. An
+ * arc's own end binding is not, unless it is a problem: no hover, selection,
+ * context or Show all draws it. Every other annotation is subject to the
+ * contextual visibility rules.
+ */
+export function isSketchAnnotationDrawnInViewport(
+  annotation: SketchAnnotationDescriptor,
+) {
+  return !annotation.arcBinding || annotation.problem !== undefined;
+}
+
+/** T14e: one row of the Constraints list. */
+export interface SketchAnnotationListRow {
+  annotation: SketchAnnotationDescriptor;
+  /** The problem mark's status text (T-17); null when not a problem. */
+  problemText: string | null;
+  /** Q1/A-9: an arc's own end binding offers no one-click delete. */
+  deletable: boolean;
+  /** Q1/A-9: the arc a binding row is listed under. */
+  group: { key: string; label: string } | null;
+}
+
+const SKETCH_ANNOTATION_PROBLEM_STATUS_TEXT = {
+  conflict: "Conflict",
+  blocked: "Blocked",
+  error: "Error",
+} as const;
+
+/**
+ * T14e (T-11/T-17, Q1/A-9): the Constraints list, the complete selectable
+ * escape hatch: problems first (each with its status text), then every other
+ * annotation in descriptor order, then each arc's end bindings together
+ * under that arc (no delete). Stable: a pure function of the descriptors.
+ */
+export function getSketchAnnotationListRows(
+  annotations: readonly SketchAnnotationDescriptor[],
+): SketchAnnotationListRow[] {
+  const rowOf = (
+    annotation: SketchAnnotationDescriptor,
+  ): SketchAnnotationListRow => ({
+    annotation,
+    problemText: annotation.problem
+      ? `${SKETCH_ANNOTATION_PROBLEM_STATUS_TEXT[annotation.problem.status]}${
+          annotation.problem.explanation
+            ? `: ${annotation.problem.explanation}`
+            : ""
+        }`
+      : null,
+    deletable: !annotation.arcBinding,
+    group: annotation.arcBinding
+      ? {
+          key: getPrimitiveRefKey(annotation.arcBinding.arc),
+          label: annotation.arcBinding.arcLabel,
+        }
+      : null,
+  });
+  const problems = annotations.filter((annotation) => annotation.problem);
+  const rest = annotations.filter((annotation) => !annotation.problem);
+  const bindingsByArc = new Map<string, SketchAnnotationDescriptor[]>();
+  for (const annotation of rest) {
+    if (annotation.arcBinding) {
+      const key = getPrimitiveRefKey(annotation.arcBinding.arc);
+      bindingsByArc.set(key, [...(bindingsByArc.get(key) ?? []), annotation]);
+    }
+  }
+
+  return [
+    ...problems,
+    ...rest.filter((annotation) => !annotation.arcBinding),
+    ...[...bindingsByArc.values()].flat(),
+  ].map(rowOf);
 }
 
 export function createDimensionAnnotationDragHandle(

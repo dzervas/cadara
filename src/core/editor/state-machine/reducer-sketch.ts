@@ -44,6 +44,7 @@ import {
   handleSketchEscapeRequested,
   handleSketchConfirmRequested,
   handleSketchInferenceSuppressionChanged,
+  handleSketchShowAllAnnotationsChanged,
   handleSketchAnnotationDeleteRequested,
   handleSketchAnnotationEditRequested,
   handleSketchConnectedSelectionRequested,
@@ -326,6 +327,8 @@ export function reduceSketchWorkflow(
       return handleSketchInferenceSuppressionChanged(state, {
         held: event.held,
       });
+    case "sketch.showAllAnnotationsChanged":
+      return handleSketchShowAllAnnotationsChanged(state, event);
     case "sketch.annotationDeleteRequested":
       return handleSketchAnnotationDeleteRequested(state);
     case "sketch.annotationEditRequested":

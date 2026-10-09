@@ -75,6 +75,20 @@ async function dimensionLine(
   await expect(page.locator(chipSelector)).toHaveCount(count);
 }
 
+/**
+ * T14e: collapses the right-side Constraints list (its header stays), so the
+ * canvas under the expanded list takes clicks again; returns the collapsed
+ * panel's box.
+ */
+async function collapseConstraintList(page: Page) {
+  await page
+    .getByRole("button", { name: "Collapse the constraints list" })
+    .click();
+  const panel = page.locator("[data-sketch-constraint-list]");
+  await expect(panel).toHaveAttribute("data-collapsed", "true");
+  return (await panel.boundingBox())!;
+}
+
 async function boxes(locator: Locator) {
   const result: Box[] = [];
   for (const element of await locator.all()) {
@@ -489,18 +503,22 @@ test("T14d review B-1: a chip anchored beside the view-cube column keeps clear o
   const column = (await chromeBoxes(page)).viewCube;
   const left = column.x - canvas.x;
   const bottom = column.y - canvas.y + column.height;
+  // T14e: the Constraints list sits under the column; collapsed, the line
+  // goes just below its header (at least 60 px under the column, as before).
+  const panel = await collapseConstraintList(page);
+  const lineY = Math.max(bottom + 60, panel.y - canvas.y + panel.height + 20);
   // A line under the column, its midpoint 10 px left of it; the label placed
   // so the chip anchor (midpoint, 18 px up) is level with the column: the
   // chip at its anchor would overlap the column by about 24 px.
   await drawLine(
     workbench,
-    { x: left - 60, y: bottom + 60 },
-    { x: left + 40, y: bottom + 60 },
+    { x: left - 60, y: lineY },
+    { x: left + 40, y: lineY },
     "1 entities",
   );
   await dimensionLine(
     workbench,
-    { x: left - 40, y: bottom + 60 },
+    { x: left - 40, y: lineY },
     { x: left - 40, y: bottom - 20 },
     1,
   );
@@ -522,6 +540,8 @@ test("T14d review R-1: an expression chip clamped at the right edge stays on one
 }) => {
   const workbench = new SketchWorkbenchHarness(page);
   await openSketch(workbench);
+  // T14e: the expanded Constraints list covers this right-edge strip.
+  await collapseConstraintList(page);
   await drawLine(
     workbench,
     { x: 1360, y: 420 },

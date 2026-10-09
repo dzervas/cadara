@@ -7,11 +7,14 @@ interface WorkbenchVariablesFabProps {
   onToggle: () => void;
 }
 
-const FAB_SIZE = 52;
+/** The FAB's size and its offset from the viewport bottom (T14e review B-1: the right-side column ends above it). */
+export const WORKBENCH_VARIABLES_FAB_SIZE_PX = 52;
+export const WORKBENCH_VARIABLES_FAB_BOTTOM_PX = 188;
+const FAB_SIZE = WORKBENCH_VARIABLES_FAB_SIZE_PX;
 
 const FAB_BASE: CSSProperties = {
   position: "absolute",
-  bottom: 188,
+  bottom: WORKBENCH_VARIABLES_FAB_BOTTOM_PX,
   right: 24,
   zIndex: 28,
   width: FAB_SIZE,

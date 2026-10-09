@@ -32,6 +32,8 @@ export interface ViewportModel {
   selection: PrimitiveRef[];
   /** T14c: the sketch's annotation selection lifecycle (owners, last). */
   annotationContext: EditorViewState["annotationContext"];
+  /** T14e (T-11): the Constraints panel's Show all switch. */
+  showAllAnnotations: boolean;
   sketchToolPresentation: SketchToolPresentationSchema | null;
   documentVariableNames: readonly string[];
   specialModePresentation: SketchSpecialModeViewportPresentation | null;

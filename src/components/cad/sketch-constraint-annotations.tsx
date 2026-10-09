@@ -16,7 +16,6 @@ import type {
 } from "@/contracts/shared/references";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
 import type { PrimitiveRef } from "@/core/editor/schema";
-import { getToolIconSrc } from "@/core/tools/tool-icons";
 import {
   annotationTargetsEqual,
   resolveSketchAnnotationLayer,
@@ -29,7 +28,10 @@ import {
   type SketchAnnotationLayoutViewport,
   type SketchViewportFeedbackProjection,
 } from "@/components/cad/sketch-viewport-feedback-model";
-import { getSketchRenderingPaletteToken } from "@/components/cad/sketch-rendering-palette";
+import {
+  getAnnotationConstraintColor,
+  getAnnotationGlyphIconSrc,
+} from "@/components/cad/sketch-annotation-glyph";
 import {
   DimensionAnnotationLabelDrag,
   type DimensionAnnotationDragListener,
@@ -52,6 +54,8 @@ interface SketchConstraintAnnotationsProps {
   definition: SketchDefinition | null;
   /** T14b (T-5/R-6): the idle select context; otherwise every annotation is passive. */
   interactive: boolean;
+  /** T14e (T-11): the Show all switch; every drawn annotation is pinned. */
+  showAll?: boolean;
   onHover: (target: SketchConstraintRef | SketchDimensionRef) => void;
   onClearHover: () => void;
   onSelect: (target: SketchConstraintRef | SketchDimensionRef) => void;
@@ -72,6 +76,7 @@ export function SketchConstraintAnnotations({
   annotationContext,
   definition,
   interactive,
+  showAll = false,
   onHover,
   onClearHover,
   onSelect,
@@ -80,6 +85,12 @@ export function SketchConstraintAnnotations({
   onWheel,
 }: SketchConstraintAnnotationsProps) {
   const [labelDrag] = useState(() => new DimensionAnnotationLabelDrag());
+  // T14e: the annotation hover this layer set (a control's pointer enter).
+  // Only that one can go stale here; a Constraints list row's hover of an
+  // annotation the layer does not render as a control is the list's.
+  const ownedHoverRef = useRef<SketchConstraintRef | SketchDimensionRef | null>(
+    null,
+  );
   // T14b review A-6 / T14d review R-3: a wheel over a control is forwarded
   // and its native default (page zoom on Ctrl+wheel or a trackpad pinch) is
   // prevented, which React's passive `onWheel` cannot do.
@@ -141,6 +152,7 @@ export function SketchConstraintAnnotations({
     annotationContext,
     definition,
     interactive,
+    showAll,
   });
   const visibleAnnotations = layer.items;
 
@@ -207,7 +219,12 @@ export function SketchConstraintAnnotations({
   // T14b review A-2: an annotation hover whose chip turned passive or went
   // away gets no pointer leave; clear it once.
   const hoverIsStale = layer.hoverIsStale;
-  const clearStaleHover = useEffectEvent(onClearHover);
+  const clearStaleHover = useEffectEvent(() => {
+    if (annotationTargetsEqual(ownedHoverRef.current, hoveredAnnotation!)) {
+      ownedHoverRef.current = null;
+      onClearHover();
+    }
+  });
   useEffect(() => {
     if (hoverIsStale) {
       clearStaleHover();
@@ -327,8 +344,14 @@ export function SketchConstraintAnnotations({
               style={style}
               aria-label={`${annotation.label}: ${annotation.detail}`}
               title={`${annotation.label}: ${annotation.detail}`}
-              onPointerEnter={() => onHover(annotation.target)}
-              onPointerLeave={onClearHover}
+              onPointerEnter={() => {
+                ownedHoverRef.current = annotation.target;
+                onHover(annotation.target);
+              }}
+              onPointerLeave={() => {
+                ownedHoverRef.current = null;
+                onClearHover();
+              }}
               onPointerDown={(event) =>
                 labelDrag.pointerDown(annotation, event)
               }
@@ -368,68 +391,4 @@ export function SketchConstraintAnnotations({
       )}
     </div>
   );
-}
-
-function getAnnotationConstraintColor(annotation: SketchAnnotationDescriptor) {
-  if (annotation.constraintDisplay?.isAffectedOverconstraint) {
-    return `var(${getSketchRenderingPaletteToken("overconstrained")})`;
-  }
-
-  // T13d (D12): a reference dimension only measures; it reads muted.
-  if (annotation.reference) {
-    return "var(--cad-muted-foreground)";
-  }
-
-  if (annotation.constraintDisplay?.state === "constrained") {
-    return `var(${getSketchRenderingPaletteToken("constrained")})`;
-  }
-
-  return `var(${getSketchRenderingPaletteToken("underconstrained")})`;
-}
-
-function getAnnotationGlyphIconSrc(
-  glyphKind: SketchAnnotationDescriptor["glyphKind"],
-) {
-  switch (glyphKind) {
-    case "constraintCoincident":
-      return getToolIconSrc("constraintCoincident");
-    case "constraintCollinear":
-      return getToolIconSrc("constraintCollinear");
-    case "constraintParallel":
-      return getToolIconSrc("constraintParallel");
-    case "constraintEqual":
-      return getToolIconSrc("constraintEqual");
-    case "constraintHorizontal":
-      return getToolIconSrc("constraintHorizontal");
-    case "constraintVertical":
-      return getToolIconSrc("constraintVertical");
-    case "constraintFixed":
-      return getToolIconSrc("constraintFix");
-    case "constraintAngle":
-      return "/icons/drawing-angular-dim-line-to-line.svg";
-    case "constraintPerpendicular":
-      return "/icons/sketch-perpendicular.svg";
-    case "constraintTangent":
-      return "/icons/sketch-tangent.svg";
-    case "constraintConcentric":
-      return getToolIconSrc("constraintConcentric");
-    case "constraintMidpoint":
-      return getToolIconSrc("constraintMidpoint");
-    case "constraintNormal":
-      return getToolIconSrc("constraintNormal");
-    case "constraintPierce":
-      return getToolIconSrc("constraintPierce");
-    case "constraintSymmetric":
-      return getToolIconSrc("constraintSymmetric");
-    case "dimensionDistance":
-      return getToolIconSrc("dimension");
-    case "dimensionHorizontal":
-      return getToolIconSrc("dimension");
-    case "dimensionVertical":
-      return getToolIconSrc("dimension");
-    case "dimensionRadius":
-      return getToolIconSrc("dimension");
-    case "dimensionAngle":
-      return "/icons/drawing-angular-dim-line-to-line.svg";
-  }
 }
