@@ -15,12 +15,14 @@ import {
   createNewSketchSession,
   finalizeSketchDraw,
   getSketchAnnotationDescriptors,
+  patchSketchEditToolValue,
+  selectSketchEditToolTarget,
   startSketchDraw,
   type SketchAnnotationContext,
   type SketchAnnotationDescriptor,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
-import type { PrimitiveRef } from "@/core/editor/schema";
+import { getPrimitiveRefKey, type PrimitiveRef } from "@/core/editor/schema";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
@@ -1761,4 +1763,401 @@ test("T14e: a glyph selected from the list renders active at the place it has wh
     'data-sketch-annotation-glyph="constraintHorizontal"',
   );
   expect(active[0]).toContain("border-[var(--cad-accent)]");
+});
+
+// T14f (T-9), UI lane (component markup seam): the layer clusters pinned
+// glyphs and hover previews, expands at most K of each cluster (4, or 2 for a
+// small context extent) and renders one `+N` per collapsed cluster: a
+// focusable button when pinned and idle, passive markup otherwise.
+const T14F_POINT: PrimitiveRef = {
+  kind: "sketchPoint",
+  sketchId: "sketch_draft",
+  pointId: "t14f_p",
+};
+const T14F_LINE: PrimitiveRef = {
+  kind: "sketchEntity",
+  sketchId: "sketch_draft",
+  entityId: "t14f_line",
+};
+/** The line through the dense endpoint, so the point's context is the line. */
+const T14F_DEFINITION = {
+  entities: [
+    {
+      entityId: "t14f_line",
+      kind: "lineSegment",
+      startPointId: "t14f_p",
+      endPointId: "t14f_q",
+    },
+  ],
+} as unknown as SketchSessionState["definition"];
+const t14fExtents = (lineDiagonal: number) =>
+  new Map([[getPrimitiveRefKey(T14F_LINE), lineDiagonal]]);
+
+function makeDenseConstraints(count: number, prefix = "constraint_c") {
+  return Array.from({ length: count }, (_, index) =>
+    makeConstraintDescriptor(`${prefix}${String(index).padStart(2, "0")}`, [
+      T14F_POINT,
+    ]),
+  );
+}
+
+function renderDense(
+  annotations: readonly SketchAnnotationDescriptor[],
+  context: {
+    selection?: readonly PrimitiveRef[];
+    annotationContext?: SketchAnnotationContext | null;
+    hoverTarget?: PrimitiveRef | null;
+    interactive?: boolean;
+    showAll?: boolean;
+    entityScreenExtents?: ReadonlyMap<string, number>;
+    anchors?: readonly { x: number; y: number }[];
+  } = {},
+) {
+  return renderToStaticMarkup(
+    <SketchConstraintAnnotations
+      viewport={TEST_LAYOUT_VIEWPORT}
+      obstacles={[]}
+      annotations={annotations}
+      projections={annotations.map((entry, index) => ({
+        id: getAnnotationProjectionId(entry.id),
+        ...(context.anchors?.[index] ?? { x: 600, y: 400 }),
+      }))}
+      hoveredAnnotation={null}
+      hoverTarget={context.hoverTarget ?? null}
+      selection={context.selection ?? []}
+      annotationContext={context.annotationContext ?? null}
+      definition={T14F_DEFINITION}
+      interactive={context.interactive ?? true}
+      showAll={context.showAll}
+      entityScreenExtents={context.entityScreenExtents}
+      onHover={() => undefined}
+      onClearHover={() => undefined}
+      onSelect={() => undefined}
+      onEdit={() => undefined}
+    />,
+  );
+}
+
+/** Interactive glyph labels (their accessible-name prefix), in markup order. */
+function denseButtons(markup: string) {
+  return [
+    ...markup.matchAll(
+      /<button[^>]*data-sketch-annotation-kind[^>]*aria-label="([^":]+):/g,
+    ),
+  ].map((match) => match[1]);
+}
+
+/** Every rendered `+N` element's opening tag. */
+function overflowTags(markup: string) {
+  return [
+    ...markup.matchAll(
+      /<(button|div)[^>]*data-sketch-annotation-overflow[^>]*>/g,
+    ),
+  ].map((match) => match[0]);
+}
+
+/** Every label's opening tag with its placed centre (glyphs, chips, `+N`). */
+function placedTags(markup: string) {
+  return [
+    ...markup.matchAll(
+      /<(button|div)[^>]*data-sketch-annotation-(?:kind|overflow)[^>]*>/g,
+    ),
+  ].map((match) => {
+    const position = /left:([\d.]+)px;top:([\d.]+)px/.exec(match[0]);
+    const name = /aria-label="([^"]*)"/.exec(match[0]);
+    return `${name?.[1] ?? "passive"}@${position?.[1]},${position?.[2]}`;
+  });
+}
+
+test("T14f: 10 constraints on one selected endpoint: 4 glyphs and an interactive `+6`; a small context: 2 and `+8`", () => {
+  const dense = makeDenseConstraints(10);
+  const markup = renderDense(dense, { selection: [T14F_POINT] });
+  expect(denseButtons(markup)).toEqual([
+    "constraint_c00",
+    "constraint_c01",
+    "constraint_c02",
+    "constraint_c03",
+  ]);
+  const [chip, ...otherChips] = overflowTags(markup);
+  expect(otherChips).toEqual([]);
+  expect(chip).toMatch(/^<button/);
+  expect(chip).toContain('aria-label="6 more constraints"');
+  expect(chip).toContain('data-sketch-annotation-overflow="6"');
+  expect(chip).toContain('data-sketch-annotation-interactive="true"');
+  expect(chip).toContain("pointer-events-auto");
+  expect(markup).toContain(">+6</button>");
+  expect(markup).toContain('data-sketch-annotation-pinned-limit="4"');
+
+  // The point's incident line spans 140 px on screen: K = 2.
+  const small = renderDense(dense, {
+    selection: [T14F_POINT],
+    entityScreenExtents: t14fExtents(140),
+  });
+  expect(denseButtons(small)).toEqual(["constraint_c00", "constraint_c01"]);
+  expect(overflowTags(small)).toHaveLength(1);
+  expect(overflowTags(small)[0]).toContain('aria-label="8 more constraints"');
+  expect(small).toContain('data-sketch-annotation-pinned-limit="2"');
+  expect(small).toContain('data-sketch-annotation-pinned-extent="140"');
+
+  // A large one keeps K = 4.
+  expect(
+    denseButtons(
+      renderDense(dense, {
+        selection: [T14F_POINT],
+        entityScreenExtents: t14fExtents(400),
+      }),
+    ),
+  ).toHaveLength(4);
+});
+
+test("T14f: Show all collapses dense groups too (no selection: the extent of the geometry they affect)", () => {
+  const dense = makeDenseConstraints(10);
+  const markup = renderDense(dense, { showAll: true });
+  expect(denseButtons(markup)).toHaveLength(4);
+  expect(
+    overflowTags(markup).map((tag) =>
+      tag.includes('aria-label="6 more constraints"'),
+    ),
+  ).toEqual([true]);
+
+  const small = renderDense(dense, {
+    showAll: true,
+    entityScreenExtents: t14fExtents(100),
+  });
+  expect(denseButtons(small)).toHaveLength(2);
+  expect(overflowTags(small)[0]).toContain('aria-label="8 more constraints"');
+});
+
+test("T14f: a hover preview collapses into a passive `+N`; with a tool armed a pinned `+N` is passive too", () => {
+  const dense = makeDenseConstraints(10);
+  const preview = renderDense(dense, { hoverTarget: T14F_LINE });
+  expect(preview, "previews are never buttons").not.toContain("<button");
+  expect(
+    renderedAnnotationTags(preview).filter((tag) =>
+      tag.includes('data-sketch-annotation-visibility="preview"'),
+    ),
+    "4 previews",
+  ).toHaveLength(4);
+  const [previewChip] = overflowTags(preview);
+  expect(previewChip).toMatch(/^<div aria-hidden="true"/);
+  expect(previewChip).toContain('data-sketch-annotation-overflow="6"');
+  expect(previewChip).toContain('data-sketch-annotation-visibility="preview"');
+  expect(previewChip).toContain("pointer-events-none");
+  expect(previewChip).not.toContain("pointer-events-auto");
+  expect(previewChip).not.toContain("aria-label");
+
+  const armed = renderDense(dense, {
+    selection: [T14F_POINT],
+    interactive: false,
+  });
+  expect(armed).not.toContain("<button");
+  const [armedChip] = overflowTags(armed);
+  expect(armedChip).toMatch(/^<div aria-hidden="true"/);
+  expect(armedChip).toContain('data-sketch-annotation-visibility="pinned"');
+  expect(armedChip).toContain('data-sketch-annotation-interactive="false"');
+  expect(armedChip).toContain("pointer-events-none");
+});
+
+test("T14f: a selected or `last` glyph is always expanded and counts toward K", () => {
+  const dense = makeDenseConstraints(10);
+  const listed = dense[8]!;
+  const selected = renderDense(dense, {
+    selection: [listed.target],
+    annotationContext: { owners: [T14F_POINT], last: listed.target },
+  });
+  expect(denseButtons(selected)).toEqual([
+    "constraint_c00",
+    "constraint_c01",
+    "constraint_c02",
+    "constraint_c08",
+  ]);
+  expect(overflowTags(selected)[0]).toContain(
+    'aria-label="6 more constraints"',
+  );
+
+  // After the first blank: `last` (subdued) stays expanded at K = 2.
+  const last = renderDense(dense, {
+    annotationContext: { owners: [T14F_POINT], last: listed.target },
+    entityScreenExtents: t14fExtents(120),
+  });
+  expect(denseButtons(last)).toEqual(["constraint_c00", "constraint_c08"]);
+  expect(last).toContain('data-sketch-annotation-selection="last"');
+  expect(overflowTags(last)[0]).toContain('aria-label="8 more constraints"');
+});
+
+test("T14f: a viewport click on an expanded glyph changes neither the expanded set nor any label position", () => {
+  const dense = makeDenseConstraints(10);
+  const pinned = placedTags(renderDense(dense, { selection: [T14F_POINT] }));
+  expect(pinned, "premise: 4 glyphs and the +N").toHaveLength(5);
+  for (const clicked of [dense[3]!, dense[0]!]) {
+    const after = placedTags(
+      renderDense(dense, {
+        selection: [clicked.target],
+        annotationContext: { owners: [T14F_POINT], last: clicked.target },
+      }),
+    );
+    expect(after, `clicking ${clicked.id}`).toEqual(pinned);
+  }
+});
+
+test("T14f: dimensions and problems on a dense endpoint are never clustered", () => {
+  const constraints = makeDenseConstraints(6);
+  const dimensions = Array.from({ length: 6 }, (_, index) =>
+    makeConstraintDescriptor(`dimension_d${index}`, [T14F_POINT], {
+      target: {
+        kind: "dimension",
+        sketchId: "sketch_draft",
+        dimensionId: `dimension_d${index}`,
+      },
+      glyphKind: "dimensionDistance",
+      status: "dimension",
+      visibleLabel: `${index}.00`,
+    } as Partial<SketchAnnotationDescriptor>),
+  );
+  const problems = makeDenseConstraints(6, "constraint_problem_").map(
+    (entry) => ({
+      ...entry,
+      constraintDisplay: {
+        state: "overconstrained" as const,
+        isAffectedOverconstraint: true,
+      },
+    }),
+  );
+  const markup = renderDense([...constraints, ...dimensions, ...problems], {
+    selection: [T14F_POINT],
+    entityScreenExtents: t14fExtents(100),
+  });
+  const kinds = renderedAnnotationTags(markup);
+  expect(
+    kinds.filter((tag) =>
+      tag.includes('data-sketch-annotation-kind="dimension"'),
+    ),
+    "every dimension chip",
+  ).toHaveLength(6);
+  expect(
+    denseButtons(markup).filter((label) =>
+      label!.startsWith("constraint_problem_"),
+    ),
+    "every problem",
+  ).toHaveLength(6);
+  expect(
+    denseButtons(markup).filter((label) => /^constraint_c\d\d$/.test(label!)),
+    "K = 2 of the quiet constraints",
+  ).toHaveLength(2);
+  expect(overflowTags(markup)).toHaveLength(1);
+  expect(overflowTags(markup)[0]).toContain('aria-label="4 more constraints"');
+});
+
+test("T14f: a selected fillet arc shows its 2 tangents and no `+N`, even at K = 2", () => {
+  let session = drawnSession("rectangle", [
+    [1, 1],
+    [5, 4],
+  ]);
+  const edge = (label: string) =>
+    session.definition.entities.find((entry) => entry.label === label)!;
+  session = patchSketchEditToolValue(
+    selectSketchEditToolTarget(
+      selectSketchEditToolTarget(
+        beginSketchTool(session, "sketchFillet"),
+        edge("Rectangle 1 bottom").target,
+      ),
+      edge("Rectangle 1 right").target,
+    ),
+    { value: 0.3 },
+  );
+  session = patchSketchEditToolValue(session, {
+    intent: "commitSketchEditOperator",
+  });
+  const arc = session.definition.entities.find((entry) => entry.kind === "arc");
+  expect(arc, "premise: the fillet arc").toBeTruthy();
+  const annotations = getSketchAnnotationDescriptors(session);
+  // 20 px per unit: the arc's two tangent anchors are within 40 px (one
+  // cluster), and the arc spans far less than 150 px (K = 2).
+  const anchors = annotations.map((annotation) => {
+    const anchor = annotation.anchor as {
+      point: readonly [number, number];
+      offset?: { x: number; y: number };
+    };
+    return {
+      x: 200 + anchor.point[0] * 20 + (anchor.offset?.x ?? 0),
+      y: 600 - anchor.point[1] * 20 + (anchor.offset?.y ?? 0),
+    };
+  });
+  const tangentAnchors = annotations.flatMap((annotation, index) =>
+    annotation.glyphKind === "constraintTangent" ? [anchors[index]!] : [],
+  );
+  expect(
+    tangentAnchors,
+    "premise: the fillet authored 2 tangents",
+  ).toHaveLength(2);
+  expect(
+    Math.hypot(
+      tangentAnchors[0]!.x - tangentAnchors[1]!.x,
+      tangentAnchors[0]!.y - tangentAnchors[1]!.y,
+    ),
+    "premise: the tangent anchors are within the 40 px cluster link",
+  ).toBeLessThanOrEqual(40);
+  const markup = renderToStaticMarkup(
+    <SketchConstraintAnnotations
+      viewport={TEST_LAYOUT_VIEWPORT}
+      obstacles={[]}
+      annotations={annotations}
+      projections={annotations.map((entry, index) => ({
+        id: getAnnotationProjectionId(entry.id),
+        ...anchors[index]!,
+      }))}
+      hoveredAnnotation={null}
+      hoverTarget={null}
+      selection={[arc!.target]}
+      annotationContext={{ owners: [arc!.target], last: null }}
+      definition={session.definition}
+      interactive
+      entityScreenExtents={new Map([[getPrimitiveRefKey(arc!.target), 17]])}
+      onHover={() => undefined}
+      onClearHover={() => undefined}
+      onSelect={() => undefined}
+      onEdit={() => undefined}
+    />,
+  );
+  expect(markup).toContain('data-sketch-annotation-pinned-limit="2"');
+  const glyphs = renderedAnnotationTags(markup).map(
+    (tag) => /data-sketch-annotation-glyph="([^"]+)"/.exec(tag)?.[1],
+  );
+  expect(glyphs, "the 2 tangents, no binding glyph").toEqual([
+    "constraintTangent",
+    "constraintTangent",
+  ]);
+  expect(overflowTags(markup)).toEqual([]);
+});
+
+test("T14f review R-3: with Show all on, a selected small entity elsewhere does not set K (the affected geometry does)", () => {
+  const dense = makeDenseConstraints(10);
+  const shortLine: PrimitiveRef = {
+    kind: "sketchEntity",
+    sketchId: "sketch_draft",
+    entityId: "t14f_short",
+  };
+  const extents = new Map([
+    [getPrimitiveRefKey(T14F_LINE), 400],
+    [getPrimitiveRefKey(shortLine), 40],
+  ]);
+  const showAll = renderDense(dense, {
+    showAll: true,
+    selection: [shortLine],
+    annotationContext: { owners: [shortLine], last: null },
+    entityScreenExtents: extents,
+  });
+  expect(showAll).toContain('data-sketch-annotation-pinned-limit="4"');
+  expect(showAll).toContain('data-sketch-annotation-pinned-extent="400"');
+  expect(denseButtons(showAll)).toHaveLength(4);
+  expect(overflowTags(showAll)[0]).toContain('aria-label="6 more constraints"');
+
+  // Contrast, Show all off: the selection is the context (the short line
+  // pins nothing here, so nothing renders and no K applies to these glyphs);
+  // selecting the dense point with a 40 px incident line gives K = 2.
+  const selected = renderDense(dense, {
+    selection: [T14F_POINT],
+    entityScreenExtents: new Map([[getPrimitiveRefKey(T14F_LINE), 40]]),
+  });
+  expect(denseButtons(selected)).toHaveLength(2);
 });

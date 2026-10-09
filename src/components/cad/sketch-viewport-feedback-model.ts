@@ -81,17 +81,20 @@ export interface SketchAnnotationLayoutObstacle extends SketchAnnotationLayoutRe
  * preview. Selection never changes the rank (orchestrator, option (c)), so a
  * click never reorders labels under the pointer; dimensions rank above pinned
  * glyphs, so pinning a context never moves a chip the user is about to click.
+ * T14f: a cluster's `+N` (`overflow`) ranks below pinned glyphs and above
+ * hover previews (plan T-8), so it never displaces a pinned glyph.
  */
 export type SketchAnnotationLayoutPriority =
   | "problem"
   | "dimension"
   | "pinned"
+  | "overflow"
   | "preview";
 
 const SKETCH_ANNOTATION_LAYOUT_PRIORITY_RANK: Record<
   SketchAnnotationLayoutPriority,
   number
-> = { problem: 0, dimension: 1, pinned: 2, preview: 3 };
+> = { problem: 0, dimension: 1, pinned: 2, overflow: 3, preview: 4 };
 
 export interface SketchAnnotationLayoutItem {
   id: string;
