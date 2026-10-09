@@ -45,6 +45,9 @@ import {
   handleSketchConfirmRequested,
   handleSketchInferenceSuppressionChanged,
   handleSketchShowAllAnnotationsChanged,
+  handleSketchAnnotationWheelOpened,
+  handleSketchAnnotationWheelClosed,
+  handleSketchAnnotationWheelListFilterChanged,
   handleSketchAnnotationDeleteRequested,
   handleSketchAnnotationEditRequested,
   handleSketchConnectedSelectionRequested,
@@ -329,6 +332,12 @@ export function reduceSketchWorkflow(
       });
     case "sketch.showAllAnnotationsChanged":
       return handleSketchShowAllAnnotationsChanged(state, event);
+    case "sketch.annotationWheelOpened":
+      return handleSketchAnnotationWheelOpened(state, event);
+    case "sketch.annotationWheelClosed":
+      return handleSketchAnnotationWheelClosed(state);
+    case "sketch.annotationWheelListFilterChanged":
+      return handleSketchAnnotationWheelListFilterChanged(state, event);
     case "sketch.annotationDeleteRequested":
       return handleSketchAnnotationDeleteRequested(state);
     case "sketch.annotationEditRequested":

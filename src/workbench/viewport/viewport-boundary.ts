@@ -30,7 +30,7 @@ export interface ViewportModel {
   sketchDisplayRenderables: SketchSessionDisplayRenderable[];
   sketchAnnotations: SketchAnnotationDescriptor[];
   selection: PrimitiveRef[];
-  /** T14c: the sketch's annotation selection lifecycle (owners, last). */
+  /** T14c: the sketch's annotation selection lifecycle (owners, last; T14g: wheel). */
   annotationContext: EditorViewState["annotationContext"];
   /** T14e (T-11): the Constraints panel's Show all switch. */
   showAllAnnotations: boolean;
@@ -71,6 +71,19 @@ export type ViewportIntent =
       target: Extract<PrimitiveRef, { kind: "constraint" | "dimension" }>;
     }
   | { type: "hoverCleared" }
+  /** T14g (T-10): a pinned `+N` opened its cluster's radial wheel. */
+  | {
+      type: "annotationWheelOpened";
+      clusterKey: string;
+      members: readonly Extract<
+        PrimitiveRef,
+        { kind: "constraint" | "dimension" }
+      >[];
+    }
+  /** T14g: `−N`, a camera change, the chooser or a stale wheel. */
+  | { type: "annotationWheelClosed" }
+  /** T14g: the wheel's "More…" (or the list's reset) filters the Constraints list. */
+  | { type: "annotationWheelListFilterChanged"; filtered: boolean }
   /** `sketchUnitsPerPixel`: the screen scale at the pointer (T13-D13). */
   | {
       type: "sketchPointerMoved";

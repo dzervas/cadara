@@ -1,5 +1,13 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { SketchWorkbenchHarness } from "./helpers/sketch-workbench";
+import {
+  ANGLES,
+  along,
+  buildDenseFan,
+  layer,
+  setShowAll,
+  type ViewportPoint,
+} from "./helpers/annotation-fan";
 
 // Lane: e2e (docs/testing.md). Seam: the workbench browser flow of the T14f
 // dense clusters (T-9, A-4, A-5): the projection feed's real screen extents
@@ -11,95 +19,6 @@ import { SketchWorkbenchHarness } from "./helpers/sketch-workbench";
 // pointer see the enter/leave sequence a user produces.
 test.setTimeout(150_000);
 test.use({ viewport: { width: 1440, height: 960 } });
-
-type ViewportPoint = { x: number; y: number };
-
-/** The fan's shared end point P and its eight 200 px lines L1…L8. */
-const P = { x: 500, y: 330 };
-const ANGLES = [25, 65, 115, 155, 205, 245, 295, 335];
-const along = (origin: ViewportPoint, angle: number, length: number) => {
-  const radians = (angle * Math.PI) / 180;
-  return {
-    x: Math.round(origin.x + length * Math.cos(radians)),
-    y: Math.round(origin.y - length * Math.sin(radians)),
-  };
-};
-
-const layer = (page: Page) => page.locator("[data-sketch-annotation-layer]");
-const showAllSwitch = (page: Page) =>
-  page.getByRole("switch", { name: "Show all constraints" });
-
-/**
- * Eight lines from P; Parallel + Equal on each opposite pair (L1/L5, L2/L6,
- * L3/L7, L4/L8: 8 constraints anchored exactly at P + (18, −18)), and
- * Perpendicular + Equal on L1/L3 (2 more, between L1 and L3). Show all on,
- * the P cluster is 8 glyphs: 4 + `+4` at K = 4, 2 + `+6` at K = 2.
- */
-async function buildDenseFan(workbench: SketchWorkbenchHarness) {
-  const page = workbench.page;
-  await workbench.open();
-  await workbench.activateTool("Start a new sketch.");
-  await page
-    .getByRole("button", { name: /Top Plane/ })
-    .first()
-    .click();
-  await workbench.expectSketchSessionActive();
-  for (const [index, angle] of ANGLES.entries()) {
-    await workbench.activateTool("Create line geometry.");
-    await workbench.hoverViewportAtReal(P);
-    await workbench.waitForAnimationFrames(3);
-    await workbench.clickViewportAt(P);
-    await workbench.hoverViewportAtReal(along(P, angle, 200));
-    await workbench.waitForAnimationFrames(3);
-    await workbench.clickViewportAt(along(P, angle, 200));
-    await expect
-      .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
-      .toContain(`${index + 1} entities staged`);
-    await page.keyboard.press("Escape");
-    await page.keyboard.press("Escape");
-    await workbench.waitForAnimationFrames(2);
-  }
-  const constrain = [
-    ["Constrain two lines to remain parallel.", 0, 4],
-    ["Constrain two lines to equal length.", 0, 4],
-    ["Constrain two lines to remain parallel.", 1, 5],
-    ["Constrain two lines to equal length.", 1, 5],
-    ["Constrain two lines to remain parallel.", 2, 6],
-    ["Constrain two lines to equal length.", 2, 6],
-    ["Constrain two lines to remain parallel.", 3, 7],
-    ["Constrain two lines to equal length.", 3, 7],
-    ["Constrain two lines to remain perpendicular.", 0, 2],
-    ["Constrain two lines to equal length.", 0, 2],
-  ] as const;
-  for (const [tool, first, second] of constrain) {
-    await workbench.activateTool(tool);
-    await workbench.clickViewportAt(along(P, ANGLES[first]!, 100));
-    await workbench.clickViewportAt(along(P, ANGLES[second]!, 100));
-    await page.keyboard.press("Escape");
-    await page.keyboard.press("Escape");
-    await workbench.waitForAnimationFrames(2);
-  }
-  await page.evaluate(() => window.__cadaraDebug?.clearSelection());
-  await expect(
-    page.locator("[data-sketch-constraint-row]"),
-    "premise: the 10 constraints are authored",
-  ).toHaveCount(10);
-  await expect(
-    page.locator(
-      "[data-sketch-constraint-row][data-sketch-constraint-problem]",
-    ),
-    "premise: none is a problem (problems are never clustered)",
-  ).toHaveCount(0);
-}
-
-async function setShowAll(workbench: SketchWorkbenchHarness, on: boolean) {
-  const toggle = showAllSwitch(workbench.page);
-  if ((await toggle.isChecked()) !== on) {
-    await toggle.click({ force: true });
-  }
-  await expect(toggle).toBeChecked({ checked: on });
-  await workbench.waitForAnimationFrames(3);
-}
 
 /** The layer's dense state and the `+N` count of the P cluster. */
 async function denseState(page: Page, clusterKey: string) {
@@ -405,7 +324,7 @@ test("T14f: geometry drags under a collapsed hover preview; its passive `+N` is 
   ).not.toContain("constraint");
 });
 
-test("T14f: a viewport click never changes the expanded set or moves a label; the pinned `+N` is a passive control for now", async ({
+test("T14f: a viewport click never changes the expanded set or moves a label; the pinned `+N` opens the wheel (T14g) and closing it moves nothing", async ({
   page,
 }) => {
   const workbench = new SketchWorkbenchHarness(page);
@@ -444,21 +363,112 @@ test("T14f: a viewport click never changes the expanded set or moves a label; th
   );
   expect(await labelSnapshot(page), "no label moved").toEqual(listed);
 
-  // The pinned `+N` is a named, focusable button; activating it does
-  // nothing yet (the wheel is T14g): no selection change, nothing moves.
+  // The pinned `+N` is a named, focusable button. T14g: activating it (a
+  // click or Enter) opens the cluster's wheel without changing the
+  // selection; closing it (Escape's wheel stage) puts every label back.
   const chip = layer(page).getByRole("button", { name: "4 more constraints" });
   await expect(chip).toHaveAttribute("data-sketch-annotation-cluster", key);
+  const wheel = page.locator(`[data-sketch-annotation-wheel="${key}"]`);
   const selection = await workbench.currentEditorSelection();
+  const rectsBefore = await labelRects(page);
   await glideClickOnto(workbench, { x: 900, y: 600 }, chip);
+  await expect(wheel, "the `+N` press opened the wheel").toHaveCount(1);
   expect(await workbench.currentEditorSelection()).toEqual(selection);
-  expect(await labelSnapshot(page), "the `+N` press moved nothing").toEqual(
-    listed,
+  // T14g review R-2: while the wheel is open, every label outside its
+  // cluster that no wheel slot covers keeps its place.
+  const slots = await wheelSlotRects(page);
+  const rectsOpen = await labelRects(page);
+  const kept = Object.entries(rectsBefore).filter(
+    ([name, rect]) =>
+      !isPClusterLabel(name) &&
+      !name.endsWith("more constraints") &&
+      slots.every((slot) => !rectsTouch(rect, slot)),
   );
-  await chip.focus();
-  await page.keyboard.press("Enter");
+  const centre = {
+    x: slots[0]!.x + slots[0]!.width / 2,
+    y: slots[0]!.y + slots[0]!.height / 2,
+  };
+  expect(
+    kept.filter(([, rect]) =>
+      rectsTouch(rect, {
+        x: centre.x - 96,
+        y: centre.y - 96,
+        width: 192,
+        height: 192,
+      }),
+    ).length,
+    "premise: a label clear of the slots lies inside the wheel's square",
+  ).toBeGreaterThan(0);
+  for (const [name, rect] of kept) {
+    expect(rectsOpen[name], `${name} kept its place while open`).toEqual(rect);
+  }
+  await page.keyboard.press("Escape");
+  await expect(wheel).toHaveCount(0);
   await workbench.waitForAnimationFrames(2);
   expect(await workbench.currentEditorSelection()).toEqual(selection);
+  expect(
+    await labelSnapshot(page),
+    "the wheel opened and closed: nothing moved",
+  ).toEqual(listed);
+  await chip.focus();
+  await page.keyboard.press("Enter");
+  await expect(wheel, "Enter opened the wheel").toHaveCount(1);
+  await page.keyboard.press("Escape");
+  await expect(wheel).toHaveCount(0);
+  await workbench.waitForAnimationFrames(2);
+  expect(await workbench.currentEditorSelection()).toEqual(selection);
+  expect(await labelSnapshot(page)).toEqual(listed);
 });
+
+type Rect = { x: number; y: number; width: number; height: number };
+
+/** Every rendered label's rounded rect, by accessible name (or kind). */
+async function labelRects(page: Page) {
+  return Object.fromEntries(
+    await layer(page)
+      .locator(
+        ":scope > [data-sketch-annotation-kind], :scope > [data-sketch-annotation-overflow]",
+      )
+      .evaluateAll((elements) =>
+        elements.map((element) => {
+          const box = element.getBoundingClientRect();
+          return [
+            element.getAttribute("aria-label") ??
+              element.getAttribute("data-sketch-annotation-kind"),
+            {
+              x: Math.round(box.x),
+              y: Math.round(box.y),
+              width: Math.round(box.width),
+              height: Math.round(box.height),
+            },
+          ];
+        }),
+      ),
+  ) as Record<string, Rect>;
+}
+
+/** The open wheel's slot rects (the centre first). */
+async function wheelSlotRects(page: Page): Promise<Rect[]> {
+  return page
+    .locator("[data-sketch-annotation-wheel-slot]")
+    .evaluateAll((elements) =>
+      elements.map((element) => {
+        const box = element.getBoundingClientRect();
+        return { x: box.x, y: box.y, width: box.width, height: box.height };
+      }),
+    );
+}
+
+/** Closer than the 6 px layout gap. */
+const rectsTouch = (left: Rect, right: Rect) =>
+  left.x < right.x + right.width + 6 &&
+  right.x < left.x + left.width + 6 &&
+  left.y < right.y + right.height + 6 &&
+  right.y < left.y + left.height + 6;
+
+/** The fan's P cluster members (Parallel/Equal 9–16). */
+const isPClusterLabel = (name: string) =>
+  /^(Parallel|Equal) (9|1[0-6]):/.test(name);
 
 /** The interactive glyphs' names (label part), in DOM order. */
 async function expandedNames(page: Page) {

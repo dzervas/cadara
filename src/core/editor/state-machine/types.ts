@@ -550,6 +550,27 @@ export interface SketchShowAllAnnotationsChangedEvent {
   showAll: boolean;
 }
 
+/**
+ * T14g (T-10): a pinned, idle `+N` was activated: its cluster's radial
+ * wheel opens (editor UI state; the screen centre is the viewport's).
+ */
+export interface SketchAnnotationWheelOpenedEvent {
+  type: "sketch.annotationWheelOpened";
+  clusterKey: string;
+  members: NonNullable<SketchAnnotationContext["wheel"]>["members"];
+}
+
+/** T14g (T-10): `−N`, Escape, a camera change, the chooser or a stale wheel. */
+export interface SketchAnnotationWheelClosedEvent {
+  type: "sketch.annotationWheelClosed";
+}
+
+/** T14g (T-10): the wheel's "More…" narrows the Constraints list to its members (or stops). */
+export interface SketchAnnotationWheelListFilterChangedEvent {
+  type: "sketch.annotationWheelListFilterChanged";
+  filtered: boolean;
+}
+
 /** Moves the active sketch-local history cursor. */
 
 /** Moves the document-level authored history cursor through the editor runtime. */
@@ -718,6 +739,9 @@ export type EditorEvent =
   | SketchConfirmRequestedEvent
   | SketchInferenceSuppressionChangedEvent
   | SketchShowAllAnnotationsChangedEvent
+  | SketchAnnotationWheelOpenedEvent
+  | SketchAnnotationWheelClosedEvent
+  | SketchAnnotationWheelListFilterChangedEvent
   | DocumentHistoryCursorRequestedEvent
   | HistoryUndoRequestedEvent
   | HistoryRedoRequestedEvent

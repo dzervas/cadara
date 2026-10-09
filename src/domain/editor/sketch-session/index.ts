@@ -67,6 +67,7 @@ export {
   isSketchAnnotationInContext,
   pruneSketchAnnotationContext,
   selectSketchAnnotation,
+  withoutSketchAnnotationWheel,
 } from "./annotations";
 
 export {

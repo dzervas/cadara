@@ -278,6 +278,8 @@ export interface SketchAnnotationOverflowChip {
   group: SketchAnnotationClusterGroup;
   key: string;
   count: number;
+  /** T14g: every member's layout id (the wheel's spokes). */
+  memberIds: readonly string[];
   x: number;
   y: number;
 }
@@ -381,6 +383,7 @@ export function layoutSketchAnnotationClusters(
                   group,
                   key: cluster.key,
                   count: cluster.collapsedIds.length + dropped[index]!,
+                  memberIds: cluster.memberIds,
                   x: placement.x,
                   y: placement.y,
                 },
@@ -428,4 +431,168 @@ export function isSketchAnnotationHoverUnplaced(
     item !== undefined &&
     !placements.has(getAnnotationProjectionId(item.annotation.id))
   );
+}
+
+/** T14g (T-10): wheel spokes are 28 px glyph buttons (prototype size). */
+export const SKETCH_ANNOTATION_WHEEL_SPOKE_PX = 28;
+/** T-10: the spokes' centres sit on an 82 px radius around the wheel centre. */
+export const SKETCH_ANNOTATION_WHEEL_RADIUS_PX = 82;
+/**
+ * T-10: the centre keeps this far from every usable edge and chrome rect:
+ * radius 82 + half a spoke 14 + a 4 px margin (the prototype's 100 px).
+ */
+export const SKETCH_ANNOTATION_WHEEL_CLAMP_PX = 100;
+/**
+ * Review R-4: how long a mouse-selected spoke keeps its ring slot before it
+ * moves to the centre, so a double-click hits the same spoke twice (the
+ * common 500 ms OS double-click interval; browsers do not expose it).
+ */
+export const SKETCH_ANNOTATION_WHEEL_DOUBLE_CLICK_MS = 500;
+/** T-10: at most 12 radial spokes; beyond that the last one is "More…". */
+export const SKETCH_ANNOTATION_WHEEL_MAX_SPOKES = 12;
+
+/**
+ * T14g (T-10): the wheel centre for an activating `point`, moved only as far
+ * as needed to keep the whole wheel (a square of ±100 px) inside the usable
+ * canvas: between the top inset and the bottom band, and clear of every
+ * `chrome` rect (T14d). The result is the nearest such point among the
+ * axis-aligned candidates (the edge clamp, and every chrome rect's sides
+ * pushed out by 100 px); when none is free, the edge clamp alone.
+ */
+export function clampSketchAnnotationWheelCentre(
+  point: { x: number; y: number },
+  viewport: SketchAnnotationLayoutViewport,
+  obstacles: readonly SketchAnnotationLayoutObstacle[],
+): { x: number; y: number } {
+  const half = SKETCH_ANNOTATION_WHEEL_CLAMP_PX;
+  const clampX = (x: number) =>
+    Math.max(half, Math.min(x, viewport.width - half));
+  const clampY = (y: number) =>
+    Math.max(
+      viewport.topInset + half,
+      Math.min(y, viewport.height - viewport.bottomInset - half),
+    );
+  const chrome = obstacles.filter((obstacle) => obstacle.chrome);
+  const clamped = { x: clampX(point.x), y: clampY(point.y) };
+  const xs = [
+    clamped.x,
+    ...chrome.flatMap((rect) => [rect.x - half, rect.x + rect.width + half]),
+  ].map(clampX);
+  const ys = [
+    clamped.y,
+    ...chrome.flatMap((rect) => [rect.y - half, rect.y + rect.height + half]),
+  ].map(clampY);
+  const isFree = (centre: { x: number; y: number }) =>
+    chrome.every(
+      (rect) =>
+        centre.x + half <= rect.x ||
+        centre.x - half >= rect.x + rect.width ||
+        centre.y + half <= rect.y ||
+        centre.y - half >= rect.y + rect.height,
+    );
+  let best: { x: number; y: number } | null = null;
+  let bestDistance = Infinity;
+  for (const x of xs) {
+    for (const y of ys) {
+      const distance = Math.hypot(x - point.x, y - point.y);
+      if (distance < bestDistance && isFree({ x, y })) {
+        best = { x, y };
+        bestDistance = distance;
+      }
+    }
+  }
+  return best ?? clamped;
+}
+
+export type SketchAnnotationWheelSpoke =
+  | { kind: "member"; id: string; x: number; y: number }
+  /** "More…": the radial members beyond the 12th slot (in the list). */
+  | { kind: "more"; ids: readonly string[]; x: number; y: number };
+
+export interface SketchAnnotationWheelLayout {
+  centre: { x: number; y: number };
+  /** The active member in the centre; null: the `−N` collapse toggle. */
+  centreId: string | null;
+  /** Clockwise from the top (−π/2), evenly spaced on the 82 px radius. */
+  spokes: readonly SketchAnnotationWheelSpoke[];
+}
+
+/**
+ * T14g (T-10): the wheel of a cluster's `memberIds` opened at `point`: the
+ * centre is the clamped point; the active member (`activeId`) takes the
+ * centre, otherwise the centre is the `−N` toggle; the other members are
+ * spokes in stable id order on the 82 px radius from −π/2 (prototype), so
+ * choosing another spoke swaps the centre and the rest close ranks. Beyond
+ * 12 radial members the 12th spoke is "More…" for the rest.
+ */
+export function layoutSketchAnnotationWheel({
+  point,
+  memberIds,
+  activeId,
+  viewport,
+  obstacles,
+}: {
+  point: { x: number; y: number };
+  memberIds: readonly string[];
+  activeId: string | null;
+  viewport: SketchAnnotationLayoutViewport;
+  obstacles: readonly SketchAnnotationLayoutObstacle[];
+}): SketchAnnotationWheelLayout {
+  const centre = clampSketchAnnotationWheelCentre(point, viewport, obstacles);
+  const members = [...memberIds].sort(compareIds);
+  const centreId =
+    activeId !== null && members.includes(activeId) ? activeId : null;
+  const radial = members.filter((id) => id !== centreId);
+  const overflow = radial.length > SKETCH_ANNOTATION_WHEEL_MAX_SPOKES;
+  const shown = overflow
+    ? radial.slice(0, SKETCH_ANNOTATION_WHEEL_MAX_SPOKES - 1)
+    : radial;
+  const slots = shown.length + (overflow ? 1 : 0);
+  const at = (index: number) => {
+    const angle = -Math.PI / 2 + (index * 2 * Math.PI) / slots;
+    return {
+      x: centre.x + Math.cos(angle) * SKETCH_ANNOTATION_WHEEL_RADIUS_PX,
+      y: centre.y + Math.sin(angle) * SKETCH_ANNOTATION_WHEEL_RADIUS_PX,
+    };
+  };
+
+  return {
+    centre,
+    centreId,
+    spokes: [
+      ...shown.map((id, index) => ({
+        kind: "member" as const,
+        id,
+        ...at(index),
+      })),
+      ...(overflow
+        ? [
+            {
+              kind: "more" as const,
+              ids: radial.slice(SKETCH_ANNOTATION_WHEEL_MAX_SPOKES - 1),
+              ...at(shown.length),
+            },
+          ]
+        : []),
+    ],
+  };
+}
+
+/**
+ * T14g (A-2, review R-2): the open wheel's layout obstacles, one 28 px box
+ * per occupied slot (the centre, each spoke, "More…"; the layout keeps its
+ * gap around each), placed before every other label: no label (a dimension
+ * chip included) is ever placed into a slot, and a label that no slot
+ * covers keeps its place.
+ */
+export function getSketchAnnotationWheelObstacles(
+  layout: SketchAnnotationWheelLayout,
+): SketchAnnotationLayoutObstacle[] {
+  const half = SKETCH_ANNOTATION_WHEEL_SPOKE_PX / 2;
+  return [layout.centre, ...layout.spokes].map((slot) => ({
+    x: slot.x - half,
+    y: slot.y - half,
+    width: SKETCH_ANNOTATION_WHEEL_SPOKE_PX,
+    height: SKETCH_ANNOTATION_WHEEL_SPOKE_PX,
+  }));
 }

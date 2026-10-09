@@ -84,6 +84,7 @@ function render(
     showAll?: boolean;
     defaultCollapsed?: boolean;
     selection?: readonly PrimitiveRef[];
+    filter?: readonly SketchAnnotationDescriptor["target"][] | null;
   } = {},
 ) {
   return renderToStaticMarkup(
@@ -94,6 +95,7 @@ function render(
         hoverTarget={null}
         showAll={options.showAll ?? false}
         defaultCollapsed={options.defaultCollapsed}
+        filter={options.filter}
         onShowAllChange={() => undefined}
         onHover={() => undefined}
         onClearHover={() => undefined}
@@ -261,4 +263,29 @@ test("T14e review A-5: a problem binding names its arc inline; its arc's quiet b
   expect(rowMarkup(markup, "ArcProblem")).toContain(
     "Arc 1 · Arc end coincident",
   );
+});
+
+// T14g (T-10): the wheel's "More…" narrows the list to the wheel's members
+// (expanding a collapsed panel) with a visible way back to every row.
+test('T14g: a "More…" filter lists only the wheel\'s members, expands the panel and offers every constraint back', () => {
+  const order = (markup: string) =>
+    [...markup.matchAll(/data-sketch-constraint-row="([^"]+)"/g)].map(
+      (match) => match[1],
+    );
+  expect(order(render()), "premise: unfiltered").toHaveLength(5);
+  const filtered = render({
+    filter: [plain.target, problem.target],
+    defaultCollapsed: true,
+  });
+  expect(order(filtered)).toEqual(["Vertical", "Horizontal"]);
+  expect(filtered).toContain('data-sketch-constraint-filter="2"');
+  expect(filtered).toContain("2 nearby constraints");
+  expect(filtered).toMatch(/<button[^>]*>Show every constraint<\/button>/);
+  expect(filtered, "the filter expanded the panel").toContain(
+    'data-collapsed="false"',
+  );
+  expect(
+    render({ filter: null, defaultCollapsed: true }),
+    "no filter: no reset",
+  ).not.toContain("Show every constraint");
 });

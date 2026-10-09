@@ -1476,6 +1476,17 @@ export function CadWorkbench({
                     selection={selection}
                     hoverTarget={hoverTarget}
                     showAll={showAllAnnotations}
+                    filter={
+                      annotationContext?.wheel?.listFiltered
+                        ? annotationContext.wheel.members
+                        : null
+                    }
+                    onClearFilter={() =>
+                      dispatch({
+                        type: "sketch.annotationWheelListFilterChanged",
+                        filtered: false,
+                      })
+                    }
                     onShowAllChange={(showAll) =>
                       dispatch({
                         type: "sketch.showAllAnnotationsChanged",

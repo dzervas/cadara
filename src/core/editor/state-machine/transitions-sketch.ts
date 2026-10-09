@@ -9,7 +9,10 @@ import {
   clearActiveSketchTool,
   confirmSketchDrawing,
   deleteSelectedSketchAnnotation,
+  getSketchAnnotationAffectedGeometryRefs,
   pruneSketchAnnotationContext,
+  withoutSketchAnnotationWheel,
+  type SketchAnnotationContext,
   deleteSelectedSketchGeometry,
   deleteSketchReferenceTarget,
   escapeSketchDrawing,
@@ -178,6 +181,111 @@ export function handleSketchShowAllAnnotationsChanged(
   return (state.showAllAnnotations ?? false) === event.showAll
     ? { state, effects: [] }
     : { state: { ...state, showAllAnnotations: event.showAll }, effects: [] };
+}
+
+/**
+ * T14g (T-10): a pinned `+N` opens its cluster's wheel, only in the idle
+ * select context (no tool, edit tool, special mode, annotation edit or
+ * drag), where `+N` is a control. Editor UI state: the session, history and
+ * the descriptor memo are untouched. Owners and `last` are kept.
+ */
+export function handleSketchAnnotationWheelOpened(
+  state: SketchEditorState,
+  event: Extract<EditorEvent, { type: "sketch.annotationWheelOpened" }>,
+): EditorTransitionResult {
+  const { session } = state;
+  if (
+    event.members.length === 0 ||
+    session.activeTool !== null ||
+    session.activeEditTool !== null ||
+    session.activeSpecialMode !== null ||
+    session.activeAnnotationEdit !== null ||
+    session.activeDrag !== null
+  ) {
+    return { state, effects: [] };
+  }
+  return {
+    state: {
+      ...state,
+      annotationContext: {
+        owners: state.annotationContext?.owners ?? [],
+        last: state.annotationContext?.last ?? null,
+        wheel: { clusterKey: event.clusterKey, members: event.members },
+      },
+    },
+    effects: [],
+  };
+}
+
+/** T14g (T-10): `−N`, Escape's wheel stage, a camera change, the chooser. */
+export function handleSketchAnnotationWheelClosed(
+  state: SketchEditorState,
+): EditorTransitionResult {
+  return state.annotationContext?.wheel
+    ? {
+        state: {
+          ...state,
+          annotationContext: withoutSketchAnnotationWheel(
+            state.annotationContext,
+          ),
+        },
+        effects: [],
+      }
+    : { state, effects: [] };
+}
+
+/** T14g (T-10): the wheel's "More…" filters the Constraints list to its members. */
+export function handleSketchAnnotationWheelListFilterChanged(
+  state: SketchEditorState,
+  event: Extract<
+    EditorEvent,
+    { type: "sketch.annotationWheelListFilterChanged" }
+  >,
+): EditorTransitionResult {
+  const context = state.annotationContext;
+  if (
+    !context?.wheel ||
+    (context.wheel.listFiltered ?? false) === event.filtered
+  ) {
+    return { state, effects: [] };
+  }
+  const { clusterKey, members } = context.wheel;
+  return {
+    state: {
+      ...state,
+      annotationContext: {
+        ...context,
+        wheel: event.filtered
+          ? { clusterKey, members, listFiltered: true }
+          : { clusterKey, members },
+      },
+    },
+    effects: [],
+  };
+}
+
+/**
+ * T14g: the pruned context with the open wheel minus the spokes the
+ * session's definition no longer holds; the wheel goes when none is left.
+ */
+function withPrunedSketchAnnotationWheel(
+  context: SketchAnnotationContext | null,
+  wheel: SketchAnnotationContext["wheel"],
+  session: SketchEditorState["session"],
+): SketchAnnotationContext | null {
+  const members =
+    wheel?.members.filter(
+      (member) =>
+        getSketchAnnotationAffectedGeometryRefs(session, member) !== null,
+    ) ?? [];
+  if (!wheel || members.length === 0) {
+    return withoutSketchAnnotationWheel(context);
+  }
+  return {
+    owners: context?.owners ?? [],
+    last: context?.last ?? null,
+    wheel: { ...wheel, members },
+  };
 }
 
 export function handleSketchToolPatched(
@@ -460,9 +568,12 @@ export function handleSketchAnnotationDeleteRequested(
     selection: [],
     hoverTarget: null,
     // T14c: deleted refs leave the context; deleting the active annotation
-    // keeps its owners, so its siblings stay reachable.
-    annotationContext: pruneSketchAnnotationContext(
-      state.annotationContext ?? null,
+    // keeps its owners, so its siblings stay reachable. T14g: an open wheel
+    // loses the deleted spoke and stays open (the layer closes it once its
+    // remaining spokes fit the dense limit).
+    annotationContext: withPrunedSketchAnnotationWheel(
+      pruneSketchAnnotationContext(state.annotationContext ?? null, session),
+      state.annotationContext?.wheel,
       session,
     ),
     session,

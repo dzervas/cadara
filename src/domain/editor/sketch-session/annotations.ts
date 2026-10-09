@@ -1507,6 +1507,21 @@ export function pruneSketchAnnotationContext(
 }
 
 /**
+ * T14g (T-10): the context with its wheel closed; null when nothing else is
+ * retained (no owners, no `last`).
+ */
+export function withoutSketchAnnotationWheel(
+  context: SketchAnnotationContext | null,
+): SketchAnnotationContext | null {
+  if (!context?.wheel) {
+    return context;
+  }
+  return context.owners.length === 0 && context.last === null
+    ? null
+    : { owners: context.owners, last: context.last };
+}
+
+/**
  * Deletes the annotation the selection holds (`selection[0]`, T14c: the
  * editor selection is the only annotation selection).
  */

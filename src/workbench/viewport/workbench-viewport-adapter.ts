@@ -206,6 +206,22 @@ export function createWorkbenchViewportIntentHandler({
       case "hoverCleared":
         onClearHover();
         return;
+      case "annotationWheelOpened":
+        dispatch({
+          type: "sketch.annotationWheelOpened",
+          clusterKey: intent.clusterKey,
+          members: intent.members,
+        });
+        return;
+      case "annotationWheelClosed":
+        dispatch({ type: "sketch.annotationWheelClosed" });
+        return;
+      case "annotationWheelListFilterChanged":
+        dispatch({
+          type: "sketch.annotationWheelListFilterChanged",
+          filtered: intent.filtered,
+        });
+        return;
       case "sketchPointerMoved":
         onSketchMove(intent.point, intent.sketchUnitsPerPixel);
         return;

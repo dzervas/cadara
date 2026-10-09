@@ -23,6 +23,13 @@ export interface SketchConstraintListProps {
   hoverTarget: PrimitiveRef | null;
   showAll: boolean;
   /**
+   * T14g (T-10): the radial wheel's "More…": only these annotations are
+   * listed (the panel expands) until the wheel closes or the filter is
+   * cleared. Null: every row.
+   */
+  filter?: readonly AnnotationTarget[] | null;
+  onClearFilter?: () => void;
+  /**
    * The list starts collapsed (the header and Show all stay visible). Only
    * the static-markup UI lane passes it (no clicks there); the workbench
    * starts expanded.
@@ -51,6 +58,8 @@ export function SketchConstraintList({
   selection,
   hoverTarget,
   showAll,
+  filter = null,
+  onClearFilter,
   defaultCollapsed = false,
   className,
   onShowAllChange,
@@ -60,7 +69,24 @@ export function SketchConstraintList({
   onDelete,
 }: SketchConstraintListProps) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
+  // T14g: a new "More…" filter expands a collapsed panel (adjusted while
+  // rendering; the user can collapse it again).
+  const [expandedForFilter, setExpandedForFilter] =
+    useState<typeof filter>(null);
+  if (expandedForFilter !== filter) {
+    setExpandedForFilter(filter);
+    if (filter) {
+      setCollapsed(false);
+    }
+  }
   const problemCount = rows.filter((row) => row.problemText !== null).length;
+  const shownRows = filter
+    ? rows.filter((row) =>
+        filter.some((target) =>
+          primitiveRefEquals(target, row.annotation.target),
+        ),
+      )
+    : rows;
   const listId = "sketch-constraint-list-rows";
   const panelRef = useRef<HTMLElement | null>(null);
   const listRef = useRef<HTMLUListElement | null>(null);
@@ -114,9 +140,9 @@ export function SketchConstraintList({
   }, [selectedId]);
 
   // Stable row callbacks (review A-2) reading the latest props.
-  const latestRef = useRef({ rows, onSelect, onDelete });
+  const latestRef = useRef({ rows: shownRows, onSelect, onDelete });
   useEffect(() => {
-    latestRef.current = { rows, onSelect, onDelete };
+    latestRef.current = { rows: shownRows, onSelect, onDelete };
   });
   const selectFromList = useCallback((target: AnnotationTarget, id: string) => {
     listSelectedIdRef.current = id;
@@ -195,6 +221,25 @@ export function SketchConstraintList({
           onChange={(event) => onShowAllChange(event.currentTarget.checked)}
           data-sketch-constraint-show-all=""
         />
+        {filter ? (
+          <div
+            className="flex items-center gap-2"
+            data-sketch-constraint-filter={shownRows.length}
+          >
+            <span>
+              {shownRows.length === 1
+                ? "1 nearby constraint"
+                : `${shownRows.length} nearby constraints`}
+            </span>
+            <button
+              type="button"
+              className="ml-auto rounded px-1 text-[var(--cad-accent)] hover:underline"
+              onClick={onClearFilter}
+            >
+              Show every constraint
+            </button>
+          </div>
+        ) : null}
       </div>
       {collapsed ? null : (
         // Review B-1: the list takes the height the column leaves and
@@ -204,12 +249,12 @@ export function SketchConstraintList({
           id={listId}
           className="relative min-h-0 flex-1 overflow-y-auto border-t border-[var(--cad-border)] py-1"
         >
-          {rows.length === 0 ? (
+          {shownRows.length === 0 ? (
             <li className="px-3 py-2 text-[var(--cad-muted-foreground)]">
               No constraints or dimensions.
             </li>
           ) : null}
-          {rows.map((row, index) => (
+          {shownRows.map((row, index) => (
             <SketchConstraintListRow
               key={row.annotation.id}
               row={row}
@@ -218,8 +263,8 @@ export function SketchConstraintList({
               groupHeader={
                 row.group !== null &&
                 row.problemText === null &&
-                (row.group.key !== rows[index - 1]?.group?.key ||
-                  rows[index - 1]?.problemText !== null)
+                (row.group.key !== shownRows[index - 1]?.group?.key ||
+                  shownRows[index - 1]?.problemText !== null)
                   ? row.group.label
                   : null
               }

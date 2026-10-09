@@ -15,6 +15,7 @@ import {
   updateSketchConstraintHover,
   updateSketchEditToolHover,
   updateSketchStyleFocusTarget,
+  withoutSketchAnnotationWheel,
 } from "@/domain/editor/sketch-session";
 import {
   doesSketchSpecialModeAcceptTarget,
@@ -33,6 +34,7 @@ import {
   getDefaultSelectionFilterForMode,
   getSelectionFilterRejectionLabel,
   getSelectionPreviewLabel,
+  primitiveRefEquals,
   resolveSelectionCandidate,
   selectionFilterAllowsTarget,
   sketchReferenceSelectionFilter,
@@ -375,9 +377,13 @@ export function handleSelectionCleared(
           // T14c two-stage clear: a blank with an active annotation clears
           // only the annotation (owners and `last` stay, siblings reachable);
           // any other blank, including the second, drops the context.
-          annotationContext: isAnnotationRef(state.selection[0])
-            ? (state.annotationContext ?? null)
-            : null,
+          // T14g (T-10): an open wheel is first-stage too; the blank
+          // collapses it and keeps owners and `last`.
+          annotationContext:
+            isAnnotationRef(state.selection[0]) ||
+            state.annotationContext?.wheel
+              ? withoutSketchAnnotationWheel(state.annotationContext ?? null)
+              : null,
         }
       : {
           ...state,
@@ -923,11 +929,18 @@ export function getSketchAnnotationSelectionContext(
   target: SketchConstraintRef | SketchDimensionRef,
 ): SketchAnnotationContext {
   const owners = state.annotationContext?.owners ?? [];
+  const wheel = state.annotationContext?.wheel;
   return {
     owners: isSketchAnnotationInContext(state.session, target, owners)
       ? owners
       : (getSketchAnnotationAffectedGeometryRefs(state.session, target) ?? []),
     last: target,
+    // T14g (T-10): a spoke goes to the wheel's centre and the wheel stays;
+    // any other annotation closes it.
+    ...(wheel &&
+    wheel.members.some((member) => primitiveRefEquals(member, target))
+      ? { wheel }
+      : {}),
   };
 }
 
@@ -945,12 +958,21 @@ export function getSketchGeometrySelectionContext(
   }
 
   const last = state.annotationContext?.last ?? null;
+  const wheel = state.annotationContext?.wheel;
   return {
     owners,
     last:
       last && isSketchAnnotationInContext(state.session, last, owners)
         ? last
         : null,
+    // T14g (T-10): geometry whose context holds the wheel's cluster keeps
+    // it open; geometry outside the context closes it.
+    ...(wheel &&
+    wheel.members.some((member) =>
+      isSketchAnnotationInContext(state.session, member, owners),
+    )
+      ? { wheel }
+      : {}),
   };
 }
 
