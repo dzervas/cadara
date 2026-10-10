@@ -37,6 +37,7 @@ import {
 import { offsetFrameCurveResidual } from "@/contracts/sketch/offset-derivation-frame";
 import { OFFSET_DIAGNOSTIC_CODES } from "@/contracts/sketch/offset-geometry";
 import { isOffsetPublicationSolveAccepted } from "@/contracts/sketch/offset-publication";
+import { declaredJoinClasses } from "@/contracts/sketch/region-extraction";
 import {
   closestSplineSpanLocation,
   evaluateSplineSpan,
@@ -8259,12 +8260,49 @@ function solveWithRebuildRetry<T>(input: {
 function solveProgramValues(
   program: SketchCompiledSolveProgram,
   startValues: Float64Array,
+  /**
+   * T15c (axis preference): `frozen` variables are excluded from the solved
+   * set (stage 1); `components` restricts the solve, and its B4 re-solve,
+   * to those components' equations, every other variable keeping its start
+   * value (stage 2). Absent: the whole system, as before.
+   */
+  stage: {
+    frozen?: ReadonlySet<number>;
+    components?: readonly SketchCompiledSolveComponent[];
+  } = {},
 ) {
-  const solved = solveSystemValues(
-    startValues,
-    program.system.scalarConstraints,
-    program.strategy,
-    (candidate) => isAcceptableSolvedValues(program, candidate),
+  const frozen = stage.frozen ?? NO_FROZEN_VARIABLES;
+  const scope = stage.components;
+  // A restricted solve reports its loss over every equation.
+  const judged = (candidate: SolvedSystemValues): SolvedSystemValues => {
+    if (!scope) return candidate;
+    const state = evaluateLoss(
+      candidate.values,
+      program.system.scalarConstraints,
+    );
+    return {
+      values: candidate.values,
+      loss: state.loss,
+      perConstraint: state.perConstraint,
+    };
+  };
+  const solved = judged(
+    solveSystemValues(
+      startValues,
+      withFrozenVariables(
+        scope
+          ? scope.flatMap((component) =>
+              component.equationIndices.map(
+                (equationIndex) =>
+                  program.system.scalarConstraints[equationIndex]!,
+              ),
+            )
+          : program.system.scalarConstraints,
+        frozen,
+      ),
+      program.strategy,
+      (candidate) => isAcceptableSolvedValues(program, judged(candidate)),
+    ),
   );
   const plain = {
     solved,
@@ -8306,7 +8344,7 @@ function solveProgramValues(
         : [];
     }),
   );
-  const conflicted = program.components.filter(
+  const conflicted = (scope ?? program.components).filter(
     (component) =>
       component.equationIndices.some((equationIndex) =>
         unsatisfiedIds.has(program.system.scalarConstraints[equationIndex]!.id),
@@ -8317,7 +8355,9 @@ function solveProgramValues(
     return plain;
   }
   const variableIndices = uniqueSortedIndices(
-    conflicted.flatMap((component) => [...component.variableIndices]),
+    conflicted.flatMap((component) =>
+      component.variableIndices.filter((index) => !frozen.has(index)),
+    ),
   );
   const anchor = createMinimumMotionAnchorConstraint({
     id: "constraint_commit_minimum_motion" as ConstraintId,
@@ -8370,6 +8410,283 @@ function reevaluateProgramValues(
   };
 }
 
+const NO_FROZEN_VARIABLES: ReadonlySet<number> = new Set();
+
+/**
+ * T15c: `constraints` with the `frozen` variables excluded from the solved
+ * set: their gradient entries are zero, so no strategy moves them (BFGS,
+ * Gauss–Newton and gradient descent all step along the gradient's span).
+ * Residuals, and so statuses and acceptance, are unchanged.
+ */
+function withFrozenVariables(
+  constraints: ScalarConstraintRecord[],
+  frozen: ReadonlySet<number>,
+): ScalarConstraintRecord[] {
+  if (frozen.size === 0) return constraints;
+  const indices = [...frozen];
+  return constraints.map((constraint) => ({
+    ...constraint,
+    evaluate(values) {
+      const evaluation = constraint.evaluate(values);
+      if (indices.every((index) => evaluation.gradient[index] === 0))
+        return evaluation;
+      const gradient = evaluation.gradient.slice();
+      for (const index of indices) gradient[index] = 0;
+      return { ...evaluation, gradient };
+    },
+  }));
+}
+
+/** T15c: one mirror's line axis: its points, their variables and their authority. */
+type MirrorAxisVariables = {
+  pointIds: readonly SketchPointId[];
+  variables: readonly number[];
+  authority: readonly number[];
+};
+
+const mirrorAxisVariablesByProgram = new WeakMap<
+  SketchCompiledSolveProgram,
+  readonly MirrorAxisVariables[]
+>();
+
+/**
+ * T15c: the line axes of the program's mirror relationships. A sketch datum
+ * axis has no variables (fixed by construction), and a missing or non-line
+ * axis (a failed mirror) has nothing to preserve.
+ */
+function mirrorAxisVariables(
+  program: SketchCompiledSolveProgram,
+): readonly MirrorAxisVariables[] {
+  const cached = mirrorAxisVariablesByProgram.get(program);
+  if (cached) return cached;
+  const entities = new Map(
+    program.definition.entities.map((entity) => [entity.entityId, entity]),
+  );
+  const axes = (program.definition.derivedRelationships ?? []).flatMap(
+    (relationship) => {
+      if (
+        relationship.kind !== "mirror" ||
+        relationship.mirrorReference.kind !== "lineEntity"
+      )
+        return [];
+      const axis = entities.get(relationship.mirrorReference.entityId);
+      if (axis?.kind !== "lineSegment") return [];
+      const pointIds = [axis.startPointId, axis.endPointId];
+      const variables = pointIds.flatMap((pointId) =>
+        pointVariableIndices(program.system.pointRecords.get(pointId)),
+      );
+      return [
+        {
+          pointIds,
+          variables,
+          authority:
+            program.system.parameterProjection.projectVariableIndices(
+              variables,
+            ),
+        },
+      ];
+    },
+  );
+  mirrorAxisVariablesByProgram.set(program, axes);
+  return axes;
+}
+
+const mirrorSourcePointsByProgram = new WeakMap<
+  SketchCompiledSolveProgram,
+  ReadonlyMap<SketchPointId, SketchPointId>
+>();
+
+/**
+ * T15c (review R-1b): a mirror output point's source: its seed point,
+ * followed through chains (a mirror of a mirror output) to the first point
+ * that is not a mirror output. Bounded by the number of mirror outputs, so a
+ * malformed cycle stops (T15b fails it explicitly elsewhere).
+ */
+function mirrorSourcePoint(
+  program: SketchCompiledSolveProgram,
+  pointId: SketchPointId,
+): SketchPointId {
+  let seeds = mirrorSourcePointsByProgram.get(program);
+  if (!seeds) {
+    const entries = new Map<SketchPointId, SketchPointId>();
+    for (const relationship of program.definition.derivedRelationships ?? []) {
+      if (relationship.kind !== "mirror") continue;
+      for (const output of relationship.outputs)
+        output.outputPointIds.forEach((outputPointId, index) => {
+          const seedPointId = output.seedPointIds[index];
+          if (seedPointId) entries.set(outputPointId, seedPointId);
+        });
+    }
+    seeds = entries;
+    mirrorSourcePointsByProgram.set(program, seeds);
+  }
+  let source = pointId;
+  for (let step = 0; step < seeds.size && seeds.has(source); step += 1)
+    source = seeds.get(source)!;
+  return source;
+}
+
+/**
+ * T15c (issue 15, [TECH] T-6 + R-7; review R-1): the axis authority
+ * variables a drag frame keeps fixed in its first stage: every mirror axis in
+ * the dragged component (a chain's upstream axes included: their authority
+ * is in the component through the projection), except an axis the drag
+ * requests to move. A drag requests an axis when the dragged points, or the
+ * mirror source of a dragged copy (`mirrorSourcePoint`), meet the axis's
+ * points: its endpoints and every point in their declared-join class (a
+ * shared point, or a satisfied `coincident` in the last accepted frame,
+ * `declaredJoinClasses`: blocked or unsatisfied ones do not join), those
+ * points' variables or their authority (the source of a derived axis, also
+ * through a chain). Empty without a line axis in the component.
+ */
+function dragFrozenAxisVariables(
+  program: SketchCompiledSolveProgram,
+  snapshot: SolvedSketchSnapshot,
+  component: SketchCompiledSolveComponent | null,
+  draggedVariableIndices: readonly number[],
+): ReadonlySet<number> {
+  const axes = mirrorAxisVariables(program);
+  if (axes.length === 0) return NO_FROZEN_VARIABLES;
+  const inComponent = component ? new Set(component.variableIndices) : null;
+  const variablesOf = (pointId: SketchPointId) =>
+    pointVariableIndices(program.system.pointRecords.get(pointId));
+  const draggedSet = new Set(draggedVariableIndices);
+  const draggedPoints = program.definition.points.filter((point) =>
+    variablesOf(point.pointId).some((index) => draggedSet.has(index)),
+  );
+  const dragged = new Set([
+    ...draggedVariableIndices,
+    ...draggedPoints.flatMap((point) =>
+      variablesOf(mirrorSourcePoint(program, point.pointId)),
+    ),
+  ]);
+  const classes = declaredJoinClasses(program.definition, snapshot);
+  const frozen = new Set<number>();
+  for (const axis of axes) {
+    if (inComponent && !axis.authority.some((index) => inComponent.has(index)))
+      continue;
+    const roots = new Set(
+      axis.pointIds.map((pointId) => classes.find(pointId)),
+    );
+    const joined = program.definition.points.flatMap((point) =>
+      roots.has(classes.find(point.pointId)) ? variablesOf(point.pointId) : [],
+    );
+    if (
+      [
+        ...axis.variables,
+        ...axis.authority,
+        ...joined,
+        ...program.system.parameterProjection.projectVariableIndices(joined),
+      ].some((index) => dragged.has(index))
+    )
+      continue;
+    for (const index of axis.authority) frozen.add(index);
+  }
+  return frozen;
+}
+
+/**
+ * T15c: the components among those holding a `frozen` variable that a
+ * rejected stage-1 batch result cannot be accepted in: an unsatisfied
+ * requirement or a rejecting error (not tolerated by the start-state rule)
+ * targets them. A rejection that cannot be attributed to a component
+ * releases every such component (today's solve for all of them).
+ */
+function rejectedAxisComponents(
+  program: SketchCompiledSolveProgram,
+  snapshot: SolvedSketchSnapshot,
+  frozen: ReadonlySet<number>,
+) {
+  const holding = program.components.filter((component) =>
+    component.variableIndices.some((index) => frozen.has(index)),
+  );
+  const unsatisfied = new Set<string>([
+    ...snapshot.constraintStatuses.flatMap((entry) =>
+      isAcceptedConstraintStatus(entry.status) ? [] : [entry.constraintId],
+    ),
+    ...snapshot.dimensionStatuses.flatMap((entry) =>
+      entry.status === "unsatisfied" ? [entry.dimensionId] : [],
+    ),
+  ]);
+  const names = (component: SketchCompiledSolveComponent, id: string) =>
+    component.equationIndices.some(
+      (equationIndex) =>
+        program.system.scalarConstraints[equationIndex]!.id === id,
+    );
+  const targets = (
+    component: SketchCompiledSolveComponent,
+    target: SketchSolveDiagnostic["target"],
+  ) => {
+    switch (target?.kind) {
+      case "entity":
+        return component.entityIds.includes(target.entityId);
+      case "point":
+        return component.pointIds.includes(target.pointId);
+      case "constraint":
+        return names(component, target.constraintId);
+      case "dimension":
+        return names(component, target.dimensionId);
+      default:
+        return false;
+    }
+  };
+  const tolerated = startFailedDerivedDiagnostics.get(snapshot);
+  const rejecting = snapshot.diagnostics.filter(
+    (diagnostic) =>
+      diagnostic.severity === "error" && !tolerated?.has(diagnostic),
+  );
+  const rejected = new Set(
+    program.components.filter(
+      (component) =>
+        [...unsatisfied].some((id) => names(component, id)) ||
+        rejecting.some((diagnostic) => targets(component, diagnostic.target)),
+    ),
+  );
+  const unattributed =
+    rejected.size === 0 ||
+    rejecting.some(
+      (diagnostic) =>
+        !program.components.some((component) =>
+          targets(component, diagnostic.target),
+        ),
+    );
+  return unattributed
+    ? holding
+    : holding.filter((component) => rejected.has(component));
+}
+
+/**
+ * T15c (issue 15: "preserve the axis unless requirements force it to
+ * move"; [TECH] T-6 + R-7): a batch solve (commit, live solve, session
+ * start, Undo/Redo/reopen; B4 inside each stage) in two stages.
+ * - Stage 1: the solve with every mirror line axis's authority variables
+ *   frozen. Kept whenever it is accepted.
+ * - Stage 2, only for the components holding an axis whose stage-1 result
+ *   is not accepted (component-local): today's unrestricted solve of those
+ *   components' equations from their start values; every other component
+ *   keeps its stage-1 values. It is reported whether or not it is accepted
+ *   (a rejected result is today's rejected result for those components).
+ * A sketch without a mirror line axis runs the unchanged single solve.
+ */
+function solveProgramValuesPreferringAxes(
+  program: SketchCompiledSolveProgram,
+  startValues: Float64Array,
+) {
+  const axes = mirrorAxisVariables(program);
+  if (axes.length === 0) return solveProgramValues(program, startValues);
+  const frozen = new Set(axes.flatMap((axis) => axis.authority));
+  const preferred = solveProgramValues(program, startValues, { frozen });
+  const snapshot = preferred.result.solvedSnapshot;
+  if (isAcceptableSolvedSnapshot(snapshot)) return preferred;
+  const rejected = rejectedAxisComponents(program, snapshot, frozen);
+  if (rejected.length === 0) return preferred;
+  const restart = cloneValues(preferred.solved.values);
+  for (const component of rejected)
+    for (const index of component.variableIndices)
+      restart[index] = startValues[index]!;
+  return solveProgramValues(program, restart, { components: rejected });
+}
+
 export function solveCompiledSketchProgram(
   program: SketchCompiledSolveProgram,
   initialValues: Float64Array = program.system.initialValues,
@@ -8383,8 +8700,9 @@ export function solveCompiledSketchProgram(
   return solveWithRebuildRetry({
     program,
     startValues: preconditionedValues,
-    solve: () => solveProgramValues(program, preconditionedValues),
-    retry: (from) => solveProgramValues(program, from),
+    solve: () =>
+      solveProgramValuesPreferringAxes(program, preconditionedValues),
+    retry: (from) => solveProgramValuesPreferringAxes(program, from),
     valuesOf: (solved) => solved.solved.values,
     reevaluate: (values) => reevaluateProgramValues(program, values),
     isAccepted: (solved) =>
@@ -8581,9 +8899,9 @@ export function startCompiledSketchSolveSession(input: {
               initialCandidate,
             ),
           }
-        : solveProgramValues(input.program, initialValues);
+        : solveProgramValuesPreferringAxes(input.program, initialValues);
     },
-    retry: (from) => solveProgramValues(input.program, from),
+    retry: (from) => solveProgramValuesPreferringAxes(input.program, from),
     valuesOf: (candidate) => candidate.solved.values,
     reevaluate: (values) => reevaluateProgramValues(input.program, values),
     isAccepted: (candidate) =>
@@ -9254,20 +9572,55 @@ function createMinimumMotionAnchorConstraint(input: {
 //   variables are projected onto the hard constraints from that frame; the
 //   result replaces the frame only if the frame acceptance accepts it.
 
+const mirrorOutputVariablesByProgram = new WeakMap<
+  SketchCompiledSolveProgram,
+  ReadonlySet<number>
+>();
+
 /**
- * T12b: generalized drag frame solver that accepts pre-resolved constraints
- * and dragged variable indices. All drag target types (point, translate,
- * radius, tangent vector) reduce to this common frame solver.
+ * T15c: whether `index` is a mirror output point's (driven) slot. Other
+ * driven outputs (offset, pattern, transform) are one-way (T12 D9) and keep
+ * today's release frame.
  */
-function solveDragFrameGeneral(input: {
+function isMirrorOutputVariable(
+  program: SketchCompiledSolveProgram,
+  index: number,
+) {
+  let variables = mirrorOutputVariablesByProgram.get(program);
+  if (!variables) {
+    variables = new Set(
+      (program.definition.derivedRelationships ?? []).flatMap((relationship) =>
+        relationship.kind === "mirror"
+          ? relationship.outputs.flatMap((output) =>
+              output.outputPointIds.flatMap((pointId) =>
+                pointVariableIndices(program.system.pointRecords.get(pointId)),
+              ),
+            )
+          : [],
+      ),
+    );
+    mirrorOutputVariablesByProgram.set(program, variables);
+  }
+  return variables.has(index);
+}
+
+type DragFrameInput = {
   session: SketchCompiledSolveSession;
   component: SketchCompiledSolveComponent | null;
   dragConstraints: ScalarConstraintRecord[];
   draggedVariableIndices: number[];
   constraintLabel: string;
   startValues?: Float64Array;
-  /** T13a2 (d1): the cursor and the existing target tolerance. */
-  exactReach?: { position: SketchPoint2D; targetTolerance: number };
+  /**
+   * T13a2 (d1): the cursor and the existing target tolerance. T15c: `pin`
+   * is the drag target as a hard (weight 1) wrapped requirement, used when
+   * the dragged point is driven (a mirror output).
+   */
+  exactReach?: {
+    position: SketchPoint2D;
+    targetTolerance: number;
+    pin: ScalarConstraintRecord;
+  };
   /** T13a2 (c3): reuse the session's curvature for this drag problem. */
   reuseCurvature?: boolean;
   /**
@@ -9276,7 +9629,49 @@ function solveDragFrameGeneral(input: {
    * the exact-reach step runs on it.
    */
   repeatsAcceptedFrame?: boolean;
-}): DraggedPointCandidate | null {
+};
+
+/**
+ * T12b: generalized drag frame solver that accepts pre-resolved constraints
+ * and dragged variable indices. All drag target types (point, translate,
+ * radius, tangent vector) reduce to this common frame solver.
+ *
+ * T15c (issue 15 axis preference; [TECH] T-6 + R-7, A-1): stage 1 is the
+ * frame solve with the frozen mirror axes (`dragFrozenAxisVariables`)
+ * excluded from the solved set; the drag target stays a requirement on its
+ * own (possibly driven) slots, never a pre-reflected target. It is kept
+ * whenever the frame accepts it, however far the cursor lags (the cursor is
+ * a soft objective, D1). Only a stage-1 frame that is not accepted runs
+ * stage 2, today's unrestricted frame, kept only if accepted (otherwise the
+ * caller keeps the last accepted frame). Without a frozen axis the frame is
+ * the unchanged single stage.
+ */
+function solveDragFrameGeneral(
+  input: DragFrameInput,
+): DraggedPointCandidate | null {
+  const frozen = dragFrozenAxisVariables(
+    input.session.program,
+    input.session.lastAcceptedSnapshot,
+    input.component,
+    input.draggedVariableIndices,
+  );
+  const preferred = solveDragFrameStage(input, frozen);
+  if (frozen.size === 0 || preferred === null || preferred.accepted)
+    return preferred;
+  return solveDragFrameStage(input, NO_FROZEN_VARIABLES);
+}
+
+/**
+ * One stage of a drag frame: the T12b/T13a2 frame solve over the
+ * component's variables minus `frozen` (phases A and B and the d1 step).
+ * T13a2 (c3) curvature is keyed by the frozen set too, so a stage reuses
+ * only its own stage's inverse Hessian (a different variable set or
+ * objective restarts from the identity).
+ */
+function solveDragFrameStage(
+  input: DragFrameInput,
+  frozen: ReadonlySet<number>,
+): DraggedPointCandidate | null {
   const { session, component } = input;
   const program = session.program;
   const parameterCount = program.system.parameterCount;
@@ -9290,8 +9685,13 @@ function solveDragFrameGeneral(input: {
     component?.variableIndices ??
       Array.from({ length: parameterCount }, (_, index) => index),
   );
+  const solvedVariables =
+    frozen.size === 0
+      ? affectedVariables
+      : affectedVariables.filter((index) => !frozen.has(index));
+  const solvedHardConstraints = withFrozenVariables(hardConstraints, frozen);
   const draggedSet = new Set(input.draggedVariableIndices);
-  const nonDraggedVariableIndices = affectedVariables.filter(
+  const nonDraggedVariableIndices = solvedVariables.filter(
     (index) => !draggedSet.has(index),
   );
 
@@ -9308,6 +9708,37 @@ function solveDragFrameGeneral(input: {
   const exactReach = (candidate: DraggedPointCandidate) => {
     if (!bfgs || !input.exactReach || !candidate.accepted) return candidate;
     const [x, y] = input.draggedVariableIndices;
+    const { position, targetTolerance, pin } = input.exactReach;
+    if (
+      x !== undefined &&
+      y !== undefined &&
+      isMirrorOutputVariable(program, x) &&
+      isMirrorOutputVariable(program, y)
+    ) {
+      // T15c (T13a2 d1 for a driven target, a mirror output point):
+      // pinning its slots is overwritten by the projection, so the target
+      // is pinned as a hard requirement on them and the stage's variables
+      // (frozen axes stay) are projected from the frame; kept only if
+      // accepted and within the reach tolerance.
+      const lagOf = (values: Float64Array) => {
+        const projected =
+          program.system.parameterProjection.projectValues(values);
+        return Math.hypot(
+          projected[x]! - position[0],
+          projected[y]! - position[1],
+        );
+      };
+      if (lagOf(candidate.values) <= targetTolerance) return candidate;
+      const projected = solveBfgsOver(
+        cloneValues(candidate.values),
+        [...hardConstraints, pin],
+        { variableIndices: solvedVariables },
+      );
+      const reached = judge(candidateOf(projected.values));
+      return reached.accepted && lagOf(reached.values) <= targetTolerance
+        ? { ...reached, curvature: candidate.curvature }
+        : candidate;
+    }
     const affected = new Set(affectedVariables);
     if (
       x === undefined ||
@@ -9316,7 +9747,6 @@ function solveDragFrameGeneral(input: {
       !affected.has(y)
     )
       return candidate;
-    const { position, targetTolerance } = input.exactReach;
     const lag = Math.hypot(
       candidate.values[x]! - position[0],
       candidate.values[y]! - position[1],
@@ -9354,7 +9784,7 @@ function solveDragFrameGeneral(input: {
       parameterProjection: program.system.parameterProjection,
     }),
   ];
-  const curvatureKey = `${input.constraintLabel}|${component?.componentId ?? "all"}|${input.draggedVariableIndices.join(",")}`;
+  const curvatureKey = `${input.constraintLabel}|${component?.componentId ?? "all"}|${input.draggedVariableIndices.join(",")}${frozen.size === 0 ? "" : `|frozen:${[...frozen].join(",")}`}`;
   const reuse =
     input.reuseCurvature === true && input.startValues === undefined;
   let curvature: SketchDragCurvature | undefined;
@@ -9364,7 +9794,7 @@ function solveDragFrameGeneral(input: {
       cloneValues(input.startValues ?? session.values),
       phaseAConstraints,
       {
-        variableIndices: affectedVariables,
+        variableIndices: solvedVariables,
         initialInverseHessian:
           reuse && session.dragCurvature?.key === curvatureKey
             ? session.dragCurvature.inverseHessian
@@ -9378,7 +9808,7 @@ function solveDragFrameGeneral(input: {
   } else {
     solvedA = solveSystemValues(
       cloneValues(input.startValues ?? session.values),
-      phaseAConstraints,
+      withFrozenVariables(phaseAConstraints, frozen),
       program.strategy,
     ).values;
   }
@@ -9388,7 +9818,9 @@ function solveDragFrameGeneral(input: {
   }
 
   // Phase B: project the phase-A candidate onto the hard-constraint manifold.
-  const phaseBConstraints: ScalarConstraintRecord[] = [...hardConstraints];
+  const phaseBConstraints: ScalarConstraintRecord[] = [
+    ...solvedHardConstraints,
+  ];
   const solvedB = solveSystemValues(
     cloneValues(candidateA.values),
     phaseBConstraints,
@@ -9432,6 +9864,11 @@ function solveDraggedPointFrame(input: {
         : {
             position: dragTarget.position,
             targetTolerance: input.exactReachTolerance,
+            // T15c: the existing point is resolved above, so never null.
+            pin: createDragTargetConstraint(
+              session.program.system,
+              dragTarget,
+            )!,
           },
     reuseCurvature: input.reuseCurvature,
     repeatsAcceptedFrame: input.repeatsAcceptedFrame,
