@@ -1256,6 +1256,337 @@ describe("region arrangement owner: declared joins and closure", () => {
   }, 60_000);
 });
 
+// OP9: arcs of one exact circle support. Each arc's support radius is
+// hypot(start − centre) (`arcDraft`), so a row reaches the co-circular path
+// only when every arc start lies on the circle BITWISE; with radii an ulp
+// apart the supports are distinct concentric circles (exact empty contact
+// set, verified before OP9). Every row asserts that premise.
+describe("region arrangement owner: co-circular arcs of one support (OP9)", () => {
+  const R = 2;
+  /** One binary64 step of `value` in direction `sign` (±1). */
+  const step = (value: number, sign: number) =>
+    sign > 0 ? nextUp(value) : nextDown(value);
+  /**
+   * The point nearest c + R(cos θ, sin θ) (±8 ulps per axis) whose
+   * hypot(p − c) is exactly R, and, with `angle`, whose atan2(p − c) is
+   * exactly that binary64 angle.
+   */
+  function onCircle(
+    center: SplineVector,
+    theta: number,
+    angle?: number,
+  ): SplineVector {
+    const seed: SplineVector = [
+      center[0] + R * Math.cos(theta),
+      center[1] + R * Math.sin(theta),
+    ];
+    let best: { point: SplineVector; cost: number } | null = null;
+    for (let dx = -8; dx <= 8; dx += 1) {
+      for (let dy = -8; dy <= 8; dy += 1) {
+        let [x, y] = seed;
+        for (let i = 0; i < Math.abs(dx); i += 1) x = step(x, dx);
+        for (let i = 0; i < Math.abs(dy); i += 1) y = step(y, dy);
+        const cost = Math.abs(dx) + Math.abs(dy);
+        if (
+          Math.hypot(x - center[0], y - center[1]) === R &&
+          (angle === undefined ||
+            Math.atan2(y - center[1], x - center[0]) === angle) &&
+          (!best || cost < best.cost)
+        )
+          best = { point: [x, y], cost };
+      }
+    }
+    if (!best) throw new Error(`no exact point at ${theta}`);
+    return best.point;
+  }
+  /** Premise: every arc's support radius is bitwise R (the co-circular path). */
+  function expectExactSupports(sketch: SketchFixture, label: string) {
+    const definition = sketch.definition();
+    const at = (id: string) =>
+      definition.points.find((point) => point.pointId === id)!.position;
+    const radii = definition.entities.flatMap((entity) =>
+      entity.kind === "arc"
+        ? [
+            Math.hypot(
+              at(entity.startPointId)[0] - at(entity.centerPointId)[0],
+              at(entity.startPointId)[1] - at(entity.centerPointId)[1],
+            ),
+          ]
+        : [],
+    );
+    expect(radii.length, `${label}: premise`).toBeGreaterThan(1);
+    expect(
+      radii.every((radius) => radius === R),
+      `${label}: premise, every arc support radius is bitwise ${R} (got ${radii.join(", ")})`,
+    ).toBe(true);
+  }
+  /** Circular segment of angle φ. */
+  const segment = (phi: number) => ((R * R) / 2) * (phi - Math.sin(phi));
+  async function expectAreas(
+    sketch: SketchFixture,
+    expected: readonly number[],
+    label: string,
+  ) {
+    const input = sketch.build();
+    const result = await derive(sketch);
+    expect(codes(result), `${label}: no diagnostics`).toEqual([]);
+    const areas = result.regions
+      .map((region) => {
+        expect(region.loops, label).toHaveLength(1);
+        return closedCurvesSignedArea(
+          regionLoopCurves(region.loops[0]!, input),
+        );
+      })
+      .sort((l, r) => l - r);
+    const sorted = [...expected].sort((l, r) => l - r);
+    expect(areas, `${label}: regions`).toHaveLength(sorted.length);
+    areas.forEach((area, index) =>
+      expect(area, `${label}: area vs closed form`).toBeCloseTo(
+        sorted[index]!,
+        9,
+      ),
+    );
+  }
+  /** Points on the circle at the given angles, arcs between consecutive ones (ccw). */
+  function arcsOfCircle(
+    center: SplineVector,
+    thetas: readonly number[],
+    closed: boolean,
+  ) {
+    const sketch = makeSketchFixture();
+    sketch.point("c", ...center);
+    thetas.forEach((theta, index) =>
+      sketch.point(`p${index}`, ...onCircle(center, theta)),
+    );
+    const count = closed ? thetas.length : thetas.length - 1;
+    for (let index = 0; index < count; index += 1)
+      sketch.arc(
+        `a${index}`,
+        "c",
+        `p${index}`,
+        `p${(index + 1) % thetas.length}`,
+      );
+    return sketch;
+  }
+
+  test("a half disk whose arc is split at 60° keeps its region (off-origin centre)", async () => {
+    const sketch = arcsOfCircle(
+      [1.25, -0.75],
+      [0, Math.PI / 3, Math.PI],
+      false,
+    );
+    sketch.line("diameter", "p2", "p0");
+    expectExactSupports(sketch, "half disk");
+    await expectAreas(sketch, [(Math.PI * R * R) / 2], "half disk");
+  }, 60_000);
+
+  test("control: the same half disk with the split point one ulp off the circle (distinct concentric supports) gives the same region", async () => {
+    const sketch = makeSketchFixture();
+    const center: SplineVector = [1.25, -0.75];
+    sketch.point("c", ...center);
+    sketch.point("p0", ...onCircle(center, 0));
+    const q = onCircle(center, Math.PI / 3);
+    let y = q[1];
+    while (Math.hypot(q[0] - center[0], y - center[1]) === R) y = nextUp(y);
+    sketch.point("p1", q[0], y);
+    sketch.point("p2", ...onCircle(center, Math.PI));
+    sketch.arc("a0", "c", "p0", "p1");
+    sketch.arc("a1", "c", "p1", "p2");
+    sketch.line("diameter", "p2", "p0");
+    await expectAreas(sketch, [(Math.PI * R * R) / 2], "ulp control");
+  }, 60_000);
+
+  for (const [name, thetas] of [
+    ["cut at 30° and 150°", [Math.PI / 6, (5 * Math.PI) / 6]],
+    ["cut at 0 (an arc ends at fl(2π))", [0, 2.6]],
+    ["cut 1e-9 below the seam (near 2π)", [-1e-9, 2.6]],
+    ["in three pieces", [0.2, 2.3, 4.4]],
+  ] as const) {
+    test(`a whole circle as arcs joined at both ends keeps its disk: ${name}`, async () => {
+      const sketch = arcsOfCircle([1.25, -0.75], thetas, true);
+      expectExactSupports(sketch, name);
+      await expectAreas(sketch, [Math.PI * R * R], name);
+    }, 60_000);
+  }
+
+  test("a whole circle as two arcs with a chord between the cuts gives the two segments", async () => {
+    const sketch = arcsOfCircle([1.25, -0.75], [Math.PI / 6, 2.6], true);
+    sketch.line("chord", "p1", "p0");
+    expectExactSupports(sketch, "chord");
+    const phi = 2.6 - Math.PI / 6;
+    await expectAreas(
+      sketch,
+      [segment(phi), Math.PI * R * R - segment(phi)],
+      "chord",
+    );
+  }, 60_000);
+
+  for (const [name, theta, exact] of [
+    ["θ = π, split point y = +0", Math.PI, [-R, 0]],
+    ["θ = π, split point y = −0", Math.PI, [-R, -0]],
+    ["θ = 0", 0, [R, 0]],
+    ["θ = −1e-9", -1e-9, null],
+    ["θ = 1e-9", 1e-9, null],
+    ...[1, 3, 5, 7].map(
+      (k) => [`θ = fl(${k}π/4) (T10a)`, (k * Math.PI) / 4, null] as const,
+    ),
+  ] as const) {
+    test(`an arc split at the seam or a quarter-turn angle keeps its segment: ${name}`, async () => {
+      const center: SplineVector = [0, 0];
+      // The split point's atan2 is exactly the binary64 angle (in (−π, π]).
+      const angle = theta > Math.PI ? theta - 2 * Math.PI : theta;
+      const sketch = makeSketchFixture();
+      sketch.point("c", ...center);
+      sketch.point("p", ...onCircle(center, theta - 0.4));
+      sketch.point("q", ...(exact ?? onCircle(center, theta, angle)));
+      sketch.point("r", ...onCircle(center, theta + 0.4));
+      sketch.arc("a0", "c", "p", "q");
+      sketch.arc("a1", "c", "q", "r");
+      sketch.line("chord", "r", "p");
+      expectExactSupports(sketch, name);
+      await expectAreas(sketch, [segment(0.8)], name);
+    }, 60_000);
+  }
+
+  test("a rounded rectangle whose corner arc is split at 45° keeps its region", async () => {
+    const sketch = makeSketchFixture();
+    const center: SplineVector = [3, 2];
+    sketch.point("v0", 0, 0);
+    sketch.point("v1", 5, 0);
+    sketch.point("c", ...center);
+    sketch.point("t0", 5, 2);
+    sketch.point("m", ...onCircle(center, Math.PI / 4));
+    sketch.point("t1", 3, 4);
+    sketch.point("v3", 0, 4);
+    sketch.line("l0", "v0", "v1");
+    sketch.line("l1", "v1", "t0");
+    sketch.arc("f0", "c", "t0", "m");
+    sketch.arc("f1", "c", "m", "t1");
+    sketch.line("l2", "t1", "v3");
+    sketch.line("l3", "v3", "v0");
+    expectExactSupports(sketch, "rounded rectangle");
+    await expectAreas(
+      sketch,
+      [5 * 4 - (R * R - (Math.PI * R * R) / 4)],
+      "rounded rectangle",
+    );
+  }, 60_000);
+
+  // Review R-2: the non-adjacent pieces of these circles are undeclared
+  // co-circular pairs whose boxes overlap: they reach the ORDINARY pair
+  // query, which proves them disjoint (Q1(b)).
+  test("review R-2: a circle in four arcs cut by a rotated slot (two chords across the long arcs) gives three regions", async () => {
+    const thetas = [-0.5, 2.5, 2.7, 5.7];
+    const sketch = arcsOfCircle([1.25, -0.75], thetas, true);
+    sketch.line("s0", "p1", "p0");
+    sketch.line("s1", "p3", "p2");
+    expectExactSupports(sketch, "rotated slot");
+    const caps = [segment(3), segment(3)];
+    await expectAreas(
+      sketch,
+      [...caps, Math.PI * R * R - caps[0]! - caps[1]!],
+      "rotated slot",
+    );
+  }, 60_000);
+
+  test("review R-2: a circle in four arcs cut by two chords crossing off-centre gives four regions", async () => {
+    const center: SplineVector = [1.25, -0.75];
+    const thetas = [0, 2, 3, 5];
+    const sketch = arcsOfCircle(center, thetas, true);
+    sketch.line("x0", "p0", "p2");
+    sketch.line("x1", "p1", "p3");
+    expectExactSupports(sketch, "crossing chords");
+    const points = thetas.map((theta) => onCircle(center, theta));
+    // The chords' crossing X (float; the areas are compared to 1e-9).
+    const [a, b, c, d] = points as [
+      SplineVector,
+      SplineVector,
+      SplineVector,
+      SplineVector,
+    ];
+    const r = [c[0] - a[0], c[1] - a[1]];
+    const s = [d[0] - b[0], d[1] - b[1]];
+    const t =
+      ((b[0] - a[0]) * s[1]! - (b[1] - a[1]) * s[0]!) /
+      (r[0]! * s[1]! - r[1]! * s[0]!);
+    const x: SplineVector = [a[0] + t * r[0]!, a[1] + t * r[1]!];
+    const expected = thetas.map((theta, index) => {
+      const next = thetas[(index + 1) % 4]! + (index === 3 ? 2 * Math.PI : 0);
+      const [from, to] = [points[index]!, points[(index + 1) % 4]!];
+      const triangle =
+        ((from[0] - x[0]) * (to[1] - x[1]) -
+          (from[1] - x[1]) * (to[0] - x[0])) /
+        2;
+      return segment(next - theta) + triangle;
+    });
+    await expectAreas(sketch, expected, "crossing chords");
+  }, 60_000);
+
+  test("Q1(b): two undeclared disjoint arcs of one circle whose boxes overlap, each closed by its chord, keep both regions", async () => {
+    const sketch = makeSketchFixture();
+    const center: SplineVector = [0, 0];
+    sketch.point("c", ...center);
+    for (const [name, from, to] of [
+      ["a0", 0, (140 * Math.PI) / 180],
+      ["a1", Math.PI, (300 * Math.PI) / 180],
+    ] as const) {
+      sketch.point(`${name}s`, ...onCircle(center, from));
+      sketch.point(`${name}e`, ...onCircle(center, to));
+      sketch.arc(name, "c", `${name}s`, `${name}e`);
+      sketch.line(`${name}chord`, `${name}e`, `${name}s`);
+    }
+    expectExactSupports(sketch, "undeclared disjoint");
+    await expectAreas(
+      sketch,
+      [segment((140 * Math.PI) / 180), segment((120 * Math.PI) / 180)],
+      "undeclared disjoint",
+    );
+  }, 60_000);
+
+  test("fails closed: an arc ending on a co-circular arc's interior (overlap) and an undeclared exact touch", async () => {
+    const center: SplineVector = [0, 0];
+    const overlap = makeSketchFixture();
+    overlap.point("c", ...center);
+    overlap.point("p0", ...onCircle(center, 0));
+    overlap.point("p1", ...onCircle(center, Math.PI / 3));
+    overlap.point("q0", ...onCircle(center, Math.PI / 6));
+    overlap.point("q1", ...onCircle(center, (2 * Math.PI) / 3));
+    overlap.arc("a0", "c", "p0", "p1");
+    overlap.arc("a1", "c", "q0", "q1");
+    overlap.pointOnCurve("p1", "a1");
+    overlap.line("c0", "p1", "p0");
+    overlap.line("c1", "q1", "q0");
+    expectExactSupports(overlap, "overlap");
+    const overlapped = await derive(overlap);
+    expect(overlapped.regions).toEqual([]);
+    expect(codes(overlapped)).toEqual(["region-join-uncertain"]);
+    expect(JSON.stringify(overlapped.diagnostics)).toContain(
+      "Co-circular arcs overlap along an arc outside their declared joins.",
+    );
+    // Distinct point ids at one exact position, no constraint: the ordinary
+    // query sees a touch, which stays `coincident-circle-supports`.
+    const touch = makeSketchFixture();
+    touch.point("c", ...center);
+    touch.point("p0", ...onCircle(center, 0));
+    touch.point("p1", ...onCircle(center, Math.PI / 2));
+    touch.point("p1b", ...onCircle(center, Math.PI / 2));
+    touch.point("p2", ...onCircle(center, Math.PI));
+    touch.arc("a0", "c", "p0", "p1");
+    touch.arc("a1", "c", "p1b", "p2");
+    touch.line("c0", "p1", "p0");
+    touch.line("c1", "p2", "p1b");
+    expectExactSupports(touch, "touch");
+    const touched = await derive(touch);
+    expect(touched.regions).toEqual([]);
+    expect(targetsOf(touched, "region-query-uncertain")).toEqual(
+      expect.arrayContaining(["a0", "a1"]),
+    );
+    expect(JSON.stringify(touched.diagnostics)).toContain(
+      "The pair query of entity sketch_entity_a0 and entity sketch_entity_a1 is uncertain (coincident-circle-supports)",
+    );
+  }, 60_000);
+});
+
 describe("region arrangement owner: verified crossings, lobes and nesting", () => {
   test("mixed line/arc/cubic crossings split every branch exactly at the witness parameters", async () => {
     const sketch = makeSketchFixture();

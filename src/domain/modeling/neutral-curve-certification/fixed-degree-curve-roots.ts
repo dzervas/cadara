@@ -11,6 +11,8 @@ import type { SplineVector } from "@/contracts/sketch/spline-geometry";
 import {
   type AlgebraicPointOnRoot,
   certifyCircleRootDisposition,
+  circlesShareParametrizationExact,
+  coCircularArcContacts,
 } from "@/domain/modeling/neutral-curve-certification/circle-angular-certification";
 import {
   admitVerifiedNeutralCurveResult,
@@ -677,6 +679,30 @@ export function certifyConstructiveCircleCubic(
   return consistentOrUncertain(request, "circleCubic", points, budget);
 }
 
+/**
+ * OP9: two active arcs of one exact parametrization whose complete contact
+ * set (`coCircularArcContacts`) is proven empty. A full turn without an arc
+ * query domain, a touch, an overlap or an undecided comparison is not.
+ */
+function coCircularArcsDisjoint(
+  first: Circle,
+  second: Circle,
+  budget: ExactProofBudget,
+) {
+  const active = (circle: Circle) =>
+    circle.queryDomain?.interval ??
+    (circle.sourceDomain.kind === "arc" ? circle.sourceDomain.interval : null);
+  const firstActive = active(first);
+  const secondActive = active(second);
+  if (
+    !firstActive ||
+    !secondActive ||
+    !circlesShareParametrizationExact(first, second, budget)
+  )
+    return false;
+  return coCircularArcContacts(firstActive, secondActive, budget)?.length === 0;
+}
+
 export function certifyConstructiveCirclePair(
   request: NeutralCurveQueryRequest,
   budget: ExactProofBudget,
@@ -703,6 +729,8 @@ export function certifyConstructiveCirclePair(
     compareExact(distanceSquared, exactZero, budget) === 0 &&
     compareExact(firstRadius, secondRadius, budget) === 0
   ) {
+    if (coCircularArcsDisjoint(first, second, budget))
+      return complete(request, "circlePair", [], budget);
     return {
       kind: "uncertain",
       code: "coincident-circle-supports",
