@@ -386,6 +386,122 @@ describe("constructive numeric neutral-curve dispatcher", () => {
     });
   });
 
+  test("OP9: co-circular arcs proven disjoint verify with an empty complete set (pinned meters, both orders); touches, overlaps, full turns, rotated axes and undecided lifts stay coincident", () => {
+    const TAU = 2 * Math.PI;
+    const onUnit = (
+      id: string,
+      interval: readonly [number, number],
+      overrides: Partial<Extract<NeutralCurve, { kind: "circle" }>> = {},
+    ) =>
+      circle(id, [0, 0], 1, {
+        sourceDomain: { kind: "arc", interval },
+        ...overrides,
+      });
+    const disjoint: [string, NeutralCurve, NeutralCurve, [number, number]][] = [
+      ["plain", onUnit("a", [0, 1]), onUnit("b", [2, 3]), [2985, 2973]],
+      [
+        "wrapped (B + 2π follows A)",
+        onUnit("a", [2.9, 3.5]),
+        onUnit("b", [-2.5, -1]),
+        [3200, 3212],
+      ],
+      [
+        "B lifted three turns, far from a tie",
+        onUnit("a", [0, 1]),
+        onUnit("b", [2 + 3 * TAU, 3 + 3 * TAU]),
+        [3158, 3158],
+      ],
+      [
+        "a full turn restricted to an arc query domain",
+        circle("a", [0, 0], 1, {
+          queryDomain: { kind: "arc", interval: [0, 1] },
+        }),
+        onUnit("b", [2, 3]),
+        [4245, 4233],
+      ],
+      [
+        "positively parallel non-unit axes",
+        onUnit("a", [0, 1], { xAxis: [3, 4] }),
+        onUnit("b", [2, 3], { xAxis: [6, 8] }),
+        [3123, 3111],
+      ],
+    ];
+    for (const [name, first, second, operations] of disjoint) {
+      for (const [order, pair] of [
+        [first, second],
+        [second, first],
+      ].entries()) {
+        const snapshots: ExactProofBudgetSnapshot[] = [];
+        const label = `${name} (${order === 0 ? "as listed" : "swapped"})`;
+        const result =
+          createCertifiedNeutralCurveQueryWithBudgetObserverForTest(
+            (snapshot) => snapshots.push(snapshot),
+          ).queryPair(request(pair[0]!, pair[1]!));
+        expect(result, label).toEqual({
+          kind: "verified",
+          points: [],
+          overlaps: [],
+          completenessProof: {
+            kind: "completeIsolatedRootSet",
+            family: "circlePair",
+            distinctRootCount: 0,
+          },
+        });
+        expect(snapshots.at(-1)!.operations, `${label} meter`).toBe(
+          operations[order],
+        );
+        expect(
+          createCertifiedNeutralCurveQueryWithLowerBudgetForTest({
+            operations: operations[order]! - 1,
+          }).queryPair(request(pair[0]!, pair[1]!)),
+          `${label} meter - 1`,
+        ).toMatchObject({ code: "exact-query-proof-budget-exhausted" });
+      }
+    }
+    const coincident: [string, NeutralCurve, NeutralCurve][] = [
+      ["touch at k = 0", onUnit("a", [0, 1]), onUnit("b", [1, 2])],
+      ["overlap", onUnit("a", [0, 1]), onUnit("b", [0.5, 2])],
+      [
+        "wrapped overlap (k = 1)",
+        onUnit("a", [2.9, 3.5]),
+        onUnit("b", [-3, -2.5]),
+      ],
+      [
+        "a full turn without a query domain",
+        circle("a", [0, 0], 1),
+        onUnit("b", [2, 3]),
+      ],
+      [
+        "rotated axes (disjoint parameters, overlapping points)",
+        onUnit("a", [0, 1]),
+        onUnit("b", [-1.2, -0.2], { xAxis: [0, 1] }),
+      ],
+      [
+        "a |k| = 3 tie the bracket cannot decide",
+        onUnit("a", [0, 1]),
+        onUnit("b", [1 + 3 * TAU, 2 + 3 * TAU]),
+      ],
+      [
+        "a scan estimate beyond 2^31 turns",
+        onUnit("a", [3e16, 3e16 + 4]),
+        onUnit("b", [0, 1]),
+      ],
+    ];
+    for (const [name, first, second] of coincident) {
+      for (const pair of [
+        [first, second],
+        [second, first],
+      ]) {
+        expect(query.queryPair(request(pair[0]!, pair[1]!)), name).toEqual({
+          kind: "uncertain",
+          code: "coincident-circle-supports",
+          message:
+            "Coincident circle supports are a positive-dimensional unsupported family.",
+        });
+      }
+    }
+  });
+
   test("classifies circle/cubic lower and upper active endpoints once", () => {
     const support = circle("endpoint-support", [0, 0], 1);
     const lower = cubic("lower-endpoint", [

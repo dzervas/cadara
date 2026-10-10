@@ -8,7 +8,10 @@ import {
   type NeutralCurveOverlapWitness,
 } from "@/contracts/modeling/neutral-curve-query";
 import { reconstructSpline } from "@/contracts/sketch/spline-geometry";
-import { ExactProofBudget } from "@/domain/modeling/neutral-curve-certification/fixed-degree-primitives";
+import {
+  ExactProofBudget,
+  compareFiniteSpanToTwoPiExact,
+} from "@/domain/modeling/neutral-curve-certification/fixed-degree-primitives";
 import { certifyNeutralCurveJoin } from "@/domain/modeling/neutral-curve-certification/joined-pair";
 import {
   createCertifiedNeutralCurveQuery,
@@ -46,6 +49,25 @@ const arc = (
   sourceDomain: { kind: "arc", interval },
   provenance: provenance(id),
 });
+/** OP9: an arc on the one support centred `center` (default the origin, r = 1). */
+const coArc = (
+  id: string,
+  interval: Point,
+  radius = 1,
+  xAxis: Point = [1, 0],
+  arcCenter: Point = [0, 0],
+): NeutralCurve => ({
+  ...arc(id, arcCenter, radius, interval),
+  xAxis,
+});
+const TAU = 2 * Math.PI;
+/** The T13m circle Split's arcs (r = 2): its wrapped join is a sub-ulp gap. */
+const T13M_LOW = 0.5235987755982987;
+const T13M_HIGH = 2.6179938779914944;
+/** fl(2.9 + fl(2π)) − 2.9 > 2π: the wrapped join of [2.9, 5] | [5, fl(2.9 + 2π)] is a sliver. */
+const SLIVER_START = 2.9;
+const OP9_OVERLAP =
+  "Co-circular arcs overlap along an arc outside their declared joins.";
 const cubic = (
   id: string,
   poles: readonly [Point, Point, Point, Point],
@@ -562,6 +584,96 @@ const VERIFIED_ROWS: readonly VerifiedRow[] = [
     classifications: [],
     operations: [110419, 110419],
   },
+  // OP9: two arcs of one exact circle support (co-circular joins).
+  {
+    name: "OP9 co-circular arcs continuing at an exact end/start join (k = 0)",
+    first: coArc("A", [0, 1]),
+    second: coArc("B", [1, 2]),
+    joins: [endToStart],
+    realizations: ["declaredEnds"],
+    classifications: [],
+    operations: [7204, 7195],
+  },
+  {
+    name: "OP9 circle as two arcs joined at both ends (one wrapped join)",
+    first: coArc("A", [0.5, 2.6]),
+    second: coArc("B", [2.6, 0.5 + TAU]),
+    joins: [endToStart, { first: "start", second: "end" }],
+    realizations: ["declaredEnds", "declaredEnds"],
+    classifications: [],
+    operations: [16706, 16715],
+  },
+  {
+    name: "OP9 co-circular arcs at the atan2 seam (−fl π vs fl π, a k = 1 gap)",
+    first: coArc("A", [2.9, Math.PI]),
+    second: coArc("B", [-Math.PI, -2.9]),
+    joins: [endToStart],
+    realizations: ["declaredEnds"],
+    classifications: [],
+    operations: [12498, 12504],
+  },
+  {
+    name: "OP9 T13m circle Split arcs: wrapped join is a sub-ulp gap",
+    first: coArc("A", [T13M_LOW, T13M_HIGH], 2),
+    second: coArc("B", [T13M_HIGH, T13M_LOW + TAU], 2),
+    joins: [endToStart, { first: "start", second: "end" }],
+    realizations: ["declaredEnds", "declaredEnds"],
+    classifications: [],
+    operations: [17197, 17206],
+  },
+  {
+    name: "OP9 circle as two arcs whose wrapped join is a seam sliver",
+    first: coArc("A", [SLIVER_START, 5]),
+    second: coArc("B", [5, SLIVER_START + TAU]),
+    joins: [endToStart, { first: "start", second: "end" }],
+    realizations: ["declaredEnds", "declaredEnds"],
+    classifications: [],
+    operations: [18624, 18609],
+  },
+  {
+    name: "OP9 circle as two arcs cut at 0 (second arc ends at fl(2π), near 2π)",
+    first: coArc("A", [0, 2.6], 2),
+    second: coArc("B", [2.6, TAU], 2),
+    joins: [endToStart, { first: "start", second: "end" }],
+    realizations: ["declaredEnds", "declaredEnds"],
+    classifications: [],
+    operations: [15204, 15237],
+  },
+  {
+    name: "OP9 circle as two arcs cut 1e-9 below the seam",
+    first: coArc("A", [-1e-9, 2.6], 2),
+    second: coArc("B", [2.6, -1e-9 + TAU], 2),
+    joins: [endToStart, { first: "start", second: "end" }],
+    realizations: ["declaredEnds", "declaredEnds"],
+    classifications: [],
+    operations: [17016, 17025],
+  },
+  ...(
+    [
+      [1, [7888, 7879]],
+      [7, [7771, 7762]],
+      [-1, [7884, 7875]],
+    ] as const
+  ).map(
+    ([k, operations]): VerifiedRow => ({
+      name: `OP9 co-circular join at fl(${k}π/4) (T10a)`,
+      first: coArc("A", [(k * Math.PI) / 4 - 0.3, (k * Math.PI) / 4], 2),
+      second: coArc("B", [(k * Math.PI) / 4, (k * Math.PI) / 4 + 0.3], 2),
+      joins: [endToStart],
+      realizations: ["declaredEnds"],
+      classifications: [],
+      operations,
+    }),
+  ),
+  {
+    name: "OP9 co-circular arcs with positively parallel non-unit axes [3,4] | [6,8]",
+    first: coArc("A", [0, 1], 1, [3, 4]),
+    second: coArc("B", [1, 2], 1, [6, 8]),
+    joins: [endToStart],
+    realizations: ["declaredEnds"],
+    classifications: [],
+    operations: [7504, 7495],
+  },
 ];
 
 const UNCERTAIN_ROWS: readonly {
@@ -571,6 +683,8 @@ const UNCERTAIN_ROWS: readonly {
   readonly joins: readonly Join[];
   readonly modelingTolerance?: number;
   readonly code: string;
+  /** The exact message, when pinned (OP9 case-specific co-circular texts). */
+  readonly message?: string;
   /** Pinned whole-request meter [as listed, swapped], with count − 1 exhaustion. */
   readonly operations?: readonly [number, number];
 }[] = [
@@ -618,15 +732,94 @@ const UNCERTAIN_ROWS: readonly {
     second: arc("B", [0, 0], 1, [0.5, 2]),
     joins: [{ first: "end", second: { interior: 1 } }],
     code: "coincident-circle-supports",
-    operations: [33742, 33742],
+    message: OP9_OVERLAP,
+    operations: [7241, 7241],
   },
   {
-    name: "same-support arcs continuing at an end/start join (coincident supports)",
-    first: arc("A", [0, 0], 1, [0, 1]),
-    second: arc("B", [0, 0], 1, [1, 2]),
+    name: "OP9 co-circular arcs head to head (end/end): overlap",
+    first: coArc("A", [0, 1]),
+    second: coArc("B", [0.5, 1]),
+    joins: [{ first: "end", second: "end" }],
+    code: "coincident-circle-supports",
+    message: OP9_OVERLAP,
+    operations: [7241, 7241],
+  },
+  {
+    name: "OP9 co-circular wrapped overlap (k = 1) ending on the other's interior",
+    first: coArc("A", [2.9, 3.5]),
+    second: coArc("B", [-3, -2.5]),
+    joins: [{ first: "end", second: { interior: 3.5 - TAU } }],
+    code: "coincident-circle-supports",
+    message: OP9_OVERLAP,
+    operations: [11112, 11139],
+  },
+  {
+    // Review R-1: the join's hull (kᵢ = −1) holds the k = 0 overlap [0.2, 0.5]
+    // in the first lift; absorbing it across shifts would report second
+    // bounds [6, 6] that miss its B parameters.
+    name: "OP9 co-circular overlap at another shift inside a join's hull (tiny circle, end/end)",
+    first: coArc("A", [-0.2, 0.5], 1e-4),
+    second: coArc("B", [0.2, 6], 1e-4),
+    joins: [{ first: "end", second: "end" }],
+    code: "coincident-circle-supports",
+    message: OP9_OVERLAP,
+    operations: [9411, 9417],
+  },
+  {
+    name: "OP9 co-circular arcs touching exactly (k = 0) outside their one declared join",
+    first: coArc("A", [0, 1]),
+    second: coArc("B", [1, TAU - 2e-4]),
+    joins: [{ first: "start", second: "end" }],
+    code: "coincident-circle-supports",
+    message: "Co-circular arcs touch outside their declared joins.",
+    operations: [8363, 8201],
+  },
+  {
+    name: "OP9 co-circular join with the second arc lifted three turns (|k| = 3 tie undecided)",
+    first: coArc("A", [0, 1]),
+    second: coArc("B", [1 + 3 * TAU, 2 + 3 * TAU]),
     joins: [endToStart],
     code: "coincident-circle-supports",
-    operations: [26411, 26393],
+    message: "Co-circular arc intervals could not be compared exactly.",
+    operations: [11036, 11017],
+  },
+  {
+    name: "OP9 circle as two arcs whose joins are 1e-4 rad apart (crowded balls)",
+    first: coArc("A", [0, 1e-4]),
+    second: coArc("B", [1e-4, TAU]),
+    joins: [endToStart, { first: "start", second: "end" }],
+    code: "join-ball-crowded",
+    operations: [13694, 13730],
+  },
+  {
+    name: "OP9 co-circular declared locations 1.5 rad apart on a tiny circle",
+    first: coArc("A", [0, 1.5], 1e-4),
+    second: coArc("B", [3, 4], 1e-4),
+    joins: [endToStart],
+    code: "join-ball-exceeds-tolerance",
+    operations: [7198, 7198],
+  },
+  {
+    // Rotated axes: the parameter intervals are disjoint, the point sets
+    // overlap; not one parametrization, so today's path.
+    name: "OP9 same centre and radius, rotated axes: not admitted",
+    first: coArc("A", [0, 1]),
+    second: coArc("B", [-1.2, -0.2], 1, [0, 1]),
+    joins: [{ first: "end", second: { interior: 1 - Math.PI / 2 } }],
+    code: "coincident-circle-supports",
+    message:
+      "Coincident circle supports are a positive-dimensional unsupported family.",
+    operations: [34409, 34409],
+  },
+  {
+    name: "OP9 an arc on its own whole circle: full turns not admitted",
+    first: coArc("A", [0, 1]),
+    second: ring(0, [0, 0], 1),
+    joins: [{ first: "end", second: onRing(1) }],
+    code: "coincident-circle-supports",
+    message:
+      "Coincident circle supports are a positive-dimensional unsupported family.",
+    operations: [46225, 46225],
   },
   {
     name: "non-structural cubic overlap (subdivided poles) at a join",
@@ -964,6 +1157,7 @@ describe("declared-join certificate at the kernel-free dispatcher seam", () => {
         expect(result, label).toMatchObject({
           kind: "uncertain",
           code: row.code,
+          ...(row.message ? { message: row.message } : {}),
         });
         if (!row.operations) continue;
         expect(snapshots[0]!.operations, `${label} meter`).toBe(
@@ -1086,6 +1280,63 @@ describe("declared-join certificate at the kernel-free dispatcher seam", () => {
         },
       ],
     });
+  });
+
+  test("OP9: a co-circular join's bounds hold its contact: singleton at an exact shared parameter, the whole sliver at a seam overlap, the declared parameters across a sub-ulp gap", () => {
+    const query = createCertifiedNeutralCurveQuery();
+    const join = (name: string) => {
+      const row = VERIFIED_ROWS.find((candidate) => candidate.name === name)!;
+      const result = query.queryJoin(orders(row)[0]!);
+      if (result.kind !== "verified") throw new Error(name);
+      return result.joins;
+    };
+    const budget = () => new ExactProofBudget();
+    expect(
+      join(
+        "OP9 co-circular arcs continuing at an exact end/start join (k = 0)",
+      ),
+    ).toMatchObject([
+      { firstParameterBounds: [1, 1], secondParameterBounds: [1, 1] },
+    ]);
+    // Sliver premise, exact: fl(2.9 + fl 2π) − 2.9 > 2π, so B's lifted end
+    // passes A's start and the arcs coincide on [2.9, end − 2π].
+    const sliverEnd = SLIVER_START + TAU;
+    expect(
+      compareFiniteSpanToTwoPiExact(SLIVER_START, sliverEnd, budget()),
+    ).toBe(1);
+    const [, sliver] = join(
+      "OP9 circle as two arcs whose wrapped join is a seam sliver",
+    );
+    expect(sliver!.firstParameterBounds[0]).toBe(SLIVER_START);
+    // The A bound reaches past end − 2π (exactly), the B bound below 2.9 + 2π.
+    expect(
+      compareFiniteSpanToTwoPiExact(
+        sliver!.firstParameterBounds[1],
+        sliverEnd,
+        budget(),
+      ),
+    ).toBe(-1);
+    expect(
+      compareFiniteSpanToTwoPiExact(
+        SLIVER_START,
+        sliver!.secondParameterBounds[0],
+        budget(),
+      ),
+    ).toBe(-1);
+    expect(sliver!.secondParameterBounds[1]).toBe(sliverEnd);
+    // Gap premise, exact: the T13m wrapped join leaves no contact; the bounds
+    // still hold both declared parameters.
+    const gapEnd = T13M_LOW + TAU;
+    expect(compareFiniteSpanToTwoPiExact(T13M_LOW, gapEnd, budget())).toBe(-1);
+    const [, gap] = join(
+      "OP9 T13m circle Split arcs: wrapped join is a sub-ulp gap",
+    );
+    expect(gap).toMatchObject({
+      firstParameter: T13M_LOW,
+      secondParameter: gapEnd,
+    });
+    expect(gap!.firstParameterBounds[0]).toBe(T13M_LOW);
+    expect(gap!.secondParameterBounds[1]).toBe(gapEnd);
   });
 
   test("invalid requests and full-turn ends fail before any certificate work", () => {

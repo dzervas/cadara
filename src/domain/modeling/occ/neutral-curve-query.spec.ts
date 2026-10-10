@@ -2879,7 +2879,8 @@ const PRODUCTION_QUERY_MATRIX: readonly ProductionMatrixRow[] = [
     second: matrixCircle("a2", [0, 0], 1, [1, 3]),
     route: "kernelFree",
     expected: failClosed("coincident-circle-supports"),
-    operations: [2725, 2725],
+    // OP9: the exact co-circular disjointness check runs first (they overlap).
+    operations: [2982, 2982],
   },
   {
     name: "line/cubic crossing",

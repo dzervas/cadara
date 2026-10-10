@@ -23,7 +23,15 @@ import {
   outwardIntervalNegate,
   type CertifiedInterval,
 } from "@/domain/modeling/neutral-curve-certification/certified-trig";
-import { validateCertifiedCircleAngularDomain } from "@/domain/modeling/neutral-curve-certification/circle-angular-certification";
+import {
+  circlesShareParametrizationExact,
+  coCircularArcContacts,
+  compareLiftedAnglesExact,
+  compareSpanToTurnsExact,
+  twoPiTurnsBracket,
+  validateCertifiedCircleAngularDomain,
+  type LiftedAngle,
+} from "@/domain/modeling/neutral-curve-certification/circle-angular-certification";
 import {
   admitVerifiedNeutralCurveResult,
   cubicPowerCoefficients,
@@ -78,6 +86,13 @@ import {
  * modulo 2π (exact comparisons), dropped when disjoint from it (another
  * piece pair reports it), and fails closed when it straddles a piece end.
  * Reported parameters therefore stay in the request's source winding.
+ *
+ * Co-circular arcs (OP9). Two arcs of one exact parametrization (equal centre
+ * and radius, positively parallel axes) bypass the pieces: their complete
+ * contact set is decided exactly from the arcs' own angle endpoints and whole
+ * turns, and every contact must lie between the two declared locations of one
+ * join (the exact shared point, a seam rounding sliver, or a sub-ulp gap),
+ * inside that join's ball and outside the others; otherwise `uncertain`.
  */
 
 type Interval = CertifiedInterval;
@@ -124,8 +139,6 @@ const LOCAL_DEPTH = 24;
 const SUBDIVISION_VISIT_SAFEGUARD = 8_000;
 /** Far arc pieces never exceed one radian (sagitta and cone validity). */
 const MAX_ARC_PIECE = 1;
-/** The binary64 neighbour below 2π; with `TWO_PI_OUTWARD_UPPER` it brackets 2π. */
-const TWO_PI_INWARD_LOWER = 6.283185307179586;
 const NEAR_HALVINGS = 8;
 
 class JoinUncertain extends Error {
@@ -911,25 +924,9 @@ class JoinCertifier {
     return inside;
   }
 
-  /** sign((y − x) − 2πk), exact; null when the outward bracket and the exact one-turn comparison cannot decide. */
+  /** sign((y − x) − 2πk), exact (`compareSpanToTurnsExact`). */
   #turnSign(x: number, y: number, k: number): -1 | 0 | 1 | null {
-    if (k === 0) return y > x ? 1 : y < x ? -1 : 0;
-    const arithmetic = this.#arithmetic;
-    const difference = y - x;
-    const [turnsLower, turnsUpper] =
-      k > 0
-        ? [k * TWO_PI_INWARD_LOWER, k * TWO_PI_OUTWARD_UPPER]
-        : [k * TWO_PI_OUTWARD_UPPER, k * TWO_PI_INWARD_LOWER];
-    if (arithmetic.up(difference) < arithmetic.down(turnsLower)) return -1;
-    if (arithmetic.down(difference) > arithmetic.up(turnsUpper)) return 1;
-    if (k === 1)
-      return y <= x ? -1 : compareFiniteSpanToTwoPiExact(x, y, this.budget);
-    if (k === -1) {
-      if (x <= y) return 1;
-      const sign = compareFiniteSpanToTwoPiExact(y, x, this.budget);
-      return sign === null ? null : sign === 1 ? -1 : 1;
-    }
-    return null;
+    return compareSpanToTurnsExact(x, y, k, this.budget);
   }
 
   /** Closed boxes that touch or overlap are merged until pairwise disjoint. */
@@ -1217,6 +1214,9 @@ class JoinCertifier {
       return { join, parameters, positions, center };
     });
 
+    const coCircular = this.#coCircular(located);
+    if (coCircular) return coCircular;
+
     const structural = this.#structuralOverlap();
     if (structural) return this.#overlapResult(structural, located);
 
@@ -1334,6 +1334,125 @@ class JoinCertifier {
     );
     this.#requireOutsideBalls(points, joins);
     return admitVerifiedJoinResult(request, joins, points, this.budget);
+  }
+
+  /** Outward binary64 bounds of value + 2πk. */
+  #liftBounds(value: number, k: number): Domain {
+    if (k === 0) return [value, value];
+    const arithmetic = this.#arithmetic;
+    const [low, high] = twoPiTurnsBracket(k);
+    return [
+      arithmetic.down(value + arithmetic.down(low)),
+      arithmetic.up(value + arithmetic.up(high)),
+    ];
+  }
+
+  /**
+   * OP9: two arcs of one exact parametrization (`circlesShareParametrizationExact`).
+   * Their complete contact set is ⋃ₖ Iₖ (`coCircularArcContacts`). For each
+   * join, the hull H of its declared locations (the second lifted by the
+   * candidate shift kᵢ, a hint only) must be (i) at most one radian wide,
+   * (ii) certified inside its ball, and (iii) outside every other join ball.
+   * Every non-empty Iₖ must lie in the hull of a join with kᵢ = k, decided
+   * exactly. The join's bounds are that hull in each lift, clamped to the
+   * domains (every contact lies in both): the exact shared point, a seam
+   * rounding sliver between the declared locations, or a sub-ulp gap.
+   * Anything else fails closed; full turns and other supports return null.
+   */
+  #coCircular(
+    located: readonly {
+      readonly parameters: readonly [number, number];
+      readonly center: SplineVector;
+    }[],
+  ): NeutralCurveJoinResult | null {
+    const { first, second } = this.request;
+    if (
+      first.kind !== "circle" ||
+      second.kind !== "circle" ||
+      first.sourceDomain.kind !== "arc" ||
+      second.sourceDomain.kind !== "arc" ||
+      !circlesShareParametrizationExact(first, second, this.budget)
+    )
+      return null;
+    const arithmetic = this.#arithmetic;
+    const [a0, a1] = first.sourceDomain.interval;
+    const [b0, b1] = second.sourceDomain.interval;
+    const undecided = () =>
+      fail(
+        "coincident-circle-supports",
+        "Co-circular arc intervals could not be compared exactly.",
+      );
+    const sign = (x: LiftedAngle, y: LiftedAngle) =>
+      compareLiftedAnglesExact(x, y, this.budget) ?? undecided();
+    const hulls = located.map(({ parameters: [pA, pB], center }) => {
+      const k = Math.round((pA - pB) / (2 * Math.PI));
+      const shifted = this.#liftBounds(pB, k);
+      const lower = Math.min(pA, shifted[0]);
+      const upper = Math.max(pA, shifted[1]);
+      if (!(arithmetic.up(upper - lower) <= MAX_ARC_PIECE))
+        fail(
+          "join-ball-exceeds-tolerance",
+          "A co-circular join's declared locations are not one short arc apart.",
+        );
+      const enclosure = this.#models[0].enclose([lower, upper]);
+      if (!this.#containedInBall(enclosure, center, this.#radius))
+        fail(
+          "join-ball-exceeds-tolerance",
+          "The arc between a co-circular join's declared locations is not certified inside its ball.",
+        );
+      const back = this.#liftBounds(pA, -k);
+      return {
+        k,
+        pA: [pA, 0] as LiftedAngle,
+        pB: [pB, k] as LiftedAngle,
+        first: [Math.max(a0, lower), Math.min(a1, upper)] as Domain,
+        second: [
+          Math.max(b0, Math.min(pB, back[0])),
+          Math.min(b1, Math.max(pB, back[1])),
+        ] as Domain,
+        enclosure,
+        center,
+      };
+    });
+    for (const [index, hull] of hulls.entries())
+      for (const [other, ball] of hulls.entries())
+        if (
+          index !== other &&
+          !this.#outsideBall(hull.enclosure, ball.center, this.#radius)
+        )
+          fail(
+            "join-ball-crowded",
+            "A co-circular join's contact arc meets another declared join ball.",
+          );
+    const contacts =
+      coCircularArcContacts([a0, a1], [b0, b1], this.budget) ?? undecided();
+    for (const { turns, lower, upper } of contacts) {
+      const absorbed = hulls.some(
+        (hull) =>
+          hull.k === turns &&
+          (sign(lower, hull.pA) >= 0 || sign(lower, hull.pB) >= 0) &&
+          (sign(upper, hull.pA) <= 0 || sign(upper, hull.pB) <= 0),
+      );
+      if (!absorbed)
+        fail(
+          "coincident-circle-supports",
+          sign(lower, upper) === 0
+            ? "Co-circular arcs touch outside their declared joins."
+            : "Co-circular arcs overlap along an arc outside their declared joins.",
+        );
+    }
+    const joins = hulls.map(
+      (hull, index): NeutralCurveJoinWitness => ({
+        firstParameter: located[index]!.parameters[0],
+        secondParameter: located[index]!.parameters[1],
+        firstParameterBounds: hull.first,
+        secondParameterBounds: hull.second,
+        position: hull.center,
+        ballRadius: this.#radius,
+        realization: "declaredEnds",
+      }),
+    );
+    return admitVerifiedJoinResult(this.request, joins, [], this.budget);
   }
 
   /** Every reported point is certified strictly outside every join ball. */

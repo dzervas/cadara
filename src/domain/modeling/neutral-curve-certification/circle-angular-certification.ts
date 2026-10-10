@@ -1,4 +1,5 @@
 import {
+  TWO_PI_OUTWARD_UPPER,
   getCircleAngularSearchBounds,
   validateCircleAngularDomain,
   type ValidCircleAngularDomain,
@@ -14,6 +15,7 @@ import {
   ExactProofBudget,
   ExactQueryProofBudgetExceeded,
   addExact,
+  compareExact,
   compareFiniteAngleToQuarterTurnMultipleExact,
   compareFiniteSpanToTwoPiExact,
   exactFromNumber,
@@ -86,6 +88,162 @@ export function validateCertifiedCircleAngularDomain(
   )
     return null;
   return domain;
+}
+
+/** The binary64 neighbour below 2π; with `TWO_PI_OUTWARD_UPPER` it brackets 2π. */
+export const TWO_PI_INWARD_LOWER = 6.283185307179586;
+
+/**
+ * The unrounded binary64 products bracketing 2πk, [k·L, k·U] for k > 0 and
+ * [k·U, k·L] for k < 0 (L < 2π < U). Callers push each one ulp outward.
+ */
+export function twoPiTurnsBracket(k: number): readonly [number, number] {
+  return k > 0
+    ? [k * TWO_PI_INWARD_LOWER, k * TWO_PI_OUTWARD_UPPER]
+    : [k * TWO_PI_OUTWARD_UPPER, k * TWO_PI_INWARD_LOWER];
+}
+
+/**
+ * sign((y − x) − 2πk), exact; null when the outward bracket and the exact
+ * one-turn comparison cannot decide. T10g-0's join-certifier comparison,
+ * moved here (with `OutwardArithmetic.up/down` inlined as the identical
+ * `nextBinary64` calls on the same budget: same results and meter charges,
+ * call for call) so the join and ordinary co-circular paths share it.
+ */
+export function compareSpanToTurnsExact(
+  x: number,
+  y: number,
+  k: number,
+  budget: ExactProofBudget,
+): -1 | 0 | 1 | null {
+  if (k === 0) return y > x ? 1 : y < x ? -1 : 0;
+  const difference = y - x;
+  const [turnsLower, turnsUpper] = twoPiTurnsBracket(k);
+  if (
+    nextBinary64(difference, "up", budget) <
+    nextBinary64(turnsLower, "down", budget)
+  )
+    return -1;
+  if (
+    nextBinary64(difference, "down", budget) >
+    nextBinary64(turnsUpper, "up", budget)
+  )
+    return 1;
+  if (k === 1) return y <= x ? -1 : compareFiniteSpanToTwoPiExact(x, y, budget);
+  if (k === -1) {
+    if (x <= y) return 1;
+    const sign = compareFiniteSpanToTwoPiExact(y, x, budget);
+    return sign === null ? null : sign === 1 ? -1 : 1;
+  }
+  return null;
+}
+
+/** A binary64 angle lifted by whole turns: value + 2π·turns. */
+export type LiftedAngle = readonly [value: number, turns: number];
+
+/** sign(x̂ − ŷ) of two lifted angles, exact; null when undecided. */
+export function compareLiftedAnglesExact(
+  x: LiftedAngle,
+  y: LiftedAngle,
+  budget: ExactProofBudget,
+) {
+  return compareSpanToTurnsExact(y[0], x[0], y[1] - x[1], budget);
+}
+
+/**
+ * Exact identity of two circles' parametrizations in the certifiers' model
+ * P(θ) = c + (R/|X|)(cos θ·X + sin θ·X⊥) (the exactly normalized axis of
+ * the join certifier's radius scale): equal centres and radii, and positively
+ * parallel x axes (exact cross product 0, exact dot product > 0).
+ */
+export function circlesShareParametrizationExact(
+  first: Extract<NeutralCurve, { kind: "circle" }>,
+  second: Extract<NeutralCurve, { kind: "circle" }>,
+  budget: ExactProofBudget,
+) {
+  const value = (x: number) => exactFromNumber(x, budget);
+  const equal = (x: number, y: number) =>
+    compareExact(value(x), value(y), budget) === 0;
+  if (
+    !equal(first.center[0], second.center[0]) ||
+    !equal(first.center[1], second.center[1]) ||
+    !equal(first.radius, second.radius)
+  )
+    return false;
+  const [ux, uy] = [value(first.xAxis[0]), value(first.xAxis[1])];
+  const [vx, vy] = [value(second.xAxis[0]), value(second.xAxis[1])];
+  const cross = compareExact(
+    multiplyExact(ux, vy, budget),
+    multiplyExact(uy, vx, budget),
+    budget,
+  );
+  const dot = addExact(
+    multiplyExact(ux, vx, budget),
+    multiplyExact(uy, vy, budget),
+    budget,
+  );
+  return cross === 0 && dot.numerator > 0n;
+}
+
+/** One non-empty Iₖ = [a₀, a₁] ∩ [b₀ + 2πk, b₁ + 2πk], ends in the first lift. */
+export interface CoCircularContact {
+  readonly turns: number;
+  readonly lower: LiftedAngle;
+  readonly upper: LiftedAngle;
+}
+
+/** Scan estimates beyond this many turns fail closed before any comparison. */
+const MAX_SCANNED_TURNS = 2 ** 31;
+
+/**
+ * OP9: the complete contact set of two arcs [a₀, a₁], [b₀, b₁] (each shorter
+ * than 2π) of one exact parametrization P. P is 2π-periodic and injective on
+ * every half-open interval of length 2π, so A(s) = B(t) iff s − t ∈ 2πℤ and
+ * the contact set in the first parameter is ⋃ₖ Iₖ (B parameter s − 2πk).
+ * Every comparison is `compareLiftedAnglesExact`. The scan range is a float
+ * estimate only: before and independently of the scan, its ends are proven
+ * empty on the monotone side (a₀ > b₁ + 2π·low, b₀ + 2π·high > a₁), so every
+ * unscanned shift is empty. Returns the non-empty Iₖ in increasing k, or
+ * null when any comparison is undecided (callers fail closed).
+ */
+export function coCircularArcContacts(
+  first: readonly [number, number],
+  second: readonly [number, number],
+  budget: ExactProofBudget,
+): readonly CoCircularContact[] | null {
+  const [a0, a1] = first;
+  const [b0, b1] = second;
+  const turn = 2 * Math.PI;
+  const lowest = Math.floor((a0 - b1) / turn) - 1;
+  const highest = Math.ceil((a1 - b0) / turn) + 1;
+  if (
+    !(Math.abs(lowest) <= MAX_SCANNED_TURNS) ||
+    !(Math.abs(highest) <= MAX_SCANNED_TURNS)
+  )
+    return null;
+  if (
+    compareLiftedAnglesExact([a0, 0], [b1, lowest], budget) !== 1 ||
+    compareLiftedAnglesExact([b0, highest], [a1, 0], budget) !== 1
+  )
+    return null;
+  const contacts: CoCircularContact[] = [];
+  for (let k = lowest + 1; k < highest; k += 1) {
+    budget.operation();
+    // Iₖ ≠ ∅ iff a₀ ≤ b₁ + 2πk and b₀ + 2πk ≤ a₁.
+    const startsAfter = compareLiftedAnglesExact([a0, 0], [b1, k], budget);
+    const endsBefore = compareLiftedAnglesExact([a1, 0], [b0, k], budget);
+    if (startsAfter === null || endsBefore === null) return null;
+    if (startsAfter > 0 || endsBefore < 0) continue;
+    const lowerSign = compareLiftedAnglesExact([a0, 0], [b0, k], budget);
+    const upperSign = compareLiftedAnglesExact([a1, 0], [b1, k], budget);
+    if (lowerSign === null || upperSign === null) return null;
+    contacts.push({
+      turns: k,
+      lower: lowerSign >= 0 ? [a0, 0] : [b0, k],
+      upper: upperSign <= 0 ? [a1, 0] : [b1, k],
+    });
+  }
+  return contacts;
 }
 
 function add(

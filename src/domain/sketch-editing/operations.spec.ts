@@ -14,6 +14,7 @@ import { nextUp } from "@/contracts/sketch/region-interval-geometry";
 import { applySolvedSketchToDefinition } from "@/domain/editor/sketch-session/definition-patches";
 import {
   FIXTURE_SKETCH_ID,
+  closedCurvesSignedArea,
   makeSketchFixture,
   neutralSpan,
   projectedSpline,
@@ -1365,6 +1366,80 @@ describe("createSketchTrimMutation (T10g-1 exact Trim, Q1b ties, review R-3)", (
       })
     ).regions.length;
   }
+  /**
+   * OP9: the derived regions' areas (sorted), each from its one loop read back
+   * as the solved lines and arcs (quadrature oracle), plus the diagnostics.
+   */
+  async function regionAreas(definition: SketchDefinition) {
+    const solved = solve(definition);
+    const derived = await deriver.derive({
+      documentId: "doc_trim",
+      revisionId: "rev_trim",
+      sketchId: FIXTURE_SKETCH_ID,
+      definition,
+      solvedSnapshot: solved,
+      projectedReferences: [],
+      modelingTolerance: 1e-3,
+    });
+    const geometry = new Map(
+      solved.solvedEntities.map((record) => [record.entityId, record]),
+    );
+    const areas = derived.regions
+      .map((region) => {
+        expect(region.loops).toHaveLength(1);
+        return closedCurvesSignedArea(
+          region.loops[0]!.segments.map((segment) => {
+            const [lo, hi] = segment.sourceParameterInterval;
+            const [from, to] =
+              segment.traversalDirection === "forward" ? [lo, hi] : [hi, lo];
+            const source = segment.branch.source;
+            if (source.kind !== "entity") throw new Error("projected");
+            const record = geometry.get(source.entityId)!;
+            if (record.kind === "lineSegment") {
+              const [p, q] = [record.startPosition, record.endPosition];
+              return {
+                point: (t: number): P => [
+                  p[0] + t * (q[0] - p[0]),
+                  p[1] + t * (q[1] - p[1]),
+                ],
+                derivative: (): P => [q[0] - p[0], q[1] - p[1]],
+                from,
+                to,
+              };
+            }
+            if (record.kind !== "arc") throw new Error(record.kind);
+            const c = record.centerPosition;
+            const r = Math.hypot(
+              record.startPosition[0] - c[0],
+              record.startPosition[1] - c[1],
+            );
+            return {
+              point: (t: number): P => [
+                c[0] + r * Math.cos(t),
+                c[1] + r * Math.sin(t),
+              ],
+              derivative: (t: number): P => [-r * Math.sin(t), r * Math.cos(t)],
+              from,
+              to,
+            };
+          }),
+        );
+      })
+      .sort((l, r) => l - r);
+    return { areas, diagnostics: JSON.stringify(derived.diagnostics) };
+  }
+  /** OP9 premise: each solved arc's support radius hypot(start − centre). */
+  const arcRadii = (definition: SketchDefinition) =>
+    solve(definition).solvedEntities.flatMap((record) =>
+      record.kind === "arc"
+        ? [
+            Math.hypot(
+              record.startPosition[0] - record.centerPosition[0],
+              record.startPosition[1] - record.centerPosition[1],
+            ),
+          ]
+        : [],
+    );
   async function intersections(definition: SketchDefinition, target: string) {
     const result = await querySketchEditIntersections(
       {
@@ -3484,7 +3559,7 @@ describe("createSketchTrimMutation (T10g-1 exact Trim, Q1b ties, review R-3)", (
     );
   });
 
-  test("T13m known limit (routed to the certifier owner): a half disk whose arc is Split loses its region, the two co-circular arcs' shared end being an uncertain declared join; a split line in the same profile keeps it", async () => {
+  test("T13m + OP9: a half disk whose arc is Split keeps its region (area 2π): the two co-circular arcs' shared end certifies as a declared join; a split line in the same profile keeps it too", async () => {
     const disk = upperArc();
     disk.line("diameter", "a", "b");
     disk.point("v0", 1, 0.5);
@@ -3494,23 +3569,14 @@ describe("createSketchTrimMutation (T10g-1 exact Trim, Q1b ties, review R-3)", (
     expect(await regions(before)).toBe(1);
     const { after } = await lineEdit(before, "split", "target", "boundary");
     expect(accepted(after)).toBe(true);
-    expect(await regions(after)).toBe(0);
-    // Review R-3: exactly that cause, the co-circular declared join.
-    const derived = await deriver.derive({
-      documentId: "doc_trim",
-      revisionId: "rev_trim",
-      sketchId: FIXTURE_SKETCH_ID,
-      definition: after,
-      solvedSnapshot: solve(after),
-      projectedReferences: [],
-      modelingTolerance: 1e-3,
-    });
-    expect(derived.diagnostics.map((entry) => entry.code)).toContain(
-      "region-join-uncertain",
-    );
-    expect(JSON.stringify(derived.diagnostics)).toContain(
-      "coincident-circle-supports",
-    );
+    // OP9 premise: both arcs' supports are bitwise the same circle (before
+    // OP9 this was `region-join-uncertain … coincident-circle-supports`).
+    expect(arcRadii(after)).toEqual([2, 2]);
+    const { areas, diagnostics } = await regionAreas(after);
+    expect(areas).toHaveLength(1);
+    expect(areas[0]).toBeCloseTo(2 * Math.PI, 9);
+    expect(diagnostics).not.toContain("region-join-uncertain");
+    expect(diagnostics).not.toContain("coincident-circle-supports");
     // The same profile with its diameter split instead keeps its region.
     const spoke = upperArc();
     spoke.line("diameter", "a", "b");
@@ -3526,7 +3592,7 @@ describe("createSketchTrimMutation (T10g-1 exact Trim, Q1b ties, review R-3)", (
     expect(await regions(split.after)).toBe(1);
   });
 
-  test("T13m circle crossed twice: the original id becomes the ccw arc Q₁→Q₂, a new `split-arc` the ccw arc Q₂→Q₁; both bound to their ends; radius → diameter; R-3 by angle; solved in place; known limit: its regions are lost (co-circular join)", async () => {
+  test("T13m circle crossed twice: the original id becomes the ccw arc Q₁→Q₂, a new `split-arc` the ccw arc Q₂→Q₁; both bound to their ends; radius → diameter; R-3 by angle; solved in place; OP9: both regions kept with their segment areas", async () => {
     const sketch = makeSketchFixture();
     sketch.point("o", 0, 0);
     sketch.circle("target", "o", 2);
@@ -3618,27 +3684,97 @@ describe("createSketchTrimMutation (T10g-1 exact Trim, Q1b ties, review R-3)", (
     expect(Math.max(gaps[kept.entityId]!, gaps[piece.entityId]!)).toBeLessThan(
       1e-9,
     );
-    const derived = await deriver.derive({
-      documentId: "doc_trim",
-      revisionId: "rev_trim",
-      sketchId: FIXTURE_SKETCH_ID,
-      definition: after,
-      solvedSnapshot: solve(after),
-      projectedReferences: [],
-      modelingTolerance: 1e-3,
-    });
-    // Known limit (routed to the certifier owner, T10g design known issue
-    // 2): two co-circular arcs joined at a shared end are an uncertain
-    // declared join, so the circle's regions are lost after the Split.
+    // OP9 (was the T13m known limit): the two co-circular arcs, joined at
+    // both cuts, certify; the chord y = 1 splits the disk r = 2 into the
+    // segment of angle 2π/3 and the rest.
     expect(regionsBefore).toBe(2);
-    expect(await regions(after)).toBe(0);
-    expect(derived.diagnostics.map((entry) => entry.code)).toContain(
-      "region-join-uncertain",
-    );
-    expect(JSON.stringify(derived.diagnostics)).toContain(
-      "coincident-circle-supports",
-    );
+    expect(arcRadii(after), "premise: one bitwise support").toEqual([2, 2]);
+    const { areas, diagnostics } = await regionAreas(after);
+    const minor = 2 * ((2 * Math.PI) / 3 - Math.sin((2 * Math.PI) / 3));
+    expect(areas).toHaveLength(2);
+    expect(areas[0]).toBeCloseTo(minor, 9);
+    expect(areas[1]).toBeCloseTo(4 * Math.PI - minor, 9);
+    expect(diagnostics).not.toContain("region-join-uncertain");
+    expect(diagnostics).not.toContain("coincident-circle-supports");
   });
+
+  test("OP9 (review R-2): a circle Split by one line and both arcs Split by a second line crossing it off-centre gives four pieces of one circle and four regions with closed-form areas", async () => {
+    const sketch = makeSketchFixture();
+    sketch.point("o", 0, 0);
+    sketch.circle("target", "o", 2);
+    // Lines chosen (OP9-evidence/four-piece-search) so all four pieces'
+    // support radii round to exactly 2: the co-circular path.
+    const l1: [P, P] = [
+      [-3, 0.75],
+      [3, 0.75],
+    ];
+    const l2: [P, P] = [
+      [-0.4, -3],
+      [-0.4, 3],
+    ];
+    sketch.point("l1a", ...l1[0]);
+    sketch.point("l1b", ...l1[1]);
+    sketch.line("boundary", "l1a", "l1b");
+    sketch.point("l2a", ...l2[0]);
+    sketch.point("l2b", ...l2[1]);
+    sketch.line("second", "l2a", "l2b");
+    let definition = sketch.definition();
+    expect(await regions(definition), "before").toBe(4);
+    ({ after: definition } = await lineEdit(
+      definition,
+      "split",
+      "target",
+      "boundary",
+    ));
+    const piece = definition.entities.at(-1)!.entityId;
+    for (const target of [entity("target"), piece]) {
+      ({ after: definition } = await lineEdit(
+        definition,
+        "split",
+        target.replace("sketch_entity_", ""),
+        "second",
+      ));
+    }
+    expect(accepted(definition)).toBe(true);
+    const radii = arcRadii(definition);
+    expect(radii, "four arcs").toHaveLength(4);
+    expect(
+      radii.every((radius) => radius === 2),
+      `premise: one bitwise support (${radii.join(", ")})`,
+    ).toBe(true);
+    const { areas, diagnostics } = await regionAreas(definition);
+    expect(diagnostics).not.toContain("region-join-uncertain");
+    expect(diagnostics).not.toContain("coincident-circle-supports");
+    // Closed form from the cut angles: each region is the segment of its arc
+    // plus the triangle (X, arc start, arc end), X the lines' crossing.
+    const x = lineX(l1[0], l1[1], l2[0], l2[1]);
+    const solved = solve(definition);
+    const cuts = solved.solvedEntities
+      .flatMap((record) =>
+        record.kind === "arc" ? [record.startPosition] : [],
+      )
+      .map((point) => Math.atan2(point[1], point[0]))
+      .sort((l, r) => l - r);
+    const expected = cuts
+      .map((theta, index) => {
+        const next =
+          index === cuts.length - 1 ? cuts[0]! + 2 * Math.PI : cuts[index + 1]!;
+        const [p, q] = [theta, next].map(
+          (angle): P => [2 * Math.cos(angle), 2 * Math.sin(angle)],
+        );
+        const phi = next - theta;
+        return (
+          2 * (phi - Math.sin(phi)) +
+          ((p![0] - x[0]) * (q![1] - x[1]) - (p![1] - x[1]) * (q![0] - x[0])) /
+            2
+        );
+      })
+      .sort((l, r) => l - r);
+    expect(areas).toHaveLength(4);
+    areas.forEach((area, index) =>
+      expect(area, "area vs closed form").toBeCloseTo(expected[index]!, 9),
+    );
+  }, 120_000);
 
   test("T13m open spline by a line: the original id keeps [S₀, Q], a new `split-spline` keeps [Q, end] (reusing the occurrence ids), sharing Q = cut.position bitwise; both reproduce the original ≤ 1e-12·scale; tied once; R-3; no fit point freed; solved in place", async () => {
     const sketch = makeSketchFixture();

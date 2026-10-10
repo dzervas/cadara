@@ -280,8 +280,10 @@ export interface NeutralCurveJoinWitness {
   readonly firstParameter: number;
   readonly secondParameter: number;
   /**
-   * Outward source-parameter bounds holding the realized parameters and the
-   * at most one contact of the two near pieces, when that contact exists.
+   * Outward source-parameter bounds holding the realized parameters and every
+   * contact of the two near pieces: at most one contact, or, for two arcs on
+   * one exact circle support, the connected sub-arc between the declared
+   * locations (a seam rounding sliver).
    */
   readonly firstParameterBounds: readonly [number, number];
   readonly secondParameterBounds: readonly [number, number];
@@ -290,11 +292,13 @@ export interface NeutralCurveJoinWitness {
   /** Certified radius (≤ modelingTolerance) of the ball around the join that holds both near pieces. */
   readonly ballRadius: number;
   /**
-   * `declaredEnds`: the near pieces meet at most once, and never outside the
-   * reported bounds (no contact, the exact shared declared point, or an
-   * unresolved contact enclosed together with the declared locations). For a
-   * join on a reported exact overlap the near pieces instead coincide along
-   * that overlap, and the bounds are the declared parameters.
+   * `declaredEnds`: every contact of the two near pieces lies within the
+   * reported bounds; it is no contact, the exact shared declared point, an
+   * unresolved contact enclosed together with the declared locations, or —
+   * for two arcs on one exact circle support — the connected sub-arc between
+   * the declared locations (a seam rounding sliver), which lies in the join
+   * ball. For a join on a reported exact overlap the near pieces instead
+   * coincide along that overlap, and the bounds are the declared parameters.
    * `uniqueContactInBall`: exactly one proven contact away from the declared
    * locations (for example a 1e-9 overshoot corner).
    */
@@ -1070,6 +1074,13 @@ export interface CertifiedTubePieceChainRequests {
 }
 
 export interface NeutralCurveQueryCapability {
+  /**
+   * Ordinary pair query. Two active arcs (an arc, or a full turn restricted
+   * to an arc query domain) of one exact circle support proven disjoint
+   * verify with an empty complete set; co-circular touches, overlaps,
+   * unrestricted full turns and undecided comparisons stay `uncertain`
+   * `coincident-circle-supports`.
+   */
   queryNeutralCurves(
     request: NeutralCurveQueryRequest,
   ): Promise<NeutralCurveQueryResult>;
@@ -1093,7 +1104,16 @@ export interface NeutralCurveQueryCapability {
    * - exact overlaps are admitted only for collinear line pairs (numeric lines
    *   and endpoint segments) and structural same-support cubics (identical
    *   poles) with every join on the overlap;
-   *   same-support arcs/circles and other cubic overlaps are `uncertain`;
+   *   other cubic overlaps are `uncertain`;
+   * - two arcs on one exact circle support (equal centre and radius,
+   *   positively parallel axes: one parametrization in the certifiers'
+   *   exactly normalized model) certify by exact angular-interval comparison
+   *   of their source angles and whole turns; their contact inside a join
+   *   ball may be the sub-arc between the declared locations (a seam rounding
+   *   sliver), which the bounds hold. Overlaps, touches outside the declared
+   *   joins and undecided comparisons stay `uncertain`
+   *   `coincident-circle-supports`; full-turn co-circular pairs stay
+   *   `uncertain` (typically `coincident-circle-supports`);
    * - a contact on a boundary between two certificate pieces is `uncertain`
    *   `join-contact-not-distinct`;
    * - the join ball radius is modelingTolerance / 2, so a contact between
