@@ -142,7 +142,28 @@ function expectStale(definition: SketchDefinition) {
   ).toEqual([]);
 }
 
-describe("stale maps after topology edits (T-15; review probe R1–R6)", () => {
+/**
+ * T15d ([TECH] T-11): the edit is refused on the mirrored definition (named
+ * message, nothing written); the same edit made by another path (a peer's
+ * edit merged with this mirror, a crafted document: the edit applied without
+ * the relationship, then the relationship re-attached) still reaches the
+ * T-15 backstop.
+ */
+const withoutMirror = (definition: SketchDefinition): SketchDefinition => ({
+  ...definition,
+  derivedRelationships: [],
+});
+const reattached = (
+  edited: SketchDefinition,
+  original: SketchDefinition,
+): SketchDefinition => ({
+  ...edited,
+  derivedRelationships: original.derivedRelationships,
+});
+const refusal = (verb: string, kind = "shape") =>
+  `This ${kind} is part of a mirror (Mirror); remove the mirror first to ${verb} it.`;
+
+describe("stale maps after topology edits (T-15; review probe R1–R6): refused up front since T15d, the backstop kept for other paths", () => {
   /** Seed line ab above the axis (y = 0), its copy mab, cutters k1/k3 and q1/q3. */
   const lineBase = () =>
     sketch(
@@ -187,8 +208,22 @@ describe("stale maps after topology edits (T-15; review probe R1–R6)", () => {
     ["R1 trim of the seed", "ab"],
     ["R2 trim of the copy", "mab"],
   ] as const)
-    test(`${label} between its cutters leaves derived-mirror-map-stale`, async () => {
-      const definition = lineBase();
+    test(`${label} between its cutters is refused; made by another path it leaves derived-mirror-map-stale`, async () => {
+      const mirrored = lineBase();
+      const refused = createSketchTrimMutation({
+        definition: mirrored,
+        targetEntityId: eid(edited),
+        intersections: {} as never,
+        solvedSnapshot: solve(mirrored),
+        factories: factories(),
+      });
+      expect(refused).toEqual({
+        changed: false,
+        message: refusal("trim"),
+        definition: mirrored,
+      });
+      expect(refused.definition).toBe(mirrored);
+      const definition = withoutMirror(mirrored);
       const solvedSnapshot = solve(definition);
       const intersections = await querySketchEditIntersections(
         {
@@ -210,11 +245,25 @@ describe("stale maps after topology edits (T-15; review probe R1–R6)", () => {
         factories: factories(),
       });
       expect(mutation.message).toBeNull();
-      expectStale(mutation.definition!);
+      expectStale(reattached(mutation.definition!, mirrored));
     });
 
-  test("R3 split of the seed leaves derived-mirror-map-stale", async () => {
-    const definition = lineBase();
+  test("R3 split of the seed is refused; made by another path it leaves derived-mirror-map-stale", async () => {
+    const mirrored = lineBase();
+    const refused = createSketchSplitMutation({
+      definition: mirrored,
+      targetEntityId: eid("ab"),
+      intersections: {} as never,
+      solvedSnapshot: solve(mirrored),
+      sequence: 7,
+      factories: factories(),
+    });
+    expect(refused).toEqual({
+      changed: false,
+      message: refusal("split"),
+      definition: mirrored,
+    });
+    const definition = withoutMirror(mirrored);
     const solvedSnapshot = solve(definition);
     const intersections = await querySketchEditIntersections(
       {
@@ -242,11 +291,11 @@ describe("stale maps after topology edits (T-15; review probe R1–R6)", () => {
       factories: factories(),
     });
     expect(mutation.message).toBeNull();
-    expectStale(mutation.definition!);
+    expectStale(reattached(mutation.definition!, mirrored));
   });
 
-  test("R4 trim of a seed circle (it becomes an arc: a kind change) leaves derived-mirror-map-stale", async () => {
-    const definition = sketch(
+  test("R4 trim of a seed circle (it becomes an arc: a kind change) is refused; made by another path it leaves derived-mirror-map-stale", async () => {
+    const mirrored = sketch(
       [
         point("c", [2, 4]),
         point("k1a", [2, 2.5]),
@@ -264,6 +313,19 @@ describe("stale maps after topology edits (T-15; review probe R1–R6)", () => {
       [out("c", "mc", ["c"], ["mc"])],
       ["c"],
     );
+    const refused = createSketchTrimMutation({
+      definition: mirrored,
+      targetEntityId: eid("c"),
+      intersections: {} as never,
+      solvedSnapshot: solve(mirrored),
+      factories: factories(),
+    });
+    expect(refused).toEqual({
+      changed: false,
+      message: refusal("trim"),
+      definition: mirrored,
+    });
+    const definition = withoutMirror(mirrored);
     const solvedSnapshot = solve(definition);
     const intersections = await querySketchEditIntersections(
       {
@@ -285,7 +347,7 @@ describe("stale maps after topology edits (T-15; review probe R1–R6)", () => {
       factories: factories(),
     });
     expect(mutation.message).toBeNull();
-    expectStale(mutation.definition!);
+    expectStale(reattached(mutation.definition!, mirrored));
   });
 
   /** A seed corner a–b–c above the axis and its mirrored corner. */
@@ -318,16 +380,28 @@ describe("stale maps after topology edits (T-15; review probe R1–R6)", () => {
     ["R5 fillet of the seed corner", ["ab", "bc"]],
     ["R6 fillet of the copied corner", ["mab", "mbc"]],
   ] as const)
-    test(`${label} leaves derived-mirror-map-stale`, () => {
+    test(`${label} is refused; made by another path it leaves derived-mirror-map-stale`, () => {
+      const mirrored = corner();
+      const refused = createSketchFilletMutation({
+        definition: mirrored,
+        entityIds: entities.map(eid),
+        radius: 0.5,
+        sequence: 7,
+        factories: factories(),
+      });
+      expect(refused.valid).toBe(false);
+      expect(refused.message).toBe(refusal("fillet"));
+      expect(refused.definition).toBeNull();
+      expect(refused.contribution).toBeNull();
       const mutation = createSketchFilletMutation({
-        definition: corner(),
+        definition: withoutMirror(mirrored),
         entityIds: entities.map(eid),
         radius: 0.5,
         sequence: 7,
         factories: factories(),
       });
       expect(mutation.valid).toBe(true);
-      expectStale(mutation.definition!);
+      expectStale(reattached(mutation.definition!, mirrored));
     });
 });
 

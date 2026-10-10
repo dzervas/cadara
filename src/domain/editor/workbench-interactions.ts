@@ -7,7 +7,10 @@ import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
 import type { PrimitiveRef, SelectionFilter } from "@/core/editor/schema";
 import { primitiveRefEquals } from "@/core/editor/schema";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
-import { resolveHandleFromTarget } from "@/domain/editor/sketch-session/drag-intent";
+import {
+  resolveHandleFromTarget,
+  type SketchDragAcceptance,
+} from "@/domain/editor/sketch-session/drag-intent";
 import { getRegisteredFeatureAuthoringDefinitions } from "@/core/feature-authoring/registry";
 import {
   confirmSketchDrawing,
@@ -302,11 +305,14 @@ function shouldTreatBackgroundDatumClickAsEmpty(
  * If the current selection contains a draggable candidate that appears in the
  * pick stack, use that one (most recently selected first). Otherwise use
  * `stack[0]` if draggable. Otherwise return null (no drag).
+ * Draggability is D9′ (`resolveHandleFromTarget`), judged against
+ * `acceptance`, the session's solve (a failed mirror's copy is not).
  */
 export function resolveSketchDragTarget(
   stack: readonly { target: PrimitiveRef }[],
   selection: readonly PrimitiveRef[],
   definition: SketchDefinition,
+  acceptance: SketchDragAcceptance | null,
 ): PrimitiveRef | null {
   // D3: the selected draggable candidate in the pointer's stack wins
   // (most recently selected first).
@@ -318,7 +324,7 @@ export function resolveSketchDragTarget(
     const sel = selection[i]!;
     if (
       !stack.some((entry) => primitiveRefEquals(entry.target, sel)) ||
-      resolveHandleFromTarget(definition, sel) === null
+      resolveHandleFromTarget(definition, sel, acceptance) === null
     ) {
       continue;
     }
@@ -355,14 +361,15 @@ export function resolveSketchDragTarget(
   );
   if (
     handleInStack &&
-    resolveHandleFromTarget(definition, handleInStack.target) !== null
+    resolveHandleFromTarget(definition, handleInStack.target, acceptance) !==
+      null
   ) {
     return handleInStack.target;
   }
   // Fall back to stack[0].
   if (stack.length > 0) {
     const top = stack[0]!;
-    if (resolveHandleFromTarget(definition, top.target) !== null) {
+    if (resolveHandleFromTarget(definition, top.target, acceptance) !== null) {
       return top.target;
     }
   }

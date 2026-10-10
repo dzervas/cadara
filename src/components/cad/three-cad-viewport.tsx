@@ -137,7 +137,10 @@ import {
   getSketchRevealedHandleEntityIds,
   getSketchToolMarkerPointIds,
 } from "@/domain/editor/sketch-session/display";
-import type { SketchDefinition } from "@/contracts/sketch/schema";
+import type {
+  SketchDefinition,
+  SolvedSketchSnapshot,
+} from "@/contracts/sketch/schema";
 import { createViewportCameraTransitionController } from "@/infrastructure/viewport/viewport-camera-transition";
 import {
   getViewportCanvasClickIntent,
@@ -203,6 +206,7 @@ import {
   shouldCaptureZeroTangentHandle,
   SKETCH_DRAG_THRESHOLD_PX,
   resolveSectionScreenDragOffset,
+  createSketchStackPick,
   resolveSketchFitPointRelease,
   resizeViewCubeRenderer,
   scheduleCoalescedSketchGeometryDragMove,
@@ -214,6 +218,8 @@ import {
 interface SketchStackPick {
   stack: (PickResult & { pickClass: SketchPickClass })[];
   displayDefinition: SketchDefinition;
+  /** The display solve: D9′ judges drag targets against it. */
+  solvedSnapshot: SolvedSketchSnapshot;
 }
 
 /** A stack and the client point it was resolved at. */
@@ -2103,7 +2109,11 @@ export function ThreeCadViewport({
 
       return {
         top: stack[0] ?? null,
-        sketch: { stack, displayDefinition: sketchDisplayDefinition },
+        sketch: createSketchStackPick(
+          sketchSession,
+          stack,
+          sketchDisplayDefinition,
+        ),
       };
     };
 
@@ -2614,6 +2624,7 @@ export function ThreeCadViewport({
           activeSketchSession,
           target,
           pick.sketch?.displayDefinition,
+          pick.sketch?.solvedSnapshot ?? null,
         )
       ) {
         canvasElement.style.cursor = "grab";
@@ -2732,7 +2743,12 @@ export function ThreeCadViewport({
       const definition = pick.sketch?.displayDefinition;
       const stack = pick.sketch?.stack ?? [];
       const dragTarget = definition
-        ? resolveSketchDragTarget(stack, selectionRef.current, definition)
+        ? resolveSketchDragTarget(
+            stack,
+            selectionRef.current,
+            definition,
+            pick.sketch?.solvedSnapshot ?? null,
+          )
         : null;
 
       if (point && dragTarget) {

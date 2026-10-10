@@ -1239,3 +1239,169 @@ export function resolveMirrorCounterpart(
     return { ...step, chain };
   });
 }
+
+// ------------------------------------------------- session helpers (T15d)
+
+/**
+ * T15d (R-1, [TECH] T-3): the structural sync of every mirror output of a
+ * definition, in dependency order (an upstream copy before the mirror that
+ * reads it), with no point, radius or kept authored vector written: tangent
+ * kinds (exact zeros included), sweep direction, closure, policy and
+ * `endSpanParameterLengths` follow the seed (`applyMirrorOutputStructure`).
+ * An output occurrence that becomes authored-nonzero needs a value: the
+ * reflected seed vector (initialization, as at creation; after a solve the
+ * caller overwrites it with the snapshot's). Relationships in `held` (a
+ * solve's `failedDerivationIds`) and those the owner cannot evaluate
+ * (missing or degenerate axis, stale map, unresolved order) keep their
+ * outputs untouched. Returns `definition` itself when nothing changes.
+ */
+export function syncMirrorOutputStructures(input: {
+  readonly definition: SketchDefinition;
+  readonly modelingTolerance: number;
+  readonly held?: ReadonlySet<string>;
+}): SketchDefinition {
+  const { definition, held } = input;
+  const mirrors = orderDerivedRelationships(definition).order.filter(
+    (relationship): relationship is MirrorRelationship =>
+      relationship.kind === "mirror" && !held?.has(relationship.derivationId),
+  );
+  if (mirrors.length === 0) return definition;
+  const entityById = new Map(
+    definition.entities.map((entity) => [entity.entityId, entity]),
+  );
+  const geometry: MirrorGeometry = {
+    pointById: new Map(
+      definition.points.map((point) => [point.pointId, point]),
+    ),
+    entityById,
+  };
+  let changed = false;
+  for (const relationship of mirrors) {
+    const evaluation = evaluateMirrorRelationship({
+      relationship,
+      geometry,
+      modelingTolerance: input.modelingTolerance,
+    });
+    if (!evaluation.ok) continue;
+    for (const output of evaluation.outputs) {
+      const current = entityById.get(output.outputEntityId)!;
+      const synced = applyMirrorOutputStructure(current, output);
+      if (sameMirrorStructure(current, synced)) continue;
+      entityById.set(synced.entityId, synced);
+      changed = true;
+    }
+  }
+  return changed
+    ? {
+        ...definition,
+        entities: definition.entities.map(
+          (entity) => entityById.get(entity.entityId) ?? entity,
+        ),
+      }
+    : definition;
+}
+
+/** Whether the structural sync left an output as it was (values included). */
+function sameMirrorStructure(
+  current: SketchEntityDefinition,
+  synced: SketchEntityDefinition,
+): boolean {
+  if (current === synced) return true;
+  if (current.kind === "arc" && synced.kind === "arc")
+    return current.sweepDirection === synced.sweepDirection;
+  if (current.kind !== "spline" || synced.kind !== "spline") return false;
+  const sameVector = (first: SplineVector, second: SplineVector) =>
+    Object.is(first[0], second[0]) && Object.is(first[1], second[1]);
+  return (
+    current.closure === synced.closure &&
+    current.interpolationPolicy === synced.interpolationPolicy &&
+    current.endSpanParameterLengths?.start ===
+      synced.endSpanParameterLengths?.start &&
+    current.endSpanParameterLengths?.end ===
+      synced.endSpanParameterLengths?.end &&
+    current.pointOccurrences.every((occurrence, index) => {
+      const next = synced.pointOccurrences[index]!.tangent;
+      const tangent = occurrence.tangent;
+      return tangent.kind === "automatic"
+        ? next.kind === "automatic"
+        : next.kind === "authored" && sameVector(tangent.vector, next.vector);
+    })
+  );
+}
+
+/**
+ * T15d ([TECH] T-12): the authority of a mirror output's spline occurrence
+ * is its root seed's occurrence (the output's tangent is a driven slot).
+ * For an occurrence on the output side of a mirror, returns the root seed
+ * occurrence (through a chain of mirrors of mirrors) and `vector`, a
+ * tangent vector at the output occurrence, carried to it by each step's
+ * vector reflection (an involution, so the seed vector reproduces the
+ * output's). Null when the occurrence is no mirror output, or a step's
+ * mirror cannot be evaluated (stale map, missing or degenerate axis).
+ */
+export function mirrorSeedTangentOf(input: {
+  readonly definition: SketchDefinition;
+  readonly modelingTolerance: number;
+  readonly entityId: SketchEntityId;
+  readonly occurrenceId: string;
+  readonly vector: SplineVector;
+}): {
+  readonly entityId: SketchEntityId;
+  readonly occurrenceId: string;
+  readonly vector: SplineVector;
+} | null {
+  const { definition } = input;
+  const step = resolveMirrorCounterpart(definition, {
+    kind: "splineOccurrence",
+    entityId: input.entityId,
+    occurrenceId: input.occurrenceId,
+  }).find((candidate) => candidate.side === "output");
+  if (!step) return null;
+  const geometry = indexMirrorGeometry(definition);
+  let vector = input.vector;
+  let counterpart: MirrorCorrespondenceRef | null = null;
+  for (const current of [step, ...step.chain]) {
+    const relationship = definition.derivedRelationships?.find(
+      (candidate) => candidate.derivationId === current.relationshipId,
+    );
+    if (relationship?.kind !== "mirror" || !current.counterpart) return null;
+    const resolution = resolveMirrorAxis(
+      relationship.derivationId,
+      relationship.mirrorReference,
+      geometry,
+      input.modelingTolerance,
+    );
+    if (!resolution.ok) return null;
+    vector = mirrorVector(resolution.axis, vector);
+    counterpart = current.counterpart;
+  }
+  return counterpart?.kind === "splineOccurrence"
+    ? {
+        entityId: counterpart.entityId,
+        occurrenceId: counterpart.occurrenceId,
+        vector,
+      }
+    : null;
+}
+
+/**
+ * T15d ([TECH] T-12): the root seed occurrence of a mirror output's spline
+ * occurrence (through a chain of mirrors of mirrors), which holds its
+ * tangent's authority. Null when the occurrence is no mirror output or the
+ * chain has a stale map (no correspondence).
+ */
+export function mirrorRootSeedOccurrence(
+  definition: CorrespondenceDefinition,
+  entityId: SketchEntityId,
+  occurrenceId: string,
+): { readonly entityId: SketchEntityId; readonly occurrenceId: string } | null {
+  const step = resolveMirrorCounterpart(definition, {
+    kind: "splineOccurrence",
+    entityId,
+    occurrenceId,
+  }).find((candidate) => candidate.side === "output");
+  const root = step ? [step, ...step.chain].at(-1)!.counterpart : null;
+  return root?.kind === "splineOccurrence"
+    ? { entityId: root.entityId, occurrenceId: root.occurrenceId }
+    : null;
+}

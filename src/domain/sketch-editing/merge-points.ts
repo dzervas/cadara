@@ -9,6 +9,7 @@ import type {
   SketchReferenceImageRecord,
 } from "@/contracts/sketch/schema";
 import { orderedSplineOccurrences } from "@/contracts/sketch/spline-geometry";
+import { mirrorEditRefusal } from "./operations";
 import type {
   ConstraintId,
   DimensionId,
@@ -417,8 +418,12 @@ export function getSketchMergePointRefusal(
   if (!point) return "Merge Points needs a local sketch point.";
   const label = point.label;
   const driven = drivenPointOwner(definition, pointId);
+  // T15d ([TECH] T-11): a mirror's seed points are not mergeable either,
+  // so a mirrored copy's point names the mirror and its removal.
   if (driven)
-    return `${label} is driven by ${RELATIONSHIP_KIND_NAMES[driven.kind]} ${driven.label}; it cannot be merged (merge its seed points instead).`;
+    return driven.kind === "mirror"
+      ? `${label} is driven by mirror ${driven.label}; remove the mirror first to merge it.`
+      : `${label} is driven by ${RELATIONSHIP_KIND_NAMES[driven.kind]} ${driven.label}; it cannot be merged (merge its seed points instead).`;
   const image = definition.referenceImages?.find((record) =>
     record.ownedPointIds.includes(pointId),
   );
@@ -535,6 +540,18 @@ export function createSketchMergePointsMutation(input: {
         `Both points are used by ${RELATIONSHIP_KIND_NAMES[relationship.kind]} ${relationship.label}; merging them would leave its copies looking joined but not joined. Delete the ${RELATIONSHIP_KIND_NAMES[relationship.kind]} first, or merge other points.`,
       );
   }
+  // T15d ([TECH] T-11, after the R-4 pair refusals, T-13): a point of a
+  // mirror seed (either side; outputs are refused above as driven) would
+  // leave the mirror's point map stale.
+  const mirrorRefusal = mirrorEditRefusal(
+    definition,
+    [
+      { kind: "point", pointId: source },
+      { kind: "point", pointId: destination },
+    ],
+    "merge",
+  );
+  if (mirrorRefusal) return refuse(mirrorRefusal);
 
   const absorbedConstraintIds = definition.constraints.flatMap((constraint) =>
     constraint.kind === "coincident" &&

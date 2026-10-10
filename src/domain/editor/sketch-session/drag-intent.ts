@@ -1,7 +1,126 @@
 import type { PrimitiveRef } from "@/core/editor/schema";
-import type { SketchDefinition } from "@/contracts/sketch/schema";
+import type {
+  SketchDefinition,
+  SolvedSketchSnapshot,
+} from "@/contracts/sketch/schema";
 import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
 import { orderedSplinePointIds } from "@/contracts/sketch/spline-geometry";
+import {
+  nonAcceptedOffsetOutputPoints,
+  nonAcceptedOffsetOutputs,
+} from "@/contracts/sketch/offset-publication";
+
+/**
+ * D9′ (T15d): the acceptance a drag target is judged against, the G19 fields
+ * of the session's live (or display) solve. Null: no solve yet, which
+ * accepts no offset output and knows of no failed mirror (G19a).
+ */
+export type SketchDragAcceptance = Pick<
+  SolvedSketchSnapshot,
+  "solvedEntities" | "certifiedOffsetDerivationIds" | "failedDerivationIds"
+>;
+
+const NO_SOLVE: SketchDragAcceptance = { solvedEntities: [] };
+
+/**
+ * Whether any of `entityIds`, or a mirror seed upstream of it, is an output
+ * of a pattern, transform or offset relationship. Bounded: every entity is
+ * visited once.
+ */
+function readsOneWayOutput(
+  relationships: NonNullable<SketchDefinition["derivedRelationships"]>,
+  entityIds: readonly SketchEntityId[],
+): boolean {
+  const visited = new Set<SketchEntityId>();
+  const pending = [...entityIds];
+  for (let entityId = pending.pop(); entityId; entityId = pending.pop()) {
+    if (visited.has(entityId)) continue;
+    visited.add(entityId);
+    for (const relationship of relationships) {
+      const output = relationship.outputs.find(
+        (candidate) => candidate.outputEntityId === entityId,
+      );
+      if (relationship.kind === "mirror") {
+        if (output) pending.push(output.seedEntityId);
+        continue;
+      }
+      if (
+        output ||
+        (relationship.kind === "offset" &&
+          [
+            ...relationship.jointOutputs,
+            ...relationship.piecewiseCubicOutputs,
+          ].some((candidate) => candidate.outputEntityId === entityId))
+      )
+        return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * D9′ ([TECH] T-10, review A-2): whether a sketch point or entity is driven
+ * by a derived relationship and cannot start a drag. Pattern, transform and
+ * offset outputs (and their driven points: output points, joint points,
+ * shell terminals) are one-way. Mirror outputs are draggable (the coupled
+ * solve moves the seed), unless G19 non-accepted (a failed (held) mirror's
+ * copy, or a copy of a non-accepted offset output) or (review A-1) the
+ * mirror image of a one-way output, directly or through a mirror chain.
+ */
+function isNonDraggableDerivedTarget(
+  definition: SketchDefinition,
+  acceptance: SketchDragAcceptance | null,
+  target: { pointId: SketchPointId } | { entityId: SketchEntityId },
+): boolean {
+  const relationships = definition.derivedRelationships ?? [];
+  if (relationships.length === 0) return false;
+  const isPoint = "pointId" in target;
+  const driven = relationships.find((relationship) => {
+    const outputs = isPoint
+      ? relationship.outputs.some((output) =>
+          output.outputPointIds.includes(target.pointId),
+        )
+      : relationship.outputs.some(
+          (output) => output.outputEntityId === target.entityId,
+        );
+    if (outputs) return true;
+    if (relationship.kind !== "offset") return false;
+    return isPoint
+      ? relationship.jointOutputs.some(
+          (joint) =>
+            joint.startPointId === target.pointId ||
+            joint.endPointId === target.pointId ||
+            joint.centerPointId === target.pointId,
+        ) ||
+          relationship.piecewiseCubicOutputs.some(
+            (shell) =>
+              shell.startPointId === target.pointId ||
+              shell.endPointId === target.pointId,
+          )
+      : relationship.jointOutputs.some(
+          (joint) => joint.outputEntityId === target.entityId,
+        ) ||
+          relationship.piecewiseCubicOutputs.some(
+            (shell) => shell.outputEntityId === target.entityId,
+          );
+  });
+  if (!driven) return false;
+  if (driven.kind !== "mirror") return true;
+  // T15d review A-1 (decided): the copy of a one-way output (directly or
+  // through a mirror chain) is one-way too, so it is no drag target either.
+  const seeds = driven.outputs
+    .filter((output) =>
+      isPoint
+        ? output.outputPointIds.includes(target.pointId)
+        : output.outputEntityId === target.entityId,
+    )
+    .map((output) => output.seedEntityId);
+  if (readsOneWayOutput(relationships, seeds)) return true;
+  const snapshot = acceptance ?? NO_SOLVE;
+  return isPoint
+    ? nonAcceptedOffsetOutputPoints(definition, snapshot).has(target.pointId)
+    : nonAcceptedOffsetOutputs(definition, snapshot).has(target.entityId);
+}
 
 /**
  * Deterministic per-handle drag intent contract (minimum-motion-sketch-drag, D5).
@@ -95,14 +214,31 @@ export function getSketchEntityDefiningPointIds(
  * - sketch point that is the centre of exactly one circle/arc → center
  * - any other authored sketch point (incl. spline fit points) → point
  * - construction sketch curves follow the same rules
- * - everything in D9 (derived outputs, driven points, non-accepted G19
- *   outputs, construction planes, reference/projected geometry, datums,
- *   regions, images, annotations) → null
+ * - everything in D9′ (pattern/transform/offset outputs and their driven
+ *   points, non-accepted G19 outputs incl. failed mirrors' copies,
+ *   construction planes, reference/projected geometry, datums, regions,
+ *   images, annotations) → null; mirror outputs resolve like authored
+ *   geometry (T15d)
  */
 export function resolveHandleFromTarget(
   definition: SketchDefinition,
   target: PrimitiveRef,
+  acceptance: SketchDragAcceptance | null,
 ): SketchDragHandle | null {
+  if (
+    (target.kind === "sketchPoint" ||
+      target.kind === "sketchEntity" ||
+      target.kind === "sketchTangentHandle") &&
+    isNonDraggableDerivedTarget(
+      definition,
+      acceptance,
+      target.kind === "sketchPoint"
+        ? { pointId: target.pointId }
+        : { entityId: target.entityId as SketchEntityId },
+    )
+  ) {
+    return null;
+  }
   if (target.kind === "sketchPoint") {
     // Check if this point is the centre of exactly one circle or arc.
     const centreEntities = definition.entities.filter(

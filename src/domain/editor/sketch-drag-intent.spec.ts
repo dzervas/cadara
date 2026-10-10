@@ -5,6 +5,8 @@ import {
   resolveHandleFromTarget,
   resolveSketchDragIntent,
 } from "@/domain/editor/sketch-session";
+import type { PrimitiveRef } from "@/core/editor/schema";
+import { derivedTargetsDefinition, pid } from "./sketch-mirror.fixtures";
 
 // Lane: logic (docs/testing.md). Seam: the deterministic per-handle drag intent
 // contract in src/domain/editor/sketch-session/drag-intent.ts. These tests prove
@@ -772,4 +774,146 @@ test("T12c D10: resolveHandleFromTarget maps PrimitiveRef to the correct handle"
   testConstructionCurveIsDraggable();
   testD9RefusalsForEveryKind();
   testSketchTangentHandleRefResolvesToTangentHandle();
+});
+
+// T15d D9′ ([TECH] T-10, review A-2; logic lane, seam: the pure handle
+// resolver `resolveHandleFromTarget`). Mirror outputs resolve like authored
+// geometry; pattern, transform and offset outputs and their driven points
+// are one-way; a failed mirror's copy and a copy of a non-accepted offset
+// output (G19) are not drag targets.
+test("T15d D9′: mirror copies resolve to handles; one-way outputs and G19 non-accepted copies do not", () => {
+  const { definition, outputOf, relationship, ids } =
+    derivedTargetsDefinition();
+  const point = (pointId: string) =>
+    ({
+      kind: "sketchPoint",
+      sketchId: "sketch_draft",
+      pointId,
+    }) as PrimitiveRef;
+  const entity = (entityId: string) =>
+    ({
+      kind: "sketchEntity",
+      sketchId: "sketch_draft",
+      entityId,
+    }) as PrimitiveRef;
+  const line = outputOf("ab");
+  const circle = outputOf("c");
+  const spline = outputOf("s");
+  const splineCopy = definition.entities.find(
+    (candidate) => candidate.entityId === spline.outputEntityId,
+  );
+  if (splineCopy?.kind !== "spline") throw new Error("spline copy");
+  const copyHandle = {
+    kind: "sketchTangentHandle",
+    sketchId: "sketch_draft",
+    entityId: spline.outputEntityId,
+    occurrenceId: splineCopy.pointOccurrences[1]!.occurrenceId,
+    pointId: spline.outputPointIds[1]!,
+  } as PrimitiveRef;
+  // An accepted solve: the offset certified, no failed mirror.
+  const accepted = {
+    solvedEntities: [],
+    certifiedOffsetDerivationIds: [ids.offsetDerivationId],
+  };
+  expect(
+    resolveHandleFromTarget(
+      definition,
+      point(line.outputPointIds[0]!),
+      accepted,
+    ),
+  ).toEqual({
+    kind: "point",
+    pointId: line.outputPointIds[0],
+  });
+  expect(
+    resolveHandleFromTarget(definition, entity(line.outputEntityId), accepted),
+  ).toEqual({
+    kind: "entityBody",
+    entityId: line.outputEntityId,
+  });
+  expect(
+    resolveHandleFromTarget(
+      definition,
+      entity(circle.outputEntityId),
+      accepted,
+    ),
+  ).toEqual({
+    kind: "rim",
+    entityId: circle.outputEntityId,
+  });
+  expect(
+    resolveHandleFromTarget(
+      definition,
+      point(circle.outputPointIds[0]!),
+      accepted,
+    ),
+  ).toEqual({
+    kind: "center",
+    entityId: circle.outputEntityId,
+  });
+  expect(resolveHandleFromTarget(definition, copyHandle, accepted)?.kind).toBe(
+    "tangentHandle",
+  );
+  // Review A-1 (decided; re-pin, was: a copy of a certified offset output is
+  // draggable): the mirror image of a one-way output is one-way too, even
+  // when the offset is certified, and through a mirror chain.
+  for (const target of [
+    point(ids.offsetCopyPoint),
+    point(ids.patternCopyPoint),
+    entity(ids.patternCopy),
+    point(ids.patternCopyOfCopyPoint),
+  ])
+    expect(
+      resolveHandleFromTarget(definition, target, accepted),
+      `a mirror copy of a one-way output ${JSON.stringify(target)}`,
+    ).toBeNull();
+
+  for (const target of [
+    entity(ids.patternLine),
+    point(ids.patternPoint),
+    entity(ids.transformLine),
+    point(ids.transformPoint),
+    entity(ids.offsetLine),
+    point(ids.offsetPoint),
+    entity(ids.jointArc),
+    point(ids.jointCentre),
+    entity(ids.shell),
+    point(ids.shellEnd),
+  ])
+    expect(
+      resolveHandleFromTarget(definition, target, accepted),
+      `one-way output ${JSON.stringify(target)}`,
+    ).toBeNull();
+
+  // The offset not certified (no solve, or an uncertified one): its mirror
+  // copy is G19 non-accepted.
+  for (const acceptance of [null, { solvedEntities: [] }])
+    expect(
+      resolveHandleFromTarget(
+        definition,
+        point(ids.offsetCopyPoint),
+        acceptance,
+      ),
+      "a copy of a non-accepted offset output",
+    ).toBeNull();
+  // The mirror failed (held copies).
+  const failed = {
+    ...accepted,
+    failedDerivationIds: [relationship.derivationId],
+  };
+  for (const target of [
+    point(line.outputPointIds[0]!),
+    entity(line.outputEntityId),
+    entity(circle.outputEntityId),
+    point(circle.outputPointIds[0]!),
+    copyHandle,
+  ])
+    expect(
+      resolveHandleFromTarget(definition, target, failed),
+      `a failed mirror's copy ${JSON.stringify(target)}`,
+    ).toBeNull();
+  expect(
+    resolveHandleFromTarget(definition, point(pid("a")), failed),
+    "control: the seed stays draggable",
+  ).toEqual({ kind: "point", pointId: pid("a") });
 });

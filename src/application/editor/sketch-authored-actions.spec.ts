@@ -53,6 +53,13 @@ import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,
 } from "@/domain/editor/sketch-session/test-snap-scale";
+import {
+  eid,
+  handleRef,
+  mirroredSession,
+  pid,
+  pointRef,
+} from "@/domain/editor/sketch-mirror.fixtures";
 
 function line(session: SketchSessionState) {
   return acceptSketchDraw(
@@ -86,18 +93,20 @@ function remapTestSketchIds<T>(value: T, nextSketchId: string): T {
   ) as T;
 }
 
-async function fixture(constrained = false) {
+async function fixture(constrained = false, initial?: SketchSessionState) {
   const owner = new SketchAuthoredActions();
-  const session = line(
-    withSketchSnapScale(
-      createNewSketchSession(
-        createStandardPlaneDefinition("xy"),
-        OCC_KERNEL_SETTINGS,
+  const session =
+    initial ??
+    line(
+      withSketchSnapScale(
+        createNewSketchSession(
+          createStandardPlaneDefinition("xy"),
+          OCC_KERNEL_SETTINGS,
+        ),
+        SPEC_SKETCH_UNITS_PER_PIXEL,
       ),
-      SPEC_SKETCH_UNITS_PER_PIXEL,
-    ),
-  );
-  if (!constrained)
+    );
+  if (!constrained && !initial)
     session.definition = {
       ...session.definition,
       constraints: [],
@@ -3293,5 +3302,167 @@ describe("T14c: the annotation lifecycle adds no history; Undo and Redo prune it
       undone.annotationContext,
       "Undo prunes the removed `last`; H stays the owner",
     ).toEqual({ owners: [f.h], last: null });
+  });
+});
+
+// T15d (logic lane; seam: the authored-action owner around the real sketch
+// reducer). Editing a mirror copy is one action per completed intent and
+// none on cancel; Undo restores the pre-drag state in one step (issue 09).
+describe("T15d: mirror copy intents through the authored-action owner", () => {
+  const world = ([x, y]: readonly [number, number]) => [x, y, 0] as const;
+  async function mirrorFixture() {
+    const setup = mirroredSession("free");
+    const f = await fixture(false, setup.session);
+    expect(f.session.actionAvailability?.canUndo ?? false).toBe(false);
+    return { f, setup };
+  }
+  function glide(
+    f: Awaited<ReturnType<typeof fixture>>,
+    target: PrimitiveRef,
+    from: readonly [number, number],
+    to: readonly [number, number],
+  ) {
+    f.dispatch({
+      type: "sketch.geometryDragStarted",
+      target,
+      point: world(from) as never,
+    });
+    for (let step = 1; step <= 4; step += 1)
+      f.dispatch({
+        type: "sketch.geometryDragMoved",
+        point: world([
+          from[0] + ((to[0] - from[0]) * step) / 4,
+          from[1] + ((to[1] - from[1]) * step) / 4,
+        ]) as never,
+      });
+  }
+
+  test("a completed copy-endpoint drag is one action: the seed followed; Undo restores the pre-drag state in one step, Redo the result", async () => {
+    const { f, setup } = await mirrorFixture();
+    const before = projection(f.session);
+    const ma = setup.outputOf("ab").outputPointIds[0]!;
+    const from = f.session.definition.points.find(
+      (entry) => entry.pointId === ma,
+    )!.position;
+    const to = [from[0] + 0.3, from[1] - 0.4] as const;
+    glide(f, pointRef(f.session, ma), from, to);
+    expect(
+      f.session.actionAvailability?.canUndo ?? false,
+      "frames record nothing",
+    ).toBe(false);
+    f.dispatch({ type: "sketch.geometryDragEnded", point: world(to) as never });
+    const after = projection(f.session);
+    const seedA = f.session.definition.points.find(
+      (entry) => entry.pointId === pid("a"),
+    )!.position;
+    expect(
+      Math.hypot(seedA[0] - to[0], seedA[1] + to[1]),
+      "the seed followed",
+    ).toBeLessThanOrEqual(1e-4);
+    expect(f.session.actionAvailability?.canUndo).toBe(true);
+    expect(projection(f.apply({ type: "history.undoRequested" }))).toEqual(
+      before,
+    );
+    expect(f.session.actionAvailability, "exactly one action").toEqual({
+      canUndo: false,
+      canRedo: true,
+    });
+    expect(projection(f.apply({ type: "history.redoRequested" }))).toEqual(
+      after,
+    );
+  });
+
+  test("a cancelled copy drag and a cancelled automatic-handle grab (seed converted at grab) record nothing and restore the pre-drag state", async () => {
+    const { f, setup } = await mirrorFixture();
+    const before = projection(f.session);
+    const ma = setup.outputOf("ab").outputPointIds[0]!;
+    const from = f.session.definition.points.find(
+      (entry) => entry.pointId === ma,
+    )!.position;
+    glide(f, pointRef(f.session, ma), from, [from[0] + 0.3, from[1] - 0.4]);
+    f.dispatch({ type: "sketch.geometryDragCancelled" });
+    expect(projection(f.session)).toEqual(before);
+
+    const copy = setup.outputOf("s");
+    const copySpline = f.session.definition.entities.find(
+      (entry) => entry.entityId === copy.outputEntityId,
+    );
+    if (copySpline?.kind !== "spline") throw new Error("spline");
+    const fit = f.session.definition.points.find(
+      (entry) => entry.pointId === copy.outputPointIds[0],
+    )!.position;
+    const handle = handleRef(
+      f.session,
+      copy.outputEntityId,
+      copySpline.pointOccurrences[0]!.occurrenceId,
+      copy.outputPointIds[0]!,
+    );
+    f.dispatch({
+      type: "sketch.geometryDragStarted",
+      target: handle,
+      point: world([fit[0] + 0.5, fit[1]]) as never,
+    });
+    expect(
+      projection(f.session),
+      "the grab converted the seed occurrence",
+    ).not.toEqual(before);
+    f.dispatch({ type: "sketch.geometryDragCancelled" });
+    expect(projection(f.session)).toEqual(before);
+    expect(f.session.actionAvailability?.canUndo ?? false).toBe(false);
+  });
+
+  test("a completed automatic-handle drag on the copy is one action; Undo restores both occurrences automatic", async () => {
+    const { f, setup } = await mirrorFixture();
+    const before = projection(f.session);
+    const copy = setup.outputOf("s");
+    const copySpline = f.session.definition.entities.find(
+      (entry) => entry.entityId === copy.outputEntityId,
+    );
+    if (copySpline?.kind !== "spline") throw new Error("spline");
+    const occurrenceId = copySpline.pointOccurrences[0]!.occurrenceId;
+    const fit = f.session.definition.points.find(
+      (entry) => entry.pointId === copy.outputPointIds[0],
+    )!.position;
+    const handle = handleRef(
+      f.session,
+      copy.outputEntityId,
+      occurrenceId,
+      copy.outputPointIds[0]!,
+    );
+    const visible = reconstructSplineAggregate(
+      copySpline,
+      Object.fromEntries(
+        f.session.definition.points.map((entry) => [
+          entry.pointId,
+          entry.position,
+        ]),
+      ),
+    );
+    if (visible.validity !== "valid") throw new Error("valid");
+    const tip = [
+      fit[0] + visible.handles[0]![0],
+      fit[1] + visible.handles[0]![1],
+    ] as const;
+    glide(f, handle, tip, [tip[0] + 0.5, tip[1] - 0.5]);
+    f.dispatch({
+      type: "sketch.geometryDragEnded",
+      point: world([tip[0] + 0.5, tip[1] - 0.5]) as never,
+    });
+    const kinds = () =>
+      [eid("s"), copy.outputEntityId].map((entityId) => {
+        const spline = f.session.definition.entities.find(
+          (entry) => entry.entityId === entityId,
+        );
+        return spline?.kind === "spline"
+          ? spline.pointOccurrences[0]!.tangent.kind
+          : null;
+      });
+    expect(kinds()).toEqual(["authored", "authored"]);
+    expect(f.session.actionAvailability?.canUndo).toBe(true);
+    expect(projection(f.apply({ type: "history.undoRequested" }))).toEqual(
+      before,
+    );
+    expect(kinds()).toEqual(["automatic", "automatic"]);
+    expect(f.session.actionAvailability?.canUndo).toBe(false);
   });
 });

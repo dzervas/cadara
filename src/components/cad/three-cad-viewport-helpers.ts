@@ -7,7 +7,11 @@ import type {
   SketchSessionStatus,
 } from "@/domain/editor/sketch-session";
 import { shouldViewportStartSketchGeometryDrag } from "@/domain/editor/workbench-interactions";
-import { resolveHandleFromTarget } from "@/domain/editor/sketch-session/drag-intent";
+import {
+  resolveHandleFromTarget,
+  type SketchDragAcceptance,
+} from "@/domain/editor/sketch-session/drag-intent";
+import { getSketchSessionDisplaySolvedSnapshot } from "@/domain/editor/sketch-session/display";
 import {
   getSketchToolDefinition,
   isRegisteredSketchToolId,
@@ -20,7 +24,10 @@ import {
   type PrimitiveRef,
   type SelectionFilter,
 } from "@/core/editor/schema";
-import type { SketchDefinition } from "@/contracts/sketch/schema";
+import type {
+  SketchDefinition,
+  SolvedSketchSnapshot,
+} from "@/contracts/sketch/schema";
 import {
   DEFAULT_LINE_PICK_THRESHOLD,
   applyWireMaterialDepthPolicy,
@@ -764,8 +771,35 @@ export function resolveSketchDragGesture(
 }
 
 /**
+ * The sketch pick at one pointer position: its stack, the display
+ * definition, and the session's current (display) solve that D9′ judges
+ * hover and press drag targets against (T15d review A-2: a failed mirror's
+ * copy shows no grab cursor and starts no drag).
+ */
+export function createSketchStackPick<TEntry>(
+  session: SketchSessionState,
+  stack: TEntry[],
+  displayDefinition: SketchDefinition,
+): {
+  stack: TEntry[];
+  displayDefinition: SketchDefinition;
+  solvedSnapshot: SolvedSketchSnapshot;
+} {
+  return {
+    stack,
+    displayDefinition,
+    solvedSnapshot: getSketchSessionDisplaySolvedSnapshot(
+      session,
+      displayDefinition,
+    ),
+  };
+}
+
+/**
  * Whether the pointer is hovering a draggable sketch target, producing a
- * `grab` cursor. The viewport calls this during hover resolution.
+ * `grab` cursor. The viewport calls this during hover resolution, with the
+ * session's solve as `acceptance` (D9′: a failed mirror's copy is not
+ * draggable).
  */
 export function isSketchDragHoverTarget(
   session: {
@@ -775,6 +809,7 @@ export function isSketchDragHoverTarget(
   } | null,
   target: PrimitiveRef | null,
   definition: SketchDefinition | null | undefined,
+  acceptance: SketchDragAcceptance | null,
 ): boolean {
   if (!session || session.activeSpecialMode) {
     return false;
@@ -787,7 +822,7 @@ export function isSketchDragHoverTarget(
   if (!target || !definition) {
     return false;
   }
-  return resolveHandleFromTarget(definition, target) !== null;
+  return resolveHandleFromTarget(definition, target, acceptance) !== null;
 }
 
 /**

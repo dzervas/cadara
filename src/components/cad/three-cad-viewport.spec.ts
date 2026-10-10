@@ -3,6 +3,7 @@ import { test, expect } from "vitest";
 import {
   cancelCoalescedSketchGeometryDragMove,
   getViewportPickTuning,
+  createSketchStackPick,
   isSketchDragHoverTarget,
   isSketchFitPointDraftActive,
   isViewportNavigationPointerMove,
@@ -25,6 +26,14 @@ import {
 } from "@/components/cad/three-cad-viewport-helpers";
 import { resolveSketchDragTarget } from "@/domain/editor/workbench-interactions";
 import { resolveHandleFromTarget } from "@/domain/editor/sketch-session/drag-intent";
+import {
+  derivedTargetsDefinition,
+  mirroredSession,
+} from "@/domain/editor/sketch-mirror.fixtures";
+import {
+  getSketchSessionDisplayDefinition,
+  rebuildSessionForDefinition,
+} from "@/domain/editor/sketch-session/internals";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
 import {
@@ -1200,6 +1209,146 @@ test("T12c R-4: grab cursor on draggable hover, cleared otherwise", () => {
     isSketchDragHoverTarget(idleSession, null, def),
     "Hovering with no target should not produce grab cursor.",
   ).toBe(false);
+});
+
+// T15d D9′ (UI lane; seam: the pure viewport drag helpers fed by the
+// handle resolver). A mirror copy is hovered with the grab cursor and is the
+// press's drag target; a pattern or offset output and a failed mirror's
+// copy are neither, under the session's solve.
+test("T15d D9′: mirror copies get the grab cursor and the drag target; pattern/offset outputs and a failed mirror's copy do not", () => {
+  const { definition, outputOf, relationship, ids } =
+    derivedTargetsDefinition();
+  const idleSession = { activeTool: null, status: "idle" as const };
+  const accepted = {
+    solvedEntities: [],
+    certifiedOffsetDerivationIds: [ids.offsetDerivationId],
+  };
+  const failed = {
+    ...accepted,
+    failedDerivationIds: [relationship.derivationId],
+  };
+  const ref = (entityId: string) =>
+    ({
+      kind: "sketchEntity",
+      sketchId: "sketch_draft",
+      entityId,
+    }) as PrimitiveRef;
+  const pointTarget = (pointId: string) =>
+    ({
+      kind: "sketchPoint",
+      sketchId: "sketch_draft",
+      pointId,
+    }) as PrimitiveRef;
+  const copyLine = ref(outputOf("ab").outputEntityId);
+  const copyEnd = pointTarget(outputOf("ab").outputPointIds[0]!);
+  for (const target of [copyLine, copyEnd]) {
+    expect(
+      isSketchDragHoverTarget(idleSession, target, definition, accepted),
+      `grab cursor on the copy ${target.kind}`,
+    ).toBe(true);
+    expect(
+      resolveSketchDragTarget([{ target }], [], definition, accepted),
+      `the copy ${target.kind} is the drag target`,
+    ).toEqual(target);
+    expect(
+      isSketchDragHoverTarget(idleSession, target, definition, failed),
+      `no grab cursor on a failed mirror's copy ${target.kind}`,
+    ).toBe(false);
+    expect(
+      resolveSketchDragTarget([{ target }], [], definition, failed),
+      `a failed mirror's copy ${target.kind} is no drag target`,
+    ).toBeNull();
+  }
+  for (const target of [
+    ref(ids.patternLine),
+    pointTarget(ids.patternPoint),
+    ref(ids.offsetLine),
+    pointTarget(ids.offsetPoint),
+    // Review A-1: the mirror image of a one-way output, directly or chained.
+    ref(ids.patternCopy),
+    pointTarget(ids.patternCopyPoint),
+    pointTarget(ids.patternCopyOfCopyPoint),
+  ]) {
+    expect(
+      isSketchDragHoverTarget(idleSession, target, definition, accepted),
+      `no grab cursor on the one-way output ${JSON.stringify(target)}`,
+    ).toBe(false);
+    expect(
+      resolveSketchDragTarget([{ target }], [], definition, accepted),
+      `the one-way output ${JSON.stringify(target)} is no drag target`,
+    ).toBeNull();
+  }
+  // A pattern output over the seed in the stack: the press drags the seed.
+  const seed = ref("sketch_entity_ab");
+  expect(
+    resolveSketchDragTarget(
+      [{ target: ref(ids.patternLine) }, { target: seed }],
+      [seed],
+      definition,
+      accepted,
+    ),
+  ).toEqual(seed);
+});
+
+// T15d review A-2 (UI lane; seam: `createSketchStackPick`, the viewport's
+// sketch pick). The pick carries the session's current solve, so hover and
+// press refuse a failed mirror's copy; the healthy copy is a drag target.
+test("T15d review A-2: the viewport pick judges drag targets against the session's current solve", () => {
+  const idleSession = { activeTool: null, status: "idle" as const };
+  const { session, outputOf } = mirroredSession("free");
+  const copyEnd = {
+    kind: "sketchPoint",
+    sketchId: "sketch_draft",
+    pointId: outputOf("ab").outputPointIds[0]!,
+  } as PrimitiveRef;
+  const healthy = createSketchStackPick(
+    session,
+    [{ target: copyEnd }],
+    getSketchSessionDisplayDefinition(session),
+  );
+  expect(healthy.solvedSnapshot).toBe(session.liveSolve!.solvedSnapshot);
+  expect(
+    isSketchDragHoverTarget(
+      idleSession,
+      copyEnd,
+      healthy.displayDefinition,
+      healthy.solvedSnapshot,
+    ),
+  ).toBe(true);
+  const entities = session.definition.entities.filter(
+    (entity) => entity.entityId !== "sketch_entity_axis",
+  );
+  const broken = rebuildSessionForDefinition(session, {
+    definition: {
+      ...session.definition,
+      entityIds: entities.map((entity) => entity.entityId),
+      entities,
+    },
+  });
+  const pick = createSketchStackPick(
+    broken,
+    [{ target: copyEnd }],
+    getSketchSessionDisplayDefinition(broken),
+  );
+  expect(pick.solvedSnapshot.failedDerivationIds?.length).toBe(1);
+  expect(
+    isSketchDragHoverTarget(
+      idleSession,
+      copyEnd,
+      pick.displayDefinition,
+      pick.solvedSnapshot,
+    ),
+    "no grab cursor on a failed mirror's copy",
+  ).toBe(false);
+  expect(
+    resolveSketchDragTarget(
+      pick.stack,
+      [],
+      pick.displayDefinition,
+      pick.solvedSnapshot,
+    ),
+    "a failed mirror's copy is no drag target",
+  ).toBeNull();
 });
 
 // -- Gesture reducer: threshold → drag start, capture, grabbing cursor ------
