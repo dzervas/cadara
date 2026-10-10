@@ -10,7 +10,11 @@ import type {
   SketchPointDefinition,
   SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
-import { MIRROR_DIAGNOSTIC_CODES } from "@/contracts/sketch/mirror-requirements";
+import {
+  MIRROR_DIAGNOSTIC_CODES,
+  resolveMirrorCounterpart,
+  type MirrorCorrespondenceRef,
+} from "@/contracts/sketch/mirror-requirements";
 import {
   evaluateSketchDerivations,
   type SketchDerivationSettings,
@@ -439,6 +443,43 @@ export function trimTargetRefusal(entity: SketchEntityDefinition) {
   }
 }
 
+/** T15d ([TECH] T-11): the edits refused on either side of a mirror. */
+export type MirrorRefusedEdit =
+  | "trim"
+  | "split"
+  | "extend"
+  | "fillet"
+  | "chamfer"
+  | "merge";
+
+/**
+ * T15d ([TECH] T-11, review R-3a; Q1 decided: refuse, a recorded limit):
+ * an edit that rewrites the points of a mirror seed or output (either
+ * side) would leave the mirror's point map stale, so it is refused up
+ * front, naming the relationship, before anything is written. `refs` are
+ * the edited entities (Merge: its points). Null when none takes part in a
+ * mirror. Removing a mirror arrives in T16.
+ */
+export function mirrorEditRefusal(
+  definition: SketchDefinition,
+  refs: readonly MirrorCorrespondenceRef[],
+  edit: MirrorRefusedEdit,
+): string | null {
+  for (const ref of refs) {
+    const step = resolveMirrorCounterpart(definition, ref)[0];
+    if (!step) continue;
+    const label =
+      definition.derivedRelationships?.find(
+        (relationship) => relationship.derivationId === step.relationshipId,
+      )?.label ?? step.relationshipId;
+    return `This ${ref.kind === "point" ? "point" : "shape"} is part of a mirror (${label}); remove the mirror first to ${edit} it.`;
+  }
+  return null;
+}
+
+const mirrorEntityRefs = (entityIds: readonly SketchEntityId[]) =>
+  entityIds.map((entityId) => ({ kind: "entity" as const, entityId }));
+
 /**
  * T10g-3b (T10g-3a review A-1): a spline piece's new fit point is not
  * bitwise the edit service's cut position, so the pieces were not rebuilt
@@ -676,6 +717,12 @@ export function createSketchTrimMutation(input: {
     (candidate) => candidate.entityId === input.targetEntityId,
   );
   if (!entity) return fail("Trim target was not found.", definition);
+  const mirrorRefusal = mirrorEditRefusal(
+    definition,
+    mirrorEntityRefs([entity.entityId]),
+    "trim",
+  );
+  if (mirrorRefusal) return fail(mirrorRefusal, definition);
   if (entity.kind === "spline")
     return createSplineTrimMutation({ ...input, entity });
   if (
@@ -1643,6 +1690,12 @@ export function createSketchFilletMutation(input: {
   sequence: number;
   factories: SketchEditOperationFactories;
 }): SketchEditOperationResult {
+  const mirrorRefusal = mirrorEditRefusal(
+    input.definition,
+    mirrorEntityRefs(input.entityIds),
+    "fillet",
+  );
+  if (mirrorRefusal) return createInvalidOperationResult(mirrorRefusal);
   if (input.radius === null || input.radius <= EPSILON) {
     return createInvalidOperationResult(
       "Fillet radius must be greater than zero.",
@@ -1840,6 +1893,12 @@ export function createSketchChamferMutation(input: {
   sequence: number;
   factories: SketchEditOperationFactories;
 }): SketchEditOperationResult {
+  const mirrorRefusal = mirrorEditRefusal(
+    input.definition,
+    mirrorEntityRefs(input.entityIds),
+    "chamfer",
+  );
+  if (mirrorRefusal) return createInvalidOperationResult(mirrorRefusal);
   if (input.distance === null || input.distance <= EPSILON) {
     return createInvalidOperationResult(
       "Chamfer distance must be greater than zero.",
@@ -1981,6 +2040,12 @@ export function createSketchExtendMutation(input: {
   const entity = definition.entities.find(
     (candidate) => candidate.entityId === input.targetEntityId,
   );
+  const mirrorRefusal = mirrorEditRefusal(
+    definition,
+    mirrorEntityRefs([input.targetEntityId]),
+    "extend",
+  );
+  if (mirrorRefusal) return fail(mirrorRefusal, definition);
   if (entity?.kind !== "lineSegment" || !intersections.extendedEnd)
     return fail(EXTEND_TARGET_UNSUPPORTED_MESSAGE, definition);
   const end = intersections.extendedEnd;
@@ -2055,6 +2120,12 @@ export function createSketchSplitMutation(input: {
   const entity = definition.entities.find(
     (candidate) => candidate.entityId === input.targetEntityId,
   );
+  const mirrorRefusal = mirrorEditRefusal(
+    definition,
+    mirrorEntityRefs([input.targetEntityId]),
+    "split",
+  );
+  if (mirrorRefusal) return fail(mirrorRefusal, definition);
   if (entity?.kind === "spline")
     return createSplineSplitMutation({ ...input, entity });
   if (

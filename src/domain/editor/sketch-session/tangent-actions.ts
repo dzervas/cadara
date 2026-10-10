@@ -16,6 +16,10 @@ import type {
 } from "@/contracts/sketch/schema";
 import type { SplinePointOccurrence } from "@/contracts/sketch/spline-geometry";
 import { orderedSplineOccurrences } from "@/contracts/sketch/spline-geometry";
+import {
+  mirrorRootSeedOccurrence,
+  syncMirrorOutputStructures,
+} from "@/contracts/sketch/mirror-requirements";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import type { SketchSessionState } from "./types";
 import {
@@ -36,6 +40,8 @@ export interface TangentActionTarget {
  *
  * A `sketchTangentHandle` maps directly to its occurrence.
  * A `sketchPoint` maps to every occurrence in every spline that uses that point.
+ * T15d ([TECH] T-12): an occurrence on the output side of a mirror maps to
+ * its root seed occurrence, which holds the tangent's authority.
  */
 export function resolveTangentActionTargets(
   selection: readonly PrimitiveRef[],
@@ -44,17 +50,20 @@ export function resolveTangentActionTargets(
 ): TangentActionTarget[] {
   const targets: TangentActionTarget[] = [];
   const seen = new Set<string>();
+  const add = (target: TangentActionTarget) => {
+    const authority = mirrorSeedOccurrence(definition, target);
+    const key = `${authority.entityId}:${authority.occurrenceId}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    targets.push(authority);
+  };
 
   for (const ref of selection) {
     if (ref.kind === "sketchTangentHandle" && ref.sketchId === sketchId) {
-      const key = `${ref.entityId}:${ref.occurrenceId}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        targets.push({
-          entityId: ref.entityId as SketchEntityId,
-          occurrenceId: ref.occurrenceId,
-        });
-      }
+      add({
+        entityId: ref.entityId as SketchEntityId,
+        occurrenceId: ref.occurrenceId,
+      });
     } else if (ref.kind === "sketchPoint" && ref.sketchId === sketchId) {
       // Map the selected fit point to its occurrence(s) in every spline.
       for (const entity of definition.entities) {
@@ -63,14 +72,10 @@ export function resolveTangentActionTargets(
         if (!ordered) continue;
         for (const occ of ordered) {
           if (occ.pointId === ref.pointId) {
-            const key = `${entity.entityId}:${occ.occurrenceId}`;
-            if (!seen.has(key)) {
-              seen.add(key);
-              targets.push({
-                entityId: entity.entityId,
-                occurrenceId: occ.occurrenceId,
-              });
-            }
+            add({
+              entityId: entity.entityId,
+              occurrenceId: occ.occurrenceId,
+            });
           }
         }
       }
@@ -205,13 +210,19 @@ export function applyTangentAction(
   );
   if (targets.length === 0) return session;
 
-  const nextDefinition =
+  const patched =
     intent === "resetTangentToAutomatic"
       ? resetTangentsToAutomatic(session.definition, targets)
       : setTangentsToZero(session.definition, targets);
 
   // Identity check: if nothing changed, no-op.
-  if (nextDefinition === session.definition) return session;
+  if (patched === session.definition) return session;
+  // T15d (R-1c): the seed's new tangent kind reaches its mirror outputs
+  // through the owner's structural sync (no value is re-derived).
+  const nextDefinition = syncMirrorOutputStructures({
+    definition: patched,
+    modelingTolerance: session.modelingTolerance,
+  });
 
   return withLiveSolveBasis(
     {
@@ -225,6 +236,20 @@ export function applyTangentAction(
 }
 
 // ── Internals ────────────────────────────────────────────────────────────
+
+/** T15d ([TECH] T-12): the occurrence holding `target`'s tangent authority. */
+function mirrorSeedOccurrence(
+  definition: SketchDefinition,
+  target: TangentActionTarget,
+): TangentActionTarget {
+  return (
+    mirrorRootSeedOccurrence(
+      definition,
+      target.entityId,
+      target.occurrenceId,
+    ) ?? target
+  );
+}
 
 function findOccurrence(
   definition: SketchDefinition,

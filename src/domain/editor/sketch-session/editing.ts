@@ -15,6 +15,11 @@ import {
   orderedSplineOccurrences,
   reconstructSplineAggregate,
 } from "@/contracts/sketch/spline-geometry";
+import {
+  mirrorRootSeedOccurrence,
+  mirrorSeedTangentOf,
+  syncMirrorOutputStructures,
+} from "@/contracts/sketch/mirror-requirements";
 import type {
   SketchDefinition,
   SolvedOffsetFramePlanRecord,
@@ -51,6 +56,7 @@ import {
   offsetCurveDescriptorFromProjectedGeometry,
   offsetSideForSketchPoint,
   createSketchTrimMutation,
+  mirrorEditRefusal,
   trimTargetRefusal,
 } from "@/domain/sketch-editing/operations";
 import {
@@ -1523,6 +1529,12 @@ function editQueryClickRefusal(
           : SPLIT_TARGET_UNSUPPORTED_MESSAGE;
   return (
     kindRefusal ??
+    // T15d ([TECH] T-11): a mirror seed or output target, before any query.
+    mirrorEditRefusal(
+      session.definition,
+      [{ kind: "entity", entityId: click.targetEntityId }],
+      kind,
+    ) ??
     (hasAcceptedLiveSolveOfDefinition(session)
       ? null
       : editQueryBasisNotAcceptedMessage(kind)) ??
@@ -2385,9 +2397,16 @@ export function beginSketchGeometryDrag(
     return session;
   }
 
-  // Resolve the handle from the explicit parameter or from the PrimitiveRef + definition.
+  // Resolve the handle from the explicit parameter or from the PrimitiveRef +
+  // definition, judged against the live solve (D9′: a failed mirror's copy
+  // is not draggable).
   const handle: SketchDragHandle | null =
-    explicitHandle ?? resolveHandleFromTarget(session.definition, target);
+    explicitHandle ??
+    resolveHandleFromTarget(
+      session.definition,
+      target,
+      session.liveSolve?.solvedSnapshot ?? null,
+    );
   if (!handle) {
     return session;
   }
@@ -2421,6 +2440,7 @@ export function beginSketchGeometryDrag(
       workingDefinition,
       intent.entityId,
       intent.occurrenceId,
+      session.modelingTolerance,
     );
     if (converted) {
       workingDefinition = converted;
@@ -2443,11 +2463,19 @@ export function beginSketchGeometryDrag(
  * Convert an automatic tangent to authored using the visible (mean-arm)
  * vector from the spline reconstruction. Returns the mutated definition,
  * or null if the tangent is already authored or the reconstruction fails.
+ *
+ * T15d ([TECH] T-12): on a mirror output the occurrence's tangent is a
+ * driven slot, so the conversion is made on the authority: the root seed
+ * occurrence becomes authored with the reflected visible vector (the
+ * owner's `mirrorSeedTangentOf`), and the owner's structural sync makes
+ * the output occurrence authored to match. The drag then targets the
+ * output's (driven) vector slot through the coupled solve.
  */
 function convertAutomaticTangentToAuthored(
   definition: SketchDefinition,
   entityId: SketchEntityId,
   occurrenceId: string,
+  modelingTolerance: number,
 ): SketchDefinition | null {
   const entity = definition.entities.find((e) => e.entityId === entityId);
   if (!entity || entity.kind !== "spline") return null;
@@ -2469,24 +2497,39 @@ function convertAutomaticTangentToAuthored(
   const visibleVector = reconstruction.handles[occIndex];
   if (!visibleVector) return null;
 
+  const seed = mirrorSeedTangentOf({
+    definition,
+    modelingTolerance,
+    entityId,
+    occurrenceId,
+    vector: visibleVector,
+  });
+  const authored = seed ?? { entityId, occurrenceId, vector: visibleVector };
   // Mutate the definition to convert this occurrence to authored.
-  return {
+  const converted = {
     ...definition,
     entities: definition.entities.map((e) => {
-      if (e.entityId !== entityId || e.kind !== "spline") return e;
+      if (e.entityId !== authored.entityId || e.kind !== "spline") return e;
       return {
         ...e,
         pointOccurrences: e.pointOccurrences.map((occ) =>
-          occ.occurrenceId === occurrenceId
+          occ.occurrenceId === authored.occurrenceId &&
+          occ.tangent.kind === "automatic"
             ? {
                 ...occ,
-                tangent: { kind: "authored" as const, vector: visibleVector },
+                tangent: {
+                  kind: "authored" as const,
+                  vector: authored.vector,
+                },
               }
             : occ,
         ),
       };
     }),
   };
+  return seed
+    ? syncMirrorOutputStructures({ definition: converted, modelingTolerance })
+    : converted;
 }
 
 /** Start the drag with the resolved intent. */
@@ -2893,6 +2936,25 @@ function buildDragTarget(
       };
     }
     case "tangentVector": {
+      if (exactZero) {
+        // T15d: Rv(0) = 0 for every axis, so on a mirror copy the exact-zero
+        // pin is the same requirement on the root seed occurrence, the
+        // tangent's authority (a hard pin on the copy's driven slot only
+        // converges near zero).
+        const authority =
+          mirrorRootSeedOccurrence(
+            definition,
+            intent.entityId,
+            intent.occurrenceId,
+          ) ?? intent;
+        return {
+          kind: "sketchTangentVector",
+          entityId: authority.entityId,
+          occurrenceId: authority.occurrenceId,
+          targetVector: [0, 0],
+          exactZero,
+        };
+      }
       // Target vector = offsetPoint minus the fit point's position.
       const fitPoint = definition.points.find(
         (p) => p.pointId === intent.pointId,
@@ -2907,7 +2969,7 @@ function buildDragTarget(
         kind: "sketchTangentVector",
         entityId: intent.entityId,
         occurrenceId: intent.occurrenceId,
-        targetVector: exactZero ? [0, 0] : targetVector,
+        targetVector,
         exactZero,
       };
     }
@@ -2945,11 +3007,9 @@ export function solveDragEdit(
   interactiveSolveSession: SketchCompiledSolveSession | null = null,
   complete = true,
 ): SolveDragEditResult {
-  // Unconstrained fast path: no constraints or dimensions.
-  if (
-    definition.constraints.length === 0 &&
-    definition.dimensions.length === 0
-  ) {
+  // Unconstrained fast path: no constraints, dimensions or mirrors (T15d:
+  // a mirror drag always solves).
+  if (usesUnconstrainedDragFastPath(definition)) {
     return applyUnconstrainedDrag(definition, intent, dragTarget, derivation);
   }
 
@@ -3223,6 +3283,22 @@ function dragFeedbackTarget(
 }
 
 /**
+ * Whether a drag skips the solver (T12b fast path): nothing in the sketch
+ * constrains the dragged geometry. T15d ([TECH] T-3): never with a mirror
+ * relationship, whose outputs are coupled to their seeds and axis through
+ * the solve (an output drag must move its seed, not be re-derived back).
+ */
+function usesUnconstrainedDragFastPath(definition: SketchDefinition) {
+  return (
+    definition.constraints.length === 0 &&
+    definition.dimensions.length === 0 &&
+    !(definition.derivedRelationships ?? []).some(
+      (relationship) => relationship.kind === "mirror",
+    )
+  );
+}
+
+/**
  * Unconstrained fast path: apply the drag target directly to the definition
  * without running the solver.
  */
@@ -3333,10 +3409,7 @@ function startInteractiveSolveSessionForDrag(
 ):
   | { kind: "started"; session: SketchCompiledSolveSession | null }
   | { kind: "unacceptable"; message: string } {
-  if (
-    definition.constraints.length === 0 &&
-    definition.dimensions.length === 0
-  ) {
+  if (usesUnconstrainedDragFastPath(definition)) {
     return { kind: "started", session: null };
   }
 

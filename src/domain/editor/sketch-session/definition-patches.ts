@@ -9,6 +9,10 @@ import {
   type SketchDerivationSettings,
 } from "@/contracts/sketch/derived-geometry";
 import {
+  orderDerivedRelationships,
+  syncMirrorOutputStructures,
+} from "@/contracts/sketch/mirror-requirements";
+import {
   cubicSpansPoleBounds,
   orderedSplineOccurrences,
 } from "@/contracts/sketch/spline-geometry";
@@ -29,6 +33,13 @@ export function addAnchorOffset(
   };
 }
 
+/**
+ * The unconstrained drag fast path's write (T12b): the dragged point
+ * positions, then every derived relationship re-evaluated. T15d: only for
+ * sketches without a mirror relationship (a mirror drag always solves, so
+ * its outputs are written from the solve, never re-derived here); pattern,
+ * transform and offset outputs still follow their seeds this way.
+ */
 export function applyPointPositionsToDefinition(
   definition: SketchDefinition,
   positions: readonly Pick<SketchPointDefinition, "pointId" | "position">[],
@@ -56,6 +67,20 @@ export function applyPointPositionsToDefinition(
   }).definition;
 }
 
+/**
+ * Writes an accepted solve into the authored definition.
+ *
+ * T15d ([TECH] T-3, review R-1): the snapshot is the only owner of values.
+ * Every solved point and circle radius (mirror outputs included) and every
+ * authored spline handle (mirror output occurrences included) is written
+ * as the snapshot holds it; mirrors are never re-evaluated here. The
+ * mirror owner's structural sync (tangent kinds incl. exact zero, sweep,
+ * closure, policy, `endSpanParameterLengths`) runs between the two writes,
+ * so an output occurrence that became authored takes the snapshot's
+ * vector. A failed (held) mirror keeps its stored outputs. Pattern,
+ * transform and offset relationships are re-evaluated as before, in
+ * dependency order, from the written geometry.
+ */
 export function applySolvedSketchToDefinition(
   definition: SketchDefinition,
   solvedSnapshot: SolvedSketchSnapshot,
@@ -84,27 +109,51 @@ export function applySolvedSketchToDefinition(
     ),
   );
 
-  const acceptedDefinition = {
+  const solvedHandles = new Map(
+    definition.entities.flatMap((entity) => {
+      const reconstruction = solvedSplines.get(entity.entityId);
+      const ordered =
+        entity.kind === "spline" ? orderedSplineOccurrences(entity) : null;
+      return reconstruction && ordered
+        ? [
+            [
+              entity.entityId,
+              new Map(
+                ordered.map((occurrence, index) => [
+                  occurrence.occurrenceId,
+                  reconstruction.handles[index],
+                ]),
+              ),
+            ] as const,
+          ]
+        : [];
+    }),
+  );
+
+  const positionedDefinition = {
     ...definition,
     points: definition.points.map((point) => {
       const position = solvedPointPositions.get(point.pointId);
       return position ? { ...point, position } : point;
     }),
     entities: definition.entities.map((entity) => {
-      if (entity.kind === "circle") {
-        const radius = solvedCircleRadii.get(entity.entityId);
-        return radius === undefined ? entity : { ...entity, radius };
-      }
+      if (entity.kind !== "circle") return entity;
+      const radius = solvedCircleRadii.get(entity.entityId);
+      return radius === undefined ? entity : { ...entity, radius };
+    }),
+  };
+  const structuredDefinition = syncMirrorOutputStructures({
+    definition: positionedDefinition,
+    modelingTolerance: derivation.modelingTolerance,
+    held: new Set(solvedSnapshot.failedDerivationIds ?? []),
+  });
+
+  const acceptedDefinition = {
+    ...structuredDefinition,
+    entities: structuredDefinition.entities.map((entity) => {
       if (entity.kind !== "spline") return entity;
-      const reconstruction = solvedSplines.get(entity.entityId);
-      const ordered = orderedSplineOccurrences(entity);
-      if (!reconstruction || !ordered) return entity;
-      const solvedByOccurrence = new Map(
-        ordered.map((occurrence, index) => [
-          occurrence.occurrenceId,
-          reconstruction.handles[index],
-        ]),
-      );
+      const solvedByOccurrence = solvedHandles.get(entity.entityId);
+      if (!solvedByOccurrence) return entity;
       return {
         ...entity,
         pointOccurrences: entity.pointOccurrences.map((occurrence) => {
@@ -120,10 +169,22 @@ export function applySolvedSketchToDefinition(
     }),
   };
 
-  return evaluateSketchDerivations({
-    definition: acceptedDefinition,
-    ...derivation,
-  }).definition;
+  // Only the resolved non-mirror relationships are re-evaluated; an
+  // unresolved one stays held as the snapshot holds it.
+  const reevaluated = orderDerivedRelationships(definition).order.filter(
+    (relationship) => relationship.kind !== "mirror",
+  );
+  if (reevaluated.length === 0) return acceptedDefinition;
+  return {
+    ...evaluateSketchDerivations({
+      definition: {
+        ...acceptedDefinition,
+        derivedRelationships: reevaluated,
+      },
+      ...derivation,
+    }).definition,
+    derivedRelationships: definition.derivedRelationships,
+  };
 }
 
 export function getSketchDatumGuideExtent(

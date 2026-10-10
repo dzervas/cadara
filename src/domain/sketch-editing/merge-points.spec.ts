@@ -1086,6 +1086,27 @@ describe("R-4: derived relationships (real contributions)", () => {
       /^Both points are used by /,
     );
 
+    // Its driven outputs stay unmergeable.
+    const drivenPoint = relationship.outputs[0]?.outputPointIds[0];
+    if (drivenPoint)
+      expect(getSketchMergePointRefusal(withRelationship, drivenPoint)).toMatch(
+        / is driven by /,
+      );
+
+    // T15d ([TECH] T-11): a mirror seed point is refused on either side of
+    // the pair (after the R-4 pair rule above), naming the mirror.
+    if (kind === "mirror") {
+      for (const [source, destination] of [
+        ["s", "q"],
+        ["q", "s"],
+      ] as const)
+        expect(merge(withRelationship, source, destination)).toEqual({
+          valid: false,
+          message: `This point is part of a mirror (${relationship.label}); remove the mirror first to merge it.`,
+        });
+      return;
+    }
+
     // One side referenced: retargeted, and the merged definition validates
     // (runtime schema incl. G18 offset ownership).
     const merged = valid(merge(withRelationship, "s", "q"));
@@ -1104,13 +1125,6 @@ describe("R-4: derived relationships (real contributions)", () => {
         .map((id) => (id === pid("q") ? pid("s") : id)),
     );
     expect(validateSketchDefinition(seedSide.definition).success).toBe(true);
-
-    // Its driven outputs stay unmergeable.
-    const drivenPoint = relationship.outputs[0]?.outputPointIds[0];
-    if (drivenPoint)
-      expect(getSketchMergePointRefusal(withRelationship, drivenPoint)).toMatch(
-        / is driven by /,
-      );
   });
 
   // Review R-4.2: a mirror reads its axis line too, so a seed end merged
