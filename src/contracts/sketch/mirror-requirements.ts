@@ -1,6 +1,7 @@
 /**
- * The single owner of mirror reflection arithmetic (T15a, [TECH] T-2; dark:
- * nothing in production calls it yet).
+ * The single owner of mirror reflection arithmetic (T15a, [TECH] T-2; live
+ * since T15b: derivation evaluation, its JVP/pullback and the solver
+ * projection call it).
  *
  * A mirror relationship is the internal requirement output = R(seed, axis),
  * imposed by substitution ([TECH] T-1). This module owns:
@@ -14,10 +15,10 @@
  * - the mirror correspondence resolver (A1).
  *
  * The point, vector and point-differential expressions are, operation for
- * operation, those of `derived-geometry.ts` (`reflectAcrossLine`,
- * `getMirrorTransform`), so T15b can delete those and call this owner with
- * bitwise-identical results. No tolerance is introduced: the only threshold
- * is the document modeling tolerance τ, passed in.
+ * operation, those of the deleted `derived-geometry.ts` mirror transform
+ * (`reflectAcrossLine`, `getMirrorTransform`), so evaluation results are
+ * bitwise unchanged. No tolerance is introduced: the only threshold is the
+ * document modeling tolerance τ, passed in.
  */
 import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
 import type {
@@ -58,11 +59,11 @@ export type MirrorRelationship = Extract<
 >;
 
 /**
- * How a mirror names its axis: the persisted straight-line reference, or a
- * sketch datum axis given as an origin and a unit axis vector (exactly
- * [±1, 0] or [0, ±1]; anything else is a programming error and throws).
- * The datum form is internal until T15b persists a `mirrorReference` kind
- * for it (R-6).
+ * How a mirror names its axis: a persisted reference (a straight sketch
+ * line, or a sketch datum axis: the x axis through the origin along [1, 0],
+ * the y axis along [0, 1]), or an internal datum axis given as an origin
+ * and a unit axis vector (exactly [±1, 0] or [0, ±1]; anything else is a
+ * programming error and throws).
  */
 export type MirrorAxisReference =
   | MirrorRelationship["mirrorReference"]
@@ -72,7 +73,7 @@ export type MirrorAxisReference =
       readonly direction: SketchPoint2D;
     };
 
-/** A mirror relationship whose axis may be a datum axis (internal until T15b). */
+/** A mirror relationship whose axis may also be an internal datum axis. */
 export type MirrorRelationshipInput = Omit<
   MirrorRelationship,
   "mirrorReference"
@@ -181,6 +182,17 @@ export function resolveMirrorAxis(
   modelingTolerance: number,
 ): MirrorAxisResolution {
   let axis: MirrorAxis;
+  if (reference.kind === "sketchDatum")
+    return resolveMirrorAxis(
+      derivationId,
+      {
+        kind: "datumAxis",
+        origin: [0, 0],
+        direction: reference.datum === "xAxis" ? [1, 0] : [0, 1],
+      },
+      geometry,
+      modelingTolerance,
+    );
   if (reference.kind === "datumAxis") {
     const [dx, dy] = reference.direction;
     if (Math.abs(dx) + Math.abs(dy) !== 1 || dx * dy !== 0)
@@ -631,9 +643,10 @@ type MirrorOutputRecord = MirrorRelationship["outputs"][number];
 /**
  * The map check of one output (R-3b): seed and output exist, are
  * mirrorable and of one kind, the recorded maps equal their defining
- * points (an empty `seedPointIds` means the seed's defining points), have
- * one length (spline occurrence counts), and every point exists. Returns
- * the resolved pair, or why the map is stale.
+ * points, have one length (spline occurrence counts), and every point
+ * exists. An empty `seedPointIds` is stale like any other mismatch (T15b:
+ * every writer records the seed's defining points). Returns the resolved
+ * pair, or why the map is stale.
  */
 function checkMirrorOutputMap(
   output: MirrorOutputRecord,
@@ -660,12 +673,10 @@ function checkMirrorOutputMap(
     );
   const seedDefining = mirrorablePointIds(seed);
   const targetDefining = mirrorablePointIds(target);
-  const seedPointIds =
-    output.seedPointIds.length > 0 ? output.seedPointIds : seedDefining;
+  const seedPointIds = output.seedPointIds;
   if (
     !seedDefining ||
     !targetDefining ||
-    !seedPointIds ||
     seedPointIds.length !== output.outputPointIds.length ||
     !sameIds(seedPointIds, seedDefining) ||
     !sameIds(output.outputPointIds, targetDefining)
@@ -942,7 +953,10 @@ function readIds(
     ...relationship.seedEntityIds,
     ...relationship.outputs.map((output) => output.seedEntityId),
   ];
-  if (relationship.kind === "mirror")
+  if (
+    relationship.kind === "mirror" &&
+    relationship.mirrorReference.kind === "lineEntity"
+  )
     entityIds.push(relationship.mirrorReference.entityId);
   const ids: string[] = relationship.outputs.flatMap(
     (output) => output.seedPointIds,
@@ -1117,13 +1131,7 @@ function counterpartSteps(
         continue;
       }
       if (ref.kind === "point") {
-        const seed = entityById.get(output.seedEntityId);
-        const seedPointIds =
-          output.seedPointIds.length > 0
-            ? output.seedPointIds
-            : seed && isMirrorable(seed)
-              ? (mirrorablePointIds(seed) ?? [])
-              : [];
+        const seedPointIds = output.seedPointIds;
         if (seedPointIds.length !== output.outputPointIds.length) continue;
         seedPointIds.forEach((seedPointId, index) => {
           const outputPointId = output.outputPointIds[index]!;

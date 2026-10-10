@@ -857,6 +857,10 @@ export function getSelectedSketchEntityIds(
     .map((target) => target.entityId);
 }
 
+/** T15b (review A10): a sketch axis is only the final Sketch Mirror pick. */
+export const MIRROR_DATUM_AXIS_ORDER_MESSAGE =
+  "Pick the geometry to mirror first, then the sketch axis as the final mirror axis.";
+
 export function getSketchEditOperatorResult(
   session: SketchSessionState,
   activeEditTool: SketchEditToolState,
@@ -906,7 +910,16 @@ export function getSketchEditOperatorResult(
         sequence: nextSequence,
         factories,
       });
-    case "sketchMirror":
+    case "sketchMirror": {
+      // T15b (T-7): a sketch datum axis as the final pick is the axis;
+      // review A10: one picked before the seeds is refused, not ignored.
+      const last = activeEditTool.selectedTargets.at(-1);
+      if (
+        activeEditTool.selectedTargets.some(
+          (target) => target.kind === "sketchDatumReference" && target !== last,
+        )
+      )
+        return refusedEditOperation(MIRROR_DATUM_AXIS_ORDER_MESSAGE);
       return createSketchDerivedTransformContribution({
         definition: session.definition,
         operatorKind: "mirror",
@@ -915,7 +928,12 @@ export function getSketchEditOperatorResult(
         sequence: nextSequence,
         factories,
         modelingTolerance: session.modelingTolerance,
+        mirrorDatumAxis:
+          last?.kind === "sketchDatumReference" && last.datumId !== "origin"
+            ? last.datumId
+            : null,
       });
+    }
     case "sketchLinearPattern":
       return createSketchDerivedTransformContribution({
         definition: session.definition,
@@ -1288,13 +1306,15 @@ function commitSketchMergePoints(
     result.definition,
   );
   // The merge is the committed change: the explanation names it (review A-1).
-  const explanation = committed.liveSolve?.accepted
-    ? null
-    : getSketchSessionInvalidFeedback(
-        committed,
-        result.retargetedRequirementIds,
-        hasAcceptedLiveSolveOfDefinition(session),
-      );
+  // T15b (O-1): explained whenever profiles are unavailable (as after Undo/Redo).
+  const explanation =
+    committed.liveRegions.status !== "unavailable"
+      ? null
+      : getSketchSessionInvalidFeedback(
+          committed,
+          result.retargetedRequirementIds,
+          hasAcceptedLiveSolveOfDefinition(session),
+        );
   const validationMessage =
     explanation === null
       ? null
@@ -2034,7 +2054,12 @@ export function selectSketchEditToolTarget(
     };
   }
 
-  if (target.kind !== "sketchEntity") {
+  // T15b (T-7): Sketch Mirror also takes a sketch datum axis as its axis.
+  const isMirrorDatumAxis =
+    activeEditTool.toolId === "sketchMirror" &&
+    target.kind === "sketchDatumReference" &&
+    target.datumId !== "origin";
+  if (target.kind !== "sketchEntity" && !isMirrorDatumAxis) {
     const message = getSketchEditToolDefinition(activeEditTool.toolId).metadata
       .validationMessages.unsupportedTarget;
     return {

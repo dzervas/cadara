@@ -165,13 +165,25 @@ export interface SketchOffsetPiecewiseCubicOutput {
   spans: readonly SketchOffsetPiecewiseCubicSpan[];
 }
 
+/**
+ * A mirror relationship's axis: a straight sketch line (construction lines
+ * included), or a sketch datum axis (T15b, [TECH] T-7: the datum-line
+ * operand shape; fixed, no solve variables).
+ */
+export type SketchMirrorReference =
+  | {
+      kind: "lineEntity";
+      entityId: SketchEntityId;
+    }
+  | {
+      kind: "sketchDatum";
+      datum: Exclude<SketchDatumOperandKind, "origin">;
+    };
+
 export type SketchDerivationDefinition =
   | (SketchDerivationDefinitionBase & {
       kind: "mirror";
-      mirrorReference: {
-        kind: "lineEntity";
-        entityId: SketchEntityId;
-      };
+      mirrorReference: SketchMirrorReference;
     })
   | (SketchDerivationDefinitionBase & {
       kind: "linearPattern";
@@ -1641,6 +1653,16 @@ export interface SolvedSketchSnapshot {
    * when no offset relationship is certified.
    */
   certifiedOffsetDerivationIds?: string[];
+  /**
+   * T15b ([TECH] T-8/T-16): the non-offset derived relationships (every
+   * mirror failure, and any relationship whose dependencies cannot be
+   * ordered) whose evaluation failed at the solved values, in definition
+   * order (solved revision data, never identity). Each has exactly one
+   * `error` diagnostic in `diagnostics`; its outputs are held at their
+   * stored values and are non-accepted geometry (G19,
+   * `nonAcceptedOffsetOutputs`). Absent when none failed.
+   */
+  failedDerivationIds?: string[];
 }
 
 /** One adjacency of a solve frame's plan ([TECH] G3; trims carry their leaves and Newton seeds). */

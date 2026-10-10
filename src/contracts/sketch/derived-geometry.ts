@@ -39,6 +39,24 @@ import {
   type OffsetFrameOutputMap,
   type OffsetFramePointDatum,
 } from "@/contracts/sketch/offset-derivation-outputs";
+import { canonicalArcSupport } from "@/contracts/sketch/canonical-arc-support";
+import {
+  applyMirrorOutputStructure,
+  applyMirrorOutputValues,
+  evaluateMirrorRelationship,
+  mirrorArcVariablesJvp,
+  mirrorArcVariablesVjp,
+  mirrorPointJvp,
+  mirrorPointVjp,
+  mirrorVectorJvp,
+  mirrorVectorVjp,
+  orderDerivedRelationships,
+  type MirrorArcVariables,
+  type MirrorAxis,
+  type MirrorAxisCotangent,
+  type MirrorOutputEvaluation,
+  type MirrorRelationshipFailure,
+} from "@/contracts/sketch/mirror-requirements";
 
 /** Explicit diagnostic: a derived shell used as a mirror/pattern/transform seed (U-G2). */
 export const DERIVED_SHELL_SEED_UNSUPPORTED =
@@ -61,12 +79,21 @@ export interface SketchDerivationInput {
    * call. Geometry is byte-identical either way.
    */
   readonly withDerivatives?: boolean;
+  /**
+   * T15b (R-4, the solver projection only): the solver slots [r, θs, θe] of
+   * every arc whose slots are authority (not driven). With them a mirror
+   * output arc's variables are the reflection of its seed arc's variables
+   * (`MirrorDerivationRecord`), in dependency order. Absent (display,
+   * commit, creation, compile): arcs are their mirrored points plus the
+   * flipped sweep.
+   */
+  readonly arcVariables?: ReadonlyMap<SketchEntityId, MirrorArcVariables>;
 }
 
 /** τ and the offset plan hints of one derivation evaluation (callers thread them with a definition). */
 export type SketchDerivationSettings = Omit<
   SketchDerivationInput,
-  "definition" | "withDerivatives"
+  "definition" | "withDerivatives" | "arcVariables"
 >;
 
 /** The evaluated solve frame of one offset relationship and its output map. */
@@ -89,9 +116,29 @@ export interface OffsetDerivationFailure {
   readonly diagnostic: SketchSolveDiagnostic;
 }
 
+/**
+ * One mirror relationship evaluated by the owner at this iterate (T15b):
+ * its axis and output values, read by the JVP and the pullback.
+ */
+export interface MirrorDerivationRecord {
+  readonly derivationId: string;
+  readonly axis: MirrorAxis;
+  readonly outputs: readonly MirrorOutputEvaluation[];
+  /**
+   * Solver path only (`arcVariables` given), per seed arc entity: whether
+   * its variables were solver slots or an upstream mirror's output
+   * (`variables`), or the point formula of a driven point-defined arc
+   * (`points`: offset seeds and outputs, pattern/transform outputs).
+   */
+  readonly seedArcSources: ReadonlyMap<SketchEntityId, "variables" | "points">;
+}
+
 export interface SketchDerivationEvaluationResult {
   definition: SketchDefinition;
-  /** Sketch-scoped diagnostics (never an offset relationship's failure, G16′). */
+  /**
+   * Sketch-scoped diagnostics (never an offset relationship's failure,
+   * G16′, nor a mirror or unresolved relationship's failure, T15b).
+   */
   diagnostics: SketchSolveDiagnostic[];
   readonly modelingTolerance: number;
   /** Every offset relationship whose solve frame evaluated, in relationship order. */
@@ -103,6 +150,45 @@ export interface SketchDerivationEvaluationResult {
    * neither `offsetFrames` nor `diagnostics`.
    */
   readonly offsetFailures: readonly OffsetDerivationFailure[];
+  /**
+   * T15b ([TECH] T-8/T-16): every non-offset relationship that failed at
+   * this iterate, one failure each, in relationship order: a mirror the
+   * owner rejects (missing or degenerate axis, stale map) and any
+   * relationship whose dependencies cannot be ordered
+   * (`derived-relationship-dependency-unresolved`). Its outputs keep the
+   * iterate's values (held); the solver reports the failure as an error
+   * and the outputs as non-accepted.
+   */
+  readonly derivedFailures: readonly MirrorRelationshipFailure[];
+  /** Every mirror relationship the owner evaluated, in evaluation order. */
+  readonly mirrorFrames: readonly MirrorDerivationRecord[];
+  /** Solver path only: the variables of every evaluated mirror output arc. */
+  readonly mirrorArcVariables: ReadonlyMap<SketchEntityId, MirrorArcVariables>;
+  /** The evaluation (dependency) order of the resolved relationships ([TECH] T-9). */
+  readonly relationshipOrder: readonly SketchDerivationDefinition[];
+}
+
+/**
+ * The solver variables [r, θs, θe] of a point-defined arc: the canonical
+ * support radius and the atan2 angles of its end points (the solver's
+ * driven-arc projection, R-g3).
+ */
+export function pointDefinedArcVariables(
+  center: SketchPoint2D,
+  start: SketchPoint2D,
+  end: SketchPoint2D,
+  sweepDirection: "clockwise" | "counterClockwise",
+): MirrorArcVariables {
+  const startOffset: SketchPoint2D = [
+    start[0] - center[0],
+    start[1] - center[1],
+  ];
+  const endOffset: SketchPoint2D = [end[0] - center[0], end[1] - center[1]];
+  return {
+    radius: canonicalArcSupport(center, start, end, sweepDirection).radius,
+    startAngle: Math.atan2(startOffset[1], startOffset[0]),
+    endAngle: Math.atan2(endOffset[1], endOffset[0]),
+  };
 }
 
 type TransformPoint = (point: SketchPoint2D) => SketchPoint2D;
@@ -236,119 +322,6 @@ function rotateAround(
   return [origin[0] + x * cos - y * sin, origin[1] + x * sin + y * cos];
 }
 
-function reflectAcrossLine(
-  point: SketchPoint2D,
-  start: SketchPoint2D,
-  end: SketchPoint2D,
-): SketchPoint2D | null {
-  const dx = end[0] - start[0];
-  const dy = end[1] - start[1];
-  const lengthSquared = dx * dx + dy * dy;
-
-  if (lengthSquared <= EPSILON) {
-    return null;
-  }
-
-  const t =
-    ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / lengthSquared;
-  const projection: SketchPoint2D = [start[0] + t * dx, start[1] + t * dy];
-
-  return [projection[0] * 2 - point[0], projection[1] * 2 - point[1]];
-}
-
-function getMirrorTransform(
-  relationship: Extract<SketchDerivationDefinition, { kind: "mirror" }>,
-  entityById: Map<SketchEntityId, SketchEntityDefinition>,
-  pointById: Map<SketchPointId, SketchPointDefinition>,
-  diagnostics: SketchSolveDiagnostic[],
-  pointVariation?: Readonly<Record<SketchPointId, SketchPoint2D>>,
-): RelationshipTransform | null {
-  const axis = entityById.get(relationship.mirrorReference.entityId);
-  if (!axis || axis.kind !== "lineSegment") {
-    diagnostics.push(
-      diagnostic(
-        "derived-transform-missing-mirror-axis",
-        "error",
-        `Mirror relationship ${relationship.derivationId} references a missing or unsupported axis.`,
-        axis ? { kind: "entity", entityId: axis.entityId } : null,
-      ),
-    );
-    return null;
-  }
-
-  const start = pointById.get(axis.startPointId);
-  const end = pointById.get(axis.endPointId);
-  if (!start || !end) {
-    diagnostics.push(
-      diagnostic(
-        "derived-transform-unsatisfied-mirror-axis",
-        "error",
-        `Mirror relationship ${relationship.derivationId} cannot resolve its axis points.`,
-        { kind: "entity", entityId: axis.entityId },
-      ),
-    );
-    return null;
-  }
-
-  const dx = end.position[0] - start.position[0];
-  const dy = end.position[1] - start.position[1];
-  const lengthSquared = dx * dx + dy * dy;
-  const dStart = pointVariation?.[start.pointId] ?? ([0, 0] as const);
-  const dEnd = pointVariation?.[end.pointId] ?? ([0, 0] as const);
-  const dAxis: SketchPoint2D = [dEnd[0] - dStart[0], dEnd[1] - dStart[1]];
-  const dLengthSquared = 2 * (dx * dAxis[0] + dy * dAxis[1]);
-  const differentiateReflection = (
-    value: SketchPoint2D,
-    differential: SketchPoint2D,
-    relativeToStart: boolean,
-  ): SketchPoint2D => {
-    const relative: SketchPoint2D = relativeToStart
-      ? [value[0] - start.position[0], value[1] - start.position[1]]
-      : value;
-    const dRelative: SketchPoint2D = relativeToStart
-      ? [differential[0] - dStart[0], differential[1] - dStart[1]]
-      : differential;
-    const numerator = relative[0] * dx + relative[1] * dy;
-    const dNumerator =
-      dRelative[0] * dx +
-      dRelative[1] * dy +
-      relative[0] * dAxis[0] +
-      relative[1] * dAxis[1];
-    const scale = numerator / lengthSquared;
-    const dScale =
-      (dNumerator * lengthSquared - numerator * dLengthSquared) /
-      (lengthSquared * lengthSquared);
-    const originDifferential: SketchPoint2D = relativeToStart
-      ? [2 * dStart[0], 2 * dStart[1]]
-      : [0, 0];
-    return [
-      originDifferential[0] +
-        2 * (dScale * dx + scale * dAxis[0]) -
-        differential[0],
-      originDifferential[1] +
-        2 * (dScale * dy + scale * dAxis[1]) -
-        differential[1],
-    ];
-  };
-  return {
-    point: (point) => {
-      const reflected = reflectAcrossLine(point, start.position, end.position);
-      return reflected ?? point;
-    },
-    vector: (vector) => {
-      const projectionScale = (vector[0] * dx + vector[1] * dy) / lengthSquared;
-      return [
-        2 * projectionScale * dx - vector[0],
-        2 * projectionScale * dy - vector[1],
-      ];
-    },
-    pointDifferential: (point, differential) =>
-      differentiateReflection(point, differential, true),
-    vectorDifferential: (vector, differential) =>
-      differentiateReflection(vector, differential, false),
-  };
-}
-
 function rotateVector(
   vector: SplineVector,
   angle: number,
@@ -362,27 +335,22 @@ function rotateVector(
   ];
 }
 
+/** A pattern or transform relationship (offsets and mirrors have their own owners). */
+type PointTransformRelationship = Exclude<
+  SketchDerivationDefinition,
+  { kind: "offset" | "mirror" }
+>;
+
+/**
+ * The point transform of one pattern/transform instance. Mirrors are owned
+ * by `mirror-requirements.ts` (T15b, [TECH] T-2); offsets recompute their
+ * geometry in `evaluateOffsetRelationship`.
+ */
 function getRelationshipTransform(
-  relationship: SketchDerivationDefinition,
-  entityById: Map<SketchEntityId, SketchEntityDefinition>,
-  pointById: Map<SketchPointId, SketchPointDefinition>,
+  relationship: PointTransformRelationship,
   instanceIndex: number,
-  diagnostics: SketchSolveDiagnostic[],
-  pointVariation?: Readonly<Record<SketchPointId, SketchPoint2D>>,
-): RelationshipTransform | null {
+): RelationshipTransform {
   switch (relationship.kind) {
-    case "offset":
-      // Offset relationships recompute per-segment geometry rather than a
-      // point transform; they are evaluated by evaluateOffsetRelationship.
-      return null;
-    case "mirror":
-      return getMirrorTransform(
-        relationship,
-        entityById,
-        pointById,
-        diagnostics,
-        pointVariation,
-      );
     case "linearPattern":
       return {
         point: (point) => [
@@ -441,7 +409,7 @@ function getRelationshipTransform(
 }
 
 function transformedEntity(
-  relationship: SketchDerivationDefinition,
+  relationship: PointTransformRelationship,
   seed: SketchEntityDefinition,
   output: SketchEntityDefinition,
   transformVector: TransformVector,
@@ -457,15 +425,7 @@ function transformedEntity(
   }
 
   if (seed.kind === "arc" && output.kind === "arc") {
-    return {
-      ...output,
-      sweepDirection:
-        relationship.kind === "mirror"
-          ? seed.sweepDirection === "clockwise"
-            ? "counterClockwise"
-            : "clockwise"
-          : seed.sweepDirection,
-    };
+    return { ...output, sweepDirection: seed.sweepDirection };
   }
 
   if (seed.kind === "spline" && output.kind === "spline") {
@@ -561,7 +521,29 @@ function circleLikeVariationFromPoints(
   };
 }
 
-/** Applies exact directional derivatives of supported one-way derivations. */
+/**
+ * The axis variation of a line mirror axis read from a point variation
+ * (undefined for a datum axis, which has no variables).
+ */
+function mirrorAxisVariationOf(
+  axis: MirrorAxis,
+  points: Readonly<Partial<Record<SketchPointId, SketchPoint2D>>>,
+) {
+  return axis.kind === "line"
+    ? {
+        start: points[axis.startPointId] ?? ZERO_VECTOR,
+        end: points[axis.endPointId] ?? ZERO_VECTOR,
+      }
+    : undefined;
+}
+
+/**
+ * Applies exact directional derivatives of the evaluated derivations, in
+ * their evaluation (dependency) order. Mirror outputs use the owner's JVPs
+ * (T15b); on the solver path an output arc's variation is the reflection
+ * of its seed arc's variable variation (R-4). Failed relationships claim no
+ * motion: their outputs are held.
+ */
 export function evaluateSketchDerivationJvp(
   evaluation: SketchDerivationEvaluationResult,
   variation: SketchDerivationVariation,
@@ -569,6 +551,9 @@ export function evaluateSketchDerivationJvp(
   const evaluatedDefinition = evaluation.definition;
   const offsetRecords = new Map(
     evaluation.offsetFrames.map((record) => [record.derivationId, record]),
+  );
+  const mirrorRecords = new Map(
+    evaluation.mirrorFrames.map((record) => [record.derivationId, record]),
   );
   const pointById = new Map(
     evaluatedDefinition.points.map((point) => [point.pointId, point]),
@@ -601,7 +586,7 @@ export function evaluateSketchDerivationJvp(
     );
   }
 
-  for (const relationship of evaluatedDefinition.derivedRelationships ?? []) {
+  for (const relationship of evaluation.relationshipOrder) {
     if (relationship.kind === "offset") {
       const record = offsetRecords.get(relationship.derivationId);
       // A failed relationship has no frame: its diagnostic already makes
@@ -636,6 +621,72 @@ export function evaluateSketchDerivationJvp(
       continue;
     }
 
+    if (relationship.kind === "mirror") {
+      const record = mirrorRecords.get(relationship.derivationId);
+      // A failed mirror is held: its outputs claim no motion.
+      if (!record) continue;
+      const { axis } = record;
+      const axisVariation = mirrorAxisVariationOf(axis, points);
+      for (const output of record.outputs) {
+        for (const point of output.points)
+          points[point.outputPointId] = mirrorPointJvp(
+            axis,
+            pointById.get(point.seedPointId)!.position,
+            points[point.seedPointId] ?? ZERO_VECTOR,
+            axisVariation,
+          );
+        const seed = entityById.get(output.seedEntityId)!;
+        const target = entityById.get(output.outputEntityId)!;
+        if (seed.kind === "circle") {
+          const seedVariation = entities[seed.entityId];
+          entities[target.entityId] = {
+            kind: "circle",
+            radius: seedVariation?.kind === "circle" ? seedVariation.radius : 0,
+          };
+        } else if (seed.kind === "arc" && target.kind === "arc") {
+          // R-4: on the solver path from the seed arc's variable variation
+          // (a point-defined seed's from its points); else point-based.
+          const seedVariation = !output.arc
+            ? null
+            : record.seedArcSources.get(seed.entityId) === "points"
+              ? circleLikeVariationFromPoints(seed, pointById, points)
+              : entities[seed.entityId];
+          const targetVariation = output.arc
+            ? {
+                kind: "arc" as const,
+                ...mirrorArcVariablesJvp(
+                  axis,
+                  seedVariation?.kind === "arc"
+                    ? seedVariation
+                    : { radius: 0, startAngle: 0, endAngle: 0 },
+                  axisVariation,
+                ),
+              }
+            : circleLikeVariationFromPoints(target, pointById, points);
+          if (targetVariation) entities[target.entityId] = targetVariation;
+        } else if (seed.kind === "spline" && target.kind === "spline") {
+          const seedVariations = splineTangents[seed.entityId] ?? {};
+          const outputVariations = splineTangents[target.entityId] ?? {};
+          const seedVectors = new Map(
+            (orderedSplineOccurrences(seed) ?? []).flatMap((occurrence) =>
+              occurrence.tangent.kind === "authored"
+                ? [[occurrence.occurrenceId, occurrence.tangent.vector]]
+                : [],
+            ),
+          );
+          for (const tangent of output.tangents)
+            outputVariations[tangent.outputOccurrenceId] = mirrorVectorJvp(
+              axis,
+              seedVectors.get(tangent.seedOccurrenceId)!,
+              seedVariations[tangent.seedOccurrenceId] ?? ZERO_VECTOR,
+              axisVariation,
+            );
+          splineTangents[target.entityId] = outputVariations;
+        }
+      }
+      continue;
+    }
+
     for (const output of relationship.outputs) {
       const seed = entityById.get(output.seedEntityId);
       const target = entityById.get(output.outputEntityId);
@@ -653,13 +704,8 @@ export function evaluateSketchDerivationJvp(
       if (seedPointIds.length !== output.outputPointIds.length) continue;
       const transform = getRelationshipTransform(
         relationship,
-        entityById,
-        pointById,
         output.instanceIndex,
-        [],
-        points,
       );
-      if (!transform) continue;
 
       for (let index = 0; index < seedPointIds.length; index += 1) {
         const seedPointId = seedPointIds[index]!;
@@ -720,12 +766,62 @@ export function evaluateSketchDerivationJvp(
 }
 
 /**
+ * The transpose of `circleLikeVariationFromPoints`: an arc cotangent
+ * (radius, start angle, end angle) on a point-defined arc as cotangents on
+ * its centre, start and end points (null where that map is degenerate).
+ */
+function circleLikeCotangentToPoints(
+  entity: Extract<SketchEntityDefinition, { kind: "arc" }>,
+  pointById: ReadonlyMap<SketchPointId, SketchPointDefinition>,
+  cotangent: MirrorArcVariables,
+): ReadonlyMap<SketchPointId, SketchPoint2D> | null {
+  const center = pointById.get(entity.centerPointId)?.position;
+  const start = pointById.get(entity.startPointId)?.position;
+  const end = pointById.get(entity.endPointId)?.position;
+  if (!center || !start || !end) return null;
+  const startRelative: SketchPoint2D = [
+    start[0] - center[0],
+    start[1] - center[1],
+  ];
+  const endRelative: SketchPoint2D = [end[0] - center[0], end[1] - center[1]];
+  const startLengthSquared = startRelative[0] ** 2 + startRelative[1] ** 2;
+  const endLengthSquared = endRelative[0] ** 2 + endRelative[1] ** 2;
+  if (startLengthSquared <= EPSILON || endLengthSquared <= EPSILON) return null;
+  const startLength = Math.sqrt(startLengthSquared);
+  const startCotangent: SketchPoint2D = [
+    (cotangent.radius * startRelative[0]) / startLength -
+      (cotangent.startAngle * startRelative[1]) / startLengthSquared,
+    (cotangent.radius * startRelative[1]) / startLength +
+      (cotangent.startAngle * startRelative[0]) / startLengthSquared,
+  ];
+  const endCotangent: SketchPoint2D = [
+    (-cotangent.endAngle * endRelative[1]) / endLengthSquared,
+    (cotangent.endAngle * endRelative[0]) / endLengthSquared,
+  ];
+  const points = new Map<SketchPointId, SketchPoint2D>();
+  const add = (pointId: SketchPointId, value: SketchPoint2D) => {
+    const current = points.get(pointId) ?? ZERO_VECTOR;
+    points.set(pointId, [current[0] + value[0], current[1] + value[1]]);
+  };
+  add(entity.startPointId, startCotangent);
+  add(entity.endPointId, endCotangent);
+  add(entity.centerPointId, [
+    -startCotangent[0] - endCotangent[0],
+    -startCotangent[1] - endCotangent[1],
+  ]);
+  return points;
+}
+
+/**
  * Prepares a sparse reverse-mode derivative for an already evaluated derivation
  * frame. Only relationships upstream of the supplied cotangent are visited;
  * point/entity lookup data is shared by every residual evaluated in the frame.
  * Offset outputs are pulled back through their solve frame's fixed-topology
  * map (`prepareOffsetFrameDerivatives`, one cached basis per frame): seed
- * points, seed authored tangents and seed circle radii. No finite
+ * points, seed authored tangents and seed circle radii. Mirror outputs are
+ * pulled back through the owner's closed-form VJPs (T15b): seed points,
+ * authored tangents, circle radii and, on the solver path, the seed arc's
+ * variables (R-4), plus both axis endpoints of a line axis. No finite
  * differences.
  */
 export function prepareSketchDerivationPullback(
@@ -745,19 +841,36 @@ export function prepareSketchDerivationPullback(
         datum: OffsetFramePointDatum;
       }
     | {
+        kind: "mirror";
+        record: MirrorDerivationRecord;
+        seedPointId: SketchPointId;
+      }
+    | {
         kind: "transform";
-        relationship: Exclude<SketchDerivationDefinition, { kind: "offset" }>;
+        relationship: PointTransformRelationship;
         instanceIndex: number;
         seedPointId: SketchPointId;
       };
-  interface TangentProducer {
-    relationship: Exclude<SketchDerivationDefinition, { kind: "offset" }>;
-    instanceIndex: number;
-    seedEntityId: SketchEntityId;
-    seedOccurrenceId: string;
-  }
+  type TangentProducer =
+    | {
+        kind: "mirror";
+        record: MirrorDerivationRecord;
+        seedEntityId: SketchEntityId;
+        seedOccurrenceId: string;
+      }
+    | {
+        kind: "transform";
+        relationship: PointTransformRelationship;
+        instanceIndex: number;
+        seedEntityId: SketchEntityId;
+        seedOccurrenceId: string;
+      };
   const pointProducers = new Map<SketchPointId, PointProducer>();
   const entityProducers = new Set<SketchEntityId>();
+  const mirrorEntityProducers = new Map<
+    SketchEntityId,
+    { record: MirrorDerivationRecord; output: MirrorOutputEvaluation }
+  >();
   const offsetEntityProducers = new Map<
     SketchEntityId,
     { record: OffsetDerivationFrameRecord; datum: OffsetFrameEntityDatum }
@@ -772,11 +885,35 @@ export function prepareSketchDerivationPullback(
     for (const [entityId, datum] of record.outputs.entities)
       offsetEntityProducers.set(entityId, { record, datum });
   }
+  for (const record of evaluation.mirrorFrames)
+    for (const output of record.outputs) {
+      mirrorEntityProducers.set(output.outputEntityId, { record, output });
+      for (const point of output.points)
+        pointProducers.set(point.outputPointId, {
+          kind: "mirror",
+          record,
+          seedPointId: point.seedPointId,
+        });
+      for (const tangent of output.tangents)
+        tangentProducers.set(
+          tangentKey(output.outputEntityId, tangent.outputOccurrenceId),
+          {
+            kind: "mirror",
+            record,
+            seedEntityId: output.seedEntityId,
+            seedOccurrenceId: tangent.seedOccurrenceId,
+          },
+        );
+    }
   for (const relationship of definition.derivedRelationships ?? []) {
     if (relationship.kind === "offset") continue;
+    for (const output of relationship.outputs)
+      entityProducers.add(output.outputEntityId);
+    // Mirrors are registered from their evaluated records (a failed mirror
+    // is held: its outputs pull nothing back).
+    if (relationship.kind === "mirror") continue;
     for (const output of relationship.outputs) {
       const target = entityById.get(output.outputEntityId);
-      entityProducers.add(output.outputEntityId);
       const seed = entityById.get(output.seedEntityId);
       if (
         !seed ||
@@ -810,6 +947,7 @@ export function prepareSketchDerivationPullback(
         tangentProducers.set(
           tangentKey(target.entityId, occurrence.occurrenceId),
           {
+            kind: "transform",
             relationship,
             instanceIndex: output.instanceIndex,
             seedEntityId: seed.entityId,
@@ -820,18 +958,22 @@ export function prepareSketchDerivationPullback(
     }
   }
 
-  const axisPointIds = (
-    relationship: Exclude<SketchDerivationDefinition, { kind: "offset" }>,
-  ): readonly SketchPointId[] => {
-    if (relationship.kind !== "mirror") return [];
-    const axis = entityById.get(relationship.mirrorReference.entityId);
-    return axis?.kind === "lineSegment"
-      ? [axis.startPointId, axis.endPointId]
-      : [];
-  };
   const dotPoint = (first: SketchPoint2D, second: SketchPoint2D) =>
     first[0] * second[0] + first[1] * second[1];
   const isZero = (value: SketchPoint2D) => value[0] === 0 && value[1] === 0;
+  const authoredSeedVector = (
+    seedEntityId: SketchEntityId,
+    seedOccurrenceId: string,
+  ): SplineVector | null => {
+    const seed = entityById.get(seedEntityId);
+    if (seed?.kind !== "spline") return null;
+    const occurrence = (orderedSplineOccurrences(seed) ?? []).find(
+      (candidate) => candidate.occurrenceId === seedOccurrenceId,
+    );
+    return occurrence?.tangent.kind === "authored"
+      ? occurrence.tangent.vector
+      : null;
+  };
 
   return (cotangent) => {
     const points: Partial<Record<SketchPointId, SketchPoint2D>> = {};
@@ -886,6 +1028,12 @@ export function prepareSketchDerivationPullback(
       entity[occurrenceId] = [current[0] + value[0], current[1] + value[1]];
       splineTangents[entityId] = entity;
     };
+    /** A mirror axis cotangent onto its endpoints (none for a datum axis). */
+    const pullAxis = (axis: MirrorAxis, value: MirrorAxisCotangent) => {
+      if (!value || axis.kind !== "line") return;
+      pullPoint(axis.startPointId, value.start, new Set());
+      pullPoint(axis.endPointId, value.end, new Set());
+    };
     /** Pulls one frame cotangent back onto the relationship's seeds. */
     const pullOffset = (
       record: OffsetDerivationFrameRecord,
@@ -937,33 +1085,29 @@ export function prepareSketchDerivationPullback(
       }
       const seedPoint = pointById.get(producer.seedPointId);
       if (!seedPoint) return;
-      const dependencies = [
-        producer.seedPointId,
-        ...axisPointIds(producer.relationship),
-      ].filter((dependency, index, all) => all.indexOf(dependency) === index);
-      for (const dependency of dependencies) {
-        const pulled: [number, number] = [0, 0];
-        for (let component = 0; component < 2; component += 1) {
-          const basis: SketchPoint2D = component === 0 ? [1, 0] : [0, 1];
-          const transform = getRelationshipTransform(
-            producer.relationship,
-            entityById,
-            pointById,
-            producer.instanceIndex,
-            [],
-            { [dependency]: basis } as Readonly<
-              Record<SketchPointId, SketchPoint2D>
-            >,
-          );
-          if (!transform) continue;
-          const differential = transform.pointDifferential(
-            seedPoint.position,
-            dependency === producer.seedPointId ? basis : ZERO_VECTOR,
-          );
-          pulled[component] = dotPoint(value, differential);
-        }
-        pullPoint(dependency, pulled, nextVisiting);
+      if (producer.kind === "mirror") {
+        const pulled = mirrorPointVjp(
+          producer.record.axis,
+          seedPoint.position,
+          value,
+        );
+        pullPoint(producer.seedPointId, pulled.point, nextVisiting);
+        pullAxis(producer.record.axis, pulled.axis);
+        return;
       }
+      const pulled: [number, number] = [0, 0];
+      for (let component = 0; component < 2; component += 1) {
+        const basis: SketchPoint2D = component === 0 ? [1, 0] : [0, 1];
+        const transform = getRelationshipTransform(
+          producer.relationship,
+          producer.instanceIndex,
+        );
+        pulled[component] = dotPoint(
+          value,
+          transform.pointDifferential(seedPoint.position, basis),
+        );
+      }
+      pullPoint(producer.seedPointId, pulled, nextVisiting);
     };
     const pullTangent = (
       entityId: SketchEntityId,
@@ -979,27 +1123,33 @@ export function prepareSketchDerivationPullback(
         return;
       }
       if (visiting.has(key)) return;
-      const seed = entityById.get(producer.seedEntityId);
-      if (seed?.kind !== "spline") return;
-      const seedOccurrence = (orderedSplineOccurrences(seed) ?? []).find(
-        (occurrence) => occurrence.occurrenceId === producer.seedOccurrenceId,
+      const seedVector = authoredSeedVector(
+        producer.seedEntityId,
+        producer.seedOccurrenceId,
       );
-      if (!seedOccurrence || seedOccurrence.tangent.kind !== "authored") return;
+      if (!seedVector) return;
       const nextVisiting = new Set(visiting).add(key);
+      if (producer.kind === "mirror") {
+        const pulled = mirrorVectorVjp(producer.record.axis, seedVector, value);
+        pullTangent(
+          producer.seedEntityId,
+          producer.seedOccurrenceId,
+          pulled.vector,
+          nextVisiting,
+        );
+        pullAxis(producer.record.axis, pulled.axis);
+        return;
+      }
       const pulledSeed: [number, number] = [0, 0];
       for (let component = 0; component < 2; component += 1) {
         const basis: SplineVector = component === 0 ? [1, 0] : [0, 1];
         const transform = getRelationshipTransform(
           producer.relationship,
-          entityById,
-          pointById,
           producer.instanceIndex,
-          [],
         );
-        if (!transform) continue;
         pulledSeed[component] = dotPoint(
           value,
-          transform.vectorDifferential(seedOccurrence.tangent.vector, basis),
+          transform.vectorDifferential(seedVector, basis),
         );
       }
       pullTangent(
@@ -1008,43 +1158,13 @@ export function prepareSketchDerivationPullback(
         pulledSeed,
         nextVisiting,
       );
-      for (const axisPointId of axisPointIds(producer.relationship)) {
-        const pulledAxis: [number, number] = [0, 0];
-        for (let component = 0; component < 2; component += 1) {
-          const basis: SketchPoint2D = component === 0 ? [1, 0] : [0, 1];
-          const transform = getRelationshipTransform(
-            producer.relationship,
-            entityById,
-            pointById,
-            producer.instanceIndex,
-            [],
-            { [axisPointId]: basis } as Readonly<
-              Record<SketchPointId, SketchPoint2D>
-            >,
-          );
-          if (!transform) continue;
-          pulledAxis[component] = dotPoint(
-            value,
-            transform.vectorDifferential(
-              seedOccurrence.tangent.vector,
-              ZERO_VECTOR,
-            ),
-          );
-        }
-        pullPoint(axisPointId, pulledAxis, new Set());
-      }
     };
-
-    for (const [pointId, value] of Object.entries(cotangent.points ?? {})) {
-      if (value) pullPoint(pointId as SketchPointId, value, new Set());
-    }
-    for (const [outputEntityId, value] of Object.entries(
-      cotangent.entities ?? {},
-    )) {
-      if (!value) continue;
-      const offsetProducer = offsetEntityProducers.get(
-        outputEntityId as SketchEntityId,
-      );
+    /** An entity (circle radius / arc variable) cotangent onto its authority. */
+    const pullEntity = (
+      entityId: SketchEntityId,
+      value: SketchDerivedEntityVariation,
+    ) => {
+      const offsetProducer = offsetEntityProducers.get(entityId);
       if (offsetProducer) {
         const frameCotangent = offsetFrameEntityCotangent(
           offsetProducer.datum,
@@ -1052,11 +1172,40 @@ export function prepareSketchDerivationPullback(
         );
         if (frameCotangent)
           pullOffset(offsetProducer.record, frameCotangent, new Set());
-        continue;
+        return;
       }
-      if (!entityProducers.has(outputEntityId as SketchEntityId)) {
-        addEntity(outputEntityId as SketchEntityId, value);
-        continue;
+      const mirrorProducer = mirrorEntityProducers.get(entityId);
+      if (mirrorProducer) {
+        const { record, output } = mirrorProducer;
+        if (value.kind === "circle") {
+          if (output.circleRadius !== null)
+            pullEntity(output.seedEntityId, value);
+          return;
+        }
+        if (output.arc) {
+          // R-4: θ′ = 2φ − θ, r′ = r from the seed arc's variables.
+          const pulled = mirrorArcVariablesVjp(record.axis, value);
+          pullAxis(record.axis, pulled.axis);
+          const seed = entityById.get(output.seedEntityId);
+          if (
+            seed?.kind === "arc" &&
+            record.seedArcSources.get(seed.entityId) === "points"
+          ) {
+            for (const [pointId, pointValue] of circleLikeCotangentToPoints(
+              seed,
+              pointById,
+              pulled.arc,
+            ) ?? [])
+              pullPoint(pointId, pointValue, new Set());
+            return;
+          }
+          pullEntity(output.seedEntityId, { kind: "arc", ...pulled.arc });
+          return;
+        }
+      }
+      if (!entityProducers.has(entityId)) {
+        addEntity(entityId, value);
+        return;
       }
       const scalarDot = (
         variation: SketchDerivedEntityVariation | undefined,
@@ -1078,7 +1227,7 @@ export function prepareSketchDerivationPullback(
           pulled[component] = scalarDot(
             jvpOf({
               points: { [point.pointId]: basis },
-            }).entities[outputEntityId as SketchEntityId],
+            }).entities[entityId],
           );
         }
         addPoint(point.pointId, pulled);
@@ -1096,12 +1245,21 @@ export function prepareSketchDerivationPullback(
             entities: {
               [entity.entityId]: { kind: "circle", radius: 1 },
             },
-          }).entities[outputEntityId as SketchEntityId],
+          }).entities[entityId],
         );
         if (radius !== 0) {
           addEntity(entity.entityId, { kind: "circle", radius });
         }
       }
+    };
+
+    for (const [pointId, value] of Object.entries(cotangent.points ?? {})) {
+      if (value) pullPoint(pointId as SketchPointId, value, new Set());
+    }
+    for (const [outputEntityId, value] of Object.entries(
+      cotangent.entities ?? {},
+    )) {
+      if (value) pullEntity(outputEntityId as SketchEntityId, value);
     }
     for (const [entityId, occurrences] of Object.entries(
       cotangent.splineTangents ?? {},
@@ -1274,15 +1432,22 @@ let cachedDerivationInput: SketchDerivationInput | null = null;
 let cachedDerivationResult: SketchDerivationEvaluationResult | null = null;
 
 /**
- * Evaluates every derived relationship of one definition iterate. Offsets
- * run their certifier-free solve frame at the document modeling tolerance τ
- * with the given per-relationship plan hint ([TECH] G3/G17); there is no
- * default τ. Memoized on (definition identity, τ, plan-hint identity).
+ * Evaluates every derived relationship of one definition iterate, in
+ * dependency order ([TECH] T-9, `orderDerivedRelationships`): a
+ * relationship whose dependencies cannot be ordered fails with
+ * `derived-relationship-dependency-unresolved` (an offset as an offset
+ * failure, any other kind as a derived failure) and its outputs are held.
+ * Offsets run their certifier-free solve frame at the document modeling
+ * tolerance τ with the given per-relationship plan hint ([TECH] G3/G17);
+ * there is no default τ. Mirrors are evaluated by their owner
+ * (`mirror-requirements.ts`, T15b): one failure per relationship, outputs
+ * held, never an unchanged point. Memoized on (definition identity, τ,
+ * plan-hint identity, arc-variable identity).
  */
 export function evaluateSketchDerivations(
   input: SketchDerivationInput,
 ): SketchDerivationEvaluationResult {
-  const { definition, modelingTolerance, offsetPlans } = input;
+  const { definition, modelingTolerance, offsetPlans, arcVariables } = input;
   const withDerivatives = input.withDerivatives === true;
   if (
     cachedDerivationInput &&
@@ -1290,6 +1455,7 @@ export function evaluateSketchDerivations(
     cachedDerivationInput.definition === definition &&
     cachedDerivationInput.modelingTolerance === modelingTolerance &&
     cachedDerivationInput.offsetPlans === offsetPlans &&
+    cachedDerivationInput.arcVariables === arcVariables &&
     (cachedDerivationInput.withDerivatives === true) === withDerivatives
   ) {
     return cachedDerivationResult;
@@ -1304,6 +1470,10 @@ export function evaluateSketchDerivations(
       modelingTolerance,
       offsetFrames: [],
       offsetFailures: [],
+      derivedFailures: [],
+      mirrorFrames: [],
+      mirrorArcVariables: new Map(),
+      relationshipOrder: [],
     };
     return cachedDerivationResult;
   }
@@ -1311,6 +1481,11 @@ export function evaluateSketchDerivations(
   const diagnostics: SketchSolveDiagnostic[] = [];
   const offsetFrames: OffsetDerivationFrameRecord[] = [];
   const offsetFailures: OffsetDerivationFailure[] = [];
+  const derivedFailures: MirrorRelationshipFailure[] = [];
+  const mirrorFrames: MirrorDerivationRecord[] = [];
+  const mirrorArcVariables = new Map<SketchEntityId, MirrorArcVariables>();
+  // R-4: the arc variables a mirror seed reads (solver slots, then mirror outputs).
+  const arcState = new Map(arcVariables ?? []);
   const pointById = new Map<SketchPointId, SketchPointDefinition>();
   const pointIndicesById = new Map<SketchPointId, number[]>();
   definition.points.forEach((point, index) => {
@@ -1350,7 +1525,20 @@ export function evaluateSketchDerivations(
     }
   };
 
-  for (const relationship of relationships) {
+  const { order, unresolved } = orderDerivedRelationships(definition);
+  const kindById = new Map(
+    relationships.map((relationship) => [
+      relationship.derivationId,
+      relationship.kind,
+    ]),
+  );
+  for (const failure of unresolved)
+    (kindById.get(failure.derivationId) === "offset"
+      ? offsetFailures
+      : derivedFailures
+    ).push(failure);
+
+  for (const relationship of order) {
     if (relationship.kind === "offset") {
       const record = evaluateOffsetRelationship(
         relationship,
@@ -1372,6 +1560,76 @@ export function evaluateSketchDerivations(
         },
       );
       if (record) offsetFrames.push(record);
+      continue;
+    }
+
+    if (relationship.kind === "mirror") {
+      // U-G2: a derived shell is never the seed of a derived operator; it
+      // is reported before the owner (which would read it as a stale map).
+      const outputs = relationship.outputs.filter((output) => {
+        const seed = entityById.get(output.seedEntityId);
+        if (seed?.kind !== "derivedPiecewiseCubic") return true;
+        diagnostics.push(shellSeedDiagnostic(relationship.derivationId, seed));
+        return false;
+      });
+      const seedArcs = new Map<SketchEntityId, MirrorArcVariables>();
+      const seedArcSources = new Map<SketchEntityId, "variables" | "points">();
+      if (arcVariables)
+        for (const output of outputs) {
+          const seed = entityById.get(output.seedEntityId);
+          if (seed?.kind !== "arc") continue;
+          const known = arcState.get(seed.entityId);
+          if (known) {
+            seedArcs.set(seed.entityId, known);
+            seedArcSources.set(seed.entityId, "variables");
+            continue;
+          }
+          const center = pointById.get(seed.centerPointId)?.position;
+          const start = pointById.get(seed.startPointId)?.position;
+          const end = pointById.get(seed.endPointId)?.position;
+          if (!center || !start || !end) continue;
+          seedArcs.set(
+            seed.entityId,
+            pointDefinedArcVariables(center, start, end, seed.sweepDirection),
+          );
+          seedArcSources.set(seed.entityId, "points");
+        }
+      const evaluation = evaluateMirrorRelationship({
+        relationship:
+          outputs.length === relationship.outputs.length
+            ? relationship
+            : { ...relationship, outputs },
+        geometry: { pointById, entityById },
+        modelingTolerance,
+        ...(arcVariables ? { arcVariables: seedArcs } : {}),
+      });
+      if (!evaluation.ok) {
+        derivedFailures.push(evaluation.failure);
+        continue;
+      }
+      for (const output of evaluation.outputs) {
+        for (const point of output.points)
+          replacePoint(point.outputPointId, point.position);
+        replaceEntity(
+          applyMirrorOutputValues(
+            applyMirrorOutputStructure(
+              entityById.get(output.outputEntityId)!,
+              output,
+            ),
+            output,
+          ),
+        );
+        if (output.arc) {
+          arcState.set(output.outputEntityId, output.arc);
+          mirrorArcVariables.set(output.outputEntityId, output.arc);
+        }
+      }
+      mirrorFrames.push({
+        derivationId: relationship.derivationId,
+        axis: evaluation.axis,
+        outputs: evaluation.outputs,
+        seedArcSources,
+      });
       continue;
     }
 
@@ -1403,15 +1661,7 @@ export function evaluateSketchDerivations(
       }
 
       if (seed.kind === "derivedPiecewiseCubic") {
-        // U-G2: a derived shell is never the seed of a derived operator.
-        diagnostics.push(
-          diagnostic(
-            DERIVED_SHELL_SEED_UNSUPPORTED,
-            "error",
-            `Derived relationship ${relationship.derivationId} uses the derived offset curve ${seed.entityId} as a seed; mirroring, patterning or transforming an offset spline curve is not supported yet.`,
-            { kind: "entity", entityId: seed.entityId },
-          ),
-        );
+        diagnostics.push(shellSeedDiagnostic(relationship.derivationId, seed));
         continue;
       }
 
@@ -1445,14 +1695,8 @@ export function evaluateSketchDerivations(
 
       const transform = getRelationshipTransform(
         relationship,
-        entityById,
-        pointById,
         output.instanceIndex,
-        diagnostics,
       );
-      if (!transform) {
-        continue;
-      }
 
       for (let index = 0; index < seedPointIds.length; index += 1) {
         const seedPointId = seedPointIds[index]!;
@@ -1481,6 +1725,20 @@ export function evaluateSketchDerivations(
     }
   }
 
+  const definitionIndex = new Map(
+    relationships.map((relationship, index) => [
+      relationship.derivationId,
+      index,
+    ]),
+  );
+  const inDefinitionOrder = <T extends { readonly derivationId: string }>(
+    records: T[],
+  ) =>
+    records.sort(
+      (first, second) =>
+        definitionIndex.get(first.derivationId)! -
+        definitionIndex.get(second.derivationId)!,
+    );
   const result: SketchDerivationEvaluationResult = {
     definition: {
       ...definition,
@@ -1489,10 +1747,27 @@ export function evaluateSketchDerivations(
     },
     diagnostics,
     modelingTolerance,
-    offsetFrames,
-    offsetFailures,
+    offsetFrames: inDefinitionOrder(offsetFrames),
+    offsetFailures: inDefinitionOrder(offsetFailures),
+    derivedFailures: inDefinitionOrder(derivedFailures),
+    mirrorFrames,
+    mirrorArcVariables,
+    relationshipOrder: order,
   };
   cachedDerivationInput = input;
   cachedDerivationResult = result;
   return result;
+}
+
+/** U-G2: a derived shell used as the seed of a mirror, pattern or transform. */
+function shellSeedDiagnostic(
+  derivationId: string,
+  seed: SketchEntityDefinition,
+): SketchSolveDiagnostic {
+  return diagnostic(
+    DERIVED_SHELL_SEED_UNSUPPORTED,
+    "error",
+    `Derived relationship ${derivationId} uses the derived offset curve ${seed.entityId} as a seed; mirroring, patterning or transforming an offset spline curve is not supported yet.`,
+    { kind: "entity", entityId: seed.entityId },
+  );
 }

@@ -847,18 +847,20 @@ function commitConstraintAuthoring(
   return {
     session: {
       ...committed,
-      validationMessage: committed.liveSolve?.accepted
-        ? null
-        : getSketchSessionInvalidFeedback(
-            committed,
-            [
-              ...constraints.map((constraint) => constraint.constraintId),
-              ...dimensions.map((dimension) => dimension.dimensionId),
-            ],
-            // T13e2 (review R-1): the commit caused the invalidity only if
-            // the sketch was accepted before it.
-            hasAcceptedLiveSolveOfDefinition(session),
-          ),
+      // T15b (O-1): explained whenever profiles are unavailable (as after Undo/Redo).
+      validationMessage:
+        committed.liveRegions.status !== "unavailable"
+          ? null
+          : getSketchSessionInvalidFeedback(
+              committed,
+              [
+                ...constraints.map((constraint) => constraint.constraintId),
+                ...dimensions.map((dimension) => dimension.dimensionId),
+              ],
+              // T13e2 (review R-1): the commit caused the invalidity only if
+              // the sketch was accepted before it.
+              hasAcceptedLiveSolveOfDefinition(session),
+            ),
     },
     duplicates: [],
   };

@@ -50,7 +50,8 @@ test("evaluateSketchDerivations mirrors geometry and reverses mirrored arc sweep
             seedEntityId: "seed_arc",
             outputEntityId: "mirror_arc",
             instanceIndex: 1,
-            seedPointIds: [],
+            // T15b: an empty map is stale; every writer records the seed's points.
+            seedPointIds: ["arc_center", "arc_start", "arc_end"],
             outputPointIds: ["mirror_center", "mirror_start", "mirror_end"],
           },
         ],
@@ -95,6 +96,7 @@ test("evaluateSketchDerivations mirrors geometry and reverses mirrored arc sweep
     result.diagnostics.length,
     "Valid mirror relationships should not emit diagnostics.",
   ).toBe(0);
+  expect(result.derivedFailures).toEqual([]);
   expect(definition).toEqual(authoredSnapshot);
   expect(
     result.definition.points.find((point) => point.pointId === "axis_start"),
@@ -595,10 +597,22 @@ test("evaluateSketchDerivations emits diagnostics for missing seed, missing outp
     codes.includes("derived-transform-missing-output"),
     "Missing output entities should emit a missing-output diagnostic.",
   ).toBeTruthy();
+  // T15b (re-pin, [TECH] T-8): a mirror failure is the owner's code, one
+  // per relationship, reported as a derived failure (not a sketch diagnostic).
   expect(
-    codes.includes("derived-transform-missing-mirror-axis"),
-    "Missing mirror axes should emit a missing-axis diagnostic.",
-  ).toBeTruthy();
+    codes.some((code) => code.includes("mirror")),
+    "A mirror failure is not a sketch-scoped diagnostic.",
+  ).toBeFalsy();
+  expect(
+    result.derivedFailures.map((failure) => [
+      failure.derivationId,
+      failure.diagnostic.code,
+      failure.diagnostic.severity,
+    ]),
+    "Missing mirror axes should fail the relationship once with derived-mirror-axis-missing.",
+  ).toEqual([
+    ["missing_axis_relationship", "derived-mirror-axis-missing", "error"],
+  ]);
 });
 
 test("evaluateSketchDerivations recomputes offset chains from seed edits with stable output identities", () => {

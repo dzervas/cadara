@@ -6,6 +6,7 @@
 // the authored-action history.
 import { describe, expect, test, vi } from "vitest";
 import { readFile } from "node:fs/promises";
+import { deriveSketchValidity } from "@/contracts/sketch/derived-validity";
 
 import type { AuthoredActionState } from "@/contracts/modeling/authored-actions";
 import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
@@ -80,6 +81,7 @@ import {
   startSketchDraw,
   updateSketchGeometryDrag,
   updateSketchPointer,
+  updateSketchReferenceProjection,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
 import {
@@ -101,6 +103,7 @@ import { TRIM_TOO_FEW_CUTS_MESSAGE } from "@/contracts/sketch/edit-intersections
 import {
   DERIVED_SHELL_DELETE_MESSAGE,
   DERIVED_SHELL_POINT_DELETE_MESSAGE,
+  MIRROR_DATUM_AXIS_ORDER_MESSAGE,
   NON_ACCEPTED_OFFSET_EDIT_INPUT_CODE,
   offsetEditInputGate,
   refreshSketchEditToolAfterOffsetRound,
@@ -8562,5 +8565,420 @@ describe("T13h placement inference on a certified offset shell", () => {
       ),
     ).toEqual([`pointOnCurve:${shellId}`]);
     expect(placed.liveSolve?.accepted, "the shell relation solves").toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T15b (logic lane; seam: the sketch session's Mirror tool and live solve,
+// then every G19 consumer through its exported entry point). A failed mirror
+// is relationship-scoped like a failed offset for acceptance ([TECH] T-8):
+// its outputs are held and non-accepted everywhere, while the sketch is
+// invalid (one error) and every profile is blocked.
+describe("T15b: failed mirrors in the session and the G19 consumers", () => {
+  /** A rectangle mirrored about the sketch y axis with the Mirror tool. */
+  function mirroredRectangle() {
+    const { session, seeds } = rectanglesSession();
+    let tool = beginSketchTool(session, "sketchMirror");
+    tool = selectSketchEditToolTarget(tool, {
+      kind: "sketchEntity",
+      sketchId: tool.sketchId!,
+      entityId: seeds[0]!,
+    } as never);
+    const mirrored = selectSketchEditToolTarget(tool, {
+      kind: "sketchDatumReference",
+      sketchId: tool.sketchId!,
+      datumId: "yAxis",
+      geometryKind: "lineSegment",
+    } as never);
+    const relationship = mirrored.definition.derivedRelationships!.find(
+      (candidate) => candidate.kind === "mirror",
+    )!;
+    return { session: mirrored, seed: seeds[0]!, relationship };
+  }
+
+  test("the Mirror tool takes a sketch datum axis as its final pick and commits a datum mirror whose copy is the exact reflection", () => {
+    const { session, seed, relationship } = mirroredRectangle();
+    expect(
+      relationship.kind === "mirror" && relationship.mirrorReference,
+    ).toEqual({ kind: "sketchDatum", datum: "yAxis" });
+    const output = relationship.outputs[0]!;
+    expect(output.seedEntityId).toBe(seed);
+    const position = (pointId: SketchPointId) =>
+      session.definition.points.find((point) => point.pointId === pointId)!
+        .position;
+    output.seedPointIds.forEach((seedPointId, index) => {
+      const [x, y] = position(seedPointId);
+      expect(position(output.outputPointIds[index]!)).toEqual([0 - x + 0, y]);
+    });
+    expect(
+      session.liveSolve?.solvedSnapshot.failedDerivationIds,
+    ).toBeUndefined();
+  });
+
+  test("review A10: a sketch axis picked before the seeds is refused with a message, not ignored", () => {
+    const { session, seeds } = rectanglesSession();
+    let tool = beginSketchTool(session, "sketchMirror");
+    tool = selectSketchEditToolTarget(tool, {
+      kind: "sketchDatumReference",
+      sketchId: tool.sketchId!,
+      datumId: "yAxis",
+      geometryKind: "lineSegment",
+    } as never);
+    tool = selectSketchEditToolTarget(tool, {
+      kind: "sketchEntity",
+      sketchId: tool.sketchId!,
+      entityId: seeds[0]!,
+    } as never);
+    expect(tool.validationMessage).toBe(MIRROR_DATUM_AXIS_ORDER_MESSAGE);
+    expect(tool.definition.derivedRelationships ?? []).toEqual([]);
+  });
+
+  test("a mirror whose seed is removed fails once (map stale); its outputs are not snapped, measured, exported, used as feature or edit input; the sketch is invalid and the rest still solves", () => {
+    const { session, seed, relationship } = mirroredRectangle();
+    const output = relationship.outputs[0]!;
+    const broken = rebuildSessionForDefinition(session, {
+      definition: {
+        ...session.definition,
+        entityIds: session.definition.entityIds.filter((id) => id !== seed),
+        entities: session.definition.entities.filter(
+          (entity) => entity.entityId !== seed,
+        ),
+        // The rectangle's own constraints on the removed line go with it.
+        ...(() => {
+          const constraints = session.definition.constraints.filter(
+            (constraint) => !JSON.stringify(constraint).includes(seed),
+          );
+          return {
+            constraints,
+            constraintIds: constraints.map(
+              (constraint) => constraint.constraintId,
+            ),
+          };
+        })(),
+      },
+    });
+    const live = broken.liveSolve!;
+    expect(live.solvedSnapshot.failedDerivationIds).toEqual([
+      relationship.derivationId,
+    ]);
+    expect(
+      live.solvedSnapshot.diagnostics
+        .filter((diagnostic) => diagnostic.severity === "error")
+        .map((diagnostic) => diagnostic.code),
+    ).toEqual(["derived-mirror-map-stale"]);
+    expect(live.solvedSnapshot.status.solveState).toBe("solved");
+    expect(
+      deriveSketchValidity({ solvedSnapshot: live.solvedSnapshot }).state,
+    ).toBe("invalid");
+
+    // Snaps: neither the output nor its driven points.
+    const geometries = collectSketchSnapGeometries({
+      definition: live.definition,
+      solvedSnapshot: live.solvedSnapshot,
+    });
+    const sources = geometries.map((geometry) => geometry.source);
+    for (const pointId of output.outputPointIds)
+      expect(sources).not.toContainEqual(
+        expect.objectContaining({ kind: "localPoint", pointId }),
+      );
+    expect(
+      sources.some(
+        (source) =>
+          "entityId" in source && source.entityId === output.outputEntityId,
+      ),
+    ).toBe(false);
+    // Measurement.
+    const measured = (ref: unknown) =>
+      deriveMeasurementViewModel({
+        activeToolId: "measure",
+        selection: [ref as never],
+        snapshot: { document: { sketches: [sketchRecordOf(broken)] } } as never,
+      })?.witnesses ?? [];
+    expect(
+      measured({
+        kind: "sketchEntity",
+        sketchId: "sketch_g5b",
+        entityId: output.outputEntityId,
+      }),
+    ).toEqual([]);
+    expect(
+      measured({
+        kind: "sketchPoint",
+        sketchId: "sketch_g5b",
+        pointId: output.outputPointIds[0],
+      }),
+    ).toEqual([]);
+    // Vector export.
+    const exported = buildSketchVectorExportModel({
+      documentId: "doc_workspace" as never,
+      revisionId: "rev_0001" as never,
+      sketches: [sketchRecordOf(broken)],
+      target: { kind: "sketch", sketchId: "sketch_g5b" } as never,
+    });
+    if ("diagnostic" in exported) throw new Error(exported.diagnostic.message);
+    expect(exported.entities.map((entity) => entity.entityId)).not.toContain(
+      output.outputEntityId,
+    );
+    // Feature input and edit input.
+    expect(
+      nonAcceptedOffsetFeatureInputMessage(
+        { definition: live.definition, solvedSnapshot: live.solvedSnapshot },
+        output.outputEntityId,
+        "a revolve axis",
+      ),
+    ).toContain(relationship.derivationId);
+    expect(
+      offsetEditInputGate(broken, [output.outputEntityId], "a fillet input")
+        ?.message,
+    ).toContain(relationship.derivationId);
+    // Control: the healthy mirror's output is accepted everywhere.
+    expect(
+      offsetEditInputGate(session, [output.outputEntityId], "a fillet input"),
+    ).toBeNull();
+  });
+});
+
+// T15b review O-1 (logic lane; seam: the sketch session's commit, Undo/Redo
+// rebuild and reopen paths). A failed mirror keeps the sketch invalid, so
+// every path that explains an invalid sketch shows the mirror's error, while
+// drags, snaps and authored edits on unrelated geometry stay available.
+describe("T15b O-1: invalid feedback for a failed mirror", () => {
+  function brokenMirrorSession() {
+    const { session, seeds } = rectanglesSession();
+    let tool = beginSketchTool(session, "sketchMirror");
+    tool = selectSketchEditToolTarget(tool, {
+      kind: "sketchEntity",
+      sketchId: tool.sketchId!,
+      entityId: seeds[0]!,
+    } as never);
+    const mirrored = selectSketchEditToolTarget(tool, {
+      kind: "sketchDatumReference",
+      sketchId: tool.sketchId!,
+      datumId: "yAxis",
+      geometryKind: "lineSegment",
+    } as never);
+    const relationship = mirrored.definition.derivedRelationships!.find(
+      (candidate) => candidate.kind === "mirror",
+    )!;
+    const seed = seeds[0]!;
+    const constraints = mirrored.definition.constraints.filter(
+      (constraint) => !JSON.stringify(constraint).includes(seed),
+    );
+    const brokenDefinition = {
+      ...mirrored.definition,
+      entityIds: mirrored.definition.entityIds.filter((id) => id !== seed),
+      entities: mirrored.definition.entities.filter(
+        (entity) => entity.entityId !== seed,
+      ),
+      constraints,
+      constraintIds: constraints.map((constraint) => constraint.constraintId),
+    };
+    // The Undo/Redo seam (`sketch-authored-actions` restores through it).
+    const broken = rebuildSessionForDefinition(
+      { ...mirrored, activeTool: null, activeEditTool: null } as never,
+      { definition: brokenDefinition },
+    );
+    const mirrorError = broken.liveSolve!.solvedSnapshot.diagnostics.find(
+      (diagnostic) => diagnostic.code === "derived-mirror-map-stale",
+    )!.message;
+    return { mirrored, broken, relationship, mirrorError };
+  }
+  const corner = (session: SketchSessionState) =>
+    session.definition.points.find(
+      (point) =>
+        Math.abs(point.position[0] - 12) < 1e-9 &&
+        Math.abs(point.position[1] - 2) < 1e-9,
+    )!;
+
+  test("Undo/Redo (rebuild) of a definition with a failed mirror shows the mirror error and profiles read unavailable at once", () => {
+    const { broken, mirrorError } = brokenMirrorSession();
+    expect(broken.liveRegions.status).toBe("unavailable");
+    expect(broken.validationMessage).toBe(mirrorError);
+  });
+
+  test("a committed dimension on unrelated geometry applies, and the session explains the failed mirror", () => {
+    const { broken, mirrorError } = brokenMirrorSession();
+    const unrelated = broken.definition.entities.find(
+      (entity) =>
+        entity.kind === "lineSegment" &&
+        broken.definition.points.some(
+          (point) =>
+            point.pointId === entity.startPointId && point.position[0] >= 10,
+        ),
+    )!;
+    const committed = dimensionLine(broken, unrelated.entityId, "3");
+    expect(committed.definition.dimensions.length).toBe(
+      broken.definition.dimensions.length + 1,
+    );
+    expect(
+      committed.liveSolve!.solvedSnapshot.dimensionStatuses.every(
+        (entry) => entry.status !== "unsatisfied",
+      ),
+    ).toBe(true);
+    expect(committed.validationMessage).toBe(mirrorError);
+  });
+
+  test("reopening the sketch explains the failed mirror", () => {
+    const { broken, mirrorError } = brokenMirrorSession();
+    const live = broken.liveSolve!;
+    const raw = createSketchSessionFromSnapshot(
+      {
+        sketchId: broken.actionContextId,
+        label: "Sketch T15b",
+        plane: broken.plane,
+        ownerFeatureId: null,
+        sketch: {
+          definition: live.sourceDefinition,
+          solvedSnapshot: live.solvedSnapshot,
+          regions: [],
+          projectedReferences: [],
+          derivedValidity: getSketchSessionDerivedValidity(broken),
+        },
+      } as never,
+      OCC_KERNEL_SETTINGS,
+    );
+    const reopened = updateSketchReferenceProjection(raw, [], []);
+    expect(reopened.liveRegions.status).toBe("unavailable");
+    expect(reopened.validationMessage).toBe(mirrorError);
+  });
+
+  test("repair stays possible: a drag of unrelated geometry starts, its frames are accepted and it commits; the copy stays held", () => {
+    const { broken, relationship } = brokenMirrorSession();
+    const target = corner(broken);
+    const heldIds = new Set(relationship.outputs[0]!.outputPointIds);
+    const held = broken.definition.points
+      .filter((point) => heldIds.has(point.pointId))
+      .map((point) => point.position);
+    let dragging = beginSketchGeometryDrag(
+      broken,
+      target.target,
+      target.position,
+    );
+    expect(dragging.activeDrag).not.toBeNull();
+    for (const x of [12.5, 13, 13.5]) {
+      dragging = updateSketchGeometryDrag(dragging, [x, 2.5]);
+      expect(dragging.activeDrag!.status).toBe("dragging");
+    }
+    const finished = finishSketchGeometryDrag(dragging, [13.5, 2.5]);
+    expect(
+      finished.definition.points.find(
+        (point) => point.pointId === target.pointId,
+      )!.position[0],
+    ).toBeCloseTo(13.5, 3);
+    expect(
+      finished.definition.points
+        .filter((point) => heldIds.has(point.pointId))
+        .map((point) => point.position),
+    ).toEqual(held);
+  });
+});
+
+// T15b (T-14, logic lane; seam: the mock solver adapter vs the core solve).
+describe("T15b: mock solver mirror parity", () => {
+  /** A seed line mirrored about a line axis, outputs stored stale. */
+  function mirrorSketch(axis: "present" | "missing" | "short") {
+    const pid = (id: string) => `sketch_point_${id}` as SketchPointId;
+    const eid = (id: string) => `sketch_entity_${id}` as SketchEntityId;
+    const point = (id: string, position: readonly [number, number]) => ({
+      pointId: pid(id),
+      label: id,
+      target: {
+        kind: "sketchPoint",
+        sketchId: "sketch_t10i",
+        pointId: pid(id),
+      },
+      position,
+      isConstruction: false,
+    });
+    const line = (id: string, a: string, b: string) => ({
+      kind: "lineSegment",
+      entityId: eid(id),
+      label: id,
+      target: {
+        kind: "sketchEntity",
+        sketchId: "sketch_t10i",
+        entityId: eid(id),
+      },
+      isConstruction: false,
+      startPointId: pid(a),
+      endPointId: pid(b),
+    });
+    const entities = [
+      line("ab", "a", "b"),
+      line("mab", "ma", "mb"),
+      ...(axis === "missing" ? [] : [line("axis", "x0", "x1")]),
+    ];
+    return {
+      schemaVersion: "sketch-definition/v1alpha2",
+      referenceIds: [],
+      references: [],
+      pointIds: ["a", "b", "ma", "mb", "x0", "x1"].map(pid),
+      points: [
+        point("a", [1, 1]),
+        point("b", [3, 2]),
+        point("ma", [7, 7]),
+        point("mb", [8, 8]),
+        point("x0", [-1, 0]),
+        point("x1", axis === "short" ? [-1 + 5e-4, 0] : [6, 0]),
+      ],
+      entityIds: entities.map((entity) => entity.entityId),
+      entities,
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+      dimensions: [],
+      derivedRelationships: [
+        {
+          derivationId: "sketch_derivation_1_mirror",
+          kind: "mirror",
+          label: "mirror",
+          seedEntityIds: [eid("ab")],
+          mirrorReference: { kind: "lineEntity", entityId: eid("axis") },
+          outputs: [
+            {
+              seedEntityId: eid("ab"),
+              outputEntityId: eid("mab"),
+              instanceIndex: 1,
+              seedPointIds: [pid("a"), pid("b")],
+              outputPointIds: [pid("ma"), pid("mb")],
+            },
+          ],
+        },
+      ],
+    } as unknown as SketchDefinition;
+  }
+
+  test("the mock evaluates mirrors through the owner (no offsets needed) and encodes a failure like the core: one error, failedDerivationIds, outputs held", async () => {
+    const healthy = (await mockSolve(mirrorSketch("present"))).solvedSnapshot;
+    expect(
+      healthy.solvedPoints.find((point) => point.pointId === "sketch_point_mb")
+        ?.solvedPosition,
+    ).toEqual([3, -2]);
+    expect(healthy.failedDerivationIds).toBeUndefined();
+    for (const [axis, code] of [
+      ["missing", "derived-mirror-axis-missing"],
+      ["short", "derived-mirror-axis-degenerate"],
+    ] as const) {
+      const response = await mockSolve(mirrorSketch(axis));
+      const snapshot = response.solvedSnapshot;
+      expect(snapshot.failedDerivationIds, axis).toEqual([
+        "sketch_derivation_1_mirror",
+      ]);
+      expect(
+        snapshot.diagnostics
+          .filter((diagnostic) => diagnostic.code.includes("mirror"))
+          .map((diagnostic) => [diagnostic.code, diagnostic.severity]),
+        axis,
+      ).toEqual([[code, "error"]]);
+      expect(
+        snapshot.solvedPoints.find(
+          (point) => point.pointId === "sketch_point_mb",
+        )?.solvedPosition,
+        `${axis}: held`,
+      ).toEqual([8, 8]);
+      expect(deriveSketchValidity({ solvedSnapshot: snapshot }).state).toBe(
+        "invalid",
+      );
+    }
   });
 });

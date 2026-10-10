@@ -1,4 +1,8 @@
 import typia from "typia";
+import {
+  DERIVED_RELATIONSHIP_DEPENDENCY_UNRESOLVED,
+  MIRROR_DIAGNOSTIC_CODES,
+} from "@/contracts/sketch/mirror-requirements";
 
 import type {
   ProjectedSketchGeometryRef,
@@ -25,6 +29,12 @@ export type ProjectedReferenceRequestTarget =
   | ProjectedSketchGeometryRef
   | SketchEntityRef
   | SketchPointRef;
+
+/** T15b: the codes of a failed (held) derived relationship's one error. */
+const DERIVED_FAILURE_CODES: ReadonlySet<string> = new Set([
+  ...Object.values(MIRROR_DIAGNOSTIC_CODES),
+  DERIVED_RELATIONSHIP_DEPENDENCY_UNRESOLVED,
+]);
 
 const sketchDefinitionValidator =
   typia.createValidateEquals<SketchDefinition>();
@@ -620,6 +630,24 @@ function validateOffsetFramePlanReferences(
               },
             ],
     ),
+    // T15b: failed (held) relationships are existing non-offset relationships.
+    ...(snapshot.failedDerivationIds ?? []).flatMap((derivationId, index) =>
+      (definition.derivedRelationships ?? []).some(
+        (relationship) =>
+          relationship.kind !== "offset" &&
+          relationship.derivationId === derivationId,
+      )
+        ? []
+        : [
+            {
+              path: `failedDerivationIds.${index}`,
+              expected: "an existing non-offset derived relationship",
+              value: derivationId,
+              message:
+                "A failed derived relationship id must reference an existing mirror, pattern or transform relationship.",
+            },
+          ],
+    ),
   ];
 }
 
@@ -645,6 +673,34 @@ function validateSolvedSketchSnapshotInvariants(
       value: certifiedIds,
       message:
         "Certified offset relationship ids must name each relationship once.",
+    });
+  const failedIds = snapshot.failedDerivationIds ?? [];
+  if (new Set(failedIds).size !== failedIds.length)
+    issues.push({
+      path: "failedDerivationIds",
+      expected: "unique failed derived relationship ids",
+      value: failedIds,
+      message:
+        "Failed derived relationship ids must name each relationship once.",
+    });
+  // T15b (review A4): failed relationships come with a derived-failure error
+  // diagnostic, so validity (read from the diagnostics) can never read
+  // current while the ids hold outputs and block regions. Diagnostics carry
+  // no structured relationship target, so the link is not checked per id.
+  if (
+    failedIds.length > 0 &&
+    !snapshot.diagnostics.some(
+      (diagnostic) =>
+        diagnostic.severity === "error" &&
+        DERIVED_FAILURE_CODES.has(diagnostic.code),
+    )
+  )
+    issues.push({
+      path: "failedDerivationIds",
+      expected: "failed relationships with their error diagnostics",
+      value: failedIds,
+      message:
+        "A failed derived relationship id must have its relationship's error diagnostic.",
     });
 
   snapshot.solvedEntities.forEach((entity, index) => {
