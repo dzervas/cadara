@@ -2,6 +2,7 @@ import type {
   ConstraintDefinition,
   SketchDefinition,
   SketchDerivationDefinition,
+  SketchMirrorReference,
   SketchDerivedEntityOutput,
   SketchEntityDefinition,
   SketchOffsetJointOutput,
@@ -9,6 +10,7 @@ import type {
   SketchPointDefinition,
   SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
+import { MIRROR_DIAGNOSTIC_CODES } from "@/contracts/sketch/mirror-requirements";
 import {
   evaluateSketchDerivations,
   type SketchDerivationSettings,
@@ -168,6 +170,12 @@ export interface SketchDerivedTransformContributionInput {
   factories: SketchEditOperationFactories;
   /** The document's settings.modelingTolerance ([TECH] G12). */
   modelingTolerance: number;
+  /**
+   * Mirror only (T15b, [TECH] T-7): a sketch datum axis picked as the
+   * mirror axis; every entity in `entityIds` is then a seed. Otherwise the
+   * last entity is the axis line.
+   */
+  mirrorDatumAxis?: "xAxis" | "yAxis" | null;
 }
 
 const EPSILON = 1e-6;
@@ -4100,17 +4108,26 @@ function sampleArcPreview(
 
 function getDerivedOperatorSeeds(
   input: SketchDerivedTransformContributionInput,
-) {
+): {
+  seedEntityIds: SketchEntityId[];
+  mirrorReference: SketchMirrorReference | null;
+} {
   if (input.operatorKind !== "mirror") {
     return {
       seedEntityIds: [...input.entityIds],
-      mirrorAxisId: null,
+      mirrorReference: null,
     };
   }
+  if (input.mirrorDatumAxis)
+    return {
+      seedEntityIds: [...input.entityIds],
+      mirrorReference: { kind: "sketchDatum", datum: input.mirrorDatumAxis },
+    };
 
+  const axisId = input.entityIds.at(-1);
   return {
     seedEntityIds: input.entityIds.slice(0, -1),
-    mirrorAxisId: input.entityIds.at(-1) ?? null,
+    mirrorReference: axisId ? { kind: "lineEntity", entityId: axisId } : null,
   };
 }
 
@@ -4118,20 +4135,20 @@ function createRelationship(
   input: SketchDerivedTransformContributionInput,
   seedEntityIds: readonly SketchEntityId[],
   outputs: SketchDerivationDefinition["outputs"],
-  mirrorAxisId: SketchEntityId | null,
+  mirrorReference: SketchMirrorReference | null,
 ): SketchDerivationDefinition | null {
   const derivationId =
     `sketch_derivation_${input.sequence}_${input.operatorKind}_${crypto.randomUUID()}` as const;
   const label = `${input.operatorKind} ${input.sequence}`;
 
   if (input.operatorKind === "mirror") {
-    return mirrorAxisId
+    return mirrorReference
       ? {
           derivationId,
           label,
           kind: "mirror",
           seedEntityIds,
-          mirrorReference: { kind: "lineEntity", entityId: mirrorAxisId },
+          mirrorReference,
           outputs,
         }
       : null;
@@ -4180,13 +4197,13 @@ function createRelationship(
 export function createSketchDerivedTransformContribution(
   input: SketchDerivedTransformContributionInput,
 ): SketchEditOperationResult {
-  const { seedEntityIds, mirrorAxisId } = getDerivedOperatorSeeds(input);
+  const { seedEntityIds, mirrorReference } = getDerivedOperatorSeeds(input);
   if (seedEntityIds.length === 0) {
     return {
       valid: false,
       message:
         input.operatorKind === "mirror"
-          ? "Select seed sketch entities, then a mirror axis line."
+          ? "Select seed sketch entities, then a mirror axis line or sketch axis."
           : "Select sketch entities to derive.",
       definition: null,
       contribution: null,
@@ -4194,17 +4211,15 @@ export function createSketchDerivedTransformContribution(
     };
   }
 
-  if (input.operatorKind === "mirror") {
-    const axis = mirrorAxisId
-      ? input.definition.entities.find(
-          (entity) => entity.entityId === mirrorAxisId,
-        )
-      : null;
+  if (mirrorReference?.kind === "lineEntity") {
+    const axis = input.definition.entities.find(
+      (entity) => entity.entityId === mirrorReference.entityId,
+    );
     if (!axis || axis.kind !== "lineSegment") {
       return {
         valid: false,
         message:
-          "Sketch mirror needs a line segment as the final selected mirror axis.",
+          "Sketch mirror needs a line segment or a sketch axis as the final selected mirror axis.",
         definition: null,
         contribution: null,
         previewEntities: [],
@@ -4262,12 +4277,17 @@ export function createSketchDerivedTransformContribution(
         `${input.operatorKind}-${safeSuffix(seedPointId)}`,
       );
       pointIdBySeedAndInstance.set(key, outputPointId);
+      const outputPoint = input.factories.createPoint(
+        `${input.operatorKind} ${seedPoint?.label ?? seedPointId}`,
+        outputPointId,
+        seedPoint?.position ?? [0, 0],
+      );
+      // A-9: a mirror output point copies its seed point's construction
+      // flag, at creation only.
       points.push(
-        input.factories.createPoint(
-          `${input.operatorKind} ${seedPoint?.label ?? seedPointId}`,
-          outputPointId,
-          seedPoint?.position ?? [0, 0],
-        ),
+        input.operatorKind === "mirror" && seedPoint
+          ? { ...outputPoint, isConstruction: seedPoint.isConstruction }
+          : outputPoint,
       );
       return outputPointId;
     });
@@ -4308,7 +4328,7 @@ export function createSketchDerivedTransformContribution(
     input,
     seedEntityIds,
     outputs,
-    mirrorAxisId,
+    mirrorReference,
   );
   if (!relationship) {
     return {
@@ -4326,10 +4346,29 @@ export function createSketchDerivedTransformContribution(
     entities,
     derivedRelationships: [relationship],
   };
-  const evaluated = evaluateSketchDerivations({
+  const evaluation = evaluateSketchDerivations({
     definition: appendDerivedContribution(input.definition, contribution),
     modelingTolerance: input.modelingTolerance,
-  }).definition;
+  });
+  // T15b: a mirror the owner cannot evaluate (e.g. an axis shorter than
+  // the modeling tolerance) is refused, never created with unmoved outputs.
+  const failure = evaluation.derivedFailures.find(
+    (candidate) => candidate.derivationId === relationship.derivationId,
+  );
+  if (failure) {
+    return {
+      valid: false,
+      // Review A3: never name the relationship that was not created.
+      message:
+        failure.diagnostic.code === MIRROR_DIAGNOSTIC_CODES.axisDegenerate
+          ? "The mirror axis is shorter than the modeling tolerance; pick a longer line or a sketch axis."
+          : "Sketch mirror could not mirror the selected geometry about this axis.",
+      definition: null,
+      contribution: null,
+      previewEntities: [],
+    };
+  }
+  const evaluated = evaluation.definition;
   const outputPointIds = new Set(points.map((point) => point.pointId));
   const outputEntityIds = new Set(entities.map((entity) => entity.entityId));
   const evaluatedContribution: SketchToolCommitContribution = {

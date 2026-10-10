@@ -202,9 +202,10 @@ export const sketchEditToolDefinitions = [
       },
       previewLabel: "Mirror preview",
       validationMessages: {
-        emptySelection: "Select seed geometry, then a line as the mirror axis.",
+        emptySelection:
+          "Select seed geometry, then a line or sketch axis as the mirror axis.",
         unsupportedTarget:
-          "Sketch mirror supports sketch entities and needs a line as the final mirror axis.",
+          "Sketch mirror supports sketch entities and needs a line or sketch axis as the final mirror axis.",
       },
       mutationContract: "createDerivedMirror",
     },

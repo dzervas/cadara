@@ -2583,10 +2583,22 @@ export function normalizeSketchDerivationDefinition(
   };
 
   if (value.kind === "mirror") {
-    if (
-      !isRecord(value.mirrorReference) ||
-      value.mirrorReference.kind !== "lineEntity"
-    ) {
+    const reference = value.mirrorReference;
+    if (!isRecord(reference)) {
+      throw new Error("Invalid sketch mirror derivation payload.");
+    }
+    // T15b (T-7): a sketch datum axis (x or y) or a straight sketch line.
+    if (reference.kind === "sketchDatum") {
+      if (reference.datum !== "xAxis" && reference.datum !== "yAxis") {
+        throw new Error("Invalid sketch mirror derivation payload.");
+      }
+      return {
+        ...base,
+        kind: "mirror",
+        mirrorReference: { kind: "sketchDatum", datum: reference.datum },
+      };
+    }
+    if (reference.kind !== "lineEntity") {
       throw new Error("Invalid sketch mirror derivation payload.");
     }
 
@@ -2595,7 +2607,7 @@ export function normalizeSketchDerivationDefinition(
       kind: "mirror",
       mirrorReference: {
         kind: "lineEntity",
-        entityId: assertSketchEntityId(value.mirrorReference.entityId),
+        entityId: assertSketchEntityId(reference.entityId),
       },
     };
   }
@@ -3373,12 +3385,26 @@ export function normalizeSolvedSketchSnapshot(
             value.certifiedOffsetDerivationIds,
           ),
         }),
+    // T15b: solved revision data; shape only, as above.
+    ...(value.failedDerivationIds === undefined
+      ? {}
+      : {
+          failedDerivationIds: normalizeFailedDerivationIds(
+            value.failedDerivationIds,
+          ),
+        }),
   };
 }
 
 function normalizeCertifiedOffsetDerivationIds(value: unknown): string[] {
   if (!Array.isArray(value) || !value.every(isString))
     throw new Error("Invalid certified offset relationship id payload.");
+  return [...value];
+}
+
+function normalizeFailedDerivationIds(value: unknown): string[] {
+  if (!Array.isArray(value) || !value.every(isString))
+    throw new Error("Invalid failed derived relationship id payload.");
   return [...value];
 }
 

@@ -953,7 +953,7 @@ describe("arc orientation from variables (ARC)", () => {
       const evaluation = expectOk(
         evaluateOn({
           relationship: makeMirror("m", "axis", [
-            ["arc", "copy", [], ["oc", "os", "oe"]],
+            ["arc", "copy", ["c", "s", "e"], ["oc", "os", "oe"]],
           ]),
           definition,
           modelingTolerance: TAU,
@@ -1019,7 +1019,7 @@ describe("arc orientation from variables (ARC)", () => {
     const evaluation = expectOk(
       evaluateOn({
         relationship: makeMirror("m", "axis", [
-          ["arc", "copy", [], ["oc", "os", "oe"]],
+          ["arc", "copy", ["c", "s", "e"], ["oc", "os", "oe"]],
         ]),
         definition: makeSketch(
           [
@@ -1288,9 +1288,14 @@ describe("structural sync touches no values (ST)", () => {
     expectOk(
       evaluateOn({
         relationship: makeMirror("m", "axis", [
-          ["arc", "arc_copy", [], ["oc", "os", "oe"]],
-          ["circle", "circle_copy", [], ["occ"]],
-          ["spline", "spline_copy", [], ["q0", "q1", "q2", "q3"]],
+          ["arc", "arc_copy", ["c", "s", "e"], ["oc", "os", "oe"]],
+          ["circle", "circle_copy", ["cc"], ["occ"]],
+          [
+            "spline",
+            "spline_copy",
+            ["p0", "p1", "p2", "p3"],
+            ["q0", "q1", "q2", "q3"],
+          ],
         ]),
         definition,
         modelingTolerance: TAU,
@@ -1762,7 +1767,7 @@ function agreementFixtures(): { name: string; definition: SketchDefinition }[] {
             [
               "seed_arc",
               "mirror_arc",
-              [],
+              ["arc_center", "arc_start", "arc_end"],
               ["mirror_center", "mirror_start", "mirror_end"],
             ],
           ]),
@@ -2124,7 +2129,11 @@ describe("agreement with today's forward evaluation (AG)", () => {
           makeArc("arc", "c", "s", "e", "counterClockwise"),
           makeArc("copy", "oc", "os", "oe", "counterClockwise"),
         ],
-        [makeMirror("m", "axis", [["arc", "copy", [], ["oc", "os", "oe"]]])],
+        [
+          makeMirror("m", "axis", [
+            ["arc", "copy", ["c", "s", "e"], ["oc", "os", "oe"]],
+          ]),
+        ],
       );
       const dc = rng.vector(1);
       const dArc: MirrorArcVariables = {
@@ -2168,7 +2177,7 @@ describe("agreement with today's forward evaluation (AG)", () => {
     }
   });
 
-  test("AG4: listed difference — a missing axis is derived-mirror-axis-missing in the owner, derived-transform-missing-mirror-axis today", () => {
+  test("AG4: a missing axis is derived-mirror-axis-missing in the owner and, since T15b, in evaluateSketchDerivations (one derived failure per relationship, not a sketch diagnostic; was derived-transform-missing-mirror-axis)", () => {
     const definition = makeSketch(
       [makePoint("seed_point", [1, 1]), makePoint("output_point", [0, 0])],
       [
@@ -2185,8 +2194,19 @@ describe("agreement with today's forward evaluation (AG)", () => {
       definition,
       modelingTolerance: TAU,
     });
-    expect(today.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
-      "derived-transform-missing-mirror-axis",
+    expect(today.diagnostics).toEqual([]);
+    expect(
+      today.derivedFailures.map((failure) => [
+        failure.derivationId,
+        failure.diagnostic.code,
+        failure.diagnostic.severity,
+      ]),
+    ).toEqual([
+      [
+        "missing_axis_relationship",
+        MIRROR_DIAGNOSTIC_CODES.axisMissing,
+        "error",
+      ],
     ]);
     const owner = evaluateOn({
       relationship: definition
@@ -2517,10 +2537,12 @@ describe("dependency order (SO)", () => {
         ],
       } as SketchDerivationDefinition,
       makeMirror("m3", "axis1", [
-        ["offset_out", "offset_mirror", [], ["c2", "d2"]],
+        ["offset_out", "offset_mirror", ["c1", "d1"], ["c2", "d2"]],
       ]),
       // Reads a1/b1 only through its seed's defining points (no recorded map).
-      makeMirror("m4", "axis2", [["bridge", "bridge_copy", [], ["e1", "f1"]]]),
+      makeMirror("m4", "axis2", [
+        ["bridge", "bridge_copy", ["a1", "b1"], ["e1", "f1"]],
+      ]),
       // Reads m2's output only through its axis.
       makeMirror("m5", "copy2", [
         ["free", "free_copy", ["f", "g"], ["f2", "g2"]],
@@ -2759,11 +2781,11 @@ describe("dependency order through offset joints and shells (SO4)", () => {
     const relationships: SketchDerivationDefinition[] = [
       // Reads the joint arc (entity and its centre/end points).
       makeMirror("mj", "axis", [
-        ["joint", "joint_copy", [], ["j1", "j2", "j3"]],
+        ["joint", "joint_copy", ["jc", "o1", "o2"], ["j1", "j2", "j3"]],
       ]),
       // Reads only the shell's terminal point, through `attached`.
       makeMirror("ms", "axis", [
-        ["attached", "attached_copy", [], ["l1", "l2"]],
+        ["attached", "attached_copy", ["sh0", "u"], ["l1", "l2"]],
       ]),
       offset,
       makeMirror("m", "axis", [
@@ -2825,11 +2847,11 @@ describe("correspondence resolver (CO)", () => {
     [
       makeMirror("m1", "axis1", [
         ["line", "copy1", ["a", "b"], ["a1", "b1"]],
-        ["spline", "spline_copy", [], ["t0", "t1"]],
+        ["spline", "spline_copy", ["s0", "s1"], ["t0", "t1"]],
       ]),
       makeMirror("m2", "axis2", [
         ["copy1", "copy2", ["a1", "b1"], ["a2", "b2"]],
-        ["spline_copy", "spline_copy2", [], ["z0", "z1"]],
+        ["spline_copy", "spline_copy2", ["t0", "t1"], ["z0", "z1"]],
       ]),
     ],
   );

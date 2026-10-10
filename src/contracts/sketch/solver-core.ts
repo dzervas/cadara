@@ -26,6 +26,7 @@ import {
 import {
   evaluateSketchDerivations,
   offsetRecordDerivatives,
+  pointDefinedArcVariables,
   prepareSketchDerivationPullback,
   solvedOffsetFramePlans,
   solvedOffsetShellSpans,
@@ -36,7 +37,6 @@ import {
 import { offsetFrameCurveResidual } from "@/contracts/sketch/offset-derivation-frame";
 import { OFFSET_DIAGNOSTIC_CODES } from "@/contracts/sketch/offset-geometry";
 import { isOffsetPublicationSolveAccepted } from "@/contracts/sketch/offset-publication";
-import { canonicalArcSupport } from "@/contracts/sketch/canonical-arc-support";
 import {
   closestSplineSpanLocation,
   evaluateSplineSpan,
@@ -243,15 +243,18 @@ type SolverParameterProjection = {
     constraint: ScalarConstraintRecord,
     variableIndices?: readonly number[],
   ): ScalarConstraintRecord;
-  /** [TECH] G16‴: the offset relationships failing at `values`. */
-  offsetFailuresAt(values: Float64Array): ReadonlySet<string>;
+  /**
+   * [TECH] G16‴ + T15b (T-16): the relationships failing at `values`: the
+   * offset failures and the derived (mirror, unresolved) failures.
+   */
+  relationshipFailuresAt(values: Float64Array): ReadonlySet<string>;
   /**
    * [TECH] G16‴/G16⁗: runs one solve whose blocked set is `blocked` (the
-   * offset relationships failing at its start state, see
+   * relationships failing at its start state, see
    * `solveWithRebuildRetry`); it is decided once, never per iterate.
    * Outside any solve it is empty.
    */
-  withBlockedOffsets<T>(blocked: ReadonlySet<string>, run: () => T): T;
+  withBlockedRelationships<T>(blocked: ReadonlySet<string>, run: () => T): T;
   /**
    * [TECH] G16‴/G16⁗: whether `derivationId` is in the current solve's
    * blocked set: the failures at the solve's start, or, in the one
@@ -1084,8 +1087,8 @@ function createDerivedParameterProjection(input: {
         (_, index) => index,
       ),
       wrapConstraint: (constraint) => constraint,
-      offsetFailuresAt: () => new Set(),
-      withBlockedOffsets: (_blocked, run) => run(),
+      relationshipFailuresAt: () => new Set(),
+      withBlockedRelationships: (_blocked, run) => run(),
       failedAtSolveStart: () => false,
     };
   }
@@ -1118,7 +1121,12 @@ function createDerivedParameterProjection(input: {
         })
       : [];
   const mirrorAxisIndices = (relationship: SketchDerivationDefinition) => {
-    if (relationship.kind !== "mirror") return [];
+    // A sketch datum axis is fixed: it has no variables (T15b, T-7).
+    if (
+      relationship.kind !== "mirror" ||
+      relationship.mirrorReference.kind !== "lineEntity"
+    )
+      return [];
     const axis = entityById.get(relationship.mirrorReference.entityId);
     return axis ? getEntityPoints(axis).flatMap(pointIndices) : [];
   };
@@ -1131,11 +1139,28 @@ function createDerivedParameterProjection(input: {
     }
   };
 
-  // [TECH] G16′: the driven indices of each offset relationship's outputs.
-  const offsetDrivenIndices = new Map<string, Set<number>>();
+  // [TECH] G16′: the driven indices of each offset relationship's outputs;
+  // T15b (T-16): and of every other relationship's (a failed mirror or an
+  // unresolved relationship holds them).
+  const relationshipDrivenIndices = new Map<string, Set<number>>();
   for (const relationship of definition.derivedRelationships ?? []) {
-    if (relationship.kind !== "offset") continue;
-    offsetDrivenIndices.set(
+    if (relationship.kind !== "offset") {
+      relationshipDrivenIndices.set(
+        relationship.derivationId,
+        new Set(
+          relationship.outputs.flatMap((output) => {
+            const target = entityById.get(output.outputEntityId);
+            return [
+              ...output.outputPointIds.flatMap(pointIndices),
+              ...entityIndices(output.outputEntityId),
+              ...(target ? splineTangentIndices(target) : []),
+            ];
+          }),
+        ),
+      );
+      continue;
+    }
+    relationshipDrivenIndices.set(
       relationship.derivationId,
       new Set([
         ...relationship.outputs.flatMap((output) => [
@@ -1201,7 +1226,10 @@ function createDerivedParameterProjection(input: {
         relationship.kind === "offset"
           ? offsetSeedIndices
           : [
-              ...derivedEntitySeedIndices(output.seedEntityId),
+              // R-4: a mirror output arc's slots follow the seed arc's.
+              ...(relationship.kind === "mirror"
+                ? entityIndices(output.seedEntityId)
+                : derivedEntitySeedIndices(output.seedEntityId)),
               ...seedPointIds.flatMap(pointIndices),
               ...axisIndices,
             ],
@@ -1270,11 +1298,12 @@ function createDerivedParameterProjection(input: {
     );
   };
   /**
-   * [TECH] G16′: the offset relationships (in definition order) whose
-   * outputs a requirement on `variableIndices` names, directly or through
-   * a derived output that depends on them (a mirror of an offset output).
+   * [TECH] G16′: the relationships (in definition order) whose outputs a
+   * requirement on `variableIndices` names, directly or through a derived
+   * output that depends on them (a mirror of an offset output). Only those
+   * failing ever block it (offsets since G16′, mirrors since T15b).
    */
-  const offsetsNamedBy = (variableIndices: readonly number[]) => {
+  const relationshipsNamedBy = (variableIndices: readonly number[]) => {
     const reached = new Set<number>();
     const pending = [...variableIndices];
     while (pending.length > 0) {
@@ -1284,7 +1313,7 @@ function createDerivedParameterProjection(input: {
       reached.add(index);
       pending.push(...dependencies);
     }
-    return [...offsetDrivenIndices].flatMap(([derivationId, indices]) =>
+    return [...relationshipDrivenIndices].flatMap(([derivationId, indices]) =>
       [...indices].some((index) => reached.has(index)) ? [derivationId] : [],
     );
   };
@@ -1352,8 +1381,18 @@ function createDerivedParameterProjection(input: {
   > | null = null;
   let cachedDiagnostics: readonly SketchSolveDiagnostic[] = [];
   let cachedEvaluation: SketchDerivationEvaluationResult | null = null;
-  // [TECH] G16‴: the current solve's blocked set (see `withBlockedOffsets`).
+  // [TECH] G16‴: the current solve's blocked set (see `withBlockedRelationships`).
   let startFailedOffsets: ReadonlySet<string> = new Set();
+  // R-4: the arcs whose solver slots are authority (a mirror output arc
+  // reflects its seed's slots; a driven point-defined arc has none).
+  const authorityArcStates = [...entityStates.values()].flatMap((state) =>
+    state.kind === "arc" &&
+    !entityIndices(state.entityId).some((index) =>
+      dependenciesByDrivenIndex.has(index),
+    )
+      ? [state]
+      : [],
+  );
   const project = (
     values: Float64Array,
     validationIndices?: readonly number[],
@@ -1418,6 +1457,16 @@ function createDerivedParameterProjection(input: {
       modelingTolerance,
       offsetPlans,
       withDerivatives: true,
+      arcVariables: new Map(
+        authorityArcStates.map((state) => [
+          state.entityId,
+          {
+            radius: values[state.baseIndex]!,
+            startAngle: values[state.baseIndex + 1]!,
+            endAngle: values[state.baseIndex + 2]!,
+          },
+        ]),
+      ),
     });
     const evaluated = derivationEvaluation.definition;
     const projected = cloneValues(values);
@@ -1431,6 +1480,10 @@ function createDerivedParameterProjection(input: {
       if (state.kind === "circle" && entity?.kind === "circle") {
         projected[state.baseIndex] = entity.radius;
       } else if (state.kind === "arc" && entity?.kind === "arc") {
+        // R-4: a mirror output arc reflects its seed arc's variables.
+        const mirrored = derivationEvaluation.mirrorArcVariables.get(
+          entity.entityId,
+        );
         const center = evaluated.points.find(
           (point) => point.pointId === entity.centerPointId,
         )?.position;
@@ -1440,24 +1493,21 @@ function createDerivedParameterProjection(input: {
         const end = evaluated.points.find(
           (point) => point.pointId === entity.endPointId,
         )?.position;
-        if (center && start && end) {
-          const startOffset = subtract(start, center);
-          const endOffset = subtract(end, center);
-          // R-g3: the one point-defined arc support formula.
-          projected[state.baseIndex] = canonicalArcSupport(
-            center,
-            start,
-            end,
-            entity.sweepDirection,
-          ).radius;
-          projected[state.baseIndex + 1] = Math.atan2(
-            startOffset[1],
-            startOffset[0],
-          );
-          projected[state.baseIndex + 2] = Math.atan2(
-            endOffset[1],
-            endOffset[0],
-          );
+        // R-g3: otherwise the one point-defined arc support formula.
+        const arc =
+          mirrored ??
+          (center && start && end
+            ? pointDefinedArcVariables(
+                center,
+                start,
+                end,
+                entity.sweepDirection,
+              )
+            : null);
+        if (arc) {
+          projected[state.baseIndex] = arc.radius;
+          projected[state.baseIndex + 1] = arc.startAngle;
+          projected[state.baseIndex + 2] = arc.endAngle;
         }
       }
     }
@@ -1490,13 +1540,15 @@ function createDerivedParameterProjection(input: {
     derivationEvaluation: (values) => project(values).evaluation,
     projectVariableIndices,
     authorityVariableIndices,
-    offsetFailuresAt: (values) =>
-      new Set(
-        project(values).evaluation.offsetFailures.map(
+    relationshipFailuresAt: (values) => {
+      const { evaluation } = project(values);
+      return new Set(
+        [...evaluation.offsetFailures, ...evaluation.derivedFailures].map(
           (failure) => failure.derivationId,
         ),
-      ),
-    withBlockedOffsets: (blocked, run) => {
+      );
+    },
+    withBlockedRelationships: (blocked, run) => {
       const previous = startFailedOffsets;
       startFailedOffsets = blocked;
       try {
@@ -1539,7 +1591,7 @@ function createDerivedParameterProjection(input: {
         return constraint;
       }
       const blockingOffsets = variableIndices
-        ? offsetsNamedBy(variableIndices)
+        ? relationshipsNamedBy(variableIndices)
         : [];
       const blocked = (
         blockers: readonly OffsetRequirementBlocker[],
@@ -1565,9 +1617,10 @@ function createDerivedParameterProjection(input: {
         const failedDuringSolve = blockingOffsets.filter(
           (derivationId) =>
             !startFailedOffsets.has(derivationId) &&
-            projected.evaluation.offsetFailures.some(
-              (failure) => failure.derivationId === derivationId,
-            ),
+            [
+              ...projected.evaluation.offsetFailures,
+              ...projected.evaluation.derivedFailures,
+            ].some((failure) => failure.derivationId === derivationId),
         );
         // [TECH] G16⁗ (re-review A-1): a relationship of the blocked set
         // holds the requirement blocked for the whole solve, also where it
@@ -7671,8 +7724,23 @@ function materializeSolveResult(
   const compiledDerivationDiagnostics = new Set(
     program.diagnostics.map((diagnostic) => JSON.stringify(diagnostic)),
   );
+  const evaluation =
+    program.system.parameterProjection.derivationEvaluation(values);
+  // T15b ([TECH] T-8/T-16): one error per failed mirror (or unresolved)
+  // relationship, always in the snapshot (the sketch is invalid, profiles
+  // blocked); its outputs are held. Under the start-state rule a failure
+  // already present at the solve's start (its blocked set) neither
+  // invalidates the solve nor rejects it; one appearing during it does.
+  const derivedFailures = evaluation?.derivedFailures ?? [];
+  const derivedFailedDuringSolve = derivedFailures.some(
+    (failure) =>
+      !program.system.parameterProjection.failedAtSolveStart(
+        failure.derivationId,
+      ),
+  );
   const diagnostics = [
     ...program.diagnostics,
+    ...derivedFailures.map((failure) => failure.diagnostic),
     ...program.validation.diagnostics,
     ...projectionDiagnostics.filter(
       (diagnostic) =>
@@ -7680,8 +7748,6 @@ function materializeSolveResult(
     ),
     ...commonCircleDiagnostics,
   ];
-  const evaluation =
-    program.system.parameterProjection.derivationEvaluation(values);
   const solvedEntities = buildSolvedEntities(
     definition,
     program.system.pointRecords,
@@ -7810,11 +7876,13 @@ function materializeSolveResult(
   }
   diagnostics.push(...solvedGeometryDiagnostics);
 
-  const geometryValid = ![
-    ...projectionDiagnostics,
-    ...commonCircleDiagnostics,
-    ...solvedGeometryDiagnostics,
-  ].some((diagnostic) => diagnostic.severity === "error");
+  const geometryValid =
+    !derivedFailedDuringSolve &&
+    ![
+      ...projectionDiagnostics,
+      ...commonCircleDiagnostics,
+      ...solvedGeometryDiagnostics,
+    ].some((diagnostic) => diagnostic.severity === "error");
   const requirementsSatisfied =
     geometryValid &&
     // [TECH] G16″: a blocked requirement does not count against the status.
@@ -7895,14 +7963,45 @@ function materializeSolveResult(
     ...(hasOffsets && evaluation
       ? { offsetFramePlans: solvedOffsetFramePlans(evaluation) }
       : {}),
+    ...(derivedFailures.length > 0
+      ? {
+          failedDerivationIds: derivedFailures.map(
+            (failure) => failure.derivationId,
+          ),
+        }
+      : {}),
   };
+  const tolerated = new Set<SketchSolveDiagnostic>(
+    derivedFailedDuringSolve
+      ? []
+      : derivedFailures.map((failure) => failure.diagnostic),
+  );
   // [TECH] G16′: each failed relationship's one diagnostic is
   // relationship-scoped. An accepted solve never carries it (G16: E1 reads
   // the snapshot); its publication reports it (the frame failure is
   // hint-independent, so publish reproduces it). An unaccepted solve
   // publishes nothing (U-G1), so the snapshot reports it instead.
-  if (!isOffsetPublicationSolveAccepted(solvedSnapshot))
-    diagnostics.push(...offsetRelationshipDiagnostics(definition, evaluation));
+  if (!isOffsetPublicationSolveAccepted(solvedSnapshot)) {
+    // T15b (T-16): unaccepted only through tolerated derived failures, the
+    // offset failures are reported but judged as in an accepted solve.
+    const onlyTolerated =
+      tolerated.size > 0 &&
+      isOffsetPublicationSolveAccepted({
+        ...solvedSnapshot,
+        diagnostics: diagnostics.filter(
+          (diagnostic) => !tolerated.has(diagnostic),
+        ),
+      });
+    const offsetDiagnostics = offsetRelationshipDiagnostics(
+      definition,
+      evaluation,
+    );
+    diagnostics.push(...offsetDiagnostics);
+    if (onlyTolerated)
+      for (const diagnostic of offsetDiagnostics) tolerated.add(diagnostic);
+  }
+  if (tolerated.size > 0)
+    startFailedDerivedDiagnostics.set(solvedSnapshot, tolerated);
 
   return {
     status,
@@ -8054,7 +8153,8 @@ function rebuiltBlockedOffsets(
   program: SketchCompiledSolveProgram,
   values: Float64Array,
 ): ReadonlySet<string> {
-  const failing = program.system.parameterProjection.offsetFailuresAt(values);
+  const failing =
+    program.system.parameterProjection.relationshipFailuresAt(values);
   const rebuilt = new Set<string>();
   for (const blockers of offsetBlockedRequirements(program, values).values())
     for (const blocker of blockers)
@@ -8093,7 +8193,7 @@ function solveWithRebuildRetry<T>(input: {
 }): T {
   const projection = input.program.system.parameterProjection;
   const run = (blocked: ReadonlySet<string>, solve: () => T) =>
-    projection.withBlockedOffsets(blocked, () => {
+    projection.withBlockedRelationships(blocked, () => {
       const result = solve();
       const values = blocked.size > 0 ? input.valuesOf(result) : null;
       return {
@@ -8115,11 +8215,12 @@ function solveWithRebuildRetry<T>(input: {
   ) =>
     solved.rebuilt.size === 0
       ? solved.result
-      : projection.withBlockedOffsets(without(blocked, solved.rebuilt), () =>
-          input.reevaluate(solved.values!),
+      : projection.withBlockedRelationships(
+          without(blocked, solved.rebuilt),
+          () => input.reevaluate(solved.values!),
         );
 
-  const blockedAtStart = projection.offsetFailuresAt(input.startValues);
+  const blockedAtStart = projection.relationshipFailuresAt(input.startValues);
   const first = run(blockedAtStart, input.solve);
   if (first.rebuilt.size === 0) return first.result;
   const kept = judged(blockedAtStart, first);
@@ -8173,7 +8274,9 @@ function solveProgramValues(
   if (
     isAcceptableSolvedSnapshot(snapshot) ||
     program.strategy !== "bfgs" ||
-    program.system.parameterProjection.offsetFailuresAt(startValues).size > 0
+    // T15b (review A6): any relationship failing at the start (offset or mirror).
+    program.system.parameterProjection.relationshipFailuresAt(startValues)
+      .size > 0
   ) {
     return plain;
   }
@@ -8298,6 +8401,27 @@ function isAcceptableSolvedValues(
   );
 }
 
+/**
+ * T15b ([TECH] T-16, the G16‴-style start-state rule): the derived failure
+ * diagnostics of a materialized snapshot whose relationships had all
+ * already failed at its solve's start. They stay errors in the snapshot
+ * (the sketch is invalid) but do not reject the solve or a drag frame. A
+ * snapshot not materialized here (a persisted prior) tolerates none.
+ */
+const startFailedDerivedDiagnostics = new WeakMap<
+  SolvedSketchSnapshot,
+  ReadonlySet<SketchSolveDiagnostic>
+>();
+
+/** Whether a materialized solve result carries an error the start-state rule does not tolerate. */
+function hasRejectingError(snapshot: SolvedSketchSnapshot) {
+  const tolerated = startFailedDerivedDiagnostics.get(snapshot);
+  return snapshot.diagnostics.some(
+    (diagnostic) =>
+      diagnostic.severity === "error" && !tolerated?.has(diagnostic),
+  );
+}
+
 function isAcceptableSolvedSnapshot(snapshot: SolvedSketchSnapshot) {
   return (
     snapshot.status.solveState !== "failed" &&
@@ -8307,9 +8431,7 @@ function isAcceptableSolvedSnapshot(snapshot: SolvedSketchSnapshot) {
     snapshot.dimensionStatuses.every(
       (status) => status.status !== "unsatisfied",
     ) &&
-    !snapshot.diagnostics.some(
-      (diagnostic) => diagnostic.severity === "error",
-    )
+    !hasRejectingError(snapshot)
   );
 }
 
@@ -8899,8 +9021,9 @@ function createDraggedPointAcceptance(input: {
     input.materialized.solvedSnapshot.dimensionStatuses.every(
       (status) => status.status !== "unsatisfied",
     );
-  const derivationsValid = !input.materialized.diagnostics.some(
-    (diagnostic) => diagnostic.severity === "error",
+  // T15b (T-16): a derived failure already present at the frame's start is tolerated.
+  const derivationsValid = !hasRejectingError(
+    input.materialized.solvedSnapshot,
   );
   // D1 (minimum-motion-sketch-drag): the cursor is a SOFT objective and is never
   // part of frame acceptance. A frame is accepted whenever the authored (hard)
@@ -11078,11 +11201,16 @@ export function validateSketchDefinitionCore(input: {
     input.tolerances,
     input.projectedReferences ?? [],
   );
+  // T15b: a failed mirror (or unresolved) relationship is an explicit error.
+  const derivationDiagnostics = [
+    ...derived.diagnostics,
+    ...derived.derivedFailures.map((failure) => failure.diagnostic),
+  ];
   return {
     isValid:
-      derived.diagnostics.every((entry) => entry.severity !== "error") &&
+      derivationDiagnostics.every((entry) => entry.severity !== "error") &&
       validation.isValid,
-    diagnostics: [...derived.diagnostics, ...validation.diagnostics],
+    diagnostics: [...derivationDiagnostics, ...validation.diagnostics],
   };
 }
 

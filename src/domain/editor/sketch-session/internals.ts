@@ -523,6 +523,11 @@ export function withLiveSolveBasis(
   }
 
   const accepted = isAcceptedSketchSolve(usableSolvedSnapshot);
+  // T15b (review O-1): a failed mirror keeps the solve accepted (drags,
+  // snaps and edits elsewhere stay available) but blocks every profile of
+  // the sketch at once, so the invalid sketch is explained like any other.
+  const regionsAvailable =
+    accepted && (usableSolvedSnapshot.failedDerivationIds ?? []).length === 0;
   const generation = session.liveRegions.generation + 1;
   return {
     ...session,
@@ -533,7 +538,7 @@ export function withLiveSolveBasis(
       solvedSnapshot: usableSolvedSnapshot,
       accepted,
     },
-    liveRegions: accepted
+    liveRegions: regionsAvailable
       ? {
           ...session.liveRegions,
           generation,

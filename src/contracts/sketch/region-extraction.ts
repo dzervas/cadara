@@ -160,8 +160,11 @@ export interface SketchArrangementUnpublishedOutput {
  * geometry, its diagnostic naming the relationship's publication state
  * from `publications` (T10i, review A-1: an offset over a non-accepted
  * seed is excluded through the predicate's closure, naming the seed's
- * offset). Without offset relationships the result is empty,
- * so the arrangement input is byte-identical.
+ * offset). T15b: the outputs of a failed (held) mirror or unresolved
+ * relationship (`failedDerivationIds`) and their dependents are excluded
+ * the same way, naming that relationship. Without offset relationships and
+ * without failed relationships the result is empty, so the arrangement
+ * input is byte-identical.
  */
 export function offsetArrangementInput(
   definition: SketchDefinition,
@@ -171,7 +174,9 @@ export function offsetArrangementInput(
   const offsets = (definition.derivedRelationships ?? []).flatMap(
     (relationship) => (relationship.kind === "offset" ? [relationship] : []),
   );
-  if (offsets.length === 0) return {};
+  // T15b: a failed mirror's held outputs are excluded like a failed offset's.
+  const failedDerived = new Set(solvedSnapshot.failedDerivationIds ?? []);
+  if (offsets.length === 0 && failedDerived.size === 0) return {};
   const status = new Map(
     publications.map((publication) => [
       publication.derivationId,
@@ -192,6 +197,8 @@ export function offsetArrangementInput(
   const derivedCurves: SketchArrangementDerivedCurve[] = [];
   const unpublishedOffsetOutputs: SketchArrangementUnpublishedOutput[] = [];
   const reasonOf = (derivationId: string) => {
+    if (failedDerived.has(derivationId))
+      return `derived relationship ${derivationId} failed (its outputs are held)`;
     const state = status.get(derivationId);
     return state === "failed"
       ? `offset relationship ${derivationId} failed its publication`
@@ -3637,6 +3644,8 @@ function projectedReferenceDiagnostics(
 function isAcceptedSolve(solved: SolvedSketchSnapshot) {
   return (
     solved.status.solveState === "solved" &&
+    // T15b ([TECH] T-8): a failed mirror blocks every profile of the sketch.
+    (solved.failedDerivationIds ?? []).length === 0 &&
     // [TECH] G16″: a requirement blocked by a failed offset relationship
     // does not withhold the rest of the sketch's regions (U-G1, scoped).
     solved.constraintStatuses.every((entry) =>

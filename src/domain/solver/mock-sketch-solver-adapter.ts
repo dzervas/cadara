@@ -1129,17 +1129,22 @@ function solveDefinition(
   offsetPlans: SolveSketchRequest["offsetPlans"],
   tolerances: SolveSketchRequest["tolerances"],
 ) {
-  // T08b-g5: offsets come from the shared contracts solve frame at τ.
+  // T08b-g5: offsets come from the shared contracts solve frame at τ;
+  // T15b (T-14): mirrors from their owner, always.
   const hasOffsets = (authoredDefinition.derivedRelationships ?? []).some(
     (relationship) => relationship.kind === "offset",
   );
-  const evaluation = hasOffsets
-    ? evaluateSketchDerivations({
-        definition: authoredDefinition,
-        modelingTolerance,
-        ...(offsetPlans ? { offsetPlans } : {}),
-      })
-    : null;
+  const hasMirrors = (authoredDefinition.derivedRelationships ?? []).some(
+    (relationship) => relationship.kind === "mirror",
+  );
+  const evaluation =
+    hasOffsets || hasMirrors
+      ? evaluateSketchDerivations({
+          definition: authoredDefinition,
+          modelingTolerance,
+          ...(offsetPlans ? { offsetPlans } : {}),
+        })
+      : null;
   const definition = evaluation?.definition ?? authoredDefinition;
   const validationDiagnostics = [
     ...authoredValidationDiagnostics,
@@ -1325,6 +1330,16 @@ function solveDefinition(
   const errorCount = validationDiagnostics.filter(
     (diagnostic) => diagnostic.severity === "error",
   ).length;
+  // T15b (T-8/T-16), as the core: one error per failed mirror (or
+  // unresolved) relationship, always in the snapshot (the sketch is
+  // invalid); a mock solve has no motion, so every failure is present at
+  // its start and does not fail the solve itself.
+  const derivedFailures = evaluation?.derivedFailures ?? [];
+  validationDiagnostics.splice(
+    authoredValidationDiagnostics.length,
+    0,
+    ...derivedFailures.map((failure) => failure.diagnostic),
+  );
 
   let status: SolvedSketchStatus;
   if (errorCount > 0) {
@@ -1361,8 +1376,15 @@ function solveDefinition(
     constraintStatuses,
     dimensionStatuses,
     diagnostics: validationDiagnostics,
-    ...(evaluation
+    ...(hasOffsets && evaluation
       ? { offsetFramePlans: solvedOffsetFramePlans(evaluation) }
+      : {}),
+    ...(derivedFailures.length > 0
+      ? {
+          failedDerivationIds: derivedFailures.map(
+            (failure) => failure.derivationId,
+          ),
+        }
       : {}),
   };
   // [TECH] G16′, as the core solver: an offset relationship's failure is

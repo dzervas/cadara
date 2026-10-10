@@ -373,18 +373,30 @@ export function applyOffsetPublications(
  * output (line, arc, circle, joint arc, shell) of an offset relationship
  * one of whose seeds is non-accepted (an offset of a non-certified offset's
  * output, directly or through a copy), owned by that seed's relationship.
+ *
+ * T15b ([TECH] T-8): every output of a failed (held) mirror or unresolved
+ * relationship (the snapshot's `failedDerivationIds`) is non-accepted too,
+ * owned by that relationship, and so are its dependents (the same
+ * closure). The name predates mirrors.
  */
 export function nonAcceptedOffsetOutputs(
   definition: Pick<SketchDefinition, "derivedRelationships" | "entities">,
   snapshot: Pick<
     SolvedSketchSnapshot,
-    "solvedEntities" | "certifiedOffsetDerivationIds"
+    "solvedEntities" | "certifiedOffsetDerivationIds" | "failedDerivationIds"
   >,
 ): ReadonlyMap<SketchEntityId, { readonly derivationId: string }> {
   const result = new Map<SketchEntityId, { readonly derivationId: string }>();
   const certified = new Set(snapshot.certifiedOffsetDerivationIds ?? []);
+  const failed = new Set(snapshot.failedDerivationIds ?? []);
   for (const relationship of definition.derivedRelationships ?? []) {
-    if (relationship.kind !== "offset") continue;
+    if (relationship.kind !== "offset") {
+      if (!failed.has(relationship.derivationId)) continue;
+      const owner = { derivationId: relationship.derivationId };
+      for (const output of relationship.outputs)
+        result.set(output.outputEntityId, owner);
+      continue;
+    }
     if (certified.has(relationship.derivationId)) continue;
     const owner = { derivationId: relationship.derivationId };
     for (const output of [
@@ -447,7 +459,8 @@ function addNonAcceptedDerivedDependents(
         continue;
       }
       const axis =
-        relationship.kind === "mirror"
+        relationship.kind === "mirror" &&
+        relationship.mirrorReference.kind === "lineEntity"
           ? result.get(relationship.mirrorReference.entityId)
           : undefined;
       for (const output of relationship.outputs) {
@@ -472,7 +485,7 @@ export function nonAcceptedOffsetOutputPoints(
   definition: Pick<SketchDefinition, "derivedRelationships" | "entities">,
   snapshot: Pick<
     SolvedSketchSnapshot,
-    "solvedEntities" | "certifiedOffsetDerivationIds"
+    "solvedEntities" | "certifiedOffsetDerivationIds" | "failedDerivationIds"
   >,
 ): ReadonlyMap<SketchPointId, { readonly derivationId: string }> {
   const outputs = nonAcceptedOffsetOutputs(definition, snapshot);
@@ -508,7 +521,7 @@ export function isAcceptedOffsetOutput(
   definition: Pick<SketchDefinition, "derivedRelationships" | "entities">,
   snapshot: Pick<
     SolvedSketchSnapshot,
-    "solvedEntities" | "certifiedOffsetDerivationIds"
+    "solvedEntities" | "certifiedOffsetDerivationIds" | "failedDerivationIds"
   >,
   entityId: SketchEntityId,
 ): boolean {

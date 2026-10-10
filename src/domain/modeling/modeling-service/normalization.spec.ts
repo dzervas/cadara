@@ -6,7 +6,18 @@ import {
   normalizeShellFeatureParameters,
   normalizeSketchDerivationDefinition,
   normalizeSketchEntityDefinition,
+  normalizeSolvedSketchSnapshot,
 } from "@/domain/modeling/modeling-service/normalization";
+import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
+import type { SketchDefinition } from "@/contracts/sketch/schema";
+import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
+import {
+  validateSketchDefinition,
+  validateSketchRecord,
+  validateSolvedSketchSnapshot,
+} from "@/contracts/sketch/runtime-schema";
+import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 
 // Lane: logic (per docs/testing.md — normalization is a domain persistence/normalization
 // seam under src/domain/, exercised through its exported entrypoint).
@@ -358,3 +369,190 @@ test("normalizes shell closedHollow and offsetAllFaces without weakening open-fa
     normalizeShellFeatureParameters(makeShellPayload({ faceTargets: [] })),
   ).toThrow("at least one removable face");
 });
+
+// T15b (T-7, T-8): same-version persistence of a datum-axis mirror and of the
+// solved `failedDerivationIds` (normalization + runtime validation seams).
+test("T15b: a sketch-datum mirror and failedDerivationIds round-trip through normalization and runtime validation; unknown datums and dangling/duplicate failed ids are rejected", async () => {
+  const pid = (id: string) => `sketch_point_${id}` as SketchPointId;
+  const eid = (id: string) => `sketch_entity_${id}` as SketchEntityId;
+  const point = (id: string, position: readonly [number, number]) => ({
+    pointId: pid(id),
+    label: id,
+    target: {
+      kind: "sketchPoint",
+      sketchId: "sketch_primary",
+      pointId: pid(id),
+    },
+    position,
+    isConstruction: false,
+  });
+  const line = (id: string, a: string, b: string) => ({
+    kind: "lineSegment",
+    entityId: eid(id),
+    label: id,
+    target: {
+      kind: "sketchEntity",
+      sketchId: "sketch_primary",
+      entityId: eid(id),
+    },
+    isConstruction: false,
+    startPointId: pid(a),
+    endPointId: pid(b),
+  });
+  const mirror = (
+    derivationId: string,
+    mirrorReference: unknown,
+    seed: string,
+    output: string,
+    seedPoints: string[],
+    outputPoints: string[],
+  ) => ({
+    derivationId,
+    label: derivationId,
+    kind: "mirror",
+    seedEntityIds: [eid(seed)],
+    mirrorReference,
+    outputs: [
+      {
+        seedEntityId: eid(seed),
+        outputEntityId: eid(output),
+        instanceIndex: 1,
+        seedPointIds: seedPoints.map(pid),
+        outputPointIds: outputPoints.map(pid),
+      },
+    ],
+  });
+  const datumMirror = mirror(
+    "sketch_derivation_1_mirror",
+    { kind: "sketchDatum", datum: "xAxis" },
+    "ab",
+    "mab",
+    ["a", "b"],
+    ["ma", "mb"],
+  );
+  const brokenMirror = mirror(
+    "sketch_derivation_2_mirror",
+    { kind: "lineEntity", entityId: eid("missing_axis") },
+    "cd",
+    "mcd",
+    ["c", "d"],
+    ["mc", "md"],
+  );
+  const definition = {
+    schemaVersion: "sketch-definition/v1alpha2",
+    referenceIds: [],
+    references: [],
+    pointIds: ["a", "b", "ma", "mb", "c", "d", "mc", "md"].map(pid),
+    points: [
+      point("a", [1, 1]),
+      point("b", [3, 2]),
+      point("ma", [1, -1]),
+      point("mb", [3, -2]),
+      point("c", [5, 5]),
+      point("d", [6, 5]),
+      point("mc", [9, 9]),
+      point("md", [10, 9]),
+    ],
+    entityIds: ["ab", "mab", "cd", "mcd"].map(eid),
+    entities: [
+      line("ab", "a", "b"),
+      line("mab", "ma", "mb"),
+      line("cd", "c", "d"),
+      line("mcd", "mc", "md"),
+    ],
+    constraintIds: [],
+    constraints: [],
+    dimensionIds: [],
+    dimensions: [],
+    derivedRelationships: [datumMirror, brokenMirror],
+  } as unknown as SketchDefinition;
+
+  // The datum kind persists as authored (same version, no migration).
+  const stored = JSON.parse(JSON.stringify(datumMirror));
+  expect(normalizeSketchDerivationDefinition(stored)).toEqual(datumMirror);
+  expect(validateSketchDefinition(definition).success).toBe(true);
+  for (const datum of ["origin", "zAxis"])
+    expect(() =>
+      normalizeSketchDerivationDefinition({
+        ...stored,
+        mirrorReference: { kind: "sketchDatum", datum },
+      }),
+    ).toThrow("Invalid sketch mirror derivation payload.");
+  expect(
+    validateSketchDefinition({
+      ...definition,
+      derivedRelationships: [
+        {
+          ...datumMirror,
+          mirrorReference: { kind: "sketchDatum", datum: "origin" },
+        },
+      ],
+    }).success,
+  ).toBe(false);
+
+  const snapshot = solveSketchDefinitionCore({
+    definition,
+    tolerances: {
+      coincidence: 1e-6,
+      angleRadians: 1e-6,
+      minimumSegmentLength: 1e-3,
+    },
+    modelingTolerance: 1e-3,
+    partialSolvePolicy: "bestEffort",
+  }).solvedSnapshot;
+  expect(snapshot.failedDerivationIds).toEqual(["sketch_derivation_2_mirror"]);
+  const roundTrip = normalizeSolvedSketchSnapshot(
+    JSON.parse(JSON.stringify(snapshot)),
+  );
+  expect(roundTrip).toEqual(snapshot);
+  expect(validateSolvedSketchSnapshot(roundTrip).success).toBe(true);
+  const duplicate = validateSolvedSketchSnapshot({
+    ...snapshot,
+    failedDerivationIds: [
+      "sketch_derivation_2_mirror",
+      "sketch_derivation_2_mirror",
+    ],
+  });
+  expect(
+    duplicate.success ? [] : duplicate.issues.map((issue) => issue.message),
+  ).toContain(
+    "Failed derived relationship ids must name each relationship once.",
+  );
+  const base = (
+    await new MockKernelAdapter().getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: "doc_workspace",
+    })
+  ).snapshot.document.sketches[0]!.sketch;
+  const record = (ids: string[]) =>
+    validateSketchRecord({
+      ...structuredClone(base),
+      definition,
+      solvedSnapshot: { ...snapshot, failedDerivationIds: ids },
+      regions: [],
+    });
+  expect(record(["sketch_derivation_2_mirror"]).success).toBe(true);
+  const dangling = record(["sketch_derivation_unknown"]);
+  expect(
+    dangling.success ? [] : dangling.issues.map((issue) => issue.message),
+  ).toContain(
+    "A failed derived relationship id must reference an existing mirror, pattern or transform relationship.",
+  );
+  // Review A4: an id without its relationship's error diagnostic is rejected.
+  const withoutError = validateSolvedSketchSnapshot({
+    ...snapshot,
+    diagnostics: snapshot.diagnostics.filter(
+      (diagnostic) => diagnostic.severity !== "error",
+    ),
+  });
+  expect(
+    withoutError.success
+      ? []
+      : withoutError.issues.map((issue) => issue.message),
+  ).toContain(
+    "A failed derived relationship id must have its relationship's error diagnostic.",
+  );
+  expect(() =>
+    normalizeSolvedSketchSnapshot({ ...snapshot, failedDerivationIds: [1] }),
+  ).toThrow("Invalid failed derived relationship id payload.");
+}, 120_000);

@@ -383,7 +383,11 @@ function relationshipReferencedPointIds(
   relationship: SketchDerivationDefinition,
 ) {
   const entityIds = new Set<SketchEntityId>(relationship.seedEntityIds);
-  if (relationship.kind === "mirror")
+  // A sketch datum axis has no local points (T15b).
+  if (
+    relationship.kind === "mirror" &&
+    relationship.mirrorReference.kind === "lineEntity"
+  )
     entityIds.add(relationship.mirrorReference.entityId);
   return new Set<SketchPointId>([
     ...definition.entities
