@@ -150,6 +150,10 @@ export interface SketchDebugSnapshot {
   entities: {
     id: string;
     kind: string;
+    /** T15e: defining point ids (line start/end, circle centre, arc centre/start/end). */
+    pointIds?: readonly string[];
+    /** T15e: circle radius (solved when a live solve exists). */
+    radius?: number;
     occurrences?: {
       occId: string;
       pointId: string;
@@ -173,6 +177,21 @@ export interface SketchDebugSnapshot {
    * regions are `pending` or `unavailable` with a stale count.
    */
   liveRegions?: { status: string; count: number };
+  /**
+   * T15e: derived relationships (kind, axis reference for mirrors, and the
+   * stable seed → output entity/point maps) for mirror E2E assertions.
+   */
+  derivedRelationships?: {
+    id: string;
+    kind: string;
+    mirrorReference?: unknown;
+    outputs: {
+      seedEntityId: string;
+      outputEntityId: string;
+      seedPointIds: readonly string[];
+      outputPointIds: readonly string[];
+    }[];
+  }[];
 }
 
 export interface CadaraDebugNamespace {

@@ -27,7 +27,11 @@ import {
   getSessionSketchId,
   rebuildSessionForDefinition,
 } from "@/domain/editor/sketch-session/internals";
-import { createSketchDerivedTransformContribution } from "@/domain/sketch-editing/operations";
+import {
+  createSketchDerivedTransformContribution,
+  createSketchOffsetDerivationContribution,
+  type SketchEditOperationResult,
+} from "@/domain/sketch-editing/operations";
 
 export type P = readonly [number, number];
 export const pid = (id: string) => `sketch_point_${id}` as SketchPointId;
@@ -415,6 +419,53 @@ export function derivedTargetsDefinition() {
     ],
   };
   return { session, relationship, outputOf, definition, ids };
+}
+
+/**
+ * T15e interplay: appends one more derived relationship, authored by the
+ * production operation builders (offset: `side` left, `value` = distance;
+ * mirror: the last entity is the axis; linear pattern: `value` = spacing),
+ * and rebuilds the session's live solve. Returns the session and the new
+ * relationship.
+ */
+export function withDerived(
+  session: SketchSessionState,
+  operatorKind: "offset" | "mirror" | "linearPattern",
+  entityIds: readonly SketchEntityId[],
+  sequence: number,
+  value: number | null = null,
+) {
+  const factories = createSessionCommitFactories(sequence, SKETCH as never);
+  const modelingTolerance = OCC_KERNEL_SETTINGS.modelingTolerance;
+  const result: SketchEditOperationResult =
+    operatorKind === "offset"
+      ? createSketchOffsetDerivationContribution({
+          definition: session.definition,
+          entityIds,
+          distance: value,
+          side: "left",
+          sequence,
+          factories,
+          modelingTolerance,
+        })
+      : createSketchDerivedTransformContribution({
+          definition: session.definition,
+          operatorKind,
+          entityIds,
+          value,
+          sequence,
+          factories,
+          modelingTolerance,
+        });
+  if (!result.valid || !result.contribution)
+    throw new Error(result.message ?? operatorKind);
+  const next = rebuildSessionForDefinition(session, {
+    definition: appendDefinition(session.definition, result.contribution),
+  });
+  return {
+    session: next,
+    relationship: next.definition.derivedRelationships!.at(-1)!,
+  };
 }
 
 /**

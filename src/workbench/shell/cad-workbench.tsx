@@ -845,6 +845,35 @@ export function CadWorkbench({
           position: solvedMap.get(p.pointId) ?? p.position,
         })),
         entities: def.entities.map((e) => {
+          if (e.kind === "lineSegment") {
+            return {
+              id: e.entityId,
+              kind: e.kind,
+              pointIds: [e.startPointId, e.endPointId],
+            };
+          }
+          if (e.kind === "circle") {
+            const solvedCircle =
+              sketchSession.liveSolve?.solvedSnapshot.solvedEntities.find(
+                (se) => se.kind === "circle" && se.entityId === e.entityId,
+              );
+            return {
+              id: e.entityId,
+              kind: e.kind,
+              pointIds: [e.centerPointId],
+              radius:
+                solvedCircle?.kind === "circle"
+                  ? solvedCircle.solvedRadius
+                  : e.radius,
+            };
+          }
+          if (e.kind === "arc") {
+            return {
+              id: e.entityId,
+              kind: e.kind,
+              pointIds: [e.centerPointId, e.startPointId, e.endPointId],
+            };
+          }
           if (e.kind !== "spline") {
             return { id: e.entityId, kind: e.kind };
           }
@@ -873,6 +902,22 @@ export function CadWorkbench({
           status: sketchSession.liveRegions.status,
           count: sketchSession.liveRegions.regions.length,
         },
+        derivedRelationships: (def.derivedRelationships ?? []).map(
+          (relationship) => ({
+            id: relationship.derivationId,
+            kind: relationship.kind,
+            mirrorReference:
+              relationship.kind === "mirror"
+                ? relationship.mirrorReference
+                : undefined,
+            outputs: relationship.outputs.map((output) => ({
+              seedEntityId: output.seedEntityId,
+              outputEntityId: output.outputEntityId,
+              seedPointIds: output.seedPointIds,
+              outputPointIds: output.outputPointIds,
+            })),
+          }),
+        ),
       };
     },
   });
