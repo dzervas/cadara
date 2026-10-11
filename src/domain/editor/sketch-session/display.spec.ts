@@ -23,10 +23,16 @@ import {
 import { publishSketchOffsets } from "@/contracts/sketch/offset-publication";
 import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
 import { createCertifiedNeutralCurveRequestQuery } from "@/domain/modeling/neutral-curve-certification/query";
+import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import * as mirror from "@/domain/editor/sketch-mirror.fixtures";
 import {
   acceptSketchDraw,
+  beginSketchGeometryDrag,
   beginSketchTool,
   completeSketchOffsetPreviewPublication,
+  deleteSelectedSketchGeometry,
+  getSketchSessionPreviewLabel,
+  updateSketchGeometryDrag,
   finalizeSketchDraw,
   createNewSketchSessionFromSupport,
   createSketchSessionFromSnapshot,
@@ -813,5 +819,148 @@ describe("T12d: tangent handle visibility rule table (D8)", () => {
       }),
       "unrelated point hovered → hidden",
     ).toBe(false);
+  });
+});
+
+// T16b ([TECH] T16-6, plan review A-5; logic lane, seam: the session's
+// display renderables). An output held by a failed mirror (its owner, the
+// G16‴ closure of `nonAcceptedOffsetOutputs`, is in the snapshot's
+// `failedDerivationIds`) is settled invalid geometry: always `invalid` (red),
+// during an unrelated drag and on re-entry before the first live solve too.
+// A not yet certified offset keeps U-A (`stale` during a drag).
+describe("T16b: held copies of a broken mirror always draw invalid", () => {
+  const validityOf = (
+    session: SketchSessionState,
+    ids: readonly SketchEntityId[],
+  ) =>
+    ids.map(
+      (id) =>
+        getSketchSessionDisplayRenderables(session).find(
+          (renderable) =>
+            renderable.target?.kind === "sketchEntity" &&
+            renderable.target.entityId === id &&
+            renderable.semanticClass !== "region",
+        )?.regionValidity,
+    );
+  const copiesOf = (relationship: SketchDerivationDefinition) =>
+    relationship.outputs.map((output) => output.outputEntityId);
+  const brokenAxis = (session: SketchSessionState) =>
+    deleteSelectedSketchGeometry(session, [
+      mirror.entityRef(session, mirror.eid("axis")),
+    ]);
+  /** An unrelated drag in progress: the free point u, glided. */
+  const dragging = (session: SketchSessionState) => {
+    const started = beginSketchGeometryDrag(
+      session,
+      mirror.pointRef(session, mirror.pid("u")),
+      [15, 5],
+    );
+    const moved = updateSketchGeometryDrag(started, [15.5, 5.5]);
+    expect(moved.activeDrag, "premise: the drag is in progress").not.toBeNull();
+    return moved;
+  };
+
+  test("idle and during an unrelated drag (red on base: stale), the held copies are invalid", () => {
+    const { session, relationship } = mirror.mirroredSession("free");
+    const broken = brokenAxis(session);
+    const copies = copiesOf(relationship);
+    expect(
+      broken.liveSolve!.solvedSnapshot.failedDerivationIds,
+      "premise: the mirror is held",
+    ).toEqual([relationship.derivationId]);
+    expect(validityOf(broken, copies), "idle").toEqual(
+      copies.map(() => "invalid"),
+    );
+    const moved = dragging(broken);
+    expect(validityOf(moved, copies), "during the drag").toEqual(
+      copies.map(() => "invalid"),
+    );
+    expect(
+      validityOf(moved, [mirror.eid("ab"), mirror.eid("c")]),
+      "control: the originals draw ordinary",
+    ).toEqual([undefined, undefined]);
+  });
+
+  test("a mirror of a held copy (the downstream closure) is invalid idle and during a drag", () => {
+    const { session, setup, second } = mirror.chainSession();
+    const broken = brokenAxis(session);
+    expect(
+      broken.liveSolve!.solvedSnapshot.failedDerivationIds,
+      "premise: only the first mirror fails; the second evaluates from held copies",
+    ).toEqual([setup.relationship.derivationId]);
+    const downstream = copiesOf(second);
+    expect(validityOf(broken, downstream), "idle").toEqual(
+      downstream.map(() => "invalid"),
+    );
+    expect(validityOf(dragging(broken), downstream), "during the drag").toEqual(
+      downstream.map(() => "invalid"),
+    );
+  });
+
+  test("control (U-A): a provisional offset is stale during the same drag while the held copies are invalid", () => {
+    const { session, relationship } = mirror.mirroredSession("free");
+    const offset = mirror.withDerived(
+      session,
+      "offset",
+      [mirror.eid("ab")],
+      90,
+      0.5,
+    );
+    const broken = brokenAxis(offset.session);
+    const offsetOutputs = copiesOf(offset.relationship);
+    const moved = dragging(broken);
+    expect(
+      validityOf(moved, offsetOutputs),
+      "the uncertified offset follows U-A",
+    ).toEqual(offsetOutputs.map(() => "stale"));
+    expect(validityOf(moved, copiesOf(relationship))).toEqual(
+      copiesOf(relationship).map(() => "invalid"),
+    );
+  });
+
+  test("on re-entry before the first live solve (red on base: stale), the held copies are invalid and the label-based message shows", async () => {
+    const { session, relationship } = mirror.mirroredSession("free");
+    const broken = brokenAxis(session);
+    const adapter = new MockKernelAdapter();
+    const request = {
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+    } as const;
+    const before = await adapter.getDocumentSnapshot(request);
+    const commit = await adapter.commitSketch({
+      ...request,
+      baseRevisionId: before.snapshot.document.revisionId,
+      solverCorrelation: {
+        requestId: "request_t16b",
+        projectionRequestId: "request_t16b:project",
+        validationRequestId: "request_t16b:validate",
+        solveRequestId: "request_t16b:solve",
+        regionRequestId: "request_t16b:regions",
+      },
+      sketchId: null,
+      sketchLabel: "Broken mirror",
+      plane: before.snapshot.document.sketches[0]!.plane,
+      definition: broken.definition,
+    });
+    expect(commit.revisionState.kind).toBe("accepted");
+    const record = (
+      await adapter.getDocumentSnapshot(request)
+    ).snapshot.document.sketches.find(
+      (entry) => entry.sketchId === commit.sketchId,
+    )!;
+    expect(
+      record.sketch.solvedSnapshot.failedDerivationIds,
+      "premise: the saved record holds the mirror",
+    ).toEqual([relationship.derivationId]);
+    const reentered = createSketchSessionFromSnapshot(
+      record,
+      OCC_KERNEL_SETTINGS,
+    );
+    expect(reentered.liveSolve, "premise: no live solve yet").toBeNull();
+    const copies = copiesOf(relationship);
+    expect(validityOf(reentered, copies)).toEqual(copies.map(() => "invalid"));
+    expect(getSketchSessionPreviewLabel(reentered)).toBe(
+      "Mirror ‘mirror 1’ is broken: its mirror line was deleted. Its copies stay where they were last solved and can't be used; profiles from this sketch are blocked. Undo, or remove the mirror from the Mirror panel.",
+    );
   });
 });

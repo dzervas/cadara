@@ -3530,3 +3530,48 @@ describe("T16a: Remove Mirror through the authored-action owner", () => {
     expect(f.session.actionAvailability?.canUndo ?? false).toBe(false);
   });
 });
+
+// T16b (logic lane; seam: the authored-action owner around the real sketch
+// reducer). Undo and Redo of the Delete that breaks a mirror recompute its
+// validity: the live solve's sketch-wide gate, the regions and the
+// label-based message follow the restored definition (issue 15: "validity is
+// recomputed after repair or Undo").
+describe("T16b: Undo/Redo recompute a broken mirror's validity", () => {
+  test("Delete the axis → broken (gate, regions unavailable, message); Undo → healthy; Redo → broken again", async () => {
+    const setup = mirroredSession("free");
+    const f = await fixture(false, setup.session);
+    const message =
+      "Mirror ‘mirror 1’ is broken: its mirror line was deleted. Its copies stay where they were last solved and can't be used; profiles from this sketch are blocked. Undo, or remove the mirror from the Mirror panel.";
+    const health = (session: SketchSessionState) => ({
+      failed: session.liveSolve?.solvedSnapshot.failedDerivationIds ?? [],
+      regions: session.liveRegions.status === "unavailable",
+      message: session.validationMessage,
+    });
+    const before = projection(f.session);
+    const healthy = health(f.session);
+    expect(healthy).toEqual({ failed: [], regions: false, message: null });
+    f.dispatch({
+      type: "viewport.selectionRequested",
+      target: entityRef(f.session, eid("axis")),
+    });
+    f.dispatch({ type: "sketch.annotationDeleteRequested" });
+    expect(
+      f.session.definition.entityIds,
+      "premise: the axis is deleted",
+    ).not.toContain(eid("axis"));
+    const broken = {
+      failed: [setup.relationship.derivationId],
+      regions: true,
+      message,
+    };
+    expect(health(f.session)).toEqual(broken);
+    expect(f.session.actionHistory?.undo.map((entry) => entry.label)).toEqual([
+      "Delete Sketch Item",
+    ]);
+    f.dispatch({ type: "history.undoRequested" });
+    expect(projection(f.session), "Undo restores the axis").toEqual(before);
+    expect(health(f.session), "Undo recomputes: healthy").toEqual(healthy);
+    f.dispatch({ type: "history.redoRequested" });
+    expect(health(f.session), "Redo recomputes: broken").toEqual(broken);
+  });
+});

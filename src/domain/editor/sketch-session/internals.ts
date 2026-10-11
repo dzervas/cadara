@@ -64,6 +64,7 @@ import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import {
   deriveSketchValidity,
   mergeSketchSolveDiagnostics,
+  sketchProfileGateFailures,
   withRelationshipScopedDiagnostics,
 } from "@/contracts/sketch/derived-validity";
 import {
@@ -524,9 +525,10 @@ export function withLiveSolveBasis(
   const accepted = isAcceptedSketchSolve(usableSolvedSnapshot);
   // T15b (review O-1): a failed mirror keeps the solve accepted (drags,
   // snaps and edits elsewhere stay available) but blocks every profile of
-  // the sketch at once, so the invalid sketch is explained like any other.
+  // the sketch at once, so the invalid sketch is explained like any other
+  // (T16b: the sketch-wide profile gate).
   const regionsAvailable =
-    accepted && (usableSolvedSnapshot.failedDerivationIds ?? []).length === 0;
+    accepted && sketchProfileGateFailures(usableSolvedSnapshot).length === 0;
   const generation = session.liveRegions.generation + 1;
   return {
     ...session,

@@ -113,9 +113,25 @@ export interface MirrorArcVariables {
   readonly endAngle: number;
 }
 
+/**
+ * Why a derived relationship failed (T16b): the axis line is missing (or is
+ * not a straight line with both end points), the axis is shorter than τ, an
+ * original or a copy was deleted, the recorded map no longer matches the
+ * geometry, the relationship is on a dependency loop, or it depends on one.
+ */
+export type DerivedRelationshipFailureReason =
+  | "axisMissing"
+  | "axisDegenerate"
+  | "seedMissing"
+  | "copyMissing"
+  | "mapMismatch"
+  | "dependencyLoop"
+  | "dependsOnLoop";
+
 /** One relationship's single failure. */
 export interface MirrorRelationshipFailure {
   readonly derivationId: string;
+  readonly reason: DerivedRelationshipFailureReason;
   readonly diagnostic: SketchSolveDiagnostic;
 }
 
@@ -149,24 +165,73 @@ export function indexMirrorGeometry(
   };
 }
 
+/** The relationship a failure message names: its kind and label, never its id. */
+type NamedRelationship = Pick<
+  SketchDerivationDefinition,
+  "derivationId" | "label"
+> & { readonly kind: SketchDerivationDefinition["kind"] };
+
+const RELATIONSHIP_NOUN: Record<SketchDerivationDefinition["kind"], string> = {
+  mirror: "Mirror",
+  linearPattern: "Linear pattern",
+  circularPattern: "Circular pattern",
+  transform: "Transform",
+  offset: "Offset",
+};
+
+/**
+ * T16b ([TECH] T16-5, issue 15 "Invalid state and recovery", specification
+ * "Minimum failure feedback"): one message per failed relationship, by its
+ * label (never its id): what is wrong, what is blocked, and the recovery
+ * commands that exist (Undo; for a mirror, removal from the Mirror panel).
+ * A non-offset failure blocks every profile of the sketch (the sketch-wide
+ * gate); an offset's stays relationship-scoped (U-G5).
+ */
+function failureMessage(
+  relationship: NamedRelationship,
+  statement: string,
+): string {
+  const consequence =
+    relationship.kind === "offset"
+      ? "Its offset curves stay where they were last solved and can't be used."
+      : "Its copies stay where they were last solved and can't be used; profiles from this sketch are blocked.";
+  const recovery =
+    relationship.kind === "mirror"
+      ? "Undo, or remove the mirror from the Mirror panel."
+      : "Undo to recover.";
+  return `${statement} ${consequence} ${recovery}`;
+}
+
 function failure(
-  derivationId: string,
-  code:
-    | (typeof MIRROR_DIAGNOSTIC_CODES)[keyof typeof MIRROR_DIAGNOSTIC_CODES]
-    | typeof DERIVED_RELATIONSHIP_DEPENDENCY_UNRESOLVED,
-  message: string,
+  relationship: NamedRelationship,
+  reason: DerivedRelationshipFailureReason,
+  statement: string,
   entityId: SketchEntityId | null,
 ): MirrorRelationshipFailure {
+  const code =
+    reason === "dependencyLoop" || reason === "dependsOnLoop"
+      ? DERIVED_RELATIONSHIP_DEPENDENCY_UNRESOLVED
+      : reason === "axisMissing"
+        ? MIRROR_DIAGNOSTIC_CODES.axisMissing
+        : reason === "axisDegenerate"
+          ? MIRROR_DIAGNOSTIC_CODES.axisDegenerate
+          : MIRROR_DIAGNOSTIC_CODES.mapStale;
   return {
-    derivationId,
+    derivationId: relationship.derivationId,
+    reason,
     diagnostic: {
       code,
       severity: "error",
-      message,
+      message: failureMessage(relationship, statement),
       target: entityId ? { kind: "entity", entityId } : null,
     },
   };
 }
+
+const brokenMirror = (
+  relationship: Pick<MirrorRelationship, "label">,
+  why: string,
+) => `Mirror ‘${relationship.label}’ is broken: ${why}.`;
 
 /**
  * Resolves and classifies a mirror axis. A missing reference or one that is
@@ -176,15 +241,16 @@ function failure(
  * also rejects a non-finite length) is `derived-mirror-axis-degenerate`.
  */
 export function resolveMirrorAxis(
-  derivationId: string,
+  relationship: Pick<MirrorRelationship, "derivationId" | "label">,
   reference: MirrorAxisReference,
   geometry: MirrorGeometry,
   modelingTolerance: number,
 ): MirrorAxisResolution {
+  const mirror = { ...relationship, kind: "mirror" as const };
   let axis: MirrorAxis;
   if (reference.kind === "sketchDatum")
     return resolveMirrorAxis(
-      derivationId,
+      relationship,
       {
         kind: "datumAxis",
         origin: [0, 0],
@@ -218,9 +284,16 @@ export function resolveMirrorAxis(
       return {
         ok: false,
         failure: failure(
-          derivationId,
-          MIRROR_DIAGNOSTIC_CODES.axisMissing,
-          `Mirror relationship ${derivationId} references a missing axis or one that is not a straight sketch line.`,
+          mirror,
+          "axisMissing",
+          brokenMirror(
+            mirror,
+            !line
+              ? "its mirror line was deleted"
+              : line.kind !== "lineSegment"
+                ? `its mirror line ‘${line.label}’ is not a straight line`
+                : `an end point of its mirror line ‘${line.label}’ was deleted`,
+          ),
           line ? line.entityId : null,
         ),
       };
@@ -240,9 +313,12 @@ export function resolveMirrorAxis(
     return {
       ok: false,
       failure: failure(
-        derivationId,
-        MIRROR_DIAGNOSTIC_CODES.axisDegenerate,
-        `Mirror relationship ${derivationId} has a mirror axis shorter than the modeling tolerance.`,
+        mirror,
+        "axisDegenerate",
+        brokenMirror(
+          mirror,
+          "its mirror line is shorter than the modeling tolerance",
+        ),
         axis.kind === "line" ? axis.entityId : null,
       ),
     };
@@ -646,7 +722,8 @@ type MirrorOutputRecord = MirrorRelationship["outputs"][number];
  * points, have one length (spline occurrence counts), and every point
  * exists. An empty `seedPointIds` is stale like any other mismatch (T15b:
  * every writer records the seed's defining points). Returns the resolved
- * pair, or why the map is stale.
+ * pair, or why the map is stale (T16b: named by the surviving side's
+ * label, never an id).
  */
 function checkMirrorOutputMap(
   output: MirrorOutputRecord,
@@ -657,20 +734,38 @@ function checkMirrorOutputMap(
       readonly target: MirrorableEntity;
       readonly seedPointIds: readonly SketchPointId[];
     }
-  | { readonly stale: string; readonly entityId: SketchEntityId | null } {
+  | {
+      readonly stale: "seedMissing" | "copyMissing" | "mapMismatch";
+      readonly why: string;
+      readonly entityId: SketchEntityId | null;
+    } {
   const { pointById, entityById } = geometry;
   const seed = entityById.get(output.seedEntityId);
   const target = entityById.get(output.outputEntityId);
-  const stale = (reason: string) => ({
+  const stale = (
+    reason: "seedMissing" | "copyMissing" | "mapMismatch",
+    why: string,
+  ) => ({
     stale: reason,
+    why,
     entityId: seed ? seed.entityId : target ? target.entityId : null,
   });
-  if (!seed) return stale(`seed ${output.seedEntityId} is missing`);
-  if (!target) return stale(`output ${output.outputEntityId} is missing`);
-  if (!isMirrorable(seed) || !isMirrorable(target) || seed.kind !== target.kind)
+  if (!seed)
     return stale(
-      `${seed.kind} ${seed.entityId} cannot be mirrored onto ${target.kind} ${target.entityId}`,
+      "seedMissing",
+      target
+        ? `the original of ‘${target.label}’ was deleted`
+        : "an original and its copy were deleted",
     );
+  if (!target)
+    return stale("copyMissing", `a copy of ‘${seed.label}’ was deleted`);
+  const mismatch = () =>
+    stale(
+      "mapMismatch",
+      `its geometry no longer matches (copy ‘${target.label}’ of ‘${seed.label}’)`,
+    );
+  if (!isMirrorable(seed) || !isMirrorable(target) || seed.kind !== target.kind)
+    return mismatch();
   const seedDefining = mirrorablePointIds(seed);
   const targetDefining = mirrorablePointIds(target);
   const seedPointIds = output.seedPointIds;
@@ -681,13 +776,11 @@ function checkMirrorOutputMap(
     !sameIds(seedPointIds, seedDefining) ||
     !sameIds(output.outputPointIds, targetDefining)
   )
-    return stale(
-      `the point map of ${seed.entityId} → ${target.entityId} differs from their defining points`,
-    );
+    return mismatch();
   const missing = [...seedPointIds, ...output.outputPointIds].find(
     (pointId) => !pointById.has(pointId),
   );
-  if (missing) return stale(`point ${missing} is missing`);
+  if (missing) return mismatch();
   return { seed, target, seedPointIds };
 }
 
@@ -699,7 +792,7 @@ export function evaluateMirrorRelationship(input: {
 }): MirrorRelationshipEvaluation {
   const { relationship, geometry } = input;
   const resolution = resolveMirrorAxis(
-    relationship.derivationId,
+    relationship,
     relationship.mirrorReference,
     geometry,
     input.modelingTolerance,
@@ -713,9 +806,9 @@ export function evaluateMirrorRelationship(input: {
       return {
         ok: false,
         failure: failure(
-          relationship.derivationId,
-          MIRROR_DIAGNOSTIC_CODES.mapStale,
-          `Mirror relationship ${relationship.derivationId} no longer matches its geometry: ${checked.stale}.`,
+          { ...relationship, kind: "mirror" },
+          checked.stale,
+          brokenMirror(relationship, checked.why),
           checked.entityId,
         ),
       };
@@ -1026,20 +1119,38 @@ export function orderDerivedRelationships(
       }
     }
   }
+  // T16b: an unsorted relationship that reaches itself through unsorted
+  // dependents is on a loop (a self-reference included); any other one only
+  // depends on a loop. One bounded search per unsorted relationship.
+  const onLoop = (start: number) => {
+    const seen = new Set<number>();
+    const stack = [...dependents[start]!];
+    while (stack.length > 0) {
+      const index = stack.pop()!;
+      if (index === start) return true;
+      if (taken[index] || seen.has(index)) continue;
+      seen.add(index);
+      stack.push(...dependents[index]!);
+    }
+    return false;
+  };
   return {
     order: order.map((index) => relationships[index]!),
-    unresolved: relationships.flatMap((relationship, index) =>
-      taken[index]
-        ? []
-        : [
-            failure(
-              relationship.derivationId,
-              DERIVED_RELATIONSHIP_DEPENDENCY_UNRESOLVED,
-              `Derived relationship ${relationship.derivationId} depends on outputs that cannot be evaluated before it (a dependency cycle or a self-reference).`,
-              relationship.seedEntityIds[0] ?? null,
-            ),
-          ],
-    ),
+    unresolved: relationships.flatMap((relationship, index) => {
+      if (taken[index]) return [];
+      const named = `${RELATIONSHIP_NOUN[relationship.kind]} ‘${relationship.label}’`;
+      const loop = onLoop(index);
+      return [
+        failure(
+          relationship,
+          loop ? "dependencyLoop" : "dependsOnLoop",
+          loop
+            ? `${named} depends on its own ${relationship.kind === "offset" ? "offset curves" : "copies"} (a dependency loop).`
+            : `${named} depends on geometry made in a dependency loop.`,
+          relationship.seedEntityIds[0] ?? null,
+        ),
+      ];
+    }),
   };
 }
 
@@ -1366,7 +1477,7 @@ export function mirrorSeedTangentOf(input: {
     );
     if (relationship?.kind !== "mirror" || !current.counterpart) return null;
     const resolution = resolveMirrorAxis(
-      relationship.derivationId,
+      relationship,
       relationship.mirrorReference,
       geometry,
       input.modelingTolerance,

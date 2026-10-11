@@ -10,9 +10,28 @@ import type {
   DimensionDefinition,
   SketchDefinition,
 } from "@/contracts/sketch/schema";
+import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
 import {
+  deriveSketchValidity,
+  sketchProfileGateFailures,
+} from "@/contracts/sketch/derived-validity";
+import { publishSketchOffsets } from "@/contracts/sketch/offset-publication";
+import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
+import { createCertifiedNeutralCurveRequestQuery } from "@/domain/modeling/neutral-curve-certification/query";
+import {
+  createStandardPlaneDefinition,
+  OCC_KERNEL_SETTINGS,
+} from "@/domain/modeling/opencascade-kernel-seed";
+import {
+  acceptSketchDraw,
   beginSketchTool,
+  completeSketchOffsetPreviewPublication,
   computeSketchTangentActionState,
+  createNewSketchSession,
+  finalizeSketchDraw,
+  patchSketchEditToolValue,
+  selectSketchEditToolTarget,
+  startSketchDraw,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
 import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
@@ -351,7 +370,7 @@ describe("T16a R-8: Remove Mirror deletes the copies' requirements and the origi
       new Map(
         state.liveSolve!.solvedSnapshot.solvedPoints.map((entry) => [
           entry.pointId,
-          entry.position,
+          entry.solvedPosition,
         ]),
       );
     const before = solved(session);
@@ -390,5 +409,200 @@ describe("T16a R-8: Remove Mirror deletes the copies' requirements and the origi
     expect(applySketchMirrorRemoval(after, relationship.derivationId)).toBe(
       after,
     );
+  });
+});
+
+/**
+ * T16b (T16a review A-1): the panel's broken set is the live solve's
+ * sketch-wide profile gate (`sketchProfileGateFailures`); the owner's
+ * evaluation gives the reason, and the broken set only before the first
+ * live solve.
+ */
+describe("T16b: the Mirror panel's health agrees with the profile gate", () => {
+  const brokenIds = (session: SketchSessionState) =>
+    (computeSketchMirrorActionState(session, [])?.entries ?? [])
+      .filter((entry) => entry.brokenReason !== null)
+      .map((entry) => entry.derivationId);
+  const gate = (session: SketchSessionState) => [
+    ...sketchProfileGateFailures(session.liveSolve!.solvedSnapshot),
+  ];
+
+  test("on every broken fixture the panel's broken mirrors are exactly the gate's", () => {
+    const { session, relationship, outputOf } = mirroredSession("free");
+    const copyLine = outputOf("ab").outputEntityId;
+    const chain = chainSession();
+    const states: [string, SketchSessionState][] = [
+      ["healthy", session],
+      ["axis missing", without(session, [eid("axis")])],
+      ["original deleted", without(session, [eid("c")])],
+      ["copy deleted", without(session, [outputOf("c").outputEntityId])],
+      [
+        "mirror line too short",
+        rebuild(session, {
+          ...session.definition,
+          points: session.definition.points.map((point) =>
+            point.pointId === pid("x1")
+              ? { ...point, position: [-2, 0] }
+              : point,
+          ),
+        }),
+      ],
+      [
+        "geometry no longer matches",
+        rebuild(session, {
+          ...session.definition,
+          entities: session.definition.entities.map((entity) =>
+            entity.entityId === copyLine && entity.kind === "lineSegment"
+              ? { ...entity, endPointId: pid("u") }
+              : entity,
+          ),
+        }),
+      ],
+      [
+        "dependency loop",
+        rebuild(session, {
+          ...session.definition,
+          derivedRelationships: [
+            {
+              ...relationship,
+              mirrorReference: { kind: "lineEntity", entityId: copyLine },
+            },
+          ],
+        }),
+      ],
+      [
+        "chain, both axes missing",
+        without(chain.session, [eid("axis"), eid("axis2")]),
+      ],
+      ["chain, first axis missing", without(chain.session, [eid("axis")])],
+    ];
+    for (const [name, state] of states)
+      expect(brokenIds(state), name).toEqual(gate(state));
+  });
+
+  test("a mirror the solve fails although its authored positions evaluate (a driving axis length below τ) is broken, with the solve's reason (red on base: listed nowhere)", () => {
+    const { session, relationship } = mirroredSession("free");
+    const shrunk = rebuild(session, {
+      ...session.definition,
+      dimensionIds: ["dimension_axis"],
+      dimensions: [
+        {
+          dimensionId: "dimension_axis",
+          kind: "lineLength",
+          label: "Axis",
+          entityId: eid("axis"),
+          value: 0.0005,
+        } as unknown as DimensionDefinition,
+      ],
+    });
+    expect(gate(shrunk), "premise: the solve holds the mirror").toEqual([
+      relationship.derivationId,
+    ]);
+    expect(
+      evaluateSketchDerivations({
+        definition: shrunk.definition,
+        modelingTolerance: shrunk.modelingTolerance,
+      }).derivedFailures,
+      "premise: the authored positions evaluate",
+    ).toEqual([]);
+    expect(listed(shrunk, [])).toEqual([
+      [relationship.label, "mirror line too short"],
+    ]);
+  });
+
+  test("before the first live solve (re-entry) the owner's evaluation gives the broken set", () => {
+    const { session, relationship } = mirroredSession("free");
+    const reentered = { ...without(session, [eid("axis")]), liveSolve: null };
+    expect(listed(reentered, [])).toEqual([
+      [relationship.label, "mirror line missing"],
+    ]);
+    expect(listed({ ...session, liveSolve: null }, []), "control").toBeNull();
+  });
+
+  test("a mirror seeded on an offset spline curve (U-G2, malformed only, gated by severity) is listed as broken with its reason", () => {
+    let session = beginSketchTool(
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
+      "spline",
+    );
+    session = startSketchDraw(session, [0, 0]);
+    session = acceptSketchDraw(session, [1, 0.6]);
+    session = finalizeSketchDraw(acceptSketchDraw(session, [2, -0.4]));
+    const seed = session.definition.entities[0]!;
+    session = patchSketchEditToolValue(
+      selectSketchEditToolTarget(
+        beginSketchTool(session, "offset"),
+        seed.target,
+      ),
+      { value: 0.2 },
+    );
+    session = patchSketchEditToolValue(session, { intent: "commitOffset" });
+    for (let round = 0; round < 2; round += 1) {
+      const publication = session.activeEditTool?.offsetPublication;
+      if (publication?.status !== "pending") break;
+      const basis = publication.basis!;
+      session = completeSketchOffsetPreviewPublication(
+        session,
+        publication.derivationId,
+        publishSketchOffsets({
+          definition: basis.definition,
+          solvedSnapshot: basis.solvedSnapshot,
+          modelingTolerance: basis.modelingTolerance,
+          capabilities: {
+            query: createCertifiedNeutralCurveRequestQuery(),
+            certifier: createCertifiedCubicTubeChain(),
+          },
+        }),
+      );
+    }
+    const shell = session.definition.entities.find(
+      (entity) => entity.kind === "derivedPiecewiseCubic",
+    );
+    if (!shell) throw new Error("premise: the offset committed a shell");
+    const shellMirror = {
+      derivationId: "derivation_shell_mirror",
+      kind: "mirror",
+      label: "shell mirror",
+      seedEntityIds: [shell.entityId],
+      mirrorReference: { kind: "sketchDatum", datum: "xAxis" },
+      outputs: [
+        {
+          seedEntityId: shell.entityId,
+          outputEntityId: eid("shell_copy"),
+          instanceIndex: 1,
+          seedPointIds: [],
+          outputPointIds: [],
+        },
+      ],
+    } as SketchDefinition["derivedRelationships"] extends
+      | readonly (infer R)[]
+      | undefined
+      ? R
+      : never;
+    const malformed = rebuild(
+      { ...session, activeTool: null, activeEditTool: null },
+      {
+        ...session.definition,
+        derivedRelationships: [
+          ...session.definition.derivedRelationships!,
+          shellMirror,
+        ],
+      },
+    );
+    expect(
+      gate(malformed),
+      "premise: not a failed id (severity-gated)",
+    ).toEqual([]);
+    expect(
+      deriveSketchValidity({
+        solvedSnapshot: malformed.liveSolve!.solvedSnapshot,
+      }).state,
+      "premise: its error gates the sketch by severity",
+    ).toBe("invalid");
+    expect(listed(malformed, [])).toEqual([
+      ["shell mirror", "original is an offset spline curve"],
+    ]);
   });
 });
