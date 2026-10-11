@@ -17,11 +17,7 @@ import type {
 import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
 import { createRegionBoundaryBasis } from "@/contracts/sketch/region-boundary-curves";
 import { resolveSketchDerivationDistances } from "@/domain/modeling/sketch-dimension-expressions";
-import type {
-  ConstraintDefinition,
-  DimensionDefinition,
-  SolvedSketchSnapshot,
-} from "@/contracts/sketch/schema";
+import type { SolvedSketchSnapshot } from "@/contracts/sketch/schema";
 import { type PrimitiveRef } from "@/core/editor/schema";
 import {
   createStandardPlaneDefinition,
@@ -30,11 +26,11 @@ import {
 import { buildReferenceImageAnchorProjectedReferences } from "@/domain/reference-image-calibration/export/references";
 import type { SketchDraftEntity } from "@/core/sketch-tools/definition";
 import { mapSketchPointToWorkspaceWorld } from "@/core/workspace/sketch-plane-mapping";
+import { getEntityPointIds } from "@/domain/sketch-editing/definition-references";
 import type { SketchConstraintDisplayState, SketchSessionState } from "./types";
 import {
   cloneDefinition,
   createEmptyDefinition,
-  getEntityPointIds,
   getNextDefinitionSequence,
   getSessionSketchId,
   getSketchSessionDerivationSettings,
@@ -351,154 +347,6 @@ export function getConnectedSketchEntitySelectionTargets(
       (entity): entity is Extract<PrimitiveRef, { kind: "sketchEntity" }> =>
         entity !== undefined,
     );
-}
-
-export function constraintReferencesSketchGeometry(
-  constraint: ConstraintDefinition,
-  deletedPointIds: ReadonlySet<SketchPointId>,
-  deletedEntityIds: ReadonlySet<SketchEntityId>,
-) {
-  switch (constraint.kind) {
-    case "coincident":
-    case "angle":
-      return constraint.pointIds.some((pointId) =>
-        deletedPointIds.has(pointId),
-      );
-    case "horizontal":
-    case "vertical":
-      return deletedEntityIds.has(constraint.entityId);
-    case "coincidentProjectedPoint":
-    case "pointOnProjectedCurve":
-    case "midpointProjectedLine":
-      return deletedPointIds.has(constraint.point.pointId);
-    case "midpoint":
-      return (
-        deletedPointIds.has(constraint.point.pointId) ||
-        deletedEntityIds.has(constraint.line.entityId)
-      );
-    case "pointOnCurve":
-      return (
-        deletedPointIds.has(constraint.point.pointId) ||
-        deletedEntityIds.has(constraint.curve.entityId)
-      );
-    case "collinear":
-      return (
-        operandReferencesSketchGeometry(
-          constraint.target,
-          deletedPointIds,
-          deletedEntityIds,
-        ) || deletedEntityIds.has(constraint.line.entityId)
-      );
-    case "collinearProjectedLine":
-      return operandReferencesSketchGeometry(
-        constraint.target,
-        deletedPointIds,
-        deletedEntityIds,
-      );
-    case "normal":
-      return (
-        deletedPointIds.has(constraint.point.pointId) ||
-        deletedEntityIds.has(constraint.line.entityId) ||
-        deletedEntityIds.has(constraint.curve.entityId)
-      );
-    case "normalProjectedCurve":
-      return (
-        deletedPointIds.has(constraint.point.pointId) ||
-        deletedEntityIds.has(constraint.line.entityId)
-      );
-    case "symmetric":
-      return (
-        constraint.pointIds.some((pointId) => deletedPointIds.has(pointId)) ||
-        deletedEntityIds.has(constraint.axis.entityId)
-      );
-    case "symmetricProjectedLine":
-      return constraint.pointIds.some((pointId) =>
-        deletedPointIds.has(pointId),
-      );
-    case "parallelProjectedLine":
-    case "perpendicularProjectedLine":
-      return deletedEntityIds.has(constraint.line.entityId);
-    case "tangentProjectedCurve":
-    case "concentricProjectedCurve":
-      return deletedEntityIds.has(constraint.curve.entityId);
-    case "equalOffset":
-      return constraint.pairs.some(
-        (pair) =>
-          deletedEntityIds.has(pair.seedEntityId) ||
-          deletedEntityIds.has(pair.offsetEntityId),
-      );
-    case "tangent":
-    case "concentric":
-    case "parallel":
-    case "perpendicular":
-    case "equalLength":
-      return constraint.entityIds.some((entityId) =>
-        deletedEntityIds.has(entityId),
-      );
-    case "fixPoint":
-      return deletedPointIds.has(constraint.pointId);
-  }
-}
-
-function operandReferencesSketchGeometry(
-  operand: { kind: string; pointId?: SketchPointId; entityId?: SketchEntityId },
-  deletedPointIds: ReadonlySet<SketchPointId>,
-  deletedEntityIds: ReadonlySet<SketchEntityId>,
-) {
-  return (
-    (operand.kind === "localPoint" &&
-      operand.pointId !== undefined &&
-      deletedPointIds.has(operand.pointId)) ||
-    (operand.kind === "localEntity" &&
-      operand.entityId !== undefined &&
-      deletedEntityIds.has(operand.entityId))
-  );
-}
-
-export function dimensionReferencesSketchGeometry(
-  dimension: DimensionDefinition,
-  deletedPointIds: ReadonlySet<SketchPointId>,
-  deletedEntityIds: ReadonlySet<SketchEntityId>,
-) {
-  const operandReferencesDeletedGeometry = (operand: {
-    kind: string;
-    pointId?: SketchPointId;
-    entityId?: SketchEntityId;
-  }) =>
-    (operand.kind === "localPoint" &&
-      operand.pointId !== undefined &&
-      deletedPointIds.has(operand.pointId)) ||
-    (operand.kind === "localEntity" &&
-      operand.entityId !== undefined &&
-      deletedEntityIds.has(operand.entityId));
-
-  switch (dimension.kind) {
-    case "distance":
-    case "horizontalDistance":
-    case "verticalDistance":
-      return dimension.pointIds.some((pointId) => deletedPointIds.has(pointId));
-    case "pointDatumDistance":
-      return deletedPointIds.has(dimension.point.pointId);
-    case "circleRadius":
-    case "diameter":
-      return deletedEntityIds.has(dimension.entityId);
-    case "lineLength":
-      return deletedEntityIds.has(dimension.entityId);
-    case "lineDistance":
-    case "lineAngle":
-      return dimension.lines.some(operandReferencesDeletedGeometry);
-    case "linePointDistance":
-      return (
-        operandReferencesDeletedGeometry(dimension.line) ||
-        operandReferencesDeletedGeometry(dimension.point)
-      );
-    case "arcStartPointCoincident":
-    case "arcEndPointCoincident":
-      return (
-        deletedEntityIds.has(dimension.entityId) ||
-        deletedPointIds.has(dimension.pointId)
-      );
-  }
 }
 
 export function isSketchConstructionSelected(session: SketchSessionState) {

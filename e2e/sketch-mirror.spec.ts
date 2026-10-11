@@ -643,7 +643,7 @@ test("T15e: Trim on a mirrored copy is refused with the named message and change
   await expect(
     page.getByRole("status").filter({
       hasText:
-        /^This shape is part of a mirror \(.+\); remove the mirror first to trim it\.$/,
+        /^This shape is part of mirror ‘mirror \d+’\. To trim it, press Esc, select it, then Mirror → Remove mirror\.$/,
     }),
   ).toBeVisible({ timeout: 15_000 });
   await workbench.waitForAnimationFrames(4);
@@ -657,6 +657,132 @@ test("T15e: Trim on a mirrored copy is refused with the named message and change
       .filter({ hasText: "Trim" }),
     "no Trim action",
   ).toHaveCount(0);
+
+  // T16a review R-2: the message's steps work as written: Esc leaves Trim,
+  // selecting the copy shows its mirror in the Mirror panel.
+  await page.keyboard.press("Escape");
+  await workbench.clickViewportAt(
+    await hoverUntil(
+      workbench,
+      mirrorOnScreen({ x: 320, y: 262 }),
+      entityTarget(copyLine),
+    ),
+  );
+  await expect(
+    page
+      .getByRole("region", { name: "Mirror" })
+      .getByRole("button", { name: "Remove mirror" }),
+  ).toBeVisible({ timeout: 15_000 });
+});
+
+// T16a ([TECH] T16-1, T16-2): Remove mirror from the Mirror panel. Lane:
+// e2e; seam: selection → panel → reducer → authored history in the
+// workbench (every pointer path glides; the button press is a real glide
+// over the panel, never a forced click).
+test("T16a: select a mirrored line's copy, Mirror panel → Remove mirror: the copy goes, original and axis stay; one Ctrl+Z restores it", async ({
+  page,
+}) => {
+  const workbench = new SketchWorkbenchHarness(page);
+  await openTopSketch(workbench);
+  await workbench.activateTool("Create line geometry.");
+  await placeFreely(workbench, LINE);
+  await expectStaged(workbench, 1);
+  await drawConstructionAxis(workbench, 2);
+  const [seed, axis] = (await snapshot(page)).entities;
+  await openSearchTool(page, "Sketch Mirror");
+  for (const [entity, around] of [
+    [seed!, { x: 320, y: 262 }],
+    [axis!, { x: 800, y: 420 }],
+  ] as const)
+    await workbench.clickViewportAt(
+      await hoverUntil(workbench, around, entityTarget(entity.id)),
+    );
+  await expectStaged(workbench, 3);
+  await page.keyboard.press("Escape");
+  await workbench.waitForAnimationFrames(2);
+  const created = await snapshot(page);
+  const copy = mirrorOf(created).outputs[0]!.outputEntityId;
+
+  await workbench.clickViewportAt(
+    await hoverUntil(
+      workbench,
+      mirrorOnScreen({ x: 320, y: 262 }),
+      entityTarget(copy),
+    ),
+  );
+  await expect
+    .poll(() => workbench.currentEditorSelection(), { timeout: 15_000 })
+    .toContain(copy);
+  const panel = page.getByRole("region", { name: "Mirror" });
+  await expect(panel).toContainText("Healthy", { timeout: 15_000 });
+  await expect(panel).toContainText("Removes 1 copy.");
+  const remove = panel.getByRole("button", { name: "Remove mirror" });
+  const box = (await remove.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, {
+    steps: 8,
+  });
+  await page.mouse.down();
+  await page.mouse.up();
+
+  await expectStaged(workbench, 2);
+  const removed = await snapshot(page);
+  expect(
+    removed.derivedRelationships.filter((entry) => entry.kind === "mirror"),
+    "the mirror is gone",
+  ).toEqual([]);
+  expect(removed.entities.map((entity) => entity.id)).toEqual([
+    seed!.id,
+    axis!.id,
+  ]);
+  for (const point of removed.points)
+    expect(point.position, `${point.id} did not move`).toEqual(
+      positionOf(created, point.id),
+    );
+  await expect(panel, "no mirror left to list").toHaveCount(0, {
+    timeout: 15_000,
+  });
+  await expect(
+    page
+      .locator('[data-history-action-direction="undo"]')
+      .filter({ hasText: "Remove Mirror" }),
+    "one Remove Mirror action",
+  ).toHaveCount(1, { timeout: 15_000 });
+
+  await page.keyboard.press("Control+z");
+  await expectStaged(workbench, 3);
+  await expect
+    .poll(
+      async () =>
+        geometryDistance(geometryOf(await snapshot(page)), geometryOf(created)),
+      { timeout: 15_000 },
+    )
+    .toBeLessThan(1e-6);
+  expectMirrorImage(await snapshot(page), "after Undo");
+
+  // Review R-1: break the mirror (delete its axis). The sketch's validation
+  // message and the Mirror panel (listing the broken mirror with nothing
+  // selected) are both visible and never overlap.
+  await workbench.clickViewportAt(
+    await hoverUntil(workbench, { x: 800, y: 420 }, entityTarget(axis!.id)),
+  );
+  await expect
+    .poll(() => workbench.currentEditorSelection(), { timeout: 15_000 })
+    .toContain(axis!.id);
+  await page.keyboard.press("Delete");
+  await expect(panel).toContainText("Broken: mirror line missing", {
+    timeout: 15_000,
+  });
+  const status = page.getByRole("status").filter({ hasText: /mirror/i });
+  await expect(status).toBeVisible();
+  const statusBox = (await status.boundingBox())!;
+  const panelBox = (await panel.boundingBox())!;
+  expect(
+    statusBox.y + statusBox.height <= panelBox.y ||
+      panelBox.y + panelBox.height <= statusBox.y ||
+      statusBox.x + statusBox.width <= panelBox.x ||
+      panelBox.x + panelBox.width <= statusBox.x,
+    `the message ${JSON.stringify(statusBox)} and the Mirror panel ${JSON.stringify(panelBox)} do not overlap`,
+  ).toBe(true);
 });
 
 test("T15e: mirror about the X datum axis picked in the viewport; dragging either side keeps the datum as the mirror line", async ({
@@ -707,6 +833,12 @@ test("T15e: mirror about the X datum axis picked in the viewport; dragging eithe
     "the seed followed",
   ).not.toEqual(positionOf(created, output.seedPointIds[0]!));
 
+  // T16a: the dragged copy is selected, so the Mirror panel occupies the
+  // left panel slot over the seed's end; Escape clears the selection first.
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("region", { name: "Mirror" })).toHaveCount(0, {
+    timeout: 15_000,
+  });
   await glide(workbench, LINE[1], { x: 420, y: 200 });
   const seedDragged = await settledAfterDrag(
     workbench,

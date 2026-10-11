@@ -32,6 +32,7 @@ import {
   patchSketchConstraintValue,
   selectSketchConstraintTarget,
   selectSketchEditToolTarget,
+  computeSketchMirrorActionState,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
 import {
@@ -55,6 +56,7 @@ import {
 } from "@/domain/editor/sketch-session/test-snap-scale";
 import {
   eid,
+  entityRef,
   handleRef,
   mirroredSession,
   pid,
@@ -3464,5 +3466,67 @@ describe("T15d: mirror copy intents through the authored-action owner", () => {
     );
     expect(kinds()).toEqual(["automatic", "automatic"]);
     expect(f.session.actionAvailability?.canUndo).toBe(false);
+  });
+});
+
+// T16a (logic lane; seam: the authored-action owner around the real sketch
+// reducer). The Mirror panel's Remove mirror is one action, "Remove Mirror";
+// Undo restores the exact pre-removal definition, Redo re-applies it.
+describe("T16a: Remove Mirror through the authored-action owner", () => {
+  test("one intent from the panel is one action; Undo restores the definition bitwise, Redo re-applies", async () => {
+    const setup = mirroredSession("free");
+    const f = await fixture(false, setup.session);
+    const before = f.session.definition;
+    const beforeProjection = projection(f.session);
+    const copy = entityRef(f.session, setup.outputOf("ab").outputEntityId);
+    f.dispatch({ type: "viewport.selectionRequested", target: copy });
+    const panel = computeSketchMirrorActionState(f.session, f.state.selection);
+    expect(
+      panel?.entries.map((entry) => entry.derivationId),
+      "the panel shows the copy's mirror",
+    ).toEqual([setup.relationship.derivationId]);
+    f.dispatch({
+      type: "sketch.toolPatched",
+      patch: {
+        intent: "removeMirror",
+        derivationId: panel!.entries[0]!.derivationId,
+      },
+    });
+    const after = f.session.definition;
+    expect(after.derivedRelationships).toEqual([]);
+    expect(after.entityIds).not.toContain(copy.entityId);
+    expect(f.state.selection, "the removed copy leaves the selection").toEqual(
+      [],
+    );
+    expect(
+      f.session.actionHistory?.undo.map((entry) => entry.label),
+      "exactly one action",
+    ).toEqual(["Remove Mirror"]);
+    const afterProjection = projection(f.session);
+
+    f.dispatch({ type: "history.undoRequested" });
+    expect(
+      f.session.definition,
+      "Undo restores the definition bitwise",
+    ).toEqual(before);
+    expect(projection(f.session)).toEqual(beforeProjection);
+    expect(f.session.actionAvailability).toEqual({
+      canUndo: false,
+      canRedo: true,
+    });
+    f.dispatch({ type: "history.redoRequested" });
+    expect(f.session.definition).toEqual(after);
+    expect(projection(f.session)).toEqual(afterProjection);
+  });
+
+  test("Remove of a mirror that is not there records nothing", async () => {
+    const setup = mirroredSession("free");
+    const f = await fixture(false, setup.session);
+    f.dispatch({
+      type: "sketch.toolPatched",
+      patch: { intent: "removeMirror", derivationId: "derivation_missing" },
+    });
+    expect(f.session.definition).toBe(setup.session.definition);
+    expect(f.session.actionAvailability?.canUndo ?? false).toBe(false);
   });
 });

@@ -5,6 +5,11 @@ import { appVersion, gitCommit } from "@/build-info";
 
 import { ThreeCadViewport } from "@/components/cad/three-cad-viewport";
 import { SketchSpecialModePanel } from "@/components/cad/sketch-special-mode-panel";
+import { SketchMirrorActions } from "@/components/cad/sketch-mirror-actions";
+import {
+  SketchSelectionContextStack,
+  SketchValidationStatus,
+} from "@/components/cad/sketch-selection-context";
 import { SketchTangentActions } from "@/components/cad/sketch-tangent-actions";
 import { SketchConstraintList } from "@/components/cad/sketch-constraint-list";
 import { splineVisibleHandleVectors } from "@/contracts/sketch/spline-geometry";
@@ -79,6 +84,7 @@ import type {
 } from "@/contracts/modeling/schema";
 import { ok } from "@/contracts/errors";
 import {
+  computeSketchMirrorActionState,
   computeSketchTangentActionState,
   getSketchAnnotationDescriptors,
   getSketchAnnotationListRows,
@@ -138,8 +144,6 @@ import {
 import type { ViewportSpecialModeTargetInput } from "@/workbench/viewport/viewport-boundary";
 import {
   VIEW_CUBE_SIZE_PX,
-  VIEWPORT_FLOATING_PANEL_LEFT_PX,
-  VIEWPORT_FLOATING_PANEL_TOP_STYLE,
   VIEWPORT_OVERLAY_GAP_PX,
   WORKBENCH_STATUS_TOP_STYLE,
   getWorkbenchNotificationRightOffsetPx,
@@ -695,6 +699,13 @@ export function CadWorkbench({
     () =>
       sketchSession
         ? computeSketchTangentActionState(sketchSession, selection)
+        : null,
+    [sketchSession, selection],
+  );
+  const sketchMirrorActionState = useMemo(
+    () =>
+      sketchSession
+        ? computeSketchMirrorActionState(sketchSession, selection)
         : null,
     [sketchSession, selection],
   );
@@ -1425,23 +1436,47 @@ export function CadWorkbench({
                   dispatch({ type: "sketch.toolPatched", patch })
                 }
               />
-              {sketchTangentActionState && sketchTangentActionState.visible ? (
-                <SketchTangentActions
-                  resetEnabled={sketchTangentActionState.resetEnabled}
-                  zeroEnabled={sketchTangentActionState.zeroEnabled}
-                  onReset={() =>
-                    dispatch({
-                      type: "sketch.toolPatched",
-                      patch: { intent: "resetTangentToAutomatic" },
-                    })
-                  }
-                  onZero={() =>
-                    dispatch({
-                      type: "sketch.toolPatched",
-                      patch: { intent: "setTangentToZero" },
-                    })
-                  }
-                />
+              {/* T16a (T16-22, review R-1): the validation message and the
+                  selection-context panels, one column (never overlapping). */}
+              {sketchSession?.validationMessage ||
+              sketchMirrorActionState ||
+              sketchTangentActionState?.visible ? (
+                <SketchSelectionContextStack>
+                  {sketchSession?.validationMessage ? (
+                    <SketchValidationStatus
+                      message={sketchSession.validationMessage}
+                    />
+                  ) : null}
+                  {sketchMirrorActionState ? (
+                    <SketchMirrorActions
+                      entries={sketchMirrorActionState.entries}
+                      onRemove={(derivationId) =>
+                        dispatch({
+                          type: "sketch.toolPatched",
+                          patch: { intent: "removeMirror", derivationId },
+                        })
+                      }
+                    />
+                  ) : null}
+                  {sketchTangentActionState?.visible ? (
+                    <SketchTangentActions
+                      resetEnabled={sketchTangentActionState.resetEnabled}
+                      zeroEnabled={sketchTangentActionState.zeroEnabled}
+                      onReset={() =>
+                        dispatch({
+                          type: "sketch.toolPatched",
+                          patch: { intent: "resetTangentToAutomatic" },
+                        })
+                      }
+                      onZero={() =>
+                        dispatch({
+                          type: "sketch.toolPatched",
+                          patch: { intent: "setTangentToZero" },
+                        })
+                      }
+                    />
+                  ) : null}
+                </SketchSelectionContextStack>
               ) : null}
               <SketchSpecialModePanel
                 schema={sketchSpecialModePanel}
@@ -1545,20 +1580,6 @@ export function CadWorkbench({
                   />
                 ) : null}
               </div>
-            </div>
-            <div className="contents" data-viewport-annotation-obstacles="">
-              {sketchSession?.validationMessage ? (
-                <div
-                  role="status"
-                  className="pointer-events-none absolute z-20 max-w-sm rounded-md border border-(--cad-border-strong) bg-(--cad-surface-overlay) px-3 py-2 text-xs text-(--cad-foreground) shadow-(--cad-panel-shadow)"
-                  style={{
-                    left: VIEWPORT_FLOATING_PANEL_LEFT_PX,
-                    top: VIEWPORT_FLOATING_PANEL_TOP_STYLE,
-                  }}
-                >
-                  {sketchSession.validationMessage}
-                </div>
-              ) : null}
             </div>
             {activeImportSession ? (
               <WorkbenchInspectorOverlay>

@@ -136,19 +136,28 @@ export {
 } from "./selection";
 
 export {
-  constraintReferencesSketchGeometry,
   createNewSketchSession,
   createNewSketchSessionFromSupport,
   createSketchSessionFromSnapshot,
   derivePlaneKeyFromTarget,
   deriveSketchDisplayEntities,
-  dimensionReferencesSketchGeometry,
   getConnectedSketchEntitySelectionTargets,
   isEditableSketchGeometrySelection,
   isSketchConstructionSelected,
   isSketchReferenceToolSelected,
   mapSketchPointToWorld,
 } from "./state";
+
+export {
+  constraintReferencesSketchGeometry,
+  dimensionReferencesSketchGeometry,
+} from "@/domain/sketch-editing/definition-references";
+
+export { computeSketchMirrorActionState } from "./mirror-actions";
+export type {
+  SketchMirrorActionEntry,
+  SketchMirrorActionState,
+} from "./mirror-actions";
 
 export { computeSketchTangentActionState } from "./tangent-actions";
 
