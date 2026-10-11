@@ -374,6 +374,20 @@ export interface SketchEditToolState {
   editQuery?: SketchEditQueryState;
   /** T13m: the last sketch pointer while Split is active (its click position). */
   pointer?: SketchPoint;
+  /** T16e: the Mirror tool's repair sub-state (Mirror panel → Replace …). */
+  repair?: SketchMirrorRepairState;
+}
+
+/**
+ * T16e ([TECH] T16-9): the Mirror tool repairs mirror `derivationId`: its
+ * mirror line (`"axis"`) or the original of one copy. `selectedTargets`
+ * holds the picked candidate (at most one); `returnSelection` is the
+ * editor selection Cancel/Escape restores (back to the Mirror panel).
+ */
+export interface SketchMirrorRepairState {
+  derivationId: string;
+  target: "axis" | { outputEntityId: SketchEntityId };
+  returnSelection: PrimitiveRef[];
 }
 
 /**

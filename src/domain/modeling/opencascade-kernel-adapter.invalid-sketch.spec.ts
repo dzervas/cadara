@@ -597,7 +597,7 @@ test("OCC retains a broken mirror across Finish and save/reopen, blocks all of i
     consumable: 0,
   };
   const MESSAGE =
-    "Mirror ‘mirror 1’ is broken: its mirror line was deleted. Its copies stay where they were last solved and can't be used; profiles from this sketch are blocked. Undo, or remove the mirror from the Mirror panel.";
+    "Mirror ‘mirror 1’ is broken: its mirror line was deleted. Its copies stay where they were last solved and can't be used; profiles from this sketch are blocked. Undo, replace the mirror line, or remove the mirror from the Mirror panel.";
 
   // A healthy mirrored sketch, extruded on its original circle's region.
   const restored = await adapter.getDocumentSnapshot(request);

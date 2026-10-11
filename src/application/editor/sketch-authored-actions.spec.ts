@@ -3700,6 +3700,218 @@ describe("T16d: Mirror creation through the authored-action owner", () => {
   });
 });
 
+// T16e ([TECH] T16-9; logic lane, seam: the authored-action owner around
+// the real sketch reducer and the workbench Enter/Escape routes). The Mirror
+// panel's Replace mirror line… / Replace original… arm the Mirror tool's
+// repair; hover and pick author nothing; Cancel and Escape record nothing
+// and give the panel back (its selection restored); Replace (or Enter) is
+// one action, "Replace Mirror Line" / "Replace Mirror Original"; one Undo
+// restores the broken definition bitwise, Redo re-applies.
+describe("T16e: mirror replacement through the authored-action owner", () => {
+  /** The mirrored seeds with the axis (or `deleted`) gone, plus l2 (x = −5) and n. */
+  function brokenWithLines(deleted = "axis") {
+    const setup = mirroredSession("free");
+    const base = setup.session.definition;
+    const point = (id: string, position: [number, number]) =>
+      ({
+        pointId: pid(id),
+        label: id,
+        target: {
+          kind: "sketchPoint",
+          sketchId: "sketch_draft",
+          pointId: pid(id),
+        },
+        position,
+        isConstruction: false,
+      }) as SketchSessionState["definition"]["points"][number];
+    const segment = (id: string, a: string, b: string) =>
+      ({
+        kind: "lineSegment",
+        entityId: eid(id),
+        label: id,
+        target: {
+          kind: "sketchEntity",
+          sketchId: "sketch_draft",
+          entityId: eid(id),
+        },
+        isConstruction: false,
+        startPointId: pid(a),
+        endPointId: pid(b),
+      }) as SketchSessionState["definition"]["entities"][number];
+    const points = [
+      point("l2a", [-5, -10]),
+      point("l2b", [-5, 10]),
+      point("n0", [2, 4]),
+      point("n1", [5, 6]),
+    ];
+    const entities = [
+      ...base.entities.filter((entity) => entity.entityId !== eid(deleted)),
+      segment("l2", "l2a", "l2b"),
+      segment("n", "n0", "n1"),
+    ];
+    const session = rebuildSessionForDefinition(setup.session, {
+      definition: {
+        ...base,
+        pointIds: [...base.pointIds, ...points.map((entry) => entry.pointId)],
+        points: [...base.points, ...points],
+        entityIds: entities.map((entity) => entity.entityId),
+        entities,
+      },
+    });
+    return { setup, session };
+  }
+  const undoLabels = (session: SketchSessionState) =>
+    session.actionHistory?.undo.map((entry) => entry.label) ?? [];
+  const escapeOf = (f: Awaited<ReturnType<typeof fixture>>) =>
+    getEscapeEvent({
+      activeCommand: null,
+      activeReferencePickerFieldId: null,
+      selection: f.state.selection,
+      sketchSession: f.session,
+    })!;
+  const listed = (f: Awaited<ReturnType<typeof fixture>>) =>
+    computeSketchMirrorActionState(f.session, f.state.selection)?.entries.map(
+      (entry) => [entry.label, entry.brokenReason],
+    ) ?? null;
+
+  test("Replace mirror line…: hover and pick author nothing; Cancel and Escape record nothing and give the panel back; Replace is one 'Replace Mirror Line' action that heals the mirror; Undo restores the broken definition bitwise, Redo re-applies", async () => {
+    const { setup, session } = brokenWithLines();
+    const f = await fixture(false, session);
+    const derivationId = setup.relationship.derivationId;
+    const before = f.session.definition;
+    const beforeProjection = projection(f.session);
+    const u = entityRef(f.session, eid("u"));
+    f.dispatch({ type: "viewport.selectionRequested", target: u });
+    expect(listed(f), "premise: the panel lists the broken mirror").toEqual([
+      ["mirror 1", "mirror line missing"],
+    ]);
+    const brokenMessage =
+      "Mirror ‘mirror 1’ is broken: its mirror line was deleted. Its copies stay where they were last solved and can't be used; profiles from this sketch are blocked. Undo, replace the mirror line, or remove the mirror from the Mirror panel.";
+    expect(f.session.validationMessage, "premise").toBe(brokenMessage);
+    const start = () =>
+      f.dispatch({
+        type: "sketch.toolPatched",
+        patch: { intent: "startMirrorRepair", derivationId },
+      });
+    const l2 = () => entityRef(f.session, eid("l2"));
+    const pick = () => {
+      f.dispatch({ type: "viewport.hovered", target: l2() });
+      expect(
+        f.session.toolStagedEntities,
+        "hover: the reflected copies",
+      ).toHaveLength(4);
+      f.dispatch({ type: "viewport.selectionRequested", target: l2() });
+      expect(f.session.toolPresentation?.floatingInput?.readout).toBe(
+        "Use ‘l2’ as the mirror line",
+      );
+      expect(projection(f.session), "nothing authored yet").toEqual(
+        beforeProjection,
+      );
+    };
+
+    start();
+    expect(f.session.activeTool).toBe("sketchMirror");
+    expect(f.state.command.toolId).toBe("sketchMirror");
+    expect(listed(f), "the tool owns the panel slot").toBeNull();
+    pick();
+    f.dispatch({
+      type: "sketch.toolPatched",
+      patch: f.session.toolPresentation!.floatingInput!.cancelAction.patch,
+    });
+    expect(f.session.activeTool, "Cancel leaves the repair").toBeNull();
+    expect(f.state.selection, "the panel's selection is back").toEqual([u]);
+    expect(
+      f.session.validationMessage,
+      "review R-2: the broken-mirror message is back",
+    ).toBe(brokenMessage);
+    expect(listed(f)).toEqual([["mirror 1", "mirror line missing"]]);
+    expect(undoLabels(f.session)).toEqual([]);
+
+    start();
+    pick();
+    f.dispatch(escapeOf(f));
+    expect(f.session.activeTool, "Escape leaves the repair").toBeNull();
+    expect(f.state.selection).toEqual([u]);
+    expect(f.session.validationMessage, "review R-2").toBe(brokenMessage);
+    expect(undoLabels(f.session)).toEqual([]);
+    expect(f.session.definition).toBe(before);
+    expect(
+      escapeOf(f),
+      "the next Escape is the ordinary one (clears the selection)",
+    ).toEqual({ type: "selection.cleared" });
+
+    start();
+    pick();
+    f.dispatch({
+      type: "sketch.toolPatched",
+      patch: f.session.toolPresentation!.floatingInput!.submitAction.patch,
+    });
+    expect(undoLabels(f.session), "exactly one action").toEqual([
+      "Replace Mirror Line",
+    ]);
+    expect(f.session.activeTool).toBeNull();
+    expect(
+      f.session.liveSolve!.solvedSnapshot.failedDerivationIds ?? [],
+    ).toEqual([]);
+    expect(f.state.selection, "the new line stays selected").toEqual([l2()]);
+    expect(listed(f), "the panel shows the healed mirror").toEqual([
+      ["mirror 1", null],
+    ]);
+    const after = f.session.definition;
+    expect(after.derivedRelationships).toEqual([
+      {
+        ...setup.relationship,
+        mirrorReference: { kind: "lineEntity", entityId: eid("l2") },
+      },
+    ]);
+
+    f.dispatch({ type: "history.undoRequested" });
+    expect(f.session.definition, "Undo restores bitwise").toEqual(before);
+    expect(projection(f.session)).toEqual(beforeProjection);
+    expect(f.session.liveSolve!.solvedSnapshot.failedDerivationIds).toEqual([
+      derivationId,
+    ]);
+    f.dispatch({ type: "history.redoRequested" });
+    expect(f.session.definition).toEqual(after);
+  });
+
+  test("Replace original… confirmed by Enter is one 'Replace Mirror Original' action; a refused pick and Enter before a pick record nothing", async () => {
+    const { setup, session } = brokenWithLines("ab");
+    const f = await fixture(false, session);
+    const before = projection(f.session);
+    const copy = setup.outputOf("ab").outputEntityId;
+    f.dispatch({
+      type: "sketch.toolPatched",
+      patch: {
+        intent: "startMirrorRepair",
+        derivationId: setup.relationship.derivationId,
+        outputEntityId: copy,
+      },
+    });
+    expect(getEnterEvent({ sketchSession: f.session })).toBeNull();
+    f.dispatch({
+      type: "viewport.selectionRequested",
+      target: entityRef(f.session, eid("c")),
+    });
+    expect(f.session.validationMessage).toBe(
+      "‘c’ is already an original of mirror ‘mirror 1’.",
+    );
+    expect(getEnterEvent({ sketchSession: f.session })).toBeNull();
+    expect(projection(f.session)).toEqual(before);
+    f.dispatch({
+      type: "viewport.selectionRequested",
+      target: entityRef(f.session, eid("n")),
+    });
+    f.dispatch(getEnterEvent({ sketchSession: f.session })!);
+    expect(undoLabels(f.session)).toEqual(["Replace Mirror Original"]);
+    expect(
+      f.session.liveSolve!.solvedSnapshot.failedDerivationIds ?? [],
+    ).toEqual([]);
+    f.dispatch({ type: "history.undoRequested" });
+    expect(projection(f.session)).toEqual(before);
+  });
+});
+
 // T16b (logic lane; seam: the authored-action owner around the real sketch
 // reducer). Undo and Redo of the Delete that breaks a mirror recompute its
 // validity: the live solve's sketch-wide gate, the regions and the
@@ -3710,7 +3922,7 @@ describe("T16b: Undo/Redo recompute a broken mirror's validity", () => {
     const setup = mirroredSession("free");
     const f = await fixture(false, setup.session);
     const message =
-      "Mirror ‘mirror 1’ is broken: its mirror line was deleted. Its copies stay where they were last solved and can't be used; profiles from this sketch are blocked. Undo, or remove the mirror from the Mirror panel.";
+      "Mirror ‘mirror 1’ is broken: its mirror line was deleted. Its copies stay where they were last solved and can't be used; profiles from this sketch are blocked. Undo, replace the mirror line, or remove the mirror from the Mirror panel.";
     const health = (session: SketchSessionState) => ({
       failed: session.liveSolve?.solvedSnapshot.failedDerivationIds ?? [],
       regions: session.liveRegions.status === "unavailable",

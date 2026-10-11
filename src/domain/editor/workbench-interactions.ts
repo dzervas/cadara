@@ -17,7 +17,7 @@ import {
   getActiveSketchStyleToolId,
   isSketchConstructionSelected,
   isSketchMergePointsReady,
-  isSketchMirrorReady,
+  getSketchMirrorConfirmIntent,
   type SketchAuthoringToolId,
   type SketchSessionStatus,
 } from "@/domain/editor/sketch-session";
@@ -96,6 +96,15 @@ export function getEscapeEvent(
     };
   }
 
+  // T16e: Escape leaves a Mirror repair with no action, back to the Mirror
+  // panel (its Cancel); the next Escape is the ordinary one.
+  if (state.sketchSession?.activeEditTool?.repair) {
+    return {
+      type: "sketch.toolPatched",
+      patch: { intent: "cancelMirrorRepair" },
+    };
+  }
+
   // T16d: Escape drops a Mirror selection (its staged preview) and keeps
   // the tool armed, as Cancel does; the next Escape exits (T11-D10).
   if (
@@ -160,8 +169,10 @@ export function getEnterEvent(
   if (session && isSketchMergePointsReady(session))
     return { type: "sketch.toolPatched", patch: { intent: "mergePoints" } };
 
-  if (session && isSketchMirrorReady(session))
-    return { type: "sketch.toolPatched", patch: { intent: "createMirror" } };
+  // T16d/T16e: a staged Mirror, or a Mirror repair's picked replacement.
+  const mirrorIntent = session ? getSketchMirrorConfirmIntent(session) : null;
+  if (mirrorIntent)
+    return { type: "sketch.toolPatched", patch: { intent: mirrorIntent } };
 
   return session?.activeTool &&
     isRegisteredSketchToolId(session.activeTool) &&

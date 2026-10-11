@@ -1,7 +1,8 @@
 /**
  * T16a ([TECH] T16-2): the Mirror panel. UI lane; seam: the components' rendered markup and their click
  * wiring (no DOM test library in the repo: the Remove button's `onClick` is
- * read from the rendered element tree and invoked).
+ * read from the rendered element tree and invoked). T16e: the replace
+ * buttons, the same way.
  */
 import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { MantineProvider } from "@mantine/core";
@@ -19,6 +20,7 @@ const healthy: SketchMirrorActionEntry = {
   requirementCount: 3,
   sizingRequirementCount: 2,
   brokenDownstreamLabels: [],
+  replaceOriginalOutputId: "copy_c",
 };
 const broken: SketchMirrorActionEntry = {
   derivationId: "derivation_broken",
@@ -28,6 +30,7 @@ const broken: SketchMirrorActionEntry = {
   requirementCount: 1,
   sizingRequirementCount: 0,
   brokenDownstreamLabels: ["offset 8", "mirror 9"],
+  replaceOriginalOutputId: null,
 };
 const render = (node: ReactNode) =>
   renderToStaticMarkup(<MantineProvider>{node}</MantineProvider>);
@@ -35,7 +38,11 @@ const text = (markup: string) => markup.replace(/<[^>]*>/g, "|");
 
 test("T16a: each mirror row shows its label, health, Remove mirror and the consequence line", () => {
   const markup = render(
-    <SketchMirrorActions entries={[healthy, broken]} onRemove={() => {}} />,
+    <SketchMirrorActions
+      entries={[healthy, broken]}
+      onRemove={() => {}}
+      onReplace={() => {}}
+    />,
   );
   const visible = text(markup);
   for (const expected of [
@@ -74,6 +81,7 @@ test("T16a: the consequence line: no requirements, singular sizing", () => {
           { ...healthy, derivationId: "b", sizingRequirementCount: 1 },
         ]}
         onRemove={() => {}}
+        onReplace={() => {}}
       />,
     ),
   );
@@ -96,6 +104,7 @@ test("T16a: Remove mirror calls onRemove with that row's mirror id", () => {
   const tree = SketchMirrorActions({
     entries: [healthy, broken],
     onRemove: (derivationId) => removed.push(derivationId),
+    onReplace: () => {},
   });
   const buttons = elements(tree).filter(
     (element) =>
@@ -106,4 +115,45 @@ test("T16a: Remove mirror calls onRemove with that row's mirror id", () => {
   (buttons[1]!.props as { onClick: () => void }).onClick();
   (buttons[0]!.props as { onClick: () => void }).onClick();
   expect(removed).toEqual(["derivation_broken", "derivation_healthy"]);
+});
+
+test("T16e: every row offers Replace mirror line…; Replace original… only for a row that targets a copy; each calls onReplace with that row's mirror (and copy)", () => {
+  const visible = text(
+    render(
+      <SketchMirrorActions
+        entries={[healthy, broken]}
+        onRemove={() => {}}
+        onReplace={() => {}}
+      />,
+    ),
+  );
+  expect(visible.match(/\|Replace mirror line…\|/g)).toHaveLength(2);
+  expect(visible.match(/\|Replace original…\|/g)).toHaveLength(1);
+  expect(
+    visible.indexOf("|Replace original…|"),
+    "the original button belongs to the healthy row (it targets a copy)",
+  ).toBeLessThan(visible.indexOf("|mirror 7|"));
+
+  const replaced: [string, string | null][] = [];
+  const tree = SketchMirrorActions({
+    entries: [healthy, broken],
+    onRemove: () => {},
+    onReplace: (derivationId, outputEntityId) =>
+      replaced.push([derivationId, outputEntityId]),
+  });
+  const byTestId = (testId: string) =>
+    elements(tree).filter(
+      (element) =>
+        (element.props as Record<string, unknown>)["data-testid"] === testId,
+    );
+  const lines = byTestId("mirror-replace-line");
+  const originals = byTestId("mirror-replace-original");
+  expect(lines).toHaveLength(2);
+  expect(originals).toHaveLength(1);
+  (lines[1]!.props as { onClick: () => void }).onClick();
+  (originals[0]!.props as { onClick: () => void }).onClick();
+  expect(replaced).toEqual([
+    ["derivation_broken", null],
+    ["derivation_healthy", "copy_c"],
+  ]);
 });

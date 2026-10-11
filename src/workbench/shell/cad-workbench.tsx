@@ -1456,6 +1456,16 @@ export function CadWorkbench({
                           patch: { intent: "removeMirror", derivationId },
                         })
                       }
+                      onReplace={(derivationId, outputEntityId) =>
+                        dispatch({
+                          type: "sketch.toolPatched",
+                          patch: {
+                            intent: "startMirrorRepair",
+                            derivationId,
+                            ...(outputEntityId ? { outputEntityId } : {}),
+                          },
+                        })
+                      }
                     />
                   ) : null}
                   {sketchTangentActionState?.visible ? (

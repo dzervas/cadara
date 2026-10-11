@@ -31,9 +31,11 @@ test("T16a (T16-22, R-1): the validation status, Mirror and Tangent flow in one 
               requirementCount: 0,
               sizingRequirementCount: 0,
               brokenDownstreamLabels: [],
+              replaceOriginalOutputId: null,
             },
           ]}
           onRemove={() => {}}
+          onReplace={() => {}}
         />
         <SketchTangentActions
           resetEnabled

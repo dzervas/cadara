@@ -1,3 +1,4 @@
+import type { SketchEntityId } from "@/contracts/shared/ids";
 import type { SketchToolId } from "@/core/sketch-tools/definition";
 import { isRegisteredSketchToolId } from "@/core/sketch-tools/registry";
 import {
@@ -35,7 +36,12 @@ import {
   updateSketchPointer,
   type SketchDrawingEscapeStep,
 } from "@/domain/editor/sketch-session";
-import { applySketchMirrorRemoval } from "@/domain/editor/sketch-session/mirror-actions";
+import {
+  applySketchMirrorRemoval,
+  applySketchMirrorRepair,
+  beginSketchMirrorRepair,
+  cancelSketchMirrorRepair,
+} from "@/domain/editor/sketch-session/mirror-actions";
 import { applyTangentAction } from "@/domain/editor/sketch-session/tangent-actions";
 import {
   enterSketchSpecialMode,
@@ -330,6 +336,86 @@ export function handleSketchToolPatched(
       state: {
         ...state,
         session,
+        preview: {
+          kind: "sketch",
+          label: getSketchSessionPreviewLabel(session),
+          target: session.planeTarget,
+        },
+      },
+      effects: [],
+    };
+  }
+
+  // T16e ([TECH] T16-9): the Mirror panel's Replace mirror line… /
+  // Replace original… arm the Mirror tool's repair sub-state; its Replace
+  // (or Enter) is one action ("Replace Mirror Line" / "Replace Mirror
+  // Original") that keeps the pick selected, so the panel shows the result;
+  // its Cancel (or Escape) is none and gives back the selection the panel
+  // was opened from.
+  if (
+    event.patch.intent === "startMirrorRepair" &&
+    typeof event.patch.derivationId === "string" &&
+    !state.session.activeTool
+  ) {
+    const outputEntityId = event.patch.outputEntityId;
+    const session = beginSketchMirrorRepair(
+      state.session,
+      event.patch.derivationId,
+      typeof outputEntityId === "string"
+        ? { outputEntityId: outputEntityId as SketchEntityId }
+        : "axis",
+      state.selection,
+    );
+    return {
+      state: {
+        ...state,
+        hoverTarget: null,
+        annotationContext: null,
+        session,
+        // As activating the tool does.
+        selectionFilter: session.activeEditTool
+          ? getDefaultSelectionFilterForMode("sketch")
+          : state.selectionFilter,
+        command: session.activeEditTool
+          ? { ...state.command, toolId: "sketchMirror", phase: "editing" }
+          : state.command,
+        preview: {
+          kind: "sketch",
+          label: getSketchSessionPreviewLabel(session),
+          target: session.planeTarget,
+        },
+      },
+      effects: [],
+    };
+  }
+
+  const repair = state.session.activeEditTool?.repair;
+  if (
+    repair &&
+    (event.patch.intent === "cancelMirrorRepair" ||
+      event.patch.intent === "replaceMirrorLine" ||
+      event.patch.intent === "replaceMirrorOriginal")
+  ) {
+    const cancel = event.patch.intent === "cancelMirrorRepair";
+    const session = cancel
+      ? cancelSketchMirrorRepair(state.session)
+      : applySketchMirrorRepair(state.session);
+    if (session === state.session) return { state, effects: [] };
+    return {
+      state: {
+        ...state,
+        selection: cancel ? [...repair.returnSelection] : state.selection,
+        hoverTarget: null,
+        annotationContext: cancel
+          ? state.annotationContext
+          : withoutSketchAnnotationWheel(
+              pruneSketchAnnotationContext(
+                state.annotationContext ?? null,
+                session,
+              ),
+            ),
+        session,
+        command: { ...state.command, toolId: "sketch", phase: "editing" },
         preview: {
           kind: "sketch",
           label: getSketchSessionPreviewLabel(session),

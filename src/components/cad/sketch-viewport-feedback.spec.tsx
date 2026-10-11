@@ -23,8 +23,10 @@ import {
 import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
 import {
   entityTarget,
+  mirroredSession,
   seedDefinition,
 } from "@/domain/editor/sketch-mirror.fixtures";
+import { beginSketchMirrorRepair } from "@/domain/editor/sketch-session/mirror-actions";
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,
@@ -666,4 +668,54 @@ test("T16d: the Mirror confirm popup renders per pick and only its own box takes
       '<div class="pointer-events-none absolute inset-0 z-40"><div class="pointer-events-auto ',
     );
   }
+});
+
+// T16e ([TECH] T16-9), UI lane; seam: the Mirror tool's repair presentation
+// (built by the real session) rendered by the viewport feedback layer. Before
+// a pick: the prompt, no popup. After a valid pick: the confirm-only popup
+// "Replace mirror line" with its readout and Replace/Cancel, no text field;
+// only its box takes the pointer.
+test("T16e: the Mirror repair prompt, then its Replace/Cancel popup after a pick", () => {
+  const { session, relationship } = mirroredSession("free");
+  const armed = beginSketchMirrorRepair(
+    session,
+    relationship.derivationId,
+    "axis",
+    [],
+  );
+  const render = (schema: SketchToolPresentationSchema | null) =>
+    renderToStaticMarkup(
+      <SketchViewportFeedbackLayer
+        schema={schema}
+        projections={[
+          { id: "floating-input:sketch-mirror-repair-confirm", x: 300, y: 400 },
+        ]}
+        onPatch={() => undefined}
+      />,
+    );
+  const before = render(armed.toolPresentation);
+  expect(before, "no popup before a pick").not.toContain(
+    "data-sketch-viewport-floating-input",
+  );
+  const picked = selectSketchEditToolTarget(armed, {
+    kind: "sketchDatumReference",
+    sketchId: "sketch_draft",
+    datumId: "yAxis",
+    geometryKind: "lineSegment",
+  } as PrimitiveRef);
+  const markup = render(picked.toolPresentation);
+  expect(markup).toContain(
+    'data-sketch-viewport-floating-input="sketch-mirror-repair-confirm"',
+  );
+  expect(markup).toContain(">Replace mirror line<");
+  expect(markup).toContain(
+    'data-floating-input-readout="true">Use the sketch Y axis as the mirror line<',
+  );
+  expect(markup).toContain(">Replace<");
+  expect(markup).toContain(">Cancel<");
+  expect(markup, "no text field").not.toContain("<input");
+  expect(
+    markup.match(/pointer-events-auto/g),
+    "only the popup box takes pointer events",
+  ).toHaveLength(1);
 });

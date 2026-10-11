@@ -30,10 +30,17 @@ import {
   createNewSketchSession,
   finalizeSketchDraw,
   patchSketchEditToolValue,
+  restageSketchMirrorTool,
   selectSketchEditToolTarget,
   startSketchDraw,
+  updateSketchEditToolHover,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
+import {
+  getEnterEvent,
+  getEscapeEvent,
+} from "@/domain/editor/workbench-interactions";
+import type { PrimitiveRef } from "@/core/editor/schema";
 import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
 import {
   chainSession,
@@ -47,6 +54,8 @@ import {
 } from "@/domain/editor/sketch-mirror.fixtures";
 import {
   applySketchMirrorRemoval,
+  applySketchMirrorRepair,
+  beginSketchMirrorRepair,
   computeSketchMirrorActionState,
 } from "./mirror-actions";
 
@@ -248,7 +257,7 @@ function copyRequirementsSession() {
 
 describe("T16a: the consequence line counts what Remove deletes, before the click", () => {
   test("healthy: 4 copies, 3 requirements on them, 2 of which size the originals (the driving radius and the copy↔unrelated constraint)", () => {
-    const { session, relationship } = copyRequirementsSession();
+    const { session, relationship, outputOf } = copyRequirementsSession();
     const snapshot = session.liveSolve!.solvedSnapshot;
     expect(snapshot.failedDerivationIds ?? [], "premise: healthy").toEqual([]);
     expect(
@@ -270,6 +279,8 @@ describe("T16a: the consequence line counts what Remove deletes, before the clic
         requirementCount: 3,
         sizingRequirementCount: 2,
         brokenDownstreamLabels: [],
+        // T16e: the selected original's copy is what Replace original… targets.
+        replaceOriginalOutputId: outputOf("c").outputEntityId,
       },
     ]);
   });
@@ -316,6 +327,8 @@ describe("T16a: the consequence line counts what Remove deletes, before the clic
         requirementCount: 3,
         sizingRequirementCount: 0,
         brokenDownstreamLabels: [],
+        // T16e: nothing selected and no original deleted: no Replace original….
+        replaceOriginalOutputId: null,
       },
     ]);
   });
@@ -604,5 +617,460 @@ describe("T16b: the Mirror panel's health agrees with the profile gate", () => {
     expect(listed(malformed, [])).toEqual([
       ["shell mirror", "original is an offset spline curve"],
     ]);
+  });
+});
+
+// T16e ([TECH] T16-9, review A-8; logic lane, seam: the sketch session's
+// Mirror tool repair sub-state (`beginSketchMirrorRepair`,
+// `updateSketchEditToolHover`, `selectSketchEditToolTarget`,
+// `applySketchMirrorRepair`) and the workbench Enter/Escape routes).
+
+type Point = SketchDefinition["points"][number];
+type Entity = SketchDefinition["entities"][number];
+const repairPoint = (id: string, position: [number, number]) =>
+  ({
+    pointId: pid(id),
+    label: id,
+    target: { kind: "sketchPoint", sketchId: "sketch_draft", pointId: pid(id) },
+    position,
+    isConstruction: false,
+  }) as Point;
+const repairLine = (id: string, a: string, b: string) =>
+  ({
+    kind: "lineSegment",
+    entityId: eid(id),
+    label: id,
+    target: {
+      kind: "sketchEntity",
+      sketchId: "sketch_draft",
+      entityId: eid(id),
+    },
+    isConstruction: false,
+    startPointId: pid(a),
+    endPointId: pid(b),
+  }) as Entity;
+const withRepairGeometry = (
+  definition: SketchDefinition,
+  points: Point[],
+  entities: Entity[],
+  constraints: ConstraintDefinition[] = [],
+): SketchDefinition => ({
+  ...definition,
+  pointIds: [...definition.pointIds, ...points.map((entry) => entry.pointId)],
+  points: [...definition.points, ...points],
+  entityIds: [
+    ...definition.entityIds,
+    ...entities.map((entry) => entry.entityId),
+  ],
+  entities: [...definition.entities, ...entities],
+  constraintIds: [
+    ...definition.constraintIds,
+    ...constraints.map((entry) => entry.constraintId),
+  ],
+  constraints: [...definition.constraints, ...constraints],
+});
+/** The mirrored seeds plus l2 (x = −5) and the line n (2, 4)–(5, 6). */
+function repairSession() {
+  const { session, relationship, outputOf } = mirroredSession("free");
+  return {
+    session: rebuild(
+      session,
+      withRepairGeometry(
+        session.definition,
+        [
+          repairPoint("l2a", [-5, -10]),
+          repairPoint("l2b", [-5, 10]),
+          repairPoint("n0", [2, 4]),
+          repairPoint("n1", [5, 6]),
+        ],
+        [repairLine("l2", "l2a", "l2b"), repairLine("n", "n0", "n1")],
+      ),
+    ),
+    relationship,
+    outputOf,
+  };
+}
+const escapeOf = (session: SketchSessionState) =>
+  getEscapeEvent({
+    activeCommand: null,
+    activeReferencePickerFieldId: null,
+    selection: [],
+    sketchSession: session,
+  });
+const previewById = (session: SketchSessionState) =>
+  new Map(session.toolStagedEntities.map((entry) => [entry.id, entry]));
+const solvedAt = (session: SketchSessionState, pointId: string) =>
+  session.liveSolve!.solvedSnapshot.solvedPoints.find(
+    (entry) => entry.pointId === pointId,
+  )!.solvedPosition;
+
+describe("T16e: Replace original… targets one copy", () => {
+  test("a selected copy, else the first copy whose original was deleted (review A-3), else a selected original's copy; none for an axis-only or unrelated selection with every original present", () => {
+    const { session, outputOf } = repairSession();
+    const target = (state: SketchSessionState, selection: PrimitiveRef[]) => {
+      const panel = computeSketchMirrorActionState(state, selection);
+      return panel ? panel.entries[0]!.replaceOriginalOutputId : "no panel";
+    };
+    expect(
+      target(session, [entityRef(session, outputOf("c").outputEntityId)]),
+    ).toBe(outputOf("c").outputEntityId);
+    expect(target(session, [entityRef(session, eid("s"))])).toBe(
+      outputOf("s").outputEntityId,
+    );
+    expect(target(session, [entityRef(session, eid("axis"))])).toBeNull();
+    expect(target(session, []), "healthy, nothing selected: no panel").toBe(
+      "no panel",
+    );
+    const seedless = without(session, [eid("c")]);
+    expect(target(seedless, [])).toBe(outputOf("c").outputEntityId);
+    expect(
+      target(seedless, [entityRef(seedless, outputOf("ab").outputEntityId)]),
+      "the selected copy wins",
+    ).toBe(outputOf("ab").outputEntityId);
+    // Review A-3: after one original is replaced the new original stays
+    // selected; the next copy whose original is missing is the target.
+    expect(
+      target(seedless, [entityRef(seedless, eid("s"))]),
+      "a copy whose original is missing before a selected original's copy",
+    ).toBe(outputOf("c").outputEntityId);
+  });
+});
+
+describe("T16e: the Mirror tool's repair sub-state", () => {
+  test("Replace mirror line… arms the Mirror tool's repair (no new tool id): a prompt, nothing staged, no popup, the panel hidden, Enter not consumed, Escape cancels; a gone mirror does not arm it", () => {
+    const { session, relationship } = repairSession();
+    const broken = without(session, [eid("axis")]);
+    const armed = beginSketchMirrorRepair(
+      broken,
+      relationship.derivationId,
+      "axis",
+      [entityRef(broken, eid("u"))],
+    );
+    expect(armed.activeTool).toBe("sketchMirror");
+    expect(armed.activeEditTool?.repair).toEqual({
+      derivationId: relationship.derivationId,
+      target: "axis",
+      returnSelection: [entityRef(broken, eid("u"))],
+    });
+    expect(armed.definition).toBe(broken.definition);
+    expect(armed.toolStagedEntities).toEqual([]);
+    expect(armed.toolPresentation?.prompts?.[0]?.text).toBe(
+      "Pick the new mirror line of mirror ‘mirror 1’: a straight line or a sketch axis.",
+    );
+    expect(
+      armed.toolPresentation?.completionHints?.[0]?.text,
+      "review A-5: a short hint, not the prompt again",
+    ).toBe("Pick one line or sketch axis");
+    expect(armed.toolPresentation?.floatingInput ?? null).toBeNull();
+    expect(computeSketchMirrorActionState(armed, [])).toBeNull();
+    expect(getEnterEvent({ sketchSession: armed })).toBeNull();
+    expect(escapeOf(armed)).toEqual({
+      type: "sketch.toolPatched",
+      patch: { intent: "cancelMirrorRepair" },
+    });
+    expect(
+      beginSketchMirrorRepair(broken, "derivation_missing", "axis", []),
+    ).toBe(broken);
+  });
+
+  test("hover: a refused candidate shows its text and stages nothing; a valid one stages the copies reflected about it (no popup, nothing authored)", () => {
+    const { session, relationship, outputOf } = repairSession();
+    const armed = beginSketchMirrorRepair(
+      session,
+      relationship.derivationId,
+      "axis",
+      [],
+    );
+    const refused = updateSketchEditToolHover(
+      armed,
+      entityRef(armed, eid("ab")),
+    );
+    expect(refused.toolStagedEntities).toEqual([]);
+    expect(refused.toolPresentation?.validation).toEqual([
+      expect.objectContaining({
+        message:
+          "‘ab’ is an original of mirror ‘mirror 1’, so it can't be its mirror line. Pick another line or a sketch axis.",
+      }),
+    ]);
+    expect(refused.toolPresentation?.floatingInput ?? null).toBeNull();
+    const hovered = updateSketchEditToolHover(
+      armed,
+      entityRef(armed, eid("l2")),
+    );
+    expect(hovered.definition).toBe(session.definition);
+    expect(hovered.toolPresentation?.floatingInput ?? null).toBeNull();
+    const previews = previewById(hovered);
+    expect([...previews.keys()].sort()).toEqual(
+      relationship.outputs
+        .map((output) => `preview-${output.outputEntityId}`)
+        .sort(),
+    );
+    const copyLine = previews.get(`preview-${outputOf("ab").outputEntityId}`);
+    expect(copyLine).toMatchObject({ kind: "line" });
+    if (copyLine?.kind !== "line") throw new Error("line");
+    // a (1, 1), b (3, 2) about x = −5.
+    expect(copyLine.start[0]).toBeCloseTo(-11, 12);
+    expect(copyLine.start[1]).toBeCloseTo(1, 12);
+    expect(copyLine.end[0]).toBeCloseTo(-13, 12);
+    expect(copyLine.end[1]).toBeCloseTo(2, 12);
+    const left = updateSketchEditToolHover(hovered, null);
+    expect(left.toolStagedEntities, "leaving the candidate clears it").toEqual(
+      [],
+    );
+  });
+
+  test("a refused pick is not kept (its text shows, Enter not consumed); a valid pick stages its solved candidate with the Replace/Cancel popup, Enter confirms; a sketch axis is a valid pick", () => {
+    const { session, relationship } = repairSession();
+    const armed = beginSketchMirrorRepair(
+      session,
+      relationship.derivationId,
+      "axis",
+      [],
+    );
+    const refused = selectSketchEditToolTarget(
+      armed,
+      entityRef(armed, eid("c")),
+    );
+    expect(refused.activeEditTool?.selectedTargets).toEqual([]);
+    expect(refused.validationMessage).toBe(
+      "A circle can't be a mirror line. Pick a straight line or a sketch axis.",
+    );
+    expect(getEnterEvent({ sketchSession: refused })).toBeNull();
+
+    const picked = selectSketchEditToolTarget(
+      refused,
+      entityRef(refused, eid("l2")),
+    );
+    expect(picked.definition).toBe(session.definition);
+    expect(picked.validationMessage).toBeNull();
+    expect(picked.toolPresentation?.floatingInput).toMatchObject({
+      label: "Replace mirror line",
+      readout: "Use ‘l2’ as the mirror line",
+      confirmOnly: true,
+      confirmLabel: "Replace",
+      cancelLabel: "Cancel",
+      submitAction: { type: "patch", patch: { intent: "replaceMirrorLine" } },
+      cancelAction: { type: "patch", patch: { intent: "cancelMirrorRepair" } },
+    });
+    expect(getEnterEvent({ sketchSession: picked })).toEqual({
+      type: "sketch.toolPatched",
+      patch: { intent: "replaceMirrorLine" },
+    });
+    expect(escapeOf(picked)).toEqual({
+      type: "sketch.toolPatched",
+      patch: { intent: "cancelMirrorRepair" },
+    });
+
+    const datum = selectSketchEditToolTarget(armed, {
+      kind: "sketchDatumReference",
+      sketchId: "sketch_draft",
+      datumId: "yAxis",
+      geometryKind: "lineSegment",
+    } as PrimitiveRef);
+    expect(datum.toolPresentation?.floatingInput?.readout).toBe(
+      "Use the sketch Y axis as the mirror line",
+    );
+  });
+
+  test("review A-8: the pick shows the solved candidate (a fixed copy centre moves the original), and Confirm commits exactly what was staged", () => {
+    const { session, relationship, outputOf } = mirroredSession("free");
+    const copyCentre = outputOf("c").outputPointIds[0]!;
+    const fix = (id: string, pointId: string, position: [number, number]) =>
+      ({
+        constraintId: `constraint_fix_${id}`,
+        kind: "fixPoint",
+        label: `Fix ${id}`,
+        pointId,
+        position,
+      }) as unknown as ConstraintDefinition;
+    const fixed = rebuild(
+      session,
+      withRepairGeometry(
+        session.definition,
+        [repairPoint("h0", [-5, 1]), repairPoint("h1", [25, 1])],
+        [repairLine("h", "h0", "h1")],
+        [
+          fix("copy_centre", copyCentre, [6, -3]),
+          fix("h0", pid("h0"), [-5, 1]),
+          fix("h1", pid("h1"), [25, 1]),
+        ],
+      ),
+    );
+    expect(
+      fixed.liveSolve!.solvedSnapshot.failedDerivationIds ?? [],
+      "premise: healthy",
+    ).toEqual([]);
+    const armed = beginSketchMirrorRepair(
+      fixed,
+      relationship.derivationId,
+      "axis",
+      [],
+    );
+    const hovered = updateSketchEditToolHover(
+      armed,
+      entityRef(armed, eid("h")),
+    );
+    const hoverCopy = previewById(hovered).get(
+      `preview-${outputOf("c").outputEntityId}`,
+    );
+    expect(
+      hoverCopy?.kind === "circle" && hoverCopy.center,
+      "hover: the pure reflection about y = 1 (the copy would jump to y = −1)",
+    ).toEqual([6, -1]);
+    const picked = selectSketchEditToolTarget(
+      armed,
+      entityRef(armed, eid("h")),
+    );
+    const staged = previewById(picked);
+    const stagedCopy = staged.get(`preview-${outputOf("c").outputEntityId}`);
+    const stagedSeed = staged.get(`preview-${eid("c")}`);
+    if (stagedCopy?.kind !== "circle" || stagedSeed?.kind !== "circle")
+      throw new Error("the staged copy and the moved original are circles");
+    expect(stagedCopy.center[0]).toBeCloseTo(6, 6);
+    expect(stagedCopy.center[1], "the copy stays fixed").toBeCloseTo(-3, 6);
+    expect(stagedSeed.center[1], "the original moves to y = 5").toBeCloseTo(
+      5,
+      6,
+    );
+    expect(
+      staged.has(`preview-${eid("ab")}`),
+      "an original the solve leaves in place is not staged",
+    ).toBe(false);
+    const committed = applySketchMirrorRepair(picked);
+    expect(committed.activeEditTool).toBeNull();
+    expect(committed.activeTool).toBeNull();
+    expect(solvedAt(committed, copyCentre)).toEqual(stagedCopy.center);
+    expect(solvedAt(committed, pid("c"))).toEqual(stagedSeed.center);
+    for (const preview of picked.toolStagedEntities)
+      if (preview.kind === "line") {
+        const entity = committed.definition.entities.find(
+          (entry) => `preview-${entry.entityId}` === preview.id,
+        );
+        if (entity?.kind !== "lineSegment") throw new Error("line");
+        expect([
+          solvedAt(committed, entity.startPointId),
+          solvedAt(committed, entity.endPointId),
+        ]).toEqual([preview.start, preview.end]);
+      }
+    expect(committed.definition.derivedRelationships![0]!).toEqual({
+      ...relationship,
+      mirrorReference: { kind: "lineEntity", entityId: eid("h") },
+    });
+  });
+
+  test("Replace original…: hover refuses an incompatible candidate; the pick of a compatible one reads 'Use ‘n’ as the original of ‘ab mirror’', Enter sends replaceMirrorOriginal, Confirm heals the mirror", () => {
+    const { session, relationship, outputOf } = repairSession();
+    const seedless = without(session, [eid("ab")]);
+    const copy = outputOf("ab").outputEntityId;
+    const armed = beginSketchMirrorRepair(
+      seedless,
+      relationship.derivationId,
+      { outputEntityId: copy },
+      [],
+    );
+    expect(armed.toolPresentation?.prompts?.[0]?.text).toBe(
+      "Pick the new original of ‘ab mirror’ (mirror ‘mirror 1’).",
+    );
+    expect(
+      updateSketchEditToolHover(armed, entityRef(armed, eid("c")))
+        .toolPresentation?.validation?.[0]?.message,
+    ).toBe("‘c’ is already an original of mirror ‘mirror 1’.");
+    const picked = selectSketchEditToolTarget(
+      armed,
+      entityRef(armed, eid("n")),
+    );
+    expect(picked.toolPresentation?.floatingInput).toMatchObject({
+      label: "Replace original",
+      readout: "Use ‘n’ as the original of ‘ab mirror’",
+      submitAction: {
+        type: "patch",
+        patch: { intent: "replaceMirrorOriginal" },
+      },
+    });
+    expect(getEnterEvent({ sketchSession: picked })).toEqual({
+      type: "sketch.toolPatched",
+      patch: { intent: "replaceMirrorOriginal" },
+    });
+    const healed = applySketchMirrorRepair(picked);
+    expect(healed.liveSolve!.solvedSnapshot.failedDerivationIds ?? []).toEqual(
+      [],
+    );
+    expect(
+      healed.definition.derivedRelationships![0]!.outputs[0],
+    ).toMatchObject({
+      seedEntityId: eid("n"),
+      outputEntityId: copy,
+      outputPointIds: outputOf("ab").outputPointIds,
+    });
+    expect(
+      beginSketchMirrorRepair(
+        seedless,
+        relationship.derivationId,
+        { outputEntityId: eid("missing") },
+        [],
+      ),
+      "a copy that is not there does not arm the repair",
+    ).toBe(seedless);
+  });
+
+  test("review A-4: when the definition loses the mirror (Undo of its creation) the repair ends, as Cancel does: no tool, no 'mirror ‘’' prompt, the sketch's own message", () => {
+    const { session, relationship } = repairSession();
+    const broken = without(session, [eid("axis")]);
+    const armed = beginSketchMirrorRepair(
+      broken,
+      relationship.derivationId,
+      "axis",
+      [],
+    );
+    const mirrorless = restageSketchMirrorTool(
+      rebuild(armed, { ...armed.definition, derivedRelationships: [] }),
+    );
+    expect(mirrorless.activeEditTool).toBeNull();
+    expect(mirrorless.activeTool).toBeNull();
+    expect(mirrorless.toolPresentation).toBeNull();
+    expect(mirrorless.validationMessage).toBeNull();
+    const original = beginSketchMirrorRepair(
+      broken,
+      relationship.derivationId,
+      { outputEntityId: relationship.outputs[0]!.outputEntityId },
+      [],
+    );
+    const copyless = restageSketchMirrorTool(
+      without(original, [relationship.outputs[0]!.outputEntityId]),
+    );
+    expect(copyless.activeEditTool, "the target copy gone").toBeNull();
+    expect(
+      copyless.validationMessage,
+      "the broken mirror is explained again",
+    ).toMatch(/^Mirror ‘mirror 1’ is broken: /);
+  });
+
+  test("Confirm without a valid pick changes nothing; Undo of the definition while picked re-judges the candidate", () => {
+    const { session, relationship } = repairSession();
+    const armed = beginSketchMirrorRepair(
+      session,
+      relationship.derivationId,
+      "axis",
+      [],
+    );
+    expect(applySketchMirrorRepair(armed)).toBe(armed);
+    const picked = selectSketchEditToolTarget(
+      armed,
+      entityRef(armed, eid("l2")),
+    );
+    const withoutLine = restageSketchMirrorTool({
+      ...picked,
+      definition: {
+        ...picked.definition,
+        entityIds: picked.definition.entityIds.filter((id) => id !== eid("l2")),
+        entities: picked.definition.entities.filter(
+          (entity) => entity.entityId !== eid("l2"),
+        ),
+      },
+    });
+    expect(withoutLine.activeEditTool?.selectedTargets).toEqual([]);
+    expect(withoutLine.toolStagedEntities).toEqual([]);
+    expect(withoutLine.toolPresentation?.floatingInput ?? null).toBeNull();
+    expect(getEnterEvent({ sketchSession: withoutLine })).toBeNull();
   });
 });

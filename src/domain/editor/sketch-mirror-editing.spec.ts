@@ -40,7 +40,10 @@ import {
   updateSketchGeometryDrag,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
-import { MIRROR_DATUM_AXIS_ORDER_MESSAGE } from "@/domain/editor/sketch-session/editing";
+import {
+  MIRROR_DATUM_AXIS_ORDER_MESSAGE,
+  offsetEditInputGate,
+} from "@/domain/editor/sketch-session/editing";
 import {
   getEnterEvent,
   getEscapeEvent,
@@ -1066,10 +1069,19 @@ describe("T15d T-12 through a mirror chain (review RQ-1)", () => {
 // failure as carried by the session's live solve and shown as its
 // validation message). One message per failed relationship, by label
 // (never its id), reason-specific, naming only recovery commands that exist
-// (Undo; for a mirror, removal from the Mirror panel). Codes unchanged.
+// (Undo; for a mirror, removal from the Mirror panel; T16e (review R-5):
+// replacing the mirror line or the original where that repairs it). Codes
+// unchanged.
 describe("T16b: failure messages name the relationship by label, say why and how to recover", () => {
   const MIRROR_TAIL =
     " Its copies stay where they were last solved and can't be used; profiles from this sketch are blocked. Undo, or remove the mirror from the Mirror panel.";
+  const LINE_TAIL =
+    " Its copies stay where they were last solved and can't be used; profiles from this sketch are blocked. Undo, replace the mirror line, or remove the mirror from the Mirror panel.";
+  const ORIGINAL_TAIL =
+    " Its copies stay where they were last solved and can't be used; profiles from this sketch are blocked. Undo, replace the original, or remove the mirror from the Mirror panel.";
+  // T16e review A-7: replacing the looping line or original breaks a loop.
+  const LOOP_TAIL =
+    " Its copies stay where they were last solved and can't be used; profiles from this sketch are blocked. Undo, replace the mirror line or the original, or remove the mirror from the Mirror panel.";
   const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/;
   const rebuild = (session: SketchSessionState, definition: SketchDefinition) =>
     rebuildSessionForDefinition(session, { definition });
@@ -1095,12 +1107,13 @@ describe("T16b: failure messages name the relationship by label, say why and how
     const { session, relationship, outputOf } = mirroredSession("free");
     const label = relationship.label;
     const copyLine = outputOf("ab").outputEntityId;
-    const cases: [string, SketchSessionState, string, string][] = [
+    const cases: [string, SketchSessionState, string, string, string][] = [
       [
         "axis missing",
         without(session, [eid("axis")]),
         "derived-mirror-axis-missing",
         `Mirror ‘${label}’ is broken: its mirror line was deleted.`,
+        LINE_TAIL,
       ],
       [
         "axis degenerate",
@@ -1114,18 +1127,21 @@ describe("T16b: failure messages name the relationship by label, say why and how
         }),
         "derived-mirror-axis-degenerate",
         `Mirror ‘${label}’ is broken: its mirror line is shorter than the modeling tolerance.`,
+        LINE_TAIL,
       ],
       [
         "seed missing",
         without(session, [eid("c")]),
         "derived-mirror-map-stale",
         `Mirror ‘${label}’ is broken: the original of ‘c mirror’ was deleted.`,
+        ORIGINAL_TAIL,
       ],
       [
         "copy missing",
         without(session, [outputOf("c").outputEntityId]),
         "derived-mirror-map-stale",
         `Mirror ‘${label}’ is broken: a copy of ‘c’ was deleted.`,
+        MIRROR_TAIL,
       ],
       [
         "geometry mismatch",
@@ -1139,6 +1155,7 @@ describe("T16b: failure messages name the relationship by label, say why and how
         }),
         "derived-mirror-map-stale",
         `Mirror ‘${label}’ is broken: its geometry no longer matches (copy ‘ab mirror’ of ‘ab’).`,
+        MIRROR_TAIL,
       ],
       [
         "dependency loop",
@@ -1153,10 +1170,11 @@ describe("T16b: failure messages name the relationship by label, say why and how
         }),
         "derived-relationship-dependency-unresolved",
         `Mirror ‘${label}’ depends on its own copies (a dependency loop).`,
+        LOOP_TAIL,
       ],
     ];
-    for (const [reason, broken, code, statement] of cases) {
-      const message = statement + MIRROR_TAIL;
+    for (const [reason, broken, code, statement, tail] of cases) {
+      const message = statement + tail;
       expect(failures(broken), reason).toEqual([[code, message]]);
       expect(message, `${reason}: no id`).not.toContain(
         relationship.derivationId,
@@ -1187,7 +1205,7 @@ describe("T16b: failure messages name the relationship by label, say why and how
     expect(failures(broken)).toEqual([
       [
         "derived-relationship-dependency-unresolved",
-        `Mirror ‘${setup.relationship.label}’ depends on its own copies (a dependency loop).${MIRROR_TAIL}`,
+        `Mirror ‘${setup.relationship.label}’ depends on its own copies (a dependency loop).${LOOP_TAIL}`,
       ],
       [
         "derived-relationship-dependency-unresolved",
@@ -1255,8 +1273,10 @@ describe("T16b: failure messages name the relationship by label, say why and how
 // text helpers by owner kind.
 describe("T16c: a broken relationship's copies are named by label at every non-acceptance site", () => {
   const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/;
+  // T16e (review R-5): these rows' mirror lost its mirror line, so the text
+  // names replacing it.
   const MIRROR_RECOVERY =
-    "Fix it (Undo) or remove the mirror from the Mirror panel.";
+    "Fix it (Undo or replace the mirror line) or remove the mirror from the Mirror panel.";
   /** Every user text of these rows: exact, and neither an id nor a UUID. */
   const expectNoIds = (
     session: SketchSessionState,
@@ -1722,7 +1742,7 @@ describe("T16c: a broken relationship's copies are named by label at every non-a
     ]);
     const patternText = `Linear pattern ‘${pattern.relationship.label}’ is broken: the original of ‘ab linearPattern’ was deleted. Profiles from this sketch are blocked. Undo to recover.`;
     const mirrorText =
-      "Mirror ‘mirror 1’ is broken: the original of ‘ab mirror’ was deleted. Its copies stay where they were last solved and can't be used; profiles from this sketch are blocked. Undo, or remove the mirror from the Mirror panel.";
+      "Mirror ‘mirror 1’ is broken: the original of ‘ab mirror’ was deleted. Its copies stay where they were last solved and can't be used; profiles from this sketch are blocked. Undo, replace the original, or remove the mirror from the Mirror panel.";
     expect(
       seedDeleted
         .liveSolve!.solvedSnapshot.diagnostics.filter(
@@ -2273,5 +2293,83 @@ describe("T16d: Mirror creation preview, cancel and confirm", () => {
         mirror.kind === "mirror" ? mirror.mirrorReference : null,
       ),
     ).toEqual([{ kind: "sketchDatum", datum: "xAxis" }]);
+  });
+});
+
+// T16e (review R-5; logic lane, seam: the edit-input gate's text for a
+// broken mirror's held copy, `brokenDerivedInputMessage` through
+// `offsetEditInputGate`). The recovery names the replacement that repairs
+// the mirror: its line (missing or too short), its original (deleted), or
+// none (a deleted copy, a dependency loop: Undo or removal).
+describe("T16e: the failed-copy input text names the repair that fits the failure", () => {
+  test("line missing / too short → replace the mirror line; original deleted → replace the original; on a loop → either (review A-7); copy deleted → Undo or remove", () => {
+    const { session, relationship, outputOf } = mirroredSession("free");
+    const rebuild = (definition: SketchDefinition) =>
+      rebuildSessionForDefinition(session, { definition });
+    const without = (ids: readonly string[]) => {
+      const entities = session.definition.entities.filter(
+        (entity) => !ids.includes(entity.entityId),
+      );
+      return rebuild({
+        ...session.definition,
+        entityIds: entities.map((entity) => entity.entityId),
+        entities,
+      });
+    };
+    const held = outputOf("ab").outputEntityId;
+    const cases: [string, SketchSessionState, string][] = [
+      [
+        "line missing",
+        without([eid("axis")]),
+        "Fix it (Undo or replace the mirror line)",
+      ],
+      [
+        "line too short",
+        rebuild({
+          ...session.definition,
+          points: session.definition.points.map((point) =>
+            point.pointId === pid("x1")
+              ? { ...point, position: [-2, 0] }
+              : point,
+          ),
+        }),
+        "Fix it (Undo or replace the mirror line)",
+      ],
+      [
+        "original deleted",
+        without([eid("c")]),
+        "Fix it (Undo or replace the original)",
+      ],
+      [
+        "copy deleted",
+        without([outputOf("c").outputEntityId]),
+        "Fix it (Undo)",
+      ],
+      [
+        "dependency loop",
+        rebuild({
+          ...session.definition,
+          derivedRelationships: [
+            {
+              ...relationship,
+              mirrorReference: { kind: "lineEntity", entityId: held },
+            },
+          ],
+        }),
+        "Fix it (Undo or replace the mirror line or the original)",
+      ],
+    ];
+    for (const [name, broken, recovery] of cases) {
+      expect(
+        broken.liveSolve!.solvedSnapshot.failedDerivationIds,
+        `${name}: premise`,
+      ).toEqual([relationship.derivationId]);
+      expect(
+        offsetEditInputGate(broken, [held], "a fillet input")?.message,
+        name,
+      ).toBe(
+        `edit-input-derived-failed: ‘ab mirror’ is a copy made by mirror ‘mirror 1’, which is broken, so it can't be used as a fillet input. ${recovery} or remove the mirror from the Mirror panel.`,
+      );
+    }
   });
 });

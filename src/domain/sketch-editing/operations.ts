@@ -4048,13 +4048,24 @@ function createPreviewEntitiesFromContribution(
   contribution: SketchToolCommitContribution,
   derivation: SketchDerivationSettings,
 ): readonly SketchDraftEntity[] {
-  const outputEntityIds = new Set(
-    contribution.entities.map((entity) => entity.entityId),
+  return createSketchEntityPreviewEntities(
+    evaluateSketchDerivations({
+      definition: appendDerivedContribution(definition, contribution),
+      ...derivation,
+    }).definition,
+    new Set(contribution.entities.map((entity) => entity.entityId)),
   );
-  const evaluated = evaluateSketchDerivations({
-    definition: appendDerivedContribution(definition, contribution),
-    ...derivation,
-  }).definition;
+}
+
+/**
+ * The tool-preview drawing of `entityIds` (lines, circles, arcs, splines,
+ * points) at their positions in `evaluated`. T16e: also the Mirror repair
+ * preview (copies reflected about a candidate, a solved candidate).
+ */
+export function createSketchEntityPreviewEntities(
+  evaluated: SketchDefinition,
+  outputEntityIds: ReadonlySet<string>,
+): readonly SketchDraftEntity[] {
   const pointById = new Map(
     evaluated.points.map((point) => [point.pointId, point.position] as const),
   );
