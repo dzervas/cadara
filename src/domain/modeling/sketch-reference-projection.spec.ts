@@ -8,6 +8,9 @@ import {
 } from "@/contracts/shared/versioning";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import { projectSketchExternalReferencesFromSnapshot } from "./sketch-reference-projection";
+import { MockKernelAdapter } from "./mock-kernel-adapter";
+import { mirroredSession } from "@/domain/editor/sketch-mirror.fixtures";
+import { removeMirrorRelationship } from "@/domain/sketch-editing/mirror-repair";
 
 function createSnapshotWithEdge(
   points: readonly (readonly [number, number, number])[],
@@ -426,4 +429,114 @@ test("model edge projection handles closed edge sampling variants without miscla
       splineGeometry.representation.isClosed,
     "Projected freeform curves should preserve explicit source sampling without becoming ordinary splines.",
   ).toBeTruthy();
+});
+
+// T16g (T16-plan review A-13). Logic lane; seam: the modeling adapter's
+// Finish (`commitSketch`) and its reference projection
+// (`projectSketchExternalReferences`, the call a dependent sketch's commit
+// or re-entry makes). After a mirror's removal is finished, a reference to
+// one of its removed copies is an explicit missing source: no geometry, no
+// retarget to the original or to any nearby entity. The original still
+// projects as before.
+test("T16g A-13: a dependent sketch's projection of a removed mirror copy is an explicit missing source after Finish (no retarget); the original still projects", async () => {
+  const { session, relationship, outputOf } = mirroredSession("free");
+  const adapter = new MockKernelAdapter();
+  const request = {
+    contractVersion: CONTRACT_VERSION,
+    documentId: "doc_workspace",
+  } as const;
+  const finish = async (
+    definition: typeof session.definition,
+    sketchId: string | null,
+  ) => {
+    const { snapshot } = await adapter.getDocumentSnapshot(request);
+    const commit = await adapter.commitSketch({
+      ...request,
+      baseRevisionId: snapshot.document.revisionId,
+      solverCorrelation: {
+        requestId: "request_t16g",
+        projectionRequestId: "request_t16g:project",
+        validationRequestId: "request_t16g:validate",
+        solveRequestId: "request_t16g:solve",
+        regionRequestId: "request_t16g:regions",
+      },
+      sketchId: sketchId as never,
+      sketchLabel: "Mirrored",
+      plane: snapshot.document.sketches[0]!.plane,
+      definition,
+    });
+    expect(commit.revisionState.kind, "premise: Finish accepted").toBe(
+      "accepted",
+    );
+    return commit.sketchId!;
+  };
+  const copy = outputOf("c").outputEntityId;
+  const original = relationship.outputs.find(
+    (output) => output.outputEntityId === copy,
+  )!.seedEntityId;
+  const project = async (sketchId: string) => {
+    const { snapshot } = await adapter.getDocumentSnapshot(request);
+    const reference = (referenceId: string, entityId: string) => ({
+      referenceId,
+      reference: {
+        referenceId,
+        kind: "sketchReference",
+        label: referenceId,
+        source: { kind: "sketchEntity", sketchId, entityId },
+      },
+    });
+    return (
+      await adapter.projectSketchExternalReferences({
+        contractVersion: CONTRACT_VERSION,
+        solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+        requestId: "request_t16g_projection",
+        documentId: "doc_workspace",
+        revisionId: snapshot.document.revisionId,
+        sketchId: "sketch_dependent",
+        plane: snapshot.document.sketches.find(
+          (entry) => entry.sketchId === sketchId,
+        )!.plane.frame,
+        tolerances: {
+          coincidence: 1e-6,
+          angleRadians: 1e-6,
+          minimumSegmentLength: 1e-6,
+        },
+        references: [
+          reference("ref_copy", copy),
+          reference("ref_original", original),
+        ],
+      } as never)
+    ).projectedReferences;
+  };
+
+  const sketchId = await finish(session.definition, null);
+  const healthy = await project(sketchId);
+  expect(
+    healthy.map((entry) => entry.status),
+    "premise: the copy and the original project while the mirror exists",
+  ).toEqual(["projected", "projected"]);
+
+  const removed = removeMirrorRelationship(
+    session.definition,
+    relationship.derivationId,
+  )!;
+  expect(
+    removed.removedEntityIds,
+    "premise: the removal takes the copy",
+  ).toContain(copy);
+  await finish(removed.definition, sketchId);
+  const after = await project(sketchId);
+  expect(after).toHaveLength(2);
+  expect(after[0]).toMatchObject({
+    referenceId: "ref_copy",
+    status: "missingSource",
+    geometry: [],
+  });
+  expect(
+    after[0]!.diagnostics.map((diagnostic) => [
+      diagnostic.code,
+      diagnostic.severity,
+    ]),
+  ).toEqual([["missing-sketch-entity-source", "error"]]);
+  expect(after[1], "the original projects unchanged").toEqual(healthy[1]);
 });
