@@ -62,6 +62,10 @@ import {
 } from "@/contracts/sketch/spline-geometry";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import {
+  correspondingMirrorDimensions,
+  type MirrorDimensionCorrespondence,
+} from "@/contracts/sketch/mirror-requirements";
+import {
   deriveSketchValidity,
   mergeSketchSolveDiagnostics,
   sketchProfileGateFailures,
@@ -1632,6 +1636,54 @@ export function rebuildSessionForDefinition(
 }
 
 /**
+ * T16f ([TECH] T16-11, review R-7e): the relationships the session's live
+ * solve failed (T16b's gate). Null without a live solve: mirror health is
+ * unknown, so no dimension routes and no geometry links.
+ */
+export function getSketchSessionMirrorHealth(
+  session: Pick<SketchSessionState, "liveSolve">,
+): ReadonlySet<string> | null {
+  const snapshot = session.liveSolve?.solvedSnapshot;
+  return snapshot ? new Set(snapshot.failedDerivationIds ?? []) : null;
+}
+
+/**
+ * T16f ([TECH] T16-11/T16-12): the driving dimensions that size the same
+ * mirrored quantity as `dimension` through healthy mirrors, the tie-break
+ * (definition order) first; none without a live solve.
+ */
+export function getSketchSessionSharedMirrorDimensions(
+  session: Pick<SketchSessionState, "definition" | "liveSolve">,
+  dimension: DimensionDefinition,
+): readonly MirrorDimensionCorrespondence[] {
+  const health = getSketchSessionMirrorHealth(session);
+  return health
+    ? correspondingMirrorDimensions(session.definition, dimension, health)
+    : [];
+}
+
+/**
+ * T16f ([TECH] T16-12, review A-9): every domain commit that would author a
+ * second driving record of one mirrored quantity is refused with this text.
+ */
+export function sharedMirrorDriverRefusal(
+  driver: MirrorDimensionCorrespondence,
+): string {
+  return `Already driven by ${driver.dimension.label} (${describeSharedMirrorPath(driver.mirrors)}); edit that dimension instead.`;
+}
+
+/** T16f: "mirror ‘a’", or "mirrors ‘a’ and ‘b’" along a chain (each named once). */
+export function describeSharedMirrorPath(
+  mirrors: MirrorDimensionCorrespondence["mirrors"],
+): string {
+  // A shortest path may pass a mirror twice (T16f review R-1): named once.
+  const names = [...new Set(mirrors.map((mirror) => `‘${mirror.label}’`))];
+  return names.length === 1
+    ? `mirror ${names[0]}`
+    : `mirrors ${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+}
+
+/**
  * T13c (D7, review R-2): the one invalid-sketch feedback text: the conflict
  * explanation when requirements are unsatisfied, else the first non-info
  * diagnostic of the session's derived validity. Used after commits,
@@ -1711,6 +1763,25 @@ export function describeSketchSessionUnsatisfiedRequirements(
   const requirements = [...subjects, ...others];
   if (requirements.length === 0) {
     return null;
+  }
+  // T16f ([TECH] T16-13): two driving dimensions that size one mirrored
+  // shape (a persisted duplicate) are explained as such.
+  if (requirements.length === 2) {
+    const [first, second] = requirements as [
+      (typeof requirements)[number],
+      (typeof requirements)[number],
+    ];
+    const dimension = session.definition.dimensions.find(
+      (entry) => entry.dimensionId === first.id,
+    );
+    const shared = dimension
+      ? getSketchSessionSharedMirrorDimensions(session, dimension).find(
+          (entry) => entry.dimension.dimensionId === second.id,
+        )
+      : undefined;
+    if (shared) {
+      return `${first.text} and ${second.text} size the same mirrored shape (${describeSharedMirrorPath(shared.mirrors)}), so they conflict. The sketch is invalid; profiles from it are blocked. Change or delete one, make one a reference, or Undo.`;
+    }
   }
   const list = (entries: typeof requirements) =>
     entries.map((entry) => entry.text).join(", ");

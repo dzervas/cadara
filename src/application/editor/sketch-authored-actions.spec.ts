@@ -3956,3 +3956,134 @@ describe("T16b: Undo/Redo recompute a broken mirror's validity", () => {
     expect(health(f.session), "Redo recomputes: broken").toEqual(broken);
   });
 });
+
+// T16f (logic lane; seam: the authored-action owner around the real sketch
+// reducer). The Dimension tool on a mirror copy whose original already has a
+// driving radius opens that driver's edit: its Save is one action that edits
+// only the driver ("Commit Annotation Value", as any dimension edit); Cancel
+// and Escape record nothing; the tool stays armed either way; one Undo
+// restores the definition bitwise. "Add as reference instead" is one action
+// adding a reference on the copy ("Commit Constraint Value", as the tool's
+// own commit).
+describe("T16f: the Dimension tool routed to a shared driver through the authored-action owner", () => {
+  async function routed() {
+    const setup = mirroredSession("free");
+    const seeded = rebuildSessionForDefinition(setup.session, {
+      definition: {
+        ...setup.session.definition,
+        dimensionIds: ["dimension_seed" as never],
+        dimensions: [
+          {
+            dimensionId: "dimension_seed",
+            kind: "circleRadius",
+            label: "Radius 2",
+            entityId: eid("c"),
+            value: { source: "literal", value: 2 },
+          } as never,
+        ],
+      },
+    });
+    const f = await fixture(false, seeded);
+    const copy = entityRef(f.session, setup.outputOf("c").outputEntityId);
+    const open = () => {
+      f.dispatch({ type: "tool.activated", toolId: "dimensionRadius" });
+      f.dispatch({ type: "viewport.selectionRequested", target: copy });
+      f.dispatch({
+        type: "sketch.pointerReleased",
+        point: [6, 6],
+        sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
+        target: null,
+      });
+      expect(
+        f.session.activeAnnotationEdit?.target,
+        "premise: the driver's edit is open",
+      ).toMatchObject({ kind: "dimension", dimensionId: "dimension_seed" });
+    };
+    return { f, seeded, copy, open };
+  }
+  const undoLabels = (f: Awaited<ReturnType<typeof fixture>>) =>
+    f.session.actionHistory?.undo.map((entry) => entry.label) ?? [];
+
+  test("Cancel and Escape record nothing and keep the tool armed; Save is one action on the driver; Undo restores it bitwise", async () => {
+    const { f, seeded, open } = await routed();
+    open();
+    f.dispatch({
+      type: "sketch.toolPatched",
+      patch: { intent: "cancelAnnotationValue" },
+    });
+    expect(undoLabels(f)).toEqual([]);
+    expect(f.session.definition).toBe(seeded.definition);
+    expect(f.session.activeTool).toBe("dimensionRadius");
+
+    open();
+    f.dispatch(
+      getEscapeEvent({
+        activeCommand: null,
+        activeReferencePickerFieldId: null,
+        selection: f.state.selection,
+        sketchSession: f.session,
+      })!,
+    );
+    expect(undoLabels(f)).toEqual([]);
+    expect(f.session.activeTool).toBe("dimensionRadius");
+
+    open();
+    f.dispatch({ type: "sketch.toolPatched", patch: { value: "3" } });
+    expect(undoLabels(f), "typing records nothing").toEqual([]);
+    f.dispatch({
+      type: "sketch.toolPatched",
+      patch: { intent: "commitAnnotationValue" },
+    });
+    expect(undoLabels(f)).toEqual(["Commit Annotation Value"]);
+    expect(f.session.definition.dimensions).toEqual([
+      expect.objectContaining({
+        dimensionId: "dimension_seed",
+        value: { source: "literal", value: 3 },
+      }),
+    ]);
+    expect(f.session.activeTool, "the tool stays armed").toBe(
+      "dimensionRadius",
+    );
+    f.dispatch({ type: "history.undoRequested" });
+    expect(f.session.definition).toEqual(seeded.definition);
+  });
+
+  test("review R-3: clicking the driver's label during the routed popup records nothing and keeps the tool armed", async () => {
+    const { f, seeded, open } = await routed();
+    open();
+    const label = f.session.activeAnnotationEdit!.target;
+    f.dispatch({ type: "viewport.selectionRequested", target: label });
+    expect(undoLabels(f)).toEqual([]);
+    expect(f.session.definition).toBe(seeded.definition);
+    expect(f.session.activeAnnotationEdit).toBe(null);
+    expect(f.session.activeTool).toBe("dimensionRadius");
+    expect(f.state.selection).toEqual([label]);
+  });
+
+  test("“Add as reference instead” is one action adding a reference on the copy; the driver is unchanged", async () => {
+    const { f, copy, open } = await routed();
+    open();
+    f.dispatch({
+      type: "sketch.toolPatched",
+      patch: { intent: "setSharedDimensionReference", reference: true },
+    });
+    expect(undoLabels(f), "the switch records nothing").toEqual([]);
+    f.dispatch({
+      type: "sketch.toolPatched",
+      patch: { intent: "commitConstraintValue" },
+    });
+    expect(undoLabels(f)).toEqual(["Commit Constraint Value"]);
+    expect(f.session.definition.dimensions).toEqual([
+      expect.objectContaining({
+        dimensionId: "dimension_seed",
+        value: { source: "literal", value: 2 },
+      }),
+      expect.objectContaining({
+        kind: "circleRadius",
+        entityId: (copy as { entityId: string }).entityId,
+        reference: true,
+      }),
+    ]);
+    expect(f.session.activeTool).toBe("dimensionRadius");
+  });
+});

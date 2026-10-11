@@ -104,6 +104,30 @@ export interface SketchConstraintAuthoringState {
 export interface SketchAnnotationEditState {
   target: SketchConstraintRef | SketchDimensionRef;
   pendingValue: MaybeAuthoredValue<number> | null;
+  /**
+   * T16f ([TECH] T16-12): the Dimension tool's picks correspond, through a
+   * healthy mirror, to this driving dimension, so the tool opened its edit
+   * instead of authoring a second driver.
+   */
+  shared?: SketchSharedDimensionEdit;
+}
+
+/**
+ * T16f: a Dimension tool routed to an existing driver. `authoring` is the
+ * tool's placed picks: the tool is re-armed when the edit ends, and "Add as
+ * reference instead" (`addsReference`) commits them as a reference.
+ */
+export interface SketchSharedDimensionEdit {
+  /** "Shared with ‹E› through mirror ‘‹label›’". */
+  readout: string;
+  authoring: SketchConstraintAuthoringState;
+  /**
+   * The tool's value label (the reference's kind, e.g. "Diameter"); null
+   * for a tool with no value (Fix, review R-2): no "Add as reference
+   * instead" is offered then.
+   */
+  referenceLabel: string | null;
+  addsReference: boolean;
 }
 
 /**
@@ -139,6 +163,12 @@ export interface SketchAnnotationDescriptor {
   glyphKind: SketchAnnotationGlyphKind;
   anchor: SketchToolAnchorDescriptor;
   affectedGeometryRefs: readonly PrimitiveRef[];
+  /**
+   * T16f ([TECH] T16-14): a dimension's affected geometry's counterparts
+   * through healthy mirrors (both sides highlight together); absent when
+   * there are none.
+   */
+  linkedGeometryRefs?: readonly PrimitiveRef[];
   constraintDisplay?: SketchConstraintDisplayTargetState;
   label: string;
   detail: string;

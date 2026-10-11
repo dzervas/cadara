@@ -903,10 +903,36 @@ export function ThreeCadViewport({
       cancelFrame: (frameId) => window.cancelAnimationFrame(frameId),
     });
   }, []);
+  // T16f: the session fields the mirror counterparts and the edited
+  // annotation read (not the whole session, which changes per pointer move).
+  const highlightSketchId = sketchSession?.sketchId ?? null;
+  const highlightDefinition = sketchSession?.definition ?? null;
+  const highlightLiveSolve = sketchSession?.liveSolve ?? null;
+  const highlightAnnotationEdit = sketchSession?.activeAnnotationEdit ?? null;
   const annotationHighlightTargets = useMemo(
     () =>
-      getAnnotationHighlightTargets(sketchAnnotations, selection, hoverTarget),
-    [hoverTarget, selection, sketchAnnotations],
+      getAnnotationHighlightTargets(
+        sketchAnnotations,
+        selection,
+        hoverTarget,
+        highlightDefinition
+          ? {
+              sketchId: highlightSketchId,
+              definition: highlightDefinition,
+              liveSolve: highlightLiveSolve,
+              activeAnnotationEdit: highlightAnnotationEdit,
+            }
+          : null,
+      ),
+    [
+      hoverTarget,
+      selection,
+      sketchAnnotations,
+      highlightSketchId,
+      highlightDefinition,
+      highlightLiveSolve,
+      highlightAnnotationEdit,
+    ],
   );
   const selectionFilterRef = useRef(selectionFilter);
   const selectionCatalogRef = useRef(selectionCatalog);

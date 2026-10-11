@@ -1,4 +1,4 @@
-import { test, expect } from "vitest";
+import { describe, test, expect } from "vitest";
 import * as THREE from "three";
 
 import { getPrimitiveRefKey, type PrimitiveRef } from "@/core/editor/schema";
@@ -22,12 +22,20 @@ import {
   createPointDefinition,
   createSplineEntityDefinition,
   getSketchSessionDisplayDefinition,
+  rebuildSessionForDefinition,
 } from "@/domain/editor/sketch-session/internals";
 import {
+  beginSketchAnnotationEdit,
   createNewSketchSession,
+  getSketchAnnotationDescriptors,
   type SketchSessionDisplayRenderable,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
+import {
+  eid,
+  entityRef,
+  mirroredSession,
+} from "@/domain/editor/sketch-mirror.fixtures";
 import { resolveSketchPickStack } from "@/domain/sketch-interaction/pick-stack";
 import {
   createStandardPlaneDefinition,
@@ -38,6 +46,7 @@ import {
   collectProjectedSketchDisplayPointCandidates,
   collectProjectedVertexCandidates,
   createSketchPickCycleWiring,
+  getAnnotationHighlightTargets,
   getSketchPickChooserTargets,
   getSketchPickPreviewTarget,
   isProjectedSketchDisplayPointTarget,
@@ -2656,4 +2665,133 @@ test("T12d: tangent handle in pick-stack — authoredPoint class, after fit poin
     stack[1]!.target,
     "Handle should be second (stack[1]) at equal distance.",
   ).toEqual(handleTarget);
+});
+
+// T16f ([TECH] T16-14), UI lane, seam: `getAnnotationHighlightTargets`, the
+// viewport's annotation highlight list, fed by the session's real
+// descriptors on the shared mirror fixture (the seed circle carries a
+// driving radius). Both sides of a healthy mirror highlight together on
+// dimension hover, selection and edit, and on selecting a participant.
+describe("T16f: linked mirror highlights in the annotation highlight list", () => {
+  function mirrored() {
+    const setup = mirroredSession("free");
+    const session = rebuildSessionForDefinition(setup.session, {
+      definition: {
+        ...setup.session.definition,
+        dimensionIds: ["dimension_seed" as never],
+        dimensions: [
+          {
+            dimensionId: "dimension_seed",
+            kind: "circleRadius",
+            label: "Radius 2",
+            entityId: eid("c"),
+            value: { source: "literal", value: 2 },
+          } as never,
+        ],
+      },
+    });
+    const copy = setup.outputOf("c").outputEntityId;
+    const dimension = {
+      kind: "dimension",
+      sketchId: session.sketchId ?? "sketch_draft",
+      dimensionId: "dimension_seed",
+    } as PrimitiveRef;
+    return { session, copy, dimension };
+  }
+  const keys = (refs: readonly PrimitiveRef[]) =>
+    [...new Set(refs.map(getPrimitiveRefKey))].sort();
+  const failed = (session: SketchSessionState): SketchSessionState => ({
+    ...session,
+    liveSolve: {
+      ...session.liveSolve!,
+      solvedSnapshot: {
+        ...session.liveSolve!.solvedSnapshot,
+        failedDerivationIds: [
+          session.definition.derivedRelationships![0]!.derivationId,
+        ],
+      },
+    },
+  });
+
+  test("dimension hover, selection and edit highlight the seed and its copy", () => {
+    const { session, copy, dimension } = mirrored();
+    const annotations = getSketchAnnotationDescriptors(session);
+    const both = keys([entityRef(session, eid("c")), entityRef(session, copy)]);
+    expect(
+      keys(getAnnotationHighlightTargets(annotations, [], dimension, session)),
+    ).toEqual(both);
+    expect(
+      keys(
+        getAnnotationHighlightTargets(annotations, [dimension], null, session),
+      ),
+    ).toEqual(both);
+    const editing = beginSketchAnnotationEdit(session, dimension as never);
+    expect(
+      keys(getAnnotationHighlightTargets(annotations, [], null, editing)),
+      "the open edit (e.g. a routed Dimension tool) highlights both sides",
+    ).toEqual(both);
+    expect(
+      getAnnotationHighlightTargets(annotations, [], null, session),
+      "control: nothing hovered, selected or edited",
+    ).toEqual([]);
+  });
+
+  test("selecting or hovering a participant highlights its counterpart", () => {
+    const { session, copy } = mirrored();
+    const annotations = getSketchAnnotationDescriptors(session);
+    expect(
+      keys(
+        getAnnotationHighlightTargets(
+          annotations,
+          [entityRef(session, copy)],
+          null,
+          session,
+        ),
+      ),
+    ).toEqual(keys([entityRef(session, eid("c"))]));
+    expect(
+      keys(
+        getAnnotationHighlightTargets(
+          annotations,
+          [],
+          entityRef(session, eid("ab")),
+          session,
+        ),
+      ),
+    ).toEqual(
+      keys([
+        entityRef(
+          session,
+          (
+            session.definition.derivedRelationships![0] as {
+              outputs: {
+                seedEntityId: string;
+                outputEntityId: SketchEntityId;
+              }[];
+            }
+          ).outputs.find((output) => output.seedEntityId === eid("ab"))!
+            .outputEntityId,
+        ),
+      ]),
+    );
+  });
+
+  test("health-gated: a failed mirror links nothing", () => {
+    const { session, copy, dimension } = mirrored();
+    const broken = failed(session);
+    const annotations = getSketchAnnotationDescriptors(broken);
+    expect(
+      keys(
+        getAnnotationHighlightTargets(annotations, [dimension], null, broken),
+      ),
+    ).toEqual(keys([entityRef(session, eid("c"))]));
+    expect(
+      getAnnotationHighlightTargets(
+        annotations,
+        [entityRef(session, copy)],
+        null,
+        broken,
+      ),
+    ).toEqual([]);
+  });
 });
