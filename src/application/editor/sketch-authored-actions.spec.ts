@@ -49,7 +49,10 @@ import { createReferenceImageOperation } from "@/domain/reference-image/operatio
 import { reconstructSplineAggregate } from "@/contracts/sketch/spline-geometry";
 import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
 import type { PrimitiveRef } from "@/core/editor/schema";
-import { getEscapeEvent } from "@/domain/editor/workbench-interactions";
+import {
+  getEnterEvent,
+  getEscapeEvent,
+} from "@/domain/editor/workbench-interactions";
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,
@@ -61,6 +64,7 @@ import {
   mirroredSession,
   pid,
   pointRef,
+  seedDefinition,
 } from "@/domain/editor/sketch-mirror.fixtures";
 
 function line(session: SketchSessionState) {
@@ -3528,6 +3532,171 @@ describe("T16a: Remove Mirror through the authored-action owner", () => {
     });
     expect(f.session.definition).toBe(setup.session.definition);
     expect(f.session.actionAvailability?.canUndo ?? false).toBe(false);
+  });
+});
+
+// T16d (logic lane; seam: the authored-action owner around the real sketch
+// reducer and the workbench Enter/Escape routes). Mirror picks stage only;
+// the popup's Mirror or Enter is one action, "Mirror" (base: the axis pick
+// itself was the action, "Viewport.selection Requested"); Cancel and Escape
+// record nothing and keep the tool armed; one Undo removes the mirror.
+describe("T16d: Mirror creation through the authored-action owner", () => {
+  async function armed() {
+    const base = rebuildSessionForDefinition(
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
+      { definition: seedDefinition() },
+    );
+    const f = await fixture(false, base);
+    f.dispatch({ type: "tool.activated", toolId: "sketchMirror" });
+    const pickAll = () => {
+      for (const id of ["c", "ab", "axis"])
+        f.dispatch({
+          type: "viewport.selectionRequested",
+          target: entityRef(f.session, eid(id)),
+        });
+    };
+    return { f, pickAll, before: projection(f.session) };
+  }
+  const undoLabels = (session: SketchSessionState) =>
+    session.actionHistory?.undo.map((entry) => entry.label) ?? [];
+  const escapeOf = (f: Awaited<ReturnType<typeof fixture>>) =>
+    getEscapeEvent({
+      activeCommand: null,
+      activeReferencePickerFieldId: null,
+      selection: f.state.selection,
+      sketchSession: f.session,
+    })!;
+  const seedsOf = (session: SketchSessionState) =>
+    (session.definition.derivedRelationships ?? []).map((relationship) =>
+      relationship.kind === "mirror" ? relationship.seedEntityIds : null,
+    );
+
+  test("picks record nothing; Cancel and Escape record nothing and keep the tool armed; the popup's Mirror is one 'Mirror' action; Undo removes it in one step, Redo restores it", async () => {
+    const { f, pickAll, before } = await armed();
+    pickAll();
+    expect(projection(f.session), "picking authors nothing").toEqual(before);
+    expect(f.session.toolStagedEntities).toHaveLength(2);
+    expect(f.session.actionAvailability?.canUndo ?? false).toBe(false);
+
+    f.dispatch({
+      type: "sketch.toolPatched",
+      patch: f.session.toolPresentation!.floatingInput!.cancelAction.patch,
+    });
+    pickAll();
+    f.dispatch(escapeOf(f));
+    expect(projection(f.session), "Cancel and Escape author nothing").toEqual(
+      before,
+    );
+    expect(undoLabels(f.session)).toEqual([]);
+    expect(f.session.activeTool, "the tool stays armed").toBe("sketchMirror");
+    expect(f.session.toolStagedEntities).toEqual([]);
+
+    pickAll();
+    f.dispatch({
+      type: "sketch.toolPatched",
+      patch: f.session.toolPresentation!.floatingInput!.submitAction.patch,
+    });
+    expect(seedsOf(f.session)).toEqual([[eid("c"), eid("ab")]]);
+    expect(undoLabels(f.session), "exactly one 'Mirror' action").toEqual([
+      "Mirror",
+    ]);
+    expect(f.session.activeTool).toBe("sketchMirror");
+    const after = projection(f.session);
+    f.dispatch({ type: "history.undoRequested" });
+    expect(projection(f.session), "one Undo removes the mirror").toEqual(
+      before,
+    );
+    expect(f.session.actionAvailability).toEqual({
+      canUndo: false,
+      canRedo: true,
+    });
+    f.dispatch({ type: "history.redoRequested" });
+    expect(projection(f.session)).toEqual(after);
+  });
+
+  test("review A-3: Undo while a mirror is staged re-stages the picks on the restored definition (preview, popup and Enter agree); picks the Undo removed stage nothing and Enter is not consumed", async () => {
+    const popupOf = (f: Awaited<ReturnType<typeof fixture>>) =>
+      f.session.toolPresentation?.floatingInput ?? null;
+    const pick = (
+      f: Awaited<ReturnType<typeof fixture>>,
+      ...ids: SketchEntityId[]
+    ) => {
+      for (const id of ids)
+        f.dispatch({
+          type: "viewport.selectionRequested",
+          target: entityRef(f.session, id),
+        });
+    };
+    // Still forms a mirror after the Undo: s about the axis.
+    {
+      const { f, pickAll } = await armed();
+      pickAll();
+      f.dispatch(getEnterEvent({ sketchSession: f.session })!);
+      pick(f, eid("s"), eid("axis"));
+      const staged = f.session.toolStagedEntities;
+      expect(popupOf(f)?.readout).toBe("1 shape about ‘axis’");
+      f.dispatch({ type: "history.undoRequested" });
+      expect(seedsOf(f.session), "Undo removed the first mirror").toEqual([]);
+      expect(
+        f.session.activeEditTool?.selectedTargets.map((target) =>
+          target.kind === "sketchEntity" ? target.entityId : null,
+        ),
+      ).toEqual([eid("s"), eid("axis")]);
+      expect(
+        f.session.toolStagedEntities.map((draft) =>
+          draft.kind === "spline" ? draft.points : null,
+        ),
+        "re-staged on the restored definition",
+      ).toEqual(
+        staged.map((draft) => (draft.kind === "spline" ? draft.points : null)),
+      );
+      expect(popupOf(f)?.readout).toBe("1 shape about ‘axis’");
+      f.dispatch(getEnterEvent({ sketchSession: f.session })!);
+      expect(seedsOf(f.session)).toEqual([[eid("s")]]);
+      expect(undoLabels(f.session)).toEqual(["Mirror"]);
+    }
+    // No longer forms a mirror: the picked copy of c is gone after the Undo.
+    {
+      const { f, pickAll } = await armed();
+      pickAll();
+      f.dispatch(getEnterEvent({ sketchSession: f.session })!);
+      const mirror = f.session.definition.derivedRelationships![0]!;
+      const copy = mirror.outputs.find(
+        (output) => output.seedEntityId === eid("c"),
+      )!.outputEntityId;
+      pick(f, copy, eid("axis"));
+      expect(popupOf(f)?.readout, "premise: staged").toBe(
+        "1 shape about ‘axis’",
+      );
+      f.dispatch({ type: "history.undoRequested" });
+      expect(f.session.toolStagedEntities, "nothing staged").toEqual([]);
+      expect(popupOf(f), "no popup").toBeNull();
+      expect(f.session.validationMessage).not.toBeNull();
+      expect(
+        getEnterEvent({ sketchSession: f.session }),
+        "Enter is not consumed",
+      ).toBeNull();
+    }
+  });
+
+  test("Enter confirms a staged mirror as one 'Mirror' action; then Escape exits the tool and records nothing", async () => {
+    const { f, pickAll, before } = await armed();
+    expect(
+      getEnterEvent({ sketchSession: f.session }),
+      "nothing staged: Enter is not consumed",
+    ).toBeNull();
+    pickAll();
+    f.dispatch(getEnterEvent({ sketchSession: f.session })!);
+    expect(seedsOf(f.session)).toEqual([[eid("c"), eid("ab")]]);
+    expect(undoLabels(f.session)).toEqual(["Mirror"]);
+    f.dispatch(escapeOf(f));
+    expect(f.session.activeEditTool, "the second Escape exits").toBeNull();
+    expect(undoLabels(f.session)).toEqual(["Mirror"]);
+    f.dispatch({ type: "history.undoRequested" });
+    expect(projection(f.session)).toEqual(before);
   });
 });
 

@@ -4908,6 +4908,15 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       mirrorSession,
       definition.entities[1]!.target,
     );
+    // T16d: the axis pick stages the copy; only the confirm authors it.
+    expect(
+      mirrorSession.definition.derivedRelationships ?? [],
+      "Sketch mirror picks author nothing before the confirm.",
+    ).toEqual([]);
+    expect(mirrorSession.toolStagedEntities).toHaveLength(1);
+    mirrorSession = patchSketchEditToolValue(mirrorSession, {
+      intent: "createMirror",
+    });
 
     const mirrorRelationship =
       mirrorSession.definition.derivedRelationships?.[0];

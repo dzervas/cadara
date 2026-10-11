@@ -16,9 +16,15 @@ import {
   beginSketchTool,
   createNewSketchSession,
   patchSketchConstraintValue,
+  selectSketchEditToolTarget,
   startSketchDraw,
   updateSketchPointer,
 } from "@/domain/editor/sketch-session";
+import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
+import {
+  entityTarget,
+  seedDefinition,
+} from "@/domain/editor/sketch-mirror.fixtures";
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,
@@ -603,4 +609,61 @@ test("T13j: a confirm-only floating input renders no text field", () => {
   expect(render(false), "premise: the default renders the field").toContain(
     "<input",
   );
+});
+
+// T16d ([TECH] T16-8/T16-21), UI lane; seam: the Mirror tool's presentation
+// (built by the real session after each pick) rendered by the viewport
+// feedback layer. The confirm-only popup shows "Mirror", the per-pick
+// readout and Mirror/Cancel, no text field; its layer lets pointer events
+// through except on the popup box itself (pick-through, review A-11).
+test("T16d: the Mirror confirm popup renders per pick and only its own box takes the pointer", () => {
+  const base = rebuildSessionForDefinition(
+    createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
+    { definition: seedDefinition() },
+  );
+  let session = beginSketchTool(base, "sketchMirror");
+  const markups: string[] = [];
+  for (const id of ["c", "ab", "axis"]) {
+    session = selectSketchEditToolTarget(
+      session,
+      entityTarget(id) as PrimitiveRef,
+    );
+    markups.push(
+      renderToStaticMarkup(
+        <SketchViewportFeedbackLayer
+          schema={session.toolPresentation}
+          projections={[
+            { id: "floating-input:sketch-mirror-confirm", x: 300, y: 400 },
+          ]}
+          onPatch={() => undefined}
+        />,
+      ),
+    );
+  }
+  const [one, two, three] = markups;
+  expect(one, "one pick: no popup").not.toContain(
+    "data-sketch-viewport-floating-input",
+  );
+  for (const [markup, readout] of [
+    [two!, "1 shape about \u2018ab\u2019"],
+    [three!, "2 shapes about \u2018axis\u2019"],
+  ] as const) {
+    expect(markup).toContain(
+      'data-sketch-viewport-floating-input="sketch-mirror-confirm"',
+    );
+    expect(markup).toContain(">Mirror<");
+    expect(markup).toContain(`data-floating-input-readout="true">${readout}<`);
+    expect(markup).toContain(">Cancel<");
+    expect(markup, "no text field").not.toContain("<input");
+    expect(
+      markup.match(/pointer-events-auto/g),
+      "only the popup box takes pointer events",
+    ).toHaveLength(1);
+    expect(markup).toContain(
+      '<div class="pointer-events-none absolute inset-0 z-40"><div class="pointer-events-auto ',
+    );
+  }
 });

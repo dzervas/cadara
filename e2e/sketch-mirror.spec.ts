@@ -291,6 +291,25 @@ async function openSearchTool(page: Page, name: string) {
   await search.press("Enter");
 }
 
+/** T16d: the Mirror tool's confirm popup (it shows once the picks form a mirror). */
+const mirrorPopup = (page: Page) =>
+  page.locator('[data-sketch-viewport-floating-input="sketch-mirror-confirm"]');
+/** The undo entries of confirmed mirrors (one per "Mirror" action). */
+const mirrorActions = (page: Page) =>
+  page
+    .locator('[data-history-action-direction="undo"]')
+    .filter({ hasText: /^Mirror$/ });
+
+/** A gliding press: the pointer moves in steps to the button's centre, then clicks. */
+async function glidePress(page: Page, button: ReturnType<Page["locator"]>) {
+  const box = (await button.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, {
+    steps: 10,
+  });
+  await page.mouse.down();
+  await page.mouse.up();
+}
+
 /**
  * The four seeds and the construction axis, mirrored with the Sketch Mirror
  * tool (each seed's body picked, the axis last). Returns the snapshot.
@@ -330,7 +349,17 @@ async function mirrorFourSeeds(workbench: SketchWorkbenchHarness) {
     const at = await hoverUntil(workbench, around, entityTarget(entity.id));
     await workbench.clickViewportAt(at);
   }
+  // T16d: the picks stage the mirror; the popup's Mirror confirms it.
+  await expect(
+    mirrorPopup(page).locator("[data-floating-input-readout]"),
+  ).toHaveText(/^4 shapes about ‘.+’$/, { timeout: 15_000 });
+  await expectStaged(workbench, 5);
+  await glidePress(
+    page,
+    mirrorPopup(page).getByRole("button", { name: "Mirror", exact: true }),
+  );
   await expectStaged(workbench, 9);
+  await expect(mirrorActions(page)).toHaveCount(1, { timeout: 15_000 });
   await page.keyboard.press("Escape");
   await workbench.waitForAnimationFrames(2);
   const mirrored = await snapshot(page);
@@ -697,6 +726,10 @@ test("T16a: select a mirrored line's copy, Mirror panel → Remove mirror: the c
     await workbench.clickViewportAt(
       await hoverUntil(workbench, around, entityTarget(entity.id)),
     );
+  // T16d: the picks stage the mirror; Enter confirms it.
+  await expect(mirrorPopup(page)).toBeVisible({ timeout: 15_000 });
+  await expectStaged(workbench, 2);
+  await page.keyboard.press("Enter");
   await expectStaged(workbench, 3);
   await page.keyboard.press("Escape");
   await workbench.waitForAnimationFrames(2);
@@ -805,6 +838,10 @@ test("T15e: mirror about the X datum axis picked in the viewport; dragging eithe
   // The X datum axis (screen y 480), away from the origin.
   const datum = await hoverUntil(workbench, { x: 1000, y: 480 }, /\.xAxis$/, 4);
   await workbench.clickViewportAt(datum);
+  // T16d: the picks stage the mirror; Enter confirms it.
+  await expect(mirrorPopup(page)).toBeVisible({ timeout: 15_000 });
+  await expectStaged(workbench, 1);
+  await page.keyboard.press("Enter");
   await expectStaged(workbench, 2);
   await page.keyboard.press("Escape");
   await workbench.waitForAnimationFrames(2);
@@ -852,4 +889,141 @@ test("T15e: mirror about the X datum axis picked in the viewport; dragging eithe
   });
   // The datum is still where it was: hoverable at screen y 480.
   await hoverUntil(workbench, { x: 1000, y: 480 }, /\.xAxis$/, 0);
+});
+
+// T16d ([TECH] T16-8/T16-21, review R-1/A-11). Lane: e2e; seam: gliding
+// pointer → pick stack → Mirror staging → confirm popup (Cancel, Enter) →
+// authored history in the workbench. Red on base: the line, picked second as
+// a seed, committed "circle about line" at once.
+test("T16d: mirror a circle and a line picked second: preview, Cancel records nothing, re-pick, Enter is one Mirror action that one Ctrl+Z removes; the popup covers no pick target and a glide over it still picks", async ({
+  page,
+}) => {
+  const workbench = new SketchWorkbenchHarness(page);
+  await openTopSketch(workbench);
+  await workbench.activateTool("Create line geometry.");
+  await placeFreely(workbench, LINE);
+  await expectStaged(workbench, 1);
+  await workbench.activateTool("Create circular geometry.");
+  await placeFreely(workbench, [CIRCLE.centre, CIRCLE.rim]);
+  await expectStaged(workbench, 2);
+  await drawConstructionAxis(workbench, 3);
+  const [line, circle, axis] = (await snapshot(page)).entities;
+  // Hoverable spots on each body, found before the tool is armed.
+  const spots = {
+    circle: await hoverUntil(
+      workbench,
+      { x: 520, y: 222 },
+      entityTarget(circle!.id),
+    ),
+    line: await hoverUntil(
+      workbench,
+      { x: 320, y: 262 },
+      entityTarget(line!.id),
+    ),
+    axis: await hoverUntil(
+      workbench,
+      { x: 800, y: 420 },
+      entityTarget(axis!.id),
+    ),
+  };
+  const canvas = (await workbench.viewport().boundingBox())!;
+  /** A gliding pick (canvas coordinates), optionally by way of `via`. */
+  const pick = async (
+    to: { x: number; y: number },
+    via?: { x: number; y: number },
+  ) => {
+    for (const point of via ? [via, to] : [to])
+      await page.mouse.move(canvas.x + point.x, canvas.y + point.y, {
+        steps: 10,
+      });
+    await workbench.waitForAnimationFrames(2);
+    await page.mouse.down();
+    await page.mouse.up();
+  };
+  const popup = mirrorPopup(page);
+  const readout = popup.locator("[data-floating-input-readout]");
+  const command = () =>
+    page.evaluate(() => window.__cadaraDebug?.getState()?.command ?? "");
+  /** The popup's rect leaves every pick spot (± 6 px) uncovered. */
+  const expectClearOfSpots = async (context: string) => {
+    const box = (await popup.boundingBox())!;
+    for (const [name, spot] of Object.entries(spots)) {
+      const x = canvas.x + spot.x;
+      const y = canvas.y + spot.y;
+      expect(
+        x + 6 < box.x ||
+          box.x + box.width < x - 6 ||
+          y + 6 < box.y ||
+          box.y + box.height < y - 6,
+        `${context}: the popup ${JSON.stringify(box)} leaves the ${name} pick at (${x}, ${y}) uncovered`,
+      ).toBe(true);
+    }
+    return box;
+  };
+
+  await openSearchTool(page, "Sketch Mirror");
+  await pick(spots.circle);
+  await pick(spots.line);
+  // The line is the axis candidate: one shape staged, nothing authored.
+  await expect(readout).toHaveText(/^1 shape about ‘.+’$/, {
+    timeout: 15_000,
+  });
+  await expectStaged(workbench, 3);
+  await expect(mirrorActions(page)).toHaveCount(0);
+  const box = await expectClearOfSpots("after the line pick");
+  // The axis pick glides across the popup first: the popup does not keep it.
+  await pick(spots.axis, {
+    x: box.x - canvas.x + box.width / 2,
+    y: box.y - canvas.y + box.height / 2,
+  });
+  await expect(readout).toHaveText(/^2 shapes about ‘.+’$/, {
+    timeout: 15_000,
+  });
+  await expectClearOfSpots("after the axis pick");
+  await expectStaged(workbench, 3);
+  await expect(mirrorActions(page)).toHaveCount(0);
+
+  // Cancel: nothing recorded, the tool stays armed.
+  await glidePress(page, popup.getByRole("button", { name: "Cancel" }));
+  await expect(popup).toBeHidden({ timeout: 15_000 });
+  await workbench.waitForAnimationFrames(4);
+  await expectStaged(workbench, 3);
+  await expect(mirrorActions(page)).toHaveCount(0);
+  expect(
+    (await snapshot(page)).derivedRelationships,
+    "Cancel authors no mirror",
+  ).toEqual([]);
+  expect(await command(), "the Mirror tool stays armed").toBe("sketchMirror");
+
+  // Re-pick, then Enter: one Mirror action of both seeds.
+  await pick(spots.circle);
+  await pick(spots.line);
+  await pick(spots.axis);
+  await expect(readout).toHaveText(/^2 shapes about ‘.+’$/, {
+    timeout: 15_000,
+  });
+  await page.keyboard.press("Enter");
+  await expect(mirrorActions(page)).toHaveCount(1, { timeout: 15_000 });
+  await expectStaged(workbench, 5);
+  await expect(popup).toBeHidden();
+  const mirrored = await snapshot(page);
+  expect(
+    mirrorOf(mirrored).outputs.map((output) => output.seedEntityId),
+    "one mirror of the circle and the line",
+  ).toEqual([circle!.id, line!.id]);
+  expect(mirrorOf(mirrored).mirrorReference).toEqual({
+    kind: "lineEntity",
+    entityId: axis!.id,
+  });
+  expectMirrorImage(mirrored, "confirmed");
+
+  // One Ctrl+Z removes the mirror.
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Control+z");
+  await expectStaged(workbench, 3);
+  expect(
+    (await snapshot(page)).derivedRelationships,
+    "Undo removes the mirror",
+  ).toEqual([]);
+  await expect(mirrorActions(page)).toHaveCount(0);
 });

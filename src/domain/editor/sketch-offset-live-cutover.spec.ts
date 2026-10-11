@@ -6699,8 +6699,10 @@ function runEditTool(
     return patchSketchEditToolValue(next, { intent: "commitOffset" });
   }
   if (value !== null) next = patchSketchEditToolValue(next, { value });
+  // T16d: the Mirror tool's confirm is its own intent.
   return patchSketchEditToolValue(next, {
-    intent: "commitSketchEditOperator",
+    intent:
+      toolId === "sketchMirror" ? "createMirror" : "commitSketchEditOperator",
   });
 }
 
@@ -8607,12 +8609,17 @@ describe("T15b: failed mirrors in the session and the G19 consumers", () => {
       sketchId: tool.sketchId!,
       entityId: seeds[0]!,
     } as never);
-    const mirrored = selectSketchEditToolTarget(tool, {
+    const staged = selectSketchEditToolTarget(tool, {
       kind: "sketchDatumReference",
       sketchId: tool.sketchId!,
       datumId: "yAxis",
       geometryKind: "lineSegment",
     } as never);
+    // T16d: the datum pick stages the mirror; the confirm authors it.
+    expect(staged.definition).toBe(session.definition);
+    const mirrored = patchSketchEditToolValue(staged, {
+      intent: "createMirror",
+    });
     const relationship = mirrored.definition.derivedRelationships!.find(
       (candidate) => candidate.kind === "mirror",
     )!;
@@ -8782,12 +8789,16 @@ describe("T15b O-1: invalid feedback for a failed mirror", () => {
       sketchId: tool.sketchId!,
       entityId: seeds[0]!,
     } as never);
-    const mirrored = selectSketchEditToolTarget(tool, {
-      kind: "sketchDatumReference",
-      sketchId: tool.sketchId!,
-      datumId: "yAxis",
-      geometryKind: "lineSegment",
-    } as never);
+    // T16d: the datum pick stages the mirror; the confirm authors it.
+    const mirrored = patchSketchEditToolValue(
+      selectSketchEditToolTarget(tool, {
+        kind: "sketchDatumReference",
+        sketchId: tool.sketchId!,
+        datumId: "yAxis",
+        geometryKind: "lineSegment",
+      } as never),
+      { intent: "createMirror" },
+    );
     const relationship = mirrored.definition.derivedRelationships!.find(
       (candidate) => candidate.kind === "mirror",
     )!;

@@ -18,6 +18,7 @@ import {
 import {
   beginSketchTool,
   createNewSketchSession,
+  patchSketchEditToolValue,
   selectSketchEditToolTarget,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
@@ -171,7 +172,10 @@ export type MirrorVariant =
   | "datumAxis"
   | "fixedSeed";
 
-/** The seeds mirrored by the Mirror tool about the line axis (or the X datum). */
+/**
+ * The seeds mirrored by the Mirror tool about the line axis (or the X
+ * datum): seeds picked, the axis picked last, then confirmed (T16d).
+ */
 export function mirroredSession(variant: MirrorVariant = "free") {
   const constraints: ConstraintDefinition[] =
     variant === "horizontalAxis"
@@ -206,7 +210,7 @@ export function mirroredSession(variant: MirrorVariant = "free") {
   let tool = beginSketchTool(base, "sketchMirror");
   for (const seed of ["ab", "c", "s", "ar"])
     tool = selectSketchEditToolTarget(tool, entityTarget(seed) as never);
-  const session = selectSketchEditToolTarget(
+  const staged = selectSketchEditToolTarget(
     tool,
     (variant === "datumAxis"
       ? {
@@ -217,6 +221,9 @@ export function mirroredSession(variant: MirrorVariant = "free") {
         }
       : entityTarget("axis")) as never,
   );
+  // T16d: the picks only stage the mirror; the confirm authors it.
+  if (staged.definition !== base.definition) throw new Error("auto-applied");
+  const session = patchSketchEditToolValue(staged, { intent: "createMirror" });
   const relationship = session.definition.derivedRelationships!.find(
     (candidate) => candidate.kind === "mirror",
   )!;

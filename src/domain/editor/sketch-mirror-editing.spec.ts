@@ -33,11 +33,18 @@ import {
   createNewSketchSession,
   deleteSelectedSketchGeometry,
   finishSketchGeometryDrag,
+  isSketchMirrorReady,
   patchSketchEditToolValue,
   selectSketchEditToolTarget,
+  updateSketchEditToolHover,
   updateSketchGeometryDrag,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
+import { MIRROR_DATUM_AXIS_ORDER_MESSAGE } from "@/domain/editor/sketch-session/editing";
+import {
+  getEnterEvent,
+  getEscapeEvent,
+} from "@/domain/editor/workbench-interactions";
 import { buildSketchVectorExportModelFromSnapshot } from "@/domain/export/sketch-vector-export-model";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
@@ -557,9 +564,10 @@ describe("T15d D9′: one-way outputs and failed mirrors' copies are not drag ta
       tool,
       entityRef(tool, patternOutput.outputEntityId),
     );
-    const mirrored = selectSketchEditToolTarget(
-      tool,
-      entityRef(tool, eid("axis")),
+    // T16d: the axis pick stages the mirror; the confirm authors it.
+    const mirrored = patchSketchEditToolValue(
+      selectSketchEditToolTarget(tool, entityRef(tool, eid("axis"))),
+      { intent: "createMirror" },
     );
     const mirror = mirrored.definition.derivedRelationships!.find(
       (relationship) => relationship.kind === "mirror",
@@ -1328,8 +1336,10 @@ describe("T16c: a broken relationship's copies are named by label at every non-a
       return patchSketchEditToolValue(next, { intent: "commitOffset" });
     }
     if (value !== null) next = patchSketchEditToolValue(next, { value });
+    // T16d: the Mirror tool's confirm is its own intent.
     return patchSketchEditToolValue(next, {
-      intent: "commitSketchEditOperator",
+      intent:
+        toolId === "sketchMirror" ? "createMirror" : "commitSketchEditOperator",
     });
   };
   /** The mirror's axis deleted, with a free line and a pattern of the first copy. */
@@ -1796,5 +1806,472 @@ describe("T16c: a broken relationship's copies are named by label at every non-a
       ...texts,
       unresolved.validationMessage,
     ]);
+  });
+});
+
+// T16d ([TECH] T16-8/T16-21, review R-1/A-2/A-11). Logic lane; seam: the
+// sketch session's Mirror tool (`selectSketchEditToolTarget`,
+// `updateSketchEditToolHover`, `patchSketchEditToolValue`) and the workbench
+// Enter/Escape routes (`getEnterEvent`, `getEscapeEvent`). Every pick
+// re-stages the preview (the last line or datum is the axis candidate, the
+// earlier picks are seeds); only Confirm or Enter authors the mirror.
+describe("T16d: Mirror creation preview, cancel and confirm", () => {
+  type Draft = SketchSessionState["toolStagedEntities"][number];
+  const datum = (datumId: "xAxis" | "yAxis") =>
+    ({
+      kind: "sketchDatumReference",
+      sketchId: "sketch_draft",
+      datumId,
+      geometryKind: "lineSegment",
+    }) as never;
+  /**
+   * The fixture's seeds plus a free line `de` (d (4, 6) → e (5, 8)) and,
+   * with `tiny`, a line shorter than τ (which makes the sketch invalid).
+   */
+  function baseSession(tiny = false) {
+    const definition = seedDefinition();
+    const a = definition.points.find((entry) => entry.pointId === pid("a"))!;
+    const ab = definition.entities.find(
+      (entry) => entry.entityId === eid("ab"),
+    )!;
+    const at = (id: string, position: P) => ({
+      ...a,
+      pointId: pid(id),
+      label: id,
+      target: { ...a.target, pointId: pid(id) },
+      position: [position[0], position[1]] as [number, number],
+    });
+    const lineOf = (id: string, start: string, end: string) => ({
+      ...ab,
+      entityId: eid(id),
+      label: id,
+      target: entityTarget(id),
+      startPointId: pid(start),
+      endPointId: pid(end),
+    });
+    const points = [
+      at("d", [4, 6]),
+      at("e", [5, 8]),
+      ...(tiny ? [at("t0", [30, 9]), at("t1", [30.0005, 9])] : []),
+    ];
+    const entities = [
+      lineOf("de", "d", "e"),
+      ...(tiny ? [lineOf("tiny", "t0", "t1")] : []),
+    ];
+    return rebuildSessionForDefinition(
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
+      {
+        definition: {
+          ...definition,
+          pointIds: [
+            ...definition.pointIds,
+            ...points.map((entry) => entry.pointId),
+          ],
+          points: [...definition.points, ...points],
+          entityIds: [
+            ...definition.entityIds,
+            ...entities.map((entry) => entry.entityId),
+          ],
+          entities: [...definition.entities, ...entities],
+        } as SketchDefinition,
+      },
+    );
+  }
+  /** The Mirror tool armed on `base`, then each pick in order (sessions after each pick). */
+  function picks(base: SketchSessionState, ...targets: unknown[]) {
+    const sessions: SketchSessionState[] = [];
+    let session = beginSketchTool(base, "sketchMirror");
+    for (const target of targets) {
+      session = selectSketchEditToolTarget(session, target as never);
+      sessions.push(session);
+    }
+    return sessions;
+  }
+  const popup = (session: SketchSessionState) =>
+    session.toolPresentation?.floatingInput ?? null;
+  const prompt = (session: SketchSessionState) =>
+    session.toolPresentation?.prompts[0]?.text;
+  const enter = (session: SketchSessionState) =>
+    getEnterEvent({ sketchSession: session });
+  const escape = (session: SketchSessionState) =>
+    getEscapeEvent({
+      activeCommand: null,
+      activeReferencePickerFieldId: null,
+      selection: [],
+      sketchSession: session,
+    });
+  const confirm = (session: SketchSessionState) =>
+    patchSketchEditToolValue(session, { intent: "createMirror" });
+  const mirrors = (session: SketchSessionState) =>
+    (session.definition.derivedRelationships ?? []).filter(
+      (relationship) => relationship.kind === "mirror",
+    );
+  /** Reflection of `point` about the line through `a` and `b`. */
+  const reflectAbout = (point: P, a: P, b: P): P => {
+    const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const u = [(b[0] - a[0]) / length, (b[1] - a[1]) / length] as const;
+    const along = (point[0] - a[0]) * u[0] + (point[1] - a[1]) * u[1];
+    return [
+      2 * (a[0] + along * u[0]) - point[0],
+      2 * (a[1] + along * u[1]) - point[1],
+    ];
+  };
+  const expectNear = (actual: P, expected: P, message: string) =>
+    expect(distance(actual, expected), message).toBeLessThan(1e-9);
+  /** The staged draft's defining points (circle: centre; line: ends). */
+  const draftPoints = (draft: Draft): P[] =>
+    draft.kind === "circle"
+      ? [draft.center as P]
+      : draft.kind === "line"
+        ? [draft.start as P, draft.end as P]
+        : [];
+  const readyPopup = (readout: string) => ({
+    id: "sketch-mirror-confirm",
+    label: "Mirror",
+    value: null,
+    readout,
+    confirmOnly: true,
+    confirmLabel: "Mirror",
+    cancelLabel: "Cancel",
+    placement: "target",
+    anchor: expect.objectContaining({
+      kind: "sketchPoint",
+      offset: { x: -110, y: 140 },
+    }),
+    submitAction: { type: "patch", patch: { intent: "createMirror" } },
+    cancelAction: {
+      type: "patch",
+      patch: { intent: "cancelSketchEditOperator" },
+    },
+  });
+  /** Nothing staged or offered: the refusal text, no popup, Enter and Confirm author nothing. */
+  function expectRefusedAtPreview(
+    base: SketchSessionState,
+    session: SketchSessionState,
+    message: string,
+  ) {
+    expect(session.validationMessage).toBe(message);
+    expect(session.definition, "nothing authored").toBe(base.definition);
+    expect(session.toolStagedEntities, "nothing staged").toEqual([]);
+    expect(popup(session), "no confirm popup").toBeNull();
+    expect(isSketchMirrorReady(session)).toBe(false);
+    expect(enter(session), "Enter is not consumed").toBeNull();
+    const confirmed = confirm(session);
+    expect(confirmed.definition, "Confirm authors nothing").toBe(
+      base.definition,
+    );
+    expect(confirmed.validationMessage).toBe(message);
+  }
+
+  test("R-1 [circle, line, axis] (red on base: the line pick committed 'circle about line'): every pick re-stages, nothing is authored before Confirm; Confirm is one mirror of both seeds; the tool stays armed", () => {
+    const base = baseSession();
+    const [first, second, third] = picks(
+      base,
+      entityTarget("c"),
+      entityTarget("ab"),
+      entityTarget("axis"),
+    );
+    for (const [label, session] of [
+      ["circle", first!],
+      ["circle, line", second!],
+      ["circle, line, axis", third!],
+    ] as const)
+      expect(session.definition, `${label}: nothing authored`).toBe(
+        base.definition,
+      );
+    expect(first!.toolStagedEntities).toEqual([]);
+    expect(popup(first!)).toBeNull();
+
+    // The line is the axis candidate: the circle's copy about ab is staged.
+    expect(second!.validationMessage).toBeNull();
+    expect(second!.toolStagedEntities.map((draft) => draft.kind)).toEqual([
+      "circle",
+    ]);
+    expectNear(
+      draftPoints(second!.toolStagedEntities[0]!)[0]!,
+      reflectAbout([6, 3], [1, 1], [3, 2]),
+      "the copy of c about ab",
+    );
+    expect(popup(second!)).toEqual(readyPopup("1 shape about ‘ab’"));
+    expect(prompt(second!)).toBe(
+      "Mirror 1 shape about ‘ab’ — Enter or Mirror to confirm",
+    );
+    expect(enter(second!)).toEqual({
+      type: "sketch.toolPatched",
+      patch: { intent: "createMirror" },
+    });
+
+    // The axis pick re-stages: ab is now a seed, the axis the candidate.
+    expect(third!.toolStagedEntities.map((draft) => draft.kind)).toEqual([
+      "circle",
+      "line",
+    ]);
+    expect(third!.toolStagedEntities.flatMap(draftPoints)).toEqual([
+      reflect([6, 3]),
+      reflect([1, 1]),
+      reflect([3, 2]),
+    ]);
+    expect(popup(third!)).toEqual(readyPopup("2 shapes about ‘axis’"));
+    // Review A-11: below every curve (lowest: the circle copy, y = −4) and
+    // centred under the copies (x 1…7), growing down from there.
+    expect(popup(third!)!.anchor).toEqual({
+      kind: "sketchPoint",
+      point: [4, -4],
+      offset: { x: -110, y: 140 },
+    });
+    // Hovering keeps the staged popup (the tool is still collecting picks).
+    expect(
+      popup(updateSketchEditToolHover(third!, entityTarget("u"))),
+      "a hover keeps the popup",
+    ).toEqual(popup(third!));
+
+    const done = confirm(third!);
+    expect(mirrors(done)).toHaveLength(1);
+    const [mirror] = mirrors(done);
+    if (mirror?.kind !== "mirror") throw new Error("mirror");
+    expect(mirror.seedEntityIds).toEqual([eid("c"), eid("ab")]);
+    expect(mirror.mirrorReference).toEqual({
+      kind: "lineEntity",
+      entityId: eid("axis"),
+    });
+    // The committed copies are the staged preview.
+    const copyPoints = mirror.outputs.flatMap((output) => {
+      const copy = entity(done, output.outputEntityId);
+      return copy.kind === "circle"
+        ? [position(done, copy.centerPointId) as P]
+        : copy.kind === "lineSegment"
+          ? [
+              position(done, copy.startPointId) as P,
+              position(done, copy.endPointId) as P,
+            ]
+          : [];
+    });
+    expect(copyPoints).toEqual(third!.toolStagedEntities.flatMap(draftPoints));
+    expect(done.liveSolve?.accepted).toBe(true);
+    // The tool stays armed with no picks; nothing is staged.
+    expect(done.activeTool).toBe("sketchMirror");
+    expect(done.activeEditTool?.selectedTargets).toEqual([]);
+    expect(done.toolStagedEntities).toEqual([]);
+    expect(done.validationMessage).toBeNull();
+    expect(popup(done)).toBeNull();
+    expect(enter(done)).toBeNull();
+  });
+
+  test("R-1 [line, line, axis] (red on base): two line seeds, one mirror after Confirm, none before", () => {
+    const base = baseSession();
+    const [first, second, third] = picks(
+      base,
+      entityTarget("ab"),
+      entityTarget("de"),
+      entityTarget("axis"),
+    );
+    for (const session of [first!, second!, third!])
+      expect(session.definition).toBe(base.definition);
+    expect(popup(second!)?.readout).toBe("1 shape about ‘de’");
+    expect(second!.toolStagedEntities.flatMap(draftPoints)).toHaveLength(2);
+    expectNear(
+      draftPoints(second!.toolStagedEntities[0]!)[0]!,
+      reflectAbout([1, 1], [4, 6], [5, 8]),
+      "the copy of ab about de",
+    );
+    expect(popup(third!)?.readout).toBe("2 shapes about ‘axis’");
+    expect(third!.toolStagedEntities.flatMap(draftPoints)).toEqual(
+      [
+        [1, 1],
+        [3, 2],
+        [4, 6],
+        [5, 8],
+      ].map((point) => reflect(point as unknown as P)),
+    );
+    const done = confirm(third!);
+    expect(
+      mirrors(done).map((mirror) =>
+        mirror.kind === "mirror"
+          ? [mirror.seedEntityIds, mirror.mirrorReference]
+          : null,
+      ),
+    ).toEqual([
+      [[eid("ab"), eid("de")], { kind: "lineEntity", entityId: eid("axis") }],
+    ]);
+  });
+
+  test("re-staging: picking the axis candidate again drops it (the previous line becomes the candidate); picking a seed again drops its copy", () => {
+    const base = baseSession();
+    const [, , staged, axisOff, seedOff] = picks(
+      base,
+      entityTarget("c"),
+      entityTarget("ab"),
+      entityTarget("axis"),
+      entityTarget("axis"),
+      entityTarget("c"),
+    );
+    expect(popup(staged!)?.readout).toBe("2 shapes about ‘axis’");
+    expect(popup(axisOff!)?.readout).toBe("1 shape about ‘ab’");
+    expect(axisOff!.toolStagedEntities.map((draft) => draft.kind)).toEqual([
+      "circle",
+    ]);
+    // Only ab is left: no seed, so nothing is staged.
+    expectRefusedAtPreview(
+      base,
+      seedOff!,
+      "Select seed sketch entities, then a mirror axis line or sketch axis.",
+    );
+  });
+
+  test("Cancel and Escape drop the picks and author nothing; the tool stays armed; a second Escape exits", () => {
+    const base = baseSession();
+    const staged = picks(
+      base,
+      entityTarget("c"),
+      entityTarget("ab"),
+      entityTarget("axis"),
+    ).at(-1)!;
+    const escapeEvent = escape(staged);
+    expect(escapeEvent, "Escape cancels the staged mirror").toEqual({
+      type: "sketch.toolPatched",
+      patch: { intent: "cancelSketchEditOperator" },
+    });
+    const viaPopup = patchSketchEditToolValue(
+      staged,
+      popup(staged)!.cancelAction.patch,
+    );
+    const viaEscape = patchSketchEditToolValue(
+      staged,
+      (escapeEvent as { patch: Record<string, unknown> }).patch,
+    );
+    for (const [label, cancelled] of [
+      ["Cancel", viaPopup],
+      ["Escape", viaEscape],
+    ] as const) {
+      expect(cancelled.definition, `${label}: nothing authored`).toBe(
+        base.definition,
+      );
+      expect(cancelled.activeTool, `${label}: the tool stays armed`).toBe(
+        "sketchMirror",
+      );
+      expect(cancelled.activeEditTool?.selectedTargets).toEqual([]);
+      expect(cancelled.toolStagedEntities).toEqual([]);
+      expect(cancelled.validationMessage).toBeNull();
+      expect(popup(cancelled)).toBeNull();
+      expect(enter(cancelled)).toBeNull();
+      expect(escape(cancelled), `${label}: the next Escape exits`).toEqual({
+        type: "sketch.activeToolCleared",
+      });
+    }
+    // The picks restart from scratch: one pick stages nothing.
+    const again = selectSketchEditToolTarget(
+      viaPopup,
+      entityTarget("ab") as never,
+    );
+    expect(again.toolStagedEntities).toEqual([]);
+    expect(again.activeEditTool?.selectedTargets).toHaveLength(1);
+  });
+
+  test("review R-1: an origin or sketch-point pick on a staged mirror shows its refusal next to the unchanged popup (red on the first T16d tree: popup hidden while Enter still confirmed); a hover keeps it; Enter gives the same mirror", () => {
+    const base = baseSession();
+    const staged = picks(
+      base,
+      entityTarget("c"),
+      entityTarget("ab"),
+      entityTarget("axis"),
+    ).at(-1)!;
+    const unsupported =
+      "Sketch mirror supports sketch entities and needs a line or sketch axis as the final mirror axis.";
+    for (const [label, target] of [
+      ["origin", datum("origin" as never)],
+      [
+        "sketch point",
+        { kind: "sketchPoint", sketchId: "sketch_draft", pointId: pid("u") },
+      ],
+    ] as const) {
+      const refused = selectSketchEditToolTarget(staged, target as never);
+      expect(refused.validationMessage, label).toBe(unsupported);
+      expect(refused.definition, `${label}: nothing authored`).toBe(
+        base.definition,
+      );
+      expect(
+        refused.activeEditTool?.selectedTargets,
+        `${label}: the picks stay`,
+      ).toEqual(staged.activeEditTool?.selectedTargets);
+      expect(refused.toolStagedEntities, `${label}: still staged`).toBe(
+        staged.toolStagedEntities,
+      );
+      expect(popup(refused), `${label}: the popup stays as it was`).toEqual(
+        popup(staged),
+      );
+      expect(popup(refused)?.readout).toBe("2 shapes about ‘axis’");
+      expect(
+        refused.toolPresentation?.validation?.map((entry) => entry.message),
+        `${label}: the refusal shows next to it`,
+      ).toEqual([unsupported]);
+      expect(
+        popup(updateSketchEditToolHover(refused, entityTarget("u"))),
+        `${label}: a hover keeps the popup`,
+      ).toEqual(popup(staged));
+      expect(enter(refused)).toEqual({
+        type: "sketch.toolPatched",
+        patch: { intent: "createMirror" },
+      });
+      /** Seeds, axis and copy positions of the confirmed mirrors (ids are fresh per commit). */
+      const confirmed = (session: SketchSessionState) => {
+        const done = confirm(session);
+        return mirrors(done).map((mirror) =>
+          mirror.kind === "mirror"
+            ? [
+                mirror.seedEntityIds,
+                mirror.mirrorReference,
+                mirror.outputs.map((output) =>
+                  output.outputPointIds.map((pointId) =>
+                    position(done, pointId),
+                  ),
+                ),
+              ]
+            : null,
+        );
+      };
+      expect(
+        confirmed(refused),
+        `${label}: Enter/Confirm gives the same mirror as before the pick`,
+      ).toEqual(confirmed(staged));
+      expect(confirmed(refused)).toHaveLength(1);
+    }
+  });
+
+  test("refusals at preview keep today's texts: a non-line last pick, an axis shorter than τ, a sketch axis picked before the seeds; a datum axis picked last stages and confirms", () => {
+    const base = baseSession();
+    expectRefusedAtPreview(
+      base,
+      picks(base, entityTarget("c"), entityTarget("ab"), entityTarget("s")).at(
+        -1,
+      )!,
+      "Sketch mirror needs a line segment or a sketch axis as the final selected mirror axis.",
+    );
+    const withTiny = baseSession(true);
+    expectRefusedAtPreview(
+      withTiny,
+      picks(withTiny, entityTarget("ab"), entityTarget("tiny")).at(-1)!,
+      "The mirror axis is shorter than the modeling tolerance; pick a longer line or a sketch axis.",
+    );
+    expectRefusedAtPreview(
+      base,
+      picks(base, datum("xAxis"), entityTarget("ab")).at(-1)!,
+      MIRROR_DATUM_AXIS_ORDER_MESSAGE,
+    );
+    const onDatum = picks(base, entityTarget("ab"), datum("xAxis")).at(-1)!;
+    expect(onDatum.definition).toBe(base.definition);
+    expect(popup(onDatum)?.readout).toBe("1 shape about the sketch X axis");
+    expect(onDatum.toolStagedEntities.flatMap(draftPoints)).toEqual([
+      reflect([1, 1]),
+      reflect([3, 2]),
+    ]);
+    const done = confirm(onDatum);
+    expect(
+      mirrors(done).map((mirror) =>
+        mirror.kind === "mirror" ? mirror.mirrorReference : null,
+      ),
+    ).toEqual([{ kind: "sketchDatum", datum: "xAxis" }]);
   });
 });
