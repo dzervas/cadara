@@ -93,6 +93,13 @@ test("T15d: dragging a mirror copy's end with a gliding pointer moves its seed a
   await search.press("Enter");
   await workbench.clickViewportAt({ x: 490, y: 270 });
   await workbench.clickViewportAt({ x: 800, y: 420 });
+  // T16d: the picks stage the mirror; Enter confirms it.
+  await expect(
+    page.locator(
+      '[data-sketch-viewport-floating-input="sketch-mirror-confirm"]',
+    ),
+  ).toBeVisible({ timeout: 10_000 });
+  await page.keyboard.press("Enter");
   await expect
     .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
     .toContain("3 entities staged");

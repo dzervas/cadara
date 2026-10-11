@@ -71,7 +71,11 @@ export interface SketchSelectionCycleContext {
   readonly key: string;
 }
 
-/** Edit tools whose click acts at once (Trim) or on its completing pick. */
+/**
+ * Edit tools with no repeated-click cycle: their click acts at once (Trim)
+ * or on its completing pick (Extend, Split); Sketch Mirror (T16d) stages
+ * every pick and keeps `none` so that picking a target again unpicks it.
+ */
 const IMMEDIATE_ACTION_EDIT_TOOLS = new Set([
   "trim",
   "sketchExtend",

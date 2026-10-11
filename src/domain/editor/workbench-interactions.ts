@@ -17,6 +17,7 @@ import {
   getActiveSketchStyleToolId,
   isSketchConstructionSelected,
   isSketchMergePointsReady,
+  isSketchMirrorReady,
   type SketchAuthoringToolId,
   type SketchSessionStatus,
 } from "@/domain/editor/sketch-session";
@@ -95,8 +96,20 @@ export function getEscapeEvent(
     };
   }
 
-  // Drawing tools take Escape in steps (T11-D10); edit, constraint and
-  // special-mode tools keep the single-Escape exit.
+  // T16d: Escape drops a Mirror selection (its staged preview) and keeps
+  // the tool armed, as Cancel does; the next Escape exits (T11-D10).
+  if (
+    state.sketchSession?.activeEditTool?.toolId === "sketchMirror" &&
+    state.sketchSession.activeEditTool.selectedTargets.length > 0
+  ) {
+    return {
+      type: "sketch.toolPatched",
+      patch: { intent: "cancelSketchEditOperator" },
+    };
+  }
+
+  // Drawing tools take Escape in steps (T11-D10); other edit, constraint
+  // and special-mode tools keep the single-Escape exit.
   if (
     state.sketchSession?.activeTool &&
     isRegisteredSketchToolId(state.sketchSession.activeTool)
@@ -136,7 +149,8 @@ export function getEscapeEvent(
 
 /**
  * Enter ends a Line chain or finalizes a viable fit-point draft, or confirms
- * a ready Merge Points (T13j); otherwise it is not consumed (T11-D10).
+ * a ready Merge Points (T13j) or a staged Mirror (T16d); otherwise it is not
+ * consumed (T11-D10).
  */
 export function getEnterEvent(
   state: Pick<EditorViewState, "sketchSession">,
@@ -145,6 +159,9 @@ export function getEnterEvent(
 
   if (session && isSketchMergePointsReady(session))
     return { type: "sketch.toolPatched", patch: { intent: "mergePoints" } };
+
+  if (session && isSketchMirrorReady(session))
+    return { type: "sketch.toolPatched", patch: { intent: "createMirror" } };
 
   return session?.activeTool &&
     isRegisteredSketchToolId(session.activeTool) &&

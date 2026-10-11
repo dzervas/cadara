@@ -11,6 +11,7 @@ import type {
 import { stableJsonValue } from "@/contracts/modeling/authored-document-serialization";
 import {
   pruneSketchAnnotationContext,
+  restageSketchMirrorTool,
   withoutSketchAnnotationWheel,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
@@ -176,15 +177,17 @@ function actionLabel(event: EditorEvent, before: EditorState) {
           ? "Zero Tangent"
           : event.patch.intent === "mergePoints"
             ? "Merge Points"
-            : event.patch.intent === "setDimensionAnnotationPlacement"
-              ? "Move Dimension Label"
-              : event.patch.intent === "setConstraintAnnotationPlacement"
-                ? "Move Constraint Label"
-                : typeof event.patch.intent === "string"
-                  ? event.patch.intent
-                      .replace(/([A-Z])/g, " $1")
-                      .replace(/^./, (value) => value.toUpperCase())
-                  : "Update Sketch";
+            : event.patch.intent === "createMirror"
+              ? "Mirror"
+              : event.patch.intent === "setDimensionAnnotationPlacement"
+                ? "Move Dimension Label"
+                : event.patch.intent === "setConstraintAnnotationPlacement"
+                  ? "Move Constraint Label"
+                  : typeof event.patch.intent === "string"
+                    ? event.patch.intent
+                        .replace(/([A-Z])/g, " $1")
+                        .replace(/^./, (value) => value.toUpperCase())
+                    : "Update Sketch";
     // A committing Escape or Enter is a finalized spline (T11-D10).
     case "sketch.pointerReleased":
     case "sketch.escapeRequested":
@@ -551,7 +554,11 @@ export class SketchAuthoredActions {
         restored.data &&
         "definition" in restored.data
       ) {
-        const session = restoreAuthoredSession(state.session, restored);
+        // T16d review A-3: a Mirror selection re-stages on the restored
+        // definition (its preview, popup and Enter agree at once).
+        const session = restageSketchMirrorTool(
+          restoreAuthoredSession(state.session, restored),
+        );
         restoreAfterReducer(before, result, {
           ...state,
           selection: [],

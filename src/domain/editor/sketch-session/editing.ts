@@ -1206,6 +1206,178 @@ export function isSketchMergePointsReady(session: SketchSessionState) {
   );
 }
 
+/**
+ * T16d ([TECH] T16-8/T16-21): what a ready Mirror selection reads as: "2
+ * shapes about ‘axis’" (the last pick is the axis candidate, the earlier
+ * picks are the seeds).
+ */
+function getSketchMirrorReadout(
+  session: SketchSessionState,
+  tool: SketchEditToolState,
+) {
+  const axis = tool.selectedTargets.at(-1);
+  const seeds = tool.selectedTargets.length - 1;
+  const axisLabel =
+    axis?.kind === "sketchDatumReference"
+      ? axis.datumId === "xAxis"
+        ? "the sketch X axis"
+        : "the sketch Y axis"
+      : `‘${
+          session.definition.entities.find(
+            (entity) =>
+              axis?.kind === "sketchEntity" &&
+              entity.entityId === axis.entityId,
+          )?.label ?? ""
+        }’`;
+  return `${seeds} ${seeds === 1 ? "shape" : "shapes"} about ${axisLabel}`;
+}
+
+/**
+ * T16d (review A-11): the Mirror confirm popup sits below every sketch
+ * curve and the staged copies (it grows up from its anchor, its top edge
+ * at least 8 px below the lowest one), centred under the copies, so it
+ * covers no geometry that can still be picked in the sketch's view.
+ */
+function getSketchMirrorConfirmAnchor(
+  session: SketchSessionState,
+  previewEntities: readonly SketchDraftEntity[],
+) {
+  const positions = new Map(
+    session.definition.points.map((point) => [point.pointId, point.position]),
+  );
+  const lows = session.definition.points.map((point) => point.position[1]);
+  for (const entity of session.definition.entities) {
+    if (entity.kind === "circle")
+      lows.push(positions.get(entity.centerPointId)![1] - entity.radius);
+    if (entity.kind === "arc") {
+      const centre = positions.get(entity.centerPointId)!;
+      const start = positions.get(entity.startPointId)!;
+      lows.push(
+        centre[1] - Math.hypot(start[0] - centre[0], start[1] - centre[1]),
+      );
+    }
+  }
+  const xs: number[] = [];
+  for (const preview of previewEntities) {
+    const points =
+      preview.kind === "line"
+        ? [preview.start, preview.end]
+        : preview.kind === "circle"
+          ? [
+              [preview.center[0] - preview.radius, preview.center[1]],
+              [preview.center[0] + preview.radius, preview.center[1]],
+              [preview.center[0], preview.center[1] - preview.radius],
+            ]
+          : preview.points;
+    for (const point of points) {
+      xs.push(point[0]);
+      lows.push(point[1]);
+    }
+  }
+  return {
+    kind: "sketchPoint" as const,
+    point: [
+      (Math.min(...xs) + Math.max(...xs)) / 2,
+      Math.min(...lows),
+    ] as SketchPoint,
+    offset: { x: -110, y: 140 },
+  };
+}
+
+/**
+ * T16d ([TECH] T16-8/T16-21): the Mirror presentation. A valid selection
+ * (seeds, then the axis candidate; `staged` is its operator result) shows
+ * its staged copies and a confirm-only Mirror/Cancel popup that updates
+ * with every pick; Enter confirms too (`getEnterEvent`). Nothing is
+ * authored before Confirm. Review R-1: the popup shows exactly when Enter
+ * confirms (the selection's validity), also next to a refused pick's
+ * message (an unsupported target leaves the staged mirror as it was).
+ */
+function buildSketchMirrorPresentation(
+  session: SketchSessionState,
+  tool: SketchEditToolState,
+  validationMessage: string | null,
+  staged: SketchEditOperationResult,
+): SketchToolPresentationSchema {
+  const previewEntities = staged.previewEntities;
+  const base = buildSketchEditToolPresentation(
+    tool,
+    validationMessage,
+    previewEntities,
+  );
+  if (!staged.valid) return base;
+  const readout = getSketchMirrorReadout(session, tool);
+  const text = `Mirror ${readout} — Enter or Mirror to confirm`;
+  return {
+    ...base,
+    prompts: [
+      {
+        id: `${tool.toolId}-prompt`,
+        text,
+        tone: validationMessage ? "warning" : "neutral",
+      },
+    ],
+    completionHints: [
+      { id: `${tool.toolId}-completion`, text: "Confirm mirror", ready: true },
+    ],
+    floatingInput: {
+      id: "sketch-mirror-confirm",
+      label: "Mirror",
+      value: null,
+      readout,
+      confirmOnly: true,
+      confirmLabel: "Mirror",
+      cancelLabel: "Cancel",
+      placement: "target",
+      anchor: getSketchMirrorConfirmAnchor(session, previewEntities),
+      submitAction: { type: "patch", patch: { intent: "createMirror" } },
+      cancelAction: {
+        type: "patch",
+        patch: { intent: "cancelSketchEditOperator" },
+      },
+    },
+  };
+}
+
+/** Whether Enter confirms the active Mirror tool's staged mirror (T16d). */
+export function isSketchMirrorReady(session: SketchSessionState) {
+  const tool = session.activeEditTool;
+  return (
+    tool?.toolId === "sketchMirror" &&
+    getSketchEditOperatorResult(session, tool).valid
+  );
+}
+
+/**
+ * T16d review A-3: after Undo/Redo rebuilds the definition, a Mirror
+ * selection re-stages against it, so its preview, popup and Enter agree
+ * without waiting for a region round. A selection that no longer forms a
+ * mirror shows its refusal; the rebuilt session's own message is kept
+ * while it still does.
+ */
+export function restageSketchMirrorTool(
+  session: SketchSessionState,
+): SketchSessionState {
+  const tool = session.activeEditTool;
+  if (tool?.toolId !== "sketchMirror" || tool.selectedTargets.length === 0)
+    return session;
+  const staged = getSketchEditOperatorResult(session, tool);
+  const validationMessage = staged.valid
+    ? session.validationMessage
+    : staged.message;
+  return {
+    ...session,
+    toolStagedEntities: staged.previewEntities,
+    validationMessage,
+    toolPresentation: buildSketchMirrorPresentation(
+      session,
+      tool,
+      validationMessage,
+      staged,
+    ),
+  };
+}
+
 function withSketchMergePointsTool(
   session: SketchSessionState,
   tool: SketchEditToolState,
@@ -1366,7 +1538,7 @@ function commitSketchMergePoints(
  * every live-region result, published or failed), so a "still being
  * checked" input clears or becomes its decided refusal without reselection.
  * Only the preview, message and presentation change: nothing is applied
- * (no Mirror auto-apply, no Commit). An Offset with a staged
+ * (no Mirror confirm, no Commit). An Offset with a staged
  * check keeps it (its own completion re-checks the seeds); one without
  * (refused or still checking) re-stages its preview, whose check the
  * editor loop then emits. The edit-query tools (Trim, Extend, Split)
@@ -1416,11 +1588,14 @@ export function refreshSketchEditToolAfterOffsetRound(
     ...session,
     toolStagedEntities: preview.previewEntities,
     validationMessage: preview.valid ? null : preview.message,
-    toolPresentation: buildSketchEditToolPresentation(
-      tool,
-      preview.message,
-      preview.previewEntities,
-    ),
+    toolPresentation:
+      tool.toolId === "sketchMirror"
+        ? buildSketchMirrorPresentation(session, tool, preview.message, preview)
+        : buildSketchEditToolPresentation(
+            tool,
+            preview.message,
+            preview.previewEntities,
+          ),
   };
 }
 
@@ -2037,11 +2212,19 @@ export function updateSketchEditToolHover(
   return {
     ...session,
     activeEditTool,
-    toolPresentation: buildSketchEditToolPresentation(
-      activeEditTool,
-      session.validationMessage,
-      preview?.previewEntities ?? [],
-    ),
+    toolPresentation:
+      activeEditTool.toolId === "sketchMirror"
+        ? buildSketchMirrorPresentation(
+            session,
+            activeEditTool,
+            session.validationMessage,
+            preview ?? getSketchEditOperatorResult(session, activeEditTool),
+          )
+        : buildSketchEditToolPresentation(
+            activeEditTool,
+            session.validationMessage,
+            preview?.previewEntities ?? [],
+          ),
   };
 }
 
@@ -2120,10 +2303,16 @@ export function selectSketchEditToolTarget(
     return {
       ...session,
       validationMessage: message,
-      toolPresentation: buildSketchEditToolPresentation(
-        activeEditTool,
-        message,
-      ),
+      // T16d review R-1: a staged Mirror keeps its popup next to the message.
+      toolPresentation:
+        activeEditTool.toolId === "sketchMirror"
+          ? buildSketchMirrorPresentation(
+              session,
+              activeEditTool,
+              message,
+              getSketchEditOperatorResult(session, activeEditTool),
+            )
+          : buildSketchEditToolPresentation(activeEditTool, message),
     };
   }
 
@@ -2175,44 +2364,26 @@ export function selectSketchEditToolTarget(
     return selectSketchEditQueryTargets(session, nextEditTool);
   const preview = getSketchEditOperatorResult(session, nextEditTool);
 
-  if (
-    nextEditTool.toolId === "sketchMirror" &&
-    nextSelectedTargets.length >= metadata.selection.requiredCount &&
-    preview.valid
-  ) {
-    const applied = applySketchEditOperationResult(session, preview);
-    if (applied) {
-      const resetEditTool = {
-        ...nextEditTool,
-        selectedTarget: null,
-        selectedTargets: [],
-      };
-      return withLiveSolveBasis(
-        {
-          ...session,
-          ...applied,
-          activeEditTool: resetEditTool,
-          toolStagedEntities: [],
-          validationMessage: null,
-          toolPresentation: buildSketchEditToolPresentation(resetEditTool),
-          activeEditTarget: null,
-          activeDrag: null,
-        },
-        applied.definition,
-      );
-    }
-  }
-
+  // T16d ([TECH] T16-21): every Mirror pick re-stages (the last line or
+  // datum is the axis candidate); only Confirm or Enter commits.
   return {
     ...session,
     activeEditTool: nextEditTool,
     toolStagedEntities: preview.previewEntities,
     validationMessage: preview.valid ? null : preview.message,
-    toolPresentation: buildSketchEditToolPresentation(
-      nextEditTool,
-      preview.message,
-      preview.previewEntities,
-    ),
+    toolPresentation:
+      nextEditTool.toolId === "sketchMirror"
+        ? buildSketchMirrorPresentation(
+            session,
+            nextEditTool,
+            preview.message,
+            preview,
+          )
+        : buildSketchEditToolPresentation(
+            nextEditTool,
+            preview.message,
+            preview.previewEntities,
+          ),
   };
 }
 
@@ -2371,7 +2542,14 @@ export function patchSketchEditOperatorValue(
     };
   }
 
-  if ("value" in patch && patch.intent !== "commitSketchEditOperator") {
+  // T16d: the Mirror tool's one confirm (popup Mirror, Enter) is its own
+  // intent, so the action is labelled "Mirror".
+  const commitIntent =
+    activeEditTool.toolId === "sketchMirror"
+      ? "createMirror"
+      : "commitSketchEditOperator";
+
+  if ("value" in patch && patch.intent !== commitIntent) {
     const value = parseOperationParameter(
       patch.value,
       getSketchEditToolValueLabel(activeEditTool.toolId).toLowerCase(),
@@ -2393,7 +2571,7 @@ export function patchSketchEditOperatorValue(
     };
   }
 
-  if (patch.intent !== "commitSketchEditOperator") {
+  if (patch.intent !== commitIntent) {
     return session;
   }
 
