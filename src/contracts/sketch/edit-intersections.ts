@@ -181,7 +181,9 @@ export type SketchEditIntersectionResult =
       /**
        * [TECH] T-g5: non-accepted offset outputs (never cutters) whose
        * outward box meets the target's; the apply step refuses with
-       * `edit-input-offset-not-certified` naming them.
+       * `edit-input-offset-not-certified` naming them (T16c: a broken
+       * mirror's, pattern's or transform's copies with
+       * `edit-input-derived-failed`).
        */
       nonAcceptedNearTarget: SketchEntityId[];
       /**

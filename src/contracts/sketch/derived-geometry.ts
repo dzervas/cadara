@@ -51,6 +51,7 @@ import {
   mirrorVectorJvp,
   mirrorVectorVjp,
   orderDerivedRelationships,
+  RELATIONSHIP_NOUN,
   type MirrorArcVariables,
   type MirrorAxis,
   type MirrorAxisCotangent,
@@ -1641,7 +1642,12 @@ export function evaluateSketchDerivations(
           diagnostic(
             "derived-transform-missing-seed",
             "error",
-            `Derived relationship ${relationship.derivationId} references missing seed entity ${output.seedEntityId}.`,
+            transformFailureMessage(
+              relationship,
+              target
+                ? `the original of ‘${target.label}’ was deleted`
+                : "an original and its copy were deleted",
+            ),
             { kind: "entity", entityId: output.seedEntityId },
           ),
         );
@@ -1653,12 +1659,20 @@ export function evaluateSketchDerivations(
           diagnostic(
             "derived-transform-missing-output",
             "error",
-            `Derived relationship ${relationship.derivationId} references missing output entity ${output.outputEntityId}.`,
+            transformFailureMessage(
+              relationship,
+              `a copy of ‘${seed.label}’ was deleted`,
+            ),
             { kind: "entity", entityId: output.seedEntityId },
           ),
         );
         continue;
       }
+      const mismatch = () =>
+        transformFailureMessage(
+          relationship,
+          `its geometry no longer matches (copy ‘${target.label}’ of ‘${seed.label}’)`,
+        );
 
       if (seed.kind === "derivedPiecewiseCubic") {
         diagnostics.push(shellSeedDiagnostic(relationship.derivationId, seed));
@@ -1686,7 +1700,7 @@ export function evaluateSketchDerivations(
           diagnostic(
             "derived-transform-output-map-invalid",
             "error",
-            `Derived relationship ${relationship.derivationId} has mismatched seed and output point maps.`,
+            mismatch(),
             { kind: "entity", entityId: output.outputEntityId },
           ),
         );
@@ -1709,7 +1723,7 @@ export function evaluateSketchDerivations(
             diagnostic(
               "derived-transform-unsatisfied-point-map",
               "error",
-              `Derived relationship ${relationship.derivationId} cannot resolve point map ${seedPointId} -> ${outputPointId}.`,
+              mismatch(),
               { kind: "entity", entityId: output.outputEntityId },
             ),
           );
@@ -1757,6 +1771,20 @@ export function evaluateSketchDerivations(
   cachedDerivationInput = input;
   cachedDerivationResult = result;
   return result;
+}
+
+/**
+ * T16c (T16b review A-1, [TECH] T16-5 structure): a pattern or transform
+ * output that cannot be evaluated, by the relationship's kind and label
+ * (never an id), the surviving counterpart named. The sketch is invalid by
+ * this error (profiles blocked); the only recovery command for these
+ * relationships is Undo (no removal or replacement exists for them).
+ */
+function transformFailureMessage(
+  relationship: PointTransformRelationship,
+  why: string,
+): string {
+  return `${RELATIONSHIP_NOUN[relationship.kind]} ‘${relationship.label}’ is broken: ${why}. Profiles from this sketch are blocked. Undo to recover.`;
 }
 
 /** U-G2: a derived shell used as the seed of a mirror, pattern or transform. */

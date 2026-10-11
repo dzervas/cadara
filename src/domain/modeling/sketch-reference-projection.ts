@@ -4,12 +4,14 @@ import type {
   RenderPoint3D,
 } from "@/contracts/render/schema";
 import type {
+  SketchDefinition,
   SketchPoint2D,
   SketchReferenceDefinition,
 } from "@/contracts/sketch/schema";
 import type {
   ProjectedGeometryId,
   ReferenceId,
+  SketchEntityId,
   SketchPointId,
 } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
@@ -30,7 +32,11 @@ import {
 } from "@/contracts/sketch/spline-geometry";
 import type { SketchSolveDiagnostic } from "@/contracts/sketch";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
-import { nonAcceptedOffsetOutputs } from "@/contracts/sketch/offset-publication";
+import {
+  brokenDerivedInputMessage,
+  nonAcceptedOffsetOutputs,
+  type NonAcceptedOutputOwner,
+} from "@/contracts/sketch/offset-publication";
 import { isDocumentHistoryTargetAppliedForCursor } from "@/domain/modeling/document-history";
 
 type Vec3 = readonly [number, number, number];
@@ -65,11 +71,26 @@ function diagnostic(
 export const NON_ACCEPTED_OFFSET_OUTPUT_PROJECTION_CODE =
   "projection-source-offset-not-certified";
 
-function nonAcceptedOffsetOutputProjectionMessage(
-  entityId: string,
-  derivationId: string,
+/**
+ * The projection's text for a skipped non-accepted output. T16c ([TECH]
+ * T16-7, review A-4): the code stays; geometry held by a broken (failed)
+ * relationship is worded by label (`brokenDerivedInputMessage`). In
+ * production that case never gets here: a failed relationship makes the
+ * source sketch's derived validity invalid, which is refused first.
+ */
+export function nonAcceptedOutputProjectionMessage(
+  definition: SketchDefinition,
+  entityId: SketchEntityId,
+  owner: NonAcceptedOutputOwner,
 ) {
-  return `Sketch entity ${entityId} is an output of offset relationship ${derivationId}, which is not certified, so it is not projected.`;
+  return owner.reason === "derivedFailed"
+    ? brokenDerivedInputMessage(
+        definition,
+        { entityId },
+        owner,
+        "it is not projected",
+      )
+    : `Sketch entity ${entityId} is an output of offset relationship ${owner.derivationId}, which is not certified, so it is not projected.`;
 }
 
 function failedReference(
@@ -885,9 +906,10 @@ function projectSketchEntity(
       reference.referenceId,
       "unsupportedSource",
       NON_ACCEPTED_OFFSET_OUTPUT_PROJECTION_CODE,
-      nonAcceptedOffsetOutputProjectionMessage(
+      nonAcceptedOutputProjectionMessage(
+        sketch.sketch.definition,
         entity.entityId,
-        nonAccepted.derivationId,
+        nonAccepted,
       ),
     );
   }
@@ -1008,9 +1030,10 @@ function projectWholeSketch(
           diagnostic(
             NON_ACCEPTED_OFFSET_OUTPUT_PROJECTION_CODE,
             "warning",
-            nonAcceptedOffsetOutputProjectionMessage(
+            nonAcceptedOutputProjectionMessage(
+              sketch.sketch.definition,
               entity.entityId,
-              owner.derivationId,
+              owner,
             ),
           ),
         );

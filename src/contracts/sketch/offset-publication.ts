@@ -15,8 +15,10 @@ import {
   offsetFrameShellSpans,
 } from "@/contracts/sketch/offset-derivation-outputs";
 import { OFFSET_DIAGNOSTIC_CODES } from "@/contracts/sketch/offset-geometry";
+import { RELATIONSHIP_NOUN } from "@/contracts/sketch/mirror-requirements";
 import type {
   SketchDefinition,
+  SketchDerivationDefinition,
   SketchSolveDiagnostic,
   SolvedOffsetFramePlanRecord,
   SolvedSketchSnapshot,
@@ -257,7 +259,7 @@ function withNonAcceptedSeedsFailed(
   const seeds = new Map(
     (definition.derivedRelationships ?? []).flatMap((relationship) =>
       relationship.kind === "offset"
-        ? [[relationship.derivationId, relationship.seedEntityIds] as const]
+        ? [[relationship.derivationId, relationship] as const]
         : [],
     ),
   );
@@ -270,17 +272,28 @@ function withNonAcceptedSeedsFailed(
     let changed = false;
     current = current.map((record) => {
       if (record.status !== "certified") return record;
-      const seed = seeds
-        .get(record.derivationId)!
-        .find((id) => nonAccepted.has(id));
+      const offset = seeds.get(record.derivationId)!;
+      const seed = offset.seedEntityIds.find((id) => nonAccepted.has(id));
       if (seed === undefined) return record;
       changed = true;
+      const owner = nonAccepted.get(seed)!;
+      // T16c ([TECH] T16-7): the code stays; a broken (failed) owner gets
+      // the label-based text. Not reached in production: a failed
+      // relationship's error diagnostic makes the solve unaccepted, so
+      // nothing is published (pinned by a publication row).
       return {
         derivationId: record.derivationId,
         status: "failed",
         diagnostic: publicationDiagnostic(
           OFFSET_DIAGNOSTIC_CODES.seedNotCertified,
-          `Offset relationship ${record.derivationId}: its seed ${seed} is an output of offset relationship ${nonAccepted.get(seed)!.derivationId}, which is not certified, so this offset is not certified either.`,
+          owner.reason === "derivedFailed"
+            ? brokenDerivedInputMessage(
+                definition,
+                { entityId: seed },
+                owner,
+                `offset ‘${offset.label}’ can't be certified either`,
+              )
+            : `Offset relationship ${record.derivationId}: its seed ${seed} is an output of offset relationship ${owner.derivationId}, which is not certified, so this offset is not certified either.`,
           seed,
         ),
       };
@@ -377,7 +390,13 @@ export function applyOffsetPublications(
  * T15b ([TECH] T-8): every output of a failed (held) mirror or unresolved
  * relationship (the snapshot's `failedDerivationIds`) is non-accepted too,
  * owned by that relationship, and so are its dependents (the same
- * closure). The name predates mirrors.
+ * closure). The name predates mirrors: the map covers failed derived
+ * relationships too (renaming is T17 cleanup).
+ *
+ * T16c ([TECH] T16-7): each owner carries the relationship's kind and
+ * label and why it holds its outputs (`NonAcceptedOutputOwner.reason`), so
+ * every consumer words a broken relationship's copies by label
+ * (`brokenDerivedInputMessage`) and keeps the offset wording for offsets.
  */
 export function nonAcceptedOffsetOutputs(
   definition: Pick<SketchDefinition, "derivedRelationships" | "entities">,
@@ -385,20 +404,29 @@ export function nonAcceptedOffsetOutputs(
     SolvedSketchSnapshot,
     "solvedEntities" | "certifiedOffsetDerivationIds" | "failedDerivationIds"
   >,
-): ReadonlyMap<SketchEntityId, { readonly derivationId: string }> {
-  const result = new Map<SketchEntityId, { readonly derivationId: string }>();
+): ReadonlyMap<SketchEntityId, NonAcceptedOutputOwner> {
+  const result = new Map<SketchEntityId, NonAcceptedOutputOwner>();
   const certified = new Set(snapshot.certifiedOffsetDerivationIds ?? []);
   const failed = new Set(snapshot.failedDerivationIds ?? []);
+  const ownerOf = (
+    relationship: SketchDerivationDefinition,
+  ): NonAcceptedOutputOwner => ({
+    derivationId: relationship.derivationId,
+    kind: relationship.kind,
+    label: relationship.label,
+    reason:
+      relationship.kind === "offset" ? "offsetNotCertified" : "derivedFailed",
+  });
   for (const relationship of definition.derivedRelationships ?? []) {
     if (relationship.kind !== "offset") {
       if (!failed.has(relationship.derivationId)) continue;
-      const owner = { derivationId: relationship.derivationId };
+      const owner = ownerOf(relationship);
       for (const output of relationship.outputs)
         result.set(output.outputEntityId, owner);
       continue;
     }
     if (certified.has(relationship.derivationId)) continue;
-    const owner = { derivationId: relationship.derivationId };
+    const owner = ownerOf(relationship);
     for (const output of [
       ...relationship.outputs,
       ...relationship.jointOutputs,
@@ -424,10 +452,95 @@ export function nonAcceptedOffsetOutputs(
     if (
       entity.kind === "derivedPiecewiseCubic" &&
       !certifiedShells.has(entity.entityId)
-    )
-      result.set(entity.entityId, { derivationId: entity.derivationId });
+    ) {
+      // A validated shell has exactly one owning offset relationship; a
+      // bare shell record (no relationship) keeps an offset owner by its
+      // `derivationId` (offset owners are worded by id, never by label).
+      const relationship = definition.derivedRelationships?.find(
+        (candidate) => candidate.derivationId === entity.derivationId,
+      );
+      result.set(
+        entity.entityId,
+        relationship
+          ? ownerOf(relationship)
+          : {
+              derivationId: entity.derivationId,
+              kind: "offset",
+              label: entity.label,
+              reason: "offsetNotCertified",
+            },
+      );
+    }
   addNonAcceptedDerivedDependents(definition, result);
   return result;
+}
+
+/**
+ * T16c ([TECH] T16-7): the relationship a non-accepted output is held by,
+ * and why. `offsetNotCertified`: an offset relationship that is not
+ * certified (or one of its shells is not); its consumers keep the offset
+ * wording and codes. `derivedFailed`: a failed (held) mirror, pattern or
+ * transform relationship (the snapshot's `failedDerivationIds`); its
+ * consumers name it by label (`brokenDerivedInputMessage`). A dependent
+ * (G16‴ closure) carries its source's owner.
+ */
+export interface NonAcceptedOutputOwner {
+  readonly derivationId: string;
+  readonly kind: SketchDerivationDefinition["kind"];
+  readonly label: string;
+  readonly reason: "offsetNotCertified" | "derivedFailed";
+}
+
+/**
+ * T16c ([TECH] T16-7, specification "Minimum failure feedback"): the one
+ * text for geometry held by a broken relationship (an owner whose `reason`
+ * is `derivedFailed`), shared by every non-acceptance consumer (edit input,
+ * feature input, projection, offset publication, vector export). It names
+ * the entity or driven point and the relationship by label, never by id: a
+ * direct output is "a copy made by" the relationship, anything further
+ * downstream "depends on" it. Then what is refused (`consequence`, e.g.
+ * "it can't be used as an offset seed") and the recovery commands that
+ * exist (Undo; for a mirror, removal from the Mirror panel).
+ */
+export function brokenDerivedInputMessage(
+  definition: Pick<
+    SketchDefinition,
+    "derivedRelationships" | "entities" | "points"
+  >,
+  subject:
+    | { readonly entityId: SketchEntityId }
+    | { readonly pointId: SketchPointId },
+  owner: NonAcceptedOutputOwner,
+  consequence: string,
+): string {
+  const outputs =
+    definition.derivedRelationships?.find(
+      (relationship) => relationship.derivationId === owner.derivationId,
+    )?.outputs ?? [];
+  const named = `${RELATIONSHIP_NOUN[owner.kind].toLowerCase()} ‘${owner.label}’`;
+  let held: string;
+  if ("entityId" in subject) {
+    const label = definition.entities.find(
+      (entity) => entity.entityId === subject.entityId,
+    )!.label;
+    held = outputs.some((output) => output.outputEntityId === subject.entityId)
+      ? `‘${label}’ is a copy made by ${named}`
+      : `‘${label}’ depends on ${named}`;
+  } else {
+    const label = definition.points.find(
+      (point) => point.pointId === subject.pointId,
+    )!.label;
+    held = outputs.some((output) =>
+      output.outputPointIds.includes(subject.pointId),
+    )
+      ? `Point ‘${label}’ belongs to a copy made by ${named}`
+      : `Point ‘${label}’ depends on ${named}`;
+  }
+  const recovery =
+    owner.kind === "mirror"
+      ? "Fix it (Undo) or remove the mirror from the Mirror panel."
+      : "Fix it (Undo).";
+  return `${held}, which is broken, so ${consequence}. ${recovery}`;
 }
 
 /**
@@ -436,7 +549,7 @@ export function nonAcceptedOffsetOutputs(
  */
 function addNonAcceptedDerivedDependents(
   definition: Pick<SketchDefinition, "derivedRelationships">,
-  result: Map<SketchEntityId, { readonly derivationId: string }>,
+  result: Map<SketchEntityId, NonAcceptedOutputOwner>,
 ) {
   if (result.size === 0) return;
   const derived = definition.derivedRelationships ?? [];
@@ -487,9 +600,9 @@ export function nonAcceptedOffsetOutputPoints(
     SolvedSketchSnapshot,
     "solvedEntities" | "certifiedOffsetDerivationIds" | "failedDerivationIds"
   >,
-): ReadonlyMap<SketchPointId, { readonly derivationId: string }> {
+): ReadonlyMap<SketchPointId, NonAcceptedOutputOwner> {
   const outputs = nonAcceptedOffsetOutputs(definition, snapshot);
-  const result = new Map<SketchPointId, { readonly derivationId: string }>();
+  const result = new Map<SketchPointId, NonAcceptedOutputOwner>();
   if (outputs.size === 0) return result;
   for (const relationship of definition.derivedRelationships ?? []) {
     const pointsOf = (

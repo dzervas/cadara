@@ -171,7 +171,10 @@ type NamedRelationship = Pick<
   "derivationId" | "label"
 > & { readonly kind: SketchDerivationDefinition["kind"] };
 
-const RELATIONSHIP_NOUN: Record<SketchDerivationDefinition["kind"], string> = {
+export const RELATIONSHIP_NOUN: Record<
+  SketchDerivationDefinition["kind"],
+  string
+> = {
   mirror: "Mirror",
   linearPattern: "Linear pattern",
   circularPattern: "Circular pattern",

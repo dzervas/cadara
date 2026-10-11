@@ -3879,6 +3879,15 @@ describe("T08b-g5c non-accepted offset outputs ([TECH] G19/G19a, U-G5)", () => {
         skipped.some((diagnostic) => diagnostic.message.includes(output)),
       ),
     ).toBe(true);
+    // T16c: the offset wording, byte for byte (failed mirrors have their own).
+    expect(skipped.map((diagnostic) => diagnostic.message).sort()).toEqual(
+      outputs
+        .map(
+          (output) =>
+            `Offset output ${output} of relationship ${derivationId} is not certified, so it was not exported.`,
+        )
+        .sort(),
+    );
     const certifiedExport = exportOf(certified);
     expect(
       outputs.every((output) =>
@@ -3970,6 +3979,10 @@ describe("T08b-g5c non-accepted offset outputs ([TECH] G19/G19a, U-G5)", () => {
       NON_ACCEPTED_OFFSET_OUTPUT_PROJECTION_CODE,
     ]);
     expect(one.diagnostics[0]!.message).toContain(derivationId);
+    // T16c: the offset wording, byte for byte (failed mirrors have their own).
+    expect(one.diagnostics[0]!.message).toBe(
+      `Sketch entity ${output} is an output of offset relationship ${derivationId}, which is not certified, so it is not projected.`,
+    );
     expect(
       project(certified, { kind: "sketchEntity", entityId: output }).status,
       "certified: the output projects",
@@ -6415,9 +6428,19 @@ describe("T08b-g7b relationship-scoped solve-frame failures ([TECH] G16′, U-G9
       live.definition,
       live.solvedSnapshot,
     );
+    // T16c ([TECH] T16-7): the owner carries the offset's kind, label and
+    // reason.
+    const offsetLabel = committed.definition.derivedRelationships!.find(
+      (relationship) => relationship.derivationId === derivationId,
+    )!.label;
     for (const pointId of translated.copyPoints)
       expect(points.get(pointId), `failed: ${pointId} is non-accepted`).toEqual(
-        { derivationId },
+        {
+          derivationId,
+          kind: "offset",
+          label: offsetLabel,
+          reason: "offsetNotCertified",
+        },
       );
 
     // A mirror of the far rectangle across one of the offset's line outputs.
@@ -8719,18 +8742,26 @@ describe("T15b: failed mirrors in the session and the G19 consumers", () => {
     expect(exported.entities.map((entity) => entity.entityId)).not.toContain(
       output.outputEntityId,
     );
-    // Feature input and edit input.
+    // Feature input and edit input (T16c: the mirror by label, never its id).
+    const copyLabel = live.definition.entities.find(
+      (entity) => entity.entityId === output.outputEntityId,
+    )!.label;
+    const held = `‘${copyLabel}’ is a copy made by mirror ‘${relationship.label}’, which is broken, so it can't be used as`;
+    const recovery =
+      "Fix it (Undo) or remove the mirror from the Mirror panel.";
     expect(
       nonAcceptedOffsetFeatureInputMessage(
         { definition: live.definition, solvedSnapshot: live.solvedSnapshot },
         output.outputEntityId,
         "a revolve axis",
       ),
-    ).toContain(relationship.derivationId);
+    ).toBe(`${held} a revolve axis. ${recovery}`);
     expect(
-      offsetEditInputGate(broken, [output.outputEntityId], "a fillet input")
-        ?.message,
-    ).toContain(relationship.derivationId);
+      offsetEditInputGate(broken, [output.outputEntityId], "a fillet input"),
+    ).toEqual({
+      pending: false,
+      message: `edit-input-derived-failed: ${held} a fillet input. ${recovery}`,
+    });
     // Control: the healthy mirror's output is accepted everywhere.
     expect(
       offsetEditInputGate(session, [output.outputEntityId], "a fillet input"),
