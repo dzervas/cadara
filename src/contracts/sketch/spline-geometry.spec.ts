@@ -1017,7 +1017,7 @@ describe("neutral spline reconstruction owner", () => {
   });
 
   test("closestPointOnSolvedCubicSpans with maxDistance keeps any result within it and skips spans beyond it", () => {
-    const spans: SolvedCubicSpan[] = build(
+    const spans: readonly SolvedCubicSpan[] = build(
       input([
         [0, 0],
         [4, 3],

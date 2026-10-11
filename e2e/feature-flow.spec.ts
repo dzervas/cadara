@@ -60,7 +60,7 @@ test("sweep rejects a coplanar profile/path combination instead of previewing no
     .poll(
       () =>
         page.evaluate(
-          () => window.__cadaraDebug?.getState().previewDiagnostics ?? "",
+          () => window.__cadaraDebug?.getState()?.previewDiagnostics ?? "",
         ),
       { timeout: 30_000 },
     )

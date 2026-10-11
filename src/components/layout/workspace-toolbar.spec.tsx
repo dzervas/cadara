@@ -92,6 +92,12 @@ test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
             machineState: initialEditorState,
             state: viewState,
             dispatch: () => undefined,
+            getRuntimeTrace: () => ({
+              maxEntries: 0,
+              totalEntries: 0,
+              droppedEntries: 0,
+              entries: [],
+            }),
           }}
         >
           <WorkbenchCommandProvider handlers={workbenchHandlers}>

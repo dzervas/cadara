@@ -53,7 +53,7 @@ export async function importBundle(
   );
   await page.goto("/");
   await page.waitForFunction(
-    () => window.__cadaraDebug?.getState().revision !== "loading",
+    () => window.__cadaraDebug?.getState()?.revision !== "loading",
   );
   const beforeRevision = await currentRevision(page);
 
@@ -110,13 +110,13 @@ export async function importBundle(
     await page.waitForFunction(
       () =>
         ["editingSketch", "idle"].includes(
-          window.__cadaraDebug?.getState().machineState ?? "",
+          window.__cadaraDebug?.getState()?.machineState ?? "",
         ),
       undefined,
       { timeout: 60_000 },
     );
     const machineState = await page.evaluate(
-      () => window.__cadaraDebug?.getState().machineState,
+      () => window.__cadaraDebug?.getState()?.machineState,
     );
     if (machineState === "editingSketch") {
       await page.locator('button[data-tool-id="finishSketch"]').click();
@@ -160,7 +160,7 @@ export async function editVariable(page: Page, name: string, value: string) {
 }
 
 export async function currentRevision(page: Page) {
-  return page.evaluate(() => window.__cadaraDebug!.getState().revision);
+  return page.evaluate(() => window.__cadaraDebug!.getState()!.revision);
 }
 
 export async function waitForRevisionChange(
@@ -172,7 +172,7 @@ export async function waitForRevisionChange(
 ) {
   await page.waitForFunction(
     (previousRevision) =>
-      window.__cadaraDebug?.getState().revision !== previousRevision,
+      window.__cadaraDebug?.getState()?.revision !== previousRevision,
     revision,
     { timeout },
   );
@@ -180,7 +180,7 @@ export async function waitForRevisionChange(
 
 export async function waitForMachineIdle(page: Page) {
   await page.waitForFunction(
-    () => window.__cadaraDebug?.getState().machineState === "idle",
+    () => window.__cadaraDebug?.getState()?.machineState === "idle",
     undefined,
     { timeout: 60_000 },
   );

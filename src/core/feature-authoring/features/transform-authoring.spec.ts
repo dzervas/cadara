@@ -1,7 +1,9 @@
 import { expect, test } from "vitest";
 
-import type { AdvancedSolidFeatureDefinition } from "@/contracts/modeling/advanced-solid";
-import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
+import {
+  ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+  type AdvancedSolidFeatureDefinition,
+} from "@/contracts/modeling/advanced-solid";
 import { transformAuthoringDefinition } from "@/core/feature-authoring/features/transform";
 
 const axis = {

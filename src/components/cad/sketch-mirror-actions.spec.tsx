@@ -20,7 +20,7 @@ const healthy: SketchMirrorActionEntry = {
   requirementCount: 3,
   sizingRequirementCount: 2,
   brokenDownstreamLabels: [],
-  replaceOriginalOutputId: "copy_c",
+  replaceOriginalOutputId: "sketch_entity_copy_c",
 };
 const broken: SketchMirrorActionEntry = {
   derivationId: "derivation_broken",
@@ -154,6 +154,6 @@ test("T16e: every row offers Replace mirror line…; Replace original… only fo
   (originals[0]!.props as { onClick: () => void }).onClick();
   expect(replaced).toEqual([
     ["derivation_broken", null],
-    ["derivation_healthy", "copy_c"],
+    ["derivation_healthy", "sketch_entity_copy_c"],
   ]);
 });

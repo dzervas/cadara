@@ -850,7 +850,10 @@ test("validates deferred revolve boolean scope and advanced construction partici
       { kind: "createFeature", index: 2 },
     ],
   });
-  expect(result.success, JSON.stringify(result.issues)).toBe(true);
+  expect(
+    result.success,
+    result.success ? undefined : JSON.stringify(result.issues),
+  ).toBe(true);
 });
 
 test("validates bodyOf only at advanced body participants", () => {
@@ -1153,7 +1156,10 @@ test("validates deferred open sketch-curve profiles on surface extrude actions",
     createFeatures: [surfaceExtrude({ kind: "sketchIdOf", actionIndex: 0 })],
     orderedActions,
   });
-  expect(accepted.success, JSON.stringify(accepted.issues)).toBe(true);
+  expect(
+    accepted.success,
+    accepted.success ? undefined : JSON.stringify(accepted.issues),
+  ).toBe(true);
 
   for (const [name, sketchId] of [
     ["forward reference", { kind: "sketchIdOf", actionIndex: 1 }],

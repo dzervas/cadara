@@ -98,7 +98,7 @@ test("nonconverged authored sketch finishes, saves, reopens, and re-enters with 
     .locator('button[aria-label="Finish Sketch"], button[data-tool-tooltip="Finish Sketch"]')
     .click();
   await expect
-    .poll(() => page.evaluate(() => window.__cadaraDebug?.getState().machineState))
+    .poll(() => page.evaluate(() => window.__cadaraDebug?.getState()?.machineState))
     .toBe("idle");
 
   const savedInvalid = await downloadCadara(page);

@@ -332,8 +332,9 @@ test("T13e D11: a circle tangent to two parallel lines a sized distance apart ha
     openInput(free, [entity(free, "Rectangle 1 right").target], [7, 2]),
   );
   expect(sized.liveSolve?.accepted, "premise: height sized").toBe(true);
+  const sizedCircle = circle(sized);
   const diameter =
-    2 * (circle(sized).kind === "circle" ? circle(sized).radius : NaN);
+    2 * (sizedCircle.kind === "circle" ? sizedCircle.radius : NaN);
   expectReferenceMode(
     openInput(sized, [circle(sized).target], [5, 5]),
     String(Number(diameter.toFixed(6))),

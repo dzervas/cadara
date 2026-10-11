@@ -109,7 +109,7 @@ async function makeOverlapState(toolId: SketchAuthoringToolId | null = null) {
       kind: "sketchDatumReference",
       sketchId: session.actionContextId,
       datumId: "xAxis",
-      geometryKind: "line",
+      geometryKind: "lineSegment",
     } as PrimitiveRef,
   };
 }

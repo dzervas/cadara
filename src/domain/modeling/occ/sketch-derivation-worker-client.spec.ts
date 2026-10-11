@@ -119,7 +119,9 @@ function makeRequest(
   };
 }
 
-function responseFor(request: DeriveSketchRegionsRequest) {
+function responseFor(
+  request: DeriveSketchRegionsRequest,
+): DeriveSketchRegionsResponse {
   return {
     contractVersion: CONTRACT_VERSION,
     solverSchemaVersion: SOLVER_SCHEMA_VERSION,
@@ -129,7 +131,8 @@ function responseFor(request: DeriveSketchRegionsRequest) {
     sketchId: request.sketchId,
     regions: [],
     diagnostics: [],
-  } as DeriveSketchRegionsResponse;
+    offsetPublications: [],
+  };
 }
 
 test("a request posts unchanged to a spawned worker and resolves with its response", async () => {

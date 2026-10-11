@@ -270,6 +270,7 @@ type CommittedSketchDefinition = {
   }>;
   derivedRelationships?: Array<{
     kind: string;
+    distance?: unknown;
     outputs: Array<{ outputEntityId: string }>;
   }>;
 };
@@ -442,11 +443,7 @@ test("T13b A6: a distance typed into the Offset floating input (not the tool pan
   await workbench.activateTool("Exit the active sketch.");
   await workbench.expectMachine("idle");
 
-  const saved = (await lastCommittedSketch(page)) as
-    | (CommittedSketchDefinition & {
-        derivedRelationships?: Array<{ kind: string; distance: unknown }>;
-      })
-    | null;
+  const saved = await lastCommittedSketch(page);
   const offset = saved?.derivedRelationships?.find(
     (relationship) => relationship.kind === "offset",
   );

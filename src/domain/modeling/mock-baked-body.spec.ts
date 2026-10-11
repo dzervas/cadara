@@ -55,9 +55,10 @@ test("MockKernelAdapter materializes bakedBody as a durable body when the resolv
   });
 
   expect(response.revisionState.kind).toBe("accepted");
-  expect(response.changedTargets[0]).toMatchObject({ kind: "body" });
+  const changedTarget = response.changedTargets[0];
+  expect(changedTarget).toMatchObject({ kind: "body" });
   expect(snapshot.snapshot.document.bodies.some((body) =>
-    body.bodyId === response.changedTargets[0]?.bodyId,
+    changedTarget?.kind === "body" && body.bodyId === changedTarget.bodyId,
   )).toBeTruthy();
   expect(snapshot.snapshot.document.render.records.some((record) =>
     record.ownerFeatureId === response.featureId && record.geometry.kind === "mesh",

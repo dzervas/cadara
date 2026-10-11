@@ -29,7 +29,9 @@ test("feature replay contracts require exact unique sources and finite linear in
     },
   });
   expect(duplicateSource.success).toBe(false);
-  expect(duplicateSource.issues?.[0]?.path).toBe("parameters.sourceFeatureIds");
+  expect(
+    duplicateSource.success ? null : duplicateSource.issues[0]?.path,
+  ).toBe("parameters.sourceFeatureIds");
 
   const nonFiniteSpacing = validateFeatureDefinition({
     ...definition,

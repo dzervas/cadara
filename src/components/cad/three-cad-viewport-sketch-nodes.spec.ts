@@ -15,6 +15,7 @@ import {
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
 import {
+  getSketchRevealedHandleEntityIds,
   getSketchRevealedPointIds,
   type SketchPointMarkerContext,
 } from "@/domain/editor/sketch-session/display";
@@ -145,6 +146,10 @@ const context = (
   };
   return {
     revealedPointIds: getSketchRevealedPointIds(renderables, full),
+    revealedHandleEntityIds: getSketchRevealedHandleEntityIds(
+      renderables,
+      full,
+    ),
     hoverTarget: full.hoverTarget,
   };
 };

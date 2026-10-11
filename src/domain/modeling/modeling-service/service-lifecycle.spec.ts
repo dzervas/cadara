@@ -8,7 +8,7 @@ import { createModelingService } from "./service";
 class CountingAdapter extends MockKernelAdapter {
   disposeCalls = 0;
 
-  override dispose() {
+  dispose() {
     this.disposeCalls += 1;
   }
 }

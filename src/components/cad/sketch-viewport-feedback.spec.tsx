@@ -159,7 +159,7 @@ test("src/components/cad/sketch-viewport-feedback.spec.tsx", () => {
     floatingInput: {
       id: "distance-value-input",
       label: "Distance",
-      value: 12,
+      value: "12",
       unit: "mm",
       confirmLabel: "Commit",
       cancelLabel: "Cancel",

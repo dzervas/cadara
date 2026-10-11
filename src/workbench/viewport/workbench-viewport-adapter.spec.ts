@@ -27,6 +27,9 @@ test("workbench viewport adapter exposes typed model and command ports", () => {
     sketchSession: null,
     isEditorRenderIdle: true,
     acceptsSpecialModeTarget: () => true,
+    annotationContext: null,
+    showAllAnnotations: false,
+    documentVariableNames: [],
   });
 
   expect(model.hoverTarget).toBe(target);

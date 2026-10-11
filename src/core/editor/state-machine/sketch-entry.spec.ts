@@ -306,7 +306,7 @@ describe("T11a sketch entry establishes a live solve basis", () => {
       status: "committed",
       revisionId: entered.document.revisionId!,
       snapshot: state.snapshot!,
-      selectionCatalog: state.selectionCatalog,
+      selectionCatalog: state.selectionCatalog!,
       session: raw,
       importedCount: 1,
     });

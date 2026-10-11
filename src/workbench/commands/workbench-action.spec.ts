@@ -124,7 +124,7 @@ test("src/workbench/commands/workbench-action.spec.ts", async () => {
     "Rejected promises should preserve causes.",
   ).toBeTruthy();
 
-  const diagnostic = appErrorToModelingDiagnostic(rejected.error, {
+  const diagnostic = appErrorToModelingDiagnostic(rejected._unsafeUnwrapErr(), {
     target: { kind: "feature", featureId: "feature_extrude-1" },
   });
   expect(

@@ -412,7 +412,11 @@ function createSurfaceExtrudeFeatureRequest(): CreateFeatureRequest {
         startExtent: { kind: "profilePlane" },
         extent: {
           mode: "oneSide",
-          end: { kind: "blind", direction: "positive", distance: 6 },
+          end: {
+            kind: "blind",
+            direction: "positive",
+            distance: { source: "literal", value: 6 },
+          },
         },
       },
     },
@@ -493,9 +497,13 @@ function createExtrudeFeatureRequest(
         startExtent: { kind: "profilePlane" },
         extent: {
           mode: "oneSide",
-          end: { kind: "blind", direction: "positive", distance: 10 },
+          end: {
+            kind: "blind",
+            direction: "positive",
+            distance: { source: "literal", value: 10 },
+          },
         },
-        operation: "newBody",
+        operation: { source: "literal", value: "newBody" },
         booleanScope: { kind: "standalone" },
       },
     },
