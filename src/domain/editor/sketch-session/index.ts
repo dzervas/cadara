@@ -103,6 +103,7 @@ export {
   deleteSelectedSketchGeometry,
   failSketchEditQuery,
   finishSketchGeometryDrag,
+  getSketchMirrorConfirmIntent,
   isSketchMergePointsReady,
   isSketchMirrorReady,
   patchSketchEditToolValue,

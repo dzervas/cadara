@@ -186,23 +186,89 @@ export const RELATIONSHIP_NOUN: Record<
  * T16b ([TECH] T16-5, issue 15 "Invalid state and recovery", specification
  * "Minimum failure feedback"): one message per failed relationship, by its
  * label (never its id): what is wrong, what is blocked, and the recovery
- * commands that exist (Undo; for a mirror, removal from the Mirror panel).
+ * commands that exist (Undo; for a mirror, T16e (review R-5): replacing
+ * the mirror line or the original when that repairs it
+ * (`mirrorRepairCommand`), and removal from the Mirror panel).
  * A non-offset failure blocks every profile of the sketch (the sketch-wide
  * gate); an offset's stays relationship-scoped (U-G5).
  */
 function failureMessage(
   relationship: NamedRelationship,
+  reason: DerivedRelationshipFailureReason,
   statement: string,
 ): string {
   const consequence =
     relationship.kind === "offset"
       ? "Its offset curves stay where they were last solved and can't be used."
       : "Its copies stay where they were last solved and can't be used; profiles from this sketch are blocked.";
+  const repair = mirrorRepairCommand(reason);
   const recovery =
-    relationship.kind === "mirror"
-      ? "Undo, or remove the mirror from the Mirror panel."
-      : "Undo to recover.";
+    relationship.kind !== "mirror"
+      ? "Undo to recover."
+      : repair
+        ? `Undo, ${repair}, or remove the mirror from the Mirror panel.`
+        : "Undo, or remove the mirror from the Mirror panel.";
   return `${statement} ${consequence} ${recovery}`;
+}
+
+/**
+ * T16e (review R-5): the replacement that repairs a broken mirror, named
+ * in its recovery texts: its mirror line when the line is missing or too
+ * short, the original when one was deleted; T16e review A-7: either, for a
+ * mirror on a dependency loop (replacing the looping line or original
+ * breaks it). Null otherwise (a deleted copy, a mismatch, a mirror that
+ * only reads a loop): Undo or removal.
+ */
+export function mirrorRepairCommand(
+  reason: DerivedRelationshipFailureReason,
+): string | null {
+  return reason === "axisMissing" || reason === "axisDegenerate"
+    ? "replace the mirror line"
+    : reason === "seedMissing"
+      ? "replace the original"
+      : reason === "dependencyLoop"
+        ? "replace the mirror line or the original"
+        : null;
+}
+
+/**
+ * T16e (review R-5): why a mirror known to be failed (in a solve's
+ * `failedDerivationIds`) fails, read from its records for consumers that
+ * have no tolerance at hand (the failed-copy input texts): the unresolved
+ * order, then a missing mirror line, then the first stale output, as
+ * evaluation classifies them. With none of those left, the only remaining
+ * failure is a mirror line shorter than τ (`axisDegenerate`); a mirror whose
+ * line is too short and whose output is also stale reads as the stale
+ * output here (evaluation reports the line first), so its text still names
+ * a repair that is needed.
+ */
+export function failedMirrorReason(
+  definition: Pick<
+    SketchDefinition,
+    "points" | "entities" | "derivedRelationships"
+  >,
+  relationship: MirrorRelationship,
+): DerivedRelationshipFailureReason {
+  const unresolved = orderDerivedRelationships(definition).unresolved.find(
+    (failure) => failure.derivationId === relationship.derivationId,
+  );
+  if (unresolved) return unresolved.reason;
+  const geometry = indexMirrorGeometry(definition);
+  const reference = relationship.mirrorReference;
+  if (reference.kind === "lineEntity") {
+    const line = geometry.entityById.get(reference.entityId);
+    if (
+      line?.kind !== "lineSegment" ||
+      !geometry.pointById.has(line.startPointId) ||
+      !geometry.pointById.has(line.endPointId)
+    )
+      return "axisMissing";
+  }
+  for (const output of relationship.outputs) {
+    const checked = checkMirrorOutputMap(output, geometry);
+    if ("stale" in checked) return checked.stale;
+  }
+  return "axisDegenerate";
 }
 
 function failure(
@@ -225,7 +291,7 @@ function failure(
     diagnostic: {
       code,
       severity: "error",
-      message: failureMessage(relationship, statement),
+      message: failureMessage(relationship, reason, statement),
       target: entityId ? { kind: "entity", entityId } : null,
     },
   };

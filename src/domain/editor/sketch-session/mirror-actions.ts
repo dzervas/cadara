@@ -31,9 +31,16 @@ import {
   type MirrorCorrespondenceRef,
   type MirrorRelationship,
 } from "@/contracts/sketch/mirror-requirements";
+import type { SketchEntityId } from "@/contracts/shared/ids";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import { removeMirrorRelationship } from "@/domain/sketch-editing/mirror-repair";
-import type { SketchSessionState } from "./types";
+import type { SketchMirrorRepairState, SketchSessionState } from "./types";
+import {
+  getSketchMirrorRepairCandidate,
+  leaveSketchMirrorRepair,
+  restageSketchMirrorRepair,
+} from "./editing";
+import { beginSketchTool, clearActiveSketchTool } from "./tools";
 import {
   getSessionSketchId,
   getSketchSessionDerivationSettings,
@@ -60,6 +67,13 @@ export interface SketchMirrorActionEntry {
   sizingRequirementCount: number;
   /** Labels of the relationships Remove leaves broken (they read a copy). */
   brokenDownstreamLabels: string[];
+  /**
+   * T16e: the copy "Replace original…" targets (one output): a selected
+   * copy, else (review A-3) the first existing copy whose original was
+   * deleted, else the existing copy of a selected original. Null: no such
+   * copy (the button is not shown).
+   */
+  replaceOriginalOutputId: SketchEntityId | null;
 }
 
 export interface SketchMirrorActionState {
@@ -156,6 +170,17 @@ export function computeSketchMirrorActionState(
     ),
   ];
   if (listed.length === 0) return null;
+  const selectedEntityIds = new Set(
+    selection.flatMap((ref) =>
+      ref.kind === "sketchEntity" &&
+      ref.sketchId === getSessionSketchId(session)
+        ? [ref.entityId as string]
+        : [],
+    ),
+  );
+  const entityIds = new Set(
+    definition.entities.map((entity) => entity.entityId as string),
+  );
   return {
     entries: listed.map(({ relationship, brokenReason }) => {
       const removal = removeMirrorRelationship(
@@ -180,6 +205,11 @@ export function computeSketchMirrorActionState(
         brokenDownstreamLabels: removal.brokenDownstream.map(
           (downstream) => downstream.label,
         ),
+        replaceOriginalOutputId: replaceOriginalOutputId(
+          relationship,
+          selectedEntityIds,
+          entityIds,
+        ),
       };
     }),
   };
@@ -197,6 +227,99 @@ export function applySketchMirrorRemoval(
   const removal = removeMirrorRelationship(session.definition, derivationId);
   return removal
     ? rebuildSessionForDefinition(session, { definition: removal.definition })
+    : session;
+}
+
+/** T16e: the one copy "Replace original…" targets (see the entry field). */
+function replaceOriginalOutputId(
+  relationship: MirrorRelationship,
+  selectedEntityIds: ReadonlySet<string>,
+  entityIds: ReadonlySet<string>,
+): SketchEntityId | null {
+  const existing = relationship.outputs.filter((output) =>
+    entityIds.has(output.outputEntityId),
+  );
+  return (
+    (
+      existing.find((output) => selectedEntityIds.has(output.outputEntityId)) ??
+      existing.find((output) => !entityIds.has(output.seedEntityId)) ??
+      existing.find((output) => selectedEntityIds.has(output.seedEntityId))
+    )?.outputEntityId ?? null
+  );
+}
+
+/**
+ * T16e ([TECH] T16-9): the Mirror panel's Replace mirror line… / Replace
+ * original… enter the Mirror tool's repair sub-state (no new tool id) for
+ * mirror `derivationId`: its line, or the original of copy
+ * `outputEntityId`. `returnSelection` (the editor selection) comes back on
+ * Cancel/Escape. The same session when the mirror or the copy is gone.
+ */
+export function beginSketchMirrorRepair(
+  session: SketchSessionState,
+  derivationId: string,
+  target: SketchMirrorRepairState["target"],
+  returnSelection: readonly PrimitiveRef[],
+): SketchSessionState {
+  const relationship = session.definition.derivedRelationships?.find(
+    (candidate) => candidate.derivationId === derivationId,
+  );
+  if (
+    relationship?.kind !== "mirror" ||
+    (target !== "axis" &&
+      !relationship.outputs.some(
+        (output) => output.outputEntityId === target.outputEntityId,
+      )) ||
+    (target !== "axis" &&
+      !session.definition.entities.some(
+        (entity) => entity.entityId === target.outputEntityId,
+      ))
+  )
+    return session;
+  const armed = beginSketchTool(session, "sketchMirror");
+  return restageSketchMirrorRepair({
+    ...armed,
+    activeEditTool: {
+      ...armed.activeEditTool!,
+      repair: {
+        derivationId,
+        target,
+        returnSelection: [...returnSelection],
+      },
+    },
+  });
+}
+
+/** T16e: Cancel/Escape of a repair: no action, the panel state back (review R-2: its message too). */
+export function cancelSketchMirrorRepair(
+  session: SketchSessionState,
+): SketchSessionState {
+  return session.activeEditTool?.repair
+    ? leaveSketchMirrorRepair(session)
+    : session;
+}
+
+/**
+ * T16e: Confirm (popup Replace, Enter) of a repair: the picked candidate,
+ * re-judged on the current definition, as one authored candidate solved
+ * from the current positions (the solve the pick staged), the tool left.
+ * The same session when nothing valid is picked.
+ */
+export function applySketchMirrorRepair(
+  session: SketchSessionState,
+): SketchSessionState {
+  const tool = session.activeEditTool;
+  const picked = tool?.selectedTargets[0];
+  if (!tool?.repair || !picked) return session;
+  const candidate = getSketchMirrorRepairCandidate(
+    session,
+    tool.repair,
+    picked,
+  );
+  return candidate.ok
+    ? rebuildSessionForDefinition(clearActiveSketchTool(session), {
+        definition: candidate.definition,
+      })
     : session;
 }
 

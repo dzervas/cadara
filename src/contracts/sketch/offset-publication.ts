@@ -15,7 +15,11 @@ import {
   offsetFrameShellSpans,
 } from "@/contracts/sketch/offset-derivation-outputs";
 import { OFFSET_DIAGNOSTIC_CODES } from "@/contracts/sketch/offset-geometry";
-import { RELATIONSHIP_NOUN } from "@/contracts/sketch/mirror-requirements";
+import {
+  failedMirrorReason,
+  mirrorRepairCommand,
+  RELATIONSHIP_NOUN,
+} from "@/contracts/sketch/mirror-requirements";
 import type {
   SketchDefinition,
   SketchDerivationDefinition,
@@ -500,7 +504,8 @@ export interface NonAcceptedOutputOwner {
  * direct output is "a copy made by" the relationship, anything further
  * downstream "depends on" it. Then what is refused (`consequence`, e.g.
  * "it can't be used as an offset seed") and the recovery commands that
- * exist (Undo; for a mirror, removal from the Mirror panel).
+ * exist (Undo; for a mirror, T16e (review R-5): replacing its mirror line
+ * or original when that repairs it, and removal from the Mirror panel).
  */
 export function brokenDerivedInputMessage(
   definition: Pick<
@@ -513,10 +518,10 @@ export function brokenDerivedInputMessage(
   owner: NonAcceptedOutputOwner,
   consequence: string,
 ): string {
-  const outputs =
-    definition.derivedRelationships?.find(
-      (relationship) => relationship.derivationId === owner.derivationId,
-    )?.outputs ?? [];
+  const relationship = definition.derivedRelationships?.find(
+    (candidate) => candidate.derivationId === owner.derivationId,
+  );
+  const outputs = relationship?.outputs ?? [];
   const named = `${RELATIONSHIP_NOUN[owner.kind].toLowerCase()} ‘${owner.label}’`;
   let held: string;
   if ("entityId" in subject) {
@@ -536,10 +541,16 @@ export function brokenDerivedInputMessage(
       ? `Point ‘${label}’ belongs to a copy made by ${named}`
       : `Point ‘${label}’ depends on ${named}`;
   }
+  const repair =
+    relationship?.kind === "mirror"
+      ? mirrorRepairCommand(failedMirrorReason(definition, relationship))
+      : null;
   const recovery =
-    owner.kind === "mirror"
-      ? "Fix it (Undo) or remove the mirror from the Mirror panel."
-      : "Fix it (Undo).";
+    owner.kind !== "mirror"
+      ? "Fix it (Undo)."
+      : repair
+        ? `Fix it (Undo or ${repair}) or remove the mirror from the Mirror panel.`
+        : "Fix it (Undo) or remove the mirror from the Mirror panel.";
   return `${held}, which is broken, so ${consequence}. ${recovery}`;
 }
 

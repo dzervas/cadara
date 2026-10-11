@@ -1027,3 +1027,135 @@ test("T16d: mirror a circle and a line picked second: preview, Cancel records no
   ).toEqual([]);
   await expect(mirrorActions(page)).toHaveCount(0);
 });
+
+// T16e ([TECH] T16-9). Lane: e2e; seam: Mirror panel → repair sub-state of
+// the Mirror tool → gliding viewport pick → staged candidate + confirm
+// popup → authored history in the workbench (every pointer path glides).
+test("T16e: delete the mirror line → panel Broken → Replace mirror line… → pick another line (popup, confirm) → the copy follows, panel Healthy; one Ctrl+Z restores the broken state", async ({
+  page,
+}) => {
+  const workbench = new SketchWorkbenchHarness(page);
+  await openTopSketch(workbench);
+  await workbench.activateTool("Create line geometry.");
+  await placeFreely(workbench, LINE);
+  await expectStaged(workbench, 1);
+  // The replacement line, horizontal at screen y 360 (review A-8: the copy
+  // about it lands at screen y 420–500, inside the viewport and clear of
+  // the toolbar).
+  await workbench.activateTool("Create line geometry.");
+  await placeFreely(workbench, [
+    { x: 480, y: 360 },
+    { x: 1000, y: 360 },
+  ]);
+  await expectStaged(workbench, 2);
+  await drawConstructionAxis(workbench, 3);
+  const [seed, replacement, axis] = (await snapshot(page)).entities;
+  const canvas = (await workbench.viewport().boundingBox())!;
+  /** A gliding pick (canvas coordinates). */
+  const pick = async (to: { x: number; y: number }) => {
+    await page.mouse.move(canvas.x + to.x, canvas.y + to.y, { steps: 10 });
+    await workbench.waitForAnimationFrames(2);
+    await page.mouse.down();
+    await page.mouse.up();
+  };
+  const spots = {
+    seed: await hoverUntil(
+      workbench,
+      { x: 320, y: 262 },
+      entityTarget(seed!.id),
+    ),
+    axis: await hoverUntil(
+      workbench,
+      { x: 800, y: 420 },
+      entityTarget(axis!.id),
+    ),
+    replacement: await hoverUntil(
+      workbench,
+      { x: 740, y: 360 },
+      entityTarget(replacement!.id),
+    ),
+  };
+  await openSearchTool(page, "Sketch Mirror");
+  await pick(spots.seed);
+  await pick(spots.axis);
+  await expect(mirrorPopup(page)).toBeVisible({ timeout: 15_000 });
+  await page.keyboard.press("Enter");
+  await expectStaged(workbench, 4);
+  await expect(mirrorActions(page)).toHaveCount(1, { timeout: 15_000 });
+  await page.keyboard.press("Escape");
+  await workbench.waitForAnimationFrames(2);
+
+  // Delete the mirror line: the panel lists the broken mirror.
+  await pick(spots.axis);
+  await expect
+    .poll(() => workbench.currentEditorSelection(), { timeout: 15_000 })
+    .toContain(axis!.id);
+  await page.keyboard.press("Delete");
+  await expectStaged(workbench, 3);
+  const panel = page.getByRole("region", { name: "Mirror" });
+  await expect(panel).toContainText("Broken: mirror line missing", {
+    timeout: 15_000,
+  });
+  const broken = await snapshot(page);
+
+  // Replace mirror line…: the repair arms the Mirror tool (the panel goes).
+  await glidePress(
+    page,
+    panel.getByRole("button", { name: "Replace mirror line…" }),
+  );
+  await expect(panel).toHaveCount(0, { timeout: 15_000 });
+  await expect
+    .poll(
+      () => page.evaluate(() => window.__cadaraDebug?.getState()?.command),
+      { timeout: 15_000 },
+    )
+    .toBe("sketchMirror");
+
+  // Pick the replacement line: the popup asks to confirm; nothing authored.
+  const popup = page.locator(
+    '[data-sketch-viewport-floating-input="sketch-mirror-repair-confirm"]',
+  );
+  await pick(spots.replacement);
+  await expect(popup.locator("[data-floating-input-readout]")).toHaveText(
+    /^Use ‘.+’ as the mirror line$/,
+    { timeout: 15_000 },
+  );
+  expect(
+    geometryDistance(geometryOf(await snapshot(page)), geometryOf(broken)),
+    "the pick authors nothing",
+  ).toBe(0);
+  const replaceActions = page
+    .locator('[data-history-action-direction="undo"]')
+    .filter({ hasText: "Replace Mirror Line" });
+  await expect(replaceActions).toHaveCount(0);
+
+  // Confirm: one action; the copy is the seed's image about the new line.
+  await glidePress(page, popup.getByRole("button", { name: "Replace" }));
+  await expect(replaceActions).toHaveCount(1, { timeout: 15_000 });
+  await expect(popup).toBeHidden();
+  const replaced = await snapshot(page);
+  expect(mirrorOf(replaced).mirrorReference).toEqual({
+    kind: "lineEntity",
+    entityId: replacement!.id,
+  });
+  expect(
+    mirrorOf(replaced).outputs.map((output) => output.outputEntityId),
+    "the copy keeps its id",
+  ).toEqual(mirrorOf(broken).outputs.map((output) => output.outputEntityId));
+  expectMirrorImage(replaced, "after the replacement");
+  await expect(panel).toContainText("Healthy", { timeout: 15_000 });
+
+  // One Ctrl+Z restores the broken state.
+  await page.keyboard.press("Control+z");
+  await expect(replaceActions).toHaveCount(0, { timeout: 15_000 });
+  await expect
+    .poll(
+      async () =>
+        geometryDistance(geometryOf(await snapshot(page)), geometryOf(broken)),
+      { timeout: 15_000 },
+    )
+    .toBe(0);
+  await expect(panel).toContainText("Broken: mirror line missing", {
+    timeout: 15_000,
+  });
+});

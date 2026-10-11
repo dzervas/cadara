@@ -1,4 +1,7 @@
-import type { SketchDerivationSettings } from "@/contracts/sketch/derived-geometry";
+import {
+  evaluateSketchDerivations,
+  type SketchDerivationSettings,
+} from "@/contracts/sketch/derived-geometry";
 import type { SketchPoint } from "@/contracts/modeling/schema";
 import type {
   SketchEntityId,
@@ -56,9 +59,15 @@ import {
   offsetCurveDescriptorFromProjectedGeometry,
   offsetSideForSketchPoint,
   createSketchTrimMutation,
+  createSketchEntityPreviewEntities,
   mirrorEditRefusal,
   trimTargetRefusal,
 } from "@/domain/sketch-editing/operations";
+import {
+  replaceMirrorLine,
+  replaceMirrorOriginal,
+  type MirrorReplacement,
+} from "@/domain/sketch-editing/mirror-repair";
 import {
   createSketchMergePointsMutation,
   getSketchMergePointRefusal,
@@ -80,6 +89,7 @@ import {
   carriedOffsetPlans,
   brokenDerivedInputMessage,
   nonAcceptedOffsetOutputs,
+  solvedPairDefinition,
 } from "@/contracts/sketch/offset-publication";
 import type { SketchOffsetPublicationRecord } from "@/contracts/solver/schema";
 import type {
@@ -87,6 +97,7 @@ import type {
   SketchEditQueryClick,
   SketchEditQueryState,
   SketchEditToolState,
+  SketchMirrorRepairState,
   SketchOffsetPreviewPublication,
   SketchSessionState,
 } from "./types";
@@ -116,6 +127,7 @@ import {
 } from "@/domain/sketch-editing/definition-references";
 import {
   buildSketchEditToolPresentation,
+  clearActiveSketchTool,
   getSketchEditToolValueLabel,
   selectSketchEditTarget,
 } from "./tools";
@@ -1339,13 +1351,409 @@ function buildSketchMirrorPresentation(
   };
 }
 
-/** Whether Enter confirms the active Mirror tool's staged mirror (T16d). */
+/**
+ * Whether Enter confirms the active Mirror tool's staged mirror (T16d), or
+ * (T16e) its repair's picked replacement.
+ */
 export function isSketchMirrorReady(session: SketchSessionState) {
+  return getSketchMirrorConfirmIntent(session) !== null;
+}
+
+/**
+ * The intent Enter (and the popup's confirm) sends for the active Mirror
+ * tool: `createMirror` for a staged mirror (T16d); T16e: `replaceMirrorLine`
+ * / `replaceMirrorOriginal` for a repair whose picked candidate is still a
+ * valid replacement. Null when nothing is ready.
+ */
+export function getSketchMirrorConfirmIntent(
+  session: SketchSessionState,
+): "createMirror" | "replaceMirrorLine" | "replaceMirrorOriginal" | null {
   const tool = session.activeEditTool;
-  return (
-    tool?.toolId === "sketchMirror" &&
-    getSketchEditOperatorResult(session, tool).valid
+  if (tool?.toolId !== "sketchMirror") return null;
+  if (tool.repair) {
+    const picked = tool.selectedTargets[0];
+    return picked &&
+      getSketchMirrorRepairCandidate(session, tool.repair, picked).ok
+      ? mirrorRepairIntent(tool.repair)
+      : null;
+  }
+  return getSketchEditOperatorResult(session, tool).valid
+    ? "createMirror"
+    : null;
+}
+
+// ------------------------------------------------- T16e: Mirror repair
+
+const mirrorRepairIntent = (repair: SketchMirrorRepairState) =>
+  repair.target === "axis" ? "replaceMirrorLine" : "replaceMirrorOriginal";
+
+/**
+ * T16e ([TECH] T16-9/T16-10): what picking `target` would make of the
+ * repaired mirror: the rebound definition, or the refusal text. Judged by
+ * the domain owner (`replaceMirrorLine` / `replaceMirrorOriginal`) against
+ * the current live solve's positions (τ) and the edit-input gate (G19).
+ */
+export function getSketchMirrorRepairCandidate(
+  session: SketchSessionState,
+  repair: SketchMirrorRepairState,
+  target: PrimitiveRef,
+): MirrorReplacement {
+  const sketchId = session.sketchId ?? ("sketch_draft" as const);
+  const use = repair.target === "axis" ? "a mirror line" : "a mirror original";
+  const context = {
+    modelingTolerance: session.modelingTolerance,
+    solvedSnapshot:
+      session.liveSolve?.sourceDefinition === session.definition
+        ? session.liveSolve.solvedSnapshot
+        : null,
+    inputRefusal: (entityId: SketchEntityId) =>
+      offsetEditInputGate(session, [entityId], use)?.message ?? null,
+  };
+  const entityId =
+    target.kind === "sketchEntity" && target.sketchId === sketchId
+      ? target.entityId
+      : null;
+  if (repair.target !== "axis")
+    return entityId
+      ? replaceMirrorOriginal(
+          session.definition,
+          repair.derivationId,
+          repair.target.outputEntityId,
+          entityId,
+          context,
+        )
+      : {
+          ok: false,
+          message: "Pick the new original: a sketch entity of the copy's kind.",
+        };
+  if (target.kind === "sketchDatumReference" && target.datumId !== "origin")
+    return replaceMirrorLine(
+      session.definition,
+      repair.derivationId,
+      { kind: "sketchDatum", datum: target.datumId },
+      context,
+    );
+  return entityId
+    ? replaceMirrorLine(
+        session.definition,
+        repair.derivationId,
+        { kind: "lineEntity", entityId },
+        context,
+      )
+    : {
+        ok: false,
+        message:
+          "Pick a straight line or a sketch axis as the new mirror line.",
+      };
+}
+
+/** The copies a repair moves: every output for the line, the one copy for an original. */
+function mirrorRepairCopyIds(
+  session: SketchSessionState,
+  repair: SketchMirrorRepairState,
+): Set<string> {
+  if (repair.target !== "axis") return new Set([repair.target.outputEntityId]);
+  const relationship = session.definition.derivedRelationships?.find(
+    (candidate) => candidate.derivationId === repair.derivationId,
   );
+  return new Set(
+    relationship?.outputs.map((output) => output.outputEntityId) ?? [],
+  );
+}
+
+/** The solved definition of a session (the authored one before any solve). */
+function solvedSessionDefinition(session: SketchSessionState) {
+  return session.liveSolve?.sourceDefinition === session.definition
+    ? solvedPairDefinition(session.definition, session.liveSolve.solvedSnapshot)
+    : session.definition;
+}
+
+/**
+ * T16e: the hover preview (pure reflection is allowed for a hover): the
+ * copies reflected about (or from) the candidate at the current solved
+ * positions, through the evaluation seam.
+ */
+function mirrorRepairHoverPreview(
+  session: SketchSessionState,
+  repair: SketchMirrorRepairState,
+  definition: SketchDefinition,
+) {
+  const snapshot =
+    session.liveSolve?.sourceDefinition === session.definition
+      ? session.liveSolve.solvedSnapshot
+      : null;
+  return createSketchEntityPreviewEntities(
+    evaluateSketchDerivations({
+      definition: snapshot
+        ? solvedPairDefinition(definition, snapshot)
+        : definition,
+      ...getSketchSessionDerivationSettings(session),
+    }).definition,
+    mirrorRepairCopyIds(session, repair),
+  );
+}
+
+/**
+ * T16e (review A-8): the solved candidate shown at the pick, so Confirm
+ * hides no jump: the candidate definition solved exactly as Confirm
+ * commits it (`rebuildSessionForDefinition`), drawn for the repaired copies
+ * and for every entity the solve moves (copy-side requirements can move
+ * the originals and whatever they drive).
+ */
+function mirrorRepairSolvedPreview(
+  session: SketchSessionState,
+  repair: SketchMirrorRepairState,
+  definition: SketchDefinition,
+) {
+  const solved = rebuildSessionForDefinition(session, { definition });
+  const allIds = new Set(definition.entities.map((entity) => entity.entityId));
+  const draw = (state: SketchSessionState) =>
+    new Map(
+      createSketchEntityPreviewEntities(
+        solvedSessionDefinition(state),
+        allIds,
+      ).map((preview) => [preview.id, preview]),
+    );
+  const before = draw(session);
+  const copies = mirrorRepairCopyIds(session, repair);
+  return [...draw(solved).values()].filter(
+    (preview) =>
+      copies.has(preview.id.replace(/^preview-/, "")) ||
+      JSON.stringify(preview) !== JSON.stringify(before.get(preview.id)),
+  );
+}
+
+function mirrorRepairLabels(
+  session: SketchSessionState,
+  repair: SketchMirrorRepairState,
+) {
+  const labelOf = (entityId: string) =>
+    session.definition.entities.find((entity) => entity.entityId === entityId)
+      ?.label ?? "";
+  const mirror =
+    session.definition.derivedRelationships?.find(
+      (candidate) => candidate.derivationId === repair.derivationId,
+    )?.label ?? "";
+  return {
+    mirror,
+    copy: repair.target === "axis" ? "" : labelOf(repair.target.outputEntityId),
+    target: (target: PrimitiveRef) =>
+      target.kind === "sketchDatumReference"
+        ? `the sketch ${target.datumId === "xAxis" ? "X" : "Y"} axis`
+        : target.kind === "sketchEntity"
+          ? `‘${labelOf(target.entityId)}’`
+          : "",
+  };
+}
+
+/**
+ * T16e: the repair presentation. Before a pick: the prompt (and a hovered
+ * candidate's refusal). After a valid pick: the solved candidate staged
+ * and a confirm-only Replace/Cancel popup ("Use ‘l2’ as the mirror line",
+ * "Use ‘e’ as the original of ‘ab mirror’"); Enter confirms too.
+ */
+function buildSketchMirrorRepairPresentation(
+  session: SketchSessionState,
+  tool: SketchEditToolState & { repair: SketchMirrorRepairState },
+  validationMessage: string | null,
+  previewEntities: readonly SketchDraftEntity[],
+): SketchToolPresentationSchema {
+  const { repair } = tool;
+  const base = buildSketchEditToolPresentation(
+    tool,
+    validationMessage,
+    previewEntities,
+  );
+  const labels = mirrorRepairLabels(session, repair);
+  const axis = repair.target === "axis";
+  const picked = tool.selectedTargets[0];
+  const readout = picked
+    ? axis
+      ? `Use ${labels.target(picked)} as the mirror line`
+      : `Use ${labels.target(picked)} as the original of ‘${labels.copy}’`
+    : null;
+  const text = readout
+    ? `${readout} — Enter or Replace to confirm`
+    : axis
+      ? `Pick the new mirror line of mirror ‘${labels.mirror}’: a straight line or a sketch axis.`
+      : `Pick the new original of ‘${labels.copy}’ (mirror ‘${labels.mirror}’).`;
+  return {
+    ...base,
+    prompts: [
+      {
+        id: `${tool.toolId}-prompt`,
+        text,
+        tone: validationMessage ? "warning" : "neutral",
+      },
+    ],
+    selectionGuide: base.selectionGuide && {
+      ...base.selectionGuide,
+      label: axis ? "New mirror line" : "New original",
+      selectedCount: picked ? 1 : 0,
+      requiredCount: 1,
+    },
+    completionHints: [
+      {
+        id: `${tool.toolId}-completion`,
+        // Review A-5: a short hint, not the prompt again.
+        text: readout
+          ? "Confirm replacement"
+          : axis
+            ? "Pick one line or sketch axis"
+            : "Pick one original",
+        ready: readout !== null,
+      },
+    ],
+    floatingInput: readout
+      ? {
+          id: "sketch-mirror-repair-confirm",
+          label: axis ? "Replace mirror line" : "Replace original",
+          value: null,
+          readout,
+          confirmOnly: true,
+          confirmLabel: "Replace",
+          cancelLabel: "Cancel",
+          placement: "target",
+          anchor: getSketchMirrorConfirmAnchor(session, previewEntities),
+          submitAction: {
+            type: "patch",
+            patch: { intent: mirrorRepairIntent(repair) },
+          },
+          cancelAction: {
+            type: "patch",
+            patch: { intent: "cancelMirrorRepair" },
+          },
+        }
+      : null,
+  };
+}
+
+/**
+ * T16e: the repair tool after a hover. With no candidate picked, a hovered
+ * candidate shows its refusal or the copies reflected about (from) it; a
+ * picked candidate keeps its solved staging and popup.
+ */
+function hoverSketchMirrorRepair(
+  session: SketchSessionState,
+  tool: SketchEditToolState & { repair: SketchMirrorRepairState },
+): SketchSessionState {
+  if (tool.selectedTargets.length > 0)
+    return { ...session, activeEditTool: tool };
+  const candidate = tool.hoverTarget
+    ? getSketchMirrorRepairCandidate(session, tool.repair, tool.hoverTarget)
+    : null;
+  const preview =
+    candidate?.ok === true
+      ? mirrorRepairHoverPreview(session, tool.repair, candidate.definition)
+      : [];
+  const message = candidate?.ok === false ? candidate.message : null;
+  return {
+    ...session,
+    activeEditTool: tool,
+    toolStagedEntities: preview,
+    toolPresentation: buildSketchMirrorRepairPresentation(
+      session,
+      tool,
+      message ?? session.validationMessage,
+      preview,
+    ),
+  };
+}
+
+/**
+ * T16e: a repair pick. A refused candidate is not kept (its text shows,
+ * nothing is staged); a valid one is staged as its solved candidate with
+ * the confirm popup. Nothing is authored before Confirm or Enter.
+ */
+function selectSketchMirrorRepairTarget(
+  session: SketchSessionState,
+  tool: SketchEditToolState & { repair: SketchMirrorRepairState },
+  target: PrimitiveRef,
+): SketchSessionState {
+  const candidate = getSketchMirrorRepairCandidate(
+    session,
+    tool.repair,
+    target,
+  );
+  const next = {
+    ...tool,
+    hoverTarget: null,
+    selectedTarget: candidate.ok ? target : null,
+    selectedTargets: candidate.ok ? [target] : [],
+  };
+  const preview = candidate.ok
+    ? mirrorRepairSolvedPreview(session, tool.repair, candidate.definition)
+    : [];
+  const message = candidate.ok ? null : candidate.message;
+  return {
+    ...session,
+    activeEditTool: next,
+    toolStagedEntities: preview,
+    validationMessage: message,
+    toolPresentation: buildSketchMirrorRepairPresentation(
+      session,
+      next,
+      message,
+      preview,
+    ),
+  };
+}
+
+/**
+ * T16e (review R-2): leaving a repair without an action (Cancel, Escape,
+ * or its mirror gone): the tool is cleared and the sketch's own invalid
+ * feedback comes back, recomputed as `rebuildSessionForDefinition` does.
+ */
+export function leaveSketchMirrorRepair(
+  session: SketchSessionState,
+): SketchSessionState {
+  const cleared = clearActiveSketchTool(session);
+  return {
+    ...cleared,
+    validationMessage:
+      cleared.liveRegions.status === "unavailable"
+        ? (getSketchSessionInvalidFeedback(cleared) ??
+          "Sketch profiles are unavailable until the sketch is corrected.")
+        : null,
+  };
+}
+
+/**
+ * T16e: the repair tool on the current definition (entering it, after
+ * Undo/Redo or an offset round; it ends when the mirror or its copy is
+ * gone): a picked candidate is re-judged and
+ * re-staged as its solved candidate (the session's own message kept), or
+ * dropped with its refusal.
+ */
+export function restageSketchMirrorRepair(
+  session: SketchSessionState,
+): SketchSessionState {
+  const tool = session.activeEditTool;
+  if (tool?.toolId !== "sketchMirror" || !tool.repair) return session;
+  // Review A-4: Undo/Redo took the mirror (or the copy) away: the repair
+  // ends, as its Cancel does.
+  const { derivationId, target } = tool.repair;
+  const relationship = session.definition.derivedRelationships?.find(
+    (candidate) => candidate.derivationId === derivationId,
+  );
+  if (
+    relationship?.kind !== "mirror" ||
+    (target !== "axis" &&
+      !session.definition.entities.some(
+        (entity) => entity.entityId === target.outputEntityId,
+      ))
+  )
+    return leaveSketchMirrorRepair(session);
+  const repairTool = { ...tool, repair: tool.repair };
+  const picked = tool.selectedTargets[0];
+  if (picked) {
+    // A still-valid pick keeps the session's own message (as T16d's re-stage).
+    const next = selectSketchMirrorRepairTarget(session, repairTool, picked);
+    return next.activeEditTool?.selectedTargets.length
+      ? { ...next, validationMessage: session.validationMessage }
+      : next;
+  }
+  return hoverSketchMirrorRepair(session, { ...repairTool, hoverTarget: null });
 }
 
 /**
@@ -1359,6 +1767,7 @@ export function restageSketchMirrorTool(
   session: SketchSessionState,
 ): SketchSessionState {
   const tool = session.activeEditTool;
+  if (tool?.repair) return restageSketchMirrorRepair(session);
   if (tool?.toolId !== "sketchMirror" || tool.selectedTargets.length === 0)
     return session;
   const staged = getSketchEditOperatorResult(session, tool);
@@ -1552,6 +1961,8 @@ export function refreshSketchEditToolAfterOffsetRound(
   const tool = session.activeEditTool;
   // T13j: a merge does not read offset publications.
   if (tool?.toolId === "sketchMergePoints") return session;
+  // T16e: a repair re-judges its candidate (the gate may have decided).
+  if (tool?.repair) return restageSketchMirrorRepair(session);
   if (tool && isSketchEditQueryTool(tool.toolId)) {
     const advanced = advanceSketchEditQueryQueue(session);
     if (tool.selectedTargets.length === 0) return advanced;
@@ -2192,6 +2603,11 @@ export function updateSketchEditToolHover(
     ...session.activeEditTool,
     hoverTarget: target,
   };
+  if (activeEditTool.repair)
+    return hoverSketchMirrorRepair(session, {
+      ...activeEditTool,
+      repair: activeEditTool.repair,
+    });
   if (activeEditTool.toolId === "sketchMergePoints")
     return {
       ...session,
@@ -2239,6 +2655,13 @@ export function selectSketchEditToolTarget(
 
   if (activeEditTool.toolId === "sketchMergePoints")
     return selectSketchMergePointsTarget(session, activeEditTool, target);
+
+  if (activeEditTool.repair)
+    return selectSketchMirrorRepairTarget(
+      session,
+      { ...activeEditTool, repair: activeEditTool.repair },
+      target,
+    );
 
   if (activeEditTool.toolId === "trim") {
     if (target.kind !== "sketchEntity") {

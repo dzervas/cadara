@@ -8754,8 +8754,10 @@ describe("T15b: failed mirrors in the session and the G19 consumers", () => {
       (entity) => entity.entityId === output.outputEntityId,
     )!.label;
     const held = `‘${copyLabel}’ is a copy made by mirror ‘${relationship.label}’, which is broken, so it can't be used as`;
+    // T16e (review R-5): its original was deleted, so the text names
+    // replacing it.
     const recovery =
-      "Fix it (Undo) or remove the mirror from the Mirror panel.";
+      "Fix it (Undo or replace the original) or remove the mirror from the Mirror panel.";
     expect(
       nonAcceptedOffsetFeatureInputMessage(
         { definition: live.definition, solvedSnapshot: live.solvedSnapshot },
