@@ -7,16 +7,27 @@
  * mirror of the sketch, whatever the selection (an empty one included),
  * so every message that points at the Mirror panel points at something
  * visible.
+ *
+ * T16b (T16a review A-1): which mirrors are broken comes from the live
+ * solve's sketch-wide profile gate (`sketchProfileGateFailures`), so the
+ * panel and the profile gate agree; the owner's evaluation of the session
+ * definition gives only the reason text, and the broken set when there is
+ * no live solve yet (re-entry before the first solve). A mirror seeded on
+ * an offset spline curve (U-G2, malformed data only) is not in the gate
+ * (its diagnostic gates the sketch by severity) and is listed as broken too.
  */
-import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
+import {
+  DERIVED_SHELL_SEED_UNSUPPORTED,
+  evaluateSketchDerivations,
+} from "@/contracts/sketch/derived-geometry";
+import { sketchProfileGateFailures } from "@/contracts/sketch/derived-validity";
 import {
   isReferenceDimension,
   type ConstraintDefinition,
 } from "@/contracts/sketch/schema";
 import {
-  DERIVED_RELATIONSHIP_DEPENDENCY_UNRESOLVED,
-  MIRROR_DIAGNOSTIC_CODES,
   resolveMirrorCounterpart,
+  type DerivedRelationshipFailureReason,
   type MirrorCorrespondenceRef,
   type MirrorRelationship,
 } from "@/contracts/sketch/mirror-requirements";
@@ -82,25 +93,58 @@ export function computeSketchMirrorActionState(
   const participantIds = selectedMirrorIds(session, selection);
   // The owner's evaluation, through the evaluation seam the solve uses
   // (one failure per relationship, unresolved order included).
-  const failureCodes = new Map(
-    evaluateSketchDerivations({
-      definition,
-      ...getSketchSessionDerivationSettings(session),
-    }).derivedFailures.map((failure) => [
+  const settings = getSketchSessionDerivationSettings(session);
+  const evaluation = evaluateSketchDerivations({ definition, ...settings });
+  const reasons = new Map(
+    evaluation.derivedFailures.map((failure) => [
       failure.derivationId,
-      failure.diagnostic.code,
+      failure.reason,
     ]),
   );
-  const entityIds = new Set(
-    definition.entities.map((entity) => entity.entityId as string),
+  const liveSnapshot = session.liveSolve?.solvedSnapshot;
+  const broken = new Set(
+    liveSnapshot ? sketchProfileGateFailures(liveSnapshot) : reasons.keys(),
+  );
+  // The live solve failed a mirror the authored positions do not (it failed
+  // during the solve, e.g. a dimension shrank its axis below τ): its reason
+  // is the owner's at the solved positions.
+  if (liveSnapshot && [...broken].some((id) => !reasons.has(id))) {
+    const solved = new Map(
+      liveSnapshot.solvedPoints.map((point) => [
+        point.pointId,
+        point.solvedPosition,
+      ]),
+    );
+    for (const failure of evaluateSketchDerivations({
+      definition: {
+        ...definition,
+        points: definition.points.map((point) => {
+          const position = solved.get(point.pointId);
+          return position ? { ...point, position } : point;
+        }),
+      },
+      ...settings,
+    }).derivedFailures)
+      if (!reasons.has(failure.derivationId))
+        reasons.set(failure.derivationId, failure.reason);
+  }
+  const shellSeeds = new Set(
+    evaluation.diagnostics.flatMap((diagnostic) =>
+      diagnostic.code === DERIVED_SHELL_SEED_UNSUPPORTED &&
+      diagnostic.target?.kind === "entity"
+        ? [diagnostic.target.entityId as string]
+        : [],
+    ),
   );
   const entries = mirrors.map((relationship) => ({
     relationship,
-    brokenReason: mirrorBrokenReason(
-      relationship,
-      failureCodes.get(relationship.derivationId),
-      entityIds,
-    ),
+    brokenReason: broken.has(relationship.derivationId)
+      ? mirrorBrokenReason(reasons.get(relationship.derivationId))
+      : relationship.outputs.some((output) =>
+            shellSeeds.has(output.seedEntityId),
+          )
+        ? "original is an offset spline curve"
+        : null,
   }));
   const listed = [
     ...entries.filter(({ relationship }) =>
@@ -208,26 +252,28 @@ function holdsByMirror(
   );
 }
 
-/** A failed relationship's reason in a few words; null when it evaluated. */
+/**
+ * A broken mirror's reason in a few words, from the owner's failure (the
+ * same classification as its message). Without one, the generic reason.
+ */
 function mirrorBrokenReason(
-  relationship: MirrorRelationship,
-  code: string | undefined,
-  entityIds: ReadonlySet<string>,
-): string | null {
-  switch (code) {
-    case undefined:
-      return null;
-    case DERIVED_RELATIONSHIP_DEPENDENCY_UNRESOLVED:
+  reason: DerivedRelationshipFailureReason | undefined,
+): string {
+  switch (reason) {
+    case "dependencyLoop":
+    case "dependsOnLoop":
       return "dependency loop";
-    case MIRROR_DIAGNOSTIC_CODES.axisMissing:
+    case "axisMissing":
       return "mirror line missing";
-    case MIRROR_DIAGNOSTIC_CODES.axisDegenerate:
+    case "axisDegenerate":
       return "mirror line too short";
+    case "seedMissing":
+      return "original deleted";
+    case "copyMissing":
+      return "copy deleted";
+    case "mapMismatch":
+      return "geometry no longer matches";
+    case undefined:
+      return "cannot be solved";
   }
-  const outputs = relationship.outputs;
-  return outputs.some((output) => !entityIds.has(output.seedEntityId))
-    ? "original deleted"
-    : outputs.some((output) => !entityIds.has(output.outputEntityId))
-      ? "copy deleted"
-      : "geometry no longer matches";
 }

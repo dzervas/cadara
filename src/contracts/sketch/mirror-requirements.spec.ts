@@ -231,7 +231,7 @@ function resolveOn(
   tolerance: number,
 ) {
   return resolveMirrorAxis(
-    derivationId,
+    { derivationId, label: derivationId },
     reference,
     indexMirrorGeometry(definition),
     tolerance,

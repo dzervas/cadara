@@ -11,8 +11,16 @@ import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
 import {
   createSketchSessionFromSnapshot,
+  deleteSelectedSketchGeometry,
   getSketchSessionPreviewLabel,
 } from "@/domain/editor/sketch-session";
+import { getConsumableSketchRegions } from "@/contracts/sketch/derived-validity";
+import {
+  eid,
+  entityRef,
+  mirroredSession,
+} from "@/domain/editor/sketch-mirror.fixtures";
+import { removeMirrorRelationship } from "@/domain/sketch-editing/mirror-repair";
 import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
 
 type OpenCascadeModule = new (
@@ -474,4 +482,241 @@ test("OCC rejects structurally malformed sketch values instead of classifying th
   expect(rejected.revisionState.kind).toBe("rejected");
   expect(rejected.diagnostics[0]?.message).toContain("positive");
   adapter.dispose();
+});
+
+// T16b (A4, B14, B16, B17/[TECH] T16-18, issue 15 "Invalid state and
+// recovery"; lane: logic, seam: production OCC adapter conformance). A
+// sketch whose mirror axis was deleted is retained across Finish and
+// save/reopen, every profile of it is blocked (sketch-wide gate), an
+// unrelated sketch in the same document stays current and extrudes; removal
+// repairs it and the Undo-equivalent compensating commit breaks it again.
+// Validity is compared on `derivedValidity` (the `solvedSnapshot.diagnostics`
+// commit/rebuild asymmetry is recorded, not fixed).
+test("OCC retains a broken mirror across Finish and save/reopen, blocks all of its sketch's profiles, keeps a peer sketch usable, and recovers by removal", async () => {
+  const oc = await loadOcc();
+  const request = {
+    contractVersion: "modeling-contract/v1alpha1",
+    documentId: "doc_workspace",
+  } as const;
+  const seedDocument =
+    await new MockKernelAdapter().exportAuthoredModelDocument("doc_workspace");
+  const peerSketch = seedDocument.sketches[0]!;
+  const seedFeature = seedDocument.features.find(
+    (feature) => feature.featureId === "feature_extrude-1",
+  )!.definition;
+  if (seedFeature.kind !== "extrude") throw new Error("premise: Extrude 1");
+  const seedExtrude = seedFeature;
+  const { session, relationship } = mirroredSession("free");
+  const broken = deleteSelectedSketchGeometry(session, [
+    entityRef(session, eid("axis")),
+  ]).definition;
+  const adapter = createAdapter(oc);
+  await adapter.restoreAuthoredModelDocument(seedDocument);
+  const sketchOf = async (
+    kernel: OpenCascadeKernelAdapter,
+    sketchId: string,
+  ) => {
+    const { snapshot } = await kernel.getDocumentSnapshot(request);
+    return {
+      snapshot,
+      record: snapshot.document.sketches.find(
+        (entry) => entry.sketchId === sketchId,
+      )!,
+    };
+  };
+  const extrude = (
+    kernel: OpenCascadeKernelAdapter,
+    baseRevisionId: string,
+    sketchId: string,
+    regionId: string,
+  ) =>
+    kernel.createFeature({
+      ...request,
+      baseRevisionId: baseRevisionId as never,
+      // The seed's Extrude 1 (a persistable definition) on another region.
+      definition: {
+        ...seedExtrude,
+        parameters: {
+          ...seedExtrude.parameters,
+          profiles: [
+            {
+              kind: "region",
+              sketchId: sketchId as never,
+              regionId: regionId as never,
+            },
+          ],
+        },
+      },
+    });
+  const commit = (
+    kernel: OpenCascadeKernelAdapter,
+    baseRevisionId: string,
+    sketchId: string | null,
+    definition: SketchDefinition,
+    label: string,
+  ) =>
+    kernel.commitSketch({
+      ...request,
+      baseRevisionId: baseRevisionId as never,
+      solverCorrelation: correlation(label),
+      sketchId: sketchId as never,
+      sketchLabel: "Mirrored",
+      plane: peerSketch.plane,
+      definition,
+    });
+  const featureCodes = (
+    snapshot: Awaited<ReturnType<typeof sketchOf>>["snapshot"],
+    featureId: string,
+  ) =>
+    snapshot.document.diagnostics
+      .filter((diagnostic) => diagnostic.featureId === featureId)
+      .map((diagnostic) => diagnostic.code);
+  const hasBody = (
+    snapshot: Awaited<ReturnType<typeof sketchOf>>["snapshot"],
+    featureId: string,
+  ) =>
+    snapshot.document.bodies.some((body) => body.ownerFeatureId === featureId);
+  const validityOf = (
+    record: Awaited<ReturnType<typeof sketchOf>>["record"],
+  ) => ({
+    state: record.sketch.derivedValidity.state,
+    codes: record.sketch.derivedValidity.diagnostics.map((entry) => entry.code),
+    failed: record.sketch.solvedSnapshot.failedDerivationIds ?? [],
+    regions: record.sketch.regions.length,
+    consumable: getConsumableSketchRegions(record.sketch).length,
+  });
+  const BROKEN = {
+    state: "invalid",
+    codes: [
+      "derived-mirror-axis-missing",
+      "regions-unavailable",
+      "sketch-validation-failed",
+    ],
+    failed: [relationship.derivationId],
+    regions: 0,
+    consumable: 0,
+  };
+  const MESSAGE =
+    "Mirror ‘mirror 1’ is broken: its mirror line was deleted. Its copies stay where they were last solved and can't be used; profiles from this sketch are blocked. Undo, or remove the mirror from the Mirror panel.";
+
+  // A healthy mirrored sketch, extruded on its original circle's region.
+  const restored = await adapter.getDocumentSnapshot(request);
+  const healthyCommit = await commit(
+    adapter,
+    restored.snapshot.document.revisionId,
+    null,
+    session.definition,
+    "t16b_healthy",
+  );
+  expect(healthyCommit.revisionState.kind).toBe("accepted");
+  const sketchId = healthyCommit.sketchId!;
+  const healthy = await sketchOf(adapter, sketchId);
+  expect(healthy.record.sketch.derivedValidity.state).toBe("current");
+  const seedRegion = healthy.record.sketch.regions.find((region) =>
+    JSON.stringify(region.loops).includes(`"${eid("c")}"`),
+  );
+  expect(seedRegion, "premise: the original circle has a region").toBeDefined();
+  const built = await extrude(
+    adapter,
+    healthyCommit.revisionId,
+    sketchId,
+    seedRegion!.regionId,
+  );
+  expect(built.revisionState.kind).toBe("accepted");
+  const featureId = (
+    await sketchOf(adapter, sketchId)
+  ).snapshot.document.features.at(-1)!.featureId;
+  expect(hasBody((await sketchOf(adapter, sketchId)).snapshot, featureId)).toBe(
+    true,
+  );
+
+  // Finish with the mirror axis deleted: accepted and retained, invalid.
+  const brokenCommit = await commit(
+    adapter,
+    built.revisionId,
+    sketchId,
+    broken,
+    "t16b_broken",
+  );
+  expect(brokenCommit.revisionState.kind).toBe("accepted");
+  const finished = await sketchOf(adapter, sketchId);
+  expect(validityOf(finished.record)).toEqual(BROKEN);
+  expect(
+    finished.record.sketch.derivedValidity.diagnostics[0]!.message,
+    "the label-based message",
+  ).toBe(MESSAGE);
+  expect(
+    featureCodes(finished.snapshot, featureId),
+    "the built extrude keeps its selection and waits for the sketch",
+  ).toEqual(["profile-region-sketch-not-current"]);
+  expect(hasBody(finished.snapshot, featureId)).toBe(false);
+  // The unrelated sketch of the same document stays current and its Extrude 1
+  // keeps building.
+  const peer = finished.snapshot.document.sketches.find(
+    (entry) => entry.sketchId === peerSketch.sketchId,
+  )!;
+  expect(peer.sketch.derivedValidity.state).toBe("current");
+  expect(getConsumableSketchRegions(peer.sketch).length).toBeGreaterThan(0);
+  expect(featureCodes(finished.snapshot, "feature_extrude-1")).toEqual([]);
+  expect(hasBody(finished.snapshot, "feature_extrude-1")).toBe(true);
+
+  // Save and reopen: same definition, same validity, still blocked.
+  const authored = await adapter.exportAuthoredModelDocument("doc_workspace");
+  adapter.dispose();
+  const reopened = createAdapter(oc);
+  await reopened.restoreAuthoredModelDocument(authored);
+  const reopenedSketch = await sketchOf(reopened, sketchId);
+  expect(JSON.stringify(reopenedSketch.record.sketch.definition)).toBe(
+    JSON.stringify(finished.record.sketch.definition),
+  );
+  expect(validityOf(reopenedSketch.record)).toEqual(BROKEN);
+  expect(reopenedSketch.record.sketch.derivedValidity.diagnostics).toEqual(
+    finished.record.sketch.derivedValidity.diagnostics,
+  );
+  expect(featureCodes(reopenedSketch.snapshot, featureId)).toEqual([
+    "profile-region-sketch-not-current",
+  ]);
+  const reopenedPeer = reopenedSketch.snapshot.document.sketches.find(
+    (entry) => entry.sketchId === peerSketch.sketchId,
+  )!;
+  expect(reopenedPeer.sketch.derivedValidity.state).toBe("current");
+  expect(hasBody(reopenedSketch.snapshot, "feature_extrude-1")).toBe(true);
+
+  // Repair by removal (the T16a write set): current, regions back, and the
+  // kept selection reconnects by identity.
+  const removal = removeMirrorRelationship(
+    reopenedSketch.record.sketch.definition,
+    relationship.derivationId,
+  )!;
+  const repaired = await commit(
+    reopened,
+    reopenedSketch.snapshot.document.revisionId,
+    sketchId,
+    removal.definition,
+    "t16b_repaired",
+  );
+  expect(repaired.revisionState.kind).toBe("accepted");
+  const afterRepair = await sketchOf(reopened, sketchId);
+  expect(afterRepair.record.sketch.derivedValidity.state).toBe("current");
+  expect(
+    afterRepair.record.sketch.regions.map((region) => region.regionId),
+  ).toContain(seedRegion!.regionId);
+  expect(featureCodes(afterRepair.snapshot, featureId)).toEqual([]);
+  expect(hasBody(afterRepair.snapshot, featureId)).toBe(true);
+
+  // The Undo-equivalent compensating commit: invalid again, same validity.
+  const compensated = await commit(
+    reopened,
+    repaired.revisionId,
+    sketchId,
+    reopenedSketch.record.sketch.definition,
+    "t16b_compensated",
+  );
+  expect(compensated.revisionState.kind).toBe("accepted");
+  const afterUndo = await sketchOf(reopened, sketchId);
+  expect(validityOf(afterUndo.record)).toEqual(BROKEN);
+  expect(featureCodes(afterUndo.snapshot, featureId)).toEqual([
+    "profile-region-sketch-not-current",
+  ]);
+  reopened.dispose();
 });

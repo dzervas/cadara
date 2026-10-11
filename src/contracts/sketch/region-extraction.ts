@@ -33,6 +33,7 @@ import type {
   SketchId,
   SketchPointId,
 } from "@/contracts/shared/ids";
+import { sketchProfileGateFailures } from "@/contracts/sketch/derived-validity";
 import { nonAcceptedOffsetOutputs } from "@/contracts/sketch/offset-publication";
 import {
   canonicalRegionSignature,
@@ -3644,8 +3645,9 @@ function projectedReferenceDiagnostics(
 function isAcceptedSolve(solved: SolvedSketchSnapshot) {
   return (
     solved.status.solveState === "solved" &&
-    // T15b ([TECH] T-8): a failed mirror blocks every profile of the sketch.
-    (solved.failedDerivationIds ?? []).length === 0 &&
+    // T15b ([TECH] T-8), T16b ([TECH] T16-4): a failed mirror blocks every
+    // profile of the sketch (the sketch-wide profile gate).
+    sketchProfileGateFailures(solved).length === 0 &&
     // [TECH] G16″: a requirement blocked by a failed offset relationship
     // does not withhold the rest of the sketch's regions (U-G1, scoped).
     solved.constraintStatuses.every((entry) =>

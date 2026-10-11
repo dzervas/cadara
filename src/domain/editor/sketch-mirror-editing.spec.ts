@@ -7,7 +7,10 @@
  */
 import { describe, expect, test } from "vitest";
 import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
-import type { SketchDefinition } from "@/contracts/sketch/schema";
+import type {
+  SketchDefinition,
+  SketchDerivationDefinition,
+} from "@/contracts/sketch/schema";
 import { reconstructSplineAggregate } from "@/contracts/sketch/spline-geometry";
 import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
 import type { PrimitiveRef } from "@/core/editor/schema";
@@ -45,6 +48,7 @@ import {
   pid,
   pointRef,
   seedDefinition,
+  withDerived,
   type P,
 } from "./sketch-mirror.fixtures";
 
@@ -1027,5 +1031,188 @@ describe("T15d T-12 through a mirror chain (review RQ-1)", () => {
         isExactZero(occurrence(done, entityId, 1).tangent),
         `${entityId} exact zero`,
       ).toBe(true);
+  });
+});
+
+// T16b ([TECH] T16-5, plan review R-4/R-5; logic lane, seam: the owner's
+// failure as carried by the session's live solve and shown as its
+// validation message). One message per failed relationship, by label
+// (never its id), reason-specific, naming only recovery commands that exist
+// (Undo; for a mirror, removal from the Mirror panel). Codes unchanged.
+describe("T16b: failure messages name the relationship by label, say why and how to recover", () => {
+  const MIRROR_TAIL =
+    " Its copies stay where they were last solved and can't be used; profiles from this sketch are blocked. Undo, or remove the mirror from the Mirror panel.";
+  const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/;
+  const rebuild = (session: SketchSessionState, definition: SketchDefinition) =>
+    rebuildSessionForDefinition(session, { definition });
+  const without = (session: SketchSessionState, ids: readonly string[]) => {
+    const entities = session.definition.entities.filter(
+      (candidate) => !ids.includes(candidate.entityId),
+    );
+    return rebuild(session, {
+      ...session.definition,
+      entityIds: entities.map((candidate) => candidate.entityId),
+      entities,
+    });
+  };
+  /** The live solve's derived-failure errors, as [code, message]. */
+  const failures = (session: SketchSessionState) =>
+    session
+      .liveSolve!.solvedSnapshot.diagnostics.filter((diagnostic) =>
+        diagnostic.code.startsWith("derived-"),
+      )
+      .map((diagnostic) => [diagnostic.code, diagnostic.message]);
+
+  test("every mirror failure reason: one message, the exact label-based text, no id, shown as the validation message", () => {
+    const { session, relationship, outputOf } = mirroredSession("free");
+    const label = relationship.label;
+    const copyLine = outputOf("ab").outputEntityId;
+    const cases: [string, SketchSessionState, string, string][] = [
+      [
+        "axis missing",
+        without(session, [eid("axis")]),
+        "derived-mirror-axis-missing",
+        `Mirror ‘${label}’ is broken: its mirror line was deleted.`,
+      ],
+      [
+        "axis degenerate",
+        rebuild(session, {
+          ...session.definition,
+          points: session.definition.points.map((point) =>
+            point.pointId === pid("x1")
+              ? { ...point, position: [-2, 0] }
+              : point,
+          ),
+        }),
+        "derived-mirror-axis-degenerate",
+        `Mirror ‘${label}’ is broken: its mirror line is shorter than the modeling tolerance.`,
+      ],
+      [
+        "seed missing",
+        without(session, [eid("c")]),
+        "derived-mirror-map-stale",
+        `Mirror ‘${label}’ is broken: the original of ‘c mirror’ was deleted.`,
+      ],
+      [
+        "copy missing",
+        without(session, [outputOf("c").outputEntityId]),
+        "derived-mirror-map-stale",
+        `Mirror ‘${label}’ is broken: a copy of ‘c’ was deleted.`,
+      ],
+      [
+        "geometry mismatch",
+        rebuild(session, {
+          ...session.definition,
+          entities: session.definition.entities.map((candidate) =>
+            candidate.entityId === copyLine && candidate.kind === "lineSegment"
+              ? { ...candidate, endPointId: pid("u") }
+              : candidate,
+          ),
+        }),
+        "derived-mirror-map-stale",
+        `Mirror ‘${label}’ is broken: its geometry no longer matches (copy ‘ab mirror’ of ‘ab’).`,
+      ],
+      [
+        "dependency loop",
+        rebuild(session, {
+          ...session.definition,
+          derivedRelationships: [
+            {
+              ...relationship,
+              mirrorReference: { kind: "lineEntity", entityId: copyLine },
+            },
+          ],
+        }),
+        "derived-relationship-dependency-unresolved",
+        `Mirror ‘${label}’ depends on its own copies (a dependency loop).`,
+      ],
+    ];
+    for (const [reason, broken, code, statement] of cases) {
+      const message = statement + MIRROR_TAIL;
+      expect(failures(broken), reason).toEqual([[code, message]]);
+      expect(message, `${reason}: no id`).not.toContain(
+        relationship.derivationId,
+      );
+      expect(message, `${reason}: no UUID`).not.toMatch(UUID);
+      expect(broken.validationMessage, reason).toBe(message);
+    }
+  });
+
+  test("a chain: the mirror on the loop and the one downstream of it each get their own message", () => {
+    const { session, setup, second } = chainSession();
+    const firstCopyLine = setup.outputOf("ab").outputEntityId;
+    const broken = rebuild(session, {
+      ...session.definition,
+      derivedRelationships: session.definition.derivedRelationships!.map(
+        (candidate) =>
+          candidate.derivationId === setup.relationship.derivationId
+            ? {
+                ...candidate,
+                mirrorReference: {
+                  kind: "lineEntity" as const,
+                  entityId: firstCopyLine,
+                },
+              }
+            : candidate,
+      ),
+    });
+    expect(failures(broken)).toEqual([
+      [
+        "derived-relationship-dependency-unresolved",
+        `Mirror ‘${setup.relationship.label}’ depends on its own copies (a dependency loop).${MIRROR_TAIL}`,
+      ],
+      [
+        "derived-relationship-dependency-unresolved",
+        `Mirror ‘${second.label}’ depends on geometry made in a dependency loop.${MIRROR_TAIL}`,
+      ],
+    ]);
+  });
+
+  test("other kinds take their own noun and only Undo (no removal command exists for them); an offset's stays relationship-scoped", () => {
+    const { session, outputOf } = mirroredSession("free");
+    const pattern = withDerived(session, "linearPattern", [eid("u")], 91, 3);
+    const offset = withDerived(
+      pattern.session,
+      "offset",
+      [outputOf("ab").outputEntityId],
+      92,
+      0.5,
+    );
+    const selfReading = (
+      relationship: SketchDerivationDefinition,
+    ): SketchDerivationDefinition =>
+      ({
+        ...relationship,
+        seedEntityIds: [relationship.outputs[0]!.outputEntityId],
+        outputs: relationship.outputs.map((output, index) =>
+          index === 0
+            ? { ...output, seedEntityId: output.outputEntityId }
+            : output,
+        ),
+      }) as SketchDerivationDefinition;
+    const definition = {
+      ...offset.session.definition,
+      derivedRelationships: offset.session.definition.derivedRelationships!.map(
+        (candidate) =>
+          candidate.derivationId === pattern.relationship.derivationId ||
+          candidate.derivationId === offset.relationship.derivationId
+            ? selfReading(candidate)
+            : candidate,
+      ),
+    };
+    const evaluation = evaluateSketchDerivations({
+      definition,
+      modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+    });
+    expect(
+      evaluation.derivedFailures.map((failure) => failure.diagnostic.message),
+    ).toEqual([
+      `Linear pattern ‘${pattern.relationship.label}’ depends on its own copies (a dependency loop). Its copies stay where they were last solved and can't be used; profiles from this sketch are blocked. Undo to recover.`,
+    ]);
+    expect(
+      evaluation.offsetFailures.map((failure) => failure.diagnostic.message),
+    ).toEqual([
+      `Offset ‘${offset.relationship.label}’ depends on its own offset curves (a dependency loop). Its offset curves stay where they were last solved and can't be used. Undo to recover.`,
+    ]);
   });
 });

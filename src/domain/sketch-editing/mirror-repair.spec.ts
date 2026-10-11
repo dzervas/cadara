@@ -414,7 +414,14 @@ describe("T16a: downstream relationships are never touched; they become explicit
       (entry) => entry.code === MIRROR_DIAGNOSTIC_CODES.mapStale,
     );
     expect(diagnostic?.severity).toBe("error");
-    expect(diagnostic?.message).toContain(second.derivationId);
+    // T16b: the message names the downstream mirror by label and its
+    // surviving copy (the first output whose original was removed).
+    const firstCopy = removal.definition.entities.find(
+      (entity) => entity.entityId === second.outputs[0]!.outputEntityId,
+    )!;
+    expect(diagnostic?.message).toBe(
+      `Mirror ‘${second.label}’ is broken: the original of ‘${firstCopy.label}’ was deleted. Its copies stay where they were last solved and can't be used; profiles from this sketch are blocked. Undo, or remove the mirror from the Mirror panel.`,
+    );
     expect(after.liveRegions.status, "the sketch stays blocked").toBe(
       "unavailable",
     );

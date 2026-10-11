@@ -17,6 +17,7 @@ import type {
   SketchStyleRecord,
   SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
+import { sketchProfileGateFailures } from "@/contracts/sketch/derived-validity";
 import { nonAcceptedOffsetOutputs } from "@/contracts/sketch/offset-publication";
 import {
   tessellateBoundaryLoop,
@@ -283,6 +284,9 @@ export function getStableSketchSessionDisplayRenderables(
     displayDefinition,
     solved.solvedSnapshot,
   );
+  const failedOwners = new Set(
+    sketchProfileGateFailures(solved.solvedSnapshot),
+  );
   const entityRenderables = [
     ...getAcceptedSketchDisplayEntities(sketchId, displayDefinition).map(
       (entity, index) => {
@@ -292,12 +296,16 @@ export function getStableSketchSessionDisplayRenderables(
           index,
           entity.entityId ? localStyleLookup.get(entity.entityId) : undefined,
         );
-        return entity.entityId && nonAcceptedOutputs.has(entity.entityId)
+        const owner = entity.entityId
+          ? nonAcceptedOutputs.get(entity.entityId)
+          : undefined;
+        return owner
           ? {
               ...renderable,
-              regionValidity: getDerivedShellDisplayValidity(
+              regionValidity: getNonAcceptedOutputDisplayValidity(
                 session,
-                "provisional",
+                owner,
+                failedOwners,
               ),
             }
           : renderable;
@@ -912,6 +920,25 @@ export function getDerivedShellDisplayValidity(
 }
 
 /**
+ * T16b ([TECH] T16-6, plan review A-5): display validity of a non-accepted
+ * derived output by its owner (the G16‴ closure of
+ * `nonAcceptedOffsetOutputs`). An output held by a failed relationship (the
+ * sketch-wide profile gate: directly, or a copy of a held copy) is settled
+ * invalid geometry, so it is always `invalid` (red), during a drag and
+ * before the first live solve too. Any other owner, a not yet certified
+ * offset, keeps `getDerivedShellDisplayValidity` (U-A).
+ */
+function getNonAcceptedOutputDisplayValidity(
+  session: SketchSessionState,
+  owner: { readonly derivationId: string },
+  failedOwners: ReadonlySet<string>,
+): SketchDerivedValidity["state"] {
+  return failedOwners.has(owner.derivationId)
+    ? "invalid"
+    : getDerivedShellDisplayValidity(session, "provisional");
+}
+
+/**
  * The derived offset shells of the display definition, drawn from their
  * solved spans clipped to each span's drawn `queryDomain` (the same
  * `solvedCubicSpans` pick, snap, measure, export and the OCC snapshot read).
@@ -927,6 +954,7 @@ export function createDisplayRenderablesForDerivedShells(
     solvedSnapshot.solvedEntities.map((record) => [record.entityId, record]),
   );
   const nonAccepted = nonAcceptedOffsetOutputs(definition, solvedSnapshot);
+  const failedOwners = new Set(sketchProfileGateFailures(solvedSnapshot));
   return definition.entities.flatMap((entity) => {
     if (entity.kind !== "derivedPiecewiseCubic") return [];
     const record = records.get(entity.entityId);
@@ -951,10 +979,13 @@ export function createDisplayRenderablesForDerivedShells(
           styles.get(entity.entityId),
         ),
         id: `renderable_sketch_shell_${entity.entityId}` as RenderableId,
-        regionValidity: getDerivedShellDisplayValidity(
-          session,
-          nonAccepted.has(entity.entityId) ? "provisional" : "certified",
-        ),
+        regionValidity: nonAccepted.has(entity.entityId)
+          ? getNonAcceptedOutputDisplayValidity(
+              session,
+              nonAccepted.get(entity.entityId)!,
+              failedOwners,
+            )
+          : getDerivedShellDisplayValidity(session, "certified"),
       },
     ];
   });

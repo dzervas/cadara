@@ -24,6 +24,21 @@ export function mergeSketchSolveDiagnostics(
   );
 }
 
+/**
+ * T16b ([TECH] T16-4, issue 15 "Invalid state and recovery"): the
+ * sketch-wide profile gate. The derived relationships the solve failed and
+ * holds (a broken mirror, or a mirror, pattern or transform whose dependency
+ * order is unresolved): while any exists, no profile of the sketch is
+ * consumable, whatever their diagnostics' severity. Unrelated sketches are
+ * unaffected; an offset failure stays relationship-scoped (U-G5) and is
+ * never listed here.
+ */
+export function sketchProfileGateFailures(
+  solvedSnapshot: Pick<SolvedSketchSnapshot, "failedDerivationIds">,
+): readonly string[] {
+  return solvedSnapshot.failedDerivationIds ?? [];
+}
+
 export function deriveSketchValidity(input: {
   solvedSnapshot: SolvedSketchSnapshot;
   diagnostics?: readonly SketchSolveDiagnostic[];
@@ -42,6 +57,7 @@ export function deriveSketchValidity(input: {
     solveState === "failed" ||
     solveState === "notEvaluated" ||
     solveState === "partiallySolved" ||
+    sketchProfileGateFailures(input.solvedSnapshot).length > 0 ||
     diagnostics.some((diagnostic) => diagnostic.severity === "error");
   return { state: invalid ? "invalid" : "current", diagnostics };
 }
