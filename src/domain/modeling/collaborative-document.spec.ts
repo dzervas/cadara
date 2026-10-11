@@ -16,7 +16,15 @@ import { createStandardPlaneDefinition } from "./opencascade-kernel-seed";
 import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
 import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import { parseAuthoredModelDocument } from "@/contracts/modeling/authored-document.runtime-schema";
-import { isReferenceDimension } from "@/contracts/sketch/schema";
+import {
+  isReferenceDimension,
+  type SketchDefinition,
+} from "@/contracts/sketch/schema";
+import { validateSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { createDocumentSolverTolerances } from "@/contracts/solver/schema";
+import { mirroredSession } from "@/domain/editor/sketch-mirror.fixtures";
+import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
+import { removeMirrorRelationship } from "@/domain/sketch-editing/mirror-repair";
 import {
   makeReferenceDimensionCases,
   makeReferenceDimensionSketch,
@@ -322,4 +330,93 @@ test("T13d D9′: concurrent Make reference and value edit merge into an openabl
   const dimension = merged.sketches[0]!.definition.dimensions[0]!;
   expect(isReferenceDimension(dimension), "the reference wins").toBe(true);
   expect(dimension).toMatchObject({ value: createLiteralAuthoredValue(7) });
+});
+
+// T16g (T16-plan review A-13), collaborative seam: one author removes a
+// mirror (its copies go with it, one action), while a peer concurrently
+// dimensions one of those copies. The real Automerge merge keeps the peer's
+// dimension (an authored record is never deleted silently) still naming the
+// removed copy (never retargeted to the original); the merged document
+// opens, and the sketch reports the missing entity as an explicit error.
+test("T16g A-13: a peer's concurrent dimension on a copy removed with its mirror merges into an explicit missing-entity error (kept, not retargeted)", async () => {
+  const seed = await fixture();
+  const { session, relationship, outputOf } = mirroredSession("free");
+  seed.sketches[0]!.definition = structuredClone(session.definition);
+  expect(parseAuthoredModelDocument(structuredClone(seed)).ok, "premise").toBe(
+    true,
+  );
+  const copy = outputOf("ab").outputEntityId;
+  const base = Automerge.from(createCollaborativeDocument(seed));
+  const removing = change(Automerge.clone(base), seed, (document) => {
+    document.sketches[0]!.definition = removeMirrorRelationship(
+      document.sketches[0]!.definition,
+      relationship.derivationId,
+    )!.definition;
+  });
+  const dimension = {
+    dimensionId: "dimension_peer_copy",
+    kind: "lineLength",
+    label: "Peer length",
+    entityId: copy,
+    value: createLiteralAuthoredValue(3),
+  } as SketchDefinition["dimensions"][number];
+  const peer = change(Automerge.clone(base), seed, (document) => {
+    const definition = document.sketches[0]!.definition;
+    definition.dimensionIds = [
+      ...definition.dimensionIds,
+      dimension.dimensionId,
+    ];
+    definition.dimensions = [...definition.dimensions, dimension];
+  });
+  const merged = materializeCollaborativeDocument(
+    Automerge.merge(removing, peer),
+  );
+  expect(
+    parseAuthoredModelDocument(structuredClone(merged)).ok,
+    "the merged document opens",
+  ).toBe(true);
+  const definition = merged.sketches[0]!.definition;
+  expect(definition.derivedRelationships ?? [], "the mirror is gone").toEqual(
+    [],
+  );
+  expect(definition.entityIds, "the copy is gone").not.toContain(copy);
+  expect(
+    definition.dimensions,
+    "the peer's dimension is kept, still naming the removed copy",
+  ).toEqual([dimension]);
+  const validation = validateSketchDefinitionCore({
+    definition,
+    tolerances: createDocumentSolverTolerances(OCC_KERNEL_SETTINGS),
+    modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+  });
+  expect(validation.isValid).toBe(false);
+  expect(
+    validation.diagnostics
+      .filter((diagnostic) => diagnostic.severity === "error")
+      .map((diagnostic) => [diagnostic.code, diagnostic.target]),
+  ).toEqual([
+    [
+      "missing-dimension-entity",
+      { kind: "dimension", dimensionId: "dimension_peer_copy" },
+    ],
+  ]);
+  const reopened = rebuildSessionForDefinition(
+    createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
+    { definition },
+  );
+  // Opened for editing: the dimension is named as unsatisfiable and the
+  // sketch's profiles are blocked; deleting it (or Undo) is the recovery.
+  expect(reopened.validationMessage).toBe(
+    "Peer length (3 mm) cannot be satisfied. The sketch is invalid; profiles from it are blocked. Change or delete it, or Undo.",
+  );
+  expect(reopened.liveRegions.status).toBe("unavailable");
+  expect(
+    reopened.liveSolve!.solvedSnapshot.diagnostics.map((diagnostic) => [
+      diagnostic.code,
+      diagnostic.severity,
+    ]),
+  ).toEqual([["missing-dimension-entity", "error"]]);
 });

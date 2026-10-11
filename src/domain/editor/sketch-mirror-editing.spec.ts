@@ -64,6 +64,7 @@ import {
   getSketchSessionDisplayDefinition,
   rebuildSessionForDefinition,
 } from "@/domain/editor/sketch-session/internals";
+import { completeSketchEditQueriesForTest } from "@/domain/editor/state-machine-test-builder";
 import { applyTangentAction } from "@/domain/editor/sketch-session/tangent-actions";
 import { toggleSketchConstructionTarget } from "@/domain/editor/sketch-session/tools";
 import { patchSketchStyleValue } from "@/domain/editor/sketch-session/styles";
@@ -2372,4 +2373,295 @@ describe("T16e: the failed-copy input text names the repair that fits the failur
       );
     }
   });
+});
+
+// T16g B8 (T15 close-out audit §3.1, CA-2; T15c review R-1b). Logic lane;
+// seam: the session's drag entry points on a mirror authored by the Mirror
+// tool. The original line e–x1 ends on the mirror line's own end x1, so its
+// copy's end sits on x1 too (x1 lies on the mirror line). Dragging that copy
+// end requests the mirror line's end: the line moves with it (T15c P6
+// "does not move" is superseded). Dragging the copy's other end keeps the
+// line bitwise (the axis preference).
+describe("T16g B8: the copy of an original's end that is the mirror line's own end", () => {
+  const reflectAbout = (p: P, a: P, b: P): P => {
+    const d = [b[0] - a[0], b[1] - a[1]] as const;
+    const t =
+      ((p[0] - a[0]) * d[0] + (p[1] - a[1]) * d[1]) /
+      (d[0] * d[0] + d[1] * d[1]);
+    return [2 * (a[0] + t * d[0]) - p[0], 2 * (a[1] + t * d[1]) - p[1]];
+  };
+  function sharedAxisEnd() {
+    const base = seedDefinition();
+    const e = {
+      pointId: pid("e"),
+      label: "e",
+      target: {
+        kind: "sketchPoint",
+        sketchId: "sketch_draft",
+        pointId: pid("e"),
+      },
+      position: [24, 4],
+      isConstruction: false,
+    } as SketchDefinition["points"][number];
+    const ex = {
+      kind: "lineSegment",
+      entityId: eid("ex"),
+      label: "ex",
+      target: entityTarget("ex"),
+      isConstruction: false,
+      startPointId: pid("e"),
+      endPointId: pid("x1"),
+    } as SketchDefinition["entities"][number];
+    const drawn = rebuildSessionForDefinition(
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
+      {
+        definition: {
+          ...base,
+          pointIds: [...base.pointIds, e.pointId],
+          points: [...base.points, e],
+          entityIds: [...base.entityIds, ex.entityId],
+          entities: [...base.entities, ex],
+        },
+      },
+    );
+    let tool = beginSketchTool(drawn, "sketchMirror");
+    for (const id of ["ex", "axis"])
+      tool = selectSketchEditToolTarget(tool, entityTarget(id) as never);
+    const mirrored = patchSketchEditToolValue(tool, { intent: "createMirror" });
+    const relationship = mirrored.definition.derivedRelationships!.find(
+      (candidate) => candidate.kind === "mirror",
+    )!;
+    const [me, mx] = relationship.outputs[0]!.outputPointIds as [
+      SketchPointId,
+      SketchPointId,
+    ];
+    const session = { ...mirrored, activeTool: null, activeEditTool: null };
+    expect(
+      distance(position(session, mx), position(session, pid("x1"))),
+      "premise: the copy's end sits on the mirror line's end",
+    ).toBeLessThanOrEqual(1e-12);
+    return { session, me, mx };
+  }
+
+  test("dragging the copy end on the mirror line's end moves that end with it (no constrained cue): the line's other end and the original's other end stay bitwise; the copy is the original's image about the moved line", () => {
+    const { session, me, mx } = sharedAxisEnd();
+    const from = position(session, mx);
+    const to: P = [from[0], from[1] + 1];
+    let next = beginSketchGeometryDrag(session, pointRef(session, mx), from);
+    expect(next.activeDrag, "the copy end is a drag target").not.toBeNull();
+    for (let step = 1; step <= 5; step += 1) {
+      next = updateSketchGeometryDrag(next, [from[0], from[1] + step / 5]);
+      expect(
+        next.activeDrag?.feedback?.kind,
+        `frame ${step}: not the constrained cue (the line is free to follow)`,
+      ).not.toBe("constrained");
+    }
+    const done = finishSketchGeometryDrag(next, to);
+    expect(done.validationMessage).toBeNull();
+    expect(
+      distance(position(done, pid("x1")), to),
+      "the mirror line's end follows the copy end",
+    ).toBeLessThanOrEqual(1e-4);
+    expect(
+      distance(position(done, mx), to),
+      "the copy end reaches the pointer",
+    ).toBeLessThanOrEqual(1e-4);
+    expectBitwise(
+      position(done, pid("x0")),
+      position(session, pid("x0")),
+      "the mirror line's other end stays",
+    );
+    expectBitwise(
+      position(done, pid("e")),
+      position(session, pid("e")),
+      "the original's other end stays",
+    );
+    expect(
+      distance(
+        position(done, me),
+        reflectAbout(
+          position(done, pid("e")),
+          position(done, pid("x0")),
+          position(done, pid("x1")),
+        ),
+      ),
+      "the copy's other end is the original's image about the moved line",
+    ).toBeLessThanOrEqual(1e-9);
+  });
+
+  test("control: dragging the copy's other end keeps the mirror line bitwise and moves the original's end as its image", () => {
+    const { session, me } = sharedAxisEnd();
+    const from = position(session, me);
+    const to: P = [from[0] + 0.3, from[1] - 0.4];
+    const { started, session: done } = drag(
+      session,
+      pointRef(session, me),
+      from,
+      to,
+    );
+    expect(started).toBe(true);
+    for (const axisPoint of ["x0", "x1"])
+      expectBitwise(
+        position(done, pid(axisPoint)),
+        position(session, pid(axisPoint)),
+        `mirror line ${axisPoint} held bitwise`,
+      );
+    expect(distance(position(done, me), to)).toBeLessThanOrEqual(1e-4);
+    expect(
+      distance(position(done, pid("e")), reflect(to)),
+      "the original's end is the copy end's image",
+    ).toBeLessThanOrEqual(1e-4);
+  });
+});
+
+// T16g B20 ([TECH] T16-15). Logic lane; seam: the session's Split and Trim
+// tools with their exact intersection query answered by the one contract
+// function (`completeSketchEditQueriesForTest`), then the live solve. Edits
+// of the mirror line itself are not refused: the line keeps its id on the
+// piece from its start, a collinear piece, so the mirror (which depends on
+// the infinite line only) stays healthy and the copies do not move. A cut
+// that would leave a piece shorter than τ is refused by the tool before any
+// write, so a too-short mirror line is never produced by Trim or Split.
+describe("T16g B20: Split and Trim of the mirror line itself", () => {
+  /** Short vertical cutters crossing the mirror line (y = 0) at `xs`. */
+  const withCutters = (session: SketchSessionState, xs: readonly number[]) => {
+    const definition = session.definition;
+    const points = xs.flatMap((x, index) =>
+      (
+        [
+          ["lo", -0.5],
+          ["hi", 0.5],
+        ] as const
+      ).map(([tag, y]) => ({
+        pointId: pid(`k${index}${tag}`),
+        label: `k${index}${tag}`,
+        target: {
+          kind: "sketchPoint",
+          sketchId: "sketch_draft",
+          pointId: pid(`k${index}${tag}`),
+        },
+        position: [x, y],
+        isConstruction: false,
+      })),
+    ) as SketchDefinition["points"];
+    const entities = xs.map((_, index) => ({
+      kind: "lineSegment",
+      entityId: eid(`k${index}`),
+      label: `k${index}`,
+      target: entityTarget(`k${index}`),
+      isConstruction: false,
+      startPointId: pid(`k${index}lo`),
+      endPointId: pid(`k${index}hi`),
+    })) as SketchDefinition["entities"];
+    return rebuildSessionForDefinition(session, {
+      definition: {
+        ...definition,
+        pointIds: [...definition.pointIds, ...points.map((p) => p.pointId)],
+        points: [...definition.points, ...points],
+        entityIds: [
+          ...definition.entityIds,
+          ...entities.map((e) => e.entityId),
+        ],
+        entities: [...definition.entities, ...entities],
+      },
+    });
+  };
+  /** Split (target, then the first cutter as boundary) or Trim of the mirror line. */
+  async function editAxis(tool: "sketchSplit" | "trim", xs: number[]) {
+    const setup = mirroredSession("free");
+    const session = withCutters(setup.session, xs);
+    let next = beginSketchTool(session, tool);
+    next = selectSketchEditToolTarget(next, entityRef(next, eid("axis")));
+    if (tool === "sketchSplit")
+      next = selectSketchEditToolTarget(next, entityRef(next, eid("k0")));
+    expect(
+      next.validationMessage,
+      "the mirror line is not refused as a mirror participant",
+    ).toBeNull();
+    expect(
+      next.activeEditTool?.editQuery?.inFlight?.input.operation.targetEntityId,
+      "the edit is queried",
+    ).toBe(eid("axis"));
+    return {
+      setup,
+      session,
+      done: await completeSketchEditQueriesForTest(next),
+    };
+  }
+  const copyPositions = (
+    session: SketchSessionState,
+    relationship: ReturnType<typeof mirroredSession>["relationship"],
+  ) =>
+    relationship.outputs.flatMap((output) =>
+      output.outputPointIds.map((pointId) => position(session, pointId)),
+    );
+  const axisEnds = (session: SketchSessionState) => {
+    const axis = entity(session, eid("axis"));
+    if (axis.kind !== "lineSegment") throw new Error("line");
+    return [axis.startPointId, axis.endPointId].map((pointId) =>
+      position(session, pointId),
+    );
+  };
+
+  for (const [tool, xs, keptEnd] of [
+    ["sketchSplit", [18], 18],
+    ["trim", [17, 18], 17],
+    // The shortest piece the tools allow next to τ = 0.001: 2τ.
+    ["sketchSplit", [-2 + 2e-3], -2 + 2e-3],
+  ] as const)
+    test(`${tool} at x = ${xs.join(", ")}: applied; the mirror line keeps its id on the piece from its start (to x = ${keptEnd}); the mirror stays healthy and its copies do not move`, async () => {
+      const { setup, session, done } = await editAxis(tool, [...xs]);
+      expect(done.validationMessage).toBeNull();
+      expect(done.definition, "the edit is authored").not.toBe(
+        session.definition,
+      );
+      const ends = axisEnds(done);
+      expect(ends[0], "the mirror line's start stays").toEqual([-2, 0]);
+      expect(ends[1]![0]).toBeCloseTo(keptEnd, 9);
+      expect(ends[1]![1]).toBeCloseTo(0, 9);
+      expect(
+        done.definition.derivedRelationships,
+        "the mirror record is unchanged (same line id)",
+      ).toEqual(session.definition.derivedRelationships);
+      const solved = done.liveSolve!.solvedSnapshot;
+      expect(solved.failedDerivationIds ?? []).toEqual([]);
+      expect(solved.diagnostics.filter((d) => d.severity === "error")).toEqual(
+        [],
+      );
+      const before = copyPositions(session, setup.relationship);
+      copyPositions(done, setup.relationship).forEach((copy, index) =>
+        expect(
+          distance(copy, before[index]!),
+          `copy point ${index} did not move`,
+        ).toBeLessThanOrEqual(1e-12),
+      );
+    });
+
+  for (const [tool, xs, refusal] of [
+    [
+      "trim",
+      [-2 + 5e-4, 18],
+      "Trim would leave a piece of axis shorter than the modeling tolerance (0.001). Nothing was changed.",
+    ],
+    [
+      "sketchSplit",
+      [-2 + 5e-4],
+      "Sketch split needs a boundary crossing inside the selected curve.",
+    ],
+  ] as const)
+    test(`${tool} leaving a piece shorter than τ is refused before any write (so -axis-degenerate never comes from it); the mirror stays healthy`, async () => {
+      const { session, done } = await editAxis(tool, [...xs]);
+      expect(done.validationMessage).toBe(refusal);
+      expect(done.definition, "nothing written").toBe(session.definition);
+      expect(axisEnds(done)).toEqual([
+        [-2, 0],
+        [20, 0],
+      ]);
+      expect(done.liveSolve!.solvedSnapshot.failedDerivationIds ?? []).toEqual(
+        [],
+      );
+    });
 });
