@@ -515,13 +515,23 @@ describe("T16a: downstream relationships are never touched; they become explicit
       ),
       "the offset reports its missing seed",
     ).toBeDefined();
+    // T16c (T16b review A-1): the pattern's text names it by label (never
+    // its id) and the copy whose original was removed.
     expect(
-      named(
-        "derived-transform-missing-seed",
-        pattern.relationship.derivationId,
-      ),
+      diagnostics
+        .filter((entry) => entry.code === "derived-transform-missing-seed")
+        .map((entry) => [entry.severity, entry.message]),
       "the pattern reports its missing seed",
-    ).toBeDefined();
+    ).toEqual(
+      pattern.relationship.outputs.map((output) => [
+        "error",
+        `Linear pattern ‘${pattern.relationship.label}’ is broken: the original of ‘${
+          removal.definition.entities.find(
+            (entity) => entity.entityId === output.outputEntityId,
+          )!.label
+        }’ was deleted. Profiles from this sketch are blocked. Undo to recover.`,
+      ]),
+    );
     expect(after.liveRegions.status).toBe("unavailable");
   });
 });

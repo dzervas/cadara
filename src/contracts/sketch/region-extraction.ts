@@ -34,7 +34,11 @@ import type {
   SketchPointId,
 } from "@/contracts/shared/ids";
 import { sketchProfileGateFailures } from "@/contracts/sketch/derived-validity";
-import { nonAcceptedOffsetOutputs } from "@/contracts/sketch/offset-publication";
+import { RELATIONSHIP_NOUN } from "@/contracts/sketch/mirror-requirements";
+import {
+  nonAcceptedOffsetOutputs,
+  type NonAcceptedOutputOwner,
+} from "@/contracts/sketch/offset-publication";
 import {
   canonicalRegionSignature,
   createRegionId,
@@ -197,9 +201,10 @@ export function offsetArrangementInput(
   const nonAccepted = nonAcceptedOffsetOutputs(definition, solvedSnapshot);
   const derivedCurves: SketchArrangementDerivedCurve[] = [];
   const unpublishedOffsetOutputs: SketchArrangementUnpublishedOutput[] = [];
-  const reasonOf = (derivationId: string) => {
-    if (failedDerived.has(derivationId))
-      return `derived relationship ${derivationId} failed (its outputs are held)`;
+  const reasonOf = ({ derivationId, ...owner }: NonAcceptedOutputOwner) => {
+    // T16c (T16b review A-7): a broken relationship by label, never its id.
+    if (owner.reason === "derivedFailed")
+      return `${RELATIONSHIP_NOUN[owner.kind].toLowerCase()} ‘${owner.label}’ is broken (its copies are held)`;
     const state = status.get(derivationId);
     return state === "failed"
       ? `offset relationship ${derivationId} failed its publication`
@@ -225,7 +230,7 @@ export function offsetArrangementInput(
         unpublishedOffsetOutputs.push({
           entityId,
           derivationId: owner.derivationId,
-          reason: reasonOf(owner.derivationId),
+          reason: reasonOf(owner),
         });
     }
     for (const output of relationship.piecewiseCubicOutputs) {
@@ -260,7 +265,7 @@ export function offsetArrangementInput(
         unpublishedOffsetOutputs.push({
           entityId: output.outputEntityId,
           derivationId: owner.derivationId,
-          reason: reasonOf(owner.derivationId),
+          reason: reasonOf(owner),
         });
     }
   }

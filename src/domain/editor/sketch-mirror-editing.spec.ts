@@ -18,16 +18,35 @@ import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
 } from "@/domain/modeling/opencascade-kernel-seed";
+import { offsetArrangementInput } from "@/contracts/sketch/region-extraction";
+import {
+  isOffsetPublicationSolveAccepted,
+  nonAcceptedOffsetOutputs,
+  publishSketchOffsets,
+} from "@/contracts/sketch/offset-publication";
+import { EXTRUDE_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
 import {
   beginSketchGeometryDrag,
   beginSketchTool,
   cancelSketchGeometryDrag,
+  computeSketchMirrorActionState,
   createNewSketchSession,
+  deleteSelectedSketchGeometry,
   finishSketchGeometryDrag,
+  patchSketchEditToolValue,
   selectSketchEditToolTarget,
   updateSketchGeometryDrag,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
+import { buildSketchVectorExportModelFromSnapshot } from "@/domain/export/sketch-vector-export-model";
+import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
+import { createCertifiedNeutralCurveRequestQuery } from "@/domain/modeling/neutral-curve-certification/query";
+import {
+  nonAcceptedOffsetFeatureInputMessage,
+  nonAcceptedOffsetFeaturePointMessage,
+} from "@/domain/modeling/sketch-feature-input";
+import { nonAcceptedOutputProjectionMessage } from "@/domain/modeling/sketch-reference-projection";
 import {
   appendDefinition,
   CONSTRAINED_DRAG_BLOCKED_MESSAGE,
@@ -43,6 +62,7 @@ import {
   chainSession,
   eid,
   entityRef,
+  entityTarget,
   handleRef,
   mirroredSession,
   pid,
@@ -1213,6 +1233,568 @@ describe("T16b: failure messages name the relationship by label, say why and how
       evaluation.offsetFailures.map((failure) => failure.diagnostic.message),
     ).toEqual([
       `Offset ‘${offset.relationship.label}’ depends on its own offset curves (a dependency loop). Its offset curves stay where they were last solved and can't be used. Undo to recover.`,
+    ]);
+  });
+});
+
+// T16c ([TECH] T16-7, review A-4; logic lane). Geometry held by a broken
+// relationship is worded by label at every non-acceptance site, with the
+// kind-neutral code where the site is reachable (edit input, vector
+// export); offset owners keep the offset text and code (pinned by the
+// offset rows in `sketch-offset-live-cutover.spec.ts`). Seams: the session's
+// edit tools, the export model and the mock adapter on a committed
+// document, the publication helper, and the feature-input / projection
+// text helpers by owner kind.
+describe("T16c: a broken relationship's copies are named by label at every non-acceptance site", () => {
+  const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/;
+  const MIRROR_RECOVERY =
+    "Fix it (Undo) or remove the mirror from the Mirror panel.";
+  /** Every user text of these rows: exact, and neither an id nor a UUID. */
+  const expectNoIds = (
+    session: SketchSessionState,
+    messages: readonly (string | null | undefined)[],
+  ) => {
+    const ids = [
+      ...session.definition.entities.map((entity) => entity.entityId),
+      ...session.definition.points.map((point) => point.pointId),
+      ...(session.definition.derivedRelationships ?? []).map(
+        (relationship) => relationship.derivationId,
+      ),
+    ];
+    for (const message of messages) {
+      expect(message, "a message").toEqual(expect.any(String));
+      expect(message, `${message}: no UUID`).not.toMatch(UUID);
+      for (const id of ids)
+        expect(message!.includes(id), `${message}: names ${id}`).toBe(false);
+    }
+  };
+  /** A free line x = 2 crossing the first copy `ab mirror` (y = −1.5) and the axis. */
+  const withFreeLine = (session: SketchSessionState) => {
+    const definition = session.definition;
+    const point = (id: string, position: P) => ({
+      pointId: pid(id),
+      label: id,
+      target: {
+        kind: "sketchPoint",
+        sketchId: "sketch_draft",
+        pointId: pid(id),
+      },
+      position: [position[0], position[1]],
+      isConstruction: false,
+    });
+    const points = [
+      ...definition.points,
+      point("f0", [2, -3]),
+      point("f1", [2, 0.5]),
+    ] as SketchDefinition["points"];
+    const free = {
+      kind: "lineSegment",
+      entityId: eid("free"),
+      label: "free",
+      target: entityTarget("free"),
+      isConstruction: false,
+      startPointId: pid("f0"),
+      endPointId: pid("f1"),
+    } as SketchDefinition["entities"][number];
+    return rebuildSessionForDefinition(session, {
+      definition: {
+        ...definition,
+        pointIds: points.map((entry) => entry.pointId),
+        points,
+        entityIds: [...definition.entityIds, free.entityId],
+        entities: [...definition.entities, free],
+      },
+    });
+  };
+  const deleteAxis = (session: SketchSessionState) =>
+    deleteSelectedSketchGeometry(session, [entityRef(session, eid("axis"))]);
+  /** Begins `toolId`, picks `entityIds` in order, sets `value` and commits. */
+  const runEditTool = (
+    session: SketchSessionState,
+    toolId: Parameters<typeof beginSketchTool>[1],
+    entityIds: readonly SketchEntityId[],
+    value: number | null,
+  ) => {
+    let next = beginSketchTool(session, toolId);
+    for (const entityId of entityIds)
+      next = selectSketchEditToolTarget(next, {
+        kind: "sketchEntity",
+        sketchId: next.sketchId!,
+        entityId,
+      } as never);
+    if (next.definition !== session.definition) return next;
+    if (toolId === "offset") {
+      next = patchSketchEditToolValue(next, { value });
+      return patchSketchEditToolValue(next, { intent: "commitOffset" });
+    }
+    if (value !== null) next = patchSketchEditToolValue(next, { value });
+    return patchSketchEditToolValue(next, {
+      intent: "commitSketchEditOperator",
+    });
+  };
+  /** The mirror's axis deleted, with a free line and a pattern of the first copy. */
+  function brokenMirror() {
+    const { session, relationship, outputOf } = mirroredSession("free");
+    const copy = outputOf("ab").outputEntityId;
+    const pattern = withDerived(session, "linearPattern", [copy], 91, 2);
+    const broken = deleteAxis(withFreeLine(pattern.session));
+    expect(
+      broken.liveSolve!.solvedSnapshot.failedDerivationIds,
+      "premise: the mirror is held",
+    ).toEqual([relationship.derivationId]);
+    return {
+      broken,
+      relationship,
+      outputOf,
+      copy,
+      patternCopy: pattern.relationship.outputs[0]!.outputEntityId,
+    };
+  }
+  /** A real Finish of `definition` into a fresh mock document. */
+  async function committed(definition: SketchDefinition) {
+    const adapter = new MockKernelAdapter();
+    const request = {
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+    } as const;
+    const before = await adapter.getDocumentSnapshot(request);
+    const commit = await adapter.commitSketch({
+      ...request,
+      baseRevisionId: before.snapshot.document.revisionId,
+      solverCorrelation: {
+        requestId: "request_t16c",
+        projectionRequestId: "request_t16c:project",
+        validationRequestId: "request_t16c:validate",
+        solveRequestId: "request_t16c:solve",
+        regionRequestId: "request_t16c:regions",
+      },
+      sketchId: null,
+      sketchLabel: "Broken mirror",
+      plane: before.snapshot.document.sketches[0]!.plane,
+      definition,
+    });
+    expect(commit.revisionState.kind, "premise: Finish accepted").toBe(
+      "accepted",
+    );
+    const { snapshot } = await adapter.getDocumentSnapshot(request);
+    const record = snapshot.document.sketches.find(
+      (entry) => entry.sketchId === commit.sketchId,
+    )!;
+    return { adapter, request, snapshot, record };
+  }
+
+  test("edit input (red on base: offset text with ids): Offset, Mirror, Split and Fillet refuse the held copy, or a copy made from it, with edit-input-derived-failed and the mirror by label; nothing is authored", () => {
+    const { broken, copy, patternCopy } = brokenMirror();
+    const held = (subject: string, use: string) =>
+      `edit-input-derived-failed: ${subject}, which is broken, so it can't be used as ${use}. ${MIRROR_RECOVERY}`;
+    const copyOf = "‘ab mirror’ is a copy made by mirror ‘mirror 1’";
+    const rows: [
+      Parameters<typeof beginSketchTool>[1],
+      SketchEntityId[],
+      number | null,
+      string,
+    ][] = [
+      ["offset", [copy], 0.1, held(copyOf, "an offset seed")],
+      [
+        "sketchMirror",
+        [copy, eid("free")],
+        null,
+        held(copyOf, "a Sketch Mirror input"),
+      ],
+      // The copy as Split's boundary (as the target, T16a's participant
+      // refusal comes first).
+      [
+        "sketchSplit",
+        [eid("free"), copy],
+        null,
+        held(copyOf, "a Sketch Split input"),
+      ],
+      // A pattern copy of the held copy (G16‴ closure: owned by the mirror;
+      // not a mirror participant, so no T16a refusal).
+      [
+        "sketchFillet",
+        [patternCopy, eid("free")],
+        0.1,
+        held(
+          "‘ab mirror linearPattern’ depends on mirror ‘mirror 1’",
+          "a Sketch Fillet input",
+        ),
+      ],
+    ];
+    const messages = rows.map(([toolId, inputs, value, expected]) => {
+      const result = runEditTool(broken, toolId, inputs, value);
+      expect(result.validationMessage, toolId).toBe(expected);
+      expect(result.definition, `${toolId} authors nothing`).toBe(
+        broken.definition,
+      );
+      return result.validationMessage;
+    });
+    expectNoIds(broken, messages);
+  });
+
+  test("vector export after Finish (red on base: sketch-vector-uncertified-offset with ids): each held copy gets sketch-vector-derived-failed and the mirror by label, and is not exported", async () => {
+    const { broken, relationship } = brokenMirror();
+    const { snapshot, record } = await committed(broken.definition);
+    expect(
+      record.sketch.solvedSnapshot.failedDerivationIds,
+      "premise: the saved record holds the mirror",
+    ).toEqual([relationship.derivationId]);
+    const exported = buildSketchVectorExportModelFromSnapshot(snapshot, {
+      kind: "sketch",
+      sketchId: record.sketchId,
+    } as never);
+    if ("diagnostic" in exported) throw new Error(exported.diagnostic.message);
+    const copies = relationship.outputs.map((output) => output.outputEntityId);
+    const labelOf = (entityId: SketchEntityId) =>
+      broken.definition.entities.find((entity) => entity.entityId === entityId)!
+        .label;
+    const expected = [
+      ...copies.map(
+        (copy) =>
+          `‘${labelOf(copy)}’ is a copy made by mirror ‘mirror 1’, which is broken, so it was not exported. ${MIRROR_RECOVERY}`,
+      ),
+      // The pattern copy of the first copy (G16‴ closure).
+      `‘ab mirror linearPattern’ depends on mirror ‘mirror 1’, which is broken, so it was not exported. ${MIRROR_RECOVERY}`,
+    ];
+    const held = exported.diagnostics.filter(
+      (diagnostic) =>
+        diagnostic.code === "sketch-vector-derived-failed" ||
+        diagnostic.code === "sketch-vector-uncertified-offset",
+    );
+    expect(
+      held.map((diagnostic) => [diagnostic.code, diagnostic.message]),
+    ).toEqual(
+      expected.map((message) => ["sketch-vector-derived-failed", message]),
+    );
+    expect(
+      exported.entities.filter((entity) =>
+        (copies as string[]).includes(entity.entityId),
+      ),
+      "no held copy is exported",
+    ).toEqual([]);
+    expectNoIds(broken, expected);
+  });
+
+  test("mock feature pre-check order: a feature on a held copy is refused for the non-current sketch first, before the feature-input check (whose text names the mirror by label)", async () => {
+    const { broken, copy } = brokenMirror();
+    const { adapter, request, record } = await committed(broken.definition);
+    expect(record.sketch.derivedValidity.state, "premise").toBe("invalid");
+    const baseRevisionId = (await adapter.getDocumentSnapshot(request)).snapshot
+      .document.revisionId;
+    const response = await adapter.createFeature({
+      ...request,
+      baseRevisionId,
+      definition: {
+        kind: "extrude",
+        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          resultBodyType: "surface",
+          profiles: [
+            {
+              kind: "sketchEntity",
+              sketchId: record.sketchId,
+              entityId: copy,
+            },
+          ],
+          startExtent: { kind: "profilePlane" },
+          extent: {
+            mode: "oneSide",
+            end: { kind: "blind", direction: "positive", distance: 2 },
+          },
+        },
+      },
+    } as never);
+    expect(response.revisionState).toEqual({
+      kind: "rejected",
+      baseRevisionId,
+      reasonCode: "mock-invalid-extrude",
+    });
+    expect(
+      response.diagnostics.map((diagnostic) => [
+        diagnostic.code,
+        diagnostic.message,
+      ]),
+    ).toEqual([
+      [
+        "mock-invalid-extrude",
+        "Features can consume sketch-derived inputs only when their owning sketch has current derived validity.",
+      ],
+    ]);
+    // Had the order been the other way, this is the text it would show.
+    expect(
+      nonAcceptedOffsetFeatureInputMessage(record.sketch, copy, "a profile"),
+    ).toBe(
+      `‘ab mirror’ is a copy made by mirror ‘mirror 1’, which is broken, so it can't be used as a profile. ${MIRROR_RECOVERY}`,
+    );
+  });
+
+  test("offset publication: an offset of a held copy is never published (the failed mirror's error makes the solve unaccepted); with that error forged away it fails derived-offset-seed-not-certified naming the mirror by label", () => {
+    const { session, relationship, outputOf } = mirroredSession("free");
+    const copy = outputOf("ab").outputEntityId;
+    const offset = withDerived(session, "offset", [copy], 92, 0.5);
+    const capabilities = {
+      query: createCertifiedNeutralCurveRequestQuery(),
+      certifier: createCertifiedCubicTubeChain(),
+    };
+    // Reachability: the session's live solve with the axis deleted.
+    const broken = deleteAxis(offset.session).liveSolve!;
+    expect(broken.solvedSnapshot.failedDerivationIds).toEqual([
+      relationship.derivationId,
+    ]);
+    expect(isOffsetPublicationSolveAccepted(broken.solvedSnapshot)).toBe(false);
+    expect(
+      publishSketchOffsets({
+        definition: broken.definition,
+        solvedSnapshot: broken.solvedSnapshot,
+        modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+        capabilities,
+      }),
+      "nothing is published",
+    ).toEqual([]);
+    // The text path: the healthy solve, with the mirror forged failed and no
+    // error (an invariant the snapshot validator enforces).
+    const healthy = offset.session.liveSolve!;
+    const publications = publishSketchOffsets({
+      definition: healthy.definition,
+      solvedSnapshot: {
+        ...healthy.solvedSnapshot,
+        failedDerivationIds: [relationship.derivationId],
+      },
+      modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+      capabilities,
+    });
+    const message = `‘ab mirror’ is a copy made by mirror ‘mirror 1’, which is broken, so offset ‘${offset.relationship.label}’ can't be certified either. ${MIRROR_RECOVERY}`;
+    expect(publications).toEqual([
+      {
+        derivationId: offset.relationship.derivationId,
+        status: "failed",
+        diagnostic: {
+          code: "derived-offset-seed-not-certified",
+          severity: "error",
+          message,
+          target: { kind: "entity", entityId: copy },
+        },
+      },
+    ]);
+    expectNoIds(offset.session, [message]);
+    // Control: unforged, the offset certifies.
+    expect(
+      publishSketchOffsets({
+        definition: healthy.definition,
+        solvedSnapshot: healthy.solvedSnapshot,
+        modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+        capabilities,
+      }).map((publication) => publication.status),
+    ).toEqual(["certified"]);
+  });
+
+  test("feature-input and projection text helpers by owner kind: a mirror's copy and driven point, a solved pattern loop (in the gate, A-3), an offset's output (offset text unchanged)", () => {
+    const { broken, outputOf, copy } = brokenMirror();
+    const live = broken.liveSolve!;
+    const sketch = {
+      definition: live.definition,
+      solvedSnapshot: live.solvedSnapshot,
+    };
+    const mirrorPoint = outputOf("ab").outputPointIds[0]!;
+    const owner = nonAcceptedOffsetOutputs(
+      live.definition,
+      live.solvedSnapshot,
+    ).get(copy)!;
+    const mirrorTexts = [
+      nonAcceptedOffsetFeatureInputMessage(sketch, copy, "a revolve axis"),
+      nonAcceptedOffsetFeaturePointMessage(
+        sketch,
+        mirrorPoint,
+        "a hole location",
+      ),
+      nonAcceptedOutputProjectionMessage(live.definition, copy, owner),
+    ];
+    expect(mirrorTexts).toEqual([
+      `‘ab mirror’ is a copy made by mirror ‘mirror 1’, which is broken, so it can't be used as a revolve axis. ${MIRROR_RECOVERY}`,
+      `Point ‘mirror a’ belongs to a copy made by mirror ‘mirror 1’, which is broken, so it can't be used as a hole location. ${MIRROR_RECOVERY}`,
+      `‘ab mirror’ is a copy made by mirror ‘mirror 1’, which is broken, so it is not projected. ${MIRROR_RECOVERY}`,
+    ]);
+    expectNoIds(broken, mirrorTexts);
+
+    // A linear pattern whose first copy reads itself: unresolved, solved
+    // into the gate (T16b review A-3), worded with its own noun and Undo.
+    const { session } = mirroredSession("free");
+    const pattern = withDerived(session, "linearPattern", [eid("u")], 91, 3);
+    const loop = rebuildSessionForDefinition(pattern.session, {
+      definition: {
+        ...pattern.session.definition,
+        derivedRelationships:
+          pattern.session.definition.derivedRelationships!.map((candidate) =>
+            candidate.derivationId === pattern.relationship.derivationId
+              ? ({
+                  ...candidate,
+                  seedEntityIds: [candidate.outputs[0]!.outputEntityId],
+                  outputs: candidate.outputs.map((output, index) =>
+                    index === 0
+                      ? { ...output, seedEntityId: output.outputEntityId }
+                      : output,
+                  ),
+                } as SketchDerivationDefinition)
+              : candidate,
+          ),
+      },
+    });
+    const loopSolve = loop.liveSolve!.solvedSnapshot;
+    expect(loopSolve.failedDerivationIds, "the loop is in the gate").toEqual([
+      pattern.relationship.derivationId,
+    ]);
+    expect(loop.liveRegions.status).toBe("unavailable");
+    const patternCopy = pattern.relationship.outputs[0]!.outputEntityId;
+    const patternOwner = nonAcceptedOffsetOutputs(
+      loop.liveSolve!.definition,
+      loopSolve,
+    ).get(patternCopy)!;
+    expect(patternOwner).toEqual({
+      derivationId: pattern.relationship.derivationId,
+      kind: "linearPattern",
+      label: pattern.relationship.label,
+      reason: "derivedFailed",
+    });
+    const patternText = nonAcceptedOutputProjectionMessage(
+      loop.liveSolve!.definition,
+      patternCopy,
+      patternOwner,
+    );
+    expect(patternText).toBe(
+      `‘u linearPattern’ is a copy made by linear pattern ‘${pattern.relationship.label}’, which is broken, so it is not projected. Fix it (Undo).`,
+    );
+    expectNoIds(loop, [patternText]);
+
+    // An offset owner keeps the offset text byte for byte.
+    const offsetOwner = {
+      derivationId: "derivation_offset",
+      kind: "offset",
+      label: "offset",
+      reason: "offsetNotCertified",
+    } as const;
+    expect(
+      nonAcceptedOutputProjectionMessage(live.definition, copy, offsetOwner),
+    ).toBe(
+      `Sketch entity ${copy} is an output of offset relationship derivation_offset, which is not certified, so it is not projected.`,
+    );
+  });
+
+  test("region arrangement input (T16b review A-7): the held copies are excluded naming the broken mirror by label", () => {
+    const { broken, relationship, patternCopy } = brokenMirror();
+    const live = broken.liveSolve!;
+    const excluded =
+      offsetArrangementInput(live.definition, live.solvedSnapshot, [])
+        .unpublishedOffsetOutputs ?? [];
+    const reason = "mirror ‘mirror 1’ is broken (its copies are held)";
+    expect(excluded).toEqual(
+      [
+        ...relationship.outputs.map((output) => output.outputEntityId),
+        patternCopy,
+      ].map((entityId) => ({
+        entityId,
+        derivationId: relationship.derivationId,
+        reason,
+      })),
+    );
+    expectNoIds(broken, [reason]);
+  });
+
+  test("derived-transform texts name the pattern by label; with a mirror and a pattern of one seed both broken, the validation message is the first error (the pattern's) and the Mirror panel still lists the broken mirror", () => {
+    const { session, relationship } = mirroredSession("free");
+    const pattern = withDerived(session, "linearPattern", [eid("ab")], 91, 3);
+    const patternCopyLabel = pattern.session.definition.entities.find(
+      (entity) =>
+        entity.entityId === pattern.relationship.outputs[0]!.outputEntityId,
+    )!.label;
+    expect(patternCopyLabel, "premise").toBe("ab linearPattern");
+    const seedDeleted = deleteSelectedSketchGeometry(pattern.session, [
+      entityRef(pattern.session, eid("ab")),
+    ]);
+    const patternText = `Linear pattern ‘${pattern.relationship.label}’ is broken: the original of ‘ab linearPattern’ was deleted. Profiles from this sketch are blocked. Undo to recover.`;
+    const mirrorText =
+      "Mirror ‘mirror 1’ is broken: the original of ‘ab mirror’ was deleted. Its copies stay where they were last solved and can't be used; profiles from this sketch are blocked. Undo, or remove the mirror from the Mirror panel.";
+    expect(
+      seedDeleted
+        .liveSolve!.solvedSnapshot.diagnostics.filter(
+          (diagnostic) => diagnostic.severity === "error",
+        )
+        .map((diagnostic) => [diagnostic.code, diagnostic.message]),
+    ).toEqual([
+      ["derived-transform-missing-seed", patternText],
+      ["derived-mirror-map-stale", mirrorText],
+    ]);
+    expect(seedDeleted.validationMessage).toBe(patternText);
+    expect(
+      computeSketchMirrorActionState(seedDeleted, [])!.entries.map((entry) => [
+        entry.derivationId,
+        entry.brokenReason !== null,
+      ]),
+      "the broken mirror stays listed (and explained) in the Mirror panel",
+    ).toEqual([[relationship.derivationId, true]]);
+
+    // A deleted pattern copy, and a copy whose point map no longer matches.
+    const copyId = pattern.relationship.outputs[0]!.outputEntityId;
+    const copyDeleted = deleteSelectedSketchGeometry(pattern.session, [
+      entityRef(pattern.session, copyId),
+    ]);
+    const mismatched = rebuildSessionForDefinition(pattern.session, {
+      definition: {
+        ...pattern.session.definition,
+        derivedRelationships:
+          pattern.session.definition.derivedRelationships!.map((candidate) =>
+            candidate.derivationId === pattern.relationship.derivationId
+              ? ({
+                  ...candidate,
+                  outputs: candidate.outputs.map((output) => ({
+                    ...output,
+                    outputPointIds: output.outputPointIds.slice(1),
+                  })),
+                } as SketchDerivationDefinition)
+              : candidate,
+          ),
+      },
+    });
+    const texts = [copyDeleted.validationMessage, mismatched.validationMessage];
+    const mismatchText = `Linear pattern ‘${pattern.relationship.label}’ is broken: its geometry no longer matches (copy ‘ab linearPattern’ of ‘ab’). Profiles from this sketch are blocked. Undo to recover.`;
+    expect(texts).toEqual([
+      `Linear pattern ‘${pattern.relationship.label}’ is broken: a copy of ‘ab’ was deleted. Profiles from this sketch are blocked. Undo to recover.`,
+      mismatchText,
+    ]);
+    // Review R-1: a point map naming a missing output point (same lengths,
+    // so the per-point `derived-transform-unsatisfied-point-map` branch).
+    const unresolved = rebuildSessionForDefinition(pattern.session, {
+      definition: {
+        ...pattern.session.definition,
+        derivedRelationships:
+          pattern.session.definition.derivedRelationships!.map((candidate) =>
+            candidate.derivationId === pattern.relationship.derivationId
+              ? ({
+                  ...candidate,
+                  outputs: candidate.outputs.map((output) => ({
+                    ...output,
+                    outputPointIds: [
+                      "sketch_point_missing" as SketchPointId,
+                      ...output.outputPointIds.slice(1),
+                    ],
+                  })),
+                } as SketchDerivationDefinition)
+              : candidate,
+          ),
+      },
+    });
+    expect(
+      unresolved
+        .liveSolve!.solvedSnapshot.diagnostics.filter(
+          (diagnostic) => diagnostic.severity === "error",
+        )
+        .map((diagnostic) => [diagnostic.code, diagnostic.message]),
+    ).toEqual([["derived-transform-unsatisfied-point-map", mismatchText]]);
+    expect(unresolved.validationMessage).toBe(mismatchText);
+    expectNoIds(pattern.session, [
+      patternText,
+      mirrorText,
+      ...texts,
+      unresolved.validationMessage,
     ]);
   });
 });

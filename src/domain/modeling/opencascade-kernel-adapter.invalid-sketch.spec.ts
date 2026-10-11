@@ -680,6 +680,10 @@ test("OCC retains a broken mirror across Finish and save/reopen, blocks all of i
     (entry) => entry.sketchId === peerSketch.sketchId,
   )!;
   expect(reopenedPeer.sketch.derivedValidity.state).toBe("current");
+  // T16c (T16b review A-4): the peer's consumable regions survive reopen.
+  expect(getConsumableSketchRegions(reopenedPeer.sketch).length).toBe(
+    getConsumableSketchRegions(peer.sketch).length,
+  );
   expect(hasBody(reopenedSketch.snapshot, "feature_extrude-1")).toBe(true);
 
   // Repair by removal (the T16a write set): current, regions back, and the
@@ -715,6 +719,10 @@ test("OCC retains a broken mirror across Finish and save/reopen, blocks all of i
   expect(compensated.revisionState.kind).toBe("accepted");
   const afterUndo = await sketchOf(reopened, sketchId);
   expect(validityOf(afterUndo.record)).toEqual(BROKEN);
+  // T16c (T16b review A-4): the same diagnostics (messages included).
+  expect(afterUndo.record.sketch.derivedValidity.diagnostics).toEqual(
+    finished.record.sketch.derivedValidity.diagnostics,
+  );
   expect(featureCodes(afterUndo.snapshot, featureId)).toEqual([
     "profile-region-sketch-not-current",
   ]);

@@ -21,7 +21,10 @@ import type {
   SketchStyleStroke,
   SolvedSketchEntityGeometryRecord,
 } from "@/contracts/sketch/schema";
-import { nonAcceptedOffsetOutputs } from "@/contracts/sketch/offset-publication";
+import {
+  brokenDerivedInputMessage,
+  nonAcceptedOffsetOutputs,
+} from "@/contracts/sketch/offset-publication";
 import {
   regionBoundaryBasisOfRecord,
   resolveRegionBoundaryCurve,
@@ -599,12 +602,25 @@ export function buildSketchVectorExportModel(
           input.target,
           diagnostics,
         );
+      // T16c ([TECH] T16-7): geometry held by a broken (failed) mirror,
+      // pattern or transform gets its own code and the label-based text.
       diagnostics.push(
-        createDiagnostic(
-          "sketch-vector-uncertified-offset",
-          `Offset output ${entity.entityId} of relationship ${owner.derivationId} is not certified, so it was not exported.`,
-          input.target,
-        ),
+        owner.reason === "derivedFailed"
+          ? createDiagnostic(
+              "sketch-vector-derived-failed",
+              brokenDerivedInputMessage(
+                sketch.sketch.definition,
+                { entityId: entity.entityId },
+                owner,
+                "it was not exported",
+              ),
+              input.target,
+            )
+          : createDiagnostic(
+              "sketch-vector-uncertified-offset",
+              `Offset output ${entity.entityId} of relationship ${owner.derivationId} is not certified, so it was not exported.`,
+              input.target,
+            ),
       );
       return null;
     })

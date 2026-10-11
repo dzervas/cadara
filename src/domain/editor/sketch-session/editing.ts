@@ -78,6 +78,7 @@ import {
 import type { OffsetFramePlan } from "@/contracts/sketch/offset-derivation-frame";
 import {
   carriedOffsetPlans,
+  brokenDerivedInputMessage,
   nonAcceptedOffsetOutputs,
 } from "@/contracts/sketch/offset-publication";
 import type { SketchOffsetPublicationRecord } from "@/contracts/solver/schema";
@@ -164,6 +165,13 @@ export const NON_ACCEPTED_OFFSET_EDIT_INPUT_CODE =
   "edit-input-offset-not-certified";
 
 /**
+ * T16c ([TECH] T16-7): an edit tool refused an input held by a broken
+ * (failed) mirror, pattern or transform relationship (directly or through
+ * a copy of its outputs).
+ */
+export const FAILED_DERIVED_EDIT_INPUT_CODE = "edit-input-derived-failed";
+
+/**
  * T10i (C3; review R-1): the gate on an edit's inputs. Null when no input
  * is a non-accepted offset output of the session's live solve; otherwise
  * the targeted message for the first such input, naming its relationship
@@ -179,6 +187,11 @@ export const NON_ACCEPTED_OFFSET_EDIT_INPUT_CODE =
  *   solve, accepts no offset output).
  * A derived offset shell is skipped: it is never an edit input (U-G2), and
  * each edit refuses it with that permanent message.
+ * T16c ([TECH] T16-7): an input held by a broken relationship (owner
+ * reason `derivedFailed`) is refused with `edit-input-derived-failed` and
+ * the label-based text. The pending variant is offset-only: a failed
+ * relationship makes regions unavailable at once (T15b O-1), so no round
+ * is pending, and its failure is decided, not being checked.
  */
 export function offsetEditInputGate(
   session: SketchSessionState,
@@ -200,6 +213,16 @@ export function offsetEditInputGate(
   for (const entityId of entityIds) {
     const owner = nonAccepted.get(entityId);
     if (!owner || shells.has(entityId)) continue;
+    if (owner.reason === "derivedFailed")
+      return {
+        pending: false,
+        message: `${FAILED_DERIVED_EDIT_INPUT_CODE}: ${brokenDerivedInputMessage(
+          session.definition,
+          { entityId },
+          owner,
+          `it can't be used as ${use}`,
+        )}`,
+      };
     return pending
       ? {
           pending,
