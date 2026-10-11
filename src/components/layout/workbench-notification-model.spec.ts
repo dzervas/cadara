@@ -49,7 +49,7 @@ test("src/components/layout/workbench-notification-model.spec.ts", () => {
   expect(scheduled[0]?.delay, "Info timer should use the 5 second delay.").toBe(5_000);
   scheduled[0]?.callback();
   expect(dismissCount, "Info timer callback should dismiss the notification.").toBe(1);
-  cleanupInfo();
+  cleanupInfo!();
   expect(cleared[0], "Manual cleanup should clear the pending info timer.").toBe("timer-0");
 
   const cleanupWarning = scheduleWorkbenchNotificationAutoDismiss(

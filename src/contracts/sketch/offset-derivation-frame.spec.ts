@@ -2313,15 +2313,13 @@ describe("T08b-g5b solve-frame memo: content-keyed, bounded, never crosses an in
       pointId: "sketch_point_g5b_unrelated" as never,
       position: [40, 40] as const,
     };
+    const withUnrelatedPoint = {
+      ...definition,
+      pointIds: [...definition.pointIds, unrelated.pointId],
+      points: [...definition.points, unrelated],
+    };
     expect(
-      solveOffsetFrame({
-        ...input,
-        definition: {
-          ...definition,
-          pointIds: [...definition.pointIds, unrelated.pointId],
-          points: [...definition.points, unrelated],
-        },
-      }),
+      solveOffsetFrame({ ...input, definition: withUnrelatedPoint }),
       "A point no seed and no coincident constraint names is not read: the same frame object.",
     ).toBe(base);
     const plan: OffsetFramePlan = { ...base.plan, origin: "published" };

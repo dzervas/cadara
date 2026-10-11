@@ -7,7 +7,11 @@ const WORKSPACE_DOCUMENT_ID = "doc_workspace";
 const MODELING_OPERATION_HISTORY_STORAGE_KEY = `cad.modeling.operationHistory.${WORKSPACE_DOCUMENT_ID}.v1`;
 
 export class SketchWorkbenchHarness {
-  constructor(readonly page: Page) {}
+  readonly page: Page;
+
+  constructor(page: Page) {
+    this.page = page;
+  }
 
   async seedOperationHistory(payload: ModelingOperationHistoryPayload) {
     const serializedPayload = JSON.stringify(payload);
@@ -250,17 +254,14 @@ export class SketchWorkbenchHarness {
     arg: Arg,
   ): Promise<Result>;
   protected async evaluateWithNavigationRetry<Arg, Result>(
-    pageFunction: (() => Result) | ((arg: Arg) => Result),
+    pageFunction: (arg: unknown) => Result,
     arg?: Arg,
   ): Promise<Result> {
     let lastError: unknown;
 
     for (let attempt = 0; attempt < 5; attempt += 1) {
       try {
-        return await this.page.evaluate(
-          pageFunction as (arg: Arg) => Result,
-          arg as Arg,
-        );
+        return await this.page.evaluate(pageFunction, arg);
       } catch (error) {
         lastError = error;
 
@@ -291,7 +292,7 @@ export class SketchWorkbenchHarness {
     );
   }
 
-  private async revisionLabel() {
+  protected async revisionLabel() {
     return this.evaluateWithNavigationRetry(
       () => window.__cadaraDebug?.getState()?.revision ?? "loading",
     );

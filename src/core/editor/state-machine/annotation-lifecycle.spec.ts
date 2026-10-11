@@ -214,7 +214,7 @@ describe("T14c annotation selection lifecycle", () => {
     // Review R-1: the canvas entry (double-click on the image) drops it too.
     const doubleClicked = apply(retained, {
       type: "sketch.specialModeDoubleClickRequested",
-      point: [1, 1, 0],
+      point: [1, 1],
       target: image,
     });
     expect(

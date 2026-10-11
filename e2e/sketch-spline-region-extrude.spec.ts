@@ -760,7 +760,11 @@ test("an open spline extrudes into a surface and is a sweep path in the browser 
         startExtent: { kind: "profilePlane" },
         extent: {
           mode: "oneSide",
-          end: { kind: "blind", direction: "positive", distance: 2 },
+          end: {
+            kind: "blind",
+            direction: "positive",
+            distance: { source: "literal", value: 2 },
+          },
         },
       },
     },

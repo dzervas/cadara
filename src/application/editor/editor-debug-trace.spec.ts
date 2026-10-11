@@ -27,6 +27,12 @@ function createRuntime(
     async commitFeature() {
       throw new Error("Feature commit is not used by this test.");
     },
+    async commitSketchPlane() {
+      throw new Error("Sketch plane commit is not used by this test.");
+    },
+    async projectSketchReferences() {
+      throw new Error("Sketch reference projection is not used by this test.");
+    },
   };
 }
 

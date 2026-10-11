@@ -200,9 +200,13 @@ function createRepairableFeatureErrorHistory(): ModelingOperationHistoryPayload 
             startExtent: { kind: "profilePlane" },
             extent: {
               mode: "oneSide",
-              end: { kind: "blind", direction: "positive", distance: 4 },
+              end: {
+                kind: "blind",
+                direction: "positive",
+                distance: { source: "literal", value: 4 },
+              },
             },
-            operation: "newBody",
+            operation: { source: "literal", value: "newBody" },
             booleanScope: { kind: "standalone" },
           },
         },

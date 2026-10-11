@@ -110,10 +110,7 @@ test("sketch-plane-flow.spec.ts opens directly, cancels without mutation, and re
         editSessionCursorContext: {
           target: { kind: "sketch" as const, sketchId },
           sessionKind: "sketchPlaneEdit" as const,
-          rollbackCursor: {
-            kind: "document" as const,
-            featureId: null,
-          },
+          rollbackCursor: { kind: "empty" as const },
           restoreCursor: snapshot.document.cursor,
           phase: "active" as const,
         },

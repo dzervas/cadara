@@ -695,7 +695,7 @@ test("structural cubic overlap proves interiors, orientation, domains, and prove
   const reversed: NeutralCurve = {
     curveId: "arch-reversed",
     kind: "cubicBezier",
-    poles: [...first.poles].reverse() as typeof first.poles,
+    poles: [first.poles[3], first.poles[2], first.poles[1], first.poles[0]],
     sourceDomain: [0, 1],
     queryDomain: [0.2, 0.8],
     provenance: { sourceEntityId: "copy", sourceSpanId: "reversed" },

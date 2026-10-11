@@ -856,7 +856,7 @@ test("T14e review R-2: a failed history restore and a status message stack witho
   const restoreBox = await boxOf(restore);
   const statusBox = await boxOf(status);
   const panel = await boxOf(panelLocator(page));
-  const window = page.viewportSize()!;
+  const viewport = page.viewportSize()!;
   expect(intersects(restoreBox, statusBox), "restore and status").toBe(false);
   expect(
     statusBox.y,
@@ -864,7 +864,7 @@ test("T14e review R-2: a failed history restore and a status message stack witho
   ).toBeGreaterThan(restoreBox.y + restoreBox.height - 1);
   // The grid keeps the notification right offset reserving the cube column.
   for (const box of [restoreBox, statusBox]) {
-    expect(Math.round(window.width - (box.x + box.width))).toBe(152);
+    expect(Math.round(viewport.width - (box.x + box.width))).toBe(152);
   }
   expect(
     panel.y,

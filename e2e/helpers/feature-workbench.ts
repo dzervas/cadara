@@ -541,12 +541,6 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
     return Array.from(new Set(labels));
   }
 
-  private async revisionLabel() {
-    return this.evaluateWithNavigationRetry(
-      () => window.__cadaraDebug?.getState()?.revision ?? "loading",
-    );
-  }
-
   private async machineLabel() {
     return this.evaluateWithNavigationRetry(
       () => window.__cadaraDebug?.getState()?.machineState ?? "",
@@ -586,13 +580,19 @@ function escapeRegExp(value: string) {
 }
 
 export class FeatureChainHarness {
+  private readonly workbench: FeatureWorkbenchHarness;
+  readonly context: {
+    profileTarget: string;
+    bodyTarget: string;
+  };
+
   constructor(
-    private readonly workbench: FeatureWorkbenchHarness,
-    readonly context: {
-      profileTarget: string;
-      bodyTarget: string;
-    },
-  ) {}
+    workbench: FeatureWorkbenchHarness,
+    context: FeatureChainHarness["context"],
+  ) {
+    this.workbench = workbench;
+    this.context = context;
+  }
 
   async addFilletFromFirstEdge() {
     await this.workbench.activateFeature("fillet");

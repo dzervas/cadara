@@ -70,11 +70,11 @@ test("src/components/shortcuts/shortcut-settings-model.spec.ts", () => {
   const editValidation = validateShortcutOverrideUpdate(
     registry,
     setCommandShortcutOverride(overrides, "editor.focusSearch", [
-      recordedShortcut,
+      recordedShortcut!,
     ]),
   );
   expect(editValidation.nextOverrides, "Valid edited shortcuts should be accepted.").not.toBe(null);
-  overrides = editValidation.nextOverrides;
+  overrides = editValidation.nextOverrides!;
   state = completeShortcutRecording(state, editValidation.conflicts);
 
   expect(state.recordingCommandId, "Saving a valid shortcut should exit recording mode.").toBe(null);

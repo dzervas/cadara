@@ -286,7 +286,9 @@ test("resolver: consumer-owned historyPoint skips parametric reframe and resolve
   if (result.kind === "resolved") {
     expect(result.bindings[0]?.sourceEvidence).toBe("historyPoint");
     expect(result.bindings[0]?.reviewReference).toMatchObject({ edgeId: "edge_t0003_24" });
-    expect(result.bindings[0]?.deferred.capturedSignature.definingData?.center).toEqual([-4, 9, 0]);
+    expect(result.bindings[0]?.deferred).toMatchObject({
+      capturedSignature: { definingData: { center: [-4, 9, 0] } },
+    });
   }
 });
 

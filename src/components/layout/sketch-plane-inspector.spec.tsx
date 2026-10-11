@@ -64,6 +64,8 @@ test("src/components/layout/sketch-plane-inspector.spec.tsx renders the shared s
       canUndo: false,
       canRedo: false,
     },
+    annotationContext: null,
+    showAllAnnotations: false,
   };
 
   const markup = renderToStaticMarkup(
@@ -73,6 +75,12 @@ test("src/components/layout/sketch-plane-inspector.spec.tsx renders the shared s
           machineState: initialEditorState,
           state: viewState,
           dispatch: () => undefined,
+          getRuntimeTrace: () => ({
+            maxEntries: 0,
+            totalEntries: 0,
+            droppedEntries: 0,
+            entries: [],
+          }),
         }}
       >
         <InspectorHarness />

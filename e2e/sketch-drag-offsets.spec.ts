@@ -158,9 +158,7 @@ test("T12g B8: drag a source point on a spline+line loop with an outward offset;
     () => window.__cadaraDebug?.getSketchSnapshot() ?? null,
   );
   expect(preDragSnap, "Pre-drag snapshot must exist.").not.toBeNull();
-  const preDragPoints = (
-    preDragSnap as { points: { id: string; position: [number, number] }[] }
-  ).points;
+  const preDragPoints = preDragSnap!.points;
 
   // Identify the spline's middle fit point (at viewport ~720,440).
   // It's the point with the largest Y (most positive sketch Y).
@@ -183,9 +181,7 @@ test("T12g B8: drag a source point on a spline+line loop with an outward offset;
     () => window.__cadaraDebug?.getSketchSnapshot() ?? null,
   );
   expect(midDragSnap, "Mid-drag snapshot must exist.").not.toBeNull();
-  const midDragPoints = (
-    midDragSnap as { points: { id: string; position: [number, number] }[] }
-  ).points;
+  const midDragPoints = midDragSnap!.points;
   const midTarget = midDragPoints.find((p) => p.id === dragTarget.id)!;
   expect(
     midTarget.position[1],
@@ -277,9 +273,7 @@ test("T12g B8: drag a source point on a spline+line loop with an outward offset;
     () => window.__cadaraDebug?.getSketchSnapshot() ?? null,
   );
   expect(postDragSnap, "Post-drag snapshot must exist.").not.toBeNull();
-  const postTarget = (
-    postDragSnap as { points: { id: string; position: [number, number] }[] }
-  ).points.find((p) => p.id === dragTarget.id)!;
+  const postTarget = postDragSnap!.points.find((p) => p.id === dragTarget.id)!;
   expect(
     postTarget.position[1],
     "Post-release: dragged point must have moved.",

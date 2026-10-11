@@ -11,6 +11,7 @@ import { EditorContext } from "@/hooks/editor-context";
 import { RuntimeExtensionRegistryProvider } from "@/hooks/runtime-extension-registry-provider";
 import { createScopedRuntimeExtensionRegistryCompositionForTest } from "@/domain/extensions/test-registry-composition";
 import {
+  getEditorViewState,
   initialEditorState,
   type EditorViewState,
 } from "@/domain/editor/state-machine";
@@ -70,11 +71,11 @@ function createDenseImportSession(): ImportSessionState {
 function renderDenseImportInspector(): string {
   const session = createDenseImportSession();
   const viewState: EditorViewState = {
-    ...initialEditorState.view,
+    ...getEditorViewState(initialEditorState),
     mode: "part",
     activeCommand: {
       commandSessionId: "command_import-1",
-      toolId: "importPart",
+      toolId: "import",
       phase: "editing",
     },
     activeImportSession: session,
@@ -90,6 +91,12 @@ function renderDenseImportInspector(): string {
             machineState: initialEditorState,
             state: viewState,
             dispatch: () => undefined,
+            getRuntimeTrace: () => ({
+              maxEntries: 0,
+              totalEntries: 0,
+              droppedEntries: 0,
+              entries: [],
+            }),
           }}
         >
           <ImportInspector onCommit={() => undefined} />

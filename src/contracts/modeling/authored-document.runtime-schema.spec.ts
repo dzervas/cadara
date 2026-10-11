@@ -118,9 +118,10 @@ test("src/contracts/modeling/authored-document.runtime-schema.spec.ts", async ()
     (feature) => feature.definition.kind === "extrude",
   );
   if (extrude?.definition.kind === "extrude") {
-    const end = extrude.definition.parameters.extent.end;
-    if (end.kind === "blind") {
-      end.distance = 12;
+    const extent = extrude.definition.parameters.extent;
+    if (extent.mode === "oneSide" && extent.end.kind === "blind") {
+      // A legacy raw literal is deliberately not a valid authored value.
+      (extent.end as { distance: unknown }).distance = 12;
     }
   }
 

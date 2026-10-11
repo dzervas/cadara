@@ -125,7 +125,7 @@ test("propagates a non-rematch probe failure from a consumer prefix", async () =
 // Lane: logic. Seam: prefix planning forwards fresh-service isolation independently
 // from whether historical signature steps are requested.
 test("forwards requireFreshExecution independently of historical sampling", async () => {
-  const forwarded: Array<{ fresh: boolean | undefined; requested: number[] | null | undefined }> = [];
+  const forwarded: Array<{ fresh: boolean | undefined; requested: readonly number[] | null | undefined }> = [];
   const actions: ImportPreparedActions = {
     addDocumentVariables: [{ name: "a" }] as never,
     orderedActions: [{ kind: "addDocumentVariable", index: 0 }],

@@ -432,7 +432,7 @@ test("edited circle radius annotation solves and still finishes the sketch", asy
   const committedRadiusValues = await page.evaluate((storageKey) => {
     const serialized = window.localStorage.getItem(storageKey);
     if (!serialized) {
-      return [];
+      return { dimensionValues: [], entityRadii: [] };
     }
 
     const payload = JSON.parse(serialized) as {
