@@ -608,8 +608,12 @@ describe("T15d D9′: one-way outputs and failed mirrors' copies are not drag ta
 });
 
 describe("T15d T-11: topology edits on either side of a mirror are refused up front", () => {
-  const message = (verb: string, label: string, kind = "shape") =>
-    `This ${kind} is part of a mirror (${label}); remove the mirror first to ${verb} it.`;
+  // T16a ([TECH] T16-3, review R-2): the texts name the mirror by label and
+  // the way to the Mirror panel's Remove mirror from the armed tool.
+  const message = (verb: string, label: string) =>
+    `This shape is part of mirror ‘${label}’. To ${verb} it, press Esc, select it, then Mirror → Remove mirror.`;
+  const mergeMessage = (point: string, relation: string, label: string) =>
+    `${point} is ${relation} mirror ‘${label}’. To merge it, press Esc, select it, then Mirror → Remove mirror.`;
 
   for (const side of ["seed", "copy"] as const) {
     const pick = (setup: ReturnType<typeof mirroredSession>) =>
@@ -634,37 +638,69 @@ describe("T15d T-11: topology edits on either side of a mirror are refused up fr
       ["sketchSplit", "split"],
       ["sketchExtend", "extend"],
     ] as const)
-      test(`${verb} of the ${side} (boundary: a free line): refused at the selection, no query, nothing written`, () => {
+      test(`${verb} of the ${side}: refused at the target pick (T16a B7), the pick not kept, tool armed, no query, nothing written`, () => {
         const setup = mirroredSession("free");
-        let tool = beginSketchTool(setup.session, toolId);
-        tool = selectSketchEditToolTarget(tool, entityRef(tool, pick(setup)));
-        const selected = selectSketchEditToolTarget(
+        const tool = beginSketchTool(setup.session, toolId);
+        const picked = selectSketchEditToolTarget(
           tool,
-          entityRef(tool, eid("axis")),
+          entityRef(tool, pick(setup)),
         );
-        expect(selected.validationMessage).toBe(
+        expect(picked.validationMessage).toBe(
           message(verb, setup.relationship.label),
         );
-        expect(selected.definition).toBe(setup.session.definition);
-        expect(selected.activeEditTool?.editQuery?.inFlight ?? null).toBeNull();
+        expect(picked.activeEditTool?.toolId, "the tool stays armed").toBe(
+          toolId,
+        );
+        expect(picked.activeEditTool?.selectedTargets).toEqual([]);
+        expect(picked.definition).toBe(setup.session.definition);
+        expect(picked.activeEditTool?.editQuery ?? null).toBeNull();
+        // The next pick starts a fresh target (the axis is no participant).
+        const next = selectSketchEditToolTarget(
+          picked,
+          entityRef(tool, eid("axis")),
+        );
+        expect(next.activeEditTool?.selectedTargets).toEqual([
+          entityRef(tool, eid("axis")),
+        ]);
+        expect(next.validationMessage).toBeNull();
       });
 
     for (const [toolId, verb] of [
       ["sketchFillet", "fillet"],
       ["sketchChamfer", "chamfer"],
     ] as const)
-      test(`${verb} with the ${side} selected: refused, nothing written`, () => {
+      test(`${verb} of the ${side}: refused at its pick, first or second (T16a review A-7), the pick not kept, tool armed, nothing written`, () => {
         const setup = mirroredSession("free");
-        let tool = beginSketchTool(setup.session, toolId);
-        tool = selectSketchEditToolTarget(tool, entityRef(tool, eid("axis")));
-        const selected = selectSketchEditToolTarget(
+        const tool = beginSketchTool(setup.session, toolId);
+        const first = selectSketchEditToolTarget(
           tool,
           entityRef(tool, pick(setup)),
         );
-        expect(selected.validationMessage).toBe(
+        expect(first.validationMessage, "refused at the first pick").toBe(
           message(verb, setup.relationship.label),
         );
-        expect(selected.definition).toBe(setup.session.definition);
+        expect(first.activeEditTool?.toolId).toBe(toolId);
+        expect(first.activeEditTool?.selectedTargets).toEqual([]);
+        expect(first.definition).toBe(setup.session.definition);
+        const axis = selectSketchEditToolTarget(
+          first,
+          entityRef(tool, eid("axis")),
+        );
+        expect(axis.activeEditTool?.selectedTargets).toEqual([
+          entityRef(tool, eid("axis")),
+        ]);
+        const second = selectSketchEditToolTarget(
+          axis,
+          entityRef(tool, pick(setup)),
+        );
+        expect(second.validationMessage, "refused at the second pick").toBe(
+          message(verb, setup.relationship.label),
+        );
+        expect(
+          second.activeEditTool?.selectedTargets,
+          "the earlier pick stays, the refused one is not kept",
+        ).toEqual([entityRef(tool, eid("axis"))]);
+        expect(second.definition).toBe(setup.session.definition);
       });
   }
 
@@ -674,7 +710,7 @@ describe("T15d T-11: topology edits on either side of a mirror are refused up fr
     let tool = beginSketchTool(setup.session, "sketchMergePoints");
     tool = selectSketchEditToolTarget(tool, pointRef(tool, pid("a")));
     const paired = selectSketchEditToolTarget(tool, pointRef(tool, pid("u")));
-    expect(paired.validationMessage).toBe(message("merge", label, "point"));
+    expect(paired.validationMessage).toBe(mergeMessage("a", "part of", label));
     expect(paired.definition).toBe(setup.session.definition);
     const reversed = selectSketchEditToolTarget(
       selectSketchEditToolTarget(
@@ -684,7 +720,7 @@ describe("T15d T-11: topology edits on either side of a mirror are refused up fr
       pointRef(tool, pid("a")),
     );
     expect(reversed.validationMessage, "either order").toBe(
-      message("merge", label, "point"),
+      mergeMessage("a", "part of", label),
     );
     const copyEnd = setup.outputOf("ab").outputPointIds[0]!;
     const copy = selectSketchEditToolTarget(
@@ -695,7 +731,7 @@ describe("T15d T-11: topology edits on either side of a mirror are refused up fr
       (entry) => entry.pointId === copyEnd,
     )!.label;
     expect(copy.validationMessage).toBe(
-      `${copyLabel} is driven by mirror ${label}; remove the mirror first to merge it.`,
+      mergeMessage(copyLabel, "driven by", label),
     );
     expect(copy.definition).toBe(setup.session.definition);
   });

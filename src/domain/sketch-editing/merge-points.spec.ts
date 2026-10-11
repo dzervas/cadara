@@ -1102,7 +1102,8 @@ describe("R-4: derived relationships (real contributions)", () => {
       ] as const)
         expect(merge(withRelationship, source, destination)).toEqual({
           valid: false,
-          message: `This point is part of a mirror (${relationship.label}); remove the mirror first to merge it.`,
+          // T16a ([TECH] T16-3): Merge's wording, naming the seed point q.
+          message: `q is part of mirror ‘${relationship.label}’. To merge it, press Esc, select it, then Mirror → Remove mirror.`,
         });
       return;
     }

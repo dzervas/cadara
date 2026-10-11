@@ -55,6 +55,7 @@ import type {
   SketchSessionDisplayRenderable,
   SketchSessionState,
 } from "./types";
+import { getEntityPointIds } from "@/domain/sketch-editing/definition-references";
 import {
   REFERENCE_IMAGE_ANCHOR_MARKER_COLOR,
   REFERENCE_IMAGE_ANCHOR_MARKER_RADIUS,
@@ -68,7 +69,6 @@ import {
   getSketchSessionDisplayProjectedReferences,
   getSketchSessionDerivedValidity,
   getSketchSessionSolvedSnapshot,
-  getEntityPointIds,
   mapDefinitionEntityToDraftEntity,
   resolveSketchDefinitionForSolve,
   getSketchSessionDerivationSettings,

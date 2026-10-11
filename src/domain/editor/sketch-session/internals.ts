@@ -57,7 +57,6 @@ import {
   SKETCH_SCHEMA_VERSION,
 } from "@/contracts/sketch/schema";
 import {
-  orderedSplinePointIds,
   reconstructSplineAggregate,
   tessellateCubicSpans,
 } from "@/contracts/sketch/spline-geometry";
@@ -821,40 +820,6 @@ export function getDefinitionSketchId(definition: SketchDefinition) {
     definition.points[0]?.target.sketchId ??
     ("sketch_draft" as SketchId)
   );
-}
-
-export function getEntityPointIds(entity: SketchEntityDefinition) {
-  switch (entity.kind) {
-    case "lineSegment":
-      return [entity.startPointId, entity.endPointId];
-    case "arc":
-      return [entity.startPointId, entity.endPointId, entity.centerPointId];
-    case "circle":
-      return [entity.centerPointId];
-    case "point":
-      return [entity.pointId];
-    case "spline":
-      return orderedSplinePointIds(entity);
-    case "ellipse":
-      return [entity.centerPointId, entity.majorAxisPointId];
-    case "ellipticalArc":
-      return [
-        entity.startPointId,
-        entity.endPointId,
-        entity.centerPointId,
-        entity.majorAxisPointId,
-      ];
-    case "conic":
-      return [entity.startPointId, entity.controlPointId, entity.endPointId];
-    case "bezierCurve":
-      return entity.controlPointIds;
-    case "profileText":
-      return [entity.anchorPointId];
-    case "derivedPiecewiseCubic":
-      // A derived shell owns no points (its driven terminals belong to its
-      // offset relationship's outputs).
-      return [];
-  }
 }
 
 export function getNextDefinitionSequence(definition: SketchDefinition) {

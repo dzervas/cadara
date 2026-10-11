@@ -458,7 +458,9 @@ export type MirrorRefusedEdit =
  * side) would leave the mirror's point map stale, so it is refused up
  * front, naming the relationship, before anything is written. `refs` are
  * the edited entities (Merge: its points). Null when none takes part in a
- * mirror. Removing a mirror arrives in T16.
+ * mirror. T16a ([TECH] T16-3): the text names the relationship by label
+ * and the way out (the Mirror panel's Remove mirror). Point refs are
+ * Merge's (existing points), refused in Merge's wording.
  */
 export function mirrorEditRefusal(
   definition: SketchDefinition,
@@ -468,14 +470,22 @@ export function mirrorEditRefusal(
   for (const ref of refs) {
     const step = resolveMirrorCounterpart(definition, ref)[0];
     if (!step) continue;
-    const label =
-      definition.derivedRelationships?.find(
-        (relationship) => relationship.derivationId === step.relationshipId,
-      )?.label ?? step.relationshipId;
-    return `This ${ref.kind === "point" ? "point" : "shape"} is part of a mirror (${label}); remove the mirror first to ${edit} it.`;
+    const label = definition.derivedRelationships!.find(
+      (relationship) => relationship.derivationId === step.relationshipId,
+    )!.label;
+    if (ref.kind === "point")
+      return `${definition.points.find((point) => point.pointId === ref.pointId)!.label} is part of mirror ‘${label}’. ${mirrorRemovalSteps(edit)}`;
+    return `This shape is part of mirror ‘${label}’. ${mirrorRemovalSteps(edit)}`;
   }
   return null;
 }
+
+/**
+ * T16a ([TECH] T16-3, review R-2): the way out of a mirror refusal, from
+ * the armed tool (Esc leaves it) to the Mirror panel's Remove mirror.
+ */
+export const mirrorRemovalSteps = (edit: MirrorRefusedEdit) =>
+  `To ${edit} it, press Esc, select it, then Mirror → Remove mirror.`;
 
 const mirrorEntityRefs = (entityIds: readonly SketchEntityId[]) =>
   entityIds.map((entityId) => ({ kind: "entity" as const, entityId }));

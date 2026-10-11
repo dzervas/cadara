@@ -35,6 +35,7 @@ import {
   updateSketchPointer,
   type SketchDrawingEscapeStep,
 } from "@/domain/editor/sketch-session";
+import { applySketchMirrorRemoval } from "@/domain/editor/sketch-session/mirror-actions";
 import { applyTangentAction } from "@/domain/editor/sketch-session/tangent-actions";
 import {
   enterSketchSpecialMode,
@@ -370,6 +371,39 @@ export function handleSketchToolPatched(
     return {
       state: {
         ...state,
+        session,
+        preview: {
+          kind: "sketch",
+          label: getSketchSessionPreviewLabel(session),
+          target: session.planeTarget,
+        },
+      },
+      effects: [],
+    };
+  }
+
+  // T16a ([TECH] T16-1): the Mirror panel's Remove mirror, one action
+  // ("Remove Mirror"). Like Delete, the selection (copies included) clears.
+  if (
+    event.patch.intent === "removeMirror" &&
+    typeof event.patch.derivationId === "string"
+  ) {
+    const session = applySketchMirrorRemoval(
+      state.session,
+      event.patch.derivationId,
+    );
+
+    return {
+      state: {
+        ...state,
+        selection: [],
+        hoverTarget: null,
+        annotationContext: withoutSketchAnnotationWheel(
+          pruneSketchAnnotationContext(
+            state.annotationContext ?? null,
+            session,
+          ),
+        ),
         session,
         preview: {
           kind: "sketch",

@@ -160,8 +160,10 @@ const reattached = (
   ...edited,
   derivedRelationships: original.derivedRelationships,
 });
-const refusal = (verb: string, kind = "shape") =>
-  `This ${kind} is part of a mirror (Mirror); remove the mirror first to ${verb} it.`;
+// T16a ([TECH] T16-3, review R-2): names the mirror by label and the way
+// to the Mirror panel.
+const refusal = (verb: string) =>
+  `This shape is part of mirror ‘Mirror’. To ${verb} it, press Esc, select it, then Mirror → Remove mirror.`;
 
 describe("stale maps after topology edits (T-15; review probe R1–R6): refused up front since T15d, the backstop kept for other paths", () => {
   /** Seed line ab above the axis (y = 0), its copy mab, cutters k1/k3 and q1/q3. */

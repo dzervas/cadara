@@ -9,7 +9,7 @@ import type {
   SketchReferenceImageRecord,
 } from "@/contracts/sketch/schema";
 import { orderedSplineOccurrences } from "@/contracts/sketch/spline-geometry";
-import { mirrorEditRefusal } from "./operations";
+import { mirrorEditRefusal, mirrorRemovalSteps } from "./operations";
 import type {
   ConstraintId,
   DimensionId,
@@ -422,7 +422,7 @@ export function getSketchMergePointRefusal(
   // so a mirrored copy's point names the mirror and its removal.
   if (driven)
     return driven.kind === "mirror"
-      ? `${label} is driven by mirror ${driven.label}; remove the mirror first to merge it.`
+      ? `${label} is driven by mirror ‘${driven.label}’. ${mirrorRemovalSteps("merge")}`
       : `${label} is driven by ${RELATIONSHIP_KIND_NAMES[driven.kind]} ${driven.label}; it cannot be merged (merge its seed points instead).`;
   const image = definition.referenceImages?.find((record) =>
     record.ownedPointIds.includes(pointId),

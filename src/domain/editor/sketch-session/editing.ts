@@ -99,7 +99,6 @@ import {
   getSketchSessionInvalidFeedback,
   hasAcceptedLiveSolveOfDefinition,
   withLiveSolveBasis,
-  getEntityPointIds,
   isDrawingSketchTool,
   rebuildSessionCommitRequest,
   rebuildSessionForDefinition,
@@ -112,7 +111,8 @@ import { updateReferenceImageOperationStates } from "./references";
 import {
   constraintReferencesSketchGeometry,
   dimensionReferencesSketchGeometry,
-} from "./state";
+  getEntityPointIds,
+} from "@/domain/sketch-editing/definition-references";
 import {
   buildSketchEditToolPresentation,
   getSketchEditToolValueLabel,
@@ -1913,6 +1913,26 @@ function selectSketchEditQueryTargets(
   tool: SketchEditToolState,
 ): SketchSessionState {
   const entityIds = getSelectedSketchEntityIds(tool);
+  // T16a (B7, [TECH] T16-3): a mirror seed or copy is refused at the
+  // target pick, which is not kept; the tool stays armed.
+  const targetRefusal =
+    entityIds.length === 1
+      ? mirrorEditRefusal(
+          session.definition,
+          [{ kind: "entity", entityId: entityIds[0]! }],
+          EDIT_QUERY_KINDS[tool.toolId as SketchEditQueryToolId],
+        )
+      : null;
+  if (targetRefusal) {
+    const reset = { ...tool, selectedTarget: null, selectedTargets: [] };
+    return {
+      ...session,
+      activeEditTool: reset,
+      toolStagedEntities: [],
+      validationMessage: targetRefusal,
+      toolPresentation: buildSketchEditToolPresentation(reset, targetRefusal),
+    };
+  }
   const click =
     entityIds.length === 2
       ? editQueryClick(session, entityIds[0]!, entityIds[1]!)
@@ -2088,6 +2108,32 @@ export function selectSketchEditToolTarget(
   const isSelected = activeEditTool.selectedTargets.some((selected) =>
     primitiveRefEquals(selected, target),
   );
+  // T16a (review A-7, as B7): Fillet and Chamfer refuse a mirror seed or
+  // copy at its own pick, which is not kept; earlier picks and the tool stay.
+  const filletLike =
+    activeEditTool.toolId === "sketchFillet"
+      ? "fillet"
+      : activeEditTool.toolId === "sketchChamfer"
+        ? "chamfer"
+        : null;
+  const pickRefusal =
+    filletLike && !isSelected && target.kind === "sketchEntity"
+      ? mirrorEditRefusal(
+          session.definition,
+          [{ kind: "entity", entityId: target.entityId }],
+          filletLike,
+        )
+      : null;
+  if (pickRefusal)
+    return {
+      ...session,
+      toolStagedEntities: [],
+      validationMessage: pickRefusal,
+      toolPresentation: buildSketchEditToolPresentation(
+        activeEditTool,
+        pickRefusal,
+      ),
+    };
   const nextSelectedTargets = isSelected
     ? activeEditTool.selectedTargets.filter(
         (selected) => !primitiveRefEquals(selected, target),
