@@ -51,7 +51,11 @@ import {
   type MirrorOutputEvaluation,
   type MirrorRelationshipEvaluation,
   type MirrorRelationshipInput,
+  correspondingMirrorDimensions,
+  linkedMirrorRefs,
 } from "@/contracts/sketch/mirror-requirements";
+import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { createDocumentSolverTolerances } from "@/contracts/solver/schema";
 
 // ------------------------------------------------------------ builders
 
@@ -3025,5 +3029,689 @@ describe("correspondence resolver (CO)", () => {
       ["m2", "output"],
     ]);
     expect(result[1]!.chain.map((step) => step.relationshipId)).toEqual(["m1"]);
+  });
+});
+
+// ------------------------------------------ shared driving dimensions (T16f)
+// Lane: logic. Seam: the owner exports `correspondingMirrorDimensions` and
+// `linkedMirrorRefs` ([TECH] T16-11/T16-14 with review R-7) on records-only
+// definitions, and (SDE) the core solve, which pins each routed size family
+// operationally: a dimension on the copy solves exactly as its image on the
+// seed.
+
+type DimensionInput = SketchDefinition["dimensions"][number];
+const local = (id: string) => ({
+  kind: "localEntity" as const,
+  entityId: eid(id),
+});
+const localPoint = (id: string) => ({
+  kind: "localPoint" as const,
+  pointId: pid(id),
+});
+const datum = (which: "xAxis" | "yAxis" | "origin") => ({
+  kind: "sketchDatum" as const,
+  datum: which,
+});
+const literal = (value: number) => ({ source: "literal" as const, value });
+function dim(id: string, fields: Record<string, unknown>): DimensionInput {
+  return {
+    dimensionId: id,
+    label: id,
+    ...(fields.kind === "lineAngle"
+      ? { valueRadians: literal(1) }
+      : { value: literal(1) }),
+    ...fields,
+  } as unknown as DimensionInput;
+}
+const radiusOf = (id: string, entity: string) =>
+  dim(id, { kind: "circleRadius", entityId: eid(entity) });
+const diameterOf = (id: string, entity: string) =>
+  dim(id, { kind: "diameter", entityId: eid(entity) });
+const lengthOf = (id: string, entity: string) =>
+  dim(id, { kind: "lineLength", entityId: eid(entity) });
+const distanceOf = (
+  id: string,
+  first: string,
+  second: string,
+  axis: "aligned" | "horizontal" | "vertical" = "aligned",
+) => dim(id, { kind: "distance", axis, pointIds: [pid(first), pid(second)] });
+
+/**
+ * Records only (positions are irrelevant to correspondence). m1 mirrors
+ * lines ab, ef (parallel to ab), gh, circle c, point entity pd and line xk
+ * (which starts at the axis end x0: R-7a) about line ax (x0–x1); m2
+ * mirrors c about the y datum (c2: orbit copy ↔ seed ↔ copy); m3 mirrors
+ * m1's copy c1 about line ay (chain); mx mirrors ab about the x datum.
+ * u is unrelated.
+ */
+function sharedDimensionSketch(): SketchDefinition {
+  const pointIds = [
+    ...["a", "b", "e", "f", "g", "h", "c", "d", "x0", "x1", "k", "u"],
+    ...["a1", "b1", "e1", "f1", "g1", "h1", "c1", "d1", "x0c", "k1"],
+    ...["c2", "c11", "y0", "y1", "ax_a", "ax_b"],
+  ];
+  const mirrorX = makeMirror("mx", "ax", [
+    ["ab", "abx", ["a", "b"], ["ax_a", "ax_b"]],
+  ]);
+  const mirrorY = makeMirror("m2", "ax", [["c", "c2", ["c"], ["c2"]]]);
+  return makeSketch(
+    pointIds.map((id, index) => makePoint(id, [index, index % 3])),
+    [
+      makeLine("ab", "a", "b"),
+      makeLine("ef", "e", "f"),
+      makeLine("gh", "g", "h"),
+      makeCircle("c", "c", 1),
+      makePointEntity("pd", "d"),
+      makeLine("ax", "x0", "x1"),
+      makeLine("xk", "x0", "k"),
+      makePointEntity("u", "u"),
+      makeLine("ab1", "a1", "b1"),
+      makeLine("ef1", "e1", "f1"),
+      makeLine("gh1", "g1", "h1"),
+      makeCircle("c1", "c1", 1),
+      makePointEntity("pd1", "d1"),
+      makeLine("xk1", "x0c", "k1"),
+      makeCircle("c2", "c2", 1),
+      makeCircle("c11", "c11", 1),
+      makeLine("ay", "y0", "y1"),
+      makeLine("abx", "ax_a", "ax_b"),
+    ],
+    [
+      makeMirror("m1", "ax", [
+        ["ab", "ab1", ["a", "b"], ["a1", "b1"]],
+        ["ef", "ef1", ["e", "f"], ["e1", "f1"]],
+        ["gh", "gh1", ["g", "h"], ["g1", "h1"]],
+        ["c", "c1", ["c"], ["c1"]],
+        ["pd", "pd1", ["d"], ["d1"]],
+        ["xk", "xk1", ["x0", "k"], ["x0c", "k1"]],
+      ]),
+      { ...mirrorY, mirrorReference: { kind: "sketchDatum", datum: "yAxis" } },
+      makeMirror("m3", "ay", [["c1", "c11", ["c1"], ["c11"]]]),
+      { ...mirrorX, mirrorReference: { kind: "sketchDatum", datum: "xAxis" } },
+    ],
+  );
+}
+
+function correspondence(
+  dimensions: readonly DimensionInput[],
+  candidate: DimensionInput,
+  failed: readonly string[] = [],
+  definition: SketchDefinition = sharedDimensionSketch(),
+) {
+  return correspondingMirrorDimensions(
+    {
+      ...definition,
+      dimensionIds: dimensions.map((entry) => entry.dimensionId),
+      dimensions: [...dimensions],
+    },
+    candidate,
+    new Set(failed),
+  ).map((entry) => [
+    entry.dimension.dimensionId,
+    entry.mirrors.map((mirror) => mirror.derivationId),
+  ]);
+}
+
+describe("shared driving dimensions: correspondence matrix (SD, T16f)", () => {
+  const corresponding: readonly [
+    string,
+    DimensionInput,
+    DimensionInput,
+    string[],
+  ][] = [
+    [
+      "radius on the copy ↔ radius on the seed",
+      radiusOf("D", "c1"),
+      radiusOf("E", "c"),
+      ["m1"],
+    ],
+    [
+      "diameter on the copy ↔ radius on the seed (one family)",
+      diameterOf("D", "c1"),
+      radiusOf("E", "c"),
+      ["m1"],
+    ],
+    [
+      "radius on the seed ↔ diameter on the copy (either side)",
+      radiusOf("D", "c"),
+      diameterOf("E", "c1"),
+      ["m1"],
+    ],
+    ["line length", lengthOf("D", "ab1"), lengthOf("E", "ab"), ["m1"]],
+    [
+      "aligned distance, order-insensitive",
+      distanceOf("D", "b1", "a1"),
+      distanceOf("E", "a", "b"),
+      ["m1"],
+    ],
+    [
+      "aligned distance across sides {a, b′} ↔ {a′, b}",
+      distanceOf("D", "a", "b1"),
+      distanceOf("E", "b", "a1"),
+      ["m1"],
+    ],
+    [
+      "aligned distance to an axis end (fixed)",
+      distanceOf("D", "a1", "x0"),
+      distanceOf("E", "x0", "a"),
+      ["m1"],
+    ],
+    [
+      "line distance, order-insensitive",
+      dim("D", { kind: "lineDistance", lines: [local("ef1"), local("ab1")] }),
+      dim("E", { kind: "lineDistance", lines: [local("ab"), local("ef")] }),
+      ["m1"],
+    ],
+    [
+      "point-line distance to the axis line (the axis maps to itself)",
+      dim("D", {
+        kind: "linePointDistance",
+        line: local("ax"),
+        point: localPoint("d1"),
+      }),
+      dim("E", {
+        kind: "linePointDistance",
+        line: local("ax"),
+        point: localPoint("d"),
+      }),
+      ["m1"],
+    ],
+    [
+      "line angle, order-insensitive",
+      dim("D", { kind: "lineAngle", lines: [local("ab1"), local("gh1")] }),
+      dim("E", { kind: "lineAngle", lines: [local("gh"), local("ab")] }),
+      ["m1"],
+    ],
+    [
+      "a datum operand maps to itself when it is the mirror's axis",
+      dim("D", { kind: "lineDistance", lines: [datum("xAxis"), local("abx")] }),
+      dim("E", { kind: "lineDistance", lines: [local("ab"), datum("xAxis")] }),
+      ["mx"],
+    ],
+    [
+      "R-7a: an axis end that is a seed point keeps itself as an image",
+      distanceOf("D", "x0", "k1"),
+      distanceOf("E", "x0", "k"),
+      ["m1"],
+    ],
+    [
+      "R-7a: … and its copy point maps back to it",
+      distanceOf("D", "x0c", "k1"),
+      distanceOf("E", "k", "x0"),
+      ["m1"],
+    ],
+    [
+      "orbit copy → seed → other copy (two mirrors of one seed)",
+      radiusOf("D", "c1"),
+      radiusOf("E", "c2"),
+      ["m1", "m2"],
+    ],
+    [
+      "orbit the other way",
+      radiusOf("D", "c2"),
+      radiusOf("E", "c1"),
+      ["m2", "m1"],
+    ],
+    [
+      "chain: a copy of a copy ↔ the root seed",
+      radiusOf("D", "c11"),
+      radiusOf("E", "c"),
+      ["m3", "m1"],
+    ],
+  ];
+  test.each(corresponding)("SD1 %s", (_, candidate, driver, mirrors) => {
+    expect(correspondence([driver], candidate)).toEqual([["E", mirrors]]);
+  });
+
+  const distinct: readonly [string, DimensionInput, DimensionInput][] = [
+    [
+      "self-image: a seed↔copy distance is its own image",
+      distanceOf("D", "a", "a1"),
+      distanceOf("E", "a1", "a"),
+    ],
+    [
+      "self-image: the angle between a seed line and its copy",
+      dim("D", { kind: "lineAngle", lines: [local("ab"), local("ab1")] }),
+      dim("E", { kind: "lineAngle", lines: [local("ab1"), local("ab")] }),
+    ],
+    [
+      "copy ↔ unrelated geometry",
+      distanceOf("D", "a1", "u"),
+      distanceOf("E", "a", "u"),
+    ],
+    [
+      "horizontal distance (signed, axis-dependent)",
+      dim("D", {
+        kind: "horizontalDistance",
+        pointIds: [pid("a1"), pid("b1")],
+      }),
+      dim("E", { kind: "horizontalDistance", pointIds: [pid("a"), pid("b")] }),
+    ],
+    [
+      "vertical distance",
+      dim("D", { kind: "verticalDistance", pointIds: [pid("a1"), pid("b1")] }),
+      dim("E", { kind: "verticalDistance", pointIds: [pid("a"), pid("b")] }),
+    ],
+    [
+      "h/v-axis `distance`",
+      distanceOf("D", "a1", "b1", "horizontal"),
+      distanceOf("E", "a", "b", "horizontal"),
+    ],
+    [
+      "pointDatumDistance",
+      dim("D", {
+        kind: "pointDatumDistance",
+        axis: "aligned",
+        point: localPoint("d1"),
+        datum: datum("origin"),
+      }),
+      dim("E", {
+        kind: "pointDatumDistance",
+        axis: "aligned",
+        point: localPoint("d"),
+        datum: datum("origin"),
+      }),
+    ],
+    [
+      "a datum that is not the mirror's axis",
+      dim("D", {
+        kind: "linePointDistance",
+        line: datum("xAxis"),
+        point: localPoint("c2"),
+      }),
+      dim("E", {
+        kind: "linePointDistance",
+        line: datum("xAxis"),
+        point: localPoint("c"),
+      }),
+    ],
+    [
+      "different families (line length vs aligned distance of its ends)",
+      lengthOf("D", "ab1"),
+      distanceOf("E", "a", "b"),
+    ],
+    [
+      "a reference is never E",
+      radiusOf("D", "c1"),
+      { ...radiusOf("E", "c"), reference: true } as DimensionInput,
+    ],
+  ];
+  test.each(distinct)("SD2 %s stays distinct", (_, candidate, driver) => {
+    expect(correspondence([driver], candidate)).toEqual([]);
+  });
+
+  test("SD3: a failed mirror (live solve's failedDerivationIds) is not a step; others still route", () => {
+    expect(
+      correspondence([radiusOf("E", "c")], radiusOf("D", "c1"), ["m1"]),
+    ).toEqual([]);
+    // c2 ↔ c1 runs through m1 too: broken.
+    expect(
+      correspondence([radiusOf("E", "c1")], radiusOf("D", "c2"), ["m1"]),
+    ).toEqual([]);
+    expect(
+      correspondence([radiusOf("E", "c")], radiusOf("D", "c2"), ["m1"]),
+    ).toEqual([["E", ["m2"]]]);
+    // Control: healthy.
+    expect(
+      correspondence([radiusOf("E", "c")], radiusOf("D", "c1"), []),
+    ).toEqual([["E", ["m1"]]]);
+  });
+
+  test("SD4: a stale map gives no correspondence even when the caller passes no failure", () => {
+    const definition = sharedDimensionSketch();
+    const stale = {
+      ...definition,
+      entityIds: definition.entityIds.filter((id) => id !== eid("gh1")),
+      entities: definition.entities.filter(
+        (entity) => entity.entityId !== eid("gh1"),
+      ),
+    };
+    expect(
+      correspondence([radiusOf("E", "c")], radiusOf("D", "c1"), [], stale),
+    ).toEqual([]);
+  });
+
+  test("SD5: several corresponding drivers come in definition order (tie-break), not search order", () => {
+    // E2 (two mirrors away) precedes E1 (one mirror away) in the definition.
+    expect(
+      correspondence(
+        [radiusOf("E2", "c2"), lengthOf("L", "ab"), diameterOf("E1", "c")],
+        radiusOf("D", "c1"),
+      ),
+    ).toEqual([
+      ["E2", ["m1", "m2"]],
+      ["E1", ["m1"]],
+    ]);
+  });
+
+  test("SD6: a persisted dimension is never its own correspondent; its duplicate is", () => {
+    const seed = radiusOf("seed", "c");
+    const copy = radiusOf("copy", "c1");
+    expect(correspondence([seed, copy], seed)).toEqual([["copy", ["m1"]]]);
+    expect(correspondence([seed, copy], copy)).toEqual([["seed", ["m1"]]]);
+    // An exact duplicate on the same targets is not a mirror correspondence.
+    expect(correspondence([seed, radiusOf("same", "c")], seed)).toEqual([]);
+  });
+
+  test("SD8 (review R-1): 24 mirrors about one line stay fast (visited target sets bound the search, not per-path mirror sets)", () => {
+    const count = 24;
+    const ids = Array.from({ length: count }, (_, index) => index);
+    const definition = makeSketch(
+      [
+        makePoint("x0", [-2, 0]),
+        makePoint("x1", [20, 0]),
+        ...ids.flatMap((index) => [
+          makePoint(`s${index}a`, [index, 1]),
+          makePoint(`s${index}b`, [index, 2]),
+          makePoint(`c${index}a`, [index, -1]),
+          makePoint(`c${index}b`, [index, -2]),
+        ]),
+      ],
+      [
+        makeLine("ax", "x0", "x1"),
+        ...ids.flatMap((index) => [
+          makeLine(`s${index}`, `s${index}a`, `s${index}b`),
+          makeLine(`c${index}`, `c${index}a`, `c${index}b`),
+        ]),
+      ],
+      ids.map((index) =>
+        makeMirror(`m${index}`, "ax", [
+          [
+            `s${index}`,
+            `c${index}`,
+            [`s${index}a`, `s${index}b`],
+            [`c${index}a`, `c${index}b`],
+          ],
+        ]),
+      ),
+    );
+    const started = performance.now();
+    // The axis maps to itself under all 24 mirrors (the case that was 2^k).
+    expect(
+      correspondence(
+        [lengthOf("E", "ax")],
+        lengthOf("D", "ax"),
+        [],
+        definition,
+      ),
+    ).toEqual([]);
+    expect(
+      correspondence(
+        [distanceOf("E", "x1", "x0")],
+        distanceOf("D", "x0", "x1"),
+        [],
+        definition,
+      ),
+    ).toEqual([]);
+    expect(
+      correspondence(
+        [lengthOf("E", "s23")],
+        lengthOf("D", "c23"),
+        [],
+        definition,
+      ),
+    ).toEqual([["E", ["m23"]]]);
+    expect(
+      performance.now() - started,
+      "milliseconds, generous bound",
+    ).toBeLessThan(1000);
+  });
+
+  test("SD7: linkedMirrorRefs gives the healthy orbit of entities and points, never the ref itself", () => {
+    const definition = {
+      ...sharedDimensionSketch(),
+      dimensionIds: [],
+      dimensions: [],
+    };
+    const linked = (
+      refs: Parameters<typeof linkedMirrorRefs>[1],
+      failed: string[] = [],
+    ) => linkedMirrorRefs(definition, refs, new Set(failed));
+    expect(linked([{ kind: "entity", entityId: eid("c1") }])).toEqual([
+      { kind: "entity", entityId: eid("c") },
+      { kind: "entity", entityId: eid("c11") },
+      { kind: "entity", entityId: eid("c2") },
+    ]);
+    expect(linked([{ kind: "point", pointId: pid("x0") }])).toEqual([
+      { kind: "point", pointId: pid("x0c") },
+    ]);
+    // The axis line maps only to itself.
+    expect(linked([{ kind: "entity", entityId: eid("ax") }])).toEqual([]);
+    expect(linked([{ kind: "entity", entityId: eid("c1") }], ["m1"])).toEqual([
+      { kind: "entity", entityId: eid("c11") },
+    ]);
+  });
+});
+
+// SDE: each routed family is reflection-invariant in the solve: a dimension
+// on the copy and its image on the seed give the same solved geometry and
+// statuses, about a line axis, a construction-line axis and a datum axis.
+// The seed dimension is D's exact image (same operand order: an
+// underconstrained solve may end elsewhere on the same requirement when a
+// two-line kind lists its lines the other way). The core solve takes
+// resolved numeric values.
+describe("shared driving dimensions: equivalence in the solve (SDE, T16f)", () => {
+  const tolerances = createDocumentSolverTolerances({
+    modelingTolerance: TAU,
+    angularToleranceRadians: 1e-6,
+  });
+  type AxisKind = "line" | "constructionLine" | "slopedLine" | "datum";
+  function mirrored(axis: AxisKind, dimension: DimensionInput) {
+    const points = [
+      makePoint("a", [1, 1]),
+      makePoint("b", [3, 2]),
+      makePoint("e", [1, 3]),
+      makePoint("f", [3, 4]),
+      makePoint("g", [5, 1]),
+      makePoint("h", [6, 3]),
+      makePoint("c", [9, 3]),
+      makePoint("d", [4, 5]),
+      makePoint("x0", [-2, 0]),
+      // Review A-1: a sloped axis too, where axis-dependent kinds would differ.
+      makePoint("x1", axis === "slopedLine" ? [20, 11] : [20, 0]),
+      ...["a1", "b1", "e1", "f1", "g1", "h1", "c1", "d1"].map((id) =>
+        makePoint(id, [0, 0]),
+      ),
+    ];
+    const axisLine = {
+      ...makeLine("ax", "x0", "x1"),
+      isConstruction: axis === "constructionLine",
+    };
+    const relationship = makeMirror("m1", "ax", [
+      ["ab", "ab1", ["a", "b"], ["a1", "b1"]],
+      ["ef", "ef1", ["e", "f"], ["e1", "f1"]],
+      ["gh", "gh1", ["g", "h"], ["g1", "h1"]],
+      ["c", "c1", ["c"], ["c1"]],
+      ["pd", "pd1", ["d"], ["d1"]],
+    ]);
+    const definition = makeSketch(
+      points,
+      [
+        makeLine("ab", "a", "b"),
+        makeLine("ef", "e", "f"),
+        makeLine("gh", "g", "h"),
+        makeCircle("c", "c", 1),
+        makePointEntity("pd", "d"),
+        axisLine,
+        makeLine("ab1", "a1", "b1"),
+        makeLine("ef1", "e1", "f1"),
+        makeLine("gh1", "g1", "h1"),
+        makeCircle("c1", "c1", 1),
+        makePointEntity("pd1", "d1"),
+      ],
+      [
+        axis === "datum"
+          ? {
+              ...relationship,
+              mirrorReference: { kind: "sketchDatum", datum: "xAxis" },
+            }
+          : relationship,
+      ],
+    );
+    return evaluateSketchDerivations({
+      definition: {
+        ...definition,
+        dimensionIds: [dimension.dimensionId],
+        dimensions: [dimension],
+      },
+      modelingTolerance: TAU,
+    }).definition;
+  }
+  const axisLineOperand = (axis: AxisKind) =>
+    axis === "datum" ? datum("xAxis") : local("ax");
+  const families: readonly [
+    string,
+    (axis: AxisKind) => [DimensionInput, DimensionInput],
+  ][] = [
+    [
+      "radius / diameter",
+      () => [
+        { ...diameterOf("D", "c1"), value: 4 } as DimensionInput,
+        { ...radiusOf("D", "c"), value: 2 } as DimensionInput,
+      ],
+    ],
+    [
+      "line length",
+      () => [
+        { ...lengthOf("D", "ab1"), value: 3 } as DimensionInput,
+        { ...lengthOf("D", "ab"), value: 3 } as DimensionInput,
+      ],
+    ],
+    [
+      "aligned distance",
+      () => [
+        { ...distanceOf("D", "a1", "h1"), value: 6 } as DimensionInput,
+        { ...distanceOf("D", "a", "h"), value: 6 } as DimensionInput,
+      ],
+    ],
+    [
+      "line distance",
+      () => [
+        dim("D", {
+          kind: "lineDistance",
+          lines: [local("ab1"), local("ef1")],
+          value: 2.5,
+        }),
+        dim("D", {
+          kind: "lineDistance",
+          lines: [local("ab"), local("ef")],
+          value: 2.5,
+        }),
+      ],
+    ],
+    [
+      "point-line distance (to the axis)",
+      (axis) => [
+        dim("D", {
+          kind: "linePointDistance",
+          line: axisLineOperand(axis),
+          point: localPoint("d1"),
+          value: 7,
+        }),
+        dim("D", {
+          kind: "linePointDistance",
+          line: axisLineOperand(axis),
+          point: localPoint("d"),
+          value: 7,
+        }),
+      ],
+    ],
+    [
+      "line angle",
+      () => [
+        dim("D", {
+          kind: "lineAngle",
+          lines: [local("ab1"), local("gh1")],
+          valueRadians: Math.PI / 3,
+        }),
+        dim("D", {
+          kind: "lineAngle",
+          lines: [local("ab"), local("gh")],
+          valueRadians: Math.PI / 3,
+        }),
+      ],
+    ],
+  ];
+  const axes: readonly AxisKind[] = [
+    "line",
+    "constructionLine",
+    "slopedLine",
+    "datum",
+  ];
+  test.each(
+    families.flatMap(([family, make]) =>
+      axes.map((axis) => [family, axis, make] as const),
+    ),
+  )("SDE %s about a %s axis", (_, axis, make) => {
+    const [onCopy, onSeed] = make(axis);
+    const definitionOnCopy = mirrored(axis, onCopy);
+    const definitionOnSeed = mirrored(axis, onSeed);
+    // The owner calls them corresponding (the family is routed) …
+    expect(
+      correspondingMirrorDimensions(
+        {
+          ...definitionOnCopy,
+          dimensionIds: ["D_seed" as never],
+          dimensions: [{ ...onSeed, dimensionId: "D_seed" } as DimensionInput],
+        },
+        onCopy,
+        new Set(),
+      ).map((entry) => entry.dimension.dimensionId),
+    ).toEqual(["D_seed"]);
+    // … and the solve treats them as one requirement.
+    const solveOf = (definition: SketchDefinition) =>
+      solveSketchDefinitionCore({
+        definition,
+        tolerances,
+        modelingTolerance: TAU,
+        partialSolvePolicy: "bestEffort",
+      }).solvedSnapshot;
+    const copySolve = solveOf(definitionOnCopy);
+    const seedSolve = solveOf(definitionOnSeed);
+    expect(copySolve.status).toEqual(seedSolve.status);
+    expect(copySolve.status.solveState).toBe("solved");
+    expect(copySolve.dimensionStatuses.map((entry) => entry.status)).toEqual(
+      seedSolve.dimensionStatuses.map((entry) => entry.status),
+    );
+    expect(copySolve.dimensionStatuses[0]!.status).toBe("driving");
+    const seedPosition = new Map(
+      seedSolve.solvedPoints.map((entry) => [
+        entry.pointId,
+        entry.solvedPosition,
+      ]),
+    );
+    expect(copySolve.solvedPoints.length).toBe(seedSolve.solvedPoints.length);
+    for (const entry of copySolve.solvedPoints) {
+      const other = seedPosition.get(entry.pointId)!;
+      expect(entry.solvedPosition[0]).toBeCloseTo(other[0], 6);
+      expect(entry.solvedPosition[1]).toBeCloseTo(other[1], 6);
+    }
+    const radiusOfEntity = (snapshot: typeof seedSolve, id: string) =>
+      (
+        snapshot.solvedEntities.find((entry) => entry.entityId === id) as
+          | { solvedRadius?: number }
+          | undefined
+      )?.solvedRadius;
+    for (const id of [eid("c"), eid("c1")])
+      expect(radiusOfEntity(copySolve, id)).toBeCloseTo(
+        radiusOfEntity(seedSolve, id)!,
+        6,
+      );
+    // The requirement moved the geometry (the row is not vacuous).
+    const authored = new Map(
+      definitionOnSeed.points.map((entry) => [entry.pointId, entry.position]),
+    );
+    expect(
+      radiusOfEntity(seedSolve, eid("c"))! > 1.5 ||
+        seedSolve.solvedPoints.some((entry) => {
+          const before = authored.get(entry.pointId)!;
+          return (
+            Math.hypot(
+              entry.solvedPosition[0] - before[0],
+              entry.solvedPosition[1] - before[1],
+            ) > 1e-3
+          );
+        }),
+    ).toBe(true);
   });
 });

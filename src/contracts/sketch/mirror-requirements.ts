@@ -21,13 +21,15 @@
  * document modeling tolerance τ, passed in.
  */
 import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
-import type {
-  SketchDefinition,
-  SketchDerivationDefinition,
-  SketchEntityDefinition,
-  SketchPoint2D,
-  SketchPointDefinition,
-  SketchSolveDiagnostic,
+import {
+  isReferenceDimension,
+  type DimensionDefinition,
+  type SketchDefinition,
+  type SketchDerivationDefinition,
+  type SketchEntityDefinition,
+  type SketchPoint2D,
+  type SketchPointDefinition,
+  type SketchSolveDiagnostic,
 } from "@/contracts/sketch/schema";
 import {
   orderedSplineOccurrences,
@@ -1418,6 +1420,315 @@ export function resolveMirrorCounterpart(
     }
     return { ...step, chain };
   });
+}
+
+// ------------------------------------- shared driving dimensions (T16f)
+
+/**
+ * T16f ([TECH] T16-11 with review R-7): the reflection-invariant size
+ * families. Radius and diameter are one family (one scalar, the diameter
+ * twice the radius); `distance` only with the aligned axis. Horizontal and
+ * vertical distances (signed, axis-dependent), `pointDatumDistance` and
+ * every constraint are never routed.
+ */
+type MirrorSizeFamily =
+  | "radius"
+  | "lineLength"
+  | "distance"
+  | "lineDistance"
+  | "linePointDistance"
+  | "lineAngle";
+
+/** A dimension's family and target keys (`symmetric`: order-insensitive). */
+interface MirrorSizeTargets {
+  readonly family: MirrorSizeFamily;
+  readonly keys: readonly string[];
+  readonly symmetric: boolean;
+}
+
+/**
+ * A target key: `e:` a local entity, `p:` a local point, `d:` a sketch datum,
+ * `x:` projected geometry (never mapped by a mirror).
+ */
+function operandKey(
+  operand:
+    | { readonly kind: "localEntity"; readonly entityId: string }
+    | { readonly kind: "localPoint"; readonly pointId: string }
+    | { readonly kind: "sketchDatum"; readonly datum: string }
+    | { readonly kind: "projectedGeometry"; readonly reference: unknown },
+): string {
+  switch (operand.kind) {
+    case "localEntity":
+      return `e:${operand.entityId}`;
+    case "localPoint":
+      return `p:${operand.pointId}`;
+    case "sketchDatum":
+      return `d:${operand.datum}`;
+    case "projectedGeometry":
+      return `x:${JSON.stringify(operand.reference)}`;
+  }
+}
+
+function mirrorSizeTargets(
+  dimension: DimensionDefinition,
+): MirrorSizeTargets | null {
+  switch (dimension.kind) {
+    case "circleRadius":
+    case "diameter":
+      return {
+        family: "radius",
+        keys: [`e:${dimension.entityId}`],
+        symmetric: false,
+      };
+    case "lineLength":
+      return {
+        family: "lineLength",
+        keys: [`e:${dimension.entityId}`],
+        symmetric: false,
+      };
+    case "distance":
+      return dimension.axis === "aligned"
+        ? {
+            family: "distance",
+            keys: dimension.pointIds.map((pointId) => `p:${pointId}`),
+            symmetric: true,
+          }
+        : null;
+    case "lineDistance":
+    case "lineAngle":
+      return {
+        family: dimension.kind,
+        keys: dimension.lines.map(operandKey),
+        symmetric: true,
+      };
+    case "linePointDistance":
+      return {
+        family: "linePointDistance",
+        keys: [operandKey(dimension.line), operandKey(dimension.point)],
+        symmetric: false,
+      };
+    default:
+      return null;
+  }
+}
+
+const sizeTargetsKey = (
+  family: MirrorSizeFamily,
+  keys: readonly string[],
+  symmetric: boolean,
+) => `${family}|${(symmetric ? [...keys].sort() : keys).join("|")}`;
+
+/** One mirror's step: every mapped key and its images (R-7a: a set). */
+interface MirrorStepIndex {
+  readonly derivationId: string;
+  readonly label: string;
+  readonly images: ReadonlyMap<string, readonly string[]>;
+}
+
+interface MirrorDimensionIndex {
+  readonly steps: readonly MirrorStepIndex[];
+  /** Driving size dimensions by family and target key, in definition order. */
+  readonly drivers: ReadonlyMap<string, readonly DimensionDefinition[]>;
+  readonly order: ReadonlyMap<string, number>;
+}
+
+/** A10: one index per definition object (definitions are never mutated). */
+const mirrorDimensionIndexes = new WeakMap<object, MirrorDimensionIndex>();
+
+function mirrorDimensionIndex(
+  definition: CorrespondenceDefinition & Pick<SketchDefinition, "dimensions">,
+): MirrorDimensionIndex {
+  const cached = mirrorDimensionIndexes.get(definition);
+  if (cached) return cached;
+  const geometry = indexMirrorGeometry(definition);
+  const steps: MirrorStepIndex[] = [];
+  for (const relationship of definition.derivedRelationships ?? []) {
+    if (relationship.kind !== "mirror") continue;
+    // Every step must resolve: a stale map gives no correspondence (A-7).
+    if (
+      relationship.outputs.some(
+        (output) => "stale" in checkMirrorOutputMap(output, geometry),
+      )
+    )
+      continue;
+    const images = new Map<string, string[]>();
+    const add = (from: string, to: string) => {
+      const list = images.get(from);
+      if (!list) images.set(from, [to]);
+      else if (!list.includes(to)) list.push(to);
+    };
+    for (const output of relationship.outputs) {
+      add(`e:${output.seedEntityId}`, `e:${output.outputEntityId}`);
+      add(`e:${output.outputEntityId}`, `e:${output.seedEntityId}`);
+      output.seedPointIds.forEach((seedPointId, index) => {
+        const outputPointId = output.outputPointIds[index]!;
+        add(`p:${seedPointId}`, `p:${outputPointId}`);
+        add(`p:${outputPointId}`, `p:${seedPointId}`);
+      });
+    }
+    // The axis and its end points map to themselves; a datum operand only
+    // when it is this mirror's axis.
+    const reference = relationship.mirrorReference;
+    if (reference.kind === "sketchDatum")
+      add(`d:${reference.datum}`, `d:${reference.datum}`);
+    else {
+      const line = geometry.entityById.get(reference.entityId);
+      if (line?.kind !== "lineSegment") continue;
+      for (const key of [
+        `e:${line.entityId}`,
+        `p:${line.startPointId}`,
+        `p:${line.endPointId}`,
+      ])
+        add(key, key);
+    }
+    steps.push({
+      derivationId: relationship.derivationId,
+      label: relationship.label,
+      images,
+    });
+  }
+  const drivers = new Map<string, DimensionDefinition[]>();
+  const order = new Map<string, number>();
+  definition.dimensions.forEach((dimension, index) => {
+    order.set(dimension.dimensionId, index);
+    if (isReferenceDimension(dimension)) return;
+    const targets = mirrorSizeTargets(dimension);
+    if (!targets) return;
+    const key = sizeTargetsKey(targets.family, targets.keys, targets.symmetric);
+    drivers.set(key, [...(drivers.get(key) ?? []), dimension]);
+  });
+  const index = { steps, drivers, order };
+  mirrorDimensionIndexes.set(definition, index);
+  return index;
+}
+
+/** A corresponding driving dimension and the mirrors its correspondence runs through. */
+export interface MirrorDimensionCorrespondence {
+  readonly dimension: DimensionDefinition;
+  readonly mirrors: readonly {
+    readonly derivationId: string;
+    readonly label: string;
+  }[];
+}
+
+/**
+ * T16f ([TECH] T16-11 with review R-7, issue 15 "a corresponding size
+ * dimension is one shared driving requirement"): the driving dimensions
+ * that size the same reflected quantity as `dimension` (a candidate, or one
+ * of the definition's), first in definition order (the tie-break: the
+ * others are persisted duplicates).
+ *
+ * E corresponds to D when both are in one reflection-invariant size family
+ * and mapping every target of D through a path of healthy mirrors gives E's
+ * targets (order-insensitive where the kind is symmetric), and those mapped
+ * targets differ from D's own (a self-image such as a seed↔copy distance is
+ * distinct). A step maps seed ↔ copy entities and points by the recorded
+ * maps; the mirror's axis line and its end points (or its datum axis) map
+ * to themselves, so a point that is both an axis end and a seed point has
+ * two images and both are tried. Paths go in both directions (copy ↔ seed
+ * ↔ another copy). Every step is a reflection, so any path of healthy steps
+ * is an isometry and a mirror may recur on it (T16f review R-1): the search
+ * is breadth-first over target sets, each visited once, so it terminates
+ * on the finite set of mapped tuples (linear in them, never exponential in
+ * the mirror count) and reports a shortest path. A mirror in
+ * `failedDerivationIds` (the live solve's, T16b) or with a stale map is not
+ * a step. References are never E; D itself never is.
+ */
+export function correspondingMirrorDimensions(
+  definition: CorrespondenceDefinition & Pick<SketchDefinition, "dimensions">,
+  dimension: DimensionDefinition,
+  failedDerivationIds: ReadonlySet<string>,
+): readonly MirrorDimensionCorrespondence[] {
+  const targets = mirrorSizeTargets(dimension);
+  if (!targets) return [];
+  const index = mirrorDimensionIndex(definition);
+  const steps = index.steps.filter(
+    (step) => !failedDerivationIds.has(step.derivationId),
+  );
+  if (steps.length === 0) return [];
+  const { family, symmetric } = targets;
+  const own = sizeTargetsKey(family, targets.keys, symmetric);
+  const found = new Map<string, MirrorDimensionCorrespondence>();
+  const seen = new Set<string>([own]);
+  const queue: { keys: readonly string[]; path: readonly number[] }[] = [
+    { keys: targets.keys, path: [] },
+  ];
+  for (let head = 0; head < queue.length; head += 1) {
+    const { keys, path: reached } = queue[head]!;
+    steps.forEach((step, stepIndex) => {
+      const imageSets = keys.map((key) => step.images.get(key));
+      if (imageSets.some((images) => !images)) return;
+      let combinations: string[][] = [[]];
+      for (const images of imageSets as (readonly string[])[])
+        combinations = combinations.flatMap((prefix) =>
+          images.map((image) => [...prefix, image]),
+        );
+      const path = [...reached, stepIndex];
+      for (const mapped of combinations) {
+        const key = sizeTargetsKey(family, mapped, symmetric);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        for (const driver of index.drivers.get(key) ?? [])
+          if (
+            driver.dimensionId !== dimension.dimensionId &&
+            !found.has(driver.dimensionId)
+          )
+            found.set(driver.dimensionId, {
+              dimension: driver,
+              mirrors: path.map((position) => ({
+                derivationId: steps[position]!.derivationId,
+                label: steps[position]!.label,
+              })),
+            });
+        queue.push({ keys: mapped, path });
+      }
+    });
+  }
+  return [...found.values()].sort(
+    (first, second) =>
+      index.order.get(first.dimension.dimensionId)! -
+      index.order.get(second.dimension.dimensionId)!,
+  );
+}
+
+/**
+ * T16f ([TECH] T16-14): the counterparts of `refs` (entities and points)
+ * through healthy mirrors: every copy, original and copy of a copy reached
+ * by the recorded maps (both directions), never the refs themselves (an
+ * axis maps to itself). Same index and health rule as
+ * `correspondingMirrorDimensions`; in first-reached order, deduplicated.
+ */
+export function linkedMirrorRefs(
+  definition: CorrespondenceDefinition & Pick<SketchDefinition, "dimensions">,
+  refs: readonly Exclude<
+    MirrorCorrespondenceRef,
+    { kind: "splineOccurrence" }
+  >[],
+  failedDerivationIds: ReadonlySet<string>,
+): readonly Exclude<MirrorCorrespondenceRef, { kind: "splineOccurrence" }>[] {
+  const steps = mirrorDimensionIndex(definition).steps.filter(
+    (step) => !failedDerivationIds.has(step.derivationId),
+  );
+  if (steps.length === 0) return [];
+  const start = refs.map((ref) =>
+    ref.kind === "entity" ? `e:${ref.entityId}` : `p:${ref.pointId}`,
+  );
+  const seen = new Set(start);
+  const queue = [...start];
+  for (let head = 0; head < queue.length; head += 1)
+    for (const step of steps)
+      for (const image of step.images.get(queue[head]!) ?? [])
+        if (!seen.has(image)) {
+          seen.add(image);
+          queue.push(image);
+        }
+  return queue
+    .slice(start.length)
+    .map((key) =>
+      key.startsWith("e:")
+        ? { kind: "entity" as const, entityId: key.slice(2) as SketchEntityId }
+        : { kind: "point" as const, pointId: key.slice(2) as SketchPointId },
+    );
 }
 
 // ------------------------------------------------- session helpers (T15d)

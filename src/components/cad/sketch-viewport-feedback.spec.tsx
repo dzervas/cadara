@@ -16,12 +16,16 @@ import {
   beginSketchTool,
   createNewSketchSession,
   patchSketchConstraintValue,
+  pinSketchConstraintPreview,
+  selectSketchConstraintTarget,
   selectSketchEditToolTarget,
   startSketchDraw,
   updateSketchPointer,
 } from "@/domain/editor/sketch-session";
 import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
 import {
+  eid,
+  entityRef,
   entityTarget,
   mirroredSession,
   seedDefinition,
@@ -718,4 +722,76 @@ test("T16e: the Mirror repair prompt, then its Replace/Cancel popup after a pick
     markup.match(/pointer-events-auto/g),
     "only the popup box takes pointer events",
   ).toHaveLength(1);
+});
+
+// T16f ([TECH] T16-12), UI lane; seam: the routed Dimension tool's popup
+// (the shared driver's edit, built by the real session) rendered by the
+// viewport feedback layer: the driver's kind and value, the "Shared with …"
+// readout and an unchecked "Add as reference instead" switch, no Make
+// reference; switched on, the picks' measured value read-only with
+// "Add reference".
+test("T16f: the routed Dimension popup renders the shared readout and the Add as reference instead switch", () => {
+  const setup = mirroredSession("free");
+  const session = rebuildSessionForDefinition(setup.session, {
+    definition: {
+      ...setup.session.definition,
+      dimensionIds: ["dimension_seed" as never],
+      dimensions: [
+        {
+          dimensionId: "dimension_seed",
+          kind: "circleRadius",
+          label: "Radius 2",
+          entityId: eid("c"),
+          value: { source: "literal", value: 2 },
+        } as never,
+      ],
+    },
+  });
+  const routed = pinSketchConstraintPreview(
+    selectSketchConstraintTarget(
+      beginSketchTool(session, "dimensionDistance"),
+      entityRef(session, setup.outputOf("c").outputEntityId),
+    ),
+    [6, 6],
+  );
+  const render = (
+    floatingInput: SketchToolPresentationSchema["floatingInput"],
+  ) =>
+    renderToStaticMarkup(
+      <MantineProvider>
+        <SketchViewportFeedbackLayer
+          schema={{ prompts: [], overlays: [], floatingInput }}
+          projections={[
+            { id: `floating-input:${floatingInput!.id}`, x: 180, y: 90 },
+          ]}
+          documentVariableNames={[]}
+          onPatch={() => undefined}
+        />
+      </MantineProvider>,
+    );
+  const input = routed.toolPresentation?.floatingInput;
+  const markup = render(input);
+  expect(markup).toContain(">Radius<");
+  expect(markup).toMatch(/<input[^>]*value="2"/);
+  expect(markup).toContain(
+    'data-floating-input-readout="true">Shared with Radius 2 through mirror \u2018mirror 1\u2019<',
+  );
+  expect(markup).toContain(">Add as reference instead<");
+  const switchInput = (text: string) =>
+    text.match(/<input[^>]*role="switch"[^>]*>/)?.[0] ?? "";
+  expect(switchInput(markup), "a visible switch").not.toBe("");
+  expect(switchInput(markup)).not.toContain('checked=""');
+  expect(markup).not.toContain("Make reference");
+  expect(markup).toContain(">Save<");
+
+  const switched = render(
+    patchSketchConstraintValue(routed, input!.modeSwitch!.action.patch)
+      .toolPresentation?.floatingInput,
+  );
+  expect(switched).toContain("Diameter (reference)");
+  expect(switched, "the copy's measured diameter").toMatch(
+    /<input[^>]*readOnly=""[^>]*value="4"/,
+  );
+  expect(switchInput(switched)).toContain('checked=""');
+  expect(switched).toContain(">Add reference<");
 });

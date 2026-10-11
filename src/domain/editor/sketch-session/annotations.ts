@@ -43,6 +43,7 @@ import {
   type SolvedCubicSpan,
 } from "@/contracts/sketch/spline-geometry";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { linkedMirrorRefs } from "@/contracts/sketch/mirror-requirements";
 import { resolveSketchDimensionValues } from "@/domain/modeling/sketch-dimension-expressions";
 import {
   type ProjectedSketchReferenceRecord,
@@ -67,8 +68,14 @@ import type {
   SketchAnnotationProblem,
   SketchDimensionAnnotationDragHandle,
   SketchSessionState,
+  SketchSharedDimensionEdit,
 } from "./types";
 import {
+  describeSharedMirrorPath,
+  getSessionSketchId,
+  getSketchSessionMirrorHealth,
+  getSketchSessionSharedMirrorDimensions,
+  sharedMirrorDriverRefusal,
   describeSketchSessionUnsatisfiedRequirements,
   getSketchSessionInvalidFeedback,
   hasAcceptedLiveSolveOfDefinition,
@@ -89,6 +96,9 @@ import {
   getSketchDatumGuideExtent,
   applySolvedSketchToDefinition,
 } from "./definition-patches";
+// T16f review R-3: re-arming a routed Dimension tool (an import cycle with
+// `constraints.ts`, used only at call time, as `tools.ts` ↔ `constraints.ts`).
+import { rearmSharedDimensionTool } from "./constraints";
 import {
   getSketchConstraintDisplayForTarget,
   getSketchConstraintDisplaySummary,
@@ -97,6 +107,12 @@ import {
 export function beginSketchAnnotationEdit(
   session: SketchSessionState,
   target: SketchConstraintRef | SketchDimensionRef,
+  options: {
+    /** T16f: a Dimension tool routed to this driver (re-armed afterwards). */
+    shared?: SketchSharedDimensionEdit;
+    /** T16f: why a commit was refused and this edit opened instead. */
+    message?: string;
+  } = {},
 ): SketchSessionState {
   const editable = getEditableAnnotationValue(session, target);
 
@@ -116,6 +132,7 @@ export function beginSketchAnnotationEdit(
   const edit: SketchAnnotationEditState = {
     target,
     pendingValue: editable.value,
+    ...(options.shared ? { shared: options.shared } : {}),
   };
 
   return {
@@ -126,12 +143,16 @@ export function beginSketchAnnotationEdit(
     livePoint: null,
     toolPlacedPoints: [],
     toolSettings: {},
-    toolPresentation: buildAnnotationEditPresentation(session, edit),
+    toolPresentation: buildAnnotationEditPresentation(
+      session,
+      edit,
+      options.message ?? null,
+    ),
     constraintAuthoring: null,
     activeAnnotationEdit: edit,
     activeEditTarget: null,
     activeDrag: null,
-    validationMessage: null,
+    validationMessage: options.message ?? null,
   };
 }
 
@@ -151,7 +172,27 @@ export function patchSketchAnnotationEditValue(
     return clearSketchAnnotationEdit(session);
   }
 
+  // T16f: "Add as reference instead" switches what the routed popup commits.
+  if (
+    intent === "setSharedDimensionReference" &&
+    edit.shared?.referenceLabel != null
+  ) {
+    const nextEdit = {
+      ...edit,
+      shared: { ...edit.shared, addsReference: patch.reference === true },
+    };
+    return {
+      ...session,
+      activeAnnotationEdit: nextEdit,
+      toolPresentation: buildAnnotationEditPresentation(session, nextEdit),
+    };
+  }
+
   if ("value" in patch) {
+    if (edit.shared?.addsReference) {
+      // The reference's measured value is read-only.
+      return session;
+    }
     const nextEdit = {
       ...edit,
       pendingValue: normalizeConstraintValue(
@@ -163,6 +204,9 @@ export function patchSketchAnnotationEditValue(
       ...session,
       activeAnnotationEdit: nextEdit,
       toolPresentation: buildAnnotationEditPresentation(session, nextEdit),
+      // T16f review A-2: typing clears a refusal shown by this popup, in the
+      // popup and the session alike.
+      validationMessage: null,
     };
   }
 
@@ -555,6 +599,23 @@ export function commitSketchAnnotationEditValue(
             isReferenceDimension(dimension),
         )
       : undefined;
+  // T16f ([TECH] T16-12/A-9): making a reference driving when a
+  // corresponding driver exists would add a second driver of one mirrored
+  // quantity: refused here, in the domain commit path, and that driver's
+  // edit opens instead.
+  const driver = madeDriving
+    ? getSketchSessionSharedMirrorDimensions(session, madeDriving)[0]
+    : undefined;
+  if (driver) {
+    return beginSketchAnnotationEdit(
+      session,
+      createSketchDimensionRef(
+        getSessionSketchId(session),
+        driver.dimension.dimensionId,
+      ),
+      { message: sharedMirrorDriverRefusal(driver) },
+    );
+  }
   // T13d review R-1: a reference shows (and prefills) magnitudes; making a
   // signed point-pair reference driving keeps the current geometry by
   // storing its points in the measured direction.
@@ -1139,6 +1200,71 @@ export function buildAnnotationEditPresentation(
   const editable = getEditableAnnotationValue(session, edit.target);
   const label = editable?.label ?? "Value";
   const reference = editable?.reference ?? null;
+  const shared = edit.shared;
+  // T16f ([TECH] T16-12): a routed Dimension tool edits the driver it
+  // shares (shown in its own kind) or, with "Add as reference instead",
+  // commits its picks as a reference measurement.
+  const sharedPresentation = shared
+    ? {
+        readout: shared.readout,
+        ...(shared.referenceLabel === null
+          ? {}
+          : {
+              modeSwitch: {
+                label: "Add as reference instead",
+                checked: shared.addsReference,
+                action: {
+                  type: "patch" as const,
+                  patch: {
+                    intent: "setSharedDimensionReference",
+                    reference: !shared.addsReference,
+                  },
+                },
+              },
+            }),
+      }
+    : null;
+  const duplicates =
+    !shared && !reference && edit.target.kind === "dimension"
+      ? describeSharedMirrorDuplicates(session, edit.target)
+      : null;
+
+  if (shared?.addsReference && shared.referenceLabel !== null) {
+    const measured = shared.authoring.pendingValue;
+    return {
+      prompts: [
+        {
+          id: "annotation-edit-prompt",
+          text: `Add ${shared.referenceLabel.toLowerCase()} reference`,
+        },
+      ],
+      floatingInput: {
+        id: `annotation-edit-${getTargetKey(edit.target)}`,
+        label: `${shared.referenceLabel} (reference)`,
+        value:
+          measured === null
+            ? null
+            : getAuthoredFormText(measured, formatMeasuredEditText),
+        unit: editable?.unit,
+        min: editable?.min,
+        ...sharedPresentation!,
+        readOnly: true,
+        confirmLabel: "Add reference",
+        cancelLabel: "Cancel",
+        anchor: editable?.anchor,
+        placement: "target",
+        submitAction: {
+          type: "patch",
+          patch: { intent: "commitConstraintValue" },
+        },
+        cancelAction: {
+          type: "patch",
+          patch: { intent: "cancelAnnotationValue" },
+        },
+      },
+      validation: [],
+    };
+  }
 
   return {
     prompts: [
@@ -1172,17 +1298,20 @@ export function buildAnnotationEditPresentation(
                 : `${reference.measuredValue.toFixed(2)} ${editable?.unit ?? ""}`.trim()
             }`,
           }
-        : editable?.canBeReference
-          ? {
-              secondaryAction: {
-                label: "Make reference",
-                action: {
-                  type: "patch" as const,
-                  patch: { intent: "makeAnnotationReference" },
+        : sharedPresentation
+          ? sharedPresentation
+          : editable?.canBeReference
+            ? {
+                ...(duplicates ? { readout: duplicates } : {}),
+                secondaryAction: {
+                  label: "Make reference",
+                  action: {
+                    type: "patch" as const,
+                    patch: { intent: "makeAnnotationReference" },
+                  },
                 },
-              },
-            }
-          : {}),
+              }
+            : {}),
       confirmLabel: reference ? "Make driving" : "Save",
       cancelLabel: "Cancel",
       anchor: editable?.anchor,
@@ -1206,6 +1335,27 @@ export function buildAnnotationEditPresentation(
         ]
       : [],
   };
+}
+
+/**
+ * T16f ([TECH] T16-13): a persisted duplicate (another driving dimension
+ * of the same mirrored quantity) is explained in either one's popup; null
+ * when there is none.
+ */
+function describeSharedMirrorDuplicates(
+  session: SketchSessionState,
+  target: SketchDimensionRef,
+): string | null {
+  const dimension = session.definition.dimensions.find(
+    (entry) => entry.dimensionId === target.dimensionId,
+  );
+  const others = dimension
+    ? getSketchSessionSharedMirrorDimensions(session, dimension)
+    : [];
+  if (others.length === 0) {
+    return null;
+  }
+  return `Also sized by ${others.map((entry) => entry.dimension.label).join(", ")} through ${describeSharedMirrorPath(others[0]!.mirrors)}; ${others.length === 1 ? "both" : "all"} must match`;
 }
 
 /** Display text of a measured value; the exact value is what gets committed. */
@@ -1361,6 +1511,22 @@ function getDimensionEditLabel(
 export function selectSketchAnnotation(
   session: SketchSessionState,
 ): SketchSessionState {
+  // T16f review R-3 (issue 04): dropping a routed Dimension tool's edit
+  // (e.g. a click on the driver's own label) keeps that tool armed, as its
+  // Cancel does.
+  const shared = session.activeAnnotationEdit?.shared;
+  if (shared) {
+    return rearmSharedDimensionTool(
+      {
+        ...session,
+        activeAnnotationEdit: null,
+        activeEditTarget: null,
+        activeDrag: null,
+        validationMessage: null,
+      },
+      shared,
+    );
+  }
   return session.activeAnnotationEdit ||
     session.activeEditTarget ||
     session.activeDrag
@@ -1459,10 +1625,48 @@ export function isSketchAnnotationInContext(
       ),
     ),
   );
+  const affected = getSketchAnnotationAffectedGeometryRefs(session, target);
+  // T16f ([TECH] T16-14): a dimension is also in the context of its
+  // geometry's mirror counterparts (selecting the copy brings the seed's
+  // dimension into context).
+  const linked =
+    affected && target.kind === "dimension"
+      ? getSketchMirrorLinkedGeometryRefs(session, affected)
+      : [];
   return (
-    getSketchAnnotationAffectedGeometryRefs(session, target)?.some((ref) =>
+    [...(affected ?? []), ...linked].some((ref) =>
       pinned.has(getPrimitiveRefKey(ref)),
     ) ?? false
+  );
+}
+
+/**
+ * T16f ([TECH] T16-14): the counterparts of the sketch entities and points
+ * among `refs` through the healthy mirrors of the session's live solve
+ * (copies, originals, copies of copies), never one of `refs`; none without
+ * a live solve (health unknown). One owner index per definition (A-10).
+ */
+export function getSketchMirrorLinkedGeometryRefs(
+  session: Pick<SketchSessionState, "sketchId" | "definition" | "liveSolve">,
+  refs: readonly PrimitiveRef[],
+): PrimitiveRef[] {
+  const health = getSketchSessionMirrorHealth(session);
+  const local = refs.flatMap(
+    (ref): Parameters<typeof linkedMirrorRefs>[1][number][] =>
+      ref.kind === "sketchEntity"
+        ? [{ kind: "entity", entityId: ref.entityId }]
+        : ref.kind === "sketchPoint"
+          ? [{ kind: "point", pointId: ref.pointId }]
+          : [],
+  );
+  if (!health || local.length === 0) {
+    return [];
+  }
+  const sketchId = session.sketchId ?? ("sketch_draft" as SketchId);
+  return linkedMirrorRefs(session.definition, local, health).map((ref) =>
+    ref.kind === "entity"
+      ? createSketchEntityRef(sketchId, ref.entityId)
+      : createSketchPointRef(sketchId, ref.pointId),
   );
 }
 
@@ -1720,8 +1924,18 @@ function buildSketchAnnotationDescriptors(session: SketchSessionState): {
         };
       }
 
+      // T16f ([TECH] T16-14): both sides of a mirror highlight together.
+      const affectedKeys = new Set(
+        annotation.affectedGeometryRefs.map(getPrimitiveRefKey),
+      );
+      const linkedGeometryRefs = getSketchMirrorLinkedGeometryRefs(
+        session,
+        annotation.affectedGeometryRefs,
+      ).filter((ref) => !affectedKeys.has(getPrimitiveRefKey(ref)));
+
       return {
         ...annotation,
+        ...(linkedGeometryRefs.length > 0 ? { linkedGeometryRefs } : {}),
         status: "dimension" as const,
         visibleLabel: formatDimensionVisibleLabel(
           dimension,

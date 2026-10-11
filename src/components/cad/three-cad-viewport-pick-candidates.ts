@@ -13,6 +13,7 @@ import {
   isSketchSelectionCyclePickRetained,
   type SketchSelectionCycleContext,
 } from "@/domain/editor/sketch-session/selection";
+import { getSketchMirrorLinkedGeometryRefs } from "@/domain/editor/sketch-session/annotations";
 import { shouldViewportClickRequestSelection } from "@/domain/editor/workbench-interactions";
 import {
   getArmedSketchPickCycleIndex,
@@ -840,13 +841,29 @@ export function isAnnotationTarget(
   return target?.kind === "constraint" || target?.kind === "dimension";
 }
 
+/**
+ * The geometry highlighted with the annotation style: the affected geometry
+ * of the hovered, selected and edited annotations. T16f ([TECH] T16-14):
+ * with their mirror counterparts (`linkedGeometryRefs`), and the healthy
+ * mirror counterparts of a hovered or selected participant entity, so both
+ * sides of a mirror highlight together.
+ */
 export function getAnnotationHighlightTargets(
   annotations: readonly SketchAnnotationDescriptor[],
   selection: readonly PrimitiveRef[],
   hoverTarget: PrimitiveRef | null,
+  session: Pick<
+    SketchSessionState,
+    "sketchId" | "definition" | "liveSolve" | "activeAnnotationEdit"
+  > | null = null,
 ) {
+  const editTarget = session?.activeAnnotationEdit?.target ?? null;
   const activeAnnotations = annotations.filter((annotation) => {
     if (hoverTarget && primitiveRefEquals(annotation.target, hoverTarget)) {
+      return true;
+    }
+
+    if (editTarget && primitiveRefEquals(annotation.target, editTarget)) {
       return true;
     }
 
@@ -854,10 +871,20 @@ export function getAnnotationHighlightTargets(
       primitiveRefEquals(annotation.target, target),
     );
   });
+  const participants = [
+    ...selection,
+    ...(hoverTarget ? [hoverTarget] : []),
+  ].filter((target) => target.kind === "sketchEntity");
 
-  return activeAnnotations.flatMap(
-    (annotation) => annotation.affectedGeometryRefs,
-  );
+  return [
+    ...activeAnnotations.flatMap((annotation) => [
+      ...annotation.affectedGeometryRefs,
+      ...(annotation.linkedGeometryRefs ?? []),
+    ]),
+    ...(session && participants.length > 0
+      ? getSketchMirrorLinkedGeometryRefs(session, participants)
+      : []),
+  ];
 }
 
 /**

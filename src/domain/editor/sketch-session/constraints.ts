@@ -1,5 +1,9 @@
 import type { SketchDerivationSettings } from "@/contracts/sketch/derived-geometry";
-import { isAcceptedConstraintStatus } from "@/contracts/sketch/schema";
+import {
+  isAcceptedConstraintStatus,
+  isReferenceDimension,
+} from "@/contracts/sketch/schema";
+import type { MirrorDimensionCorrespondence } from "@/contracts/sketch/mirror-requirements";
 import type {
   DocumentVariableRecord,
   SketchPoint,
@@ -45,6 +49,7 @@ import type {
 import type {
   SketchConstraintAuthoringState,
   SketchSessionState,
+  SketchSharedDimensionEdit,
 } from "./types";
 import {
   applySketchContribution,
@@ -61,8 +66,12 @@ import {
   normalizeConstraintValue,
   rebuildSessionCommitRequest,
   getSketchSessionDerivationSettings,
+  describeSharedMirrorPath,
+  getSketchSessionSharedMirrorDimensions,
+  sharedMirrorDriverRefusal,
 } from "./internals";
 import {
+  beginSketchAnnotationEdit,
   patchSketchAnnotationEditValue,
   updateDimensionAnnotationPlacementInDefinition,
 } from "./annotations";
@@ -528,12 +537,85 @@ export function pinSketchConstraintPreview(
       point ?? authoring.pointer,
     ),
   };
-  const probed = withConstraintRedundancy(session, nextAuthoring);
+
+  return openConstraintValueInput(session, nextAuthoring);
+}
+
+/**
+ * The value input opens for placed picks. T16f ([TECH] T16-12, review
+ * A-9): when they correspond, through a healthy mirror, to an existing
+ * driving dimension, that driver's edit opens instead (before the T13e
+ * redundancy probe, so no second driver can be authored); otherwise the
+ * probe decides Reference vs driving (T13e).
+ */
+function openConstraintValueInput(
+  session: SketchSessionState,
+  placed: SketchConstraintAuthoringState,
+): SketchSessionState {
+  const candidate = createConstraintCommitContribution(session, placed)
+    .dimensions?.[0];
+  const driver = candidate
+    ? getSketchSessionSharedMirrorDimensions(session, candidate)[0]
+    : undefined;
+  if (driver) {
+    return openSharedMirrorDriverEdit(session, placed, driver);
+  }
+  const probed = withConstraintRedundancy(session, placed);
 
   return {
     ...session,
     toolPresentation: buildConstraintToolPresentation(probed),
     constraintAuthoring: probed,
+  };
+}
+
+/**
+ * T16f: the corresponding driver's annotation edit, prefilled with its
+ * value and shown in its own kind, explaining what it shares; the tool's
+ * picks are kept for "Add as reference instead" and the re-armed tool.
+ */
+function openSharedMirrorDriverEdit(
+  session: SketchSessionState,
+  authoring: SketchConstraintAuthoringState,
+  driver: MirrorDimensionCorrespondence,
+  message?: string,
+): SketchSessionState {
+  const definition = getSketchConstraintDefinition(authoring.toolId);
+  return beginSketchAnnotationEdit(
+    session,
+    createSketchDimensionRef(
+      getSessionSketchId(session),
+      driver.dimension.dimensionId,
+    ),
+    {
+      shared: {
+        readout: `Shared with ${driver.dimension.label} through ${describeSharedMirrorPath(driver.mirrors)}`,
+        authoring: { ...authoring, authorsReference: true },
+        // Review R-2: only a value tool (a Dimension tool) can author its
+        // picks as a reference measurement instead.
+        referenceLabel:
+          (
+            definition.getValueSpec?.(authoring.selectedTargets) ??
+            definition.valueSpec
+          )?.label ?? null,
+        addsReference: false,
+      },
+      ...(message ? { message } : {}),
+    },
+  );
+}
+
+/**
+ * T16f (issue 04): a routed Dimension tool stays armed once its edit ends
+ * (committed, or cancelled with no action), keeping any explanation.
+ */
+export function rearmSharedDimensionTool(
+  session: SketchSessionState,
+  shared: SketchSharedDimensionEdit,
+): SketchSessionState {
+  return {
+    ...activateSketchConstraintTool(session, shared.authoring.toolId),
+    validationMessage: session.validationMessage,
   };
 }
 
@@ -544,7 +626,25 @@ export function patchSketchConstraintValue(
   const authoring = session.constraintAuthoring;
 
   if (session.activeAnnotationEdit) {
-    return patchSketchAnnotationEditValue(session, patch);
+    const shared = session.activeAnnotationEdit.shared;
+    if (!shared) {
+      return patchSketchAnnotationEditValue(session, patch);
+    }
+    // T16f: "Add as reference instead" commits the tool's picks as a
+    // reference (non-driving, so allowed); any other end of the routed edit
+    // re-arms the tool.
+    const next =
+      shared.addsReference && patch.intent === "commitConstraintValue"
+        ? commitSketchConstraintAuthoring({
+            ...session,
+            activeAnnotationEdit: null,
+            constraintAuthoring: shared.authoring,
+          })
+        : patchSketchAnnotationEditValue(session, patch);
+    return next.activeAnnotationEdit ||
+      (next.constraintAuthoring && next.activeTool)
+      ? next
+      : rearmSharedDimensionTool(next, shared);
   }
 
   if (!authoring) {
@@ -583,14 +683,14 @@ export function patchSketchConstraintValue(
         point,
       ),
     };
-    const nextAuthoring = pins
-      ? withConstraintRedundancy(session, placed)
-      : placed;
+    if (pins) {
+      return openConstraintValueInput(session, placed);
+    }
 
     return {
       ...session,
-      toolPresentation: buildConstraintToolPresentation(nextAuthoring),
-      constraintAuthoring: nextAuthoring,
+      toolPresentation: buildConstraintToolPresentation(placed),
+      constraintAuthoring: placed,
     };
   }
 
@@ -760,6 +860,28 @@ function commitConstraintAuthoring(
   const dimensions = (contribution.dimensions ?? []).map((dimension) =>
     authoring.authorsReference ? toReferenceDimension(dimension) : dimension,
   );
+  // T16f ([TECH] T16-12, review A-9): no commit authors a second driving
+  // record of one mirrored quantity, whatever the entry point (the Dimension
+  // tool routes before this; Fix on a copy circle authors a diameter here):
+  // refused, and the driver's edit opens instead.
+  for (const dimension of dimensions) {
+    if (isReferenceDimension(dimension)) continue;
+    const driver = getSketchSessionSharedMirrorDimensions(
+      session,
+      dimension,
+    )[0];
+    if (driver) {
+      return {
+        session: openSharedMirrorDriverEdit(
+          session,
+          authoring,
+          driver,
+          sharedMirrorDriverRefusal(driver),
+        ),
+        duplicates: [],
+      };
+    }
+  }
   if (constraints.length === 0 && dimensions.length === 0) {
     const duplicates = (contribution.constraints ?? []).flatMap(
       (constraint) =>
