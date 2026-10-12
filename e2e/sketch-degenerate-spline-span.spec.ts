@@ -11,6 +11,7 @@ import { FeatureWorkbenchHarness } from "./helpers/feature-workbench";
 import {
   glideClick,
   glidePress,
+  hoverUntil,
   openSearchTool,
   openTopSketch,
   sketchSnapshot,
@@ -37,7 +38,7 @@ const C = { x: 720, y: 420 };
 const D = { x: 840, y: 520 };
 
 const TEXT =
-  "Spline 1 has two consecutive fit points at the same place (Spline 1 point 2 and Spline 1 point 3); the sketch's profiles are blocked. Undo, or delete the spline and draw it again.";
+  "Spline 1 has two consecutive fit points at the same place (Spline 1 point 2 and Spline 1 point 3); the sketch's profiles are blocked. Undo, or drag one of them apart (delete the Coincident between them first, if there is one).";
 
 const status = (page: Page) =>
   page.getByRole("status").filter({ hasText: TEXT });
@@ -238,4 +239,183 @@ test("T17c3: Coincident on two consecutive fit points is one 'Coincident' action
   await expect
     .poll(() => liveRegions(page), { timeout: 30_000 })
     .toMatchObject({ status: "current" });
+});
+
+// T17c5 (issue 08 :107): in a constrained sketch (a Fix on fit point 1, so
+// no drag takes the unconstrained fast path), after Finish → reopen from the
+// tree (the drag and the Coincident path), gliding one of the two fit points
+// apart is one "Move Sketch Geometry": the status goes and the region is
+// offered again. A Coincident between them keeps them together until it is
+// deleted from the Constraints panel.
+
+/** A Fix on fit point A (gliding press), then back to Select. */
+async function fixA(workbench: FeatureWorkbenchHarness) {
+  const page = workbench.page;
+  await glidePress(page, page.getByRole("button", { name: "Fix Geometry" }));
+  await waitForCommittedAction(page, "Fix Geometry", () =>
+    glideClick(workbench, A),
+  );
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+}
+
+/** Finish, then reopen the sketch from the tree (gliding double-click). */
+async function finishAndReopen(workbench: FeatureWorkbenchHarness) {
+  const page = workbench.page;
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await workbench.activateTool("Exit the active sketch.");
+  await workbench.expectMachine("idle", 60_000);
+  await glideDoubleClick(
+    page,
+    page
+      .getByRole("button", { name: /Select .*Double-click to reopen\./ })
+      .first(),
+  );
+  await workbench.expectSketchSessionActive();
+  await expect(status(page), "the reopened sketch's status").toBeVisible({
+    timeout: 15_000,
+  });
+  await expect
+    .poll(() => liveRegions(page), { timeout: 30_000 })
+    .toMatchObject({ status: "unavailable" });
+}
+
+/**
+ * Hovers fit points 2 and 3 near `at` (one of them reports), then glides it
+ * apart: fit point 2 to `second`, fit point 3 to `third` (so the spline
+ * keeps its order and bounds the region). `committed`: wait for one "Move
+ * Sketch Geometry".
+ */
+async function dragOneApart(
+  workbench: FeatureWorkbenchHarness,
+  at: { x: number; y: number },
+  occurrences: readonly string[],
+  destinations: {
+    second: { x: number; y: number };
+    third: { x: number; y: number };
+  },
+  committed: boolean,
+) {
+  const grabbed = await hoverUntil(
+    workbench,
+    at,
+    new RegExp(`\\.(${occurrences[1]}|${occurrences[2]})$`),
+  );
+  const to = (await workbench.currentHoverTarget()).endsWith(occurrences[1]!)
+    ? destinations.second
+    : destinations.third;
+  const drag = () => glideDrag(workbench, grabbed, to);
+  if (committed)
+    await waitForCommittedAction(workbench.page, "Move Sketch Geometry", drag);
+  else await drag();
+}
+
+/** One "Move Sketch Geometry" took them apart: no status, the region back. */
+async function expectRecovered(page: Page, occurrences: readonly string[]) {
+  await expect(status(page), "the status is gone").toHaveCount(0, {
+    timeout: 15_000,
+  });
+  await expect
+    .poll(() => liveRegions(page), {
+      message: "the region is back",
+      timeout: 30_000,
+    })
+    .toEqual({ status: "current", count: 1 });
+  const snap = await sketchSnapshot(page);
+  const at = (id: string) =>
+    snap.points.find((point) => point.id === id)!.position;
+  expect(at(occurrences[2]!), "fit points 2 and 3 apart").not.toEqual(
+    at(occurrences[1]!),
+  );
+  expect(
+    (
+      snap.entities[0] as unknown as { occurrences: { pointId: string }[] }
+    ).occurrences.map((occurrence) => occurrence.pointId),
+    "the spline's fit points are unchanged",
+  ).toEqual(occurrences);
+}
+
+test("T17c5: a fit point dragged onto its neighbour in a constrained sketch; after Finish → reopen, gliding one of them apart is one Move Sketch Geometry: the status goes and Extrude offers the region again", async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  const workbench = new FeatureWorkbenchHarness(page);
+  const { spline, occurrences } = await drawLoop(workbench);
+  await fixA(workbench);
+  await waitForCommittedAction(page, "Move Sketch Geometry", () =>
+    glideDrag(workbench, C, B),
+  );
+  await expectDegenerate(page, spline.id, occurrences);
+
+  await finishAndReopen(workbench);
+  await dragOneApart(
+    workbench,
+    B,
+    occurrences,
+    { second: { x: B.x - 60, y: B.y + 20 }, third: C },
+    true,
+  );
+  await expectRecovered(page, occurrences);
+
+  await workbench.activateTool("Exit the active sketch.");
+  await workbench.expectMachine("idle", 60_000);
+  await workbench.activateFeature("extrude");
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          () =>
+            window.__cadaraDebug
+              ?.getState()
+              ?.selectableTargets.filter((target) => /\.region_/.test(target))
+              .length ?? 0,
+        ),
+      { message: "Extrude offers the region again", timeout: 30_000 },
+    )
+    .toBe(1);
+});
+
+test("T17c5: Coincident on two consecutive fit points in a constrained sketch; after Finish → reopen, a drag keeps them together until the Coincident is deleted, then gliding one apart recovers the region", async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  const workbench = new FeatureWorkbenchHarness(page);
+  const { spline, occurrences } = await drawLoop(workbench);
+  await fixA(workbench);
+  await openSearchTool(page, "Coincident");
+  await glideClick(workbench, B);
+  await waitForCommittedAction(page, "Coincident", () =>
+    glideClick(workbench, C),
+  );
+  await expectDegenerate(page, spline.id, occurrences);
+
+  await finishAndReopen(workbench);
+  // The Coincident moved both to the midpoint of B and C.
+  const midpoint = { x: (B.x + C.x) / 2, y: B.y };
+  const before = await sketchSnapshot(page);
+  const apart = { second: B, third: C };
+  await dragOneApart(workbench, midpoint, occurrences, apart, false);
+  await workbench.waitForAnimationFrames(4);
+  expect(
+    (await sketchSnapshot(page)).points,
+    "the Coincident keeps them together: nothing moved",
+  ).toEqual(before.points);
+  await expect(status(page), "still blocked").toBeVisible();
+
+  const coincidentRow = page
+    .locator("[data-sketch-constraint-row]")
+    .filter({ has: page.getByRole("button", { name: /^Coincident/ }) });
+  await waitForCommittedAction(page, "Delete Sketch Item", () =>
+    glidePress(
+      page,
+      coincidentRow.getByRole("button", { name: /^Delete Coincident/ }),
+    ),
+  );
+  await expect
+    .poll(() => liveRegions(page), { timeout: 30_000 })
+    .toMatchObject({ status: "unavailable" });
+
+  await dragOneApart(workbench, midpoint, occurrences, apart, true);
+  await expectRecovered(page, occurrences);
 });
