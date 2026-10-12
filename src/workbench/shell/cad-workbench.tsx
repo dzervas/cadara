@@ -6,6 +6,7 @@ import { appVersion, gitCommit } from "@/build-info";
 import { ThreeCadViewport } from "@/components/cad/three-cad-viewport";
 import { SketchSpecialModePanel } from "@/components/cad/sketch-special-mode-panel";
 import { SketchMirrorActions } from "@/components/cad/sketch-mirror-actions";
+import { SketchOffsetActions } from "@/components/cad/sketch-offset-actions";
 import {
   SketchSelectionContextStack,
   SketchValidationStatus,
@@ -85,6 +86,7 @@ import type {
 import { ok } from "@/contracts/errors";
 import {
   computeSketchMirrorActionState,
+  computeSketchOffsetActionState,
   computeSketchTangentActionState,
   getSketchAnnotationDescriptors,
   getSketchAnnotationListRows,
@@ -706,6 +708,13 @@ export function CadWorkbench({
     () =>
       sketchSession
         ? computeSketchMirrorActionState(sketchSession, selection)
+        : null,
+    [sketchSession, selection],
+  );
+  const sketchOffsetActionState = useMemo(
+    () =>
+      sketchSession
+        ? computeSketchOffsetActionState(sketchSession, selection)
         : null,
     [sketchSession, selection],
   );
@@ -1444,6 +1453,7 @@ export function CadWorkbench({
                   selection-context panels, one column (never overlapping). */}
               {sketchSession?.validationMessage ||
               sketchMirrorActionState ||
+              sketchOffsetActionState ||
               sketchTangentActionState?.visible ? (
                 <SketchSelectionContextStack>
                   {sketchSession?.validationMessage ? (
@@ -1468,6 +1478,17 @@ export function CadWorkbench({
                             derivationId,
                             ...(outputEntityId ? { outputEntityId } : {}),
                           },
+                        })
+                      }
+                    />
+                  ) : null}
+                  {sketchOffsetActionState ? (
+                    <SketchOffsetActions
+                      entries={sketchOffsetActionState.entries}
+                      onRemove={(derivationId) =>
+                        dispatch({
+                          type: "sketch.toolPatched",
+                          patch: { intent: "removeOffset", derivationId },
                         })
                       }
                     />

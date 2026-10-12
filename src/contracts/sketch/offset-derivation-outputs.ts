@@ -142,6 +142,52 @@ export function offsetFrameRelationshipOf(
 }
 
 /**
+ * T17c (T16-20 route): an output curve of the offset that no longer exists
+ * (an ordinary Delete of an output keeps the relationship: a valid
+ * authored state the owner reports, [TECH] G18), as a label-based
+ * `topologyChanged` reason with its seed as target: the seed's offset
+ * curve, or the joint arc between two seeds' offset curves. Null when
+ * every output exists. Called once the solve frame exists (so every seed
+ * does). Never an id: the recovery names the Offset panel (reached by
+ * selecting the seed).
+ */
+export function offsetDeletedOutput(
+  relationship: OffsetRelationshipDefinition,
+  entityLabel: (entityId: SketchEntityId) => string | undefined,
+): {
+  readonly seedEntityId: SketchEntityId;
+  /** The short reason ("the offset curve of ‘a’ was deleted"; the Offset panel's health line). */
+  readonly reason: string;
+  readonly message: string;
+} | null {
+  const broken = (seedEntityId: SketchEntityId, what: string) => {
+    const seed = `‘${entityLabel(seedEntityId)!}’`;
+    const reason = `${what} was deleted`;
+    return {
+      seedEntityId,
+      reason,
+      message: `Offset ‘${relationship.label}’ is broken: ${reason}. Undo, or select ${seed}, then Offset → Remove offset.`,
+    };
+  };
+  for (const output of [
+    ...relationship.outputs,
+    ...relationship.piecewiseCubicOutputs,
+  ])
+    if (entityLabel(output.outputEntityId) === undefined)
+      return broken(
+        output.seedEntityId,
+        `the offset curve of ‘${entityLabel(output.seedEntityId)!}’`,
+      );
+  for (const joint of relationship.jointOutputs)
+    if (entityLabel(joint.outputEntityId) === undefined)
+      return broken(
+        joint.firstSeedEntityId,
+        `the joint arc between the offset curves of ‘${entityLabel(joint.firstSeedEntityId)!}’ and ‘${entityLabel(joint.secondSeedEntityId)!}’`,
+      );
+  return null;
+}
+
+/**
  * Maps a solve frame onto the relationship's authored outputs. A string is a
  * `topologyChanged` reason: the authored records (kinds, shared corner
  * points, joint arcs, output spans) no longer fit the frame. Authored intent

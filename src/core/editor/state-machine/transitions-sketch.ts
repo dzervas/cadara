@@ -42,6 +42,7 @@ import {
   beginSketchMirrorRepair,
   cancelSketchMirrorRepair,
 } from "@/domain/editor/sketch-session/mirror-actions";
+import { applySketchOffsetRemoval } from "@/domain/editor/sketch-session/offset-actions";
 import { applyTangentAction } from "@/domain/editor/sketch-session/tangent-actions";
 import {
   enterSketchSpecialMode,
@@ -469,15 +470,19 @@ export function handleSketchToolPatched(
   }
 
   // T16a ([TECH] T16-1): the Mirror panel's Remove mirror, one action
-  // ("Remove Mirror"). Like Delete, the selection (copies included) clears.
+  // ("Remove Mirror"); T17c ([TECH] T17-5): the Offset panel's Remove
+  // offset ("Remove Offset"). Like Delete, the selection (outputs
+  // included) clears.
   if (
-    event.patch.intent === "removeMirror" &&
+    (event.patch.intent === "removeMirror" ||
+      event.patch.intent === "removeOffset") &&
     typeof event.patch.derivationId === "string"
   ) {
-    const session = applySketchMirrorRemoval(
-      state.session,
-      event.patch.derivationId,
-    );
+    const session = (
+      event.patch.intent === "removeMirror"
+        ? applySketchMirrorRemoval
+        : applySketchOffsetRemoval
+    )(state.session, event.patch.derivationId);
 
     return {
       state: {

@@ -33,6 +33,7 @@ import {
   selectSketchConstraintTarget,
   selectSketchEditToolTarget,
   computeSketchMirrorActionState,
+  computeSketchOffsetActionState,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
 import {
@@ -66,6 +67,8 @@ import {
   pointRef,
   seedDefinition,
 } from "@/domain/editor/sketch-mirror.fixtures";
+import { offsetSession } from "@/domain/editor/sketch-offset.fixtures";
+import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
 
 function line(session: SketchSessionState) {
   return acceptSketchDraw(
@@ -3675,6 +3678,80 @@ describe("T16a: Remove Mirror through the authored-action owner", () => {
     f.dispatch({
       type: "sketch.toolPatched",
       patch: { intent: "removeMirror", derivationId: "derivation_missing" },
+    });
+    expect(f.session.definition).toBe(setup.session.definition);
+    expect(f.session.actionAvailability?.canUndo ?? false).toBe(false);
+  });
+});
+
+// T17c (logic lane; seam: the authored-action owner around the real sketch
+// reducer, on an entered session). The Offset panel's Remove offset is one
+// action, "Remove Offset"; Undo restores the exact pre-removal definition,
+// Redo re-applies it; the persistence validation ([TECH] G18) holds at
+// every step.
+describe("T17c: Remove Offset through the authored-action owner", () => {
+  test("a spline + line offset selected by its shell: one intent from the panel is one action; Undo restores the definition bitwise, Redo re-applies; valid throughout", async () => {
+    const setup = offsetSession("lineSplineArcJoint");
+    if (setup.relationship.kind !== "offset") throw new Error("offset");
+    const f = await fixture(false, setup.session);
+    const before = f.session.definition;
+    const beforeProjection = projection(f.session);
+    const valid = (message: string) => {
+      const result = validateSketchDefinition(f.session.definition);
+      expect(result.success ? [] : result.issues, message).toEqual([]);
+    };
+    valid("premise: valid");
+    const shellId = setup.relationship.piecewiseCubicOutputs[0]!.outputEntityId;
+    const shell = entityRef(f.session, shellId);
+    f.dispatch({ type: "viewport.selectionRequested", target: shell });
+    const panel = computeSketchOffsetActionState(f.session, f.state.selection);
+    expect(
+      panel?.entries.map((entry) => entry.derivationId),
+      "the panel shows the shell's offset",
+    ).toEqual([setup.relationship.derivationId]);
+    f.dispatch({
+      type: "sketch.toolPatched",
+      patch: {
+        intent: "removeOffset",
+        derivationId: panel!.entries[0]!.derivationId,
+      },
+    });
+    const after = f.session.definition;
+    expect(after.derivedRelationships).toEqual([]);
+    expect(after.entityIds).not.toContain(shellId);
+    expect(f.state.selection, "the removed shell leaves the selection").toEqual(
+      [],
+    );
+    expect(
+      f.session.actionHistory?.undo.map((entry) => entry.label),
+      "exactly one action",
+    ).toEqual(["Remove Offset"]);
+    valid("valid after the removal");
+    const afterProjection = projection(f.session);
+
+    f.dispatch({ type: "history.undoRequested" });
+    expect(
+      f.session.definition,
+      "Undo restores the definition bitwise",
+    ).toEqual(before);
+    expect(projection(f.session)).toEqual(beforeProjection);
+    valid("valid after Undo");
+    expect(f.session.actionAvailability).toEqual({
+      canUndo: false,
+      canRedo: true,
+    });
+    f.dispatch({ type: "history.redoRequested" });
+    expect(f.session.definition).toEqual(after);
+    expect(projection(f.session)).toEqual(afterProjection);
+    valid("valid after Redo");
+  });
+
+  test("Remove of an offset that is not there records nothing", async () => {
+    const setup = offsetSession("lineTrim");
+    const f = await fixture(false, setup.session);
+    f.dispatch({
+      type: "sketch.toolPatched",
+      patch: { intent: "removeOffset", derivationId: "derivation_missing" },
     });
     expect(f.session.definition).toBe(setup.session.definition);
     expect(f.session.actionAvailability?.canUndo ?? false).toBe(false);

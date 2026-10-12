@@ -162,6 +162,12 @@ export type {
   SketchMirrorActionState,
 } from "./mirror-actions";
 
+export { computeSketchOffsetActionState } from "./offset-actions";
+export type {
+  SketchOffsetActionEntry,
+  SketchOffsetActionState,
+} from "./offset-actions";
+
 export { computeSketchTangentActionState } from "./tangent-actions";
 
 export {

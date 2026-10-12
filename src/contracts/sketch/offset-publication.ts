@@ -10,6 +10,7 @@ import {
 } from "@/contracts/sketch/offset-derivation-frame";
 import {
   mapOffsetFrameOutputs,
+  offsetDeletedOutput,
   offsetFramePointValue,
   offsetFrameRelationshipOf,
   offsetFrameShellSpans,
@@ -197,6 +198,22 @@ export function publishSketchOffsets(input: {
         derivationId: relationship.derivationId,
         status: "failed",
         diagnostic: solveFrame.diagnostic,
+      };
+    // T17c: a deleted output curve is reported by label.
+    const deleted = offsetDeletedOutput(
+      relationship,
+      (id) =>
+        definition.entities.find((entity) => entity.entityId === id)?.label,
+    );
+    if (deleted)
+      return {
+        derivationId: relationship.derivationId,
+        status: "failed",
+        diagnostic: publicationDiagnostic(
+          OFFSET_DIAGNOSTIC_CODES.topologyChanged,
+          deleted.message,
+          deleted.seedEntityId,
+        ),
       };
     // The publication must cover exactly what the snapshot persists.
     const outputs = mapOffsetFrameOutputs(relationship, solveFrame, (id) =>
