@@ -140,6 +140,24 @@ test("production STEP recipe binds the return status shared by Transfer and Writ
   );
 });
 
+test("STEP enum source receipts are conditional, post-acceptance and checksummed", () => {
+  const script = readFileSync("scripts/occ/regen-patched-bindings.sh", "utf8");
+  const copies = script.indexOf('if "IFSelect_ReturnStatus" in targets:');
+  expect(copies).toBeGreaterThan(
+    script.indexOf('sys.exit("Regeneration acceptance failed")'),
+  );
+  expect(script).toContain('rel = targets["IFSelect_ReturnStatus"]');
+  expect(script).toContain(
+    'shutil.copyfile(os.path.join(original_root, rel), receipts + "/IFSelect_ReturnStatus.original.cpp")',
+  );
+  expect(script).toContain(
+    'shutil.copyfile(os.path.join(regenerated_root, rel), receipts + "/IFSelect_ReturnStatus.regenerated.cpp")',
+  );
+  expect(script).toMatch(
+    /if \[\[ -f "\$receipts\/IFSelect_ReturnStatus\.original\.cpp" \]\]; then[\s\S]*?sha256sum IFSelect_ReturnStatus\.original\.cpp IFSelect_ReturnStatus\.regenerated\.cpp >> receipts\.sha256/,
+  );
+});
+
 test("lifetime policy rejects drift in an existing public signature", () => {
   const changed = declarations.replace(
     "IsNull(): Standard_Boolean;",

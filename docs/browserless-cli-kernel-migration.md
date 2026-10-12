@@ -330,8 +330,17 @@ not permission to skip the lifetime probe or update whole-build golden hashes.
 No native compilation, new stage, artifact promotion or real STEP success is
 claimed. The user's retained stage remains immutable and still throws on Transfer
 and Write. After review, the parent prepares the combined source snapshot; the
-builder must return input/artifact/receipt hashes and the new enum generated
-source/declarations, then rerun the original real sheet/solid export seams (native
+builder must return input/artifact/receipt hashes, built `cadara-occ.d.ts`, and
+`binding-regeneration/IFSelect_ReturnStatus.original.cpp` plus
+`IFSelect_ReturnStatus.regenerated.cpp`. The regeneration script copies those
+exact sources from its existing symbol/relative-path targets only when the enum
+is recipe-bound, after the unchanged destructor-only acceptance checks; both
+filenames are included in `binding-regeneration/receipts.sha256`. No generated
+JSON declaration filename or full binding-source archive is assumed. These
+outputs support the independent enum ABI audit; they do not approve a new binary.
+Source-only receipt checks cover enum-bound copying, no-enum omission and rejection
+before copying when acceptance fails; this does not execute the native builder.
+Then rerun the original real sheet/solid export seams (native
 schema/unit setup, successful status, real Part 21 header, read/remove output),
 complete registry/declaration audit, and unchanged native lifetime/precision gates.
 The expected illegal-release child trap and lifetime slopes are preserved.
