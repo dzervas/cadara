@@ -170,6 +170,9 @@ export type {
 
 export { computeSketchTangentActionState } from "./tangent-actions";
 
+export { computeSketchCloseSplineState } from "./close-spline";
+export type { SketchCloseSplineState } from "./close-spline";
+
 export {
   focusSketchStyleTool,
   getActiveSketchStyleToolId,

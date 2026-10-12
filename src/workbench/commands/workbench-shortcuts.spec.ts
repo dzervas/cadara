@@ -20,6 +20,25 @@ import {
 } from "@/core/shortcuts/resolver";
 import type { ToolId } from "@/core/tools/tool-registry";
 import { isTextEditingTarget } from "@/hooks/shortcut-targets";
+import {
+  acceptSketchDraw,
+  beginSketchTool,
+  clearActiveSketchTool,
+  createNewSketchSession,
+  finalizeSketchDraw,
+  startSketchDraw,
+  type SketchSessionState,
+} from "@/domain/editor/sketch-session";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import { entityRef } from "@/domain/editor/sketch-mirror.fixtures";
+import {
+  SPEC_SKETCH_UNITS_PER_PIXEL,
+  withSketchSnapScale,
+} from "@/domain/editor/sketch-session/test-snap-scale";
+import {
+  createStandardPlaneDefinition,
+  OCC_KERNEL_SETTINGS,
+} from "@/domain/modeling/opencascade-kernel-seed";
 
 test("src/workbench/commands/workbench-shortcuts.spec.ts", () => {
   const deleteFixture = createFixture({
@@ -464,6 +483,83 @@ interface FixtureOptions {
   selection?: EditorViewState["selection"];
   sketchSession?: EditorViewState["sketchSession"];
 }
+
+// T17c2 ([TECH] T17-16): the "Close Spline" sketch command: registered with
+// no default shortcut; enabled exactly when the panel's Close spline is
+// (refused, hidden or outside sketch mode: disabled); it dispatches the
+// panel's intent.
+test("T17c2: the Close Spline command", () => {
+  const command = getShortcutCommandDefinitions().find(
+    (definition) => definition.id === "sketch.closeSpline",
+  );
+  expect(command).toEqual(
+    expect.objectContaining({
+      label: "Close Spline",
+      category: "Sketch",
+      scope: "sketch",
+      defaultShortcuts: [],
+    }),
+  );
+  const drawn = (points: readonly (readonly [number, number])[]) => {
+    let next = startSketchDraw(
+      beginSketchTool(
+        withSketchSnapScale(
+          enterSketchSession(
+            createNewSketchSession(
+              createStandardPlaneDefinition("xy"),
+              OCC_KERNEL_SETTINGS,
+            ),
+          ),
+          SPEC_SKETCH_UNITS_PER_PIXEL,
+        ),
+        "spline",
+      ),
+      points[0]!,
+    );
+    for (const point of points.slice(1)) next = acceptSketchDraw(next, point);
+    return clearActiveSketchTool(finalizeSketchDraw(next));
+  };
+  const handlers = (
+    session: SketchSessionState,
+    mode: EditorViewState["mode"] = "sketch",
+  ) => {
+    const dispatched: EditorEvent[] = [];
+    const spline = session.definition.entities.find(
+      (entity) => entity.kind === "spline",
+    )!;
+    const handler = createWorkbenchShortcutCommandHandlers({
+      activeCommand: null,
+      activeReferencePickerFieldId: null,
+      activateTool: () => {},
+      dispatch: (event) => dispatched.push(event),
+      mode,
+      selection: [entityRef(session, spline.entityId)],
+      sketchSession: session as EditorViewState["sketchSession"],
+    })["sketch.closeSpline"]!;
+    return { handler, dispatched };
+  };
+  const open = drawn([
+    [1, 1],
+    [3, 2.5],
+    [5, 1.5],
+  ]);
+  const enabled = handlers(open);
+  expect(enabled.handler.isEnabled?.(null)).toBe(true);
+  enabled.handler.execute();
+  expect(enabled.dispatched).toEqual([
+    { type: "sketch.toolPatched", patch: { intent: "closeSpline" } },
+  ]);
+  expect(
+    handlers(
+      drawn([
+        [1, 1],
+        [4, 2],
+      ]),
+    ).handler.isEnabled?.(null),
+    "refused",
+  ).toBe(false);
+  expect(handlers(open, "part").handler.isEnabled?.(null)).toBe(false);
+});
 
 function createFixture({
   canRedo = true,

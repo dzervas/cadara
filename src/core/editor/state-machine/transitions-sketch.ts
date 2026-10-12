@@ -44,6 +44,7 @@ import {
 } from "@/domain/editor/sketch-session/mirror-actions";
 import { applySketchOffsetRemoval } from "@/domain/editor/sketch-session/offset-actions";
 import { applyTangentAction } from "@/domain/editor/sketch-session/tangent-actions";
+import { applySketchCloseSpline } from "@/domain/editor/sketch-session/close-spline";
 import {
   enterSketchSpecialMode,
   getSketchSpecialModeSelectionFilter,
@@ -454,6 +455,25 @@ export function handleSketchToolPatched(
       state.selection,
       event.patch.intent,
     );
+
+    return {
+      state: {
+        ...state,
+        session,
+        preview: {
+          kind: "sketch",
+          label: getSketchSessionPreviewLabel(session),
+          target: session.planeTarget,
+        },
+      },
+      effects: [],
+    };
+  }
+
+  // T17c2 ([TECH] T17-16): Close spline, one action ("Close Spline"); the
+  // spline stays selected.
+  if (event.patch.intent === "closeSpline") {
+    const session = applySketchCloseSpline(state.session, state.selection);
 
     return {
       state: {

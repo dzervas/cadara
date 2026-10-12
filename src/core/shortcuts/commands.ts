@@ -29,6 +29,7 @@ export type EditorCommandId =
   | "editor.undo";
 
 export type SketchCommandId =
+  | "sketch.closeSpline"
   | "sketch.resetTangentToAutomatic"
   | "sketch.setTangentToZero";
 export type WorkbenchCommandId =
@@ -381,6 +382,14 @@ const sketchCommands = [
   {
     id: "sketch.setTangentToZero",
     label: "Set Tangent to Zero",
+    category: "Sketch",
+    scope: "sketch",
+    defaultShortcuts: [],
+    customizable: true,
+  },
+  {
+    id: "sketch.closeSpline",
+    label: "Close Spline",
     category: "Sketch",
     scope: "sketch",
     defaultShortcuts: [],
