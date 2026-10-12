@@ -110,3 +110,61 @@ Prior ticket 01 aggregate: 267 files / 3831 tests passed with six failed tests, 
 Review handoff bookmark: `browserless-cli/review-fixes`; change ID `runptrkluqnuxtrqrslzursvqqosruxk` (the final commit identifier is supplied in the handoff report). Integration ancestry is rechecked immediately before handoff; an unchanged `dcd49028` requires no merge. The bootstrap and initialization function bodies were mechanically compared with the integration parent and match exactly; the behavior change is dependency ownership, not kernel logic.
 
 The parent owns merge, marking ticket 01 blocked, and eventual workspace cleanup. This workspace is left intact for handoff. No tracker closure or full CLI completion is authorized by the boundary fix.
+
+## Integrated blocker follow-up (2026-10-12)
+
+This section supersedes the preserved blocker status above where explicitly noted; **ticket 01 remains blocked**, not completed. Retained integration workspace: `/home/dzervas/Lab/cadara/.pi/worktree/browserless-cli-integration`, bookmark `browserless-cli`. Merge change `xsqsyqxp` has parents `6d21a5d6` (existing integration with first STEP recipe and kernel alias fixes), `89ce23ac` (canonical export loader migration), and `3af86eb2` (empty native Boolean history qualification only). The existing integration tip is an ancestor of both incoming tips. No conflicts occurred; path-restricted tree comparisons confirm exact incoming export/payload files, retained kernel fix, and unchanged split/reference semantics, native shims, binding patches and tracked assets. Only `browserless-cli` was explicitly moved; no other workspace/main/tracker files were edited. During finalization the Boolean agent concurrently attached an empty descendant (`rkrrvkwq`) to integration. Jujutsu automatically rebased that descendant and its bookmark when integration was snapshotted/described; its source tree is unchanged. No other-agent history restoration was attempted.
+
+### Reproductions now fixed
+
+- **Fillet/shell dimension-only rebuild:** composing native aliases now preserves the implicit native-to-public identity bridge after semantic reconciliation. The original real-native consumer assertions pass; regressions also check exact native payload membership, current subshape `IsSame`, and edited width 12 rather than stale width 10. No native rebuild is needed for this TypeScript fix.
+- **Disjoint Boolean common:** available operand history can validly have zero final faces. The parser accepts that exact native result while duplicate IDs/incidences and unsupported-history constraints stay strict. The new generated-kernel regression proves successful disjoint common, empty topology, available empty history and zero diagnostics. The original `testCombineRejectsEmptyAndMalformedBodyRoles` assertion is unchanged and passes with the intended no-solid-result diagnostic. No native rebuild is needed for this parser fix.
+- **Excluded export spec loader typing:** both mesh rows now use canonical `getDefaultOpenCascadeInstance`, removing the duplicate constructor loader and its incompatible generated-module cast. The explicit export-spec typecheck passes; this does not make STEP export succeed against old assets.
+
+### Native STEP rebuild still required: exact source recipe
+
+`opencascade-recipe.yaml` already contains the required inheritance closure `Interface_Static -> Interface_TypedValue -> MoniTool_TypedValue` (the missing last base is now bound; `Standard_Transient` was already present). Old generated artifacts leave `Interface_Static.IsPresent` / `SetCVal` unresolved in Embind, and the original STEP regression still fails with `occ-export-writer-unavailable`: `STEP writer configuration is not available in this OpenCascade runtime.` Do not work around this in the provider or accept missing output as success.
+
+A subsequent explicitly authorized native build must snapshot **this combined integration source**, not reuse the historical STEP-only stage. From the retained integration workspace, prepare a new stage and run its existing pinned builder on a Docker-capable host:
+
+```sh
+# Future source snapshot; neither command was run in this integration follow-up.
+bash scripts/stage-occ-build.sh "$PWD/node_modules/.tmp/browserless-cli-combined-step-rebuild"
+bash "$PWD/node_modules/.tmp/browserless-cli-combined-step-rebuild/build.sh"
+```
+
+The runner uses `donalffons/opencascade.js:2.0.0-beta.b5ff984@sha256:3069f4c2e3ab62bb82d81843bad2c0f8552ee92373208f8f655ef9bf71c0524d`, OCCT `bb368e271e24f63078129283148ce83db6b9670a`, and the existing `regen-patched-bindings.sh`/recipe. No additional shim or generator patch is required by the STEP diagnosis. Retain the entire stage, input/artifact hashes, generated JS/WASM/declarations and conformance/lifetime results. Qualify the original STEP seam and production gates before staging assets into integration; do not overwrite shared/main artifacts.
+
+Native assets were **not regenerated or changed** here. Verified SHA256:
+
+- `public/cadara-occ.js`: `ae18d9482dec22915dd6a9e1256b6b1d241e6ab109c18115c4cffaf4d9229d54`
+- `public/cadara-occ.wasm`: `13b060457eeadd9946a3e4c932c5c3b380d17307187db53093b70e988943a524`
+- `opencascade-recipe.yaml`: `35c1394ec2b0f783006d469f026386f980a8d1dfb0a0bdb5d683421c3e89109f`
+
+### Split source-owner ambiguity remains unresolved
+
+The d3cd9 sheet-tool successor has exact native correspondence but belongs to two Split output slots; publishing an unqualified single-owner alias would change reference meaning. The source query carries `isFromBackBodyT`; independent rollback evidence says face JZW belongs to captured owner JZT. The special deferred selector does not carry a usable owner witness. Authorized qualification of the existing strict source-to-runtime owner mapper yielded **10 unique, 3 ambiguous, 8 noMatch** among 21 captured sibling faces. Its all-unique/same-owner contract therefore cannot establish JZT's runtime owner. Qualification stopped without retaining any split production/test change. No arbitrary orientation, first/nearest slot, relaxed tolerance, ignored sibling or assertion migration is authorized. A further authoritative correspondence mechanism or input/evidence decision is needed; carrying the captured owner alone would only move the failure. A native STEP rebuild does not resolve this semantic blocker.
+
+### Fixture availability and isolation
+
+The approved ignored `test/fixtures/onshape-captures/9841e486906fa2ce62d74d8e.onshape-capture.json` was absent. Copied **only that existing file** from main to the same integration test path, without displaying contents or reading authentication/secrets. `git check-ignore` confirms it remains ignored; no fixture was committed. This is an environment action, not an importer repair or a native geometry qualification claim.
+
+All checks use integration's real private `node_modules` with per-package links and private `.tmp`, `.cache`, `.vite`, `.vite-temp` directories. No install, shared dependency/cache writes, server, root command, mutating Git operation or native build was used. Jujutsu mutations use per-command `signing.behavior=drop`.
+
+### Fresh integrated verification and excluded-spec gap
+
+Reviewed `docs/testing.md`. Existing **logic** tests cover exported feature/rebuild behavior and real production adapter conformance; **static** checks cover repository policy separately. No new test/assertion edits were made by this merger.
+
+- Combined naming/topology/shared (27) plus feature/payload (45): **5 files / 72 tests passed**. Command: `bunx vitest run src/domain/modeling/occ/topological-naming.spec.ts src/domain/modeling/occ/topology.spec.ts src/domain/modeling/occ/features/shared.spec.ts src/domain/modeling/occ/features.spec.ts src/domain/modeling/occ/native-topology-payload.spec.ts`. Log: `/tmp/cadara-integration-combined-72.log`.
+- `bun run test:static`: **21 files / 37 tests passed**, `/tmp/cadara-integration-static-final.log`.
+- Export directory + canonical runtime + split-interface query-reader check: **8 files passed / 1 failed; 22 tests passed / 1 failed**, `/tmp/cadara-integration-export-runtime-fixture.log`. Both migrated mesh rows complete before the original STEP assertion fails with the exact unavailable-configuration diagnostic against unchanged assets. Runtime conformance and the query-reader suite pass; the copied fixture resolves that suite's availability failure, not split ownership.
+- `bun run typecheck`, `bun run typecheck:specs`, and `bun run lint`: **passed**, `/tmp/cadara-integration-{production-types,ratchet-types,lint}-final.log`.
+- Explicit isolated checks of all three affected excluded specs use temporary private configs extending `tsconfig.test.json`, each with its exact spec and `src/vite-env.d.ts`, `exclude: []`, private build info and `--listFiles` inclusion confirmation. Baseline `cee569db` source is compiled against identical merged dependencies/configuration; private baseline copies preserve relative import resolution. Compare diagnostic code/message multisets, not shifted source locations. `/tmp/cadara-integration-explicit-comparison.log` and `/tmp/cadara-integration-explicit-{export,native-payload,topological-naming}-{baseline,current}.log` retain results:
+  - Export: **1 baseline error -> 0 current; explicit PASS**, no additions, removed incompatible constructor cast.
+  - Native payload: **35 baseline errors -> 34 current**, no additions, removed incompatible constructor cast. Remaining existing errors are not repaired here; this explicit check is not a clean pass.
+  - Topological naming: **106 baseline errors -> 117 current, 11 added** in the earlier kernel regression additions. They include missing exported `OpenCascadeNativeTopologyKernelHost` (line 49), possibly undefined body/target accesses, and incompatible `TopAbs_ShapeEnum` typing (line 569). This spec is unchanged from existing integration `6d21a5d6`; the gap predates this two-tip merge, but corrects the kernel handoff's coverage claim. Runtime assertions pass; excluded-spec typing does not. Left for scoped follow-up, not silently repaired by the merger.
+- The normal spec ratchet **excludes all three files** and cannot certify them. Explicit comparison exits nonzero for the newly disclosed kernel-spec gap; do not report all touched specs as green.
+- Read-only `git diff --check` and exact source-tree/ancestry checks pass. No aggregate repeat was run: multiple previous bounded aggregate attempts/failures are recorded above and in blocker evidence; no fresh whole-suite/UI/E2E success is claimed.
+
+Blocker evidence reviewed: `/tmp/cadara-browserless-cli-{kernel-rebuild,step-export,boolean-topology}-evidence.md` and `/tmp/cadara-browserless-cli-split-ownership-decision.md`. Split qualification replay patch remains external evidence at `/tmp/cadara-split-owner-mapping-probe.patch`, not retained source. Keep integration for native rebuild and semantic-owner/typecheck follow-up; ticket closure is not authorized.
+
