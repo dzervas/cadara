@@ -34,7 +34,8 @@ import type { SketchSolveDiagnostic } from "@/contracts/sketch";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import {
   brokenDerivedInputMessage,
-  nonAcceptedOffsetOutputs,
+  nonAcceptedDerivedOutputs,
+  uncertifiedOffsetInputMessage,
   type NonAcceptedOutputOwner,
 } from "@/contracts/sketch/offset-publication";
 import { sketchNotCurrentExplanation } from "@/contracts/sketch/derived-validity";
@@ -84,14 +85,12 @@ export function nonAcceptedOutputProjectionMessage(
   entityId: SketchEntityId,
   owner: NonAcceptedOutputOwner,
 ) {
-  return owner.reason === "derivedFailed"
-    ? brokenDerivedInputMessage(
-        definition,
-        { entityId },
-        owner,
-        "it is not projected",
-      )
-    : `Sketch entity ${entityId} is an output of offset relationship ${owner.derivationId}, which is not certified, so it is not projected.`;
+  // T17e (B2): both owner kinds are worded by label, never by id.
+  return (
+    owner.reason === "derivedFailed"
+      ? brokenDerivedInputMessage
+      : uncertifiedOffsetInputMessage
+  )(definition, { entityId }, owner, "it is not projected");
 }
 
 function failedReference(
@@ -468,7 +467,7 @@ function projectModelVertex(
       reference.referenceId,
       "missingSource",
       "missing-model-vertex-source",
-      `Model vertex ${reference.referenceId} does not resolve in the requested revision.`,
+      `Model vertex ‘${reference.reference.label}’ does not resolve in the requested revision.`,
     );
   }
 
@@ -484,7 +483,7 @@ function projectModelVertex(
       reference.referenceId,
       "outOfPlane",
       "projection-source-out-of-plane",
-      `Model vertex ${reference.referenceId} is not coplanar with the active sketch plane.`,
+      `Model vertex ‘${reference.reference.label}’ is not coplanar with the active sketch plane.`,
     );
   }
 
@@ -518,7 +517,7 @@ function projectModelEdge(
       reference.referenceId,
       "missingSource",
       "missing-model-edge-source",
-      `Model edge ${reference.referenceId} does not resolve in the requested revision.`,
+      `Model edge ‘${reference.reference.label}’ does not resolve in the requested revision.`,
     );
   }
 
@@ -534,7 +533,7 @@ function projectModelEdge(
       reference.referenceId,
       "outOfPlane",
       "projection-source-out-of-plane",
-      `Model edge ${reference.referenceId} is not coplanar with the active sketch plane.`,
+      `Model edge ‘${reference.reference.label}’ is not coplanar with the active sketch plane.`,
     );
   }
 
@@ -558,7 +557,7 @@ function projectModelEdge(
         reference.referenceId,
         "unsupportedSource",
         "unsupported-model-edge-source",
-        `Model edge ${reference.referenceId} cannot be represented as a projected line, circle, or arc.`,
+        `Model edge ‘${reference.reference.label}’ cannot be represented as a projected line, circle, or arc.`,
       );
 }
 
@@ -602,7 +601,7 @@ function projectModelFace(
       reference.referenceId,
       "missingSource",
       "missing-model-face-source",
-      `Model face ${reference.referenceId} does not resolve in the requested revision.`,
+      `Model face ‘${reference.reference.label}’ does not resolve in the requested revision.`,
     );
   }
 
@@ -618,7 +617,7 @@ function projectModelFace(
       reference.referenceId,
       "outOfPlane",
       "projection-source-out-of-plane",
-      `Model face ${reference.referenceId} is not coplanar with the active sketch plane.`,
+      `Model face ‘${reference.reference.label}’ is not coplanar with the active sketch plane.`,
     );
   }
 
@@ -628,7 +627,7 @@ function projectModelFace(
       reference.referenceId,
       "ambiguous",
       "ambiguous-model-face-boundary",
-      `Model face ${reference.referenceId} does not expose a representable boundary.`,
+      `Model face ‘${reference.reference.label}’ does not expose a representable boundary.`,
     );
   }
 
@@ -670,7 +669,7 @@ function projectSketchPoint(
       reference.referenceId,
       "unsupportedSource",
       "unsupported-sketch-reference-source",
-      `Sketch reference ${reference.referenceId} does not target a sketch point.`,
+      `Sketch reference ‘${reference.reference.label}’ does not target a sketch point.`,
     );
   }
 
@@ -685,7 +684,7 @@ function projectSketchPoint(
       reference.referenceId,
       "missingSource",
       "missing-sketch-point-source",
-      `Sketch point ${reference.referenceId} does not resolve in the requested revision.`,
+      `Sketch point ‘${reference.reference.label}’ does not resolve in the requested revision.`,
     );
   }
 
@@ -706,7 +705,7 @@ function projectSketchPoint(
       reference.referenceId,
       "outOfPlane",
       "projection-source-out-of-plane",
-      `Sketch point ${reference.referenceId} is not coplanar with the active sketch plane.`,
+      `Sketch point ‘${reference.reference.label}’ is not coplanar with the active sketch plane.`,
     );
   }
 
@@ -875,7 +874,7 @@ function projectSketchEntity(
       reference.referenceId,
       "unsupportedSource",
       "unsupported-sketch-reference-source",
-      `Sketch reference ${reference.referenceId} does not target a sketch entity.`,
+      `Sketch reference ‘${reference.reference.label}’ does not target a sketch entity.`,
     );
   }
 
@@ -890,7 +889,7 @@ function projectSketchEntity(
       reference.referenceId,
       "missingSource",
       "missing-sketch-entity-source",
-      `Sketch entity ${reference.referenceId} does not resolve in the requested revision.`,
+      `Sketch entity ‘${reference.reference.label}’ does not resolve in the requested revision.`,
     );
   }
 
@@ -898,7 +897,7 @@ function projectSketchEntity(
   if (notCurrent) return notCurrent;
 
   // [TECH] G19: a non-accepted offset output is not modeling input.
-  const nonAccepted = nonAcceptedOffsetOutputs(
+  const nonAccepted = nonAcceptedDerivedOutputs(
     sketch.sketch.definition,
     sketch.sketch.solvedSnapshot,
   ).get(entity.entityId);
@@ -928,7 +927,7 @@ function projectSketchEntity(
       reference.referenceId,
       "missingSource",
       "missing-sketch-entity-source",
-      `Sketch entity ${reference.referenceId} references missing sketch points.`,
+      `Sketch entity ‘${reference.reference.label}’ references missing sketch points.`,
     );
   }
   if (geometry.length === 0) {
@@ -936,7 +935,7 @@ function projectSketchEntity(
       reference.referenceId,
       "unsupportedSource",
       "unsupported-sketch-entity-source",
-      `Sketch entity ${reference.referenceId} cannot be represented as projected point, line, circle, or arc geometry.`,
+      `Sketch entity ‘${reference.reference.label}’ cannot be represented as projected point, line, circle, or arc geometry.`,
     );
   }
 
@@ -950,7 +949,7 @@ function projectSketchEntity(
       reference.referenceId,
       "outOfPlane",
       "projection-source-out-of-plane",
-      `Sketch entity ${reference.referenceId} is not coplanar with the active sketch plane.`,
+      `Sketch entity ‘${reference.reference.label}’ is not coplanar with the active sketch plane.`,
     );
   }
 
@@ -974,7 +973,7 @@ function projectWholeSketch(
       reference.referenceId,
       "unsupportedSource",
       "unsupported-sketch-reference-source",
-      `Sketch reference ${reference.referenceId} does not target a sketch.`,
+      `Sketch reference ‘${reference.reference.label}’ does not target a sketch.`,
     );
   }
 
@@ -986,7 +985,7 @@ function projectWholeSketch(
       reference.referenceId,
       "missingSource",
       "missing-sketch-source",
-      `Sketch ${reference.referenceId} does not resolve in the requested revision.`,
+      `Sketch ‘${reference.reference.label}’ does not resolve in the requested revision.`,
     );
   }
 
@@ -1008,13 +1007,13 @@ function projectWholeSketch(
       reference.referenceId,
       "outOfPlane",
       "projection-source-out-of-plane",
-      `Sketch ${reference.referenceId} is not coplanar with the active sketch plane.`,
+      `Sketch ‘${reference.reference.label}’ is not coplanar with the active sketch plane.`,
     );
   }
 
   // [TECH] G19: non-accepted offset outputs are skipped, each with a
   // targeted warning on the projection.
-  const nonAccepted = nonAcceptedOffsetOutputs(
+  const nonAccepted = nonAcceptedDerivedOutputs(
     sketch.sketch.definition,
     sketch.sketch.solvedSnapshot,
   );
@@ -1060,7 +1059,7 @@ function projectWholeSketch(
         reference.referenceId,
         "unsupportedSource",
         "unsupported-sketch-source",
-        `Sketch ${reference.referenceId} does not contain supported projectable geometry.`,
+        `Sketch ‘${reference.reference.label}’ does not contain supported projectable geometry.`,
       );
 }
 
@@ -1093,7 +1092,7 @@ function projectReference(
       reference.referenceId,
       "missingSource",
       "missing-sketch-source",
-      `Sketch source ${reference.referenceId} is after the requested document cursor.`,
+      `Sketch source ‘${reference.reference.label}’ is after the requested document cursor.`,
     );
   }
 
@@ -1151,7 +1150,7 @@ function projectReference(
     reference.referenceId,
     "unsupportedSource",
     "unsupported-reference-source",
-    `Reference ${reference.referenceId} does not contain a supported source.`,
+    `Reference ‘${reference.reference.label}’ does not contain a supported source.`,
   );
 }
 

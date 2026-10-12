@@ -103,9 +103,11 @@ async function expectDegenerate(
   await expect(status(page), "the label-based status").toBeVisible({
     timeout: 15_000,
   });
+  // T17e (B12): no region counts while live regions are unavailable (the
+  // debug count used to report the last current count).
   await expect
     .poll(() => liveRegions(page), { timeout: 30_000 })
-    .toMatchObject({ status: "unavailable" });
+    .toEqual({ status: "unavailable", count: 0 });
   const snap = await sketchSnapshot(page);
   const at = (id: string) =>
     snap.points.find((point) => point.id === id)!.position;

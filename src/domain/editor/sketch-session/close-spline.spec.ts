@@ -9,6 +9,7 @@
  * by the production builders. The refusal set is T17b0 P-10's.
  */
 import { describe, expect, test } from "vitest";
+import { expectNoInternalIds } from "@/contracts/sketch/user-text.fixtures";
 import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
@@ -43,6 +44,7 @@ import {
   deleteSelectedSketchGeometry,
   finalizeSketchDraw,
   publishSketchLiveRegions,
+  selectSketchEditToolTarget,
   startSketchDraw,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
@@ -767,5 +769,92 @@ describe("T17c2: P-10 refusals (label-based; nothing written)", () => {
       "the column's first message is the mirror's",
     ).toMatch(mirrorMessage);
     expectRefused(moved, spline, NEEDS_SOLVE);
+  });
+});
+
+// T17e (B2; T17c2 review R-1/A-1). Logic lane; seams: the Trim tool's
+// edit-query basis refusal and the live region derivation (real adapter).
+describe("T17e: cause-neutral and label-based texts around Close spline", () => {
+  test("Trim without an accepted solve and without a conflict: the cause-neutral text (the column shows the cause above)", () => {
+    let drawn = drawSpline(entered(), [
+      [20, 0],
+      [21, 1],
+      [22, 1],
+      [23, 0],
+    ]);
+    drawn = drawLine(drawn, [0, 0], [4, 0]);
+    const degenerate = splines(drawn.definition)[0]!;
+    const [b, c] = [1, 2].map(
+      (index) => degenerate.pointOccurrences[index]!.pointId,
+    );
+    const moved = rebuild(drawn, {
+      ...drawn.definition,
+      points: drawn.definition.points.map((point) =>
+        point.pointId === c
+          ? {
+              ...point,
+              position: drawn.definition.points.find((p) => p.pointId === b)!
+                .position,
+            }
+          : point,
+      ),
+    });
+    expect(moved.liveSolve?.accepted, "premise: not solved").toBe(false);
+    expect(
+      moved.liveSolve!.solvedSnapshot.constraintStatuses.filter(
+        (status) => status.status !== "satisfied",
+      ),
+      "premise: no constraint conflicts",
+    ).toEqual([]);
+    const line = moved.definition.entities.find(
+      (entity) => entity.kind === "lineSegment",
+    )!;
+    const trimmed = selectSketchEditToolTarget(
+      beginSketchTool(moved, "trim"),
+      entityRef(moved, line.entityId),
+    );
+    expect(trimmed.validationMessage).toBe(
+      "Trim needs a solved sketch; fix the problem shown above first, or Undo.",
+    );
+    expect(trimmed.definition).toBe(moved.definition);
+  });
+
+  test("end tangents against the closing direction: no region, and the join warnings name the spline's spans by label (T17c2 review A-1)", async () => {
+    const drawn = drawSpline(entered(), FIVE);
+    const [spline] = splines(drawn.definition);
+    const authored = withSpline(drawn.definition, spline!.entityId, (s) => ({
+      ...s,
+      pointOccurrences: s.pointOccurrences.map((occurrence, index) =>
+        index === 0 || index === s.pointOccurrences.length - 1
+          ? {
+              ...occurrence,
+              tangent: {
+                kind: "authored",
+                vector: index === 0 ? [0.75, -1.25] : [-0.5, -1],
+              },
+            }
+          : occurrence,
+      ),
+    }));
+    const session = rebuild(drawn, authored);
+    const closed = applySketchCloseSpline(
+      session,
+      ref(session, spline!.entityId),
+    );
+    expect(closed.liveSolve?.accepted, "premise: solved").toBe(true);
+    const { response } = await liveRegions(closed);
+    expect(response.regions, "premise: no region").toEqual([]);
+    const joins = response.diagnostics.filter(
+      (diagnostic) => diagnostic.code === "region-join-uncertain",
+    );
+    expect(joins.length, "premise: the join warnings").toBeGreaterThan(0);
+    for (const diagnostic of joins)
+      expect(diagnostic.message).toMatch(
+        new RegExp(`‘${spline!.label}’ span [1-5]`),
+      );
+    expectNoInternalIds(
+      response.diagnostics.map((diagnostic) => diagnostic.message),
+      spline!.pointOccurrenceIds,
+    );
   });
 });

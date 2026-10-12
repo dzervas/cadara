@@ -927,9 +927,14 @@ export function CadWorkbench({
             entityId: se.entityId,
             publication: se.publication,
           })),
+        // T17e (B12): regions count only while they are current; a
+        // pending or unavailable state holds stale regions.
         liveRegions: {
           status: sketchSession.liveRegions.status,
-          count: sketchSession.liveRegions.regions.length,
+          count:
+            sketchSession.liveRegions.status === "current"
+              ? sketchSession.liveRegions.regions.length
+              : 0,
         },
         dimensions: def.dimensions.map((dimension) => ({
           id: dimension.dimensionId,

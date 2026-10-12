@@ -1749,12 +1749,60 @@ export function getSketchSessionInvalidFeedback(
   subjectIds: readonly string[] = [],
   commitCausedInvalidity = false,
 ): string | null {
+  // T17e (O-1): a requirement naming geometry that no longer exists (a peer
+  // merge keeps it, never retargeted) is explained as that, by label, not
+  // as an unsatisfiable value. Review R-1: it is not a value conflict, so
+  // it never joins the conflict list, and a conflict the user's own change
+  // (`subjectIds`) caused is still explained first.
+  const missing = (session.liveSolve?.solvedSnapshot.diagnostics ?? []).flatMap(
+    (diagnostic) => {
+      if (
+        diagnostic.severity !== "error" ||
+        !diagnostic.code.startsWith("missing-")
+      )
+        return [];
+      const target = diagnostic.target;
+      const id =
+        target?.kind === "constraint"
+          ? target.constraintId
+          : target?.kind === "dimension"
+            ? target.dimensionId
+            : null;
+      const label = id
+        ? [...session.definition.constraints, ...session.definition.dimensions]
+            .map((requirement) =>
+              "dimensionId" in requirement
+                ? ([requirement.dimensionId, requirement.label] as const)
+                : ([requirement.constraintId, requirement.label] as const),
+            )
+            .find(([candidate]) => candidate === id)?.[1]
+        : undefined;
+      return id && label !== undefined
+        ? [{ id: id as string, label, message: diagnostic.message }]
+        : [];
+    },
+  );
   const conflict = describeSketchSessionUnsatisfiedRequirements(
     session,
     subjectIds,
     commitCausedInvalidity,
+    new Set(missing.map((entry) => entry.id)),
   );
-  if (conflict) return conflict;
+  // A value conflict left by the user's own change (any subject that is
+  // not itself a missing reference) is explained first.
+  const subjectConflict = subjectIds.some(
+    (id) => !missing.some((entry) => entry.id === id),
+  );
+  if (conflict && (subjectConflict || missing.length === 0)) return conflict;
+  if (missing.length > 0) {
+    // Review R-2: the recovery names the requirement(s), never "it".
+    const labels = [...new Set(missing.map((entry) => `‘${entry.label}’`))];
+    const named =
+      labels.length === 1
+        ? labels[0]
+        : `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}`;
+    return `${missing[0]!.message} The sketch is invalid; profiles from it are blocked. Delete ${named}, or Undo.`;
+  }
   const first = getSketchSessionDerivedValidity(session).diagnostics.find(
     (diagnostic) => diagnostic.severity !== "info",
   );
@@ -1786,19 +1834,23 @@ export function describeSketchSessionUnsatisfiedRequirements(
   session: Pick<SketchSessionState, "definition" | "liveSolve">,
   subjectIds: readonly string[] = [],
   commitCausedInvalidity = false,
+  /** T17e (review R-1): requirements naming removed geometry (no value conflict). */
+  excludedIds: ReadonlySet<string> = new Set(),
 ): string | null {
   const snapshot = session.liveSolve?.solvedSnapshot;
   if (!snapshot) {
     return null;
   }
-  const unsatisfiedIds = new Set<string>([
-    ...snapshot.constraintStatuses.flatMap((entry) =>
-      entry.status === "unsatisfied" ? [entry.constraintId] : [],
-    ),
-    ...snapshot.dimensionStatuses.flatMap((entry) =>
-      entry.status === "unsatisfied" ? [entry.dimensionId] : [],
-    ),
-  ]);
+  const unsatisfiedIds = new Set<string>(
+    [
+      ...snapshot.constraintStatuses.flatMap((entry) =>
+        entry.status === "unsatisfied" ? [entry.constraintId] : [],
+      ),
+      ...snapshot.dimensionStatuses.flatMap((entry) =>
+        entry.status === "unsatisfied" ? [entry.dimensionId] : [],
+      ),
+    ].filter((id) => !excludedIds.has(id)),
+  );
   if (unsatisfiedIds.size === 0) {
     return null;
   }

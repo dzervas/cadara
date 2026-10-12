@@ -115,6 +115,7 @@ export function offsetFrameRelationshipOf(
 ): OffsetFrameRelationship | null {
   const base = {
     derivationId: relationship.derivationId,
+    label: relationship.label,
     seedEntityIds: relationship.seedEntityIds,
     distance,
   };
@@ -260,7 +261,7 @@ export function mapOffsetFrameOutputs(
       offsetFramePointValue(frame, datum),
     )
       ? null
-      : `output point ${pointId} is not one shared published position.`;
+      : "two of its curves no longer share one corner point position.";
   };
 
   for (const [index, piece] of pieces.entries()) {
@@ -271,7 +272,7 @@ export function mapOffsetFrameOutputs(
         !shell ||
         entityKind(shell.outputEntityId) !== "derivedPiecewiseCubic"
       )
-        return `spline seed ${seed} has no derived shell output.`;
+        return "a spline original has no offset curve.";
       const keys: string[] = [];
       for (const leaf of frame.cubics.get(seed)!) {
         const key = ownerSpanKey(leaf.span.source);
@@ -293,7 +294,7 @@ export function mapOffsetFrameOutputs(
             }) !== key,
         )
       )
-        return `the source spans of seed ${seed} no longer match its shell's output spans.`;
+        return "the spans of a spline original no longer match its offset curve's spans.";
       shellOutputs.push({ entityId: shell.outputEntityId, seed, spanIds });
       const failure =
         bind(shell.startPointId, endDatum(index, "start")) ??
@@ -307,11 +308,11 @@ export function mapOffsetFrameOutputs(
       !output ||
       entityKind(output.outputEntityId) !== pieceEntityKind(piece.kind)
     )
-      return `seed ${seed} no longer matches its output entity kind.`;
+      return "an original no longer matches the kind of its offset curve.";
     const ids = output.outputPointIds;
     if (piece.kind === "circle") {
       if (ids.length !== 1)
-        return `output ${output.outputEntityId} has a stale point map.`;
+        return "an offset curve's points no longer match it.";
       const failure = bind(ids[0]!, { kind: "circleCenter", seed });
       if (failure) return failure;
       entities.set(output.outputEntityId, { kind: "circle", seed });
@@ -321,7 +322,7 @@ export function mapOffsetFrameOutputs(
     const [startId, endId] =
       piece.kind === "arc" ? [ids[1], ids[2]] : [ids[0], ids[1]];
     if (ids.length !== (piece.kind === "arc" ? 3 : 2) || !startId || !endId)
-      return `output ${output.outputEntityId} has a stale point map.`;
+      return "an offset curve's points no longer match it.";
     if (piece.kind === "arc") {
       const failure = bind(ids[0]!, { kind: "seedArcCenter", seed });
       if (failure) return failure;

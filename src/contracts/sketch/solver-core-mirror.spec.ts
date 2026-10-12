@@ -50,7 +50,7 @@ import {
   deriveSketchValidity,
   getConsumableSketchRegions,
 } from "@/contracts/sketch/derived-validity";
-import { nonAcceptedOffsetOutputs } from "@/contracts/sketch/offset-publication";
+import { nonAcceptedDerivedOutputs } from "@/contracts/sketch/offset-publication";
 import {
   createSketchArrangementDeriver,
   offsetArrangementInput,
@@ -347,7 +347,7 @@ describe("failure encoding: one relationship error, held outputs, the rest solve
     ]);
     expect(solvedSnapshot.failedDerivationIds).toEqual(["m"]);
     expect(status.solveState).toBe("solved");
-    const nonAccepted = nonAcceptedOffsetOutputs(definition, solvedSnapshot);
+    const nonAccepted = nonAcceptedDerivedOutputs(definition, solvedSnapshot);
     expect(
       [...nonAccepted].map(([entityId, owner]) => [
         entityId,

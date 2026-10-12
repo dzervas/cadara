@@ -229,7 +229,7 @@ async function finished(
 }
 
 const REJECTED_EXPLANATION =
-  "Its last solve was not accepted, so its geometry is not current. Edit the sketch to see why, then correct it or Undo.";
+  "Its last solve was not accepted, so its geometry is not current. Edit the sketch to see why, then correct it, or Undo.";
 const MIRROR_EXPLANATION =
   "Mirror ‘mirror 1’ is broken: its mirror line was deleted. Its copies stay where they were last solved and can't be used; profiles from this sketch are blocked. Undo, replace the mirror line, or remove the mirror from the Mirror panel.";
 

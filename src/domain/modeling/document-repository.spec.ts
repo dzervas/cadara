@@ -1,4 +1,6 @@
-import { test, expect } from "vitest";
+import { describe, test, expect } from "vitest";
+import { expectNoInternalIds } from "@/contracts/sketch/user-text.fixtures";
+import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
 import { createSeedAuthoredModelDocument } from "./modeling-test-fixtures";
 import { createMemoryDocumentRepository } from "./memory-document-repository";
 import {
@@ -241,6 +243,269 @@ test("real Automerge peer merge preserves unrelated fields and history, blocks a
   });
   expect(after.ok && after.document.name).toBe("B conflict");
   expect(after.ok && after.document.bodyLabels).toEqual(local.bodyLabels);
+});
+
+// T17e (P-8; specification "Two-author editing": conflicting compensation
+// blocks with a reason). Logic lane; seam: the document repositories'
+// blocked Undo after a peer changed or deleted what the entry wrote (real
+// Automerge merge, and the memory repository's peer receive). The reason
+// names the entry and the sketch by label, once, never an address or id;
+// the reason code is unchanged.
+describe("T17e: a blocked document Undo names the entry and the sketch by label", () => {
+  const sketchDocument = async () => {
+    const seed = await createSeedAuthoredModelDocument();
+    const plane = createStandardPlaneDefinition("xy");
+    const sketch = {
+      sketchId: "sketch_bracket" as const,
+      label: "Bracket",
+      plane,
+      definition: createNewSketchSession(plane, OCC_KERNEL_SETTINGS).definition,
+    };
+    return {
+      seed,
+      published: {
+        ...seed,
+        sketches: [...seed.sketches, sketch],
+        historyOrder: [
+          ...seed.historyOrder,
+          { kind: "sketch" as const, sketchId: sketch.sketchId },
+        ],
+      },
+    };
+  };
+  const changedBy = (document: AuthoredModelDocument) => ({
+    ...document,
+    sketches: document.sketches.map((sketch) =>
+      sketch.sketchId === "sketch_bracket"
+        ? {
+            ...sketch,
+            definition: { ...sketch.definition, svgRenderingEnabled: true },
+          }
+        : sketch,
+    ),
+  });
+  const deletedBy = (
+    document: AuthoredModelDocument,
+    seed: typeof document,
+  ) => ({
+    ...document,
+    sketches: seed.sketches,
+    historyOrder: seed.historyOrder,
+  });
+  const expectBlocked = (
+    result: Awaited<ReturnType<DocumentRepository["undoDurableHistory"]>>,
+    message: string,
+  ) => {
+    expect(result?.ok).toBe(false);
+    if (!result || result.ok) throw new Error("not blocked");
+    expect(result.status).toMatchObject({
+      kind: "failed",
+      diagnostic: { reasonCode: "expected-state-changed", message },
+    });
+    expectNoInternalIds([message]);
+  };
+
+  for (const [what, expected] of [
+    [
+      "deleted",
+      "Can't undo Publish Sketch: ‘Bracket’ was deleted by another session.",
+    ],
+    [
+      "changed",
+      "Can't undo Publish Sketch: ‘Bracket’ was changed by another session.",
+    ],
+  ] as const) {
+    test(`Automerge: a peer ${what} the published sketch`, async () => {
+      const { seed, published } = await sketchDocument();
+      const repoA = new RealAutomergeRepo(),
+        urlsA = new MemoryDocumentRepositoryUrlStore();
+      const a = persistent(repoA, urlsA);
+      await a.load({ documentId: seed.documentId, seedDocument: seed });
+      expect(
+        (
+          await a.mutate({
+            documentId: seed.documentId,
+            expected: seed,
+            document: published,
+            label: "Publish Sketch",
+          })
+        ).ok,
+      ).toBe(true);
+      const handleA = await repoA.find<CollaborativeDocument>(
+        urlsA.get(seed.documentId)!,
+      );
+      const handleB = handleA.fork(),
+        repoB = new RealAutomergeRepo(),
+        urlsB = new MemoryDocumentRepositoryUrlStore();
+      repoB.handles.set(handleB.url, handleB as never);
+      urlsB.set(seed.documentId, handleB.url);
+      const b = persistent(repoB, urlsB);
+      const base = await b.load({
+        documentId: seed.documentId,
+        seedDocument: seed,
+      });
+      if (!base.ok) throw new Error(JSON.stringify(base.status));
+      expect(
+        (
+          await b.mutate({
+            documentId: seed.documentId,
+            expected: base.document,
+            document:
+              what === "deleted"
+                ? deletedBy(base.document, seed)
+                : changedBy(base.document),
+          })
+        ).ok,
+      ).toBe(true);
+      handleA.merge(handleB);
+      expectBlocked(await a.undoDurableHistory(seed.documentId), expected);
+      expect(
+        await a.getDurableHistoryAvailability(seed.documentId),
+        "the entry is kept",
+      ).toMatchObject({ canUndo: true });
+    });
+  }
+
+  // T17b0 P-8's case: a re-publish edits the sketch's records (many deep
+  // addresses, each reported twice by the owner); after a peer deletes the
+  // sketch, the Undo names it once.
+  test("Automerge: a peer deleted a re-published sketch; the edited records are named once, as the sketch", async () => {
+    const { seed, published } = await sketchDocument();
+    const republished = changedBy(published);
+    republished.sketches = republished.sketches.map((sketch) =>
+      sketch.sketchId === "sketch_bracket"
+        ? {
+            ...sketch,
+            definition: {
+              ...sketch.definition,
+              constraintIds: [],
+              constraints: [],
+              dimensionIds: [],
+              dimensions: [],
+            },
+          }
+        : sketch,
+    );
+    const repoA = new RealAutomergeRepo(),
+      urlsA = new MemoryDocumentRepositoryUrlStore();
+    const a = persistent(repoA, urlsA);
+    await a.load({ documentId: seed.documentId, seedDocument: seed });
+    for (const [expected, document] of [
+      [seed, published],
+      [published, republished],
+    ] as const)
+      expect(
+        (
+          await a.mutate({
+            documentId: seed.documentId,
+            expected,
+            document,
+            label: "Publish Sketch",
+          })
+        ).ok,
+      ).toBe(true);
+    const handleA = await repoA.find<CollaborativeDocument>(
+      urlsA.get(seed.documentId)!,
+    );
+    const handleB = handleA.fork();
+    handleB.change((storage) => {
+      const document = storage as unknown as {
+        authored: { sketches: Record<string, unknown> };
+      };
+      delete document.authored.sketches["sketch_bracket"];
+    });
+    handleA.merge(handleB);
+    expectBlocked(
+      await a.undoDurableHistory(seed.documentId),
+      "Can't undo Publish Sketch: ‘Bracket’ was deleted by another session.",
+    );
+  });
+
+  // Review A-3 (probe P1): a sketch this session never wrote whole (it was
+  // there before) has no label in this session's history: the fallback
+  // names it generically, still without an id.
+  test("Automerge: a peer deleted a sketch this session only edited; the fallback names no id", async () => {
+    const { seed } = await sketchDocument();
+    const existing = seed.sketches[0]!;
+    const edited = {
+      ...seed,
+      sketches: seed.sketches.map((sketch) =>
+        sketch.sketchId === existing.sketchId
+          ? {
+              ...sketch,
+              definition: { ...sketch.definition, svgRenderingEnabled: true },
+            }
+          : sketch,
+      ),
+    };
+    const repoA = new RealAutomergeRepo(),
+      urlsA = new MemoryDocumentRepositoryUrlStore();
+    const a = persistent(repoA, urlsA);
+    await a.load({ documentId: seed.documentId, seedDocument: seed });
+    expect(
+      (
+        await a.mutate({
+          documentId: seed.documentId,
+          expected: seed,
+          document: edited,
+          label: "Publish Sketch",
+        })
+      ).ok,
+    ).toBe(true);
+    const handleA = await repoA.find<CollaborativeDocument>(
+      urlsA.get(seed.documentId)!,
+    );
+    const handleB = handleA.fork();
+    handleB.change((storage) => {
+      const document = storage as unknown as {
+        authored: { sketches: Record<string, unknown> };
+      };
+      delete document.authored.sketches[existing.sketchId];
+    });
+    handleA.merge(handleB);
+    const message =
+      "Can't undo Publish Sketch: a sketch was deleted by another session.";
+    expectBlocked(await a.undoDurableHistory(seed.documentId), message);
+    expectNoInternalIds([message], [existing.sketchId]);
+  });
+
+  for (const [what, expected] of [
+    [
+      "deleted",
+      "Can't undo Publish Sketch: ‘Bracket’ was deleted by another session.",
+    ],
+    [
+      "changed",
+      "Can't undo Publish Sketch: ‘Bracket’ was changed by another session.",
+    ],
+  ] as const) {
+    test(`memory: a peer ${what} the published sketch`, async () => {
+      const { seed, published } = await sketchDocument();
+      const repository = createMemoryDocumentRepository();
+      await repository.load({
+        documentId: seed.documentId,
+        seedDocument: seed,
+      });
+      const written = await repository.mutate({
+        documentId: seed.documentId,
+        expected: seed,
+        document: published,
+        label: "Publish Sketch",
+      });
+      if (!written.ok) throw new Error(JSON.stringify(written.status));
+      const peer = await repository.receivePeerDocument(
+        what === "deleted"
+          ? deletedBy(written.document, seed)
+          : changedBy(written.document),
+        written.document,
+      );
+      expect(peer.ok).toBe(true);
+      expectBlocked(
+        await repository.undoDurableHistory(seed.documentId),
+        expected,
+      );
+    });
+  }
 });
 
 test("Automerge peer changes during a pending local flush are not hidden from subscribers", async () => {

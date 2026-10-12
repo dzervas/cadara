@@ -21,7 +21,7 @@ import {
 import { offsetArrangementInput } from "@/contracts/sketch/region-extraction";
 import {
   isOffsetPublicationSolveAccepted,
-  nonAcceptedOffsetOutputs,
+  nonAcceptedDerivedOutputs,
   publishSketchOffsets,
 } from "@/contracts/sketch/offset-publication";
 import { EXTRUDE_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
@@ -1615,7 +1615,7 @@ describe("T16c: a broken relationship's copies are named by label at every non-a
       solvedSnapshot: live.solvedSnapshot,
     };
     const mirrorPoint = outputOf("ab").outputPointIds[0]!;
-    const owner = nonAcceptedOffsetOutputs(
+    const owner = nonAcceptedDerivedOutputs(
       live.definition,
       live.solvedSnapshot,
     ).get(copy)!;
@@ -1664,7 +1664,7 @@ describe("T16c: a broken relationship's copies are named by label at every non-a
     ]);
     expect(loop.liveRegions.status).toBe("unavailable");
     const patternCopy = pattern.relationship.outputs[0]!.outputEntityId;
-    const patternOwner = nonAcceptedOffsetOutputs(
+    const patternOwner = nonAcceptedDerivedOutputs(
       loop.liveSolve!.definition,
       loopSolve,
     ).get(patternCopy)!;
@@ -1686,7 +1686,7 @@ describe("T16c: a broken relationship's copies are named by label at every non-a
     );
     expectNoIds(loop, [patternText]);
 
-    // An offset owner keeps the offset text byte for byte.
+    // An offset owner gets the offset text (T17e: by label).
     const offsetOwner = {
       derivationId: "derivation_offset",
       kind: "offset",
@@ -1696,8 +1696,13 @@ describe("T16c: a broken relationship's copies are named by label at every non-a
     expect(
       nonAcceptedOutputProjectionMessage(live.definition, copy, offsetOwner),
     ).toBe(
-      `Sketch entity ${copy} is an output of offset relationship derivation_offset, which is not certified, so it is not projected.`,
+      // T17e (B2): an offset owner is worded by label too, never by id (no
+      // offset relationship exists here, so the copy depends on it).
+      "‘ab mirror’ depends on offset ‘offset’, which is not certified, so it is not projected. Fix it (Undo) or remove the offset from the Offset panel.",
     );
+    expectNoIds(broken, [
+      nonAcceptedOutputProjectionMessage(live.definition, copy, offsetOwner),
+    ]);
   });
 
   test("region arrangement input (T16b review A-7): the held copies are excluded naming the broken mirror by label", () => {

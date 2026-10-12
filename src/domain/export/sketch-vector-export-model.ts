@@ -21,7 +21,10 @@ import type {
   SketchStyleStroke,
   SolvedSketchEntityGeometryRecord,
 } from "@/contracts/sketch/schema";
-import { nonAcceptedOffsetOutputs } from "@/contracts/sketch/offset-publication";
+import {
+  nonAcceptedDerivedOutputs,
+  uncertifiedOffsetInputMessage,
+} from "@/contracts/sketch/offset-publication";
 import { sketchNotCurrentExplanation } from "@/contracts/sketch/derived-validity";
 import {
   regionBoundaryBasisOfRecord,
@@ -78,13 +81,15 @@ function getPoint(
   pointId: SketchPointId,
   diagnostics: DocumentExportDiagnostic[],
   target: DurableRef,
+  entityLabel: string,
 ) {
   const point = pointMap.get(pointId);
   if (!point) {
     diagnostics.push(
       createDiagnostic(
         "sketch-vector-missing-point",
-        `Sketch export skipped geometry because point ${pointId} is missing.`,
+        // T17e (review A-9): the skipped geometry by label.
+        `Sketch export skipped ‘${entityLabel}’ because one of its points no longer exists.`,
         target,
       ),
     );
@@ -268,7 +273,7 @@ function buildEntity(
     diagnostics.push(
       createDiagnostic(
         "sketch-vector-unsupported-entity",
-        `Sketch entity ${entity.entityId} of kind '${solvedEntity.kind}' is not supported by sketch vector export yet.`,
+        `‘${entity.label}’ (${solvedEntity.kind}) is not supported by sketch vector export yet.`,
         target,
       ),
     );
@@ -282,8 +287,15 @@ function buildEntity(
         entity.startPointId,
         diagnostics,
         target,
+        entity.label,
       );
-      const end = getPoint(pointMap, entity.endPointId, diagnostics, target);
+      const end = getPoint(
+        pointMap,
+        entity.endPointId,
+        diagnostics,
+        target,
+        entity.label,
+      );
       return start && end
         ? {
             kind: entity.kind,
@@ -302,6 +314,7 @@ function buildEntity(
         entity.centerPointId,
         diagnostics,
         target,
+        entity.label,
       );
       return center
         ? {
@@ -321,14 +334,22 @@ function buildEntity(
         entity.centerPointId,
         diagnostics,
         target,
+        entity.label,
       );
       const start = getPoint(
         pointMap,
         entity.startPointId,
         diagnostics,
         target,
+        entity.label,
       );
-      const end = getPoint(pointMap, entity.endPointId, diagnostics, target);
+      const end = getPoint(
+        pointMap,
+        entity.endPointId,
+        diagnostics,
+        target,
+        entity.label,
+      );
       return center && start && end
         ? {
             kind: entity.kind,
@@ -354,7 +375,7 @@ function buildEntity(
         diagnostics.push(
           createDiagnostic(
             "sketch-vector-unsupported-entity",
-            `Spline ${entity.entityId} needs at least two exportable points.`,
+            `‘${entity.label}’ needs at least two exportable points.`,
             target,
           ),
         );
@@ -371,13 +392,15 @@ function buildEntity(
     }
     case "bezierCurve": {
       const controlPoints = entity.controlPointIds
-        .map((pointId) => getPoint(pointMap, pointId, diagnostics, target))
+        .map((pointId) =>
+          getPoint(pointMap, pointId, diagnostics, target, entity.label),
+        )
         .filter((point): point is SketchPoint2D => point !== undefined);
       if (controlPoints.length < 3) {
         diagnostics.push(
           createDiagnostic(
             "sketch-vector-unsupported-entity",
-            `Bezier curve ${entity.entityId} needs at least three exportable control points.`,
+            `‘${entity.label}’ needs at least three exportable control points.`,
             target,
           ),
         );
@@ -399,14 +422,22 @@ function buildEntity(
         entity.startPointId,
         diagnostics,
         target,
+        entity.label,
       );
       const control = getPoint(
         pointMap,
         entity.controlPointId,
         diagnostics,
         target,
+        entity.label,
       );
-      const end = getPoint(pointMap, entity.endPointId, diagnostics, target);
+      const end = getPoint(
+        pointMap,
+        entity.endPointId,
+        diagnostics,
+        target,
+        entity.label,
+      );
       return start && control && end
         ? {
             kind: entity.kind,
@@ -429,7 +460,7 @@ function buildEntity(
       diagnostics.push(
         createDiagnostic(
           "sketch-vector-unsupported-entity",
-          `Sketch entity ${entity.entityId} of kind '${entity.kind}' is not supported by sketch vector export yet.`,
+          `‘${entity.label}’ (${entity.kind}) is not supported by sketch vector export yet.`,
           target,
         ),
       );
@@ -498,7 +529,7 @@ function buildRegions(
             diagnostics.push(
               createDiagnostic(
                 "sketch-vector-region-unresolved",
-                `Region ${region.regionId} was not exported: ${resolved.message}`,
+                `${region.label} was not exported: its boundary could not be resolved.`,
                 target,
               ),
             );
@@ -546,7 +577,7 @@ export function buildSketchVectorExportModel(
     return {
       diagnostic: createDiagnostic(
         "sketch-vector-missing-sketch",
-        `Sketch ${input.target.sketchId} does not resolve in the current document revision.`,
+        "The sketch to export no longer exists in this revision.",
         input.target,
         "error",
       ),
@@ -590,7 +621,7 @@ export function buildSketchVectorExportModel(
       diagnostics.push(
         createDiagnostic(
           "sketch-vector-duplicate-point",
-          `Sketch export found duplicate point ${point.pointId}; the first point was kept.`,
+          `Sketch export found point ‘${point.label}’ twice; the first one was kept.`,
           input.target,
         ),
       );
@@ -606,7 +637,7 @@ export function buildSketchVectorExportModel(
   // relationship, or an uncertified shell) is not exported. Geometry held by
   // a broken mirror, pattern or transform never gets here: its sketch is
   // refused above (T17d).
-  const nonAccepted = nonAcceptedOffsetOutputs(
+  const nonAccepted = nonAcceptedDerivedOutputs(
     sketch.sketch.definition,
     sketch.sketch.solvedSnapshot,
   );
@@ -624,7 +655,12 @@ export function buildSketchVectorExportModel(
       diagnostics.push(
         createDiagnostic(
           "sketch-vector-uncertified-offset",
-          `Offset output ${entity.entityId} of relationship ${owner.derivationId} is not certified, so it was not exported.`,
+          uncertifiedOffsetInputMessage(
+            sketch.sketch.definition,
+            { entityId: entity.entityId },
+            owner,
+            "it was not exported",
+          ),
           input.target,
         ),
       );
@@ -637,7 +673,7 @@ export function buildSketchVectorExportModel(
     diagnostics.push(
       createDiagnostic(
         "sketch-vector-empty-sketch",
-        `Sketch ${sketch.sketchId} has no exportable vector geometry.`,
+        `Sketch ‘${sketch.label}’ has no exportable vector geometry.`,
         input.target,
         "error",
       ),

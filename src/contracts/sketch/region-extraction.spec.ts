@@ -38,6 +38,7 @@ import type {
   RegionRecord,
 } from "@/contracts/sketch/schema";
 import { regionBranchKey } from "@/contracts/sketch/region-identity";
+import { expectNoInternalIds } from "@/contracts/sketch/user-text.fixtures";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import {
   applyOffsetPublications,
@@ -359,8 +360,13 @@ describe("region arrangement owner: accepted solves and curve admission", () => 
     expect(result.diagnostics.map((d) => [d.code, d.target])).toEqual([
       ["region-unsupported-curve", null],
     ]);
-    expect(result.diagnostics[0]!.message).toContain(
-      "ref_samples/projected_geometry_s",
+    // T17e (B2): named by its reference's label, never by its ids.
+    expect(result.diagnostics[0]!.message).toBe(
+      "projected ‘samples’ (projected source samples) has no neutral region curve form.",
+    );
+    expectNoInternalIds(
+      result.diagnostics.map((d) => d.message),
+      ["ref_samples", "projected_geometry_s"],
     );
   });
 
@@ -792,7 +798,10 @@ describe("region arrangement owner: declared joins and closure", () => {
     ]);
     expect(codes(result)).toEqual(["region-join-uncertain"]);
     expect(
-      result.diagnostics.map((d) => [d.target, d.message.includes("span0")]),
+      result.diagnostics.map((d) => [
+        d.target,
+        d.message.includes("projected ‘h’ span 1"),
+      ]),
     ).toContainEqual([null, true]);
     expect(result.diagnostics[0]!.message).toContain("re-enter");
   }, 30_000);
@@ -834,7 +843,9 @@ describe("region arrangement owner: declared joins and closure", () => {
       "arc1",
       "arc2",
     ]);
-    expect(gapped.diagnostics[0]!.message).toContain("vertex j[");
+    expect(gapped.diagnostics[0]!.message).toContain(
+      "the curves meeting at a declared join",
+    );
 
     // Control: the bitwise-shared join keeps the curvature order.
     const shared = await derive(build(0));
@@ -922,7 +933,9 @@ describe("region arrangement owner: declared joins and closure", () => {
         "b1",
         "b3",
       ]);
-      expect(result.diagnostics[0]!.message).toContain("vertex j[");
+      expect(result.diagnostics[0]!.message).toContain(
+        "the curves meeting at a declared join",
+      );
     }
     expect(
       (await derive(arcSliver([0, 0], 1e-5, [2e-6, 1e-6]))).diagnostics[0]!
@@ -1582,8 +1595,9 @@ describe("region arrangement owner: co-circular arcs of one support (OP9)", () =
       expect.arrayContaining(["a0", "a1"]),
     );
     expect(JSON.stringify(touched.diagnostics)).toContain(
-      "The pair query of entity sketch_entity_a0 and entity sketch_entity_a1 is uncertain (coincident-circle-supports)",
+      "The pair query of ‘a0’ and ‘a1’ is uncertain (coincident-circle-supports)",
     );
+    expectNoInternalIds(touched.diagnostics.map((d) => d.message));
   }, 60_000);
 });
 
@@ -2325,7 +2339,11 @@ describe("region arrangement owner: exact overlaps and U6 identity", () => {
       "non-structural-cubic-overlap",
     );
     expect(cubicResult.diagnostics[0]!.message).toContain(
-      "ref_A/projected_geometry_a",
+      "projected ‘A’ span 1",
+    );
+    expectNoInternalIds(
+      cubicResult.diagnostics.map((d) => d.message),
+      ["ref_A", "projected_geometry_a"],
     );
 
     const circles = makeSketchFixture();
@@ -3872,9 +3890,15 @@ describe("T08b-g3 derived offset shells as region input", () => {
       expect(result.regions, label).toEqual([]);
       expect(codes(result), label).toEqual(["profile-open-segment"]);
       const opens = result.diagnostics.map((d) => d.message);
+      // T17e (B2): a shell sub-span is named by its 1-based piece number
+      // (this fixture's shell has no entity record, so no label); one shell,
+      // so the number alone identifies it.
+      expect(offset.outputs.derivedCurves, `${label}: one shell`).toHaveLength(
+        1,
+      );
       const spans = offset.outputs.derivedCurves.flatMap((shell) =>
         shell.spans.map((span, index) => ({
-          key: `span ${span.outputSpanId} sub-span ${span.subIndex}.`,
+          key: `an unnamed curve piece ${index + 1}.`,
           trimmed:
             (index === 0 && span.queryDomain[0] !== span.sourceDomain[0]) ||
             (index === shell.spans.length - 1 &&
@@ -4213,7 +4237,13 @@ describe("T08b-g3b single-entry clearance for short trimmed tails", () => {
     expect(
       result.diagnostics.find((d) => d.code === "region-join-uncertain")!
         .message,
-    ).toContain("entered once by entity sketch_entity_shell");
+    ).toContain("entered once by an unnamed curve piece 1");
+    // T17e (review R-4): the join is never named by its key (point ids).
+    expectNoInternalIds(
+      result.diagnostics
+        .filter((d) => d.code === "region-join-uncertain")
+        .map((d) => d.message),
+    );
   };
   // Its tail runs from P0 (inside the box) to T, and its kept part leaves
   // the box once.
@@ -4348,7 +4378,13 @@ describe("T08b-g3b single-entry clearance for short trimmed tails", () => {
     expect(
       result.diagnostics.find((d) => d.code === "region-join-uncertain")!
         .message,
-    ).toContain("entered once by entity sketch_entity_S");
+    ).toContain("entered once by ‘S’ span 1");
+    // T17e (review R-4): the join is never named by its key (point ids).
+    expectNoInternalIds(
+      result.diagnostics
+        .filter((d) => d.code === "region-join-uncertain")
+        .map((d) => d.message),
+    );
   }, 60_000);
 
   /*
@@ -5233,7 +5269,7 @@ describe("T08b-g5c contacts on undrawn tails are not region events", () => {
     expect(
       loose.diagnostics[0]!.message,
       "the order failure is on the shell's own list",
-    ).toContain("two contacts on entity sketch_entity_shell span s sub-span 0");
+    ).toContain("two contacts on an unnamed curve piece 1");
   }, 120_000);
 
   test("a tail contact whose valid enclosure ends exactly at the trim parameter is kept (the comparison against q is exact and strict)", async () => {
@@ -5268,7 +5304,7 @@ describe("T08b-g5c contacts on undrawn tails are not region events", () => {
     expect(result.regions).toEqual([]);
     expect(codes(result)).toEqual(["region-vertex-order-uncertain"]);
     expect(result.diagnostics[0]!.message).toContain(
-      "two contacts on entity sketch_entity_shell span s sub-span 0",
+      "two contacts on an unnamed curve piece 1",
     );
   }, 120_000);
 
@@ -5301,7 +5337,7 @@ describe("T08b-g5c contacts on undrawn tails are not region events", () => {
     expect(exactly.regions).toEqual([]);
     expect(codes(exactly)).toEqual(["region-vertex-order-uncertain"]);
     expect(exactly.diagnostics[0]!.message).toContain(
-      "two contacts on entity sketch_entity_L cannot be ordered",
+      "two contacts on ‘L’ cannot be ordered",
     );
     for (const step of [1e-15, 1e-12, 1e-9]) {
       const shifted = await variant(step);
@@ -5594,20 +5630,22 @@ describe("T08b-g5c contacts on undrawn tails are not region events", () => {
 
 // D7 pins (T09 clearance owner).
 const D7_LS90_TARGETS = ["close0", "off_p0", "off_p1"];
+// T17e (B2): the curves by label (a spline span and a shell piece by their
+// 1-based number), the join without its key.
 const D7_LS90_MESSAGE =
-  'The declared join j["sketch_point_off_j0"] is not proven clear of entity sketch_entity_close0: a curve may pass through the join ball, where the realized boundary is not queried. Affects entity ';
+  "A declared join is not proven clear of ‘close0’: a curve may pass through the join ball, where the realized boundary is not queried. Affects ";
 const D7_LS90_MESSAGES = [
-  `${D7_LS90_MESSAGE}sketch_entity_off_p0.`,
-  `${D7_LS90_MESSAGE}sketch_entity_close0.`,
-  `${D7_LS90_MESSAGE}sketch_entity_off_p1 span spline_occurrence_<uuid>>spline_occurrence_<uuid> sub-span 0.`,
+  `${D7_LS90_MESSAGE}‘off_p0’.`,
+  `${D7_LS90_MESSAGE}‘close0’.`,
+  `${D7_LS90_MESSAGE}an unnamed curve piece 1.`,
 ];
 const D7_90_TARGETS = ["off_p0", "src_0"];
 const D7_90_MESSAGE =
-  'The declared join j["derived:sketch_entity_off_p0:spline_occurrence_<uuid>>spline_occurrence_<uuid>:10"] is not proven clear of entity sketch_entity_src_0 span src_0_o1>src_0_o2: a curve may pass through the join ball, where the realized boundary is not queried. Affects entity ';
+  "A declared join is not proven clear of ‘src_0’ span 2: a curve may pass through the join ball, where the realized boundary is not queried. Affects ";
 const D7_90_MESSAGES = [
-  `${D7_90_MESSAGE}sketch_entity_src_0 span src_0_o1>src_0_o2.`,
-  `${D7_90_MESSAGE}sketch_entity_off_p0 span spline_occurrence_<uuid>>spline_occurrence_<uuid> sub-span 9.`,
-  `${D7_90_MESSAGE}sketch_entity_off_p0 span spline_occurrence_<uuid>>spline_occurrence_<uuid> sub-span 10.`,
+  `${D7_90_MESSAGE}‘src_0’ span 2.`,
+  `${D7_90_MESSAGE}an unnamed curve piece 11.`,
+  `${D7_90_MESSAGE}an unnamed curve piece 12.`,
 ];
 
 // ---------------------------------------------------------------------------
@@ -6029,4 +6067,33 @@ describe("T08b-g7-F: tangent fillets carrying an offset certify after an edit (d
     },
     600_000,
   );
+});
+
+// T17e (review A-1). Logic lane; seam: the arrangement deriver. A
+// reference that is unavailable or not projected is named by its label,
+// never its id, and its projection status code is not shown.
+describe("T17e: references that do not take part in regions are named by label", () => {
+  test("unavailable (no projection) and not projected (failed projection)", async () => {
+    const sketch = makeSketchFixture();
+    const referenceId = sketch.project("edge", []);
+    addRectangle(sketch, "q", [30, 0, 40, 5]);
+    const unavailable = await derive(sketch, { projectedReferences: [] });
+    const failed = await derive(sketch, {
+      projectedReferences: [
+        { referenceId, status: "missingSource", geometry: [], diagnostics: [] },
+      ],
+    });
+    const messages = [unavailable, failed].map((result) =>
+      result.diagnostics
+        .filter((d) => d.code.startsWith("projected-region-reference"))
+        .map((d) => d.message),
+    );
+    expect(messages).toEqual([
+      ["Reference ‘edge’ is unavailable for region derivation."],
+      [
+        "Reference ‘edge’ cannot participate in region derivation because it was not projected.",
+      ],
+    ]);
+    expectNoInternalIds(messages.flat(), [referenceId]);
+  });
 });

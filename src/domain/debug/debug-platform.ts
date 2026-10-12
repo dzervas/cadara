@@ -173,8 +173,8 @@ export interface SketchDebugSnapshot {
   /**
    * T12g: live region summary from the sketch session.
    * `status` mirrors `SketchLiveRegions.status`; `count` is the number of
-   * current regions. During a drag the derivation is suppressed (U-A), so
-   * regions are `pending` or `unavailable` with a stale count.
+   * current regions, 0 while they are not `current` (T17e, B12: a pending or
+   * unavailable state holds stale regions, e.g. during a drag, U-A).
    */
   liveRegions?: { status: string; count: number };
   /**

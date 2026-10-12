@@ -15,7 +15,7 @@ import type {
   SketchDefinition,
   SketchPoint2D,
 } from "@/contracts/sketch/schema";
-import { nonAcceptedOffsetOutputs } from "@/contracts/sketch/offset-publication";
+import { nonAcceptedDerivedOutputs } from "@/contracts/sketch/offset-publication";
 import {
   createLineEntityDefinition,
   createPointDefinition,
@@ -561,7 +561,7 @@ test("[TECH] G19: a non-accepted derived output stays pickable in its own class"
       accepted: false,
     },
   } as unknown as SketchSessionState;
-  const nonAccepted = nonAcceptedOffsetOutputs(
+  const nonAccepted = nonAcceptedDerivedOutputs(
     definition,
     getSketchSessionDisplaySolvedSnapshot(session),
   );

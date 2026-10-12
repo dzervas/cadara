@@ -1,4 +1,5 @@
 import { test, expect } from "vitest";
+import { expectNoInternalIds } from "@/contracts/sketch/user-text.fixtures";
 import * as Automerge from "@automerge/automerge";
 import { createSeedAuthoredModelDocument } from "./modeling-test-fixtures";
 import { AuthoredActionHistory } from "./authored-action-history";
@@ -407,11 +408,23 @@ test("T16g A-13: a peer's concurrent dimension on a copy removed with its mirror
     ),
     { definition },
   );
-  // Opened for editing: the dimension is named as unsatisfiable and the
-  // sketch's profiles are blocked; deleting it (or Undo) is the recovery.
+  // Opened for editing: the dimension is named, with its line gone, and
+  // the sketch's profiles are blocked; deleting it (or Undo) is the
+  // recovery. T17e (O-1): by label, saying what is missing, never an id.
   expect(reopened.validationMessage).toBe(
-    "Peer length (3 mm) cannot be satisfied. The sketch is invalid; profiles from it are blocked. Change or delete it, or Undo.",
+    "‘Peer length’ references a line that no longer exists. The sketch is invalid; profiles from it are blocked. Delete ‘Peer length’, or Undo.",
   );
+  expect(
+    validation.diagnostics
+      .filter((diagnostic) => diagnostic.severity === "error")
+      .map((diagnostic) => diagnostic.message),
+  ).toEqual(["‘Peer length’ references a line that no longer exists."]);
+  expectNoInternalIds([
+    reopened.validationMessage,
+    ...reopened.liveSolve!.solvedSnapshot.diagnostics.map(
+      (diagnostic) => diagnostic.message,
+    ),
+  ]);
   expect(reopened.liveRegions.status).toBe("unavailable");
   expect(
     reopened.liveSolve!.solvedSnapshot.diagnostics.map((diagnostic) => [

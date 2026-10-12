@@ -198,6 +198,9 @@ export function extractDeclaredOffsetChainConnectivity(input: {
   const knownPointIds = new Set(
     input.definition.points.map((point) => point.pointId),
   );
+  // T17e (B2): points are named by label in failure texts, never by id.
+  const pointLabel = (pointId: SketchPointId) =>
+    `‘${input.definition.points.find((point) => point.pointId === pointId)?.label ?? "?"}’`;
   for (const seed of seeds) {
     const missingPointId = seed.pointIds.find(
       (pointId) => !knownPointIds.has(pointId),
@@ -205,7 +208,7 @@ export function extractDeclaredOffsetChainConnectivity(input: {
     if (missingPointId !== undefined) {
       return failure(
         "unsupportedSeed",
-        `Offset seed references missing point ${missingPointId}.`,
+        "An original references a point that no longer exists.",
         seed.entity.entityId,
       );
     }
@@ -246,7 +249,7 @@ export function extractDeclaredOffsetChainConnectivity(input: {
     if (degree > 2) {
       return failure(
         "degree>2",
-        `Declared point ${pointId} has ${degree} selected seed incidences.`,
+        `Point ${pointLabel(pointId)} is shared by ${degree} ends of the originals; an offset chain can't branch.`,
       );
     }
   }
@@ -273,14 +276,14 @@ export function extractDeclaredOffsetChainConnectivity(input: {
     ) {
       return failure(
         "missingConstraint",
-        `Coincident constraint ${constraint.constraintId} references a missing point.`,
+        `‘${constraint.label}’ references a point that no longer exists.`,
       );
     }
     if (!touchesSelected) continue;
     if (first === second) {
       return failure(
         "multipleDeclarations",
-        `Coincident constraint ${constraint.constraintId} repeats one declared point.`,
+        `‘${constraint.label}’ makes a point coincident with itself.`,
       );
     }
     if (
@@ -289,7 +292,7 @@ export function extractDeclaredOffsetChainConnectivity(input: {
     ) {
       return failure(
         "degree>2",
-        `Coincident constraint ${constraint.constraintId} creates more than two selected seed incidences.`,
+        `‘${constraint.label}’ joins more than two ends of the originals; an offset chain can't branch.`,
       );
     }
   }
@@ -326,7 +329,7 @@ export function extractDeclaredOffsetChainConnectivity(input: {
     if (count > 1) {
       return failure(
         "multipleDeclarations",
-        `Declared point ${pointId} participates in multiple coincidence paths.`,
+        `Point ${pointLabel(pointId)} is joined to the originals by more than one Coincident path.`,
       );
     }
   }
@@ -390,7 +393,7 @@ export function extractDeclaredOffsetChainConnectivity(input: {
     if (matching.length > 2) {
       return failure(
         "degree>2",
-        `Declared point ${pointId} has too many terminals.`,
+        `Point ${pointLabel(pointId)} is shared by too many ends of the originals.`,
       );
     }
     if (matching.length === 2) {

@@ -2021,7 +2021,7 @@ export function declaredOffsetChainPieces(input: {
     if (status !== "satisfied")
       return failure(
         codes.disconnectedChain,
-        `The declared coincident join ${join.constraintId} is ${status} in this solve frame, so it does not join the chain.`,
+        `The join ‘${constraint.label}’ is ${status} in this solve, so it does not join the chain.`,
         null,
       );
   }

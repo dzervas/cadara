@@ -219,7 +219,7 @@ export function regionBoundaryBasisOfArrangementInput(
     unsupported: new Set(
       obstacles
         .filter((obstacle) => obstacle.code === "region-unsupported-curve")
-        .map((obstacle) => obstacle.description),
+        .map((obstacle) => obstacle.sourceKey),
     ),
   });
   return basis;

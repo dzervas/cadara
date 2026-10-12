@@ -6,8 +6,8 @@ import type {
 import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
 import { orderedSplinePointIds } from "@/contracts/sketch/spline-geometry";
 import {
-  nonAcceptedOffsetOutputPoints,
-  nonAcceptedOffsetOutputs,
+  nonAcceptedDerivedOutputPoints,
+  nonAcceptedDerivedOutputs,
 } from "@/contracts/sketch/offset-publication";
 
 /**
@@ -118,8 +118,8 @@ function isNonDraggableDerivedTarget(
   if (readsOneWayOutput(relationships, seeds)) return true;
   const snapshot = acceptance ?? NO_SOLVE;
   return isPoint
-    ? nonAcceptedOffsetOutputPoints(definition, snapshot).has(target.pointId)
-    : nonAcceptedOffsetOutputs(definition, snapshot).has(target.entityId);
+    ? nonAcceptedDerivedOutputPoints(definition, snapshot).has(target.pointId)
+    : nonAcceptedDerivedOutputs(definition, snapshot).has(target.entityId);
 }
 
 /**

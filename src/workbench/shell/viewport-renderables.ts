@@ -1,6 +1,6 @@
 import type { RenderableEntityRecord } from "@/contracts/render/schema";
 import type { SketchSnapshotRecord } from "@/contracts/modeling/schema";
-import { nonAcceptedOffsetOutputs } from "@/contracts/sketch/offset-publication";
+import { nonAcceptedDerivedOutputs } from "@/contracts/sketch/offset-publication";
 import type { SketchSessionState } from "@/domain/editor/sketch-session";
 import {
   getSketchConstraintDisplayForTarget,
@@ -82,7 +82,7 @@ export function composeViewportRenderables(
       return state === "current" ? [] : [[sketch.sketchId, state] as const];
     }),
   );
-  const nonAcceptedOffsetOutputsById =
+  const nonAcceptedDerivedOutputsById =
     createCommittedNonAcceptedOffsetOutputLookup(snapshotSketches);
   const layeredRenderables = [
     ...input.snapshotRenderables.map((renderable) => ({
@@ -94,7 +94,7 @@ export function composeViewportRenderables(
       ),
       ...getCommittedSketchGeometryValidity(
         renderable,
-        nonAcceptedOffsetOutputsById,
+        nonAcceptedDerivedOutputsById,
         nonCurrentSketchStates,
       ),
     })),
@@ -170,7 +170,7 @@ function createCommittedNonAcceptedOffsetOutputLookup(
       (sketch) =>
         [
           sketch.sketchId,
-          nonAcceptedOffsetOutputs(
+          nonAcceptedDerivedOutputs(
             sketch.sketch.definition,
             sketch.sketch.solvedSnapshot,
           ),

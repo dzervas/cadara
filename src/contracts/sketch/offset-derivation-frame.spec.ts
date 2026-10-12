@@ -1483,6 +1483,7 @@ describe("T08b-g1 frame owner: [TECH] G5/G6/G16 relationship-scoped results, aut
     const collapsed = {
       ...relationshipOf([circle.id], 1.5),
       derivationId: "derivation_g1_circle",
+      label: "Circle offset",
     };
     expect(certifiedOf(publishCycle(square, pair)).derivationId).toBe(
       "derivation_g1",
@@ -1507,8 +1508,9 @@ describe("T08b-g1 frame owner: [TECH] G5/G6/G16 relationship-scoped results, aut
       diagnostic: {
         code: codes.arcCollapse,
         severity: "error",
+        // T17e (B2): the offset by label, never by id.
         message:
-          "Offset relationship derivation_g1_circle: Offset distance collapses the circle radius.",
+          "Offset ‘Circle offset’: Offset distance collapses the circle radius.",
         target: { kind: "entity", entityId: circle.id },
       },
     });

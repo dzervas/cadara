@@ -29,11 +29,14 @@ async function expectRegionCount(
         const regions = await workbench.page.evaluate(
           () => window.__cadaraDebug?.getSketchSnapshot()?.liveRegions ?? null,
         );
-        return regions?.status === "pending" ? null : (regions?.count ?? null);
+        // T17e (B12): a count is only meaningful while regions are
+        // current (an unavailable state counts 0), so the status is part
+        // of the expectation.
+        return regions?.status === "pending" ? null : regions;
       },
       { message, timeout: 30_000 },
     )
-    .toBe(count);
+    .toEqual({ status: "current", count });
 }
 
 test("T13k: a near gap shows a passive glyph; hovering its end offers Merge…, which stages the merge for Enter; Undo brings the gap back; the ring follows zoom", async ({

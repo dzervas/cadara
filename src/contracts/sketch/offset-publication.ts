@@ -166,7 +166,7 @@ export function publishSketchOffsets(input: {
       status: "failed",
       diagnostic: publicationDiagnostic(
         code,
-        `Offset relationship ${relationship.derivationId}: ${message}`,
+        `Offset ‘${relationship.label}’: ${message}`,
         entityId,
       ),
     });
@@ -286,7 +286,7 @@ function withNonAcceptedSeedsFailed(
   );
   let current = [...records];
   for (;;) {
-    const nonAccepted = nonAcceptedOffsetOutputs(
+    const nonAccepted = nonAcceptedDerivedOutputs(
       definition,
       applyOffsetPublications(definition, snapshot, current),
     );
@@ -314,7 +314,12 @@ function withNonAcceptedSeedsFailed(
                 owner,
                 `offset ‘${offset.label}’ can't be certified either`,
               )
-            : `Offset relationship ${record.derivationId}: its seed ${seed} is an output of offset relationship ${owner.derivationId}, which is not certified, so this offset is not certified either.`,
+            : uncertifiedOffsetInputMessage(
+                definition,
+                { entityId: seed },
+                owner,
+                `offset ‘${offset.label}’ can't be certified either`,
+              ),
           seed,
         ),
       };
@@ -411,15 +416,15 @@ export function applyOffsetPublications(
  * T15b ([TECH] T-8): every output of a failed (held) mirror or unresolved
  * relationship (the snapshot's `failedDerivationIds`) is non-accepted too,
  * owned by that relationship, and so are its dependents (the same
- * closure). The name predates mirrors: the map covers failed derived
- * relationships too (renaming is T17 cleanup).
+ * closure). T17e (B2): named for every derived kind (was
+ * the offset-only name).
  *
  * T16c ([TECH] T16-7): each owner carries the relationship's kind and
  * label and why it holds its outputs (`NonAcceptedOutputOwner.reason`), so
  * every consumer words a broken relationship's copies by label
  * (`brokenDerivedInputMessage`) and keeps the offset wording for offsets.
  */
-export function nonAcceptedOffsetOutputs(
+export function nonAcceptedDerivedOutputs(
   definition: Pick<SketchDefinition, "derivedRelationships" | "entities">,
   snapshot: Pick<
     SolvedSketchSnapshot,
@@ -489,7 +494,7 @@ export function nonAcceptedOffsetOutputs(
     ) {
       // A validated shell has exactly one owning offset relationship; a
       // bare shell record (no relationship) keeps an offset owner by its
-      // `derivationId` (offset owners are worded by id, never by label).
+      // `derivationId`, worded by the shell's own label (T17e).
       const relationship = definition.derivedRelationships?.find(
         (candidate) => candidate.derivationId === entity.derivationId,
       );
@@ -590,6 +595,76 @@ export function brokenDerivedInputMessage(
 }
 
 /**
+ * T17e (B2, specification "Minimum failure feedback"): the one text for
+ * geometry held by an offset that is not certified (an owner whose
+ * `reason` is `offsetNotCertified`), shared by the same consumers as
+ * `brokenDerivedInputMessage` and worded the same way: the entity or
+ * driven point and the offset by label, never by id; a direct output is "a
+ * curve made by" the offset, anything further downstream (a copy of it, an
+ * offset of it) "depends on" it. `pending`: the offset's check is still
+ * running, so the input can be used once it finishes (no recovery);
+ * otherwise what is refused (`consequence`) and the recovery commands
+ * (Undo, or Remove Offset in the Offset panel).
+ */
+export function uncertifiedOffsetInputMessage(
+  definition: Pick<
+    SketchDefinition,
+    "derivedRelationships" | "entities" | "points"
+  >,
+  subject:
+    | { readonly entityId: SketchEntityId }
+    | { readonly pointId: SketchPointId },
+  owner: NonAcceptedOutputOwner,
+  consequence: string,
+  pending = false,
+): string {
+  const relationship = definition.derivedRelationships?.find(
+    (candidate) => candidate.derivationId === owner.derivationId,
+  );
+  const outputs =
+    relationship?.kind === "offset"
+      ? [
+          ...relationship.outputs.map((output) => ({
+            entityId: output.outputEntityId,
+            pointIds: output.outputPointIds,
+          })),
+          ...relationship.jointOutputs.map((joint) => ({
+            entityId: joint.outputEntityId,
+            pointIds: [
+              joint.startPointId,
+              joint.endPointId,
+              joint.centerPointId,
+            ],
+          })),
+          ...relationship.piecewiseCubicOutputs.map((shell) => ({
+            entityId: shell.outputEntityId,
+            pointIds: [shell.startPointId, shell.endPointId],
+          })),
+        ]
+      : [];
+  const named = `offset ‘${owner.label}’`;
+  let held: string;
+  if ("entityId" in subject) {
+    const label = definition.entities.find(
+      (entity) => entity.entityId === subject.entityId,
+    )!.label;
+    held = outputs.some((output) => output.entityId === subject.entityId)
+      ? `‘${label}’ is a curve made by ${named}`
+      : `‘${label}’ depends on ${named}`;
+  } else {
+    const label = definition.points.find(
+      (point) => point.pointId === subject.pointId,
+    )!.label;
+    held = outputs.some((output) => output.pointIds.includes(subject.pointId))
+      ? `Point ‘${label}’ belongs to a curve made by ${named}`
+      : `Point ‘${label}’ depends on ${named}`;
+  }
+  return pending
+    ? `${held}, which is still being checked; ${consequence} once the check finishes.`
+    : `${held}, which is not certified, so ${consequence}. Fix it (Undo) or remove the offset from the Offset panel.`;
+}
+
+/**
  * [TECH] G16‴: closes `result` over mirror/pattern/transform outputs and
  * (T10i, review A-1) over offsets of non-accepted seeds, to a fixed point.
  */
@@ -640,7 +715,7 @@ function addNonAcceptedDerivedDependents(
  * start, end and center, and a shell's terminal points. They are not snap
  * candidates and are not measurable, like their outputs.
  */
-export function nonAcceptedOffsetOutputPoints(
+export function nonAcceptedDerivedOutputPoints(
   definition: Pick<SketchDefinition, "derivedRelationships" | "entities">,
   snapshot: Pick<
     SolvedSketchSnapshot,
@@ -650,7 +725,7 @@ export function nonAcceptedOffsetOutputPoints(
     | "failedDerivationReasons"
   >,
 ): ReadonlyMap<SketchPointId, NonAcceptedOutputOwner> {
-  const outputs = nonAcceptedOffsetOutputs(definition, snapshot);
+  const outputs = nonAcceptedDerivedOutputs(definition, snapshot);
   const result = new Map<SketchPointId, NonAcceptedOutputOwner>();
   if (outputs.size === 0) return result;
   for (const relationship of definition.derivedRelationships ?? []) {
@@ -690,7 +765,7 @@ export function isAcceptedOffsetOutput(
   >,
   entityId: SketchEntityId,
 ): boolean {
-  return !nonAcceptedOffsetOutputs(definition, snapshot).has(entityId);
+  return !nonAcceptedDerivedOutputs(definition, snapshot).has(entityId);
 }
 
 /**
@@ -742,7 +817,7 @@ export function closeOffsetReplanRound(
       status: "failed",
       diagnostic: publicationDiagnostic(
         OFFSET_DIAGNOSTIC_CODES.topologyUncertain,
-        `Offset relationship ${publication.derivationId}: the corner plan changed again after its one re-solve.`,
+        `${relationship ? `Offset ‘${relationship.label}’` : "An offset"}: the corner plan changed again after its one re-solve.`,
         relationship?.seedEntityIds[0] ?? null,
       ),
     };

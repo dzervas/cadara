@@ -1315,7 +1315,7 @@ function evaluateOffsetRelationship(
       diagnostic: diagnostic(
         code,
         "error",
-        `Offset relationship ${relationship.derivationId}: ${message}`,
+        `Offset ‘${relationship.label}’: ${message}`,
         entityId ? { kind: "entity", entityId } : null,
       ),
     });
@@ -1588,7 +1588,7 @@ export function evaluateSketchDerivations(
       const outputs = relationship.outputs.filter((output) => {
         const seed = entityById.get(output.seedEntityId);
         if (seed?.kind !== "derivedPiecewiseCubic") return true;
-        diagnostics.push(shellSeedDiagnostic(relationship.derivationId, seed));
+        diagnostics.push(shellSeedDiagnostic(relationship, seed));
         return false;
       });
       const seedArcs = new Map<SketchEntityId, MirrorArcVariables>();
@@ -1693,7 +1693,7 @@ export function evaluateSketchDerivations(
         );
 
       if (seed.kind === "derivedPiecewiseCubic") {
-        diagnostics.push(shellSeedDiagnostic(relationship.derivationId, seed));
+        diagnostics.push(shellSeedDiagnostic(relationship, seed));
         continue;
       }
 
@@ -1702,7 +1702,7 @@ export function evaluateSketchDerivations(
           diagnostic(
             "derived-transform-unsupported-entity",
             "warning",
-            `${seed.kind} ${seed.entityId} is valid sketch geometry, but this derived transform evaluator does not support it yet.`,
+            `‘${seed.label}’ (${seed.kind}) can't be copied by ${RELATIONSHIP_NOUN[relationship.kind].toLowerCase()} ‘${relationship.label}’ yet; its copy is not updated.`,
             { kind: "entity", entityId: seed.entityId },
           ),
         );
@@ -1807,13 +1807,13 @@ function transformFailureMessage(
 
 /** U-G2: a derived shell used as the seed of a mirror, pattern or transform. */
 function shellSeedDiagnostic(
-  derivationId: string,
+  relationship: Pick<SketchDerivationDefinition, "kind" | "label">,
   seed: SketchEntityDefinition,
 ): SketchSolveDiagnostic {
   return diagnostic(
     DERIVED_SHELL_SEED_UNSUPPORTED,
     "error",
-    `Derived relationship ${derivationId} uses the derived offset curve ${seed.entityId} as a seed; mirroring, patterning or transforming an offset spline curve is not supported yet.`,
+    `${RELATIONSHIP_NOUN[relationship.kind]} ‘${relationship.label}’ uses the offset spline curve ‘${seed.label}’ as an original; mirroring, patterning or transforming an offset spline curve is not supported yet.`,
     { kind: "entity", entityId: seed.entityId },
   );
 }

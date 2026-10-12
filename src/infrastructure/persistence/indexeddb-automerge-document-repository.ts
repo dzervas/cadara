@@ -33,6 +33,7 @@ import {
 } from "@/domain/modeling/geometry-asset-store";
 
 import { AuthoredActionHistory } from "@/domain/modeling/authored-action-history";
+import { describeBlockedDocumentAction } from "@/domain/modeling/document-action-blocked";
 import {
   applyCollaborativeWrites,
   DocumentProvenanceConflict,
@@ -287,13 +288,20 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
     if (unresolved) return { ok: false, status: unresolved };
     const staged = this.owner(documentId).fork();
     let result: AuthoredActionResult = { status: "unchanged" };
+    let checkedDocument: AuthoredModelDocument | undefined;
     try {
       const identity = this.identity(documentId);
+      const direction = input ? "commit" : source === "undo" ? "undo" : "redo";
+      const ledger = staged.entries(identity);
+      const entries = direction === "commit" ? [] : ledger[direction];
+      const entry =
+        actionSequence === undefined
+          ? entries.at(-1)
+          : entries.find((candidate) => candidate.sequence === actionSequence);
       this.localChanges.add(documentId);
       handle.change((storage) => {
-        const current = documentActionState(
-          materializeCollaborativeDocument(storage),
-        );
+        checkedDocument = materializeCollaborativeDocument(storage);
+        const current = documentActionState(checkedDocument);
         result = input
           ? staged.commit(
               identity,
@@ -320,7 +328,16 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
       if (checked.status === "blocked")
         return this.fail(documentId, {
           reasonCode: checked.reason,
-          message: `Document action blocked: ${checked.reason} (${checked.targets.map((p) => p.join(".")).join(", ")})`,
+          message: describeBlockedDocumentAction({
+            direction,
+            label:
+              direction === "commit"
+                ? (input?.label ?? "Edit document")
+                : (entry?.label ?? "this action"),
+            result: checked,
+            current: checkedDocument,
+            history: [...ledger.undo, ...ledger.redo],
+          }),
         });
       // change() has already applied and may have shared these writes. The ledger must
       // match that live state, even if the subsequent durability barrier fails.

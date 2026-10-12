@@ -456,7 +456,7 @@ function validateDefinition(
             makeDiagnostic(
               "missing-point-reference",
               "error",
-              `Point entity ${entity.entityId} references missing point ${entity.pointId}.`,
+              `‘${entity.label}’ references a point that no longer exists.`,
               { kind: "entity", entityId: entity.entityId },
             ),
           );
@@ -471,7 +471,7 @@ function validateDefinition(
             makeDiagnostic(
               "missing-line-endpoint",
               "error",
-              `Line ${entity.entityId} references a missing endpoint.`,
+              `‘${entity.label}’ references an endpoint that no longer exists.`,
               { kind: "entity", entityId: entity.entityId },
             ),
           );
@@ -492,7 +492,7 @@ function validateDefinition(
             makeDiagnostic(
               "degenerate-line-segment",
               "error",
-              `Line ${entity.entityId} is shorter than the minimum segment length tolerance.`,
+              `‘${entity.label}’ is shorter than the minimum segment length tolerance.`,
               { kind: "entity", entityId: entity.entityId },
             ),
           );
@@ -504,7 +504,7 @@ function validateDefinition(
             makeDiagnostic(
               "missing-circle-center",
               "error",
-              `Circle ${entity.entityId} references a missing center point.`,
+              `‘${entity.label}’ references a center point that no longer exists.`,
               { kind: "entity", entityId: entity.entityId },
             ),
           );
@@ -515,7 +515,7 @@ function validateDefinition(
             makeDiagnostic(
               "invalid-circle-radius",
               "error",
-              `Circle ${entity.entityId} must have a radius greater than zero.`,
+              `‘${entity.label}’ must have a radius greater than zero.`,
               { kind: "entity", entityId: entity.entityId },
             ),
           );
@@ -531,7 +531,7 @@ function validateDefinition(
             makeDiagnostic(
               "missing-arc-point",
               "error",
-              `Arc ${entity.entityId} references a missing point.`,
+              `‘${entity.label}’ references a point that no longer exists.`,
               { kind: "entity", entityId: entity.entityId },
             ),
           );
@@ -544,7 +544,7 @@ function validateDefinition(
             makeDiagnostic(
               "invalid-spline-point-occurrences",
               "error",
-              `Spline ${entity.entityId} requires at least two ordered point occurrences.`,
+              `‘${entity.label}’ requires at least two ordered point occurrences.`,
               { kind: "entity", entityId: entity.entityId },
             ),
           );
@@ -556,7 +556,7 @@ function validateDefinition(
             makeDiagnostic(
               "missing-spline-fit-point",
               "error",
-              `Spline ${entity.entityId} references a missing fit point.`,
+              `‘${entity.label}’ references a fit point that no longer exists.`,
               { kind: "entity", entityId: entity.entityId },
             ),
           );
@@ -601,7 +601,7 @@ function validateDefinition(
             makeDiagnostic(
               "missing-coincident-point",
               "error",
-              `Constraint ${constraint.constraintId} references a missing point.`,
+              `‘${constraint.label}’ references a point that no longer exists.`,
               { kind: "constraint", constraintId: constraint.constraintId },
             ),
           );
@@ -614,7 +614,7 @@ function validateDefinition(
             makeDiagnostic(
               "missing-constrained-entity",
               "error",
-              `Constraint ${constraint.constraintId} references a missing entity.`,
+              `‘${constraint.label}’ references geometry that no longer exists.`,
               { kind: "constraint", constraintId: constraint.constraintId },
             ),
           );
@@ -626,7 +626,7 @@ function validateDefinition(
             makeDiagnostic(
               "missing-coincident-point",
               "error",
-              `Constraint ${constraint.constraintId} references a missing point.`,
+              `‘${constraint.label}’ references a point that no longer exists.`,
               { kind: "constraint", constraintId: constraint.constraintId },
             ),
           );
@@ -643,7 +643,7 @@ function validateDefinition(
             makeDiagnostic(
               "missing-projected-constraint-target",
               "error",
-              `Constraint ${constraint.constraintId} targets missing projected geometry.`,
+              `‘${constraint.label}’ targets projected geometry that is not available.`,
               { kind: "constraint", constraintId: constraint.constraintId },
             ),
           );
@@ -655,7 +655,7 @@ function validateDefinition(
             makeDiagnostic(
               "missing-point-on-projected-curve-point",
               "error",
-              `Constraint ${constraint.constraintId} references a missing point.`,
+              `‘${constraint.label}’ references a point that no longer exists.`,
               { kind: "constraint", constraintId: constraint.constraintId },
             ),
           );
@@ -672,7 +672,7 @@ function validateDefinition(
             makeDiagnostic(
               "missing-projected-constraint-target",
               "error",
-              `Constraint ${constraint.constraintId} targets missing projected geometry.`,
+              `‘${constraint.label}’ targets projected geometry that is not available.`,
               { kind: "constraint", constraintId: constraint.constraintId },
             ),
           );
@@ -693,7 +693,7 @@ function validateDefinition(
             makeDiagnostic(
               "missing-projected-line-local-entity",
               "error",
-              `Constraint ${constraint.constraintId} references a missing or unsupported line entity.`,
+              `‘${constraint.label}’ references a line that no longer exists or is not supported.`,
               { kind: "constraint", constraintId: constraint.constraintId },
             ),
           );
@@ -707,7 +707,7 @@ function validateDefinition(
             makeDiagnostic(
               "missing-projected-constraint-target",
               "error",
-              `Constraint ${constraint.constraintId} targets missing projected line geometry.`,
+              `‘${constraint.label}’ targets projected line geometry that is not available.`,
               { kind: "constraint", constraintId: constraint.constraintId },
             ),
           );
@@ -730,7 +730,7 @@ function validateDefinition(
             makeDiagnostic(
               "missing-projected-tangent-local-curve",
               "error",
-              `Constraint ${constraint.constraintId} references a missing or unsupported local curve.`,
+              `‘${constraint.label}’ references a curve that no longer exists or is not supported.`,
               { kind: "constraint", constraintId: constraint.constraintId },
             ),
           );
@@ -743,7 +743,7 @@ function validateDefinition(
             makeDiagnostic(
               "missing-projected-constraint-target",
               "error",
-              `Constraint ${constraint.constraintId} targets missing projected circle or arc geometry.`,
+              `‘${constraint.label}’ targets projected circle or arc geometry that is not available.`,
               { kind: "constraint", constraintId: constraint.constraintId },
             ),
           );
@@ -793,7 +793,7 @@ function validateDefinition(
             makeDiagnostic(
               "missing-dimension-point",
               "error",
-              `Dimension ${dimension.dimensionId} references a missing point.`,
+              `‘${dimension.label}’ references a point that no longer exists.`,
               { kind: "dimension", dimensionId: dimension.dimensionId },
             ),
           );
@@ -806,7 +806,7 @@ function validateDefinition(
             makeDiagnostic(
               "missing-dimension-entity",
               "error",
-              `Dimension ${dimension.dimensionId} references a missing entity.`,
+              `‘${dimension.label}’ references geometry that no longer exists.`,
               { kind: "dimension", dimensionId: dimension.dimensionId },
             ),
           );
@@ -818,7 +818,7 @@ function validateDefinition(
             makeDiagnostic(
               "missing-dimension-entity",
               "error",
-              `Dimension ${dimension.dimensionId} references a missing line.`,
+              `‘${dimension.label}’ references a line that no longer exists.`,
               { kind: "dimension", dimensionId: dimension.dimensionId },
             ),
           );
@@ -832,7 +832,7 @@ function validateDefinition(
               makeDiagnostic(
                 "missing-dimension-entity",
                 "error",
-                `Dimension ${dimension.dimensionId} references a missing line.`,
+                `‘${dimension.label}’ references a line that no longer exists.`,
                 { kind: "dimension", dimensionId: dimension.dimensionId },
               ),
             );
@@ -848,7 +848,7 @@ function validateDefinition(
             makeDiagnostic(
               "missing-dimension-entity",
               "error",
-              `Dimension ${dimension.dimensionId} references a missing line.`,
+              `‘${dimension.label}’ references a line that no longer exists.`,
               { kind: "dimension", dimensionId: dimension.dimensionId },
             ),
           );
@@ -861,7 +861,7 @@ function validateDefinition(
             makeDiagnostic(
               "missing-dimension-point",
               "error",
-              `Dimension ${dimension.dimensionId} references a missing point.`,
+              `‘${dimension.label}’ references a point that no longer exists.`,
               { kind: "dimension", dimensionId: dimension.dimensionId },
             ),
           );
@@ -877,7 +877,7 @@ function validateDefinition(
             makeDiagnostic(
               "missing-arc-endpoint-reference",
               "error",
-              `Dimension ${dimension.dimensionId} references missing arc or point data.`,
+              `‘${dimension.label}’ references missing arc or point data.`,
               { kind: "dimension", dimensionId: dimension.dimensionId },
             ),
           );
