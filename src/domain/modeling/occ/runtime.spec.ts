@@ -1,8 +1,13 @@
 import { test, expect } from "vitest";
+import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { loadFilesystemOpenCascadeFactory } from "@/infrastructure/occ/filesystem-kernel-runtime";
 import {
   createOpenCascadeInitializerFromMainJS,
+  createProductionOpenCascadeInitializerFromMainJS,
+  probeOpenCascadeNativeTopologyKernelCapabilities,
   createOpenCascadeInstanceLoader,
-  getDefaultOpenCascadeEntrySpecifier,
   getDefaultOpenCascadeInstance,
   loadDefaultOpenCascadeFactory,
   getOpenCascadeRuntimeAssetVersion,
@@ -40,19 +45,15 @@ test("src/domain/modeling/occ/runtime.spec.ts", async () => {
 
     expect(
       initializer,
-      "Node runtime must resolve the node-specific OCJS entry point.",
+      "Node runtime must resolve the filesystem execution adapter.",
     ).toBe(nodeInitializer);
     expect(
-      getDefaultOpenCascadeEntrySpecifier({ isNodeRuntime: true }),
-      "Node runtime detection must expose the node-specific OCJS entry specifier.",
-    ).toBe("opencascade.js/dist/node.js");
-    expect(
       nodeLoads,
-      "Node runtime must load the node-specific OCJS module exactly once.",
+      "Node runtime must load the filesystem execution adapter exactly once.",
     ).toBe(1);
     expect(
       browserLoads,
-      "Node runtime must not touch the browser OCJS entry point.",
+      "Node runtime must not load the browser execution adapter.",
     ).toBe(0);
   }
 
@@ -77,19 +78,15 @@ test("src/domain/modeling/occ/runtime.spec.ts", async () => {
 
     expect(
       initializer,
-      "Browser runtime must resolve the browser OCJS entry point.",
+      "Browser runtime must resolve the browser execution adapter.",
     ).toBe(browserInitializer);
     expect(
-      getDefaultOpenCascadeEntrySpecifier({ isNodeRuntime: false }),
-      "Browser runtime detection must expose the browser OCJS entry specifier.",
-    ).toBe("opencascade.js");
-    expect(
       browserLoads,
-      "Browser runtime must load the browser OCJS module exactly once.",
+      "Browser runtime must load the browser execution adapter exactly once.",
     ).toBe(1);
     expect(
       nodeLoads,
-      "Browser runtime must not touch the node-specific OCJS entry point.",
+      "Browser runtime must not load the filesystem execution adapter.",
     ).toBe(0);
   }
 
@@ -261,8 +258,13 @@ test("src/domain/modeling/occ/runtime.spec.ts", async () => {
       const oc = await first;
 
       expect(
+        probeOpenCascadeNativeTopologyKernelCapabilities(oc).kind,
+        "Filesystem startup must load the custom production topology kernel.",
+      ).toBe("available");
+
+      expect(
         typeof oc.BRepBuilderAPI_MakeEdge_3,
-        "Node/test OCJS initialization must expose confirmed modeling APIs from the node entry point.",
+        "Filesystem initialization must expose the production modeling APIs.",
       ).toBe("function");
     } finally {
       resetDefaultOpenCascadeInstanceForTests();
@@ -278,4 +280,62 @@ test("src/domain/modeling/occ/runtime.spec.ts", async () => {
   await testGetDefaultOpenCascadeInstanceInitializesNodeOpenCascade();
 
   console.log("OCC phase 1 runtime bootstrap tests passed.");
+});
+
+test("production initialization rejects missing native topology capabilities", async () => {
+  const mainJS = function () {
+    return Promise.resolve({} as OpenCascadeInstance);
+  } as unknown as Parameters<
+    typeof createProductionOpenCascadeInitializerFromMainJS
+  >[0];
+  const initialize = createProductionOpenCascadeInitializerFromMainJS(mainJS);
+  await expect(initialize()).rejects.toThrow(
+    "missing native topology kernel entrypoints: CadaraNativeTopologyProbe",
+  );
+});
+
+test("production startup requires callable native topology and neutral query methods", async () => {
+  const oc = await getDefaultOpenCascadeInstance();
+  for (const [entrypoint, method] of [
+    ["CadaraBuildNativeTopologyPayload", "BuildJson"],
+    ["CadaraNativeNeutralCurveQuery", "QueryJson"],
+  ]) {
+    const incomplete = Object.assign(Object.create(oc), {
+      [entrypoint]: class {},
+    });
+    const mainJS = function () {
+      return Promise.resolve(incomplete);
+    } as unknown as Parameters<
+      typeof createProductionOpenCascadeInitializerFromMainJS
+    >[0];
+    const initialize = createProductionOpenCascadeInitializerFromMainJS(mainJS);
+    await expect(initialize()).rejects.toThrow(`${entrypoint}.${method}`);
+  }
+});
+
+test("filesystem startup fails explicitly for absent and unusable custom assets", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "cadara-occ-runtime-"));
+  try {
+    await expect(loadFilesystemOpenCascadeFactory(directory)).rejects.toThrow();
+    await writeFile(join(directory, "cadara-occ.js"), "export default 42;");
+    await writeFile(join(directory, "cadara-occ.wasm"), "unusable wasm");
+    await expect(loadFilesystemOpenCascadeFactory(directory)).rejects.toThrow(
+      "did not expose a default initializer",
+    );
+    // A real generated initializer must also reject unusable WASM, not fall
+    // back to the installed stock package.
+    const wasmDirectory = join(directory, "invalid-wasm");
+    await mkdir(wasmDirectory);
+    await copyFile(
+      "public/cadara-occ.js",
+      join(wasmDirectory, "cadara-occ.js"),
+    );
+    await writeFile(join(wasmDirectory, "cadara-occ.wasm"), "unusable wasm");
+    const initialize = await loadFilesystemOpenCascadeFactory(wasmDirectory);
+    await expect(
+      initialize({ module: { printErr: () => undefined } }),
+    ).rejects.toThrow();
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

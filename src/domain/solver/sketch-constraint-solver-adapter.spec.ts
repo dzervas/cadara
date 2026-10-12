@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import { describe, expect, test } from "vitest";
 
 import type { NeutralCurveQueryCapability } from "@/contracts/modeling/neutral-curve-query";
@@ -20,7 +19,7 @@ import {
 } from "@/contracts/solver/schema";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { createOpenCascadeNeutralCurveQueryCapability } from "@/domain/modeling/occ/neutral-curve-query";
-import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import { getDefaultOpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import {
   DEFAULT_MOCK_SKETCH_PLANE_FRAME,
   MockSketchSolverAdapter,
@@ -348,34 +347,11 @@ describe("querySketchEditIntersections adapters (T10g-1)", () => {
   });
 });
 
-// Review R-7c: an edit query that reaches OCC (a whole circle cut by a whole
-// circle: the full-turn pair goes to the kernel) on the SHIPPED
-// `public/cadara-occ` build, not only the stock Node package (open problem 8).
-type CustomOpenCascadeMainJS = new (
-  module: Record<string, unknown>,
-) => Promise<OpenCascadeInstance>;
-
-let productionRuntime: Promise<OpenCascadeInstance> | null = null;
-function loadProductionOcc() {
-  productionRuntime ??= (async () => {
-    const module = (await import("../../../public/cadara-occ.js")) as {
-      default: CustomOpenCascadeMainJS;
-    };
-    const wasmBinary = new Uint8Array(
-      await readFile(
-        new URL("../../../public/cadara-occ.wasm", import.meta.url),
-      ),
-    );
-    return new module.default({ wasmBinary });
-  })();
-  return productionRuntime;
-}
-
-// (The stock package answers this pair `occ-neutral-curve-query-bindings-
-// unavailable`, so only the shipped build runs here.)
+// Review R-7c: the full-turn circle pair reaches the shared production OCC
+// filesystem runtime instead of a separately initialized test runtime.
 describe("R-7c: Trim of a whole circle by a whole circle through OCC", () => {
   for (const [runtime, load] of [
-    ["production public/cadara-occ", loadProductionOcc],
+    ["production public/cadara-occ", getDefaultOpenCascadeInstance],
   ] as const)
     test(
       runtime,

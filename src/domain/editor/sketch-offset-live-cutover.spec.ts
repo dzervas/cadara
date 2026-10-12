@@ -5,7 +5,6 @@
 // (normalization, runtime schema), the solver's shell residual / U-G2 and
 // the authored-action history.
 import { describe, expect, test, vi } from "vitest";
-import { readFile } from "node:fs/promises";
 import { deriveSketchValidity } from "@/contracts/sketch/derived-validity";
 
 import type { AuthoredActionState } from "@/contracts/modeling/authored-actions";
@@ -259,23 +258,6 @@ vi.mock(
     };
   },
 );
-
-/** The shipped `public/cadara-occ` runtime (T10 T-1: the browser's bindings). */
-let productionOcc: Promise<OpenCascadeInstance> | null = null;
-function loadProductionOcc() {
-  productionOcc ??= (async () => {
-    const module = (await import("../../../public/cadara-occ.js")) as {
-      default: new (
-        module: Record<string, unknown>,
-      ) => Promise<OpenCascadeInstance>;
-    };
-    const wasmBinary = new Uint8Array(
-      await readFile(new URL("../../../public/cadara-occ.wasm", import.meta.url)),
-    );
-    return new module.default({ wasmBinary });
-  })();
-  return productionOcc;
-}
 
 const XY = {
   kind: "construction",
@@ -3208,7 +3190,7 @@ describe("T08b-g5b consumers and region wiring", () => {
     );
   }, 300_000);
 
-  test("g5b-7 → T10c (A1/A2, review R1): on native OCC (stock and production assets) the outward shell annulus (joint arcs) and the inward annulus (shell sub-spans across knots) build exact faces whose areas and prism volumes equal the oracle; each shell edge is its selected sub-span's untrimmed poles over the record interval", async () => {
+  test("g5b-7 → T10c (A1/A2, review R1): on the production native OCC assets the outward shell annulus (joint arcs) and the inward annulus (shell sub-spans across knots) build exact faces whose areas and prism volumes equal the oracle; each shell edge is its selected sub-span's untrimmed poles over the record interval", async () => {
     for (const [side, distance] of [
       ["left", 0.01],
       ["right", 0.1],
@@ -3329,8 +3311,7 @@ describe("T08b-g5b consumers and region wiring", () => {
         ).toBe(true);
 
       for (const [runtime, loadRuntime] of [
-        ["production", loadProductionOcc],
-        ["stock", getDefaultOpenCascadeInstance],
+        ["production", getDefaultOpenCascadeInstance],
       ] as const) {
         const oc = await loadRuntime();
         for (const [index, region] of response.regions.entries()) {
