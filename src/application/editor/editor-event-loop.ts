@@ -68,6 +68,47 @@ export class EditorEventLoop {
   private running = false;
   private runToken = 0;
   private traceSequence = 0;
+  private currentCorrelation: string | null = null;
+  private readonly effectCorrelations = new WeakMap<EditorEffect, string>();
+  private readonly settlements = new Map<string, { pending: number; events: EditorEvent[]; resolve: (events: readonly EditorEvent[]) => void }>();
+  private activeEffects = 0;
+  private readonly drainWaiters = new Set<() => void>();
+
+  /** Observe real terminal effect events, including typed failures and descendants. */
+  dispatchAndSettle(commandId: string, event: EditorEvent): Promise<readonly EditorEvent[]> {
+    if (!this.running) return Promise.reject(new Error("Editor event loop is stopped."));
+    if (this.settlements.has(commandId)) return Promise.reject(new Error("Duplicate editor correlation."));
+    const completion = new Promise<readonly EditorEvent[]>((resolve) => {
+      this.settlements.set(commandId, { pending: 0, events: [], resolve });
+    });
+    this.currentCorrelation = commandId;
+    try { this.dispatch(event); } finally { this.currentCorrelation = null; }
+    this.settleCorrelation(commandId);
+    return completion;
+  }
+
+  /** Drain serial and detached work and descendants without invalidating outcomes. */
+  drain(): Promise<void> {
+    if (this.isDrained()) return Promise.resolve();
+    return new Promise(resolve => this.drainWaiters.add(resolve));
+  }
+
+  private isDrained() {
+    return this.activeEffects === 0 && !this.processing && this.effectQueue.length === 0 && this.backgroundEffects.length === 0;
+  }
+
+  private notifyDrained() {
+    if (!this.isDrained()) return;
+    for (const resolve of this.drainWaiters) resolve();
+    this.drainWaiters.clear();
+  }
+
+  private settleCorrelation(id: string) {
+    const settlement = this.settlements.get(id);
+    if (!settlement || settlement.pending !== 0) return;
+    this.settlements.delete(id);
+    settlement.resolve(settlement.events);
+  }
 
   constructor(
     runtime: EditorEffectRuntime,
@@ -128,6 +169,13 @@ export class EditorEventLoop {
     return this.state;
   }
 
+  startAndSettle(commandId: string): Promise<readonly EditorEvent[]> {
+    if (this.running) return Promise.reject(new Error("Editor event loop already started."));
+    this.running = true;
+    this.runToken += 1;
+    return this.dispatchAndSettle(commandId, { type: "session.started" });
+  }
+
   start() {
     if (this.running) {
       return;
@@ -145,8 +193,17 @@ export class EditorEventLoop {
 
     this.running = false;
     this.runToken += 1;
+    for (const effect of [...this.effectQueue, ...this.backgroundEffects]) {
+      const id = this.effectCorrelations.get(effect);
+      if (id) {
+        const settlement = this.settlements.get(id);
+        if (settlement) settlement.pending -= 1;
+        this.settleCorrelation(id);
+      }
+    }
     this.effectQueue.length = 0;
     this.backgroundEffects.length = 0;
+    this.notifyDrained();
     // The run token drops in-flight derivation results; release the request so
     // the post-transition hook re-derives after a restart.
     if (
@@ -162,6 +219,11 @@ export class EditorEventLoop {
   ) {
     this.state = result.state;
     for (const effect of result.effects) {
+      if (this.currentCorrelation) {
+        this.effectCorrelations.set(effect, this.currentCorrelation);
+        const settlement = this.settlements.get(this.currentCorrelation);
+        if (settlement) settlement.pending += 1;
+      }
       if ("background" in effect && effect.background) {
         this.backgroundEffects.push(effect);
       } else {
@@ -227,6 +289,7 @@ export class EditorEventLoop {
       }
     } finally {
       this.processing = false;
+      this.notifyDrained();
       if (this.running && this.effectQueue.length > 0) {
         this.scheduleDrain();
       }
@@ -235,6 +298,8 @@ export class EditorEventLoop {
 
   /** Runs one effect and applies its completion; false once the run is stopped. */
   private async runEffect(effect: EditorEffect, runToken: number) {
+    this.activeEffects += 1;
+    const correlation = this.effectCorrelations.get(effect);
     this.emitTrace(
       createEffectStartedTraceEntry({
         sequence: this.nextTraceSequence(),
@@ -245,13 +310,18 @@ export class EditorEventLoop {
 
     try {
       const effectEvent = await this.executeEffect(effect, this.runtime);
+      if (correlation) this.settlements.get(correlation)?.events.push(effectEvent);
 
       if (!this.running || runToken !== this.runToken) {
         return false;
       }
 
-      const result = this.transition(effectEvent);
-      this.applyTransitionResult(result);
+      this.currentCorrelation = correlation ?? null;
+      let result: ReturnType<typeof transitionEditorState>;
+      try {
+        result = this.transition(effectEvent);
+        this.applyTransitionResult(result);
+      } finally { this.currentCorrelation = null; }
       this.emitTrace(
         createEffectCompletedTraceEntry({
           sequence: this.nextTraceSequence(),
@@ -262,10 +332,6 @@ export class EditorEventLoop {
         }),
       );
     } catch (error: unknown) {
-      if (!this.running || runToken !== this.runToken) {
-        return false;
-      }
-
       const appError = normalizeUnknownError(error, {
         code: "editor/invocation-failed",
         fallbackMessage: "Editor runtime invocation failed.",
@@ -287,8 +353,11 @@ export class EditorEventLoop {
         appError,
         "Editor runtime invocation failed.",
       );
+      if (correlation) this.settlements.get(correlation)?.events.push(failureEvent);
+      if (!this.running || runToken !== this.runToken) return false;
+      this.currentCorrelation = correlation ?? null;
       const result = this.transition(failureEvent);
-      this.applyTransitionResult(result);
+      try { this.applyTransitionResult(result); } finally { this.currentCorrelation = null; }
       this.emitTrace(
         createEffectFailedTraceEntry({
           sequence: this.nextTraceSequence(),
@@ -299,6 +368,14 @@ export class EditorEventLoop {
           emittedEffects: result.effects,
         }),
       );
+    } finally {
+      this.activeEffects -= 1;
+      if (correlation) {
+        const settlement = this.settlements.get(correlation);
+        if (settlement) settlement.pending -= 1;
+        this.settleCorrelation(correlation);
+      }
+      this.notifyDrained();
     }
 
     return true;

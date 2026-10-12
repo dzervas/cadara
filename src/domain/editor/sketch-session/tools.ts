@@ -85,7 +85,7 @@ import {
   withConstructionFlag,
   withPlacementPresentation,
 } from "./internals";
-import { getSketchSessionDisplaySolvedSnapshot } from "./display";
+import { getSketchSessionDisplaySolvedSnapshot } from "./solved-snapshot";
 import { buildCommittedDimensionOverlays } from "./annotations";
 import {
   activateSketchConstraintTool,

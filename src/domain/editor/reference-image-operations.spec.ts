@@ -9,10 +9,10 @@ import {
   createSketchSessionFromSnapshot,
   createNewSketchSession,
   deleteSelectedSketchGeometry,
-  getSketchSessionDisplayRenderables,
   startSketchDraw,
-  updateReferenceImageOperationStates,
+  updateReferenceImageOperationStates
 } from "@/domain/editor/sketch-session";
+import { getSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session/display";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,

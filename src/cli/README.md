@@ -18,6 +18,36 @@ bun run cli -- <group> <command> [args]
 cadara <group> <command> [args]
 ```
 
+## `document recipe`
+
+Run a sequential create/inspect recipe against an isolated in-memory document:
+
+```bash
+bun run cli -- document recipe recipe.json
+bun run cli -- document recipe --help
+```
+
+```json
+{
+  "version": 1,
+  "operations": [
+    { "version": 1, "commandId": "create", "operation": "document.create", "label": "Bracket", "basis": null, "as": "part" },
+    { "version": 1, "commandId": "inspect", "operation": "document.inspect", "basis": { "alias": "part" } }
+  ]
+}
+```
+
+Command IDs and aliases are unique within the recipe. Inspection also accepts
+an explicit `{ documentId, revisionId, repositoryHeads }` basis; stale bases are
+refused. Aliases resolve only from completed authoritative results, never labels
+or list order. Stdout is one JSON envelope containing correlated semantic
+results, unexecuted command IDs and awaited cleanup. Errors use stderr and the
+shell's existing 0/1/2 policy. Execution stops at the first failed operation;
+prior changes are not rolled back. Each invocation owns a separate document.
+Repository commitment is not a disk save. File and sketch operations are not
+implemented by this document slice. Help, capture and invalid recipes do not
+start the modeling runtime.
+
 ## `onshape capture`
 
 Capture an Onshape document into a single self-contained, versioned bundle file

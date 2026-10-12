@@ -70,7 +70,6 @@ import {
   deleteSelectedSketchGeometry,
   finishSketchGeometryDrag,
   getSketchSessionDerivedValidity,
-  getSketchSessionDisplayRenderables,
   hasAcceptedLiveSolveOfDefinition,
   patchSketchConstraintValue,
   patchSketchEditToolValue,
@@ -81,8 +80,9 @@ import {
   updateSketchGeometryDrag,
   updateSketchPointer,
   updateSketchReferenceProjection,
-  type SketchSessionState,
+  type SketchSessionState
 } from "@/domain/editor/sketch-session";
+import { getSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session/display";
 import {
   completeSketchEditQueriesForTest,
   deriveSketchRegionsForTest,
@@ -156,11 +156,12 @@ import {
   offsetArrangementInput,
 } from "@/contracts/sketch/region-extraction";
 import { evaluateSplineSpan } from "@/contracts/sketch/spline-geometry";
-import { getStableSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session";
+
+import { getStableSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session/display";
 import {
-  getDerivedShellDisplayValidity,
-  getSketchSessionDisplaySolvedSnapshot,
+  getDerivedShellDisplayValidity
 } from "@/domain/editor/sketch-session/display";
+import { getSketchSessionDisplaySolvedSnapshot } from "@/domain/editor/sketch-session/solved-snapshot";
 import { getEntityAnchor } from "@/domain/editor/sketch-session/annotations";
 import { collectSketchInteractionGeometry } from "@/domain/sketch-interaction/geometry";
 import { collectSketchSnapGeometries } from "@/domain/sketch-snapping/snap-candidates";

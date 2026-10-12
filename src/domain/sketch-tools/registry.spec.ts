@@ -11,12 +11,12 @@ import {
   deriveSketchDisplayEntities,
   finalizeSketchDraw,
   getSketchSessionDerivedValidity,
-  getSketchSessionDisplayRenderables,
   getSketchToolPresentation,
   patchSketchDrawingToolValue,
   startSketchDraw,
-  updateSketchPointer,
+  updateSketchPointer
 } from "@/domain/editor/sketch-session";
+import { getSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session/display";
 import {
   createSessionCommitFactories,
   rebuildSessionForDefinition,

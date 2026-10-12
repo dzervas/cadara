@@ -8,10 +8,11 @@
  * restructuring this file.
  */
 import { onshapeCaptureCommand } from "@/cli/commands/onshape-capture";
+import { documentRecipesCommand } from "@/cli/commands/document-recipes";
 import type { CliEnv, CliIO, CommandModule } from "@/cli/types";
 
 /** Registered subcommands. Add new commands here. */
-export const commandRegistry: readonly CommandModule[] = [onshapeCaptureCommand];
+export const commandRegistry: readonly CommandModule[] = [onshapeCaptureCommand, documentRecipesCommand];
 
 function commandTokens(name: string): string[] {
   return name.split(" ").filter(Boolean);
@@ -70,5 +71,11 @@ if ((import.meta as { main?: boolean }).main) {
       stdout: (text) => process.stdout.write(text),
       stderr: (text) => process.stderr.write(text),
     },
-  ).then((code) => process.exit(code));
+  ).then(
+    (code) => { process.exitCode = code; },
+    (error: unknown) => {
+      process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
+      process.exitCode = 1;
+    },
+  );
 }

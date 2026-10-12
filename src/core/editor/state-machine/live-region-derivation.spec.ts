@@ -8,14 +8,14 @@ import {
   patchSketchEditToolValue,
   selectSketchEditToolTarget,
   getSketchSessionDerivedValidity,
-  getSketchSessionDisplayRenderables,
   getSketchSessionPreviewLabel,
   patchSketchDimensionAnnotationPlacement,
   patchSketchStyleValue,
   toggleSketchSvgRendering,
   withLiveSolveBasis,
-  type SketchSessionState,
+  type SketchSessionState
 } from "@/domain/editor/sketch-session";
+import { getSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session/display";
 import { openSketchSessionFromSelection } from "@/domain/editor/sketch-session-controller";
 import { getFirstSketchStyleTarget } from "@/domain/editor/sketch-session/styles";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";

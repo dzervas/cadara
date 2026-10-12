@@ -56,7 +56,7 @@ import {
   type DocumentRepositoryChangeEvent,
   type DocumentRepositoryMetadata,
 } from "@/domain/modeling/document-repository";
-import { createLocalAuthoredDocumentPayload } from "@/lib/local-file-system-access";
+import { serializeAuthoredDocumentJson as createLocalAuthoredDocumentPayload } from "@/contracts/modeling/authored-document-serialization";
 import { hashGeometryAssetBytes } from "@/domain/modeling/geometry-asset-store";
 import type {
   ModelingService,
@@ -139,7 +139,13 @@ import { requireRenderExport } from "@/contracts/render/runtime-schema";
 export function createModelingService(
   adapter: ModelingKernelAdapter,
   options: ModelingServiceOptions,
-): ModelingService {
+): ModelingService & {
+  initialize(): Promise<ModelingHistoryRestoreState>;
+  createDocumentTransaction(input: {
+    name: string;
+    observe: (transaction: import("@/domain/modeling/document-repository").DocumentRepositoryMutationResult) => void;
+  }): Promise<ModelingDocumentFileMutationResult>;
+} {
   const exportProviders =
     options.exportProviders ?? createExportProviderRegistry([]);
   const currentDocumentId = normalizeCurrentDocumentId(
@@ -531,6 +537,7 @@ export function createModelingService(
       fetchSnapshot?: boolean;
       validateBeforePersist?: boolean;
       validateEmbeddedAssetsBeforePersist?: boolean;
+      observeTransaction?: (transaction: import("@/domain/modeling/document-repository").DocumentRepositoryMutationResult) => void;
     } = {},
   ): Promise<ModelingDocumentFileMutationResult> {
     if (!adapter.restoreAuthoredModelDocument) {
@@ -611,9 +618,13 @@ export function createModelingService(
         assets,
       });
 
+      options.observeTransaction?.(writeResult);
       if (!writeResult.ok) {
         canPersistAuthoredDocument = false;
-        if (rollbackDocument) {
+        if (writeResult.appliedLive) {
+          markRepositorySnapshotFresh(writeResult.appliedLive.metadata);
+          await restoreAuthoredRepositoryDocument(writeResult.appliedLive.document, writeResult.appliedLive.diagnostics ?? [], assets);
+        } else if (rollbackDocument) {
           await restoreAuthoredRepositoryDocument(rollbackDocument);
         }
         return {
@@ -1431,6 +1442,16 @@ export function createModelingService(
       return () => {
         documentChangeListeners.delete(listener);
       };
+    },
+    async initialize() {
+      await ensureInitialized();
+      await repositoryChangePromise;
+      return historyRestoreState;
+    },
+    async createDocumentTransaction(input) {
+      await ensureInitialized();
+      await repositoryChangePromise;
+      return replaceCurrentAuthoredDocument({ ...(await getSeedAuthoredDocument()), name: input.name }, [], { observeTransaction: input.observe });
     },
     async waitForPersistence() {
       await ensureInitialized();

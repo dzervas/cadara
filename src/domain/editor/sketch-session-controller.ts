@@ -3,10 +3,9 @@ import {
   createNewSketchSession,
   createNewSketchSessionFromSupport,
   createSketchSessionFromSnapshot,
-  getSketchSessionDisplayRenderables,
-  type SketchSessionDisplayRenderable,
-  type SketchSessionState,
+  type SketchSessionState
 } from "@/domain/editor/sketch-session";
+
 import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
 import type { RenderableEntityRecord } from "@/contracts/render/schema";
 import type { SketchPlaneDefinition } from "@/contracts/shared/sketch-plane";
@@ -16,7 +15,6 @@ import type {
 } from "@/domain/modeling/modeling-service";
 import type { AppResult } from "@/contracts/errors";
 import { getPrimitiveRefKey } from "@/core/editor/schema";
-import type { ViewportRenderableRecord } from "@/core/workspace/viewport-renderables";
 
 type Vec3 = readonly [number, number, number];
 
@@ -248,44 +246,3 @@ export async function commitActiveSketchSession(input: {
   return result;
 }
 
-export function mergeSketchRenderables<
-  T extends RenderableEntityRecord | ViewportRenderableRecord,
->(documentRenderables: T[], session: SketchSessionState | null) {
-  if (!session) {
-    return {
-      documentRenderables,
-      sketchDisplayRenderables: [],
-    };
-  }
-
-  const activeSketchId = session.sketchId;
-  const visibleDocumentRenderables = activeSketchId
-    ? documentRenderables.filter(
-        (entry) => !isActiveSketchRenderable(entry, activeSketchId),
-      )
-    : documentRenderables;
-
-  return {
-    documentRenderables: visibleDocumentRenderables,
-    sketchDisplayRenderables: getSketchSessionDisplayRenderables(session),
-  };
-}
-
-export type MergedSketchRenderables = {
-  documentRenderables: Array<RenderableEntityRecord | ViewportRenderableRecord>;
-  sketchDisplayRenderables: SketchSessionDisplayRenderable[];
-};
-
-function isActiveSketchRenderable(
-  entry: RenderableEntityRecord | ViewportRenderableRecord,
-  sketchId: NonNullable<SketchSessionState["sketchId"]>,
-) {
-  const renderable = "renderable" in entry ? entry.renderable : entry;
-  const target = renderable.binding.target;
-
-  return (
-    (target.kind === "region" && target.sketchId === sketchId) ||
-    (target.kind === "sketchEntity" && target.sketchId === sketchId) ||
-    (target.kind === "sketchPoint" && target.sketchId === sketchId)
-  );
-}
