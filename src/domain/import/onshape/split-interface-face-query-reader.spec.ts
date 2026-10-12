@@ -34,6 +34,7 @@ test("decodes 9841's exact split-interface supports to their authored Cutter ent
     profileSourceEntityId: "ZFNETMCD9zyJ.0",
     toolExtrudeFeatureId: featureNamed("Extrude 4").featureId,
     splitFeatureId: featureNamed("Split 1").featureId,
+    side: "back",
   });
   expect(sketch4).toEqual({ ...sketch3, profileSourceEntityId: "ZFNETMCD9zyJ.1" });
   expect(cutterEntityIds, "Both decoded ids must name entities Cutter actually authors.").toEqual(

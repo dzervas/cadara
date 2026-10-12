@@ -10,6 +10,12 @@ export interface OnshapeSplitInterfaceFaceQuery {
   profileSourceEntityId: string;
   toolExtrudeFeatureId: string;
   splitFeatureId: string;
+  /**
+   * Preserved only for the exact recognized isFromBackBodyT leaf. qSplitBy's
+   * documented back side is opposite the SOURCE tool normal (FsDoc/library.html#qSplitBy-Id--boolean).
+   * Captured owner winding corroborates that leaf; OCC tool orientation is not assumed equal.
+   */
+  side: "back";
 }
 
 export function readSplitInterfaceFaceQuery(
@@ -41,6 +47,7 @@ export function readSplitInterfaceFaceQuery(
     profileSketchFeatureId: sketch[1]!,
     profileSourceEntityId: entityParts.join("."),
     toolExtrudeFeatureId: tool[1]!,
-    splitFeatureId: split[1]!
+    splitFeatureId: split[1]!,
+    side: "back"
   };
 }
