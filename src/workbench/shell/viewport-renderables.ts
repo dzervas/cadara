@@ -76,10 +76,11 @@ export function composeViewportRenderables(
   const snapshotSketches = input.snapshotSketches ?? [];
   const sketchConstraintDisplayById =
     createCommittedSketchConstraintDisplayLookup(snapshotSketches);
-  const nonCurrentSketchIds = new Set(
-    snapshotSketches
-      .filter((sketch) => sketch.sketch.derivedValidity.state !== "current")
-      .map((sketch) => sketch.sketchId),
+  const nonCurrentSketchStates = new Map(
+    snapshotSketches.flatMap((sketch) => {
+      const { state } = sketch.sketch.derivedValidity;
+      return state === "current" ? [] : [[sketch.sketchId, state] as const];
+    }),
   );
   const nonAcceptedOffsetOutputsById =
     createCommittedNonAcceptedOffsetOutputLookup(snapshotSketches);
@@ -91,12 +92,11 @@ export function composeViewportRenderables(
         renderable,
         sketchConstraintDisplayById,
       ),
-      ...(isCommittedNonAcceptedOffsetOutput(
+      ...getCommittedSketchGeometryValidity(
         renderable,
         nonAcceptedOffsetOutputsById,
-      )
-        ? { offsetOutputValidity: "invalid" as const }
-        : {}),
+        nonCurrentSketchStates,
+      ),
     })),
     ...(input.previewRenderables ?? []).map((renderable) => ({
       origin: "preview" as const,
@@ -106,7 +106,7 @@ export function composeViewportRenderables(
     const target = renderable.binding.target;
     return (
       !isTargetHidden(target, input.hiddenTargetKeys) &&
-      !(target.kind === "region" && nonCurrentSketchIds.has(target.sketchId))
+      !(target.kind === "region" && nonCurrentSketchStates.has(target.sketchId))
     );
   });
 
@@ -179,13 +179,25 @@ function createCommittedNonAcceptedOffsetOutputLookup(
   );
 }
 
-function isCommittedNonAcceptedOffsetOutput(
+/**
+ * A non-accepted offset output ([TECH] G19) is `invalid`; any other curve or
+ * point of a sketch that is not current takes the sketch's state (T17d2:
+ * part mode draws its held geometry, marked).
+ */
+function getCommittedSketchGeometryValidity(
   renderable: RenderableEntityRecord,
-  lookup: ReturnType<typeof createCommittedNonAcceptedOffsetOutputLookup>,
-) {
+  nonAcceptedOutputs: ReturnType<
+    typeof createCommittedNonAcceptedOffsetOutputLookup
+  >,
+  nonCurrentSketchStates: ReadonlyMap<string, "invalid" | "stale">,
+): { sketchGeometryValidity?: "invalid" | "stale" } {
   const target = renderable.binding.target;
-  return (
+  if (target.kind !== "sketchEntity" && target.kind !== "sketchPoint")
+    return {};
+  const validity =
     target.kind === "sketchEntity" &&
-    lookup.get(target.sketchId)?.has(target.entityId) === true
-  );
+    nonAcceptedOutputs.get(target.sketchId)?.has(target.entityId)
+      ? "invalid"
+      : nonCurrentSketchStates.get(target.sketchId);
+  return validity ? { sketchGeometryValidity: validity } : {};
 }

@@ -8,9 +8,13 @@ export interface ViewportRenderableRecord {
   renderable: RenderableEntityRecord;
   sketchConstraintDisplay?: SketchConstraintDisplayTargetState;
   /**
-   * [TECH] G19 (T08b-g5c): a committed sketch curve that is a non-accepted
-   * offset output (its relationship failed or is not certified). Part mode
-   * draws it with the danger tint; it stays pickable.
+   * A committed sketch curve or point that is not current geometry, drawn
+   * with the danger tint when `invalid` (it stays pickable):
+   * - [TECH] G19 (T08b-g5c): a non-accepted offset output (its relationship
+   *   failed or is not certified) is `invalid`;
+   * - T17d2: every curve and point of a sketch whose derived validity is not
+   *   current takes that state (its held geometry is drawn). `stale` keeps
+   *   the normal colour, as a stale output does in sketch mode (U-A).
    */
-  offsetOutputValidity?: "invalid";
+  sketchGeometryValidity?: "invalid" | "stale";
 }
