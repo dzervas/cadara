@@ -45,6 +45,7 @@ import {
   splineSourceSpanPairs,
 } from "@/contracts/sketch/offset-derivation-outputs";
 import { canonicalArcSupport } from "@/contracts/sketch/canonical-arc-support";
+import { createOffsetShellPreviewEntities } from "@/domain/sketch-editing/offset-preview";
 import { declaredJoinClasses } from "@/contracts/sketch/region-extraction";
 import {
   projectedSplineIsClosed,
@@ -3756,11 +3757,15 @@ export function createSketchOffsetDerivationContribution(input: {
     message: null,
     definition: null,
     contribution,
-    previewEntities: createPreviewEntitiesFromContribution(
-      input.definition,
-      contribution,
-      { modelingTolerance: input.modelingTolerance },
-    ),
+    previewEntities: [
+      ...createPreviewEntitiesFromContribution(input.definition, contribution, {
+        modelingTolerance: input.modelingTolerance,
+      }),
+      // A spline seed's output is a shell, drawn as its solved record will
+      // be. A lone spline's offset has no other output to preview or to
+      // anchor the floating input on (T17c4).
+      ...createOffsetShellPreviewEntities(frame, mapped.shells, entities),
+    ],
   };
 }
 

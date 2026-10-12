@@ -156,7 +156,15 @@ import {
   createSketchArrangementDeriver,
   offsetArrangementInput,
 } from "@/contracts/sketch/region-extraction";
-import { evaluateSplineSpan } from "@/contracts/sketch/spline-geometry";
+import {
+  evaluateSplineSpan,
+  solvedCubicSpans,
+  tessellateCubicSpans,
+} from "@/contracts/sketch/spline-geometry";
+import { offsetSeedSession } from "@/domain/editor/sketch-offset.fixtures";
+import { applySketchCloseSpline } from "@/domain/editor/sketch-session/close-spline";
+import { clearActiveSketchTool } from "@/domain/editor/sketch-session";
+import { eid } from "@/domain/editor/sketch-mirror.fixtures";
 import { getStableSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session";
 import {
   getDerivedShellDisplayValidity,
@@ -1382,6 +1390,174 @@ describe("T08b-g5a live offset cutover", () => {
         (entity) => entity.kind === "derivedPiecewiseCubic",
       ),
     ).toBe(true);
+  });
+
+  test("row 8c (T17c4, T17c review F-A): a lone open spline's offset previews its shell (the preview basis's solved spans), anchors the floating Create input on it, and commits after certification; in a mixed chain the shell follows the other outputs", () => {
+    const drawn = offsetSeedSession();
+    const staged = stagedOffset(drawn, [eid("s")], 0.5);
+    const publication = staged.activeEditTool!.offsetPublication!;
+    expect(publication.status, "premise: the check is pending").toBe("pending");
+    const shell = publication.contribution.entities.find(
+      (entity) => entity.kind === "derivedPiecewiseCubic",
+    )!;
+    expect(
+      publication.contribution.entities.map((entity) => entity.kind),
+      "premise: the shell is the only output",
+    ).toEqual(["derivedPiecewiseCubic"]);
+    const record = publication.basis!.solvedSnapshot.solvedEntities.find(
+      (entity) => entity.entityId === shell.entityId,
+    )!;
+    const drawnShell = tessellateCubicSpans(solvedCubicSpans(record));
+    expect(
+      drawnShell.length,
+      "premise: the solved shell has spans",
+    ).toBeGreaterThan(2);
+    expect(
+      staged.toolStagedEntities,
+      "The preview draws the shell where its solve puts it.",
+    ).toEqual([
+      {
+        id: `preview-${shell.entityId}`,
+        kind: "polyline",
+        points: drawnShell,
+        isClosed: false,
+        entityId: null,
+        status: "preview",
+        label: shell.label,
+        isConstruction: false,
+      },
+    ]);
+    const input = staged.toolPresentation?.floatingInput;
+    expect(
+      input?.anchor,
+      "The floating Create input anchors on the shell.",
+    ).toEqual({
+      kind: "sketchPoint",
+      point: drawnShell[Math.floor(drawnShell.length / 2)],
+      offset: { x: 18, y: -18 },
+    });
+    expect(input?.confirmLabel).toBe("Create");
+    expect(staged.toolPresentation?.completionHints?.[0]?.ready).toBe(true);
+
+    const { derivationId, publications } = previewPublications(staged);
+    const certified = completeSketchOffsetPreviewPublication(
+      staged,
+      derivationId,
+      publications,
+    );
+    expect(certified.activeEditTool?.offsetPublication?.status).toBe(
+      "certified",
+    );
+    expect(certified.toolPresentation?.floatingInput?.anchor).toEqual(
+      input?.anchor,
+    );
+    const committed = patchSketchEditToolValue(certified, {
+      intent: "commitOffset",
+    });
+    expect(
+      committed.definition.entities.filter(
+        (entity) => entity.kind === "derivedPiecewiseCubic",
+      ),
+      "Create commits the certified shell.",
+    ).toEqual([shell]);
+
+    // A line + spline chain (outward: a joint arc): the joint arc and the
+    // line output come first as before (the anchor stays on them), the
+    // shell last.
+    const mixed = stagedOffset(drawn, [eid("l2"), eid("s")], 0.5);
+    const mixedShell =
+      mixed.activeEditTool!.offsetPublication!.contribution.entities.find(
+        (entity) => entity.kind === "derivedPiecewiseCubic",
+      )!;
+    expect(mixed.toolStagedEntities.map((entity) => entity.kind)).toEqual([
+      "spline",
+      "line",
+      "polyline",
+    ]);
+    expect(mixed.toolStagedEntities.at(-1)?.id).toBe(
+      `preview-${mixedShell.entityId}`,
+    );
+    // Inward (a trim joint): the preview draws only the shell's drawn
+    // (trimmed) domain, as its solved record does.
+    const trimmed = patchSketchEditToolValue(mixed, {
+      intent: "setOffsetSide",
+      value: "right",
+    });
+    const trimmedPublication = trimmed.activeEditTool!.offsetPublication!;
+    const trimmedShell = trimmedPublication.contribution.entities.find(
+      (entity) => entity.kind === "derivedPiecewiseCubic",
+    )!;
+    const trimmedRecord = shellRecord(trimmedPublication.basis!.solvedSnapshot);
+    expect(
+      trimmedRecord.spans.some(
+        (span) =>
+          span.queryDomain[0] !== span.sourceDomain[0] ||
+          span.queryDomain[1] !== span.sourceDomain[1],
+      ),
+      "premise: the shell is trimmed",
+    ).toBe(true);
+    expect(trimmed.toolStagedEntities.map((entity) => entity.kind)).toEqual([
+      "line",
+      "polyline",
+    ]);
+    expect(trimmed.toolStagedEntities.at(-1)).toMatchObject({
+      id: `preview-${trimmedShell.entityId}`,
+      points: tessellateCubicSpans(solvedCubicSpans(trimmedRecord)),
+    });
+  });
+
+  test("row 8d (T17c4 review A-1): a lone closed spline's offset previews its shell (the solved record's), anchors the floating input and commits the certified shell, on both sides", () => {
+    const open = drawSpline(newSession(), [
+      [0, 0],
+      [2, 0],
+      [3, 1.5],
+      [1.5, 3],
+      [-0.5, 1.5],
+    ]);
+    const isSpline = (entity: SketchDefinition["entities"][number]) =>
+      entity.kind === "spline";
+    // Close spline (T17c2) acts on a selection with no active tool.
+    const idle = clearActiveSketchTool(open);
+    const closed = applySketchCloseSpline(idle, [
+      idle.definition.entities.find(isSpline)!.target,
+    ]);
+    const spline = closed.definition.entities.find(isSpline)!;
+    expect(
+      spline.kind === "spline" && spline.closure,
+      "premise: one smooth closed spline",
+    ).toBe("smooth");
+    for (const side of ["left", "right"] as const) {
+      let staged = selectSketchEditToolTarget(
+        beginSketchTool(closed, "offset"),
+        spline.target,
+      );
+      staged = patchSketchEditToolValue(staged, {
+        intent: "setOffsetSide",
+        value: side,
+      });
+      staged = patchSketchEditToolValue(staged, { value: 0.2 });
+      const publication = staged.activeEditTool!.offsetPublication!;
+      expect(publication.status, `${side}: premise pending`).toBe("pending");
+      const drawnShell = tessellateCubicSpans(
+        solvedCubicSpans(shellRecord(publication.basis!.solvedSnapshot)),
+      );
+      expect(
+        staged.toolStagedEntities.map((entity) =>
+          entity.kind === "polyline" ? entity.points : entity.kind,
+        ),
+        `${side}: the preview is the solved shell alone`,
+      ).toEqual([drawnShell]);
+      expect(
+        staged.toolPresentation?.floatingInput?.anchor,
+        `${side}: anchored`,
+      ).toMatchObject({ point: drawnShell[Math.floor(drawnShell.length / 2)] });
+      const committed = commitCertified(staged);
+      expect(
+        committed.definition.entities.map((entity) => entity.kind),
+        `${side}: Create commits the certified shell`,
+      ).toEqual(["spline", "derivedPiecewiseCubic"]);
+      expect(committed.validationMessage).toBe(null);
+    }
   });
 
   test("row 8b: a planChanged preview publication re-solves ONCE with the certifier's hint and then certifies and commits (G3/G17)", () => {
@@ -2694,6 +2870,35 @@ describe("T08b-g5b consumers and region wiring", () => {
       ).toEqual(ids);
     }
   }, 600_000);
+
+  test("T17c4 review R-1: the g5d deep-trim preview (loop, inward d = 0.1) draws the committed shell exactly, without the removed leaves", () => {
+    const { session, seeds } = splineLoopSession();
+    let staged = beginSketchTool(session, "offset");
+    for (const entityId of seeds)
+      staged = selectSketchEditToolTarget(
+        staged,
+        staged.definition.entities.find(
+          (entity) => entity.entityId === entityId,
+        )!.target,
+      );
+    staged = patchSketchEditToolValue(staged, {
+      intent: "setOffsetSide",
+      value: "right",
+    });
+    staged = patchSketchEditToolValue(staged, { value: 0.1 });
+    const preview = staged.toolStagedEntities.at(-1)!;
+    expect(preview.kind, "premise: the shell preview is last").toBe("polyline");
+    const committed = commitCertified(staged);
+    const record = shellRecord(committed.liveSolve!.solvedSnapshot);
+    expect(
+      record.spans,
+      "premise: the committed shell omits the two removed leaves",
+    ).toHaveLength(6);
+    expect(
+      preview.kind === "polyline" ? preview.points : null,
+      "The preview is the committed shell's drawn curve.",
+    ).toEqual(tessellateCubicSpans(solvedCubicSpans(record)));
+  });
 
   test("T08b-g5d (U-G6): the g5b-1b loop at inward d = 0.1 (deep trims on inner leaves of the terminal source span) commits, publishes certified and derives the annulus + disk with oracle areas; the shell record omits the removed sub-spans", async () => {
     const { session, seeds } = splineLoopSession();
