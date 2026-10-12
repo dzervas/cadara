@@ -178,6 +178,11 @@ export interface SketchDebugSnapshot {
    */
   liveRegions?: { status: string; count: number };
   /**
+   * T17b (F-4): the authored dimensions (drivers and references, drawn or
+   * not: off-screen labels have no chip), for E2E counts.
+   */
+  dimensions?: { id: string; kind: string }[];
+  /**
    * T15e: derived relationships (kind, axis reference for mirrors, and the
    * stable seed → output entity/point maps) for mirror E2E assertions.
    */

@@ -913,6 +913,10 @@ export function CadWorkbench({
           status: sketchSession.liveRegions.status,
           count: sketchSession.liveRegions.regions.length,
         },
+        dimensions: def.dimensions.map((dimension) => ({
+          id: dimension.dimensionId,
+          kind: dimension.kind,
+        })),
         derivedRelationships: (def.derivedRelationships ?? []).map(
           (relationship) => ({
             id: relationship.derivationId,

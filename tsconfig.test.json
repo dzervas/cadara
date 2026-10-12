@@ -62,7 +62,6 @@
     "src/core/feature-authoring/features/pattern-authoring.spec.ts",
     "src/core/workspace/sketch-feedback-projection.spec.ts",
     "src/domain/bug-reporting/report.spec.ts",
-    "src/domain/editor/authored-sketch-graph.spec.ts",
     "src/domain/editor/feature-boolean-target-preselection.spec.ts",
     "src/domain/editor/history-undo-redo.spec.ts",
     "src/domain/editor/reference-image-operations.spec.ts",

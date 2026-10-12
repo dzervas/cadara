@@ -429,8 +429,10 @@ test("T13b A6: a distance typed into the Offset floating input (not the tool pan
     '[data-sketch-viewport-floating-input="offset-distance-input"]',
   );
   await expect(floatingInput).toBeVisible();
-  // D29: an operation parameter offers no variable suggestions.
-  await expect(floatingInput.locator("datalist")).toHaveCount(0);
+  // (D29, no variable suggestions on an operation parameter, is pinned by
+  // the UI row "T13b A6 (D29)" in sketch-viewport-feedback.spec.tsx, which
+  // renders with a document variable; this document has none, so a
+  // datalist check here could never fail. T17b, E11.)
   await floatingInput.locator("input").fill("0.35");
   await expect(
     page.getByRole("textbox", { name: "Distance" }),

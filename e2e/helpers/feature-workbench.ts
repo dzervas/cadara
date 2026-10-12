@@ -341,18 +341,6 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
     await this.page.waitForSelector('[data-render-idle="true"]', { timeout });
   }
 
-  async selectReferenceByViewportPicking(targetId: string) {
-    const viewportPoint = await this.projectTargetToScreen(targetId);
-
-    if (!viewportPoint) {
-      throw new Error(
-        `No projected viewport point is available for ${targetId}.`,
-      );
-    }
-
-    await this.clickViewportAtReal(viewportPoint);
-  }
-
   async expectBodyPresent(bodyId: string) {
     await expect
       .poll(() => this.listVisibleBodyIds(), { timeout: 30_000 })

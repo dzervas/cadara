@@ -1,5 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import {
+  currentRevision,
+  glideDoubleClick,
+  openTwoSessions,
+  waitForPeerRevision,
+} from "./helpers/acceptance";
+import { glideClick, glidePress } from "./helpers/mirror-workbench";
 import { SketchWorkbenchHarness } from "./helpers/sketch-workbench";
 
 test.setTimeout(120_000);
@@ -9,66 +16,63 @@ test("two sessions keep drafts private, publish once, retain reentry history, an
   context,
 }, testInfo) => {
   const channel = `cad-e2e-sketch-publication-${testInfo.workerIndex}-${Date.now()}`;
-  const first = await context.newPage();
-  const second = await context.newPage();
-  const firstWorkbench = new SketchWorkbenchHarness(first);
-  const secondWorkbench = new SketchWorkbenchHarness(second);
-
-  await firstWorkbench.openPreservingStorage(syncUrl(channel, `${channel}-a`));
-  await waitForRepositoryUrl(first, channel);
-  await secondWorkbench.openPreservingStorage(syncUrl(channel, `${channel}-b`));
+  const { first: firstWorkbench, second: secondWorkbench } =
+    await openTwoSessions(context, channel);
+  const first = firstWorkbench.page;
+  const second = secondWorkbench.page;
 
   await firstWorkbench.activateTool("Start a new sketch.");
-  await first
-    .getByRole("button", { name: /Top Plane/ })
-    .first()
-    .click();
+  await glidePress(
+    first,
+    first.getByRole("button", { name: /Top Plane/ }).first(),
+  );
   await firstWorkbench.activateTool("Create line geometry.");
-  const firstCanvas = first.locator("main canvas").first();
-  await firstCanvas.click({ position: { x: 360, y: 260 }, force: true });
-  await firstCanvas.click({ position: { x: 420, y: 320 }, force: true });
+  await glideClick(firstWorkbench, { x: 360, y: 260 });
+  await glideClick(firstWorkbench, { x: 420, y: 320 });
   await expect
     .poll(() => firstWorkbench.currentSketchSession())
     .toContain("1 entities staged");
 
+  // A forced refresh: B still sees nothing of A's private draft.
   await refreshDocument(second);
-  await expect.poll(() => revisionLabel(second)).toBe("rev_0001");
+  await expect.poll(() => currentRevision(second)).toBe("rev_0001");
   await expect(
     second.getByRole("button", { name: /Sketch Draft.*reopen/ }),
   ).toHaveCount(0);
 
   await firstWorkbench.activateTool("Exit the active sketch.");
   await firstWorkbench.expectMachine("idle");
-  const firstPublishedRevision = await revisionLabel(first);
-  await refreshDocument(second);
+  const firstPublishedRevision = await currentRevision(first);
+  // B receives the publication through the production peer refresh.
+  await waitForPeerRevision(second, "rev_0001");
   const published = second.getByRole("button", {
     name: "Select Sketch Draft. Double-click to reopen.",
   });
   await expect(published).toBeVisible({ timeout: 30_000 });
 
-  await published.dblclick({ force: true });
+  await glideDoubleClick(second, published);
   await secondWorkbench.expectSketchSessionActive();
-  await second.getByRole("button", { name: "Select Line 1." }).click();
+  await glidePress(
+    second,
+    second.getByRole("button", { name: "Select Line 1." }),
+  );
   await second.keyboard.press("Delete");
   await expect(
     second.getByRole("button", { name: "Undo Delete Sketch Item" }),
   ).toBeVisible();
   await secondWorkbench.activateTool("Create line geometry.");
-  const secondCanvas = second.locator("main canvas").first();
-  await secondCanvas.click({ position: { x: 500, y: 300 }, force: true });
-  await secondCanvas.click({ position: { x: 570, y: 350 }, force: true });
+  await glideClick(secondWorkbench, { x: 500, y: 300 });
+  await glideClick(secondWorkbench, { x: 570, y: 350 });
   await secondWorkbench.activateTool("Exit the active sketch.");
   await secondWorkbench.expectMachine("idle");
 
-  await refreshDocument(first);
-  await expect
-    .poll(() => revisionLabel(first), { timeout: 30_000 })
-    .not.toBe(firstPublishedRevision);
-  await first
-    .getByRole("button", {
+  await waitForPeerRevision(first, firstPublishedRevision);
+  await glideDoubleClick(
+    first,
+    first.getByRole("button", {
       name: "Select Sketch Draft. Double-click to reopen.",
-    })
-    .dblclick({ force: true });
+    }),
+  );
   await firstWorkbench.expectSketchSessionActive();
   const retainedAction = first
     .locator(
@@ -76,7 +80,7 @@ test("two sessions keep drafts private, publish once, retain reentry history, an
     )
     .first();
   await expect(retainedAction).toBeVisible();
-  await retainedAction.click();
+  await glidePress(first, retainedAction);
   await expect(
     first.getByText(/Cannot undo: expected-state-changed/),
   ).toBeVisible({ timeout: 10_000 });
@@ -97,7 +101,10 @@ test("document Undo/Redo preserves the original identity and later sketch histor
 
   const createPublishedLine = async (offset: number) => {
     await workbench.activateTool("Start a new sketch.");
-    await page.getByRole("button", { name: /Top Plane/ }).first().click();
+    await page
+      .getByRole("button", { name: /Top Plane/ })
+      .first()
+      .click();
     await workbench.activateTool("Create line geometry.");
     const canvas = page.locator("main canvas").first();
     await canvas.click({ position: { x: 360 + offset, y: 260 }, force: true });
@@ -111,7 +118,9 @@ test("document Undo/Redo preserves the original identity and later sketch histor
     name: "Select Sketch Draft. Double-click to reopen.",
   });
   await expect(firstSketch).toBeVisible();
-  const firstSketchId = await firstSketch.getAttribute("data-history-sketch-id");
+  const firstSketchId = await firstSketch.getAttribute(
+    "data-history-sketch-id",
+  );
   expect(firstSketchId).toMatch(/^sketch_[0-9a-f-]{36}$/);
 
   const cadToolbar = page.getByRole("toolbar", { name: "CAD tools" });
@@ -155,38 +164,8 @@ test("document Undo/Redo preserves the original identity and later sketch histor
   await expect(originalAction).toBeVisible();
 });
 
-function syncUrl(channelName: string, databaseName: string) {
-  const params = new URLSearchParams({
-    cadLocalPeerSync: "1",
-    cadLocalPeerSyncChannel: channelName,
-    cadRepositoryDbName: databaseName,
-    cadTestMode: "1",
-  });
-  return `/?${params}`;
-}
-
-async function waitForRepositoryUrl(page: Page, channelName: string) {
-  const namespace = `cad-local-peer-channel:${encodeURIComponent(channelName)}`;
-  const key = `cad.documentRepository.automergeUrls.v1:${namespace}`;
-  await expect
-    .poll(
-      () =>
-        page.evaluate((storageKey) => localStorage.getItem(storageKey), key),
-      {
-        timeout: 30_000,
-      },
-    )
-    .toContain("doc_workspace");
-}
-
 async function refreshDocument(page: Page) {
   await page.evaluate(() => {
     window.__cadaraDebug?.refreshDocument();
   });
-}
-
-async function revisionLabel(page: Page) {
-  return page.evaluate(
-    () => window.__cadaraDebug?.getState()?.revision ?? "loading",
-  );
 }
