@@ -1,4 +1,4 @@
-import { loadDefaultOpenCascadeFactory } from "@/domain/modeling/occ/runtime";
+import { loadDefaultOpenCascadeFactory } from "@/infrastructure/occ/runtime";
 
 async function verifyBrowserOpenCascadeBootstrapCompiles() {
   const initializer = await loadDefaultOpenCascadeFactory();

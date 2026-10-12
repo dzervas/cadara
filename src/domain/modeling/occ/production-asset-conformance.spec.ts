@@ -60,10 +60,8 @@ import {
   regionBoundaryBasisOfSketchRecord,
   releaseBuiltSketchProfileFace,
 } from "@/domain/modeling/occ/sketch-profile";
-import {
-  getDefaultOpenCascadeInstance,
-  type OpenCascadeInstance,
-} from "@/domain/modeling/occ/runtime";
+import { getDefaultOpenCascadeInstance } from "@/infrastructure/occ/runtime";
+import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import {
   OCC_KERNEL_DOCUMENT_ID,
   OCC_KERNEL_INITIAL_REVISION_ID,

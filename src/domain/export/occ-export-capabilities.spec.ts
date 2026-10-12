@@ -10,7 +10,7 @@ import {
   trackNewSolidBody,
 } from "@/domain/modeling/occ/topology";
 import { createOccExportCapabilities } from "@/domain/export/occ-export-capabilities";
-import { getDefaultOpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import { getDefaultOpenCascadeInstance } from "@/infrastructure/occ/runtime";
 
 type CustomOpenCascadeMainJSForTest = new (
   module: Record<string, unknown>,

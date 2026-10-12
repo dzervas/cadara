@@ -167,10 +167,8 @@ import { collectSketchSnapGeometries } from "@/domain/sketch-snapping/snap-candi
 import { deriveMeasurementViewModel } from "@/domain/measure/measurement";
 import { buildSketchVectorExportModel } from "@/domain/export/sketch-vector-export-model";
 import { buildOccRenderExport } from "@/domain/modeling/occ/snapshot";
-import {
-  getDefaultOpenCascadeInstance,
-  type OpenCascadeInstance,
-} from "@/domain/modeling/occ/runtime";
+import { getDefaultOpenCascadeInstance } from "@/infrastructure/occ/runtime";
+import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import {
   buildRegionProfileFace,
   regionBoundaryBasisOfSketchRecord,

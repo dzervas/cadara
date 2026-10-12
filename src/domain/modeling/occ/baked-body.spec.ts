@@ -10,7 +10,7 @@ import {
 } from "@/contracts/shared/versioning";
 import type { FeatureDefinition } from "@/contracts/modeling/schema";
 import type { FeatureId, GeometryAssetId } from "@/contracts/shared/ids";
-import { getDefaultOpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import { getDefaultOpenCascadeInstance } from "@/infrastructure/occ/runtime";
 import {
   applyOccFeatureToAuthoringState,
   createOccAuthoringState,

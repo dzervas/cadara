@@ -19,7 +19,7 @@ import {
   buildConstructionPlaneFromPlanarFace,
   getExtrusionNormalForPlanarFace,
 } from "@/domain/modeling/occ/sketch-profile";
-import { getDefaultOpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import { getDefaultOpenCascadeInstance } from "@/infrastructure/occ/runtime";
 import {
   extractSolidShapes,
   getOccDurableRefKey,

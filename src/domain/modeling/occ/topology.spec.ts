@@ -19,7 +19,7 @@ import {
   type SketchDefinition as AuthoredSketchDefinition,
   type SketchRecord,
 } from "@/contracts/sketch/schema";
-import { getDefaultOpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import { getDefaultOpenCascadeInstance } from "@/infrastructure/occ/runtime";
 import type {
   OccNativeShimPayload,
   OpenCascadeNativeTopologyKernelHost,
