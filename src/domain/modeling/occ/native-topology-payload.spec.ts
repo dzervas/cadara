@@ -1452,7 +1452,7 @@ test("src/domain/modeling/occ/native-topology-payload.spec.ts", async () => {
 });
 
 async function loadNativeOpenCascadeForTest() {
-  const module = (await import("../../../../public/cadara-occ.js")) as {
+  const module = (await import("../../../../public/cadara-occ.js")) as unknown as {
     default: NativeOpenCascadeMainJSForTest;
   };
   const wasmBinary = new Uint8Array(
@@ -1467,7 +1467,7 @@ test("native disjoint common preserves available empty operand history", async (
   const left = new oc.BRepPrimAPI_MakeBox_2(2, 2, 2);
   const right = new oc.BRepPrimAPI_MakeBox_3(origin, 2, 2, 2);
   const result = oc.CadaraExecuteNativeFeatureTransaction
-    .BuildBooleanCommittedShapeTransaction?.(
+    ?.BuildBooleanCommittedShapeTransaction?.(
       left.Shape(), right.Shape(), "intersect",
       "body_empty_common" as BodyId, "t_empty_common", 0.1, 0.5,
     );
