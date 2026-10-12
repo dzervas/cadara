@@ -8,8 +8,9 @@ import type {
 
 /**
  * Application API, independent of recipe/terminal encoding. Validated commands
- * execute sequentially; reject concurrent execution rather than inventing a
- * shared multi-writer guarantee. A command ID identifies one intent, including
+ * enter one serial executor, never concurrent modeling. Queued commands settle
+ * canceled when close begins; this is not a shared multi-writer guarantee.
+ * A command ID identifies one intent, including
  * every serial/detached follow-up, final solve/derivation and snapshot handoff.
  * Correlation intent is derived by the application from the validated operation;
  * clients cannot upgrade an ordinary geometry request to author-invalid on failure.

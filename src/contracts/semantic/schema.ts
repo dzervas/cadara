@@ -139,6 +139,8 @@ export interface SemanticCompletion {
  */
 export interface SemanticDiscovery {
   state: SemanticState;
+  /** Inspection metadata from this same snapshot, not another document owner. */
+  document?: { label: string };
   references: readonly { label: string; target: DurableRef }[];
   history: DurableHistoryAvailability | null;
 }

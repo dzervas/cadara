@@ -88,9 +88,9 @@ import {
   type SplineVector,
 } from "@/contracts/sketch/spline-geometry";
 import {
-  createSketchSessionFromSnapshot,
-  getSketchSessionDisplayRenderables,
+  createSketchSessionFromSnapshot
 } from "@/domain/editor/sketch-session";
+import { getSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session/display";
 import {
   collectSketchSnapGeometries,
   resolveSketchSnap,

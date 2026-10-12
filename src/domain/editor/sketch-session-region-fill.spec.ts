@@ -19,12 +19,12 @@ import {
   createSketchSessionFromSnapshot,
   failSketchLiveRegions,
   getSketchSessionDerivedValidity,
-  getSketchSessionDisplayRenderables,
   getSketchSessionLiveRegionBasis,
   publishSketchLiveRegions,
   withLiveSolveBasis,
-  type SketchSessionState,
+  type SketchSessionState
 } from "@/domain/editor/sketch-session";
+import { getSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session/display";
 import { measureSketchRegion } from "@/domain/measure/measurement";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import {

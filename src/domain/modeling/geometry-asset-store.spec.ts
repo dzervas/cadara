@@ -1,7 +1,7 @@
+import { createIndexedDbGeometryAssetStore } from "@/infrastructure/persistence/indexeddb-geometry-asset-store";
 import { test, expect } from "vitest";
 
 import {
-  createIndexedDbGeometryAssetStore,
   createMemoryGeometryAssetStore,
   hashGeometryAssetBytes,
 } from "@/domain/modeling/geometry-asset-store";

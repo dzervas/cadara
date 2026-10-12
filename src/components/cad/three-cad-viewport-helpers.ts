@@ -11,7 +11,8 @@ import {
   resolveHandleFromTarget,
   type SketchDragAcceptance,
 } from "@/domain/editor/sketch-session/drag-intent";
-import { getSketchSessionDisplaySolvedSnapshot } from "@/domain/editor/sketch-session/display";
+
+import { getSketchSessionDisplaySolvedSnapshot } from "@/domain/editor/sketch-session/solved-snapshot";
 import {
   getSketchToolDefinition,
   isRegisteredSketchToolId,
