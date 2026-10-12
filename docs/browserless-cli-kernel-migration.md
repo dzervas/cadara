@@ -180,3 +180,26 @@ Mandatory aggregate attempt: `PLAYWRIGHT_BASE_URL=http://127.0.0.1:3117 PLAYWRIG
 
 Validation uses a workspace-local real dependency directory with package links, private caches and copied unchanged production JS/WASM. No native staging/build, asset regeneration, tracker closure, main or other workspace edits occurred. Native STEP still requires the combined-source recipe rebuild and conformance qualification described above. Split source-owner ambiguity remains unresolved; this source typing repair changes neither blocker nor ticket 01 status.
 
+## Retained integration: native rebuild operational handoff (2026-10-12)
+
+The final merger created a new integration change directly atop reviewed blocker repair `676faf60065c67d1c9693acb678b018dc3c561a8` (parent `2aab76f453d0b41e342556141923ae90c99be696`). Only `browserless-cli` was explicitly advanced. No ancestor was edited, rebased or squashed. The integrated delta is confined to regression-spec typing and this documentation; no production behavior changes or conflicts.
+
+The already prepared, ignored stage is retained at `/home/dzervas/Lab/cadara/.pi/worktree/browserless-cli-integration/.scratch/occ-step-binding-rebuild`. This supersedes the earlier instruction to prepare another stage: **all 22 manifest input hashes passed**, and byte comparisons against current integration confirm the recipe, complete shim and binding-patch file sets, regeneration script and all five conformance/probe scripts match. The recipe includes `MoniTool_TypedValue`; this is the combined current native source, not the historical STEP-only snapshot. Stage inputs were not rewritten. Evidence: `/tmp/cadara-final-merger-stage.log`.
+
+From the **main repository root**, the user can run the retained pinned Docker builder on a Docker-capable host:
+
+```sh
+bash .pi/worktree/browserless-cli-integration/.scratch/occ-step-binding-rebuild/build.sh
+```
+
+The configured Docker socket `/run/user/1000/docker.sock` is missing in the agent environment. No native build was attempted, no privileged command or service start was used, and no native output was produced or installed. Preserve the entire stage and return its generated artifacts, hashes and conformance/lifetime results for qualification before any asset installation. Main/generated binaries were not overwritten. The ignored capture fixture and existing JS/WASM remain preserved, with the asset hashes recorded above unchanged. **STEP and split ownership remain blocked; ticket 01 is not complete.** A successful native build alone would not qualify STEP or solve split owner ambiguity.
+
+Fresh final integration checks (private workspace-local caches):
+
+- Reviewed `docs/testing.md`; existing **logic** lane covers public native rebuild and real production topology-adapter conformance. No test edits by this merger. Naming/topology/shared: **3 files / 27 tests passed**, `/tmp/cadara-final-merger-27.log`.
+- `bun run typecheck` and `bun run typecheck:specs`: **passed**, `/tmp/cadara-final-merger-{production,spec}-types.log`. Normal spec ratchet still excludes the naming spec.
+- Explicit naming-spec baseline comparison replayed using the existing evidence script adapted only to integration paths and private configs/caches: `cee569db` **106 -> 98 diagnostics, zero added**, comparison exit 0. Exact spec inclusion verified with `--listFiles`, `exclude: []`, identical current dependencies/configuration, diagnostic code/message multiset comparison. Both compiler invocations exit 1 for remaining baseline errors: this is **no typing regression**, not a clean explicit compiler pass. Evidence: `/tmp/cadara-final-merger-explicit-{baseline,current,comparison}.log`; replay `/tmp/cadara-final-merger-explicit-compare.py`.
+- Read-only `git diff --check`, scoped source delta and conflict checks passed. No full aggregate repeat, native build, fresh broad-suite/UI/E2E qualification or tracker closure is claimed.
+
+The meaningful reviewed source/docs change retains `browserless-cli`; integration is left on a new empty working change above it. Workspaces, tracker, ignored stage, fixture and assets remain for the parent/user handoff.
+
