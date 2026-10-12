@@ -107,8 +107,11 @@ mainBuild:
     - symbol: Handle_Poly_Triangulation
     - symbol: Handle_TNaming_NamedShape
     - symbol: Handle_BRepTools_History
+    # Interface_Static -> Interface_TypedValue -> MoniTool_TypedValue:
+    # missing any base leaves STEP configuration methods unresolved in Embind.
     - symbol: Interface_Static
     - symbol: Interface_TypedValue
+    - symbol: MoniTool_TypedValue
     - symbol: Message_ProgressRange
     - symbol: NCollection_BaseList
     - symbol: NCollection_BaseMap
