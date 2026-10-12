@@ -8943,16 +8943,16 @@ describe("T15b: failed mirrors in the session and the G19 consumers", () => {
         pointId: output.outputPointIds[0],
       }),
     ).toEqual([]);
-    // Vector export.
+    // Vector export: T17d (B3) refuses the whole sketch (the sketch-wide
+    // gate holds), so the output is not exported either.
     const exported = buildSketchVectorExportModel({
       documentId: "doc_workspace" as never,
       revisionId: "rev_0001" as never,
       sketches: [sketchRecordOf(broken)],
       target: { kind: "sketch", sketchId: "sketch_g5b" } as never,
     });
-    if ("diagnostic" in exported) throw new Error(exported.diagnostic.message);
-    expect(exported.entities.map((entity) => entity.entityId)).not.toContain(
-      output.outputEntityId,
+    expect("diagnostic" in exported && exported.diagnostic.code).toBe(
+      "sketch-vector-derived-failed",
     );
     // Feature input and edit input (T16c: the mirror by label, never its id).
     const copyLabel = live.definition.entities.find(

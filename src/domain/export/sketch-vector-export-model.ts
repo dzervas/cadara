@@ -21,10 +21,8 @@ import type {
   SketchStyleStroke,
   SolvedSketchEntityGeometryRecord,
 } from "@/contracts/sketch/schema";
-import {
-  brokenDerivedInputMessage,
-  nonAcceptedOffsetOutputs,
-} from "@/contracts/sketch/offset-publication";
+import { nonAcceptedOffsetOutputs } from "@/contracts/sketch/offset-publication";
+import { sketchNotCurrentExplanation } from "@/contracts/sketch/derived-validity";
 import {
   regionBoundaryBasisOfRecord,
   resolveRegionBoundaryCurve,
@@ -555,6 +553,25 @@ export function buildSketchVectorExportModel(
     };
   }
 
+  // T17d (B3, [TECH] A-5): only a current sketch is exported. An invalid
+  // or stale one is refused as a whole (its solved snapshot may be a
+  // rejected solve, e.g. sides collapsed below τ), and so is one the
+  // sketch-wide gate holds (a broken mirror, T16 `sketchProfileGateFailures`),
+  // with its relationships' own label-based texts.
+  const notCurrent = sketchNotCurrentExplanation(sketch.sketch);
+  if (notCurrent) {
+    return {
+      diagnostic: createDiagnostic(
+        notCurrent.brokenRelationships
+          ? "sketch-vector-derived-failed"
+          : "sketch-vector-sketch-not-current",
+        `Sketch ‘${sketch.label}’ was not exported because it is ${notCurrent.state}. ${notCurrent.explanation}`,
+        input.target,
+        "error",
+      ),
+    };
+  }
+
   const diagnostics: DocumentExportDiagnostic[] = [];
   const points = new Map<SketchPointId, SketchPoint2D>();
   const solvedPoints = new Map(
@@ -586,7 +603,9 @@ export function buildSketchVectorExportModel(
   }
 
   // [TECH] G19: a non-accepted offset output (of a failed or pending
-  // relationship, or an uncertified shell) is not exported.
+  // relationship, or an uncertified shell) is not exported. Geometry held by
+  // a broken mirror, pattern or transform never gets here: its sketch is
+  // refused above (T17d).
   const nonAccepted = nonAcceptedOffsetOutputs(
     sketch.sketch.definition,
     sketch.sketch.solvedSnapshot,
@@ -602,25 +621,12 @@ export function buildSketchVectorExportModel(
           input.target,
           diagnostics,
         );
-      // T16c ([TECH] T16-7): geometry held by a broken (failed) mirror,
-      // pattern or transform gets its own code and the label-based text.
       diagnostics.push(
-        owner.reason === "derivedFailed"
-          ? createDiagnostic(
-              "sketch-vector-derived-failed",
-              brokenDerivedInputMessage(
-                sketch.sketch.definition,
-                { entityId: entity.entityId },
-                owner,
-                "it was not exported",
-              ),
-              input.target,
-            )
-          : createDiagnostic(
-              "sketch-vector-uncertified-offset",
-              `Offset output ${entity.entityId} of relationship ${owner.derivationId} is not certified, so it was not exported.`,
-              input.target,
-            ),
+        createDiagnostic(
+          "sketch-vector-uncertified-offset",
+          `Offset output ${entity.entityId} of relationship ${owner.derivationId} is not certified, so it was not exported.`,
+          input.target,
+        ),
       );
       return null;
     })

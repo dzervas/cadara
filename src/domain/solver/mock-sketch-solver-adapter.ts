@@ -1384,6 +1384,13 @@ function solveDefinition(
           failedDerivationIds: derivedFailures.map(
             (failure) => failure.derivationId,
           ),
+          // T17d (B4, [TECH] T17-6): the reasons travel with the failure.
+          failedDerivationReasons: Object.fromEntries(
+            derivedFailures.map((failure) => [
+              failure.derivationId,
+              [...failure.reasons],
+            ]),
+          ),
         }
       : {}),
   };

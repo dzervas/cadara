@@ -1463,7 +1463,10 @@ describe("T16c: a broken relationship's copies are named by label at every non-a
     expectNoIds(broken, messages);
   });
 
-  test("vector export after Finish (red on base: sketch-vector-uncertified-offset with ids): each held copy gets sketch-vector-derived-failed and the mirror by label, and is not exported", async () => {
+  // T17d (B3, [TECH] A-5) supersedes the T16c per-copy export texts: the
+  // sketch-wide gate refuses the whole sketch (the held copies' solved
+  // snapshot is not current), with the mirror's own label-based message.
+  test("vector export after Finish (red on base: sketch-vector-uncertified-offset with ids; T17d: the whole sketch is refused by the sketch-wide gate with sketch-vector-derived-failed and the mirror by label)", async () => {
     const { broken, relationship } = brokenMirror();
     const { snapshot, record } = await committed(broken.definition);
     expect(
@@ -1474,36 +1477,17 @@ describe("T16c: a broken relationship's copies are named by label at every non-a
       kind: "sketch",
       sketchId: record.sketchId,
     } as never);
-    if ("diagnostic" in exported) throw new Error(exported.diagnostic.message);
-    const copies = relationship.outputs.map((output) => output.outputEntityId);
-    const labelOf = (entityId: SketchEntityId) =>
-      broken.definition.entities.find((entity) => entity.entityId === entityId)!
-        .label;
-    const expected = [
-      ...copies.map(
-        (copy) =>
-          `‘${labelOf(copy)}’ is a copy made by mirror ‘mirror 1’, which is broken, so it was not exported. ${MIRROR_RECOVERY}`,
-      ),
-      // The pattern copy of the first copy (G16‴ closure).
-      `‘ab mirror linearPattern’ depends on mirror ‘mirror 1’, which is broken, so it was not exported. ${MIRROR_RECOVERY}`,
-    ];
-    const held = exported.diagnostics.filter(
-      (diagnostic) =>
-        diagnostic.code === "sketch-vector-derived-failed" ||
-        diagnostic.code === "sketch-vector-uncertified-offset",
-    );
-    expect(
-      held.map((diagnostic) => [diagnostic.code, diagnostic.message]),
-    ).toEqual(
-      expected.map((message) => ["sketch-vector-derived-failed", message]),
-    );
-    expect(
-      exported.entities.filter((entity) =>
-        (copies as string[]).includes(entity.entityId),
-      ),
-      "no held copy is exported",
-    ).toEqual([]);
-    expectNoIds(broken, expected);
+    const expected =
+      "Sketch ‘Broken mirror’ was not exported because it is invalid. Mirror ‘mirror 1’ is broken: its mirror line was deleted. Its copies stay where they were last solved and can't be used; profiles from this sketch are blocked. Undo, replace the mirror line, or remove the mirror from the Mirror panel.";
+    expect(exported).toEqual({
+      diagnostic: {
+        code: "sketch-vector-derived-failed",
+        severity: "error",
+        message: expected,
+        target: { kind: "sketch", sketchId: record.sketchId },
+      },
+    });
+    expectNoIds(broken, [expected]);
   });
 
   test("mock feature pre-check order: a feature on a held copy is refused for the non-current sketch first, before the feature-input check (whose text names the mirror by label)", async () => {
@@ -1587,9 +1571,13 @@ describe("T16c: a broken relationship's copies are named by label at every non-a
     const healthy = offset.session.liveSolve!;
     const publications = publishSketchOffsets({
       definition: healthy.definition,
+      // T17d (B4): the reason travels with the failure, so it is forged too.
       solvedSnapshot: {
         ...healthy.solvedSnapshot,
         failedDerivationIds: [relationship.derivationId],
+        failedDerivationReasons: {
+          [relationship.derivationId]: ["axisMissing"],
+        },
       },
       modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
       capabilities,
@@ -1685,6 +1673,8 @@ describe("T16c: a broken relationship's copies are named by label at every non-a
       kind: "linearPattern",
       label: pattern.relationship.label,
       reason: "derivedFailed",
+      // T17d (B4): the solve's reason, carried.
+      failureReasons: ["dependencyLoop"],
     });
     const patternText = nonAcceptedOutputProjectionMessage(
       loop.liveSolve!.definition,
@@ -2340,6 +2330,21 @@ describe("T16e: the failed-copy input text names the repair that fits the failur
         "original deleted",
         without([eid("c")]),
         "Fix it (Undo or replace the original)",
+      ],
+      // T17d (B4, T16e review A-6): the reasons travel with the failure, so
+      // the double fault names both repairs (red on base: the input text
+      // inferred "replace the original" alone by elimination).
+      [
+        "line too short and original deleted",
+        rebuild({
+          ...without([eid("c")]).definition,
+          points: session.definition.points.map((point) =>
+            point.pointId === pid("x1")
+              ? { ...point, position: [-2, 0] }
+              : point,
+          ),
+        }),
+        "Fix it (Undo or replace the mirror line and the original)",
       ],
       [
         "copy deleted",

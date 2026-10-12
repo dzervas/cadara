@@ -9,9 +9,19 @@ import { describe, expect, test } from "vitest";
 import type {
   ConstraintId,
   DimensionId,
+  DocumentId,
+  RequestId,
+  RevisionId,
   SketchEntityId,
+  SketchId,
   SketchPointId,
 } from "@/contracts/shared/ids";
+import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
+import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
+import {
+  DEFAULT_MOCK_SKETCH_PLANE_FRAME,
+  MockSketchSolverAdapter,
+} from "@/domain/solver/mock-sketch-solver-adapter";
 import type {
   SketchDefinition,
   SketchDerivationDefinition,
@@ -1986,5 +1996,136 @@ describe("T15c review fixes: a drag that requests the axis frees it; the freeze 
     expect(distance(solvedPoint(snapshot, "ma"), cursor)).toBeLessThanOrEqual(
       RELEASE_TOLERANCE,
     );
+  });
+});
+
+// T17d (B4, [TECH] T17-6; logic lane, seams: the core solve and the mock
+// solver adapter's solve, the solved-snapshot contract). The reasons the
+// evaluation classified travel with the failure in
+// `failedDerivationReasons`, keyed to `failedDerivationIds`, primary first;
+// a mirror whose line is too short and whose original was deleted carries
+// both, and its one message names both repairs. Red on base: the field is
+// absent and the double fault's text names the line only.
+describe("T17d B4: the failure reason travels with the failure", () => {
+  const withoutSeed = (definition: SketchDefinition): SketchDefinition => {
+    const entities = definition.entities.filter(
+      (entity) => entity.entityId !== eid("ab"),
+    );
+    return {
+      ...definition,
+      entities,
+      entityIds: entities.map((entity) => entity.entityId),
+    };
+  };
+  const cases: readonly [
+    string,
+    SketchDefinition,
+    Record<string, readonly string[]>,
+  ][] = [
+    ["line missing", sketch(lineAndCircle("missing")), { m: ["axisMissing"] }],
+    [
+      "line too short",
+      sketch(lineAndCircle("short")),
+      { m: ["axisDegenerate"] },
+    ],
+    [
+      "original deleted",
+      withoutSeed(sketch(lineAndCircle())),
+      { m: ["seedMissing"] },
+    ],
+    [
+      "line too short and original deleted",
+      withoutSeed(sketch(lineAndCircle("short"))),
+      { m: ["axisDegenerate", "seedMissing"] },
+    ],
+  ];
+
+  test("RB1: each failed relationship carries its reasons in the core solve and, with the same reasons, in the mock solver's", async () => {
+    const mock = new MockSketchSolverAdapter({
+      documentId: "doc_t17d",
+      revisionId: "rev_t17d",
+      neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
+    });
+    for (const [name, definition, reasons] of cases) {
+      const core = solve(definition, MECHANISM_TOLERANCES).solvedSnapshot;
+      expect(core.failedDerivationIds, name).toEqual(["m"]);
+      expect(core.failedDerivationReasons, name).toEqual(reasons);
+      const mocked = await mock.solveSketch({
+        contractVersion: CONTRACT_VERSION,
+        solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+        requestId: "request_t17d" as RequestId,
+        documentId: "doc_t17d" as DocumentId,
+        revisionId: "rev_t17d" as RevisionId,
+        sketchId: "sketch_primary" as SketchId,
+        plane: DEFAULT_MOCK_SKETCH_PLANE_FRAME,
+        tolerances: MECHANISM_TOLERANCES,
+        modelingTolerance: TAU,
+        partialSolvePolicy: "bestEffort",
+        definition,
+        projectedReferences: [],
+      });
+      expect(
+        mocked.solvedSnapshot.failedDerivationReasons,
+        `${name} (mock)`,
+      ).toEqual(reasons);
+    }
+    // A healthy mirror carries neither field.
+    const healthy = solve(sketch(lineAndCircle())).solvedSnapshot;
+    expect(healthy.failedDerivationIds).toBeUndefined();
+    expect(healthy.failedDerivationReasons).toBeUndefined();
+  });
+
+  test("RB2: a dependency loop carries its reason; a mirror failing only during the solve carries the reason of the solved positions", () => {
+    const loop = solve(
+      sketch({
+        points: [
+          point("a", [1, 1]),
+          point("b", [3, 2]),
+          point("p", [1, 3]),
+          point("q", [2, 4]),
+          point("x0", [-1, 0]),
+          point("x1", [6, 0]),
+        ],
+        entities: [
+          line("ab", "a", "b"),
+          line("pq", "p", "q"),
+          line("axis", "x0", "x1"),
+        ],
+        relationships: [
+          mirror("first", "axis", [["ab", "pq", ["a", "b"], ["p", "q"]]]),
+          mirror("second", "axis", [["pq", "ab", ["p", "q"], ["a", "b"]]]),
+        ],
+      }),
+    ).solvedSnapshot;
+    expect(loop.failedDerivationReasons).toEqual({
+      first: ["dependencyLoop"],
+      second: ["dependencyLoop"],
+    });
+    // MF4's case: the authored axis is long; the solve drives it below τ.
+    const during = solve(
+      sketch({
+        ...lineAndCircle(),
+        dimensions: [lineLength("axis_len", "axis", 5e-4)],
+      }),
+      MECHANISM_TOLERANCES,
+    ).solvedSnapshot;
+    expect(during.failedDerivationReasons).toEqual({ m: ["axisDegenerate"] });
+  });
+
+  test("RB3: the double fault's one error names both breaks and both repairs", () => {
+    const { solvedSnapshot } = solve(
+      withoutSeed(sketch(lineAndCircle("short"))),
+      MECHANISM_TOLERANCES,
+    );
+    expect(
+      solvedSnapshot.diagnostics
+        .filter((diagnostic) => diagnostic.severity === "error")
+        .map((diagnostic) => [diagnostic.code, diagnostic.message]),
+    ).toEqual([
+      [
+        MIRROR_DIAGNOSTIC_CODES.axisDegenerate,
+        "Mirror ‘m’ is broken: its mirror line is shorter than the modeling tolerance, and the original of ‘mab’ was deleted. Its copies stay where they were last solved and can't be used; profiles from this sketch are blocked. Undo, replace the mirror line and the original, or remove the mirror from the Mirror panel.",
+      ],
+    ]);
   });
 });

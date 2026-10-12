@@ -1,8 +1,5 @@
 import typia from "typia";
-import {
-  DERIVED_RELATIONSHIP_DEPENDENCY_UNRESOLVED,
-  MIRROR_DIAGNOSTIC_CODES,
-} from "@/contracts/sketch/mirror-requirements";
+import { DERIVED_FAILURE_CODES } from "@/contracts/sketch/mirror-requirements";
 
 import type {
   ProjectedSketchGeometryRef,
@@ -29,12 +26,6 @@ export type ProjectedReferenceRequestTarget =
   | ProjectedSketchGeometryRef
   | SketchEntityRef
   | SketchPointRef;
-
-/** T15b: the codes of a failed (held) derived relationship's one error. */
-const DERIVED_FAILURE_CODES: ReadonlySet<string> = new Set([
-  ...Object.values(MIRROR_DIAGNOSTIC_CODES),
-  DERIVED_RELATIONSHIP_DEPENDENCY_UNRESOLVED,
-]);
 
 const sketchDefinitionValidator =
   typia.createValidateEquals<SketchDefinition>();
@@ -683,6 +674,32 @@ function validateSolvedSketchSnapshotInvariants(
       message:
         "Failed derived relationship ids must name each relationship once.",
     });
+  // T17d (B4): the carried reasons name exactly the failed relationships,
+  // each with one or more distinct reasons.
+  const reasons = snapshot.failedDerivationReasons;
+  if (reasons !== undefined || failedIds.length > 0) {
+    const keys = Object.keys(reasons ?? {});
+    if (
+      keys.length !== new Set(failedIds).size ||
+      !keys.every((key) => failedIds.includes(key))
+    )
+      issues.push({
+        path: "failedDerivationReasons",
+        expected: "one reason list per failed derived relationship",
+        value: reasons,
+        message:
+          "Failed derived relationship reasons must name exactly the failed relationships.",
+      });
+    for (const [derivationId, list] of Object.entries(reasons ?? {}))
+      if (list.length === 0 || new Set(list).size !== list.length)
+        issues.push({
+          path: `failedDerivationReasons.${derivationId}`,
+          expected: "one or more distinct reasons",
+          value: list,
+          message:
+            "A failed derived relationship must carry one or more distinct reasons.",
+        });
+  }
   // T15b (review A4): failed relationships come with a derived-failure error
   // diagnostic, so validity (read from the diagnostics) can never read
   // current while the ids hold outputs and block regions. Diagnostics carry
