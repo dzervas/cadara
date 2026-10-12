@@ -107,6 +107,39 @@ test("lifetime policy rejects enum and declaration-ownership drift", () => {
   }
 });
 
+test("unbuilt STEP status declarations remain rejected pending the next binary audit", () => {
+  // Header-derived prediction, not a golden artifact or approval of an unseen ABI.
+  const anticipated =
+    `export declare type IFSelect_ReturnStatus = {
+  IFSelect_RetVoid: {};
+  IFSelect_RetDone: {};
+  IFSelect_RetError: {};
+  IFSelect_RetFail: {};
+  IFSelect_RetStop: {};
+}\n\n` +
+    extended.replace(
+      "export type OpenCascadeInstance = {FS: typeof FS} & {",
+      "export type OpenCascadeInstance = {FS: typeof FS} & {\n  IFSelect_ReturnStatus: IFSelect_ReturnStatus;",
+    );
+  const result = checkDeclarations(anticipated);
+  expect(result.status).not.toBe(0);
+  expect(result.stderr).toContain(
+    "Existing declarations must equal the v8 reference",
+  );
+});
+
+test("production STEP recipe binds the return status shared by Transfer and Write", () => {
+  const writer = declarations.match(
+    /export declare class STEPControl_Writer \{([\s\S]*?)\n}/,
+  )?.[1];
+  expect(writer).toBeDefined();
+  expect(writer).toMatch(/Transfer\([^\n]*\): IFSelect_ReturnStatus;/);
+  expect(writer).toMatch(/Write\([^\n]*\): IFSelect_ReturnStatus;/);
+  expect(readFileSync("opencascade-recipe.yaml", "utf8")).toMatch(
+    /^ {4}- symbol: IFSelect_ReturnStatus$/m,
+  );
+});
+
 test("lifetime policy rejects drift in an existing public signature", () => {
   const changed = declarations.replace(
     "IsNull(): Standard_Boolean;",
