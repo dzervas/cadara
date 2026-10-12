@@ -11,6 +11,8 @@ import type {
  * execute sequentially; reject concurrent execution rather than inventing a
  * shared multi-writer guarantee. A command ID identifies one intent, including
  * every serial/detached follow-up, final solve/derivation and snapshot handoff.
+ * Correlation intent is derived by the application from the validated operation;
+ * clients cannot upgrade an ordinary geometry request to author-invalid on failure.
  * Expected failures resolve as results; unexpected programming exceptions remain
  * observable (never swallowed). Family command inputs extend the closed contract
  * union in later tickets, not arbitrary editor events or internal sketch records.
@@ -61,14 +63,15 @@ export type SemanticCloseResult =
  * resources after partial startup failure, awaiting work before owner release.
  */
 export interface SemanticSessionFactory {
-  open(): Promise<
+  /** Aborted startup settles after partial cleanup; local native work may drain. */
+  open(options?: { signal?: AbortSignal }): Promise<
     | {
         kind: "ready";
         session: SemanticSession;
         initialization: { kind: "initialized"; state: SemanticState };
       }
     | {
-        kind: "failed";
+        kind: "failed" | "canceled";
         diagnostics: readonly ModelingDiagnostic[];
         cleanup: SemanticCloseResult;
       }
