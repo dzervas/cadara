@@ -555,3 +555,56 @@ smoke passes above do not turn that aggregate into all-green or close ticket 01.
 Integration verification details are recorded in
 `/tmp/cadara-browserless-cli-enum-asset-merge-evidence.md`.
 
+## Reviewed captured split-owner source integration (2026-10-12)
+
+A new two-parent integration change preserves promoted revision `b8af3ce0` and
+reviewed split source `ba953ebf`, including its preserved repair `9bd1b551`.
+Standards review had zero findings; the Spec P2 incomplete-tessellation finding
+is repaired and independently closed by the original reviewer. The source merge
+is conflict-free; all 12 split source/spec paths exactly match the reviewed tip.
+No public asset/stamp, recipe, CPP, binding, stage or source-producer workspace is
+changed. The earlier browser qualification remains applicable to byte-identical
+assets; no browser repeat or native rebuild is required for this source merge.
+
+The split unique-owner gate is now certified from independently captured OWNER
+winding, support and complete trim at the actual producer boundary, including
+source-world normalization. The runtime tool's opposite winding in this capture
+is not a SameOrientation default. Selection accepts only existing exact scoped
+claims for the authored tool source and exactly one agreeing native face
+occurrence. Missing/opposite/ambiguous/incomplete evidence fails closed; malformed
+selected-face or unscoped source facets refuse authority. No unqualified alias,
+output-order choice, tolerance relaxation or sibling voting is used. Continued
+history probing preserves declared `sourceBodyScopeBinding` and the existing
+exclusive `bodyOf` witness; multiple surviving bodies remain ambiguous.
+
+The corrected original Split boundary had **0 noMatch / 10 unique / 3 ambiguous**
+siblings, not the earlier wrong-boundary noMatch diagnosis. That correction alone
+never authorized voting or weakened the all-sibling mapper; captured owner
+occurrence evidence is the independent certification seam.
+
+Ticket 01 remains blocked. The original 9841/JHo direct
+`FcPi2PXMdBYVGkq_1:externalSketchReference:JHo` apply failure occurs before Split
+and was independently reproduced using the old base and identical compiled
+inputs after diagnostically continuing past its old review failure. No repair or
+assertion weakening for that adjacent ambiguity is included. Tickets 02–38 are
+not implemented by this merge. Next gate: diagnose and qualify that source/apply
+anchor independently, then pass the unchanged original affected acceptance rows
+and complete the required validation lanes before ticket 01 closure or advancing
+the remaining browserless-CLI specification. Aggregate timeout is not all-green.
+
+Fresh integrated qualification passes the exact four-file / 45 source
+facet/witness/contract/probe checks, unchanged complete d3cd9 acceptance with its
+original dimension/variable rebuild assertions, 77 native naming/history/query/
+runtime/default-filesystem STEP checks, and all 49 static guards. Production
+typecheck, normal spec ratchet and full lint pass. Exact exclusion-cleared typing
+includes all five touched specs and matches reviewed `ba953ebf` with the same
+promoted declarations: 75 existing diagnostics (55 apply / 20 kernel probe),
+zero additions or removals; this is not a clean excluded-spec typecheck.
+
+The required post-merge aggregate ran once and exits 124 at 300 seconds during
+logic, after lint/build/spec typing completed. It reports the inherited 9841
+Sketch 3/4 split-interface history row failed; no complete logic summary or
+aggregate UI/static/E2E execution is claimed. Separate targeted/static passes
+above do not close that remaining source/apply gate. Final revision and detailed
+results are recorded in `/tmp/cadara-browserless-cli-final-gate-merge-evidence.md`.
+
