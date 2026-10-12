@@ -122,6 +122,9 @@ mainBuild:
     - symbol: ShapeUpgrade_UnifySameDomain
     - symbol: STEPControl_Controller
     - symbol: STEPControl_StepModelType
+    # Transfer and Write both return IFSelect_ReturnStatus; without its binding
+    # Embind leaves these production STEP export calls uncallable.
+    - symbol: IFSelect_ReturnStatus
     - symbol: Standard_Transient
     - symbol: STEPControl_Writer
     - symbol: TCollection_ExtendedString

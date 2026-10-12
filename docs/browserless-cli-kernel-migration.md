@@ -285,5 +285,66 @@ correctly rejected the still-old asset-version stamp; no version stamp was chang
 to imply promotion. Final restored-asset static validation passes. No full-suite,
 STEP-header, browser qualification or ticket closure is claimed.
 
+### Follow-up source repair: STEP return-status dependency (not built)
+
+A complete audit of the **used production export path**, against the retained
+staged registry/declarations and pinned OCCT headers, finds only one unresolved
+binding type: `IFSelect_ReturnStatus`, returned by both `STEPControl_Writer.Transfer`
+and `.Write`. Independently calling each on the staged runtime reports that same
+unbound type. `STEPControl_Controller.Init`, `Interface_Static.IsPresent`/`SetCVal`,
+`STEPControl_Writer_1()` and `Message_ProgressRange_1()` resolve and run;
+`STEPControl_StepModelType.STEPControl_AsIs` is bound with value 0. Writer disposal
+runs successfully. `FS.analyzePath`, `FS.readFile` and `FS.unlink` are Emscripten
+filesystem functions, not Embind bindings with unresolved C++ types; analysis
+reports no STEP file, so the real read/status-success paths remain unqualified.
+The provider checks native returned status `.value === 1` (header enum
+`IFSelect_RetDone`), reads UTF-8 output and removes it in `finally`.
+
+The recipe now explicitly binds `IFSelect_ReturnStatus`, with its Transfer/Write
+return dependency documented beside the symbol. This adds no translator, wrapper,
+shim, fallback or JS enum/status patch. Unused WorkSession/model/history methods
+are not dependencies of this call path and are not bound speculatively.
+Pinned header: OCCT `bb368e271e24f63078129283148ce83db6b9670a`,
+`src/IFSelect/IFSelect_ReturnStatus.hxx`: RetVoid/RetDone/RetError/RetFail/RetStop
+have successive values 0/1/2/3/4. Generator `bindings.py` at opencascade.js
+`b5ff984` matches the build's pinned pre-patch SHA256; its enum emitter explicitly
+binds those five values. `generateBindings.py`, `compileBindings.py` and
+`buildFromYaml.py` match the actual regeneration receipt hashes. Regeneration
+receipts show Init/interface/progress sources unchanged and the writer changed
+only by removing its placement-delete no-op specialization, not by signature edits.
+
+**Future ABI audit is pending; the strict lifetime policy is unchanged.** The
+source-derived anticipated declaration is one enum block plus one instance entry;
+existing method declarations stay unchanged. The registered-type inventory
+predicts five existing return-type resolutions (Transfer/Write plus the three
+controller transfer methods already referencing the same enum), not new methods.
+The next build must independently demonstrate the enum registration metadata and
+values, those exact resolutions and no unrelated drift before the policy can
+approve them. The current stage contains no compiled/generated IFSelect binding;
+no unsigned/size metadata or future artifact fingerprint is accepted by analogy.
+A focused static regression ensures even the header-derived future enum
+declaration remains rejected until audited. Thus a rebuilt stage can correctly
+fail the old policy gate while awaiting this independent review; that failure is
+not permission to skip the lifetime probe or update whole-build golden hashes.
+
+No native compilation, new stage, artifact promotion or real STEP success is
+claimed. The user's retained stage remains immutable and still throws on Transfer
+and Write. After review, the parent prepares the combined source snapshot; the
+builder must return input/artifact/receipt hashes and the new enum generated
+source/declarations, then rerun the original real sheet/solid export seams (native
+schema/unit setup, successful status, real Part 21 header, read/remove output),
+complete registry/declaration audit, and unchanged native lifetime/precision gates.
+The expected illegal-release child trap and lifetime slopes are preserved.
+
+Reviewed `docs/testing.md`; the two new tests are **static** recipe/ABI-policy
+checks, not claims of native export behavior. Dependency guard red: **1 failed /
+6 passed** before the recipe edit. Final focused checks: **2 files / 11 pass**;
+full static suite: **22 files / 45 pass**. Explicit changed-spec comparison against
+`80029bb7`: **0 -> 0** diagnostics with exact file inclusion and `exclude: []`.
+Production typing, normal spec typing, lint, script syntax and diff checks pass.
+The existing real production export/provider seam remains red against the user's
+read-only stage. No new logic assertions, aggregate repeat or E2E claim; parent
+owns final combined validation after review and rebuild qualification.
+
 The meaningful reviewed source/docs change retains `browserless-cli`; integration is left on a new empty working change above it. Workspaces, tracker, ignored stage, fixture and assets remain for the parent/user handoff.
 
