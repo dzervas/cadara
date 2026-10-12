@@ -934,9 +934,10 @@ export function getDocumentRenderableMaterialOptions(
     return {};
   }
 
-  // A non-accepted offset output ([TECH] G19) takes the danger tint, as the
-  // sketch-mode stroke of an invalid offset output does.
-  if (diagnostic || entry.offsetOutputValidity === "invalid") {
+  // A non-accepted offset output ([TECH] G19), or the held geometry of an
+  // invalid sketch (T17d2), takes the danger tint, as the sketch-mode stroke
+  // of invalid geometry does.
+  if (diagnostic || entry.sketchGeometryValidity === "invalid") {
     return { color: palette.overconstrained, flat: true };
   }
 

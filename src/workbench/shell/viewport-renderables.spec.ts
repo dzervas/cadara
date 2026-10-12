@@ -531,7 +531,7 @@ test("T08b-g5c [TECH] G19: committed non-accepted offset outputs are marked for 
       previewRenderables: null,
       sketchSession: null,
       hiddenTargetKeys: {},
-    }).documentRenderables.map((entry) => entry.offsetOutputValidity);
+    }).documentRenderables.map((entry) => entry.sketchGeometryValidity);
   expect(
     marks(live.solvedSnapshot),
     "Uncertified: the output is marked, the source line is not (both still composed, so pickable).",
@@ -545,3 +545,99 @@ test("T08b-g5c [TECH] G19: committed non-accepted offset outputs are marked for 
     "Certified: nothing is marked.",
   ).toEqual([undefined, undefined]);
 }, 120_000);
+
+test("T17d2 (T17d review R-1): every committed curve and point of a sketch that is not current carries its sketch's validity for the part-mode tint (its held geometry is drawn); a current sketch's are unmarked, and all stay composed (pickable)", () => {
+  const sketch = (
+    sketchId: string,
+    state: "current" | "invalid" | "stale",
+  ): SketchSnapshotRecord =>
+    ({
+      sketchId,
+      sketch: {
+        definition: {
+          schemaVersion: "sketch-definition/v1alpha2",
+          referenceIds: [],
+          references: [],
+          pointIds: [],
+          points: [],
+          entityIds: [],
+          entities: [],
+          constraintIds: [],
+          constraints: [],
+          dimensionIds: [],
+          dimensions: [],
+        },
+        solvedSnapshot: {
+          schemaVersion: "solved-sketch/v1alpha2",
+          status: { solveState: "solved", constraintState: "underConstrained" },
+          solvedEntities: [],
+          solvedPoints: [],
+          constraintStatuses: [],
+          dimensionStatuses: [],
+          diagnostics: [],
+        },
+        derivedValidity: { state, diagnostics: [] },
+        projectedReferences: [],
+        regions: [],
+      },
+    }) as unknown as SketchSnapshotRecord;
+  const record = (
+    sketchId: string,
+    kind: "sketchEntity" | "sketchPoint",
+  ): RenderableEntityRecord =>
+    ({
+      id: `render_${sketchId}_${kind}`,
+      label: `${sketchId} ${kind}`,
+      ownerBodyId: null,
+      ownerFeatureId: null,
+      binding: {
+        pickId: `pick_${sketchId}_${kind}`,
+        pickPriority: 1,
+        target:
+          kind === "sketchEntity"
+            ? { kind, sketchId, entityId: `${sketchId}_line` }
+            : { kind, sketchId, pointId: `${sketchId}_point` },
+        topology: null,
+        semanticClass: kind === "sketchEntity" ? "sketchCurve" : "sketchPoint",
+      },
+      geometry:
+        kind === "sketchEntity"
+          ? {
+              kind: "polyline",
+              points: [
+                [0, 0, 0],
+                [1, 0, 0],
+              ],
+              isClosed: false,
+            }
+          : { kind: "marker", position: [0, 0, 0], displayRadius: 0.1 },
+    }) as unknown as RenderableEntityRecord;
+  const ids = ["sketch_invalid", "sketch_stale", "sketch_current"];
+  const composed = composeViewportRenderables({
+    snapshotRenderables: ids.flatMap((sketchId) => [
+      record(sketchId, "sketchEntity"),
+      record(sketchId, "sketchPoint"),
+    ]),
+    snapshotSketches: [
+      sketch("sketch_invalid", "invalid"),
+      sketch("sketch_stale", "stale"),
+      sketch("sketch_current", "current"),
+    ],
+    previewRenderables: null,
+    sketchSession: null,
+    hiddenTargetKeys: {},
+  });
+  expect(
+    composed.documentRenderables.map((entry) => [
+      entry.renderable.label,
+      entry.sketchGeometryValidity,
+    ]),
+  ).toEqual([
+    ["sketch_invalid sketchEntity", "invalid"],
+    ["sketch_invalid sketchPoint", "invalid"],
+    ["sketch_stale sketchEntity", "stale"],
+    ["sketch_stale sketchPoint", "stale"],
+    ["sketch_current sketchEntity", undefined],
+    ["sketch_current sketchPoint", undefined],
+  ]);
+});

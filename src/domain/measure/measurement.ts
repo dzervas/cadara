@@ -29,6 +29,7 @@ import {
 import type { RegionRecord, SketchPoint2D } from "@/contracts/sketch/schema";
 import {
   closestSplineSpanLocation,
+  reconstructSplineAggregate,
   tessellateCubicSpans,
   tessellateProjectedSpline,
   solvedCubicSpanLocalDomain,
@@ -793,36 +794,54 @@ function resolveSketchEntityTarget(
     });
   }
 
-  // T17d (B3, [TECH] A-5): a spline or offset shell is defined only by an
-  // accepted solve (its solved spans); an invalid or stale sketch's solved
-  // snapshot is not one, so it is refused, saying why.
+  // T17d (B3, [TECH] A-5): an offset shell is defined only by an accepted
+  // solve (its solved spans); an invalid or stale sketch's solved snapshot
+  // is not one, so it is refused, saying why.
   const notCurrent = sketchNotCurrentExplanation(sketch.sketch);
-  if (
-    notCurrent &&
-    (entity.kind === "spline" || entity.kind === "derivedPiecewiseCubic")
-  )
-    return {
-      target,
-      key: getPrimitiveRefKey(target),
-      label: entity.label,
-      category: "curve",
-      distancePrimitive: null,
-      rows: [],
-      note: null,
-      validityNote: `Sketch ‘${sketch.label}’ is ${notCurrent.state}, so ‘${entity.label}’ is not measured: its curve is only defined by an accepted solve. ${notCurrent.explanation}`,
-      witnesses: [],
-    };
+  const refused = (reason: string): MeasuredTarget => ({
+    target,
+    key: getPrimitiveRefKey(target),
+    label: entity.label,
+    category: "curve",
+    distancePrimitive: null,
+    rows: [],
+    note: null,
+    validityNote: `Sketch ‘${sketch.label}’ is ${notCurrent!.state}, so ‘${entity.label}’ is not measured: ${reason} ${notCurrent!.explanation}`,
+    witnesses: [],
+  });
+  if (notCurrent && entity.kind === "derivedPiecewiseCubic")
+    return refused("its curve is only defined by an accepted solve.");
 
   if (entity.kind === "spline") {
-    // T10f review R-1: the record's solved spans (modeling-grade), never the
-    // authored reconstruction; no valid solved spline, no measurement.
-    const record = sketch.sketch.solvedSnapshot.solvedEntities.find(
-      (entry) => entry.entityId === entity.entityId,
-    );
+    // T10f review R-1: the record's solved spans (modeling-grade); no valid
+    // solved spline, no measurement. T17d2 (T17d review A-3): a spline of
+    // a sketch that is not current is measured on its held (authored)
+    // reconstruction, the curve part mode and sketch mode draw, and marked
+    // so; never on the rejected solve. Held fit points that define no
+    // spline (a degenerate span, drawn through its fit points) are refused.
+    const record = notCurrent
+      ? {
+          entityId: entity.entityId,
+          kind: "spline" as const,
+          reconstruction: reconstructSplineAggregate(
+            entity,
+            Object.fromEntries(
+              sketch.sketch.definition.points.map((point) => [
+                point.pointId,
+                point.position,
+              ]),
+            ),
+          ),
+        }
+      : sketch.sketch.solvedSnapshot.solvedEntities.find(
+          (entry) => entry.entityId === entity.entityId,
+        );
     const solvedSpans =
       record?.kind === "spline" ? solvedCubicSpans(record) : [];
     if (solvedSpans.length === 0) {
-      return null;
+      return notCurrent
+        ? refused("its held fit points do not define a spline.")
+        : null;
     }
 
     const sampledPoints = tessellateCubicSpans(

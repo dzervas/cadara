@@ -969,9 +969,50 @@ test("T08b-g5c [TECH] G19: a non-accepted offset LINE output takes the same tint
   ).toBe(palette.underconstrained);
   expect(
     getDocumentRenderableMaterialOptions(
-      { ...committed, offsetOutputValidity: "invalid" } as never,
+      { ...committed, sketchGeometryValidity: "invalid" } as never,
       palette,
     ).color,
     "Part mode: a non-accepted offset output uses the danger tint.",
   ).toBe(palette.overconstrained);
+  // T17d2: the held geometry of a sketch that is not current.
+  const constrained = {
+    ...committed,
+    sketchConstraintDisplay: { state: "constrained" },
+  };
+  expect(
+    getDocumentRenderableMaterialOptions(constrained as never, palette).color,
+    "Control: a constrained committed curve is drawn constrained.",
+  ).toBe(palette.constrained);
+  expect(
+    getDocumentRenderableMaterialOptions(
+      { ...constrained, sketchGeometryValidity: "invalid" } as never,
+      palette,
+    ).color,
+    "Part mode: a curve of an invalid sketch uses the danger tint, whatever its constraint state.",
+  ).toBe(palette.overconstrained);
+  expect(
+    getDocumentRenderableMaterialOptions(
+      {
+        ...committed,
+        renderable: {
+          ...committed.renderable,
+          binding: {
+            ...committed.renderable.binding,
+            semanticClass: "sketchPoint",
+          },
+          geometry: { kind: "marker", position: [0, 0, 0], displayRadius: 1 },
+        },
+        sketchGeometryValidity: "invalid",
+      } as never,
+      palette,
+    ).color,
+    "Part mode: a point of an invalid sketch uses the danger tint.",
+  ).toBe(palette.overconstrained);
+  expect(
+    getDocumentRenderableMaterialOptions(
+      { ...constrained, sketchGeometryValidity: "stale" } as never,
+      palette,
+    ).color,
+    "Part mode: stale geometry keeps its normal colour, as in sketch mode (U-A).",
+  ).toBe(palette.constrained);
 });

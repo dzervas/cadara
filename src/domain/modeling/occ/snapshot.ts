@@ -17,9 +17,13 @@ import type {
   RenderPoint3D,
   RenderableEntityRecord,
 } from "@/contracts/render/schema";
-import type { SolvedSketchEntityGeometryRecord } from "@/contracts/sketch/schema";
+import type {
+  SketchPoint2D,
+  SolvedSketchEntityGeometryRecord,
+} from "@/contracts/sketch/schema";
 import {
   orderedSplineOccurrences,
+  reconstructSplineAggregate,
   tessellateCubicSpans,
   solvedCubicSpans,
 } from "@/contracts/sketch/spline-geometry";
@@ -35,6 +39,7 @@ import type {
   ReferenceId,
   RenderableId,
   SketchId,
+  SketchPointId,
   SnapshotEntityId,
   VertexId,
 } from "@/contracts/shared/ids";
@@ -2194,9 +2199,211 @@ function sampleArcPoints(
   return points;
 }
 
-function buildSketchCurveRenderRecords(
-  _state: OccAuthoringState,
+/**
+ * T17d2 (T17d review R-1; issue 03: one accepted geometry for display,
+ * selection, measurement and modeling; specification §5: stale display is
+ * marked and never consumed as current). A committed sketch whose derived
+ * validity is not current is drawn as sketch mode draws it on re-entry: at
+ * its held (authored) definition positions, splines by their authored
+ * reconstruction, held mirror/offset copies where the definition holds
+ * them, and offset shells by the record's spans (the spans the re-entered
+ * session draws). Never the rejected solve's positions. The viewport tints
+ * these records by the sketch's validity.
+ */
+function heldSketchGeometry(sketch: SketchSnapshotRecord) {
+  const { definition, solvedSnapshot } = sketch.sketch;
+  const positions = new Map(
+    definition.points.map((point) => [point.pointId, point.position] as const),
+  );
+  const shells = new Map(
+    solvedSnapshot.solvedEntities.map(
+      (record) => [record.entityId, record] as const,
+    ),
+  );
+  const all = (ids: readonly SketchPointId[]) => {
+    const found = ids.map((id) => positions.get(id));
+    return found.every((position) => position !== undefined) ? found : null;
+  };
+  const entities = definition.entities.flatMap(
+    (entity): SolvedSketchEntityGeometryRecord[] => {
+      const { entityId } = entity;
+      switch (entity.kind) {
+        case "point":
+          return [];
+        case "derivedPiecewiseCubic": {
+          const shell = shells.get(entityId);
+          return shell?.kind === "derivedPiecewiseCubic" ? [shell] : [];
+        }
+        case "lineSegment": {
+          const at = all([entity.startPointId, entity.endPointId]);
+          return at
+            ? [
+                {
+                  entityId,
+                  kind: "lineSegment",
+                  startPosition: at[0]!,
+                  endPosition: at[1]!,
+                },
+              ]
+            : [];
+        }
+        case "circle": {
+          const at = all([entity.centerPointId]);
+          return at
+            ? [
+                {
+                  entityId,
+                  kind: "circle",
+                  centerPosition: at[0]!,
+                  solvedRadius: entity.radius,
+                },
+              ]
+            : [];
+        }
+        case "arc": {
+          const at = all([
+            entity.centerPointId,
+            entity.startPointId,
+            entity.endPointId,
+          ]);
+          return at
+            ? [
+                {
+                  entityId,
+                  kind: "arc",
+                  centerPosition: at[0]!,
+                  startPosition: at[1]!,
+                  endPosition: at[2]!,
+                  sweepDirection: entity.sweepDirection,
+                },
+              ]
+            : [];
+        }
+        case "spline":
+          return [
+            {
+              entityId,
+              kind: "spline",
+              reconstruction: reconstructSplineAggregate(
+                entity,
+                Object.fromEntries(positions) as Record<
+                  SketchPointId,
+                  SketchPoint2D
+                >,
+              ),
+            },
+          ];
+        case "ellipse": {
+          const at = all([entity.centerPointId, entity.majorAxisPointId]);
+          return at
+            ? [
+                {
+                  entityId,
+                  kind: "ellipse",
+                  centerPosition: at[0]!,
+                  majorAxisEndpointPosition: at[1]!,
+                  minorRadius: entity.minorRadius,
+                },
+              ]
+            : [];
+        }
+        case "ellipticalArc": {
+          const at = all([
+            entity.centerPointId,
+            entity.majorAxisPointId,
+            entity.startPointId,
+            entity.endPointId,
+          ]);
+          return at
+            ? [
+                {
+                  entityId,
+                  kind: "ellipticalArc",
+                  centerPosition: at[0]!,
+                  majorAxisEndpointPosition: at[1]!,
+                  startPosition: at[2]!,
+                  endPosition: at[3]!,
+                  minorRadius: entity.minorRadius,
+                  sweepDirection: entity.sweepDirection,
+                },
+              ]
+            : [];
+        }
+        case "conic": {
+          const at = all([
+            entity.startPointId,
+            entity.controlPointId,
+            entity.endPointId,
+          ]);
+          return at
+            ? [
+                {
+                  entityId,
+                  kind: "conic",
+                  startPosition: at[0]!,
+                  controlPosition: at[1]!,
+                  endPosition: at[2]!,
+                  rho: entity.rho,
+                },
+              ]
+            : [];
+        }
+        case "bezierCurve": {
+          const at = all(entity.controlPointIds);
+          return at
+            ? [
+                {
+                  entityId,
+                  kind: "bezierCurve",
+                  controlPoints: at,
+                  degree: entity.degree,
+                },
+              ]
+            : [];
+        }
+        case "profileText": {
+          const at = all([entity.anchorPointId]);
+          return at
+            ? [
+                {
+                  entityId,
+                  kind: "profileText",
+                  anchorPosition: at[0]!,
+                  text: entity.text,
+                  height: entity.height,
+                  rotationRadians: entity.rotationRadians,
+                  horizontalAlign: entity.horizontalAlign,
+                  verticalAlign: entity.verticalAlign,
+                },
+              ]
+            : [];
+        }
+      }
+    },
+  );
+  return { entities, positions };
+}
+
+/** The geometry part mode draws: the solve if current, else the held geometry. */
+function drawnSketchGeometry(
   sketch: SketchSnapshotRecord,
+): ReturnType<typeof heldSketchGeometry> {
+  const { derivedValidity, solvedSnapshot } = sketch.sketch;
+  return derivedValidity.state === "current"
+    ? {
+        entities: solvedSnapshot.solvedEntities,
+        positions: new Map(
+          solvedSnapshot.solvedPoints.map(
+            (point) => [point.pointId, point.solvedPosition] as const,
+          ),
+        ),
+      }
+    : heldSketchGeometry(sketch);
+}
+
+function buildSketchCurveRenderRecords(
+  sketch: SketchSnapshotRecord,
+  drawn: ReturnType<typeof drawnSketchGeometry>,
 ) {
   const authoredEntityMap = new Map(
     sketch.sketch.definition.entities.map(
@@ -2204,7 +2411,7 @@ function buildSketchCurveRenderRecords(
     ),
   );
 
-  return sketch.sketch.solvedSnapshot.solvedEntities.flatMap((entity) => {
+  return drawn.entities.flatMap((entity) => {
     if (authoredEntityMap.get(entity.entityId)?.isConstruction) {
       return [];
     }
@@ -2255,15 +2462,10 @@ function buildSketchCurveRenderRecords(
           break;
         // T17c3 (issue 08): a degenerate span (two consecutive fit points
         // at one place) leaves no spans; the spline is still drawn, through
-        // its distinct solved fit points (as in the sketch session).
+        // its distinct drawn fit points (as in the sketch session).
         isClosed = authored.closure === "smooth";
-        const solved = new Map(
-          sketch.sketch.solvedSnapshot.solvedPoints.map(
-            (point) => [point.pointId, point.solvedPosition] as const,
-          ),
-        );
         const fitPoints = (orderedSplineOccurrences(authored) ?? []).map(
-          (occurrence) => solved.get(occurrence.pointId)!,
+          (occurrence) => drawn.positions.get(occurrence.pointId)!,
         );
         points2D = fitPoints.filter((point, index) => {
           const previous =
@@ -2272,8 +2474,6 @@ function buildSketchCurveRenderRecords(
             !previous || previous[0] !== point[0] || previous[1] !== point[1]
           );
         });
-        // Normalization refuses a closed polyline with < 3 distinct points.
-        if (new Set(points2D.map(String)).size < (isClosed ? 3 : 2)) return [];
         break;
       }
       case "derivedPiecewiseCubic":
@@ -2322,6 +2522,13 @@ function buildSketchCurveRenderRecords(
         break;
     }
 
+    // T17d2 review R-2 (T17c3 finding 1): a curve with fewer distinct points
+    // than a polyline needs (2 open, 3 closed; normalization refuses less)
+    // is not drawn, as sketch mode draws nothing for it either (e.g. a
+    // spline whose reconstruction is invalid has no spans). Emitting it
+    // would break the whole document snapshot.
+    if (new Set(points2D.map(String)).size < (isClosed ? 3 : 2)) return [];
+
     return [
       {
         id: createRenderableId(target),
@@ -2348,15 +2555,9 @@ function buildSketchCurveRenderRecords(
 }
 
 function buildSketchPointRenderRecords(
-  _state: OccAuthoringState,
   sketch: SketchSnapshotRecord,
+  drawn: ReturnType<typeof drawnSketchGeometry>,
 ) {
-  const solvedPointById = new Map(
-    sketch.sketch.solvedSnapshot.solvedPoints.map(
-      (point) => [point.pointId, point.solvedPosition] as const,
-    ),
-  );
-
   return sketch.sketch.definition.points.flatMap((point) => {
     if (point.isConstruction) {
       return [];
@@ -2367,7 +2568,7 @@ function buildSketchPointRenderRecords(
       sketchId: sketch.sketchId,
       pointId: point.pointId,
     };
-    const position = solvedPointById.get(point.pointId) ?? point.position;
+    const position = drawn.positions.get(point.pointId) ?? point.position;
 
     return [
       {
@@ -2400,10 +2601,13 @@ function buildSketchRenderRecords(
 ) {
   return [
     ...buildRegionRenderRecords(state, sketches, options, regionDiagnostics),
-    ...sketches.flatMap((sketch) => [
-      ...buildSketchCurveRenderRecords(state, sketch),
-      ...buildSketchPointRenderRecords(state, sketch),
-    ]),
+    ...sketches.flatMap((sketch) => {
+      const drawn = drawnSketchGeometry(sketch);
+      return [
+        ...buildSketchCurveRenderRecords(sketch, drawn),
+        ...buildSketchPointRenderRecords(sketch, drawn),
+      ];
+    }),
   ];
 }
 
