@@ -20,6 +20,8 @@ Dependency direction is now `bootstrap -> filesystem adapter -> initialization -
 
 All edits and commands ran from `/home/dzervas/Lab/cadara/.pi/worktree/browserless-cli-review-fixes`. Main, integration working files, trackers, and other workspaces were not modified. The local `node_modules` is a real private directory, modeled on ticket 01: dependency/package and binary symlinks point to installed dependencies; `.tmp`, `.cache`, `.vite`, and `.vite-temp` are private directories, not shared cache symlinks. Safe generated `public/cadara-occ.js` and `.wasm` were copied from ticket 01. No dependency installation or shared server was used.
 
+Earlier ticket 01 validation used a whole-directory `node_modules` symlink before the cache risk was discovered. It may have updated main's generated TS/build caches; no main source, tracker or kernel assets were edited, and those shared caches were not rolled back while another agent was active. All final validation used private caches.
+
 Reviewed `docs/testing.md`, the layering ADR, code-review skill, TDD skill, `tests.md`, and `mocking.md`. Announced lanes before test edits: **static** for dependency/policy guards and existing **logic** for public runtime/production adapter and worker conformance. Existing Vitest runner retained. Runtime logic specs stay at the existing approved seam rather than moving non-UI coverage into the guide's UI-classified infrastructure OCC folder.
 
 Red-green: the new static cycle guard failed against the original domain-to-infrastructure import (1 failed / 2 passed; `/tmp/cadara-review-red.log`). After separation it passes. An initial targeted run caught the stale worker mock import (2 failed / 40 passed); updating its canonical mock target restored all tests. Initial spec typecheck caught the same stale mock target; final spec typecheck passes. No production behavior/assertion changed to satisfy those checks.
@@ -53,7 +55,7 @@ bun -e 'import {getDefaultOpenCascadeInstance} from "./src/infrastructure/occ/ru
 - Direct Bun startup: native topology capability **`available`**; `/tmp/cadara-review-bun-startup.log`.
 - Read-only `git diff --check`: passed (Jujutsu workspace; no mutating Git used).
 
-Mandatory aggregate attempt (bounded per user instruction):
+Mandatory aggregate attempt (bounded by the implementation coordinator):
 
 ```sh
 PLAYWRIGHT_BASE_URL=http://127.0.0.1:3102 PLAYWRIGHT_WEB_SERVER=0 \
