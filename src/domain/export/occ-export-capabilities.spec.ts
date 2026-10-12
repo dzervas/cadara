@@ -16,7 +16,7 @@ type CustomOpenCascadeMainJSForTest = new (
   module: Record<string, unknown>,
 ) => Promise<OpenCascadeInstance>;
 
-test("src/domain/export/occ-export-capabilities.spec.ts", async () => {
+test("production OCC exports native meshes and sheet STEP payloads", async () => {
   async function loadCustomOpenCascadeForTest() {
     const module = (await import("../../../public/cadara-occ.js")) as {
       default: CustomOpenCascadeMainJSForTest;
@@ -172,7 +172,7 @@ test("src/domain/export/occ-export-capabilities.spec.ts", async () => {
 
     expect(
       "payload" in stepResult,
-      "STEP export must accept sheet bodies without body-kind branching.",
+      `STEP export must accept sheet bodies without body-kind branching: ${JSON.stringify(stepResult)}`,
     ).toBeTruthy();
     if ("payload" in stepResult) {
       expect(
