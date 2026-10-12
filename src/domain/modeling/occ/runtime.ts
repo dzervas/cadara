@@ -44,10 +44,6 @@ export type OpenCascadeInitializer = (
   settings?: OpenCascadeInitializationOptions,
 ) => Promise<OpenCascadeInstance>;
 
-export type OpenCascadeEntrySpecifier =
-  | "opencascade.js"
-  | "opencascade.js/dist/node.js";
-
 interface OpenCascadeFactoryModule {
   default?: OpenCascadeInitializer;
   initOpenCascade?: OpenCascadeInitializer;
@@ -72,19 +68,9 @@ function isNodeRuntime() {
   );
 }
 
-export function getDefaultOpenCascadeEntrySpecifier(
-  options: Pick<OpenCascadeFactoryLoadOptions, "isNodeRuntime"> = {},
-): OpenCascadeEntrySpecifier {
-  return (options.isNodeRuntime ?? isNodeRuntime())
-    ? "opencascade.js/dist/node.js"
-    : "opencascade.js";
-}
-
-
 export function createOpenCascadeInitializerFromMainJS(
   defaultMainJS: OpenCascadeMainJS,
-  getDefaultMainWasm = () =>
-    getVersionedOpenCascadeRuntimeAssetUrls().mainWasm,
+  getDefaultMainWasm = () => getVersionedOpenCascadeRuntimeAssetUrls().mainWasm,
 ): OpenCascadeInitializer {
   return async ({
     mainJS = defaultMainJS,
@@ -219,7 +205,8 @@ export function assertOpenCascadeNativeTopologyKernelCapabilities(
 }
 
 async function loadBrowserOpenCascadeModule(): Promise<OpenCascadeFactoryModule> {
-  const customMainJSImportUrl = getVersionedOpenCascadeRuntimeAssetUrls().mainJS;
+  const customMainJSImportUrl =
+    getVersionedOpenCascadeRuntimeAssetUrls().mainJS;
   const customMainJSModule = (await import(
     /* @vite-ignore */
     customMainJSImportUrl
@@ -232,90 +219,56 @@ async function loadBrowserOpenCascadeModule(): Promise<OpenCascadeFactoryModule>
     );
   }
 
-  const customInitializer = createOpenCascadeInitializerFromMainJS(
+  const customInitializer = createProductionOpenCascadeInitializerFromMainJS(
     customMainJS,
-    () =>
-      getVersionedOpenCascadeRuntimeAssetUrls().mainWasm,
+    () => getVersionedOpenCascadeRuntimeAssetUrls().mainWasm,
   );
 
-  return {
-    default: async (settings = {}) => {
-      const oc = await customInitializer(settings);
-      assertRequiredOpenCascadeBindings(oc);
-      return oc;
-    },
-  };
+  return { default: customInitializer };
 }
 
-async function readNodeOpenCascadeWasmBinary(path: string) {
-  const bunRuntime = globalThis as typeof globalThis & {
-    Bun?: { file(path: string): { arrayBuffer(): Promise<ArrayBuffer> } };
+export function createProductionOpenCascadeInitializerFromMainJS(
+  mainJS: OpenCascadeMainJS,
+  getMainWasm?: () => string,
+): OpenCascadeInitializer {
+  const initialize = createOpenCascadeInitializerFromMainJS(
+    mainJS,
+    getMainWasm,
+  );
+  return async (settings) => {
+    const oc = await initialize(settings);
+    assertOpenCascadeNativeTopologyKernelCapabilities(oc);
+    const host = oc as unknown as Record<
+      string,
+      Record<string, unknown> | undefined
+    >;
+    const requiredMethods = [
+      ["CadaraBuildNativeTopologyPayload", "BuildJson"],
+      ["CadaraExecuteNativeFeatureTransaction", "BuildCommittedShapePayload"],
+      ["CadaraBuildNativeExactBrepPayload", "BuildJson"],
+      ["CadaraBuildNativeMeshExportPayload", "BuildJson"],
+      ["CadaraNativeNeutralCurveQuery", "QueryJson"],
+    ] as const;
+    const missing = requiredMethods
+      .filter(
+        ([entrypoint, method]) =>
+          typeof host[entrypoint]?.[method] !== "function",
+      )
+      .map(([entrypoint, method]) => `${entrypoint}.${method}`);
+    if (missing.length > 0) {
+      throw new Error(
+        `Loaded OpenCascade build is missing required native methods: ${missing.join(", ")}.`,
+      );
+    }
+    assertRequiredOpenCascadeBindings(oc);
+    return oc;
   };
-
-  if (bunRuntime.Bun) {
-    return new Uint8Array(await bunRuntime.Bun.file(path).arrayBuffer());
-  }
-
-  const { readFile } = await import("node:fs/promises");
-  return new Uint8Array(await readFile(path));
 }
 
 async function loadNodeOpenCascadeModule(): Promise<OpenCascadeFactoryModule> {
-  const allowLegacyTopologyEnumerationForNodeTests = async (
-    initializer: OpenCascadeInitializer,
-  ) => {
-    const oc = await initializer();
-
-    (
-      oc as OpenCascadeInstance & {
-        CadaraAllowLegacyTopologyEnumerationForTests?: boolean;
-      }
-    ).CadaraAllowLegacyTopologyEnumerationForTests = true;
-
-    return oc;
-  };
-
-  try {
-    const nodeEntrySpecifier = "opencascade.js/dist/" + "node.js";
-    const module = (await import(
-      /* @vite-ignore */ nodeEntrySpecifier
-    )) as OpenCascadeFactoryModule;
-    const initializer = resolveOpenCascadeInitializer(module);
-
-    return {
-      default: (settings = {}) =>
-        allowLegacyTopologyEnumerationForNodeTests(() => initializer(settings)),
-    };
-  } catch {
-    const legacyMainSpecifier = "opencascade.js/dist/" + "opencascade.wasm.js";
-    const legacyWasmSpecifier =
-      "opencascade.js/dist/" + "opencascade.wasm.wasm";
-    const [{ default: nodeMainJS }, { default: wasmPath }] = await Promise.all([
-      import(/* @vite-ignore */ legacyMainSpecifier),
-      import(/* @vite-ignore */ legacyWasmSpecifier),
-    ]);
-    const defaultInitializer = createOpenCascadeInitializerFromMainJS(
-      nodeMainJS as OpenCascadeMainJS,
-      () => wasmPath,
-    );
-
-    return {
-      default: async (settings = {}) => {
-        const initializer = async () =>
-          defaultInitializer({
-            ...settings,
-            module: {
-              ...settings.module,
-              wasmBinary:
-                settings.module?.wasmBinary ??
-                (await readNodeOpenCascadeWasmBinary(wasmPath)),
-            },
-          });
-
-        return allowLegacyTopologyEnumerationForNodeTests(initializer);
-      },
-    };
-  }
+  const { loadFilesystemOpenCascadeFactory } =
+    await import("@/infrastructure/occ/filesystem-kernel-runtime");
+  return { default: await loadFilesystemOpenCascadeFactory() };
 }
 
 function resolveOpenCascadeInitializer(
@@ -335,9 +288,8 @@ function resolveOpenCascadeInitializer(
 export async function loadDefaultOpenCascadeFactory(
   options: OpenCascadeFactoryLoadOptions = {},
 ): Promise<OpenCascadeInitializer> {
-  const entrySpecifier = getDefaultOpenCascadeEntrySpecifier(options);
   const loadModule =
-    entrySpecifier === "opencascade.js/dist/node.js"
+    (options.isNodeRuntime ?? isNodeRuntime())
       ? (options.loadNodeModule ?? loadNodeOpenCascadeModule)
       : (options.loadBrowserModule ?? loadBrowserOpenCascadeModule);
   const module = await loadModule();

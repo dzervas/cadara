@@ -1,5 +1,4 @@
 import { describe, expect, test } from "vitest";
-import { readFile } from "node:fs/promises";
 
 import type {
   ConstructionSnapshotRecord,
@@ -71,36 +70,10 @@ import {
   createStandardPlaneDefinition,
 } from "@/domain/modeling/opencascade-kernel-seed";
 
-// T-1 (T10 review R5): the logic lane's default Node runtime is the stock
-// opencascade.js package, which binds types the shipped `public/cadara-occ`
-// build does not (open problem 8). These rows build every OCC path that makes
-// curve edges today through the production feature executor on BOTH runtimes
-// and check them against closed-form oracles, so a missing binding on the
-// shipped build fails here instead of only in the browser.
-
-type CustomOpenCascadeMainJS = new (
-  module: Record<string, unknown>,
-) => Promise<OpenCascadeInstance>;
-
-let productionRuntime: Promise<OpenCascadeInstance> | null = null;
-function loadProductionOcc() {
-  productionRuntime ??= (async () => {
-    const module = (await import("../../../../public/cadara-occ.js")) as {
-      default: CustomOpenCascadeMainJS;
-    };
-    const wasmBinary = new Uint8Array(
-      await readFile(
-        new URL("../../../../public/cadara-occ.wasm", import.meta.url),
-      ),
-    );
-    return new module.default({ wasmBinary });
-  })();
-  return productionRuntime;
-}
-
+// Curve-edge conformance uses the shared filesystem production runtime and
+// closed-form oracles, so missing shipped bindings fail without browser startup.
 const RUNTIMES = [
-  ["production public/cadara-occ", loadProductionOcc],
-  ["stock opencascade.js", getDefaultOpenCascadeInstance],
+  ["production public/cadara-occ", getDefaultOpenCascadeInstance],
 ] as const;
 
 /** Relative error bound for areas and volumes against the closed forms (review A2). */
@@ -1966,8 +1939,7 @@ describe("src/domain/modeling/occ/production-asset-conformance.spec.ts", () => {
       );
 
       // Export the prism that still has its non-manifold touch edge. Mesh
-      // export is native to the shipped build (the stock package has no
-      // payload builder), so it runs on the production runtime only.
+      // export uses the native payload builder in the shared production runtime.
       const capabilities = createOccExportCapabilities(
         createOccAuthoringState(oc, { bodies: [body!] }),
       );
@@ -1976,42 +1948,32 @@ describe("src/domain/modeling/occ/production-asset-conformance.spec.ts", () => {
         chordTolerance: 0.05,
         angleToleranceRadians: 0.1,
       });
-      if (!runtimeName.startsWith("production")) {
+      if (!Array.isArray(triangles))
+        throw new Error(`mesh export failed: ${triangles.message}`);
+      expectRelative(
+        meshVolume(triangles),
+        88 * HEIGHT,
+        "exported mesh volume",
+      );
+      expect(
+        unmatchedDirectedEdges(triangles),
+        "every directed mesh edge has its reverse: a closed, consistently oriented surface",
+      ).toEqual([]);
+      for (const provider of [stlExportProvider, threeMfExportProvider] as const) {
+        const result = await provider.export({
+          target,
+          targetLabel: "touching prism",
+          options: provider.getDefaultOptions() as never,
+          capabilities,
+        });
         expect(
-          Array.isArray(triangles) ? "meshed" : triangles.message,
-          "premise: the stock package has no native mesh export",
-        ).toMatch(/not available in this OpenCascade runtime/);
-      } else {
-        if (!Array.isArray(triangles))
-          throw new Error(`mesh export failed: ${triangles.message}`);
-        expectRelative(
-          meshVolume(triangles),
-          88 * HEIGHT,
-          "exported mesh volume",
-        );
+          result.ok,
+          `${provider.label} export of the point-touching prism`,
+        ).toBe(true);
         expect(
-          unmatchedDirectedEdges(triangles),
-          "every directed mesh edge has its reverse: a closed, consistently oriented surface",
-        ).toEqual([]);
-        for (const provider of [
-          stlExportProvider,
-          threeMfExportProvider,
-        ] as const) {
-          const result = await provider.export({
-            target,
-            targetLabel: "touching prism",
-            options: provider.getDefaultOptions() as never,
-            capabilities,
-          });
-          expect(
-            result.ok,
-            `${provider.label} export of the point-touching prism`,
-          ).toBe(true);
-          expect(
-            result.ok && result.payload.length > 0,
-            `${provider.label} payload is non-empty`,
-          ).toBe(true);
-        }
+          result.ok && result.payload.length > 0,
+          `${provider.label} payload is non-empty`,
+        ).toBe(true);
       }
 
       // Booleans: a cut through the touch point (removes the non-manifold

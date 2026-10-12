@@ -2,7 +2,7 @@
 // against today's main-thread path. Both real worker modules run in-process
 // behind structured-clone transports, so envelope validation, op handlers and
 // response cloning are the production ones; only the OCC loader is redirected
-// to the Node build (the workers' default loads the browser build).
+// to the shared filesystem production build instead of browser asset URLs.
 // - main-thread path (no delegate): solver -> kernel adapter queries -> the
 //   OCC kernel worker's queries (today's production composition);
 // - g4 path: solver -> `SketchRegionDerivationWorkerPool` -> dedicated worker.
@@ -230,9 +230,8 @@ const fixtures: [string, (sketch: SketchFixture) => void, number, number][] = [
     0,
   ],
   [
-    // The Node OCC build lacks the custom native query binding, so this pair
-    // is `region-query-unsupported` on both paths (0 regions); it proves the
-    // OCC-backed query ran in the worker (the browser run covers real regions).
+    // Two intersecting unit circles enclose three cells: their common lens
+    // and the two exclusive crescents. Both paths use real native queries.
     "two overlapping full circles (OCC pair query)",
     (s) => {
       s.point("p", 0, 0);
@@ -240,7 +239,7 @@ const fixtures: [string, (sketch: SketchFixture) => void, number, number][] = [
       s.circle("c", "p", 1);
       s.circle("d", "q", 1);
     },
-    0,
+    3,
     1,
   ],
   [
