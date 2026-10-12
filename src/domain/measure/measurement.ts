@@ -17,6 +17,7 @@ import {
   isAcceptedOffsetOutput,
   nonAcceptedOffsetOutputPoints,
 } from "@/contracts/sketch/offset-publication";
+import { sketchNotCurrentExplanation } from "@/contracts/sketch/derived-validity";
 import {
   boundaryLoopSignedArea,
   curveLength,
@@ -129,6 +130,12 @@ interface MeasuredTarget {
   distancePrimitive: DistancePrimitive | null;
   rows: readonly MeasurementRow[];
   note: string | null;
+  /**
+   * T17d (B3): set on a target of an invalid or stale sketch: its values
+   * are measured on the held (authored) geometry and marked so, or it is
+   * refused where only an accepted solve defines it.
+   */
+  validityNote?: string;
   witnesses: readonly MeasurementWitness[];
 }
 
@@ -240,7 +247,7 @@ export function deriveMeasurementViewModel(input: {
       title: target.label,
       subtitle: "Single target",
       rows: target.rows,
-      note: target.note,
+      note: joinNotes(target.validityNote, target.note),
       witnesses: target.witnesses,
     };
   }
@@ -261,9 +268,13 @@ export function deriveMeasurementViewModel(input: {
       ]
     : [];
 
-  const note = pairwise
-    ? null
-    : "Select a supported point, edge, face, or profile target pair to inspect distance.";
+  const note = joinNotes(
+    first!.validityNote,
+    second!.validityNote,
+    pairwise
+      ? null
+      : "Select a supported point, edge, face, or profile target pair to inspect distance.",
+  );
 
   return {
     title: `${first!.label} + ${second!.label}`,
@@ -302,12 +313,24 @@ function resolveMeasuredTarget(
     return resolveRegionTarget(snapshot, target);
   }
 
-  if (target.kind === "sketchPoint") {
-    return resolveSketchPointTarget(snapshot, target);
-  }
-
-  if (target.kind === "sketchEntity") {
-    return resolveSketchEntityTarget(snapshot, target);
+  if (target.kind === "sketchPoint" || target.kind === "sketchEntity") {
+    const resolved =
+      target.kind === "sketchPoint"
+        ? resolveSketchPointTarget(snapshot, target)
+        : resolveSketchEntityTarget(snapshot, target);
+    const sketch = snapshot.document.sketches.find(
+      (entry) => entry.sketchId === target.sketchId,
+    );
+    const notCurrent = sketch && sketchNotCurrentExplanation(sketch.sketch);
+    // T17d (B3, [TECH] A-5): an invalid or stale sketch is measured on what
+    // is held (its authored geometry), never on its rejected solve, and the
+    // result says so.
+    return resolved && notCurrent && resolved.validityNote === undefined
+      ? {
+          ...resolved,
+          validityNote: `Sketch ‘${sketch.label}’ is ${notCurrent.state}, so this measures its held geometry (as authored), not a current solve. ${notCurrent.explanation}`,
+        }
+      : resolved;
   }
 
   if (target.kind === "projectedReferenceGeometry") {
@@ -770,6 +793,26 @@ function resolveSketchEntityTarget(
     });
   }
 
+  // T17d (B3, [TECH] A-5): a spline or offset shell is defined only by an
+  // accepted solve (its solved spans); an invalid or stale sketch's solved
+  // snapshot is not one, so it is refused, saying why.
+  const notCurrent = sketchNotCurrentExplanation(sketch.sketch);
+  if (
+    notCurrent &&
+    (entity.kind === "spline" || entity.kind === "derivedPiecewiseCubic")
+  )
+    return {
+      target,
+      key: getPrimitiveRefKey(target),
+      label: entity.label,
+      category: "curve",
+      distancePrimitive: null,
+      rows: [],
+      note: null,
+      validityNote: `Sketch ‘${sketch.label}’ is ${notCurrent.state}, so ‘${entity.label}’ is not measured: its curve is only defined by an accepted solve. ${notCurrent.explanation}`,
+      witnesses: [],
+    };
+
   if (entity.kind === "spline") {
     // T10f review R-1: the record's solved spans (modeling-grade), never the
     // authored reconstruction; no valid solved spline, no measurement.
@@ -1040,6 +1083,13 @@ function resolveProjectedGeometryTarget(
   }
 
   return null;
+}
+
+function joinNotes(...notes: readonly (string | null | undefined)[]) {
+  const present = new Set(
+    notes.filter((note): note is string => Boolean(note)),
+  );
+  return present.size > 0 ? [...present].join(" ") : null;
 }
 
 function createCurveTarget(input: {

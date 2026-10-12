@@ -37,6 +37,7 @@ import {
   nonAcceptedOffsetOutputs,
   type NonAcceptedOutputOwner,
 } from "@/contracts/sketch/offset-publication";
+import { sketchNotCurrentExplanation } from "@/contracts/sketch/derived-validity";
 import { isDocumentHistoryTargetAppliedForCursor } from "@/domain/modeling/document-history";
 
 type Vec3 = readonly [number, number, number];
@@ -204,16 +205,24 @@ function projectSplineSpan(
   };
 }
 
-function sourceSketchDerivedOutputFailure(
+/**
+ * T17d (B3, [TECH] A-5): a source sketch whose derived output is not
+ * current (invalid, e.g. a rejected solve, or held by a broken mirror; or
+ * stale) is never projected; the refusal names the sketch and why by label.
+ */
+function sourceSketchNotCurrent(
   referenceId: ReferenceId,
-  state: "invalid" | "stale",
-): ProjectedSketchReferenceRecord {
-  return failedReference(
-    referenceId,
-    "unsupportedSource",
-    "projection-source-derived-output-not-current",
-    `Sketch reference ${referenceId} cannot project ${state} source-derived output.`,
-  );
+  sketch: WorkspaceSnapshot["document"]["sketches"][number],
+): ProjectedSketchReferenceRecord | null {
+  const notCurrent = sketchNotCurrentExplanation(sketch.sketch);
+  return notCurrent
+    ? failedReference(
+        referenceId,
+        "unsupportedSource",
+        "projection-source-derived-output-not-current",
+        `Sketch ‘${sketch.label}’ can't be projected because it is ${notCurrent.state}. ${notCurrent.explanation}`,
+      )
+    : null;
 }
 
 function canUseExistingGeometry(
@@ -680,12 +689,8 @@ function projectSketchPoint(
     );
   }
 
-  if (sketch.sketch.derivedValidity.state !== "current") {
-    return sourceSketchDerivedOutputFailure(
-      reference.referenceId,
-      sketch.sketch.derivedValidity.state,
-    );
-  }
+  const notCurrent = sourceSketchNotCurrent(reference.referenceId, sketch);
+  if (notCurrent) return notCurrent;
 
   const solvedPoint = sketch.sketch.solvedSnapshot.solvedPoints.find(
     (entry) => entry.pointId === source.pointId,
@@ -889,12 +894,8 @@ function projectSketchEntity(
     );
   }
 
-  if (sketch.sketch.derivedValidity.state !== "current") {
-    return sourceSketchDerivedOutputFailure(
-      reference.referenceId,
-      sketch.sketch.derivedValidity.state,
-    );
-  }
+  const notCurrent = sourceSketchNotCurrent(reference.referenceId, sketch);
+  if (notCurrent) return notCurrent;
 
   // [TECH] G19: a non-accepted offset output is not modeling input.
   const nonAccepted = nonAcceptedOffsetOutputs(
@@ -989,12 +990,8 @@ function projectWholeSketch(
     );
   }
 
-  if (sketch.sketch.derivedValidity.state !== "current") {
-    return sourceSketchDerivedOutputFailure(
-      reference.referenceId,
-      sketch.sketch.derivedValidity.state,
-    );
-  }
+  const notCurrent = sourceSketchNotCurrent(reference.referenceId, sketch);
+  if (notCurrent) return notCurrent;
 
   const sourcePoints = sketch.sketch.definition.points.map((point) =>
     mapSketchPointToWorld(sketch.plane.frame, point.position),

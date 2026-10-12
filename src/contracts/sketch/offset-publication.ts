@@ -17,11 +17,11 @@ import {
 } from "@/contracts/sketch/offset-derivation-outputs";
 import { OFFSET_DIAGNOSTIC_CODES } from "@/contracts/sketch/offset-geometry";
 import {
-  failedMirrorReason,
   mirrorRepairCommand,
   RELATIONSHIP_NOUN,
 } from "@/contracts/sketch/mirror-requirements";
 import type {
+  DerivedRelationshipFailureReason,
   SketchDefinition,
   SketchDerivationDefinition,
   SketchSolveDiagnostic,
@@ -423,7 +423,10 @@ export function nonAcceptedOffsetOutputs(
   definition: Pick<SketchDefinition, "derivedRelationships" | "entities">,
   snapshot: Pick<
     SolvedSketchSnapshot,
-    "solvedEntities" | "certifiedOffsetDerivationIds" | "failedDerivationIds"
+    | "solvedEntities"
+    | "certifiedOffsetDerivationIds"
+    | "failedDerivationIds"
+    | "failedDerivationReasons"
   >,
 ): ReadonlyMap<SketchEntityId, NonAcceptedOutputOwner> {
   const result = new Map<SketchEntityId, NonAcceptedOutputOwner>();
@@ -431,13 +434,23 @@ export function nonAcceptedOffsetOutputs(
   const failed = new Set(snapshot.failedDerivationIds ?? []);
   const ownerOf = (
     relationship: SketchDerivationDefinition,
-  ): NonAcceptedOutputOwner => ({
-    derivationId: relationship.derivationId,
-    kind: relationship.kind,
-    label: relationship.label,
-    reason:
-      relationship.kind === "offset" ? "offsetNotCertified" : "derivedFailed",
-  });
+  ): NonAcceptedOutputOwner =>
+    relationship.kind === "offset"
+      ? {
+          derivationId: relationship.derivationId,
+          kind: relationship.kind,
+          label: relationship.label,
+          reason: "offsetNotCertified",
+        }
+      : {
+          derivationId: relationship.derivationId,
+          kind: relationship.kind,
+          label: relationship.label,
+          reason: "derivedFailed",
+          // T17d (B4): the solve's reasons, carried with the failure.
+          failureReasons:
+            snapshot.failedDerivationReasons?.[relationship.derivationId] ?? [],
+        };
   for (const relationship of definition.derivedRelationships ?? []) {
     if (relationship.kind !== "offset") {
       if (!failed.has(relationship.derivationId)) continue;
@@ -502,14 +515,17 @@ export function nonAcceptedOffsetOutputs(
  * certified (or one of its shells is not); its consumers keep the offset
  * wording and codes. `derivedFailed`: a failed (held) mirror, pattern or
  * transform relationship (the snapshot's `failedDerivationIds`); its
- * consumers name it by label (`brokenDerivedInputMessage`). A dependent
- * (G16‴ closure) carries its source's owner.
+ * consumers name it by label (`brokenDerivedInputMessage`), with T17d
+ * (B4) the reasons the solve carried for it (`failedDerivationReasons`;
+ * none when the snapshot carries none). A dependent (G16‴ closure)
+ * carries its source's owner.
  */
 export interface NonAcceptedOutputOwner {
   readonly derivationId: string;
   readonly kind: SketchDerivationDefinition["kind"];
   readonly label: string;
   readonly reason: "offsetNotCertified" | "derivedFailed";
+  readonly failureReasons?: readonly DerivedRelationshipFailureReason[];
 }
 
 /**
@@ -522,7 +538,9 @@ export interface NonAcceptedOutputOwner {
  * downstream "depends on" it. Then what is refused (`consequence`, e.g.
  * "it can't be used as an offset seed") and the recovery commands that
  * exist (Undo; for a mirror, T16e (review R-5): replacing its mirror line
- * or original when that repairs it, and removal from the Mirror panel).
+ * or original when that repairs it, read from the reasons the solve
+ * carried (T17d, B4: `owner.failureReasons`), and removal from the Mirror
+ * panel).
  */
 export function brokenDerivedInputMessage(
   definition: Pick<
@@ -560,7 +578,7 @@ export function brokenDerivedInputMessage(
   }
   const repair =
     relationship?.kind === "mirror"
-      ? mirrorRepairCommand(failedMirrorReason(definition, relationship))
+      ? mirrorRepairCommand(owner.failureReasons ?? [])
       : null;
   const recovery =
     owner.kind !== "mirror"
@@ -626,7 +644,10 @@ export function nonAcceptedOffsetOutputPoints(
   definition: Pick<SketchDefinition, "derivedRelationships" | "entities">,
   snapshot: Pick<
     SolvedSketchSnapshot,
-    "solvedEntities" | "certifiedOffsetDerivationIds" | "failedDerivationIds"
+    | "solvedEntities"
+    | "certifiedOffsetDerivationIds"
+    | "failedDerivationIds"
+    | "failedDerivationReasons"
   >,
 ): ReadonlyMap<SketchPointId, NonAcceptedOutputOwner> {
   const outputs = nonAcceptedOffsetOutputs(definition, snapshot);
@@ -662,7 +683,10 @@ export function isAcceptedOffsetOutput(
   definition: Pick<SketchDefinition, "derivedRelationships" | "entities">,
   snapshot: Pick<
     SolvedSketchSnapshot,
-    "solvedEntities" | "certifiedOffsetDerivationIds" | "failedDerivationIds"
+    | "solvedEntities"
+    | "certifiedOffsetDerivationIds"
+    | "failedDerivationIds"
+    | "failedDerivationReasons"
   >,
   entityId: SketchEntityId,
 ): boolean {

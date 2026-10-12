@@ -1,12 +1,16 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  deriveCommittedSketchValidity,
   deriveSketchValidity,
   getConsumableSketchRegions,
+  mergeSketchSolveDiagnostics,
+  SKETCH_VALIDATION_FAILED,
   sketchProfileGateFailures,
 } from "@/contracts/sketch/derived-validity";
 import { DERIVED_SHELL_SEED_UNSUPPORTED } from "@/contracts/sketch/derived-geometry";
 import type { RegionRecord, SolvedSketchSnapshot } from "@/contracts/sketch/schema";
+import type { SketchEntityId } from "@/contracts/shared/ids";
 
 const solved: SolvedSketchSnapshot = {
   schemaVersion: "solved-sketch/v1alpha2",
@@ -36,7 +40,7 @@ test("derived validity distinguishes current, invalid, and stale output and gate
     solvedSnapshot: solved,
     freshness: "stale",
   });
-  const region = { regionId: "region_test" } as RegionRecord;
+  const region = { regionId: "region_test" } as unknown as RegionRecord;
 
   expect(current.state).toBe("current");
   expect(invalid.state).toBe("invalid");
@@ -55,7 +59,7 @@ test("derived validity distinguishes current, invalid, and stale output and gate
 // T16b ([TECH] T16-4): the sketch-wide profile gate is one predicate over the
 // snapshot's failed (held) derived relationships, added to the severity rule.
 describe("T16b: the sketch-wide profile gate", () => {
-  const region = { regionId: "region_test" } as RegionRecord;
+  const region = { regionId: "region_test" } as unknown as RegionRecord;
   const warning = {
     code: "derived-mirror-axis-missing",
     severity: "warning" as const,
@@ -146,4 +150,77 @@ test("partial nonconvergence is invalid while an ordinary solved underconstraine
     }).state,
   ).toBe("invalid");
   expect(deriveSketchValidity({ solvedSnapshot: solved }).state).toBe("current");
+});
+
+// T17d (B5, [TECH] T17-7; logic lane, seam: the one committed-sketch
+// validity derivation both adapters' Finish and restore call). Identical
+// diagnostics — same code, target and message — are one (T16c A-5: a
+// pattern output with several missing points repeats one text), at the
+// first position, with the most severe severity; `sketch-validation-failed`
+// comes from the validation outcome only; the stored snapshot carries the
+// sketch's diagnostics and the validity adds the relationship-scoped offset
+// ones. Red on base: no such function (each path merged its own lists).
+describe("T17d B5: one committed-sketch validity derivation", () => {
+  const pointMap = {
+    code: "derived-transform-unsatisfied-point-map",
+    severity: "error" as const,
+    message:
+      "Linear pattern ‘linearPattern 91’ is broken: its geometry no longer matches (copy ‘ab linearPattern’ of ‘ab’). Profiles from this sketch are blocked. Undo to recover.",
+    target: {
+      kind: "entity" as const,
+      entityId: "sketch_entity_copy" as SketchEntityId,
+    },
+  };
+  const offset = {
+    code: "derived-offset-seed-not-certified",
+    severity: "error" as const,
+    message: "Offset ‘offset 1’ can't be certified.",
+    target: null,
+  };
+
+  test("identical diagnostics are one, at the first position, with the most severe severity", () => {
+    const repeatedWarning = { ...pointMap, severity: "warning" as const };
+    const other = { ...pointMap, target: null };
+    expect(
+      mergeSketchSolveDiagnostics(
+        [repeatedWarning, other],
+        [pointMap, pointMap, other],
+      ),
+    ).toEqual([pointMap, other]);
+  });
+
+  test("Finish and restore inputs give one result: duplicates once, sketch-validation-failed from the validation only, offset diagnostics only in the validity", () => {
+    const derive = (validationIsValid: boolean) =>
+      deriveCommittedSketchValidity({
+        kind: "solved",
+        solvedSnapshot: { ...solved, diagnostics: [pointMap, pointMap] },
+        validationIsValid,
+        diagnostics: [[], [], [pointMap, pointMap], []],
+        offsetDiagnostics: [offset],
+      });
+    const invalid = derive(false);
+    expect(invalid.solvedSnapshot.diagnostics).toEqual([
+      pointMap,
+      SKETCH_VALIDATION_FAILED,
+    ]);
+    expect(invalid.derivedValidity).toEqual({
+      state: "invalid",
+      diagnostics: [pointMap, SKETCH_VALIDATION_FAILED, offset],
+    });
+    expect(derive(true).solvedSnapshot.diagnostics).toEqual([pointMap]);
+    // Unresolved authored values: no solve ran and no validation failed.
+    const unresolved = deriveCommittedSketchValidity({
+      kind: "unresolvedValues",
+      diagnostics: [pointMap, pointMap],
+    });
+    expect(unresolved.solvedSnapshot.status).toEqual({
+      solveState: "failed",
+      constraintState: "inconsistent",
+    });
+    expect(unresolved.derivedValidity).toEqual({
+      state: "invalid",
+      diagnostics: [pointMap],
+    });
+    expect(unresolved.solvedSnapshot.diagnostics).toEqual([pointMap]);
+  });
 });

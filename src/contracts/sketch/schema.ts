@@ -1663,7 +1663,37 @@ export interface SolvedSketchSnapshot {
    * `nonAcceptedOffsetOutputs`). Absent when none failed.
    */
   failedDerivationIds?: string[];
+  /**
+   * T17d (B4, [TECH] T17-6): why each relationship in `failedDerivationIds`
+   * failed, as the solve's evaluation classified it: its primary reason (the
+   * one its error diagnostic's code names) first, then any further failure
+   * of the same relationship (a mirror whose line is too short and whose
+   * original was deleted carries both). Written only by the solve, with
+   * `failedDerivationIds` (solved revision data, never identity, never
+   * authored); consumers read it instead of re-classifying the definition.
+   */
+  failedDerivationReasons?: Record<string, DerivedRelationshipFailureReason[]>;
 }
+
+/**
+ * Why a non-offset derived relationship failed (T16b): the axis line is
+ * missing (or is not a straight line with both end points), the axis is
+ * shorter than τ, an original or a copy was deleted, the recorded map no
+ * longer matches the geometry, the relationship is on a dependency loop, or
+ * it depends on one.
+ */
+export const DERIVED_RELATIONSHIP_FAILURE_REASONS = [
+  "axisMissing",
+  "axisDegenerate",
+  "seedMissing",
+  "copyMissing",
+  "mapMismatch",
+  "dependencyLoop",
+  "dependsOnLoop",
+] as const;
+
+export type DerivedRelationshipFailureReason =
+  (typeof DERIVED_RELATIONSHIP_FAILURE_REASONS)[number];
 
 /** One adjacency of a solve frame's plan ([TECH] G3; trims carry their leaves and Newton seeds). */
 export type SolvedOffsetFramePlanEntry =

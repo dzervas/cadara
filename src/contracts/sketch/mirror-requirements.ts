@@ -23,6 +23,7 @@
 import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
 import {
   isReferenceDimension,
+  type DerivedRelationshipFailureReason,
   type DimensionDefinition,
   type SketchDefinition,
   type SketchDerivationDefinition,
@@ -54,6 +55,12 @@ export const MIRROR_DIAGNOSTIC_CODES = {
  */
 export const DERIVED_RELATIONSHIP_DEPENDENCY_UNRESOLVED =
   "derived-relationship-dependency-unresolved";
+
+/** T15b: the codes of a failed (held) derived relationship's one error. */
+export const DERIVED_FAILURE_CODES: ReadonlySet<string> = new Set([
+  ...Object.values(MIRROR_DIAGNOSTIC_CODES),
+  DERIVED_RELATIONSHIP_DEPENDENCY_UNRESOLVED,
+]);
 
 export type MirrorRelationship = Extract<
   SketchDerivationDefinition,
@@ -115,25 +122,17 @@ export interface MirrorArcVariables {
   readonly endAngle: number;
 }
 
-/**
- * Why a derived relationship failed (T16b): the axis line is missing (or is
- * not a straight line with both end points), the axis is shorter than τ, an
- * original or a copy was deleted, the recorded map no longer matches the
- * geometry, the relationship is on a dependency loop, or it depends on one.
- */
-export type DerivedRelationshipFailureReason =
-  | "axisMissing"
-  | "axisDegenerate"
-  | "seedMissing"
-  | "copyMissing"
-  | "mapMismatch"
-  | "dependencyLoop"
-  | "dependsOnLoop";
+export type { DerivedRelationshipFailureReason };
 
-/** One relationship's single failure. */
+/**
+ * One relationship's single failure: its primary `reason` (the one the
+ * diagnostic's code names) and, T17d (B4), every reason it failed for,
+ * primary first (the solve carries them in `failedDerivationReasons`).
+ */
 export interface MirrorRelationshipFailure {
   readonly derivationId: string;
   readonly reason: DerivedRelationshipFailureReason;
+  readonly reasons: readonly DerivedRelationshipFailureReason[];
   readonly diagnostic: SketchSolveDiagnostic;
 }
 
@@ -196,14 +195,14 @@ export const RELATIONSHIP_NOUN: Record<
  */
 function failureMessage(
   relationship: NamedRelationship,
-  reason: DerivedRelationshipFailureReason,
+  reasons: readonly DerivedRelationshipFailureReason[],
   statement: string,
 ): string {
   const consequence =
     relationship.kind === "offset"
       ? "Its offset curves stay where they were last solved and can't be used."
       : "Its copies stay where they were last solved and can't be used; profiles from this sketch are blocked.";
-  const repair = mirrorRepairCommand(reason);
+  const repair = mirrorRepairCommand(reasons);
   const recovery =
     relationship.kind !== "mirror"
       ? "Undo to recover."
@@ -219,66 +218,40 @@ function failureMessage(
  * short, the original when one was deleted; T16e review A-7: either, for a
  * mirror on a dependency loop (replacing the looping line or original
  * breaks it). Null otherwise (a deleted copy, a mismatch, a mirror that
- * only reads a loop): Undo or removal.
+ * only reads a loop): Undo or removal. T17d (B4): every repair a failure's
+ * reasons need, in order ("replace the mirror line and the original" for a
+ * line too short and a deleted original).
  */
 export function mirrorRepairCommand(
-  reason: DerivedRelationshipFailureReason,
+  reasons: readonly DerivedRelationshipFailureReason[],
 ): string | null {
-  return reason === "axisMissing" || reason === "axisDegenerate"
-    ? "replace the mirror line"
-    : reason === "seedMissing"
-      ? "replace the original"
-      : reason === "dependencyLoop"
-        ? "replace the mirror line or the original"
-        : null;
+  const replaced = [
+    ...new Set(
+      reasons.flatMap((reason) =>
+        reason === "axisMissing" || reason === "axisDegenerate"
+          ? ["the mirror line"]
+          : reason === "seedMissing"
+            ? ["the original"]
+            : reason === "dependencyLoop"
+              ? ["the mirror line or the original"]
+              : [],
+      ),
+    ),
+  ];
+  return replaced.length === 0 ? null : `replace ${replaced.join(" and ")}`;
 }
 
-/**
- * T16e (review R-5): why a mirror known to be failed (in a solve's
- * `failedDerivationIds`) fails, read from its records for consumers that
- * have no tolerance at hand (the failed-copy input texts): the unresolved
- * order, then a missing mirror line, then the first stale output, as
- * evaluation classifies them. With none of those left, the only remaining
- * failure is a mirror line shorter than τ (`axisDegenerate`); a mirror whose
- * line is too short and whose output is also stale reads as the stale
- * output here (evaluation reports the line first), so its text still names
- * a repair that is needed.
- */
-export function failedMirrorReason(
-  definition: Pick<
-    SketchDefinition,
-    "points" | "entities" | "derivedRelationships"
-  >,
-  relationship: MirrorRelationship,
-): DerivedRelationshipFailureReason {
-  const unresolved = orderDerivedRelationships(definition).unresolved.find(
-    (failure) => failure.derivationId === relationship.derivationId,
-  );
-  if (unresolved) return unresolved.reason;
-  const geometry = indexMirrorGeometry(definition);
-  const reference = relationship.mirrorReference;
-  if (reference.kind === "lineEntity") {
-    const line = geometry.entityById.get(reference.entityId);
-    if (
-      line?.kind !== "lineSegment" ||
-      !geometry.pointById.has(line.startPointId) ||
-      !geometry.pointById.has(line.endPointId)
-    )
-      return "axisMissing";
-  }
-  for (const output of relationship.outputs) {
-    const checked = checkMirrorOutputMap(output, geometry);
-    if ("stale" in checked) return checked.stale;
-  }
-  return "axisDegenerate";
-}
-
+/** `reasons`: the primary reason first (it chooses the code). */
 function failure(
   relationship: NamedRelationship,
-  reason: DerivedRelationshipFailureReason,
+  reasons: readonly [
+    DerivedRelationshipFailureReason,
+    ...DerivedRelationshipFailureReason[],
+  ],
   statement: string,
   entityId: SketchEntityId | null,
 ): MirrorRelationshipFailure {
+  const reason = reasons[0];
   const code =
     reason === "dependencyLoop" || reason === "dependsOnLoop"
       ? DERIVED_RELATIONSHIP_DEPENDENCY_UNRESOLVED
@@ -290,10 +263,11 @@ function failure(
   return {
     derivationId: relationship.derivationId,
     reason,
+    reasons,
     diagnostic: {
       code,
       severity: "error",
-      message: failureMessage(relationship, reason, statement),
+      message: failureMessage(relationship, reasons, statement),
       target: entityId ? { kind: "entity", entityId } : null,
     },
   };
@@ -303,6 +277,14 @@ const brokenMirror = (
   relationship: Pick<MirrorRelationship, "label">,
   why: string,
 ) => `Mirror ‘${relationship.label}’ is broken: ${why}.`;
+
+/** Why a mirror axis does not resolve (`classifyMirrorAxis`). */
+interface MirrorAxisFault {
+  readonly ok: false;
+  readonly reason: "axisMissing" | "axisDegenerate";
+  readonly why: string;
+  readonly entityId: SketchEntityId | null;
+}
 
 /**
  * Resolves and classifies a mirror axis. A missing reference or one that is
@@ -317,11 +299,28 @@ export function resolveMirrorAxis(
   geometry: MirrorGeometry,
   modelingTolerance: number,
 ): MirrorAxisResolution {
+  const classified = classifyMirrorAxis(reference, geometry, modelingTolerance);
+  if (classified.ok) return classified;
   const mirror = { ...relationship, kind: "mirror" as const };
+  return {
+    ok: false,
+    failure: failure(
+      mirror,
+      [classified.reason],
+      brokenMirror(mirror, classified.why),
+      classified.entityId,
+    ),
+  };
+}
+
+function classifyMirrorAxis(
+  reference: MirrorAxisReference,
+  geometry: MirrorGeometry,
+  modelingTolerance: number,
+): { readonly ok: true; readonly axis: MirrorAxis } | MirrorAxisFault {
   let axis: MirrorAxis;
   if (reference.kind === "sketchDatum")
-    return resolveMirrorAxis(
-      relationship,
+    return classifyMirrorAxis(
       {
         kind: "datumAxis",
         origin: [0, 0],
@@ -354,19 +353,13 @@ export function resolveMirrorAxis(
     if (line?.kind !== "lineSegment" || !start || !end)
       return {
         ok: false,
-        failure: failure(
-          mirror,
-          "axisMissing",
-          brokenMirror(
-            mirror,
-            !line
-              ? "its mirror line was deleted"
-              : line.kind !== "lineSegment"
-                ? `its mirror line ‘${line.label}’ is not a straight line`
-                : `an end point of its mirror line ‘${line.label}’ was deleted`,
-          ),
-          line ? line.entityId : null,
-        ),
+        reason: "axisMissing",
+        why: !line
+          ? "its mirror line was deleted"
+          : line.kind !== "lineSegment"
+            ? `its mirror line ‘${line.label}’ is not a straight line`
+            : `an end point of its mirror line ‘${line.label}’ was deleted`,
+        entityId: line ? line.entityId : null,
       };
     const dx = end.position[0] - start.position[0];
     const dy = end.position[1] - start.position[1];
@@ -383,15 +376,9 @@ export function resolveMirrorAxis(
   if (!(Math.hypot(axis.direction[0], axis.direction[1]) >= modelingTolerance))
     return {
       ok: false,
-      failure: failure(
-        mirror,
-        "axisDegenerate",
-        brokenMirror(
-          mirror,
-          "its mirror line is shorter than the modeling tolerance",
-        ),
-        axis.kind === "line" ? axis.entityId : null,
-      ),
+      reason: "axisDegenerate",
+      why: "its mirror line is shorter than the modeling tolerance",
+      entityId: axis.kind === "line" ? axis.entityId : null,
     };
   return { ok: true, axis };
 }
@@ -796,6 +783,12 @@ type MirrorOutputRecord = MirrorRelationship["outputs"][number];
  * pair, or why the map is stale (T16b: named by the surviving side's
  * label, never an id).
  */
+interface MirrorOutputMapStale {
+  readonly stale: "seedMissing" | "copyMissing" | "mapMismatch";
+  readonly why: string;
+  readonly entityId: SketchEntityId | null;
+}
+
 function checkMirrorOutputMap(
   output: MirrorOutputRecord,
   geometry: MirrorGeometry,
@@ -805,11 +798,7 @@ function checkMirrorOutputMap(
       readonly target: MirrorableEntity;
       readonly seedPointIds: readonly SketchPointId[];
     }
-  | {
-      readonly stale: "seedMissing" | "copyMissing" | "mapMismatch";
-      readonly why: string;
-      readonly entityId: SketchEntityId | null;
-    } {
+  | MirrorOutputMapStale {
   const { pointById, entityById } = geometry;
   const seed = entityById.get(output.seedEntityId);
   const target = entityById.get(output.outputEntityId);
@@ -862,13 +851,31 @@ export function evaluateMirrorRelationship(input: {
   readonly arcVariables?: ReadonlyMap<SketchEntityId, MirrorArcVariables>;
 }): MirrorRelationshipEvaluation {
   const { relationship, geometry } = input;
-  const resolution = resolveMirrorAxis(
-    relationship,
+  const resolution = classifyMirrorAxis(
     relationship.mirrorReference,
     geometry,
     input.modelingTolerance,
   );
-  if (!resolution.ok) return resolution;
+  if (!resolution.ok) {
+    // T17d (B4): an axis failure is the primary reason; a stale output of
+    // the same mirror is carried too, so its texts name every repair the
+    // mirror needs (a line too short and a deleted original: both).
+    const stale = relationship.outputs
+      .map((output) => checkMirrorOutputMap(output, geometry))
+      .find((checked): checked is MirrorOutputMapStale => "stale" in checked);
+    return {
+      ok: false,
+      failure: failure(
+        { ...relationship, kind: "mirror" },
+        stale ? [resolution.reason, stale.stale] : [resolution.reason],
+        brokenMirror(
+          relationship,
+          stale ? `${resolution.why}, and ${stale.why}` : resolution.why,
+        ),
+        resolution.entityId,
+      ),
+    };
+  }
   const { axis } = resolution;
   const outputs: MirrorOutputEvaluation[] = [];
   for (const output of relationship.outputs) {
@@ -878,7 +885,7 @@ export function evaluateMirrorRelationship(input: {
         ok: false,
         failure: failure(
           { ...relationship, kind: "mirror" },
-          checked.stale,
+          [checked.stale],
           brokenMirror(relationship, checked.why),
           checked.entityId,
         ),
@@ -1214,7 +1221,7 @@ export function orderDerivedRelationships(
       return [
         failure(
           relationship,
-          loop ? "dependencyLoop" : "dependsOnLoop",
+          [loop ? "dependencyLoop" : "dependsOnLoop"],
           loop
             ? `${named} depends on its own ${relationship.kind === "offset" ? "offset curves" : "copies"} (a dependency loop).`
             : `${named} depends on geometry made in a dependency loop.`,

@@ -9,6 +9,7 @@ import type {
   SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
 import { buildSketchVectorExportModel } from "@/domain/export/sketch-vector-export-model";
+import { deriveSketchValidity } from "@/contracts/sketch/derived-validity";
 import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
 
 test("buildSketchVectorExportModel extracts committed sketch geometry, regions, styles, and diagnostics", () => {
@@ -62,28 +63,24 @@ test("buildSketchVectorExportModel extracts committed sketch geometry, regions, 
   ).toBeTruthy();
 });
 
-test("an unsolved record exports authored entities and leaves its unresolvable region out with a diagnostic", () => {
-  const model = buildSketchVectorExportModel({
+// T17d (B3, [TECH] A-5): an unsolved (not evaluated) record is not current,
+// so it is refused as a whole; it used to export its authored entities.
+test("an unsolved record is not current: it is refused as a whole, by the sketch's label", () => {
+  const result = buildSketchVectorExportModel({
     documentId: "doc_export",
     revisionId: "rev_0001",
     sketches: [createSketchSnapshot()],
     target: { kind: "sketch", sketchId: "sketch_profile" },
-  }) as SketchVectorExportModel;
-  const line = model.entities.find(
-    (entity) =>
-      entity.kind === "lineSegment" && entity.entityId === "entity_ab",
-  );
-  expect(
-    line?.kind === "lineSegment" && line.end,
-    "With no solved geometry the entity comes from its authored points.",
-  ).toEqual([10, 0]);
-  expect(
-    model.regions,
-    "The region has no solved boundary to resolve against (T10e).",
-  ).toEqual([]);
-  expect(model.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
-    "sketch-vector-region-unresolved",
-  );
+  });
+  expect(result).toEqual({
+    diagnostic: {
+      code: "sketch-vector-sketch-not-current",
+      severity: "error",
+      message:
+        "Sketch ‘Sketch Profile’ was not exported because it is invalid. Its last solve was not accepted, so its geometry is not current. Edit the sketch to see why, then correct it or Undo.",
+      target: { kind: "sketch", sketchId: "sketch_profile" },
+    },
+  });
 });
 
 test("buildSketchVectorExportModel exports solved committed geometry for dimensioned rectangles", () => {
@@ -254,6 +251,7 @@ function createSketchSnapshot(
       planeSupport: plane.support,
       definition,
       solvedSnapshot,
+      derivedValidity: deriveSketchValidity({ solvedSnapshot }),
       regions: [region],
     },
   };

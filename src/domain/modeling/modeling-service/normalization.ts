@@ -63,6 +63,10 @@ import {
   getAuthoredLiteralValue,
   type MaybeAuthoredValue,
 } from "@/contracts/modeling/authored-values";
+import {
+  DERIVED_RELATIONSHIP_FAILURE_REASONS,
+  type DerivedRelationshipFailureReason,
+} from "@/contracts/sketch/schema";
 import type {
   ConstraintStatusRecord,
   ConstraintDefinition,
@@ -3393,6 +3397,14 @@ export function normalizeSolvedSketchSnapshot(
             value.failedDerivationIds,
           ),
         }),
+    // T17d (B4): solved revision data; shape only, as above.
+    ...(value.failedDerivationReasons === undefined
+      ? {}
+      : {
+          failedDerivationReasons: normalizeFailedDerivationReasons(
+            value.failedDerivationReasons,
+          ),
+        }),
   };
 }
 
@@ -3406,6 +3418,27 @@ function normalizeFailedDerivationIds(value: unknown): string[] {
   if (!Array.isArray(value) || !value.every(isString))
     throw new Error("Invalid failed derived relationship id payload.");
   return [...value];
+}
+
+function normalizeFailedDerivationReasons(
+  value: unknown,
+): NonNullable<SolvedSketchSnapshot["failedDerivationReasons"]> {
+  const reasons: readonly unknown[] = DERIVED_RELATIONSHIP_FAILURE_REASONS;
+  if (
+    !isRecord(value) ||
+    !Object.values(value).every(
+      (entry) =>
+        Array.isArray(entry) &&
+        entry.every((reason) => reasons.includes(reason)),
+    )
+  )
+    throw new Error("Invalid failed derived relationship reason payload.");
+  return Object.fromEntries(
+    Object.entries(value).map(([derivationId, entry]) => [
+      derivationId,
+      [...(entry as DerivedRelationshipFailureReason[])],
+    ]),
+  );
 }
 
 function normalizeNumberPair(value: unknown, message: string) {

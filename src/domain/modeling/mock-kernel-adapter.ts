@@ -2,12 +2,10 @@ import type {
   SketchDefinition,
   SketchRecord,
   SketchSolveDiagnostic,
-  SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
 import {
-  deriveSketchValidity,
-  mergeSketchSolveDiagnostics,
-  withRelationshipScopedDiagnostics,
+  deriveCommittedSketchValidity,
+  type CommittedSketchDerivation,
 } from "@/contracts/sketch/derived-validity";
 import { solveAndDeriveSketchWithOffsets } from "@/domain/solver/offset-publication-round";
 import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
@@ -3334,20 +3332,6 @@ function mapModelingDiagnosticToSketchDiagnostic(
   };
 }
 
-function createInvalidSolvedSnapshot(
-  diagnostics: readonly SketchSolveDiagnostic[],
-): SolvedSketchSnapshot {
-  return {
-    schemaVersion: "solved-sketch/v1alpha2",
-    status: { solveState: "failed", constraintState: "inconsistent" },
-    solvedEntities: [],
-    solvedPoints: [],
-    constraintStatuses: [],
-    dimensionStatuses: [],
-    diagnostics: [...diagnostics],
-  };
-}
-
 function mapSketchSolverDiagnostic(
   sketchId: SketchId,
   diagnostic: {
@@ -3697,6 +3681,19 @@ async function buildSketchRecord(
     },
   );
 
+  // T17d (B5): the derivation every commit, restore and rebuild uses.
+  const { solvedSnapshot, derivedValidity } = deriveCommittedSketchValidity({
+    kind: "solved",
+    solvedSnapshot: solved.solvedSnapshot,
+    validationIsValid: validation.isValid,
+    diagnostics: [
+      projection.diagnostics,
+      validation.diagnostics,
+      solved.diagnostics,
+      regions.diagnostics,
+    ],
+    offsetDiagnostics: solvedOffsetDiagnostics,
+  });
   return {
     ownerDocumentId: input.documentId,
     ownerRevisionId: input.revisionId,
@@ -3710,20 +3707,10 @@ async function buildSketchRecord(
       constructionId: "construction_plane-xy",
     },
     definition: input.definition,
-    solvedSnapshot: solved.solvedSnapshot,
-    derivedValidity: withRelationshipScopedDiagnostics(
-      deriveSketchValidity({
-        solvedSnapshot: solved.solvedSnapshot,
-        diagnostics: mergeSketchSolveDiagnostics(
-          validation.diagnostics,
-          solved.diagnostics,
-          regions.diagnostics,
-        ),
-      }),
-      solvedOffsetDiagnostics,
-    ),
+    solvedSnapshot,
+    derivedValidity,
     projectedReferences: projection.projectedReferences,
-    regions: validation.isValid ? regions.regions : [],
+    regions: derivedValidity.state === "current" ? regions.regions : [],
   };
 }
 
@@ -3758,10 +3745,14 @@ async function rebuildSketchesForDocumentVariables(input: {
     });
 
     if (!resolvedDefinition.ok) {
-      const sketchDiagnostics = resolvedDefinition.diagnostics.map(
-        mapModelingDiagnosticToSketchDiagnostic,
+      const { solvedSnapshot, derivedValidity } = deriveCommittedSketchValidity(
+        {
+          kind: "unresolvedValues",
+          diagnostics: resolvedDefinition.diagnostics.map(
+            mapModelingDiagnosticToSketchDiagnostic,
+          ),
+        },
       );
-      const solvedSnapshot = createInvalidSolvedSnapshot(sketchDiagnostics);
       diagnostics.push(...resolvedDefinition.diagnostics);
       sketches.push({
         ...sketch,
@@ -3771,10 +3762,7 @@ async function rebuildSketchesForDocumentVariables(input: {
           ownerRevisionId: input.nextRevisionId,
           definition,
           solvedSnapshot,
-          derivedValidity: deriveSketchValidity({
-            solvedSnapshot,
-            diagnostics: sketchDiagnostics,
-          }),
+          derivedValidity,
           regions: [],
         },
       });
@@ -3865,39 +3853,23 @@ async function rebuildSketchesForDocumentVariables(input: {
     ];
 
     diagnostics.push(...sketchDiagnostics);
-    const sketchValidity = deriveSketchValidity({
+    const { solvedSnapshot, derivedValidity } = deriveCommittedSketchValidity({
+      kind: "solved",
       solvedSnapshot: solved.solvedSnapshot,
-      diagnostics: mergeSketchSolveDiagnostics(
+      validationIsValid: validation.isValid,
+      diagnostics: [
         projection.diagnostics,
         validation.diagnostics,
         solved.diagnostics,
         regions.diagnostics,
-        validation.isValid
-          ? []
-          : [
-              {
-                code: "sketch-validation-failed",
-                severity: "error" as const,
-                message:
-                  "The authored sketch has invalid or unresolved requirements.",
-                target: null,
-              },
-            ],
-      ),
+      ],
+      offsetDiagnostics: solvedOffsetDiagnostics,
     });
-
-    const derivedValidity = withRelationshipScopedDiagnostics(
-      sketchValidity,
-      solvedOffsetDiagnostics,
-    );
     const sketchRecord: SketchRecord = {
       ...sketch.sketch,
       ownerRevisionId: input.nextRevisionId,
       definition,
-      solvedSnapshot: {
-        ...solved.solvedSnapshot,
-        diagnostics: sketchValidity.diagnostics,
-      },
+      solvedSnapshot,
       derivedValidity,
       projectedReferences: structuredClone(projection.projectedReferences),
       regions:
@@ -5418,6 +5390,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
               );
               return {
                 projectedReferences: projected.projectedReferences,
+                projectionDiagnostics: projected.diagnostics,
                 validation,
                 solve,
                 regions,
@@ -5425,29 +5398,31 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
               };
             })()
           : null;
-        const expressionDiagnostics = resolvedDefinition.ok
-          ? []
-          : resolvedDefinition.diagnostics.map(
-              mapModelingDiagnosticToSketchDiagnostic,
-            );
-        const solvedSnapshot =
-          evaluation?.solve.solvedSnapshot ??
-          createInvalidSolvedSnapshot(expressionDiagnostics);
-        const derivedDiagnostics = evaluation
-          ? mergeSketchSolveDiagnostics(
-              evaluation.validation.diagnostics,
-              evaluation.solve.diagnostics,
-              evaluation.regions.diagnostics,
-            )
-          : expressionDiagnostics;
-        const sketchValidity = deriveSketchValidity({
-          solvedSnapshot,
-          diagnostics: derivedDiagnostics,
-        });
-        const derivedValidity = withRelationshipScopedDiagnostics(
-          sketchValidity,
-          evaluation?.offsetDiagnostics ?? [],
-        );
+        // T17d (B5): the derivation Finish (commit) uses, same inputs.
+        const { solvedSnapshot, derivedValidity } =
+          deriveCommittedSketchValidity(
+            evaluation
+              ? {
+                  kind: "solved",
+                  solvedSnapshot: evaluation.solve.solvedSnapshot,
+                  validationIsValid: evaluation.validation.isValid,
+                  diagnostics: [
+                    evaluation.projectionDiagnostics,
+                    evaluation.validation.diagnostics,
+                    evaluation.solve.diagnostics,
+                    evaluation.regions.diagnostics,
+                  ],
+                  offsetDiagnostics: evaluation.offsetDiagnostics,
+                }
+              : {
+                  kind: "unresolvedValues",
+                  diagnostics: resolvedDefinition.ok
+                    ? []
+                    : resolvedDefinition.diagnostics.map(
+                        mapModelingDiagnosticToSketchDiagnostic,
+                      ),
+                },
+          );
         const sketchRecord: SketchRecord = {
           ownerDocumentId: document.documentId,
           ownerRevisionId: document.revisionId,
@@ -5458,10 +5433,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
           label: sketch.label,
           planeSupport: sketch.plane.support,
           definition: structuredClone(sketch.definition),
-          solvedSnapshot: {
-            ...solvedSnapshot,
-            diagnostics: sketchValidity.diagnostics,
-          },
+          solvedSnapshot,
           derivedValidity,
           projectedReferences: structuredClone(
             evaluation?.projectedReferences ?? [],
@@ -6119,18 +6091,18 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
     let projectedReferences = [] as Awaited<
       ReturnType<MockKernelAdapter["projectSketchExternalReferences"]>
     >["projectedReferences"];
-    let solvedSnapshot: SolvedSketchSnapshot;
-    let offsetDiagnostics: SketchSolveDiagnostic[] = [];
     let derivedRegions = [] as Awaited<
       ReturnType<SketchSolverAdapter["deriveSketchRegions"]>
     >["regions"];
-    let sketchDiagnostics: SketchSolveDiagnostic[];
+    let derivation: CommittedSketchDerivation;
 
     if (!resolvedDefinition.ok) {
-      sketchDiagnostics = resolvedDefinition.diagnostics.map(
-        mapModelingDiagnosticToSketchDiagnostic,
-      );
-      solvedSnapshot = createInvalidSolvedSnapshot(sketchDiagnostics);
+      derivation = {
+        kind: "unresolvedValues",
+        diagnostics: resolvedDefinition.diagnostics.map(
+          mapModelingDiagnosticToSketchDiagnostic,
+        ),
+      };
     } else {
       const projection = await this.projectSketchExternalReferences({
         contractVersion: CONTRACT_VERSION,
@@ -6194,41 +6166,24 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
           modelingTolerance: snapshot.document.settings.modelingTolerance,
         },
       );
-      solvedSnapshot = solved.solvedSnapshot;
-      offsetDiagnostics = solvedOffsetDiagnostics;
       derivedRegions = regions.regions;
-      sketchDiagnostics = mergeSketchSolveDiagnostics(
-        projection.diagnostics,
-        validation.diagnostics,
-        solved.diagnostics,
-        regions.diagnostics,
-        validation.isValid
-          ? []
-          : [
-              {
-                code: "sketch-validation-failed",
-                severity: "error" as const,
-                message:
-                  "The authored sketch has invalid or unresolved requirements.",
-                target: null,
-              },
-            ],
-      );
+      derivation = {
+        kind: "solved",
+        solvedSnapshot: solved.solvedSnapshot,
+        validationIsValid: validation.isValid,
+        diagnostics: [
+          projection.diagnostics,
+          validation.diagnostics,
+          solved.diagnostics,
+          regions.diagnostics,
+        ],
+        offsetDiagnostics: solvedOffsetDiagnostics,
+      };
     }
 
-    const sketchValidity = deriveSketchValidity({
-      solvedSnapshot,
-      diagnostics: sketchDiagnostics,
-    });
-    solvedSnapshot = {
-      ...solvedSnapshot,
-      diagnostics: sketchValidity.diagnostics,
-    };
-    // [TECH] G16: relationship-scoped, never in the solved snapshot.
-    const derivedValidity = withRelationshipScopedDiagnostics(
-      sketchValidity,
-      offsetDiagnostics,
-    );
+    // T17d (B5): the derivation restore and rebuild use too.
+    const { solvedSnapshot, derivedValidity } =
+      deriveCommittedSketchValidity(derivation);
     const commitDiagnostics = derivedValidity.diagnostics.map((diagnostic) =>
       mapSketchSolverDiagnostic(sketchId, diagnostic),
     );

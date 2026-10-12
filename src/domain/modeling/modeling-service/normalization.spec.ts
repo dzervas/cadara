@@ -7,6 +7,7 @@ import {
   normalizeSketchDerivationDefinition,
   normalizeSketchEntityDefinition,
   normalizeSolvedSketchSnapshot,
+  normalizeWorkspaceSnapshot,
 } from "@/domain/modeling/modeling-service/normalization";
 import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
@@ -18,6 +19,13 @@ import {
 } from "@/contracts/sketch/runtime-schema";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import { deleteSelectedSketchGeometry } from "@/domain/editor/sketch-session";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import {
+  eid,
+  entityRef,
+  mirroredSession,
+} from "@/domain/editor/sketch-mirror.fixtures";
 
 // Lane: logic (per docs/testing.md — normalization is a domain persistence/normalization
 // seam under src/domain/, exercised through its exported entrypoint).
@@ -555,4 +563,111 @@ test("T15b: a sketch-datum mirror and failedDerivationIds round-trip through nor
   expect(() =>
     normalizeSolvedSketchSnapshot({ ...snapshot, failedDerivationIds: [1] }),
   ).toThrow("Invalid failed derived relationship id payload.");
+  // T17d (B4): the hand normalizer keeps the carried reasons (shape only).
+  expect(snapshot.failedDerivationReasons).toEqual({
+    sketch_derivation_2_mirror: ["axisMissing"],
+  });
+  expect(() =>
+    normalizeSolvedSketchSnapshot({
+      ...snapshot,
+      failedDerivationReasons: { sketch_derivation_2_mirror: ["axisBent"] },
+    }),
+  ).toThrow("Invalid failed derived relationship reason payload.");
+}, 120_000);
+
+// T17d (B4, [TECH] T17-6; logic lane, seams: the workspace snapshot's
+// worker-transport validation (`normalizeWorkspaceSnapshot`), the solved
+// snapshot's runtime validation, and the hand normalizer's shape parity).
+// The carried reasons round-trip; they must name exactly the failed
+// relationships, each with one or more distinct reasons from the closed
+// union. Red on base: the field is absent from the solve and unknown to
+// every seam (typia rejects it as an extra property).
+test("T17d B4: failedDerivationReasons cross the worker transport and runtime validation; mismatched, empty, duplicate, unknown and missing reasons are rejected", async () => {
+  const { session } = mirroredSession("free");
+  const broken = deleteSelectedSketchGeometry(enterSketchSession(session), [
+    entityRef(session, eid("axis")),
+  ]);
+  const snapshot = broken.liveSolve!.solvedSnapshot;
+  const [derivationId] = snapshot.failedDerivationIds ?? [];
+  expect(derivationId, "premise: the mirror failed").toBeDefined();
+  const reasons = { [derivationId!]: ["axisMissing"] };
+  expect(snapshot.failedDerivationReasons).toEqual(reasons);
+  expect(validateSolvedSketchSnapshot(snapshot).success).toBe(true);
+  const messages = (value: unknown) => {
+    const result = validateSolvedSketchSnapshot(value);
+    return result.success ? [] : result.issues.map((issue) => issue.message);
+  };
+  const exactly =
+    "Failed derived relationship reasons must name exactly the failed relationships.";
+  const distinct =
+    "A failed derived relationship must carry one or more distinct reasons.";
+  expect(
+    messages({
+      ...snapshot,
+      failedDerivationReasons: { other: ["axisMissing"] },
+    }),
+  ).toContain(exactly);
+  expect(
+    messages({ ...snapshot, failedDerivationReasons: undefined }),
+  ).toContain(exactly);
+  expect(
+    messages({ ...snapshot, failedDerivationReasons: { [derivationId!]: [] } }),
+  ).toContain(distinct);
+  expect(
+    messages({
+      ...snapshot,
+      failedDerivationReasons: {
+        [derivationId!]: ["axisMissing", "axisMissing"],
+      },
+    }),
+  ).toContain(distinct);
+  expect(
+    validateSolvedSketchSnapshot({
+      ...snapshot,
+      failedDerivationReasons: { [derivationId!]: ["axisBent"] },
+    }).success,
+    "the reason union is closed",
+  ).toBe(false);
+
+  // Worker transport: the committed record's reasons survive the workspace
+  // snapshot's validation; an unknown reason is refused there.
+  const adapter = new MockKernelAdapter();
+  const request = {
+    contractVersion: CONTRACT_VERSION,
+    documentId: "doc_workspace",
+  } as const;
+  const before = await adapter.getDocumentSnapshot(request);
+  const commit = await adapter.commitSketch({
+    ...request,
+    baseRevisionId: before.snapshot.document.revisionId,
+    solverCorrelation: {
+      requestId: "request_t17d",
+      projectionRequestId: "request_t17d:project",
+      validationRequestId: "request_t17d:validate",
+      solveRequestId: "request_t17d:solve",
+      regionRequestId: "request_t17d:regions",
+    },
+    sketchId: null,
+    sketchLabel: "Broken mirror",
+    plane: before.snapshot.document.sketches[0]!.plane,
+    definition: broken.definition,
+  } as never);
+  const workspace = (await adapter.getDocumentSnapshot(request)).snapshot;
+  const recordIndex = workspace.document.sketches.findIndex(
+    (entry) => entry.sketchId === commit.sketchId,
+  );
+  const transported = normalizeWorkspaceSnapshot(
+    JSON.parse(JSON.stringify(workspace)),
+  );
+  expect(
+    transported.document.sketches[recordIndex]!.sketch.solvedSnapshot
+      .failedDerivationReasons,
+  ).toEqual(reasons);
+  const forged = JSON.parse(JSON.stringify(workspace));
+  forged.document.sketches[
+    recordIndex
+  ].sketch.solvedSnapshot.failedDerivationReasons = {
+    [derivationId!]: ["axisBent"],
+  };
+  expect(() => normalizeWorkspaceSnapshot(forged)).toThrow();
 }, 120_000);

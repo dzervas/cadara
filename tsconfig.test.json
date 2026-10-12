@@ -41,7 +41,6 @@
     "src/contracts/sketch/advanced-entities.spec.ts",
     "src/contracts/sketch/derivation-runtime-schema.spec.ts",
     "src/contracts/sketch/derived-geometry.spec.ts",
-    "src/contracts/sketch/derived-validity.spec.ts",
     "src/contracts/sketch/edit-intersections.spec.ts",
     "src/contracts/sketch/inferred-constraint-solver.spec.ts",
     "src/contracts/sketch/mirror-requirements.spec.ts",
