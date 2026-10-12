@@ -44,7 +44,12 @@ import {
 import { extractPlanarFaceData } from "@/domain/modeling/occ/planes";
 import { classifySemanticStageTopology } from "@/domain/modeling/occ/topology-naming";
 import { getDefaultOpenCascadeInstance } from "@/infrastructure/occ/runtime";
-import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import type {
+  OpenCascadeInstance,
+  OpenCascadeNativeTopologyKernelHost,
+} from "@/domain/modeling/occ/runtime";
+import { resolveNativeTopologyTargetId } from "@/domain/modeling/occ/features/shared";
+import { parseNativeShimPayloadJson } from "@/domain/modeling/occ/native-topology-payload";
 import { buildAxisFromLineEdge } from "@/domain/modeling/occ/sketch-profile";
 import {
   OCC_REFERENCE_INVALIDATION_REASONS,
@@ -537,7 +542,66 @@ async function rebuildAfterDimensionEdit(
     "The edited prefix must expose the authored subtopology reference as live.",
   ).toBe(null);
 
-  return rebuildOccAuthoringState(editedState, [baseFeature, consumerFeature]);
+  const nativeId = resolveNativeTopologyTargetId(editedBody, selectedTarget);
+  const nativePayload = parseNativeShimPayloadJson(
+    (oc as unknown as OpenCascadeNativeTopologyKernelHost)
+      .CadaraBuildNativeTopologyPayload!.BuildJson!(
+        editedBody.shape,
+        bodyId,
+        editedBody.topologyToken,
+        0.001,
+        0.5,
+      ),
+  );
+  const nativeTarget = nativePayload.topology.find(
+    (record) =>
+      record.bodyId === bodyId &&
+      record.kind === selectedTarget.kind &&
+      record.id === nativeId,
+  );
+  expect(
+    nativeTarget,
+    "The durable target must marshal to an identity in the current production native topology payload.",
+  ).toBeTruthy();
+  const nativeShapes = new oc.TopTools_IndexedMapOfShape_1();
+  oc.TopExp.MapShapes_1(
+    editedBody.shape,
+    selectedTarget.kind === "edge"
+      ? oc.TopAbs_ShapeEnum.TopAbs_EDGE
+      : oc.TopAbs_ShapeEnum.TopAbs_FACE,
+    nativeShapes,
+  );
+  const nativeShape = nativeShapes.FindKey(nativeTarget!.index);
+  try {
+    const publicShape = selectedTarget.kind === "edge"
+      ? editedBody.edgesById.get(selectedTarget.edgeId)!
+      : editedBody.facesById.get(selectedTarget.faceId)!;
+    expect(
+      nativeShape.IsSame(publicShape),
+      "The marshaled native identity must denote the same current OCC subshape as the semantic public target.",
+    ).toBe(true);
+  } finally {
+    nativeShape.delete();
+    nativeShapes.delete();
+  }
+  const rebuilt = rebuildOccAuthoringState(editedState, [
+    baseFeature,
+    consumerFeature,
+  ]);
+  const rebuiltBody = requireBody(rebuilt, bodyId);
+  const vertexX = [...rebuiltBody.verticesById.values()].map((vertex) => {
+    const point = oc.BRep_Tool.Pnt(vertex);
+    try {
+      return point.X();
+    } finally {
+      point.delete();
+    }
+  });
+  expect(
+    Math.max(...vertexX),
+    "The rebuilt consumer must output the edited 12-wide body, not a stale 10-wide shape.",
+  ).toBeCloseTo(12, 6);
+  return rebuilt;
 }
 
 function createExtrudeDefinition(

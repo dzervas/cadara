@@ -1213,7 +1213,11 @@ function composeNativeTopologyAliases(input: {
 }): OccNativeTopologyIdAliases | undefined {
   const aliases = input.current.nativeTopologyIdAliases;
   if (!aliases) {
-    return undefined;
+    // Fresh native-tracked bodies have implicit native-to-public identity aliases.
+    // Preserve that bridge when semantic reconciliation changes their public IDs.
+    return input.current.nativeTopologyPayload
+      ? createCurrentToReconciledAliases(input.targetByCurrentKey)
+      : undefined;
   }
 
   const compose = <Id extends FaceId | EdgeId | VertexId>(
