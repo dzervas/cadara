@@ -44,10 +44,8 @@ import {
 import { extractPlanarFaceData } from "@/domain/modeling/occ/planes";
 import { classifySemanticStageTopology } from "@/domain/modeling/occ/topology-naming";
 import { getDefaultOpenCascadeInstance } from "@/infrastructure/occ/runtime";
-import type {
-  OpenCascadeInstance,
-  OpenCascadeNativeTopologyKernelHost,
-} from "@/domain/modeling/occ/runtime";
+import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import type { OpenCascadeNativeTopologyKernelHost } from "@/domain/modeling/occ/native-topology-payload";
 import { resolveNativeTopologyTargetId } from "@/domain/modeling/occ/features/shared";
 import { parseNativeShimPayloadJson } from "@/domain/modeling/occ/native-topology-payload";
 import { buildAxisFromLineEdge } from "@/domain/modeling/occ/sketch-profile";
@@ -477,18 +475,23 @@ async function rebuildAfterDimensionEdit(
   } satisfies OccAuthoringFeatureRecord;
   const afterBase = applyFeature(initial, baseFeature);
   const baseBody = requireBody(afterBase, bodyId);
-  const selectedTarget =
-    consumer === "shell"
-      ? ({
-          kind: "face",
-          bodyId,
-          faceId: findPlanarFaceAtZ(oc, baseBody, 6),
-        } as const)
-      : ({
-          kind: "edge",
-          bodyId,
-          edgeId: findEdgeByEndpoints(oc, baseBody, [10, 0, 0], [10, 0, 6]),
-        } as const);
+  if (!baseBody) {
+    throw new Error(`Expected dimension-edit base body ${bodyId} to exist.`);
+  }
+  const selectedTarget = (() => {
+    if (consumer === "shell") {
+      const faceId = findPlanarFaceAtZ(oc, baseBody, 6);
+      if (!faceId) {
+        throw new Error("Expected the shell's top planar face at z=6.");
+      }
+      return { kind: "face", bodyId, faceId } as const;
+    }
+    const edgeId = findEdgeByEndpoints(oc, baseBody, [10, 0, 0], [10, 0, 6]);
+    if (!edgeId) {
+      throw new Error("Expected the moving vertical consumer edge at x=10.");
+    }
+    return { kind: "edge", bodyId, edgeId } as const;
+  })();
   const consumerFeature =
     selectedTarget.kind === "face"
       ? ({
@@ -517,6 +520,9 @@ async function rebuildAfterDimensionEdit(
 
   const rebuiltPrefix = rebuildOccAuthoringState(editedState, [baseFeature]);
   const editedBody = requireBody(rebuiltPrefix, bodyId);
+  if (!editedBody) {
+    throw new Error(`Expected rebuilt dimension-edit prefix body ${bodyId}.`);
+  }
   const semanticTargetId =
     selectedTarget.kind === "edge"
       ? findEdgeByEndpoints(oc, editedBody, [12, 0, 0], [12, 0, 6])
@@ -563,15 +569,18 @@ async function rebuildAfterDimensionEdit(
     nativeTarget,
     "The durable target must marshal to an identity in the current production native topology payload.",
   ).toBeTruthy();
+  if (!nativeTarget) {
+    throw new Error("Expected the durable target in the current native payload.");
+  }
   const nativeShapes = new oc.TopTools_IndexedMapOfShape_1();
   oc.TopExp.MapShapes_1(
     editedBody.shape,
-    selectedTarget.kind === "edge"
+    (selectedTarget.kind === "edge"
       ? oc.TopAbs_ShapeEnum.TopAbs_EDGE
-      : oc.TopAbs_ShapeEnum.TopAbs_FACE,
+      : oc.TopAbs_ShapeEnum.TopAbs_FACE) as never,
     nativeShapes,
   );
-  const nativeShape = nativeShapes.FindKey(nativeTarget!.index);
+  const nativeShape = nativeShapes.FindKey(nativeTarget.index);
   try {
     const publicShape = selectedTarget.kind === "edge"
       ? editedBody.edgesById.get(selectedTarget.edgeId)!
@@ -589,6 +598,9 @@ async function rebuildAfterDimensionEdit(
     consumerFeature,
   ]);
   const rebuiltBody = requireBody(rebuilt, bodyId);
+  if (!rebuiltBody) {
+    throw new Error(`Expected rebuilt dimension-edit consumer body ${bodyId}.`);
+  }
   const vertexX = [...rebuiltBody.verticesById.values()].map((vertex) => {
     const point = oc.BRep_Tool.Pnt(vertex);
     try {
