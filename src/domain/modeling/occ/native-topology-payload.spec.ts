@@ -242,7 +242,12 @@ test("src/domain/modeling/occ/native-topology-payload.spec.ts", async () => {
         ],
       },
       { ...payload, status: "unsupported", finalFaces: payload.finalFaces },
-      { ...payload, status: "available", finalFaces: [] },
+      {
+        ...payload,
+        finalFaces: [
+          { ...payload.finalFaces[0], rightSourceFaceNativeIds: ["face_right", "face_right"] },
+        ],
+      },
       { ...payload, operation: "unsupported-operation" },
     ]) {
       expect(
@@ -504,19 +509,6 @@ test("src/domain/modeling/occ/native-topology-payload.spec.ts", async () => {
       },
       "Native shim parsing should reject empty native diagnostic messages.",
     );
-  }
-
-  async function loadNativeOpenCascadeForTest() {
-    const module = (await import("../../../../public/cadara-occ.js")) as {
-      default: NativeOpenCascadeMainJSForTest;
-    };
-    const wasmBinary = new Uint8Array(
-      await readFile(
-        new URL("../../../../public/cadara-occ.wasm", import.meta.url),
-      ),
-    );
-
-    return new module.default({ wasmBinary });
   }
 
   async function testNativeExactBrepPreservesDoublePrecision() {
@@ -1457,6 +1449,44 @@ test("src/domain/modeling/occ/native-topology-payload.spec.ts", async () => {
   await testNativeBooleanOperandHistoryForPartiallyOverlappingBoxesWhenAvailable();
   await testNativeBooleanTransactionRetainsExactG22Predecessor();
   await testNativeMeshPayloadPreservesFaceOrientation();
+});
+
+async function loadNativeOpenCascadeForTest() {
+  const module = (await import("../../../../public/cadara-occ.js")) as {
+    default: NativeOpenCascadeMainJSForTest;
+  };
+  const wasmBinary = new Uint8Array(
+    await readFile(new URL("../../../../public/cadara-occ.wasm", import.meta.url)),
+  );
+  return new module.default({ wasmBinary });
+}
+
+test("native disjoint common preserves available empty operand history", async () => {
+  const oc = await loadNativeOpenCascadeForTest();
+  const origin = new oc.gp_Pnt_3(10, 0, 0);
+  const left = new oc.BRepPrimAPI_MakeBox_2(2, 2, 2);
+  const right = new oc.BRepPrimAPI_MakeBox_3(origin, 2, 2, 2);
+  const result = oc.CadaraExecuteNativeFeatureTransaction
+    .BuildBooleanCommittedShapeTransaction?.(
+      left.Shape(), right.Shape(), "intersect",
+      "body_empty_common" as BodyId, "t_empty_common", 0.1, 0.5,
+    );
+  try {
+    expect(result?.IsDone()).toBe(true);
+    const payload = parseNativeShimPayloadJson(result!.PayloadJson());
+    expect(payload.topology).toEqual([]);
+    const history = parseNativeBooleanOperandHistoryJson(
+      result!.BooleanOperandHistoryJson!(),
+    );
+    expect(history.status).toBe("available");
+    expect(history.finalFaces).toEqual([]);
+    expect(history.diagnostics).toEqual([]);
+  } finally {
+    result?.delete?.();
+    left.delete?.();
+    right.delete?.();
+    origin.delete?.();
+  }
 });
 
 function subtract(left: Point3, right: Point3): Point3 {
