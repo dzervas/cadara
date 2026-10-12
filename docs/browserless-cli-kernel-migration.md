@@ -608,3 +608,27 @@ aggregate UI/static/E2E execution is claimed. Separate targeted/static passes
 above do not close that remaining source/apply gate. Final revision and detailed
 results are recorded in `/tmp/cadara-browserless-cli-final-gate-merge-evidence.md`.
 
+## Explicit importer deferral and ticket 01 disposition (2026-10-12)
+
+The user explicitly directed: **defer Onshape importer changes for later**.
+This scope decision supersedes the preceding requirement to repair the JHo
+importer anchor before CLI02 onward. Ticket 01 acceptance closure is **runtime
+migration qualified; outstanding importer rows deferred**, not “all acceptance
+green”. The parent owns tracker disposition and subsequent tickets.
+
+The JHo source-provenance blocker is real: captured coordinates and canonical
+within-sketch coincidence do not establish the opaque external reference's
+source creator/owner/point identity. Investigation left its source workspace
+clean; there is no source implementation to merge. No coordinate fallback,
+synthetic provenance, relaxed matching, fake capability or weaker assertion is
+authorized by this deferral. Exact original tests remain unchanged; no claim is
+made that whole-importer acceptance passes.
+
+The previously qualified native kernel, promoted JS/WASM/declarations, asset
+stamp, browser/filesystem runtime and real sheet/solid STEP export remain
+unchanged. No native build or repeat qualification is needed for this docs-only
+disposition. The required aggregate is **not green**; the known importer failure
+and bounded aggregate result remain visible rather than being waived into a
+passing test result. Evidence and this disposition's fresh bounded aggregate
+result: `/tmp/cadara-browserless-cli-importer-deferral-merge.md`.
+
