@@ -27,6 +27,7 @@ import {
 } from "@/contracts/sketch/offset-derivation-frame";
 import {
   mapOffsetFrameOutputs,
+  offsetDeletedOutput,
   offsetFrameCircleRadius,
   offsetFrameEntityCotangent,
   offsetFrameEntityJvp,
@@ -1351,6 +1352,23 @@ function evaluateOffsetRelationship(
     context.failures.push({
       derivationId: relationship.derivationId,
       diagnostic: frame.diagnostic,
+    });
+    return null;
+  }
+  // T17c: a deleted output curve is reported by label.
+  const deleted = offsetDeletedOutput(
+    relationship,
+    (entityId) => context.entityById.get(entityId)?.label,
+  );
+  if (deleted) {
+    context.failures.push({
+      derivationId: relationship.derivationId,
+      diagnostic: diagnostic(
+        OFFSET_DIAGNOSTIC_CODES.topologyChanged,
+        "error",
+        deleted.message,
+        { kind: "entity", entityId: deleted.seedEntityId },
+      ),
     });
     return null;
   }

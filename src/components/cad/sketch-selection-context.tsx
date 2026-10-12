@@ -1,7 +1,7 @@
 /**
  * T16a ([TECH] T16-22, review R-1): the left floating panel column of the
  * sketch session: the validation status first, then the selection-context
- * panels (Mirror, Tangent). One positioned column, so they flow and never
+ * panels (Mirror, Offset (T17c), Tangent). One positioned column, so they flow and never
  * overlap. Only the panels take the pointer.
  */
 

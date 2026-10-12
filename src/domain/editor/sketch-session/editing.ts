@@ -141,13 +141,16 @@ import {
   getSelectedSketchGeometryIds,
 } from "./selection";
 
-/** Explicit rejection of deleting a derived offset shell on its own. */
+/**
+ * Explicit rejection of deleting a derived offset shell on its own; T17c
+ * ([TECH] T17-5): the text names the removal that exists.
+ */
 export const DERIVED_SHELL_DELETE_MESSAGE =
-  "An offset spline curve is part of its offset and cannot be deleted on its own.";
+  "An offset spline curve is part of its offset and can't be deleted on its own. To remove the whole offset, select it, then Offset → Remove offset.";
 
-/** Explicit rejection of deleting a derived offset shell's driven end point on its own. */
+/** Explicit rejection of deleting a derived offset shell's driven end point on its own (T17c: names the removal). */
 export const DERIVED_SHELL_POINT_DELETE_MESSAGE =
-  "An offset spline curve's end point is part of its offset and cannot be deleted on its own.";
+  "An offset spline curve's end point is part of its offset and can't be deleted on its own. To remove the whole offset, select it, then Offset → Remove offset.";
 
 /**
  * The driven terminal points of every derived offset shell. No entity
