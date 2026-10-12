@@ -135,17 +135,12 @@ import {
   replayHistoryEntry,
 } from "./operation-history";
 import { requireRenderExport } from "@/contracts/render/runtime-schema";
+import { createRevisionId, parseRevisionSequence } from "../document-revision";
 
 export function createModelingService(
   adapter: ModelingKernelAdapter,
   options: ModelingServiceOptions,
-): ModelingService & {
-  initialize(): Promise<ModelingHistoryRestoreState>;
-  createDocumentTransaction(input: {
-    name: string;
-    observe: (transaction: import("@/domain/modeling/document-repository").DocumentRepositoryMutationResult) => void;
-  }): Promise<ModelingDocumentFileMutationResult>;
-} {
+): ModelingService {
   const exportProviders =
     options.exportProviders ?? createExportProviderRegistry([]);
   const currentDocumentId = normalizeCurrentDocumentId(
@@ -1443,16 +1438,6 @@ export function createModelingService(
         documentChangeListeners.delete(listener);
       };
     },
-    async initialize() {
-      await ensureInitialized();
-      await repositoryChangePromise;
-      return historyRestoreState;
-    },
-    async createDocumentTransaction(input) {
-      await ensureInitialized();
-      await repositoryChangePromise;
-      return replaceCurrentAuthoredDocument({ ...(await getSeedAuthoredDocument()), name: input.name }, [], { observeTransaction: input.observe });
-    },
     async waitForPersistence() {
       await ensureInitialized();
       await repositoryChangePromise;
@@ -1500,10 +1485,29 @@ export function createModelingService(
       );
       return result as OccNativeTopologyWorkerResult<OccNativeExactBrepPayload>;
     },
-    async createNewDocument() {
+    async createNewDocument(input) {
       await ensureInitialized();
       await repositoryChangePromise;
-      return replaceCurrentAuthoredDocument(await getSeedAuthoredDocument());
+      const current = validateSnapshotResponse(
+        await adapter.getDocumentSnapshot(
+          buildDocumentRequest(currentDocumentId),
+        ),
+        currentDocumentId,
+      );
+      const seed = await getSeedAuthoredDocument();
+      // A reset is a new authoritative revision, not a replay of the cached seed.
+      // Reuse the kernel's allocator so subsequent modeling revisions stay ordered.
+      return replaceCurrentAuthoredDocument(
+        {
+          ...seed,
+          name: input?.name ?? seed.name,
+          revisionId: createRevisionId(
+            parseRevisionSequence(current.document.revisionId) + 1,
+          ),
+        },
+        [],
+        { observeTransaction: input?.observe },
+      );
     },
     async importDocument(input) {
       await ensureInitialized();

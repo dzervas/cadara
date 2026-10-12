@@ -31,9 +31,9 @@ it("observes the exact failed replacement transaction and hands off its applied 
     documentRepository: repository,
   });
   try {
-    expect((await service.initialize()).kind).not.toBe("failed");
+    expect((await service.getHistoryRestoreState()).kind).not.toBe("failed");
     let transaction: DocumentRepositoryMutationResult | null = null;
-    const created = await service.createDocumentTransaction({
+    const created = await service.createNewDocument({
       name: "Applied despite write failure",
       observe: (receipt) => {
         transaction = receipt;

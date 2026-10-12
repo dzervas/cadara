@@ -117,10 +117,10 @@ class InstrumentedModelingService implements ModelingService {
     );
   }
 
-  createNewDocument() {
+  createNewDocument(input?: Parameters<ModelingService["createNewDocument"]>[0]) {
     return this.measure(
       "createNewDocument",
-      () => this.inner.createNewDocument(),
+      () => input ? this.inner.createNewDocument(input) : this.inner.createNewDocument(),
       okDiagnosticAttributes,
     );
   }

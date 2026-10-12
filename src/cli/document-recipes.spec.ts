@@ -7,6 +7,89 @@ import { resolve } from "node:path";
 const exec = promisify(execFile);
 const root = resolve(import.meta.dirname, "../..");
 
+it("gives replacements distinct authoritative bases, accepts the latest alias and rejects the first alias", async () => {
+  const directory = await mkdtemp(resolve(tmpdir(), "cadara-replacement-"));
+  try {
+    const file = resolve(directory, "recipe.json");
+    await writeFile(
+      file,
+      JSON.stringify({
+        version: 1,
+        operations: [
+          {
+            version: 1,
+            commandId: "first",
+            operation: "document.create",
+            label: "First",
+            basis: null,
+            as: "first",
+          },
+          {
+            version: 1,
+            commandId: "second",
+            operation: "document.create",
+            label: "Second",
+            basis: null,
+            as: "second",
+          },
+          {
+            version: 1,
+            commandId: "latest",
+            operation: "document.inspect",
+            basis: { alias: "second" },
+          },
+          {
+            version: 1,
+            commandId: "stale-first",
+            operation: "document.inspect",
+            basis: { alias: "first" },
+          },
+          {
+            version: 1,
+            commandId: "never",
+            operation: "document.create",
+            label: "Never",
+            basis: null,
+          },
+        ],
+      }),
+    );
+    const failure = await exec(
+      "bun",
+      ["src/cli/main.ts", "document", "recipe", file],
+      { cwd: root, timeout: 60000 },
+    ).then(
+      () => {
+        throw new Error("Expected stale first alias to conflict");
+      },
+      (error) => error as { code: number; stdout: string; stderr: string },
+    );
+    expect(failure.code).toBe(1);
+    const result = JSON.parse(failure.stdout);
+    expect(
+      result.results.map((r: { outcome: { kind: string } }) => r.outcome.kind),
+    ).toEqual(["completed", "completed", "completed", "conflicted"]);
+    const first = result.results[0].discovery.state;
+    const second = result.results[1].discovery.state;
+    expect(second.revisionId).not.toBe(first.revisionId);
+    expect(second.repositoryHeads).not.toEqual(first.repositoryHeads);
+    expect(result.results[2].discovery).toMatchObject({
+      state: second,
+      document: { label: "Second" },
+      history: { canUndo: false, canRedo: false },
+    });
+    expect(result.results[3].completion.live.state).toEqual(second);
+    expect(result.results[3].discovery).toBeNull();
+    expect(result.unexecuted).toEqual(["never"]);
+    expect(result.cleanup).toMatchObject({
+      kind: "closed",
+      resourcesReleased: true,
+    });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 90000);
+
 it("runs an isolated sequential recipe in a real Bun process with clean JSON stdout", async () => {
   const directory = await mkdtemp(resolve(tmpdir(), "cadara-recipe-"));
   try {
