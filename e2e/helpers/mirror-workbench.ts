@@ -22,6 +22,7 @@ export type MirrorSketchSnapshot = {
     radius?: number;
   }[];
   liveRegions?: { status: string; count: number };
+  dimensions?: { id: string; kind: string }[];
   derivedRelationships: {
     id: string;
     kind: string;
@@ -89,15 +90,20 @@ export async function glidePress(page: Page, control: Locator) {
   await page.mouse.up();
 }
 
-/** Shift-placed gliding clicks (no inferred constraint), then back to Select. */
+/**
+ * Shift-placed gliding clicks (no inferred constraint), optionally finished
+ * with Enter (a spline), then back to Select.
+ */
 export async function placeFreely(
   workbench: SketchWorkbenchHarness,
   points: readonly CanvasPoint[],
+  finishWithEnter = false,
 ) {
   const page = workbench.page;
   await page.keyboard.down("Shift");
   for (const point of points) await glideClick(workbench, point);
   await page.keyboard.up("Shift");
+  if (finishWithEnter) await page.keyboard.press("Enter");
   await page.keyboard.press("Escape");
   await page.keyboard.press("Escape");
 }

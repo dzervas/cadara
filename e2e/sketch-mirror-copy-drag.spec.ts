@@ -1,5 +1,15 @@
 import { expect, test } from "@playwright/test";
 
+import {
+  glideDrag,
+  waitForCommittedAction,
+  waitForUndoneAction,
+} from "./helpers/acceptance";
+import {
+  glideClick,
+  glidePress,
+  placeFreely,
+} from "./helpers/mirror-workbench";
 import { SketchWorkbenchHarness } from "./helpers/sketch-workbench";
 
 test.setTimeout(90_000);
@@ -59,30 +69,23 @@ test("T15d: dragging a mirror copy's end with a gliding pointer moves its seed a
   const workbench = new SketchWorkbenchHarness(page);
   await workbench.open();
   await workbench.activateTool("Start a new sketch.");
-  await page
-    .getByRole("button", { name: /Top Plane/ })
-    .first()
-    .click();
+  await glidePress(
+    page,
+    page.getByRole("button", { name: /Top Plane/ }).first(),
+  );
   await workbench.expectSketchSessionActive();
 
   // The seed line, then the construction axis, placed with Shift so no
   // inferred constraint is authored: the sketch has no constraint at all
   // (probe 9a: before T15d such a copy drag took the unconstrained fast path
   // and silently snapped back).
-  const shiftClicks = async (points: readonly { x: number; y: number }[]) => {
-    await page.keyboard.down("Shift");
-    for (const point of points) await workbench.clickViewportAt(point);
-    await page.keyboard.up("Shift");
-    await page.keyboard.press("Escape");
-    await page.keyboard.press("Escape");
-  };
   await workbench.activateTool("Create line geometry.");
-  await shiftClicks([SEED_START, SEED_END]);
+  await placeFreely(workbench, [SEED_START, SEED_END]);
   await workbench.activateTool(
     "Toggle sketch geometry construction-only or mark new sketch geometry as construction.",
   );
   await workbench.activateTool("Create line geometry.");
-  await shiftClicks([AXIS_START, AXIS_END]);
+  await placeFreely(workbench, [AXIS_START, AXIS_END]);
   await expect
     .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
     .toContain("2 entities staged");
@@ -91,20 +94,21 @@ test("T15d: dragging a mirror copy's end with a gliding pointer moves its seed a
   const search = page.getByPlaceholder("Search tools");
   await search.fill("Sketch Mirror");
   await search.press("Enter");
-  await workbench.clickViewportAt({ x: 490, y: 270 });
-  await workbench.clickViewportAt({ x: 800, y: 420 });
+  await glideClick(workbench, { x: 490, y: 270 });
+  await glideClick(workbench, { x: 800, y: 420 });
   // T16d: the picks stage the mirror; Enter confirms it.
   await expect(
     page.locator(
       '[data-sketch-viewport-floating-input="sketch-mirror-confirm"]',
     ),
   ).toBeVisible({ timeout: 10_000 });
-  await page.keyboard.press("Enter");
+  await waitForCommittedAction(page, "Mirror", () =>
+    page.keyboard.press("Enter"),
+  );
   await expect
     .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
     .toContain("3 entities staged");
   await page.keyboard.press("Escape");
-  await workbench.waitForAnimationFrames(2);
 
   const seedStart = await hoveredPointId(workbench, SEED_START);
   const axisStart = await hoveredPointId(workbench, AXIS_START);
@@ -124,28 +128,11 @@ test("T15d: dragging a mirror copy's end with a gliding pointer moves its seed a
     "premise: the copy is the seed's mirror image",
   ).toBeLessThan(1e-9);
 
-  // A gliding drag of the copy's end (several pointer moves, never a jump).
-  const box = (await workbench.viewport().boundingBox())!;
-  await page.mouse.move(box.x + COPY_START.x, box.y + COPY_START.y);
-  await page.mouse.down();
-  for (const fraction of [0.25, 0.5, 0.75, 1])
-    await page.mouse.move(
-      box.x + COPY_START.x + (COPY_TARGET.x - COPY_START.x) * fraction,
-      box.y + COPY_START.y + (COPY_TARGET.y - COPY_START.y) * fraction,
-      { steps: 4 },
-    );
-  await workbench.waitForAnimationFrames(2);
-  await page.mouse.up();
-
-  await expect
-    .poll(async () => {
-      const after = await livePoints(workbench);
-      return Math.hypot(
-        byId(after, copyStart)[0] - byId(before, copyStart)[0],
-        byId(after, copyStart)[1] - byId(before, copyStart)[1],
-      );
-    })
-    .toBeGreaterThan(0);
+  // A gliding drag of the copy's end (several pointer moves, never a jump):
+  // one committed action.
+  await waitForCommittedAction(page, "Move Sketch Geometry", () =>
+    glideDrag(workbench, COPY_START, COPY_TARGET),
+  );
   const after = await livePoints(workbench);
   const copy = byId(after, copyStart);
   const seed = byId(after, seedStart);
@@ -173,7 +160,9 @@ test("T15d: dragging a mirror copy's end with a gliding pointer moves its seed a
   expect(byId(after, axisEnd), "the axis stays").toEqual(byId(before, axisEnd));
 
   // Undo restores the pre-drag sketch in one step.
-  await page.keyboard.press("Control+z");
+  await waitForUndoneAction(page, "Move Sketch Geometry", () =>
+    page.keyboard.press("Control+z"),
+  );
   await expect
     .poll(async () => {
       const undone = await livePoints(workbench);

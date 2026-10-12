@@ -12,17 +12,21 @@ import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,
 } from "@/domain/editor/sketch-session/test-snap-scale";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 
 test("sketch contents reflect current authored records rather than a replay cursor", () => {
-  let session = withSketchSnapScale(
-    createNewSketchSessionFromSupport(
-      {
-        kind: "construction",
-        constructionId: "construction_plane-xy",
-      },
-      OCC_KERNEL_SETTINGS,
+  // Entered as the app enters a sketch (T17-10′).
+  let session = enterSketchSession(
+    withSketchSnapScale(
+      createNewSketchSessionFromSupport(
+        {
+          kind: "construction",
+          constructionId: "construction_plane-xy",
+        },
+        OCC_KERNEL_SETTINGS,
+      ),
+      SPEC_SKETCH_UNITS_PER_PIXEL,
     ),
-    SPEC_SKETCH_UNITS_PER_PIXEL,
   );
   for (const y of [0, 1])
     session = acceptSketchDraw(

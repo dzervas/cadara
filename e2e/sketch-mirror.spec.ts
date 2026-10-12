@@ -1,5 +1,13 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import {
+  glideDoubleClick,
+  glideDrag,
+  waitForCommittedAction,
+  waitForRedoneAction,
+  waitForUndoneAction,
+} from "./helpers/acceptance";
+import { glideClick, placeFreely } from "./helpers/mirror-workbench";
 import { SketchWorkbenchHarness } from "./helpers/sketch-workbench";
 
 test.setTimeout(180_000);
@@ -237,21 +245,6 @@ async function expectStaged(workbench: SketchWorkbenchHarness, count: number) {
     .toContain(`${count} entities staged`);
 }
 
-/** Shift-placed clicks (no inferred constraint), then back to Select. */
-async function placeFreely(
-  workbench: SketchWorkbenchHarness,
-  points: readonly { x: number; y: number }[],
-  finishWithEnter = false,
-) {
-  const page = workbench.page;
-  await page.keyboard.down("Shift");
-  for (const point of points) await workbench.clickViewportAt(point);
-  await page.keyboard.up("Shift");
-  if (finishWithEnter) await page.keyboard.press("Enter");
-  await page.keyboard.press("Escape");
-  await page.keyboard.press("Escape");
-}
-
 async function drawConstructionAxis(
   workbench: SketchWorkbenchHarness,
   staged: number,
@@ -347,21 +340,21 @@ async function mirrorFourSeeds(workbench: SketchWorkbenchHarness) {
     [axis!, { x: 800, y: 420 }],
   ] as const) {
     const at = await hoverUntil(workbench, around, entityTarget(entity.id));
-    await workbench.clickViewportAt(at);
+    await glideClick(workbench, at);
   }
   // T16d: the picks stage the mirror; the popup's Mirror confirms it.
   await expect(
     mirrorPopup(page).locator("[data-floating-input-readout]"),
   ).toHaveText(/^4 shapes about ‘.+’$/, { timeout: 15_000 });
   await expectStaged(workbench, 5);
-  await glidePress(
-    page,
-    mirrorPopup(page).getByRole("button", { name: "Mirror", exact: true }),
+  await waitForCommittedAction(page, "Mirror", () =>
+    glidePress(
+      page,
+      mirrorPopup(page).getByRole("button", { name: "Mirror", exact: true }),
+    ),
   );
   await expectStaged(workbench, 9);
-  await expect(mirrorActions(page)).toHaveCount(1, { timeout: 15_000 });
   await page.keyboard.press("Escape");
-  await workbench.waitForAnimationFrames(2);
   const mirrored = await snapshot(page);
   expect(
     mirrorOf(mirrored).outputs.map((output) => output.seedEntityId),
@@ -373,28 +366,6 @@ async function mirrorFourSeeds(workbench: SketchWorkbenchHarness) {
   });
   expectMirrorImage(mirrored, "premise");
   return mirrored;
-}
-
-/** A gliding drag: hover, press, 4 segments × 4 pointer moves, release. */
-async function glide(
-  workbench: SketchWorkbenchHarness,
-  from: { x: number; y: number },
-  to: { x: number; y: number },
-  options: { release?: boolean } = {},
-) {
-  const page = workbench.page;
-  const box = (await workbench.viewport().boundingBox())!;
-  await page.mouse.move(box.x + from.x, box.y + from.y);
-  await workbench.waitForAnimationFrames(2);
-  await page.mouse.down();
-  for (const fraction of [0.25, 0.5, 0.75, 1])
-    await page.mouse.move(
-      box.x + from.x + (to.x - from.x) * fraction,
-      box.y + from.y + (to.y - from.y) * fraction,
-      { steps: 4 },
-    );
-  await workbench.waitForAnimationFrames(2);
-  if (options.release ?? true) await page.mouse.up();
 }
 
 /**
@@ -409,7 +380,9 @@ async function expectOneUndoStep(
   after: Snapshot,
 ) {
   const page = workbench.page;
-  await page.keyboard.press("Control+z");
+  await waitForUndoneAction(page, "Move Sketch Geometry", () =>
+    page.keyboard.press("Control+z"),
+  );
   await expect
     .poll(
       async () =>
@@ -418,7 +391,9 @@ async function expectOneUndoStep(
     )
     .toBeLessThan(1e-6);
   await expectStaged(workbench, 9);
-  await page.keyboard.press("Control+Shift+z");
+  await waitForRedoneAction(page, "Move Sketch Geometry", () =>
+    page.keyboard.press("Control+Shift+z"),
+  );
   await expect
     .poll(
       async () =>
@@ -435,21 +410,22 @@ function expectAxisUnchanged(before: Snapshot, after: Snapshot) {
   );
 }
 
+/**
+ * Runs `drag` and waits for its one committed "Move Sketch Geometry" action
+ * (T17b, C7: the committed entry, not a frame count); the sketch changed.
+ */
 async function settledAfterDrag(
   workbench: SketchWorkbenchHarness,
   before: Snapshot,
   movedPointId: string | null,
+  drag: () => Promise<unknown>,
 ) {
-  await expect
-    .poll(async () => {
-      const now = await snapshot(workbench.page);
-      return (
-        JSON.stringify(geometryOf(now)) !== JSON.stringify(geometryOf(before))
-      );
-    })
-    .toBe(true);
-  await workbench.waitForAnimationFrames(4);
+  await waitForCommittedAction(workbench.page, "Move Sketch Geometry", drag);
   const after = await snapshot(workbench.page);
+  expect(
+    geometryDistance(geometryOf(after), geometryOf(before)),
+    "the drag changed the sketch",
+  ).toBeGreaterThan(0);
   if (movedPointId) {
     const [x0, y0] = positionOf(before, movedPointId);
     const [x1, y1] = positionOf(after, movedPointId);
@@ -470,8 +446,9 @@ test("T15e: dragging a mirrored line's copy end moves the seed as its mirror ima
   const copyStart = line.outputPointIds[0]!;
   const seedStart = line.seedPointIds[0]!;
 
-  await glide(workbench, mirrorOnScreen(LINE[0]), { x: 220, y: 590 });
-  const after = await settledAfterDrag(workbench, before, copyStart);
+  const after = await settledAfterDrag(workbench, before, copyStart, () =>
+    glideDrag(workbench, mirrorOnScreen(LINE[0]), { x: 220, y: 590 }),
+  );
   expect(
     Math.hypot(
       positionOf(after, seedStart)[0] - positionOf(before, seedStart)[0],
@@ -497,8 +474,9 @@ test("T15e: dragging a mirrored circle copy's rim grows the seed circle too, kee
     4,
   );
 
-  await glide(workbench, rim, { x: rim.x + 40, y: rim.y });
-  const after = await settledAfterDrag(workbench, before, null);
+  const after = await settledAfterDrag(workbench, before, null, () =>
+    glideDrag(workbench, rim, { x: rim.x + 40, y: rim.y }),
+  );
   const seedRadius = entityOf(before, circle.seedEntityId).radius!;
   expect(
     entityOf(after, circle.outputEntityId).radius! / seedRadius,
@@ -527,8 +505,10 @@ test("T15e: dragging a mirrored spline copy's handle authors the seed's reflecte
     mirrorOnScreen({ x: 890, y: 270 }),
     entityTarget(copy.id),
   );
-  await workbench.clickViewportAt(body);
-  await workbench.waitForAnimationFrames(3);
+  await glideClick(workbench, body);
+  await expect
+    .poll(() => workbench.currentEditorSelection(), { timeout: 15_000 })
+    .toContain(copy.id);
   const middle = mirrorOnScreen(SPLINE[1]);
   const handleLabel = new RegExp(
     `\\.${copy.id}\\.${copy.occurrences![1]!.occId}$`,
@@ -546,8 +526,9 @@ test("T15e: dragging a mirrored spline copy's handle authors the seed's reflecte
     }
   expect(tip, "the copy's middle handle tip is hoverable").not.toBeNull();
 
-  await glide(workbench, tip!, { x: tip!.x + 10, y: tip!.y + 40 });
-  const after = await settledAfterDrag(workbench, before, null);
+  const after = await settledAfterDrag(workbench, before, null, () =>
+    glideDrag(workbench, tip!, { x: tip!.x + 10, y: tip!.y + 40 }),
+  );
   const copied = entityOf(after, copy.id).occurrences![1]!;
   const seeded = entityOf(after, seed.id).occurrences![1]!;
   expect(copied.tangent.kind, "the copy's handle is authored").toBe("authored");
@@ -576,8 +557,9 @@ test("T15e: dragging the mirror axis's end moves the axis and every copy follows
     mirrorOf(before).mirrorReference!.entityId!,
   ).pointIds![0]!;
 
-  await glide(workbench, AXIS[0], { x: AXIS[0].x, y: AXIS[0].y + 60 });
-  const after = await settledAfterDrag(workbench, before, axisStart);
+  const after = await settledAfterDrag(workbench, before, axisStart, () =>
+    glideDrag(workbench, AXIS[0], { x: AXIS[0].x, y: AXIS[0].y + 60 }),
+  );
   // The seeds keep their place (up to the solve tolerance: the arc's own
   // point-on-curve requirements are re-solved in the frame).
   for (const output of mirrorOf(before).outputs)
@@ -605,7 +587,7 @@ test("T15e: Escape mid-drag of a mirror copy restores the sketch and records no 
   const workbench = new SketchWorkbenchHarness(page);
   const before = await mirrorFourSeeds(workbench);
 
-  await glide(
+  await glideDrag(
     workbench,
     mirrorOnScreen(LINE[0]),
     { x: 220, y: 590 },
@@ -626,7 +608,9 @@ test("T15e: Escape mid-drag of a mirror copy restores the sketch and records no 
     })
     .toEqual(geometryOf(before));
   // No drag action: the next Ctrl+Z undoes the mirror itself.
-  await page.keyboard.press("Control+z");
+  await waitForUndoneAction(page, "Mirror", () =>
+    page.keyboard.press("Control+z"),
+  );
   await expectStaged(workbench, 5);
 });
 
@@ -637,15 +621,18 @@ test("T15e: Finish → re-enter keeps the mirrored sketch identical", async ({
   await mirrorFourSeeds(workbench);
   // One copy drag first, so the state is not just the creation result.
   const created = await snapshot(page);
-  await glide(workbench, mirrorOnScreen(LINE[0]), { x: 220, y: 590 });
-  const dragged = await settledAfterDrag(workbench, created, null);
+  const dragged = await settledAfterDrag(workbench, created, null, () =>
+    glideDrag(workbench, mirrorOnScreen(LINE[0]), { x: 220, y: 590 }),
+  );
 
   await workbench.activateTool("Exit the active sketch.");
   await workbench.expectMachine("idle", 60_000);
-  await page
-    .getByRole("button", { name: /Select .*Double-click to reopen\./ })
-    .first()
-    .dblclick();
+  await glideDoubleClick(
+    page,
+    page
+      .getByRole("button", { name: /Select .*Double-click to reopen\./ })
+      .first(),
+  );
   await workbench.expectSketchSessionActive();
   await expectStaged(workbench, 9);
   const reentered = await snapshot(page);
@@ -668,7 +655,7 @@ test("T15e: Trim on a mirrored copy is refused with the named message and change
     mirrorOnScreen({ x: 320, y: 262 }),
     entityTarget(copyLine),
   );
-  await workbench.clickViewportAt(at);
+  await glideClick(workbench, at);
   await expect(
     page.getByRole("status").filter({
       hasText:
@@ -690,7 +677,8 @@ test("T15e: Trim on a mirrored copy is refused with the named message and change
   // T16a review R-2: the message's steps work as written: Esc leaves Trim,
   // selecting the copy shows its mirror in the Mirror panel.
   await page.keyboard.press("Escape");
-  await workbench.clickViewportAt(
+  await glideClick(
+    workbench,
     await hoverUntil(
       workbench,
       mirrorOnScreen({ x: 320, y: 262 }),
@@ -723,20 +711,23 @@ test("T16a: select a mirrored line's copy, Mirror panel → Remove mirror: the c
     [seed!, { x: 320, y: 262 }],
     [axis!, { x: 800, y: 420 }],
   ] as const)
-    await workbench.clickViewportAt(
+    await glideClick(
+      workbench,
       await hoverUntil(workbench, around, entityTarget(entity.id)),
     );
   // T16d: the picks stage the mirror; Enter confirms it.
   await expect(mirrorPopup(page)).toBeVisible({ timeout: 15_000 });
   await expectStaged(workbench, 2);
-  await page.keyboard.press("Enter");
+  await waitForCommittedAction(page, "Mirror", () =>
+    page.keyboard.press("Enter"),
+  );
   await expectStaged(workbench, 3);
   await page.keyboard.press("Escape");
-  await workbench.waitForAnimationFrames(2);
   const created = await snapshot(page);
   const copy = mirrorOf(created).outputs[0]!.outputEntityId;
 
-  await workbench.clickViewportAt(
+  await glideClick(
+    workbench,
     await hoverUntil(
       workbench,
       mirrorOnScreen({ x: 320, y: 262 }),
@@ -795,7 +786,8 @@ test("T16a: select a mirrored line's copy, Mirror panel → Remove mirror: the c
   // Review R-1: break the mirror (delete its axis). The sketch's validation
   // message and the Mirror panel (listing the broken mirror with nothing
   // selected) are both visible and never overlap.
-  await workbench.clickViewportAt(
+  await glideClick(
+    workbench,
     await hoverUntil(workbench, { x: 800, y: 420 }, entityTarget(axis!.id)),
   );
   await expect
@@ -834,17 +826,18 @@ test("T15e: mirror about the X datum axis picked in the viewport; dragging eithe
     { x: 320, y: 262 },
     entityTarget(seedLine.id),
   );
-  await workbench.clickViewportAt(seedBody);
+  await glideClick(workbench, seedBody);
   // The X datum axis (screen y 480), away from the origin.
   const datum = await hoverUntil(workbench, { x: 1000, y: 480 }, /\.xAxis$/, 4);
-  await workbench.clickViewportAt(datum);
+  await glideClick(workbench, datum);
   // T16d: the picks stage the mirror; Enter confirms it.
   await expect(mirrorPopup(page)).toBeVisible({ timeout: 15_000 });
   await expectStaged(workbench, 1);
-  await page.keyboard.press("Enter");
+  await waitForCommittedAction(page, "Mirror", () =>
+    page.keyboard.press("Enter"),
+  );
   await expectStaged(workbench, 2);
   await page.keyboard.press("Escape");
-  await workbench.waitForAnimationFrames(2);
   const created = await snapshot(page);
   expect(mirrorOf(created).mirrorReference).toEqual({
     kind: "sketchDatum",
@@ -854,15 +847,16 @@ test("T15e: mirror about the X datum axis picked in the viewport; dragging eithe
   const output = mirrorOf(created).outputs[0]!;
 
   // The copy of the seed's start is below the X axis (screen y 660).
-  await glide(
-    workbench,
-    { x: LINE[0].x, y: 960 - LINE[0].y },
-    { x: 230, y: 700 },
-  );
   const copyDragged = await settledAfterDrag(
     workbench,
     created,
     output.outputPointIds[0]!,
+    () =>
+      glideDrag(
+        workbench,
+        { x: LINE[0].x, y: 960 - LINE[0].y },
+        { x: 230, y: 700 },
+      ),
   );
   expectMirrorImage(copyDragged, "after the copy drag (about y = 0)");
   expect(
@@ -876,11 +870,11 @@ test("T15e: mirror about the X datum axis picked in the viewport; dragging eithe
   await expect(page.getByRole("region", { name: "Mirror" })).toHaveCount(0, {
     timeout: 15_000,
   });
-  await glide(workbench, LINE[1], { x: 420, y: 200 });
   const seedDragged = await settledAfterDrag(
     workbench,
     copyDragged,
     output.seedPointIds[1]!,
+    () => glideDrag(workbench, LINE[1], { x: 420, y: 200 }),
   );
   expectMirrorImage(seedDragged, "after the seed drag (about y = 0)");
   expect(mirrorOf(seedDragged).mirrorReference).toEqual({
@@ -1079,11 +1073,11 @@ test("T16e: delete the mirror line → panel Broken → Replace mirror line… �
   await pick(spots.seed);
   await pick(spots.axis);
   await expect(mirrorPopup(page)).toBeVisible({ timeout: 15_000 });
-  await page.keyboard.press("Enter");
+  await waitForCommittedAction(page, "Mirror", () =>
+    page.keyboard.press("Enter"),
+  );
   await expectStaged(workbench, 4);
-  await expect(mirrorActions(page)).toHaveCount(1, { timeout: 15_000 });
   await page.keyboard.press("Escape");
-  await workbench.waitForAnimationFrames(2);
 
   // Delete the mirror line: the panel lists the broken mirror.
   await pick(spots.axis);

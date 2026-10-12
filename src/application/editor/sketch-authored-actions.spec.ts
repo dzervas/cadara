@@ -3471,6 +3471,152 @@ describe("T15d: mirror copy intents through the authored-action owner", () => {
     expect(kinds()).toEqual(["automatic", "automatic"]);
     expect(f.session.actionAvailability?.canUndo).toBe(false);
   });
+
+  // T17b (C7, T15d review A-5): the rim, Reset and Zero intents on a copy go
+  // through the same owner as the point and handle intents.
+  const undoLabels = (f: Awaited<ReturnType<typeof fixture>>) =>
+    f.session.actionHistory?.undo.map((entry) => entry.label) ?? [];
+  const radiusOf = (
+    f: Awaited<ReturnType<typeof fixture>>,
+    entityId: string,
+  ) => {
+    const circle = f.session.definition.entities.find(
+      (entry) => entry.entityId === entityId,
+    );
+    if (circle?.kind !== "circle") throw new Error("circle");
+    return circle.radius;
+  };
+  const tangentOf = (
+    f: Awaited<ReturnType<typeof fixture>>,
+    entityId: string,
+    index: number,
+  ) => {
+    const spline = f.session.definition.entities.find(
+      (entry) => entry.entityId === entityId,
+    );
+    if (spline?.kind !== "spline") throw new Error("spline");
+    return spline.pointOccurrences[index]!.tangent;
+  };
+
+  test("a completed copy-rim drag is one 'Move Sketch Geometry' action: the seed circle grew with it; Undo restores the pre-drag state in one step, Redo the result", async () => {
+    const { f, setup } = await mirrorFixture();
+    const before = projection(f.session);
+    const copy = setup.outputOf("c");
+    const centre = f.session.definition.points.find(
+      (entry) => entry.pointId === copy.outputPointIds[0],
+    )!.position;
+    const seedRadius = radiusOf(f, eid("c"));
+    const from = [centre[0] + seedRadius, centre[1]] as const;
+    const to = [centre[0] + seedRadius + 0.6, centre[1]] as const;
+    glide(f, entityRef(f.session, copy.outputEntityId), from, to);
+    expect(undoLabels(f), "frames record nothing").toEqual([]);
+    f.dispatch({ type: "sketch.geometryDragEnded", point: world(to) as never });
+    expect(undoLabels(f), "exactly one action").toEqual([
+      "Move Sketch Geometry",
+    ]);
+    expect(
+      radiusOf(f, copy.outputEntityId),
+      "the copy's rim followed the pointer",
+    ).toBeCloseTo(seedRadius + 0.6, 4);
+    expect(
+      radiusOf(f, eid("c")),
+      "the seed circle has the copy's radius",
+    ).toBeCloseTo(radiusOf(f, copy.outputEntityId), 12);
+    const after = projection(f.session);
+    expect(projection(f.apply({ type: "history.undoRequested" }))).toEqual(
+      before,
+    );
+    expect(f.session.actionAvailability, "one Undo step").toEqual({
+      canUndo: false,
+      canRedo: true,
+    });
+    expect(projection(f.apply({ type: "history.redoRequested" }))).toEqual(
+      after,
+    );
+  });
+
+  for (const [intent, label] of [
+    ["resetTangentToAutomatic", "Reset Tangent"],
+    ["setTangentToZero", "Zero Tangent"],
+  ] as const)
+    test(`${label} on a copy's fit point is one '${label}' action on the seed occurrence (the copy follows); Undo restores both in one step, Redo the result`, async () => {
+      const { f, setup } = await mirrorFixture();
+      const copy = setup.outputOf("s");
+      const copySpline = f.session.definition.entities.find(
+        (entry) => entry.entityId === copy.outputEntityId,
+      );
+      if (copySpline?.kind !== "spline") throw new Error("spline");
+      const occurrenceId = copySpline.pointOccurrences[1]!.occurrenceId;
+      const handle = handleRef(
+        f.session,
+        copy.outputEntityId,
+        occurrenceId,
+        copy.outputPointIds[1]!,
+      );
+      // Reset needs authored handles: one completed drag of the copy's
+      // handle first (it authors the seed occurrence and the copy's).
+      if (intent === "resetTangentToAutomatic") {
+        const fit = f.session.definition.points.find(
+          (entry) => entry.pointId === copy.outputPointIds[1],
+        )!.position;
+        const visible = reconstructSplineAggregate(
+          copySpline,
+          Object.fromEntries(
+            f.session.definition.points.map((entry) => [
+              entry.pointId,
+              entry.position,
+            ]),
+          ),
+        );
+        if (visible.validity !== "valid") throw new Error("valid");
+        const tip = [
+          fit[0] + visible.handles[1]![0],
+          fit[1] + visible.handles[1]![1],
+        ] as const;
+        const to = [tip[0] + 0.5, tip[1] - 0.5] as const;
+        glide(f, handle, tip, to);
+        f.dispatch({
+          type: "sketch.geometryDragEnded",
+          point: world(to) as never,
+        });
+        expect(
+          [eid("s"), copy.outputEntityId].map(
+            (entityId) => tangentOf(f, entityId, 1).kind,
+          ),
+          "premise: both handles authored",
+        ).toEqual(["authored", "authored"]);
+      }
+      const labelsBefore = undoLabels(f);
+      const before = projection(f.session);
+      // The copy's fit point (it maps to its occurrence, as in the panel).
+      f.dispatch({
+        type: "viewport.selectionRequested",
+        target: pointRef(f.session, copy.outputPointIds[1]!),
+      });
+      f.dispatch({ type: "sketch.toolPatched", patch: { intent } });
+      expect(undoLabels(f), "exactly one action").toEqual([
+        ...labelsBefore,
+        label,
+      ]);
+      for (const entityId of [eid("s"), copy.outputEntityId]) {
+        const tangent = tangentOf(f, entityId, 1);
+        if (intent === "resetTangentToAutomatic")
+          expect(tangent.kind, entityId).toBe("automatic");
+        else
+          expect(tangent, `${entityId} exact zero`).toEqual({
+            kind: "authored",
+            vector: [0, 0],
+          });
+      }
+      const after = projection(f.session);
+      expect(projection(f.apply({ type: "history.undoRequested" }))).toEqual(
+        before,
+      );
+      expect(undoLabels(f), "one Undo step").toEqual(labelsBefore);
+      expect(projection(f.apply({ type: "history.redoRequested" }))).toEqual(
+        after,
+      );
+    });
 });
 
 // T16a (logic lane; seam: the authored-action owner around the real sketch

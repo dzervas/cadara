@@ -1,5 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import {
+  glideDoubleClick,
+  readHistoryStrip,
+  selectRegionInViewport,
+  waitForCommittedAction,
+  waitForUndoneAction,
+} from "./helpers/acceptance";
 import { openDocumentCopy, saveDocumentCopy } from "./helpers/document-files";
 import { FeatureWorkbenchHarness } from "./helpers/feature-workbench";
 import {
@@ -23,6 +30,7 @@ import {
   sketchSnapshot,
   undoEntries,
   type CanvasPoint,
+  type Rgb,
 } from "./helpers/mirror-workbench";
 
 test.use({ viewport: { width: 1440, height: 960 } });
@@ -55,6 +63,8 @@ const OTHER = { centre: { x: 980, y: 700 }, rim: { x: 1080, y: 700 } };
 /** Rim points (lower left, away from labels and panels) for pixel checks. */
 const SEED_RIM_SAMPLE = { x: 598, y: 302 };
 const COPY_RIM_SAMPLE = { x: 598, y: 622 };
+/** F-4 control: an unhighlighted rim's largest colour change (measured: T17b.md). */
+const CONTROL_MAX_RIM_CHANGE = 30;
 
 const floatingInput = (page: Page) =>
   page.locator("[data-sketch-viewport-floating-input]");
@@ -136,8 +146,13 @@ const radiusOf = (
 
 // Plan row 2 ([TECH] T16-12/T16-14, T16f). Red on 46054e20 (pre-T16): the
 // Dimension tool on the copy opens its own Reference-mode input, with no
-// shared readout and the original not highlighted.
-test("T16g row 2: the Dimension tool on a mirrored copy opens the original's driving radius (shared readout, both circles highlighted); Save is one action that edits both, one Ctrl+Z restores", async ({
+// shared readout and the original not highlighted. T17b (F-4): the same
+// pick before the original has a driving radius is the control (its value
+// input open, neither circle is highlighted), so both highlights below are
+// the linked highlight of the shared driver edit;
+// dimensions are counted in the sketch snapshot (off-screen labels have no
+// chip).
+test("T16g row 2: the Dimension tool on a mirrored copy opens the original's driving radius (shared readout, both circles highlighted; without a driver the same pick highlights neither); Save is one action that edits both, one Ctrl+Z restores", async ({
   page,
 }) => {
   test.setTimeout(180_000);
@@ -145,6 +160,78 @@ test("T16g row 2: the Dimension tool on a mirrored copy opens the original's dri
   await workbench.open();
   await openTopSketch(workbench);
   const { seed, copy } = await mirroredCircle(workbench, false);
+  const dimensionCount = async () =>
+    (await sketchSnapshot(page)).dimensions!.length;
+  const popup = floatingInput(page);
+  const pickCopyWithRadiusTool = async () => {
+    await workbench.activateTool("Create point-to-point distance dimensions.");
+    await glidePress(
+      page,
+      page.getByRole("menuitem", {
+        name: /Radius Create circle radius dimensions/,
+      }),
+    );
+    await glideClick(
+      workbench,
+      await hoverUntil(
+        workbench,
+        { x: COPY_CENTRE.x + 60, y: COPY_CENTRE.y },
+        entityTarget(copy),
+        4,
+      ),
+    );
+    await glideClick(workbench, { x: 820, y: 660 });
+    await expect(popup).toBeVisible({ timeout: 15_000 });
+  };
+  /** Each rim's largest colour change against its unhighlighted crop. */
+  const rimChange = async (plain: { seed: Rgb[][]; copy: Rgb[][] }) => ({
+    seed: maxColorDistance(
+      await cropPixels(workbench, SEED_RIM_SAMPLE, 12),
+      plain.seed,
+    ),
+    copy: maxColorDistance(
+      await cropPixels(workbench, COPY_RIM_SAMPLE, 12),
+      plain.copy,
+    ),
+  });
+  /** Unhighlighted rims (nothing hovered or selected). */
+  const plainRims = async () => {
+    await workbench.clearHoverByLeavingViewport();
+    await expect.poll(() => workbench.currentHoverTarget()).toBe("none");
+    await expect
+      .poll(() => workbench.currentEditorSelection())
+      .toBe("Nothing selected");
+    return {
+      seed: await cropPixels(workbench, SEED_RIM_SAMPLE, 12),
+      copy: await cropPixels(workbench, COPY_RIM_SAMPLE, 12),
+    };
+  };
+
+  // Control (no driver yet): the same pick, with its value input open,
+  // highlights neither circle; Escape records nothing.
+  expect(await dimensionCount(), "premise: no dimension").toBe(0);
+  const unpicked = await plainRims();
+  const historyBefore = await readHistoryStrip(page);
+  await pickCopyWithRadiusTool();
+  await expect(
+    popup.getByText(/^Shared with/),
+    "control: no shared driver to open",
+  ).toHaveCount(0);
+  const control = await rimChange(unpicked);
+  console.log(`F-4 control rim change ${JSON.stringify(control)}`);
+  expect(control.seed, "control: the original").toBeLessThan(
+    CONTROL_MAX_RIM_CHANGE,
+  );
+  expect(control.copy, "control: the copy").toBeLessThan(
+    CONTROL_MAX_RIM_CHANGE,
+  );
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await expect(popup).toBeHidden({ timeout: 15_000 });
+  expect(await readHistoryStrip(page), "control: nothing recorded").toEqual(
+    historyBefore,
+  );
+  expect(await dimensionCount(), "control: no dimension").toBe(0);
 
   // The original's driving radius (Radius tool, measured value committed).
   await workbench.activateTool("Create point-to-point distance dimensions.");
@@ -159,58 +246,26 @@ test("T16g row 2: the Dimension tool on a mirrored copy opens the original's dri
     await hoverUntil(workbench, SEED.rim, entityTarget(seed), 4),
   );
   await glideClick(workbench, { x: 780, y: 170 });
-  await expect(floatingInput(page)).toBeVisible({ timeout: 15_000 });
-  await glidePress(
-    page,
-    floatingInput(page).getByRole("button", { name: "Commit" }),
+  await expect(popup).toBeVisible({ timeout: 15_000 });
+  await waitForCommittedAction(page, "Commit Constraint Value", () =>
+    glidePress(page, popup.getByRole("button", { name: "Commit" })),
   );
-  await expect(floatingInput(page)).toBeHidden({ timeout: 15_000 });
+  await expect(popup).toBeHidden({ timeout: 15_000 });
   await page.keyboard.press("Escape");
   await page.keyboard.press("Escape");
-  const chips = page.locator('[data-sketch-annotation-kind="dimension"]');
-  await expect(chips).toHaveCount(1, { timeout: 15_000 });
+  expect(await dimensionCount(), "one driving radius").toBe(1);
   const before = await sketchSnapshot(page);
   const radius = radiusOf(before, seed);
   expect(radiusOf(before, copy), "premise: the copy's radius").toBeCloseTo(
     radius,
     9,
   );
-  // The history strip lists the newest actions first (a few at most).
-  const undo = page.locator('[data-history-action-direction="undo"]');
-  const edits = undoEntries(page, "Commit Annotation Value");
-  await expect(edits).toHaveCount(0);
-
-  // Unhighlighted rims (nothing hovered or selected).
-  await workbench.clearHoverByLeavingViewport();
-  await expect.poll(() => workbench.currentHoverTarget()).toBe("none");
-  await expect
-    .poll(() => workbench.currentEditorSelection())
-    .toBe("Nothing selected");
-  const plain = {
-    seed: await cropPixels(workbench, SEED_RIM_SAMPLE, 12),
-    copy: await cropPixels(workbench, COPY_RIM_SAMPLE, 12),
-  };
+  const plain = await plainRims();
+  const historyWithDriver = await readHistoryStrip(page);
 
   // The Radius tool on the copy: its value input opens the original's
   // driver (routed before the redundancy probe).
-  await workbench.activateTool("Create point-to-point distance dimensions.");
-  await glidePress(
-    page,
-    page.getByRole("menuitem", {
-      name: /Radius Create circle radius dimensions/,
-    }),
-  );
-  await glideClick(
-    workbench,
-    await hoverUntil(
-      workbench,
-      { x: COPY_CENTRE.x + 60, y: COPY_CENTRE.y },
-      entityTarget(copy),
-      4,
-    ),
-  );
-  await glideClick(workbench, { x: 820, y: 660 });
-  const popup = floatingInput(page);
+  await pickCopyWithRadiusTool();
   await expect(popup.locator("[data-floating-input-readout]")).toHaveText(
     /^Shared with Radius \d+ through mirror ‘mirror \d+’$/,
     { timeout: 15_000 },
@@ -222,28 +277,25 @@ test("T16g row 2: the Dimension tool on a mirrored copy opens the original's dri
   );
   await expect(popup.getByRole("switch")).not.toBeChecked();
   // Both sides are highlighted while the shared driver is edited.
-  for (const [side, at] of [
-    ["the original", SEED_RIM_SAMPLE],
-    ["the copy", COPY_RIM_SAMPLE],
-  ] as const)
+  for (const side of ["seed", "copy"] as const)
     await expect
-      .poll(
-        async () =>
-          maxColorDistance(
-            await cropPixels(workbench, at, 12),
-            side === "the original" ? plain.seed : plain.copy,
-          ),
-        { message: `${side} is highlighted`, timeout: 10_000 },
-      )
+      .poll(async () => (await rimChange(plain))[side], {
+        message: `the ${side === "seed" ? "original" : "copy"} is highlighted`,
+        timeout: 10_000,
+      })
       .toBeGreaterThan(60);
-  await expect(edits, "opening the edit records nothing").toHaveCount(0);
+  console.log(
+    `F-4 shared rim change ${JSON.stringify(await rimChange(plain))}`,
+  );
+  expect(
+    await readHistoryStrip(page),
+    "opening the edit records nothing",
+  ).toEqual(historyWithDriver);
 
   const edited = Math.round(radius * 1.25 * 100) / 100;
   await input.fill(String(edited));
-  await glidePress(page, popup.getByRole("button", { name: "Save" }));
-  await expect(edits).toHaveCount(1, { timeout: 15_000 });
-  await expect(undo.first(), "the newest action").toHaveText(
-    "Commit Annotation Value",
+  await waitForCommittedAction(page, "Commit Annotation Value", () =>
+    glidePress(page, popup.getByRole("button", { name: "Save" })),
   );
   await expect
     .poll(async () => {
@@ -253,13 +305,17 @@ test("T16g row 2: the Dimension tool on a mirrored copy opens the original's dri
       );
     })
     .toEqual([true, true]);
-  await expect(chips, "no second driver or reference was added").toHaveCount(1);
+  expect(
+    await dimensionCount(),
+    "no second driver or reference was added",
+  ).toBe(1);
 
   // One Ctrl+Z restores both circles.
   await page.keyboard.press("Escape");
   await page.keyboard.press("Escape");
-  await page.keyboard.press("Control+z");
-  await expect(edits).toHaveCount(0, { timeout: 15_000 });
+  await waitForUndoneAction(page, "Commit Annotation Value", () =>
+    page.keyboard.press("Control+z"),
+  );
   await expect
     .poll(async () => {
       const snap = await sketchSnapshot(page);
@@ -268,7 +324,7 @@ test("T16g row 2: the Dimension tool on a mirrored copy opens the original's dri
       );
     })
     .toEqual([true, true]);
-  await expect(chips).toHaveCount(1);
+  expect(await dimensionCount()).toBe(1);
 });
 
 type SavedDocument = {
@@ -296,49 +352,14 @@ const regionTargets = (page: Page) =>
         ) ?? [],
   );
 
-/**
- * Glides into a region and presses it. The projected centroid is the
- * circle's centre point (which picks the circle), so the pointer moves out
- * from it until the region itself is the hover target.
- */
-async function glidePressRegion(
-  workbench: FeatureWorkbenchHarness,
-  region: string,
-) {
-  const page = workbench.page;
-  const surface = (await workbench.viewportSurface().boundingBox())!;
-  const centroid = await page.evaluate(
-    (id) => window.__cadProjectToScreen?.(id) ?? null,
-    region,
-  );
-  expect(centroid, `${region} is on screen`).not.toBeNull();
-  for (const dx of [20, 25, 30, 35, 15, 40]) {
-    await page.mouse.move(
-      surface.x + centroid!.x + dx,
-      surface.y + centroid!.y,
-      { steps: 6 },
-    );
-    await workbench.waitForAnimationFrames(2);
-    if ((await workbench.currentHoverTarget()) === region) {
-      await page.mouse.down();
-      await page.mouse.up();
-      return;
-    }
-  }
-  throw new Error(`${region} is not hoverable near its centroid.`);
-}
-
 /** Glides onto a timeline entry (the `index`-th of `label`) and double-clicks it. */
 async function reenter(page: Page, label: string, index: number) {
-  const entry = page
-    .getByRole("button", { name: `Select ${label}. Double-click to reopen.` })
-    .nth(index);
-  await expect(entry).toBeVisible({ timeout: 15_000 });
-  const box = (await entry.boundingBox())!;
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, {
-    steps: 10,
-  });
-  await page.mouse.dblclick(box.x + box.width / 2, box.y + box.height / 2);
+  await glideDoubleClick(
+    page,
+    page
+      .getByRole("button", { name: `Select ${label}. Double-click to reopen.` })
+      .nth(index),
+  );
 }
 
 // Plan rows 3 and 4 ([TECH] T16-4/T16-5/T16-6, T16b; recovery T16e). A
@@ -500,7 +521,7 @@ test("T16g rows 3–4: delete the mirror line → copy invalid, no region; Undo/
       { timeout: 30_000 },
     )
     .toEqual([other.sketchId]);
-  await glidePressRegion(workbench, regions[0]!);
+  await selectRegionInViewport(workbench, regions[0]!);
   await expect
     .poll(() => workbench.currentEditorSelection(), { timeout: 15_000 })
     .toContain(regions[0]!);

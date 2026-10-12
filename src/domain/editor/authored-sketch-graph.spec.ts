@@ -1,4 +1,8 @@
 import { expect, test } from "vitest";
+import type {
+  DimensionDefinition,
+  SketchDefinition,
+} from "@/contracts/sketch/schema";
 import {
   acceptSketchDraw,
   beginSketchAnnotationEdit,
@@ -11,15 +15,19 @@ import {
   selectSketchConstraintTarget,
   startSketchDraw,
 } from "@/domain/editor/sketch-session";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
 
+/** A rectangle drawn in a session entered as the app enters it (T17-10′). */
 function rectangle() {
-  const session = createNewSketchSessionFromSupport(
-    {
-      kind: "construction",
-      constructionId: "construction_plane-xy",
-    },
-    OCC_KERNEL_SETTINGS,
+  const session = enterSketchSession(
+    createNewSketchSessionFromSupport(
+      {
+        kind: "construction",
+        constructionId: "construction_plane-xy",
+      },
+      OCC_KERNEL_SETTINGS,
+    ),
   );
   return acceptSketchDraw(
     startSketchDraw(beginSketchTool(session, "rectangle"), [0, 0]),
@@ -75,16 +83,16 @@ test("numeric edits update the current authored value rather than reconstruction
   edited = patchSketchConstraintValue(edited, {
     intent: "commitAnnotationValue",
   });
-  expect(
-    edited.definition.dimensions.find(
-      (d) => d.dimensionId === dimension.dimensionId,
-    )?.value,
-  ).toEqual({ source: "literal", value: 6 });
-  expect(
-    edited.commitRequest?.definition.dimensions.find(
-      (d) => d.dimensionId === dimension.dimensionId,
-    )?.value,
-  ).toEqual({ source: "literal", value: 6 });
+  const widthOf = (definition: SketchDefinition | undefined) =>
+    definition?.dimensions.find(
+      (d): d is Extract<DimensionDefinition, { kind: "lineLength" }> =>
+        d.kind === "lineLength" && d.dimensionId === dimension.dimensionId,
+    )?.value;
+  expect(widthOf(edited.definition)).toEqual({ source: "literal", value: 6 });
+  expect(widthOf(edited.commitRequest?.definition)).toEqual({
+    source: "literal",
+    value: 6,
+  });
   expect(edited.definition).not.toHaveProperty("authoringOperations");
 });
 

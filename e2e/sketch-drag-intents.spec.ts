@@ -1,4 +1,11 @@
 import { expect, test } from "@playwright/test";
+import {
+  glideDrag,
+  waitForCommittedAction,
+  waitForRedoneAction,
+  waitForUndoneAction,
+} from "./helpers/acceptance";
+import { glideClick, glidePress } from "./helpers/mirror-workbench";
 import { SketchWorkbenchHarness } from "./helpers/sketch-workbench";
 
 test.setTimeout(60_000);
@@ -25,8 +32,8 @@ async function drawLine(
   p2: { x: number; y: number },
 ) {
   await workbench.activateTool("Create line geometry.");
-  await workbench.clickViewportAt(p1);
-  await workbench.clickViewportAt(p2);
+  await glideClick(workbench, p1);
+  await glideClick(workbench, p2);
   await expect
     .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
     .toContain("1 entities staged");
@@ -34,20 +41,20 @@ async function drawLine(
   await expect.poll(() => workbench.currentPhase()).toBe("collecting");
 }
 
-async function viewportDrag(
+const MOVE = "Move Sketch Geometry";
+
+/**
+ * A gliding drag (T17b: the shared `glideDrag`) that completes one
+ * committed "Move Sketch Geometry" action.
+ */
+async function committedDrag(
   workbench: SketchWorkbenchHarness,
   from: { x: number; y: number },
   to: { x: number; y: number },
-  steps = 8,
 ) {
-  const box = await workbench.viewport().boundingBox();
-  if (!box) throw new Error("Viewport not visible.");
-  await workbench.page.mouse.move(box.x + from.x, box.y + from.y);
-  await workbench.page.mouse.down();
-  await workbench.page.mouse.move(box.x + to.x, box.y + to.y, { steps });
-  // Let the RAF-coalesced move fire before releasing.
-  await workbench.waitForAnimationFrames(2);
-  await workbench.page.mouse.up();
+  await waitForCommittedAction(workbench.page, MOVE, () =>
+    glideDrag(workbench, from, to, { steps: 8 }),
+  );
 }
 
 type LivePoint = { id: string; position: readonly [number, number] };
@@ -152,8 +159,8 @@ async function drawCircle(
   rim: { x: number; y: number },
 ) {
   await workbench.activateTool("Create circular geometry.");
-  await workbench.clickViewportAt(centre);
-  await workbench.clickViewportAt(rim);
+  await glideClick(workbench, centre);
+  await glideClick(workbench, rim);
   await expect
     .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
     .toContain("1 entities staged");
@@ -189,18 +196,19 @@ async function addDiameterWithDimensionTool(
       name: /Distance Create aligned distance dimensions/,
     })
     .click();
-  await workbench.clickViewportAt(rim);
-  await workbench.clickViewportAt(placement);
+  await glideClick(workbench, rim);
+  await glideClick(workbench, placement);
   const floatingInput = page.locator("[data-sketch-viewport-floating-input]");
   await expect(floatingInput).toBeVisible();
   await floatingInput.locator("input").fill(diameter.toFixed(4));
-  await floatingInput.getByRole("button", { name: "Commit" }).click();
+  await waitForCommittedAction(page, "Commit Constraint Value", () =>
+    glidePress(page, floatingInput.getByRole("button", { name: "Commit" })),
+  );
   await expect(floatingInput).toBeHidden();
   await expect(
     page.locator('[data-sketch-annotation-kind="dimension"]'),
   ).toHaveCount(1);
   await page.keyboard.press("Escape");
-  await workbench.waitForAnimationFrames(2);
 }
 
 // Viewport 1440×960, centre (720,480). Top-plane sketch: origin at
@@ -217,7 +225,9 @@ test("T12c: Escape mid-drag restores geometry and does not create an Undo entry"
 
   const box = await workbench.viewport().boundingBox();
   if (!box) throw new Error("Viewport not visible.");
-  await page.mouse.move(box.x + 400, box.y + 300);
+  await page.mouse.move(box.x + 400, box.y + 300, {
+    steps: 8,
+  });
   await page.mouse.down();
   await page.mouse.move(box.x + 400, box.y + 650, { steps: 6 });
   await page.keyboard.press("Escape");
@@ -257,17 +267,16 @@ test("T12c: completed vertex drag inside sketch; Ctrl+Z restores, Ctrl+Shift+Z r
     .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
     .toContain("1 entities staged");
 
-  await viewportDrag(workbench, { x: 360, y: 260 }, { x: 500, y: 260 });
-  await workbench.waitForAnimationFrames(4);
+  await committedDrag(workbench, { x: 360, y: 260 }, { x: 500, y: 260 });
 
-  await page.keyboard.press("Control+z");
-  await workbench.waitForAnimationFrames(4);
+  await waitForUndoneAction(page, MOVE, () => page.keyboard.press("Control+z"));
   await expect
     .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
     .toContain("1 entities staged");
 
-  await page.keyboard.press("Control+Shift+z");
-  await workbench.waitForAnimationFrames(4);
+  await waitForRedoneAction(page, MOVE, () =>
+    page.keyboard.press("Control+Shift+z"),
+  );
   await expect
     .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
     .toContain("1 entities staged");
@@ -291,8 +300,7 @@ test("T12c: dragging a line body translates both endpoints by the pointer delta"
   await enterSketchMode(workbench);
   await drawLine(workbench, { x: 350, y: 300 }, { x: 550, y: 300 });
 
-  await viewportDrag(workbench, { x: 450, y: 300 }, { x: 450, y: 650 });
-  await workbench.waitForAnimationFrames(3);
+  await committedDrag(workbench, { x: 450, y: 300 }, { x: 450, y: 650 });
 
   await finishSketch(workbench);
   const committed = await readCommittedDefinition(workbench);
@@ -316,15 +324,13 @@ test("T13a: rim drag on a freshly drawn circle grows the radius, centre fixed, e
   const circleId = await liveCircleId(workbench);
 
   // Drag the rim 200 px outward (500 → 700): radius 100 px → 300 px.
-  await viewportDrag(workbench, { x: 500, y: 400 }, { x: 700, y: 400 });
-  await workbench.waitForAnimationFrames(3);
+  await committedDrag(workbench, { x: 500, y: 400 }, { x: 700, y: 400 });
   await expectRimHover(workbench, { x: 700, y: 400 }, circleId, true);
 
   // Exactly one Undo step: the first Ctrl+Z undoes the drag (the circle
   // stays, its rim back at the drawn 100 px: review A-2, no stale read),
   // the second undoes the circle draw.
-  await page.keyboard.press("Control+z");
-  await workbench.waitForAnimationFrames(4);
+  await waitForUndoneAction(page, MOVE, () => page.keyboard.press("Control+z"));
   await expect
     .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
     .toContain("1 entities staged");
@@ -338,8 +344,9 @@ test("T13a: rim drag on a freshly drawn circle grows the radius, centre fixed, e
   await expect
     .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
     .toContain("1 entities staged");
-  await page.keyboard.press("Control+Shift+z");
-  await workbench.waitForAnimationFrames(4);
+  await waitForRedoneAction(page, MOVE, () =>
+    page.keyboard.press("Control+Shift+z"),
+  );
 
   await finishSketch(workbench);
   const committed = await readCommittedDefinition(workbench);
@@ -377,8 +384,8 @@ test("T13a B-1: with a rectangle drawn first, a circle's rim drag keeps the grow
   // drag on the solver path.
   await workbench.activateTool("Create rectangle geometry.");
   await page.locator('[role="menuitem"][data-tool-id="rectangle"]').click();
-  await workbench.clickViewportAt({ x: 900, y: 250 });
-  await workbench.clickViewportAt({ x: 1050, y: 350 });
+  await glideClick(workbench, { x: 900, y: 250 });
+  await glideClick(workbench, { x: 1050, y: 350 });
   await expect
     .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
     .toContain("4 entities staged");
@@ -386,8 +393,8 @@ test("T13a B-1: with a rectangle drawn first, a circle's rim drag keeps the grow
   await expect.poll(() => workbench.currentPhase()).toBe("editing");
 
   await workbench.activateTool("Create circular geometry.");
-  await workbench.clickViewportAt({ x: 400, y: 400 });
-  await workbench.clickViewportAt({ x: 500, y: 400 });
+  await glideClick(workbench, { x: 400, y: 400 });
+  await glideClick(workbench, { x: 500, y: 400 });
   await expect
     .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
     .toContain("5 entities staged");
@@ -397,14 +404,13 @@ test("T13a B-1: with a rectangle drawn first, a circle's rim drag keeps the grow
   const centreBefore = (await readLivePoints(workbench)).at(-1)!;
   const circleId = await liveCircleId(workbench);
 
-  await viewportDrag(workbench, { x: 500, y: 400 }, { x: 700, y: 400 });
-  await workbench.waitForAnimationFrames(3);
+  await committedDrag(workbench, { x: 500, y: 400 }, { x: 700, y: 400 });
   await expectRimHover(workbench, { x: 700, y: 400 }, circleId, true);
 
   // A later unrelated edit re-solves the sketch from its definition.
   await workbench.activateTool("Create line geometry.");
-  await workbench.clickViewportAt({ x: 900, y: 700 });
-  await workbench.clickViewportAt({ x: 1050, y: 700 });
+  await glideClick(workbench, { x: 900, y: 700 });
+  await glideClick(workbench, { x: 1050, y: 700 });
   await expect
     .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
     .toContain("6 entities staged");
@@ -453,14 +459,14 @@ test("T12c: after deleting the deliberately added diameter, rim drag grows the r
   );
   await diameterGlyph.first().click();
   await workbench.waitForAnimationFrames(2);
-  await page.keyboard.press("Delete");
+  await waitForCommittedAction(page, "Delete Sketch Item", () =>
+    page.keyboard.press("Delete"),
+  );
   await expect(diameterGlyph).toHaveCount(0);
-  await workbench.waitForAnimationFrames(4);
 
   // Drag rim 200 px outward (500 → 700). Now unconstrained, the radius
   // should change. Initial ~2.4 sketch units → post-drag ~7.1 units.
-  await viewportDrag(workbench, { x: 500, y: 400 }, { x: 700, y: 400 });
-  await workbench.waitForAnimationFrames(3);
+  await committedDrag(workbench, { x: 500, y: 400 }, { x: 700, y: 400 });
 
   await finishSketch(workbench);
   const committed = await readCommittedDefinition(workbench);
@@ -489,16 +495,15 @@ test("T12c: dragging a circle centre translates the circle", async ({
   await enterSketchMode(workbench);
 
   await workbench.activateTool("Create circular geometry.");
-  await workbench.clickViewportAt({ x: 500, y: 400 });
-  await workbench.clickViewportAt({ x: 600, y: 400 });
+  await glideClick(workbench, { x: 500, y: 400 });
+  await glideClick(workbench, { x: 600, y: 400 });
   await expect
     .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
     .toContain("1 entities staged");
   await page.keyboard.press("Escape");
   await expect.poll(() => workbench.currentPhase()).toBe("editing");
 
-  await viewportDrag(workbench, { x: 500, y: 400 }, { x: 500, y: 600 });
-  await workbench.waitForAnimationFrames(3);
+  await committedDrag(workbench, { x: 500, y: 400 }, { x: 500, y: 600 });
 
   await finishSketch(workbench);
   const committed = await readCommittedDefinition(workbench);
@@ -514,6 +519,9 @@ test("T12c: dragging a circle centre translates the circle", async ({
 
 // ── Spline body drag ────────────────────────────────────────────────────
 
+/** F3 bound on the spline body drag's deviation from a translation (T17b.md). */
+const SPLINE_BODY_RIGIDITY = 1e-6;
+
 test("T12c: dragging a spline body translates all fit points", async ({
   page,
 }) => {
@@ -521,9 +529,12 @@ test("T12c: dragging a spline body translates all fit points", async ({
   await enterSketchMode(workbench);
 
   await workbench.activateTool("Create spline geometry.");
-  await workbench.clickViewportAt({ x: 300, y: 400 });
-  await workbench.clickViewportAt({ x: 450, y: 300 });
-  await workbench.clickViewportAt({ x: 600, y: 400 });
+  for (const at of [
+    { x: 300, y: 400 },
+    { x: 450, y: 300 },
+    { x: 600, y: 400 },
+  ])
+    await glideClick(workbench, at);
   await page.keyboard.press("Enter");
   await expect
     .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
@@ -531,23 +542,42 @@ test("T12c: dragging a spline body translates all fit points", async ({
   await page.keyboard.press("Escape");
   await expect.poll(() => workbench.currentPhase()).toBe("editing");
 
-  // (375,350) is on the spline curve per hover diagnostic.
-  await viewportDrag(workbench, { x: 375, y: 350 }, { x: 375, y: 650 });
-  await workbench.waitForAnimationFrames(3);
+  const before = await readLivePoints(workbench);
+  // (375,350) is on the spline curve per hover diagnostic. One gliding
+  // drag, one committed action (T17b: no frame-count wait).
+  await committedDrag(workbench, { x: 375, y: 350 }, { x: 375, y: 650 });
 
   await finishSketch(workbench);
   const committed = await readCommittedDefinition(workbench);
   expect(committed).not.toBeNull();
   expect(committed!.points.length).toBeGreaterThanOrEqual(3);
 
+  // T17b (F3): rigid = every fit point moved by the same vector. The
+  // largest deviation from the common displacement measured 8.9e-16 (a
+  // translation up to rounding, T17b.md); the bound keeps a wide margin and
+  // is far below any reshaping drag (sketch units; one pixel ≈ 0.024).
+  const moves = committed!.points.map((point) => {
+    const start = before.find((entry) => entry.id === point.id)!.position;
+    return [point.position[0] - start[0], point.position[1] - start[1]];
+  });
+  const mean = [0, 1].map(
+    (axis) => moves.reduce((sum, move) => sum + move[axis]!, 0) / moves.length,
+  );
+  const deviation = Math.max(
+    ...moves.map((move) =>
+      Math.hypot(move[0]! - mean[0]!, move[1]! - mean[1]!),
+    ),
+  );
+  console.log(
+    `F3 spline body drag: deviation ${deviation}, mean move ${JSON.stringify(mean)}`,
+  );
+  expect(
+    deviation,
+    "every fit point moved by the same vector (rigid)",
+  ).toBeLessThan(SPLINE_BODY_RIGIDITY);
+  expect(mean[1]!, "the spline moved down with the pointer").toBeLessThan(-5);
   const ys = committed!.points.map((p) => p.position[1]);
   const meanY = ys.reduce((s, y) => s + y, 0) / ys.length;
-  for (let i = 0; i < ys.length; i++) {
-    expect(
-      Math.abs(ys[i]! - meanY),
-      `Fit point ${i} Y near group mean (rigid).`,
-    ).toBeLessThan(2.0);
-  }
   expect(meanY, "All fit points below origin.").toBeLessThan(-1);
 });
 
@@ -562,8 +592,8 @@ test("T12f: dragging a fixed circle centre shows a feedback cue that disappears 
   // Draw a circle at (500,400). The T12c centre-drag test proves the
   // centre point at (500,400) is reliably pickable.
   await workbench.activateTool("Create circular geometry.");
-  await workbench.clickViewportAt({ x: 500, y: 400 });
-  await workbench.clickViewportAt({ x: 600, y: 400 });
+  await glideClick(workbench, { x: 500, y: 400 });
+  await glideClick(workbench, { x: 600, y: 400 });
   await expect
     .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
     .toContain("1 entities staged");
@@ -573,10 +603,10 @@ test("T12f: dragging a fixed circle centre shows a feedback cue that disappears 
   // Fix the centre point: activate Fix Geometry, then click the centre.
   await page.getByRole("button", { name: "Fix Geometry" }).click();
   await workbench.waitForAnimationFrames(2);
-  await page.mouse.click(
-    (await workbench.viewport().boundingBox())!.x + 500,
-    (await workbench.viewport().boundingBox())!.y + 400,
-  );
+  // (A gliding press; the Fix action's label is still the generic
+  // "Viewport.selection Requested" (T17b0 P-9, fixed in T17c3), so this
+  // setup step keeps its frame wait instead of naming that label.)
+  await glideClick(workbench, { x: 500, y: 400 });
   await workbench.waitForAnimationFrames(4);
   // Escape out of the constraint tool.
   await page.keyboard.press("Escape");
@@ -586,8 +616,8 @@ test("T12f: dragging a fixed circle centre shows a feedback cue that disappears 
   if (!box) throw new Error("Viewport not visible.");
 
   // Now drag the centre point (which is now fixed + has radius dimension =
-  // fully constrained). Use viewportDrag which is proven reliable.
-  await page.mouse.move(box.x + 500, box.y + 400);
+  // fully constrained), with a plain press-move-release.
+  await page.mouse.move(box.x + 500, box.y + 400, { steps: 8 });
   await page.mouse.down();
   await page.mouse.move(box.x + 500, box.y + 600, { steps: 10 });
   await workbench.waitForAnimationFrames(8);
@@ -643,7 +673,9 @@ test("T12f: dragging the rim of a circle with a deliberately added diameter show
 
   // Drag the rim outward. Entity-curve picks depend on tessellation
   // alignment (T12c report); hover first to warm the pick target.
-  await page.mouse.move(box.x + 600, box.y + 400);
+  await page.mouse.move(box.x + 600, box.y + 400, {
+    steps: 8,
+  });
   await workbench.waitForAnimationFrames(2);
   await page.mouse.down();
   await page.mouse.move(box.x + 750, box.y + 400, { steps: 8 });
@@ -738,8 +770,8 @@ test("T12g: two consecutive drags of different targets in one sketch produce two
   await drawLine(workbench, { x: 300, y: 300 }, { x: 500, y: 300 });
   // Second line: inline to avoid drawLine's "1 entities staged" assertion.
   await workbench.activateTool("Create line geometry.");
-  await workbench.clickViewportAt({ x: 600, y: 500 });
-  await workbench.clickViewportAt({ x: 800, y: 500 });
+  await glideClick(workbench, { x: 600, y: 500 });
+  await glideClick(workbench, { x: 800, y: 500 });
   await expect
     .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
     .toContain("2 entities staged");
@@ -753,8 +785,7 @@ test("T12g: two consecutive drags of different targets in one sketch produce two
   expect(snap0.length).toBeGreaterThanOrEqual(4);
 
   // ── Drag 1: body of line 1 down 80px (400,300 → 400,380). ──
-  await viewportDrag(workbench, { x: 400, y: 300 }, { x: 400, y: 380 });
-  await workbench.waitForAnimationFrames(4);
+  await committedDrag(workbench, { x: 400, y: 300 }, { x: 400, y: 380 });
   const snap1 = await readLivePoints(workbench);
   // Line 1's points (indices 0,1) should have moved down.
   expect(
@@ -772,8 +803,7 @@ test("T12g: two consecutive drags of different targets in one sketch produce two
   ).toBeLessThan(0.1);
 
   // ── Drag 2: body of line 2 up 80px (700,500 → 700,420). ──
-  await viewportDrag(workbench, { x: 700, y: 500 }, { x: 700, y: 420 });
-  await workbench.waitForAnimationFrames(4);
+  await committedDrag(workbench, { x: 700, y: 500 }, { x: 700, y: 420 });
   const snap2 = await readLivePoints(workbench);
   // Line 2's points should have moved up.
   expect(
@@ -787,8 +817,7 @@ test("T12g: two consecutive drags of different targets in one sketch produce two
   ).toBeLessThan(0.3);
 
   // ── Undo 1: should restore state after drag 1 (before drag 2). ──
-  await page.keyboard.press("Control+z");
-  await workbench.waitForAnimationFrames(4);
+  await waitForUndoneAction(page, MOVE, () => page.keyboard.press("Control+z"));
   const afterUndo1 = await readLivePoints(workbench);
   for (const pt of afterUndo1) {
     const s1Pt = snap1.find((p) => p.id === pt.id)!;
@@ -803,8 +832,7 @@ test("T12g: two consecutive drags of different targets in one sketch produce two
   }
 
   // ── Undo 2: should restore initial state (before any drag). ──
-  await page.keyboard.press("Control+z");
-  await workbench.waitForAnimationFrames(4);
+  await waitForUndoneAction(page, MOVE, () => page.keyboard.press("Control+z"));
   const afterUndo2 = await readLivePoints(workbench);
   for (const pt of afterUndo2) {
     const s0Pt = snap0.find((p) => p.id === pt.id)!;
@@ -819,10 +847,12 @@ test("T12g: two consecutive drags of different targets in one sketch produce two
   }
 
   // ── Redo twice: should restore the final state. ──
-  await page.keyboard.press("Control+Shift+z");
-  await workbench.waitForAnimationFrames(4);
-  await page.keyboard.press("Control+Shift+z");
-  await workbench.waitForAnimationFrames(4);
+  await waitForRedoneAction(page, MOVE, () =>
+    page.keyboard.press("Control+Shift+z"),
+  );
+  await waitForRedoneAction(page, MOVE, () =>
+    page.keyboard.press("Control+Shift+z"),
+  );
   const afterRedos = await readLivePoints(workbench);
   for (const pt of afterRedos) {
     const s2Pt = snap2.find((p) => p.id === pt.id)!;
@@ -902,11 +932,10 @@ test("T12g: the same world-space displacement applied at 1× and ~2× zoom gives
   // ── Measure world-units-per-pixel at 1× zoom empirically. ──
   // Drag point 0 exactly 100px right, observe world delta.
   const init1x = await readLivePoints(workbench);
-  await viewportDrag(workbench, LINE_START, {
+  await committedDrag(workbench, LINE_START, {
     x: LINE_START.x + 100,
     y: LINE_START.y,
   });
-  await workbench.waitForAnimationFrames(4);
   const after1x = await readLivePoints(workbench);
   const delta1x = after1x[0]!.position[0] - init1x[0]!.position[0];
   const wupp1x = delta1x / 100; // world-units-per-pixel at 1×
@@ -914,8 +943,7 @@ test("T12g: the same world-space displacement applied at 1× and ~2× zoom gives
     delta1x,
     "1× drag must produce a positive displacement.",
   ).toBeGreaterThan(0.5);
-  await page.keyboard.press("Control+z");
-  await workbench.waitForAnimationFrames(4);
+  await waitForUndoneAction(page, MOVE, () => page.keyboard.press("Control+z"));
 
   // ── Zoom in at the centre; find point 0 on screen again. ──
   await zoomInAtCentre(workbench);
@@ -924,8 +952,7 @@ test("T12g: the same world-space displacement applied at 1× and ~2× zoom gives
   // ── Measure world-units-per-pixel at the zoomed level. ──
   // Probe: drag point 0 by 60px right, observe world delta, undo.
   const initProbe = await readLivePoints(workbench);
-  await viewportDrag(workbench, start2x, { x: start2x.x + 60, y: start2x.y });
-  await workbench.waitForAnimationFrames(4);
+  await committedDrag(workbench, start2x, { x: start2x.x + 60, y: start2x.y });
   const afterProbe = await readLivePoints(workbench);
   const deltaProbe = afterProbe[0]!.position[0] - initProbe[0]!.position[0];
   const wupp2x = deltaProbe / 60; // world-units-per-pixel at zoomed level
@@ -933,17 +960,15 @@ test("T12g: the same world-space displacement applied at 1× and ~2× zoom gives
     wupp2x,
     "Zoomed wupp must be smaller than 1× (zoom happened).",
   ).toBeLessThan(wupp1x * 0.9);
-  await page.keyboard.press("Control+z");
-  await workbench.waitForAnimationFrames(4);
+  await waitForUndoneAction(page, MOVE, () => page.keyboard.press("Control+z"));
 
   // ── Apply the same world-space displacement (delta1x) at zoomed level. ──
   const pixelsNeeded = Math.round(delta1x / wupp2x);
   const init2x = await readLivePoints(workbench);
-  await viewportDrag(workbench, start2x, {
+  await committedDrag(workbench, start2x, {
     x: start2x.x + pixelsNeeded,
     y: start2x.y,
   });
-  await workbench.waitForAnimationFrames(4);
   const after2x = await readLivePoints(workbench);
   const delta2x = after2x[0]!.position[0] - init2x[0]!.position[0];
 
@@ -976,7 +1001,9 @@ test("T12g: a press within the grab radius but off the point does not cause a po
   // the point.
   const box = await workbench.viewport().boundingBox();
   if (!box) throw new Error("No viewport.");
-  await page.mouse.move(box.x + LINE_START.x + 8, box.y + LINE_START.y);
+  await page.mouse.move(box.x + LINE_START.x + 8, box.y + LINE_START.y, {
+    steps: 8,
+  });
   await page.mouse.down();
   await workbench.waitForAnimationFrames(2);
   await page.mouse.up();
@@ -996,7 +1023,9 @@ test("T12g: a press within the grab radius but off the point does not cause a po
   await zoomInAtCentre(workbench);
   const start2x = await locateLineStart(workbench);
   // Press 8px to the right of point 0.
-  await page.mouse.move(box.x + start2x.x + 8, box.y + start2x.y);
+  await page.mouse.move(box.x + start2x.x + 8, box.y + start2x.y, {
+    steps: 8,
+  });
   await page.mouse.down();
   await workbench.waitForAnimationFrames(2);
   await page.mouse.up();

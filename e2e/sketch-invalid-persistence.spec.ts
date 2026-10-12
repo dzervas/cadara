@@ -1,6 +1,5 @@
-import { readFile } from "node:fs/promises";
-
 import { expect, test } from "@playwright/test";
+import { openDocumentCopy, saveDocumentCopy } from "./helpers/document-files";
 import { FeatureWorkbenchHarness } from "./helpers/feature-workbench";
 import { createRectangleProfileOperationHistory } from "./helpers/modeling-fixtures";
 
@@ -17,50 +16,22 @@ type CadaraDocument = {
   }>;
 };
 
-async function downloadCadara(page: import("@playwright/test").Page) {
-  await page.getByRole("button", { name: "File" }).click();
-  const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("menuitem", { name: "Save As" }).click();
-  await page.getByRole("button", { name: "Download a copy" }).click();
-  const download = await downloadPromise;
-  const path = await download.path();
-  if (!path) throw new Error("Could not read the saved cadara document.");
-  return JSON.parse(await readFile(path, "utf8")) as CadaraDocument;
-}
-
-async function openCadara(
-  page: import("@playwright/test").Page,
-  document: CadaraDocument,
-  name: string,
-) {
-  await page.getByRole("button", { name: "File" }).click();
-  await page.getByRole("menuitem", { name: "Open..." }).click();
-  const chooserPromise = page.waitForEvent("filechooser");
-  await page.getByRole("button", { name: "Open a copy" }).click();
-  const chooser = await chooserPromise;
-  await chooser.setFiles({
-    name,
-    mimeType: "application/vnd.cadara+json",
-    buffer: Buffer.from(JSON.stringify(document)),
-  });
-  await expect(
-    page.getByRole("status").filter({ hasText: `Opened ${name}.` }),
-  ).toBeVisible({ timeout: 15_000 });
-}
-
 // Lane: e2e. Seam: actual workbench Finish + browser file Save As/Open +
 // re-entry, which cannot be established by kernel or debug-only tests.
 test("nonconverged authored sketch finishes, saves, reopens, and re-enters with diagnostics intact", async ({
   page,
 }) => {
   const workbench = new FeatureWorkbenchHarness(page);
-  await workbench.seedOperationHistory(createRectangleProfileOperationHistory());
+  await workbench.seedOperationHistory(
+    createRectangleProfileOperationHistory(),
+  );
   await workbench.openWithRepository();
-  const valid = await downloadCadara(page);
+  const valid = await saveDocumentCopy<CadaraDocument>(page);
   const sketch = valid.sketches[0];
   if (!sketch) throw new Error("Rectangle fixture did not save a sketch.");
   const pointId = sketch.definition.pointIds[0];
-  if (!pointId) throw new Error("Rectangle fixture did not save a sketch point.");
+  if (!pointId)
+    throw new Error("Rectangle fixture did not save a sketch point.");
   sketch.definition.constraintIds.push(
     "constraint_conflicting_e2e_a",
     "constraint_conflicting_e2e_b",
@@ -82,7 +53,7 @@ test("nonconverged authored sketch finishes, saves, reopens, and re-enters with 
     },
   );
 
-  await openCadara(page, valid, "invalid-current.cadara");
+  await openDocumentCopy(page, valid, "invalid-current.cadara");
   const sketchButton = page
     .getByRole("button", { name: /Select .*Double-click to reopen\./ })
     .first();
@@ -95,20 +66,25 @@ test("nonconverged authored sketch finishes, saves, reopens, and re-enters with 
     }),
   ).toBeVisible({ timeout: 15_000 });
   await page
-    .locator('button[aria-label="Finish Sketch"], button[data-tool-tooltip="Finish Sketch"]')
+    .locator(
+      'button[aria-label="Finish Sketch"], button[data-tool-tooltip="Finish Sketch"]',
+    )
     .click();
   await expect
-    .poll(() => page.evaluate(() => window.__cadaraDebug?.getState()?.machineState))
+    .poll(() =>
+      page.evaluate(() => window.__cadaraDebug?.getState()?.machineState),
+    )
     .toBe("idle");
 
-  const savedInvalid = await downloadCadara(page);
+  const savedInvalid = await saveDocumentCopy<CadaraDocument>(page);
   expect(
     savedInvalid.sketches[0]?.definition.constraints.some(
-      (constraint) => constraint.constraintId === "constraint_conflicting_e2e_b",
+      (constraint) =>
+        constraint.constraintId === "constraint_conflicting_e2e_b",
     ),
   ).toBe(true);
 
-  await openCadara(page, savedInvalid, "invalid-reopened.cadara");
+  await openDocumentCopy(page, savedInvalid, "invalid-reopened.cadara");
   await page
     .getByRole("button", { name: /Select .*Double-click to reopen\./ })
     .first()

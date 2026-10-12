@@ -40,7 +40,7 @@ export default defineConfig({
   },
   fullyParallel: true,
   // Real captures saturate the OCC worker and run serially. The default fast
-  // lane keeps enough browser parallelism to stay inside the two-minute budget.
+  // lane runs four browsers in parallel (about 14 minutes for 190 rows, T17b).
   workers: runRealCaptures ? 1 : 4,
   retries: 0,
   use: {
