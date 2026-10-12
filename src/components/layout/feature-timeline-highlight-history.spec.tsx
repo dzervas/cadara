@@ -36,7 +36,7 @@ import {
   rebuildOccAuthoringState,
 } from "@/domain/modeling/occ/authoring-state";
 import { extractPlanarFaceData } from "@/domain/modeling/occ/planes";
-import { getDefaultOpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import { getDefaultOpenCascadeInstance } from "@/infrastructure/occ/runtime";
 import { buildOccWorkspaceSnapshot } from "@/domain/modeling/occ/snapshot";
 import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
 import { getTargetContributingFeatureIds } from "@/domain/modeling/document-snapshot-view";

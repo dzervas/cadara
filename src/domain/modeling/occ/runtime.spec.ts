@@ -6,16 +6,20 @@ import { loadFilesystemOpenCascadeFactory } from "@/infrastructure/occ/filesyste
 import {
   createOpenCascadeInitializerFromMainJS,
   createProductionOpenCascadeInitializerFromMainJS,
+} from "@/infrastructure/occ/initialization";
+import {
   probeOpenCascadeNativeTopologyKernelCapabilities,
-  createOpenCascadeInstanceLoader,
-  getDefaultOpenCascadeInstance,
-  loadDefaultOpenCascadeFactory,
   getOpenCascadeRuntimeAssetVersion,
   getVersionedOpenCascadeRuntimeAssetUrl,
-  resetDefaultOpenCascadeInstanceForTests,
   type OpenCascadeInitializer,
   type OpenCascadeInstance,
 } from "@/domain/modeling/occ/runtime";
+import {
+  createOpenCascadeInstanceLoader,
+  getDefaultOpenCascadeInstance,
+  loadDefaultOpenCascadeFactory,
+  resetDefaultOpenCascadeInstanceForTests,
+} from "@/infrastructure/occ/runtime";
 
 test("src/domain/modeling/occ/runtime.spec.ts", async () => {
   function createMockOpenCascadeInstance() {

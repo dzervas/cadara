@@ -8,7 +8,7 @@ import {
   type OccFeatureExecutionContext,
 } from "@/domain/modeling/occ/features/shared";
 import { assertValidFeatureResultShape } from "@/domain/modeling/occ/features/boolean-operations";
-import { getDefaultOpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import { getDefaultOpenCascadeInstance } from "@/infrastructure/occ/runtime";
 import { trackNewSolidBody } from "@/domain/modeling/occ/topology";
 
 test("native aliases win when a preserved public id collides with a current OCC id", async () => {

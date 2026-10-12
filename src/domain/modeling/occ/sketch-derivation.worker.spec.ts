@@ -20,7 +20,7 @@ import {
 import type { DocumentId, RequestId } from "@/contracts/shared/ids";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
-import { getDefaultOpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import { getDefaultOpenCascadeInstance } from "@/infrastructure/occ/runtime";
 import { SketchRegionDerivationWorkerPool } from "@/domain/modeling/occ/sketch-derivation-worker-client";
 import {
   OccWorkerClient,
@@ -34,9 +34,9 @@ import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint
 
 const occLoads = vi.hoisted(() => ({ count: 0 }));
 
-vi.mock("@/domain/modeling/occ/runtime", async (importOriginal) => {
+vi.mock("@/infrastructure/occ/runtime", async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import("@/domain/modeling/occ/runtime")>();
+    await importOriginal<typeof import("@/infrastructure/occ/runtime")>();
   return {
     ...actual,
     // Both workers load OCC through this; the main thread never does.

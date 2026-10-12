@@ -9,8 +9,8 @@ import type {
 import type { DocumentId, GeometryAssetId, RequestId } from "@/contracts/shared/ids";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
 import { packWorkspaceSnapshotRenderMeshes } from "@/domain/modeling/occ/mesh-transport";
+import { loadDefaultOpenCascadeFactory } from "@/infrastructure/occ/runtime";
 import {
-  loadDefaultOpenCascadeFactory,
   probeOpenCascadeNativeTopologyKernelCapabilities,
   type OpenCascadeInstance,
 } from "@/domain/modeling/occ/runtime";

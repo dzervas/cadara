@@ -43,10 +43,8 @@ import {
 } from "@/domain/modeling/occ/authoring-state";
 import { extractPlanarFaceData } from "@/domain/modeling/occ/planes";
 import { classifySemanticStageTopology } from "@/domain/modeling/occ/topology-naming";
-import {
-  getDefaultOpenCascadeInstance,
-  type OpenCascadeInstance,
-} from "@/domain/modeling/occ/runtime";
+import { getDefaultOpenCascadeInstance } from "@/infrastructure/occ/runtime";
+import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import { buildAxisFromLineEdge } from "@/domain/modeling/occ/sketch-profile";
 import {
   OCC_REFERENCE_INVALIDATION_REASONS,

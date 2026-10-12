@@ -123,8 +123,8 @@ import {
   releaseOccAuthoringStateObjects,
 } from "@/domain/modeling/occ/memory";
 import { OCC_CONTRACT_GAP_CODES } from "@/domain/modeling/occ/implementation-policy";
+import { getOpenCascadeInstance } from "@/infrastructure/occ/runtime";
 import {
-  getOpenCascadeInstance,
   probeOpenCascadeNativeTopologyKernelCapabilities,
   type OpenCascadeInstance,
 } from "@/domain/modeling/occ/runtime";

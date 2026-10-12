@@ -3,8 +3,8 @@ import { pathToFileURL, fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import {
   createProductionOpenCascadeInitializerFromMainJS,
-  type OpenCascadeInitializer,
-} from "@/domain/modeling/occ/runtime";
+} from "@/infrastructure/occ/initialization";
+import type { OpenCascadeInitializer } from "@/domain/modeling/occ/runtime";
 
 /** Loads the same generated artifacts as the browser, without a web server. */
 export async function loadFilesystemOpenCascadeFactory(

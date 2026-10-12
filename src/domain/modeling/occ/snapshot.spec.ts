@@ -44,7 +44,7 @@ import {
   createOccAuthoringState,
   rebuildOccAuthoringState,
 } from "@/domain/modeling/occ/authoring-state";
-import { getDefaultOpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import { getDefaultOpenCascadeInstance } from "@/infrastructure/occ/runtime";
 import { extractPlanarFaceData, toGpPnt } from "@/domain/modeling/occ/planes";
 import { trackNewSolidBody } from "@/domain/modeling/occ/topology";
 import {
