@@ -8,6 +8,8 @@ export interface RollbackTopologyDiagnostic {
   code: RollbackTopologyDiagnosticCode;
   message: string;
   featureId?: string;
+  /** Known affected face; absent means unreadable evidence cannot be scoped safely. */
+  faceId?: string;
 }
 
 export interface RollbackFacet {
@@ -116,6 +118,7 @@ export function readRollbackTopologySnapshot(
           code: "rollback-tessellation-unreadable",
           featureId: snapshot.featureId,
           message: `Rollback body ${body.id} contains a malformed face.`,
+          faceId: typeof face?.id === "string" ? face.id : undefined,
         });
         continue;
       }
@@ -127,6 +130,7 @@ export function readRollbackTopologySnapshot(
             code: "rollback-tessellation-unreadable",
             featureId: snapshot.featureId,
             message: `Rollback face ${face.id} contains a malformed facet.`,
+            faceId: face.id,
           });
           continue;
         }
@@ -136,6 +140,7 @@ export function readRollbackTopologySnapshot(
             code: "rollback-tessellation-unreadable",
             featureId: snapshot.featureId,
             message: `Rollback face ${face.id} contains a malformed facet vertex.`,
+            faceId: face.id,
           });
           continue;
         }

@@ -495,7 +495,7 @@ function makeSplitInterfaceScenario(options: {
   const fixtureOwnerWitness = (entity: string) => {
     const index = Math.max(0, profile.definition.entities.findIndex(entry => entry.entityId === entity)) + 1;
     const face = makeExactPayload(splitBodies[0]!).brep.bodies[0]!.topology.faces[index]!;
-    const snapshot = { bodies: [{ id: "captured-mock-owner", faces: [{ id: `captured-${entity}`, facets: face.triangles.map(triangle => ({ vertices: triangle.map(i => face.meshVertices[i]!.map(value => value / 1000) as [number, number, number]) })) }] }] } as unknown as RollbackTopologySnapshot;
+    const snapshot = { diagnostics: [], bodies: [{ id: "captured-mock-owner", faces: [{ id: `captured-${entity}`, facets: face.triangles.map(triangle => ({ vertices: triangle.map(i => face.meshVertices[i]!.map(value => value / 1000) as [number, number, number]) })) }] }] } as unknown as RollbackTopologySnapshot;
     return captureSplitInterfaceOwnerWitness(snapshot, snapshot, `captured-${entity}`);
   };
   const consumerSketch = (label: string, entity: string) => ({
