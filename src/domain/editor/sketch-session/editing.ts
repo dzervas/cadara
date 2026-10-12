@@ -108,6 +108,7 @@ import {
   applySketchContribution,
   cloneDefinition,
   createSessionCommitFactories,
+  describeSketchSessionUnsatisfiedRequirements,
   getSketchSessionInvalidFeedback,
   hasAcceptedLiveSolveOfDefinition,
   withLiveSolveBasis,
@@ -3227,7 +3228,17 @@ function startDragWithIntent(
     session.offsetPlans,
   );
   if (started.kind === "unacceptable") {
-    return { ...session, validationMessage: started.message };
+    // T17c5 review A-4: a conflict is explained before a degenerate span
+    // (the T17c3 feedback order).
+    const conflict = started.degenerateSpan
+      ? describeSketchSessionUnsatisfiedRequirements(session)
+      : null;
+    return {
+      ...session,
+      validationMessage: conflict
+        ? `Geometry can't be dragged until the sketch solves: ${conflict}`
+        : started.message,
+    };
   }
   const interactiveSolveSession = started.session;
 
@@ -4091,7 +4102,7 @@ function startInteractiveSolveSessionForDrag(
   offsetPlans?: readonly SolvedOffsetFramePlanRecord[],
 ):
   | { kind: "started"; session: SketchCompiledSolveSession | null }
-  | { kind: "unacceptable"; message: string } {
+  | { kind: "unacceptable"; message: string; degenerateSpan: boolean } {
   if (usesUnconstrainedDragFastPath(definition)) {
     return { kind: "started", session: null };
   }
@@ -4123,6 +4134,10 @@ function startInteractiveSolveSessionForDrag(
       ...derivation,
       offsetPlans: carried,
       partialSolvePolicy: "failOnConflict",
+      // T17c5 (issue 08 :107): a fit point dragged off its coincident
+      // neighbour may recover the degenerate span.
+      degenerateSplineSpanDragPointId:
+        intent.kind === "point" ? intent.pointId : undefined,
     }),
   });
   return started.kind === "started"
@@ -4132,5 +4147,7 @@ function startInteractiveSolveSessionForDrag(
         message: `Geometry can't be dragged until the sketch solves${
           started.diagnostic ? `: ${started.diagnostic.message}` : "."
         }`,
+        degenerateSpan:
+          started.diagnostic?.code === "invalid-spline-coincident-points",
       };
 }

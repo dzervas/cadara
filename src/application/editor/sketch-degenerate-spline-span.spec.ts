@@ -20,7 +20,15 @@ import type {
   SketchDefinition,
   SketchEntityDefinition,
 } from "@/contracts/sketch/schema";
-import { entityRef, pointRef } from "@/domain/editor/sketch-mirror.fixtures";
+import {
+  entityRef,
+  eid as mirrorEid,
+  entityTarget as mirrorEntityTarget,
+  mirroredSession,
+  pid as mirrorPid,
+  pointRef,
+  seedDefinition as mirrorSeedDefinition,
+} from "@/domain/editor/sketch-mirror.fixtures";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
   acceptSketchDraw,
@@ -31,7 +39,9 @@ import {
   finalizeSketchDraw,
   getSketchSessionDisplayRenderables,
   getSketchSessionPreviewLabel,
+  patchSketchEditToolValue,
   selectSketchEditTarget,
+  selectSketchEditToolTarget,
   startSketchDraw,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
@@ -65,7 +75,7 @@ const C: P = [2, 1];
 const D: P = [3, 0.125];
 
 const TEXT =
-  "Spline 1 has two consecutive fit points at the same place (Spline 1 point 2 and Spline 1 point 3); the sketch's profiles are blocked. Undo, or delete the spline and draw it again.";
+  "Spline 1 has two consecutive fit points at the same place (Spline 1 point 2 and Spline 1 point 3); the sketch's profiles are blocked. Undo, or drag one of them apart (delete the Coincident between them first, if there is one).";
 
 function loop(): SketchSessionState {
   let session = withSketchSnapScale(
@@ -325,12 +335,11 @@ describe("T17c3: a degenerate spline span is reported, drawn and blocks the prof
   });
 });
 
-// Review F-1: the text promises only what works in a sketch with a
-// constraint (here a Fix on point 1, besides the line's inferred one).
-// Dragging the points apart is refused there (the drag solve compiles the
-// authored definition, which is invalid), and removing the Coincident leaves
-// them together, so neither is promised. Undo works in the session; after
-// Finish → reopen (no Undo history) deleting the spline unblocks the sketch.
+// Review F-1: the promised recoveries work in a sketch with a constraint
+// (here a Fix on point 1, besides the line's inferred one). Undo works in
+// the session; after Finish → reopen (no Undo history) deleting the spline
+// unblocks the sketch. Dragging one of the points apart (T17c5) has its own
+// rows below.
 describe("T17c3 review F-1: the promised recoveries work in a constrained sketch", () => {
   async function constrainedDegenerate(path: "drag" | "coincident") {
     const { f, b, c, before } = await drawn();
@@ -457,7 +466,7 @@ describe("T17c3 review F-6: wrap span, conflict first, selection in a valid sket
     await f.settle();
     expect(positionOf(f.session.definition, last), "premise").toEqual(A);
     expect(f.session.validationMessage).toBe(
-      "Spline 1 has two consecutive fit points at the same place (Spline 1 point 4 and Spline 1 point 1); the sketch's profiles are blocked. Undo, or delete the spline and draw it again.",
+      "Spline 1 has two consecutive fit points at the same place (Spline 1 point 4 and Spline 1 point 1); the sketch's profiles are blocked. Undo, or drag one of them apart (delete the Coincident between them first, if there is one).",
     );
   });
 
@@ -510,4 +519,479 @@ describe("T17c3 review F-6: wrap span, conflict first, selection in a valid sket
         .validationMessage,
     ).toBe(TEXT);
   });
+});
+
+// T17c5 (issue 08 :107, recovery by editing): in a constrained sketch whose
+// only error is the degenerate span, dragging one of the two fit points
+// apart is one "Move Sketch Geometry" that makes the span valid again, in
+// the session and after Finish → reopen. A Coincident between them keeps
+// them together (the drag is refused) until it is deleted. A drag that
+// keeps them together, and every other drag-start refusal, are unchanged.
+describe("T17c5: dragging one of the coincident fit points apart recovers the span", () => {
+  type Fixture = Awaited<ReturnType<typeof createSketchActionOwnerFixture>>;
+
+  /** Fix on fit point 1, then the degenerate span by `path`; optionally Finish → JSON → reopen. */
+  async function degenerate(
+    path: "drag" | "coincident",
+    where: "session" | "reopened",
+  ) {
+    const { f, b, c, before } = await drawn();
+    const [a, , , d] = splineOf(before).pointOccurrences.map(
+      (occurrence) => occurrence.pointId as SketchPointId,
+    );
+    f.dispatch({ type: "tool.activated", toolId: "constraintFix" });
+    f.dispatch({
+      type: "viewport.selectionRequested",
+      target: pointRef(f.session, a!),
+    });
+    f.dispatch({ type: "sketch.activeToolCleared" });
+    await f.settle();
+    if (path === "drag") await dragOntoB(f, c);
+    else {
+      f.dispatch({ type: "tool.activated", toolId: "constraintCoincident" });
+      f.dispatch({
+        type: "viewport.selectionRequested",
+        target: pointRef(f.session, b),
+      });
+      f.dispatch({
+        type: "viewport.selectionRequested",
+        target: pointRef(f.session, c),
+      });
+      f.dispatch({ type: "sketch.activeToolCleared" });
+      await f.settle();
+    }
+    expect(f.session.validationMessage, "premise: degenerate").toBe(TEXT);
+    if (where === "session") return { f, b, c, d: d! };
+    const saved = await finish(f.session.commitRequest!.definition);
+    const file = JSON.parse(JSON.stringify(saved)) as SketchSnapshotRecord;
+    const reopened = await createSketchActionOwnerFixture(
+      createSketchSessionFromSnapshot(file, OCC_KERNEL_SETTINGS),
+    );
+    expect(reopened.undoLabels(), "premise: no Undo history").toEqual([]);
+    expect(getSketchSessionInvalidFeedback(reopened.session)).toBe(TEXT);
+    return { f: reopened, b, c, d: d! };
+  }
+
+  /** Glides `pointId` from where it is to `to` and releases; the viewport then selects it. */
+  async function glide(f: Fixture, pointId: SketchPointId, to: P) {
+    const from = positionOf(f.session.definition, pointId);
+    f.dispatch({
+      type: "sketch.geometryDragStarted",
+      target: pointRef(f.session, pointId),
+      point: world(from as unknown as P),
+    });
+    for (let step = 1; step <= 4; step += 1)
+      f.dispatch({
+        type: "sketch.geometryDragMoved",
+        point: world([
+          from[0] + ((to[0] - from[0]) * step) / 4,
+          from[1] + ((to[1] - from[1]) * step) / 4,
+        ]),
+      });
+    f.dispatch({ type: "sketch.geometryDragEnded", point: world(to) });
+    f.dispatch({
+      type: "viewport.selectionRequested",
+      target: pointRef(f.session, pointId),
+    });
+    await f.settle();
+  }
+
+  /** The drag left the sketch exactly as it was: no action, same definition, same status. */
+  function expectUnchanged(
+    f: Fixture,
+    labels: readonly string[],
+    definition: SketchDefinition,
+  ) {
+    expect(f.undoLabels(), "no action").toEqual(labels);
+    expect(f.session.definition, "the sketch is exactly as before").toEqual(
+      definition,
+    );
+    expect(f.session.liveRegions.status).toBe("unavailable");
+    expect(getSketchSessionInvalidFeedback(f.session)).toBe(TEXT);
+  }
+
+  /** Fit point `c` dragged to C: one action, the span valid, profiles back, no message. */
+  function expectRecovered(
+    f: Fixture,
+    labels: readonly string[],
+    b: SketchPointId,
+    c: SketchPointId,
+    before: SketchDefinition,
+  ) {
+    expect(f.undoLabels(), "one 'Move Sketch Geometry'").toEqual([
+      ...labels,
+      "Move Sketch Geometry",
+    ]);
+    expect(
+      splineOf(f.session.definition).pointOccurrences,
+      "the spline's authored occurrences are unchanged",
+    ).toEqual(splineOf(before).pointOccurrences);
+    expect(
+      positionOf(f.session.definition, b),
+      "the other fit point did not move (nothing separates them automatically)",
+    ).toEqual(positionOf(before, b));
+    const moved = positionOf(f.session.definition, c);
+    expect(
+      moved[0],
+      "the dragged fit point is where it was dropped",
+    ).toBeCloseTo(C[0], 9);
+    expect(moved[1]).toBeCloseTo(C[1], 9);
+    expect(
+      getSketchDegenerateSplineSpans(
+        f.session.liveSolve!.definition,
+        f.session.liveSolve!.solvedSnapshot,
+      ),
+      "the span is no longer degenerate",
+    ).toEqual([]);
+    expect(f.session.liveRegions.status, "profiles are back").toBe("current");
+    expect(f.session.liveRegions.regions).toHaveLength(1);
+    expect(f.session.validationMessage, "the message is gone").toBeNull();
+    expect(getSketchSessionInvalidFeedback(f.session)).toBeNull();
+    expect(
+      splineRenderable(f.session)?.regionValidity,
+      "no tint",
+    ).toBeUndefined();
+  }
+
+  for (const where of ["session", "reopened"] as const) {
+    test(`fit point dragged onto its neighbour, ${where}: dragging it apart is one 'Move Sketch Geometry'; the span is valid, regions current, the message gone`, async () => {
+      const { f, b, c } = await degenerate("drag", where);
+      const labels = f.undoLabels();
+      const before = f.session.definition;
+      await glide(f, c, C);
+      expectRecovered(f, labels, b, c, before);
+      if (where === "session") {
+        f.dispatch({ type: "history.undoRequested" });
+        await f.settle();
+        expectUnchanged(f, labels, before);
+      }
+    });
+
+    test(`Coincident on the two fit points, ${where}: the drag keeps them together (refused, nothing changes); after deleting the Coincident, dragging one apart recovers the span`, async () => {
+      const { f, b, c } = await degenerate("coincident", where);
+      const held = f.session.definition;
+      const heldLabels = f.undoLabels();
+      await glide(f, c, C);
+      expectUnchanged(f, heldLabels, held);
+
+      const coincident = held.constraints.find(
+        (constraint) => constraint.kind === "coincident",
+      )!;
+      f.dispatch({
+        type: "viewport.selectionRequested",
+        target: {
+          kind: "constraint",
+          sketchId: f.session.sketchId ?? "sketch_draft",
+          constraintId: coincident.constraintId,
+        } as never,
+      });
+      f.dispatch({ type: "sketch.annotationDeleteRequested" });
+      await f.settle();
+      expect(f.undoLabels(), "premise: the Coincident deleted").toEqual([
+        ...heldLabels,
+        "Delete Sketch Item",
+      ]);
+      expect(
+        positionOf(f.session.definition, c),
+        "premise: still together",
+      ).toEqual(positionOf(f.session.definition, b));
+      expect(f.session.liveRegions.status, "premise: still blocked").toBe(
+        "unavailable",
+      );
+
+      const labels = f.undoLabels();
+      const before = f.session.definition;
+      await glide(f, c, C);
+      expectRecovered(f, labels, b, c, before);
+    });
+  }
+
+  test("a drag that keeps them together stays blocked: fit point 3 is also Fixed, so dragging it moves nothing and the sketch stays exactly as invalid; dragging fit point 2 apart then recovers", async () => {
+    const { f, b, c } = await degenerate("drag", "session");
+    f.dispatch({ type: "tool.activated", toolId: "constraintFix" });
+    f.dispatch({
+      type: "viewport.selectionRequested",
+      target: pointRef(f.session, c),
+    });
+    f.dispatch({ type: "sketch.activeToolCleared" });
+    await f.settle();
+    const fixed = f.session.definition;
+    const labels = f.undoLabels();
+    expect(labels.at(-1), "premise").toBe("Fix Geometry");
+    await glide(f, c, C);
+    expectUnchanged(f, labels, fixed);
+
+    // Fit point 2 is free: dragging it to C separates them.
+    await glide(f, b, C);
+    expect(f.undoLabels()).toEqual([...labels, "Move Sketch Geometry"]);
+    expect(positionOf(f.session.definition, c)).toEqual(positionOf(fixed, c));
+    expect(f.session.liveRegions.status).toBe("current");
+    expect(f.session.validationMessage).toBeNull();
+  });
+
+  test("every other drag-start refusal is unchanged: dragging another point, or with a conflict besides the span", async () => {
+    const { f, c, d } = await degenerate("drag", "reopened");
+    const definition = f.session.definition;
+    f.dispatch({
+      type: "sketch.geometryDragStarted",
+      target: pointRef(f.session, d),
+      point: world(D),
+    });
+    expect(
+      f.session.activeDrag,
+      "another point: refused at the start",
+    ).toBeNull();
+    expect(f.session.validationMessage).toBe(
+      `Geometry can't be dragged until the sketch solves: ${TEXT}`,
+    );
+    await glide(f, d, [3, 1]);
+    expectUnchanged(f, [], definition);
+
+    // Two conflicting Fixes besides the span: dragging fit point 3 is refused.
+    const conflict = (id: string, position: P) => ({
+      constraintId: `constraint_conflict_${id}`,
+      kind: "fixPoint",
+      label: `Conflicting fix ${id}`,
+      pointId: splineOf(definition).pointOccurrences[0]!.pointId,
+      position,
+    });
+    const conflicting = rebuildSessionForDefinition(f.session, {
+      definition: {
+        ...definition,
+        constraintIds: [
+          ...definition.constraintIds,
+          "constraint_conflict_a",
+          "constraint_conflict_b",
+        ],
+        constraints: [
+          ...definition.constraints,
+          conflict("a", A),
+          conflict("b", [A[0], A[1] + 5]),
+        ],
+      } as SketchDefinition,
+    });
+    const g = await createSketchActionOwnerFixture(conflicting);
+    g.dispatch({
+      type: "sketch.geometryDragStarted",
+      target: pointRef(g.session, c),
+      point: world(B),
+    });
+    expect(g.session.activeDrag, "a conflict: refused at the start").toBeNull();
+    // Review A-4: the conflict is explained first (the T17c3 feedback order).
+    expect(g.session.validationMessage).toBe(
+      "Geometry can't be dragged until the sketch solves: Fix 3, Conflicting fix a, Conflicting fix b conflict. The sketch is invalid; profiles from it are blocked. Change or delete one of them, or Undo.",
+    );
+  });
+});
+
+// Review R-1: a derived copy (mirror, linear/circular pattern, transform) of
+// the seed spline has the same degenerate span, driven by the same two seed
+// fit points. The copy's span is part of the same recovery: dragging a seed
+// fit point apart separates both, in one "Move Sketch Geometry", in the
+// session and after Finish → reopen.
+describe("T17c5 review R-1: a spline with derived copies recovers by dragging a seed fit point apart", () => {
+  type Fixture = Awaited<ReturnType<typeof createSketchActionOwnerFixture>>;
+  const s1 = mirrorPid("s1");
+  const s2 = mirrorPid("s2");
+
+  /** The seed spline s0 → s1 → s2 and its copies, made degenerate by a Coincident on s1, s2 that is then deleted. */
+  async function degenerateCopies(
+    session: SketchSessionState,
+    where: "session" | "reopened",
+    joinCopy = false,
+  ) {
+    let f = await createSketchActionOwnerFixture(session);
+    const regions = f.session.liveRegions.regions.length;
+    // A Fix on s0: a constrained sketch, so no drag takes the unconstrained
+    // fast path (a mirror always solves; a pattern or transform alone would not).
+    f.dispatch({ type: "tool.activated", toolId: "constraintFix" });
+    f.dispatch({
+      type: "viewport.selectionRequested",
+      target: pointRef(f.session, mirrorPid("s0")),
+    });
+    f.dispatch({ type: "sketch.activeToolCleared" });
+    await f.settle();
+    expect(
+      f.session.definition.constraints.map((constraint) => constraint.kind),
+      "premise: constrained",
+    ).toContain("fixPoint");
+    f.dispatch({ type: "tool.activated", toolId: "constraintCoincident" });
+    f.dispatch({
+      type: "viewport.selectionRequested",
+      target: pointRef(f.session, s1),
+    });
+    f.dispatch({
+      type: "viewport.selectionRequested",
+      target: pointRef(f.session, s2),
+    });
+    f.dispatch({ type: "sketch.activeToolCleared" });
+    await f.settle();
+    const coincident = f.session.definition.constraints.find(
+      (constraint) => constraint.kind === "coincident",
+    )!;
+    f.dispatch({
+      type: "viewport.selectionRequested",
+      target: {
+        kind: "constraint",
+        sketchId: f.session.sketchId ?? "sketch_draft",
+        constraintId: coincident.constraintId,
+      } as never,
+    });
+    f.dispatch({ type: "sketch.annotationDeleteRequested" });
+    await f.settle();
+    if (joinCopy) {
+      // Review RR-1: a Coincident on the copy's own two span points.
+      const output = f.session.definition
+        .derivedRelationships!.flatMap((relationship) => relationship.outputs)
+        .find((entry) => entry.seedEntityId === mirrorEid("s"))!;
+      const copyOf = (seed: SketchPointId) =>
+        output.outputPointIds[output.seedPointIds.indexOf(seed)]!;
+      f.dispatch({ type: "tool.activated", toolId: "constraintCoincident" });
+      for (const seed of [s1, s2])
+        f.dispatch({
+          type: "viewport.selectionRequested",
+          target: pointRef(f.session, copyOf(seed)),
+        });
+      f.dispatch({ type: "sketch.activeToolCleared" });
+      await f.settle();
+      expect(
+        f.session.definition.constraints.filter(
+          (constraint) =>
+            constraint.kind === "coincident" &&
+            constraint.pointIds.includes(copyOf(s1)) &&
+            constraint.pointIds.includes(copyOf(s2)),
+        ),
+        "premise: the copy's two span points are joined by a Coincident",
+      ).toHaveLength(1);
+    }
+    if (where === "reopened") {
+      const saved = await finish(f.session.commitRequest!.definition);
+      const file = JSON.parse(JSON.stringify(saved)) as SketchSnapshotRecord;
+      f = await createSketchActionOwnerFixture(
+        createSketchSessionFromSnapshot(file, OCC_KERNEL_SETTINGS),
+      );
+    }
+    const spans = getSketchDegenerateSplineSpans(
+      f.session.liveSolve!.definition,
+      f.session.liveSolve!.solvedSnapshot,
+    );
+    expect(
+      new Set(spans.map((span) => span.spline.entityId)).size,
+      "premise: the seed and its copy are degenerate",
+    ).toBeGreaterThanOrEqual(2);
+    expect(f.session.liveRegions.status, "premise: blocked").toBe(
+      "unavailable",
+    );
+    return { f, regions };
+  }
+
+  async function glideApart(f: Fixture) {
+    const from = positionOf(f.session.definition, s2);
+    const to: P = [12, 2];
+    f.dispatch({
+      type: "sketch.geometryDragStarted",
+      target: pointRef(f.session, s2),
+      point: world(from as unknown as P),
+    });
+    for (let step = 1; step <= 4; step += 1)
+      f.dispatch({
+        type: "sketch.geometryDragMoved",
+        point: world([
+          from[0] + ((to[0] - from[0]) * step) / 4,
+          from[1] + ((to[1] - from[1]) * step) / 4,
+        ]),
+      });
+    f.dispatch({ type: "sketch.geometryDragEnded", point: world(to) });
+    f.dispatch({
+      type: "viewport.selectionRequested",
+      target: pointRef(f.session, s2),
+    });
+    await f.settle();
+  }
+
+  function expectRecovered(
+    f: Fixture,
+    labels: readonly string[],
+    regions: number,
+  ) {
+    expect(f.undoLabels(), "one 'Move Sketch Geometry'").toEqual([
+      ...labels,
+      "Move Sketch Geometry",
+    ]);
+    expect(
+      getSketchDegenerateSplineSpans(
+        f.session.liveSolve!.definition,
+        f.session.liveSolve!.solvedSnapshot,
+      ),
+      "neither the seed nor its copies are degenerate",
+    ).toEqual([]);
+    expect(f.session.liveRegions.status).toBe("current");
+    expect(f.session.liveRegions.regions).toHaveLength(regions);
+    expect(f.session.validationMessage).toBeNull();
+  }
+
+  for (const where of ["session", "reopened"] as const)
+    test(`mirror, ${where}: dragging seed fit point s2 apart recovers the seed and the mirrored copy`, async () => {
+      const { f, regions } = await degenerateCopies(
+        mirroredSession("free").session,
+        where,
+      );
+      const labels = f.undoLabels();
+      await glideApart(f);
+      expectRecovered(f, labels, regions);
+    });
+
+  /** The seed sketch with one pattern or transform copy of spline s. */
+  function copied(
+    toolId: "sketchLinearPattern" | "sketchCircularPattern" | "sketchTransform",
+  ) {
+    const base = mirroredSession("free").session;
+    const seedOnly = rebuildSessionForDefinition(base, {
+      definition: mirrorSeedDefinition([]),
+    });
+    let tool = beginSketchTool(seedOnly, toolId);
+    tool = selectSketchEditToolTarget(tool, mirrorEntityTarget("s") as never);
+    tool = patchSketchEditToolValue(tool, {
+      value: toolId === "sketchCircularPattern" ? Math.PI / 2 : 20,
+    });
+    tool = patchSketchEditToolValue(tool, {
+      intent: "commitSketchEditOperator",
+    });
+    expect(
+      tool.definition.derivedRelationships?.map((entry) => entry.kind),
+      "premise: one copy relationship",
+    ).toHaveLength(1);
+    return { ...tool, activeTool: null, activeEditTool: null };
+  }
+
+  for (const toolId of [
+    "sketchLinearPattern",
+    "sketchCircularPattern",
+    "sketchTransform",
+  ] as const)
+    for (const where of ["session", "reopened"] as const)
+      test(`${toolId}, ${where}: dragging seed fit point s2 apart recovers the seed and its copy`, async () => {
+        const { f, regions } = await degenerateCopies(copied(toolId), where);
+        const labels = f.undoLabels();
+        await glideApart(f);
+        expectRecovered(f, labels, regions);
+      });
+
+  // Review RR-1: a join on the copy's own span ends holds the copy span
+  // together through the derivation (within the solve's tolerance), so the
+  // drag keeps today's refusal, as for a join on the seed's ends.
+  for (const [name, make] of [
+    ["mirror", () => mirroredSession("free").session],
+    ["sketchLinearPattern", () => copied("sketchLinearPattern")],
+  ] as const)
+    for (const where of ["session", "reopened"] as const)
+      test(`${name}, ${where}: a Coincident on the copy's two span points keeps the refusal (nothing moves, no action)`, async () => {
+        const { f } = await degenerateCopies(make(), where, true);
+        const labels = f.undoLabels();
+        const definition = f.session.definition;
+        await glideApart(f);
+        expect(f.undoLabels(), "no action").toEqual(labels);
+        expect(f.session.definition, "nothing moved").toEqual(definition);
+        expect(f.session.liveRegions.status).toBe("unavailable");
+      });
 });

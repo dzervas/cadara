@@ -317,6 +317,11 @@ export interface SketchCompiledSolveProgram {
   strategy: SketchSolveStrategy;
   diagnostics: readonly SketchSolveDiagnostic[];
   validation: SketchCoreValidationResult;
+  /**
+   * T17c5: the splines whose coincident-span check is judged at each
+   * solve's values instead of in `validation` (a drag's recovery).
+   */
+  degenerateSplineSpanRecovery: DegenerateSplineSpanRecovery;
   system: BuildSystemResult;
   components: readonly SketchCompiledSolveComponent[];
   equationMetadata: readonly SketchCompiledEquationMetadata[];
@@ -4607,7 +4612,147 @@ export function describeDegenerateSplineSpan(
     const pointId = occurrences[index % occurrences.length]?.pointId ?? "";
     return pointLabel(pointId) ?? pointId;
   });
-  return `${spline.label} has two consecutive fit points at the same place (${first} and ${second}); the sketch's profiles are blocked. Undo, or delete the spline and draw it again.`;
+  return `${spline.label} has two consecutive fit points at the same place (${first} and ${second}); the sketch's profiles are blocked. Undo, or drag one of them apart (delete the Coincident between them first, if there is one).`;
+}
+
+const COINCIDENT_SPLINE_SPAN_CODE = "invalid-spline-coincident-points";
+
+/** T17c5: the splines a drag recovers, and the seed points of each span's ends. */
+interface DegenerateSplineSpanRecovery {
+  splineIds: ReadonlySet<SketchEntityId>;
+  /**
+   * The two ends of every recovered span, as authored and mapped to their
+   * seed points (review RR-1: a join on either pair holds the span).
+   */
+  spanEnds: readonly (readonly [SketchPointId, SketchPointId])[];
+}
+
+const NO_DEGENERATE_SPLINE_SPAN_RECOVERY: DegenerateSplineSpanRecovery = {
+  splineIds: new Set(),
+  spanEnds: [],
+};
+
+/**
+ * T17c5 (issue 08 :107, recovery by dragging): the splines whose
+ * coincident-span validation a drag of `dragPointId` re-judges at each
+ * solve's values instead of the authored positions, when those spans are
+ * the definition's only authored errors. A spline qualifies when every
+ * coincident span of its authored reconstruction has the dragged point as
+ * one end, both read through the mirror/pattern/transform outputs back to
+ * their seed points (review R-1: a copy of the seed span is the same span,
+ * moved by the same drag). Whether a declared join holds the two ends
+ * together is decided on the start's solve
+ * (`isDegenerateSplineSpanRecoveryStart`).
+ */
+function degenerateSplineSpanDragRecovery(
+  definition: SketchDefinition,
+  validation: SketchCoreValidationResult,
+  dragPointId: SketchPointId | undefined,
+): DegenerateSplineSpanRecovery {
+  const flagged = new Set(
+    validation.diagnostics.flatMap((diagnostic) =>
+      diagnostic.code === COINCIDENT_SPLINE_SPAN_CODE &&
+      diagnostic.target?.kind === "entity"
+        ? [diagnostic.target.entityId]
+        : [],
+    ),
+  );
+  if (
+    !dragPointId ||
+    flagged.size === 0 ||
+    validation.diagnostics.some(
+      (diagnostic) =>
+        diagnostic.severity === "error" &&
+        diagnostic.code !== COINCIDENT_SPLINE_SPAN_CODE,
+    )
+  )
+    return NO_DEGENERATE_SPLINE_SPAN_RECOVERY;
+  const seedPoint = new Map<SketchPointId, SketchPointId>();
+  for (const relationship of definition.derivedRelationships ?? []) {
+    if (relationship.kind === "offset") continue;
+    for (const output of relationship.outputs)
+      output.outputPointIds.forEach((pointId, index) => {
+        const seed = output.seedPointIds[index];
+        if (seed !== undefined && seed !== pointId)
+          seedPoint.set(pointId, seed);
+      });
+  }
+  const seedOf = (pointId: SketchPointId): SketchPointId => {
+    const seed = seedPoint.get(pointId);
+    return seed === undefined ? pointId : seedOf(seed);
+  };
+  const dragged = seedOf(dragPointId);
+  const positions = Object.fromEntries(
+    definition.points.map((point) => [point.pointId, point.position]),
+  ) as Record<SketchPointId, SketchPoint2D>;
+  const splineIds = new Set<SketchEntityId>();
+  const spanEnds: (readonly [SketchPointId, SketchPointId])[] = [];
+  for (const entity of definition.entities) {
+    if (entity.kind !== "spline" || !flagged.has(entity.entityId)) continue;
+    const occurrences = orderedSplineOccurrences(entity) ?? [];
+    const ends = reconstructSplineAggregate(entity, positions).diagnostics.map(
+      (span) => {
+        if (span.code !== "coincident-points" || span.spanIndex === undefined)
+          return null;
+        const first = occurrences[span.spanIndex]?.pointId;
+        const second =
+          occurrences[(span.spanIndex + 1) % occurrences.length]?.pointId;
+        if (first === undefined || second === undefined) return null;
+        const pair = [seedOf(first), seedOf(second)] as const;
+        return pair.includes(dragged) ? [[first, second] as const, pair] : null;
+      },
+    );
+    if (ends.length === 0 || ends.some((pair) => pair === null)) continue;
+    splineIds.add(entity.entityId);
+    spanEnds.push(
+      ...(ends as (readonly [SketchPointId, SketchPointId])[][]).flat(),
+    );
+  }
+  return { splineIds, spanEnds };
+}
+
+/**
+ * T17c5: the coincident-span errors of the recovered splines at a solve's
+ * values (the authored check's own text, judged on the solved
+ * reconstruction).
+ */
+function recoveredSplineSpanDiagnostics(
+  program: SketchCompiledSolveProgram,
+  solvedEntities: readonly SolvedSketchEntityGeometryRecord[],
+): SketchSolveDiagnostic[] {
+  const { splineIds } = program.degenerateSplineSpanRecovery;
+  if (splineIds.size === 0) return [];
+  return solvedEntities.flatMap((solved) => {
+    const entity = program.definition.entities.find(
+      (candidate) => candidate.entityId === solved.entityId,
+    );
+    if (
+      solved.kind !== "spline" ||
+      entity?.kind !== "spline" ||
+      !splineIds.has(entity.entityId)
+    )
+      return [];
+    return solved.reconstruction.diagnostics.flatMap((diagnostic) =>
+      diagnostic.code === "coincident-points" &&
+      diagnostic.spanIndex !== undefined
+        ? [
+            makeDiagnostic(
+              COINCIDENT_SPLINE_SPAN_CODE,
+              "error",
+              describeDegenerateSplineSpan(
+                entity,
+                diagnostic.spanIndex,
+                (pointId) =>
+                  program.definition.points.find(
+                    (point) => point.pointId === pointId,
+                  )?.label,
+              ),
+              { kind: "entity", entityId: entity.entityId },
+            ),
+          ]
+        : [],
+    );
+  });
 }
 
 function validateDefinition(
@@ -7530,6 +7675,12 @@ export function compileSketchSolveProgram(input: {
   offsetPlans?: readonly SolvedOffsetFramePlanRecord[];
   partialSolvePolicy: SolverPartialSolvePolicy;
   strategy?: SketchSolveStrategy;
+  /**
+   * T17c5: the point a drag moves. A spline whose only authored errors are
+   * coincident spans at this point, not joined by Coincident constraints,
+   * is judged at each solve's values (the drag may separate them).
+   */
+  degenerateSplineSpanDragPointId?: SketchPointId;
 }): SketchCompiledSolveProgram {
   assertSolveModelingTolerance(input.modelingTolerance);
   const projectedReferences = input.projectedReferences ?? [];
@@ -7539,11 +7690,30 @@ export function compileSketchSolveProgram(input: {
     offsetPlans: input.offsetPlans,
   });
   const definition = derived.definition;
-  const validation = validateDefinition(
+  const authoredValidation = validateDefinition(
     definition,
     input.tolerances,
     projectedReferences,
   );
+  const degenerateSplineSpanRecovery = degenerateSplineSpanDragRecovery(
+    definition,
+    authoredValidation,
+    input.degenerateSplineSpanDragPointId,
+  );
+  // T17c5: the recovered splines' coincident spans leave the authored
+  // validation; `materializeSolveResult` judges them at the solve's values.
+  const validationDiagnostics = authoredValidation.diagnostics.filter(
+    (diagnostic) =>
+      diagnostic.code !== COINCIDENT_SPLINE_SPAN_CODE ||
+      diagnostic.target?.kind !== "entity" ||
+      !degenerateSplineSpanRecovery.splineIds.has(diagnostic.target.entityId),
+  );
+  const validation: SketchCoreValidationResult = {
+    isValid: validationDiagnostics.every(
+      (diagnostic) => diagnostic.severity !== "error",
+    ),
+    diagnostics: validationDiagnostics,
+  };
   const system = buildSystem(definition, {
     dragTarget: null,
     projectedReferences,
@@ -7578,6 +7748,7 @@ export function compileSketchSolveProgram(input: {
     strategy,
     diagnostics: derived.diagnostics,
     validation,
+    degenerateSplineSpanRecovery,
     system,
     components,
     equationMetadata,
@@ -7901,6 +8072,9 @@ function materializeSolveResult(
       );
     }
   }
+  solvedGeometryDiagnostics.push(
+    ...recoveredSplineSpanDiagnostics(program, solvedEntities),
+  );
   diagnostics.push(...solvedGeometryDiagnostics);
 
   const geometryValid =
@@ -8766,6 +8940,43 @@ function hasRejectingError(snapshot: SolvedSketchSnapshot) {
   );
 }
 
+/**
+ * T17c5: a drag program's start that would be acceptable but for the
+ * coincident spans of its recovered splines, none of whose two ends a
+ * declared join holds together (review R-2: the C4 join classes, i.e.
+ * satisfied Coincidents, Coincidents to one datum or projected point,
+ * shared ids). A solve keeps a joined pair only within its tolerance, which
+ * the exact-zero span rule would read as separated.
+ */
+function isDegenerateSplineSpanRecoveryStart(
+  program: SketchCompiledSolveProgram,
+  snapshot: SolvedSketchSnapshot,
+) {
+  const { splineIds, spanEnds } = program.degenerateSplineSpanRecovery;
+  if (splineIds.size === 0) return false;
+  const tolerated = startFailedDerivedDiagnostics.get(snapshot);
+  const joins = declaredJoinClasses(program.definition, snapshot);
+  return (
+    spanEnds.every(
+      ([first, second]) => joins.find(first) !== joins.find(second),
+    ) &&
+    snapshot.constraintStatuses.every((status) =>
+      isAcceptedConstraintStatus(status.status),
+    ) &&
+    snapshot.dimensionStatuses.every(
+      (status) => status.status !== "unsatisfied",
+    ) &&
+    snapshot.diagnostics.every(
+      (diagnostic) =>
+        diagnostic.severity !== "error" ||
+        tolerated?.has(diagnostic) ||
+        (diagnostic.code === COINCIDENT_SPLINE_SPAN_CODE &&
+          diagnostic.target?.kind === "entity" &&
+          splineIds.has(diagnostic.target.entityId)),
+    )
+  );
+}
+
 function isAcceptableSolvedSnapshot(snapshot: SolvedSketchSnapshot) {
   return (
     snapshot.status.solveState !== "failed" &&
@@ -8948,7 +9159,14 @@ export function startCompiledSketchSolveSession(input: {
       input.program,
       input.program.system.parameterProjection.projectValues(seeded.values),
     ).length === 0;
-  if (!solvedIsAcceptable && !priorIsAcceptable) {
+  // T17c5: a drag recovering a degenerate spline span starts from a solve
+  // whose only rejecting errors are those spans (its snapshot keeps them
+  // and its `failed` status); only frames that separate them are accepted.
+  const recoveryStart =
+    !solvedIsAcceptable &&
+    !priorIsAcceptable &&
+    isDegenerateSplineSpanRecoveryStart(input.program, solved.solvedSnapshot);
+  if (!solvedIsAcceptable && !priorIsAcceptable && !recoveryStart) {
     const commonCircleDiagnostic = solved.diagnostics.find(
       (diagnostic) =>
         diagnostic.code === "offset-arc-common-circle-unsatisfied",
@@ -8973,11 +9191,12 @@ export function startCompiledSketchSolveSession(input: {
     sessionId: input.sessionId,
     program: input.program,
     values: cloneValues(
-      solvedIsAcceptable ? solvedValues.values : seeded.values,
+      solvedIsAcceptable || recoveryStart ? solvedValues.values : seeded.values,
     ),
-    lastAcceptedSnapshot: solvedIsAcceptable
-      ? solved.solvedSnapshot
-      : input.priorSolvedSnapshot!,
+    lastAcceptedSnapshot:
+      solvedIsAcceptable || recoveryStart
+        ? solved.solvedSnapshot
+        : input.priorSolvedSnapshot!,
     disposed: false,
     warmStarted: seeded.warmStarted,
   };
