@@ -127,6 +127,21 @@ export function captureSplitInterfaceOwnerWitness(
   consumer: RollbackTopologySnapshot | null,
   faceId: string | null,
 ): ImportSplitInterfaceOwnerWitness {
+  // Skipped source facets are not proof of a complete trim. Unknown diagnostic
+  // scope must also refuse; an identified other face is not this authority.
+  if (
+    [producer, consumer].some((snapshot) =>
+      snapshot?.diagnostics.some(
+        (diagnostic) =>
+          diagnostic.code === "rollback-tessellation-unreadable" &&
+          (diagnostic.faceId === undefined || diagnostic.faceId === faceId),
+      ),
+    )
+  ) {
+    throw new Error(
+      "Split owner witness has unreadable source tessellation evidence.",
+    );
+  }
   const occurrences = (snapshot: RollbackTopologySnapshot | null) =>
     snapshot?.bodies.flatMap((body) =>
       body.faces

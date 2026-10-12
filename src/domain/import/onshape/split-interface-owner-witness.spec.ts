@@ -5,7 +5,11 @@ import {
   captureSplitInterfaceOwnerWitness,
   selectSplitInterfaceOwner,
 } from "./split-interface-owner-witness";
-import type { RollbackTopologySnapshot } from "./rollback-topology-reader";
+import {
+  readRollbackTopologySnapshot,
+  type RollbackTopologySnapshot,
+} from "./rollback-topology-reader";
+import type { OnshapeRollbackSnapshot } from "@/contracts/import/onshape-capture-bundle";
 
 const vertices: [number, number, number][] = [
   [0, 0, 0],
@@ -13,6 +17,7 @@ const vertices: [number, number, number][] = [
   [0, 0.01, 0],
 ];
 const capture = {
+  diagnostics: [],
   bodies: [
     {
       id: "source-owner",
@@ -43,6 +48,96 @@ const candidate = (body: string, reversed = false) => ({
     faceId: "native-face" as FaceId,
   },
   face: face(reversed),
+});
+
+const parsedCapture = (damagedFaceId?: string) =>
+  readRollbackTopologySnapshot({
+    featureId: "split",
+    tessellationTolerance: 0.001,
+    tessellatedFaces: {
+      bodies: [
+        {
+          id: "source-owner",
+          faces: ["source-face", "other-face"].map((id) => ({
+            id,
+            facets: [
+              { vertices: vertices.map(([x, y, z]) => ({ x, y, z })) },
+              ...(damagedFaceId === id ? [{ vertices: [{ x: 0, y: 0 }] }] : []),
+            ],
+          })),
+        },
+      ],
+    },
+  } as OnshapeRollbackSnapshot);
+
+test.each(["producer", "consumer", "both"] as const)(
+  "unreadable selected-face facet at %s boundary cannot certify a truncated trim",
+  (boundary) => {
+    const producer = parsedCapture(
+      boundary === "consumer" ? undefined : "source-face",
+    );
+    const consumer = parsedCapture(
+      boundary === "producer" ? undefined : "source-face",
+    );
+    const damaged = boundary === "consumer" ? consumer : producer;
+    expect(damaged.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "rollback-tessellation-unreadable",
+        faceId: "source-face",
+      }),
+    ]);
+    // The reader deliberately preserves the valid triangle: comparing parsed
+    // facets alone therefore cannot prove that either full boundary was read.
+    expect(producer.bodies[0]!.faces[0]!.facets).toEqual(
+      consumer.bodies[0]!.faces[0]!.facets,
+    );
+    let selected: unknown;
+    expect(() => {
+      const owner = captureSplitInterfaceOwnerWitness(
+        producer,
+        consumer,
+        "source-face",
+      );
+      selected = selectSplitInterfaceOwner(owner, [candidate("correct")]);
+    }).toThrow();
+    expect(selected).toBeUndefined();
+  },
+);
+
+test("unscoped unreadable source evidence fails closed", () => {
+  const complete = parsedCapture();
+  const rawBodies = (complete.source.tessellatedFaces as { bodies: unknown[] })
+    .bodies;
+  const damaged = readRollbackTopologySnapshot({
+    ...complete.source,
+    tessellatedFaces: { bodies: [...rawBodies, { faces: [] }] },
+  });
+  expect(damaged.diagnostics).toEqual([
+    expect.objectContaining({ code: "rollback-tessellation-unreadable" }),
+  ]);
+  expect(damaged.diagnostics[0]!.faceId).toBeUndefined();
+  expect(() =>
+    captureSplitInterfaceOwnerWitness(damaged, complete, "source-face"),
+  ).toThrow("unreadable");
+  expect(() =>
+    captureSplitInterfaceOwnerWitness(complete, damaged, "source-face"),
+  ).toThrow("unreadable");
+});
+
+test("an identified unreadable other face does not invalidate complete selected-face authority", () => {
+  const parsed = parsedCapture("other-face");
+  expect(parsed.diagnostics).toEqual([
+    expect.objectContaining({
+      code: "rollback-tessellation-unreadable",
+      faceId: "other-face",
+    }),
+  ]);
+  expect(
+    selectSplitInterfaceOwner(
+      captureSplitInterfaceOwnerWitness(parsed, parsed, "source-face"),
+      [candidate("correct")],
+    ),
+  ).toEqual(candidate("correct").reference);
 });
 
 test("captured owner winding selects one exact occurrence, not the opposite occurrence or list order", () => {
