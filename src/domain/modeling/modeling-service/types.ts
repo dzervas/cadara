@@ -31,7 +31,7 @@ import type { OccTessellationTierId } from "@/domain/modeling/occ/tessellation";
 import type { LocalFileBindingMetadata } from "@/domain/modeling/local-file-binding-store";
 import type { DocumentSyncWriteStatus } from "@/domain/modeling/document-sync-worker-protocol";
 import type { LocalFileSystemFileHandle } from "@/lib/local-file-system-access";
-import type { DocumentRepositoryMetadata } from "@/domain/modeling/document-repository";
+import type { DocumentRepositoryMetadata, DocumentRepositoryMutationResult } from "@/domain/modeling/document-repository";
 import type { AuthoredActionSketch } from "@/contracts/modeling/authored-actions";
 import type { OperationHistoryStore } from "@/domain/modeling/modeling-history-persistence";
 import type { DocumentRepository } from "@/domain/modeling/document-repository";
@@ -59,7 +59,11 @@ export interface ModelingService {
     baseRevisionId: RevisionId;
     target: DurableRef;
   }): Promise<OccNativeTopologyWorkerResult<OccNativeExactBrepPayload>>;
-  createNewDocument(): Promise<ModelingDocumentFileMutationResult>;
+  createNewDocument(input?: {
+    name?: string;
+    /** Exact replacement transaction, never inferred from a global drain tail. */
+    observe?: (transaction: DocumentRepositoryMutationResult) => void;
+  }): Promise<ModelingDocumentFileMutationResult>;
   importDocument(
     input: ModelingImportDocumentInput,
   ): Promise<ModelingDocumentFileMutationResult>;
