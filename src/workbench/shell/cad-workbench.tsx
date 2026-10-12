@@ -7,6 +7,7 @@ import { ThreeCadViewport } from "@/components/cad/three-cad-viewport";
 import { SketchSpecialModePanel } from "@/components/cad/sketch-special-mode-panel";
 import { SketchMirrorActions } from "@/components/cad/sketch-mirror-actions";
 import { SketchOffsetActions } from "@/components/cad/sketch-offset-actions";
+import { SketchCloseSplineAction } from "@/components/cad/sketch-close-spline-action";
 import {
   SketchSelectionContextStack,
   SketchValidationStatus,
@@ -85,6 +86,7 @@ import type {
 } from "@/contracts/modeling/schema";
 import { ok } from "@/contracts/errors";
 import {
+  computeSketchCloseSplineState,
   computeSketchMirrorActionState,
   computeSketchOffsetActionState,
   computeSketchTangentActionState,
@@ -715,6 +717,13 @@ export function CadWorkbench({
     () =>
       sketchSession
         ? computeSketchOffsetActionState(sketchSession, selection)
+        : null,
+    [sketchSession, selection],
+  );
+  const sketchCloseSplineState = useMemo(
+    () =>
+      sketchSession
+        ? computeSketchCloseSplineState(sketchSession, selection)
         : null,
     [sketchSession, selection],
   );
@@ -1454,6 +1463,7 @@ export function CadWorkbench({
               {sketchSession?.validationMessage ||
               sketchMirrorActionState ||
               sketchOffsetActionState ||
+              sketchCloseSplineState ||
               sketchTangentActionState?.visible ? (
                 <SketchSelectionContextStack>
                   {sketchSession?.validationMessage ? (
@@ -1489,6 +1499,17 @@ export function CadWorkbench({
                         dispatch({
                           type: "sketch.toolPatched",
                           patch: { intent: "removeOffset", derivationId },
+                        })
+                      }
+                    />
+                  ) : null}
+                  {sketchCloseSplineState ? (
+                    <SketchCloseSplineAction
+                      state={sketchCloseSplineState}
+                      onClose={() =>
+                        dispatch({
+                          type: "sketch.toolPatched",
+                          patch: { intent: "closeSpline" },
                         })
                       }
                     />

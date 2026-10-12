@@ -34,8 +34,11 @@ import {
   selectSketchEditToolTarget,
   computeSketchMirrorActionState,
   computeSketchOffsetActionState,
+  computeSketchCloseSplineState,
+  clearActiveSketchTool,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
@@ -3754,6 +3757,233 @@ describe("T17c: Remove Offset through the authored-action owner", () => {
       patch: { intent: "removeOffset", derivationId: "derivation_missing" },
     });
     expect(f.session.definition).toBe(setup.session.definition);
+    expect(f.session.actionAvailability?.canUndo ?? false).toBe(false);
+  });
+});
+
+// T17c2 (logic lane; seam: the authored-action owner around the real sketch
+// reducer, on an entered session with a spline drawn by the Spline tool).
+// Close spline is one action, "Close Spline", whose write set is the
+// spline's `closure`; Undo restores the raw definition exactly, Redo
+// re-applies it; a refused Close records nothing.
+describe("T17c2: Close Spline through the authored-action owner", () => {
+  function drawn(points: readonly (readonly [number, number])[]) {
+    let next = startSketchDraw(
+      beginSketchTool(
+        withSketchSnapScale(
+          enterSketchSession(
+            createNewSketchSession(
+              createStandardPlaneDefinition("xy"),
+              OCC_KERNEL_SETTINGS,
+            ),
+          ),
+          SPEC_SKETCH_UNITS_PER_PIXEL,
+        ),
+        "spline",
+      ),
+      points[0]!,
+    );
+    for (const point of points.slice(1)) next = acceptSketchDraw(next, point);
+    return clearActiveSketchTool(finalizeSketchDraw(next));
+  }
+
+  test("a fit point selected: one intent is one action; only `closure` changes; Undo/Redo exact on the raw definition", async () => {
+    const f = await fixture(
+      false,
+      drawn([
+        [1, 1],
+        [3, 2.5],
+        [5, 1.5],
+        [3, -0.5],
+      ]),
+    );
+    const before = f.session.definition;
+    const spline = before.entities.find((entity) => entity.kind === "spline");
+    if (spline?.kind !== "spline") throw new Error("spline");
+    f.dispatch({
+      type: "viewport.selectionRequested",
+      target: pointRef(f.session, spline.pointOccurrences[1]!.pointId),
+    });
+    expect(
+      computeSketchCloseSplineState(f.session, f.state.selection),
+      "the panel offers Close spline",
+    ).toEqual({
+      entityId: spline.entityId,
+      label: spline.label,
+      refusal: null,
+    });
+    const selection = f.state.selection;
+    f.dispatch({
+      type: "sketch.toolPatched",
+      patch: { intent: "closeSpline" },
+    });
+    const after = f.session.definition;
+    expect(after).toEqual({
+      ...before,
+      entities: before.entities.map((entity) =>
+        entity.entityId === spline.entityId
+          ? { ...entity, closure: "smooth" }
+          : entity,
+      ),
+    });
+    expect(
+      f.session.actionHistory?.undo.map((entry) => entry.label),
+      "exactly one action",
+    ).toEqual(["Close Spline"]);
+    expect(f.state.selection, "the selection stays").toEqual(selection);
+    expect(
+      computeSketchCloseSplineState(f.session, f.state.selection),
+      "closed: no Close spline",
+    ).toBeNull();
+
+    f.dispatch({ type: "history.undoRequested" });
+    expect(f.session.definition, "Undo re-opens it exactly").toEqual(before);
+    expect(f.session.actionAvailability).toEqual({
+      canUndo: false,
+      canRedo: true,
+    });
+    f.dispatch({ type: "history.redoRequested" });
+    expect(f.session.definition, "Redo closes it again").toEqual(after);
+  });
+
+  // T17c2 review (orchestrator: option B): a piece of a real spline Trim
+  // carries `endSpanParameterLengths`; Close spline drops it in the same
+  // action, the wrapped piece reconstructs validly, and Undo restores the
+  // field exactly.
+  test("a piece of a real Trim closes: one action drops its fixed end spans with the closure; the wrapped piece is valid; Undo restores the field exactly, Redo drops it again", async () => {
+    const f = await fixture(
+      false,
+      drawn([
+        [20, 0],
+        [22, 3],
+        [24, 0],
+        [26, 3],
+        [28, 0],
+        [30, 3],
+      ]),
+    );
+    let session = f.session;
+    for (const x of [21, 23])
+      session = clearActiveSketchTool(
+        acceptSketchDraw(
+          startSketchDraw(
+            beginSketchTool(
+              withSketchSnapScale(session, SPEC_SKETCH_UNITS_PER_PIXEL),
+              "line",
+            ),
+            [x, -1],
+          ),
+          [x, 4],
+        ),
+      );
+    f.apply({ type: "selection.cleared" }, session);
+    const original = f.session.definition.entities.find(
+      (entity) => entity.kind === "spline",
+    )!;
+    f.apply(
+      { type: "selection.cleared" },
+      selectSketchEditToolTarget(
+        beginSketchTool(f.session, "trim"),
+        original.target,
+      ),
+    );
+    const emitted = emitPendingSketchEditQuery({ state: f.state, effects: [] });
+    const effect = emitted.effects.find(
+      (candidate) => candidate.type === "sketch.queryEditIntersections",
+    );
+    if (effect?.type !== "sketch.queryEditIntersections")
+      throw new Error("Expected the Trim query.");
+    const event = await runEditorEffect(effect, {
+      querySketchEditIntersections: querySketchEditIntersectionsForTest,
+    } as EditorEffectRuntime);
+    f.apply(
+      event,
+      transitionEditorState(emitted.state as SketchEditorState, event).state
+        .session as SketchSessionState,
+    );
+    expect(f.session.actionHistory?.undo.at(-1)?.label, "premise: Trim").toBe(
+      "Trim",
+    );
+    f.apply({ type: "selection.cleared" }, clearActiveSketchTool(f.session));
+    const piece = f.session.definition.entities.find(
+      (entity) =>
+        entity.kind === "spline" && entity.pointOccurrences.length >= 3,
+    );
+    if (piece?.kind !== "spline") throw new Error("a ≥ 3-point piece");
+    expect(
+      piece.endSpanParameterLengths,
+      "premise: the Trim piece has fixed end spans",
+    ).toBeDefined();
+    const before = f.session.definition;
+    const undoDepth = f.session.actionHistory!.undo.length;
+    f.dispatch({
+      type: "viewport.selectionRequested",
+      target: entityRef(f.session, piece.entityId),
+    });
+    expect(
+      computeSketchCloseSplineState(f.session, f.state.selection)?.refusal,
+      "a trimmed piece can close",
+    ).toBeNull();
+    f.dispatch({
+      type: "sketch.toolPatched",
+      patch: { intent: "closeSpline" },
+    });
+    expect(f.session.actionHistory?.undo).toHaveLength(undoDepth + 1);
+    expect(f.session.actionHistory?.undo.at(-1)?.label).toBe("Close Spline");
+    const open: typeof piece = { ...piece, closure: "smooth" };
+    delete open.endSpanParameterLengths;
+    const after = f.session.definition;
+    expect(after).toStrictEqual({
+      ...before,
+      entities: before.entities.map((entity) =>
+        entity.entityId === piece.entityId ? open : entity,
+      ),
+    });
+    const solved = f.session.liveSolve!.solvedSnapshot.solvedEntities.find(
+      (entity) => entity.entityId === piece.entityId,
+    );
+    expect(f.session.liveSolve?.accepted).toBe(true);
+    expect(solved?.kind === "spline" && solved.reconstruction.validity).toBe(
+      "valid",
+    );
+    expect(
+      solved?.kind === "spline" && solved.reconstruction.spans.length,
+      "wrapped: n spans for n fit points",
+    ).toBe(piece.pointOccurrences.length);
+
+    f.dispatch({ type: "history.undoRequested" });
+    expect(
+      f.session.definition,
+      "Undo restores the fixed end spans exactly",
+    ).toStrictEqual(before);
+    f.dispatch({ type: "history.redoRequested" });
+    expect(f.session.definition).toStrictEqual(after);
+  });
+
+  test("a refused Close (2 fit points) records nothing", async () => {
+    const f = await fixture(
+      false,
+      drawn([
+        [1, 1],
+        [4, 2],
+      ]),
+    );
+    const before = f.session.definition;
+    const spline = before.entities.find((entity) => entity.kind === "spline")!;
+    f.dispatch({
+      type: "viewport.selectionRequested",
+      target: entityRef(f.session, spline.entityId),
+    });
+    expect(
+      computeSketchCloseSplineState(f.session, f.state.selection)?.refusal,
+    ).toBe(
+      `${spline.label} has 2 fit points; closing a spline needs at least 3.`,
+    );
+    f.dispatch({
+      type: "sketch.toolPatched",
+      patch: { intent: "closeSpline" },
+    });
+    expect(f.session.definition).toBe(before);
     expect(f.session.actionAvailability?.canUndo ?? false).toBe(false);
   });
 });

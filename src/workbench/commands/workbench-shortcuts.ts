@@ -2,7 +2,10 @@ import type {
   EditorEvent,
   EditorViewState,
 } from "@/domain/editor/state-machine";
-import { isEditableSketchGeometrySelection } from "@/domain/editor/sketch-session";
+import {
+  computeSketchCloseSplineState,
+  isEditableSketchGeometrySelection,
+} from "@/domain/editor/sketch-session";
 import {
   getEnterEvent,
   getEscapeEvent,
@@ -146,6 +149,20 @@ export function createWorkbenchShortcutCommandHandlers({
         patch: { intent: "setTangentToZero" },
       }),
     isEnabled: tangentCommandEnabled,
+  };
+
+  // T17c2 ([TECH] T17-16): Close spline (no default shortcut, sketch scope),
+  // enabled exactly when the panel's Close spline is.
+  commandHandlers["sketch.closeSpline"] = {
+    execute: () =>
+      dispatch({
+        type: "sketch.toolPatched",
+        patch: { intent: "closeSpline" },
+      }),
+    isEnabled: () =>
+      sketchSession !== null &&
+      mode === "sketch" &&
+      computeSketchCloseSplineState(sketchSession, selection)?.refusal === null,
   };
 
   for (const tool of toolDefinitions) {
