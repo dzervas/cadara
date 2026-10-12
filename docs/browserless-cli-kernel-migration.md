@@ -201,5 +201,89 @@ Fresh final integration checks (private workspace-local caches):
 - Explicit naming-spec baseline comparison replayed using the existing evidence script adapted only to integration paths and private configs/caches: `cee569db` **106 -> 98 diagnostics, zero added**, comparison exit 0. Exact spec inclusion verified with `--listFiles`, `exclude: []`, identical current dependencies/configuration, diagnostic code/message multiset comparison. Both compiler invocations exit 1 for remaining baseline errors: this is **no typing regression**, not a clean explicit compiler pass. Evidence: `/tmp/cadara-final-merger-explicit-{baseline,current,comparison}.log`; replay `/tmp/cadara-final-merger-explicit-compare.py`.
 - Read-only `git diff --check`, scoped source delta and conflict checks passed. No full aggregate repeat, native build, fresh broad-suite/UI/E2E qualification or tracker closure is claimed.
 
+## Built STEP closure: bounded guard qualification (2026-10-12)
+
+The user built the retained combined-source stage. Its original lifetime result
+was **14 pass / 1 error**: the actual failure was the obsolete
+`registry-abi-and-declarations-unchanged` v8 byte-hash guard, not the printed
+`memory access out of bounds`. The latter is the intentional illegal-release
+negative witness: deleting a NamedShape attribute handle after its document
+must trap; deleting the handle first completes 20 iterations. That witness,
+raw-destructor inventory, borrowed-pointer audit and lifetime slopes are unchanged.
+
+An independent old/new registration audit proved exactly **58 added MoniTool
+registrations**, plus `Interface_TypedValue`'s base resolving from
+`?unbound:19MoniTool_TypedValue` to `MoniTool_TypedValue`. Removing only that
+explicit extension and reversing that one base resolution recovers the original
+ABI SHA256 `5c3617ab8ab5a10d41a5351e2ded5b472a19ece74880ece1e7a7c700bde87d8d`.
+All **477 existing classes and 12 enum declaration blocks are byte-identical**;
+only their top-level ordering changes. The three added MoniTool classes and
+three instance entries are pinned in `scripts/occ/step-binding-extension.json`.
+Instance entries are reordered, but all existing signatures and remaining type
+aliases/initializer declarations are preserved.
+
+`lifetime-abi-policy.mjs` retains the original ABI/declaration fingerprints and
+checks the explicit approved extension rather than accepting a new build hash.
+The declaration baseline is independently canonicalized by sorting intact
+class/enum blocks and instance entries (not members), preserving declaration
+ownership. Its SHA256 is
+`42ed68c0445500c9b617ebbae8acdc8a77f13d0f8e27e45e9ba37cc4dd40c7c2`.
+Any other signature, base, enum, registration or extension change fails closed;
+registry and declarations must agree on whether the extension exists.
+Future stage preparation copies both policy files beside the probe.
+
+Run the **modified repository probe**, not the immutable stage's historical
+probe, with an explicit stage directory and a result path outside the stage:
+
+```sh
+node scripts/occ/native-lifetime-conformance.mjs /absolute/retained-stage /tmp/lifetime-results.json
+node scripts/occ/probe-custom-build.mjs /absolute/retained-stage /tmp/conformance-results.json
+```
+
+New assets: JS SHA256
+`1cd537f7922268d496ae48b4813607375cdd17e799e1f10bde1671e0bf278cbf`, WASM
+`31627620c515151af8f295cbe3a2c28f4fbdc10ab3224daf13ef2b3911cb47d2`, declarations
+`bde44bfda1df5dbcbecfbb2ab0065779cd7a815fa87e9c4349cae55d833177ce`, registered ABI
+`ab7eb7cf2cd2f7d4f8f7d0479db6d738d569a8d2233dba1445e31e5d8a1bae67`.
+Fresh staged probes: **15 lifetime pass / 0 error**, **13 conformance pass / 0
+error**, exact native precision retained. The original assets pass the retained
+ABI/declaration policy but still fail the full destructor/lifetime gate (**5
+pass / 10 error**, including no-op destructors and retained-wrapper slopes).
+Accepting the original public signatures does not accept its unrepaired native
+lifetime behavior. Static declaration-policy regression
+coverage includes unchanged/reordered baseline, approved extension, altered
+existing/added signatures, partial extension, missing instance entry and enum
+or declaration-ownership drift. Reviewed `docs/testing.md`; this is **static
+policy coverage**, separate from the existing **logic adapter conformance**.
+
+**STEP remains blocked; do not promote these artifacts.** Filesystem startup
+reports native topology `available`; `Interface_Static.IsPresent` and `SetCVal`
+now successfully configure AP242DIS/MM. The original production sheet STEP
+regression then fails at `STEPControl_Writer.Transfer` with
+`UnboundTypeError: ... 21IFSelect_ReturnStatus`. A direct filesystem-loader /
+production export-capability check reproduces it for a solid too. The old and
+new registries both leave that return enum unbound for `Transfer` and `Write`;
+this is an existing missing binding exposed after fixing the inheritance closure,
+not an unexpected ABI delta. No valid STEP header was produced. No recipe,
+provider fallback, assertion weakening or split-owner change is included here.
+Artifact promotion/version updates and any additional native recipe repair
+remain separately owned by the parent. Stage inputs, outputs and historical
+results remain immutable; qualification results are external evidence.
+
+Validation used private per-package dependency links/caches and temporarily
+copied new JS/WASM/declarations into the qualification workspace only; its public
+assets were restored before handoff. New-asset targeted checks: **104 pass / 1
+STEP failure** across eight files; focused policy/borrowed-pointer/runtime-boundary
+and provider checks: **11 pass**. Final static suite with restored assets:
+**22 files / 43 tests pass**. The new static spec is explicitly typechecked with
+`exclude: []` and file inclusion verified: absent-at-baseline **0 -> 0**
+diagnostics. Mandatory `test:all` with new assets passed lint/build/spec typing,
+then timed out at **300 seconds / exit 124** during logic; the log showed STEP,
+d3cd9 and the zero-test query-reader fixture suite, without a final logic summary.
+UI/static/E2E aggregate stages were not reached. A separate new-asset static run
+correctly rejected the still-old asset-version stamp; no version stamp was changed
+to imply promotion. Final restored-asset static validation passes. No full-suite,
+STEP-header, browser qualification or ticket closure is claimed.
+
 The meaningful reviewed source/docs change retains `browserless-cli`; integration is left on a new empty working change above it. Workspaces, tracker, ignored stage, fixture and assets remain for the parent/user handoff.
 
