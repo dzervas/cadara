@@ -140,7 +140,9 @@ function violations(entry: string) {
       )
         failures.push(`${from} -> unresolved ${specifier}`);
       if (
-        /^(react(?:\/|$)|three(?:\/|$)|@react-three\/|@mantine\/)/.test(to) ||
+        /^(react(?:-dom)?(?:\/|$)|three(?:\/|$)|@react-three\/|@mantine\/)/.test(
+          to,
+        ) ||
         /(?:^|\/)node_modules\/(?:react|react-dom|three|@react-three|@mantine)(?:\/|$)/.test(
           to,
         ) ||
@@ -209,9 +211,12 @@ describe("headless transitive runtime boundary", () => {
         entry,
         'export * from "./leaf"; type T = import("three").Vector2; import type { ReactNode } from "react";',
       );
-      writeFileSync(resolve(directory, "leaf.ts"), 'void import("react");');
+      writeFileSync(
+        resolve(directory, "leaf.ts"),
+        'void import("react"); void import("react-dom/client");',
+      );
       expect(runtimeImports(entry)).toEqual(["./leaf"]);
-      expect(violations(entry)).toHaveLength(1);
+      expect(violations(entry)).toHaveLength(2);
       expect(violations(entry)[0]).toContain("leaf.ts -> react");
       expect(target(entry, "@/contracts/shared/ids")).toBe(
         resolve(root, "src/contracts/shared/ids.ts"),
