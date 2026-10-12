@@ -26,6 +26,8 @@ import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 import type { SketchSolverAdapter } from "@/contracts/solver/adapter";
 import { translateSketch } from "@/domain/import/onshape/sketch-translator";
+import { captureSplitInterfaceOwnerWitness } from "@/domain/import/onshape/split-interface-owner-witness";
+import type { RollbackTopologySnapshot } from "@/domain/import/onshape/rollback-topology-reader";
 function makeSnapshot(revisionId: RevisionId, bodies: readonly { bodyId: BodyId }[]) {
   return {
     document: {
@@ -155,6 +157,52 @@ function sketchExtrudeCandidate(documentId: DocumentId): ImportPreparedActions {
   };
 }
 
+
+test.each(["siblings", "bodyOf", "ambiguousBodyOf"] as const)("continued probe registers %s body scope before its new consumer", async (authority) => {
+  const bodyId = "body_current_probe" as BodyId;
+  const source = { consumerFeatureId: "source_consumer", parameterId: "plane", deterministicId: "source_face" };
+  const derived = deriveKernelTopologySignaturesFromExactBrepPayload(makeExactPayload(bodyId));
+  if (derived.status !== "available") throw new Error("Fixture topology unavailable");
+  const faces = derived.signatures.filter(signature => signature.entityClass === "face");
+  const selected = faces[0]!;
+  const profile = sketchExtrudeCandidate("doc_probe" as DocumentId).commitSketches![0]!;
+  const selector = { kind: "topologyOf" as const, expectedKind: "face" as const,
+    capturedSignature: selected, source, bodyScope: "body_from_other_review_session" as BodyId,
+    tolerance: { linear: 1e-4, relative: 1e-6, angularRadians: 1e-6, ambiguityMargin: Infinity } };
+  const full: ImportPreparedActions = {
+    commitSketches: [profile, { ...profile, sketchLabel: "consumer", plane: { ...profile.plane, support: selector } }],
+    createFeatures: [{ featureLabel: "producer" } as never],
+    orderedActions: [{ kind: "commitSketch", index: 0 }, { kind: "createFeature", index: 0 }, { kind: "commitSketch", index: 1 }],
+    bodyScopeBindings: [{ probeBodyId: selector.bodyScope, consumerActionIndex: 2, producerActionIndex: 1,
+      source, siblingSignatures: authority === "siblings" ? faces.slice(1) : [],
+      ...(authority !== "siblings" ? { ownerRef: { kind: "bodyOf" as const, actionIndex: 1 } } : {}),
+    }],
+  };
+  const producedBodies = authority === "ambiguousBodyOf" ? [bodyId, "body_additional_probe" as BodyId] : [bodyId];
+  let hasBody = false;
+  let support: unknown;
+  const service = {
+    async getCurrentDocumentSnapshot() { return makeSnapshot("rev_probe" as RevisionId, hasBody ? producedBodies.map(bodyId => ({ bodyId })) : []); },
+    async commitSketch(request: { sketchLabel: string; plane: { support?: unknown } }) {
+      if (request.sketchLabel === "consumer") support = request.plane.support;
+      return ok({ revisionId: "rev_probe", revisionState: { kind: "accepted" }, diagnostics: [], sketchId: "sketch_probe" });
+    },
+    async createFeature() { hasBody = true; return ok({ revisionId: "rev_probe", revisionState: { kind: "accepted" }, diagnostics: [], featureId: "feature_probe", changedTargets: producedBodies.map(bodyId => ({ kind: "body", bodyId })) }); },
+    async buildNativeExactBrepPayload(request: { target: { bodyId: BodyId } }) { return { kind: "nativeTopologyPayload", payload: makeExactPayload(request.target.bodyId), diagnostics: [] }; },
+  };
+  const probe = createKernelHistoryProbeSession({ service: service as never });
+  await probe.evaluateHistoryProbe({ actions: { ...full, commitSketches: [profile], orderedActions: full.orderedActions!.slice(0, 2), bodyScopeBindings: [] } });
+  if (authority === "ambiguousBodyOf") {
+    await expect(probe.evaluateHistoryProbe({ actions: full })).rejects.toThrow("Live topology rematch failed");
+    expect(support).toBeUndefined();
+    await probe.dispose?.();
+    return;
+  }
+  const result = await probe.evaluateHistoryProbe({ actions: full });
+  expect(result.steps.every(step => step.status === "rebuilt")).toBe(true);
+  expect(support).toEqual(selected.reference);
+  await probe.dispose?.();
+});
 
 test("kernel history probe materializes deferred sketch-region extrudes", async () => {
   const documentId = "doc_workspace" as DocumentId;
@@ -436,9 +484,20 @@ function makeSplitInterfaceScenario(options: {
     splitActionIndex: 2,
     profileEntityId: entity,
     endRole: "one-side-end" as const,
-    source: { consumerFeatureId: consumer, parameterId: "plane", deterministicId: `split-interface:${consumer}` },
+    side: "back" as const,
+    successorActionIndexes: [],
+    // This mock proves orchestration only; real captured owner qualification
+    // lives in the d3cd9 native apply test, not this box fixture.
+    ownerWitness: fixtureOwnerWitness(entity),
+    source: { consumerFeatureId: consumer, parameterId: "plane", deterministicId: `captured-${entity}` },
   });
   const profile = sketchExtrudeCandidate("doc_split" as DocumentId).commitSketches![0]!;
+  const fixtureOwnerWitness = (entity: string) => {
+    const index = Math.max(0, profile.definition.entities.findIndex(entry => entry.entityId === entity)) + 1;
+    const face = makeExactPayload(splitBodies[0]!).brep.bodies[0]!.topology.faces[index]!;
+    const snapshot = { bodies: [{ id: "captured-mock-owner", faces: [{ id: `captured-${entity}`, facets: face.triangles.map(triangle => ({ vertices: triangle.map(i => face.meshVertices[i]!.map(value => value / 1000) as [number, number, number]) })) }] }] } as unknown as RollbackTopologySnapshot;
+    return captureSplitInterfaceOwnerWitness(snapshot, snapshot, `captured-${entity}`);
+  };
   const consumerSketch = (label: string, entity: string) => ({
     ...profile,
     sketchLabel: label,
@@ -468,8 +527,8 @@ function makeSplitInterfaceScenario(options: {
   };
   const toolKey = (entity: string) =>
     `extrude:feature_tool:profile-sketch:${profileSketchId}:end:one-side-end:sketch-entity:${profileSketchId}:${entity}:generated-side-face`;
-  const aliasKey = (toolFace: { faceId: string }) =>
-    `sheet-split-tool-successor:feature_split:${toolBody}:face:${toolFace.faceId}`;
+  const scopedKey = (entity: string) =>
+    `generated-from:feature_split:${toolBody}:face:${encodeURIComponent(toolKey(entity))}:sheet-split-interface-face:output-slot:mock-output-a`;
   const lineage = (featureId: string, outputSlot: BodyId, claims: [string, object][]) => ({
     featureId,
     outputs: [{
@@ -506,7 +565,10 @@ function makeSplitInterfaceScenario(options: {
     };
     return {
       async getCurrentDocumentSnapshot() {
-        return makeSnapshot(`rev_split_${revision}` as RevisionId, bodies.map((bodyId) => ({ bodyId })));
+        const snapshot = makeSnapshot(`rev_split_${revision}` as RevisionId, bodies.map((bodyId) => ({ bodyId }))) as unknown as { document: unknown };
+        return { ...snapshot,
+          presentation: { documentHistory: [{ kind: "sketch", sketchId: profileSketchId }, ...features.map(featureId => ({ kind: "feature", featureId }))] },
+        };
       },
       async commitSketch(input: {
         sketchLabel: string;
@@ -545,7 +607,7 @@ function makeSplitInterfaceScenario(options: {
         ));
         const splitLineage = lineage("feature_split", splitBodies[0]!, options.omitSplitAlias
           ? []
-          : profileEntityIds.map((_, index) => [aliasKey(toolFaces[index]!), aliasOutputOf(index)]));
+          : profileEntityIds.map((entity, index) => [scopedKey(entity), aliasOutputOf(index)]));
         return {
           kind: "nativeTopologyPayload" as const,
           payload: {
@@ -716,7 +778,7 @@ test("kernel history probe fails the split step when its exact interface alias i
   expect(result.steps[2]).toMatchObject({
     diagnostics: [{
       code: "kernel-history-probe-step-failed",
-      message: expect.stringContaining("History probe failed at step 3: Split-interface alias sheet-split-tool-successor:feature_split:body_split_tool:face:"),
+      message: expect.stringContaining("History probe failed at step 3: Captured split owner certifies 0 exact occurrences"),
     }],
   });
   expect(scenario.consumerSupports()).toEqual([]);

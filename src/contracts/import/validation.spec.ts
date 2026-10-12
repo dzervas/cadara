@@ -653,6 +653,14 @@ test("src/contracts/import/validation.spec.ts", async () => {
         splitActionIndex: 2,
         profileEntityId: "sketch_entity_profile_line",
         endRole,
+        side: "back",
+        successorActionIndexes: [],
+        ownerWitness: {
+          capturedBodyId: "source-owner", capturedFaceId: "source-face",
+          orientedNormal: [0, 0, 1],
+          boundary: [[[0, 0, 0], [1, 0, 0]], [[1, 0, 0], [0, 1, 0]], [[0, 1, 0], [0, 0, 0]]],
+          capturedSignature: { entityClass: "face", geometryType: "plane", definingData: { origin: [0, 0, 0], normal: [0, 0, 1] }, boundingBox: { low: [0, 0, 0], high: [1, 1, 0] } },
+        },
         source: {
           consumerFeatureId: "S_SPLIT_INTERFACE",
           parameterId: "sketchPlane",
@@ -683,6 +691,10 @@ test("src/contracts/import/validation.spec.ts", async () => {
     validateImportPreparedActions(splitInterfaceActions("unsupported-role")).success,
     "Prepared action validation must reject an unrecognized split-interface selector role.",
   ).toBeFalsy();
+
+  const missingWitness = splitInterfaceActions("one-side-end");
+  delete (missingWitness.commitSketches[1]!.plane.support as unknown as { ownerWitness?: unknown }).ownerWitness;
+  expect(validateImportPreparedActions(missingWitness).success, "Missing captured owner authority must not validate.").toBeFalsy();
 
   const withReference = (reference: unknown) => ({
     ...sketchRequest(),

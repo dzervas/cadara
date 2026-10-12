@@ -20,6 +20,7 @@ import type {
   ImportDeferredSurfaceProfileRef,
   ImportPreparedActions,
   ImportPreparedActionRef,
+  ImportDeferredValue,
 } from "@/contracts/import/actions";
 import type { ImportDiagnostic } from "@/contracts/import/diagnostics";
 import { describeUnknownError } from "@/contracts/errors";
@@ -109,6 +110,7 @@ import { probeTopologyConsumerPrefixes } from "@/domain/import/onshape/topology-
 import { createMemoizedHistoryProbe } from "@/domain/import/kernel-history-probe";
 import { OCC_KERNEL_CAPABILITIES } from "@/domain/modeling/opencascade-kernel-seed";
 import { readTopologyQueryRefs } from "@/domain/import/onshape/topology-query-reader";
+import { captureSplitInterfaceOwnerWitness } from "@/domain/import/onshape/split-interface-owner-witness";
 import { readSplitInterfaceFaceQuery } from "@/domain/import/onshape/split-interface-face-query-reader";
 import {
   isUniquePrefixBodyQuery,
@@ -442,7 +444,10 @@ function readExactSplitInterfaceFaceQuery(
   const queries = parameter?.queries;
   if (!Array.isArray(queries) || queries.length !== 1) return null;
   const queryString = (queries[0] as { queryString?: unknown })?.queryString;
-  return typeof queryString === "string" ? readSplitInterfaceFaceQuery(queryString) : null;
+  const parsed = typeof queryString === "string" ? readSplitInterfaceFaceQuery(queryString) : null;
+  if (!parsed) return null;
+  const ids = (queries[0] as { deterministicIds?: unknown }).deterministicIds;
+  return { ...parsed, capturedFaceId: Array.isArray(ids) && ids.length === 1 && typeof ids[0] === "string" && ids[0].length > 0 ? ids[0] : null };
 }
 
 
@@ -3542,6 +3547,7 @@ async function buildPreparedActions(input: {
     actionIndex: number;
     bodyDeterministicIds: readonly string[];
     bindings: ReadonlyMap<string, ImportDeferredTopologyRef>;
+    ownerRef?: Extract<ImportDeferredValue, { kind: "bodyOf" }>;
   };
   const bodyProducerByDeterministicId = new Map<string, PreparedBodyProducer>();
   const exactProducerActionIndexByFeatureId = new Map<string, number>();
@@ -3597,6 +3603,7 @@ async function buildPreparedActions(input: {
           source: selector.source,
           producerActionIndex: producer.actionIndex,
           siblingSignatures: evidence.siblingSignatures,
+          ownerRef: producer.ownerRef,
         });
       }
     }
@@ -3640,7 +3647,9 @@ async function buildPreparedActions(input: {
     ]) {
       bodyProducerByDeterministicId.delete(bodyId);
     }
-    const producer = { actionIndex, bodyDeterministicIds, bindings };
+    const producer: PreparedBodyProducer = { actionIndex, bodyDeterministicIds, bindings,
+      ownerRef: actionCount === 1 && bodyDeterministicIds.length === 1 ? { kind: "bodyOf", actionIndex } : undefined,
+    };
     for (const bodyId of bodyDeterministicIds) {
       bodyProducerByDeterministicId.set(bodyId, producer);
     }
@@ -4211,6 +4220,20 @@ async function buildPreparedActions(input: {
             `Split-interface sketch ${featurePlan.label} is missing an emitted profile, tool, or Split action.`,
           );
         }
+        const ownerWitness = splitInterfaceQuery
+          ? captureSplitInterfaceOwnerWitness(
+              rollbackTimeline?.snapshotAfterFeature(splitInterfaceQuery.splitFeatureId) ?? null,
+              rollbackTimeline?.snapshotBeforeFeature(featurePlan.onshapeFeatureId) ?? null,
+              splitInterfaceQuery.capturedFaceId,
+            )
+          : undefined;
+        const successorActionIndexes = ownerWitness
+          ? (rollbackTimeline?.featuresModifyingBody(ownerWitness.capturedBodyId, featurePlan.onshapeFeatureId) ?? [])
+              .flatMap(featureId => {
+                const index = orderedIndexByFeatureId.get(featureId);
+                return index !== undefined && index > splitActionIndex! ? [index] : [];
+              })
+          : [];
         planeSupport = splitInterfaceQuery
           ? {
               kind: "splitInterfaceFaceOf",
@@ -4219,10 +4242,13 @@ async function buildPreparedActions(input: {
               splitActionIndex: splitActionIndex!,
               profileEntityId: profileEntityId!,
               endRole: endRole!,
+              side: splitInterfaceQuery.side,
+              ownerWitness: ownerWitness!,
+              successorActionIndexes,
               source: {
                 consumerFeatureId: featurePlan.onshapeFeatureId,
                 parameterId: "sketchPlane",
-                deterministicId: `split-interface:${splitInterfaceQuery.profileSourceEntityId}`,
+                deterministicId: ownerWitness!.capturedFaceId,
               },
             }
           : featurePlan.target.probedFaceSelector;
