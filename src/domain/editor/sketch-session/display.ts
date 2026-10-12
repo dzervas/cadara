@@ -29,6 +29,7 @@ import {
   tessellateProjectedSpline,
   solvedCubicSpans,
   orderedSplineOccurrences,
+  reconstructSplineAggregate,
   splineVisibleHandleVectors,
   type SplineVector,
 } from "@/contracts/sketch/spline-geometry";
@@ -299,6 +300,10 @@ export function getStableSketchSessionDisplayRenderables(
         const owner = entity.entityId
           ? nonAcceptedOutputs.get(entity.entityId)
           : undefined;
+        // T17c3: a spline drawn through its fit points (a degenerate span)
+        // takes the invalid tint.
+        if (entity.id === degenerateSplineDraftId(entity.entityId))
+          return { ...renderable, regionValidity: "invalid" as const };
         return owner
           ? {
               ...renderable,
@@ -820,13 +825,60 @@ function getAcceptedSketchDisplayEntities(
   sketchId: SketchId,
   displayDefinition: SketchDefinition,
 ): readonly SketchDraftEntity[] {
-  return displayDefinition.entities.flatMap((entity) =>
-    mapDefinitionEntityToDraftEntity(
+  return displayDefinition.entities.flatMap((entity) => {
+    const drafts = mapDefinitionEntityToDraftEntity(
       sketchId,
       displayDefinition.points,
       entity,
-    ),
+    );
+    return drafts.length === 0 && entity.kind === "spline"
+      ? getDegenerateSplineDraft(displayDefinition, entity)
+      : drafts;
+  });
+}
+
+const degenerateSplineDraftId = (entityId: SketchEntityId | null) =>
+  `${entityId}:degenerate-span`;
+
+/**
+ * T17c3 (issue 08 :107): a spline with a degenerate span (two consecutive
+ * fit points at the same place) has no reconstruction, but it is never
+ * invisible: it is drawn through its fit points (a smooth closure back to
+ * the first), and its renderable takes the invalid tint. The authored
+ * points are kept as they are.
+ */
+function getDegenerateSplineDraft(
+  definition: SketchDefinition,
+  spline: Extract<SketchEntityDefinition, { kind: "spline" }>,
+): SketchDraftEntity[] {
+  const positions = new Map(
+    definition.points.map((point) => [point.pointId, point.position] as const),
   );
+  const reconstruction = reconstructSplineAggregate(
+    spline,
+    Object.fromEntries(positions) as Record<SketchPointId, SketchPoint>,
+  );
+  if (
+    !reconstruction.diagnostics.some(
+      (diagnostic) => diagnostic.code === "coincident-points",
+    )
+  )
+    return [];
+  const fitPoints = (orderedSplineOccurrences(spline) ?? []).map(
+    (occurrence) => positions.get(occurrence.pointId)!,
+  );
+  return [
+    {
+      id: degenerateSplineDraftId(spline.entityId),
+      kind: "spline",
+      points:
+        spline.closure === "smooth" ? [...fitPoints, fitPoints[0]!] : fitPoints,
+      entityId: spline.entityId,
+      status: "accepted",
+      label: spline.label,
+      isConstruction: spline.isConstruction,
+    },
+  ];
 }
 
 export function getStableSketchSessionDisplayKey(

@@ -19,6 +19,7 @@ import type {
 } from "@/contracts/render/schema";
 import type { SolvedSketchEntityGeometryRecord } from "@/contracts/sketch/schema";
 import {
+  orderedSplineOccurrences,
   tessellateCubicSpans,
   solvedCubicSpans,
 } from "@/contracts/sketch/spline-geometry";
@@ -2242,9 +2243,39 @@ function buildSketchCurveRenderRecords(
           DEFAULT_ARC_SAMPLE_COUNT,
         );
         break;
-      case "spline":
+      case "spline": {
         points2D = tessellateCubicSpans(entity.reconstruction.spans);
+        const authored = authoredEntityMap.get(entity.entityId);
+        if (
+          authored?.kind !== "spline" ||
+          !entity.reconstruction.diagnostics.some(
+            (diagnostic) => diagnostic.code === "coincident-points",
+          )
+        )
+          break;
+        // T17c3 (issue 08): a degenerate span (two consecutive fit points
+        // at one place) leaves no spans; the spline is still drawn, through
+        // its distinct solved fit points (as in the sketch session).
+        isClosed = authored.closure === "smooth";
+        const solved = new Map(
+          sketch.sketch.solvedSnapshot.solvedPoints.map(
+            (point) => [point.pointId, point.solvedPosition] as const,
+          ),
+        );
+        const fitPoints = (orderedSplineOccurrences(authored) ?? []).map(
+          (occurrence) => solved.get(occurrence.pointId)!,
+        );
+        points2D = fitPoints.filter((point, index) => {
+          const previous =
+            fitPoints[index - 1] ?? (isClosed ? fitPoints.at(-1) : undefined);
+          return (
+            !previous || previous[0] !== point[0] || previous[1] !== point[1]
+          );
+        });
+        // Normalization refuses a closed polyline with < 3 distinct points.
+        if (new Set(points2D.map(String)).size < (isClosed ? 3 : 2)) return [];
         break;
+      }
       case "derivedPiecewiseCubic":
         // The session display's tessellation: solved spans clipped to their
         // drawn domains (T08b-g5b).

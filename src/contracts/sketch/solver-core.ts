@@ -4591,6 +4591,25 @@ function buildSystem(
   return system;
 }
 
+/**
+ * T17c3 (issue 08: a degenerate span is reported, its profiles blocked):
+ * the one label-based text of a spline span between two consecutive fit
+ * points at the same place (`spanIndex` of its reconstruction; the last
+ * span of a smooth closure wraps to the first fit point).
+ */
+export function describeDegenerateSplineSpan(
+  spline: Extract<SketchEntityDefinition, { kind: "spline" }>,
+  spanIndex: number,
+  pointLabel: (pointId: string) => string | undefined,
+): string {
+  const occurrences = orderedSplineOccurrences(spline) ?? [];
+  const [first, second] = [spanIndex, spanIndex + 1].map((index) => {
+    const pointId = occurrences[index % occurrences.length]?.pointId ?? "";
+    return pointLabel(pointId) ?? pointId;
+  });
+  return `${spline.label} has two consecutive fit points at the same place (${first} and ${second}); the sketch's profiles are blocked. Undo, or delete the spline and draw it again.`;
+}
+
 function validateDefinition(
   definition: SketchDefinition,
   tolerances: SketchSolveTolerancePolicy,
@@ -4965,7 +4984,14 @@ function validateDefinition(
             makeDiagnostic(
               `invalid-spline-${diagnostic.code}`,
               "error",
-              `Spline ${entity.entityId} reconstruction is invalid: ${diagnostic.code}.`,
+              diagnostic.code === "coincident-points" &&
+                diagnostic.spanIndex !== undefined
+                ? describeDegenerateSplineSpan(
+                    entity,
+                    diagnostic.spanIndex,
+                    (pointId) => pointMap.get(pointId as SketchPointId)?.label,
+                  )
+                : `Spline ${entity.entityId} reconstruction is invalid: ${diagnostic.code}.`,
               { kind: "entity", entityId: entity.entityId },
             ),
           );

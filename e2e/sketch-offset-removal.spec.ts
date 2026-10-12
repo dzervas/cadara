@@ -72,7 +72,7 @@ async function commitOffset(
   picks: readonly { around: CanvasPoint; entityId: string }[],
   side: CanvasPoint,
   distance: string,
-  committedLabel: string | null,
+  committedLabel: string,
 ) {
   const page = workbench.page;
   await workbench.activateTool(OFFSET_TOOL);
@@ -86,23 +86,16 @@ async function commitOffset(
   await page.mouse.move(canvas.x + side.x, canvas.y + side.y, { steps: 8 });
   const floatingInput = page.locator("[data-sketch-viewport-floating-input]");
   await expect(floatingInput).toBeVisible({ timeout: 15_000 });
-  const create = () =>
-    glidePress(page, floatingInput.getByRole("button", { name: "Create" }));
   // A commit that waits for the preview's certification lands with the
-  // publication event and is labelled after it (pre-existing, recorded in
-  // T17c.md); that setup step waits on the committed outputs instead.
-  if (committedLabel)
-    await waitForCommittedAction(page, committedLabel, create);
-  else {
-    const before = (await sketchSnapshot(page)).entities.length;
-    await create();
-    await expect
-      .poll(async () => (await sketchSnapshot(page)).entities.length, {
-        message: "the offset's outputs are committed",
-        timeout: 60_000,
-      })
-      .toBeGreaterThan(before);
-  }
+  // publication event; it is the same "Commit Offset" action (T17c3). The
+  // certification may take a while on a loaded lane.
+  await waitForCommittedAction(
+    page,
+    committedLabel,
+    () =>
+      glidePress(page, floatingInput.getByRole("button", { name: "Create" })),
+    { timeout: 60_000 },
+  );
   await page.keyboard.press("Escape");
   await expect
     .poll(() => workbench.currentPhase(), { timeout: 5_000 })
@@ -141,7 +134,7 @@ test("T17c: a spline offset's shell → Offset panel → Remove offset: one Remo
     ],
     { x: 720, y: 400 },
     "0.1",
-    null,
+    "Commit Offset",
   );
   const created = await sketchSnapshot(page);
   const shell = created.entities.find(

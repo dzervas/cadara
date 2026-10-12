@@ -603,11 +603,10 @@ test("T12f: dragging a fixed circle centre shows a feedback cue that disappears 
   // Fix the centre point: activate Fix Geometry, then click the centre.
   await page.getByRole("button", { name: "Fix Geometry" }).click();
   await workbench.waitForAnimationFrames(2);
-  // (A gliding press; the Fix action's label is still the generic
-  // "Viewport.selection Requested" (T17b0 P-9, fixed in T17c3), so this
-  // setup step keeps its frame wait instead of naming that label.)
-  await glideClick(workbench, { x: 500, y: 400 });
-  await workbench.waitForAnimationFrames(4);
+  // (A gliding press, committed as one "Fix Geometry" action.)
+  await waitForCommittedAction(page, "Fix Geometry", () =>
+    glideClick(workbench, { x: 500, y: 400 }),
+  );
   // Escape out of the constraint tool.
   await page.keyboard.press("Escape");
   await workbench.waitForAnimationFrames(2);

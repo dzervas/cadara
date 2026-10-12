@@ -166,12 +166,15 @@ const sequenceOf = (entry: HistoryEntry | undefined) => entry?.sequence ?? null;
  * commit skips the undone sequences: "exactly one" is checked by position,
  * not by `+1`.) Limit: a second commit that lands in a later render, after
  * the poll accepted the first, is not seen; rows that must exclude it also
- * re-pin "one action" through a one-step Undo. Returns the committed entry.
+ * re-pin "one action" through a one-step Undo. `timeout` is for commits that
+ * wait on a background derivation (e.g. an offset's certification). Returns
+ * the committed entry.
  */
 export async function waitForCommittedAction(
   page: Page,
   label: string,
   act: () => Promise<unknown>,
+  { timeout = 15_000 }: { timeout?: number } = {},
 ): Promise<HistoryEntry> {
   const before = await readHistoryStrip(page);
   const shown = [...before.undo, ...before.redo].map((entry) => entry.sequence);
@@ -190,7 +193,7 @@ export async function waitForCommittedAction(
       },
       {
         message: `one "${label}" action is committed on top of ${JSON.stringify(before.undo)}`,
-        timeout: 15_000,
+        timeout,
       },
     )
     .toEqual({ label, new: true, below: sequenceOf(before.undo[0]) });

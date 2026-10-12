@@ -16,6 +16,7 @@ import {
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
 import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
+import { getToolById } from "@/core/tools/tool-registry";
 import {
   AuthoredActionHistory,
   encodeAuthoredActionState,
@@ -195,6 +196,24 @@ function actionLabel(event: EditorEvent, before: EditorState) {
       return "Create Sketch Geometry";
     case "sketch.specialModeDragEnded":
       return "Edit Sketch Operation";
+    // T17c3 (T17b0 P-9): a pick that completes an action (a constraint's
+    // last pick, a construction toggle, a reference pick) is the armed
+    // tool's action, labelled by its name (e.g. "Coincident").
+    case "viewport.selectionRequested": {
+      const toolId =
+        before.kind === "editingSketch" ? before.session.activeTool : null;
+      if (toolId) return getToolById(toolId).name;
+      break;
+    }
+    // T17c3 review F-4: the SVG Rendering toggle is one action.
+    case "tool.activated":
+      if (event.toolId === "svgRendering")
+        return getToolById(event.toolId).name;
+      break;
+    // T17c3 (T17c review F-B): a Create that waited for the preview's
+    // certification commits with the publication; it is the same action.
+    case "effect.sketchOffsetPreviewPublished":
+      return "Commit Offset";
     // T10g-1/T10g-2 (T-g15): the applied exact Trim, Extend or Split is
     // one action labelled by the operation of the query it answers (review
     // A-4: the in-flight query before the transition).
@@ -206,12 +225,11 @@ function actionLabel(event: EditorEvent, before: EditorState) {
           : undefined;
       return kind === "extend" ? "Extend" : kind === "split" ? "Split" : "Trim";
     }
-    default:
-      return event.type
-        .replace(/^sketch\./, "")
-        .replace(/([A-Z])/g, " $1")
-        .replace(/^./, (value) => value.toUpperCase());
   }
+  return event.type
+    .replace(/^sketch\./, "")
+    .replace(/([A-Z])/g, " $1")
+    .replace(/^./, (value) => value.toUpperCase());
 }
 
 function replaceSemanticSketchIdentity<T>(

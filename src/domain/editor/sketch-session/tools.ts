@@ -1084,7 +1084,13 @@ export function selectSketchEditTarget(
     activeEditTarget: target,
     activeDrag: null,
     activeAnnotationEdit: null,
-    validationMessage: null,
+    // T17c3: selecting a point (the viewport selects a dragged point on
+    // release) keeps the explanation of a sketch whose profiles are blocked.
+    validationMessage:
+      session.liveRegions.status === "unavailable"
+        ? (getSketchSessionInvalidFeedback(session) ??
+          "Sketch profiles are unavailable until the sketch is corrected.")
+        : null,
   };
 }
 

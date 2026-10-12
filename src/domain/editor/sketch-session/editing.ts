@@ -3510,7 +3510,7 @@ export function applySketchGeometryDrag(
 
   // Every accepted frame is a new live solve basis; regions stay stale while
   // the drag is active and are derived once it completes (no active drag).
-  return withLiveSolveBasis(
+  const next = withLiveSolveBasis(
     {
       ...session,
       definition,
@@ -3533,6 +3533,16 @@ export function applySketchGeometryDrag(
     definition,
     edit.solvedSnapshot,
   );
+  // T17c3: a completed drag that leaves the profiles unavailable (e.g. a fit
+  // point dropped on its neighbour) is explained, as a commit is (T15b O-1).
+  return complete && next.liveRegions.status === "unavailable"
+    ? {
+        ...next,
+        validationMessage:
+          getSketchSessionInvalidFeedback(next) ??
+          "Sketch profiles are unavailable until the sketch is corrected.",
+      }
+    : next;
 }
 
 /**
