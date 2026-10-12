@@ -503,3 +503,55 @@ the temporary new-assets static stamp failure is expected and the stamp remains
 unchanged. Both stages' manifests still verify and original public hashes are
 restored before handoff.
 
+## Reviewed enum source and immutable asset promotion (2026-10-12)
+
+Integration uses a distinct new change atop reviewed enum source `119f5dec`
+(Standards and Spec reviews: zero findings). Only the immutable new stage
+`.scratch/occ-step-status-rebuild` supplies the promoted JS/WASM/declarations;
+main, sibling workspaces, both stages and historical probe logs/results are not
+promotion destinations. All 24 input, three artifact and ten receipt hashes
+verify before and after promotion. Promoted SHA256 values are:
+
+- JS: `8933159b3f88e564fe4e35e968ff73f93cf81280178be1598d6a340d1b4e7e16`
+- WASM: `6350099253e8b379f32521df6881bb95cd1929122aa948e662f3c2279c856d4e`
+- declarations: `d196d263cd2872ed64b49f8e2ba1dbe042f3dc4e67360b835b6ea203578cd7b6`
+
+The central `OCC_ASSET_VERSION` is the actual JS SHA256 followed by `-` and
+actual WASM SHA256. This supersedes the source-only promotion pending status
+above, not the preserved historical results. Original-v8 fingerprints and exact
+enum/Moni extension inventories remain the policy: no whole-build gold hash,
+provider workaround, source-owner repair or native rebuild is introduced.
+
+Fresh integration default filesystem loading and production STEP provider
+qualification export real sheets and solids for AP242/mm (provider default),
+AP214 and AP203. All six exports return native RetDone=1 for Transfer and Write,
+contain complete ISO-10303-21 output with the respective FILE_SCHEMA and mm
+SI_UNIT, and read/remove the actual native files. The enum-only source/ABI gate
+is closed; ticket 01 is **not closed** and global all-green is not claimed.
+The separate three split-owner fixes (`9bd1b551`, reviewed separately at
+`ba953ebf`) are not merged here; the preexisting 9841/JHo history failure remains
+a separate blocker. Existing fixture copies are retained.
+
+Fresh promoted-asset probes pass 15/15 lifetime and 13/13 native conformance;
+full static passes 22 files / 49 checks, and unchanged targeted production
+export/runtime/topology/naming/features/query tests pass 9 files / 141 tests.
+The existing real-browser runtime regression passes bootstrap, persisted native
+geometry reload and face selection. An additional real-browser production-loader
+smoke initializes the new native kernel and exports a complete AP242/mm solid
+with native Transfer/Write RetDone=1. Actual runtime requests use the central
+cache-version stamp for both assets; the browser independently hashes those
+same immutable served URLs to the exact promoted JS/WASM values above. No fake
+kernel or response interception is used. This is browser smoke qualification,
+not a full UI/E2E-suite pass. Chromium's unavailable worker inspector-response
+bodies initially failed the hash observer, not the kernel; preserved diagnostics
+and the corrected browser-side crypto verification are in the merger evidence.
+
+Production typecheck, normal spec ratchet and full lint independently pass.
+Mandatory `bun run test:all` exits 124 at the exact 300-second bound during logic,
+after lint/build/spec typing complete. It reports the existing 9841 Sketch 3/4
+split-interface history row failed; no complete logic summary is produced and
+aggregate UI/static/E2E are not reached. The separate full static and browser
+smoke passes above do not turn that aggregate into all-green or close ticket 01.
+Integration verification details are recorded in
+`/tmp/cadara-browserless-cli-enum-asset-merge-evidence.md`.
+
