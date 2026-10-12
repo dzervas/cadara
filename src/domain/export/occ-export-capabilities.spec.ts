@@ -1,5 +1,4 @@
 import { test, expect } from "vitest";
-import { readFile } from "node:fs/promises";
 
 import type { BodyId, FeatureId } from "@/contracts/shared/ids";
 import { createOccAuthoringState } from "@/domain/modeling/occ/authoring-state";
@@ -12,26 +11,9 @@ import {
 import { createOccExportCapabilities } from "@/domain/export/occ-export-capabilities";
 import { getDefaultOpenCascadeInstance } from "@/infrastructure/occ/runtime";
 
-type CustomOpenCascadeMainJSForTest = new (
-  module: Record<string, unknown>,
-) => Promise<OpenCascadeInstance>;
-
 test("production OCC exports native meshes and sheet STEP payloads", async () => {
-  async function loadCustomOpenCascadeForTest() {
-    const module = (await import("../../../public/cadara-occ.js")) as {
-      default: CustomOpenCascadeMainJSForTest;
-    };
-    const wasmBinary = new Uint8Array(
-      await readFile(
-        new URL("../../../public/cadara-occ.wasm", import.meta.url),
-      ),
-    );
-
-    return new module.default({ wasmBinary });
-  }
-
   async function testMeshExportConsumesNativePayloadWithoutJsFaceTriangulation() {
-    const oc = await loadCustomOpenCascadeForTest();
+    const oc = await getDefaultOpenCascadeInstance();
     const builder = new oc.BRepPrimAPI_MakeBox_3(
       toGpPnt(oc, [0, 0, 0]),
       1,
@@ -143,7 +125,7 @@ test("production OCC exports native meshes and sheet STEP payloads", async () =>
   }
 
   async function testSheetBodyMeshExportStaysShapeAgnostic() {
-    const oc = await loadCustomOpenCascadeForTest();
+    const oc = await getDefaultOpenCascadeInstance();
     const sheet = createSheetExportBody(oc);
     const capabilities = createOccExportCapabilities(
       createOccAuthoringState(oc, { bodies: [sheet] }),
