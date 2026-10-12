@@ -1206,12 +1206,8 @@ function assertNativeBooleanOperandHistoryInvariants(
       `${path}.rightSourceFaceNativeIds`,
     );
   }
-  if (payload.status === "available" && payload.finalFaces.length === 0) {
-    throw invariantFailure(
-      "finalFaces",
-      "must not be empty when Boolean operand history is available.",
-    );
-  }
+  // An available history describes the exact result, including an empty
+  // disjoint common. Availability is not a non-empty geometry guarantee.
   if (payload.status === "unsupported" && payload.finalFaces.length !== 0) {
     throw invariantFailure(
       "finalFaces",
