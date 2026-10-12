@@ -160,6 +160,20 @@ describe("semantic command boundary", () => {
         }).success,
       ).toBe(false);
     }
+    const openCorrelation: SemanticCorrelation = {
+      ...correlation,
+      family: "file-open",
+    };
+    expect(
+      validateSemanticResult(openCorrelation, {
+        ...result,
+        correlation: openCorrelation,
+        completion: {
+          ...result.completion,
+          geometry: { kind: "not-required" },
+        },
+      }).success,
+    ).toBe(false);
     const saveCorrelation: SemanticCorrelation = {
       ...correlation,
       family: "file-save",
@@ -247,6 +261,44 @@ describe("semantic command boundary", () => {
         completion: {
           ...result.completion,
           geometry: { ...result.completion.geometry, rebuildRevisionId: null },
+        },
+      }).success,
+    ).toBe(false);
+  });
+
+  test("inspection may report invalid state but never claims an authored change", () => {
+    const inspectCorrelation: SemanticCorrelation = {
+      ...correlation,
+      family: "document",
+      intent: "inspect",
+    };
+    const result = completedResult();
+    const inspect = {
+      ...result,
+      correlation: inspectCorrelation,
+      outcome: { kind: "completed", change: "unchanged" },
+      completion: {
+        ...result.completion,
+        live: { kind: "unchanged", state },
+        geometry: { ...result.completion.geometry, kind: "invalid-editable" },
+        persistence: { kind: "not-required" },
+      },
+    };
+    expect(validateSemanticResult(inspectCorrelation, inspect).success).toBe(
+      true,
+    );
+    expect(
+      validateSemanticResult(inspectCorrelation, {
+        ...result,
+        correlation: inspectCorrelation,
+      }).success,
+    ).toBe(false);
+    expect(
+      validateSemanticResult(inspectCorrelation, {
+        ...inspect,
+        correlation: {
+          ...inspectCorrelation,
+          basis: { ...correlation.basis, revisionId: "rev_other" },
         },
       }).success,
     ).toBe(false);
