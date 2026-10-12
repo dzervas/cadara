@@ -355,5 +355,91 @@ The existing real production export/provider seam remains red against the user's
 read-only stage. No new logic assertions, aggregate repeat or E2E claim; parent
 owns final combined validation after review and rebuild qualification.
 
-The meaningful reviewed source/docs change retains `browserless-cli`; integration is left on a new empty working change above it. Workspaces, tracker, ignored stage, fixture and assets remain for the parent/user handoff.
+## Audited gate merge and next immutable status build (2026-10-12)
+
+Integration preserves `80029bb7`, `771b5698` and the source-only enum receipt
+closure `100ef59e`, above former integration `b09b0606`. The receipt closure
+leaves the 88 changed-destructor-only acceptance and all-other-identical rule
+unchanged; independent source-only checks confirm enum-bound copies/checksums,
+no-enum omission and failure before copying. These are not native build results.
+Only the integration bookmark `browserless-cli` is explicitly advanced; no
+ancestor, sibling or default-workspace history is rewritten.
+
+**The existing `.scratch/occ-step-binding-rebuild` remains immutable.** Its 22
+input hashes and three artifact hashes still verify. Against that actual binary,
+the audited repository policy has already qualified **15 lifetime checks and 13
+native conformance checks**, including the expected unsafe-release trap. Both
+STEP Transfer and Write remain uncallable due to the unbound status enum. Neither
+those artifacts nor current public assets are promoted or overwritten.
+
+A separate, fresh source snapshot is now prepared at:
+`/home/dzervas/Lab/cadara/.pi/worktree/browserless-cli-integration/.scratch/occ-step-status-rebuild`.
+All **24 input hashes** verify, and the mapped recipe/shim/patch/regeneration/probe
+inputs match integration byte-for-byte. This snapshot contains the MoniTool
+inheritance closure **and** `IFSelect_ReturnStatus`, the audited policy plus its
+explicit Moni inventory beside the probe, and the conditional checksummed enum
+CPP receipt outputs. It contains no built artifacts. Its `inputs.sha256` SHA256 is
+`b7d8e4cc35178f5ae95c48f0a5092ad71640a0e830f3c2d1dd719c8a218ed3a4`.
+
+On the user's Docker-capable host **outside the agent sandbox**, run:
+
+```sh
+bash /home/dzervas/Lab/cadara/.pi/worktree/browserless-cli-integration/.scratch/occ-step-status-rebuild/build.sh
+```
+
+Return the entire new stage, including builder/toolchain identity, input/artifact
+hashes, generated-binding receipts/diff, built JS/WASM/declarations and the exact
+`IFSelect_ReturnStatus.original.cpp` / `.regenerated.cpp` receipts. Preserve both
+stages. The strict policy intentionally rejects the unseen enum extension until
+its actual enum metadata, five values, five existing return-type resolutions and
+preserved baseline declarations/registrations are independently audited. Do not
+relax the gate or claim the next guard will pass. Errors printed by the expected
+unsafe-release child are its negative witness, not a positive-case failure;
+interpret the individual check results. Real sheet and solid/provider Transfer,
+Write, RetDone, nonempty Part 21 header, filesystem cleanup, native lifetime and
+precision qualification remain required before any promotion. Compilation alone
+is insufficient, and ticket 01 remains blocked.
+
+Fresh combined-source verification uses integration-local per-package dependency
+links and private caches, with unchanged original public assets and the existing
+ignored capture fixture retained. Reviewed `docs/testing.md`; no tests were edited
+by this merger. The **static** lane covers recipe/ABI and post-acceptance receipt
+policy, not real native STEP behavior: **22 files / 46 checks pass**. Production
+typecheck, normal spec ratchet, lint, Bash/Node and embedded Python syntax checks
+pass. Explicit parent `771b5698` / current static-spec compilation uses exact file
+inclusion, `exclude: []`, private build info and `--listFiles`: **0 -> 0 diagnostics**,
+both compiler invocations pass. Source-only receipts pass enum-bound, no-enum and
+acceptance-failure fixtures; removing only receipt additions recovers the parent
+regeneration script byte-for-byte. No fresh heavy native probe, compilation or
+browser/server qualification is claimed.
+
+Mandatory combined `PLAYWRIGHT_WEB_SERVER=0 timeout --signal=TERM --kill-after=10s
+180s bun run test:all` exited **124**, during logic. Aggregate lint, production
+build and normal spec typing completed; logic started but produced no completed
+test rows or summary before interruption. Aggregate UI/static/E2E were not
+reached; no whole-suite pass or fresh logic result is inferred. Dedicated static
+and type/lint/source-only results above remain separate evidence. Logs:
+`/tmp/cadara-gate-test-all.log` and `/tmp/cadara-gate-exits.log`. Existing build
+externalization/chunk/plugin-time and MaxListeners warnings remain outside scope.
+
+### Split memo correction: no owner bridge qualified
+
+The primary-source memo
+`/tmp/cadara-browserless-cli-onshape-split-primary-source.md` records official
+Onshape `qSplitBy` front/back semantics relative to the split tool surface normal
+(`https://cad.onshape.com/FsDoc/library.html#qSplitBy-Id--boolean`). This does not
+prove the undocumented compressed `isFromBackBodyT` encoding or equivalence to a
+reconstructed OCC occurrence orientation. Independent investigation
+`/tmp/cadara-browserless-cli-split-owner-semantics-research.md` corrects the earlier
+qualification boundary: **post-Extrude 6 source / post-Split 1 native** produced
+the recorded 10 unique / 3 ambiguous / 8 noMatch counts. They are valid
+cross-boundary observations, not a valid disqualification of producer-boundary
+owner mapping. Post-Split 1 JZT has 13 siblings excluding JZW, not the consumer's
+21. No corrected same-boundary native qualification or source-to-output owner
+bridge has been established here. Split remains unresolved; no weaker voting,
+orientation guess or original assertion change is authorized by this correction.
+
+The meaningful reviewed source/docs change retains `browserless-cli`; integration
+is left on a new empty working change above it. Workspaces, tracker, both ignored
+stages, fixture and assets remain for the parent/user handoff.
 
