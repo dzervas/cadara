@@ -88,7 +88,8 @@ import type { OffsetFramePlan } from "@/contracts/sketch/offset-derivation-frame
 import {
   carriedOffsetPlans,
   brokenDerivedInputMessage,
-  nonAcceptedOffsetOutputs,
+  uncertifiedOffsetInputMessage,
+  nonAcceptedDerivedOutputs,
   solvedPairDefinition,
 } from "@/contracts/sketch/offset-publication";
 import type { SketchOffsetPublicationRecord } from "@/contracts/solver/schema";
@@ -215,7 +216,7 @@ export function offsetEditInputGate(
   use: string,
 ): { readonly pending: boolean; readonly message: string } | null {
   if (entityIds.length === 0) return null;
-  const nonAccepted = nonAcceptedOffsetOutputs(
+  const nonAccepted = nonAcceptedDerivedOutputs(
     session.definition,
     session.liveSolve?.solvedSnapshot ?? { solvedEntities: [] },
   );
@@ -242,11 +243,22 @@ export function offsetEditInputGate(
     return pending
       ? {
           pending,
-          message: `Sketch entity ${entityId} is an output of offset relationship ${owner.derivationId}, which is still being checked; it can be used as ${use} once the check finishes.`,
+          message: uncertifiedOffsetInputMessage(
+            session.definition,
+            { entityId },
+            owner,
+            `it can be used as ${use}`,
+            true,
+          ),
         }
       : {
           pending,
-          message: `${NON_ACCEPTED_OFFSET_EDIT_INPUT_CODE}: Sketch entity ${entityId} is an output of offset relationship ${owner.derivationId}, which is not certified, so it cannot be used as ${use}.`,
+          message: `${NON_ACCEPTED_OFFSET_EDIT_INPUT_CODE}: ${uncertifiedOffsetInputMessage(
+            session.definition,
+            { entityId },
+            owner,
+            `it can't be used as ${use}`,
+          )}`,
         };
   }
   return null;
@@ -2047,7 +2059,7 @@ export function editQueryStaleMessage(
 export function editQueryBasisNotAcceptedMessage(
   kind: SketchEditOperation["kind"],
 ): string {
-  return `${editQueryToolName(kind)} needs a solved sketch; resolve the conflicting constraints first.`;
+  return `${editQueryToolName(kind)} needs a solved sketch; fix the problem shown above first, or Undo.`;
 }
 
 function editQueryToolName(kind: SketchEditOperation["kind"]) {

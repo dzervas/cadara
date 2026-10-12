@@ -18,7 +18,7 @@ import type {
   SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
 import { sketchProfileGateFailures } from "@/contracts/sketch/derived-validity";
-import { nonAcceptedOffsetOutputs } from "@/contracts/sketch/offset-publication";
+import { nonAcceptedDerivedOutputs } from "@/contracts/sketch/offset-publication";
 import {
   tessellateBoundaryLoop,
   type RegionBoundaryBasis,
@@ -281,7 +281,7 @@ export function getStableSketchSessionDisplayRenderables(
   );
   // [TECH] G19: a non-accepted offset output (line, arc, joint arc) takes the
   // same stale/invalid display state as a non-accepted shell.
-  const nonAcceptedOutputs = nonAcceptedOffsetOutputs(
+  const nonAcceptedOutputs = nonAcceptedDerivedOutputs(
     displayDefinition,
     solved.solvedSnapshot,
   );
@@ -974,7 +974,7 @@ export function getDerivedShellDisplayValidity(
 /**
  * T16b ([TECH] T16-6, plan review A-5): display validity of a non-accepted
  * derived output by its owner (the G16‴ closure of
- * `nonAcceptedOffsetOutputs`). An output held by a failed relationship (the
+ * `nonAcceptedDerivedOutputs`). An output held by a failed relationship (the
  * sketch-wide profile gate: directly, or a copy of a held copy) is settled
  * invalid geometry, so it is always `invalid` (red), during a drag and
  * before the first live solve too. Any other owner, a not yet certified
@@ -1005,7 +1005,7 @@ export function createDisplayRenderablesForDerivedShells(
   const records = new Map(
     solvedSnapshot.solvedEntities.map((record) => [record.entityId, record]),
   );
-  const nonAccepted = nonAcceptedOffsetOutputs(definition, solvedSnapshot);
+  const nonAccepted = nonAcceptedDerivedOutputs(definition, solvedSnapshot);
   const failedOwners = new Set(sketchProfileGateFailures(solvedSnapshot));
   return definition.entities.flatMap((entity) => {
     if (entity.kind !== "derivedPiecewiseCubic") return [];

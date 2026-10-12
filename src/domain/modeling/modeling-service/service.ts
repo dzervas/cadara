@@ -868,6 +868,8 @@ export function createModelingService(
     result: T,
     input: { baseRepositoryHeads?: readonly string[] },
     createHistoryEntry: (() => ModelingOperationHistoryEntry) | null,
+    /** The document history entry's label (the repository default otherwise). */
+    label?: string,
   ): Promise<T> {
     const repositoryConflict = repositoryHeadsChangedSinceBasis(input);
     const freshResult = repositoryConflict
@@ -885,15 +887,15 @@ export function createModelingService(
     if (createHistoryEntry) {
       appendOperationHistoryEntry(createHistoryEntry());
       if (documentRepositoryPersistence === "background") {
-        await enqueueAcceptedAuthoredDocumentPersistence(expected);
+        await enqueueAcceptedAuthoredDocumentPersistence(expected, label);
         return freshResult;
       }
     } else if (documentRepositoryPersistence === "background") {
-      await enqueueAcceptedAuthoredDocumentPersistence(expected);
+      await enqueueAcceptedAuthoredDocumentPersistence(expected, label);
       return freshResult;
     }
 
-    return persistAcceptedAuthoredDocument(freshResult, expected);
+    return persistAcceptedAuthoredDocument(freshResult, expected, label);
   }
 
   function notifyModelingDocumentChange(event: DocumentRepositoryChangeEvent) {
@@ -1265,7 +1267,7 @@ export function createModelingService(
 
   async function persistAcceptedAuthoredDocument<
     T extends { diagnostics: ModelingDiagnostic[] },
-  >(result: T, expected: AuthoredModelDocument): Promise<T> {
+  >(result: T, expected: AuthoredModelDocument, label?: string): Promise<T> {
     if (!documentRepository) {
       return result;
     }
@@ -1287,6 +1289,7 @@ export function createModelingService(
       documentId: currentDocumentId,
       expected,
       document: await exportAuthoredDocumentForRepository(),
+      ...(label === undefined ? {} : { label }),
     });
 
     if (writeResult.ok) {
@@ -1344,6 +1347,7 @@ export function createModelingService(
 
   async function enqueueAcceptedAuthoredDocumentPersistence(
     expected: AuthoredModelDocument,
+    label?: string,
   ) {
     if (!documentRepository || !canPersistAuthoredDocument) {
       return;
@@ -1363,6 +1367,7 @@ export function createModelingService(
           documentId: currentDocumentId,
           expected,
           document,
+          ...(label === undefined ? {} : { label }),
         });
 
         if (writeResult.ok) {
@@ -1837,6 +1842,8 @@ export function createModelingService(
             mapDeleteTargetResponse(response, currentDocumentId),
             input,
             () => createDeleteTargetHistoryEntry(request),
+            // T17e (P-8): a sketch delete is its own history entry.
+            request.target.kind === "sketch" ? "Delete Sketch" : undefined,
           );
         },
       });

@@ -125,6 +125,8 @@ const codes = OFFSET_DIAGNOSTIC_CODES;
 /** The offset relationship a frame evaluates (not persisted in g1). */
 export interface OffsetFrameRelationship {
   readonly derivationId: string;
+  /** T17e (B2): the relationship's label, for its failure text (never its id). */
+  readonly label?: string;
   readonly seedEntityIds: readonly SketchEntityId[];
   /** The chain distance d (signed, left positive). */
   readonly distance: number;
@@ -289,7 +291,7 @@ function frameFailure(
     diagnostic: {
       code: failure.code,
       severity: "error",
-      message: `Offset relationship ${relationship.derivationId}: ${failure.message}`,
+      message: `${relationship.label === undefined ? "Offset" : `Offset ‘${relationship.label}’`}: ${failure.message}`,
       target: entityId ? { kind: "entity", entityId } : null,
     },
   };

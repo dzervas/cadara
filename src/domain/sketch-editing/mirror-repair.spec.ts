@@ -514,18 +514,16 @@ describe("T16a: downstream relationships are never touched; they become explicit
     );
     const after = resolve(pattern.session, removal.definition);
     const diagnostics = after.liveSolve!.solvedSnapshot.diagnostics;
-    const named = (code: string, derivationId: string) =>
+    // T17e (B2): the offset by label, never by id.
+    const named = (code: string, label: string) =>
       diagnostics.find(
         (entry) =>
           entry.code === code &&
           entry.severity === "error" &&
-          entry.message.includes(derivationId),
+          entry.message.startsWith(`Offset ‘${label}’: `),
       );
     expect(
-      named(
-        "derived-offset-unsupported-seed",
-        offset.relationship.derivationId,
-      ),
+      named("derived-offset-unsupported-seed", offset.relationship.label),
       "the offset reports its missing seed",
     ).toBeDefined();
     // T16c (T16b review A-1): the pattern's text names it by label (never

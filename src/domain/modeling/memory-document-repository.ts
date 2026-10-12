@@ -34,6 +34,7 @@ import {
 } from "./collaborative-document";
 import type { CollaborativeDocument } from "./collaborative-document";
 import type { AuthoredActionResult } from "@/contracts/modeling/authored-actions";
+import { describeBlockedDocumentAction } from "./document-action-blocked";
 
 export class MemoryDocumentRepository implements GeometryAssetDocumentRepository {
   private readonly actorId = crypto.randomUUID();
@@ -274,7 +275,12 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
       documentActionState(input.expected),
     );
     if (action.status === "blocked")
-      return this.blocked(input.documentId, action);
+      return this.blocked(input.documentId, action, {
+        direction: "commit",
+        label: input.label ?? "Edit document",
+        current: previousDocument,
+        history: this.historyOf(input.documentId),
+      });
     const storage = structuredClone(this.documents.get(input.documentId)!);
     if (action.status === "applied")
       applyCollaborativeWrites(storage, action.writes);
@@ -346,7 +352,12 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
       documentActionState(expected),
     );
     if (action.status === "blocked")
-      return this.blocked(document.documentId, action);
+      return this.blocked(document.documentId, action, {
+        direction: "commit",
+        label: "Peer edit",
+        current,
+        history: this.historyOf(document.documentId),
+      });
     const storage = structuredClone(this.documents.get(document.documentId)!);
     if (action.status === "applied")
       applyCollaborativeWrites(storage, action.writes);
@@ -526,6 +537,12 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
       context: { kind: "document" as const },
     };
   }
+  private historyOf(documentId: DocumentId) {
+    const entries = this.actionOwner(documentId).entries(
+      this.identity(documentId),
+    );
+    return [...entries.undo, ...entries.redo];
+  }
   private actionOwner(documentId: DocumentId) {
     let owner = this.actions.get(documentId);
     if (!owner) {
@@ -537,10 +554,14 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
   private blocked(
     documentId: DocumentId,
     result: Extract<AuthoredActionResult, { status: "blocked" }>,
+    context: Omit<
+      Parameters<typeof describeBlockedDocumentAction>[0],
+      "result"
+    >,
   ) {
     return this.fail(documentId, {
       reasonCode: result.reason,
-      message: `Document action blocked: ${result.reason} (${result.targets.map((p) => p.join(".")).join(", ")})`,
+      message: describeBlockedDocumentAction({ ...context, result }),
     });
   }
   private compensate(
@@ -551,13 +572,24 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
     const current = this.currentDocument(documentId);
     if (!current) return null;
     const staged = this.actionOwner(documentId).fork();
+    const entries = staged.entries(this.identity(documentId))[direction];
+    const entry =
+      actionSequence === undefined
+        ? entries.at(-1)
+        : entries.find((candidate) => candidate.sequence === actionSequence);
     const action = staged[direction](
       this.identity(documentId),
       documentActionState(current),
       actionSequence,
     );
     if (action.status === "unchanged") return null;
-    if (action.status === "blocked") return this.blocked(documentId, action);
+    if (action.status === "blocked")
+      return this.blocked(documentId, action, {
+        direction,
+        label: entry?.label ?? "this action",
+        current,
+        history: this.historyOf(documentId),
+      });
     const storage = structuredClone(this.documents.get(documentId)!);
     applyCollaborativeWrites(storage, action.writes);
     const document = materializeCollaborativeDocument(storage);

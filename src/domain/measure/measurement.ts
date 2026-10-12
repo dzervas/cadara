@@ -15,7 +15,7 @@ import {
 } from "@/contracts/solver/schema";
 import {
   isAcceptedOffsetOutput,
-  nonAcceptedOffsetOutputPoints,
+  nonAcceptedDerivedOutputPoints,
 } from "@/contracts/sketch/offset-publication";
 import { sketchNotCurrentExplanation } from "@/contracts/sketch/derived-validity";
 import {
@@ -611,7 +611,7 @@ function resolveSketchPointTarget(
   // [TECH] G19b: a driven point of a non-accepted offset output is not
   // measurable, like its output.
   if (
-    nonAcceptedOffsetOutputPoints(
+    nonAcceptedDerivedOutputPoints(
       sketch.sketch.definition,
       sketch.sketch.solvedSnapshot,
     ).has(point.pointId)

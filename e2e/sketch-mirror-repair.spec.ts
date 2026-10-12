@@ -411,10 +411,10 @@ test("T16g rows 3–4: delete the mirror line → copy invalid, no region; Undo/
   );
   const message = await brokenStatus.textContent();
   await expect(mirrorPanel(page)).toContainText("Broken: mirror line missing");
-  // (The debug count keeps the last regions while they are unavailable.)
+  // (T17e, B12: no region counts while they are unavailable.)
   await expect
-    .poll(async () => (await sketchSnapshot(page)).liveRegions?.status)
-    .toBe("unavailable");
+    .poll(async () => (await sketchSnapshot(page)).liveRegions)
+    .toEqual({ status: "unavailable", count: 0 });
   /** The held copy is drawn in the danger red; the original is not. */
   const expectCopyInvalid = async (context: string) => {
     await workbench.clearHoverByLeavingViewport();
@@ -554,10 +554,10 @@ test("T16g rows 3–4: delete the mirror line → copy invalid, no region; Undo/
     await workbench.currentEditorSelection(),
     "no mirror participant is selected (the re-entered sketch is)",
   ).toBe(mirrored.sketchId);
-  // (The debug count keeps the last regions while they are unavailable.)
+  // (T17e, B12: no region counts while they are unavailable.)
   await expect
-    .poll(async () => (await sketchSnapshot(page)).liveRegions?.status)
-    .toBe("unavailable");
+    .poll(async () => (await sketchSnapshot(page)).liveRegions)
+    .toEqual({ status: "unavailable", count: 0 });
   await expectCopyInvalid("after re-entry");
 
   // Recovery on the reopened file (fresh history): Replace mirror line… →

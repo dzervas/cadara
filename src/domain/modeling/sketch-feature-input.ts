@@ -1,8 +1,9 @@
 import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
 import {
   brokenDerivedInputMessage,
-  nonAcceptedOffsetOutputPoints,
-  nonAcceptedOffsetOutputs,
+  nonAcceptedDerivedOutputPoints,
+  nonAcceptedDerivedOutputs,
+  uncertifiedOffsetInputMessage,
 } from "@/contracts/sketch/offset-publication";
 import type { SketchRecord } from "@/contracts/sketch/schema";
 
@@ -30,19 +31,17 @@ export function nonAcceptedOffsetFeatureInputMessage(
   entityId: SketchEntityId,
   use: string,
 ): string | null {
-  const owner = nonAcceptedOffsetOutputs(
+  const owner = nonAcceptedDerivedOutputs(
     sketch.definition,
     sketch.solvedSnapshot,
   ).get(entityId);
   if (!owner) return null;
-  return owner.reason === "derivedFailed"
-    ? brokenDerivedInputMessage(
-        sketch.definition,
-        { entityId },
-        owner,
-        `it can't be used as ${use}`,
-      )
-    : `Sketch entity ${entityId} is an output of offset relationship ${owner.derivationId}, which is not certified, so it cannot be used as ${use}.`;
+  // T17e (B2): both owner kinds are worded by label, never by id.
+  return (
+    owner.reason === "derivedFailed"
+      ? brokenDerivedInputMessage
+      : uncertifiedOffsetInputMessage
+  )(sketch.definition, { entityId }, owner, `it can't be used as ${use}`);
 }
 
 /** Throws the targeted G19 feature failure (`code: message`) for a non-accepted offset output. */
@@ -66,19 +65,17 @@ export function nonAcceptedOffsetFeaturePointMessage(
   pointId: SketchPointId,
   use: string,
 ): string | null {
-  const owner = nonAcceptedOffsetOutputPoints(
+  const owner = nonAcceptedDerivedOutputPoints(
     sketch.definition,
     sketch.solvedSnapshot,
   ).get(pointId);
   if (!owner) return null;
-  return owner.reason === "derivedFailed"
-    ? brokenDerivedInputMessage(
-        sketch.definition,
-        { pointId },
-        owner,
-        `it can't be used as ${use}`,
-      )
-    : `Sketch point ${pointId} is a driven point of an output of offset relationship ${owner.derivationId}, which is not certified, so it cannot be used as ${use}.`;
+  // T17e (B2): both owner kinds are worded by label, never by id.
+  return (
+    owner.reason === "derivedFailed"
+      ? brokenDerivedInputMessage
+      : uncertifiedOffsetInputMessage
+  )(sketch.definition, { pointId }, owner, `it can't be used as ${use}`);
 }
 
 /** Throws the targeted G19c feature failure (`code: message`) for a driven point of a non-accepted offset output. */

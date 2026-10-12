@@ -18,7 +18,6 @@ import type {
 import type { PrimitiveRef } from "@/core/editor/schema";
 import {
   getPrimitiveRefKey,
-  getPrimitiveRefLabel,
   selectionFilterAllowsTarget,
 } from "@/core/editor/schema";
 import { getObjectTreeNodeToolIcon } from "@/core/tools/tool-icon-resolvers";
@@ -174,6 +173,15 @@ export function FeatureSidebar({
     Record<string, Pick<DocumentVariableRecord, "name" | "valueText">>
   >({});
   const previousVariableIdsRef = useRef<Set<string> | null>(null);
+  const featureLabel = useMemo(() => {
+    const labels = new Map<string, string>(
+      (snapshot?.document.features ?? []).map((feature) => [
+        feature.featureId,
+        feature.label,
+      ]),
+    );
+    return (featureId: string) => labels.get(featureId);
+  }, [snapshot]);
   const variableResultPresentations = useMemo(
     () =>
       getVariableResultPresentations(
@@ -749,14 +757,17 @@ export function FeatureSidebar({
                           <p className="mt-1 text-sm text-[var(--workbench-shell-text)]">
                             {diagnostic.message}
                           </p>
-                          {diagnostic.target ? (
+                          {/* T17e (review R-3): no target id line; the
+                              target is reached by "Select target". */}
+                          {formatSidebarDiagnosticDetail(
+                            diagnostic,
+                            featureLabel,
+                          ) ? (
                             <p className="mt-1 text-xs text-[var(--workbench-shell-text-muted)]">
-                              Target {getPrimitiveRefLabel(diagnostic.target)}
-                            </p>
-                          ) : null}
-                          {formatSidebarDiagnosticDetail(diagnostic) ? (
-                            <p className="mt-1 text-xs text-[var(--workbench-shell-text-muted)]">
-                              {formatSidebarDiagnosticDetail(diagnostic)}
+                              {formatSidebarDiagnosticDetail(
+                                diagnostic,
+                                featureLabel,
+                              )}
                             </p>
                           ) : null}
                           <p className="mt-1 text-xs text-[var(--workbench-shell-text-dim)]">

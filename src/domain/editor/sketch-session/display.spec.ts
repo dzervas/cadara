@@ -824,7 +824,7 @@ describe("T12d: tangent handle visibility rule table (D8)", () => {
 
 // T16b ([TECH] T16-6, plan review A-5; logic lane, seam: the session's
 // display renderables). An output held by a failed mirror (its owner, the
-// G16‴ closure of `nonAcceptedOffsetOutputs`, is in the snapshot's
+// G16‴ closure of `nonAcceptedDerivedOutputs`, is in the snapshot's
 // `failedDerivationIds`) is settled invalid geometry: always `invalid` (red),
 // during an unrelated drag and on re-entry before the first live solve too.
 // A not yet certified offset keeps U-A (`stale` during a drag).

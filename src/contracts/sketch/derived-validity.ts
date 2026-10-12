@@ -208,13 +208,25 @@ export function sketchNotCurrentExplanation(
             ? [diagnostic.message]
             : [],
         );
+  // T17e (T17d review A-1): the explanation names the cause: no solve ran,
+  // the solve was not accepted, or an accepted solve with errors (from
+  // projection, validation or regions).
+  const { status, constraintStatuses, dimensionStatuses } = solvedSnapshot;
+  const solveAccepted =
+    status.solveState === "solved" &&
+    constraintStatuses.every((entry) => entry.status !== "unsatisfied") &&
+    dimensionStatuses.every((entry) => entry.status !== "unsatisfied");
   return {
     state: "invalid",
     brokenRelationships: broken.length > 0,
     explanation:
       broken.length > 0
         ? broken.join(" ")
-        : "Its last solve was not accepted, so its geometry is not current. Edit the sketch to see why, then correct it or Undo.",
+        : status.solveState === "notEvaluated"
+          ? "It has not been solved, so its geometry is not current. Edit the sketch to solve it, or Undo."
+          : solveAccepted
+            ? "It has errors, so its geometry is not current. Edit the sketch to see them, then correct it, or Undo."
+            : "Its last solve was not accepted, so its geometry is not current. Edit the sketch to see why, then correct it, or Undo.",
   };
 }
 

@@ -1,7 +1,7 @@
 import type { SketchSnapIntersectionTargetResult } from "@/contracts/sketch/edit-intersections";
 import {
-  nonAcceptedOffsetOutputPoints,
-  nonAcceptedOffsetOutputs,
+  nonAcceptedDerivedOutputPoints,
+  nonAcceptedDerivedOutputs,
 } from "@/contracts/sketch/offset-publication";
 import type {
   SketchDefinition,
@@ -207,11 +207,11 @@ export function collectSketchSnapGeometries(input: {
   solvedSnapshot?: SolvedSketchSnapshot | null;
 }): SketchSnapGeometry[] {
   const acceptedSnapshot = input.solvedSnapshot ?? { solvedEntities: [] };
-  const nonAccepted = nonAcceptedOffsetOutputs(
+  const nonAccepted = nonAcceptedDerivedOutputs(
     input.definition,
     acceptedSnapshot,
   );
-  const nonAcceptedPoints = nonAcceptedOffsetOutputPoints(
+  const nonAcceptedPoints = nonAcceptedDerivedOutputPoints(
     input.definition,
     acceptedSnapshot,
   );

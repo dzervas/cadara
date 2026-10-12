@@ -1,4 +1,5 @@
 import { test, expect } from "vitest";
+import { expectNoInternalIds } from "@/contracts/sketch/user-text.fixtures";
 
 import { lineLoopSegmentsForTest } from "@/contracts/sketch/region-record.fixtures";
 import type { SketchVectorExportModel } from "@/contracts/export/sketch-vector";
@@ -61,6 +62,20 @@ test("buildSketchVectorExportModel extracts committed sketch geometry, regions, 
     ),
     "Unsupported sketch entity kinds should be reported without dropping supported geometry.",
   ).toBeTruthy();
+  // T17e (B2): the unsupported entity is named by label, never by id.
+  expect(
+    model.diagnostics
+      .filter(
+        (diagnostic) => diagnostic.code === "sketch-vector-unsupported-entity",
+      )
+      .map((diagnostic) => diagnostic.message),
+  ).toEqual([
+    "‘Ellipse’ (ellipse) is not supported by sketch vector export yet.",
+  ]);
+  expectNoInternalIds(
+    model.diagnostics.map((diagnostic) => diagnostic.message),
+    ["entity_", "point_"],
+  );
 });
 
 // T17d (B3, [TECH] A-5): an unsolved (not evaluated) record is not current,
@@ -76,11 +91,101 @@ test("an unsolved record is not current: it is refused as a whole, by the sketch
     diagnostic: {
       code: "sketch-vector-sketch-not-current",
       severity: "error",
+      // T17e (T17d review A-1): the cause is named: no solve ran.
       message:
-        "Sketch ‘Sketch Profile’ was not exported because it is invalid. Its last solve was not accepted, so its geometry is not current. Edit the sketch to see why, then correct it or Undo.",
+        "Sketch ‘Sketch Profile’ was not exported because it is invalid. It has not been solved, so its geometry is not current. Edit the sketch to solve it, or Undo.",
       target: { kind: "sketch", sketchId: "sketch_profile" },
     },
   });
+});
+
+// T17e (review A-1, A-9). Logic lane; seam: the vector export model. The
+// empty-sketch, missing-point and unresolved-region texts name the sketch,
+// the geometry and the region by label, never by id.
+test("T17e: empty sketch, missing point and unresolved region texts are label-based", () => {
+  const exportOf = (record: SketchSnapshotRecord) =>
+    buildSketchVectorExportModel({
+      documentId: "doc_export",
+      revisionId: "rev_0001",
+      sketches: [record],
+      target: { kind: "sketch", sketchId: "sketch_profile" },
+    }) as SketchVectorExportModel;
+  const base = createSketchSnapshot(createSolvedRectangleSnapshot());
+  const withSketch = (
+    patch: (
+      sketch: SketchSnapshotRecord["sketch"],
+    ) => SketchSnapshotRecord["sketch"],
+  ) => ({ ...base, sketch: patch(base.sketch) });
+  const messages = (record: SketchSnapshotRecord, code: string) =>
+    exportOf(record)
+      .diagnostics.filter((diagnostic) => diagnostic.code === code)
+      .map((diagnostic) => diagnostic.message);
+
+  const empty = withSketch((sketch) => ({
+    ...sketch,
+    definition: {
+      ...sketch.definition,
+      entityIds: ["entity_ellipse"] as never,
+      entities: sketch.definition.entities.filter(
+        (entity) => entity.kind === "ellipse",
+      ),
+    },
+    regions: [],
+  }));
+  const missing = withSketch((sketch) => ({
+    ...sketch,
+    definition: {
+      ...sketch.definition,
+      pointIds: sketch.definition.pointIds.filter(
+        (id) => (id as string) !== "point_a",
+      ),
+      points: sketch.definition.points.filter(
+        (point) => (point.pointId as string) !== "point_a",
+      ),
+      entities: sketch.definition.entities.map((entity) =>
+        (entity.entityId as string) === "entity_ab"
+          ? { ...entity, label: "Bottom" }
+          : entity,
+      ),
+    },
+    solvedSnapshot: {
+      ...sketch.solvedSnapshot,
+      solvedEntities: sketch.solvedSnapshot.solvedEntities.filter(
+        (entity) => (entity.entityId as string) !== "entity_ab",
+      ),
+    },
+    regions: [],
+  }));
+  const unresolved = withSketch((sketch) => ({
+    ...sketch,
+    regions: sketch.regions.map((region) => ({
+      ...region,
+      loops: region.loops.map((loop) => ({
+        ...loop,
+        segments: loop.segments.map((segment, index) =>
+          index === 0
+            ? {
+                ...segment,
+                sourceParameterInterval: [2, 3] as [number, number],
+              }
+            : segment,
+        ),
+      })),
+    })),
+  }));
+  const texts = [
+    messages(empty, "sketch-vector-empty-sketch"),
+    messages(missing, "sketch-vector-missing-point"),
+    messages(unresolved, "sketch-vector-region-unresolved"),
+  ];
+  expect(texts).toEqual([
+    ["Sketch ‘Sketch Profile’ has no exportable vector geometry."],
+    [
+      "Sketch export skipped ‘Bottom’ because one of its points no longer exists.",
+    ],
+    ["Square region was not exported: its boundary could not be resolved."],
+  ]);
+  expectNoInternalIds(texts.flat(), ["entity_", "point_", "sketch_profile"]);
 });
 
 test("buildSketchVectorExportModel exports solved committed geometry for dimensioned rectangles", () => {

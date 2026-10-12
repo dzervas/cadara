@@ -36,7 +36,7 @@ import type {
 import { sketchProfileGateFailures } from "@/contracts/sketch/derived-validity";
 import { RELATIONSHIP_NOUN } from "@/contracts/sketch/mirror-requirements";
 import {
-  nonAcceptedOffsetOutputs,
+  nonAcceptedDerivedOutputs,
   type NonAcceptedOutputOwner,
 } from "@/contracts/sketch/offset-publication";
 import {
@@ -156,7 +156,7 @@ export interface SketchArrangementUnpublishedOutput {
  * ([TECH] G7/G19), mapped exactly as the g3 fixture helper
  * (`addOffsetFramePublication`) maps a publication. `solvedSnapshot` is the
  * pair's snapshot with the publications applied (`applyOffsetPublications`);
- * acceptance is the shared predicate `nonAcceptedOffsetOutputs` on it, so a
+ * acceptance is the shared predicate `nonAcceptedDerivedOutputs` on it, so a
  * shell is consumed only when its relationship is certified in the snapshot
  * and its record is `certified`. Each accepted non-construction shell
  * becomes one derived curve on its authored driven terminal points and its
@@ -198,21 +198,23 @@ export function offsetArrangementInput(
   const entities = new Map(
     definition.entities.map((entity) => [entity.entityId, entity]),
   );
-  const nonAccepted = nonAcceptedOffsetOutputs(definition, solvedSnapshot);
+  const nonAccepted = nonAcceptedDerivedOutputs(definition, solvedSnapshot);
   const derivedCurves: SketchArrangementDerivedCurve[] = [];
   const unpublishedOffsetOutputs: SketchArrangementUnpublishedOutput[] = [];
   const reasonOf = ({ derivationId, ...owner }: NonAcceptedOutputOwner) => {
     // T16c (T16b review A-7): a broken relationship by label, never its id.
     if (owner.reason === "derivedFailed")
       return `${RELATIONSHIP_NOUN[owner.kind].toLowerCase()} ‘${owner.label}’ is broken (its copies are held)`;
+    // T17e (B2): an offset by label too, never its id.
+    const named = `offset ‘${owner.label}’`;
     const state = status.get(derivationId);
     return state === "failed"
-      ? `offset relationship ${derivationId} failed its publication`
+      ? `${named} failed its check`
       : state === "planChanged"
-        ? `offset relationship ${derivationId} is pending its re-solve`
+        ? `${named} is still being checked`
         : state === "certified"
-          ? `offset relationship ${derivationId} is not certified in this solved snapshot`
-          : `offset relationship ${derivationId} is not published`;
+          ? `${named} is not certified in this solve`
+          : `${named} is not checked yet`;
   };
   for (const relationship of offsets) {
     for (const entityId of [
@@ -364,6 +366,8 @@ interface Obstacle {
   box: Box;
   code: "region-unsupported-curve" | "region-degenerate-curve";
   entityId: SketchEntityId | null;
+  /** The source's identity key (`sourceDescription`), never shown. */
+  sourceKey: string;
   description: string;
   reason: string;
 }
@@ -379,13 +383,17 @@ interface ExcludedOutput {
   reason: string;
 }
 
-type BranchDraft = Omit<Branch, "index" | "key" | "box" | "curve"> & {
+type BranchDraft = Omit<
+  Branch,
+  "index" | "key" | "box" | "curve" | "description"
+> & {
   curve:
     | Omit<SegmentCurve, "curveId">
     | Omit<CircleCurve, "curveId">
     | Omit<CubicCurve, "curveId">;
 };
 
+/** A source's identity key (ids); internal, never a user text (T17e). */
 export function sourceDescription(source: RegionBoundarySource) {
   return source.kind === "entity"
     ? `entity ${source.entityId}`
@@ -435,7 +443,6 @@ function segmentDraft(
     portPointIds: { start: startPointId, end: endPointId },
     portPositions: { start, end },
     entityId: source.kind === "entity" ? source.entityId : null,
-    description: sourceDescription(source),
   };
 }
 
@@ -480,7 +487,6 @@ function arcDraft(
       ? { start, end }
       : { start: end, end: start },
     entityId: source.kind === "entity" ? source.entityId : null,
-    description: sourceDescription(source),
   };
 }
 
@@ -508,7 +514,6 @@ function circleDraft(
     portPointIds: { start: null, end: null },
     portPositions: { start: null, end: null },
     entityId: source.kind === "entity" ? source.entityId : null,
-    description: sourceDescription(source),
   };
 }
 
@@ -534,7 +539,6 @@ function spanDraft(
     portPointIds,
     portPositions: { start: span.poles[0], end: span.poles[3] },
     entityId: source.kind === "entity" ? source.entityId : null,
-    description: `${sourceDescription(source)} span ${spanId}`,
   };
 }
 
@@ -647,12 +651,38 @@ export function collectArrangementBranches(
   const unpublished = new Map(
     unpublishedOutputs.map((output) => [output.entityId, output.reason]),
   );
+  // T17e (B2, specification "Minimum failure feedback"): every diagnostic
+  // names its geometry by label (a spline's span and a shell's piece by
+  // their 1-based number), never by an id or an occurrence key.
+  const entityLabels = new Map(
+    definition.entities.map((entity) => [entity.entityId, entity.label]),
+  );
+  const referenceLabels = new Map(
+    definition.references.map((reference) => [
+      reference.referenceId,
+      reference.label,
+    ]),
+  );
+  const name = (source: RegionBoundarySource) => {
+    const label =
+      source.kind === "entity"
+        ? entityLabels.get(source.entityId)
+        : referenceLabels.get(source.reference.referenceId);
+    return source.kind === "entity"
+      ? label === undefined
+        ? "an unnamed curve"
+        : `‘${label}’`
+      : label === undefined
+        ? "projected geometry"
+        : `projected ‘${label}’`;
+  };
+  const spanNames = new Map<BranchDraft, string>();
   // [TECH] G19: a non-accepted offset output is excluded like construction
   // geometry, so it never bounds a region and never blocks one.
   const exclude = (entityId: SketchEntityId, reason: string) =>
     excluded.push({
       entityId,
-      description: sourceDescription({ kind: "entity", entityId }),
+      description: name({ kind: "entity", entityId }),
       reason,
     });
   const addDraft = (
@@ -668,7 +698,8 @@ export function collectArrangementBranches(
       box,
       code: "region-degenerate-curve",
       entityId: source.kind === "entity" ? source.entityId : null,
-      description: sourceDescription(source),
+      sourceKey: sourceDescription(source),
+      description: name(source),
       reason: draft,
     });
   };
@@ -681,7 +712,8 @@ export function collectArrangementBranches(
       box,
       code: "region-unsupported-curve",
       entityId: source.kind === "entity" ? source.entityId : null,
-      description: sourceDescription(source),
+      sourceKey: sourceDescription(source),
+      description: name(source),
       reason,
     });
 
@@ -706,7 +738,8 @@ export function collectArrangementBranches(
         box: { x: [-Infinity, Infinity], y: [-Infinity, Infinity] },
         code: "region-degenerate-curve",
         entityId: entity.entityId,
-        description: sourceDescription(source),
+        sourceKey: sourceDescription(source),
+        description: name(source),
         reason: "no solved geometry",
       });
       continue;
@@ -778,20 +811,20 @@ export function collectArrangementBranches(
           );
           break;
         }
-        for (const span of reconstruction.spans) {
-          drafts.push(
-            spanDraft(
-              source,
-              span,
-              `${span.source.startOccurrenceId}>${span.source.endOccurrenceId}`,
-              { start: span.source.startPointId, end: span.source.endPointId },
-              {
-                start: span.source.startPointId as SketchPointId,
-                end: span.source.endPointId as SketchPointId,
-              },
-            ),
+        reconstruction.spans.forEach((span, index) => {
+          const draft = spanDraft(
+            source,
+            span,
+            `${span.source.startOccurrenceId}>${span.source.endOccurrenceId}`,
+            { start: span.source.startPointId, end: span.source.endPointId },
+            {
+              start: span.source.startPointId as SketchPointId,
+              end: span.source.endPointId as SketchPointId,
+            },
           );
-        }
+          drafts.push(draft);
+          spanNames.set(draft, `span ${index + 1}`);
+        });
         break;
       }
       case "ellipse":
@@ -926,15 +959,15 @@ export function collectArrangementBranches(
               geometry.geometryId,
               span.source.endOccurrenceId,
             );
-            drafts.push(
-              spanDraft(
-                source,
-                span,
-                `span${index}`,
-                { start, end },
-                { start: null, end: null },
-              ),
+            const draft = spanDraft(
+              source,
+              span,
+              `span${index}`,
+              { start, end },
+              { start: null, end: null },
             );
+            drafts.push(draft);
+            spanNames.set(draft, `span ${index + 1}`);
           });
           break;
       }
@@ -974,7 +1007,8 @@ export function collectArrangementBranches(
             : { x: [-Infinity, Infinity], y: [-Infinity, Infinity] },
         code: "region-degenerate-curve",
         entityId: shell.outputEntityId,
-        description: sourceDescription(source),
+        sourceKey: sourceDescription(source),
+        description: name(source),
         reason: invalid,
       });
       continue;
@@ -994,7 +1028,7 @@ export function collectArrangementBranches(
       const endPort =
         index < last ? knot(index + 1) : endTrimmed ? null : shell.endPointId;
       const record = { source, spanId: span.outputSpanId };
-      drafts.push({
+      const draft: BranchDraft = {
         record,
         curve: {
           kind: "cubicBezier",
@@ -1011,7 +1045,6 @@ export function collectArrangementBranches(
         },
         portPositions: { start: span.poles[0], end: span.poles[3] },
         entityId: shell.outputEntityId,
-        description: `${sourceDescription(source)} span ${span.outputSpanId} sub-span ${span.subIndex}`,
         derived: {
           subIndex: span.subIndex,
           tails: {
@@ -1023,14 +1056,20 @@ export function collectArrangementBranches(
               : null,
           },
         },
-      });
+      };
+      drafts.push(draft);
+      spanNames.set(draft, `piece ${index + 1}`);
     });
   }
 
   const branches = drafts.map((draft, index): Branch => {
     const key = regionBranchKey(draft.record);
     const curve = { ...draft.curve, curveId: key } as OwnedCurve;
-    return { ...draft, index, key, curve, box: curveBox(curve) };
+    const span = spanNames.get(draft);
+    const description = span
+      ? `${name(draft.record.source)} ${span}`
+      : name(draft.record.source);
+    return { ...draft, index, key, curve, description, box: curveBox(curve) };
   });
   return { branches, obstacles, excluded };
 }
@@ -2736,7 +2775,7 @@ async function buildComponent(
     ): Extract<ComponentOutcome, { kind: "blocked" }> => ({
       kind: "blocked",
       code: "region-vertex-order-uncertain",
-      reason: `the curves meeting at vertex ${info.key} ${reason}`,
+      reason: `the curves meeting at ${info.classRoot === null ? "one point" : "a declared join"} ${reason}`,
       // A join names its members; the whole component is blocked either way.
       branches:
         info.classRoot === null
@@ -3606,12 +3645,16 @@ function projectedReferenceDiagnostics(
   const byId = new Map(
     projectedReferences.map((reference) => [reference.referenceId, reference]),
   );
+  const labelOf = (referenceId: ReferenceId) =>
+    definition.references.find(
+      (reference) => reference.referenceId === referenceId,
+    )!.label;
   const diagnostics = projectedReferences
     .filter((reference) => !authored.has(reference.referenceId))
-    .map((reference) =>
+    .map(() =>
       makeDiagnostic(
         "projected-region-reference-unauthored",
-        `Projected reference ${reference.referenceId} cannot participate in region derivation because it is not backed by the current authored sketch references.`,
+        "A projected reference cannot participate in region derivation because it is not backed by the current authored sketch references.",
         null,
       ),
     );
@@ -3620,7 +3663,7 @@ function projectedReferenceDiagnostics(
       diagnostics.push(
         makeDiagnostic(
           "projected-region-reference-unauthored",
-          `Reference ${referenceId} cannot participate in region derivation because it is not backed by both referenceIds and references.`,
+          "A reference cannot participate in region derivation because it is not backed by both referenceIds and references.",
           null,
         ),
       );
@@ -3631,7 +3674,7 @@ function projectedReferenceDiagnostics(
       diagnostics.push(
         makeDiagnostic(
           "projected-region-reference-unresolved",
-          `Reference ${referenceId} is unavailable for region derivation.`,
+          `Reference ‘${labelOf(referenceId)}’ is unavailable for region derivation.`,
           null,
         ),
       );
@@ -3639,7 +3682,7 @@ function projectedReferenceDiagnostics(
       diagnostics.push(
         makeDiagnostic(
           "projected-region-reference-invalid",
-          `Reference ${referenceId} cannot participate in region derivation because projection status is ${projected.status}.`,
+          `Reference ‘${labelOf(referenceId)}’ cannot participate in region derivation because it was not projected.`,
           null,
         ),
       );
@@ -3810,7 +3853,7 @@ async function deriveArrangement(
     emit(
       makeDiagnostic(
         "region-derived-unpublished",
-        `${output.description} is an offset output that is not consumable (${output.reason}); regions are derived without it.`,
+        `${output.description} is not used for regions: ${output.reason}.`,
         { kind: "entity", entityId: output.entityId },
       ),
     );
@@ -3940,7 +3983,7 @@ async function deriveArrangement(
       blocked.add(joinedRoot);
       emitForBranches(
         "region-join-uncertain",
-        `The declared join ${vertex.key} is not proven to be entered once by ${branches[member]!.description}: its own far part may re-enter the join ball, where the realized boundary is not queried.`,
+        `A declared join is not proven to be entered once by ${branches[member]!.description}: its own far part may re-enter the join ball, where the realized boundary is not queried.`,
         [...joined],
       );
     }
@@ -3962,7 +4005,7 @@ async function deriveArrangement(
       block(branch.index);
       emitForBranches(
         "region-join-uncertain",
-        `The declared join ${vertex.key} is not proven clear of ${branch.description}: a curve may pass through the join ball, where the realized boundary is not queried.`,
+        `A declared join is not proven clear of ${branch.description}: a curve may pass through the join ball, where the realized boundary is not queried.`,
         [...joined, branch.index],
       );
     }
@@ -4258,7 +4301,7 @@ async function publishRegions(
     emit(
       makeDiagnostic(
         "region-identity-collision",
-        `Two derived regions share identity ${candidate.regionId}; both are withheld.`,
+        "Two derived regions share one identity; both are withheld.",
         null,
       ),
     );

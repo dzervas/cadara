@@ -5,6 +5,7 @@
 // (normalization, runtime schema), the solver's shell residual / U-G2 and
 // the authored-action history.
 import { describe, expect, test, vi } from "vitest";
+import { expectNoInternalIds } from "@/contracts/sketch/user-text.fixtures";
 import { readFile } from "node:fs/promises";
 import { deriveSketchValidity } from "@/contracts/sketch/derived-validity";
 
@@ -27,7 +28,7 @@ import {
   applyOffsetPublications,
   isAcceptedOffsetOutput,
   isOffsetReplanRound,
-  nonAcceptedOffsetOutputPoints,
+  nonAcceptedDerivedOutputPoints,
   publishSketchOffsets,
   solvedPairDefinition,
 } from "@/contracts/sketch/offset-publication";
@@ -241,7 +242,7 @@ vi.mock(
           diagnostic: {
             code: failure.code,
             severity: "error",
-            message: `Offset relationship ${relationship.derivationId}: ${failure.message}`,
+            message: `Offset ‘${relationship.label}’: ${failure.message}`,
             target: { kind: "entity", entityId: seedEntityId },
           },
         } as ReturnType<typeof actual.solveOffsetFrame>;
@@ -3067,11 +3068,13 @@ describe("T08b-g5b consumers and region wiring", () => {
         result.diagnostics.flatMap((diagnostic) =>
           diagnostic.code === "region-derived-unpublished" &&
           diagnostic.target?.kind === "entity" &&
-          diagnostic.message.includes(relationship.derivationId)
+          diagnostic.message.includes(`offset ‘${relationship.label}’`)
             ? [diagnostic.target.entityId]
             : [],
         ),
       );
+      // T17e (B2): the offset by label, never by id.
+      expectNoInternalIds(result.diagnostics.map((d) => d.message));
       expect(
         [...outputIds].every((entityId) => targeted.has(entityId)),
         `${status}: every output (lines and joint arcs) has its targeted diagnostic`,
@@ -3998,10 +4001,13 @@ describe("T08b-g5c non-accepted offset outputs ([TECH] G19/G19a, U-G5)", () => {
           [...targets].sort(),
           `${where}: exactly one diagnostic per output`,
         ).toEqual([...outputs].sort());
+        // T17e (B2): by label, never by id.
+        const offsetName = `offset ‘${offsetLabelOf(live.definition, derivationId)}’`;
         expect(
-          result.diagnostics.every((d) => d.message.includes(derivationId)),
+          result.diagnostics.every((d) => d.message.includes(offsetName)),
           `${where}: each names the relationship`,
         ).toBe(true);
+        expectNoInternalIds(result.diagnostics.map((d) => d.message));
       }
     },
     600_000,
@@ -4079,20 +4085,27 @@ describe("T08b-g5c non-accepted offset outputs ([TECH] G19/G19a, U-G5)", () => {
     expect(skipped, "failed: one warning per output").toHaveLength(
       outputs.length,
     );
+    const offsetLabel = offsetLabelOf(failed.definition, derivationId);
     expect(
       outputs.every((output) =>
-        skipped.some((diagnostic) => diagnostic.message.includes(output)),
+        skipped.some((diagnostic) =>
+          diagnostic.message.startsWith(
+            `‘${entityLabelOf(failed.definition, output)}’ `,
+          ),
+        ),
       ),
     ).toBe(true);
-    // T16c: the offset wording, byte for byte (failed mirrors have their own).
+    // T16c: the offset wording, byte for byte (failed mirrors have their
+    // own); T17e (B2): by label, never by id.
     expect(skipped.map((diagnostic) => diagnostic.message).sort()).toEqual(
       outputs
         .map(
           (output) =>
-            `Offset output ${output} of relationship ${derivationId} is not certified, so it was not exported.`,
+            `‘${entityLabelOf(failed.definition, output)}’ is a curve made by offset ‘${offsetLabel}’, which is not certified, so it was not exported. Fix it (Undo) or remove the offset from the Offset panel.`,
         )
         .sort(),
     );
+    expectNoInternalIds(skipped.map((diagnostic) => diagnostic.message));
     const certifiedExport = exportOf(certified);
     expect(
       outputs.every((output) =>
@@ -4183,11 +4196,13 @@ describe("T08b-g5c non-accepted offset outputs ([TECH] G19/G19a, U-G5)", () => {
     expect(one.diagnostics.map((d) => d.code)).toEqual([
       NON_ACCEPTED_OFFSET_OUTPUT_PROJECTION_CODE,
     ]);
-    expect(one.diagnostics[0]!.message).toContain(derivationId);
-    // T16c: the offset wording, byte for byte (failed mirrors have their own).
+    expect(one.diagnostics[0]!.message).toContain(`offset ‘${offsetLabel}’`);
+    // T16c: the offset wording, byte for byte (failed mirrors have their
+    // own); T17e (B2): by label, never by id.
     expect(one.diagnostics[0]!.message).toBe(
-      `Sketch entity ${output} is an output of offset relationship ${derivationId}, which is not certified, so it is not projected.`,
+      `‘${entityLabelOf(failed.definition, output)}’ is a curve made by offset ‘${offsetLabel}’, which is not certified, so it is not projected. Fix it (Undo) or remove the offset from the Offset panel.`,
     );
+    expectNoInternalIds([one.diagnostics[0]!.message]);
     expect(
       project(certified, { kind: "sketchEntity", entityId: output }).status,
       "certified: the output projects",
@@ -4693,7 +4708,8 @@ describe("T08b-g5c review fixes", () => {
         const message = occFailure(row.run);
         if (expectFailure)
           expect(message, where).toBe(
-            `${NON_ACCEPTED_OFFSET_FEATURE_INPUT_CODE}: Sketch entity ${axisLine} is an output of offset relationship ${derivationId}, which is not certified, so it cannot be used as ${row.use}.`,
+            // T17e (B2): by label, never by id.
+            `${NON_ACCEPTED_OFFSET_FEATURE_INPUT_CODE}: ‘${entityLabelOf(entry.sketch.definition, axisLine)}’ is a curve made by offset ‘${offsetLabelOf(entry.sketch.definition, derivationId)}’, which is not certified, so it can't be used as ${row.use}. Fix it (Undo) or remove the offset from the Offset panel.`,
           );
         else expect(message, `${where}: builds`).toBeNull();
       }
@@ -4781,7 +4797,8 @@ describe("T08b-g5c review fixes", () => {
         const message = occFailure(row.run);
         if (failedRound)
           expect(message, where).toBe(
-            `${NON_ACCEPTED_OFFSET_FEATURE_INPUT_CODE}: Sketch point ${drivenPoint} is a driven point of an output of offset relationship ${derivationId}, which is not certified, so it cannot be used as ${row.use}.`,
+            // T17e (B2): by label, never by id.
+            `${NON_ACCEPTED_OFFSET_FEATURE_INPUT_CODE}: Point ‘${entry.sketch.definition.points.find((point) => point.pointId === drivenPoint)!.label}’ belongs to a curve made by offset ‘${offsetLabelOf(entry.sketch.definition, derivationId)}’, which is not certified, so it can't be used as ${row.use}. Fix it (Undo) or remove the offset from the Offset panel.`,
           );
         else expect(message, `${where}: builds`).toBeNull();
       }
@@ -4827,7 +4844,8 @@ describe("T08b-g5c review fixes", () => {
             {
               code: NON_ACCEPTED_OFFSET_FEATURE_INPUT_CODE,
               severity: "error",
-              message: `Sketch point ${drivenPoint} is a driven point of an output of offset relationship ${derivationId}, which is not certified, so it cannot be used as an input of ${kind}.`,
+              // T17e (B2): by label, never by id.
+              message: `Point ‘${entry.sketch.definition.points.find((point) => point.pointId === drivenPoint)!.label}’ belongs to a curve made by offset ‘${offsetLabelOf(entry.sketch.definition, derivationId)}’, which is not certified, so it can't be used as an input of ${kind}. Fix it (Undo) or remove the offset from the Offset panel.`,
               target: { kind: "sketchPoint", sketchId, pointId: drivenPoint },
               detail: null,
             },
@@ -4884,7 +4902,8 @@ describe("T08b-g5c review fixes", () => {
             {
               code: NON_ACCEPTED_OFFSET_FEATURE_INPUT_CODE,
               severity: "error",
-              message: `Sketch entity ${axisLine} is an output of offset relationship ${derivationId}, which is not certified, so it cannot be used as an input of ${kind}.`,
+              // T17e (B2): by label, never by id.
+              message: `‘${entityLabelOf(entry.sketch.definition, axisLine)}’ is a curve made by offset ‘${offsetLabelOf(entry.sketch.definition, derivationId)}’, which is not certified, so it can't be used as an input of ${kind}. Fix it (Undo) or remove the offset from the Offset panel.`,
               target: { kind: "sketchEntity", sketchId, entityId: axisLine },
               detail: null,
             },
@@ -4924,7 +4943,7 @@ describe("T08b-g5c review fixes", () => {
     ).startPointId;
     expect(
       [
-        ...nonAcceptedOffsetOutputPoints(
+        ...nonAcceptedDerivedOutputPoints(
           failed.liveSolve!.definition,
           failed.liveSolve!.solvedSnapshot,
         ).keys(),
@@ -4932,7 +4951,7 @@ describe("T08b-g5c review fixes", () => {
       "the predicate names exactly the driven points",
     ).toEqual([...drivenPoints].sort());
     expect(
-      nonAcceptedOffsetOutputPoints(
+      nonAcceptedDerivedOutputPoints(
         certified.liveSolve!.definition,
         certified.liveSolve!.solvedSnapshot,
       ).size,
@@ -5609,10 +5628,19 @@ async function expectScopedFailure(input: {
   expect(
     getSketchSessionDerivedValidity(settled).diagnostics.filter(
       (diagnostic) =>
-        diagnostic.code === code && diagnostic.message.includes(failing),
+        diagnostic.code === code &&
+        // T17e (B2): the relationship by label, never by id.
+        diagnostic.message.startsWith(
+          `Offset ‘${offsetLabelOf(settled.definition, failing)}’: `,
+        ),
     ),
     "the relationship has exactly one diagnostic",
   ).toHaveLength(1);
+  expectNoInternalIds(
+    response.offsetPublications.flatMap((publication) =>
+      publication.diagnostic ? [publication.diagnostic.message] : [],
+    ),
+  );
   const snapshot = settled.liveSolve!.solvedSnapshot;
   expect(snapshot.certifiedOffsetDerivationIds ?? []).not.toContain(failing);
   for (const entityId of outputEntityIds(settled.definition, failing))
@@ -5950,9 +5978,13 @@ describe("T08b-g7b relationship-scoped solve-frame failures ([TECH] G16′, U-G9
       expect.objectContaining({
         severity: "warning",
         target: { kind: "dimension", dimensionId: requirement.dimensionId },
-        message: expect.stringContaining(derivationId!),
+        // T17e (B2): the offset by label, never by id.
+        message: expect.stringContaining(
+          `offset ‘${offsetLabelOf(broken.definition, derivationId!)}’`,
+        ),
       }),
     ]);
+    expectNoInternalIds(snapshot.diagnostics.map((d) => d.message));
     expect(
       snapshot.status.solveState,
       "a blocked requirement does not count against the sketch's status",
@@ -6172,7 +6204,10 @@ describe("T08b-g7b relationship-scoped solve-frame failures ([TECH] G16′, U-G9
         )
         .map((diagnostic) => [
           diagnostic.code,
-          [first, second].find((id) => diagnostic.message.includes(id!)),
+          // T17e (B2): each names its offset by label, never by id.
+          [first, second].find((id) =>
+            diagnostic.message.includes(`‘${offsetLabelOf(broken, id!)}’`),
+          ),
         ]);
     const snapshot = solve(unaccepted).solvedSnapshot;
     // T13e2 (A2): the conflicting fixes collapse the unrelated rectangle's
@@ -6299,7 +6334,11 @@ describe("T08b-g7b relationship-scoped solve-frame failures ([TECH] G16′, U-G9
       expect(snapshot.diagnostics[0]!.message).toContain(
         "derivative is unavailable",
       );
-      expect(snapshot.diagnostics[0]!.message).toContain(derivationId!);
+      // T17e (B2): the offset by label, never by id.
+      expect(snapshot.diagnostics[0]!.message).toContain(
+        `offset ‘${offsetLabelOf(definition, derivationId!)}’`,
+      );
+      expectNoInternalIds([snapshot.diagnostics[0]!.message]);
       expect(snapshot.status.solveState).toBe("solved");
       expect(
         snapshot.offsetFramePlans?.map((plan) => plan.derivationId),
@@ -6612,8 +6651,12 @@ describe("T08b-g7b relationship-scoped solve-frame failures ([TECH] G16′, U-G9
     ).toEqual([...translated.copies].sort());
     for (const diagnostic of excluded) {
       expect(diagnostic.code).toBe("region-derived-unpublished");
-      expect(diagnostic.message).toContain(derivationId);
+      // T17e (B2): the offset by label, never by id.
+      expect(diagnostic.message).toContain(
+        `offset ‘${offsetLabelOf(live.definition, derivationId)}’`,
+      );
     }
+    expectNoInternalIds(excluded.map((diagnostic) => diagnostic.message));
     const failedSketch = {
       definition: live.definition,
       solvedSnapshot: live.solvedSnapshot,
@@ -6627,9 +6670,10 @@ describe("T08b-g7b relationship-scoped solve-frame failures ([TECH] G16′, U-G9
         ),
         `failed: ${copy} is refused as a feature input, naming the offset`,
       ).toBe(
-        `Sketch entity ${copy} is an output of offset relationship ${derivationId}, which is not certified, so it cannot be used as a sweep path.`,
+        // T17e (B2): by label; a copy of an output depends on the offset.
+        `‘${entityLabelOf(live.definition, copy)}’ depends on offset ‘${offsetLabelOf(live.definition, derivationId)}’, which is not certified, so it can't be used as a sweep path. Fix it (Undo) or remove the offset from the Offset panel.`,
       );
-    const points = nonAcceptedOffsetOutputPoints(
+    const points = nonAcceptedDerivedOutputPoints(
       live.definition,
       live.solvedSnapshot,
     );
@@ -6911,18 +6955,63 @@ function runEditTool(
   });
 }
 
-const gateMessage = (entityId: SketchEntityId, derivationId: string) =>
+/** T17e (B2): labels, as user texts name them (never ids). */
+function entityLabelOf(definition: SketchDefinition, entityId: SketchEntityId) {
+  return definition.entities.find((entity) => entity.entityId === entityId)!
+    .label;
+}
+function offsetLabelOf(definition: SketchDefinition, derivationId: string) {
+  return definition.derivedRelationships!.find(
+    (relationship) => relationship.derivationId === derivationId,
+  )!.label;
+}
+
+/**
+ * T17e (B2): the C3 gate texts name the input and its offset by label,
+ * never by id: a direct output is "a curve made by" the offset, anything
+ * downstream "depends on" it (`uncertifiedOffsetInputMessage`).
+ */
+const offsetInputHeld = (
+  definition: SketchDefinition,
+  entityId: SketchEntityId,
+  derivationId: string,
+) => {
+  const relationship = definition.derivedRelationships!.find(
+    (candidate) => candidate.derivationId === derivationId,
+  );
+  if (relationship?.kind !== "offset") throw new Error("no offset");
+  const direct = [
+    ...relationship.outputs,
+    ...relationship.jointOutputs,
+    ...relationship.piecewiseCubicOutputs,
+  ].some((output) => output.outputEntityId === entityId);
+  const label = definition.entities.find(
+    (entity) => entity.entityId === entityId,
+  )!.label;
+  return `‘${label}’ ${direct ? "is a curve made by" : "depends on"} offset ‘${relationship.label}’`;
+};
+const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const gateMessage = (
+  definition: SketchDefinition,
+  entityId: SketchEntityId,
+  derivationId: string,
+) =>
   expect.stringMatching(
     new RegExp(
-      `^${NON_ACCEPTED_OFFSET_EDIT_INPUT_CODE}: Sketch entity ${entityId} is an output of offset relationship ${derivationId}, which is not certified, so it cannot be used as `,
+      `^${NON_ACCEPTED_OFFSET_EDIT_INPUT_CODE}: ${literal(offsetInputHeld(definition, entityId, derivationId))}, which is not certified, so it can't be used as .+\\. Fix it \\(Undo\\) or remove the offset from the Offset panel\\.$`,
     ),
   );
 
 /** Review R-1: while the round is pending the input is "still being checked" (not refused as uncertified). */
-const checkingMessage = (entityId: SketchEntityId, derivationId: string) =>
+const checkingMessage = (
+  definition: SketchDefinition,
+  entityId: SketchEntityId,
+  derivationId: string,
+) =>
   expect.stringMatching(
     new RegExp(
-      `^Sketch entity ${entityId} is an output of offset relationship ${derivationId}, which is still being checked; it can be used as .+ once the check finishes\\.$`,
+      `^${literal(offsetInputHeld(definition, entityId, derivationId))}, which is still being checked; it can be used as .+ once the check finishes\\.$`,
     ),
   );
 
@@ -6973,10 +7062,12 @@ describe("T10i edit inputs on non-accepted offset outputs ([TECH] C3, review A8)
           `${toolId} on a ${label} output is ${label === "failed" ? "refused" : "still being checked"}`,
         ).toEqual(
           (label === "failed" ? gateMessage : checkingMessage)(
+            state.definition,
             states.outputs[0]!,
             states.derivationId,
           ),
         );
+        expectNoInternalIds([result.validationMessage]);
         expect(
           result.definition,
           `${toolId} on a ${label} output authors nothing`,
@@ -7032,7 +7123,7 @@ describe("T10i edit inputs on non-accepted offset outputs ([TECH] C3, review A8)
       expect(
         runEditTool(failed, toolId, [copy], value).validationMessage,
         `${toolId} of the copy of a failed output is refused`,
-      ).toEqual(gateMessage(copy, states.derivationId));
+      ).toEqual(gateMessage(failed.definition, copy, states.derivationId));
       const certified = (await liveRound(mirrored)).session;
       expect(
         runEditTool(certified, toolId, [copy], value).validationMessage ?? "",
@@ -7079,10 +7170,18 @@ describe("T10i edit inputs on non-accepted offset outputs ([TECH] C3, review A8)
     expect(applied.activeEditTool!.offsetPublication).toMatchObject({
       status: "failed",
       commitRequested: false,
-      message: gateMessage(states.outputs[0]!, states.derivationId),
+      message: gateMessage(
+        seedFailed.definition,
+        states.outputs[0]!,
+        states.derivationId,
+      ),
     });
     expect(applied.validationMessage).toEqual(
-      gateMessage(states.outputs[0]!, states.derivationId),
+      gateMessage(
+        seedFailed.definition,
+        states.outputs[0]!,
+        states.derivationId,
+      ),
     );
     const control = completeSketchOffsetPreviewPublication(
       staged,
@@ -7184,8 +7283,9 @@ describe("T10i edit inputs on non-accepted offset outputs ([TECH] C3, review A8)
       expect(failed?.status).toBe("failed");
       expect(failed?.diagnostic).toMatchObject({
         code: OFFSET_DIAGNOSTIC_CODES.disconnectedChain,
+        // T17e (B2): the join by its constraint's label, never its id.
         message: expect.stringContaining(
-          `The declared coincident join ${join!.constraintId} is blocked in this solve frame, so it does not join the chain.`,
+          `The join ‘${join!.label}’ is blocked in this solve, so it does not join the chain.`,
         ),
       });
     } finally {
@@ -7303,7 +7403,7 @@ describe("T10i review fixes (R-2, R-1, A-1)", () => {
         expect(
           result.validationMessage,
           `${toolId}, ${label}: the gate names the non-first input`,
-        ).toEqual(message(output, states.derivationId));
+        ).toEqual(message(state.definition, output, states.derivationId));
         expect(result.definition, `${label}: nothing authored`).toBe(
           state.definition,
         );
@@ -7384,14 +7484,14 @@ describe("T10i review fixes (R-2, R-1, A-1)", () => {
           : [states.cutter, output];
       const selected = selectEditTool(states.pending, toolId, selection, null);
       expect(selected.validationMessage).toEqual(
-        checkingMessage(output, states.derivationId),
+        checkingMessage(selected.definition, output, states.derivationId),
       );
       expect(selected.activeEditTool?.editQuery?.queue).toHaveLength(1);
       const refused = refreshSketchEditToolAfterOffsetRound(
         failedRound(selected),
       );
       expect(refused.validationMessage).toEqual(
-        gateMessage(output, states.derivationId),
+        gateMessage(selected.definition, output, states.derivationId),
       );
       expect(refused.activeEditTool?.editQuery).toEqual({
         queue: [],
@@ -7479,16 +7579,28 @@ describe("T10i review fixes (R-2, R-1, A-1)", () => {
       0.2,
     );
     expect(selected.validationMessage).toEqual(
-      checkingMessage(states.outputs[0]!, states.derivationId),
+      checkingMessage(
+        states.pending.definition,
+        states.outputs[0]!,
+        states.derivationId,
+      ),
     );
     const refused = refreshSketchEditToolAfterOffsetRound(
       failedRound(selected),
     );
     expect(refused.validationMessage).toEqual(
-      gateMessage(states.outputs[0]!, states.derivationId),
+      gateMessage(
+        states.pending.definition,
+        states.outputs[0]!,
+        states.derivationId,
+      ),
     );
     expect(refused.toolPresentation?.validation?.[0]?.message).toEqual(
-      gateMessage(states.outputs[0]!, states.derivationId),
+      gateMessage(
+        states.pending.definition,
+        states.outputs[0]!,
+        states.derivationId,
+      ),
     );
     expect(refused.definition).toBe(selected.definition);
 
@@ -7500,7 +7612,11 @@ describe("T10i review fixes (R-2, R-1, A-1)", () => {
     );
     const valued = patchSketchEditToolValue(offset, { value: 0.1 });
     expect(valued.validationMessage).toEqual(
-      checkingMessage(states.outputs[0]!, states.derivationId),
+      checkingMessage(
+        states.pending.definition,
+        states.outputs[0]!,
+        states.derivationId,
+      ),
     );
     expect(valued.activeEditTool?.offsetPublication).toBeUndefined();
     const staged = refreshSketchEditToolAfterOffsetRound(
@@ -7541,7 +7657,11 @@ describe("T10i review fixes (R-2, R-1, A-1)", () => {
     );
     expect(applied.activeEditTool?.offsetPublication).toBeUndefined();
     expect(applied.validationMessage).toEqual(
-      checkingMessage(states.outputs[0]!, states.derivationId),
+      checkingMessage(
+        states.pending.definition,
+        states.outputs[0]!,
+        states.derivationId,
+      ),
     );
     const restaged = refreshSketchEditToolAfterOffsetRound(
       (await liveRound(applied)).session,
@@ -7601,7 +7721,8 @@ describe("T10i review fixes (R-2, R-1, A-1)", () => {
           code: OFFSET_DIAGNOSTIC_CODES.seedNotCertified,
           severity: "error",
           target: { kind: "entity", entityId: states.outputs[0]! },
-          message: `Offset relationship ${second}: its seed ${states.outputs[0]!} is an output of offset relationship ${states.derivationId}, which is not certified, so this offset is not certified either.`,
+          // T17e (B2): by label, never by id.
+          message: `‘${entityLabelOf(definition, states.outputs[0]!)}’ is a curve made by offset ‘${offsetLabelOf(definition, states.derivationId)}’, which is not certified, so offset ‘${offsetLabelOf(definition, second)}’ can't be certified either. Fix it (Undo) or remove the offset from the Offset panel.`,
         },
       });
     } finally {
@@ -7629,7 +7750,7 @@ describe("T10i review fixes (R-2, R-1, A-1)", () => {
         `${entityId} is excluded from region input, naming A`,
       ).toMatchObject({
         derivationId: states.derivationId,
-        reason: `offset relationship ${states.derivationId} failed its publication`,
+        reason: `offset ‘${offsetLabelOf(definition, states.derivationId)}’ failed its check`,
       });
   }, 600_000);
 });
@@ -7941,7 +8062,8 @@ describe("T10g-1 Trim with offset relationships (review R-1, T-g5)", () => {
     expect(refused.validationMessage).toEqual(
       expect.stringMatching(
         new RegExp(
-          `^${NON_ACCEPTED_OFFSET_EDIT_INPUT_CODE}: Sketch entity (${states.outputs.join("|")}) is an output of offset relationship ${states.derivationId}, which is not certified, so it cannot be used as a Trim input\\.$`,
+          // T17e (B2): by label, never by id.
+          `^${NON_ACCEPTED_OFFSET_EDIT_INPUT_CODE}: (${states.outputs.map((output) => literal(`‘${entityLabelOf(states.failed.definition, output)}’`)).join("|")}) is a curve made by offset ${literal(`‘${offsetLabelOf(states.failed.definition, states.derivationId)}’`)}, which is not certified, so it can't be used as a Trim input\\. Fix it \\(Undo\\) or remove the offset from the Offset panel\\.$`,
         ),
       ),
     );
@@ -8096,7 +8218,7 @@ function expectBeingChecked(
     `${label}: still being checked, not refused as uncertified`,
   ).toEqual({
     pending: true,
-    message: checkingMessage(outputs[0]!, derivationId),
+    message: checkingMessage(session.definition, outputs[0]!, derivationId),
   });
   expect(snapsTo(session, outputs[0]!), `${label}: no snap yet`).toBe(false);
 }

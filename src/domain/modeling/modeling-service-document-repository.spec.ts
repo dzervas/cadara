@@ -2430,3 +2430,49 @@ function assertReferenceImageOperationPayloads(
     throw new Error(message);
   }
 }
+
+// T17e (P-8). Logic lane; seam: the modeling service's generic delete
+// writing the document action. A sketch delete is its own history entry,
+// "Delete Sketch" (it was the repository default "Edit document"); other
+// deletes keep the default.
+test("T17e: deleting a sketch is one document action labelled Delete Sketch; a body delete keeps the default label", async () => {
+  const unwrapModelingResult = async <T>(result: AppResultAsync<T>) => {
+    const resolved = await result;
+    if (resolved.isErr()) throw new Error(resolved.error.message);
+    return resolved.value;
+  };
+  const repository = createMemoryDocumentRepository();
+  const service = createModelingService(new MockKernelAdapter(), {
+    currentDocumentId: "doc_workspace",
+    documentRepository: repository,
+  });
+  const snapshot = await service.getCurrentDocumentSnapshot();
+  const sketchId = snapshot.document.sketches[0]!.sketchId;
+  const deleted = await unwrapModelingResult(
+    service.deleteTarget({
+      baseRevisionId: snapshot.document.revisionId,
+      target: { kind: "sketch", sketchId },
+    }),
+  );
+  expect(deleted.revisionState.kind).toBe("accepted");
+  const availability = await repository.getDurableHistoryAvailability(
+    snapshot.document.documentId,
+  );
+  expect(availability.undoEntries?.map((entry) => entry.label)).toEqual([
+    "Delete Sketch",
+  ]);
+  const after = await service.getCurrentDocumentSnapshot();
+  await unwrapModelingResult(
+    service.deleteTarget({
+      baseRevisionId: after.document.revisionId,
+      target: { kind: "body", bodyId: "body_part-1" as BodyId },
+    }),
+  );
+  expect(
+    (
+      await repository.getDurableHistoryAvailability(
+        snapshot.document.documentId,
+      )
+    ).undoEntries?.map((entry) => entry.label),
+  ).toEqual(["Delete Sketch", "Edit document"]);
+});

@@ -6,6 +6,7 @@ import {
   getConsumableSketchRegions,
   mergeSketchSolveDiagnostics,
   SKETCH_VALIDATION_FAILED,
+  sketchNotCurrentExplanation,
   sketchProfileGateFailures,
 } from "@/contracts/sketch/derived-validity";
 import { DERIVED_SHELL_SEED_UNSUPPORTED } from "@/contracts/sketch/derived-geometry";
@@ -222,5 +223,56 @@ describe("T17d B5: one committed-sketch validity derivation", () => {
       diagnostics: [pointMap],
     });
     expect(unresolved.solvedSnapshot.diagnostics).toEqual([pointMap]);
+  });
+});
+
+// T17e (T17d review A-1). Logic lane; seam: `sketchNotCurrentExplanation`,
+// the text export and projection show for a non-current sketch. It names
+// the cause: no solve ran, the solve was not accepted, or an accepted solve
+// with errors; "its last solve was not accepted" only for the second.
+describe("T17e: the not-current explanation names its cause", () => {
+  const explain = (
+    solvedSnapshot: SolvedSketchSnapshot,
+    diagnostics: SolvedSketchSnapshot["diagnostics"] = [],
+  ) =>
+    sketchNotCurrentExplanation({
+      solvedSnapshot,
+      derivedValidity: deriveSketchValidity({ solvedSnapshot, diagnostics }),
+    })?.explanation;
+  const regionError = {
+    code: "profile-boundary-unresolved",
+    severity: "error" as const,
+    message: "Outer region cannot be drawn.",
+    target: null,
+  };
+
+  test("not evaluated, not accepted, accepted with errors", () => {
+    expect(
+      explain({
+        ...solved,
+        status: { solveState: "notEvaluated", constraintState: "unknown" },
+      } as SolvedSketchSnapshot),
+    ).toBe(
+      "It has not been solved, so its geometry is not current. Edit the sketch to solve it, or Undo.",
+    );
+    expect(
+      explain({
+        ...solved,
+        dimensionStatuses: [
+          {
+            dimensionId: "dimension_a" as never,
+            status: "unsatisfied",
+            solvedValue: 2,
+          },
+        ],
+        status: { solveState: "failed", constraintState: "inconsistent" },
+      } as SolvedSketchSnapshot),
+    ).toBe(
+      "Its last solve was not accepted, so its geometry is not current. Edit the sketch to see why, then correct it, or Undo.",
+    );
+    expect(explain(solved, [regionError])).toBe(
+      "It has errors, so its geometry is not current. Edit the sketch to see them, then correct it, or Undo.",
+    );
+    expect(explain(solved), "control: current").toBeUndefined();
   });
 });

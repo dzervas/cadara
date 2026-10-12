@@ -33,11 +33,14 @@ async function expectRegionCount(
     .poll(
       async () => {
         const regions = await liveRegions(workbench);
-        return regions?.status === "pending" ? null : (regions?.count ?? null);
+        // T17e (B12): a count is only meaningful while regions are
+        // current (an unavailable state counts 0), so the status is part
+        // of the expectation.
+        return regions?.status === "pending" ? null : regions;
       },
       { message, timeout: 30_000 },
     )
-    .toBe(count);
+    .toEqual({ status: "current", count });
 }
 
 /** Hovers `at` and returns the hovered sketch point key (fails otherwise). */

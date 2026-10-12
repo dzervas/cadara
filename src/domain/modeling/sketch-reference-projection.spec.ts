@@ -1,4 +1,5 @@
 import { test, expect } from "vitest";
+import { expectNoInternalIds } from "@/contracts/sketch/user-text.fixtures";
 import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
 import type { SketchDerivedValidity } from "@/contracts/sketch/schema";
 import {
@@ -182,7 +183,11 @@ test("model edge projection classifies supported projected geometry generically"
   ).toBe("counterClockwise");
 });
 
-function projectAuthoredSpline(derivedValidity: SketchDerivedValidity) {
+function projectAuthoredSpline(
+  derivedValidity: SketchDerivedValidity,
+  // T17e: the whole sketch as the source, the destination plane at height z.
+  options: { readonly wholeSketch?: boolean; readonly planeZ?: number } = {},
+) {
   const snapshot = createSnapshotWithEdge([], false);
   snapshot.document.cursor = { kind: "sketch", sketchId: "sketch_source" };
   snapshot.presentation.documentHistory = [
@@ -293,6 +298,10 @@ function projectAuthoredSpline(derivedValidity: SketchDerivedValidity) {
           { pointId: "sketch_point_start", solvedPosition: [0, 0] },
           { pointId: "sketch_point_end", solvedPosition: [2, 0] },
         ],
+        // T17e: a solved snapshot always carries its requirement statuses
+        // (the not-current explanation reads them).
+        constraintStatuses: [],
+        dimensionStatuses: [],
         diagnostics: [],
       },
       derivedValidity,
@@ -308,7 +317,7 @@ function projectAuthoredSpline(derivedValidity: SketchDerivedValidity) {
     revisionId: "rev_projection",
     sketchId: "sketch_projection",
     plane: {
-      origin: [0, 0, 0],
+      origin: [0, 0, options.planeZ ?? 0],
       xAxis: [1, 0, 0],
       yAxis: [0, 1, 0],
       normal: [0, 0, 1],
@@ -327,16 +336,35 @@ function projectAuthoredSpline(derivedValidity: SketchDerivedValidity) {
           referenceId: "ref_projected_spline",
           kind: "sketchReference",
           label: "Projected spline",
-          source: {
-            kind: "sketchEntity",
-            sketchId: "sketch_source",
-            entityId: "sketch_entity_spline",
-          },
+          source: options.wholeSketch
+            ? { kind: "sketch", sketchId: "sketch_source" }
+            : {
+                kind: "sketchEntity",
+                sketchId: "sketch_source",
+                entityId: "sketch_entity_spline",
+              },
         },
       },
     ],
   });
 }
+
+// T17e (review A-1). Logic lane; seam: the reference projection. A source
+// off the sketch plane is named by the reference's label, never its id.
+test("T17e: an off-plane source is named by the reference label (entity and whole sketch)", () => {
+  const messages = [false, true].map(
+    (wholeSketch) =>
+      projectAuthoredSpline(
+        { state: "current", diagnostics: [] },
+        { wholeSketch, planeZ: 5 },
+      ).projectedReferences[0]?.diagnostics[0]?.message,
+  );
+  expect(messages).toEqual([
+    "Sketch entity ‘Projected spline’ is not coplanar with the active sketch plane.",
+    "Sketch ‘Projected spline’ is not coplanar with the active sketch plane.",
+  ]);
+  expectNoInternalIds(messages, ["ref_projected_spline"]);
+});
 
 test("authored spline projection transforms source-owner spans into an opposite-normal destination frame", () => {
   const projected = projectAuthoredSpline({ state: "current", diagnostics: [] })
@@ -481,7 +509,8 @@ test("T16g A-13: a dependent sketch's projection of a removed mirror copy is an 
       reference: {
         referenceId,
         kind: "sketchReference",
-        label: referenceId,
+        // T17e: a label distinct from the id, as authored references have.
+        label: referenceId === "ref_copy" ? "Copy edge" : "Original edge",
         source: { kind: "sketchEntity", sketchId, entityId },
       },
     });
@@ -538,5 +567,10 @@ test("T16g A-13: a dependent sketch's projection of a removed mirror copy is an 
       diagnostic.severity,
     ]),
   ).toEqual([["missing-sketch-entity-source", "error"]]);
+  // T17e (B2): the reference by its label, never its id.
+  expect(after[0]!.diagnostics[0]!.message).toBe(
+    "Sketch entity ‘Copy edge’ does not resolve in the requested revision.",
+  );
+  expectNoInternalIds([after[0]!.diagnostics[0]!.message], ["ref_copy"]);
   expect(after[1], "the original projects unchanged").toEqual(healthy[1]);
 });

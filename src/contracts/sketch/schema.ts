@@ -1660,7 +1660,7 @@ export interface SolvedSketchSnapshot {
    * order (solved revision data, never identity). Each has exactly one
    * `error` diagnostic in `diagnostics`; its outputs are held at their
    * stored values and are non-accepted geometry (G19,
-   * `nonAcceptedOffsetOutputs`). Absent when none failed.
+   * `nonAcceptedDerivedOutputs`). Absent when none failed.
    */
   failedDerivationIds?: string[];
   /**

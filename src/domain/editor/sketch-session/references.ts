@@ -99,6 +99,17 @@ export function updateReferenceImageOperationStates(input: {
   );
 }
 
+/** T17e: why a reference is not projected, in words (never the status code). */
+const PROJECTION_STATUS_TEXT: Record<
+  Exclude<ProjectedSketchReferenceRecord["status"], "projected">,
+  string
+> = {
+  unsupportedSource: "its source can't be projected",
+  missingSource: "its source no longer exists",
+  outOfPlane: "its source is not in the sketch plane",
+  ambiguous: "its source is ambiguous",
+};
+
 export function updateSketchReferenceProjection(
   session: SketchSessionState,
   projectedReferences: ProjectedSketchReferenceRecord[],
@@ -108,6 +119,12 @@ export function updateSketchReferenceProjection(
     session.definition,
     projectedReferences,
   );
+  const referenceName = (referenceId: string) => {
+    const label = session.definition.references.find(
+      (entry) => entry.referenceId === referenceId,
+    )?.label;
+    return label === undefined ? "A reference" : `Reference ‘${label}’`;
+  };
   const referenceDiagnostics = mergedProjectedReferences.flatMap(
     (reference) => [
       ...reference.diagnostics,
@@ -117,7 +134,8 @@ export function updateSketchReferenceProjection(
             {
               code: `external-reference-${reference.status}`,
               severity: "warning" as const,
-              message: `Reference ${reference.referenceId} projection status: ${reference.status}.`,
+              // T17e (review A-7): by the reference's label, the status in words.
+              message: `${referenceName(reference.referenceId)} is not projected: ${PROJECTION_STATUS_TEXT[reference.status]}.`,
               target: null,
             },
           ]),

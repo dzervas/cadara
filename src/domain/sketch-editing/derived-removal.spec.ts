@@ -457,7 +457,10 @@ describe("T17c: downstream relationships are never touched; they become explicit
       errors.some(
         (entry) =>
           entry.code === OFFSET_DIAGNOSTIC_CODES.unsupportedSeed &&
-          entry.message.includes(offsetOfOffset.relationship.derivationId),
+          // T17e (B2): the offset by label, never by id.
+          entry.message.startsWith(
+            `Offset ‘${offsetOfOffset.relationship.label}’: `,
+          ),
       ),
       "the offset of the output reports its missing seed",
     ).toBe(true);
