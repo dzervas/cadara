@@ -26,8 +26,16 @@ const extension = JSON.parse(
 ) as {
   abi: string[];
   declarations: Record<string, string>;
+  returnStatus: {
+    abi: string[];
+    resolvedAbi: string[];
+    declaration: string;
+    instanceEntry: string;
+  };
 };
 const baseline = declarations
+  .replace(extension.returnStatus.declaration, "")
+  .replace("  " + extension.returnStatus.instanceEntry + "\n", "")
   .replace(
     /^[ \t]*export declare class MoniTool_TypedValue(?:_[12])?[^\n]*\{\n[\s\S]*?^\s*}/gm,
     "",
@@ -107,8 +115,8 @@ test("lifetime policy rejects enum and declaration-ownership drift", () => {
   }
 });
 
-test("unbuilt STEP status declarations remain rejected pending the next binary audit", () => {
-  // Header-derived prediction, not a golden artifact or approval of an unseen ABI.
+test("lifetime policy accepts the independently audited STEP status declarations", () => {
+  // Exact emitted declaration independently matched to the pinned native header.
   const anticipated =
     `export declare type IFSelect_ReturnStatus = {
   IFSelect_RetVoid: {};
@@ -122,10 +130,102 @@ test("unbuilt STEP status declarations remain rejected pending the next binary a
       "export type OpenCascadeInstance = {FS: typeof FS} & {\n  IFSelect_ReturnStatus: IFSelect_ReturnStatus;",
     );
   const result = checkDeclarations(anticipated);
-  expect(result.status).not.toBe(0);
-  expect(result.stderr).toContain(
-    "Existing declarations must equal the v8 reference",
+  expect(result.stderr).toBe("");
+  expect(result.status).toBe(0);
+});
+
+test("lifetime policy rejects altered or partial STEP status declarations", () => {
+  const status = extension.returnStatus;
+  const complete =
+    status.declaration +
+    "\n\n" +
+    extended.replace(
+      "export type OpenCascadeInstance = {FS: typeof FS} & {",
+      "export type OpenCascadeInstance = {FS: typeof FS} & {\n  " +
+        status.instanceEntry,
+    );
+  for (const changed of [
+    complete.replace("IFSelect_RetDone: {};", "IFSelect_RetDone: number;"),
+    complete.replace(status.declaration, ""),
+    complete.replace(status.instanceEntry, ""),
+    complete.replace("IsNull(): Standard_Boolean;", "IsNull(): void;"),
+  ]) {
+    expect(changed).not.toBe(complete);
+    expect(checkDeclarations(changed).status).not.toBe(0);
+  }
+});
+
+test("lifetime policy rejects wrong status values, metadata and partial return resolutions", () => {
+  const status = extension.returnStatus;
+  const complete = [...status.abi, ...status.resolvedAbi];
+  for (const changed of [
+    complete.map((line) =>
+      line.replace("IFSelect_RetDone=1", "IFSelect_RetDone=2"),
+    ),
+    complete.map((line) => line.replace("size=4 signed=0", "size=4 signed=1")),
+    complete.map((line) => line.replace("size=4 signed=0", "size=8 signed=0")),
+    complete.slice(1),
+    complete.slice(0, -1),
+    complete.map((line) => line.replace("emscripten::val) iiii", "bool) iiii")),
+  ]) {
+    expect(changed).not.toEqual(complete);
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `
+      import { assertLifetimeAbi } from "./scripts/occ/lifetime-abi-policy.mjs";
+      import { readFileSync } from "node:fs";
+      assertLifetimeAbi(JSON.parse(readFileSync(0, "utf8")));
+    `,
+      ],
+      { input: JSON.stringify(changed), encoding: "utf8" },
+    );
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      "STEP status registry must equal the approved enum and return resolutions",
+    );
+  }
+});
+
+test("native probe reporting names the failed guard and labels the expected trap PASS", () => {
+  // Execute the real reporting tail with explicit report cases, not a fake kernel.
+  const source = readFileSync(
+    "scripts/occ/native-lifetime-conformance.mjs",
+    "utf8",
   );
+  const reporting = source.slice(
+    source.lastIndexOf("console.log(JSON.stringify(result));"),
+  );
+  for (const errors of [0, 1]) {
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `
+      const cases = [
+        { name: "attribute-handle-after-document-is-unsafe-release-order", status: "pass" },
+        ...( ${errors} ? [{name: "registry-abi-and-declarations-approved-extension", status: "error", error: "Existing Embind registry ABI must equal the v8 reference"}] : []),
+      ];
+      const result = {cases, summary: {pass: 1, error: ${errors}}};
+      ${reporting}
+    `,
+      ],
+      { encoding: "utf8" },
+    );
+    expect(result.status).toBe(errors);
+    expect(JSON.parse(result.stdout).summary.error).toBe(errors);
+    expect(result.stderr).toContain(
+      "PASS attribute-handle-after-document-is-unsafe-release-order: expected unsafe-release memory access out of bounds",
+    );
+    if (errors)
+      expect(result.stderr).toContain(
+        "ERROR registry-abi-and-declarations-approved-extension: Existing Embind registry ABI must equal the v8 reference",
+      );
+    else expect(result.stderr).not.toContain("ERROR registry-");
+  }
 });
 
 test("production STEP recipe binds the return status shared by Transfer and Write", () => {

@@ -443,3 +443,63 @@ The meaningful reviewed source/docs change retains `browserless-cli`; integratio
 is left on a new empty working change above it. Workspaces, tracker, both ignored
 stages, fixture and assets remain for the parent/user handoff.
 
+## Compiled STEP status enum qualification (2026-10-12)
+
+The user returned the new `occ-step-status-rebuild` stage. Its historical
+**14 pass / 1 error** again identifies the strict registry/declaration policy,
+not the expected illegal-release child trap. Independent read-only auditing
+verified all 24 inputs, three artifacts and ten receipt checksums. The retained
+original/regenerated enum CPP files are byte-identical, SHA256
+`e133595a986bc38735cd4084a601ddecdb7ed4228a6d22c790a1ebdb1d57f58f`, matching
+the enum source receipt. All 151 earlier generated source records are unchanged.
+The pinned OCCT header and actual CPP bind exactly RetVoid/Done/Error/Fail/Stop
+with values 0/1/2/3/4. Emscripten 3.1.14's `enum_` registers native `sizeof` and
+underlying-type signedness; the measured compiled registration is size 4,
+unsigned. Its pinned LLVM enum selection chooses unsigned int for these
+nonnegative values, with 32-bit int and no short-enum compilation flag.
+
+The actual registry has exactly six additions (one enum and five values) and
+five existing return-type resolutions: Writer Transfer/Write, STEP controller
+TransferWriteShape, and XS controller TransferWriteShape/TransferWriteTransient.
+The approved Moni inventory remains exactly 58 entries. All other existing
+registrations, 480 class blocks, 12 enum blocks, instance entries and aliases
+are unchanged. Removing only the two approved extensions and reversing their
+explicit resolutions recovers the original v8 ABI and canonical declaration
+fingerprints above. `step-binding-extension.json` now pins this audited enum
+inventory alongside Moni, rather than accepting a new whole-build hash.
+Registry/declaration presence must agree independently for each extension;
+wrong enum metadata/values, changed signatures, partial extensions and unrelated
+drift still fail closed.
+
+Fresh repository probes against the immutable new stage pass **15/15 lifetime**
+and **13/13 native conformance** checks, including exact precision. The public
+lifetime probe preserves stdout JSON, result files and every native gate, and
+adds a stderr summary naming actual failed cases and explicitly labeling the
+expected unsafe-release trap PASS (safe order completes 20 iterations).
+
+**Native STEP output is now qualified at the production filesystem/export seam.**
+The unchanged sheet regression passes. Real sheets and solids exported through
+the shared filesystem loader and production STEP provider succeed for default
+AP242/mm and AP214/AP203 variants: native Transfer and Write return RetDone=1,
+nonempty ISO-10303-21 payloads contain the corresponding FILE_SCHEMA and mm
+SI_UNIT, and real files are read and removed. This is not an enum-presence-only
+claim. No provider fallback, new binding, native rebuild or split-owner repair
+was introduced. Both user stages and their historical results remain immutable.
+
+Reviewed `docs/testing.md`: updated **static** tests cover the exported policy
+and report contract; unchanged **logic** tests cover real production adapters.
+Qualification temporarily copies new assets only into the qualification
+workspace, then restores original assets. Asset/version promotion remains the
+parent's responsibility after review; this source-only change does not qualify
+a new checked-in stamp, close ticket 01, or resolve the separate split ownership
+blocker. Final targeted qualification passes **10 files / 114 tests**; restored-
+asset full static passes **22 files / 49 checks**. Exact changed-spec compilation
+with exclusions cleared is **0 baseline -> 0 final diagnostics**; typing and lint
+pass. Mandatory `test:all` with new assets and an owned isolated server times out
+at **300 seconds / exit 124** during logic after lint/build/spec typing pass;
+it reports a split-interface history failure, without a complete logic summary.
+Aggregate UI/static/E2E are not reached. No whole-suite/browser pass is inferred;
+the temporary new-assets static stamp failure is expected and the stamp remains
+unchanged. Both stages' manifests still verify and original public hashes are
+restored before handoff.
+

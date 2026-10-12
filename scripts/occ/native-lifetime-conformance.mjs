@@ -492,6 +492,11 @@ run("registry-abi-and-declarations-approved-extension", (out) => {
     (out.approvedAbiEntries === 0) === (out.approvedDeclarationClasses === 0),
     "Registry and declarations must agree on the approved STEP extension",
   );
+  assert(
+    (out.approvedReturnStatusAbiEntries === 0) ===
+      (out.approvedReturnStatusDeclarationEnums === 0),
+    "Registry and declarations must agree on the approved STEP status enum",
+  );
 });
 
 // Audited inventory: every binding returning T* yields a borrowed alias that must
@@ -1191,4 +1196,11 @@ if (process.argv[3]) {
   );
 }
 console.log(JSON.stringify(result));
+console.error(`Native lifetime checks: ${result.summary.pass} PASS, ${result.summary.error} ERROR`);
+for (const entry of cases) {
+  if (entry.status === "error")
+    console.error(`ERROR ${entry.name}: ${entry.error}`);
+  else if (entry.name === "attribute-handle-after-document-is-unsafe-release-order")
+    console.error(`PASS ${entry.name}: expected unsafe-release memory access out of bounds; safe order completed 20 iterations`);
+}
 if (result.summary.error) process.exitCode = 1;

@@ -2,8 +2,9 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 // Destructor-only repairs retain the original v8 ABI. The separately audited
-// STEP inheritance closure may add ONLY this explicit registration/declaration
-// inventory. Do not replace these baseline hashes with a new build's hashes.
+// STEP inheritance closure and return-status enum may add ONLY the independently
+// audited registration/declaration inventories below. Do not replace these
+// baseline hashes with a new build's hashes.
 export const EXPECTED_DTS_SHA256 =
   "e30f46eca4fa30d12b6ccb16281a86d2c439433e6c4de6a43eeef623c93a8443";
 export const EXPECTED_ABI_SHA256 =
@@ -38,8 +39,29 @@ export function assertLifetimeAbi(lines) {
       "STEP registry extension must resolve Interface_TypedValue's base",
     );
   }
+  // The pinned enum_<IFSelect_ReturnStatus> emits sizeof(EnumType) and native
+  // underlying-type signedness: actual 3.1.14/WASM registration is 4/unsigned.
+  const status = extension.returnStatus;
+  const enumAdded = lines.filter((line) =>
+    /^enum(?:Value)? IFSelect_ReturnStatus[ .]/.test(line),
+  );
+  if (enumAdded.length) {
+    assert(
+      JSON.stringify([...enumAdded].sort()) === JSON.stringify(status.abi) &&
+        status.resolvedAbi.every((line) => lines.includes(line)),
+      "STEP status registry must equal the approved enum and return resolutions",
+    );
+  }
   const baseline = lines
-    .filter((line) => !added.includes(line))
+    .filter((line) => !added.includes(line) && !enumAdded.includes(line))
+    .map((line) =>
+      enumAdded.length && status.resolvedAbi.includes(line)
+        ? line.replace(
+            "IFSelect_ReturnStatus,",
+            "?unbound:21IFSelect_ReturnStatus,",
+          )
+        : line,
+    )
     .map((line) =>
       added.length &&
       line === "class Interface_TypedValue base=MoniTool_TypedValue"
@@ -52,7 +74,11 @@ export function assertLifetimeAbi(lines) {
     baselineAbiSha256 === EXPECTED_ABI_SHA256,
     "Existing Embind registry ABI must equal the v8 reference",
   );
-  return { baselineAbiSha256, approvedAbiEntries: added.length };
+  return {
+    baselineAbiSha256,
+    approvedAbiEntries: added.length,
+    approvedReturnStatusAbiEntries: enumAdded.length,
+  };
 }
 
 export function assertLifetimeDeclarations(declarations) {
@@ -72,6 +98,15 @@ export function assertLifetimeDeclarations(declarations) {
       "STEP declarations must equal the approved MoniTool binding inventory",
     );
   }
+  const status = extension.returnStatus;
+  const enumAdded = classes.filter(
+    (match) => match[1] === "IFSelect_ReturnStatus",
+  );
+  assert(
+    enumAdded.length === 0 ||
+      (enumAdded.length === 1 && enumAdded[0][0].trim() === status.declaration),
+    "STEP status declaration must equal the approved enum inventory",
+  );
   let rest = declarations.replace(
     /^[ \t]*export declare (?:class|type) (\w+)[^\n]*\{\n[\s\S]*?^\s*}/gm,
     "",
@@ -94,16 +129,26 @@ export function assertLifetimeDeclarations(declarations) {
       ),
     "STEP instance entries must match the approved declarations",
   );
+  const enumEntries = entries.filter((line) =>
+    /^IFSelect_ReturnStatus:/.test(line),
+  );
+  assert(
+    JSON.stringify(enumEntries) ===
+      JSON.stringify(enumAdded.length ? [status.instanceEntry] : []),
+    "STEP status instance entry must match the approved enum declaration",
+  );
   rest = rest.replace(instance[0], "");
   const canonical =
     classes
-      .filter((match) => !added.includes(match))
+      .filter((match) => !added.includes(match) && !enumAdded.includes(match))
       .map((match) => match[0].trim())
       .sort()
       .join("\n\n") +
     "\n\n" +
     entries
-      .filter((line) => !addedEntries.includes(line))
+      .filter(
+        (line) => !addedEntries.includes(line) && !enumEntries.includes(line),
+      )
       .sort()
       .join("\n") +
     "\n\n" +
@@ -121,5 +166,6 @@ export function assertLifetimeDeclarations(declarations) {
   return {
     baselineDeclarationsSha256,
     approvedDeclarationClasses: added.length,
+    approvedReturnStatusDeclarationEnums: enumAdded.length,
   };
 }
