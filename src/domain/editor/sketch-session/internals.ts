@@ -60,7 +60,10 @@ import {
   reconstructSplineAggregate,
   tessellateCubicSpans,
 } from "@/contracts/sketch/spline-geometry";
-import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import {
+  describeDegenerateSplineSpan,
+  solveSketchDefinitionCore,
+} from "@/contracts/sketch/solver-core";
 import {
   correspondingMirrorDimensions,
   type MirrorDimensionCorrespondence,
@@ -531,8 +534,14 @@ export function withLiveSolveBasis(
   // snaps and edits elsewhere stay available) but blocks every profile of
   // the sketch at once, so the invalid sketch is explained like any other
   // (T16b: the sketch-wide profile gate).
+  // T17c3 (issue 08): a spline with a degenerate span (two consecutive fit
+  // points solved to the same place) blocks them the same way, as its
+  // authored validation error does when the definition is re-solved.
   const regionsAvailable =
-    accepted && sketchProfileGateFailures(usableSolvedSnapshot).length === 0;
+    accepted &&
+    sketchProfileGateFailures(usableSolvedSnapshot).length === 0 &&
+    getSketchDegenerateSplineSpans(evaluatedDefinition, usableSolvedSnapshot)
+      .length === 0;
   const generation = session.liveRegions.generation + 1;
   return {
     ...session,
@@ -563,6 +572,48 @@ export function withLiveSolveBasis(
           diagnostics: [LIVE_REGIONS_UNAVAILABLE_DIAGNOSTIC],
         },
   };
+}
+
+/**
+ * T17c3 (issue 08 :107): the splines of `definition` whose solved
+ * reconstruction has a zero-length span (two consecutive fit points at the
+ * same solved place), each with its first such span. The span stays
+ * authored; it is reported and blocks the sketch's profiles.
+ */
+export function getSketchDegenerateSplineSpans(
+  definition: SketchDefinition,
+  solvedSnapshot: SolvedSketchSnapshot,
+): readonly {
+  spline: Extract<SketchEntityDefinition, { kind: "spline" }>;
+  message: string;
+}[] {
+  const labels = new Map(
+    definition.points.map((point) => [point.pointId as string, point.label]),
+  );
+  return solvedSnapshot.solvedEntities.flatMap((solved) => {
+    const spanIndex =
+      solved.kind === "spline"
+        ? solved.reconstruction.diagnostics.find(
+            (diagnostic) => diagnostic.code === "coincident-points",
+          )?.spanIndex
+        : undefined;
+    const spline =
+      spanIndex === undefined
+        ? undefined
+        : definition.entities.find(
+            (entity) => entity.entityId === solved.entityId,
+          );
+    return spanIndex === undefined || spline?.kind !== "spline"
+      ? []
+      : [
+          {
+            spline,
+            message: describeDegenerateSplineSpan(spline, spanIndex, (id) =>
+              labels.get(id),
+            ),
+          },
+        ];
+  });
 }
 
 /**
@@ -1686,24 +1737,35 @@ export function describeSharedMirrorPath(
 /**
  * T13c (D7, review R-2): the one invalid-sketch feedback text: the conflict
  * explanation when requirements are unsatisfied, else the first non-info
- * diagnostic of the session's derived validity. Used after commits,
- * Undo/Redo, reopen (projection re-basing) and by the preview label, so
- * every path shows the same text for the same invalid state.
+ * diagnostic of the session's derived validity; T17c3: a degenerate spline
+ * span is named before a first diagnostic that is only a warning (the solve
+ * reports it as an error only when the authored definition is re-solved).
+ * Used after commits, Undo/Redo, reopen (projection re-basing) and by the
+ * preview label, so every path shows the same text for the same invalid
+ * state.
  */
 export function getSketchSessionInvalidFeedback(
   session: SketchSessionState,
   subjectIds: readonly string[] = [],
   commitCausedInvalidity = false,
 ): string | null {
+  const conflict = describeSketchSessionUnsatisfiedRequirements(
+    session,
+    subjectIds,
+    commitCausedInvalidity,
+  );
+  if (conflict) return conflict;
+  const first = getSketchSessionDerivedValidity(session).diagnostics.find(
+    (diagnostic) => diagnostic.severity !== "info",
+  );
+  const live = session.liveSolve;
   return (
-    describeSketchSessionUnsatisfiedRequirements(
-      session,
-      subjectIds,
-      commitCausedInvalidity,
-    ) ??
-    getSketchSessionDerivedValidity(session).diagnostics.find(
-      (diagnostic) => diagnostic.severity !== "info",
-    )?.message ??
+    (first?.severity === "error" ? first.message : undefined) ??
+    (live
+      ? getSketchDegenerateSplineSpans(live.definition, live.solvedSnapshot)[0]
+          ?.message
+      : undefined) ??
+    first?.message ??
     null
   );
 }
