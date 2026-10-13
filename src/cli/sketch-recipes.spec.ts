@@ -4,8 +4,101 @@ import { promisify } from "node:util";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
+import type { SemanticResult } from "@/contracts/semantic/schema";
 const exec = promisify(execFile);
 const root = resolve(import.meta.dirname, "../..");
+
+it("runs both documented command families and opens a native file over a private draft", async () => {
+  const directory = await mkdtemp(resolve(tmpdir(), "cadara-combined-recipe-"));
+  try {
+    const help = await exec(
+      "bun",
+      ["src/cli/main.ts", "document", "recipe", "--help"],
+      { cwd: root },
+    );
+    const recipe = JSON.parse(help.stdout.slice(help.stdout.indexOf("{")));
+    const path = resolve(directory, "part.cadara");
+    for (const operation of recipe.operations) {
+      if ("path" in operation) operation.path = path;
+    }
+    recipe.operations.push(
+      {
+        version: 1,
+        commandId: "begin-before-open",
+        operation: "sketch.begin",
+        basis: { alias: "opened" },
+        plane: "xy",
+        as: "private-before-open",
+      },
+      {
+        version: 1,
+        commandId: "open-over-private",
+        operation: "document.open",
+        path,
+        basis: null,
+        as: "reopened",
+      },
+      {
+        version: 1,
+        commandId: "inspect-reopened",
+        operation: "document.inspect",
+        basis: { alias: "reopened" },
+      },
+    );
+    const file = resolve(directory, "recipe.json");
+    await writeFile(file, JSON.stringify(recipe));
+    const output = await exec(
+      "bun",
+      ["src/cli/main.ts", "document", "recipe", file],
+      { cwd: root, timeout: 90000 },
+    );
+    const result: {
+      results: SemanticResult[];
+      unexecuted: string[];
+      cleanup: { kind: string };
+    } = JSON.parse(output.stdout);
+    expect(result.results.map((r) => r.correlation.family)).toEqual([
+      "document",
+      "sketch-open",
+      "sketch-author",
+      "sketch-publish",
+      "document",
+      "file-save",
+      "file-open",
+      "document",
+      "sketch-open",
+      "file-open",
+      "document",
+    ]);
+    expect(result.results.map((r) => r.outcome.kind)).toEqual(
+      Array(11).fill("completed"),
+    );
+    expect(
+      result.results[2]!.discovery!.sketch!.points.map((p) => p.position),
+    ).toEqual([
+      [0, 0],
+      [20, 0],
+      [20, 10],
+      [0, 10],
+    ]);
+    expect(result.results[8]!.discovery!.state.draft).not.toBeNull();
+    expect(result.results[9]!.completion.persistence.kind).toBe("committed");
+    expect(result.results[9]!.completion.handoff.kind).toBe("current");
+    expect(result.results[10]!.discovery!.state).toMatchObject({
+      editingContext: { kind: "document" },
+      draft: null,
+    });
+    expect(
+      result.results[10]!.discovery!.references.filter(
+        (r) => r.target.kind === "sketch",
+      ),
+    ).toHaveLength(1);
+    expect(result.unexecuted).toEqual([]);
+    expect(result.cleanup.kind).toBe("closed");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 120000);
 
 it("runs private rectangle authoring and publication with client-only basis and draft aliases", async () => {
   const directory = await mkdtemp(resolve(tmpdir(), "cadara-sketch-recipe-"));
