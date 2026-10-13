@@ -108,6 +108,18 @@ Publication is one document action. Failed persistence can still have applied
 live state, and is reported separately. Fresh file opening resets both owners;
 saving does not persist process-private history for another invocation.
 
+### STEP export
+
+`export.step` takes the current `basis`, a discovered `target`, an output `path`,
+and `options: { schema: "AP242" | "AP214" | "AP203", unit: "millimeter" }`.
+Only existing STEP-provider body targets are supported. A recipe may select an
+exact unique body label with `{ "alias": "solid", "label": "<discovered body label>" }`;
+feature labels are not body labels. Re-discover after editing; stale bases,
+missing targets, unsupported target kinds and invalid options are refused.
+Completion includes the provider result and the actual file write/sync/close.
+Export does not mutate authored state or invent a repository commit receipt.
+Failed writes retain the observed byte count independently of valid geometry.
+
 ## `onshape capture`
 
 Capture an Onshape document into a single self-contained, versioned bundle file

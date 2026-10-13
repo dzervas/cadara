@@ -15,8 +15,9 @@ import { semanticCommandCorrelation } from "@/contracts/semantic/correlation";
 type Alias = { alias: string };
 type TargetAlias = Alias & { label: string };
 type RecipeCommand<T = SemanticCommand> = T extends SemanticCommand
-  ? Omit<T, "basis" | "draft" | "points" | "dimensionId" | "profile" | "featureId" | "sketchId"> &
+  ? Omit<T, "basis" | "draft" | "points" | "dimensionId" | "profile" | "featureId" | "sketchId" | "target"> &
     (T extends { profile: infer P } ? { profile: P | TargetAlias } : unknown) &
+    (T extends { target: infer R } ? { target: R | TargetAlias } : unknown) &
     (T extends { featureId: infer F } ? { featureId: F | TargetAlias } : unknown) &
     (T extends { sketchId: infer S } ? { sketchId: S | TargetAlias } : unknown) &
     (T extends { points: infer P } ? { points: P | readonly [TargetAlias, TargetAlias] } : unknown) &
@@ -177,6 +178,10 @@ function parseRecipe(input: unknown): RecipeOperation[] {
       validateTarget(command.profile, "region_validation");
       validationCommand.profile = { kind: "region", sketchId: "sketch_validation", regionId: "region_validation" };
     }
+    if (isAlias(command.target)) {
+      validateTarget(command.target, "body_validation");
+      validationCommand.target = { kind: "body", bodyId: "body_validation" };
+    }
     if (!validateSemanticCommand(validationCommand).success)
       throw new Error("Invalid semantic operation.");
     if (typeof alias === "string") aliases.add(alias);
@@ -261,6 +266,12 @@ export const documentRecipesCommand: CommandModule = {
           const matches = [...(sketch?.requirements ?? []), ...(sketch?.measurements ?? [])].filter(d => d.label === target.label);
           if (matches.length !== 1) throw new Error("Dimension target alias is missing or ambiguous.");
           command.dimensionId = matches[0]!.dimensionId;
+        }
+        if (command.operation === "export.step" && isAlias(command.target)) {
+          const target = command.target;
+          const matches = aliases.get(target.alias)?.references.filter(r => r.label === target.label && r.target.kind === "body") ?? [];
+          if (matches.length !== 1) throw new Error("Export body target alias is missing or ambiguous.");
+          command.target = matches[0]!.target;
         }
         if (command.operation === "extrude.create" && isAlias(command.profile)) {
           const target = command.profile;
