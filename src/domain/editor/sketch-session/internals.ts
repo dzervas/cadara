@@ -55,6 +55,7 @@ import {
   type SketchPointDefinition,
   type SolvedSketchSnapshot,
   SKETCH_SCHEMA_VERSION,
+  SOLVED_SKETCH_SCHEMA_VERSION,
 } from "@/contracts/sketch/schema";
 import {
   reconstructSplineAggregate,
@@ -826,8 +827,27 @@ export function getSketchSessionSolvedSnapshot(
 }
 
 /**
+ * T17g3 (G1, review G-1): the solve of a session that is not solved yet (the
+ * opened session, before the entry establishes its live solve): not
+ * evaluated, with no solved geometry and no statuses, so it certifies no
+ * offset and fails no relationship. Readers draw the authored geometry and
+ * claim nothing current from it.
+ */
+export const SKETCH_NOT_SOLVED_YET: SolvedSketchSnapshot = {
+  schemaVersion: SOLVED_SKETCH_SCHEMA_VERSION,
+  status: { solveState: "notEvaluated", constraintState: "unknown" },
+  solvedEntities: [],
+  solvedPoints: [],
+  constraintStatuses: [],
+  dimensionStatuses: [],
+  diagnostics: [],
+};
+
+/**
  * Display validity of the session's live regions: pending is stale; not
  * accepted, unavailable or failed is invalid. Never a consumption gate.
+ * T17g3 (G1): without a live solve (an opened session, review G-1) nothing
+ * is judged yet, so it is stale, never current.
  */
 export function getSketchSessionDerivedValidity(
   session: SketchSessionState,
@@ -837,27 +857,19 @@ export function getSketchSessionDerivedValidity(
     liveRegions.diagnostics,
     getLiveRegionBoundaryDiagnostics(liveRegions),
   );
+  if (!liveSolve) return { state: "stale", diagnostics: regionDiagnostics };
   if (liveRegions.status === "current") {
     return withRelationshipScopedDiagnostics(
-      liveSolve
-        ? deriveSketchValidity({
-            solvedSnapshot: liveSolve.solvedSnapshot,
-            diagnostics: regionDiagnostics,
-          })
-        : {
-            state: regionDiagnostics.some(
-              (diagnostic) => diagnostic.severity === "error",
-            )
-              ? "invalid"
-              : "current",
-            diagnostics: regionDiagnostics,
-          },
+      deriveSketchValidity({
+        solvedSnapshot: liveSolve.solvedSnapshot,
+        diagnostics: regionDiagnostics,
+      }),
       session.offsetPublicationDiagnostics ?? [],
     );
   }
 
   const diagnostics = mergeSketchSolveDiagnostics(
-    liveSolve?.solvedSnapshot.diagnostics ?? [],
+    liveSolve.solvedSnapshot.diagnostics,
     regionDiagnostics,
   );
   return liveRegions.status === "pending"

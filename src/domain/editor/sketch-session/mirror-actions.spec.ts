@@ -524,13 +524,39 @@ describe("T16b: the Mirror panel's health agrees with the profile gate", () => {
     ]);
   });
 
-  test("before the first live solve (re-entry) the owner's evaluation gives the broken set", () => {
+  // T17g3 (review G-4): re-entry goes through the production entry, which
+  // establishes the live solve at once (T11a); the opened (raw) session has
+  // none.
+  test("on re-entry the entry's live solve gives the broken set, with the owner's reason", () => {
     const { session, relationship } = mirroredSession("free");
-    const reentered = { ...without(session, [eid("axis")]), liveSolve: null };
+    const reentered = enterSketchSession({
+      ...without(session, [eid("axis")]),
+      liveSolve: null,
+    });
     expect(listed(reentered, [])).toEqual([
       [relationship.label, "mirror line missing"],
     ]);
-    expect(listed({ ...session, liveSolve: null }, []), "control").toBeNull();
+    expect(
+      listed(enterSketchSession({ ...session, liveSolve: null }), []),
+      "control",
+    ).toBeNull();
+  });
+
+  test("T17g3: an opened session not solved yet lists nothing (mirror health is not known yet)", () => {
+    const { session, relationship } = mirroredSession("free");
+    const opened = { ...without(session, [eid("axis")]), liveSolve: null };
+    expect(
+      listed(enterSketchSession(opened), []),
+      "control: entered, the mirror is listed broken",
+    ).toEqual([[relationship.label, "mirror line missing"]]);
+    expect(listed(opened, [])).toBeNull();
+    const seed = entityRef(session, eid("ab"));
+    const healthy = { ...session, liveSolve: null };
+    expect(
+      listed(enterSketchSession(healthy), [seed]),
+      "control: entered, the selected seed's mirror is listed healthy",
+    ).toEqual([[relationship.label, null]]);
+    expect(listed(healthy, [seed])).toBeNull();
   });
 
   test("a mirror seeded on an offset spline curve (U-G2, malformed only, gated by severity) is listed as broken with its reason", () => {

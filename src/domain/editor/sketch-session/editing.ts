@@ -120,6 +120,7 @@ import {
   getSketchSessionPreviewBasis,
   parseOperationParameter,
   resolveSketchDefinitionForSolve,
+  SKETCH_NOT_SOLVED_YET,
 } from "./internals";
 import { updateReferenceImageOperationStates } from "./references";
 import {
@@ -199,9 +200,12 @@ export const FAILED_DERIVED_EDIT_INPUT_CODE = "edit-input-derived-failed";
  *   input is not usable yet, the message says it is being checked, and the
  *   tool is re-evaluated when the round completes
  *   (`refreshSketchEditToolAfterOffsetRound`).
+ * - also `pending` before the session has a live solve (T17g3: an opened
+ *   session, review G-1): nothing is decided yet, so no offset output is
+ *   accepted and the input is still being checked.
  * - otherwise it is decided: `edit-input-offset-not-certified`, with the
- *   G19a snapshot rule (no `certifiedOffsetDerivationIds`, or no live
- *   solve, accepts no offset output).
+ *   G19a snapshot rule (no `certifiedOffsetDerivationIds` accepts no offset
+ *   output).
  * A derived offset shell is skipped: it is never an edit input (U-G2), and
  * each edit refuses it with that permanent message.
  * T16c ([TECH] T16-7): an input held by a broken relationship (owner
@@ -216,9 +220,10 @@ export function offsetEditInputGate(
   use: string,
 ): { readonly pending: boolean; readonly message: string } | null {
   if (entityIds.length === 0) return null;
+  const { liveSolve } = session;
   const nonAccepted = nonAcceptedDerivedOutputs(
     session.definition,
-    session.liveSolve?.solvedSnapshot ?? { solvedEntities: [] },
+    liveSolve?.solvedSnapshot ?? SKETCH_NOT_SOLVED_YET,
   );
   const shells = new Set(
     session.definition.entities.flatMap((entity) =>
@@ -226,7 +231,7 @@ export function offsetEditInputGate(
     ),
   );
   const pending =
-    session.liveSolve !== null && session.liveRegions.status === "pending";
+    liveSolve === null || session.liveRegions.status === "pending";
   for (const entityId of entityIds) {
     const owner = nonAccepted.get(entityId);
     if (!owner || shells.has(entityId)) continue;

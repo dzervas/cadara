@@ -11,8 +11,8 @@
  * T16b (T16a review A-1): which mirrors are broken comes from the live
  * solve's sketch-wide profile gate (`sketchProfileGateFailures`), so the
  * panel and the profile gate agree; the owner's evaluation of the session
- * definition gives only the reason text, and the broken set when there is
- * no live solve yet (re-entry before the first solve). A mirror seeded on
+ * definition gives only the reason text. Without a live solve (an opened
+ * session, T17g3) nothing is listed. A mirror seeded on
  * an offset spline curve (U-G2, malformed data only) is not in the gate
  * (its diagnostic gates the sketch by severity) and is listed as broken too.
  */
@@ -83,8 +83,9 @@ export interface SketchMirrorActionState {
 /**
  * The Mirror panel state: participants of the selection first (definition
  * order), then every other broken mirror. Null when there is nothing to
- * list, or while a drag, a tool, a special mode or an annotation edit owns
- * the panel slot.
+ * list, while a drag, a tool, a special mode or an annotation edit owns
+ * the panel slot, or before the session's live solve (T17g3: mirror health
+ * is not known yet, so nothing is listed as healthy or broken).
  */
 export function computeSketchMirrorActionState(
   session: SketchSessionState,
@@ -104,6 +105,9 @@ export function computeSketchMirrorActionState(
   );
   if (mirrors.length === 0) return null;
 
+  const liveSnapshot = session.liveSolve?.solvedSnapshot;
+  if (!liveSnapshot) return null;
+
   const participantIds = selectedMirrorIds(session, selection);
   // The owner's evaluation, through the evaluation seam the solve uses
   // (one failure per relationship, unresolved order included).
@@ -115,14 +119,11 @@ export function computeSketchMirrorActionState(
       failure.reason,
     ]),
   );
-  const liveSnapshot = session.liveSolve?.solvedSnapshot;
-  const broken = new Set(
-    liveSnapshot ? sketchProfileGateFailures(liveSnapshot) : reasons.keys(),
-  );
+  const broken = new Set(sketchProfileGateFailures(liveSnapshot));
   // The live solve failed a mirror the authored positions do not (it failed
   // during the solve, e.g. a dimension shrank its axis below τ): its reason
   // is the owner's at the solved positions.
-  if (liveSnapshot && [...broken].some((id) => !reasons.has(id))) {
+  if ([...broken].some((id) => !reasons.has(id))) {
     const solved = new Map(
       liveSnapshot.solvedPoints.map((point) => [
         point.pointId,
