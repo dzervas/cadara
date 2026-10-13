@@ -1087,6 +1087,21 @@ export function toggleSketchConstructionTarget(
     return session;
   }
 
+  return setSketchConstructionTarget(session, target);
+}
+
+/** Shared explicit construction edit; omitting the value is the browser toggle. */
+export function setSketchConstructionTarget(
+  session: SketchSessionState,
+  target: PrimitiveRef,
+  construction?: boolean,
+): SketchSessionState {
+  if ((target.kind !== "sketchEntity" && target.kind !== "sketchPoint") || target.sketchId !== getSessionSketchId(session)) return session;
+  const selected = target.kind === "sketchEntity"
+    ? session.definition.entities.find(e => e.entityId === target.entityId)
+    : session.definition.points.find(p => p.pointId === target.pointId);
+  if (!selected) return session;
+  if (selected.isConstruction === construction) return { ...session, validationMessage: null };
   const nextFullDefinition = toggleConstructionTargetInDefinition(
     session.definition,
     target,

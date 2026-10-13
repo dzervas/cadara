@@ -13,6 +13,7 @@ import {
   semanticDiagnostic,
 } from "@/application/semantic/session";
 import {
+  getSessionSketchId,
   getSketchSessionDerivedValidity,
   hasAcceptedLiveSolveOfDefinition,
   getLiveRegionBoundaryDiagnostics,
@@ -27,6 +28,19 @@ import { sketchProfileGateFailures } from "@/contracts/sketch/derived-validity";
 
 import { isReferenceDimension } from "@/contracts/sketch/schema";
 import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
+import { getEntityPointIds } from "@/domain/sketch-editing/definition-references";
+
+function entityDiscovery(definition: import("@/contracts/sketch/schema").SketchDefinition): NonNullable<SemanticDiscovery["sketch"]>["entities"] {
+  return definition.entities.map(e => ({
+    entityId: e.entityId, kind: e.kind, pointIds: getEntityPointIds(e), construction: e.isConstruction,
+    ...(e.kind === "circle" ? { radius: e.radius } : e.kind === "arc" ? { radius: (() => {
+      const center = definition.points.find(p => p.pointId === e.centerPointId)!.position;
+      const start = definition.points.find(p => p.pointId === e.startPointId)!.position;
+      return Math.hypot(start[0] - center[0], start[1] - center[1]);
+    })() } : {}),
+    ...(e.kind === "spline" ? { tangents: e.pointOccurrences.map(o => ({ occurrenceId: o.occurrenceId, pointId: o.pointId, vector: o.tangent.kind === "authored" ? o.tangent.vector : null })) } : {}),
+  }));
+}
 
 function dimensionDiscovery(
   definition: import("@/contracts/sketch/schema").SketchDefinition,
@@ -86,7 +100,15 @@ export function createSemanticSketchPort(input: {
     return {
       ...base,
       state,
-      references: [...base.references.filter(r => !(r.target.kind === "sketchPoint" && r.target.sketchId === (s.sketchId ?? s.actionContextId))), ...s.definition.points.map(p => ({ label: p.label, target: { kind: "sketchPoint" as const, sketchId: s.sketchId ?? s.actionContextId, pointId: p.pointId } }))],
+      references: [
+        ...base.references.filter(r => !("sketchId" in r.target && r.target.sketchId === (s.sketchId ?? s.actionContextId))),
+        { label: s.sketchLabel, target: { kind: "sketch", sketchId: s.sketchId ?? s.actionContextId } },
+        ...s.definition.points.map(p => ({ label: p.label, target: { kind: "sketchPoint" as const, sketchId: s.sketchId ?? s.actionContextId, pointId: p.pointId } })),
+        ...s.definition.entities.map(e => ({ label: e.label, target: { kind: "sketchEntity" as const, sketchId: s.sketchId ?? s.actionContextId, entityId: e.entityId } })),
+        ...s.definition.dimensions.map(d => ({ label: d.label, target: { kind: "dimension" as const, sketchId: s.sketchId ?? s.actionContextId, dimensionId: d.dimensionId } })),
+        ...s.definition.constraints.map(c => ({ label: c.label, target: { kind: "constraint" as const, sketchId: s.sketchId ?? s.actionContextId, constraintId: c.constraintId } })),
+        ...(usable ? s.liveRegions.regions.filter(r => r.isClosed).map(r => ({ label: r.label, target: { kind: "region" as const, sketchId: s.sketchId ?? s.actionContextId, regionId: r.regionId } })) : []),
+      ],
       history: {
         canUndo: s.actionAvailability?.canUndo ?? false,
         canRedo: s.actionAvailability?.canRedo ?? false,
@@ -106,29 +128,7 @@ export function createSemanticSketchPort(input: {
           position: p.position,
           construction: p.isConstruction,
         })),
-        entities: s.definition.entities.flatMap<
-          NonNullable<SemanticDiscovery["sketch"]>["entities"][number]
-        >((e) =>
-          e.kind === "point"
-            ? [
-                {
-                  entityId: e.entityId,
-                  kind: e.kind,
-                  pointIds: [e.pointId],
-                  construction: e.isConstruction,
-                },
-              ]
-            : e.kind === "lineSegment"
-              ? [
-                  {
-                    entityId: e.entityId,
-                    kind: e.kind,
-                    pointIds: [e.startPointId, e.endPointId],
-                    construction: e.isConstruction,
-                  },
-                ]
-              : [],
-        ),
+        entities: entityDiscovery(s.definition),
         profiles: usable
           ? s.liveRegions.regions
               .filter((r) => r.isClosed)
@@ -216,6 +216,15 @@ export function createSemanticSketchPort(input: {
       };
     if (command.operation === "sketch.open" && !initial.references.some(r => r.target.kind === "sketch" && r.target.sketchId === command.sketchId))
       return { ...terminal, outcome: { kind: "rejected", reasonCode: "sketch-unavailable" } };
+    const geometryMutation = command.operation === "sketch.construction.set" || command.operation === "sketch.geometry.update" || command.operation === "sketch.geometry.delete" || command.operation === "sketch.label.set";
+    if (geometryMutation) {
+      if (editor.kind !== "editingSketch") throw new Error("Missing private sketch owner.");
+      const s = editor.session;
+      const targets = command.operation === "sketch.geometry.update" ? [command.edit.target] : command.operation === "sketch.geometry.delete" ? command.targets : [command.target];
+      const valid = targets.length > 0 && targets.every(t => t.sketchId === (s.sketchId ?? s.actionContextId) && (t.kind === "sketch" || (t.kind === "sketchPoint" ? s.definition.points.some(p => p.pointId === t.pointId) : t.kind === "dimension" ? s.definition.dimensions.some(d => d.dimensionId === t.dimensionId) : t.kind === "constraint" ? s.definition.constraints.some(c => c.constraintId === t.constraintId) : s.definition.entities.some(e => e.entityId === t.entityId))));
+      if (!valid) return { ...terminal, outcome: { kind: "rejected", reasonCode: "sketch-target-unavailable" } };
+      if (command.operation === "sketch.label.set" && !command.label.trim()) return { ...terminal, outcome: { kind: "rejected", reasonCode: "invalid-label" } };
+    }
     if (command.operation === "sketch.author") {
       const p = command.primitive;
       const start = p.kind === "point" ? p.position : p.start;
@@ -269,6 +278,9 @@ export function createSemanticSketchPort(input: {
       if (command.actionSequence === undefined ? !entries.length : !entries.some(e => e.sequence === command.actionSequence))
         return { ...terminal, outcome: { kind: "unavailable", capability: command.operation } };
     }
+    // Public draft references name the owned action context. Existing editor
+    // definitions still use their internal draft identity until publication.
+    const editorTarget = <T extends { sketchId: import("@/contracts/shared/ids").SketchId }>(target: T): T => ({ ...target, sketchId: editor.kind === "editingSketch" ? getSessionSketchId(editor.session) : target.sketchId });
     const priorGeometry = geometry(initial.state);
     let events: readonly EditorEvent[] = [];
     let publicationReceipt:
@@ -290,6 +302,17 @@ export function createSemanticSketchPort(input: {
           type: "sketch.beginRequested",
           target: { kind: "sketch", sketchId: command.sketchId },
         });
+      if (command.operation === "sketch.geometry.update") {
+        const edit = { ...command.edit };
+        edit.target = editorTarget(edit.target);
+        events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.geometryUpdated", edit });
+      }
+      if (command.operation === "sketch.geometry.delete")
+        events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.geometryDeleted", targets: command.targets.map(editorTarget) });
+      if (command.operation === "sketch.label.set")
+        events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.labelSet", target: editorTarget(command.target), label: command.label });
+      if (command.operation === "sketch.construction.set")
+        events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.constructionSet", target: editorTarget(command.target), construction: command.construction });
       if (command.operation === "sketch.author")
         events = await input.loop.dispatchAndSettle(command.commandId, {
           type: "sketch.primitiveAuthored",
@@ -344,6 +367,10 @@ export function createSemanticSketchPort(input: {
         const blocked = command.actionSequence === undefined ? entries.at(-1) : entries.find(e => e.sequence === command.actionSequence);
         if (blocked?.blockedReason)
           return { ...terminal, outcome: { kind: "conflicted", actualBasis: initial.state }, diagnostics: [...terminal.diagnostics, semanticDiagnostic(new Error(blocked.blockedReason))] };
+      }
+      if (geometryMutation && editor.kind === "editingSketch" && finalEditor.kind === "editingSketch" && finalEditor.session.definition === editor.session.definition && finalEditor.session.sketchLabel === editor.session.sketchLabel) {
+        if (finalEditor.session.validationMessage) return { ...terminal, outcome: { kind: "rejected", reasonCode: "sketch-edit-refused" }, diagnostics: [semanticDiagnostic(new Error(finalEditor.session.validationMessage))] };
+        return { ...terminal, outcome: priorGeometry.kind === "current" ? { kind: "completed", change: "unchanged" } : { kind: "failed", failures: ["geometry"] }, discovery: initial, completion: { ...terminal.completion, handoff: { kind: "current", state: initial.state }, geometry: priorGeometry } };
       }
       const ownedSnapshot = finalEditor.snapshot;
       const ownedState: SemanticState = {
@@ -554,29 +581,7 @@ export function createSemanticSketchPort(input: {
               position: p.position,
               construction: p.isConstruction,
             })),
-            entities: sketch.definition.entities.flatMap<
-              NonNullable<SemanticDiscovery["sketch"]>["entities"][number]
-            >((e) =>
-              e.kind === "point"
-                ? [
-                    {
-                      entityId: e.entityId,
-                      kind: e.kind,
-                      pointIds: [e.pointId],
-                      construction: e.isConstruction,
-                    },
-                  ]
-                : e.kind === "lineSegment"
-                  ? [
-                      {
-                        entityId: e.entityId,
-                        kind: e.kind,
-                        pointIds: [e.startPointId, e.endPointId],
-                        construction: e.isConstruction,
-                      },
-                    ]
-                  : [],
-            ),
+            entities: entityDiscovery(sketch.definition),
             profiles: usable
               ? sketch.regions
                   .filter((r) => r.isClosed)

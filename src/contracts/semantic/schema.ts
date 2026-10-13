@@ -40,6 +40,15 @@ export type SemanticDimensionInput = {
   points: readonly [SketchPointId, SketchPointId];
 } & ({ mode: "driving"; value: number } | { mode: "reference" });
 
+export type SemanticSketchGeometryTarget = Extract<DurableRef, { kind: "sketchPoint" | "sketchEntity" }>;
+export type SemanticSketchLabelTarget = Extract<DurableRef, { kind: "sketchPoint" | "sketchEntity" | "dimension" | "constraint" | "sketch" }>;
+/** Explicit geometry intents reuse the existing constrained edit solver, not pointer choreography. */
+export type SemanticSketchGeometryEdit =
+  | { kind: "point"; target: Extract<DurableRef, { kind: "sketchPoint" }>; position: SketchPoint }
+  | { kind: "translate"; target: Extract<DurableRef, { kind: "sketchEntity" }>; delta: SketchPoint }
+  | { kind: "radius"; target: Extract<DurableRef, { kind: "sketchEntity" }>; radius: number }
+  | { kind: "tangent"; target: import("@/contracts/shared/references").SketchTangentHandleRef; vector: SketchPoint };
+
 export interface SemanticDraftBasis {
   commandSessionId: CommandSessionId;
   generation: number;
@@ -58,6 +67,10 @@ export type SemanticSketchCommand = CommandIdentity & {
       }
     | ({ operation: "sketch.dimension.add"; draft: SemanticDraftBasis; intent: "fulfill" | "author-invalid" } & SemanticDimensionInput)
     | { operation: "sketch.dimension.update"; draft: SemanticDraftBasis; dimensionId: import("@/contracts/shared/ids").DimensionId; value: number; intent: "fulfill" | "author-invalid" }
+    | { operation: "sketch.construction.set"; draft: SemanticDraftBasis; target: Extract<DurableRef, { kind: "sketchPoint" | "sketchEntity" }>; construction: boolean; intent: "fulfill" | "author-invalid" }
+    | { operation: "sketch.geometry.update"; draft: SemanticDraftBasis; edit: SemanticSketchGeometryEdit; intent: "fulfill" | "author-invalid" }
+    | { operation: "sketch.geometry.delete"; draft: SemanticDraftBasis; targets: readonly SemanticSketchGeometryTarget[]; intent: "fulfill" | "author-invalid" }
+    | { operation: "sketch.label.set"; draft: SemanticDraftBasis; target: SemanticSketchLabelTarget; label: string; intent: "fulfill" | "author-invalid" }
     | { operation: "sketch.inspect"; draft: SemanticDraftBasis }
     | {
         operation: "sketch.publish";
@@ -258,9 +271,11 @@ export interface SemanticDiscovery {
     }[];
     entities: readonly {
       entityId: SketchEntityId;
-      kind: "point" | "lineSegment";
+      kind: import("@/contracts/sketch/schema").SketchEntityDefinition["kind"];
       pointIds: readonly SketchPointId[];
       construction: boolean;
+      radius?: number;
+      tangents?: readonly { occurrenceId: string; pointId: SketchPointId; vector: SketchPoint | null }[];
     }[];
     requirements: readonly {
       dimensionId: import("@/contracts/shared/ids").DimensionId;

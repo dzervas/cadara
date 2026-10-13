@@ -3109,7 +3109,7 @@ export function beginSketchGeometryDrag(
   // recompiles the session. Cancel restores the original definition.
   let workingDefinition = base.definition;
   if (intent.kind === "tangentVector" && handle.kind === "tangentHandle") {
-    const converted = convertAutomaticTangentToAuthored(
+    const converted = prepareSketchTangentEditDefinition(
       workingDefinition,
       intent.entityId,
       intent.occurrenceId,
@@ -3144,7 +3144,7 @@ export function beginSketchGeometryDrag(
  * the output occurrence authored to match. The drag then targets the
  * output's (driven) vector slot through the coupled solve.
  */
-function convertAutomaticTangentToAuthored(
+export function prepareSketchTangentEditDefinition(
   definition: SketchDefinition,
   entityId: SketchEntityId,
   occurrenceId: string,
@@ -3680,6 +3680,15 @@ export function solveDragEdit(
   interactiveSolveSession: SketchCompiledSolveSession | null = null,
   complete = true,
 ): SolveDragEditResult {
+  if (intent.kind === "radius") {
+    const arc = definition.entities.find(e => e.entityId === intent.entityId && e.kind === "arc");
+    const mirrored = definition.derivedRelationships?.some(r => r.kind === "mirror" && r.outputs.some(o => o.outputEntityId === intent.entityId));
+    // Production arc tools bind endpoints; mirror outputs are coupled through
+    // their owning relationship instead. Unbound native inputs would otherwise
+    // leave authored endpoints untouched while reporting a completed radius edit.
+    if (arc?.kind === "arc" && !mirrored && (!definition.dimensions.some(d => d.kind === "arcStartPointCoincident" && d.entityId === arc.entityId && d.pointId === arc.startPointId) || !definition.dimensions.some(d => d.kind === "arcEndPointCoincident" && d.entityId === arc.entityId && d.pointId === arc.endPointId)))
+      return { kind: "blocked", message: "Arc radius editing requires endpoint bindings." };
+  }
   // Unconstrained fast path: no constraints, dimensions or mirrors (T15d:
   // a mirror drag always solves).
   if (usesUnconstrainedDragFastPath(definition)) {
@@ -4032,8 +4041,7 @@ function applyUnconstrainedDrag(
             if (e.entityId !== intent.entityId) return e;
             if (e.kind === "circle")
               return { ...e, radius: Math.max(1e-9, dragTarget.targetRadius) };
-            // Arcs: the unconstrained path does not modify arc radius
-            // (it's derived from center+endpoints). The solver handles it.
+            // Unsupported non-circle radius targets are not changed.
             return e;
           }),
         },

@@ -14,8 +14,11 @@ import { semanticCommandCorrelation } from "@/contracts/semantic/correlation";
 
 type Alias = { alias: string };
 type TargetAlias = Alias & { label: string };
+type RecipeGeometryEdit<T = import("@/contracts/semantic/schema").SemanticSketchGeometryEdit> = T extends { target: infer R } ? Omit<T, "target"> & { target: R | TargetAlias } : never;
 type RecipeCommand<T = SemanticCommand> = T extends SemanticCommand
-  ? Omit<T, "basis" | "draft" | "points" | "dimensionId" | "profile" | "featureId" | "sketchId" | "target"> &
+  ? Omit<T, "basis" | "draft" | "points" | "dimensionId" | "profile" | "featureId" | "sketchId" | "target" | "targets" | "edit"> &
+    (T extends { edit: unknown } ? { edit: RecipeGeometryEdit } : unknown) &
+    (T extends { targets: infer R extends readonly unknown[] } ? { targets: readonly (R[number] | TargetAlias)[] } : unknown) &
     (T extends { profile: infer P } ? { profile: P | TargetAlias } : unknown) &
     (T extends { target: infer R } ? { target: R | TargetAlias } : unknown) &
     (T extends { featureId: infer F } ? { featureId: F | TargetAlias } : unknown) &
@@ -180,7 +183,17 @@ function parseRecipe(input: unknown): RecipeOperation[] {
     }
     if (isAlias(command.target)) {
       validateTarget(command.target, "body_validation");
-      validationCommand.target = { kind: "body", bodyId: "body_validation" };
+      validationCommand.target = command.operation === "export.step" ? { kind: "body", bodyId: "body_validation" } : { kind: "sketchPoint", sketchId: "sketch_validation", pointId: "sketch_point_validation" };
+    }
+    if (Array.isArray(command.targets)) validationCommand.targets = command.targets.map(target => {
+      if (!isAlias(target)) return target;
+      validateTarget(target, "sketch_point_validation");
+      return { kind: "sketchPoint", sketchId: "sketch_validation", pointId: "sketch_point_validation" };
+    });
+    if (command.edit && typeof command.edit === "object" && "target" in command.edit && isAlias(command.edit.target)) {
+      validateTarget(command.edit.target, "sketch_point_validation");
+      if (!("kind" in command.edit) || command.edit.kind === "tangent") throw new Error("Tangent edits require a typed handle reference.");
+      validationCommand.edit = { ...command.edit, target: command.edit.kind === "point" ? { kind: "sketchPoint", sketchId: "sketch_validation", pointId: "sketch_point_validation" } : { kind: "sketchEntity", sketchId: "sketch_validation", entityId: "sketch_entity_validation" } };
     }
     if (!validateSemanticCommand(validationCommand).success)
       throw new Error("Invalid semantic operation.");
@@ -266,6 +279,33 @@ export const documentRecipesCommand: CommandModule = {
           const matches = [...(sketch?.requirements ?? []), ...(sketch?.measurements ?? [])].filter(d => d.label === target.label);
           if (matches.length !== 1) throw new Error("Dimension target alias is missing or ambiguous.");
           command.dimensionId = matches[0]!.dimensionId;
+        }
+        function resolveSketchTarget(target: import("@/contracts/shared/references").DurableRef | import("@/contracts/shared/references").SketchTangentHandleRef | TargetAlias, kinds: readonly string[]) {
+          if (!isAlias(target)) return target;
+          const matches = aliases.get(target.alias)?.references.filter(r => r.label === target.label && kinds.includes(r.target.kind)) ?? [];
+          if (matches.length !== 1) throw new Error("Sketch target alias is missing or ambiguous.");
+          return matches[0]!.target;
+        }
+        if (command.operation === "sketch.construction.set") {
+          const target = resolveSketchTarget(command.target, ["sketchPoint", "sketchEntity"]);
+          if (target.kind !== "sketchPoint" && target.kind !== "sketchEntity") throw new Error("Invalid construction target.");
+          command.target = target;
+        }
+        if (command.operation === "sketch.label.set") {
+          const target = resolveSketchTarget(command.target, ["sketchPoint", "sketchEntity", "dimension", "constraint", "sketch"]);
+          if (target.kind !== "sketchPoint" && target.kind !== "sketchEntity" && target.kind !== "dimension" && target.kind !== "constraint" && target.kind !== "sketch") throw new Error("Invalid label target.");
+          command.target = target;
+        }
+        if (command.operation === "sketch.geometry.delete") command.targets = command.targets.map(value => {
+          const target = resolveSketchTarget(value, ["sketchPoint", "sketchEntity"]);
+          if (target.kind !== "sketchPoint" && target.kind !== "sketchEntity") throw new Error("Invalid deletion target.");
+          return target;
+        });
+        if (command.operation === "sketch.geometry.update" && isAlias(command.edit.target)) {
+          const target = resolveSketchTarget(command.edit.target, command.edit.kind === "point" ? ["sketchPoint"] : ["sketchEntity"]);
+          if (command.edit.kind === "point" && target.kind === "sketchPoint") command.edit.target = target;
+          else if ((command.edit.kind === "translate" || command.edit.kind === "radius") && target.kind === "sketchEntity") command.edit.target = target;
+          else throw new Error("Invalid geometry edit target.");
         }
         if (command.operation === "export.step" && isAlias(command.target)) {
           const target = command.target;
