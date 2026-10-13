@@ -14,7 +14,7 @@ import { semanticCommandCorrelation } from "@/contracts/semantic/correlation";
 
 type Alias = { alias: string };
 type TargetAlias = Alias & { label: string };
-type RecipeGeometryEdit<T = import("@/contracts/semantic/schema").SemanticSketchGeometryEdit> = T extends { target: infer R } ? Omit<T, "target"> & { target: R | TargetAlias } : never;
+type RecipeGeometryEdit<T = import("@/contracts/semantic/schema").SemanticSketchGeometryEdit> = T extends { target: infer R } ? Omit<T, "target" | "destination"> & { target: R | TargetAlias } & (T extends { destination: infer D } ? { destination: D | TargetAlias } : unknown) : never;
 type RecipePrimitive<T = import("@/contracts/semantic/schema").SemanticSketchPrimitive> = T extends { source: infer S } ? Omit<T, "source"> & { source: S | TargetAlias } : T;
 type RecipeCommand<T = SemanticCommand> = T extends SemanticCommand
   ? Omit<T, "basis" | "draft" | "points" | "dimensionId" | "profile" | "featureId" | "sketchId" | "target" | "targets" | "edit" | "primitive"> &
@@ -192,10 +192,18 @@ function parseRecipe(input: unknown): RecipeOperation[] {
       validateTarget(target, "sketch_point_validation");
       return { kind: "sketchPoint", sketchId: "sketch_validation", pointId: "sketch_point_validation" };
     });
-    if (command.edit && typeof command.edit === "object" && "target" in command.edit && isAlias(command.edit.target)) {
-      validateTarget(command.edit.target, "sketch_point_validation");
-      if (!("kind" in command.edit) || command.edit.kind === "tangent") throw new Error("Tangent edits require a typed handle reference.");
-      validationCommand.edit = { ...command.edit, target: command.edit.kind === "point" ? { kind: "sketchPoint", sketchId: "sketch_validation", pointId: "sketch_point_validation" } : { kind: "sketchEntity", sketchId: "sketch_validation", entityId: "sketch_entity_validation" } };
+    if (command.edit && typeof command.edit === "object") {
+      const edit: Record<string, unknown> = { ...command.edit };
+      if (isAlias(edit.target)) {
+        validateTarget(edit.target, "sketch_point_validation");
+        if (!edit.kind || edit.kind === "tangent") throw new Error("Tangent edits require a typed handle reference.");
+        edit.target = edit.kind === "point" || edit.kind === "mergePoints" ? { kind: "sketchPoint", sketchId: "sketch_validation", pointId: "sketch_point_validation" } : { kind: "sketchEntity", sketchId: "sketch_validation", entityId: "sketch_entity_validation" };
+      }
+      if (isAlias(edit.destination)) {
+        validateTarget(edit.destination, "sketch_point_validation");
+        edit.destination = { kind: "sketchPoint", sketchId: "sketch_validation", pointId: "sketch_point_validation" };
+      }
+      validationCommand.edit = edit;
     }
     if (command.primitive && typeof command.primitive === "object" && "source" in command.primitive && isAlias(command.primitive.source)) {
       validateTarget(command.primitive.source, "sketch_entity_validation");
@@ -313,10 +321,15 @@ export const documentRecipesCommand: CommandModule = {
           return target;
         });
         if (command.operation === "sketch.geometry.update" && isAlias(command.edit.target)) {
-          const target = resolveSketchTarget(command.edit.target, command.edit.kind === "point" ? ["sketchPoint"] : ["sketchEntity"]);
-          if (command.edit.kind === "point" && target.kind === "sketchPoint") command.edit.target = target;
+          const target = resolveSketchTarget(command.edit.target, command.edit.kind === "point" || command.edit.kind === "mergePoints" ? ["sketchPoint"] : ["sketchEntity"]);
+          if ((command.edit.kind === "point" || command.edit.kind === "mergePoints") && target.kind === "sketchPoint") command.edit.target = target;
           else if ((command.edit.kind === "translate" || command.edit.kind === "radius") && target.kind === "sketchEntity") command.edit.target = target;
           else throw new Error("Invalid geometry edit target.");
+        }
+        if (command.operation === "sketch.geometry.update" && command.edit.kind === "mergePoints" && isAlias(command.edit.destination)) {
+          const destination = resolveSketchTarget(command.edit.destination, ["sketchPoint"]);
+          if (destination.kind !== "sketchPoint") throw new Error("Invalid merge destination.");
+          command.edit.destination = destination;
         }
         if (command.operation === "export.step" && isAlias(command.target)) {
           const target = command.target;

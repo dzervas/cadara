@@ -17,7 +17,7 @@ import {
   getSketchEntityDefiningPointIds,
   type SketchDragIntent,
 } from "./drag-intent";
-import { prepareSketchTangentEditDefinition, solveDragEdit } from "./editing";
+import { prepareSketchPointMerge, prepareSketchTangentEditDefinition, solveDragEdit } from "./editing";
 
 /** One completed parameter edit through the same solver and target gate as browser edits. */
 export function updateSketchGeometry(
@@ -30,6 +30,12 @@ export function updateSketchGeometry(
   });
   if (edit.target.sketchId !== getSessionSketchId(session))
     return refuse("Sketch target is unavailable.");
+  if (edit.kind === "mergePoints") {
+    if (edit.destination.sketchId !== getSessionSketchId(session))
+      return refuse("Merge destination is unavailable.");
+    const prepared = prepareSketchPointMerge(session, edit.target.pointId, edit.destination.pointId);
+    return prepared.result.valid ? { ...prepared.session, validationMessage: null } : refuse(prepared.result.message);
+  }
   const handle = resolveHandleFromTarget(
     session.definition,
     edit.target,

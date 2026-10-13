@@ -38,6 +38,12 @@ function entityDiscovery(definition: import("@/contracts/sketch/schema").SketchD
       const start = definition.points.find(p => p.pointId === e.startPointId)!.position;
       return Math.hypot(start[0] - center[0], start[1] - center[1]);
     })() } : {}),
+    ...(e.kind === "ellipse" || e.kind === "ellipticalArc" ? { minorRadius: e.minorRadius } : {}),
+    ...(e.kind === "arc" || e.kind === "ellipticalArc" ? { sweepDirection: e.sweepDirection } : {}),
+    ...(e.kind === "conic" ? { rho: e.rho } : {}),
+    ...(e.kind === "bezierCurve" ? { degree: e.degree } : {}),
+    ...(e.kind === "spline" ? { closure: e.closure } : {}),
+    ...(e.kind === "profileText" ? { text: { content: e.text, height: e.height, rotationRadians: e.rotationRadians, horizontalAlign: e.horizontalAlign, verticalAlign: e.verticalAlign } } : {}),
     ...(e.kind === "spline" ? { tangents: e.pointOccurrences.map(o => ({ occurrenceId: o.occurrenceId, pointId: o.pointId, vector: o.tangent.kind === "authored" ? o.tangent.vector : null })) } : {}),
   }));
 }
@@ -220,7 +226,7 @@ export function createSemanticSketchPort(input: {
     if (geometryMutation) {
       if (editor.kind !== "editingSketch") throw new Error("Missing private sketch owner.");
       const s = editor.session;
-      const targets = command.operation === "sketch.geometry.update" ? [command.edit.target] : command.operation === "sketch.geometry.delete" ? command.targets : [command.target];
+      const targets = command.operation === "sketch.geometry.update" ? command.edit.kind === "mergePoints" ? [command.edit.target, command.edit.destination] : [command.edit.target] : command.operation === "sketch.geometry.delete" ? command.targets : [command.target];
       const valid = targets.length > 0 && targets.every(t => t.sketchId === (s.sketchId ?? s.actionContextId) && (t.kind === "sketch" || (t.kind === "sketchPoint" ? s.definition.points.some(p => p.pointId === t.pointId) : t.kind === "dimension" ? s.definition.dimensions.some(d => d.dimensionId === t.dimensionId) : t.kind === "constraint" ? s.definition.constraints.some(c => c.constraintId === t.constraintId) : s.definition.entities.some(e => e.entityId === t.entityId))));
       if (!valid) return { ...terminal, outcome: { kind: "rejected", reasonCode: "sketch-target-unavailable" } };
       if (command.operation === "sketch.label.set" && !command.label.trim()) return { ...terminal, outcome: { kind: "rejected", reasonCode: "invalid-label" } };
@@ -299,6 +305,7 @@ export function createSemanticSketchPort(input: {
       if (command.operation === "sketch.geometry.update") {
         const edit = { ...command.edit };
         edit.target = editorTarget(edit.target);
+        if (edit.kind === "mergePoints") edit.destination = editorTarget(edit.destination);
         events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.geometryUpdated", edit });
       }
       if (command.operation === "sketch.geometry.delete")
