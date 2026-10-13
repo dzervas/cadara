@@ -25,9 +25,13 @@ function body(file: string, name: string) {
 
 it("browser and semantic dimensions share contribution, reference and solve preparation", () => {
   const file = "src/domain/editor/sketch-session/constraints.ts";
+  const legacy = body(file, "authorSketchDimension");
+  expect(legacy).toContain("authorSketchRequirement(");
+  expect(legacy).not.toContain("solveCommittedConstraintDefinition(");
+  expect(legacy).not.toContain("createCommitContribution(");
   for (const name of [
     "commitSketchConstraintAuthoring",
-    "authorSketchDimension",
+    "authorSketchRequirement",
   ]) {
     const source = body(file, name);
     expect(source).toContain("prepareSketchConstraintCommit(");

@@ -190,7 +190,9 @@ function parseRecipe(input: unknown): RecipeOperation[] {
     if (Array.isArray(command.targets)) validationCommand.targets = command.targets.map(target => {
       if (!isAlias(target)) return target;
       validateTarget(target, "sketch_point_validation");
-      return { kind: "sketchPoint", sketchId: "sketch_validation", pointId: "sketch_point_validation" };
+      return command.operation === "sketch.requirement.remove"
+        ? { kind: "dimension", sketchId: "sketch_validation", dimensionId: "dimension_validation" }
+        : { kind: "sketchPoint", sketchId: "sketch_validation", pointId: "sketch_point_validation" };
     });
     if (command.edit && typeof command.edit === "object") {
       const edit: Record<string, unknown> = { ...command.edit };
@@ -287,7 +289,7 @@ export const documentRecipesCommand: CommandModule = {
           };
           command.points = [resolvePoint(command.points[0]), resolvePoint(command.points[1])];
         }
-        if (command.operation === "sketch.dimension.update" && isAlias(command.dimensionId)) {
+        if ((command.operation === "sketch.dimension.update" || command.operation === "sketch.dimension.reference") && isAlias(command.dimensionId)) {
           const target = command.dimensionId;
           const sketch = aliases.get(target.alias)?.sketch;
           const matches = [...(sketch?.requirements ?? []), ...(sketch?.measurements ?? [])].filter(d => d.label === target.label);
@@ -300,6 +302,20 @@ export const documentRecipesCommand: CommandModule = {
           if (matches.length !== 1) throw new Error("Sketch target alias is missing or ambiguous.");
           return matches[0]!.target;
         }
+        if (command.operation === "sketch.requirement.add") command.targets = command.targets.map(value => {
+          if (!isAlias(value)) return value;
+          const discovered = aliases.get(value.alias);
+          const matches = [...(discovered?.references ?? []), ...(discovered?.sketch?.operands ?? [])].filter(r => r.label === value.label && ["sketchPoint", "sketchEntity", "sketchDatumReference", "projectedReferenceGeometry"].includes(r.target.kind));
+          if (matches.length !== 1) throw new Error("Requirement target alias is missing or ambiguous.");
+          const target = matches[0]!.target;
+          if (target.kind !== "sketchPoint" && target.kind !== "sketchEntity" && target.kind !== "sketchDatumReference" && target.kind !== "projectedReferenceGeometry") throw new Error("Invalid requirement target.");
+          return target;
+        });
+        if (command.operation === "sketch.requirement.remove") command.targets = command.targets.map(value => {
+          const target = resolveSketchTarget(value, ["dimension", "constraint"]);
+          if (target.kind !== "dimension" && target.kind !== "constraint") throw new Error("Invalid requirement removal target.");
+          return target;
+        });
         if (command.operation === "sketch.author" && command.primitive.kind === "tangentArc" && isAlias(command.primitive.source)) {
           const source = resolveSketchTarget(command.primitive.source, ["sketchEntity"]);
           if (source.kind !== "sketchEntity") throw new Error("Invalid tangent source target.");

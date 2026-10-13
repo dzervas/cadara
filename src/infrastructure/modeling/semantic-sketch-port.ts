@@ -54,13 +54,14 @@ function dimensionDiscovery(
 ) {
   const values = new Map(solved.dimensionStatuses.map(s => [s.dimensionId, s.solvedValue]));
   return {
+    constraints: definition.constraints.map(c => ({ constraintId: c.constraintId, kind: c.kind, label: c.label, status: solved.constraintStatuses.find(s => s.constraintId === c.constraintId)?.status ?? null })),
     requirements: definition.dimensions.filter(d => !isReferenceDimension(d)).map(d => ({
-      dimensionId: d.dimensionId, label: d.label, mode: "driving" as const,
-      value: "value" in d ? getAuthoredLiteralValue(d.value) : null,
+      dimensionId: d.dimensionId, kind: d.kind, label: d.label, mode: "driving" as const,
+      value: d.kind === "lineAngle" ? getAuthoredLiteralValue(d.valueRadians) : "value" in d ? getAuthoredLiteralValue(d.value) : null,
       measuredValue: values.get(d.dimensionId) ?? null,
     })),
     measurements: definition.dimensions.filter(isReferenceDimension).map(d => ({
-      dimensionId: d.dimensionId, label: d.label, mode: "reference" as const,
+      dimensionId: d.dimensionId, kind: d.kind, label: d.label, mode: "reference" as const,
       measuredValue: values.get(d.dimensionId) ?? null,
     })),
   };
@@ -125,6 +126,10 @@ export function createSemanticSketchPort(input: {
       },
       sketch: {
         ...dimensionDiscovery(s.definition, s.liveSolve!.solvedSnapshot),
+        operands: [
+          ...([{ datumId: "origin", geometryKind: "point", label: "Sketch origin" }, { datumId: "xAxis", geometryKind: "lineSegment", label: "Sketch X axis" }, { datumId: "yAxis", geometryKind: "lineSegment", label: "Sketch Y axis" }] as const).map(d => ({ label: d.label, target: { kind: "sketchDatumReference" as const, sketchId: s.sketchId ?? s.actionContextId, datumId: d.datumId, geometryKind: d.geometryKind } })),
+          ...s.projectedReferences.filter(r => r.status === "projected").flatMap(r => r.geometry.map(g => ({ label: `Projected ${g.geometryId}`, target: { kind: "projectedReferenceGeometry" as const, referenceId: r.referenceId, geometryId: g.geometryId, geometryKind: g.kind } }))),
+        ],
         sketchId: s.sketchId,
         plane: s.plane.key!,
         solveStatus: s.liveSolve!.solvedSnapshot.status,
@@ -222,11 +227,11 @@ export function createSemanticSketchPort(input: {
       };
     if (command.operation === "sketch.open" && !initial.references.some(r => r.target.kind === "sketch" && r.target.sketchId === command.sketchId))
       return { ...terminal, outcome: { kind: "rejected", reasonCode: "sketch-unavailable" } };
-    const geometryMutation = command.operation === "sketch.construction.set" || command.operation === "sketch.geometry.update" || command.operation === "sketch.geometry.delete" || command.operation === "sketch.label.set";
+    const geometryMutation = command.operation === "sketch.requirement.remove" || command.operation === "sketch.construction.set" || command.operation === "sketch.geometry.update" || command.operation === "sketch.geometry.delete" || command.operation === "sketch.label.set";
     if (geometryMutation) {
       if (editor.kind !== "editingSketch") throw new Error("Missing private sketch owner.");
       const s = editor.session;
-      const targets = command.operation === "sketch.geometry.update" ? command.edit.kind === "mergePoints" ? [command.edit.target, command.edit.destination] : [command.edit.target] : command.operation === "sketch.geometry.delete" ? command.targets : [command.target];
+      const targets = command.operation === "sketch.geometry.update" ? command.edit.kind === "mergePoints" ? [command.edit.target, command.edit.destination] : [command.edit.target] : (command.operation === "sketch.geometry.delete" || command.operation === "sketch.requirement.remove") ? command.targets : [command.target];
       const valid = targets.length > 0 && targets.every(t => t.sketchId === (s.sketchId ?? s.actionContextId) && (t.kind === "sketch" || (t.kind === "sketchPoint" ? s.definition.points.some(p => p.pointId === t.pointId) : t.kind === "dimension" ? s.definition.dimensions.some(d => d.dimensionId === t.dimensionId) : t.kind === "constraint" ? s.definition.constraints.some(c => c.constraintId === t.constraintId) : s.definition.entities.some(e => e.entityId === t.entityId))));
       if (!valid) return { ...terminal, outcome: { kind: "rejected", reasonCode: "sketch-target-unavailable" } };
       if (command.operation === "sketch.label.set" && !command.label.trim()) return { ...terminal, outcome: { kind: "rejected", reasonCode: "invalid-label" } };
@@ -264,7 +269,13 @@ export function createSemanticSketchPort(input: {
         ...terminal,
         outcome: { kind: "rejected" as const, reasonCode: "profiles-unusable" },
       };
-    if (command.operation === "sketch.dimension.add" || command.operation === "sketch.dimension.update") {
+    if (command.operation === "sketch.requirement.add") {
+      if (editor.kind !== "editingSketch") throw new Error("Missing private sketch owner.");
+      const s = editor.session;
+      if (!command.targets.length || !command.targets.every(t => t.kind === "projectedReferenceGeometry" ? s.projectedReferences.some(r => r.status === "projected" && r.referenceId === t.referenceId && r.geometry.some(g => g.geometryId === t.geometryId && g.kind === t.geometryKind)) : t.sketchId === (s.sketchId ?? s.actionContextId) && (t.kind === "sketchDatumReference" || (t.kind === "sketchPoint" ? s.definition.points.some(p => p.pointId === t.pointId) : s.definition.entities.some(e => e.entityId === t.entityId)))) || (command.tool.startsWith("dimension") && command.mode === "driving" && (command.value === null || !Number.isFinite(command.value) || command.value <= 0)))
+        return { ...terminal, outcome: { kind: "rejected", reasonCode: "invalid-requirement-target-or-value" } };
+    }
+    if (command.operation === "sketch.dimension.add" || command.operation === "sketch.dimension.update" || command.operation === "sketch.dimension.reference") {
       if (editor.kind !== "editingSketch") throw new Error("Missing private sketch owner.");
       const validTarget = command.operation === "sketch.dimension.add"
         ? command.points[0] !== command.points[1] && command.points.every(id => editor.session.definition.points.some(p => p.pointId === id))
@@ -320,11 +331,17 @@ export function createSemanticSketchPort(input: {
           primitive: command.primitive,
           construction: command.construction,
         });
+      if (command.operation === "sketch.requirement.remove")
+        events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.requirementRemoved", targets: command.targets.map(editorTarget) });
+      if (command.operation === "sketch.requirement.add")
+        events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.requirementAuthored", input: { tool: command.tool, targets: command.targets.map(t => "sketchId" in t ? editorTarget(t) : t), mode: command.mode, value: command.value } });
       if (command.operation === "sketch.dimension.add") {
         const { axis, points, mode } = command;
         const dimension = mode === "driving" ? { axis, points, mode, value: command.value } : { axis, points, mode };
         events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.dimensionAuthored", input: dimension });
       }
+      if (command.operation === "sketch.dimension.reference")
+        events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.dimensionMadeReference", dimensionId: command.dimensionId });
       if (command.operation === "sketch.dimension.update")
         events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.dimensionUpdated", dimensionId: command.dimensionId, value: command.value });
       if (command.operation === "history.undo" || command.operation === "history.redo")
@@ -369,7 +386,7 @@ export function createSemanticSketchPort(input: {
         if (blocked?.blockedReason)
           return { ...terminal, outcome: { kind: "conflicted", actualBasis: initial.state }, diagnostics: [...terminal.diagnostics, semanticDiagnostic(new Error(blocked.blockedReason))] };
       }
-      if (geometryMutation && editor.kind === "editingSketch" && finalEditor.kind === "editingSketch" && finalEditor.session.definition === editor.session.definition && finalEditor.session.sketchLabel === editor.session.sketchLabel) {
+      if ((geometryMutation || command.operation === "sketch.requirement.add" || command.operation === "sketch.dimension.update" || command.operation === "sketch.dimension.reference") && editor.kind === "editingSketch" && finalEditor.kind === "editingSketch" && finalEditor.session.definition === editor.session.definition && finalEditor.session.sketchLabel === editor.session.sketchLabel) {
         if (finalEditor.session.validationMessage) return { ...terminal, outcome: { kind: "rejected", reasonCode: "sketch-edit-refused" }, diagnostics: [semanticDiagnostic(new Error(finalEditor.session.validationMessage))] };
         return { ...terminal, outcome: priorGeometry.kind === "current" ? { kind: "completed", change: "unchanged" } : { kind: "failed", failures: ["geometry"] }, discovery: initial, completion: { ...terminal.completion, handoff: { kind: "current", state: initial.state }, geometry: priorGeometry } };
       }

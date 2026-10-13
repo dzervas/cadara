@@ -174,8 +174,14 @@ function actionLabel(event: EditorEvent, before: EditorState) {
       return "Label Sketch Item";
     case "sketch.constructionSet":
       return "Set Sketch Construction";
+    case "sketch.requirementRemoved":
+      return "Remove Sketch Requirement";
+    case "sketch.requirementAuthored":
+      return "Create Sketch Requirement";
     case "sketch.dimensionAuthored":
       return "Create Sketch Dimension";
+    case "sketch.dimensionMadeReference":
+      return "Make Sketch Dimension Reference";
     case "sketch.dimensionUpdated":
       return "Update Sketch Dimension";
     case "sketch.geometryDragEnded":

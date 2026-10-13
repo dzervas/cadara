@@ -828,15 +828,32 @@ export function authorSketchDimension(
   session: SketchSessionState,
   input: import("@/contracts/semantic/schema").SemanticDimensionInput,
 ): SketchSessionState {
-  const toolId = input.axis === "horizontal" ? "dimensionHorizontal" : "dimensionVertical";
-  const selectedTargets = input.points.map(pointId => resolveSketchConstraintTarget(toolId, session.definition, { kind: "sketchPoint", sketchId: getSessionSketchId(session), pointId }, session.projectedReferences));
-  if (selectedTargets.some(target => target === null)) throw new Error("Dimension points are not in the current sketch.");
+  return authorSketchRequirement(session, {
+    tool: input.axis === "horizontal" ? "dimensionHorizontal" : "dimensionVertical",
+    targets: input.points.map(pointId => ({ kind: "sketchPoint", sketchId: getSessionSketchId(session), pointId })),
+    mode: input.mode, value: input.mode === "driving" ? input.value : null,
+  });
+}
+
+/** Explicit completed operands use the browser registry and commit owner, without selecting or pinning UI tools. */
+export function authorSketchRequirement(
+  session: SketchSessionState,
+  input: import("@/contracts/semantic/schema").SemanticRequirementInput,
+): SketchSessionState {
+  const selectedTargets = input.targets.map(target => resolveSketchConstraintTarget(input.tool, session.definition, target, session.projectedReferences));
+  const definition = getSketchConstraintDefinition(input.tool);
+  if (selectedTargets.some(target => target === null)
+    || new Set(input.targets.map(getTargetKey)).size !== input.targets.length
+    || (input.tool === "dimensionDistance" ? input.targets.length < 1 || input.targets.length > 2 || (selectedTargets[0]?.circle && input.targets.length !== 1) : input.targets.length !== definition.steps.length)
+    || (definition.metadata.group === "constraints" && (input.mode !== "driving" || input.value !== null))
+    || (input.mode === "reference" && input.value !== null)) {
+    return { ...session, validationMessage: "Requirement needs the supported target combination." };
+  }
   const targets = selectedTargets.filter(target => target !== null);
-  const measured = getSketchConstraintDefinition(toolId).measureValue!(targets, null);
+  const value = input.mode === "reference" ? definition.measureValue?.(targets, null) ?? null : input.value;
   return prepareSketchConstraintCommit(session, {
-    toolId, selectedTargets: targets, hoverTarget: null, pointer: null,
-    isPreviewPinned: false,
-    pendingValue: createLiteralAuthoredValue(input.mode === "driving" ? input.value : measured!),
+    toolId: input.tool, selectedTargets: targets, hoverTarget: null, pointer: null,
+    isPreviewPinned: false, pendingValue: value === null ? null : createLiteralAuthoredValue(value),
     pendingAnnotationPlacement: null, authorsReference: input.mode === "reference",
   }).session;
 }

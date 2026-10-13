@@ -8,12 +8,28 @@ import type {
   FeatureId,
   LoopId,
   RegionId,
+  ReferenceId,
+  ProjectedGeometryId,
   SketchAuthoringOperationId,
   SketchEntityId,
   SketchId,
   SketchPointId,
   VertexId,
 } from "@/contracts/shared/ids";
+
+export interface ProjectedReferenceGeometryRef {
+  kind: "projectedReferenceGeometry";
+  referenceId: ReferenceId;
+  geometryId: ProjectedGeometryId;
+  geometryKind: "point" | "lineSegment" | "circle" | "arc" | "spline";
+}
+
+export interface SketchDatumReferenceRef {
+  kind: "sketchDatumReference";
+  sketchId: import("@/contracts/shared/ids").SketchId;
+  datumId: "origin" | "xAxis" | "yAxis";
+  geometryKind: "point" | "lineSegment";
+}
 
 /**
  * Durable reference to a body owned by the modeling backend.

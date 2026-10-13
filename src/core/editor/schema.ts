@@ -1,7 +1,7 @@
 import type { ToolId } from "@/core/tools/tool-registry";
 import type { ToolbarMode } from "@/core/tools/schema";
-import type { DurableRef } from "@/contracts/shared/references";
-import type { ProjectedGeometryId, ReferenceId } from "@/contracts/shared/ids";
+import type { DurableRef, ProjectedReferenceGeometryRef, SketchDatumReferenceRef } from "@/contracts/shared/references";
+import type { ReferenceId } from "@/contracts/shared/ids";
 
 export type {
   BodyId,
@@ -32,20 +32,6 @@ export type {
   SnapshotEntityId,
   VertexId,
 } from "@/contracts/shared/ids";
-
-export interface ProjectedReferenceGeometryRef {
-  kind: "projectedReferenceGeometry";
-  referenceId: ReferenceId;
-  geometryId: ProjectedGeometryId;
-  geometryKind: "point" | "lineSegment" | "circle" | "arc" | "spline";
-}
-
-export interface SketchDatumReferenceRef {
-  kind: "sketchDatumReference";
-  sketchId: import("@/contracts/shared/ids").SketchId;
-  datumId: "origin" | "xAxis" | "yAxis";
-  geometryKind: "point" | "lineSegment";
-}
 
 export interface SketchExternalReferenceRef {
   kind: "sketchExternalReference";
