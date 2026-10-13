@@ -18,8 +18,8 @@ import type { SketchSessionState } from "@/domain/editor/sketch-session";
  * any seeded definition) through the app's own entry: the sketch selection
  * command receives `effect.sketchSessionOpened`, and `enterSketchEditing`
  * establishes the live solve basis (`withLiveSolveBasis`). Rows built on it
- * see `liveSolve` exactly as a session the user opened, instead of the
- * display's best-effort solve of a never-entered session.
+ * see `liveSolve` exactly as a session the user opened (a never-entered
+ * session has no solve: T17g3 deleted the display's best-effort fallback).
  */
 export function enterSketchSessionState(
   session: SketchSessionState,

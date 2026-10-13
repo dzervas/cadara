@@ -23,7 +23,6 @@ import {
   tessellateBoundaryLoop,
   type RegionBoundaryBasis,
 } from "@/contracts/sketch/region-boundary-curves";
-import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import {
   tessellateCubicSpans,
   tessellateProjectedSpline,
@@ -70,10 +69,8 @@ import {
   getSketchSessionDisplayDefinition,
   getSketchSessionDisplayProjectedReferences,
   getSketchSessionDerivedValidity,
-  getSketchSessionSolvedSnapshot,
   mapDefinitionEntityToDraftEntity,
-  resolveSketchDefinitionForSolve,
-  getSketchSessionDerivationSettings,
+  SKETCH_NOT_SOLVED_YET,
 } from "./internals";
 import { mapSketchPointToWorld } from "./state";
 import {
@@ -151,11 +148,7 @@ export function getStableSketchSessionDisplayRenderables(
       referenceImageOperationOverrides,
     );
   const solved = {
-    solvedSnapshot: getSketchSessionDisplaySolvedSnapshot(
-      session,
-      displayDefinition,
-      displayProjectedReferences,
-    ),
+    solvedSnapshot: getSketchSessionDisplaySolvedSnapshot(session),
   };
   const constraintDisplaySummary = getSketchConstraintDisplaySummary({
     sketchId,
@@ -754,47 +747,17 @@ export function getSketchToolMarkerPointIds(
   );
 }
 
-let displaySolveCacheKey: string | null = null;
-let displaySolveCacheSnapshot: SolvedSketchSnapshot | null = null;
-
 /**
- * The solved snapshot the session displays: the live solve, else a
- * best-effort solve of the display definition, cached on the stable display
- * key. Every editor sketch entry establishes the live solve (T11a), so the
- * fallback serves only sessions never entered for editing (domain fixtures
- * built from the session constructors). Display, pick and snap read
- * the shells' spans from this one snapshot (T08b-g5b).
+ * The solved snapshot the session displays: its live solve. Display, pick
+ * and snap read the shells' spans from this one snapshot (T08b-g5b). Every
+ * editor sketch entry establishes the live solve (T11a); before it (the
+ * opened session, T17g3 review G-1) this is `SKETCH_NOT_SOLVED_YET`: the
+ * authored geometry is drawn, with no solved shells and nothing certified.
  */
 export function getSketchSessionDisplaySolvedSnapshot(
   session: SketchSessionState,
-  displayDefinition?: SketchDefinition,
-  displayProjectedReferences?: readonly ProjectedSketchReferenceRecord[],
 ): SolvedSketchSnapshot {
-  const live = getSketchSessionSolvedSnapshot(session);
-  if (live) return live;
-  const key = getStableSketchSessionDisplayKey(session);
-  if (displaySolveCacheKey === key && displaySolveCacheSnapshot)
-    return displaySolveCacheSnapshot;
-  // Derived lazily: callers without a display definition (snap, on every
-  // pointer move) skip the derivation when a live solve exists.
-  displayDefinition ??= getSketchSessionDisplayDefinition(session);
-  displayProjectedReferences ??= getSketchSessionDisplayProjectedReferences(
-    session,
-    displayDefinition,
-  );
-  const snapshot = solveSketchDefinitionCore({
-    definition: resolveSketchDefinitionForSolve(
-      displayDefinition,
-      session.documentVariables,
-    ),
-    projectedReferences: displayProjectedReferences,
-    tolerances: session.solverTolerances,
-    ...getSketchSessionDerivationSettings(session),
-    partialSolvePolicy: "bestEffort",
-  }).solvedSnapshot;
-  displaySolveCacheKey = key;
-  displaySolveCacheSnapshot = snapshot;
-  return snapshot;
+  return session.liveSolve?.solvedSnapshot ?? SKETCH_NOT_SOLVED_YET;
 }
 
 export function getTransientSketchSessionDisplayRenderables(
@@ -954,19 +917,19 @@ export function withSketchConstraintDisplay(
  * Display validity of a derived offset output (T08b-g5b, plan §3.4; [TECH]
  * G19 for every output kind): an accepted (`certified`) output is current. A
  * non-accepted (`provisional`) one is `stale` (normal colour, U-A) while a
- * drag is active, while its publication round is pending, or before the
- * session has a live solve; once the round has settled (current,
- * unavailable or failed) without certifying it, it is `invalid` (the
- * existing red tint).
+ * drag is active or while its publication round is pending; once the round
+ * has settled (current, unavailable or failed) without certifying it, it is
+ * `invalid` (the existing red tint). T17g3: before the session has a live
+ * solve (an opened session, review G-1) nothing is judged yet, so every
+ * output is `stale`, never `current`.
  */
 export function getDerivedShellDisplayValidity(
   session: SketchSessionState,
   publication: "provisional" | "certified",
 ): SketchDerivedValidity["state"] {
+  if (session.liveSolve === null) return "stale";
   if (publication === "certified") return "current";
-  return session.liveSolve === null ||
-    session.activeDrag !== null ||
-    session.liveRegions.status === "pending"
+  return session.activeDrag !== null || session.liveRegions.status === "pending"
     ? "stale"
     : "invalid";
 }
@@ -976,9 +939,9 @@ export function getDerivedShellDisplayValidity(
  * derived output by its owner (the G16‴ closure of
  * `nonAcceptedDerivedOutputs`). An output held by a failed relationship (the
  * sketch-wide profile gate: directly, or a copy of a held copy) is settled
- * invalid geometry, so it is always `invalid` (red), during a drag and
- * before the first live solve too. Any other owner, a not yet certified
- * offset, keeps `getDerivedShellDisplayValidity` (U-A).
+ * invalid geometry, so it is always `invalid` (red), during a drag too.
+ * Any other owner, a not yet certified offset, keeps
+ * `getDerivedShellDisplayValidity` (U-A).
  */
 function getNonAcceptedOutputDisplayValidity(
   session: SketchSessionState,

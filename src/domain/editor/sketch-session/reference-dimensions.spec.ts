@@ -385,9 +385,9 @@ test.each(ADAPTERS)(
       "the reference never blocks profiles",
     ).toBeGreaterThan(0);
 
-    const reopened = createSketchSessionFromSnapshot(
-      published,
-      OCC_KERNEL_SETTINGS,
+    // T17g3: reopened through the production entry (it has the live solve).
+    const reopened = enterSketchSession(
+      createSketchSessionFromSnapshot(published, OCC_KERNEL_SETTINGS),
     );
     expect(isReferenceDimension(reopened.definition.dimensions[0]!)).toBe(true);
     expect(descriptor(reopened, 0).visibleLabel).toBe("(5.00)");

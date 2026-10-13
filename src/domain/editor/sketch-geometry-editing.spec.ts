@@ -4046,7 +4046,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       .slice(0, 2)
       .map((entity) => entity.target);
     const activated = beginSketchTool(
-      createSessionFromDefinition(definition),
+      enterSketchSession(createSessionFromDefinition(definition)),
       "offset",
       selectedTargets,
     );
@@ -4070,7 +4070,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     ).toBeTruthy();
 
     const cleared = beginSketchTool(
-      createSessionFromDefinition(definition),
+      enterSketchSession(createSessionFromDefinition(definition)),
       "offset",
       [definition.points[0]!.target],
     );
@@ -4090,7 +4090,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     // inward and "right" offsets outward with arc joins at the corners.
     const definition = createSquareDefinition(false);
     let outerSession = beginSketchTool(
-      createSessionFromDefinition(definition),
+      enterSketchSession(createSessionFromDefinition(definition)),
       "offset",
     );
 
@@ -4163,7 +4163,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     );
 
     let innerSession = beginSketchTool(
-      createSessionFromDefinition(definition),
+      enterSketchSession(createSessionFromDefinition(definition)),
       "offset",
     );
     for (const entity of definition.entities) {
@@ -4211,7 +4211,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       ],
     });
     let session = beginSketchTool(
-      createSessionFromDefinition(definition),
+      enterSketchSession(createSessionFromDefinition(definition)),
       "offset",
     );
     session = selectSketchEditToolTarget(session, {
@@ -4266,7 +4266,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       ],
     });
     let session = beginSketchTool(
-      createSessionFromDefinition(definition),
+      enterSketchSession(createSessionFromDefinition(definition)),
       "offset",
     );
     for (const entity of definition.entities) {
@@ -4351,7 +4351,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     });
 
     let circleSession = beginSketchTool(
-      createSessionFromDefinition(definition),
+      enterSketchSession(createSessionFromDefinition(definition)),
       "offset",
     );
     circleSession = selectSketchEditToolTarget(circleSession, {
@@ -4376,7 +4376,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     ).toBeTruthy();
 
     let arcSession = beginSketchTool(
-      createSessionFromDefinition(definition),
+      enterSketchSession(createSessionFromDefinition(definition)),
       "offset",
     );
     arcSession = selectSketchEditToolTarget(arcSession, {
@@ -4395,7 +4395,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     ).toBeTruthy();
 
     let splineSession = beginSketchTool(
-      createSessionFromDefinition(definition),
+      enterSketchSession(createSessionFromDefinition(definition)),
       "offset",
     );
     splineSession = selectSketchEditToolTarget(splineSession, {
@@ -4564,7 +4564,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     });
 
     let filletSession = beginSketchTool(
-      createSessionFromDefinition(cornerDefinition),
+      enterSketchSession(createSessionFromDefinition(cornerDefinition)),
       "sketchFillet",
     );
     filletSession = selectSketchEditToolTarget(
@@ -4593,7 +4593,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     ).toBe("sketchFillet");
 
     let chamferSession = beginSketchTool(
-      createSessionFromDefinition(cornerDefinition),
+      enterSketchSession(createSessionFromDefinition(cornerDefinition)),
       "sketchChamfer",
     );
     chamferSession = selectSketchEditToolTarget(
@@ -4625,7 +4625,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       ],
     });
     let slotSession = beginSketchTool(
-      createSessionFromDefinition(lineDefinition),
+      enterSketchSession(createSessionFromDefinition(lineDefinition)),
       "sketchSlot",
     );
     slotSession = selectSketchEditToolTarget(
@@ -4665,7 +4665,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       ],
     });
     let splineSlotSession = beginSketchTool(
-      createSessionFromDefinition(splineDefinition),
+      enterSketchSession(createSessionFromDefinition(splineDefinition)),
       "sketchSlot",
     );
     splineSlotSession = selectSketchEditToolTarget(
@@ -4879,7 +4879,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     }
 
     let unsupportedSession = beginSketchTool(
-      createSessionFromDefinition(splitDefinition),
+      enterSketchSession(createSessionFromDefinition(splitDefinition)),
       "sketchFillet",
     );
     unsupportedSession = selectSketchEditToolTarget(
@@ -4927,7 +4927,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     });
 
     let mirrorSession = beginSketchTool(
-      createSessionFromDefinition(definition),
+      enterSketchSession(createSessionFromDefinition(definition)),
       "sketchMirror",
     );
     expect(
@@ -5033,7 +5033,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       ).toBeFalsy();
 
       let session = beginSketchTool(
-        createSessionFromDefinition(definition),
+        enterSketchSession(createSessionFromDefinition(definition)),
         toolId,
       );
       expect(
@@ -5069,7 +5069,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
   async function testDerivedLinearPatternGeometryParticipatesInProfiles() {
     const definition = createSquareDefinition(false);
     let session = beginSketchTool(
-      createSessionFromDefinition(definition),
+      enterSketchSession(createSessionFromDefinition(definition)),
       "sketchLinearPattern",
     );
     for (const entity of definition.entities) {

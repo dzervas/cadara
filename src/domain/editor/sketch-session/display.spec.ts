@@ -921,7 +921,10 @@ describe("T16b: held copies of a broken mirror always draw invalid", () => {
     );
   });
 
-  test("on re-entry before the first live solve (red on base: stale), the held copies are invalid and the label-based message shows", async () => {
+  // T17g3 (review G-3): re-entered through the production entry, which
+  // establishes the live solve at once (T11a); a session "entered but not yet
+  // solved" is unreachable, so the premise is the entry's own state.
+  test("on re-entry, the held copies are invalid and the label-based message shows", async () => {
     const { session, relationship } = mirror.mirroredSession("free");
     const broken = brokenAxis(session);
     const adapter = new MockKernelAdapter();
@@ -955,11 +958,17 @@ describe("T16b: held copies of a broken mirror always draw invalid", () => {
       record.sketch.solvedSnapshot.failedDerivationIds,
       "premise: the saved record holds the mirror",
     ).toEqual([relationship.derivationId]);
-    const reentered = createSketchSessionFromSnapshot(
-      record,
-      OCC_KERNEL_SETTINGS,
+    const reentered = enterSketchSession(
+      createSketchSessionFromSnapshot(record, OCC_KERNEL_SETTINGS),
     );
-    expect(reentered.liveSolve, "premise: no live solve yet").toBeNull();
+    expect(
+      reentered.liveRegions.status,
+      "premise: re-entered; a failed relationship makes regions unavailable at once (T15b O-1)",
+    ).toBe("unavailable");
+    expect(
+      reentered.liveSolve!.solvedSnapshot.failedDerivationIds,
+      "premise: the entry's live solve holds the mirror",
+    ).toEqual([relationship.derivationId]);
     const copies = copiesOf(relationship);
     expect(validityOf(reentered, copies)).toEqual(copies.map(() => "invalid"));
     expect(getSketchSessionPreviewLabel(reentered)).toBe(

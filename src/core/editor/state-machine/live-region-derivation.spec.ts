@@ -17,6 +17,7 @@ import {
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
 import { openSketchSessionFromSelection } from "@/domain/editor/sketch-session-controller";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { getFirstSketchStyleTarget } from "@/domain/editor/sketch-session/styles";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
 import {
@@ -40,12 +41,13 @@ async function makeSketchState() {
     snapshot,
   );
   if (!session) throw new Error("Seed sketch must open a session.");
-  const state: SketchEditorState = {
+  const document = {
+    documentId: snapshot.document.documentId,
+    revisionId: snapshot.document.revisionId,
+  };
+  const entered: SketchEditorState = {
     ...initialEditorState,
-    document: {
-      documentId: snapshot.document.documentId,
-      revisionId: snapshot.document.revisionId,
-    },
+    document,
     snapshot,
     kind: "editingSketch",
     mode: "sketch",
@@ -54,7 +56,10 @@ async function makeSketchState() {
       toolId: "sketch",
       phase: "editing",
     },
-    session,
+    // T17g3 (review G-2): the opened session entered as the app does, so it
+    // has the entry's live solve; the entry's region round then settles with
+    // the seed's regions (the app's next step).
+    session: enterSketchSession(session, document),
     selection: [{ kind: "sketch", sketchId: sketch.sketchId }],
     selectionFilter: defaultSelectionFilter,
     pendingCommitRequestId: null,
@@ -62,6 +67,20 @@ async function makeSketchState() {
     pendingImportRequestId: null,
     pendingRegionRequest: null,
   };
+  const round = emitPendingSketchRegionDerivation({
+    state: entered,
+    effects: [],
+  });
+  const state = transitionEditorState(
+    round.state,
+    derivedEvent(
+      onlyDeriveEffect(round.effects),
+      structuredClone(sketch.sketch.regions),
+    ),
+  ).state as SketchEditorState;
+  expect(state.session.liveRegions.status, "premise: entry settled").toBe(
+    "current",
+  );
   return { snapshot, sketch, state };
 }
 

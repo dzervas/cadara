@@ -131,11 +131,7 @@ export function collectSketchInteractionGeometry(
     ),
     ...collectLocalInteractionGeometry(
       definition,
-      getSketchSessionDisplaySolvedSnapshot(
-        session,
-        definition,
-        projectedReferences,
-      ),
+      getSketchSessionDisplaySolvedSnapshot(session),
     ),
     ...collectProjectedInteractionGeometry(projectedReferences),
   ];

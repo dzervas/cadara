@@ -799,10 +799,7 @@ export function createSketchStackPick<TEntry>(
   return {
     stack,
     displayDefinition,
-    solvedSnapshot: getSketchSessionDisplaySolvedSnapshot(
-      session,
-      displayDefinition,
-    ),
+    solvedSnapshot: getSketchSessionDisplaySolvedSnapshot(session),
   };
 }
 

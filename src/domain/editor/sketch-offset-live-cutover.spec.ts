@@ -146,6 +146,7 @@ import {
   applySketchContribution,
   createSessionCommitFactories,
   rebuildSessionForDefinition,
+  SKETCH_NOT_SOLVED_YET,
   withLiveSolveBasis,
 } from "@/domain/editor/sketch-session/internals";
 import {
@@ -8244,6 +8245,60 @@ function expectCertified(
     true,
   );
 }
+
+// T17g3 (G1, review G-1; logic lane, session seam). The opened session (the
+// controller's result, before `enterSketchEditing` bases it) has no live
+// solve; with the display fallback deleted, every reader says "not solved
+// yet" instead of claiming current or refusing as decided.
+test("T17g3: an opened session not solved yet is never current: its outputs draw stale, the gate says still being checked, its validity is stale", async () => {
+  const reopened = await reopenCertified(false);
+  const { raw } = reopened;
+  const opened = reopened.opened.state as SketchEditorState;
+  const settled = await settleDerivations(opened, reopened.opened.effects);
+  expect(raw.liveSolve, "premise: a raw reopened session").toBe(null);
+  expect(
+    getSketchSessionDisplaySolvedSnapshot(raw),
+    "no solve of its own: the not-solved-yet snapshot",
+  ).toBe(SKETCH_NOT_SOLVED_YET);
+  const output = reopened.outputs[0]!;
+  expect(offsetEditInputGate(raw, [output], "a Trim target")).toEqual({
+    pending: true,
+    message: checkingMessage(raw.definition, output, reopened.derivationId),
+  });
+  expect(
+    offsetEditInputGate(settled.session, [output], "a Trim target"),
+    "control: certified after the entry's round",
+  ).toBe(null);
+  expect(getDerivedShellDisplayValidity(raw, "certified")).toBe("stale");
+  expect(
+    getDerivedShellDisplayValidity(settled.session, "certified"),
+    "control",
+  ).toBe("current");
+  expect(
+    raw.liveRegions.status,
+    "premise: the record's regions are current",
+  ).toBe("current");
+  expect(getSketchSessionDerivedValidity(raw).state).toBe("stale");
+  expect(
+    getSketchSessionDerivedValidity(settled.session).state,
+    "control",
+  ).toBe("current");
+  const validityOf = (session: SketchSessionState) =>
+    getStableSketchSessionDisplayRenderables(session)
+      .filter(
+        (item) =>
+          item.target?.kind === "sketchEntity" &&
+          item.target.entityId === output &&
+          item.semanticClass !== "region",
+      )
+      .map((item) => item.regionValidity);
+  expect(validityOf(raw), "the authored output draws, stale").toEqual([
+    "stale",
+  ]);
+  expect(validityOf(settled.session), "control: certified").toEqual([
+    undefined,
+  ]);
+}, 600_000);
 
 describe("T11a reopened sketch certification (routed A3, review R-5)", () => {
   test("normal reopen of a certified offset: certified after the opening round with no edit; the output snaps, passes the C3 gate and is a Trim target", async () => {
