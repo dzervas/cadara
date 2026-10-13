@@ -111,6 +111,7 @@ export function semanticResultIssues(
       "model-mutate",
       "history",
       "file-open",
+      "export",
     ];
     if (
       geometryFamilies.includes(expected.family) &&
@@ -154,10 +155,9 @@ export function semanticResultIssues(
         );
       }
       if (
-        ["model-mutate", "sketch-publish", "file-open"].includes(
+        (["model-mutate", "sketch-publish", "file-open"].includes(
           expected.family,
-        ) &&
-        completion.live.kind === "applied" &&
+        ) && completion.live.kind === "applied" || expected.family === "export") &&
         geometry.rebuildRevisionId !== liveState?.revisionId
       ) {
         refuse(
@@ -171,7 +171,9 @@ export function semanticResultIssues(
         "model-mutate",
         "file-open",
         "file-save",
-        "export",
+        // Geometry export reads the certified revision; unlike native save it
+        // does not publish a new repository transaction. Its file barrier below
+        // remains mandatory, without inventing a commit receipt.
       ].includes(expected.family) ||
       (expected.family === "sketch-publish" && completion.live.kind === "applied") ||
       (expected.family === "document" && completion.live.kind === "applied") ||

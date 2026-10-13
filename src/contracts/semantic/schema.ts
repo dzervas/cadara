@@ -112,11 +112,20 @@ export type SemanticHistoryCommand = CommandIdentity & {
   | { operation: "history.undo" | "history.redo"; actionSequence?: number }
 );
 
+export type SemanticExportCommand = CommandIdentity & {
+  operation: "export.step";
+  basis: SemanticBasis;
+  target: DurableRef;
+  options: import("@/contracts/export/capabilities").StepWriterOptions;
+  path: string;
+};
+
 /** Implemented slices. Later tickets extend this closed union. */
 export type SemanticCommand =
   | SemanticSketchCommand
   | SemanticExtrudeCommand
   | SemanticHistoryCommand
+  | SemanticExportCommand
   | (CommandIdentity &
       (
         | { operation: "document.create"; label: string; basis: null }

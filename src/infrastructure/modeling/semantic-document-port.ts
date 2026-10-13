@@ -1,3 +1,4 @@
+import { createSemanticExportPort } from "./semantic-export-port";
 import { createSemanticHistoryPort } from "./semantic-history-port";
 import { createSemanticExtrudePort } from "./semantic-extrude-port";
 import { inspectSemanticModel } from "./semantic-model-inspection";
@@ -175,6 +176,7 @@ export function createSemanticDocumentPort(input: {
     sketch: sketches.execute,
     history: createSemanticHistoryPort({ repository, service, loop, inspect, sketch: sketches.execute }),
     extrude: createSemanticExtrudePort({ service, loop, inspect }),
+    export: createSemanticExportPort({ service, files: input.nativeFileIO, inspect }),
     async drain() {
       await loop.drain();
       await service.waitForPersistence();

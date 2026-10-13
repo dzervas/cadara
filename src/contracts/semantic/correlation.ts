@@ -19,6 +19,8 @@ export function semanticCommandCorrelation(
                 ? "history"
               : command.operation.startsWith("extrude.")
                 ? "model-mutate"
+              : command.operation.startsWith("export.")
+                ? "export"
               : command.operation === "document.open"
                 ? "file-open"
                 : command.operation === "document.save"

@@ -1,3 +1,4 @@
+import { createBuiltinExportProviderRegistry } from "@/domain/export/builtin-provider-composition";
 import { createSketchPublicationReceipts } from "@/infrastructure/modeling/sketch-publication-receipts";
 import { createSemanticDocumentPort } from "@/infrastructure/modeling/semantic-document-port";
 import { fileURLToPath } from "node:url";
@@ -52,7 +53,8 @@ export function createHeadlessSessionFactory(
             fileURLToPath(new URL("../../public/", import.meta.url)),
         );
         return async (settings) => {
-          const oc = await initialize(settings);
+          // Native progress is diagnostic output, never the command result channel.
+          const oc = await initialize({ ...settings, module: { ...settings?.module, print: console.error, printErr: console.error } });
           assertOpenCascadeNativeTopologyKernelCapabilities(oc);
           return oc;
         };
@@ -81,6 +83,7 @@ export function createHeadlessSessionFactory(
           currentDocumentId: documentId,
           sketchSolver: solver,
           documentRepository: repository,
+          exportProviders: createBuiltinExportProviderRegistry(),
         });
       } catch (error) {
         adapter.dispose();
