@@ -12,6 +12,7 @@ import type {
   SketchToolPresentationSchema,
 } from "@/core/sketch-tools/editor-schema";
 import {
+  getFloatingInputKeyPatch,
   getFloatingInputProjectionId,
   getOverlayGeometryProjectionId,
   getOverlayProjectionId,
@@ -629,6 +630,15 @@ function ViewportFloatingInput({
     inputRef.current?.focus({ preventScroll: true });
     // T13e: leaving Reference mode remounts the input; focus it to type.
   }, [descriptor.id, descriptor.readOnly, placed]);
+  // T17f (T17c4 finding): the input follows a value set elsewhere (the
+  // panel's Distance), not only its own typing; it is not rewritten while
+  // focused, so a partly typed number stays as typed.
+  const value = descriptor.value ?? "";
+  useEffect(() => {
+    const input = inputRef.current;
+    if (input && input !== document.activeElement && input.value !== value)
+      input.value = value;
+  }, [value, placed]);
 
   if (!projection) {
     return null;
@@ -667,12 +677,15 @@ function ViewportFloatingInput({
           onChange={(event) => {
             onPatch({ value: event.currentTarget.value });
           }}
-          // T14b review R-1: shortcuts skip a focused text input, so Escape
-          // here is the popup's own Cancel.
           onKeyDown={(event) => {
-            if (event.key === "Escape") {
+            const patch = getFloatingInputKeyPatch(
+              descriptor,
+              event.key,
+              event.nativeEvent.isComposing,
+            );
+            if (patch) {
               event.preventDefault();
-              onPatch(descriptor.cancelAction.patch);
+              onPatch(patch);
             }
           }}
         />

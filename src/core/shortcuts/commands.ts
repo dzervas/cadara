@@ -108,7 +108,8 @@ const editorCommands = [
   },
   {
     id: "editor.confirm",
-    label: "Confirm (End Chain, Finalize Spline, Merge)",
+    // T17f review A-5: every target of `getEnterEvent`.
+    label: "Confirm (End Chain, Finalize Spline, Merge, Mirror, Offset)",
     category: "Sketch",
     scope: "sketch",
     defaultShortcuts: ["enter"],

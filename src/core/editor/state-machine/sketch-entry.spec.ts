@@ -5,6 +5,9 @@ import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixt
 import { createReferenceImageOperation } from "@/domain/reference-image/operations";
 import { REFERENCE_IMAGE_CALIBRATION_MODE_ID } from "@/domain/reference-image-calibration/mode/shared";
 import { openSketchSessionFromSelection } from "@/domain/editor/sketch-session-controller";
+import { createSketchSpecialModeRegistry } from "@/core/sketch-special-modes/registry";
+import type { SketchSpecialModeDefinition } from "@/core/sketch-special-modes/schema";
+import { defaultEditorExtensionDependencies } from "./dependencies";
 import { transitionEditorState } from "./reducer-root";
 import { initialEditorState } from "./state-creators";
 import type {
@@ -186,6 +189,34 @@ describe("T11a sketch entry establishes a live solve basis", () => {
       "sketch.projectReferences",
       "sketch.deriveRegions",
     ]);
+  });
+
+  // T17f (G2, T11a ADV-4): the bypass forwards the event with the caller's
+  // extension dependencies, so a mode registered only there is entered
+  // (base: the default registry, "not registered").
+  test("special mode from the sketch selection command uses the caller's extension dependencies", async () => {
+    const { state, operation } = await seedSketchCommand();
+    const mode = {
+      id: "t17f-injected-mode",
+      label: "Injected mode",
+      enter: () => ({ state: null }),
+      cancel: () => ({ exit: true }),
+    } satisfies SketchSpecialModeDefinition<null>;
+    const result = transitionEditorState(
+      state,
+      {
+        type: "sketch.specialModeEntered",
+        modeId: mode.id,
+        operationId: operation.operationId,
+      },
+      {
+        ...defaultEditorExtensionDependencies,
+        sketchSpecialModes: createSketchSpecialModeRegistry([mode]),
+      },
+    );
+    const entered = editingSketch(result);
+    expect(entered.session.validationMessage).toBe(null);
+    expect(entered.session.activeSpecialMode?.modeId).toBe(mode.id);
   });
 
   test("normal open without references solves once (no second solve for the basis)", async () => {

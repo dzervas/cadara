@@ -605,7 +605,9 @@ function handleSharedEvent(
         ? handleSketchSpecialModeEntered(
             state,
             event,
-            transitionEditorState,
+            // T17f (G2): the forwarded entry keeps the caller's extensions.
+            (nextState, nextEvent) =>
+              transitionEditorState(nextState, nextEvent, dependencies),
             dependencies,
           )
         : { state, effects: [] };

@@ -800,3 +800,105 @@ describe("authored action boundary", () => {
     ).toMatchObject({ status: "blocked", reason: "context-missing" });
   });
 });
+
+// T17f (B6, T17-8′; T17b0 P-4). Logic lane; seam: the owner's commit/undo/redo.
+// A record an action creates or removes comes back at its recorded position
+// (base: appended last), and the derived `pointIds` follow the records.
+describe("T17f: record positions survive Undo and Redo", () => {
+  const ids = ["p1", "p2", "p3", "p4", "p5"];
+  const points = (state: AuthoredActionState) => {
+    if (
+      state.context.kind !== "sketch" ||
+      !state.data ||
+      !("definition" in state.data)
+    )
+      throw new Error("Expected sketch");
+    return {
+      records: state.data.definition.points.map((entry) => entry.pointId),
+      ids: state.data.definition.pointIds,
+    };
+  };
+  const both = (order: string[]) => ({ records: order, ids: order });
+  const five = () => ids.reduce((state, id) => point(state, id), seed());
+  const without = (state: AuthoredActionState, removed: string[]) =>
+    changed(state, (data) => {
+      data.definition.points = data.definition.points.filter(
+        (entry) => !removed.includes(entry.pointId),
+      );
+      data.definition.pointIds = data.definition.pointIds.filter(
+        (id) => !removed.includes(id),
+      );
+    });
+
+  test("removals: Undo re-inserts after the predecessor (neighbours removed together too); Redo, Undo again", () => {
+    const history = new AuthoredActionHistory(),
+      before = five();
+    const removed = applied(
+      history.commit(
+        identity,
+        before,
+        without(before, ["p2", "p3", "p5"]),
+        "Delete",
+        before,
+      ),
+    );
+    expect(points(removed)).toEqual(both(["p1", "p4"]));
+    const undone = applied(history.undo(identity, removed));
+    expect(points(undone), "Undo").toEqual(both(ids));
+    const redone = applied(history.redo(identity, undone));
+    expect(points(redone), "Redo").toEqual(both(["p1", "p4"]));
+    expect(points(applied(history.undo(identity, redone))), "Undo").toEqual(
+      both(ids),
+    );
+  });
+
+  test("a predecessor gone meanwhile: after the nearest earlier surviving id, else first", () => {
+    const history = new AuthoredActionHistory(),
+      before = five();
+    const removed = applied(
+      history.commit(
+        identity,
+        before,
+        without(before, ["p3", "p2"]),
+        "Delete",
+        before,
+      ),
+    );
+    // Removed outside this action (a peer): p2's predecessor p1, and p3's p2.
+    const peer = without(removed, ["p1"]);
+    expect(points(applied(history.undo(identity, peer)))).toEqual(
+      both(["p2", "p3", "p4", "p5"]),
+    );
+    const other = new AuthoredActionHistory(),
+      base = five();
+    const third = applied(
+      other.commit(identity, base, without(base, ["p3"]), "Delete", base),
+    );
+    expect(
+      points(applied(other.undo(identity, without(third, ["p2"])))),
+      "p2 gone: after p1",
+    ).toEqual(both(["p1", "p3", "p4", "p5"]));
+  });
+
+  test("insertions: a commit keeps the candidate's position; Undo removes, Redo re-inserts there", () => {
+    const history = new AuthoredActionHistory(),
+      before = five();
+    const candidate = changed(point(before, "q"), (data) => {
+      const q = data.definition.points.pop()!;
+      data.definition.points.splice(2, 0, q);
+      data.definition.pointIds = data.definition.points.map(
+        (entry) => entry.pointId,
+      );
+    });
+    const inserted = ["p1", "p2", "q", "p3", "p4", "p5"];
+    const committed = applied(
+      history.commit(identity, before, candidate, "Point", before),
+    );
+    expect(points(committed), "commit").toEqual(both(inserted));
+    const undone = applied(history.undo(identity, committed));
+    expect(points(undone), "Undo").toEqual(both(ids));
+    expect(points(applied(history.redo(identity, undone))), "Redo").toEqual(
+      both(inserted),
+    );
+  });
+});

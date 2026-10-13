@@ -11,6 +11,7 @@ import type {
 import { stableJsonValue } from "@/contracts/modeling/authored-document-serialization";
 import {
   pruneSketchAnnotationContext,
+  restageSketchMergePointsTool,
   restageSketchMirrorTool,
   withoutSketchAnnotationWheel,
   type SketchSessionState,
@@ -62,10 +63,11 @@ function restoreAuthoredSession(
   });
 }
 
-/** The session fields a label placement frame rewrites (`patchSketchDimensionAnnotationPlacement`). */
+/** The session fields a label placement frame rewrites (`patchSketchDimensionAnnotationPlacement`;
+ * T17f D3: it re-bases the live solve onto the moved definition). */
 type AnnotationGestureBasis = Pick<
   SketchSessionState,
-  "definition" | "commitRequest" | "toolPresentation"
+  "definition" | "commitRequest" | "toolPresentation" | "liveSolve"
 >;
 
 interface AnnotationGesture {
@@ -357,6 +359,7 @@ export class SketchAuthoredActions {
             definition: before.session.definition,
             commitRequest: before.session.commitRequest,
             toolPresentation: before.session.toolPresentation,
+            liveSolve: before.session.liveSolve,
           },
         });
     }
@@ -573,12 +576,26 @@ export class SketchAuthoredActions {
         "definition" in restored.data
       ) {
         // T16d review A-3: a Mirror selection re-stages on the restored
-        // definition (its preview, popup and Enter agree at once).
-        const session = restageSketchMirrorTool(
-          restoreAuthoredSession(state.session, restored),
+        // definition (its preview, popup and Enter agree at once); T17f:
+        // so do Merge Points' picks.
+        const session = restageSketchMergePointsTool(
+          restageSketchMirrorTool(
+            restoreAuthoredSession(state.session, restored),
+          ),
         );
         restoreAfterReducer(before, result, {
           ...state,
+          // T17f (T16e review A-4): a repair the restore ended leaves no
+          // tool, so the command is the sketch again, as after its Cancel.
+          ...(state.session.activeEditTool?.repair && !session.activeEditTool
+            ? {
+                command: {
+                  ...state.command,
+                  toolId: "sketch" as const,
+                  phase: "editing" as const,
+                },
+              }
+            : {}),
           selection: [],
           hoverTarget: null,
           // T14c: refs the restored definition no longer holds leave the
