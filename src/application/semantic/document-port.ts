@@ -1,11 +1,33 @@
 import type { ModelingDiagnostic } from "@/contracts/modeling/schema";
 import type {
   SemanticDiscovery,
+  SemanticFileReceipt,
   SemanticPersistenceReceipt,
   SemanticState,
 } from "@/contracts/semantic/schema";
 
 /** Production adapter owns the existing service and editor, never a second state/history store. */
+/** Disk boundary only: shared owners neither open pickers nor interpret terminal paths. */
+export interface NativeDocumentFileIO {
+  read(path: string): Promise<string>;
+  write(
+    path: string,
+    text: string,
+  ): Promise<{
+    kind: "written" | "failed";
+    bytesWritten: number;
+    diagnostics: readonly ModelingDiagnostic[];
+  }>;
+}
+
+export interface SemanticDocumentMutation {
+  state: SemanticState | null;
+  failure?: "execution" | "file" | "persistence";
+  rejected?: string;
+  persistence: SemanticPersistenceReceipt;
+  diagnostics: readonly ModelingDiagnostic[];
+}
+
 export interface SemanticDocumentPort {
   initialize(): Promise<
     | { kind: "ready"; discovery: SemanticDiscovery }
@@ -22,6 +44,29 @@ export interface SemanticDocumentPort {
     discovery: SemanticDiscovery;
     diagnostics: readonly ModelingDiagnostic[];
   }>;
+  /** Optional family capability; paths are opaque adapter inputs, not picker policy. */
+  nativeFiles?: {
+    open(input: {
+      commandId: string;
+      path: string;
+      currentState: SemanticState;
+    }): Promise<SemanticDocumentMutation>;
+    rename(input: {
+      commandId: string;
+      label: string;
+      currentState: SemanticState;
+    }): Promise<SemanticDocumentMutation>;
+    save(input: {
+      commandId: string;
+      path: string;
+      state: SemanticState;
+    }): Promise<{
+      file: SemanticFileReceipt;
+      persistence: SemanticPersistenceReceipt;
+      failure?: "execution";
+      diagnostics: readonly ModelingDiagnostic[];
+    }>;
+  };
   drain(): Promise<void>;
   release(): Promise<void>;
 }

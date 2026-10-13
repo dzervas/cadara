@@ -331,10 +331,18 @@ function violations(entry: string) {
         /^src\/(domain|infrastructure|application\/editor)\//.test(to)
       )
         failures.push(`${from} -> ${to}`);
+      if (nativeFilePolicyViolation(from, specifier))
+        failures.push(`${from} -> filesystem adapter ${specifier}`);
       if (resolved) pending.push(resolved);
     }
   }
   return failures;
+}
+function nativeFilePolicyViolation(from: string, specifier: string): boolean {
+  return (
+    /^src\/application\/semantic\//.test(from) &&
+    /^(?:node:)?fs(?:\/|$)/.test(specifier)
+  );
 }
 function sharedCliViolations(file: string) {
   return runtimeImports(file).flatMap((edge) => {
@@ -351,6 +359,27 @@ function sharedCliViolations(file: string) {
   });
 }
 describe("headless transitive runtime boundary", () => {
+  it("keeps filesystem bytes and operations in adapters, not semantic application owners", () => {
+    const directory = mkdtempSync(
+      resolve(root, "src/application/semantic/.native-file-policy-"),
+    );
+    try {
+      const file = resolve(directory, "files.ts");
+      writeFileSync(
+        file,
+        'import { readFile } from "node:fs/promises"; export { open } from "fs/promises";',
+      );
+      expect(violations(file)).toEqual([
+        expect.stringContaining("filesystem adapter node:fs/promises"),
+        expect.stringContaining("filesystem adapter fs/promises"),
+      ]);
+      expect(violations(resolve(root, "src/composition/headless.ts"))).toEqual(
+        [],
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
   it.each([
     [
       "src/infrastructure/occ/filesystem-kernel-runtime.ts",

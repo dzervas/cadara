@@ -3,18 +3,34 @@ export interface AuthoredDocumentSerializationOptions {
 }
 
 export function stableJsonValue(value: unknown): unknown {
+  return orderedJsonValue(value, false);
+}
+
+function orderedJsonValue(
+  value: unknown,
+  preserveGeometryData: boolean,
+): unknown {
   if (Array.isArray(value)) {
-    return value.map((entry) => stableJsonValue(entry));
+    return value.map((entry) => orderedJsonValue(entry, preserveGeometryData));
   }
 
   if (!isRecord(value)) {
     return value;
   }
 
+  // Asset hashes certify the existing encoder's bytes, including nested key
+  // order. Sorting retained data corrupts a valid native file on fresh reopen.
+  // Equality still uses fully stable ordering; only serialization preserves bytes.
+  if (
+    preserveGeometryData &&
+    (value.kind === "cadaraBrep" || value.kind === "bakedMeshGeometry")
+  )
+    return value;
+
   return Object.fromEntries(
     Object.keys(value)
       .sort()
-      .map((key) => [key, stableJsonValue(value[key])]),
+      .map((key) => [key, orderedJsonValue(value[key], preserveGeometryData)]),
   );
 }
 
@@ -23,7 +39,7 @@ export function serializeAuthoredDocumentJson(
   options: AuthoredDocumentSerializationOptions = {},
 ) {
   return JSON.stringify(
-    stableJsonValue(document),
+    orderedJsonValue(document, true),
     null,
     (options.pretty ?? true) ? 2 : 0,
   );

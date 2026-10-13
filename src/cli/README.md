@@ -20,7 +20,7 @@ cadara <group> <command> [args]
 
 ## `document recipe`
 
-Run a sequential create/inspect recipe against an isolated in-memory document:
+Run sequential native document operations against an isolated editing context:
 
 ```bash
 bun run cli -- document recipe recipe.json
@@ -44,9 +44,17 @@ or list order. Stdout is one JSON envelope containing correlated semantic
 results, unexecuted command IDs and awaited cleanup. Errors use stderr and the
 shell's existing 0/1/2 policy. Execution stops at the first failed operation;
 prior changes are not rolled back. Each invocation owns a separate document.
-Repository commitment is not a disk save. File and sketch operations are not
-implemented by this document slice. Help, capture and invalid recipes do not
-start the modeling runtime.
+Repository commitment is not a disk save. `document.rename` takes `label` and
+a current `basis`; it may define a new alias with `as`. `document.save` takes
+`path` and a current `basis`, and completes only after writing, synchronizing
+and closing the native file. `document.open` takes `path`, `basis: null`, and
+may define an alias. It uses the current native JSON format and retained assets,
+with a fresh editing context and no restored private undo history. Read/write
+failures are command failures; applied live state and failed saving remain
+separate in the result. Saving is not atomic and partial bytes are reported.
+For example, append `{ "version": 1, "commandId": "save", "operation":
+"document.save", "path": "bracket.cadara", "basis": { "alias": "part" } }`.
+Help, capture and invalid recipes do not start the modeling runtime.
 
 ## `onshape capture`
 

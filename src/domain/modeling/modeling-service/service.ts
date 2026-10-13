@@ -441,6 +441,30 @@ export function createModelingService(
       assets.map((asset) => [asset.asset.assetId, asset]),
     );
 
+    // Current native files must carry the retained inputs they reference;
+    // resolving an old session's store copy would make reopening non-repeatable.
+    const manifestById = new Map(
+      document.assets.records.map((asset) => [asset.assetId, asset]),
+    );
+    for (const feature of document.features) {
+      if (feature.definition.kind !== "bakedBody") continue;
+      const reference = feature.definition.parameters;
+      const asset = manifestById.get(reference.assetId);
+      if (
+        !asset ||
+        asset.format !== reference.format ||
+        asset.hash !== reference.hash ||
+        asset.byteLength !== reference.byteLength
+      ) {
+        diagnostics.push(
+          createDocumentFileDiagnostic(
+            "document-import-asset-missing",
+            `Retained geometry asset ${reference.assetId} is missing or does not match feature ${feature.featureId}.`,
+          ),
+        );
+      }
+    }
+
     for (const asset of document.assets.records) {
       if (asset.format !== "cadara-brep" && asset.format !== "baked-mesh") {
         continue;
@@ -575,6 +599,14 @@ export function createModelingService(
       ) ?? restoreActiveDocument());
     };
 
+    if (options.validateEmbeddedAssetsBeforePersist) {
+      const diagnostics = await validateEmbeddedGeometryAssetsForPersistence(
+        activeDocument,
+        assets,
+      );
+      if (diagnostics.length > 0) return { ok: false, diagnostics };
+    }
+
     if (options.validateBeforePersist) {
       try {
         await validateActiveDocument();
@@ -589,19 +621,6 @@ export function createModelingService(
                 : "Imported document could not be restored.",
             ),
           ],
-        };
-      }
-    }
-
-    if (options.validateEmbeddedAssetsBeforePersist) {
-      const diagnostics = await validateEmbeddedGeometryAssetsForPersistence(
-        activeDocument,
-        assets,
-      );
-      if (diagnostics.length > 0) {
-        return {
-          ok: false,
-          diagnostics,
         };
       }
     }
@@ -1517,9 +1536,26 @@ export function createModelingService(
         return normalized;
       }
 
+      const current = validateSnapshotResponse(
+        await adapter.getDocumentSnapshot(buildDocumentRequest(currentDocumentId)),
+        currentDocumentId,
+      );
+      // Fresh editing contexts cannot reuse a saved basis from an earlier owner.
       return replaceCurrentAuthoredDocument(
-        normalized.document,
+        {
+          ...normalized.document,
+          revisionId: createRevisionId(
+            Math.max(
+              parseRevisionSequence(current.document.revisionId),
+              parseRevisionSequence(normalized.document.revisionId),
+            ) + 1,
+          ),
+        },
         input.assets ?? [],
+        {
+          validateEmbeddedAssetsBeforePersist: true,
+          observeTransaction: input.observe,
+        },
       );
     },
     async renameDocument(input) {
@@ -1540,10 +1576,15 @@ export function createModelingService(
         };
       }
 
-      return replaceCurrentAuthoredDocument({
-        ...document,
-        name: input.name,
-      });
+      return replaceCurrentAuthoredDocument(
+        {
+          ...document,
+          name: input.name,
+          revisionId: createRevisionId(parseRevisionSequence(document.revisionId) + 1),
+        },
+        [],
+        { observeTransaction: input.observe },
+      );
     },
     async bindLocalFile(input) {
       await ensureInitialized();
@@ -1616,10 +1657,22 @@ export function createModelingService(
         }
       });
     },
-    async exportCurrentDocument() {
+    async exportCurrentDocument(input) {
       await ensureInitialized();
       await repositoryChangePromise;
       const document = await exportAuthoredDocumentForRepository();
+      if (input && documentRepository) {
+        // Explicit native save observes its own synchronization transaction;
+        // a fulfilled global persistence tail cannot certify durability.
+        const receipt = await documentRepository.mutate({
+          documentId: currentDocumentId,
+          document,
+          expected: document,
+        });
+        input.observe(receipt);
+        if (!receipt.ok) throw new Error(receipt.status.diagnostic.message);
+        markRepositorySnapshotFresh(receipt.metadata);
+      }
 
       return {
         ok: true,
