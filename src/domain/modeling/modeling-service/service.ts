@@ -55,6 +55,7 @@ import {
   isGeometryAssetDocumentRepository,
   type DocumentRepositoryChangeEvent,
   type DocumentRepositoryMetadata,
+  type DocumentRepositoryMutationResult,
 } from "@/domain/modeling/document-repository";
 import { serializeAuthoredDocumentJson as createLocalAuthoredDocumentPayload } from "@/contracts/modeling/authored-document-serialization";
 import { hashGeometryAssetBytes } from "@/domain/modeling/geometry-asset-store";
@@ -893,7 +894,7 @@ export function createModelingService(
     expected: AuthoredModelDocument,
     response: ModelingOperationResult,
     result: T,
-    input: { baseRepositoryHeads?: readonly string[] },
+    input: { baseRepositoryHeads?: readonly string[]; observePersistence?: (transaction: DocumentRepositoryMutationResult) => void },
     createHistoryEntry: (() => ModelingOperationHistoryEntry) | null,
   ): Promise<T> {
     const repositoryConflict = repositoryHeadsChangedSinceBasis(input);
@@ -912,15 +913,15 @@ export function createModelingService(
     if (createHistoryEntry) {
       appendOperationHistoryEntry(createHistoryEntry());
       if (documentRepositoryPersistence === "background") {
-        await enqueueAcceptedAuthoredDocumentPersistence(expected);
+        await enqueueAcceptedAuthoredDocumentPersistence(expected, input.observePersistence);
         return freshResult;
       }
     } else if (documentRepositoryPersistence === "background") {
-      await enqueueAcceptedAuthoredDocumentPersistence(expected);
+      await enqueueAcceptedAuthoredDocumentPersistence(expected, input.observePersistence);
       return freshResult;
     }
 
-    return persistAcceptedAuthoredDocument(freshResult, expected);
+    return persistAcceptedAuthoredDocument(freshResult, expected, input.observePersistence);
   }
 
   function notifyModelingDocumentChange(event: DocumentRepositoryChangeEvent) {
@@ -1292,7 +1293,7 @@ export function createModelingService(
 
   async function persistAcceptedAuthoredDocument<
     T extends { diagnostics: ModelingDiagnostic[] },
-  >(result: T, expected: AuthoredModelDocument): Promise<T> {
+  >(result: T, expected: AuthoredModelDocument, observe?: (transaction: DocumentRepositoryMutationResult) => void): Promise<T> {
     if (!documentRepository) {
       return result;
     }
@@ -1315,6 +1316,7 @@ export function createModelingService(
       expected,
       document: await exportAuthoredDocumentForRepository(),
     });
+    observe?.(writeResult);
 
     if (writeResult.ok) {
       markRepositorySnapshotFresh(writeResult.metadata);
@@ -1371,6 +1373,7 @@ export function createModelingService(
 
   async function enqueueAcceptedAuthoredDocumentPersistence(
     expected: AuthoredModelDocument,
+    observe?: (transaction: DocumentRepositoryMutationResult) => void,
   ) {
     if (!documentRepository || !canPersistAuthoredDocument) {
       return;
@@ -1391,6 +1394,7 @@ export function createModelingService(
           expected,
           document,
         });
+        observe?.(writeResult);
 
         if (writeResult.ok) {
           markRepositorySnapshotFresh(writeResult.metadata);
@@ -1417,6 +1421,8 @@ export function createModelingService(
           historyRestoreState.entriesReplayed,
         );
       });
+    // A semantic caller awaits this exact candidate's write, not a fulfilled global drain.
+    if (observe) await repositoryPersistencePromise;
   }
 
   return {
@@ -2018,7 +2024,15 @@ export function createModelingService(
             input,
             currentDocumentId,
           );
-          const expected = await exportAuthoredDocumentForRepository();
+          const kernelBase = await exportAuthoredDocumentForRepository();
+          // Restoring a published sketch can omit inactive downstream lineage from
+          // the kernel export. The three-way persistence base is the exact stored
+          // document, not that derived view; normal head conflict checks still apply.
+          const storedBase = documentRepository
+            ? await documentRepository.load({ documentId: currentDocumentId, seedDocument: kernelBase })
+            : null;
+          if (storedBase && !storedBase.ok) throw new Error(storedBase.status.diagnostic.message);
+          const expected = storedBase?.ok ? storedBase.document : kernelBase;
           const response = await adapter.setFeatureCursor(request);
           return finalizeMutationResult(
             expected,

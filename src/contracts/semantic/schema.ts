@@ -48,6 +48,7 @@ export type SemanticSketchCommand = CommandIdentity & {
   basis: SemanticBasis;
 } & (
     | { operation: "sketch.begin"; plane: "xy" | "yz" | "xz" }
+    | { operation: "sketch.open"; sketchId: SketchId }
     | {
         operation: "sketch.author";
         draft: SemanticDraftBasis;
@@ -93,9 +94,19 @@ interface CommandIdentity {
   commandId: string;
 }
 
-/** Implemented document/private-sketch slices. Later tickets extend this closed union. */
+export type SemanticExtrudeCommand = CommandIdentity & {
+  basis: SemanticBasis;
+  depth: number;
+  intent: "fulfill" | "author-invalid";
+} & (
+  | { operation: "extrude.create"; profile: Extract<DurableRef, { kind: "region" }> }
+  | { operation: "extrude.update"; featureId: import("@/contracts/shared/ids").FeatureId }
+);
+
+/** Implemented slices. Later tickets extend this closed union. */
 export type SemanticCommand =
   | SemanticSketchCommand
+  | SemanticExtrudeCommand
   | (CommandIdentity &
       (
         | { operation: "document.create"; label: string; basis: null }
@@ -211,6 +222,11 @@ export interface SemanticDiscovery {
   settings?: import("@/contracts/modeling/schema").ModelingDocumentSettings;
   references: readonly { label: string; target: DurableRef }[];
   history: DurableHistoryAvailability | null;
+  model?: {
+    features: readonly { featureId: import("@/contracts/shared/ids").FeatureId; label: string; kind: string; producedTargets: readonly DurableRef[] }[];
+    /** Native exact B-rep inspection only; null when unavailable or invalid. */
+    bodies: readonly { bodyId: import("@/contracts/shared/ids").BodyId; kind: import("@/contracts/modeling/schema").BodyKind; bounds: { min: readonly number[]; max: readonly number[] } | null }[];
+  };
   sketch?: {
     sketchId: SketchId | null;
     plane: "xy" | "yz" | "xz";

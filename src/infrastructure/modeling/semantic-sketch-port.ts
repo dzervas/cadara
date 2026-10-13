@@ -187,7 +187,7 @@ export function createSemanticSketchPort(input: {
         outcome: { kind: "conflicted" as const, actualBasis: initial.state },
       };
     if (
-      command.operation === "sketch.begin"
+      (command.operation === "sketch.begin" || command.operation === "sketch.open")
         ? editor.kind !== "idle"
         : editor.kind !== "editingSketch"
     )
@@ -196,7 +196,7 @@ export function createSemanticSketchPort(input: {
         outcome: { kind: "rejected" as const, reasonCode: "editing-context" },
       };
     if (
-      command.operation !== "sketch.begin" &&
+      "draft" in command &&
       (initial.state.draft?.commandSessionId !==
         command.draft.commandSessionId ||
         initial.state.draft.generation !== command.draft.generation)
@@ -205,6 +205,8 @@ export function createSemanticSketchPort(input: {
         ...terminal,
         outcome: { kind: "conflicted" as const, actualBasis: initial.state },
       };
+    if (command.operation === "sketch.open" && !initial.references.some(r => r.target.kind === "sketch" && r.target.sketchId === command.sketchId))
+      return { ...terminal, outcome: { kind: "rejected", reasonCode: "sketch-unavailable" } };
     if (command.operation === "sketch.author") {
       const p = command.primitive;
       const start = p.kind === "point" ? p.position : p.start;
@@ -257,6 +259,7 @@ export function createSemanticSketchPort(input: {
     let publicationReceipt:
       | import("@/domain/modeling/document-repository").DocumentRepositoryMutationResult
       | undefined;
+    const cursorWrites: { event: Extract<EditorEvent, { type: "effect.documentCursorMoved" | "effect.documentCursorMoveFailed" }>; receipt: import("@/domain/modeling/document-repository").DocumentRepositoryMutationResult | undefined }[] = [];
     try {
       if (command.operation === "sketch.begin")
         events = await input.loop.dispatchAndSettle(command.commandId, {
@@ -266,6 +269,11 @@ export function createSemanticSketchPort(input: {
             constructionId:
               `construction_plane-${command.plane}` as ConstructionId,
           },
+        });
+      if (command.operation === "sketch.open")
+        events = await input.loop.dispatchAndSettle(command.commandId, {
+          type: "sketch.beginRequested",
+          target: { kind: "sketch", sketchId: command.sketchId },
         });
       if (command.operation === "sketch.author")
         events = await input.loop.dispatchAndSettle(command.commandId, {
@@ -296,6 +304,9 @@ export function createSemanticSketchPort(input: {
             ? [semanticDiagnostic(new Error(event.message))]
             : [],
       );
+      for (const event of events) if (event.type === "effect.documentCursorMoved" || event.type === "effect.documentCursorMoveFailed") {
+        cursorWrites.push({ event, receipt: input.publications.takeCursor(event.baseRevisionId) });
+      }
       const finalEditor = input.loop.getState();
       for (const e of events)
         if (
@@ -424,22 +435,33 @@ export function createSemanticSketchPort(input: {
         const publicationRequestId =
           committed?.requestId ?? commitFailure?.requestId;
         const receipt = publicationReceipt;
-        const applied = receipt?.ok ? receipt : receipt?.appliedLive;
+        const publicationApplied = receipt?.ok ? receipt : receipt?.appliedLive;
+        let applied = publicationApplied;
+        let cursorChainValid = true;
+        for (const cursor of cursorWrites) {
+          const next = cursor.receipt?.ok ? cursor.receipt : cursor.receipt?.appliedLive;
+          if (!applied || cursor.event.baseRevisionId !== applied.document.revisionId || !next || cursor.event.type !== "effect.documentCursorMoved" || !cursor.event.accepted) cursorChainValid = false;
+          if (next) applied = next;
+        }
+        const persistenceFailed = !receipt?.ok || cursorWrites.some(c => !c.receipt?.ok);
         if (
           applied &&
-          (!committed?.accepted ||
+          (!committed?.accepted || !cursorChainValid ||
             state.revisionId !== applied.document.revisionId ||
             [...state.repositoryHeads].sort().join("\0") !==
               [...applied.metadata.heads].sort().join("\0"))
         ) {
-          const actualState = {
+          const finalCursorApplied = cursorWrites.some(c => c.event.type === "effect.documentCursorMoved" && c.event.accepted && c.event.revisionId === state.revisionId);
+          // A failed cursor write does not roll the already accepted kernel cursor back
+          // to the publication revision. Preserve the observed final live basis.
+          const actualState = finalCursorApplied ? state : {
             ...state,
             revisionId: applied.document.revisionId,
             repositoryHeads: [...applied.metadata.heads],
           };
           terminal.completion.live = { kind: "applied", state: actualState };
           terminal.completion.persistence = {
-            kind: receipt!.ok ? "committed" : "failed",
+            kind: persistenceFailed ? "failed" : "committed",
             commandId: command.commandId,
             transactionId: publicationRequestId!,
             state: actualState,
@@ -458,22 +480,19 @@ export function createSemanticSketchPort(input: {
               "execution",
               "handoff",
               "geometry",
-              ...(!receipt!.ok ? ["persistence" as const] : []),
+              ...(persistenceFailed ? ["persistence" as const] : []),
             ],
           };
           terminal.diagnostics = [
             ...terminal.diagnostics,
-            semanticDiagnostic(
-              new Error(
-                "Publication snapshot does not match the exact accepted transaction.",
-              ),
-            ),
+            semanticDiagnostic(new Error("Publication snapshot does not match the exact accepted transaction and cursor restoration.")),
+            ...cursorWrites.flatMap(c => c.receipt && !c.receipt.ok ? [semanticDiagnostic(new Error(c.receipt.status.diagnostic.message))] : []),
           ];
           return terminal;
         }
         if (committed?.accepted && applied) {
           terminal.completion.persistence = {
-            kind: receipt!.ok ? "committed" : "failed",
+            kind: persistenceFailed ? "failed" : "committed",
             commandId: command.commandId,
             transactionId: committed.requestId,
             state,
@@ -488,6 +507,7 @@ export function createSemanticSketchPort(input: {
             );
           const boundaryBasis = regionBoundaryBasisOfRecord(sketch);
           const usable =
+            !snapshot.document.diagnostics.some(d => d.severity === "error") &&
             sketch.derivedValidity.state === "current" &&
             sketchProfileGateFailures(sketch.solvedSnapshot).length === 0 &&
             sketch.regions.every((r) =>
@@ -558,7 +578,7 @@ export function createSemanticSketchPort(input: {
             rebuildRevisionId: state.revisionId,
           } as SemanticGeometryReceipt;
           const failures = [
-            ...(!receipt!.ok ? ["persistence" as const] : []),
+            ...(persistenceFailed ? ["persistence" as const] : []),
             ...(!usable ||
             (command.requireProfiles &&
               !terminal.discovery.sketch.profiles.length)
@@ -595,6 +615,11 @@ export function createSemanticSketchPort(input: {
             ],
           };
         }
+      }
+      if (command.operation !== "sketch.publish" && cursorWrites.length) {
+        const failed = cursorWrites.some(c => !c.receipt?.ok);
+        terminal.completion.persistence = { kind: failed ? "failed" : "committed", commandId: command.commandId, transactionId: cursorWrites.map(c => c.event.requestId).join(":"), state };
+        if (failed) terminal.outcome = { kind: "failed", failures: [...(terminal.outcome.kind === "failed" ? terminal.outcome.failures : []), "persistence"] };
       }
       if (
         terminal.completion.geometry.kind === "invalid-editable" &&

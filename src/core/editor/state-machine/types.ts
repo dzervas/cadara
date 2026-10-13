@@ -704,7 +704,7 @@ export interface SnapshotFailedEvent {
  * through `effect.*` result events.
  */
 export type EditorEvent =
-  | { type: "sketch.beginRequested"; target: import("@/contracts/shared/references").ConstructionRef }
+  | { type: "sketch.beginRequested"; target: import("@/contracts/shared/references").ConstructionRef | import("@/contracts/shared/references").SketchRef }
   | { type: "sketch.primitiveAuthored"; primitive: import("@/contracts/semantic/schema").SemanticSketchPrimitive; construction: boolean }
   | { type: "sketch.dimensionAuthored"; input: import("@/contracts/semantic/schema").SemanticDimensionInput }
   | { type: "sketch.dimensionUpdated"; dimensionId: import("@/contracts/shared/ids").DimensionId; value: number }

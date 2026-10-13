@@ -7,7 +7,7 @@ export function semanticCommandCorrelation(
   return {
     commandId: command.commandId,
     family:
-      command.operation === "sketch.begin"
+      (command.operation === "sketch.begin" || command.operation === "sketch.open")
         ? "sketch-open"
         : command.operation === "sketch.publish"
           ? "sketch-publish"
@@ -15,6 +15,8 @@ export function semanticCommandCorrelation(
             ? "sketch-discard"
             : command.operation.startsWith("sketch.")
               ? "sketch-author"
+              : command.operation.startsWith("extrude.")
+                ? "model-mutate"
               : command.operation === "document.open"
                 ? "file-open"
                 : command.operation === "document.save"

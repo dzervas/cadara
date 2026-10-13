@@ -1,3 +1,5 @@
+import { createSemanticExtrudePort } from "./semantic-extrude-port";
+import { inspectSemanticModel } from "./semantic-model-inspection";
 import { createSemanticSketchPort } from "./semantic-sketch-port";
 import { createNativeDocumentFiles } from "./native-document-files";
 import type {
@@ -62,11 +64,12 @@ export function createSemanticDocumentPort(input: {
       ),
       document: { label: snapshot.document.name },
       settings: snapshot.document.settings,
-      references: snapshot.presentation.entities.map((entity) => ({
-        label: entity.label,
-        target: entity.target,
-      })),
+      references: [
+        ...snapshot.presentation.entities.map((entity) => ({ label: entity.label, target: entity.target })),
+        ...snapshot.document.features.map(f => ({ label: f.label, target: { kind: "feature" as const, featureId: f.featureId } })),
+      ],
       history: await repository.getDurableHistoryAvailability(documentId),
+      model: await inspectSemanticModel(service, snapshot),
     };
     return { discovery: sketches.discovery(discovery), diagnostics: snapshot.document.diagnostics };
   }
@@ -152,6 +155,7 @@ export function createSemanticDocumentPort(input: {
     }),
     inspect,
     sketch: sketches.execute,
+    extrude: createSemanticExtrudePort({ service, loop, inspect }),
     async drain() {
       await loop.drain();
       await service.waitForPersistence();
