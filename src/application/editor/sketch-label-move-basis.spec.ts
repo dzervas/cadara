@@ -9,6 +9,7 @@
  */
 import { describe, expect, test } from "vitest";
 import type { EditorEvent } from "@/core/editor/state-machine";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
   acceptSketchDraw,
   beginSketchTool,
@@ -41,9 +42,11 @@ async function labelledLines() {
   const drawn = draw(
     draw(
       draw(
-        createNewSketchSession(
-          createStandardPlaneDefinition("xy"),
-          OCC_KERNEL_SETTINGS,
+        enterSketchSession(
+          createNewSketchSession(
+            createStandardPlaneDefinition("xy"),
+            OCC_KERNEL_SETTINGS,
+          ),
         ),
         [0, 0],
         [4, 0],

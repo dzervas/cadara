@@ -18,6 +18,7 @@ import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
 } from "@/domain/modeling/opencascade-kernel-seed";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import { validateSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import {
@@ -94,19 +95,9 @@ test("src/domain/editor/sketch-reference-geometry.spec.ts", () => {
       partialSolvePolicy: "bestEffort",
     });
 
-    return createSketchSessionFromSnapshot(
-      {
-        ownerDocumentId: "doc_workspace",
-        ownerRevisionId: "rev_0001",
-        ownerFeatureId: null,
-        ownerSketchId: "sketch_primary",
-        ownerBodyId: null,
-        sketchId: "sketch_primary",
-        label: "Sketch",
-        plane,
-        planeTarget: plane.support,
-        planeKey: "xy",
-        sketch: {
+    return enterSketchSession(
+      createSketchSessionFromSnapshot(
+        {
           ownerDocumentId: "doc_workspace",
           ownerRevisionId: "rev_0001",
           ownerFeatureId: null,
@@ -114,14 +105,26 @@ test("src/domain/editor/sketch-reference-geometry.spec.ts", () => {
           ownerBodyId: null,
           sketchId: "sketch_primary",
           label: "Sketch",
-          planeSupport: plane.support,
-          definition,
-          solvedSnapshot: solved.solvedSnapshot,
-          derivedValidity: { state: "current", diagnostics: [] },
-          regions: [],
-        },
-      } satisfies SketchSnapshotRecord,
-      OCC_KERNEL_SETTINGS,
+          plane,
+          planeTarget: plane.support,
+          planeKey: "xy",
+          sketch: {
+            ownerDocumentId: "doc_workspace",
+            ownerRevisionId: "rev_0001",
+            ownerFeatureId: null,
+            ownerSketchId: "sketch_primary",
+            ownerBodyId: null,
+            sketchId: "sketch_primary",
+            label: "Sketch",
+            planeSupport: plane.support,
+            definition,
+            solvedSnapshot: solved.solvedSnapshot,
+            derivedValidity: { state: "current", diagnostics: [] },
+            regions: [],
+          },
+        } satisfies SketchSnapshotRecord,
+        OCC_KERNEL_SETTINGS,
+      ),
     );
   }
 

@@ -21,6 +21,7 @@ import {
   createSessionCommitFactories,
   rebuildSessionForDefinition,
 } from "@/domain/editor/sketch-session/internals";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import type { SketchId } from "@/contracts/shared/ids";
 import {
   getRegisteredSketchToolDefinitions,
@@ -371,12 +372,14 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
 
   function testSessionRuntimeDelegatesCommitOutputToToolModule() {
     const session = beginSketchTool(
-      createNewSketchSessionFromSupport(
-        {
-          kind: "construction",
-          constructionId: "construction_plane-xy",
-        },
-        OCC_KERNEL_SETTINGS,
+      enterSketchSession(
+        createNewSketchSessionFromSupport(
+          {
+            kind: "construction",
+            constructionId: "construction_plane-xy",
+          },
+          OCC_KERNEL_SETTINGS,
+        ),
       ),
       "rectangle",
     );
@@ -413,12 +416,14 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
     points: readonly [number, number][],
   ) {
     let session = beginSketchTool(
-      createNewSketchSessionFromSupport(
-        {
-          kind: "construction",
-          constructionId: "construction_plane-xy",
-        },
-        OCC_KERNEL_SETTINGS,
+      enterSketchSession(
+        createNewSketchSessionFromSupport(
+          {
+            kind: "construction",
+            constructionId: "construction_plane-xy",
+          },
+          OCC_KERNEL_SETTINGS,
+        ),
       ),
       toolId,
     );
@@ -599,12 +604,14 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
 
   function testSplineCollectsFitPointsUntilFinalizedAndCommitsDurableGeometry() {
     let session = beginSketchTool(
-      createNewSketchSessionFromSupport(
-        {
-          kind: "construction",
-          constructionId: "construction_plane-xy",
-        },
-        OCC_KERNEL_SETTINGS,
+      enterSketchSession(
+        createNewSketchSessionFromSupport(
+          {
+            kind: "construction",
+            constructionId: "construction_plane-xy",
+          },
+          OCC_KERNEL_SETTINGS,
+        ),
       ),
       "spline",
     );
@@ -1017,12 +1024,14 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
 
   function testAdvancedToolValidationRejectsDegenerateInput() {
     let session = beginSketchTool(
-      createNewSketchSessionFromSupport(
-        {
-          kind: "construction",
-          constructionId: "construction_plane-xy",
-        },
-        OCC_KERNEL_SETTINGS,
+      enterSketchSession(
+        createNewSketchSessionFromSupport(
+          {
+            kind: "construction",
+            constructionId: "construction_plane-xy",
+          },
+          OCC_KERNEL_SETTINGS,
+        ),
       ),
       "ellipse",
     );
@@ -1042,12 +1051,14 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
 
   async function testProfileTextCommitsEditableTextAndDerivedProfile() {
     let session = beginSketchTool(
-      createNewSketchSessionFromSupport(
-        {
-          kind: "construction",
-          constructionId: "construction_plane-xy",
-        },
-        OCC_KERNEL_SETTINGS,
+      enterSketchSession(
+        createNewSketchSessionFromSupport(
+          {
+            kind: "construction",
+            constructionId: "construction_plane-xy",
+          },
+          OCC_KERNEL_SETTINGS,
+        ),
       ),
       "profileText",
     );
@@ -1130,12 +1141,14 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
 
   function testInvalidProfileTextDoesNotCommitPartialEntity() {
     let session = beginSketchTool(
-      createNewSketchSessionFromSupport(
-        {
-          kind: "construction",
-          constructionId: "construction_plane-xy",
-        },
-        OCC_KERNEL_SETTINGS,
+      enterSketchSession(
+        createNewSketchSessionFromSupport(
+          {
+            kind: "construction",
+            constructionId: "construction_plane-xy",
+          },
+          OCC_KERNEL_SETTINGS,
+        ),
       ),
       "profileText",
     );
@@ -1159,12 +1172,14 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
 
   function testFullSplinePreviewsMatchCommittedGeometry() {
     let ordinary = beginSketchTool(
-      createNewSketchSessionFromSupport(
-        {
-          kind: "construction",
-          constructionId: "construction_plane-xy",
-        },
-        OCC_KERNEL_SETTINGS,
+      enterSketchSession(
+        createNewSketchSessionFromSupport(
+          {
+            kind: "construction",
+            constructionId: "construction_plane-xy",
+          },
+          OCC_KERNEL_SETTINGS,
+        ),
       ),
       "spline",
     );
@@ -1187,12 +1202,14 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
     ).toBeGreaterThan(3);
 
     let control = beginSketchTool(
-      createNewSketchSessionFromSupport(
-        {
-          kind: "construction",
-          constructionId: "construction_plane-xy",
-        },
-        OCC_KERNEL_SETTINGS,
+      enterSketchSession(
+        createNewSketchSessionFromSupport(
+          {
+            kind: "construction",
+            constructionId: "construction_plane-xy",
+          },
+          OCC_KERNEL_SETTINGS,
+        ),
       ),
       "controlPointSpline",
     );

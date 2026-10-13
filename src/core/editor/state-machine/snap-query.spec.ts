@@ -15,6 +15,7 @@ import {
   updateSketchPointer,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,
@@ -73,9 +74,11 @@ function drawFree(
 async function stateWith(
   other: (session: SketchSessionState) => SketchSessionState,
 ) {
-  let session = createNewSketchSession(
-    createStandardPlaneDefinition("xy"),
-    OCC_KERNEL_SETTINGS,
+  let session = enterSketchSession(
+    createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
   );
   session = drawFree(session, "spline", [
     [0, 0],

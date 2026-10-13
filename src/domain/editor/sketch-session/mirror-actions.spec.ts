@@ -41,6 +41,7 @@ import {
   getEscapeEvent,
 } from "@/domain/editor/workbench-interactions";
 import type { PrimitiveRef } from "@/core/editor/schema";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
 import {
   chainSession,
@@ -534,9 +535,11 @@ describe("T16b: the Mirror panel's health agrees with the profile gate", () => {
 
   test("a mirror seeded on an offset spline curve (U-G2, malformed only, gated by severity) is listed as broken with its reason", () => {
     let session = beginSketchTool(
-      createNewSketchSession(
-        createStandardPlaneDefinition("xy"),
-        OCC_KERNEL_SETTINGS,
+      enterSketchSession(
+        createNewSketchSession(
+          createStandardPlaneDefinition("xy"),
+          OCC_KERNEL_SETTINGS,
+        ),
       ),
       "spline",
     );

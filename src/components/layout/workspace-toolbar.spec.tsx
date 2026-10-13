@@ -17,6 +17,7 @@ import {
   startSketchDraw,
   toggleSketchSvgRendering,
 } from "@/domain/editor/sketch-session";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
@@ -266,9 +267,11 @@ test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
 
   let styledSession = toggleSketchSvgRendering(
     withSketchSnapScale(
-      createNewSketchSession(
-        createStandardPlaneDefinition("xy"),
-        OCC_KERNEL_SETTINGS,
+      enterSketchSession(
+        createNewSketchSession(
+          createStandardPlaneDefinition("xy"),
+          OCC_KERNEL_SETTINGS,
+        ),
       ),
       SPEC_SKETCH_UNITS_PER_PIXEL,
     ),

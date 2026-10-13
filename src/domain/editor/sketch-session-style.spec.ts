@@ -12,6 +12,7 @@ import type {
   SketchPointId,
 } from "@/contracts/shared/ids";
 import type { PrimitiveRef } from "@/core/editor/schema";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
   createSketchSessionFromSnapshot,
   getSketchConstraintDisplayForTarget,
@@ -120,19 +121,9 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
     partialSolvePolicy: "bestEffort",
   });
   const plane = createStandardPlaneDefinition("xy");
-  const session = createSketchSessionFromSnapshot(
-    {
-      ownerDocumentId: "doc_workspace",
-      ownerRevisionId: "rev_0001",
-      ownerFeatureId: null,
-      ownerSketchId: "sketch_primary",
-      ownerBodyId: null,
-      sketchId: "sketch_primary",
-      label: "Sketch",
-      plane,
-      planeTarget: plane.support,
-      planeKey: "xy",
-      sketch: {
+  const session = enterSketchSession(
+    createSketchSessionFromSnapshot(
+      {
         ownerDocumentId: "doc_workspace",
         ownerRevisionId: "rev_0001",
         ownerFeatureId: null,
@@ -140,14 +131,26 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
         ownerBodyId: null,
         sketchId: "sketch_primary",
         label: "Sketch",
-        planeSupport: plane.support,
-        definition,
-        solvedSnapshot: solved.solvedSnapshot,
-        derivedValidity: { state: "current", diagnostics: [] },
-        regions: [],
-      },
-    } satisfies SketchSnapshotRecord,
-    OCC_KERNEL_SETTINGS,
+        plane,
+        planeTarget: plane.support,
+        planeKey: "xy",
+        sketch: {
+          ownerDocumentId: "doc_workspace",
+          ownerRevisionId: "rev_0001",
+          ownerFeatureId: null,
+          ownerSketchId: "sketch_primary",
+          ownerBodyId: null,
+          sketchId: "sketch_primary",
+          label: "Sketch",
+          planeSupport: plane.support,
+          definition,
+          solvedSnapshot: solved.solvedSnapshot,
+          derivedValidity: { state: "current", diagnostics: [] },
+          regions: [],
+        },
+      } satisfies SketchSnapshotRecord,
+      OCC_KERNEL_SETTINGS,
+    ),
   );
 
   const lineRenderable = getSketchSessionDisplayRenderables(session).find(
@@ -242,19 +245,9 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
     modelingTolerance: 1e-3,
     partialSolvePolicy: "bestEffort",
   });
-  const localSession = createSketchSessionFromSnapshot(
-    {
-      ownerDocumentId: "doc_workspace",
-      ownerRevisionId: "rev_0001",
-      ownerFeatureId: null,
-      ownerSketchId: "sketch_primary",
-      ownerBodyId: null,
-      sketchId: "sketch_primary",
-      label: "Sketch",
-      plane,
-      planeTarget: plane.support,
-      planeKey: "xy",
-      sketch: {
+  const localSession = enterSketchSession(
+    createSketchSessionFromSnapshot(
+      {
         ownerDocumentId: "doc_workspace",
         ownerRevisionId: "rev_0001",
         ownerFeatureId: null,
@@ -262,14 +255,26 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
         ownerBodyId: null,
         sketchId: "sketch_primary",
         label: "Sketch",
-        planeSupport: plane.support,
-        definition: localDefinition,
-        solvedSnapshot: localSolved.solvedSnapshot,
-        derivedValidity: { state: "current", diagnostics: [] },
-        regions: [],
-      },
-    } satisfies SketchSnapshotRecord,
-    OCC_KERNEL_SETTINGS,
+        plane,
+        planeTarget: plane.support,
+        planeKey: "xy",
+        sketch: {
+          ownerDocumentId: "doc_workspace",
+          ownerRevisionId: "rev_0001",
+          ownerFeatureId: null,
+          ownerSketchId: "sketch_primary",
+          ownerBodyId: null,
+          sketchId: "sketch_primary",
+          label: "Sketch",
+          planeSupport: plane.support,
+          definition: localDefinition,
+          solvedSnapshot: localSolved.solvedSnapshot,
+          derivedValidity: { state: "current", diagnostics: [] },
+          regions: [],
+        },
+      } satisfies SketchSnapshotRecord,
+      OCC_KERNEL_SETTINGS,
+    ),
   );
 
   const localLineRenderable = getSketchSessionDisplayRenderables(
@@ -380,19 +385,9 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
     partialSolvePolicy: "bestEffort",
   });
   const regionSession = {
-    ...createSketchSessionFromSnapshot(
-      {
-        ownerDocumentId: "doc_workspace",
-        ownerRevisionId: "rev_0001",
-        ownerFeatureId: null,
-        ownerSketchId: "sketch_primary",
-        ownerBodyId: null,
-        sketchId: "sketch_primary",
-        label: "Sketch",
-        plane,
-        planeTarget: plane.support,
-        planeKey: "xy",
-        sketch: {
+    ...enterSketchSession(
+      createSketchSessionFromSnapshot(
+        {
           ownerDocumentId: "doc_workspace",
           ownerRevisionId: "rev_0001",
           ownerFeatureId: null,
@@ -400,49 +395,61 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
           ownerBodyId: null,
           sketchId: "sketch_primary",
           label: "Sketch",
-          planeSupport: plane.support,
-          definition: regionDefinition,
-          solvedSnapshot: regionSolved.solvedSnapshot,
-          derivedValidity: { state: "current", diagnostics: [] },
-          regions: [
-            {
-              ownerDocumentId: "doc_workspace",
-              ownerRevisionId: "rev_0001",
-              ownerFeatureId: null,
-              ownerSketchId: "sketch_primary",
-              ownerBodyId: null,
-              regionId: "region_primary",
-              label: "Primary region",
-              target: {
-                kind: "region",
-                sketchId: "sketch_primary",
+          plane,
+          planeTarget: plane.support,
+          planeKey: "xy",
+          sketch: {
+            ownerDocumentId: "doc_workspace",
+            ownerRevisionId: "rev_0001",
+            ownerFeatureId: null,
+            ownerSketchId: "sketch_primary",
+            ownerBodyId: null,
+            sketchId: "sketch_primary",
+            label: "Sketch",
+            planeSupport: plane.support,
+            definition: regionDefinition,
+            solvedSnapshot: regionSolved.solvedSnapshot,
+            derivedValidity: { state: "current", diagnostics: [] },
+            regions: [
+              {
+                ownerDocumentId: "doc_workspace",
+                ownerRevisionId: "rev_0001",
+                ownerFeatureId: null,
+                ownerSketchId: "sketch_primary",
+                ownerBodyId: null,
                 regionId: "region_primary",
-              },
-              sourceSketch: { kind: "sketch", sketchId: "sketch_primary" },
-              loops: [
-                {
-                  role: "outer",
-                  segments: lineLoopSegmentsForTest(
-                    [
-                      { pointId: "sketch_point_a", position: [0, 0] },
-                      { pointId: "sketch_point_b", position: [4, 0] },
-                      { pointId: "sketch_point_c", position: [0, 4] },
-                    ] as never,
-                    [
-                      "sketch_entity_ab",
-                      "sketch_entity_bc",
-                      "sketch_entity_ca",
-                    ] as never,
-                  ),
-                  isClosed: true,
+                label: "Primary region",
+                target: {
+                  kind: "region",
+                  sketchId: "sketch_primary",
+                  regionId: "region_primary",
                 },
-              ],
-              isClosed: true,
-            },
-          ],
-        },
-      } satisfies SketchSnapshotRecord,
-      OCC_KERNEL_SETTINGS,
+                sourceSketch: { kind: "sketch", sketchId: "sketch_primary" },
+                loops: [
+                  {
+                    role: "outer",
+                    segments: lineLoopSegmentsForTest(
+                      [
+                        { pointId: "sketch_point_a", position: [0, 0] },
+                        { pointId: "sketch_point_b", position: [4, 0] },
+                        { pointId: "sketch_point_c", position: [0, 4] },
+                      ] as never,
+                      [
+                        "sketch_entity_ab",
+                        "sketch_entity_bc",
+                        "sketch_entity_ca",
+                      ] as never,
+                    ),
+                    isClosed: true,
+                  },
+                ],
+                isClosed: true,
+              },
+            ],
+          },
+        } satisfies SketchSnapshotRecord,
+        OCC_KERNEL_SETTINGS,
+      ),
     ),
     definition: regionDefinition,
   };
@@ -501,19 +508,9 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
     modelingTolerance: 1e-3,
     partialSolvePolicy: "bestEffort",
   });
-  const disabledStrokeSession = createSketchSessionFromSnapshot(
-    {
-      ownerDocumentId: "doc_workspace",
-      ownerRevisionId: "rev_0001",
-      ownerFeatureId: null,
-      ownerSketchId: "sketch_primary",
-      ownerBodyId: null,
-      sketchId: "sketch_primary",
-      label: "Sketch",
-      plane,
-      planeTarget: plane.support,
-      planeKey: "xy",
-      sketch: {
+  const disabledStrokeSession = enterSketchSession(
+    createSketchSessionFromSnapshot(
+      {
         ownerDocumentId: "doc_workspace",
         ownerRevisionId: "rev_0001",
         ownerFeatureId: null,
@@ -521,14 +518,26 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
         ownerBodyId: null,
         sketchId: "sketch_primary",
         label: "Sketch",
-        planeSupport: plane.support,
-        definition: disabledStrokeDefinition,
-        solvedSnapshot: disabledStrokeSolved.solvedSnapshot,
-        derivedValidity: { state: "current", diagnostics: [] },
-        regions: [],
-      },
-    } satisfies SketchSnapshotRecord,
-    OCC_KERNEL_SETTINGS,
+        plane,
+        planeTarget: plane.support,
+        planeKey: "xy",
+        sketch: {
+          ownerDocumentId: "doc_workspace",
+          ownerRevisionId: "rev_0001",
+          ownerFeatureId: null,
+          ownerSketchId: "sketch_primary",
+          ownerBodyId: null,
+          sketchId: "sketch_primary",
+          label: "Sketch",
+          planeSupport: plane.support,
+          definition: disabledStrokeDefinition,
+          solvedSnapshot: disabledStrokeSolved.solvedSnapshot,
+          derivedValidity: { state: "current", diagnostics: [] },
+          regions: [],
+        },
+      } satisfies SketchSnapshotRecord,
+      OCC_KERNEL_SETTINGS,
+    ),
   );
   const disabledStrokeLineRenderable = getSketchSessionDisplayRenderables(
     disabledStrokeSession,
@@ -562,19 +571,9 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
     modelingTolerance: 1e-3,
     partialSolvePolicy: "bestEffort",
   });
-  const pointStyledSession = createSketchSessionFromSnapshot(
-    {
-      ownerDocumentId: "doc_workspace",
-      ownerRevisionId: "rev_0001",
-      ownerFeatureId: null,
-      ownerSketchId: "sketch_primary",
-      ownerBodyId: null,
-      sketchId: "sketch_primary",
-      label: "Sketch",
-      plane,
-      planeTarget: plane.support,
-      planeKey: "xy",
-      sketch: {
+  const pointStyledSession = enterSketchSession(
+    createSketchSessionFromSnapshot(
+      {
         ownerDocumentId: "doc_workspace",
         ownerRevisionId: "rev_0001",
         ownerFeatureId: null,
@@ -582,14 +581,26 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
         ownerBodyId: null,
         sketchId: "sketch_primary",
         label: "Sketch",
-        planeSupport: plane.support,
-        definition: pointStyledDefinition,
-        solvedSnapshot: pointStyledSolved.solvedSnapshot,
-        derivedValidity: { state: "current", diagnostics: [] },
-        regions: [],
-      },
-    } satisfies SketchSnapshotRecord,
-    OCC_KERNEL_SETTINGS,
+        plane,
+        planeTarget: plane.support,
+        planeKey: "xy",
+        sketch: {
+          ownerDocumentId: "doc_workspace",
+          ownerRevisionId: "rev_0001",
+          ownerFeatureId: null,
+          ownerSketchId: "sketch_primary",
+          ownerBodyId: null,
+          sketchId: "sketch_primary",
+          label: "Sketch",
+          planeSupport: plane.support,
+          definition: pointStyledDefinition,
+          solvedSnapshot: pointStyledSolved.solvedSnapshot,
+          derivedValidity: { state: "current", diagnostics: [] },
+          regions: [],
+        },
+      } satisfies SketchSnapshotRecord,
+      OCC_KERNEL_SETTINGS,
+    ),
   );
   const pointRenderable = getSketchSessionDisplayRenderables(
     pointStyledSession,

@@ -36,6 +36,7 @@ import type {
 } from "@/core/editor/state-machine/types";
 import { withLiveSolveBasis } from "@/domain/editor/sketch-session";
 import { openSketchSessionFromSelection } from "@/domain/editor/sketch-session-controller";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
@@ -53,12 +54,14 @@ test("commits the current authored sketch after deletion without resurrecting a 
   }
 
   let session = withSketchSnapScale(
-    createNewSketchSessionFromSupport(
-      {
-        kind: "construction",
-        constructionId: "construction_plane-xy",
-      },
-      OCC_KERNEL_SETTINGS,
+    enterSketchSession(
+      createNewSketchSessionFromSupport(
+        {
+          kind: "construction",
+          constructionId: "construction_plane-xy",
+        },
+        OCC_KERNEL_SETTINGS,
+      ),
     ),
     SPEC_SKETCH_UNITS_PER_PIXEL,
   );
@@ -193,9 +196,11 @@ test("sketch reference projection uses the live session's document tolerance pol
 
 test("live region derivation goes through the modeling service sketch solver boundary and completes as sketchRegionsDerived", async () => {
   let session = withSketchSnapScale(
-    createNewSketchSessionFromSupport(
-      { kind: "construction", constructionId: "construction_plane-xy" },
-      OCC_KERNEL_SETTINGS,
+    enterSketchSession(
+      createNewSketchSessionFromSupport(
+        { kind: "construction", constructionId: "construction_plane-xy" },
+        OCC_KERNEL_SETTINGS,
+      ),
     ),
     SPEC_SKETCH_UNITS_PER_PIXEL,
   );
@@ -324,9 +329,11 @@ test("live region derivation goes through the modeling service sketch solver bou
 // reducer can flip any shell to certified.
 test("a derive response whose offset publications fail validation rejects instead of reaching the reducer (G17)", async () => {
   let session = withSketchSnapScale(
-    createNewSketchSessionFromSupport(
-      { kind: "construction", constructionId: "construction_plane-xy" },
-      OCC_KERNEL_SETTINGS,
+    enterSketchSession(
+      createNewSketchSessionFromSupport(
+        { kind: "construction", constructionId: "construction_plane-xy" },
+        OCC_KERNEL_SETTINGS,
+      ),
     ),
     SPEC_SKETCH_UNITS_PER_PIXEL,
   );
@@ -430,9 +437,14 @@ test("two documents with different tolerances reach the live region queries with
       startSketchDraw(
         beginSketchTool(
           withSketchSnapScale(
-            createNewSketchSessionFromSupport(
-              { kind: "construction", constructionId: "construction_plane-xy" },
-              { ...OCC_KERNEL_SETTINGS, modelingTolerance },
+            enterSketchSession(
+              createNewSketchSessionFromSupport(
+                {
+                  kind: "construction",
+                  constructionId: "construction_plane-xy",
+                },
+                { ...OCC_KERNEL_SETTINGS, modelingTolerance },
+              ),
             ),
             SPEC_SKETCH_UNITS_PER_PIXEL,
           ),

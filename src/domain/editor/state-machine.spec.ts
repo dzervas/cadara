@@ -13,6 +13,7 @@ import {
   createModelingServiceEditorEffectRuntime,
 } from "./state-machine";
 import { createEditorEventLoop } from "@/application/editor/editor-event-loop";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
   deriveSketchRegionsForTest,
   replayEditorEvents,
@@ -703,9 +704,11 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
 
   function createOffsetFixtureSketchSession() {
     let session = withSketchSnapScale(
-      createNewSketchSession(
-        createStandardPlaneDefinition("xy"),
-        OCC_KERNEL_SETTINGS,
+      enterSketchSession(
+        createNewSketchSession(
+          createStandardPlaneDefinition("xy"),
+          OCC_KERNEL_SETTINGS,
+        ),
       ),
       SPEC_SKETCH_UNITS_PER_PIXEL,
     );
@@ -4224,9 +4227,11 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
 
     let styledSession = toggleSketchSvgRendering(
       withSketchSnapScale(
-        createNewSketchSession(
-          createStandardPlaneDefinition("xy"),
-          OCC_KERNEL_SETTINGS,
+        enterSketchSession(
+          createNewSketchSession(
+            createStandardPlaneDefinition("xy"),
+            OCC_KERNEL_SETTINGS,
+          ),
         ),
         SPEC_SKETCH_UNITS_PER_PIXEL,
       ),
@@ -4350,9 +4355,11 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     lineTarget: PrimitiveRef;
   } {
     let session = withSketchSnapScale(
-      createNewSketchSession(
-        createStandardPlaneDefinition("xy"),
-        OCC_KERNEL_SETTINGS,
+      enterSketchSession(
+        createNewSketchSession(
+          createStandardPlaneDefinition("xy"),
+          OCC_KERNEL_SETTINGS,
+        ),
       ),
       SPEC_SKETCH_UNITS_PER_PIXEL,
     );
@@ -4509,9 +4516,11 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
 
   function testDimensionReleaseOverSecondLineDefersToAngleSelection() {
     let session = withSketchSnapScale(
-      createNewSketchSession(
-        createStandardPlaneDefinition("xy"),
-        OCC_KERNEL_SETTINGS,
+      enterSketchSession(
+        createNewSketchSession(
+          createStandardPlaneDefinition("xy"),
+          OCC_KERNEL_SETTINGS,
+        ),
       ),
       SPEC_SKETCH_UNITS_PER_PIXEL,
     );
@@ -4808,9 +4817,11 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
 
   function testConnectedSketchSelectionEventWorksAfterRectangleToolAcceptsShape() {
     let session = withSketchSnapScale(
-      createNewSketchSession(
-        createStandardPlaneDefinition("xy"),
-        OCC_KERNEL_SETTINGS,
+      enterSketchSession(
+        createNewSketchSession(
+          createStandardPlaneDefinition("xy"),
+          OCC_KERNEL_SETTINGS,
+        ),
       ),
       SPEC_SKETCH_UNITS_PER_PIXEL,
     );
@@ -4889,9 +4900,11 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
   }
 
   function testCommittedAnnotationSelectionAndDeletionRoutesThroughSketchMutation() {
-    let session = createNewSketchSession(
-      createStandardPlaneDefinition("xy"),
-      OCC_KERNEL_SETTINGS,
+    let session = enterSketchSession(
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
     );
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [0, 0]);
@@ -5078,9 +5091,11 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
 
   function testCommittedDimensionAnnotationEditRequestOpensAndCommitsValueForm() {
     let session = withSketchSnapScale(
-      createNewSketchSession(
-        createStandardPlaneDefinition("xy"),
-        OCC_KERNEL_SETTINGS,
+      enterSketchSession(
+        createNewSketchSession(
+          createStandardPlaneDefinition("xy"),
+          OCC_KERNEL_SETTINGS,
+        ),
       ),
       SPEC_SKETCH_UNITS_PER_PIXEL,
     );
@@ -5190,9 +5205,11 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
 
   function testSketchStylePatchRoutesThroughSelectionAndUpdatesCommitRequest() {
     let session = withSketchSnapScale(
-      createNewSketchSession(
-        createStandardPlaneDefinition("xy"),
-        OCC_KERNEL_SETTINGS,
+      enterSketchSession(
+        createNewSketchSession(
+          createStandardPlaneDefinition("xy"),
+          OCC_KERNEL_SETTINGS,
+        ),
       ),
       SPEC_SKETCH_UNITS_PER_PIXEL,
     );
@@ -5322,9 +5339,11 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
 
   function testSketchCommitConflictRefreshesBeforeRetry() {
     let session = withSketchSnapScale(
-      createNewSketchSession(
-        createStandardPlaneDefinition("xy"),
-        OCC_KERNEL_SETTINGS,
+      enterSketchSession(
+        createNewSketchSession(
+          createStandardPlaneDefinition("xy"),
+          OCC_KERNEL_SETTINGS,
+        ),
       ),
       SPEC_SKETCH_UNITS_PER_PIXEL,
     );

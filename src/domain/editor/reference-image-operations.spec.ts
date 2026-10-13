@@ -21,6 +21,7 @@ import {
   REFERENCE_IMAGE_CALIBRATION_MODE_ID,
   type ReferenceImageCalibrationModeState,
 } from "@/domain/reference-image-calibration/mode/shared";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { solveReferenceImageOperationState } from "@/domain/reference-image-calibration/state";
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
@@ -686,9 +687,11 @@ test("src/domain/editor/reference-image-operations.spec.ts lets bound anchor poi
 
 test("src/domain/editor/reference-image-operations.spec.ts reuses bound anchor point ids when drawing snapped lines", () => {
   let session = withSketchSnapScale(
-    createSketchSessionFromSnapshot(
-      loadCapturedReferenceImageSketchFixture(),
-      OCC_KERNEL_SETTINGS,
+    enterSketchSession(
+      createSketchSessionFromSnapshot(
+        loadCapturedReferenceImageSketchFixture(),
+        OCC_KERNEL_SETTINGS,
+      ),
     ),
     SPEC_SKETCH_UNITS_PER_PIXEL,
   );
@@ -737,9 +740,11 @@ test("src/domain/editor/reference-image-operations.spec.ts reuses bound anchor p
 
 test("src/domain/editor/reference-image-operations.spec.ts keeps captured debug-state anchors visible in normal sketch mode", () => {
   const session = withSketchSnapScale(
-    createSketchSessionFromSnapshot(
-      loadCapturedReferenceImageSketchFixture(),
-      OCC_KERNEL_SETTINGS,
+    enterSketchSession(
+      createSketchSessionFromSnapshot(
+        loadCapturedReferenceImageSketchFixture(),
+        OCC_KERNEL_SETTINGS,
+      ),
     ),
     SPEC_SKETCH_UNITS_PER_PIXEL,
   );

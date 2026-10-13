@@ -21,6 +21,7 @@ import {
   type SketchAnnotationDescriptor,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { describeSketchSessionUnsatisfiedRequirements } from "@/domain/editor/sketch-session/internals";
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
@@ -37,9 +38,11 @@ import {
 test("T14b T-7: a three-point arc's end bindings are Coincident constraint descriptors, not dimension chips", () => {
   let session = startSketchDraw(
     beginSketchTool(
-      createNewSketchSession(
-        createStandardPlaneDefinition("xy"),
-        OCC_KERNEL_SETTINGS,
+      enterSketchSession(
+        createNewSketchSession(
+          createStandardPlaneDefinition("xy"),
+          OCC_KERNEL_SETTINGS,
+        ),
       ),
       "threePointArc",
     ),
@@ -82,9 +85,11 @@ test("T14b T-7: a three-point arc's end bindings are Coincident constraint descr
 
 function newSpecSession() {
   return withSketchSnapScale(
-    createNewSketchSession(
-      createStandardPlaneDefinition("xy"),
-      OCC_KERNEL_SETTINGS,
+    enterSketchSession(
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
     ),
     SPEC_SKETCH_UNITS_PER_PIXEL,
   );

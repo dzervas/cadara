@@ -55,6 +55,7 @@ import {
   reconstructSplineAggregate,
   orderedSplineOccurrences,
 } from "@/contracts/sketch/spline-geometry";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { withLiveSolveBasis } from "@/domain/editor/sketch-session/internals";
 import { mapSketchPointToWorld } from "@/domain/editor/sketch-session/state";
 import { collectSketchInteractionGeometry } from "@/domain/sketch-interaction/geometry";
@@ -527,9 +528,11 @@ describe("T11f contextual point markers (T11-D8)", () => {
 
   test("an offset shell's driven terminal points are contextual, owned by the shell, and revealed by hovering it (review R-2)", () => {
     let session = beginSketchTool(
-      createNewSketchSessionFromSupport(
-        { kind: "construction", constructionId: "construction_plane-xy" },
-        OCC_KERNEL_SETTINGS,
+      enterSketchSession(
+        createNewSketchSessionFromSupport(
+          { kind: "construction", constructionId: "construction_plane-xy" },
+          OCC_KERNEL_SETTINGS,
+        ),
       ),
       "spline",
     );

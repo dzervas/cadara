@@ -532,9 +532,11 @@ test("T13e: the dimension value input renders Reference mode with a read-only me
 // the requirements the commit will author are visible before the last click.
 test("T13g: placement inference badges render their requirement text", () => {
   let session = withSketchSnapScale(
-    createNewSketchSession(
-      createStandardPlaneDefinition("xy"),
-      OCC_KERNEL_SETTINGS,
+    enterSketchSession(
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
     ),
     SPEC_SKETCH_UNITS_PER_PIXEL,
   );
