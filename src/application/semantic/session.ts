@@ -28,7 +28,12 @@ function result(
     version: 1,
     correlation: {
       commandId: command.commandId,
-      family: "document",
+      family:
+        command.operation === "document.open"
+          ? "file-open"
+          : command.operation === "document.save"
+            ? "file-save"
+            : "document",
       intent: command.operation === "document.inspect" ? "inspect" : "fulfill",
       basis: command.basis
         ? {
@@ -190,17 +195,54 @@ class DocumentSession implements SemanticSession {
         },
       };
     try {
-      if (command.operation === "document.create") {
-        const accepted = await this.owner.create({
-          commandId: command.commandId,
-          label: command.label,
-        });
+      if (
+        ["document.open", "document.rename", "document.save"].includes(
+          command.operation,
+        ) &&
+        !this.owner.nativeFiles
+      ) {
+        return {
+          ...terminal,
+          outcome: { kind: "unavailable", capability: "document.native-files" },
+        };
+      }
+      if (
+        command.operation === "document.create" ||
+        command.operation === "document.open" ||
+        command.operation === "document.rename"
+      ) {
+        const accepted =
+          command.operation === "document.create"
+            ? await this.owner.create({
+                commandId: command.commandId,
+                label: command.label,
+              })
+            : command.operation === "document.open"
+              ? await this.owner.nativeFiles!.open({
+                  commandId: command.commandId,
+                  path: command.path,
+                  currentState: this.state,
+                })
+              : await this.owner.nativeFiles!.rename({
+                  commandId: command.commandId,
+                  label: command.label,
+                  currentState: this.state,
+                });
         terminal.diagnostics = accepted.diagnostics;
         terminal.completion.persistence = accepted.persistence;
         if (accepted.state) {
           this.state = accepted.state;
           terminal.completion.live = { kind: "applied", state: accepted.state };
-        } else {
+        } else if ("rejected" in accepted && accepted.rejected) {
+          terminal.outcome = {
+            kind: "rejected",
+            reasonCode: accepted.rejected,
+          };
+          return terminal;
+        } else if (
+          accepted.failure ||
+          command.operation !== "document.rename"
+        ) {
           terminal.outcome = {
             kind: "failed",
             failures: [accepted.failure ?? "persistence"],
@@ -215,7 +257,28 @@ class DocumentSession implements SemanticSession {
         ];
         terminal.outcome = failures.length
           ? { kind: "failed", failures }
-          : { kind: "completed", change: "changed" };
+          : {
+              kind: "completed",
+              change: accepted.state ? "changed" : "unchanged",
+            };
+      }
+      if (command.operation === "document.save") {
+        const saved = await this.owner.nativeFiles!.save({
+          commandId: command.commandId,
+          path: command.path,
+          state: this.state,
+        });
+        terminal.completion.file = saved.file;
+        terminal.completion.persistence = saved.persistence;
+        terminal.diagnostics = saved.diagnostics;
+        const failures = [
+          ...(saved.persistence.kind === "failed"
+            ? ["persistence" as const]
+            : []),
+          ...(saved.file.kind === "failed" ? ["file" as const] : []),
+          ...(saved.failure ? [saved.failure] : []),
+        ];
+        if (failures.length) terminal.outcome = { kind: "failed", failures };
       }
       try {
         const current = await this.owner.inspect({
@@ -234,6 +297,32 @@ class DocumentSession implements SemanticSession {
         if (terminal.completion.live.kind === "unchanged")
           terminal.completion.live.state = this.state;
         terminal.discovery = current.discovery;
+        if (
+          command.operation === "document.open" &&
+          terminal.completion.live.kind === "applied"
+        ) {
+          const invalid = current.diagnostics.some(
+            (diagnostic) => diagnostic.severity === "error",
+          );
+          terminal.completion.geometry = {
+            kind: invalid ? "failed" : "current",
+            state: this.state,
+            sketchBasis: null,
+            solve: null,
+            derivation: null,
+            rebuildRevisionId: this.state.revisionId,
+          };
+          if (invalid)
+            terminal.outcome = {
+              kind: "failed",
+              failures: [
+                ...(terminal.outcome.kind === "failed"
+                  ? terminal.outcome.failures
+                  : []),
+                "geometry",
+              ],
+            };
+        }
         terminal.diagnostics = [
           ...terminal.diagnostics,
           ...current.diagnostics,

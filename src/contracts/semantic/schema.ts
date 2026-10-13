@@ -41,6 +41,9 @@ export type SemanticCommand = CommandIdentity &
   (
     | { operation: "document.create"; label: string; basis: null }
     | { operation: "document.inspect"; basis: SemanticBasis }
+    | { operation: "document.open"; path: string; basis: null }
+    | { operation: "document.rename"; label: string; basis: SemanticBasis }
+    | { operation: "document.save"; path: string; basis: SemanticBasis }
   );
 
 export type SemanticFamily =

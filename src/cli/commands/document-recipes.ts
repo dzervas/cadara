@@ -10,13 +10,11 @@ import {
   validateSemanticResult,
 } from "@/contracts/semantic/runtime-schema";
 
+type AliasedCommand<T> = T extends { basis: SemanticBasis }
+  ? Omit<T, "basis"> & { basis: { alias: string } }
+  : never;
 interface RecipeOperation {
-  command:
-    | SemanticCommand
-    | (Omit<
-        Extract<SemanticCommand, { operation: "document.inspect" }>,
-        "basis"
-      > & { basis: { alias: string } });
+  command: SemanticCommand | AliasedCommand<SemanticCommand>;
   alias?: string;
 }
 const example = {
@@ -32,9 +30,32 @@ const example = {
     },
     {
       version: 1,
+      commandId: "rename",
+      operation: "document.rename",
+      label: "Renamed bracket",
+      basis: { alias: "part" },
+      as: "renamed",
+    },
+    {
+      version: 1,
+      commandId: "save",
+      operation: "document.save",
+      path: "bracket.cadara",
+      basis: { alias: "renamed" },
+    },
+    {
+      version: 1,
+      commandId: "open",
+      operation: "document.open",
+      path: "bracket.cadara",
+      basis: null,
+      as: "opened",
+    },
+    {
+      version: 1,
       commandId: "inspect",
       operation: "document.inspect",
-      basis: { alias: "part" },
+      basis: { alias: "opened" },
     },
   ],
 };
@@ -70,12 +91,7 @@ function parseRecipe(input: unknown): RecipeOperation[] {
       throw new Error("Command IDs must be nonempty and unique.");
     ids.add(command.commandId);
     const basis = command.basis;
-    if (
-      command.operation === "document.inspect" &&
-      basis &&
-      typeof basis === "object" &&
-      "alias" in basis
-    ) {
+    if (basis && typeof basis === "object" && "alias" in basis) {
       if (
         Object.keys(basis).length !== 1 ||
         typeof basis.alias !== "string" ||
@@ -93,8 +109,15 @@ function parseRecipe(input: unknown): RecipeOperation[] {
       if (!validated.success) throw new Error("Invalid inspect operation.");
     } else if (!validateSemanticCommand(command).success)
       throw new Error("Invalid semantic operation.");
-    if (alias !== undefined && command.operation !== "document.create")
-      throw new Error("Only creation defines a document alias.");
+    if (
+      alias !== undefined &&
+      !["document.create", "document.open", "document.rename"].includes(
+        String(command.operation),
+      )
+    )
+      throw new Error(
+        "Only document creation, opening or rename defines an alias.",
+      );
     if (typeof alias === "string") aliases.add(alias);
     return {
       command: command as RecipeOperation["command"],
@@ -105,7 +128,7 @@ function parseRecipe(input: unknown): RecipeOperation[] {
 export const documentRecipesCommand: CommandModule = {
   name: "document recipe",
   description:
-    "Run a sequential create/inspect JSON recipe in an isolated document",
+    "Run sequential native document operations in an isolated editing context",
   async run(argv, _env, io) {
     if (argv.length === 1 && ["--help", "-h"].includes(argv[0]!)) {
       io.stdout(
@@ -150,10 +173,7 @@ export const documentRecipesCommand: CommandModule = {
     try {
       for (const operation of operations) {
         let command = operation.command;
-        if (
-          command.operation === "document.inspect" &&
-          "alias" in command.basis
-        ) {
+        if (command.basis && "alias" in command.basis) {
           const basis = aliases.get(command.basis.alias);
           if (!basis)
             throw new Error("Alias has no completed authoritative state.");
@@ -166,7 +186,12 @@ export const documentRecipesCommand: CommandModule = {
         const checked = validateSemanticResult(
           {
             commandId: validated.data.commandId,
-            family: "document",
+            family:
+              validated.data.operation === "document.open"
+                ? "file-open"
+                : validated.data.operation === "document.save"
+                  ? "file-save"
+                  : "document",
             intent:
               validated.data.operation === "document.inspect"
                 ? "inspect"

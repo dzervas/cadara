@@ -1,4 +1,8 @@
-import type { SemanticDocumentPort } from "@/application/semantic/document-port";
+import { createNativeDocumentFiles } from "./native-document-files";
+import type {
+  NativeDocumentFileIO,
+  SemanticDocumentPort,
+} from "@/application/semantic/document-port";
 import { semanticDiagnostic } from "@/application/semantic/session";
 import type { EditorEventLoop } from "@/application/editor/editor-event-loop";
 import type { SketchAuthoredActions } from "@/application/editor/sketch-authored-actions";
@@ -16,6 +20,7 @@ import type { ModelingService } from "@/domain/modeling/modeling-service";
 /** Concrete adapter for the shared production modeling/editor owners. */
 export function createSemanticDocumentPort(input: {
   documentId: DocumentId;
+  nativeFileIO: NativeDocumentFileIO;
   repository: DocumentRepository;
   service: ModelingService;
   loop: EditorEventLoop;
@@ -128,6 +133,12 @@ export function createSemanticDocumentPort(input: {
         diagnostics,
       };
     },
+    nativeFiles: createNativeDocumentFiles({
+      service,
+      sketchActions,
+      state,
+      files: input.nativeFileIO,
+    }),
     inspect,
     async drain() {
       await loop.drain();

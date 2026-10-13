@@ -69,8 +69,11 @@ export interface ModelingService {
   ): Promise<ModelingDocumentFileMutationResult>;
   renameDocument(input: {
     name: string;
+    observe?: (transaction: DocumentRepositoryMutationResult) => void;
   }): Promise<ModelingDocumentFileMutationResult>;
-  exportCurrentDocument(): Promise<DocumentExportSuccessResult>;
+  exportCurrentDocument(input?: {
+    observe: (transaction: DocumentRepositoryMutationResult) => void;
+  }): Promise<DocumentExportSuccessResult>;
   bindLocalFile(input: {
     handle: LocalFileSystemFileHandle;
     metadata: LocalFileBindingMetadata;
@@ -361,6 +364,7 @@ export type ModelingExportDocumentResult = DocumentExportResult;
 
 export interface ModelingImportDocumentInput {
   document: unknown;
+  observe?: (transaction: DocumentRepositoryMutationResult) => void;
   assets?: readonly GeometryAssetBlobInput[];
 }
 

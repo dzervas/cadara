@@ -1,12 +1,20 @@
 import { createSemanticDocumentPort } from "@/infrastructure/modeling/semantic-document-port";
 import { fileURLToPath } from "node:url";
 import { createSemanticSessionFactory } from "@/application/semantic/session";
-import type { SemanticDocumentPort } from "@/application/semantic/document-port";
+import { filesystemNativeDocumentIO } from "@/infrastructure/modeling/native-document-file-io";
+import type {
+  NativeDocumentFileIO,
+  SemanticDocumentPort,
+} from "@/application/semantic/document-port";
 import type { DocumentId } from "@/contracts/shared/ids";
 import { createDocumentSolverTolerances } from "@/contracts/solver/schema";
 import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
 import { createStoreGeometryAssetResolver } from "@/infrastructure/modeling/geometry-asset-resolver";
-import { createMemoryGeometryAssetStore } from "@/domain/modeling/geometry-asset-store";
+import {
+  createMemoryGeometryAssetStore,
+  type GeometryAssetStore,
+} from "@/domain/modeling/geometry-asset-store";
+import type { GeometryAssetDocumentRepository } from "@/domain/modeling/document-repository";
 import { MemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
 import { createModelingService } from "@/domain/modeling/modeling-service";
@@ -22,13 +30,21 @@ import { createConsoleErrorReporter } from "@/contracts/errors";
 
 /** Source default is module-relative; distribution can inject its adjacent occ directory. */
 export function createHeadlessSessionFactory(
-  options: { assetDirectory?: string } = {},
+  options: {
+    assetDirectory?: string;
+    nativeFileIO?: NativeDocumentFileIO;
+    createRepository?: (
+      assets: GeometryAssetStore,
+    ) => GeometryAssetDocumentRepository;
+  } = {},
 ) {
   return createSemanticSessionFactory(
     async (): Promise<SemanticDocumentPort> => {
       const documentId = `doc_${crypto.randomUUID()}` as DocumentId;
       const assets = createMemoryGeometryAssetStore();
-      const repository = new MemoryDocumentRepository([], assets);
+      const repository =
+        options.createRepository?.(assets) ??
+        new MemoryDocumentRepository([], assets);
       const loader = createOpenCascadeInstanceLoader(async () => {
         const initialize = await loadFilesystemOpenCascadeFactory(
           options.assetDirectory ??
@@ -85,6 +101,7 @@ export function createHeadlessSessionFactory(
       }
       return createSemanticDocumentPort({
         documentId,
+        nativeFileIO: options.nativeFileIO ?? filesystemNativeDocumentIO,
         repository,
         service,
         loop,
