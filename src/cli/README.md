@@ -83,6 +83,50 @@ Recipes may select a tangent `primitive.source` by exact unique
 `{ "alias": "source", "label": "Line 1" }`; missing/ambiguous, foreign, deleted,
 or stale sources fail closed. Re-discover after each command.
 
+### Advanced sketch curves
+
+Advanced `sketch.author` primitives reuse the production browser tools:
+
+- `ellipse`: three `points` (center, major-axis endpoint, minor-sizing point).
+- `ellipticalArc`: five `points` (center, major-axis endpoint, minor-sizing
+  point, start, end), with the production counter-clockwise sweep.
+- `conic`: three `points` (start, control, end), with production rho `0.5`.
+- `bezierCurve` / `controlPointSpline`: exactly four distinct `controlPoints`.
+  Both create the production cubic Bézier representation, not an interpolating
+  ordinary spline; no extra degrees or knot settings are implied.
+- `spline`: `fitPoints` (at least two), through which the ordinary spline
+  interpolates. Its automatic tangents use the canonical reconstruction owner.
+- `profileText`: `anchor`, `heightPoint`, nonempty `text`, `horizontalAlign`
+  (`left`, `center`, `right`) and `verticalAlign` (`baseline`, `middle`, `top`,
+  `bottom`). The second point sizes height and rotation; it is not an authored
+  point or a glyph outline.
+
+Discovery exposes authored minor radii, sweep directions, conic rho, Bézier
+degree, ordinary-spline closure and text settings. Point moves and entity
+translations use the existing constrained edit owner; ordinary-spline tangent
+edits address distinct typed tangent handles, not fit points. There is no
+production parameter-edit UI owner for changing text content, conic rho,
+Bézier degree or minor radius independently, so these are creation settings,
+not invented edit commands.
+
+`sketch.geometry.update` also accepts `edit: { kind: "mergePoints", target,
+destination }`, with two owned point references (or exact unique recipe label
+aliases). The destination keeps its ID and position; references follow it.
+Merging an ordinary spline's own end points closes it positionally when it has
+at least four fit-point occurrences. Undo restores the open identities. Equal
+coordinates alone do not close it, and collapsing another curve's own ends is
+refused. No arbitrary smooth-closure variant is added.
+
+The production region owner currently has **no consumable region form** for
+ellipse, elliptical arc, conic, Bézier/control-point spline or profile text.
+Their geometry can be authored and edited, but diagnostics explain unsupported
+profiles, discovery returns no face, and `requireProfiles: true` publication
+is refused. Text preview is not native glyph geometry. Do not infer extrusion
+or export support from a registered tool or successful authoring; requested
+exports still use their provider's target/capability gates. Ordinary splines
+can produce profiles only when the production closure and native query gates
+succeed. Degenerate advanced inputs are refused even with `author-invalid`.
+
 ### Private sketch dimensions
 
 `sketch.dimension.add` takes the current `basis` and `draft`, an `axis`

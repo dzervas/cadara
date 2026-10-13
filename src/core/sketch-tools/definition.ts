@@ -256,6 +256,8 @@ export interface SketchToolDefinition<
     state: SketchToolRuntimeState,
   ): readonly SketchDraftEntity[];
   validate(start: SketchPoint, end: SketchPoint): SketchToolValidationResult;
+  /** Pure completed-input validation for multi-point contributions, shared with semantic authoring. */
+  validateContribution?(points: readonly SketchPoint[], settings: Record<string, SketchToolControlValue>): SketchToolValidationResult;
   getPresentation(state: SketchToolRuntimeState): SketchToolPresentationSchema;
   /** What click `index` of a draft becomes (T13-D16). */
   placementRole(index: number): SketchPlacementRole;

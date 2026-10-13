@@ -1860,6 +1860,24 @@ function selectSketchMergePointsTarget(
     : withSketchMergePointsTool(session, tool, pair.message);
 }
 
+/** Apply explicit connectivity through the production merge owner, without picking or UI state. */
+export function prepareSketchPointMerge(session: SketchSessionState, sourcePointId: SketchPointId, destinationPointId: SketchPointId) {
+  const result = createSketchMergePointsMutation({ definition: session.definition, sourcePointId, destinationPointId });
+  if (!result.valid) return { result, session };
+  return {
+    result,
+    session: withLiveSolveBasis({
+      ...session,
+      definition: result.definition,
+      sequence: session.sequence + 1,
+      commitRequest: rebuildSessionCommitRequest(session, result.definition),
+      toolStagedEntities: [],
+      activeEditTarget: null,
+      activeDrag: null,
+    }, result.definition),
+  };
+}
+
 /**
  * T13j (D25): confirm the merge as one definition change. The normal commit
  * solve follows (no solve gate): a conflict is retained and explained with
@@ -1875,11 +1893,8 @@ function commitSketchMergePoints(
     tool.selectedTargets,
   );
   if (!source || !destination) return session;
-  const result = createSketchMergePointsMutation({
-    definition: session.definition,
-    sourcePointId: source,
-    destinationPointId: destination,
-  });
+  const prepared = prepareSketchPointMerge(session, source, destination);
+  const { result } = prepared;
   if (!result.valid)
     return withSketchMergePointsTool(session, tool, result.message);
   const sourceLabel = getSketchMergePoint(session, source)!.label;
@@ -1905,19 +1920,7 @@ function commitSketchMergePoints(
     selectedTargets: [],
     hoverTarget: null,
   };
-  const committed = withLiveSolveBasis(
-    {
-      ...session,
-      definition: result.definition,
-      sequence: session.sequence + 1,
-      commitRequest: rebuildSessionCommitRequest(session, result.definition),
-      activeEditTool: reset,
-      toolStagedEntities: [],
-      activeEditTarget: null,
-      activeDrag: null,
-    },
-    result.definition,
-  );
+  const committed = { ...prepared.session, activeEditTool: reset };
   // The merge is the committed change: the explanation names it (review A-1).
   // T15b (O-1): explained whenever profiles are unavailable (as after Undo/Redo).
   const explanation =

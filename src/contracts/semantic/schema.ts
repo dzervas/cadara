@@ -21,6 +21,11 @@ import type {
 } from "@/contracts/sketch/schema";
 
 export type SemanticSketchPrimitive =
+  | { kind: "ellipse" | "conic"; points: readonly [SketchPoint, SketchPoint, SketchPoint] }
+  | { kind: "ellipticalArc"; points: readonly [SketchPoint, SketchPoint, SketchPoint, SketchPoint, SketchPoint] }
+  | { kind: "bezierCurve" | "controlPointSpline"; controlPoints: readonly [SketchPoint, SketchPoint, SketchPoint, SketchPoint] }
+  | { kind: "profileText"; anchor: SketchPoint; heightPoint: SketchPoint; text: string; horizontalAlign: "left" | "center" | "right"; verticalAlign: "baseline" | "middle" | "top" | "bottom" }
+  | { kind: "spline"; fitPoints: readonly SketchPoint[] }
   | { kind: "point"; position: SketchPoint }
   | { kind: "line"; start: SketchPoint; end: SketchPoint }
   | {
@@ -48,6 +53,7 @@ export type SemanticSketchGeometryTarget = Extract<DurableRef, { kind: "sketchPo
 export type SemanticSketchLabelTarget = Extract<DurableRef, { kind: "sketchPoint" | "sketchEntity" | "dimension" | "constraint" | "sketch" }>;
 /** Explicit geometry intents reuse the existing constrained edit solver, not pointer choreography. */
 export type SemanticSketchGeometryEdit =
+  | { kind: "mergePoints"; target: Extract<DurableRef, { kind: "sketchPoint" }>; destination: Extract<DurableRef, { kind: "sketchPoint" }> }
   | { kind: "point"; target: Extract<DurableRef, { kind: "sketchPoint" }>; position: SketchPoint }
   | { kind: "translate"; target: Extract<DurableRef, { kind: "sketchEntity" }>; delta: SketchPoint }
   | { kind: "radius"; target: Extract<DurableRef, { kind: "sketchEntity" }>; radius: number }
@@ -279,6 +285,13 @@ export interface SemanticDiscovery {
       pointIds: readonly SketchPointId[];
       construction: boolean;
       radius?: number;
+      /** Authored advanced parameters, not a promise of region/export support. */
+      minorRadius?: number;
+      sweepDirection?: "clockwise" | "counterClockwise";
+      rho?: number;
+      degree?: 2 | 3;
+      closure?: "open" | "positional" | "smooth";
+      text?: { content: string; height: number; rotationRadians: number; horizontalAlign: "left" | "center" | "right"; verticalAlign: "baseline" | "middle" | "top" | "bottom" };
       tangents?: readonly { occurrenceId: string; pointId: SketchPointId; vector: SketchPoint | null }[];
     }[];
     requirements: readonly {
