@@ -355,9 +355,6 @@ function resolveBodyTarget(
 
   const faceRenderables = getBodyFaceRenderables(snapshot, body.bodyId);
   const edgeRenderables = getBodyEdgeRenderables(snapshot, body.bodyId);
-  const bodyTriangles = faceRenderables.flatMap((renderable) =>
-    trianglesFromMesh(renderable.geometry),
-  );
   const surfaceArea =
     faceRenderables.length === body.topology.faceIds.length
       ? faceRenderables.reduce(
@@ -366,9 +363,10 @@ function resolveBodyTarget(
         )
       : null;
   const volume =
-    faceRenderables.length === body.topology.faceIds.length &&
-    bodyTriangles.length > 0
-      ? getClosedMeshVolume(bodyTriangles)
+    faceRenderables.length === body.topology.faceIds.length
+      ? getClosedMeshVolume(
+          faceRenderables.map((renderable) => renderable.geometry),
+        )
       : null;
 
   const rows = [
@@ -2007,42 +2005,108 @@ function signedTetrahedronVolume(triangle: Triangle) {
   );
 }
 
-function getClosedMeshVolume(triangles: readonly Triangle[]) {
-  const vertices = triangles.flatMap((triangle) => [
-    triangle.first,
-    triangle.second,
-    triangle.third,
-  ]);
-  const centroid = scale(
-    vertices.reduce((sum, point) => add(sum, point), [0, 0, 0]),
-    1 / vertices.length,
-  );
-
-  return Math.abs(
-    triangles.reduce((sum, triangle) => {
-      const oriented = orientTriangleOutward(triangle, centroid);
-      return sum + signedTetrahedronVolume(oriented);
-    }, 0),
-  );
-}
-
-function orientTriangleOutward(triangle: Triangle, centroid: WorkspaceVec3) {
-  const triangleCentroid = scale(
-    add(add(triangle.first, triangle.second), triangle.third),
-    1 / 3,
-  );
-  const normal = crossProduct(
-    subtract(triangle.second, triangle.first),
-    subtract(triangle.third, triangle.first),
-  );
-
-  return dotProduct(normal, subtract(triangleCentroid, centroid)) < 0
-    ? {
-        first: triangle.first,
-        second: triangle.third,
-        third: triangle.second,
+/**
+ * The volume enclosed by a body's face meshes, or null when they don't
+ * close. T17h: the previous "outward from the vertex centroid" guess flipped
+ * the walls of any hole or concavity.
+ * - Face meshes are separate, so vertices are welded by exact position;
+ *   triangles with fewer than three distinct vertices (the mesher's poles,
+ *   apexes and fillet corners) enclose nothing and are dropped (review R-2).
+ * - Every remaining edge must be used by exactly two triangles.
+ * - Each shell (edge-connected set) is oriented through its shared edges:
+ *   two consistently wound triangles run a shared edge in opposite
+ *   directions. When every shell already is (the kernel winds faces
+ *   outward), the signed sum is kept, so an inner void subtracts (review
+ *   A-1); otherwise (face meshes wound either way) each shell counts by its
+ *   magnitude, and a void would count as material.
+ */
+function getClosedMeshVolume(meshes: readonly RenderMeshGeometry[]) {
+  const vertexIds = new Map<string, number>();
+  const kept: Triangle[] = [];
+  const corners: number[] = [];
+  for (const mesh of meshes) {
+    // Each face vertex is welded once (its exact position).
+    const ids = mesh.vertexPositions.map((point) => {
+      const key = getPointKey(point);
+      let id = vertexIds.get(key);
+      if (id === undefined) {
+        id = vertexIds.size;
+        vertexIds.set(key, id);
       }
-    : triangle;
+      return id;
+    });
+    for (const [first, second, third] of mesh.triangleIndices) {
+      const a = ids[first];
+      const b = ids[second];
+      const c = ids[third];
+      if (a === undefined || b === undefined || c === undefined) continue;
+      if (a === b || b === c || c === a) continue;
+      kept.push({
+        first: mesh.vertexPositions[first]!,
+        second: mesh.vertexPositions[second]!,
+        third: mesh.vertexPositions[third]!,
+      });
+      corners.push(a, b, c);
+    }
+  }
+  if (kept.length === 0) return null;
+  const vertexCount = vertexIds.size;
+  // Edge key → the two uses, each `triangle * 2 + (start < end ? 1 : 0)`.
+  const uses = new Map<number, number[]>();
+  const edgeKey = (index: number, side: number) => {
+    const start = corners[index * 3 + side]!;
+    const end = corners[index * 3 + ((side + 1) % 3)]!;
+    return {
+      key: Math.min(start, end) * vertexCount + Math.max(start, end),
+      use: index * 2 + (start < end ? 1 : 0),
+    };
+  };
+  for (let index = 0; index < kept.length; index += 1) {
+    for (let side = 0; side < 3; side += 1) {
+      const { key, use } = edgeKey(index, side);
+      const edgeUses = uses.get(key);
+      if (edgeUses) edgeUses.push(use);
+      else uses.set(key, [use]);
+    }
+  }
+  for (const edgeUses of uses.values()) {
+    if (edgeUses.length !== 2) return null;
+  }
+  const flipped = new Int8Array(kept.length).fill(-1);
+  let signedTotal = 0;
+  let magnitudeTotal = 0;
+  let windingConsistent = true;
+  for (let seed = 0; seed < kept.length; seed += 1) {
+    if (flipped[seed] !== -1) continue;
+    flipped[seed] = 0;
+    const queue = [seed];
+    let shellVolume = 0;
+    while (queue.length > 0) {
+      const current = queue.pop()!;
+      const currentFlipped = flipped[current] === 1;
+      shellVolume +=
+        signedTetrahedronVolume(kept[current]!) * (currentFlipped ? -1 : 1);
+      for (let side = 0; side < 3; side += 1) {
+        const { key, use } = edgeKey(current, side);
+        const [first, second] = uses.get(key)!;
+        const other = first === use ? second! : first!;
+        const neighbour = other >> 1;
+        // The neighbour runs the shared edge against this triangle.
+        const neighbourFlipped =
+          ((other & 1) === 1) === (((use & 1) === 1) !== currentFlipped);
+        if (flipped[neighbour] === -1) {
+          flipped[neighbour] = neighbourFlipped ? 1 : 0;
+          if (neighbourFlipped) windingConsistent = false;
+          queue.push(neighbour);
+        } else if ((flipped[neighbour] === 1) !== neighbourFlipped) {
+          return null;
+        }
+      }
+    }
+    signedTotal += shellVolume;
+    magnitudeTotal += Math.abs(shellVolume);
+  }
+  return windingConsistent ? Math.abs(signedTotal) : magnitudeTotal;
 }
 
 function triangleEdges(triangle: Triangle) {

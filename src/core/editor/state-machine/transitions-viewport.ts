@@ -95,7 +95,7 @@ import {
   emitSketchOpen,
   emitSketchReferenceProjection,
 } from "./effect-emitters";
-import { isFeatureTool } from "./utility-helpers";
+import { commandAfterSketchToolCommit, isFeatureTool } from "./utility-helpers";
 
 export function handleViewportHoverCleared(
   state: EditorState,
@@ -860,14 +860,16 @@ function selectEditingSketchViewportTarget(
         effects: [],
       };
     }
+    const selected = applySketchSelectionState(
+      state,
+      session,
+      event.target,
+      "collecting",
+    );
     return {
       state: {
-        ...applySketchSelectionState(
-          state,
-          session,
-          event.target,
-          "collecting",
-        ),
+        ...selected,
+        command: commandAfterSketchToolCommit(state, session, selected.command),
         annotationContext: null,
       },
       effects: [],

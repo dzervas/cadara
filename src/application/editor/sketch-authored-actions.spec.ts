@@ -4546,3 +4546,93 @@ describe("T16f: the Dimension tool routed to a shared driver through the authore
     expect(f.session.activeTool).toBe("dimensionRadius");
   });
 });
+
+// T17h review R-1 (logic lane; seam: the authored-action owner around the
+// real reducer). A constraint or dimension commit disarms its tool and hands
+// the command (the toolbar) back to Select (T17h D-2), but a T16f routed edit
+// also leaves the session without an active tool while its popup is open and
+// re-arms the tool at every end: the command must keep the tool throughout,
+// so the toolbar matches the armed tool. Red before the review fix: the
+// command became Select at the routed popup and stayed Select once re-armed.
+describe("T17h review R-1: a routed edit keeps the tool's command; the toolbar matches the re-armed tool", () => {
+  async function routed() {
+    const setup = mirroredSession("free");
+    const seeded = rebuildSessionForDefinition(setup.session, {
+      definition: {
+        ...setup.session.definition,
+        dimensionIds: ["dimension_seed" as never],
+        dimensions: [
+          {
+            dimensionId: "dimension_seed",
+            kind: "circleRadius",
+            label: "Radius 2",
+            entityId: eid("c"),
+            value: { source: "literal", value: 2 },
+          } as never,
+        ],
+      },
+    });
+    const f = await fixture(false, seeded);
+    const copy = entityRef(f.session, setup.outputOf("c").outputEntityId);
+    return { f, copy };
+  }
+  const expectCommand = (
+    f: Awaited<ReturnType<typeof fixture>>,
+    toolId: string,
+    context: string,
+  ) => {
+    expect(f.state.command.toolId, `${context}: the command`).toBe(toolId);
+    expect(f.session.activeTool, `${context}: the session`).toBe(
+      f.session.activeAnnotationEdit ? null : toolId,
+    );
+  };
+
+  test("Fix on the mirror copy's circle (routed at the pick): popup, Cancel, then Save keep the Fix command", async () => {
+    const { f, copy } = await routed();
+    f.dispatch({ type: "tool.activated", toolId: "constraintFix" });
+    f.dispatch({ type: "viewport.selectionRequested", target: copy });
+    expect(
+      f.session.activeAnnotationEdit?.shared,
+      "premise: the routed edit is open",
+    ).toBeTruthy();
+    expectCommand(f, "constraintFix", "routed popup");
+    f.dispatch({
+      type: "sketch.toolPatched",
+      patch: { intent: "cancelAnnotationValue" },
+    });
+    expectCommand(f, "constraintFix", "after Cancel");
+
+    f.dispatch({ type: "viewport.selectionRequested", target: copy });
+    f.dispatch({ type: "sketch.toolPatched", patch: { value: "3" } });
+    f.dispatch({
+      type: "sketch.toolPatched",
+      patch: { intent: "commitAnnotationValue" },
+    });
+    expect(
+      f.session.actionHistory?.undo.map((entry) => entry.label),
+      "premise: Save is one action",
+    ).toEqual(["Commit Annotation Value"]);
+    expectCommand(f, "constraintFix", "after Save");
+  });
+
+  test("Radius on the copy routed by the label placement patch, then Save keeps the Radius command", async () => {
+    const { f, copy } = await routed();
+    f.dispatch({ type: "tool.activated", toolId: "dimensionRadius" });
+    f.dispatch({ type: "viewport.selectionRequested", target: copy });
+    f.dispatch({
+      type: "sketch.toolPatched",
+      patch: { intent: "setConstraintAnnotationPlacement", point: [6, 6] },
+    });
+    expect(
+      f.session.activeAnnotationEdit?.shared,
+      "premise: the routed edit is open",
+    ).toBeTruthy();
+    expectCommand(f, "dimensionRadius", "routed popup");
+    f.dispatch({ type: "sketch.toolPatched", patch: { value: "3" } });
+    f.dispatch({
+      type: "sketch.toolPatched",
+      patch: { intent: "commitAnnotationValue" },
+    });
+    expectCommand(f, "dimensionRadius", "after Save");
+  });
+});

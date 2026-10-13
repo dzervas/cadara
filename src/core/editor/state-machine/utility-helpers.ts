@@ -3,13 +3,37 @@ import type { PrimitiveRef } from "@/core/editor/schema";
 import type { SketchPlaneSupportRef } from "@/contracts/shared/sketch-plane";
 import type { CommandSessionId, RequestId } from "@/contracts/shared/ids";
 import type { SketchSessionState } from "@/domain/editor/sketch-session";
-import type { EditorCommandToolId, EditorState } from "./types";
+import type {
+  EditorCommandToolId,
+  EditorState,
+  SketchEditorState,
+} from "./types";
 
 export function nextCommandSessionId(
   state: EditorState,
   toolId: EditorCommandToolId,
 ) {
   return `command_${toolId}-${state.nextCommandSequence}` as CommandSessionId;
+}
+
+/**
+ * T17h: a constraint or dimension commit disarms its tool (the session's
+ * `activeTool` becomes null); the command follows, so the toolbar shows
+ * Select again, as after Escape (it kept the disarmed tool pressed). A
+ * T16f routed edit (Dimension or Fix on a mirror copy opening the shared
+ * driver) also leaves no active tool while its popup is open, but re-arms
+ * the tool at every end, so the command keeps the tool (review R-1).
+ */
+export function commandAfterSketchToolCommit(
+  state: SketchEditorState,
+  session: SketchSessionState,
+  command: SketchEditorState["command"] = state.command,
+): SketchEditorState["command"] {
+  return state.session.activeTool !== null &&
+    session.activeTool === null &&
+    !session.activeAnnotationEdit?.shared
+    ? { ...command, toolId: "sketch", phase: "editing" }
+    : command;
 }
 
 export function nextRequestId(state: EditorState, scope: string) {
