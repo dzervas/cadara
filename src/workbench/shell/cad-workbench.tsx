@@ -14,7 +14,10 @@ import {
 } from "@/components/cad/sketch-selection-context";
 import { SketchTangentActions } from "@/components/cad/sketch-tangent-actions";
 import { SketchConstraintList } from "@/components/cad/sketch-constraint-list";
-import { splineVisibleHandleVectors } from "@/contracts/sketch/spline-geometry";
+import {
+  solvedCubicSpans,
+  splineVisibleHandleVectors,
+} from "@/contracts/sketch/spline-geometry";
 import { SketchToolPanel } from "@/components/cad/sketch-tool-panel";
 import { FeatureInspector } from "@/components/layout/feature-inspector";
 import { FloatingPartsTree } from "@/components/layout/floating-parts-tree";
@@ -901,15 +904,24 @@ export function CadWorkbench({
               id: e.entityId,
               kind: e.kind,
               pointIds: [e.centerPointId, e.startPointId, e.endPointId],
+              sweepDirection: e.sweepDirection,
             };
           }
           if (e.kind !== "spline") {
             return { id: e.entityId, kind: e.kind };
           }
           const visibleVectors = splineVisibleHandleVectors(e, positionsRecord);
+          const solvedSpline =
+            sketchSession.liveSolve?.solvedSnapshot.solvedEntities.find(
+              (se) => se.kind === "spline" && se.entityId === e.entityId,
+            );
           return {
             id: e.entityId,
             kind: e.kind,
+            closure: e.closure,
+            spans: solvedSpline
+              ? solvedCubicSpans(solvedSpline).map((span) => span.poles)
+              : [],
             occurrences: e.pointOccurrences.map((occ, i) => ({
               occId: occ.occurrenceId,
               pointId: occ.pointId,

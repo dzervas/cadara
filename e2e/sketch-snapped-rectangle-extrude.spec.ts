@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 
+import { selectRegionInViewport } from "./helpers/acceptance";
 import { FeatureWorkbenchHarness } from "./helpers/feature-workbench";
 
 const MODELING_OPERATION_HISTORY_STORAGE_KEY =
@@ -181,7 +182,7 @@ test("a snapped rectangle closes through its declared closing corner after a dim
       },
     )
     .toBe(1);
-  await workbench.selectReference(regionTargets[0]!);
+  await selectRegionInViewport(workbench, regionTargets[0]!);
   await workbench.expectFeaturePreviewReady("extrude");
   await workbench.commitFeature();
   await workbench.expectBodyCountAtLeast(1);

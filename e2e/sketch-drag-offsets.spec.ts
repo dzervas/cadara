@@ -1,6 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import { FeatureWorkbenchHarness } from "./helpers/feature-workbench";
+import {
+  selectThinOffsetRegion,
+  thickThenThin,
+} from "./helpers/offset-regions";
 
 test.setTimeout(180_000);
 test.use({ viewport: { width: 1440, height: 960 } });
@@ -115,6 +119,8 @@ async function regionTargets(page: Page, minimum: number) {
 test("T12g B8: drag a source point on a spline+line loop with an outward offset; the curved shell geometry changes during drag; after release the region becomes selectable and extrudable", async ({
   page,
 }) => {
+  // T17i: the viewport pick of the ring zooms in (≈ +40 s).
+  test.setTimeout(300_000);
   const workbench = new FeatureWorkbenchHarness(page);
   await startTopPlaneSketch(page, workbench);
 
@@ -290,8 +296,10 @@ test("T12g B8: drag a source point on a spline+line loop with an outward offset;
   const targets = await regionTargets(page, 2);
 
   // Verify that one region is extrudable (certification completed after
-  // release → the offset region is no longer provisional).
-  await workbench.selectReference(targets[0]!);
+  // release → the offset region is no longer provisional). T17i: the
+  // offset ring itself, picked in the viewport after zooming in ×30.
+  const [, ring] = await thickThenThin(workbench, targets);
+  await selectThinOffsetRegion(workbench, ring, 30);
   await workbench.expectFeaturePreviewReady("extrude");
   await workbench.commitFeature("feature_extrude-1");
   await workbench.expectBodyCountAtLeast(1);

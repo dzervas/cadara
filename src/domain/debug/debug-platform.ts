@@ -154,6 +154,16 @@ export interface SketchDebugSnapshot {
     pointIds?: readonly string[];
     /** T15e: circle radius (solved when a live solve exists). */
     radius?: number;
+    /** T17i: an arc's authored sweep direction. */
+    sweepDirection?: string;
+    /** T17i: a spline's authored closure. */
+    closure?: string;
+    /**
+     * T17i (review R-6 read): a spline's solved cubic spans (Bézier poles)
+     * from the live solve, the spans sketch mode draws; empty without a
+     * live solve or a valid reconstruction.
+     */
+    spans?: readonly (readonly (readonly [number, number])[])[];
     occurrences?: {
       occId: string;
       pointId: string;
