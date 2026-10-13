@@ -110,6 +110,7 @@ import {
   collectBindings,
   collectRaycastPickCandidates,
   type CollectedBindings,
+  intersectObjectsWithLinePickRadius,
   isSeededDatumPlaneRenderable,
   type PickResult,
   resolveAllCandidates,
@@ -2050,16 +2051,23 @@ export function ThreeCadViewport({
       );
       raycasterRef.current.setFromCamera(pointerRef.current, camera);
       const pickTuning = getViewportPickTuning(selectionFilterRef.current);
-      raycasterRef.current.params.Line.threshold = pickTuning.linePickThreshold;
       (
         raycasterRef.current as THREE.Raycaster & { firstHitOnly?: boolean }
       ).firstHitOnly = false;
-
-      const intersections = raycasterRef.current.intersectObjects(
-        bindings.pickables,
-        true,
-      );
       const sketchSession = sketchSessionRef.current;
+      // Part mode picks lines within a screen-pixel band capped at the
+      // world band (T17-19); sketch mode keeps the world band.
+      raycasterRef.current.params.Line.threshold = pickTuning.linePickThreshold;
+      const intersections = sketchSession
+        ? raycasterRef.current.intersectObjects(bindings.pickables, true)
+        : intersectObjectsWithLinePickRadius({
+            raycaster: raycasterRef.current,
+            objects: bindings.pickables,
+            camera,
+            viewportHeight: viewportRect.height,
+            linePickRadiusPx: pickTuning.linePickRadiusPx,
+            maxLineThreshold: pickTuning.linePickThreshold,
+          });
       // Built once per pick; the curve collector and the stack share it.
       const sketchDisplayDefinition = sketchSession
         ? getSketchSessionDisplayDefinition(sketchSession)
@@ -3480,7 +3488,7 @@ export function ThreeCadViewport({
         gl={{ antialias: true, alpha: true, localClippingEnabled: true }}
         orthographic
         camera={{ near: 0.1, far: 1000, position: [14, -16, 28] }}
-        onCreated={({ camera, gl, raycaster }) => {
+        onCreated={({ camera, gl }) => {
           const viewportCamera =
             camera instanceof THREE.OrthographicCamera ||
             camera instanceof THREE.PerspectiveCamera
@@ -3500,7 +3508,6 @@ export function ThreeCadViewport({
           canvasCreatedRef.current?.();
           setCanvasReadyVersion((current) => current + 1);
           gl.setClearColor(0x000000, 0);
-          raycaster.params.Line.threshold = 0.75;
         }}
       >
         <ViewportProjectionCameraController

@@ -55,19 +55,24 @@ const REGION_SEARCH_OFFSETS = regionSearchOffsets();
  * region itself as the hover target, presses there, and waits for the
  * selection (the profile chip of an active feature, or the editor
  * selection). Fails with the hover targets it saw; it never falls back to a
- * debug selection.
+ * debug selection. `from` replaces the projected start point (same canvas
+ * coordinates), e.g. a point on a thin region once zoomed in, where the
+ * region's projected point is far off screen.
  */
 export async function selectRegionInViewport(
   workbench: SketchWorkbenchHarness,
   regionId: string,
+  { from }: { from?: CanvasPoint } = {},
 ) {
   const page = workbench.page;
   const surface = await workbench.viewportSurface().boundingBox();
   if (!surface) throw new Error("Viewport surface is not visible.");
-  const start = await page.evaluate(
-    (id) => window.__cadProjectToScreen?.(id) ?? null,
-    regionId,
-  );
+  const start =
+    from ??
+    (await page.evaluate(
+      (id) => window.__cadProjectToScreen?.(id) ?? null,
+      regionId,
+    ));
   if (!start) throw new Error(`${regionId} has no projected screen point.`);
   const seen = new Map<string, number>();
   for (const offset of REGION_SEARCH_OFFSETS) {

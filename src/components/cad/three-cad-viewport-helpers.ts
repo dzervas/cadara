@@ -29,6 +29,7 @@ import type {
   SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
 import {
+  DEFAULT_LINE_PICK_RADIUS_PX,
   DEFAULT_LINE_PICK_THRESHOLD,
   applyWireMaterialDepthPolicy,
   getBoundTarget,
@@ -38,6 +39,11 @@ import type { ViewportRenderableRecord } from "@/core/workspace/viewport-rendera
 
 export const WORKSPACE_SCAFFOLD_RENDER_ORDER = 0;
 const MEASURE_LINE_PICK_THRESHOLD = 0.12;
+/**
+ * The measure band in part mode: 0.12 world units at the default camera,
+ * capped at that world band (T17-19).
+ */
+const MEASURE_LINE_PICK_RADIUS_PX = 3.4;
 const MEASURE_WIRE_OCCLUSION_TOLERANCE = 0.001;
 const POINTER_BUTTON_SECONDARY = 2;
 const POINTER_BUTTON_AUXILIARY = 4;
@@ -210,12 +216,16 @@ export function resolveSketchFitPointRelease(input: {
 export function getViewportPickTuning(
   selectionFilter: SelectionFilter | null,
 ): {
+  /** The world-unit line band: sketch mode, and the part-mode cap. */
   linePickThreshold: number;
+  /** Part mode: the line band in screen pixels at the hit depth (T17-19). */
+  linePickRadiusPx: number;
   resolutionOptions: PickResolutionOptions;
 } {
   if (selectionFilter?.kind === "measureTargets") {
     return {
       linePickThreshold: MEASURE_LINE_PICK_THRESHOLD,
+      linePickRadiusPx: MEASURE_LINE_PICK_RADIUS_PX,
       resolutionOptions: {
         wireOcclusionTolerance: MEASURE_WIRE_OCCLUSION_TOLERANCE,
       },
@@ -224,6 +234,7 @@ export function getViewportPickTuning(
 
   return {
     linePickThreshold: DEFAULT_LINE_PICK_THRESHOLD,
+    linePickRadiusPx: DEFAULT_LINE_PICK_RADIUS_PX,
     resolutionOptions: {},
   };
 }
