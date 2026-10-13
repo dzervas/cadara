@@ -33,7 +33,11 @@ if (fontconfigFile) process.env.FONTCONFIG_FILE = fontconfigFile;
 export default defineConfig({
   testDir: "./e2e",
   testMatch: runRealCaptures ? realCaptureTests : undefined,
-  testIgnore: runRealCaptures ? undefined : realCaptureTests,
+  // `e2e/offline/` runs only in its own sub-lane on a production preview
+  // (`playwright.offline.config.ts`, `bun run test:e2e:offline`).
+  testIgnore: runRealCaptures
+    ? undefined
+    : [...realCaptureTests, "**/e2e/offline/**"],
   timeout: 30_000,
   expect: {
     timeout: 1_000,

@@ -17,6 +17,7 @@ This repository does not treat all tests as the same kind of asset. Choose the t
 - `bun run test:static` runs repository policy guards under `test/static/`.
 - `bun run test` runs the umbrella non-Playwright suite: logic, UI, and static.
 - `bun run test:e2e` runs the fast Playwright browser lane with four workers; real-capture acceptance specs are excluded.
+- `bun run test:e2e:offline` builds the app with the debug platform on (`vite.offline-test.config.ts`, into `.tmp-offline-dist/`) and runs `e2e/offline/` against `vite preview` of that build, cutting the network after load; it is outside `test:all`.
 - `bun run test:e2e:diagnostic` reruns the fast lane serially with retained failure traces and video.
 - `bun run test:e2e:real-captures` explicitly runs the complete Onshape/OCC acceptance lane against the tracked fixtures in `test/fixtures/onshape-captures` with one worker.
 - `bun run test:e2e:real-captures:diagnostic` runs that acceptance lane with retained failure traces and video.
