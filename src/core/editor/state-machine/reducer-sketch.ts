@@ -1,5 +1,8 @@
 import { authorSketchDimension } from "@/domain/editor/sketch-session/constraints";
 import { updateSketchDimensionValue } from "@/domain/editor/sketch-session/annotations";
+import { updateSketchGeometry, setSketchItemLabel } from "@/domain/editor/sketch-session/geometry-actions";
+import { deleteSelectedSketchGeometry } from "@/domain/editor/sketch-session/editing";
+import { setSketchConstructionTarget } from "@/domain/editor/sketch-session/tools";
 import { authorSketchPrimitive } from "@/domain/editor/sketch-session/tools";
 import { isRegisteredSketchToolId } from "@/core/sketch-tools/registry";
 import { isRegisteredSketchConstraintToolId } from "@/core/sketch-constraints/registry";
@@ -214,6 +217,14 @@ export function reduceSketchWorkflow(
   switch (event.type) {
     case "sketch.beginRequested":
       return { state, effects: [] };
+    case "sketch.geometryUpdated":
+      return { state: createSketchPreviewState(state, updateSketchGeometry(state.session, event.edit)), effects: [] };
+    case "sketch.geometryDeleted":
+      return { state: createSketchPreviewState(state, deleteSelectedSketchGeometry(state.session, event.targets)), effects: [] };
+    case "sketch.labelSet":
+      return { state: createSketchPreviewState(state, setSketchItemLabel(state.session, event.target, event.label)), effects: [] };
+    case "sketch.constructionSet":
+      return { state: createSketchPreviewState(state, setSketchConstructionTarget(state.session, event.target, event.construction)), effects: [] };
     case "sketch.primitiveAuthored":
       return { state: createSketchPreviewState(state, authorSketchPrimitive(state.session, event.primitive, event.construction)), effects: [] };
     case "sketch.dimensionAuthored":

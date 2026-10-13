@@ -75,6 +75,33 @@ Recipes may resolve a point or dimension target using `{ "alias": "rectangle",
 is accepted; missing/ambiguous labels fail, and current basis/draft checks still
 apply. These aliases are CLI-only, never semantic command inputs.
 
+### Sketch geometry edits
+
+After `sketch.open`, geometry edits take the current `basis`, `draft`, and
+`intent: "fulfill"` or explicit `"author-invalid"`:
+
+- `sketch.geometry.update` takes an `edit`: `point` with a point `target` and
+  `position`, `translate` with an entity `target` and `delta`, `radius` with a
+  circle/arc entity `target` and positive `radius`, or `tangent` with a typed
+  `sketchTangentHandle` target and `vector`.
+- `sketch.construction.set` takes a point/entity `target` and `construction`.
+- `sketch.geometry.delete` takes nonempty point/entity `targets`; dependent
+  requirements are removed by the existing geometry deletion owner.
+- `sketch.label.set` takes a sketch, point, entity, dimension or constraint
+  `target` and a nonempty `label`. Labels are authored metadata, not overrides.
+
+Discovery exposes canonical point/entity references, defining point IDs,
+current circle/arc radii, and spline tangent occurrence IDs. Each edit is one
+private authored action; undo/redo, discard, and Publish Sketch use the same
+owners as the browser. Constrained/derived targets can refuse an edit. Invalid
+editable drafts expose no consumable profiles; publication with
+`requireProfiles: true` fails closed. Re-discover after every edit.
+
+Recipes can resolve these `target`, `targets`, and `edit.target` fields using
+exact unique `{ "alias": "draft", "label": "Line 1 end" }` selectors.
+Tangent edits require the typed handle, including its occurrence and point ID.
+Missing, ambiguous, foreign-sketch and stale references are refused.
+
 ### Basic solid extrusion and rebuild
 
 `extrude.create` takes a current `basis`, a typed region `profile`

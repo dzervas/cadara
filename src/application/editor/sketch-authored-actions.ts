@@ -166,6 +166,14 @@ function actionLabel(event: EditorEvent, before: EditorState) {
     return "Create Sketch Geometry";
   }
   switch (event.type) {
+    case "sketch.geometryUpdated":
+      return "Edit Sketch Geometry";
+    case "sketch.geometryDeleted":
+      return "Delete Sketch Geometry";
+    case "sketch.labelSet":
+      return "Label Sketch Item";
+    case "sketch.constructionSet":
+      return "Set Sketch Construction";
     case "sketch.dimensionAuthored":
       return "Create Sketch Dimension";
     case "sketch.dimensionUpdated":

@@ -705,6 +705,10 @@ export interface SnapshotFailedEvent {
  */
 export type EditorEvent =
   | { type: "sketch.beginRequested"; target: import("@/contracts/shared/references").ConstructionRef | import("@/contracts/shared/references").SketchRef }
+  | { type: "sketch.geometryUpdated"; edit: import("@/contracts/semantic/schema").SemanticSketchGeometryEdit }
+  | { type: "sketch.geometryDeleted"; targets: readonly import("@/contracts/semantic/schema").SemanticSketchGeometryTarget[] }
+  | { type: "sketch.labelSet"; target: import("@/contracts/semantic/schema").SemanticSketchLabelTarget; label: string }
+  | { type: "sketch.constructionSet"; target: Extract<import("@/contracts/shared/references").DurableRef, { kind: "sketchEntity" | "sketchPoint" }>; construction: boolean }
   | { type: "sketch.primitiveAuthored"; primitive: import("@/contracts/semantic/schema").SemanticSketchPrimitive; construction: boolean }
   | { type: "sketch.dimensionAuthored"; input: import("@/contracts/semantic/schema").SemanticDimensionInput }
   | { type: "sketch.dimensionUpdated"; dimensionId: import("@/contracts/shared/ids").DimensionId; value: number }

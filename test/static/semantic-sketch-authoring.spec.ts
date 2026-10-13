@@ -36,6 +36,22 @@ it("browser and semantic primitive authoring share contribution factories and so
   expect(preparation).toContain("withLiveSolveBasis(");
   expect(preparation).not.toContain("createPointDefinition(");
 });
+it("browser and semantic geometry edits share solving, deletion and construction owners", () => {
+  const tools = "src/domain/editor/sketch-session/tools.ts";
+  expect(body(tools, "toggleSketchConstructionTarget")).toContain("setSketchConstructionTarget(");
+  expect(body(tools, "setSketchConstructionTarget")).toContain("toggleConstructionTargetInDefinition(");
+  expect(body("src/domain/editor/sketch-session/geometry-actions.ts", "updateSketchGeometry")).toContain("solveDragEdit(");
+  expect(body("src/domain/editor/sketch-session/editing.ts", "applySketchGeometryDrag")).toContain("solveDragEdit(");
+  expect(body("src/domain/editor/sketch-session/editing.ts", "beginSketchGeometryDrag")).toContain("prepareSketchTangentEditDefinition(");
+  expect(body("src/domain/editor/sketch-session/geometry-actions.ts", "updateSketchGeometry")).toContain("prepareSketchTangentEditDefinition(");
+  const reducer = readFileSync(resolve(root, "src/core/editor/state-machine/reducer-sketch.ts"), "utf8");
+  expect(reducer).toContain("deleteSelectedSketchGeometry(state.session, event.targets)");
+  expect(body("src/core/editor/state-machine/transitions-sketch.ts", "handleSketchAnnotationDeleteRequested")).toContain("deleteSelectedSketchGeometry(state.session, state.selection)");
+  const adapter = readFileSync(resolve(root, "src/infrastructure/modeling/semantic-sketch-port.ts"), "utf8");
+  expect(adapter).not.toMatch(/type:\s*["'](?:tool\.activated|sketch\.(?:pointer|geometryDrag))/);
+  expect(adapter).not.toContain("solveDragEdit(");
+  expect(adapter).not.toContain("deleteSelectedSketchGeometry(");
+});
 it("semantic publication attaches the existing authored owner basis by emitted intent, not a Finish gesture", () => {
   const source = readFileSync(
     resolve(root, "src/application/editor/sketch-authored-actions.ts"),
