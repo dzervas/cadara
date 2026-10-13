@@ -7,7 +7,7 @@ import {
   err,
   ok,
 } from "@/contracts/errors";
-import type { DurableHistoryService } from "@/workbench/history/durable-history";
+import type { DurableHistoryService } from "@/application/history/durable-history";
 
 import {
   createHookTestHarness,

@@ -94,6 +94,20 @@ selector) to reopen a committed private draft. Updating a driving requirement
 and publishing settles the production cursor restoration and downstream rebuild
 before returning current solid output. Re-discover references after edits.
 
+### Active-author undo and redo
+
+`history.inspect`, `history.undo`, and `history.redo` take the current `basis`
+and `draft`: a current draft basis (or its recipe alias) while editing a sketch,
+otherwise `null`. Discovery exposes the active owner's undo/redo entries and
+availability. Undo/redo may take an explicit `actionSequence`; omitted means
+the newest available action. Empty private history never falls through to
+document undo. Document actions use author-scoped repository compensation and
+await exact synchronization and editor rebuild/handoff; peer edits are preserved
+and overlapping actions are refused. Cursor movement is not authored-action undo.
+Publication is one document action. Failed persistence can still have applied
+live state, and is reported separately. Fresh file opening resets both owners;
+saving does not persist process-private history for another invocation.
+
 ## `onshape capture`
 
 Capture an Onshape document into a single self-contained, versioned bundle file

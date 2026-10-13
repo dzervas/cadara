@@ -103,10 +103,20 @@ export type SemanticExtrudeCommand = CommandIdentity & {
   | { operation: "extrude.update"; featureId: import("@/contracts/shared/ids").FeatureId }
 );
 
+/** History uses the active editing owner; null draft explicitly selects document context. */
+export type SemanticHistoryCommand = CommandIdentity & {
+  basis: SemanticBasis;
+  draft: SemanticDraftBasis | null;
+} & (
+  | { operation: "history.inspect" }
+  | { operation: "history.undo" | "history.redo"; actionSequence?: number }
+);
+
 /** Implemented slices. Later tickets extend this closed union. */
 export type SemanticCommand =
   | SemanticSketchCommand
   | SemanticExtrudeCommand
+  | SemanticHistoryCommand
   | (CommandIdentity &
       (
         | { operation: "document.create"; label: string; basis: null }

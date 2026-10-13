@@ -17,12 +17,14 @@ export function createNativeDocumentFiles(input: {
   state(
     revisionId: SemanticState["revisionId"],
     heads: readonly string[],
+    freshContext: boolean,
   ): SemanticState;
 }): NonNullable<SemanticDocumentPort["nativeFiles"]> {
   const { service, files, sketchActions, state } = input;
   async function mutate(
     commandId: string,
     currentState: SemanticState,
+    freshContext: boolean,
     apply: (
       observe: (receipt: DocumentRepositoryMutationResult) => void,
     ) => ReturnType<ModelingService["importDocument"]>,
@@ -72,8 +74,8 @@ export function createNativeDocumentFiles(input: {
           ? { failure }
           : { rejected: rejected ?? "native-document-unchanged" }),
       };
-    sketchActions.reset();
-    const accepted = state(applied.document.revisionId, applied.metadata.heads);
+    if (freshContext) sketchActions.reset();
+    const accepted = state(applied.document.revisionId, applied.metadata.heads, freshContext);
     return {
       state: accepted,
       persistence: {
@@ -110,12 +112,12 @@ export function createNativeDocumentFiles(input: {
           diagnostics: [semanticDiagnostic(error)],
         };
       }
-      return mutate(commandId, currentState, (observe) =>
+      return mutate(commandId, currentState, true, (observe) =>
         service.importDocument({ document, observe }),
       );
     },
     async rename({ commandId, label, currentState }) {
-      return mutate(commandId, currentState, (observe) =>
+      return mutate(commandId, currentState, false, (observe) =>
         service.renameDocument({ name: label, observe }),
       );
     },

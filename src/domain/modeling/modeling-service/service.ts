@@ -558,6 +558,7 @@ export function createModelingService(
       validateBeforePersist?: boolean;
       validateEmbeddedAssetsBeforePersist?: boolean;
       observeTransaction?: (transaction: import("@/domain/modeling/document-repository").DocumentRepositoryMutationResult) => void;
+      authoredAction?: { expected: AuthoredModelDocument; label: string };
     } = {},
   ): Promise<ModelingDocumentFileMutationResult> {
     if (!adapter.restoreAuthoredModelDocument) {
@@ -577,7 +578,7 @@ export function createModelingService(
       return normalized;
     }
 
-    const activeDocument = normalized.document;
+    let activeDocument = normalized.document;
     let restoreDiagnostics: ModelingDiagnostic[] = [];
     const rollbackDocument =
       options.validateBeforePersist && documentRepository
@@ -627,11 +628,19 @@ export function createModelingService(
     }
 
     if (documentRepository) {
-      const writeResult = await documentRepository.initialize({
-        documentId: currentDocumentId,
-        document: activeDocument,
-        assets,
-      });
+      const writeResult = options.authoredAction
+        ? await documentRepository.mutate({
+            documentId: currentDocumentId,
+            document: activeDocument,
+            expected: options.authoredAction.expected,
+            label: options.authoredAction.label,
+            assets,
+          })
+        : await documentRepository.initialize({
+            documentId: currentDocumentId,
+            document: activeDocument,
+            assets,
+          });
 
       options.observeTransaction?.(writeResult);
       if (!writeResult.ok) {
@@ -649,6 +658,7 @@ export function createModelingService(
       }
 
       markRepositorySnapshotFresh(writeResult.metadata);
+      activeDocument = writeResult.document;
       restoreDiagnostics = writeResult.diagnostics ?? [];
     }
 
@@ -1591,7 +1601,7 @@ export function createModelingService(
           revisionId: createRevisionId(parseRevisionSequence(document.revisionId) + 1),
         },
         [],
-        { observeTransaction: input.observe },
+        { observeTransaction: input.observe, authoredAction: { expected: document, label: "Rename document" } },
       );
     },
     async bindLocalFile(input) {

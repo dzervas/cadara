@@ -326,10 +326,13 @@ function createAuthoredModelDocumentFromAuthoringState(
     featureOrder: state.features.map((feature) => feature.featureId),
     historyOrder: state.historyOrder.map((item) => ({ ...item })),
     cursor: structuredClone(state.cursor),
-    bodyLabels: state.bodies.map((body) => ({
-      bodyId: body.bodyId,
-      label: body.label,
-    })),
+    // The active cursor's evaluated bodies are only a view. Keep authored
+    // labels for inactive bodies so rollback/restore cannot delete and recreate
+    // them as unrelated document actions (or discard a user's body name).
+    bodyLabels: [...new Map([
+      ...state.bodyLabels,
+      ...state.bodies.map((body) => [body.bodyId, body.label] as const),
+    ])].map(([bodyId, label]) => ({ bodyId, label })),
     assets: structuredClone(state.assets),
     embeddedBinaryAssets: [...structuredClone(state.embeddedBinaryAssets)],
     topologyLineage: serializeCurrentOccTopologyLineage(state),

@@ -181,10 +181,12 @@ class DocumentSession implements SemanticSession {
         },
       };
     try {
-      if (command.operation.startsWith("sketch.") || command.operation.startsWith("extrude.")) {
+      if (command.operation.startsWith("sketch.") || command.operation.startsWith("extrude.") || command.operation.startsWith("history.")) {
         const execute = command.operation.startsWith("sketch.")
           ? this.owner.sketch?.bind(this.owner)
-          : this.owner.extrude?.bind(this.owner);
+          : command.operation.startsWith("history.")
+            ? this.owner.history?.bind(this.owner)
+            : this.owner.extrude?.bind(this.owner);
         if (!execute)
           return {
             ...terminal,
