@@ -710,7 +710,10 @@ export type EditorEvent =
   | { type: "sketch.labelSet"; target: import("@/contracts/semantic/schema").SemanticSketchLabelTarget; label: string }
   | { type: "sketch.constructionSet"; target: Extract<import("@/contracts/shared/references").DurableRef, { kind: "sketchEntity" | "sketchPoint" }>; construction: boolean }
   | { type: "sketch.primitiveAuthored"; primitive: import("@/contracts/semantic/schema").SemanticSketchPrimitive; construction: boolean }
+  | { type: "sketch.requirementRemoved"; targets: readonly Extract<import("@/contracts/shared/references").DurableRef, { kind: "dimension" | "constraint" }>[] }
+  | { type: "sketch.requirementAuthored"; input: import("@/contracts/semantic/schema").SemanticRequirementInput }
   | { type: "sketch.dimensionAuthored"; input: import("@/contracts/semantic/schema").SemanticDimensionInput }
+  | { type: "sketch.dimensionMadeReference"; dimensionId: import("@/contracts/shared/ids").DimensionId }
   | { type: "sketch.dimensionUpdated"; dimensionId: import("@/contracts/shared/ids").DimensionId; value: number }
   | { type: "sketch.publishRequested" }
   | { type: "sketch.discardRequested" }

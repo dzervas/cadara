@@ -1,5 +1,5 @@
-import { authorSketchDimension } from "@/domain/editor/sketch-session/constraints";
-import { updateSketchDimensionValue } from "@/domain/editor/sketch-session/annotations";
+import { authorSketchDimension, authorSketchRequirement } from "@/domain/editor/sketch-session/constraints";
+import { updateSketchDimensionValue, deleteSelectedSketchAnnotation, makeSketchAnnotationReference } from "@/domain/editor/sketch-session/annotations";
 import { updateSketchGeometry, setSketchItemLabel } from "@/domain/editor/sketch-session/geometry-actions";
 import { deleteSelectedSketchGeometry } from "@/domain/editor/sketch-session/editing";
 import { setSketchConstructionTarget } from "@/domain/editor/sketch-session/tools";
@@ -227,8 +227,14 @@ export function reduceSketchWorkflow(
       return { state: createSketchPreviewState(state, setSketchConstructionTarget(state.session, event.target, event.construction)), effects: [] };
     case "sketch.primitiveAuthored":
       return { state: createSketchPreviewState(state, authorSketchPrimitive(state.session, event.primitive, event.construction)), effects: [] };
+    case "sketch.requirementRemoved":
+      return { state: createSketchPreviewState(state, event.targets.reduce((session, target) => deleteSelectedSketchAnnotation(session, [target]), state.session)), effects: [] };
+    case "sketch.requirementAuthored":
+      return { state: createSketchPreviewState(state, authorSketchRequirement(state.session, event.input)), effects: [] };
     case "sketch.dimensionAuthored":
       return { state: createSketchPreviewState(state, authorSketchDimension(state.session, event.input)), effects: [] };
+    case "sketch.dimensionMadeReference":
+      return { state: createSketchPreviewState(state, makeSketchAnnotationReference(state.session, { target: { kind: "dimension", sketchId: state.session.sketchId ?? state.session.actionContextId, dimensionId: event.dimensionId }, pendingValue: null })), effects: [] };
     case "sketch.dimensionUpdated":
       return { state: createSketchPreviewState(state, updateSketchDimensionValue(state.session, event.dimensionId, event.value)), effects: [] };
     case "sketch.publishRequested":

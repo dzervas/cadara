@@ -44,6 +44,20 @@ export type SemanticSketchPrimitive =
   | { kind: "centerPointArc"; center: SketchPoint; start: SketchPoint; end: SketchPoint }
   | { kind: "tangentArc"; start: SketchPoint; direction: SketchPoint; end: SketchPoint; source: Extract<DurableRef, { kind: "sketchEntity" }> | null };
 
+export type SemanticRequirementTarget = SemanticSketchGeometryTarget
+  | import("@/contracts/shared/references").SketchDatumReferenceRef
+  | import("@/contracts/shared/references").ProjectedReferenceGeometryRef;
+export interface SemanticRequirementInput {
+  tool: "dimensionDistance" | "dimensionHorizontal" | "dimensionVertical" | "dimensionRadius" | "constraintCoincident" | "constraintCollinear"
+    | "constraintParallel" | "constraintPerpendicular" | "constraintTangent"
+    | "constraintEqual" | "constraintHorizontal" | "constraintVertical"
+    | "constraintConcentric" | "constraintMidpoint" | "constraintNormal"
+    | "constraintPierce" | "constraintSymmetric" | "constraintFix";
+  targets: readonly SemanticRequirementTarget[];
+  mode: "driving" | "reference";
+  value: number | null;
+}
+
 export type SemanticDimensionInput = {
   axis: "horizontal" | "vertical";
   points: readonly [SketchPointId, SketchPointId];
@@ -75,7 +89,10 @@ export type SemanticSketchCommand = CommandIdentity & {
         construction: boolean;
         intent: "fulfill" | "author-invalid";
       }
+    | { operation: "sketch.requirement.remove"; draft: SemanticDraftBasis; targets: readonly Extract<DurableRef, { kind: "dimension" | "constraint" }>[]; intent: "fulfill" | "author-invalid" }
+    | ({ operation: "sketch.requirement.add"; draft: SemanticDraftBasis; intent: "fulfill" | "author-invalid" } & SemanticRequirementInput)
     | ({ operation: "sketch.dimension.add"; draft: SemanticDraftBasis; intent: "fulfill" | "author-invalid" } & SemanticDimensionInput)
+    | { operation: "sketch.dimension.reference"; draft: SemanticDraftBasis; dimensionId: import("@/contracts/shared/ids").DimensionId; intent: "fulfill" | "author-invalid" }
     | { operation: "sketch.dimension.update"; draft: SemanticDraftBasis; dimensionId: import("@/contracts/shared/ids").DimensionId; value: number; intent: "fulfill" | "author-invalid" }
     | { operation: "sketch.construction.set"; draft: SemanticDraftBasis; target: Extract<DurableRef, { kind: "sketchPoint" | "sketchEntity" }>; construction: boolean; intent: "fulfill" | "author-invalid" }
     | { operation: "sketch.geometry.update"; draft: SemanticDraftBasis; edit: SemanticSketchGeometryEdit; intent: "fulfill" | "author-invalid" }
@@ -294,9 +311,18 @@ export interface SemanticDiscovery {
       text?: { content: string; height: number; rotationRadians: number; horizontalAlign: "left" | "center" | "right"; verticalAlign: "baseline" | "middle" | "top" | "bottom" };
       tangents?: readonly { occurrenceId: string; pointId: SketchPointId; vector: SketchPoint | null }[];
     }[];
+    /** Read-only datum/projected operands from this exact private sketch basis. */
+    operands: readonly { label: string; target: Exclude<SemanticRequirementTarget, SemanticSketchGeometryTarget> }[];
+    constraints: readonly {
+      constraintId: import("@/contracts/shared/ids").ConstraintId;
+      kind: import("@/contracts/sketch/schema").ConstraintDefinition["kind"];
+      label: string;
+      status: import("@/contracts/sketch/schema").ConstraintStatusRecord["status"] | null;
+    }[];
     requirements: readonly {
       dimensionId: import("@/contracts/shared/ids").DimensionId;
       mode: "driving";
+      kind: import("@/contracts/sketch/schema").DimensionDefinition["kind"];
       label: string;
       value: number | null;
       measuredValue: number | null;
@@ -304,6 +330,7 @@ export interface SemanticDiscovery {
     measurements: readonly {
       dimensionId: import("@/contracts/shared/ids").DimensionId;
       mode: "reference";
+      kind: import("@/contracts/sketch/schema").DimensionDefinition["kind"];
       label: string;
       measuredValue: number | null;
     }[];

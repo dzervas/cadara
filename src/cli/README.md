@@ -146,6 +146,58 @@ Recipes may resolve a point or dimension target using `{ "alias": "rectangle",
 is accepted; missing/ambiguous labels fail, and current basis/draft checks still
 apply. These aliases are CLI-only, never semantic command inputs.
 
+### Complete sketch requirements
+
+`sketch.requirement.add` takes current `basis`, `draft`, explicit typed
+`targets`, a `tool`, `mode`, `value`, and `intent`. It uses the browser's
+constraint registry, contribution preparation and solver, not tool gestures.
+
+| Tool | Supported operand combinations |
+| --- | --- |
+| `constraintCoincident` | Two local points; two local lines; local point/curve; local point or circle center with a supported datum/projected point or curve |
+| `constraintCollinear` | Local point/line and local, datum or projected line |
+| `constraintParallel`, `constraintPerpendicular` | Two local lines, or a local line and datum/projected line |
+| `constraintTangent` | Local line/circle/arc with circle/arc; supported local curve with projected circle/arc |
+| `constraintEqual` | Two local lines (not equal-radius circles) |
+| `constraintHorizontal`, `constraintVertical` | One local line |
+| `constraintConcentric` | Two local circles/arcs, or local circle/arc with projected circle/arc |
+| `constraintMidpoint` | Local point and local, datum or projected line |
+| `constraintNormal` | Local line, local contact point and local/projected circle/arc |
+| `constraintPierce` | Local point and supported local, datum or projected curve |
+| `constraintSymmetric` | Two existing local points and local, datum or projected line axis; creates no mirror copies |
+| `constraintFix` | Supported local point/entity; circles also receive a driving diameter |
+| `dimensionDistance` | One local circle/arc (diameter), one local line (length), two supported lines (parallel distance or nonparallel angle), point/line distance, two local points or local point/sketch origin |
+| `dimensionHorizontal`, `dimensionVertical` | Two local points or local point/sketch origin |
+| `dimensionRadius` | One local circle only; use Distance for an arc diameter |
+
+Constraints require `mode: "driving", value: null`. Dimensions require either
+`mode: "driving", value: <positive number>` or
+`mode: "reference", value: null`. Angle creation and numeric updates use
+**degrees**; authored/discovered line-angle values and measurements are
+**radians**. Other numeric values use document millimeters. Reference
+measurements never drive geometry.
+
+`sketch.dimension.reference` takes `dimensionId` and changes a supported
+numeric requirement to a measurement. `sketch.dimension.update` changes its
+value, making a reference driving through the shared annotation owner.
+`sketch.requirement.remove` takes nonempty dimension/constraint `targets`.
+All three take current `basis`, `draft` and `intent`; each command is one
+private authored action, including multi-target removal.
+
+Discovery includes requirement kinds/IDs/values, separate measurements,
+constraint kinds/IDs/solve statuses, and current read-only datum/projected
+`sketch.operands`. Datum/projected references are operands, not editable
+geometry. Only current supported combinations are accepted; unavailable,
+foreign, repeated, extra or unsupported operands refuse unchanged. Solver
+conflicts report correlated invalid geometry and diagnostics, never fulfilled
+geometry or consumable profiles.
+
+Recipes may use exact unique label aliases for requirement `targets`,
+removal `targets` and `dimensionId`, including labels in `sketch.operands`.
+A point entity can share its point's label: such a generic alias is ambiguous
+and must be replaced with a typed reference or a unique authored label.
+No implicit proximity, list-order selection or coordinate merging occurs.
+
 ### Sketch geometry edits
 
 After `sketch.open`, geometry edits take the current `basis`, `draft`, and

@@ -211,11 +211,7 @@ export function patchSketchAnnotationEditValue(
   }
 
   if (intent === "makeAnnotationReference") {
-    return commitEditedAnnotationDefinition(
-      session,
-      edit,
-      makeReferenceDimensionInDefinition(session.definition, edit.target),
-    );
+    return makeSketchAnnotationReference(session, edit);
   }
 
   if (intent !== "commitAnnotationValue") {
@@ -582,6 +578,22 @@ export function clearSketchAnnotationEdit(
     activeAnnotationEdit: null,
     validationMessage: null,
   };
+}
+
+/** Completed Make reference intent shares the browser annotation mutation and solve owner. */
+export function makeSketchAnnotationReference(
+  session: SketchSessionState,
+  edit: SketchAnnotationEditState,
+): SketchSessionState {
+  const definition = makeReferenceDimensionInDefinition(session.definition, edit.target);
+  const target = edit.target;
+  const alreadyReference = target.kind === "dimension" && session.definition.dimensions.some(d => d.dimensionId === target.dimensionId && isReferenceDimension(d));
+  // A satisfied no-op must not inherit another command's refusal feedback or create an authored action.
+  if (alreadyReference) return { ...session, validationMessage: null };
+  if (definition === session.definition) {
+    return { ...session, validationMessage: "This requirement cannot be a reference measurement." };
+  }
+  return commitEditedAnnotationDefinition(session, edit, definition);
 }
 
 /** Updates share browser annotation conversion, conflict retention and solve preparation. */
