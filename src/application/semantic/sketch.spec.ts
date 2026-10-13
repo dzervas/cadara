@@ -1,7 +1,118 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
+import { MemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";
 import { createHeadlessSessionFactory } from "@/composition/headless";
 import type { SemanticResult } from "@/contracts/semantic/schema";
 import { validateSemanticResult } from "@/contracts/semantic/runtime-schema";
+
+it.each(["receipt", "throw"] as const)(
+  "preserves a pre-apply publication $0 failure against unchanged live state",
+  async (failure) => {
+    const opened = await createHeadlessSessionFactory().open();
+    if (opened.kind !== "ready") throw new Error(JSON.stringify(opened));
+    const original = MemoryDocumentRepository.prototype.mutate;
+    const write = vi
+      .spyOn(MemoryDocumentRepository.prototype, "mutate")
+      .mockImplementation(function (this: MemoryDocumentRepository, input) {
+        if (input.label === "Publish Sketch") {
+          if (failure === "throw")
+            throw new Error("Publication repository threw before receipt.");
+          return Promise.resolve({
+            ok: false,
+            status: {
+              kind: "failed",
+              documentId: input.documentId,
+              diagnostic: {
+                reasonCode: "storage-write-failed",
+                message: "Publication storage refused before application.",
+              },
+            },
+          });
+        }
+        return original.call(this, input);
+      });
+    try {
+      const begun = await opened.session.execute({
+        version: 1,
+        commandId: "begin",
+        operation: "sketch.begin",
+        basis: opened.initialization.state,
+        plane: "xy",
+      });
+      const authored = await opened.session.execute({
+        version: 1,
+        commandId: "rectangle",
+        operation: "sketch.author",
+        basis: basis(begun),
+        draft: begun.discovery!.state.draft!,
+        primitive: { kind: "rectangle", start: [0, 0], end: [20, 10] },
+        construction: false,
+        intent: "fulfill",
+      });
+      expect(authored.outcome).toEqual({
+        kind: "completed",
+        change: "changed",
+      });
+      expect(authored.discovery!.sketch!.profiles).toHaveLength(1);
+      const published = await opened.session.execute({
+        version: 1,
+        commandId: "publish",
+        operation: "sketch.publish",
+        basis: basis(authored),
+        draft: authored.discovery!.state.draft!,
+        requireProfiles: true,
+      });
+      if (failure === "receipt") {
+        expect(
+          published.completion.persistence,
+          JSON.stringify(published),
+        ).toEqual({
+          kind: "failed",
+          commandId: "publish",
+          transactionId: expect.any(String),
+          state: authored.discovery!.state,
+        });
+        expect(published.outcome).toMatchObject({
+          kind: "failed",
+          failures: expect.arrayContaining(["execution", "persistence"]),
+        });
+        expect(published.diagnostics.map((d) => d.message)).toContain(
+          "Publication storage refused before application.",
+        );
+      } else {
+        expect(
+          published.diagnostics.map((d) => d.message),
+          JSON.stringify(published),
+        ).toEqual(
+          expect.arrayContaining([
+            "Publication repository threw before receipt.",
+            "Authoritative editor snapshot handoff failed.",
+          ]),
+        );
+        expect(published.outcome).toMatchObject({
+          kind: "failed",
+          failures: expect.arrayContaining(["execution", "handoff"]),
+        });
+        expect(published.completion.handoff).toEqual({ kind: "failed" });
+        expect(published.completion.persistence).toEqual({
+          kind: "not-required",
+        });
+        expect(published.discovery).toBeNull();
+      }
+      expect(published.completion.live).toEqual({
+        kind: "unchanged",
+        state: authored.discovery!.state,
+      });
+      expect(
+        validateSemanticResult(published.correlation, published).success,
+        JSON.stringify(published),
+      ).toBe(true);
+    } finally {
+      write.mockRestore();
+      await opened.session.close();
+    }
+  },
+  30000,
+);
 
 function basis(result: SemanticResult) {
   const { documentId, revisionId, repositoryHeads } = result.discovery!.state;

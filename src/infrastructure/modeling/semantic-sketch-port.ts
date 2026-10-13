@@ -250,6 +250,14 @@ export function createSemanticSketchPort(input: {
         events = await input.loop.dispatchAndSettle(command.commandId, {
           type: "sketch.discardRequested",
         });
+      // Preserve originating effect evidence before authoritative inspection can fail.
+      terminal.diagnostics = events.flatMap((event) =>
+        event.type === "effect.sketchCommitted"
+          ? event.diagnostics
+          : event.type.endsWith("Failed") && "message" in event
+            ? [semanticDiagnostic(new Error(event.message))]
+            : [],
+      );
       const finalEditor = input.loop.getState();
       for (const e of events)
         if (
@@ -314,8 +322,16 @@ export function createSemanticSketchPort(input: {
               transactionId: finished.requestId,
               state: actualState,
             };
-          } else
+          } else {
             terminal.completion.live = { kind: "unchanged", state: ownedState };
+            if (publicationReceipt && !publicationReceipt.ok)
+              terminal.completion.persistence = {
+                kind: "failed",
+                commandId: command.commandId,
+                transactionId: finished.requestId,
+                state: ownedState,
+              };
+          }
         }
       }
       const inspected = await input.inspect({
@@ -330,6 +346,7 @@ export function createSemanticSketchPort(input: {
       terminal.completion.handoff = { kind: "current", state };
       terminal.completion.geometry = geometry(state);
       terminal.diagnostics = [
+        ...terminal.diagnostics,
         ...inspected.diagnostics,
         ...(terminal.discovery.sketch?.validity.diagnostics ?? []).map((d) => ({
           ...d,
@@ -410,8 +427,7 @@ export function createSemanticSketchPort(input: {
             ...terminal.diagnostics,
             semanticDiagnostic(
               new Error(
-                commitFailure?.message ??
-                  "Publication snapshot does not match the exact accepted transaction.",
+                "Publication snapshot does not match the exact accepted transaction.",
               ),
             ),
           ];
@@ -516,10 +532,6 @@ export function createSemanticSketchPort(input: {
           terminal.outcome = failures.length
             ? { kind: "failed", failures }
             : { kind: "completed", change: "changed" };
-          terminal.diagnostics = [
-            ...terminal.diagnostics,
-            ...committed.diagnostics,
-          ];
         } else if (
           !committed &&
           initial.sketch?.entities.length === 0 &&
@@ -534,11 +546,15 @@ export function createSemanticSketchPort(input: {
           terminal.outcome = { kind: "completed", change: "unchanged" };
         } else {
           terminal.completion.live = { kind: "unchanged", state };
-          terminal.outcome = { kind: "failed", failures: ["execution"] };
-          terminal.diagnostics = [
-            ...terminal.diagnostics,
-            ...(committed?.diagnostics ?? []),
-          ];
+          terminal.outcome = {
+            kind: "failed",
+            failures: [
+              "execution",
+              ...(terminal.completion.persistence.kind === "failed"
+                ? ["persistence" as const]
+                : []),
+            ],
+          };
         }
       }
       if (
