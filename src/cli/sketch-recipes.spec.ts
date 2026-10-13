@@ -62,6 +62,7 @@ it("runs both documented command families and opens a native file over a private
       "sketch-open",
       "sketch-author",
       "sketch-publish",
+      "model-mutate",
       "document",
       "file-save",
       "file-open",
@@ -71,7 +72,7 @@ it("runs both documented command families and opens a native file over a private
       "document",
     ]);
     expect(result.results.map((r) => r.outcome.kind)).toEqual(
-      Array(11).fill("completed"),
+      Array(12).fill("completed"),
     );
     expect(
       result.results[2]!.discovery!.sketch!.points.map((p) => p.position),
@@ -81,15 +82,15 @@ it("runs both documented command families and opens a native file over a private
       [20, 10],
       [0, 10],
     ]);
-    expect(result.results[8]!.discovery!.state.draft).not.toBeNull();
-    expect(result.results[9]!.completion.persistence.kind).toBe("committed");
-    expect(result.results[9]!.completion.handoff.kind).toBe("current");
-    expect(result.results[10]!.discovery!.state).toMatchObject({
+    expect(result.results[9]!.discovery!.state.draft).not.toBeNull();
+    expect(result.results[10]!.completion.persistence.kind).toBe("committed");
+    expect(result.results[10]!.completion.handoff.kind).toBe("current");
+    expect(result.results[11]!.discovery!.state).toMatchObject({
       editingContext: { kind: "document" },
       draft: null,
     });
     expect(
-      result.results[10]!.discovery!.references.filter(
+      result.results[11]!.discovery!.references.filter(
         (r) => r.target.kind === "sketch",
       ),
     ).toHaveLength(1);

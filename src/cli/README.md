@@ -75,6 +75,25 @@ Recipes may resolve a point or dimension target using `{ "alias": "rectangle",
 is accepted; missing/ambiguous labels fail, and current basis/draft checks still
 apply. These aliases are CLI-only, never semantic command inputs.
 
+### Basic solid extrusion and rebuild
+
+`extrude.create` takes a current `basis`, a typed region `profile`
+(`{ kind: "region", sketchId, regionId }`), positive `depth` in document units,
+and `intent`. `extrude.update` takes the current `basis`, `featureId`, `depth`
+and `intent`. They reuse production feature preparation, mutation and rebuild.
+Discovery includes feature/produced-body identities and `model.bodies[].bounds`
+(`min`/`max`) from native B-rep inspection; null means no certified measurement,
+never last-good display geometry. A rejected request applies nothing; an applied
+revision with failed geometry or persistence is still command failure.
+
+Recipes can resolve `profile` and `featureId` with exact unique label selectors,
+for example `{ "alias": "published", "label": "Outer region" }` and
+`{ "alias": "solid", "label": "Extrude 1" }`. Stale bases and ambiguous labels
+are refused. `sketch.open` takes a current `basis` and `sketchId` (or its CLI label
+selector) to reopen a committed private draft. Updating a driving requirement
+and publishing settles the production cursor restoration and downstream rebuild
+before returning current solid output. Re-discover references after edits.
+
 ## `onshape capture`
 
 Capture an Onshape document into a single self-contained, versioned bundle file

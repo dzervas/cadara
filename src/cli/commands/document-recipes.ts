@@ -16,7 +16,10 @@ import { semanticCommandCorrelation } from "@/contracts/semantic/correlation";
 type Alias = { alias: string };
 type TargetAlias = Alias & { label: string };
 type RecipeCommand<T = SemanticCommand> = T extends SemanticCommand
-  ? Omit<T, "basis" | "draft" | "points" | "dimensionId"> &
+  ? Omit<T, "basis" | "draft" | "points" | "dimensionId" | "profile" | "featureId" | "sketchId"> &
+    (T extends { profile: infer P } ? { profile: P | TargetAlias } : unknown) &
+    (T extends { featureId: infer F } ? { featureId: F | TargetAlias } : unknown) &
+    (T extends { sketchId: infer S } ? { sketchId: S | TargetAlias } : unknown) &
     (T extends { points: infer P } ? { points: P | readonly [TargetAlias, TargetAlias] } : unknown) &
     (T extends { dimensionId: infer D } ? { dimensionId: D | TargetAlias } : unknown) & { basis: T["basis"] | Alias } & (T extends {
         draft: SemanticDraftBasis;
@@ -72,10 +75,20 @@ const example = {
     },
     {
       version: 1,
+      commandId: "extrude",
+      operation: "extrude.create",
+      basis: { alias: "published" },
+      profile: { alias: "published", label: "Outer region" },
+      depth: 7,
+      intent: "fulfill",
+      as: "solid",
+    },
+    {
+      version: 1,
       commandId: "rename",
       operation: "document.rename",
       label: "Renamed bracket",
-      basis: { alias: "published" },
+      basis: { alias: "solid" },
       as: "renamed",
     },
     {
@@ -159,6 +172,12 @@ function parseRecipe(input: unknown): RecipeOperation[] {
     }
     if (Array.isArray(command.points)) validationCommand.points = command.points.map(value => validateTarget(value, "sketch_point_validation"));
     if ("dimensionId" in command) validationCommand.dimensionId = validateTarget(command.dimensionId, "dimension_validation");
+    for (const [key, placeholder] of [["featureId", "feature_validation"], ["sketchId", "sketch_validation"]] as const)
+      if (key in command) validationCommand[key] = validateTarget(command[key], placeholder);
+    if (isAlias(command.profile)) {
+      validateTarget(command.profile, "region_validation");
+      validationCommand.profile = { kind: "region", sketchId: "sketch_validation", regionId: "region_validation" };
+    }
     if (!validateSemanticCommand(validationCommand).success)
       throw new Error("Invalid semantic operation.");
     if (typeof alias === "string") aliases.add(alias);
@@ -243,6 +262,23 @@ export const documentRecipesCommand: CommandModule = {
           const matches = [...(sketch?.requirements ?? []), ...(sketch?.measurements ?? [])].filter(d => d.label === target.label);
           if (matches.length !== 1) throw new Error("Dimension target alias is missing or ambiguous.");
           command.dimensionId = matches[0]!.dimensionId;
+        }
+        if (command.operation === "extrude.create" && isAlias(command.profile)) {
+          const target = command.profile;
+          const matches = aliases.get(target.alias)?.references.filter(r => r.label === target.label && r.target.kind === "region") ?? [];
+          if (matches.length !== 1 || matches[0]!.target.kind !== "region") throw new Error("Profile target alias is missing or ambiguous.");
+          command.profile = matches[0]!.target;
+        }
+        if ((command.operation === "extrude.update" && isAlias(command.featureId)) || (command.operation === "sketch.open" && isAlias(command.sketchId))) {
+          const key = command.operation === "extrude.update" ? "featureId" : "sketchId";
+          const target = key === "featureId" && "featureId" in command ? command.featureId : "sketchId" in command ? command.sketchId : null;
+          if (!isAlias(target)) throw new Error("Invalid target alias.");
+          const kind = key === "featureId" ? "feature" : "sketch";
+          const matches = aliases.get(target.alias)?.references.filter(r => r.label === target.label && r.target.kind === kind) ?? [];
+          if (matches.length !== 1) throw new Error("Feature or sketch target alias is missing or ambiguous.");
+          const ref = matches[0]!.target;
+          if (command.operation === "extrude.update" && ref.kind === "feature") command.featureId = ref.featureId;
+          if (command.operation === "sketch.open" && ref.kind === "sketch") command.sketchId = ref.sketchId;
         }
         const validated = validateSemanticCommand(command);
         if (!validated.success)

@@ -1,10 +1,13 @@
-import type { RequestId } from "@/contracts/shared/ids";
+import type { RequestId, RevisionId } from "@/contracts/shared/ids";
 import type { DocumentRepositoryMutationResult } from "@/domain/modeling/document-repository";
 
 /** A write receipt is retained by its effect request, not inferred from a global flush. */
 export function createSketchPublicationReceipts() {
   const receipts = new Map<RequestId, DocumentRepositoryMutationResult>();
+  const cursors = new Map<RevisionId, DocumentRepositoryMutationResult>();
   return {
+    observeCursor(baseRevisionId: RevisionId, receipt: DocumentRepositoryMutationResult) { cursors.set(baseRevisionId, receipt); },
+    takeCursor(baseRevisionId: RevisionId) { const receipt = cursors.get(baseRevisionId); cursors.delete(baseRevisionId); return receipt; },
     observe(requestId: RequestId, receipt: DocumentRepositoryMutationResult) {
       receipts.set(requestId, receipt);
     },

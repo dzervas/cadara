@@ -91,7 +91,7 @@ export function createHeadlessSessionFactory(
       const sketchPublications = createSketchPublicationReceipts();
       try {
         loop = createEditorEventLoop(
-          createModelingServiceEditorEffectRuntime(service, { observeSketchPublication: sketchPublications.observe }),
+          createModelingServiceEditorEffectRuntime(service, { observeSketchPublication: sketchPublications.observe, observeCursorPersistence: sketchPublications.observeCursor }),
           createConsoleErrorReporter(),
           undefined,
           defaultEditorExtensionDependencies,

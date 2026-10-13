@@ -181,15 +181,16 @@ class DocumentSession implements SemanticSession {
         },
       };
     try {
-      if (command.operation.startsWith("sketch.")) {
-        if (!this.owner.sketch)
+      if (command.operation.startsWith("sketch.") || command.operation.startsWith("extrude.")) {
+        const execute = command.operation.startsWith("sketch.")
+          ? this.owner.sketch?.bind(this.owner)
+          : this.owner.extrude?.bind(this.owner);
+        if (!execute)
           return {
             ...terminal,
             outcome: { kind: "unavailable", capability: command.operation },
           };
-        const executed = await this.owner.sketch(
-          command as import("@/contracts/semantic/schema").SemanticSketchCommand,
-        );
+        const executed = await (execute as (input: SemanticCommand) => Promise<SemanticResult>)(command);
         if (executed.completion.live.state)
           this.state = executed.completion.live.state;
         const issues = semanticResultIssues(terminal.correlation, executed);
