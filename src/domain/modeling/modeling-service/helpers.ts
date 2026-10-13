@@ -187,6 +187,7 @@ export function normalizeCommitSketchInput(
   };
   delete requestInput.requestId;
   delete requestInput.publicationBase;
+  delete requestInput.observePublication;
 
   return {
     ...requestInput,

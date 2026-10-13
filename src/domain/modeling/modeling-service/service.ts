@@ -763,6 +763,7 @@ export function createModelingService(
     latestShared: AuthoredModelDocument;
     normalizedCandidate: AuthoredModelDocument;
     expectedSketch: AuthoredModelDocument["sketches"][number] | null;
+    observe?: import("./types").ModelingCommitSketchInput["observePublication"];
     result: T;
   }): Promise<T & { durabilityPending?: boolean }> {
     if (!documentRepository || input.result.revisionState.kind !== "accepted") {
@@ -811,6 +812,7 @@ export function createModelingService(
       document: candidate,
       label: "Publish Sketch",
     });
+    input.observe?.(write);
     if (write.ok) {
       markRepositorySnapshotFresh(write.metadata);
       await restoreAuthoredRepositoryDocument(
@@ -1713,6 +1715,7 @@ export function createModelingService(
               latestShared,
               normalizedCandidate,
               expectedSketch: input.publicationBase.expectedSketch,
+              observe: input.observePublication,
               result,
             });
             if (published.revisionState.kind === "accepted") {

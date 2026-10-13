@@ -1,8 +1,9 @@
 import { readFile } from "node:fs/promises";
 import type { CommandModule } from "@/cli/types";
 import type {
-  SemanticBasis,
   SemanticCommand,
+  SemanticDraftBasis,
+  SemanticState,
   SemanticResult,
 } from "@/contracts/semantic/schema";
 import {
@@ -10,12 +11,22 @@ import {
   validateSemanticResult,
 } from "@/contracts/semantic/runtime-schema";
 
-type AliasedCommand<T> = T extends { basis: SemanticBasis }
-  ? Omit<T, "basis"> & { basis: { alias: string } }
+import { semanticCommandCorrelation } from "@/contracts/semantic/correlation";
+
+type Alias = { alias: string };
+type RecipeCommand<T = SemanticCommand> = T extends SemanticCommand
+  ? Omit<T, "basis" | "draft"> & { basis: T["basis"] | Alias } & (T extends {
+        draft: SemanticDraftBasis;
+      }
+        ? { draft: SemanticDraftBasis | Alias }
+        : unknown)
   : never;
 interface RecipeOperation {
-  command: SemanticCommand | AliasedCommand<SemanticCommand>;
+  command: RecipeCommand;
   alias?: string;
+}
+function isAlias(value: unknown): value is Alias {
+  return !!value && typeof value === "object" && "alias" in value;
 }
 const example = {
   version: 1,
@@ -30,10 +41,38 @@ const example = {
     },
     {
       version: 1,
+      commandId: "begin",
+      operation: "sketch.begin",
+      basis: { alias: "part" },
+      plane: "xy",
+      as: "draft",
+    },
+    {
+      version: 1,
+      commandId: "rectangle",
+      operation: "sketch.author",
+      basis: { alias: "draft" },
+      draft: { alias: "draft" },
+      primitive: { kind: "rectangle", start: [0, 0], end: [20, 10] },
+      construction: false,
+      intent: "fulfill",
+      as: "rectangle",
+    },
+    {
+      version: 1,
+      commandId: "publish",
+      operation: "sketch.publish",
+      basis: { alias: "rectangle" },
+      draft: { alias: "rectangle" },
+      requireProfiles: true,
+      as: "published",
+    },
+    {
+      version: 1,
       commandId: "rename",
       operation: "document.rename",
       label: "Renamed bracket",
-      basis: { alias: "part" },
+      basis: { alias: "published" },
       as: "renamed",
     },
     {
@@ -90,34 +129,27 @@ function parseRecipe(input: unknown): RecipeOperation[] {
     )
       throw new Error("Command IDs must be nonempty and unique.");
     ids.add(command.commandId);
-    const basis = command.basis;
-    if (basis && typeof basis === "object" && "alias" in basis) {
+    const validationCommand = { ...command };
+    for (const key of ["basis", "draft"] as const) {
+      const value = command[key];
+      if (!isAlias(value)) continue;
       if (
-        Object.keys(basis).length !== 1 ||
-        typeof basis.alias !== "string" ||
-        !aliases.has(basis.alias)
+        Object.keys(value).length !== 1 ||
+        typeof value.alias !== "string" ||
+        !aliases.has(value.alias)
       )
-        throw new Error("Unknown or ambiguous document alias.");
-      const validated = validateSemanticCommand({
-        ...command,
-        basis: {
-          documentId: "doc_validation",
-          revisionId: "rev_validation",
-          repositoryHeads: [],
-        },
-      });
-      if (!validated.success) throw new Error("Invalid inspect operation.");
-    } else if (!validateSemanticCommand(command).success)
+        throw new Error(key === "basis" ? "Unknown or ambiguous document alias." : "Unknown or ambiguous draft alias.");
+      validationCommand[key] =
+        key === "basis"
+          ? {
+              documentId: "doc_validation",
+              revisionId: "rev_validation",
+              repositoryHeads: [],
+            }
+          : { commandSessionId: "command_validation", generation: 1 };
+    }
+    if (!validateSemanticCommand(validationCommand).success)
       throw new Error("Invalid semantic operation.");
-    if (
-      alias !== undefined &&
-      !["document.create", "document.open", "document.rename"].includes(
-        String(command.operation),
-      )
-    )
-      throw new Error(
-        "Only document creation, opening or rename defines an alias.",
-      );
     if (typeof alias === "string") aliases.add(alias);
     return {
       command: command as RecipeOperation["command"],
@@ -128,7 +160,7 @@ function parseRecipe(input: unknown): RecipeOperation[] {
 export const documentRecipesCommand: CommandModule = {
   name: "document recipe",
   description:
-    "Run sequential native document operations in an isolated editing context",
+    "Run a sequential document/sketch JSON recipe in an isolated document",
   async run(argv, _env, io) {
     if (argv.length === 1 && ["--help", "-h"].includes(argv[0]!)) {
       io.stdout(
@@ -168,36 +200,29 @@ export const documentRecipesCommand: CommandModule = {
       };
     }
     const results: SemanticResult[] = [];
-    const aliases = new Map<string, SemanticBasis>();
+    const aliases = new Map<string, SemanticState>();
     let succeeded = true;
     try {
       for (const operation of operations) {
-        let command = operation.command;
-        if (command.basis && "alias" in command.basis) {
-          const basis = aliases.get(command.basis.alias);
-          if (!basis)
+        const command = { ...operation.command };
+        if (isAlias(command.basis)) {
+          const state = aliases.get(command.basis.alias);
+          if (!state)
             throw new Error("Alias has no completed authoritative state.");
-          command = { ...command, basis };
+          const { documentId, revisionId, repositoryHeads } = state;
+          command.basis = { documentId, revisionId, repositoryHeads };
+        }
+        if ("draft" in command && isAlias(command.draft)) {
+          const draft = aliases.get(command.draft.alias)?.draft;
+          if (!draft) throw new Error("Alias has no current private draft.");
+          command.draft = draft;
         }
         const validated = validateSemanticCommand(command);
         if (!validated.success)
           throw new Error("Resolved operation is invalid.");
         const terminal = await opened.session.execute(validated.data);
         const checked = validateSemanticResult(
-          {
-            commandId: validated.data.commandId,
-            family:
-              validated.data.operation === "document.open"
-                ? "file-open"
-                : validated.data.operation === "document.save"
-                  ? "file-save"
-                  : "document",
-            intent:
-              validated.data.operation === "document.inspect"
-                ? "inspect"
-                : "fulfill",
-            basis: validated.data.basis,
-          },
+          semanticCommandCorrelation(validated.data),
           terminal,
         );
         if (!checked.success)
@@ -205,18 +230,15 @@ export const documentRecipesCommand: CommandModule = {
             "Application returned an invalid completion certificate.",
           );
         results.push(terminal);
-        if (terminal.outcome.kind !== "completed") {
+        if (
+          terminal.outcome.kind !== "completed" &&
+          terminal.outcome.kind !== "accepted-invalid"
+        ) {
           succeeded = false;
           break;
         }
         if (operation.alias && terminal.discovery) {
-          const { documentId, revisionId, repositoryHeads } =
-            terminal.discovery.state;
-          aliases.set(operation.alias, {
-            documentId,
-            revisionId,
-            repositoryHeads,
-          });
+          aliases.set(operation.alias, terminal.discovery.state);
         }
       }
     } finally {

@@ -1,3 +1,4 @@
+import { authorSketchPrimitive } from "@/domain/editor/sketch-session/tools";
 import { isRegisteredSketchToolId } from "@/core/sketch-tools/registry";
 import { isRegisteredSketchConstraintToolId } from "@/core/sketch-constraints/registry";
 import { isRegisteredSketchEditToolId } from "@/core/sketch-edit-tools/registry";
@@ -209,6 +210,16 @@ export function reduceSketchWorkflow(
   ) => EditorTransitionResult,
 ): EditorTransitionResult | null {
   switch (event.type) {
+    case "sketch.beginRequested":
+      return { state, effects: [] };
+    case "sketch.primitiveAuthored":
+      return { state: createSketchPreviewState(state, authorSketchPrimitive(state.session, event.primitive, event.construction)), effects: [] };
+    case "sketch.publishRequested":
+      return finishSketchSession(state);
+    case "sketch.discardRequested":
+      return state.editSessionCursorContext?.phase === "active"
+        ? emitEditSessionCursorRestore(toIdleState(state, "part"))
+        : { state: toIdleState(state, "part"), effects: [] };
     case "tool.activated": {
       // T14c: activating any sketch tool drops the annotation context.
       const result = handleEditingSketchToolActivation(state, event);

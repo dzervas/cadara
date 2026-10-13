@@ -1,3 +1,5 @@
+import { semanticCommandCorrelation } from "@/contracts/semantic/correlation";
+import { semanticResultIssues } from "@/contracts/semantic/validation";
 import type { ModelingDiagnostic } from "@/contracts/modeling/schema";
 import type {
   SemanticCommand,
@@ -20,29 +22,13 @@ export function semanticDiagnostic(error: unknown): ModelingDiagnostic {
     detail: null,
   };
 }
-function result(
+export function createSemanticResult(
   command: SemanticCommand,
   state: SemanticState | null,
 ): SemanticResult {
   return {
     version: 1,
-    correlation: {
-      commandId: command.commandId,
-      family:
-        command.operation === "document.open"
-          ? "file-open"
-          : command.operation === "document.save"
-            ? "file-save"
-            : "document",
-      intent: command.operation === "document.inspect" ? "inspect" : "fulfill",
-      basis: command.basis
-        ? {
-            documentId: command.basis.documentId,
-            revisionId: command.basis.revisionId,
-            repositoryHeads: command.basis.repositoryHeads,
-          }
-        : null,
-    },
+    correlation: semanticCommandCorrelation(command),
     outcome: { kind: "completed", change: "unchanged" },
     completion: {
       live: { kind: "unchanged", state },
@@ -149,7 +135,7 @@ class DocumentSession implements SemanticSession {
     command: SemanticCommand,
     options?: { signal?: AbortSignal },
   ): Promise<SemanticResult> {
-    const empty = result(command, this.state);
+    const empty = createSemanticResult(command, this.state);
     if (this.closing)
       return Promise.resolve({
         ...empty,
@@ -164,7 +150,7 @@ class DocumentSession implements SemanticSession {
     const task = this.tail.then(async () => {
       if (this.closing || options?.signal?.aborted)
         return {
-          ...result(command, this.state),
+          ...createSemanticResult(command, this.state),
           outcome: { kind: "canceled", phase: "not-started" },
         } satisfies SemanticResult;
       return this.run(command);
@@ -181,7 +167,7 @@ class DocumentSession implements SemanticSession {
     return task;
   }
   private async run(command: SemanticCommand): Promise<SemanticResult> {
-    const terminal = result(command, this.state);
+    const terminal = createSemanticResult(command, this.state);
     if (command.basis && !sameBasis(this.state, command.basis))
       return {
         ...terminal,
@@ -195,6 +181,52 @@ class DocumentSession implements SemanticSession {
         },
       };
     try {
+      if (command.operation.startsWith("sketch.")) {
+        if (!this.owner.sketch)
+          return {
+            ...terminal,
+            outcome: { kind: "unavailable", capability: command.operation },
+          };
+        const executed = await this.owner.sketch(
+          command as import("@/contracts/semantic/schema").SemanticSketchCommand,
+        );
+        if (executed.completion.live.state)
+          this.state = executed.completion.live.state;
+        const issues = semanticResultIssues(terminal.correlation, executed);
+        if (issues.length)
+          return {
+            ...executed,
+            outcome: {
+              kind: "failed",
+              failures: [
+                "execution",
+                "handoff",
+                ...(executed.completion.geometry.kind !== "not-required"
+                  ? ["geometry" as const]
+                  : []),
+                ...(executed.completion.persistence.kind === "failed"
+                  ? ["persistence" as const]
+                  : []),
+              ],
+            },
+            completion: {
+              ...executed.completion,
+              handoff: { kind: "failed" },
+              geometry:
+                executed.completion.geometry.kind === "not-required"
+                  ? executed.completion.geometry
+                  : { ...executed.completion.geometry, kind: "failed" },
+            },
+            discovery: null,
+            diagnostics: [
+              ...executed.diagnostics,
+              ...issues.map((issue) =>
+                semanticDiagnostic(new Error(issue.message)),
+              ),
+            ],
+          };
+        return executed;
+      }
       if (
         ["document.open", "document.rename", "document.save"].includes(
           command.operation,

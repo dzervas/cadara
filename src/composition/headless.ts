@@ -1,3 +1,4 @@
+import { createSketchPublicationReceipts } from "@/infrastructure/modeling/sketch-publication-receipts";
 import { createSemanticDocumentPort } from "@/infrastructure/modeling/semantic-document-port";
 import { fileURLToPath } from "node:url";
 import { createSemanticSessionFactory } from "@/application/semantic/session";
@@ -87,9 +88,10 @@ export function createHeadlessSessionFactory(
       }
       let loop: ReturnType<typeof createEditorEventLoop>;
       const sketchActions = new SketchAuthoredActions();
+      const sketchPublications = createSketchPublicationReceipts();
       try {
         loop = createEditorEventLoop(
-          createModelingServiceEditorEffectRuntime(service),
+          createModelingServiceEditorEffectRuntime(service, { observeSketchPublication: sketchPublications.observe }),
           createConsoleErrorReporter(),
           undefined,
           defaultEditorExtensionDependencies,
@@ -106,6 +108,7 @@ export function createHeadlessSessionFactory(
         service,
         loop,
         sketchActions,
+        sketchPublications,
         resetRuntime: () => loader.reset(),
       });
     },

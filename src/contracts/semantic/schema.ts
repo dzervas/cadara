@@ -8,6 +8,56 @@ import type {
   RevisionId,
 } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
+import type { SketchPoint } from "@/contracts/modeling/schema";
+import type {
+  SketchPointId,
+  SketchEntityId,
+  SketchId,
+  RegionId,
+} from "@/contracts/shared/ids";
+import type {
+  SketchDerivedValidity,
+  SolvedSketchStatus,
+} from "@/contracts/sketch/schema";
+
+export type SemanticSketchPrimitive =
+  | { kind: "point"; position: SketchPoint }
+  | { kind: "line"; start: SketchPoint; end: SketchPoint }
+  | {
+      kind: "rectangle" | "centerPointRectangle";
+      start: SketchPoint;
+      end: SketchPoint;
+    }
+  | {
+      kind: "alignedRectangle";
+      start: SketchPoint;
+      end: SketchPoint;
+      heightPoint: SketchPoint;
+    };
+
+export interface SemanticDraftBasis {
+  commandSessionId: CommandSessionId;
+  generation: number;
+}
+export type SemanticSketchCommand = CommandIdentity & {
+  basis: SemanticBasis;
+} & (
+    | { operation: "sketch.begin"; plane: "xy" | "yz" | "xz" }
+    | {
+        operation: "sketch.author";
+        draft: SemanticDraftBasis;
+        primitive: SemanticSketchPrimitive;
+        construction: boolean;
+        intent: "fulfill" | "author-invalid";
+      }
+    | { operation: "sketch.inspect"; draft: SemanticDraftBasis }
+    | {
+        operation: "sketch.publish";
+        draft: SemanticDraftBasis;
+        requireProfiles: boolean;
+      }
+    | { operation: "sketch.discard"; draft: SemanticDraftBasis }
+  );
 
 /**
  * Shared semantic boundary v1, not a terminal protocol or editor-event tunnel.
@@ -36,15 +86,17 @@ interface CommandIdentity {
   commandId: string;
 }
 
-/** Initial document slice only. Later tickets extend this closed union. */
-export type SemanticCommand = CommandIdentity &
-  (
-    | { operation: "document.create"; label: string; basis: null }
-    | { operation: "document.inspect"; basis: SemanticBasis }
-    | { operation: "document.open"; path: string; basis: null }
-    | { operation: "document.rename"; label: string; basis: SemanticBasis }
-    | { operation: "document.save"; path: string; basis: SemanticBasis }
-  );
+/** Implemented document/private-sketch slices. Later tickets extend this closed union. */
+export type SemanticCommand =
+  | SemanticSketchCommand
+  | (CommandIdentity &
+      (
+        | { operation: "document.create"; label: string; basis: null }
+        | { operation: "document.inspect"; basis: SemanticBasis }
+        | { operation: "document.open"; path: string; basis: null }
+        | { operation: "document.rename"; label: string; basis: SemanticBasis }
+        | { operation: "document.save"; path: string; basis: SemanticBasis }
+      ));
 
 export type SemanticFamily =
   | "document"
@@ -88,8 +140,13 @@ export type SemanticGeometryReceipt =
       state: SemanticState;
       /** Retained even when publication has exited the private draft. */
       sketchBasis: SemanticState["draft"];
-      solve: { requestId: RequestId; generation: number } | null;
+      solve:
+        | { requestId: RequestId; generation: number }
+        | { kind: "synchronous"; generation: number }
+        | null;
       derivation: { requestId: RequestId; generation: number } | null;
+      /** No arrangement request exists for an empty or solver-invalid definition. */
+      derivationUnavailableReason?: "empty-sketch" | "solve-invalid";
       rebuildRevisionId: RevisionId | null;
     };
 
@@ -146,6 +203,25 @@ export interface SemanticDiscovery {
   document?: { label: string };
   references: readonly { label: string; target: DurableRef }[];
   history: DurableHistoryAvailability | null;
+  sketch?: {
+    sketchId: SketchId | null;
+    plane: "xy" | "yz" | "xz";
+    solveStatus: SolvedSketchStatus;
+    validity: SketchDerivedValidity;
+    points: readonly {
+      pointId: SketchPointId;
+      position: SketchPoint;
+      construction: boolean;
+    }[];
+    entities: readonly {
+      entityId: SketchEntityId;
+      kind: "point" | "lineSegment";
+      pointIds: readonly SketchPointId[];
+      construction: boolean;
+    }[];
+    /** Only current, boundary-resolved, consumable profiles are discoverable. */
+    profiles: readonly { regionId: RegionId; isClosed: boolean }[];
+  };
 }
 
 export type SemanticOutcome =

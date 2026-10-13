@@ -2263,6 +2263,7 @@ export function isDrawingSketchTool(
 export function createSessionCommitFactories(
   sequence: number,
   sketchId: SketchId,
+  construction = false,
 ) {
   return {
     createPointId: (suffix: string) => createPointId(sequence, suffix),
@@ -2274,7 +2275,7 @@ export function createSessionCommitFactories(
       label: string,
       pointId: SketchPointId,
       position: SketchPoint,
-    ) => createPointDefinition(sketchId, pointId, label, position, false),
+    ) => createPointDefinition(sketchId, pointId, label, position, construction),
     createLineEntity: (
       label: string,
       entityId: SketchEntityId,
@@ -2287,13 +2288,13 @@ export function createSessionCommitFactories(
         label,
         startPointId,
         endPointId,
-        false,
+        construction,
       ),
     createPointEntity: (
       label: string,
       entityId: SketchEntityId,
       pointId: SketchPointId,
-    ) => createPointEntityDefinition(sketchId, entityId, label, pointId, false),
+    ) => createPointEntityDefinition(sketchId, entityId, label, pointId, construction),
     createCircleEntity: (
       label: string,
       entityId: SketchEntityId,
@@ -2306,7 +2307,7 @@ export function createSessionCommitFactories(
         label,
         centerPointId,
         radius,
-        false,
+        construction,
       ),
     createArcEntity: (
       label: string,
@@ -2324,14 +2325,14 @@ export function createSessionCommitFactories(
         startPointId,
         endPointId,
         sweepDirection,
-        false,
+        construction,
       ),
     createSplineEntity: (
       label: string,
       entityId: SketchEntityId,
       pointIds: readonly SketchPointId[],
     ) =>
-      createSplineEntityDefinition(sketchId, entityId, label, pointIds, false),
+      createSplineEntityDefinition(sketchId, entityId, label, pointIds, construction),
     createEllipseEntity: (
       label: string,
       entityId: SketchEntityId,
@@ -2346,7 +2347,7 @@ export function createSessionCommitFactories(
         centerPointId,
         majorAxisPointId,
         minorRadius,
-        false,
+        construction,
       ),
     createEllipticalArcEntity: (
       label: string,
@@ -2368,7 +2369,7 @@ export function createSessionCommitFactories(
         endPointId,
         minorRadius,
         sweepDirection,
-        false,
+        construction,
       ),
     createConicEntity: (
       label: string,
@@ -2386,7 +2387,7 @@ export function createSessionCommitFactories(
         controlPointId,
         endPointId,
         rho,
-        false,
+        construction,
       ),
     createBezierCurveEntity: (
       label: string,
@@ -2400,7 +2401,7 @@ export function createSessionCommitFactories(
         label,
         controlPointIds,
         degree,
-        false,
+        construction,
       ),
     createProfileTextEntity: (
       label: string,
@@ -2422,7 +2423,7 @@ export function createSessionCommitFactories(
         rotationRadians,
         horizontalAlign,
         verticalAlign,
-        false,
+        construction,
       ),
   };
 }
