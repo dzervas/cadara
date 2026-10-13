@@ -21,7 +21,7 @@ import {
   lineLoopSegmentsForTest,
   sketchSnapshotRecordForTest,
 } from "@/contracts/sketch/region-record.fixtures";
-import type { SketchPointId } from "@/contracts/shared/ids";
+import type { FaceId, SketchPointId } from "@/contracts/shared/ids";
 import type {
   SketchEntityDefinition,
   SketchPoint2D,
@@ -1334,4 +1334,152 @@ test("entity splines measure the record's solved spans; no valid solved spline m
     ) as typeof solved.solvedEntities,
   });
   expect(measure(invalid, [spline])).toBeNull();
+});
+
+/**
+ * A 6 × 6 × 2 prism with a centred 2 × 2 through hole (volume 64), every
+ * face meshed on its own (no shared vertex arrays, as the kernel exports
+ * faces). `inwardFaces` lists the faces whose triangles are wound against
+ * the outward normal: unoriented meshes are accepted, so the measure must
+ * not trust the winding.
+ */
+function holedPrismSnapshot(input: {
+  inwardFaces: readonly string[] | "all";
+  dropTriangleOf?: string;
+}): WorkspaceSnapshot {
+  type P = readonly [number, number, number];
+  const outer: [number, number][] = [
+    [0, 0],
+    [6, 0],
+    [6, 6],
+    [0, 6],
+  ];
+  const inner: [number, number][] = [
+    [2, 2],
+    [4, 2],
+    [4, 4],
+    [2, 4],
+  ];
+  const at = ([x, y]: [number, number], z: number): P => [x, y, z];
+  /** The annulus between the squares at height z, wound towards +z. */
+  const annulus = (z: number) =>
+    outer.flatMap((corner, index) => {
+      const next = (index + 1) % 4;
+      return [
+        [at(corner, z), at(outer[next]!, z), at(inner[next]!, z)],
+        [at(corner, z), at(inner[next]!, z), at(inner[index]!, z)],
+      ] as P[][];
+    });
+  /** A vertical wall from a to b (0 → 2), wound with a left-hand normal. */
+  const wall = (a: [number, number], b: [number, number]) =>
+    [
+      [at(a, 0), at(b, 0), at(b, 2)],
+      [at(a, 0), at(b, 2), at(a, 2)],
+    ] as P[][];
+  const faces: Record<FaceId, P[][]> = {
+    // Wound towards +z: outward on top, inward at the bottom.
+    face_top: annulus(2),
+    face_bottom: annulus(0),
+  };
+  outer.forEach((corner, index) => {
+    // Counter-clockwise outer square: outward is to the right of a → b.
+    faces[`face_outer_${index}`] = wall(outer[(index + 1) % 4]!, corner);
+  });
+  inner.forEach((corner, index) => {
+    // The hole's walls face the hole: outward is to the left of a → b.
+    faces[`face_inner_${index}`] = wall(corner, inner[(index + 1) % 4]!);
+  });
+  // Bring every face to its outward winding, then wind the listed ones in.
+  faces.face_bottom = faces.face_bottom!.map(([a, b, c]) => [a!, c!, b!]);
+  const records: RenderableEntityRecord[] = (
+    Object.entries(faces) as [FaceId, P[][]][]
+  ).map(([faceId, triangles]) => {
+    const wound =
+      input.inwardFaces === "all" || input.inwardFaces.includes(faceId)
+        ? triangles.map(([a, b, c]) => [a!, c!, b!])
+        : triangles;
+    const kept = input.dropTriangleOf === faceId ? wound.slice(1) : wound;
+    return {
+      id: `renderable_${faceId}`,
+      label: faceId,
+      ownerBodyId: "body_holed",
+      ownerFeatureId: "feature_holed",
+      binding: {
+        pickId: `pick_${faceId}`,
+        pickPriority: 10,
+        target: { kind: "face", bodyId: "body_holed", faceId },
+        topology: "face",
+        semanticClass: "bodyFace",
+      },
+      geometry: {
+        kind: "mesh",
+        vertexPositions: kept.flat(),
+        vertexNormals: null,
+        triangleIndices: kept.map(
+          (_, index) => [index * 3, index * 3 + 1, index * 3 + 2] as const,
+        ),
+      },
+    };
+  });
+  return {
+    document: {
+      bodies: [
+        {
+          bodyId: "body_holed",
+          label: "Holed body",
+          topology: {
+            faceIds: Object.keys(faces),
+            edgeIds: [],
+            vertexIds: [],
+          },
+        },
+      ],
+      render: { schemaVersion: RENDER_EXPORT_SCHEMA_VERSION, records },
+    },
+  } as unknown as WorkspaceSnapshot;
+}
+
+const holedVolume = (snapshot: WorkspaceSnapshot) =>
+  deriveMeasurementViewModel({
+    activeToolId: "measure",
+    selection: [{ kind: "body", bodyId: "body_holed" }],
+    snapshot,
+  })?.rows.find((row) => row.label === "Volume")?.value ?? null;
+
+// T17h (Category 1 flow, R-6: the Measure tool's Volume readout is the
+// acceptance oracle): before T17h each triangle was turned "outward" from the
+// vertex centroid, which lies in the hole here, so the hole's walls counted
+// with the wrong sign (74.67 mm³ = 2 · (36 + 4/3)).
+test("a body with a through hole measures its solid volume, whatever each face's winding; an open shell has no volume", () => {
+  expect(
+    holedVolume(holedPrismSnapshot({ inwardFaces: [] })),
+    "all faces wound outward",
+  ).toBe("64 mm³");
+  expect(
+    holedVolume(
+      holedPrismSnapshot({
+        inwardFaces: [
+          "face_bottom",
+          "face_outer_1",
+          "face_inner_0",
+          "face_inner_3",
+        ],
+      }),
+    ),
+    "mixed windings (unoriented face meshes)",
+  ).toBe("64 mm³");
+  expect(
+    holedVolume(
+      holedPrismSnapshot({
+        inwardFaces: "all",
+      }),
+    ),
+    "every face wound inward",
+  ).toBe("64 mm³");
+  expect(
+    holedVolume(
+      holedPrismSnapshot({ inwardFaces: [], dropTriangleOf: "face_inner_2" }),
+    ),
+    "a shell with a missing triangle encloses no volume",
+  ).toBeNull();
 });

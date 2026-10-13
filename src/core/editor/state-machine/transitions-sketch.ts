@@ -76,7 +76,11 @@ import {
   getSketchAnnotationSelectionContext,
   getSketchGeometrySelectionContext,
 } from "./transitions-viewport";
-import { deriveSketchPointFromWorld, nextRequestId } from "./utility-helpers";
+import {
+  commandAfterSketchToolCommit,
+  deriveSketchPointFromWorld,
+  nextRequestId,
+} from "./utility-helpers";
 
 export function handleSketchPointerMoved(
   state: EditorState,
@@ -338,6 +342,7 @@ export function handleSketchToolPatched(
       state: {
         ...state,
         session,
+        command: commandAfterSketchToolCommit(state, session),
         preview: {
           kind: "sketch",
           label: getSketchSessionPreviewLabel(session),

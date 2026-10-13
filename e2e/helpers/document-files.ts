@@ -39,3 +39,56 @@ export async function openDocumentCopy(
     page.getByRole("status").filter({ hasText: `Opened ${name}.` }),
   ).toBeVisible({ timeout: 15_000 });
 }
+
+/**
+ * File → Save As → "Save and keep linked" (the File System Access path).
+ * Headless Chromium has no usable save picker, so rows first emulate the
+ * browser's picker with `emulateSaveFilePicker`.
+ */
+export async function saveDocumentLinked(page: Page) {
+  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("menuitem", { name: "Save As" }).click();
+  await page.getByRole("button", { name: "Save and keep linked" }).click();
+}
+
+/**
+ * Environment emulation (like `context.setOffline`), not a debug action:
+ * headless Chromium has no save dialog, so the browser's
+ * `showSaveFilePicker` returns a real file handle named `name` in the
+ * page's origin-private file system. While
+ * `window.__cadaraEmulatedWriteFailure` holds a message, opening a writable
+ * on any file handle rejects with it (a disk or permission failure).
+ */
+export async function emulateSaveFilePicker(page: Page, name: string) {
+  await page.addInitScript((fileName) => {
+    const target = window as unknown as {
+      __cadaraEmulatedWriteFailure?: string;
+      showSaveFilePicker: () => Promise<FileSystemFileHandle>;
+    };
+    target.showSaveFilePicker = async () =>
+      (await navigator.storage.getDirectory()).getFileHandle(fileName, {
+        create: true,
+      });
+    const createWritable = FileSystemFileHandle.prototype.createWritable;
+    FileSystemFileHandle.prototype.createWritable = function (
+      this: FileSystemFileHandle,
+      ...options
+    ) {
+      const failure = target.__cadaraEmulatedWriteFailure;
+      return failure === undefined
+        ? createWritable.apply(this, options)
+        : Promise.reject(
+            new DOMException(failure, "NoModificationAllowedError"),
+          );
+    };
+  }, name);
+}
+
+/** The text of the emulated picker's file `name` (empty if never written). */
+export function readEmulatedSavedFile(page: Page, name: string) {
+  return page.evaluate(async (fileName) => {
+    const directory = await navigator.storage.getDirectory();
+    const handle = await directory.getFileHandle(fileName, { create: true });
+    return (await handle.getFile()).text();
+  }, name);
+}
