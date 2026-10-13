@@ -29,6 +29,7 @@ export interface SemanticDocumentMutation {
 }
 
 export interface SemanticDocumentPort {
+  sketch?(command: import("@/contracts/semantic/schema").SemanticSketchCommand): Promise<import("@/contracts/semantic/schema").SemanticResult>;
   initialize(): Promise<
     | { kind: "ready"; discovery: SemanticDiscovery }
     | { kind: "failed"; diagnostics: readonly ModelingDiagnostic[] }

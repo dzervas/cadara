@@ -512,6 +512,10 @@ function handleSharedEvent(
   switch (event.type) {
     case "session.started":
       return emitSnapshotFetch(state, null);
+    case "sketch.beginRequested":
+      return state.kind === "idle"
+        ? handleSketchToolActivation({ ...state, selection: [event.target] })
+        : { state, effects: [] };
     case "tool.activated":
       return handleSharedToolActivated(state, event);
     case "history.undoRequested":

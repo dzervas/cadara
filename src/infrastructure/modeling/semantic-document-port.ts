@@ -1,3 +1,4 @@
+import { createSemanticSketchPort } from "./semantic-sketch-port";
 import { createNativeDocumentFiles } from "./native-document-files";
 import type {
   NativeDocumentFileIO,
@@ -25,6 +26,7 @@ export function createSemanticDocumentPort(input: {
   service: ModelingService;
   loop: EditorEventLoop;
   sketchActions: SketchAuthoredActions;
+  sketchPublications: ReturnType<typeof import("./sketch-publication-receipts").createSketchPublicationReceipts>;
   resetRuntime(): void;
 }): SemanticDocumentPort {
   const { documentId, repository, service, loop, sketchActions, resetRuntime } =
@@ -41,16 +43,18 @@ export function createSemanticDocumentPort(input: {
       draft: null,
     };
   }
+  let replacementPending = false;
   async function inspect(input: { commandId: string }) {
     const snapshot = await service.getCurrentDocumentSnapshot();
-    const events = await loop.dispatchAndSettle(input.commandId, {
+    const events = loop.getState().kind === "editingSketch" && !replacementPending ? [] : await loop.dispatchAndSettle(input.commandId, {
       type: "document.replaced",
       snapshot,
     });
     const failed = events.find((event) => event.type.endsWith("Failed"));
     if (failed) throw new Error(JSON.stringify(failed));
-    if (loop.getState().snapshot !== snapshot || !snapshot.provenance)
+    if ((loop.getState().kind === "editingSketch" ? loop.getState().snapshot?.document.revisionId !== snapshot.document.revisionId : loop.getState().snapshot !== snapshot) || !snapshot.provenance)
       throw new Error("Authoritative editor snapshot handoff failed.");
+    replacementPending = false;
     const discovery: SemanticDiscovery = {
       state: state(
         snapshot.document.revisionId,
@@ -63,8 +67,9 @@ export function createSemanticDocumentPort(input: {
       })),
       history: await repository.getDurableHistoryAvailability(documentId),
     };
-    return { discovery, diagnostics: snapshot.document.diagnostics };
+    return { discovery: sketches.discovery(discovery), diagnostics: snapshot.document.diagnostics };
   }
+  const sketches = createSemanticSketchPort({ loop, inspect, service, publications: input.sketchPublications });
   let released = false;
   return {
     async initialize() {
@@ -117,6 +122,7 @@ export function createSemanticDocumentPort(input: {
           diagnostics,
         };
       sketchActions.reset();
+      replacementPending = true;
       const acceptedState = state(
         applied.document.revisionId,
         applied.metadata.heads,
@@ -136,10 +142,15 @@ export function createSemanticDocumentPort(input: {
     nativeFiles: createNativeDocumentFiles({
       service,
       sketchActions,
-      state,
+      state: (revisionId, heads) => {
+        // Accepted native mutations replace the editor context, including a private draft.
+        replacementPending = true;
+        return state(revisionId, heads);
+      },
       files: input.nativeFileIO,
     }),
     inspect,
+    sketch: sketches.execute,
     async drain() {
       await loop.drain();
       await service.waitForPersistence();

@@ -189,6 +189,7 @@ function actionLabel(event: EditorEvent, before: EditorState) {
                         .replace(/^./, (value) => value.toUpperCase())
                     : "Update Sketch";
     // A committing Escape or Enter is a finalized spline (T11-D10).
+    case "sketch.primitiveAuthored":
     case "sketch.pointerReleased":
     case "sketch.escapeRequested":
     case "sketch.confirmRequested":
@@ -344,6 +345,8 @@ export class SketchAuthoredActions {
     }
     const leavesGesture =
       event.type === "command.cancelled" ||
+      event.type === "sketch.publishRequested" ||
+      event.type === "sketch.discardRequested" ||
       event.type === "command.commitRequested" ||
       event.type === "tool.activated" ||
       event.type === "sketch.activeToolCleared" ||
@@ -409,8 +412,7 @@ export class SketchAuthoredActions {
     if (
       before.kind === "editingSketch" &&
       beforeKey &&
-      event.type === "tool.activated" &&
-      event.toolId === "finishSketch"
+      result.effects.some((effect) => effect.type === "sketch.commit")
     ) {
       const publicationBase = this.publicationBases.get(beforeKey);
       result.effects = result.effects.map((effect) =>

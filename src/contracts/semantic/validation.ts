@@ -133,7 +133,7 @@ export function semanticResultIssues(
         sketchRequired &&
         (geometry.sketchBasis === null ||
           geometry.solve === null ||
-          geometry.derivation === null)
+          (geometry.derivation === null && !(geometry.derivationUnavailableReason === "empty-sketch" && result.discovery?.sketch?.entities.length === 0) && !(geometry.derivationUnavailableReason === "solve-invalid" && geometry.kind === "invalid-editable")))
       ) {
         refuse(
           "completion.geometry",
@@ -143,7 +143,7 @@ export function semanticResultIssues(
       if (
         geometry.sketchBasis !== null &&
         (geometry.solve?.generation !== geometry.sketchBasis.generation ||
-          geometry.derivation?.generation !== geometry.sketchBasis.generation ||
+          (geometry.derivation !== null && geometry.derivation.generation !== geometry.sketchBasis.generation) ||
           (liveState?.draft !== null &&
             liveState?.draft !== undefined &&
             !sameDraft(geometry.sketchBasis, liveState.draft)))
@@ -168,12 +168,12 @@ export function semanticResultIssues(
     }
     const repositoryRequired =
       [
-        "sketch-publish",
         "model-mutate",
         "file-open",
         "file-save",
         "export",
       ].includes(expected.family) ||
+      (expected.family === "sketch-publish" && completion.live.kind === "applied") ||
       (expected.family === "document" && completion.live.kind === "applied") ||
       (expected.family === "history" &&
         liveState?.editingContext.kind === "document" &&

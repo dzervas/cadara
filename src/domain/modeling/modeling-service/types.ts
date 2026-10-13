@@ -389,6 +389,8 @@ export interface ModelingCommitSketchInput
     Omit<schema.CommitSketchRequest, "contractVersion" | "documentId">,
     Partial<ModelingMutationBasisInput> {
   solverCorrelation: ModelingCommitSketchCorrelation | null;
+  /** Observe the exact Publish Sketch repository write, never a global persistence tail. */
+  observePublication?: (transaction: DocumentRepositoryMutationResult) => void;
   publicationBase?: {
     actionContextId: SketchId;
     expectedSketch: AuthoredActionSketch | null;

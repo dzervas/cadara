@@ -253,6 +253,7 @@ export function createEffectExecutor(runtime: EditorEffectRuntime) {
             actualRevisionId: result.actualRevisionId,
             publishedSketchId: result.publishedSketchId,
             durabilityPending: result.durabilityPending,
+            solverCorrelation: result.solverCorrelation,
             errorContext: result.errorContext,
           };
         } catch (error: unknown) {
@@ -696,6 +697,7 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
     definition: SketchSessionState["commitRequest"] extends null
       ? never
       : NonNullable<SketchSessionState["commitRequest"]>["definition"];
+    observePublication?: (transaction: import("@/domain/modeling/document-repository").DocumentRepositoryMutationResult) => void;
     solverCorrelation: {
       requestId: RequestId;
       projectionRequestId: RequestId;
@@ -764,7 +766,7 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
       | { kind: "rejected"; reasonCode: string };
     diagnostics: ModelingDiagnostic[];
   }>;
-}): EditorEffectRuntime {
+}, options: { observeSketchPublication?: (requestId: RequestId, transaction: import("@/domain/modeling/document-repository").DocumentRepositoryMutationResult) => void } = {}): EditorEffectRuntime {
   return {
     supersedesSketchRegionDerivation:
       modelingService.sketchSolver?.supersedesRegionDerivation === true,
@@ -783,21 +785,19 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
         }).definition,
         derivedRelationships: input.session.definition.derivedRelationships,
       };
+      const solverCorrelation = modelingService.sketchSolver?.createCommitCorrelation(input.requestId) ?? null;
       const result = await modelingService.commitSketch({
         requestId: input.requestId,
         baseRevisionId: input.baseRevisionId,
         baseRepositoryHeads: input.baseRepositoryHeads,
+        observePublication: options.observeSketchPublication ? receipt => options.observeSketchPublication!(input.requestId, receipt) : undefined,
         publicationBase: input.publicationBase,
         sketchId: input.session.commitRequest?.sketchId ?? null,
         sketchLabel:
           input.session.commitRequest?.sketchLabel ?? input.session.sketchLabel,
         plane: input.session.commitRequest?.plane ?? input.session.plane,
         definition: commitDefinition,
-        solverCorrelation: modelingService.sketchSolver
-          ? modelingService.sketchSolver.createCommitCorrelation(
-              input.requestId,
-            )
-          : null,
+        solverCorrelation,
       });
 
       if (result.isErr()) {
@@ -826,8 +826,10 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
 
       return {
         revisionId: result.value.revisionId,
-        accepted: true,
+        accepted: result.value.revisionState.kind === "accepted",
+        ...(result.value.revisionState.kind === "conflict" ? { actualRevisionId: result.value.revisionState.actualRevisionId } : {}),
         diagnostics: result.value.diagnostics,
+        solverCorrelation,
         publishedSketchId: result.value.sketchId,
         durabilityPending: result.value.durabilityPending,
       };

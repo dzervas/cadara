@@ -704,6 +704,10 @@ export interface SnapshotFailedEvent {
  * through `effect.*` result events.
  */
 export type EditorEvent =
+  | { type: "sketch.beginRequested"; target: import("@/contracts/shared/references").ConstructionRef }
+  | { type: "sketch.primitiveAuthored"; primitive: import("@/contracts/semantic/schema").SemanticSketchPrimitive; construction: boolean }
+  | { type: "sketch.publishRequested" }
+  | { type: "sketch.discardRequested" }
   | SessionStartedEvent
   | ToolActivatedEvent
   | CommandCancelledEvent
@@ -902,6 +906,7 @@ export type EditorEvent =
       actualRevisionId?: RevisionId;
       /** Kernel-normalized identity used to retain private history across publication. */
       publishedSketchId?: SketchId;
+      solverCorrelation?: { solveRequestId: RequestId; regionRequestId: RequestId } | null;
       /** Publication reached the live shared CRDT but its durability flush is pending. */
       durabilityPending?: boolean;
       /** Structured error context preserved when `accepted` is false. */
@@ -1387,6 +1392,7 @@ export interface EditorEffectRuntime {
     diagnostics: ModelingDiagnostic[];
     actualRevisionId?: RevisionId;
     publishedSketchId?: SketchId;
+    solverCorrelation?: { solveRequestId: RequestId; regionRequestId: RequestId } | null;
     durabilityPending?: boolean;
     errorContext?: AppErrorContextEntry[];
   } | null>;

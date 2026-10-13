@@ -55,21 +55,8 @@ import type {
 } from "./types";
 import {
   applySketchContribution,
-  createArcEntityDefinition,
-  createBezierCurveEntityDefinition,
-  createCircleEntityDefinition,
-  createConicEntityDefinition,
+  createSessionCommitFactories,
   createConstraintId,
-  createDimensionId,
-  createEllipseEntityDefinition,
-  createEllipticalArcEntityDefinition,
-  createEntityId,
-  createLineEntityDefinition,
-  createPointDefinition,
-  createPointEntityDefinition,
-  createPointId,
-  createProfileTextEntityDefinition,
-  createSplineEntityDefinition,
   withLiveSolveBasis,
   getCommittedSketchToolChainSegments,
   getSessionSketchId,
@@ -1809,222 +1796,77 @@ function commitSketchDraw(
   endPoint: SketchPoint,
   placements: readonly PlacementInference[],
 ): SketchSessionState {
-  const nextSequence = session.sequence + 1;
-  const sketchId = session.sketchId ?? ("sketch_draft" as SketchId);
-  const baseDefinitionPatch = toolDefinition.createCommitContribution({
-    sequence: nextSequence,
+  const prepared = prepareSketchContribution(session, toolDefinition, {
     start: startPoint,
     end: endPoint,
     points: result.state.placedPoints ?? [startPoint, endPoint],
     settings: result.state.settings ?? session.toolSettings,
+    placements,
+  });
+  const { definitionPatch } = prepared;
+  const committed: SketchSessionState = {
+    ...prepared.session,
+    toolStagedEntities: [],
+    status: result.state.status,
+    pointerDownPoint: result.state.pointerDownPoint,
+    livePoint: result.state.livePoint,
+    toolPlacedPoints: result.state.status === "idle" ? [] : (result.state.placedPoints ?? session.toolPlacedPoints),
+    toolSettings: result.state.status === "idle" ? {} : (result.state.settings ?? session.toolSettings),
+    validationMessage: null,
+    toolPresentation: result.presentation,
+    activeAnnotationEdit: null,
+    activeEditTool: null,
+    activeEditTarget: null,
+    activeDrag: null,
+    activeInference: null,
+    toolPlacements: [],
+    toolStartPointId: null,
+    toolTangentSourceEntityId: null,
+  };
+  return toolDefinition.lifecycle === "chain"
+    ? continueSketchToolChain(session, committed, definitionPatch, startPoint)
+    : committed;
+}
+
+/** Shared contribution/identity/inference preparation, independent of pointer lifecycle. */
+export function prepareSketchContribution(
+  session: SketchSessionState,
+  toolDefinition: SketchToolDefinition,
+  input: { start: SketchPoint; end: SketchPoint; points: readonly SketchPoint[]; settings: SketchToolRuntimeState["settings"]; placements: readonly PlacementInference[] | null },
+) {
+  const nextSequence = session.sequence + 1;
+  const sketchId = session.sketchId ?? ("sketch_draft" as SketchId);
+  const baseDefinitionPatch = toolDefinition.createCommitContribution({
+    sequence: nextSequence,
+    start: input.start,
+    end: input.end,
+    points: input.points,
+    settings: input.settings ?? {},
     isConstruction: session.constructionModifierActive,
     tangentSourceEntityId: session.toolTangentSourceEntityId ?? null,
-    factories: {
-      createPointId: (suffix) => createPointId(nextSequence, suffix),
-      createEntityId: (suffix) => createEntityId(nextSequence, suffix),
-      createConstraintId: (suffix) => createConstraintId(nextSequence, suffix),
-      createDimensionId: (suffix) => createDimensionId(nextSequence, suffix),
-      createPoint: (label, pointId, position) =>
-        createPointDefinition(
-          sketchId,
-          pointId,
-          label,
-          position,
-          session.constructionModifierActive,
-        ),
-      createLineEntity: (label, entityId, startPointId, endPointId) =>
-        createLineEntityDefinition(
-          sketchId,
-          entityId,
-          label,
-          startPointId,
-          endPointId,
-          session.constructionModifierActive,
-        ),
-      createPointEntity: (label, entityId, pointId) =>
-        createPointEntityDefinition(
-          sketchId,
-          entityId,
-          label,
-          pointId,
-          session.constructionModifierActive,
-        ),
-      createCircleEntity: (label, entityId, centerPointId, radius) =>
-        createCircleEntityDefinition(
-          sketchId,
-          entityId,
-          label,
-          centerPointId,
-          radius,
-          session.constructionModifierActive,
-        ),
-      createArcEntity: (
-        label,
-        entityId,
-        centerPointId,
-        startPointId,
-        endPointId,
-        sweepDirection,
-      ) =>
-        createArcEntityDefinition(
-          sketchId,
-          entityId,
-          label,
-          centerPointId,
-          startPointId,
-          endPointId,
-          sweepDirection,
-          session.constructionModifierActive,
-        ),
-      createSplineEntity: (label, entityId, pointIds) =>
-        createSplineEntityDefinition(
-          sketchId,
-          entityId,
-          label,
-          pointIds,
-          session.constructionModifierActive,
-        ),
-      createEllipseEntity: (
-        label,
-        entityId,
-        centerPointId,
-        majorAxisPointId,
-        minorRadius,
-      ) =>
-        createEllipseEntityDefinition(
-          sketchId,
-          entityId,
-          label,
-          centerPointId,
-          majorAxisPointId,
-          minorRadius,
-          session.constructionModifierActive,
-        ),
-      createEllipticalArcEntity: (
-        label,
-        entityId,
-        centerPointId,
-        majorAxisPointId,
-        startPointId,
-        endPointId,
-        minorRadius,
-        sweepDirection,
-      ) =>
-        createEllipticalArcEntityDefinition(
-          sketchId,
-          entityId,
-          label,
-          centerPointId,
-          majorAxisPointId,
-          startPointId,
-          endPointId,
-          minorRadius,
-          sweepDirection,
-          session.constructionModifierActive,
-        ),
-      createConicEntity: (
-        label,
-        entityId,
-        startPointId,
-        controlPointId,
-        endPointId,
-        rho,
-      ) =>
-        createConicEntityDefinition(
-          sketchId,
-          entityId,
-          label,
-          startPointId,
-          controlPointId,
-          endPointId,
-          rho,
-          session.constructionModifierActive,
-        ),
-      createBezierCurveEntity: (label, entityId, controlPointIds, degree) =>
-        createBezierCurveEntityDefinition(
-          sketchId,
-          entityId,
-          label,
-          controlPointIds,
-          degree,
-          session.constructionModifierActive,
-        ),
-      createProfileTextEntity: (
-        label,
-        entityId,
-        anchorPointId,
-        text,
-        height,
-        rotationRadians,
-        horizontalAlign,
-        verticalAlign,
-      ) =>
-        createProfileTextEntityDefinition(
-          sketchId,
-          entityId,
-          label,
-          anchorPointId,
-          text,
-          height,
-          rotationRadians,
-          horizontalAlign,
-          verticalAlign,
-          session.constructionModifierActive,
-        ),
-    },
+    factories: createSessionCommitFactories(nextSequence, sketchId, session.constructionModifierActive),
   });
   const structuralStartPointId = session.toolStartPointId ?? null;
-  const definitionPatch = bindPlacementInferences({
+  const definitionPatch = input.placements === null ? baseDefinitionPatch : bindPlacementInferences({
     patch: baseDefinitionPatch,
-    placements: structuralStartPointId ? [null, ...placements] : placements,
+    placements: structuralStartPointId ? [null, ...input.placements] : input.placements,
     structuralStartPointId,
     sequence: nextSequence,
     createConstraintId: (suffix) => createConstraintId(nextSequence, suffix),
   });
-  const history = applySketchContribution(session, {
-    ...definitionPatch,
-  });
+  const { definition } = applySketchContribution(session, definitionPatch);
+  const next = { ...session, definition, sequence: nextSequence, commitRequest: buildCommitRequest({ sketchId: session.sketchId, sketchLabel: session.sketchLabel, plane: session.plane, definition }) };
+  return { definitionPatch, session: withLiveSolveBasis(next, definition) };
+}
 
-  const committed = withLiveSolveBasis(
-    {
-      ...session,
-      toolStagedEntities: [],
-      definition: history.definition,
-      status: result.state.status,
-      pointerDownPoint: result.state.pointerDownPoint,
-      livePoint: result.state.livePoint,
-      toolPlacedPoints:
-        result.state.status === "idle"
-          ? []
-          : (result.state.placedPoints ?? session.toolPlacedPoints),
-      toolSettings:
-        result.state.status === "idle"
-          ? {}
-          : (result.state.settings ?? session.toolSettings),
-      sequence: nextSequence,
-      commitRequest: buildCommitRequest({
-        sketchId: session.sketchId,
-        sketchLabel: session.sketchLabel,
-        plane: session.plane,
-        definition: history.definition,
-      }),
-      validationMessage: null,
-      toolPresentation: result.presentation,
-      activeAnnotationEdit: null,
-      activeEditTool: null,
-      activeEditTarget: null,
-      activeDrag: null,
-      activeInference: null,
-      toolPlacements: [],
-      toolStartPointId: null,
-      toolTangentSourceEntityId: null,
-    },
-    history.definition,
-  );
-
-  return toolDefinition.lifecycle === "chain"
-    ? continueSketchToolChain(session, committed, definitionPatch, startPoint)
-    : committed;
+/** A completed semantic intent enters this helper only inside the authored-action transition. */
+export function authorSketchPrimitive(session: SketchSessionState, primitive: import("@/contracts/semantic/schema").SemanticSketchPrimitive, construction: boolean): SketchSessionState {
+  const tool = getSketchToolDefinition(primitive.kind);
+  const start = primitive.kind === "point" ? primitive.position : primitive.start;
+  const end = primitive.kind === "point" ? primitive.position : primitive.end;
+  const points = primitive.kind === "point" ? [start] : primitive.kind === "alignedRectangle" ? [start, end, primitive.heightPoint] : [start, end];
+  const prepared = prepareSketchContribution({ ...session, constructionModifierActive: construction, toolStartPointId: null, toolTangentSourceEntityId: null }, tool, { start, end, points, settings: {}, placements: null });
+  return { ...prepared.session, constructionModifierActive: session.constructionModifierActive };
 }
 
 /**
