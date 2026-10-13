@@ -166,6 +166,10 @@ function actionLabel(event: EditorEvent, before: EditorState) {
     return "Create Sketch Geometry";
   }
   switch (event.type) {
+    case "sketch.dimensionAuthored":
+      return "Create Sketch Dimension";
+    case "sketch.dimensionUpdated":
+      return "Update Sketch Dimension";
     case "sketch.geometryDragEnded":
       return "Move Sketch Geometry";
     case "sketch.annotationDeleteRequested":

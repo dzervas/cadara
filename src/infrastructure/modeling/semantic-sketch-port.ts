@@ -15,6 +15,7 @@ import {
   getSketchSessionDerivedValidity,
   hasAcceptedLiveSolveOfDefinition,
   getLiveRegionBoundaryDiagnostics,
+  getSessionSketchId,
 } from "@/domain/editor/sketch-session/internals";
 import { getSketchToolDefinition } from "@/core/sketch-tools/registry";
 import { validateAlignedRectanglePoints } from "@/core/sketch-tools/tools/aligned-rectangle";
@@ -23,6 +24,27 @@ import {
   resolveRegionBoundaryCurve,
 } from "@/contracts/sketch/region-boundary-curves";
 import { sketchProfileGateFailures } from "@/contracts/sketch/derived-validity";
+
+import { isReferenceDimension } from "@/contracts/sketch/schema";
+import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
+
+function dimensionDiscovery(
+  definition: import("@/contracts/sketch/schema").SketchDefinition,
+  solved: import("@/contracts/sketch/schema").SolvedSketchSnapshot,
+) {
+  const values = new Map(solved.dimensionStatuses.map(s => [s.dimensionId, s.solvedValue]));
+  return {
+    requirements: definition.dimensions.filter(d => !isReferenceDimension(d)).map(d => ({
+      dimensionId: d.dimensionId, label: d.label, mode: "driving" as const,
+      value: "value" in d ? getAuthoredLiteralValue(d.value) : null,
+      measuredValue: values.get(d.dimensionId) ?? null,
+    })),
+    measurements: definition.dimensions.filter(isReferenceDimension).map(d => ({
+      dimensionId: d.dimensionId, label: d.label, mode: "reference" as const,
+      measuredValue: values.get(d.dimensionId) ?? null,
+    })),
+  };
+}
 
 /** Certificates only are retained here; the editor/action owner owns all draft state. */
 export function createSemanticSketchPort(input: {
@@ -64,7 +86,9 @@ export function createSemanticSketchPort(input: {
     return {
       ...base,
       state,
+      references: [...base.references.filter(r => !(r.target.kind === "sketchPoint" && r.target.sketchId === getSessionSketchId(s))), ...s.definition.points.map(p => ({ label: p.label, target: { kind: "sketchPoint" as const, sketchId: getSessionSketchId(s), pointId: p.pointId } }))],
       sketch: {
+        ...dimensionDiscovery(s.definition, s.liveSolve!.solvedSnapshot),
         sketchId: s.sketchId,
         plane: s.plane.key!,
         solveStatus: s.liveSolve!.solvedSnapshot.status,
@@ -221,6 +245,14 @@ export function createSemanticSketchPort(input: {
         ...terminal,
         outcome: { kind: "rejected" as const, reasonCode: "profiles-unusable" },
       };
+    if (command.operation === "sketch.dimension.add" || command.operation === "sketch.dimension.update") {
+      if (editor.kind !== "editingSketch") throw new Error("Missing private sketch owner.");
+      const validTarget = command.operation === "sketch.dimension.add"
+        ? command.points[0] !== command.points[1] && command.points.every(id => editor.session.definition.points.some(p => p.pointId === id))
+        : editor.session.definition.dimensions.some(d => d.dimensionId === command.dimensionId);
+      if (!validTarget || ("value" in command && (!Number.isFinite(command.value) || command.value <= 0)))
+        return { ...terminal, outcome: { kind: "rejected", reasonCode: "invalid-dimension-target-or-value" } };
+    }
     const priorGeometry = geometry(initial.state);
     let events: readonly EditorEvent[] = [];
     let publicationReceipt:
@@ -242,6 +274,13 @@ export function createSemanticSketchPort(input: {
           primitive: command.primitive,
           construction: command.construction,
         });
+      if (command.operation === "sketch.dimension.add") {
+        const { axis, points, mode } = command;
+        const dimension = mode === "driving" ? { axis, points, mode, value: command.value } : { axis, points, mode };
+        events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.dimensionAuthored", input: dimension });
+      }
+      if (command.operation === "sketch.dimension.update")
+        events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.dimensionUpdated", dimensionId: command.dimensionId, value: command.value });
       if (command.operation === "sketch.publish")
         events = await input.loop.dispatchAndSettle(command.commandId, {
           type: "sketch.publishRequested",
@@ -463,6 +502,7 @@ export function createSemanticSketchPort(input: {
             );
           terminal.discovery.sketch = {
             ...initial.sketch!,
+            ...dimensionDiscovery(sketch.definition, sketch.solvedSnapshot),
             sketchId: sketch.sketchId,
             solveStatus: sketch.solvedSnapshot.status,
             validity: sketch.derivedValidity,
@@ -559,7 +599,7 @@ export function createSemanticSketchPort(input: {
       }
       if (
         terminal.completion.geometry.kind === "invalid-editable" &&
-        command.operation === "sketch.author" &&
+        "intent" in command &&
         command.intent === "author-invalid"
       )
         terminal.outcome = { kind: "accepted-invalid" };

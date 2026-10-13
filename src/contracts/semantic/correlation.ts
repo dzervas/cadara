@@ -22,7 +22,7 @@ export function semanticCommandCorrelation(
                   : "document",
     intent: command.operation.endsWith("inspect")
       ? "inspect"
-      : command.operation === "sketch.author"
+      : "intent" in command
         ? command.intent
         : "fulfill",
     basis: command.basis
