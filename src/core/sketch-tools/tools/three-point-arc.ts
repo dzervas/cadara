@@ -79,7 +79,7 @@ function buildThreePointArcPreview(
   ];
 }
 
-function validateThreePointArc(
+export function validateThreePointArc(
   points: readonly SketchPoint[],
 ): SketchToolValidationResult {
   if (points.length < REQUIRED_POINTS) {

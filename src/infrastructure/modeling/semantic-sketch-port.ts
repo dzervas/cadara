@@ -18,8 +18,8 @@ import {
   hasAcceptedLiveSolveOfDefinition,
   getLiveRegionBoundaryDiagnostics,
 } from "@/domain/editor/sketch-session/internals";
-import { getSketchToolDefinition } from "@/core/sketch-tools/registry";
-import { validateAlignedRectanglePoints } from "@/core/sketch-tools/tools/aligned-rectangle";
+import { sketchPrimitiveContributionInput, validateSketchPrimitive } from "@/core/sketch-tools/semantic-primitive";
+import { canUseTangentArcSourceAtPoint } from "@/domain/sketch-inference/placement-inference";
 import {
   regionBoundaryBasisOfRecord,
   resolveRegionBoundaryCurve,
@@ -227,21 +227,15 @@ export function createSemanticSketchPort(input: {
     }
     if (command.operation === "sketch.author") {
       const p = command.primitive;
-      const start = p.kind === "point" ? p.position : p.start;
-      const end = p.kind === "point" ? p.position : p.end;
-      const points =
-        p.kind === "alignedRectangle"
-          ? [start, end, p.heightPoint]
-          : [start, end];
-      const valid =
-        p.kind === "alignedRectangle"
-          ? validateAlignedRectanglePoints(points)
-          : getSketchToolDefinition(p.kind).validate(start, end);
-      if (
-        points.some((p) => !Number.isFinite(p[0]) || !Number.isFinite(p[1])) ||
-        (!valid.valid && command.intent !== "author-invalid") ||
-        (!valid.valid && p.kind === "alignedRectangle")
-      )
+      const valid = validateSketchPrimitive(p);
+      if (p.kind === "tangentArc" && p.source) {
+        if (editor.kind !== "editingSketch") throw new Error("Missing private sketch owner.");
+        const s = editor.session;
+        const sourceId = p.source.entityId;
+        if (p.source.sketchId !== (s.sketchId ?? s.actionContextId) || !canUseTangentArcSourceAtPoint(s.definition, sourceId, p.start))
+          return { ...terminal, outcome: { kind: "rejected", reasonCode: "tangent-source-unavailable" }, diagnostics: [semanticDiagnostic(new Error("Tangent arc source must be an owned line, circle or arc; construction endpoints are not supported."))] };
+      }
+      if (sketchPrimitiveContributionInput(p).points.some(point => !Number.isFinite(point[0]) || !Number.isFinite(point[1])) || (!valid.valid && (command.intent !== "author-invalid" || !["point", "line", "rectangle", "centerPointRectangle"].includes(p.kind))))
         return {
           ...terminal,
           outcome: {

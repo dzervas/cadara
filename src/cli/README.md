@@ -56,6 +56,33 @@ For example, append `{ "version": 1, "commandId": "save", "operation":
 "document.save", "path": "bracket.cadara", "basis": { "alias": "part" } }`.
 Help, capture and invalid recipes do not start the modeling runtime.
 
+### Round sketch primitives
+
+`sketch.author` takes current `basis` and `draft`, `construction`, `intent`, and
+one `primitive`:
+
+- `circle`: `center`, positive `radius`.
+- `threePointCircle` / `threePointArc`: exactly three distinct non-collinear
+  `points` (arc order: start, through, end).
+- `centerPointArc`: `center`, `start`, `end`; counter-clockwise with a nonzero
+  sweep. Endpoint bindings retain the browser tool's circular-arc solve rules.
+- `tangentArc`: `start`, nonzero `direction` vector, `end`, and `source` (null
+  for a free direction or an owned `sketchEntity` reference). A source authors
+  structural tangency and start-on-source requirements. Line/circle/arc sources
+  are supported; centers and construction line/arc endpoints are not sources.
+- `inscribedPolygon` / `circumscribedPolygon`: `center`, positive `radius`
+  (circumradius / inradius). Both use the production six-sided, fixed-orientation
+  tool and its construction circles and regularity requirements.
+
+Coordinates are in document units. Degenerate round inputs are refused, including
+with `author-invalid`; no empty contribution is reported as fulfilled. Geometry,
+identities, solving and current profiles use the browser's contribution owner.
+Open arcs have no consumable closed profile; equal coordinates alone do not
+establish shared endpoint identities. Construction primitives do not create profiles.
+Recipes may select a tangent `primitive.source` by exact unique
+`{ "alias": "source", "label": "Line 1" }`; missing/ambiguous, foreign, deleted,
+or stale sources fail closed. Re-discover after each command.
+
 ### Private sketch dimensions
 
 `sketch.dimension.add` takes the current `basis` and `draft`, an `axis`

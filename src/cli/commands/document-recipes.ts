@@ -15,8 +15,10 @@ import { semanticCommandCorrelation } from "@/contracts/semantic/correlation";
 type Alias = { alias: string };
 type TargetAlias = Alias & { label: string };
 type RecipeGeometryEdit<T = import("@/contracts/semantic/schema").SemanticSketchGeometryEdit> = T extends { target: infer R } ? Omit<T, "target"> & { target: R | TargetAlias } : never;
+type RecipePrimitive<T = import("@/contracts/semantic/schema").SemanticSketchPrimitive> = T extends { source: infer S } ? Omit<T, "source"> & { source: S | TargetAlias } : T;
 type RecipeCommand<T = SemanticCommand> = T extends SemanticCommand
-  ? Omit<T, "basis" | "draft" | "points" | "dimensionId" | "profile" | "featureId" | "sketchId" | "target" | "targets" | "edit"> &
+  ? Omit<T, "basis" | "draft" | "points" | "dimensionId" | "profile" | "featureId" | "sketchId" | "target" | "targets" | "edit" | "primitive"> &
+    (T extends { primitive: unknown } ? { primitive: RecipePrimitive } : unknown) &
     (T extends { edit: unknown } ? { edit: RecipeGeometryEdit } : unknown) &
     (T extends { targets: infer R extends readonly unknown[] } ? { targets: readonly (R[number] | TargetAlias)[] } : unknown) &
     (T extends { profile: infer P } ? { profile: P | TargetAlias } : unknown) &
@@ -195,6 +197,10 @@ function parseRecipe(input: unknown): RecipeOperation[] {
       if (!("kind" in command.edit) || command.edit.kind === "tangent") throw new Error("Tangent edits require a typed handle reference.");
       validationCommand.edit = { ...command.edit, target: command.edit.kind === "point" ? { kind: "sketchPoint", sketchId: "sketch_validation", pointId: "sketch_point_validation" } : { kind: "sketchEntity", sketchId: "sketch_validation", entityId: "sketch_entity_validation" } };
     }
+    if (command.primitive && typeof command.primitive === "object" && "source" in command.primitive && isAlias(command.primitive.source)) {
+      validateTarget(command.primitive.source, "sketch_entity_validation");
+      validationCommand.primitive = { ...command.primitive, source: { kind: "sketchEntity", sketchId: "sketch_validation", entityId: "sketch_entity_validation" } };
+    }
     if (!validateSemanticCommand(validationCommand).success)
       throw new Error("Invalid semantic operation.");
     if (typeof alias === "string") aliases.add(alias);
@@ -285,6 +291,11 @@ export const documentRecipesCommand: CommandModule = {
           const matches = aliases.get(target.alias)?.references.filter(r => r.label === target.label && kinds.includes(r.target.kind)) ?? [];
           if (matches.length !== 1) throw new Error("Sketch target alias is missing or ambiguous.");
           return matches[0]!.target;
+        }
+        if (command.operation === "sketch.author" && command.primitive.kind === "tangentArc" && isAlias(command.primitive.source)) {
+          const source = resolveSketchTarget(command.primitive.source, ["sketchEntity"]);
+          if (source.kind !== "sketchEntity") throw new Error("Invalid tangent source target.");
+          command.primitive = { ...command.primitive, source };
         }
         if (command.operation === "sketch.construction.set") {
           const target = resolveSketchTarget(command.target, ["sketchPoint", "sketchEntity"]);

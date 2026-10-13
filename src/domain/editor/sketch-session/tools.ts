@@ -1,4 +1,5 @@
 import type { SketchPoint } from "@/contracts/modeling/schema";
+import { sketchPrimitiveContributionInput } from "@/core/sketch-tools/semantic-primitive";
 import type {
   ReferenceId,
   SketchEntityId,
@@ -1877,10 +1878,8 @@ export function prepareSketchContribution(
 /** A completed semantic intent enters this helper only inside the authored-action transition. */
 export function authorSketchPrimitive(session: SketchSessionState, primitive: import("@/contracts/semantic/schema").SemanticSketchPrimitive, construction: boolean): SketchSessionState {
   const tool = getSketchToolDefinition(primitive.kind);
-  const start = primitive.kind === "point" ? primitive.position : primitive.start;
-  const end = primitive.kind === "point" ? primitive.position : primitive.end;
-  const points = primitive.kind === "point" ? [start] : primitive.kind === "alignedRectangle" ? [start, end, primitive.heightPoint] : [start, end];
-  const prepared = prepareSketchContribution({ ...session, constructionModifierActive: construction, toolStartPointId: null, toolTangentSourceEntityId: null }, tool, { start, end, points, settings: {}, placements: null });
+  const input = sketchPrimitiveContributionInput(primitive);
+  const prepared = prepareSketchContribution({ ...session, constructionModifierActive: construction, toolStartPointId: null, toolTangentSourceEntityId: primitive.kind === "tangentArc" ? primitive.source?.entityId ?? null : null }, tool, input);
   return { ...prepared.session, constructionModifierActive: session.constructionModifierActive };
 }
 

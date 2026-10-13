@@ -33,7 +33,11 @@ export type SemanticSketchPrimitive =
       start: SketchPoint;
       end: SketchPoint;
       heightPoint: SketchPoint;
-    };
+    }
+  | { kind: "circle" | "inscribedPolygon" | "circumscribedPolygon"; center: SketchPoint; radius: number }
+  | { kind: "threePointCircle" | "threePointArc"; points: readonly [SketchPoint, SketchPoint, SketchPoint] }
+  | { kind: "centerPointArc"; center: SketchPoint; start: SketchPoint; end: SketchPoint }
+  | { kind: "tangentArc"; start: SketchPoint; direction: SketchPoint; end: SketchPoint; source: Extract<DurableRef, { kind: "sketchEntity" }> | null };
 
 export type SemanticDimensionInput = {
   axis: "horizontal" | "vertical";

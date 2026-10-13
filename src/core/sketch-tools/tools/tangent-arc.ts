@@ -72,7 +72,7 @@ function buildTangentArcPreview(
   ];
 }
 
-function validateTangentArc(
+export function validateTangentArc(
   points: readonly SketchPoint[],
 ): SketchToolValidationResult {
   if (points.length < REQUIRED_POINTS) {
