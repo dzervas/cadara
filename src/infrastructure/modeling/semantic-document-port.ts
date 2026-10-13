@@ -1,3 +1,4 @@
+import { createSemanticHistoryPort } from "./semantic-history-port";
 import { createSemanticExtrudePort } from "./semantic-extrude-port";
 import { inspectSemanticModel } from "./semantic-model-inspection";
 import { createSemanticSketchPort } from "./semantic-sketch-port";
@@ -46,12 +47,24 @@ export function createSemanticDocumentPort(input: {
     };
   }
   let replacementPending = false;
+  let privateSnapshotRefresh: SemanticState | null = null;
   async function inspect(input: { commandId: string }) {
     const snapshot = await service.getCurrentDocumentSnapshot();
-    const events = loop.getState().kind === "editingSketch" && !replacementPending ? [] : await loop.dispatchAndSettle(input.commandId, {
-      type: "document.replaced",
-      snapshot,
-    });
+    const editor = loop.getState();
+    const preserveDraft = editor.kind === "editingSketch" && !replacementPending;
+    // A private draft only rebases after an exactly observed metadata mutation.
+    // An unknown kernel revision after a thrown publication is not a handoff.
+    const refresh = privateSnapshotRefresh;
+    privateSnapshotRefresh = null;
+    const authorizedRefresh = refresh && snapshot.provenance &&
+      refresh.revisionId === snapshot.document.revisionId &&
+      [...refresh.repositoryHeads].sort().join("\0") === [...snapshot.provenance.repositoryHeads].sort().join("\0");
+    const events = preserveDraft && (!authorizedRefresh || editor.snapshot?.document.revisionId === snapshot.document.revisionId)
+      ? []
+      : await loop.dispatchAndSettle(input.commandId, {
+          type: preserveDraft ? "document.snapshotLoaded" : "document.replaced",
+          snapshot,
+        });
     const failed = events.find((event) => event.type.endsWith("Failed"));
     if (failed) throw new Error(JSON.stringify(failed));
     if ((loop.getState().kind === "editingSketch" ? loop.getState().snapshot?.document.revisionId !== snapshot.document.revisionId : loop.getState().snapshot !== snapshot) || !snapshot.provenance)
@@ -146,15 +159,21 @@ export function createSemanticDocumentPort(input: {
     nativeFiles: createNativeDocumentFiles({
       service,
       sketchActions,
-      state: (revisionId, heads) => {
-        // Accepted native mutations replace the editor context, including a private draft.
-        replacementPending = true;
-        return state(revisionId, heads);
+      state: (revisionId, heads, freshContext) => {
+        // Only fresh file opening replaces the history owner; rename is authored intent.
+        replacementPending = freshContext;
+        const basis = state(revisionId, heads);
+        privateSnapshotRefresh = freshContext ? null : basis;
+        const editor = loop.getState();
+        return !freshContext && editor.kind === "editingSketch"
+          ? { ...basis, editingContext: { kind: "sketch", sketchId: editor.session.actionContextId }, draft: { commandSessionId: editor.command.commandSessionId, generation: editor.session.liveRegions.generation } }
+          : basis;
       },
       files: input.nativeFileIO,
     }),
     inspect,
     sketch: sketches.execute,
+    history: createSemanticHistoryPort({ repository, service, loop, inspect, sketch: sketches.execute }),
     extrude: createSemanticExtrudePort({ service, loop, inspect }),
     async drain() {
       await loop.drain();

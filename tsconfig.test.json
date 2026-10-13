@@ -177,7 +177,6 @@
     "src/workbench/debug/cadara-debug-platform.spec.ts",
     "src/workbench/document/document-file-actions.spec.ts",
     "src/workbench/document/document-owner.spec.ts",
-    "src/workbench/history/durable-history.spec.ts",
     "src/workbench/history/workbench-history.spec.ts",
     "src/workbench/runtime/initial-occ-render-state.spec.ts",
     "src/workbench/shell/cad-workbench-sketch-image-import.spec.ts",

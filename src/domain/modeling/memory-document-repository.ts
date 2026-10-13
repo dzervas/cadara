@@ -24,6 +24,7 @@ import {
 } from "@/domain/modeling/geometry-asset-store";
 
 import { AuthoredActionHistory } from "./authored-action-history";
+import { createRevisionId, parseRevisionSequence } from "./document-revision";
 import {
   createCollaborativeDocument,
   materializeCollaborativeDocument,
@@ -560,6 +561,10 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
     if (action.status === "blocked") return this.blocked(documentId, action);
     const storage = structuredClone(this.documents.get(documentId)!);
     applyCollaborativeWrites(storage, action.writes);
+    // Compensation is a new intent, not a return to an older revision. Distinct
+    // heads/revisions also prevent old recipe bases and replayed notifications
+    // from certifying the newly compensated state.
+    storage.revisionId = createRevisionId(parseRevisionSequence(current.revisionId) + 1);
     const document = materializeCollaborativeDocument(storage);
     this.documents.set(documentId, storage);
     this.actions.set(documentId, staged);

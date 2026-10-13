@@ -2,7 +2,6 @@ import { readFile } from "node:fs/promises";
 import type { CommandModule } from "@/cli/types";
 import type {
   SemanticCommand,
-  SemanticDraftBasis,
   SemanticDiscovery,
   SemanticResult,
 } from "@/contracts/semantic/schema";
@@ -22,9 +21,9 @@ type RecipeCommand<T = SemanticCommand> = T extends SemanticCommand
     (T extends { sketchId: infer S } ? { sketchId: S | TargetAlias } : unknown) &
     (T extends { points: infer P } ? { points: P | readonly [TargetAlias, TargetAlias] } : unknown) &
     (T extends { dimensionId: infer D } ? { dimensionId: D | TargetAlias } : unknown) & { basis: T["basis"] | Alias } & (T extends {
-        draft: SemanticDraftBasis;
+        draft: infer D;
       }
-        ? { draft: SemanticDraftBasis | Alias }
+        ? { draft: D | Alias }
         : unknown)
   : never;
 interface RecipeOperation {

@@ -15,6 +15,8 @@ export function semanticCommandCorrelation(
             ? "sketch-discard"
             : command.operation.startsWith("sketch.")
               ? "sketch-author"
+              : command.operation.startsWith("history.")
+                ? "history"
               : command.operation.startsWith("extrude.")
                 ? "model-mutate"
               : command.operation === "document.open"

@@ -201,8 +201,8 @@ it("does not forge a persistence receipt when native save preparation throws bef
 
 it("reports a native repository failure without inventing applied-live evidence", async () => {
   class FailingRepository extends MemoryDocumentRepository {
-    override async initialize(
-      input: Parameters<MemoryDocumentRepository["initialize"]>[0],
+    override async mutate(
+      input: Parameters<MemoryDocumentRepository["mutate"]>[0],
     ): Promise<DocumentRepositoryMutationResult> {
       return {
         ok: false,
@@ -254,10 +254,10 @@ it("reports a native repository failure without inventing applied-live evidence"
 
 it("retains applied-live native rename evidence when its repository write fails", async () => {
   class FailingRepository extends MemoryDocumentRepository {
-    override async initialize(
-      input: Parameters<MemoryDocumentRepository["initialize"]>[0],
+    override async mutate(
+      input: Parameters<MemoryDocumentRepository["mutate"]>[0],
     ): Promise<DocumentRepositoryMutationResult> {
-      const applied = await super.initialize(input);
+      const applied = await super.mutate(input);
       if (!applied.ok) return applied;
       return {
         ok: false,

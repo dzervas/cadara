@@ -1,3 +1,4 @@
+import { createAuthoredHistoryOperation } from "@/application/history/authored-history";
 import {
   useCallback,
   useEffect,
@@ -240,171 +241,65 @@ export function useWorkbenchHistory({
     [setInvalidVariableValueMessages, showWorkbenchError],
   );
 
-  const requestUndo = useCallback(
-    (actionSequence?: number) => {
-      if (sketchSessionRef.current) {
-        dispatch({ type: "history.undoRequested", actionSequence });
-        return;
-      }
+  const requestHistory = useCallback(
+    (direction: "undo" | "redo", actionSequence?: number) => {
       const currentSnapshot = snapshotRef.current;
-      if (!currentSnapshot || isUndoRedoRunning) {
-        return;
-      }
-
+      if (!currentSnapshot || isUndoRedoRunning) return;
       setIsUndoRedoRunning(true);
-      void durableHistory
-        .undo({
-          documentId: currentSnapshot.document.documentId,
-          actionSequence,
-        })
+      const historyOperation = createAuthoredHistoryOperation({
+    documentHistory: durableHistory,
+    getContext: () => sketchSessionRef.current
+      ? { kind: "sketch" }
+      : snapshotRef.current
+        ? { kind: "document", documentId: snapshotRef.current.document.documentId, revisionId: snapshotRef.current.document.revisionId }
+        : null,
+    privateHistory: async ({ direction, actionSequence }) => {
+      dispatch({ type: direction === "undo" ? "history.undoRequested" : "history.redoRequested", actionSequence });
+    },
+    handoff: async (snapshot) => {
+      dispatch({ type: "document.replaced", snapshot });
+    },
+      });
+      void historyOperation.execute({ direction, actionSequence, commandId: `history-${crypto.randomUUID()}` })
         .then((result) => {
-          if (!result) {
-            return;
-          }
-
-          if (result.context === "document") {
+          if (result?.context === "document") {
             setActiveHistoryAvailability({
               contextKey: currentSnapshot.document.documentId,
               availability: result.availability,
             });
-            dispatch({
-              type: "document.replaced",
-              snapshot: result.snapshot,
-            });
-            return;
           }
         })
         .catch((error: unknown) => {
-          const message =
-            error instanceof Error ? error.message : "Undo failed.";
-          setBlockedDocumentAction({
-            direction: "undo",
-            sequence: actionSequence,
-            reason: message,
-          });
+          const message = error instanceof Error ? error.message : `${direction === "undo" ? "Undo" : "Redo"} failed.`;
+          setBlockedDocumentAction({ direction, sequence: actionSequence, reason: message });
           handleWorkbenchFailure({
             appError: createAppError({
               code: "workbench/action-failed",
               message,
               context: [
-                { key: "operation", value: "undo" },
-                ...errorContext(
-                  "documentId",
-                  currentSnapshot.document.documentId,
-                ),
-                ...errorContext(
-                  "revisionId",
-                  currentSnapshot.document.revisionId,
-                ),
+                { key: "operation", value: direction },
+                ...errorContext("documentId", currentSnapshot.document.documentId),
+                ...errorContext("revisionId", currentSnapshot.document.revisionId),
               ],
               cause: error,
             }),
             reporter: errorReporter,
             metadata: {
-              source: "workbench.history.undo",
+              source: `workbench.history.${direction}`,
               visibility: "user",
-              dedupeKey: `workbench.history.undo:${currentSnapshot.document.documentId}:${message}`,
+              dedupeKey: `workbench.history.${direction}:${currentSnapshot.document.documentId}:${message}`,
             },
             reportability: "reportable",
             userMessage: message,
             notify: showWorkbenchError,
           });
         })
-        .finally(() => {
-          setIsUndoRedoRunning(false);
-        });
+        .finally(() => setIsUndoRedoRunning(false));
     },
-    [
-      dispatch,
-      durableHistory,
-      errorReporter,
-      isUndoRedoRunning,
-      showWorkbenchError,
-    ],
+    [dispatch, durableHistory, errorReporter, isUndoRedoRunning, showWorkbenchError],
   );
-
-  const requestRedo = useCallback(
-    (actionSequence?: number) => {
-      if (sketchSessionRef.current) {
-        dispatch({ type: "history.redoRequested", actionSequence });
-        return;
-      }
-      const currentSnapshot = snapshotRef.current;
-      if (!currentSnapshot || isUndoRedoRunning) {
-        return;
-      }
-
-      setIsUndoRedoRunning(true);
-      void durableHistory
-        .redo({
-          documentId: currentSnapshot.document.documentId,
-          actionSequence,
-        })
-        .then((result) => {
-          if (!result) {
-            return;
-          }
-
-          if (result.context === "document") {
-            setActiveHistoryAvailability({
-              contextKey: currentSnapshot.document.documentId,
-              availability: result.availability,
-            });
-            dispatch({
-              type: "document.replaced",
-              snapshot: result.snapshot,
-            });
-            return;
-          }
-        })
-        .catch((error: unknown) => {
-          const message =
-            error instanceof Error ? error.message : "Redo failed.";
-          setBlockedDocumentAction({
-            direction: "redo",
-            sequence: actionSequence,
-            reason: message,
-          });
-          handleWorkbenchFailure({
-            appError: createAppError({
-              code: "workbench/action-failed",
-              message,
-              context: [
-                { key: "operation", value: "redo" },
-                ...errorContext(
-                  "documentId",
-                  currentSnapshot.document.documentId,
-                ),
-                ...errorContext(
-                  "revisionId",
-                  currentSnapshot.document.revisionId,
-                ),
-              ],
-              cause: error,
-            }),
-            reporter: errorReporter,
-            metadata: {
-              source: "workbench.history.redo",
-              visibility: "user",
-              dedupeKey: `workbench.history.redo:${currentSnapshot.document.documentId}:${message}`,
-            },
-            reportability: "reportable",
-            userMessage: message,
-            notify: showWorkbenchError,
-          });
-        })
-        .finally(() => {
-          setIsUndoRedoRunning(false);
-        });
-    },
-    [
-      dispatch,
-      durableHistory,
-      errorReporter,
-      isUndoRedoRunning,
-      showWorkbenchError,
-    ],
-  );
+  const requestUndo = useCallback((sequence?: number) => requestHistory("undo", sequence), [requestHistory]);
+  const requestRedo = useCallback((sequence?: number) => requestHistory("redo", sequence), [requestHistory]);
 
   const handleVariableUpdate = useCallback(
     (variable: DocumentVariableRecord, next: DocumentVariablePatch) => {

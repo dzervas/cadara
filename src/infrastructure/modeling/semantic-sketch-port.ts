@@ -1,5 +1,6 @@
 import type {
   SemanticSketchCommand,
+  SemanticHistoryCommand,
   SemanticDiscovery,
   SemanticState,
   SemanticGeometryReceipt,
@@ -86,6 +87,14 @@ export function createSemanticSketchPort(input: {
       ...base,
       state,
       references: [...base.references.filter(r => !(r.target.kind === "sketchPoint" && r.target.sketchId === (s.sketchId ?? s.actionContextId))), ...s.definition.points.map(p => ({ label: p.label, target: { kind: "sketchPoint" as const, sketchId: s.sketchId ?? s.actionContextId, pointId: p.pointId } }))],
+      history: {
+        canUndo: s.actionAvailability?.canUndo ?? false,
+        canRedo: s.actionAvailability?.canRedo ?? false,
+        // UI-local blocked markers are reported by the refused command's
+        // diagnostics, not leaked as unknown fields into the strict contract.
+        undoEntries: (s.actionHistory?.undo ?? []).map(({ sequence, label }) => ({ sequence, label })),
+        redoEntries: (s.actionHistory?.redo ?? []).map(({ sequence, label }) => ({ sequence, label })),
+      },
       sketch: {
         ...dimensionDiscovery(s.definition, s.liveSolve!.solvedSnapshot),
         sketchId: s.sketchId,
@@ -168,7 +177,7 @@ export function createSemanticSketchPort(input: {
     };
   }
   async function execute(
-    command: SemanticSketchCommand,
+    command: SemanticSketchCommand | SemanticHistoryCommand,
   ): Promise<import("@/contracts/semantic/schema").SemanticResult> {
     const before = await input.inspect({
       commandId: `${command.commandId}:before`,
@@ -197,7 +206,7 @@ export function createSemanticSketchPort(input: {
       };
     if (
       "draft" in command &&
-      (initial.state.draft?.commandSessionId !==
+      (!command.draft || initial.state.draft?.commandSessionId !==
         command.draft.commandSessionId ||
         initial.state.draft.generation !== command.draft.generation)
     )
@@ -254,6 +263,12 @@ export function createSemanticSketchPort(input: {
       if (!validTarget || ("value" in command && (!Number.isFinite(command.value) || command.value <= 0)))
         return { ...terminal, outcome: { kind: "rejected", reasonCode: "invalid-dimension-target-or-value" } };
     }
+    if (command.operation === "history.undo" || command.operation === "history.redo") {
+      const direction = command.operation === "history.undo" ? "undo" : "redo";
+      const entries = editor.kind === "editingSketch" ? editor.session.actionHistory?.[direction] ?? [] : [];
+      if (command.actionSequence === undefined ? !entries.length : !entries.some(e => e.sequence === command.actionSequence))
+        return { ...terminal, outcome: { kind: "unavailable", capability: command.operation } };
+    }
     const priorGeometry = geometry(initial.state);
     let events: readonly EditorEvent[] = [];
     let publicationReceipt:
@@ -288,6 +303,8 @@ export function createSemanticSketchPort(input: {
       }
       if (command.operation === "sketch.dimension.update")
         events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.dimensionUpdated", dimensionId: command.dimensionId, value: command.value });
+      if (command.operation === "history.undo" || command.operation === "history.redo")
+        events = await input.loop.dispatchAndSettle(command.commandId, { type: command.operation === "history.undo" ? "history.undoRequested" : "history.redoRequested", actionSequence: command.actionSequence });
       if (command.operation === "sketch.publish")
         events = await input.loop.dispatchAndSettle(command.commandId, {
           type: "sketch.publishRequested",
@@ -321,6 +338,13 @@ export function createSemanticSketchPort(input: {
             generation: e.generation,
             requestId: e.requestId,
           };
+      if ((command.operation === "history.undo" || command.operation === "history.redo") && finalEditor.kind === "editingSketch") {
+        const direction = command.operation === "history.undo" ? "undo" : "redo";
+        const entries = finalEditor.session.actionHistory?.[direction] ?? [];
+        const blocked = command.actionSequence === undefined ? entries.at(-1) : entries.find(e => e.sequence === command.actionSequence);
+        if (blocked?.blockedReason)
+          return { ...terminal, outcome: { kind: "conflicted", actualBasis: initial.state }, diagnostics: [...terminal.diagnostics, semanticDiagnostic(new Error(blocked.blockedReason))] };
+      }
       const ownedSnapshot = finalEditor.snapshot;
       const ownedState: SemanticState = {
         ...initial.state,
@@ -344,7 +368,7 @@ export function createSemanticSketchPort(input: {
             : null,
       };
       terminal.completion.live =
-        command.operation === "sketch.inspect"
+        (command.operation === "sketch.inspect" || command.operation === "history.inspect")
           ? { kind: "unchanged", state: ownedState }
           : { kind: "applied", state: ownedState };
       if (command.operation === "sketch.publish") {
@@ -389,7 +413,7 @@ export function createSemanticSketchPort(input: {
       terminal.discovery = discovery(inspected.discovery);
       const state = terminal.discovery.state;
       terminal.completion.live =
-        command.operation === "sketch.inspect"
+        (command.operation === "sketch.inspect" || command.operation === "history.inspect")
           ? { kind: "unchanged", state }
           : { kind: "applied", state };
       terminal.completion.handoff = { kind: "current", state };
@@ -408,7 +432,7 @@ export function createSemanticSketchPort(input: {
           ? {
               kind: "completed",
               change:
-                command.operation === "sketch.inspect"
+                (command.operation === "sketch.inspect" || command.operation === "history.inspect")
                   ? "unchanged"
                   : "changed",
             }
@@ -628,7 +652,7 @@ export function createSemanticSketchPort(input: {
       )
         terminal.outcome = { kind: "accepted-invalid" };
       if (
-        command.operation === "sketch.inspect" &&
+        (command.operation === "sketch.inspect" || command.operation === "history.inspect") &&
         terminal.completion.geometry.kind === "invalid-editable"
       )
         terminal.outcome = { kind: "completed", change: "unchanged" };
