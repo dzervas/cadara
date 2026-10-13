@@ -26,6 +26,7 @@
     "test:static": "vitest run test/static",
     "test": "bun run test:logic && bun run test:ui && bun run test:static",
     "test:e2e": "playwright test",
+    "test:e2e:offline": "SENTRY_AUTH_TOKEN= vite build --config vite.offline-test.config.ts && playwright test --config playwright.offline.config.ts",
     "test:e2e:diagnostic": "PLAYWRIGHT_DIAGNOSTICS=1 playwright test --workers=1",
     "test:e2e:real-captures": "bun ./scripts/require-onshape-captures.ts && PLAYWRIGHT_REAL_CAPTURES=1 playwright test e2e/onshape-import-parametric.spec.ts e2e/onshape-variable-rebuild.spec.ts --workers=1",
     "test:e2e:real-captures:diagnostic": "bun ./scripts/require-onshape-captures.ts && PLAYWRIGHT_REAL_CAPTURES=1 PLAYWRIGHT_DIAGNOSTICS=1 playwright test e2e/onshape-import-parametric.spec.ts e2e/onshape-variable-rebuild.spec.ts --workers=1",

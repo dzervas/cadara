@@ -1,4 +1,7 @@
 import { OCC_ASSET_VERSION } from "@/domain/modeling/occ/assets";
+import occWorkerUrl from "@/domain/modeling/occ/worker.ts?worker&url";
+import sketchDerivationWorkerUrl from "@/domain/modeling/occ/sketch-derivation.worker.ts?worker&url";
+import documentSyncWorkerUrl from "@/infrastructure/workers/document-sync.worker.ts?worker&url";
 
 const OPENCASCADE_PACKAGE_VERSION = "2.0.0-beta.b5ff984";
 
@@ -40,8 +43,33 @@ export function getOpenCascadeServiceWorkerVersion() {
   return OCC_ASSET_VERSION;
 }
 
-export function getOpenCascadeServiceWorkerUrl() {
-  return `${OCC_SERVICE_WORKER_PATH}?v=${encodeURIComponent(OCC_ASSET_VERSION)}`;
+/**
+ * The built (content-hashed) bundles of the app's dedicated workers, as the
+ * build emits them. A worker may first be spawned after the network is gone
+ * (a new or opened document's derivation worker), and hosts serve these
+ * files `no-cache`, so the service worker precaches them when the app loads
+ * and serves them cache-first. They import no other chunk.
+ */
+export const APP_WORKER_ASSET_URLS: readonly string[] = [
+  occWorkerUrl,
+  sketchDerivationWorkerUrl,
+  documentSyncWorkerUrl,
+];
+
+/**
+ * The registration URL carries both caches' identity: the OCC artifact
+ * version (`v`) and the worker bundles to precache (`precache`, comma
+ * separated; the app registers `APP_WORKER_ASSET_URLS`). A build with other
+ * worker hashes registers a new script URL, so the browser installs it
+ * (precaching the new bundles) and its activation drops the old bundles'
+ * cache.
+ */
+export function getOpenCascadeServiceWorkerUrl(
+  precacheUrls: readonly string[] = [],
+) {
+  const search = new URLSearchParams({ v: OCC_ASSET_VERSION });
+  if (precacheUrls.length > 0) search.set("precache", precacheUrls.join(","));
+  return `${OCC_SERVICE_WORKER_PATH}?${search}`;
 }
 
 export async function registerOpenCascadeAssetCache(
@@ -55,7 +83,7 @@ export async function registerOpenCascadeAssetCache(
   }
 
   return navigatorLike.serviceWorker.register(
-    getOpenCascadeServiceWorkerUrl(),
+    getOpenCascadeServiceWorkerUrl(APP_WORKER_ASSET_URLS),
     getOpenCascadeServiceWorkerRegistrationOptions(),
   );
 }

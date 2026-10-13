@@ -184,6 +184,7 @@ import {
   type ViewportIntent,
   type ViewportModel,
 } from "@/workbench/viewport/viewport-boundary";
+import { isCadaraDebugPlatformEnabled } from "@/workbench/debug/cadara-debug-bridge";
 import {
   LEGACY_VIEWPORT_HEIGHT_PX,
   LEGACY_VIEWPORT_LEFT_INSET_PX,
@@ -3358,7 +3359,9 @@ export function ThreeCadViewport({
   ]);
 
   useEffect(() => {
-    if (!import.meta.env.DEV) {
+    // Same gate as `__cadaraDebug`: dev, or a build with TEST = "true" (the
+    // offline E2E sub-lane's production build, `vite.offline-test.config.ts`).
+    if (!isCadaraDebugPlatformEnabled()) {
       return;
     }
 
