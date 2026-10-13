@@ -32,8 +32,10 @@ import { createSketchMergePointsMutation } from "@/domain/sketch-editing/merge-p
 import { normalizeSketchDefinition } from "@/domain/modeling/modeling-service/normalization";
 import {
   getEnterEvent,
+  getEscapeEvent,
   getSketchMergeOfferEvents,
 } from "@/domain/editor/workbench-interactions";
+import { createSketchActionOwnerFixture } from "@/application/editor/sketch-action-owner.fixtures";
 import {
   initialEditorState,
   transitionEditorState,
@@ -603,5 +605,165 @@ describe("Merge… from the near-gap hint (T13k)", () => {
       point(session, "b"),
     ]);
     expect(other.session.definition).toBe(armed.session.definition);
+  });
+});
+
+// T17f (T17-9′; T16d review R-1 and A-4, Mirror parity; issue 04 :49).
+// Seam: the authored-action owner around the real reducer on an entered
+// session (`createSketchActionOwnerFixture`), with the workbench's Enter and
+// Escape routes (`getEnterEvent`, `getEscapeEvent`). The confirm popup shows
+// exactly when Enter merges (base: a refused later pick hid the popup while
+// Enter still merged); Escape first drops the picks with the tool armed and
+// no action, then leaves the tool (base: one Escape left with picks staged).
+describe("T17f: Merge Points popup ⇔ Enter ⇔ staged; two-stage Escape", () => {
+  async function staged() {
+    const f = await createSketchActionOwnerFixture(open());
+    f.dispatch({ type: "tool.activated", toolId: "sketchMergePoints" });
+    for (const name of ["a2", "a"])
+      f.dispatch({
+        type: "viewport.selectionRequested",
+        target: point(f.session, name),
+      });
+    return f;
+  }
+  const popup = (session: SketchSessionState) =>
+    session.toolPresentation?.floatingInput ?? null;
+  const enter = (session: SketchSessionState) =>
+    getEnterEvent({ sketchSession: session });
+  const escape = (f: Awaited<ReturnType<typeof staged>>) =>
+    getEscapeEvent({
+      activeCommand: null,
+      activeReferencePickerFieldId: null,
+      selection: f.state.selection,
+      sketchSession: f.session,
+      annotationContext: f.state.annotationContext,
+    });
+
+  test.each([
+    [
+      "the centre of a circle",
+      (session: SketchSessionState) => point(session, "o"),
+      "o is the centre of ring; centres are not merged. Use Concentric or Coincident instead.",
+    ],
+    [
+      "the sketch origin",
+      (session: SketchSessionState): PrimitiveRef => ({
+        kind: "sketchDatumReference",
+        sketchId: session.sketchId as SketchId,
+        datumId: "origin",
+        geometryKind: "point",
+      }),
+      "Projected and datum points are not local sketch points; they cannot be merged.",
+    ],
+  ])(
+    "a refused pick (%s) after a staged pair keeps the picks, the popup and Enter; Enter is one Merge Points",
+    async (_, refused, message) => {
+      const f = await staged();
+      const picks = f.session.activeEditTool?.selectedTargets;
+      const shown = popup(f.session);
+      expect(shown?.readout, "premise: staged").toBe("a2 \u2192 a");
+      f.dispatch({
+        type: "viewport.selectionRequested",
+        target: refused(f.session),
+      });
+      expect(f.session.activeEditTool?.selectedTargets).toEqual(picks);
+      expect(f.session.validationMessage).toBe(message);
+      expect(popup(f.session), "the popup stays").toEqual(shown);
+      expect(f.session.toolPresentation?.prompts[0]).toMatchObject({
+        text: "Merge a2 into a \u2014 Enter or Merge to confirm",
+        tone: "warning",
+      });
+      expect(f.session.toolPresentation?.validation?.[0]?.message).toBe(
+        message,
+      );
+      f.dispatch({ type: "viewport.hovered", target: point(f.session, "b") });
+      expect(popup(f.session), "a later hover keeps it").toEqual(shown);
+      const event = enter(f.session);
+      expect(event).toEqual({
+        type: "sketch.toolPatched",
+        patch: { intent: "mergePoints" },
+      });
+      f.dispatch(event!);
+      expect(f.undoLabels()).toEqual(["Merge Points"]);
+      expect(f.session.definition.pointIds).not.toContain(pid("a2"));
+    },
+  );
+
+  test("no popup ⇔ Enter is not consumed (one pick; after the merge)", async () => {
+    const f = await createSketchActionOwnerFixture(open());
+    f.dispatch({ type: "tool.activated", toolId: "sketchMergePoints" });
+    f.dispatch({
+      type: "viewport.selectionRequested",
+      target: point(f.session, "a2"),
+    });
+    expect(popup(f.session)).toBe(null);
+    expect(enter(f.session)).toBe(null);
+    f.dispatch({
+      type: "viewport.selectionRequested",
+      target: point(f.session, "a"),
+    });
+    f.dispatch(enter(f.session)!);
+    expect(popup(f.session)).toBe(null);
+    expect(enter(f.session)).toBe(null);
+  });
+
+  test("Undo under a staged pair re-judges it: a pair Undo makes invalid loses its popup and Enter; a valid one keeps both", async () => {
+    const f = await createSketchActionOwnerFixture(open());
+    const line = (id: string): PrimitiveRef => ({
+      kind: "sketchEntity",
+      sketchId: f.session.sketchId as SketchId,
+      entityId: `sketch_entity_${id}` as SketchEntityId,
+    });
+    // Delete bc, then stage b → c (no longer the ends of one line).
+    f.dispatch({ type: "viewport.selectionRequested", target: line("bc") });
+    f.dispatch({ type: "sketch.annotationDeleteRequested" });
+    expect(f.undoLabels()).toEqual(["Delete Sketch Item"]);
+    f.dispatch({ type: "tool.activated", toolId: "sketchMergePoints" });
+    for (const name of ["b", "c"])
+      f.dispatch({
+        type: "viewport.selectionRequested",
+        target: point(f.session, name),
+      });
+    expect(popup(f.session)?.readout, "premise: staged").toBe("b \u2192 c");
+    // Undo brings bc back: b and c are its two ends, so the pair is refused.
+    f.dispatch({ type: "history.undoRequested" });
+    expect(f.session.activeTool).toBe("sketchMergePoints");
+    expect(enter(f.session), "Enter is not consumed").toBe(null);
+    expect(popup(f.session), "and no popup offers it").toBe(null);
+    expect(f.session.validationMessage).toBe(
+      "Both points are ends of bc; merging them would collapse it.",
+    );
+    // Redo deletes bc again: the pair is valid, staged and confirmable.
+    f.dispatch({ type: "history.redoRequested" });
+    expect(popup(f.session)?.readout).toBe("b \u2192 c");
+    expect(f.session.toolStagedEntities, "the arrow is staged").not.toEqual([]);
+    expect(enter(f.session)).toEqual({
+      type: "sketch.toolPatched",
+      patch: { intent: "mergePoints" },
+    });
+  });
+
+  test("Escape drops the picks, keeps Merge Points armed and records nothing; a second Escape leaves the tool", async () => {
+    const f = await staged();
+    const definition = f.session.definition;
+    const first = escape(f);
+    expect(first).toEqual({
+      type: "sketch.toolPatched",
+      patch: { intent: "cancelSketchEditOperator" },
+    });
+    f.dispatch(first!);
+    expect(f.session.activeTool).toBe("sketchMergePoints");
+    expect(f.session.activeEditTool?.selectedTargets).toEqual([]);
+    expect(popup(f.session)).toBe(null);
+    expect(enter(f.session)).toBe(null);
+    expect(f.session.definition).toBe(definition);
+    expect(f.undoLabels()).toEqual([]);
+    const second = escape(f);
+    expect(second).toEqual({ type: "sketch.activeToolCleared" });
+    f.dispatch(second!);
+    expect(f.session.activeTool).toBe(null);
+    expect(f.session.activeEditTool).toBe(null);
+    expect(f.state.command.toolId).toBe("sketch");
+    expect(f.undoLabels()).toEqual([]);
   });
 });

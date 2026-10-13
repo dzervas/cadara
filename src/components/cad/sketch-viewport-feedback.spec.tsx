@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MantineProvider } from "@mantine/core";
 
 import { SketchViewportFeedbackLayer } from "@/components/cad/sketch-viewport-feedback";
+import { getFloatingInputKeyPatch } from "@/components/cad/sketch-viewport-feedback-model";
 import type { SketchToolPresentationSchema } from "@/core/sketch-tools/editor-schema";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import { buildSketchEditToolPresentation } from "@/domain/editor/sketch-session/tools";
@@ -23,6 +24,7 @@ import {
   updateSketchPointer,
 } from "@/domain/editor/sketch-session";
 import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
   eid,
   entityRef,
@@ -615,6 +617,80 @@ test("T13j: a confirm-only floating input renders no text field", () => {
   expect(render(false), "premise: the default renders the field").toContain(
     "<input",
   );
+});
+
+// T17f (T17-9′, as T16d review R-1), UI lane; seam: the Merge Points
+// presentation built by the real session (entered, T17-10′ builder) and
+// rendered by the viewport feedback layer. A refused pick after a staged
+// pair keeps the Merge popup (Enter still merges; base: it vanished).
+test("T17f: a refused pick after a staged merge keeps the Merge popup", () => {
+  const session = enterSketchSession(
+    rebuildSessionForDefinition(
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
+      { definition: seedDefinition() },
+    ),
+  );
+  const pointRef = (name: string) =>
+    ({
+      kind: "sketchPoint",
+      sketchId: session.sketchId ?? "sketch_draft",
+      pointId: `sketch_point_${name}`,
+    }) as PrimitiveRef;
+  const staged = ["a", "u"].reduce(
+    (current, name) => selectSketchEditToolTarget(current, pointRef(name)),
+    beginSketchTool(session, "sketchMergePoints"),
+  );
+  const refused = selectSketchEditToolTarget(staged, pointRef("c"));
+  const render = (schema: SketchToolPresentationSchema | null) =>
+    renderToStaticMarkup(
+      <SketchViewportFeedbackLayer
+        schema={schema}
+        projections={[
+          { id: "floating-input:merge-points-confirm", x: 300, y: 400 },
+        ]}
+        onPatch={() => undefined}
+      />,
+    );
+  expect(refused.validationMessage, "premise: the pick is refused").toMatch(
+    /centre/,
+  );
+  expect(refused.activeEditTool?.selectedTargets).toHaveLength(2);
+  for (const markup of [
+    render(staged.toolPresentation),
+    render(refused.toolPresentation),
+  ]) {
+    expect(markup).toContain(
+      'data-sketch-viewport-floating-input="merge-points-confirm"',
+    );
+    expect(markup).toMatch(/data-floating-input-readout="true">a \u2192 u</);
+    expect(markup).toContain(">Merge<");
+  }
+});
+
+// T17f review A-7/A-4, UI lane; seam: the key handling of the floating
+// input's field (`getFloatingInputKeyPatch`, used by its onKeyDown) on a
+// Dimension edit popup built by the real session: Enter is its Save, Escape
+// its Cancel, and a key that ends an IME composition is not the popup's.
+test("T17f: Enter in a floating value field is the popup's confirm; Escape its Cancel; not while composing", () => {
+  const input = editDimension(
+    makeCircleWithDiameterSession({ reference: false }),
+    0,
+  ).toolPresentation!.floatingInput!;
+  expect(input.submitAction.patch, "premise: the Save").toEqual({
+    intent: "commitAnnotationValue",
+  });
+  expect(getFloatingInputKeyPatch(input, "Enter", false)).toEqual(
+    input.submitAction.patch,
+  );
+  expect(getFloatingInputKeyPatch(input, "Escape", false)).toEqual(
+    input.cancelAction.patch,
+  );
+  expect(getFloatingInputKeyPatch(input, "Enter", true)).toBe(null);
+  expect(getFloatingInputKeyPatch(input, "Escape", true)).toBe(null);
+  expect(getFloatingInputKeyPatch(input, "a", false)).toBe(null);
 });
 
 // T16d ([TECH] T16-8/T16-21), UI lane; seam: the Mirror tool's presentation

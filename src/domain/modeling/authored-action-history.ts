@@ -222,17 +222,110 @@ function diff(
     },
   );
 }
-function write(root: Fields, change: AuthoredFieldWrite) {
+function define(parent: Fields, key: string, value: AuthoredValue) {
+  Object.defineProperty(parent, key, {
+    value,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
+}
+/** T17-8′: for each collection (JSON address) in which an action creates or removes
+ * records, its record order on the side(s) where they exist. A record re-created by
+ * Undo/Redo goes back after its predecessor in that order, else after the nearest earlier
+ * id still present, else first. Membership `*Ids` arrays stay derived from record order.
+ */
+type RecordOrders = Record<string, { before?: string[]; after?: string[] }>;
+type LedgerAction = AuthoredAction & { orders: RecordOrders };
+function contractAction({
+  sequence,
+  identity,
+  label,
+  writes,
+  dependencies,
+}: LedgerAction): AuthoredAction {
+  return structuredClone({ sequence, identity, label, writes, dependencies });
+}
+function recordOrders(
+  writes: readonly AuthoredFieldWrite[],
+  before: Fields,
+  after: Fields,
+): RecordOrders {
+  const orders: RecordOrders = {};
+  for (const change of writes) {
+    if (
+      recordId(change.address) === undefined ||
+      change.before.exists === change.after.exists
+    )
+      continue;
+    const side = change.before.exists ? "before" : "after";
+    const address = change.address.slice(0, -1);
+    const key = JSON.stringify(address);
+    if (orders[key]?.[side]) continue;
+    const collection = read(side === "before" ? before : after, address);
+    if (collection.exists && object(collection.value))
+      orders[key] = { ...orders[key], [side]: Object.keys(collection.value) };
+  }
+  return orders;
+}
+/** Puts the records `created` (appended by this pass) back at their positions in
+ * `order`, rebuilding the collection once: each goes after the nearest earlier id
+ * of `order` that is present (possibly another created one), else first.
+ */
+function placeRecords(
+  parent: Fields,
+  created: ReadonlySet<string>,
+  order: readonly string[],
+) {
+  const position = new Map(order.map((id, index) => [id, index]));
+  const followers = new Map<string | null, string[]>();
+  for (const id of [...created].sort(
+    (left, right) => position.get(left)! - position.get(right)!,
+  )) {
+    let anchor: string | null = null;
+    for (let index = position.get(id)! - 1; index >= 0; index--)
+      if (Object.hasOwn(parent, order[index]!)) {
+        anchor = order[index]!;
+        break;
+      }
+    const list = followers.get(anchor);
+    if (list) list.push(id);
+    else followers.set(anchor, [id]);
+  }
+  const entries: [string, AuthoredValue][] = [];
+  // Depth-first, iteratively: chains of re-created records can be long.
+  const emit = (anchor: string | null) => {
+    const stack: string[] = [];
+    const follow = (from: string | null) => {
+      const list = followers.get(from) ?? [];
+      for (let index = list.length - 1; index >= 0; index--)
+        stack.push(list[index]!);
+    };
+    follow(anchor);
+    for (let id = stack.pop(); id !== undefined; id = stack.pop()) {
+      entries.push([id, parent[id]!]);
+      follow(id);
+    }
+  };
+  emit(null);
+  for (const [key, value] of Object.entries(parent)) {
+    if (created.has(key)) continue;
+    entries.push([key, value]);
+    emit(key);
+  }
+  for (const [key] of entries) delete parent[key];
+  for (const [key, entry] of entries) define(parent, key, entry);
+}
+function parentOf(root: Fields, address: AuthoredAddress) {
   let parent = root;
-  for (const key of change.address.slice(0, -1)) parent = parent[key] as Fields;
+  for (const key of address.slice(0, -1)) parent = parent[key] as Fields;
+  return parent;
+}
+function write(root: Fields, change: AuthoredFieldWrite) {
+  const parent = parentOf(root, change.address);
   const key = change.address.at(-1)!;
   if (change.after.exists)
-    Object.defineProperty(parent, key, {
-      value: structuredClone(change.after.value),
-      writable: true,
-      enumerable: true,
-      configurable: true,
-    });
+    define(parent, key, structuredClone(change.after.value));
   else delete parent[key];
 }
 function references(
@@ -281,6 +374,7 @@ function applyWrites(
   writes: readonly AuthoredFieldWrite[],
   dependencies: AuthoredAction["dependencies"],
   side: "before" | "after",
+  orders: RecordOrders = {},
 ): AuthoredActionResult | undefined {
   const targets = writes
     .filter((change) => !equal(read(data, change.address), change.before))
@@ -296,7 +390,36 @@ function applyWrites(
     }
   if (targets.length)
     return { status: "blocked", reason: "expected-state-changed", targets };
-  for (const change of writes) write(data, change);
+  // A created record takes its recorded position (the candidate's on a commit);
+  // each collection is rebuilt once per pass (T17f review A-1).
+  const created = new Map<
+    string,
+    { parent: Fields; order: readonly string[]; ids: Set<string> }
+  >();
+  for (const change of writes) {
+    const collection = JSON.stringify(change.address.slice(0, -1));
+    const order = orders[collection]?.[side];
+    const parent = parentOf(data, change.address);
+    const id = change.address.at(-1)!;
+    const fresh =
+      order !== undefined &&
+      change.after.exists &&
+      recordId(change.address) !== undefined &&
+      !Object.hasOwn(parent, id);
+    write(data, change);
+    if (!fresh) continue;
+    const entry = created.get(collection) ?? { parent, order, ids: new Set() };
+    entry.ids.add(id);
+    created.set(collection, entry);
+  }
+  for (const { parent, order, ids } of created.values()) {
+    const ordered = new Set(order);
+    placeRecords(
+      parent,
+      new Set([...ids].filter((id) => ordered.has(id))),
+      order,
+    );
+  }
   const dependentTargets = dependencies
     .filter((dependency) => {
       if (
@@ -326,7 +449,7 @@ function applyWrites(
 export class AuthoredActionHistory {
   private ledgers = new Map<
     string,
-    { undo: AuthoredAction[]; redo: AuthoredAction[] }
+    { undo: LedgerAction[]; redo: LedgerAction[] }
   >();
   private sequence = 0;
 
@@ -382,9 +505,18 @@ export class AuthoredActionHistory {
             value: remapSemanticSketchIds(presence.value, replacements),
           }
         : presence;
-    const remapAction = (action: AuthoredAction): AuthoredAction => ({
+    const remapAction = (action: LedgerAction): LedgerAction => ({
       ...action,
       identity: structuredClone(nextIdentity),
+      // Sketch-context collections hold no sketch ids; only their addresses remap.
+      orders: Object.fromEntries(
+        Object.entries(action.orders).map(([address, order]) => [
+          JSON.stringify(
+            remapAddress(JSON.parse(address) as string[], replacements),
+          ),
+          order,
+        ]),
+      ),
       writes: action.writes.map((change) => ({
         address: remapAddress(change.address, replacements),
         before: remapPresence(change.before),
@@ -426,7 +558,11 @@ export class AuthoredActionHistory {
     undo: readonly AuthoredAction[];
     redo: readonly AuthoredAction[];
   } {
-    return structuredClone(this.ledger(identity));
+    const ledger = this.ledger(identity);
+    return {
+      undo: ledger.undo.map(contractAction),
+      redo: ledger.redo.map(contractAction),
+    };
   }
   private check(
     identity: AuthoredActionIdentity,
@@ -470,7 +606,7 @@ export class AuthoredActionHistory {
       after = encode(candidate);
     const writes = diff(before, after);
     if (!writes.length) return { status: "unchanged" };
-    const action: AuthoredAction = {
+    const action: LedgerAction = {
       sequence: this.sequence + 1,
       identity: structuredClone(identity),
       label,
@@ -489,9 +625,16 @@ export class AuthoredActionHistory {
               },
             ];
       }),
+      orders: recordOrders(writes, before, after),
     };
     const data = encode(current);
-    const conflict = applyWrites(data, writes, action.dependencies, "after");
+    const conflict = applyWrites(
+      data,
+      writes,
+      action.dependencies,
+      "after",
+      action.orders,
+    );
     if (conflict) return conflict;
     const ledger = this.ledger(identity);
     this.sequence = action.sequence;
@@ -501,7 +644,7 @@ export class AuthoredActionHistory {
     return {
       status: "applied",
       state: decode(current, data),
-      action,
+      action: contractAction(action),
       direction: "commit",
       writes,
     };
@@ -572,6 +715,7 @@ export class AuthoredActionHistory {
       writes,
       action.dependencies,
       direction === "undo" ? "before" : "after",
+      action.orders,
     );
     if (conflict) return conflict;
     source.splice(index, 1);
@@ -582,7 +726,7 @@ export class AuthoredActionHistory {
     return {
       status: "applied",
       state: decode(current, data),
-      action: structuredClone(action),
+      action: contractAction(action),
       direction,
       writes: structuredClone(writes),
     };

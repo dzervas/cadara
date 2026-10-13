@@ -1,5 +1,6 @@
 import type {
   SketchToolAnchorDescriptor,
+  SketchToolFloatingInputDescriptor,
   SketchToolOverlayDescriptor,
   SketchToolPresentationSchema,
 } from "@/core/sketch-tools/editor-schema";
@@ -502,4 +503,24 @@ function getSketchPointAnchor(
   point: readonly [number, number],
 ): SketchToolAnchorDescriptor {
   return { kind: "sketchPoint", point };
+}
+
+/**
+ * The patch a key in a floating input's field sends. Shortcuts skip a
+ * focused text input, so Escape there is the popup's own Cancel (T14b review
+ * R-1) and Enter its confirm (T17f); a key that ends an IME composition is
+ * the composition's, not the popup's (T17f review A-4).
+ */
+export function getFloatingInputKeyPatch(
+  descriptor: Pick<
+    SketchToolFloatingInputDescriptor,
+    "submitAction" | "cancelAction"
+  >,
+  key: string,
+  isComposing: boolean,
+): Record<string, unknown> | null {
+  if (isComposing) return null;
+  if (key === "Escape") return descriptor.cancelAction.patch;
+  if (key === "Enter") return descriptor.submitAction.patch;
+  return null;
 }

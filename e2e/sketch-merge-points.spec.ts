@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 
+import { readHistoryStrip, waitForCommittedAction } from "./helpers/acceptance";
 import { FeatureWorkbenchHarness } from "./helpers/feature-workbench";
+import { glideClick, glidePress } from "./helpers/mirror-workbench";
 
 test.setTimeout(120_000);
 test.use({ viewport: { width: 1440, height: 960 } });
@@ -188,4 +190,90 @@ test("T13j: a Shift-placed near gap is merged source → destination; the region
   await workbench.expectFeaturePreviewReady("extrude");
   await workbench.commitFeature();
   await workbench.expectBodyCountAtLeast(1);
+});
+
+// T17f (T17-9′; Mirror parity, T16d review R-1/A-4; issue 04 :49). Seam:
+// the Merge Points confirm popup, the workbench Enter and Escape routes
+// and the history strip, with a gliding pointer. A refused pick after a
+// staged pair (the other end of the source's line) keeps the popup, and Enter
+// merges what it shows (base: the popup vanished while Enter still
+// merged). Escape first drops the picks and keeps Merge Points armed with
+// no history entry, then leaves the tool (base: one Escape left it).
+test("T17f: a refused pick keeps the Merge popup and Enter merges it; Escape drops the picks first, then leaves Merge Points", async ({
+  page,
+}) => {
+  const workbench = new FeatureWorkbenchHarness(page);
+  const command = () =>
+    page.evaluate(() => window.__cadaraDebug?.getState()?.command ?? null);
+  const floating = page.locator(
+    '[data-sketch-viewport-floating-input="merge-points-confirm"]',
+  );
+  await workbench.open();
+  await workbench.activateTool("Start a new sketch.");
+  await glidePress(
+    page,
+    page.getByRole("button", { name: /Top Plane/ }).first(),
+  );
+  await workbench.expectSketchSessionActive();
+  await workbench.activateTool("Create line geometry.");
+  for (const at of [P, Q, R]) await glideClick(workbench, at);
+  await page.keyboard.down("Shift");
+  await glideClick(workbench, GAP_END);
+  await page.keyboard.up("Shift");
+  await expect
+    .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
+    .toContain("3 entities staged");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  const history = await readHistoryStrip(page);
+
+  await workbench.activateTool(
+    "Merge two sketch points: the first into the second (the destination).",
+  );
+  const stage = async () => {
+    await hoveredPoint(workbench, GAP_END);
+    await glideClick(workbench, GAP_END);
+    await hoveredPoint(workbench, P);
+    await glideClick(workbench, P);
+    await expect(floating.getByRole("button", { name: "Merge" })).toBeVisible();
+  };
+  // R and the source are both ends of the last line: a refused pair, so
+  // the pick is not taken (T13j review A-4).
+  const refusePick = async () => {
+    await hoveredPoint(workbench, R);
+    await glideClick(workbench, R);
+    // The tool panel's validation (the status line repeats it).
+    await expect(
+      page
+        .getByText(
+          /^Both points are ends of .+; merging them would collapse it\.$/,
+        )
+        .first(),
+    ).toBeVisible();
+  };
+
+  await stage();
+  await refusePick();
+  await expect(floating, "the popup stays with the picks").toBeVisible();
+
+  // First Escape: the picks (and the popup) go, Merge Points stays armed,
+  // nothing is recorded.
+  await page.keyboard.press("Escape");
+  await expect(floating).toBeHidden();
+  await expect.poll(command).toBe("sketchMergePoints");
+  expect(await readHistoryStrip(page)).toEqual(history);
+
+  // Staged again, refused again: Enter merges the pair the popup shows.
+  await stage();
+  await refusePick();
+  await expect(floating).toBeVisible();
+  await waitForCommittedAction(page, "Merge Points", () =>
+    page.keyboard.press("Enter"),
+  );
+  await expectRegionCount(workbench, 1, "the merged join closes the triangle");
+  await expect(floating).toBeHidden();
+
+  // No picks: Escape leaves the tool.
+  await page.keyboard.press("Escape");
+  await expect.poll(command).toBe("sketch");
 });

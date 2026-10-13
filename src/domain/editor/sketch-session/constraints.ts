@@ -783,8 +783,16 @@ export function patchSketchDimensionAnnotationPlacement(
 
   // A label placement never affects the solve or region records (T09b review
   // A6(a)), so the live solve basis and the published live regions are kept.
+  // T17f (D3, T17b0 P-6): a solve of the current definition is re-based onto
+  // the new one without re-solving, so Trim/Split/Extend, intersection snaps
+  // and near-gap warnings keep reading it as the solve of this definition.
+  const liveSolve =
+    session.liveSolve?.sourceDefinition === session.definition
+      ? { ...session.liveSolve, sourceDefinition: nextDefinition }
+      : session.liveSolve;
   return {
     ...session,
+    liveSolve,
     definition: nextDefinition,
     toolPresentation: null,
     commitRequest: rebuildSessionCommitRequest(session, nextDefinition),

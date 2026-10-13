@@ -130,3 +130,57 @@ test("T17c4: a lone open spline offsets: the preview shows the floating Create i
     })
     .toEqual([{ entityId: shell!.id, publication: "certified" }]);
 });
+
+// T17f (T17c4 finding and review A-2). Seam: the Offset tool's panel
+// Distance, its floating Create input and the Enter key, with a gliding
+// pointer and a committed-history wait. The popup follows the Distance set
+// in the panel (base: it kept "1" while Create used 0.5), and Enter in it is
+// its Create: one "Commit Offset", its shell drawn at that distance (base:
+// Enter did nothing).
+test("T17f: the floating input follows the panel's Distance, and Enter in it creates the offset at that distance", async ({
+  page,
+}) => {
+  const workbench = new SketchWorkbenchHarness(page);
+  await workbench.open();
+  await openTopSketch(workbench);
+  await workbench.activateTool("Create spline geometry.");
+  await placeFreely(workbench, SPLINE, true);
+  const spline = (await sketchSnapshot(page)).entities[0]!;
+  await workbench.activateTool(OFFSET_TOOL);
+  await workbench.clearHoverByLeavingViewport();
+  const before = await cropPixels(workbench, PREVIEW_APEX, 6);
+  await glideClick(
+    workbench,
+    await hoverUntil(workbench, { x: 660, y: 470 }, entityTarget(spline.id)),
+  );
+  const floatingInput = page.locator(
+    '[data-sketch-viewport-floating-input="offset-distance-input"]',
+  );
+  await expect(floatingInput).toBeVisible({ timeout: 15_000 });
+  await expect(floatingInput.locator("input")).toHaveValue("1");
+  await page.getByRole("textbox", { name: "Distance" }).fill("0.5");
+  await expect(
+    floatingInput.locator("input"),
+    "the popup shows the panel's distance",
+  ).toHaveValue("0.5");
+
+  // Focus the popup's field (as after a pick) and press Enter.
+  await glidePress(page, floatingInput.locator("input"));
+  await expect(floatingInput.locator("input")).toBeFocused();
+  await waitForCommittedAction(
+    page,
+    "Commit Offset",
+    () => page.keyboard.press("Enter"),
+    { timeout: 60_000 },
+  );
+  // The committed shell runs 0.5 above the arch's apex (a shell at 1
+  // would pass ≈ 21 px higher).
+  await workbench.clearHoverByLeavingViewport();
+  await expect
+    .poll(
+      async () =>
+        maxColorDistance(before, await cropPixels(workbench, PREVIEW_APEX, 6)),
+      { message: "the shell is drawn 0.5 above the apex", timeout: 15_000 },
+    )
+    .toBeGreaterThan(60);
+});

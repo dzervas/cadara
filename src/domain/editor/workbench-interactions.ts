@@ -17,6 +17,7 @@ import {
   getActiveSketchStyleToolId,
   isSketchConstructionSelected,
   isSketchMergePointsReady,
+  isSketchOffsetConfirmable,
   getSketchMirrorConfirmIntent,
   type SketchAuthoringToolId,
   type SketchSessionStatus,
@@ -107,9 +108,11 @@ export function getEscapeEvent(
 
   // T16d: Escape drops a Mirror selection (its staged preview) and keeps
   // the tool armed, as Cancel does; the next Escape exits (T11-D10).
+  // T17f (T17-9′, issue 04): Merge Points' picks the same way.
+  const editToolId = state.sketchSession?.activeEditTool?.toolId;
   if (
-    state.sketchSession?.activeEditTool?.toolId === "sketchMirror" &&
-    state.sketchSession.activeEditTool.selectedTargets.length > 0
+    (editToolId === "sketchMirror" || editToolId === "sketchMergePoints") &&
+    state.sketchSession!.activeEditTool!.selectedTargets.length > 0
   ) {
     return {
       type: "sketch.toolPatched",
@@ -158,8 +161,9 @@ export function getEscapeEvent(
 
 /**
  * Enter ends a Line chain or finalizes a viable fit-point draft, or confirms
- * a ready Merge Points (T13j) or a staged Mirror (T16d); otherwise it is not
- * consumed (T11-D10).
+ * a ready Merge Points (T13j), a staged Mirror (T16d) or an Offset with a
+ * selection (T17f: its Create, which waits for a preview still being
+ * checked); otherwise it is not consumed (T11-D10).
  */
 export function getEnterEvent(
   state: Pick<EditorViewState, "sketchSession">,
@@ -173,6 +177,9 @@ export function getEnterEvent(
   const mirrorIntent = session ? getSketchMirrorConfirmIntent(session) : null;
   if (mirrorIntent)
     return { type: "sketch.toolPatched", patch: { intent: mirrorIntent } };
+
+  if (session && isSketchOffsetConfirmable(session))
+    return { type: "sketch.toolPatched", patch: { intent: "commitOffset" } };
 
   return session?.activeTool &&
     isRegisteredSketchToolId(session.activeTool) &&

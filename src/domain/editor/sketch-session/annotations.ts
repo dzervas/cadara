@@ -1527,12 +1527,17 @@ export function selectSketchAnnotation(
       shared,
     );
   }
-  return session.activeAnnotationEdit ||
-    session.activeEditTarget ||
-    session.activeDrag
+  // T17f (T16f review): a dropped edit takes its popup with it, as its
+  // Cancel does (status, presentation and the popup's refusal).
+  if (session.activeAnnotationEdit)
+    return {
+      ...clearSketchAnnotationEdit(session),
+      activeEditTarget: null,
+      activeDrag: null,
+    };
+  return session.activeEditTarget || session.activeDrag
     ? {
         ...session,
-        activeAnnotationEdit: null,
         activeEditTarget: null,
         activeDrag: null,
       }

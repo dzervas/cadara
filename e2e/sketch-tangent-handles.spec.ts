@@ -1,4 +1,16 @@
 import { expect, test } from "@playwright/test";
+import {
+  waitForCommittedAction,
+  waitForUndoneAction,
+} from "./helpers/acceptance";
+import {
+  glideClick,
+  glidePress,
+  hoverUntil,
+  openSearchTool,
+  openTopSketch,
+  placeFreely,
+} from "./helpers/mirror-workbench";
 import { SketchWorkbenchHarness } from "./helpers/sketch-workbench";
 
 test.setTimeout(90_000);
@@ -693,4 +705,101 @@ test("T12e: select a fit point, click Set to zero → exactly [0,0]", async ({
     zeroOcc1.tangent.vector,
     "Set to zero must store exactly [0, 0].",
   ).toEqual([0, 0]);
+});
+
+// ── T17f item 6: a clicked handle is the selection Set to zero acts on ──
+// (T17b finding 3 / review A-5.) Seam: the viewport pick of a revealed
+// tangent handle (a gliding press without motion), the selection, the
+// tangent panel's "Set to zero" and the history strip, on a spline seed and
+// on its mirror copy. A copy's handle acts on its root seed occurrence
+// (T15d T-12), and the copy follows. Pinned by mutant (the handle branch of
+// `resolveTangentActionTargets` removed), not red on base: the probe found
+// handle selection already works in the app; the T17b logic rejection was
+// the legacy fixture's part-mode selection filter.
+test("T17f: a clicked tangent handle (seed and mirror copy) is selected, and Set to zero acts on its occurrence", async ({
+  page,
+}) => {
+  const workbench = new SketchWorkbenchHarness(page);
+  await workbench.open();
+  await openTopSketch(workbench);
+  await workbench.activateTool("Create spline geometry.");
+  await placeFreely(
+    workbench,
+    [
+      { x: 300, y: 300 },
+      { x: 450, y: 200 },
+      { x: 600, y: 300 },
+      { x: 750, y: 200 },
+    ],
+    true,
+  );
+  await workbench.activateTool(
+    "Toggle sketch geometry construction-only or mark new sketch geometry as construction.",
+  );
+  await workbench.activateTool("Create line geometry.");
+  await placeFreely(workbench, [
+    { x: 200, y: 420 },
+    { x: 1000, y: 420 },
+  ]);
+  await openSearchTool(page, "Sketch Mirror");
+  const seedBody = await hoverUntil(
+    workbench,
+    { x: 525, y: 250 },
+    /spline[^.]*$/,
+    40,
+  );
+  await glideClick(workbench, seedBody);
+  await glideClick(workbench, { x: 900, y: 420 });
+  await expect(
+    page.locator(
+      '[data-sketch-viewport-floating-input="sketch-mirror-confirm"]',
+    ),
+  ).toBeVisible({ timeout: 10_000 });
+  await waitForCommittedAction(page, "Mirror", () =>
+    page.keyboard.press("Enter"),
+  );
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  const tangents = async () =>
+    (await readLiveSketch(workbench)).entities
+      .filter((entity) => entity.kind === "spline")
+      .map((entity) => entity.occurrences!.map((occ) => occ.tangent));
+  const zero = { kind: "authored", vector: [0, 0] };
+  const automatic = { kind: "automatic" };
+
+  // Seed: its third fit point's handle (the second one sits under the panels).
+  // Copy: its second fit point's handle (the mirror image about y = 420).
+  for (const [side, body, fit, index] of [
+    ["seed", seedBody, { x: 600, y: 300 }, 2],
+    ["copy", null, { x: 450, y: 640 }, 1],
+  ] as const) {
+    await glideClick(
+      workbench,
+      body ??
+        (await hoverUntil(workbench, { x: 525, y: 590 }, /mirror[^.]*$/, 40)),
+    );
+    const handle = await findHandleNear(workbench, fit);
+    const handleLabel = await workbench.currentHoverTarget();
+    await glideClick(workbench, handle);
+    await expect
+      .poll(() => workbench.currentEditorSelection(), {
+        message: `the ${side}'s handle is the selection`,
+      })
+      .toBe(handleLabel);
+    await waitForCommittedAction(page, "Zero Tangent", () =>
+      glidePress(page, page.getByRole("button", { name: /Set to zero/i })),
+    );
+    const expected = [automatic, automatic, automatic, automatic].map(
+      (tangent, at) => (at === index ? zero : tangent),
+    );
+    expect(
+      await tangents(),
+      `${side}: the seed occurrence, and the copy follows`,
+    ).toEqual([expected, expected]);
+    await waitForUndoneAction(page, "Zero Tangent", () =>
+      page.keyboard.press("Control+z"),
+    );
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Escape");
+  }
 });

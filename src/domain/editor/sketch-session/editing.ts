@@ -1155,7 +1155,10 @@ export function buildSketchMergePointsPresentation(
     session,
     tool.selectedTargets,
   ).map((pointId) => getSketchMergePoint(session, pointId));
-  const ready = Boolean(source && destination && validationMessage === null);
+  // T17f (T17-9′, as T16d review R-1 for Mirror): the popup shows exactly
+  // when Enter confirms (`isSketchMergePointsReady`): a valid staged pair,
+  // with a refused later pick's message shown alongside, not hiding it.
+  const ready = getSketchMergePointsResult(session, tool).valid;
   const text =
     notice ??
     (source && destination
@@ -1223,6 +1226,16 @@ export function buildSketchMergePointsPresentation(
           }
         : null,
   };
+}
+
+/**
+ * T17f (T17c4 review A-2): whether Enter is the Offset's Create: the tool
+ * has a selection, as its Create popup does. Create (and so Enter) commits a
+ * certified preview, waits for one still being checked, or shows a refusal.
+ */
+export function isSketchOffsetConfirmable(session: SketchSessionState) {
+  const tool = session.activeEditTool;
+  return tool?.toolId === "offset" && tool.selectedTargets.length > 0;
 }
 
 /** Whether Enter confirms the active tool's ready merge (T13j). */
@@ -1820,6 +1833,38 @@ function withSketchMergePointsTool(
       validationMessage,
     ),
   };
+}
+
+/**
+ * T17f (T17-9′, as T16d review A-3 for Mirror): after Undo/Redo rebuilds the
+ * definition, Merge Points' picks are re-judged against it, so its arrow,
+ * popup and Enter agree at once: a pick whose point is gone is dropped, a
+ * pair that is now refused shows its refusal with no popup, and a valid one
+ * keeps the rebuilt session's own message.
+ */
+export function restageSketchMergePointsTool(
+  session: SketchSessionState,
+): SketchSessionState {
+  const tool = session.activeEditTool;
+  if (tool?.toolId !== "sketchMergePoints" || tool.selectedTargets.length === 0)
+    return session;
+  const selectedTargets = tool.selectedTargets.filter((target) => {
+    const pointId = getSketchMergeTargetPointId(session, target);
+    return pointId !== null && getSketchMergePoint(session, pointId);
+  });
+  const next: SketchEditToolState = {
+    ...tool,
+    selectedTarget: selectedTargets[0] ?? null,
+    selectedTargets,
+  };
+  const pair = getSketchMergePointsResult(session, next);
+  return withSketchMergePointsTool(
+    session,
+    next,
+    pair.valid || pair.message === null
+      ? session.validationMessage
+      : pair.message,
+  );
 }
 
 /**
