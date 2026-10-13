@@ -9,6 +9,7 @@ import type { PrimitiveRef } from "@/core/editor/schema";
 import {
   MARKER_SPHERE_GEOMETRY,
   GEOMETRY_HIGHLIGHT_COLORS,
+  DEFAULT_LINE_PICK_RADIUS_PX,
   DEFAULT_LINE_PICK_THRESHOLD,
   bindFaceHoverPerimeterObject,
   collectRaycastPickCandidates,
@@ -21,6 +22,8 @@ import {
   createRenderableMeshMaterial,
   createProjectedPickCandidate,
   getVisibleMarkerRadius,
+  getWorldUnitsPerPixelAt,
+  intersectObjectsWithLinePickRadius,
   resolveAllCandidates,
   resolvePickTarget,
   shouldIncludeProjectedPickCandidate,
@@ -1397,4 +1400,271 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
   }
 
   console.log("All render-picking tests passed.");
+});
+
+// T17-19 (T17f2). Lane: ui (docs/testing.md: `src/infrastructure/viewport`).
+// Seam: the part-mode raycast (`intersectObjectsWithLinePickRadius`) feeding
+// the part-mode resolver (`resolvePickTarget`). Real three.js cameras,
+// raycaster and bound lines/meshes; the pointer is the viewport centre.
+const VIEWPORT_HEIGHT_PX = 900;
+
+function orthographicCamera(zoom: number) {
+  // The viewport's default frustum: 32 units tall, 3:2.
+  const camera = new THREE.OrthographicCamera(-24, 24, 16, -16, -1000, 1000);
+  camera.position.set(0, 0, 50);
+  camera.lookAt(0, 0, 0);
+  camera.zoom = zoom;
+  camera.updateProjectionMatrix();
+  camera.updateMatrixWorld();
+  return camera;
+}
+
+function perspectiveCamera(distance: number) {
+  const camera = new THREE.PerspectiveCamera(45, 1.5, 0.1, 1000);
+  camera.position.set(0, 0, distance);
+  camera.lookAt(0, 0, 0);
+  camera.updateProjectionMatrix();
+  camera.updateMatrixWorld();
+  return camera;
+}
+
+/** A sketch curve along x at height `y` (and depth `z`), bound for picking. */
+function boundCurve(entityId: string, y: number, z = 0) {
+  const line = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-5, y, z),
+      new THREE.Vector3(5, y, z),
+    ]),
+    new THREE.LineBasicMaterial(),
+  );
+  line.updateMatrixWorld();
+  bindRenderableObject(
+    line,
+    `pick_${entityId}`,
+    {
+      kind: "sketchEntity",
+      sketchId: "sketch_a",
+      entityId: `sketch_entity_${entityId}`,
+    },
+    "sketchCurve",
+    "document",
+  );
+  return line;
+}
+
+/** A region quad between y = ±halfHeight on z = 0, bound for picking. */
+function boundRegion(halfHeight: number) {
+  const geometry = new THREE.PlaneGeometry(10, 2 * halfHeight);
+  const mesh = new THREE.Mesh(
+    geometry,
+    new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
+  );
+  mesh.updateMatrixWorld();
+  bindRenderableObject(
+    mesh,
+    "pick_region_a",
+    { kind: "region", sketchId: "sketch_a", regionId: "region_a" },
+    "region",
+    "document",
+  );
+  return mesh;
+}
+
+/** The part-mode raycast at `ndc` (the viewport centre by default). */
+function centrePick(
+  camera: THREE.OrthographicCamera | THREE.PerspectiveCamera,
+  objects: THREE.Object3D[],
+  ndc = new THREE.Vector2(0, 0),
+) {
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(ndc, camera);
+  return intersectObjectsWithLinePickRadius({
+    raycaster,
+    objects,
+    camera,
+    viewportHeight: VIEWPORT_HEIGHT_PX,
+    linePickRadiusPx: DEFAULT_LINE_PICK_RADIUS_PX,
+    maxLineThreshold: DEFAULT_LINE_PICK_THRESHOLD,
+  });
+}
+
+/** A sketch curve from `from` to `to`, bound for picking. */
+function boundSegment(
+  entityId: string,
+  from: readonly [number, number, number],
+  to: readonly [number, number, number],
+) {
+  const line = boundCurve(entityId, 0);
+  line.geometry.setFromPoints([
+    new THREE.Vector3(...from),
+    new THREE.Vector3(...to),
+  ]);
+  line.geometry.computeBoundingSphere();
+  return line;
+}
+
+const hitIds = (hits: THREE.Intersection<THREE.Object3D>[]) =>
+  hits.map((hit) => hit.object.userData.pickId as string);
+
+test("T17-19: the part-mode line band is 21 screen px at every orthographic zoom", () => {
+  expect(DEFAULT_LINE_PICK_RADIUS_PX).toBe(21);
+  for (const zoom of [1, 4]) {
+    const worldPerPx = 32 / zoom / VIEWPORT_HEIGHT_PX;
+    const inside = boundCurve("inside", 20.5 * worldPerPx);
+    const outside = boundCurve("outside", -21.5 * worldPerPx);
+    expect(
+      hitIds(centrePick(orthographicCamera(zoom), [inside, outside])),
+      `zoom ${zoom}: 20.5 px away is hit, 21.5 px away is not`,
+    ).toEqual(["pick_inside"]);
+  }
+  // A curve 15 px away at zoom 1 is 60 px away at zoom 4: the band shrank
+  // in world units (the old world band, 0.75, would still hit it).
+  const curve = boundCurve("curve", (15 * 32) / VIEWPORT_HEIGHT_PX);
+  expect(hitIds(centrePick(orthographicCamera(1), [curve]))).toEqual([
+    "pick_curve",
+  ]);
+  expect(hitIds(centrePick(orthographicCamera(4), [curve]))).toEqual([]);
+});
+
+test("T17-19: the part-mode line band is 21 screen px at the hit depth under a perspective camera", () => {
+  const worldPerPxAt = (depth: number) =>
+    (2 * depth * Math.tan(THREE.MathUtils.degToRad(22.5))) / VIEWPORT_HEIGHT_PX;
+  for (const distance of [20, 5]) {
+    const camera = perspectiveCamera(distance);
+    expect(
+      getWorldUnitsPerPixelAt(camera, VIEWPORT_HEIGHT_PX, new THREE.Vector3()),
+    ).toBeCloseTo(worldPerPxAt(distance), 12);
+    const inside = boundCurve("inside", 20.5 * worldPerPxAt(distance));
+    const outside = boundCurve("outside", -21.5 * worldPerPxAt(distance));
+    expect(
+      hitIds(centrePick(camera, [inside, outside])),
+      `camera ${distance} away: 20.5 px away is hit, 21.5 px away is not`,
+    ).toEqual(["pick_inside"]);
+  }
+  // Zooming in (20 → 5 units away) shrinks the band in world units.
+  const curve = boundCurve("curve", 15 * worldPerPxAt(20));
+  expect(hitIds(centrePick(perspectiveCamera(20), [curve]))).toEqual([
+    "pick_curve",
+  ]);
+  expect(hitIds(centrePick(perspectiveCamera(5), [curve]))).toEqual([]);
+  // Per candidate depth in one view: the same world offset is 30 px away
+  // at depth 10 (missed) and 15 px away at depth 20 (hit).
+  const camera = perspectiveCamera(10);
+  const offset = 30 * worldPerPxAt(10);
+  const near = boundCurve("near", offset, 0);
+  const far = boundCurve("far", offset, -10);
+  expect(hitIds(centrePick(camera, [near, far]))).toEqual(["pick_far"]);
+});
+
+test("T17-19: a point between two curves 2 px apart at the default zoom picks the curve there and the region once zoomed in", () => {
+  // The curves bound a region 2 px tall at zoom 1 (the offset-0.1 ring of
+  // T17b0 P-5); the pointer is midway between them.
+  const halfHeight = 32 / VIEWPORT_HEIGHT_PX;
+  const objects = [
+    boundCurve("lower", -halfHeight),
+    boundCurve("upper", halfHeight),
+    boundRegion(halfHeight),
+  ];
+  const pick = (zoom: number) =>
+    resolvePickTarget(centrePick(orthographicCamera(zoom), objects))?.target;
+  // Default zoom: inside both curve bands; a curve wins (priority unchanged).
+  expect(pick(1)).toMatchObject({ kind: "sketchEntity" });
+  // Zoom 30: the curves are 30 px from the pointer, outside the 21 px band.
+  expect(pick(30)).toEqual({
+    kind: "region",
+    sketchId: "sketch_a",
+    regionId: "region_a",
+  });
+});
+
+test("T17-19 (review R-1): zoomed out, the band is the former world band, so a region's pick share equals base's", () => {
+  // A 4 × 4 region bounded by four curves, sampled on a 21 × 21 grid of
+  // pointers over its footprint (the review's P-1 sweep).
+  const objects = [
+    boundSegment("bottom", [-2, -2, 0], [2, -2, 0]),
+    boundSegment("right", [2, -2, 0], [2, 2, 0]),
+    boundSegment("top", [2, 2, 0], [-2, 2, 0]),
+    boundSegment("left", [-2, 2, 0], [-2, -2, 0]),
+    boundRegion(2),
+  ];
+  objects[4]!.scale.set(0.4, 1, 1); // the 10-wide quad → 4 × 4
+  objects[4]!.updateMatrixWorld();
+  for (const zoom of [0.25, 0.5]) {
+    const camera = orthographicCamera(zoom);
+    // The edge of the band is the world band: 0.74 is hit, 0.76 is not
+    // (uncapped, 21 px is 1.49 / 2.99 units at these zooms).
+    expect(
+      hitIds(
+        centrePick(camera, [
+          boundCurve("inside", 0.74),
+          boundCurve("outside", -0.76),
+        ]),
+      ),
+      `zoom ${zoom}: the band is capped at 0.75 world units`,
+    ).toEqual(["pick_inside"]);
+    const share = (pick: (ndc: THREE.Vector2) => THREE.Intersection[]) => {
+      let regionHits = 0;
+      for (let i = 0; i <= 20; i += 1) {
+        for (let j = 0; j <= 20; j += 1) {
+          const x = -2 + (4 * i) / 20;
+          const y = -2 + (4 * j) / 20;
+          const ndc = new THREE.Vector2(x / (24 / zoom), y / (16 / zoom));
+          if (resolvePickTarget(pick(ndc))?.target.kind === "region") {
+            regionHits += 1;
+          }
+        }
+      }
+      return regionHits;
+    };
+    const base = share((ndc) => {
+      // Base: one raycast with the world band.
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(ndc, camera);
+      raycaster.params.Line.threshold = DEFAULT_LINE_PICK_THRESHOLD;
+      return raycaster.intersectObjects(objects, true);
+    });
+    expect(base, "premise: the region is pickable on base").toBeGreaterThan(0);
+    expect(
+      share((ndc) => centrePick(camera, objects, ndc)),
+      `zoom ${zoom}: the region's pick share equals base's`,
+    ).toBe(base);
+  }
+});
+
+test("T17-19 (review A-1): perspective bands use the view depth off the view axis and the farthest depth of a receding line", () => {
+  const worldPerPxAt = (depth: number) =>
+    (2 * depth * Math.tan(THREE.MathUtils.degToRad(22.5))) / VIEWPORT_HEIGHT_PX;
+  // Off-centre pointer near the corner: the curves lie on z = 0 (view depth
+  // 10, parallel to the image plane), so `o` world units across are o /
+  // worldPerPx(10) px on screen. Measured from the oblique ray the 21 px
+  // band reaches ≈ 24 px across here; a Euclidean-distance depth (12 here)
+  // would reach ≈ 29 px.
+  const camera = perspectiveCamera(10);
+  const ndc = new THREE.Vector2(0.9, 0.9);
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(ndc, camera);
+  const onPlane = raycaster.ray.intersectPlane(
+    new THREE.Plane(new THREE.Vector3(0, 0, 1), 0),
+    new THREE.Vector3(),
+  )!;
+  const across = (entityId: string, px: number) => {
+    const x = onPlane.x + px * worldPerPxAt(10);
+    return boundSegment(entityId, [x, onPlane.y - 3, 0], [x, onPlane.y + 3, 0]);
+  };
+  expect(
+    hitIds(centrePick(camera, [across("near", 20), across("far", 26)], ndc)),
+    "off-centre: 20 px across is hit, 26 px is not",
+  ).toEqual(["pick_near"]);
+
+  // A line receding from depth 5 (200 px off) to depth 15 (15 px off): its
+  // closest point is the far end, where the band is widest. The raycast's
+  // threshold must cover the farthest depth, not the line's mid depth (10,
+  // where 21 px is narrower than the far end's offset).
+  const near = perspectiveCamera(5);
+  const receding = boundSegment(
+    "receding",
+    [0, 200 * worldPerPxAt(5), 0],
+    [0, 15 * worldPerPxAt(15), -10],
+  );
+  expect(hitIds(centrePick(near, [receding]))).toEqual(["pick_receding"]);
 });

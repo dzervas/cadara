@@ -653,6 +653,10 @@ test("src/components/cad/three-cad-viewport.spec.ts", () => {
       "Measure picking should reduce the line threshold to avoid selecting hidden wires through faces.",
     ).toBeTruthy();
     expect(
+      defaultTuning.linePickRadiusPx > measureTuning.linePickRadiusPx,
+      "Measure picking should reduce the part-mode screen-px line band too (T17-19).",
+    ).toBeTruthy();
+    expect(
       (measureTuning.resolutionOptions.wireOcclusionTolerance ??
         Number.POSITIVE_INFINITY) < Number.POSITIVE_INFINITY,
       "Measure picking should install an explicit wire occlusion tolerance override.",

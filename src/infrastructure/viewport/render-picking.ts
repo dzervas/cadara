@@ -11,6 +11,7 @@ import type {
   RenderMeshGeometry,
 } from "@/contracts/render/schema";
 import type { ViewportRenderableOrigin } from "@/core/workspace/viewport-renderables";
+import type { ViewportCamera } from "@/infrastructure/viewport/viewport-projection";
 import type { SketchPickStackCandidate } from "@/domain/sketch-interaction/pick-stack";
 import { SKETCH_POINT_RADII_PX } from "@/domain/sketch-interaction/screen-radii";
 import { workbenchGeometryHighlightColors } from "@/theme/workbench-theme";
@@ -69,7 +70,22 @@ const SEEDED_DATUM_CONSTRUCTION_IDS = new Set([
 ]);
 const VISIBLE_MARKER_SCALE_FACTOR = 0.44;
 const MARKER_PICK_SCALE_FACTOR = 1.45;
+/**
+ * Line band in world units: the sketch-mode raycast band, and the cap of
+ * the part-mode band (T17-19).
+ */
 export const DEFAULT_LINE_PICK_THRESHOLD = 0.75;
+/**
+ * Part-mode line pick radius in screen pixels (T17-19): a curve or edge is
+ * hit within this many pixels of the pointer at its own depth, capped at
+ * `DEFAULT_LINE_PICK_THRESHOLD` world units. Zoomed in, the band keeps its
+ * size on screen, so regions between close curves become pickable; zoomed
+ * out, it stays the former world band, so small faces and regions are
+ * never harder to pick than before (T17f2 review R-1). 21 px is the
+ * former band at the default camera (orthographic, 32-unit frustum, zoom 1)
+ * on a 900 px tall canvas (measured, T17f2 M-0).
+ */
+export const DEFAULT_LINE_PICK_RADIUS_PX = 21;
 export const DEFAULT_PROJECTED_POINT_PICK_ENTER_RADIUS_PX = 48;
 export const DEFAULT_PROJECTED_POINT_PICK_EXIT_RADIUS_PX = 56;
 /** Sketch display points (T11-D2); feature vertices keep the radii above. */
@@ -220,6 +236,100 @@ function getRenderPointKey(
   point: RenderMeshGeometry["vertexPositions"][number],
 ) {
   return `${point[0]}:${point[1]}:${point[2]}`;
+}
+
+/**
+ * World units per screen pixel at `point` for a viewport `viewportHeight`
+ * pixels tall: constant for an orthographic camera, proportional to the
+ * point's view depth for a perspective one.
+ */
+export function getWorldUnitsPerPixelAt(
+  camera: ViewportCamera,
+  viewportHeight: number,
+  point: THREE.Vector3,
+) {
+  if (camera instanceof THREE.OrthographicCamera) {
+    return (camera.top - camera.bottom) / camera.zoom / viewportHeight;
+  }
+
+  const depth = Math.max(
+    point
+      .clone()
+      .sub(new THREE.Vector3().setFromMatrixPosition(camera.matrixWorld))
+      .dot(camera.getWorldDirection(new THREE.Vector3())),
+    camera.near,
+  );
+
+  return (
+    (2 * depth * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))) /
+    camera.zoom /
+    viewportHeight
+  );
+}
+
+/**
+ * `raycaster.intersectObjects(objects, true)` for part mode (T17-19), except
+ * that a line (`THREE.Line` and its subclasses) is hit only where the ray
+ * passes within its band: `linePickRadiusPx` screen pixels at the depth of
+ * its closest point, capped at `maxLineThreshold` world units. Each line is
+ * raycast with `Line.threshold` set to the band at its farthest
+ * bounding-sphere depth, and each hit is kept only within the band at its
+ * own depth (under a perspective camera the pixel band grows with depth).
+ * The band is measured from the ray, which off the view axis is a close,
+ * slightly generous stand-in for the on-screen distance. Meshes raycast
+ * unchanged. Unlike three, a `raycast()` returning `false` does not stop
+ * the descent (nothing in the scene returns it). The scene has no
+ * `THREE.Points`.
+ */
+export function intersectObjectsWithLinePickRadius(input: {
+  raycaster: THREE.Raycaster;
+  objects: readonly THREE.Object3D[];
+  camera: ViewportCamera;
+  viewportHeight: number;
+  linePickRadiusPx: number;
+  maxLineThreshold: number;
+}): THREE.Intersection<THREE.Object3D>[] {
+  const { raycaster, camera, viewportHeight, linePickRadiusPx } = input;
+  const intersections: THREE.Intersection<THREE.Object3D>[] = [];
+  const onRay = new THREE.Vector3();
+  const bandAt = (point: THREE.Vector3) =>
+    Math.min(
+      input.maxLineThreshold,
+      linePickRadiusPx * getWorldUnitsPerPixelAt(camera, viewportHeight, point),
+    );
+  const visit = (object: THREE.Object3D) => {
+    if (object.layers.test(raycaster.layers)) {
+      if (object instanceof THREE.Line) {
+        if (!object.geometry.boundingSphere) {
+          object.geometry.computeBoundingSphere();
+        }
+        const sphere = object.geometry.boundingSphere!.clone();
+        sphere.applyMatrix4(object.matrixWorld);
+        raycaster.params.Line.threshold = bandAt(
+          sphere.center.addScaledVector(
+            camera.getWorldDirection(new THREE.Vector3()),
+            sphere.radius,
+          ),
+        );
+        const lineHits: THREE.Intersection<THREE.Object3D>[] = [];
+        object.raycast(raycaster, lineHits);
+        intersections.push(
+          ...lineHits.filter(
+            (hit) =>
+              hit.point.distanceTo(raycaster.ray.at(hit.distance, onRay)) <=
+              bandAt(hit.point),
+          ),
+        );
+      } else {
+        object.raycast(raycaster, intersections);
+      }
+    }
+
+    object.children.forEach(visit);
+  };
+
+  input.objects.forEach(visit);
+  return intersections.sort((left, right) => left.distance - right.distance);
 }
 
 export function resolvePickTarget(
