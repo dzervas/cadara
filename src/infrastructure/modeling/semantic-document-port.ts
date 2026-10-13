@@ -60,7 +60,8 @@ export function createSemanticDocumentPort(input: {
         snapshot.document.revisionId,
         snapshot.provenance.repositoryHeads,
       ),
-      document: { label: snapshot.document.name, settings: snapshot.document.settings },
+      document: { label: snapshot.document.name },
+      settings: snapshot.document.settings,
       references: snapshot.presentation.entities.map((entity) => ({
         label: entity.label,
         target: entity.target,

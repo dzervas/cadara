@@ -15,7 +15,6 @@ import {
   getSketchSessionDerivedValidity,
   hasAcceptedLiveSolveOfDefinition,
   getLiveRegionBoundaryDiagnostics,
-  getSessionSketchId,
 } from "@/domain/editor/sketch-session/internals";
 import { getSketchToolDefinition } from "@/core/sketch-tools/registry";
 import { validateAlignedRectanglePoints } from "@/core/sketch-tools/tools/aligned-rectangle";
@@ -86,7 +85,7 @@ export function createSemanticSketchPort(input: {
     return {
       ...base,
       state,
-      references: [...base.references.filter(r => !(r.target.kind === "sketchPoint" && r.target.sketchId === getSessionSketchId(s))), ...s.definition.points.map(p => ({ label: p.label, target: { kind: "sketchPoint" as const, sketchId: getSessionSketchId(s), pointId: p.pointId } }))],
+      references: [...base.references.filter(r => !(r.target.kind === "sketchPoint" && r.target.sketchId === (s.sketchId ?? s.actionContextId))), ...s.definition.points.map(p => ({ label: p.label, target: { kind: "sketchPoint" as const, sketchId: s.sketchId ?? s.actionContextId, pointId: p.pointId } }))],
       sketch: {
         ...dimensionDiscovery(s.definition, s.liveSolve!.solvedSnapshot),
         sketchId: s.sketchId,

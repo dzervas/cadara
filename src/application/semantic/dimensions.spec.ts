@@ -47,7 +47,23 @@ async function rectangle() {
 it("drives rectangle width through semantic point targets and returns the measured requirement identity", async () => {
   const fixture = await rectangle();
   try {
-    const points = fixture.initial.discovery!.sketch!.points;
+    const discovery = fixture.initial.discovery!;
+    const context = discovery.state.editingContext;
+    expect(context.kind).toBe("sketch");
+    if (context.kind !== "sketch")
+      throw new Error("Expected private sketch owner");
+    const pointReferences = discovery.references.filter(
+      (r) => r.target.kind === "sketchPoint",
+    );
+    expect(pointReferences).toHaveLength(4);
+    expect(
+      pointReferences.every(
+        (r) =>
+          r.target.kind === "sketchPoint" &&
+          r.target.sketchId === context.sketchId,
+      ),
+    ).toBe(true);
+    const points = discovery.sketch!.points;
     const result = await fixture.execute({
       operation: "sketch.dimension.add",
       axis: "horizontal",
@@ -123,7 +139,7 @@ it("updates the same driving height identity and refreshes geometry and measurem
     expect(updated.discovery!.state.draft!.generation).toBeGreaterThan(
       added.discovery!.state.draft!.generation,
     );
-    expect(updated.discovery!.document!.settings).toEqual({
+    expect(updated.discovery!.settings).toEqual({
       linearUnit: "millimeter",
       modelingTolerance: 0.001,
       angularToleranceRadians: 0.0001,
