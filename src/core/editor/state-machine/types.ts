@@ -706,6 +706,8 @@ export interface SnapshotFailedEvent {
 export type EditorEvent =
   | { type: "sketch.beginRequested"; target: import("@/contracts/shared/references").ConstructionRef }
   | { type: "sketch.primitiveAuthored"; primitive: import("@/contracts/semantic/schema").SemanticSketchPrimitive; construction: boolean }
+  | { type: "sketch.dimensionAuthored"; input: import("@/contracts/semantic/schema").SemanticDimensionInput }
+  | { type: "sketch.dimensionUpdated"; dimensionId: import("@/contracts/shared/ids").DimensionId; value: number }
   | { type: "sketch.publishRequested" }
   | { type: "sketch.discardRequested" }
   | SessionStartedEvent

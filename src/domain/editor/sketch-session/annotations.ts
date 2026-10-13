@@ -584,6 +584,18 @@ export function clearSketchAnnotationEdit(
   };
 }
 
+/** Updates share browser annotation conversion, conflict retention and solve preparation. */
+export function updateSketchDimensionValue(
+  session: SketchSessionState,
+  dimensionId: import("@/contracts/shared/ids").DimensionId,
+  value: number,
+): SketchSessionState {
+  return commitSketchAnnotationEditValue(session, {
+    target: createSketchDimensionRef(getSessionSketchId(session), dimensionId),
+    pendingValue: createLiteralAuthoredValue(value),
+  });
+}
+
 export function commitSketchAnnotationEditValue(
   session: SketchSessionState,
   edit: SketchAnnotationEditState & {

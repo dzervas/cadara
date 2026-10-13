@@ -35,6 +35,11 @@ export type SemanticSketchPrimitive =
       heightPoint: SketchPoint;
     };
 
+export type SemanticDimensionInput = {
+  axis: "horizontal" | "vertical";
+  points: readonly [SketchPointId, SketchPointId];
+} & ({ mode: "driving"; value: number } | { mode: "reference" });
+
 export interface SemanticDraftBasis {
   commandSessionId: CommandSessionId;
   generation: number;
@@ -50,6 +55,8 @@ export type SemanticSketchCommand = CommandIdentity & {
         construction: boolean;
         intent: "fulfill" | "author-invalid";
       }
+    | ({ operation: "sketch.dimension.add"; draft: SemanticDraftBasis; intent: "fulfill" | "author-invalid" } & SemanticDimensionInput)
+    | { operation: "sketch.dimension.update"; draft: SemanticDraftBasis; dimensionId: import("@/contracts/shared/ids").DimensionId; value: number; intent: "fulfill" | "author-invalid" }
     | { operation: "sketch.inspect"; draft: SemanticDraftBasis }
     | {
         operation: "sketch.publish";
@@ -200,7 +207,7 @@ export interface SemanticCompletion {
 export interface SemanticDiscovery {
   state: SemanticState;
   /** Inspection metadata from this same snapshot, not another document owner. */
-  document?: { label: string };
+  document?: { label: string; settings?: import("@/contracts/modeling/schema").ModelingDocumentSettings };
   references: readonly { label: string; target: DurableRef }[];
   history: DurableHistoryAvailability | null;
   sketch?: {
@@ -218,6 +225,19 @@ export interface SemanticDiscovery {
       kind: "point" | "lineSegment";
       pointIds: readonly SketchPointId[];
       construction: boolean;
+    }[];
+    requirements: readonly {
+      dimensionId: import("@/contracts/shared/ids").DimensionId;
+      mode: "driving";
+      label: string;
+      value: number | null;
+      measuredValue: number | null;
+    }[];
+    measurements: readonly {
+      dimensionId: import("@/contracts/shared/ids").DimensionId;
+      mode: "reference";
+      label: string;
+      measuredValue: number | null;
     }[];
     /** Only current, boundary-resolved, consumable profiles are discoverable. */
     profiles: readonly { regionId: RegionId; isClosed: boolean }[];

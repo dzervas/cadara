@@ -39,8 +39,8 @@ bun run cli -- document recipe --help
 
 Command IDs and aliases are unique within the recipe. Inspection also accepts
 an explicit `{ documentId, revisionId, repositoryHeads }` basis; stale bases are
-refused. Aliases resolve only from completed authoritative results, never labels
-or list order. Stdout is one JSON envelope containing correlated semantic
+refused. Basis aliases resolve only from authoritative result states, never
+labels or list order. Stdout is one JSON envelope containing correlated semantic
 results, unexecuted command IDs and awaited cleanup. Errors use stderr and the
 shell's existing 0/1/2 policy. Execution stops at the first failed operation;
 prior changes are not rolled back. Each invocation owns a separate document.
@@ -55,6 +55,25 @@ separate in the result. Saving is not atomic and partial bytes are reported.
 For example, append `{ "version": 1, "commandId": "save", "operation":
 "document.save", "path": "bracket.cadara", "basis": { "alias": "part" } }`.
 Help, capture and invalid recipes do not start the modeling runtime.
+
+### Private sketch dimensions
+
+`sketch.dimension.add` takes the current `basis` and `draft`, an `axis`
+(`horizontal` or `vertical`), two canonical sketch point IDs in `points`,
+and either `mode: "driving", value: <positive number>` or `mode: "reference"`.
+`sketch.dimension.update` takes `dimensionId` and `value`; updating a reference
+makes it driving through the existing annotation owner. Both commands take
+`intent: "fulfill"` or explicit `"author-invalid"`. Conflicting requirements are
+never fulfilled; explicit invalid authoring remains editable without usable
+profiles. Discovery separates `requirements` from solved `measurements`, with
+requirement IDs, labels and measured values; document settings retain units and
+tolerances.
+
+Recipes may resolve a point or dimension target using `{ "alias": "rectangle",
+"label": "Rectangle 1 bottom left" }` or `{ "alias": "width", "label":
+"Horizontal distance 2" }`. Only an exact unique match in that immutable result
+is accepted; missing/ambiguous labels fail, and current basis/draft checks still
+apply. These aliases are CLI-only, never semantic command inputs.
 
 ## `onshape capture`
 

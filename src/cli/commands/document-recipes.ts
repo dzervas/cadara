@@ -3,7 +3,7 @@ import type { CommandModule } from "@/cli/types";
 import type {
   SemanticCommand,
   SemanticDraftBasis,
-  SemanticState,
+  SemanticDiscovery,
   SemanticResult,
 } from "@/contracts/semantic/schema";
 import {
@@ -14,8 +14,11 @@ import {
 import { semanticCommandCorrelation } from "@/contracts/semantic/correlation";
 
 type Alias = { alias: string };
+type TargetAlias = Alias & { label: string };
 type RecipeCommand<T = SemanticCommand> = T extends SemanticCommand
-  ? Omit<T, "basis" | "draft"> & { basis: T["basis"] | Alias } & (T extends {
+  ? Omit<T, "basis" | "draft" | "points" | "dimensionId"> &
+    (T extends { points: infer P } ? { points: P | readonly [TargetAlias, TargetAlias] } : unknown) &
+    (T extends { dimensionId: infer D } ? { dimensionId: D | TargetAlias } : unknown) & { basis: T["basis"] | Alias } & (T extends {
         draft: SemanticDraftBasis;
       }
         ? { draft: SemanticDraftBasis | Alias }
@@ -148,6 +151,14 @@ function parseRecipe(input: unknown): RecipeOperation[] {
             }
           : { commandSessionId: "command_validation", generation: 1 };
     }
+    function validateTarget(value: unknown, placeholder: string) {
+      if (!isAlias(value)) return value;
+      if (Object.keys(value).length !== 2 || typeof value.alias !== "string" || !aliases.has(value.alias) || !("label" in value) || typeof value.label !== "string" || !value.label)
+        throw new Error("Unknown or ambiguous target alias.");
+      return placeholder;
+    }
+    if (Array.isArray(command.points)) validationCommand.points = command.points.map(value => validateTarget(value, "sketch_point_validation"));
+    if ("dimensionId" in command) validationCommand.dimensionId = validateTarget(command.dimensionId, "dimension_validation");
     if (!validateSemanticCommand(validationCommand).success)
       throw new Error("Invalid semantic operation.");
     if (typeof alias === "string") aliases.add(alias);
@@ -200,22 +211,38 @@ export const documentRecipesCommand: CommandModule = {
       };
     }
     const results: SemanticResult[] = [];
-    const aliases = new Map<string, SemanticState>();
+    const aliases = new Map<string, SemanticDiscovery>();
     let succeeded = true;
     try {
       for (const operation of operations) {
         const command = { ...operation.command };
         if (isAlias(command.basis)) {
-          const state = aliases.get(command.basis.alias);
+          const state = aliases.get(command.basis.alias)?.state;
           if (!state)
             throw new Error("Alias has no completed authoritative state.");
           const { documentId, revisionId, repositoryHeads } = state;
           command.basis = { documentId, revisionId, repositoryHeads };
         }
         if ("draft" in command && isAlias(command.draft)) {
-          const draft = aliases.get(command.draft.alias)?.draft;
+          const draft = aliases.get(command.draft.alias)?.state.draft;
           if (!draft) throw new Error("Alias has no current private draft.");
           command.draft = draft;
+        }
+        if (command.operation === "sketch.dimension.add") {
+          const resolvePoint = (value: typeof command.points[number]) => {
+            if (!isAlias(value)) return value;
+            const matches = aliases.get(value.alias)?.references.filter(r => r.label === value.label && r.target.kind === "sketchPoint") ?? [];
+            if (matches.length !== 1 || matches[0]!.target.kind !== "sketchPoint") throw new Error("Point target alias is missing or ambiguous.");
+            return matches[0]!.target.pointId;
+          };
+          command.points = [resolvePoint(command.points[0]), resolvePoint(command.points[1])];
+        }
+        if (command.operation === "sketch.dimension.update" && isAlias(command.dimensionId)) {
+          const target = command.dimensionId;
+          const sketch = aliases.get(target.alias)?.sketch;
+          const matches = [...(sketch?.requirements ?? []), ...(sketch?.measurements ?? [])].filter(d => d.label === target.label);
+          if (matches.length !== 1) throw new Error("Dimension target alias is missing or ambiguous.");
+          command.dimensionId = matches[0]!.dimensionId;
         }
         const validated = validateSemanticCommand(command);
         if (!validated.success)
@@ -238,7 +265,7 @@ export const documentRecipesCommand: CommandModule = {
           break;
         }
         if (operation.alias && terminal.discovery) {
-          aliases.set(operation.alias, terminal.discovery.state);
+          aliases.set(operation.alias, terminal.discovery);
         }
       }
     } finally {

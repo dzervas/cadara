@@ -503,7 +503,7 @@ export function authorSketchConstraintTarget(
   };
 
   if (!definition.valueSpec && nextTargets.length >= definition.steps.length) {
-    return commitConstraintAuthoring(nextSession);
+    return prepareSketchConstraintCommit(nextSession);
   }
 
   return { session: nextSession, duplicates: [] };
@@ -823,10 +823,28 @@ export function solveCommittedConstraintDefinition(
   };
 }
 
+/** Completed semantic targets use the same contribution, reference and solve preparation as browser commits. */
+export function authorSketchDimension(
+  session: SketchSessionState,
+  input: import("@/contracts/semantic/schema").SemanticDimensionInput,
+): SketchSessionState {
+  const toolId = input.axis === "horizontal" ? "dimensionHorizontal" : "dimensionVertical";
+  const selectedTargets = input.points.map(pointId => resolveSketchConstraintTarget(toolId, session.definition, { kind: "sketchPoint", sketchId: getSessionSketchId(session), pointId }, session.projectedReferences));
+  if (selectedTargets.some(target => target === null)) throw new Error("Dimension points are not in the current sketch.");
+  const targets = selectedTargets.filter(target => target !== null);
+  const measured = getSketchConstraintDefinition(toolId).measureValue!(targets, null);
+  return prepareSketchConstraintCommit(session, {
+    toolId, selectedTargets: targets, hoverTarget: null, pointer: null,
+    isPreviewPinned: false,
+    pendingValue: createLiteralAuthoredValue(input.mode === "driving" ? input.value : measured!),
+    pendingAnnotationPlacement: null, authorsReference: input.mode === "reference",
+  }).session;
+}
+
 export function commitSketchConstraintAuthoring(
   session: SketchSessionState,
 ): SketchSessionState {
-  return commitConstraintAuthoring(session).session;
+  return prepareSketchConstraintCommit(session).session;
 }
 
 export interface ConstraintCommitResult {
@@ -834,10 +852,10 @@ export interface ConstraintCommitResult {
   duplicates: readonly SketchConstraintRef[];
 }
 
-function commitConstraintAuthoring(
+export function prepareSketchConstraintCommit(
   session: SketchSessionState,
+  authoring = session.constraintAuthoring,
 ): ConstraintCommitResult {
-  const authoring = session.constraintAuthoring;
 
   if (!authoring) {
     return { session, duplicates: [] };

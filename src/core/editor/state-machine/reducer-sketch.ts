@@ -1,3 +1,5 @@
+import { authorSketchDimension } from "@/domain/editor/sketch-session/constraints";
+import { updateSketchDimensionValue } from "@/domain/editor/sketch-session/annotations";
 import { authorSketchPrimitive } from "@/domain/editor/sketch-session/tools";
 import { isRegisteredSketchToolId } from "@/core/sketch-tools/registry";
 import { isRegisteredSketchConstraintToolId } from "@/core/sketch-constraints/registry";
@@ -214,6 +216,10 @@ export function reduceSketchWorkflow(
       return { state, effects: [] };
     case "sketch.primitiveAuthored":
       return { state: createSketchPreviewState(state, authorSketchPrimitive(state.session, event.primitive, event.construction)), effects: [] };
+    case "sketch.dimensionAuthored":
+      return { state: createSketchPreviewState(state, authorSketchDimension(state.session, event.input)), effects: [] };
+    case "sketch.dimensionUpdated":
+      return { state: createSketchPreviewState(state, updateSketchDimensionValue(state.session, event.dimensionId, event.value)), effects: [] };
     case "sketch.publishRequested":
       return finishSketchSession(state);
     case "sketch.discardRequested":
