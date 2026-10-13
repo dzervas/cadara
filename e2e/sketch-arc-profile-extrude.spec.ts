@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 
+import { selectRegionInViewport } from "./helpers/acceptance";
 import { FeatureWorkbenchHarness } from "./helpers/feature-workbench";
 
 test.setTimeout(90_000);
@@ -69,7 +70,7 @@ test("a 3-point arc closed by a line extrudes into a body", async ({
       },
     )
     .toBe(1);
-  await workbench.selectReference(regionTargets[0]!);
+  await selectRegionInViewport(workbench, regionTargets[0]!);
   await workbench.expectFeaturePreviewReady("extrude");
   await workbench.commitFeature();
   await workbench.expectBodyCountAtLeast(1);

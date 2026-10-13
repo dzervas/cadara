@@ -10354,12 +10354,16 @@ export function updateCompiledSketchSolveSession(
       break;
     }
 
-    const frame = solveDragFrameGeneralWithRebuild({
+    const solvedFrame = solveDragFrameGeneralWithRebuild({
       session,
       resolved,
       constraintLabel: dragTargetLabel(dragTarget),
       reuseCurvature: targetTolerance === null,
     });
+    const frame =
+      stepTarget.kind === "sketchTangentVector" && stepTarget.exactZero
+        ? exactZeroTangentFrame(session, resolved, solvedFrame)
+        : solvedFrame;
     if (frame && frame.accepted) {
       acceptDraggedPointCandidate(
         session,
@@ -10385,6 +10389,31 @@ export function updateCompiledSketchSolveSession(
 }
 
 // --- Helpers for the generalized updateCompiledSketchSolveSession ---
+
+/**
+ * T17i: the exact-zero pin is a penalty (½ v²), so its frame converges to
+ * the solver tolerance (≈ 1e-7 after a run of capture frames), not to the
+ * exactly [0, 0] the target promises (T12d D4). Like the point exact-reach
+ * step (T13a2 d1), the pinned tangent slots are set to exactly 0 and the
+ * candidate is re-judged; it is kept only if still accepted. A rejected
+ * zeroed candidate silently keeps the solver's near-zero vector (as d1
+ * keeps its unpinned candidate); no fixture reaches that branch.
+ */
+function exactZeroTangentFrame(
+  session: SketchCompiledSolveSession,
+  resolved: NonNullable<ReturnType<typeof resolveDragTargetFrame>>,
+  frame: DraggedPointCandidate | null,
+): DraggedPointCandidate | null {
+  if (!frame?.accepted) return frame;
+  if (
+    resolved.draggedVariableIndices.every((index) => frame.values[index] === 0)
+  )
+    return frame;
+  const values = cloneValues(frame.values);
+  for (const index of resolved.draggedVariableIndices) values[index] = 0;
+  const zeroed = reevaluateDraggedPointCandidate(session, values);
+  return zeroed.accepted ? { ...zeroed, curvature: frame.curvature } : frame;
+}
 
 function dragTargetDiagnosticTarget(
   target: SketchDragTarget,

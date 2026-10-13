@@ -110,6 +110,168 @@ export async function selectRegionInViewport(
   );
 }
 
+/** Screen points (`__cadProjectToScreen` coordinates) of `ids`, once still. */
+export async function settledProjections(
+  workbench: SketchWorkbenchHarness,
+  ids: readonly string[],
+) {
+  const read = () =>
+    workbench.page.evaluate(
+      (targets) =>
+        targets.map((id) => window.__cadProjectToScreen?.(id) ?? null),
+      [...ids],
+    );
+  let previous = await read();
+  let current = previous;
+  await expect
+    .poll(
+      async () => {
+        await workbench.waitForAnimationFrames(3);
+        current = await read();
+        const still = current.every((point, index) => {
+          const before = previous[index];
+          return (
+            point !== null &&
+            before != null &&
+            Math.hypot(point.x - before.x, point.y - before.y) < 0.01
+          );
+        });
+        previous = current;
+        return still;
+      },
+      { message: `the camera settled (${ids.join(", ")})`, timeout: 15_000 },
+    )
+    .toBe(true);
+  return current as CanvasPoint[];
+}
+
+export const mean = (points: readonly CanvasPoint[]) => ({
+  x: points.reduce((sum, point) => sum + point.x, 0) / points.length,
+  y: points.reduce((sum, point) => sum + point.y, 0) / points.length,
+});
+export const spread = (points: readonly CanvasPoint[]) =>
+  Math.hypot(points[1]!.x - points[0]!.x, points[1]!.y - points[0]!.y);
+
+/**
+ * Zooms the viewport in `factor` times about the mean screen point of the
+ * scene targets `anchor`: pans it to the viewport centre with gliding
+ * middle-button drags (the controls zoom about the centre), wheels in at
+ * the centre until the two point targets `scale` are `factor` times
+ * farther apart on screen, then pans the anchor back to the centre.
+ * Returns the anchor's screen point. (Moved from
+ * `part-mode-line-pick-radius.spec.ts`, T17i: thin regions of the
+ * converted region rows are picked after the same zoom.)
+ */
+export async function zoomInAbout(
+  workbench: SketchWorkbenchHarness,
+  anchor: readonly string[],
+  scale: readonly [string, string],
+  factor: number,
+) {
+  const page = workbench.page;
+  const surface = (await workbench.viewportSurface().boundingBox())!;
+  const canvas = (await workbench.viewport().boundingBox())!;
+  const centre = {
+    x: canvas.x + canvas.width / 2 - surface.x,
+    y: canvas.y + canvas.height / 2 - surface.y,
+  };
+  const panToCentre = async () => {
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const at = mean(await settledProjections(workbench, anchor));
+      const offset = Math.hypot(centre.x - at.x, centre.y - at.y);
+      if (offset < 2) return at;
+      // Grab at the centre and drag the scene by at most 300 px per glide.
+      const step = Math.min(1, 300 / offset);
+      await page.mouse.move(surface.x + centre.x, surface.y + centre.y, {
+        steps: 6,
+      });
+      await page.mouse.down({ button: "middle" });
+      await page.mouse.move(
+        surface.x + centre.x + (centre.x - at.x) * step,
+        surface.y + centre.y + (centre.y - at.y) * step,
+        { steps: 16 },
+      );
+      await page.mouse.up({ button: "middle" });
+    }
+    const at = mean(await settledProjections(workbench, anchor));
+    expect(
+      Math.hypot(centre.x - at.x, centre.y - at.y),
+      "the zoom anchor is panned to the viewport centre",
+    ).toBeLessThan(2);
+    return at;
+  };
+  const start = spread(await settledProjections(workbench, scale));
+  await panToCentre();
+  for (let round = 0; round < 40; round += 1) {
+    if (spread(await settledProjections(workbench, scale)) >= factor * start)
+      break;
+    await page.mouse.move(surface.x + centre.x, surface.y + centre.y, {
+      steps: 4,
+    });
+    for (let event = 0; event < 10; event += 1) {
+      await page.mouse.wheel(0, -100);
+    }
+  }
+  expect(
+    spread(await settledProjections(workbench, scale)),
+    `zoomed in ${factor}×`,
+  ).toBeGreaterThanOrEqual(factor * start);
+  return panToCentre();
+}
+
+/**
+ * After the profile list is cleared (or a missing region removed) the
+ * feature's profile slot is no longer the active pick target; a user
+ * presses "+ Add Profile" before picking in the viewport.
+ */
+export async function activateProfileSlot(page: Page) {
+  const add = page.getByRole("button", { name: "+ Add Profile" });
+  await expect(add).toBeVisible({ timeout: 15_000 });
+  if ((await add.getAttribute("aria-pressed")) === "true") return;
+  const box = (await add.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, {
+    steps: 10,
+  });
+  await page.mouse.down();
+  await page.mouse.up();
+  await expect(add).toHaveAttribute("aria-pressed", "true", {
+    timeout: 10_000,
+  });
+}
+
+/**
+ * A gliding press on an object's Parts & Objects visibility toggle
+ * ("Show ‹label›" / "Hide ‹label›", revealed on hover). A sketch consumed
+ * by a feature is auto-hidden: picking another of its regions starts by
+ * showing it again; a body in front of a region is hidden, as a user does.
+ */
+export async function toggleVisibility(
+  page: Page,
+  action: "Show" | "Hide",
+  label: string | RegExp,
+) {
+  const toggle = page
+    .getByRole("button", {
+      name:
+        typeof label === "string"
+          ? `${action} ${label}`
+          : new RegExp(`^${action} ${label.source}`),
+    })
+    .first();
+  await expect(toggle, `${action} ${label}`).toHaveCount(1, {
+    timeout: 15_000,
+  });
+  const box = (await toggle.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, {
+    steps: 10,
+  });
+  await page.mouse.down();
+  await page.mouse.up();
+}
+
+export const showInViewport = (page: Page, label: string | RegExp) =>
+  toggleVisibility(page, "Show", label);
+
 /** A gliding drag in canvas coordinates: glide on, press, glide, release. */
 export async function glideDrag(
   workbench: SketchWorkbenchHarness,

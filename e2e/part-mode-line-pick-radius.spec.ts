@@ -8,7 +8,14 @@ import {
 import type { CommitSketchRequest } from "../src/contracts/modeling/schema";
 import { SKETCH_SCHEMA_VERSION } from "../src/contracts/sketch/schema";
 import { createStandardPlaneDefinition } from "../src/domain/modeling/opencascade-kernel-seed";
-import { selectRegionInViewport, type CanvasPoint } from "./helpers/acceptance";
+import {
+  mean,
+  selectRegionInViewport,
+  settledProjections,
+  spread,
+  zoomInAbout,
+  type CanvasPoint,
+} from "./helpers/acceptance";
 import { FeatureWorkbenchHarness } from "./helpers/feature-workbench";
 
 test.setTimeout(300_000);
@@ -48,113 +55,6 @@ async function regionTargets(page: Page, count: number) {
     )
     .toBe(count);
   return targets;
-}
-
-/** Screen points (`__cadProjectToScreen` coordinates) of `ids`, once still. */
-async function settledProjections(
-  workbench: FeatureWorkbenchHarness,
-  ids: readonly string[],
-) {
-  const read = () =>
-    workbench.page.evaluate(
-      (targets) =>
-        targets.map((id) => window.__cadProjectToScreen?.(id) ?? null),
-      [...ids],
-    );
-  let previous = await read();
-  let current = previous;
-  await expect
-    .poll(
-      async () => {
-        await workbench.waitForAnimationFrames(3);
-        current = await read();
-        const still = current.every((point, index) => {
-          const before = previous[index];
-          return (
-            point !== null &&
-            before != null &&
-            Math.hypot(point.x - before.x, point.y - before.y) < 0.01
-          );
-        });
-        previous = current;
-        return still;
-      },
-      { message: `the camera settled (${ids.join(", ")})`, timeout: 15_000 },
-    )
-    .toBe(true);
-  return current as CanvasPoint[];
-}
-
-const mean = (points: readonly CanvasPoint[]) => ({
-  x: points.reduce((sum, point) => sum + point.x, 0) / points.length,
-  y: points.reduce((sum, point) => sum + point.y, 0) / points.length,
-});
-const spread = (points: readonly CanvasPoint[]) =>
-  Math.hypot(points[1]!.x - points[0]!.x, points[1]!.y - points[0]!.y);
-
-/**
- * Zooms the viewport in `factor` times about the mean screen point of the
- * scene targets `anchor`: pans it to the viewport centre with gliding
- * middle-button drags (the controls zoom about the centre), wheels in at
- * the centre until the two point targets `scale` are `factor` times
- * farther apart on screen, then pans the anchor back to the centre.
- * Returns the anchor's screen point.
- */
-async function zoomInAbout(
-  workbench: FeatureWorkbenchHarness,
-  anchor: readonly string[],
-  scale: readonly [string, string],
-  factor: number,
-) {
-  const page = workbench.page;
-  const surface = (await workbench.viewportSurface().boundingBox())!;
-  const canvas = (await workbench.viewport().boundingBox())!;
-  const centre = {
-    x: canvas.x + canvas.width / 2 - surface.x,
-    y: canvas.y + canvas.height / 2 - surface.y,
-  };
-  const panToCentre = async () => {
-    for (let attempt = 0; attempt < 6; attempt += 1) {
-      const at = mean(await settledProjections(workbench, anchor));
-      const offset = Math.hypot(centre.x - at.x, centre.y - at.y);
-      if (offset < 2) return at;
-      // Grab at the centre and drag the scene by at most 300 px per glide.
-      const step = Math.min(1, 300 / offset);
-      await page.mouse.move(surface.x + centre.x, surface.y + centre.y, {
-        steps: 6,
-      });
-      await page.mouse.down({ button: "middle" });
-      await page.mouse.move(
-        surface.x + centre.x + (centre.x - at.x) * step,
-        surface.y + centre.y + (centre.y - at.y) * step,
-        { steps: 16 },
-      );
-      await page.mouse.up({ button: "middle" });
-    }
-    const at = mean(await settledProjections(workbench, anchor));
-    expect(
-      Math.hypot(centre.x - at.x, centre.y - at.y),
-      "the zoom anchor is panned to the viewport centre",
-    ).toBeLessThan(2);
-    return at;
-  };
-  const start = spread(await settledProjections(workbench, scale));
-  await panToCentre();
-  for (let round = 0; round < 40; round += 1) {
-    if (spread(await settledProjections(workbench, scale)) >= factor * start)
-      break;
-    await page.mouse.move(surface.x + centre.x, surface.y + centre.y, {
-      steps: 4,
-    });
-    for (let event = 0; event < 10; event += 1) {
-      await page.mouse.wheel(0, -100);
-    }
-  }
-  expect(
-    spread(await settledProjections(workbench, scale)),
-    `zoomed in ${factor}×`,
-  ).toBeGreaterThanOrEqual(factor * start);
-  return panToCentre();
 }
 
 type Point = readonly [number, number];

@@ -1,6 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { selectRegionInViewport, toggleVisibility } from "./helpers/acceptance";
 import { FeatureWorkbenchHarness } from "./helpers/feature-workbench";
+import {
+  lastCommittedSketch,
+  pickSecondOffsetRegion,
+  thickThenThin,
+} from "./helpers/offset-regions";
 
 test.setTimeout(180_000);
 test.use({ viewport: { width: 1440, height: 960 } });
@@ -111,6 +117,8 @@ async function regionTargets(page: Page, count: number) {
 test("an inward offset of a line rectangle commits certified trimmed line outputs; after Finish both regions are selectable and each extrudes", async ({
   page,
 }) => {
+  // T17i: the thin region's viewport pick zooms in (≈ +40 s).
+  test.setTimeout(300_000);
   const workbench = new FeatureWorkbenchHarness(page);
   await startTopPlaneSketch(page, workbench);
 
@@ -137,11 +145,13 @@ test("an inward offset of a line rectangle commits certified trimmed line output
   await workbench.expectMachine("idle");
 
   await workbench.activateFeature("extrude");
-  const targets = await regionTargets(page, 2);
+  // T17i: picked in the viewport, the inner rectangle first, then the
+  // 0.5-wide frame (zoomed in ×6).
+  const targets = await thickThenThin(workbench, await regionTargets(page, 2));
   // The frame between the rectangle and its offset, and the inner
   // rectangle: both are bounded by the offset's certified lines. Each one
   // extrudes on its own into a new body.
-  await workbench.selectReference(targets[0]!);
+  await selectRegionInViewport(workbench, targets[0]!);
   await workbench.expectFeaturePreviewReady("extrude");
   await workbench.commitFeature("feature_extrude-1");
   await workbench.expectBodyCountAtLeast(1);
@@ -153,15 +163,9 @@ test("an inward offset of a line rectangle commits certified trimmed line output
   await expect(
     page.getByRole("button", { name: `Remove ${targets[0]!}` }),
   ).toHaveCount(0);
-  // Picked into the profile list directly: after the first commit the
-  // editor selection summary no longer echoes the picked region, so the
-  // harness's selection poll does not apply; the profile chip is the check.
-  expect(
-    await page.evaluate(
-      (id) => window.__cadaraDebug?.selectTarget(id) ?? false,
-      targets[1]!,
-    ),
-  ).toBe(true);
+  // The profile chip is the check (after the first commit the editor
+  // selection summary no longer echoes the pick).
+  await pickSecondOffsetRegion(workbench, targets[1]!, 6);
   await expect(
     page.getByRole("button", { name: `Remove ${targets[1]!}` }),
   ).toHaveCount(1, { timeout: 10_000 });
@@ -170,12 +174,16 @@ test("an inward offset of a line rectangle commits certified trimmed line output
   await workbench.setOperation("newBody");
   await workbench.expectFeaturePreviewReady("extrude");
   await workbench.commitFeature("feature_extrude-2");
+  // The first body was hidden for the pick; shown again.
+  await toggleVisibility(page, "Show", "feature_extrude-1");
   await workbench.expectBodyCountAtLeast(2);
 });
 
 test("an outward offset of a spline closed by a line commits a certified shell; after Finish its regions are selectable; the source region and the annulus each extrude into a body", async ({
   page,
 }) => {
+  // T17i: the thin region's viewport pick zooms in (≈ +40 s).
+  test.setTimeout(300_000);
   const workbench = new FeatureWorkbenchHarness(page);
   await startTopPlaneSketch(page, workbench);
 
@@ -212,7 +220,9 @@ test("an outward offset of a spline closed by a line commits a certified shell; 
   await workbench.expectMachine("idle", 90_000);
 
   await workbench.activateFeature("extrude");
-  const targets = await regionTargets(page, 2);
+  // T17i: picked in the viewport, the source region first, then the
+  // 0.1-wide ring (zoomed in ×30).
+  const targets = await thickThenThin(workbench, await regionTargets(page, 2));
   const diagnosticsBefore = await page.evaluate(
     () => window.__cadaraDebug?.getState()?.snapshotDiagnosticsCount ?? -1,
   );
@@ -220,7 +230,7 @@ test("an outward offset of a spline closed by a line commits a certified shell; 
   // OCC build. The source region (the spline arch and its line) and the
   // offset annulus (the shell, the line output and the joint arcs, with the
   // source loop as its hole) each extrude on their own into a new body.
-  await workbench.selectReference(targets[0]!);
+  await selectRegionInViewport(workbench, targets[0]!);
   await workbench.expectFeaturePreviewReady("extrude");
   await workbench.commitFeature("feature_extrude-1");
   await workbench.expectBodyCountAtLeast(1);
@@ -232,18 +242,15 @@ test("an outward offset of a spline closed by a line commits a certified shell; 
   await expect(
     page.getByRole("button", { name: `Remove ${targets[0]!}` }),
   ).toHaveCount(0);
-  expect(
-    await page.evaluate(
-      (id) => window.__cadaraDebug?.selectTarget(id) ?? false,
-      targets[1]!,
-    ),
-  ).toBe(true);
+  await pickSecondOffsetRegion(workbench, targets[1]!, 30);
   await expect(
     page.getByRole("button", { name: `Remove ${targets[1]!}` }),
   ).toHaveCount(1, { timeout: 10_000 });
   await workbench.setOperation("newBody");
   await workbench.expectFeaturePreviewReady("extrude");
   await workbench.commitFeature("feature_extrude-2");
+  // The first body was hidden for the pick; shown again.
+  await toggleVisibility(page, "Show", "feature_extrude-1");
   await workbench.expectBodyCountAtLeast(2);
   // Review A-3: neither region raised a document diagnostic (a profile face
   // that failed in the part-mode render would add a `profile-…` warning).
@@ -254,46 +261,6 @@ test("an outward offset of a spline closed by a line commits a certified shell; 
     "no new document diagnostic",
   ).toBe(diagnosticsBefore);
 });
-
-type CommittedSketchDefinition = {
-  points: Array<{ pointId: string; position: readonly [number, number] }>;
-  entities: Array<{
-    entityId: string;
-    kind: string;
-    startPointId?: string;
-    endPointId?: string;
-  }>;
-  constraints: Array<{
-    kind: string;
-    point?: { pointId: string };
-    curve?: { entityId: string };
-  }>;
-  derivedRelationships?: Array<{
-    kind: string;
-    distance?: unknown;
-    outputs: Array<{ outputEntityId: string }>;
-  }>;
-};
-
-/** The definition of the last sketch commit in the browser's operation history. */
-async function lastCommittedSketch(page: Page) {
-  return page.evaluate(() => {
-    const payload = JSON.parse(
-      window.localStorage.getItem(
-        "cad.modeling.operationHistory.doc_workspace.v1",
-      ) ?? "{}",
-    ) as {
-      entries?: Array<{
-        kind: string;
-        payload?: { definition?: unknown };
-      }>;
-    };
-    return (
-      payload.entries?.filter((entry) => entry.kind === "commitSketch").at(-1)
-        ?.payload?.definition ?? null
-    );
-  }) as Promise<CommittedSketchDefinition | null>;
-}
 
 test("T11a: a reopened sketch's certified offset output is snapped to with no prior edit", async ({
   page,

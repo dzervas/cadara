@@ -1,6 +1,10 @@
 import { expect, test } from "@playwright/test";
 
-import { readHistoryStrip, waitForCommittedAction } from "./helpers/acceptance";
+import {
+  readHistoryStrip,
+  selectRegionInViewport,
+  waitForCommittedAction,
+} from "./helpers/acceptance";
 import { FeatureWorkbenchHarness } from "./helpers/feature-workbench";
 import { glideClick, glidePress } from "./helpers/mirror-workbench";
 
@@ -186,7 +190,7 @@ test("T13j: a Shift-placed near gap is merged source → destination; the region
       { message: "The merged triangle publishes one region.", timeout: 15_000 },
     )
     .toBe(1);
-  await workbench.selectReference(regionTargets[0]!);
+  await selectRegionInViewport(workbench, regionTargets[0]!);
   await workbench.expectFeaturePreviewReady("extrude");
   await workbench.commitFeature();
   await workbench.expectBodyCountAtLeast(1);
