@@ -96,6 +96,7 @@ import {
   resolveSketchSnap,
 } from "@/domain/sketch-snapping/snap-candidates";
 import { deriveMeasurementViewModel } from "@/domain/measure/measurement";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { buildSketchVectorExportModel } from "@/domain/export/sketch-vector-export-model";
 import { svgSketchExportProvider } from "@/domain/export/providers/svg-sketch-export-provider";
 import type { ExportCapabilities } from "@/contracts/export/capabilities";
@@ -170,13 +171,13 @@ test("src/components/cad/three-cad-viewport-pick-candidates.spec.ts", () => {
   ).toBe(1);
   // T11c (review R-4): the origin sorts as a reference point in the sketch
   // pick stack, below authored geometry, not as an authored point.
-  const originSession = {
+  const originSession = enterSketchSession({
     ...createNewSketchSession(
       createStandardPlaneDefinition("xy"),
       OCC_KERNEL_SETTINGS,
     ),
     sketchId: "sketch_primary" as SketchId,
-  };
+  });
   expect(
     originCandidates[0]?.semanticClass,
     "The sketch datum origin candidate is a reference candidate, not an authored sketch point.",
@@ -223,13 +224,13 @@ test("src/components/cad/three-cad-viewport-pick-candidates.spec.ts", () => {
     clientY: viewportRect.top + 100,
     camera,
     viewportRect,
-    sketchSession: {
+    sketchSession: enterSketchSession({
       ...createNewSketchSession(
         createStandardPlaneDefinition("xy"),
         OCC_KERNEL_SETTINGS,
       ),
-      sketchId: "sketch_primary",
-    },
+      sketchId: "sketch_primary" as SketchId,
+    }),
     acceptsTarget: () => true,
     currentHoverTarget: null,
   });
@@ -249,9 +250,11 @@ test("src/components/cad/three-cad-viewport-pick-candidates.spec.ts", () => {
     clientY: viewportRect.top + 100,
     camera,
     viewportRect,
-    sketchSession: createNewSketchSession(
-      createStandardPlaneDefinition("xy"),
-      OCC_KERNEL_SETTINGS,
+    sketchSession: enterSketchSession(
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
     ),
     acceptsTarget: () => true,
     currentHoverTarget: null,
@@ -585,14 +588,14 @@ function makeCurveSession(sketchId: SketchId) {
     entities: [line, constructionLine, circle, arc, spline],
   };
 
-  return {
+  return enterSketchSession({
     ...createNewSketchSession(
       createStandardPlaneDefinition("xy"),
       OCC_KERNEL_SETTINGS,
     ),
     sketchId,
     definition,
-  };
+  });
 }
 
 // Lane: ui (docs/testing.md). Seam: the viewport's sketch pick wiring (T11c):
@@ -712,7 +715,7 @@ function makeAxisLineSession({
     OCC_KERNEL_SETTINGS,
   );
   return {
-    session: {
+    session: enterSketchSession({
       ...base,
       sketchId,
       definition: {
@@ -722,7 +725,7 @@ function makeAxisLineSession({
         entityIds: entities.map((entry) => entry.entityId),
         entities,
       },
-    } satisfies SketchSessionState,
+    }),
     lineTarget: line.target,
     constructionTarget: construction.target,
     startPointTarget: points[0]!.target,
@@ -1135,7 +1138,9 @@ function waveSession() {
     [],
     createStandardPlaneDefinition("xy"),
   );
-  const session = createSketchSessionFromSnapshot(record, OCC_KERNEL_SETTINGS);
+  const session = enterSketchSession(
+    createSketchSessionFromSnapshot(record, OCC_KERNEL_SETTINGS),
+  );
   const spans = solvedCubicSpans(
     input.solvedSnapshot.solvedEntities.find(
       (entry) => entry.entityId === "sketch_entity_wave",
@@ -1603,9 +1608,15 @@ test("at oblique orthographic views lines and splines pick by their exact screen
   sketch.point("l1", 8, 4);
   sketch.line("diag", "l0", "l1");
   const input = sketch.build();
-  const session = createSketchSessionFromSnapshot(
-    sketchSnapshotRecordForTest(input, [], createStandardPlaneDefinition("xy")),
-    OCC_KERNEL_SETTINGS,
+  const session = enterSketchSession(
+    createSketchSessionFromSnapshot(
+      sketchSnapshotRecordForTest(
+        input,
+        [],
+        createStandardPlaneDefinition("xy"),
+      ),
+      OCC_KERNEL_SETTINGS,
+    ),
   );
   const spans = solvedCubicSpans(
     input.solvedSnapshot.solvedEntities.find(
@@ -1752,9 +1763,15 @@ test("arcs, circles, lines and splines pick exactly at oblique orthographic and 
   sketch.point("d", 10, 3);
   sketch.spline("wave", ["a", "b", "c", "d"], "open");
   const input = sketch.build();
-  const session = createSketchSessionFromSnapshot(
-    sketchSnapshotRecordForTest(input, [], createStandardPlaneDefinition("xy")),
-    OCC_KERNEL_SETTINGS,
+  const session = enterSketchSession(
+    createSketchSessionFromSnapshot(
+      sketchSnapshotRecordForTest(
+        input,
+        [],
+        createStandardPlaneDefinition("xy"),
+      ),
+      OCC_KERNEL_SETTINGS,
+    ),
   );
   const spans = solvedCubicSpans(
     input.solvedSnapshot.solvedEntities.find(
@@ -2001,9 +2018,15 @@ test("a perspective spline partly beyond the far plane still picks its in-range 
     "open",
   );
   const input = sketch.build();
-  const session = createSketchSessionFromSnapshot(
-    sketchSnapshotRecordForTest(input, [], createStandardPlaneDefinition("xy")),
-    OCC_KERNEL_SETTINGS,
+  const session = enterSketchSession(
+    createSketchSessionFromSnapshot(
+      sketchSnapshotRecordForTest(
+        input,
+        [],
+        createStandardPlaneDefinition("xy"),
+      ),
+      OCC_KERNEL_SETTINGS,
+    ),
   );
   const spans = solvedCubicSpans(
     input.solvedSnapshot.solvedEntities.find(

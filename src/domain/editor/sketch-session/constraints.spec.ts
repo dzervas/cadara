@@ -30,6 +30,7 @@ import {
 import { createPlacedPointDimensionLine } from "@/domain/editor/sketch-session/annotations";
 import { updateSketchReferenceProjection } from "@/domain/editor/sketch-session/references";
 import { createSketchSessionFromSnapshot } from "@/domain/editor/sketch-session";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { makeSketchFixture } from "@/contracts/sketch/region-extraction.fixtures";
 import { sketchSnapshotRecordForTest } from "@/contracts/sketch/region-record.fixtures";
 import {
@@ -39,9 +40,11 @@ import {
 
 function newSession() {
   return withSketchSnapScale(
-    createNewSketchSession(
-      createStandardPlaneDefinition("xy"),
-      OCC_KERNEL_SETTINGS,
+    enterSketchSession(
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
     ),
     SPEC_SKETCH_UNITS_PER_PIXEL,
   );
