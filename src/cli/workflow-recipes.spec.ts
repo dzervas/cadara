@@ -8,11 +8,8 @@ import type { SemanticResult } from "@/contracts/semantic/schema";
 import { validateSemanticResult } from "@/contracts/semantic/runtime-schema";
 const exec = promisify(execFile);
 
-it("replays the dimensioned workflow in real Bun processes with correlated JSON and exit codes 0, 1 and 2", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "cadara-workflow-recipe-"));
+function createRecipeProcess(directory: string) {
   const recipe = join(directory, "recipe.json");
-  const native = join(directory, "plate.cadara");
-  const output = join(directory, "plate.step");
   const invocation = ["src/cli/main.ts", "document", "recipe", recipe];
   const options = {
     cwd: resolve(import.meta.dirname, "../.."),
@@ -59,6 +56,14 @@ it("replays the dimensioned workflow in real Bun processes with correlated JSON 
       );
     return results;
   }
+  return run;
+}
+
+it("replays the dimensioned workflow in real Bun processes with correlated JSON and exit code 0", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "cadara-workflow-recipe-"));
+  const native = join(directory, "plate.cadara");
+  const output = join(directory, "plate.step");
+  const run = createRecipeProcess(directory);
   function size(result: SemanticResult, width: number) {
     const bounds = result.discovery!.model!.bodies[0]!.bounds!;
     for (const [axis, value] of [width, 10, 7].entries())
@@ -248,9 +253,23 @@ it("replays the dimensioned workflow in real Bun processes with correlated JSON 
       kind: "written",
       bytesWritten: Buffer.byteLength(step),
     });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 180000);
+
+it("real Bun failure and usage exits preserve clean correlated output and stop before the next recipe action", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "cadara-workflow-exits-"));
+  const run = createRecipeProcess(directory);
+  try {
     const failure = await run(
       [
-        { operation: "document.open", basis: null, path: native, as: "opened" },
+        {
+          operation: "document.create",
+          label: "Fresh process",
+          basis: null,
+          as: "opened",
+        },
         { operation: "history.undo", basis: { alias: "opened" }, draft: null },
         {
           operation: "document.rename",
@@ -280,4 +299,4 @@ it("replays the dimensioned workflow in real Bun processes with correlated JSON 
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
-}, 180000);
+}, 120000);
