@@ -12,6 +12,7 @@ import {
   selectSketchConstraintTarget,
   startSketchDraw,
 } from "@/domain/editor/sketch-session";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import {
   createStandardPlaneDefinition,
@@ -799,9 +800,11 @@ test("src/domain/editor/workbench-interactions.spec.ts", async () => {
 // open annotation edit is the innermost Escape stage; Escape is its Cancel
 // (the same patch), ahead of clearing the selection, and it closes the edit.
 test("T14b R-1: Escape with an open annotation edit cancels the edit", () => {
-  let session = createNewSketchSession(
-    createStandardPlaneDefinition("xy"),
-    OCC_KERNEL_SETTINGS,
+  let session = enterSketchSession(
+    createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
   );
   session = acceptSketchDraw(
     startSketchDraw(beginSketchTool(session, "line"), [0, 0]),

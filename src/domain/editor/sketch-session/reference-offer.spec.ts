@@ -22,6 +22,7 @@ import {
   withLiveSolveBasis,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { createSessionCommitFactories } from "@/domain/editor/sketch-session/internals";
 import { createSketchFilletMutation } from "@/domain/sketch-editing/operations";
 import { createSketchSessionFromSnapshot } from "@/domain/editor/sketch-session";
@@ -44,9 +45,11 @@ import {
 
 function newSession() {
   return withSketchSnapScale(
-    createNewSketchSession(
-      createStandardPlaneDefinition("xy"),
-      OCC_KERNEL_SETTINGS,
+    enterSketchSession(
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
     ),
     SPEC_SKETCH_UNITS_PER_PIXEL,
   );

@@ -28,6 +28,7 @@ import {
   startSketchDraw,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
 import {
   createStandardPlaneDefinition,
@@ -164,9 +165,11 @@ describe("T17c3: a completed pick is labelled by its tool", () => {
   test("an Offset Create pressed before the preview is certified commits with the publication, as one 'Commit Offset' action", async () => {
     let drawn = startSketchDraw(
       beginSketchTool(
-        createNewSketchSession(
-          createStandardPlaneDefinition("xy"),
-          OCC_KERNEL_SETTINGS,
+        enterSketchSession(
+          createNewSketchSession(
+            createStandardPlaneDefinition("xy"),
+            OCC_KERNEL_SETTINGS,
+          ),
         ),
         "spline",
       ),

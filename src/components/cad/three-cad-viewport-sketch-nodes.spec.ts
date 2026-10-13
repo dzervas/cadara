@@ -19,6 +19,7 @@ import {
   getSketchRevealedPointIds,
   type SketchPointMarkerContext,
 } from "@/domain/editor/sketch-session/display";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { getSketchSessionDisplayDefinition } from "@/domain/editor/sketch-session/internals";
 import {
   createStandardPlaneDefinition,
@@ -65,13 +66,15 @@ function markerSession(): SketchSessionState {
   sketch.point("cb", 4, 0);
   sketch.line("construction", "ca", "cb", true);
   sketch.point("free", -6, 5);
-  return createSketchSessionFromSnapshot(
-    sketchSnapshotRecordForTest(
-      sketch.build(),
-      [],
-      createStandardPlaneDefinition("xy"),
+  return enterSketchSession(
+    createSketchSessionFromSnapshot(
+      sketchSnapshotRecordForTest(
+        sketch.build(),
+        [],
+        createStandardPlaneDefinition("xy"),
+      ),
+      OCC_KERNEL_SETTINGS,
     ),
-    OCC_KERNEL_SETTINGS,
   );
 }
 

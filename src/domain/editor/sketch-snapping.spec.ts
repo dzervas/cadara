@@ -10,6 +10,7 @@ import {
   startSketchDraw,
   updateSketchPointer,
 } from "@/domain/editor/sketch-session";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
@@ -35,12 +36,14 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
 
   function createSketchLineSession(y = 0) {
     let session = withSketchSnapScale(
-      createNewSketchSessionFromSupport(
-        {
-          kind: "construction",
-          constructionId: "construction_plane-xy",
-        },
-        OCC_KERNEL_SETTINGS,
+      enterSketchSession(
+        createNewSketchSessionFromSupport(
+          {
+            kind: "construction",
+            constructionId: "construction_plane-xy",
+          },
+          OCC_KERNEL_SETTINGS,
+        ),
       ),
       SPEC_SKETCH_UNITS_PER_PIXEL,
     );
@@ -223,12 +226,14 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
       },
     ];
     let session = withSketchSnapScale(
-      createNewSketchSessionFromSupport(
-        {
-          kind: "construction",
-          constructionId: "construction_plane-xy",
-        },
-        OCC_KERNEL_SETTINGS,
+      enterSketchSession(
+        createNewSketchSessionFromSupport(
+          {
+            kind: "construction",
+            constructionId: "construction_plane-xy",
+          },
+          OCC_KERNEL_SETTINGS,
+        ),
       ),
       SPEC_SKETCH_UNITS_PER_PIXEL,
     );
@@ -288,12 +293,14 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
       projectionMode: "projectAlongPlaneNormal" as const,
     };
     let session = withSketchSnapScale(
-      createNewSketchSessionFromSupport(
-        {
-          kind: "construction",
-          constructionId: "construction_plane-xy",
-        },
-        OCC_KERNEL_SETTINGS,
+      enterSketchSession(
+        createNewSketchSessionFromSupport(
+          {
+            kind: "construction",
+            constructionId: "construction_plane-xy",
+          },
+          OCC_KERNEL_SETTINGS,
+        ),
       ),
       SPEC_SKETCH_UNITS_PER_PIXEL,
     );
@@ -325,12 +332,14 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
 
   function testBothEndpointsSnappedToSameLineUseUniqueConstraintIds() {
     let session = withSketchSnapScale(
-      createNewSketchSessionFromSupport(
-        {
-          kind: "construction",
-          constructionId: "construction_plane-xy",
-        },
-        OCC_KERNEL_SETTINGS,
+      enterSketchSession(
+        createNewSketchSessionFromSupport(
+          {
+            kind: "construction",
+            constructionId: "construction_plane-xy",
+          },
+          OCC_KERNEL_SETTINGS,
+        ),
       ),
       SPEC_SKETCH_UNITS_PER_PIXEL,
     );
@@ -395,12 +404,14 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
     ];
     let session = addProjectedLineReference(
       withSketchSnapScale(
-        createNewSketchSessionFromSupport(
-          {
-            kind: "construction",
-            constructionId: "construction_plane-xy",
-          },
-          OCC_KERNEL_SETTINGS,
+        enterSketchSession(
+          createNewSketchSessionFromSupport(
+            {
+              kind: "construction",
+              constructionId: "construction_plane-xy",
+            },
+            OCC_KERNEL_SETTINGS,
+          ),
         ),
         SPEC_SKETCH_UNITS_PER_PIXEL,
       ),
@@ -442,12 +453,14 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
     ];
     let session = addProjectedLineReference(
       withSketchSnapScale(
-        createNewSketchSessionFromSupport(
-          {
-            kind: "construction",
-            constructionId: "construction_plane-xy",
-          },
-          OCC_KERNEL_SETTINGS,
+        enterSketchSession(
+          createNewSketchSessionFromSupport(
+            {
+              kind: "construction",
+              constructionId: "construction_plane-xy",
+            },
+            OCC_KERNEL_SETTINGS,
+          ),
         ),
         SPEC_SKETCH_UNITS_PER_PIXEL,
       ),
@@ -488,12 +501,14 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
     ];
     let session = addProjectedLineReference(
       withSketchSnapScale(
-        createNewSketchSessionFromSupport(
-          {
-            kind: "construction",
-            constructionId: "construction_plane-xy",
-          },
-          OCC_KERNEL_SETTINGS,
+        enterSketchSession(
+          createNewSketchSessionFromSupport(
+            {
+              kind: "construction",
+              constructionId: "construction_plane-xy",
+            },
+            OCC_KERNEL_SETTINGS,
+          ),
         ),
         SPEC_SKETCH_UNITS_PER_PIXEL,
       ),
@@ -519,12 +534,14 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
 
   function testSketchDatumSnapsCommitDerivedReferenceConstraints() {
     let originSession = withSketchSnapScale(
-      createNewSketchSessionFromSupport(
-        {
-          kind: "construction",
-          constructionId: "construction_plane-xy",
-        },
-        OCC_KERNEL_SETTINGS,
+      enterSketchSession(
+        createNewSketchSessionFromSupport(
+          {
+            kind: "construction",
+            constructionId: "construction_plane-xy",
+          },
+          OCC_KERNEL_SETTINGS,
+        ),
       ),
       SPEC_SKETCH_UNITS_PER_PIXEL,
     );
@@ -556,12 +573,14 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
     // T13-D19: an exact origin or axis placement is the same snap at distance
     // 0 and authors the same constraint (shown == authored).
     let exactSession = withSketchSnapScale(
-      createNewSketchSessionFromSupport(
-        {
-          kind: "construction",
-          constructionId: "construction_plane-xy",
-        },
-        OCC_KERNEL_SETTINGS,
+      enterSketchSession(
+        createNewSketchSessionFromSupport(
+          {
+            kind: "construction",
+            constructionId: "construction_plane-xy",
+          },
+          OCC_KERNEL_SETTINGS,
+        ),
       ),
       SPEC_SKETCH_UNITS_PER_PIXEL,
     );
@@ -600,12 +619,14 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
     ]);
 
     let axisSession = withSketchSnapScale(
-      createNewSketchSessionFromSupport(
-        {
-          kind: "construction",
-          constructionId: "construction_plane-xy",
-        },
-        OCC_KERNEL_SETTINGS,
+      enterSketchSession(
+        createNewSketchSessionFromSupport(
+          {
+            kind: "construction",
+            constructionId: "construction_plane-xy",
+          },
+          OCC_KERNEL_SETTINGS,
+        ),
       ),
       SPEC_SKETCH_UNITS_PER_PIXEL,
     );
@@ -635,12 +656,14 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
     ).toBeTruthy();
 
     let exactAxisSession = withSketchSnapScale(
-      createNewSketchSessionFromSupport(
-        {
-          kind: "construction",
-          constructionId: "construction_plane-xy",
-        },
-        OCC_KERNEL_SETTINGS,
+      enterSketchSession(
+        createNewSketchSessionFromSupport(
+          {
+            kind: "construction",
+            constructionId: "construction_plane-xy",
+          },
+          OCC_KERNEL_SETTINGS,
+        ),
       ),
       SPEC_SKETCH_UNITS_PER_PIXEL,
     );
@@ -686,12 +709,14 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
     ];
     let perpendicularSession = addProjectedLineReference(
       withSketchSnapScale(
-        createNewSketchSessionFromSupport(
-          {
-            kind: "construction",
-            constructionId: "construction_plane-xy",
-          },
-          OCC_KERNEL_SETTINGS,
+        enterSketchSession(
+          createNewSketchSessionFromSupport(
+            {
+              kind: "construction",
+              constructionId: "construction_plane-xy",
+            },
+            OCC_KERNEL_SETTINGS,
+          ),
         ),
         SPEC_SKETCH_UNITS_PER_PIXEL,
       ),
@@ -739,12 +764,14 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
     ];
     let tangentSession = addProjectedLineReference(
       withSketchSnapScale(
-        createNewSketchSessionFromSupport(
-          {
-            kind: "construction",
-            constructionId: "construction_plane-xy",
-          },
-          OCC_KERNEL_SETTINGS,
+        enterSketchSession(
+          createNewSketchSessionFromSupport(
+            {
+              kind: "construction",
+              constructionId: "construction_plane-xy",
+            },
+            OCC_KERNEL_SETTINGS,
+          ),
         ),
         SPEC_SKETCH_UNITS_PER_PIXEL,
       ),

@@ -29,6 +29,7 @@ import {
 } from "@/domain/modeling/opencascade-kernel-seed";
 import { makeCircleWithDiameterSession } from "@/components/cad/sketch-reference-dimension.fixtures";
 import { makeAnnotationLifecycleState } from "@/domain/editor/annotation-lifecycle.fixtures";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
   DimensionAnnotationLabelDrag,
   type DimensionAnnotationPointerEvent,
@@ -518,9 +519,11 @@ function drawnSession(
 ) {
   let session = startSketchDraw(
     beginSketchTool(
-      createNewSketchSession(
-        createStandardPlaneDefinition("xy"),
-        OCC_KERNEL_SETTINGS,
+      enterSketchSession(
+        createNewSketchSession(
+          createStandardPlaneDefinition("xy"),
+          OCC_KERNEL_SETTINGS,
+        ),
       ),
       toolId,
     ),

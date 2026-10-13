@@ -18,6 +18,7 @@ import {
   startSketchDraw,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
 import {
   PROJECTED_SPLINE_OFFSET_UNSUPPORTED_MESSAGE,
@@ -73,12 +74,14 @@ test("the sketch tool panel shows the D6 not-supported-yet messages", () => {
         startSketchDraw(
           beginSketchTool(
             withSketchSnapScale(
-              createNewSketchSessionFromSupport(
-                {
-                  kind: "construction",
-                  constructionId: "construction_plane-xy",
-                },
-                OCC_KERNEL_SETTINGS,
+              enterSketchSession(
+                createNewSketchSessionFromSupport(
+                  {
+                    kind: "construction",
+                    constructionId: "construction_plane-xy",
+                  },
+                  OCC_KERNEL_SETTINGS,
+                ),
               ),
               SPEC_SKETCH_UNITS_PER_PIXEL,
             ),
@@ -157,9 +160,11 @@ test("the sketch tool panel shows the D6 not-supported-yet messages", () => {
 // exact intersections and the user sees that it is being checked.
 test("the sketch tool panel shows Trim's 'Checking intersections…' while its query is pending", () => {
   let drawn = withSketchSnapScale(
-    createNewSketchSessionFromSupport(
-      { kind: "construction", constructionId: "construction_plane-xy" },
-      OCC_KERNEL_SETTINGS,
+    enterSketchSession(
+      createNewSketchSessionFromSupport(
+        { kind: "construction", constructionId: "construction_plane-xy" },
+        OCC_KERNEL_SETTINGS,
+      ),
     ),
     SPEC_SKETCH_UNITS_PER_PIXEL,
   );
@@ -201,9 +206,11 @@ test.each(["sketchExtend", "sketchSplit"] as const)(
   "the sketch tool panel shows %s's 'Checking intersections…' while its query is pending",
   (toolId) => {
     let drawn = withSketchSnapScale(
-      createNewSketchSessionFromSupport(
-        { kind: "construction", constructionId: "construction_plane-xy" },
-        OCC_KERNEL_SETTINGS,
+      enterSketchSession(
+        createNewSketchSessionFromSupport(
+          { kind: "construction", constructionId: "construction_plane-xy" },
+          OCC_KERNEL_SETTINGS,
+        ),
       ),
       SPEC_SKETCH_UNITS_PER_PIXEL,
     );

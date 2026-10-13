@@ -27,6 +27,7 @@ import {
   startSketchDraw,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { openSketchSessionFromSelection } from "@/domain/editor/sketch-session-controller";
 import {
   createStandardPlaneDefinition,
@@ -57,9 +58,11 @@ function draw(
 
 /** A rectangle [1,1]–[5,4] and a circle (centre [12,1], r 2.5). */
 function rectangleAndCircle(
-  session = createNewSketchSession(
-    createStandardPlaneDefinition("xy"),
-    OCC_KERNEL_SETTINGS,
+  session = enterSketchSession(
+    createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
   ),
 ) {
   let next = draw(session, "rectangle", [
@@ -425,7 +428,7 @@ test.each(ADAPTERS)(
       await readSnapshot(),
     );
     if (!opened) throw new Error("The XY plane opens a sketch session.");
-    const session = rectangleAndCircle(opened);
+    const session = rectangleAndCircle(enterSketchSession(opened));
     const corner = session.definition.points.find(
       (point) => point.position[0] === 5 && point.position[1] === 4,
     )!;
@@ -492,7 +495,7 @@ test.each(ADAPTERS)(
 );
 
 function dimensioned_(opened: SketchSessionState) {
-  let session = rectangleAndCircle(opened);
+  let session = rectangleAndCircle(enterSketchSession(opened));
   session = dimensionWith(
     session,
     "dimensionDistance",

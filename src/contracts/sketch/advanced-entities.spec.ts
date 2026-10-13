@@ -28,6 +28,7 @@ import {
   createNewSketchSession,
   getSketchSessionDisplayRenderables,
 } from "@/domain/editor/sketch-session";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { buildOccRenderExport } from "@/domain/modeling/occ/snapshot";
 import { createOccAuthoringState } from "@/domain/modeling/occ/authoring-state";
 import type { SketchSnapshotRecord } from "@/contracts/modeling/schema";
@@ -406,11 +407,11 @@ test("src/contracts/sketch/advanced-entities.spec.ts", async () => {
     ]),
   );
 
-  const session = {
+  const session = enterSketchSession({
     ...createNewSketchSession(plane, OCC_KERNEL_SETTINGS),
     sketchId,
     definition,
-  };
+  });
   const sessionRenderables = getSketchSessionDisplayRenderables(session);
   expect(
     sessionRenderables.some(

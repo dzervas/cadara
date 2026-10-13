@@ -12,6 +12,7 @@ import {
   finalizeSketchDraw,
   startSketchDraw,
 } from "@/domain/editor/sketch-session";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
@@ -231,7 +232,7 @@ test("src/app/viewport-renderables.spec.ts", async () => {
   }
 
   {
-    const activeSession = {
+    const activeSession = enterSketchSession({
       ...createNewSketchSessionFromSupport(
         {
           kind: "construction",
@@ -240,7 +241,7 @@ test("src/app/viewport-renderables.spec.ts", async () => {
         OCC_KERNEL_SETTINGS,
       ),
       sketchId: "sketch_a",
-    };
+    });
     const activeSketchRegion = createCommittedRegion("sketch_a", "region_a");
     const otherSketchRegion = createCommittedRegion("sketch_b", "region_b");
 
@@ -389,12 +390,14 @@ test("src/app/viewport-renderables.spec.ts", async () => {
 
   {
     let session = beginSketchTool(
-      createNewSketchSessionFromSupport(
-        {
-          kind: "construction",
-          constructionId: "construction_plane-xy",
-        },
-        OCC_KERNEL_SETTINGS,
+      enterSketchSession(
+        createNewSketchSessionFromSupport(
+          {
+            kind: "construction",
+            constructionId: "construction_plane-xy",
+          },
+          OCC_KERNEL_SETTINGS,
+        ),
       ),
       "spline",
     );
@@ -453,9 +456,11 @@ test("T08b-g5c [TECH] G19: committed non-accepted offset outputs are marked for 
   let session = acceptSketchDraw(
     startSketchDraw(
       beginSketchTool(
-        createNewSketchSessionFromSupport(
-          { kind: "construction", constructionId: "construction_plane-xy" },
-          { ...OCC_KERNEL_SETTINGS },
+        enterSketchSession(
+          createNewSketchSessionFromSupport(
+            { kind: "construction", constructionId: "construction_plane-xy" },
+            { ...OCC_KERNEL_SETTINGS },
+          ),
         ),
         "rectangle",
       ),

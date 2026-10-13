@@ -19,6 +19,7 @@ import {
   OCC_KERNEL_SETTINGS,
 } from "@/domain/modeling/opencascade-kernel-seed";
 import type { PrimitiveRef } from "@/core/editor/schema";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 
 function dimension(
   session: SketchSessionState,
@@ -49,9 +50,11 @@ export function editDimension(session: SketchSessionState, index: number) {
 }
 
 export function makeCircleWithDiameterSession(options: { reference: boolean }) {
-  let session = createNewSketchSession(
-    createStandardPlaneDefinition("xy"),
-    OCC_KERNEL_SETTINGS,
+  let session = enterSketchSession(
+    createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
   );
   session = acceptSketchDraw(
     startSketchDraw(beginSketchTool(session, "rectangle"), [1, 1]),

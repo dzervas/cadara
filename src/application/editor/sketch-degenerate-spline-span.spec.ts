@@ -79,9 +79,11 @@ const TEXT =
 
 function loop(): SketchSessionState {
   let session = withSketchSnapScale(
-    createNewSketchSession(
-      createStandardPlaneDefinition("xy"),
-      OCC_KERNEL_SETTINGS,
+    enterSketchSession(
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
     ),
     SPEC_SKETCH_UNITS_PER_PIXEL,
   );
@@ -429,9 +431,11 @@ describe("T17c3 review F-1: the promised recoveries work in a constrained sketch
 describe("T17c3 review F-6: wrap span, conflict first, selection in a valid sketch", () => {
   test("a smooth closure's wrap span names the last and the first fit point", async () => {
     let session = withSketchSnapScale(
-      createNewSketchSession(
-        createStandardPlaneDefinition("xy"),
-        OCC_KERNEL_SETTINGS,
+      enterSketchSession(
+        createNewSketchSession(
+          createStandardPlaneDefinition("xy"),
+          OCC_KERNEL_SETTINGS,
+        ),
       ),
       SPEC_SKETCH_UNITS_PER_PIXEL,
     );

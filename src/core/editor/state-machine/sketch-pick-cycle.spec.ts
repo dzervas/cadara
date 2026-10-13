@@ -11,6 +11,7 @@ import {
   startSketchDraw,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
   getSketchSelectionCycleContext,
   isSketchSelectionCyclePickRetained,
@@ -52,9 +53,11 @@ const draw = (
  */
 async function makeOverlapState(toolId: SketchAuthoringToolId | null = null) {
   let session = withSketchSnapScale(
-    createNewSketchSession(
-      createStandardPlaneDefinition("xy"),
-      OCC_KERNEL_SETTINGS,
+    enterSketchSession(
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
     ),
     SPEC_SKETCH_UNITS_PER_PIXEL,
   );

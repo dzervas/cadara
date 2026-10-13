@@ -29,6 +29,8 @@ import {
   createSplineEntityDefinition,
 } from "@/domain/editor/sketch-session/internals";
 import { createNewSketchSession } from "@/domain/editor/sketch-session";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import { updateSketchReferenceProjection } from "@/domain/editor/sketch-session/references";
 import {
   closestPointOnSketchInteractionCurve,
   collectSketchInteractionGeometry,
@@ -179,15 +181,19 @@ test("collectSketchInteractionGeometry preserves local, projected, datum, and ad
     entityIds: entities.map((entity) => entity.entityId),
     entities,
   };
-  const session = {
-    ...createNewSketchSession(
-      createStandardPlaneDefinition("xy"),
-      OCC_KERNEL_SETTINGS,
-    ),
-    sketchId,
-    definition,
-    projectedReferences: [projectedReference],
-  };
+  // Entered, then the projection response arrives (the reducer's handler).
+  const session = updateSketchReferenceProjection(
+    enterSketchSession({
+      ...createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
+      sketchId,
+      definition,
+    }),
+    [projectedReference],
+    [],
+  );
 
   const geometry = collectSketchInteractionGeometry(session);
   const byKind = new Set(geometry.map((entry) => entry.kind));
@@ -290,14 +296,14 @@ test("closestPointOnSketchInteractionCurve respects arc sweeps and covers whole 
     entityIds: [arc.entityId, circle.entityId, missingLine.entityId],
     entities: [arc, circle, missingLine],
   };
-  const session = {
+  const session = enterSketchSession({
     ...createNewSketchSession(
       createStandardPlaneDefinition("xy"),
       OCC_KERNEL_SETTINGS,
     ),
     sketchId,
     definition,
-  };
+  });
   const geometry = collectSketchInteractionGeometry(session);
   const arcGeometry = geometry.find((entry) => entry.target === arc.target);
   const circleGeometry = geometry.find(
@@ -477,17 +483,20 @@ test("splines, projected neutral splines and authored Béziers are exact cubic s
       },
     },
   ];
-  const session = {
-    ...base,
-    sketchId,
-    definition: {
-      ...base.definition,
-      pointIds: points.map((entry) => entry.pointId),
-      points,
-      entityIds: [spline.entityId, quadratic.entityId, cubic.entityId],
-      entities: [spline, quadratic, cubic],
-    },
-    projectedReferences: [
+  // Entered, then the projection response arrives (the reducer's handler).
+  const session = updateSketchReferenceProjection(
+    enterSketchSession({
+      ...base,
+      sketchId,
+      definition: {
+        ...base.definition,
+        pointIds: points.map((entry) => entry.pointId),
+        points,
+        entityIds: [spline.entityId, quadratic.entityId, cubic.entityId],
+        entities: [spline, quadratic, cubic],
+      },
+    }),
+    [
       {
         ...projected,
         geometry: [
@@ -503,7 +512,8 @@ test("splines, projected neutral splines and authored Béziers are exact cubic s
         ],
       },
     ],
-  };
+    [],
+  );
   const geometry = collectSketchInteractionGeometry(session);
   const byTarget = (target: unknown) =>
     geometry.find((entry) => entry.target === target);
@@ -709,17 +719,19 @@ test("a closed sampled curve's closing segment is searched", () => {
     createStandardPlaneDefinition("xy"),
     OCC_KERNEL_SETTINGS,
   );
-  const geometry = collectSketchInteractionGeometry({
-    ...base,
-    sketchId,
-    definition: {
-      ...base.definition,
-      pointIds: [center.pointId, major.pointId],
-      points: [center, major],
-      entityIds: [ellipse.entityId],
-      entities: [ellipse],
-    },
-  }).find((entry) => entry.target === ellipse.target);
+  const geometry = collectSketchInteractionGeometry(
+    enterSketchSession({
+      ...base,
+      sketchId,
+      definition: {
+        ...base.definition,
+        pointIds: [center.pointId, major.pointId],
+        points: [center, major],
+        entityIds: [ellipse.entityId],
+        entities: [ellipse],
+      },
+    }),
+  ).find((entry) => entry.target === ellipse.target);
   assert(
     geometry?.kind === "sampledCurve" && geometry.isClosed,
     "the ellipse is a closed sampled curve",

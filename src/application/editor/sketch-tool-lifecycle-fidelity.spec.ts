@@ -22,6 +22,7 @@ import {
   finalizeSketchDraw,
   startSketchDraw,
 } from "@/domain/editor/sketch-session";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
 import {
   eid,
@@ -120,9 +121,11 @@ describe("T17f: tool lifecycle leftovers", () => {
   test("Enter on an Offset with a selection is its Create: it waits for the preview's check, then one 'Commit Offset'", async () => {
     let drawn = startSketchDraw(
       beginSketchTool(
-        createNewSketchSession(
-          createStandardPlaneDefinition("xy"),
-          OCC_KERNEL_SETTINGS,
+        enterSketchSession(
+          createNewSketchSession(
+            createStandardPlaneDefinition("xy"),
+            OCC_KERNEL_SETTINGS,
+          ),
         ),
         "spline",
       ),

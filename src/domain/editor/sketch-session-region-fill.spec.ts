@@ -25,6 +25,7 @@ import {
   withLiveSolveBasis,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { measureSketchRegion } from "@/domain/measure/measurement";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import {
@@ -51,10 +52,33 @@ async function sessionOf(build: (sketch: SketchFixture) => void) {
     regions,
     createStandardPlaneDefinition("xy"),
   );
+  // Opened through the app's entry, which leaves the committed regions
+  // pending on the entered basis; the entry's `sketch.deriveRegions` round is
+  // stood in for here: derive for that basis and publish.
+  const entered = enterSketchSession(
+    createSketchSessionFromSnapshot(record, OCC_KERNEL_SETTINGS),
+  );
+  expect(entered.liveRegions.status, "premise: entry derives anew").toBe(
+    "pending",
+  );
+  const basis = getSketchSessionLiveRegionBasis(entered)!;
+  const derived = await createSketchArrangementDeriver(capability).derive({
+    documentId: "doc_fill",
+    revisionId: "rev_fill",
+    sketchId: basis.sketchId,
+    definition: basis.definition,
+    solvedSnapshot: basis.solvedSnapshot,
+    projectedReferences: basis.projectedReferences,
+    modelingTolerance: basis.modelingTolerance,
+  });
   return {
     input,
     record,
-    session: createSketchSessionFromSnapshot(record, OCC_KERNEL_SETTINGS),
+    session: publishSketchLiveRegions(
+      entered,
+      derived.regions,
+      derived.diagnostics,
+    ),
   };
 }
 
