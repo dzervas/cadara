@@ -111,9 +111,11 @@ async function fixture(constrained = false, initial?: SketchSessionState) {
     initial ??
     line(
       withSketchSnapScale(
-        createNewSketchSession(
-          createStandardPlaneDefinition("xy"),
-          OCC_KERNEL_SETTINGS,
+        enterSketchSession(
+          createNewSketchSession(
+            createStandardPlaneDefinition("xy"),
+            OCC_KERNEL_SETTINGS,
+          ),
         ),
         SPEC_SKETCH_UNITS_PER_PIXEL,
       ),
@@ -620,18 +622,22 @@ test("compensation restores every authored sketch field captured by the owner", 
 test("creation IDs do not collide in independent drafts with identical counters", () => {
   const a = line(
     withSketchSnapScale(
-      createNewSketchSession(
-        createStandardPlaneDefinition("xy"),
-        OCC_KERNEL_SETTINGS,
+      enterSketchSession(
+        createNewSketchSession(
+          createStandardPlaneDefinition("xy"),
+          OCC_KERNEL_SETTINGS,
+        ),
       ),
       SPEC_SKETCH_UNITS_PER_PIXEL,
     ),
   );
   const b = line(
     withSketchSnapScale(
-      createNewSketchSession(
-        createStandardPlaneDefinition("xy"),
-        OCC_KERNEL_SETTINGS,
+      enterSketchSession(
+        createNewSketchSession(
+          createStandardPlaneDefinition("xy"),
+          OCC_KERNEL_SETTINGS,
+        ),
       ),
       SPEC_SKETCH_UNITS_PER_PIXEL,
     ),

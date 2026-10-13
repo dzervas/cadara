@@ -100,6 +100,7 @@ import {
 } from "@/core/editor/state-machine";
 import { runEditorEffect } from "@/application/editor/effect-registry";
 import { previewSketchPlacement } from "@/domain/editor/sketch-session/tools";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { TRIM_TOO_FEW_CUTS_MESSAGE } from "@/contracts/sketch/edit-intersections";
 import {
   DERIVED_SHELL_DELETE_MESSAGE,
@@ -305,7 +306,7 @@ function newSession(modelingTolerance = OCC_KERNEL_SETTINGS.modelingTolerance) {
     ...OCC_KERNEL_SETTINGS,
     modelingTolerance,
   };
-  return createNewSketchSessionFromSupport(XY, settings);
+  return enterSketchSession(createNewSketchSessionFromSupport(XY, settings));
 }
 
 function drawSpline(

@@ -26,6 +26,7 @@ import {
 } from "@/domain/modeling/opencascade-kernel-seed";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
 import { createReferenceImageOperation } from "@/domain/reference-image/operations";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
   initialEditorState,
   type SketchEditorState,
@@ -44,9 +45,11 @@ import {
 export async function makeAnnotationLifecycleState() {
   const sketchId = "sketch_draft" as SketchId;
   let session = withSketchSnapScale(
-    createNewSketchSession(
-      createStandardPlaneDefinition("xy"),
-      OCC_KERNEL_SETTINGS,
+    enterSketchSession(
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
     ),
     SPEC_SKETCH_UNITS_PER_PIXEL,
   );

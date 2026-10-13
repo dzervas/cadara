@@ -20,6 +20,7 @@ import {
   OCC_KERNEL_SETTINGS,
 } from "@/domain/modeling/opencascade-kernel-seed";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { querySketchEditIntersectionsForTest } from "@/domain/editor/state-machine-test-builder";
 import type { SketchEntityId } from "@/contracts/shared/ids";
 import { emitPendingSketchEditQuery } from "./effect-emitters";
@@ -58,9 +59,11 @@ const draw = (
 /** A horizontal target (0,0)→(4,0) crossed by vertical lines at x = 1 and 3. */
 async function trimState() {
   let session = withSketchSnapScale(
-    createNewSketchSession(
-      createStandardPlaneDefinition("xy"),
-      OCC_KERNEL_SETTINGS,
+    enterSketchSession(
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
     ),
     SPEC_SKETCH_UNITS_PER_PIXEL,
   );
@@ -398,9 +401,11 @@ describe.each([
   async function lineEditState() {
     const { state } = await trimState();
     let session = withSketchSnapScale(
-      createNewSketchSession(
-        createStandardPlaneDefinition("xy"),
-        OCC_KERNEL_SETTINGS,
+      enterSketchSession(
+        createNewSketchSession(
+          createStandardPlaneDefinition("xy"),
+          OCC_KERNEL_SETTINGS,
+        ),
       ),
       SPEC_SKETCH_UNITS_PER_PIXEL,
     );

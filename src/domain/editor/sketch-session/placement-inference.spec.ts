@@ -23,6 +23,7 @@ import {
   rebuildSessionForDefinition,
 } from "@/domain/editor/sketch-session/internals";
 import type { SketchSessionState } from "@/domain/editor/sketch-session/types";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,
@@ -46,9 +47,11 @@ type Session = SketchSessionState;
 type Click = readonly [number, number];
 
 function blank(): Session {
-  return createNewSketchSession(
-    createStandardPlaneDefinition("xy"),
-    OCC_KERNEL_SETTINGS,
+  return enterSketchSession(
+    createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
   );
 }
 

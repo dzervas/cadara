@@ -5,6 +5,7 @@ import type { SketchDefinition } from "@/contracts/sketch/schema";
 import type { SketchSessionState } from "@/domain/editor/sketch-session";
 import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
 import type { SketchSnapshotRecord } from "@/contracts/modeling/schema";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { parseAuthoredModelDocument } from "@/contracts/modeling/authored-document.runtime-schema";
 import {
   beginSketchGeometryDrag,
@@ -609,16 +610,21 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     };
   }
 
+  // The sketch opened for editing with its committed regions: the entry
+  // (T11a) establishes the live solve and leaves them pending until the
+  // entry's derivation round publishes (T17g1).
   async function withCommittedRegions(
     session: ReturnType<typeof createSessionFromDefinition>,
   ) {
-    return {
-      ...session,
-      liveRegions: {
-        ...session.liveRegions,
-        ...(await deriveRegionsForDefinition(session.definition)),
-      },
-    };
+    return publishPendingLiveRegions(
+      enterSketchSession({
+        ...session,
+        liveRegions: {
+          ...session.liveRegions,
+          ...(await deriveRegionsForDefinition(session.definition)),
+        },
+      }),
+    );
   }
 
   // Stands in for the editor's async `sketch.deriveRegions` effect at the
@@ -885,12 +891,14 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
   }
 
   function testUnconstrainedPointDragUpdatesAuthoredDefinition() {
-    let session = createNewSketchSessionFromSupport(
-      {
-        kind: "construction",
-        constructionId: "construction_plane-xy",
-      },
-      OCC_KERNEL_SETTINGS,
+    let session = enterSketchSession(
+      createNewSketchSessionFromSupport(
+        {
+          kind: "construction",
+          constructionId: "construction_plane-xy",
+        },
+        OCC_KERNEL_SETTINGS,
+      ),
     );
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [0, 0]);
@@ -1324,12 +1332,14 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
   // T13a2 (issue 05): a size-free rectangle's corner drag resizes it with
   // minimum motion; the opposite corner stays (re-pinned from "translates").
   function testRectangleToolCornerDragResizesRectangle() {
-    let session = createNewSketchSessionFromSupport(
-      {
-        kind: "construction",
-        constructionId: "construction_plane-xy",
-      },
-      OCC_KERNEL_SETTINGS,
+    let session = enterSketchSession(
+      createNewSketchSessionFromSupport(
+        {
+          kind: "construction",
+          constructionId: "construction_plane-xy",
+        },
+        OCC_KERNEL_SETTINGS,
+      ),
     );
     session = beginSketchTool(session, "rectangle");
     session = startSketchDraw(session, [0, 0]);
@@ -1526,9 +1536,11 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
 
   // T12b: grab offset is preserved — pressing near a point does not make it jump.
   function testGrabOffsetPreservesPointPosition() {
-    let session = createNewSketchSessionFromSupport(
-      { kind: "construction", constructionId: "construction_plane-xy" },
-      OCC_KERNEL_SETTINGS,
+    let session = enterSketchSession(
+      createNewSketchSessionFromSupport(
+        { kind: "construction", constructionId: "construction_plane-xy" },
+        OCC_KERNEL_SETTINGS,
+      ),
     );
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [0, 0]);
@@ -1576,9 +1588,11 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       deltaX: number,
       deltaY: number,
     ) {
-      let session = createNewSketchSessionFromSupport(
-        { kind: "construction", constructionId: "construction_plane-xy" },
-        OCC_KERNEL_SETTINGS,
+      let session = enterSketchSession(
+        createNewSketchSessionFromSupport(
+          { kind: "construction", constructionId: "construction_plane-xy" },
+          OCC_KERNEL_SETTINGS,
+        ),
       );
       session = beginSketchTool(session, "line");
       session = startSketchDraw(session, [0, 0]);
@@ -1650,9 +1664,11 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
 
   // T12b: entity body drag starts and translates all defining points (unconstrained).
   function testEntityBodyDragTranslatesLine() {
-    let session = createNewSketchSessionFromSupport(
-      { kind: "construction", constructionId: "construction_plane-xy" },
-      OCC_KERNEL_SETTINGS,
+    let session = enterSketchSession(
+      createNewSketchSessionFromSupport(
+        { kind: "construction", constructionId: "construction_plane-xy" },
+        OCC_KERNEL_SETTINGS,
+      ),
     );
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [0, 0]);
@@ -1727,9 +1743,11 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
 
   // T12b: cancel restores pre-drag definition including automatic tangent state.
   function testCancelRestoresPreDragDefinition() {
-    let session = createNewSketchSessionFromSupport(
-      { kind: "construction", constructionId: "construction_plane-xy" },
-      OCC_KERNEL_SETTINGS,
+    let session = enterSketchSession(
+      createNewSketchSessionFromSupport(
+        { kind: "construction", constructionId: "construction_plane-xy" },
+        OCC_KERNEL_SETTINGS,
+      ),
     );
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [0, 0]);
@@ -1754,9 +1772,11 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
 
   // T12b: the activeDrag state includes handle, intent, and grabOffset.
   function testActiveDragStateIncludesHandleAndIntent() {
-    let session = createNewSketchSessionFromSupport(
-      { kind: "construction", constructionId: "construction_plane-xy" },
-      OCC_KERNEL_SETTINGS,
+    let session = enterSketchSession(
+      createNewSketchSessionFromSupport(
+        { kind: "construction", constructionId: "construction_plane-xy" },
+        OCC_KERNEL_SETTINGS,
+      ),
     );
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [0, 0]);
@@ -1785,9 +1805,11 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
   /** Draw a 3-point open spline through the tool, returning a session with
    *  the spline committed (idle, no active tool). */
   function drawThreePointSpline() {
-    let session = createNewSketchSessionFromSupport(
-      { kind: "construction", constructionId: "construction_plane-xy" },
-      OCC_KERNEL_SETTINGS,
+    let session = enterSketchSession(
+      createNewSketchSessionFromSupport(
+        { kind: "construction", constructionId: "construction_plane-xy" },
+        OCC_KERNEL_SETTINGS,
+      ),
     );
     session = beginSketchTool(session, "spline");
     session = startSketchDraw(session, [0, 0]);
@@ -2405,9 +2427,11 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
 
   // R-2 row 11: One action per completed drag for translate intent.
   function testOneActionPerTranslateDrag() {
-    let session = createNewSketchSessionFromSupport(
-      { kind: "construction", constructionId: "construction_plane-xy" },
-      OCC_KERNEL_SETTINGS,
+    let session = enterSketchSession(
+      createNewSketchSessionFromSupport(
+        { kind: "construction", constructionId: "construction_plane-xy" },
+        OCC_KERNEL_SETTINGS,
+      ),
     );
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [0, 0]);
@@ -2433,9 +2457,11 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
 
   // R-2 row 12: Cancel per non-point intent produces no history entry.
   function testCancelTranslateDragNoHistory() {
-    let session = createNewSketchSessionFromSupport(
-      { kind: "construction", constructionId: "construction_plane-xy" },
-      OCC_KERNEL_SETTINGS,
+    let session = enterSketchSession(
+      createNewSketchSessionFromSupport(
+        { kind: "construction", constructionId: "construction_plane-xy" },
+        OCC_KERNEL_SETTINGS,
+      ),
     );
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [0, 0]);
@@ -2538,9 +2564,11 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
   // only as hard constraints force (minimum motion).
   function testSplineBodyWithConstrainedNeighbour() {
     // Draw a spline + a line sharing an endpoint, then translate the spline body.
-    let session = createNewSketchSessionFromSupport(
-      { kind: "construction", constructionId: "construction_plane-xy" },
-      OCC_KERNEL_SETTINGS,
+    let session = enterSketchSession(
+      createNewSketchSessionFromSupport(
+        { kind: "construction", constructionId: "construction_plane-xy" },
+        OCC_KERNEL_SETTINGS,
+      ),
     );
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [0, 0]);
@@ -2896,9 +2924,11 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
   function testT12fFeedbackClearedOnMovingFrame() {
     // An unconstrained line: drag one endpoint to get an accepted frame,
     // then verify feedback is null on that accepted frame.
-    let session = createNewSketchSessionFromSupport(
-      { kind: "construction", constructionId: "construction_plane-xy" },
-      OCC_KERNEL_SETTINGS,
+    let session = enterSketchSession(
+      createNewSketchSessionFromSupport(
+        { kind: "construction", constructionId: "construction_plane-xy" },
+        OCC_KERNEL_SETTINGS,
+      ),
     );
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [0, 0]);
@@ -3029,9 +3059,11 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
   // (not preDragDefinition).
   function testBlockedFinalFrameKeepsLastAccepted() {
     // Use an unconstrained line so intermediate accepts are guaranteed.
-    let session = createNewSketchSessionFromSupport(
-      { kind: "construction", constructionId: "construction_plane-xy" },
-      OCC_KERNEL_SETTINGS,
+    let session = enterSketchSession(
+      createNewSketchSessionFromSupport(
+        { kind: "construction", constructionId: "construction_plane-xy" },
+        OCC_KERNEL_SETTINGS,
+      ),
     );
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [0, 0]);
@@ -3941,12 +3973,14 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
   }
 
   function testOffsetAddsLineCopyAndRejectsInvalidDistance() {
-    let session = createNewSketchSessionFromSupport(
-      {
-        kind: "construction",
-        constructionId: "construction_plane-xy",
-      },
-      OCC_KERNEL_SETTINGS,
+    let session = enterSketchSession(
+      createNewSketchSessionFromSupport(
+        {
+          kind: "construction",
+          constructionId: "construction_plane-xy",
+        },
+        OCC_KERNEL_SETTINGS,
+      ),
     );
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [0, 0]);
@@ -5091,7 +5125,9 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
 
   function testPointerOnlyPreviewReusesStableDisplayRenderables() {
     let session = beginSketchTool(
-      createSessionFromDefinition(createSquareDefinition(false)),
+      enterSketchSession(
+        createSessionFromDefinition(createSquareDefinition(false)),
+      ),
       "line",
     );
     session = startSketchDraw(session, [0, 0]);
@@ -5120,7 +5156,9 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
 
   function testAcceptedSketchEditInvalidatesStableDisplayRenderables() {
     let session = beginSketchTool(
-      createSessionFromDefinition(createSquareDefinition(false)),
+      enterSketchSession(
+        createSessionFromDefinition(createSquareDefinition(false)),
+      ),
       "line",
     );
     session = startSketchDraw(session, [0, 0]);
@@ -5275,8 +5313,8 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
   }
 
   function testNoOpPointerMovementPreservesSessionIdentity() {
-    const idleSession = createSessionFromDefinition(
-      createSquareDefinition(false),
+    const idleSession = enterSketchSession(
+      createSessionFromDefinition(createSquareDefinition(false)),
     );
     const idleMoved = updateSketchPointer(idleSession, [4, 4]);
 
@@ -5326,19 +5364,9 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     });
-    let session = createSketchSessionFromSnapshot(
-      {
-        ownerDocumentId: parsed.document.documentId,
-        ownerRevisionId: parsed.document.revisionId,
-        ownerFeatureId: null,
-        ownerSketchId: sketch.sketchId,
-        ownerBodyId: null,
-        sketchId: sketch.sketchId,
-        label: sketch.label,
-        plane: sketch.plane,
-        planeTarget: sketch.plane.support,
-        planeKey: sketch.plane.key,
-        sketch: {
+    let session = enterSketchSession(
+      createSketchSessionFromSnapshot(
+        {
           ownerDocumentId: parsed.document.documentId,
           ownerRevisionId: parsed.document.revisionId,
           ownerFeatureId: null,
@@ -5346,14 +5374,26 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
           ownerBodyId: null,
           sketchId: sketch.sketchId,
           label: sketch.label,
-          planeSupport: sketch.plane.support,
-          definition: sketch.definition,
-          solvedSnapshot: solved.solvedSnapshot,
-          derivedValidity: { state: "current", diagnostics: [] },
-          regions: [],
-        },
-      } satisfies SketchSnapshotRecord,
-      OCC_KERNEL_SETTINGS,
+          plane: sketch.plane,
+          planeTarget: sketch.plane.support,
+          planeKey: sketch.plane.key,
+          sketch: {
+            ownerDocumentId: parsed.document.documentId,
+            ownerRevisionId: parsed.document.revisionId,
+            ownerFeatureId: null,
+            ownerSketchId: sketch.sketchId,
+            ownerBodyId: null,
+            sketchId: sketch.sketchId,
+            label: sketch.label,
+            planeSupport: sketch.plane.support,
+            definition: sketch.definition,
+            solvedSnapshot: solved.solvedSnapshot,
+            derivedValidity: { state: "current", diagnostics: [] },
+            regions: [],
+          },
+        } satisfies SketchSnapshotRecord,
+        OCC_KERNEL_SETTINGS,
+      ),
     );
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [0, 0]);
@@ -5435,9 +5475,11 @@ test("T10g-1 R-6: Trim needs the accepted live solve of the current definition",
       startSketchDraw(beginSketchTool(session, "line"), start),
       end,
     );
-  let session = createNewSketchSession(
-    createStandardPlaneDefinition("xy"),
-    OCC_KERNEL_SETTINGS,
+  let session = enterSketchSession(
+    createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
   );
   session = draw(
     draw(draw(session, [0, 0], [4, 0]), [1, -1], [1, 1]),
@@ -5509,9 +5551,11 @@ test("T10g-1 R-6: Trim needs the accepted live solve of the current definition",
 // the Circle tool no longer authors one) stays accepted after its Trim (the
 // radius is now a diameter of the arc), so a second Trim still runs.
 test("T10g-1: trimming a circle with a Radius-tool dimension keeps the sketch accepted and a second Trim in the same sketch succeeds", async () => {
-  let session = createNewSketchSession(
-    createStandardPlaneDefinition("xy"),
-    OCC_KERNEL_SETTINGS,
+  let session = enterSketchSession(
+    createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
   );
   session = acceptSketchDraw(
     startSketchDraw(beginSketchTool(session, "circle"), [0, 0]),
@@ -5602,9 +5646,11 @@ test("T10g-1: trimming a circle with a Radius-tool dimension keeps the sketch ac
 // size, so its rim drag grows the radius with the centre fixed; the same drag
 // after a deliberate Radius-tool dimension leaves the radius at its value.
 test("T13a: a freshly drawn circle's rim drag grows the radius with the centre fixed; a deliberate radius blocks it", () => {
-  let session = createNewSketchSession(
-    createStandardPlaneDefinition("xy"),
-    OCC_KERNEL_SETTINGS,
+  let session = enterSketchSession(
+    createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
   );
   session = acceptSketchDraw(
     startSketchDraw(beginSketchTool(session, "circle"), [1, 1]),
@@ -5696,9 +5742,11 @@ function drawCircleAt11() {
   const session = acceptSketchDraw(
     startSketchDraw(
       beginSketchTool(
-        createNewSketchSession(
-          createStandardPlaneDefinition("xy"),
-          OCC_KERNEL_SETTINGS,
+        enterSketchSession(
+          createNewSketchSession(
+            createStandardPlaneDefinition("xy"),
+            OCC_KERNEL_SETTINGS,
+          ),
         ),
         "circle",
       ),
@@ -5799,9 +5847,11 @@ test("T13a Q2: an expression-valued dimension stays byte-identical through a dra
 // T13a2 deleted the rigid-translation drag fast path that translated the
 // whole rectangle, so this row is a plain `test` again.
 test("T13a: a rectangle corner drag resizes both sides freely and keeps horizontal/vertical", () => {
-  let session = createNewSketchSession(
-    createStandardPlaneDefinition("xy"),
-    OCC_KERNEL_SETTINGS,
+  let session = enterSketchSession(
+    createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
   );
   session = acceptSketchDraw(
     startSketchDraw(beginSketchTool(session, "rectangle"), [1, 1]),
@@ -5856,9 +5906,11 @@ test("T13a: a rectangle corner drag resizes both sides freely and keeps horizont
 // the sketch the rim drag goes through the solver; the accepted radius must
 // reach the authored definition, survive a fresh solve and be committed.
 test("T13a B-1: a circle drawn next to a rectangle keeps its rim-dragged radius in the definition, a fresh solve and the commit request", () => {
-  let session = createNewSketchSession(
-    createStandardPlaneDefinition("xy"),
-    OCC_KERNEL_SETTINGS,
+  let session = enterSketchSession(
+    createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
   );
   session = acceptSketchDraw(
     startSketchDraw(beginSketchTool(session, "rectangle"), [6, 0]),
@@ -5916,9 +5968,11 @@ test("T13a B-1: a circle drawn next to a rectangle keeps its rim-dragged radius 
 // construction circle changes size during a vertex drag; the released
 // definition must reproduce the released geometry on a fresh solve.
 test("T13a B-1: a centre-fixed circumscribed hexagon does not drift on a fresh solve after a vertex drag", () => {
-  let session = createNewSketchSession(
-    createStandardPlaneDefinition("xy"),
-    OCC_KERNEL_SETTINGS,
+  let session = enterSketchSession(
+    createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
   );
   session = acceptSketchDraw(
     startSketchDraw(beginSketchTool(session, "circumscribedPolygon"), [1, 1]),
@@ -5991,9 +6045,11 @@ function polygonRegularityAfterVertexDrag(
   toolId: "inscribedPolygon" | "circumscribedPolygon",
   name: string,
 ) {
-  let session = createNewSketchSession(
-    createStandardPlaneDefinition("xy"),
-    OCC_KERNEL_SETTINGS,
+  let session = enterSketchSession(
+    createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
   );
   session = acceptSketchDraw(
     startSketchDraw(beginSketchTool(session, "rectangle"), [10, 10]),
@@ -6252,9 +6308,11 @@ function commitOffsetForT13a2(session: SketchSessionState) {
 // is solved with it (its outputs follow the resized rectangle), and an
 // unrelated line keeps its exact position.
 test("T13a2: a corner drag resizes a rectangle with its offset, follows the cursor every frame and leaves an unrelated component untouched", () => {
-  let session = createNewSketchSession(
-    createStandardPlaneDefinition("xy"),
-    OCC_KERNEL_SETTINGS,
+  let session = enterSketchSession(
+    createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
   );
   session = acceptSketchDraw(
     startSketchDraw(beginSketchTool(session, "rectangle"), [1, 1]),
@@ -6369,9 +6427,11 @@ test("T13a2: a corner drag resizes a rectangle with its offset, follows the curs
 // tangent line, the arc turns inside out). That frame is blocked with the
 // drag feedback and the last accepted state is kept.
 test("T13a2: a rounded-rectangle drag that would flip a fillet is blocked at the flipping frame", () => {
-  let session = createNewSketchSession(
-    createStandardPlaneDefinition("xy"),
-    OCC_KERNEL_SETTINGS,
+  let session = enterSketchSession(
+    createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
   );
   session = acceptSketchDraw(
     startSketchDraw(beginSketchTool(session, "rectangle"), [0, 0]),
@@ -6489,9 +6549,11 @@ test("T13a2: a rounded-rectangle drag that would flip a fillet is blocked at the
 // a release with an equally large jump to another reachable cursor lands
 // within the tolerance.
 test("T13a2: interactive drag frames skip the exact-reach step; the release frame reaches the cursor", () => {
-  let session = createNewSketchSession(
-    createStandardPlaneDefinition("xy"),
-    OCC_KERNEL_SETTINGS,
+  let session = enterSketchSession(
+    createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
   );
   session = acceptSketchDraw(
     startSketchDraw(beginSketchTool(session, "rectangle"), [0, 0]),
@@ -6585,9 +6647,11 @@ test("T13a2: interactive drag frames skip the exact-reach step; the release fram
 // T13a2 review R-1 (logic lane, session seam): the Fillet-tool rounded
 // rectangle [0,0]–[2,1], r = 0.2, and its bottom side's left end.
 function roundedRectangleForT13a2Review() {
-  let session = createNewSketchSession(
-    createStandardPlaneDefinition("xy"),
-    OCC_KERNEL_SETTINGS,
+  let session = enterSketchSession(
+    createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
   );
   session = acceptSketchDraw(
     startSketchDraw(beginSketchTool(session, "rectangle"), [0, 0]),
@@ -6767,9 +6831,11 @@ function t13bRectangle() {
   const rectangle = acceptSketchDraw(
     startSketchDraw(
       beginSketchTool(
-        createNewSketchSession(
-          createStandardPlaneDefinition("xy"),
-          OCC_KERNEL_SETTINGS,
+        enterSketchSession(
+          createNewSketchSession(
+            createStandardPlaneDefinition("xy"),
+            OCC_KERNEL_SETTINGS,
+          ),
         ),
         "rectangle",
       ),
@@ -6854,9 +6920,11 @@ test.each([
 // pointer leaves the canvas the last on-canvas one is kept), so the
 // cleared case drives `updateSketchPointer(…, null)` synthetically.
 test("T13m: Split's boundary click (the last sketch pointer) picks the crossing; with no pointer, or a synthetically cleared one, the first crossing is cut; other tools record nothing", async () => {
-  let session = createNewSketchSession(
-    createStandardPlaneDefinition("xy"),
-    OCC_KERNEL_SETTINGS,
+  let session = enterSketchSession(
+    createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
   );
   session = acceptSketchDraw(
     startSketchDraw(beginSketchTool(session, "line"), [0, 0]),

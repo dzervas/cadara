@@ -21,6 +21,7 @@ import {
 } from "@/domain/editor/sketch-session";
 import { getSketchToolMarkerPointIds } from "@/domain/editor/sketch-session/display";
 import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
@@ -59,9 +60,11 @@ const expectedLifecycles: Record<SketchToolId, SketchToolLifecycle> = {
 function armed(toolId: SketchToolId) {
   return beginSketchTool(
     withSketchSnapScale(
-      createNewSketchSession(
-        createStandardPlaneDefinition("xy"),
-        OCC_KERNEL_SETTINGS,
+      enterSketchSession(
+        createNewSketchSession(
+          createStandardPlaneDefinition("xy"),
+          OCC_KERNEL_SETTINGS,
+        ),
       ),
       SPEC_SKETCH_UNITS_PER_PIXEL,
     ),
