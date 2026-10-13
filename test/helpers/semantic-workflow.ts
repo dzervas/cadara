@@ -1,4 +1,8 @@
 import { createHeadlessSessionFactory } from "@/composition/headless";
+import {
+  validateSemanticCommand,
+  validateSemanticResult,
+} from "@/contracts/semantic/runtime-schema";
 import type {
   SemanticCommand,
   SemanticResult,
@@ -17,18 +21,42 @@ export async function createPlateWorkflow(
     current = await session.execute({
       version: 1,
       commandId: `workflow-${++sequence}`,
-      basis: current?.completion.live.state ?? initialization.state,
+      basis: (() => {
+        const { documentId, revisionId, repositoryHeads } =
+          current?.completion.live.state ?? initialization.state;
+        return { documentId, revisionId, repositoryHeads };
+      })(),
       ...input,
     } as unknown as SemanticCommand);
     return current;
   }
   async function execute(input: Record<string, unknown>) {
+    const state = current?.completion.live.state ?? initialization.state;
+    const command = {
+      version: 1,
+      commandId: `workflow-${sequence + 1}`,
+      basis: {
+        documentId: state.documentId,
+        revisionId: state.revisionId,
+        repositoryHeads: state.repositoryHeads,
+      },
+      ...input,
+    };
+    const validation = validateSemanticCommand(command);
+    if (!validation.success) throw new Error(JSON.stringify(validation));
     const result = await run(input);
+    const checked = validateSemanticResult(result.correlation, result);
+    if (!checked.success) throw new Error(JSON.stringify(checked));
     if (result.outcome.kind !== "completed")
       throw new Error(JSON.stringify(result));
     return result;
   }
   try {
+    await execute({
+      operation: "document.create",
+      label: "Workflow plate",
+      basis: null,
+    });
     await execute({ operation: "sketch.begin", plane: "xy" });
     await execute({
       operation: "sketch.author",

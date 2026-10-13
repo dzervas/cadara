@@ -525,6 +525,13 @@ function applyFeatureResult(
   return {
     ...state,
     assets: mergeGeometryAssetRecords(state.assets, result.assetRecords),
+    // Generated labels become authored metadata when the feature is accepted.
+    // Retain them in the runtime too: a later cursor rollback must not export
+    // their absence as a document edit just because those bodies are inactive.
+    bodyLabels: new Map([
+      ...state.bodyLabels,
+      ...reconciled.bodies.map((body) => [body.bodyId, body.label] as const),
+    ]),
     bodies: reconciled.bodies,
     constructions: result.constructions,
     constructionPlanes: result.constructionPlanes,
