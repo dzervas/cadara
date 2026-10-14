@@ -166,6 +166,8 @@ function actionLabel(event: EditorEvent, before: EditorState) {
     return "Create Sketch Geometry";
   }
   switch (event.type) {
+    case "sketch.intersectionEditCompleted":
+      return event.basis.input.operation.kind === "extend" ? "Extend" : event.basis.input.operation.kind === "split" ? "Split" : "Trim";
     case "sketch.geometryUpdated":
       return "Edit Sketch Geometry";
     case "sketch.geometryDeleted":

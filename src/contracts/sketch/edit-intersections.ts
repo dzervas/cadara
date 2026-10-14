@@ -44,6 +44,11 @@ import {
 import {
   boxesOverlap,
   boxHull,
+  boxOfIntervalPoint,
+  curvePoint,
+  ivAdd,
+  ivMul,
+  ivSub,
   exact,
   nextDown,
   nextUp,
@@ -92,6 +97,8 @@ export type SketchEditOperation =
       targetEntityId: SketchEntityId;
       boundaryEntityId: SketchEntityId;
       pick?: [number, number];
+      /** Explicit clients must not silently choose traversal order at an equal-distance tie. */
+      requireUniquePick?: boolean;
     };
 
 /**
@@ -168,6 +175,7 @@ export type SketchEditFailureCode =
   | "edit-too-few-cuts"
   | "edit-no-crossing"
   | "edit-extend-ambiguous"
+  | "edit-split-ambiguous"
   | "edit-piece-too-short"
   | "edit-circle-split-needs-two";
 
@@ -880,10 +888,27 @@ async function queryCuts(
           allCuts[index]!.position[1] - pick[1],
         );
       // `sort` is stable: equal distances keep the traversal order.
-      selected = [...selected]
-        .sort((left, right) => distance(left) - distance(right))
-        .slice(0, needed)
-        .sort((left, right) => left - right);
+      const ranked = [...selected].sort((left, right) => distance(left) - distance(right));
+      if (operation.requireUniquePick && ranked.length > needed) {
+        // Compare certified root enclosures, not rounded representatives: an
+        // exact tie can have slightly different evaluated binary64 positions.
+        const distanceSquared = (index: number) => {
+          const cut = allCuts[index]!;
+          const box = ordered.flatMap(branch => {
+            const lo = Math.max(branch.domain[0], cut.enclosure[0]);
+            const hi = Math.min(branch.domain[1], cut.enclosure[1]);
+            return lo <= hi ? [boxOfIntervalPoint(curvePoint(branch.curve, [lo, hi]))] : [];
+          }).reduce(boxHull);
+          const dx = ivSub(box.x, exact(pick[0]));
+          const dy = ivSub(box.y, exact(pick[1]));
+          return ivAdd(ivMul(dx, dx), ivMul(dy, dy));
+        };
+        const chosen = ranked.slice(0, needed).map(distanceSquared);
+        const other = ranked.slice(needed).map(distanceSquared);
+        if (chosen.some(a => other.some(b => a[1] >= b[0])))
+          fail("edit-split-ambiguous", "Split has crossings equally near or indistinguishable at the selection; choose a point nearer the intended crossing.", boundaryIds);
+      }
+      selected = ranked.slice(0, needed).sort((left, right) => left - right);
     } else {
       const candidates = selected.flatMap((first) =>
         needed === 1

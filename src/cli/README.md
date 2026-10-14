@@ -127,6 +127,39 @@ exports still use their provider's target/capability gates. Ordinary splines
 can produce profiles only when the production closure and native query gates
 succeed. Degenerate advanced inputs are refused even with `author-invalid`.
 
+### Exact sketch intersection edits
+
+`sketch.geometry.update` additionally accepts `edit`:
+
+- `{ kind: "trim", target }`: line, arc, circle or ordinary spline. The
+  production trim removes the interval between the first and last crossings
+  of all other local curves (construction included); a circle/closed spline
+  instead keeps that interval in source traversal. This is not arbitrary
+  clicked-segment removal. Projected geometry is not a cutter.
+- `{ kind: "split", target, boundary, pick: [x, y] }`: line, arc, circle or
+  ordinary spline cut by one of those same curve kinds. `pick` selects the
+  nearest crossing (a circle needs two). Equally near or uncertifiably ordered
+  choices refuse; choose a point nearer the intended crossing.
+- `{ kind: "extend", target, boundary }`: a line extended to the infinite line
+  of a local line boundary. The production query chooses the nearest eligible
+  end; no crossing or an ambiguous end refuses. Curved extension is unsupported.
+
+Target/boundary are owned entity references or exact unique recipe label
+aliases. Current `basis`, `draft`, and `intent` remain required. Edits reuse
+browser query gates and mutation builders, including derived-input refusals,
+requirement migration and identity allocation. Radius requirements on a circle
+becoming arcs retain their ID as diameter requirements with doubled value;
+arc endpoint bindings are rebuilt. One completed edit is one private action.
+Undo restores the original records. Rediscover resulting references after an
+edit; unchanged labels alone do not promise unchanged geometry.
+
+A successful geometry receipt includes `editQuery` (request ID and queried
+prior draft generation), final `solve`, and final `derivation`. Missing,
+unsupported, stale, ambiguous or no-crossing inputs cannot report applied
+geometry. Profile availability comes from the final production derivation,
+not from the query alone. Explicit point merges keep the existing shared
+`mergePoints` operation described above.
+
 ### Private sketch dimensions
 
 `sketch.dimension.add` takes the current `basis` and `draft`, an `axis`
