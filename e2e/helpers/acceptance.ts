@@ -152,10 +152,59 @@ export const mean = (points: readonly CanvasPoint[]) => ({
 export const spread = (points: readonly CanvasPoint[]) =>
   Math.hypot(points[1]!.x - points[0]!.x, points[1]!.y - points[0]!.y);
 
+/** The viewport centre in viewport-surface (`__cadProjectToScreen`) px. */
+async function viewportCentre(workbench: SketchWorkbenchHarness) {
+  const surface = (await workbench.viewportSurface().boundingBox())!;
+  const canvas = (await workbench.viewport().boundingBox())!;
+  return {
+    surface,
+    centre: {
+      x: canvas.x + canvas.width / 2 - surface.x,
+      y: canvas.y + canvas.height / 2 - surface.y,
+    },
+  };
+}
+
+/**
+ * Pans the mean screen point of the scene targets `anchor` to the viewport
+ * centre with gliding middle-button drags (at most 300 px per glide);
+ * returns the anchor's screen point (viewport-surface px).
+ */
+export async function panToViewportCentre(
+  workbench: SketchWorkbenchHarness,
+  anchor: readonly string[],
+) {
+  const page = workbench.page;
+  const { surface, centre } = await viewportCentre(workbench);
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const at = mean(await settledProjections(workbench, anchor));
+    const offset = Math.hypot(centre.x - at.x, centre.y - at.y);
+    if (offset < 2) return at;
+    // Grab at the centre and drag the scene by at most 300 px per glide.
+    const step = Math.min(1, 300 / offset);
+    await page.mouse.move(surface.x + centre.x, surface.y + centre.y, {
+      steps: 6,
+    });
+    await page.mouse.down({ button: "middle" });
+    await page.mouse.move(
+      surface.x + centre.x + (centre.x - at.x) * step,
+      surface.y + centre.y + (centre.y - at.y) * step,
+      { steps: 16 },
+    );
+    await page.mouse.up({ button: "middle" });
+  }
+  const at = mean(await settledProjections(workbench, anchor));
+  expect(
+    Math.hypot(centre.x - at.x, centre.y - at.y),
+    "the zoom anchor is panned to the viewport centre",
+  ).toBeLessThan(2);
+  return at;
+}
+
 /**
  * Zooms the viewport in `factor` times about the mean screen point of the
- * scene targets `anchor`: pans it to the viewport centre with gliding
- * middle-button drags (the controls zoom about the centre), wheels in at
+ * scene targets `anchor`: pans it to the viewport centre
+ * (`panToViewportCentre`; the controls zoom about the centre), wheels in at
  * the centre until the two point targets `scale` are `factor` times
  * farther apart on screen, then pans the anchor back to the centre.
  * Returns the anchor's screen point. (Moved from
@@ -169,39 +218,9 @@ export async function zoomInAbout(
   factor: number,
 ) {
   const page = workbench.page;
-  const surface = (await workbench.viewportSurface().boundingBox())!;
-  const canvas = (await workbench.viewport().boundingBox())!;
-  const centre = {
-    x: canvas.x + canvas.width / 2 - surface.x,
-    y: canvas.y + canvas.height / 2 - surface.y,
-  };
-  const panToCentre = async () => {
-    for (let attempt = 0; attempt < 6; attempt += 1) {
-      const at = mean(await settledProjections(workbench, anchor));
-      const offset = Math.hypot(centre.x - at.x, centre.y - at.y);
-      if (offset < 2) return at;
-      // Grab at the centre and drag the scene by at most 300 px per glide.
-      const step = Math.min(1, 300 / offset);
-      await page.mouse.move(surface.x + centre.x, surface.y + centre.y, {
-        steps: 6,
-      });
-      await page.mouse.down({ button: "middle" });
-      await page.mouse.move(
-        surface.x + centre.x + (centre.x - at.x) * step,
-        surface.y + centre.y + (centre.y - at.y) * step,
-        { steps: 16 },
-      );
-      await page.mouse.up({ button: "middle" });
-    }
-    const at = mean(await settledProjections(workbench, anchor));
-    expect(
-      Math.hypot(centre.x - at.x, centre.y - at.y),
-      "the zoom anchor is panned to the viewport centre",
-    ).toBeLessThan(2);
-    return at;
-  };
+  const { surface, centre } = await viewportCentre(workbench);
   const start = spread(await settledProjections(workbench, scale));
-  await panToCentre();
+  await panToViewportCentre(workbench, anchor);
   for (let round = 0; round < 40; round += 1) {
     if (spread(await settledProjections(workbench, scale)) >= factor * start)
       break;
@@ -216,7 +235,7 @@ export async function zoomInAbout(
     spread(await settledProjections(workbench, scale)),
     `zoomed in ${factor}×`,
   ).toBeGreaterThanOrEqual(factor * start);
-  return panToCentre();
+  return panToViewportCentre(workbench, anchor);
 }
 
 /**

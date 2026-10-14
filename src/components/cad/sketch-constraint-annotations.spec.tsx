@@ -32,6 +32,8 @@ import { makeAnnotationLifecycleState } from "@/domain/editor/annotation-lifecyc
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
   DimensionAnnotationLabelDrag,
+  getDimensionLabelDragPoint,
+  type DimensionAnnotationLabelGrab,
   type DimensionAnnotationPointerEvent,
 } from "@/components/cad/three-cad-viewport-annotation-drag";
 
@@ -1010,6 +1012,7 @@ function makeLabelDragHarness() {
   const captured = new Set<number>();
   const selected: unknown[] = [];
   const phases: string[] = [];
+  const grabs: DimensionAnnotationLabelGrab[] = [];
   const pointer = (
     clientX: number,
     clientY: number,
@@ -1033,14 +1036,17 @@ function makeLabelDragHarness() {
     captured,
     selected,
     phases,
+    grabs,
     down: (x: number, y: number) => drag.pointerDown(annotation, pointer(x, y)),
     move: (x: number, y: number) =>
       drag.pointerMove(
         annotation,
         pointer(x, y),
         (target) => selected.push(target),
-        (_handle, clientX, clientY, phase) =>
-          phases.push(`${phase} ${clientX},${clientY}`),
+        (_handle, clientX, clientY, phase, grab) => {
+          phases.push(`${phase} ${clientX},${clientY}`);
+          grabs.push(grab);
+        },
       ),
     up: (x: number, y: number) => drag.pointerEnd(pointer(x, y), "end"),
   };
@@ -1085,6 +1091,50 @@ test("T14a: a label drag past 6 px selects once and reports start, move and end;
     h.phases,
     "The capture loss that follows a release reports nothing.",
   ).toHaveLength(4);
+});
+
+// T17j (F-1; issue 10's approved delta drag), UI lane (label drag
+// controller + the viewport's placement point, `getDimensionLabelDragPoint`):
+// a label grabbed off its own point moves by the pointer's sketch
+// displacement since the press, so the drag starts with no jump and keeps
+// the grab offset (base: the viewport placed the label at the pointer).
+test("T17j F-1: a label drag grabbed off the label keeps the grab offset: no jump at the start, then the pointer's sketch displacement", () => {
+  const h = makeLabelDragHarness();
+  // Top-plane-like projection: 20 px per unit, y up, origin at (100, 100).
+  const project = (x: number, y: number) =>
+    [(x - 100) / 20, (100 - y) / 20] as const;
+  h.down(30, 70);
+  h.move(37, 70);
+  h.move(70, 30);
+  h.up(70, 30);
+  expect(h.phases).toEqual([
+    "start 30,70",
+    "move 37,70",
+    "move 70,30",
+    "end 70,30",
+  ]);
+  for (const grab of h.grabs)
+    expect(
+      grab,
+      "every phase carries the press and the label's own point",
+    ).toEqual({
+      clientX: 30,
+      clientY: 70,
+      labelPoint: [5, 2],
+    });
+  const placed = h.phases.map((phase, index) => {
+    const [x, y] = phase.split(" ")[1]!.split(",").map(Number);
+    return getDimensionLabelDragPoint(h.grabs[index]!, x!, y!, project);
+  });
+  expect(placed[0], "the start places the label where it is").toEqual([5, 2]);
+  expect(placed[1], "past the threshold: 7 px right = 0.35 units").toEqual([
+    5.35, 2,
+  ]);
+  expect(placed[3], "40 px right, 40 px up = (2, 2) units").toEqual([7, 4]);
+  expect(
+    getDimensionLabelDragPoint(h.grabs[0]!, 70, 30, () => null),
+    "no projection, no placement",
+  ).toBeNull();
 });
 
 test("T14a: lostpointercapture mid label drag reports cancel and ends the drag", () => {

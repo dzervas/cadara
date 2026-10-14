@@ -15,6 +15,7 @@ import {
   getSketchAnnotationListRows,
   isSketchAnnotationDrawnInViewport,
   patchSketchConstraintValue,
+  patchSketchDimensionAnnotationPlacement,
   pinSketchConstraintPreview,
   selectSketchConstraintTarget,
   startSketchDraw,
@@ -336,4 +337,120 @@ test("T14e Q1/T-17: a problem binding is drawn and listed first (still without d
     key: getPrimitiveRefKey(arc),
     label: "Arc 1",
   });
+});
+
+// T17j (F-1; issue 10's approved delta label drag), logic lane (descriptor
+// seam `getSketchAnnotationDescriptors` + `patchSketchDimensionAnnotationPlacement`):
+// the viewport now writes a label drag's placement at the label's own
+// descriptor anchor plus the pointer's sketch displacement since the grab.
+// For every draggable dimension kind, placing at the label's own anchor
+// changes nothing (no jump when a drag starts), and a displacement moves
+// the label the way its placement allows. (`pointDatumDistance`,
+// `lineDistance` and `linePointDistance` share the point-pair and line
+// placement functions covered here.)
+test("T17j F-1: for every draggable dimension kind a placement at the label's own anchor changes nothing, and a displacement moves the label as its placement allows", () => {
+  const fresh = enterSketchSession(
+    createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
+  );
+  const line = (session: SketchSessionState, a: SketchPoint, b: SketchPoint) =>
+    acceptSketchDraw(startSketchDraw(beginSketchTool(session, "line"), a), b);
+  let session = line(fresh, [0, 0], [4, 0]);
+  session = line(session, [-1, 1], [-1, 4]);
+  session = acceptSketchDraw(
+    startSketchDraw(beginSketchTool(session, "circle"), [8, 1]),
+    [10, 1],
+  );
+  const [lineA, lineB, circle] = session.definition.entities;
+  if (lineA?.kind !== "lineSegment" || !lineB || !circle)
+    throw new Error("premise: two lines and a circle");
+  const aPoints = [lineA.startPointId, lineA.endPointId] as const;
+  const local = (entityId: SketchEntityId) =>
+    ({ kind: "localEntity", entityId }) as const;
+  const dimensions = [
+    { kind: "lineLength", entityId: lineA.entityId },
+    { kind: "distance", axis: "aligned", pointIds: aPoints },
+    { kind: "horizontalDistance", pointIds: aPoints },
+    { kind: "circleRadius", entityId: circle.entityId },
+    { kind: "diameter", entityId: circle.entityId },
+    {
+      kind: "lineAngle",
+      lines: [local(lineA.entityId), local(lineB.entityId)],
+    },
+  ].map((dimension, index) => ({
+    ...dimension,
+    dimensionId: `dimension_t17j_${index}_${dimension.kind}`,
+    label: dimension.kind,
+    reference: true as const,
+  }));
+  session = {
+    ...session,
+    definition: {
+      ...session.definition,
+      dimensionIds: dimensions.map((dimension) => dimension.dimensionId),
+      dimensions,
+    } as unknown as SketchSessionState["definition"],
+  };
+  const anchorOf = (state: SketchSessionState, id: string) => {
+    const descriptor = getSketchAnnotationDescriptors(state).find(
+      (candidate) => candidate.id === id,
+    )!;
+    expect(descriptor.dragHandle, `${id} is draggable`).toBeDefined();
+    expect(descriptor.anchor.kind).toBe("sketchPoint");
+    return descriptor.anchor.point as SketchPoint;
+  };
+  const place = (state: SketchSessionState, id: string, point: SketchPoint) =>
+    patchSketchDimensionAnnotationPlacement(state, {
+      intent: "setDimensionAnnotationPlacement",
+      dimensionId: id,
+      point,
+    });
+  const delta: SketchPoint = [0.7, 0.9];
+  const close = (actual: SketchPoint, expected: SketchPoint, message: string) =>
+    expect(
+      Math.hypot(actual[0] - expected[0], actual[1] - expected[1]),
+      message,
+    ).toBeLessThan(1e-9);
+  for (const { dimensionId: id, kind } of dimensions) {
+    // A first placement off the default, then the label's own anchor.
+    const placed = place(session, id, kind === "lineAngle" ? [2, 2] : [3, 2]);
+    const anchor = anchorOf(placed, id);
+    const restarted = place(placed, id, anchor);
+    close(anchorOf(restarted, id), anchor, `${kind}: no jump at the grab`);
+    const moved = anchorOf(
+      place(placed, id, [anchor[0] + delta[0], anchor[1] + delta[1]]),
+      id,
+    );
+    switch (kind) {
+      case "lineLength":
+      case "distance":
+      case "horizontalDistance":
+        // Line A is horizontal: the label follows the normal (y) part.
+        close(moved, [anchor[0], anchor[1] + delta[1]], kind);
+        break;
+      case "circleRadius":
+      case "diameter": {
+        const target = [anchor[0] + delta[0] - 8, anchor[1] + delta[1] - 1];
+        const length = Math.hypot(target[0]!, target[1]!);
+        close(
+          moved,
+          [8 + (2 * target[0]!) / length, 1 + (2 * target[1]!) / length],
+          `${kind}: the label turns to the pointer's direction on the rim`,
+        );
+        break;
+      }
+      case "lineAngle": {
+        // The lines' corner is their intersection (-1, 0).
+        const radius = (point: SketchPoint) =>
+          Math.hypot(point[0] + 1, point[1]);
+        expect(radius(moved), kind).toBeCloseTo(
+          radius([anchor[0] + delta[0], anchor[1] + delta[1]]),
+          9,
+        );
+        break;
+      }
+    }
+  }
 });
