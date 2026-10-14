@@ -269,6 +269,42 @@ Recipes accept exact unique discovered labels for seeds, `axis`, repair
 Missing/ambiguous labels fail before that operation and leave later operations
 unexecuted; unknown aliases are usage errors before runtime startup.
 
+### Durable sketch patterns and transforms
+
+`sketch.derivation.create` takes current `basis`/`draft`, distinct owned
+entity `targets`, `kind: "linearPattern" | "circularPattern" | "transform"`,
+a finite positive numeric `value`, and `intent`. Seeds use exact unique
+discovered-label aliases in recipes. Missing/ambiguous labels fail before the
+operation; unknown aliases are usage errors before runtime startup.
+
+These are the current browser builder's supported settings, not arbitrary
+schema construction: linear pattern creates ONE additional instance translated
+by `[value, 0]`; circular pattern creates ONE additional instance rotated by
+`value` RADIANS about `[0, 0]`; derived transform creates ONE additional copy
+translated by `[value, 0]`, with origin `[0, 0]`, rotation zero and scale one.
+They support points, lines, circles, bound arcs and ordinary splines, preserving
+shared point identities and construction flags. Unsupported curves and offset
+spline shells refuse. No direction/center reference, arbitrary instance count,
+rotation/scale setter or post-creation numeric setter is exposed: the browser
+has no such authoring owner. Scalar settings are creation inputs. Derived
+transforms are NOT direct `sketch.geometry.update` moves.
+
+One authored action creates each durable relationship. Source point/body/radius/
+requirement edits use the existing edit/solve owners and refresh derived copies;
+chains reuse those same production dependencies. Undo/redo and publication/
+reopening preserve relationship and copy identities. Deleting a needed seed
+can invalidate the solve and block publication/profile use rather than serving
+last-good geometry. This does not invent detach, automatic rebinding or repair.
+
+Discovery `sketch.derivations` exposes the authored relationship record with
+settings and seed/output identities, `profileGateFailed` from the production
+failed-derivation list, and accepted solved `currentGeometry` (null when that
+relationship fails the gate OR the live solve is unaccepted). Missing-seed
+diagnostics can invalidate a solve without appearing in that narrower list;
+inspect sketch validity/diagnostics too. Authored entity/point records remain
+distinct from current geometry. Completion awaits correlated solve/native
+region derivation, and profile validity remains production-owned.
+
 ### Private sketch dimensions
 
 `sketch.dimension.add` takes the current `basis` and `draft`, an `axis`

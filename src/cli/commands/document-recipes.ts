@@ -208,7 +208,7 @@ function parseRecipe(input: unknown): RecipeOperation[] {
       validateTarget(target, "sketch_point_validation");
       return command.operation === "sketch.requirement.remove"
         ? { kind: "dimension", sketchId: "sketch_validation", dimensionId: "dimension_validation" }
-        : command.operation === "sketch.geometry.build" || command.operation === "sketch.mirror.create" || command.operation === "sketch.offset.create"
+        : command.operation === "sketch.geometry.build" || command.operation === "sketch.derivation.create" || command.operation === "sketch.mirror.create" || command.operation === "sketch.offset.create"
           ? { kind: "sketchEntity", sketchId: "sketch_validation", entityId: "sketch_entity_validation" }
           : { kind: "sketchPoint", sketchId: "sketch_validation", pointId: "sketch_point_validation" };
     });
@@ -383,7 +383,7 @@ export const documentRecipesCommand: CommandModule = {
           if (target.kind !== "sketchPoint" && target.kind !== "sketchEntity" && target.kind !== "dimension" && target.kind !== "constraint" && target.kind !== "sketch") throw new Error("Invalid label target.");
           command.target = target;
         }
-        if (command.operation === "sketch.geometry.build" || command.operation === "sketch.mirror.create" || command.operation === "sketch.offset.create") command.targets = command.targets.map(value => {
+        if (command.operation === "sketch.geometry.build" || command.operation === "sketch.derivation.create" || command.operation === "sketch.mirror.create" || command.operation === "sketch.offset.create") command.targets = command.targets.map(value => {
           const target = resolveSketchTarget(value, ["sketchEntity"]);
           if (target.kind !== "sketchEntity") throw new Error("Invalid construction target.");
           return target;
