@@ -80,6 +80,17 @@ export type SemanticSketchConstruction = {
   targets: readonly Extract<DurableRef, { kind: "sketchEntity" }>[];
 } & ({ kind: "fillet"; radius: number } | { kind: "chamfer"; distance: number } | { kind: "slot"; width: number });
 
+export type SemanticSketchStylePatch = {
+  [K in keyof Required<import("@/contracts/sketch/schema").SketchStyleDefinition>]: {
+    field: K;
+    value: Required<import("@/contracts/sketch/schema").SketchStyleDefinition>[K];
+  }
+}[keyof import("@/contracts/sketch/schema").SketchStyleDefinition];
+
+export type SemanticReferenceImageEdit =
+  | { kind: "placement"; placement: import("@/contracts/reference-image/schema").ReferenceImagePlacement }
+  | { kind: "settings"; scaleMode: import("@/contracts/reference-image/schema").ReferenceImageCalibrationScaleMode; showExportedAnchorsInSketch: boolean };
+
 export interface SemanticDraftBasis {
   commandSessionId: CommandSessionId;
   generation: number;
@@ -90,6 +101,11 @@ export type SemanticSketchCommand = CommandIdentity & {
     | ({ operation: "sketch.begin" } & ({ plane: "xy" | "yz" | "xz" } | { support: import("@/contracts/shared/sketch-plane").SketchPlaneSupportRef }))
     | { operation: "sketch.open"; sketchId: SketchId }
     | { operation: "sketch.support.reassign"; sketchId: SketchId; support: import("@/contracts/shared/sketch-plane").SketchPlaneSupportRef }
+    | { operation: "sketch.image.update"; draft: SemanticDraftBasis; target: Extract<DurableRef, { kind: "sketchOperation" }>; edit: SemanticReferenceImageEdit; intent: "fulfill" | "author-invalid" }
+    | { operation: "sketch.image.replace"; draft: SemanticDraftBasis; target: Extract<DurableRef, { kind: "sketchOperation" }>; path: string; intent: "fulfill" | "author-invalid" }
+    | { operation: "sketch.image.remove"; draft: SemanticDraftBasis; target: Extract<DurableRef, { kind: "sketchOperation" }>; intent: "fulfill" | "author-invalid" }
+    | { operation: "sketch.image.add"; draft: SemanticDraftBasis; path: string; intent: "fulfill" | "author-invalid" }
+    | { operation: "sketch.style.patch"; draft: SemanticDraftBasis; targets: readonly Extract<DurableRef, { kind: "region" | "sketchEntity" }>[]; patch: SemanticSketchStylePatch; intent: "fulfill" | "author-invalid" }
     | { operation: "sketch.reference.add"; draft: SemanticDraftBasis; target: Extract<DurableRef, { kind: "construction" | "face" | "edge" | "vertex" | "sketch" | "sketchEntity" | "sketchPoint" }>; intent: "fulfill" | "author-invalid" }
     | {
         operation: "sketch.author";
@@ -309,6 +325,8 @@ export interface SemanticDiscovery {
     plane: "xy" | "yz" | "xz" | null;
     /** Resolved production support and world frame, in document units. */
     support?: import("@/contracts/shared/sketch-plane").SketchPlaneDefinition;
+    styles?: readonly import("@/contracts/sketch/schema").SketchStyleRecord[];
+    referenceImages?: readonly import("@/contracts/sketch/schema").SketchReferenceImageRecord[];
     /** Authored sources and actual solver-owned projections; never editable local copies. */
     references?: readonly { definition: import("@/contracts/sketch/schema").SketchReferenceDefinition; revisionId: RevisionId | null; projection: import("@/contracts/solver/schema").ProjectedSketchReferenceRecord | null }[];
     solveStatus: SolvedSketchStatus;
@@ -323,6 +341,7 @@ export interface SemanticDiscovery {
       kind: import("@/contracts/sketch/schema").SketchEntityDefinition["kind"];
       pointIds: readonly SketchPointId[];
       construction: boolean;
+      style?: import("@/contracts/sketch/schema").SketchStyleDefinition;
       radius?: number;
       /** Authored advanced parameters, not a promise of region/export support. */
       minorRadius?: number;

@@ -168,6 +168,14 @@ function actionLabel(event: EditorEvent, before: EditorState) {
   switch (event.type) {
     case "sketch.intersectionEditCompleted":
       return event.basis.input.operation.kind === "extend" ? "Extend" : event.basis.input.operation.kind === "split" ? "Split" : "Trim";
+    case "sketch.imageEdited":
+      return event.edit.kind === "replace" ? "Replace Reference Image" : "Edit Reference Image";
+    case "sketch.imageRemoved":
+      return "Remove Reference Image";
+    case "sketch.imageAuthored":
+      return "Reference Image";
+    case "sketch.styleAuthored":
+      return "Sketch Style";
     case "sketch.referenceAuthored":
       return "Reference Geometry";
     case "sketch.derivationCreated":

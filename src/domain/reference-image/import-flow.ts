@@ -14,9 +14,7 @@ import type {
 } from "@/domain/modeling/modeling-service";
 import { createReferenceImageOperation } from "@/domain/reference-image/operations";
 import {
-  encodeBytesToBase64,
-  inferReferenceImageMediaType,
-  readRasterImageDimensions,
+  prepareReferenceImagePayload,
   supportedReferenceImageFileTypes,
 } from "@/domain/reference-image/raster";
 import {
@@ -27,21 +25,11 @@ import {
 export async function readReferenceImagePayload(
   file: File,
 ): Promise<ReferenceImagePayload> {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  const { width, height } = readRasterImageDimensions(bytes);
-  const mediaType = file.type.trim() || inferReferenceImageMediaType(file.name);
-
-  if (!mediaType) {
-    throw new Error(`Unsupported reference image type for ${file.name}.`);
-  }
-
-  return {
-    mediaType,
-    fileName: file.name.trim() || undefined,
-    pixelWidth: width,
-    pixelHeight: height,
-    base64Data: encodeBytesToBase64(bytes),
-  };
+  return prepareReferenceImagePayload({
+    bytes: new Uint8Array(await file.arrayBuffer()),
+    fileName: file.name,
+    mediaType: file.type,
+  });
 }
 
 export type SketchImageImportFlowResult =

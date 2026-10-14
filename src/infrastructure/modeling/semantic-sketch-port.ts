@@ -53,6 +53,7 @@ function currentDerivedOutputGeometry(
 function entityDiscovery(definition: import("@/contracts/sketch/schema").SketchDefinition): NonNullable<SemanticDiscovery["sketch"]>["entities"] {
   return definition.entities.map(e => ({
     entityId: e.entityId, kind: e.kind, pointIds: getEntityPointIds(e), construction: e.isConstruction,
+    ...(e.style ? { style: e.style } : {}),
     ...(e.kind === "circle" ? { radius: e.radius } : e.kind === "arc" ? { radius: (() => {
       const center = definition.points.find(p => p.pointId === e.centerPointId)!.position;
       const start = definition.points.find(p => p.pointId === e.startPointId)!.position;
@@ -123,6 +124,7 @@ function dimensionDiscovery(
 /** Certificates only are retained here; the editor/action owner owns all draft state. */
 export function createSemanticSketchPort(input: {
   loop: EditorEventLoop;
+  referenceImageFiles?: import("@/application/semantic/reference-image-files").ReferenceImageFiles;
   service: import("@/domain/modeling/modeling-service").ModelingService;
   publications: ReturnType<
     typeof import("./sketch-publication-receipts").createSketchPublicationReceipts
@@ -167,6 +169,7 @@ export function createSemanticSketchPort(input: {
         { label: s.sketchLabel, target: { kind: "sketch", sketchId: s.sketchId ?? s.actionContextId } },
         ...s.definition.points.map(p => ({ label: p.label, target: { kind: "sketchPoint" as const, sketchId: s.sketchId ?? s.actionContextId, pointId: p.pointId } })),
         ...s.definition.entities.map(e => ({ label: e.label, target: { kind: "sketchEntity" as const, sketchId: s.sketchId ?? s.actionContextId, entityId: e.entityId } })),
+        ...(s.definition.referenceImages ?? []).map(r => ({ label: r.label, target: { kind: "sketchOperation" as const, sketchId: s.sketchId ?? s.actionContextId, operationId: r.operationId } })),
         ...s.definition.dimensions.map(d => ({ label: d.label, target: { kind: "dimension" as const, sketchId: s.sketchId ?? s.actionContextId, dimensionId: d.dimensionId } })),
         ...s.definition.constraints.map(c => ({ label: c.label, target: { kind: "constraint" as const, sketchId: s.sketchId ?? s.actionContextId, constraintId: c.constraintId } })),
         ...(usable ? s.liveRegions.regions.filter(r => r.isClosed).map(r => ({ label: r.label, target: { kind: "region" as const, sketchId: s.sketchId ?? s.actionContextId, regionId: r.regionId } })) : []),
@@ -200,6 +203,8 @@ export function createSemanticSketchPort(input: {
           construction: p.isConstruction,
         })),
         entities: entityDiscovery(s.definition),
+        styles: s.definition.styles ?? [],
+        referenceImages: s.definition.referenceImages ?? [],
         derivations: (s.definition.derivedRelationships ?? []).flatMap(relationship => {
           if (relationship.kind !== "linearPattern" && relationship.kind !== "circularPattern" && relationship.kind !== "transform") return [];
           const failed = sketchProfileGateFailures(s.liveSolve!.solvedSnapshot).includes(relationship.derivationId);
@@ -384,6 +389,14 @@ export function createSemanticSketchPort(input: {
       if (!canStartSketchFromTarget(target, snapshot)) return { ...terminal, outcome: { kind: "rejected", reasonCode: "sketch-support-unavailable" } };
     }
     if (command.operation === "sketch.support.reassign") return reassignSupport(command, terminal);
+    if (command.operation === "sketch.image.update" || command.operation === "sketch.image.remove" || command.operation === "sketch.image.replace") {
+      if (editor.kind !== "editingSketch" || command.target.sketchId !== (editor.session.sketchId ?? editor.session.actionContextId) || !editor.session.definition.referenceImages?.some(r => r.operationId === command.target.operationId))
+        return { ...terminal, outcome: { kind: "rejected", reasonCode: "reference-image-unavailable" } };
+    }
+    if (command.operation === "sketch.style.patch") {
+      if (editor.kind !== "editingSketch" || !command.targets.every(t => t.sketchId === (editor.session.sketchId ?? editor.session.actionContextId)))
+        return { ...terminal, outcome: { kind: "rejected", reasonCode: "sketch-target-unavailable" } };
+    }
     if (command.operation === "sketch.reference.add") {
       const key = getPrimitiveRefKey(command.target);
       if (!before.discovery.references.some(r => getPrimitiveRefKey(r.target) === key)) return { ...terminal, outcome: { kind: "rejected", reasonCode: "reference-source-unavailable" } };
@@ -510,6 +523,22 @@ export function createSemanticSketchPort(input: {
       }
       if (command.operation === "sketch.reference.add")
         events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.referenceAuthored", target: command.target });
+      if (command.operation === "sketch.image.update")
+        events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.imageEdited", target: editorTarget(command.target), edit: command.edit });
+      if (command.operation === "sketch.image.remove")
+        events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.imageRemoved", target: editorTarget(command.target) });
+      if (command.operation === "sketch.image.replace") {
+        if (!input.referenceImageFiles) return { ...terminal, outcome: { kind: "unavailable", capability: "reference-image-files" } };
+        const image = await input.referenceImageFiles.read(command.path);
+        events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.imageEdited", target: editorTarget(command.target), edit: { kind: "replace", image } });
+      }
+      if (command.operation === "sketch.image.add") {
+        if (!input.referenceImageFiles) return { ...terminal, outcome: { kind: "unavailable", capability: "reference-image-files" } };
+        const payload = await input.referenceImageFiles.read(command.path);
+        events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.imageAuthored", payload });
+      }
+      if (command.operation === "sketch.style.patch")
+        events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.styleAuthored", targets: command.targets.map(editorTarget), patch: command.patch });
       if (command.operation === "sketch.derivation.create")
         events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.derivationCreated", input: { ...command, targets: command.targets.map(editorTarget) } });
       if (command.operation === "sketch.mirror.remove")
@@ -609,7 +638,7 @@ export function createSemanticSketchPort(input: {
         if (blocked?.blockedReason)
           return { ...terminal, outcome: { kind: "conflicted", actualBasis }, diagnostics: [...terminal.diagnostics, semanticDiagnostic(new Error(blocked.blockedReason))] };
       }
-      if ((geometryMutation || command.operation === "sketch.reference.add" || command.operation === "sketch.requirement.add" || command.operation === "sketch.dimension.update" || command.operation === "sketch.dimension.reference") && editor.kind === "editingSketch" && finalEditor.kind === "editingSketch" && finalEditor.session.definition === editor.session.definition && finalEditor.session.sketchLabel === editor.session.sketchLabel) {
+      if ((geometryMutation || command.operation === "sketch.image.update" || command.operation === "sketch.image.replace" || command.operation === "sketch.image.remove" || command.operation === "sketch.style.patch" || command.operation === "sketch.reference.add" || command.operation === "sketch.requirement.add" || command.operation === "sketch.dimension.update" || command.operation === "sketch.dimension.reference") && editor.kind === "editingSketch" && finalEditor.kind === "editingSketch" && finalEditor.session.definition === editor.session.definition && finalEditor.session.sketchLabel === editor.session.sketchLabel) {
         if (finalEditor.session.validationMessage) return { ...terminal, outcome: { kind: "rejected", reasonCode: "sketch-edit-refused" }, diagnostics: [semanticDiagnostic(new Error(finalEditor.session.validationMessage))] };
         return { ...terminal, outcome: priorGeometry.kind === "current" ? { kind: "completed", change: "unchanged" } : { kind: "failed", failures: ["geometry"] }, discovery: initial, completion: { ...terminal.completion, handoff: { kind: "current", state: initial.state }, geometry: priorGeometry } };
       }
@@ -800,9 +829,17 @@ export function createSemanticSketchPort(input: {
               "Published sketch is absent from the authoritative snapshot.",
             );
           const boundaryBasis = regionBoundaryBasisOfRecord(sketch);
+          // The production image-import contract persists image-only metadata
+          // with notEvaluated geometry. Like an empty draft, it has no profile
+          // obligation; do not manufacture a solved status or native faces.
+          const imageOnly = (sketch.definition.referenceImages?.length ?? 0) > 0 &&
+            sketch.definition.entities.length === 0 && sketch.definition.points.length === 0 &&
+            sketch.definition.constraints.length === 0 && sketch.definition.dimensions.length === 0 &&
+            sketch.definition.references.length === 0 && (sketch.definition.derivedRelationships?.length ?? 0) === 0 &&
+            sketch.solvedSnapshot.status.solveState === "notEvaluated";
           const usable =
             !snapshot.document.diagnostics.some(d => d.severity === "error") &&
-            sketch.derivedValidity.state === "current" &&
+            (sketch.derivedValidity.state === "current" || imageOnly) &&
             sketchProfileGateFailures(sketch.solvedSnapshot).length === 0 &&
             sketch.regions.every((r) =>
               r.loops.every((l) =>
@@ -830,6 +867,8 @@ export function createSemanticSketchPort(input: {
               construction: p.isConstruction,
             })),
             entities: entityDiscovery(sketch.definition),
+            styles: sketch.definition.styles ?? [],
+            referenceImages: sketch.definition.referenceImages ?? [],
             profiles: usable
               ? sketch.regions
                   .filter((r) => r.isClosed)

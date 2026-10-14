@@ -26,6 +26,7 @@ import type { ModelingService } from "@/domain/modeling/modeling-service";
 export function createSemanticDocumentPort(input: {
   documentId: DocumentId;
   nativeFileIO: NativeDocumentFileIO;
+  referenceImageFiles?: import("@/application/semantic/reference-image-files").ReferenceImageFiles;
   repository: DocumentRepository;
   service: ModelingService;
   loop: EditorEventLoop;
@@ -87,7 +88,7 @@ export function createSemanticDocumentPort(input: {
     };
     return { discovery: sketches.discovery(discovery), diagnostics: snapshot.document.diagnostics };
   }
-  const sketches = createSemanticSketchPort({ loop, inspect, service, publications: input.sketchPublications });
+  const sketches = createSemanticSketchPort({ loop, inspect, service, publications: input.sketchPublications, referenceImageFiles: input.referenceImageFiles });
   let released = false;
   return {
     async initialize() {

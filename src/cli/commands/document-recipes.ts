@@ -20,7 +20,7 @@ type RecipeCommand<T = SemanticCommand> = T extends SemanticCommand
   ? Omit<T, "basis" | "draft" | "points" | "dimensionId" | "derivationId" | "profile" | "featureId" | "sketchId" | "target" | "targets" | "axis" | "repair" | "edit" | "primitive" | "support"> &
     (T extends { support: infer S } ? { support: S | TargetAlias } : unknown) &
     (T extends { primitive: unknown } ? { primitive: RecipePrimitive } : unknown) &
-    (T extends { edit: unknown } ? { edit: RecipeGeometryEdit } : unknown) &
+    (T extends { edit: infer E } ? { edit: E extends { target: unknown } ? RecipeGeometryEdit<E> : E } : unknown) &
     (T extends { axis: infer A } ? { axis: A | TargetAlias } : unknown) &
     (T extends { repair: infer R } ? { repair: R extends { kind: "axis"; target: infer A } ? { kind: "axis"; target: A | TargetAlias } : R extends { kind: "original"; target: infer A; output: infer O } ? { kind: "original"; target: A | TargetAlias; output: O | TargetAlias } : never } : unknown) &
     (T extends { targets: infer R extends readonly unknown[] } ? { targets: readonly (R[number] | TargetAlias)[] } : unknown) &
@@ -190,7 +190,9 @@ function parseRecipe(input: unknown): RecipeOperation[] {
     }
     if (isAlias(command.target)) {
       validateTarget(command.target, "body_validation");
-      validationCommand.target = command.operation === "export.step" ? { kind: "body", bodyId: "body_validation" } : { kind: "sketchPoint", sketchId: "sketch_validation", pointId: "sketch_point_validation" };
+      validationCommand.target = command.operation === "export.step" ? { kind: "body", bodyId: "body_validation" }
+        : command.operation === "sketch.image.update" || command.operation === "sketch.image.replace" || command.operation === "sketch.image.remove" ? { kind: "sketchOperation", sketchId: "sketch_validation", operationId: "sketch_operation_validation" }
+        : { kind: "sketchPoint", sketchId: "sketch_validation", pointId: "sketch_point_validation" };
     }
     if (isAlias(command.support)) {
       validateTarget(command.support, "construction_validation");
@@ -213,7 +215,7 @@ function parseRecipe(input: unknown): RecipeOperation[] {
       validateTarget(target, "sketch_point_validation");
       return command.operation === "sketch.requirement.remove"
         ? { kind: "dimension", sketchId: "sketch_validation", dimensionId: "dimension_validation" }
-        : command.operation === "sketch.geometry.build" || command.operation === "sketch.derivation.create" || command.operation === "sketch.mirror.create" || command.operation === "sketch.offset.create"
+        : command.operation === "sketch.style.patch" || command.operation === "sketch.geometry.build" || command.operation === "sketch.derivation.create" || command.operation === "sketch.mirror.create" || command.operation === "sketch.offset.create"
           ? { kind: "sketchEntity", sketchId: "sketch_validation", entityId: "sketch_entity_validation" }
           : { kind: "sketchPoint", sketchId: "sketch_validation", pointId: "sketch_point_validation" };
     });
@@ -388,6 +390,11 @@ export const documentRecipesCommand: CommandModule = {
           if (target.kind !== "construction" && target.kind !== "face" && target.kind !== "edge" && target.kind !== "vertex" && target.kind !== "sketch" && target.kind !== "sketchEntity" && target.kind !== "sketchPoint") throw new Error("Invalid external reference source.");
           command.target = target;
         }
+        if (command.operation === "sketch.image.update" || command.operation === "sketch.image.replace" || command.operation === "sketch.image.remove") {
+          const target = resolveSketchTarget(command.target, ["sketchOperation"]);
+          if (target.kind !== "sketchOperation") throw new Error("Invalid reference image target.");
+          command.target = target;
+        }
         if (command.operation === "sketch.construction.set") {
           const target = resolveSketchTarget(command.target, ["sketchPoint", "sketchEntity"]);
           if (target.kind !== "sketchPoint" && target.kind !== "sketchEntity") throw new Error("Invalid construction target.");
@@ -401,6 +408,11 @@ export const documentRecipesCommand: CommandModule = {
         if (command.operation === "sketch.geometry.build" || command.operation === "sketch.derivation.create" || command.operation === "sketch.mirror.create" || command.operation === "sketch.offset.create") command.targets = command.targets.map(value => {
           const target = resolveSketchTarget(value, ["sketchEntity"]);
           if (target.kind !== "sketchEntity") throw new Error("Invalid construction target.");
+          return target;
+        });
+        if (command.operation === "sketch.style.patch") command.targets = command.targets.map(value => {
+          const target = resolveSketchTarget(value, ["region", "sketchEntity"]);
+          if (target.kind !== "region" && target.kind !== "sketchEntity") throw new Error("Invalid style target.");
           return target;
         });
         if (command.operation === "sketch.geometry.delete") command.targets = command.targets.map(value => {

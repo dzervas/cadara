@@ -6,8 +6,11 @@ import type {
   SketchPointDefinition,
 } from "@/contracts/sketch/schema";
 import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
-import { stripReferenceImageRuntimeState } from "@/domain/reference-image-calibration/state";
+import { stripReferenceImageRuntimeState, createDefaultReferenceImageCalibrationState, solveReferenceImageOperationState, replaceReferenceImagePayloadPreservingCalibration } from "@/domain/reference-image-calibration/state";
+import { validateReferenceImageOperationState } from "@/contracts/reference-image/runtime-schema";
 import type { SketchSessionState } from "./types";
+import { createReferenceImageOperation } from "@/domain/reference-image/operations";
+import { getSessionSketchId, hasAcceptedLiveSolveOfDefinition } from "./internals";
 import {
   appendDefinition,
   getSketchSessionInvalidFeedback,
@@ -15,6 +18,18 @@ import {
   rebuildSessionCommitRequest,
   withLiveSolveBasis,
 } from "./internals";
+
+/** One explicit image intent delegates to the same append owner as browser imports. */
+export function authorReferenceImage(
+  session: SketchSessionState,
+  payload: import("@/contracts/reference-image/schema").ReferenceImagePayload,
+): SketchSessionState {
+  return appendReferenceImageOperations(session, [createReferenceImageOperation({
+    sequence: session.sequence + 1,
+    sketchId: getSessionSketchId(session),
+    payload,
+  })]);
+}
 
 export function appendReferenceImageOperations(
   session: SketchSessionState,
@@ -37,6 +52,34 @@ export function appendReferenceImageOperations(
     },
     definition,
   );
+}
+
+/** Explicit placement/settings/replacement prepare the same owned-state update used by calibration. */
+export function editReferenceImage(
+  session: SketchSessionState,
+  operationId: SketchAuthoringOperationId,
+  edit: import("@/contracts/semantic/schema").SemanticReferenceImageEdit | { kind: "replace"; image: import("@/contracts/reference-image/schema").ReferenceImagePayload },
+): SketchSessionState {
+  const record = session.definition.referenceImages?.find(r => r.operationId === operationId);
+  if (!record) return { ...session, validationMessage: "Reference image is unavailable." };
+  const calibration = record.ownedState.calibration ?? createDefaultReferenceImageCalibrationState();
+  const state = edit.kind === "placement"
+    ? { ...record.ownedState, placement: edit.placement }
+    : edit.kind === "settings"
+      ? { ...record.ownedState, calibration: { ...calibration, scaleMode: edit.scaleMode, showExportedAnchorsInSketch: edit.showExportedAnchorsInSketch } }
+      : { ...record.ownedState, image: edit.image };
+  const checked = validateReferenceImageOperationState(state);
+  if (!checked.success) return { ...session, validationMessage: checked.issues[0]?.message ?? "Invalid reference image settings." };
+  if (calibration.anchors.length && !hasAcceptedLiveSolveOfDefinition(session))
+    return { ...session, validationMessage: "Reference image calibration requires current accepted sketch points." };
+  const pointPositionsById = new Map(session.liveSolve?.solvedSnapshot.solvedPoints.map(p => [p.pointId, p.solvedPosition]) ?? []);
+  const solved = edit.kind === "replace"
+    ? replaceReferenceImagePayloadPreservingCalibration({ state: record.ownedState, image: edit.image, pointPositionsById })
+    : solveReferenceImageOperationState(checked.data, { pointPositionsById });
+  const label = edit.kind === "replace" ? edit.image.fileName ?? record.label : record.label;
+  if (label === record.label && JSON.stringify(stripReferenceImageRuntimeState(solved)) === JSON.stringify(stripReferenceImageRuntimeState(record.ownedState)))
+    return { ...session, validationMessage: null };
+  return updateReferenceImageOperationStates({ session: { ...session, validationMessage: null }, updates: [{ operationId, state: solved, label }] });
 }
 
 export function updateReferenceImageOperationStates(input: {
