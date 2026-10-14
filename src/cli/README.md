@@ -160,6 +160,37 @@ geometry. Profile availability comes from the final production derivation,
 not from the query alone. Explicit point merges keep the existing shared
 `mergePoints` operation described above.
 
+### Sketch corners and slots
+
+`sketch.geometry.build` takes current `basis`, `draft`, owned entity
+`targets`, `intent`, and one construction input:
+
+- `kind: "fillet", radius: <positive number>`: two adjacent, non-collinear
+  local line segments; trims the corner and adds a tangent, endpoint-bound arc.
+- `kind: "chamfer", distance: <positive number>`: the same two-line corner;
+  trims each side by that distance and adds a connecting line.
+- `kind: "slot", width: <positive number>`: one line (parallel sides and
+  bound semicircular ends), one arc (concentric arcs and **straight radial
+  caps**), or one closed line chain (two joined offset loops). Spline, circle,
+  projected and open multi-line seeds are not supported.
+
+Values use document millimeters and must fit the selected geometry. Arc slots
+require a positive inner radius. Existing mirror/derived-input restrictions
+still apply. This is the browser's construction operation, not a new
+associative slot or persistent driving radius/width requirement.
+Corners retain source entity IDs and existing requirements; fillets and
+rounded slot ends add the production endpoint/tangency requirements.
+Slots **retain the seed** and inherit its construction flag; they do not
+silently delete it or mark it construction. An ordinary retained seed can
+partition profiles. Use an explicit `sketch.construction.set` when appropriate.
+
+Each completed construction is one private authored action. Completion returns
+the correlated final solve/derivation, diagnostics, current profiles and
+discoverable entity/requirement identities. Infeasible, unavailable, duplicate,
+foreign or stale targets never imply successful construction.
+Recipes accept exact unique entity-label aliases in `targets`; browser picking
+and pointer gestures are not semantic inputs.
+
 ### Private sketch dimensions
 
 `sketch.dimension.add` takes the current `basis` and `draft`, an `axis`

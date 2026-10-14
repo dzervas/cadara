@@ -108,6 +108,7 @@ import {
   applySketchContribution,
   cloneDefinition,
   createSessionCommitFactories,
+  getSessionSketchId,
   getSketchSessionInvalidFeedback,
   hasAcceptedLiveSolveOfDefinition,
   withLiveSolveBasis,
@@ -905,6 +906,37 @@ export function getSelectedSketchEntityIds(
 export const MIRROR_DATUM_AXIS_ORDER_MESSAGE =
   "Pick the geometry to mirror first, then the sketch axis as the final mirror axis.";
 
+/** Explicit construction inputs shared with browser preview and commit. */
+export function getSketchCornerSlotResult(
+  session: SketchSessionState,
+  input: { kind: "fillet" | "chamfer" | "slot"; entityIds: readonly SketchEntityId[]; value: number | null },
+): SketchEditOperationResult {
+  const toolId = input.kind === "fillet" ? "sketchFillet" : input.kind === "chamfer" ? "sketchChamfer" : "sketchSlot";
+  const gate = offsetEditInputGate(session, input.entityIds, `a ${getSketchEditToolDefinition(toolId).metadata.name} input`);
+  if (gate) return refusedEditOperation(gate.message);
+  const common = {
+    definition: session.definition,
+    entityIds: input.entityIds,
+    sequence: session.sequence + 1,
+    factories: createSessionCommitFactories(session.sequence + 1, session.sketchId ?? ("sketch_draft" as SketchId)),
+  };
+  return input.kind === "fillet"
+    ? createSketchFilletMutation({ ...common, radius: input.value })
+    : input.kind === "chamfer"
+      ? createSketchChamferMutation({ ...common, distance: input.value })
+      : createSketchSlotContribution({ ...common, width: input.value });
+}
+
+export function buildSketchGeometry(
+  session: SketchSessionState,
+  input: import("@/contracts/semantic/schema").SemanticSketchConstruction,
+): SketchSessionState {
+  if (!input.targets.length || !input.targets.every(t => t.sketchId === getSessionSketchId(session) && session.definition.entities.some(e => e.entityId === t.entityId)) || new Set(input.targets.map(t => t.entityId)).size !== input.targets.length)
+    return { ...session, validationMessage: "Construction targets must be distinct owned sketch entities." };
+  const result = getSketchCornerSlotResult(session, { kind: input.kind, entityIds: input.targets.map(t => t.entityId), value: input.kind === "fillet" ? input.radius : input.kind === "chamfer" ? input.distance : input.width });
+  return completeSketchEditOperation(session, result);
+}
+
 export function getSketchEditOperatorResult(
   session: SketchSessionState,
   activeEditTool: SketchEditToolState,
@@ -916,7 +948,10 @@ export function getSketchEditOperatorResult(
   // (Trim, Extend, Split) gate their clicks themselves.
   if (
     !isSketchEditQueryTool(activeEditTool.toolId) &&
-    activeEditTool.toolId !== "offset"
+    activeEditTool.toolId !== "offset" &&
+    activeEditTool.toolId !== "sketchFillet" &&
+    activeEditTool.toolId !== "sketchChamfer" &&
+    activeEditTool.toolId !== "sketchSlot"
   ) {
     const gate = offsetEditInputGate(
       session,
@@ -931,29 +966,11 @@ export function getSketchEditOperatorResult(
 
   switch (activeEditTool.toolId) {
     case "sketchFillet":
-      return createSketchFilletMutation({
-        definition: session.definition,
-        entityIds,
-        radius: activeEditTool.toolValue,
-        sequence: nextSequence,
-        factories,
-      });
+      return getSketchCornerSlotResult(session, { kind: "fillet", entityIds, value: activeEditTool.toolValue });
     case "sketchChamfer":
-      return createSketchChamferMutation({
-        definition: session.definition,
-        entityIds,
-        distance: activeEditTool.toolValue,
-        sequence: nextSequence,
-        factories,
-      });
+      return getSketchCornerSlotResult(session, { kind: "chamfer", entityIds, value: activeEditTool.toolValue });
     case "sketchSlot":
-      return createSketchSlotContribution({
-        definition: session.definition,
-        entityIds,
-        width: activeEditTool.toolValue,
-        sequence: nextSequence,
-        factories,
-      });
+      return getSketchCornerSlotResult(session, { kind: "slot", entityIds, value: activeEditTool.toolValue });
     case "sketchMirror": {
       // T15b (T-7): a sketch datum axis as the final pick is the axis;
       // review A10: one picked before the seeds is refused, not ignored.
@@ -2586,6 +2603,23 @@ export function applySketchEditOperationResult(
   return null;
 }
 
+/** Both semantic construction and browser confirmation use this solve-basis handoff. */
+export function completeSketchEditOperation(
+  session: SketchSessionState,
+  result: SketchEditOperationResult,
+): SketchSessionState {
+  if (!result.valid) return { ...session, validationMessage: result.message };
+  const applied = applySketchEditOperationResult(session, result);
+  return applied ? withLiveSolveBasis({
+    ...session,
+    ...applied,
+    toolStagedEntities: [],
+    validationMessage: null,
+    activeEditTarget: null,
+    activeDrag: null,
+  }, applied.definition) : session;
+}
+
 export function updateSketchEditToolHover(
   session: SketchSessionState,
   target: PrimitiveRef | null,
@@ -3013,30 +3047,17 @@ export function patchSketchEditOperatorValue(
     };
   }
 
-  const applied = applySketchEditOperationResult(session, preview);
-  if (!applied) {
-    return session;
-  }
-
   const nextEditTool = {
     ...activeEditTool,
     selectedTarget: null,
     selectedTargets: [],
   };
 
-  return withLiveSolveBasis(
-    {
-      ...session,
-      ...applied,
-      activeEditTool: nextEditTool,
-      toolStagedEntities: [],
-      validationMessage: null,
-      toolPresentation: buildSketchEditToolPresentation(nextEditTool),
-      activeEditTarget: null,
-      activeDrag: null,
-    },
-    applied.definition,
-  );
+  return {
+    ...completeSketchEditOperation(session, preview),
+    activeEditTool: nextEditTool,
+    toolPresentation: buildSketchEditToolPresentation(nextEditTool),
+  };
 }
 
 export function beginSketchGeometryDrag(
