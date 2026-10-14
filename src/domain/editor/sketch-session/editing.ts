@@ -1011,6 +1011,35 @@ export function createSketchMirror(
     axis.kind === "sketchDatumReference" && axis.datumId !== "origin" ? axis.datumId : null));
 }
 
+/** Browser and explicit clients share the production pattern/transform builder and gate. */
+export function getSketchDerivationResult(
+  session: SketchSessionState,
+  kind: "linearPattern" | "circularPattern" | "transform",
+  entityIds: readonly SketchEntityId[],
+  value: number | null,
+): SketchEditOperationResult {
+  const toolId = kind === "linearPattern" ? "sketchLinearPattern" : kind === "circularPattern" ? "sketchCircularPattern" : "sketchTransform";
+  const gate = offsetEditInputGate(session, entityIds, `a ${getSketchEditToolDefinition(toolId).metadata.name} input`);
+  if (gate) return refusedEditOperation(gate.message);
+  const sequence = session.sequence + 1;
+  return createSketchDerivedTransformContribution({
+    definition: session.definition, operatorKind: kind, entityIds, value, sequence,
+    factories: createSessionCommitFactories(sequence, getSessionSketchId(session)),
+    modelingTolerance: session.modelingTolerance,
+  });
+}
+
+export function createSketchDerivation(
+  session: SketchSessionState,
+  input: Extract<import("@/contracts/semantic/schema").SemanticCommand, { operation: "sketch.derivation.create" }>,
+): SketchSessionState {
+  const ids = input.targets.map(t => t.entityId);
+  if (!ids.length || new Set(ids).size !== ids.length || input.targets.some(t => t.sketchId !== getSessionSketchId(session)) ||
+      !ids.every(id => session.definition.entities.some(e => e.entityId === id)) || !Number.isFinite(input.value) || input.value <= 0)
+    return { ...session, validationMessage: "A derived pattern or transform requires distinct owned seeds and a finite positive setting." };
+  return completeSketchEditOperation(session, getSketchDerivationResult(session, input.kind, ids, input.value));
+}
+
 export function getSketchEditOperatorResult(
   session: SketchSessionState,
   activeEditTool: SketchEditToolState,
@@ -1026,7 +1055,10 @@ export function getSketchEditOperatorResult(
     activeEditTool.toolId !== "sketchFillet" &&
     activeEditTool.toolId !== "sketchChamfer" &&
     activeEditTool.toolId !== "sketchSlot" &&
-    activeEditTool.toolId !== "sketchMirror"
+    activeEditTool.toolId !== "sketchMirror" &&
+    activeEditTool.toolId !== "sketchLinearPattern" &&
+    activeEditTool.toolId !== "sketchCircularPattern" &&
+    activeEditTool.toolId !== "sketchTransform"
   ) {
     const gate = offsetEditInputGate(
       session,
@@ -1035,10 +1067,6 @@ export function getSketchEditOperatorResult(
     );
     if (gate) return refusedEditOperation(gate.message);
   }
-  const nextSequence = session.sequence + 1;
-  const sketchId = session.sketchId ?? ("sketch_draft" as SketchId);
-  const factories = createSessionCommitFactories(nextSequence, sketchId);
-
   switch (activeEditTool.toolId) {
     case "sketchFillet":
       return getSketchCornerSlotResult(session, { kind: "fillet", entityIds, value: activeEditTool.toolValue });
@@ -1060,35 +1088,11 @@ export function getSketchEditOperatorResult(
         last?.kind === "sketchDatumReference" && last.datumId !== "origin" ? last.datumId : null);
     }
     case "sketchLinearPattern":
-      return createSketchDerivedTransformContribution({
-        definition: session.definition,
-        operatorKind: "linearPattern",
-        entityIds,
-        value: activeEditTool.toolValue,
-        sequence: nextSequence,
-        factories,
-        modelingTolerance: session.modelingTolerance,
-      });
+      return getSketchDerivationResult(session, "linearPattern", entityIds, activeEditTool.toolValue);
     case "sketchCircularPattern":
-      return createSketchDerivedTransformContribution({
-        definition: session.definition,
-        operatorKind: "circularPattern",
-        entityIds,
-        value: activeEditTool.toolValue,
-        sequence: nextSequence,
-        factories,
-        modelingTolerance: session.modelingTolerance,
-      });
+      return getSketchDerivationResult(session, "circularPattern", entityIds, activeEditTool.toolValue);
     case "sketchTransform":
-      return createSketchDerivedTransformContribution({
-        definition: session.definition,
-        operatorKind: "transform",
-        entityIds,
-        value: activeEditTool.toolValue,
-        sequence: nextSequence,
-        factories,
-        modelingTolerance: session.modelingTolerance,
-      });
+      return getSketchDerivationResult(session, "transform", entityIds, activeEditTool.toolValue);
     case "sketchMergePoints":
       return getSketchMergePointsResult(session, activeEditTool);
     case "trim":

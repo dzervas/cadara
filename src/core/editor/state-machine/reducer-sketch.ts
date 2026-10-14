@@ -3,7 +3,7 @@ import { updateSketchDimensionValue, deleteSelectedSketchAnnotation, makeSketchA
 import { updateSketchGeometry, setSketchItemLabel } from "@/domain/editor/sketch-session/geometry-actions";
 import { applySketchMirrorRemoval, completeSketchMirrorRepair } from "@/domain/editor/sketch-session/mirror-actions";
 import { applySketchOffsetRemoval } from "@/domain/editor/sketch-session/offset-actions";
-import { createSketchMirror, completeSketchOffset, buildSketchGeometry, completeSketchIntersectionEdit, deleteSelectedSketchGeometry } from "@/domain/editor/sketch-session/editing";
+import { createSketchDerivation, createSketchMirror, completeSketchOffset, buildSketchGeometry, completeSketchIntersectionEdit, deleteSelectedSketchGeometry } from "@/domain/editor/sketch-session/editing";
 import { setSketchConstructionTarget } from "@/domain/editor/sketch-session/tools";
 import { authorSketchPrimitive } from "@/domain/editor/sketch-session/tools";
 import { isRegisteredSketchToolId } from "@/core/sketch-tools/registry";
@@ -223,6 +223,8 @@ export function reduceSketchWorkflow(
       return { state: createSketchPreviewState(state, completeSketchIntersectionEdit(state.session, event.basis, event.result).session), effects: [] };
     case "sketch.offsetCompleted":
       return { state: createSketchPreviewState(state, completeSketchOffset(state.session, event.prepared, event.record)), effects: [] };
+    case "sketch.derivationCreated":
+      return { state: createSketchPreviewState(state, createSketchDerivation(state.session, event.input)), effects: [] };
     case "sketch.mirrorRemoved":
       return { state: createSketchPreviewState(state, applySketchMirrorRemoval(state.session, event.derivationId)), effects: [] };
     case "sketch.mirrorRepaired":
