@@ -21,12 +21,50 @@ export function createDimensionAnnotationPlacementPatch(
 
 const DIMENSION_ANNOTATION_DRAG_THRESHOLD_PX = 6;
 
+/**
+ * Where a label drag was grabbed: the press (client px) and the label's own
+ * sketch point then (its descriptor anchor, the point the placement is
+ * inferred from).
+ */
+export interface DimensionAnnotationLabelGrab {
+  clientX: number;
+  clientY: number;
+  labelPoint: readonly [number, number];
+}
+
 export type DimensionAnnotationDragListener = (
   handle: SketchDimensionAnnotationDragHandle,
   clientX: number,
   clientY: number,
   phase: "start" | "move" | "end" | "cancel",
+  grab: DimensionAnnotationLabelGrab,
 ) => void;
+
+/**
+ * T17j (F-1, issue 10's approved delta drag): the label moves by the
+ * pointer's displacement in sketch space since the grab, so it keeps the
+ * grab offset and never jumps to the pointer: the label's grabbed sketch
+ * point plus (pointer − press), both projected onto the sketch.
+ */
+export function getDimensionLabelDragPoint(
+  grab: DimensionAnnotationLabelGrab,
+  clientX: number,
+  clientY: number,
+  project: (
+    clientX: number,
+    clientY: number,
+  ) => readonly [number, number] | null,
+): [number, number] | null {
+  const pressed = project(grab.clientX, grab.clientY);
+  const pointer = project(clientX, clientY);
+  if (!pressed || !pointer) {
+    return null;
+  }
+  return [
+    grab.labelPoint[0] + pointer[0] - pressed[0],
+    grab.labelPoint[1] + pointer[1] - pressed[1],
+  ];
+}
 
 /** The parts of a chip pointer event the label drag reads. */
 export interface DimensionAnnotationPointerEvent {
@@ -52,6 +90,7 @@ export class DimensionAnnotationLabelDrag {
   private drag: {
     handle: SketchDimensionAnnotationDragHandle;
     pointerId: number;
+    grab: DimensionAnnotationLabelGrab;
     startX: number;
     startY: number;
     lastX: number;
@@ -69,6 +108,7 @@ export class DimensionAnnotationLabelDrag {
     if (
       annotation.status !== "dimension" ||
       !annotation.dragHandle ||
+      annotation.anchor.kind !== "sketchPoint" ||
       event.button !== 0 ||
       !event.isPrimary
     ) {
@@ -78,6 +118,11 @@ export class DimensionAnnotationLabelDrag {
     this.drag = {
       handle: annotation.dragHandle,
       pointerId: event.pointerId,
+      grab: {
+        clientX: event.clientX,
+        clientY: event.clientY,
+        labelPoint: annotation.anchor.point,
+      },
       startX: event.clientX,
       startY: event.clientY,
       lastX: event.clientX,
@@ -118,14 +163,26 @@ export class DimensionAnnotationLabelDrag {
       drag.dragging = true;
       drag.listener = onDimensionDrag;
       onSelect(drag.target);
-      drag.listener?.(drag.handle, drag.startX, drag.startY, "start");
+      drag.listener?.(
+        drag.handle,
+        drag.startX,
+        drag.startY,
+        "start",
+        drag.grab,
+      );
     }
 
     event.preventDefault();
     event.stopPropagation();
     drag.lastX = event.clientX;
     drag.lastY = event.clientY;
-    drag.listener?.(drag.handle, event.clientX, event.clientY, "move");
+    drag.listener?.(
+      drag.handle,
+      event.clientX,
+      event.clientY,
+      "move",
+      drag.grab,
+    );
   }
 
   pointerEnd(event: DimensionAnnotationPointerEvent, phase: "end" | "cancel") {
@@ -139,7 +196,13 @@ export class DimensionAnnotationLabelDrag {
       event.preventDefault();
       event.stopPropagation();
       this.suppressClickHandleId = drag.handle.id;
-      drag.listener?.(drag.handle, event.clientX, event.clientY, phase);
+      drag.listener?.(
+        drag.handle,
+        event.clientX,
+        event.clientY,
+        phase,
+        drag.grab,
+      );
     }
 
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
@@ -167,7 +230,7 @@ export class DimensionAnnotationLabelDrag {
     const drag = this.drag;
     this.drag = null;
     if (drag?.dragging) {
-      drag.listener?.(drag.handle, drag.lastX, drag.lastY, "cancel");
+      drag.listener?.(drag.handle, drag.lastX, drag.lastY, "cancel", drag.grab);
     }
   }
 

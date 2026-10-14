@@ -194,6 +194,7 @@ export function SketchConstraintAnnotations({
     clientX,
     clientY,
     phase,
+    grab,
   ) => {
     if (phase === "start") {
       const annotation = annotations.find(
@@ -214,7 +215,7 @@ export function SketchConstraintAnnotations({
     } else if (phase === "end" || phase === "cancel") {
       setLabelDragOffset(null);
     }
-    onDimensionDrag?.(handle, clientX, clientY, phase);
+    onDimensionDrag?.(handle, clientX, clientY, phase, grab);
   };
 
   const layer = resolveSketchAnnotationLayer(annotations, {

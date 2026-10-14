@@ -112,6 +112,16 @@ function expectClear(left: Box, right: Box, message: string) {
   expect(separation(left, right), message).toBeGreaterThanOrEqual(0);
 }
 
+/**
+ * T17j (D8): two chips keep the layout's 6 px gap
+ * (`SKETCH_ANNOTATION_LAYOUT_GAP_PX`) with their real DOM widths, not just
+ * no overlap (the width estimate covers each real chip, so the real gap is
+ * at least the laid-out one).
+ */
+function expectLayoutGap(left: Box, right: Box, message: string) {
+  expect(separation(left, right), message).toBeGreaterThanOrEqual(6);
+}
+
 /** Real chip widths against the T14d estimate (40 px frame + 7 px/char). */
 async function expectEstimateCoversChips(page: Page) {
   const chips = await page.locator(chipSelector).all();
@@ -165,7 +175,7 @@ test("T14d: two dimension chips on one anchor keep clear with real DOM widths; a
 
   const chips = await boxes(page.locator(chipSelector));
   expect(chips).toHaveLength(2);
-  expectClear(chips[0]!, chips[1]!, "the two chips do not overlap");
+  expectLayoutGap(chips[0]!, chips[1]!, "the two chips keep the 6 px gap");
   await expectEstimateCoversChips(page);
   await expectChipsInsideCanvas(page);
 
@@ -202,10 +212,10 @@ test("T14d: two dimension chips on one anchor keep clear with real DOM widths; a
   await page.mouse.up();
   await workbench.waitForAnimationFrames(4);
   const afterDrag = await boxes(page.locator(chipSelector));
-  expectClear(
+  expectLayoutGap(
     afterDrag[0]!,
     afterDrag[1]!,
-    "after the drag the chips keep clear",
+    "after the drag the chips keep the 6 px gap",
   );
 
   // T14b review A-6: a wheel over an interactive chip zooms (out), so the

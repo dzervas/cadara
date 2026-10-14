@@ -31,7 +31,10 @@ import {
   collectSketchSpecialModeFeedbackAnchors,
   type SketchSpecialModeFeedbackProjection,
 } from "@/components/cad/sketch-special-mode-feedback-model";
-import { createDimensionAnnotationPlacementPatch } from "@/components/cad/three-cad-viewport-annotation-drag";
+import {
+  createDimensionAnnotationPlacementPatch,
+  getDimensionLabelDragPoint,
+} from "@/components/cad/three-cad-viewport-annotation-drag";
 import {
   requestViewCubeCameraTransition,
   resolveSketchCameraTransition,
@@ -3856,8 +3859,13 @@ export function ThreeCadViewport({
             }),
           );
         }}
-        onDimensionDrag={(handle, clientX, clientY, gesturePhase) => {
-          const point = projectSketchClientPointRef.current(clientX, clientY);
+        onDimensionDrag={(handle, clientX, clientY, gesturePhase, grab) => {
+          const point = getDimensionLabelDragPoint(
+            grab,
+            clientX,
+            clientY,
+            projectSketchClientPointRef.current,
+          );
           if (point) {
             sketchToolPatchRef.current({
               ...createDimensionAnnotationPlacementPatch(handle, point),
