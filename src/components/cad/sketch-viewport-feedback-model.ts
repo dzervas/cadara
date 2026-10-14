@@ -383,7 +383,7 @@ function getSketchToolOverlayLabelParts(
         `${overlay.value.toFixed(2)} ${overlay.unit ?? ""}`,
       ];
     case "dimensionLine":
-      return overlay.dragHandle
+      return overlay.labelled
         ? [
             overlay.label,
             ...(overlay.value === null || overlay.value === undefined
@@ -392,7 +392,7 @@ function getSketchToolOverlayLabelParts(
           ]
         : null;
     case "angleArc":
-      return overlay.dragHandle
+      return overlay.labelled
         ? [
             overlay.label,
             ...(overlay.referenceLabel ? [overlay.referenceLabel] : []),

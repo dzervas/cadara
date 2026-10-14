@@ -245,8 +245,8 @@ function getOverlayContent(overlay: SketchToolOverlayDescriptor) {
 function shouldRenderOverlayLabel(overlay: SketchToolOverlayDescriptor) {
   return (
     overlay.kind === "measurement" ||
-    (overlay.kind === "dimensionLine" && Boolean(overlay.dragHandle)) ||
-    (overlay.kind === "angleArc" && Boolean(overlay.dragHandle)) ||
+    (overlay.kind === "dimensionLine" && overlay.labelled === true) ||
+    (overlay.kind === "angleArc" && overlay.labelled === true) ||
     overlay.kind === "referenceLabel" ||
     overlay.kind === "snapIndicator"
   );
