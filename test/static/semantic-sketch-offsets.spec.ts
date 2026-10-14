@@ -68,3 +68,23 @@ test("offset CLI and semantic adapter own neither offset algorithms, uncertified
   );
   expect(discovery).not.toContain("getSketchSessionDisplayDefinition(");
 });
+
+test("relationship label aliases resolve only in the terminal client, not shared offset owners", () => {
+  const client = read("src/cli/commands/document-recipes.ts");
+  expect(client).toContain(
+    'validateTarget(command.derivationId, "derivation_validation")',
+  );
+  expect(client).toContain(
+    "offsets.filter(offset => offset.label === target.label)",
+  );
+  expect(client).toContain(
+    'matches.length !== 1) throw new Error("Offset target alias is missing or ambiguous.")',
+  );
+  for (const path of [
+    "src/domain/editor/sketch-session/editing.ts",
+    "src/infrastructure/modeling/semantic-sketch-port.ts",
+  ]) {
+    expect(read(path)).not.toContain("TargetAlias");
+    expect(read(path)).not.toContain("aliases.get(");
+  }
+});

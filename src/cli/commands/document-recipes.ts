@@ -17,7 +17,7 @@ type TargetAlias = Alias & { label: string };
 type RecipeGeometryEdit<T = import("@/contracts/semantic/schema").SemanticSketchGeometryEdit> = T extends { target: infer R } ? Omit<T, "target" | "destination" | "boundary"> & { target: R | TargetAlias } & (T extends { destination: infer D } ? { destination: D | TargetAlias } : unknown) & (T extends { boundary: infer B } ? { boundary: B | TargetAlias } : unknown) : never;
 type RecipePrimitive<T = import("@/contracts/semantic/schema").SemanticSketchPrimitive> = T extends { source: infer S } ? Omit<T, "source"> & { source: S | TargetAlias } : T;
 type RecipeCommand<T = SemanticCommand> = T extends SemanticCommand
-  ? Omit<T, "basis" | "draft" | "points" | "dimensionId" | "profile" | "featureId" | "sketchId" | "target" | "targets" | "edit" | "primitive"> &
+  ? Omit<T, "basis" | "draft" | "points" | "dimensionId" | "derivationId" | "profile" | "featureId" | "sketchId" | "target" | "targets" | "edit" | "primitive"> &
     (T extends { primitive: unknown } ? { primitive: RecipePrimitive } : unknown) &
     (T extends { edit: unknown } ? { edit: RecipeGeometryEdit } : unknown) &
     (T extends { targets: infer R extends readonly unknown[] } ? { targets: readonly (R[number] | TargetAlias)[] } : unknown) &
@@ -26,6 +26,7 @@ type RecipeCommand<T = SemanticCommand> = T extends SemanticCommand
     (T extends { featureId: infer F } ? { featureId: F | TargetAlias } : unknown) &
     (T extends { sketchId: infer S } ? { sketchId: S | TargetAlias } : unknown) &
     (T extends { points: infer P } ? { points: P | readonly [TargetAlias, TargetAlias] } : unknown) &
+    (T extends { derivationId: infer D } ? { derivationId: D | TargetAlias } : unknown) &
     (T extends { dimensionId: infer D } ? { dimensionId: D | TargetAlias } : unknown) & { basis: T["basis"] | Alias } & (T extends {
         draft: infer D;
       }
@@ -177,6 +178,7 @@ function parseRecipe(input: unknown): RecipeOperation[] {
     }
     if (Array.isArray(command.points)) validationCommand.points = command.points.map(value => validateTarget(value, "sketch_point_validation"));
     if ("dimensionId" in command) validationCommand.dimensionId = validateTarget(command.dimensionId, "dimension_validation");
+    if ("derivationId" in command) validationCommand.derivationId = validateTarget(command.derivationId, "derivation_validation");
     for (const [key, placeholder] of [["featureId", "feature_validation"], ["sketchId", "sketch_validation"]] as const)
       if (key in command) validationCommand[key] = validateTarget(command[key], placeholder);
     if (isAlias(command.profile)) {
@@ -301,6 +303,12 @@ export const documentRecipesCommand: CommandModule = {
           const matches = [...(sketch?.requirements ?? []), ...(sketch?.measurements ?? [])].filter(d => d.label === target.label);
           if (matches.length !== 1) throw new Error("Dimension target alias is missing or ambiguous.");
           command.dimensionId = matches[0]!.dimensionId;
+        }
+        if (command.operation === "sketch.offset.remove" && isAlias(command.derivationId)) {
+          const target = command.derivationId;
+          const matches = aliases.get(target.alias)?.sketch?.offsets.filter(offset => offset.label === target.label) ?? [];
+          if (matches.length !== 1) throw new Error("Offset target alias is missing or ambiguous.");
+          command.derivationId = matches[0]!.derivationId;
         }
         function resolveSketchTarget(target: import("@/contracts/shared/references").DurableRef | import("@/contracts/shared/references").SketchTangentHandleRef | TargetAlias, kinds: readonly string[]) {
           if (!isAlias(target)) return target;

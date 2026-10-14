@@ -220,7 +220,9 @@ requirements on offset outputs can size the originals and can be edited with
 `sketch.dimension.update`; they do not change the relationship's authored
 separation. There is no independent browser distance/side/expression setter,
 so this command does not invent one. `sketch.offset.remove` takes the current
-basis/draft, discovered `derivationId` and `intent`; it uses the browser's
+basis/draft, discovered `derivationId` and `intent`. Recipes can select that
+relationship by `derivationId: { "alias": "offset", "label": "Offset 2" }`, using
+its exact unique discovered label (never a guessed ID or first match). It uses the browser's
 **Remove Offset** owner, removes its outputs/requirements as one action, and
 leaves dependent relationships explicitly broken. Private undo/redo restores
 relationship/output identities. Publication/reopening retains the relationship.
