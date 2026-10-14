@@ -6,6 +6,7 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
+  type ReactNode,
   type RefObject,
 } from "react";
 import * as THREE from "three";
@@ -560,4 +561,37 @@ export function WorkspaceSceneScaffold() {
       </mesh>
     </>
   );
+}
+
+/**
+ * T17c6 (D-4): the viewport's pick root. `onCommit` runs after the R3F
+ * commit that mounted, replaced or removed its children (the scene's
+ * pickable objects are attached and `rootRef` is set), and again whenever
+ * `commitToken` changes. The scene is rendered by R3F's own reconciler,
+ * which commits after the DOM-side layout effects, so bindings collected
+ * there could hold the previous scene's objects (picking dead after the
+ * first Finish until a hover change re-collected them).
+ */
+export function ViewportPickRoot({
+  rootRef,
+  commitToken,
+  onCommit,
+  children,
+}: {
+  rootRef: RefObject<THREE.Group | null>;
+  commitToken: unknown;
+  onCommit: () => void;
+  children: ReactNode;
+}) {
+  const onCommitRef = useRef(onCommit);
+
+  useLayoutEffect(() => {
+    onCommitRef.current = onCommit;
+  });
+
+  useLayoutEffect(() => {
+    onCommitRef.current();
+  }, [commitToken]);
+
+  return <group ref={rootRef}>{children}</group>;
 }

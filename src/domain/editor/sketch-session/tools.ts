@@ -100,6 +100,7 @@ import {
 import { isSketchConstructionSelected } from "./state";
 import { getSketchStyleTargetDefinition } from "./styles";
 import { buildCommitRequest } from "./history";
+import { keptSketchWithheldRegionText } from "./region-feedback";
 
 export function buildConstructionTargetPresentation(): SketchToolPresentationSchema {
   return {
@@ -974,7 +975,8 @@ export function updateSketchPointer(
       result.stagedEntities,
       session.constructionModifierActive,
     ),
-    validationMessage: result.state.validationMessage,
+    validationMessage:
+      result.state.validationMessage ?? keptSketchWithheldRegionText(session),
     toolPresentation: withPlacementPresentation(
       result.presentation,
       session.toolPlacements ?? [],
@@ -1086,11 +1088,12 @@ export function selectSketchEditTarget(
     activeAnnotationEdit: null,
     // T17c3: selecting a point (the viewport selects a dragged point on
     // release) keeps the explanation of a sketch whose profiles are blocked.
+    // T17c6 (D-2): and of a withheld region shown on the status line.
     validationMessage:
       session.liveRegions.status === "unavailable"
         ? (getSketchSessionInvalidFeedback(session) ??
           "Sketch profiles are unavailable until the sketch is corrected.")
-        : null,
+        : keptSketchWithheldRegionText(session),
   };
 }
 
@@ -1725,7 +1728,8 @@ export function startSketchDraw(
       result.stagedEntities,
       session.constructionModifierActive,
     ),
-    validationMessage: result.state.validationMessage,
+    validationMessage:
+      result.state.validationMessage ?? keptSketchWithheldRegionText(session),
     toolPresentation: withPlacementPresentation(
       result.presentation,
       placements,
@@ -1780,7 +1784,8 @@ export function acceptSketchDraw(
       livePoint: result.state.livePoint,
       toolPlacedPoints: result.state.placedPoints ?? session.toolPlacedPoints,
       toolSettings: result.state.settings ?? session.toolSettings,
-      validationMessage: result.state.validationMessage,
+      validationMessage:
+        result.state.validationMessage ?? keptSketchWithheldRegionText(session),
       toolPresentation: withPlacementPresentation(
         result.presentation,
         placements,
@@ -1991,7 +1996,7 @@ function commitSketchDraw(
     ...definitionPatch,
   });
 
-  const committed = withLiveSolveBasis(
+  const solved = withLiveSolveBasis(
     {
       ...session,
       toolStagedEntities: [],
@@ -2014,7 +2019,9 @@ function commitSketchDraw(
         plane: session.plane,
         definition: history.definition,
       }),
-      validationMessage: null,
+      // T17c6 (review A-3): the withheld-region explanation stays until the
+      // commit's region result decides (it clears or re-sets it).
+      validationMessage: keptSketchWithheldRegionText(session),
       toolPresentation: result.presentation,
       activeAnnotationEdit: null,
       activeEditTool: null,
@@ -2027,6 +2034,11 @@ function commitSketchDraw(
     },
     history.definition,
   );
+  // No region result follows an unavailable commit: nothing kept (as before).
+  const committed =
+    solved.liveRegions.status === "unavailable"
+      ? { ...solved, validationMessage: null }
+      : solved;
 
   return toolDefinition.lifecycle === "chain"
     ? continueSketchToolChain(session, committed, definitionPatch, startPoint)
@@ -2100,7 +2112,11 @@ export function getToolRuntimeState(
     livePoint: session.livePoint,
     placedPoints: session.toolPlacedPoints,
     settings: session.toolSettings,
-    validationMessage: session.validationMessage,
+    // T17c6 (review A-3): the withheld-region status line is not the
+    // tool's own validation.
+    validationMessage: keptSketchWithheldRegionText(session)
+      ? null
+      : session.validationMessage,
   };
 }
 

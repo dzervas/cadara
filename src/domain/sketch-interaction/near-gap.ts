@@ -37,7 +37,9 @@ export interface SketchNearGap {
  * The [start, end] point ids of one curve (none for closed or end-less
  * kinds).
  */
-function curveEndPointIds(entity: SketchEntityDefinition): SketchPointId[] {
+export function curveEndPointIds(
+  entity: SketchEntityDefinition,
+): SketchPointId[] {
   switch (entity.kind) {
     case "lineSegment":
     case "arc":

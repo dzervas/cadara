@@ -123,6 +123,11 @@ import type {
   SketchToolChain,
 } from "./types";
 import { buildCommitRequest } from "./history";
+import {
+  describeSketchSessionWithheldRegions,
+  isSketchWithheldRegionText,
+  keptSketchWithheldRegionText,
+} from "./region-feedback";
 import type { SketchExactIntersection } from "@/domain/sketch-snapping/snap-candidates";
 
 export const CONSTRAINED_DRAG_BLOCKED_MESSAGE =
@@ -715,7 +720,7 @@ export function publishSketchLiveRegions(
       offsetPublications,
     ),
   };
-  return {
+  const next: SketchSessionState = {
     ...session,
     ...(liveSolve ? { liveSolve } : {}),
     offsetPlans: samePlans(published, session.offsetPlans)
@@ -732,6 +737,25 @@ export function publishSketchLiveRegions(
       boundaryBasis: liveRegionBasis(liveSolve, regions),
       diagnostics,
     },
+  };
+  // T17c6 (D-2): a withheld region the user had, or a closed outline left
+  // without one, is explained on the status line (not only the preview
+  // label). Review A-4: once nothing qualifies, the explanation this owner
+  // set is cleared; other owners' messages are kept.
+  const withheld = describeSketchSessionWithheldRegions(
+    next,
+    session.liveRegions.regions,
+  );
+  return {
+    ...next,
+    validationMessage:
+      withheld ??
+      (isSketchWithheldRegionText(
+        session.liveRegions.diagnostics,
+        session.validationMessage,
+      )
+        ? null
+        : session.validationMessage),
   };
 }
 
@@ -2230,7 +2254,8 @@ export function restageSketchToolChain(
       result.stagedEntities,
       session.constructionModifierActive,
     ),
-    validationMessage: result.state.validationMessage,
+    validationMessage:
+      result.state.validationMessage ?? keptSketchWithheldRegionText(session),
     toolPresentation: result.presentation,
     activeInference: null,
     // D20: the next segment starts structurally at the anchor's id; a

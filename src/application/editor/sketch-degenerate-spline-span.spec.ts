@@ -62,7 +62,11 @@ import {
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 import { createSketchMergePointsMutation } from "@/domain/sketch-editing/merge-points";
-import { createSketchActionOwnerFixture } from "./sketch-action-owner.fixtures";
+import {
+  createSketchActionOwnerFixture,
+  drawnMixedOutlineSession,
+  MIXED_OUTLINE,
+} from "./sketch-action-owner.fixtures";
 
 type P = readonly [number, number];
 type Spline = Extract<SketchEntityDefinition, { kind: "spline" }>;
@@ -998,4 +1002,150 @@ describe("T17c5 review R-1: a spline with derived copies recovers by dragging a 
         expect(f.session.definition, "nothing moved").toEqual(definition);
         expect(f.session.liveRegions.status).toBe("unavailable");
       });
+});
+
+// T17c6 (D-3; T17i review §4): in a constrained sketch the release frame's
+// exact-reach step (T13a2 d1) runs for any nonzero lag, so a reachable drop
+// lands exactly at the cursor. Before, it ran only when the lag exceeded
+// the 1e-4 reach tolerance, and a fit point dropped on its neighbour on a
+// drawn outline (inferred coincidences) landed ~1e-9 away: no degenerate
+// span, no status, the region gone silently. An unreachable drop keeps the
+// accepted lagging frame (the pin is rejected by the frame acceptance).
+describe("T17c6 D-3: a release in a constrained sketch reaches the cursor exactly when it can", () => {
+  const { L0, F2 } = MIXED_OUTLINE;
+  const MIXED_TEXT =
+    "Spline 3 has two consecutive fit points at the same place (Spline 3 point 2 and Spline 3 point 3); the sketch's profiles are blocked. Undo, or drag one of them apart (delete the Coincident between them first, if there is one).";
+
+  async function mixedOutline() {
+    const f = await createSketchActionOwnerFixture(drawnMixedOutlineSession());
+    expect(
+      f.session.definition.entities.map((entity) => entity.kind),
+      "premise: a line, an arc and a spline",
+    ).toEqual(["lineSegment", "arc", "spline"]);
+    expect(
+      f.session.definition.constraints.map((constraint) => constraint.kind),
+      "premise: a constrained sketch (inferred, as drawn in the browser)",
+    ).toContain("coincident");
+    expect(f.session.liveRegions.status, "premise: one region").toBe("current");
+    expect(f.session.liveRegions.regions).toHaveLength(1);
+    const [, f2, f3] = splineOf(f.session.definition).pointOccurrences.map(
+      (occurrence) => occurrence.pointId as SketchPointId,
+    );
+    return { f, f2: f2!, f3: f3!, before: f.session.definition };
+  }
+
+  /** Glides `pointId` in 8 frames to `to` and releases there. */
+  function glideTo(
+    f: Awaited<ReturnType<typeof createSketchActionOwnerFixture>>,
+    pointId: SketchPointId,
+    to: P,
+  ) {
+    const from = positionOf(f.session.definition, pointId);
+    f.dispatch({
+      type: "sketch.geometryDragStarted",
+      target: pointRef(f.session, pointId),
+      point: world(from as unknown as P),
+    });
+    for (let step = 1; step <= 8; step += 1)
+      f.dispatch({
+        type: "sketch.geometryDragMoved",
+        point: world([
+          from[0] + ((to[0] - from[0]) * step) / 8,
+          from[1] + ((to[1] - from[1]) * step) / 8,
+        ]),
+      });
+    f.dispatch({ type: "sketch.geometryDragEnded", point: world(to) });
+    return f.settle();
+  }
+
+  test("fit point 3 dropped on fit point 2: exactly on it, one 'Move Sketch Geometry', the label-based degenerate status, profiles blocked, the spline drawn tinted; Undo restores the drawn outline exactly, Redo the exact drop", async () => {
+    const { f, f2, f3, before } = await mixedOutline();
+    await glideTo(f, f3, F2);
+    expect(f.undoLabels()).toEqual(["Move Sketch Geometry"]);
+    const dropped = f.session.definition;
+    expect(
+      positionOf(dropped, f3),
+      "the dropped fit point is exactly on its neighbour",
+    ).toEqual(positionOf(dropped, f2));
+    expect(positionOf(dropped, f2), "the neighbour did not move").toEqual(
+      positionOf(before, f2),
+    );
+    expect(f.session.liveRegions.status, "the profiles are blocked").toBe(
+      "unavailable",
+    );
+    expect(f.session.validationMessage, "the shown status").toBe(MIXED_TEXT);
+    expect(getSketchSessionInvalidFeedback(f.session)).toBe(MIXED_TEXT);
+    expect(
+      splineRenderable(f.session)?.regionValidity,
+      "the spline stays drawn, tinted",
+    ).toBe("invalid");
+
+    f.dispatch({ type: "history.undoRequested" });
+    await f.settle();
+    expect(f.session.definition.points, "Undo is exact").toEqual(before.points);
+    expect(f.session.liveRegions.status).toBe("current");
+    expect(f.session.liveRegions.regions).toHaveLength(1);
+    expect(f.session.validationMessage).toBeNull();
+    f.dispatch({ type: "history.redoRequested" });
+    await f.settle();
+    expect(f.session.definition.points, "Redo is exact").toEqual(
+      dropped.points,
+    );
+    expect(getSketchSessionInvalidFeedback(f.session)).toBe(MIXED_TEXT);
+  });
+
+  test("a reachable drop elsewhere lands exactly at the cursor; the region stays", async () => {
+    const { f, f3 } = await mixedOutline();
+    const to: P = [3.0137, 3.9071];
+    await glideTo(f, f3, to);
+    expect(f.undoLabels()).toEqual(["Move Sketch Geometry"]);
+    expect(
+      positionOf(f.session.definition, f3),
+      "exactly where it was dropped",
+    ).toEqual(to);
+    expect(f.session.liveRegions.status).toBe("current");
+    expect(f.session.liveRegions.regions).toHaveLength(1);
+    expect(f.session.validationMessage).toBeNull();
+  });
+
+  test("an unreachable drop keeps the accepted lagging frame: the line's end, with its start Fixed and the line Horizontal, slides along the line and stays off the cursor", async () => {
+    const { f } = await mixedOutline();
+    const line = f.session.definition.entities.find(
+      (entity) => entity.kind === "lineSegment",
+    ) as Extract<SketchEntityDefinition, { kind: "lineSegment" }>;
+    expect(
+      f.session.definition.constraints.map((constraint) => constraint.kind),
+      "premise: the line is Horizontal",
+    ).toContain("horizontal");
+    f.dispatch({ type: "tool.activated", toolId: "constraintFix" });
+    f.dispatch({
+      type: "viewport.selectionRequested",
+      target: pointRef(f.session, line.startPointId),
+    });
+    f.dispatch({ type: "sketch.activeToolCleared" });
+    await f.settle();
+    const labels = f.undoLabels();
+    expect(labels.at(-1), "premise").toBe("Fix Geometry");
+    const to: P = [5.9, 0.8];
+    await glideTo(f, line.endPointId, to);
+    expect(f.undoLabels(), "one action").toEqual([
+      ...labels,
+      "Move Sketch Geometry",
+    ]);
+    const end = positionOf(f.session.definition, line.endPointId);
+    expect(
+      Math.abs(end[1] - L0[1]),
+      "the end stays on the Horizontal through the Fixed start",
+    ).toBeLessThan(1e-6);
+    expect(
+      Math.abs(end[0] - to[0]),
+      "it follows the cursor along the line",
+    ).toBeLessThan(1e-3);
+    expect(
+      Math.hypot(end[0] - to[0], end[1] - to[1]),
+      "not pinned at the unreachable cursor",
+    ).toBeGreaterThan(0.4);
+    expect(f.session.liveRegions.status).toBe("current");
+    expect(f.session.validationMessage).toBeNull();
+  });
 });

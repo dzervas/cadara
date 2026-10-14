@@ -207,7 +207,7 @@ async function drawMixedOutline(workbench: FeatureWorkbenchHarness) {
 const editSpans = async (page: Page) =>
   splineOf(await mixedSnapshot(page)).spans!;
 
-test("§2 E2E-2: a closed Line + 3-Point Arc + Spline outline; an uneven fit-point drag, an interior handle drag, the end handle to exactly zero (no region at the join, fails closed), recovered by the pick cycle and reset to automatic (each one action); construction removes the region and back; Finish: part mode draws the spline the edit spans describe; Extrude picked in the viewport builds the exact prism", async ({
+test("§2 E2E-2: a closed Line + 3-Point Arc + Spline outline; an uneven fit-point drag, an interior handle drag, the end handle to exactly zero (no region at the join, fails closed, the status line says why), recovered by the pick cycle and reset to automatic (each one action); construction removes the region and back; a fit point dropped exactly on its neighbour keeps the span authored and drawn, says so by label and blocks the profiles, dragged apart the region returns; Finish: part mode draws the spline the edit spans describe; Extrude picked in the viewport builds the exact prism", async ({
   page,
 }) => {
   test.setTimeout(420_000);
@@ -299,13 +299,22 @@ test("§2 E2E-2: a closed Line + 3-Point Arc + Spline outline; an uneven fit-poi
   expectSamePoints(zeroed, afterFitDrag, "zeroing a handle moves no point");
   // A zero end tangent at the join with the arc: the arrangement cannot
   // certify the join, so the outline forms no region (fails closed) and
-  // says why, by label. (Recorded gap, T17i.md D-2: that text reaches only
-  // the preview label, a debug read; nothing visible in sketch mode.)
+  // the status line says why, by label, with the recovery (T17c6 D-2).
   await expectLiveRegions(
     page,
     { status: "current", count: 0 },
     "a zero tangent at a join: no region is offered",
   );
+  const withheld = page.getByRole("status").filter({
+    hasText:
+      "The declared-join query of ‘3-point arc 2’ and ‘Spline 3’ span 1 is uncertain (join-zero-end-tangent): A cubic has a zero tangent at a declared join location. Affects ‘3-point arc 2’. No region is formed there. Undo, or edit that geometry.",
+  });
+  await expect(
+    withheld,
+    "the status line explains the missing region",
+  ).toBeVisible({
+    timeout: 15_000,
+  });
   await page.keyboard.press("Escape");
   await glideClick(workbench, BLANK);
   await expect
@@ -382,6 +391,85 @@ test("§2 E2E-2: a closed Line + 3-Point Arc + Spline outline; an uneven fit-poi
     await toSelect(page);
   }
 
+  // Degenerate span on this constrained outline (T17c3/T17c5; T17c6 D-3:
+  // the release lands exactly on the cursor whenever it can): fit point 3
+  // glided onto fit point 2: one action; exactly together; the span stays
+  // authored and drawn, the label-based status shows and no profile is
+  // offered; dragged apart, the region returns.
+  const beforeDrop = await mixedSnapshot(page);
+  const second = map.toCanvas(positionOf(beforeDrop, fit[1]!));
+  const third = map.toCanvas(positionOf(beforeDrop, fit[2]!));
+  await waitForCommittedAction(page, "Move Sketch Geometry", () =>
+    glideDrag(workbench, third, second),
+  );
+  const degenerateStatus = page.getByRole("status").filter({
+    hasText:
+      "Spline 3 has two consecutive fit points at the same place (Spline 3 point 2 and Spline 3 point 3); the sketch's profiles are blocked. Undo, or drag one of them apart (delete the Coincident between them first, if there is one).",
+  });
+  await expect(degenerateStatus, "the label-based status").toBeVisible({
+    timeout: 15_000,
+  });
+  await expectLiveRegions(
+    page,
+    { status: "unavailable", count: 0 },
+    "no profile is offered",
+  );
+  const degenerate = await mixedSnapshot(page);
+  expect(
+    positionOf(degenerate, fit[2]!),
+    "dropped exactly on its neighbour",
+  ).toEqual(positionOf(degenerate, fit[1]!));
+  expect(
+    occurrencesOf(degenerate).map((occurrence) => occurrence.pointId),
+    "the span stays authored",
+  ).toEqual(fit);
+  expect(
+    await page.evaluate(
+      (id) => window.__cadProjectToScreen?.(`sketch_draft.${id}`) ?? null,
+      spline.id,
+    ),
+    "the spline stays drawn",
+  ).not.toBeNull();
+  await page.keyboard.press("Escape");
+  await glideClick(workbench, BLANK);
+  const grabbed = await hoverUntil(
+    workbench,
+    second,
+    new RegExp(`\\.(${fit[1]}|${fit[2]})$`),
+  );
+  const grabbedId = (await workbench.currentHoverTarget()).endsWith(fit[2]!)
+    ? fit[2]!
+    : fit[1]!;
+  // Fit point 3 goes back where it was; fit point 2 back towards C (either
+  // keeps the fit points in order).
+  const back =
+    grabbedId === fit[2]
+      ? third
+      : map.toCanvas([
+          (positionOf(beforeDrop, fit[0]!)[0] +
+            positionOf(beforeDrop, fit[1]!)[0]) /
+            2,
+          (positionOf(beforeDrop, fit[0]!)[1] +
+            positionOf(beforeDrop, fit[1]!)[1]) /
+            2,
+        ]);
+  await waitForCommittedAction(page, "Move Sketch Geometry", () =>
+    glideDrag(workbench, grabbed, back),
+  );
+  await expect(degenerateStatus, "the status is gone").toHaveCount(0, {
+    timeout: 15_000,
+  });
+  await expectLiveRegions(
+    page,
+    { status: "current", count: 1 },
+    "dragged apart: the region returns",
+  );
+  const apart = map.toCanvas(positionOf(await mixedSnapshot(page), grabbedId));
+  expect(
+    Math.hypot(apart.x - back.x, apart.y - back.y),
+    "the hovered fit point is the one dragged apart",
+  ).toBeLessThan(2);
+
   // Edit vs finished (R-6, review R-1). The edit read: the live solve's
   // spline spans (debug snapshot). The finished read, after Finish (the
   // document's solve, the kernel's re-solve): what part mode draws, the
@@ -394,9 +482,8 @@ test("§2 E2E-2: a closed Line + 3-Point Arc + Spline outline; an uneven fit-poi
   // below 0.001 px here), so only float and projection rounding remain:
   // tolerance 0.05 px. A part mode drawing another spline meaning (the
   // review's `rm-handles` mutant, inner poles pulled 25 %: 0.54 px) fails.
-  // The Measure tool's Length/Area readouts would be the user-facing read,
-  // but right after the first Finish the part-mode viewport picks nothing
-  // (T17i.md D-4, recorded).
+  // (The Measure tool's Length/Area readouts read the document's solved
+  // spans, so they would not see a different drawing; T17i.md R-1.)
   const edit = await mixedSnapshot(page);
   const editSpline = splineOf(edit);
   expect(editSpline.spans, "three spans").toHaveLength(3);
@@ -514,7 +601,7 @@ const authoredSpline = (entity: MixedSketchSnapshot["entities"][number]) => ({
   })),
 });
 
-test("§2 E2E-2 closures: Close spline on an open spline (one action) and positional closure by Merge Points (the second pick, the first fit point, survives) each form a region; a fit point glided onto its neighbour keeps the span authored and drawn, says so by label and blocks the profiles, dragged apart they return; Finish → Save As → Open: each closure and the authored tangents are byte-equal, re-entered and saved again unchanged, and the positional region extrudes from a viewport pick", async ({
+test("§2 E2E-2 closures: Close spline on an open spline (one action) and positional closure by Merge Points (the second pick, the first fit point, survives) each form a region; Finish → Save As → Open: each closure and the authored tangents are byte-equal, re-entered and saved again unchanged, and the positional region extrudes from a viewport pick", async ({
   page,
 }) => {
   test.setTimeout(420_000);
@@ -631,76 +718,7 @@ test("§2 E2E-2 closures: Close spline on an open spline (one action) and positi
   );
   await toSelect(page);
 
-  // Degenerate span (T17c3/T17c5): fit point 3 of the merged spline glided
-  // onto fit point 2: one action; the span stays authored and drawn, the
-  // label-based status shows and no profile is offered; dragged apart,
-  // both regions return.
-  const second = map.toCanvas(positionOf(positional, mergeFit[1]!));
-  const third = map.toCanvas(positionOf(positional, mergeFit[2]!));
-  await waitForCommittedAction(page, "Move Sketch Geometry", () =>
-    glideDrag(workbench, third, second),
-  );
-  const status = page.getByRole("status").filter({
-    hasText:
-      "Spline 2 has two consecutive fit points at the same place (Spline 2 point 2 and Spline 2 point 3); the sketch's profiles are blocked. Undo, or drag one of them apart (delete the Coincident between them first, if there is one).",
-  });
-  await expect(status, "the label-based status").toBeVisible({
-    timeout: 15_000,
-  });
-  await expectLiveRegions(
-    page,
-    { status: "unavailable", count: 0 },
-    "no profile is offered",
-  );
-  const degenerate = await mixedSnapshot(page);
-  expect(positionOf(degenerate, mergeFit[2]!)).toEqual(
-    positionOf(degenerate, mergeFit[1]!),
-  );
-  expect(
-    degenerate.entities[1]!.occurrences!.map(
-      (occurrence) => occurrence.pointId,
-    ),
-    "the span stays authored",
-  ).toEqual(mergedNow.occurrences!.map((occurrence) => occurrence.pointId));
-  expect(
-    await page.evaluate(
-      (id) => window.__cadProjectToScreen?.(`sketch_draft.${id}`) ?? null,
-      merged.id,
-    ),
-    "the spline stays drawn",
-  ).not.toBeNull();
-  await page.keyboard.press("Escape");
-  await glideClick(workbench, BLANK);
-  const grabbed = await hoverUntil(
-    workbench,
-    second,
-    new RegExp(`\\.(${mergeFit[1]}|${mergeFit[2]})$`),
-  );
-  const grabbedId = (await workbench.currentHoverTarget()).endsWith(
-    mergeFit[2]!,
-  )
-    ? mergeFit[2]!
-    : mergeFit[1]!;
-  // Fit point 3 goes back where it was; fit point 2 towards fit point 1
-  // (either keeps the fit points in order).
-  const back = grabbedId === mergeFit[2] ? third : { x: 890, y: 500 };
-  await waitForCommittedAction(page, "Move Sketch Geometry", () =>
-    glideDrag(workbench, grabbed, back),
-  );
-  await expect(status, "the status is gone").toHaveCount(0, {
-    timeout: 15_000,
-  });
-  await expectLiveRegions(
-    page,
-    { status: "current", count: 2 },
-    "dragged apart: both regions return",
-  );
   const beforeFinish = await mixedSnapshot(page);
-  const moved = map.toCanvas(positionOf(beforeFinish, grabbedId));
-  expect(
-    Math.hypot(moved.x - back.x, moved.y - back.y),
-    "the hovered fit point is the one dragged apart",
-  ).toBeLessThan(2);
 
   // Finish → Save As: the closures and the authored tangents as edited.
   await workbench.activateTool("Exit the active sketch.");

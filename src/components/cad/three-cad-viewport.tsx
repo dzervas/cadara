@@ -91,6 +91,7 @@ import {
   ViewportInvalidationBridge,
   ViewportCameraTransitionDriver,
   ViewportProjectionCameraController,
+  ViewportPickRoot,
   ViewportProjectionSelector,
   WorkspaceSceneScaffold,
 } from "@/components/cad/three-cad-viewport-inner-components";
@@ -1877,10 +1878,40 @@ export function ThreeCadViewport({
     };
   }, [controlsReadyVersion, requestCameraTransition]);
 
-  useLayoutEffect(() => {
-    bindingsRef.current = collectBindings(pickRootRef.current);
+  // T17c6 (D-4): pick bindings are collected after the R3F commit of the
+  // pick root (`ViewportPickRoot`), whenever its objects or the highlight
+  // inputs may have changed; a DOM-side layout effect runs before that
+  // commit and could keep the previous scene's objects.
+  const pickRootCommitToken = useMemo(
+    () => [
+      activeSectionClippingPlane,
+      annotationHighlightTargets,
+      bvhSceneKey,
+      hoverTarget,
+      renderables,
+      selection,
+      sketchDisplayRenderables,
+      sketchDisplayStylesEnabled,
+      sketchMarkerContext,
+      sketchRenderingPalette,
+    ],
+    [
+      activeSectionClippingPlane,
+      annotationHighlightTargets,
+      bvhSceneKey,
+      hoverTarget,
+      renderables,
+      selection,
+      sketchDisplayRenderables,
+      sketchDisplayStylesEnabled,
+      sketchMarkerContext,
+      sketchRenderingPalette,
+    ],
+  );
+  const handlePickRootCommit = () => {
+    const bindings = collectBindings(pickRootRef.current);
+    bindingsRef.current = bindings;
     bindingsSceneKeyRef.current = bvhSceneKey;
-    const bindings = bindingsRef.current;
 
     if (bindings) {
       updateWorkspaceHighlight(
@@ -1890,7 +1921,7 @@ export function ThreeCadViewport({
         annotationHighlightTargets,
       );
     }
-  }, [annotationHighlightTargets, bvhSceneKey, hoverTarget, selection]);
+  };
 
   useEffect(() => {
     const camera = cameraRef.current;
@@ -3568,7 +3599,11 @@ export function ThreeCadViewport({
           onReady={() => firstNonEmptyGeometryFrameRef.current?.()}
         />
         <Bvh key={bvhSceneKey} enabled>
-          <group ref={pickRootRef}>
+          <ViewportPickRoot
+            rootRef={pickRootRef}
+            commitToken={pickRootCommitToken}
+            onCommit={handlePickRootCommit}
+          >
             {renderables.map((entry) => (
               <DocumentRenderableNode
                 key={`${entry.origin}:${entry.renderable.id}`}
@@ -3586,7 +3621,7 @@ export function ThreeCadViewport({
                 markerContext={sketchMarkerContext}
               />
             ))}
-          </group>
+          </ViewportPickRoot>
         </Bvh>
         <MeasurementWitnessLayer witnesses={measurementWitnesses} />
         {activeSectionView ? (
