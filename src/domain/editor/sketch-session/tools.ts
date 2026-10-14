@@ -1225,15 +1225,19 @@ export function selectSketchReferenceTarget(
   session: SketchSessionState,
   target: PrimitiveRef,
 ): SketchSessionState {
-  if (!session.referenceTargetPicking) {
-    return session;
-  }
+  return session.referenceTargetPicking ? authorSketchReference(session, target) : session;
+}
 
+/** Explicit reference authoring shared with browser target selection. */
+export function authorSketchReference(
+  session: SketchSessionState,
+  target: PrimitiveRef,
+): SketchSessionState {
   if (
     (target.kind === "sketch" ||
       target.kind === "sketchEntity" ||
       target.kind === "sketchPoint") &&
-    target.sketchId === getSessionSketchId(session)
+    (target.sketchId === getSessionSketchId(session) || target.sketchId === session.actionContextId)
   ) {
     const message =
       "Reference geometry must come from model topology or another existing sketch.";

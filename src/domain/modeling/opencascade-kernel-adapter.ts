@@ -2711,6 +2711,8 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
           projectionState = {
             ...projectionState,
             sketches: [...projectionState.sketches, rebuiltSketch],
+            // The next sketch may project any already-restored sketch, not future history.
+            cursor: { kind: "sketch", sketchId: rebuiltSketch.sketchId },
           };
           continue;
         }

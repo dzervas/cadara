@@ -9,8 +9,8 @@ import type {
   SemanticResult,
 } from "@/contracts/semantic/schema";
 
-export async function createSketchWorkflow() {
-  const opened = await createHeadlessSessionFactory().open();
+export async function createSketchWorkflow(options: Parameters<typeof createHeadlessSessionFactory>[0] = {}) {
+  const opened = await createHeadlessSessionFactory(options).open();
   if (opened.kind !== "ready") throw new Error(JSON.stringify(opened));
   const { session, initialization } = opened;
   let current: SemanticResult | undefined;

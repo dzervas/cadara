@@ -17,7 +17,8 @@ type TargetAlias = Alias & { label: string };
 type RecipeGeometryEdit<T = import("@/contracts/semantic/schema").SemanticSketchGeometryEdit> = T extends { target: infer R } ? Omit<T, "target" | "destination" | "boundary"> & { target: R | TargetAlias } & (T extends { destination: infer D } ? { destination: D | TargetAlias } : unknown) & (T extends { boundary: infer B } ? { boundary: B | TargetAlias } : unknown) : never;
 type RecipePrimitive<T = import("@/contracts/semantic/schema").SemanticSketchPrimitive> = T extends { source: infer S } ? Omit<T, "source"> & { source: S | TargetAlias } : T;
 type RecipeCommand<T = SemanticCommand> = T extends SemanticCommand
-  ? Omit<T, "basis" | "draft" | "points" | "dimensionId" | "derivationId" | "profile" | "featureId" | "sketchId" | "target" | "targets" | "axis" | "repair" | "edit" | "primitive"> &
+  ? Omit<T, "basis" | "draft" | "points" | "dimensionId" | "derivationId" | "profile" | "featureId" | "sketchId" | "target" | "targets" | "axis" | "repair" | "edit" | "primitive" | "support"> &
+    (T extends { support: infer S } ? { support: S | TargetAlias } : unknown) &
     (T extends { primitive: unknown } ? { primitive: RecipePrimitive } : unknown) &
     (T extends { edit: unknown } ? { edit: RecipeGeometryEdit } : unknown) &
     (T extends { axis: infer A } ? { axis: A | TargetAlias } : unknown) &
@@ -190,6 +191,10 @@ function parseRecipe(input: unknown): RecipeOperation[] {
     if (isAlias(command.target)) {
       validateTarget(command.target, "body_validation");
       validationCommand.target = command.operation === "export.step" ? { kind: "body", bodyId: "body_validation" } : { kind: "sketchPoint", sketchId: "sketch_validation", pointId: "sketch_point_validation" };
+    }
+    if (isAlias(command.support)) {
+      validateTarget(command.support, "construction_validation");
+      validationCommand.support = { kind: "construction", constructionId: "construction_plane-xy" };
     }
     if (isAlias(command.axis)) {
       validateTarget(command.axis, "sketch_entity_validation");
@@ -373,6 +378,16 @@ export const documentRecipesCommand: CommandModule = {
           if (source.kind !== "sketchEntity") throw new Error("Invalid tangent source target.");
           command.primitive = { ...command.primitive, source };
         }
+        if ((command.operation === "sketch.begin" && "support" in command) || command.operation === "sketch.support.reassign") {
+          const support = resolveSketchTarget(command.support, ["construction", "face"]);
+          if (support.kind !== "construction" && support.kind !== "face") throw new Error("Invalid sketch support.");
+          command.support = support;
+        }
+        if (command.operation === "sketch.reference.add") {
+          const target = resolveSketchTarget(command.target, ["construction", "face", "edge", "vertex", "sketch", "sketchEntity", "sketchPoint"]);
+          if (target.kind !== "construction" && target.kind !== "face" && target.kind !== "edge" && target.kind !== "vertex" && target.kind !== "sketch" && target.kind !== "sketchEntity" && target.kind !== "sketchPoint") throw new Error("Invalid external reference source.");
+          command.target = target;
+        }
         if (command.operation === "sketch.construction.set") {
           const target = resolveSketchTarget(command.target, ["sketchPoint", "sketchEntity"]);
           if (target.kind !== "sketchPoint" && target.kind !== "sketchEntity") throw new Error("Invalid construction target.");
@@ -421,7 +436,7 @@ export const documentRecipesCommand: CommandModule = {
           if (matches.length !== 1 || matches[0]!.target.kind !== "region") throw new Error("Profile target alias is missing or ambiguous.");
           command.profile = matches[0]!.target;
         }
-        if ((command.operation === "extrude.update" && isAlias(command.featureId)) || (command.operation === "sketch.open" && isAlias(command.sketchId))) {
+        if ((command.operation === "extrude.update" && isAlias(command.featureId)) || ((command.operation === "sketch.open" || command.operation === "sketch.support.reassign") && isAlias(command.sketchId))) {
           const key = command.operation === "extrude.update" ? "featureId" : "sketchId";
           const target = key === "featureId" && "featureId" in command ? command.featureId : "sketchId" in command ? command.sketchId : null;
           if (!isAlias(target)) throw new Error("Invalid target alias.");
@@ -430,7 +445,7 @@ export const documentRecipesCommand: CommandModule = {
           if (matches.length !== 1) throw new Error("Feature or sketch target alias is missing or ambiguous.");
           const ref = matches[0]!.target;
           if (command.operation === "extrude.update" && ref.kind === "feature") command.featureId = ref.featureId;
-          if (command.operation === "sketch.open" && ref.kind === "sketch") command.sketchId = ref.sketchId;
+          if ((command.operation === "sketch.open" || command.operation === "sketch.support.reassign") && ref.kind === "sketch") command.sketchId = ref.sketchId;
         }
         const validated = validateSemanticCommand(command);
         if (!validated.success)

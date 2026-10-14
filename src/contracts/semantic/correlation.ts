@@ -9,6 +9,8 @@ export function semanticCommandCorrelation(
     family:
       (command.operation === "sketch.begin" || command.operation === "sketch.open")
         ? "sketch-open"
+        : command.operation === "sketch.support.reassign"
+          ? "model-mutate"
         : command.operation === "sketch.publish"
           ? "sketch-publish"
           : command.operation === "sketch.discard"

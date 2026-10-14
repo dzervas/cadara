@@ -168,6 +168,8 @@ function actionLabel(event: EditorEvent, before: EditorState) {
   switch (event.type) {
     case "sketch.intersectionEditCompleted":
       return event.basis.input.operation.kind === "extend" ? "Extend" : event.basis.input.operation.kind === "split" ? "Split" : "Trim";
+    case "sketch.referenceAuthored":
+      return "Reference Geometry";
     case "sketch.derivationCreated":
       return event.input.kind === "linearPattern" ? "Sketch Linear Pattern" : event.input.kind === "circularPattern" ? "Sketch Circular Pattern" : "Sketch Transform";
     case "sketch.mirrorRemoved":

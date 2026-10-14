@@ -87,8 +87,10 @@ export interface SemanticDraftBasis {
 export type SemanticSketchCommand = CommandIdentity & {
   basis: SemanticBasis;
 } & (
-    | { operation: "sketch.begin"; plane: "xy" | "yz" | "xz" }
+    | ({ operation: "sketch.begin" } & ({ plane: "xy" | "yz" | "xz" } | { support: import("@/contracts/shared/sketch-plane").SketchPlaneSupportRef }))
     | { operation: "sketch.open"; sketchId: SketchId }
+    | { operation: "sketch.support.reassign"; sketchId: SketchId; support: import("@/contracts/shared/sketch-plane").SketchPlaneSupportRef }
+    | { operation: "sketch.reference.add"; draft: SemanticDraftBasis; target: Extract<DurableRef, { kind: "construction" | "face" | "edge" | "vertex" | "sketch" | "sketchEntity" | "sketchPoint" }>; intent: "fulfill" | "author-invalid" }
     | {
         operation: "sketch.author";
         draft: SemanticDraftBasis;
@@ -304,7 +306,11 @@ export interface SemanticDiscovery {
   };
   sketch?: {
     sketchId: SketchId | null;
-    plane: "xy" | "yz" | "xz";
+    plane: "xy" | "yz" | "xz" | null;
+    /** Resolved production support and world frame, in document units. */
+    support?: import("@/contracts/shared/sketch-plane").SketchPlaneDefinition;
+    /** Authored sources and actual solver-owned projections; never editable local copies. */
+    references?: readonly { definition: import("@/contracts/sketch/schema").SketchReferenceDefinition; revisionId: RevisionId | null; projection: import("@/contracts/solver/schema").ProjectedSketchReferenceRecord | null }[];
     solveStatus: SolvedSketchStatus;
     validity: SketchDerivedValidity;
     points: readonly {

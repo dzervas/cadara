@@ -1,6 +1,7 @@
 import type { PrimitiveRef, RevisionId } from "@/core/editor/schema";
 import {
   createNewSketchSession,
+  derivePlaneKeyFromTarget,
   createNewSketchSessionFromSupport,
   createSketchSessionFromSnapshot,
   type SketchSessionState
@@ -62,7 +63,9 @@ function createSketchSessionForSelection(
       return createNewSketchSession(construction.plane, settings);
     }
 
-    return createNewSketchSessionFromSupport(primary, settings);
+    return derivePlaneKeyFromTarget(primary)
+      ? createNewSketchSessionFromSupport(primary, settings)
+      : null;
   }
 
   if (primary.kind === "face") {
@@ -78,7 +81,8 @@ export function canStartSketchFromTarget(
   snapshot: WorkspaceSnapshot | null,
 ) {
   if (target.kind === "construction") {
-    return true;
+    return derivePlaneKeyFromTarget(target) !== null ||
+      !!snapshot?.document.constructions.some(c => c.constructionId === target.constructionId);
   }
 
   if (target.kind === "face" && snapshot) {

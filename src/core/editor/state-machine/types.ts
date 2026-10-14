@@ -704,8 +704,10 @@ export interface SnapshotFailedEvent {
  * through `effect.*` result events.
  */
 export type EditorEvent =
-  | { type: "sketch.beginRequested"; target: import("@/contracts/shared/references").ConstructionRef | import("@/contracts/shared/references").SketchRef }
+  | { type: "sketchPlaneEdit.supportCommitted"; target: import("@/contracts/shared/sketch-plane").SketchPlaneSupportRef }
+  | { type: "sketch.beginRequested"; target: import("@/contracts/shared/sketch-plane").SketchPlaneSupportRef | import("@/contracts/shared/references").SketchRef }
   | { type: "sketch.offsetCompleted"; prepared: Exclude<ReturnType<typeof import("@/domain/editor/sketch-session/editing").prepareSketchOffset>, { message: string }>; record: import("@/contracts/solver/schema").SketchOffsetPublicationRecord }
+  | { type: "sketch.referenceAuthored"; target: Extract<import("@/contracts/semantic/schema").SemanticSketchCommand, { operation: "sketch.reference.add" }>["target"] }
   | { type: "sketch.derivationCreated"; input: Extract<import("@/contracts/semantic/schema").SemanticCommand, { operation: "sketch.derivation.create" }> }
   | { type: "sketch.mirrorRemoved"; derivationId: string }
   | { type: "sketch.mirrorRepaired"; repair: import("@/domain/editor/sketch-session/types").SketchMirrorRepairState; target: import("@/core/editor/schema").PrimitiveRef }
