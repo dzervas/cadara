@@ -166,6 +166,11 @@ export type SketchToolOverlayDescriptor =
       labelAnchor: SketchToolAnchorDescriptor;
       value?: number | null;
       unit?: string;
+      /**
+       * The tool's live preview: its kind label is drawn (independent of
+       * `dragHandle`, which is set only while the preview can be dragged).
+       */
+      labelled?: boolean;
       dragHandle?: SketchToolOverlayDragHandle;
       extensionLines?: readonly SketchToolPreviewLineDescriptor[];
     }
@@ -186,6 +191,11 @@ export type SketchToolOverlayDescriptor =
       radius: number;
       side: "minor" | "major";
       labelAnchor: SketchToolAnchorDescriptor;
+      /**
+       * The tool's live preview: its kind label is drawn (independent of
+       * `dragHandle`, which is set only while the preview can be dragged).
+       */
+      labelled?: boolean;
       dragHandle?: SketchToolOverlayDragHandle;
       witnessLines?: readonly SketchToolPreviewLineDescriptor[];
       referenceLabel?: string;

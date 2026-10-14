@@ -19,7 +19,9 @@ import {
   selectSketchConstraintTarget,
   selectSketchEditToolTarget,
   startSketchDraw,
+  updateSketchConstraintHover,
   updateSketchGeometryDrag,
+  updateSketchPointer,
   withLiveSolveBasis,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
@@ -1215,4 +1217,63 @@ test("T13e2 (re-review A-2): an annotation edit of a satisfied, unrelated dimens
   expect(message).not.toContain(" conflicts with ");
   for (const id of conflict)
     expect(message).toContain(requirementLabel(edited, id));
+});
+
+// T17j2 (Category 4 flow): with the Distance tool's first target picked, the
+// preview runs from it to the pointer (or the hovered second target). Its
+// drag handle is a wide, pointer-catching hit line in the viewport, so while
+// targets are still being picked the preview must carry none: the next pick
+// reaches the canvas. Once both targets are chosen (placement), it has one.
+test("T17j2: a point-dimension preview is labelled in every phase but not draggable until both targets are picked; the placement preview is", () => {
+  const session = rectangleAndCircle();
+  const corner = (index: number) => session.definition.points[index]!;
+  const [first, second] = [corner(0), corner(2)];
+  expect(
+    Math.hypot(
+      first.position[0] - second.position[0],
+      first.position[1] - second.position[1],
+    ),
+    "premise: two distinct corners",
+  ).toBeGreaterThan(1);
+  const previewHandles = (state: SketchSessionState) => {
+    const lines = (state.toolPresentation?.overlays ?? []).filter(
+      (overlay) => overlay.kind === "dimensionLine",
+    );
+    expect(lines, "the preview dimension line is drawn").toHaveLength(1);
+    expect(
+      lines.every(
+        (overlay) => overlay.kind === "dimensionLine" && overlay.labelled,
+      ),
+      "the preview keeps its kind label in every phase (review A-1)",
+    ).toBe(true);
+    return lines.map((overlay) =>
+      overlay.kind === "dimensionLine" ? (overlay.dragHandle ?? null) : null,
+    );
+  };
+  for (const toolId of [
+    "dimensionDistance",
+    "dimensionHorizontal",
+    "dimensionVertical",
+  ] as const) {
+    let next = selectSketchConstraintTarget(
+      beginSketchTool(session, toolId),
+      first.target,
+    );
+    next = updateSketchPointer(next, second.position);
+    expect(
+      previewHandles(next),
+      `${toolId}: one target, pointer on the second point`,
+    ).toEqual([null]);
+    next = updateSketchConstraintHover(next, second.target);
+    expect(
+      previewHandles(next),
+      `${toolId}: one target, the second point hovered`,
+    ).toEqual([null]);
+    next = selectSketchConstraintTarget(next, second.target);
+    next = updateSketchPointer(next, [3, 6]);
+    expect(
+      previewHandles(next)[0]?.kind,
+      `${toolId}: both targets picked, the placement preview is draggable`,
+    ).toBe("dimensionLine");
+  }
 });

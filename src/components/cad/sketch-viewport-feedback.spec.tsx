@@ -3,7 +3,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MantineProvider } from "@mantine/core";
 
 import { SketchViewportFeedbackLayer } from "@/components/cad/sketch-viewport-feedback";
-import { getFloatingInputKeyPatch } from "@/components/cad/sketch-viewport-feedback-model";
+import {
+  collectSketchViewportFeedbackAnchors,
+  getFloatingInputKeyPatch,
+} from "@/components/cad/sketch-viewport-feedback-model";
 import type { SketchToolPresentationSchema } from "@/core/sketch-tools/editor-schema";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import { buildSketchEditToolPresentation } from "@/domain/editor/sketch-session/tools";
@@ -63,6 +66,7 @@ test("src/components/cad/sketch-viewport-feedback.spec.tsx", () => {
         end: [4, 2],
         value: 12,
         unit: "mm",
+        labelled: true,
         dragHandle: { id: "distance-preview-drag", kind: "dimensionLine" },
         labelAnchor: { kind: "sketchPoint", point: [2, 2] },
         extensionLines: [
@@ -101,6 +105,7 @@ test("src/components/cad/sketch-viewport-feedback.spec.tsx", () => {
         radius: 1,
         side: "major",
         labelAnchor: { kind: "sketchPoint", point: [0.5, 0.5] },
+        labelled: true,
         dragHandle: { id: "parallel-angle-preview-drag", kind: "angleArc" },
         witnessLines: [
           {
@@ -872,4 +877,71 @@ test("T16f: the routed Dimension popup renders the shared readout and the Add as
   );
   expect(switchInput(switched)).toContain('checked=""');
   expect(switched).toContain(">Add reference<");
+});
+
+// T17j2 (review A-1), UI lane: while a point dimension's targets are being
+// picked its preview keeps its kind label but renders no drag-handle hit
+// line (which would sit under the pointer and swallow the second pick);
+// once both are picked the placement preview has both.
+test("T17j2: a point-dimension preview shows its kind label before the second pick, with no drag-handle hit line; the placement preview has both", () => {
+  let session = withSketchSnapScale(
+    enterSketchSession(
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
+    ),
+    SPEC_SKETCH_UNITS_PER_PIXEL,
+  );
+  session = acceptSketchDraw(
+    startSketchDraw(beginSketchTool(session, "rectangle"), [1, 1]),
+    [5, 4],
+  );
+  const [first, , second] = session.definition.points;
+  const render = (state: typeof session) => {
+    const schema = state.toolPresentation!;
+    return renderToStaticMarkup(
+      <SketchViewportFeedbackLayer
+        schema={schema}
+        projections={collectSketchViewportFeedbackAnchors(schema).map(
+          (anchor, index) => ({ id: anchor.id, x: 100 + index * 10, y: 100 }),
+        )}
+        onPatch={() => undefined}
+      />,
+    );
+  };
+  for (const [toolId, kind] of [
+    ["dimensionDistance", "Aligned"],
+    ["dimensionHorizontal", "Horizontal"],
+    ["dimensionVertical", "Vertical"],
+  ] as const) {
+    let picking = selectSketchConstraintTarget(
+      beginSketchTool(session, toolId),
+      first!.target,
+    );
+    picking = updateSketchPointer(picking, second!.position);
+    const before = render(picking);
+    expect(
+      before.includes(`data-sketch-viewport-overlay="dimensionLine"`) &&
+        before.includes(kind),
+      `${toolId}: the preview's kind label is shown before the second pick`,
+    ).toBe(true);
+    expect(
+      before.includes("data-sketch-viewport-drag-handle"),
+      `${toolId}: no drag-handle hit line before the second pick`,
+    ).toBe(false);
+    const placing = updateSketchPointer(
+      selectSketchConstraintTarget(picking, second!.target),
+      [3, 6],
+    );
+    const after = render(placing);
+    expect(
+      after.includes(`data-sketch-viewport-overlay="dimensionLine"`),
+      `${toolId}: the placement preview keeps its label`,
+    ).toBe(true);
+    expect(
+      after.includes("data-sketch-viewport-drag-handle"),
+      `${toolId}: the placement preview is draggable`,
+    ).toBe(true);
+  }
 });

@@ -120,7 +120,7 @@ export function buildConstraintToolPresentation(
     isSketchConstraintReadyForValue(definition, authoring.selectedTargets);
   // T13c (D5): until the annotation is pinned (and the value input opens),
   // the preview reads the measured quantity at the current pointer.
-  const overlays = definition.buildPreview({
+  const preview = definition.buildPreview({
     selectedTargets: authoring.selectedTargets,
     hoverTarget: authoring.hoverTarget,
     pointer: authoring.pointer,
@@ -133,6 +133,21 @@ export function buildConstraintToolPresentation(
         : getAuthoredLiteralValue(authoring.pendingValue),
     annotationPlacement: authoring.pendingAnnotationPlacement,
   });
+  // T17j2: a dimension tool's live preview (the overlays the registry gives
+  // a drag handle) shows its kind label in every phase, but it is draggable
+  // only once every target is picked. While targets are still being picked
+  // a point dimension's preview runs to the pointer, so a drag handle would
+  // sit under the pointer and swallow the next pick.
+  const overlays = preview.map((overlay) =>
+    (overlay.kind === "dimensionLine" || overlay.kind === "angleArc") &&
+    overlay.dragHandle
+      ? {
+          ...overlay,
+          labelled: true,
+          dragHandle: needsValue ? overlay.dragHandle : undefined,
+        }
+      : overlay,
+  );
   const promptText = needsValue
     ? authoring.isPreviewPinned
       ? `Enter ${valueSpec?.label.toLowerCase() ?? "value"}`
