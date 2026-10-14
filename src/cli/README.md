@@ -206,7 +206,13 @@ After `sketch.open`, geometry edits take the current `basis`, `draft`, and
 - `sketch.geometry.update` takes an `edit`: `point` with a point `target` and
   `position`, `translate` with an entity `target` and `delta`, `radius` with a
   circle/arc entity `target` and positive `radius`, or `tangent` with a typed
-  `sketchTangentHandle` target and `vector`.
+  `sketchTangentHandle` target and `vector`. A point destination on the uniquely
+  owned center of a circle/arc translates the entire entity, just like a browser
+  center grab; other points request minimum-motion edits rather than rigid
+  component translation. Explicit `translate` requests the entity's defining
+  points together. Fixed requirements may block either intent; constraints and
+  driving dimensions remain authoritative. Tangent vectors edit handles, not
+  spline fit points, and preserve the fit-point positions.
 - `sketch.construction.set` takes a point/entity `target` and `construction`.
 - `sketch.geometry.delete` takes nonempty point/entity `targets`; dependent
   requirements are removed by the existing geometry deletion owner.

@@ -14,7 +14,6 @@ import {
 import {
   resolveHandleFromTarget,
   resolveSketchDragIntent,
-  getSketchEntityDefiningPointIds,
   type SketchDragIntent,
 } from "./drag-intent";
 import { prepareSketchPointMerge, prepareSketchTangentEditDefinition, solveDragEdit } from "./editing";
@@ -46,30 +45,37 @@ export function updateSketchGeometry(
   let intent: SketchDragIntent | null = null;
   let target: SketchDragTarget;
   switch (edit.kind) {
-    case "point":
-      if (
-        !session.definition.points.some(
-          (p) => p.pointId === edit.target.pointId,
-        ) ||
-        !edit.position.every(Number.isFinite)
-      )
-        return refuse("Point target and coordinates must be valid.");
-      intent = { kind: "point", pointId: edit.target.pointId };
-      target = {
-        kind: "sketchPoint",
-        pointId: edit.target.pointId,
-        position: edit.position,
-      };
-      break;
-    case "translate": {
-      const pointIds = getSketchEntityDefiningPointIds(
-        session.definition,
-        edit.target.entityId,
+    case "point": {
+      const point = session.definition.points.find(
+        (p) => p.pointId === edit.target.pointId,
       );
-      if (!pointIds.length || !edit.delta.every(Number.isFinite))
+      if (!point || !edit.position.every(Number.isFinite))
+        return refuse("Point target and coordinates must be valid.");
+      // A uniquely owned circle/arc center has the same whole-entity meaning
+      // as a browser center grab; targeting just its scalar point deforms arcs.
+      intent = resolveSketchDragIntent(session.definition, handle);
+      if (!intent || (intent.kind !== "point" && intent.kind !== "translate"))
+        return refuse("Point target is not editable.");
+      target = intent.kind === "translate"
+        ? {
+            kind: "sketchTranslate",
+            pointIds: intent.pointIds,
+            delta: [edit.position[0] - point.position[0], edit.position[1] - point.position[1]],
+          }
+        : {
+            kind: "sketchPoint",
+            pointId: intent.pointId,
+            position: edit.position,
+          };
+      break;
+    }
+    case "translate": {
+      intent = resolveSketchDragIntent(session.definition, {
+        kind: "entityBody", entityId: edit.target.entityId,
+      });
+      if (intent?.kind !== "translate" || !edit.delta.every(Number.isFinite))
         return refuse("Translation target and coordinates must be valid.");
-      intent = { kind: "translate", pointIds };
-      target = { kind: "sketchTranslate", pointIds, delta: edit.delta };
+      target = { kind: "sketchTranslate", pointIds: intent.pointIds, delta: edit.delta };
       break;
     }
     case "radius":
