@@ -7,10 +7,18 @@ import { expect, type Page } from "@playwright/test";
  * and Open… → "Open a copy" through the browser's file chooser. The saved
  * document is returned parsed, as written to disk.
  */
+/**
+ * The File menu button. Exact: a substring match also finds any button whose
+ * name contains "file", e.g. a feature's repair guidance ("…the profile
+ * will resolve again", T17k).
+ */
+const fileMenu = (page: Page) =>
+  page.getByRole("button", { name: "File", exact: true });
+
 export async function saveDocumentCopy<Document = unknown>(
   page: Page,
 ): Promise<Document> {
-  await page.getByRole("button", { name: "File" }).click();
+  await fileMenu(page).click();
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("menuitem", { name: "Save As" }).click();
   await page.getByRole("button", { name: "Download a copy" }).click();
@@ -25,7 +33,7 @@ export async function openDocumentCopy(
   document: unknown,
   name: string,
 ) {
-  await page.getByRole("button", { name: "File" }).click();
+  await fileMenu(page).click();
   await page.getByRole("menuitem", { name: "Open..." }).click();
   const chooserPromise = page.waitForEvent("filechooser");
   await page.getByRole("button", { name: "Open a copy" }).click();
@@ -46,7 +54,7 @@ export async function openDocumentCopy(
  * browser's picker with `emulateSaveFilePicker`.
  */
 export async function saveDocumentLinked(page: Page) {
-  await page.getByRole("button", { name: "File" }).click();
+  await fileMenu(page).click();
   await page.getByRole("menuitem", { name: "Save As" }).click();
   await page.getByRole("button", { name: "Save and keep linked" }).click();
 }

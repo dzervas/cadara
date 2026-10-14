@@ -968,6 +968,7 @@ export function CadWorkbench({
             })),
           }),
         ),
+        definition: def,
       };
     },
   });
