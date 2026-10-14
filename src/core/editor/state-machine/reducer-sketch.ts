@@ -1,7 +1,7 @@
 import { authorSketchDimension, authorSketchRequirement } from "@/domain/editor/sketch-session/constraints";
 import { updateSketchDimensionValue, deleteSelectedSketchAnnotation, makeSketchAnnotationReference } from "@/domain/editor/sketch-session/annotations";
 import { updateSketchGeometry, setSketchItemLabel } from "@/domain/editor/sketch-session/geometry-actions";
-import { completeSketchIntersectionEdit, deleteSelectedSketchGeometry } from "@/domain/editor/sketch-session/editing";
+import { buildSketchGeometry, completeSketchIntersectionEdit, deleteSelectedSketchGeometry } from "@/domain/editor/sketch-session/editing";
 import { setSketchConstructionTarget } from "@/domain/editor/sketch-session/tools";
 import { authorSketchPrimitive } from "@/domain/editor/sketch-session/tools";
 import { isRegisteredSketchToolId } from "@/core/sketch-tools/registry";
@@ -219,6 +219,8 @@ export function reduceSketchWorkflow(
       return { state, effects: [] };
     case "sketch.intersectionEditCompleted":
       return { state: createSketchPreviewState(state, completeSketchIntersectionEdit(state.session, event.basis, event.result).session), effects: [] };
+    case "sketch.geometryBuilt":
+      return { state: createSketchPreviewState(state, buildSketchGeometry(state.session, event.input)), effects: [] };
     case "sketch.geometryUpdated":
       return { state: createSketchPreviewState(state, updateSketchGeometry(state.session, event.edit)), effects: [] };
     case "sketch.geometryDeleted":

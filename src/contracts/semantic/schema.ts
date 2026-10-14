@@ -76,6 +76,10 @@ export type SemanticSketchGeometryEdit =
   | { kind: "radius"; target: Extract<DurableRef, { kind: "sketchEntity" }>; radius: number }
   | { kind: "tangent"; target: import("@/contracts/shared/references").SketchTangentHandleRef; vector: SketchPoint };
 
+export type SemanticSketchConstruction = {
+  targets: readonly Extract<DurableRef, { kind: "sketchEntity" }>[];
+} & ({ kind: "fillet"; radius: number } | { kind: "chamfer"; distance: number } | { kind: "slot"; width: number });
+
 export interface SemanticDraftBasis {
   commandSessionId: CommandSessionId;
   generation: number;
@@ -99,6 +103,7 @@ export type SemanticSketchCommand = CommandIdentity & {
     | { operation: "sketch.dimension.update"; draft: SemanticDraftBasis; dimensionId: import("@/contracts/shared/ids").DimensionId; value: number; intent: "fulfill" | "author-invalid" }
     | { operation: "sketch.construction.set"; draft: SemanticDraftBasis; target: Extract<DurableRef, { kind: "sketchPoint" | "sketchEntity" }>; construction: boolean; intent: "fulfill" | "author-invalid" }
     | { operation: "sketch.geometry.update"; draft: SemanticDraftBasis; edit: SemanticSketchGeometryEdit; intent: "fulfill" | "author-invalid" }
+    | ({ operation: "sketch.geometry.build"; draft: SemanticDraftBasis; intent: "fulfill" | "author-invalid" } & SemanticSketchConstruction)
     | { operation: "sketch.geometry.delete"; draft: SemanticDraftBasis; targets: readonly SemanticSketchGeometryTarget[]; intent: "fulfill" | "author-invalid" }
     | { operation: "sketch.label.set"; draft: SemanticDraftBasis; target: SemanticSketchLabelTarget; label: string; intent: "fulfill" | "author-invalid" }
     | { operation: "sketch.inspect"; draft: SemanticDraftBasis }
