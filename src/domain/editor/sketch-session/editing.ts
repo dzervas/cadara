@@ -2267,7 +2267,6 @@ export function advanceSketchEditQueryQueue(
         { ...editQuery, queue },
         message ?? gate?.message ?? null,
       );
-    const liveSolve = session.liveSolve!;
     const operation: SketchEditOperation = head.boundary
       ? {
           kind: kind as "extend" | "split",
@@ -2288,13 +2287,7 @@ export function advanceSketchEditQueryQueue(
           queryId: `${kind}-query-${crypto.randomUUID()}`,
           definition: session.definition,
           generation: session.liveRegions.generation,
-          input: {
-            definition: liveSolve.definition,
-            solvedSnapshot: liveSolve.solvedSnapshot,
-            projectedReferences: liveSolve.projectedReferences,
-            modelingTolerance: session.modelingTolerance,
-            operation,
-          },
+          input: sketchEditIntersectionInput(session, operation),
         },
       },
       message,
@@ -2302,10 +2295,32 @@ export function advanceSketchEditQueryQueue(
   }
 }
 
-/**
- * The builder of the in-flight operation (Trim, Extend or Split) on the
- * snapshot its intersections were certified on.
- */
+/** Shared accepted-basis preparation; clients supply explicit entities, not clicks. */
+export function prepareSketchIntersectionEdit(
+  session: SketchSessionState,
+  operation: SketchEditOperation,
+): { input: SketchEditIntersectionInput; definition: SketchDefinition; generation: number } | { message: string } {
+  const toolId = operation.kind === "trim" ? "trim" : operation.kind === "extend" ? "sketchExtend" : "sketchSplit";
+  const target = editQueryClick(session, operation.targetEntityId, operation.kind === "trim" ? null : operation.boundaryEntityId);
+  if (!target) return { message: "Sketch edit target or boundary is unavailable." };
+  const refusal = editQueryClickRefusal(session, toolId, target);
+  if (refusal) return { message: refusal };
+  const gate = offsetEditInputGate(session, clickEntityIds(target), editQueryInputUse(toolId, true));
+  const offsets = (session.definition.derivedRelationships ?? []).some(r => r.kind === "offset");
+  if (gate || (offsets && session.liveRegions.status === "pending"))
+    return { message: gate?.message ?? "Sketch edit needs current derived geometry." };
+  if (operation.kind === "split" && operation.pick && !operation.pick.every(Number.isFinite))
+    return { message: "Split crossing selection must be finite." };
+  return { input: sketchEditIntersectionInput(session, operation), definition: session.definition, generation: session.liveRegions.generation };
+}
+
+function sketchEditIntersectionInput(session: SketchSessionState, operation: SketchEditOperation): SketchEditIntersectionInput {
+  const liveSolve = session.liveSolve!;
+  return { definition: liveSolve.definition, solvedSnapshot: liveSolve.solvedSnapshot,
+    projectedReferences: liveSolve.projectedReferences, modelingTolerance: session.modelingTolerance, operation };
+}
+
+/** The builder of the operation on the snapshot its intersections were certified on. */
 function buildEditQueryMutation(
   session: SketchSessionState,
   input: SketchEditIntersectionInput,
@@ -2380,64 +2395,38 @@ export function completeSketchEditQuery(
     session.liveSolve?.solvedSnapshot !== inFlight.input.solvedSnapshot
   )
     return advanceSketchEditQueryQueue(withEditQuery(session, cleared, null));
-  const gate = offsetEditInputGate(
-    session,
-    [
-      operation.targetEntityId,
-      ...(operation.kind === "trim" ? [] : [operation.boundaryEntityId]),
-      ...(result.kind === "verified"
-        ? [result.cuts[0]!, result.cuts.at(-1)!].flatMap((cut) =>
-            cut.cutters.map((cutter) => cutter.entityId),
-          )
-        : []),
-      ...result.nonAcceptedNearTarget,
-    ],
-    editQueryInputUse(tool.toolId, false),
-  );
-  if (gate?.pending)
+  const completed = completeSketchIntersectionEdit(session, inFlight, result);
+  if (completed.pending)
     return advanceSketchEditQueryQueue(withEditQuery(session, cleared, null));
-  if (gate)
-    return advanceSketchEditQueryQueue(
-      withEditQuery(session, popped, null),
-      gate.message,
-    );
-  if (result.kind === "failed")
-    return advanceSketchEditQueryQueue(
-      withEditQuery(session, popped, null),
-      result.message,
-    );
-  const nextSequence = session.sequence + 1;
-  const mutation = buildEditQueryMutation(
-    session,
-    inFlight.input,
-    result,
-    nextSequence,
-  );
-  if (!mutation.changed)
-    return advanceSketchEditQueryQueue(
-      withEditQuery(session, popped, null),
-      mutation.message,
-    );
-  const applied = withLiveSolveBasis(
-    {
-      ...withEditQuery(session, popped, null),
-      definition: mutation.definition,
-      toolStagedEntities: [],
-      sequence: nextSequence,
-      commitRequest: rebuildSessionCommitRequest(session, mutation.definition),
-      activeEditTarget: null,
-      activeDrag: null,
-    },
-    mutation.definition,
-  );
   return advanceSketchEditQueryQueue(
-    applied,
-    freedFitPointsMessage(
-      session.definition,
-      mutation.definition,
-      operation.targetEntityId,
-    ),
+    withEditQuery(completed.session, popped, null), completed.session.validationMessage,
   );
+}
+
+/** Shared exact-result gate and authored mutation for browser and explicit edits. */
+export function completeSketchIntersectionEdit(
+  session: SketchSessionState,
+  basis: { definition: SketchDefinition; generation: number; input: SketchEditIntersectionInput },
+  result: SketchEditIntersectionResult,
+): { session: SketchSessionState; pending: boolean } {
+  const { operation } = basis.input;
+  const refuse = (message: string | null, pending = false) => ({ session: { ...session, validationMessage: message }, pending });
+  if (session.definition !== basis.definition || session.liveRegions.generation !== basis.generation || session.liveSolve?.solvedSnapshot !== basis.input.solvedSnapshot)
+    return refuse(editQueryStaleMessage(operation.kind));
+  const gate = offsetEditInputGate(session, [operation.targetEntityId,
+    ...(operation.kind === "trim" ? [] : [operation.boundaryEntityId]),
+    ...(result.kind === "verified" ? [result.cuts[0]!, result.cuts.at(-1)!].flatMap(cut => cut.cutters.map(cutter => cutter.entityId)) : []),
+    ...result.nonAcceptedNearTarget], `a ${editQueryToolName(operation.kind)} input`);
+  if (gate) return refuse(gate.message, gate.pending);
+  if (result.kind === "failed") return refuse(result.message);
+  const nextSequence = session.sequence + 1;
+  const mutation = buildEditQueryMutation(session, basis.input, result, nextSequence);
+  if (!mutation.changed) return refuse(mutation.message);
+  return { pending: false, session: withLiveSolveBasis({ ...session,
+    definition: mutation.definition, toolStagedEntities: [], sequence: nextSequence,
+    commitRequest: rebuildSessionCommitRequest(session, mutation.definition), activeEditTarget: null, activeDrag: null,
+    validationMessage: freedFitPointsMessage(session.definition, mutation.definition, operation.targetEntityId),
+  }, mutation.definition) };
 }
 
 /**

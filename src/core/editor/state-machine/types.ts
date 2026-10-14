@@ -706,6 +706,7 @@ export interface SnapshotFailedEvent {
 export type EditorEvent =
   | { type: "sketch.beginRequested"; target: import("@/contracts/shared/references").ConstructionRef | import("@/contracts/shared/references").SketchRef }
   | { type: "sketch.geometryUpdated"; edit: import("@/contracts/semantic/schema").SemanticSketchGeometryEdit }
+  | { type: "sketch.intersectionEditCompleted"; basis: { definition: SketchSessionState["definition"]; generation: number; input: import("@/contracts/sketch/edit-intersections").SketchEditIntersectionInput }; result: import("@/contracts/sketch/edit-intersections").SketchEditIntersectionResult }
   | { type: "sketch.geometryDeleted"; targets: readonly import("@/contracts/semantic/schema").SemanticSketchGeometryTarget[] }
   | { type: "sketch.labelSet"; target: import("@/contracts/semantic/schema").SemanticSketchLabelTarget; label: string }
   | { type: "sketch.constructionSet"; target: Extract<import("@/contracts/shared/references").DurableRef, { kind: "sketchEntity" | "sketchPoint" }>; construction: boolean }

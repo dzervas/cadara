@@ -67,6 +67,9 @@ export type SemanticSketchGeometryTarget = Extract<DurableRef, { kind: "sketchPo
 export type SemanticSketchLabelTarget = Extract<DurableRef, { kind: "sketchPoint" | "sketchEntity" | "dimension" | "constraint" | "sketch" }>;
 /** Explicit geometry intents reuse the existing constrained edit solver, not pointer choreography. */
 export type SemanticSketchGeometryEdit =
+  | { kind: "trim"; target: Extract<DurableRef, { kind: "sketchEntity" }> }
+  | { kind: "extend"; target: Extract<DurableRef, { kind: "sketchEntity" }>; boundary: Extract<DurableRef, { kind: "sketchEntity" }> }
+  | { kind: "split"; target: Extract<DurableRef, { kind: "sketchEntity" }>; boundary: Extract<DurableRef, { kind: "sketchEntity" }>; pick: SketchPoint }
   | { kind: "mergePoints"; target: Extract<DurableRef, { kind: "sketchPoint" }>; destination: Extract<DurableRef, { kind: "sketchPoint" }> }
   | { kind: "point"; target: Extract<DurableRef, { kind: "sketchPoint" }>; position: SketchPoint }
   | { kind: "translate"; target: Extract<DurableRef, { kind: "sketchEntity" }>; delta: SketchPoint }
@@ -221,6 +224,8 @@ export type SemanticGeometryReceipt =
         | { requestId: RequestId; generation: number }
         | { kind: "synchronous"; generation: number }
         | null;
+      /** Exact edit query accepted before the final solve/derivation, when required. */
+      editQuery?: { requestId: RequestId; generation: number };
       derivation: { requestId: RequestId; generation: number } | null;
       /** No arrangement request exists for an empty or solver-invalid definition. */
       derivationUnavailableReason?: "empty-sketch" | "solve-invalid";

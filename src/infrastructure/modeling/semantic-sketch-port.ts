@@ -29,6 +29,9 @@ import { sketchProfileGateFailures } from "@/contracts/sketch/derived-validity";
 import { isReferenceDimension } from "@/contracts/sketch/schema";
 import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
 import { getEntityPointIds } from "@/domain/sketch-editing/definition-references";
+import { prepareSketchIntersectionEdit } from "@/domain/editor/sketch-session/editing";
+import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
+import { requireQuerySketchEditIntersectionsResponse } from "@/contracts/solver/runtime-schema";
 
 function entityDiscovery(definition: import("@/contracts/sketch/schema").SketchDefinition): NonNullable<SemanticDiscovery["sketch"]>["entities"] {
   return definition.entities.map(e => ({
@@ -195,6 +198,7 @@ export function createSemanticSketchPort(input: {
     });
     const initial = discovery(before.discovery);
     const terminal = createSemanticResult(command, initial.state);
+    const actualBasis = { documentId: initial.state.documentId, revisionId: initial.state.revisionId, repositoryHeads: initial.state.repositoryHeads };
     const editor = input.loop.getState();
     if (
       command.basis.documentId !== initial.state.documentId ||
@@ -204,7 +208,7 @@ export function createSemanticSketchPort(input: {
     )
       return {
         ...terminal,
-        outcome: { kind: "conflicted" as const, actualBasis: initial.state },
+        outcome: { kind: "conflicted" as const, actualBasis },
       };
     if (
       (command.operation === "sketch.begin" || command.operation === "sketch.open")
@@ -223,7 +227,7 @@ export function createSemanticSketchPort(input: {
     )
       return {
         ...terminal,
-        outcome: { kind: "conflicted" as const, actualBasis: initial.state },
+        outcome: { kind: "conflicted" as const, actualBasis },
       };
     if (command.operation === "sketch.open" && !initial.references.some(r => r.target.kind === "sketch" && r.target.sketchId === command.sketchId))
       return { ...terminal, outcome: { kind: "rejected", reasonCode: "sketch-unavailable" } };
@@ -231,7 +235,7 @@ export function createSemanticSketchPort(input: {
     if (geometryMutation) {
       if (editor.kind !== "editingSketch") throw new Error("Missing private sketch owner.");
       const s = editor.session;
-      const targets = command.operation === "sketch.geometry.update" ? command.edit.kind === "mergePoints" ? [command.edit.target, command.edit.destination] : [command.edit.target] : (command.operation === "sketch.geometry.delete" || command.operation === "sketch.requirement.remove") ? command.targets : [command.target];
+      const targets = command.operation === "sketch.geometry.update" ? command.edit.kind === "mergePoints" ? [command.edit.target, command.edit.destination] : command.edit.kind === "split" || command.edit.kind === "extend" ? [command.edit.target, command.edit.boundary] : [command.edit.target] : (command.operation === "sketch.geometry.delete" || command.operation === "sketch.requirement.remove") ? command.targets : [command.target];
       const valid = targets.length > 0 && targets.every(t => t.sketchId === (s.sketchId ?? s.actionContextId) && (t.kind === "sketch" || (t.kind === "sketchPoint" ? s.definition.points.some(p => p.pointId === t.pointId) : t.kind === "dimension" ? s.definition.dimensions.some(d => d.dimensionId === t.dimensionId) : t.kind === "constraint" ? s.definition.constraints.some(c => c.constraintId === t.constraintId) : s.definition.entities.some(e => e.entityId === t.entityId))));
       if (!valid) return { ...terminal, outcome: { kind: "rejected", reasonCode: "sketch-target-unavailable" } };
       if (command.operation === "sketch.label.set" && !command.label.trim()) return { ...terminal, outcome: { kind: "rejected", reasonCode: "invalid-label" } };
@@ -294,6 +298,7 @@ export function createSemanticSketchPort(input: {
     const editorTarget = <T extends { sketchId: import("@/contracts/shared/ids").SketchId }>(target: T): T => ({ ...target, sketchId: editor.kind === "editingSketch" ? getSessionSketchId(editor.session) : target.sketchId });
     const priorGeometry = geometry(initial.state);
     let events: readonly EditorEvent[] = [];
+    let editQuery: { requestId: RequestId; generation: number } | undefined;
     let publicationReceipt:
       | import("@/domain/modeling/document-repository").DocumentRepositoryMutationResult
       | undefined;
@@ -317,7 +322,19 @@ export function createSemanticSketchPort(input: {
         const edit = { ...command.edit };
         edit.target = editorTarget(edit.target);
         if (edit.kind === "mergePoints") edit.destination = editorTarget(edit.destination);
-        events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.geometryUpdated", edit });
+        if (edit.kind === "split" || edit.kind === "extend") edit.boundary = editorTarget(edit.boundary);
+        if (edit.kind === "trim" || edit.kind === "extend" || edit.kind === "split") {
+          if (editor.kind !== "editingSketch") throw new Error("Missing private sketch owner.");
+          const operation: import("@/contracts/sketch/edit-intersections").SketchEditOperation = edit.kind === "trim" ? { kind: edit.kind, targetEntityId: edit.target.entityId } : edit.kind === "extend" ? { kind: edit.kind, targetEntityId: edit.target.entityId, boundaryEntityId: edit.boundary.entityId } : { kind: edit.kind, targetEntityId: edit.target.entityId, boundaryEntityId: edit.boundary.entityId, pick: [edit.pick[0], edit.pick[1]], requireUniquePick: true };
+          const prepared = prepareSketchIntersectionEdit(editor.session, operation);
+          if ("message" in prepared) return { ...terminal, outcome: { kind: "rejected", reasonCode: "sketch-edit-refused" }, diagnostics: [semanticDiagnostic(new Error(prepared.message))] };
+          const requestId = `request_semantic-edit-${crypto.randomUUID()}` as RequestId;
+          if (!input.service.sketchSolver) throw new Error("Sketch edit-intersection queries require the modeling service sketch solver.");
+          const answer = requireQuerySketchEditIntersectionsResponse(await input.service.sketchSolver.querySketchEditIntersections({ solverSchemaVersion: SOLVER_SCHEMA_VERSION, requestId, documentId: initial.state.documentId, revisionId: initial.state.revisionId, sketchId: getSessionSketchId(editor.session), ...prepared.input }));
+          if (answer.requestId !== requestId || answer.documentId !== initial.state.documentId || answer.revisionId !== initial.state.revisionId || answer.sketchId !== getSessionSketchId(editor.session)) throw new Error("Sketch edit query response does not match its owned request.");
+          editQuery = { requestId: answer.requestId, generation: prepared.generation };
+          events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.intersectionEditCompleted", basis: prepared, result: answer.result });
+        } else events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.geometryUpdated", edit });
       }
       if (command.operation === "sketch.geometry.delete")
         events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.geometryDeleted", targets: command.targets.map(editorTarget) });
@@ -384,7 +401,7 @@ export function createSemanticSketchPort(input: {
         const entries = finalEditor.session.actionHistory?.[direction] ?? [];
         const blocked = command.actionSequence === undefined ? entries.at(-1) : entries.find(e => e.sequence === command.actionSequence);
         if (blocked?.blockedReason)
-          return { ...terminal, outcome: { kind: "conflicted", actualBasis: initial.state }, diagnostics: [...terminal.diagnostics, semanticDiagnostic(new Error(blocked.blockedReason))] };
+          return { ...terminal, outcome: { kind: "conflicted", actualBasis }, diagnostics: [...terminal.diagnostics, semanticDiagnostic(new Error(blocked.blockedReason))] };
       }
       if ((geometryMutation || command.operation === "sketch.requirement.add" || command.operation === "sketch.dimension.update" || command.operation === "sketch.dimension.reference") && editor.kind === "editingSketch" && finalEditor.kind === "editingSketch" && finalEditor.session.definition === editor.session.definition && finalEditor.session.sketchLabel === editor.session.sketchLabel) {
         if (finalEditor.session.validationMessage) return { ...terminal, outcome: { kind: "rejected", reasonCode: "sketch-edit-refused" }, diagnostics: [semanticDiagnostic(new Error(finalEditor.session.validationMessage))] };
@@ -463,6 +480,7 @@ export function createSemanticSketchPort(input: {
           : { kind: "applied", state };
       terminal.completion.handoff = { kind: "current", state };
       terminal.completion.geometry = geometry(state);
+      if (editQuery && terminal.completion.geometry.kind !== "not-required") terminal.completion.geometry.editQuery = editQuery;
       terminal.diagnostics = [
         ...terminal.diagnostics,
         ...inspected.diagnostics,

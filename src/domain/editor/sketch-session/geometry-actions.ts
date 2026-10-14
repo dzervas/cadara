@@ -29,6 +29,8 @@ export function updateSketchGeometry(
   });
   if (edit.target.sketchId !== getSessionSketchId(session))
     return refuse("Sketch target is unavailable.");
+  if (edit.kind === "trim" || edit.kind === "extend" || edit.kind === "split")
+    return refuse("Sketch intersection edits require an exact accepted query result.");
   if (edit.kind === "mergePoints") {
     if (edit.destination.sketchId !== getSessionSketchId(session))
       return refuse("Merge destination is unavailable.");
