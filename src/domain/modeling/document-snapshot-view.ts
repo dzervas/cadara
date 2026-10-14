@@ -160,3 +160,39 @@ export function buildSelectionTargetCatalog(
       .map((entry) => entry.key),
   };
 }
+
+/**
+ * T17k2 (T17e review A-2 routed): the name a reference chip shows for
+ * `target`, never its id: a region as "‹sketch›: ‹region›", a record by its
+ * label, any other target by its presentation entity's label. Null when
+ * the snapshot does not hold it (a region: it no longer exists).
+ */
+export function getReferenceTargetLabel(
+  snapshot: WorkspaceSnapshot | null | undefined,
+  target: PrimitiveRef,
+): string | null {
+  if (!snapshot) return null;
+  if (target.kind === "region") {
+    const sketch = snapshot.document.sketches.find(
+      (entry) => entry.sketchId === target.sketchId,
+    );
+    const region = sketch?.sketch.regions.find(
+      (entry) => entry.regionId === target.regionId,
+    );
+    return sketch && region ? `${sketch.label}: ${region.label}` : null;
+  }
+  if (target.kind === "sketch")
+    return getSketchLabel(snapshot, target.sketchId);
+  if (target.kind === "feature")
+    return getFeatureLabel(snapshot, target.featureId);
+  if (target.kind === "body") return getBodyLabel(snapshot, target.bodyId);
+  return getEntityRecordForTarget(snapshot, target)?.label ?? null;
+}
+
+/** The sketch label of a region that no longer exists, if its sketch does. */
+export function getMissingRegionSketchLabel(
+  snapshot: WorkspaceSnapshot | null | undefined,
+  target: Extract<PrimitiveRef, { kind: "region" }>,
+) {
+  return snapshot ? getSketchLabel(snapshot, target.sketchId) : null;
+}

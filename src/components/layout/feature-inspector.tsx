@@ -26,6 +26,7 @@ import type {
   DocumentVariableRecord,
   FeatureSnapshotRecord,
   ModelingDiagnostic,
+  WorkspaceSnapshot,
 } from "@/contracts/modeling/schema";
 import {
   getPrimitiveRefLabel,
@@ -33,6 +34,10 @@ import {
   type PrimitiveRef,
 } from "@/core/editor/schema";
 import { formatInspectorDiagnosticDetail } from "@/domain/modeling/diagnostic-formatting";
+import {
+  getMissingRegionSketchLabel,
+  getReferenceTargetLabel,
+} from "@/domain/modeling/document-snapshot-view";
 import {
   PROFILE_REGION_RESELECT_CODE,
   PROFILE_REGION_SKETCH_NOT_CURRENT_CODE,
@@ -61,6 +66,7 @@ import type {
   FeatureNumericField,
 } from "@/core/feature-authoring/form-schema";
 import { useEditorState } from "@/hooks/use-editor-state";
+import { EditorContext } from "@/hooks/editor-context";
 import { WorkbenchInspectorPanel } from "@/components/layout/workbench-inspector-panel";
 import { getVisualFormSections } from "@/components/layout/feature-inspector-sections";
 
@@ -136,9 +142,30 @@ function DiagnosticsList({
   );
 }
 
-function renderReference(value: unknown) {
-  return value && typeof value === "object" && "kind" in value
-    ? getPrimitiveRefLabel(value as Parameters<typeof getPrimitiveRefLabel>[0])
+/**
+ * T17k2 (T17e review A-2 routed): what a reference chip says, by label
+ * (base: the internal key, e.g. "sketch_….region_…"). A region that no
+ * longer exists is a "Missing region" of its sketch; a target the
+ * snapshot does not name (topology) keeps its key.
+ */
+function referenceChipLabel(
+  snapshot: WorkspaceSnapshot | null | undefined,
+  target: PrimitiveRef,
+  missing = false,
+) {
+  const label = getReferenceTargetLabel(snapshot, target);
+  if (target.kind !== "region") return label ?? getPrimitiveRefLabel(target);
+  if (label !== null && !missing) return label;
+  const sketch = getMissingRegionSketchLabel(snapshot, target);
+  return sketch === null ? "Missing region" : `Missing region (${sketch})`;
+}
+
+function renderReference(
+  snapshot: WorkspaceSnapshot | null | undefined,
+  value: unknown,
+) {
+  return isPrimitiveRefValue(value)
+    ? referenceChipLabel(snapshot, value)
     : "None selected";
 }
 
@@ -720,6 +747,7 @@ function ReferenceCollectionCard(props: {
   onPatch: (patch: Record<string, unknown>) => void;
 }) {
   const featureDiagnostics = useContext(FeatureDiagnosticsContext);
+  const snapshot = useContext(EditorContext)?.state.snapshot;
   return (
     <Controller
       control={props.control}
@@ -774,9 +802,11 @@ function ReferenceCollectionCard(props: {
                           <span
                             className={`min-w-0 truncate text-[12px] ${diagnostic ? "text-(--workbench-shell-danger-text)" : "text-(--workbench-shell-text)"}`}
                           >
-                            {diagnostic?.code === PROFILE_REGION_RESELECT_CODE
-                              ? `Missing region (${getPrimitiveRefLabel(target)})`
-                              : getPrimitiveRefLabel(target)}
+                            {referenceChipLabel(
+                              snapshot,
+                              target,
+                              diagnostic?.code === PROFILE_REGION_RESELECT_CODE,
+                            )}
                           </span>
                           <ActionIcon
                             component="button"
@@ -793,7 +823,8 @@ function ReferenceCollectionCard(props: {
                                 ),
                               );
                             }}
-                            aria-label={`Remove ${getPrimitiveRefLabel(target)}`}
+                            aria-label={`Remove ${referenceChipLabel(snapshot, target)}`}
+                            data-reference-key={getPrimitiveRefLabel(target)}
                             variant="default"
                             color="red"
                             size={22}
@@ -876,12 +907,13 @@ function ReferenceCollectionCard(props: {
                 {selected.map((target) => (
                   <div
                     key={getPrimitiveRefLabel(target)}
+                    data-reference-key={getPrimitiveRefLabel(target)}
                     className="flex min-h-7 items-center justify-between gap-2 rounded-[3px] px-2"
                     style={{ background: "var(--workbench-shell-overlay)" }}
                   >
                     <span className="min-w-0 truncate text-[12px] text-(--workbench-shell-text)">
                       {props.field.picker.itemLabel ?? props.field.label}:{" "}
-                      {getPrimitiveRefLabel(target)}
+                      {referenceChipLabel(snapshot, target)}
                     </span>
                     {props.field.picker.allowsMultiple ? (
                       <div className="flex items-center gap-1">
@@ -896,7 +928,7 @@ function ReferenceCollectionCard(props: {
                                     target,
                                 });
                               }}
-                              aria-label={`Move ${getPrimitiveRefLabel(target)} earlier`}
+                              aria-label={`Move ${referenceChipLabel(snapshot, target)} earlier`}
                               variant="default"
                               size={22}
                               styles={compactActionIconStyles()}
@@ -915,7 +947,7 @@ function ReferenceCollectionCard(props: {
                                     target,
                                 });
                               }}
-                              aria-label={`Move ${getPrimitiveRefLabel(target)} later`}
+                              aria-label={`Move ${referenceChipLabel(snapshot, target)} later`}
                               variant="default"
                               size={22}
                               styles={compactActionIconStyles()}
@@ -939,7 +971,7 @@ function ReferenceCollectionCard(props: {
                               ),
                             );
                           }}
-                          aria-label={`Remove ${getPrimitiveRefLabel(target)}`}
+                          aria-label={`Remove ${referenceChipLabel(snapshot, target)}`}
                           variant="default"
                           color="red"
                           size={22}
@@ -981,6 +1013,7 @@ export function FeatureFormFieldRenderer(props: {
   onReferencePickerActivate: (fieldId: string) => void;
   onPatch: (patch: Record<string, unknown>) => void;
 }) {
+  const snapshot = useContext(EditorContext)?.state.snapshot;
   if (props.field.hidden) {
     return null;
   }
@@ -1013,7 +1046,10 @@ export function FeatureFormFieldRenderer(props: {
           render={({ field: controllerField }) => (
             <ReferenceCard
               title={field.label}
-              value={renderReference(controllerField.value) || field.emptyLabel}
+              value={
+                renderReference(snapshot, controllerField.value) ||
+                field.emptyLabel
+              }
               helper={formatParticipantHelper(field)}
               error={field.error}
               isActive={props.activeReferencePickerFieldId === field.id}

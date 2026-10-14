@@ -1,4 +1,4 @@
-import type { PrimitiveRef, RevisionId } from "@/core/editor/schema";
+import type { PrimitiveRef } from "@/core/editor/schema";
 import {
   createNewSketchSession,
   createNewSketchSessionFromSupport,
@@ -10,11 +10,6 @@ import {
 import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
 import type { RenderableEntityRecord } from "@/contracts/render/schema";
 import type { SketchPlaneDefinition } from "@/contracts/shared/sketch-plane";
-import type {
-  ModelingCommitSketchResult,
-  ModelingService,
-} from "@/domain/modeling/modeling-service";
-import type { AppResult } from "@/contracts/errors";
 import { getPrimitiveRefKey } from "@/core/editor/schema";
 import type { ViewportRenderableRecord } from "@/core/workspace/viewport-renderables";
 
@@ -228,24 +223,6 @@ function normalize(vector: Vec3): Vec3 | null {
   }
 
   return [vector[0] / length, vector[1] / length, vector[2] / length];
-}
-
-export async function commitActiveSketchSession(input: {
-  modelingService: ModelingService;
-  session: SketchSessionState;
-  baseRevisionId: RevisionId;
-}): Promise<AppResult<ModelingCommitSketchResult> | null> {
-  if (!input.session.commitRequest) {
-    return null;
-  }
-
-  const result = await input.modelingService.commitSketch({
-    baseRevisionId: input.baseRevisionId,
-    ...input.session.commitRequest,
-    solverCorrelation: null,
-  });
-
-  return result;
 }
 
 export function mergeSketchRenderables<

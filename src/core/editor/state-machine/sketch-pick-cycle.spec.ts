@@ -99,7 +99,6 @@ async function makeOverlapState(toolId: SketchAuthoringToolId | null = null) {
     },
     session,
     pendingCommitRequestId: null,
-    pendingImportRequestId: null,
     pendingProjectionRequestId: null,
     pendingRegionRequest: null,
   };

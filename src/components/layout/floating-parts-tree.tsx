@@ -131,6 +131,9 @@ export function FloatingPartsTree({
               items={menuItems}
             >
               <Row
+                // T17k2: the row's target key for tests (its text is the
+                // label, e.g. "Extrude 1", never an id).
+                data-parts-tree-target={targetKey}
                 isSelected={isSelected}
                 isHidden={isHidden}
                 isAllowed={isAllowed}

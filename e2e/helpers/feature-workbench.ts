@@ -278,10 +278,10 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
   }
 
   async expectBooleanTargetSelected(bodyId: string) {
-    await expect(this.featureInspector()).toContainText(
-      `Target body: ${bodyId}`,
-      { timeout: 10_000 },
-    );
+    // T17k2: the chip names the body by label; its key is a data attribute.
+    await expect(
+      this.featureInspector().locator(`[data-reference-key="${bodyId}"]`),
+    ).toContainText("Target body: ", { timeout: 10_000 });
   }
 
   async expectNoBooleanTargetSelected() {
@@ -520,9 +520,15 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
             return match ? [match[1]] : [];
           }
 
-          const text = button.textContent?.trim() ?? "";
-          const bodyLabel = /^feature_[A-Za-z0-9_-]+$/.exec(text)?.[0];
-          return bodyLabel ? [`body_${bodyLabel}`] : [];
+          // T17k2: a Parts & Objects body row shows its label ("Extrude
+          // 1"); its body id is the row's target key.
+          if (button.hasAttribute("data-trail")) return [];
+          const target =
+            button
+              .closest("[data-parts-tree-target]")
+              ?.getAttribute("data-parts-tree-target") ?? "";
+          const bodyId = /^body:(body_[A-Za-z0-9_-]+)$/.exec(target)?.[1];
+          return bodyId ? [bodyId] : [];
         }),
       );
 
@@ -620,8 +626,8 @@ export function meanPixelDelta(left: Buffer, right: Buffer) {
 }
 
 const SIDEBAR_TARGET_LABELS: Record<string, string | RegExp> = {
-  "body_feature_extrude-1": "feature_extrude-1",
-  "body_feature_extrude-2": "feature_extrude-2",
+  "body_feature_extrude-1": "Extrude 1",
+  "body_feature_extrude-2": "Extrude 2",
   "construction_plane-xy": "Top Plane",
   "construction_plane-yz": "Right Plane",
   "construction_plane-xz": "Front Plane",

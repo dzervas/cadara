@@ -26,7 +26,6 @@ import type {
   SnapshotMutationBasis,
 } from "@/contracts/modeling/schema";
 import { SKETCH_OFFSET_PREVIEW_REQUEST_SCOPE } from "@/contracts/solver/schema";
-import type { ReferenceImagePayload } from "@/contracts/reference-image/schema";
 import type { CommandSessionId } from "@/contracts/shared/ids";
 import type { FeatureId, RequestId, SketchId } from "@/contracts/shared/ids";
 import type { EditorExtensionDependencies } from "./dependencies";
@@ -755,56 +754,6 @@ export function emitPendingSketchSnapQuery(
         queryId: stage.queryId,
         sketchId: state.session.sketchId ?? ("sketch_draft" as SketchId),
         input: stage.input!,
-      },
-    ],
-  };
-}
-
-export function emitSketchReferenceImageImportWithPayloads(
-  state: SketchEditorState,
-  payloads: readonly ReferenceImagePayload[],
-): EditorTransitionResult {
-  const mutationBasis = getSnapshotMutationBasis(state);
-
-  if (
-    state.document.documentId === null ||
-    state.document.revisionId === null ||
-    mutationBasis === null ||
-    payloads.length === 0
-  ) {
-    return {
-      state,
-      effects: [],
-    };
-  }
-
-  const requestId = nextRequestId(state, "sketch-reference-image-import");
-
-  return {
-    state: {
-      ...state,
-      nextRequestSequence: state.nextRequestSequence + 1,
-      pendingImportRequestId: requestId,
-      command: {
-        ...state.command,
-        phase: "awaitingEffect",
-      },
-      preview: {
-        kind: "sketch",
-        label: "Import reference images",
-        target: state.session.planeTarget,
-      },
-    },
-    effects: [
-      {
-        type: "sketch.importReferenceImages",
-        requestId,
-        commandSessionId: state.command.commandSessionId,
-        documentId: state.document.documentId,
-        baseRevisionId: state.document.revisionId,
-        mutationBasis,
-        session: state.session,
-        payloads: [...payloads],
       },
     ],
   };

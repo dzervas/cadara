@@ -106,8 +106,6 @@ import {
   handleEffectSketchSnapIntersectionsQueried,
   handleEffectSketchSnapIntersectionsQueryFailed,
   handleEffectSketchOffsetPreviewPublicationFailed,
-  handleEffectSketchReferenceImageImportCompleted,
-  handleEffectSketchReferenceImageImportFailed,
   handleEffectSketchSpecialModeEffectCompleted,
   handleEffectSketchSpecialModeEffectFailed,
 } from "./transitions-effects";
@@ -663,10 +661,6 @@ function handleSharedEvent(
       return handleEffectSketchSnapIntersectionsQueried(state, event);
     case "effect.sketchSnapIntersectionsQueryFailed":
       return handleEffectSketchSnapIntersectionsQueryFailed(state, event);
-    case "effect.sketchReferenceImageImportCompleted":
-      return handleEffectSketchReferenceImageImportCompleted(state, event);
-    case "effect.sketchReferenceImageImportFailed":
-      return handleEffectSketchReferenceImageImportFailed(state, event);
     case "effect.sketchSpecialModeEffectCompleted":
       return handleEffectSketchSpecialModeEffectCompleted(
         state,

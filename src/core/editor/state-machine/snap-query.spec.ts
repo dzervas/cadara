@@ -102,7 +102,6 @@ async function stateWith(
       SPEC_SKETCH_UNITS_PER_PIXEL,
     ),
     pendingCommitRequestId: null,
-    pendingImportRequestId: null,
     pendingProjectionRequestId: null,
     pendingRegionRequest: null,
   };

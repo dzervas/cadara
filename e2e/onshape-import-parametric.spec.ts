@@ -37,7 +37,7 @@ const PART_STUDIO_BAKED_BODIES = [
   "body_feature_bakedBody-1_2",
 ];
 const INVALID_REFERENCE_ALERT =
-  /does not resolve|invalid reference|missing reference|solver|workbench action failed/i;
+  /does not resolve|no longer exists|invalid reference|missing reference|solver|workbench action failed/i;
 
 test("Mounts constrained sketch drag commits without breaking constraints", async ({
   page,

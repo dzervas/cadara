@@ -69,7 +69,8 @@ function resolveBody(
   if (!body) {
     return createExportDiagnostic(
       "occ-export-missing-body",
-      `Body ${target.bodyId} does not resolve in the current OpenCascade authoring state.`,
+      // T17k2 (T17e A-2 routed): the body is gone, so no label; no id.
+      "The body to export no longer exists in this document.",
       target,
     );
   }

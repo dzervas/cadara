@@ -84,7 +84,6 @@ async function trimState() {
     },
     session: beginSketchTool(session, "trim"),
     pendingCommitRequestId: null,
-    pendingImportRequestId: null,
     pendingProjectionRequestId: null,
     pendingRegionRequest: null,
   };

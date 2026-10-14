@@ -104,6 +104,31 @@ function pick(session: SketchSessionState, ...names: string[]) {
 const merge = (session: SketchSessionState) =>
   patchSketchEditToolValue(session, { intent: "mergePoints" });
 
+/** The triangle with a 0.5 distance between a2 and a (retained by a merge). */
+function gapTriangle() {
+  const fixture = triangle();
+  const definition = fixture.definition();
+  const withGap: SketchDefinition = {
+    ...definition,
+    dimensionIds: ["dimension_gap" as DimensionId],
+    dimensions: [
+      {
+        dimensionId: "dimension_gap" as DimensionId,
+        kind: "distance",
+        label: "Gap",
+        axis: "aligned",
+        pointIds: [pid("a2"), pid("a")],
+        value: 0.5,
+      },
+    ],
+  };
+  const session = open({
+    ...fixture,
+    build: () => ({ ...fixture.build(), definition: withGap }),
+  });
+  return { fixture, withGap, session };
+}
+
 describe("Merge Points session (T13j)", () => {
   test("source then destination: the destination is labelled, an arrow previews the merge, nothing is authored before confirm", () => {
     const session = open();
@@ -218,26 +243,7 @@ describe("Merge Points session (T13j)", () => {
   });
 
   test("a distance between the pair is retained: the invalid merge is explained with blocked profiles", () => {
-    const fixture = triangle();
-    const definition = fixture.definition();
-    const withGap: SketchDefinition = {
-      ...definition,
-      dimensionIds: ["dimension_gap" as DimensionId],
-      dimensions: [
-        {
-          dimensionId: "dimension_gap" as DimensionId,
-          kind: "distance",
-          label: "Gap",
-          axis: "aligned",
-          pointIds: [pid("a2"), pid("a")],
-          value: 0.5,
-        },
-      ],
-    };
-    const session = open({
-      ...fixture,
-      build: () => ({ ...fixture.build(), definition: withGap }),
-    });
+    const { fixture, withGap, session } = gapTriangle();
     expect(session.liveSolve?.accepted, "premise: accepted before").toBe(true);
     const merged = merge(pick(session, "a2", "a"));
     expect(merged.definition.dimensions[0]).toEqual({
@@ -475,7 +481,6 @@ describe("selection-first activation (T13j)", () => {
       session,
       selection: selection.map((name) => point(session, name)),
       pendingCommitRequestId: null,
-      pendingImportRequestId: null,
       pendingProjectionRequestId: null,
     } as SketchEditorState;
     const result = transitionEditorState(state, {
@@ -530,7 +535,6 @@ describe("Merge… from the near-gap hint (T13k)", () => {
       session,
       selection: [...selection],
       pendingCommitRequestId: null,
-      pendingImportRequestId: null,
       pendingProjectionRequestId: null,
     } as SketchEditorState;
   }
@@ -766,4 +770,41 @@ describe("T17f: Merge Points popup ⇔ Enter ⇔ staged; two-stage Escape", () =
     expect(f.state.command.toolId).toBe("sketch");
     expect(f.undoLabels()).toEqual([]);
   });
+});
+
+// T17k2 (T17k F-1): the explanation of a sketch a merge left invalid is the
+// sketch's, not the tool's: leaving Merge Points (Escape) keeps it, exactly
+// as Undo → Redo of the same merge shows it.
+test("T17k2: Escape out of Merge Points after a conflicting merge keeps the invalid-sketch explanation (as Redo does)", async () => {
+  const f = await createSketchActionOwnerFixture(gapTriangle().session);
+  f.dispatch({ type: "tool.activated", toolId: "sketchMergePoints" });
+  for (const name of ["a2", "a"])
+    f.dispatch({
+      type: "viewport.selectionRequested",
+      target: point(f.session, name),
+    });
+  f.dispatch({ type: "sketch.toolPatched", patch: { intent: "mergePoints" } });
+  expect(f.undoLabels()).toEqual(["Merge Points"]);
+  const explanation =
+    "Gap (0.5 mm) cannot be satisfied. The sketch is invalid; profiles from it are blocked. Change or delete it, or Undo.";
+  expect(f.session.validationMessage, "premise").toBe(
+    `Merging a2 into a: ${explanation}`,
+  );
+  const escape = getEscapeEvent({
+    activeCommand: null,
+    activeReferencePickerFieldId: null,
+    selection: f.state.selection,
+    sketchSession: f.session,
+    annotationContext: f.state.annotationContext,
+  });
+  expect(escape).toEqual({ type: "sketch.activeToolCleared" });
+  f.dispatch(escape!);
+  expect(f.session.activeTool, "the tool is left").toBe(null);
+  expect(f.session.validationMessage).toBe(explanation);
+  f.dispatch({ type: "history.undoRequested" });
+  expect(f.session.validationMessage, "Undo: valid again").toBe(null);
+  f.dispatch({ type: "history.redoRequested" });
+  expect(f.session.validationMessage, "Redo shows the same text").toBe(
+    explanation,
+  );
 });

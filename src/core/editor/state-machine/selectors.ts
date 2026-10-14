@@ -43,6 +43,26 @@ export function getEditorHistoryAvailability(
   };
 }
 
+/**
+ * T17-20 (T17k2; T17b0 P-8 S1): the notice for a sketch being edited that
+ * another session deleted (the shared sketch is gone from the document).
+ * Its history can't be applied (issue 09) and re-creating it is not a
+ * feature, so Finish is refused and the author can only discard and leave.
+ * Null when the edited sketch was never published or still exists.
+ */
+export function getPeerDeletedSketchNotice(state: EditorState): string | null {
+  if (
+    state.kind !== "editingSketch" ||
+    state.session.sketchId === null ||
+    !state.snapshot ||
+    state.snapshot.document.sketches.some(
+      (sketch) => sketch.sketchId === state.session.sketchId,
+    )
+  )
+    return null;
+  return `‘${state.session.sketchLabel}’ was deleted by another session; your changes can't be published.`;
+}
+
 export function getEditorViewState(state: EditorState) {
   return {
     mode: state.mode,

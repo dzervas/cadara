@@ -509,7 +509,6 @@ test("a superseded live derivation completes as a stale failure event; real erro
     selectionFilter: defaultSelectionFilter,
     pendingCommitRequestId: null,
     pendingProjectionRequestId: null,
-    pendingImportRequestId: null,
     pendingRegionRequest: null,
   });
   const deriveEffect = (state: SketchEditorState) => {

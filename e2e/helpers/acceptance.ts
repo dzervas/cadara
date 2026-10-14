@@ -59,6 +59,14 @@ const REGION_SEARCH_OFFSETS = regionSearchOffsets();
  * coordinates), e.g. a point on a thin region once zoomed in, where the
  * region's projected point is far off screen.
  */
+/**
+ * The remove button of `regionKey`'s profile chip (`sketch_….region_…`).
+ * T17k2: chips are named by label; the key is a data attribute, not text.
+ */
+export function profileChip(page: Page, regionKey: string) {
+  return page.locator(`button[data-reference-key="${regionKey}"]`);
+}
+
 export async function selectRegionInViewport(
   workbench: SketchWorkbenchHarness,
   regionId: string,
@@ -91,7 +99,7 @@ export async function selectRegionInViewport(
     if (hovered !== regionId) continue;
     await page.mouse.down();
     await page.mouse.up();
-    const chip = page.getByRole("button", { name: `Remove ${regionId}` });
+    const chip = profileChip(page, regionId);
     await expect
       .poll(
         async () =>

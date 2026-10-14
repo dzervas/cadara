@@ -88,9 +88,17 @@ test("src/components/layout/sketch-plane-inspector.spec.tsx renders the shared s
     </MantineProvider>,
   );
 
+  // T17k2: the committed support target is named by its label, not its id.
+  const supportLabel = snapshot.presentation.entities.find(
+    (entity) =>
+      entity.target.kind === "construction" &&
+      entity.target.constructionId === "construction_plane-xy",
+  )?.label;
+  expect(supportLabel, "premise: the support plane's label").toBeTruthy();
   expect(
     markup.includes("Support plane") &&
-      markup.includes("construction_plane-xy"),
+      markup.includes(`>${supportLabel}<`) &&
+      !markup.includes("construction_plane-xy"),
     "Sketch-plane inspector should render the support-plane picker label and the current committed support target.",
   ).toBeTruthy();
   expect(

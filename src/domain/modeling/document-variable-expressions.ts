@@ -68,7 +68,11 @@ export function evaluateDocumentVariableExpressions(
         code: "document-variable-invalid-name",
         variableId: variable.variableId,
         name: variable.name,
-        message: `Document variable ${variable.variableId} must use a non-empty math identifier name.`,
+        // T17k2 (T17e review A-8): the name is the user's; never the id.
+        message:
+          variable.name === ""
+            ? "A document variable needs a name."
+            : `Document variable name "${variable.name}" is not valid: use letters, digits and _, not starting with a digit.`,
       });
       continue;
     }

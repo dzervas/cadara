@@ -54,8 +54,7 @@ export function getEditorEffectContext(
   if (
     effect.type === "sketch.commit" ||
     effect.type === "sketchPlane.commit" ||
-    effect.type === "sketch.projectReferences" ||
-    effect.type === "sketch.importReferenceImages"
+    effect.type === "sketch.projectReferences"
   ) {
     context.push({ key: "sketchId", value: effect.session.sketchId });
   }
@@ -196,15 +195,6 @@ export function createEditorEffectFailureEvent(
         commandSessionId: effect.commandSessionId,
         baseRevisionId: effect.baseRevisionId,
         generation: effect.generation,
-        message: appError.message,
-      };
-    case "sketch.importReferenceImages":
-      return {
-        type: "effect.sketchReferenceImageImportFailed",
-        requestId: effect.requestId,
-        documentId: effect.documentId,
-        commandSessionId: effect.commandSessionId,
-        baseRevisionId: effect.baseRevisionId,
         message: appError.message,
       };
     case "sketch.specialModeEffect":

@@ -64,7 +64,6 @@ async function makeSketchState() {
     selectionFilter: defaultSelectionFilter,
     pendingCommitRequestId: null,
     pendingProjectionRequestId: null,
-    pendingImportRequestId: null,
     pendingRegionRequest: null,
   };
   const round = emitPendingSketchRegionDerivation({

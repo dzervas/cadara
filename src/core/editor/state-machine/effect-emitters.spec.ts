@@ -16,7 +16,6 @@ import {
   emitDocumentCursorMove,
   emitFeatureCommit,
   emitFeaturePreview,
-  emitSketchReferenceImageImportWithPayloads,
   emitSketchSpecialModeEffect,
   getSnapshotMutationBasis,
 } from "./effect-emitters";
@@ -71,7 +70,6 @@ function makeSketchState(
     selectionFilter: defaultSelectionFilter,
     pendingCommitRequestId: null,
     pendingProjectionRequestId: null,
-    pendingImportRequestId: null,
   };
 }
 
@@ -182,42 +180,6 @@ test("effect-emitters.ts guards feature preview when no document revision is loa
   expect(
     result.effects.length === 0 && result.state.document.revisionId === null,
     "Feature preview should not issue an effect before the editor has a loaded document revision.",
-  ).toBeTruthy();
-});
-
-test("effect-emitters.ts emits reference-image imports only when the sketch edit session has a valid mutation basis and payloads", async () => {
-  const snapshot = await createSeedDocumentSnapshot();
-  const session = openSketchSessionFromSelection(
-    [{ kind: "sketch", sketchId: snapshot.document.sketches[0]!.sketchId }],
-    snapshot,
-  );
-
-  expect(
-    session,
-    "Seed snapshot should expose a sketch session for sketch effect coverage.",
-  ).toBeTruthy();
-
-  const state = makeSketchState(snapshot, session);
-  const suppressed = emitSketchReferenceImageImportWithPayloads(state, []);
-  const emitted = emitSketchReferenceImageImportWithPayloads(state, [
-    {
-      mediaType: "image/png",
-      base64Data: "cG5n",
-      pixelWidth: 32,
-      pixelHeight: 24,
-      fileName: "reference.png",
-    },
-  ]);
-
-  expect(
-    suppressed.effects.length,
-    "Reference-image import should be suppressed when no payloads were chosen.",
-  ).toBe(0);
-  expect(
-    emitted.effects[0]?.type === "sketch.importReferenceImages" &&
-      emitted.effects[0].payloads.length === 1 &&
-      emitted.state.pendingImportRequestId === emitted.effects[0].requestId,
-    "Reference-image import should emit the dedicated sketch import effect and track the in-flight request id.",
   ).toBeTruthy();
 });
 

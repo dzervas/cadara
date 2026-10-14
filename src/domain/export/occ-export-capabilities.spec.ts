@@ -11,6 +11,7 @@ import {
 } from "@/domain/modeling/occ/topology";
 import { createOccExportCapabilities } from "@/domain/export/occ-export-capabilities";
 import { getDefaultOpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import { expectNoInternalIds } from "@/contracts/sketch/user-text.fixtures";
 
 type CustomOpenCascadeMainJSForTest = new (
   module: Record<string, unknown>,
@@ -185,4 +186,27 @@ test("src/domain/export/occ-export-capabilities.spec.ts", async () => {
   await testMeshExportConsumesNativePayloadWithoutJsFaceTriangulation();
   await testSheetBodyMeshExportStaysShapeAgnostic();
   await testSheetBodyStepExportStaysShapeAgnostic();
+});
+
+// T17k2 (T17e review A-2). Logic lane; seam: the OCC export capabilities.
+// A body that no longer exists is reported without its id (base: "Body
+// ‹bodyId› does not resolve in the current OpenCascade authoring state.").
+test("T17k2: exporting a body that no longer exists says so without an internal id", async () => {
+  const oc = await getDefaultOpenCascadeInstance();
+  const capabilities = createOccExportCapabilities(
+    createOccAuthoringState(oc, { bodies: [] }),
+  );
+  const result = capabilities.brep.writeStep(
+    { kind: "body", bodyId: "body_feature_extrude-1" as BodyId },
+    { schema: "AP242", unit: "millimeter" },
+  );
+  expect(result).toMatchObject({
+    diagnostic: {
+      code: "occ-export-missing-body",
+      message: "The body to export no longer exists in this document.",
+    },
+  });
+  expectNoInternalIds([
+    (result as { diagnostic: { message: string } }).diagnostic.message,
+  ]);
 });

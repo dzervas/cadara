@@ -415,7 +415,8 @@ function createMissingFeatureDiagnostic(
   return createDiagnostic(
     OCC_MISSING_FEATURE_CODE,
     "error",
-    `Feature ${featureId} does not resolve in the current OCC authoring state.`,
+    // T17k2 (T17e routed): no id in a user-facing text; the record is gone.
+    "The feature no longer exists in this document.",
     { kind: "feature", featureId },
   );
 }
@@ -424,16 +425,20 @@ function createMissingBodyDiagnostic(bodyId: BodyId): ModelingDiagnostic {
   return createDiagnostic(
     OCC_MISSING_BODY_CODE,
     "error",
-    `Body ${bodyId} does not resolve in the current OCC authoring state.`,
+    "The body no longer exists in this document.",
     { kind: "body", bodyId },
   );
 }
 
-function createMissingSketchDiagnostic(sketchId: SketchId): ModelingDiagnostic {
+/** T17k2 (T17b0 P-8): e.g. a sketch a peer deleted, named by `label` if known. */
+function createMissingSketchDiagnostic(
+  sketchId: SketchId,
+  label?: string,
+): ModelingDiagnostic {
   return createDiagnostic(
     "occ-missing-sketch",
     "error",
-    `Sketch ${sketchId} does not resolve in the current OCC authoring state.`,
+    `${label === undefined ? "The sketch" : `‘${label}’`} no longer exists in this document.`,
     { kind: "sketch", sketchId },
   );
 }
@@ -455,7 +460,7 @@ function createMissingReorderAnchorDiagnostic(
   return createDiagnostic(
     OCC_MISSING_REORDER_ANCHOR_CODE,
     "error",
-    `Feature reorder anchor ${featureId} does not resolve in the current OCC authoring state.`,
+    "The feature to reorder before no longer exists in this document.",
     { kind: "feature", featureId },
   );
 }
@@ -466,7 +471,7 @@ function createMissingDocumentHistoryItemDiagnostic(
   return createDiagnostic(
     "occ-missing-document-history-item",
     "error",
-    `Document history item ${getDocumentHistoryOrderEntryKey(item)} does not resolve in the current OCC authoring state.`,
+    "The history item to move no longer exists in this document.",
     item.kind === "sketch"
       ? { kind: "sketch", sketchId: item.sketchId }
       : { kind: "feature", featureId: item.featureId },
@@ -479,7 +484,7 @@ function createMissingDocumentHistoryAnchorDiagnostic(
   return createDiagnostic(
     "occ-missing-document-history-anchor",
     "error",
-    `Document history anchor ${item === null ? "tail" : getDocumentHistoryOrderEntryKey(item)} does not resolve in the current OCC authoring state.`,
+    "The history position to move to no longer exists in this document.",
     item === null
       ? null
       : item.kind === "sketch"
@@ -3037,12 +3042,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       }
     } else if (request.sketchId !== null && !existingSketch) {
       diagnostics.push(
-        createDiagnostic(
-          "occ-missing-sketch",
-          "error",
-          `Sketch ${request.sketchId} does not resolve in the current OCC authoring state.`,
-          { kind: "sketch", sketchId: request.sketchId },
-        ),
+        createMissingSketchDiagnostic(request.sketchId, request.sketchLabel),
       );
     }
 

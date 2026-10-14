@@ -1,4 +1,6 @@
-import type { SketchEntityId } from "@/contracts/shared/ids";
+import type { SketchEntityId, SketchId } from "@/contracts/shared/ids";
+import type { ReferenceImagePayload } from "@/contracts/reference-image/schema";
+import { createReferenceImageOperation } from "@/domain/reference-image/operations";
 import type { SketchToolId } from "@/core/sketch-tools/definition";
 import { isRegisteredSketchToolId } from "@/core/sketch-tools/registry";
 import {
@@ -35,6 +37,8 @@ import {
   updateSketchGeometryDrag,
   updateSketchPointer,
   type SketchDrawingEscapeStep,
+  appendReferenceImageOperations,
+  type SketchSessionState,
 } from "@/domain/editor/sketch-session";
 import {
   applySketchMirrorRemoval,
@@ -67,7 +71,6 @@ import type {
 } from "./types";
 import type { EditorExtensionDependencies } from "./dependencies";
 import {
-  emitSketchReferenceImageImportWithPayloads,
   emitSketchReferenceProjection,
   emitSketchSpecialModeEffect,
 } from "./effect-emitters";
@@ -971,36 +974,27 @@ export function handleSketchReferenceImagePayloadsPicked(
       return { state, effects: [] };
     }
 
+    if (event.payloads && event.payloads.length > 0)
+      // The images join the entered sketch's draft (private until Finish).
+      return enterSketchEditing(
+        state,
+        withImportedReferenceImages(session, event.payloads),
+      );
+
     const entered = enterSketchEditing(state, session);
-    const nextState = entered.state;
-
-    if (!event.payloads || event.payloads.length === 0) {
-      return {
-        state: {
-          ...nextState,
-          preview: {
-            kind: "sketch",
-            label: event.message ?? getSketchSessionPreviewLabel(session),
-            target: session.planeTarget,
-          },
-          session: event.message
-            ? {
-                ...nextState.session,
-                validationMessage: event.message,
-              }
-            : nextState.session,
-        },
-        effects: entered.effects,
-      };
-    }
-
-    const imported = emitSketchReferenceImageImportWithPayloads(
-      nextState,
-      event.payloads,
-    );
     return {
-      state: imported.state,
-      effects: [...entered.effects, ...imported.effects],
+      state: {
+        ...entered.state,
+        preview: {
+          kind: "sketch",
+          label: event.message ?? getSketchSessionPreviewLabel(session),
+          target: session.planeTarget,
+        },
+        session: event.message
+          ? { ...entered.state.session, validationMessage: event.message }
+          : entered.state.session,
+      },
+      effects: entered.effects,
     };
   }
 
@@ -1032,7 +1026,43 @@ export function handleSketchReferenceImagePayloadsPicked(
     };
   }
 
-  return emitSketchReferenceImageImportWithPayloads(state, event.payloads);
+  const session = withImportedReferenceImages(state.session, event.payloads);
+  return {
+    state: {
+      ...state,
+      session,
+      command: { ...state.command, phase: "editing" },
+      preview: {
+        kind: "sketch",
+        label: getSketchSessionPreviewLabel(session),
+        target: session.planeTarget,
+      },
+    },
+    effects: [],
+  };
+}
+
+/**
+ * T17k2 (review A-5): reference images imported inside a sketch are a
+ * private sketch edit ("Import Image"), like any other: they join the
+ * session's draft and are published only by Finish (the import used to
+ * commit the whole draft to the document and reopen the sketch).
+ */
+function withImportedReferenceImages(
+  session: SketchSessionState,
+  payloads: readonly ReferenceImagePayload[],
+) {
+  const sketchId = (session.sketchId ?? "sketch_draft") as SketchId;
+  return appendReferenceImageOperations(
+    session,
+    payloads.map((payload, index) =>
+      createReferenceImageOperation({
+        sequence: session.sequence + index + 1,
+        sketchId,
+        payload,
+      }),
+    ),
+  );
 }
 
 export function handleSketchSpecialModeEntered(

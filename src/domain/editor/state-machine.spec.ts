@@ -6,7 +6,6 @@ import {
   getEditorSelectionKey,
   type EditorEffectRuntime,
   initialEditorState,
-  runEditorEffect,
   type SketchEditorState,
   transitionEditorState,
   type EditorEvent,
@@ -2560,7 +2559,6 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       session: sketchSession,
       pendingCommitRequestId: null,
       pendingProjectionRequestId: null,
-      pendingImportRequestId: null,
     };
 
     const sketchCleared = transitionEditorState(sketchState, {
@@ -4036,7 +4034,6 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       session,
       pendingCommitRequestId: null,
       pendingProjectionRequestId: null,
-      pendingImportRequestId: null,
     };
 
     const reused = transitionEditorState(baseState, {
@@ -4277,7 +4274,6 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       session: styledSession,
       pendingCommitRequestId: null,
       pendingProjectionRequestId: null,
-      pendingImportRequestId: null,
     };
 
     for (const toolId of passiveSketchToolIds) {
@@ -4567,7 +4563,6 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       session,
       pendingCommitRequestId: null,
       pendingProjectionRequestId: null,
-      pendingImportRequestId: null,
     };
 
     const selectedFirst = transitionEditorState(state, {
@@ -4790,7 +4785,6 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
         session,
         pendingCommitRequestId: null,
         pendingProjectionRequestId: null,
-        pendingImportRequestId: null,
       },
     };
   }
@@ -4861,7 +4855,6 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
         session,
         pendingCommitRequestId: null,
         pendingProjectionRequestId: null,
-        pendingImportRequestId: null,
       },
       {
         type: "sketch.connectedSelectionRequested",
@@ -5552,7 +5545,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
   testReferencePickerCancellationAndSessionCleanup();
   await testImportSessionAutoArmsSinglePlanePicker();
   await testImportPlaneSelectionCompletesSinglePlanePicker();
-  async function testSketchImageImportUsesEditorRuntime() {
+  async function testSketchImageImportIsAPrivateSketchEdit() {
     const snapshot = (
       await new MockKernelAdapter().getDocumentSnapshot({
         contractVersion: "modeling-contract/v1alpha1",
@@ -5592,40 +5585,6 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       session,
       pendingCommitRequestId: null,
       pendingProjectionRequestId: null,
-      pendingImportRequestId: null,
-    };
-
-    const reopenedSession = {
-      ...session,
-      sketchId: "sketch_imported" as SketchId,
-      sketchLabel: "Imported Sketch",
-    };
-    const runtime: EditorEffectRuntime = {
-      async getCurrentDocumentSnapshot() {
-        return snapshot;
-      },
-      async commitSketch() {
-        return null;
-      },
-      async projectSketchReferences() {
-        return { projectedReferences: [], diagnostics: [] };
-      },
-      async importSketchReferenceImages() {
-        return {
-          status: "committed" as const,
-          revisionId: snapshot.document.revisionId,
-          snapshot,
-          selectionCatalog: buildSelectionTargetCatalog(snapshot),
-          session: reopenedSession,
-          importedCount: 1,
-        };
-      },
-      async evaluatePreview() {
-        throw new Error("Feature preview is not used by this test.");
-      },
-      async commitFeature() {
-        throw new Error("Feature commit is not used by this test.");
-      },
     };
 
     const importing = transitionEditorState(sketchState, {
@@ -5656,31 +5615,66 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       ],
     });
 
+    // T17k2 (review A-5): the import is a private sketch edit: the image
+    // joins the session's draft, nothing is committed or reopened.
     expect(
-      selected.effects[0]?.type,
-      "Selected reference-image payloads should emit a sketch-owned import effect.",
-    ).toBe("sketch.importReferenceImages");
-
-    const completedEvent = await runEditorEffect(selected.effects[0]!, runtime);
-    const completed = transitionEditorState(selected.state, completedEvent);
-
+      selected.effects.map((effect) => effect.type),
+      "Selected reference-image payloads publish nothing.",
+    ).not.toContain("sketch.commit");
+    expect(selected.state.kind).toBe("editingSketch");
     expect(
-      completed.state.kind,
-      "Successful import should keep the reopened sketch session active.",
-    ).toBe("editingSketch");
+      selected.state.kind === "editingSketch" &&
+        selected.state.session.definition.referenceImages?.map(
+          (record) => record.label,
+        ),
+      "The picked image joins the sketch draft.",
+    ).toEqual(["reference.png"]);
     expect(
-      completed.state.selection[0]?.kind,
-      "Successful import should select the reopened sketch target.",
-    ).toBe("sketch");
-    expect(
-      completed.state.selection[0]?.kind === "sketch" &&
-        completed.state.selection[0].sketchId === "sketch_imported",
-      "Successful import should reopen the imported sketch through the editor runtime rather than the workbench shell.",
-    ).toBeTruthy();
-    expect(
-      completed.state.pendingImportRequestId,
-      "Import completion should clear the pending import request.",
+      selected.state.kind === "editingSketch" &&
+        selected.state.session.sketchId,
+      "The draft stays unpublished.",
     ).toBe(null);
+    // T17k2 re-review RQ-A: the whole record the import creates: the
+    // payload, centred at the sketch origin with its longer side 200 (so
+    // 200 × 150 for 640 × 480), unrotated, default calibration, owning no
+    // geometry; the sketch's points and entities are untouched.
+    if (selected.state.kind !== "editingSketch") throw new Error("premise");
+    expect(selected.state.session.definition.referenceImages).toEqual([
+      {
+        operationId: expect.stringMatching(/^sketch_operation_/),
+        label: "reference.png",
+        kind: "referenceImage",
+        ownedPointIds: [],
+        ownedEntityIds: [],
+        ownedState: {
+          kind: "referenceImage",
+          image: {
+            mediaType: "image/png",
+            fileName: "reference.png",
+            pixelWidth: 640,
+            pixelHeight: 480,
+            base64Data: "cG5n",
+          },
+          placement: {
+            center: [0, 0],
+            width: 200,
+            height: 150,
+            rotationRadians: 0,
+          },
+          calibration: {
+            scaleMode: "lockedAspect",
+            showExportedAnchorsInSketch: true,
+            anchors: [],
+          },
+        },
+      },
+    ]);
+    expect(selected.state.session.definition.pointIds).toEqual(
+      session.definition.pointIds,
+    );
+    expect(selected.state.session.definition.entityIds).toEqual(
+      session.definition.entityIds,
+    );
   }
 
   function testSketchImageImportCanStartFromSketchSelectionCommand() {
@@ -5744,9 +5738,13 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       "Picking reference-image payloads should open a draft sketch session.",
     ).toBe("editingSketch");
     expect(
-      payloadSelected.effects[0]?.type,
-      "Picking reference-image payloads from sketch entry should emit the sketch import effect.",
-    ).toBe("sketch.importReferenceImages");
+      payloadSelected.state.kind === "editingSketch" &&
+        payloadSelected.state.session.definition.referenceImages?.length,
+      "Picking reference-image payloads from sketch entry adds them to the draft (T17k2: no commit).",
+    ).toBe(1);
+    expect(payloadSelected.effects.map((effect) => effect.type)).not.toContain(
+      "sketch.commit",
+    );
   }
 
   function testSketchImagePayloadSelectionAcceptsImportImageOwnedSelectionCommand() {
@@ -5800,9 +5798,10 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       "Import-image-owned sketch selection commands should open a draft sketch session when payloads are picked.",
     ).toBe("editingSketch");
     expect(
-      payloadSelected.effects[0]?.type,
-      "Import-image-owned sketch selection commands should emit the sketch import effect.",
-    ).toBe("sketch.importReferenceImages");
+      payloadSelected.state.kind === "editingSketch" &&
+        payloadSelected.state.session.definition.referenceImages?.length,
+      "Import-image-owned sketch selection commands add the images to the draft (T17k2: no commit).",
+    ).toBe(1);
   }
 
   testSelectionClearEventClearsSelectionAndPreservesActiveState();
@@ -5833,7 +5832,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
   await testRuntimeLoopReopensStoredSketchPlane();
   await testRuntimeLoopReopensCommittedFeatureFromExplicitIntent();
   await testRuntimeLoopReopensSketchFromExplicitIntent();
-  await testSketchImageImportUsesEditorRuntime();
+  await testSketchImageImportIsAPrivateSketchEdit();
   testSketchImageImportCanStartFromSketchSelectionCommand();
   testSketchImagePayloadSelectionAcceptsImportImageOwnedSelectionCommand();
   await testFeatureEditEntryRollsBackBeforeHydrationFromTail();

@@ -4,6 +4,7 @@ import type {
 } from "@/contracts/sketch/schema";
 import { type PrimitiveRef, primitiveRefEquals } from "@/core/editor/schema";
 import {
+  type SketchStylePatch,
   type SketchStyleToolId,
   isSketchStyleTarget,
   parseSketchStylePatch,
@@ -181,6 +182,20 @@ export function getSketchStyleTargetDefinition(
   );
 }
 
+/**
+ * The style tool (Fill or Stroke) a style patch applies as: the focused
+ * panel's, else the one owning the patched field.
+ */
+export function getSketchStylePatchToolId(
+  session: SketchSessionState,
+  patch: SketchStylePatch,
+): SketchStyleToolId {
+  return (
+    session.activeStyleFocus?.toolId ??
+    (isFillStylePatch(patch) ? "fill" : "stroke")
+  );
+}
+
 export function patchSketchStyleValue(
   session: SketchSessionState,
   selectedTargets: readonly PrimitiveRef[],
@@ -193,9 +208,7 @@ export function patchSketchStyleValue(
   }
 
   const sketchId = getSessionSketchId(session);
-  const toolId =
-    session.activeStyleFocus?.toolId ??
-    (isFillStylePatch(parsedPatch) ? "fill" : "stroke");
+  const toolId = getSketchStylePatchToolId(session, parsedPatch);
   const localTargets = selectedTargets.filter((target) =>
     isSketchStyleTarget(target, sketchId, toolId),
   );

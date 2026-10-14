@@ -49,14 +49,12 @@ test("error-mapping.ts extracts effect context for feature, sketch, and special-
     featureSession,
   } satisfies EditorEffect);
   const sketchContext = getEditorEffectContext({
-    type: "sketch.importReferenceImages",
-    requestId: "request_sketch-import-1",
+    type: "sketch.projectReferences",
+    requestId: "request_sketch-project-1",
     commandSessionId: "command_sketch-1",
     documentId: "doc_fixture",
     baseRevisionId: "rev_fixture",
-    mutationBasis: { baseRevisionId: "rev_fixture" },
     session: sketchSession,
-    payloads: [],
   } satisfies EditorEffect);
   const specialModeContext = getEditorEffectContext({
     type: "sketch.specialModeEffect",
@@ -242,26 +240,6 @@ test("error-mapping.ts maps each editor effect type to its typed failure event s
           event.type === "effect.sketchReferenceProjectionFailed" &&
             event.baseRevisionId === "rev_fixture",
           "Reference-projection failures should preserve the base revision context.",
-        ).toBeTruthy();
-      },
-    },
-    {
-      effect: {
-        type: "sketch.importReferenceImages",
-        requestId: "request_sketch-import-1",
-        commandSessionId: "command_sketch-1",
-        documentId: "doc_fixture",
-        baseRevisionId: "rev_fixture",
-        mutationBasis: { baseRevisionId: "rev_fixture" },
-        session: sketchSession,
-        payloads: [],
-      },
-      expectedType: "effect.sketchReferenceImageImportFailed",
-      assertResult: (event) => {
-        expect(
-          event.type === "effect.sketchReferenceImageImportFailed" &&
-            event.commandSessionId === "command_sketch-1",
-          "Reference-image import failures should map back into the dedicated image-import failure event.",
         ).toBeTruthy();
       },
     },

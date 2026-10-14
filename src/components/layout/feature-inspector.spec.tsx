@@ -24,6 +24,7 @@ import {
 } from "@/domain/editor/feature-editing";
 import type { ToolId } from "@/core/tools/tool-registry";
 import { EditorContext } from "@/hooks/editor-context";
+import { expectNoInternalIds } from "@/contracts/sketch/user-text.fixtures";
 import { workbenchTheme } from "@/theme/workbench-theme";
 
 test("src/components/layout/feature-inspector.spec.tsx", async () => {
@@ -231,8 +232,12 @@ test("src/components/layout/feature-inspector.spec.tsx", async () => {
         variables: [
           { variableId: "variable_wall", name: "wall", valueText: "2" },
         ],
+        features: [],
+        sketches: [],
+        bodies: [],
       },
-    } as WorkspaceSnapshot,
+      presentation: { entities: [] },
+    } as unknown as WorkspaceSnapshot,
   });
 
   expect(
@@ -349,11 +354,24 @@ test("src/components/layout/feature-inspector.spec.tsx", async () => {
             detail: null,
           },
         ],
+        features: [],
+        bodies: [],
+        // T17k2: the chips name the sketch and region by label.
+        sketches: [
+          {
+            sketchId: "sketch_a",
+            label: "Sketch A",
+            sketch: {
+              regions: [{ regionId: "region_live", label: "Outer region" }],
+            },
+          },
+        ],
       },
+      presentation: { entities: [] },
     } as unknown as WorkspaceSnapshot,
   });
   expect(
-    danglingMarkup.includes("Missing region (sketch_a.region_gone)") &&
+    danglingMarkup.includes("Missing region (Sketch A)") &&
       danglingMarkup.includes(
         "Edit Extrude 1 and choose a valid profile selection.",
       ) &&
@@ -361,9 +379,19 @@ test("src/components/layout/feature-inspector.spec.tsx", async () => {
     "The dangling region renders as a missing region with its guidance and code.",
   ).toBeTruthy();
   expect(
-    danglingMarkup.includes("Remove sketch_a.region_gone") &&
-      danglingMarkup.includes(">sketch_a.region_live</span>") &&
-      !danglingMarkup.includes("Missing region (sketch_a.region_live)"),
+    danglingMarkup.includes('aria-label="Remove Missing region (Sketch A)"') &&
+      danglingMarkup.includes(">Sketch A: Outer region</span>") &&
+      danglingMarkup.includes('aria-label="Remove Sketch A: Outer region"'),
     "The dangling selection is kept (removable) and the live one renders normally; nothing is replaced automatically.",
   ).toBeTruthy();
+  // T17k2 (T17e review A-2 routed): no chip text or chip button name
+  // carries an internal id (base: "Missing region (sketch_a.region_gone)",
+  // "Remove sketch_a.region_live").
+  const chipTexts = [
+    ...danglingMarkup.replace(/<[^>]*>/g, "\n").split("\n"),
+    ...[...danglingMarkup.matchAll(/aria-label="([^"]*)"/g)].map(
+      (match) => match[1]!,
+    ),
+  ].filter((text) => /region|^(Remove|Move) /i.test(text));
+  expectNoInternalIds(chipTexts, ["region_gone", "region_live"]);
 });

@@ -24,7 +24,6 @@ import {
   getSketchSpecialModeSelectionFilter,
 } from "@/core/sketch-special-modes/presentation";
 import { isFeatureScopedModelingDiagnostic } from "@/contracts/modeling/diagnostics";
-import type { SketchId } from "@/contracts/shared/ids";
 import { createTailDocumentCursor } from "@/domain/modeling/document-history";
 import type {
   EditorEvent,
@@ -46,11 +45,7 @@ import {
   createPreviewFailedDiagnostics,
   getDurableDiagnosticTarget,
 } from "./error-mapping";
-import {
-  emitFeaturePreview,
-  emitSketchReferenceProjection,
-  emitSnapshotFetch,
-} from "./effect-emitters";
+import { emitFeaturePreview, emitSnapshotFetch } from "./effect-emitters";
 import {
   createFeatureEditingState,
   enterSketchEditing,
@@ -1134,115 +1129,6 @@ export function handleEffectSketchRegionDerivationFailed(
         failSketchLiveRegions(state.session, event.message),
       ),
     ),
-    effects: [],
-  };
-}
-
-export function handleEffectSketchReferenceImageImportCompleted(
-  state: EditorState,
-  event: Extract<
-    EditorEvent,
-    { type: "effect.sketchReferenceImageImportCompleted" }
-  >,
-): EditorTransitionResult {
-  if (
-    state.kind !== "editingSketch" ||
-    state.pendingImportRequestId !== event.requestId ||
-    state.command.commandSessionId !== event.commandSessionId ||
-    !eventMatchesDocument(state, event.documentId, event.baseRevisionId)
-  ) {
-    return { state, effects: [] };
-  }
-
-  if (
-    event.status === "cancelled" ||
-    !event.snapshot ||
-    !event.selectionCatalog ||
-    !event.session
-  ) {
-    return {
-      state: {
-        ...state,
-        pendingImportRequestId: null,
-        command: {
-          ...state.command,
-          phase: "editing",
-        },
-        preview: {
-          kind: "sketch",
-          label: getSketchSessionPreviewLabel(state.session),
-          target: state.session.planeTarget,
-        },
-      },
-      effects: [],
-    };
-  }
-
-  return emitSketchReferenceProjection(
-    {
-      ...state,
-      document: {
-        documentId: event.snapshot.document.documentId,
-        revisionId: event.revisionId,
-      },
-      snapshot: event.snapshot,
-      selectionCatalog: event.selectionCatalog,
-      selection: [
-        {
-          kind: "sketch",
-          sketchId: event.session.sketchId ?? ("sketch_draft" as SketchId),
-        },
-      ],
-      hoverTarget: null,
-      selectionFilter: getDefaultSelectionFilterForMode("sketch"),
-      previewRenderables: null,
-      command: {
-        ...state.command,
-        phase: "editing",
-      },
-      session: event.session,
-      pendingProjectionRequestId: null,
-      pendingImportRequestId: null,
-      pendingRegionRequest: null,
-    },
-    event.session,
-  );
-}
-
-export function handleEffectSketchReferenceImageImportFailed(
-  state: EditorState,
-  event: Extract<
-    EditorEvent,
-    { type: "effect.sketchReferenceImageImportFailed" }
-  >,
-): EditorTransitionResult {
-  if (
-    state.kind !== "editingSketch" ||
-    state.pendingImportRequestId !== event.requestId ||
-    state.command.commandSessionId !== event.commandSessionId ||
-    !eventMatchesDocument(state, event.documentId, event.baseRevisionId)
-  ) {
-    return { state, effects: [] };
-  }
-
-  return {
-    state: {
-      ...state,
-      pendingImportRequestId: null,
-      command: {
-        ...state.command,
-        phase: "editing",
-      },
-      preview: {
-        kind: "sketch",
-        label: event.message,
-        target: state.session.planeTarget,
-      },
-      session: {
-        ...state.session,
-        validationMessage: event.message,
-      },
-    },
     effects: [],
   };
 }

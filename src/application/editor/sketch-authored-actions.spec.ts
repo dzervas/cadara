@@ -141,7 +141,6 @@ async function fixture(constrained = false, initial?: SketchSessionState) {
     },
     session,
     pendingCommitRequestId: null,
-    pendingImportRequestId: null,
     pendingProjectionRequestId: null,
   };
   function apply(event: EditorEvent, candidate?: SketchSessionState) {
@@ -942,15 +941,17 @@ test("reentry uses latest authored state and retains blocked actions instead of 
   );
   if (result.state.kind !== "editingSketch") throw Error("Expected sketch");
   expect(projection(result.state.session)).toEqual(projection(peer));
-  expect(result.state.session.validationMessage).toContain(
-    "expected-state-changed",
+  // T17k2 (review A-2): the reason by label, never the code.
+  expect(result.state.session.validationMessage).toBe(
+    "Can't undo Edit Sketch: ‘Line 1’ was changed by another session.",
   );
   expect(result.state.session.actionAvailability).toEqual({
     canUndo: true,
     canRedo: false,
   });
   expect(result.state.session.actionHistory?.undo.at(-1)).toMatchObject({
-    blockedReason: "expected-state-changed",
+    blockedReason:
+      "Can't undo Edit Sketch: ‘Line 1’ was changed by another session.",
   });
 });
 
@@ -1045,7 +1046,9 @@ test("T10g-1: an applied Trim is one 'Trim' action; Undo/Redo restore it exactly
   );
   if (blocked.state.kind !== "editingSketch") throw Error("Expected sketch");
   expect(projection(blocked.state.session)).toEqual(projection(peer));
-  expect(blocked.state.session.validationMessage).toContain("Cannot redo");
+  expect(blocked.state.session.validationMessage).toBe(
+    "Can't redo Trim: ‘Line 1’ was changed by another session.",
+  );
   expect(blocked.state.session.actionHistory?.redo.at(-1)).toMatchObject({
     label: "Trim",
     blockedReason: expect.any(String),
@@ -1780,7 +1783,9 @@ describe("T11h: Line chain history (T11-D11, D12)", () => {
     if (blocked.state.kind !== "editingSketch") throw Error("Expected sketch");
     const after = blocked.state.session;
 
-    expect(after.validationMessage).toContain("Cannot undo");
+    expect(after.validationMessage).toBe(
+      "Can't undo Create Sketch Geometry: ‘Line 4 end’ was changed by another session.",
+    );
     expect(projection(after)).toEqual(projection(peer));
     expect(
       {
@@ -3242,7 +3247,7 @@ describe("T14c: the annotation lifecycle adds no history; Undo and Redo prune it
     expect(
       blocked.state.session.actionHistory?.undo.at(-1)?.blockedReason,
       "premise: the Undo is marked blocked",
-    ).toBe("expected-state-changed");
+    ).toBe("Can't undo Edit Sketch: ‘Line 1’ was changed by another session.");
 
     const next = f.owner.transition(
       blocked.state,

@@ -282,8 +282,9 @@ test("§5 E2E-5 history: create, drag, dimension, construction, style, label mov
   await toSelect(page);
 
   // Step 5, style: the sketch's SVG rendering switched on ("SVG
-  // Rendering"), then Line 1's stroke enabled in the Stroke panel ("Patch
-  // Sketch Style"): one action each.
+  // Rendering"), then Line 1's stroke enabled in the Stroke panel
+  // ("Stroke"; T17k2: was the generated "Patch Sketch Style"): one action
+  // each.
   await oneUndoableAction(page, "SVG Rendering", () =>
     workbench.activateTool(SVG_RENDERING_TOOL),
   );
@@ -296,7 +297,7 @@ test("§5 E2E-5 history: create, drag, dimension, construction, style, label mov
     .poll(() => workbench.currentEditorSelection(), { timeout: 10_000 })
     .toContain(line1!);
   await workbench.activateTool(STROKE_TOOL);
-  const styled = await oneUndoableAction(page, "Patch Sketch Style", () =>
+  const styled = await oneUndoableAction(page, "Stroke", () =>
     glidePress(page, page.getByText("Stroke Enabled", { exact: true })),
   );
   expect(
@@ -612,6 +613,13 @@ test("§5 E2E-5 invalid by merge: an endpoint merge retaining two disagreeing Fi
     { timeout: 15_000 },
   );
   await toSelect(page);
+  // T17k2 (T17k F-1): leaving the tool keeps the invalid sketch's
+  // explanation on the status line (base: Escape cleared it), the text
+  // Undo/Redo and re-entry show.
+  await expect(
+    page.getByRole("status").filter({ hasText: CONFLICT }),
+    "the explanation outlives the tool",
+  ).toHaveText(CONFLICT, { timeout: 15_000 });
   const problemRows = page.locator(
     "[data-sketch-constraint-row][data-sketch-constraint-problem]",
   );

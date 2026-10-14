@@ -1,3 +1,4 @@
+import { getPeerDeletedSketchNotice } from "./selectors";
 import { isRegisteredSketchToolId } from "@/core/sketch-tools/registry";
 import { isRegisteredSketchConstraintToolId } from "@/core/sketch-constraints/registry";
 import { isRegisteredSketchEditToolId } from "@/core/sketch-edit-tools/registry";
@@ -88,6 +89,11 @@ function createSketchPreviewState(
  * the commit request never includes it.
  */
 function finishSketchSession(state: SketchEditorState): EditorTransitionResult {
+  // T17-20 (T17k2): a sketch another session deleted can't be published;
+  // Finish does nothing and the author stays (the deleted-sketch notice says
+  // why; Discard and leave is the way out). Review R-1: nothing is stored,
+  // so nothing goes stale when the sketch comes back.
+  if (getPeerDeletedSketchNotice(state) !== null) return { state, effects: [] };
   const session = finalizeSketchDraw(state.session);
   // T14c: Finish drops the annotation context (a reopened sketch starts
   // without one).

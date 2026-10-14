@@ -188,8 +188,6 @@ export interface SketchEditorState extends EditorStateBase {
   pendingCommitRequestId: RequestId | null;
   /** Explicit correlation ID for an in-flight sketch reference projection request. */
   pendingProjectionRequestId: RequestId | null;
-  /** Explicit correlation ID for an in-flight sketch reference-image import request. */
-  pendingImportRequestId: RequestId | null;
   /** The single in-flight live region derivation, and the generation it derives. */
   pendingRegionRequest: { requestId: RequestId; generation: number } | null;
   /** U-G3: the in-flight publication of the staged offset preview, if any. */
@@ -1037,27 +1035,6 @@ export type EditorEvent =
       message: string;
     }
   | {
-      type: "effect.sketchReferenceImageImportCompleted";
-      requestId: RequestId;
-      documentId: DocumentId;
-      commandSessionId: CommandSessionId;
-      baseRevisionId: RevisionId;
-      status: "cancelled" | "committed";
-      revisionId: RevisionId;
-      snapshot?: WorkspaceSnapshot;
-      selectionCatalog?: SelectionTargetCatalog;
-      session?: SketchSessionState;
-      importedCount?: number;
-    }
-  | {
-      type: "effect.sketchReferenceImageImportFailed";
-      requestId: RequestId;
-      documentId: DocumentId;
-      commandSessionId: CommandSessionId;
-      baseRevisionId: RevisionId;
-      message: string;
-    }
-  | {
       type: "effect.sketchSpecialModeEffectCompleted";
       requestId: RequestId;
       documentId: DocumentId;
@@ -1317,16 +1294,6 @@ export type EditorEffect =
       input: SketchSnapIntersectionInput;
     }
   | {
-      type: "sketch.importReferenceImages";
-      requestId: RequestId;
-      commandSessionId: CommandSessionId;
-      documentId: DocumentId;
-      baseRevisionId: RevisionId;
-      mutationBasis: SnapshotMutationBasis;
-      session: SketchSessionState;
-      payloads: readonly ReferenceImagePayload[];
-    }
-  | {
       type: "sketch.specialModeEffect";
       requestId: RequestId;
       commandSessionId: CommandSessionId;
@@ -1449,23 +1416,6 @@ export interface EditorEffectRuntime {
     sketchId: SketchId;
     input: SketchSnapIntersectionInput;
   }): Promise<SketchSnapIntersectionTargetResult[]>;
-  /** Imports one or more reference images into the active sketch workflow. */
-  importSketchReferenceImages?(input: {
-    requestId: RequestId;
-    documentId: DocumentId;
-    commandSessionId: CommandSessionId;
-    baseRevisionId: RevisionId;
-    baseRepositoryHeads?: readonly string[];
-    session: SketchSessionState;
-    payloads: readonly ReferenceImagePayload[];
-  }): Promise<{
-    status: "cancelled" | "committed";
-    revisionId: RevisionId;
-    snapshot?: WorkspaceSnapshot;
-    selectionCatalog?: SelectionTargetCatalog;
-    session?: SketchSessionState;
-    importedCount?: number;
-  }>;
   /** Runs asynchronous work requested by an active sketch special editor mode. */
   runSketchSpecialModeEffect?(input: {
     requestId: RequestId;

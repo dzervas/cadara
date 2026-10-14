@@ -143,7 +143,12 @@ export function createEffectExecutor(runtime: EditorEffectRuntime) {
               documentId: snapshot.document.documentId,
               revisionId: snapshot.document.revisionId,
               commandSessionId: effect.commandSessionId,
-              message: `Feature ${effect.selectedFeatureId} cannot be edited in the current feature session flow.`,
+              // T17k2 (T17e review A-8): by label, never by id.
+              message: featureNotEditableMessage(
+                snapshot.document.features.find(
+                  (feature) => feature.featureId === effect.selectedFeatureId,
+                )?.label,
+              ),
             };
           }
 
@@ -487,45 +492,6 @@ export function createEffectExecutor(runtime: EditorEffectRuntime) {
           queryId: effect.queryId,
           targets,
         };
-      }
-      case "sketch.importReferenceImages": {
-        try {
-          if (!runtime.importSketchReferenceImages) {
-            throw new Error(
-              "Sketch reference-image import runtime is not available.",
-            );
-          }
-
-          const result = await runtime.importSketchReferenceImages({
-            requestId: effect.requestId,
-            documentId: effect.documentId,
-            commandSessionId: effect.commandSessionId,
-            baseRevisionId: effect.baseRevisionId,
-            baseRepositoryHeads: effect.mutationBasis.baseRepositoryHeads,
-            session: effect.session,
-            payloads: effect.payloads,
-          });
-
-          return {
-            type: "effect.sketchReferenceImageImportCompleted",
-            requestId: effect.requestId,
-            documentId: effect.documentId,
-            commandSessionId: effect.commandSessionId,
-            baseRevisionId: effect.baseRevisionId,
-            status: result.status,
-            revisionId: result.revisionId,
-            snapshot: result.snapshot,
-            selectionCatalog: result.selectionCatalog,
-            session: result.session,
-            importedCount: result.importedCount,
-          };
-        } catch (error: unknown) {
-          return createEditorEffectFailureEvent(
-            effect,
-            error,
-            "Sketch reference-image import failed.",
-          );
-        }
       }
       case "sketch.specialModeEffect": {
         try {
@@ -1104,4 +1070,10 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
       };
     },
   };
+}
+
+function featureNotEditableMessage(label: string | undefined) {
+  return label === undefined
+    ? "The feature to edit no longer exists in this document."
+    : `‘${label}’ can't be edited here.`;
 }

@@ -129,6 +129,44 @@ function applyBodyLabels(
   });
 }
 
+/**
+ * T17k2 (T17h finding): a body a feature creates is named after the feature
+ * ("Extrude 1"; several solids "Extrude 1 (2)"), not by its id: the kernel
+ * tracks it under the generated label `‹featureId›` / `‹featureId›_‹n›`.
+ */
+function withFeatureBodyLabels(
+  bodies: readonly OccTrackedBody[],
+  feature: OccAuthoringFeatureRecord,
+): OccTrackedBody[] {
+  const featureLabel = feature.label;
+  if (!featureLabel) return [...bodies];
+  return bodies.map((body) => {
+    const label = generatedBodyLabel(body);
+    return body.ownerFeatureId === feature.featureId && label
+      ? {
+          ...body,
+          label:
+            label.index === null
+              ? featureLabel
+              : `${featureLabel} (${label.index})`,
+        }
+      : body;
+  });
+}
+
+/** The kernel's id-based default label of `body`, if it has one. */
+function generatedBodyLabel(
+  body: Pick<OccTrackedBody, "ownerFeatureId" | "label">,
+): { index: string | null } | null {
+  const { label, ownerFeatureId: featureId } = body;
+  if (featureId === null) return null;
+  if (label === featureId) return { index: null };
+  const index = label.startsWith(`${featureId}_`)
+    ? label.slice(featureId.length + 1)
+    : "";
+  return /^[0-9]+$/.test(index) ? { index } : null;
+}
+
 function mergeGeometryAssetRecords(
   manifest: GeometryAssetManifest,
   updates: readonly GeometryAssetRecord[] | undefined,
@@ -494,10 +532,16 @@ function applyFeatureResult(
     rawBodies,
     result.historyInvalidations,
   );
+  // Named after reconciliation: a reconciled body is the topology stage's,
+  // which the feature tracked under its generated label.
+  const bodies = applyBodyLabels(
+    withFeatureBodyLabels(reconciled.bodies, feature),
+    state.bodyLabels,
+  );
   const referenceState = createOccReferenceState({
     documentId: state.documentId,
     revisionId: state.revisionId,
-    bodies: reconciled.bodies,
+    bodies,
     constructions: result.constructions,
     sketches: state.sketches,
     features,
@@ -525,7 +569,7 @@ function applyFeatureResult(
   return {
     ...state,
     assets: mergeGeometryAssetRecords(state.assets, result.assetRecords),
-    bodies: reconciled.bodies,
+    bodies,
     constructions: result.constructions,
     constructionPlanes: result.constructionPlanes,
     features,

@@ -18,6 +18,13 @@ import {
 } from "@/domain/editor/sketch-session";
 import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
 import { getToolById } from "@/core/tools/tool-registry";
+import { describeBlockedSketchAction } from "@/domain/modeling/document-action-blocked";
+import { getSketchEditToolDefinition } from "@/core/sketch-edit-tools/registry";
+import {
+  parseSketchStylePatch,
+  SKETCH_STYLE_PATCH_INTENT,
+} from "@/domain/sketch-styles/definition";
+import { getSketchStylePatchToolId } from "@/domain/editor/sketch-session/styles";
 import {
   AuthoredActionHistory,
   encodeAuthoredActionState,
@@ -173,31 +180,40 @@ function actionLabel(event: EditorEvent, before: EditorState) {
       return "Move Sketch Geometry";
     case "sketch.annotationDeleteRequested":
       return "Delete Sketch Item";
-    case "sketch.toolPatched":
-      return event.patch.intent === "resetTangentToAutomatic"
-        ? "Reset Tangent"
-        : event.patch.intent === "setTangentToZero"
-          ? "Zero Tangent"
-          : event.patch.intent === "mergePoints"
-            ? "Merge Points"
-            : event.patch.intent === "createMirror"
-              ? "Mirror"
-              : event.patch.intent === "setDimensionAnnotationPlacement"
-                ? "Move Dimension Label"
-                : event.patch.intent === "setConstraintAnnotationPlacement"
-                  ? "Move Constraint Label"
-                  : typeof event.patch.intent === "string"
-                    ? event.patch.intent
-                        .replace(/([A-Z])/g, " $1")
-                        .replace(/^./, (value) => value.toUpperCase())
-                    : "Update Sketch";
+    case "sketch.toolPatched": {
+      const intent = event.patch.intent;
+      if (typeof intent !== "string") return "Update Sketch";
+      // T17k2 (T17k F-4): a style patch is the Fill or Stroke tool's action
+      // and an edit operator's confirm is that tool's (e.g. "Sketch
+      // Fillet"), not the generated "Patch Sketch Style" / "Commit Sketch
+      // Edit Operator".
+      if (
+        intent === SKETCH_STYLE_PATCH_INTENT ||
+        intent === "commitSketchEditOperator"
+      )
+        return patchingToolName(before, event.patch);
+      return (
+        PATCH_LABELS[intent] ??
+        intent
+          .replace(/([A-Z])/g, " $1")
+          .replace(/^./, (value) => value.toUpperCase())
+      );
+    }
     // A committing Escape or Enter is a finalized spline (T11-D10).
     case "sketch.pointerReleased":
     case "sketch.escapeRequested":
     case "sketch.confirmRequested":
       return "Create Sketch Geometry";
     case "sketch.specialModeDragEnded":
+    case "sketch.specialModeClickRequested":
+    case "sketch.specialModeDoubleClickRequested":
+    case "sketch.specialModePanelActionInvoked":
+    case "effect.sketchSpecialModeEffectCompleted":
       return "Edit Sketch Operation";
+    // T17k2 (review A-5): reference images picked inside a sketch are one
+    // private action.
+    case "sketch.referenceImagePayloadsPicked":
+      return getToolById("importImage").name;
     // T17c3 (T17b0 P-9): a pick that completes an action (a constraint's
     // last pick, a construction toggle, a reference pick) is the armed
     // tool's action, labelled by its name (e.g. "Coincident").
@@ -228,10 +244,31 @@ function actionLabel(event: EditorEvent, before: EditorState) {
       return kind === "extend" ? "Extend" : kind === "split" ? "Split" : "Trim";
     }
   }
-  return event.type
-    .replace(/^sketch\./, "")
-    .replace(/([A-Z])/g, " $1")
-    .replace(/^./, (value) => value.toUpperCase());
+  // T17k2: never an event's type name (e.g. "Viewport.selection Requested").
+  return "Edit Sketch";
+}
+
+const PATCH_LABELS: Readonly<Record<string, string>> = {
+  resetTangentToAutomatic: "Reset Tangent",
+  setTangentToZero: "Zero Tangent",
+  mergePoints: "Merge Points",
+  createMirror: "Mirror",
+  setDimensionAnnotationPlacement: "Move Dimension Label",
+  setConstraintAnnotationPlacement: "Move Constraint Label",
+  makeAnnotationReference: "Make Reference",
+};
+
+function patchingToolName(before: EditorState, patch: Record<string, unknown>) {
+  const session = before.kind === "editingSketch" ? before.session : null;
+  if (patch.intent === SKETCH_STYLE_PATCH_INTENT) {
+    const style = parseSketchStylePatch(patch);
+    return session && style
+      ? getToolById(getSketchStylePatchToolId(session, style)).name
+      : "Style";
+  }
+  return session?.activeEditTool
+    ? getSketchEditToolDefinition(session.activeEditTool.toolId).metadata.name
+    : "Edit Sketch";
 }
 
 function replaceSemanticSketchIdentity<T>(
@@ -543,24 +580,37 @@ export class SketchAuthoredActions {
         const blockedSequence =
           actionSequence ??
           available.state.session.actionHistory?.[direction].at(-1)?.sequence;
+        // T17k2 (review A-2): the reason by label, as the document strip
+        // says it, never the reason code.
+        const entries = this.history.entries(identity);
+        const reason = describeBlockedSketchAction({
+          direction,
+          label:
+            entries[direction].find(
+              (entry) => entry.sequence === blockedSequence,
+            )?.label ?? "this action",
+          result: action,
+          definition: available.state.session.definition,
+          history: [...entries.undo, ...entries.redo],
+        });
         return {
           ...available,
           state: {
             ...available.state,
             session: {
               ...available.state.session,
-              validationMessage: `Cannot ${direction}: ${action.reason}`,
+              validationMessage: reason,
               actionHistory: {
                 undo:
                   available.state.session.actionHistory?.undo.map((entry) =>
                     direction === "undo" && entry.sequence === blockedSequence
-                      ? { ...entry, blockedReason: action.reason }
+                      ? { ...entry, blockedReason: reason }
                       : entry,
                   ) ?? [],
                 redo:
                   available.state.session.actionHistory?.redo.map((entry) =>
                     direction === "redo" && entry.sequence === blockedSequence
-                      ? { ...entry, blockedReason: action.reason }
+                      ? { ...entry, blockedReason: reason }
                       : entry,
                   ) ?? [],
               },

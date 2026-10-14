@@ -877,7 +877,9 @@ export function clearActiveSketchTool(
     toolPlacedPoints: [],
     toolSettings: {},
     toolStagedEntities: [],
-    validationMessage: null,
+    // T17k2 (T17k F-1): leaving a tool keeps the sketch's own explanation
+    // (as point selection and Undo/Redo do); the tool's messages go.
+    validationMessage: keptSketchStatusText(session),
     toolPresentation: null,
     constraintAuthoring: null,
     activeAnnotationEdit: null,
@@ -891,6 +893,18 @@ export function clearActiveSketchTool(
     toolTangentSourceEntityId: null,
     toolChain: null,
   };
+}
+
+/**
+ * The status line that belongs to the sketch, not to a tool: the invalid
+ * sketch's explanation while its profiles are blocked (T17c3), else a
+ * withheld region's explanation (T17c6), else none.
+ */
+function keptSketchStatusText(session: SketchSessionState) {
+  return session.liveRegions.status === "unavailable"
+    ? (getSketchSessionInvalidFeedback(session) ??
+        "Sketch profiles are unavailable until the sketch is corrected.")
+    : keptSketchWithheldRegionText(session);
 }
 
 export function updateSketchPointer(
@@ -1089,11 +1103,7 @@ export function selectSketchEditTarget(
     // T17c3: selecting a point (the viewport selects a dragged point on
     // release) keeps the explanation of a sketch whose profiles are blocked.
     // T17c6 (D-2): and of a withheld region shown on the status line.
-    validationMessage:
-      session.liveRegions.status === "unavailable"
-        ? (getSketchSessionInvalidFeedback(session) ??
-          "Sketch profiles are unavailable until the sketch is corrected.")
-        : keptSketchWithheldRegionText(session),
+    validationMessage: keptSketchStatusText(session),
   };
 }
 

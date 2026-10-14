@@ -13,6 +13,8 @@ import {
   SketchValidationStatus,
 } from "@/components/cad/sketch-selection-context";
 import { SketchTangentActions } from "@/components/cad/sketch-tangent-actions";
+import { SketchDeletedNotice } from "@/components/cad/sketch-deleted-notice";
+import { getPeerDeletedSketchNotice } from "@/core/editor/state-machine";
 import { SketchConstraintList } from "@/components/cad/sketch-constraint-list";
 import {
   solvedCubicSpans,
@@ -237,6 +239,8 @@ export function CadWorkbench({
     getRuntimeTrace,
   } = useEditorState();
   const snapshot = machineState.snapshot;
+  // T17-20 (T17k2): the edited sketch was deleted by another session.
+  const deletedSketchNotice = getPeerDeletedSketchNotice(machineState);
   const initialOccRenderPending = isInitialOccRenderPending(machineState);
   const previewRenderables = machineState.previewRenderables;
   const [variablesPanelOpen, setVariablesPanelOpen] = useState(false);
@@ -1478,12 +1482,26 @@ export function CadWorkbench({
               />
               {/* T16a (T16-22, review R-1): the validation message and the
                   selection-context panels, one column (never overlapping). */}
-              {sketchSession?.validationMessage ||
+              {deletedSketchNotice ||
+              sketchSession?.validationMessage ||
               sketchMirrorActionState ||
               sketchOffsetActionState ||
               sketchCloseSplineState ||
               sketchTangentActionState?.visible ? (
                 <SketchSelectionContextStack>
+                  {deletedSketchNotice &&
+                  machineState.kind === "editingSketch" ? (
+                    <SketchDeletedNotice
+                      message={deletedSketchNotice}
+                      onDiscard={() =>
+                        dispatch({
+                          type: "command.cancelled",
+                          commandSessionId:
+                            machineState.command.commandSessionId,
+                        })
+                      }
+                    />
+                  ) : null}
                   {sketchSession?.validationMessage ? (
                     <SketchValidationStatus
                       message={sketchSession.validationMessage}
