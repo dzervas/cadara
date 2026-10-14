@@ -11,8 +11,27 @@ import {
   type EditorEvent,
   type SketchEditorState,
 } from "@/core/editor/state-machine";
-import { enterSketchSessionState } from "@/domain/editor/sketch-entry.fixtures";
-import type { SketchSessionState } from "@/domain/editor/sketch-session";
+import {
+  enterSketchSession,
+  enterSketchSessionState,
+} from "@/domain/editor/sketch-entry.fixtures";
+import {
+  acceptSketchDraw,
+  beginSketchTool,
+  clearActiveSketchTool,
+  createNewSketchSession,
+  finalizeSketchDraw,
+  startSketchDraw,
+  type SketchSessionState,
+} from "@/domain/editor/sketch-session";
+import {
+  SPEC_SKETCH_UNITS_PER_PIXEL,
+  withSketchSnapScale,
+} from "@/domain/editor/sketch-session/test-snap-scale";
+import {
+  createStandardPlaneDefinition,
+  OCC_KERNEL_SETTINGS,
+} from "@/domain/modeling/opencascade-kernel-seed";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
@@ -119,4 +138,54 @@ export async function createSketchActionOwnerFixture(
     undoLabels: () =>
       state.session.actionHistory?.undo.map((entry) => entry.label) ?? [],
   };
+}
+
+type P = readonly [number, number];
+
+/**
+ * T17c6: the points of a closed mixed outline as drawn in the browser (the
+ * E2E-2 shape): Line L0→L1, 3-Point Arc L1→M0 through M1 (clicks: start,
+ * through, end), Spline M0→F2→F3→L0.
+ */
+export const MIXED_OUTLINE = {
+  L0: [1.7, 0.3],
+  L1: [5.58, 0.3],
+  M0: [5.58, 3.21],
+  M1: [6.93, 2.31],
+  F2: [4.125, 4.18],
+  F3: [2.67, 3.598],
+} as const satisfies Record<string, P>;
+
+/**
+ * T17c6: an entered session with the mixed outline drawn by the tools
+ * (snapped ends: inferred coincidences, a Horizontal on the line), or only
+ * its arc and spline (`withLine: false`, an open chain).
+ */
+export function drawnMixedOutlineSession(
+  options: { withLine?: boolean } = {},
+): SketchSessionState {
+  const { L0, L1, M0, M1, F2, F3 } = MIXED_OUTLINE;
+  let session = withSketchSnapScale(
+    enterSketchSession(
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
+    ),
+    SPEC_SKETCH_UNITS_PER_PIXEL,
+  );
+  const draw = (
+    toolId: Parameters<typeof beginSketchTool>[1],
+    points: readonly P[],
+  ) => {
+    session = startSketchDraw(beginSketchTool(session, toolId), points[0]!);
+    for (const point of points.slice(1))
+      session = acceptSketchDraw(session, point);
+    if (toolId === "spline") session = finalizeSketchDraw(session);
+    session = clearActiveSketchTool(session);
+  };
+  if (options.withLine !== false) draw("line", [L0, L1]);
+  draw("threePointArc", [L1, M1, M0]);
+  draw("spline", [M0, F2, F3, L0]);
+  return session;
 }

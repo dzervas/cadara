@@ -9834,10 +9834,11 @@ function createMinimumMotionAnchorConstraint(input: {
 //   not depend on the reuse path.
 // - d1: when a session update with a reach tolerance (the release frame of
 //   an editor drag, or a single solver call) has an accepted frame that
-//   leaves the dragged point farther than `targetTolerance` from the
-//   cursor, the point is pinned at the cursor and the other component
-//   variables are projected onto the hard constraints from that frame; the
-//   result replaces the frame only if the frame acceptance accepts it.
+//   leaves the dragged point off the cursor (T17c6: any nonzero lag; a
+//   driven mirror-output target: farther than `targetTolerance`), the point
+//   is pinned at the cursor and the other component variables are
+//   projected onto the hard constraints from that frame; the result
+//   replaces the frame only if the frame acceptance accepts it.
 
 const mirrorOutputVariablesByProgram = new WeakMap<
   SketchCompiledSolveProgram,
@@ -10018,7 +10019,10 @@ function solveDragFrameStage(
       candidate.values[x]! - position[0],
       candidate.values[y]! - position[1],
     );
-    if (lag <= targetTolerance) return candidate;
+    // T17c6 (D-3): any nonzero lag runs the step, not only a lag above
+    // the reach tolerance, so a reachable release (a fit point dropped on
+    // its neighbour) lands exactly at the cursor, not ~1e-15–1e-6 away.
+    if (lag === 0) return candidate;
     const pinned = cloneValues(candidate.values);
     pinned[x] = position[0];
     pinned[y] = position[1];
