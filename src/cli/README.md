@@ -191,6 +191,40 @@ foreign or stale targets never imply successful construction.
 Recipes accept exact unique entity-label aliases in `targets`; browser picking
 and pointer gestures are not semantic inputs.
 
+### Durable sketch offsets
+
+`sketch.offset.create` takes current `basis`, `draft`, distinct owned entity
+`targets`, a finite positive `distance` in document millimeters, `side: "left"`
+or `"right"`, and `intent`. Exact unique entity-label aliases work in recipes.
+The canonical chain owner orders connected local lines, arcs, circles and
+ordinary splines; left/right follows that declared traversal, not selection
+order or a screen location. Existing identity, join and modeling-tolerance
+rules apply. Equal coordinates alone do not declare a connected chain.
+Derived spline shells cannot be offset again, and unsupported joints,
+collapsed curves, unavailable or uncertified seeds refuse without an action.
+
+Creation waits for the production offset publication (including its one
+permitted certified-plan re-authoring) before committing one **Offset** action,
+then waits for the resulting live solve/region derivation. Expression resolution
+and publication use the same owners as browser previews and Finish Sketch.
+Discovery `sketch.offsets` reports durable IDs, ordered seeds, outputs, authored
+signed distance and relationship health. `currentGeometry` contains only
+current certified solved outputs (including spline cubic spans and driven
+terminal points); it is null for checking/broken offsets. The ordinary
+`sketch.entities`/`points` remain authored records, not solved offset geometry.
+Last-good display curves are never exposed as usable profiles; independent
+healthy source regions can still remain consumable when a descendant fails.
+
+Source changes propagate through the production solver. Existing supported
+requirements on offset outputs can size the originals and can be edited with
+`sketch.dimension.update`; they do not change the relationship's authored
+separation. There is no independent browser distance/side/expression setter,
+so this command does not invent one. `sketch.offset.remove` takes the current
+basis/draft, discovered `derivationId` and `intent`; it uses the browser's
+**Remove Offset** owner, removes its outputs/requirements as one action, and
+leaves dependent relationships explicitly broken. Private undo/redo restores
+relationship/output identities. Publication/reopening retains the relationship.
+
 ### Private sketch dimensions
 
 `sketch.dimension.add` takes the current `basis` and `draft`, an `axis`

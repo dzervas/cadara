@@ -3427,7 +3427,7 @@ export function createSketchOffsetDerivationContribution(input: {
     );
   }
 
-  if (input.distance === null || input.distance <= EPSILON) {
+  if (input.distance === null || !Number.isFinite(input.distance) || input.distance <= EPSILON) {
     return createInvalidOperationResult(
       "Offset distance must be greater than zero.",
     );

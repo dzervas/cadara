@@ -541,7 +541,19 @@ export function getOffsetPreview(
     };
   }
 
-  const seedEntityIds = sketchEntityTargets.map((target) => target.entityId);
+  return getSketchOffsetResult(session, sketchEntityTargets.map((target) => target.entityId), activeEditTool.offsetDistance, activeEditTool.offsetSide, plan);
+}
+
+/** Explicit durable offset preparation, also used by the browser preview. */
+export function getSketchOffsetResult(
+  session: SketchSessionState,
+  seedEntityIds: readonly SketchEntityId[],
+  distance: number | null,
+  side: "left" | "right",
+  plan?: OffsetFramePlan,
+): SketchEditOperationResult {
+  const nextSequence = session.sequence + 1;
+  const sketchId = getSessionSketchId(session);
   // T10i (C3): an offset seed (direct, or a G16‴ copy of one) must be
   // accepted geometry.
   const gate = offsetEditInputGate(session, seedEntityIds, "an offset seed");
@@ -550,8 +562,8 @@ export function getOffsetPreview(
   return createSketchOffsetDerivationContribution({
     definition: offsetSeedDefinition(session),
     entityIds: seedEntityIds,
-    distance: activeEditTool.offsetDistance,
-    side: activeEditTool.offsetSide,
+    distance,
+    side,
     sequence: nextSequence,
     factories: createSessionCommitFactories(nextSequence, sketchId),
     modelingTolerance: session.modelingTolerance,
@@ -605,18 +617,7 @@ export function stageOffsetPreviewPublication(
   if (!relationship || !preview.contribution) return rest;
   // The re-solve runs the hint unchanged (keyed by the re-authored
   // relationship), so a second disagreement fails closed in publish.
-  const basis = getSketchSessionPreviewBasis(
-    replan
-      ? {
-          ...session,
-          offsetPlans: [
-            ...(session.offsetPlans ?? []),
-            { derivationId: relationship.derivationId, plan: replan },
-          ],
-        }
-      : session,
-    applySketchContribution(session, preview.contribution).definition,
-  );
+  const basis = getOffsetContributionBasis(session, preview.contribution, replan);
   const offsetPublication: SketchOffsetPreviewPublication = {
     derivationId: relationship.derivationId,
     contribution: preview.contribution,
@@ -685,8 +686,7 @@ function commitOffsetContribution(
       message: gate.message,
     });
   }
-  const nextSequence = session.sequence + 1;
-  const history = applySketchContribution(session, contribution);
+  const committed = applySketchOffsetContribution(session, contribution);
   const tool = withoutOffsetPublication(activeEditTool);
   const nextEditTool = {
     ...tool,
@@ -694,19 +694,61 @@ function commitOffsetContribution(
     selectedTargets: [],
   };
 
-  return withLiveSolveBasis(
-    {
-      ...session,
-      activeEditTool: nextEditTool,
-      toolStagedEntities: [],
-      definition: history.definition,
-      sequence: nextSequence,
-      commitRequest: rebuildSessionCommitRequest(session, history.definition),
-      validationMessage: null,
-      toolPresentation: buildSketchEditToolPresentation(nextEditTool),
-    },
-    history.definition,
-  );
+  return {
+    ...committed,
+    activeEditTool: nextEditTool,
+    toolStagedEntities: [],
+    toolPresentation: buildSketchEditToolPresentation(nextEditTool),
+  };
+}
+
+/** Applies only a contribution whose publication the caller has certified. */
+function applySketchOffsetContribution(
+  session: SketchSessionState,
+  contribution: NonNullable<SketchEditOperationResult["contribution"]>,
+): SketchSessionState {
+  const history = applySketchContribution(session, contribution);
+  return withLiveSolveBasis({ ...session, definition: history.definition, sequence: session.sequence + 1, commitRequest: rebuildSessionCommitRequest(session, history.definition), validationMessage: null }, history.definition);
+}
+
+function getOffsetContributionBasis(
+  session: SketchSessionState,
+  contribution: NonNullable<SketchEditOperationResult["contribution"]>,
+  plan?: OffsetFramePlan,
+) {
+  const relationship = contribution.derivedRelationships?.find(r => r.kind === "offset");
+  if (!relationship) throw new Error("An offset publication must own a durable relationship.");
+  return getSketchSessionPreviewBasis(plan ? { ...session, offsetPlans: [...(session.offsetPlans ?? []), { derivationId: relationship.derivationId, plan }] } : session, applySketchContribution(session, contribution).definition);
+}
+
+export function prepareSketchOffset(
+  session: SketchSessionState,
+  entityIds: readonly SketchEntityId[],
+  distance: number,
+  side: "left" | "right",
+  plan?: OffsetFramePlan,
+) {
+  if (new Set(entityIds).size !== entityIds.length || !Number.isFinite(distance)) return { message: "Offset requires distinct seeds and a finite positive distance." };
+  const result = getSketchOffsetResult(session, entityIds, distance, side, plan);
+  const contribution = result.contribution;
+  if (!result.valid || !contribution) return { message: result.message ?? "Offset could not be prepared." };
+  const relationship = contribution.derivedRelationships?.find(r => r.kind === "offset");
+  if (!relationship) throw new Error("A durable offset must have an offset relationship.");
+  const basis = getOffsetContributionBasis(session, contribution, plan);
+  if (!basis) return { message: OFFSET_PREVIEW_UNACCEPTED_MESSAGE };
+  return { definition: session.definition, generation: session.liveRegions.generation, contribution, derivationId: relationship.derivationId, basis };
+}
+
+export function completeSketchOffset(
+  session: SketchSessionState,
+  prepared: Exclude<ReturnType<typeof prepareSketchOffset>, { message: string }>,
+  record: SketchOffsetPublicationRecord,
+): SketchSessionState {
+  if (session.definition !== prepared.definition || session.liveRegions.generation !== prepared.generation) return { ...session, validationMessage: "Offset source changed while its geometry was being checked." };
+  if (record.derivationId !== prepared.derivationId || record.status !== "certified") return { ...session, validationMessage: record.diagnostic?.message ?? "Offset geometry is not certified." };
+  const gate = offsetEditInputGate(session, prepared.contribution.derivedRelationships!.flatMap(r => r.kind === "offset" ? r.seedEntityIds : []), "an offset seed");
+  if (gate) return { ...session, validationMessage: gate.message };
+  return applySketchOffsetContribution(record.plan ? { ...session, offsetPlans: [...(session.offsetPlans ?? []), { derivationId: prepared.derivationId, plan: record.plan }] } : session, prepared.contribution);
 }
 
 function withOffsetPublication(
