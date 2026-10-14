@@ -707,6 +707,10 @@ export type EditorEvent =
   | { type: "sketchPlaneEdit.supportCommitted"; target: import("@/contracts/shared/sketch-plane").SketchPlaneSupportRef }
   | { type: "sketch.beginRequested"; target: import("@/contracts/shared/sketch-plane").SketchPlaneSupportRef | import("@/contracts/shared/references").SketchRef }
   | { type: "sketch.offsetCompleted"; prepared: Exclude<ReturnType<typeof import("@/domain/editor/sketch-session/editing").prepareSketchOffset>, { message: string }>; record: import("@/contracts/solver/schema").SketchOffsetPublicationRecord }
+  | { type: "sketch.imageEdited"; target: Extract<import("@/contracts/shared/references").DurableRef, { kind: "sketchOperation" }>; edit: import("@/contracts/semantic/schema").SemanticReferenceImageEdit | { kind: "replace"; image: import("@/contracts/reference-image/schema").ReferenceImagePayload } }
+  | { type: "sketch.imageRemoved"; target: Extract<import("@/contracts/shared/references").DurableRef, { kind: "sketchOperation" }> }
+  | { type: "sketch.imageAuthored"; payload: import("@/contracts/reference-image/schema").ReferenceImagePayload }
+  | { type: "sketch.styleAuthored"; targets: Extract<import("@/contracts/semantic/schema").SemanticSketchCommand, { operation: "sketch.style.patch" }>["targets"]; patch: import("@/contracts/semantic/schema").SemanticSketchStylePatch }
   | { type: "sketch.referenceAuthored"; target: Extract<import("@/contracts/semantic/schema").SemanticSketchCommand, { operation: "sketch.reference.add" }>["target"] }
   | { type: "sketch.derivationCreated"; input: Extract<import("@/contracts/semantic/schema").SemanticCommand, { operation: "sketch.derivation.create" }> }
   | { type: "sketch.mirrorRemoved"; derivationId: string }

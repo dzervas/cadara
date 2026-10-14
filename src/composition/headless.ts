@@ -3,6 +3,7 @@ import { createSketchPublicationReceipts } from "@/infrastructure/modeling/sketc
 import { createSemanticDocumentPort } from "@/infrastructure/modeling/semantic-document-port";
 import { fileURLToPath } from "node:url";
 import { createSemanticSessionFactory } from "@/application/semantic/session";
+import { filesystemReferenceImageFiles } from "@/infrastructure/modeling/reference-image-file-io";
 import { filesystemNativeDocumentIO } from "@/infrastructure/modeling/native-document-file-io";
 import type {
   NativeDocumentFileIO,
@@ -35,6 +36,7 @@ export function createHeadlessSessionFactory(
   options: {
     assetDirectory?: string;
     nativeFileIO?: NativeDocumentFileIO;
+    referenceImageFiles?: import("@/application/semantic/reference-image-files").ReferenceImageFiles;
     createRepository?: (
       assets: GeometryAssetStore,
     ) => GeometryAssetDocumentRepository;
@@ -107,6 +109,7 @@ export function createHeadlessSessionFactory(
       return createSemanticDocumentPort({
         documentId,
         nativeFileIO: options.nativeFileIO ?? filesystemNativeDocumentIO,
+        referenceImageFiles: options.referenceImageFiles ?? filesystemReferenceImageFiles,
         repository,
         service,
         loop,

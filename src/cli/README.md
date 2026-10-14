@@ -354,6 +354,53 @@ and reassignment `sketchId`. Missing/ambiguous labels stop that operation; unkno
 aliases are usage errors before startup. Native files retain supports and authored
 reference identities, not session-private history or arbitrary topology remapping.
 
+### Sketch styles and raster reference images
+
+All style/image commands take current `basis`/`draft` and explicit `intent`.
+`sketch.style.patch` takes nonempty owned `targets` and one `{ field, value }`
+patch. Fill targets are current enclosed regions; stroke targets are local
+entities. Fields follow the existing style owner: `fillMode` (none/solid/gradient),
+`fillColor`, `gradientStartColor`, `gradientEndColor`, `strokeEnabled`,
+`strokeColor`, `strokeWidth`, `strokeCap` (butt/round/square), `strokeJoin`
+(miter/round/bevel), `strokeMiterLimit`, `strokeDashSize`, `strokeGapSize`.
+Numeric stroke values are finite and nonnegative; widths/dashes/gaps are the
+existing SVG pixel values, not model dimensions. Color strings retain the
+browser's policy (including CSS variables), not a new color parser. Styles
+preserve geometry and current profiles. A changed patch is one **Sketch Style**
+action; an unchanged patch adds no action. Discovery exposes entity `style`
+and authored region `sketch.styles` records. No rendering toggle is required.
+
+`sketch.image.add` takes a local `path`. The filesystem adapter supplies bytes
+and filename to the same payload preparation used by browser imports, without
+pickers, DOM, browser image APIs or new decoders. Existing PNG, JPEG, BMP, WebP
+and TIFF metadata readers supply pixel dimensions; TIFF metadata is supported
+by the existing reader even though the browser picker advertises only the other
+formats. Dimension metadata is not a pixel-decoding or complete-file-integrity
+certificate. Invalid/absent dimensions, unknown extensions and unreadable files
+fail before authoring. Bytes are retained inline, base64-encoded, in the existing
+native document format; no new asset archive is created.
+
+Discovery exposes authored `sketch.referenceImages` and typed `sketchOperation`
+targets. Images start centered at `[0,0]`, rotation zero, with longest extent 200
+in sketch/document units and the original aspect ratio. `sketch.image.update`
+takes an owned image `target` and either `{ kind: "placement", placement: {
+center, width, height, rotationRadians } }` (positive finite extents) or
+`{ kind: "settings", scaleMode: "lockedAspect" | "independent",
+showExportedAnchorsInSketch: boolean }`. Settings/placement use the existing
+calibration solver and owned-state update; existing anchor bindings can constrain
+the recovered placement. This does not create anchors or new calibration geometry.
+`sketch.image.replace` takes `target` and local `path`, preserving operation
+identity and calibration through the existing replacement owner.
+`sketch.image.remove` takes `target` and uses the shared deletion owner, including
+owned anchor geometry and requirements. Each changed intent is one private
+undoable action. Images do not create consumable profiles; validated image-only
+sketches may publish/save without manufacturing curves or native faces.
+
+Recipes accept exact unique discovered-label aliases for style `targets` and
+image `target`. Missing/ambiguous labels fail, unknown aliases are usage errors.
+Native save/open retains styles, bytes, placement and calibration—not private
+history. File and repository failures remain separate from actual live changes.
+
 ### Private sketch dimensions
 
 `sketch.dimension.add` takes the current `basis` and `draft`, an `axis`

@@ -4,6 +4,8 @@ import { updateSketchGeometry, setSketchItemLabel } from "@/domain/editor/sketch
 import { applySketchMirrorRemoval, completeSketchMirrorRepair } from "@/domain/editor/sketch-session/mirror-actions";
 import { applySketchOffsetRemoval } from "@/domain/editor/sketch-session/offset-actions";
 import { createSketchDerivation, createSketchMirror, completeSketchOffset, buildSketchGeometry, completeSketchIntersectionEdit, deleteSelectedSketchGeometry } from "@/domain/editor/sketch-session/editing";
+import { authorReferenceImage, editReferenceImage } from "@/domain/editor/sketch-session/references";
+import { authorSketchStyle } from "@/domain/editor/sketch-session/styles";
 import { authorSketchReference } from "@/domain/editor/sketch-session/tools";
 import { setSketchConstructionTarget } from "@/domain/editor/sketch-session/tools";
 import { authorSketchPrimitive } from "@/domain/editor/sketch-session/tools";
@@ -221,6 +223,14 @@ export function reduceSketchWorkflow(
   switch (event.type) {
     case "sketch.beginRequested":
       return { state, effects: [] };
+    case "sketch.imageEdited":
+      return { state: createSketchPreviewState(state, editReferenceImage(state.session, event.target.operationId, event.edit)), effects: [] };
+    case "sketch.imageRemoved":
+      return { state: createSketchPreviewState(state, deleteSelectedSketchGeometry(state.session, [event.target])), effects: [] };
+    case "sketch.imageAuthored":
+      return { state: createSketchPreviewState(state, authorReferenceImage(state.session, event.payload)), effects: [] };
+    case "sketch.styleAuthored":
+      return { state: createSketchPreviewState(state, authorSketchStyle(state.session, event.targets, event.patch)), effects: [] };
     case "sketch.referenceAuthored": {
       const session = authorSketchReference(state.session, event.target);
       return session.definition === state.session.definition
