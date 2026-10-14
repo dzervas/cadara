@@ -168,13 +168,14 @@ export function semanticResultIssues(
     }
     const repositoryRequired =
       [
-        "model-mutate",
         "file-open",
         "file-save",
         // Geometry export reads the certified revision; unlike native save it
         // does not publish a new repository transaction. Its file barrier below
         // remains mandatory, without inventing a commit receipt.
       ].includes(expected.family) ||
+      // A confirmed no-op must not fabricate a repository transaction.
+      (expected.family === "model-mutate" && !(result.outcome.kind === "completed" && result.outcome.change === "unchanged" && completion.live.kind === "unchanged")) ||
       (expected.family === "sketch-publish" && completion.live.kind === "applied") ||
       (expected.family === "document" && completion.live.kind === "applied") ||
       (expected.family === "history" &&

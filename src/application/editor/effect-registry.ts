@@ -698,6 +698,7 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
       ? never
       : NonNullable<SketchSessionState["commitRequest"]>["definition"];
     observePublication?: (transaction: import("@/domain/modeling/document-repository").DocumentRepositoryMutationResult) => void;
+    observePersistence?: (transaction: import("@/domain/modeling/document-repository").DocumentRepositoryMutationResult) => void;
     solverCorrelation: {
       requestId: RequestId;
       projectionRequestId: RequestId;
@@ -847,6 +848,8 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
         baseRevisionId: input.baseRevisionId,
         baseRepositoryHeads: input.baseRepositoryHeads,
         ...request,
+        // Plane reassignment is a committed mutation, not private-draft publication.
+        observePersistence: options.observeSketchPublication ? receipt => options.observeSketchPublication!(input.requestId, receipt) : undefined,
         solverCorrelation: modelingService.sketchSolver
           ? modelingService.sketchSolver.createCommitCorrelation(
               input.requestId,
@@ -882,7 +885,8 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
 
       return {
         revisionId: result.value.revisionId,
-        accepted: true,
+        accepted: result.value.revisionState.kind === "accepted",
+        ...(result.value.revisionState.kind === "conflict" ? { actualRevisionId: result.value.revisionState.actualRevisionId } : {}),
         diagnostics: result.value.diagnostics,
       };
     },

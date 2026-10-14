@@ -305,6 +305,55 @@ inspect sketch validity/diagnostics too. Authored entity/point records remain
 distinct from current geometry. Completion awaits correlated solve/native
 region derivation, and profile validity remains production-owned.
 
+### Sketch supports and external references
+
+`sketch.begin` takes current `basis` and either `plane: "xy" | "yz" | "xz"`
+or an explicit `support` construction/face reference. Discovery supplies real
+construction and native body topology targets; unknown constructions, missing
+faces and nonplanar faces refuse. The existing support owner supplies the actual
+origin/axes/normal in document-length units and a right-handed frame. Face-backed
+supports have `plane: null`; use `sketch.support`, not a guessed standard plane.
+
+`sketch.support.reassign` takes current `basis`, a committed `sketchId` and
+explicit `support`, outside a private draft. It uses the browser's committed
+plane-edit/cursor workflow, preserving geometry IDs and sketch-plane coordinates.
+The support must exist after rollback to the edited sketch; its own downstream
+faces are not eligible. Cancellation/refusal restores the cursor through the
+same owner. A tail same-support no-op has no write. A non-tail no-op can advance
+the revision through real rollback/restoration writes without adding an authored
+action. Those applied basis changes are reported, not hidden as an unchanged
+transaction. Missing or failed exact persistence receipts never certify a commit;
+already applied live state is not promised to roll back.
+
+`sketch.reference.add` takes current `basis`/`draft`, `intent`, and a typed
+external `target`: construction, face, edge, vertex, sketch, sketch entity or
+sketch point. It shares reference authoring, native projection, solve and region
+completion with the browser, creating one **Reference Geometry** private action.
+Self, duplicate, unavailable and stale targets refuse. Model edges/vertices use
+normal-direction projection; a collapsed vertical edge can be unsupported.
+Faces and sketch sources require coplanarity. This is not a new projection
+algorithm or arbitrary topology-correspondence guarantee.
+
+Discovery `sketch.references` separates authored definitions from actual
+projection records (`projected`, `missingSource`, `unsupportedSource`,
+`outOfPlane`, `ambiguous`) and diagnostics. `revisionId` identifies the document
+basis used for that projection, not a per-source timestamp; it is null when no
+projection record is available. Successful records expose read-only operands in
+`sketch.operands`, never editable local entities. Source publication/reopening
+refreshes those records through production restoration; source deletion exposes
+missing-source diagnostics, not old geometry. Runtime projection failure clears
+old external operands and fails the geometry barrier. Unresolved references do
+not fulfill a geometry request even when there are no local entities. Explicit
+`author-invalid` can retain structurally authored invalid drafts; it cannot turn
+a runtime failure into success. Existing requirement operand combinations still
+apply: exposing a projected circle does not enable single-circle diameter sizing
+or local/projected point-pair sizing where the registry does not support them.
+
+Recipes accept exact unique discovered-label aliases for `support`, `target`
+and reassignment `sketchId`. Missing/ambiguous labels stop that operation; unknown
+aliases are usage errors before startup. Native files retain supports and authored
+reference identities, not session-private history or arbitrary topology remapping.
+
 ### Private sketch dimensions
 
 `sketch.dimension.add` takes the current `basis` and `draft`, an `axis`

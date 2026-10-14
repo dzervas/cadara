@@ -19,6 +19,9 @@ import {
   getLiveRegionBoundaryDiagnostics,
 } from "@/domain/editor/sketch-session/internals";
 import { sketchPrimitiveContributionInput, validateSketchPrimitive } from "@/core/sketch-tools/semantic-primitive";
+import { getPrimitiveRefKey } from "@/core/editor/schema";
+import { canReassignCommittedSketchPlane } from "@/domain/editor/sketch-plane-editing";
+import { canStartSketchFromTarget } from "@/domain/editor/sketch-session-controller";
 import { canUseTangentArcSourceAtPoint } from "@/domain/sketch-inference/placement-inference";
 import {
   regionBoundaryBasisOfRecord,
@@ -149,8 +152,10 @@ export function createSemanticSketchPort(input: {
       editingContext: { kind: "sketch", sketchId: s.actionContextId },
       draft,
     };
+    const projectionsCurrent = s.definition.references.every(reference =>
+      s.projectedReferences.some(projected => projected.referenceId === reference.referenceId && projected.status === "projected"));
     const usable =
-      hasAcceptedLiveSolveOfDefinition(s) &&
+      projectionsCurrent && !s.projectionDiagnostics.some(d => d.severity === "error") && hasAcceptedLiveSolveOfDefinition(s) &&
       s.liveRegions.status === "current" &&
       sketchProfileGateFailures(s.liveSolve!.solvedSnapshot).length === 0 &&
       getLiveRegionBoundaryDiagnostics(s.liveRegions).length === 0;
@@ -181,7 +186,12 @@ export function createSemanticSketchPort(input: {
           ...s.projectedReferences.filter(r => r.status === "projected").flatMap(r => r.geometry.map(g => ({ label: `Projected ${g.geometryId}`, target: { kind: "projectedReferenceGeometry" as const, referenceId: r.referenceId, geometryId: g.geometryId, geometryKind: g.kind } }))),
         ],
         sketchId: s.sketchId,
-        plane: s.plane.key!,
+        plane: s.plane.key,
+        support: s.plane,
+        references: s.definition.references.map(definition => {
+          const projection = s.projectedReferences.find(r => r.referenceId === definition.referenceId) ?? null;
+          return { definition, revisionId: projection ? editor.document.revisionId : null, projection };
+        }),
         solveStatus: s.liveSolve!.solvedSnapshot.status,
         validity: getSketchSessionDerivedValidity(s),
         points: s.definition.points.map((p) => ({
@@ -217,15 +227,19 @@ export function createSemanticSketchPort(input: {
     if (editor.kind !== "editingSketch") return { kind: "not-required" };
     const s = editor.session;
     const empty = s.definition.entities.length === 0;
-    const current =
-      empty ||
+    // An empty local definition is not proof that its external geometry resolved.
+    const projectionsCurrent = s.definition.references.every(reference =>
+      s.projectedReferences.some(projected => projected.referenceId === reference.referenceId && projected.status === "projected"));
+    const current = projectionsCurrent && !s.projectionDiagnostics.some(d => d.severity === "error") &&
+      (empty ||
       (hasAcceptedLiveSolveOfDefinition(s) &&
         s.liveRegions.status === "current" &&
-        getLiveRegionBoundaryDiagnostics(s.liveRegions).length === 0);
+        getLiveRegionBoundaryDiagnostics(s.liveRegions).length === 0));
     return {
       kind: current
         ? "current"
-        : s.liveRegions.status === "failed" ||
+        : s.projectionDiagnostics.some(d => d.code === "projection-runtime-failed") ||
+            s.liveRegions.status === "failed" ||
             s.liveRegions.status === "pending"
           ? "failed"
           : "invalid-editable",
@@ -251,6 +265,80 @@ export function createSemanticSketchPort(input: {
       rebuildRevisionId: null,
     };
   }
+  async function reassignSupport(
+    command: Extract<SemanticSketchCommand, { operation: "sketch.support.reassign" }>,
+    terminal: import("@/contracts/semantic/schema").SemanticResult,
+  ): Promise<import("@/contracts/semantic/schema").SemanticResult> {
+    const snapshot = await input.service.getCurrentDocumentSnapshot();
+    if (!canReassignCommittedSketchPlane(snapshot, command.sketchId) || !canStartSketchFromTarget(command.support, snapshot))
+      return { ...terminal, outcome: { kind: "rejected", reasonCode: "sketch-support-unavailable" } };
+    const events: EditorEvent[] = [];
+    let error: unknown;
+    try {
+      events.push(...await input.loop.dispatchAndSettle(`${command.commandId}:support-open`, { type: "sketchPlaneEdit.requested", target: { kind: "sketch", sketchId: command.sketchId } }));
+      const opened = input.loop.getState();
+      if (opened.kind === "editingSketchPlane" && canStartSketchFromTarget(command.support, opened.snapshot)) {
+        events.push(...await input.loop.dispatchAndSettle(command.commandId, { type: "sketchPlaneEdit.supportCommitted", target: command.support }));
+      }
+      const pending = input.loop.getState();
+      if (pending.kind !== "idle") {
+        // Restore the production timeline cursor on refused/unchanged edits too.
+        events.push(...await input.loop.dispatchAndSettle(`${command.commandId}:support-exit`, { type: "command.cancelled", commandSessionId: pending.command.commandSessionId }));
+      }
+    } catch (caught) { error = caught; }
+    const committed = events.find((e): e is Extract<EditorEvent, { type: "effect.sketchPlaneCommitted" }> => e.type === "effect.sketchPlaneCommitted");
+    const failed = events.find((e): e is Extract<EditorEvent, { type: "effect.sketchPlaneCommitFailed" }> => e.type === "effect.sketchPlaneCommitFailed");
+    const requestId = committed?.requestId ?? failed?.requestId;
+    const receipt = requestId ? input.publications.take(requestId) : undefined;
+    const applied = receipt?.ok ? receipt : receipt?.appliedLive;
+    const cursorReceipts = events.flatMap(e => e.type === "effect.documentCursorMoved" || e.type === "effect.documentCursorMoveFailed" ? [{ event: e, receipt: input.publications.takeCursor(e.baseRevisionId) }] : []);
+    // Rollback, commit and restoration receipts form one chronological basis chain.
+    let observed: typeof applied;
+    let chainRevision = terminal.completion.live.state!.revisionId;
+    let chainValid = true;
+    for (const event of events) {
+      const write = event.type === "effect.sketchPlaneCommitted" || event.type === "effect.sketchPlaneCommitFailed"
+        ? receipt
+        : cursorReceipts.find(entry => entry.event === event)?.receipt;
+      if (!(event.type === "effect.sketchPlaneCommitted" || event.type === "effect.sketchPlaneCommitFailed" || event.type === "effect.documentCursorMoved" || event.type === "effect.documentCursorMoveFailed")) continue;
+      const next = write?.ok ? write : write?.appliedLive;
+      if (event.baseRevisionId !== chainRevision || !next ||
+          event.type === "effect.sketchPlaneCommitFailed" || event.type === "effect.documentCursorMoveFailed" ||
+          ((event.type === "effect.sketchPlaneCommitted" || event.type === "effect.documentCursorMoved") && !event.accepted)) chainValid = false;
+      if (next) {
+        observed = next;
+        chainRevision = next.document.revisionId;
+      }
+    }
+    const inspected = await input.inspect({ commandId: `${command.commandId}:support-handoff` });
+    const state = inspected.discovery.state;
+    const handoff = !error && chainValid && input.loop.getState().kind === "idle" && (!observed || state.revisionId === observed.document.revisionId && [...state.repositoryHeads].sort().join("\0") === [...observed.metadata.heads].sort().join("\0"));
+    const persistenceFailed = !!requestId && !receipt?.ok || cursorReceipts.some(entry => !entry.receipt?.ok);
+    const current = await input.service.getCurrentDocumentSnapshot();
+    const sketch = current.document.sketches.find(s => s.sketchId === command.sketchId);
+    const usable = !!sketch && sketch.sketch.derivedValidity.state === "current" && !current.document.diagnostics.some(d => d.severity === "error");
+    const diagnostics = [...inspected.diagnostics, ...(committed?.diagnostics ?? []), ...(failed ? [semanticDiagnostic(new Error(failed.message))] : []), ...(error ? [semanticDiagnostic(error)] : []), ...cursorReceipts.flatMap(entry => entry.receipt && !entry.receipt.ok ? [semanticDiagnostic(new Error(entry.receipt.status.diagnostic.message))] : [])];
+    const actualState = !handoff && observed ? { ...state, revisionId: observed.document.revisionId, repositoryHeads: [...observed.metadata.heads] } : state;
+    const failures = [...(!committed?.accepted || !applied || error ? ["execution" as const] : []), ...(!handoff ? ["handoff" as const] : []), ...(!usable || !handoff ? ["geometry" as const] : []), ...(persistenceFailed ? ["persistence" as const] : [])];
+    if (!requestId && !error && handoff && !persistenceFailed) {
+      const unchanged = sketch && getPrimitiveRefKey(sketch.plane.support) === getPrimitiveRefKey(command.support);
+      if (!unchanged) diagnostics.push(semanticDiagnostic(new Error("Sketch support is unavailable at the edited timeline cursor.")));
+      return { ...terminal, discovery: inspected.discovery, diagnostics, completion: { ...terminal.completion, live: observed ? { kind: "applied", state } : { kind: "unchanged", state }, handoff: { kind: "current", state }, geometry: unchanged ? { kind: usable ? "current" : "failed", state, sketchBasis: null, solve: null, derivation: null, rebuildRevisionId: state.revisionId } : { kind: "not-required" }, persistence: cursorReceipts.length ? { kind: "committed", commandId: command.commandId, transactionId: cursorReceipts.map(entry => entry.event.requestId).join(":"), state } : { kind: "not-required" } }, outcome: unchanged ? usable ? { kind: "completed", change: observed ? "changed" : "unchanged" } : { kind: "failed", failures: ["geometry"] } : observed ? { kind: "failed", failures: ["execution"] } : { kind: "rejected", reasonCode: "sketch-support-unavailable" } };
+    }
+    return {
+      ...terminal,
+      discovery: handoff ? inspected.discovery : null,
+      diagnostics,
+      completion: {
+        ...terminal.completion,
+        live: observed || state.revisionId !== terminal.completion.live.state!.revisionId ? { kind: "applied", state: actualState } : { kind: "unchanged", state: actualState },
+        handoff: handoff ? { kind: "current", state } : { kind: "failed" },
+        persistence: requestId || cursorReceipts.length ? { kind: persistenceFailed ? "failed" : "committed", commandId: command.commandId, transactionId: requestId ?? cursorReceipts.map(entry => entry.event.requestId).join(":"), state: actualState } : { kind: "not-required" },
+        geometry: { kind: usable && handoff ? "current" : "failed", state: actualState, sketchBasis: null, solve: null, derivation: null, rebuildRevisionId: usable && handoff ? state.revisionId : null },
+      },
+      outcome: failures.length ? { kind: "failed", failures } : { kind: "completed", change: "changed" },
+    };
+  }
   async function execute(
     command: SemanticSketchCommand | SemanticHistoryCommand,
   ): Promise<import("@/contracts/semantic/schema").SemanticResult> {
@@ -272,7 +360,7 @@ export function createSemanticSketchPort(input: {
         outcome: { kind: "conflicted" as const, actualBasis },
       };
     if (
-      (command.operation === "sketch.begin" || command.operation === "sketch.open")
+      (command.operation === "sketch.begin" || command.operation === "sketch.open" || command.operation === "sketch.support.reassign")
         ? editor.kind !== "idle"
         : editor.kind !== "editingSketch"
     )
@@ -290,6 +378,16 @@ export function createSemanticSketchPort(input: {
         ...terminal,
         outcome: { kind: "conflicted" as const, actualBasis },
       };
+    if (command.operation === "sketch.begin" && "support" in command) {
+      const snapshot = await input.service.getCurrentDocumentSnapshot();
+      const target = command.support;
+      if (!canStartSketchFromTarget(target, snapshot)) return { ...terminal, outcome: { kind: "rejected", reasonCode: "sketch-support-unavailable" } };
+    }
+    if (command.operation === "sketch.support.reassign") return reassignSupport(command, terminal);
+    if (command.operation === "sketch.reference.add") {
+      const key = getPrimitiveRefKey(command.target);
+      if (!before.discovery.references.some(r => getPrimitiveRefKey(r.target) === key)) return { ...terminal, outcome: { kind: "rejected", reasonCode: "reference-source-unavailable" } };
+    }
     if (command.operation === "sketch.open" && !initial.references.some(r => r.target.kind === "sketch" && r.target.sketchId === command.sketchId))
       return { ...terminal, outcome: { kind: "rejected", reasonCode: "sketch-unavailable" } };
     if (command.operation === "sketch.mirror.remove" || command.operation === "sketch.mirror.repair") {
@@ -381,7 +479,7 @@ export function createSemanticSketchPort(input: {
       if (command.operation === "sketch.begin")
         events = await input.loop.dispatchAndSettle(command.commandId, {
           type: "sketch.beginRequested",
-          target: {
+          target: "support" in command ? command.support : {
             kind: "construction",
             constructionId:
               `construction_plane-${command.plane}` as ConstructionId,
@@ -410,6 +508,8 @@ export function createSemanticSketchPort(input: {
           events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.intersectionEditCompleted", basis: prepared, result: answer.result });
         } else events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.geometryUpdated", edit });
       }
+      if (command.operation === "sketch.reference.add")
+        events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.referenceAuthored", target: command.target });
       if (command.operation === "sketch.derivation.create")
         events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.derivationCreated", input: { ...command, targets: command.targets.map(editorTarget) } });
       if (command.operation === "sketch.mirror.remove")
@@ -509,7 +609,7 @@ export function createSemanticSketchPort(input: {
         if (blocked?.blockedReason)
           return { ...terminal, outcome: { kind: "conflicted", actualBasis }, diagnostics: [...terminal.diagnostics, semanticDiagnostic(new Error(blocked.blockedReason))] };
       }
-      if ((geometryMutation || command.operation === "sketch.requirement.add" || command.operation === "sketch.dimension.update" || command.operation === "sketch.dimension.reference") && editor.kind === "editingSketch" && finalEditor.kind === "editingSketch" && finalEditor.session.definition === editor.session.definition && finalEditor.session.sketchLabel === editor.session.sketchLabel) {
+      if ((geometryMutation || command.operation === "sketch.reference.add" || command.operation === "sketch.requirement.add" || command.operation === "sketch.dimension.update" || command.operation === "sketch.dimension.reference") && editor.kind === "editingSketch" && finalEditor.kind === "editingSketch" && finalEditor.session.definition === editor.session.definition && finalEditor.session.sketchLabel === editor.session.sketchLabel) {
         if (finalEditor.session.validationMessage) return { ...terminal, outcome: { kind: "rejected", reasonCode: "sketch-edit-refused" }, diagnostics: [semanticDiagnostic(new Error(finalEditor.session.validationMessage))] };
         return { ...terminal, outcome: priorGeometry.kind === "current" ? { kind: "completed", change: "unchanged" } : { kind: "failed", failures: ["geometry"] }, discovery: initial, completion: { ...terminal.completion, handoff: { kind: "current", state: initial.state }, geometry: priorGeometry } };
       }
@@ -590,6 +690,7 @@ export function createSemanticSketchPort(input: {
       terminal.diagnostics = [
         ...terminal.diagnostics,
         ...inspected.diagnostics,
+        ...(finalEditor.kind === "editingSketch" ? finalEditor.session.projectionDiagnostics.map(d => ({ ...d, target: null, detail: null })) : []),
         ...(terminal.discovery.sketch?.validity.diagnostics ?? []).map((d) => ({
           ...d,
           target: null,
@@ -715,6 +816,11 @@ export function createSemanticSketchPort(input: {
           terminal.discovery.sketch = {
             ...initial.sketch!,
             ...dimensionDiscovery(sketch.definition, sketch.solvedSnapshot),
+            support: snapshot.document.sketches.find(s => s.sketchId === committed.publishedSketchId)!.plane,
+            references: sketch.definition.references.map(definition => {
+              const projection = sketch.projectedReferences?.find(r => r.referenceId === definition.referenceId) ?? null;
+              return { definition, revisionId: projection ? snapshot.document.revisionId : null, projection };
+            }),
             sketchId: sketch.sketchId,
             solveStatus: sketch.solvedSnapshot.status,
             validity: sketch.derivedValidity,

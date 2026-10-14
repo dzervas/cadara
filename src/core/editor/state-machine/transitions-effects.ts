@@ -822,8 +822,16 @@ export function handleEffectSketchReferenceProjectionFailed(
         label: event.message,
         target: state.session.planeTarget,
       },
+      // Keep the established entry solve/round, but do not expose old operands as a refreshed projection.
       session: {
         ...state.session,
+        projectedReferences: [],
+        projectionDiagnostics: [{
+          code: "projection-runtime-failed",
+          severity: "error",
+          message: event.message,
+          target: null,
+        }],
         validationMessage: event.message,
       },
     },

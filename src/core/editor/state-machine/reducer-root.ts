@@ -12,6 +12,7 @@ import {
 } from "@/domain/editor/feature-editing";
 import {
   getSketchPlaneEditSelectionTarget,
+  applySelectionToSketchPlaneEditSession,
   patchSketchPlaneEditSession,
 } from "@/domain/editor/sketch-plane-editing";
 import {
@@ -188,6 +189,10 @@ function reduceSketchPlaneWorkflow(
       return handleFormReferencePickerActivated(state, event);
     case "form.referencePickerCancelled":
       return handleFormReferencePickerCancelled(state, dependencies);
+    case "sketchPlaneEdit.supportCommitted": {
+      const session = applySelectionToSketchPlaneEditSession(state.session, event.target, state.snapshot);
+      return emitSketchPlaneCommit({ ...state, session });
+    }
     case "sketchPlaneEdit.patched": {
       const session = patchSketchPlaneEditSession(state.session, event.patch);
       return {

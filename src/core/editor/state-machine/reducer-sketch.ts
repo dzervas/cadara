@@ -4,6 +4,7 @@ import { updateSketchGeometry, setSketchItemLabel } from "@/domain/editor/sketch
 import { applySketchMirrorRemoval, completeSketchMirrorRepair } from "@/domain/editor/sketch-session/mirror-actions";
 import { applySketchOffsetRemoval } from "@/domain/editor/sketch-session/offset-actions";
 import { createSketchDerivation, createSketchMirror, completeSketchOffset, buildSketchGeometry, completeSketchIntersectionEdit, deleteSelectedSketchGeometry } from "@/domain/editor/sketch-session/editing";
+import { authorSketchReference } from "@/domain/editor/sketch-session/tools";
 import { setSketchConstructionTarget } from "@/domain/editor/sketch-session/tools";
 import { authorSketchPrimitive } from "@/domain/editor/sketch-session/tools";
 import { isRegisteredSketchToolId } from "@/core/sketch-tools/registry";
@@ -38,6 +39,7 @@ import type {
 import type { EditorExtensionDependencies } from "./dependencies";
 import {
   emitSketchCommit,
+  emitSketchReferenceProjection,
   emitSketchSpecialModeEffect,
   emitEditSessionCursorRestore,
 } from "./effect-emitters";
@@ -219,6 +221,12 @@ export function reduceSketchWorkflow(
   switch (event.type) {
     case "sketch.beginRequested":
       return { state, effects: [] };
+    case "sketch.referenceAuthored": {
+      const session = authorSketchReference(state.session, event.target);
+      return session.definition === state.session.definition
+        ? { state: createSketchPreviewState(state, session), effects: [] }
+        : emitSketchReferenceProjection(createSketchPreviewState(state, session), session);
+    }
     case "sketch.intersectionEditCompleted":
       return { state: createSketchPreviewState(state, completeSketchIntersectionEdit(state.session, event.basis, event.result).session), effects: [] };
     case "sketch.offsetCompleted":
