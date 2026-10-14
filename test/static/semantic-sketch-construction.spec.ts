@@ -14,7 +14,7 @@ it("browser and semantic corner/slot construction share canonical builders, gate
     expect(source.match(new RegExp(`${builder}\\(`, "g"))).toHaveLength(1);
   expect(source.match(/getSketchCornerSlotResult\(session,/g)).toHaveLength(4);
   expect(source.match(/completeSketchEditOperation\(session,/g)).toHaveLength(
-    2,
+    3, // Corner/slot, browser confirmation, and explicit mirror creation.
   );
   expect(source).toContain("offsetEditInputGate(session, input.entityIds");
   expect(source).toContain("applySketchEditOperationResult(session, result)");

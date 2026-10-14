@@ -1,8 +1,9 @@
 import { authorSketchDimension, authorSketchRequirement } from "@/domain/editor/sketch-session/constraints";
 import { updateSketchDimensionValue, deleteSelectedSketchAnnotation, makeSketchAnnotationReference } from "@/domain/editor/sketch-session/annotations";
 import { updateSketchGeometry, setSketchItemLabel } from "@/domain/editor/sketch-session/geometry-actions";
+import { applySketchMirrorRemoval, completeSketchMirrorRepair } from "@/domain/editor/sketch-session/mirror-actions";
 import { applySketchOffsetRemoval } from "@/domain/editor/sketch-session/offset-actions";
-import { completeSketchOffset, buildSketchGeometry, completeSketchIntersectionEdit, deleteSelectedSketchGeometry } from "@/domain/editor/sketch-session/editing";
+import { createSketchMirror, completeSketchOffset, buildSketchGeometry, completeSketchIntersectionEdit, deleteSelectedSketchGeometry } from "@/domain/editor/sketch-session/editing";
 import { setSketchConstructionTarget } from "@/domain/editor/sketch-session/tools";
 import { authorSketchPrimitive } from "@/domain/editor/sketch-session/tools";
 import { isRegisteredSketchToolId } from "@/core/sketch-tools/registry";
@@ -222,6 +223,12 @@ export function reduceSketchWorkflow(
       return { state: createSketchPreviewState(state, completeSketchIntersectionEdit(state.session, event.basis, event.result).session), effects: [] };
     case "sketch.offsetCompleted":
       return { state: createSketchPreviewState(state, completeSketchOffset(state.session, event.prepared, event.record)), effects: [] };
+    case "sketch.mirrorRemoved":
+      return { state: createSketchPreviewState(state, applySketchMirrorRemoval(state.session, event.derivationId)), effects: [] };
+    case "sketch.mirrorRepaired":
+      return { state: createSketchPreviewState(state, completeSketchMirrorRepair(state.session, event.repair, event.target)), effects: [] };
+    case "sketch.mirrorCreated":
+      return { state: createSketchPreviewState(state, createSketchMirror(state.session, event.targets, event.axis)), effects: [] };
     case "sketch.offsetRemoved":
       return { state: createSketchPreviewState(state, applySketchOffsetRemoval(state.session, event.derivationId)), effects: [] };
     case "sketch.geometryBuilt":

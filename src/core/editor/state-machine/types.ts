@@ -706,6 +706,9 @@ export interface SnapshotFailedEvent {
 export type EditorEvent =
   | { type: "sketch.beginRequested"; target: import("@/contracts/shared/references").ConstructionRef | import("@/contracts/shared/references").SketchRef }
   | { type: "sketch.offsetCompleted"; prepared: Exclude<ReturnType<typeof import("@/domain/editor/sketch-session/editing").prepareSketchOffset>, { message: string }>; record: import("@/contracts/solver/schema").SketchOffsetPublicationRecord }
+  | { type: "sketch.mirrorRemoved"; derivationId: string }
+  | { type: "sketch.mirrorRepaired"; repair: import("@/domain/editor/sketch-session/types").SketchMirrorRepairState; target: import("@/core/editor/schema").PrimitiveRef }
+  | { type: "sketch.mirrorCreated"; targets: readonly Extract<import("@/contracts/shared/references").DurableRef, { kind: "sketchEntity" }>[]; axis: Extract<import("@/contracts/shared/references").DurableRef, { kind: "sketchEntity" }> | import("@/contracts/shared/references").SketchDatumReferenceRef }
   | { type: "sketch.offsetRemoved"; derivationId: string }
   | { type: "sketch.geometryBuilt"; input: import("@/contracts/semantic/schema").SemanticSketchConstruction }
   | { type: "sketch.geometryUpdated"; edit: import("@/contracts/semantic/schema").SemanticSketchGeometryEdit }

@@ -227,6 +227,48 @@ its exact unique discovered label (never a guessed ID or first match). It uses t
 leaves dependent relationships explicitly broken. Private undo/redo restores
 relationship/output identities. Publication/reopening retains the relationship.
 
+### Reciprocal sketch mirrors
+
+`sketch.mirror.create` takes current `basis`/`draft`, distinct owned entity
+`targets`, a separate `axis` (a local straight line, construction included, or
+an owned sketch X/Y datum reference), and `intent`. The production builder
+supports points, lines, circles, bound arcs and ordinary splines; unsupported
+curves, offset spline shells, unavailable seeds and degenerate axes refuse.
+Copies preserve shared point identities and construction flags. One **Mirror**
+action creates a durable coupled relationship, not one-way copies. Completion
+waits for the correlated live solve and native region derivation.
+
+Edits on either side and requirements use the existing reciprocal solver.
+Copy-side requirements can size originals; a second driving dimension for the
+same mirrored quantity refuses, so edit the discovered existing driver instead.
+Reference dimensions remain measurements. Copy movement preserves a line axis
+unless production requirements force it to move; an explicit edit of the axis
+is distinct. Conflicts and broken mirror dependencies block profile consumption.
+
+Discovery `sketch.mirrors` exposes relationship IDs/labels, seed/output IDs,
+axis references, broken reasons and removal/requirement consequences. Its
+`currentGeometry` is solved output geometry, null for a broken relationship or
+unaccepted solve. `sketch.entities`/`points` remain authored records, so a repair
+need not overwrite their stored output placeholders. No last-good geometry is
+advertised as current. Private undo/redo and publication/reopening preserve
+relationship and output identities.
+
+`sketch.mirror.repair` takes a discovered `derivationId` and either
+`repair: { kind: "axis", target: <straight line or datum reference> }` or
+`repair: { kind: "original", output: <owned copy entity>, target: <new seed entity> }`.
+The canonical repair owner preserves copy identities, checks kind/spline
+fit-count/closure and point-correspondence compatibility, and refuses dependency
+cycles. It supports healthy relationships as well as recovery from missing
+originals/axes. `sketch.mirror.remove` removes the relationship, its owned copies
+and their requirements as one **Remove Mirror** action; dependent relationships
+remain broken rather than cascading or being silently rebound. **Mirror Detach
+is deferred**, not exposed. There is no invented numeric mirror setting.
+
+Recipes accept exact unique discovered labels for seeds, `axis`, repair
+`target`/`output`, and `derivationId`, including datum labels from `sketch.operands`.
+Missing/ambiguous labels fail before that operation and leave later operations
+unexecuted; unknown aliases are usage errors before runtime startup.
+
 ### Private sketch dimensions
 
 `sketch.dimension.add` takes the current `basis` and `draft`, an `axis`

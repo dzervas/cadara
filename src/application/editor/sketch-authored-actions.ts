@@ -168,6 +168,12 @@ function actionLabel(event: EditorEvent, before: EditorState) {
   switch (event.type) {
     case "sketch.intersectionEditCompleted":
       return event.basis.input.operation.kind === "extend" ? "Extend" : event.basis.input.operation.kind === "split" ? "Split" : "Trim";
+    case "sketch.mirrorRemoved":
+      return "Remove Mirror";
+    case "sketch.mirrorRepaired":
+      return event.repair.target === "axis" ? "Replace Mirror Line" : "Replace Mirror Original";
+    case "sketch.mirrorCreated":
+      return "Mirror";
     case "sketch.offsetCompleted":
       return "Offset";
     case "sketch.offsetRemoved":
