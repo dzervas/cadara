@@ -106,3 +106,56 @@ test("open line and curved arc offsets expose certified geometry rather than aut
     }
   }
 }, 120_000);
+
+test("an outward closed-line offset retains the canonical rounded corner joins", async () => {
+  const w = await createSketchWorkflow();
+  try {
+    const source = await w.execute({
+      operation: "sketch.author",
+      draft: w.current().discovery!.state.draft,
+      primitive: { kind: "rectangle", start: [0, 0], end: [10, 10] },
+      construction: false,
+      intent: "fulfill",
+    });
+    const result = await w.execute({
+      operation: "sketch.offset.create",
+      draft: source.discovery!.state.draft,
+      targets: source
+        .discovery!.references.filter((r) => r.target.kind === "sketchEntity")
+        .map((r) => r.target),
+      distance: 1,
+      side: "right",
+      intent: "fulfill",
+    });
+    const geometry = result.discovery!.sketch!.offsets[0]!.currentGeometry!;
+    expect(geometry).toHaveLength(8);
+    const lines = geometry.filter((e) => e.kind === "lineSegment");
+    const arcs = geometry.filter((e) => e.kind === "arc");
+    expect(lines).toHaveLength(4);
+    expect(arcs).toHaveLength(4);
+    expect(arcs.map((e) => e.radius)).toEqual([1, 1, 1, 1]);
+    expect(
+      arcs.map((e) => JSON.stringify(e.points[2]!.position)).sort(),
+    ).toEqual(["[0,0]", "[0,10]", "[10,0]", "[10,10]"]);
+    expect(
+      lines
+        .flatMap((e) => e.points.map((p) => JSON.stringify(p.position)))
+        .sort(),
+    ).toEqual([
+      "[-1,0]",
+      "[-1,10]",
+      "[0,-1]",
+      "[0,11]",
+      "[10,-1]",
+      "[10,11]",
+      "[11,0]",
+      "[11,10]",
+    ]);
+    expect(
+      new Set(arcs.flatMap((e) => e.points.slice(0, 2).map((p) => p.pointId))),
+    ).toEqual(new Set(lines.flatMap((e) => e.points.map((p) => p.pointId))));
+    expect(result.discovery!.sketch!.profiles).toHaveLength(2);
+  } finally {
+    await w.close();
+  }
+}, 120_000);
