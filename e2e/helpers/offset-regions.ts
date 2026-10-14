@@ -118,7 +118,7 @@ export async function pickSecondOffsetRegion(
   factor: number,
 ) {
   const page = workbench.page;
-  await toggleVisibility(page, "Hide", "feature_extrude-1");
+  await toggleVisibility(page, "Hide", "Extrude 1");
   await toggleVisibility(page, "Show", /Sketch/);
   await activateProfileSlot(page);
   return selectThinOffsetRegion(workbench, region, factor);

@@ -89,5 +89,6 @@ export {
   getEditorHistoryAvailability,
   getEditorSelectionKey,
   getEditorViewState,
+  getPeerDeletedSketchNotice,
   hydrateFeatureSessionFromSnapshot,
 } from "./selectors";

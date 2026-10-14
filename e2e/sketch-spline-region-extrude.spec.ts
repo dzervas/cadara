@@ -4,6 +4,7 @@ import type { CreateFeatureRequest } from "../src/contracts/modeling/schema";
 import { EXTRUDE_FEATURE_SCHEMA_VERSION } from "../src/contracts/shared/versioning";
 import {
   activateProfileSlot,
+  profileChip,
   selectRegionInViewport,
   showInViewport,
   toggleVisibility,
@@ -85,16 +86,14 @@ test("both regions of a spline annulus (the annulus and its spline disk) extrude
   // The other region alone, as a new body (one of the two is the annulus).
   await workbench.activateFeature("extrude");
   await page.getByRole("button", { name: "Clear Profile targets" }).click();
-  await expect(
-    page.getByRole("button", { name: `Remove ${targets[0]!}` }),
-  ).toHaveCount(0);
+  await expect(profileChip(page, targets[0]!)).toHaveCount(0);
   // The consumed sketch is auto-hidden: shown again to pick its other region.
   await showInViewport(page, "Spline Sketch");
   await activateProfileSlot(page);
   await selectRegionInViewport(workbench, targets[1]!);
-  await expect(
-    page.getByRole("button", { name: `Remove ${targets[1]!}` }),
-  ).toHaveCount(1, { timeout: 10_000 });
+  await expect(profileChip(page, targets[1]!)).toHaveCount(1, {
+    timeout: 10_000,
+  });
   await workbench.setOperation("newBody");
   await workbench.expectFeaturePreviewReady("extrude");
   await workbench.commitFeature("feature_extrude-2");
@@ -382,10 +381,14 @@ test("a figure-eight lobe keeps its region through a fit-point edit, asks for re
 
   // Reselect: the dangling lobe is kept as a missing region until replaced.
   await repair.dblclick();
-  await expect(page.getByText(`Missing region (${lobes[0]})`)).toBeVisible({
-    timeout: 30_000,
-  });
-  await page.getByRole("button", { name: `Remove ${lobes[0]}` }).click();
+  // T17k2: the chip names the missing region by its sketch, not its id.
+  await expect(profileChip(page, lobes[0]!)).toHaveAttribute(
+    "aria-label",
+    /^Remove Missing region \(.+\)$/,
+    { timeout: 30_000 },
+  );
+  await expect(page.getByText(/^Missing region \(.+\)$/)).toBeVisible();
+  await profileChip(page, lobes[0]).click();
   await activateProfileSlot(page);
   await selectRegionInViewport(workbench, simple!);
   await expect
@@ -584,7 +587,7 @@ test("an open spline extrudes into a surface and is a sweep path in the browser 
   // (T17-19), so it is picked after zooming in ×8 about two opposite
   // sides; the path is then found from the profile's centre, where it
   // starts (the helper searches any target until it is the hover target).
-  await toggleVisibility(page, "Hide", "feature_extrude-1");
+  await toggleVisibility(page, "Hide", "Extrude 1");
   const sides = [
     `${profileId}.sketch_entity_ab`,
     `${profileId}.sketch_entity_cd`,

@@ -1,6 +1,7 @@
 import { test, expect } from "vitest";
 
 import type { DocumentVariableRecord } from "@/contracts/modeling/schema";
+import { expectNoInternalIds } from "@/contracts/sketch/user-text.fixtures";
 import {
   evaluateDocumentVariableExpressions,
   isValidDocumentVariableName,
@@ -139,5 +140,27 @@ test("src/domain/modeling/document-variable-expressions.spec.ts", () => {
     [variable("x", "sqrt(-1)")],
     "document-variable-non-finite-result",
     "Complex results should be rejected.",
+  );
+});
+
+// T17k2 (T17e review A-8). Logic lane; seam: the variable evaluator's
+// diagnostics, which the Variables panel shows. An invalid name is
+// explained by the name the user typed, never the variable's id (base:
+// "Document variable variable_‹…› must use a non-empty math identifier
+// name.").
+test("T17k2: an invalid variable name is explained without the variable's id", () => {
+  const messages = (name: string) => {
+    const result = evaluateDocumentVariableExpressions([
+      { variableId: "variable_t17k2", name, valueText: "1" },
+    ]);
+    return result.ok ? [] : result.diagnostics.map((entry) => entry.message);
+  };
+  expect(messages("")).toEqual(["A document variable needs a name."]);
+  expect(messages("1_width")).toEqual([
+    'Document variable name "1_width" is not valid: use letters, digits and _, not starting with a digit.',
+  ]);
+  expectNoInternalIds(
+    [...messages(""), ...messages("1_width")],
+    ["variable_t17k2"],
   );
 });

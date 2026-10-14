@@ -132,7 +132,7 @@ function expectEntryBasis(result: EditorTransitionResult, label: string) {
 }
 
 describe("T11a sketch entry establishes a live solve basis", () => {
-  test("reference-image import from the sketch selection command: basis, projection request and the import effect", async () => {
+  test("reference-image import from the sketch selection command: basis and projection request; the image joins the entered draft (T17k2: no import commit)", async () => {
     const { state } = await seedSketchCommand();
     const result = transitionEditorState(state, {
       type: "sketch.referenceImagePayloadsPicked",
@@ -147,18 +147,14 @@ describe("T11a sketch entry establishes a live solve basis", () => {
       ],
     });
     const entered = expectEntryBasis(result, "import bypass");
-    expect(
-      result.effects.map((effect) => effect.type),
-      "The projection request is merged with the import effect.",
-    ).toEqual([
+    expect(result.effects.map((effect) => effect.type)).toEqual([
       "sketch.projectReferences",
-      "sketch.importReferenceImages",
       "sketch.deriveRegions",
     ]);
-    expect(entered.pendingImportRequestId).toBe(result.effects[1]!.requestId);
-    expect(entered.pendingImportRequestId).not.toBe(
-      entered.pendingProjectionRequestId,
-    );
+    expect(
+      entered.session.definition.referenceImages?.at(-1)?.label,
+      "the picked image is the draft's newest reference image",
+    ).toBe("reference.png");
   });
 
   test("reference-image import cancelled from the sketch selection command: basis and projection request, message kept", async () => {
@@ -304,53 +300,6 @@ describe("T11a sketch entry establishes a live solve basis", () => {
     );
     expect(published.session.liveRegions.status).toBe("current");
     expect(published.pendingRegionRequest).toBe(null);
-  });
-
-  test("import completion replaces the session with a raw reopened one: it is based at once, its projection is requested and its round derives", async () => {
-    const { state } = await seedSketchCommand();
-    const entered = editingSketch(
-      transitionEditorState(state, {
-        type: "sketch.referenceImagePayloadsPicked",
-        payloads: [
-          {
-            mediaType: "image/png",
-            fileName: "reference.png",
-            pixelWidth: 4,
-            pixelHeight: 2,
-            base64Data: "cG5n",
-          },
-        ],
-      }),
-    );
-    // What the app runtime returns after the import commit.
-    const raw = openSketchSessionFromSelection(
-      state.selection.slice(),
-      state.snapshot!,
-    )!;
-    expect(raw.liveSolve, "premise: a raw reopened session").toBe(null);
-    const result = transitionEditorState(entered, {
-      type: "effect.sketchReferenceImageImportCompleted",
-      requestId: entered.pendingImportRequestId!,
-      documentId: entered.document.documentId!,
-      commandSessionId: entered.command.commandSessionId,
-      baseRevisionId: entered.document.revisionId!,
-      status: "committed",
-      revisionId: entered.document.revisionId!,
-      snapshot: state.snapshot!,
-      selectionCatalog: state.selectionCatalog!,
-      session: raw,
-      importedCount: 1,
-    });
-    const completed = expectEntryBasis(result, "import completion");
-    expect(completed.session.liveSolve!.sourceDefinition).toBe(raw.definition);
-    expect(result.effects.map((effect) => effect.type)).toEqual([
-      "sketch.projectReferences",
-      "sketch.deriveRegions",
-    ]);
-    expect(
-      (projectionRequests(result.effects)[0] as { session: unknown }).session,
-      "the projection effect carries the based session",
-    ).toBe(completed.session);
   });
 
   test("an in-session reference pick keeps its own basis: the projection request carries the state's session, no extra generation", async () => {

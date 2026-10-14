@@ -151,12 +151,12 @@ test("editor effect runtime covers snapshot, sketch-open, and feature-hydration 
       },
     } as EditorEffectRuntime,
   );
+  // T17k2 (T17e review A-8): no internal id in the message.
   expect(
     hydrateMissing.type === "effect.featureSessionHydrationFailed" &&
-      hydrateMissing.message ===
-        "Feature feature_missing cannot be edited in the current feature session flow.",
-    "Missing feature hydration should fail with the feature-specific message.",
-  ).toBeTruthy();
+      hydrateMissing.message,
+    "Missing feature hydration should fail saying the feature is gone.",
+  ).toBe("The feature to edit no longer exists in this document.");
 });
 
 test("editor effect runtime maps preview, commit, and sketch projection outcomes", async () => {
@@ -365,7 +365,7 @@ test("editor effect runtime maps preview, commit, and sketch projection outcomes
   ).toBeTruthy();
 });
 
-test("editor effect runtime covers reference-image import, special modes, and history cursor movement", async () => {
+test("editor effect runtime covers special modes and history cursor movement", async () => {
   const snapshot = await createSeedDocumentSnapshot();
   const sketchSession = openSketchSessionFromSelection(
     [{ kind: "sketch", sketchId: snapshot.document.sketches[0]!.sketchId }],
@@ -375,59 +375,6 @@ test("editor effect runtime covers reference-image import, special modes, and hi
   expect(
     sketchSession,
     "Seed snapshot should expose a sketch session for import and cursor coverage.",
-  ).toBeTruthy();
-
-  const importEffect: EditorEffect = {
-    type: "sketch.importReferenceImages",
-    requestId: "request_editor_import_images" as EditorEffect["requestId"],
-    commandSessionId:
-      "command_import_images" as EditorEffect["commandSessionId"],
-    documentId: snapshot.document.documentId,
-    baseRevisionId: snapshot.document.revisionId,
-    mutationBasis: { baseRepositoryHeads: ["head_import_1"] },
-    session: sketchSession,
-    payloads: [],
-  };
-
-  const missingImportRuntime = await runEditorEffect(
-    importEffect,
-    {} as EditorEffectRuntime,
-  );
-  expect(
-    missingImportRuntime.type === "effect.sketchReferenceImageImportFailed" &&
-      missingImportRuntime.message ===
-        "Sketch reference-image import runtime is not available.",
-    "Reference-image import should fail explicitly when the runtime capability is unavailable.",
-  ).toBeTruthy();
-
-  const imported = await runEditorEffect(importEffect, {
-    async importSketchReferenceImages() {
-      return {
-        status: "committed",
-        revisionId:
-          "rev_imported_images" as typeof snapshot.document.revisionId,
-        snapshot,
-        selectionCatalog: {
-          selectableTargetKeys: [],
-          existingSketchKeys: [],
-          constructionPlaneKeys: [],
-          planarFaceKeys: [],
-        },
-        session: sketchSession,
-        importedCount: 2,
-      };
-    },
-  } as EditorEffectRuntime);
-  expect(
-    imported.type,
-    "Reference-image import should complete through the import-completed event seam.",
-  ).toBe("effect.sketchReferenceImageImportCompleted");
-  expect(
-    imported.type === "effect.sketchReferenceImageImportCompleted" &&
-      imported.status === "committed" &&
-      imported.importedCount === 2 &&
-      imported.snapshot === snapshot,
-    "Reference-image import success should preserve the imported count and refreshed snapshot payload.",
   ).toBeTruthy();
 
   const specialModeEffect: EditorEffect = {

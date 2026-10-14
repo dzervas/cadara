@@ -974,7 +974,7 @@ test("§2 E2E-2 seeded fixtures: each figure-eight lobe and each of two point-to
         page.getByRole("button", { name: "Clear Profile targets" }),
       );
       for (let body = 1; body <= index; body += 1)
-        await toggleVisibility(page, "Hide", `feature_extrude-${body}`);
+        await toggleVisibility(page, "Hide", `Extrude ${body}`);
       if (
         (await page
           .getByRole("button", { name: `Show ${pick.sketch}` })
@@ -990,7 +990,7 @@ test("§2 E2E-2 seeded fixtures: each figure-eight lobe and each of two point-to
     await expectExactPrism(page, `body_${feature}`, [pick.faces], diagnostics);
     if (index > 0)
       for (let body = 1; body <= index; body += 1)
-        await toggleVisibility(page, "Show", `feature_extrude-${body}`);
+        await toggleVisibility(page, "Show", `Extrude ${body}`);
   }
   await workbench.expectBodyCountAtLeast(4);
   expect(

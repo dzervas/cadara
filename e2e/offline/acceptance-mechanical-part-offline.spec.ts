@@ -79,7 +79,7 @@ const OVERLAPPING_CIRCLES = [
 
 /** File → New. */
 async function newDocument(page: Page) {
-  await page.getByRole("button", { name: "File" }).click();
+  await page.getByRole("button", { name: "File", exact: true }).click();
   await page.getByRole("menuitem", { name: "New", exact: true }).click();
   await expect(
     page.getByRole("status").filter({ hasText: "Created a new document." }),

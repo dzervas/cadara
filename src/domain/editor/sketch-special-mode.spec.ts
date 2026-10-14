@@ -214,7 +214,6 @@ test("src/contracts/editor/sketch-special-mode.spec.ts", async () => {
       session,
       pendingCommitRequestId: null,
       pendingProjectionRequestId: null,
-      pendingImportRequestId: null,
     };
 
     const entered = transitionWithFixtureModes(baseState, {
@@ -463,7 +462,6 @@ test("src/contracts/editor/sketch-special-mode.spec.ts", async () => {
       session: builtinSession,
       pendingCommitRequestId: null,
       pendingProjectionRequestId: null,
-      pendingImportRequestId: null,
     },
     {
       type: "sketch.specialModeDoubleClickRequested",

@@ -136,6 +136,13 @@ import {
 } from "./operation-history";
 import { requireRenderExport } from "@/contracts/render/runtime-schema";
 
+/** A feature kind as a history label: "extrude" → "Extrude", "deleteSolid" → "Delete Solid". */
+function featureKindLabel(kind: string) {
+  return kind
+    .replace(/([A-Z])/g, " $1")
+    .replace(/^./, (value) => value.toUpperCase());
+}
+
 export function createModelingService(
   adapter: ModelingKernelAdapter,
   options: ModelingServiceOptions,
@@ -1655,6 +1662,7 @@ export function createModelingService(
             result,
             input,
             () => createCommitSketchHistoryEntry(request, response.sketchId),
+            "Edit Sketch",
           );
         },
       });
@@ -1693,6 +1701,7 @@ export function createModelingService(
                 request,
                 response.variableId,
               ),
+            "Add Variable",
           );
         },
       });
@@ -1720,6 +1729,7 @@ export function createModelingService(
             mapDocumentVariableResponse(response, currentDocumentId),
             input,
             () => createUpdateDocumentVariableHistoryEntry(request),
+            "Edit Variable",
           );
         },
       });
@@ -1741,6 +1751,9 @@ export function createModelingService(
             mapFeatureMutationResponse(response, currentDocumentId),
             input,
             () => createCreateFeatureHistoryEntry(request),
+            // T17k2 (T17h finding): the action is named by its feature kind
+            // ("Extrude"), not the repository default "Edit document".
+            featureKindLabel(request.definition.kind),
           );
         },
       });
@@ -1765,6 +1778,7 @@ export function createModelingService(
             mapFeatureMutationResponse(response, currentDocumentId),
             input,
             () => createUpdateFeatureHistoryEntry(request),
+            `Edit ${featureKindLabel(request.definition.kind)}`,
           );
         },
       });
@@ -1794,6 +1808,7 @@ export function createModelingService(
             mapFeatureSuppressionResponse(response, currentDocumentId),
             input,
             () => createSetFeatureSuppressionHistoryEntry(request),
+            request.suppressed ? "Suppress Feature" : "Unsuppress Feature",
           );
         },
       });
@@ -1818,6 +1833,7 @@ export function createModelingService(
             mapDeleteFeatureResponse(response, currentDocumentId),
             input,
             () => createDeleteFeatureHistoryEntry(request),
+            "Delete Feature",
           );
         },
       });
@@ -1842,8 +1858,13 @@ export function createModelingService(
             mapDeleteTargetResponse(response, currentDocumentId),
             input,
             () => createDeleteTargetHistoryEntry(request),
-            // T17e (P-8): a sketch delete is its own history entry.
-            request.target.kind === "sketch" ? "Delete Sketch" : undefined,
+            // T17e (P-8): a sketch delete is its own history entry; T17k2:
+            // so is a body delete.
+            request.target.kind === "sketch"
+              ? "Delete Sketch"
+              : request.target.kind === "body"
+                ? "Delete Body"
+                : undefined,
           );
         },
       });
@@ -1868,6 +1889,7 @@ export function createModelingService(
             mapRenameBodyResponse(response, currentDocumentId),
             input,
             () => createRenameBodyHistoryEntry(request),
+            "Rename Body",
           );
         },
       });
@@ -1895,6 +1917,7 @@ export function createModelingService(
             mapReorderFeatureResponse(response, currentDocumentId),
             input,
             () => createReorderFeatureHistoryEntry(request),
+            "Reorder History",
           );
         },
       });
@@ -1928,6 +1951,7 @@ export function createModelingService(
             mapReorderDocumentHistoryResponse(response, currentDocumentId),
             input,
             () => createReorderDocumentHistoryEntry(request),
+            "Reorder History",
           );
         },
       });
@@ -1954,6 +1978,7 @@ export function createModelingService(
             input.persistHistory === false
               ? null
               : () => createSetFeatureCursorHistoryEntry(request),
+            "Roll History",
           );
         },
       });

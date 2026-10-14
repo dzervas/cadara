@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import type { ModelingOperationHistoryPayload } from "../src/contracts/modeling/operation-history";
+import { profileChip } from "./helpers/acceptance";
 import { FeatureWorkbenchHarness } from "./helpers/feature-workbench";
 import {
   createBaseExtrudeOperationHistory,
@@ -41,11 +42,16 @@ test("persisted legacy region labels require reselection after canonical region 
   // T10 plan §2.9: the cause is `profile-region-reselect`, and the editor's
   // profile field keeps the dangling selection as a missing region.
   await repair.dblclick();
+  // T17k2: the chip names the missing region by its sketch, not its id.
   await expect(
-    page.getByText(
-      `Missing region (${FEATURE_FIXTURE.profile.replace(canonicalRegionId, legacyRegionId)})`,
+    profileChip(
+      page,
+      FEATURE_FIXTURE.profile.replace(canonicalRegionId, legacyRegionId),
     ),
-  ).toBeVisible({ timeout: 30_000 });
+  ).toHaveAttribute("aria-label", /^Remove Missing region \(.+\)$/, {
+    timeout: 30_000,
+  });
+  await expect(page.getByText(/^Missing region \(.+\)$/)).toBeVisible();
   await expect(
     page.getByText("profile-region-reselect", { exact: true }).first(),
   ).toBeVisible();

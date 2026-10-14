@@ -16,14 +16,14 @@ test("solid STL export downloads through the browser worker path", async ({
 
   const bodyRow = page
     .locator("[data-parts-tree-row]")
-    .filter({ hasText: "feature_extrude-1" })
+    .filter({ hasText: "Extrude 1" })
     .first();
   await expect(bodyRow).toBeVisible({ timeout: 30_000 });
   await bodyRow.click({ button: "right", force: true });
 
   await page.getByRole("menuitem", { name: "Export" }).click();
   await expect(
-    page.getByRole("dialog", { name: "Export feature_extrude-1" }),
+    page.getByRole("dialog", { name: "Export Extrude 1" }),
   ).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole("radio", { name: "STL" })).toBeChecked();
 
@@ -31,7 +31,7 @@ test("solid STL export downloads through the browser worker path", async ({
   await page.getByRole("button", { name: "Export" }).click();
   const download = await downloadPromise;
 
-  expect(download.suggestedFilename()).toBe("feature-extrude-1.stl");
+  expect(download.suggestedFilename()).toBe("extrude-1.stl");
 
   const downloadPath = await download.path();
   if (!downloadPath) {

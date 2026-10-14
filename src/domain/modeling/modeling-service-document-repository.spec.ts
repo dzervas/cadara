@@ -2433,9 +2433,9 @@ function assertReferenceImageOperationPayloads(
 
 // T17e (P-8). Logic lane; seam: the modeling service's generic delete
 // writing the document action. A sketch delete is its own history entry,
-// "Delete Sketch" (it was the repository default "Edit document"); other
-// deletes keep the default.
-test("T17e: deleting a sketch is one document action labelled Delete Sketch; a body delete keeps the default label", async () => {
+// "Delete Sketch" (it was the repository default "Edit document"); T17k2: a
+// body delete is "Delete Body".
+test("T17e: deleting a sketch is one document action labelled Delete Sketch; a body delete is Delete Body", async () => {
   const unwrapModelingResult = async <T>(result: AppResultAsync<T>) => {
     const resolved = await result;
     if (resolved.isErr()) throw new Error(resolved.error.message);
@@ -2474,5 +2474,56 @@ test("T17e: deleting a sketch is one document action labelled Delete Sketch; a b
         snapshot.document.documentId,
       )
     ).undoEntries?.map((entry) => entry.label),
-  ).toEqual(["Delete Sketch", "Edit document"]);
+  ).toEqual(["Delete Sketch", "Delete Body"]);
+});
+
+// T17k2 (T17h finding). Logic lane; seam: the modeling service writing the
+// document action. Feature and variable actions are named (base: every one
+// was the repository default "Edit document").
+test("T17k2: creating and editing a feature and adding a variable are named document actions", async () => {
+  const unwrapModelingResult = async <T>(result: AppResultAsync<T>) => {
+    const resolved = await result;
+    if (resolved.isErr()) throw new Error(resolved.error.message);
+    return resolved.value;
+  };
+  const repository = createMemoryDocumentRepository();
+  const service = createModelingService(new MockKernelAdapter(), {
+    currentDocumentId: "doc_workspace",
+    documentRepository: repository,
+  });
+  const labels = async () =>
+    (
+      await repository.getDurableHistoryAvailability(
+        (await service.getCurrentDocumentSnapshot()).document.documentId,
+      )
+    ).undoEntries?.map((entry) => entry.label);
+  const revision = async () =>
+    (await service.getCurrentDocumentSnapshot()).document.revisionId;
+  const seed = (
+    await service.getCurrentDocumentSnapshot()
+  ).document.features.find((feature) => feature.definition.kind === "extrude")!;
+  const created = await unwrapModelingResult(
+    service.createFeature({
+      baseRevisionId: await revision(),
+      definition: seed.definition,
+    }),
+  );
+  expect(created.revisionState.kind).toBe("accepted");
+  expect(await labels()).toEqual(["Extrude"]);
+  await unwrapModelingResult(
+    service.updateFeature({
+      baseRevisionId: await revision(),
+      featureId: created.featureId!,
+      featureLabel: "Boss",
+      definition: seed.definition,
+    }),
+  );
+  await unwrapModelingResult(
+    service.addDocumentVariable({
+      baseRevisionId: await revision(),
+      name: "Width",
+      valueText: "10",
+    }),
+  );
+  expect(await labels()).toEqual(["Extrude", "Edit Extrude", "Add Variable"]);
 });

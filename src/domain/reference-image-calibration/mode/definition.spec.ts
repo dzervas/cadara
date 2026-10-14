@@ -62,7 +62,6 @@ function createEditingSketchState(): SketchEditorState {
     session,
     pendingCommitRequestId: null,
     pendingProjectionRequestId: null,
-    pendingImportRequestId: null,
   };
 }
 

@@ -1,6 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { selectRegionInViewport, toggleVisibility } from "./helpers/acceptance";
+import {
+  profileChip,
+  selectRegionInViewport,
+  toggleVisibility,
+} from "./helpers/acceptance";
 import { FeatureWorkbenchHarness } from "./helpers/feature-workbench";
 import {
   lastCommittedSketch,
@@ -160,22 +164,20 @@ test("an inward offset of a line rectangle commits certified trimmed line output
   // extrudes the other region alone.
   await workbench.activateFeature("extrude");
   await page.getByRole("button", { name: "Clear Profile targets" }).click();
-  await expect(
-    page.getByRole("button", { name: `Remove ${targets[0]!}` }),
-  ).toHaveCount(0);
+  await expect(profileChip(page, targets[0]!)).toHaveCount(0);
   // The profile chip is the check (after the first commit the editor
   // selection summary no longer echoes the pick).
   await pickSecondOffsetRegion(workbench, targets[1]!, 6);
-  await expect(
-    page.getByRole("button", { name: `Remove ${targets[1]!}` }),
-  ).toHaveCount(1, { timeout: 10_000 });
+  await expect(profileChip(page, targets[1]!)).toHaveCount(1, {
+    timeout: 10_000,
+  });
   // Extrude preselects join with the first body, which the inner rectangle
   // touches; keep it a new body so each region yields its own body.
   await workbench.setOperation("newBody");
   await workbench.expectFeaturePreviewReady("extrude");
   await workbench.commitFeature("feature_extrude-2");
   // The first body was hidden for the pick; shown again.
-  await toggleVisibility(page, "Show", "feature_extrude-1");
+  await toggleVisibility(page, "Show", "Extrude 1");
   await workbench.expectBodyCountAtLeast(2);
 });
 
@@ -239,18 +241,16 @@ test("an outward offset of a spline closed by a line commits a certified shell; 
   // extrudes the other region alone, as a new body.
   await workbench.activateFeature("extrude");
   await page.getByRole("button", { name: "Clear Profile targets" }).click();
-  await expect(
-    page.getByRole("button", { name: `Remove ${targets[0]!}` }),
-  ).toHaveCount(0);
+  await expect(profileChip(page, targets[0]!)).toHaveCount(0);
   await pickSecondOffsetRegion(workbench, targets[1]!, 30);
-  await expect(
-    page.getByRole("button", { name: `Remove ${targets[1]!}` }),
-  ).toHaveCount(1, { timeout: 10_000 });
+  await expect(profileChip(page, targets[1]!)).toHaveCount(1, {
+    timeout: 10_000,
+  });
   await workbench.setOperation("newBody");
   await workbench.expectFeaturePreviewReady("extrude");
   await workbench.commitFeature("feature_extrude-2");
   // The first body was hidden for the pick; shown again.
-  await toggleVisibility(page, "Show", "feature_extrude-1");
+  await toggleVisibility(page, "Show", "Extrude 1");
   await workbench.expectBodyCountAtLeast(2);
   // Review A-3: neither region raised a document diagnostic (a profile face
   // that failed in the part-mode render would add a `profile-…` warning).
