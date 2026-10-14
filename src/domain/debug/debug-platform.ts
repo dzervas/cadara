@@ -1,3 +1,4 @@
+import type { SketchDefinition } from "@/contracts/sketch/schema";
 import type { TopologyDebugSummary } from "@/domain/modeling/topology-debug";
 
 export interface WorkbenchDebugRequirement {
@@ -207,6 +208,12 @@ export interface SketchDebugSnapshot {
       outputPointIds: readonly string[];
     }[];
   }[];
+  /**
+   * T17k: the session's authored definition as it is (every record array
+   * and `*Ids` order, construction flags, styles, label placements), for
+   * E2E checks that an Undo restores the pre-action definition exactly.
+   */
+  definition?: SketchDefinition;
 }
 
 export interface CadaraDebugNamespace {
