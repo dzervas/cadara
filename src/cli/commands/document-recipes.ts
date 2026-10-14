@@ -17,9 +17,11 @@ type TargetAlias = Alias & { label: string };
 type RecipeGeometryEdit<T = import("@/contracts/semantic/schema").SemanticSketchGeometryEdit> = T extends { target: infer R } ? Omit<T, "target" | "destination" | "boundary"> & { target: R | TargetAlias } & (T extends { destination: infer D } ? { destination: D | TargetAlias } : unknown) & (T extends { boundary: infer B } ? { boundary: B | TargetAlias } : unknown) : never;
 type RecipePrimitive<T = import("@/contracts/semantic/schema").SemanticSketchPrimitive> = T extends { source: infer S } ? Omit<T, "source"> & { source: S | TargetAlias } : T;
 type RecipeCommand<T = SemanticCommand> = T extends SemanticCommand
-  ? Omit<T, "basis" | "draft" | "points" | "dimensionId" | "derivationId" | "profile" | "featureId" | "sketchId" | "target" | "targets" | "edit" | "primitive"> &
+  ? Omit<T, "basis" | "draft" | "points" | "dimensionId" | "derivationId" | "profile" | "featureId" | "sketchId" | "target" | "targets" | "axis" | "repair" | "edit" | "primitive"> &
     (T extends { primitive: unknown } ? { primitive: RecipePrimitive } : unknown) &
     (T extends { edit: unknown } ? { edit: RecipeGeometryEdit } : unknown) &
+    (T extends { axis: infer A } ? { axis: A | TargetAlias } : unknown) &
+    (T extends { repair: infer R } ? { repair: R extends { kind: "axis"; target: infer A } ? { kind: "axis"; target: A | TargetAlias } : R extends { kind: "original"; target: infer A; output: infer O } ? { kind: "original"; target: A | TargetAlias; output: O | TargetAlias } : never } : unknown) &
     (T extends { targets: infer R extends readonly unknown[] } ? { targets: readonly (R[number] | TargetAlias)[] } : unknown) &
     (T extends { profile: infer P } ? { profile: P | TargetAlias } : unknown) &
     (T extends { target: infer R } ? { target: R | TargetAlias } : unknown) &
@@ -189,12 +191,24 @@ function parseRecipe(input: unknown): RecipeOperation[] {
       validateTarget(command.target, "body_validation");
       validationCommand.target = command.operation === "export.step" ? { kind: "body", bodyId: "body_validation" } : { kind: "sketchPoint", sketchId: "sketch_validation", pointId: "sketch_point_validation" };
     }
+    if (isAlias(command.axis)) {
+      validateTarget(command.axis, "sketch_entity_validation");
+      validationCommand.axis = { kind: "sketchEntity", sketchId: "sketch_validation", entityId: "sketch_entity_validation" };
+    }
+    if (command.repair && typeof command.repair === "object") {
+      const repair: Record<string, unknown> = { ...command.repair };
+      for (const key of ["target", "output"] as const) if (isAlias(repair[key])) {
+        validateTarget(repair[key], "sketch_entity_validation");
+        repair[key] = { kind: "sketchEntity", sketchId: "sketch_validation", entityId: "sketch_entity_validation" };
+      }
+      validationCommand.repair = repair;
+    }
     if (Array.isArray(command.targets)) validationCommand.targets = command.targets.map(target => {
       if (!isAlias(target)) return target;
       validateTarget(target, "sketch_point_validation");
       return command.operation === "sketch.requirement.remove"
         ? { kind: "dimension", sketchId: "sketch_validation", dimensionId: "dimension_validation" }
-        : command.operation === "sketch.geometry.build" || command.operation === "sketch.offset.create"
+        : command.operation === "sketch.geometry.build" || command.operation === "sketch.mirror.create" || command.operation === "sketch.offset.create"
           ? { kind: "sketchEntity", sketchId: "sketch_validation", entityId: "sketch_entity_validation" }
           : { kind: "sketchPoint", sketchId: "sketch_validation", pointId: "sketch_point_validation" };
     });
@@ -304,6 +318,12 @@ export const documentRecipesCommand: CommandModule = {
           if (matches.length !== 1) throw new Error("Dimension target alias is missing or ambiguous.");
           command.dimensionId = matches[0]!.dimensionId;
         }
+        if ((command.operation === "sketch.mirror.remove" || command.operation === "sketch.mirror.repair") && isAlias(command.derivationId)) {
+          const target = command.derivationId;
+          const matches = aliases.get(target.alias)?.sketch?.mirrors.filter(mirror => mirror.label === target.label) ?? [];
+          if (matches.length !== 1) throw new Error("Mirror target alias is missing or ambiguous.");
+          command.derivationId = matches[0]!.derivationId;
+        }
         if (command.operation === "sketch.offset.remove" && isAlias(command.derivationId)) {
           const target = command.derivationId;
           const matches = aliases.get(target.alias)?.sketch?.offsets.filter(offset => offset.label === target.label) ?? [];
@@ -315,6 +335,24 @@ export const documentRecipesCommand: CommandModule = {
           const matches = aliases.get(target.alias)?.references.filter(r => r.label === target.label && kinds.includes(r.target.kind)) ?? [];
           if (matches.length !== 1) throw new Error("Sketch target alias is missing or ambiguous.");
           return matches[0]!.target;
+        }
+        function resolveMirrorAxis(target: import("@/contracts/shared/references").SketchDatumReferenceRef | Extract<import("@/contracts/shared/references").DurableRef, { kind: "sketchEntity" }> | TargetAlias) {
+          if (!isAlias(target)) return target;
+          const discovery = aliases.get(target.alias);
+          const matches = [...(discovery?.references ?? []), ...(discovery?.sketch?.operands ?? [])].filter(r => r.label === target.label && (r.target.kind === "sketchEntity" || r.target.kind === "sketchDatumReference"));
+          const found = matches.length === 1 ? matches[0]!.target : null;
+          if (!found || (found.kind !== "sketchEntity" && found.kind !== "sketchDatumReference")) throw new Error("Mirror axis alias is missing or ambiguous.");
+          return found;
+        }
+        if (command.operation === "sketch.mirror.create") command.axis = resolveMirrorAxis(command.axis);
+        if (command.operation === "sketch.mirror.repair") {
+          if (command.repair.kind === "axis") command.repair.target = resolveMirrorAxis(command.repair.target);
+          else {
+            const target = resolveSketchTarget(command.repair.target, ["sketchEntity"]);
+            const output = resolveSketchTarget(command.repair.output, ["sketchEntity"]);
+            if (target.kind !== "sketchEntity" || output.kind !== "sketchEntity") throw new Error("Invalid mirror original target.");
+            command.repair = { kind: "original", target, output };
+          }
         }
         if (command.operation === "sketch.requirement.add") command.targets = command.targets.map(value => {
           if (!isAlias(value)) return value;
@@ -345,7 +383,7 @@ export const documentRecipesCommand: CommandModule = {
           if (target.kind !== "sketchPoint" && target.kind !== "sketchEntity" && target.kind !== "dimension" && target.kind !== "constraint" && target.kind !== "sketch") throw new Error("Invalid label target.");
           command.target = target;
         }
-        if (command.operation === "sketch.geometry.build" || command.operation === "sketch.offset.create") command.targets = command.targets.map(value => {
+        if (command.operation === "sketch.geometry.build" || command.operation === "sketch.mirror.create" || command.operation === "sketch.offset.create") command.targets = command.targets.map(value => {
           const target = resolveSketchTarget(value, ["sketchEntity"]);
           if (target.kind !== "sketchEntity") throw new Error("Invalid construction target.");
           return target;

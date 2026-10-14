@@ -31,6 +31,7 @@ import { isReferenceDimension } from "@/contracts/sketch/schema";
 import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
 import { getEntityPointIds } from "@/domain/sketch-editing/definition-references";
 import { createModelingServiceEditorEffectRuntime } from "@/application/editor/effect-registry";
+import { getSketchMirrorActionEntries } from "@/domain/editor/sketch-session/mirror-actions";
 import { getSketchOffsetHealth } from "@/domain/editor/sketch-session/offset-actions";
 import { prepareSketchOffset, prepareSketchIntersectionEdit } from "@/domain/editor/sketch-session/editing";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
@@ -179,6 +180,14 @@ export function createSemanticSketchPort(input: {
           construction: p.isConstruction,
         })),
         entities: entityDiscovery(s.definition),
+        mirrors: getSketchMirrorActionEntries(s).map(entry => {
+          const relationship = s.definition.derivedRelationships!.find(r => r.derivationId === entry.derivationId)!;
+          if (relationship.kind !== "mirror") throw new Error("Expected mirror relationship.");
+          const health = { derivationId: entry.derivationId, label: entry.label, brokenReason: entry.brokenReason, copyCount: entry.copyCount, requirementCount: entry.requirementCount, sizingRequirementCount: entry.sizingRequirementCount, brokenDownstreamLabels: entry.brokenDownstreamLabels };
+          const solved = solvedPairDefinition(s.liveSolve!.definition, s.liveSolve!.solvedSnapshot);
+          const currentGeometry = !hasAcceptedLiveSolveOfDefinition(s) || health.brokenReason !== null ? null : entityDiscovery(solved).filter(e => relationship.outputs.some(o => o.outputEntityId === e.entityId)).map(e => ({ entityId: e.entityId, kind: e.kind, ...(e.radius !== undefined ? { radius: e.radius } : {}), points: e.pointIds.map(id => { const point = solved.points.find(p => p.pointId === id)!; return { pointId: id, position: point.position }; }) }));
+          return { ...health, seedEntityIds: relationship.seedEntityIds, outputEntityIds: relationship.outputs.map(o => o.outputEntityId), axis: relationship.mirrorReference, currentGeometry };
+        }),
         offsets: offsetDiscovery(s),
         profiles: usable
           ? s.liveRegions.regions
@@ -268,14 +277,26 @@ export function createSemanticSketchPort(input: {
       };
     if (command.operation === "sketch.open" && !initial.references.some(r => r.target.kind === "sketch" && r.target.sketchId === command.sketchId))
       return { ...terminal, outcome: { kind: "rejected", reasonCode: "sketch-unavailable" } };
-    const geometryMutation = command.operation === "sketch.offset.create" || command.operation === "sketch.offset.remove" || command.operation === "sketch.geometry.build" || command.operation === "sketch.requirement.remove" || command.operation === "sketch.construction.set" || command.operation === "sketch.geometry.update" || command.operation === "sketch.geometry.delete" || command.operation === "sketch.label.set";
+    if (command.operation === "sketch.mirror.remove" || command.operation === "sketch.mirror.repair") {
+      if (editor.kind !== "editingSketch" || !editor.session.definition.derivedRelationships?.some(r => r.kind === "mirror" && r.derivationId === command.derivationId)) return { ...terminal, outcome: { kind: "rejected", reasonCode: "mirror-unavailable" } };
+      if (command.operation === "sketch.mirror.repair") {
+        const s = editor.session;
+        const refs = command.repair.kind === "axis" ? [command.repair.target] : [command.repair.target, command.repair.output];
+        if (!refs.every(t => t.sketchId === (s.sketchId ?? s.actionContextId) && (t.kind === "sketchDatumReference" ? t.datumId !== "origin" && t.geometryKind === "lineSegment" : s.definition.entities.some(e => e.entityId === t.entityId)))) return { ...terminal, outcome: { kind: "rejected", reasonCode: "mirror-target-unavailable" } };
+      }
+    }
+    const geometryMutation = command.operation === "sketch.mirror.remove" || command.operation === "sketch.mirror.repair" || command.operation === "sketch.mirror.create" || command.operation === "sketch.offset.create" || command.operation === "sketch.offset.remove" || command.operation === "sketch.geometry.build" || command.operation === "sketch.requirement.remove" || command.operation === "sketch.construction.set" || command.operation === "sketch.geometry.update" || command.operation === "sketch.geometry.delete" || command.operation === "sketch.label.set";
     if (command.operation === "sketch.offset.remove" && (editor.kind !== "editingSketch" || !editor.session.definition.derivedRelationships?.some(r => r.kind === "offset" && r.derivationId === command.derivationId))) return { ...terminal, outcome: { kind: "rejected", reasonCode: "offset-unavailable" } };
-    if (geometryMutation && command.operation !== "sketch.offset.remove") {
+    if (geometryMutation && command.operation !== "sketch.offset.remove" && command.operation !== "sketch.mirror.remove" && command.operation !== "sketch.mirror.repair") {
       if (editor.kind !== "editingSketch") throw new Error("Missing private sketch owner.");
       const s = editor.session;
-      const targets = command.operation === "sketch.geometry.update" ? command.edit.kind === "mergePoints" ? [command.edit.target, command.edit.destination] : command.edit.kind === "split" || command.edit.kind === "extend" ? [command.edit.target, command.edit.boundary] : [command.edit.target] : (command.operation === "sketch.offset.create" || command.operation === "sketch.geometry.build" || command.operation === "sketch.geometry.delete" || command.operation === "sketch.requirement.remove") ? command.targets : [command.target];
+      const targets = command.operation === "sketch.geometry.update" ? command.edit.kind === "mergePoints" ? [command.edit.target, command.edit.destination] : command.edit.kind === "split" || command.edit.kind === "extend" ? [command.edit.target, command.edit.boundary] : [command.edit.target] : (command.operation === "sketch.mirror.create" || command.operation === "sketch.offset.create" || command.operation === "sketch.geometry.build" || command.operation === "sketch.geometry.delete" || command.operation === "sketch.requirement.remove") ? command.targets : [command.target];
       const valid = targets.length > 0 && targets.every(t => t.sketchId === (s.sketchId ?? s.actionContextId) && (t.kind === "sketch" || (t.kind === "sketchPoint" ? s.definition.points.some(p => p.pointId === t.pointId) : t.kind === "dimension" ? s.definition.dimensions.some(d => d.dimensionId === t.dimensionId) : t.kind === "constraint" ? s.definition.constraints.some(c => c.constraintId === t.constraintId) : s.definition.entities.some(e => e.entityId === t.entityId))));
       if (!valid) return { ...terminal, outcome: { kind: "rejected", reasonCode: "sketch-target-unavailable" } };
+      if (command.operation === "sketch.mirror.create") {
+        const axis = command.axis;
+        if (axis.sketchId !== (s.sketchId ?? s.actionContextId) || (axis.kind === "sketchEntity" ? !s.definition.entities.some(e => e.entityId === axis.entityId) : axis.datumId === "origin" || axis.geometryKind !== "lineSegment")) return { ...terminal, outcome: { kind: "rejected", reasonCode: "mirror-axis-unavailable" } };
+      }
       if (command.operation === "sketch.label.set" && !command.label.trim()) return { ...terminal, outcome: { kind: "rejected", reasonCode: "invalid-label" } };
     }
     if (command.operation === "sketch.author") {
@@ -374,6 +395,12 @@ export function createSemanticSketchPort(input: {
           events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.intersectionEditCompleted", basis: prepared, result: answer.result });
         } else events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.geometryUpdated", edit });
       }
+      if (command.operation === "sketch.mirror.remove")
+        events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.mirrorRemoved", derivationId: command.derivationId });
+      if (command.operation === "sketch.mirror.repair")
+        events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.mirrorRepaired", repair: { derivationId: command.derivationId, target: command.repair.kind === "axis" ? "axis" : { outputEntityId: command.repair.output.entityId }, returnSelection: [] }, target: editorTarget(command.repair.target) });
+      if (command.operation === "sketch.mirror.create")
+        events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.mirrorCreated", targets: command.targets.map(editorTarget), axis: editorTarget(command.axis) });
       if (command.operation === "sketch.offset.remove")
         events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.offsetRemoved", derivationId: command.derivationId });
       if (command.operation === "sketch.offset.create") {

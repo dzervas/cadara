@@ -979,6 +979,38 @@ export function buildSketchGeometry(
   return completeSketchEditOperation(session, result);
 }
 
+/** Explicit and browser mirrors share the canonical coupled relationship builder. */
+export function getSketchMirrorResult(
+  session: SketchSessionState,
+  entityIds: readonly SketchEntityId[],
+  mirrorDatumAxis: "xAxis" | "yAxis" | null,
+): SketchEditOperationResult {
+  const gate = offsetEditInputGate(session, entityIds, `a ${getSketchEditToolDefinition("sketchMirror").metadata.name} input`);
+  if (gate) return refusedEditOperation(gate.message);
+  const nextSequence = session.sequence + 1;
+  return createSketchDerivedTransformContribution({
+    definition: session.definition, operatorKind: "mirror", entityIds,
+    value: null, sequence: nextSequence,
+    factories: createSessionCommitFactories(nextSequence, getSessionSketchId(session)),
+    modelingTolerance: session.modelingTolerance, mirrorDatumAxis,
+  });
+}
+
+export function createSketchMirror(
+  session: SketchSessionState,
+  targets: readonly Extract<import("@/contracts/shared/references").DurableRef, { kind: "sketchEntity" }>[],
+  axis: Extract<import("@/contracts/shared/references").DurableRef, { kind: "sketchEntity" }> | import("@/contracts/shared/references").SketchDatumReferenceRef,
+): SketchSessionState {
+  const ids = targets.map(t => t.entityId);
+  if (!ids.length || new Set(ids).size !== ids.length || [...targets, axis].some(t => t.sketchId !== getSessionSketchId(session)) ||
+      !ids.every(id => session.definition.entities.some(e => e.entityId === id)) ||
+      (axis.kind === "sketchEntity" ? ids.includes(axis.entityId) || !session.definition.entities.some(e => e.entityId === axis.entityId) : axis.datumId === "origin" || axis.geometryKind !== "lineSegment"))
+    return { ...session, validationMessage: "Mirror requires distinct owned seeds and a separate straight axis." };
+  return completeSketchEditOperation(session, getSketchMirrorResult(session,
+    axis.kind === "sketchEntity" ? [...ids, axis.entityId] : ids,
+    axis.kind === "sketchDatumReference" && axis.datumId !== "origin" ? axis.datumId : null));
+}
+
 export function getSketchEditOperatorResult(
   session: SketchSessionState,
   activeEditTool: SketchEditToolState,
@@ -993,7 +1025,8 @@ export function getSketchEditOperatorResult(
     activeEditTool.toolId !== "offset" &&
     activeEditTool.toolId !== "sketchFillet" &&
     activeEditTool.toolId !== "sketchChamfer" &&
-    activeEditTool.toolId !== "sketchSlot"
+    activeEditTool.toolId !== "sketchSlot" &&
+    activeEditTool.toolId !== "sketchMirror"
   ) {
     const gate = offsetEditInputGate(
       session,
@@ -1023,19 +1056,8 @@ export function getSketchEditOperatorResult(
         )
       )
         return refusedEditOperation(MIRROR_DATUM_AXIS_ORDER_MESSAGE);
-      return createSketchDerivedTransformContribution({
-        definition: session.definition,
-        operatorKind: "mirror",
-        entityIds,
-        value: activeEditTool.toolValue,
-        sequence: nextSequence,
-        factories,
-        modelingTolerance: session.modelingTolerance,
-        mirrorDatumAxis:
-          last?.kind === "sketchDatumReference" && last.datumId !== "origin"
-            ? last.datumId
-            : null,
-      });
+      return getSketchMirrorResult(session, entityIds,
+        last?.kind === "sketchDatumReference" && last.datumId !== "origin" ? last.datumId : null);
     }
     case "sketchLinearPattern":
       return createSketchDerivedTransformContribution({
@@ -1488,7 +1510,7 @@ export function getSketchMirrorRepairCandidate(
           ok: false,
           message: "Pick the new original: a sketch entity of the copy's kind.",
         };
-  if (target.kind === "sketchDatumReference" && target.datumId !== "origin")
+  if (target.kind === "sketchDatumReference" && target.datumId !== "origin" && target.geometryKind === "lineSegment")
     return replaceMirrorLine(
       session.definition,
       repair.derivationId,
