@@ -104,6 +104,8 @@ export type SemanticSketchCommand = CommandIdentity & {
     | { operation: "sketch.construction.set"; draft: SemanticDraftBasis; target: Extract<DurableRef, { kind: "sketchPoint" | "sketchEntity" }>; construction: boolean; intent: "fulfill" | "author-invalid" }
     | { operation: "sketch.geometry.update"; draft: SemanticDraftBasis; edit: SemanticSketchGeometryEdit; intent: "fulfill" | "author-invalid" }
     | ({ operation: "sketch.geometry.build"; draft: SemanticDraftBasis; intent: "fulfill" | "author-invalid" } & SemanticSketchConstruction)
+    | { operation: "sketch.offset.create"; draft: SemanticDraftBasis; targets: readonly Extract<DurableRef, { kind: "sketchEntity" }>[]; distance: number; side: "left" | "right"; intent: "fulfill" | "author-invalid" }
+    | { operation: "sketch.offset.remove"; draft: SemanticDraftBasis; derivationId: string; intent: "fulfill" | "author-invalid" }
     | { operation: "sketch.geometry.delete"; draft: SemanticDraftBasis; targets: readonly SemanticSketchGeometryTarget[]; intent: "fulfill" | "author-invalid" }
     | { operation: "sketch.label.set"; draft: SemanticDraftBasis; target: SemanticSketchLabelTarget; label: string; intent: "fulfill" | "author-invalid" }
     | { operation: "sketch.inspect"; draft: SemanticDraftBasis }
@@ -321,6 +323,7 @@ export interface SemanticDiscovery {
       text?: { content: string; height: number; rotationRadians: number; horizontalAlign: "left" | "center" | "right"; verticalAlign: "baseline" | "middle" | "top" | "bottom" };
       tangents?: readonly { occurrenceId: string; pointId: SketchPointId; vector: SketchPoint | null }[];
     }[];
+    offsets: readonly { derivationId: string; label: string; seedEntityIds: readonly SketchEntityId[]; outputEntityIds: readonly SketchEntityId[]; distance: import("@/contracts/modeling/authored-values").MaybeAuthoredValue<number>; currentGeometry: readonly { entityId: SketchEntityId; kind: import("@/contracts/sketch/schema").SketchEntityDefinition["kind"]; points: readonly { pointId: SketchPointId; position: SketchPoint }[]; radius?: number; cubicSpans?: readonly import("@/contracts/sketch/schema").SolvedSketchDerivedCubicSpan[] }[] | null; health: { kind: "healthy" } | { kind: "checking" } | { kind: "broken"; reason: string } }[];
     /** Read-only datum/projected operands from this exact private sketch basis. */
     operands: readonly { label: string; target: Exclude<SemanticRequirementTarget, SemanticSketchGeometryTarget> }[];
     constraints: readonly {

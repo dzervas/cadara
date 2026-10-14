@@ -26,10 +26,13 @@ import {
 } from "@/contracts/sketch/region-boundary-curves";
 import { sketchProfileGateFailures } from "@/contracts/sketch/derived-validity";
 
+import { solvedPairDefinition } from "@/contracts/sketch/offset-publication";
 import { isReferenceDimension } from "@/contracts/sketch/schema";
 import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
 import { getEntityPointIds } from "@/domain/sketch-editing/definition-references";
-import { prepareSketchIntersectionEdit } from "@/domain/editor/sketch-session/editing";
+import { createModelingServiceEditorEffectRuntime } from "@/application/editor/effect-registry";
+import { getSketchOffsetHealth } from "@/domain/editor/sketch-session/offset-actions";
+import { prepareSketchOffset, prepareSketchIntersectionEdit } from "@/domain/editor/sketch-session/editing";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import { requireQuerySketchEditIntersectionsResponse } from "@/contracts/solver/runtime-schema";
 
@@ -49,6 +52,39 @@ function entityDiscovery(definition: import("@/contracts/sketch/schema").SketchD
     ...(e.kind === "profileText" ? { text: { content: e.text, height: e.height, rotationRadians: e.rotationRadians, horizontalAlign: e.horizontalAlign, verticalAlign: e.verticalAlign } } : {}),
     ...(e.kind === "spline" ? { tangents: e.pointOccurrences.map(o => ({ occurrenceId: o.occurrenceId, pointId: o.pointId, vector: o.tangent.kind === "authored" ? o.tangent.vector : null })) } : {}),
   }));
+}
+
+/** Authored relationships and certified outputs remain separate from display fallbacks. */
+function offsetDiscovery(session: import("@/domain/editor/sketch-session").SketchSessionState): NonNullable<SemanticDiscovery["sketch"]>["offsets"] {
+  const snapshot = session.liveSolve!.solvedSnapshot;
+  const solved = solvedPairDefinition(session.liveSolve!.definition, snapshot);
+  const entities = entityDiscovery(solved);
+  const health = getSketchOffsetHealth(session);
+  return (session.definition.derivedRelationships ?? []).flatMap(relationship => {
+    if (relationship.kind !== "offset") return [];
+    const outputEntityIds = [...relationship.outputs, ...relationship.jointOutputs, ...relationship.piecewiseCubicOutputs].map(output => output.outputEntityId);
+    const current = session.liveRegions.status === "current" && snapshot.certifiedOffsetDerivationIds?.includes(relationship.derivationId);
+    return [{
+      derivationId: relationship.derivationId,
+      label: relationship.label,
+      seedEntityIds: relationship.seedEntityIds,
+      outputEntityIds,
+      distance: relationship.distance,
+      health: health(relationship),
+      currentGeometry: current ? entities.filter(entity => outputEntityIds.includes(entity.entityId)).map(entity => {
+        const pointIds = entity.kind === "derivedPiecewiseCubic"
+          ? relationship.piecewiseCubicOutputs.filter(shell => shell.outputEntityId === entity.entityId).flatMap(shell => [shell.startPointId, shell.endPointId])
+          : entity.pointIds;
+        return {
+          entityId: entity.entityId,
+          kind: entity.kind,
+          points: pointIds.map(pointId => ({ pointId, position: solved.points.find(point => point.pointId === pointId)!.position })),
+          ...(entity.radius === undefined ? {} : { radius: entity.radius }),
+          ...(entity.kind === "derivedPiecewiseCubic" ? { cubicSpans: snapshot.solvedEntities.flatMap(output => output.entityId === entity.entityId && output.kind === "derivedPiecewiseCubic" && output.publication === "certified" ? output.spans : []) } : {}),
+        };
+      }) : null,
+    }];
+  });
 }
 
 function dimensionDiscovery(
@@ -143,6 +179,7 @@ export function createSemanticSketchPort(input: {
           construction: p.isConstruction,
         })),
         entities: entityDiscovery(s.definition),
+        offsets: offsetDiscovery(s),
         profiles: usable
           ? s.liveRegions.regions
               .filter((r) => r.isClosed)
@@ -231,11 +268,12 @@ export function createSemanticSketchPort(input: {
       };
     if (command.operation === "sketch.open" && !initial.references.some(r => r.target.kind === "sketch" && r.target.sketchId === command.sketchId))
       return { ...terminal, outcome: { kind: "rejected", reasonCode: "sketch-unavailable" } };
-    const geometryMutation = command.operation === "sketch.geometry.build" || command.operation === "sketch.requirement.remove" || command.operation === "sketch.construction.set" || command.operation === "sketch.geometry.update" || command.operation === "sketch.geometry.delete" || command.operation === "sketch.label.set";
-    if (geometryMutation) {
+    const geometryMutation = command.operation === "sketch.offset.create" || command.operation === "sketch.offset.remove" || command.operation === "sketch.geometry.build" || command.operation === "sketch.requirement.remove" || command.operation === "sketch.construction.set" || command.operation === "sketch.geometry.update" || command.operation === "sketch.geometry.delete" || command.operation === "sketch.label.set";
+    if (command.operation === "sketch.offset.remove" && (editor.kind !== "editingSketch" || !editor.session.definition.derivedRelationships?.some(r => r.kind === "offset" && r.derivationId === command.derivationId))) return { ...terminal, outcome: { kind: "rejected", reasonCode: "offset-unavailable" } };
+    if (geometryMutation && command.operation !== "sketch.offset.remove") {
       if (editor.kind !== "editingSketch") throw new Error("Missing private sketch owner.");
       const s = editor.session;
-      const targets = command.operation === "sketch.geometry.update" ? command.edit.kind === "mergePoints" ? [command.edit.target, command.edit.destination] : command.edit.kind === "split" || command.edit.kind === "extend" ? [command.edit.target, command.edit.boundary] : [command.edit.target] : (command.operation === "sketch.geometry.build" || command.operation === "sketch.geometry.delete" || command.operation === "sketch.requirement.remove") ? command.targets : [command.target];
+      const targets = command.operation === "sketch.geometry.update" ? command.edit.kind === "mergePoints" ? [command.edit.target, command.edit.destination] : command.edit.kind === "split" || command.edit.kind === "extend" ? [command.edit.target, command.edit.boundary] : [command.edit.target] : (command.operation === "sketch.offset.create" || command.operation === "sketch.geometry.build" || command.operation === "sketch.geometry.delete" || command.operation === "sketch.requirement.remove") ? command.targets : [command.target];
       const valid = targets.length > 0 && targets.every(t => t.sketchId === (s.sketchId ?? s.actionContextId) && (t.kind === "sketch" || (t.kind === "sketchPoint" ? s.definition.points.some(p => p.pointId === t.pointId) : t.kind === "dimension" ? s.definition.dimensions.some(d => d.dimensionId === t.dimensionId) : t.kind === "constraint" ? s.definition.constraints.some(c => c.constraintId === t.constraintId) : s.definition.entities.some(e => e.entityId === t.entityId))));
       if (!valid) return { ...terminal, outcome: { kind: "rejected", reasonCode: "sketch-target-unavailable" } };
       if (command.operation === "sketch.label.set" && !command.label.trim()) return { ...terminal, outcome: { kind: "rejected", reasonCode: "invalid-label" } };
@@ -335,6 +373,28 @@ export function createSemanticSketchPort(input: {
           editQuery = { requestId: answer.requestId, generation: prepared.generation };
           events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.intersectionEditCompleted", basis: prepared, result: answer.result });
         } else events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.geometryUpdated", edit });
+      }
+      if (command.operation === "sketch.offset.remove")
+        events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.offsetRemoved", derivationId: command.derivationId });
+      if (command.operation === "sketch.offset.create") {
+        if (editor.kind !== "editingSketch") throw new Error("Missing private sketch owner.");
+        const seeds = command.targets.map(t => t.entityId);
+        let prepared = prepareSketchOffset(editor.session, seeds, command.distance, command.side);
+        if ("message" in prepared) return { ...terminal, outcome: { kind: "rejected", reasonCode: "sketch-edit-refused" }, diagnostics: [semanticDiagnostic(new Error(prepared.message))] };
+        const runtime = createModelingServiceEditorEffectRuntime(input.service);
+        const publish = async (p: typeof prepared) => {
+          if ("message" in p) throw new Error(p.message);
+          const result = await runtime.deriveSketchRegions!({ requestId: `request_semantic-offset-${crypto.randomUUID()}` as RequestId, documentId: initial.state.documentId, baseRevisionId: initial.state.revisionId, basis: p.basis, derivationLane: "offsetPreview" });
+          return result.offsetPublications.find(r => r.derivationId === p.derivationId);
+        };
+        let record = await publish(prepared);
+        if (record?.status === "planChanged" && record.plan) {
+          prepared = prepareSketchOffset(editor.session, seeds, command.distance, command.side, record.plan);
+          if ("message" in prepared) return { ...terminal, outcome: { kind: "rejected", reasonCode: "sketch-edit-refused" }, diagnostics: [semanticDiagnostic(new Error(prepared.message))] };
+          record = await publish(prepared);
+        }
+        if (!record || record.status !== "certified") return { ...terminal, outcome: { kind: "rejected", reasonCode: "offset-not-certified" }, diagnostics: [semanticDiagnostic(new Error(record?.diagnostic?.message ?? "Offset geometry is not certified."))] };
+        events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.offsetCompleted", prepared, record });
       }
       if (command.operation === "sketch.geometry.build")
         events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.geometryBuilt", input: command.kind === "fillet" ? { kind: command.kind, targets: command.targets.map(editorTarget), radius: command.radius } : command.kind === "chamfer" ? { kind: command.kind, targets: command.targets.map(editorTarget), distance: command.distance } : { kind: command.kind, targets: command.targets.map(editorTarget), width: command.width } });

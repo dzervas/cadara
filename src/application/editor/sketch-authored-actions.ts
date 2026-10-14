@@ -168,6 +168,10 @@ function actionLabel(event: EditorEvent, before: EditorState) {
   switch (event.type) {
     case "sketch.intersectionEditCompleted":
       return event.basis.input.operation.kind === "extend" ? "Extend" : event.basis.input.operation.kind === "split" ? "Split" : "Trim";
+    case "sketch.offsetCompleted":
+      return "Offset";
+    case "sketch.offsetRemoved":
+      return "Remove Offset";
     case "sketch.geometryBuilt":
       return event.input.kind === "fillet" ? "Fillet" : event.input.kind === "chamfer" ? "Chamfer" : "Slot";
     case "sketch.geometryUpdated":
