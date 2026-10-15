@@ -188,11 +188,16 @@ export type SemanticVariableCommand = CommandIdentity & {
 
 export type SemanticExtrudeCommand = CommandIdentity & {
   basis: SemanticBasis;
-  depth: number | string;
   intent: "fulfill" | "author-invalid";
 } & (
-  | { operation: "extrude.create"; profile: Extract<DurableRef, { kind: "region" }> }
-  | { operation: "extrude.update"; featureId: import("@/contracts/shared/ids").FeatureId }
+  | ({ operation: "extrude.create" } & (
+      | { profile: Extract<DurableRef, { kind: "region" }>; depth: number | string; parameters?: never }
+      | { parameters: import("@/contracts/modeling/schema").ExtrudeFeatureParameters; profile?: never; depth?: never }
+    ))
+  | ({ operation: "extrude.update"; featureId: import("@/contracts/shared/ids").FeatureId } & (
+      | { depth: number | string; parameters?: never }
+      | { parameters: import("@/contracts/modeling/schema").ExtrudeFeatureParameters; depth?: never }
+    ))
 );
 
 /** History uses the active editing owner; null draft explicitly selects document context. */

@@ -16,8 +16,10 @@ type Alias = { alias: string };
 type TargetAlias = Alias & { label: string };
 type RecipeGeometryEdit<T = import("@/contracts/semantic/schema").SemanticSketchGeometryEdit> = T extends { target: infer R } ? Omit<T, "target" | "destination" | "boundary"> & { target: R | TargetAlias } & (T extends { destination: infer D } ? { destination: D | TargetAlias } : unknown) & (T extends { boundary: infer B } ? { boundary: B | TargetAlias } : unknown) : never;
 type RecipePrimitive<T = import("@/contracts/semantic/schema").SemanticSketchPrimitive> = T extends { source: infer S } ? Omit<T, "source"> & { source: S | TargetAlias } : T;
+type RecipeExtrudeParameters<T = import("@/contracts/modeling/schema").ExtrudeFeatureParameters> = T extends { profiles: infer P extends readonly unknown[] } ? Omit<T, "profiles"> & { profiles: readonly [P[number] | TargetAlias, ...(P[number] | TargetAlias)[]] } : never;
 type RecipeCommand<T = SemanticCommand> = T extends SemanticCommand
-  ? Omit<T, "basis" | "draft" | "points" | "dimensionId" | "derivationId" | "profile" | "featureId" | "beforeFeatureId" | "bodyId" | "cursor" | "item" | "beforeItem" | "variableId" | "sketchId" | "target" | "targets" | "axis" | "repair" | "edit" | "primitive" | "support"> &
+  ? Omit<T, "parameters" | "basis" | "draft" | "points" | "dimensionId" | "derivationId" | "profile" | "featureId" | "beforeFeatureId" | "bodyId" | "cursor" | "item" | "beforeItem" | "variableId" | "sketchId" | "target" | "targets" | "axis" | "repair" | "edit" | "primitive" | "support"> &
+    (T extends { parameters: unknown } ? { parameters: RecipeExtrudeParameters } : unknown) &
     (T extends { support: infer S } ? { support: S | TargetAlias } : unknown) &
     (T extends { primitive: unknown } ? { primitive: RecipePrimitive } : unknown) &
     (T extends { edit: infer E } ? { edit: E extends { target: unknown } ? RecipeGeometryEdit<E> : E } : unknown) &
@@ -193,6 +195,13 @@ function parseRecipe(input: unknown): RecipeOperation[] {
     for (const key of ["cursor", "item", "beforeItem"] as const) if (isAlias(command[key])) {
       validateTarget(command[key], "feature_validation");
       validationCommand[key] = { kind: "feature", featureId: "feature_validation" };
+    }
+    if ((command.operation === "extrude.create" || command.operation === "extrude.update") && command.parameters && typeof command.parameters === "object" && "profiles" in command.parameters && Array.isArray(command.parameters.profiles)) {
+      validationCommand.parameters = { ...command.parameters, profiles: command.parameters.profiles.map(profile => {
+        if (!isAlias(profile)) return profile;
+        validateTarget(profile, "region_validation");
+        return { kind: "region", sketchId: "sketch_validation", regionId: "region_validation" };
+      }) };
     }
     if (isAlias(command.profile)) {
       validateTarget(command.profile, "region_validation");
@@ -492,7 +501,27 @@ export const documentRecipesCommand: CommandModule = {
           if (matches.length !== 1) throw new Error("Export body target alias is missing or ambiguous.");
           command.target = matches[0]!.target;
         }
-        if (command.operation === "extrude.create" && isAlias(command.profile)) {
+        if ((command.operation === "extrude.create" || command.operation === "extrude.update") && "parameters" in command && command.parameters !== undefined) {
+          const parameters = command.parameters;
+          function resolveProfile(profile: import("@/contracts/modeling/schema").ExtrudeSurfaceProfileRef | TargetAlias) {
+            if (!isAlias(profile)) return profile;
+            const kinds = parameters.resultBodyType === "surface" ? ["region", "face", "sketchEntity"] : ["region", "face"];
+            const matches = aliases.get(profile.alias)?.references.filter(r => r.label === profile.label && kinds.includes(r.target.kind)) ?? [];
+            if (matches.length !== 1) throw new Error("Extrude profile target alias is missing or ambiguous.");
+            const target = matches[0]!.target;
+            if (target.kind !== "region" && target.kind !== "face" && target.kind !== "sketchEntity") throw new Error("Unsupported extrude profile reference.");
+            return target;
+          }
+          function resolveSolidProfile(profile: import("@/contracts/modeling/schema").ExtrudeProfileRef | TargetAlias) {
+            const target = resolveProfile(profile);
+            if (target.kind === "sketchEntity") throw new Error("Solid extrusion requires closed profiles.");
+            return target;
+          }
+          command.parameters = parameters.resultBodyType === "solid"
+            ? { ...parameters, profiles: [resolveSolidProfile(parameters.profiles[0]), ...parameters.profiles.slice(1).map(resolveSolidProfile)] }
+            : { ...parameters, profiles: [resolveProfile(parameters.profiles[0]), ...parameters.profiles.slice(1).map(resolveProfile)] };
+        }
+        if (command.operation === "extrude.create" && "profile" in command && isAlias(command.profile)) {
           const target = command.profile;
           const matches = aliases.get(target.alias)?.references.filter(r => r.label === target.label && r.target.kind === "region") ?? [];
           if (matches.length !== 1 || matches[0]!.target.kind !== "region") throw new Error("Profile target alias is missing or ambiguous.");

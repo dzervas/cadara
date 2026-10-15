@@ -28,6 +28,7 @@ import {
 } from "@/contracts/sketch/region-boundary-curves";
 import { sketchProfileGateFailures } from "@/contracts/sketch/derived-validity";
 import { createFeatureEditorPatchFromExpression } from "@/core/feature-authoring/form-adapter";
+import { prepareExtrudeFeatureDefinition } from "@/core/feature-authoring/features/extrude";
 
 export function createSemanticExtrudePort(input: {
   service: ModelingService;
@@ -49,7 +50,7 @@ export function createSemanticExtrudePort(input: {
         ...terminal,
         outcome: { kind: "rejected" as const, reasonCode: "editing-context" },
       };
-    if (typeof command.depth === "number" ? !Number.isFinite(command.depth) || command.depth <= 0 : !command.depth.trim())
+    if (command.depth !== undefined && (typeof command.depth === "number" ? !Number.isFinite(command.depth) || command.depth <= 0 : !command.depth.trim()))
       return {
         ...terminal,
         outcome: {
@@ -59,7 +60,7 @@ export function createSemanticExtrudePort(input: {
       };
     const snapshot = await input.service.getCurrentDocumentSnapshot();
     let draft;
-    if (command.operation === "extrude.create") {
+    if (command.operation === "extrude.create" && command.profile !== undefined) {
       const sketch = snapshot.document.sketches.find(
         (s) => s.sketchId === command.profile.sketchId,
       )?.sketch;
@@ -89,14 +90,13 @@ export function createSemanticExtrudePort(input: {
         featureType: "extrude",
         selectedTarget: command.profile,
       });
-    } else {
+    } else if (command.operation === "extrude.update") {
       const feature = snapshot.document.features.find(
         (f) => f.featureId === command.featureId,
       );
       if (
         !feature ||
-        feature.definition.kind !== "extrude" ||
-        feature.definition.parameters.resultBodyType !== "solid"
+        feature.definition.kind !== "extrude"
       )
         return {
           ...terminal,
@@ -107,14 +107,17 @@ export function createSemanticExtrudePort(input: {
         };
       draft = hydrateFeatureEditSession(feature)!;
     }
-    const depthField = getFeatureEditorFormField(draft, "extrude-depth");
-    const patch = typeof command.depth === "string"
-      ? depthField?.kind === "numeric" ? createFeatureEditorPatchFromExpression(depthField, command.depth) : null
-      : { depth: command.depth };
-    const definition = patch && buildFeatureDefinition(
-      patchFeatureEditSession(draft, patch),
-    );
-    if (!definition)
+    let definition;
+    if (command.parameters !== undefined) {
+      definition = prepareExtrudeFeatureDefinition(command.parameters);
+    } else {
+      const depthField = getFeatureEditorFormField(draft!, "extrude-depth");
+      const patch = typeof command.depth === "string"
+        ? depthField?.kind === "numeric" ? createFeatureEditorPatchFromExpression(depthField, command.depth) : null
+        : { depth: command.depth };
+      definition = patch && buildFeatureDefinition(patchFeatureEditSession(draft!, patch));
+    }
+    if (!definition || definition.kind !== "extrude")
       return {
         ...terminal,
         outcome: {
@@ -268,7 +271,7 @@ export function createSemanticExtrudePort(input: {
             after.discovery.model?.bodies.some(
               (b) =>
                 b.bodyId === t.bodyId &&
-                b.kind === "solid" &&
+                b.kind === (definition.parameters.resultBodyType === "surface" ? "sheet" : "solid") &&
                 b.bounds !== null,
             ),
         );

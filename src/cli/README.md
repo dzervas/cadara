@@ -573,12 +573,65 @@ exact unique `{ "alias": "draft", "label": "Line 1 end" }` selectors.
 Tangent edits require the typed handle, including its occurrence and point ID.
 Missing, ambiguous, foreign-sketch and stale references are refused.
 
-### Basic solid extrusion and rebuild
+### Extrusion variants and rebuild
 
 `extrude.create` takes a current `basis`, a typed region `profile`
 (`{ kind: "region", sketchId, regionId }`), positive `depth` in document units,
 and `intent`. `extrude.update` takes the current `basis`, `featureId`, `depth`
 and `intent`. They reuse production feature preparation, mutation and rebuild.
+Instead of the `profile`/`depth` shorthand, both commands accept `parameters`
+using the existing `ExtrudeFeatureParameters` contract (not a raw document patch).
+`extrude.update` still requires `featureId`. The two input forms are exclusive.
+For example, a symmetric standalone solid uses:
+
+```json
+{
+  "resultBodyType": "solid",
+  "profiles": [{ "alias": "published", "label": "Outer region" }],
+  "startExtent": { "kind": "profilePlane" },
+  "extent": {
+    "mode": "symmetric",
+    "end": {
+      "kind": "blind", "direction": "positive",
+      "distance": { "source": "literal", "value": 4 }
+    }
+  },
+  "operation": { "source": "literal", "value": "newBody" },
+  "booleanScope": { "kind": "standalone" }
+}
+```
+
+Canonical scalar values use `{ source: "literal", value }` or
+`{ source: "expression", valueText }`; distances use document units and draft
+angles use radians. A symmetric blind distance is the depth **on each side**.
+`twoSide` has independent `firstEnd` and `secondEnd`; `oneSide`/`symmetric` have
+`end`. Supported end conditions follow production: `blind`, `throughAll`,
+`upToNext`, `upToFace`, `upToPart`, and `upToVertex`; symmetric ends are limited
+to blind/through-all. Reference ends require exact typed `target` references;
+up-to offsets have authored `distance` and `direction: "shorten" | "extend"`.
+Starts use `profilePlane`, `blindOffset` (authored distance and direction),
+`sketchPointOffset` (exact sketch point target), or `entityOffset` (exact planar
+edge/face target). Existing starts survive shorthand depth edits.
+
+`resultBodyType: "surface"` creates a sheet and has no `operation` or
+`booleanScope`. Profiles can be a region, planar face, or a connected chain of
+open `sketchEntity` curves from one sketch. Surface extrusion does not close an
+open boundary to manufacture a solid. Surface drafts, open-curve up-to-next,
+mixed/disconnected profile groups and unsupported termination cases are refused
+by shared preparation/production evaluation, never silently approximated.
+Solid booleans use authored `operation: newBody | join | cut | intersect` and
+explicit `booleanScope: standalone | targetBody | targetBodies`; no implicit
+scene-wide scope is inferred. Reference and scope failures can leave an applied,
+persisted but invalid feature: `fulfill` reports geometry failure;
+`author-invalid` explicitly permits `accepted-invalid`/`invalid-editable` only
+when the production owner actually accepts that state. A production rejection
+remains a rejection for either intent.
+
+Recipe `parameters.profiles` also accepts exact unique label aliases; nested
+start/end targets and boolean body IDs currently require typed discovered
+references. Up-to-next must prove complete termination of the swept profile,
+not choose an arbitrary first contact or partially covering target.
+
 Discovery includes feature/produced-body identities and `model.bodies[].bounds`
 (`min`/`max`) from native B-rep inspection; null means no certified measurement,
 never last-good display geometry. A rejected request applies nothing; an applied
