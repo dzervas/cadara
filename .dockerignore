@@ -16,3 +16,8 @@ coverage
 .playwright-cli
 /test-results
 /test/fixtures/onshape-captures
+.pi
+.scratch
+.devenv
+.codegraph
+.tmp*

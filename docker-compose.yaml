@@ -15,8 +15,8 @@ services:
       - frontend
     environment:
       TOKEN: cadara-local-debug
-      CONCURRENT: "2"
-      QUEUED: "2"
+      CONCURRENT: "8"
+      QUEUED: "8"
       TIMEOUT: "-1"
     ports:
       - "127.0.0.1:9222:3000"
