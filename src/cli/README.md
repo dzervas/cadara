@@ -401,6 +401,41 @@ image `target`. Missing/ambiguous labels fail, unknown aliases are usage errors.
 Native save/open retains styles, bytes, placement and calibration—not private
 history. File and repository failures remain separate from actual live changes.
 
+### Document variables and expressions
+
+`variable.add` takes current `basis`, identifier-style `name`, `valueText` and
+`intent`. `variable.update` additionally takes the discovered `variableId` and
+supplies the complete new name/value text. These are document-context operations;
+finish or discard a private sketch first. Discovery `variables` exposes the actual
+authored IDs, names and expression text. No variable-delete command is invented.
+Recipes may select `variableId` by `{ "alias": "parameters", "label": "height" }`,
+matching an exact unique variable name in that result. Unknown aliases are usage
+errors; missing/ambiguous names fail the operation.
+
+Expressions use the production scalar evaluator, including arithmetic, dependency
+chains and supported math functions/constants (for example `sqrt(81) + sin(pi / 2)`).
+They must resolve to finite real numbers: assignments, unresolved symbols, cycles,
+duplicates, invalid names and unit-valued results such as `2 cm` are refused before
+writing, even with `author-invalid`. Values are scalar model-unit inputs, not a
+new dimensional-unit conversion language: lengths use document millimeters and
+angle expressions use radians.
+
+`sketch.dimension.update` accepts a numeric value or expression string through the
+same annotation normalizer used by browser edits; numeric angle updates remain
+in degrees. Dimension/requirement creation still uses numeric inputs; update the
+discovered dimension to author an expression. `extrude.create` and `extrude.update`
+accept numeric or expression `depth` through the shared browser feature form
+preparation. No independent expression setter is added to offsets or unsupported
+feature families.
+
+Variable changes await the production dependent solve/rebuild and authoritative
+handoff. An accepted variable that invalidates a sketch or feature reports applied
+state and failed geometry, never current last-good output; explicit
+`intent: "author-invalid"` reports invalid-editable output instead. Repository
+commitment, runtime acceptance and file saving remain separate. Native save/open
+retains authored expressions and dependency identities, and subsequent edits
+rebuild them; it does not retain private session history.
+
 ### Private sketch dimensions
 
 `sketch.dimension.add` takes the current `basis` and `draft`, an `axis`

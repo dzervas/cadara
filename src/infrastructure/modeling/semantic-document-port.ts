@@ -1,3 +1,4 @@
+import { createSemanticVariablePort } from "./semantic-variable-port";
 import { createSemanticExportPort } from "./semantic-export-port";
 import { createSemanticHistoryPort } from "./semantic-history-port";
 import { createSemanticExtrudePort } from "./semantic-extrude-port";
@@ -78,6 +79,7 @@ export function createSemanticDocumentPort(input: {
         snapshot.provenance.repositoryHeads,
       ),
       document: { label: snapshot.document.name },
+      variables: snapshot.document.variables,
       settings: snapshot.document.settings,
       references: [
         ...snapshot.presentation.entities.map((entity) => ({ label: entity.label, target: entity.target })),
@@ -176,6 +178,7 @@ export function createSemanticDocumentPort(input: {
     inspect,
     sketch: sketches.execute,
     history: createSemanticHistoryPort({ repository, service, loop, inspect, sketch: sketches.execute }),
+    variable: createSemanticVariablePort({ service, loop, inspect }),
     extrude: createSemanticExtrudePort({ service, loop, inspect }),
     export: createSemanticExportPort({ service, files: input.nativeFileIO, inspect }),
     async drain() {
