@@ -36,6 +36,7 @@ import type {
   UpdateFeatureResponse,
 } from "@/contracts/modeling/schema";
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
+import type { AuthoredDocumentRestoreOptions } from "@/contracts/modeling/adapter";
 import type {
   BakedGeometryAssetReference,
   GeometryAssetBlobInput,
@@ -113,6 +114,7 @@ export type OccWorkerOperation =
     }
   | ({
       kind: "restoreAuthoredModelDocument";
+      options?: AuthoredDocumentRestoreOptions;
     } & AuthoredDocumentWorkerOperationBase)
   | ({
       kind: "validateAuthoredModelDocument";

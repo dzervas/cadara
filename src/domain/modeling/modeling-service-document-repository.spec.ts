@@ -2142,6 +2142,12 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
     expect(
       (await repository.receivePeerDocument(peerSketchEdit, afterUndo)).ok,
     ).toBeTruthy();
+    // T17k3 (K3): every revision this session has held so far.
+    const held = new Set([
+      originalSnapshot.document.revisionId,
+      published.revisionId,
+      (await service.getCurrentDocumentSnapshot()).document.revisionId,
+    ]);
     const conflict = await service.commitSketch({
       baseRevisionId: originalSnapshot.document.revisionId,
       sketchId: originalSketch.sketchId,
@@ -2161,6 +2167,12 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
       },
     });
     expect(conflict.isErr()).toBe(true);
+    // The failed publication restores the repository's state, which this
+    // session did not author: it gets a revision the session never held
+    // (base: the stored id, the publication's own revision).
+    const afterConflict = (await service.getCurrentDocumentSnapshot()).document
+      .revisionId;
+    expect(held.has(afterConflict), afterConflict).toBe(false);
     const current = await repository.load({
       documentId: originalDocument.documentId,
       seedDocument: originalDocument,

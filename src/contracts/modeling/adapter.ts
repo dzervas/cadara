@@ -84,6 +84,17 @@ export interface GeometryAssetResolver {
   getGeometryAssetBytes?(hash: GeometryAssetHash): Promise<Uint8Array | null>;
 }
 
+export interface AuthoredDocumentRestoreOptions {
+  /**
+   * The document is a state this session did not author (a peer change, an
+   * Undo or Redo). Its stored revision id may already name another state here:
+   * every writer counts from the shared field, and compensation never changes
+   * it. The restored state gets a revision id this kernel has not used before:
+   * the stored id when it is later than every id used here, else the next one.
+   */
+  newRevision?: boolean;
+}
+
 /**
  * Public modeling-kernel boundary for durable document queries and feature
  * mutations. Implementers must treat request payloads as authoritative typed
@@ -100,6 +111,7 @@ export interface ModelingKernelAdapter extends NeutralCurveQueryCapability {
     document: AuthoredDocument,
     diagnostics?: readonly ModelingDiagnostic[],
     assetResolver?: GeometryAssetResolver,
+    options?: AuthoredDocumentRestoreOptions,
   ): Promise<void>;
   /** Rebuilds an authored document for validation without requiring a viewport snapshot. */
   validateAuthoredModelDocument?(

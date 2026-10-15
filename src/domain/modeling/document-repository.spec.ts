@@ -1,6 +1,9 @@
 import { describe, test, expect } from "vitest";
 import { expectNoInternalIds } from "@/contracts/sketch/user-text.fixtures";
-import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
+import {
+  createAuthoredModelDocumentFromSnapshot,
+  type AuthoredModelDocument,
+} from "@/contracts/modeling/authored-document";
 import { createSeedAuthoredModelDocument } from "./modeling-test-fixtures";
 import { createMemoryDocumentRepository } from "./memory-document-repository";
 import {
@@ -17,6 +20,15 @@ import {
 import type { DocumentRepository } from "./document-repository";
 import { createNewSketchSession } from "@/domain/editor/sketch-session";
 import { createStandardPlaneDefinition } from "./opencascade-kernel-seed";
+import type { AppResultAsync } from "@/contracts/errors";
+import type { BodyId, RevisionId } from "@/contracts/shared/ids";
+import { getDefaultCadaraExportOptions } from "@/contracts/modeling/export.runtime-schema";
+import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
+import { MockKernelAdapter } from "./mock-kernel-adapter";
+import {
+  createModelingService,
+  type ModelingService,
+} from "./modeling-service";
 
 function persistent(
   repo = new RealAutomergeRepo(),
@@ -852,6 +864,401 @@ test("replaced document and snapshot history storage is explicitly rejected", as
   expect(!replaced.ok && replaced.status.diagnostic.message).toContain(
     "Unsupported collaborative document",
   );
+});
+
+// T17k3 (K3). Logic lane; seam: two modeling services (mock kernel), each
+// over its own Automerge repository on one shared document (forked handles).
+// A state this session did not author (a concurrent peer write, an Undo or
+// Redo) gets a revision id this session has not used before, so a result
+// computed against the earlier revision is stale: the export check rejects
+// it and the kernel refuses a mutation based on it.
+describe("T17k3: a state this session did not author gets a new revision", () => {
+  const unwrap = async <T>(result: AppResultAsync<T>) => {
+    const resolved = await result;
+    if (resolved.isErr()) throw new Error(resolved.error.message);
+    return resolved.value;
+  };
+  type Persistence = "blocking" | "background";
+  async function session(
+    repo: RealAutomergeRepo,
+    urls = new MemoryDocumentRepositoryUrlStore(),
+    persistence: Persistence = "blocking",
+  ) {
+    const repository = persistent(repo, urls);
+    const service = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: "doc_workspace",
+      documentRepository: repository,
+      documentRepositoryPersistence: persistence,
+    });
+    await service.getCurrentDocumentSnapshot();
+    return { service, repository, urls };
+  }
+  async function twoSessions(persistence: Persistence = "blocking") {
+    const repoA = new RealAutomergeRepo();
+    const a = await session(repoA, undefined, persistence);
+    const handleA = await repoA.find<CollaborativeDocument>(
+      a.urls.get("doc_workspace")!,
+    );
+    const handleB = handleA.fork(),
+      repoB = new RealAutomergeRepo(),
+      urlsB = new MemoryDocumentRepositoryUrlStore();
+    repoB.handles.set(handleB.url, handleB as never);
+    urlsB.set("doc_workspace", handleB.url);
+    const b = await session(repoB, urlsB, persistence);
+    return {
+      a: a.service,
+      b: b.service,
+      repositoryA: a.repository,
+      handleA,
+      handleB,
+    };
+  }
+  const snapshotOf = (service: ModelingService) =>
+    service.getCurrentDocumentSnapshot();
+  const revisionOf = async (service: ModelingService) =>
+    (await snapshotOf(service)).document.revisionId;
+  const exportAt = (service: ModelingService, baseRevisionId: RevisionId) =>
+    service.exportDocument({
+      baseRevisionId,
+      target: { kind: "body", bodyId: "body_part-1" as BodyId },
+      targetLabel: "Part 1",
+      format: "cadara",
+      options: getDefaultCadaraExportOptions(),
+    });
+  const renameAt = (
+    service: ModelingService,
+    baseRevisionId: RevisionId,
+    bodyLabel: string,
+  ) =>
+    service.renameBody({
+      baseRevisionId,
+      bodyId: "body_part-1" as BodyId,
+      bodyLabel,
+    });
+  async function expectStale(service: ModelingService, stale: RevisionId) {
+    const current = await revisionOf(service);
+    expect
+      .soft(current, "the new state has a revision this session never had")
+      .not.toBe(stale);
+    const exported = await exportAt(service, stale);
+    expect
+      .soft(exported.ok, "an export requested at the earlier revision is stale")
+      .toBe(false);
+    expect
+      .soft(exported.diagnostics.map((d) => d.code))
+      .toEqual(["export-revision-conflict"]);
+    const renamed = await (await renameAt(service, stale, "Stale"))
+      .map((result) => result.revisionState.kind)
+      .unwrapOr("error");
+    expect
+      .soft(renamed, "a mutation based on the earlier revision is refused")
+      .not.toBe("accepted");
+    expect(
+      (await snapshotOf(service)).document.bodies.find(
+        (body) => body.bodyId === "body_part-1",
+      )?.label,
+    ).not.toBe("Stale");
+  }
+
+  test("two concurrent writers: the merged state is a new revision in each session", async () => {
+    const { a, b, handleA, handleB } = await twoSessions();
+    await unwrap(renameAt(a, await revisionOf(a), "A body"));
+    await unwrap(
+      b.addDocumentVariable({
+        baseRevisionId: await revisionOf(b),
+        name: "Width",
+        valueText: "10",
+      }),
+    );
+    const writtenA = await revisionOf(a),
+      writtenB = await revisionOf(b);
+    handleB.merge(handleA);
+    handleA.merge(handleB);
+    const mergedB = await snapshotOf(b),
+      mergedA = await snapshotOf(a);
+    // Both sessions now hold both writes.
+    for (const merged of [mergedA, mergedB]) {
+      expect(
+        merged.document.bodies.find((body) => body.bodyId === "body_part-1")
+          ?.label,
+      ).toBe("A body");
+      expect(merged.document.variables.map((v) => v.name)).toContain("Width");
+    }
+    await expectStale(b, writtenB);
+    await expectStale(a, writtenA);
+  });
+
+  test("Undo and Redo, own and a peer's: each resulting state is a new revision", async () => {
+    const { a, b, repositoryA, handleA, handleB } = await twoSessions();
+    const label = async (service: ModelingService) =>
+      (await snapshotOf(service)).document.bodies.find(
+        (body) => body.bodyId === "body_part-1",
+      )?.label;
+    const seedLabel = await label(a);
+    await unwrap(renameAt(a, await revisionOf(a), "A body"));
+    handleB.merge(handleA);
+    expect(await label(b)).toBe("A body");
+    for (const [direction, expected] of [
+      ["undo", seedLabel],
+      ["redo", "A body"],
+    ] as const) {
+      const beforeA = await revisionOf(a),
+        beforeB = await revisionOf(b);
+      const result =
+        direction === "undo"
+          ? await repositoryA.undoDurableHistory("doc_workspace")
+          : await repositoryA.redoDurableHistory("doc_workspace");
+      expect(result?.ok, direction).toBe(true);
+      handleB.merge(handleA);
+      expect(await label(a)).toBe(expected);
+      expect(await label(b)).toBe(expected);
+      await expectStale(a, beforeA);
+      await expectStale(b, beforeB);
+      // expectStale's refused rename must not have changed anything.
+      expect(await label(a)).toBe(expected);
+    }
+  });
+
+  // T17k3 review A-1: a peer change that reaches A after A's kernel accepted
+  // an edit but before A's repository write lands. A's restore waits for the
+  // write and restores the merged state: A keeps its own edit (kernel and
+  // file export) and gets the peer's. Base: A restored the event's older
+  // state and lost "A body" while the shared document kept it.
+  for (const persistence of ["blocking", "background"] as const)
+    test(`a peer change during A's repository write keeps A's edit (${persistence})`, async () => {
+      const { a, b, repositoryA, handleA, handleB } =
+        await twoSessions(persistence);
+      await unwrap(
+        b.addDocumentVariable({
+          baseRevisionId: await revisionOf(b),
+          name: "Width",
+          valueText: "10",
+        }),
+      );
+      const write = repositoryA.mutate.bind(repositoryA);
+      let peerArrived = false;
+      repositoryA.mutate = async (input) => {
+        if (!peerArrived) {
+          peerArrived = true;
+          handleA.merge(handleB);
+          await new Promise((resolve) => setTimeout(resolve, 30));
+        }
+        return write(input);
+      };
+      const renamed = await unwrap(renameAt(a, await revisionOf(a), "A body"));
+      expect(renamed.revisionState.kind).toBe("accepted");
+      await a.waitForPersistence();
+      expect(peerArrived, "premise: the peer change arrived mid-write").toBe(
+        true,
+      );
+      const stateA = await snapshotOf(a);
+      expect(
+        stateA.document.bodies.find((body) => body.bodyId === "body_part-1")
+          ?.label,
+        "A keeps its own edit",
+      ).toBe("A body");
+      expect(stateA.document.variables.map((v) => v.name)).toContain("Width");
+      expect(
+        JSON.stringify(await a.exportCurrentDocument()),
+        "A's file export keeps it",
+      ).toContain("A body");
+      expect(
+        stateA.document.revisionId,
+        "the merged state is not the edit's own revision",
+      ).not.toBe(renamed.revisionId);
+      handleB.merge(handleA);
+      const stateB = await snapshotOf(b);
+      expect(
+        stateB.document.bodies.find((body) => body.bodyId === "body_part-1")
+          ?.label,
+      ).toBe("A body");
+    });
+
+  // T17k3 re-review RR-1 (probe P6). A's first mutation is in its repository
+  // write when a peer change arrives, so the peer restore waits for it; a
+  // second mutation started then (based on the kernel's current revision)
+  // runs after that restore. It is refused as stale or kept, never accepted
+  // and then dropped. Mutant Ma (`runLocalMutation` without
+  // `await changesBefore`): accepted, then lost to the restore.
+  for (const persistence of ["blocking", "background"] as const)
+    test(`a mutation started while a peer restore waits is never accepted and then lost (${persistence})`, async () => {
+      const repoA = new RealAutomergeRepo();
+      const urlsA = new MemoryDocumentRepositoryUrlStore();
+      const repositoryA = persistent(repoA, urlsA);
+      const kernelA = new MockKernelAdapter();
+      const a = createModelingService(kernelA, {
+        currentDocumentId: "doc_workspace",
+        documentRepository: repositoryA,
+        documentRepositoryPersistence: persistence,
+      });
+      await a.getCurrentDocumentSnapshot();
+      const handleA = await repoA.find<CollaborativeDocument>(
+        urlsA.get("doc_workspace")!,
+      );
+      const handleB = handleA.fork(),
+        repoB = new RealAutomergeRepo(),
+        urlsB = new MemoryDocumentRepositoryUrlStore();
+      repoB.handles.set(handleB.url, handleB as never);
+      urlsB.set("doc_workspace", handleB.url);
+      const b = (await session(repoB, urlsB, persistence)).service;
+      await unwrap(
+        b.addDocumentVariable({
+          baseRevisionId: await revisionOf(b),
+          name: "Width",
+          valueText: "10",
+        }),
+      );
+      const write = repositoryA.mutate.bind(repositoryA);
+      let writes = 0;
+      let releaseFirst!: () => void;
+      const firstHeld = new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+      });
+      let peerQueued!: () => void;
+      const peerArrived = new Promise<void>((resolve) => {
+        peerQueued = resolve;
+      });
+      repositoryA.mutate = async (input) => {
+        if (writes++ === 0) {
+          handleA.merge(handleB);
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          peerQueued();
+          await firstHeld;
+        }
+        return write(input);
+      };
+      // The kernel's own revision: the service's reads wait for the restore.
+      const kernelRevision = async () =>
+        (
+          await kernelA.getDocumentSnapshot({
+            contractVersion: CONTRACT_VERSION,
+            documentId: "doc_workspace",
+          })
+        ).snapshot.document.revisionId;
+      const first = unwrap(renameAt(a, await revisionOf(a), "A body"));
+      await peerArrived;
+      const second = a.addDocumentVariable({
+        baseRevisionId: await kernelRevision(),
+        name: "Depth",
+        valueText: "5",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      releaseFirst();
+      expect((await first).revisionState.kind).toBe("accepted");
+      const secondResult = await second;
+      const secondAccepted =
+        secondResult.isOk() &&
+        secondResult.value.revisionState.kind === "accepted";
+      await a.waitForPersistence();
+      const state = await snapshotOf(a);
+      expect(
+        state.document.bodies.find((body) => body.bodyId === "body_part-1")
+          ?.label,
+        "the first edit is kept",
+      ).toBe("A body");
+      const variables = state.document.variables.map((v) => v.name);
+      expect(variables, "the peer's change arrived").toContain("Width");
+      expect(
+        variables.includes("Depth"),
+        `an accepted second edit is kept (accepted: ${secondAccepted})`,
+      ).toBe(secondAccepted);
+    });
+
+  // T17k3 review R-1: a peer write (same counter value) lands while A's
+  // Publish Sketch is in the repository. Every state A's kernel holds has
+  // its own revision id: the merged document A restores after its write is
+  // not the published candidate, so it is renumbered. Base and before R-1:
+  // the merged state reused the candidate's id.
+  test("a peer write during Publish Sketch: no revision names two states in A", async () => {
+    const repository = createMemoryDocumentRepository();
+    const adapter = new MockKernelAdapter();
+    const held = new Map<string, string>();
+    const collisions: string[] = [];
+    const record = async (why: string) => {
+      const { revisionId, ...rest } =
+        await adapter.exportAuthoredModelDocument("doc_workspace");
+      const content = JSON.stringify(rest);
+      if ((held.get(revisionId) ?? content) !== content)
+        collisions.push(`${why}: ${revisionId}`);
+      held.set(revisionId, content);
+    };
+    for (const method of [
+      "commitSketch",
+      "restoreAuthoredModelDocument",
+      "renameBody",
+    ] as const) {
+      const original = adapter[method].bind(adapter) as (
+        ...args: unknown[]
+      ) => Promise<unknown>;
+      (adapter as unknown as Record<string, unknown>)[method] = async (
+        ...args: unknown[]
+      ) => {
+        const result = await original(...args);
+        await record(method);
+        return result;
+      };
+    }
+    const service = createModelingService(adapter, {
+      currentDocumentId: "doc_workspace",
+      documentRepository: repository,
+    });
+    const snapshot = await service.getCurrentDocumentSnapshot();
+    await record("initial");
+    const original = createAuthoredModelDocumentFromSnapshot(snapshot);
+    const sketch = original.sketches[0]!;
+    const definition = structuredClone(sketch.definition);
+    definition.points[0] = { ...definition.points[0]!, position: [41, 17] };
+    const write = repository.mutate.bind(repository);
+    let peerArrived = false;
+    repository.mutate = async (input) => {
+      if (!peerArrived) {
+        peerArrived = true;
+        const peer = structuredClone(original);
+        peer.revisionId = input.document.revisionId;
+        peer.bodyLabels[0] = { ...peer.bodyLabels[0]!, label: "Peer label" };
+        expect((await repository.receivePeerDocument(peer, original)).ok).toBe(
+          true,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      return write(input);
+    };
+    const published = await unwrap(
+      service.commitSketch({
+        baseRevisionId: snapshot.document.revisionId,
+        sketchId: sketch.sketchId,
+        sketchLabel: sketch.label,
+        plane: sketch.plane,
+        definition,
+        solverCorrelation: {
+          requestId: "request_t17k3_publish",
+          projectionRequestId: "request_t17k3_publish:project",
+          validationRequestId: "request_t17k3_publish:validate",
+          solveRequestId: "request_t17k3_publish:solve",
+          regionRequestId: "request_t17k3_publish:regions",
+        },
+        publicationBase: {
+          actionContextId: sketch.sketchId,
+          expectedSketch: sketch,
+        },
+      }),
+    );
+    expect(published.revisionState.kind).toBe("accepted");
+    expect(peerArrived).toBe(true);
+    const after = await service.getCurrentDocumentSnapshot();
+    expect(published.revisionId, "the result names the kernel's state").toBe(
+      after.document.revisionId,
+    );
+    expect(after.document.bodies[0]?.label).toBe("Peer label");
+    await unwrap(
+      service.renameBody({
+        baseRevisionId: after.document.revisionId,
+        bodyId: "body_part-1" as BodyId,
+        bodyLabel: "A next",
+      }),
+    );
+    expect(collisions).toEqual([]);
+  });
 });
 
 import * as Automerge from "@automerge/automerge";

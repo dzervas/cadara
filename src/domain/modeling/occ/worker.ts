@@ -247,6 +247,7 @@ async function handleWorkerOperation(operation: OccWorkerOperation) {
         operation.document,
         operation.diagnostics ?? [],
         createWorkerAssetResolver(operation.assets),
+        operation.options,
       );
       return undefined;
     case "validateAuthoredModelDocument":
