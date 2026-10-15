@@ -340,10 +340,22 @@ export function handleSketchToolPatched(
 
   if (state.session.constraintAuthoring || state.session.activeAnnotationEdit) {
     const session = patchSketchConstraintValue(state.session, event.patch);
+    // T17j3 F-1: a tool's value commit leaves its picks unselected, whatever
+    // received the placement press. A press on the canvas cleared them
+    // (its blank click); one on the preview's dimension-line handle placed
+    // the label without that click and left them selected.
+    const toolCommitted =
+      state.session.constraintAuthoring !== null &&
+      session.constraintAuthoring === null &&
+      session.activeAnnotationEdit === null &&
+      session.activeTool === null;
 
     return {
       state: {
         ...state,
+        ...(toolCommitted
+          ? { selection: [], hoverTarget: null, annotationContext: null }
+          : {}),
         session,
         command: commandAfterSketchToolCommit(state, session),
         preview: {

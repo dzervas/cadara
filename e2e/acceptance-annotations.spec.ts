@@ -54,7 +54,8 @@ const expect = baseExpect.configure({ timeout: 10_000 });
 // `mouse.move` steps); waits are on committed history entries and session
 // state. Debug reads (sketch snapshot, hover target, editor selection,
 // `__cadProjectToScreen`) are assertions only. Step → row map and
-// discrimination (mutants): T17j.md.
+// discrimination (mutants): T17j.md. T17j3: every row runs with the
+// production document repository on (`openWithRepository`).
 
 const RECTANGLE_TOOL = "Create rectangle geometry.";
 const LINE_TOOL = "Create line geometry.";
@@ -307,7 +308,8 @@ test("§3 E2E-3: dense constraints at a rectangle corner; hover preview, pinned 
 }) => {
   test.setTimeout(420_000);
   const workbench = new FeatureWorkbenchHarness(page);
-  await workbench.open();
+  await workbench.openWithRepository();
+  await workbench.expectWorkspaceInRepository();
   await openTopSketch(workbench);
   const canvas = await canvasBox(page);
 
@@ -439,7 +441,19 @@ test("§3 E2E-3: dense constraints at a rectangle corner; hover preview, pinned 
 
   // Step 3: hovering L1 (nothing selected) previews its requirements:
   // passive glyphs (no controls), the canvas owns the pointer under them.
+  // Premise, waited on as state (no click): the Distance commit left no
+  // selection, whichever element took its placement press (T17j3 F-1, fixed:
+  // the preview's dimension-line handle used to leave L1 selected, its
+  // glyphs pinned controls), and with the pointer on blank canvas no
+  // constraint glyph is drawn, so every glyph read below is the hover's.
   await page.mouse.move(canvas.x + 1050, canvas.y + 720, { steps: 6 });
+  await expect
+    .poll(() => workbench.currentEditorSelection(), { timeout: 10_000 })
+    .toBe("Nothing selected");
+  await expect(
+    constraintGlyphs(page),
+    "premise: no glyph is drawn with nothing selected or hovered",
+  ).toHaveCount(0);
   snap = await mixedSnapshot(page);
   const l1At = alongLine(map, snap, l1, 0.6);
   await page.mouse.move(canvas.x + l1At.x, canvas.y + l1At.y, { steps: 8 });
@@ -867,7 +881,8 @@ test("§3 E2E-3 drag matrix: point, body and tangent-handle drags keep the grab 
 }) => {
   test.setTimeout(420_000);
   const workbench = new FeatureWorkbenchHarness(page);
-  await workbench.open();
+  await workbench.openWithRepository();
+  await workbench.expectWorkspaceInRepository();
   await openTopSketch(workbench);
 
   // A connected two-line chain (P0 → P1 → P2), a 3-point spline, a point
@@ -1243,7 +1258,8 @@ test("§3 E2E-3 tool switch: switching tools during an unfinished Circle or Rect
 }) => {
   test.setTimeout(240_000);
   const workbench = new FeatureWorkbenchHarness(page);
-  await workbench.open();
+  await workbench.openWithRepository();
+  await workbench.expectWorkspaceInRepository();
   await openTopSketch(workbench);
   // Committed geometry: one line.
   await workbench.activateTool(LINE_TOOL);

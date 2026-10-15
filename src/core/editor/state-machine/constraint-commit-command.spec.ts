@@ -93,6 +93,73 @@ describe("T17h a committing constraint tool hands the command back to Select", (
     });
   });
 
+  test("T17j3 F-1: the Distance value commit leaves the pick unselected whether the placement press hit the canvas or the preview's dimension-line handle", async () => {
+    const { state, h } = await makeAnnotationLifecycleState();
+    let picked = apply(state, {
+      type: "tool.activated",
+      toolId: "dimensionDistance",
+    });
+    picked = apply(picked, { type: "viewport.selectionRequested", target: h });
+    expect(picked.selection, "premise: the pick selects H").toContainEqual(h);
+
+    // The canvas: the release pins the placement, then its blank click
+    // clears the selection.
+    let canvas = apply(picked, {
+      type: "sketch.pointerReleased",
+      point: [5, 8],
+      sketchUnitsPerPixel: null,
+      target: null,
+    });
+    canvas = apply(canvas, { type: "selection.cleared" });
+    // The preview's dimension-line handle: a drag placement, no click.
+    let handle = picked;
+    for (const gesturePhase of ["start", "end"])
+      handle = apply(handle, {
+        type: "sketch.toolPatched",
+        patch: {
+          intent: "setConstraintAnnotationPlacement",
+          point: [5, 8],
+          gesturePhase,
+        },
+      });
+    for (const placed of [canvas, handle])
+      expect(
+        placed.session.constraintAuthoring?.isPreviewPinned,
+        "premise: the value input is open",
+      ).toBe(true);
+    expect(
+      handle.selection,
+      "premise: the handle path keeps H selected",
+    ).toContainEqual(h);
+
+    const commit = (placed: SketchEditorState) =>
+      apply(placed, {
+        type: "sketch.toolPatched",
+        patch: { intent: "commitConstraintValue" },
+      });
+    const [fromCanvas, fromHandle] = [commit(canvas), commit(handle)];
+    for (const committed of [fromCanvas, fromHandle])
+      expect(
+        committed.session.definition.dimensions,
+        "premise: one dimension is committed",
+      ).toHaveLength(1);
+    const outcome = (committed: SketchEditorState) => ({
+      selection: committed.selection,
+      hoverTarget: committed.hoverTarget,
+      annotationContext: committed.annotationContext,
+      command: committed.command.toolId,
+    });
+    expect(outcome(fromHandle), "one outcome for both presses").toEqual(
+      outcome(fromCanvas),
+    );
+    expect(outcome(fromCanvas)).toEqual({
+      selection: [],
+      hoverTarget: null,
+      annotationContext: null,
+      command: "sketch",
+    });
+  });
+
   test("control: a refused duplicate restarts the tool, which stays armed", async () => {
     const { state, g } = await makeAnnotationLifecycleState();
     const armed = apply(state, {

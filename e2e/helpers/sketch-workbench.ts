@@ -5,6 +5,9 @@ import type { ModelingOperationHistoryPayload } from "../../src/contracts/modeli
 
 const WORKSPACE_DOCUMENT_ID = "doc_workspace";
 const MODELING_OPERATION_HISTORY_STORAGE_KEY = `cad.modeling.operationHistory.${WORKSPACE_DOCUMENT_ID}.v1`;
+/** The default namespace's Automerge URL store (`document-repository-url-store.ts`). */
+const DOCUMENT_REPOSITORY_URL_STORAGE_KEY =
+  "cad.documentRepository.automergeUrls.v1";
 
 export class SketchWorkbenchHarness {
   readonly page: Page;
@@ -43,6 +46,78 @@ export class SketchWorkbenchHarness {
 
   async openWithRepository(path = "/") {
     await this.openPreservingStorage(withTestMode(path));
+  }
+
+  /**
+   * T17j3: a seeded fixture through the production document repository.
+   * The operation history is stored once (not again on a reload) and the
+   * app opens with the repository on; an empty repository restores a
+   * stored operation history by replaying it, writes the resulting
+   * authored document to the repository and removes the stored history
+   * (`restoreRepositoryBackedDocument`). Waits until that happened: the
+   * history key is gone and the repository holds the workspace document.
+   */
+  async openWithRepositoryAndOperationHistory(
+    payload: ModelingOperationHistoryPayload,
+  ) {
+    await this.page.addInitScript(
+      ({ storageKey, serialized, marker }) => {
+        if (window.localStorage.getItem(marker) !== null) return;
+        window.localStorage.setItem(marker, "seeded");
+        window.localStorage.setItem(storageKey, serialized);
+      },
+      {
+        storageKey: MODELING_OPERATION_HISTORY_STORAGE_KEY,
+        serialized: JSON.stringify(payload),
+        marker: `${MODELING_OPERATION_HISTORY_STORAGE_KEY}.e2e-seeded`,
+      },
+    );
+    await this.openWithRepository();
+    await expect
+      .poll(
+        async () => ({
+          historyStored: await this.page.evaluate(
+            (storageKey) => window.localStorage.getItem(storageKey) !== null,
+            MODELING_OPERATION_HISTORY_STORAGE_KEY,
+          ),
+          repository: await this.workspaceRepositoryUrlStored(),
+        }),
+        {
+          message:
+            "the seeded history was restored into the document repository",
+          timeout: 30_000,
+        },
+      )
+      .toEqual({ historyStored: false, repository: true });
+  }
+
+  /**
+   * T17j3: the production document repository holds the workspace document
+   * (its Automerge URL is stored); never true with the repository disabled.
+   */
+  async expectWorkspaceInRepository() {
+    await expect
+      .poll(() => this.workspaceRepositoryUrlStored(), {
+        message: "the document repository holds the workspace document",
+        timeout: 30_000,
+      })
+      .toBe(true);
+  }
+
+  private workspaceRepositoryUrlStored() {
+    return this.page.evaluate(
+      ({ urlKey, documentId }) =>
+        (
+          JSON.parse(window.localStorage.getItem(urlKey) ?? "{}") as Record<
+            string,
+            string
+          >
+        )[documentId]?.startsWith("automerge:") ?? false,
+      {
+        urlKey: DOCUMENT_REPOSITORY_URL_STORAGE_KEY,
+        documentId: WORKSPACE_DOCUMENT_ID,
+      },
+    );
   }
 
   async openPreservingStorage(path = "/") {

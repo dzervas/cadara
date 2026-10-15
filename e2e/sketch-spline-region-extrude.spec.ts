@@ -39,16 +39,19 @@ test.use({ viewport: { width: 1440, height: 960 } });
 // the closed splines are seeded through the operation history. T17i: every
 // profile is picked in the viewport (`selectRegionInViewport`, hover-verified,
 // no debug selection); the fixtures and debug reads live in
-// `helpers/seeded-sketches.ts`.
+// `helpers/seeded-sketches.ts`. T17j3: the lobe, annulus and reselection
+// rows (cited §2 acceptance evidence) open with the production document
+// repository on: the seeded history is restored into it
+// (`openWithRepositoryAndOperationHistory`).
 
 test("one lobe of a figure-eight spline extrudes into a body", async ({
   page,
 }) => {
   const workbench = new FeatureWorkbenchHarness(page);
-  await workbench.seedOperationHistory(
+  await workbench.openWithRepositoryAndOperationHistory(
     closedSplineSketchHistory("sketch_figure_eight", [FIGURE_EIGHT]),
   );
-  await workbench.open();
+  await workbench.waitForRenderIdle();
 
   await workbench.activateFeature("extrude");
   const lobes = await regionTargets(page, "sketch_figure_eight", 2);
@@ -66,10 +69,10 @@ test("both regions of a spline annulus (the annulus and its spline disk) extrude
   page,
 }) => {
   const workbench = new FeatureWorkbenchHarness(page);
-  await workbench.seedOperationHistory(
+  await workbench.openWithRepositoryAndOperationHistory(
     closedSplineSketchHistory("sketch_annulus", SPLINE_ANNULUS),
   );
-  await workbench.open();
+  await workbench.waitForRenderIdle();
 
   await workbench.activateFeature("extrude");
   const targets = await regionTargets(page, "sketch_annulus", 2);
@@ -274,10 +277,10 @@ test("a figure-eight lobe keeps its region through a fit-point edit, asks for re
 }, testInfo) => {
   const sketchId = "sketch_figure_eight";
   const workbench = new FeatureWorkbenchHarness(page);
-  await workbench.seedOperationHistory(
+  await workbench.openWithRepositoryAndOperationHistory(
     closedSplineSketchHistory(sketchId, [FIGURE_EIGHT]),
   );
-  await workbench.open();
+  await workbench.waitForRenderIdle();
 
   await workbench.activateFeature("extrude");
   const lobes = await regionTargets(page, sketchId, 2);
