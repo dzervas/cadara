@@ -17,7 +17,7 @@ type TargetAlias = Alias & { label: string };
 type RecipeGeometryEdit<T = import("@/contracts/semantic/schema").SemanticSketchGeometryEdit> = T extends { target: infer R } ? Omit<T, "target" | "destination" | "boundary"> & { target: R | TargetAlias } & (T extends { destination: infer D } ? { destination: D | TargetAlias } : unknown) & (T extends { boundary: infer B } ? { boundary: B | TargetAlias } : unknown) : never;
 type RecipePrimitive<T = import("@/contracts/semantic/schema").SemanticSketchPrimitive> = T extends { source: infer S } ? Omit<T, "source"> & { source: S | TargetAlias } : T;
 type RecipeCommand<T = SemanticCommand> = T extends SemanticCommand
-  ? Omit<T, "basis" | "draft" | "points" | "dimensionId" | "derivationId" | "profile" | "featureId" | "variableId" | "sketchId" | "target" | "targets" | "axis" | "repair" | "edit" | "primitive" | "support"> &
+  ? Omit<T, "basis" | "draft" | "points" | "dimensionId" | "derivationId" | "profile" | "featureId" | "beforeFeatureId" | "bodyId" | "cursor" | "item" | "beforeItem" | "variableId" | "sketchId" | "target" | "targets" | "axis" | "repair" | "edit" | "primitive" | "support"> &
     (T extends { support: infer S } ? { support: S | TargetAlias } : unknown) &
     (T extends { primitive: unknown } ? { primitive: RecipePrimitive } : unknown) &
     (T extends { edit: infer E } ? { edit: E extends { target: unknown } ? RecipeGeometryEdit<E> : E } : unknown) &
@@ -27,6 +27,11 @@ type RecipeCommand<T = SemanticCommand> = T extends SemanticCommand
     (T extends { profile: infer P } ? { profile: P | TargetAlias } : unknown) &
     (T extends { target: infer R } ? { target: R | TargetAlias } : unknown) &
     (T extends { featureId: infer F } ? { featureId: F | TargetAlias } : unknown) &
+    (T extends { beforeFeatureId: infer F } ? { beforeFeatureId: F | TargetAlias } : unknown) &
+    (T extends { bodyId: infer B } ? { bodyId: B | TargetAlias } : unknown) &
+    (T extends { cursor: infer C } ? { cursor: C | TargetAlias } : unknown) &
+    (T extends { item: infer I } ? { item: I | TargetAlias } : unknown) &
+    (T extends { beforeItem: infer I } ? { beforeItem: I | TargetAlias } : unknown) &
     (T extends { variableId: infer V } ? { variableId: V | TargetAlias } : unknown) &
     (T extends { sketchId: infer S } ? { sketchId: S | TargetAlias } : unknown) &
     (T extends { points: infer P } ? { points: P | readonly [TargetAlias, TargetAlias] } : unknown) &
@@ -183,15 +188,19 @@ function parseRecipe(input: unknown): RecipeOperation[] {
     if (Array.isArray(command.points)) validationCommand.points = command.points.map(value => validateTarget(value, "sketch_point_validation"));
     if ("dimensionId" in command) validationCommand.dimensionId = validateTarget(command.dimensionId, "dimension_validation");
     if ("derivationId" in command) validationCommand.derivationId = validateTarget(command.derivationId, "derivation_validation");
-    for (const [key, placeholder] of [["featureId", "feature_validation"], ["variableId", "variable_validation"], ["sketchId", "sketch_validation"]] as const)
+    for (const [key, placeholder] of [["featureId", "feature_validation"], ["beforeFeatureId", "feature_validation"], ["bodyId", "body_validation"], ["variableId", "variable_validation"], ["sketchId", "sketch_validation"]] as const)
       if (key in command) validationCommand[key] = validateTarget(command[key], placeholder);
+    for (const key of ["cursor", "item", "beforeItem"] as const) if (isAlias(command[key])) {
+      validateTarget(command[key], "feature_validation");
+      validationCommand[key] = { kind: "feature", featureId: "feature_validation" };
+    }
     if (isAlias(command.profile)) {
       validateTarget(command.profile, "region_validation");
       validationCommand.profile = { kind: "region", sketchId: "sketch_validation", regionId: "region_validation" };
     }
     if (isAlias(command.target)) {
       validateTarget(command.target, "body_validation");
-      validationCommand.target = command.operation === "export.step" ? { kind: "body", bodyId: "body_validation" }
+      validationCommand.target = command.operation === "export.step" || command.operation === "target.delete" ? { kind: "body", bodyId: "body_validation" }
         : command.operation === "sketch.image.update" || command.operation === "sketch.image.replace" || command.operation === "sketch.image.remove" ? { kind: "sketchOperation", sketchId: "sketch_validation", operationId: "sketch_operation_validation" }
         : { kind: "sketchPoint", sketchId: "sketch_validation", pointId: "sketch_point_validation" };
     }
@@ -358,6 +367,40 @@ export const documentRecipesCommand: CommandModule = {
           if (!found || (found.kind !== "sketchEntity" && found.kind !== "sketchDatumReference")) throw new Error("Mirror axis alias is missing or ambiguous.");
           return found;
         }
+        if ("featureId" in command && isAlias(command.featureId)) {
+          const target = resolveSketchTarget(command.featureId, ["feature"]);
+          if (target.kind !== "feature") throw new Error("Invalid feature target.");
+          command.featureId = target.featureId;
+        }
+        if (command.operation === "feature.reorder" && isAlias(command.beforeFeatureId)) {
+          const target = resolveSketchTarget(command.beforeFeatureId, ["feature"]);
+          if (target.kind !== "feature") throw new Error("Invalid feature reorder anchor.");
+          command.beforeFeatureId = target.featureId;
+        }
+        if (command.operation === "body.rename" && isAlias(command.bodyId)) {
+          const target = resolveSketchTarget(command.bodyId, ["body"]);
+          if (target.kind !== "body") throw new Error("Invalid body target.");
+          command.bodyId = target.bodyId;
+        }
+        function resolveTimelineTarget(value: import("@/contracts/modeling/schema").DocumentFeatureCursor | TargetAlias) {
+          if (!isAlias(value)) return value;
+          const target = resolveSketchTarget(value, ["feature", "sketch"]);
+          if (target.kind !== "feature" && target.kind !== "sketch") throw new Error("Invalid timeline target.");
+          return target;
+        }
+        if (command.operation === "timeline.cursor.set") command.cursor = resolveTimelineTarget(command.cursor);
+        if (command.operation === "timeline.reorder") {
+          const item = resolveTimelineTarget(command.item);
+          const beforeItem = command.beforeItem === null ? null : resolveTimelineTarget(command.beforeItem);
+          if (item.kind === "empty" || beforeItem?.kind === "empty") throw new Error("Invalid timeline order target.");
+          command.item = item;
+          command.beforeItem = beforeItem;
+        }
+        if (command.operation === "target.delete") {
+          const target = resolveSketchTarget(command.target, ["body", "feature", "sketch", "face", "edge", "vertex", "loop", "construction", "region", "sketchEntity", "sketchPoint", "dimension", "constraint", "sketchOperation"]);
+          if (target.kind === "sketchTangentHandle") throw new Error("Invalid deletion target.");
+          command.target = target;
+        }
         if (command.operation === "sketch.mirror.create") command.axis = resolveMirrorAxis(command.axis);
         if (command.operation === "sketch.mirror.repair") {
           if (command.repair.kind === "axis") command.repair.target = resolveMirrorAxis(command.repair.target);
@@ -455,16 +498,10 @@ export const documentRecipesCommand: CommandModule = {
           if (matches.length !== 1 || matches[0]!.target.kind !== "region") throw new Error("Profile target alias is missing or ambiguous.");
           command.profile = matches[0]!.target;
         }
-        if ((command.operation === "extrude.update" && isAlias(command.featureId)) || ((command.operation === "sketch.open" || command.operation === "sketch.support.reassign") && isAlias(command.sketchId))) {
-          const key = command.operation === "extrude.update" ? "featureId" : "sketchId";
-          const target = key === "featureId" && "featureId" in command ? command.featureId : "sketchId" in command ? command.sketchId : null;
-          if (!isAlias(target)) throw new Error("Invalid target alias.");
-          const kind = key === "featureId" ? "feature" : "sketch";
-          const matches = aliases.get(target.alias)?.references.filter(r => r.label === target.label && r.target.kind === kind) ?? [];
-          if (matches.length !== 1) throw new Error("Feature or sketch target alias is missing or ambiguous.");
-          const ref = matches[0]!.target;
-          if (command.operation === "extrude.update" && ref.kind === "feature") command.featureId = ref.featureId;
-          if ((command.operation === "sketch.open" || command.operation === "sketch.support.reassign") && ref.kind === "sketch") command.sketchId = ref.sketchId;
+        if ((command.operation === "sketch.open" || command.operation === "sketch.support.reassign") && isAlias(command.sketchId)) {
+          const target = resolveSketchTarget(command.sketchId, ["sketch"]);
+          if (target.kind !== "sketch") throw new Error("Invalid sketch target.");
+          command.sketchId = target.sketchId;
         }
         const validated = validateSemanticCommand(command);
         if (!validated.success)

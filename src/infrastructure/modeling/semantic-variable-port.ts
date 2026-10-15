@@ -1,5 +1,4 @@
-import { sketchProfileGateFailures } from "@/contracts/sketch/derived-validity";
-import { regionBoundaryBasisOfRecord, resolveRegionBoundaryCurve } from "@/contracts/sketch/region-boundary-curves";
+import { semanticSketchesCurrent } from "./semantic-sketch-currentness";
 import type { SemanticDiscovery, SemanticVariableCommand, SemanticState } from "@/contracts/semantic/schema";
 import type { ModelingDiagnostic } from "@/contracts/modeling/schema";
 import type { DocumentRepositoryMutationResult } from "@/domain/modeling/document-repository";
@@ -89,19 +88,7 @@ export function createSemanticVariablePort(input: {
       terminal.diagnostics = [...terminal.diagnostics, ...after.diagnostics];
       if (!observed?.ok) terminal.diagnostics = [...terminal.diagnostics, semanticDiagnostic(new Error(observed && !observed.ok ? observed.status.diagnostic.message : "Accepted variable has no exact repository write receipt."))];
       const snapshot = input.loop.getState().snapshot;
-      const sketchesCurrent = !!snapshot && snapshot.document.revisionId === state.revisionId && snapshot.document.sketches.every(({ sketch }) => {
-        const definition = sketch.definition;
-        // Empty/image-only metadata has no curve obligation, as in sketch publication.
-        const metadataOnly = definition.entities.length === 0 && definition.points.length === 0 &&
-          definition.constraints.length === 0 && definition.dimensions.length === 0 &&
-          definition.references.length === 0 && (definition.derivedRelationships?.length ?? 0) === 0 &&
-          sketch.solvedSnapshot.status.solveState === "notEvaluated";
-        const basis = regionBoundaryBasisOfRecord(sketch);
-        return (sketch.derivedValidity.state === "current" || metadataOnly) &&
-          sketchProfileGateFailures(sketch.solvedSnapshot).length === 0 &&
-          sketch.regions.every(region => region.loops.every(loop => loop.segments.every(segment =>
-            resolveRegionBoundaryCurve(basis, segment).kind !== "failed")));
-      });
+      const sketchesCurrent = semanticSketchesCurrent(snapshot, state.revisionId);
       const valid = result.rebuildResult.kind === "rebuilt" && result.rebuildResult.revisionId === state.revisionId && sketchesCurrent && !after.diagnostics.some(d => d.severity === "error") && (after.discovery.model?.bodies.every(b => b.bounds !== null) ?? true);
       if (!valid) terminal.diagnostics = [...terminal.diagnostics, semanticDiagnostic(new Error("Variable rebuild did not establish current sketch and solid geometry."))];
       terminal.completion.geometry = { kind: valid ? "current" : command.intent === "author-invalid" ? "invalid-editable" : "failed", state, sketchBasis: null, solve: null, derivation: null, rebuildRevisionId: result.rebuildResult.kind === "skipped" ? null : result.rebuildResult.revisionId };

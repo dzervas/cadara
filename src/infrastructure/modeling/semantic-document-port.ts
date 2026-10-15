@@ -1,3 +1,4 @@
+import { createSemanticFeatureLifecyclePort } from "./semantic-feature-lifecycle-port";
 import { createSemanticVariablePort } from "./semantic-variable-port";
 import { createSemanticExportPort } from "./semantic-export-port";
 import { createSemanticHistoryPort } from "./semantic-history-port";
@@ -179,6 +180,7 @@ export function createSemanticDocumentPort(input: {
     sketch: sketches.execute,
     history: createSemanticHistoryPort({ repository, service, loop, inspect, sketch: sketches.execute }),
     variable: createSemanticVariablePort({ service, loop, inspect }),
+    featureLifecycle: createSemanticFeatureLifecyclePort({ service, loop, inspect }),
     extrude: createSemanticExtrudePort({ service, loop, inspect }),
     export: createSemanticExportPort({ service, files: input.nativeFileIO, inspect }),
     async drain() {

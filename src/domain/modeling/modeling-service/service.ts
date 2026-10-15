@@ -168,6 +168,7 @@ export function createModelingService(
   let latestDocumentChangeEvent: ModelingServiceDocumentChangeEvent | null =
     null;
   let seedAuthoredDocument: AuthoredModelDocument | null = null;
+  let restoredMutationPredecessor: AuthoredModelDocument | null = null;
   let repositoryChangePromise = Promise.resolve();
   let repositoryPersistencePromise = Promise.resolve();
   let isRestoringRepositoryDocument = documentRepository !== null;
@@ -329,6 +330,7 @@ export function createModelingService(
       diagnostics,
       createLocalAssetResolver(document, assets),
     );
+    restoredMutationPredecessor = structuredClone(document);
   }
 
   async function getSeedAuthoredDocument() {
@@ -366,6 +368,16 @@ export function createModelingService(
       currentDocumentId,
     );
     return createAuthoredModelDocumentFromSnapshot(snapshot);
+  }
+
+  async function getMutationPredecessor() {
+    const kernelBase = await exportAuthoredDocumentForRepository();
+    // Restore/compensation rebuilds native witnesses, while the repository keeps
+    // its exact previous stored basis. That basis applies only until the runtime
+    // advances: later writes may be queued ahead of background persistence.
+    return restoredMutationPredecessor?.revisionId === kernelBase.revisionId
+      ? structuredClone(restoredMutationPredecessor)
+      : kernelBase;
   }
 
   function createDocumentFileDiagnostic(
@@ -668,6 +680,7 @@ export function createModelingService(
 
       markRepositorySnapshotFresh(writeResult.metadata);
       activeDocument = writeResult.document;
+      if (options.validateBeforePersist) restoredMutationPredecessor = structuredClone(activeDocument);
       restoreDiagnostics = writeResult.diagnostics ?? [];
     }
 
@@ -1783,7 +1796,7 @@ export function createModelingService(
             input,
             currentDocumentId,
           );
-          const expected = await exportAuthoredDocumentForRepository();
+          const expected = await getMutationPredecessor();
           const response = await adapter.addDocumentVariable(request);
           return finalizeMutationResult(
             expected,
@@ -1814,7 +1827,7 @@ export function createModelingService(
             input,
             currentDocumentId,
           );
-          const expected = await exportAuthoredDocumentForRepository();
+          const expected = await getMutationPredecessor();
           const response = await adapter.updateDocumentVariable(request);
           return finalizeMutationResult(
             expected,
@@ -1835,7 +1848,7 @@ export function createModelingService(
           await ensureInitialized();
           await repositoryChangePromise;
           const request = normalizeCreateFeatureInput(input, currentDocumentId);
-          const expected = await exportAuthoredDocumentForRepository();
+          const expected = await getMutationPredecessor();
           const response = await adapter.createFeature(request);
           return finalizeMutationResult(
             expected,
@@ -1859,7 +1872,7 @@ export function createModelingService(
           await ensureInitialized();
           await repositoryChangePromise;
           const request = normalizeUpdateFeatureInput(input, currentDocumentId);
-          const expected = await exportAuthoredDocumentForRepository();
+          const expected = await getMutationPredecessor();
           const response = await adapter.updateFeature(request);
           return finalizeMutationResult(
             expected,
@@ -1888,7 +1901,7 @@ export function createModelingService(
             input,
             currentDocumentId,
           );
-          const expected = await exportAuthoredDocumentForRepository();
+          const expected = await getMutationPredecessor();
           const response = await adapter.setFeatureSuppression(request);
           return finalizeMutationResult(
             expected,
@@ -1912,7 +1925,7 @@ export function createModelingService(
           await ensureInitialized();
           await repositoryChangePromise;
           const request = normalizeDeleteFeatureInput(input, currentDocumentId);
-          const expected = await exportAuthoredDocumentForRepository();
+          const expected = await getMutationPredecessor();
           const response = await adapter.deleteFeature(request);
           return finalizeMutationResult(
             expected,
@@ -1936,7 +1949,7 @@ export function createModelingService(
           await ensureInitialized();
           await repositoryChangePromise;
           const request = normalizeDeleteTargetInput(input, currentDocumentId);
-          const expected = await exportAuthoredDocumentForRepository();
+          const expected = await getMutationPredecessor();
           const response = await adapter.deleteTarget(request);
           return finalizeMutationResult(
             expected,
@@ -1960,7 +1973,7 @@ export function createModelingService(
           await ensureInitialized();
           await repositoryChangePromise;
           const request = normalizeRenameBodyInput(input, currentDocumentId);
-          const expected = await exportAuthoredDocumentForRepository();
+          const expected = await getMutationPredecessor();
           const response = await adapter.renameBody(request);
           return finalizeMutationResult(
             expected,
@@ -1987,7 +2000,7 @@ export function createModelingService(
             input,
             currentDocumentId,
           );
-          const expected = await exportAuthoredDocumentForRepository();
+          const expected = await getMutationPredecessor();
           const response = await adapter.reorderFeature(request);
           return finalizeMutationResult(
             expected,
@@ -2020,7 +2033,7 @@ export function createModelingService(
             input,
             currentDocumentId,
           );
-          const expected = await exportAuthoredDocumentForRepository();
+          const expected = await getMutationPredecessor();
           const response = await adapter.reorderDocumentHistory(request);
           return finalizeMutationResult(
             expected,
@@ -2044,15 +2057,7 @@ export function createModelingService(
             input,
             currentDocumentId,
           );
-          const kernelBase = await exportAuthoredDocumentForRepository();
-          // Restoring a published sketch can omit inactive downstream lineage from
-          // the kernel export. The three-way persistence base is the exact stored
-          // document, not that derived view; normal head conflict checks still apply.
-          const storedBase = documentRepository
-            ? await documentRepository.load({ documentId: currentDocumentId, seedDocument: kernelBase })
-            : null;
-          if (storedBase && !storedBase.ok) throw new Error(storedBase.status.diagnostic.message);
-          const expected = storedBase?.ok ? storedBase.document : kernelBase;
+          const expected = await getMutationPredecessor();
           const response = await adapter.setFeatureCursor(request);
           return finalizeMutationResult(
             expected,

@@ -325,7 +325,9 @@ export type ModelingSetFeatureSuppressionInput = Omit<
   schema.SetFeatureSuppressionRequest,
   "contractVersion" | "documentId"
 > &
-  Partial<ModelingMutationBasisInput>;
+  Partial<ModelingMutationBasisInput> & {
+    observePersistence?: (transaction: DocumentRepositoryMutationResult) => void;
+  };
 export type ModelingUpdateDocumentVariableInput = Omit<
   schema.UpdateDocumentVariableRequest,
   "contractVersion" | "documentId"
@@ -337,27 +339,37 @@ export type ModelingDeleteFeatureInput = Omit<
   schema.DeleteFeatureRequest,
   "contractVersion" | "documentId"
 > &
-  Partial<ModelingMutationBasisInput>;
+  Partial<ModelingMutationBasisInput> & {
+    observePersistence?: (transaction: DocumentRepositoryMutationResult) => void;
+  };
 export type ModelingDeleteTargetInput = Omit<
   schema.DeleteDocumentTargetRequest,
   "contractVersion" | "documentId"
 > &
-  Partial<ModelingMutationBasisInput>;
+  Partial<ModelingMutationBasisInput> & {
+    observePersistence?: (transaction: DocumentRepositoryMutationResult) => void;
+  };
 export type ModelingRenameBodyInput = Omit<
   schema.RenameBodyRequest,
   "contractVersion" | "documentId"
 > &
-  Partial<ModelingMutationBasisInput>;
+  Partial<ModelingMutationBasisInput> & {
+    observePersistence?: (transaction: DocumentRepositoryMutationResult) => void;
+  };
 export type ModelingReorderFeatureInput = Omit<
   schema.ReorderFeatureRequest,
   "contractVersion" | "documentId"
 > &
-  Partial<ModelingMutationBasisInput>;
+  Partial<ModelingMutationBasisInput> & {
+    observePersistence?: (transaction: DocumentRepositoryMutationResult) => void;
+  };
 export type ModelingReorderDocumentHistoryInput = Omit<
   schema.ReorderDocumentHistoryRequest,
   "contractVersion" | "documentId"
 > &
-  Partial<ModelingMutationBasisInput>;
+  Partial<ModelingMutationBasisInput> & {
+    observePersistence?: (transaction: DocumentRepositoryMutationResult) => void;
+  };
 export type ModelingSetFeatureCursorInput = Omit<
   schema.SetFeatureCursorRequest,
   "contractVersion" | "documentId"

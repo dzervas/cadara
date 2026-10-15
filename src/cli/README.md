@@ -56,6 +56,39 @@ For example, append `{ "version": 1, "commandId": "save", "operation":
 "document.save", "path": "bracket.cadara", "basis": { "alias": "part" } }`.
 Help, capture and invalid recipes do not start the modeling runtime.
 
+### Feature lifecycle and rollback timeline
+
+The following operations require a current `basis` and explicit `intent`
+(`fulfill` or `author-invalid`) in document context, outside a private sketch:
+
+- `feature.suppression.set`: `featureId`, `suppressed` boolean; restoration
+  uses `false` and preserves the feature identity.
+- `feature.delete`: `featureId`; removes the authored feature.
+- `feature.reorder`: `featureId`, `beforeFeatureId` (null appends).
+- `body.rename`: `bodyId`, `label`; preserves body identity and geometry.
+- `target.delete`: a typed durable `target`; uses production supported-target
+  deletion semantics (deleting a body authors a `deleteSolid` feature).
+- `timeline.cursor.set`: `cursor` is `{ kind: "empty" }`,
+  `{ kind: "sketch", sketchId }` or `{ kind: "feature", featureId }`.
+- `timeline.reorder`: typed sketch/feature `item` and `beforeItem` (null appends).
+
+Discovery `model.features` includes actual suppression state and produced
+identities; `model.cursor` and `model.timeline` describe the current authored
+rollback position/order. Cursor movement changes evaluated geometry without
+removing later feature records. It is **not** author-scoped `history.undo` or
+`history.redo`, nor replay of private history. Native files retain authored
+suppression, body labels and cursor, not the process's undo stack.
+
+Recipes accept exact unique `{ alias, label }` references for `featureId`,
+`beforeFeatureId`, `bodyId`, `target`, `cursor`, `item` and `beforeItem`, using
+references from that alias's discovery. Null anchors remain null. Missing or
+ambiguous labels fail before the operation; unknown aliases are usage errors.
+Dependency-invalid orders, unsupported/deleted targets and stale bases refuse.
+Accepted edits still require an exact persistence receipt, rebuilt geometry and
+current handoff. Invalid downstream geometry is not fulfillment; only explicit
+`author-invalid` can accept it as editable invalid state. A write failure does
+not imply rollback of an already applied live edit.
+
 ### Round sketch primitives
 
 `sketch.author` takes current `basis` and `draft`, `construction`, `intent`, and

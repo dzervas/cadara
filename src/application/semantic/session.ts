@@ -181,8 +181,10 @@ class DocumentSession implements SemanticSession {
         },
       };
     try {
-      if (command.operation.startsWith("variable.") || command.operation.startsWith("sketch.") || command.operation.startsWith("extrude.") || command.operation.startsWith("history.") || command.operation.startsWith("export.")) {
-        const execute = command.operation.startsWith("variable.")
+      if (command.operation.startsWith("timeline.") || command.operation === "target.delete" || command.operation === "body.rename" || command.operation.startsWith("feature.") || command.operation.startsWith("variable.") || command.operation.startsWith("sketch.") || command.operation.startsWith("extrude.") || command.operation.startsWith("history.") || command.operation.startsWith("export.")) {
+        const execute = command.operation.startsWith("timeline.") || command.operation === "target.delete" || command.operation === "body.rename" || command.operation.startsWith("feature.")
+          ? this.owner.featureLifecycle?.bind(this.owner)
+          : command.operation.startsWith("variable.")
           ? this.owner.variable?.bind(this.owner)
           : command.operation.startsWith("sketch.")
           ? this.owner.sketch?.bind(this.owner)

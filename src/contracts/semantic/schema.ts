@@ -166,6 +166,19 @@ interface CommandIdentity {
   commandId: string;
 }
 
+export type SemanticFeatureLifecycleCommand = CommandIdentity & {
+  basis: SemanticBasis;
+  intent: "fulfill" | "author-invalid";
+} & (
+  | { operation: "feature.suppression.set"; featureId: import("@/contracts/shared/ids").FeatureId; suppressed: boolean }
+  | { operation: "feature.reorder"; featureId: import("@/contracts/shared/ids").FeatureId; beforeFeatureId: import("@/contracts/shared/ids").FeatureId | null }
+  | { operation: "feature.delete"; featureId: import("@/contracts/shared/ids").FeatureId }
+  | { operation: "timeline.reorder"; item: import("@/contracts/modeling/schema").DocumentHistoryOrderEntry; beforeItem: import("@/contracts/modeling/schema").DocumentHistoryOrderEntry | null }
+  | { operation: "timeline.cursor.set"; cursor: import("@/contracts/modeling/schema").DocumentFeatureCursor }
+  | { operation: "target.delete"; target: DurableRef }
+  | { operation: "body.rename"; bodyId: import("@/contracts/shared/ids").BodyId; label: string }
+);
+
 export type SemanticVariableCommand = CommandIdentity & {
   basis: SemanticBasis;
   name: string;
@@ -204,6 +217,7 @@ export type SemanticCommand =
   | SemanticSketchCommand
   | SemanticExtrudeCommand
   | SemanticVariableCommand
+  | SemanticFeatureLifecycleCommand
   | SemanticHistoryCommand
   | SemanticExportCommand
   | (CommandIdentity &
@@ -325,7 +339,9 @@ export interface SemanticDiscovery {
   references: readonly { label: string; target: DurableRef }[];
   history: DurableHistoryAvailability | null;
   model?: {
-    features: readonly { featureId: import("@/contracts/shared/ids").FeatureId; label: string; kind: string; producedTargets: readonly DurableRef[] }[];
+    cursor?: import("@/contracts/modeling/schema").DocumentFeatureCursor;
+    timeline?: readonly { label: string; target: Extract<DurableRef, { kind: "sketch" | "feature" }> }[];
+    features: readonly { featureId: import("@/contracts/shared/ids").FeatureId; label: string; kind: string; suppressed: boolean; producedTargets: readonly DurableRef[] }[];
     /** Native exact B-rep inspection only; null when unavailable or invalid. */
     bodies: readonly { bodyId: import("@/contracts/shared/ids").BodyId; kind: import("@/contracts/modeling/schema").BodyKind; bounds: { min: readonly number[]; max: readonly number[] } | null }[];
   };
@@ -414,6 +430,8 @@ export type SemanticOutcome =
 
 export interface SemanticResult {
   version: 1;
+  /** Exact production mutation attribution; absent for non-mutating families. */
+  changedTargets?: readonly DurableRef[];
   correlation: SemanticCorrelation;
   outcome: SemanticOutcome;
   completion: SemanticCompletion;
