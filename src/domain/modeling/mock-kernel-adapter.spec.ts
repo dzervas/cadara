@@ -6,9 +6,11 @@ import { createCertifiedNeutralCurveQuery } from "@/domain/modeling/neutral-curv
 import { createModelingService } from "./modeling-service";
 // T17o review A-1: `modelingRuntimeValidators` (no production consumer) is
 // deleted; its members were these individually exported normalizers.
+// T17p2 (F-1): `normalizeFeatures` had no production caller and is deleted;
+// feature records are checked through `normalizeWorkspaceSnapshot`.
 import {
-  normalizeFeatures,
   normalizeRenderables,
+  normalizeWorkspaceSnapshot,
 } from "./modeling-service/normalization";
 import { MockSketchSolverAdapter } from "@/domain/solver/mock-sketch-solver-adapter";
 import {
@@ -49,6 +51,7 @@ import {
 
 import {
   createExpressionAuthoredValue,
+  createLiteralAuthoredValue,
   isExpressionAuthoredValue,
 } from "@/contracts/modeling/authored-values";
 test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
@@ -3637,8 +3640,22 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
     ).toBeTruthy();
   }
 
-  function testFeatureSnapshotValidatorPreservesMirrorAndTransformDefinitions() {
-    const features = normalizeFeatures([
+  // T17p2 (F-1): the production worker-transport path (Typia
+  // `parseWorkspaceSnapshot` inside `normalizeWorkspaceSnapshot`) parses the
+  // feature records, replacing the deleted `normalizeFeatures`.
+  async function testFeatureSnapshotValidatorPreservesMirrorAndTransformDefinitions() {
+    const adapter = new MockKernelAdapter();
+    const workspace = JSON.parse(
+      JSON.stringify(
+        (
+          await adapter.getDocumentSnapshot({
+            contractVersion: "modeling-contract/v1alpha1",
+            documentId: "doc_workspace",
+          })
+        ).snapshot,
+      ),
+    );
+    workspace.document.features = [
       {
         ownerDocumentId: "doc_workspace",
         ownerRevisionId: "rev_1",
@@ -3664,7 +3681,7 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
                 ],
               },
             ],
-            options: { copy: true },
+            options: { copy: createLiteralAuthoredValue(true) },
           },
         },
         producedTargets: [{ kind: "body", bodyId: "body_mirror-1" }],
@@ -3694,12 +3711,13 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
                 ],
               },
             ],
-            options: { distance: 2 },
+            options: { distance: createLiteralAuthoredValue(2) },
           },
         },
         producedTargets: [{ kind: "body", bodyId: "body_a" }],
       },
-    ]);
+    ];
+    const features = normalizeWorkspaceSnapshot(workspace).document.features;
 
     expect(
       features[0]?.definition.kind,
@@ -3708,7 +3726,7 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
     expect(
       features[0]?.definition.parameters.options?.copy,
       "Feature snapshot normalization should preserve mirror copy options.",
-    ).toBeTruthy();
+    ).toEqual(createLiteralAuthoredValue(true));
     expect(
       features[1]?.definition.kind,
       "Feature snapshot normalization should preserve transform definitions.",
@@ -3716,7 +3734,7 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
     expect(
       features[1]?.definition.parameters.options?.distance,
       "Feature snapshot normalization should preserve transform distance options.",
-    ).toBe(2);
+    ).toEqual(createLiteralAuthoredValue(2));
   }
 
   async function testMockSnapshotSurfacesSketchNavigationAndHistory() {
@@ -4424,7 +4442,7 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
   await testConstructionPlanesExposeFilledRenderSurfaces();
   testResolvePickTargetUsesKernelPriority();
   testRenderValidatorRejectsInvalidGeometry();
-  testFeatureSnapshotValidatorPreservesMirrorAndTransformDefinitions();
+  await testFeatureSnapshotValidatorPreservesMirrorAndTransformDefinitions();
   await testMockSnapshotSurfacesSketchNavigationAndHistory();
   await testDocumentVariableExpressionsValidateBeforeMutation();
   await testDocumentVariableUpdateRebuildsImportedExpressionSketch();

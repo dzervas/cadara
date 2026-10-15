@@ -96,7 +96,7 @@ import type {
   RegionIntersectionWitness,
   RegionLoopRecord,
   RegionRecord,
-  SketchDefinition,
+  DerivableSketchDefinition,
   SketchPoint2D,
   SketchSolveDiagnostic,
   SolvedSketchSnapshot,
@@ -117,8 +117,11 @@ export interface SketchArrangementInput {
   documentId: DocumentId;
   revisionId: RevisionId;
   sketchId: SketchId;
-  /** Evaluated definition that produced `solvedSnapshot` (one accepted pair). */
-  definition: SketchDefinition;
+  /**
+   * Evaluated definition that produced `solvedSnapshot` (one accepted pair;
+   * authored or resolved, T17p2 F-2: arrangement never reads dimensions).
+   */
+  definition: DerivableSketchDefinition;
   solvedSnapshot: SolvedSketchSnapshot;
   projectedReferences: readonly ProjectedSketchReferenceRecord[];
   /** The document's settings.modelingTolerance: the only semantic linear tolerance. */
@@ -172,7 +175,7 @@ export interface SketchArrangementUnpublishedOutput {
  * input is byte-identical.
  */
 export function offsetArrangementInput(
-  definition: SketchDefinition,
+  definition: DerivableSketchDefinition,
   solvedSnapshot: SolvedSketchSnapshot,
   publications: readonly SketchOffsetPublicationRecord[],
 ): Pick<SketchArrangementInput, "derivedCurves" | "unpublishedOffsetOutputs"> {
@@ -590,7 +593,9 @@ function outwardBox(center: SplineVector, radius: number): Box {
   };
 }
 
-function authoredReferenceIds(definition: SketchDefinition): Set<ReferenceId> {
+function authoredReferenceIds(
+  definition: DerivableSketchDefinition,
+): Set<ReferenceId> {
   const recorded = new Set(
     definition.references.map((reference) => reference.referenceId),
   );
@@ -632,7 +637,7 @@ function projectedSource(
  * and the output is unchanged.
  */
 export function collectArrangementBranches(
-  definition: SketchDefinition,
+  definition: DerivableSketchDefinition,
   solved: SolvedSketchSnapshot,
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
   derivedCurves: readonly SketchArrangementDerivedCurve[],
@@ -1114,7 +1119,7 @@ export interface DeclaredJoinClasses {
 }
 
 export function declaredJoinClasses(
-  definition: SketchDefinition,
+  definition: DerivableSketchDefinition,
   solved: SolvedSketchSnapshot,
 ): DeclaredJoinClasses {
   const classes = new UnionFind<string>();
@@ -1265,7 +1270,7 @@ export function incidenceOnHosts(
 }
 
 export function collectDeclarations(
-  definition: SketchDefinition,
+  definition: DerivableSketchDefinition,
   solved: SolvedSketchSnapshot,
   branches: readonly Branch[],
 ): Declarations {
@@ -3638,7 +3643,7 @@ function makeDiagnostic(
 }
 
 function projectedReferenceDiagnostics(
-  definition: SketchDefinition,
+  definition: DerivableSketchDefinition,
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
 ): SketchSolveDiagnostic[] {
   const authored = authoredReferenceIds(definition);

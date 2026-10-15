@@ -14,6 +14,7 @@ import type {
 import type { SketchPlaneFrame, SketchPlaneKey } from "@/contracts/shared/sketch-plane";
 import type {
   RegionRecord,
+  NumericSketchDefinition,
   SketchDefinition,
   SketchPoint2D,
   SolvedSketchSnapshot,
@@ -232,7 +233,7 @@ async function deriveVerificationSketch(
     relationshipSummary: translation.relationshipSummary,
     sourceSolveStatus: translation.sourceSolveStatus,
   });
-  const definition: SketchDefinition = {
+  const definition: NumericSketchDefinition = {
     ...definitionForVerificationSolve(verified.definition),
     references: [],
   };

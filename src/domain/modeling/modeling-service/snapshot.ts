@@ -10,7 +10,6 @@ import type {
   GetDocumentSnapshotRequest,
   AddDocumentVariableResponse,
   RenameBodyResponse,
-  ResolvedReferenceRecord,
   ResolveReferenceResponse,
   ReorderDocumentHistoryResponse,
   ReorderFeatureResponse,
@@ -428,12 +427,4 @@ export function mapResolvedReferenceResponse(
     resolution: parsed.resolution,
     diagnostics: parsed.diagnostics,
   };
-}
-
-export function normalizeResolution(value: unknown): ResolvedReferenceRecord {
-  return requireResolveReferenceResponse({
-    contractVersion: CONTRACT_VERSION,
-    resolution: value,
-    diagnostics: [],
-  }).resolution;
 }

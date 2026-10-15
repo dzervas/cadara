@@ -12,7 +12,7 @@ import {
   createLiteralAuthoredValue,
   getAuthoredFormText,
   getAuthoredLiteralValue,
-  type MaybeAuthoredValue,
+  type AuthoredValue,
 } from "@/contracts/modeling/authored-values";
 import type { DimensionId } from "@/contracts/shared/ids";
 import type {
@@ -1020,7 +1020,7 @@ function measureSketchConstraintValue(
   session: SketchSessionState,
   authoring: SketchConstraintAuthoringState,
   pointer: SketchPoint | null,
-): MaybeAuthoredValue<number> | null {
+): AuthoredValue<number> | null {
   const definition = getSketchConstraintDefinition(authoring.toolId);
   if (!definition.measureValue) {
     return authoring.pendingValue;

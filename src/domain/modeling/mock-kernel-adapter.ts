@@ -129,7 +129,10 @@ import type {
   UpdateDocumentVariableRequest,
   UpdateDocumentVariableResponse,
 } from "@/contracts/modeling/schema";
-import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
+import {
+  createLiteralAuthoredValue,
+  getAuthoredLiteralValue,
+} from "@/contracts/modeling/authored-values";
 import {
   createAuthoredModelDocumentFromSnapshot,
   type AuthoredModelDocument as RepositoryAuthoredModelDocument,
@@ -3546,7 +3549,7 @@ const sketchDefinition: SketchDefinition = {
         "sketch_point_1_rect-bottom-left" as SketchPointId,
         "sketch_point_1_rect-bottom-right" as SketchPointId,
       ],
-      value: 8,
+      value: createLiteralAuthoredValue(8),
     },
     {
       dimensionId: "dimension_1_height" as DimensionId,
@@ -3557,7 +3560,7 @@ const sketchDefinition: SketchDefinition = {
         "sketch_point_1_rect-bottom-left" as SketchPointId,
         "sketch_point_1_rect-top-left" as SketchPointId,
       ],
-      value: 6,
+      value: createLiteralAuthoredValue(6),
     },
   ],
 };
@@ -3638,6 +3641,17 @@ async function buildSketchRecord(
     sketchId: input.sketchId,
   } as const;
   const requestId = "request_mock-snapshot-bootstrap";
+  // T17p2 (F-2): the solve requests carry the resolved definition; the seed
+  // has literal values only, so it resolves without document variables.
+  const resolved = resolveSketchDimensionValues({
+    definition: input.definition,
+    variables: [],
+  });
+  if (!resolved.ok) {
+    throw new Error(
+      `Mock seed sketch dimensions do not resolve: ${resolved.diagnostics.map((diagnostic) => diagnostic.message).join(" ")}`,
+    );
+  }
   const projection = await solverAdapter.projectExternalReferences({
     ...base,
     requestId: `${requestId}:project` as RequestId,
@@ -3654,7 +3668,7 @@ async function buildSketchRecord(
     plane,
     tolerances,
     modelingTolerance: input.settings.modelingTolerance,
-    definition: input.definition,
+    definition: resolved.definition,
     projectedReferences: projection.projectedReferences,
   });
   const {
@@ -3670,13 +3684,13 @@ async function buildSketchRecord(
       tolerances,
       modelingTolerance: input.settings.modelingTolerance,
       partialSolvePolicy: "bestEffort",
-      definition: input.definition,
+      definition: resolved.definition,
       projectedReferences: projection.projectedReferences,
     },
     {
       ...base,
       requestId: `${requestId}:regions` as RequestId,
-      definition: input.definition,
+      definition: resolved.definition,
       projectedReferences: projection.projectedReferences,
       modelingTolerance: input.settings.modelingTolerance,
     },

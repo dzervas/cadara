@@ -5,6 +5,7 @@ import { expect, test } from "vitest";
 
 import {
   addRectangle,
+  literalResolvedDefinition,
   makeSketchFixture,
 } from "@/contracts/sketch/region-extraction.fixtures";
 import {
@@ -112,7 +113,8 @@ function makeRequest(
     documentId: documentId as DocumentId,
     revisionId: input.revisionId as DeriveSketchRegionsRequest["revisionId"],
     sketchId: input.sketchId as DeriveSketchRegionsRequest["sketchId"],
-    definition: input.definition,
+    // T17p2 (F-2): the request carries the resolved definition.
+    definition: literalResolvedDefinition(input.definition),
     solvedSnapshot: input.solvedSnapshot,
     projectedReferences: [...input.projectedReferences],
     modelingTolerance: input.modelingTolerance,

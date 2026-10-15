@@ -2,6 +2,7 @@ import type { SketchDerivationSettings } from "@/contracts/sketch/derived-geomet
 import {
   isAcceptedConstraintStatus,
   isReferenceDimension,
+  requireDrivingDimensionValue,
 } from "@/contracts/sketch/schema";
 import type {
   DocumentVariableRecord,
@@ -12,7 +13,7 @@ import {
   getAuthoredFormText,
   getAuthoredLiteralValue,
   isExpressionAuthoredValue,
-  type MaybeAuthoredValue,
+  type AuthoredValue,
 } from "@/contracts/modeling/authored-values";
 import type {
   SketchEntityId,
@@ -587,7 +588,7 @@ export function clearSketchAnnotationEdit(
 export function commitSketchAnnotationEditValue(
   session: SketchSessionState,
   edit: SketchAnnotationEditState & {
-    pendingValue: MaybeAuthoredValue<number>;
+    pendingValue: AuthoredValue<number>;
   },
 ): SketchSessionState {
   const target = edit.target;
@@ -686,7 +687,9 @@ function orientSignedPointPairDimension(
         return dimension;
       }
       const axis = getSignedPointPairAxis(dimension);
-      const literal = getAuthoredLiteralValue(dimension.value);
+      const literal = getAuthoredLiteralValue(
+        requireDrivingDimensionValue(dimension, dimension.value),
+      );
       const signed = literal === null ? measuredSign : literal * measuredSign;
       if (!axis || signed >= 0) {
         return dimension;
@@ -867,7 +870,7 @@ export function solveEditedAnnotationDefinition(
 export function updateAnnotationValueInDefinition(
   definition: SketchDefinition,
   target: SketchConstraintRef | SketchDimensionRef,
-  value: MaybeAuthoredValue<number>,
+  value: AuthoredValue<number>,
 ): SketchDefinition {
   if (target.kind === "constraint") {
     const constraints = definition.constraints.map((constraint) => {
@@ -932,8 +935,12 @@ export function updateAnnotationValueInDefinition(
           const literalValue = getAuthoredLiteralValue(value);
           return {
             ...withoutReferenceMarker(dimension),
+            // T17p2 (F-2): a literal angle is stored as a literal wrapper
+            // (it was written bare before).
             valueRadians:
-              literalValue === null ? value : (literalValue * Math.PI) / 180,
+              literalValue === null
+                ? value
+                : createLiteralAuthoredValue((literalValue * Math.PI) / 180),
           };
         }
         case "arcStartPointCoincident":
@@ -1369,7 +1376,7 @@ export function getEditableAnnotationValue(
 ): {
   label: string;
   /** The edit's initial value; a reference dimension's is its measured value. */
-  value: MaybeAuthoredValue<number> | null;
+  value: AuthoredValue<number> | null;
   unit?: string;
   min?: number;
   anchor?: SketchToolAnchorDescriptor;
@@ -1398,7 +1405,9 @@ export function getEditableAnnotationValue(
 
     return {
       label: "Angle",
-      value: (constraint.valueRadians * 180) / Math.PI,
+      value: createLiteralAuthoredValue(
+        (constraint.valueRadians * 180) / Math.PI,
+      ),
       unit: "deg",
       anchor,
     };
@@ -1447,12 +1456,16 @@ export function getEditableAnnotationValue(
   }
 
   if (dimension.kind === "lineAngle") {
-    const literalRadians = getAuthoredLiteralValue(dimension.valueRadians);
+    const valueRadians = requireDrivingDimensionValue(
+      dimension,
+      dimension.valueRadians,
+    );
+    const literalRadians = getAuthoredLiteralValue(valueRadians);
     return {
       label,
       value:
         literalRadians === null
-          ? dimension.valueRadians
+          ? valueRadians
           : createLiteralAuthoredValue((literalRadians * 180) / Math.PI),
       unit,
       min,
@@ -1463,7 +1476,7 @@ export function getEditableAnnotationValue(
 
   return {
     label,
-    value: dimension.value,
+    value: requireDrivingDimensionValue(dimension, dimension.value),
     unit,
     min,
     anchor,
@@ -2769,7 +2782,7 @@ export function buildCommittedDimensionOverlays(
               referenceKind: axis,
               start: line.start,
               end: line.end,
-              value: isReferenceDimension(dimension) ? null : dimension.value,
+              value: dimensionOverlayValue(dimension),
               unit: "mm",
               labelAnchor: {
                 kind: "sketchPoint",
@@ -2822,7 +2835,7 @@ export function buildCommittedDimensionOverlays(
               referenceKind: dimension.axis,
               start: line.start,
               end: line.end,
-              value: isReferenceDimension(dimension) ? null : dimension.value,
+              value: dimensionOverlayValue(dimension),
               unit: "mm",
               labelAnchor: {
                 kind: "sketchPoint",
@@ -2875,7 +2888,7 @@ export function buildCommittedDimensionOverlays(
                 dimension.kind === "diameter" ? "diameter" : "radius",
               start,
               end,
-              value: isReferenceDimension(dimension) ? null : dimension.value,
+              value: dimensionOverlayValue(dimension),
               unit: "mm",
               labelAnchor: {
                 kind: "sketchPoint",
@@ -2906,7 +2919,7 @@ export function buildCommittedDimensionOverlays(
               referenceKind: "lineLength",
               start: line.start,
               end: line.end,
-              value: isReferenceDimension(dimension) ? null : dimension.value,
+              value: dimensionOverlayValue(dimension),
               unit: "mm",
               labelAnchor: {
                 kind: "sketchPoint",
@@ -2961,7 +2974,7 @@ export function buildCommittedDimensionOverlays(
               referenceKind: "lineDistance",
               start: line.start,
               end: line.end,
-              value: isReferenceDimension(dimension) ? null : dimension.value,
+              value: dimensionOverlayValue(dimension),
               unit: "mm",
               labelAnchor: {
                 kind: "sketchPoint",
@@ -2999,7 +3012,7 @@ export function buildCommittedDimensionOverlays(
               referenceKind: "pointLineDistance",
               start: line.start,
               end: line.end,
-              value: isReferenceDimension(dimension) ? null : dimension.value,
+              value: dimensionOverlayValue(dimension),
               unit: "mm",
               labelAnchor: {
                 kind: "sketchPoint",
@@ -3886,8 +3899,26 @@ export function describeConstraint(constraint: ConstraintDefinition) {
 
 const CALCULATED_DIMENSION_SYMBOL = "\u0192"; // ƒ denotes an expression-driven value.
 
+/**
+ * T17p2 (F-2): the number a dimension-line overlay carries: a driving
+ * literal's value; null for a reference or an expression (the overlay's
+ * value is a number, never the authored wrapper).
+ */
+function dimensionOverlayValue(
+  dimension: Exclude<
+    DimensionDefinition,
+    { kind: "lineAngle" | "arcStartPointCoincident" | "arcEndPointCoincident" }
+  >,
+): number | null {
+  return isReferenceDimension(dimension)
+    ? null
+    : getAuthoredLiteralValue(
+        requireDrivingDimensionValue(dimension, dimension.value),
+      );
+}
+
 function formatAuthoredDimensionNumber(
-  value: MaybeAuthoredValue<number>,
+  value: AuthoredValue<number>,
   digits: number,
   resolvedValue?: number,
 ) {
@@ -3904,7 +3935,7 @@ function formatAuthoredDimensionNumber(
 }
 
 function formatAuthoredDimensionDegrees(
-  value: MaybeAuthoredValue<number>,
+  value: AuthoredValue<number>,
   digits: number,
   resolvedRadians?: number,
 ) {
@@ -3970,9 +4001,9 @@ export function describeDimension(
     case "lineLength":
     case "lineDistance":
     case "linePointDistance":
-      return `${formatAuthoredDimensionNumber(dimension.value, 2, resolved)} mm ${getDimensionQuantityNoun(dimension)}`;
+      return `${formatAuthoredDimensionNumber(requireDrivingDimensionValue(dimension, dimension.value), 2, resolved)} mm ${getDimensionQuantityNoun(dimension)}`;
     case "lineAngle":
-      return `${formatAuthoredDimensionDegrees(dimension.valueRadians, 1, resolved)} deg angle`;
+      return `${formatAuthoredDimensionDegrees(requireDrivingDimensionValue(dimension, dimension.valueRadians), 1, resolved)} deg angle`;
     case "arcStartPointCoincident":
       return "Arc start coincident";
     case "arcEndPointCoincident":
@@ -3998,9 +4029,13 @@ export function formatDimensionVisibleLabel(
     case "lineLength":
     case "lineDistance":
     case "linePointDistance":
-      return formatAuthoredDimensionNumber(dimension.value, 2, resolved);
+      return formatAuthoredDimensionNumber(
+        requireDrivingDimensionValue(dimension, dimension.value),
+        2,
+        resolved,
+      );
     case "lineAngle":
-      return `${formatAuthoredDimensionDegrees(dimension.valueRadians, 1, resolved)}°`;
+      return `${formatAuthoredDimensionDegrees(requireDrivingDimensionValue(dimension, dimension.valueRadians), 1, resolved)}°`;
     case "arcStartPointCoincident":
     case "arcEndPointCoincident":
       return "Coincident";

@@ -4,7 +4,7 @@ import type {
   RenderPoint3D,
 } from "@/contracts/render/schema";
 import type {
-  SketchDefinition,
+  DerivableSketchDefinition,
   SketchPoint2D,
   SketchReferenceDefinition,
 } from "@/contracts/sketch/schema";
@@ -81,7 +81,7 @@ export const NON_ACCEPTED_OFFSET_OUTPUT_PROJECTION_CODE =
  * source sketch's derived validity invalid, which is refused first.
  */
 export function nonAcceptedOutputProjectionMessage(
-  definition: SketchDefinition,
+  definition: DerivableSketchDefinition,
   entityId: SketchEntityId,
   owner: NonAcceptedOutputOwner,
 ) {

@@ -10,7 +10,11 @@ import type {
   SketchPointId,
 } from "@/contracts/shared/ids";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
-import { makeSketchFixture } from "@/contracts/sketch/region-extraction.fixtures";
+import {
+  literalResolvedDefinition,
+  makeSketchFixture,
+} from "@/contracts/sketch/region-extraction.fixtures";
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import { sketchSnapshotRecordForTest } from "@/contracts/sketch/region-record.fixtures";
 import {
   requireSketchDefinition,
@@ -120,7 +124,7 @@ function gapTriangle() {
         label: "Gap",
         axis: "aligned",
         pointIds: [pid("a2"), pid("a")],
-        value: 0.5,
+        value: createLiteralAuthoredValue(0.5),
       },
     ],
   };
@@ -280,7 +284,7 @@ describe("Merge Points session (T13j)", () => {
         ...fixture.build(),
         definition: saved,
         solvedSnapshot: solveSketchDefinitionCore({
-          definition: saved,
+          definition: literalResolvedDefinition(saved),
           tolerances: merged.solverTolerances,
           modelingTolerance: merged.modelingTolerance,
           partialSolvePolicy: "bestEffort",

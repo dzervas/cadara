@@ -1,8 +1,10 @@
 import { test, expect } from "vitest";
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 
 import type { SketchDefinition } from "@/contracts/sketch/schema";
 import type { SolvedSketchSnapshot } from "@/contracts/sketch/schema";
-import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { solveSketchDefinitionCore as solveSketchDefinitionCoreResolved } from "@/contracts/sketch/solver-core";
+import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 import { lineLoopSegmentsForTest } from "@/contracts/sketch/region-record.fixtures";
 import type { SketchSnapshotRecord } from "@/contracts/modeling/schema";
 import type {
@@ -24,6 +26,21 @@ import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
 } from "@/domain/modeling/opencascade-kernel-seed";
+
+// T17p2 (F-2): the solver consumes the resolved definition; these fixtures
+// author literal values, resolved before each solve (`literalResolvedDefinition`).
+const solveSketchDefinitionCore = (
+  input: Omit<
+    Parameters<typeof solveSketchDefinitionCoreResolved>[0],
+    "definition"
+  > & {
+    definition: SketchDefinition;
+  },
+) =>
+  solveSketchDefinitionCoreResolved({
+    ...input,
+    definition: literalResolvedDefinition(input.definition),
+  });
 
 test("src/domain/editor/sketch-session-style.spec.ts", () => {
   const definition = {
@@ -714,7 +731,7 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
         label: "Distance",
         pointIds: ["sketch_point_a", "sketch_point_b"],
         axis: "aligned",
-        value: 1,
+        value: createLiteralAuthoredValue(1),
       },
     ],
   } as SketchDefinition;

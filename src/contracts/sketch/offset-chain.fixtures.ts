@@ -17,6 +17,8 @@ import type {
   SketchDefinition,
   SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
+import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 
 export type Vector = readonly [number, number];
@@ -189,7 +191,7 @@ export function createNativeOffsetChainHarness(options: {
   const solvedPair = (patches: readonly Authored[]): AcceptedPair => {
     const definition = sketch(patches);
     const solved = solveSketchDefinitionCore({
-      definition,
+      definition: literalResolvedDefinition(definition),
       tolerances: solveTolerances,
       modelingTolerance,
       partialSolvePolicy: "bestEffort",
@@ -1108,7 +1110,7 @@ export function createNativeArcOffsetHarness(options: {
   /** Solve (must be solved) with solved point positions written back. */
   const solved = (definition: SketchDefinition): AcceptedPair => {
     const result = solveSketchDefinitionCore({
-      definition,
+      definition: literalResolvedDefinition(definition),
       tolerances: solveTolerances,
       modelingTolerance,
       partialSolvePolicy: "bestEffort",
@@ -1662,7 +1664,9 @@ export function withLineLength(
         kind: "lineLength",
         label: "C1 edit",
         entityId: lineId,
-        value: Math.hypot(b[0] - a[0], b[1] - a[1]) + delta,
+        value: createLiteralAuthoredValue(
+          Math.hypot(b[0] - a[0], b[1] - a[1]) + delta,
+        ),
       },
     ] as SketchDefinition["dimensions"],
   };

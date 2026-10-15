@@ -3,6 +3,7 @@
 // explanation and its solver diagnostic targets (D7), the local Tangent tool
 // and duplicate refusal (D8). Every row runs in a multi-entity sketch.
 import { expect, test } from "vitest";
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import type { SketchPoint } from "@/contracts/modeling/schema";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import {
@@ -1049,7 +1050,7 @@ test("T13e2: a diameter conflicting with a slot held by parallel lines and a lin
       kind: "lineDistance",
       label: "Gap",
       lines,
-      value: 4,
+      value: createLiteralAuthoredValue(4),
     },
   ] as unknown as typeof base.dimensions;
   const opened = updateSketchReferenceProjection(

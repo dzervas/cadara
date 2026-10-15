@@ -1,10 +1,10 @@
 import * as math from "mathjs";
 
 import {
-  ensureLiteralAuthoredValue,
+  isAuthoredValue,
   isExpressionAuthoredValue,
   validateFeatureValueKind,
-  type MaybeAuthoredValue,
+  type AuthoredValue,
   type FeatureValueKindDescriptor,
 } from "@/contracts/modeling/authored-values";
 import type {
@@ -17,7 +17,10 @@ import type {
   NumericSketchDefinition,
   SketchDefinition,
 } from "@/contracts/sketch/schema";
-import { isReferenceDimension } from "@/contracts/sketch/schema";
+import {
+  isReferenceDimension,
+  resolvedReferenceDimension,
+} from "@/contracts/sketch/schema";
 import {
   createDocumentVariableExpressionDiagnostics,
   evaluateDocumentVariableExpressions,
@@ -131,7 +134,7 @@ function resolveDimension(
   | { ok: false; diagnostics: ModelingDiagnostic[] } {
   // T13d (D9): a reference dimension has no value to resolve.
   if (isReferenceDimension(dimension)) {
-    return { ok: true, dimension };
+    return { ok: true, dimension: resolvedReferenceDimension(dimension) };
   }
   switch (dimension.kind) {
     case "arcStartPointCoincident":
@@ -175,12 +178,25 @@ function resolveDimension(
 }
 
 function resolveAuthoredNumber(input: {
-  value: MaybeAuthoredValue<number>;
+  /**
+   * T17p2 (F-2): a dimension value or a non-numeric offset distance; only
+   * the authored wrapper resolves (a bare value is never converted).
+   */
+  value: AuthoredValue<number> | undefined;
   label: string;
   valueKind: FeatureValueKindDescriptor;
   variablesByName: ReadonlyMap<string, number>;
 }): { ok: true; value: number } | { ok: false; diagnostic: ModelingDiagnostic } {
-  const authoredValue = ensureLiteralAuthoredValue(input.value);
+  const authoredValue = input.value;
+  if (!isAuthoredValue(authoredValue)) {
+    return {
+      ok: false,
+      diagnostic: createDiagnostic(
+        "sketch-dimension-expression-type-mismatch",
+        `${input.label}: Value must be a literal or expression authored value.`,
+      ),
+    };
+  }
   if (!isExpressionAuthoredValue(authoredValue)) {
     const validation = validateFeatureValueKind(authoredValue.value, input.valueKind);
     return validation.ok

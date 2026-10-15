@@ -11,7 +11,11 @@ import type {
 } from "@/contracts/modeling/authored-document";
 import { validateContract } from "@/contracts/shared/validation";
 import { validateFeatureDefinitionAuthoredValueInvariants } from "@/contracts/modeling/feature-authored-values";
-import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
+import {
+  bareDimensionValueIssues,
+  validateSketchDefinition,
+} from "@/contracts/sketch/runtime-schema";
+import { SKETCH_SCHEMA_VERSION } from "@/contracts/sketch/schema";
 
 const authoredModelDocumentValidator =
   typia.createValidateEquals<AuthoredModelDocument>();
@@ -293,6 +297,43 @@ function validateAuthoredModelDocumentInvariants(
 export function parseAuthoredModelDocument(
   value: unknown,
 ): AuthoredModelDocumentParseResult {
+  // T17p2 (F-2): a bare sketch dimension value gets its readable reason
+  // (the structural validation below would reject it too). Review R-1: only
+  // in a current-version document and sketch; any other version reports its
+  // version first.
+  const record =
+    typeof value === "object" && value !== null
+      ? (value as { schemaVersion?: unknown; sketches?: unknown })
+      : {};
+  const [bareValue] =
+    record.schemaVersion === AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION &&
+    Array.isArray(record.sketches)
+      ? record.sketches.flatMap((sketch: unknown, index) => {
+          const definition =
+            typeof sketch === "object" && sketch !== null
+              ? (sketch as { definition?: unknown }).definition
+              : undefined;
+          const sketchVersion =
+            typeof definition === "object" && definition !== null
+              ? (definition as { schemaVersion?: unknown }).schemaVersion
+              : undefined;
+          return sketchVersion === SKETCH_SCHEMA_VERSION
+            ? bareDimensionValueIssues(
+                definition,
+                `sketches.${index}.definition`,
+              )
+            : [];
+        })
+      : [];
+  if (bareValue) {
+    return {
+      ok: false,
+      diagnostic: createDiagnostic(
+        "invalid-authored-document",
+        bareValue.message,
+      ),
+    };
+  }
   const result = validateContract(authoredModelDocumentValidator, value);
   if (!result.success) {
     return {

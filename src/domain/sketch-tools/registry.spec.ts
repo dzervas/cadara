@@ -3,7 +3,9 @@ import { test, expect } from "vitest";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
-import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { solveSketchDefinitionCore as solveSketchDefinitionCoreResolved } from "@/contracts/sketch/solver-core";
+import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
+import type { SketchDefinition } from "@/contracts/sketch/schema";
 import {
   acceptSketchDraw,
   beginSketchTool,
@@ -38,6 +40,21 @@ import {
   searchToolDefinitions,
 } from "@/core/tools/tool-registry";
 import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+
+// T17p2 (F-2): the solver consumes the resolved definition; these fixtures
+// author literal values, resolved before each solve (`literalResolvedDefinition`).
+const solveSketchDefinitionCore = (
+  input: Omit<
+    Parameters<typeof solveSketchDefinitionCoreResolved>[0],
+    "definition"
+  > & {
+    definition: SketchDefinition;
+  },
+) =>
+  solveSketchDefinitionCoreResolved({
+    ...input,
+    definition: literalResolvedDefinition(input.definition),
+  });
 
 const regionSolver = new SketchConstraintSolverAdapter({
   neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
@@ -964,7 +981,7 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
       documentId: "doc_workspace",
       revisionId: "rev_0001",
       sketchId: "sketch_draft",
-      definition: conic.definition,
+      definition: literalResolvedDefinition(conic.definition),
       solvedSnapshot: solvedConic.solvedSnapshot,
       projectedReferences: [],
       modelingTolerance: 1e-6,
@@ -1116,7 +1133,7 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
       documentId: "doc_workspace",
       revisionId: "rev_0001",
       sketchId: "sketch_draft",
-      definition: session.definition,
+      definition: literalResolvedDefinition(session.definition),
       solvedSnapshot: solved.solvedSnapshot,
       projectedReferences: [],
       modelingTolerance: 1e-6,

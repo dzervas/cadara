@@ -8,6 +8,7 @@
  * near-gap basis stays present. A cancelled label gesture keeps it too.
  */
 import { describe, expect, test } from "vitest";
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import type { EditorEvent } from "@/core/editor/state-machine";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
@@ -68,7 +69,7 @@ async function labelledLines() {
         kind: "lineLength",
         label: "Length",
         entityId: line.entityId,
-        value: 4,
+        value: createLiteralAuthoredValue(4),
         annotationPlacement: { kind: "dimensionLine", offset: 1 },
       },
     ],

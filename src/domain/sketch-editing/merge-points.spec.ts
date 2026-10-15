@@ -19,10 +19,12 @@ import type {
 import {
   FIXTURE_SKETCH_ID,
   FIXTURE_TOLERANCE,
+  literalResolvedDefinition,
   makeSketchFixture,
 } from "@/contracts/sketch/region-extraction.fixtures";
 import { createSketchArrangementDeriver } from "@/contracts/sketch/region-extraction";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
 import { orderedSplinePointIds } from "@/contracts/sketch/spline-geometry";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
@@ -258,32 +260,37 @@ const d = <K extends DimensionDefinition["kind"]>(
     ...rest,
   }) as Extract<DimensionDefinition, { kind: K }>;
 
+// T17p2 (F-2): dimension values are authored wrappers.
+const one = createLiteralAuthoredValue(1);
 /** One record of every dimension kind; each point-holding kind references S. */
 const DIMENSIONS: {
   [K in DimensionDefinition["kind"]]: Extract<DimensionDefinition, { kind: K }>;
 } = {
-  distance: d("distance", { axis: "aligned", pointIds: [S, X], value: 1 }),
+  distance: d("distance", { axis: "aligned", pointIds: [S, X], value: one }),
   pointDatumDistance: d("pointDatumDistance", {
     axis: "horizontal",
     point: local(S),
     datum: { kind: "sketchDatum", datum: "origin" },
-    value: 1,
+    value: one,
   }),
-  circleRadius: d("circleRadius", { entityId: E, value: 1 }),
-  diameter: d("diameter", { entityId: E, value: 1 }),
-  lineLength: d("lineLength", { entityId: E, value: 1 }),
-  lineDistance: d("lineDistance", { lines: [entity(E), entity(E2)], value: 1 }),
+  circleRadius: d("circleRadius", { entityId: E, value: one }),
+  diameter: d("diameter", { entityId: E, value: one }),
+  lineLength: d("lineLength", { entityId: E, value: one }),
+  lineDistance: d("lineDistance", {
+    lines: [entity(E), entity(E2)],
+    value: one,
+  }),
   linePointDistance: d("linePointDistance", {
     line: entity(E),
     point: local(S),
-    value: 1,
+    value: one,
   }),
   lineAngle: d("lineAngle", {
     lines: [entity(E), entity(E2)],
-    valueRadians: 1,
+    valueRadians: one,
   }),
-  horizontalDistance: d("horizontalDistance", { pointIds: [X, S], value: 1 }),
-  verticalDistance: d("verticalDistance", { pointIds: [S, X], value: 1 }),
+  horizontalDistance: d("horizontalDistance", { pointIds: [X, S], value: one }),
+  verticalDistance: d("verticalDistance", { pointIds: [S, X], value: one }),
   arcStartPointCoincident: d("arcStartPointCoincident", {
     entityId: E,
     pointId: S,
@@ -516,7 +523,7 @@ const TOLERANCES = {
 };
 const solve = (definition: SketchDefinition) =>
   solveSketchDefinitionCore({
-    definition,
+    definition: literalResolvedDefinition(definition),
     tolerances: TOLERANCES,
     modelingTolerance: FIXTURE_TOLERANCE,
     partialSolvePolicy: "bestEffort",
@@ -643,7 +650,7 @@ describe("createSketchMergePointsMutation (T13j, D25)", () => {
           label: "Gap",
           axis: "aligned",
           pointIds: [pid("a2"), pid("a")],
-          value: 0.5,
+          value: createLiteralAuthoredValue(0.5),
         },
       ],
     };

@@ -11,6 +11,7 @@ import type {
 } from "@/contracts/shared/ids";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import {
+  literalResolvedDefinition,
   makeSketchFixture,
   type SketchFixture,
 } from "@/contracts/sketch/region-extraction.fixtures";
@@ -51,7 +52,7 @@ function request(
     documentId: DOCUMENT,
     revisionId: "rev_trim" as QuerySketchEditIntersectionsRequest["revisionId"],
     sketchId: input.sketchId as QuerySketchEditIntersectionsRequest["sketchId"],
-    definition: input.definition,
+    definition: literalResolvedDefinition(input.definition),
     solvedSnapshot: input.solvedSnapshot,
     projectedReferences: [],
     modelingTolerance: input.modelingTolerance,
@@ -109,7 +110,7 @@ describe("querySketchEditIntersections adapters (T10g-1)", () => {
     sketch.point("a", 2, 0);
     sketch.point("b", -2, 0);
     sketch.arc("arc", "o", "a", "b");
-    const definition = sketch.definition();
+    const definition = literalResolvedDefinition(sketch.definition());
     const withDiameter = {
       ...definition,
       dimensionIds: ["dimension_diameter" as DimensionId],
@@ -173,7 +174,7 @@ describe("querySketchEditIntersections adapters (T10g-1)", () => {
     sketch.point("c", 5, 5);
     sketch.point("d", 6, 5);
     sketch.line("other", "c", "d");
-    const definition = sketch.definition();
+    const definition = literalResolvedDefinition(sketch.definition());
     const point = (name: string) => `sketch_point_${name}` as SketchPointId;
     const constraints = [
       {
@@ -280,9 +281,11 @@ describe("querySketchEditIntersections adapters (T10g-1)", () => {
       },
       modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort" as const,
-      definition: withDimensions(
-        makeReferenceDimensionSketch(),
-        cases.map((entry) => entry.reference),
+      definition: literalResolvedDefinition(
+        withDimensions(
+          makeReferenceDimensionSketch(),
+          cases.map((entry) => entry.reference),
+        ),
       ),
       projectedReferences: [],
     };

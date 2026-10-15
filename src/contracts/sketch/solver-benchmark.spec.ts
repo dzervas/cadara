@@ -1,19 +1,20 @@
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { test, expect } from "vitest";
 
-import type { AuthoredSketchRecord } from "@/contracts/modeling/authored-document";
 import {
   countSolverAnnotations,
   evaluateSketchSolverBenchmarkFixture,
   SKETCH_SOLVER_BENCHMARK_DOCUMENT,
   SKETCH_SOLVER_BENCHMARK_FIXTURES,
+  type SketchSolverBenchmarkSketch,
 } from "@/contracts/sketch/solver-benchmark";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 
 const sketchSolver = new SketchConstraintSolverAdapter({ ...SKETCH_SOLVER_BENCHMARK_DOCUMENT, neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest() });
 
 test("src/contracts/sketch/solver-benchmark.spec.ts", async () => {
-  function assertAuthoredSketchRecord(sketch: AuthoredSketchRecord) {
+  // T17p2 (F-2): the record's definition is the solver's resolved view.
+  function assertAuthoredSketchRecord(sketch: SketchSolverBenchmarkSketch) {
     expect(
       sketch.sketchId.startsWith("sketch_"),
       "Benchmark fixtures should expose document-held sketch ids.",

@@ -1,8 +1,25 @@
 import { test, expect } from "vitest";
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 
 import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
-import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { solveSketchDefinitionCore as solveSketchDefinitionCoreResolved } from "@/contracts/sketch/solver-core";
+import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
+
+// T17p2 (F-2): the solver consumes the resolved definition; these fixtures
+// author literal values, resolved before each solve (`literalResolvedDefinition`).
+const solveSketchDefinitionCore = (
+  input: Omit<
+    Parameters<typeof solveSketchDefinitionCoreResolved>[0],
+    "definition"
+  > & {
+    definition: SketchDefinition;
+  },
+) =>
+  solveSketchDefinitionCoreResolved({
+    ...input,
+    definition: literalResolvedDefinition(input.definition),
+  });
 
 test("src/contracts/sketch/inferred-constraint-solver.spec.ts", () => {
   const tolerances = {
@@ -227,7 +244,7 @@ test("src/contracts/sketch/inferred-constraint-solver.spec.ts", () => {
               kind: "circleRadius",
               label: "Radius 2",
               entityId: "sketch_entity_circle",
-              value: 2,
+              value: createLiteralAuthoredValue(2),
             },
           ],
         }

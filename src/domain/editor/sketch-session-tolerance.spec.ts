@@ -1,6 +1,7 @@
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { expect, test } from "vitest";
 import { createAuthoredModelDocumentFromSnapshot } from "@/contracts/modeling/authored-document";
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import type {
   ConstraintId,
   DimensionId,
@@ -118,7 +119,7 @@ function makeToleranceProbeDefinition(): SketchDefinition {
         { kind: "localEntity", entityId: base },
         { kind: "localEntity", entityId: tilted },
       ],
-      value: 3,
+      value: createLiteralAuthoredValue(3),
     });
   };
   addLineDistance("near_parallel", 0.005, 10);
@@ -299,7 +300,7 @@ function makeDimensionedProfile(
       kind: "lineLength",
       label: `edge ${edge} length`,
       entityId: entities[edge]!.entityId,
-      value,
+      value: createLiteralAuthoredValue(value),
     }),
   );
   return {

@@ -1,4 +1,5 @@
 import { test, expect } from "vitest";
+import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 import type {
   CreateFeatureResponse,
   CreateFeatureRequest,
@@ -201,7 +202,7 @@ test("src/contracts/shared/contract-examples.spec.ts", async () => {
     tolerances: solveSketchProjectionRequest.tolerances,
     modelingTolerance: 1e-3,
     partialSolvePolicy: "bestEffort",
-    definition: sketchDefinition,
+    definition: literalResolvedDefinition(sketchDefinition),
     projectedReferences: [],
   };
 

@@ -1,6 +1,7 @@
 import type {
   ConstraintDefinition,
   SketchDefinition,
+  SketchDimensionAuthoredValue,
   SketchDerivationDefinition,
   SketchMirrorReference,
   SketchDerivedEntityOutput,
@@ -52,7 +53,6 @@ import {
   type ProjectedSketchReferenceGeometry,
 } from "@/contracts/solver/schema";
 import type { SketchPoint } from "@/contracts/modeling/schema";
-import { isAuthoredValue } from "@/contracts/modeling/authored-values";
 import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
 import type {
   SketchDraftEntity,
@@ -501,16 +501,12 @@ export function splineTrimCutMismatchMessage(label: string) {
 }
 
 /** An authored dimension value doubled: exact for literals; `2 * (text)` for expressions. */
-function doubledDimensionValue(value: unknown) {
-  if (typeof value === "number") return 2 * value;
-  if (isAuthoredValue(value))
-    return value.source === "literal"
-      ? { source: "literal" as const, value: 2 * (value.value as number) }
-      : {
-          source: "expression" as const,
-          valueText: `2 * (${value.valueText})`,
-        };
-  throw new Error(`A dimension value must be a number or an authored value.`);
+function doubledDimensionValue(
+  value: SketchDimensionAuthoredValue,
+): SketchDimensionAuthoredValue {
+  return value.source === "literal"
+    ? { source: "literal", value: 2 * value.value }
+    : { source: "expression", valueText: `2 * (${value.valueText})` };
 }
 
 /** The [start, end] point ids of a local curve (none for closed or end-less kinds). */
@@ -706,8 +702,8 @@ function cutTies(input: {
  *   parameter lies beyond the last cut; everything else stays on the
  *   original id (which keeps the first piece);
  * - a circle's `circleRadius` dimensions become `diameter` dimensions (same
- *   id and placement, value doubled; the default labels "Circle N radius"
- *   and "Radius N" become "Circle N diameter" and "Diameter N");
+ *   id and placement, value doubled; the Radius tool's default label
+ *   "Radius N" becomes "Diameter N");
  * - D27 (T13l): arc endpoint bindings are rebuilt per resulting arc from its
  *   own end points (`rebuiltArcBindings`; a circle's arc gains both), and a
  *   `tangent` follows the piece that touches its partner
@@ -897,12 +893,9 @@ function circleRadiiAsDiameters(
       ? {
           ...dimension,
           kind: "diameter" as const,
-          // Review A-3 / T13l (review A4): only the default labels follow
-          // (the Circle tool's legacy "Circle N radius", the Radius tool's
-          // "Radius N"); a user label is kept.
-          label: dimension.label
-            .replace(/^(Circle \d+) radius$/, "$1 diameter")
-            .replace(/^Radius (\d+)$/, "Diameter $1"),
+          // Review A-3 / T13l (review A4): only the Radius tool's default
+          // label "Radius N" follows; a user label is kept.
+          label: dimension.label.replace(/^Radius (\d+)$/, "Diameter $1"),
           // T13d: a reference radius stays a reference (the marker is
           // spread); a value it kept (ignored, D9′) doubles too.
           ...(dimension.value === undefined

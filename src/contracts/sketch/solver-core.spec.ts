@@ -13,7 +13,8 @@ import {
   type SketchSolveStrategy,
   type SketchSolveTolerancePolicy,
 } from "@/contracts/sketch/solver-core";
-import type { SketchDefinition } from "@/contracts/sketch/schema";
+// T17p2 (F-2): the solver core works on resolved definitions (numbers).
+import type { NumericSketchDefinition as SketchDefinition } from "@/contracts/sketch/schema";
 import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
 import { OFFSET_DIAGNOSTIC_CODES } from "@/contracts/sketch/offset-geometry";
 import { publishSketchOffsets } from "@/contracts/sketch/offset-publication";
@@ -29,6 +30,7 @@ import type { ModelingDocumentSettings } from "@/contracts/modeling/schema";
 import { createNewSketchSessionFromSupport } from "@/domain/editor/sketch-session";
 import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
 import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+import { literalAuthoredDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 
 test("src/contracts/sketch/solver-core.spec.ts", async () => {
   function assertClose(
@@ -6870,7 +6872,8 @@ function solveCoreAndLive(definition: SketchDefinition) {
       { kind: "construction", constructionId: "construction_plane-xy" },
       { ...OCC_KERNEL_SETTINGS } as ModelingDocumentSettings,
     ),
-    { definition },
+    // The editor session holds the authored definition.
+    { definition: literalAuthoredDefinition(definition) },
   );
   return {
     compiled: compileSketchSolveProgram(input).diagnostics,

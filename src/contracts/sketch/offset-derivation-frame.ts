@@ -39,6 +39,7 @@ import {
   type OffsetChainFailure,
 } from "@/contracts/sketch/offset-geometry";
 import type {
+  DerivableSketchDefinition,
   SketchDefinition,
   SketchPoint2D,
   SketchSolveDiagnostic,
@@ -1526,7 +1527,7 @@ export function publishOffsetFrame(input: {
   readonly relationship: OffsetFrameRelationship;
   readonly pair: {
     readonly definition: Pick<
-      SketchDefinition,
+      DerivableSketchDefinition,
       "points" | "entities" | "constraints" | "dimensions"
     >;
     readonly solvedSnapshot: SolvedSketchSnapshot;

@@ -4,13 +4,29 @@ import type {
   SketchDefinition,
   SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
-import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { solveSketchDefinitionCore as solveSketchDefinitionCoreResolved } from "@/contracts/sketch/solver-core";
+import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
 import {
   evaluateSplineSpan,
   reconstructSplineAggregate,
 } from "@/contracts/sketch/spline-geometry";
 import { applySolvedSketchToDefinition } from "./definition-patches";
+
+// T17p2 (F-2): the solver consumes the resolved definition; these fixtures
+// author literal values, resolved before each solve (`literalResolvedDefinition`).
+const solveSketchDefinitionCore = (
+  input: Omit<
+    Parameters<typeof solveSketchDefinitionCoreResolved>[0],
+    "definition"
+  > & {
+    definition: SketchDefinition;
+  },
+) =>
+  solveSketchDefinitionCoreResolved({
+    ...input,
+    definition: literalResolvedDefinition(input.definition),
+  });
 
 const point = (
   id: `sketch_point_${string}`,

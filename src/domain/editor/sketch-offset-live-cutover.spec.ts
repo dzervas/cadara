@@ -10,7 +10,11 @@ import { readFile } from "node:fs/promises";
 import { deriveSketchValidity } from "@/contracts/sketch/derived-validity";
 
 import type { AuthoredActionState } from "@/contracts/modeling/authored-actions";
-import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
+import {
+  createLiteralAuthoredValue,
+  getAuthoredLiteralValue,
+  type AuthoredValue,
+} from "@/contracts/modeling/authored-values";
 import type { ModelingDocumentSettings } from "@/contracts/modeling/schema";
 import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
 import {
@@ -195,6 +199,7 @@ import {
   closedCurvesSignedArea,
   cubicOracle,
   lineOracle,
+  literalResolvedDefinition,
   type OracleCurve,
 } from "@/contracts/sketch/region-extraction.fixtures";
 import {
@@ -410,7 +415,7 @@ function offsetSplineSession(modelingTolerance?: number, distance = 0.2) {
 
 function solve(definition: SketchDefinition, modelingTolerance = 1e-3) {
   return solveSketchDefinitionCore({
-    definition,
+    definition: literalResolvedDefinition(definition),
     tolerances: {
       coincidence: 1e-6,
       angleRadians: 1e-6,
@@ -5063,7 +5068,10 @@ describe("T08b-g7a live two-edit sequence (audit C1, U-G8)", () => {
     ...definition,
     dimensions: definition.dimensions.map((dimension) =>
       dimension.dimensionId === "dimension_c1_edit"
-        ? ({ ...dimension, value } as typeof dimension)
+        ? ({
+            ...dimension,
+            value: createLiteralAuthoredValue(value),
+          } as typeof dimension)
         : dimension,
     ),
   });
@@ -5140,7 +5148,9 @@ describe("T08b-g7a live two-edit sequence (audit C1, U-G8)", () => {
     const second = rebuildSessionForDefinition(first.session, {
       definition: withDimensionValue(
         first.session.definition,
-        (dimension as { value: number }).value - 0.15,
+        getAuthoredLiteralValue(
+          (dimension as { value: AuthoredValue<number> }).value,
+        )! - 0.15,
       ),
     });
     expect(
@@ -5201,11 +5211,13 @@ describe("T08b-g7a live two-edit sequence (audit C1, U-G8)", () => {
       rebuildSessionForDefinition(first.session, {
         definition: withDimensionValue(
           first.session.definition,
-          (
-            edited.dimensions.find(
-              (item) => item.dimensionId === "dimension_c1_edit",
-            ) as { value: number }
-          ).value - 0.15,
+          getAuthoredLiteralValue(
+            (
+              edited.dimensions.find(
+                (item) => item.dimensionId === "dimension_c1_edit",
+              ) as { value: AuthoredValue<number> }
+            ).value,
+          )! - 0.15,
         ),
       }),
     );
@@ -5943,7 +5955,7 @@ describe("T08b-g7b relationship-scoped solve-frame failures ([TECH] G16′, U-G9
       label: "Output to unrelated corner",
       pointIds: [outputPoint, corner.pointId],
       axis: "horizontal",
-      value: 10 - held[0],
+      value: createLiteralAuthoredValue(10 - held[0]),
     } as unknown as SketchDefinition["dimensions"][number];
     const withRequirement = (definition: SketchDefinition) => ({
       ...definition,
@@ -6195,7 +6207,7 @@ describe("T08b-g7b relationship-scoped solve-frame failures ([TECH] G16′, U-G9
           label: "Order",
           pointIds: [outputPoint, corner.pointId],
           axis: "aligned",
-          value: 1,
+          value: createLiteralAuthoredValue(1),
         } as unknown as SketchDefinition["dimensions"][number],
       ],
     };
@@ -6286,7 +6298,9 @@ describe("T08b-g7b relationship-scoped solve-frame failures ([TECH] G16′, U-G9
       label: "Output to corner",
       pointIds: [outputPoint, corner.pointId],
       axis: "aligned",
-      value: Math.hypot(at[0] - 0, at[1] - 1) + 0.05,
+      value: createLiteralAuthoredValue(
+        Math.hypot(at[0] - 0, at[1] - 1) + 0.05,
+      ),
     } as unknown as SketchDefinition["dimensions"][number];
     // The filleted rectangle has no width and height dimensions (T13a: the
     // Rectangle tool authors none), so the requirement is satisfiable by a
@@ -7852,7 +7866,7 @@ const mockSolve = (definition: SketchDefinition) =>
     },
     modelingTolerance: 1e-3,
     partialSolvePolicy: "bestEffort",
-    definition,
+    definition: literalResolvedDefinition(definition),
     projectedReferences: [],
   });
 
@@ -7921,7 +7935,7 @@ describe("T10i degenerate offset line outputs are relationship-scoped ([TECH] C5
     const trigger = degenerateOutputRectangle();
     const persisted = withShortLines(trigger.edited, trigger.shortOutputs);
     const core = solveSketchDefinitionCore({
-      definition: persisted,
+      definition: literalResolvedDefinition(persisted),
       tolerances: {
         coincidence: 1e-6,
         angleRadians: 1e-6,
@@ -7956,7 +7970,7 @@ describe("T10i degenerate offset line outputs are relationship-scoped ([TECH] C5
       target: { kind: "entity", entityId: trigger.built.lines[1]! },
     };
     const coreAuthored = solveSketchDefinitionCore({
-      definition: authoredShort,
+      definition: literalResolvedDefinition(authoredShort),
       tolerances: {
         coincidence: 1e-6,
         angleRadians: 1e-6,

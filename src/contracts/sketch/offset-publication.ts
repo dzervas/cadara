@@ -22,6 +22,7 @@ import {
 } from "@/contracts/sketch/mirror-requirements";
 import type {
   DerivedRelationshipFailureReason,
+  DerivableSketchDefinition,
   SketchDefinition,
   SketchDerivationDefinition,
   SketchSolveDiagnostic,
@@ -60,10 +61,9 @@ export function isOffsetPublicationSolveAccepted(
  * solved state): point positions, circle radii and authored spline tangents
  * taken from the solved snapshot.
  */
-export function solvedPairDefinition(
-  definition: SketchDefinition,
-  snapshot: SolvedSketchSnapshot,
-): SketchDefinition {
+export function solvedPairDefinition<
+  TDefinition extends DerivableSketchDefinition,
+>(definition: TDefinition, snapshot: SolvedSketchSnapshot): TDefinition {
   const positions = new Map(
     snapshot.solvedPoints.map((point) => [point.pointId, point.solvedPosition]),
   );
@@ -128,7 +128,7 @@ const encode = (value: unknown) =>
  * unaccepted solve publishes nothing (U-G1).
  */
 export function publishSketchOffsets(input: {
-  readonly definition: SketchDefinition;
+  readonly definition: DerivableSketchDefinition;
   readonly solvedSnapshot: SolvedSketchSnapshot;
   readonly modelingTolerance: number;
   readonly capabilities: OffsetPublicationCapabilities;
@@ -273,7 +273,7 @@ export function publishSketchOffsets(input: {
  * offset of it fails in turn).
  */
 function withNonAcceptedSeedsFailed(
-  definition: SketchDefinition,
+  definition: DerivableSketchDefinition,
   snapshot: SolvedSketchSnapshot,
   records: readonly SketchOffsetPublicationRecord[],
 ): SketchOffsetPublicationRecord[] {
@@ -351,7 +351,7 @@ function publicationDiagnostic(
  * relationship and without recorded ids the snapshot is returned as it is.
  */
 export function applyOffsetPublications(
-  definition: SketchDefinition,
+  definition: DerivableSketchDefinition,
   snapshot: SolvedSketchSnapshot,
   publications: readonly SketchOffsetPublicationRecord[],
 ): SolvedSketchSnapshot {
@@ -804,7 +804,7 @@ export function isOffsetReplanRound(snapshot: SolvedSketchSnapshot): boolean {
  * further re-solve.
  */
 export function closeOffsetReplanRound(
-  definition: SketchDefinition,
+  definition: DerivableSketchDefinition,
   publications: readonly SketchOffsetPublicationRecord[],
 ): SketchOffsetPublicationRecord[] {
   return publications.map((publication) => {

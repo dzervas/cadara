@@ -1,10 +1,13 @@
 import { describe, test, expect } from "vitest";
 
 import type {
+  NumericSketchDefinition,
   SketchDefinition,
   SketchEntityDefinition,
   SketchPointDefinition,
+  SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import type { SketchPoint } from "@/contracts/modeling/schema";
 import {
   evaluateSplineSpan,
@@ -15,6 +18,7 @@ import { applySolvedSketchToDefinition } from "@/domain/editor/sketch-session/de
 import {
   FIXTURE_SKETCH_ID,
   closedCurvesSignedArea,
+  literalResolvedDefinition,
   makeSketchFixture,
   neutralSpan,
   projectedSpline,
@@ -331,7 +335,7 @@ test("src/domain/sketch-editing/operations.spec.ts", async () => {
 
   const solveLines = (definition: SketchDefinition) =>
     solveSketchDefinitionCore({
-      definition,
+      definition: literalResolvedDefinition(definition),
       tolerances: {
         coincidence: 1e-6,
         angleRadians: 1e-6,
@@ -351,7 +355,7 @@ test("src/domain/sketch-editing/operations.spec.ts", async () => {
   ) {
     const result = await querySketchEditIntersections(
       {
-        definition,
+        definition: literalResolvedDefinition(definition),
         solvedSnapshot: solveLines(definition),
         projectedReferences: [],
         modelingTolerance: 1e-3,
@@ -1337,22 +1341,24 @@ describe("createSketchTrimMutation (T10g-1 exact Trim, Q1b ties, review R-3)", (
   const entity = (name: string) => `sketch_entity_${name}` as SketchEntityId;
   type P = readonly [number, number];
 
-  const solve = (definition: SketchDefinition) =>
+  // T17p2 (F-2): the solver and the edit queries consume the resolved
+  // definition; these fixtures author literals (`literalResolvedDefinition`).
+  const solveResolved = (definition: NumericSketchDefinition) =>
     solveSketchDefinitionCore({
       definition,
       tolerances: TOLERANCES,
       modelingTolerance: 1e-3,
       partialSolvePolicy: "bestEffort",
     }).solvedSnapshot;
-  const accepted = (definition: SketchDefinition) => {
-    const solved = solve(definition);
-    return (
-      solved.status.solveState === "solved" &&
-      solved.constraintStatuses.every((entry) =>
-        isAcceptedConstraintStatus(entry.status),
-      )
+  const solve = (definition: SketchDefinition) =>
+    solveResolved(literalResolvedDefinition(definition));
+  const isAcceptedSolve = (solved: SolvedSketchSnapshot) =>
+    solved.status.solveState === "solved" &&
+    solved.constraintStatuses.every((entry) =>
+      isAcceptedConstraintStatus(entry.status),
     );
-  };
+  const accepted = (definition: SketchDefinition) =>
+    isAcceptedSolve(solve(definition));
   async function regions(definition: SketchDefinition) {
     return (
       await deriver.derive({
@@ -1441,10 +1447,16 @@ describe("createSketchTrimMutation (T10g-1 exact Trim, Q1b ties, review R-3)", (
         : [],
     );
   async function intersections(definition: SketchDefinition, target: string) {
+    return resolvedIntersections(literalResolvedDefinition(definition), target);
+  }
+  async function resolvedIntersections(
+    definition: NumericSketchDefinition,
+    target: string,
+  ) {
     const result = await querySketchEditIntersections(
       {
         definition,
-        solvedSnapshot: solve(definition),
+        solvedSnapshot: solveResolved(definition),
         projectedReferences: [],
         modelingTolerance: 1e-3,
         operation: { kind: "trim", targetEntityId: entity(target) },
@@ -1458,12 +1470,13 @@ describe("createSketchTrimMutation (T10g-1 exact Trim, Q1b ties, review R-3)", (
     definition: SketchDefinition,
     target: string,
     result: Extract<SketchEditIntersectionResult, { kind: "verified" }>,
+    solvedSnapshot = solve(definition),
   ) {
     const mutation = createSketchTrimMutation({
       definition,
       targetEntityId: entity(target),
       intersections: result,
-      solvedSnapshot: solve(definition),
+      solvedSnapshot,
       factories: createSessionCommitFactories(1, FIXTURE_SKETCH_ID as SketchId),
     });
     expect(mutation.message).toBeNull();
@@ -1778,8 +1791,8 @@ describe("createSketchTrimMutation (T10g-1 exact Trim, Q1b ties, review R-3)", (
         valueText: "1 + 1",
       },
     ];
+    // T17p2 (F-2): the bare-number case is deleted with the bare form.
     for (const [value, doubled] of [
-      [2, 4],
       [
         { source: "literal", value: 2 },
         { source: "literal", value: 4 },
@@ -1802,10 +1815,12 @@ describe("createSketchTrimMutation (T10g-1 exact Trim, Q1b ties, review R-3)", (
         if (!result.ok) throw new Error(JSON.stringify(result.diagnostics));
         return result.definition;
       };
+      // T17p2 (F-2): an expression value needs the variables to solve.
       const after = apply(
         definition,
         "target",
-        await intersections(resolved(definition), "target"),
+        await resolvedIntersections(resolved(definition), "target"),
+        solveResolved(resolved(definition)),
       );
       const arc = after.entities.find(
         (candidate) => candidate.entityId === entity("target"),
@@ -1839,10 +1854,18 @@ describe("createSketchTrimMutation (T10g-1 exact Trim, Q1b ties, review R-3)", (
           numeric.dimensions[0].value,
         "the doubled value evaluates to twice the radius",
       ).toBe(4);
-      expect(accepted(numeric), `${JSON.stringify(value)}: solves`).toBe(true);
+      expect(
+        isAcceptedSolve(solveResolved(numeric)),
+        `${JSON.stringify(value)}: solves`,
+      ).toBe(true);
       // The unconverted radius dimension on the arc does not (mutant oracle).
       expect(
-        accepted({ ...numeric, dimensions: resolved(definition).dimensions }),
+        isAcceptedSolve(
+          solveResolved({
+            ...numeric,
+            dimensions: resolved(definition).dimensions,
+          }),
+        ),
       ).toBe(false);
     }
   });
@@ -1959,7 +1982,7 @@ describe("createSketchTrimMutation (T10g-1 exact Trim, Q1b ties, review R-3)", (
     const solvedSnapshot = solve(definition);
     const result = await querySketchEditIntersections(
       {
-        definition,
+        definition: literalResolvedDefinition(definition),
         solvedSnapshot,
         projectedReferences: [],
         modelingTolerance: 1e-3,
@@ -2621,7 +2644,7 @@ describe("createSketchTrimMutation (T10g-1 exact Trim, Q1b ties, review R-3)", (
   ) {
     const result = await querySketchEditIntersections(
       {
-        definition,
+        definition: literalResolvedDefinition(definition),
         solvedSnapshot: solve(definition),
         projectedReferences: [],
         modelingTolerance: 1e-3,
@@ -2996,7 +3019,7 @@ describe("createSketchTrimMutation (T10g-1 exact Trim, Q1b ties, review R-3)", (
     ]);
   });
 
-  test("T13l (C1 A-3, T13a A-1): the circle → arc rewrite relabels the Radius tool's 'Radius N' and the legacy 'Circle N radius'; other labels are kept; a reference radius stays a reference", async () => {
+  test("T13l (C1 A-3, T13a A-1): the circle → arc rewrite relabels the Radius tool's 'Radius N'; other labels are kept; a reference radius stays a reference", async () => {
     const sketch = makeSketchFixture();
     sketch.point("o", 0, 0);
     sketch.circle("target", "o", 2);
@@ -3006,12 +3029,13 @@ describe("createSketchTrimMutation (T10g-1 exact Trim, Q1b ties, review R-3)", (
       sketch.line(`x${x}`, `x${x}a`, `x${x}b`);
     }
     const base = sketch.definition();
+    // T17p2 (F-2): dimension values are authored wrappers.
+    const literal = createLiteralAuthoredValue<number>;
     for (const [label, value, expected] of [
-      ["Radius 7", 2, { label: "Diameter 7", value: 4 }],
-      ["Circle 3 radius", 2, { label: "Circle 3 diameter", value: 4 }],
-      ["Radius 7 of hole", 2, { label: "Radius 7 of hole", value: 4 }],
+      ["Radius 7", 2, { label: "Diameter 7", value: literal(4) }],
+      ["Radius 7 of hole", 2, { label: "Radius 7 of hole", value: literal(4) }],
       // Review A4: a user label ending in " radius" is left alone.
-      ["Inner radius", 2, { label: "Inner radius", value: 4 }],
+      ["Inner radius", 2, { label: "Inner radius", value: literal(4) }],
       ["Radius 12", undefined, { label: "Diameter 12", reference: true }],
     ] as const) {
       const radius = {
@@ -3019,7 +3043,9 @@ describe("createSketchTrimMutation (T10g-1 exact Trim, Q1b ties, review R-3)", (
         kind: "circleRadius" as const,
         label,
         entityId: entity("target"),
-        ...(value === undefined ? { reference: true as const } : { value }),
+        ...(value === undefined
+          ? { reference: true as const }
+          : { value: literal(value) }),
       };
       const definition = {
         ...base,
@@ -3505,7 +3531,7 @@ describe("createSketchTrimMutation (T10g-1 exact Trim, Q1b ties, review R-3)", (
       kind: "diameter" as const,
       label: "Diameter 1",
       entityId: arc.entityId,
-      value: 4,
+      value: createLiteralAuthoredValue(4),
     };
     const definition = {
       ...filleted,
@@ -3608,7 +3634,7 @@ describe("createSketchTrimMutation (T10g-1 exact Trim, Q1b ties, review R-3)", (
       kind: "circleRadius" as const,
       label: "Radius 7",
       entityId: entity("target"),
-      value: 2,
+      value: createLiteralAuthoredValue(2),
     };
     const before = {
       ...sketch.definition(),
@@ -3663,7 +3689,7 @@ describe("createSketchTrimMutation (T10g-1 exact Trim, Q1b ties, review R-3)", (
         kind: "diameter",
         label: "Diameter 7",
         entityId: entity("target"),
-        value: 4,
+        value: createLiteralAuthoredValue(4),
       },
       ...[kept, piece].flatMap((arc) => [
         expect.objectContaining({

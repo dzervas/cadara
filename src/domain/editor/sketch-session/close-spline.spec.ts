@@ -12,6 +12,7 @@ import { describe, expect, test } from "vitest";
 import { expectNoInternalIds } from "@/contracts/sketch/user-text.fixtures";
 import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
 import type {
   SketchDefinition,
@@ -683,7 +684,7 @@ describe("T17c2: P-10 refusals (label-based; nothing written)", () => {
         kind: "lineLength",
         label: `L${index}`,
         entityId: line.entityId,
-        value,
+        value: createLiteralAuthoredValue(value),
       })) as SketchDefinition["dimensions"],
     });
     expect(conflict.liveSolve?.accepted, "premise: not solved").toBe(false);

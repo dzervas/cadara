@@ -17,6 +17,7 @@ import {
   validateSolverRegionRecord,
 } from "@/contracts/sketch/runtime-schema";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { deleteSelectedSketchGeometry } from "@/domain/editor/sketch-session";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
@@ -550,7 +551,7 @@ test("T15b: a sketch-datum mirror and failedDerivationIds round-trip through nor
   ).toBe(false);
 
   const snapshot = solveSketchDefinitionCore({
-    definition,
+    definition: literalResolvedDefinition(definition),
     tolerances: {
       coincidence: 1e-6,
       angleRadians: 1e-6,

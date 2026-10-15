@@ -1,4 +1,5 @@
 import { test, expect } from "vitest";
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import type {
   FeatureDefinition,
   SketchSnapshotRecord,
@@ -338,7 +339,7 @@ function createDimensionedRectangleSketch(
           pointId(`${sketchId}_bottom_left`),
           pointId(`${sketchId}_bottom_right`),
         ],
-        value: width,
+        value: createLiteralAuthoredValue(width),
       },
     ],
   };

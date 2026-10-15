@@ -11,6 +11,8 @@ import {
   solveSketchDefinitionCore,
 } from "@/contracts/sketch/solver-core";
 import type { DimensionDefinition } from "@/contracts/sketch/schema";
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
+import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 import {
   makeReferenceDimensionCases,
   makeReferenceDimensionSketch,
@@ -25,7 +27,10 @@ const TOLERANCES = {
 
 function solve(dimensions: readonly DimensionDefinition[]) {
   return solveSketchDefinitionCore({
-    definition: withDimensions(makeReferenceDimensionSketch(), dimensions),
+    // T17p2 (F-2): the solver consumes the resolved definition.
+    definition: literalResolvedDefinition(
+      withDimensions(makeReferenceDimensionSketch(), dimensions),
+    ),
     tolerances: TOLERANCES,
     modelingTolerance: 1e-3,
     partialSolvePolicy: "bestEffort",
@@ -88,7 +93,9 @@ test("T13d D10: a reference dimension compiles no residual; its driving twin doe
   const sketch = makeReferenceDimensionSketch();
   for (const entry of makeReferenceDimensionCases()) {
     const evaluate = (dimension: DimensionDefinition) => {
-      const definition = withDimensions(sketch, [dimension]);
+      const definition = literalResolvedDefinition(
+        withDimensions(sketch, [dimension]),
+      );
       return () =>
         evaluateSketchScalarConstraintForTest({
           definition,
@@ -148,7 +155,7 @@ test("T13d D10: a sketch over-determined only by a reference stays solved and un
   const conflicting = solve([
     radius,
     bottom.driving,
-    { ...diameter.driving, value: 5 },
+    { ...diameter.driving, value: createLiteralAuthoredValue(5) },
   ]);
   expect(conflicting.status.solveState).toBe("partiallySolved");
 });
@@ -159,7 +166,10 @@ test("T13d D9′: a reference keeping a conflicting value is ignored by the solv
   const cases = makeReferenceDimensionCases();
   const radius = cases.find((entry) => entry.name === "circleRadius")!.driving;
   const diameter = cases.find((entry) => entry.name === "diameter (circle)")!;
-  const solved = solve([radius, { ...diameter.reference, value: 99 }]);
+  const solved = solve([
+    radius,
+    { ...diameter.reference, value: createLiteralAuthoredValue(99) },
+  ]);
   expect(solved.status.solveState).toBe("solved");
   expect(solved.solvedSnapshot.dimensionStatuses[1]).toMatchObject({
     status: "driven",

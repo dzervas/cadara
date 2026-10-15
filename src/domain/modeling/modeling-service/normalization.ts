@@ -1,6 +1,5 @@
 import type {
   BodyId,
-  FeatureId,
   FeatureTreeNodeId,
   ObjectTreeNodeId,
   PickId,
@@ -9,10 +8,6 @@ import type {
   SnapshotEntityId,
 } from "@/core/editor/schema";
 import type {
-  BodySnapshotRecord,
-  ConstructionSnapshotRecord,
-  DocumentVariableRecord,
-  DocumentFeatureCursor,
   DocumentHistoryItemRecord,
   ExtrudeEndCondition,
   ExtrudeFeatureExtent,
@@ -23,19 +18,9 @@ import type {
   FeatureDefinition,
   BakedBodyFeatureParameters,
   BakedBodyFeatureProvenance,
-  FeatureSnapshotRecord,
   FilletFeatureParameters,
-  InvalidReferenceDetailPayload,
-  ModelingDiagnostic,
-  ModelingDiagnosticDetail,
-  MutationRevisionState,
   ObjectTreeNodeRecord,
   KernelDocumentSnapshot,
-  PreviewId,
-  PreviewFreshness,
-  RebuildResult,
-  ReferenceRecord,
-  SketchSnapshotRecord,
   SnapshotEntityRecord,
   WorkspaceSnapshot,
   PlaneFeatureParameters,
@@ -44,7 +29,6 @@ import type {
   ShellFeatureParameters,
   AdvancedSolidFeatureParameters,
 } from "@/contracts/modeling/schema";
-import type { GeometryAssetDiagnosticDetail } from "@/contracts/modeling/geometry-assets";
 import type {
   RenderExport,
   RenderableEntityRecord,
@@ -63,7 +47,6 @@ import {
   getAuthoredLiteralValue,
   type MaybeAuthoredValue,
 } from "@/contracts/modeling/authored-values";
-import type { DurableRef } from "@/contracts/shared/references";
 import type { SketchPlaneDefinition } from "@/contracts/shared/sketch-plane";
 import {
   EXTRUDE_FEATURE_SCHEMA_VERSION,
@@ -82,13 +65,11 @@ import {
   isAuthoredEnumLike,
   assertBodyId,
   assertDocumentId,
-  assertDocumentVariableId,
   assertRevisionId,
   assertFeatureId,
   assertSketchId,
   assertPrimitiveRef,
   assertDurableRef,
-  assertSketchPlaneSupportRef,
   assertExtrudeProfileRefs,
   assertSurfaceProfileRefs,
   assertFilletEdgeRef,
@@ -98,20 +79,6 @@ import {
   normalizeUpToOffset,
   toContractAuthoredValue,
 } from "./validation";
-
-export function normalizeSketchPlaneKey(
-  value: unknown,
-): SketchPlaneDefinition["key"] {
-  if (value === null) {
-    return null;
-  }
-
-  if (value === "xy" || value === "yz" || value === "xz") {
-    return value;
-  }
-
-  throw new Error("Invalid sketch plane key payload.");
-}
 
 export function normalizeSketchPlaneFrame(
   value: unknown,
@@ -136,20 +103,6 @@ export function normalizeSketchPlaneFrame(
         : (() => {
             throw new Error("Invalid sketch plane handedness payload.");
           })(),
-  };
-}
-
-export function normalizeSketchPlaneDefinition(
-  value: unknown,
-): SketchPlaneDefinition {
-  if (!isRecord(value) || !isRecord(value.frame)) {
-    throw new Error("Invalid sketch plane payload.");
-  }
-
-  return {
-    support: assertSketchPlaneSupportRef(value.support),
-    frame: normalizeSketchPlaneFrame(value.frame),
-    key: normalizeSketchPlaneKey(value.key),
   };
 }
 
@@ -1071,44 +1024,6 @@ export function normalizeFeatureDefinition(value: unknown): FeatureDefinition {
   }
 }
 
-export function normalizeDiagnostics(value: unknown): ModelingDiagnostic[] {
-  if (!Array.isArray(value)) {
-    throw new Error("Invalid diagnostics payload.");
-  }
-
-  return value.map((entry) => {
-    if (
-      !isRecord(entry) ||
-      !isString(entry.code) ||
-      !isString(entry.message) ||
-      (entry.severity !== "info" &&
-        entry.severity !== "warning" &&
-        entry.severity !== "error")
-    ) {
-      throw new Error("Invalid diagnostic record.");
-    }
-
-    return {
-      code: entry.code,
-      severity: entry.severity,
-      message: entry.message,
-      featureId:
-        entry.featureId == null ? null : assertFeatureId(entry.featureId),
-      fieldId: entry.fieldId == null ? null : String(entry.fieldId),
-      fieldPath: Array.isArray(entry.fieldPath)
-        ? entry.fieldPath.map((segment) =>
-            typeof segment === "number" ? segment : String(segment),
-          )
-        : undefined,
-      repairGuidance:
-        entry.repairGuidance == null ? null : String(entry.repairGuidance),
-      target: entry.target == null ? null : assertDurableRef(entry.target),
-      detail:
-        entry.detail == null ? null : normalizeDiagnosticDetail(entry.detail),
-    };
-  });
-}
-
 export function normalizeModelingDocumentSettings(
   value: unknown,
 ): KernelDocumentSnapshot["settings"] {
@@ -1152,216 +1067,6 @@ export function normalizeModelingKernelCapabilities(
     supportsFaceBackedSketchPlanes: value.supportsFaceBackedSketchPlanes,
     supportsDurableTopologyNaming: value.supportsDurableTopologyNaming,
   };
-}
-
-export function normalizeInvalidReferenceDetail(
-  value: unknown,
-): InvalidReferenceDetailPayload {
-  if (!isRecord(value) || !isString(value.reason)) {
-    throw new Error("Invalid invalid reference detail payload.");
-  }
-
-  return {
-    reason: value.reason,
-    target: assertDurableRef(value.target),
-    ownerFeatureId:
-      value.ownerFeatureId === null
-        ? null
-        : assertFeatureId(value.ownerFeatureId),
-    ownerSketchId:
-      value.ownerSketchId === null ? null : assertSketchId(value.ownerSketchId),
-    sourceTarget:
-      value.sourceTarget === null ? null : assertDurableRef(value.sourceTarget),
-  };
-}
-
-export function normalizeDiagnosticDetail(
-  value: unknown,
-): ModelingDiagnosticDetail {
-  if (!isRecord(value) || !isString(value.kind)) {
-    throw new Error("Invalid diagnostic detail payload.");
-  }
-
-  switch (value.kind) {
-    case "invalidReference":
-      return {
-        kind: "invalidReference",
-        reference: normalizeInvalidReferenceDetail(value.reference),
-      };
-    case "revisionConflict":
-      return {
-        kind: "revisionConflict",
-        expectedRevisionId: assertRevisionId(value.expectedRevisionId),
-        actualRevisionId: assertRevisionId(value.actualRevisionId),
-      };
-    case "stalePreview":
-      return {
-        kind: "stalePreview",
-        previewId: value.previewId as PreviewId,
-        requestedRevisionId: assertRevisionId(value.requestedRevisionId),
-        currentRevisionId: assertRevisionId(value.currentRevisionId),
-      };
-    case "rebuildFailure":
-      if (
-        !Array.isArray(value.affectedFeatureIds) ||
-        !Array.isArray(value.affectedTargets)
-      ) {
-        throw new Error("Invalid rebuild failure detail payload.");
-      }
-
-      return {
-        kind: "rebuildFailure",
-        affectedFeatureIds: value.affectedFeatureIds.map((featureId) =>
-          assertFeatureId(featureId),
-        ),
-        affectedTargets: value.affectedTargets.map((target) =>
-          assertDurableRef(target),
-        ),
-      };
-    case "geometryAsset":
-      if (
-        !isString(value.code) ||
-        !isString(value.assetId) ||
-        !isString(value.hash) ||
-        !isString(value.hashPrefix) ||
-        typeof value.byteLength !== "number" ||
-        !isString(value.format) ||
-        !isString(value.mediaType) ||
-        !Array.isArray(value.ownerFeatureIds)
-      ) {
-        throw new Error("Invalid geometry asset diagnostic detail payload.");
-      }
-
-      return {
-        kind: "geometryAsset",
-        code: value.code as GeometryAssetDiagnosticDetail["code"],
-        assetId: value.assetId as GeometryAssetDiagnosticDetail["assetId"],
-        hash: value.hash as GeometryAssetDiagnosticDetail["hash"],
-        hashPrefix: value.hashPrefix,
-        byteLength: value.byteLength,
-        format: value.format as GeometryAssetDiagnosticDetail["format"],
-        mediaType: value.mediaType,
-        ownerFeatureIds: value.ownerFeatureIds.map((featureId) =>
-          assertFeatureId(featureId),
-        ),
-      };
-    default:
-      throw new Error("Invalid diagnostic detail kind.");
-  }
-}
-
-export function normalizeRevisionState(value: unknown): MutationRevisionState {
-  if (!isRecord(value) || !isString(value.kind)) {
-    throw new Error("Invalid revision state payload.");
-  }
-
-  switch (value.kind) {
-    case "accepted":
-      return {
-        kind: "accepted",
-        baseRevisionId: assertRevisionId(value.baseRevisionId),
-      };
-    case "conflict":
-      return {
-        kind: "conflict",
-        expectedRevisionId: assertRevisionId(value.expectedRevisionId),
-        actualRevisionId: assertRevisionId(value.actualRevisionId),
-      };
-    case "rejected":
-      if (!isString(value.reasonCode)) {
-        throw new Error("Invalid rejected revision state payload.");
-      }
-
-      return {
-        kind: "rejected",
-        baseRevisionId: assertRevisionId(value.baseRevisionId),
-        reasonCode: value.reasonCode,
-      };
-    default:
-      throw new Error("Invalid revision state kind.");
-  }
-}
-
-export function normalizePreviewFreshness(value: unknown): PreviewFreshness {
-  if (!isRecord(value) || !isString(value.kind)) {
-    throw new Error("Invalid preview freshness payload.");
-  }
-
-  switch (value.kind) {
-    case "fresh":
-      return {
-        kind: "fresh",
-        baseRevisionId: assertRevisionId(value.baseRevisionId),
-      };
-    case "stale":
-      return {
-        kind: "stale",
-        requestedRevisionId: assertRevisionId(value.requestedRevisionId),
-        currentRevisionId: assertRevisionId(value.currentRevisionId),
-      };
-    default:
-      throw new Error("Invalid preview freshness kind.");
-  }
-}
-
-export function normalizeRebuildResult(value: unknown): RebuildResult {
-  if (
-    !isRecord(value) ||
-    !isString(value.kind) ||
-    !Array.isArray(value.diagnostics)
-  ) {
-    throw new Error("Invalid rebuild result payload.");
-  }
-
-  switch (value.kind) {
-    case "rebuilt":
-      if (
-        !isString(value.revisionId) ||
-        !Array.isArray(value.invalidatedTargets)
-      ) {
-        throw new Error("Invalid rebuilt result payload.");
-      }
-
-      return {
-        kind: "rebuilt",
-        revisionId: assertRevisionId(value.revisionId),
-        invalidatedTargets: normalizeChangedTargets(value.invalidatedTargets),
-        diagnostics: normalizeDiagnostics(value.diagnostics),
-      };
-    case "skipped":
-      if (
-        value.reasonCode !== "revisionConflict" &&
-        value.reasonCode !== "validationRejected" &&
-        value.reasonCode !== "noOp"
-      ) {
-        throw new Error("Invalid skipped rebuild result payload.");
-      }
-
-      return {
-        kind: "skipped",
-        reasonCode: value.reasonCode,
-        invalidatedTargets: [],
-        diagnostics: normalizeDiagnostics(value.diagnostics),
-      };
-    case "failed":
-      if (
-        !isString(value.revisionId) ||
-        !isString(value.reasonCode) ||
-        !Array.isArray(value.invalidatedTargets)
-      ) {
-        throw new Error("Invalid failed rebuild result payload.");
-      }
-
-      return {
-        kind: "failed",
-        revisionId: assertRevisionId(value.revisionId),
-        reasonCode: value.reasonCode,
-        invalidatedTargets: normalizeChangedTargets(value.invalidatedTargets),
-        diagnostics: normalizeDiagnostics(value.diagnostics),
-      };
-    default:
-      throw new Error("Unsupported rebuild result payload.");
-  }
 }
 
 export function normalizeFeatureTree(
@@ -1525,67 +1230,6 @@ export function normalizeOwnership(value: unknown) {
     ownerBodyId:
       value.ownerBodyId === null ? null : assertBodyId(value.ownerBodyId),
   };
-}
-
-export function normalizeReferences(value: unknown): ReferenceRecord[] {
-  if (!Array.isArray(value)) {
-    throw new Error("Invalid reference payload.");
-  }
-
-  return value.map((entry) => {
-    if (
-      !isRecord(entry) ||
-      !isString(entry.id) ||
-      !isString(entry.label) ||
-      !(entry.ownerFeatureId === null || isString(entry.ownerFeatureId))
-    ) {
-      throw new Error("Invalid reference record.");
-    }
-
-    return {
-      id: entry.id as ReferenceRecord["id"],
-      label: entry.label,
-      target: assertDurableRef(entry.target),
-      ownerDocumentId: assertDocumentId(entry.ownerDocumentId),
-      ownerRevisionId: assertRevisionId(entry.ownerRevisionId),
-      ownerFeatureId: entry.ownerFeatureId as FeatureId | null,
-      ownerSketchId:
-        entry.ownerSketchId === null
-          ? null
-          : assertSketchId(entry.ownerSketchId),
-      ownerBodyId:
-        entry.ownerBodyId === null ? null : assertBodyId(entry.ownerBodyId),
-      invalidation:
-        entry.invalidation === null
-          ? null
-          : normalizeInvalidReferenceDetail(entry.invalidation),
-    };
-  });
-}
-
-export function normalizeDocumentVariables(
-  value: unknown,
-): DocumentVariableRecord[] {
-  if (!Array.isArray(value)) {
-    throw new Error("Invalid document variables payload.");
-  }
-
-  return value.map((entry) => {
-    if (
-      !isRecord(entry) ||
-      !isString(entry.variableId) ||
-      !isString(entry.name) ||
-      !isString(entry.valueText)
-    ) {
-      throw new Error("Invalid document variable record.");
-    }
-
-    return {
-      variableId: assertDocumentVariableId(entry.variableId),
-      name: entry.name,
-      valueText: entry.valueText,
-    };
-  });
 }
 
 export function normalizeRenderables(value: unknown): RenderableEntityRecord[] {
@@ -1982,166 +1626,6 @@ export function normalizeRenderExport(value: unknown): RenderExport {
   };
 }
 
-export function normalizeFeatures(value: unknown): FeatureSnapshotRecord[] {
-  if (!Array.isArray(value)) {
-    throw new Error("Invalid feature snapshot payload.");
-  }
-
-  return value.map((entry) => {
-    if (
-      !isRecord(entry) ||
-      !isString(entry.featureId) ||
-      !isString(entry.label) ||
-      typeof entry.suppressed !== "boolean" ||
-      !isRecord(entry.definition) ||
-      !Array.isArray(entry.producedTargets)
-    ) {
-      throw new Error("Invalid feature snapshot record.");
-    }
-
-    return {
-      ...normalizeOwnership(entry),
-      featureId: assertFeatureId(entry.featureId),
-      label: entry.label,
-      suppressed: entry.suppressed,
-      definition: normalizeFeatureDefinition(entry.definition),
-      producedTargets: entry.producedTargets.map((target) =>
-        assertDurableRef(target),
-      ),
-    };
-  });
-}
-
-export function normalizeDocumentFeatureCursor(
-  value: unknown,
-  features: readonly FeatureSnapshotRecord[],
-  sketches: readonly SketchSnapshotRecord[] = [],
-): DocumentFeatureCursor {
-  if (!isRecord(value) || !isString(value.kind)) {
-    throw new Error("Invalid document feature cursor payload.");
-  }
-
-  if (value.kind === "empty") {
-    return { kind: "empty" };
-  }
-
-  if (value.kind === "sketch" && isString(value.sketchId)) {
-    const sketchId = assertSketchId(value.sketchId);
-
-    if (!sketches.some((sketch) => sketch.sketchId === sketchId)) {
-      throw new Error(
-        `Document feature cursor references missing sketch ${sketchId}.`,
-      );
-    }
-
-    return { kind: "sketch", sketchId };
-  }
-
-  if (value.kind === "feature" && isString(value.featureId)) {
-    const featureId = assertFeatureId(value.featureId);
-
-    if (!features.some((feature) => feature.featureId === featureId)) {
-      throw new Error(
-        `Document feature cursor references missing feature ${featureId}.`,
-      );
-    }
-
-    return { kind: "feature", featureId };
-  }
-
-  throw new Error("Invalid document feature cursor payload.");
-}
-
-export function normalizeBodies(value: unknown): BodySnapshotRecord[] {
-  if (!Array.isArray(value)) {
-    throw new Error("Invalid body snapshot payload.");
-  }
-
-  return value.map((entry) => {
-    if (
-      !isRecord(entry) ||
-      !isString(entry.bodyId) ||
-      !isString(entry.label) ||
-      (entry.bodyKind !== "solid" && entry.bodyKind !== "sheet") ||
-      !isRecord(entry.topology) ||
-      !Array.isArray(entry.topology.faceIds) ||
-      !Array.isArray(entry.topology.edgeIds) ||
-      !Array.isArray(entry.topology.vertexIds) ||
-      (entry.topologyPresentation !== undefined &&
-        entry.topologyPresentation !== "bodyOnlyMesh") ||
-      (entry.topologyPresentation === "bodyOnlyMesh" &&
-        (entry.topology.faceIds.length !== 0 ||
-          entry.topology.edgeIds.length !== 0 ||
-          entry.topology.vertexIds.length !== 0))
-    ) {
-      throw new Error("Invalid body snapshot record.");
-    }
-
-    return {
-      ...normalizeOwnership(entry),
-      bodyId: assertBodyId(entry.bodyId),
-      label: entry.label,
-      bodyKind: entry.bodyKind === "sheet" ? "sheet" : "solid",
-      topology: {
-        faceIds: entry.topology.faceIds.map((faceId) => {
-          if (!isString(faceId)) {
-            throw new Error("Invalid face ID payload.");
-          }
-
-          return faceId as BodySnapshotRecord["topology"]["faceIds"][number];
-        }),
-        edgeIds: entry.topology.edgeIds.map((edgeId) => {
-          if (!isString(edgeId)) {
-            throw new Error("Invalid edge ID payload.");
-          }
-
-          return edgeId as BodySnapshotRecord["topology"]["edgeIds"][number];
-        }),
-        vertexIds: entry.topology.vertexIds.map((vertexId) => {
-          if (!isString(vertexId)) {
-            throw new Error("Invalid vertex ID payload.");
-          }
-
-          return vertexId as BodySnapshotRecord["topology"]["vertexIds"][number];
-        }),
-      },
-      topologyPresentation:
-        entry.topologyPresentation === "bodyOnlyMesh"
-          ? "bodyOnlyMesh"
-          : undefined,
-    };
-  });
-}
-
-export function normalizeConstructions(
-  value: unknown,
-): ConstructionSnapshotRecord[] {
-  if (!Array.isArray(value)) {
-    throw new Error("Invalid construction snapshot payload.");
-  }
-
-  return value.map((entry) => {
-    if (
-      !isRecord(entry) ||
-      !isString(entry.constructionId) ||
-      !isString(entry.label) ||
-      entry.constructionType !== "plane"
-    ) {
-      throw new Error("Invalid construction snapshot record.");
-    }
-
-    return {
-      ...normalizeOwnership(entry),
-      constructionId:
-        entry.constructionId as ConstructionSnapshotRecord["constructionId"],
-      label: entry.label,
-      constructionType: entry.constructionType,
-      plane: normalizeSketchPlaneDefinition(entry.plane),
-      target: assertDurableRef(entry.target),
-    };
-  });
-}
-
 export function normalizeEntities(value: unknown): SnapshotEntityRecord[] {
   if (!Array.isArray(value)) {
     throw new Error("Invalid snapshot entity payload.");
@@ -2221,12 +1705,4 @@ export function normalizeWorkspaceSnapshot(value: unknown): WorkspaceSnapshot {
     document,
     presentation,
   };
-}
-
-export function normalizeChangedTargets(value: unknown): DurableRef[] {
-  if (!Array.isArray(value)) {
-    throw new Error("Invalid changed target payload.");
-  }
-
-  return value.map((entry) => assertDurableRef(entry));
 }

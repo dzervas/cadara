@@ -1,4 +1,5 @@
 import { test, expect } from "vitest";
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import {
   beginSketchAnnotationEdit,
   beginSketchTool,
@@ -1071,7 +1072,14 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
         value: dimension.value,
       })),
       "Fixing a circle should add a diameter dimension for the current size.",
-    ).toEqual([{ kind: "diameter", entityId: circle.entityId, value: 8 }]);
+    ).toEqual([
+      {
+        kind: "diameter",
+        entityId: circle.entityId,
+        // T17p2 (F-2): authored as a literal wrapper (it was bare).
+        value: createLiteralAuthoredValue(8),
+      },
+    ]);
     expect(circleSession.definition.dimensions[0]?.label).toMatch(
       /^Fixed diameter \d+$/,
     );
@@ -1975,13 +1983,13 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
 
     expect(
       session.definition.dimensions[0]?.kind === "distance" &&
-        session.definition.dimensions[0].value.source === "literal" &&
+        session.definition.dimensions[0].value?.source === "literal" &&
         session.definition.dimensions[0].value.value === 31,
       "Committing the reopened distance input should update the durable dimension record.",
     ).toBeTruthy();
     expect(
       session.commitRequest?.definition.dimensions[0]?.kind === "distance" &&
-        session.commitRequest.definition.dimensions[0].value.source ===
+        session.commitRequest.definition.dimensions[0].value?.source ===
           "literal" &&
         session.commitRequest.definition.dimensions[0].value.value === 31,
       "Committing the reopened distance input should update the durable sketch mutation payload.",
@@ -2057,7 +2065,7 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     expect(
       dimension?.kind === "lineLength" &&
         dimension.entityId === bottom.entityId &&
-        dimension.value.source === "literal" &&
+        dimension.value?.source === "literal" &&
         dimension.value.value === 20,
       "Width edit should update the durable dimension.",
     ).toBeTruthy();
@@ -2084,7 +2092,7 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     ).toBeTruthy();
     expect(
       payloadDimension?.kind === "lineLength" &&
-        payloadDimension.value.source === "literal" &&
+        payloadDimension.value?.source === "literal" &&
         payloadDimension.value.value === 20,
       "Width edit should update the durable sketch mutation payload.",
     ).toBeTruthy();
@@ -2136,7 +2144,7 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     );
     expect(
       dimension?.kind === "circleRadius" &&
-        dimension.value.source === "literal" &&
+        dimension.value?.source === "literal" &&
         dimension.value.value === 18,
       "Radius edit should update the durable dimension.",
     ).toBeTruthy();
@@ -2229,7 +2237,7 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     );
     expect(
       dimension?.kind === "circleRadius" &&
-        dimension.value.source === "expression" &&
+        dimension.value?.source === "expression" &&
         dimension.value.valueText === "radiusVar",
       "Committed dimension edit should persist the raw expression text.",
     ).toBeTruthy();
@@ -2300,7 +2308,7 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     expect(
       diameter?.kind === "diameter" &&
         diameter.entityId === circleId &&
-        diameter.value.source === "literal" &&
+        diameter.value?.source === "literal" &&
         diameter.value.value === 12 &&
         diameter.annotationPlacement?.kind === "dimensionLine",
       "Diameter authoring should commit a durable diameter dimension with annotation placement.",
@@ -2364,7 +2372,7 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     expect(
       lineLength?.kind === "lineLength" &&
         lineLength.entityId === lengthLineId &&
-        lineLength.value.source === "literal" &&
+        lineLength.value?.source === "literal" &&
         lineLength.value.value === 8 &&
         lineLength.annotationPlacement?.kind === "dimensionLine",
       "Single-line Dimension authoring should commit a durable line-length dimension tied to the selected edge.",
@@ -2397,7 +2405,7 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     expect(
       lineDistance?.kind === "lineDistance" &&
         lineDistance.lines.every((line) => line.kind === "localEntity") &&
-        lineDistance.value.source === "literal" &&
+        lineDistance.value?.source === "literal" &&
         lineDistance.value.value === 6,
       "Parallel line targets should commit a durable line-to-line distance dimension.",
     ).toBeTruthy();
@@ -2433,7 +2441,7 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       pointLineDistance?.kind === "linePointDistance" &&
         pointLineDistance.line.kind === "localEntity" &&
         pointLineDistance.point.kind === "localPoint" &&
-        pointLineDistance.value.source === "literal" &&
+        pointLineDistance.value?.source === "literal" &&
         pointLineDistance.value.value === 4,
       "Line and point targets should commit a durable line-to-point distance dimension in either selection order.",
     ).toBeTruthy();
@@ -2569,7 +2577,7 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     );
     expect(
       angle?.kind === "lineAngle" &&
-        angle.valueRadians.source === "literal" &&
+        angle.valueRadians?.source === "literal" &&
         Math.abs(angle.valueRadians.value - Math.PI / 2) < 1e-9 &&
         angle.lines.every((line) => line.kind === "localEntity") &&
         angle.annotationPlacement?.side === "major",
@@ -2615,7 +2623,9 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     expect(
       angleEditSession.status === "idle" &&
         editedAngle?.kind === "lineAngle" &&
-        Math.abs(editedAngle.valueRadians - Math.PI / 2) < 1e-9,
+        // T17p2 (F-2): a literal wrapper (it was written bare).
+        editedAngle.valueRadians?.source === "literal" &&
+        Math.abs(editedAngle.valueRadians.value - Math.PI / 2) < 1e-9,
       "Committed angle dimension edits should accept degree input and preserve durable radians.",
     ).toBeTruthy();
     const committedAngleOverlay = getSketchToolPresentation(

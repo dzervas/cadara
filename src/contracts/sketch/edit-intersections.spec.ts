@@ -15,6 +15,7 @@ import {
   type SketchEditIntersectionResult,
 } from "@/contracts/sketch/edit-intersections";
 import {
+  literalResolvedDefinition,
   addRectangle,
   makeSketchFixture,
   type SketchFixture,
@@ -38,7 +39,7 @@ async function trim(
   const input = sketch.build();
   return querySketchEditIntersections(
     {
-      definition: input.definition,
+      definition: literalResolvedDefinition(input.definition),
       solvedSnapshot: input.solvedSnapshot,
       projectedReferences: [],
       modelingTolerance: input.modelingTolerance,
@@ -621,7 +622,7 @@ describe("Extend and Split (T10g-2)", () => {
     const input = sketch.build();
     return querySketchEditIntersections(
       {
-        definition: input.definition,
+        definition: literalResolvedDefinition(input.definition),
         solvedSnapshot: input.solvedSnapshot,
         projectedReferences: [],
         modelingTolerance: input.modelingTolerance,
@@ -1143,7 +1144,7 @@ describe("Intersect (T13i snap candidates)", () => {
     const input = sketch.build();
     return querySketchEditIntersections(
       {
-        definition: input.definition,
+        definition: literalResolvedDefinition(input.definition),
         solvedSnapshot: input.solvedSnapshot,
         projectedReferences: [],
         modelingTolerance: input.modelingTolerance,
@@ -1254,7 +1255,7 @@ describe("Intersect (T13i snap candidates)", () => {
     sketch.spline("other", ["w0", "w1", "w2"], "open");
     const input = sketch.build();
     const basis = {
-      definition: input.definition,
+      definition: literalResolvedDefinition(input.definition),
       solvedSnapshot: input.solvedSnapshot,
       projectedReferences: [],
       modelingTolerance: input.modelingTolerance,
@@ -1294,7 +1295,7 @@ describe("Split of arc, circle and spline targets (T13m)", () => {
     const input = sketch.build();
     return querySketchEditIntersections(
       {
-        definition: input.definition,
+        definition: literalResolvedDefinition(input.definition),
         solvedSnapshot: input.solvedSnapshot,
         projectedReferences: [],
         modelingTolerance: input.modelingTolerance,
@@ -1314,7 +1315,7 @@ describe("Split of arc, circle and spline targets (T13m)", () => {
     return verified(
       await querySketchEditIntersections(
         {
-          definition: input.definition,
+          definition: literalResolvedDefinition(input.definition),
           solvedSnapshot: input.solvedSnapshot,
           projectedReferences: [],
           modelingTolerance: input.modelingTolerance,

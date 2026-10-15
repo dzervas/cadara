@@ -354,7 +354,10 @@
             "entityId": "sketch_entity_3_line",
             "kind": "lineLength",
             "label": "Line length 5",
-            "value": 20
+            "value": {
+              "source": "literal",
+              "value": 20
+            }
           },
           {
             "annotationPlacement": {
@@ -365,7 +368,10 @@
             "entityId": "sketch_entity_6_line",
             "kind": "lineLength",
             "label": "Line length 26",
-            "value": 17
+            "value": {
+              "source": "literal",
+              "value": 17
+            }
           },
           {
             "annotationPlacement": {
@@ -383,7 +389,10 @@
               "kind": "localPoint",
               "pointId": "sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_2"
             },
-            "value": 6
+            "value": {
+              "source": "literal",
+              "value": 6
+            }
           }
         ],
         "entities": [

@@ -1,6 +1,7 @@
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { lineLoopSegmentsForTest } from "@/contracts/sketch/region-record.fixtures";
 import { test, expect } from "vitest";
+import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 import type { ModelingKernelAdapter } from "@/contracts/modeling/adapter";
 import {
   createModelingService,
@@ -1119,7 +1120,7 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
       documentId: OCC_KERNEL_DOCUMENT_ID,
       revisionId: OCC_KERNEL_INITIAL_REVISION_ID,
       sketchId,
-      definition,
+      definition: literalResolvedDefinition(definition),
       solvedSnapshot: {
         schemaVersion: SOLVED_SKETCH_SCHEMA_VERSION,
         status: { solveState: "solved", constraintState: "wellConstrained" },

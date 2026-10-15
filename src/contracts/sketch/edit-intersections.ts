@@ -52,7 +52,7 @@ import {
   type SegmentCurve,
 } from "@/contracts/sketch/region-interval-geometry";
 import type {
-  SketchDefinition,
+  NumericSketchDefinition,
   SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
 import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
@@ -60,7 +60,7 @@ import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
 /** One accepted live pair (the `SketchLiveRegionBasis` fields) and the operation. */
 export interface SketchEditIntersectionInput {
   /** Evaluated definition of the accepted pair. */
-  definition: SketchDefinition;
+  definition: NumericSketchDefinition;
   /** Its solved snapshot, with the offset publications applied. */
   solvedSnapshot: SolvedSketchSnapshot;
   /** Carried with the pair; projected geometry is not a cutter (A4, T13). */
@@ -351,7 +351,7 @@ export async function querySketchSnapIntersections(
  * Split: `SPLIT_ENTITY_KINDS`, T13m), else null.
  */
 function lineOperationRefusal(
-  definition: SketchDefinition,
+  definition: NumericSketchDefinition,
   operation: SketchCutQueryInput["operation"],
 ) {
   if (operation.kind === "trim" || operation.kind === "intersect") return null;
@@ -422,7 +422,7 @@ function targetBranchesOf(
  * the corner, T-g14) and a smooth closure's whole loop from c to c.
  */
 function keptPieces(
-  definition: SketchDefinition,
+  definition: NumericSketchDefinition,
   solved: SolvedSketchSnapshot,
   targetId: SketchEntityId,
   ordered: readonly Branch[],

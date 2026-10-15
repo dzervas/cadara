@@ -1,4 +1,5 @@
 import { test, expect } from "vitest";
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import { readFileSync } from "node:fs";
 
 import type { SketchDefinition } from "@/contracts/sketch/schema";
@@ -49,6 +50,7 @@ import {
   OCC_KERNEL_SETTINGS,
 } from "@/domain/modeling/opencascade-kernel-seed";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 import { completeSketchEditQueriesForTest } from "@/domain/editor/state-machine-test-builder";
 import { TRIM_BASIS_NOT_ACCEPTED_MESSAGE } from "@/domain/editor/sketch-session/editing";
 import {
@@ -305,14 +307,14 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
           kind: "horizontalDistance",
           label: "Width",
           pointIds: ["sketch_point_a", "sketch_point_b"],
-          value: 1,
+          value: createLiteralAuthoredValue(1),
         },
         {
           dimensionId: "dimension_height",
           kind: "verticalDistance",
           label: "Height",
           pointIds: ["sketch_point_a", "sketch_point_d"],
-          value: 1,
+          value: createLiteralAuthoredValue(1),
         },
       ],
     };
@@ -458,7 +460,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
           kind: "lineLength",
           label: "Line 4 length",
           entityId: "sketch_entity_4_line" as const,
-          value: 20,
+          value: createLiteralAuthoredValue(20),
         },
       ],
     };
@@ -512,7 +514,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
           kind: "lineLength",
           label: "Branch length",
           entityId: "sketch_entity_branch_line",
-          value: 20,
+          value: createLiteralAuthoredValue(20),
         },
       ],
     };
@@ -521,7 +523,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
   function createSessionFromDefinition(definition: SketchDefinition) {
     const plane = createStandardPlaneDefinition("xy");
     const solved = solveSketchDefinitionCore({
-      definition,
+      definition: literalResolvedDefinition(definition),
       tolerances: {
         coincidence: 1e-6,
         angleRadians: 1e-6,
@@ -577,7 +579,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
 
   async function deriveRegionsForDefinition(definition: SketchDefinition) {
     const solved = solveSketchDefinitionCore({
-      definition,
+      definition: literalResolvedDefinition(definition),
       tolerances: {
         coincidence: 1e-6,
         angleRadians: 1e-6,
@@ -2377,7 +2379,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
           kind: "circleRadius" as const,
           label: "R3",
           entityId: "sketch_entity_circle" as `sketch_entity_${string}`,
-          value: 3,
+          value: createLiteralAuthoredValue(3),
           display: { position: [3, 0] as const },
         },
       ],
@@ -2685,7 +2687,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
           kind: "lineLength",
           label: "L4",
           entityId: "sketch_entity_line",
-          value: 4,
+          value: createLiteralAuthoredValue(4),
         },
       ],
     };
@@ -2779,7 +2781,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
           kind: "circleRadius" as const,
           label: "R3",
           entityId: "sketch_entity_circle" as `sketch_entity_${string}`,
-          value: 3,
+          value: createLiteralAuthoredValue(3),
           display: { position: [3, 0] as const },
         },
       ],
@@ -2842,7 +2844,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
           kind: "lineLength",
           label: "Impossible length",
           entityId: "sketch_entity_line",
-          value: 100,
+          value: createLiteralAuthoredValue(100),
         },
       ],
     };
@@ -2981,7 +2983,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
           kind: "lineLength",
           label: "L4",
           entityId: "sketch_entity_line",
-          value: 4,
+          value: createLiteralAuthoredValue(4),
         },
       ],
     };
@@ -3033,7 +3035,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
           kind: "lineLength",
           label: "L4",
           entityId: "sketch_entity_line",
-          value: 4,
+          value: createLiteralAuthoredValue(4),
         },
       ],
     };
@@ -3151,7 +3153,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
           kind: "lineLength",
           label: "Impossible length",
           entityId: "sketch_entity_line",
-          value: 100,
+          value: createLiteralAuthoredValue(100),
         },
       ],
     };
@@ -3223,14 +3225,14 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
           kind: "circleRadius",
           label: "Radius",
           entityId: "sketch_entity_circle",
-          value: 1,
+          value: createLiteralAuthoredValue(1),
         },
         {
           dimensionId: "dimension_width",
           kind: "horizontalDistance",
           label: "Width",
           pointIds: ["sketch_point_a", "sketch_point_b"],
-          value: 2,
+          value: createLiteralAuthoredValue(2),
         },
       ],
     });
@@ -4981,7 +4983,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       ),
     };
     const solvedEdited = solveSketchDefinitionCore({
-      definition: editedSeed,
+      definition: literalResolvedDefinition(editedSeed),
       tolerances: {
         coincidence: 1e-6,
         angleRadians: 1e-6,
@@ -5081,7 +5083,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     });
 
     const solved = solveSketchDefinitionCore({
-      definition: session.definition,
+      definition: literalResolvedDefinition(session.definition),
       tolerances: {
         coincidence: 1e-6,
         angleRadians: 1e-6,
@@ -5273,7 +5275,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     const fresh = createSessionFromDefinition(persistedDefinition);
     expect(fresh.definition.entities).toEqual(persistedDefinition.entities);
     const freshSolved = solveSketchDefinitionCore({
-      definition: fresh.definition,
+      definition: literalResolvedDefinition(fresh.definition),
       tolerances: {
         coincidence: 1e-6,
         angleRadians: 1e-6,
@@ -5355,7 +5357,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     }
 
     const solved = solveSketchDefinitionCore({
-      definition: sketch.definition,
+      definition: literalResolvedDefinition(sketch.definition),
       tolerances: {
         coincidence: 1e-6,
         angleRadians: 1e-6,

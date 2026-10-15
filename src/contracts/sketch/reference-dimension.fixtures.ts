@@ -5,6 +5,7 @@
  * the authored positions. Shared by the contract, solver and adapter-parity
  * specs.
  */
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import type { DimensionId } from "@/contracts/shared/ids";
 import type {
   DimensionDefinition,
@@ -76,7 +77,7 @@ export function makeReferenceDimensionCases(): ReferenceDimensionCase[] {
         label: "Distance a–c",
         axis: "aligned",
         pointIds: [point("a"), point("c")],
-        value: 5,
+        value: createLiteralAuthoredValue(5),
       },
     },
     {
@@ -88,7 +89,7 @@ export function makeReferenceDimensionCases(): ReferenceDimensionCase[] {
         label: "Horizontal a–b",
         axis: "horizontal",
         pointIds: [point("a"), point("b")],
-        value: 4,
+        value: createLiteralAuthoredValue(4),
       },
     },
     {
@@ -100,7 +101,7 @@ export function makeReferenceDimensionCases(): ReferenceDimensionCase[] {
         label: "Vertical a–d",
         axis: "vertical",
         pointIds: [point("a"), point("d")],
-        value: 3,
+        value: createLiteralAuthoredValue(3),
       },
     },
     {
@@ -113,7 +114,7 @@ export function makeReferenceDimensionCases(): ReferenceDimensionCase[] {
         axis: "aligned",
         point: { kind: "localPoint", pointId: point("c") },
         datum: { kind: "sketchDatum", datum: "origin" },
-        value: 5,
+        value: createLiteralAuthoredValue(5),
       },
     },
     {
@@ -124,7 +125,7 @@ export function makeReferenceDimensionCases(): ReferenceDimensionCase[] {
         kind: "circleRadius",
         label: "Circle radius",
         entityId: entity("circle"),
-        value: 2,
+        value: createLiteralAuthoredValue(2),
       },
     },
     {
@@ -135,7 +136,7 @@ export function makeReferenceDimensionCases(): ReferenceDimensionCase[] {
         kind: "diameter",
         label: "Circle diameter",
         entityId: entity("circle"),
-        value: 4,
+        value: createLiteralAuthoredValue(4),
       },
     },
     {
@@ -146,7 +147,7 @@ export function makeReferenceDimensionCases(): ReferenceDimensionCase[] {
         kind: "diameter",
         label: "Arc diameter",
         entityId: entity("arc"),
-        value: 4,
+        value: createLiteralAuthoredValue(4),
       },
     },
     {
@@ -157,7 +158,7 @@ export function makeReferenceDimensionCases(): ReferenceDimensionCase[] {
         kind: "lineLength",
         label: "Bottom length",
         entityId: entity("bottom"),
-        value: 4,
+        value: createLiteralAuthoredValue(4),
       },
     },
     {
@@ -168,7 +169,7 @@ export function makeReferenceDimensionCases(): ReferenceDimensionCase[] {
         kind: "lineDistance",
         label: "Bottom to top",
         lines: [line("bottom"), line("top")],
-        value: 3,
+        value: createLiteralAuthoredValue(3),
       },
     },
     {
@@ -179,7 +180,7 @@ export function makeReferenceDimensionCases(): ReferenceDimensionCase[] {
         kind: "lineDistance",
         label: "Bottom to diagonal",
         lines: [line("bottom"), line("diagonal")],
-        value: 1,
+        value: createLiteralAuthoredValue(1),
       },
     },
     {
@@ -191,7 +192,7 @@ export function makeReferenceDimensionCases(): ReferenceDimensionCase[] {
         label: "Bottom to c",
         line: line("bottom"),
         point: { kind: "localPoint", pointId: point("c") },
-        value: 3,
+        value: createLiteralAuthoredValue(3),
       },
     },
     {
@@ -202,7 +203,7 @@ export function makeReferenceDimensionCases(): ReferenceDimensionCase[] {
         kind: "lineAngle",
         label: "Bottom to diagonal angle",
         lines: [line("bottom"), line("diagonal")],
-        valueRadians: (3 * Math.PI) / 4,
+        valueRadians: createLiteralAuthoredValue((3 * Math.PI) / 4),
       },
     },
     {
@@ -213,7 +214,7 @@ export function makeReferenceDimensionCases(): ReferenceDimensionCase[] {
         kind: "horizontalDistance",
         label: "Horizontal d–c",
         pointIds: [point("d"), point("c")],
-        value: 4,
+        value: createLiteralAuthoredValue(4),
       },
     },
     {
@@ -224,7 +225,7 @@ export function makeReferenceDimensionCases(): ReferenceDimensionCase[] {
         kind: "verticalDistance",
         label: "Vertical b–c",
         pointIds: [point("b"), point("c")],
-        value: 3,
+        value: createLiteralAuthoredValue(3),
       },
     },
   ];

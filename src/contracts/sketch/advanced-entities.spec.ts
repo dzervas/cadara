@@ -10,9 +10,10 @@ import {
   validateSolvedSketchSnapshot,
 } from "@/contracts/sketch/runtime-schema";
 import {
-  solveSketchDefinitionCore,
-  validateSketchDefinitionCore,
+  solveSketchDefinitionCore as solveSketchDefinitionCoreResolved,
+  validateSketchDefinitionCore as validateSketchDefinitionCoreResolved,
 } from "@/contracts/sketch/solver-core";
+import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 import { parseOperationHistoryPayload as validateOperationHistoryPayload } from "@/contracts/modeling/operation-history.runtime-schema";
@@ -32,6 +33,33 @@ import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { buildOccRenderExport } from "@/domain/modeling/occ/snapshot";
 import { createOccAuthoringState } from "@/domain/modeling/occ/authoring-state";
 import type { SketchSnapshotRecord } from "@/contracts/modeling/schema";
+
+// T17p2 (F-2): the solver consumes the resolved definition; these fixtures
+// author literal values, resolved before each solve (`literalResolvedDefinition`).
+const solveSketchDefinitionCore = (
+  input: Omit<
+    Parameters<typeof solveSketchDefinitionCoreResolved>[0],
+    "definition"
+  > & {
+    definition: SketchDefinition;
+  },
+) =>
+  solveSketchDefinitionCoreResolved({
+    ...input,
+    definition: literalResolvedDefinition(input.definition),
+  });
+const validateSketchDefinitionCore = (
+  input: Omit<
+    Parameters<typeof validateSketchDefinitionCoreResolved>[0],
+    "definition"
+  > & {
+    definition: SketchDefinition;
+  },
+) =>
+  validateSketchDefinitionCoreResolved({
+    ...input,
+    definition: literalResolvedDefinition(input.definition),
+  });
 
 const regionSolver = new SketchConstraintSolverAdapter({
   neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
@@ -371,7 +399,7 @@ test("src/contracts/sketch/advanced-entities.spec.ts", async () => {
     documentId: "doc_workspace",
     revisionId: "rev_0001",
     sketchId,
-    definition,
+    definition: literalResolvedDefinition(definition),
     solvedSnapshot: solved.solvedSnapshot,
     projectedReferences: [],
     modelingTolerance: tolerances.coincidence,
