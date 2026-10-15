@@ -11,7 +11,7 @@
 import { describe, expect, test } from "vitest";
 import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import type { SketchPointId } from "@/contracts/shared/ids";
-import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
+import { evaluateAuthoredSketchDerivations } from "@/domain/modeling/sketch-dimension-expressions";
 import { MIRROR_DIAGNOSTIC_CODES } from "@/contracts/sketch/mirror-requirements";
 import { OFFSET_DIAGNOSTIC_CODES } from "@/contracts/sketch/offset-geometry";
 import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
@@ -372,9 +372,10 @@ describe("T17c: removing an offset deletes exactly its write set", () => {
       entities,
     };
     expect(
-      evaluateSketchDerivations({
+      evaluateAuthoredSketchDerivations({
         definition: broken,
         modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+        documentVariables: session.documentVariables,
       }).offsetFailures.map((failure) => failure.derivationId),
       "premise: broken",
     ).toEqual([relationship.derivationId]);

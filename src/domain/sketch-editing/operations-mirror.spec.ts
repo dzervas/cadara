@@ -437,6 +437,7 @@ describe("mirror creation (T-7, A-9, T-5)", () => {
       sequence: 10,
       factories: createSessionCommitFactories(10, "sketch_primary" as never),
       modelingTolerance: TAU,
+      documentVariables: [],
       mirrorDatumAxis,
     });
 

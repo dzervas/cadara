@@ -12,7 +12,7 @@ import type {
 import { validateContract } from "@/contracts/shared/validation";
 import { validateFeatureDefinitionAuthoredValueInvariants } from "@/contracts/modeling/feature-authored-values";
 import {
-  bareDimensionValueIssues,
+  bareAuthoredValueIssues,
   validateSketchDefinition,
 } from "@/contracts/sketch/runtime-schema";
 import { SKETCH_SCHEMA_VERSION } from "@/contracts/sketch/schema";
@@ -297,8 +297,9 @@ function validateAuthoredModelDocumentInvariants(
 export function parseAuthoredModelDocument(
   value: unknown,
 ): AuthoredModelDocumentParseResult {
-  // T17p2 (F-2): a bare sketch dimension value gets its readable reason
-  // (the structural validation below would reject it too). Review R-1: only
+  // T17p2 (F-2), T17p3: a bare sketch dimension value or offset distance
+  // gets its readable reason (the structural validation below would reject
+  // it too). Review R-1: only
   // in a current-version document and sketch; any other version reports its
   // version first.
   const record =
@@ -318,7 +319,7 @@ export function parseAuthoredModelDocument(
               ? (definition as { schemaVersion?: unknown }).schemaVersion
               : undefined;
           return sketchVersion === SKETCH_SCHEMA_VERSION
-            ? bareDimensionValueIssues(
+            ? bareAuthoredValueIssues(
                 definition,
                 `sketches.${index}.definition`,
               )

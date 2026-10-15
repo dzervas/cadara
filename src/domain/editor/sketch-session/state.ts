@@ -14,9 +14,8 @@ import type {
   SketchPlaneDefinition,
   SketchPlaneSupportRef,
 } from "@/contracts/shared/sketch-plane";
-import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
 import { createRegionBoundaryBasis } from "@/contracts/sketch/region-boundary-curves";
-import { resolveSketchDerivationDistances } from "@/domain/modeling/sketch-dimension-expressions";
+import { evaluateAuthoredSketchDerivations } from "@/domain/modeling/sketch-dimension-expressions";
 import type { SolvedSketchSnapshot } from "@/contracts/sketch/schema";
 import { type PrimitiveRef } from "@/core/editor/schema";
 import {
@@ -227,11 +226,8 @@ export function deriveSketchDisplayEntities(
   session: SketchSessionState,
 ): readonly SketchDraftEntity[] {
   const sketchId = getSessionSketchId(session);
-  const displayDefinition = evaluateSketchDerivations({
-    definition: resolveSketchDerivationDistances({
-      definition: session.definition,
-      variables: session.documentVariables,
-    }),
+  const displayDefinition = evaluateAuthoredSketchDerivations({
+    definition: session.definition,
     ...getSketchSessionDerivationSettings(session),
   }).definition;
   const acceptedEntities = displayDefinition.entities.flatMap((entity) =>

@@ -12,7 +12,7 @@ import type {
   SketchDerivationDefinition,
 } from "@/contracts/sketch/schema";
 import { reconstructSplineAggregate } from "@/contracts/sketch/spline-geometry";
-import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
+import { evaluateAuthoredSketchDerivations } from "@/domain/modeling/sketch-dimension-expressions";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import {
   createStandardPlaneDefinition,
@@ -507,6 +507,7 @@ describe("T15d D9′: one-way outputs and failed mirrors' copies are not drag ta
         sequence: 30,
         factories: createSessionCommitFactories(30, "sketch_draft" as never),
         modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+        documentVariables: [],
       });
       expect(contribution.valid, contribution.message ?? "").toBe(true);
       const session = rebuildSessionForDefinition(base, {
@@ -556,6 +557,7 @@ describe("T15d D9′: one-way outputs and failed mirrors' copies are not drag ta
       sequence: 30,
       factories: createSessionCommitFactories(30, "sketch_draft" as never),
       modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+      documentVariables: [],
     });
     expect(contribution.valid, contribution.message ?? "").toBe(true);
     const patterned = rebuildSessionForDefinition(base, {
@@ -845,9 +847,10 @@ describe("T15d R-1b: forward evaluations are the identity on solved or created m
   ) {
     const stored = copyValues(session.definition, relationship);
     const forward = {
-      evaluation: evaluateSketchDerivations({
+      evaluation: evaluateAuthoredSketchDerivations({
         definition: session.definition,
         modelingTolerance: session.modelingTolerance,
+        documentVariables: session.documentVariables,
       }).definition,
       display: getSketchSessionDisplayDefinition(session),
       commit: session.commitRequest!.definition,
@@ -1247,9 +1250,10 @@ describe("T16b: failure messages name the relationship by label, say why and how
             : candidate,
       ),
     };
-    const evaluation = evaluateSketchDerivations({
+    const evaluation = evaluateAuthoredSketchDerivations({
       definition,
       modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+      documentVariables: [],
     });
     expect(
       evaluation.derivedFailures.map((failure) => failure.diagnostic.message),

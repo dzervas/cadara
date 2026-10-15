@@ -7,6 +7,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { expectNoInternalIds } from "@/contracts/sketch/user-text.fixtures";
 import { readFile } from "node:fs/promises";
+import { evaluateAuthoredSketchDerivations } from "@/domain/modeling/sketch-dimension-expressions";
 import { deriveSketchValidity } from "@/contracts/sketch/derived-validity";
 
 import type { AuthoredActionState } from "@/contracts/modeling/authored-actions";
@@ -621,9 +622,10 @@ describe("T08b-g5a live offset cutover", () => {
 
     // Insert a fit point: the source-span set changes.
     const edited = withInsertedSeedOccurrence(definition, seed);
-    const evaluation = evaluateSketchDerivations({
+    const evaluation = evaluateAuthoredSketchDerivations({
       definition: edited,
       modelingTolerance: 1e-3,
+      documentVariables: [],
     });
     // [TECH] G16′: the failure is scoped to the relationship.
     expect(evaluation.diagnostics).toEqual([]);
@@ -793,7 +795,7 @@ describe("T08b-g5a live offset cutover", () => {
       ),
     };
     const evaluation = evaluateSketchDerivations({
-      definition: withTangent,
+      definition: literalResolvedDefinition(withTangent),
       modelingTolerance: 1e-3,
     });
     expect(evaluation.diagnostics).toEqual([]);
@@ -849,7 +851,7 @@ describe("T08b-g5a live offset cutover", () => {
     const h = 1e-6;
     const shifted = (sign: number) =>
       evaluateSketchDerivations({
-        definition: {
+        definition: literalResolvedDefinition({
           ...withTangent,
           points: withTangent.points.map((point) => {
             const delta = v.points[point.pointId];
@@ -885,7 +887,7 @@ describe("T08b-g5a live offset cutover", () => {
                 }
               : entity,
           ),
-        },
+        }),
         modelingTolerance: 1e-3,
       }).definition.points.find((point) => point.pointId === output.endPointId)!
         .position;
@@ -899,7 +901,7 @@ describe("T08b-g5a live offset cutover", () => {
 
     // The point-on-shell residual's gradient against central FD.
     const pointId = "sketch_point_g5a_on_shell" as SketchPointId;
-    const probe: SketchDefinition = {
+    const probe = literalResolvedDefinition({
       ...withTangent,
       pointIds: [...withTangent.pointIds, pointId],
       points: [
@@ -923,7 +925,7 @@ describe("T08b-g5a live offset cutover", () => {
           curve: { kind: "localEntity", entityId: shell.entityId },
         } as SketchDefinition["constraints"][number],
       ],
-    };
+    });
     const tolerances = {
       coincidence: 1e-6,
       angleRadians: 1e-6,
@@ -1280,7 +1282,7 @@ describe("T08b-g5a live offset cutover", () => {
       derivedRelationships: definition.derivedRelationships!.map(
         (relationship) =>
           relationship.kind === "offset"
-            ? { ...relationship, distance: 5 }
+            ? { ...relationship, distance: createLiteralAuthoredValue(5) }
             : relationship,
       ),
     };
@@ -1299,7 +1301,7 @@ describe("T08b-g5a live offset cutover", () => {
       snapshot: SolvedSketchSnapshot,
     ) =>
       publishSketchOffsets({
-        definition,
+        definition: literalResolvedDefinition(definition),
         solvedSnapshot: snapshot,
         modelingTolerance: 1e-3,
         capabilities: capabilities(),
@@ -1650,7 +1652,7 @@ describe("T08b-g5a live offset cutover", () => {
     const solved = solve(conflicting);
     expect(
       publishSketchOffsets({
-        definition: conflicting,
+        definition: literalResolvedDefinition(conflicting),
         solvedSnapshot: solved.solvedSnapshot,
         modelingTolerance: 1e-3,
         capabilities: capabilities(),
@@ -1687,6 +1689,7 @@ describe("T08b-g5a live offset cutover", () => {
         sequence: 99,
         factories: createSessionCommitFactories(99, "sketch_draft" as never),
         modelingTolerance: 1e-3,
+        documentVariables: [],
       });
       expect(result).toMatchObject({
         valid: false,
@@ -4277,7 +4280,7 @@ describe("T08b-g5c non-accepted offset outputs ([TECH] G19/G19a, U-G5)", () => {
     const record = (ids: string[]) =>
       validateSketchRecord({
         ...structuredClone(base),
-        definition,
+        definition: committed.definition,
         solvedSnapshot: { ...published, certifiedOffsetDerivationIds: ids },
         regions: [],
       });
@@ -5455,6 +5458,7 @@ function withOffsetRelationship(
     sequence,
     factories: createSessionCommitFactories(sequence, "sketch_g7b" as never),
     modelingTolerance: 1e-3,
+    documentVariables: [],
   });
   if (!result.valid || !result.contribution)
     throw new Error(`offset: ${result.message}`);
@@ -5487,7 +5491,7 @@ function withOffsetDistance(
       (relationship) =>
         relationship.derivationId === derivationId &&
         relationship.kind === "offset"
-          ? { ...relationship, distance }
+          ? { ...relationship, distance: createLiteralAuthoredValue(distance) }
           : relationship,
     ),
   };
@@ -6153,7 +6157,7 @@ describe("T08b-g7b relationship-scoped solve-frame failures ([TECH] G16′, U-G9
     const accepted = solve(broken).solvedSnapshot;
     expect(accepted.status.solveState).toBe("solved");
     const publications = publishSketchOffsets({
-      definition: broken,
+      definition: literalResolvedDefinition(broken),
       solvedSnapshot: accepted,
       modelingTolerance: 1e-3,
       capabilities: capabilities(),
@@ -6573,6 +6577,7 @@ describe("T08b-g7b relationship-scoped solve-frame failures ([TECH] G16′, U-G9
         sequence: 97,
         factories: createSessionCommitFactories(97, "sketch_draft" as never),
         modelingTolerance: 1e-3,
+        documentVariables: [],
       });
       const contribution = result.contribution;
       if (!result.valid || !contribution) throw new Error(result.message!);
@@ -6839,7 +6844,7 @@ describe("T08b-g7b relationship-scoped solve-frame failures ([TECH] G16′, U-G9
     };
     expect(
       evaluateSketchDerivations({
-        definition,
+        definition: literalResolvedDefinition(definition),
         modelingTolerance: 1e-3,
       }).offsetFailures.map((failure) => [
         failure.derivationId,
@@ -7276,7 +7281,7 @@ describe("T10i edit inputs on non-accepted offset outputs ([TECH] C3, review A8)
       return {
         solved,
         publications: publishSketchOffsets({
-          definition,
+          definition: literalResolvedDefinition(definition),
           solvedSnapshot: solved.solvedSnapshot,
           modelingTolerance: 1e-3,
           capabilities: capabilities(),
@@ -7706,7 +7711,7 @@ describe("T10i review fixes (R-2, R-1, A-1)", () => {
     const solved = solve(definition).solvedSnapshot;
     const publishOnce = (snapshot: SolvedSketchSnapshot) =>
       publishSketchOffsets({
-        definition,
+        definition: literalResolvedDefinition(definition),
         solvedSnapshot: snapshot,
         modelingTolerance: 1e-3,
         capabilities: capabilities(),
@@ -8938,6 +8943,7 @@ describe("T13b B2: Offset creation seeds from the live accepted solve ([TECH] D2
         conflicting.sketchId!,
       ),
       modelingTolerance: conflicting.modelingTolerance,
+      documentVariables: conflicting.documentVariables,
     });
     expect(
       publication.contribution.points.map((point) => point.position),

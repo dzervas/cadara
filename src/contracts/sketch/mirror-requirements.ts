@@ -27,6 +27,7 @@ import {
   type DimensionDefinition,
   type SketchDefinition,
   type SketchDerivationDefinition,
+  type SketchDerivationDefinitionOf,
   type SketchEntityDefinition,
   type SketchPoint2D,
   type SketchPointDefinition,
@@ -1097,7 +1098,9 @@ function definingPointIds(
   }
 }
 
-function producedIds(relationship: SketchDerivationDefinition): string[] {
+function producedIds(
+  relationship: SketchDerivationDefinitionOf<unknown>,
+): string[] {
   const ids: string[] = relationship.outputs.flatMap((output) => [
     output.outputEntityId,
     ...output.outputPointIds,
@@ -1117,7 +1120,7 @@ function producedIds(relationship: SketchDerivationDefinition): string[] {
 }
 
 function readIds(
-  relationship: SketchDerivationDefinition,
+  relationship: SketchDerivationDefinitionOf<unknown>,
   entityById: ReadonlyMap<SketchEntityId, SketchEntityDefinition>,
 ): string[] {
   const entityIds: SketchEntityId[] = [
@@ -1151,10 +1154,14 @@ function readIds(
  * reading its own outputs, or downstream of either) fails with
  * `derived-relationship-dependency-unresolved` and is not in `order`.
  */
-export function orderDerivedRelationships(
-  definition: Pick<SketchDefinition, "entities" | "derivedRelationships">,
+export function orderDerivedRelationships<
+  TRelationship extends SketchDerivationDefinitionOf<unknown>,
+>(
+  definition: Pick<SketchDefinition, "entities"> & {
+    readonly derivedRelationships?: readonly TRelationship[];
+  },
 ): {
-  readonly order: readonly SketchDerivationDefinition[];
+  readonly order: readonly TRelationship[];
   readonly unresolved: readonly MirrorRelationshipFailure[];
 } {
   const relationships = definition.derivedRelationships ?? [];

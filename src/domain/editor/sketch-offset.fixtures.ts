@@ -143,6 +143,7 @@ export function withOffset(
     sequence,
     factories: createSessionCommitFactories(sequence, SKETCH as never),
     modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+    documentVariables: session.documentVariables,
   });
   if (!result.valid || !result.contribution)
     throw new Error(result.message ?? "offset");

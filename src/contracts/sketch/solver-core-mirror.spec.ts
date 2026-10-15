@@ -25,7 +25,7 @@ import {
 // T17p2 (F-2): the solver works on resolved definitions.
 import type {
   NumericSketchDefinition as SketchDefinition,
-  SketchDerivationDefinition,
+  NumericSketchDerivationDefinition as SketchDerivationDefinition,
   SketchEntityDefinition,
   SketchPoint2D,
   SketchPointDefinition,

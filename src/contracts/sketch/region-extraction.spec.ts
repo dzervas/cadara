@@ -3217,6 +3217,7 @@ function createNativeArcAuthoring(sketchId: string): NativeArcAuthoring {
         sequence,
         factories: factoriesOf(sequence),
         modelingTolerance: 1e-3,
+        documentVariables: [],
       } as never);
       return result.valid && result.contribution
         ? (result.contribution as never)
@@ -5855,7 +5856,7 @@ describe("T08b-g7-F: tangent fillets carrying an offset certify after an edit (d
     let snapshot = first.solvedSnapshot;
     const publish = () =>
       publishSketchOffsets({
-        definition,
+        definition: literalResolvedDefinition(definition),
         solvedSnapshot: snapshot,
         modelingTolerance: FIXTURE_TOLERANCE,
         capabilities,

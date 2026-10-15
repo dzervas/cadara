@@ -16,10 +16,8 @@
  * an offset spline curve (U-G2, malformed data only) is not in the gate
  * (its diagnostic gates the sketch by severity) and is listed as broken too.
  */
-import {
-  DERIVED_SHELL_SEED_UNSUPPORTED,
-  evaluateSketchDerivations,
-} from "@/contracts/sketch/derived-geometry";
+import { DERIVED_SHELL_SEED_UNSUPPORTED } from "@/contracts/sketch/derived-geometry";
+import { evaluateAuthoredSketchDerivations } from "@/domain/modeling/sketch-dimension-expressions";
 import { sketchProfileGateFailures } from "@/contracts/sketch/derived-validity";
 import {
   isReferenceDimension,
@@ -112,7 +110,10 @@ export function computeSketchMirrorActionState(
   // The owner's evaluation, through the evaluation seam the solve uses
   // (one failure per relationship, unresolved order included).
   const settings = getSketchSessionDerivationSettings(session);
-  const evaluation = evaluateSketchDerivations({ definition, ...settings });
+  const evaluation = evaluateAuthoredSketchDerivations({
+    definition,
+    ...settings,
+  });
   const reasons = new Map(
     evaluation.derivedFailures.map((failure) => [
       failure.derivationId,
@@ -130,7 +131,7 @@ export function computeSketchMirrorActionState(
         point.solvedPosition,
       ]),
     );
-    for (const failure of evaluateSketchDerivations({
+    for (const failure of evaluateAuthoredSketchDerivations({
       definition: {
         ...definition,
         points: definition.points.map((point) => {

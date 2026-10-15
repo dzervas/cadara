@@ -28,7 +28,8 @@ export type CommittedSketchDefinition = {
   }>;
   derivedRelationships?: Array<{
     kind: string;
-    distance?: unknown;
+    /** T17p3: an offset's distance, stored only as an authored value. */
+    distance?: { source: string; value?: number; valueText?: string };
     outputs: Array<{ outputEntityId: string; seedEntityId?: string }>;
   }>;
 };

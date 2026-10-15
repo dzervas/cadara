@@ -27,8 +27,7 @@ import type {
   SketchId,
 } from "@/contracts/shared/ids";
 import type { AuthoredActionSketch } from "@/contracts/modeling/authored-actions";
-import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
-import { resolveSketchDerivationDistances } from "@/domain/modeling/sketch-dimension-expressions";
+import { evaluateAuthoredSketchDerivations } from "@/domain/modeling/sketch-dimension-expressions";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import {
   requireQuerySketchEditIntersectionsResponse,
@@ -717,18 +716,12 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
     getCurrentDocumentSnapshot: () =>
       modelingService.getCurrentDocumentSnapshot(),
     async commitSketch(input) {
-      // Evaluate with resolved derivation distances so committed geometry is
-      // current, while the persisted relationships keep authored expressions.
-      const commitDefinition = {
-        ...evaluateSketchDerivations({
-          definition: resolveSketchDerivationDistances({
-            definition: input.session.definition,
-            variables: input.session.documentVariables,
-          }),
-          ...getSketchSessionDerivationSettings(input.session),
-        }).definition,
-        derivedRelationships: input.session.definition.derivedRelationships,
-      };
+      // Committed geometry is current, while the persisted relationships
+      // keep authored expressions.
+      const commitDefinition = evaluateAuthoredSketchDerivations({
+        definition: input.session.definition,
+        ...getSketchSessionDerivationSettings(input.session),
+      }).definition;
       const result = await modelingService.commitSketch({
         requestId: input.requestId,
         baseRevisionId: input.baseRevisionId,

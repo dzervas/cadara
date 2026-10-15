@@ -11,7 +11,7 @@ import type {
   DimensionDefinition,
   SketchDefinition,
 } from "@/contracts/sketch/schema";
-import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
+import { evaluateAuthoredSketchDerivations } from "@/domain/modeling/sketch-dimension-expressions";
 import {
   deriveSketchValidity,
   sketchProfileGateFailures,
@@ -514,9 +514,10 @@ describe("T16b: the Mirror panel's health agrees with the profile gate", () => {
       relationship.derivationId,
     ]);
     expect(
-      evaluateSketchDerivations({
+      evaluateAuthoredSketchDerivations({
         definition: shrunk.definition,
         modelingTolerance: shrunk.modelingTolerance,
+        documentVariables: shrunk.documentVariables,
       }).derivedFailures,
       "premise: the authored positions evaluate",
     ).toEqual([]);

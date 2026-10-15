@@ -5,9 +5,9 @@ import type {
   SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
 import {
-  evaluateSketchDerivations,
-  type SketchDerivationSettings,
-} from "@/contracts/sketch/derived-geometry";
+  evaluateAuthoredSketchDerivations,
+  type AuthoredSketchDerivationSettings,
+} from "@/domain/modeling/sketch-dimension-expressions";
 import {
   orderDerivedRelationships,
   syncMirrorOutputStructures,
@@ -43,7 +43,7 @@ export function addAnchorOffset(
 export function applyPointPositionsToDefinition(
   definition: SketchDefinition,
   positions: readonly Pick<SketchPointDefinition, "pointId" | "position">[],
-  derivation: SketchDerivationSettings,
+  derivation: AuthoredSketchDerivationSettings,
 ): SketchDefinition {
   const positionMap = new Map(
     positions.map((point) => [point.pointId, point.position]),
@@ -61,7 +61,7 @@ export function applyPointPositionsToDefinition(
     }),
   };
 
-  return evaluateSketchDerivations({
+  return evaluateAuthoredSketchDerivations({
     definition: nextDefinition,
     ...derivation,
   }).definition;
@@ -84,7 +84,7 @@ export function applyPointPositionsToDefinition(
 export function applySolvedSketchToDefinition(
   definition: SketchDefinition,
   solvedSnapshot: SolvedSketchSnapshot,
-  derivation: SketchDerivationSettings,
+  derivation: AuthoredSketchDerivationSettings,
 ): SketchDefinition {
   const solvedPointPositions = new Map(
     solvedSnapshot.solvedPoints.map((point) => [
@@ -176,7 +176,7 @@ export function applySolvedSketchToDefinition(
   );
   if (reevaluated.length === 0) return acceptedDefinition;
   return {
-    ...evaluateSketchDerivations({
+    ...evaluateAuthoredSketchDerivations({
       definition: {
         ...acceptedDefinition,
         derivedRelationships: reevaluated,

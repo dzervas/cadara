@@ -181,7 +181,13 @@ export type SketchMirrorReference =
       datum: Exclude<SketchDatumOperandKind, "origin">;
     };
 
-export type SketchDerivationDefinition =
+/**
+ * T17p3: the relationship member list over the offset distance's
+ * representation, as `DimensionDefinitionOf` (one plain union, so Typia
+ * dispatches on `kind`). Authored: `SketchDerivationDefinition`; resolved:
+ * `NumericSketchDerivationDefinition`.
+ */
+export type SketchDerivationDefinitionOf<TDistance> =
   | (SketchDerivationDefinitionBase & {
       kind: "mirror";
       mirrorReference: SketchMirrorReference;
@@ -209,10 +215,10 @@ export type SketchDerivationDefinition =
       /**
        * Signed offset distance in sketch-plane units. Positive offsets to the
        * left of the chain traversal, which is anchored to the first seed
-       * entity's natural direction. Accepts the same literal-or-expression
-       * authored values as sketch dimensions.
+       * entity's natural direction. Authored as a sketch dimension value
+       * (a literal or an expression wrapper); a number in the resolved view.
        */
-      distance: SketchOffsetAuthoredDistance;
+      distance: TDistance;
       jointPolicy: SketchOffsetJointPolicy;
       /**
        * Stable identities for generated arc joins, keyed by adjacent seed
@@ -562,14 +568,32 @@ export type DimensionAnnotationPlacement =
  * rejected by the persistence validator; nothing converts it.
  */
 export type SketchDimensionAuthoredValue = AuthoredValue<number>;
-// T17o (review A-5): `any` is a recorded defect, not a design. The offset
-// relationship's distance is written bare by the Offset tool and as a wrapper
-// by expressions; the Typia persistence validator accepts any value here.
-// Tightening it to `MaybeAuthoredValue<number>` belongs to the routed T17-15
-// `MaybeAuthoredValue` item (T17p2 F-2 covers dimension values only).
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- recorded defect, see above (T17-15 route).
-export type SketchOffsetAuthoredDistance = any;
+/**
+ * T17p3: an offset relationship's distance has one representation, the
+ * authored wrapper, like a dimension value. A bare number or anything else
+ * is rejected by the persistence validator; nothing converts it.
+ */
+export type SketchOffsetAuthoredDistance = AuthoredValue<number>;
 export type SketchDimensionNumericValue = number;
+
+export type SketchDerivationDefinition =
+  SketchDerivationDefinitionOf<SketchOffsetAuthoredDistance>;
+
+/**
+ * T17p3: derivation's resolved view of a relationship: an offset distance is
+ * a number (`NaN` when its expression does not resolve; derivation reports
+ * that offset as unresolved).
+ */
+export type NumericSketchDerivationDefinition =
+  SketchDerivationDefinitionOf<number>;
+
+/**
+ * T17p3: the relationship records of any view (authored or resolved), for
+ * the readers that never read an offset distance.
+ */
+export interface SketchDerivationRecords {
+  readonly derivedRelationships?: readonly SketchDerivationDefinitionOf<unknown>[];
+}
 
 /**
  * T17p2 (F-2): the solver's resolved view of a dimension: the same kinds
@@ -579,18 +603,43 @@ export type SketchDimensionNumericValue = number;
 export type NumericDimensionDefinition =
   DimensionDefinitionOf<SketchDimensionNumericValue>;
 
-export type NumericSketchDefinition = Omit<SketchDefinition, "dimensions"> & {
+export type NumericSketchDefinition = Omit<
+  SketchDefinition,
+  "dimensions" | "derivedRelationships"
+> & {
   dimensions: NumericDimensionDefinition[];
+  derivedRelationships?: NumericSketchDerivationDefinition[];
 };
 
 /**
- * T17p2 (F-2): either the authored definition or the solver's resolved one,
- * for the readers that never read a dimension value (derivation, region
- * joins, offset publication).
+ * T17p3: the authored definition with only its offset distances resolved
+ * (`resolveSketchDerivationDistances`): what the editor evaluates
+ * derivations on while keeping authored dimension values for display.
+ */
+export type OffsetResolvedSketchDefinition = Omit<
+  SketchDefinition,
+  "derivedRelationships"
+> & {
+  derivedRelationships?: NumericSketchDerivationDefinition[];
+};
+
+/**
+ * T17p3: a definition whose offset distances are resolved, with dimension
+ * values in either form: the input of the readers that read an offset
+ * distance (derivation evaluation, offset publication).
+ */
+export type DerivationInputSketchDefinition =
+  | OffsetResolvedSketchDefinition
+  | NumericSketchDefinition;
+
+/**
+ * T17p2 (F-2), T17p3: the authored definition or a resolved view, for the
+ * readers that never read a dimension value or an offset distance (region
+ * joins, snapping, profile input).
  */
 export type DerivableSketchDefinition =
   | SketchDefinition
-  | NumericSketchDefinition;
+  | DerivationInputSketchDefinition;
 
 /**
  * Authorable fill payload for sketch styles.

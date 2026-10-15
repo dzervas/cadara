@@ -6,7 +6,7 @@ import type {
 } from "@/contracts/sketch/schema";
 import { solveSketchDefinitionCore as solveSketchDefinitionCoreResolved } from "@/contracts/sketch/solver-core";
 import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
-import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
+import { evaluateAuthoredSketchDerivations } from "@/domain/modeling/sketch-dimension-expressions";
 import {
   evaluateSplineSpan,
   reconstructSplineAggregate,
@@ -223,7 +223,7 @@ test("T15d: solved seed and copy handles are both written from the snapshot, coh
       sketch_entity_seed: firstHandles,
       sketch_entity_output: reflected(firstHandles),
     }),
-    { modelingTolerance: 1e-3 },
+    { modelingTolerance: 1e-3, documentVariables: [] },
   );
   const secondHandles = [
     [8, -1],
@@ -237,7 +237,7 @@ test("T15d: solved seed and copy handles are both written from the snapshot, coh
       sketch_entity_seed: secondHandles,
       sketch_entity_output: reflected(secondHandles),
     }),
-    { modelingTolerance: 1e-3 },
+    { modelingTolerance: 1e-3, documentVariables: [] },
   );
   const tangents = (entityId: string) => {
     const entity = second.entities.find((entry) => entry.entityId === entityId);
@@ -356,6 +356,7 @@ test("T15d: a copy value that differs from R(seed) in the snapshot is written as
   );
   const applied = applySolvedSketchToDefinition(definition, snapshot, {
     modelingTolerance: 1e-3,
+    documentVariables: [],
   });
   const position = (pointId: string) =>
     applied.points.find((entry) => entry.pointId === pointId)!.position;
@@ -541,7 +542,7 @@ test("T15d: the patch applies the owner's structural sync to copies; a newly aut
       ],
       sketch_entity_output: snapshotOutput,
     }),
-    { modelingTolerance: 1e-3 },
+    { modelingTolerance: 1e-3, documentVariables: [] },
   );
   const output = applied.entities.find(
     (entity) => entity.entityId === "sketch_entity_output",
@@ -579,7 +580,7 @@ test("T15d: a failed mirror (snapshot failedDerivationIds) keeps its stored copi
         failedDerivationIds: ["mirror-structure"],
       },
     ),
-    { modelingTolerance: 1e-3 },
+    { modelingTolerance: 1e-3, documentVariables: [] },
   );
   for (const entityId of ["sketch_entity_output", "sketch_entity_marc"])
     expect(
@@ -666,7 +667,7 @@ test("T15d: pattern outputs are still re-evaluated after the solve, from the sna
         ],
       },
     ),
-    { modelingTolerance: 1e-3 },
+    { modelingTolerance: 1e-3, documentVariables: [] },
   );
   const position = (pointId: string) =>
     applied.points.find((entry) => entry.pointId === pointId)!.position;
@@ -761,12 +762,13 @@ test("driven spline constraints keep snapshot, applied definition, and fresh sol
         : occurrence,
     ),
   };
-  const desiredDefinition = evaluateSketchDerivations({
+  const desiredDefinition = evaluateAuthoredSketchDerivations({
     definition: {
       ...base,
       entities: [desiredSeed, output, axis],
     },
     modelingTolerance: 1e-3,
+    documentVariables: [],
   }).definition;
   const desiredOutput = desiredDefinition.entities.find(
     (entity) => entity.entityId === output.entityId,
@@ -841,7 +843,7 @@ test("driven spline constraints keep snapshot, applied definition, and fresh sol
   const applied = applySolvedSketchToDefinition(
     definition,
     solved.solvedSnapshot,
-    { modelingTolerance: 1e-3 },
+    { modelingTolerance: 1e-3, documentVariables: [] },
   );
   const solvedOutput = solved.solvedSnapshot.solvedEntities.find(
     (entity) => entity.entityId === output.entityId && entity.kind === "spline",

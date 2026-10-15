@@ -8,7 +8,7 @@ import type {
   ProjectedSketchGeometryRef,
   NumericSketchDefinition as SketchDefinition,
   SketchCurveConstraintOperand,
-  SketchDerivationDefinition,
+  NumericSketchDerivationDefinition,
   SketchEntityDefinition,
   SketchPointConstraintOperand,
   SketchPoint2D,
@@ -1133,7 +1133,9 @@ function createDerivedParameterProjection(input: {
           return state ? [state.baseIndex, state.baseIndex + 1] : [];
         })
       : [];
-  const mirrorAxisIndices = (relationship: SketchDerivationDefinition) => {
+  const mirrorAxisIndices = (
+    relationship: NumericSketchDerivationDefinition,
+  ) => {
     // A sketch datum axis is fixed: it has no variables (T15b, T-7).
     if (
       relationship.kind !== "mirror" ||

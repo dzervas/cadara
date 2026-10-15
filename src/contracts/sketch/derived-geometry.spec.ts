@@ -1,9 +1,11 @@
 import { test, expect } from "vitest";
 
 import type { SketchPointId } from "@/contracts/shared/ids";
+// T17p3: derivation reads the resolved view (offset distances are numbers;
+// `resolveSketchDerivationDistances` is the resolve boundary).
 import type {
-  SketchDefinition,
-  SketchDerivationDefinition,
+  NumericSketchDefinition as SketchDefinition,
+  NumericSketchDerivationDefinition as SketchDerivationDefinition,
   SketchEntityDefinition,
   SketchPoint2D,
   SketchPointDefinition,
@@ -765,23 +767,11 @@ test("evaluateSketchDerivations recomputes offset chains from seed edits with st
     "Distance edits should recompute the derived chain.",
   );
 
-  const literalAuthored = evaluateSketchDerivations({
-    definition: makeOffsetDefinition({
-      bX: 4,
-      distance: { source: "literal", value: 1 },
-    }),
-    modelingTolerance: 1e-3,
-  });
-  assertPoint(
-    pointPosition(literalAuthored.definition, "o1s"),
-    [0, 1],
-    "Authored literal distances should evaluate like plain numbers.",
-  );
-
+  // T17p3: the resolve boundary gives an unresolved expression `NaN`.
   const unresolvedExpression = evaluateSketchDerivations({
     definition: makeOffsetDefinition({
       bX: 4,
-      distance: { source: "expression", valueText: "wall / 2" },
+      distance: Number.NaN,
     }),
     modelingTolerance: 1e-3,
   });

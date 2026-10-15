@@ -1,7 +1,10 @@
 import { test, expect } from "vitest";
 
 import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
-import type { SketchDefinition } from "@/contracts/sketch/schema";
+import type {
+  SketchDefinition,
+  SketchOffsetAuthoredDistance,
+} from "@/contracts/sketch/schema";
 
 test("src/contracts/sketch/derivation-runtime-schema.spec.ts", () => {
   const baseDefinition: SketchDefinition = {
@@ -52,7 +55,9 @@ test("src/contracts/sketch/derivation-runtime-schema.spec.ts", () => {
     dimensions: [],
   };
 
-  function withOffsetDistance(distance: unknown): SketchDefinition {
+  function withOffsetDistance(
+    distance: SketchOffsetAuthoredDistance,
+  ): SketchDefinition {
     return {
       ...baseDefinition,
       derivedRelationships: [
@@ -79,11 +84,17 @@ test("src/contracts/sketch/derivation-runtime-schema.spec.ts", () => {
     };
   }
 
-  const numericDistance = validateSketchDefinition(withOffsetDistance(1.5));
+  const literal = (value: number) => ({ source: "literal" as const, value });
+
+  // T17p3: an offset distance has one representation, the authored wrapper;
+  // a bare number is rejected, never converted.
+  const numericDistance = validateSketchDefinition(
+    withOffsetDistance(1.5 as never),
+  );
   expect(
     numericDistance.success,
-    "Runtime schema should accept offset derivations with a numeric distance.",
-  ).toBeTruthy();
+    "Runtime schema should reject offset derivations with a bare numeric distance.",
+  ).toBeFalsy();
 
   const expressionDistance = validateSketchDefinition(
     withOffsetDistance({ source: "expression", valueText: "wall / 2" }),
@@ -102,7 +113,7 @@ test("src/contracts/sketch/derivation-runtime-schema.spec.ts", () => {
   ).toBeTruthy();
 
   const roundTrip = validateSketchDefinition(
-    JSON.parse(JSON.stringify(withOffsetDistance(1.5))) as unknown,
+    JSON.parse(JSON.stringify(withOffsetDistance(literal(1.5)))) as unknown,
   );
   expect(
     roundTrip.success,
@@ -114,25 +125,27 @@ test("src/contracts/sketch/derivation-runtime-schema.spec.ts", () => {
     "Round-tripped offset derivations should preserve the joint policy.",
   ).toBe("trimExtendArcFallback");
 
-  const stringDistance = validateSketchDefinition(withOffsetDistance("oops"));
+  const stringDistance = validateSketchDefinition(
+    withOffsetDistance("oops" as never),
+  );
   expect(
     stringDistance.success,
     "Runtime schema should reject offset derivations with a bare string distance.",
   ).toBeFalsy();
 
   const nonFiniteDistance = validateSketchDefinition(
-    withOffsetDistance(Number.POSITIVE_INFINITY),
+    withOffsetDistance(literal(Number.POSITIVE_INFINITY)),
   );
   expect(
     nonFiniteDistance.success,
-    "Runtime schema should reject offset derivations with a non-finite distance.",
+    "Runtime schema should reject offset derivations with a non-finite literal distance.",
   ).toBeFalsy();
 
   const invalidJointPolicy = validateSketchDefinition({
-    ...withOffsetDistance(1),
+    ...withOffsetDistance(literal(1)),
     derivedRelationships: [
       {
-        ...withOffsetDistance(1).derivedRelationships![0]!,
+        ...withOffsetDistance(literal(1)).derivedRelationships![0]!,
         jointPolicy: "bogusPolicy",
       },
     ],
@@ -142,7 +155,7 @@ test("src/contracts/sketch/derivation-runtime-schema.spec.ts", () => {
     "Runtime schema should reject unknown offset joint policies.",
   ).toBeFalsy();
 
-  const offsetDefinition = withOffsetDistance(1);
+  const offsetDefinition = withOffsetDistance(literal(1));
   const missingJointOutputs = validateSketchDefinition({
     ...offsetDefinition,
     derivedRelationships: [

@@ -30,10 +30,7 @@ import type {
   SketchOperationRef,
   SketchPointRef,
 } from "@/contracts/shared/references";
-import {
-  evaluateSketchDerivations,
-  type SketchDerivationSettings,
-} from "@/contracts/sketch/derived-geometry";
+import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
 import {
   applyOffsetPublications,
   isOffsetPublicationSolveAccepted,
@@ -80,8 +77,10 @@ import {
   withRelationshipScopedDiagnostics,
 } from "@/contracts/sketch/derived-validity";
 import {
+  evaluateAuthoredSketchDerivations,
   resolveSketchDerivationDistances,
   resolveSketchDimensionValues,
+  type AuthoredSketchDerivationSettings,
 } from "@/domain/modeling/sketch-dimension-expressions";
 import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
 import {
@@ -374,23 +373,28 @@ export function mergeDerivedProjectedReferences(
   ];
 }
 
-/** τ and the session's offset plan hints ([TECH] G3/G12/G17) for every session evaluation. */
+/**
+ * τ, the session's offset plan hints ([TECH] G3/G12/G17) and (T17p3) the
+ * document variables offset distances resolve against, for every session
+ * evaluation.
+ */
 export function getSketchSessionDerivationSettings(
-  session: Pick<SketchSessionState, "modelingTolerance" | "offsetPlans">,
-): SketchDerivationSettings {
+  session: Pick<
+    SketchSessionState,
+    "modelingTolerance" | "offsetPlans" | "documentVariables"
+  >,
+): AuthoredSketchDerivationSettings {
   return {
     modelingTolerance: session.modelingTolerance,
     ...(session.offsetPlans ? { offsetPlans: session.offsetPlans } : {}),
+    documentVariables: session.documentVariables,
   };
 }
 
 export function getSketchSessionDisplayDefinition(session: SketchSessionState) {
   const sketchId = session.sketchId ?? ("sketch_draft" as SketchId);
-  const evaluatedDefinition = evaluateSketchDerivations({
-    definition: resolveSketchDerivationDistances({
-      definition: session.definition,
-      variables: session.documentVariables,
-    }),
+  const evaluatedDefinition = evaluateAuthoredSketchDerivations({
+    definition: session.definition,
     ...getSketchSessionDerivationSettings(session),
   }).definition;
   return mergeReferenceImageAnchorReferences(
@@ -430,21 +434,18 @@ export function resolveSketchDefinitionForSolve(
   definition: SketchDefinition,
   documentVariables: readonly DocumentVariableRecord[] = [],
 ): NumericSketchDefinition {
-  const withDerivationDistances = resolveSketchDerivationDistances({
-    definition,
-    variables: documentVariables,
-  });
   const resolved = resolveSketchDimensionValues({
-    definition: withDerivationDistances,
+    definition,
     variables: documentVariables,
   });
   return resolved.ok
     ? resolved.definition
     : {
-        ...withDerivationDistances,
-        dimensions: withDerivationDistances.dimensions.map(
-          unresolvedDrivingDimension,
-        ),
+        ...resolveSketchDerivationDistances({
+          definition,
+          variables: documentVariables,
+        }),
+        dimensions: definition.dimensions.map(unresolvedDrivingDimension),
       };
 }
 
@@ -2363,19 +2364,12 @@ export function rebuildSessionCommitRequest(
   session: SketchSessionState,
   definition: SketchDefinition,
 ) {
-  // Evaluate with resolved derivation distances so committed geometry is
-  // current, but persist the authored relationship records so expression
-  // distances survive the round-trip.
-  const evaluatedDefinition = {
-    ...evaluateSketchDerivations({
-      definition: resolveSketchDerivationDistances({
-        definition,
-        variables: session.documentVariables,
-      }),
-      ...getSketchSessionDerivationSettings(session),
-    }).definition,
-    derivedRelationships: definition.derivedRelationships,
-  };
+  // Committed geometry is current; the authored relationship records are
+  // persisted, so expression distances survive the round-trip.
+  const evaluatedDefinition = evaluateAuthoredSketchDerivations({
+    definition,
+    ...getSketchSessionDerivationSettings(session),
+  }).definition;
   return buildCommitRequest({
     sketchId: session.sketchId,
     sketchLabel: session.sketchLabel,

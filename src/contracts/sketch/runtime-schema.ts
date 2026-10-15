@@ -62,20 +62,52 @@ function retiredVersionIssues(
     : [];
 }
 
+const AUTHORED_VALUE_FORMS =
+  '({"source": "literal", "value": …} or {"source": "expression", "valueText": …}). Bare values are not supported and are not converted.';
+
 /**
- * T17p2 (F-2): a sketch dimension value has one representation, the authored
- * wrapper. A bare number (or anything else) in a current-version payload is
- * rejected here with a readable reason, before the structural validation;
- * it is never converted.
+ * T17p2 (F-2), T17p3: a sketch dimension value and an offset relationship's
+ * distance have one representation, the authored wrapper. A bare number (or
+ * anything else) in a current-version payload is rejected here with a
+ * readable reason, before the structural validation; it is never converted.
  */
-export function bareDimensionValueIssues(
+export function bareAuthoredValueIssues(
   definition: unknown,
   path: string,
 ): ContractValidationIssue[] {
-  const dimensions =
+  const record =
     typeof definition === "object" && definition !== null
-      ? (definition as { dimensions?: unknown }).dimensions
-      : undefined;
+      ? (definition as { dimensions?: unknown; derivedRelationships?: unknown })
+      : {};
+  const prefix = path ? `${path}.` : "";
+  const relationships = Array.isArray(record.derivedRelationships)
+    ? record.derivedRelationships
+    : [];
+  return [
+    ...bareDimensionValueIssues(record.dimensions, prefix),
+    ...relationships.flatMap((relationship: unknown, index) => {
+      if (typeof relationship !== "object" || relationship === null) return [];
+      const offset = relationship as Record<string, unknown>;
+      return offset.kind === "offset" &&
+        offset.distance !== undefined &&
+        !isAuthoredValue(offset.distance)
+        ? [
+            {
+              path: `${prefix}derivedRelationships.${index}.distance`,
+              expected: "an authored value",
+              value: offset.distance,
+              message: `Sketch offset ‘${String(offset.label)}’ stores its distance as ${JSON.stringify(offset.distance)}; an offset distance must be an authored value ${AUTHORED_VALUE_FORMS}`,
+            },
+          ]
+        : [];
+    }),
+  ];
+}
+
+function bareDimensionValueIssues(
+  dimensions: unknown,
+  prefix: string,
+): ContractValidationIssue[] {
   if (!Array.isArray(dimensions)) return [];
   return dimensions.flatMap((dimension: unknown, index) => {
     if (typeof dimension !== "object" || dimension === null) return [];
@@ -84,10 +116,10 @@ export function bareDimensionValueIssues(
       record[key] !== undefined && !isAuthoredValue(record[key])
         ? [
             {
-              path: `${path ? `${path}.` : ""}dimensions.${index}.${key}`,
+              path: `${prefix}dimensions.${index}.${key}`,
               expected: "an authored value",
               value: record[key],
-              message: `Sketch dimension ‘${String(record.label)}’ stores its value as ${JSON.stringify(record[key])}; a dimension value must be an authored value ({"source": "literal", "value": …} or {"source": "expression", "valueText": …}). Bare values are not supported and are not converted.`,
+              message: `Sketch dimension ‘${String(record.label)}’ stores its value as ${JSON.stringify(record[key])}; a dimension value must be an authored value ${AUTHORED_VALUE_FORMS}`,
             },
           ]
         : [],
@@ -108,7 +140,7 @@ export function validateSketchDefinition(
   const rejected = retired<SketchDefinition>(
     [
       ...retiredVersionIssues(value, "", "sketch-definition/v1alpha1"),
-      ...bareDimensionValueIssues(value, ""),
+      ...bareAuthoredValueIssues(value, ""),
     ],
     value,
   );
@@ -155,7 +187,7 @@ export function validateSketchRecord(
         "solvedSnapshot",
         "solved-sketch/v1alpha1",
       ),
-      ...bareDimensionValueIssues(record.definition, "definition"),
+      ...bareAuthoredValueIssues(record.definition, "definition"),
     ],
     value,
   );
@@ -358,22 +390,15 @@ function validateSketchDefinitionInvariants(definition: SketchDefinition) {
       return;
     }
 
-    const distance: unknown = relationship.distance;
-    const isNumericDistance =
-      typeof distance === "number" && Number.isFinite(distance);
-    const isAuthoredDistance =
-      isAuthoredValue(distance) &&
-      (distance.source === "expression"
-        ? typeof distance.valueText === "string"
-        : typeof distance.value === "number" &&
-          Number.isFinite(distance.value));
-    if (!isNumericDistance && !isAuthoredDistance) {
+    // T17p3: the wrapper is structural (Typia); a literal must be finite.
+    const distance = relationship.distance;
+    if (distance.source === "literal" && !Number.isFinite(distance.value)) {
       issues.push({
         path: `derivedRelationships.${index}.distance`,
-        expected: "finite number or authored literal/expression value",
+        expected: "finite literal or expression authored value",
         value: distance,
         message:
-          "Offset derivation distance must be a finite number or an authored literal/expression value.",
+          "Offset derivation distance must be a finite literal or an expression authored value.",
       });
     }
   });
