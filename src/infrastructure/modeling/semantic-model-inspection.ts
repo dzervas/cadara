@@ -37,10 +37,13 @@ export async function inspectSemanticModel(
     bodies.push({ bodyId: body.bodyId, kind: body.bodyKind, bounds });
   }
   return {
+    cursor: snapshot.document.cursor,
+    timeline: snapshot.document.featureTree.flatMap(row => row.target.kind === "sketch" || row.target.kind === "feature" ? [{ label: row.label, target: row.target }] : []),
     features: snapshot.document.features.map((f) => ({
       featureId: f.featureId,
       label: f.label,
       kind: f.definition.kind,
+      suppressed: f.suppressed,
       producedTargets: f.producedTargets,
     })),
     bodies,

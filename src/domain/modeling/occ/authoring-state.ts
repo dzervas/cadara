@@ -413,10 +413,13 @@ function reconcileFeatureTopologyStage(
       provedLiveReferenceKeys.add(getOccDurableRefKey(target));
     }
 
-    bodiesById.set(outputSlot, reconciled.body);
+    // Reconciliation owns topology identity, not authored body names. The stage
+    // body can predate applyBodyLabels above; retain that current authored label.
+    const body = { ...reconciled.body, label: bodiesById.get(outputSlot)?.label ?? reconciled.body.label };
+    bodiesById.set(outputSlot, body);
     outputs.set(outputSlot, {
       ...currentOutput,
-      body: reconciled.body,
+      body,
       sourceTargets,
     });
     for (const [key, invalidation] of classification.invalidations) {
