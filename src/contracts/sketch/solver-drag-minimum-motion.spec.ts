@@ -1,6 +1,7 @@
 import { test, expect } from "vitest";
 
-import type { SketchDefinition } from "@/contracts/sketch/schema";
+// T17p2 (F-2): the solver works on resolved definitions (numbers).
+import type { NumericSketchDefinition as SketchDefinition } from "@/contracts/sketch/schema";
 import {
   compileSketchSolveProgram,
   createCompiledSketchSolveSession,

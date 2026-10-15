@@ -1,4 +1,5 @@
 import type {
+  DerivableSketchDefinition,
   SketchDefinition,
   SketchDerivationDefinition,
   SketchEntityDefinition,
@@ -64,9 +65,14 @@ import {
 export const DERIVED_SHELL_SEED_UNSUPPORTED =
   "derived-offset-shell-seed-unsupported";
 
+// T17p2 (F-2): derivation never reads dimensions, so it evaluates the
+// authored definition (editor display, commit, creation) and the solver's
+// resolved one alike, and returns the kind it was given.
 /** One derivation evaluation input: the definition iterate, τ and the offset plan hints. */
-export interface SketchDerivationInput {
-  readonly definition: SketchDefinition;
+export interface SketchDerivationInput<
+  TDefinition extends DerivableSketchDefinition = SketchDefinition,
+> {
+  readonly definition: TDefinition;
   /** The document's settings.modelingTolerance ([TECH] G12); never a default. */
   readonly modelingTolerance: number;
   /**
@@ -135,8 +141,10 @@ export interface MirrorDerivationRecord {
   readonly seedArcSources: ReadonlyMap<SketchEntityId, "variables" | "points">;
 }
 
-export interface SketchDerivationEvaluationResult {
-  definition: SketchDefinition;
+export interface SketchDerivationEvaluationResult<
+  TDefinition extends DerivableSketchDefinition = DerivableSketchDefinition,
+> {
+  definition: TDefinition;
   /**
    * Sketch-scoped diagnostics (never an offset relationship's failure,
    * G16′, nor a mirror or unresolved relationship's failure, T15b).
@@ -1447,7 +1455,8 @@ export function solvedOffsetShellSpans(
   return spans;
 }
 
-let cachedDerivationInput: SketchDerivationInput | null = null;
+let cachedDerivationInput: SketchDerivationInput<DerivableSketchDefinition> | null =
+  null;
 let cachedDerivationResult: SketchDerivationEvaluationResult | null = null;
 
 /**
@@ -1463,9 +1472,11 @@ let cachedDerivationResult: SketchDerivationEvaluationResult | null = null;
  * held, never an unchanged point. Memoized on (definition identity, τ,
  * plan-hint identity, arc-variable identity).
  */
-export function evaluateSketchDerivations(
-  input: SketchDerivationInput,
-): SketchDerivationEvaluationResult {
+export function evaluateSketchDerivations<
+  TDefinition extends DerivableSketchDefinition,
+>(
+  input: SketchDerivationInput<TDefinition>,
+): SketchDerivationEvaluationResult<TDefinition> {
   const { definition, modelingTolerance, offsetPlans, arcVariables } = input;
   const withDerivatives = input.withDerivatives === true;
   if (
@@ -1477,13 +1488,14 @@ export function evaluateSketchDerivations(
     cachedDerivationInput.arcVariables === arcVariables &&
     (cachedDerivationInput.withDerivatives === true) === withDerivatives
   ) {
-    return cachedDerivationResult;
+    // The cached result's definition derives from the identical cached
+    // input definition, so it is of the caller's kind.
+    return cachedDerivationResult as SketchDerivationEvaluationResult<TDefinition>;
   }
 
   const relationships = definition.derivedRelationships ?? [];
   if (relationships.length === 0) {
-    cachedDerivationInput = input;
-    cachedDerivationResult = {
+    const unchanged: SketchDerivationEvaluationResult<TDefinition> = {
       definition,
       diagnostics: [],
       modelingTolerance,
@@ -1494,7 +1506,9 @@ export function evaluateSketchDerivations(
       mirrorArcVariables: new Map(),
       relationshipOrder: [],
     };
-    return cachedDerivationResult;
+    cachedDerivationInput = input;
+    cachedDerivationResult = unchanged;
+    return unchanged;
   }
 
   const diagnostics: SketchSolveDiagnostic[] = [];
@@ -1771,12 +1785,14 @@ export function evaluateSketchDerivations(
         definitionIndex.get(first.derivationId)! -
         definitionIndex.get(second.derivationId)!,
     );
-  const result: SketchDerivationEvaluationResult = {
+  const result: SketchDerivationEvaluationResult<TDefinition> = {
+    // Only points and entities change; TypeScript cannot see that a spread
+    // of a generic definition with them replaced is still `TDefinition`.
     definition: {
       ...definition,
       points: nextPoints,
       entities: nextEntities,
-    },
+    } as TDefinition,
     diagnostics,
     modelingTolerance,
     offsetFrames: inDefinitionOrder(offsetFrames),

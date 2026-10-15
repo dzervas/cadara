@@ -13,6 +13,7 @@ import {
   cubicOracle,
   FIXTURE_TOLERANCE,
   lineOracle,
+  literalResolvedDefinition,
   makeSketchFixture,
   neutralSpan,
   projectedSpline,
@@ -2266,7 +2267,7 @@ describe("region arrangement owner: exact overlaps and U6 identity", () => {
     sketch.lineLength("r_s0", 11);
     const definition = sketch.definition();
     const solved = solveSketchDefinitionCore({
-      definition,
+      definition: literalResolvedDefinition(definition),
       tolerances: {
         coincidence: FIXTURE_TOLERANCE,
         angleRadians: 1e-4,
@@ -5694,7 +5695,7 @@ describe("T08b-g7-F: Fillet and Slot arcs stay attached after an edit (no offset
     )!;
     const definition = withLineLength(authored, line, delta);
     const solved = solveSketchDefinitionCore({
-      definition,
+      definition: literalResolvedDefinition(definition),
       tolerances: EDIT_TOLERANCES,
       modelingTolerance: FIXTURE_TOLERANCE,
       partialSolvePolicy: "bestEffort",
@@ -5838,7 +5839,7 @@ describe("T08b-g7-F: tangent fillets carrying an offset certify after an edit (d
   type Plans = Parameters<typeof solveSketchDefinitionCore>[0]["offsetPlans"];
   const solve = (definition: SketchDefinition, offsetPlans?: Plans) =>
     solveSketchDefinitionCore({
-      definition,
+      definition: literalResolvedDefinition(definition),
       tolerances: TOLERANCES,
       modelingTolerance: FIXTURE_TOLERANCE,
       partialSolvePolicy: "bestEffort",

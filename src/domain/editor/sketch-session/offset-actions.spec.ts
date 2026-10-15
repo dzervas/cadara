@@ -8,6 +8,7 @@
  * by the production Offset builder in entered sessions (shared fixture).
  */
 import { describe, expect, test } from "vitest";
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import type {
   ConstraintDefinition,
   DimensionDefinition,
@@ -207,7 +208,7 @@ describe("T17c: the Offset panel lists the offsets the selection takes part in",
         kind: "lineLength",
         label: "L",
         entityId: second!.outputEntityId,
-        value: 3,
+        value: createLiteralAuthoredValue(3),
       },
       {
         dimensionId: "d_out_ref",
@@ -261,7 +262,7 @@ describe("T17c: the Offset panel lists the offsets the selection takes part in",
       kind: "lineLength",
       label: "L",
       entityId: offset.outputs[1]!.outputEntityId,
-      value: 3,
+      value: createLiteralAuthoredValue(3),
     } as unknown as DimensionDefinition;
     const entities = setup.session.definition.entities.filter(
       (entity) => entity.entityId !== eid("l2"),
@@ -323,7 +324,7 @@ describe("T17c review: the Offset panel's health and the rest of the sizing rule
           kind: "circleRadius",
           label: "R",
           entityId: output,
-          value: 1.5,
+          value: createLiteralAuthoredValue(1.5),
         } as unknown as DimensionDefinition,
       ],
     });

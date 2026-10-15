@@ -62,6 +62,39 @@ function retiredVersionIssues(
     : [];
 }
 
+/**
+ * T17p2 (F-2): a sketch dimension value has one representation, the authored
+ * wrapper. A bare number (or anything else) in a current-version payload is
+ * rejected here with a readable reason, before the structural validation;
+ * it is never converted.
+ */
+export function bareDimensionValueIssues(
+  definition: unknown,
+  path: string,
+): ContractValidationIssue[] {
+  const dimensions =
+    typeof definition === "object" && definition !== null
+      ? (definition as { dimensions?: unknown }).dimensions
+      : undefined;
+  if (!Array.isArray(dimensions)) return [];
+  return dimensions.flatMap((dimension: unknown, index) => {
+    if (typeof dimension !== "object" || dimension === null) return [];
+    const record = dimension as Record<string, unknown>;
+    return (["value", "valueRadians"] as const).flatMap((key) =>
+      record[key] !== undefined && !isAuthoredValue(record[key])
+        ? [
+            {
+              path: `${path ? `${path}.` : ""}dimensions.${index}.${key}`,
+              expected: "an authored value",
+              value: record[key],
+              message: `Sketch dimension ‘${String(record.label)}’ stores its value as ${JSON.stringify(record[key])}; a dimension value must be an authored value ({"source": "literal", "value": …} or {"source": "expression", "valueText": …}). Bare values are not supported and are not converted.`,
+            },
+          ]
+        : [],
+    );
+  });
+}
+
 function retired<T>(
   issues: ContractValidationIssue[],
   value: unknown,
@@ -73,7 +106,10 @@ export function validateSketchDefinition(
   value: unknown,
 ): ContractValidationResult<SketchDefinition> {
   const rejected = retired<SketchDefinition>(
-    retiredVersionIssues(value, "", "sketch-definition/v1alpha1"),
+    [
+      ...retiredVersionIssues(value, "", "sketch-definition/v1alpha1"),
+      ...bareDimensionValueIssues(value, ""),
+    ],
     value,
   );
   if (rejected) return rejected;
@@ -119,6 +155,7 @@ export function validateSketchRecord(
         "solvedSnapshot",
         "solved-sketch/v1alpha1",
       ),
+      ...bareDimensionValueIssues(record.definition, "definition"),
     ],
     value,
   );
@@ -402,10 +439,10 @@ function validateSketchDefinitionInvariants(definition: SketchDefinition) {
 /**
  * T13d (D9′): a driving numeric dimension (no marker) carries its value; a
  * reference (`reference: true`) may or may not keep its last driving value,
- * which is then ignored (the reference wins). Typia enforces the shapes it
- * can see; authored dimension values are typed `any` (transitional
- * wrappers), which hides an absent value and a non-`true` marker from it, so
- * those are checked here.
+ * which is then ignored (the reference wins). Typia enforces the value's
+ * shape (T17p2 F-2: an `AuthoredValue<number>` wrapper; a bare number is
+ * rejected); the value is optional in the type, so "a driving dimension
+ * carries one" (and the marker's exact `true`) are checked here.
  */
 function validateDimensionValueInvariants(
   definition: SketchDefinition,

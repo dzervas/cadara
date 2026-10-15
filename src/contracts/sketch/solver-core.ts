@@ -2,6 +2,7 @@ import type {
   ConstraintDefinition,
   ConstraintStatusRecord,
   NumericDimensionDefinition as DimensionDefinition,
+  DimensionDefinition as AuthoredDimensionDefinition,
   DimensionStatusRecord,
   LocalCollinearTargetOperand,
   ProjectedSketchGeometryRef,
@@ -440,6 +441,12 @@ function getDrivingDimensionValue(dimension: DimensionDefinition): number {
     dimension.kind === "arcEndPointCoincident"
   ) {
     return 0;
+  }
+  // T17p2 (F-2): a reference keeps its authored (unresolved) value.
+  if (isReferenceDimension(dimension)) {
+    throw new Error(
+      `Reference dimension ${dimension.dimensionId} has no driving value.`,
+    );
   }
   const value =
     "valueRadians" in dimension
@@ -12060,9 +12067,16 @@ const ANGLE_ONLY_CONSTRAINT_KINDS: ReadonlySet<ConstraintDefinition["kind"]> =
     "perpendicularProjectedLine",
   ]);
 
+/**
+ * T17p2 (F-2): the probe's candidate is the editor's authored dimension (or
+ * a resolved one); only its kind and targets matter, each trial replaces its
+ * value.
+ */
+type RedundancyCandidate = DimensionDefinition | AuthoredDimensionDefinition;
+
 function withCandidateDimension(
   definition: SketchDefinition,
-  candidate: DimensionDefinition,
+  candidate: RedundancyCandidate,
   value: number,
 ): SketchDefinition {
   const driving =
@@ -12079,7 +12093,7 @@ function withCandidateDimension(
 
 /** The quantity's domain: signed point-pair components are unbounded. */
 function isRedundancyTrialValueInDomain(
-  candidate: DimensionDefinition,
+  candidate: RedundancyCandidate,
   value: number,
 ) {
   if (candidate.kind === "lineAngle") return value > 0 && value < Math.PI;
@@ -12123,7 +12137,7 @@ function isRedundancyTrialValueInDomain(
  */
 export function probeSketchDimensionRedundancy(input: {
   definition: SketchDefinition;
-  candidate: DimensionDefinition;
+  candidate: RedundancyCandidate;
   projectedReferences?: readonly ProjectedSketchReferenceRecord[];
   tolerances: SketchSolveTolerancePolicy;
   modelingTolerance: number;

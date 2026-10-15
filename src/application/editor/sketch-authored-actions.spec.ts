@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import type {
   SketchEntityId,
   SketchId,
@@ -205,7 +206,7 @@ const mutations: Record<
           kind: "lineLength",
           label: "Length",
           entityId: session.definition.entities[0]!.entityId,
-          value: 20,
+          value: createLiteralAuthoredValue(20),
         },
       ],
     },
@@ -267,7 +268,7 @@ const mutations: Record<
           kind: "lineLength",
           label: "Length",
           entityId: session.definition.entities[0]!.entityId,
-          value: 12,
+          value: createLiteralAuthoredValue(12),
           annotationPlacement: { kind: "dimensionLine", offset: 8 },
         },
       ],

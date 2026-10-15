@@ -36,11 +36,14 @@ import {
   type ConstraintDefinition,
   type DimensionDefinition,
   type LocalSketchEntityConstraintOperand,
+  type NumericDimensionDefinition,
+  type NumericSketchDefinition,
   type LocalSketchPointConstraintOperand,
   type ProjectedSketchGeometryConstraintOperand,
   type SketchDefinition,
   type SketchDerivationDefinition,
   type SketchDimensionAuthoredValue,
+  isReferenceDimension,
   type SketchEntityDefinition,
   type SketchOffsetPair,
   type SketchPoint2D,
@@ -1114,36 +1117,43 @@ function translateDerivationRecord(input: {
 
 type VerifiableRelationship =
   | { kind: "constraint"; id: ConstraintId; relationshipKind: string; constraint: ConstraintDefinition }
-  | { kind: "dimension"; id: DimensionId; relationshipKind: string; dimension: DimensionDefinition };
+  | { kind: "dimension"; id: DimensionId; relationshipKind: string; dimension: NumericDimensionDefinition };
 
-function numericAuthoredValue(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
+/**
+ * T17p2 (F-2): a definition whose dimensions are resolved for a verification
+ * solve (the importer's resolve boundary; the authored definition keeps its
+ * wrappers).
+ */
+type VerificationSolveDefinition<T> = Omit<T, "dimensions"> & {
+  dimensions: NumericDimensionDefinition[];
+};
+
+/** The number an authored value denotes without the document's variables. */
+function numericAuthoredValue(value: SketchDimensionAuthoredValue | undefined): number | null {
+  if (value?.source === "literal" && Number.isFinite(value.value)) {
+    return value.value;
   }
-  if (typeof value !== "object" || value === null) {
-    return null;
-  }
-  const authored = value as { source?: unknown; value?: unknown; valueText?: unknown };
-  if (authored.source === "literal" && typeof authored.value === "number" && Number.isFinite(authored.value)) {
-    return authored.value;
-  }
-  if (authored.source === "expression" && typeof authored.valueText === "string") {
-    const numeric = Number(authored.valueText);
+  if (value?.source === "expression") {
+    const numeric = Number(value.valueText);
     return Number.isFinite(numeric) ? numeric : null;
   }
   return null;
 }
 
-function dimensionForSolve(dimension: DimensionDefinition): DimensionDefinition | null {
-  if ("valueRadians" in dimension) {
+function dimensionForSolve(dimension: DimensionDefinition): NumericDimensionDefinition | null {
+  // The importer authors no reference dimension; one would not drive.
+  if (isReferenceDimension(dimension)) {
+    return null;
+  }
+  if (dimension.kind === "arcStartPointCoincident" || dimension.kind === "arcEndPointCoincident") {
+    return null;
+  }
+  if (dimension.kind === "lineAngle") {
     const numeric = numericAuthoredValue(dimension.valueRadians);
-    return numeric === null ? null : ({ ...dimension, valueRadians: numeric } as DimensionDefinition);
+    return numeric === null ? null : { ...dimension, valueRadians: numeric };
   }
-  if ("value" in dimension) {
-    const numeric = numericAuthoredValue(dimension.value);
-    return numeric === null ? null : ({ ...dimension, value: numeric } as DimensionDefinition);
-  }
-  return null;
+  const numeric = numericAuthoredValue(dimension.value);
+  return numeric === null ? null : { ...dimension, value: numeric };
 }
 
 function verifiableRelationships(
@@ -1183,7 +1193,7 @@ export function definitionForVerificationSolve<
     SketchDefinition,
     "constraintIds" | "constraints" | "dimensionIds" | "dimensions"
   >,
->(definition: T): T {
+>(definition: T): VerificationSolveDefinition<T> {
   return definitionWithRelationships(
     definition,
     verifiableRelationships(definition),
@@ -1195,7 +1205,10 @@ function definitionWithRelationships<
     SketchDefinition,
     "constraintIds" | "constraints" | "dimensionIds" | "dimensions"
   >,
->(definition: T, relationships: readonly VerifiableRelationship[]): T {
+>(
+  definition: T,
+  relationships: readonly VerifiableRelationship[],
+): VerificationSolveDefinition<T> {
   const constraints = relationships
     .filter((relationship): relationship is Extract<VerifiableRelationship, { kind: "constraint" }> => relationship.kind === "constraint")
     .map((relationship) => relationship.constraint);
@@ -1241,7 +1254,7 @@ function definitionWithoutRelationships(
 }
 
 function solvedDeviation(
-  definition: ImportDeferredSketchDefinition,
+  definition: Pick<ImportDeferredSketchDefinition, "points">,
   solvedPoints: readonly { pointId: SketchPointId; solvedPosition: SketchPoint2D }[],
 ): number {
   const solvedById = new Map(solvedPoints.map((point) => [point.pointId, point.solvedPosition]));
@@ -1347,7 +1360,9 @@ export async function verifySketchTranslationSolveConsistency(
   const relationships = verifiableRelationships(input.definition);
   let requestSequence = 0;
 
-  const solveDefinition = async (definition: ImportDeferredSketchDefinition) => {
+  const solveDefinition = async (
+    definition: VerificationSolveDefinition<ImportDeferredSketchDefinition>,
+  ) => {
     const projectedReferenceIds = new Set(
       (input.projectedReferences ?? [])
         .filter((reference) => reference.status === "projected")
@@ -1377,7 +1392,7 @@ export async function verifySketchTranslationSolveConsistency(
       partialSolvePolicy: "failOnConflict",
       // Projection is materialized above. Deferred source selectors are not
       // consulted by solve once every authored reference has an exact record.
-      definition: definition as unknown as SketchDefinition,
+      definition: definition as unknown as NumericSketchDefinition,
       projectedReferences: [...(input.projectedReferences ?? [])],
     });
   };
@@ -1518,7 +1533,7 @@ export async function verifySketchTranslationSolveConsistency(
         candidate,
         verifiableRelationships(candidate),
       );
-      const perturbed: ImportDeferredSketchDefinition = {
+      const perturbed: VerificationSolveDefinition<ImportDeferredSketchDefinition> = {
         ...solveReady,
         points: solveReady.points.map((point) => componentPointIds.has(point.pointId)
           ? { ...point, position: transform(point.position) }

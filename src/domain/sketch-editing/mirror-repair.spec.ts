@@ -6,6 +6,7 @@
  * show each downstream relationship is explicitly broken, not cascaded.
  */
 import { describe, expect, test } from "vitest";
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
 import type {
   ConstraintDefinition,
@@ -247,14 +248,14 @@ describe("T16a: removing a mirror deletes exactly its write set", () => {
         kind: "circleRadius",
         label: "R",
         entityId: copyCircle,
-        value: 1,
+        value: createLiteralAuthoredValue(1),
       },
       {
         dimensionId: "d_seed_len",
         kind: "lineLength",
         label: "L",
         entityId: eid("ab"),
-        value: 2,
+        value: createLiteralAuthoredValue(2),
       },
       {
         dimensionId: "d_seed_ab",
@@ -262,7 +263,7 @@ describe("T16a: removing a mirror deletes exactly its write set", () => {
         label: "D",
         axis: "aligned",
         pointIds: [pid("a"), pid("b")],
-        value: 2,
+        value: createLiteralAuthoredValue(2),
       },
       {
         dimensionId: "d_copy_ref",

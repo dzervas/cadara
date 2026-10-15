@@ -26,6 +26,7 @@ import type { SketchPlaneFrame } from "@/contracts/shared/sketch-plane";
 import type {
   RegionRecord,
   ProjectedSketchGeometryRef,
+  NumericSketchDefinition,
   SketchDefinition,
   SketchPoint2D,
   SketchReferenceDefinition,
@@ -372,8 +373,8 @@ export interface ValidateSketchRequest extends SketchSolverRequestBase {
   tolerances: SolverTolerancePolicy;
   /** The document's settings.modelingTolerance (finite, > 0; [TECH] G12); never a default. */
   modelingTolerance: number;
-  /** Durable authored sketch definition submitted for validation. */
-  definition: SketchDefinition;
+  /** T17p2 (F-2): the definition with dimension values resolved to numbers (`resolveSketchDimensionValues`). */
+  definition: NumericSketchDefinition;
   /** Explicit projected external references already resolved into sketch space. */
   projectedReferences: ProjectedSketchReferenceRecord[];
 }
@@ -402,8 +403,8 @@ export interface SolveSketchRequest extends SketchSolverRequestBase {
   modelingTolerance: number;
   /** Declares whether the solver may return partial results when conflicts exist. */
   partialSolvePolicy: SolverPartialSolvePolicy;
-  /** Durable authored sketch definition to solve. */
-  definition: SketchDefinition;
+  /** T17p2 (F-2): the definition with dimension values resolved to numbers (`resolveSketchDimensionValues`). */
+  definition: NumericSketchDefinition;
   /** Explicit projected external references available to the solver. */
   projectedReferences: ProjectedSketchReferenceRecord[];
   /**
@@ -439,8 +440,8 @@ export interface StartInteractiveSketchSolveSessionRequest extends SketchSolverR
   modelingTolerance: number;
   /** Declares whether the solver may return partial results when conflicts exist. */
   partialSolvePolicy: SolverPartialSolvePolicy;
-  /** Durable authored sketch definition to solve. */
-  definition: SketchDefinition;
+  /** T17p2 (F-2): the definition with dimension values resolved to numbers (`resolveSketchDimensionValues`). */
+  definition: NumericSketchDefinition;
   /** Explicit projected external references available to the solver. */
   projectedReferences: ProjectedSketchReferenceRecord[];
   /** Optional compatible snapshot used to seed mutable solve state. */
@@ -563,8 +564,12 @@ export interface DisposeInteractiveSketchSolveSessionResponse extends SketchSolv
 export interface DeriveSketchRegionsRequest extends SketchSolverRequestBase {
   /** Solved sketch snapshot that region derivation must consume. */
   solvedSnapshot: SolvedSketchSnapshot;
-  /** Authored sketch definition corresponding to `solvedSnapshot`. */
-  definition: SketchDefinition;
+  /**
+   * The resolved sketch definition `solvedSnapshot` was solved from (T17p2
+   * F-2: every caller sends the solve's own definition — the editor's live
+   * basis and the kernel commit alike).
+   */
+  definition: NumericSketchDefinition;
   /** Explicit projected external references available to region derivation. */
   projectedReferences: ProjectedSketchReferenceRecord[];
   /** The document's settings.modelingTolerance (finite, > 0); never a default. */

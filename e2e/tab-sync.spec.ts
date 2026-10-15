@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { waitForPeerRevision } from "./helpers/acceptance";
 
 test.setTimeout(90_000);
 test.use({ viewport: { width: 1440, height: 960 } });
@@ -20,6 +21,7 @@ test("opt-in local peer sync exposes peer-authored document changes after refres
   await openSyncedWorkbench(secondTab, secondTabUrl);
   await expect(firstTab.locator("[data-variable-row]")).toHaveCount(0);
   await expect(secondTab.locator("[data-variable-row]")).toHaveCount(0);
+  const secondTabRevisionBefore = await revisionLabel(secondTab);
 
   await firstTab.locator("[data-workbench-variables-fab]").click();
   await firstTab.getByRole("button", { name: "Add variable" }).click();
@@ -31,9 +33,9 @@ test("opt-in local peer sync exposes peer-authored document changes after refres
     "0",
   );
 
-  await secondTab.evaluate(() => {
-    window.__cadaraDebug?.refreshDocument();
-  });
+  // T17p2 (F-4): the second tab picks the change up through the production
+  // peer refresh, not the debug refresh hook.
+  await waitForPeerRevision(secondTab, secondTabRevisionBefore);
   await expect
     .poll(() => revisionLabel(secondTab), { timeout: 30_000 })
     .toBe("rev_0002");

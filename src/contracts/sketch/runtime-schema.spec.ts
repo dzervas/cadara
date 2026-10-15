@@ -17,6 +17,20 @@ import { reconstructSplineAggregate } from "@/contracts/sketch/spline-geometry";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { createAuthoredModelDocumentFromSnapshot } from "@/contracts/modeling/authored-document";
 import { parseAuthoredModelDocument } from "@/contracts/modeling/authored-document.runtime-schema";
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
+import { readFileSync } from "node:fs";
+import {
+  validateDeriveSketchRegionsRequest,
+  validateSolveSketchRequest,
+} from "@/contracts/solver/runtime-schema";
+import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
+import { DEFAULT_MOCK_SKETCH_PLANE_FRAME } from "@/domain/solver/mock-sketch-solver-adapter";
+import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
+import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import {
+  FIXTURE_SKETCH_ID,
+  literalResolvedDefinition,
+} from "@/contracts/sketch/region-extraction.fixtures";
 
 // Lane: logic. Seam: strict current sketch-record runtime contract.
 test("invalid and stale sketch derivations cannot carry consumable regions", async () => {
@@ -297,7 +311,9 @@ test("T13d D9′: validation accepts driving and reference shapes of every numer
       entry.driving.kind === "lineAngle" ? "valueRadians" : "value";
     // D9′ (review A-2): a reference may keep its last driving value.
     expect(
-      check([{ ...entry.reference, [valueKey]: 1 }]),
+      check([
+        { ...entry.reference, [valueKey]: createLiteralAuthoredValue(1) },
+      ]),
       `${entry.name}: a reference keeping a value is accepted`,
     ).toBe(true);
     expect(
@@ -356,6 +372,103 @@ test("T13d D9′: validation accepts driving and reference shapes of every numer
   ).toEqual(cases.map((entry) => entry.reference));
 });
 
+// T17p2 (F-2), logic lane, contract seam: the persistence validators
+// (`validateSketchDefinition`, `validateSketchRecord`, and the file-open
+// `parseAuthoredModelDocument`). A sketch dimension value has one
+// representation, the authored wrapper; a bare number (driving, or a
+// reference's kept value) or any other non-wrapper is rejected with a
+// readable reason, never converted. Red on base: the field was typed `any`,
+// so every such value was accepted.
+test("T17p2 F-2: a bare or non-wrapper dimension value in a current-version sketch is rejected explicitly, by every persistence entry point", async () => {
+  const cases = makeReferenceDimensionCases();
+  const sketch = makeReferenceDimensionSketch();
+  const definition = (dimensions: readonly unknown[]) =>
+    JSON.parse(
+      JSON.stringify(
+        withDimensions(sketch, dimensions as DimensionDefinition[]),
+      ),
+    );
+  const issues = (dimensions: readonly unknown[]) => {
+    const result = validateSketchDefinition(definition(dimensions));
+    return result.success ? [] : result.issues;
+  };
+  for (const entry of cases) {
+    const valueKey =
+      entry.driving.kind === "lineAngle" ? "valueRadians" : "value";
+    const wrapped = (entry.driving as Record<string, unknown>)[valueKey] as {
+      source: "literal";
+      value: number;
+    };
+    expect(wrapped.source, `${entry.name}: premise, wrapped`).toBe("literal");
+    expect(issues([entry.driving]), `${entry.name}: wrapped`).toEqual([]);
+    for (const [name, value] of [
+      ["bare number", wrapped.value],
+      ["string", "garbage"],
+      ["null", null],
+      ["bare wrapper value", { source: "literal", value: "5" }],
+    ] as const) {
+      const found = issues([{ ...entry.driving, [valueKey]: value }]);
+      expect(
+        found.length,
+        `${entry.name}: ${name} is rejected`,
+      ).toBeGreaterThan(0);
+      if (name === "bare wrapper value") continue;
+      expect(found[0], `${entry.name}: ${name}: the readable reason`).toEqual({
+        path: `dimensions.0.${valueKey}`,
+        expected: "an authored value",
+        value,
+        message: `Sketch dimension ‘${entry.driving.label}’ stores its value as ${JSON.stringify(value)}; a dimension value must be an authored value ({"source": "literal", "value": …} or {"source": "expression", "valueText": …}). Bare values are not supported and are not converted.`,
+      });
+    }
+    // D9′: a reference may keep a value, but only an authored one.
+    expect(
+      issues([{ ...entry.reference, [valueKey]: wrapped.value }]).length,
+      `${entry.name}: a reference keeping a bare value is rejected`,
+    ).toBeGreaterThan(0);
+  }
+
+  // The stored record and the file-open path reject the same shape.
+  const snapshot = await new MockKernelAdapter().getDocumentSnapshot({
+    contractVersion: "modeling-contract/v1alpha1",
+    documentId: "doc_workspace",
+  });
+  const record = structuredClone(
+    snapshot.snapshot.document.sketches[0]!.sketch,
+  );
+  expect(validateSketchRecord(JSON.parse(JSON.stringify(record))).success).toBe(
+    true,
+  );
+  const [first] = record.definition.dimensions;
+  expect(first?.kind, "premise: the seed's first dimension").toBe("distance");
+  const bareRecord = JSON.parse(JSON.stringify(record));
+  bareRecord.definition.dimensions[0].value = 8;
+  const recordResult = validateSketchRecord(bareRecord);
+  expect(recordResult.success).toBe(false);
+  expect(!recordResult.success && recordResult.issues[0]?.path).toBe(
+    "definition.dimensions.0.value",
+  );
+
+  const logo = JSON.parse(readFileSync("public/logo.cadara", "utf8"));
+  expect(
+    parseAuthoredModelDocument(logo).ok,
+    "the shipped logo (wrapped values) opens",
+  ).toBe(true);
+  const bareLogo = structuredClone(logo);
+  const logoDimension = bareLogo.sketches[0].definition.dimensions[0];
+  expect(logoDimension.value, "premise: the logo's wrapped value").toEqual({
+    source: "literal",
+    value: 20,
+  });
+  logoDimension.value = 20;
+  expect(parseAuthoredModelDocument(bareLogo)).toEqual({
+    ok: false,
+    diagnostic: {
+      reasonCode: "invalid-authored-document",
+      message: `Sketch dimension ‘${logoDimension.label}’ stores its value as 20; a dimension value must be an authored value ({"source": "literal", "value": …} or {"source": "expression", "valueText": …}). Bare values are not supported and are not converted.`,
+    },
+  });
+});
+
 // T13d (D9), contract seam: the stored-record and authored-document entry
 // points (persistence, collaborative sync, file open, modeling service and
 // the OCC adapter all parse documents through parseAuthoredModelDocument)
@@ -393,7 +506,7 @@ test("T13d D9′: sketch records and authored documents carry reference dimensio
   };
   expect(validateSketchRecord(record(shapes.reference)).success).toBe(true);
   // D9′ (review A-2): a reference that kept a value opens, as a reference.
-  const kept = { ...circle.reference, value: 2 };
+  const kept = { ...circle.reference, value: createLiteralAuthoredValue(2) };
   expect(validateSketchRecord(record([kept])).success).toBe(true);
   const keptDocument = parseAuthoredModelDocument(document([kept]));
   expect(keptDocument.ok).toBe(true);
@@ -420,5 +533,117 @@ test("T13d D9′: sketch records and authored documents carry reference dimensio
       parseAuthoredModelDocument(document(dimensions)).ok,
       `document: ${name}`,
     ).toBe(false);
+  }
+});
+
+// T17p2 review R-1, logic lane, contract seam: file open
+// (`parseAuthoredModelDocument`). The readable bare-value reason is for
+// current-version files only: a file of an unsupported document or sketch
+// version reports its version, whatever its dimension values look like.
+test("T17p2 R-1: an unsupported-version file with a bare dimension value reports its version, not the bare value", () => {
+  const logo = JSON.parse(readFileSync("public/logo.cadara", "utf8"));
+  const bare = structuredClone(logo);
+  bare.sketches[0].definition.dimensions[0].value = 20;
+  const message = (document: unknown) => {
+    const parsed = parseAuthoredModelDocument(document);
+    return parsed.ok ? null : parsed.diagnostic.message;
+  };
+  expect(
+    message(bare),
+    "premise: current versions give the bare reason",
+  ).toMatch(/stores its value as 20/);
+  const oldDocument = structuredClone(bare);
+  oldDocument.schemaVersion = "authored-model-document/v1alpha0";
+  const oldSketch = structuredClone(bare);
+  oldSketch.sketches[0].definition.schemaVersion = "sketch-definition/v1alpha1";
+  for (const [name, document] of [
+    ["document version", oldDocument],
+    ["sketch version", oldSketch],
+  ] as const)
+    expect(message(document), name).toBe(
+      "Authored model document schema version is not supported.",
+    );
+});
+
+// T17p2 (F-2), logic lane, contract seam: the solver request validators
+// (the worker transport's Typia boundary). Solver requests carry the
+// resolved definition: every numeric kind, driving (a number) and reference
+// (no value), validates and dispatches on `kind`; the authored wrappers are
+// refused there. Red against a per-kind `Omit`-mapped resolved type (Typia
+// could not dispatch it: "kind must match \"distance\"", seen in the
+// browser's region derivation before the resolved view became one plain
+// union).
+test("T17p2 F-2: solver requests carry the resolved definition; every numeric kind validates, the authored wrappers do not", () => {
+  const cases = makeReferenceDimensionCases();
+  const sketch = makeReferenceDimensionSketch();
+  const tolerances = {
+    coincidence: 1e-6,
+    angleRadians: 1e-6,
+    minimumSegmentLength: 1e-6,
+  };
+  const request = (definition: unknown, solvedSnapshot: unknown) => ({
+    contractVersion: CONTRACT_VERSION,
+    solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+    requestId: "request_t17p2",
+    documentId: "doc_t17p2",
+    revisionId: "rev_t17p2",
+    sketchId: FIXTURE_SKETCH_ID,
+    definition,
+    solvedSnapshot,
+    projectedReferences: [],
+    modelingTolerance: 1e-3,
+  });
+  const solveRequest = (definition: unknown) => ({
+    contractVersion: CONTRACT_VERSION,
+    solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+    requestId: "request_t17p2_solve",
+    documentId: "doc_t17p2",
+    revisionId: "rev_t17p2",
+    sketchId: FIXTURE_SKETCH_ID,
+    plane: DEFAULT_MOCK_SKETCH_PLANE_FRAME,
+    tolerances,
+    modelingTolerance: 1e-3,
+    partialSolvePolicy: "bestEffort",
+    definition,
+    projectedReferences: [],
+  });
+  for (const [name, dimensions] of [
+    [
+      "driving",
+      cases
+        .filter((entry) => entry.measured !== null)
+        .map((entry) => entry.driving),
+    ],
+    ["reference", cases.map((entry) => entry.reference)],
+  ] as const) {
+    const authored = withDimensions(sketch, dimensions);
+    const resolved = JSON.parse(
+      JSON.stringify(literalResolvedDefinition(authored)),
+    );
+    const solved = solveSketchDefinitionCore({
+      definition: resolved,
+      tolerances,
+      modelingTolerance: 1e-3,
+      partialSolvePolicy: "bestEffort",
+    }).solvedSnapshot;
+    const derive = validateDeriveSketchRegionsRequest(
+      request(resolved, JSON.parse(JSON.stringify(solved))),
+    );
+    expect(
+      derive.success ? [] : derive.issues.slice(0, 2),
+      `${name}: the region request validates`,
+    ).toEqual([]);
+    const solve = validateSolveSketchRequest(solveRequest(resolved));
+    expect(
+      solve.success ? [] : solve.issues.slice(0, 2),
+      `${name}: the solve request validates`,
+    ).toEqual([]);
+    if (name === "driving")
+      expect(
+        validateSolveSketchRequest(
+          solveRequest(JSON.parse(JSON.stringify(authored))),
+        ).success,
+        "the authored wrappers are not a solver input",
+      ).toBe(false);
   }
 });

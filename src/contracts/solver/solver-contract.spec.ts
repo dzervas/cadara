@@ -23,7 +23,10 @@ import {
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
-import type { SketchDefinition } from "@/contracts/sketch/schema";
+// T17p2 (F-2): the solver works on resolved definitions (numbers).
+import type { NumericSketchDefinition as SketchDefinition } from "@/contracts/sketch/schema";
+// Reference resolution reads the authored definition.
+import { literalAuthoredDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 
 const neutralCurveQueries = createCertifiedNeutralCurveQueryCapabilityForTest();
 
@@ -362,7 +365,7 @@ test("src/contracts/solver/solver-contract.spec.ts", async () => {
         sketchId: "sketch_primary",
         regionId: regions.regions[0]!.regionId,
       },
-      definition: sketchDefinition,
+      definition: literalAuthoredDefinition(sketchDefinition),
       solvedSnapshot: solved.solvedSnapshot,
       regions: regions.regions,
     };
@@ -389,7 +392,7 @@ test("src/contracts/solver/solver-contract.spec.ts", async () => {
         referenceId: "ref_model_edge_1",
         geometryId: "projected_geometry_ref_model_edge_1_0",
       },
-      definition: sketchDefinition,
+      definition: literalAuthoredDefinition(sketchDefinition),
       solvedSnapshot: solved.solvedSnapshot,
       regions: regions.regions,
     });

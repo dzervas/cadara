@@ -1,3 +1,4 @@
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
 import type {
   CommitSketchRequest,
@@ -317,7 +318,7 @@ export const OCC_KERNEL_SEED_SKETCH_DEFINITION: SketchDefinition = {
         "sketch_point_1_rect-bottom-left" as SketchPointId,
         "sketch_point_1_rect-bottom-right" as SketchPointId,
       ],
-      value: 8,
+      value: createLiteralAuthoredValue(8),
     },
     {
       dimensionId: "dimension_1_height" as DimensionId,
@@ -328,7 +329,7 @@ export const OCC_KERNEL_SEED_SKETCH_DEFINITION: SketchDefinition = {
         "sketch_point_1_rect-bottom-left" as SketchPointId,
         "sketch_point_1_rect-top-left" as SketchPointId,
       ],
-      value: 6,
+      value: createLiteralAuthoredValue(6),
     },
   ],
 };

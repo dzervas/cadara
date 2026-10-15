@@ -12,7 +12,7 @@ import { describe, expect, test } from "vitest";
 import type { SketchPointId } from "@/contracts/shared/ids";
 import type {
   ConstraintDefinition,
-  SketchDefinition,
+  NumericSketchDefinition as SketchDefinition,
 } from "@/contracts/sketch/schema";
 import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
 import {
@@ -22,6 +22,7 @@ import {
 } from "@/contracts/sketch/solver-core";
 import {
   FIXTURE_TOLERANCE,
+  literalResolvedDefinition,
   makeSketchFixture,
 } from "@/contracts/sketch/region-extraction.fixtures";
 
@@ -47,7 +48,8 @@ function degenerate(
   fixture.line("l", "d", "e");
   fixture.lineLength("l", 1);
   extra?.(fixture);
-  return fixture.definition();
+  // T17p2 (F-2): the solver consumes the resolved definition.
+  return literalResolvedDefinition(fixture.definition());
 }
 
 const id = (name: string) => `sketch_point_${name}` as SketchPointId;
@@ -285,6 +287,8 @@ describe("T17c5 review R-2: a declared join between the two fit points keeps the
     fixture.spline("s", ["a", "b", "b", "d"], "open");
     fixture.line("l", "d", "e");
     fixture.lineLength("l", 1);
-    expect(refusal(fixture.definition(), "b")).toBe(SPAN_CODE);
+    expect(refusal(literalResolvedDefinition(fixture.definition()), "b")).toBe(
+      SPAN_CODE,
+    );
   });
 });

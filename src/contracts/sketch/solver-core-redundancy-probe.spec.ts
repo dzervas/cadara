@@ -8,10 +8,11 @@
 import { expect, test } from "vitest";
 
 import type { ConstraintId, DimensionId } from "@/contracts/shared/ids";
+// T17p2 (F-2): the probe and the solver work on resolved definitions.
 import type {
   ConstraintDefinition,
-  DimensionDefinition,
-  SketchDefinition,
+  NumericDimensionDefinition as DimensionDefinition,
+  NumericSketchDefinition as SketchDefinition,
 } from "@/contracts/sketch/schema";
 import {
   probeSketchDimensionRedundancy,
@@ -19,7 +20,10 @@ import {
   traceSketchSolverForTest,
   type SketchSolveStrategy,
 } from "@/contracts/sketch/solver-core";
-import { makeSketchFixture } from "@/contracts/sketch/region-extraction.fixtures";
+import {
+  literalResolvedDefinition,
+  makeSketchFixture,
+} from "@/contracts/sketch/region-extraction.fixtures";
 
 /** The kernel seed's document tolerances: τ = 1e-3 mm, τ_ang = 1e-4 rad. */
 const TOLERANCES = {
@@ -122,7 +126,7 @@ function rectangleSketch(width: number, height: number) {
   sketch.line("left", "d", "a");
   sketch.circle("circle", "e", 2.5);
   sketch.line("free", "p", "q");
-  return withRequirements(sketch.definition(), [
+  return withRequirements(literalResolvedDefinition(sketch.definition()), [
     axisConstraint("horizontal", "bottom"),
     axisConstraint("horizontal", "top"),
     axisConstraint("vertical", "right"),
@@ -181,7 +185,7 @@ test("T13e D11 domain: when m − δ ≤ 0 the probe tries m + δ and m + 2δ (a
   sketch.point("e", 5, 5);
   sketch.line("tiny", "a", "b");
   sketch.circle("circle", "e", 1);
-  const free = sketch.definition();
+  const free = literalResolvedDefinition(sketch.definition());
   const independent = probe(free, lineLength("tiny", "tiny", 0.0015));
   expect(independent).toMatchObject({ kind: "independent", delta: 2 * TAU });
   expect("trialValues" in independent && independent.trialValues).toEqual([
@@ -221,7 +225,10 @@ function chainedPolygonSketch() {
       entityIds: [entity(`s${k + 1}`), entity(`s${k + 2}`)],
     }),
   );
-  return withRequirements(sketch.definition(), equalities);
+  return withRequirements(
+    literalResolvedDefinition(sketch.definition()),
+    equalities,
+  );
 }
 
 test("T13e D11 long chain (R-2): in a 32-gon with chained equal sides and side 1 dimensioned, sides 17 and 32 read determined; with no size they are independent", () => {
@@ -261,7 +268,7 @@ test("T13e D11 two-sided: a distance just below the top of its range (a point on
   sketch.line("other", "p", "r");
   sketch.pointOnCurve("q", "ring");
   const definition = withRequirements(
-    sketch.definition(),
+    literalResolvedDefinition(sketch.definition()),
     [fix("o", 0, 0), fix("p", 5, 0)],
     [
       {
@@ -461,7 +468,7 @@ test("T13e review R-2: δ is capped at max(0.1·|m|, 4τ_c); a 0.1 mm-side chain
   for (let k = 0; k < n; k += 1)
     sketch.line(`s${k + 1}`, `v${k}`, `v${(k + 1) % n}`);
   const sized = withRequirements(
-    sketch.definition(),
+    literalResolvedDefinition(sketch.definition()),
     Array.from(
       { length: n - 1 },
       (_, k): ConstraintDefinition => ({

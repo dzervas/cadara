@@ -1,12 +1,41 @@
 import { test, expect } from "vitest";
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 
 import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
 import {
-  solveSketchDefinitionCore,
-  validateSketchDefinitionCore,
+  solveSketchDefinitionCore as solveSketchDefinitionCoreResolved,
+  validateSketchDefinitionCore as validateSketchDefinitionCoreResolved,
 } from "@/contracts/sketch/solver-core";
+import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
 import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
+
+// T17p2 (F-2): the solver consumes the resolved definition; these fixtures
+// author literal values, resolved before each solve (`literalResolvedDefinition`).
+const solveSketchDefinitionCore = (
+  input: Omit<
+    Parameters<typeof solveSketchDefinitionCoreResolved>[0],
+    "definition"
+  > & {
+    definition: SketchDefinition;
+  },
+) =>
+  solveSketchDefinitionCoreResolved({
+    ...input,
+    definition: literalResolvedDefinition(input.definition),
+  });
+const validateSketchDefinitionCore = (
+  input: Omit<
+    Parameters<typeof validateSketchDefinitionCoreResolved>[0],
+    "definition"
+  > & {
+    definition: SketchDefinition;
+  },
+) =>
+  validateSketchDefinitionCoreResolved({
+    ...input,
+    definition: literalResolvedDefinition(input.definition),
+  });
 
 test("src/contracts/sketch/reference-constraint-targets.spec.ts", async () => {
   const tolerances = {
@@ -554,7 +583,7 @@ test("src/contracts/sketch/reference-constraint-targets.spec.ts", async () => {
         axis: "aligned",
         point: { kind: "localPoint", pointId: "sketch_point_b" },
         datum: { kind: "sketchDatum", datum: "origin" },
-        value: Math.hypot(4, 5),
+        value: createLiteralAuthoredValue(Math.hypot(4, 5)),
       },
     ],
   };

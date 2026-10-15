@@ -10,10 +10,13 @@ import { describe, expect, test } from "vitest";
 import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
 import type {
   ConstraintDefinition,
+  DerivableSketchDefinition,
   DimensionDefinition,
   SketchDefinition,
   SketchEntityDefinition,
 } from "@/contracts/sketch/schema";
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
+import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 import {
   DERIVED_SHELL_SEED_UNSUPPORTED,
   evaluateSketchDerivations,
@@ -49,8 +52,10 @@ import {
 } from "@/domain/editor/sketch-mirror.fixtures";
 
 const RECOVERY = "Fix it (Undo) or remove the offset from the Offset panel.";
-const labelOf = (definition: SketchDefinition, entityId: SketchEntityId) =>
-  definition.entities.find((entity) => entity.entityId === entityId)!.label;
+const labelOf = (
+  definition: DerivableSketchDefinition,
+  entityId: SketchEntityId,
+) => definition.entities.find((entity) => entity.entityId === entityId)!.label;
 
 describe("T17e: an offset of a held mirror copy is named by label at every consumer", () => {
   // T16c review probe: an offset authored on a healthy copy whose mirror
@@ -254,7 +259,8 @@ test("T17e: an offset whose output records no longer fit its frame fails by its 
 describe("T17e: solver validation texts (F-2, O-1 and the missing-reference family)", () => {
   const validate = (definition: SketchDefinition) =>
     validateSketchDefinitionCore({
-      definition,
+      // T17p2 (F-2): the solver validates the resolved definition.
+      definition: literalResolvedDefinition(definition),
       tolerances: createDocumentSolverTolerances(OCC_KERNEL_SETTINGS),
       modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
     }).diagnostics;
@@ -307,7 +313,7 @@ describe("T17e: solver validation texts (F-2, O-1 and the missing-reference fami
         kind: "lineLength",
         label: "Length 1",
         entityId: eid("gone"),
-        value: 3,
+        value: createLiteralAuthoredValue(3),
       },
       {
         dimensionId: "dimension_t17e_distance",
@@ -315,7 +321,7 @@ describe("T17e: solver validation texts (F-2, O-1 and the missing-reference fami
         label: "Distance 1",
         pointIds: [pid("a"), pid("gone")],
         axis: "aligned",
-        value: 3,
+        value: createLiteralAuthoredValue(3),
       },
     ] as unknown as DimensionDefinition[];
     const definition: SketchDefinition = {

@@ -59,7 +59,9 @@ import {
   isReferenceDimension,
   SOLVED_SKETCH_SCHEMA_VERSION,
   type ProjectedSketchGeometryRef,
-  type SketchDefinition,
+  // T17p2 (F-2): the mock solver works on resolved definitions, as the
+  // solver core does (its requests carry `NumericSketchDefinition`).
+  type NumericSketchDefinition as SketchDefinition,
   type SketchEntityDefinition,
   type SketchPoint2D,
   type SketchSolveDiagnostic,

@@ -55,6 +55,7 @@ import {
   linkedMirrorRefs,
 } from "@/contracts/sketch/mirror-requirements";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 import { createDocumentSolverTolerances } from "@/contracts/solver/schema";
 
 // ------------------------------------------------------------ builders
@@ -3566,22 +3567,22 @@ describe("shared driving dimensions: equivalence in the solve (SDE, T16f)", () =
     [
       "radius / diameter",
       () => [
-        { ...diameterOf("D", "c1"), value: 4 } as DimensionInput,
-        { ...radiusOf("D", "c"), value: 2 } as DimensionInput,
+        { ...diameterOf("D", "c1"), value: literal(4) } as DimensionInput,
+        { ...radiusOf("D", "c"), value: literal(2) } as DimensionInput,
       ],
     ],
     [
       "line length",
       () => [
-        { ...lengthOf("D", "ab1"), value: 3 } as DimensionInput,
-        { ...lengthOf("D", "ab"), value: 3 } as DimensionInput,
+        { ...lengthOf("D", "ab1"), value: literal(3) } as DimensionInput,
+        { ...lengthOf("D", "ab"), value: literal(3) } as DimensionInput,
       ],
     ],
     [
       "aligned distance",
       () => [
-        { ...distanceOf("D", "a1", "h1"), value: 6 } as DimensionInput,
-        { ...distanceOf("D", "a", "h"), value: 6 } as DimensionInput,
+        { ...distanceOf("D", "a1", "h1"), value: literal(6) } as DimensionInput,
+        { ...distanceOf("D", "a", "h"), value: literal(6) } as DimensionInput,
       ],
     ],
     [
@@ -3590,12 +3591,12 @@ describe("shared driving dimensions: equivalence in the solve (SDE, T16f)", () =
         dim("D", {
           kind: "lineDistance",
           lines: [local("ab1"), local("ef1")],
-          value: 2.5,
+          value: literal(2.5),
         }),
         dim("D", {
           kind: "lineDistance",
           lines: [local("ab"), local("ef")],
-          value: 2.5,
+          value: literal(2.5),
         }),
       ],
     ],
@@ -3606,13 +3607,13 @@ describe("shared driving dimensions: equivalence in the solve (SDE, T16f)", () =
           kind: "linePointDistance",
           line: axisLineOperand(axis),
           point: localPoint("d1"),
-          value: 7,
+          value: literal(7),
         }),
         dim("D", {
           kind: "linePointDistance",
           line: axisLineOperand(axis),
           point: localPoint("d"),
-          value: 7,
+          value: literal(7),
         }),
       ],
     ],
@@ -3622,12 +3623,12 @@ describe("shared driving dimensions: equivalence in the solve (SDE, T16f)", () =
         dim("D", {
           kind: "lineAngle",
           lines: [local("ab1"), local("gh1")],
-          valueRadians: Math.PI / 3,
+          valueRadians: literal(Math.PI / 3),
         }),
         dim("D", {
           kind: "lineAngle",
           lines: [local("ab"), local("gh")],
-          valueRadians: Math.PI / 3,
+          valueRadians: literal(Math.PI / 3),
         }),
       ],
     ],
@@ -3661,7 +3662,8 @@ describe("shared driving dimensions: equivalence in the solve (SDE, T16f)", () =
     // … and the solve treats them as one requirement.
     const solveOf = (definition: SketchDefinition) =>
       solveSketchDefinitionCore({
-        definition,
+        // T17p2 (F-2): the solver consumes the resolved definition.
+        definition: literalResolvedDefinition(definition),
         tolerances,
         modelingTolerance: TAU,
         partialSolvePolicy: "bestEffort",

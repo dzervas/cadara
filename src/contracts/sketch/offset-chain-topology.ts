@@ -31,6 +31,7 @@ import {
   type OffsetChainFailure,
 } from "@/contracts/sketch/offset-geometry";
 import type {
+  DerivableSketchDefinition,
   SketchDefinition,
   SketchPoint2D,
   SolvedSketchSnapshot,
@@ -1949,7 +1950,7 @@ function sameSpanGeometry(first: SplineSpan, second: SplineSpan) {
  */
 export function declaredOffsetChainPieces(input: {
   readonly definition: Pick<
-    SketchDefinition,
+    DerivableSketchDefinition,
     "points" | "entities" | "constraints" | "dimensions"
   >;
   readonly solvedSnapshot: SolvedSketchSnapshot;

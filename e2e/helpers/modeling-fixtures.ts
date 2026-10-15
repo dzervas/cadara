@@ -10,6 +10,8 @@ import type {
 } from "../../src/contracts/modeling/schema";
 import { createSketchArrangementDeriver } from "../../src/contracts/sketch/region-extraction";
 import { solveSketchDefinitionCore } from "../../src/contracts/sketch/solver-core";
+import { createLiteralAuthoredValue } from "../../src/contracts/modeling/authored-values";
+import { resolveSketchDimensionValues } from "../../src/domain/modeling/sketch-dimension-expressions";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "../../src/domain/modeling/neutral-curve-certification/query";
 import { OCC_KERNEL_SETTINGS } from "../../src/domain/modeling/opencascade-kernel-seed";
 import { SKETCH_SCHEMA_VERSION } from "../../src/contracts/sketch/schema";
@@ -170,7 +172,7 @@ function createRectangleSketchDefinition(
         label: `Rectangle ${idPrefix} width`,
         axis: "horizontal",
         pointIds: [bottomLeftPointId, bottomRightPointId],
-        value: bounds.maxX - bounds.minX,
+        value: createLiteralAuthoredValue(bounds.maxX - bounds.minX),
       },
       {
         dimensionId: `dimension_${idPrefix}_height`,
@@ -178,7 +180,7 @@ function createRectangleSketchDefinition(
         label: `Rectangle ${idPrefix} height`,
         axis: "vertical",
         pointIds: [bottomRightPointId, topRightPointId],
-        value: bounds.maxY - bounds.minY,
+        value: createLiteralAuthoredValue(bounds.maxY - bounds.minY),
       },
     ],
   };
@@ -196,11 +198,15 @@ async function deriveFixtureRegionId(
   idPrefix: `${number}`,
   bounds: RectangleBounds,
 ) {
-  const definition = createRectangleSketchDefinition(
-    sketchId,
-    idPrefix,
-    bounds,
-  );
+  // T17p2 (F-2): the solver consumes the resolved definition, as the kernel's.
+  const resolved = resolveSketchDimensionValues({
+    definition: createRectangleSketchDefinition(sketchId, idPrefix, bounds),
+    variables: [],
+  });
+  if (!resolved.ok) {
+    throw new Error(`Fixture sketch ${sketchId} dimensions do not resolve.`);
+  }
+  const { definition } = resolved;
   const solved = solveSketchDefinitionCore({
     definition,
     tolerances: {

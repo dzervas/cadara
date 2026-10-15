@@ -2868,7 +2868,8 @@ const sketchConstraintDefinitions = [
                 kind: "diameter" as const,
                 label: `Fixed diameter ${input.sequence}`,
                 entityId: target.entity.entityId,
-                value: target.entity.radius * 2,
+                // T17p2 (F-2): a literal wrapper (it was written bare).
+                value: createLiteralAuthoredValue(target.entity.radius * 2),
               },
             ]
           : [];

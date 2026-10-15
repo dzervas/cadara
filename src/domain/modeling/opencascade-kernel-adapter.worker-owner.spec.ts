@@ -13,7 +13,10 @@ import {
   OCC_KERNEL_INITIAL_REVISION_ID,
 } from "@/domain/modeling/opencascade-kernel-seed";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
-import { makeSketchFixture } from "@/contracts/sketch/region-extraction.fixtures";
+import {
+  literalResolvedDefinition,
+  makeSketchFixture,
+} from "@/contracts/sketch/region-extraction.fixtures";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 
@@ -228,15 +231,8 @@ test("src/domain/modeling/opencascade-kernel-adapter.worker-owner.spec.ts", asyn
       },
       planeTarget: { kind: "construction", constructionId: "construction_xy" },
       planeKey: "sketch-plane:xy",
-      definition: {
-        schemaVersion: "sketch/v1alpha1",
-        points: [],
-        entities: [],
-        constraints: [],
-        dimensions: [],
-        referenceIds: [],
-        references: [],
-      },
+      // T17p2 (F-5): a current-format empty definition.
+      definition: makeSketchFixture().definition(),
       solverCorrelation: null,
     });
 
@@ -441,7 +437,7 @@ test("src/domain/modeling/opencascade-kernel-adapter.worker-owner.spec.ts", asyn
       revisionId: OCC_KERNEL_INITIAL_REVISION_ID,
       sketchId: input.sketchId as never,
       solvedSnapshot: input.solvedSnapshot,
-      definition: input.definition,
+      definition: literalResolvedDefinition(input.definition),
       projectedReferences: input.projectedReferences,
       modelingTolerance: input.modelingTolerance,
     });

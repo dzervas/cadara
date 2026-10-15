@@ -243,15 +243,18 @@ test("T13d R-1: normalization keeps reference dimensions of every numeric kind a
     expect(
       (driving as Record<string, unknown>)[valueKey],
       `${entry.name}: the driving value is kept`,
-    ).toEqual((entry.driving as Record<string, number>)[valueKey]!);
+    ).toEqual((entry.driving as Record<string, unknown>)[valueKey]!);
     // D9′ (review A-2/A-3): a kept value parses with the marker; an
     // explicitly undefined value is no value.
     expect(
-      parseDimension({ ...entry.reference, [valueKey]: 1 }),
+      parseDimension({
+        ...entry.reference,
+        [valueKey]: createLiteralAuthoredValue(1),
+      }),
       `${entry.name}: a reference keeping a value parses`,
     ).toMatchObject({
       reference: true,
-      [valueKey]: 1,
+      [valueKey]: createLiteralAuthoredValue(1),
     });
     expect(
       parseDimension({

@@ -27,7 +27,6 @@ import type {
   SketchEntityId,
   SketchPointId,
 } from "@/contracts/shared/ids";
-import type { SketchPlaneSupportRef } from "@/contracts/shared/sketch-plane";
 import {
   getAuthoredLiteralValue,
   isAuthoredValue,
@@ -244,18 +243,6 @@ export function assertDurableRef(value: unknown): DurableRef {
     target.kind === "sketchTangentHandle"
   ) {
     throw new Error("Invalid durable reference payload.");
-  }
-
-  return target;
-}
-
-export function assertSketchPlaneSupportRef(
-  value: unknown,
-): SketchPlaneSupportRef {
-  const target = assertPrimitiveRef(value);
-
-  if (target.kind !== "construction" && target.kind !== "face") {
-    throw new Error("Invalid sketch-plane support payload.");
   }
 
   return target;

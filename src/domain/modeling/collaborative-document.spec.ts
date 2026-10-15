@@ -1,4 +1,5 @@
 import { test, expect } from "vitest";
+import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 import { expectNoInternalIds } from "@/contracts/sketch/user-text.fixtures";
 import * as Automerge from "@automerge/automerge";
 import { createSeedAuthoredModelDocument } from "./modeling-test-fixtures";
@@ -386,7 +387,7 @@ test("T16g A-13: a peer's concurrent dimension on a copy removed with its mirror
     "the peer's dimension is kept, still naming the removed copy",
   ).toEqual([dimension]);
   const validation = validateSketchDefinitionCore({
-    definition,
+    definition: literalResolvedDefinition(definition),
     tolerances: createDocumentSolverTolerances(OCC_KERNEL_SETTINGS),
     modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
   });

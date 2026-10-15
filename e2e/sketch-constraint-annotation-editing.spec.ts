@@ -175,7 +175,7 @@ test("committed distance annotation input keeps Backspace local and saves durabl
         kind: string;
         payload?: {
           definition?: {
-            dimensions?: Array<{ kind: string; value?: number | { source?: string; value?: number } }>;
+            dimensions?: Array<{ kind: string; value?: { source?: string; value?: number } }>;
           };
         };
       }>;
@@ -185,10 +185,8 @@ test("committed distance annotation input keeps Backspace local and saves durabl
       payload.entries
         ?.filter((entry) => entry.kind === "commitSketch")
         .at(-1)
-        ?.payload?.definition?.dimensions?.map((dimension) =>
-          typeof dimension.value === "number"
-            ? dimension.value
-            : (dimension.value?.value ?? null),
+        ?.payload?.definition?.dimensions?.map(
+          (dimension) => dimension.value?.value ?? null,
         ) ?? []
     );
   }, MODELING_OPERATION_HISTORY_STORAGE_KEY);
@@ -261,7 +259,7 @@ test("edited rectangle width annotation solves and still finishes the sketch", a
         kind: string;
         payload?: {
           definition?: {
-            dimensions?: Array<{ axis?: string; kind: string; value?: number | { source?: string; value?: number } }>;
+            dimensions?: Array<{ axis?: string; kind: string; value?: { source?: string; value?: number } }>;
           };
         };
       }>;
@@ -274,11 +272,7 @@ test("edited rectangle width annotation solves and still finishes the sketch", a
         ?.payload?.definition?.dimensions?.filter(
           (dimension) => dimension.kind === "lineLength",
         )
-        .map((dimension) =>
-          typeof dimension.value === "number"
-            ? dimension.value
-            : (dimension.value?.value ?? null),
-        ) ?? []
+        .map((dimension) => dimension.value?.value ?? null) ?? []
     );
   }, MODELING_OPERATION_HISTORY_STORAGE_KEY);
 
@@ -350,7 +344,7 @@ test("edited rectangle height annotation solves and still finishes the sketch", 
         kind: string;
         payload?: {
           definition?: {
-            dimensions?: Array<{ axis?: string; kind: string; value?: number | { source?: string; value?: number } }>;
+            dimensions?: Array<{ axis?: string; kind: string; value?: { source?: string; value?: number } }>;
           };
         };
       }>;
@@ -363,11 +357,7 @@ test("edited rectangle height annotation solves and still finishes the sketch", 
         ?.payload?.definition?.dimensions?.filter(
           (dimension) => dimension.kind === "lineLength",
         )
-        .map((dimension) =>
-          typeof dimension.value === "number"
-            ? dimension.value
-            : (dimension.value?.value ?? null),
-        ) ?? []
+        .map((dimension) => dimension.value?.value ?? null) ?? []
     );
   }, MODELING_OPERATION_HISTORY_STORAGE_KEY);
 
@@ -440,7 +430,7 @@ test("edited circle radius annotation solves and still finishes the sketch", asy
         kind: string;
         payload?: {
           definition?: {
-            dimensions?: Array<{ kind: string; value?: number | { source?: string; value?: number } }>;
+            dimensions?: Array<{ kind: string; value?: { source?: string; value?: number } }>;
             entities?: Array<{ kind: string; radius?: number }>;
           };
         };
@@ -454,11 +444,7 @@ test("edited circle radius annotation solves and still finishes the sketch", asy
       dimensionValues:
         definition?.dimensions
           ?.filter((dimension) => dimension.kind === "circleRadius")
-          .map((dimension) =>
-            typeof dimension.value === "number"
-              ? dimension.value
-              : (dimension.value?.value ?? null),
-          ) ?? [],
+          .map((dimension) => dimension.value?.value ?? null) ?? [],
       entityRadii:
         definition?.entities
           ?.filter((entity) => entity.kind === "circle")
@@ -536,7 +522,7 @@ test("edited circle diameter annotation (added with the Dimension tool) solves a
           definition?: {
             dimensions?: Array<{
               kind: string;
-              value?: number | { source?: string; value?: number };
+              value?: { source?: string; value?: number };
             }>;
           };
         };
@@ -548,9 +534,7 @@ test("edited circle diameter annotation (added with the Dimension tool) solves a
         .at(-1)
         ?.payload?.definition?.dimensions?.map((dimension) => [
           dimension.kind,
-          typeof dimension.value === "number"
-            ? dimension.value
-            : (dimension.value?.value ?? null),
+          dimension.value?.value ?? null,
         ]) ?? []
     );
   }, MODELING_OPERATION_HISTORY_STORAGE_KEY);

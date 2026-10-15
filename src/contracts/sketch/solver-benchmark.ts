@@ -1,7 +1,9 @@
 import type { AuthoredSketchRecord } from "@/contracts/modeling/authored-document";
+// T17p2 (F-2): benchmark sketches are solver inputs, so their dimension
+// values are resolved numbers (the solver core's view).
 import type {
-  DimensionDefinition,
-  SketchDefinition,
+  NumericDimensionDefinition as DimensionDefinition,
+  NumericSketchDefinition as SketchDefinition,
   SketchPoint2D,
 } from "@/contracts/sketch/schema";
 import type { SketchSolverAdapter } from "@/contracts/solver/adapter";
@@ -27,10 +29,16 @@ import type {
   SketchPlaneKey,
 } from "@/contracts/shared/sketch-plane";
 
+/** An authored sketch record whose definition is already resolved. */
+export type SketchSolverBenchmarkSketch = Omit<
+  AuthoredSketchRecord,
+  "definition"
+> & { definition: SketchDefinition };
+
 export interface SketchSolverBenchmarkFixture {
   name: string;
   description: string;
-  sketch: AuthoredSketchRecord;
+  sketch: SketchSolverBenchmarkSketch;
   expectedAnnotationCount: number;
   expectedRegionCount: number;
   expectedDiagnosticCount: number;
@@ -273,7 +281,7 @@ function makeAuthoredSketchRecord(
   sketchId: SketchId,
   label: string,
   definition: SketchDefinition,
-): AuthoredSketchRecord {
+): SketchSolverBenchmarkSketch {
   const plane = createBenchmarkPlaneDefinition("xy");
   return {
     sketchId,
@@ -286,7 +294,7 @@ function makeAuthoredSketchRecord(
 function makeFixture(
   name: string,
   description: string,
-  sketch: AuthoredSketchRecord,
+  sketch: SketchSolverBenchmarkSketch,
   expectedRegionCount: number,
   expectedDiagnosticCount = 0,
 ): SketchSolverBenchmarkFixture {

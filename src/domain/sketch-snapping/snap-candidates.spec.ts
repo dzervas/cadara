@@ -21,6 +21,7 @@ import {
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { SKETCH_CURVE_RADII_PX } from "@/domain/sketch-interaction/screen-radii";
 import {
+  literalResolvedDefinition,
   makeSketchFixture,
   neutralSpan,
   projectedSpline,
@@ -1130,7 +1131,8 @@ test("T13i R-1/A-3: the staged snap batch computes each spline pair once and off
   sketch.line("line", "l0", "l1");
   const input = sketch.build();
   const basis = {
-    definition: input.definition,
+    // T17p2 (F-2): the queries carry the resolved definition.
+    definition: literalResolvedDefinition(input.definition),
     solvedSnapshot: input.solvedSnapshot,
     projectedReferences: [],
     modelingTolerance: input.modelingTolerance,

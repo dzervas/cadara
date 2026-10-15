@@ -81,6 +81,8 @@ import {
 } from "@/contracts/sketch/canonical-arc-support";
 import { extractDeclaredOffsetChainConnectivity } from "@/contracts/sketch/offset-chain-connectivity";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import {
   ARCH_POINTS,
   CORNER_MATRIX_SOLVE_TOLERANCES,
@@ -2040,7 +2042,8 @@ describe("declared multi-piece tube stability (L1b, bounded helper, not live)", 
         return record;
       }),
       pointer: null,
-      value,
+      // T17p2 (F-2): the tools take an authored value.
+      value: value === null ? null : createLiteralAuthoredValue(value),
       annotationPlacement: null,
       createConstraintId: (suffix) => `constraint_${step}_${suffix}` as const,
       createDimensionId: (suffix) => `dimension_${step}_${suffix}` as const,
@@ -2552,7 +2555,7 @@ describe("declared multi-piece tube stability (L1b, bounded helper, not live)", 
         splineEnds(spline)[0],
       );
       const solved = solveSketchDefinitionCore({
-        definition,
+        definition: literalResolvedDefinition(definition),
         tolerances: { ...SKETCH_DIRECT_EDIT_TOLERANCES, coincidence },
         modelingTolerance: 1e-3,
         partialSolvePolicy: "bestEffort",
@@ -4572,7 +4575,8 @@ describe("T08b-d SEL: declared vertices, adoption, U1 absorption", () => {
         return record;
       }),
       pointer: null,
-      value,
+      // T17p2 (F-2): the tools take an authored value.
+      value: value === null ? null : createLiteralAuthoredValue(value),
       annotationPlacement: null,
       createConstraintId: (suffix) => `constraint_${step}_${suffix}` as const,
       createDimensionId: (suffix) => `dimension_${step}_${suffix}` as const,

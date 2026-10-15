@@ -4,6 +4,7 @@ import {
   nonAcceptedDerivedOutputs,
 } from "@/contracts/sketch/offset-publication";
 import type {
+  DerivableSketchDefinition,
   SketchDefinition,
   SketchPoint2D,
   SolvedSketchSnapshot,
@@ -1511,7 +1512,7 @@ type Box = { min: SketchPoint2D; max: SketchPoint2D };
  * so they are not considered (recorded).
  */
 export function getSketchSnapIntersectionTargets(
-  definition: SketchDefinition,
+  definition: DerivableSketchDefinition,
   solvedSnapshot: SolvedSketchSnapshot,
   modelingTolerance: number,
   cutters: "curves" | "splines",
@@ -1616,7 +1617,7 @@ function circleBox(center: SketchPoint2D, radius: number): Box {
  * coincident, not two on-curve relations. A ranking change must keep that.
  */
 export function getSketchExactIntersections(
-  definition: SketchDefinition,
+  definition: DerivableSketchDefinition,
   targets: readonly SketchSnapIntersectionTargetResult[],
 ): SketchExactIntersection[] {
   const entities = new Map(

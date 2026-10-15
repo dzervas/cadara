@@ -5,6 +5,7 @@ import type {
 import {
   isAcceptedConstraintStatus,
   isReferenceDimension,
+  resolvedReferenceDimension,
 } from "@/contracts/sketch/schema";
 import {
   createExpressionAuthoredValue,
@@ -46,7 +47,10 @@ import {
 import type { SketchOffsetPublicationRecord } from "@/contracts/solver/schema";
 import {
   type ConstraintDefinition,
+  type DerivableSketchDefinition,
   type DimensionDefinition,
+  type NumericDimensionDefinition,
+  type NumericSketchDefinition,
   type RegionRecord,
   type SketchDefinition,
   type SketchDerivedValidity,
@@ -407,7 +411,7 @@ export function getSketchSessionDisplayProjectedReferences(
   );
 }
 
-let cachedSolveDefinition: SketchDefinition | null = null;
+let cachedSolveDefinition: NumericSketchDefinition | null = null;
 let cachedSolveProjectedRefs: ProjectedSketchReferenceRecord[] | null = null;
 let cachedSolveTolerances: SketchSessionState["solverTolerances"] | null = null;
 let cachedSolveModelingTolerance: number | null = null;
@@ -415,14 +419,17 @@ let cachedSolveResult: SolvedSketchSnapshot | null = null;
 
 /**
  * Resolves expression-authored sketch dimensions against the session's document
- * variables so the numeric solver only ever receives concrete numbers. Falls
- * back to the authored definition when resolution fails so preview solving stays
- * best-effort instead of throwing.
+ * variables so the numeric solver only ever receives concrete numbers (the
+ * editor's resolve boundary). When resolution fails, preview solving stays
+ * best-effort instead of throwing: T17p2 (F-2) every driving dimension value
+ * is then `NaN`, so the solve fails on its NaN residuals (as it did when the
+ * authored wrappers themselves reached the solver); the resolution
+ * diagnostics are reported where the edit is committed.
  */
 export function resolveSketchDefinitionForSolve(
   definition: SketchDefinition,
   documentVariables: readonly DocumentVariableRecord[] = [],
-): SketchDefinition {
+): NumericSketchDefinition {
   const withDerivationDistances = resolveSketchDerivationDistances({
     definition,
     variables: documentVariables,
@@ -431,7 +438,31 @@ export function resolveSketchDefinitionForSolve(
     definition: withDerivationDistances,
     variables: documentVariables,
   });
-  return resolved.ok ? resolved.definition : withDerivationDistances;
+  return resolved.ok
+    ? resolved.definition
+    : {
+        ...withDerivationDistances,
+        dimensions: withDerivationDistances.dimensions.map(
+          unresolvedDrivingDimension,
+        ),
+      };
+}
+
+function unresolvedDrivingDimension(
+  dimension: DimensionDefinition,
+): NumericDimensionDefinition {
+  if (isReferenceDimension(dimension)) {
+    return resolvedReferenceDimension(dimension);
+  }
+  if (
+    dimension.kind === "arcStartPointCoincident" ||
+    dimension.kind === "arcEndPointCoincident"
+  ) {
+    return dimension;
+  }
+  return dimension.kind === "lineAngle"
+    ? { ...dimension, valueRadians: Number.NaN }
+    : { ...dimension, value: Number.NaN };
 }
 
 const LIVE_REGIONS_UNAVAILABLE_DIAGNOSTIC: SketchSolveDiagnostic = {
@@ -618,7 +649,7 @@ export function withLiveSolveBasis(
  * authored; it is reported and blocks the sketch's profiles.
  */
 export function getSketchDegenerateSplineSpans(
-  definition: SketchDefinition,
+  definition: DerivableSketchDefinition,
   solvedSnapshot: SolvedSketchSnapshot,
 ): readonly {
   spline: Extract<SketchEntityDefinition, { kind: "spline" }>;
@@ -2007,9 +2038,12 @@ function formatSketchRequirement(
 }
 
 function formatRequirementValue(
-  value: MaybeAuthoredValue<number>,
+  value: MaybeAuthoredValue<number> | undefined,
   unit: "mm" | "deg",
 ): string {
+  if (value === undefined) {
+    return "?";
+  }
   if (isExpressionAuthoredValue(value)) {
     return value.valueText;
   }

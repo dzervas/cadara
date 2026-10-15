@@ -19,14 +19,42 @@ import {
   OCC_KERNEL_SETTINGS,
 } from "@/domain/modeling/opencascade-kernel-seed";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
-import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
-import { validateSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { solveSketchDefinitionCore as solveSketchDefinitionCoreResolved } from "@/contracts/sketch/solver-core";
+import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
+import { validateSketchDefinitionCore as validateSketchDefinitionCoreResolved } from "@/contracts/sketch/solver-core";
 import {
   bindRenderableObject,
   collectBindings,
   SURFACE_COLORS,
   updateWorkspaceHighlight,
 } from "@/infrastructure/viewport/render-picking";
+
+// T17p2 (F-2): the solver consumes the resolved definition; these fixtures
+// author literal values, resolved before each solve (`literalResolvedDefinition`).
+const solveSketchDefinitionCore = (
+  input: Omit<
+    Parameters<typeof solveSketchDefinitionCoreResolved>[0],
+    "definition"
+  > & {
+    definition: SketchDefinition;
+  },
+) =>
+  solveSketchDefinitionCoreResolved({
+    ...input,
+    definition: literalResolvedDefinition(input.definition),
+  });
+const validateSketchDefinitionCore = (
+  input: Omit<
+    Parameters<typeof validateSketchDefinitionCoreResolved>[0],
+    "definition"
+  > & {
+    definition: SketchDefinition;
+  },
+) =>
+  validateSketchDefinitionCoreResolved({
+    ...input,
+    definition: literalResolvedDefinition(input.definition),
+  });
 
 test("src/domain/editor/sketch-reference-geometry.spec.ts", () => {
   function createDefinition(): SketchDefinition {

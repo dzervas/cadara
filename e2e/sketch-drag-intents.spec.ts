@@ -733,7 +733,7 @@ test("T12f: dragging the rim of a circle with a deliberately added diameter show
           definition?: {
             dimensions?: Array<{
               kind: string;
-              value?: number | { value?: number };
+              value?: { value?: number };
             }>;
           };
         };
@@ -745,9 +745,7 @@ test("T12f: dragging the rim of a circle with a deliberately added diameter show
         .at(-1)
         ?.payload?.definition?.dimensions?.map((dimension) => [
           dimension.kind,
-          typeof dimension.value === "number"
-            ? dimension.value
-            : (dimension.value?.value ?? null),
+          dimension.value?.value ?? null,
         ]) ?? []
     );
   }, MODELING_OPERATION_HISTORY_STORAGE_KEY);

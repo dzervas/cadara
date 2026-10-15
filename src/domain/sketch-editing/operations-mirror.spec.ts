@@ -12,6 +12,7 @@ import type {
 } from "@/contracts/sketch/schema";
 import { querySketchEditIntersections } from "@/contracts/sketch/edit-intersections";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 import {
   deriveSketchValidity,
   getConsumableSketchRegions,
@@ -114,7 +115,7 @@ function sketch(
 }
 const solve = (definition: SketchDefinition) =>
   solveSketchDefinitionCore({
-    definition,
+    definition: literalResolvedDefinition(definition),
     tolerances,
     modelingTolerance: TAU,
     partialSolvePolicy: "bestEffort",
@@ -229,7 +230,7 @@ describe("stale maps after topology edits (T-15; review probe R1–R6): refused 
       const solvedSnapshot = solve(definition);
       const intersections = await querySketchEditIntersections(
         {
-          definition,
+          definition: literalResolvedDefinition(definition),
           solvedSnapshot,
           projectedReferences: [],
           modelingTolerance: TAU,
@@ -269,7 +270,7 @@ describe("stale maps after topology edits (T-15; review probe R1–R6): refused 
     const solvedSnapshot = solve(definition);
     const intersections = await querySketchEditIntersections(
       {
-        definition,
+        definition: literalResolvedDefinition(definition),
         solvedSnapshot,
         projectedReferences: [],
         modelingTolerance: TAU,
@@ -331,7 +332,7 @@ describe("stale maps after topology edits (T-15; review probe R1–R6): refused 
     const solvedSnapshot = solve(definition);
     const intersections = await querySketchEditIntersections(
       {
-        definition,
+        definition: literalResolvedDefinition(definition),
         solvedSnapshot,
         projectedReferences: [],
         modelingTolerance: TAU,

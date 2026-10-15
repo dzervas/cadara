@@ -14,17 +14,21 @@
 import { expect, test } from "vitest";
 
 import type { DimensionId } from "@/contracts/shared/ids";
+// T17p2 (F-2): the solver works on resolved definitions.
 import type {
   ConstraintDefinition,
-  DimensionDefinition,
-  SketchDefinition,
+  NumericDimensionDefinition as DimensionDefinition,
+  NumericSketchDefinition as SketchDefinition,
 } from "@/contracts/sketch/schema";
 import {
   solvePivotedCholeskyForTest,
   solveSketchDefinitionCore,
   traceSketchSolverForTest,
 } from "@/contracts/sketch/solver-core";
-import { makeSketchFixture } from "@/contracts/sketch/region-extraction.fixtures";
+import {
+  literalResolvedDefinition,
+  makeSketchFixture,
+} from "@/contracts/sketch/region-extraction.fixtures";
 
 /** The kernel seed's document tolerances: τ = 1e-3 mm, τ_ang = 1e-4 rad. */
 const TOLERANCES = {
@@ -182,7 +186,7 @@ function hvRectangle() {
   sketch.line("right", "b", "c");
   sketch.line("top", "c", "d");
   sketch.line("left", "d", "a");
-  return withRequirements(sketch.definition(), [
+  return withRequirements(literalResolvedDefinition(sketch.definition()), [
     constraint("h_bottom", { kind: "horizontal", entityId: entity("bottom") }),
     constraint("h_top", { kind: "horizontal", entityId: entity("top") }),
     constraint("v_right", { kind: "vertical", entityId: entity("right") }),
@@ -261,7 +265,7 @@ test("T13e2 A2: a line driven below the minimum segment length is degenerate geo
   sketch.point("c", 2, 3);
   sketch.line("short", "a", "b");
   sketch.line("other", "b", "c");
-  const base = sketch.definition();
+  const base = literalResolvedDefinition(sketch.definition());
 
   const above = solve(
     withRequirements(base, [], [lineLength("short", "short", 0.002)]),
@@ -300,7 +304,7 @@ function horizontalSlot() {
       ] as [number, number],
     })),
   };
-  const circle = sketch.definition();
+  const circle = literalResolvedDefinition(sketch.definition());
   return withRequirements(
     {
       ...moved,
@@ -337,7 +341,7 @@ function parallelSlot() {
   sketch.line("B", "b0", "b1");
   sketch.circle("circle", "c", 2);
   return withRequirements(
-    sketch.definition(),
+    literalResolvedDefinition(sketch.definition()),
     [
       constraint("parallel", {
         kind: "parallel",
@@ -431,7 +435,7 @@ test("T13e2 B1: points on two parallel lines with a conflicting point distance a
   sketch.pointOnCurve("p", "A");
   sketch.pointOnCurve("q", "B");
   const base = withRequirements(
-    sketch.definition(),
+    literalResolvedDefinition(sketch.definition()),
     [
       constraint("parallel", {
         kind: "parallel",
@@ -573,12 +577,15 @@ test("T13e2 (review A-1): a tight-policy rescue stops at its first accepted Gaus
   sketch.point("b1", 10 * Math.cos(0.1), 5 + 10 * Math.sin(0.1));
   sketch.line("A", "a0", "a1");
   sketch.line("B", "b0", "b1");
-  const definition = withRequirements(sketch.definition(), [
-    constraint("parallel", {
-      kind: "parallel",
-      entityIds: [entity("A"), entity("B")],
-    }),
-  ]);
+  const definition = withRequirements(
+    literalResolvedDefinition(sketch.definition()),
+    [
+      constraint("parallel", {
+        kind: "parallel",
+        entityIds: [entity("A"), entity("B")],
+      }),
+    ],
+  );
   const traced = traceSketchSolverForTest(() =>
     solveSketchDefinitionCore({
       definition,
@@ -684,10 +691,11 @@ test("T13e2 B1 (review R-2): pointOnCurve — points on two horizontal lines 3 a
     sketch.point("q", 3, 3);
     sketch.pointOnCurve("p", "A");
     sketch.pointOnCurve("q", "B");
-    return withRequirements(sketch.definition(), pair.constraints, [
-      ...pair.dimensions,
-      pointDistance("p", "q", conflicting ? 2.9 : 3),
-    ]);
+    return withRequirements(
+      literalResolvedDefinition(sketch.definition()),
+      pair.constraints,
+      [...pair.dimensions, pointDistance("p", "q", conflicting ? 2.9 : 3)],
+    );
   });
 });
 
@@ -698,7 +706,7 @@ test("T13e2 B1 (review R-2): collinear (point target) — points collinear with 
     sketch.point("p", 3, 0);
     sketch.point("q", 3, 3);
     return withRequirements(
-      sketch.definition(),
+      literalResolvedDefinition(sketch.definition()),
       [
         ...pair.constraints,
         ...(["p", "q"] as const).map((name) =>
@@ -725,7 +733,7 @@ test("T13e2 B1 (review R-2): collinear (line target) — short lines collinear w
     sketch.line("P", "p", "p1");
     sketch.line("Q", "q", "q1");
     return withRequirements(
-      sketch.definition(),
+      literalResolvedDefinition(sketch.definition()),
       [
         ...pair.constraints,
         ...(
@@ -754,7 +762,7 @@ test("T13e2 B1 (review R-2): linePointDistance — a point 3 from a horizontal l
     sketch.point("p", 3, 3);
     sketch.line("A", "a0", "a1");
     return withRequirements(
-      sketch.definition(),
+      literalResolvedDefinition(sketch.definition()),
       [horizontal("A")],
       [
         lineLength("length_a", "A", 6),
@@ -776,18 +784,22 @@ test("T13e2 B1 (review R-2): lineDistance is no lever source — two fixed-lengt
   expectFarBasinRejected("lineDistance", (conflicting) => {
     const sketch = makeSketchFixture();
     const pair = horizontalPair(sketch);
-    return withRequirements(sketch.definition(), pair.constraints, [
-      lineLength("length_a", "A", 6),
-      lineLength("length_b", "B", 6),
-      {
-        dimensionId: dimensionId("line_gap"),
-        kind: "lineDistance",
-        label: "line gap",
-        lines: [localLine("A"), localLine("B")],
-        value: 3,
-      } as DimensionDefinition,
-      verticalDistance("start_gap", "a0", "b0", conflicting ? 2.9 : 3),
-    ]);
+    return withRequirements(
+      literalResolvedDefinition(sketch.definition()),
+      pair.constraints,
+      [
+        lineLength("length_a", "A", 6),
+        lineLength("length_b", "B", 6),
+        {
+          dimensionId: dimensionId("line_gap"),
+          kind: "lineDistance",
+          label: "line gap",
+          lines: [localLine("A"), localLine("B")],
+          value: 3,
+        } as DimensionDefinition,
+        verticalDistance("start_gap", "a0", "b0", conflicting ? 2.9 : 3),
+      ],
+    );
   });
 });
 
@@ -800,7 +812,7 @@ test("T13e2 B1 (review R-2): symmetric — two points symmetric about a horizont
     sketch.point("q", 3, -1);
     sketch.line("A", "a0", "a1");
     return withRequirements(
-      sketch.definition(),
+      literalResolvedDefinition(sketch.definition()),
       [
         horizontal("A"),
         constraint("symmetric", {
@@ -828,7 +840,7 @@ test("T13e2 B1 (review R-2): equalOffset between two fixed-length horizontal pai
     sketch.line("C", "c0", "c1");
     sketch.line("D", "d0", "d1");
     return withRequirements(
-      sketch.definition(),
+      literalResolvedDefinition(sketch.definition()),
       [
         ...pair.constraints,
         horizontal("C"),
@@ -876,7 +888,7 @@ test("T13e2 B1 (review R-2): two fixed-length horizontal lines 3 apart both norm
         curve: localLine("circle"),
       });
     return withRequirements(
-      sketch.definition(),
+      literalResolvedDefinition(sketch.definition()),
       [
         ...pair.constraints,
         normal("a", "A", "pa"),
@@ -913,9 +925,9 @@ test("T13e2 B1 (review R-2): tangentProjectedCurve and normalProjectedCurve — 
   const base = makeSketchFixture();
   const pair = horizontalPair(base);
   const definition = {
-    ...base.definition(),
-    referenceIds: sketch.definition().referenceIds,
-    references: sketch.definition().references,
+    ...literalResolvedDefinition(base.definition()),
+    referenceIds: literalResolvedDefinition(sketch.definition()).referenceIds,
+    references: literalResolvedDefinition(sketch.definition()).references,
   };
   // Tangent to the fixed circle on both sides, but 2.9 apart at the starts.
   expectFarBasinRejected(
@@ -951,9 +963,10 @@ test("T13e2 B1 (review R-2): tangentProjectedCurve and normalProjectedCurve — 
     (conflicting) =>
       withRequirements(
         {
-          ...withContact.definition(),
-          referenceIds: sketch.definition().referenceIds,
-          references: sketch.definition().references,
+          ...literalResolvedDefinition(withContact.definition()),
+          referenceIds: literalResolvedDefinition(sketch.definition())
+            .referenceIds,
+          references: literalResolvedDefinition(sketch.definition()).references,
         },
         [
           horizontal("A"),
@@ -997,7 +1010,7 @@ function heldOrientationSlot(holding: "lineAngle" | "parallel", value: number) {
   sketch.line("M", "m0", "m1");
   sketch.circle("circle", "c", 2);
   return withRequirements(
-    sketch.definition(),
+    literalResolvedDefinition(sketch.definition()),
     [
       ...["A", "B"].map((line) =>
         constraint(`tangent_${line}`, {
@@ -1074,7 +1087,7 @@ test("T13e2 B1 (re-review RR-1): normal (local curve) — a circle normal to a h
     sketch.circle("circle", "center", 1);
     sketch.point("pc", 2, 0);
     return withRequirements(
-      sketch.definition(),
+      literalResolvedDefinition(sketch.definition()),
       [
         fixAt("a0", 0, 0),
         horizontal("A"),
@@ -1109,7 +1122,7 @@ test("T13e2 B1 (re-review advisory): normal (local curve), its two sources separ
       sketch.line("A", "a0", "a1");
       sketch.circle("circle", "center", 10_000);
       return withRequirements(
-        sketch.definition(),
+        literalResolvedDefinition(sketch.definition()),
         [
           fixAt("o", 0, 0),
           fixAt("center", centerX, 1.5),
@@ -1152,7 +1165,7 @@ function heldLineWithFreeParallel(
   sketch.pointOnCurve("p", "B");
   const extra = relation(sketch);
   return withRequirements(
-    sketch.definition(),
+    literalResolvedDefinition(sketch.definition()),
     [
       fixAt("a0", 0, 0),
       holdBothEnds ? fixAt("a1", 6, 0) : horizontal("A"),
@@ -1211,7 +1224,7 @@ test("T13e2 B1 (re-review advisory): normalProjectedCurve's two sources separate
       `normalProjectedCurve, ${label}`,
       (conflicting) =>
         withRequirements(
-          sketch.definition(),
+          literalResolvedDefinition(sketch.definition()),
           [
             fixAt("o", 0, 0),
             horizontal("A"),

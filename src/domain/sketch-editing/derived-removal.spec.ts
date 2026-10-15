@@ -9,6 +9,7 @@
  * persistence validation ([TECH] G18).
  */
 import { describe, expect, test } from "vitest";
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import type { SketchPointId } from "@/contracts/shared/ids";
 import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
 import { MIRROR_DIAGNOSTIC_CODES } from "@/contracts/sketch/mirror-requirements";
@@ -308,21 +309,21 @@ describe("T17c: removing an offset deletes exactly its write set", () => {
         kind: "lineLength",
         label: "L",
         entityId: second!.outputEntityId,
-        value: 3,
+        value: createLiteralAuthoredValue(3),
       },
       {
         dimensionId: "d_seed_len",
         kind: "lineLength",
         label: "Seed L",
         entityId: eid("l2"),
-        value: 3,
+        value: createLiteralAuthoredValue(3),
       },
       {
         dimensionId: "d_joint_r",
         kind: "circleRadius",
         label: "R",
         entityId: joint.outputEntityId,
-        value: 0.5,
+        value: createLiteralAuthoredValue(0.5),
       },
       {
         dimensionId: "d_out_ref",

@@ -7,9 +7,10 @@ import type {
   SketchId,
   SketchPointId,
 } from "@/contracts/shared/ids";
-import type { MaybeAuthoredValue } from "@/contracts/modeling/authored-values";
+import type { AuthoredValue } from "@/contracts/modeling/authored-values";
 import type {
   SketchReferenceImageRecord,
+  NumericSketchDefinition,
   SketchDefinition,
   SketchEntityDefinition,
   SketchSolveDiagnostic,
@@ -89,7 +90,7 @@ export interface SketchConstraintAuthoringState {
     | null;
   pointer: SketchPoint | null;
   isPreviewPinned: boolean;
-  pendingValue: MaybeAuthoredValue<number> | null;
+  pendingValue: AuthoredValue<number> | null;
   pendingAnnotationPlacement: DimensionAnnotationPlacement | null;
   /**
    * T13e (D11): the determined-quantity probe's verdict, taken once when the
@@ -103,7 +104,7 @@ export interface SketchConstraintAuthoringState {
 
 export interface SketchAnnotationEditState {
   target: SketchConstraintRef | SketchDimensionRef;
-  pendingValue: MaybeAuthoredValue<number> | null;
+  pendingValue: AuthoredValue<number> | null;
   /**
    * T16f ([TECH] T16-12): the Dimension tool's picks correspond, through a
    * healthy mirror, to this driving dimension, so the tool opened its edit
@@ -275,8 +276,11 @@ export interface SketchLiveSolve {
    * the current definition exactly when this is `session.definition`.
    */
   sourceDefinition: SketchDefinition;
-  /** Evaluated definition used for the solve. */
-  definition: SketchDefinition;
+  /**
+   * Evaluated definition used for the solve, its dimension values resolved
+   * (T17p2 F-2: `resolveSketchDefinitionForSolve`).
+   */
+  definition: NumericSketchDefinition;
   projectedReferences: ProjectedSketchReferenceRecord[];
   solvedSnapshot: SolvedSketchSnapshot;
   /** Solved, with every constraint satisfied. */
@@ -308,7 +312,8 @@ export interface SketchLiveRegions {
 /** Input of one async live region derivation, captured from the live solve. */
 export interface SketchLiveRegionBasis {
   sketchId: SketchId;
-  definition: SketchDefinition;
+  /** The live solve's resolved definition (T17p2 F-2). */
+  definition: NumericSketchDefinition;
   projectedReferences: ProjectedSketchReferenceRecord[];
   solvedSnapshot: SolvedSketchSnapshot;
   /** Document modeling tolerance; carried now, sent on the request from T09e. */

@@ -17,6 +17,7 @@ import type {
 } from "@/contracts/sketch/schema";
 import { publishSketchOffsets } from "@/contracts/sketch/offset-publication";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 import {
   evaluateSketchDerivationJvp,
   evaluateSketchDerivations,
@@ -3112,7 +3113,8 @@ describe("T08b-g7a audit C1 (U-G8): edited filleted outlines carrying an offset 
   type Plans = Parameters<typeof solveSketchDefinitionCore>[0]["offsetPlans"];
   const solve = (definition: SketchDefinition, offsetPlans?: Plans) =>
     solveSketchDefinitionCore({
-      definition,
+      // T17p2 (F-2): the solver consumes the resolved definition.
+      definition: literalResolvedDefinition(definition),
       tolerances: SKETCH_DIRECT_EDIT_TOLERANCES,
       modelingTolerance: TOLERANCE,
       partialSolvePolicy: "bestEffort",

@@ -1,5 +1,6 @@
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { test, expect } from "vitest";
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import {
   createCreateFeatureHistoryEntry,
   createEmptyOperationHistory,
@@ -24,6 +25,7 @@ import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import type { ModelingCommitSketchResult } from "@/domain/modeling/modeling-service";
 import { createModelingService } from "@/domain/modeling/modeling-service";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 
@@ -206,7 +208,7 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
             "sketch_point_1_rect-bottom-left",
             "sketch_point_1_rect-bottom-right",
           ] as const,
-          value: 10.5,
+          value: createLiteralAuthoredValue(10.5),
         },
         {
           dimensionId: "dimension_1_height",
@@ -217,7 +219,7 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
             "sketch_point_1_rect-bottom-right",
             "sketch_point_1_rect-top-right",
           ] as const,
-          value: 9.5,
+          value: createLiteralAuthoredValue(9.5),
         },
       ],
     } satisfies CommitSketchRequest["definition"];
@@ -227,8 +229,10 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
     documentId: "doc_workspace",
     revisionId: `rev_${string}`,
     sketchId: `sketch_${string}`,
-    definition: ReturnType<typeof createDraftSketchDefinition>,
+    authored: ReturnType<typeof createDraftSketchDefinition>,
   ) {
+    // T17p2 (F-2): the solver and region derivation take the resolved definition.
+    const definition = literalResolvedDefinition(authored);
     const solved = solveSketchDefinitionCore({
       definition,
       tolerances: {
@@ -549,8 +553,10 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
           request.definition,
           sketchId,
         );
+        const resolvedDefinition =
+          literalResolvedDefinition(normalizedDefinition);
         const solvedSnapshot = solveSketchDefinitionCore({
-          definition: normalizedDefinition,
+          definition: resolvedDefinition,
           tolerances: {
             coincidence: 1e-6,
             angleRadians: 1e-6,
@@ -566,7 +572,7 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
           documentId: "doc_workspace",
           revisionId,
           sketchId,
-          definition: normalizedDefinition,
+          definition: resolvedDefinition,
           solvedSnapshot,
           projectedReferences: [],
           modelingTolerance: 1e-6,

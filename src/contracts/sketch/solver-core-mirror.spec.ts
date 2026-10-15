@@ -22,8 +22,9 @@ import {
   DEFAULT_MOCK_SKETCH_PLANE_FRAME,
   MockSketchSolverAdapter,
 } from "@/domain/solver/mock-sketch-solver-adapter";
+// T17p2 (F-2): the solver works on resolved definitions.
 import type {
-  SketchDefinition,
+  NumericSketchDefinition as SketchDefinition,
   SketchDerivationDefinition,
   SketchEntityDefinition,
   SketchPoint2D,

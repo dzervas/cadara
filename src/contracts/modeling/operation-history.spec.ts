@@ -319,7 +319,7 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
             "sketch_point_1_rect-bottom-left",
             "sketch_point_1_rect-bottom-right",
           ] as const,
-          value: 10.5,
+          value: createLiteralAuthoredValue(10.5),
         },
         {
           dimensionId: "dimension_1_height",
@@ -330,7 +330,7 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
             "sketch_point_1_rect-bottom-right",
             "sketch_point_1_rect-top-right",
           ] as const,
-          value: 9.5,
+          value: createLiteralAuthoredValue(9.5),
         },
       ],
     } satisfies CommitSketchRequest["definition"];

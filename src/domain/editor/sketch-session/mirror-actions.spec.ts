@@ -5,6 +5,7 @@
  * mirrors authored by the Mirror tool (shared fixture).
  */
 import { describe, expect, test } from "vitest";
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import type {
   ConstraintDefinition,
   DimensionDefinition,
@@ -232,7 +233,7 @@ function copyRequirementsSession() {
       kind: "circleRadius",
       label: "Copy radius",
       entityId: copyCircle,
-      value: 1,
+      value: createLiteralAuthoredValue(1),
     },
     {
       dimensionId: "dimension_copy_reference",
@@ -505,7 +506,7 @@ describe("T16b: the Mirror panel's health agrees with the profile gate", () => {
           kind: "lineLength",
           label: "Axis",
           entityId: eid("axis"),
-          value: 0.0005,
+          value: createLiteralAuthoredValue(0.0005),
         } as unknown as DimensionDefinition,
       ],
     });

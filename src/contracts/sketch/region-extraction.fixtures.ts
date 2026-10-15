@@ -4,6 +4,7 @@
  * verbatim from the authored positions (the owner consumes a solve; it never
  * solves), so each fixture controls every bitwise coordinate and residual.
  */
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import type {
   ConstraintId,
   DimensionId,
@@ -11,15 +12,18 @@ import type {
   SketchEntityId,
   SketchPointId,
 } from "@/contracts/shared/ids";
-import type {
-  ConstraintDefinition,
-  DimensionDefinition,
-  SketchDefinition,
-  SketchReferenceDefinition,
-  SketchEntityDefinition,
-  SketchPointDefinition,
-  SolvedSketchEntityGeometryRecord,
-  SolvedSketchSnapshot,
+import {
+  isReferenceDimension,
+  resolvedReferenceDimension,
+  type ConstraintDefinition,
+  type DimensionDefinition,
+  type NumericSketchDefinition,
+  type SketchDefinition,
+  type SketchReferenceDefinition,
+  type SketchEntityDefinition,
+  type SketchPointDefinition,
+  type SolvedSketchEntityGeometryRecord,
+  type SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
 import type { OffsetSolveFrame } from "@/contracts/sketch/offset-derivation-frame";
 import type {
@@ -102,7 +106,79 @@ export interface SketchFixture {
     projectedReferences?: ProjectedSketchReferenceRecord[];
     /** T08b-g3: published derived shells (absent: no `derivedCurves` field). */
     derivedCurves?: readonly SketchArrangementDerivedCurve[];
-  }): SketchArrangementInput;
+  }): SketchArrangementInput & { definition: SketchDefinition };
+}
+
+/**
+ * T17p2 (F-2): spec support. The solver consumes resolved definitions; spec
+ * fixtures author literal dimension values only, so resolving one reads its
+ * literal (an expression needs the domain resolver, which contracts may not
+ * import, and throws here).
+ */
+export function literalResolvedDefinition(
+  definition: SketchDefinition,
+): NumericSketchDefinition {
+  return {
+    ...definition,
+    dimensions: definition.dimensions.map((dimension) => {
+      if (isReferenceDimension(dimension))
+        return resolvedReferenceDimension(dimension);
+      if (
+        dimension.kind === "arcStartPointCoincident" ||
+        dimension.kind === "arcEndPointCoincident"
+      )
+        return dimension;
+      const value =
+        dimension.kind === "lineAngle"
+          ? dimension.valueRadians
+          : dimension.value;
+      if (value?.source !== "literal")
+        throw new Error(
+          `fixture dimension ${dimension.dimensionId} is not a literal`,
+        );
+      return dimension.kind === "lineAngle"
+        ? { ...dimension, valueRadians: value.value }
+        : { ...dimension, value: value.value };
+    }),
+  };
+}
+
+/**
+ * T17p2 (F-2): spec support, the inverse of `literalResolvedDefinition`: a
+ * solver-level fixture (resolved numbers) as the authored definition an
+ * editor session or a persisted record holds (each value a literal wrapper).
+ */
+export function literalAuthoredDefinition(
+  definition: NumericSketchDefinition,
+): SketchDefinition {
+  return {
+    ...definition,
+    dimensions: definition.dimensions.map((dimension): DimensionDefinition => {
+      if (
+        dimension.kind === "arcStartPointCoincident" ||
+        dimension.kind === "arcEndPointCoincident"
+      )
+        return dimension;
+      // Each member keeps its kind; TypeScript cannot narrow the union
+      // through the replaced value key, hence the annotation.
+      if (dimension.kind === "lineAngle")
+        return (
+          dimension.valueRadians === undefined
+            ? dimension
+            : {
+                ...dimension,
+                valueRadians: createLiteralAuthoredValue(
+                  dimension.valueRadians,
+                ),
+              }
+        ) as DimensionDefinition;
+      return (
+        dimension.value === undefined
+          ? dimension
+          : { ...dimension, value: createLiteralAuthoredValue(dimension.value) }
+      ) as DimensionDefinition;
+    }),
+  };
 }
 
 export function makeSketchFixture(): SketchFixture {
@@ -325,7 +401,7 @@ export function makeSketchFixture(): SketchFixture {
         kind: "lineLength",
         label: id,
         entityId: entityId(line),
-        value,
+        value: createLiteralAuthoredValue(value),
       });
       return id;
     },

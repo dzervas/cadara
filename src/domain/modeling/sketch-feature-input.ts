@@ -5,7 +5,16 @@ import {
   nonAcceptedDerivedOutputs,
   uncertifiedOffsetInputMessage,
 } from "@/contracts/sketch/offset-publication";
-import type { SketchRecord } from "@/contracts/sketch/schema";
+import type {
+  DerivableSketchDefinition,
+  SketchRecord,
+} from "@/contracts/sketch/schema";
+
+/** T17p2 (F-2): a committed record or a live pair (no dimension is read). */
+type FeatureInputSketch = {
+  definition: DerivableSketchDefinition;
+  solvedSnapshot: SketchRecord["solvedSnapshot"];
+};
 
 /**
  * [TECH] G19 (T08b-g5c review REQUIRED-1): a feature referenced a
@@ -27,7 +36,7 @@ export const NON_ACCEPTED_OFFSET_FEATURE_INPUT_CODE =
  * relationship and the feature `use`; null for accepted geometry.
  */
 export function nonAcceptedOffsetFeatureInputMessage(
-  sketch: Pick<SketchRecord, "definition" | "solvedSnapshot">,
+  sketch: FeatureInputSketch,
   entityId: SketchEntityId,
   use: string,
 ): string | null {
@@ -46,7 +55,7 @@ export function nonAcceptedOffsetFeatureInputMessage(
 
 /** Throws the targeted G19 feature failure (`code: message`) for a non-accepted offset output. */
 export function assertAcceptedSketchFeatureInput(
-  sketch: Pick<SketchRecord, "definition" | "solvedSnapshot">,
+  sketch: FeatureInputSketch,
   entityId: SketchEntityId,
   use: string,
 ) {
@@ -61,7 +70,7 @@ export function assertAcceptedSketchFeatureInput(
  * naming the point, its relationship and the feature `use`; null otherwise.
  */
 export function nonAcceptedOffsetFeaturePointMessage(
-  sketch: Pick<SketchRecord, "definition" | "solvedSnapshot">,
+  sketch: FeatureInputSketch,
   pointId: SketchPointId,
   use: string,
 ): string | null {
@@ -80,7 +89,7 @@ export function nonAcceptedOffsetFeaturePointMessage(
 
 /** Throws the targeted G19c feature failure (`code: message`) for a driven point of a non-accepted offset output. */
 export function assertAcceptedSketchFeaturePoint(
-  sketch: Pick<SketchRecord, "definition" | "solvedSnapshot">,
+  sketch: FeatureInputSketch,
   pointId: SketchPointId,
   use: string,
 ) {
