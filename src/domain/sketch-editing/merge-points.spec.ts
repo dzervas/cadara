@@ -351,7 +351,7 @@ const RELATIONSHIPS: {
   offset: {
     ...relationshipBase("offset"),
     kind: "offset",
-    distance: 1,
+    distance: createLiteralAuthoredValue(1),
     jointPolicy: "trimExtendArcFallback",
     jointOutputs: [
       {
@@ -1025,6 +1025,7 @@ describe("R-4: derived relationships (real contributions)", () => {
         sequence: 50,
         factories,
         modelingTolerance: FIXTURE_TOLERANCE,
+        documentVariables: [],
       }),
     mirror: (definition: SketchDefinition) =>
       createSketchDerivedTransformContribution({
@@ -1035,6 +1036,7 @@ describe("R-4: derived relationships (real contributions)", () => {
         sequence: 50,
         factories,
         modelingTolerance: FIXTURE_TOLERANCE,
+        documentVariables: [],
       }),
     linearPattern: (definition: SketchDefinition) =>
       createSketchDerivedTransformContribution({
@@ -1045,6 +1047,7 @@ describe("R-4: derived relationships (real contributions)", () => {
         sequence: 50,
         factories,
         modelingTolerance: FIXTURE_TOLERANCE,
+        documentVariables: [],
       }),
     circularPattern: (definition: SketchDefinition) =>
       createSketchDerivedTransformContribution({
@@ -1055,6 +1058,7 @@ describe("R-4: derived relationships (real contributions)", () => {
         sequence: 50,
         factories,
         modelingTolerance: FIXTURE_TOLERANCE,
+        documentVariables: [],
       }),
     transform: (definition: SketchDefinition) =>
       createSketchDerivedTransformContribution({
@@ -1065,6 +1069,7 @@ describe("R-4: derived relationships (real contributions)", () => {
         sequence: 50,
         factories,
         modelingTolerance: FIXTURE_TOLERANCE,
+        documentVariables: [],
       }),
   };
 

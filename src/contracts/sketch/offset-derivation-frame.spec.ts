@@ -416,6 +416,7 @@ function createNativeArcAuthoring(sketchId: string): NativeArcAuthoring {
         sequence,
         factories: factoriesOf(sequence),
         modelingTolerance: 1e-3,
+        documentVariables: [],
       } as never);
       return result.valid && result.contribution
         ? (result.contribution as never)
@@ -2053,7 +2054,7 @@ function gappedSs60Row(distance: number): DerivativeRow {
     [],
     SKETCH_DIRECT_EDIT_TOLERANCES,
     [],
-    { modelingTolerance: 1e-3 },
+    { modelingTolerance: 1e-3, documentVariables: [] },
   );
   if (!solved.solvedSnapshot)
     throw new Error("gapped SS-60 was not solver-accepted");
@@ -2518,7 +2519,7 @@ describe("T08b-g2 frame derivatives: unavailable directions, tangent authority, 
       0.1,
     );
     const evaluation = evaluateSketchDerivations({
-      definition: pair.definition,
+      definition: literalResolvedDefinition(pair.definition),
       modelingTolerance: TOLERANCE,
     });
     const record = evaluation.offsetFrames[0]!;
@@ -3125,7 +3126,7 @@ describe("T08b-g7a audit C1 (U-G8): edited filleted outlines carrying an offset 
     solvedSnapshot: SolvedSketchSnapshot,
   ) =>
     publishSketchOffsets({
-      definition,
+      definition: literalResolvedDefinition(definition),
       solvedSnapshot,
       modelingTolerance: TOLERANCE,
       capabilities: { query, certifier },

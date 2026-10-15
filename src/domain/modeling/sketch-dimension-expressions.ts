@@ -15,12 +15,21 @@ import type {
   DimensionDefinition,
   NumericDimensionDefinition,
   NumericSketchDefinition,
+  NumericSketchDerivationDefinition,
+  OffsetResolvedSketchDefinition,
   SketchDefinition,
+  SketchDerivationDefinition,
 } from "@/contracts/sketch/schema";
 import {
   isReferenceDimension,
   resolvedReferenceDimension,
 } from "@/contracts/sketch/schema";
+import {
+  evaluateSketchDerivations,
+  type SketchDerivationEvaluationResult,
+  type SketchDerivationInput,
+  type SketchDerivationSettings,
+} from "@/contracts/sketch/derived-geometry";
 import {
   createDocumentVariableExpressionDiagnostics,
   evaluateDocumentVariableExpressions,
@@ -32,61 +41,128 @@ export type SketchDimensionExpressionResolution =
   | { ok: true; definition: NumericSketchDefinition }
   | { ok: false; diagnostics: ModelingDiagnostic[] };
 
+const resolvedDistanceViews = new WeakMap<
+  SketchDefinition,
+  {
+    variables: readonly DocumentVariableRecord[];
+    view: OffsetResolvedSketchDefinition;
+  }
+>();
+
 /**
- * Resolves expression-authored offset derivation distances to numeric
- * literals so derivation evaluation sees concrete values. Best-effort: an
- * unresolvable distance stays authored and the derivation evaluator reports
- * the structured unresolved-distance diagnostic while outputs keep their last
- * resolvable state.
+ * T17p3: the resolve boundary of offset distances. Every offset
+ * relationship's authored distance becomes a number; one that does not
+ * resolve (an expression with an unresolved symbol, or document variables
+ * that do not evaluate) becomes `NaN`, which the derivation evaluator reports
+ * as the structured unresolved-distance diagnostic while the outputs keep
+ * their last resolvable state. Memoized on (definition, variables) identity,
+ * so the derivation evaluator's identity cache keeps hitting.
  */
 export function resolveSketchDerivationDistances(input: {
   definition: SketchDefinition;
   variables: readonly DocumentVariableRecord[];
-}): SketchDefinition {
-  const relationships = input.definition.derivedRelationships ?? [];
-  if (
-    !relationships.some(
-      (relationship) =>
-        relationship.kind === "offset" &&
-        typeof relationship.distance !== "number",
-    )
-  ) {
-    return input.definition;
-  }
+}): OffsetResolvedSketchDefinition {
+  const cached = resolvedDistanceViews.get(input.definition);
+  if (cached && cached.variables === input.variables) return cached.view;
 
-  const variableEvaluation = evaluateDocumentVariableExpressions(
-    input.variables,
-  );
-  if (!variableEvaluation.ok) {
-    return input.definition;
-  }
-
-  let changed = false;
-  const resolvedRelationships = relationships.map((relationship) => {
-    if (
-      relationship.kind !== "offset" ||
-      typeof relationship.distance === "number"
-    ) {
-      return relationship;
+  const { derivedRelationships, ...rest } = input.definition;
+  // Document variables are evaluated once, and only for an expression.
+  let variablesByName: ReadonlyMap<string, number> | null | undefined;
+  const resolveDistance = (
+    relationship: Extract<SketchDerivationDefinition, { kind: "offset" }>,
+  ) => {
+    if (isExpressionAuthoredValue(relationship.distance)) {
+      if (variablesByName === undefined) {
+        const evaluation = evaluateDocumentVariableExpressions(input.variables);
+        variablesByName = evaluation.ok ? evaluation.valuesByName : null;
+      }
+      if (variablesByName === null) return Number.NaN;
     }
-
     const resolved = resolveAuthoredNumber({
       value: relationship.distance,
       label: relationship.label,
       valueKind: { kind: "finiteNumber" },
-      variablesByName: variableEvaluation.valuesByName,
+      variablesByName: variablesByName ?? new Map(),
     });
-    if (!resolved.ok) {
-      return relationship;
-    }
-
-    changed = true;
-    return { ...relationship, distance: resolved.value };
+    return resolved.ok ? resolved.value : Number.NaN;
+  };
+  const view: OffsetResolvedSketchDefinition = derivedRelationships
+    ? {
+        ...rest,
+        derivedRelationships: derivedRelationships.map(
+          (relationship): NumericSketchDerivationDefinition =>
+            relationship.kind === "offset"
+              ? { ...relationship, distance: resolveDistance(relationship) }
+              : relationship,
+        ),
+      }
+    : rest;
+  resolvedDistanceViews.set(input.definition, {
+    variables: input.variables,
+    view,
   });
+  return view;
+}
 
-  return changed
-    ? { ...input.definition, derivedRelationships: resolvedRelationships }
-    : input.definition;
+/**
+ * T17p3: derivation settings for an authored definition: τ, the plan hints
+ * and the document variables its offset distances resolve against.
+ */
+export type AuthoredSketchDerivationSettings = SketchDerivationSettings & {
+  readonly documentVariables: readonly DocumentVariableRecord[];
+};
+
+export type AuthoredSketchDerivationEvaluation = Omit<
+  SketchDerivationEvaluationResult<OffsetResolvedSketchDefinition>,
+  "definition"
+> & { definition: SketchDefinition };
+
+const authoredEvaluations = new WeakMap<
+  OffsetResolvedSketchDefinition,
+  { authored: SketchDefinition; definition: SketchDefinition }
+>();
+
+/**
+ * T17p3: derivation of an authored definition. It evaluates the definition's
+ * resolved-distance view (`resolveSketchDerivationDistances`) and returns
+ * the evaluated points and entities with the authored relationship records,
+ * so expression distances survive. The input itself comes back when
+ * nothing moved; a repeated evaluation returns the same definition.
+ */
+export function evaluateAuthoredSketchDerivations(
+  input: Omit<SketchDerivationInput, "definition"> &
+    AuthoredSketchDerivationSettings & {
+      readonly definition: SketchDefinition;
+    },
+): AuthoredSketchDerivationEvaluation {
+  const { definition: authored, documentVariables, ...settings } = input;
+  const view = resolveSketchDerivationDistances({
+    definition: authored,
+    variables: documentVariables,
+  });
+  const result = evaluateSketchDerivations({ ...settings, definition: view });
+  return {
+    ...result,
+    definition: withAuthoredRelationships(authored, view, result.definition),
+  };
+}
+
+function withAuthoredRelationships(
+  authored: SketchDefinition,
+  view: OffsetResolvedSketchDefinition,
+  evaluated: OffsetResolvedSketchDefinition,
+): SketchDefinition {
+  if (evaluated === view) return authored;
+  const cached = authoredEvaluations.get(evaluated);
+  if (cached?.authored === authored) return cached.definition;
+  // Only points and entities moved: an unchanged view is returned above, so
+  // the authored definition has relationships here.
+  const definition: SketchDefinition = {
+    ...evaluated,
+    derivedRelationships: authored.derivedRelationships,
+  };
+  authoredEvaluations.set(evaluated, { authored, definition });
+  return definition;
 }
 
 export function resolveSketchDimensionValues(input: {
@@ -179,8 +255,8 @@ function resolveDimension(
 
 function resolveAuthoredNumber(input: {
   /**
-   * T17p2 (F-2): a dimension value or a non-numeric offset distance; only
-   * the authored wrapper resolves (a bare value is never converted).
+   * T17p2 (F-2), T17p3: a dimension value or an offset distance; only the
+   * authored wrapper resolves (a bare value is never converted).
    */
   value: AuthoredValue<number> | undefined;
   label: string;

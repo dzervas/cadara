@@ -38,6 +38,7 @@ import {
   type LocalSketchEntityConstraintOperand,
   type NumericDimensionDefinition,
   type NumericSketchDefinition,
+  type NumericSketchDerivationDefinition,
   type LocalSketchPointConstraintOperand,
   type ProjectedSketchGeometryConstraintOperand,
   type SketchDefinition,
@@ -1120,12 +1121,16 @@ type VerifiableRelationship =
   | { kind: "dimension"; id: DimensionId; relationshipKind: string; dimension: NumericDimensionDefinition };
 
 /**
- * T17p2 (F-2): a definition whose dimensions are resolved for a verification
- * solve (the importer's resolve boundary; the authored definition keeps its
- * wrappers).
+ * T17p2 (F-2), T17p3: a definition whose dimensions and offset distances are
+ * resolved for a verification solve (the importer's resolve boundary; the
+ * authored definition keeps its wrappers).
  */
-type VerificationSolveDefinition<T> = Omit<T, "dimensions"> & {
+type VerificationSolveDefinition<T> = Omit<
+  T,
+  "dimensions" | "derivedRelationships"
+> & {
   dimensions: NumericDimensionDefinition[];
+  derivedRelationships?: NumericSketchDerivationDefinition[];
 };
 
 /** The number an authored value denotes without the document's variables. */
@@ -1138,6 +1143,18 @@ function numericAuthoredValue(value: SketchDimensionAuthoredValue | undefined): 
     return Number.isFinite(numeric) ? numeric : null;
   }
   return null;
+}
+
+/** T17p3: an offset distance not numeric without the document's variables is unresolved (`NaN`). */
+function relationshipForSolve(
+  relationship: SketchDerivationDefinition,
+): NumericSketchDerivationDefinition {
+  return relationship.kind === "offset"
+    ? {
+        ...relationship,
+        distance: numericAuthoredValue(relationship.distance) ?? Number.NaN,
+      }
+    : relationship;
 }
 
 function dimensionForSolve(dimension: DimensionDefinition): NumericDimensionDefinition | null {
@@ -1191,7 +1208,11 @@ function verifiableRelationships(
 export function definitionForVerificationSolve<
   T extends Pick<
     SketchDefinition,
-    "constraintIds" | "constraints" | "dimensionIds" | "dimensions"
+    | "constraintIds"
+    | "constraints"
+    | "dimensionIds"
+    | "dimensions"
+    | "derivedRelationships"
   >,
 >(definition: T): VerificationSolveDefinition<T> {
   return definitionWithRelationships(
@@ -1203,7 +1224,11 @@ export function definitionForVerificationSolve<
 function definitionWithRelationships<
   T extends Pick<
     SketchDefinition,
-    "constraintIds" | "constraints" | "dimensionIds" | "dimensions"
+    | "constraintIds"
+    | "constraints"
+    | "dimensionIds"
+    | "dimensions"
+    | "derivedRelationships"
   >,
 >(
   definition: T,
@@ -1221,6 +1246,8 @@ function definitionWithRelationships<
     constraints,
     dimensionIds: dimensions.map((dimension) => dimension.dimensionId),
     dimensions,
+    derivedRelationships:
+      definition.derivedRelationships?.map(relationshipForSolve),
   };
 }
 

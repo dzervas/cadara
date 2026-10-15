@@ -17,7 +17,15 @@ import { reconstructSplineAggregate } from "@/contracts/sketch/spline-geometry";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { createAuthoredModelDocumentFromSnapshot } from "@/contracts/modeling/authored-document";
 import { parseAuthoredModelDocument } from "@/contracts/modeling/authored-document.runtime-schema";
-import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
+import {
+  createExpressionAuthoredValue,
+  createLiteralAuthoredValue,
+} from "@/contracts/modeling/authored-values";
+import {
+  offsetSeedSession,
+  withOffset,
+} from "@/domain/editor/sketch-offset.fixtures";
+import { eid } from "@/domain/editor/sketch-mirror.fixtures";
 import { readFileSync } from "node:fs";
 import {
   validateDeriveSketchRegionsRequest,
@@ -563,6 +571,117 @@ test("T17p2 R-1: an unsupported-version file with a bare dimension value reports
     expect(message(document), name).toBe(
       "Authored model document schema version is not supported.",
     );
+});
+
+// T17p3, logic lane, contract seam: the persistence validators
+// (`validateSketchDefinition`, `validateSketchRecord`, and the file-open
+// `parseAuthoredModelDocument`). An offset relationship's distance has one
+// representation, the authored wrapper (the Offset tool writes a literal
+// one); a bare number or any other non-wrapper is rejected with a readable
+// reason, never converted. Red on base: the field was typed `any` and the
+// validator accepted a finite bare number.
+test("T17p3: a bare or non-wrapper offset distance in a current-version sketch is rejected explicitly, by every persistence entry point", async () => {
+  const { session, relationship } = withOffset(
+    offsetSeedSession(),
+    [eid("l1"), eid("l2")],
+    1,
+  );
+  const authored = JSON.parse(JSON.stringify(session.definition));
+  const index = authored.derivedRelationships.findIndex(
+    (entry: { derivationId: string }) =>
+      entry.derivationId === relationship.derivationId,
+  );
+  expect(
+    authored.derivedRelationships[index].distance,
+    "premise: the Offset tool authored a literal wrapper",
+  ).toEqual(createLiteralAuthoredValue(0.5));
+  const withDistance = (distance: unknown) => {
+    const definition = structuredClone(authored);
+    definition.derivedRelationships[index].distance = distance;
+    return definition;
+  };
+  const issues = (distance: unknown) => {
+    const result = validateSketchDefinition(withDistance(distance));
+    return result.success ? [] : result.issues;
+  };
+  const reason = (distance: unknown) =>
+    `Sketch offset ‘${relationship.label}’ stores its distance as ${JSON.stringify(distance)}; an offset distance must be an authored value ({"source": "literal", "value": …} or {"source": "expression", "valueText": …}). Bare values are not supported and are not converted.`;
+  expect(issues(createLiteralAuthoredValue(0.5)), "literal").toEqual([]);
+  expect(
+    issues(createExpressionAuthoredValue("wall / 2")),
+    "expression",
+  ).toEqual([]);
+  for (const [name, value] of [
+    ["bare number", 0.5],
+    ["string", "garbage"],
+    ["null", null],
+  ] as const)
+    expect(issues(value)[0], `${name}: the readable reason`).toEqual({
+      path: `derivedRelationships.${index}.distance`,
+      expected: "an authored value",
+      value,
+      message: reason(value),
+    });
+  for (const [name, value] of [
+    ["non-numeric literal", { source: "literal", value: "5" }],
+    ["non-finite literal", createLiteralAuthoredValue(Number.NaN)],
+  ] as const)
+    expect(issues(value).length, `${name} is rejected`).toBeGreaterThan(0);
+
+  // The stored record and the file-open path reject the same shape.
+  const snapshot = await new MockKernelAdapter().getDocumentSnapshot({
+    contractVersion: "modeling-contract/v1alpha1",
+    documentId: "doc_workspace",
+  });
+  const record = (distance: unknown) => {
+    const current = structuredClone(
+      snapshot.snapshot.document.sketches[0]!.sketch,
+    );
+    current.definition = withDistance(distance);
+    return JSON.parse(JSON.stringify(current));
+  };
+  expect(
+    validateSketchRecord(record(createLiteralAuthoredValue(0.5))).success,
+    "premise: the record opens with the wrapper",
+  ).toBe(true);
+  const recordResult = validateSketchRecord(record(0.5));
+  expect(!recordResult.success && recordResult.issues[0]).toEqual({
+    path: `definition.derivedRelationships.${index}.distance`,
+    expected: "an authored value",
+    value: 0.5,
+    message: reason(0.5),
+  });
+  const document = (distance: unknown) => {
+    const current = createAuthoredModelDocumentFromSnapshot(snapshot.snapshot);
+    current.sketches[0]!.definition = withDistance(distance);
+    return JSON.parse(JSON.stringify(current));
+  };
+  expect(
+    parseAuthoredModelDocument(document(createLiteralAuthoredValue(0.5))).ok,
+    "premise: the file opens with the wrapper",
+  ).toBe(true);
+  expect(parseAuthoredModelDocument(document(0.5))).toEqual({
+    ok: false,
+    diagnostic: {
+      reasonCode: "invalid-authored-document",
+      message: reason(0.5),
+    },
+  });
+
+  // As T17p2 R-1: an unsupported-version file reports its version first.
+  const oldDocument = document(0.5);
+  oldDocument.schemaVersion = "authored-model-document/v1alpha0";
+  const oldSketch = document(0.5);
+  oldSketch.sketches[0].definition.schemaVersion = "sketch-definition/v1alpha1";
+  for (const [name, file] of [
+    ["document version", oldDocument],
+    ["sketch version", oldSketch],
+  ] as const) {
+    const parsed = parseAuthoredModelDocument(file);
+    expect(!parsed.ok && parsed.diagnostic.message, name).toBe(
+      "Authored model document schema version is not supported.",
+    );
+  }
 });
 
 // T17p2 (F-2), logic lane, contract seam: the solver request validators

@@ -3,6 +3,7 @@
  * authored-action owner): seeds above the x axis, mirrored by the Mirror
  * tool about a construction line (or the X datum), with drag-target refs.
  */
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
 import type {
   ConstraintDefinition,
@@ -346,7 +347,7 @@ export function derivedTargetsDefinition() {
         kind: "offset",
         label: "offset",
         seedEntityIds: [eid("ab"), eid("s")],
-        distance: 0.5,
+        distance: createLiteralAuthoredValue(0.5),
         jointPolicy: "arc",
         outputs: [
           copyOf(eid("ab"), ids.offsetLine, [ids.offsetPoint, pid("offset_b")]),
@@ -454,6 +455,7 @@ export function withDerived(
           sequence,
           factories,
           modelingTolerance,
+          documentVariables: session.documentVariables,
         })
       : createSketchDerivedTransformContribution({
           definition: session.definition,
@@ -463,6 +465,7 @@ export function withDerived(
           sequence,
           factories,
           modelingTolerance,
+          documentVariables: session.documentVariables,
         });
   if (!result.valid || !result.contribution)
     throw new Error(result.message ?? operatorKind);
@@ -510,6 +513,7 @@ export function chainSession() {
     sequence: 60,
     factories: createSessionCommitFactories(60, SKETCH as never),
     modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+    documentVariables: withAxisSession.documentVariables,
   });
   if (!contribution.valid || !contribution.contribution)
     throw new Error(contribution.message ?? "second mirror");

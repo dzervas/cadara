@@ -649,6 +649,7 @@ describe("T17c2: P-10 refusals (label-based; nothing written)", () => {
         sequence: 70,
         factories: createSessionCommitFactories(70, "sketch_draft" as never),
         modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+        documentVariables: [],
       });
       if (!result.valid || !result.contribution)
         throw new Error(result.message ?? operatorKind);

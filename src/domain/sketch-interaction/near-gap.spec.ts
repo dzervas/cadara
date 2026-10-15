@@ -327,6 +327,7 @@ describe("findNearGapEndpoints (T13k, D26)", () => {
         FIXTURE_SKETCH_ID as SketchId,
       ),
       modelingTolerance: FIXTURE_TOLERANCE,
+      documentVariables: [],
     });
     expect(contribution.valid, contribution.message ?? "").toBe(true);
     const patterned = appendDefinition(definition, contribution.contribution!);

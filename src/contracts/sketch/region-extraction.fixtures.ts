@@ -18,7 +18,9 @@ import {
   type ConstraintDefinition,
   type DimensionDefinition,
   type NumericSketchDefinition,
+  type NumericSketchDerivationDefinition,
   type SketchDefinition,
+  type SketchDerivationDefinition,
   type SketchReferenceDefinition,
   type SketchEntityDefinition,
   type SketchPointDefinition,
@@ -111,8 +113,8 @@ export interface SketchFixture {
 
 /**
  * T17p2 (F-2): spec support. The solver consumes resolved definitions; spec
- * fixtures author literal dimension values only, so resolving one reads its
- * literal (an expression needs the domain resolver, which contracts may not
+ * fixtures author literal dimension values (T17p3: and offset distances)
+ * only, so resolving one reads its literal (an expression needs the domain resolver, which contracts may not
  * import, and throws here).
  */
 export function literalResolvedDefinition(
@@ -140,6 +142,16 @@ export function literalResolvedDefinition(
         ? { ...dimension, valueRadians: value.value }
         : { ...dimension, value: value.value };
     }),
+    derivedRelationships: definition.derivedRelationships?.map(
+      (relationship): NumericSketchDerivationDefinition => {
+        if (relationship.kind !== "offset") return relationship;
+        if (relationship.distance.source !== "literal")
+          throw new Error(
+            `fixture offset ${relationship.derivationId} distance is not a literal`,
+          );
+        return { ...relationship, distance: relationship.distance.value };
+      },
+    ),
   };
 }
 
@@ -178,6 +190,15 @@ export function literalAuthoredDefinition(
           : { ...dimension, value: createLiteralAuthoredValue(dimension.value) }
       ) as DimensionDefinition;
     }),
+    derivedRelationships: definition.derivedRelationships?.map(
+      (relationship): SketchDerivationDefinition =>
+        relationship.kind === "offset"
+          ? {
+              ...relationship,
+              distance: createLiteralAuthoredValue(relationship.distance),
+            }
+          : relationship,
+    ),
   };
 }
 

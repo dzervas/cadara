@@ -1,3 +1,4 @@
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import { describe, expect, test } from "vitest";
 
 import type {
@@ -184,7 +185,7 @@ function markerSession({ conflict }: { conflict: boolean }) {
         kind: "offset",
         label: "Offset line",
         seedEntityIds: [entityId("line")],
-        distance: 0.75,
+        distance: createLiteralAuthoredValue(0.75),
         jointPolicy: "trimExtendArcFallback",
         jointOutputs: [],
         piecewiseCubicOutputs: [],

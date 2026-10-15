@@ -15,12 +15,10 @@ import type {
   SketchDefinition,
   SketchEntityDefinition,
 } from "@/contracts/sketch/schema";
+import { evaluateAuthoredSketchDerivations } from "@/domain/modeling/sketch-dimension-expressions";
 import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
-import {
-  DERIVED_SHELL_SEED_UNSUPPORTED,
-  evaluateSketchDerivations,
-} from "@/contracts/sketch/derived-geometry";
+import { DERIVED_SHELL_SEED_UNSUPPORTED } from "@/contracts/sketch/derived-geometry";
 import { extractDeclaredOffsetChainConnectivity } from "@/contracts/sketch/offset-chain-connectivity";
 import { nonAcceptedDerivedOutputs } from "@/contracts/sketch/offset-publication";
 import { validateSketchDefinitionCore } from "@/contracts/sketch/solver-core";
@@ -162,7 +160,10 @@ describe("T17e: derived-transform evaluation texts", () => {
           : entity,
       ),
     };
-    const messages = evaluateSketchDerivations({ definition, ...settings })
+    const messages = evaluateAuthoredSketchDerivations({
+      definition,
+      ...settings,
+    })
       .diagnostics.filter(
         (diagnostic) =>
           diagnostic.code === "derived-transform-unsupported-entity",
@@ -210,7 +211,10 @@ describe("T17e: derived-transform evaluation texts", () => {
         },
       ],
     };
-    const messages = evaluateSketchDerivations({ definition, ...settings })
+    const messages = evaluateAuthoredSketchDerivations({
+      definition,
+      ...settings,
+    })
       .diagnostics.filter(
         (diagnostic) => diagnostic.code === DERIVED_SHELL_SEED_UNSUPPORTED,
       )
@@ -246,7 +250,7 @@ test("T17e: an offset whose output records no longer fit its frame fails by its 
           : relationship,
     ),
   };
-  const failures = evaluateSketchDerivations({
+  const failures = evaluateAuthoredSketchDerivations({
     definition,
     ...getSketchSessionDerivationSettings(offset.session),
   }).offsetFailures.map((failure) => failure.diagnostic.message);

@@ -1935,7 +1935,7 @@ describe("agreement with today's forward evaluation (AG)", () => {
     "AG1: $name — points, radius, sweep and tangents equal evaluateSketchDerivations bitwise",
     ({ definition }) => {
       const today = evaluateSketchDerivations({
-        definition,
+        definition: literalResolvedDefinition(definition),
         modelingTolerance: TAU,
       });
       expect(today.diagnostics).toEqual([]);
@@ -1978,7 +1978,7 @@ describe("agreement with today's forward evaluation (AG)", () => {
     ({ definition }) => {
       const rng = random(31);
       const today = evaluateSketchDerivations({
-        definition,
+        definition: literalResolvedDefinition(definition),
         modelingTolerance: TAU,
       });
       const relationship = definition.derivedRelationships![0] as Extract<
@@ -2157,7 +2157,10 @@ describe("agreement with today's forward evaluation (AG)", () => {
       const dS = rng.vector(1);
       const dE = rng.vector(1);
       const today = evaluateSketchDerivationJvp(
-        evaluateSketchDerivations({ definition, modelingTolerance: TAU }),
+        evaluateSketchDerivations({
+          definition: literalResolvedDefinition(definition),
+          modelingTolerance: TAU,
+        }),
         {
           points: {
             [pid("c")]: dc,
@@ -2196,7 +2199,7 @@ describe("agreement with today's forward evaluation (AG)", () => {
       ],
     );
     const today = evaluateSketchDerivations({
-      definition,
+      definition: literalResolvedDefinition(definition),
       modelingTolerance: TAU,
     });
     expect(today.diagnostics).toEqual([]);
@@ -2527,7 +2530,7 @@ describe("dependency order (SO)", () => {
         derivationId: "offset",
         label: "offset",
         seedEntityIds: [eid("base")],
-        distance: 0.5,
+        distance: literal(0.5),
         jointPolicy: "trimExtendArcFallback",
         jointOutputs: [],
         piecewiseCubicOutputs: [],
@@ -2760,7 +2763,7 @@ describe("dependency order through offset joints and shells (SO4)", () => {
       label: "offset",
       // Seeds are the mirror's outputs: offset-of-mirror.
       seedEntityIds: [eid("ab_copy"), eid("bc_copy")],
-      distance: 0.5,
+      distance: literal(0.5),
       jointPolicy: "trimExtendArcFallback",
       outputs: [],
       jointOutputs: [
@@ -3549,14 +3552,22 @@ describe("shared driving dimensions: equivalence in the solve (SDE, T16f)", () =
           : relationship,
       ],
     );
-    return evaluateSketchDerivations({
-      definition: {
-        ...definition,
-        dimensionIds: [dimension.dimensionId],
-        dimensions: [dimension],
-      },
+    const authored = {
+      ...definition,
+      dimensionIds: [dimension.dimensionId],
+      dimensions: [dimension],
+    };
+    // T17p3: derivation evaluates the resolved view; the authored
+    // definition takes its evaluated points and entities.
+    const evaluated = evaluateSketchDerivations({
+      definition: literalResolvedDefinition(authored),
       modelingTolerance: TAU,
     }).definition;
+    return {
+      ...authored,
+      points: evaluated.points,
+      entities: evaluated.entities,
+    };
   }
   const axisLineOperand = (axis: AxisKind) =>
     axis === "datum" ? datum("xAxis") : local("ax");

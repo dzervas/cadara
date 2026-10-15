@@ -842,6 +842,7 @@ test("src/domain/sketch-editing/operations.spec.ts", async () => {
       sequence: 10,
       factories: createFactories(),
       modelingTolerance: 1e-3,
+      documentVariables: [],
     });
     expect(
       emptySelection.valid,
@@ -860,6 +861,7 @@ test("src/domain/sketch-editing/operations.spec.ts", async () => {
       sequence: 10,
       factories: createFactories(),
       modelingTolerance: 1e-3,
+      documentVariables: [],
     });
     expect(
       disconnected.valid,
@@ -878,6 +880,7 @@ test("src/domain/sketch-editing/operations.spec.ts", async () => {
       sequence: 10,
       factories: createFactories(),
       modelingTolerance: 1e-3,
+      documentVariables: [],
     });
     expect(
       missingEntity.valid,
@@ -892,6 +895,7 @@ test("src/domain/sketch-editing/operations.spec.ts", async () => {
       sequence: 10,
       factories: createFactories(),
       modelingTolerance: 1e-3,
+      documentVariables: [],
     });
     expect(
       committed.valid,
@@ -907,10 +911,12 @@ test("src/domain/sketch-editing/operations.spec.ts", async () => {
         relationship.seedEntityIds,
         "The relationship should record the seed chain in traversal order.",
       ).toEqual(["sketch_entity_ab", "sketch_entity_bc"] as SketchEntityId[]);
+      // T17p3: the Offset tool writes the authored wrapper, the only stored
+      // representation of an offset distance (never a bare number).
       expect(
         relationship.distance,
-        "The right side should store a negative signed distance.",
-      ).toBe(-1);
+        "The right side should store a negative signed distance as a literal authored value.",
+      ).toEqual(createLiteralAuthoredValue(-1));
       expect(
         relationship.jointPolicy,
         "The relationship should record the joint policy.",
@@ -990,6 +996,7 @@ test("src/domain/sketch-editing/operations.spec.ts", async () => {
       sequence: 10,
       factories: createFactories(),
       modelingTolerance: 1e-3,
+      documentVariables: [],
     });
     const output = result.contribution?.entities.find(
       (entity): entity is Extract<SketchEntityDefinition, { kind: "spline" }> =>
@@ -1035,6 +1042,7 @@ test("src/domain/sketch-editing/operations.spec.ts", async () => {
       sequence: 11,
       factories: createFactories(),
       modelingTolerance: 1e-3,
+      documentVariables: [],
     });
     expect(trimmed.valid).toBeTruthy();
     expect(
@@ -2584,6 +2592,7 @@ describe("createSketchTrimMutation (T10g-1 exact Trim, Q1b ties, review R-3)", (
     ).toBeGreaterThan(1e-6);
     const before = applySolvedSketchToDefinition(authored, unreconciled, {
       modelingTolerance: 1e-3,
+      documentVariables: [],
     });
     const { result, solvedSnapshot, after } = await trimSpline(before);
     const resolved = solve(after);

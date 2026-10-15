@@ -14,7 +14,7 @@ import type {
   DimensionDefinition,
   SketchDefinition,
 } from "@/contracts/sketch/schema";
-import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
+import { evaluateAuthoredSketchDerivations } from "@/domain/modeling/sketch-dimension-expressions";
 import { publishSketchOffsets } from "@/contracts/sketch/offset-publication";
 import { OFFSET_DIAGNOSTIC_CODES } from "@/contracts/sketch/offset-geometry";
 import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
@@ -488,9 +488,10 @@ describe("T17c: Delete of offset outputs", () => {
       target: { kind: "entity", entityId: eid("free") },
     };
     expect(
-      evaluateSketchDerivations({
+      evaluateAuthoredSketchDerivations({
         definition: deleted.definition,
         modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+        documentVariables: deleted.documentVariables,
       }).offsetFailures,
       "the owner's evaluation",
     ).toEqual([{ derivationId: offset.derivationId, diagnostic: expected }]);

@@ -1,6 +1,5 @@
 import type { CertifiedTubePieceChainRequests } from "@/contracts/modeling/neutral-curve-query";
 import { isAcceptedConstraintStatus } from "@/contracts/sketch/schema";
-import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
 import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
 import type { CertifiedNeutralCurveRequestQuery } from "@/contracts/sketch/offset-chain-topology";
 import {
@@ -23,8 +22,11 @@ import {
 import type {
   DerivedRelationshipFailureReason,
   DerivableSketchDefinition,
+  DerivationInputSketchDefinition,
   SketchDefinition,
   SketchDerivationDefinition,
+  SketchDerivationDefinitionOf,
+  SketchDerivationRecords,
   SketchSolveDiagnostic,
   SolvedOffsetFramePlanRecord,
   SolvedSketchSnapshot,
@@ -128,7 +130,7 @@ const encode = (value: unknown) =>
  * unaccepted solve publishes nothing (U-G1).
  */
 export function publishSketchOffsets(input: {
-  readonly definition: DerivableSketchDefinition;
+  readonly definition: DerivationInputSketchDefinition;
   readonly solvedSnapshot: SolvedSketchSnapshot;
   readonly modelingTolerance: number;
   readonly capabilities: OffsetPublicationCapabilities;
@@ -170,8 +172,8 @@ export function publishSketchOffsets(input: {
         entityId,
       ),
     });
-    const distance = getAuthoredLiteralValue<number>(relationship.distance);
-    if (typeof distance !== "number" || !Number.isFinite(distance))
+    const distance = relationship.distance;
+    if (!Number.isFinite(distance))
       return failed(
         OFFSET_DIAGNOSTIC_CODES.unresolvedDistance,
         "distance is unresolved.",
@@ -273,7 +275,7 @@ export function publishSketchOffsets(input: {
  * offset of it fails in turn).
  */
 function withNonAcceptedSeedsFailed(
-  definition: DerivableSketchDefinition,
+  definition: DerivationInputSketchDefinition,
   snapshot: SolvedSketchSnapshot,
   records: readonly SketchOffsetPublicationRecord[],
 ): SketchOffsetPublicationRecord[] {
@@ -425,7 +427,7 @@ export function applyOffsetPublications(
  * (`brokenDerivedInputMessage`) and keeps the offset wording for offsets.
  */
 export function nonAcceptedDerivedOutputs(
-  definition: Pick<SketchDefinition, "derivedRelationships" | "entities">,
+  definition: Pick<SketchDefinition, "entities"> & SketchDerivationRecords,
   snapshot: Pick<
     SolvedSketchSnapshot,
     | "solvedEntities"
@@ -438,7 +440,7 @@ export function nonAcceptedDerivedOutputs(
   const certified = new Set(snapshot.certifiedOffsetDerivationIds ?? []);
   const failed = new Set(snapshot.failedDerivationIds ?? []);
   const ownerOf = (
-    relationship: SketchDerivationDefinition,
+    relationship: SketchDerivationDefinitionOf<unknown>,
   ): NonAcceptedOutputOwner =>
     relationship.kind === "offset"
       ? {
@@ -548,10 +550,8 @@ export interface NonAcceptedOutputOwner {
  * panel).
  */
 export function brokenDerivedInputMessage(
-  definition: Pick<
-    SketchDefinition,
-    "derivedRelationships" | "entities" | "points"
-  >,
+  definition: Pick<SketchDefinition, "entities" | "points"> &
+    SketchDerivationRecords,
   subject:
     | { readonly entityId: SketchEntityId }
     | { readonly pointId: SketchPointId },
@@ -607,10 +607,8 @@ export function brokenDerivedInputMessage(
  * (Undo, or Remove Offset in the Offset panel).
  */
 export function uncertifiedOffsetInputMessage(
-  definition: Pick<
-    SketchDefinition,
-    "derivedRelationships" | "entities" | "points"
-  >,
+  definition: Pick<SketchDefinition, "entities" | "points"> &
+    SketchDerivationRecords,
   subject:
     | { readonly entityId: SketchEntityId }
     | { readonly pointId: SketchPointId },
@@ -669,7 +667,7 @@ export function uncertifiedOffsetInputMessage(
  * (T10i, review A-1) over offsets of non-accepted seeds, to a fixed point.
  */
 function addNonAcceptedDerivedDependents(
-  definition: Pick<SketchDefinition, "derivedRelationships">,
+  definition: SketchDerivationRecords,
   result: Map<SketchEntityId, NonAcceptedOutputOwner>,
 ) {
   if (result.size === 0) return;
@@ -716,7 +714,7 @@ function addNonAcceptedDerivedDependents(
  * candidates and are not measurable, like their outputs.
  */
 export function nonAcceptedDerivedOutputPoints(
-  definition: Pick<SketchDefinition, "derivedRelationships" | "entities">,
+  definition: Pick<SketchDefinition, "entities"> & SketchDerivationRecords,
   snapshot: Pick<
     SolvedSketchSnapshot,
     | "solvedEntities"
@@ -755,7 +753,7 @@ export function nonAcceptedDerivedOutputPoints(
 
 /** [TECH] G19: whether `entityId` is accepted geometry (not a non-accepted offset output). */
 export function isAcceptedOffsetOutput(
-  definition: Pick<SketchDefinition, "derivedRelationships" | "entities">,
+  definition: Pick<SketchDefinition, "entities"> & SketchDerivationRecords,
   snapshot: Pick<
     SolvedSketchSnapshot,
     | "solvedEntities"

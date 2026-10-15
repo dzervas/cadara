@@ -1,5 +1,6 @@
 import type {
-  DerivableSketchDefinition,
+  DerivationInputSketchDefinition,
+  NumericSketchDerivationDefinition,
   SketchDefinition,
   SketchDerivationDefinition,
   SketchEntityDefinition,
@@ -15,7 +16,6 @@ import {
   orderedSplinePointIds,
   type SplineVector,
 } from "@/contracts/sketch/spline-geometry";
-import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
 import { OFFSET_DIAGNOSTIC_CODES } from "@/contracts/sketch/offset-geometry";
 import {
   prepareOffsetFrameDerivatives,
@@ -66,11 +66,13 @@ export const DERIVED_SHELL_SEED_UNSUPPORTED =
   "derived-offset-shell-seed-unsupported";
 
 // T17p2 (F-2): derivation never reads dimensions, so it evaluates the
-// authored definition (editor display, commit, creation) and the solver's
-// resolved one alike, and returns the kind it was given.
+// editor's view (authored dimensions) and the solver's resolved one alike,
+// and returns the kind it was given. T17p3: it reads offset distances, so
+// both views carry them resolved (`resolveSketchDerivationDistances`).
 /** One derivation evaluation input: the definition iterate, τ and the offset plan hints. */
 export interface SketchDerivationInput<
-  TDefinition extends DerivableSketchDefinition = SketchDefinition,
+  TDefinition extends DerivationInputSketchDefinition =
+    DerivationInputSketchDefinition,
 > {
   readonly definition: TDefinition;
   /** The document's settings.modelingTolerance ([TECH] G12); never a default. */
@@ -142,7 +144,8 @@ export interface MirrorDerivationRecord {
 }
 
 export interface SketchDerivationEvaluationResult<
-  TDefinition extends DerivableSketchDefinition = DerivableSketchDefinition,
+  TDefinition extends DerivationInputSketchDefinition =
+    DerivationInputSketchDefinition,
 > {
   definition: TDefinition;
   /**
@@ -175,7 +178,7 @@ export interface SketchDerivationEvaluationResult<
   /** Solver path only: the variables of every evaluated mirror output arc. */
   readonly mirrorArcVariables: ReadonlyMap<SketchEntityId, MirrorArcVariables>;
   /** The evaluation (dependency) order of the resolved relationships ([TECH] T-9). */
-  readonly relationshipOrder: readonly SketchDerivationDefinition[];
+  readonly relationshipOrder: readonly NumericSketchDerivationDefinition[];
 }
 
 /**
@@ -347,7 +350,7 @@ function rotateVector(
 
 /** A pattern or transform relationship (offsets and mirrors have their own owners). */
 type PointTransformRelationship = Exclude<
-  SketchDerivationDefinition,
+  NumericSketchDerivationDefinition,
   { kind: "offset" | "mirror" }
 >;
 
@@ -1298,7 +1301,7 @@ export function prepareSketchDerivationPullback(
  * ([TECH] G16′): reported in `failures`, never a sketch diagnostic.
  */
 function evaluateOffsetRelationship(
-  relationship: Extract<SketchDerivationDefinition, { kind: "offset" }>,
+  relationship: Extract<NumericSketchDerivationDefinition, { kind: "offset" }>,
   iterate: Pick<SketchDefinition, "points" | "entities" | "constraints">,
   context: {
     readonly modelingTolerance: number;
@@ -1330,8 +1333,8 @@ function evaluateOffsetRelationship(
     return null;
   };
 
-  const distance = getAuthoredLiteralValue<number>(relationship.distance);
-  if (typeof distance !== "number" || !Number.isFinite(distance))
+  const distance = relationship.distance;
+  if (!Number.isFinite(distance))
     return fail(
       OFFSET_DIAGNOSTIC_CODES.unresolvedDistance,
       "distance is unresolved; resolve expressions before evaluating derivations.",
@@ -1455,8 +1458,7 @@ export function solvedOffsetShellSpans(
   return spans;
 }
 
-let cachedDerivationInput: SketchDerivationInput<DerivableSketchDefinition> | null =
-  null;
+let cachedDerivationInput: SketchDerivationInput | null = null;
 let cachedDerivationResult: SketchDerivationEvaluationResult | null = null;
 
 /**
@@ -1473,7 +1475,7 @@ let cachedDerivationResult: SketchDerivationEvaluationResult | null = null;
  * plan-hint identity, arc-variable identity).
  */
 export function evaluateSketchDerivations<
-  TDefinition extends DerivableSketchDefinition,
+  TDefinition extends DerivationInputSketchDefinition,
 >(
   input: SketchDerivationInput<TDefinition>,
 ): SketchDerivationEvaluationResult<TDefinition> {

@@ -1,4 +1,4 @@
-import type { SketchDerivationSettings } from "@/contracts/sketch/derived-geometry";
+import type { AuthoredSketchDerivationSettings } from "@/domain/modeling/sketch-dimension-expressions";
 import {
   isAcceptedConstraintStatus,
   isReferenceDimension,
@@ -819,7 +819,7 @@ export function solveCommittedConstraintDefinition(
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
   tolerances: SolverTolerancePolicy,
   documentVariables: readonly DocumentVariableRecord[],
-  derivation: SketchDerivationSettings,
+  derivation: AuthoredSketchDerivationSettings,
 ): { definition: SketchDefinition; solvedSnapshot?: SolvedSketchSnapshot } {
   const solved = solveSketchDefinitionCore({
     definition: resolveSketchDefinitionForSolve(definition, documentVariables),

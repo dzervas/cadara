@@ -9,7 +9,7 @@ import type {
 } from "@/contracts/sketch/offset-derivation-frame";
 import type {
   SketchDefinition,
-  SketchDerivationDefinition,
+  SketchDerivationDefinitionOf,
   SketchPoint2D,
   SolvedSketchDerivedCubicSpan,
 } from "@/contracts/sketch/schema";
@@ -28,8 +28,9 @@ import type { SplinePoles } from "@/contracts/sketch/spline-geometry";
  *   ends and maps the joint arc's centre to the F1 arc centre.
  */
 
+// T17p3: the distance is passed separately (resolved), never read here.
 type OffsetRelationshipDefinition = Extract<
-  SketchDerivationDefinition,
+  SketchDerivationDefinitionOf<unknown>,
   { kind: "offset" }
 >;
 

@@ -416,12 +416,13 @@ test("T13b A6: a distance typed into the Offset floating input (not the tool pan
   const offset = saved?.derivedRelationships?.find(
     (relationship) => relationship.kind === "offset",
   );
-  const distance =
-    typeof offset?.distance === "number"
-      ? offset.distance
-      : (offset?.distance as { value?: number } | undefined)?.value;
+  // T17p3: the stored distance is the authored literal wrapper.
   expect(
-    Math.abs(distance ?? Number.NaN),
+    offset?.distance?.source,
+    `the committed offset distance is a literal (${JSON.stringify(offset?.distance)})`,
+  ).toBe("literal");
+  expect(
+    Math.abs(offset?.distance?.value ?? Number.NaN),
     `the committed offset distance (${JSON.stringify(offset?.distance)})`,
   ).toBeCloseTo(0.35, 12);
 });

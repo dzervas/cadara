@@ -17,9 +17,9 @@ import {
   type MirrorCorrespondenceRef,
 } from "@/contracts/sketch/mirror-requirements";
 import {
-  evaluateSketchDerivations,
-  type SketchDerivationSettings,
-} from "@/contracts/sketch/derived-geometry";
+  evaluateAuthoredSketchDerivations,
+  type AuthoredSketchDerivationSettings,
+} from "@/domain/modeling/sketch-dimension-expressions";
 import {
   closestSplineSpanLocation,
   evaluateSplineSpan,
@@ -52,7 +52,11 @@ import {
   projectedSplineIsClosed,
   type ProjectedSketchReferenceGeometry,
 } from "@/contracts/solver/schema";
-import type { SketchPoint } from "@/contracts/modeling/schema";
+import type {
+  DocumentVariableRecord,
+  SketchPoint,
+} from "@/contracts/modeling/schema";
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
 import type {
   SketchDraftEntity,
@@ -175,6 +179,8 @@ export interface SketchDerivedTransformContributionInput {
   factories: SketchEditOperationFactories;
   /** The document's settings.modelingTolerance ([TECH] G12). */
   modelingTolerance: number;
+  /** T17p3: the document variables offset distances resolve against. */
+  documentVariables: readonly DocumentVariableRecord[];
   /**
    * Mirror only (T15b, [TECH] T-7): a sketch datum axis picked as the
    * mirror axis; every entity in `entityIds` is then a seed. Otherwise the
@@ -3411,6 +3417,8 @@ export function createSketchOffsetDerivationContribution(input: {
   factories: SketchEditOperationFactories;
   /** The document's settings.modelingTolerance ([TECH] G12). */
   modelingTolerance: number;
+  /** T17p3: the document variables offset distances resolve against. */
+  documentVariables: readonly DocumentVariableRecord[];
   /** A `planChanged` hint of the preview's publication (G3), passed unchanged. */
   plan?: OffsetFramePlan;
 }): SketchEditOperationResult {
@@ -3718,7 +3726,8 @@ export function createSketchOffsetDerivationContribution(input: {
       label: `offset ${input.sequence}`,
       kind: "offset",
       seedEntityIds,
-      distance: signedDistance,
+      // T17p3: the authored wrapper, the only stored representation.
+      distance: createLiteralAuthoredValue(signedDistance),
       jointPolicy: "trimExtendArcFallback",
       outputs,
       jointOutputs,
@@ -3753,6 +3762,7 @@ export function createSketchOffsetDerivationContribution(input: {
     previewEntities: [
       ...createPreviewEntitiesFromContribution(input.definition, contribution, {
         modelingTolerance: input.modelingTolerance,
+        documentVariables: input.documentVariables,
       }),
       // A spline seed's output is a shell, drawn as its solved record will
       // be. A lone spline's offset has no other output to preview or to
@@ -4044,10 +4054,10 @@ function appendDerivedContribution(
 function createPreviewEntitiesFromContribution(
   definition: SketchDefinition,
   contribution: SketchToolCommitContribution,
-  derivation: SketchDerivationSettings,
+  derivation: AuthoredSketchDerivationSettings,
 ): readonly SketchDraftEntity[] {
   return createSketchEntityPreviewEntities(
-    evaluateSketchDerivations({
+    evaluateAuthoredSketchDerivations({
       definition: appendDerivedContribution(definition, contribution),
       ...derivation,
     }).definition,
@@ -4436,9 +4446,10 @@ export function createSketchDerivedTransformContribution(
     entities,
     derivedRelationships: [relationship],
   };
-  const evaluation = evaluateSketchDerivations({
+  const evaluation = evaluateAuthoredSketchDerivations({
     definition: appendDerivedContribution(input.definition, contribution),
     modelingTolerance: input.modelingTolerance,
+    documentVariables: input.documentVariables,
   });
   // T15b: a mirror the owner cannot evaluate (e.g. an axis shorter than
   // the modeling tolerance) is refused, never created with unmoved outputs.
@@ -4479,7 +4490,10 @@ export function createSketchDerivedTransformContribution(
     previewEntities: createPreviewEntitiesFromContribution(
       input.definition,
       evaluatedContribution,
-      { modelingTolerance: input.modelingTolerance },
+      {
+        modelingTolerance: input.modelingTolerance,
+        documentVariables: input.documentVariables,
+      },
     ),
   };
 }

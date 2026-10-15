@@ -1,7 +1,7 @@
 import {
-  evaluateSketchDerivations,
-  type SketchDerivationSettings,
-} from "@/contracts/sketch/derived-geometry";
+  evaluateAuthoredSketchDerivations,
+  type AuthoredSketchDerivationSettings,
+} from "@/domain/modeling/sketch-dimension-expressions";
 import type { SketchPoint } from "@/contracts/modeling/schema";
 import type {
   SketchEntityId,
@@ -572,6 +572,7 @@ export function getOffsetPreview(
     sequence: nextSequence,
     factories: createSessionCommitFactories(nextSequence, sketchId),
     modelingTolerance: session.modelingTolerance,
+    documentVariables: session.documentVariables,
     ...(plan ? { plan } : {}),
   });
 }
@@ -990,6 +991,7 @@ export function getSketchEditOperatorResult(
         sequence: nextSequence,
         factories,
         modelingTolerance: session.modelingTolerance,
+        documentVariables: session.documentVariables,
         mirrorDatumAxis:
           last?.kind === "sketchDatumReference" && last.datumId !== "origin"
             ? last.datumId
@@ -1005,6 +1007,7 @@ export function getSketchEditOperatorResult(
         sequence: nextSequence,
         factories,
         modelingTolerance: session.modelingTolerance,
+        documentVariables: session.documentVariables,
       });
     case "sketchCircularPattern":
       return createSketchDerivedTransformContribution({
@@ -1015,6 +1018,7 @@ export function getSketchEditOperatorResult(
         sequence: nextSequence,
         factories,
         modelingTolerance: session.modelingTolerance,
+        documentVariables: session.documentVariables,
       });
     case "sketchTransform":
       return createSketchDerivedTransformContribution({
@@ -1025,6 +1029,7 @@ export function getSketchEditOperatorResult(
         sequence: nextSequence,
         factories,
         modelingTolerance: session.modelingTolerance,
+        documentVariables: session.documentVariables,
       });
     case "sketchMergePoints":
       return getSketchMergePointsResult(session, activeEditTool);
@@ -1517,7 +1522,7 @@ function mirrorRepairHoverPreview(
       ? session.liveSolve.solvedSnapshot
       : null;
   return createSketchEntityPreviewEntities(
-    evaluateSketchDerivations({
+    evaluateAuthoredSketchDerivations({
       definition: snapshot
         ? solvedPairDefinition(definition, snapshot)
         : definition,
@@ -3756,7 +3761,7 @@ export function solveDragEdit(
   definition: SketchDefinition,
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
   tolerances: SolverTolerancePolicy,
-  derivation: SketchDerivationSettings,
+  derivation: AuthoredSketchDerivationSettings,
   documentVariables: SketchSessionState["documentVariables"],
   intent: SketchDragIntent,
   dragTarget: SketchDragTarget,
@@ -4062,7 +4067,7 @@ function applyUnconstrainedDrag(
   definition: SketchDefinition,
   intent: SketchDragIntent,
   dragTarget: SketchDragTarget,
-  derivation: SketchDerivationSettings,
+  derivation: AuthoredSketchDerivationSettings,
 ):
   | {
       kind: "accepted";
@@ -4158,7 +4163,7 @@ function startInteractiveSolveSessionForDrag(
   definition: SketchDefinition,
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
   tolerances: SolverTolerancePolicy,
-  derivation: SketchDerivationSettings,
+  derivation: AuthoredSketchDerivationSettings,
   documentVariables: SketchSessionState["documentVariables"],
   intent: SketchDragIntent,
   offsetPlans?: readonly SolvedOffsetFramePlanRecord[],

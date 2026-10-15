@@ -1,13 +1,13 @@
-import type { SketchDerivationSettings } from "@/contracts/sketch/derived-geometry";
+import {
+  resolveSketchDimensionValues,
+  type AuthoredSketchDerivationSettings,
+} from "@/domain/modeling/sketch-dimension-expressions";
 import {
   isAcceptedConstraintStatus,
   isReferenceDimension,
   requireDrivingDimensionValue,
 } from "@/contracts/sketch/schema";
-import type {
-  DocumentVariableRecord,
-  SketchPoint,
-} from "@/contracts/modeling/schema";
+import type { SketchPoint } from "@/contracts/modeling/schema";
 import {
   createLiteralAuthoredValue,
   getAuthoredFormText,
@@ -45,7 +45,6 @@ import {
 } from "@/contracts/sketch/spline-geometry";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import { linkedMirrorRefs } from "@/contracts/sketch/mirror-requirements";
-import { resolveSketchDimensionValues } from "@/domain/modeling/sketch-dimension-expressions";
 import {
   type ProjectedSketchReferenceRecord,
   type SolverTolerancePolicy,
@@ -755,7 +754,6 @@ function commitEditedAnnotationDefinition(
     session.projectedReferences,
     session.solverTolerances,
     getSketchSessionDerivationSettings(session),
-    session.documentVariables,
   );
 
   if (solved.kind === "blocked") {
@@ -815,12 +813,12 @@ export function solveEditedAnnotationDefinition(
   definition: SketchDefinition,
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
   tolerances: SolverTolerancePolicy,
-  derivation: SketchDerivationSettings,
-  documentVariables: readonly DocumentVariableRecord[] = [],
+  // T17p3 review A-2: one source of the document variables, the settings.
+  derivation: AuthoredSketchDerivationSettings,
 ) {
   const resolvedDefinition = resolveSketchDimensionValues({
     definition,
-    variables: documentVariables,
+    variables: derivation.documentVariables,
   });
   if (!resolvedDefinition.ok) {
     return {
