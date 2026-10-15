@@ -22,6 +22,7 @@ import type {
 } from "@/contracts/modeling/geometry-assets";
 import {
   encodeGeometryAssetData,
+  getEmbeddedGeometryAssetBytes,
   createGeometryAssetDiagnostic,
 } from "@/contracts/modeling/geometry-assets";
 import { requireCadaraExportOptions } from "@/contracts/modeling/export.runtime-schema";
@@ -385,6 +386,12 @@ export function createModelingService(
     assets: readonly GeometryAssetBlobInput[],
   ): GeometryAssetResolver | undefined {
     const transientAssetBytesByHash = new Map<GeometryAssetHash, Uint8Array>();
+    // Import validation restores before repository initialization; embedded native
+    // inputs must be resolvable during that restore, not only after persistence.
+    for (const asset of document.assets.records) {
+      const bytes = getEmbeddedGeometryAssetBytes(asset);
+      if (bytes) transientAssetBytesByHash.set(asset.hash, bytes);
+    }
     const transientAssetsById = new Map(
       assets.map((asset) => {
         transientAssetBytesByHash.set(asset.asset.hash, asset.bytes.slice());
@@ -398,7 +405,7 @@ export function createModelingService(
       ? documentRepository
       : undefined;
 
-    if (transientAssetsById.size === 0 && !repositoryResolver) {
+    if (transientAssetBytesByHash.size === 0 && !repositoryResolver) {
       return undefined;
     }
 
@@ -415,11 +422,9 @@ export function createModelingService(
         const record = document.assets.records.find(
           (asset) => asset.assetId === reference.assetId,
         );
-        if (!record || !repositoryResolver) {
-          return null;
-        }
-
-        const bytes = await repositoryResolver.getGeometryAssetRecord(record);
+        if (!record) return null;
+        const bytes = transientAssetBytesByHash.get(record.hash) ??
+          await repositoryResolver?.getGeometryAssetRecord(record);
         return bytes ? { bytes: bytes.slice(), format: record.format } : null;
       },
       async getGeometryAssetBytes(hash) {
@@ -612,6 +617,10 @@ export function createModelingService(
     if (options.validateBeforePersist) {
       try {
         await validateActiveDocument();
+        // Restore regenerates runtime topology witnesses. Persist that actual
+        // restored basis, not file-era tokens that the next write would
+        // legitimately reject as different from its own runtime predecessor.
+        activeDocument = await exportAuthoredDocumentForRepository();
       } catch (error: unknown) {
         return {
           ok: false,
@@ -1572,6 +1581,7 @@ export function createModelingService(
         input.assets ?? [],
         {
           validateEmbeddedAssetsBeforePersist: true,
+          validateBeforePersist: true,
           observeTransaction: input.observe,
         },
       );

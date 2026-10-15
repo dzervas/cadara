@@ -469,7 +469,7 @@ export function createSemanticSketchPort(input: {
       const validTarget = command.operation === "sketch.dimension.add"
         ? command.points[0] !== command.points[1] && command.points.every(id => editor.session.definition.points.some(p => p.pointId === id))
         : editor.session.definition.dimensions.some(d => d.dimensionId === command.dimensionId);
-      if (!validTarget || ("value" in command && (!Number.isFinite(command.value) || command.value <= 0)))
+      if (!validTarget || ("value" in command && (typeof command.value === "number" ? !Number.isFinite(command.value) || command.value <= 0 : !command.value.trim())))
         return { ...terminal, outcome: { kind: "rejected", reasonCode: "invalid-dimension-target-or-value" } };
     }
     if (command.operation === "history.undo" || command.operation === "history.redo") {

@@ -600,11 +600,13 @@ export function makeSketchAnnotationReference(
 export function updateSketchDimensionValue(
   session: SketchSessionState,
   dimensionId: import("@/contracts/shared/ids").DimensionId,
-  value: number,
+  value: number | string,
 ): SketchSessionState {
+  const pendingValue = normalizeConstraintValue(value);
+  if (pendingValue === null) return { ...session, validationMessage: "Enter a value before saving." };
   return commitSketchAnnotationEditValue(session, {
     target: createSketchDimensionRef(getSessionSketchId(session), dimensionId),
-    pendingValue: createLiteralAuthoredValue(value),
+    pendingValue,
   });
 }
 

@@ -17,7 +17,7 @@ type TargetAlias = Alias & { label: string };
 type RecipeGeometryEdit<T = import("@/contracts/semantic/schema").SemanticSketchGeometryEdit> = T extends { target: infer R } ? Omit<T, "target" | "destination" | "boundary"> & { target: R | TargetAlias } & (T extends { destination: infer D } ? { destination: D | TargetAlias } : unknown) & (T extends { boundary: infer B } ? { boundary: B | TargetAlias } : unknown) : never;
 type RecipePrimitive<T = import("@/contracts/semantic/schema").SemanticSketchPrimitive> = T extends { source: infer S } ? Omit<T, "source"> & { source: S | TargetAlias } : T;
 type RecipeCommand<T = SemanticCommand> = T extends SemanticCommand
-  ? Omit<T, "basis" | "draft" | "points" | "dimensionId" | "derivationId" | "profile" | "featureId" | "sketchId" | "target" | "targets" | "axis" | "repair" | "edit" | "primitive" | "support"> &
+  ? Omit<T, "basis" | "draft" | "points" | "dimensionId" | "derivationId" | "profile" | "featureId" | "variableId" | "sketchId" | "target" | "targets" | "axis" | "repair" | "edit" | "primitive" | "support"> &
     (T extends { support: infer S } ? { support: S | TargetAlias } : unknown) &
     (T extends { primitive: unknown } ? { primitive: RecipePrimitive } : unknown) &
     (T extends { edit: infer E } ? { edit: E extends { target: unknown } ? RecipeGeometryEdit<E> : E } : unknown) &
@@ -27,6 +27,7 @@ type RecipeCommand<T = SemanticCommand> = T extends SemanticCommand
     (T extends { profile: infer P } ? { profile: P | TargetAlias } : unknown) &
     (T extends { target: infer R } ? { target: R | TargetAlias } : unknown) &
     (T extends { featureId: infer F } ? { featureId: F | TargetAlias } : unknown) &
+    (T extends { variableId: infer V } ? { variableId: V | TargetAlias } : unknown) &
     (T extends { sketchId: infer S } ? { sketchId: S | TargetAlias } : unknown) &
     (T extends { points: infer P } ? { points: P | readonly [TargetAlias, TargetAlias] } : unknown) &
     (T extends { derivationId: infer D } ? { derivationId: D | TargetAlias } : unknown) &
@@ -182,7 +183,7 @@ function parseRecipe(input: unknown): RecipeOperation[] {
     if (Array.isArray(command.points)) validationCommand.points = command.points.map(value => validateTarget(value, "sketch_point_validation"));
     if ("dimensionId" in command) validationCommand.dimensionId = validateTarget(command.dimensionId, "dimension_validation");
     if ("derivationId" in command) validationCommand.derivationId = validateTarget(command.derivationId, "derivation_validation");
-    for (const [key, placeholder] of [["featureId", "feature_validation"], ["sketchId", "sketch_validation"]] as const)
+    for (const [key, placeholder] of [["featureId", "feature_validation"], ["variableId", "variable_validation"], ["sketchId", "sketch_validation"]] as const)
       if (key in command) validationCommand[key] = validateTarget(command[key], placeholder);
     if (isAlias(command.profile)) {
       validateTarget(command.profile, "region_validation");
@@ -317,6 +318,12 @@ export const documentRecipesCommand: CommandModule = {
             return matches[0]!.target.pointId;
           };
           command.points = [resolvePoint(command.points[0]), resolvePoint(command.points[1])];
+        }
+        if (command.operation === "variable.update" && isAlias(command.variableId)) {
+          const target = command.variableId;
+          const matches = aliases.get(target.alias)?.variables?.filter(variable => variable.name === target.label) ?? [];
+          if (matches.length !== 1) throw new Error("Variable target alias is missing or ambiguous.");
+          command.variableId = matches[0]!.variableId;
         }
         if ((command.operation === "sketch.dimension.update" || command.operation === "sketch.dimension.reference") && isAlias(command.dimensionId)) {
           const target = command.dimensionId;

@@ -19,7 +19,7 @@ export function semanticCommandCorrelation(
               ? "sketch-author"
               : command.operation.startsWith("history.")
                 ? "history"
-              : command.operation.startsWith("extrude.")
+              : (command.operation.startsWith("extrude.") || command.operation.startsWith("variable."))
                 ? "model-mutate"
               : command.operation.startsWith("export.")
                 ? "export"

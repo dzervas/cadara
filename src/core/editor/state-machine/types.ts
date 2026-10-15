@@ -728,7 +728,7 @@ export type EditorEvent =
   | { type: "sketch.requirementAuthored"; input: import("@/contracts/semantic/schema").SemanticRequirementInput }
   | { type: "sketch.dimensionAuthored"; input: import("@/contracts/semantic/schema").SemanticDimensionInput }
   | { type: "sketch.dimensionMadeReference"; dimensionId: import("@/contracts/shared/ids").DimensionId }
-  | { type: "sketch.dimensionUpdated"; dimensionId: import("@/contracts/shared/ids").DimensionId; value: number }
+  | { type: "sketch.dimensionUpdated"; dimensionId: import("@/contracts/shared/ids").DimensionId; value: number | string }
   | { type: "sketch.publishRequested" }
   | { type: "sketch.discardRequested" }
   | SessionStartedEvent

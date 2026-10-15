@@ -311,7 +311,9 @@ export type ModelingAddDocumentVariableInput = Omit<
   schema.AddDocumentVariableRequest,
   "contractVersion" | "documentId"
 > &
-  Partial<ModelingMutationBasisInput>;
+  Partial<ModelingMutationBasisInput> & {
+    observePersistence?: (transaction: DocumentRepositoryMutationResult) => void;
+  };
 export type ModelingUpdateFeatureInput = Omit<
   schema.UpdateFeatureRequest,
   "contractVersion" | "documentId"
@@ -328,7 +330,9 @@ export type ModelingUpdateDocumentVariableInput = Omit<
   schema.UpdateDocumentVariableRequest,
   "contractVersion" | "documentId"
 > &
-  Partial<ModelingMutationBasisInput>;
+  Partial<ModelingMutationBasisInput> & {
+    observePersistence?: (transaction: DocumentRepositoryMutationResult) => void;
+  };
 export type ModelingDeleteFeatureInput = Omit<
   schema.DeleteFeatureRequest,
   "contractVersion" | "documentId"

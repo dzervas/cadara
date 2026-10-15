@@ -118,7 +118,7 @@ export type SemanticSketchCommand = CommandIdentity & {
     | ({ operation: "sketch.requirement.add"; draft: SemanticDraftBasis; intent: "fulfill" | "author-invalid" } & SemanticRequirementInput)
     | ({ operation: "sketch.dimension.add"; draft: SemanticDraftBasis; intent: "fulfill" | "author-invalid" } & SemanticDimensionInput)
     | { operation: "sketch.dimension.reference"; draft: SemanticDraftBasis; dimensionId: import("@/contracts/shared/ids").DimensionId; intent: "fulfill" | "author-invalid" }
-    | { operation: "sketch.dimension.update"; draft: SemanticDraftBasis; dimensionId: import("@/contracts/shared/ids").DimensionId; value: number; intent: "fulfill" | "author-invalid" }
+    | { operation: "sketch.dimension.update"; draft: SemanticDraftBasis; dimensionId: import("@/contracts/shared/ids").DimensionId; value: number | string; intent: "fulfill" | "author-invalid" }
     | { operation: "sketch.construction.set"; draft: SemanticDraftBasis; target: Extract<DurableRef, { kind: "sketchPoint" | "sketchEntity" }>; construction: boolean; intent: "fulfill" | "author-invalid" }
     | { operation: "sketch.geometry.update"; draft: SemanticDraftBasis; edit: SemanticSketchGeometryEdit; intent: "fulfill" | "author-invalid" }
     | ({ operation: "sketch.geometry.build"; draft: SemanticDraftBasis; intent: "fulfill" | "author-invalid" } & SemanticSketchConstruction)
@@ -166,9 +166,16 @@ interface CommandIdentity {
   commandId: string;
 }
 
+export type SemanticVariableCommand = CommandIdentity & {
+  basis: SemanticBasis;
+  name: string;
+  valueText: string;
+  intent: "fulfill" | "author-invalid";
+} & ({ operation: "variable.add" } | { operation: "variable.update"; variableId: import("@/contracts/shared/ids").DocumentVariableId });
+
 export type SemanticExtrudeCommand = CommandIdentity & {
   basis: SemanticBasis;
-  depth: number;
+  depth: number | string;
   intent: "fulfill" | "author-invalid";
 } & (
   | { operation: "extrude.create"; profile: Extract<DurableRef, { kind: "region" }> }
@@ -196,6 +203,7 @@ export type SemanticExportCommand = CommandIdentity & {
 export type SemanticCommand =
   | SemanticSketchCommand
   | SemanticExtrudeCommand
+  | SemanticVariableCommand
   | SemanticHistoryCommand
   | SemanticExportCommand
   | (CommandIdentity &
@@ -312,6 +320,7 @@ export interface SemanticDiscovery {
   state: SemanticState;
   /** Inspection metadata from this same snapshot, not another document owner. */
   document?: { label: string };
+  variables?: readonly import("@/contracts/modeling/schema").DocumentVariableRecord[];
   settings?: import("@/contracts/modeling/schema").ModelingDocumentSettings;
   references: readonly { label: string; target: DurableRef }[];
   history: DurableHistoryAvailability | null;

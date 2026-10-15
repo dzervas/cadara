@@ -20,12 +20,14 @@ import {
   hydrateFeatureEditSession,
   patchFeatureEditSession,
   buildFeatureDefinition,
+  getFeatureEditorFormField,
 } from "@/domain/editor/feature-editing";
 import {
   regionBoundaryBasisOfRecord,
   resolveRegionBoundaryCurve,
 } from "@/contracts/sketch/region-boundary-curves";
 import { sketchProfileGateFailures } from "@/contracts/sketch/derived-validity";
+import { createFeatureEditorPatchFromExpression } from "@/core/feature-authoring/form-adapter";
 
 export function createSemanticExtrudePort(input: {
   service: ModelingService;
@@ -47,7 +49,7 @@ export function createSemanticExtrudePort(input: {
         ...terminal,
         outcome: { kind: "rejected" as const, reasonCode: "editing-context" },
       };
-    if (!Number.isFinite(command.depth) || command.depth <= 0)
+    if (typeof command.depth === "number" ? !Number.isFinite(command.depth) || command.depth <= 0 : !command.depth.trim())
       return {
         ...terminal,
         outcome: {
@@ -105,8 +107,12 @@ export function createSemanticExtrudePort(input: {
         };
       draft = hydrateFeatureEditSession(feature)!;
     }
-    const definition = buildFeatureDefinition(
-      patchFeatureEditSession(draft, { depth: command.depth }),
+    const depthField = getFeatureEditorFormField(draft, "extrude-depth");
+    const patch = typeof command.depth === "string"
+      ? depthField?.kind === "numeric" ? createFeatureEditorPatchFromExpression(depthField, command.depth) : null
+      : { depth: command.depth };
+    const definition = patch && buildFeatureDefinition(
+      patchFeatureEditSession(draft, patch),
     );
     if (!definition)
       return {
