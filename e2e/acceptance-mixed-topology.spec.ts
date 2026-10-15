@@ -926,7 +926,9 @@ test("§2 E2E-2 near gap: a Shift-placed near gap is not healed; both ends Fixed
 // once) and two squares touching at one shared corner point, in two
 // sketches. The annulus (nested regions) and the figure-eight's
 // reselection after its crossing is removed are the converted rows of
-// `sketch-spline-region-extrude.spec.ts` (T17i.md).
+// `sketch-spline-region-extrude.spec.ts` (T17i.md). T17j3: the seeded
+// history is restored into the production document repository (the
+// repository's own restore path), not opened with the repository off.
 const FIGURE_EIGHT_SKETCH: SketchId = "sketch_figure_eight";
 const SQUARES_SKETCH: SketchId = "sketch_touching_squares";
 
@@ -935,7 +937,7 @@ test("§2 E2E-2 seeded fixtures: each figure-eight lobe and each of two point-to
 }) => {
   test.setTimeout(420_000);
   const workbench = new FeatureWorkbenchHarness(page);
-  await workbench.openWithOperationHistory(
+  await workbench.openWithRepositoryAndOperationHistory(
     historyOf([
       closedSplineSketch(FIGURE_EIGHT_SKETCH, "Figure Eight", [FIGURE_EIGHT]),
       pointTouchingSquaresSketch(
@@ -946,6 +948,7 @@ test("§2 E2E-2 seeded fixtures: each figure-eight lobe and each of two point-to
       ),
     ]),
   );
+  await workbench.waitForRenderIdle();
   await workbench.activateFeature("extrude");
   const lobes = await sketchRegionTargets(page, FIGURE_EIGHT_SKETCH, 2);
   const squares = await sketchRegionTargets(page, SQUARES_SKETCH, 2);
