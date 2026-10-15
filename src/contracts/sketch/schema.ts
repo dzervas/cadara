@@ -555,7 +555,14 @@ export type DimensionAngleAnnotationPlacement = {
 export type DimensionAnnotationPlacement =
   | DimensionLineAnnotationPlacement
   | DimensionAngleAnnotationPlacement;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- transitional authored dimension values must remain assignable to numeric solver-era call sites while normalization canonicalizes wrappers.
+// T17o (review A-5): `any` is a recorded defect, not a design. Nothing
+// canonicalizes dimension values (the hand normalizer is deleted), and the
+// Typia persistence validator accepts any value here (`"garbage"`, `null`);
+// only presence and the reference marker are checked
+// (`validateDimensionValueInvariants`). Tightening it to
+// `MaybeAuthoredValue<number>` belongs to the routed T17-15
+// `MaybeAuthoredValue` item (numeric solver-era call sites still read it).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- recorded defect, see above (T17-15 route).
 export type SketchDimensionAuthoredValue = any;
 export type SketchDimensionNumericValue = number;
 

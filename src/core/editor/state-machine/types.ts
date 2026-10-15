@@ -98,6 +98,12 @@ export interface EditSessionCursorContext {
   phase: "rollingBack" | "opening" | "active" | "restorePending" | "restoring";
 }
 
+/** T17o review fixes: what failed (the workbench titles the notice by kind). */
+export interface EditorFailureNotice {
+  kind: "sketchOpen" | "featureEdit" | "historyMove";
+  message: string;
+}
+
 interface EditorStateBase {
   /**
    * Current toolbar mode exposed to the UI.
@@ -133,6 +139,18 @@ interface EditorStateBase {
   pendingSnapshotRequestId: RequestId | null;
   /** Document history cursor mutation currently in flight, or null when no history move is pending. */
   pendingHistoryCursorRequestId: RequestId | null;
+  /**
+   * T17o (T17c3 route): the error of the last failed snapshot refresh, or
+   * null. The editor still holds the older revision's snapshot, so the
+   * workbench shows a notice with a retry; any loaded snapshot clears it.
+   */
+  documentRefreshFailure: string | null;
+  /**
+   * T17o review fixes: the last failed sketch open, feature edit or history
+   * move (its refusal or unexpected error), shown by the workbench as a
+   * dismissible notice; the next success of the same kind clears it.
+   */
+  failureNotice: EditorFailureNotice | null;
   /** Cursor rollback/restore context for an active committed-item edit session. */
   editSessionCursorContext: EditSessionCursorContext | null;
 }
@@ -321,6 +339,11 @@ export interface CommandCommitRequestedEvent {
 /** Requests a fresh document snapshot outside an active command flow. */
 export interface DocumentRefreshRequestedEvent {
   type: "document.refreshRequested";
+}
+
+/** T17o review fixes: the user dismissed the failure notice. */
+export interface FailureNoticeDismissedEvent {
+  type: "failureNotice.dismissed";
 }
 
 /** Applies a snapshot already accepted by a modeling action without another fetch round-trip. */
@@ -707,6 +730,7 @@ export type EditorEvent =
   | CommandCancelledEvent
   | CommandCommitRequestedEvent
   | DocumentRefreshRequestedEvent
+  | FailureNoticeDismissedEvent
   | DocumentSnapshotLoadedEvent
   | DocumentReplacedEvent
   | ViewportHoveredEvent

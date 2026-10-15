@@ -2,6 +2,7 @@ import {
   createConsoleErrorReporter,
   normalizeUnknownError,
   type ErrorReporter,
+  type ErrorReportVisibility,
 } from "@/contracts/errors";
 import {
   createEditorEffectFailureEvent,
@@ -29,6 +30,17 @@ import { runEditorEffect } from "./effect-registry";
 import { SketchAuthoredActions } from "./sketch-authored-actions";
 
 export type EditorEventLoopListener = (state: EditorState) => void;
+
+/**
+ * [TECH] T17-11: a failed snap query only removes an inference hint (nothing
+ * authored or blocked), so it is a developer report. Every other effect's
+ * failure event has a user-visible surface (T17o failure-feedback audit).
+ */
+export function getEditorInvocationFailureVisibility(
+  effect: Pick<EditorEffect, "type">,
+): ErrorReportVisibility {
+  return effect.type === "sketch.querySnapIntersections" ? "developer" : "user";
+}
 
 export class EditorEventLoop {
   private readonly runtime: EditorEffectRuntime;
@@ -278,7 +290,7 @@ export class EditorEventLoop {
 
       this.errorReporter.report(appError, {
         source: "editor-runtime",
-        visibility: "user",
+        visibility: getEditorInvocationFailureVisibility(effect),
         dedupeKey: `${effect.type}:${appError.requestId ?? appError.message}`,
       });
 

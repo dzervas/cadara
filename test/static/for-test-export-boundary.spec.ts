@@ -29,8 +29,18 @@ const ROOT = process.cwd();
 const SRC = join(ROOT, "src");
 const ENTRY_POINTS = ["src/main.tsx", "src/cli/main.ts"];
 const SOURCE_EXTENSIONS = [".ts", ".tsx"];
-const TEST_EXPORT = /ForTest$/;
-const TEST_EXPORT_TEXT = /ForTest\b/;
+// T17o (I3): the plural `…ForTests` spelling is a test seam too.
+const TEST_EXPORT = /ForTests?$/;
+const TEST_EXPORT_TEXT = /ForTests?\b/;
+
+/**
+ * T17o (I3): `…ForTest(s)`-named identifiers that are not test exports, each
+ * with the reason it may appear in production modules.
+ */
+const ALLOWED_TEST_NAMED_IDENTIFIERS: Record<string, string> = {
+  CadaraAllowLegacyTopologyEnumerationForTests:
+    "a property flag the Node OpenCascade loader (`occ/runtime.ts`, stock `opencascade.js`, which lacks the native topology payload) sets on the instance and `occ/topology.ts` reads; it is not an export. The Node loader serves Node consumers (the logic lane; the CLI loads no OpenCascade); a future Node-hosted production kernel would need a renamed, explicit opt-in (OCC-runtime owner).",
+};
 const TEST_ONLY_MODULE =
   /(\.spec\.tsx?|\.fixtures\.ts|-test-builder\.ts|\/test-[^/]*\.ts)$/;
 
@@ -200,6 +210,17 @@ test("test/static/for-test-export-boundary.spec.ts production modules never reac
     owners.size,
     "the owner map finds the known test seams",
   ).toBeGreaterThanOrEqual(3);
+  // T17o (I3): a plural `…ForTests` export is owned (and guarded) too.
+  expect(owners.get("resetDefaultOpenCascadeInstanceForTests")).toEqual([
+    "src/domain/modeling/occ/runtime.ts",
+  ]);
+  for (const name of Object.keys(ALLOWED_TEST_NAMED_IDENTIFIERS))
+    expect(
+      [...modules.values()].some((scanned) =>
+        scanned.references.some((reference) => reference.name === name),
+      ),
+      `${name}: an allowlisted identifier that no production module uses any more must be removed`,
+    ).toBe(true);
 
   const offenders = [
     ...[...owners]
@@ -210,6 +231,7 @@ test("test/static/for-test-export-boundary.spec.ts production modules never reac
       ),
     ...[...modules].flatMap(([filePath, scanned]) => [
       ...scanned.references.flatMap(({ name, inTestDeclaration }) => {
+        if (Object.hasOwn(ALLOWED_TEST_NAMED_IDENTIFIERS, name)) return [];
         const owner = owners.get(name);
         if (owner?.length === 1 && owner[0] === filePath)
           return inTestDeclaration

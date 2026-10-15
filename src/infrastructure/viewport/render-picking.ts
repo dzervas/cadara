@@ -332,18 +332,6 @@ export function intersectObjectsWithLinePickRadius(input: {
   return intersections.sort((left, right) => left.distance - right.distance);
 }
 
-export function resolvePickTarget(
-  intersections: THREE.Intersection<THREE.Object3D>[],
-  acceptsTarget: ((target: PrimitiveRef) => boolean) | null = null,
-  options: PickResolutionOptions = {},
-) {
-  return resolveAllCandidates(
-    collectRaycastPickCandidates(intersections),
-    acceptsTarget,
-    options,
-  );
-}
-
 export function collectRaycastPickCandidates(
   intersections: THREE.Intersection<THREE.Object3D>[],
 ): PickCandidate[] {

@@ -36,5 +36,5 @@ export type {
   ModelingResolvedReferenceResult,
 } from "./types";
 
-export { createModelingService, modelingRuntimeValidators } from "./service";
+export { createModelingService } from "./service";
 export { createSketchSolverService } from "./sketch-solver";

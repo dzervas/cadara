@@ -235,9 +235,3 @@ export function getConsumableSketchRegions(
 ): readonly RegionRecord[] {
   return sketch.derivedValidity.state === "current" ? sketch.regions : [];
 }
-
-export function isSketchProfileOutputCurrent(
-  validity: SketchDerivedValidity,
-): boolean {
-  return validity.state === "current";
-}

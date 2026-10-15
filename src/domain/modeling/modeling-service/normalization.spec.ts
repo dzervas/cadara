@@ -2,20 +2,19 @@ import { test, expect } from "vitest";
 
 import { isExpressionAuthoredValue } from "@/contracts/modeling/authored-values";
 import {
-  normalizeRegionRecords,
   normalizeShellFeatureParameters,
-  normalizeSketchDerivationDefinition,
-  normalizeSketchEntityDefinition,
-  normalizeSolvedSketchSnapshot,
   normalizeWorkspaceSnapshot,
 } from "@/domain/modeling/modeling-service/normalization";
 import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import {
+  requireSketchDefinition,
+  requireSolvedSketchSnapshot,
   validateSketchDefinition,
   validateSketchRecord,
   validateSolvedSketchSnapshot,
+  validateSolverRegionRecord,
 } from "@/contracts/sketch/runtime-schema";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
@@ -27,10 +26,65 @@ import {
   mirroredSession,
 } from "@/domain/editor/sketch-mirror.fixtures";
 
-// Lane: logic (per docs/testing.md — normalization is a domain persistence/normalization
-// seam under src/domain/, exercised through its exported entrypoint).
-// Seam: normalizeSketchDerivationDefinition offset branch, the persistence boundary that
-// re-parses stored offset payloads into a typed SketchDerivationDefinition.
+// Lane: logic (per docs/testing.md — persistence/runtime validation seam).
+// T17o (E2, [TECH] T17-14): the hand-written sketch normalizer
+// (`normalizeSketches` → `normalizeSketchRecord`/`normalizeSketchDefinition`,
+// `normalizeSolvedSketchSnapshot`) had no production consumer and is
+// deleted; its rows are ported to the Typia validators of the persistence
+// boundary (`@/contracts/sketch/runtime-schema`), which every caller uses.
+// Entity- and relationship-level payloads are checked inside a minimal
+// sketch definition (`definitionWith`).
+const NORMALIZATION_SKETCH_ID = "sketch_normalization";
+
+function definitionWith(input: {
+  pointIds?: readonly string[];
+  entities?: readonly unknown[];
+  derivedRelationships?: readonly unknown[];
+}) {
+  const pointIds = input.pointIds ?? [];
+  const entities = (input.entities ?? []) as { entityId: string }[];
+  return {
+    schemaVersion: "sketch-definition/v1alpha2",
+    referenceIds: [],
+    references: [],
+    pointIds: [...pointIds],
+    points: pointIds.map((pointId) => ({
+      pointId,
+      label: pointId,
+      target: {
+        kind: "sketchPoint",
+        sketchId: NORMALIZATION_SKETCH_ID,
+        pointId,
+      },
+      position: [0, 0],
+      isConstruction: false,
+    })),
+    entityIds: entities.map((entity) => entity.entityId),
+    entities: [...entities],
+    constraintIds: [],
+    constraints: [],
+    dimensionIds: [],
+    dimensions: [],
+    ...(input.derivedRelationships
+      ? { derivedRelationships: [...input.derivedRelationships] }
+      : {}),
+  };
+}
+
+/** The relationship as the persistence boundary parses it (throws when rejected). */
+const parseRelationship = (relationship: unknown) =>
+  requireSketchDefinition(
+    definitionWith({ derivedRelationships: [relationship] }),
+  ).derivedRelationships![0]!;
+
+const SPLINE_POINT_IDS = ["sketch_point_middle", "sketch_point_alias"];
+
+/** The entity as the persistence boundary parses it (throws when rejected). */
+const parseEntity = (entity: unknown) =>
+  requireSketchDefinition(
+    definitionWith({ pointIds: SPLINE_POINT_IDS, entities: [entity] }),
+  ).entities[0]!;
+
 function makeOffsetPayload(overrides: Record<string, unknown> = {}) {
   return {
     derivationId: "sketch_derivation_1_offset",
@@ -114,7 +168,7 @@ function makeSplinePayload() {
 }
 
 test("src/domain/modeling/modeling-service/normalization.spec.ts", () => {
-  const normalized = normalizeSketchDerivationDefinition(makeOffsetPayload());
+  const normalized = parseRelationship(makeOffsetPayload());
   expect(
     normalized.kind === "offset" && normalized.jointPolicy,
     "A valid offset payload should normalize to the offset kind with its joint policy.",
@@ -130,35 +184,29 @@ test("src/domain/modeling/modeling-service/normalization.spec.ts", () => {
   ).toBeTruthy();
 
   expect(
-    () =>
-      normalizeSketchDerivationDefinition(
-        makeOffsetPayload({ jointPolicy: "bogusPolicy" }),
-      ),
-    "An unknown joint policy should be rejected at the normalization boundary.",
+    () => parseRelationship(makeOffsetPayload({ jointPolicy: "bogusPolicy" })),
+    "An unknown joint policy should be rejected at the persistence boundary.",
   ).toThrow();
 
   expect(
     () =>
-      normalizeSketchDerivationDefinition(
+      parseRelationship(
         makeOffsetPayload({
           jointOutputs: [{ firstSeedEntityId: "sketch_entity_seed" }],
         }),
       ),
-    "A malformed joint output payload should be rejected at the normalization boundary.",
+    "A malformed joint output payload should be rejected at the persistence boundary.",
   ).toThrow();
 
   expect(
-    () =>
-      normalizeSketchDerivationDefinition(
-        makeOffsetPayload({ jointOutputs: "nope" }),
-      ),
-    "A non-array jointOutputs field should be rejected at the normalization boundary.",
+    () => parseRelationship(makeOffsetPayload({ jointOutputs: "nope" })),
+    "A non-array jointOutputs field should be rejected at the persistence boundary.",
   ).toThrow();
 });
 
 test("spline normalization rejects unknown fields without changing authored ordering or tangent intent", () => {
   const payload = makeSplinePayload();
-  const normalized = normalizeSketchEntityDefinition(payload);
+  const normalized = parseEntity(payload);
   expect(normalized).toEqual(payload);
   expect(normalized.kind).toBe("spline");
   if (normalized.kind !== "spline") return;
@@ -178,11 +226,9 @@ test("spline normalization rejects unknown fields without changing authored orde
   expect(normalized.pointOccurrences[2]?.pointId).toBe("sketch_point_alias");
   expect(normalized.closure).toBe("positional");
 
+  expect(() => parseEntity({ ...payload, unknownEntityField: true })).toThrow();
   expect(() =>
-    normalizeSketchEntityDefinition({ ...payload, unknownEntityField: true }),
-  ).toThrow();
-  expect(() =>
-    normalizeSketchEntityDefinition({
+    parseEntity({
       ...payload,
       pointOccurrences: [
         { ...payload.pointOccurrences[0], unknownOccurrenceField: true },
@@ -191,7 +237,7 @@ test("spline normalization rejects unknown fields without changing authored orde
     }),
   ).toThrow();
   expect(() =>
-    normalizeSketchEntityDefinition({
+    parseEntity({
       ...payload,
       pointOccurrences: [
         {
@@ -211,26 +257,24 @@ test("spline normalization rejects unknown fields without changing authored orde
 // explicitly (a dropped field would silently change the shape on reload).
 test("spline normalization carries endSpanParameterLengths and rejects malformed shapes", () => {
   const payload = makeSplinePayload();
-  expect(
-    "endSpanParameterLengths" in normalizeSketchEntityDefinition(payload),
-  ).toBe(false);
+  expect("endSpanParameterLengths" in parseEntity(payload)).toBe(false);
   for (const fields of [{ start: 0.5 }, { end: 2 }, { start: 0.5, end: 2 }]) {
     const stored = JSON.parse(
       JSON.stringify({ ...payload, endSpanParameterLengths: fields }),
     );
-    const normalized = normalizeSketchEntityDefinition(stored);
+    const normalized = parseEntity(stored);
     expect(normalized).toEqual(stored);
     expect(
       normalized.kind === "spline" && normalized.endSpanParameterLengths,
     ).toEqual(fields);
-    // Round trip: normalizing the normalized record is the identity.
-    expect(
-      normalizeSketchEntityDefinition(JSON.parse(JSON.stringify(normalized))),
-    ).toEqual(normalized);
+    // Round trip: parsing the parsed record is the identity.
+    expect(parseEntity(JSON.parse(JSON.stringify(normalized)))).toEqual(
+      normalized,
+    );
   }
   // Values are judged by reconstructSpline (A-7), not here.
   expect(
-    normalizeSketchEntityDefinition({
+    parseEntity({
       ...payload,
       endSpanParameterLengths: { start: -1 },
     }),
@@ -238,7 +282,7 @@ test("spline normalization carries endSpanParameterLengths and rejects malformed
   for (const malformed of [{}, { start: 1, other: 2 }, { end: "2" }, 3, null])
     expect(
       () =>
-        normalizeSketchEntityDefinition({
+        parseEntity({
           ...payload,
           endSpanParameterLengths: malformed,
         }),
@@ -316,17 +360,24 @@ test("normalizes split-boundary vertex records without accepting partial or lega
       loops: [{ ...payload[0]!.loops[0], segments: [replacement] }],
     },
   ];
-  const normalized = normalizeRegionRecords(payload);
+  // T17o (E2): the persistence boundary's region validator (Typia).
+  const parseRegions = (value: readonly unknown[]) =>
+    value.map((record) => {
+      const result = validateSolverRegionRecord(record);
+      if (!result.success) throw new Error("Invalid region record payload.");
+      return result.data;
+    });
+  const normalized = parseRegions(payload);
   expect(normalized[0]?.loops[0]?.segments[0]?.start?.position).toEqual([2, 0]);
   expect(normalized[0]?.loops[0]?.segments[0]?.end?.position).toEqual([-2, 0]);
   expect(normalized[0]?.loops[0]?.segments[0]?.sourceSegmentOrdinal).toBe(1);
   expect(
-    () => normalizeRegionRecords(withSegment({ ...segment, end: undefined })),
+    () => parseRegions(withSegment({ ...segment, end: undefined })),
     "A split boundary segment without its end vertex is rejected.",
   ).toThrow("Invalid region record payload");
   expect(
     () =>
-      normalizeRegionRecords(
+      parseRegions(
         withSegment({
           ...segment,
           startPosition: [2, 0],
@@ -477,15 +528,15 @@ test("T15b: a sketch-datum mirror and failedDerivationIds round-trip through nor
 
   // The datum kind persists as authored (same version, no migration).
   const stored = JSON.parse(JSON.stringify(datumMirror));
-  expect(normalizeSketchDerivationDefinition(stored)).toEqual(datumMirror);
+  expect(parseRelationship(stored)).toEqual(datumMirror);
   expect(validateSketchDefinition(definition).success).toBe(true);
   for (const datum of ["origin", "zAxis"])
     expect(() =>
-      normalizeSketchDerivationDefinition({
+      parseRelationship({
         ...stored,
         mirrorReference: { kind: "sketchDatum", datum },
       }),
-    ).toThrow("Invalid sketch mirror derivation payload.");
+    ).toThrow(/derivedRelationships\[0\]/);
   expect(
     validateSketchDefinition({
       ...definition,
@@ -509,7 +560,7 @@ test("T15b: a sketch-datum mirror and failedDerivationIds round-trip through nor
     partialSolvePolicy: "bestEffort",
   }).solvedSnapshot;
   expect(snapshot.failedDerivationIds).toEqual(["sketch_derivation_2_mirror"]);
-  const roundTrip = normalizeSolvedSketchSnapshot(
+  const roundTrip = requireSolvedSketchSnapshot(
     JSON.parse(JSON.stringify(snapshot)),
   );
   expect(roundTrip).toEqual(snapshot);
@@ -561,23 +612,23 @@ test("T15b: a sketch-datum mirror and failedDerivationIds round-trip through nor
     "A failed derived relationship id must have its relationship's error diagnostic.",
   );
   expect(() =>
-    normalizeSolvedSketchSnapshot({ ...snapshot, failedDerivationIds: [1] }),
-  ).toThrow("Invalid failed derived relationship id payload.");
-  // T17d (B4): the hand normalizer keeps the carried reasons (shape only).
+    requireSolvedSketchSnapshot({ ...snapshot, failedDerivationIds: [1] }),
+  ).toThrow(/failedDerivationIds\[0\]/);
+  // T17d (B4): the persistence boundary keeps the carried reasons.
   expect(snapshot.failedDerivationReasons).toEqual({
     sketch_derivation_2_mirror: ["axisMissing"],
   });
   expect(() =>
-    normalizeSolvedSketchSnapshot({
+    requireSolvedSketchSnapshot({
       ...snapshot,
       failedDerivationReasons: { sketch_derivation_2_mirror: ["axisBent"] },
     }),
-  ).toThrow("Invalid failed derived relationship reason payload.");
+  ).toThrow(/failedDerivationReasons/);
 }, 120_000);
 
 // T17d (B4, [TECH] T17-6; logic lane, seams: the workspace snapshot's
 // worker-transport validation (`normalizeWorkspaceSnapshot`), the solved
-// snapshot's runtime validation, and the hand normalizer's shape parity).
+// snapshot's runtime validation).
 // The carried reasons round-trip; they must name exactly the failed
 // relationships, each with one or more distinct reasons from the closed
 // union. Red on base: the field is absent from the solve and unknown to

@@ -5,7 +5,6 @@
 export {
   createModelingService,
   createSketchSolverService,
-  modelingRuntimeValidators,
 } from "./modeling-service/index";
 
 export type {

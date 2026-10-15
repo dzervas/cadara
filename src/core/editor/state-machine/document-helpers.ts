@@ -53,6 +53,7 @@ export function updateStateDocument(
       state.pendingSnapshotRequestId === payload.requestId
         ? null
         : state.pendingSnapshotRequestId,
+    documentRefreshFailure: null,
   };
 }
 
@@ -104,6 +105,7 @@ export function updateStateDocumentSnapshot(
     snapshot,
     selectionCatalog: buildSelectionTargetCatalog(snapshot),
     pendingSnapshotRequestId: null,
+    documentRefreshFailure: null,
   };
 }
 
@@ -129,6 +131,8 @@ export function replaceStateDocumentSnapshot(
     nextRequestSequence: state.nextRequestSequence,
     pendingSnapshotRequestId: null,
     pendingHistoryCursorRequestId: null,
+    documentRefreshFailure: null,
+    failureNotice: null,
     editSessionCursorContext: null,
   };
 }

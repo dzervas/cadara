@@ -64,6 +64,8 @@ function createInitialState(): EditorState {
     nextRequestSequence: 1,
     pendingSnapshotRequestId: null,
     pendingHistoryCursorRequestId: null,
+    documentRefreshFailure: null,
+    failureNotice: null,
     editSessionCursorContext: null,
   };
 }
@@ -123,6 +125,8 @@ export function toIdleState(
     nextRequestSequence: state.nextRequestSequence,
     pendingSnapshotRequestId: state.pendingSnapshotRequestId,
     pendingHistoryCursorRequestId: state.pendingHistoryCursorRequestId,
+    documentRefreshFailure: state.documentRefreshFailure,
+    failureNotice: state.failureNotice,
     editSessionCursorContext: state.editSessionCursorContext,
   };
 }
@@ -149,6 +153,8 @@ export function createCommandState(
     nextRequestSequence: state.nextRequestSequence,
     pendingSnapshotRequestId: state.pendingSnapshotRequestId,
     pendingHistoryCursorRequestId: state.pendingHistoryCursorRequestId,
+    documentRefreshFailure: state.documentRefreshFailure,
+    failureNotice: state.failureNotice,
     editSessionCursorContext: null,
     pendingRequestId: null,
     command: {
@@ -190,6 +196,8 @@ export function createFeatureEditingState(
     nextRequestSequence: state.nextRequestSequence,
     pendingSnapshotRequestId: state.pendingSnapshotRequestId,
     pendingHistoryCursorRequestId: state.pendingHistoryCursorRequestId,
+    documentRefreshFailure: state.documentRefreshFailure,
+    failureNotice: state.failureNotice,
     editSessionCursorContext: state.editSessionCursorContext
       ? advanceCursorPhase(state.editSessionCursorContext, "sessionOpened")
       : null,
@@ -223,6 +231,8 @@ export function createSketchPlaneEditingState(
     nextRequestSequence: state.nextRequestSequence,
     pendingSnapshotRequestId: state.pendingSnapshotRequestId,
     pendingHistoryCursorRequestId: state.pendingHistoryCursorRequestId,
+    documentRefreshFailure: state.documentRefreshFailure,
+    failureNotice: state.failureNotice,
     editSessionCursorContext: state.editSessionCursorContext
       ? advanceCursorPhase(state.editSessionCursorContext, "sessionOpened")
       : null,
@@ -263,6 +273,8 @@ export function createImportingState(
     nextRequestSequence: state.nextRequestSequence,
     pendingSnapshotRequestId: state.pendingSnapshotRequestId,
     pendingHistoryCursorRequestId: state.pendingHistoryCursorRequestId,
+    documentRefreshFailure: state.documentRefreshFailure,
+    failureNotice: state.failureNotice,
     editSessionCursorContext: null,
     command: {
       commandSessionId: nextCommandSessionId(state, "import"),
@@ -297,6 +309,8 @@ export function createSectionViewEditingState(
     nextRequestSequence: state.nextRequestSequence,
     pendingSnapshotRequestId: state.pendingSnapshotRequestId,
     pendingHistoryCursorRequestId: state.pendingHistoryCursorRequestId,
+    documentRefreshFailure: state.documentRefreshFailure,
+    failureNotice: state.failureNotice,
     editSessionCursorContext: null,
     command: {
       ...state.command,
@@ -339,6 +353,8 @@ export function enterSketchEditing(
     nextRequestSequence: state.nextRequestSequence,
     pendingSnapshotRequestId: state.pendingSnapshotRequestId,
     pendingHistoryCursorRequestId: state.pendingHistoryCursorRequestId,
+    documentRefreshFailure: state.documentRefreshFailure,
+    failureNotice: state.failureNotice,
     editSessionCursorContext: state.editSessionCursorContext
       ? advanceCursorPhase(state.editSessionCursorContext, "sessionOpened")
       : null,

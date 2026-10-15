@@ -15,7 +15,10 @@ import type {
   EditorEffectRuntime,
 } from "@/core/editor/state-machine";
 import { createFeatureEditSession } from "@/domain/editor/feature-editing";
-import { hydrateFeatureSessionFromSnapshot } from "@/core/editor/state-machine";
+import {
+  createEditorEffectFailureEvent,
+  hydrateFeatureSessionFromSnapshot,
+} from "@/core/editor/state-machine";
 import {
   applySelectionToSketchPlaneEditSession,
   hydrateSketchPlaneEditSession,
@@ -55,11 +58,26 @@ test("editor effect runtime covers snapshot, sketch-open, and feature-hydration 
     "Successful snapshot fetches should hand off the loaded snapshot and derived selection catalog.",
   ).toBeTruthy();
 
-  const failed = await runEditorEffect(snapshotEffect, {
+  // T17o (T17c3 route): the executor no longer catches a failed fetch; it
+  // reaches the event loop's error reporting, which maps it to the typed
+  // failure event (`effect.snapshotFailed`, ids and message preserved).
+  const failure = await runEditorEffect(snapshotEffect, {
     async getCurrentDocumentSnapshot() {
       throw new Error("Repository offline.");
     },
-  } as EditorEffectRuntime);
+  } as EditorEffectRuntime).then(
+    () => null,
+    (error: unknown) => error,
+  );
+  expect(
+    failure instanceof Error && failure.message,
+    "Snapshot fetch failures should escape the executor to the event loop's error reporting.",
+  ).toBe("Repository offline.");
+  const failed = createEditorEffectFailureEvent(
+    snapshotEffect,
+    failure,
+    "Editor runtime invocation failed.",
+  );
   expect(
     failed.type,
     "Snapshot fetch failures should re-enter the state machine as typed failure events.",
@@ -157,6 +175,73 @@ test("editor effect runtime covers snapshot, sketch-open, and feature-hydration 
       hydrateMissing.message,
     "Missing feature hydration should fail saying the feature is gone.",
   ).toBe("The feature to edit no longer exists in this document.");
+});
+
+// T17o review fixes. Logic lane; seam: the effect executor. A sketch open,
+// feature hydration or history move that throws is no longer caught into its
+// failure event (which nothing reported): it escapes to the event loop's
+// error reporting, which maps it to the same typed event. Red on base: each
+// resolved to its failure event.
+test("T17o review: thrown sketch-open, feature-hydration and history-move failures escape the executor", async () => {
+  const snapshot = await createSeedDocumentSnapshot();
+  const failing = {
+    async getCurrentDocumentSnapshot() {
+      throw new Error("Repository offline.");
+    },
+    async setDocumentCursor() {
+      throw new Error("Cursor write failed.");
+    },
+  } as unknown as EditorEffectRuntime;
+  const base = {
+    documentId: snapshot.document.documentId,
+    commandSessionId: "command_t17o" as never,
+  };
+  const effects: [EditorEffect, string][] = [
+    [
+      {
+        ...base,
+        type: "sketch.openSession",
+        requestId: "request_t17o_open" as EditorEffect["requestId"],
+        revisionId: snapshot.document.revisionId,
+        selection: [
+          { kind: "sketch", sketchId: snapshot.document.sketches[0]!.sketchId },
+        ],
+      } as EditorEffect,
+      "Repository offline.",
+    ],
+    [
+      {
+        ...base,
+        type: "feature.hydrateFromSelection",
+        requestId: "request_t17o_hydrate" as EditorEffect["requestId"],
+        revisionId: snapshot.document.revisionId,
+        selectedFeatureId: snapshot.document.features[0]!.featureId,
+      } as EditorEffect,
+      "Repository offline.",
+    ],
+    [
+      {
+        type: "document.moveHistoryCursor",
+        requestId: "request_t17o_cursor" as EditorEffect["requestId"],
+        documentId: snapshot.document.documentId,
+        baseRevisionId: snapshot.document.revisionId,
+        mutationBasis: { baseRepositoryHeads: null },
+        cursor: snapshot.document.cursor,
+        transient: false,
+      } as unknown as EditorEffect,
+      "Cursor write failed.",
+    ],
+  ];
+  for (const [effect, message] of effects) {
+    const failure = await runEditorEffect(effect, failing).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(
+      failure instanceof Error && failure.message,
+      `${effect.type} failures escape to the event loop's error reporting`,
+    ).toBe(message);
+  }
 });
 
 test("editor effect runtime maps preview, commit, and sketch projection outcomes", async () => {

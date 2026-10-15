@@ -69,104 +69,89 @@ export function createEffectExecutor(runtime: EditorEffectRuntime) {
   ): Promise<EditorEvent> {
     switch (effect.type) {
       case "document.fetchSnapshot": {
-        try {
-          const snapshot = await runtime.getCurrentDocumentSnapshot();
+        // T17o (T17c3 route): a failed fetch is not caught here. It reaches
+        // the event loop's error reporting, which then dispatches
+        // `effect.snapshotFailed` (the workbench shows a notice from it).
+        const snapshot = await runtime.getCurrentDocumentSnapshot();
 
-          return {
-            type: "effect.snapshotLoaded",
-            payload: {
-              requestId: effect.requestId,
-              documentId: snapshot.document.documentId,
-              revisionId: snapshot.document.revisionId,
-              snapshot,
-              selectionCatalog: buildSelectionTargetCatalog(snapshot),
-              preserveRenderRecordsOnFeatureDiagnostics:
-                effect.preserveRenderRecordsOnFeatureDiagnostics,
-            },
-          };
-        } catch (error: unknown) {
-          return createEditorEffectFailureEvent(
-            effect,
-            error,
-            "Snapshot refresh failed.",
-          );
-        }
+        return {
+          type: "effect.snapshotLoaded",
+          payload: {
+            requestId: effect.requestId,
+            documentId: snapshot.document.documentId,
+            revisionId: snapshot.document.revisionId,
+            snapshot,
+            selectionCatalog: buildSelectionTargetCatalog(snapshot),
+            preserveRenderRecordsOnFeatureDiagnostics:
+              effect.preserveRenderRecordsOnFeatureDiagnostics,
+          },
+        };
       }
       case "sketch.openSession": {
-        try {
-          const snapshot = await runtime.getCurrentDocumentSnapshot();
-          const session = openSketchSessionFromSelection(
-            effect.selection.slice(),
-            snapshot,
-          );
+        // T17o review fixes: an unexpected failure is not caught here; it
+        // reaches the event loop's error reporting, which then dispatches
+        // the typed failure event (the workbench's failure notice).
+        const snapshot = await runtime.getCurrentDocumentSnapshot();
+        const session = openSketchSessionFromSelection(
+          effect.selection.slice(),
+          snapshot,
+        );
 
-          if (!session) {
-            return {
-              type: "effect.sketchSessionOpenFailed",
-              requestId: effect.requestId,
-              documentId: snapshot.document.documentId,
-              revisionId: snapshot.document.revisionId,
-              commandSessionId: effect.commandSessionId,
-              message:
-                "Sketch requires an existing sketch, construction plane, or planar face selection.",
-            };
-          }
-
+        if (!session) {
           return {
-            type: "effect.sketchSessionOpened",
+            type: "effect.sketchSessionOpenFailed",
             requestId: effect.requestId,
             documentId: snapshot.document.documentId,
             revisionId: snapshot.document.revisionId,
             commandSessionId: effect.commandSessionId,
-            session,
+            message:
+              "Sketch requires an existing sketch, construction plane, or planar face selection.",
           };
-        } catch (error: unknown) {
-          return createEditorEffectFailureEvent(
-            effect,
-            error,
-            "Sketch session could not be opened.",
-          );
         }
+
+        return {
+          type: "effect.sketchSessionOpened",
+          requestId: effect.requestId,
+          documentId: snapshot.document.documentId,
+          revisionId: snapshot.document.revisionId,
+          commandSessionId: effect.commandSessionId,
+          session,
+        };
       }
       case "feature.hydrateFromSelection": {
-        try {
-          const snapshot = await runtime.getCurrentDocumentSnapshot();
-          const session = hydrateFeatureSessionFromSnapshot(
-            snapshot,
-            effect.selectedFeatureId,
-          );
+        // T17o review fixes: an unexpected failure is not caught here; it
+        // reaches the event loop's error reporting, which then dispatches
+        // the typed failure event (the workbench's failure notice).
+        const snapshot = await runtime.getCurrentDocumentSnapshot();
+        const session = hydrateFeatureSessionFromSnapshot(
+          snapshot,
+          effect.selectedFeatureId,
+        );
 
-          if (!session) {
-            return {
-              type: "effect.featureSessionHydrationFailed",
-              requestId: effect.requestId,
-              documentId: snapshot.document.documentId,
-              revisionId: snapshot.document.revisionId,
-              commandSessionId: effect.commandSessionId,
-              // T17k2 (T17e review A-8): by label, never by id.
-              message: featureNotEditableMessage(
-                snapshot.document.features.find(
-                  (feature) => feature.featureId === effect.selectedFeatureId,
-                )?.label,
-              ),
-            };
-          }
-
+        if (!session) {
           return {
-            type: "effect.featureSessionHydrated",
+            type: "effect.featureSessionHydrationFailed",
             requestId: effect.requestId,
             documentId: snapshot.document.documentId,
             revisionId: snapshot.document.revisionId,
             commandSessionId: effect.commandSessionId,
-            session,
+            // T17k2 (T17e review A-8): by label, never by id.
+            message: featureNotEditableMessage(
+              snapshot.document.features.find(
+                (feature) => feature.featureId === effect.selectedFeatureId,
+              )?.label,
+            ),
           };
-        } catch (error: unknown) {
-          return createEditorEffectFailureEvent(
-            effect,
-            error,
-            "Feature session hydration failed.",
-          );
         }
+
+        return {
+          type: "effect.featureSessionHydrated",
+          requestId: effect.requestId,
+          documentId: snapshot.document.documentId,
+          revisionId: snapshot.document.revisionId,
+          commandSessionId: effect.commandSessionId,
+          session,
+        };
       }
       case "feature.evaluatePreview": {
         try {
@@ -530,43 +515,38 @@ export function createEffectExecutor(runtime: EditorEffectRuntime) {
         }
       }
       case "document.moveHistoryCursor": {
-        try {
-          if (!runtime.setDocumentCursor) {
-            throw new Error(
-              "Document history cursor mutation runtime is not available.",
-            );
-          }
-
-          const result = await runtime.setDocumentCursor({
-            baseRevisionId: effect.baseRevisionId,
-            baseRepositoryHeads: effect.mutationBasis.baseRepositoryHeads,
-            cursor: effect.cursor,
-            transient: effect.transient,
-          });
-
-          const snapshot = result.accepted
-            ? await runtime.getCurrentDocumentSnapshot()
-            : undefined;
-
-          return {
-            type: "effect.documentCursorMoved",
-            requestId: effect.requestId,
-            documentId: effect.documentId,
-            baseRevisionId: effect.baseRevisionId,
-            revisionId: result.revisionId,
-            accepted: result.accepted,
-            snapshot,
-            diagnostics: result.diagnostics,
-            actualRevisionId: result.actualRevisionId,
-            errorContext: result.errorContext,
-          };
-        } catch (error: unknown) {
-          return createEditorEffectFailureEvent(
-            effect,
-            error,
-            "Document history cursor move failed.",
+        // T17o review fixes: an unexpected failure is not caught here; it
+        // reaches the event loop's error reporting, which then dispatches
+        // the typed failure event (the workbench's failure notice).
+        if (!runtime.setDocumentCursor) {
+          throw new Error(
+            "Document history cursor mutation runtime is not available.",
           );
         }
+
+        const result = await runtime.setDocumentCursor({
+          baseRevisionId: effect.baseRevisionId,
+          baseRepositoryHeads: effect.mutationBasis.baseRepositoryHeads,
+          cursor: effect.cursor,
+          transient: effect.transient,
+        });
+
+        const snapshot = result.accepted
+          ? await runtime.getCurrentDocumentSnapshot()
+          : undefined;
+
+        return {
+          type: "effect.documentCursorMoved",
+          requestId: effect.requestId,
+          documentId: effect.documentId,
+          baseRevisionId: effect.baseRevisionId,
+          revisionId: result.revisionId,
+          accepted: result.accepted,
+          snapshot,
+          diagnostics: result.diagnostics,
+          actualRevisionId: result.actualRevisionId,
+          errorContext: result.errorContext,
+        };
       }
       default:
         return {

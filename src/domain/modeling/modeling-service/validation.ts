@@ -119,46 +119,6 @@ export function assertBodyId(value: unknown): BodyId {
   return value as BodyId;
 }
 
-export function assertSketchPointId(value: unknown): SketchPointId {
-  if (!isString(value)) {
-    throw new Error("Invalid sketch point ID payload.");
-  }
-
-  return value as SketchPointId;
-}
-
-export function assertSketchEntityId(value: unknown): SketchEntityId {
-  if (!isString(value)) {
-    throw new Error("Invalid sketch entity ID payload.");
-  }
-
-  return value as SketchEntityId;
-}
-
-export function assertConstraintId(value: unknown): ConstraintId {
-  if (!isString(value)) {
-    throw new Error("Invalid constraint ID payload.");
-  }
-
-  return value as ConstraintId;
-}
-
-export function assertDimensionId(value: unknown): DimensionId {
-  if (!isString(value)) {
-    throw new Error("Invalid dimension ID payload.");
-  }
-
-  return value as DimensionId;
-}
-
-export function assertRegionId(value: unknown): RegionId {
-  if (!isString(value)) {
-    throw new Error("Invalid region ID payload.");
-  }
-
-  return value as RegionId;
-}
-
 export function assertPrimitiveRef(value: unknown): PrimitiveRef {
   if (!isRecord(value) || !isString(value.kind)) {
     throw new Error("Invalid primitive reference payload.");

@@ -13,17 +13,31 @@ import { createSketchSpecialModeRegistry } from "@/core/sketch-special-modes/reg
 import type { SketchSpecialModeDefinition } from "@/core/sketch-special-modes/schema";
 import { createReferenceImageOperation } from "@/domain/reference-image/operations";
 import {
+  acceptSketchDraw,
+  beginSketchTool,
+  createNewSketchSession,
+  finalizeSketchDraw,
   getSketchSessionDerivedValidity,
   getSketchSessionPreviewLabel,
+  startSketchDraw,
   withLiveSolveBasis,
 } from "@/domain/editor/sketch-session";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import {
+  createStandardPlaneDefinition,
+  OCC_KERNEL_SETTINGS,
+} from "@/domain/modeling/opencascade-kernel-seed";
+import { runEditorEffect } from "./effect-registry";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
-import { isSketchProfileOutputCurrent } from "@/contracts/sketch/derived-validity";
 import { buildSelectionTargetCatalog } from "@/domain/modeling/document-snapshot-view";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
 import { createTestErrorReporter } from "@/contracts/errors";
-import { createEditorEventLoop } from "./editor-event-loop";
+import { getPreviousDocumentHistoryCursor } from "@/domain/modeling/document-history";
+import {
+  createEditorEventLoop,
+  getEditorInvocationFailureVisibility,
+} from "./editor-event-loop";
 
 function createRuntime(
   snapshot: Awaited<ReturnType<typeof createSeedDocumentSnapshot>>,
@@ -263,6 +277,251 @@ test("src/application/editor/editor-event-loop.spec.ts executes effects serially
     (candidate) => candidate.pendingSnapshotRequestId === null,
   );
   loop.stop();
+});
+
+// T17o (T17c3 route, high priority). Logic lane; seam: the event loop over
+// the real effect executor. A failed document snapshot fetch must reach
+// error handling (the reporter, user visibility) and leave the reason in
+// the editor state the workbench shows; a later loaded snapshot clears it.
+// Red on base: the executor caught the failure into `effect.snapshotFailed`
+// (no report) and only the debug preview label carried it, so the view
+// silently stayed on the older revision.
+test("T17o: a failed snapshot refresh is reported and kept in the editor state until a snapshot loads", async () => {
+  const snapshot = await createSeedDocumentSnapshot();
+  const reporter = createTestErrorReporter();
+  let offline = false;
+  const loop = createEditorEventLoop(
+    {
+      ...createRuntime(snapshot),
+      async getCurrentDocumentSnapshot() {
+        if (offline) throw new Error("Repository offline.");
+        return snapshot;
+      },
+    },
+    reporter,
+  );
+  loop.start();
+  await waitForState(loop, (state) => state.snapshot !== null);
+  expect(loop.getState().documentRefreshFailure, "premise").toBeNull();
+
+  offline = true;
+  loop.dispatch({ type: "document.refreshRequested" });
+  const failed = await waitForState(
+    loop,
+    (state) => state.pendingSnapshotRequestId === null,
+  );
+  expect(failed.documentRefreshFailure).toBe("Repository offline.");
+  expect(failed.snapshot, "the older revision is kept").toBe(snapshot);
+  expect(
+    reporter.reports.map(({ error, metadata }) => ({
+      code: error.code,
+      message: error.message,
+      source: metadata.source,
+      visibility: metadata.visibility,
+    })),
+  ).toEqual([
+    {
+      code: "editor/invocation-failed",
+      message: "Repository offline.",
+      source: "editor-runtime",
+      visibility: "user",
+    },
+  ]);
+
+  offline = false;
+  loop.dispatch({ type: "document.refreshRequested" });
+  const retried = await waitForState(
+    loop,
+    (state) => state.pendingSnapshotRequestId === null,
+  );
+  expect(
+    retried.documentRefreshFailure,
+    "a loaded snapshot clears it",
+  ).toBeNull();
+  loop.stop();
+});
+
+// T17o review fixes. Logic lane; seam: the event loop over the real effect
+// executor. A sketch open or history move that throws reaches error
+// reporting (user visibility) and the editor's failure notice (the
+// workbench shows it). Red on base: the executor caught both into their
+// failure events, nothing was reported, and only the debug preview label
+// carried the reason.
+test("T17o review: a thrown sketch open and a thrown history move are reported and shown as the failure notice", async () => {
+  const snapshot = await createSeedDocumentSnapshot();
+  const reporter = createTestErrorReporter();
+  let offline = false;
+  const loop = createEditorEventLoop(
+    {
+      ...createRuntime(snapshot),
+      async getCurrentDocumentSnapshot() {
+        if (offline) throw new Error("Repository offline.");
+        return snapshot;
+      },
+      async setDocumentCursor() {
+        throw new Error("Cursor write failed.");
+      },
+    },
+    reporter,
+  );
+  loop.start();
+  await waitForState(loop, (state) => state.snapshot !== null);
+  const reports = () =>
+    reporter.reports.map(({ error, metadata }) => ({
+      code: error.code,
+      message: error.message,
+      visibility: metadata.visibility,
+    }));
+
+  offline = true;
+  loop.dispatch({ type: "tool.activated", toolId: "sketch" });
+  loop.dispatch({
+    type: "viewport.selectionRequested",
+    target: { kind: "construction", constructionId: "construction_plane-xy" },
+  });
+  const openFailed = await waitForState(
+    loop,
+    (state) => state.failureNotice !== null,
+  );
+  expect(openFailed.failureNotice).toEqual({
+    kind: "sketchOpen",
+    message: "Repository offline.",
+  });
+  expect(reports()).toEqual([
+    {
+      code: "editor/invocation-failed",
+      message: "Repository offline.",
+      visibility: "user",
+    },
+  ]);
+
+  offline = false;
+  loop.dispatch({
+    type: "command.cancelled",
+    commandSessionId: (
+      openFailed as Extract<EditorState, { kind: "selectionCommand" }>
+    ).command.commandSessionId,
+  });
+  loop.dispatch({ type: "failureNotice.dismissed" });
+  expect(loop.getState().failureNotice, "dismissed").toBeNull();
+  const previous = getPreviousDocumentHistoryCursor(snapshot);
+  expect(previous, "premise: a previous history cursor").not.toBeNull();
+  loop.dispatch({ type: "document.historyCursorRequested", cursor: previous! });
+  const moveFailed = await waitForState(
+    loop,
+    (state) => state.failureNotice !== null,
+  );
+  expect(moveFailed.failureNotice).toEqual({
+    kind: "historyMove",
+    message: "Cursor write failed.",
+  });
+  expect(reports().at(-1)).toEqual({
+    code: "editor/invocation-failed",
+    message: "Cursor write failed.",
+    visibility: "user",
+  });
+  loop.stop();
+});
+
+// [TECH] T17-11 (T17o). Logic lane; seam: the loop's report policy for an
+// escaped effect failure. Red on base: every escaped failure was `user`.
+// T17o review fixes (review A-3). Logic lane; seam: the loop's escaped-effect
+// report for a real `sketch.querySnapIntersections` effect. The sketch
+// (a spline crossed by a line, an accepted basis, so the loop issues a snap
+// query) is opened through the loop; the executor fails only the snap
+// query. Fails when the loop's report is reverted to `visibility: "user"`.
+test("T17-11: the loop reports a thrown snap query with developer visibility", async () => {
+  const snapshot = await createSeedDocumentSnapshot();
+  let session = enterSketchSession(
+    createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
+  );
+  const draw = (toolId: "spline" | "line", clicks: [number, number][]) => {
+    let current = beginSketchTool(session, toolId);
+    clicks.forEach((click, index) => {
+      current =
+        index === 0
+          ? startSketchDraw(current, click)
+          : acceptSketchDraw(current, click);
+    });
+    session = toolId === "spline" ? finalizeSketchDraw(current) : current;
+  };
+  draw("spline", [
+    [0, 0],
+    [2, 3],
+    [4, 0],
+  ]);
+  draw("line", [
+    [1, -1],
+    [1, 4],
+  ]);
+  session = beginSketchTool(session, "line");
+  const runtime = createRuntime(snapshot);
+  const reporter = createTestErrorReporter();
+  const snapEffects: EditorEffect[] = [];
+  const loop = createEditorEventLoop(runtime, reporter, async (effect) => {
+    if (effect.type === "sketch.querySnapIntersections") {
+      snapEffects.push(effect);
+      throw new Error("Snap worker died.");
+    }
+    if (effect.type === "sketch.openSession")
+      return {
+        type: "effect.sketchSessionOpened",
+        requestId: effect.requestId,
+        documentId: effect.documentId,
+        revisionId: effect.revisionId,
+        commandSessionId: effect.commandSessionId,
+        session,
+      } as EditorEvent;
+    return runEditorEffect(effect, runtime);
+  });
+  loop.start();
+  await waitForState(loop, (state) => state.snapshot !== null);
+  loop.dispatch({ type: "tool.activated", toolId: "sketch" });
+  loop.dispatch({
+    type: "viewport.selectionRequested",
+    target: { kind: "construction", constructionId: "construction_plane-xy" },
+  });
+  await waitForCondition(() =>
+    reporter.reports.some(
+      (record) => record.error.message === "Snap worker died.",
+    ),
+  );
+  expect(snapEffects.length, "premise: the loop issued a snap query").toBe(1);
+  expect(
+    reporter.reports
+      .filter((record) => record.error.message === "Snap worker died.")
+      .map(({ error, metadata }) => ({
+        code: error.code,
+        source: metadata.source,
+        visibility: metadata.visibility,
+      })),
+  ).toEqual([
+    {
+      code: "editor/invocation-failed",
+      source: "editor-runtime",
+      visibility: "developer",
+    },
+  ]);
+  loop.stop();
+});
+
+test("T17-11: an escaped snap-query failure is a developer report; every other effect's is a user report", () => {
+  expect(
+    getEditorInvocationFailureVisibility({
+      type: "sketch.querySnapIntersections",
+    }),
+  ).toBe("developer");
+  for (const type of [
+    "document.fetchSnapshot",
+    "sketch.deriveRegions",
+    "sketch.publishOffsetPreview",
+    "sketch.queryEditIntersections",
+    "sketch.specialModeEffect",
+  ] as const)
+    expect(getEditorInvocationFailureVisibility({ type }), type).toBe("user");
 });
 
 test("src/application/editor/editor-event-loop.spec.ts reports escaped effect errors and continues with failure events", async () => {
@@ -653,7 +912,7 @@ test("EditorEventLoop Undo and Redo recompute equivalent invalid diagnostics and
       (diagnostic) => diagnostic.code === "solver-residual-too-large",
     ),
   ).toBe(true);
-  expect(isSketchProfileOutputCurrent(invalidValidity)).toBe(false);
+  expect(invalidValidity.state).not.toBe("current");
   const invalidFeedback = getSketchSessionPreviewLabel(currentSession());
   // T13c (D7, review R-2): the invalid feedback is the conflict explanation
   // naming both conflicting requirements, not the raw residual.
@@ -675,18 +934,16 @@ test("EditorEventLoop Undo and Redo recompute equivalent invalid diagnostics and
   expect(getSketchSessionDerivedValidity(currentSession()).state).toBe(
     "current",
   );
-  expect(
-    isSketchProfileOutputCurrent(
-      getSketchSessionDerivedValidity(currentSession()),
-    ),
-  ).toBe(true);
+  expect(getSketchSessionDerivedValidity(currentSession()).state).toBe(
+    "current",
+  );
 
   loop.dispatch({ type: "history.undoRequested" });
   const undoneValidity = getSketchSessionDerivedValidity(currentSession());
   expect(currentSession().liveRegions.status).toBe("unavailable");
   expect(undoneValidity).toEqual(invalidValidity);
   expect(getSketchSessionPreviewLabel(currentSession())).toBe(invalidFeedback);
-  expect(isSketchProfileOutputCurrent(undoneValidity)).toBe(false);
+  expect(undoneValidity.state).not.toBe("current");
 
   loop.dispatch({ type: "history.redoRequested" });
   expect(
@@ -701,7 +958,7 @@ test("EditorEventLoop Undo and Redo recompute equivalent invalid diagnostics and
   );
   const redoneValidity = getSketchSessionDerivedValidity(currentSession());
   expect(redoneValidity.state).toBe("current");
-  expect(isSketchProfileOutputCurrent(redoneValidity)).toBe(true);
+  expect(redoneValidity.state).toBe("current");
   loop.stop();
 });
 

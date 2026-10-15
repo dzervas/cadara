@@ -382,6 +382,78 @@ test("a failed derivation marks live regions failed with a diagnostic and keeps 
   expect(failed.effects, "Failures are not retried.").toEqual([]);
 });
 
+// T17o (E10, review A-6). Logic lane; seam: the reducer's region-derivation
+// failure → the session's status line (`validationMessage`, the only
+// user-visible sketch status; the preview label is debug-only). Red on base:
+// a failed round (e.g. "OCC worker transport failed.") left the status line
+// untouched, so the regions went silently non-current.
+test("T17o A-6: a failed region derivation is explained on the status line until a new round starts", async () => {
+  const { state } = await makeSketchState();
+  const round = (from: SketchEditorState) => {
+    const next = transitionEditorState(
+      withSession(
+        from,
+        withLiveSolveBasis(from.session, from.session.definition),
+      ),
+      { type: "document.refreshRequested" },
+    );
+    return {
+      state: next.state as SketchEditorState,
+      effect: onlyDeriveEffect(next.effects),
+    };
+  };
+  const first = round(state);
+  expect(first.state.session.validationMessage, "premise").toBeNull();
+  const failed = transitionEditorState(first.state, {
+    type: "effect.sketchRegionDerivationFailed",
+    requestId: first.effect.requestId,
+    documentId: first.effect.documentId,
+    commandSessionId: first.effect.commandSessionId,
+    baseRevisionId: first.effect.baseRevisionId,
+    generation: first.effect.generation,
+    message: "OCC worker transport failed.",
+  }).state as SketchEditorState;
+  const text =
+    "OCC worker transport failed. The sketch's regions could not be computed, so its profiles are blocked. Edit the sketch to try again, or Undo.";
+  expect(failed.session.validationMessage).toBe(text);
+  expect(getSketchSessionPreviewLabel(failed.session)).toBe(text);
+
+  const second = round(failed);
+  expect(
+    second.state.session.validationMessage,
+    "a new round (an edit, a refresh) clears the failure text",
+  ).toBeNull();
+  const published = transitionEditorState(
+    second.state,
+    derivedEvent(
+      second.effect,
+      structuredClone(state.session.liveRegions.regions),
+    ),
+  ).state as SketchEditorState;
+  expect(published.session.liveRegions.status).toBe("current");
+  expect(
+    published.session.validationMessage,
+    "and the published round leaves it cleared",
+  ).toBeNull();
+
+  const other = {
+    ...failed.session,
+    validationMessage: "Another owner's message.",
+  };
+  const third = round(withSession(failed, other));
+  const kept = transitionEditorState(
+    third.state,
+    derivedEvent(
+      third.effect,
+      structuredClone(state.session.liveRegions.regions),
+    ),
+  ).state as SketchEditorState;
+  expect(
+    kept.session.validationMessage,
+    "another owner's status line is kept",
+  ).toBe("Another owner's message.");
+});
+
 test("an accepted edit after an unavailable or failed state drops the stale synthetic diagnostics", async () => {
   const { state } = await makeSketchState();
   const definition = state.session.definition;
@@ -430,8 +502,10 @@ test("an accepted edit after an unavailable or failed state drops the stale synt
     }).state as SketchEditorState
   ).session;
   expect(failedSession.liveRegions.status).toBe("failed");
+  // T17o (A-6): the status line now carries the failure (with what is
+  // blocked and the recovery), so the preview label shows that text.
   expect(getSketchSessionPreviewLabel(failedSession)).toBe(
-    "Region derivation exploded.",
+    "Region derivation exploded. The sketch's regions could not be computed, so its profiles are blocked. Edit the sketch to try again, or Undo.",
   );
   expectClean(withLiveSolveBasis(failedSession, definition), "failed");
 });

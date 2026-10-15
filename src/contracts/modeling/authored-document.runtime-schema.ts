@@ -7,7 +7,7 @@ import {
 import type {
   AuthoredModelDocument,
   AuthoredModelDocumentDiagnostic,
-  AuthoredModelDocumentMigrationResult,
+  AuthoredModelDocumentParseResult,
 } from "@/contracts/modeling/authored-document";
 import { validateContract } from "@/contracts/shared/validation";
 import { validateFeatureDefinitionAuthoredValueInvariants } from "@/contracts/modeling/feature-authored-values";
@@ -283,9 +283,16 @@ function validateAuthoredModelDocumentInvariants(
   return null;
 }
 
-export function migrateAuthoredModelDocument(
+/**
+ * The persistence boundary of the authored document: Typia validation plus
+ * the document invariants. T17o (T17-15): the former
+ * `migrateAuthoredModelDocument` it delegated to migrated nothing (its
+ * `migrated` flag was always false) and is folded in here; there are no
+ * migrations (specification "No backward compatibility").
+ */
+export function parseAuthoredModelDocument(
   value: unknown,
-): AuthoredModelDocumentMigrationResult {
+): AuthoredModelDocumentParseResult {
   const result = validateContract(authoredModelDocumentValidator, value);
   if (!result.success) {
     return {
@@ -305,15 +312,5 @@ export function migrateAuthoredModelDocument(
     };
   }
 
-  return {
-    ok: true,
-    document,
-    migrated: false,
-  };
-}
-
-export function parseAuthoredModelDocument(
-  value: unknown,
-): AuthoredModelDocumentMigrationResult {
-  return migrateAuthoredModelDocument(value);
+  return { ok: true, document };
 }

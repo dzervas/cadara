@@ -69,10 +69,16 @@ export function handleEffectDocumentCursorMoved(
     const message =
       event.diagnostics[0]?.message ??
       `Document history cursor move rejected due to revision conflict (${event.actualRevisionId ?? "unknown"}).`;
+    const refreshable = isRefreshableDocumentCursorConflict(event);
     const nextState = withPreview(
       {
         ...state,
         pendingHistoryCursorRequestId: null,
+        // T17o review fixes: a refused move is shown, not only on the
+        // debug preview label (a refreshable conflict re-fetches instead).
+        ...(refreshable
+          ? {}
+          : { failureNotice: { kind: "historyMove" as const, message } }),
       },
       {
         kind: "selection",
@@ -81,7 +87,7 @@ export function handleEffectDocumentCursorMoved(
       },
     );
 
-    return isRefreshableDocumentCursorConflict(event)
+    return refreshable
       ? emitSnapshotFetch(nextState, null)
       : { state: nextState, effects: [] };
   }
@@ -94,6 +100,7 @@ export function handleEffectDocumentCursorMoved(
     },
     pendingHistoryCursorRequestId: null,
     preview: null,
+    failureNotice: clearedFailureNotice(state, "historyMove"),
   } satisfies EditorState;
 
   if (!event.snapshot) {
@@ -103,6 +110,14 @@ export function handleEffectDocumentCursorMoved(
   return continueAfterSnapshotRefresh(
     updateStateDocumentSnapshot(nextState, event.snapshot),
   );
+}
+
+/** T17o review fixes: a success of `kind` clears that kind's notice. */
+function clearedFailureNotice(
+  state: EditorState,
+  kind: NonNullable<EditorState["failureNotice"]>["kind"],
+) {
+  return state.failureNotice?.kind === kind ? null : state.failureNotice;
 }
 
 export function handleEffectDocumentCursorMoveFailed(
@@ -121,6 +136,7 @@ export function handleEffectDocumentCursorMoveFailed(
       {
         ...state,
         pendingHistoryCursorRequestId: null,
+        failureNotice: { kind: "historyMove", message: event.message },
       },
       {
         kind: "selection",
@@ -161,6 +177,7 @@ export function handleEffectSnapshotFailed(
       {
         ...state,
         pendingSnapshotRequestId: null,
+        documentRefreshFailure: event.error,
       },
       {
         kind: "selection",
@@ -186,7 +203,10 @@ export function handleEffectSketchSessionOpened(
     return { state, effects: [] };
   }
 
-  return enterSketchEditing(state, event.session);
+  return enterSketchEditing(
+    { ...state, failureNotice: clearedFailureNotice(state, "sketchOpen") },
+    event.session,
+  );
 }
 
 export function handleEffectSketchSessionOpenFailed(
@@ -212,6 +232,7 @@ export function handleEffectSketchSessionOpenFailed(
           ...state.command,
           phase: "armed",
         },
+        failureNotice: { kind: "sketchOpen", message: event.message },
       },
       {
         kind: "selection",
@@ -242,6 +263,7 @@ export function handleEffectFeatureSessionHydrated(
       {
         ...state,
         pendingRequestId: null,
+        failureNotice: clearedFailureNotice(state, "featureEdit"),
       },
       state.command,
       event.session,
@@ -268,6 +290,7 @@ export function handleEffectFeatureSessionHydrationFailed(
       {
         ...state,
         pendingRequestId: null,
+        failureNotice: { kind: "featureEdit", message: event.message },
       },
       {
         kind: "selection",

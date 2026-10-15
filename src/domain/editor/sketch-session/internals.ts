@@ -445,6 +445,30 @@ const LIVE_REGIONS_UNAVAILABLE_DIAGNOSTIC: SketchSolveDiagnostic = {
 const LIVE_REGIONS_DERIVATION_FAILED_CODE = "regions-derivation-failed";
 
 /**
+ * T17o (E10, review A-6): the status line of a failed live-region
+ * derivation (e.g. "OCC worker transport failed."): the reason, what is
+ * blocked and the recovery (an edit starts a new derivation round).
+ */
+function liveRegionsFailedText(message: string) {
+  return `${message} The sketch's regions could not be computed, so its profiles are blocked. Edit the sketch to try again, or Undo.`;
+}
+
+/** Whether `message` is the status line `failSketchLiveRegions` composed from `diagnostics`. */
+function isLiveRegionsFailedText(
+  diagnostics: readonly SketchSolveDiagnostic[],
+  message: string | null,
+) {
+  return (
+    message !== null &&
+    diagnostics.some(
+      (diagnostic) =>
+        diagnostic.code === LIVE_REGIONS_DERIVATION_FAILED_CODE &&
+        liveRegionsFailedText(diagnostic.message) === message,
+    )
+  );
+}
+
+/**
  * An accepted solve: solved, with every constraint status accepted. Live
  * regions derive only from one; pick and snap read a snapshot's spline spans
  * only from one (otherwise the authored reconstruction the display draws).
@@ -551,6 +575,13 @@ export function withLiveSolveBasis(
   const generation = session.liveRegions.generation + 1;
   return {
     ...session,
+    // T17o (A-6): a new round replaces a failed one's status line.
+    ...(isLiveRegionsFailedText(
+      session.liveRegions.diagnostics,
+      session.validationMessage,
+    )
+      ? { validationMessage: null }
+      : {}),
     liveSolve: {
       sourceDefinition: definition,
       definition: evaluatedDefinition,
@@ -781,6 +812,10 @@ export function failSketchLiveRegions(
 ): SketchSessionState {
   return {
     ...session,
+    // T17o (E10, review A-6): a failed derivation (e.g. the derivation
+    // worker's transport failing) is shown on the status line, not only on
+    // the debug preview label; the next published round clears it.
+    validationMessage: liveRegionsFailedText(message),
     liveRegions: {
       ...session.liveRegions,
       status: "failed",
@@ -857,15 +892,24 @@ export function getSketchSessionSolvedSnapshot(
  * offset and fails no relationship. Readers draw the authored geometry and
  * claim nothing current from it.
  */
-export const SKETCH_NOT_SOLVED_YET: SolvedSketchSnapshot = {
+export const SKETCH_NOT_SOLVED_YET: SolvedSketchSnapshot = Object.freeze({
   schemaVersion: SOLVED_SKETCH_SCHEMA_VERSION,
-  status: { solveState: "notEvaluated", constraintState: "unknown" },
-  solvedEntities: [],
-  solvedPoints: [],
-  constraintStatuses: [],
-  dimensionStatuses: [],
-  diagnostics: [],
-};
+  status: Object.freeze({
+    solveState: "notEvaluated" as const,
+    constraintState: "unknown" as const,
+  }),
+  // T17o (T17g3 ADV-2): shared by every unsolved session, so frozen (an
+  // in-place mutation throws instead of corrupting them all).
+  solvedEntities: frozenEmpty<SolvedSketchSnapshot["solvedEntities"]>(),
+  solvedPoints: frozenEmpty<SolvedSketchSnapshot["solvedPoints"]>(),
+  constraintStatuses: frozenEmpty<SolvedSketchSnapshot["constraintStatuses"]>(),
+  dimensionStatuses: frozenEmpty<SolvedSketchSnapshot["dimensionStatuses"]>(),
+  diagnostics: frozenEmpty<SolvedSketchSnapshot["diagnostics"]>(),
+});
+
+function frozenEmpty<T extends unknown[]>(): T {
+  return Object.freeze([]) as unknown as T;
+}
 
 /**
  * Display validity of the session's live regions: pending is stale; not

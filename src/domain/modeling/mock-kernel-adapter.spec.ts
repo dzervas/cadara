@@ -3,14 +3,18 @@ import { test, expect } from "vitest";
 import { createAuthoredModelDocumentFromSnapshot } from "@/contracts/modeling/authored-document";
 import { MockKernelAdapter } from "./mock-kernel-adapter";
 import { createCertifiedNeutralCurveQuery } from "@/domain/modeling/neutral-curve-certification/query";
+import { createModelingService } from "./modeling-service";
+// T17o review A-1: `modelingRuntimeValidators` (no production consumer) is
+// deleted; its members were these individually exported normalizers.
 import {
-  createModelingService,
-  modelingRuntimeValidators,
-} from "./modeling-service";
+  normalizeFeatures,
+  normalizeRenderables,
+} from "./modeling-service/normalization";
 import { MockSketchSolverAdapter } from "@/domain/solver/mock-sketch-solver-adapter";
 import {
   bindRenderableObject,
-  resolvePickTarget,
+  collectRaycastPickCandidates,
+  resolveAllCandidates,
 } from "@/infrastructure/viewport/render-picking";
 import * as THREE from "three";
 import {
@@ -3518,7 +3522,11 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
       },
     ] as THREE.Intersection<THREE.Object3D>[];
 
-    const result = resolvePickTarget(intersections);
+    // T17o (G5): the viewport's raycast resolution through public seams.
+    const result = resolveAllCandidates(
+      collectRaycastPickCandidates(intersections),
+      null,
+    );
 
     expect(
       result?.pickId,
@@ -3550,7 +3558,7 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
     let meshRejected = false;
 
     try {
-      modelingRuntimeValidators.renderables([validFace]);
+      normalizeRenderables([validFace]);
     } catch {
       meshRejected = true;
     }
@@ -3582,7 +3590,7 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
     let polylineRejected = false;
 
     try {
-      modelingRuntimeValidators.renderables([invalidPolyline]);
+      normalizeRenderables([invalidPolyline]);
     } catch {
       polylineRejected = true;
     }
@@ -3618,7 +3626,7 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
     let markerRejected = false;
 
     try {
-      modelingRuntimeValidators.renderables([invalidMarker]);
+      normalizeRenderables([invalidMarker]);
     } catch {
       markerRejected = true;
     }
@@ -3630,7 +3638,7 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
   }
 
   function testFeatureSnapshotValidatorPreservesMirrorAndTransformDefinitions() {
-    const features = modelingRuntimeValidators.features([
+    const features = normalizeFeatures([
       {
         ownerDocumentId: "doc_workspace",
         ownerRevisionId: "rev_1",

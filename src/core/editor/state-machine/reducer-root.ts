@@ -544,6 +544,10 @@ function handleSharedEvent(
       return { state, effects: [] };
     case "document.refreshRequested":
       return emitSnapshotFetch(state, null);
+    case "failureNotice.dismissed":
+      return state.failureNotice
+        ? { state: { ...state, failureNotice: null }, effects: [] }
+        : { state, effects: [] };
     case "document.snapshotLoaded":
       return {
         state: updateStateDocumentSnapshot(state, event.snapshot),
