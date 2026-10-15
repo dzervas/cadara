@@ -54,6 +54,7 @@ export type FeatureResultBodyType = "solid" | "surface";
 export interface ExtrudeFeatureParameterDraft {
   resultBodyType: FeatureResultBodyType;
   profileTargets: readonly ExtrudeSurfaceProfileRef[];
+  startExtent: ExtrudeFeatureParameters["startExtent"];
   extentMode: "oneSide" | "symmetric" | "twoSide";
   firstEnd: ExtrudeFeatureEndConditionDraft;
   secondEnd: ExtrudeFeatureEndConditionDraft;
