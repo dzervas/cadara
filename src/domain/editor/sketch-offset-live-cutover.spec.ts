@@ -35,6 +35,8 @@ import {
 import { extractDeclaredOffsetChainConnectivity } from "@/contracts/sketch/offset-chain-connectivity";
 import { OFFSET_DIAGNOSTIC_CODES } from "@/contracts/sketch/offset-geometry";
 import {
+  requireSketchDefinition,
+  requireSolvedSketchSnapshot,
   validateSketchDefinition,
   validateSketchRecord,
   validateSolvedSketchSnapshot,
@@ -112,10 +114,6 @@ import {
 } from "@/domain/editor/sketch-session/editing";
 import { AuthoredActionHistory } from "@/domain/modeling/authored-action-history";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
-import {
-  normalizeSketchDefinition,
-  normalizeSolvedSketchSnapshot,
-} from "@/domain/modeling/modeling-service/normalization";
 import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
 import { createCertifiedNeutralCurveRequestQuery } from "@/domain/modeling/neutral-curve-certification/query";
 import {
@@ -1114,7 +1112,7 @@ describe("T08b-g5a live offset cutover", () => {
     const snapshot = committed.liveSolve!.solvedSnapshot;
     expect(validateSketchDefinition(definition).success).toBe(true);
     expect(validateSolvedSketchSnapshot(snapshot).success).toBe(true);
-    const roundTripped = normalizeSketchDefinition(
+    const roundTripped = requireSketchDefinition(
       JSON.parse(JSON.stringify(definition)),
     );
     expect(
@@ -1136,9 +1134,10 @@ describe("T08b-g5a live offset cutover", () => {
     const solvedRoundTrip = JSON.parse(JSON.stringify(snapshot));
     expect(validateSolvedSketchSnapshot(solvedRoundTrip).success).toBe(true);
     expect(solvedRoundTrip).toEqual(snapshot);
-    // The hand-written normalizer has no solved spline case (pre-existing);
-    // its shell and plan cases are checked on the shell-only snapshot.
-    const shellOnly = normalizeSolvedSketchSnapshot(
+    // T17o (E2): the hand-written normalizer is deleted; the Typia
+    // validator (the persistence boundary) checks the shell and plan cases
+    // on the shell-only snapshot, as the normalizer's rows did.
+    const shellOnly = requireSolvedSketchSnapshot(
       JSON.parse(
         JSON.stringify({
           ...snapshot,
@@ -1158,7 +1157,7 @@ describe("T08b-g5a live offset cutover", () => {
     expect(rejected.success ? null : rejected.issues[0]!.message).toMatch(
       /sketch-definition\/v1alpha1.*no migration/,
     );
-    expect(() => normalizeSketchDefinition(retired)).toThrow(
+    expect(() => requireSketchDefinition(retired)).toThrow(
       /sketch-definition\/v1alpha1/,
     );
     expect(
@@ -1168,7 +1167,7 @@ describe("T08b-g5a live offset cutover", () => {
       }).success,
     ).toBe(false);
     expect(() =>
-      normalizeSolvedSketchSnapshot({
+      requireSolvedSketchSnapshot({
         ...snapshot,
         schemaVersion: "solved-sketch/v1alpha1",
       }),
@@ -1206,18 +1205,21 @@ describe("T08b-g5a live offset cutover", () => {
     ).toContain(
       "An offset spline seed has no fit-point output; its output is a derived shell.",
     );
-    expect(() =>
-      normalizeSketchDefinition(
-        JSON.parse(
-          JSON.stringify({
-            ...definition,
-            derivedRelationships: [
-              { ...relationship, piecewiseCubicOutputs: undefined },
-            ],
-          }),
-        ),
+    const withoutShells = validateSketchDefinition(
+      JSON.parse(
+        JSON.stringify({
+          ...definition,
+          derivedRelationships: [
+            { ...relationship, piecewiseCubicOutputs: undefined },
+          ],
+        }),
       ),
-    ).toThrow(/offset derivation payload/);
+    );
+    expect(
+      withoutShells.success
+        ? []
+        : withoutShells.issues.map((issue) => issue.path),
+    ).toContain("derivedRelationships[0].piecewiseCubicOutputs");
     // Deleting the shell alone leaves the relationship naming a missing shell.
     const orphaned: SketchDefinition = {
       ...definition,
@@ -1315,7 +1317,7 @@ describe("T08b-g5a live offset cutover", () => {
       ),
       "The diagnostic is source-linked to the seed.",
     ).toBe(true);
-    const reopened = normalizeSketchDefinition(
+    const reopened = requireSketchDefinition(
       JSON.parse(JSON.stringify(invalid)),
     );
     const second = solve(reopened);
@@ -1881,7 +1883,7 @@ async function expectRetainedBrokenSeed(
   ).toBe(true);
   expect(diagnosed(record.derivedValidity.diagnostics)).toBe(true);
   expect(shellRecord(record.solvedSnapshot).publication).toBe("provisional");
-  const reopened = normalizeSketchDefinition(
+  const reopened = requireSketchDefinition(
     JSON.parse(JSON.stringify(record.definition)),
   );
   expect(validateSketchDefinition(reopened).success).toBe(true);
@@ -4247,9 +4249,9 @@ describe("T08b-g5c non-accepted offset outputs ([TECH] G19/G19a, U-G5)", () => {
       "idempotent (equal; a round's ids replace the recorded ones, review advisory 4)",
     ).toEqual(published);
     expect(validateSolvedSketchSnapshot(published).success).toBe(true);
-    expect(normalizeSolvedSketchSnapshot(published)).toEqual(published);
+    expect(requireSolvedSketchSnapshot(published)).toEqual(published);
     expect(
-      "certifiedOffsetDerivationIds" in normalizeSolvedSketchSnapshot(raw),
+      "certifiedOffsetDerivationIds" in requireSolvedSketchSnapshot(raw),
       "absent stays absent",
     ).toBe(false);
     const duplicate = validateSolvedSketchSnapshot({
@@ -4282,11 +4284,11 @@ describe("T08b-g5c non-accepted offset outputs ([TECH] G19/G19a, U-G5)", () => {
       "A certified offset relationship id must reference an existing offset relationship.",
     );
     expect(() =>
-      normalizeSolvedSketchSnapshot({
+      requireSolvedSketchSnapshot({
         ...published,
         certifiedOffsetDerivationIds: [1],
       }),
-    ).toThrow("Invalid certified offset relationship id payload.");
+    ).toThrow(/certifiedOffsetDerivationIds\[0\]/);
   }, 300_000);
 });
 
@@ -5745,7 +5747,7 @@ describe("T08b-g7b relationship-scoped solve-frame failures ([TECH] G16′, U-G9
       record.regions.filter(isUnrelatedRegion(built.lines)),
       "the unrelated region is saved",
     ).toHaveLength(1);
-    const reopened = normalizeSketchDefinition(
+    const reopened = requireSketchDefinition(
       JSON.parse(JSON.stringify(record.definition)),
     );
     const again = await commitToMockKernel(reopened, production());
@@ -6052,12 +6054,12 @@ describe("T08b-g7b relationship-scoped solve-frame failures ([TECH] G16′, U-G9
       1,
     );
     expect(
-      normalizeSolvedSketchSnapshot(
+      requireSolvedSketchSnapshot(
         JSON.parse(JSON.stringify(record.solvedSnapshot)),
       ),
       "a persisted blocked status round-trips",
     ).toEqual(record.solvedSnapshot);
-    const reopened = normalizeSketchDefinition(
+    const reopened = requireSketchDefinition(
       JSON.parse(JSON.stringify(record.definition)),
     );
     const again = await commitToMockKernel(reopened, production());

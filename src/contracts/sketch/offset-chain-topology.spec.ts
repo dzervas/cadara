@@ -7780,7 +7780,7 @@ describe("T08b-f seed arcs: native line/arc chains through the SEL (Offset relat
     },
     // T08b-g7-F: the row's tangency is now the Fillet's own, so the 1e-4
     // centre drag is solved back (was 1_012_471 / 265_257 / 482).
-    "rounded rect rotated + Tangent, dragged 1e-4 -0.01": {
+    "rounded rect rotated 0.3, fillet centre dragged 1e-4 -0.01": {
       operations: 1_326_776,
       euclideanSteps: 355_775,
       integerBits: 505,

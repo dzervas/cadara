@@ -1213,6 +1213,13 @@ function createDerivedParameterProjection(input: {
     for (const output of relationship.outputs) {
       const seed = entityById.get(output.seedEntityId);
       const target = entityById.get(output.outputEntityId);
+      // T17o (C2, [TECH] T17-12′, documented only): the empty-map fallback
+      // to the seed's defining points registers driven-dependency edges
+      // (the authority graph) and accepts nothing. Pattern and transform
+      // outputs need it. A mirror also reaches it, but a mirror with an
+      // empty seed map fails `derived-mirror-map-stale` first (evaluation,
+      // `checkMirrorOutputMap`), so its outputs are held and never
+      // consumed through these edges (T15 close-out audit §2).
       const seedPointIds =
         output.seedPointIds.length > 0
           ? output.seedPointIds

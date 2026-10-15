@@ -101,7 +101,10 @@ test("an unsolved record is not current: it is refused as a whole, by the sketch
 
 // T17e (review A-1, A-9). Logic lane; seam: the vector export model. The
 // empty-sketch, missing-point and unresolved-region texts name the sketch,
-// the geometry and the region by label, never by id.
+// the geometry and the region by label, never by id. T17o (T17d review
+// A-4): the authored fallback for an entity without a solved record (which
+// produced the missing-point text) is deleted; such an entity is refused,
+// by label, as having no solved geometry.
 test("T17e: empty sketch, missing point and unresolved region texts are label-based", () => {
   const exportOf = (record: SketchSnapshotRecord) =>
     buildSketchVectorExportModel({
@@ -175,14 +178,12 @@ test("T17e: empty sketch, missing point and unresolved region texts are label-ba
   }));
   const texts = [
     messages(empty, "sketch-vector-empty-sketch"),
-    messages(missing, "sketch-vector-missing-point"),
+    messages(missing, "sketch-vector-missing-solved-geometry"),
     messages(unresolved, "sketch-vector-region-unresolved"),
   ];
   expect(texts).toEqual([
     ["Sketch ‘Sketch Profile’ has no exportable vector geometry."],
-    [
-      "Sketch export skipped ‘Bottom’ because one of its points no longer exists.",
-    ],
+    ["Sketch export skipped ‘Bottom’ because it has no solved geometry."],
     ["Square region was not exported: its boundary could not be resolved."],
   ]);
   expectNoInternalIds(texts.flat(), ["entity_", "point_", "sketch_profile"]);

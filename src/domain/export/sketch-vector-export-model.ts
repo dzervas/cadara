@@ -33,14 +33,9 @@ import {
 } from "@/contracts/sketch/region-boundary-curves";
 import {
   clippedSolvedCubicSpanPoles,
-  reconstructSplineAggregate,
   solvedCubicSpans,
 } from "@/contracts/sketch/spline-geometry";
-import type {
-  DocumentId,
-  RevisionId,
-  SketchPointId,
-} from "@/contracts/shared/ids";
+import type { DocumentId, RevisionId } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
 
 export interface BuildSketchVectorExportModelInput {
@@ -74,27 +69,6 @@ function pointKey(point: SketchPoint2D) {
 
 function distance(left: SketchPoint2D, right: SketchPoint2D) {
   return Math.hypot(left[0] - right[0], left[1] - right[1]);
-}
-
-function getPoint(
-  pointMap: ReadonlyMap<SketchPointId, SketchPoint2D>,
-  pointId: SketchPointId,
-  diagnostics: DocumentExportDiagnostic[],
-  target: DurableRef,
-  entityLabel: string,
-) {
-  const point = pointMap.get(pointId);
-  if (!point) {
-    diagnostics.push(
-      createDiagnostic(
-        "sketch-vector-missing-point",
-        // T17e (review A-9): the skipped geometry by label.
-        `Sketch export skipped ‘${entityLabel}’ because one of its points no longer exists.`,
-        target,
-      ),
-    );
-  }
-  return point;
 }
 
 function resolveLocalFill(
@@ -170,302 +144,126 @@ export function resolveAuthoredSketchVectorStyle(
 function buildEntity(
   entity: SketchEntityDefinition,
   solvedEntity: SolvedSketchEntityGeometryRecord | undefined,
-  pointMap: ReadonlyMap<SketchPointId, SketchPoint2D>,
   target: DurableRef,
   diagnostics: DocumentExportDiagnostic[],
 ): SketchVectorEntity | null {
   const style = resolveAuthoredSketchVectorStyle(entity.style);
 
-  if (solvedEntity) {
-    if (solvedEntity.kind === "lineSegment") {
-      return {
-        kind: "lineSegment",
-        entityId: entity.entityId,
-        label: entity.label,
-        start: solvedEntity.startPosition,
-        end: solvedEntity.endPosition,
-        isConstruction: entity.isConstruction,
-        style,
-      };
-    }
-
-    if (solvedEntity.kind === "circle") {
-      return {
-        kind: "circle",
-        entityId: entity.entityId,
-        label: entity.label,
-        center: solvedEntity.centerPosition,
-        radius: solvedEntity.solvedRadius,
-        isConstruction: entity.isConstruction,
-        style,
-      };
-    }
-
-    if (solvedEntity.kind === "arc") {
-      return {
-        kind: "arc",
-        entityId: entity.entityId,
-        label: entity.label,
-        center: solvedEntity.centerPosition,
-        start: solvedEntity.startPosition,
-        end: solvedEntity.endPosition,
-        radius: distance(
-          solvedEntity.centerPosition,
-          solvedEntity.startPosition,
-        ),
-        sweepDirection: solvedEntity.sweepDirection,
-        isConstruction: entity.isConstruction,
-        style,
-      };
-    }
-
-    if (solvedEntity.kind === "spline") {
-      if (solvedEntity.reconstruction.validity !== "valid") return null;
-      return {
-        kind: "spline",
-        entityId: entity.entityId,
-        label: entity.label,
-        spans: solvedEntity.reconstruction.spans.map((span) => span.poles),
-        isConstruction: entity.isConstruction,
-        style,
-      };
-    }
-
-    if (solvedEntity.kind === "derivedPiecewiseCubic") {
-      // [TECH] G7/G19: an accepted (certified) shell exports as SVG cubics
-      // of its solved spans clipped to their drawn domains.
-      return {
-        kind: "spline",
-        entityId: entity.entityId,
-        label: entity.label,
-        spans: solvedCubicSpans(solvedEntity).map(clippedSolvedCubicSpanPoles),
-        isConstruction: entity.isConstruction,
-        style,
-      };
-    }
-
-    if (solvedEntity.kind === "bezierCurve") {
-      return {
-        kind: "bezierCurve",
-        entityId: entity.entityId,
-        label: entity.label,
-        controlPoints: solvedEntity.controlPoints,
-        degree: solvedEntity.degree,
-        isConstruction: entity.isConstruction,
-        style,
-      };
-    }
-
-    if (solvedEntity.kind === "conic") {
-      return {
-        kind: "conic",
-        entityId: entity.entityId,
-        label: entity.label,
-        start: solvedEntity.startPosition,
-        control: solvedEntity.controlPosition,
-        end: solvedEntity.endPosition,
-        rho: solvedEntity.rho,
-        isConstruction: entity.isConstruction,
-        style,
-      };
-    }
-
+  // T17o (T17d review A-4): only current records are exported (T17d B3),
+  // and a current record's solve has a record for every entity (the solver
+  // records each entity whose points exist; a dangling point is a
+  // validation error, so never current). The authored fallback that
+  // re-interpreted entities without a solved record is deleted; an entity
+  // without one is refused explicitly, never re-derived from authored data.
+  if (!solvedEntity) {
     diagnostics.push(
       createDiagnostic(
-        "sketch-vector-unsupported-entity",
-        `‘${entity.label}’ (${solvedEntity.kind}) is not supported by sketch vector export yet.`,
+        "sketch-vector-missing-solved-geometry",
+        `Sketch export skipped ‘${entity.label}’ because it has no solved geometry.`,
         target,
       ),
     );
     return null;
   }
 
-  switch (entity.kind) {
-    case "lineSegment": {
-      const start = getPoint(
-        pointMap,
-        entity.startPointId,
-        diagnostics,
-        target,
-        entity.label,
-      );
-      const end = getPoint(
-        pointMap,
-        entity.endPointId,
-        diagnostics,
-        target,
-        entity.label,
-      );
-      return start && end
-        ? {
-            kind: entity.kind,
-            entityId: entity.entityId,
-            label: entity.label,
-            start,
-            end,
-            isConstruction: entity.isConstruction,
-            style,
-          }
-        : null;
-    }
-    case "circle": {
-      const center = getPoint(
-        pointMap,
-        entity.centerPointId,
-        diagnostics,
-        target,
-        entity.label,
-      );
-      return center
-        ? {
-            kind: entity.kind,
-            entityId: entity.entityId,
-            label: entity.label,
-            center,
-            radius: entity.radius,
-            isConstruction: entity.isConstruction,
-            style,
-          }
-        : null;
-    }
-    case "arc": {
-      const center = getPoint(
-        pointMap,
-        entity.centerPointId,
-        diagnostics,
-        target,
-        entity.label,
-      );
-      const start = getPoint(
-        pointMap,
-        entity.startPointId,
-        diagnostics,
-        target,
-        entity.label,
-      );
-      const end = getPoint(
-        pointMap,
-        entity.endPointId,
-        diagnostics,
-        target,
-        entity.label,
-      );
-      return center && start && end
-        ? {
-            kind: entity.kind,
-            entityId: entity.entityId,
-            label: entity.label,
-            center,
-            start,
-            end,
-            radius: distance(center, start),
-            sweepDirection: entity.sweepDirection,
-            isConstruction: entity.isConstruction,
-            style,
-          }
-        : null;
-    }
-    case "spline": {
-      const positions = Object.fromEntries(pointMap) as Record<
-        SketchPointId,
-        SketchPoint2D
-      >;
-      const reconstruction = reconstructSplineAggregate(entity, positions);
-      if (reconstruction.validity !== "valid") {
-        diagnostics.push(
-          createDiagnostic(
-            "sketch-vector-unsupported-entity",
-            `‘${entity.label}’ needs at least two exportable points.`,
-            target,
-          ),
-        );
-        return null;
-      }
-      return {
-        kind: entity.kind,
-        entityId: entity.entityId,
-        label: entity.label,
-        spans: reconstruction.spans.map((span) => span.poles),
-        isConstruction: entity.isConstruction,
-        style,
-      };
-    }
-    case "bezierCurve": {
-      const controlPoints = entity.controlPointIds
-        .map((pointId) =>
-          getPoint(pointMap, pointId, diagnostics, target, entity.label),
-        )
-        .filter((point): point is SketchPoint2D => point !== undefined);
-      if (controlPoints.length < 3) {
-        diagnostics.push(
-          createDiagnostic(
-            "sketch-vector-unsupported-entity",
-            `‘${entity.label}’ needs at least three exportable control points.`,
-            target,
-          ),
-        );
-        return null;
-      }
-      return {
-        kind: entity.kind,
-        entityId: entity.entityId,
-        label: entity.label,
-        controlPoints,
-        degree: entity.degree,
-        isConstruction: entity.isConstruction,
-        style,
-      };
-    }
-    case "conic": {
-      const start = getPoint(
-        pointMap,
-        entity.startPointId,
-        diagnostics,
-        target,
-        entity.label,
-      );
-      const control = getPoint(
-        pointMap,
-        entity.controlPointId,
-        diagnostics,
-        target,
-        entity.label,
-      );
-      const end = getPoint(
-        pointMap,
-        entity.endPointId,
-        diagnostics,
-        target,
-        entity.label,
-      );
-      return start && control && end
-        ? {
-            kind: entity.kind,
-            entityId: entity.entityId,
-            label: entity.label,
-            start,
-            control,
-            end,
-            rho: entity.rho,
-            isConstruction: entity.isConstruction,
-            style,
-          }
-        : null;
-    }
-    case "point":
-    case "ellipse":
-    case "ellipticalArc":
-    case "profileText":
-    case "derivedPiecewiseCubic":
-      diagnostics.push(
-        createDiagnostic(
-          "sketch-vector-unsupported-entity",
-          `‘${entity.label}’ (${entity.kind}) is not supported by sketch vector export yet.`,
-          target,
-        ),
-      );
-      return null;
+  if (solvedEntity.kind === "lineSegment") {
+    return {
+      kind: "lineSegment",
+      entityId: entity.entityId,
+      label: entity.label,
+      start: solvedEntity.startPosition,
+      end: solvedEntity.endPosition,
+      isConstruction: entity.isConstruction,
+      style,
+    };
   }
+
+  if (solvedEntity.kind === "circle") {
+    return {
+      kind: "circle",
+      entityId: entity.entityId,
+      label: entity.label,
+      center: solvedEntity.centerPosition,
+      radius: solvedEntity.solvedRadius,
+      isConstruction: entity.isConstruction,
+      style,
+    };
+  }
+
+  if (solvedEntity.kind === "arc") {
+    return {
+      kind: "arc",
+      entityId: entity.entityId,
+      label: entity.label,
+      center: solvedEntity.centerPosition,
+      start: solvedEntity.startPosition,
+      end: solvedEntity.endPosition,
+      radius: distance(solvedEntity.centerPosition, solvedEntity.startPosition),
+      sweepDirection: solvedEntity.sweepDirection,
+      isConstruction: entity.isConstruction,
+      style,
+    };
+  }
+
+  if (solvedEntity.kind === "spline") {
+    if (solvedEntity.reconstruction.validity !== "valid") return null;
+    return {
+      kind: "spline",
+      entityId: entity.entityId,
+      label: entity.label,
+      spans: solvedEntity.reconstruction.spans.map((span) => span.poles),
+      isConstruction: entity.isConstruction,
+      style,
+    };
+  }
+
+  if (solvedEntity.kind === "derivedPiecewiseCubic") {
+    // [TECH] G7/G19: an accepted (certified) shell exports as SVG cubics
+    // of its solved spans clipped to their drawn domains.
+    return {
+      kind: "spline",
+      entityId: entity.entityId,
+      label: entity.label,
+      spans: solvedCubicSpans(solvedEntity).map(clippedSolvedCubicSpanPoles),
+      isConstruction: entity.isConstruction,
+      style,
+    };
+  }
+
+  if (solvedEntity.kind === "bezierCurve") {
+    return {
+      kind: "bezierCurve",
+      entityId: entity.entityId,
+      label: entity.label,
+      controlPoints: solvedEntity.controlPoints,
+      degree: solvedEntity.degree,
+      isConstruction: entity.isConstruction,
+      style,
+    };
+  }
+
+  if (solvedEntity.kind === "conic") {
+    return {
+      kind: "conic",
+      entityId: entity.entityId,
+      label: entity.label,
+      start: solvedEntity.startPosition,
+      control: solvedEntity.controlPosition,
+      end: solvedEntity.endPosition,
+      rho: solvedEntity.rho,
+      isConstruction: entity.isConstruction,
+      style,
+    };
+  }
+
+  diagnostics.push(
+    createDiagnostic(
+      "sketch-vector-unsupported-entity",
+      `‘${entity.label}’ (${solvedEntity.kind}) is not supported by sketch vector export yet.`,
+      target,
+    ),
+  );
+  return null;
 }
 
 /** One resolved boundary segment in export form (traversal order). */
@@ -604,34 +402,11 @@ export function buildSketchVectorExportModel(
   }
 
   const diagnostics: DocumentExportDiagnostic[] = [];
-  const points = new Map<SketchPointId, SketchPoint2D>();
-  const solvedPoints = new Map(
-    sketch.sketch.solvedSnapshot.solvedPoints.map(
-      (point) => [point.pointId, point.solvedPosition] as const,
-    ),
-  );
   const solvedEntities = new Map(
     sketch.sketch.solvedSnapshot.solvedEntities.map(
       (entity) => [entity.entityId, entity] as const,
     ),
   );
-
-  for (const point of sketch.sketch.definition.points) {
-    if (points.has(point.pointId)) {
-      diagnostics.push(
-        createDiagnostic(
-          "sketch-vector-duplicate-point",
-          `Sketch export found point ‘${point.label}’ twice; the first one was kept.`,
-          input.target,
-        ),
-      );
-      continue;
-    }
-    points.set(
-      point.pointId,
-      solvedPoints.get(point.pointId) ?? point.position,
-    );
-  }
 
   // [TECH] G19: a non-accepted offset output (of a failed or pending
   // relationship, or an uncertified shell) is not exported. Geometry held by
@@ -648,7 +423,6 @@ export function buildSketchVectorExportModel(
         return buildEntity(
           entity,
           solvedEntities.get(entity.entityId),
-          points,
           input.target,
           diagnostics,
         );

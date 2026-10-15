@@ -80,12 +80,6 @@ import {
 import { getSketchDatumGuideExtent } from "./definition-patches";
 import { isSketchSvgRenderingEnabled } from "./styles";
 
-export function sampleSplinePoints(
-  points: readonly SketchPoint[],
-): SketchPoint[] {
-  return [...points];
-}
-
 export function sketchSessionHasReferenceImage(
   session: SketchSessionState,
 ): boolean {
@@ -994,6 +988,12 @@ export function createDisplayRenderablesForDerivedShells(
           styles.get(entity.entityId),
         ),
         id: `renderable_sketch_shell_${entity.entityId}` as RenderableId,
+        // T17o (B14, [TECH] T17-13): kept for owner-rule consistency with
+        // the line/arc outputs (`getNonAcceptedOutputDisplayValidity`).
+        // Its failed-owner branch is unreachable for shells today: a
+        // shell's owner is its offset, and a failed relationship could own
+        // it only through a certified offset of a held seed, which
+        // `withNonAcceptedSeedsFailed` forbids (T16b review A-2).
         regionValidity: nonAccepted.has(entity.entityId)
           ? getNonAcceptedOutputDisplayValidity(
               session,
@@ -1173,7 +1173,7 @@ export function createDisplayRenderableForEntity(
         : null,
       geometry: {
         kind: "polyline",
-        points: sampleSplinePoints(entity.points).map((point) =>
+        points: entity.points.map((point) =>
           mapSketchPointToWorld(session.plane, point),
         ),
         isClosed: false,

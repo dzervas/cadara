@@ -24,6 +24,8 @@ const FORBIDDEN_NAMES = [
   "collectTargetIntersections",
   "sampleSplineDisplayPolyline",
   "splineDescriptorPolyline",
+  // T17o (H4): the identity spline "sampler" of the session display.
+  "sampleSplinePoints",
 ] as const;
 
 const TESSELLATORS = [
@@ -52,6 +54,22 @@ const TESSELLATOR_ALLOWLIST: Record<string, string> = {
   "src/domain/measure/measurement.ts": "measurement witness polylines",
   "src/contracts/sketch/region-boundary-curves.ts":
     "tessellateBoundaryLoop draws its cubic segments with the one tessellator",
+};
+
+/**
+ * T17o (H4): the display-only Bézier samplers (one per module that draws a
+ * Bézier entity as a polyline). They interpret no geometry for modelling,
+ * so they may live only in these display modules; a sampler appearing in
+ * any other production module is caught.
+ */
+const BEZIER_DISPLAY_SAMPLER = /\bsample\w*Bezier\w*/;
+const BEZIER_SAMPLER_ALLOWLIST: Record<string, string> = {
+  "src/core/sketch-tools/tools/advanced-curves.ts":
+    "Bézier tool preview polyline",
+  "src/domain/modeling/occ/snapshot.ts":
+    "OCC snapshot display edges of Bézier entities",
+  "src/domain/editor/sketch-session/internals.ts":
+    "session display of Bézier entities",
 };
 
 const EXTENSIONS = new Set([".ts", ".tsx"]);
@@ -88,11 +106,24 @@ function scan(files: readonly { path: string; text: string }[]) {
       )
       .map(({ path }) => path),
   );
+  const samplers = new Set(
+    files
+      .filter(
+        ({ path, text }) => !isSpec(path) && BEZIER_DISPLAY_SAMPLER.test(text),
+      )
+      .map(({ path }) => path),
+  );
   return {
     forbidden,
     unlisted: [...readers].filter((path) => !(path in TESSELLATOR_ALLOWLIST)),
     stale: Object.keys(TESSELLATOR_ALLOWLIST).filter(
       (path) => !readers.has(path),
+    ),
+    unlistedSamplers: [...samplers].filter(
+      (path) => !(path in BEZIER_SAMPLER_ALLOWLIST),
+    ),
+    staleSamplers: Object.keys(BEZIER_SAMPLER_ALLOWLIST).filter(
+      (path) => !samplers.has(path),
     ),
   };
 }
@@ -126,12 +157,28 @@ test("test/static/geometry-tessellation-boundary.spec.ts", () => {
     "Defining modules and specs need no allowlist entry.",
   ).toEqual([]);
 
+  // T17o (H4): a Bézier sampler outside the display allowlist is caught;
+  // specs are exempt.
+  expect(
+    scan([
+      {
+        path: "src/domain/measure/measurement.ts",
+        text: "const points = sampleBezierPoints(controlPoints, 32);",
+      },
+      {
+        path: "src/domain/a.spec.ts",
+        text: "sampleBezierSketchPoints(controlPoints, 8);",
+      },
+    ]).unlistedSamplers,
+  ).toEqual(["src/domain/measure/measurement.ts"]);
+
   const root = process.cwd();
   const files = sourceFiles(join(root, "src")).map((path) => ({
     path: relative(root, path).replaceAll("\\", "/"),
     text: readFileSync(path).toString("latin1"),
   }));
-  const { forbidden, unlisted, stale } = scan(files);
+  const { forbidden, unlisted, stale, unlistedSamplers, staleSamplers } =
+    scan(files);
   expect(
     forbidden,
     "Deleted private spline/boundary interpretations must not return; use the exact span owner (spline-geometry.ts) or the region boundary owner.",
@@ -143,5 +190,13 @@ test("test/static/geometry-tessellation-boundary.spec.ts", () => {
   expect(
     stale,
     "An allowlisted module no longer reads a tessellator: remove its entry.",
+  ).toEqual([]);
+  expect(
+    unlistedSamplers,
+    "Bézier samplers are display-only; non-display consumers use the exact curve.",
+  ).toEqual([]);
+  expect(
+    staleSamplers,
+    "An allowlisted module no longer has a Bézier sampler: remove its entry.",
   ).toEqual([]);
 });

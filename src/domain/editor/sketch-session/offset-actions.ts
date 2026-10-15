@@ -180,9 +180,11 @@ export function applySketchOffsetRemoval(
  */
 function offsetHealth(session: SketchSessionState) {
   const live = session.liveSolve;
-  const definition = live
-    ? solvedPairDefinition(live.definition, live.solvedSnapshot)
-    : session.definition;
+  // T17o (T17g3 ADV-4): without a live solve nothing is judged yet, as in
+  // the Mirror panel; the authored definition is never judged instead.
+  if (!live)
+    return (): SketchOffsetActionEntry["health"] => ({ kind: "checking" });
+  const definition = solvedPairDefinition(live.definition, live.solvedSnapshot);
   const failures = new Map(
     evaluateSketchDerivations({
       definition,
@@ -193,7 +195,7 @@ function offsetHealth(session: SketchSessionState) {
     ]),
   );
   const certified = new Set(
-    live?.solvedSnapshot.certifiedOffsetDerivationIds ?? [],
+    live.solvedSnapshot.certifiedOffsetDerivationIds ?? [],
   );
   const labels = new Map(
     definition.entities.map((entity) => [
@@ -217,8 +219,7 @@ function offsetHealth(session: SketchSessionState) {
             : offsetFailureReason(failure.code),
       };
     }
-    if (!live || session.liveRegions.status === "pending")
-      return { kind: "checking" };
+    if (session.liveRegions.status === "pending") return { kind: "checking" };
     if (certified.has(relationship.derivationId)) return { kind: "healthy" };
     const seeds = new Set<string>(relationship.seedEntityIds);
     const published = (session.offsetPublicationDiagnostics ?? []).find(

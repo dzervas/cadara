@@ -1485,11 +1485,12 @@ export function seedArcRows(): readonly SeedArcRow[] {
     [0.01, -0.01, 0.1, -0.1],
   );
   add(
-    "rounded rect rotated + Tangent, dragged 1e-4",
-    // "+ Tangent": since T08b-g7-F the tangency is the Fillet's own (two
-    // `tangent` constraints per fillet). The native Tangent tool, which this
-    // row used to apply, adds nothing between two local curves (it only
-    // constrains a local curve to a projected circle/arc).
+    "rounded rect rotated 0.3, fillet centre dragged 1e-4",
+    // T17o (E8): the row was labelled "+ Tangent", but it applies no Tangent:
+    // since T08b-g7-F the tangency is the Fillet's own (two `tangent`
+    // constraints per fillet; the native Tangent tool adds nothing between
+    // two local curves). It is the rotated rounded rect (0.3 rad, fillet
+    // radius 0.2) with its first fillet's centre moved 1e-4 in x.
     (h) => {
       let { definition } = filleted(0.3, 0.2)(h);
       const arcs = definition.entities.filter(

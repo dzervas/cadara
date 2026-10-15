@@ -12,7 +12,10 @@ import type {
 import type { SketchDefinition } from "@/contracts/sketch/schema";
 import { makeSketchFixture } from "@/contracts/sketch/region-extraction.fixtures";
 import { sketchSnapshotRecordForTest } from "@/contracts/sketch/region-record.fixtures";
-import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
+import {
+  requireSketchDefinition,
+  validateSketchDefinition,
+} from "@/contracts/sketch/runtime-schema";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import {
   beginSketchTool,
@@ -29,7 +32,6 @@ import {
   isSketchSelectionCycleTargetEligible,
 } from "@/domain/editor/sketch-session/selection";
 import { createSketchMergePointsMutation } from "@/domain/sketch-editing/merge-points";
-import { normalizeSketchDefinition } from "@/domain/modeling/modeling-service/normalization";
 import {
   getEnterEvent,
   getEscapeEvent,
@@ -260,10 +262,10 @@ describe("Merge Points session (T13j)", () => {
       expect.objectContaining({ text: "Merged a2 into a.", tone: "warning" }),
     );
 
-    // Save and reopen the invalid merge: the persisted definition validates
-    // and normalizes unchanged, and the reopened session explains it again
+    // Save and reopen the invalid merge: the persisted definition parses
+    // (the Typia persistence validator) unchanged, and the reopened session explains it again
     // (a reopened sketch knows no merge, so the T13c text alone).
-    const saved = normalizeSketchDefinition(merged.commitRequest!.definition);
+    const saved = requireSketchDefinition(merged.commitRequest!.definition);
     expect(validateSketchDefinition(saved).success).toBe(true);
     expect(saved.pointIds).toEqual(merged.definition.pointIds);
     expect(saved.dimensions[0]).toEqual(

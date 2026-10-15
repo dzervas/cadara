@@ -394,6 +394,26 @@ describe("T17c review: the Offset panel's health and the rest of the sizing rule
           ?.entries[0]?.health,
       ).toEqual(broken);
   });
+
+  // T17o (T17g3 ADV-4). Red on base: without a live solve the health was
+  // judged on the authored definition (`broken`), where the Mirror panel
+  // judges nothing yet.
+  test("without a live solve nothing is judged: an authored-broken offset reads checking, like the Mirror panel", () => {
+    const { session } = offsetSession("lineArcJoint");
+    const offset = offsetOf(session);
+    const deleted = deleteSelectedSketchGeometry(session, [
+      entityRef(session, offset.jointOutputs[0]!.outputEntityId),
+    ]);
+    const health = (state: SketchSessionState) =>
+      computeSketchOffsetActionState(state, [entityRef(state, eid("l2"))])
+        ?.entries[0]?.health;
+    expect(health(deleted), "premise: broken with a live solve").toMatchObject({
+      kind: "broken",
+    });
+    expect(health({ ...deleted, liveSolve: null })).toEqual({
+      kind: "checking",
+    });
+  });
 });
 
 describe("T17c: Remove Offset in the session", () => {

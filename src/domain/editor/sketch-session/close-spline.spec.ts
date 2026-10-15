@@ -333,8 +333,6 @@ describe("T17c2: Close spline closes an open spline smoothly", () => {
     expect(savedSpline.target.sketchId).toBe(saved.sketchId);
     const file = JSON.parse(JSON.stringify(saved)) as SketchSnapshotRecord;
     // The persistence boundary's runtime validation ([TECH] G18, Typia).
-    // `normalizeSketchDefinition` is not used: it rejects the Spline tool's
-    // inferred origin Coincident (T17c2 finding, unrelated to closure).
     const restored = file.sketch.definition;
     expect(validateSketchDefinition(restored).success).toBe(true);
     expect(JSON.stringify(splines(restored)[0])).toBe(

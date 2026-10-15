@@ -64,18 +64,11 @@ function normalizeHistoryOrder(
   diagnostics: ModelingDiagnostic[],
 ) {
   const seen = new Set<string>();
-  const legacyOrder = [
-    ...document.sketches.map((sketch) => ({
-      kind: "sketch" as const,
-      sketchId: sketch.sketchId,
-    })),
-    ...document.featureOrder.map((featureId) => ({
-      kind: "feature" as const,
-      featureId,
-    })),
-  ];
-  const sourceOrder = document.historyOrder ?? legacyOrder;
-  const normalized = sourceOrder.filter((item) => {
+  // T17o (T17-15, review A-8): `historyOrder` is required by the contract and
+  // every caller passes a parsed document (repository results/events and the
+  // worker's normalize request all come from `parseAuthoredModelDocument`),
+  // so the legacy order rebuilt from sketches + featureOrder is deleted.
+  const normalized = document.historyOrder.filter((item) => {
     const exists =
       item.kind === "sketch"
         ? sketchIds.has(item.sketchId)

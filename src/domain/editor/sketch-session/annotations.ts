@@ -80,7 +80,7 @@ import {
   getSketchSessionInvalidFeedback,
   hasAcceptedLiveSolveOfDefinition,
   withLiveSolveBasis,
-  resolveSketchDefinitionForSolve,
+  SKETCH_NOT_SOLVED_YET,
   getTargetKey,
   normalizeConstraintValue,
   rebuildSessionCommitRequest,
@@ -1827,24 +1827,20 @@ function buildSketchAnnotationDescriptors(session: SketchSessionState): {
 } {
   const sketchId = session.sketchId ?? ("sketch_draft" as SketchId);
   const resolvedDimensionValues = resolveDimensionEffectiveValues(session);
-  const solved = solveSketchDefinitionCore({
-    definition: resolveSketchDefinitionForSolve(
-      session.definition,
-      session.documentVariables,
-    ),
-    projectedReferences: session.projectedReferences,
-    tolerances: session.solverTolerances,
-    ...getSketchSessionDerivationSettings(session),
-    partialSolvePolicy: "bestEffort",
-  });
+  // T17o (T17g3 ADV-1, T14 T-16): the annotations read the session's live
+  // solve, the one the display draws, never a second solve of their own
+  // (it could disagree, e.g. over offset publications, and cost a full solve
+  // per drag frame). Without a live solve nothing is judged yet.
+  const solvedSnapshot =
+    session.liveSolve?.solvedSnapshot ?? SKETCH_NOT_SOLVED_YET;
   const constraintDisplaySummary = getSketchConstraintDisplaySummary({
     sketchId,
     definition: session.definition,
-    solvedSnapshot: solved.solvedSnapshot,
+    solvedSnapshot,
   });
   // T13d (D12): a reference dimension shows the solve's measured value.
   const measuredValues = new Map(
-    solved.solvedSnapshot.dimensionStatuses.map((entry) => [
+    solvedSnapshot.dimensionStatuses.map((entry) => [
       entry.dimensionId,
       entry.solvedValue,
     ]),
@@ -1855,7 +1851,7 @@ function buildSketchAnnotationDescriptors(session: SketchSessionState): {
       : resolvedDimensionValues.get(dimension.dimensionId);
   const problemOf = createSketchAnnotationProblemResolver(
     session,
-    solved.solvedSnapshot,
+    solvedSnapshot,
   );
 
   const descriptors: SketchAnnotationDescriptor[] = [
@@ -1953,7 +1949,7 @@ function buildSketchAnnotationDescriptors(session: SketchSessionState): {
       };
     }),
   ];
-  return { descriptors, solvedSnapshot: solved.solvedSnapshot };
+  return { descriptors, solvedSnapshot };
 }
 
 /**

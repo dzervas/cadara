@@ -54,6 +54,10 @@ import {
   hasNonEmptyCommittedGeometry,
   isInitialOccRenderPending,
 } from "@/workbench/runtime/initial-occ-render-state";
+import {
+  getDocumentRefreshFailureNotification,
+  getEditorFailureNotification,
+} from "@/workbench/runtime/document-refresh-failure";
 import { installOccPerfMutationBridge } from "@/workbench/runtime/occ-performance-bridge";
 import type { PerformanceTelemetry } from "@/contracts/performance/telemetry";
 import {
@@ -242,6 +246,14 @@ export function CadWorkbench({
   // T17-20 (T17k2): the edited sketch was deleted by another session.
   const deletedSketchNotice = getPeerDeletedSketchNotice(machineState);
   const initialOccRenderPending = isInitialOccRenderPending(machineState);
+  const documentRefreshFailureNotification =
+    getDocumentRefreshFailureNotification(machineState, () =>
+      dispatch({ type: "document.refreshRequested" }),
+    );
+  const editorFailureNotification = getEditorFailureNotification(
+    machineState,
+    () => dispatch({ type: "failureNotice.dismissed" }),
+  );
   const previewRenderables = machineState.previewRenderables;
   const [variablesPanelOpen, setVariablesPanelOpen] = useState(false);
   const [openDocumentModalOpened, setOpenDocumentModalOpened] = useState(false);
@@ -1632,6 +1644,14 @@ export function CadWorkbench({
                       {...workbenchStatusNotification}
                       onDismiss={() => setWorkbenchStatusNotification(null)}
                     />
+                  ) : null}
+                  {documentRefreshFailureNotification ? (
+                    <WorkbenchNotification
+                      {...documentRefreshFailureNotification}
+                    />
+                  ) : null}
+                  {editorFailureNotification ? (
+                    <WorkbenchNotification {...editorFailureNotification} />
                   ) : null}
                 </div>
               </div>

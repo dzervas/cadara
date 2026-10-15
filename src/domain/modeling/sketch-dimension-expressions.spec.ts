@@ -6,8 +6,11 @@ import {
   isExpressionAuthoredValue,
 } from "@/contracts/modeling/authored-values";
 import type { DocumentVariableRecord } from "@/contracts/modeling/schema";
-import type { SketchDefinition } from "@/contracts/sketch/schema";
-import { normalizeDimensionDefinitionCore } from "@/domain/modeling/modeling-service/sketch-definition-normalization";
+import type {
+  DimensionDefinition,
+  SketchDefinition,
+} from "@/contracts/sketch/schema";
+import { requireSketchDefinition } from "@/contracts/sketch/runtime-schema";
 import {
   resolveSketchDerivationDistances,
   resolveSketchDimensionValues,
@@ -25,30 +28,31 @@ test("src/domain/modeling/sketch-dimension-expressions.spec.ts", () => {
     { variableId: "variable_gap", name: "gap", valueText: "3" },
   ];
 
-  const definition = createSketchDefinition({
-    dimensions: [
-      normalizeDimensionDefinitionCore({
-        dimensionId: "dimension_width",
-        kind: "distance",
-        label: "Width",
-        axis: "aligned",
-        pointIds: ["point_a", "point_b"],
-        value: 10,
-      }),
-      normalizeDimensionDefinitionCore({
-        dimensionId: "dimension_expr",
-        kind: "lineLength",
-        label: "Length",
-        entityId: "entity_line",
-        value: createExpressionAuthoredValue("width + gap"),
-      }),
-    ],
-  });
+  const definition = parsedSketchDefinition([
+    {
+      dimensionId: "dimension_width",
+      kind: "distance",
+      label: "Width",
+      axis: "aligned",
+      pointIds: ["sketch_point_a", "sketch_point_b"],
+      value: createLiteralAuthoredValue(10),
+    },
+    {
+      dimensionId: "dimension_expr",
+      kind: "lineLength",
+      label: "Length",
+      entityId: "sketch_entity_line",
+      value: createExpressionAuthoredValue("width + gap"),
+    },
+  ]);
 
-  const legacy = definition.dimensions[0];
+  // T17o (E2): the hand normalizer and its bare-number → literal wrapper
+  // conversion are deleted; authored literals survive the persistence
+  // boundary (Typia) as they are.
+  const literal = definition.dimensions[0];
   expect(
-    legacy.kind === "distance" && legacy.value,
-    "Legacy numeric dimension values should normalize to authored literal wrappers.",
+    literal.kind === "distance" && literal.value,
+    "Literal dimension values survive the persistence boundary as authored literal wrappers.",
   ).toEqual(createLiteralAuthoredValue(10));
 
   const expression = definition.dimensions[1];
@@ -74,17 +78,15 @@ test("src/domain/modeling/sketch-dimension-expressions.spec.ts", () => {
 });
 
 test("src/domain/modeling/sketch-dimension-expressions.spec.ts invalid expression", () => {
-  const definition = createSketchDefinition({
-    dimensions: [
-      normalizeDimensionDefinitionCore({
-        dimensionId: "dimension_bad",
-        kind: "circleRadius",
-        label: "Radius",
-        entityId: "entity_circle",
-        value: createExpressionAuthoredValue("missing + 1"),
-      }),
-    ],
-  });
+  const definition = parsedSketchDefinition([
+    {
+      dimensionId: "dimension_bad",
+      kind: "circleRadius",
+      label: "Radius",
+      entityId: "sketch_entity_circle",
+      value: createExpressionAuthoredValue("missing + 1"),
+    },
+  ]);
 
   const resolved = resolveSketchDimensionValues({ definition, variables: [] });
   expect(resolved.ok, "Unresolved symbols should block solver-boundary resolution.").toBe(
@@ -106,18 +108,16 @@ test("src/domain/modeling/sketch-dimension-expressions.spec.ts solver boundary r
   const variables: DocumentVariableRecord[] = [
     { variableId: "variable_width", name: "width", valueText: "12" },
   ];
-  const definition = createSketchDefinition({
-    dimensions: [
-      normalizeDimensionDefinitionCore({
-        dimensionId: "dimension_width",
-        kind: "distance",
-        label: "Width",
-        axis: "aligned",
-        pointIds: ["point_a", "point_b"],
-        value: createExpressionAuthoredValue("width"),
-      }),
-    ],
-  });
+  const definition = parsedSketchDefinition([
+    {
+      dimensionId: "dimension_width",
+      kind: "distance",
+      label: "Width",
+      axis: "aligned",
+      pointIds: ["sketch_point_a", "sketch_point_b"],
+      value: createExpressionAuthoredValue("width"),
+    },
+  ]);
 
   // Reproduction: handing the authored expression wrapper straight to the
   // numeric solver yields a NaN residual because arithmetic runs on an object.
@@ -174,7 +174,7 @@ test("src/domain/modeling/sketch-dimension-expressions.spec.ts offset derivation
         derivationId: "sketch_derivation_1_offset",
         label: "offset 1",
         kind: "offset",
-        seedEntityIds: ["entity_line" as never],
+        seedEntityIds: ["sketch_entity_line" as never],
         distance: createExpressionAuthoredValue("wall / 2"),
         jointPolicy: "trimExtendArcFallback",
         piecewiseCubicOutputs: [],
@@ -216,20 +216,25 @@ test("src/domain/modeling/sketch-dimension-expressions.spec.ts offset derivation
   ).toBe(1.5);
 });
 
-// T13d (D9, R-1), logic lane: the modeling-service normalization rebuilds
-// dimensions field by field; it must carry `reference` for every numeric
-// kind and reject mixed shapes. Expression resolution skips references.
+// T13d (D9, R-1), logic lane: the persistence boundary must carry
+// `reference` for every numeric kind and reject mixed shapes. Expression
+// resolution skips references. T17o (E2): ported from the deleted hand
+// normalizer to the Typia persistence validator (the dimension is parsed
+// inside its sketch definition); a value is kept as authored (no
+// bare-number → literal wrapper conversion any more).
 test("T13d R-1: normalization keeps reference dimensions of every numeric kind and rejects invalid shapes", () => {
+  const parseDimension = (dimension: unknown) =>
+    requireSketchDefinition(
+      withDimensions(makeReferenceDimensionSketch(), [
+        dimension as DimensionDefinition,
+      ]),
+    ).dimensions[0]!;
   for (const entry of makeReferenceDimensionCases()) {
     expect(
-      normalizeDimensionDefinitionCore(
-        JSON.parse(JSON.stringify(entry.reference)),
-      ),
+      parseDimension(JSON.parse(JSON.stringify(entry.reference))),
       `${entry.name}: the reference round-trips exactly`,
     ).toEqual(entry.reference);
-    const driving = normalizeDimensionDefinitionCore(
-      JSON.parse(JSON.stringify(entry.driving)),
-    );
+    const driving = parseDimension(JSON.parse(JSON.stringify(entry.driving)));
     expect("reference" in driving, `${entry.name}: driving stays driving`).toBe(
       false,
     );
@@ -238,26 +243,22 @@ test("T13d R-1: normalization keeps reference dimensions of every numeric kind a
     expect(
       (driving as Record<string, unknown>)[valueKey],
       `${entry.name}: the driving value is kept`,
-    ).toEqual(
-      createLiteralAuthoredValue(
-        (entry.driving as Record<string, number>)[valueKey]!,
-      ),
-    );
-    // D9′ (review A-2/A-3): a kept value normalizes with the marker; an
+    ).toEqual((entry.driving as Record<string, number>)[valueKey]!);
+    // D9′ (review A-2/A-3): a kept value parses with the marker; an
     // explicitly undefined value is no value.
     expect(
-      normalizeDimensionDefinitionCore({ ...entry.reference, [valueKey]: 1 }),
-      `${entry.name}: a reference keeping a value normalizes`,
+      parseDimension({ ...entry.reference, [valueKey]: 1 }),
+      `${entry.name}: a reference keeping a value parses`,
     ).toMatchObject({
       reference: true,
-      [valueKey]: createLiteralAuthoredValue(1),
+      [valueKey]: 1,
     });
     expect(
-      normalizeDimensionDefinitionCore({
+      parseDimension({
         ...entry.reference,
         [valueKey]: undefined,
       }),
-      `${entry.name}: { reference: true, value: undefined } normalizes`,
+      `${entry.name}: { reference: true, value: undefined } parses`,
     ).toEqual(entry.reference);
     for (const [shape, payload] of [
       [
@@ -269,12 +270,12 @@ test("T13d R-1: normalization keeps reference dimensions of every numeric kind a
       ["reference: 'yes'", { ...entry.reference, reference: "yes" }],
     ] as const)
       expect(
-        () => normalizeDimensionDefinitionCore(payload),
+        () => parseDimension(payload),
         `${entry.name}: ${shape} is rejected`,
       ).toThrow();
   }
   expect(() =>
-    normalizeDimensionDefinitionCore({
+    parseDimension({
       dimensionId: "dimension_arc_start",
       kind: "arcStartPointCoincident",
       label: "Arc start",
@@ -282,19 +283,19 @@ test("T13d R-1: normalization keeps reference dimensions of every numeric kind a
       pointId: "sketch_point_g",
       reference: true,
     }),
-  ).toThrow(/arc endpoint bindings cannot be reference/);
+  ).toThrow(/`reference` is not defined/);
 });
 
 test("T13d R-1: expression resolution skips reference dimensions and still resolves driving ones", () => {
   const cases = makeReferenceDimensionCases();
   const references = cases.map((entry) => entry.reference);
-  const width = normalizeDimensionDefinitionCore({
-    dimensionId: "dimension_width_expr",
+  const width: DimensionDefinition = {
+    dimensionId: "dimension_width_expr" as DimensionDefinition["dimensionId"],
     kind: "lineLength",
     label: "Width",
-    entityId: "sketch_entity_bottom",
+    entityId: "sketch_entity_bottom" as never,
     value: createExpressionAuthoredValue("width"),
-  });
+  };
   const resolved = resolveSketchDimensionValues({
     definition: withDimensions(makeReferenceDimensionSketch(), [
       ...references,
@@ -310,6 +311,15 @@ test("T13d R-1: expression resolution skips reference dimensions and still resol
   expect(resolved.definition.dimensions.at(-1)).toMatchObject({ value: 4 });
 });
 
+/** T17o (E2): the definition as the persistence boundary (Typia) parses it. */
+function parsedSketchDefinition(dimensions: readonly unknown[]) {
+  return requireSketchDefinition(
+    createSketchDefinition({
+      dimensions: dimensions as SketchDefinition["dimensions"],
+    }),
+  );
+}
+
 function createSketchDefinition(input: {
   dimensions: SketchDefinition["dimensions"];
 }): SketchDefinition {
@@ -317,57 +327,57 @@ function createSketchDefinition(input: {
     schemaVersion: "sketch-definition/v1alpha2",
     referenceIds: [],
     references: [],
-    pointIds: ["point_a", "point_b"],
+    pointIds: ["sketch_point_a", "sketch_point_b"],
     points: [
       {
-        pointId: "point_a",
+        pointId: "sketch_point_a",
         label: "A",
         target: {
           kind: "sketchPoint",
           sketchId: "sketch_1",
-          pointId: "point_a",
+          pointId: "sketch_point_a",
         },
         position: [0, 0],
         isConstruction: false,
       },
       {
-        pointId: "point_b",
+        pointId: "sketch_point_b",
         label: "B",
         target: {
           kind: "sketchPoint",
           sketchId: "sketch_1",
-          pointId: "point_b",
+          pointId: "sketch_point_b",
         },
         position: [1, 0],
         isConstruction: false,
       },
     ],
-    entityIds: ["entity_line", "entity_circle"],
+    entityIds: ["sketch_entity_line", "sketch_entity_circle"],
     entities: [
       {
         kind: "lineSegment",
-        entityId: "entity_line",
+        entityId: "sketch_entity_line",
         label: "Line",
         target: {
           kind: "sketchEntity",
           sketchId: "sketch_1",
-          entityId: "entity_line",
+          entityId: "sketch_entity_line",
         },
         isConstruction: false,
-        startPointId: "point_a",
-        endPointId: "point_b",
+        startPointId: "sketch_point_a",
+        endPointId: "sketch_point_b",
       },
       {
         kind: "circle",
-        entityId: "entity_circle",
+        entityId: "sketch_entity_circle",
         label: "Circle",
         target: {
           kind: "sketchEntity",
           sketchId: "sketch_1",
-          entityId: "entity_circle",
+          entityId: "sketch_entity_circle",
         },
         isConstruction: false,
-        centerPointId: "point_a",
+        centerPointId: "sketch_point_a",
         radius: 1,
       },
     ],

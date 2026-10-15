@@ -103,8 +103,8 @@ export interface AuthoredModelDocumentDiagnostic {
   message: string;
 }
 
-export type AuthoredModelDocumentMigrationResult =
-  | { ok: true; document: AuthoredModelDocument; migrated: boolean }
+export type AuthoredModelDocumentParseResult =
+  | { ok: true; document: AuthoredModelDocument }
   | { ok: false; diagnostic: AuthoredModelDocumentDiagnostic };
 
 export function createAuthoredModelDocumentFromSnapshot(

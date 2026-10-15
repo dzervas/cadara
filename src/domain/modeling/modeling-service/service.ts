@@ -99,22 +99,6 @@ import {
   stringifyCadaraDocument,
 } from "./helpers";
 import {
-  normalizeRevisionState,
-  normalizePreviewFreshness,
-  normalizeRebuildResult,
-  normalizeFeatureTree,
-  normalizeObjects,
-  normalizeReferences,
-  normalizeDocumentVariables,
-  normalizeRenderables,
-  normalizeSketches,
-  normalizeFeatures,
-  normalizeDocumentFeatureCursor,
-  normalizeBodies,
-  normalizeConstructions,
-  normalizeEntities,
-} from "./normalization";
-import {
   validateSnapshotResponse,
   buildDocumentRequest,
   mapCommitSketchResponse,
@@ -130,13 +114,11 @@ import {
   mapPreviewResponse,
   mapExportDocumentResponse,
   mapResolvedReferenceResponse,
-  normalizeResolution,
 } from "./snapshot";
 import {
   getAdapterReplayCursor,
   replayHistoryEntry,
 } from "./operation-history";
-import { requireRenderExport } from "@/contracts/render/runtime-schema";
 
 /** A feature kind as a history label: "extrude" → "Extrude", "deleteSolid" → "Delete Solid". */
 function featureKindLabel(kind: string) {
@@ -2131,27 +2113,3 @@ export function createModelingService(
     },
   };
 }
-
-/**
- * Optional runtime validators for typed modeling payloads.
- * The kernel boundary is statically authoritative; these helpers exist only for
- * callers that want defensive runtime checks around external adapter payloads.
- */
-export const modelingRuntimeValidators = {
-  revisionState: normalizeRevisionState,
-  previewFreshness: normalizePreviewFreshness,
-  rebuildResult: normalizeRebuildResult,
-  featureTree: normalizeFeatureTree,
-  objects: normalizeObjects,
-  references: normalizeReferences,
-  variables: normalizeDocumentVariables,
-  renderables: normalizeRenderables,
-  renderExport: requireRenderExport,
-  sketches: normalizeSketches,
-  features: normalizeFeatures,
-  documentFeatureCursor: normalizeDocumentFeatureCursor,
-  bodies: normalizeBodies,
-  constructions: normalizeConstructions,
-  entities: normalizeEntities,
-  resolution: normalizeResolution,
-} as const;

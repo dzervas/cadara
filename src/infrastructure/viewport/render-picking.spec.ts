@@ -25,10 +25,26 @@ import {
   getWorldUnitsPerPixelAt,
   intersectObjectsWithLinePickRadius,
   resolveAllCandidates,
-  resolvePickTarget,
   shouldIncludeProjectedPickCandidate,
   updateWorkspaceHighlight,
 } from "@/infrastructure/viewport/render-picking";
+
+/**
+ * T17o (G5): the raycast pick resolution the viewport performs, composed
+ * from the module's public seams (the spec-only production export
+ * `resolvePickTarget` is deleted).
+ */
+function resolvePickTarget(
+  intersections: THREE.Intersection<THREE.Object3D>[],
+  acceptsTarget: ((target: PrimitiveRef) => boolean) | null = null,
+  options: Parameters<typeof resolveAllCandidates>[2] = {},
+) {
+  return resolveAllCandidates(
+    collectRaycastPickCandidates(intersections),
+    acceptsTarget,
+    options,
+  );
+}
 
 test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
   function assertEqual<T>(

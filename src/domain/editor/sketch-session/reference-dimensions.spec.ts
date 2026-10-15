@@ -38,12 +38,15 @@ import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-a
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
-import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
-import { normalizeSketchDefinition } from "@/domain/modeling/modeling-service/normalization";
+import {
+  requireSketchDefinition,
+  validateSketchDefinition,
+} from "@/contracts/sketch/runtime-schema";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import {
   getSketchSessionDerivationSettings,
   resolveSketchDefinitionForSolve,
+  SKETCH_NOT_SOLVED_YET,
 } from "@/domain/editor/sketch-session/internals";
 
 function draw(
@@ -469,7 +472,7 @@ test.each(ADAPTERS)(
     const published = (await readSnapshot()).document.sketches.find(
       (entry) => entry.sketchId === result.sketchId,
     )!;
-    const normalized = normalizeSketchDefinition(
+    const normalized = requireSketchDefinition(
       JSON.parse(JSON.stringify(published.sketch.definition)),
     );
     expect(normalized.dimensions.at(-1)).toEqual(datumDistance);
@@ -599,4 +602,52 @@ test("T13d A-5: a reference angle's detail reads '(…°) reference angle'", () 
   expect(descriptor(reference, index).detail).toMatch(
     /^\(\d+\.\d°\) reference angle$/,
   );
+});
+
+// T17o (T17g3 ADV-1, T14 T-16). Logic lane; seam: the sketch session's
+// annotation descriptors. They read the session's live solve (the one the
+// display draws), never a solve of their own. Red on base: the descriptors
+// re-solved the definition, so a live solve that differs from that solve
+// (here: a measured value only the live solve carries) was ignored, and a
+// session without a live solve still showed solved values.
+test("T17o ADV-1: annotation descriptors follow the live solve; without one nothing is measured", () => {
+  const reference = makeReference(dimensioned(), 0);
+  expect(descriptor(reference, 0).visibleLabel, "premise").toBe("(5.00)");
+  const live = reference.liveSolve!;
+  const forged: SketchSessionState = {
+    ...reference,
+    liveSolve: {
+      ...live,
+      solvedSnapshot: {
+        ...live.solvedSnapshot,
+        dimensionStatuses: live.solvedSnapshot.dimensionStatuses.map(
+          (entry, index) =>
+            index === 0 ? { ...entry, solvedValue: 7 } : entry,
+        ),
+      },
+    },
+  };
+  expect(descriptor(forged, 0).visibleLabel).toBe("(7.00)");
+  expect(descriptor(forged, 0).detail).toBe("(7.00) mm reference diameter");
+
+  const unsolved = { ...reference, liveSolve: null };
+  expect(descriptor(unsolved, 0).visibleLabel).not.toContain("5.00");
+  expect(descriptor(unsolved, 0).detail).not.toContain("5.00");
+});
+
+// T17o (T17g3 ADV-2). The not-solved-yet sentinel is shared by every
+// unsolved session, so it is frozen. Red on base: it was a plain object.
+test("T17o ADV-2: SKETCH_NOT_SOLVED_YET is frozen, arrays included", () => {
+  expect(Object.isFrozen(SKETCH_NOT_SOLVED_YET)).toBe(true);
+  expect(Object.isFrozen(SKETCH_NOT_SOLVED_YET.status)).toBe(true);
+  for (const list of [
+    SKETCH_NOT_SOLVED_YET.solvedEntities,
+    SKETCH_NOT_SOLVED_YET.solvedPoints,
+    SKETCH_NOT_SOLVED_YET.constraintStatuses,
+    SKETCH_NOT_SOLVED_YET.dimensionStatuses,
+    SKETCH_NOT_SOLVED_YET.diagnostics,
+  ]) {
+    expect(Object.isFrozen(list)).toBe(true);
+    expect(() => (list as unknown[]).push(1)).toThrow(TypeError);
+  }
 });
