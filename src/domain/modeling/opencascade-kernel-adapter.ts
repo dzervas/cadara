@@ -1,4 +1,5 @@
 import type {
+  AuthoredDocumentRestoreOptions,
   GeometryAssetResolver,
   ModelingKernelAdapter,
 } from "@/contracts/modeling/adapter";
@@ -1856,6 +1857,9 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
 
   private initializationPromise: Promise<OccKernelRuntimeState> | null = null;
   private runtimeState: OccKernelRuntimeState | null = null;
+  /** T17k3: the highest revision sequence this kernel has held. Restores never
+   * lower it, so a minted id never names a second state. */
+  private revisionHighWater = 0;
   private runtimeGeneration = 0;
   private operationTail: Promise<void> = Promise.resolve();
   private activeOperations = 0;
@@ -2096,12 +2100,14 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     document: AuthoredModelDocument,
     diagnostics: readonly ModelingDiagnostic[] = [],
     assetResolver?: GeometryAssetResolver,
+    options: AuthoredDocumentRestoreOptions = {},
   ) {
     return this.runSerializedOperation(() =>
       this.restoreAuthoredModelDocumentSerialized(
         document,
         diagnostics,
         assetResolver,
+        options,
       ),
     );
   }
@@ -2313,6 +2319,10 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
             return acceptedRuntime;
           }
           this.runtimeState = state;
+          this.revisionHighWater = Math.max(
+            this.revisionHighWater,
+            state.revisionSequence,
+          );
           return state;
         })
         .catch((error: unknown) => {
@@ -2502,12 +2512,23 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     document: AuthoredModelDocument,
     diagnostics: readonly ModelingDiagnostic[] = [],
     assetResolver?: GeometryAssetResolver,
+    options: AuthoredDocumentRestoreOptions = {},
   ): Promise<void> {
     const parsed = parseAuthoredModelDocument(structuredClone(document));
     if (!parsed.ok) {
       throw new Error(parsed.diagnostic.message);
     }
     const validatedDocument = parsed.document;
+    // A stored id later than any this kernel has used is kept; otherwise the
+    // next unused one. The worker owns the runtime state, and so the counter.
+    if (options.newRevision && !this.workerSnapshotClient) {
+      validatedDocument.revisionId = createRevisionId(
+        Math.max(
+          this.revisionHighWater + 1,
+          parseRevisionSequence(validatedDocument.revisionId),
+        ),
+      );
+    }
     this.assetResolver = assetResolver ?? this.assetResolver;
     const assetBlobs = await resolveGeometryAssetBlobs(
       validatedDocument,
@@ -2523,6 +2544,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         validatedDocument,
         diagnostics,
         assets,
+        options,
       );
       return;
     }
@@ -2730,7 +2752,10 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       const rebuiltAuthoringState = this.tryBuildNextAuthoringState(
         {
           authoringState,
-          revisionSequence: parseRevisionSequence(document.revisionId),
+          revisionSequence: Math.max(
+            this.revisionHighWater,
+            parseRevisionSequence(document.revisionId),
+          ),
         },
         {
           revisionId: document.revisionId,
@@ -2746,9 +2771,13 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
           restoreDiagnostics,
         ),
       };
+      // A plain restore keeps the document's id but never lowers the counter.
       const runtimeState = {
         authoringState,
-        revisionSequence: parseRevisionSequence(document.revisionId),
+        revisionSequence: Math.max(
+          this.revisionHighWater,
+          parseRevisionSequence(document.revisionId),
+        ),
       };
       retainedRestoreState = authoringState;
       if (options.replaceRuntimeState !== false) {
@@ -2838,6 +2867,10 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     this.workerRestoredDocument = null;
     this.pruneNativeTopologyBodyPayloadCache(runtimeState.authoringState);
     this.runtimeState = runtimeState;
+    this.revisionHighWater = Math.max(
+      this.revisionHighWater,
+      runtimeState.revisionSequence,
+    );
     this.initializationPromise = Promise.resolve(runtimeState);
     if (previousRuntimeState) {
       this.releaseDiscardedState(previousRuntimeState.authoringState, [

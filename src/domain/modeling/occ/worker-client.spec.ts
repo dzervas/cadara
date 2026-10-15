@@ -26,6 +26,7 @@ import {
   type DeriveSketchRegionsResponse,
 } from "@/contracts/solver/schema";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
+import { createSeedAuthoredModelDocument } from "@/domain/modeling/modeling-test-fixtures";
 
 class FakeOccWorker implements OccWorkerLike {
   private messageListener:
@@ -618,7 +619,42 @@ test("src/domain/modeling/occ/worker-client.spec.ts", async () => {
     ).rejects.toThrow("OCC worker postMessage failed: DataCloneError");
   }
 
+  // T17k3 (K3). Seam: the restore worker operation carries the restore
+  // options (a state this session did not author gets a new revision in
+  // the worker-owned kernel), and the worker's envelope validation accepts
+  // them.
+  async function testRestoreCarriesTheNewRevisionOption() {
+    const document = await createSeedAuthoredModelDocument();
+    const worker = new FakeOccWorker();
+    const client = new OccWorkerClient({ worker });
+    const promise = client.restoreAuthoredModelDocument(document, [], [], {
+      newRevision: true,
+    });
+    const posted = worker.posted[0]!;
+    expect(
+      posted.kind === "invoke" && posted.operation,
+      "The restore operation carries the options.",
+    ).toMatchObject({
+      kind: "restoreAuthoredModelDocument",
+      options: { newRevision: true },
+    });
+    const validation = validateOccWorkerRequestEnvelope(
+      structuredClone(posted),
+    );
+    expect(
+      validation.success ? [] : validation.errors,
+      "The worker accepts the restore envelope with options.",
+    ).toEqual([]);
+    worker.emit({
+      kind: "invoked",
+      requestId: posted.requestId,
+      operation: "restoreAuthoredModelDocument",
+    });
+    await promise;
+  }
+
   await testWarmupInvokesWorkerOperation();
+  await testRestoreCarriesTheNewRevisionOption();
   await testNeutralCurveQueriesRoundTripThroughTheWorker();
   await testDeriveSketchRegionsRoundTripsThroughTheWorker();
   await testSnapshotResponsesAreUnpacked();

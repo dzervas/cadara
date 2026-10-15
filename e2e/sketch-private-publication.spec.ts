@@ -32,6 +32,15 @@ test("§6 E2E-6 two authors: private drafts, one Publish Sketch, document Undo/R
   const { first: a, second: b } = await openTwoSessions(context, channel);
   const pageA = a.page;
   const pageB = b.page;
+  const expectNewRevisions = async (before: string[], when: string) => {
+    for (const [index, page] of [pageA, pageB].entries())
+      await expect
+        .poll(() => currentRevision(page), {
+          message: `${index ? "B" : "A"} has a new revision ${when}`,
+          timeout: 10_000,
+        })
+        .not.toBe(before[index]);
+  };
 
   // 1. A draws privately; B sees nothing.
   await glidePress(pageA, a.toolbarButton("Start a new sketch."));
@@ -82,6 +91,12 @@ test("§6 E2E-6 two authors: private drafts, one Publish Sketch, document Undo/R
   await expect(variableRow(pageB)).toBeVisible();
   await openVariables(pageA);
   await expect(variableRow(pageA)).toBeVisible({ timeout: 30_000 });
+  // T17k3 (K3): an Undo or Redo is a new state on both pages, so both
+  // revisions change (base: compensation kept the stored revision id).
+  const beforeUndo = [
+    await currentRevision(pageA),
+    await currentRevision(pageB),
+  ];
   await waitForUndoneAction(pageA, "Publish Sketch", () =>
     glidePress(pageA, undoButton(pageA)),
   );
@@ -92,6 +107,11 @@ test("§6 E2E-6 two authors: private drafts, one Publish Sketch, document Undo/R
   ).toBeVisible();
   await expect(sketchEntry(pageB)).toHaveCount(0, { timeout: 30_000 });
   await expect(variableRow(pageB), "and on B").toBeVisible();
+  await expectNewRevisions(beforeUndo, "after A's Undo");
+  const beforeRedo = [
+    await currentRevision(pageA),
+    await currentRevision(pageB),
+  ];
   await waitForRedoneAction(pageA, "Publish Sketch", () =>
     glidePress(pageA, redoButton(pageA)),
   );
@@ -102,6 +122,7 @@ test("§6 E2E-6 two authors: private drafts, one Publish Sketch, document Undo/R
   await expect(sketchEntry(pageB)).toBeVisible({ timeout: 30_000 });
   await expect(variableRow(pageB)).toBeVisible();
   await expect(variableRow(pageA)).toBeVisible();
+  await expectNewRevisions(beforeRedo, "after A's Redo");
 
   // 4. Conflicting compensation. A changes the variable; A's Undo succeeds;
   //    B changes the same field; A's Redo is blocked by label, nothing

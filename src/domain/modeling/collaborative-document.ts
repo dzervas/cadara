@@ -13,6 +13,9 @@ type Fields = Record<string, AuthoredValue>;
 export interface CollaborativeDocument {
   format: "cadara-stable-authored-v3";
   authored: Fields;
+  /** The last writer's kernel revision id: a per-session identity, never
+   * compared across sessions. Writers count independently and Undo/Redo keep
+   * it, so a session restoring a state it did not author renumbers it (T17k3). */
   revisionId: AuthoredModelDocument["revisionId"];
   provenance: Record<string, Fields>;
   topologyLineage: Fields;

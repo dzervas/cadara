@@ -71,6 +71,7 @@ import {
   getRevolveFeatureExtent,
 } from "@/contracts/modeling/feature-extents";
 import type {
+  AuthoredDocumentRestoreOptions,
   GeometryAssetResolver,
   ModelingKernelAdapter,
 } from "@/contracts/modeling/adapter";
@@ -5282,9 +5283,22 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
   }
 
   async restoreAuthoredModelDocument(
-    document: RepositoryAuthoredModelDocument,
+    restored: RepositoryAuthoredModelDocument,
     diagnostics: readonly ModelingDiagnostic[] = [],
+    _assetResolver?: GeometryAssetResolver,
+    options: AuthoredDocumentRestoreOptions = {},
   ): Promise<void> {
+    const document = options.newRevision
+      ? {
+          ...restored,
+          revisionId: `rev_${String(
+            Math.max(
+              this.revisionSequence + 1,
+              parseMockRevisionSequence(restored.revisionId),
+            ),
+          ).padStart(4, "0")}` as RevisionId,
+        }
+      : restored;
     const snapshot = structuredClone(await this.getSnapshot());
     const restoreSolverAdapter = this.solverAdapterForDocument(
       document.documentId,
@@ -5506,7 +5520,11 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
     ];
     stampSnapshotRevision(snapshot, document.revisionId);
     this.currentRevisionId = document.revisionId;
-    this.revisionSequence = parseMockRevisionSequence(document.revisionId);
+    // T17k3: a plain restore keeps the document's id but never lowers the counter.
+    this.revisionSequence = Math.max(
+      this.revisionSequence,
+      parseMockRevisionSequence(document.revisionId),
+    );
     this.solverAdapter = restoreSolverAdapter;
     this.snapshotPromise = Promise.resolve(snapshot);
   }

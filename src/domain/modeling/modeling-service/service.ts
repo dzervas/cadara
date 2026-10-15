@@ -1,4 +1,5 @@
 import type {
+  AuthoredDocumentRestoreOptions,
   GeometryAssetResolver,
   ModelingKernelAdapter,
 } from "@/contracts/modeling/adapter";
@@ -91,6 +92,7 @@ import {
   createRepositoryRestoreFailure,
   createDocumentRepositoryDiagnostic,
   runModelingMutationBoundary,
+  type ModelingMutationBoundaryResult,
   getResolutionLabel,
   createExportDiagnostic,
   createExportFilename,
@@ -174,6 +176,10 @@ export function createModelingService(
   let seedAuthoredDocument: AuthoredModelDocument | null = null;
   let repositoryChangePromise = Promise.resolve();
   let repositoryPersistencePromise = Promise.resolve();
+  // T17k3 (A-1): local mutations in flight, and the newest repository state seen.
+  let localMutations: Promise<unknown> = Promise.resolve();
+  let latestRepositoryEvent: DocumentRepositoryChangeEvent | null = null;
+  let restoredRepositoryEvent: DocumentRepositoryChangeEvent | null = null;
   let isRestoringRepositoryDocument = documentRepository !== null;
   let disposed = false;
   let adapterDisposed = false;
@@ -327,12 +333,59 @@ export function createModelingService(
     >[0],
     diagnostics: ModelingDiagnostic[] = [],
     assets: readonly GeometryAssetBlobInput[] = [],
+    options?: AuthoredDocumentRestoreOptions,
   ) {
     await adapter.restoreAuthoredModelDocument?.(
       document,
       diagnostics,
       createLocalAssetResolver(document, assets),
+      options,
     );
+  }
+
+  /** T17k3 (K3): the repository's current state, which may hold changes this
+   * session did not author (peer writes, Undo/Redo). Its stored revision id is
+   * not an identity for it, so the kernel gives it a new one. */
+  function restoreRepositoryState(
+    document: AuthoredModelDocument,
+    diagnostics: ModelingDiagnostic[] = [],
+  ) {
+    return restoreAuthoredRepositoryDocument(document, diagnostics, [], {
+      newRevision: true,
+    });
+  }
+
+  /** T17k3 (A-1): a document mutation runs after the repository changes
+   * received before it; a change received during it is restored after it. */
+  function runLocalMutation<T extends ModelingMutationBoundaryResult>(
+    input: Parameters<typeof runModelingMutationBoundary<T>>[0],
+  ) {
+    return runModelingMutationBoundary<T>({
+      ...input,
+      action: () => {
+        const changesBefore = repositoryChangePromise;
+        const run = (async () => {
+          await ensureInitialized();
+          await changesBefore;
+          return input.action();
+        })();
+        // Ordering only: the caller still receives `run`'s rejection.
+        localMutations = Promise.all([
+          localMutations,
+          run.catch(() => undefined),
+        ]);
+        return run;
+      },
+    });
+  }
+
+  async function currentRevisionId() {
+    return validateSnapshotResponse(
+      await adapter.getDocumentSnapshot(
+        buildDocumentRequest(currentDocumentId),
+      ),
+      currentDocumentId,
+    ).document.revisionId;
   }
 
   async function getSeedAuthoredDocument() {
@@ -677,7 +730,8 @@ export function createModelingService(
       diagnostics: ModelingDiagnostic[];
     },
   >(result: T, input: { baseRepositoryHeads?: readonly string[] }): Promise<T> {
-    await repositoryChangePromise;
+    // Runs inside a local mutation, after the repository changes received
+    // before it (`runLocalMutation`); later ones wait for the mutation.
     const snapshot = validateSnapshotResponse(
       await adapter.getDocumentSnapshot(
         buildDocumentRequest(currentDocumentId),
@@ -793,24 +847,39 @@ export function createModelingService(
       document: candidate,
       label: "Publish Sketch",
     });
+    // T17k3 (R-1): the write is a three-way commit onto the current shared
+    // state; when that state held a peer change, the merged document is not
+    // the published candidate and gets a new revision.
+    const restorePublished = async (
+      document: AuthoredModelDocument,
+      diagnostics: ModelingDiagnostic[] = [],
+    ) => {
+      await (authoredDocumentsEqual(document, candidate)
+        ? restoreAuthoredRepositoryDocument(document, diagnostics)
+        : restoreRepositoryState(document, diagnostics));
+      // A peer change queued during the write needs no second restore when
+      // this is already the newest repository state.
+      if (
+        latestRepositoryEvent &&
+        authoredDocumentsEqual(latestRepositoryEvent.document, document)
+      )
+        restoredRepositoryEvent = latestRepositoryEvent;
+    };
     if (write.ok) {
       markRepositorySnapshotFresh(write.metadata);
-      await restoreAuthoredRepositoryDocument(
-        write.document,
-        write.diagnostics,
-      );
-      return { ...input.result, revisionId: write.document.revisionId };
+      await restorePublished(write.document, write.diagnostics);
+      return { ...input.result, revisionId: await currentRevisionId() };
     }
     if (write.appliedLive) {
       canPersistAuthoredDocument = false;
       markRepositorySnapshotFresh(write.appliedLive.metadata);
-      await restoreAuthoredRepositoryDocument(
+      await restorePublished(
         write.appliedLive.document,
         write.appliedLive.diagnostics,
       );
       return {
         ...input.result,
-        revisionId: write.appliedLive.document.revisionId,
+        revisionId: await currentRevisionId(),
         durabilityPending: true,
         diagnostics: [
           ...input.result.diagnostics,
@@ -825,18 +894,13 @@ export function createModelingService(
     });
     if (restored.ok) {
       markRepositorySnapshotFresh(restored.metadata);
-      await restoreAuthoredRepositoryDocument(
-        restored.document,
-        restored.diagnostics,
-      );
+      await restoreRepositoryState(restored.document, restored.diagnostics);
     } else {
-      await restoreAuthoredRepositoryDocument(input.latestShared, [
+      await restoreRepositoryState(input.latestShared, [
         createDocumentRepositoryDiagnostic(restored.status),
       ]);
     }
-    const actualRevisionId = restored.ok
-      ? restored.document.revisionId
-      : input.latestShared.revisionId;
+    const actualRevisionId = await currentRevisionId();
     return {
       ...input.result,
       revisionId: actualRevisionId,
@@ -932,6 +996,7 @@ export function createModelingService(
       (event) => {
         if (disposed) return;
         rememberRepositoryMetadata(event.metadata);
+        latestRepositoryEvent = event;
         if (
           event.metadata.source !== "peer" &&
           event.metadata.source !== "undo" &&
@@ -945,14 +1010,22 @@ export function createModelingService(
           return;
         }
 
+        // T17k3 (A-1): a change that arrives while local mutations are in
+        // flight is restored after them and their repository writes, from the
+        // newest repository state (which holds both); restoring the event's
+        // own, older state would drop this session's accepted edit.
+        const mutationsBefore = localMutations;
         repositoryChangePromise = repositoryChangePromise.then(async () => {
           await ensureInitialized();
+          await mutationsBefore;
+          await repositoryPersistencePromise;
           if (disposed) return;
-          rememberRepositoryMetadata(event.metadata);
-          await restoreAuthoredRepositoryDocument(
-            event.document,
-            event.diagnostics,
-          );
+          const latest = latestRepositoryEvent ?? event;
+          if (latest !== restoredRepositoryEvent) {
+            restoredRepositoryEvent = latest;
+            rememberRepositoryMetadata(latest.metadata);
+            await restoreRepositoryState(latest.document, latest.diagnostics);
+          }
           if (!disposed) notifyModelingDocumentChange(event);
         });
       },
@@ -1619,14 +1692,12 @@ export function createModelingService(
       };
     },
     commitSketch(input) {
-      return runModelingMutationBoundary({
+      return runLocalMutation({
         operation: "Commit sketch",
         fallbackMessage: "Commit sketch failed.",
         requestId: input.solverCorrelation?.requestId,
         context: [{ key: "baseRevisionId", value: input.baseRevisionId }],
         action: async () => {
-          await ensureInitialized();
-          await repositoryChangePromise;
           const latestShared = await exportAuthoredDocumentForRepository();
           const request = normalizeCommitSketchInput(
             input.publicationBase
@@ -1678,13 +1749,11 @@ export function createModelingService(
       );
     },
     addDocumentVariable(input) {
-      return runModelingMutationBoundary({
+      return runLocalMutation({
         operation: "Add document variable",
         fallbackMessage: "Add document variable failed.",
         context: [{ key: "baseRevisionId", value: input.baseRevisionId }],
         action: async () => {
-          await ensureInitialized();
-          await repositoryChangePromise;
           const request = normalizeAddDocumentVariableInput(
             input,
             currentDocumentId,
@@ -1707,7 +1776,7 @@ export function createModelingService(
       });
     },
     updateDocumentVariable(input) {
-      return runModelingMutationBoundary({
+      return runLocalMutation({
         operation: "Update document variable",
         fallbackMessage: "Update document variable failed.",
         context: [
@@ -1715,8 +1784,6 @@ export function createModelingService(
           { key: "variableId", value: input.variableId },
         ],
         action: async () => {
-          await ensureInitialized();
-          await repositoryChangePromise;
           const request = normalizeUpdateDocumentVariableInput(
             input,
             currentDocumentId,
@@ -1735,13 +1802,11 @@ export function createModelingService(
       });
     },
     createFeature(input) {
-      return runModelingMutationBoundary({
+      return runLocalMutation({
         operation: "Create feature",
         fallbackMessage: "Create feature failed.",
         context: [{ key: "baseRevisionId", value: input.baseRevisionId }],
         action: async () => {
-          await ensureInitialized();
-          await repositoryChangePromise;
           const request = normalizeCreateFeatureInput(input, currentDocumentId);
           const expected = await exportAuthoredDocumentForRepository();
           const response = await adapter.createFeature(request);
@@ -1759,7 +1824,7 @@ export function createModelingService(
       });
     },
     updateFeature(input) {
-      return runModelingMutationBoundary({
+      return runLocalMutation({
         operation: "Update feature",
         fallbackMessage: "Update feature failed.",
         context: [
@@ -1767,8 +1832,6 @@ export function createModelingService(
           { key: "featureId", value: input.featureId },
         ],
         action: async () => {
-          await ensureInitialized();
-          await repositoryChangePromise;
           const request = normalizeUpdateFeatureInput(input, currentDocumentId);
           const expected = await exportAuthoredDocumentForRepository();
           const response = await adapter.updateFeature(request);
@@ -1784,7 +1847,7 @@ export function createModelingService(
       });
     },
     setFeatureSuppression(input) {
-      return runModelingMutationBoundary({
+      return runLocalMutation({
         operation: input.suppressed ? "Suppress feature" : "Unsuppress feature",
         fallbackMessage: input.suppressed
           ? "Suppress feature failed."
@@ -1794,8 +1857,6 @@ export function createModelingService(
           { key: "featureId", value: input.featureId },
         ],
         action: async () => {
-          await ensureInitialized();
-          await repositoryChangePromise;
           const request = normalizeSetFeatureSuppressionInput(
             input,
             currentDocumentId,
@@ -1814,7 +1875,7 @@ export function createModelingService(
       });
     },
     deleteFeature(input) {
-      return runModelingMutationBoundary({
+      return runLocalMutation({
         operation: "Delete feature",
         fallbackMessage: "Delete feature failed.",
         context: [
@@ -1822,8 +1883,6 @@ export function createModelingService(
           { key: "featureId", value: input.featureId },
         ],
         action: async () => {
-          await ensureInitialized();
-          await repositoryChangePromise;
           const request = normalizeDeleteFeatureInput(input, currentDocumentId);
           const expected = await exportAuthoredDocumentForRepository();
           const response = await adapter.deleteFeature(request);
@@ -1839,7 +1898,7 @@ export function createModelingService(
       });
     },
     deleteTarget(input) {
-      return runModelingMutationBoundary({
+      return runLocalMutation({
         operation: "Delete target",
         fallbackMessage: "Delete target failed.",
         context: [
@@ -1847,8 +1906,6 @@ export function createModelingService(
           { key: "target", value: getPrimitiveRefKey(input.target) },
         ],
         action: async () => {
-          await ensureInitialized();
-          await repositoryChangePromise;
           const request = normalizeDeleteTargetInput(input, currentDocumentId);
           const expected = await exportAuthoredDocumentForRepository();
           const response = await adapter.deleteTarget(request);
@@ -1870,7 +1927,7 @@ export function createModelingService(
       });
     },
     renameBody(input) {
-      return runModelingMutationBoundary({
+      return runLocalMutation({
         operation: "Rename body",
         fallbackMessage: "Rename body failed.",
         context: [
@@ -1878,8 +1935,6 @@ export function createModelingService(
           { key: "bodyId", value: input.bodyId },
         ],
         action: async () => {
-          await ensureInitialized();
-          await repositoryChangePromise;
           const request = normalizeRenameBodyInput(input, currentDocumentId);
           const expected = await exportAuthoredDocumentForRepository();
           const response = await adapter.renameBody(request);
@@ -1895,7 +1950,7 @@ export function createModelingService(
       });
     },
     reorderFeature(input) {
-      return runModelingMutationBoundary({
+      return runLocalMutation({
         operation: "Reorder feature",
         fallbackMessage: "Reorder feature failed.",
         context: [
@@ -1903,8 +1958,6 @@ export function createModelingService(
           { key: "featureId", value: input.featureId },
         ],
         action: async () => {
-          await ensureInitialized();
-          await repositoryChangePromise;
           const request = normalizeReorderFeatureInput(
             input,
             currentDocumentId,
@@ -1923,7 +1976,7 @@ export function createModelingService(
       });
     },
     reorderDocumentHistory(input) {
-      return runModelingMutationBoundary({
+      return runLocalMutation({
         operation: "Reorder document history",
         fallbackMessage: "Reorder document history failed.",
         context: [
@@ -1937,8 +1990,6 @@ export function createModelingService(
           },
         ],
         action: async () => {
-          await ensureInitialized();
-          await repositoryChangePromise;
           const request = normalizeReorderDocumentHistoryInput(
             input,
             currentDocumentId,
@@ -1957,13 +2008,11 @@ export function createModelingService(
       });
     },
     setFeatureCursor(input) {
-      return runModelingMutationBoundary({
+      return runLocalMutation({
         operation: "Set feature cursor",
         fallbackMessage: "Set feature cursor failed.",
         context: [{ key: "baseRevisionId", value: input.baseRevisionId }],
         action: async () => {
-          await ensureInitialized();
-          await repositoryChangePromise;
           const request = normalizeSetFeatureCursorInput(
             input,
             currentDocumentId,

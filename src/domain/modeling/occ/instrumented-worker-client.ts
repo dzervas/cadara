@@ -1,4 +1,5 @@
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
+import type { AuthoredDocumentRestoreOptions } from "@/contracts/modeling/adapter";
 import type { GeometryAssetBlobInput } from "@/contracts/modeling/geometry-assets";
 import type { ModelingDiagnostic } from "@/contracts/modeling/schema";
 import type { BodyId, RevisionId } from "@/contracts/shared/ids";
@@ -74,9 +75,15 @@ class InstrumentedOccWorkerClient implements OccWorkerSnapshotClient {
     document: AuthoredModelDocument,
     diagnostics?: readonly ModelingDiagnostic[],
     assets?: readonly GeometryAssetBlobInput[],
+    options?: AuthoredDocumentRestoreOptions,
   ) {
     return this.measure("restoreAuthoredModelDocument", () =>
-      this.inner.restoreAuthoredModelDocument(document, diagnostics, assets),
+      this.inner.restoreAuthoredModelDocument(
+        document,
+        diagnostics,
+        assets,
+        options,
+      ),
     );
   }
 

@@ -32,7 +32,10 @@ import type {
   UpdateFeatureRequest,
   UpdateFeatureResponse,
 } from "@/contracts/modeling/schema";
-import type { GeometryAssetResolver } from "@/contracts/modeling/adapter";
+import type {
+  AuthoredDocumentRestoreOptions,
+  GeometryAssetResolver,
+} from "@/contracts/modeling/adapter";
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
 import type { GeometryAssetBlobInput } from "@/contracts/modeling/geometry-assets";
 import type { BodyId, RequestId, RevisionId } from "@/contracts/shared/ids";
@@ -119,6 +122,7 @@ export interface OccWorkerSnapshotClient {
     document: AuthoredModelDocument,
     diagnostics?: readonly ModelingDiagnostic[],
     assets?: readonly GeometryAssetBlobInput[],
+    options?: AuthoredDocumentRestoreOptions,
   ): Promise<void>;
   validateAuthoredModelDocument(
     document: AuthoredModelDocument,
@@ -246,12 +250,14 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
     document: AuthoredModelDocument,
     diagnostics: readonly ModelingDiagnostic[] = [],
     assets: readonly GeometryAssetBlobInput[] = [],
+    options: AuthoredDocumentRestoreOptions = {},
   ) {
     return this.invokeVoid({
       kind: "restoreAuthoredModelDocument",
       document,
       diagnostics,
       assets,
+      options,
     });
   }
 
