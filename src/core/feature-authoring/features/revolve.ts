@@ -4,6 +4,7 @@ import type {
   RevolveSurfaceProfileRef,
   RevolveEndCondition,
   RevolveFeatureExtent,
+  RevolveFeatureParameters,
   UpToOffsetDirection,
 } from "@/contracts/modeling/schema";
 import type {
@@ -887,3 +888,14 @@ export const revolveAuthoringDefinition = {
     };
   },
 } satisfies FeatureAuthoringDefinition<"revolve">;
+
+/** Canonical callers use the same preparation as browser feature editing. */
+export function prepareRevolveFeatureDefinition(parameters: RevolveFeatureParameters) {
+  return revolveAuthoringDefinition.buildDefinition(
+    revolveAuthoringDefinition.hydrateDraft({
+      kind: "revolve",
+      featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
+      parameters,
+    }),
+  );
+}

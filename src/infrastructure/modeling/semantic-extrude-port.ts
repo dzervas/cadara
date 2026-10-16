@@ -6,6 +6,7 @@ import {
 import type {
   SemanticDiscovery,
   SemanticExtrudeCommand,
+  SemanticRevolveCommand,
   SemanticState,
 } from "@/contracts/semantic/schema";
 import type { DocumentRepositoryMutationResult } from "@/domain/modeling/document-repository";
@@ -30,7 +31,11 @@ import { sketchProfileGateFailures } from "@/contracts/sketch/derived-validity";
 import { createFeatureEditorPatchFromExpression } from "@/core/feature-authoring/form-adapter";
 import { prepareExtrudeFeatureDefinition } from "@/core/feature-authoring/features/extrude";
 
-export function createSemanticExtrudePort(input: {
+import { prepareRevolveFeatureDefinition } from "@/core/feature-authoring/features/revolve";
+
+// Both profile features share exact production mutation, persistence and native
+// output completion; only their browser-owned parameter preparation differs.
+export function createSemanticProfileFeaturePort(input: {
   service: ModelingService;
   loop: EditorEventLoop;
   inspect(input: {
@@ -40,7 +45,8 @@ export function createSemanticExtrudePort(input: {
     diagnostics: readonly import("@/contracts/modeling/schema").ModelingDiagnostic[];
   }>;
 }) {
-  return async function execute(command: SemanticExtrudeCommand) {
+  return async function execute(command: SemanticExtrudeCommand | SemanticRevolveCommand) {
+    const featureKind = command.operation === "revolve.create" || command.operation === "revolve.update" ? "revolve" : "extrude";
     const before = await input.inspect({
       commandId: `${command.commandId}:before`,
     });
@@ -50,7 +56,7 @@ export function createSemanticExtrudePort(input: {
         ...terminal,
         outcome: { kind: "rejected" as const, reasonCode: "editing-context" },
       };
-    if (command.depth !== undefined && (typeof command.depth === "number" ? !Number.isFinite(command.depth) || command.depth <= 0 : !command.depth.trim()))
+    if ("depth" in command && command.depth !== undefined && (typeof command.depth === "number" ? !Number.isFinite(command.depth) || command.depth <= 0 : !command.depth.trim()))
       return {
         ...terminal,
         outcome: {
@@ -90,25 +96,27 @@ export function createSemanticExtrudePort(input: {
         featureType: "extrude",
         selectedTarget: command.profile,
       });
-    } else if (command.operation === "extrude.update") {
+    } else if (command.operation === "extrude.update" || command.operation === "revolve.update") {
       const feature = snapshot.document.features.find(
         (f) => f.featureId === command.featureId,
       );
       if (
         !feature ||
-        feature.definition.kind !== "extrude"
+        feature.definition.kind !== featureKind
       )
         return {
           ...terminal,
           outcome: {
             kind: "rejected" as const,
-            reasonCode: "extrude-unavailable",
+            reasonCode: `${featureKind}-unavailable`,
           },
         };
       draft = hydrateFeatureEditSession(feature)!;
     }
     let definition;
-    if (command.parameters !== undefined) {
+    if (command.operation === "revolve.create" || command.operation === "revolve.update") {
+      definition = prepareRevolveFeatureDefinition(command.parameters);
+    } else if (command.parameters !== undefined) {
       definition = prepareExtrudeFeatureDefinition(command.parameters);
     } else {
       const depthField = getFeatureEditorFormField(draft!, "extrude-depth");
@@ -117,12 +125,12 @@ export function createSemanticExtrudePort(input: {
         : { depth: command.depth };
       definition = patch && buildFeatureDefinition(patchFeatureEditSession(draft!, patch));
     }
-    if (!definition || definition.kind !== "extrude")
+    if (!definition || definition.kind !== featureKind)
       return {
         ...terminal,
         outcome: {
           kind: "rejected" as const,
-          reasonCode: "extrude-incomplete",
+          reasonCode: `${featureKind}-incomplete`,
         },
       };
     let receipt: DocumentRepositoryMutationResult | undefined;
@@ -139,7 +147,7 @@ export function createSemanticExtrudePort(input: {
       };
       mutationStarted = true;
       const response =
-        command.operation === "extrude.create"
+        command.operation === "extrude.create" || command.operation === "revolve.create"
           ? await input.service.createFeature(base)
           : await input.service.updateFeature({
               ...base,

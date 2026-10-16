@@ -33,6 +33,7 @@ export interface SemanticDocumentPort {
   variable?(command: import("@/contracts/semantic/schema").SemanticVariableCommand): Promise<import("@/contracts/semantic/schema").SemanticResult>;
   export?(command: import("@/contracts/semantic/schema").SemanticExportCommand): Promise<import("@/contracts/semantic/schema").SemanticResult>;
   history?(command: import("@/contracts/semantic/schema").SemanticHistoryCommand): Promise<import("@/contracts/semantic/schema").SemanticResult>;
+  revolve?(command: import("@/contracts/semantic/schema").SemanticRevolveCommand): Promise<import("@/contracts/semantic/schema").SemanticResult>;
   extrude?(command: import("@/contracts/semantic/schema").SemanticExtrudeCommand): Promise<import("@/contracts/semantic/schema").SemanticResult>;
   sketch?(command: import("@/contracts/semantic/schema").SemanticSketchCommand): Promise<import("@/contracts/semantic/schema").SemanticResult>;
   initialize(): Promise<
