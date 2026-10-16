@@ -196,6 +196,18 @@ export type SemanticEdgeTreatmentCommand = CommandIdentity & {
   | { operation: "chamfer.update"; featureId: import("@/contracts/shared/ids").FeatureId; parameters: import("@/contracts/modeling/advanced-solid").ChamferFeatureParameters }
 );
 
+export type SemanticBodyBooleanCommand = CommandIdentity & {
+  basis: SemanticBasis;
+  intent: "fulfill" | "author-invalid";
+} & (
+  | { operation: "combine.create"; parameters: import("@/contracts/modeling/advanced-solid").CombineFeatureParameters }
+  | { operation: "combine.update"; featureId: import("@/contracts/shared/ids").FeatureId; parameters: import("@/contracts/modeling/advanced-solid").CombineFeatureParameters }
+  | { operation: "split.create"; parameters: import("@/contracts/modeling/advanced-solid").SplitFeatureParameters }
+  | { operation: "split.update"; featureId: import("@/contracts/shared/ids").FeatureId; parameters: import("@/contracts/modeling/advanced-solid").SplitFeatureParameters }
+  | { operation: "deleteSolid.create"; parameters: import("@/contracts/modeling/advanced-solid").DeleteSolidFeatureParameters }
+  | { operation: "deleteSolid.update"; featureId: import("@/contracts/shared/ids").FeatureId; parameters: import("@/contracts/modeling/advanced-solid").DeleteSolidFeatureParameters }
+);
+
 export type SemanticLoftCommand = CommandIdentity & {
   basis: SemanticBasis;
   intent: "fulfill" | "author-invalid";
@@ -293,6 +305,7 @@ export type SemanticCommand =
   | SemanticHoleCommand
   | SemanticSweepCommand
   | SemanticLoftCommand
+  | SemanticBodyBooleanCommand
   | SemanticVariableCommand
   | SemanticFeatureLifecycleCommand
   | SemanticHistoryCommand

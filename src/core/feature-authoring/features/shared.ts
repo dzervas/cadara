@@ -11,6 +11,26 @@ import type {
 } from "@/core/editor/schema";
 import { primitiveRefEquals } from "@/core/editor/schema";
 
+/** Refuse body-set inputs before hydration can drop roles, kinds or duplicates. */
+export function hasExactBodyParticipants(
+  parameters: import("@/contracts/modeling/advanced-solid").AdvancedSolidFeatureParameters,
+  roles: readonly string[],
+  maximum = Infinity,
+) {
+  if (parameters.participants.length !== roles.length) return false;
+  const bodies = new Set<string>();
+  return roles.every(role => {
+    const participants = parameters.participants.filter(p => p.role === role);
+    if (participants.length !== 1) return false;
+    const targets = participants[0]!.targets;
+    return targets.length > 0 && targets.length <= maximum && targets.every(t => {
+      if (t.kind !== "body" || bodies.has(t.bodyId)) return false;
+      bodies.add(t.bodyId);
+      return true;
+    });
+  });
+}
+
 export {
   buildAdvancedSolidParticipants,
   isAdvancedOperationIntent,

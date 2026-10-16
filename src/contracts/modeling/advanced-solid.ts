@@ -139,6 +139,28 @@ export interface AdvancedSolidFeatureParameters {
   options?: Record<string, unknown>;
 }
 
+/** Explicit body sets; retention is a native literal boolean, not an expression. */
+export interface CombineFeatureParameters {
+  participants: readonly (
+    | { role: "targetBody"; targets: readonly Extract<DurableRef, { kind: "body" }>[] }
+    | { role: "toolBody"; targets: readonly Extract<DurableRef, { kind: "body" }>[] }
+  )[];
+  operationIntent: AuthoredValue<Exclude<AdvancedSolidOperationIntent, "create">>;
+  options?: { keepTools?: boolean };
+}
+
+export interface SplitFeatureParameters {
+  participants: readonly (
+    | { role: "targetBody"; targets: readonly Extract<DurableRef, { kind: "body" }>[] }
+    | { role: "toolBody"; targets: readonly Extract<DurableRef, { kind: "body" }>[] }
+  )[];
+  options?: { keepTools?: boolean };
+}
+
+export interface DeleteSolidFeatureParameters {
+  participants: readonly [{ role: "body"; targets: readonly Extract<DurableRef, { kind: "body" }>[] }];
+}
+
 export interface AdvancedSolidFeatureDefinition {
   kind: AdvancedSolidFeatureKind;
   featureTypeVersion: typeof ADVANCED_SOLID_FEATURE_SCHEMA_VERSION;

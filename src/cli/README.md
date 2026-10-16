@@ -937,6 +937,44 @@ and parameter ranges in `topology[].definingData`; these are actual curve data,
 not sampled display geometry. Endcaps and bounds alone cannot prove path-loft
 interiors or effective section counts.
 
+### Body booleans, splits and Delete Solid
+
+`combine.create` / `combine.update`, `split.create` / `split.update` and
+`deleteSolid.create` / `deleteSolid.update` take current `basis`, explicit
+`intent`, canonical `parameters`, and (for updates) the existing `featureId`.
+Participant body targets and feature IDs accept exact unique recipe label
+aliases. Duplicate roles/bodies, overlapping target/tool sets, unknown roles
+and unsupported inputs refuse before browser hydration can discard them.
+
+- Combine requires nonempty `targetBody` and `toolBody` participant sets of
+  current **solid** bodies and literal authored `operationIntent` `add`,
+  `subtract` or `intersect`. Unresolved intent expressions refuse. Native
+  subtraction/intersection apply all tools sequentially to each target.
+  Addition merges all targets and tools into the **first target** identity;
+  other target bodies disappear even when tools are retained.
+  `options.keepTools` is an optional literal boolean, default **false**.
+- Split requires exactly one solid `targetBody` and one distinct solid or sheet
+  `toolBody`. Plane splitting and all operation intents are unsupported.
+  `options.keepTools` defaults **true**; only literal false consumes the tool.
+  The original target is invalidated and new result solids are discovered from
+  actual feature outputs, with existing native split-history behavior unchanged.
+- Delete Solid requires one nonempty unique `body` participant set of current
+  solids, with no options or operation intent. It authors a **history feature**,
+  not removal of the target's producer or of a feature record. Its
+  `producedTargets` is correctly empty. Deleting that history feature restores
+  upstream geometry. Completion requires exact current rebuild, native deletion
+  invalidations and absent requested bodies, while applied at the rollback
+  cursor; absence alone is not success. Native missing-body refusals remain
+  non-repairable even with `author-invalid`, including formerly valid bodies
+  whose producer was removed. No missing-body deletion is certified.
+
+Rediscover current references after every operation. Consumed/deleted targets
+must not be reused as current topology. Unsupported geometry may refuse before
+commit; accepted edits with failed regeneration remain applied and persisted,
+not fulfilled. Only explicit `author-invalid` accepts editable invalid state.
+No CLI boolean algorithm, body-array mutation or alternative native history
+owner is introduced.
+
 ### Active-author undo and redo
 
 `history.inspect`, `history.undo`, and `history.redo` take the current `basis`
