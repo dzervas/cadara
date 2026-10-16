@@ -37,6 +37,7 @@ export async function inspectSemanticModel(
     bodies.push({ bodyId: body.bodyId, kind: body.bodyKind, bounds });
   }
   return {
+    constructions: snapshot.document.constructions.map(c => ({ constructionId: c.constructionId, ownerFeatureId: c.ownerFeatureId, frame: c.plane.frame })),
     cursor: snapshot.document.cursor,
     timeline: snapshot.document.featureTree.flatMap(row => row.target.kind === "sketch" || row.target.kind === "feature" ? [{ label: row.label, target: row.target }] : []),
     features: snapshot.document.features.map((f) => ({

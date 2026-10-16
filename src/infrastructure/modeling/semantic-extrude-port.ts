@@ -7,6 +7,7 @@ import type {
   SemanticDiscovery,
   SemanticExtrudeCommand,
   SemanticRevolveCommand,
+  SemanticPlaneCommand,
   SemanticState,
 } from "@/contracts/semantic/schema";
 import type { DocumentRepositoryMutationResult } from "@/domain/modeling/document-repository";
@@ -33,9 +34,11 @@ import { prepareExtrudeFeatureDefinition } from "@/core/feature-authoring/featur
 
 import { prepareRevolveFeatureDefinition } from "@/core/feature-authoring/features/revolve";
 
-// Both profile features share exact production mutation, persistence and native
-// output completion; only their browser-owned parameter preparation differs.
-export function createSemanticProfileFeaturePort(input: {
+import { preparePlaneFeatureDefinition } from "@/core/feature-authoring/features/plane";
+
+// Feature families share exact production mutation, persistence and native
+// output completion; parameter preparation and output kind remain family-specific.
+export function createSemanticFeatureMutationPort(input: {
   service: ModelingService;
   loop: EditorEventLoop;
   inspect(input: {
@@ -45,8 +48,8 @@ export function createSemanticProfileFeaturePort(input: {
     diagnostics: readonly import("@/contracts/modeling/schema").ModelingDiagnostic[];
   }>;
 }) {
-  return async function execute(command: SemanticExtrudeCommand | SemanticRevolveCommand) {
-    const featureKind = command.operation === "revolve.create" || command.operation === "revolve.update" ? "revolve" : "extrude";
+  return async function execute(command: SemanticExtrudeCommand | SemanticRevolveCommand | SemanticPlaneCommand) {
+    const featureKind = command.operation === "plane.create" || command.operation === "plane.update" ? "plane" : command.operation === "revolve.create" || command.operation === "revolve.update" ? "revolve" : "extrude";
     const before = await input.inspect({
       commandId: `${command.commandId}:before`,
     });
@@ -96,7 +99,7 @@ export function createSemanticProfileFeaturePort(input: {
         featureType: "extrude",
         selectedTarget: command.profile,
       });
-    } else if (command.operation === "extrude.update" || command.operation === "revolve.update") {
+    } else if (command.operation === "extrude.update" || command.operation === "revolve.update" || command.operation === "plane.update") {
       const feature = snapshot.document.features.find(
         (f) => f.featureId === command.featureId,
       );
@@ -114,7 +117,9 @@ export function createSemanticProfileFeaturePort(input: {
       draft = hydrateFeatureEditSession(feature)!;
     }
     let definition;
-    if (command.operation === "revolve.create" || command.operation === "revolve.update") {
+    if (command.operation === "plane.create" || command.operation === "plane.update") {
+      definition = preparePlaneFeatureDefinition(command.parameters);
+    } else if (command.operation === "revolve.create" || command.operation === "revolve.update") {
       definition = prepareRevolveFeatureDefinition(command.parameters);
     } else if (command.parameters !== undefined) {
       definition = prepareExtrudeFeatureDefinition(command.parameters);
@@ -147,7 +152,7 @@ export function createSemanticProfileFeaturePort(input: {
       };
       mutationStarted = true;
       const response =
-        command.operation === "extrude.create" || command.operation === "revolve.create"
+        command.operation === "extrude.create" || command.operation === "revolve.create" || command.operation === "plane.create"
           ? await input.service.createFeature(base)
           : await input.service.updateFeature({
               ...base,
@@ -270,19 +275,18 @@ export function createSemanticProfileFeaturePort(input: {
       );
       const outputs =
         feature?.producedTargets.filter((t) => t.kind === "body") ?? [];
+      const constructions = feature?.producedTargets.filter(t => t.kind === "construction") ?? [];
       const valid =
         terminal.completion.geometry.kind === "current" &&
-        outputs.length > 0 &&
-        outputs.every(
-          (t) =>
-            t.kind === "body" &&
-            after.discovery.model?.bodies.some(
-              (b) =>
+        (definition.kind === "plane"
+          ? constructions.length > 0 && constructions.every(t =>
+              t.kind === "construction" && after.discovery.model?.constructions?.some(c =>
+                c.constructionId === t.constructionId && c.ownerFeatureId === result.featureId))
+          : outputs.length > 0 && outputs.every(t =>
+              t.kind === "body" && after.discovery.model?.bodies.some(b =>
                 b.bodyId === t.bodyId &&
                 b.kind === (definition.parameters.resultBodyType === "surface" ? "sheet" : "solid") &&
-                b.bounds !== null,
-            ),
-        );
+                b.bounds !== null)));
       if (!valid)
         terminal.completion.geometry.kind =
           command.intent === "author-invalid" ? "invalid-editable" : "failed";

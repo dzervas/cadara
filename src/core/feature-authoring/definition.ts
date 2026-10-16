@@ -175,6 +175,8 @@ export interface FilletFeatureParameterDraft {
 }
 
 export interface PlaneFeatureParameterDraft {
+  /** Preserve canonical standalone frames through browser hydration and edits. */
+  explicitFrame?: import("@/contracts/shared/sketch-plane").SketchPlaneFrame;
   referenceTarget: Extract<
     PrimitiveRef,
     { kind: "construction" | "face" }

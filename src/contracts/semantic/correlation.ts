@@ -19,7 +19,7 @@ export function semanticCommandCorrelation(
               ? "sketch-author"
               : command.operation.startsWith("history.")
                 ? "history"
-              : (command.operation.startsWith("timeline.") || command.operation === "target.delete" || command.operation === "body.rename" || command.operation.startsWith("feature.") || command.operation.startsWith("extrude.") || command.operation.startsWith("revolve.") || command.operation.startsWith("variable."))
+              : (command.operation.startsWith("timeline.") || command.operation === "target.delete" || command.operation === "body.rename" || command.operation.startsWith("feature.") || command.operation.startsWith("extrude.") || command.operation.startsWith("revolve.") || command.operation.startsWith("plane.") || command.operation.startsWith("variable."))
                 ? "model-mutate"
               : command.operation.startsWith("export.")
                 ? "export"
