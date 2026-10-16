@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "operations": [
+    {
+      "version": 1,
+      "commandId": "sketch-1",
+      "operation": "document.create",
+      "label": "Release sketch",
+      "basis": null,
+      "as": "document"
+    },
+    {
+      "version": 1,
+      "commandId": "sketch-2",
+      "operation": "sketch.begin",
+      "plane": "xy",
+      "basis": {
+        "alias": "document"
+      },
+      "as": "draft"
+    },
+    {
+      "version": 1,
+      "commandId": "sketch-3",
+      "operation": "sketch.author",
+      "basis": {
+        "alias": "draft"
+      },
+      "draft": {
+        "alias": "draft"
+      },
+      "primitive": {
+        "kind": "circle",
+        "center": [0, 0],
+        "radius": 5
+      },
+      "construction": false,
+      "intent": "fulfill",
+      "as": "circle"
+    },
+    {
+      "version": 1,
+      "commandId": "sketch-4",
+      "operation": "sketch.inspect",
+      "basis": {
+        "alias": "circle"
+      },
+      "draft": {
+        "alias": "circle"
+      }
+    },
+    {
+      "version": 1,
+      "commandId": "sketch-5",
+      "operation": "sketch.publish",
+      "basis": {
+        "alias": "circle"
+      },
+      "draft": {
+        "alias": "circle"
+      },
+      "requireProfiles": true,
+      "as": "published"
+    },
+    {
+      "version": 1,
+      "commandId": "sketch-6",
+      "operation": "document.save",
+      "basis": {
+        "alias": "published"
+      },
+      "path": "sketch.cadara"
+    },
+    {
+      "version": 1,
+      "commandId": "sketch-7",
+      "operation": "document.open",
+      "basis": null,
+      "path": "sketch.cadara",
+      "as": "opened"
+    },
+    {
+      "version": 1,
+      "commandId": "sketch-8",
+      "operation": "document.inspect",
+      "basis": {
+        "alias": "opened"
+      }
+    }
+  ]
+}

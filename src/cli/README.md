@@ -1,7 +1,7 @@
 # cadara CLI
 
 `cadara` is the general-purpose command-line tool for the CADara project. It
-runs under Bun/Node (never in the browser) and shares contract and domain code
+runs under Bun (never in the browser; Node runs the repository test harness) and shares contract and domain code
 with the app but never imports browser-bound modules.
 
 ```
@@ -17,6 +17,32 @@ bun run cli -- <group> <command> [args]
 # or, once linked as a bin:
 cadara <group> <command> [args]
 ```
+
+### Self-contained release
+
+Build with `bun run build:cli` (not the Vite web build). This writes `dist-cli/`;
+`bun scripts/build-cli.mjs /absolute/output/directory` selects another output.
+Distribute that directory or archive its contents. Use a fresh output directory
+for a release. No install, source checkout, Bun preload or node_modules is needed
+on the receiving machine, only Bun 1.3.13+ and the complete package:
+
+```bash
+tar -czf cadara-cli.tar.gz -C dist-cli .
+# On the receiving machine, extract into a new directory:
+mkdir cadara-cli && tar -xzf cadara-cli.tar.gz -C cadara-cli
+bun /absolute/path/to/cadara-cli/main.js document recipe --help
+bun /absolute/path/to/cadara-cli/main.js document recipe /absolute/path/to/cadara-cli/examples/plate.json
+```
+
+The three runtime files are `main.js`, `occ/cadara-occ.js` and
+`occ/cadara-occ.wasm`. Assets resolve relative to `main.js`, not your working
+directory. Typia is transformed at build time. Both native files are copied
+unchanged from the production custom build; there is no native build or fallback.
+The reachable memory repository has no Automerge WASM runtime dependency.
+Metadata, license, this guide, [coverage matrix](./COVERAGE.md) and runnable
+`examples/` are included. Input/output recipe paths remain relative to the
+caller's working directory. The extracted-package test runs outside the checkout
+with no package-local source/node_modules and replays the same foundation test.
 
 ## `document recipe`
 
