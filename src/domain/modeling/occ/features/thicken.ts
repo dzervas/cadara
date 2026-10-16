@@ -180,8 +180,52 @@ function buildThickSolid(
         `thicken-failed: OCC thicken produced ${solids.length} solid result bodies instead of exactly one.`,
       );
     }
-    assertValidFeatureResultShape(context, solids[0]!, "thicken");
-    return solids[0]!;
+    let solid = solids[0]!;
+    // MakeThickSolidBySimple can return an inward-oriented solid depending on
+    // the source orientation and offset sign. Normalize its shells, not the
+    // top-level solid orientation: reversed solids break downstream fillets.
+    const properties = new context.oc.GProp_GProps_1();
+    try {
+      context.oc.BRepGProp.VolumeProperties_1(
+        solid,
+        properties,
+        false,
+        false,
+        false,
+      );
+      if (properties.Mass() < 0) {
+        const oriented = new context.oc.BRepBuilderAPI_MakeSolid_1();
+        const shells = new context.oc.TopExp_Explorer_2(
+          solid,
+          context.oc.TopAbs_ShapeEnum.TopAbs_SHELL as never,
+          context.oc.TopAbs_ShapeEnum.TopAbs_SHAPE as never,
+        );
+        try {
+          while (shells.More()) {
+            const shape = shells.Current();
+            const shell = context.oc.TopoDS.Shell_1(shape);
+            try {
+              shell.Reverse();
+              oriented.Add(shell);
+            } finally {
+              deleteOccObject(shell);
+              deleteOccObject(shape);
+            }
+            shells.Next();
+          }
+          const normalized = oriented.Solid();
+          deleteOccObject(solid);
+          solid = normalized;
+        } finally {
+          deleteOccObject(shells);
+          deleteOccObject(oriented);
+        }
+      }
+    } finally {
+      deleteOccObject(properties);
+    }
+    assertValidFeatureResultShape(context, solid, "thicken");
+    return solid;
   } finally {
     deleteOccObject(progress);
     deleteOccObject(builder);

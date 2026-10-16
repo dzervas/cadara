@@ -9,6 +9,7 @@ import type {
   SemanticRevolveCommand,
   SemanticPlaneCommand,
   SemanticEdgeTreatmentCommand,
+  SemanticShellThickenCommand,
   SemanticState,
 } from "@/contracts/semantic/schema";
 import type { DocumentRepositoryMutationResult } from "@/domain/modeling/document-repository";
@@ -39,6 +40,9 @@ import { preparePlaneFeatureDefinition } from "@/core/feature-authoring/features
 import { prepareFilletFeatureDefinition } from "@/core/feature-authoring/features/fillet";
 import { prepareChamferFeatureDefinition } from "@/core/feature-authoring/features/chamfer";
 
+import { prepareShellFeatureDefinition } from "@/core/feature-authoring/features/shell";
+import { prepareThickenFeatureDefinition } from "@/core/feature-authoring/features/thicken";
+
 // Feature families share exact production mutation, persistence and native
 // output completion; parameter preparation and output kind remain family-specific.
 export function createSemanticFeatureMutationPort(input: {
@@ -51,8 +55,8 @@ export function createSemanticFeatureMutationPort(input: {
     diagnostics: readonly import("@/contracts/modeling/schema").ModelingDiagnostic[];
   }>;
 }) {
-  return async function execute(command: SemanticExtrudeCommand | SemanticRevolveCommand | SemanticPlaneCommand | SemanticEdgeTreatmentCommand) {
-    const featureKind = command.operation === "fillet.create" || command.operation === "fillet.update" ? "fillet" : command.operation === "chamfer.create" || command.operation === "chamfer.update" ? "chamfer" : command.operation === "plane.create" || command.operation === "plane.update" ? "plane" : command.operation === "revolve.create" || command.operation === "revolve.update" ? "revolve" : "extrude";
+  return async function execute(command: SemanticExtrudeCommand | SemanticRevolveCommand | SemanticPlaneCommand | SemanticEdgeTreatmentCommand | SemanticShellThickenCommand) {
+    const featureKind = command.operation === "shell.create" || command.operation === "shell.update" ? "shell" : command.operation === "thicken.create" || command.operation === "thicken.update" ? "thicken" : command.operation === "fillet.create" || command.operation === "fillet.update" ? "fillet" : command.operation === "chamfer.create" || command.operation === "chamfer.update" ? "chamfer" : command.operation === "plane.create" || command.operation === "plane.update" ? "plane" : command.operation === "revolve.create" || command.operation === "revolve.update" ? "revolve" : "extrude";
     const before = await input.inspect({
       commandId: `${command.commandId}:before`,
     });
@@ -120,7 +124,11 @@ export function createSemanticFeatureMutationPort(input: {
       draft = hydrateFeatureEditSession(feature)!;
     }
     let definition;
-    if (command.operation === "fillet.create" || command.operation === "fillet.update") {
+    if (command.operation === "shell.create" || command.operation === "shell.update") {
+      definition = prepareShellFeatureDefinition(command.parameters);
+    } else if (command.operation === "thicken.create" || command.operation === "thicken.update") {
+      definition = prepareThickenFeatureDefinition(command.parameters);
+    } else if (command.operation === "fillet.create" || command.operation === "fillet.update") {
       definition = prepareFilletFeatureDefinition(command.parameters);
     } else if (command.operation === "chamfer.create" || command.operation === "chamfer.update") {
       definition = prepareChamferFeatureDefinition(command.parameters);
