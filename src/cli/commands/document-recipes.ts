@@ -16,10 +16,10 @@ type Alias = { alias: string };
 type TargetAlias = Alias & { label: string };
 type RecipeGeometryEdit<T = import("@/contracts/semantic/schema").SemanticSketchGeometryEdit> = T extends { target: infer R } ? Omit<T, "target" | "destination" | "boundary"> & { target: R | TargetAlias } & (T extends { destination: infer D } ? { destination: D | TargetAlias } : unknown) & (T extends { boundary: infer B } ? { boundary: B | TargetAlias } : unknown) : never;
 type RecipePrimitive<T = import("@/contracts/semantic/schema").SemanticSketchPrimitive> = T extends { source: infer S } ? Omit<T, "source"> & { source: S | TargetAlias } : T;
-type RecipeExtrudeParameters<T = import("@/contracts/modeling/schema").ExtrudeFeatureParameters> = T extends { profiles: infer P extends readonly unknown[] } ? Omit<T, "profiles"> & { profiles: readonly [P[number] | TargetAlias, ...(P[number] | TargetAlias)[]] } : never;
+type RecipeFeatureParameters<T> = T extends { profiles: infer P extends readonly unknown[] } ? Omit<T, "profiles" | "axis"> & { profiles: readonly [P[number] | TargetAlias, ...(P[number] | TargetAlias)[]] } & (T extends { axis: infer A } ? { axis: A | TargetAlias } : unknown) : never;
 type RecipeCommand<T = SemanticCommand> = T extends SemanticCommand
   ? Omit<T, "parameters" | "basis" | "draft" | "points" | "dimensionId" | "derivationId" | "profile" | "featureId" | "beforeFeatureId" | "bodyId" | "cursor" | "item" | "beforeItem" | "variableId" | "sketchId" | "target" | "targets" | "axis" | "repair" | "edit" | "primitive" | "support"> &
-    (T extends { parameters: unknown } ? { parameters: RecipeExtrudeParameters } : unknown) &
+    (T extends { parameters: infer P } ? { parameters: RecipeFeatureParameters<P> } : unknown) &
     (T extends { support: infer S } ? { support: S | TargetAlias } : unknown) &
     (T extends { primitive: unknown } ? { primitive: RecipePrimitive } : unknown) &
     (T extends { edit: infer E } ? { edit: E extends { target: unknown } ? RecipeGeometryEdit<E> : E } : unknown) &
@@ -196,12 +196,16 @@ function parseRecipe(input: unknown): RecipeOperation[] {
       validateTarget(command[key], "feature_validation");
       validationCommand[key] = { kind: "feature", featureId: "feature_validation" };
     }
-    if ((command.operation === "extrude.create" || command.operation === "extrude.update") && command.parameters && typeof command.parameters === "object" && "profiles" in command.parameters && Array.isArray(command.parameters.profiles)) {
+    if ((command.operation === "extrude.create" || command.operation === "extrude.update" || command.operation === "revolve.create" || command.operation === "revolve.update") && command.parameters && typeof command.parameters === "object" && "profiles" in command.parameters && Array.isArray(command.parameters.profiles)) {
       validationCommand.parameters = { ...command.parameters, profiles: command.parameters.profiles.map(profile => {
         if (!isAlias(profile)) return profile;
         validateTarget(profile, "region_validation");
         return { kind: "region", sketchId: "sketch_validation", regionId: "region_validation" };
       }) };
+    }
+    if ((command.operation === "revolve.create" || command.operation === "revolve.update") && command.parameters && typeof command.parameters === "object" && "axis" in command.parameters && isAlias(command.parameters.axis)) {
+      validateTarget(command.parameters.axis, "sketch_entity_validation");
+      validationCommand.parameters = { ...validationCommand.parameters as object, axis: { kind: "sketchEntity", sketchId: "sketch_validation", entityId: "sketch_entity_validation" } };
     }
     if (isAlias(command.profile)) {
       validateTarget(command.profile, "region_validation");
@@ -501,7 +505,7 @@ export const documentRecipesCommand: CommandModule = {
           if (matches.length !== 1) throw new Error("Export body target alias is missing or ambiguous.");
           command.target = matches[0]!.target;
         }
-        if ((command.operation === "extrude.create" || command.operation === "extrude.update") && "parameters" in command && command.parameters !== undefined) {
+        if ((command.operation === "extrude.create" || command.operation === "extrude.update" || command.operation === "revolve.create" || command.operation === "revolve.update") && "parameters" in command && command.parameters !== undefined) {
           const parameters = command.parameters;
           function resolveProfile(profile: import("@/contracts/modeling/schema").ExtrudeSurfaceProfileRef | TargetAlias) {
             if (!isAlias(profile)) return profile;
@@ -520,6 +524,11 @@ export const documentRecipesCommand: CommandModule = {
           command.parameters = parameters.resultBodyType === "solid"
             ? { ...parameters, profiles: [resolveSolidProfile(parameters.profiles[0]), ...parameters.profiles.slice(1).map(resolveSolidProfile)] }
             : { ...parameters, profiles: [resolveProfile(parameters.profiles[0]), ...parameters.profiles.slice(1).map(resolveProfile)] };
+        }
+        if (command.operation === "revolve.create" || command.operation === "revolve.update") {
+          const axis = resolveSketchTarget(command.parameters.axis, ["edge", "sketchEntity", "construction"]);
+          if (axis.kind !== "edge" && axis.kind !== "sketchEntity" && axis.kind !== "construction") throw new Error("Invalid revolve axis.");
+          command.parameters = { ...command.parameters, axis };
         }
         if (command.operation === "extrude.create" && "profile" in command && isAlias(command.profile)) {
           const target = command.profile;

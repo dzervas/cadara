@@ -645,6 +645,56 @@ selector) to reopen a committed private draft. Updating a driving requirement
 and publishing settles the production cursor restoration and downstream rebuild
 before returning current solid output. Re-discover references after edits.
 
+### Revolve solids and sheets
+
+`revolve.create` takes current `basis`, explicit `intent` and canonical
+`RevolveFeatureParameters` in `parameters`. `revolve.update` additionally takes
+`featureId`. Both use the browser feature builder and the same production
+mutation, exact persistence receipt, native output and handoff checks as extrusion.
+For example, a standalone full solid uses:
+
+```json
+{
+  "resultBodyType": "solid",
+  "profiles": [{ "alias": "published", "label": "Outer region" }],
+  "axis": { "alias": "published", "label": "Line 1" },
+  "startAngle": { "source": "literal", "value": 0 },
+  "extent": { "mode": "oneSide", "end": { "kind": "full" } },
+  "operation": { "source": "literal", "value": "newBody" },
+  "booleanScope": { "kind": "standalone" }
+}
+```
+
+Axes are exact linear `edge` or solved line `sketchEntity` references.
+Construction-backed **axis references** are not supported by the production
+kernel; an ordinary sketch line marked construction is still a sketch-entity
+axis. A solid requires one closed region or planar face. A surface has no
+boolean fields and accepts one region/face wire or one connected open-curve
+chain from one sketch. Mixed/disconnected and unsupported multi-profile groups
+are refused; open curves are not closed to invent solid support.
+
+`startAngle`, blind `angle` and reference-offset `angle` are authored scalar
+wrappers, in radians (expressions use the shared expression evaluator).
+`oneSide.end` accepts `full`, `blind`, `upToNext`, `upToFace`, `upToPart` and
+`upToVertex`. Non-full ends specify `direction: "clockwise" |
+"counterClockwise"`. `symmetric.end` is blind, with the given angle on **each**
+side; `twoSide` has non-full `firstEnd` and `secondEnd`. Solid symmetric/two-sided
+results retain the production separate-body-per-side behavior; no extra fusion
+is performed. Two-sided sheets require
+opposite directions and may not overlap beyond a full revolution. Reference
+ends use exact typed body/face/vertex targets and optional authored angular
+`offset` with `direction: "shorten" | "extend"`. They retain production angular
+target resolution and ambiguity/impossible-termination refusals, not a new
+collision or contact algorithm. Solid booleans retain explicit operation/scope.
+
+Recipes resolve exact unique label aliases in `parameters.profiles`,
+`parameters.axis` and `featureId`. Nested end targets and boolean body IDs remain
+typed discovered references. Re-discover after edits. Rejection leaves live state
+unchanged; accepted authored state with missing native output is **not**
+fulfillment. Only explicit `author-invalid` permits accepted editable invalid
+state, and does not override production rejections. Native body kind/bounds and
+current feature/topology references are returned in discovery.
+
 ### Active-author undo and redo
 
 `history.inspect`, `history.undo`, and `history.redo` take the current `basis`

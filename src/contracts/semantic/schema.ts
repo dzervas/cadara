@@ -186,6 +186,15 @@ export type SemanticVariableCommand = CommandIdentity & {
   intent: "fulfill" | "author-invalid";
 } & ({ operation: "variable.add" } | { operation: "variable.update"; variableId: import("@/contracts/shared/ids").DocumentVariableId });
 
+export type SemanticRevolveCommand = CommandIdentity & {
+  basis: SemanticBasis;
+  intent: "fulfill" | "author-invalid";
+  parameters: import("@/contracts/modeling/schema").RevolveFeatureParameters;
+} & (
+  | { operation: "revolve.create" }
+  | { operation: "revolve.update"; featureId: import("@/contracts/shared/ids").FeatureId }
+);
+
 export type SemanticExtrudeCommand = CommandIdentity & {
   basis: SemanticBasis;
   intent: "fulfill" | "author-invalid";
@@ -221,6 +230,7 @@ export type SemanticExportCommand = CommandIdentity & {
 export type SemanticCommand =
   | SemanticSketchCommand
   | SemanticExtrudeCommand
+  | SemanticRevolveCommand
   | SemanticVariableCommand
   | SemanticFeatureLifecycleCommand
   | SemanticHistoryCommand
