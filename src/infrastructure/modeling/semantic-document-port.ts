@@ -1,3 +1,4 @@
+import { describeExportProviders, type ExportProviderRegistry } from "@/domain/export/provider-registry";
 import { createSemanticFeatureLifecyclePort } from "./semantic-feature-lifecycle-port";
 import { createSemanticVariablePort } from "./semantic-variable-port";
 import { createSemanticExportPort } from "./semantic-export-port";
@@ -28,6 +29,7 @@ import type { ModelingService } from "@/domain/modeling/modeling-service";
 export function createSemanticDocumentPort(input: {
   documentId: DocumentId;
   nativeFileIO: NativeDocumentFileIO;
+  exportProviders: ExportProviderRegistry;
   referenceImageFiles?: import("@/application/semantic/reference-image-files").ReferenceImageFiles;
   repository: DocumentRepository;
   service: ModelingService;
@@ -36,7 +38,7 @@ export function createSemanticDocumentPort(input: {
   sketchPublications: ReturnType<typeof import("./sketch-publication-receipts").createSketchPublicationReceipts>;
   resetRuntime(): void;
 }): SemanticDocumentPort {
-  const { documentId, repository, service, loop, sketchActions, resetRuntime } =
+  const { documentId, repository, service, loop, sketchActions, resetRuntime, exportProviders } =
     input;
   function state(
     revisionId: SemanticState["revisionId"],
@@ -80,6 +82,7 @@ export function createSemanticDocumentPort(input: {
         snapshot.provenance.repositoryHeads,
       ),
       document: { label: snapshot.document.name },
+      exportProviders: describeExportProviders(exportProviders),
       variables: snapshot.document.variables,
       settings: snapshot.document.settings,
       references: [

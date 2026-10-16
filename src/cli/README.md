@@ -1075,17 +1075,42 @@ Publication is one document action. Failed persistence can still have applied
 live state, and is reported separately. Fresh file opening resets both owners;
 saving does not persist process-private history for another invocation.
 
-### STEP export
+### Geometry and sketch export
 
-`export.step` takes the current `basis`, a discovered `target`, an output `path`,
-and `options: { schema: "AP242" | "AP214" | "AP203", unit: "millimeter" }`.
-Only existing STEP-provider body targets are supported. A recipe may select an
-exact unique body label with `{ "alias": "solid", "label": "<discovered body label>" }`;
-feature labels are not body labels. Re-discover after editing; stale bases,
-missing targets, unsupported target kinds and invalid options are refused.
+Discovery's `exportProviders` comes from the same production registry used for
+execution: format, label, extension, MIME type, target kinds and default options.
+Every export takes the current `basis`, a discovered `target`, output `path`, and
+closed `options` (unknown fields are refused):
+
+| Operation | Target | Options |
+| --- | --- | --- |
+| `export.step` | body | `{ schema: "AP242" \| "AP214" \| "AP203", unit: "millimeter" }` |
+| `export.stl` | body | `{ meshAccuracy: { chordTolerance: 0.05, angleToleranceRadians: 0.1 }, encoding: "binary" \| "ascii" }` |
+| `export.3mf` | body | `{ meshAccuracy: { chordTolerance: 0.05, angleToleranceRadians: 0.1 }, unit: "millimeter", includeMetadata: true }` |
+| `export.svg`, `export.dxf` | committed sketch | `{}` |
+
+Mesh tolerances must be positive finite numbers, in model millimeters and radians.
+3MF's `includeMetadata` is a boolean controlling the target-label Title metadata.
+STL and 3MF use the native production mesh exporter, not viewport/display meshes.
+Binary STL and ZIP-based 3MF are written as bytes without UTF-8 conversion.
+
+A recipe may select an exact unique reference label with
+`{ "alias": "solid", "label": "<discovered body or sketch label>" }`;
+feature labels are not body/sketch labels. Re-discover after editing; stale bases,
+missing targets, incompatible target kinds and invalid options are refused.
+Vector export uses existing solved sketch geometry, omits construction entities
+and nonaccepted/broken derived output, and forwards diagnostics. The existing
+providers support lines, circles, arcs, splines, Béziers and conics. Unsupported
+points, ellipses, elliptical arcs and profile text are skipped with warnings;
+no exportable geometry is a provider failure. SVG includes resolved region paths
+and styles; DXF emits entities, approximates curves with polylines, and does not
+export region fills. These are existing provider limitations, not new translators.
+
 Completion includes the provider result and the actual file write/sync/close.
-Export does not mutate authored state or invent a repository commit receipt.
-Failed writes retain the observed byte count independently of valid geometry.
+Export is distinct from `document.save`: it does not save editable native history,
+mutate authored state, or invent a repository commit receipt. Failed writes retain
+the observed byte count independently of valid geometry; a sync/close failure is
+still a file failure even when all payload bytes were written.
 
 ## `onshape capture`
 

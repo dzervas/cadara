@@ -10,7 +10,7 @@ import type {
 import type { ModelingDiagnostic } from "@/contracts/modeling/schema";
 import type { ModelingService } from "@/domain/modeling/modeling-service";
 
-/** Existing service/provider owns target, revision and native STEP execution. */
+/** Existing service/provider owns target, options, revision and export execution. */
 export function createSemanticExportPort(input: {
   service: ModelingService;
   files: NativeDocumentFileIO;
@@ -42,31 +42,22 @@ export function createSemanticExportPort(input: {
           },
         },
       };
-    // Semantic callers get the same closed options as the existing STEP writer.
-    if (
-      !["AP203", "AP214", "AP242"].includes(command.options.schema) ||
-      command.options.unit !== "millimeter"
-    )
-      return {
-        ...terminal,
-        outcome: {
-          kind: "rejected" as const,
-          reasonCode: "invalid-step-options",
-        },
-      };
     const targetLabel =
       before.discovery.references.find(
         (reference) =>
-          reference.target.kind === "body" &&
-          command.target.kind === "body" &&
-          reference.target.bodyId === command.target.bodyId,
-      )?.label ?? "STEP export";
+          (reference.target.kind === "body" &&
+            command.target.kind === "body" &&
+            reference.target.bodyId === command.target.bodyId) ||
+          (reference.target.kind === "sketch" &&
+            command.target.kind === "sketch" &&
+            reference.target.sketchId === command.target.sketchId),
+      )?.label ?? "Geometry export";
     try {
       const result = await input.service.exportDocument({
         baseRevisionId: command.basis.revisionId,
         target: command.target,
         targetLabel,
-        format: "step",
+        format: command.operation.slice("export.".length),
         options: command.options,
       });
       terminal.diagnostics = result.diagnostics.map((diagnostic) => ({
@@ -76,7 +67,7 @@ export function createSemanticExportPort(input: {
       if (!result.ok) {
         terminal.outcome = {
           kind: "rejected",
-          reasonCode: result.diagnostics[0]?.code ?? "step-export-failed",
+          reasonCode: result.diagnostics[0]?.code ?? "export-failed",
         };
         return terminal;
       }
@@ -91,13 +82,17 @@ export function createSemanticExportPort(input: {
         rebuildRevisionId: state.revisionId,
       };
       // Payload basis was certified by the provider, not by a later live snapshot.
-      const text =
-        typeof result.payload === "string"
-          ? result.payload
-          : new TextDecoder("utf8", { fatal: true }).decode(result.payload);
       let file: Awaited<ReturnType<NativeDocumentFileIO["write"]>>;
       try {
-        file = await input.files.write(command.path, text);
+        if (typeof result.payload === "string") {
+          file = await input.files.write(command.path, result.payload);
+        } else {
+          if (!input.files.writeBytes)
+            throw new Error(
+              "The file adapter does not support binary export output.",
+            );
+          file = await input.files.writeBytes(command.path, result.payload);
+        }
       } catch (error) {
         // A rejected adapter promise gives no observed byte count; do not infer
         // that the file is untouched or erase the provider's geometry result.

@@ -8,10 +8,9 @@ import type { ExportResult } from "@/contracts/export/result";
 import type { DurableRef } from "@/contracts/shared/references";
 import type { FeatureEditorFormSchema } from "@/core/feature-authoring/form-schema";
 
-export interface StepExportOptions {
-  schema: "AP203" | "AP214" | "AP242";
-  unit: "millimeter";
-}
+import { requireGeometryExportOptions } from "@/contracts/export/options.runtime-schema";
+import type { StepExportOptions } from "@/contracts/export/options";
+export type { StepExportOptions } from "@/contracts/export/options";
 
 function exportStep(
   target: DurableRef,
@@ -39,6 +38,7 @@ export const stepExportProvider: ExportProvider<
   id: "step",
   label: "STEP",
   formatId: "step",
+  validateOptions: (options) => requireGeometryExportOptions("step", options),
   fileExtension: "step",
   mimeType: "model/step",
   targetKinds: ["body"],

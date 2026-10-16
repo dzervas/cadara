@@ -292,7 +292,7 @@ function parseRecipe(input: unknown): RecipeOperation[] {
     }
     if (isAlias(command.target)) {
       validateTarget(command.target, "body_validation");
-      validationCommand.target = command.operation === "export.step" || command.operation === "target.delete" ? { kind: "body", bodyId: "body_validation" }
+      validationCommand.target = (typeof command.operation === "string" && command.operation.startsWith("export.")) || command.operation === "target.delete" ? { kind: "body", bodyId: "body_validation" }
         : command.operation === "sketch.image.update" || command.operation === "sketch.image.replace" || command.operation === "sketch.image.remove" ? { kind: "sketchOperation", sketchId: "sketch_validation", operationId: "sketch_operation_validation" }
         : { kind: "sketchPoint", sketchId: "sketch_validation", pointId: "sketch_point_validation" };
     }
@@ -597,10 +597,10 @@ export const documentRecipesCommand: CommandModule = {
           if (destination.kind !== "sketchPoint") throw new Error("Invalid merge destination.");
           command.edit.destination = destination;
         }
-        if (command.operation === "export.step" && isAlias(command.target)) {
+        if (command.operation.startsWith("export.") && "target" in command && isAlias(command.target)) {
           const target = command.target;
-          const matches = aliases.get(target.alias)?.references.filter(r => r.label === target.label && r.target.kind === "body") ?? [];
-          if (matches.length !== 1) throw new Error("Export body target alias is missing or ambiguous.");
+          const matches = aliases.get(target.alias)?.references.filter(r => r.label === target.label) ?? [];
+          if (matches.length !== 1) throw new Error("Export target alias is missing or ambiguous.");
           command.target = matches[0]!.target;
         }
         if ((command.operation === "extrude.create" || command.operation === "extrude.update" || command.operation === "revolve.create" || command.operation === "revolve.update") && "parameters" in command && command.parameters !== undefined) {

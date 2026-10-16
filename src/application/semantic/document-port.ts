@@ -10,6 +10,8 @@ import type {
 /** Disk boundary only: shared owners neither open pickers nor interpret terminal paths. */
 export interface NativeDocumentFileIO {
   read(path: string): Promise<string>;
+  /** Binary geometry output must never pass through text decoding. */
+  writeBytes?(path: string, bytes: Uint8Array): ReturnType<NativeDocumentFileIO["write"]>;
   write(
     path: string,
     text: string,
