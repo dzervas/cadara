@@ -310,12 +310,15 @@ export type SemanticHistoryCommand = CommandIdentity & {
 );
 
 export type SemanticExportCommand = CommandIdentity & {
-  operation: "export.step";
   basis: SemanticBasis;
   target: DurableRef;
-  options: import("@/contracts/export/capabilities").StepWriterOptions;
   path: string;
-};
+} & (
+  | { operation: "export.step"; options: import("@/contracts/export/options").StepExportOptions }
+  | { operation: "export.stl"; options: import("@/contracts/export/options").StlExportOptions }
+  | { operation: "export.3mf"; options: import("@/contracts/export/options").ThreeMfExportOptions }
+  | { operation: "export.svg" | "export.dxf"; options: import("@/contracts/export/options").SketchVectorExportOptions }
+);
 
 /** Implemented slices. Later tickets extend this closed union. */
 export type SemanticCommand =
@@ -447,6 +450,7 @@ export interface SemanticCompletion {
  */
 export interface SemanticDiscovery {
   state: SemanticState;
+  exportProviders?: readonly import("@/contracts/export/options").ExportProviderDescription[];
   /** Inspection metadata from this same snapshot, not another document owner. */
   document?: { label: string };
   variables?: readonly import("@/contracts/modeling/schema").DocumentVariableRecord[];

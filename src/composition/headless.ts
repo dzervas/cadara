@@ -74,6 +74,7 @@ export function createHeadlessSessionFactory(
         },
         createSolverAdapter: () => solver,
       });
+      const exportProviders = createBuiltinExportProviderRegistry();
       let service: ReturnType<typeof createModelingService>;
       try {
         solver = new SketchConstraintSolverAdapter({
@@ -85,7 +86,7 @@ export function createHeadlessSessionFactory(
           currentDocumentId: documentId,
           sketchSolver: solver,
           documentRepository: repository,
-          exportProviders: createBuiltinExportProviderRegistry(),
+          exportProviders,
         });
       } catch (error) {
         adapter.dispose();
@@ -107,6 +108,7 @@ export function createHeadlessSessionFactory(
         throw error;
       }
       return createSemanticDocumentPort({
+        exportProviders,
         documentId,
         nativeFileIO: options.nativeFileIO ?? filesystemNativeDocumentIO,
         referenceImageFiles: options.referenceImageFiles ?? filesystemReferenceImageFiles,

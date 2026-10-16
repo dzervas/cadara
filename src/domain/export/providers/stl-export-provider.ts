@@ -11,15 +11,10 @@ import type { ExportResult } from "@/contracts/export/result";
 import type { DurableRef } from "@/contracts/shared/references";
 import type { FeatureEditorFormSchema } from "@/core/feature-authoring/form-schema";
 
-export interface StlMeshAccuracyOptions {
-  chordTolerance: number;
-  angleToleranceRadians: number;
-}
-
-export interface StlExportOptions {
-  meshAccuracy: StlMeshAccuracyOptions;
-  encoding: "binary" | "ascii";
-}
+import { requireGeometryExportOptions } from "@/contracts/export/options.runtime-schema";
+import type { StlExportOptions } from "@/contracts/export/options";
+export type { StlExportOptions } from "@/contracts/export/options";
+export type StlMeshAccuracyOptions = import("@/contracts/export/capabilities").MeshExportAccuracy;
 
 function getDefaultStlMeshAccuracy(): StlMeshAccuracyOptions {
   return { chordTolerance: 0.05, angleToleranceRadians: 0.1 };
@@ -122,6 +117,7 @@ export const stlExportProvider: ExportProvider<
   id: "stl",
   label: "STL",
   formatId: "stl",
+  validateOptions: (options) => requireGeometryExportOptions("stl", options),
   fileExtension: "stl",
   mimeType: "model/stl",
   targetKinds: ["body"],

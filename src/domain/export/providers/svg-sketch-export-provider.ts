@@ -14,7 +14,8 @@ import type { DocumentExportDiagnostic } from "@/contracts/modeling/export";
 import type { SketchPoint2D } from "@/contracts/sketch/schema";
 import type { FeatureEditorFormSchema } from "@/core/feature-authoring/form-schema";
 
-export type SvgSketchExportOptions = Record<string, never>;
+import { requireGeometryExportOptions } from "@/contracts/export/options.runtime-schema";
+export type SvgSketchExportOptions = import("@/contracts/export/options").SketchVectorExportOptions;
 
 function formatNumber(value: number) {
   return Number.isInteger(value)
@@ -437,6 +438,7 @@ export const svgSketchExportProvider: ExportProvider<
   id: "sketch-svg",
   label: "SVG",
   formatId: "svg",
+  validateOptions: (options) => requireGeometryExportOptions("svg", options),
   fileExtension: "svg",
   mimeType: "image/svg+xml",
   targetKinds: ["sketch"],
