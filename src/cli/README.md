@@ -856,6 +856,50 @@ can accept that state. Native topology exposes cylindrical radii/axes, conical
 angles and cut extents for independent inspection; unchanged outer bounds alone
 do not prove a hole exists.
 
+### Sweeps
+
+`sweep.create` and `sweep.update` take current `basis`, `intent`, canonical
+`parameters`, and (for update) a discovered `featureId`. Parameters contain
+`participants` with exactly one `profile` (one current region or planar solid
+body face) and one `path` (one current solid-body edge or sketch entity), and
+`options: { profileControl: "none", twist: { type: "none" }, endScale: 1 }`.
+Scalar values retain the shared authored literal/expression forms. Recipes
+accept exact unique discovered-label aliases for participant targets and update
+feature IDs; missing/ambiguous labels fail, unknown aliases are usage errors.
+
+Ordinary paths use the production pipe builder, including supported sketch
+lines, arcs, circles and splines. Supported profile controls are `none`,
+`lockProfileFaces` (requires `lockProfileFace` planar
+solid-body face targets), and `lockProfileDirection` (requires exactly one
+`lockProfileDirection` linear solid-body edge or construction-plane reference).
+Face locks use the first selected planar face's normal, after validating all
+selected faces; direction constructions use their plane normal. These controls
+use the existing native trihedron modes, not arbitrary guide geometry.
+`keepProfileOrientation` is explicitly refused: the existing native MakePipe
+call silently falls back from its fixed trihedron mode, so it does not provide
+the promised fixed orientation. No new native implementation is included. Inactive
+lock targets, duplicate roles, extra paths and unknown controls are refused
+before browser hydration can discard or default them.
+
+Non-unit positive `endScale` and twist variants require a **durable linear
+solid-body edge**, not a sketch-entity path. Twist is `{ type: "angle", angle }`
+in RADIANS, `{ type: "turns", turns }` with positive turns, or
+`{ type: "pitch", pitch }` with positive document-length pitch. The latter
+converts path length / pitch to turns. These native controls construct a
+**two-section endpoint loft**, transforming the end profile by scale about the
+path start, rotation about the path axis, then path translation. They are NOT
+a continuous helical sweep: whole-turn endpoint rotations are periodic and do
+not imply material winding between sections. Profile controls cannot combine
+with effective twist/scale. Guides and boolean composition are unsupported;
+no new geometry algorithm is implied. `operationIntent` defaults to create.
+
+Completion uses the same production mutation, exact repository receipt, rebuild
+and handoff as other features. Missing references may leave an applied, committed
+but failed-editable feature; strict intent never reports that as fulfilled.
+Inspect the sweep feature's `producedTargets` to choose its actual current body,
+not a retained body used as the path tool. Native topology is current exact
+geometry, not a last-good mesh or a body-count certificate.
+
 ### Active-author undo and redo
 
 `history.inspect`, `history.undo`, and `history.redo` take the current `basis`

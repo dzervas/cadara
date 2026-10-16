@@ -727,6 +727,19 @@ export interface SweepAdvancedOptions extends Record<string, unknown> {
   endScale: MaybeAuthoredValue<number>;
 }
 
+/** Canonical sweep request uses the existing controls, not a client options model. */
+export interface SweepFeatureParameters {
+  participants: readonly (
+    | { role: "profile"; targets: readonly Extract<DurableRef, { kind: "region" | "face" }>[] }
+    | { role: "path" | "guideCurve"; targets: readonly Extract<DurableRef, { kind: "edge" | "sketchEntity" }>[] }
+    | { role: "lockProfileFace"; targets: readonly Extract<DurableRef, { kind: "face" }>[] }
+    | { role: "lockProfileDirection"; targets: readonly Extract<DurableRef, { kind: "edge" | "construction" }>[] }
+    | { role: "targetBody"; targets: readonly Extract<DurableRef, { kind: "body" }>[] }
+  )[];
+  operationIntent?: AuthoredValue<AdvancedSolidOperationIntent>;
+  options: Pick<SweepAdvancedOptions, "profileControl" | "twist" | "endScale">;
+}
+
 export const SWEEP_ADVANCED_OPTION_DESCRIPTORS = [
   {
     key: "profileControl",
