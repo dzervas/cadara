@@ -244,7 +244,7 @@ function parseRecipe(input: unknown): RecipeOperation[] {
         }) } : {}),
       };
     }
-    if ((command.operation === "sweep.create" || command.operation === "sweep.update") && command.parameters && typeof command.parameters === "object" && "participants" in command.parameters && Array.isArray(command.parameters.participants)) {
+    if ((command.operation === "loft.create" || command.operation === "loft.update" || command.operation === "sweep.create" || command.operation === "sweep.update") && command.parameters && typeof command.parameters === "object" && "participants" in command.parameters && Array.isArray(command.parameters.participants)) {
       validationCommand.parameters = { ...command.parameters, participants: command.parameters.participants.map(p => {
         if (!p || typeof p !== "object" || !Array.isArray(p.targets)) return p;
         return { ...p, targets: p.targets.map((t: unknown) => {
@@ -611,6 +611,20 @@ export const documentRecipesCommand: CommandModule = {
             return target;
           }) }));
           command.parameters = { ...command.parameters, participants: [{ role: "face", targets: sources }, ...targets] };
+        }
+        if (command.operation === "loft.create" || command.operation === "loft.update") {
+          command.parameters = { ...command.parameters, participants: command.parameters.participants.map(p => {
+            if (p.role === "profile") return { role: p.role, targets: p.targets.map(v => {
+              const t = resolveSketchTarget(v, ["region", "face"]);
+              if (t.kind !== "region" && t.kind !== "face") throw new Error("Invalid loft profile.");
+              return t;
+            }) };
+            return { role: p.role, targets: p.targets.map(v => {
+              const t = resolveSketchTarget(v, ["edge"]);
+              if (t.kind !== "edge") throw new Error("Invalid loft path.");
+              return t;
+            }) };
+          }) };
         }
         if (command.operation === "sweep.create" || command.operation === "sweep.update") {
           command.parameters = { ...command.parameters, participants: command.parameters.participants.map(p => {
