@@ -185,6 +185,7 @@ export function createSemanticDocumentPort(input: {
     revolve: createSemanticFeatureMutationPort({ service, loop, inspect }),
     plane: createSemanticFeatureMutationPort({ service, loop, inspect }),
     hole: createSemanticFeatureMutationPort({ service, loop, inspect }),
+    sweep: createSemanticFeatureMutationPort({ service, loop, inspect }),
     shellThicken: createSemanticFeatureMutationPort({ service, loop, inspect }),
     edgeTreatment: createSemanticFeatureMutationPort({ service, loop, inspect }),
     export: createSemanticExportPort({ service, files: input.nativeFileIO, inspect }),

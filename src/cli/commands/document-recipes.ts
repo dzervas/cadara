@@ -244,6 +244,22 @@ function parseRecipe(input: unknown): RecipeOperation[] {
         }) } : {}),
       };
     }
+    if ((command.operation === "sweep.create" || command.operation === "sweep.update") && command.parameters && typeof command.parameters === "object" && "participants" in command.parameters && Array.isArray(command.parameters.participants)) {
+      validationCommand.parameters = { ...command.parameters, participants: command.parameters.participants.map(p => {
+        if (!p || typeof p !== "object" || !Array.isArray(p.targets)) return p;
+        return { ...p, targets: p.targets.map((t: unknown) => {
+          if (!isAlias(t)) return t;
+          validateTarget(t, "sweep_validation");
+          switch (p.role) {
+            case "profile": return { kind: "region", sketchId: "sketch_validation", regionId: "region_validation" };
+            case "path": case "guideCurve": case "lockProfileDirection": return { kind: "edge", bodyId: "body_validation", edgeId: "edge_validation" };
+            case "lockProfileFace": return { kind: "face", bodyId: "body_validation", faceId: "face_validation" };
+            case "targetBody": return { kind: "body", bodyId: "body_validation" };
+            default: return t;
+          }
+        }) };
+      }) };
+    }
     if (isAlias(command.profile)) {
       validateTarget(command.profile, "region_validation");
       validationCommand.profile = { kind: "region", sketchId: "sketch_validation", regionId: "region_validation" };
@@ -595,6 +611,38 @@ export const documentRecipesCommand: CommandModule = {
             return target;
           }) }));
           command.parameters = { ...command.parameters, participants: [{ role: "face", targets: sources }, ...targets] };
+        }
+        if (command.operation === "sweep.create" || command.operation === "sweep.update") {
+          command.parameters = { ...command.parameters, participants: command.parameters.participants.map(p => {
+            // Keep role/kind correspondence; labels never select an arbitrary first match.
+            switch (p.role) {
+              case "profile": return { role: p.role, targets: p.targets.map(v => {
+                const t = resolveSketchTarget(v, ["region", "face"]);
+                if (t.kind !== "region" && t.kind !== "face") throw new Error("Invalid sweep profile.");
+                return t;
+              }) };
+              case "path": case "guideCurve": return { role: p.role, targets: p.targets.map(v => {
+                const t = resolveSketchTarget(v, ["edge", "sketchEntity"]);
+                if (t.kind !== "edge" && t.kind !== "sketchEntity") throw new Error("Invalid sweep path.");
+                return t;
+              }) };
+              case "lockProfileFace": return { role: p.role, targets: p.targets.map(v => {
+                const t = resolveSketchTarget(v, ["face"]);
+                if (t.kind !== "face") throw new Error("Invalid sweep lock face.");
+                return t;
+              }) };
+              case "lockProfileDirection": return { role: p.role, targets: p.targets.map(v => {
+                const t = resolveSketchTarget(v, ["edge", "construction"]);
+                if (t.kind !== "edge" && t.kind !== "construction") throw new Error("Invalid sweep lock direction.");
+                return t;
+              }) };
+              case "targetBody": return { role: p.role, targets: p.targets.map(v => {
+                const t = resolveSketchTarget(v, ["body"]);
+                if (t.kind !== "body") throw new Error("Invalid sweep target body.");
+                return t;
+              }) };
+            }
+          }) };
         }
         if (command.operation === "hole.create" || command.operation === "hole.update") {
           const locations = command.parameters.participants[0].targets.map(value => {
