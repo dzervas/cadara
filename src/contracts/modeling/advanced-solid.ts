@@ -223,6 +223,12 @@ export type ChamferWidthOptions =
       angle: MaybeAuthoredValue<number>;
     };
 
+/** Canonical supported chamfer input; no unrelated roles or inactive width fields. */
+export interface ChamferFeatureParameters {
+  participants: readonly [{ role: "edge"; targets: readonly Extract<DurableRef, { kind: "edge" }>[] }];
+  options: ChamferWidthOptions;
+}
+
 export interface ChamferAdvancedOptions extends Record<string, unknown> {
   widthForm?: MaybeAuthoredValue<ChamferWidthForm>;
   distance?: MaybeAuthoredValue<number>;

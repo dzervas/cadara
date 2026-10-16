@@ -181,7 +181,7 @@ class DocumentSession implements SemanticSession {
         },
       };
     try {
-      if (command.operation.startsWith("timeline.") || command.operation === "target.delete" || command.operation === "body.rename" || command.operation.startsWith("feature.") || command.operation.startsWith("variable.") || command.operation.startsWith("sketch.") || command.operation.startsWith("extrude.") || command.operation.startsWith("revolve.") || command.operation.startsWith("plane.") || command.operation.startsWith("history.") || command.operation.startsWith("export.")) {
+      if (command.operation.startsWith("timeline.") || command.operation === "target.delete" || command.operation === "body.rename" || command.operation.startsWith("feature.") || command.operation.startsWith("variable.") || command.operation.startsWith("sketch.") || command.operation.startsWith("extrude.") || command.operation.startsWith("revolve.") || command.operation.startsWith("plane.") || command.operation.startsWith("fillet.") || command.operation.startsWith("chamfer.") || command.operation.startsWith("history.") || command.operation.startsWith("export.")) {
         const execute = command.operation.startsWith("timeline.") || command.operation === "target.delete" || command.operation === "body.rename" || command.operation.startsWith("feature.")
           ? this.owner.featureLifecycle?.bind(this.owner)
           : command.operation.startsWith("variable.")
@@ -192,7 +192,9 @@ class DocumentSession implements SemanticSession {
             ? this.owner.history?.bind(this.owner)
             : command.operation.startsWith("export.")
               ? this.owner.export?.bind(this.owner)
-              : command.operation.startsWith("plane.")
+              : command.operation.startsWith("fillet.") || command.operation.startsWith("chamfer.")
+                 ? this.owner.edgeTreatment?.bind(this.owner)
+               : command.operation.startsWith("plane.")
                 ? this.owner.plane?.bind(this.owner)
               : command.operation.startsWith("revolve.")
                 ? this.owner.revolve?.bind(this.owner)

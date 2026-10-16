@@ -15,6 +15,17 @@ import {
   isPositiveAuthoredNumber,
 } from "@/core/feature-authoring/features/shared";
 
+/** Canonical clients use the browser draft/builder, not a raw definition patch. */
+export function prepareFilletFeatureDefinition(parameters: import("@/contracts/modeling/schema").FilletFeatureParameters) {
+  return filletAuthoringDefinition.buildDefinition(
+    filletAuthoringDefinition.hydrateDraft({
+      kind: "fillet",
+      featureTypeVersion: FILLET_FEATURE_SCHEMA_VERSION,
+      parameters,
+    }),
+  );
+}
+
 export const filletAuthoringDefinition = {
   metadata: {
     kind: "fillet",

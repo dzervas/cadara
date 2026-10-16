@@ -16,7 +16,7 @@ type Alias = { alias: string };
 type TargetAlias = Alias & { label: string };
 type RecipeGeometryEdit<T = import("@/contracts/semantic/schema").SemanticSketchGeometryEdit> = T extends { target: infer R } ? Omit<T, "target" | "destination" | "boundary"> & { target: R | TargetAlias } & (T extends { destination: infer D } ? { destination: D | TargetAlias } : unknown) & (T extends { boundary: infer B } ? { boundary: B | TargetAlias } : unknown) : never;
 type RecipePrimitive<T = import("@/contracts/semantic/schema").SemanticSketchPrimitive> = T extends { source: infer S } ? Omit<T, "source"> & { source: S | TargetAlias } : T;
-type RecipeFeatureParameters<T> = T extends { profiles: infer P extends readonly unknown[] } ? Omit<T, "profiles" | "axis"> & { profiles: readonly [P[number] | TargetAlias, ...(P[number] | TargetAlias)[]] } & (T extends { axis: infer A } ? { axis: A | TargetAlias } : unknown) : T extends { reference: { target: infer R } } ? Omit<T, "reference"> & { reference: { target: R | TargetAlias } } : T;
+type RecipeFeatureParameters<T> = T extends { profiles: infer P extends readonly unknown[] } ? Omit<T, "profiles" | "axis"> & { profiles: readonly [P[number] | TargetAlias, ...(P[number] | TargetAlias)[]] } & (T extends { axis: infer A } ? { axis: A | TargetAlias } : unknown) : T extends { edgeTargets: infer E extends readonly unknown[] } ? Omit<T, "edgeTargets"> & { edgeTargets: readonly (E[number] | TargetAlias)[] } : T extends { participants: readonly [{ role: "edge"; targets: infer E extends readonly unknown[] }] } ? Omit<T, "participants"> & { participants: readonly [{ role: "edge"; targets: readonly (E[number] | TargetAlias)[] }] } : T extends { reference: { target: infer R } } ? Omit<T, "reference"> & { reference: { target: R | TargetAlias } } : T;
 type RecipeCommand<T = SemanticCommand> = T extends SemanticCommand
   ? Omit<T, "parameters" | "basis" | "draft" | "points" | "dimensionId" | "derivationId" | "profile" | "featureId" | "beforeFeatureId" | "bodyId" | "cursor" | "item" | "beforeItem" | "variableId" | "sketchId" | "target" | "targets" | "axis" | "repair" | "edit" | "primitive" | "support"> &
     (T extends { parameters: infer P } ? { parameters: RecipeFeatureParameters<P> } : unknown) &
@@ -210,6 +210,22 @@ function parseRecipe(input: unknown): RecipeOperation[] {
     if ((command.operation === "plane.create" || command.operation === "plane.update") && command.parameters && typeof command.parameters === "object" && "reference" in command.parameters && command.parameters.reference && typeof command.parameters.reference === "object" && "target" in command.parameters.reference && isAlias(command.parameters.reference.target)) {
       validateTarget(command.parameters.reference.target, "construction_validation");
       validationCommand.parameters = { ...command.parameters, reference: { target: { kind: "construction", constructionId: "construction_validation" } } };
+    }
+    if ((command.operation === "fillet.create" || command.operation === "fillet.update" || command.operation === "chamfer.create" || command.operation === "chamfer.update") && command.parameters && typeof command.parameters === "object") {
+      const parameters = command.parameters as Record<string, unknown>;
+      const validateEdges = (targets: unknown[]) => targets.map(target => {
+        if (!isAlias(target)) return target;
+        validateTarget(target, "edge_validation");
+        return { kind: "edge", bodyId: "body_validation", edgeId: "edge_validation" };
+      });
+      validationCommand.parameters = {
+        ...parameters,
+        ...(Array.isArray(parameters.edgeTargets) ? { edgeTargets: validateEdges(parameters.edgeTargets) } : {}),
+        ...(Array.isArray(parameters.participants) ? { participants: parameters.participants.map(participant => {
+          if (!participant || typeof participant !== "object" || !("targets" in participant) || !Array.isArray(participant.targets)) return participant;
+          return { ...participant, targets: validateEdges(participant.targets) };
+        }) } : {}),
+      };
     }
     if (isAlias(command.profile)) {
       validateTarget(command.profile, "region_validation");
@@ -528,6 +544,17 @@ export const documentRecipesCommand: CommandModule = {
           command.parameters = parameters.resultBodyType === "solid"
             ? { ...parameters, profiles: [resolveSolidProfile(parameters.profiles[0]), ...parameters.profiles.slice(1).map(resolveSolidProfile)] }
             : { ...parameters, profiles: [resolveProfile(parameters.profiles[0]), ...parameters.profiles.slice(1).map(resolveProfile)] };
+        }
+        if (command.operation === "fillet.create" || command.operation === "fillet.update" || command.operation === "chamfer.create" || command.operation === "chamfer.update") {
+          const resolveEdge = (value: Extract<import("@/contracts/shared/references").DurableRef, { kind: "edge" }> | TargetAlias) => {
+            const target = resolveSketchTarget(value, ["edge"]);
+            if (target.kind !== "edge") throw new Error("Invalid edge target.");
+            return target;
+          };
+          if (command.operation === "fillet.create" || command.operation === "fillet.update")
+            command.parameters = { ...command.parameters, edgeTargets: command.parameters.edgeTargets.map(resolveEdge) };
+          else
+            command.parameters = { ...command.parameters, participants: [{ role: "edge", targets: command.parameters.participants[0].targets.map(resolveEdge) }] };
         }
         if ((command.operation === "plane.create" || command.operation === "plane.update") && command.parameters.mode === "coplanar") {
           const target = resolveSketchTarget(command.parameters.reference.target, ["construction", "face"]);
