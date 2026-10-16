@@ -186,6 +186,16 @@ export type SemanticVariableCommand = CommandIdentity & {
   intent: "fulfill" | "author-invalid";
 } & ({ operation: "variable.add" } | { operation: "variable.update"; variableId: import("@/contracts/shared/ids").DocumentVariableId });
 
+export type SemanticEdgeTreatmentCommand = CommandIdentity & {
+  basis: SemanticBasis;
+  intent: "fulfill" | "author-invalid";
+} & (
+  | { operation: "fillet.create"; parameters: import("@/contracts/modeling/schema").FilletFeatureParameters }
+  | { operation: "fillet.update"; featureId: import("@/contracts/shared/ids").FeatureId; parameters: import("@/contracts/modeling/schema").FilletFeatureParameters }
+  | { operation: "chamfer.create"; parameters: import("@/contracts/modeling/advanced-solid").ChamferFeatureParameters }
+  | { operation: "chamfer.update"; featureId: import("@/contracts/shared/ids").FeatureId; parameters: import("@/contracts/modeling/advanced-solid").ChamferFeatureParameters }
+);
+
 export type SemanticPlaneCommand = CommandIdentity & {
   basis: SemanticBasis;
   intent: "fulfill" | "author-invalid";
@@ -241,6 +251,7 @@ export type SemanticCommand =
   | SemanticExtrudeCommand
   | SemanticRevolveCommand
   | SemanticPlaneCommand
+  | SemanticEdgeTreatmentCommand
   | SemanticVariableCommand
   | SemanticFeatureLifecycleCommand
   | SemanticHistoryCommand
@@ -370,7 +381,7 @@ export interface SemanticDiscovery {
     /** Current production construction frames, never inferred from display outlines. */
     constructions?: readonly { constructionId: import("@/contracts/shared/ids").ConstructionId; ownerFeatureId: import("@/contracts/shared/ids").FeatureId | null; frame: import("@/contracts/shared/sketch-plane").SketchPlaneFrame }[];
     /** Native exact B-rep inspection only; null when unavailable or invalid. */
-    bodies: readonly { bodyId: import("@/contracts/shared/ids").BodyId; kind: import("@/contracts/modeling/schema").BodyKind; bounds: { min: readonly number[]; max: readonly number[] } | null }[];
+    bodies: readonly { bodyId: import("@/contracts/shared/ids").BodyId; kind: import("@/contracts/modeling/schema").BodyKind; bounds: { min: readonly number[]; max: readonly number[] } | null; /** Same exact payload as bounds; null is not empty topology. */ topology?: readonly import("@/contracts/import/capabilities").HistoryProbeTopologySignature[] | null }[];
   };
   sketch?: {
     sketchId: SketchId | null;

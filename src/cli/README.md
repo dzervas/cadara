@@ -734,6 +734,48 @@ from the displayed outline. Completion requires current native construction
 output, the exact repository transaction and authoritative handoff, not a body
 bounding box. No solid is created by a plane alone.
 
+### Solid edge treatments
+
+`fillet.create` / `fillet.update` and `chamfer.create` / `chamfer.update`
+take current `basis`, explicit `intent`, and canonical `parameters`. Updates
+also require the discovered `featureId`. These use the same browser feature
+preparation, production mutation and native topology/history owners.
+
+Fillet parameters are `{ edgeTargets: [<edge ref>], radius: { source:
+"literal", value: 1 } }`. Radius uses the canonical authored scalar (expressions
+use `{ source: "expression", valueText }`), must resolve positively and fit the
+solid. Chamfer parameters are `{ participants: [{ role: "edge", targets:
+[<edge ref>] }], options }`, with one supported width form:
+
+- `{ widthForm: "equalOffsets", distance: 1 }` (the width form may be omitted).
+- `{ widthForm: "twoOffsets", distance1: 1, distance2: 2 }`.
+- `{ widthForm: "offsetAngle", distance: 1, angle: 30 }`.
+
+Distances are in document units; chamfer angles are **degrees**, strictly between
+0 and 90. Scalar fields also accept canonical authored wrappers. Width variants
+must be explicit literals, not unresolved expressions. Unknown roles, unknown
+options and inactive variant fields are refused rather than silently discarded.
+Native two-offset/distance-angle execution retains production adjacent-face
+ordering; an edge reference does not select an owner face or reverse the widths.
+
+Edge refs are `{ kind: "edge", bodyId, edgeId }` from current discovery, not
+subshape indices. Recipes also accept exact unique `{ alias, label }` in
+`edgeTargets` and participant `targets`; feature IDs accept the existing feature
+label aliases. An old discovery may describe the input to an existing feature
+update, but cannot certify a consumed edge as a current new selection.
+Rediscover after each operation. Missing, stale, unsupported subtopology and
+infeasible inputs cannot fulfill a treatment. Existing production refusals may
+be unchanged execution failures; accepted invalid rebuilds retain applied live
+state and persistence truth, with failed geometry (or explicit `author-invalid`
+editable state), never an invented successful rollback.
+
+`model.bodies[].topology` exposes the existing native exact-payload signatures
+with durable refs, analytic types/defining data and extents from the **same**
+payload as `bounds`. A fillet can leave overall body bounds unchanged: inspect
+the actual cylinder radius or bevel plane, not bounds alone. Null means exact
+inspection is unavailable/invalid, not an empty topology. Body-only mesh outputs
+expose no fabricated face/edge/vertex selections and have null exact topology.
+
 ### Active-author undo and redo
 
 `history.inspect`, `history.undo`, and `history.redo` take the current `basis`

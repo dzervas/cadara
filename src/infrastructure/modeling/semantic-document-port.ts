@@ -184,6 +184,7 @@ export function createSemanticDocumentPort(input: {
     extrude: createSemanticFeatureMutationPort({ service, loop, inspect }),
     revolve: createSemanticFeatureMutationPort({ service, loop, inspect }),
     plane: createSemanticFeatureMutationPort({ service, loop, inspect }),
+    edgeTreatment: createSemanticFeatureMutationPort({ service, loop, inspect }),
     export: createSemanticExportPort({ service, files: input.nativeFileIO, inspect }),
     async drain() {
       await loop.drain();

@@ -17,6 +17,7 @@ export async function inspectSemanticModel(
     let bounds: NonNullable<
       SemanticDiscovery["model"]
     >["bodies"][number]["bounds"] = null;
+    let topology: NonNullable<SemanticDiscovery["model"]>["bodies"][number]["topology"] = null;
     if (!invalid && body.topologyPresentation !== "bodyOnlyMesh") {
       const exact = await service.buildNativeExactBrepPayload({
         baseRevisionId: snapshot.document.revisionId,
@@ -26,6 +27,7 @@ export async function inspectSemanticModel(
         const derived = deriveKernelTopologySignaturesFromExactBrepPayload(
           exact.payload,
         );
+        if (derived.status === "available") topology = derived.signatures;
         const box =
           derived.status === "available"
             ? derived.signatures.find((s) => s.entityClass === "body")
@@ -34,7 +36,7 @@ export async function inspectSemanticModel(
         if (box) bounds = { min: box.low, max: box.high };
       }
     }
-    bodies.push({ bodyId: body.bodyId, kind: body.bodyKind, bounds });
+    bodies.push({ bodyId: body.bodyId, kind: body.bodyKind, bounds, topology });
   }
   return {
     constructions: snapshot.document.constructions.map(c => ({ constructionId: c.constructionId, ownerFeatureId: c.ownerFeatureId, frame: c.plane.frame })),
