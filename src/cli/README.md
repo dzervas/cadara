@@ -695,6 +695,45 @@ fulfillment. Only explicit `author-invalid` permits accepted editable invalid
 state, and does not override production rejections. Native body kind/bounds and
 current feature/topology references are returned in discovery.
 
+### Construction planes
+
+`plane.create` and `plane.update` take current `basis`, explicit `intent`, and
+canonical `parameters`; update also takes a discovered `featureId` (or its exact
+unique feature-label alias). Supported forms are `mode: "coplanar"` with
+`reference: { target: <construction or planar face> }`, and `mode: "explicitFrame"`
+with a complete world-space `frame`, for example:
+
+```json
+{
+  "mode": "explicitFrame",
+  "frame": {
+    "origin": [3, 4, 5],
+    "xAxis": [0, 1, 0],
+    "yAxis": [0, 0, 1],
+    "normal": [1, 0, 0],
+    "linearUnit": "documentLength",
+    "handedness": "rightHanded"
+  }
+}
+```
+
+Browser hydration/build and semantic preparation preserve the same explicit
+frame and share right-handed orthonormal validation. Degenerate or left-handed
+axes refuse rather than being normalized. No general offset/angle authoring is
+added. Coplanar target resolution remains production-owned; missing/nonplanar
+references cannot fulfill, including after an update of a previously valid plane.
+An accepted invalid revision is reported as applied with failed geometry for
+`fulfill`, not as rollback or successful creation.
+
+Discovery `model.constructions` exposes current construction IDs, owning feature
+IDs and actual frames. `references` supplies the construction target and its
+exact unique label for recipes (`parameters.reference.target` accepts a target
+alias). IDs remain stable when updating the owning feature. Use these discovered
+targets as sketch supports or subsequent coplanar seeds; do not infer identity
+from the displayed outline. Completion requires current native construction
+output, the exact repository transaction and authoritative handoff, not a body
+bounding box. No solid is created by a plane alone.
+
 ### Active-author undo and redo
 
 `history.inspect`, `history.undo`, and `history.redo` take the current `basis`

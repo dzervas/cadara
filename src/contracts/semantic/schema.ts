@@ -186,6 +186,15 @@ export type SemanticVariableCommand = CommandIdentity & {
   intent: "fulfill" | "author-invalid";
 } & ({ operation: "variable.add" } | { operation: "variable.update"; variableId: import("@/contracts/shared/ids").DocumentVariableId });
 
+export type SemanticPlaneCommand = CommandIdentity & {
+  basis: SemanticBasis;
+  intent: "fulfill" | "author-invalid";
+  parameters: import("@/contracts/modeling/schema").PlaneFeatureParameters;
+} & (
+  | { operation: "plane.create" }
+  | { operation: "plane.update"; featureId: import("@/contracts/shared/ids").FeatureId }
+);
+
 export type SemanticRevolveCommand = CommandIdentity & {
   basis: SemanticBasis;
   intent: "fulfill" | "author-invalid";
@@ -231,6 +240,7 @@ export type SemanticCommand =
   | SemanticSketchCommand
   | SemanticExtrudeCommand
   | SemanticRevolveCommand
+  | SemanticPlaneCommand
   | SemanticVariableCommand
   | SemanticFeatureLifecycleCommand
   | SemanticHistoryCommand
@@ -357,6 +367,8 @@ export interface SemanticDiscovery {
     cursor?: import("@/contracts/modeling/schema").DocumentFeatureCursor;
     timeline?: readonly { label: string; target: Extract<DurableRef, { kind: "sketch" | "feature" }> }[];
     features: readonly { featureId: import("@/contracts/shared/ids").FeatureId; label: string; kind: string; suppressed: boolean; producedTargets: readonly DurableRef[] }[];
+    /** Current production construction frames, never inferred from display outlines. */
+    constructions?: readonly { constructionId: import("@/contracts/shared/ids").ConstructionId; ownerFeatureId: import("@/contracts/shared/ids").FeatureId | null; frame: import("@/contracts/shared/sketch-plane").SketchPlaneFrame }[];
     /** Native exact B-rep inspection only; null when unavailable or invalid. */
     bodies: readonly { bodyId: import("@/contracts/shared/ids").BodyId; kind: import("@/contracts/modeling/schema").BodyKind; bounds: { min: readonly number[]; max: readonly number[] } | null }[];
   };

@@ -16,7 +16,7 @@ type Alias = { alias: string };
 type TargetAlias = Alias & { label: string };
 type RecipeGeometryEdit<T = import("@/contracts/semantic/schema").SemanticSketchGeometryEdit> = T extends { target: infer R } ? Omit<T, "target" | "destination" | "boundary"> & { target: R | TargetAlias } & (T extends { destination: infer D } ? { destination: D | TargetAlias } : unknown) & (T extends { boundary: infer B } ? { boundary: B | TargetAlias } : unknown) : never;
 type RecipePrimitive<T = import("@/contracts/semantic/schema").SemanticSketchPrimitive> = T extends { source: infer S } ? Omit<T, "source"> & { source: S | TargetAlias } : T;
-type RecipeFeatureParameters<T> = T extends { profiles: infer P extends readonly unknown[] } ? Omit<T, "profiles" | "axis"> & { profiles: readonly [P[number] | TargetAlias, ...(P[number] | TargetAlias)[]] } & (T extends { axis: infer A } ? { axis: A | TargetAlias } : unknown) : never;
+type RecipeFeatureParameters<T> = T extends { profiles: infer P extends readonly unknown[] } ? Omit<T, "profiles" | "axis"> & { profiles: readonly [P[number] | TargetAlias, ...(P[number] | TargetAlias)[]] } & (T extends { axis: infer A } ? { axis: A | TargetAlias } : unknown) : T extends { reference: { target: infer R } } ? Omit<T, "reference"> & { reference: { target: R | TargetAlias } } : T;
 type RecipeCommand<T = SemanticCommand> = T extends SemanticCommand
   ? Omit<T, "parameters" | "basis" | "draft" | "points" | "dimensionId" | "derivationId" | "profile" | "featureId" | "beforeFeatureId" | "bodyId" | "cursor" | "item" | "beforeItem" | "variableId" | "sketchId" | "target" | "targets" | "axis" | "repair" | "edit" | "primitive" | "support"> &
     (T extends { parameters: infer P } ? { parameters: RecipeFeatureParameters<P> } : unknown) &
@@ -206,6 +206,10 @@ function parseRecipe(input: unknown): RecipeOperation[] {
     if ((command.operation === "revolve.create" || command.operation === "revolve.update") && command.parameters && typeof command.parameters === "object" && "axis" in command.parameters && isAlias(command.parameters.axis)) {
       validateTarget(command.parameters.axis, "sketch_entity_validation");
       validationCommand.parameters = { ...validationCommand.parameters as object, axis: { kind: "sketchEntity", sketchId: "sketch_validation", entityId: "sketch_entity_validation" } };
+    }
+    if ((command.operation === "plane.create" || command.operation === "plane.update") && command.parameters && typeof command.parameters === "object" && "reference" in command.parameters && command.parameters.reference && typeof command.parameters.reference === "object" && "target" in command.parameters.reference && isAlias(command.parameters.reference.target)) {
+      validateTarget(command.parameters.reference.target, "construction_validation");
+      validationCommand.parameters = { ...command.parameters, reference: { target: { kind: "construction", constructionId: "construction_validation" } } };
     }
     if (isAlias(command.profile)) {
       validateTarget(command.profile, "region_validation");
@@ -524,6 +528,11 @@ export const documentRecipesCommand: CommandModule = {
           command.parameters = parameters.resultBodyType === "solid"
             ? { ...parameters, profiles: [resolveSolidProfile(parameters.profiles[0]), ...parameters.profiles.slice(1).map(resolveSolidProfile)] }
             : { ...parameters, profiles: [resolveProfile(parameters.profiles[0]), ...parameters.profiles.slice(1).map(resolveProfile)] };
+        }
+        if ((command.operation === "plane.create" || command.operation === "plane.update") && command.parameters.mode === "coplanar") {
+          const target = resolveSketchTarget(command.parameters.reference.target, ["construction", "face"]);
+          if (target.kind !== "construction" && target.kind !== "face") throw new Error("Invalid plane reference.");
+          command.parameters = { ...command.parameters, reference: { target } };
         }
         if (command.operation === "revolve.create" || command.operation === "revolve.update") {
           const axis = resolveSketchTarget(command.parameters.axis, ["edge", "sketchEntity", "construction"]);
