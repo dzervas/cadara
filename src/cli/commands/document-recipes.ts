@@ -244,7 +244,7 @@ function parseRecipe(input: unknown): RecipeOperation[] {
         }) } : {}),
       };
     }
-    if ((command.operation === "loft.create" || command.operation === "loft.update" || command.operation === "sweep.create" || command.operation === "sweep.update") && command.parameters && typeof command.parameters === "object" && "participants" in command.parameters && Array.isArray(command.parameters.participants)) {
+    if ((command.operation === "mirror.create" || command.operation === "mirror.update" || command.operation === "transform.create" || command.operation === "transform.update" || command.operation === "linearPattern.create" || command.operation === "linearPattern.update" || command.operation === "circularPattern.create" || command.operation === "circularPattern.update" || command.operation === "loft.create" || command.operation === "loft.update" || command.operation === "sweep.create" || command.operation === "sweep.update") && command.parameters && typeof command.parameters === "object" && "participants" in command.parameters && Array.isArray(command.parameters.participants)) {
       validationCommand.parameters = { ...command.parameters, participants: command.parameters.participants.map(p => {
         if (!p || typeof p !== "object" || !Array.isArray(p.targets)) return p;
         return { ...p, targets: p.targets.map((t: unknown) => {
@@ -254,7 +254,9 @@ function parseRecipe(input: unknown): RecipeOperation[] {
             case "profile": return { kind: "region", sketchId: "sketch_validation", regionId: "region_validation" };
             case "path": case "guideCurve": case "lockProfileDirection": return { kind: "edge", bodyId: "body_validation", edgeId: "edge_validation" };
             case "lockProfileFace": return { kind: "face", bodyId: "body_validation", faceId: "face_validation" };
-            case "targetBody": return { kind: "body", bodyId: "body_validation" };
+            case "body": case "targetBody": return { kind: "body", bodyId: "body_validation" };
+            case "plane": case "transformReference": return { kind: "construction", constructionId: "construction_validation" };
+            case "axis": case "direction": return { kind: "edge", bodyId: "body_validation", edgeId: "edge_validation" };
             default: return t;
           }
         }) };
@@ -623,6 +625,14 @@ export const documentRecipesCommand: CommandModule = {
           } else {
             command.parameters = { ...command.parameters, participants: command.parameters.participants.map(p => ({ role: p.role, targets: p.targets.map(resolveBody) })) };
           }
+        }
+        if (command.operation === "mirror.create" || command.operation === "mirror.update" || command.operation === "transform.create" || command.operation === "transform.update" || command.operation === "linearPattern.create" || command.operation === "linearPattern.update" || command.operation === "circularPattern.create" || command.operation === "circularPattern.update") {
+          command.parameters = { ...command.parameters, participants: command.parameters.participants.map(p => {
+            const kinds = p.role === "body" || p.role === "targetBody" ? ["body"] as const
+              : p.role === "plane" || p.role === "transformReference" ? ["construction", "face"] as const
+              : ["construction", "face", "edge", "sketchEntity"] as const;
+            return { role: p.role, targets: p.targets.map(value => resolveSketchTarget(value, kinds)) };
+          }) } as typeof command.parameters;
         }
         if (command.operation === "loft.create" || command.operation === "loft.update") {
           command.parameters = { ...command.parameters, participants: command.parameters.participants.map(p => {

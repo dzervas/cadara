@@ -31,6 +31,32 @@ export function hasExactBodyParticipants(
   });
 }
 
+/** Canonical body operations must not lose duplicate roles/refs to hydration. */
+export function hasExactBodyOperationParticipants(
+  parameters: import("@/contracts/modeling/advanced-solid").AdvancedSolidFeatureParameters,
+  referenceRole: string,
+  referenceKinds: readonly PrimitiveRef["kind"][],
+  referenceRequired = true,
+  allowTargetBody = false,
+) {
+  const seen = new Set<string>();
+  let hasBody = false;
+  let hasReference = false;
+  for (const p of parameters.participants) {
+    if (seen.has(p.role) || p.targets.length === 0) return false;
+    seen.add(p.role);
+    if (p.role === "body" || (allowTargetBody && p.role === "targetBody")) {
+      if (p.targets.some(t => t.kind !== "body")) return false;
+      if (p.targets.some((t, i) => p.targets.slice(0, i).some(other => primitiveRefEquals(t, other)))) return false;
+      if (p.role === "body") hasBody = true;
+    } else if (p.role === referenceRole) {
+      if (p.targets.length !== 1 || !referenceKinds.includes(p.targets[0]!.kind)) return false;
+      hasReference = true;
+    } else return false;
+  }
+  return hasBody && (hasReference || !referenceRequired);
+}
+
 export {
   buildAdvancedSolidParticipants,
   isAdvancedOperationIntent,

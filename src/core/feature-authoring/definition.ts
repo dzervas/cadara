@@ -271,12 +271,15 @@ export interface DeleteSolidFeatureParameterDraft {
 }
 
 export interface MirrorFeatureParameterDraft {
+  operationIntent?: import("@/contracts/modeling/authored-values").AuthoredValue<"add">;
+  targetBodyTargets?: readonly Extract<PrimitiveRef, { kind: "body" }>[];
   bodyTargets: readonly Extract<PrimitiveRef, { kind: "body" }>[];
   planeTarget: Extract<PrimitiveRef, { kind: "construction" | "face" }> | null;
   copy: MaybeAuthoredValue<boolean>;
 }
 
 export interface TransformFeatureParameterDraft {
+  vector?: readonly [number, number, number];
   bodyTargets: readonly Extract<PrimitiveRef, { kind: "body" }>[];
   transformReferenceTarget: Extract<
     PrimitiveRef,

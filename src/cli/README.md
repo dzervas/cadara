@@ -975,6 +975,55 @@ not fulfilled. Only explicit `author-invalid` accepts editable invalid state.
 No CLI boolean algorithm, body-array mutation or alternative native history
 owner is introduced.
 
+### Body mirrors, transforms and copy patterns
+
+`mirror`, `transform`, `linearPattern` and `circularPattern` each provide
+`.create` and `.update` with current `basis`, explicit `intent`, canonical
+`parameters`, and `featureId` for updates. Participant references and feature
+IDs accept exact unique recipe labels. `model.capabilities` forwards the same
+production kernel capability declaration used by the browser: mirror and
+transform execution are supported, but neither is advertised as previewable.
+No CLI capability override is used.
+
+- Mirror requires nonempty unique solid `body` targets, exactly one `plane`
+  (construction plane or planar solid face), and `options.copy: true` (also
+  accepts existing authored wrappers). Ordinary copies retain their seeds and
+  have new body identities. The only supported explicit operation intent is
+  literal authored `add`, with exactly one seed and exactly one `targetBody`
+  referencing **that same body**; this merges into the original identity.
+  Replace, other intents, and arbitrary merge scopes are unsupported.
+- Transform is in-place on unique solid `body` targets and preserves body IDs.
+  Translation takes either `options.vector: [x,y,z]` (finite, nonzero), with no
+  reference or inactive options, or one `transformReference` (construction or
+  planar solid face), positive `distance`, and optional `direction` `positive`
+  (default) or `negative`. Distance accepts existing authored expressions.
+  Rotation takes `transformType: "rotation"`, nonzero literal `angle` in
+  **degrees**, and one `axis` (construction/planar face normal, linear solid
+  edge, or sketch line). Literal angle wrappers are accepted; angle expressions
+  are not resolved by the existing native owner and are refused. No boolean
+  intent, mixed translation/rotation fields, or fallback from an invalid vector
+  is accepted.
+- Patterns are **copy-only bodies**, not face/feature patterns or replay.
+  `linearPattern` takes one explicit `direction`; `circularPattern` takes one
+  `axis`. Both accept construction/planar face normals, linear solid edges or
+  sketch lines. `instanceCount` is an integer >=2 **including each seed**;
+  seeds remain unchanged and only count-1 copies per seed are feature outputs.
+  Linear `spacing` is positive and `oppositeDirection` reverses it. Centered
+  patterns and operation intents are refused. Circular `angleDegrees` is
+  nonzero with magnitude <=360; `equalSpace: true` divides a full turn by count,
+  otherwise by count-1 including the partial endpoint. With `equalSpace: false`
+  the angle is the per-instance step. `oppositeDirection` reverses the signed
+  angle. Pattern count, spacing, angle and booleans use existing authored-value
+  resolution. Copied topology retains the native conservative producer-stage
+  policy; exact geometric inspection does not promise durable subshape naming.
+
+Unknown/duplicate roles, duplicate bodies, extra references and inactive fields
+are refused before shared browser hydration could drop them. Rediscover current
+references after edits. Strict accepted mutations with failed regeneration are
+applied and persisted but report failed geometry, never last-good success;
+explicit `author-invalid` may retain editable invalid state. Native pre-commit
+refusals remain unchanged and are not converted into fabricated edit receipts.
+
 ### Active-author undo and redo
 
 `history.inspect`, `history.undo`, and `history.redo` take the current `basis`

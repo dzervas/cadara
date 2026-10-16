@@ -2,7 +2,7 @@ import {
   ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
   validateAdvancedSolidFeatureDefinition,
 } from "@/contracts/modeling/advanced-solid";
-import type { MaybeAuthoredValue } from "@/contracts/modeling/authored-values";
+import { getAuthoredLiteralValue, type MaybeAuthoredValue } from "@/contracts/modeling/authored-values";
 import type {
   FeatureAuthoringDefinition,
   TransformFeatureParameterDraft,
@@ -24,6 +24,7 @@ import {
   createMissingInputDiagnostic,
   expressionCapableAuthoredValue,
   isPositiveAuthoredNumber,
+  hasExactBodyOperationParticipants,
 } from "@/core/feature-authoring/features/shared";
 
 export const transformParticipants = [
@@ -120,6 +121,16 @@ function buildTransformDefinition(draft: TransformFeatureParameterDraft) {
     };
   }
 
+  if (draft.vector !== undefined) {
+    return {
+      kind: "transform" as const,
+      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        participants: [{ role: "body" as const, targets: draft.bodyTargets }],
+        options: { vector: draft.vector },
+      },
+    };
+  }
   return {
     kind: "transform" as const,
     featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
@@ -145,6 +156,27 @@ function buildTransformDefinition(draft: TransformFeatureParameterDraft) {
   };
 }
 
+export function prepareTransformFeatureDefinition(
+  parameters: import("@/contracts/modeling/advanced-solid").TransformFeatureParameters,
+) {
+  if ("operationIntent" in parameters) return null;
+  const options = parameters.options;
+  const rotation = options.transformType === "rotation";
+  const vector = "vector" in options;
+  const keys = rotation ? ["transformType", "angle"] : vector ? ["transformType", "vector"] : ["transformType", "distance", "direction"];
+  if (Object.keys(options).some(k => !keys.includes(k))) return null;
+  if (options.transformType !== undefined && options.transformType !== "translation" && options.transformType !== "rotation") return null;
+  if (!hasExactBodyOperationParticipants(parameters, rotation ? "axis" : "transformReference", rotation ? ["construction", "face", "edge", "sketchEntity"] : ["construction", "face"], !vector)) return null;
+  if (vector && (parameters.participants.some(p => p.role !== "body") || !Array.isArray(options.vector) || options.vector.length !== 3 || !options.vector.every(n => Number.isFinite(n)) || !options.vector.some(n => n !== 0))) return null;
+  if (rotation) {
+    const angle = getAuthoredLiteralValue(options.angle);
+    if (typeof angle !== "number" || !Number.isFinite(angle) || angle === 0) return null;
+  } else if (!vector && "direction" in options && options.direction !== undefined && options.direction !== "positive" && options.direction !== "negative") return null;
+  return transformAuthoringDefinition.buildDefinition(transformAuthoringDefinition.hydrateDraft({
+    kind: "transform", featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION, parameters,
+  }));
+}
+
 function getTransformValidationDiagnostics(
   draft: TransformFeatureParameterDraft,
 ) {
@@ -157,6 +189,10 @@ function getTransformValidationDiagnostics(
     },
   );
 
+  if (draft.transformType === "translation" && draft.vector !== undefined &&
+      (draft.vector.length !== 3 || !draft.vector.every(Number.isFinite) || !draft.vector.some(n => n !== 0))) {
+    diagnostics.push({ code: "advanced-feature-invalid-option", severity: "error", role: null, target: null, message: "Translation vector must have three finite components and be non-zero." });
+  }
   if (!isNormalDirection(draft.direction)) {
     diagnostics.push({
       code: "advanced-feature-invalid-option",
@@ -234,11 +270,13 @@ export const transformAuthoringDefinition = {
       ),
       angle: (feature.parameters.options?.angle ??
         0) as TransformFeatureParameterDraft["angle"],
+      ...(feature.parameters.options?.vector === undefined ? {} : { vector: feature.parameters.options.vector as TransformFeatureParameterDraft["vector"] }),
     };
   },
   applyPatch(draft, patch) {
     return {
       ...draft,
+      ...(patch.distance !== undefined || patch.direction !== undefined || patch.transformReferenceTarget !== undefined ? { vector: undefined } : {}),
       bodyTargets:
         patch.bodyTargets === undefined
           ? draft.bodyTargets
@@ -312,6 +350,7 @@ export const transformAuthoringDefinition = {
       }
       return `${prefix} rotation on ${draft.bodyTargets.length} bod${draft.bodyTargets.length === 1 ? "y" : "ies"}`;
     }
+    if (draft.vector) return `${prefix} vector translation on ${draft.bodyTargets.length} bodies`;
     if (!draft.transformReferenceTarget) {
       return "Select one transform reference plane";
     }
