@@ -821,6 +821,41 @@ explicit `author-invalid` can accept editable invalid state. Inspection exposes
 native analytic topology for checking cavities and offset planes, not just
 unchanged outer bounds.
 
+### Holes
+
+`hole.create` / `hole.update` take canonical `parameters`, a current `basis`,
+explicit `intent`, and an existing `featureId` for updates. Holes are implicitly
+subtractive; there is no separate boolean operation intent. Participants are
+`[{ role: "location", targets: [<sketchPoint refs>] }, { role: "body", targets:
+[<solid body refs>] }]`. Locations must be current authored sketch points and
+inherit their owning sketch plane's normal; `direction: "forward" | "reverse"`
+selects its sign. Recipes accept exact unique `{ alias, label }` location/body
+references and the existing feature aliases.
+
+Options reuse the browser's canonical hole styles and authored scalar values:
+
+- `style: "simple"` (also the omitted-style default), `mainDiameter`,
+  `termination: "blind"`, positive `depth`, optional `direction` (forward by
+  default).
+- `termination: "throughAll"` omits `depth`; inactive depth input is refused,
+  not silently discarded. The existing native owner spans the selected bodies.
+- `style: "counterbore"` adds `counterboreDiameter` and `counterboreDepth`.
+  The entry diameter must exceed `mainDiameter`; recess depth must be positive
+  and smaller than a blind bore's depth.
+- `style: "countersink"` adds `countersinkDiameter` and
+  `countersinkAngleDegrees` (included angle, strictly between 0 and 180).
+  The entry diameter must exceed `mainDiameter`; its cone must fit a blind bore.
+
+Unknown/inactive style fields, unsupported targets, unresolved style/direction/
+termination variants and implicit scopes are refused rather than coerced by
+browser transition defaults. Diameter/depth expressions use the existing
+production expression resolver. Sheet targets and infeasible dimensions refuse
+through existing native rules. Missing/deleted locations can persist an invalid
+editable feature, but never count as fulfillment; only explicit `author-invalid`
+can accept that state. Native topology exposes cylindrical radii/axes, conical
+angles and cut extents for independent inspection; unchanged outer bounds alone
+do not prove a hole exists.
+
 ### Active-author undo and redo
 
 `history.inspect`, `history.undo`, and `history.redo` take the current `basis`

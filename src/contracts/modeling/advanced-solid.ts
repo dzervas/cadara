@@ -293,6 +293,24 @@ export type HoleAdvancedOptions =
       counterboreDepth?: never;
     };
 
+// Distribute over existing styles without intersecting authored scalar unions.
+// Overlapping MaybeAuthoredValue fields otherwise create nonsensical intersections.
+type HoleWithExplicitTermination<Options> = Options extends unknown
+  ? Omit<Options, "termination" | "depth"> & (
+      | { termination: MaybeAuthoredValue<"blind">; depth: MaybeAuthoredValue<number> }
+      | { termination: MaybeAuthoredValue<"throughAll">; depth?: never }
+    )
+  : never;
+
+/** Canonical hole inputs retain existing style options and explicit subtractive scope. */
+export interface HoleFeatureParameters {
+  participants: readonly [
+    { role: "location"; targets: readonly Extract<DurableRef, { kind: "sketchPoint" }>[] },
+    { role: "body"; targets: readonly Extract<DurableRef, { kind: "body" }>[] },
+  ];
+  options: HoleWithExplicitTermination<HoleAdvancedOptions>;
+}
+
 /** Copy-only body pattern: selected seed bodies remain and each instance produces a new body. */
 
 export interface LinearPatternAdvancedOptions extends Record<string, unknown> {

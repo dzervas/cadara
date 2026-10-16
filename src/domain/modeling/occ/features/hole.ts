@@ -394,7 +394,11 @@ function makeCountersinkTool(
 ) {
   const axisStart = add(location.origin, scale(location.axisDirection, -margin));
   const axisEnd = add(location.origin, scale(location.axisDirection, sinkDepth));
-  const outerStart = add(axisStart, scale(location.radialDirection, sinkRadius));
+  // Extend the same cone behind the entry plane; keeping sinkRadius at the
+  // extended start would change both the requested taper and entry diameter.
+  const extendedRadius =
+    sinkRadius + margin * ((sinkRadius - mainRadius) / sinkDepth);
+  const outerStart = add(axisStart, scale(location.radialDirection, extendedRadius));
   const outerEnd = add(axisEnd, scale(location.radialDirection, mainRadius));
   const p1 = toGpPnt(oc, axisStart);
   const p2 = toGpPnt(oc, outerStart);

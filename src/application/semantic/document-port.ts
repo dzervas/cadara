@@ -29,6 +29,7 @@ export interface SemanticDocumentMutation {
 }
 
 export interface SemanticDocumentPort {
+  hole?(command: import("@/contracts/semantic/schema").SemanticHoleCommand): Promise<import("@/contracts/semantic/schema").SemanticResult>;
   shellThicken?(command: import("@/contracts/semantic/schema").SemanticShellThickenCommand): Promise<import("@/contracts/semantic/schema").SemanticResult>;
   edgeTreatment?(command: import("@/contracts/semantic/schema").SemanticEdgeTreatmentCommand): Promise<import("@/contracts/semantic/schema").SemanticResult>;
   plane?(command: import("@/contracts/semantic/schema").SemanticPlaneCommand): Promise<import("@/contracts/semantic/schema").SemanticResult>;
