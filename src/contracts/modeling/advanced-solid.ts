@@ -229,6 +229,20 @@ export interface ChamferFeatureParameters {
   options: ChamferWidthOptions;
 }
 
+/** Thicken sources are faces OR exactly one sheet body, never a mixed set. */
+export interface ThickenFeatureParameters {
+  participants: readonly [
+    { role: "face"; targets: readonly Extract<DurableRef, { kind: "face" }>[] | readonly [Extract<DurableRef, { kind: "body" }>] },
+    ...{ role: "targetBody"; targets: readonly Extract<DurableRef, { kind: "body" }>[] }[],
+  ];
+  operationIntent?: AuthoredValue<AdvancedSolidOperationIntent>;
+  options: {
+    thickness: AuthoredValue<number>;
+    side: AuthoredValue<"oneSide" | "symmetric">;
+    direction: "positive" | "negative";
+  };
+}
+
 export interface ChamferAdvancedOptions extends Record<string, unknown> {
   widthForm?: MaybeAuthoredValue<ChamferWidthForm>;
   distance?: MaybeAuthoredValue<number>;

@@ -196,6 +196,16 @@ export type SemanticEdgeTreatmentCommand = CommandIdentity & {
   | { operation: "chamfer.update"; featureId: import("@/contracts/shared/ids").FeatureId; parameters: import("@/contracts/modeling/advanced-solid").ChamferFeatureParameters }
 );
 
+export type SemanticShellThickenCommand = CommandIdentity & {
+  basis: SemanticBasis;
+  intent: "fulfill" | "author-invalid";
+} & (
+  | { operation: "shell.create"; parameters: import("@/contracts/modeling/schema").ShellFeatureParameters }
+  | { operation: "shell.update"; featureId: import("@/contracts/shared/ids").FeatureId; parameters: import("@/contracts/modeling/schema").ShellFeatureParameters }
+  | { operation: "thicken.create"; parameters: import("@/contracts/modeling/advanced-solid").ThickenFeatureParameters }
+  | { operation: "thicken.update"; featureId: import("@/contracts/shared/ids").FeatureId; parameters: import("@/contracts/modeling/advanced-solid").ThickenFeatureParameters }
+);
+
 export type SemanticPlaneCommand = CommandIdentity & {
   basis: SemanticBasis;
   intent: "fulfill" | "author-invalid";
@@ -252,6 +262,7 @@ export type SemanticCommand =
   | SemanticRevolveCommand
   | SemanticPlaneCommand
   | SemanticEdgeTreatmentCommand
+  | SemanticShellThickenCommand
   | SemanticVariableCommand
   | SemanticFeatureLifecycleCommand
   | SemanticHistoryCommand

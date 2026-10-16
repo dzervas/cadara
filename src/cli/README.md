@@ -776,6 +776,51 @@ the actual cylinder radius or bevel plane, not bounds alone. Null means exact
 inspection is unavailable/invalid, not an empty topology. Body-only mesh outputs
 expose no fabricated face/edge/vertex selections and have null exact topology.
 
+### Shell and thicken
+
+`shell.create` / `shell.update` and `thicken.create` / `thicken.update` take
+canonical `parameters`, current `basis`, explicit `intent`, and (for updates)
+`featureId`. They use the browser's shared parameter preparation and production
+create/update path, not raw feature patches.
+
+Shell parameters contain durable `bodyTarget`, positive authored `thickness`,
+`direction` (`inside` / `outside`), `faceTargets`, authored `operation`, and
+`booleanScope`. Legacy omitted `mode` means `openFaces`:
+
+- `openFaces` requires removable faces belonging to the source body. `newBody`
+  with standalone scope retains the source and creates a separate shell;
+  `join` / `cut` / `intersect` require explicit target-body scope.
+- `closedHollow` requires `faceTargets: []` and `direction: "inside"`.
+  It preserves the outer envelope and creates an inward cavity.
+- `offsetAllFaces` requires `faceTargets: []` and offsets the whole solid in
+  the requested direction.
+
+**Both whole-body modes replace the source body.** They do not execute boolean
+composition or create a second body. Their existing canonical operation/scope
+fields must be neutral `operation: { source: "literal", value: "newBody" }`,
+`booleanScope: { kind: "standalone" }`; other requests are refused rather than
+silently ignored. This metadata does not change their replacement behavior.
+
+Thicken parameters contain `participants: [{ role: "face", targets: [...] }]`,
+optional authored `operationIntent` (`create`, `add`, `subtract`, `intersect`),
+and `options: { thickness: <positive authored number>, side: <authored
+"oneSide" | "symmetric">, direction: "positive" | "negative" }`. Source targets
+must be faces **or exactly one sheet body**, never mixed or multiple bodies.
+A solid body is not a sheet source. Symmetric thickness is the total band,
+half on each side, not twice the entered thickness. Boolean intents require
+one additional `targetBody` participant with explicit solid targets; create
+cannot carry ignored target bodies.
+
+Recipes support exact unique `{ alias, label }` discovery references in shell
+`bodyTarget` / `faceTargets` and thicken participant targets. Boolean scope body
+IDs remain typed discovered IDs. Re-discover after each edit: unavailable or
+consumed subtopology is not replaced with a guessed face. Infeasible offsets,
+invalid thickness, participants and missing scopes/output fail through existing
+production rules. Applied/persisted invalid geometry is not fulfillment; only
+explicit `author-invalid` can accept editable invalid state. Inspection exposes
+native analytic topology for checking cavities and offset planes, not just
+unchanged outer bounds.
+
 ### Active-author undo and redo
 
 `history.inspect`, `history.undo`, and `history.redo` take the current `basis`

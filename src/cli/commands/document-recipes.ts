@@ -16,7 +16,7 @@ type Alias = { alias: string };
 type TargetAlias = Alias & { label: string };
 type RecipeGeometryEdit<T = import("@/contracts/semantic/schema").SemanticSketchGeometryEdit> = T extends { target: infer R } ? Omit<T, "target" | "destination" | "boundary"> & { target: R | TargetAlias } & (T extends { destination: infer D } ? { destination: D | TargetAlias } : unknown) & (T extends { boundary: infer B } ? { boundary: B | TargetAlias } : unknown) : never;
 type RecipePrimitive<T = import("@/contracts/semantic/schema").SemanticSketchPrimitive> = T extends { source: infer S } ? Omit<T, "source"> & { source: S | TargetAlias } : T;
-type RecipeFeatureParameters<T> = T extends { profiles: infer P extends readonly unknown[] } ? Omit<T, "profiles" | "axis"> & { profiles: readonly [P[number] | TargetAlias, ...(P[number] | TargetAlias)[]] } & (T extends { axis: infer A } ? { axis: A | TargetAlias } : unknown) : T extends { edgeTargets: infer E extends readonly unknown[] } ? Omit<T, "edgeTargets"> & { edgeTargets: readonly (E[number] | TargetAlias)[] } : T extends { participants: readonly [{ role: "edge"; targets: infer E extends readonly unknown[] }] } ? Omit<T, "participants"> & { participants: readonly [{ role: "edge"; targets: readonly (E[number] | TargetAlias)[] }] } : T extends { reference: { target: infer R } } ? Omit<T, "reference"> & { reference: { target: R | TargetAlias } } : T;
+type RecipeFeatureParameters<T> = T extends { profiles: infer P extends readonly unknown[] } ? Omit<T, "profiles" | "axis"> & { profiles: readonly [P[number] | TargetAlias, ...(P[number] | TargetAlias)[]] } & (T extends { axis: infer A } ? { axis: A | TargetAlias } : unknown) : T extends { edgeTargets: infer E extends readonly unknown[] } ? Omit<T, "edgeTargets"> & { edgeTargets: readonly (E[number] | TargetAlias)[] } : T extends { participants: infer P extends readonly { role: string; targets: readonly unknown[] }[] } ? Omit<T, "participants"> & { participants: { [K in keyof P]: Omit<P[K], "targets"> & { targets: readonly (P[K]["targets"][number] | TargetAlias)[] } } } : T extends { bodyTarget: infer B; faceTargets: infer F extends readonly unknown[] } ? Omit<T, "bodyTarget" | "faceTargets"> & { bodyTarget: B | TargetAlias; faceTargets: readonly (F[number] | TargetAlias)[] } : T extends { reference: { target: infer R } } ? Omit<T, "reference"> & { reference: { target: R | TargetAlias } } : T;
 type RecipeCommand<T = SemanticCommand> = T extends SemanticCommand
   ? Omit<T, "parameters" | "basis" | "draft" | "points" | "dimensionId" | "derivationId" | "profile" | "featureId" | "beforeFeatureId" | "bodyId" | "cursor" | "item" | "beforeItem" | "variableId" | "sketchId" | "target" | "targets" | "axis" | "repair" | "edit" | "primitive" | "support"> &
     (T extends { parameters: infer P } ? { parameters: RecipeFeatureParameters<P> } : unknown) &
@@ -224,6 +224,23 @@ function parseRecipe(input: unknown): RecipeOperation[] {
         ...(Array.isArray(parameters.participants) ? { participants: parameters.participants.map(participant => {
           if (!participant || typeof participant !== "object" || !("targets" in participant) || !Array.isArray(participant.targets)) return participant;
           return { ...participant, targets: validateEdges(participant.targets) };
+        }) } : {}),
+      };
+    }
+    if ((command.operation === "shell.create" || command.operation === "shell.update" || command.operation === "thicken.create" || command.operation === "thicken.update") && command.parameters && typeof command.parameters === "object") {
+      const parameters = command.parameters as Record<string, unknown>;
+      const validateReference = (value: unknown, kind: "body" | "face") => {
+        if (!isAlias(value)) return value;
+        validateTarget(value, kind === "body" ? "body_validation" : "face_validation");
+        return kind === "body" ? { kind, bodyId: "body_validation" } : { kind, bodyId: "body_validation", faceId: "face_validation" };
+      };
+      validationCommand.parameters = {
+        ...parameters,
+        ...("bodyTarget" in parameters ? { bodyTarget: validateReference(parameters.bodyTarget, "body") } : {}),
+        ...(Array.isArray(parameters.faceTargets) ? { faceTargets: parameters.faceTargets.map(t => validateReference(t, "face")) } : {}),
+        ...(Array.isArray(parameters.participants) ? { participants: parameters.participants.map(p => {
+          if (!p || typeof p !== "object" || !Array.isArray(p.targets)) return p;
+          return { ...p, targets: p.targets.map((t: unknown) => validateReference(t, p.role === "targetBody" ? "body" : "face")) };
         }) } : {}),
       };
     }
@@ -555,6 +572,29 @@ export const documentRecipesCommand: CommandModule = {
             command.parameters = { ...command.parameters, edgeTargets: command.parameters.edgeTargets.map(resolveEdge) };
           else
             command.parameters = { ...command.parameters, participants: [{ role: "edge", targets: command.parameters.participants[0].targets.map(resolveEdge) }] };
+        }
+        if (command.operation === "shell.create" || command.operation === "shell.update") {
+          const bodyTarget = resolveSketchTarget(command.parameters.bodyTarget, ["body"]);
+          if (bodyTarget.kind !== "body") throw new Error("Invalid shell body reference.");
+          const faceTargets = command.parameters.faceTargets.map(value => {
+            const target = resolveSketchTarget(value, ["face"]);
+            if (target.kind !== "face") throw new Error("Invalid shell face reference.");
+            return target;
+          });
+          command.parameters = { ...command.parameters, bodyTarget, faceTargets } as typeof command.parameters;
+        }
+        if (command.operation === "thicken.create" || command.operation === "thicken.update") {
+          const sources = command.parameters.participants[0].targets.map(value => {
+            const target = resolveSketchTarget(value, ["body", "face"]);
+            if (target.kind !== "body" && target.kind !== "face") throw new Error("Invalid thicken source.");
+            return target;
+          });
+          const targets = command.parameters.participants.slice(1).map(p => ({ role: "targetBody" as const, targets: p.targets.map(value => {
+            const target = resolveSketchTarget(value, ["body"]);
+            if (target.kind !== "body") throw new Error("Invalid thicken boolean target.");
+            return target;
+          }) }));
+          command.parameters = { ...command.parameters, participants: [{ role: "face", targets: sources }, ...targets] };
         }
         if ((command.operation === "plane.create" || command.operation === "plane.update") && command.parameters.mode === "coplanar") {
           const target = resolveSketchTarget(command.parameters.reference.target, ["construction", "face"]);
