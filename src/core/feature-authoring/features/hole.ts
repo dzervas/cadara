@@ -310,6 +310,24 @@ function numericField(
   };
 }
 
+/** Refuse unresolved variants before browser transition defaults can coerce them. */
+export function prepareHoleFeatureDefinition(parameters: import("@/contracts/modeling/advanced-solid").HoleFeatureParameters) {
+  const style = authoredStringLiteral(parameters.options.style ?? "simple", "");
+  const termination = authoredStringLiteral<string>(parameters.options.termination, "");
+  const direction = authoredStringLiteral(parameters.options.direction ?? "forward", "");
+  if (!["simple", "counterbore", "countersink"].includes(style) || !["blind", "throughAll"].includes(termination) || !["forward", "reverse"].includes(direction)) return null;
+  if (termination === "throughAll" && parameters.options.depth !== undefined) return null;
+  if (parameters.participants.length !== 2 || parameters.participants[0].role !== "location" || parameters.participants[1].role !== "body") return null;
+  if (parameters.participants[0].targets.some(t => t.kind !== "sketchPoint") || parameters.participants[1].targets.some(t => t.kind !== "body")) return null;
+  return holeAuthoringDefinition.buildDefinition(
+    holeAuthoringDefinition.hydrateDraft({
+      kind: "hole",
+      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+      parameters,
+    }),
+  );
+}
+
 export const holeAuthoringDefinition = {
   metadata: {
     kind: "hole",

@@ -196,6 +196,15 @@ export type SemanticEdgeTreatmentCommand = CommandIdentity & {
   | { operation: "chamfer.update"; featureId: import("@/contracts/shared/ids").FeatureId; parameters: import("@/contracts/modeling/advanced-solid").ChamferFeatureParameters }
 );
 
+export type SemanticHoleCommand = CommandIdentity & {
+  basis: SemanticBasis;
+  intent: "fulfill" | "author-invalid";
+  parameters: import("@/contracts/modeling/advanced-solid").HoleFeatureParameters;
+} & (
+  | { operation: "hole.create" }
+  | { operation: "hole.update"; featureId: import("@/contracts/shared/ids").FeatureId }
+);
+
 export type SemanticShellThickenCommand = CommandIdentity & {
   basis: SemanticBasis;
   intent: "fulfill" | "author-invalid";
@@ -263,6 +272,7 @@ export type SemanticCommand =
   | SemanticPlaneCommand
   | SemanticEdgeTreatmentCommand
   | SemanticShellThickenCommand
+  | SemanticHoleCommand
   | SemanticVariableCommand
   | SemanticFeatureLifecycleCommand
   | SemanticHistoryCommand

@@ -227,12 +227,12 @@ function parseRecipe(input: unknown): RecipeOperation[] {
         }) } : {}),
       };
     }
-    if ((command.operation === "shell.create" || command.operation === "shell.update" || command.operation === "thicken.create" || command.operation === "thicken.update") && command.parameters && typeof command.parameters === "object") {
+    if ((command.operation === "shell.create" || command.operation === "shell.update" || command.operation === "thicken.create" || command.operation === "thicken.update" || command.operation === "hole.create" || command.operation === "hole.update") && command.parameters && typeof command.parameters === "object") {
       const parameters = command.parameters as Record<string, unknown>;
-      const validateReference = (value: unknown, kind: "body" | "face") => {
+      const validateReference = (value: unknown, kind: "body" | "face" | "sketchPoint") => {
         if (!isAlias(value)) return value;
-        validateTarget(value, kind === "body" ? "body_validation" : "face_validation");
-        return kind === "body" ? { kind, bodyId: "body_validation" } : { kind, bodyId: "body_validation", faceId: "face_validation" };
+        validateTarget(value, kind === "body" ? "body_validation" : kind === "face" ? "face_validation" : "sketch_point_validation");
+        return kind === "body" ? { kind, bodyId: "body_validation" } : kind === "face" ? { kind, bodyId: "body_validation", faceId: "face_validation" } : { kind, sketchId: "sketch_validation", pointId: "sketch_point_validation" };
       };
       validationCommand.parameters = {
         ...parameters,
@@ -240,7 +240,7 @@ function parseRecipe(input: unknown): RecipeOperation[] {
         ...(Array.isArray(parameters.faceTargets) ? { faceTargets: parameters.faceTargets.map(t => validateReference(t, "face")) } : {}),
         ...(Array.isArray(parameters.participants) ? { participants: parameters.participants.map(p => {
           if (!p || typeof p !== "object" || !Array.isArray(p.targets)) return p;
-          return { ...p, targets: p.targets.map((t: unknown) => validateReference(t, p.role === "targetBody" ? "body" : "face")) };
+          return { ...p, targets: p.targets.map((t: unknown) => validateReference(t, p.role === "location" ? "sketchPoint" : p.role === "targetBody" || p.role === "body" ? "body" : "face")) };
         }) } : {}),
       };
     }
@@ -595,6 +595,19 @@ export const documentRecipesCommand: CommandModule = {
             return target;
           }) }));
           command.parameters = { ...command.parameters, participants: [{ role: "face", targets: sources }, ...targets] };
+        }
+        if (command.operation === "hole.create" || command.operation === "hole.update") {
+          const locations = command.parameters.participants[0].targets.map(value => {
+            const target = resolveSketchTarget(value, ["sketchPoint"]);
+            if (target.kind !== "sketchPoint") throw new Error("Invalid hole location.");
+            return target;
+          });
+          const bodies = command.parameters.participants[1].targets.map(value => {
+            const target = resolveSketchTarget(value, ["body"]);
+            if (target.kind !== "body") throw new Error("Invalid hole body.");
+            return target;
+          });
+          command.parameters = { ...command.parameters, participants: [{ role: "location", targets: locations }, { role: "body", targets: bodies }] };
         }
         if ((command.operation === "plane.create" || command.operation === "plane.update") && command.parameters.mode === "coplanar") {
           const target = resolveSketchTarget(command.parameters.reference.target, ["construction", "face"]);
