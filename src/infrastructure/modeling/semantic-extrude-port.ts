@@ -14,6 +14,7 @@ import type {
   SemanticSweepCommand,
   SemanticLoftCommand,
   SemanticBodyBooleanCommand,
+  SemanticBodyOperationCommand,
   SemanticState,
 } from "@/contracts/semantic/schema";
 import type { DocumentRepositoryMutationResult } from "@/domain/modeling/document-repository";
@@ -53,6 +54,11 @@ import { prepareHoleFeatureDefinition } from "@/core/feature-authoring/features/
 import { prepareShellFeatureDefinition } from "@/core/feature-authoring/features/shell";
 import { prepareThickenFeatureDefinition } from "@/core/feature-authoring/features/thicken";
 
+import { prepareMirrorFeatureDefinition } from "@/core/feature-authoring/features/mirror";
+import { prepareTransformFeatureDefinition } from "@/core/feature-authoring/features/transform";
+import { prepareLinearPatternFeatureDefinition } from "@/core/feature-authoring/features/linear-pattern";
+import { prepareCircularPatternFeatureDefinition } from "@/core/feature-authoring/features/circular-pattern";
+
 // Feature families share exact production mutation, persistence and native
 // output completion; parameter preparation and output kind remain family-specific.
 export function createSemanticFeatureMutationPort(input: {
@@ -65,8 +71,8 @@ export function createSemanticFeatureMutationPort(input: {
     diagnostics: readonly import("@/contracts/modeling/schema").ModelingDiagnostic[];
   }>;
 }) {
-  return async function execute(command: SemanticExtrudeCommand | SemanticRevolveCommand | SemanticPlaneCommand | SemanticEdgeTreatmentCommand | SemanticShellThickenCommand | SemanticHoleCommand | SemanticSweepCommand | SemanticLoftCommand | SemanticBodyBooleanCommand) {
-    const featureKind = command.operation === "combine.create" || command.operation === "combine.update" ? "combine" : command.operation === "split.create" || command.operation === "split.update" ? "split" : command.operation === "deleteSolid.create" || command.operation === "deleteSolid.update" ? "deleteSolid" : command.operation === "loft.create" || command.operation === "loft.update" ? "loft" : command.operation === "sweep.create" || command.operation === "sweep.update" ? "sweep" : command.operation === "hole.create" || command.operation === "hole.update" ? "hole" : command.operation === "shell.create" || command.operation === "shell.update" ? "shell" : command.operation === "thicken.create" || command.operation === "thicken.update" ? "thicken" : command.operation === "fillet.create" || command.operation === "fillet.update" ? "fillet" : command.operation === "chamfer.create" || command.operation === "chamfer.update" ? "chamfer" : command.operation === "plane.create" || command.operation === "plane.update" ? "plane" : command.operation === "revolve.create" || command.operation === "revolve.update" ? "revolve" : "extrude";
+  return async function execute(command: SemanticExtrudeCommand | SemanticRevolveCommand | SemanticPlaneCommand | SemanticEdgeTreatmentCommand | SemanticShellThickenCommand | SemanticHoleCommand | SemanticSweepCommand | SemanticLoftCommand | SemanticBodyBooleanCommand | SemanticBodyOperationCommand) {
+    const featureKind = command.operation === "mirror.create" || command.operation === "mirror.update" ? "mirror" : command.operation === "transform.create" || command.operation === "transform.update" ? "transform" : command.operation === "linearPattern.create" || command.operation === "linearPattern.update" ? "linearPattern" : command.operation === "circularPattern.create" || command.operation === "circularPattern.update" ? "circularPattern" : command.operation === "combine.create" || command.operation === "combine.update" ? "combine" : command.operation === "split.create" || command.operation === "split.update" ? "split" : command.operation === "deleteSolid.create" || command.operation === "deleteSolid.update" ? "deleteSolid" : command.operation === "loft.create" || command.operation === "loft.update" ? "loft" : command.operation === "sweep.create" || command.operation === "sweep.update" ? "sweep" : command.operation === "hole.create" || command.operation === "hole.update" ? "hole" : command.operation === "shell.create" || command.operation === "shell.update" ? "shell" : command.operation === "thicken.create" || command.operation === "thicken.update" ? "thicken" : command.operation === "fillet.create" || command.operation === "fillet.update" ? "fillet" : command.operation === "chamfer.create" || command.operation === "chamfer.update" ? "chamfer" : command.operation === "plane.create" || command.operation === "plane.update" ? "plane" : command.operation === "revolve.create" || command.operation === "revolve.update" ? "revolve" : "extrude";
     const before = await input.inspect({
       commandId: `${command.commandId}:before`,
     });
@@ -134,7 +140,15 @@ export function createSemanticFeatureMutationPort(input: {
       draft = hydrateFeatureEditSession(feature)!;
     }
     let definition;
-    if (command.operation === "combine.create" || command.operation === "combine.update") {
+    if (command.operation === "mirror.create" || command.operation === "mirror.update") {
+      definition = prepareMirrorFeatureDefinition(command.parameters);
+    } else if (command.operation === "transform.create" || command.operation === "transform.update") {
+      definition = prepareTransformFeatureDefinition(command.parameters);
+    } else if (command.operation === "linearPattern.create" || command.operation === "linearPattern.update") {
+      definition = prepareLinearPatternFeatureDefinition(command.parameters);
+    } else if (command.operation === "circularPattern.create" || command.operation === "circularPattern.update") {
+      definition = prepareCircularPatternFeatureDefinition(command.parameters);
+    } else if (command.operation === "combine.create" || command.operation === "combine.update") {
       definition = prepareCombineFeatureDefinition(command.parameters);
     } else if (command.operation === "split.create" || command.operation === "split.update") {
       definition = prepareSplitFeatureDefinition(command.parameters);

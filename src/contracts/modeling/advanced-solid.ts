@@ -157,6 +157,47 @@ export interface SplitFeatureParameters {
   options?: { keepTools?: boolean };
 }
 
+export type BodyOperationAxis = Extract<DurableRef, { kind: "construction" | "face" | "edge" | "sketchEntity" }>;
+type BodyOperationParticipant = { role: "body"; targets: readonly Extract<DurableRef, { kind: "body" }>[] };
+
+export interface MirrorFeatureParameters {
+  participants: readonly (BodyOperationParticipant
+    | { role: "plane"; targets: readonly Extract<DurableRef, { kind: "construction" | "face" }>[] }
+    | { role: "targetBody"; targets: readonly Extract<DurableRef, { kind: "body" }>[] })[];
+  operationIntent?: AuthoredValue<"add">;
+  options: { copy: MaybeAuthoredValue<boolean> };
+}
+
+/** Rotation angles are literal degrees; only reference distance resolves expressions. */
+export interface TransformFeatureParameters {
+  participants: readonly (BodyOperationParticipant
+    | { role: "transformReference"; targets: readonly Extract<DurableRef, { kind: "construction" | "face" }>[] }
+    | { role: "axis"; targets: readonly BodyOperationAxis[] })[];
+  options:
+    | { transformType?: "translation"; vector: readonly [number, number, number] }
+    | { transformType?: "translation"; distance: MaybeAuthoredValue<number>; direction?: "positive" | "negative" }
+    | { transformType: "rotation"; angle: number | { source: "literal"; value: number } };
+}
+
+export interface LinearPatternFeatureParameters {
+  participants: readonly (BodyOperationParticipant | { role: "direction"; targets: readonly BodyOperationAxis[] })[];
+  options: {
+    instanceCount: MaybeAuthoredValue<number>;
+    spacing: MaybeAuthoredValue<number>;
+    oppositeDirection: MaybeAuthoredValue<boolean>;
+  };
+}
+
+export interface CircularPatternFeatureParameters {
+  participants: readonly (BodyOperationParticipant | { role: "axis"; targets: readonly BodyOperationAxis[] })[];
+  options: {
+    instanceCount: MaybeAuthoredValue<number>;
+    angleDegrees: MaybeAuthoredValue<number>;
+    equalSpace: MaybeAuthoredValue<boolean>;
+    oppositeDirection: MaybeAuthoredValue<boolean>;
+  };
+}
+
 export interface DeleteSolidFeatureParameters {
   participants: readonly [{ role: "body"; targets: readonly Extract<DurableRef, { kind: "body" }>[] }];
 }

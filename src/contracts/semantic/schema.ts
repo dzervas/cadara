@@ -196,6 +196,20 @@ export type SemanticEdgeTreatmentCommand = CommandIdentity & {
   | { operation: "chamfer.update"; featureId: import("@/contracts/shared/ids").FeatureId; parameters: import("@/contracts/modeling/advanced-solid").ChamferFeatureParameters }
 );
 
+export type SemanticBodyOperationCommand = CommandIdentity & {
+  basis: SemanticBasis;
+  intent: "fulfill" | "author-invalid";
+} & (
+  | { operation: "mirror.create"; parameters: import("@/contracts/modeling/advanced-solid").MirrorFeatureParameters }
+  | { operation: "mirror.update"; featureId: import("@/contracts/shared/ids").FeatureId; parameters: import("@/contracts/modeling/advanced-solid").MirrorFeatureParameters }
+  | { operation: "transform.create"; parameters: import("@/contracts/modeling/advanced-solid").TransformFeatureParameters }
+  | { operation: "transform.update"; featureId: import("@/contracts/shared/ids").FeatureId; parameters: import("@/contracts/modeling/advanced-solid").TransformFeatureParameters }
+  | { operation: "linearPattern.create"; parameters: import("@/contracts/modeling/advanced-solid").LinearPatternFeatureParameters }
+  | { operation: "linearPattern.update"; featureId: import("@/contracts/shared/ids").FeatureId; parameters: import("@/contracts/modeling/advanced-solid").LinearPatternFeatureParameters }
+  | { operation: "circularPattern.create"; parameters: import("@/contracts/modeling/advanced-solid").CircularPatternFeatureParameters }
+  | { operation: "circularPattern.update"; featureId: import("@/contracts/shared/ids").FeatureId; parameters: import("@/contracts/modeling/advanced-solid").CircularPatternFeatureParameters }
+);
+
 export type SemanticBodyBooleanCommand = CommandIdentity & {
   basis: SemanticBasis;
   intent: "fulfill" | "author-invalid";
@@ -306,6 +320,7 @@ export type SemanticCommand =
   | SemanticSweepCommand
   | SemanticLoftCommand
   | SemanticBodyBooleanCommand
+  | SemanticBodyOperationCommand
   | SemanticVariableCommand
   | SemanticFeatureLifecycleCommand
   | SemanticHistoryCommand
@@ -429,6 +444,7 @@ export interface SemanticDiscovery {
   references: readonly { label: string; target: DurableRef }[];
   history: DurableHistoryAvailability | null;
   model?: {
+    capabilities?: import("@/contracts/modeling/schema").ModelingKernelCapabilities;
     cursor?: import("@/contracts/modeling/schema").DocumentFeatureCursor;
     timeline?: readonly { label: string; target: Extract<DurableRef, { kind: "sketch" | "feature" }> }[];
     features: readonly { featureId: import("@/contracts/shared/ids").FeatureId; label: string; kind: string; suppressed: boolean; producedTargets: readonly DurableRef[] }[];
