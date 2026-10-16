@@ -196,6 +196,15 @@ export type SemanticEdgeTreatmentCommand = CommandIdentity & {
   | { operation: "chamfer.update"; featureId: import("@/contracts/shared/ids").FeatureId; parameters: import("@/contracts/modeling/advanced-solid").ChamferFeatureParameters }
 );
 
+export type SemanticFeatureReplayCommand = CommandIdentity & {
+  basis: SemanticBasis;
+  intent: "fulfill" | "author-invalid";
+  parameters: import("@/contracts/modeling/feature-replay").FeatureReplayFeatureParameters;
+} & (
+  | { operation: "featureReplay.create" }
+  | { operation: "featureReplay.update"; featureId: import("@/contracts/shared/ids").FeatureId }
+);
+
 export type SemanticBodyOperationCommand = CommandIdentity & {
   basis: SemanticBasis;
   intent: "fulfill" | "author-invalid";
@@ -321,6 +330,7 @@ export type SemanticCommand =
   | SemanticLoftCommand
   | SemanticBodyBooleanCommand
   | SemanticBodyOperationCommand
+  | SemanticFeatureReplayCommand
   | SemanticVariableCommand
   | SemanticFeatureLifecycleCommand
   | SemanticHistoryCommand

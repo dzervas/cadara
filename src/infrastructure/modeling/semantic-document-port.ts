@@ -186,6 +186,7 @@ export function createSemanticDocumentPort(input: {
     plane: createSemanticFeatureMutationPort({ service, loop, inspect }),
     hole: createSemanticFeatureMutationPort({ service, loop, inspect }),
     loft: createSemanticFeatureMutationPort({ service, loop, inspect }),
+    featureReplay: createSemanticFeatureMutationPort({ service, loop, inspect }),
     bodyOperation: createSemanticFeatureMutationPort({ service, loop, inspect }),
     bodyBoolean: createSemanticFeatureMutationPort({ service, loop, inspect }),
     sweep: createSemanticFeatureMutationPort({ service, loop, inspect }),

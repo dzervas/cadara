@@ -15,6 +15,7 @@ import type {
   SemanticLoftCommand,
   SemanticBodyBooleanCommand,
   SemanticBodyOperationCommand,
+  SemanticFeatureReplayCommand,
   SemanticState,
 } from "@/contracts/semantic/schema";
 import type { DocumentRepositoryMutationResult } from "@/domain/modeling/document-repository";
@@ -59,6 +60,9 @@ import { prepareTransformFeatureDefinition } from "@/core/feature-authoring/feat
 import { prepareLinearPatternFeatureDefinition } from "@/core/feature-authoring/features/linear-pattern";
 import { prepareCircularPatternFeatureDefinition } from "@/core/feature-authoring/features/circular-pattern";
 
+import { normalizeFeatureDefinition } from "@/domain/modeling/modeling-service/normalization";
+import { FEATURE_REPLAY_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
+
 // Feature families share exact production mutation, persistence and native
 // output completion; parameter preparation and output kind remain family-specific.
 export function createSemanticFeatureMutationPort(input: {
@@ -71,8 +75,8 @@ export function createSemanticFeatureMutationPort(input: {
     diagnostics: readonly import("@/contracts/modeling/schema").ModelingDiagnostic[];
   }>;
 }) {
-  return async function execute(command: SemanticExtrudeCommand | SemanticRevolveCommand | SemanticPlaneCommand | SemanticEdgeTreatmentCommand | SemanticShellThickenCommand | SemanticHoleCommand | SemanticSweepCommand | SemanticLoftCommand | SemanticBodyBooleanCommand | SemanticBodyOperationCommand) {
-    const featureKind = command.operation === "mirror.create" || command.operation === "mirror.update" ? "mirror" : command.operation === "transform.create" || command.operation === "transform.update" ? "transform" : command.operation === "linearPattern.create" || command.operation === "linearPattern.update" ? "linearPattern" : command.operation === "circularPattern.create" || command.operation === "circularPattern.update" ? "circularPattern" : command.operation === "combine.create" || command.operation === "combine.update" ? "combine" : command.operation === "split.create" || command.operation === "split.update" ? "split" : command.operation === "deleteSolid.create" || command.operation === "deleteSolid.update" ? "deleteSolid" : command.operation === "loft.create" || command.operation === "loft.update" ? "loft" : command.operation === "sweep.create" || command.operation === "sweep.update" ? "sweep" : command.operation === "hole.create" || command.operation === "hole.update" ? "hole" : command.operation === "shell.create" || command.operation === "shell.update" ? "shell" : command.operation === "thicken.create" || command.operation === "thicken.update" ? "thicken" : command.operation === "fillet.create" || command.operation === "fillet.update" ? "fillet" : command.operation === "chamfer.create" || command.operation === "chamfer.update" ? "chamfer" : command.operation === "plane.create" || command.operation === "plane.update" ? "plane" : command.operation === "revolve.create" || command.operation === "revolve.update" ? "revolve" : "extrude";
+  return async function execute(command: SemanticExtrudeCommand | SemanticRevolveCommand | SemanticPlaneCommand | SemanticEdgeTreatmentCommand | SemanticShellThickenCommand | SemanticHoleCommand | SemanticSweepCommand | SemanticLoftCommand | SemanticBodyBooleanCommand | SemanticBodyOperationCommand | SemanticFeatureReplayCommand) {
+    const featureKind = command.operation === "featureReplay.create" || command.operation === "featureReplay.update" ? "featureReplay" : command.operation === "mirror.create" || command.operation === "mirror.update" ? "mirror" : command.operation === "transform.create" || command.operation === "transform.update" ? "transform" : command.operation === "linearPattern.create" || command.operation === "linearPattern.update" ? "linearPattern" : command.operation === "circularPattern.create" || command.operation === "circularPattern.update" ? "circularPattern" : command.operation === "combine.create" || command.operation === "combine.update" ? "combine" : command.operation === "split.create" || command.operation === "split.update" ? "split" : command.operation === "deleteSolid.create" || command.operation === "deleteSolid.update" ? "deleteSolid" : command.operation === "loft.create" || command.operation === "loft.update" ? "loft" : command.operation === "sweep.create" || command.operation === "sweep.update" ? "sweep" : command.operation === "hole.create" || command.operation === "hole.update" ? "hole" : command.operation === "shell.create" || command.operation === "shell.update" ? "shell" : command.operation === "thicken.create" || command.operation === "thicken.update" ? "thicken" : command.operation === "fillet.create" || command.operation === "fillet.update" ? "fillet" : command.operation === "chamfer.create" || command.operation === "chamfer.update" ? "chamfer" : command.operation === "plane.create" || command.operation === "plane.update" ? "plane" : command.operation === "revolve.create" || command.operation === "revolve.update" ? "revolve" : "extrude";
     const before = await input.inspect({
       commandId: `${command.commandId}:before`,
     });
@@ -137,10 +141,26 @@ export function createSemanticFeatureMutationPort(input: {
             reasonCode: `${featureKind}-unavailable`,
           },
         };
-      draft = hydrateFeatureEditSession(feature)!;
+      if (featureKind !== "featureReplay") draft = hydrateFeatureEditSession(feature)!;
     }
     let definition;
-    if (command.operation === "mirror.create" || command.operation === "mirror.update") {
+    if (command.operation === "featureReplay.create" || command.operation === "featureReplay.update") {
+      // Replay is runtime-authored, not a browser feature-edit draft. Use the
+      // same normalization as production create/update; native owns sources.
+      try {
+        definition = normalizeFeatureDefinition({
+          kind: "featureReplay",
+          featureTypeVersion: FEATURE_REPLAY_FEATURE_SCHEMA_VERSION,
+          parameters: command.parameters,
+        });
+      } catch (error) {
+        return {
+          ...terminal,
+          outcome: { kind: "rejected" as const, reasonCode: "featureReplay-incomplete" },
+          diagnostics: [semanticDiagnostic(error)],
+        };
+      }
+    } else if (command.operation === "mirror.create" || command.operation === "mirror.update") {
       definition = prepareMirrorFeatureDefinition(command.parameters);
     } else if (command.operation === "transform.create" || command.operation === "transform.update") {
       definition = prepareTransformFeatureDefinition(command.parameters);

@@ -29,6 +29,7 @@ export interface SemanticDocumentMutation {
 }
 
 export interface SemanticDocumentPort {
+  featureReplay?(command: import("@/contracts/semantic/schema").SemanticFeatureReplayCommand): Promise<import("@/contracts/semantic/schema").SemanticResult>;
   bodyOperation?(command: import("@/contracts/semantic/schema").SemanticBodyOperationCommand): Promise<import("@/contracts/semantic/schema").SemanticResult>;
   bodyBoolean?(command: import("@/contracts/semantic/schema").SemanticBodyBooleanCommand): Promise<import("@/contracts/semantic/schema").SemanticResult>;
   loft?(command: import("@/contracts/semantic/schema").SemanticLoftCommand): Promise<import("@/contracts/semantic/schema").SemanticResult>;
