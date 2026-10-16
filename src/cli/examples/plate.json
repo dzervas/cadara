@@ -1,0 +1,146 @@
+{
+  "version": 1,
+  "operations": [
+    {
+      "version": 1,
+      "commandId": "plate-1",
+      "operation": "document.create",
+      "label": "Release plate",
+      "basis": null,
+      "as": "document"
+    },
+    {
+      "version": 1,
+      "commandId": "plate-2",
+      "operation": "sketch.begin",
+      "plane": "xy",
+      "basis": {
+        "alias": "document"
+      },
+      "as": "draft"
+    },
+    {
+      "version": 1,
+      "commandId": "plate-3",
+      "operation": "sketch.author",
+      "basis": {
+        "alias": "draft"
+      },
+      "draft": {
+        "alias": "draft"
+      },
+      "primitive": {
+        "kind": "rectangle",
+        "start": [0, 0],
+        "end": [20, 10]
+      },
+      "construction": false,
+      "intent": "fulfill",
+      "as": "rectangle"
+    },
+    {
+      "version": 1,
+      "commandId": "plate-4",
+      "operation": "sketch.publish",
+      "basis": {
+        "alias": "rectangle"
+      },
+      "draft": {
+        "alias": "rectangle"
+      },
+      "requireProfiles": true,
+      "as": "published"
+    },
+    {
+      "version": 1,
+      "commandId": "plate-5",
+      "operation": "extrude.create",
+      "basis": {
+        "alias": "published"
+      },
+      "profile": {
+        "alias": "published",
+        "label": "Outer region"
+      },
+      "depth": 7,
+      "intent": "fulfill",
+      "as": "solid"
+    },
+    {
+      "version": 1,
+      "commandId": "plate-6",
+      "operation": "extrude.update",
+      "basis": {
+        "alias": "solid"
+      },
+      "featureId": {
+        "alias": "solid",
+        "label": "Extrude 1"
+      },
+      "depth": 9,
+      "intent": "fulfill",
+      "as": "deeper"
+    },
+    {
+      "version": 1,
+      "commandId": "plate-7",
+      "operation": "history.undo",
+      "basis": {
+        "alias": "deeper"
+      },
+      "draft": null,
+      "as": "undone"
+    },
+    {
+      "version": 1,
+      "commandId": "plate-8",
+      "operation": "history.redo",
+      "basis": {
+        "alias": "undone"
+      },
+      "draft": null,
+      "as": "redone"
+    },
+    {
+      "version": 1,
+      "commandId": "plate-9",
+      "operation": "extrude.update",
+      "basis": {
+        "alias": "redone"
+      },
+      "featureId": {
+        "alias": "redone",
+        "label": "Extrude 1"
+      },
+      "depth": 7,
+      "intent": "fulfill",
+      "as": "final"
+    },
+    {
+      "version": 1,
+      "commandId": "plate-10",
+      "operation": "history.inspect",
+      "basis": {
+        "alias": "final"
+      },
+      "draft": null
+    },
+    {
+      "version": 1,
+      "commandId": "plate-11",
+      "operation": "document.save",
+      "basis": {
+        "alias": "final"
+      },
+      "path": "plate.cadara"
+    },
+    {
+      "version": 1,
+      "commandId": "plate-12",
+      "operation": "document.inspect",
+      "basis": {
+        "alias": "final"
+      }
+    }
+  ]
+}

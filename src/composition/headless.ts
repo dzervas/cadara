@@ -31,7 +31,18 @@ import { SketchAuthoredActions } from "@/application/editor/sketch-authored-acti
 import { defaultEditorExtensionDependencies } from "@/core/editor/state-machine";
 import { createConsoleErrorReporter } from "@/contracts/errors";
 
-/** Source default is module-relative; distribution can inject its adjacent occ directory. */
+// Replaced by the CLI bundler, never read from the caller's environment or cwd.
+declare const CADARA_CLI_PACKAGED: boolean;
+const defaultAssetDirectory = fileURLToPath(
+  new URL(
+    typeof CADARA_CLI_PACKAGED !== "undefined" && CADARA_CLI_PACKAGED
+      ? "./occ/"
+      : "../../public/",
+    import.meta.url,
+  ),
+);
+
+/** Both source and release defaults are module-relative. */
 export function createHeadlessSessionFactory(
   options: {
     assetDirectory?: string;
@@ -51,8 +62,7 @@ export function createHeadlessSessionFactory(
         new MemoryDocumentRepository([], assets);
       const loader = createOpenCascadeInstanceLoader(async () => {
         const initialize = await loadFilesystemOpenCascadeFactory(
-          options.assetDirectory ??
-            fileURLToPath(new URL("../../public/", import.meta.url)),
+          options.assetDirectory ?? defaultAssetDirectory,
         );
         return async (settings) => {
           // Native progress is diagnostic output, never the command result channel.
