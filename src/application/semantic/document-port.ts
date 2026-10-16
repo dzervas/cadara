@@ -29,6 +29,7 @@ export interface SemanticDocumentMutation {
 }
 
 export interface SemanticDocumentPort {
+  bodyBoolean?(command: import("@/contracts/semantic/schema").SemanticBodyBooleanCommand): Promise<import("@/contracts/semantic/schema").SemanticResult>;
   loft?(command: import("@/contracts/semantic/schema").SemanticLoftCommand): Promise<import("@/contracts/semantic/schema").SemanticResult>;
   sweep?(command: import("@/contracts/semantic/schema").SemanticSweepCommand): Promise<import("@/contracts/semantic/schema").SemanticResult>;
   hole?(command: import("@/contracts/semantic/schema").SemanticHoleCommand): Promise<import("@/contracts/semantic/schema").SemanticResult>;

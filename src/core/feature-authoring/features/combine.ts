@@ -1,3 +1,4 @@
+import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
 import {
   ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
   validateAdvancedSolidFeatureDefinition,
@@ -21,6 +22,7 @@ import {
   authoredDefinitionValue,
   authoredStringLiteral,
   createMissingInputDiagnostic,
+  hasExactBodyParticipants,
   expressionCapableAuthoredValue,
 } from "@/core/feature-authoring/features/shared";
 
@@ -100,6 +102,7 @@ function buildCombineDefinition(draft: CombineFeatureParameterDraft) {
         "subtract",
       ),
       participants: buildCombineParticipants(draft),
+      ...(draft.keepTools === undefined ? {} : { options: { keepTools: draft.keepTools } }),
     },
   };
 }
@@ -131,6 +134,22 @@ function getCombineValidationDiagnostics(draft: CombineFeatureParameterDraft) {
   }
 
   return diagnostics;
+}
+
+export function prepareCombineFeatureDefinition(
+  parameters: import("@/contracts/modeling/advanced-solid").CombineFeatureParameters,
+) {
+  if (!hasExactBodyParticipants(parameters, ["targetBody", "toolBody"])) return null;
+  if (!isCombineOperationIntent(getAuthoredLiteralValue(parameters.operationIntent))) return null;
+  if (parameters.options && (Object.keys(parameters.options).some(k => k !== "keepTools") ||
+    (parameters.options.keepTools !== undefined && typeof parameters.options.keepTools !== "boolean"))) return null;
+  return combineAuthoringDefinition.buildDefinition(
+    combineAuthoringDefinition.hydrateDraft({
+      kind: "combine",
+      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+      parameters,
+    }),
+  );
 }
 
 export const combineAuthoringDefinition = {
@@ -175,11 +194,13 @@ export const combineAuthoringDefinition = {
       targetBodyTargets: filterBodyTargets(getParticipantTargets("targetBody")),
       toolBodyTargets: filterBodyTargets(getParticipantTargets("toolBody")),
       operationIntent: draftOperationIntent,
+      ...(typeof feature.parameters.options?.keepTools === "boolean" ? { keepTools: feature.parameters.options.keepTools } : {}),
     };
   },
   applyPatch(draft, patch) {
     return {
       ...draft,
+      ...(typeof patch.keepTools === "boolean" ? { keepTools: patch.keepTools } : {}),
       targetBodyTargets:
         patch.targetBodyTargets === undefined
           ? draft.targetBodyTargets

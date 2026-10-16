@@ -227,7 +227,7 @@ function parseRecipe(input: unknown): RecipeOperation[] {
         }) } : {}),
       };
     }
-    if ((command.operation === "shell.create" || command.operation === "shell.update" || command.operation === "thicken.create" || command.operation === "thicken.update" || command.operation === "hole.create" || command.operation === "hole.update") && command.parameters && typeof command.parameters === "object") {
+    if ((command.operation === "shell.create" || command.operation === "shell.update" || command.operation === "thicken.create" || command.operation === "thicken.update" || command.operation === "hole.create" || command.operation === "hole.update" || command.operation === "combine.create" || command.operation === "combine.update" || command.operation === "split.create" || command.operation === "split.update" || command.operation === "deleteSolid.create" || command.operation === "deleteSolid.update") && command.parameters && typeof command.parameters === "object") {
       const parameters = command.parameters as Record<string, unknown>;
       const validateReference = (value: unknown, kind: "body" | "face" | "sketchPoint") => {
         if (!isAlias(value)) return value;
@@ -240,7 +240,7 @@ function parseRecipe(input: unknown): RecipeOperation[] {
         ...(Array.isArray(parameters.faceTargets) ? { faceTargets: parameters.faceTargets.map(t => validateReference(t, "face")) } : {}),
         ...(Array.isArray(parameters.participants) ? { participants: parameters.participants.map(p => {
           if (!p || typeof p !== "object" || !Array.isArray(p.targets)) return p;
-          return { ...p, targets: p.targets.map((t: unknown) => validateReference(t, p.role === "location" ? "sketchPoint" : p.role === "targetBody" || p.role === "body" ? "body" : "face")) };
+          return { ...p, targets: p.targets.map((t: unknown) => validateReference(t, p.role === "location" ? "sketchPoint" : p.role === "targetBody" || p.role === "toolBody" || p.role === "body" ? "body" : "face")) };
         }) } : {}),
       };
     }
@@ -611,6 +611,18 @@ export const documentRecipesCommand: CommandModule = {
             return target;
           }) }));
           command.parameters = { ...command.parameters, participants: [{ role: "face", targets: sources }, ...targets] };
+        }
+        if (command.operation === "combine.create" || command.operation === "combine.update" || command.operation === "split.create" || command.operation === "split.update" || command.operation === "deleteSolid.create" || command.operation === "deleteSolid.update") {
+          const resolveBody = (value: Extract<import("@/contracts/shared/references").DurableRef, { kind: "body" }> | TargetAlias) => {
+            const target = resolveSketchTarget(value, ["body"]);
+            if (target.kind !== "body") throw new Error("Invalid body boolean participant.");
+            return target;
+          };
+          if (command.operation === "deleteSolid.create" || command.operation === "deleteSolid.update") {
+            command.parameters = { ...command.parameters, participants: [{ role: "body", targets: command.parameters.participants[0].targets.map(resolveBody) }] };
+          } else {
+            command.parameters = { ...command.parameters, participants: command.parameters.participants.map(p => ({ role: p.role, targets: p.targets.map(resolveBody) })) };
+          }
         }
         if (command.operation === "loft.create" || command.operation === "loft.update") {
           command.parameters = { ...command.parameters, participants: command.parameters.participants.map(p => {

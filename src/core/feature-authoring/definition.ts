@@ -252,6 +252,7 @@ export interface ThickenFeatureParameterDraft {
 }
 
 export interface CombineFeatureParameterDraft {
+  keepTools?: boolean;
   targetBodyTargets: readonly Extract<PrimitiveRef, { kind: "body" }>[];
   toolBodyTargets: readonly Extract<PrimitiveRef, { kind: "body" }>[];
   operationIntent: MaybeAuthoredValue<
@@ -260,6 +261,7 @@ export interface CombineFeatureParameterDraft {
 }
 
 export interface SplitFeatureParameterDraft {
+  keepTools?: boolean;
   targetBodyTarget: Extract<PrimitiveRef, { kind: "body" }> | null;
   toolBodyTarget: Extract<PrimitiveRef, { kind: "body" }> | null;
 }

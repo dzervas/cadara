@@ -13,6 +13,7 @@ import type {
   SemanticHoleCommand,
   SemanticSweepCommand,
   SemanticLoftCommand,
+  SemanticBodyBooleanCommand,
   SemanticState,
 } from "@/contracts/semantic/schema";
 import type { DocumentRepositoryMutationResult } from "@/domain/modeling/document-repository";
@@ -43,6 +44,9 @@ import { preparePlaneFeatureDefinition } from "@/core/feature-authoring/features
 import { prepareFilletFeatureDefinition } from "@/core/feature-authoring/features/fillet";
 import { prepareChamferFeatureDefinition } from "@/core/feature-authoring/features/chamfer";
 
+import { prepareCombineFeatureDefinition } from "@/core/feature-authoring/features/combine";
+import { prepareSplitFeatureDefinition } from "@/core/feature-authoring/features/split";
+import { prepareDeleteSolidFeatureDefinition } from "@/core/feature-authoring/features/delete-solid";
 import { prepareLoftFeatureDefinition } from "@/core/feature-authoring/features/loft";
 import { prepareSweepFeatureDefinition } from "@/core/feature-authoring/features/sweep";
 import { prepareHoleFeatureDefinition } from "@/core/feature-authoring/features/hole";
@@ -61,8 +65,8 @@ export function createSemanticFeatureMutationPort(input: {
     diagnostics: readonly import("@/contracts/modeling/schema").ModelingDiagnostic[];
   }>;
 }) {
-  return async function execute(command: SemanticExtrudeCommand | SemanticRevolveCommand | SemanticPlaneCommand | SemanticEdgeTreatmentCommand | SemanticShellThickenCommand | SemanticHoleCommand | SemanticSweepCommand | SemanticLoftCommand) {
-    const featureKind = command.operation === "loft.create" || command.operation === "loft.update" ? "loft" : command.operation === "sweep.create" || command.operation === "sweep.update" ? "sweep" : command.operation === "hole.create" || command.operation === "hole.update" ? "hole" : command.operation === "shell.create" || command.operation === "shell.update" ? "shell" : command.operation === "thicken.create" || command.operation === "thicken.update" ? "thicken" : command.operation === "fillet.create" || command.operation === "fillet.update" ? "fillet" : command.operation === "chamfer.create" || command.operation === "chamfer.update" ? "chamfer" : command.operation === "plane.create" || command.operation === "plane.update" ? "plane" : command.operation === "revolve.create" || command.operation === "revolve.update" ? "revolve" : "extrude";
+  return async function execute(command: SemanticExtrudeCommand | SemanticRevolveCommand | SemanticPlaneCommand | SemanticEdgeTreatmentCommand | SemanticShellThickenCommand | SemanticHoleCommand | SemanticSweepCommand | SemanticLoftCommand | SemanticBodyBooleanCommand) {
+    const featureKind = command.operation === "combine.create" || command.operation === "combine.update" ? "combine" : command.operation === "split.create" || command.operation === "split.update" ? "split" : command.operation === "deleteSolid.create" || command.operation === "deleteSolid.update" ? "deleteSolid" : command.operation === "loft.create" || command.operation === "loft.update" ? "loft" : command.operation === "sweep.create" || command.operation === "sweep.update" ? "sweep" : command.operation === "hole.create" || command.operation === "hole.update" ? "hole" : command.operation === "shell.create" || command.operation === "shell.update" ? "shell" : command.operation === "thicken.create" || command.operation === "thicken.update" ? "thicken" : command.operation === "fillet.create" || command.operation === "fillet.update" ? "fillet" : command.operation === "chamfer.create" || command.operation === "chamfer.update" ? "chamfer" : command.operation === "plane.create" || command.operation === "plane.update" ? "plane" : command.operation === "revolve.create" || command.operation === "revolve.update" ? "revolve" : "extrude";
     const before = await input.inspect({
       commandId: `${command.commandId}:before`,
     });
@@ -130,7 +134,13 @@ export function createSemanticFeatureMutationPort(input: {
       draft = hydrateFeatureEditSession(feature)!;
     }
     let definition;
-    if (command.operation === "loft.create" || command.operation === "loft.update") {
+    if (command.operation === "combine.create" || command.operation === "combine.update") {
+      definition = prepareCombineFeatureDefinition(command.parameters);
+    } else if (command.operation === "split.create" || command.operation === "split.update") {
+      definition = prepareSplitFeatureDefinition(command.parameters);
+    } else if (command.operation === "deleteSolid.create" || command.operation === "deleteSolid.update") {
+      definition = prepareDeleteSolidFeatureDefinition(command.parameters);
+    } else if (command.operation === "loft.create" || command.operation === "loft.update") {
       definition = prepareLoftFeatureDefinition(command.parameters);
     } else if (command.operation === "sweep.create" || command.operation === "sweep.update") {
       definition = prepareSweepFeatureDefinition(command.parameters);
@@ -303,9 +313,32 @@ export function createSemanticFeatureMutationPort(input: {
       const outputs =
         feature?.producedTargets.filter((t) => t.kind === "body") ?? [];
       const constructions = feature?.producedTargets.filter(t => t.kind === "construction") ?? [];
+      // Delete Solid deliberately produces no bodies. Prove current native
+      // deletion using the exact snapshot's invalidations, including updates
+      // where the target was already deleted by the previous definition.
+      let deletionValid = false;
+      if (definition.kind === "deleteSolid") {
+        const current = await input.service.getCurrentDocumentSnapshot();
+        const targets = definition.parameters.participants.flatMap(p => p.targets);
+        const timeline = after.discovery.model?.timeline ?? [];
+        const cursor = after.discovery.model?.cursor;
+        const deletionIndex = timeline.findIndex(row => row.target.kind === "feature" && row.target.featureId === result.featureId);
+        const cursorIndex = timeline.findIndex(row =>
+          cursor?.kind === "feature" ? row.target.kind === "feature" && row.target.featureId === cursor.featureId :
+          cursor?.kind === "sketch" && row.target.kind === "sketch" && row.target.sketchId === cursor.sketchId);
+        deletionValid = deletionIndex >= 0 && deletionIndex <= cursorIndex &&
+          current.document.revisionId === state.revisionId &&
+          feature?.kind === "deleteSolid" && !feature.suppressed &&
+          feature.producedTargets.length === 0 && targets.length > 0 &&
+          !current.document.diagnostics.some(d => d.severity === "error") &&
+          targets.every(t => t.kind === "body" &&
+            !after.discovery.model?.bodies.some(b => b.bodyId === t.bodyId) &&
+            current.document.references.some(r => r.target.kind === "body" &&
+              r.target.bodyId === t.bodyId && r.invalidation !== null));
+      }
       const valid =
         terminal.completion.geometry.kind === "current" &&
-        (definition.kind === "plane"
+        (definition.kind === "deleteSolid" ? deletionValid : definition.kind === "plane"
           ? constructions.length > 0 && constructions.every(t =>
               t.kind === "construction" && after.discovery.model?.constructions?.some(c =>
                 c.constructionId === t.constructionId && c.ownerFeatureId === result.featureId))
