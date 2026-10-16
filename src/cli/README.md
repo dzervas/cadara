@@ -900,6 +900,43 @@ Inspect the sweep feature's `producedTargets` to choose its actual current body,
 not a retained body used as the path tool. Native topology is current exact
 geometry, not a last-good mesh or a body-count certificate.
 
+### Lofts
+
+`loft.create` / `loft.update` take current `basis`, `intent`, canonical
+`parameters`, and a discovered `featureId` for updates. `participants` contains
+one `profile` role with **at least two ordered** current regions or planar
+solid-body faces. Order is preserved, never sorted. Region profiles with inner
+loops are unsupported. Optional `operationIntent` supports only literal `create`;
+boolean composition is refused. Recipe participant/feature aliases use exact
+unique discovered labels, with the same missing/ambiguous/unknown alias policy
+as other features.
+
+The optional `path` role requires **exactly two profiles and at most one durable
+linear solid-body edge**. Sketch entities and curved edges are not supported.
+`options: { path: { sectionCount: 3 } }` accepts positive integers and existing
+authored expressions; the default count is 5. Inactive path settings are refused.
+The existing native algorithm inserts that many translated **start-wire copies**
+at `edgeDelta * i / (sectionCount + 1)`, between the actual start and end wires.
+Only the edge delta is used, not its origin. This is not a curved-centerline loft
+or an interpolation of changing profile sizes along the path. The final wire is
+the actual end profile, which may differ in size/shape.
+
+Guide participants, guide continuity, endpoint conditions/magnitudes and match
+connections are excluded/refused, including explicit neutral values: the native
+owner currently only validates/resolves them and does not apply them to geometry.
+Neutral defaults added internally by the shared browser builder do not imply
+those capabilities. Engine follow-up is separate; no new loft algorithm is added.
+
+The shared browser hydration/build and production mutation path retain exact
+persistence/rebuild/handoff/failure semantics. An applied committed feature with
+missing references can remain failed-editable, never strictly fulfilled; only
+explicit `author-invalid` accepts invalid geometry. Inspect the feature's actual
+`producedTargets`, not retained tool bodies. Existing exact native B-rep B-spline
+edge records now include poles, degree, knots/multiplicities, weights (if rational)
+and parameter ranges in `topology[].definingData`; these are actual curve data,
+not sampled display geometry. Endcaps and bounds alone cannot prove path-loft
+interiors or effective section counts.
+
 ### Active-author undo and redo
 
 `history.inspect`, `history.undo`, and `history.redo` take the current `basis`

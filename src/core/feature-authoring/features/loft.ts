@@ -5,7 +5,7 @@ import {
   type LoftGuideContinuity,
   type LoftProfileConditionKind,
 } from "@/contracts/modeling/advanced-solid";
-import { isExpressionAuthoredValue } from "@/contracts/modeling/authored-values";
+import { getAuthoredLiteralValue, isExpressionAuthoredValue } from "@/contracts/modeling/authored-values";
 import {
   createSelectionFilterForRequirement,
   primitiveRefEquals,
@@ -291,6 +291,37 @@ function moveTarget(
   const [moved] = next.splice(index, 1);
   next.splice(nextIndex, 0, moved!);
   return next;
+}
+
+/** Guard against lossy hydration and native controls that validate but do nothing. */
+export function prepareLoftFeatureDefinition(
+  parameters: import("@/contracts/modeling/advanced-solid").LoftFeatureParameters,
+) {
+  const seen = new Set<string>();
+  for (const participant of parameters.participants) {
+    if (seen.has(participant.role)) return null;
+    seen.add(participant.role);
+    if (participant.role === "profile") {
+      if (participant.targets.length < 2 || participant.targets.some(t => t.kind !== "region" && t.kind !== "face")) return null;
+    } else if (participant.role === "path") {
+      if (participant.targets.length > 1 || participant.targets.some(t => t.kind !== "edge")) return null;
+    } else return null;
+  }
+  const profiles = parameters.participants.find(p => p.role === "profile")?.targets;
+  const paths = parameters.participants.find(p => p.role === "path")?.targets ?? [];
+  if (!profiles || (paths.length > 0 && profiles.length !== 2)) return null;
+  if (getAuthoredLiteralValue(parameters.operationIntent ?? "create") !== "create") return null;
+  // Refuse even explicit neutral inert controls: only the browser builder may
+  // add its neutral defaults. Inactive path settings must not be stripped.
+  if (parameters.options && Object.keys(parameters.options).some(k => k !== "path")) return null;
+  if (parameters.options?.path && paths.length === 0) return null;
+  return loftAuthoringDefinition.buildDefinition(
+    loftAuthoringDefinition.hydrateDraft({
+      kind: "loft",
+      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+      parameters,
+    }),
+  );
 }
 
 export const loftAuthoringDefinition = {

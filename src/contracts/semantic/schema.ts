@@ -196,6 +196,15 @@ export type SemanticEdgeTreatmentCommand = CommandIdentity & {
   | { operation: "chamfer.update"; featureId: import("@/contracts/shared/ids").FeatureId; parameters: import("@/contracts/modeling/advanced-solid").ChamferFeatureParameters }
 );
 
+export type SemanticLoftCommand = CommandIdentity & {
+  basis: SemanticBasis;
+  intent: "fulfill" | "author-invalid";
+  parameters: import("@/contracts/modeling/advanced-solid").LoftFeatureParameters;
+} & (
+  | { operation: "loft.create" }
+  | { operation: "loft.update"; featureId: import("@/contracts/shared/ids").FeatureId }
+);
+
 export type SemanticSweepCommand = CommandIdentity & {
   basis: SemanticBasis;
   intent: "fulfill" | "author-invalid";
@@ -283,6 +292,7 @@ export type SemanticCommand =
   | SemanticShellThickenCommand
   | SemanticHoleCommand
   | SemanticSweepCommand
+  | SemanticLoftCommand
   | SemanticVariableCommand
   | SemanticFeatureLifecycleCommand
   | SemanticHistoryCommand
