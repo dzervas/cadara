@@ -16,7 +16,9 @@ type Alias = { alias: string };
 type TargetAlias = Alias & { label: string };
 type RecipeGeometryEdit<T = import("@/contracts/semantic/schema").SemanticSketchGeometryEdit> = T extends { target: infer R } ? Omit<T, "target" | "destination" | "boundary"> & { target: R | TargetAlias } & (T extends { destination: infer D } ? { destination: D | TargetAlias } : unknown) & (T extends { boundary: infer B } ? { boundary: B | TargetAlias } : unknown) : never;
 type RecipePrimitive<T = import("@/contracts/semantic/schema").SemanticSketchPrimitive> = T extends { source: infer S } ? Omit<T, "source"> & { source: S | TargetAlias } : T;
-type RecipeFeatureParameters<T> = T extends { profiles: infer P extends readonly unknown[] } ? Omit<T, "profiles" | "axis"> & { profiles: readonly [P[number] | TargetAlias, ...(P[number] | TargetAlias)[]] } & (T extends { axis: infer A } ? { axis: A | TargetAlias } : unknown) : T extends { edgeTargets: infer E extends readonly unknown[] } ? Omit<T, "edgeTargets"> & { edgeTargets: readonly (E[number] | TargetAlias)[] } : T extends { participants: infer P extends readonly { role: string; targets: readonly unknown[] }[] } ? Omit<T, "participants"> & { participants: { [K in keyof P]: Omit<P[K], "targets"> & { targets: readonly (P[K]["targets"][number] | TargetAlias)[] } } } : T extends { bodyTarget: infer B; faceTargets: infer F extends readonly unknown[] } ? Omit<T, "bodyTarget" | "faceTargets"> & { bodyTarget: B | TargetAlias; faceTargets: readonly (F[number] | TargetAlias)[] } : T extends { reference: { target: infer R } } ? Omit<T, "reference"> & { reference: { target: R | TargetAlias } } : T;
+type RecipeBooleanScope<T> = T extends { bodyId: infer B } ? Omit<T, "bodyId"> & { bodyId: B | TargetAlias } : T;
+type RecipeReplayTransform<T> = T extends { direction: infer R } ? Omit<T, "direction"> & { direction: R | TargetAlias } : T extends { plane: infer R } ? Omit<T, "plane"> & { plane: R | TargetAlias } : never;
+type RecipeFeatureParameters<T> = T extends { sourceFeatureIds: infer S extends readonly unknown[]; transform: infer R } ? Omit<T, "sourceFeatureIds" | "transform"> & { sourceFeatureIds: readonly (S[number] | TargetAlias)[]; transform: RecipeReplayTransform<R> } : T extends { profiles: infer P extends readonly unknown[] } ? Omit<T, "profiles" | "axis" | "booleanScope"> & { profiles: readonly [P[number] | TargetAlias, ...(P[number] | TargetAlias)[]] } & (T extends { axis: infer A } ? { axis: A | TargetAlias } : unknown) & (T extends { booleanScope: infer B } ? { booleanScope: RecipeBooleanScope<B> } : unknown) : T extends { edgeTargets: infer E extends readonly unknown[] } ? Omit<T, "edgeTargets"> & { edgeTargets: readonly (E[number] | TargetAlias)[] } : T extends { participants: infer P extends readonly { role: string; targets: readonly unknown[] }[] } ? Omit<T, "participants"> & { participants: { [K in keyof P]: Omit<P[K], "targets"> & { targets: readonly (P[K]["targets"][number] | TargetAlias)[] } } } : T extends { bodyTarget: infer B; faceTargets: infer F extends readonly unknown[] } ? Omit<T, "bodyTarget" | "faceTargets"> & { bodyTarget: B | TargetAlias; faceTargets: readonly (F[number] | TargetAlias)[] } : T extends { reference: { target: infer R } } ? Omit<T, "reference"> & { reference: { target: R | TargetAlias } } : T;
 type RecipeCommand<T = SemanticCommand> = T extends SemanticCommand
   ? Omit<T, "parameters" | "basis" | "draft" | "points" | "dimensionId" | "derivationId" | "profile" | "featureId" | "beforeFeatureId" | "bodyId" | "cursor" | "item" | "beforeItem" | "variableId" | "sketchId" | "target" | "targets" | "axis" | "repair" | "edit" | "primitive" | "support"> &
     (T extends { parameters: infer P } ? { parameters: RecipeFeatureParameters<P> } : unknown) &
@@ -187,6 +189,22 @@ function parseRecipe(input: unknown): RecipeOperation[] {
         throw new Error("Unknown or ambiguous target alias.");
       return placeholder;
     }
+    if ((command.operation === "featureReplay.create" || command.operation === "featureReplay.update") && command.parameters && typeof command.parameters === "object") {
+      const parameters = command.parameters as Record<string, unknown>;
+      const transform = parameters.transform;
+      const normalizedTransform = transform && typeof transform === "object" ? { ...transform } as Record<string, unknown> : null;
+      if (normalizedTransform) {
+        for (const key of ["direction", "plane"] as const) if (isAlias(normalizedTransform[key])) {
+          validateTarget(normalizedTransform[key], "construction_validation");
+          normalizedTransform[key] = { kind: "construction", constructionId: "construction_validation" };
+        }
+      }
+      validationCommand.parameters = {
+        ...parameters,
+        ...(Array.isArray(parameters.sourceFeatureIds) ? { sourceFeatureIds: parameters.sourceFeatureIds.map(value => validateTarget(value, "feature_validation")) } : {}),
+        transform: normalizedTransform,
+      };
+    }
     if (Array.isArray(command.points)) validationCommand.points = command.points.map(value => validateTarget(value, "sketch_point_validation"));
     if ("dimensionId" in command) validationCommand.dimensionId = validateTarget(command.dimensionId, "dimension_validation");
     if ("derivationId" in command) validationCommand.derivationId = validateTarget(command.derivationId, "derivation_validation");
@@ -202,6 +220,12 @@ function parseRecipe(input: unknown): RecipeOperation[] {
         validateTarget(profile, "region_validation");
         return { kind: "region", sketchId: "sketch_validation", regionId: "region_validation" };
       }) };
+    }
+    if ((command.operation === "extrude.create" || command.operation === "extrude.update" || command.operation === "revolve.create" || command.operation === "revolve.update") && command.parameters && typeof command.parameters === "object" && "booleanScope" in command.parameters) {
+      const scope = command.parameters.booleanScope;
+      if (scope && typeof scope === "object" && "bodyId" in scope && isAlias(scope.bodyId)) {
+        validationCommand.parameters = { ...validationCommand.parameters as object, booleanScope: { ...scope, bodyId: validateTarget(scope.bodyId, "body_validation") } };
+      }
     }
     if ((command.operation === "revolve.create" || command.operation === "revolve.update") && command.parameters && typeof command.parameters === "object" && "axis" in command.parameters && isAlias(command.parameters.axis)) {
       validateTarget(command.parameters.axis, "sketch_entity_validation");
@@ -440,6 +464,25 @@ export const documentRecipesCommand: CommandModule = {
           if (target.kind !== "feature") throw new Error("Invalid feature target.");
           command.featureId = target.featureId;
         }
+        if (command.operation === "featureReplay.create" || command.operation === "featureReplay.update") {
+          const sourceFeatureIds = command.parameters.sourceFeatureIds.map(value => {
+            if (!isAlias(value)) return value;
+            const target = resolveSketchTarget(value, ["feature"]);
+            if (target.kind !== "feature") throw new Error("Invalid replay source feature.");
+            return target.featureId;
+          });
+          const resolveConstruction = (value: Extract<import("@/contracts/shared/references").DurableRef, { kind: "construction" }> | TargetAlias) => {
+            const target = resolveSketchTarget(value, ["construction"]);
+            if (target.kind !== "construction") throw new Error("Invalid replay construction reference.");
+            return target;
+          };
+          const transform = command.parameters.transform;
+          command.parameters = {
+            ...command.parameters,
+            sourceFeatureIds,
+            transform: transform.kind === "linear" ? { ...transform, direction: resolveConstruction(transform.direction) } : { ...transform, plane: resolveConstruction(transform.plane) },
+          };
+        }
         if (command.operation === "feature.reorder" && isAlias(command.beforeFeatureId)) {
           const target = resolveSketchTarget(command.beforeFeatureId, ["feature"]);
           if (target.kind !== "feature") throw new Error("Invalid feature reorder anchor.");
@@ -579,6 +622,11 @@ export const documentRecipesCommand: CommandModule = {
           command.parameters = parameters.resultBodyType === "solid"
             ? { ...parameters, profiles: [resolveSolidProfile(parameters.profiles[0]), ...parameters.profiles.slice(1).map(resolveSolidProfile)] }
             : { ...parameters, profiles: [resolveProfile(parameters.profiles[0]), ...parameters.profiles.slice(1).map(resolveProfile)] };
+        }
+        if ((command.operation === "extrude.create" || command.operation === "extrude.update" || command.operation === "revolve.create" || command.operation === "revolve.update") && "parameters" in command && command.parameters !== undefined && command.parameters.resultBodyType === "solid" && command.parameters.booleanScope.kind === "targetBody" && isAlias(command.parameters.booleanScope.bodyId)) {
+          const target = resolveSketchTarget(command.parameters.booleanScope.bodyId, ["body"]);
+          if (target.kind !== "body") throw new Error("Invalid exact boolean scope body.");
+          command.parameters = { ...command.parameters, booleanScope: { kind: "targetBody", bodyId: target.bodyId } };
         }
         if (command.operation === "fillet.create" || command.operation === "fillet.update" || command.operation === "chamfer.create" || command.operation === "chamfer.update") {
           const resolveEdge = (value: Extract<import("@/contracts/shared/references").DurableRef, { kind: "edge" }> | TargetAlias) => {

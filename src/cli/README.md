@@ -1024,6 +1024,43 @@ applied and persisted but report failed geometry, never last-good success;
 explicit `author-invalid` may retain editable invalid state. Native pre-commit
 refusals remain unchanged and are not converted into fabricated edit receipts.
 
+### Supported extrusion-operation replay
+
+`featureReplay.create` and `featureReplay.update` take the current `basis`,
+explicit `intent`, canonical `parameters: { sourceFeatureIds, transform }`, and
+`featureId` for updates. Sources are ordered, nonempty, unique **earlier feature
+IDs**, not bodies or faces. Recipe source IDs, transform references and update
+feature IDs accept exact unique `{ alias, label }` selections. Canonical
+extrude/revolve `booleanScope: { kind: "targetBody", bodyId }` also accepts a
+body label alias in recipes; this resolves an exact body, never an inferred scope.
+
+Only solid extrusion **join/cut** operations with an exact `targetBody` lineage,
+or earlier supported replay features, are replayable. New-body/sheet/intersect
+extrusions and other feature families are unsupported. This re-executes each
+source operation tool against its original target lineage, not a generic
+feature/body/face pattern. Original operations remain; produced targets identify
+the affected existing bodies rather than new body copies.
+
+- Linear transform: `{ kind: "linear", direction, instanceCount, spacing,
+  oppositeDirection }`. `direction` must be a construction plane (its normal);
+  count is an integer >=2 including the original, spacing is positive, and
+  opposite reverses direction. Count/spacing use canonical authored values and
+  support existing numeric expressions. Opposite must be a **literal authored
+  boolean**; the existing shared normalizer refuses boolean expressions.
+- Mirror transform: `{ kind: "mirror", plane }`, construction plane only.
+  Nested replay applies each source's **local transform before the outer
+  transform**, preserving source order and exact target-body lineage.
+
+Unknown/inactive fields are rejected by the exact semantic validator. Shared
+production normalization and the existing native replay owner validate source
+availability, operation kinds, transforms and dependencies. Stale bases conflict;
+pre-commit refusals do not mutate state. An accepted update with missing source
+or construction reference can persist with failed regeneration: strict mode
+reports failed geometry, not last-good bounds/topology. Explicit `author-invalid`
+may retain editable invalid state. Rediscover references after changes; deleting
+an earlier source can invalidate downstream replay. Conservative native replay
+provenance is unchanged; inspection does not promise durable subshape naming.
+
 ### Active-author undo and redo
 
 `history.inspect`, `history.undo`, and `history.redo` take the current `basis`

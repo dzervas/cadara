@@ -181,7 +181,7 @@ class DocumentSession implements SemanticSession {
         },
       };
     try {
-      if (command.operation.startsWith("timeline.") || command.operation === "target.delete" || command.operation === "body.rename" || command.operation.startsWith("feature.") || command.operation.startsWith("variable.") || command.operation.startsWith("sketch.") || command.operation.startsWith("extrude.") || command.operation.startsWith("revolve.") || command.operation.startsWith("plane.") || command.operation.startsWith("fillet.") || command.operation.startsWith("chamfer.") || command.operation.startsWith("shell.") || command.operation.startsWith("thicken.") || command.operation.startsWith("hole.") || command.operation.startsWith("sweep.") || command.operation.startsWith("loft.") || command.operation.startsWith("combine.") || command.operation.startsWith("split.") || command.operation.startsWith("deleteSolid.") || command.operation.startsWith("mirror.") || command.operation.startsWith("transform.") || command.operation.startsWith("linearPattern.") || command.operation.startsWith("circularPattern.") || command.operation.startsWith("history.") || command.operation.startsWith("export.")) {
+      if (command.operation.startsWith("timeline.") || command.operation === "target.delete" || command.operation === "body.rename" || command.operation.startsWith("feature.") || command.operation.startsWith("variable.") || command.operation.startsWith("sketch.") || command.operation.startsWith("extrude.") || command.operation.startsWith("revolve.") || command.operation.startsWith("plane.") || command.operation.startsWith("fillet.") || command.operation.startsWith("chamfer.") || command.operation.startsWith("shell.") || command.operation.startsWith("thicken.") || command.operation.startsWith("hole.") || command.operation.startsWith("sweep.") || command.operation.startsWith("loft.") || command.operation.startsWith("combine.") || command.operation.startsWith("split.") || command.operation.startsWith("deleteSolid.") || command.operation.startsWith("mirror.") || command.operation.startsWith("transform.") || command.operation.startsWith("linearPattern.") || command.operation.startsWith("circularPattern.") || command.operation.startsWith("featureReplay.") || command.operation.startsWith("history.") || command.operation.startsWith("export.")) {
         const execute = command.operation.startsWith("timeline.") || command.operation === "target.delete" || command.operation === "body.rename" || command.operation.startsWith("feature.")
           ? this.owner.featureLifecycle?.bind(this.owner)
           : command.operation.startsWith("variable.")
@@ -192,6 +192,8 @@ class DocumentSession implements SemanticSession {
             ? this.owner.history?.bind(this.owner)
             : command.operation.startsWith("export.")
               ? this.owner.export?.bind(this.owner)
+              : command.operation.startsWith("featureReplay.")
+                ? this.owner.featureReplay?.bind(this.owner)
               : command.operation.startsWith("mirror.") || command.operation.startsWith("transform.") || command.operation.startsWith("linearPattern.") || command.operation.startsWith("circularPattern.")
                 ? this.owner.bodyOperation?.bind(this.owner)
               : command.operation.startsWith("combine.") || command.operation.startsWith("split.") || command.operation.startsWith("deleteSolid.")
