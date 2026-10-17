@@ -2939,7 +2939,7 @@ const PRODUCTION_QUERY_MATRIX: readonly ProductionMatrixRow[] = [
     ]),
     route: "kernelFree",
     expected: verified("cubicCubic", ["crossing", "crossing"]),
-    operations: [430591, 430222],
+    operations: [418447, 418126],
   },
   {
     name: "cubic/cubic interior tangency",
@@ -2952,7 +2952,7 @@ const PRODUCTION_QUERY_MATRIX: readonly ProductionMatrixRow[] = [
     ]),
     route: "kernelFree",
     expected: verified("cubicCubic", ["tangent"]),
-    operations: [80463, 79431],
+    operations: [69322, 68330],
   },
   {
     name: "cubic/cubic structural reversed overlap",
@@ -2982,7 +2982,7 @@ const PRODUCTION_QUERY_MATRIX: readonly ProductionMatrixRow[] = [
     ]),
     route: "kernelFree",
     expected: failClosed("non-structural-cubic-overlap"),
-    operations: [28311, 26636],
+    operations: [16856, 15746],
   },
 ];
 
