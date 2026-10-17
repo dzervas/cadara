@@ -25,10 +25,6 @@ import {
   getConnectedSketchEntitySelectionTargets,
   getSketchSessionDerivedValidity,
   getSketchSessionRegionDiagnostics,
-  getSketchSessionDisplayRenderables,
-  getStableSketchSessionDisplayKey,
-  getStableSketchSessionDisplayRenderables,
-  getTransientSketchSessionDisplayRenderables,
   isSketchSvgRenderingEnabled,
   patchSketchStyleValue,
   patchSketchEditToolValue,
@@ -42,8 +38,11 @@ import {
   updateSketchGeometryDrag,
   updateSketchPointer,
   updateSketchReferenceProjection,
-  acceptSketchDraw,
+  acceptSketchDraw
 } from "@/domain/editor/sketch-session";
+import { getSketchSessionDisplayRenderables, getStableSketchSessionDisplayRenderables, getTransientSketchSessionDisplayRenderables 
+} from "@/domain/editor/sketch-session/display";
+import { getStableSketchSessionDisplayKey } from "@/domain/editor/sketch-session/solved-snapshot";
 import { reconstructSplineAggregate } from "@/contracts/sketch/spline-geometry";
 import {
   createStandardPlaneDefinition,

@@ -15,6 +15,7 @@ import {
   appendUniqueTarget,
   asBodyRef,
   createMissingInputDiagnostic,
+  hasExactBodyParticipants,
 } from "@/core/feature-authoring/features/shared";
 
 export const deleteSolidParticipants = [
@@ -58,6 +59,21 @@ function getDeleteSolidValidationDiagnostics(
       featureKind: "deleteSolid",
       participants: deleteSolidParticipants,
     },
+  );
+}
+
+export function prepareDeleteSolidFeatureDefinition(
+  parameters: import("@/contracts/modeling/advanced-solid").DeleteSolidFeatureParameters,
+) {
+  if (!hasExactBodyParticipants(parameters, ["body"])) return null;
+  if ("operationIntent" in parameters) return null;
+  if ("options" in parameters) return null;
+  return deleteSolidAuthoringDefinition.buildDefinition(
+    deleteSolidAuthoringDefinition.hydrateDraft({
+      kind: "deleteSolid",
+      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+      parameters,
+    }),
   );
 }
 

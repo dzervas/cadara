@@ -24,7 +24,7 @@ import { EditorProvider } from "@/hooks/editor-provider";
 import { ModelingServiceProvider } from "@/hooks/modeling-service-provider";
 import { RuntimeExtensionRegistryProvider } from "@/hooks/runtime-extension-registry-provider";
 import { CadWorkbench } from "@/workbench/shell/cad-workbench";
-import { createDurableHistoryService } from "@/workbench/history/durable-history";
+import { createDurableHistoryService } from "@/application/history/durable-history";
 import { createLocalStorageOperationHistoryStore } from "@/infrastructure/persistence/local-storage-operation-history-store";
 import { createLocalStorageWorkbenchTabsStore } from "@/infrastructure/persistence/local-storage-workbench-tabs-store";
 import {

@@ -88,8 +88,9 @@ export interface AuthoredDocumentRestoreOptions {
   /**
    * The document is a state this session did not author (a peer change, an
    * Undo or Redo). Its stored revision id may already name another state here:
-   * every writer counts from the shared field, and compensation never changes
-   * it. The restored state gets a revision id this kernel has not used before:
+   * writers can independently reuse the shared field. Compensation allocates a
+   * new stored revision, but that value can still have been used in this runtime.
+   * The restored state gets a revision id this kernel has not used before:
    * the stored id when it is later than every id used here, else the next one.
    */
   newRevision?: boolean;

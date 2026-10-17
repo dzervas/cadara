@@ -518,7 +518,7 @@ export function authorSketchConstraintTarget(
   };
 
   if (!definition.valueSpec && nextTargets.length >= definition.steps.length) {
-    return commitConstraintAuthoring(nextSession);
+    return prepareSketchConstraintCommit(nextSession);
   }
 
   return { session: nextSession, duplicates: [] };
@@ -846,10 +846,45 @@ export function solveCommittedConstraintDefinition(
   };
 }
 
+/** Completed semantic targets use the same contribution, reference and solve preparation as browser commits. */
+export function authorSketchDimension(
+  session: SketchSessionState,
+  input: import("@/contracts/semantic/schema").SemanticDimensionInput,
+): SketchSessionState {
+  return authorSketchRequirement(session, {
+    tool: input.axis === "horizontal" ? "dimensionHorizontal" : "dimensionVertical",
+    targets: input.points.map(pointId => ({ kind: "sketchPoint", sketchId: getSessionSketchId(session), pointId })),
+    mode: input.mode, value: input.mode === "driving" ? input.value : null,
+  });
+}
+
+/** Explicit completed operands use the browser registry and commit owner, without selecting or pinning UI tools. */
+export function authorSketchRequirement(
+  session: SketchSessionState,
+  input: import("@/contracts/semantic/schema").SemanticRequirementInput,
+): SketchSessionState {
+  const selectedTargets = input.targets.map(target => resolveSketchConstraintTarget(input.tool, session.definition, target, session.projectedReferences));
+  const definition = getSketchConstraintDefinition(input.tool);
+  if (selectedTargets.some(target => target === null)
+    || new Set(input.targets.map(getTargetKey)).size !== input.targets.length
+    || (input.tool === "dimensionDistance" ? input.targets.length < 1 || input.targets.length > 2 || (selectedTargets[0]?.circle && input.targets.length !== 1) : input.targets.length !== definition.steps.length)
+    || (definition.metadata.group === "constraints" && (input.mode !== "driving" || input.value !== null))
+    || (input.mode === "reference" && input.value !== null)) {
+    return { ...session, validationMessage: "Requirement needs the supported target combination." };
+  }
+  const targets = selectedTargets.filter(target => target !== null);
+  const value = input.mode === "reference" ? definition.measureValue?.(targets, null) ?? null : input.value;
+  return prepareSketchConstraintCommit(session, {
+    toolId: input.tool, selectedTargets: targets, hoverTarget: null, pointer: null,
+    isPreviewPinned: false, pendingValue: value === null ? null : createLiteralAuthoredValue(value),
+    pendingAnnotationPlacement: null, authorsReference: input.mode === "reference",
+  }).session;
+}
+
 export function commitSketchConstraintAuthoring(
   session: SketchSessionState,
 ): SketchSessionState {
-  return commitConstraintAuthoring(session).session;
+  return prepareSketchConstraintCommit(session).session;
 }
 
 export interface ConstraintCommitResult {
@@ -857,10 +892,10 @@ export interface ConstraintCommitResult {
   duplicates: readonly SketchConstraintRef[];
 }
 
-function commitConstraintAuthoring(
+export function prepareSketchConstraintCommit(
   session: SketchSessionState,
+  authoring = session.constraintAuthoring,
 ): ConstraintCommitResult {
-  const authoring = session.constraintAuthoring;
 
   if (!authoring) {
     return { session, duplicates: [] };

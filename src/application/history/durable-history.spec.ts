@@ -4,7 +4,7 @@ import { test, expect } from "vitest";
 import {
   createDurableHistoryService,
   DEFAULT_REPOSITORY_SYNCHRONIZATION_TIMEOUT_MS,
-} from "@/workbench/history/durable-history";
+} from "@/application/history/durable-history";
 import type { DocumentRepository } from "@/domain/modeling/document-repository";
 import {
   createModelingService,
@@ -19,7 +19,7 @@ import { EXTRUDE_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
 import type { AppResultAsync } from "@/contracts/errors";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 
-test("src/workbench/history/durable-history.spec.ts", async () => {
+test("repository compensation synchronizes background document edits", async () => {
   type ExtrudeFeatureDefinition = Extract<
     FeatureDefinition,
     { kind: "extrude" }
@@ -35,6 +35,7 @@ test("src/workbench/history/durable-history.spec.ts", async () => {
         ? resolved.error.message
         : "Expected modeling result to be ok.",
     ).toBeTruthy();
+    if (resolved.isErr()) throw new Error(resolved.error.message);
     return resolved.value;
   }
 
@@ -109,6 +110,7 @@ test("src/workbench/history/durable-history.spec.ts", async () => {
       variable,
       "Added variable should exist before update undo coverage runs.",
     ).toBeTruthy();
+    if (!variable) throw new Error("Missing authored variable");
 
     const updated = await unwrapModelingResult(
       modelingService.updateDocumentVariable({
@@ -125,7 +127,6 @@ test("src/workbench/history/durable-history.spec.ts", async () => {
 
     const availability = await durableHistory.getAvailability({
       documentId: withVariable.document.documentId,
-      sketchSession: null,
     });
     expect(
       availability.canUndo,
@@ -134,7 +135,6 @@ test("src/workbench/history/durable-history.spec.ts", async () => {
 
     const undone = await durableHistory.undo({
       documentId: withVariable.document.documentId,
-      sketchSession: null,
     });
     expect(
       undone?.context,
@@ -163,6 +163,7 @@ test("src/workbench/history/durable-history.spec.ts", async () => {
       initialExtrude?.definition.kind,
       "Seed extrude should exist before extrude undo coverage runs.",
     ).toBe("extrude");
+    if (!initialExtrude || initialExtrude.definition.kind !== "extrude") throw new Error("Missing seed extrude");
     const initialDistance =
       initialExtrude.definition.parameters.extent.mode === "oneSide" &&
       initialExtrude.definition.parameters.extent.end.kind === "blind"
@@ -197,7 +198,6 @@ test("src/workbench/history/durable-history.spec.ts", async () => {
 
     const availability = await durableHistory.getAvailability({
       documentId: initial.document.documentId,
-      sketchSession: null,
     });
     expect(
       availability.canUndo,
@@ -206,7 +206,6 @@ test("src/workbench/history/durable-history.spec.ts", async () => {
 
     const undone = await durableHistory.undo({
       documentId: initial.document.documentId,
-      sketchSession: null,
     });
     const restoredExtrude =
       undone?.context === "document"
@@ -259,7 +258,6 @@ test("src/workbench/history/durable-history.spec.ts", async () => {
 
     const availability = await durableHistory.getAvailability({
       documentId: initial.document.documentId,
-      sketchSession: null,
     });
     expect(
       availability.canUndo,
@@ -268,7 +266,6 @@ test("src/workbench/history/durable-history.spec.ts", async () => {
 
     const undone = await durableHistory.undo({
       documentId: initial.document.documentId,
-      sketchSession: null,
     });
     const restoredSketch =
       undone?.context === "document"
@@ -313,6 +310,7 @@ test("src/workbench/history/durable-history.spec.ts", async () => {
       variable,
       "Delayed-notification variable should exist before undo coverage runs.",
     ).toBeTruthy();
+    if (!variable) throw new Error("Missing authored variable");
 
     const updated = await unwrapModelingResult(
       modelingService.updateDocumentVariable({
@@ -329,7 +327,6 @@ test("src/workbench/history/durable-history.spec.ts", async () => {
 
     const undone = await durableHistory.undo({
       documentId: withVariable.document.documentId,
-      sketchSession: null,
     });
     expect(
       undone?.context === "document" &&
@@ -371,6 +368,7 @@ test("src/workbench/history/durable-history.spec.ts", async () => {
       variable,
       "No-replay variable should exist before undo coverage runs.",
     ).toBeTruthy();
+    if (!variable) throw new Error("Missing authored variable");
 
     const updated = await unwrapModelingResult(
       baseModelingService.updateDocumentVariable({
@@ -387,7 +385,6 @@ test("src/workbench/history/durable-history.spec.ts", async () => {
 
     const undone = await durableHistory.undo({
       documentId: withVariable.document.documentId,
-      sketchSession: null,
     });
     expect(
       undone?.context === "document" &&
@@ -434,7 +431,6 @@ test("src/workbench/history/durable-history.spec.ts", async () => {
 
     const undone = await durableHistory.undo({
       documentId: initial.document.documentId,
-      sketchSession: null,
     });
     expect(undone?.context).toBe("document");
     expect(DEFAULT_REPOSITORY_SYNCHRONIZATION_TIMEOUT_MS).toBeGreaterThan(

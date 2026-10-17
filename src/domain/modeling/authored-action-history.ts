@@ -638,9 +638,17 @@ export class AuthoredActionHistory {
     if (conflict) return conflict;
     const ledger = this.ledger(identity);
     this.sequence = action.sequence;
-    ledger.undo.push(structuredClone(action));
-    ledger.undo = ledger.undo.slice(-250);
-    ledger.redo = [];
+    // A timeline cursor move changes evaluation context, not authored intent.
+    // Keep its checked writes in repository storage, but do not create an undo
+    // entry or discard redo. Mixed authored actions retain their cursor writes
+    // (e.g. creating a feature also selects it) for document validity.
+    const cursorOnly = identity.context.kind === "document" &&
+      writes.every((change) => change.address[0] === "cursor");
+    if (!cursorOnly) {
+      ledger.undo.push(structuredClone(action));
+      ledger.undo = ledger.undo.slice(-250);
+      ledger.redo = [];
+    }
     return {
       status: "applied",
       state: decode(current, data),

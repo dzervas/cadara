@@ -32,7 +32,6 @@ import {
   createSketchSessionFromSnapshot,
   deleteSelectedSketchGeometry,
   finalizeSketchDraw,
-  getSketchSessionDisplayRenderables,
   patchSketchConstraintValue,
   pinSketchConstraintPreview,
   selectSketchConstraintTarget,
@@ -40,6 +39,7 @@ import {
   type SketchSessionDisplayRenderable,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
+import { getSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session/display";
 import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {

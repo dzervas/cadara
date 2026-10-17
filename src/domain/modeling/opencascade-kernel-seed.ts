@@ -52,6 +52,9 @@ export const OCC_KERNEL_CAPABILITIES: ModelingKernelCapabilities = {
     "combine",
     "split",
     "deleteSolid",
+    // Native execution is supported; preview support is a separate contract.
+    "mirror",
+    "transform",
     "linearPattern",
     "circularPattern",
     "featureReplay",

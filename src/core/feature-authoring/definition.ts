@@ -54,6 +54,7 @@ export type FeatureResultBodyType = "solid" | "surface";
 export interface ExtrudeFeatureParameterDraft {
   resultBodyType: FeatureResultBodyType;
   profileTargets: readonly ExtrudeSurfaceProfileRef[];
+  startExtent: ExtrudeFeatureParameters["startExtent"];
   extentMode: "oneSide" | "symmetric" | "twoSide";
   firstEnd: ExtrudeFeatureEndConditionDraft;
   secondEnd: ExtrudeFeatureEndConditionDraft;
@@ -174,6 +175,8 @@ export interface FilletFeatureParameterDraft {
 }
 
 export interface PlaneFeatureParameterDraft {
+  /** Preserve canonical standalone frames through browser hydration and edits. */
+  explicitFrame?: import("@/contracts/shared/sketch-plane").SketchPlaneFrame;
   referenceTarget: Extract<
     PrimitiveRef,
     { kind: "construction" | "face" }
@@ -249,6 +252,7 @@ export interface ThickenFeatureParameterDraft {
 }
 
 export interface CombineFeatureParameterDraft {
+  keepTools?: boolean;
   targetBodyTargets: readonly Extract<PrimitiveRef, { kind: "body" }>[];
   toolBodyTargets: readonly Extract<PrimitiveRef, { kind: "body" }>[];
   operationIntent: MaybeAuthoredValue<
@@ -257,6 +261,7 @@ export interface CombineFeatureParameterDraft {
 }
 
 export interface SplitFeatureParameterDraft {
+  keepTools?: boolean;
   targetBodyTarget: Extract<PrimitiveRef, { kind: "body" }> | null;
   toolBodyTarget: Extract<PrimitiveRef, { kind: "body" }> | null;
 }
@@ -266,12 +271,15 @@ export interface DeleteSolidFeatureParameterDraft {
 }
 
 export interface MirrorFeatureParameterDraft {
+  operationIntent?: import("@/contracts/modeling/authored-values").AuthoredValue<"add">;
+  targetBodyTargets?: readonly Extract<PrimitiveRef, { kind: "body" }>[];
   bodyTargets: readonly Extract<PrimitiveRef, { kind: "body" }>[];
   planeTarget: Extract<PrimitiveRef, { kind: "construction" | "face" }> | null;
   copy: MaybeAuthoredValue<boolean>;
 }
 
 export interface TransformFeatureParameterDraft {
+  vector?: readonly [number, number, number];
   bodyTargets: readonly Extract<PrimitiveRef, { kind: "body" }>[];
   transformReferenceTarget: Extract<
     PrimitiveRef,

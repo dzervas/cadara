@@ -59,7 +59,7 @@ function buildThreePointCirclePreview(
     : [];
 }
 
-function validateThreePointCircle(
+export function validateThreePointCircle(
   points: readonly SketchPoint[],
 ): SketchToolValidationResult {
   if (points.length < REQUIRED_POINTS) {

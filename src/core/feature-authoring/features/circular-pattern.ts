@@ -21,6 +21,7 @@ import {
   authoredNumberFormValue,
   authoredNumberLiteral,
   createMissingInputDiagnostic,
+  hasExactBodyOperationParticipants,
   expressionCapableAuthoredValue,
   toFeaturePhaseDiagnostics,
 } from "@/core/feature-authoring/features/shared";
@@ -118,6 +119,16 @@ function getCircularPatternValidationDiagnostics(
       options: circularPatternOptions,
     },
   );
+}
+
+export function prepareCircularPatternFeatureDefinition(
+  parameters: import("@/contracts/modeling/advanced-solid").CircularPatternFeatureParameters,
+) {
+  if ("operationIntent" in parameters || !hasExactBodyOperationParticipants(parameters, "axis", ["construction", "face", "edge", "sketchEntity"])) return null;
+  if (Object.keys(parameters.options).some(k => !["instanceCount","angleDegrees","equalSpace","oppositeDirection"].includes(k))) return null;
+  return circularPatternAuthoringDefinition.buildDefinition(circularPatternAuthoringDefinition.hydrateDraft({
+    kind: "circularPattern", featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION, parameters,
+  }));
 }
 
 export const circularPatternAuthoringDefinition = {

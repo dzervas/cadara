@@ -9,11 +9,11 @@ import {
   beginSketchTool,
   createSketchSessionFromSnapshot,
   deleteSketchReferenceTarget,
-  getSketchSessionDisplayRenderables,
   selectSketchReferenceTarget,
   toggleSketchConstructionTarget,
-  updateSketchReferenceProjection,
+  updateSketchReferenceProjection
 } from "@/domain/editor/sketch-session";
+import { getSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session/display";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,

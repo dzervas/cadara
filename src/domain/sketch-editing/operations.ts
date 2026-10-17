@@ -1561,6 +1561,7 @@ function findSharedLineCorner(
 
   return {
     pointId: match.firstPoint.pointId,
+    secondPointId: match.secondPoint.pointId,
     point: match.firstPoint.position,
     firstOther: match.firstOther,
     secondOther: match.secondOther,
@@ -1706,7 +1707,7 @@ export function createSketchFilletMutation(input: {
     "fillet",
   );
   if (mirrorRefusal) return createInvalidOperationResult(mirrorRefusal);
-  if (input.radius === null || input.radius <= EPSILON) {
+  if (input.radius === null || !Number.isFinite(input.radius) || input.radius <= EPSILON) {
     return createInvalidOperationResult(
       "Fillet radius must be greater than zero.",
     );
@@ -1805,7 +1806,7 @@ export function createSketchFilletMutation(input: {
   );
   const updatedSecond = replaceLineEndpoint(
     second.entity,
-    corner.pointId,
+    corner.secondPointId,
     secondPointId,
   );
   const { constraints, dimensions } = primitiveArcRelationships({
@@ -1909,7 +1910,7 @@ export function createSketchChamferMutation(input: {
     "chamfer",
   );
   if (mirrorRefusal) return createInvalidOperationResult(mirrorRefusal);
-  if (input.distance === null || input.distance <= EPSILON) {
+  if (input.distance === null || !Number.isFinite(input.distance) || input.distance <= EPSILON) {
     return createInvalidOperationResult(
       "Chamfer distance must be greater than zero.",
     );
@@ -1986,7 +1987,7 @@ export function createSketchChamferMutation(input: {
   );
   const updatedSecond = replaceLineEndpoint(
     second.entity,
-    corner.pointId,
+    corner.secondPointId,
     secondPointId,
   );
   const definition = appendPointsAndEntities(
@@ -3087,7 +3088,7 @@ export function createSketchSlotContribution(input: {
     return createInvalidOperationResult(SPLINE_SLOT_UNSUPPORTED_MESSAGE);
   }
 
-  if (input.width === null || input.width <= EPSILON) {
+  if (input.width === null || !Number.isFinite(input.width) || input.width <= EPSILON) {
     return createInvalidOperationResult(
       "Slot width must be greater than zero.",
     );
@@ -3428,7 +3429,7 @@ export function createSketchOffsetDerivationContribution(input: {
     );
   }
 
-  if (input.distance === null || input.distance <= EPSILON) {
+  if (input.distance === null || !Number.isFinite(input.distance) || input.distance <= EPSILON) {
     return createInvalidOperationResult(
       "Offset distance must be greater than zero.",
     );

@@ -37,6 +37,23 @@ function isShellMode(
   );
 }
 
+/** Whole-body native modes replace the source; they do not execute booleans.
+ * Only neutral operation/scope metadata is accepted, never silently ignored intent.
+ */
+export function prepareShellFeatureDefinition(parameters: import("@/contracts/modeling/schema").ShellFeatureParameters) {
+  if (parameters.mode === "closedHollow" && parameters.direction !== "inside") return null;
+  if (parameters.mode === "closedHollow" || parameters.mode === "offsetAllFaces") {
+    if (parameters.faceTargets.length || authoredStringLiteral(parameters.operation, "") !== "newBody" || parameters.booleanScope.kind !== "standalone") return null;
+  }
+  return shellAuthoringDefinition.buildDefinition(
+    shellAuthoringDefinition.hydrateDraft({
+      kind: "shell",
+      featureTypeVersion: SHELL_FEATURE_SCHEMA_VERSION,
+      parameters,
+    }),
+  );
+}
+
 export const shellAuthoringDefinition = {
   metadata: {
     kind: "shell",

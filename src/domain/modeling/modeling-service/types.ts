@@ -31,7 +31,7 @@ import type { OccTessellationTierId } from "@/domain/modeling/occ/tessellation";
 import type { LocalFileBindingMetadata } from "@/domain/modeling/local-file-binding-store";
 import type { DocumentSyncWriteStatus } from "@/domain/modeling/document-sync-worker-protocol";
 import type { LocalFileSystemFileHandle } from "@/lib/local-file-system-access";
-import type { DocumentRepositoryMetadata } from "@/domain/modeling/document-repository";
+import type { DocumentRepositoryMetadata, DocumentRepositoryMutationResult } from "@/domain/modeling/document-repository";
 import type { AuthoredActionSketch } from "@/contracts/modeling/authored-actions";
 import type { OperationHistoryStore } from "@/domain/modeling/modeling-history-persistence";
 import type { DocumentRepository } from "@/domain/modeling/document-repository";
@@ -59,14 +59,21 @@ export interface ModelingService {
     baseRevisionId: RevisionId;
     target: DurableRef;
   }): Promise<OccNativeTopologyWorkerResult<OccNativeExactBrepPayload>>;
-  createNewDocument(): Promise<ModelingDocumentFileMutationResult>;
+  createNewDocument(input?: {
+    name?: string;
+    /** Exact replacement transaction, never inferred from a global drain tail. */
+    observe?: (transaction: DocumentRepositoryMutationResult) => void;
+  }): Promise<ModelingDocumentFileMutationResult>;
   importDocument(
     input: ModelingImportDocumentInput,
   ): Promise<ModelingDocumentFileMutationResult>;
   renameDocument(input: {
     name: string;
+    observe?: (transaction: DocumentRepositoryMutationResult) => void;
   }): Promise<ModelingDocumentFileMutationResult>;
-  exportCurrentDocument(): Promise<DocumentExportSuccessResult>;
+  exportCurrentDocument(input?: {
+    observe: (transaction: DocumentRepositoryMutationResult) => void;
+  }): Promise<DocumentExportSuccessResult>;
   bindLocalFile(input: {
     handle: LocalFileSystemFileHandle;
     metadata: LocalFileBindingMetadata;
@@ -297,57 +304,78 @@ export type ModelingCreateFeatureInput = Omit<
   schema.CreateFeatureRequest,
   "contractVersion" | "documentId"
 > &
-  Partial<ModelingMutationBasisInput>;
+  Partial<ModelingMutationBasisInput> & {
+    observePersistence?: (transaction: DocumentRepositoryMutationResult) => void;
+  };
 export type ModelingAddDocumentVariableInput = Omit<
   schema.AddDocumentVariableRequest,
   "contractVersion" | "documentId"
 > &
-  Partial<ModelingMutationBasisInput>;
+  Partial<ModelingMutationBasisInput> & {
+    observePersistence?: (transaction: DocumentRepositoryMutationResult) => void;
+  };
 export type ModelingUpdateFeatureInput = Omit<
   schema.UpdateFeatureRequest,
   "contractVersion" | "documentId"
 > &
-  Partial<ModelingMutationBasisInput>;
+  Partial<ModelingMutationBasisInput> & {
+    observePersistence?: (transaction: DocumentRepositoryMutationResult) => void;
+  };
 export type ModelingSetFeatureSuppressionInput = Omit<
   schema.SetFeatureSuppressionRequest,
   "contractVersion" | "documentId"
 > &
-  Partial<ModelingMutationBasisInput>;
+  Partial<ModelingMutationBasisInput> & {
+    observePersistence?: (transaction: DocumentRepositoryMutationResult) => void;
+  };
 export type ModelingUpdateDocumentVariableInput = Omit<
   schema.UpdateDocumentVariableRequest,
   "contractVersion" | "documentId"
 > &
-  Partial<ModelingMutationBasisInput>;
+  Partial<ModelingMutationBasisInput> & {
+    observePersistence?: (transaction: DocumentRepositoryMutationResult) => void;
+  };
 export type ModelingDeleteFeatureInput = Omit<
   schema.DeleteFeatureRequest,
   "contractVersion" | "documentId"
 > &
-  Partial<ModelingMutationBasisInput>;
+  Partial<ModelingMutationBasisInput> & {
+    observePersistence?: (transaction: DocumentRepositoryMutationResult) => void;
+  };
 export type ModelingDeleteTargetInput = Omit<
   schema.DeleteDocumentTargetRequest,
   "contractVersion" | "documentId"
 > &
-  Partial<ModelingMutationBasisInput>;
+  Partial<ModelingMutationBasisInput> & {
+    observePersistence?: (transaction: DocumentRepositoryMutationResult) => void;
+  };
 export type ModelingRenameBodyInput = Omit<
   schema.RenameBodyRequest,
   "contractVersion" | "documentId"
 > &
-  Partial<ModelingMutationBasisInput>;
+  Partial<ModelingMutationBasisInput> & {
+    observePersistence?: (transaction: DocumentRepositoryMutationResult) => void;
+  };
 export type ModelingReorderFeatureInput = Omit<
   schema.ReorderFeatureRequest,
   "contractVersion" | "documentId"
 > &
-  Partial<ModelingMutationBasisInput>;
+  Partial<ModelingMutationBasisInput> & {
+    observePersistence?: (transaction: DocumentRepositoryMutationResult) => void;
+  };
 export type ModelingReorderDocumentHistoryInput = Omit<
   schema.ReorderDocumentHistoryRequest,
   "contractVersion" | "documentId"
 > &
-  Partial<ModelingMutationBasisInput>;
+  Partial<ModelingMutationBasisInput> & {
+    observePersistence?: (transaction: DocumentRepositoryMutationResult) => void;
+  };
 export type ModelingSetFeatureCursorInput = Omit<
   schema.SetFeatureCursorRequest,
   "contractVersion" | "documentId"
 > & {
   persistHistory?: boolean;
+  observePersistence?: (transaction: DocumentRepositoryMutationResult) => void;
 } & Partial<ModelingMutationBasisInput>;
 export type ModelingExportDocumentInput = Omit<
   DocumentExportRequest,
@@ -357,6 +385,7 @@ export type ModelingExportDocumentResult = DocumentExportResult;
 
 export interface ModelingImportDocumentInput {
   document: unknown;
+  observe?: (transaction: DocumentRepositoryMutationResult) => void;
   assets?: readonly GeometryAssetBlobInput[];
 }
 
@@ -381,6 +410,8 @@ export interface ModelingCommitSketchInput
     Omit<schema.CommitSketchRequest, "contractVersion" | "documentId">,
     Partial<ModelingMutationBasisInput> {
   solverCorrelation: ModelingCommitSketchCorrelation | null;
+  /** Observe the exact Publish Sketch repository write, never a global persistence tail. */
+  observePublication?: (transaction: DocumentRepositoryMutationResult) => void;
   publicationBase?: {
     actionContextId: SketchId;
     expectedSketch: AuthoredActionSketch | null;

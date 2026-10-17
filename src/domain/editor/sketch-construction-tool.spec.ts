@@ -7,10 +7,10 @@ import {
   beginSketchTool,
   clearActiveSketchTool,
   createSketchSessionFromSnapshot,
-  getSketchSessionDisplayRenderables,
   startSketchDraw,
-  toggleSketchConstructionTarget,
+  toggleSketchConstructionTarget
 } from "@/domain/editor/sketch-session";
+import { getSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session/display";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,

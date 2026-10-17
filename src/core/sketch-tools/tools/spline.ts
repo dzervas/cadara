@@ -292,6 +292,7 @@ export const splineSketchToolDefinition: SketchToolDefinition<"spline"> = {
   validate(start, end) {
     return validateSpline([start, end]);
   },
+  validateContribution: validateSpline,
   getPresentation: buildSplinePresentation,
   placementRole: () => "point",
   createCommitContribution({

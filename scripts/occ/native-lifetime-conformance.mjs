@@ -8,17 +8,17 @@ import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import {
+  assertLifetimeAbi,
+  assertLifetimeDeclarations,
+  EXPECTED_ABI_SHA256,
+  EXPECTED_DTS_SHA256,
+} from "./lifetime-abi-policy.mjs";
 
 if (!process.argv[2])
   throw new Error("An explicit staged custom-asset directory is required");
 const directory = resolve(process.argv[2]);
 
-// The destructor repair must not change the generated declarations or the
-// embind constructor/method registry of the v8 assets.
-const EXPECTED_DTS_SHA256 =
-  "e30f46eca4fa30d12b6ccb16281a86d2c439433e6c4de6a43eeef623c93a8443";
-const EXPECTED_ABI_SHA256 =
-  "5c3617ab8ab5a10d41a5351e2ded5b472a19ece74880ece1e7a7c700bde87d8d";
 // Only a non-public destructor may keep embind's no-op raw_destructor.
 const NONPUBLIC_DESTRUCTOR_ALLOWLIST = [
   "BRepAlgoAPI_Algo",
@@ -478,18 +478,24 @@ run("registry-nop-destructors-are-only-nonpublic-allowlist", (out) => {
   );
 });
 
-run("registry-abi-and-declarations-unchanged", (out) => {
+run("registry-abi-and-declarations-approved-extension", (out) => {
   out.abiEntries = abiLines.length;
   out.abiSha256 = abiSha256;
   out.expectedAbiSha256 = EXPECTED_ABI_SHA256;
   out.dtsSha256 = assets["cadara-occ.d.ts"].sha256;
+  out.expectedDtsSha256 = EXPECTED_DTS_SHA256;
+  Object.assign(out, assertLifetimeAbi(abiLines));
+  Object.assign(out, assertLifetimeDeclarations(
+    readFileSync(resolve(directory, "cadara-occ.d.ts"), "utf8"),
+  ));
   assert(
-    out.dtsSha256 === EXPECTED_DTS_SHA256,
-    "cadara-occ.d.ts must be byte-identical to v8",
+    (out.approvedAbiEntries === 0) === (out.approvedDeclarationClasses === 0),
+    "Registry and declarations must agree on the approved STEP extension",
   );
   assert(
-    abiSha256 === EXPECTED_ABI_SHA256,
-    "Embind registry ABI must equal the v8 reference",
+    (out.approvedReturnStatusAbiEntries === 0) ===
+      (out.approvedReturnStatusDeclarationEnums === 0),
+    "Registry and declarations must agree on the approved STEP status enum",
   );
 });
 
@@ -1190,4 +1196,11 @@ if (process.argv[3]) {
   );
 }
 console.log(JSON.stringify(result));
+console.error(`Native lifetime checks: ${result.summary.pass} PASS, ${result.summary.error} ERROR`);
+for (const entry of cases) {
+  if (entry.status === "error")
+    console.error(`ERROR ${entry.name}: ${entry.error}`);
+  else if (entry.name === "attribute-handle-after-document-is-unsafe-release-order")
+    console.error(`PASS ${entry.name}: expected unsafe-release memory access out of bounds; safe order completed 20 iterations`);
+}
 if (result.summary.error) process.exitCode = 1;

@@ -14,7 +14,8 @@ import {
 } from "@/contracts/sketch/spline-geometry";
 import type { FeatureEditorFormSchema } from "@/core/feature-authoring/form-schema";
 
-export type DxfSketchExportOptions = Record<string, never>;
+import { requireGeometryExportOptions } from "@/contracts/export/options.runtime-schema";
+export type DxfSketchExportOptions = import("@/contracts/export/options").SketchVectorExportOptions;
 
 function dxfPair(code: number, value: string | number) {
   return `${code}\n${value}`;
@@ -191,6 +192,7 @@ export const dxfSketchExportProvider: ExportProvider<
   id: "sketch-dxf",
   label: "DXF",
   formatId: "dxf",
+  validateOptions: (options) => requireGeometryExportOptions("dxf", options),
   fileExtension: "dxf",
   mimeType: "application/dxf",
   targetKinds: ["sketch"],

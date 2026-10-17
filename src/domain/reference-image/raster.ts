@@ -1,3 +1,23 @@
+import { requireReferenceImagePayload } from "@/contracts/reference-image/runtime-schema";
+
+/** Shared browser/filesystem metadata preparation; this does not decode pixels. */
+export function prepareReferenceImagePayload(input: {
+  bytes: Uint8Array;
+  fileName: string;
+  mediaType?: string;
+}) {
+  const { width, height } = readRasterImageDimensions(input.bytes);
+  const mediaType = input.mediaType?.trim() || inferReferenceImageMediaType(input.fileName);
+  if (!mediaType) throw new Error(`Unsupported reference image type for ${input.fileName}.`);
+  return requireReferenceImagePayload({
+    mediaType,
+    ...(input.fileName.trim() ? { fileName: input.fileName.trim() } : {}),
+    pixelWidth: width,
+    pixelHeight: height,
+    base64Data: encodeBytesToBase64(input.bytes),
+  });
+}
+
 export const supportedReferenceImageFileTypes = [
   { extension: "png", mediaType: "image/png" },
   { extension: "jpg", mediaType: "image/jpeg" },

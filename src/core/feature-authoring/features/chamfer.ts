@@ -202,6 +202,19 @@ function getChamferValidationDiagnostics(draft: ChamferFeatureParameterDraft) {
   return diagnostics;
 }
 
+/** Reject unresolved variants before browser transition defaults can coerce them. */
+export function prepareChamferFeatureDefinition(parameters: import("@/contracts/modeling/advanced-solid").ChamferFeatureParameters) {
+  const widthForm = authoredStringLiteral(parameters.options.widthForm ?? "equalOffsets", "");
+  if (!["equalOffsets", "twoOffsets", "offsetAngle"].includes(widthForm)) return null;
+  return chamferAuthoringDefinition.buildDefinition(
+    chamferAuthoringDefinition.hydrateDraft({
+      kind: "chamfer",
+      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+      parameters,
+    }),
+  );
+}
+
 export const chamferAuthoringDefinition = {
   metadata: {
     kind: "chamfer",

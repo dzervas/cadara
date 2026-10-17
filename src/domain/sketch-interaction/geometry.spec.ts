@@ -37,11 +37,12 @@ import {
   isSketchInteractionCurveGeometry,
   type SketchInteractionCurveGeometry,
 } from "@/domain/sketch-interaction/geometry";
-import { getSketchSessionDisplaySolvedSnapshot } from "@/domain/editor/sketch-session/display";
+
+import { getSketchSessionDisplaySolvedSnapshot } from "@/domain/editor/sketch-session/solved-snapshot";
 import {
-  createSketchSessionFromSnapshot,
-  getSketchSessionDisplayRenderables,
+  createSketchSessionFromSnapshot
 } from "@/domain/editor/sketch-session";
+import { getSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session/display";
 import { withLiveSolveBasis } from "@/domain/editor/sketch-session/internals";
 import { makeSketchFixture } from "@/contracts/sketch/region-extraction.fixtures";
 import { sketchSnapshotRecordForTest } from "@/contracts/sketch/region-record.fixtures";

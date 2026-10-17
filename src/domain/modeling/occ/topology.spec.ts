@@ -1,5 +1,4 @@
 import { test, expect } from "vitest";
-import { readFile } from "node:fs/promises";
 import type {
   ConstructionSnapshotRecord,
   FeatureDefinition,
@@ -20,7 +19,7 @@ import {
   type SketchDefinition as AuthoredSketchDefinition,
   type SketchRecord,
 } from "@/contracts/sketch/schema";
-import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import { getDefaultOpenCascadeInstance } from "@/infrastructure/occ/runtime";
 import type {
   OccNativeShimPayload,
   OpenCascadeNativeTopologyKernelHost,
@@ -236,20 +235,7 @@ test("src/domain/modeling/occ/topology.spec.ts", async () => {
     return body;
   }
 
-  async function loadCustomOpenCascadeForTopologyTest() {
-    const module = (await import("../../../../public/cadara-occ.js")) as {
-      default: new (
-        module: Record<string, unknown>,
-      ) => Promise<OpenCascadeInstance & OpenCascadeNativeTopologyKernelHost>;
-    };
-    const wasmBinary = new Uint8Array(
-      await readFile(
-        new URL("../../../../public/cadara-occ.wasm", import.meta.url),
-      ),
-    );
-
-    return new module.default({ wasmBinary });
-  }
+  const loadCustomOpenCascadeForTopologyTest = getDefaultOpenCascadeInstance;
 
   async function testNewBodiesUseKernelOwnedNativeTopologyIds() {
     const oc = await loadCustomOpenCascadeForTopologyTest();

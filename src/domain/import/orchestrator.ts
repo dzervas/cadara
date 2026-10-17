@@ -68,6 +68,9 @@ import {
 import { describeUnknownError } from "@/contracts/errors";
 import { matchSignature } from "@/domain/import/onshape/signature-matcher";
 import { deriveLiveBodySignatures } from "@/domain/import/live-body-signatures";
+import { selectSplitInterfaceOwner } from "@/domain/import/onshape/split-interface-owner-witness";
+import { createOccTopologyProvenanceIndex, createOccFeatureTopologyLineageMap } from "@/domain/modeling/occ/topology-stage";
+import type { CadaraBrepFaceRecord } from "@/contracts/modeling/geometry-assets";
 import type { DurableRef } from "@/contracts/shared/references";
 import { requireAcceptedModelingResult } from "@/lib/reported-action";
 
@@ -542,7 +545,7 @@ export class ImportDeferredMaterializer {
       "getCurrentDocumentSnapshot" | "buildNativeExactBrepPayload"
     >;
     outputRecords: Map<string, ImportActionOutputRecord>;
-    bodyScopeBindings: ReadonlyMap<string, NonNullable<ImportPreparedActions["bodyScopeBindings"]>[number]>;
+    bodyScopeBindings: Map<string, NonNullable<ImportPreparedActions["bodyScopeBindings"]>[number]>;
   };
   private activeConsumerActionIndex: number | undefined;
   private topologyFallbackSource: ImportDeferredTopologyRef["source"] | null = null;
@@ -565,6 +568,7 @@ export class ImportDeferredMaterializer {
   private readonly splitInterfaceSelectors = new Map<string, {
     selector: ImportDeferredSplitInterfaceFaceRef;
     toolFace: Extract<DurableRef, { kind: "face" }> | null;
+    toolProvenanceId: string | null;
     outputFace: Extract<DurableRef, { kind: "face" }> | null;
   }>();
 
@@ -576,11 +580,14 @@ export class ImportDeferredMaterializer {
     outputRecords: Map<string, ImportActionOutputRecord>;
     bodyScopeBindings?: readonly NonNullable<ImportPreparedActions["bodyScopeBindings"]>[number][];
   }) {
-    const bodyScopeBindings = new Map<
-      string,
-      NonNullable<ImportPreparedActions["bodyScopeBindings"]>[number]
-    >();
-    for (const binding of input.bodyScopeBindings ?? []) {
+    this.input = { ...input, bodyScopeBindings: new Map() };
+    this.registerBodyScopeBindings(input.bodyScopeBindings ?? []);
+  }
+
+  /** A continued probe must register new consumer scopes before applying its suffix. */
+  registerBodyScopeBindings(bindings: readonly NonNullable<ImportPreparedActions["bodyScopeBindings"]>[number][]) {
+    const declarations = new Set<string>();
+    for (const binding of bindings) {
       if (
         !Number.isInteger(binding.producerActionIndex) ||
         !Number.isInteger(binding.consumerActionIndex) ||
@@ -596,12 +603,14 @@ export class ImportDeferredMaterializer {
         binding.probeBodyId,
         binding.source,
       );
-      if (bodyScopeBindings.has(key)) {
-        throw new Error(`Duplicate body-scope binding declaration for ${key}.`);
+      if (declarations.has(key)) throw new Error(`Duplicate body-scope binding declaration for ${key}.`);
+      declarations.add(key);
+      const existing = this.input.bodyScopeBindings.get(key);
+      if (existing && JSON.stringify(existing) !== JSON.stringify(binding)) {
+        throw new Error(`Conflicting body-scope binding declaration for ${key}.`);
       }
-      bodyScopeBindings.set(key, binding);
+      this.input.bodyScopeBindings.set(key, binding);
     }
-    this.input = { ...input, bodyScopeBindings };
   }
 
   /** Retain exact signatures already sampled for the current immutable revision. */
@@ -692,7 +701,7 @@ export class ImportDeferredMaterializer {
         if (existing && JSON.stringify(existing.selector) !== JSON.stringify(selector)) {
           throw new Error("Conflicting split-interface selector declarations.");
         }
-        if (!existing) this.splitInterfaceSelectors.set(key, { selector, toolFace: null, outputFace: null });
+        if (!existing) this.splitInterfaceSelectors.set(key, { selector, toolFace: null, toolProvenanceId: null, outputFace: null });
         return;
       }
       for (const entry of Array.isArray(value) ? value : Object.values(value)) visit(entry);
@@ -731,6 +740,13 @@ export class ImportDeferredMaterializer {
         throw new Error(`Split-interface source ${sourceKey} resolved ${targets.length} tool faces, expected exactly one.`);
       }
       registration.toolFace = targets[0]!;
+      if (exact.kind !== "nativeTopologyPayload") throw new Error("Exact tool provenance unavailable.");
+      registration.toolProvenanceId = createOccTopologyProvenanceIndex({
+        stages: new Map(), previousLineage: createOccFeatureTopologyLineageMap(exact.payload.topologyLineage),
+        historyOrder: snapshot.presentation.documentHistory.map(item => item.kind === "sketch"
+          ? { kind: "sketch" as const, sketchId: item.sketchId }
+          : { kind: "feature" as const, featureId: item.featureId }),
+      }).resolveFace(registration.toolFace);
     }
   }
 
@@ -743,24 +759,36 @@ export class ImportDeferredMaterializer {
       if (!output?.featureId || !registration.toolFace || !output.bodyIds?.length) {
         throw new Error("Split-interface selector has no exact tool face or split outputs.");
       }
-      const snapshot = await this.input.modelingService.getCurrentDocumentSnapshot();
-      const exact = await this.input.modelingService.buildNativeExactBrepPayload({
-        baseRevisionId: snapshot.document.revisionId,
-        target: { kind: "body", bodyId: output.bodyIds[0]! },
-      });
-      const sourceKey = `sheet-split-tool-successor:${output.featureId}:${registration.toolFace.bodyId}:face:${registration.toolFace.faceId}`;
-      const targets = exact.kind === "nativeTopologyPayload"
-        ? (exact.payload.topologyLineage ?? []).filter((lineage) => lineage.featureId === output.featureId)
-          .flatMap((lineage) => lineage.outputs)
-          .flatMap((entry) => entry.sourceTargets)
-          .filter((entry) => entry.sourceKey === sourceKey)
-          .flatMap((entry) => entry.targets)
-          .filter((target): target is Extract<DurableRef, { kind: "face" }> => target.kind === "face")
-        : [];
-      if (targets.length !== 1) {
-        throw new Error(`Split-interface alias ${sourceKey} resolved ${targets.length} output faces, expected exactly one.`);
+      if (registration.selector.ownerWitness?.capturedFaceId !== registration.selector.source.deterministicId) {
+        throw new Error("Split-interface captured owner provenance is inconsistent.");
       }
-      registration.outputFace = targets[0]!;
+      if (registration.selector.side !== "back" || !registration.toolProvenanceId) {
+        throw new Error("Split-interface source side or exact tool provenance is unavailable.");
+      }
+      const snapshot = await this.input.modelingService.getCurrentDocumentSnapshot();
+      // Use the kernel's existing scoped claims, never its deliberately omitted
+      // ambiguous alias. Mesh winding accounts for each occurrence's REVERSED flag.
+      const prefix = `generated-from:${output.featureId}:${registration.toolFace.bodyId}:face:${encodeURIComponent(registration.toolProvenanceId)}:sheet-split-interface-face:output-slot:`;
+      const candidates: Array<{ reference: Extract<DurableRef, { kind: "face" }>; face: CadaraBrepFaceRecord }> = [];
+      for (const bodyId of output.bodyIds) {
+        const exact = await this.input.modelingService.buildNativeExactBrepPayload({
+          baseRevisionId: snapshot.document.revisionId, target: { kind: "body", bodyId },
+        });
+        if (exact.kind !== "nativeTopologyPayload") throw new Error("Split-interface occurrence payload unavailable.");
+        const claims = (exact.payload.topologyLineage ?? []).filter(lineage => lineage.featureId === output.featureId)
+          .flatMap(lineage => lineage.outputs).filter(entry => entry.outputSlot === bodyId)
+          .flatMap(entry => entry.sourceTargets).filter(entry => entry.sourceKey.startsWith(prefix));
+        for (const claim of claims) {
+          if (claim.targets.length !== 1) throw new Error("Split-interface scoped claim is ambiguous.");
+          const reference = claim.targets[0]!;
+          if (reference.kind !== "face" || reference.bodyId !== bodyId) throw new Error("Split-interface scoped claim has contradictory ownership.");
+          const faces = exact.payload.brep.bodies.filter(body => body.bodyKey === bodyId)
+            .flatMap(body => body.topology.faces).filter(face => face.faceKey === reference.faceId);
+          if (faces.length !== 1) throw new Error("Split-interface scoped occurrence is unavailable or ambiguous.");
+          candidates.push({ reference, face: faces[0]! });
+        }
+      }
+      registration.outputFace = selectSplitInterfaceOwner(registration.selector.ownerWitness, candidates);
     }
   }
 
@@ -776,6 +804,32 @@ export class ImportDeferredMaterializer {
       throw new Error(`Split-interface output face ${reference.bodyId}:${reference.faceId} occurs 0 times at the sketch consumer.`);
     }
     return reference;
+  }
+
+  async advanceSplitInterfaceSelectorsAtAction(orderedActionIndex: number) {
+    const registrations = [...this.splitInterfaceSelectors.values()].filter(({ selector }) =>
+      selector.successorActionIndexes.includes(orderedActionIndex));
+    if (registrations.length === 0) return;
+    const snapshot = await this.input.modelingService.getCurrentDocumentSnapshot();
+    const result = await deriveLiveBodySignatures({ snapshot, service: this.input.modelingService });
+    if (result.status !== "available") throw new Error("Split-interface exact successor evidence unavailable.");
+    const output = this.input.outputRecords.get(orderedOutputKey(orderedActionIndex));
+    const evidence = { ...result.exactTopologyEvidence, actionOutputs: output ? [{ actionIndex: orderedActionIndex, ...output }] : [] };
+    for (const registration of registrations) {
+      if (!registration.outputFace) throw new Error("Split-interface producer witness was not bound.");
+      const successor = followExactTopologySuccessor({ actionIndex: orderedActionIndex, evidence, reference: registration.outputFace });
+      if (successor.kind === "many") throw new Error(successor.detail);
+      if (successor.kind === "unique") {
+        if (successor.reference.kind !== "face") throw new Error("Split-interface successor is not a face.");
+        registration.outputFace = successor.reference;
+      } else {
+        // Exact unchanged identity is permitted; never rematch old capture bounds
+        // against geometry changed after the certified producer boundary.
+        const key = durableTopologyReferenceKey(registration.outputFace);
+        const occurrences = result.signatures.filter(signature => durableTopologyReferenceKey(signature.reference) === key);
+        if (occurrences.length !== 1) throw new Error("Split-interface identity does not survive its modifying action uniquely.");
+      }
+    }
   }
 
   historicalWitnessActionIndexes(): ReadonlySet<number> {
@@ -905,6 +959,18 @@ export class ImportDeferredMaterializer {
       );
     }
     const snapshot = await this.input.modelingService.getCurrentDocumentSnapshot();
+    if (scope.ownerRef) {
+      // Reuse bodyOf's exclusive producer result, not a partial sibling vote.
+      // Multiple-output producers have no such witness and retain the strict mapper below.
+      if (scope.ownerRef.kind !== "bodyOf" || scope.ownerRef.actionIndex !== scope.producerActionIndex || output?.bodyIds?.length !== 1) {
+        throw new TopologyApplyRematchError(selector, "exact bodyOf owner witness is unavailable or ambiguous");
+      }
+      const bodyId = output.bodyIds[0]!;
+      if (snapshot.document.bodies.filter(body => body.bodyId === bodyId).length !== 1) {
+        throw new TopologyApplyRematchError(selector, "exact bodyOf owner no longer survives uniquely");
+      }
+      return bodyId;
+    }
     const result = await deriveLiveBodySignatures({
       snapshot,
       service: this.input.modelingService,
@@ -1886,6 +1952,7 @@ export async function applyImportPreparedActions(input: {
       await applyByKind(ref);
       await materializer.bindSplitInterfaceToolFacesAtAction(orderedPosition);
       await materializer.bindSplitInterfaceOutputFacesAtAction(orderedPosition);
+      await materializer.advanceSplitInterfaceSelectorsAtAction(orderedPosition);
       await materializer.bindHistoricalSelectorsAtAction(orderedPosition);
     } catch (error) {
       failure = error;

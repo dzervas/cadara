@@ -88,14 +88,6 @@ export {
 } from "./constraints";
 
 export {
-  getSketchSessionDisplayRenderables,
-  getStableSketchSessionDisplayKey,
-  getStableSketchSessionDisplayRenderables,
-  getTransientSketchSessionDisplayRenderables,
-  sketchSessionHasReferenceImage,
-} from "./display";
-
-export {
   beginSketchGeometryDrag,
   cancelSketchGeometryDrag,
   completeSketchOffsetPreviewPublication,

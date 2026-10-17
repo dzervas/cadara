@@ -19,9 +19,9 @@ import {
   createSketchSessionFromSnapshot,
   getSketchConstraintDisplayForTarget,
   getSketchConstraintDisplaySummary,
-  getSketchSessionDisplayRenderables,
-  normalizeSketchConstraintDisplayState,
+  normalizeSketchConstraintDisplayState
 } from "@/domain/editor/sketch-session";
+import { getSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session/display";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,

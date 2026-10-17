@@ -456,78 +456,6 @@ export function orderSheetShapesCanonically(
   return keyed.map((entry) => entry.sheet);
 }
 
-function enumerateFaces(
-  oc: OpenCascadeInstance,
-  bodyId: BodyId,
-  topologyToken: string,
-  shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
-) {
-  const faceIds: FaceId[] = [];
-  const facesById = new Map<
-    FaceId,
-    InstanceType<OpenCascadeInstance["TopoDS_Face"]>
-  >();
-  const faceMap = new oc.TopTools_IndexedMapOfShape_1();
-  oc.TopExp.MapShapes_1(shape, faceShapeType(oc) as never, faceMap);
-
-  for (let index = 1; index <= faceMap.Size(); index += 1) {
-    const faceId = `face_${bodyId}_${topologyToken}_${index}` as FaceId;
-    faceIds.push(faceId);
-    facesById.set(faceId, oc.TopoDS.Face_1(faceMap.FindKey(index)));
-  }
-
-  faceMap.delete();
-  return { faceIds, facesById };
-}
-
-function enumerateEdges(
-  oc: OpenCascadeInstance,
-  bodyId: BodyId,
-  topologyToken: string,
-  shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
-) {
-  const edgeIds: EdgeId[] = [];
-  const edgesById = new Map<
-    EdgeId,
-    InstanceType<OpenCascadeInstance["TopoDS_Edge"]>
-  >();
-  const edgeMap = new oc.TopTools_IndexedMapOfShape_1();
-  oc.TopExp.MapShapes_1(shape, edgeShapeType(oc) as never, edgeMap);
-
-  for (let index = 1; index <= edgeMap.Size(); index += 1) {
-    const edgeId = `edge_${bodyId}_${topologyToken}_${index}` as EdgeId;
-    edgeIds.push(edgeId);
-    edgesById.set(edgeId, oc.TopoDS.Edge_1(edgeMap.FindKey(index)));
-  }
-
-  edgeMap.delete();
-  return { edgeIds, edgesById };
-}
-
-function enumerateVertices(
-  oc: OpenCascadeInstance,
-  bodyId: BodyId,
-  topologyToken: string,
-  shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
-) {
-  const vertexIds: VertexId[] = [];
-  const verticesById = new Map<
-    VertexId,
-    InstanceType<OpenCascadeInstance["TopoDS_Vertex"]>
-  >();
-  const vertexMap = new oc.TopTools_IndexedMapOfShape_1();
-  oc.TopExp.MapShapes_1(shape, vertexShapeType(oc) as never, vertexMap);
-
-  for (let index = 1; index <= vertexMap.Size(); index += 1) {
-    const vertexId = `vertex_${bodyId}_${topologyToken}_${index}` as VertexId;
-    vertexIds.push(vertexId);
-    verticesById.set(vertexId, oc.TopoDS.Vertex_1(vertexMap.FindKey(index)));
-  }
-
-  vertexMap.delete();
-  return { vertexIds, verticesById };
-}
-
 function indexFacesByNativePayload(
   oc: OpenCascadeInstance,
   bodyId: BodyId,
@@ -673,16 +601,6 @@ function buildNativeTopologyPayloadForTrackedBody(
   const buildJson = nativeHost.CadaraBuildNativeTopologyPayload?.BuildJson;
 
   if (!buildJson) {
-    if (
-      (
-        oc as OpenCascadeInstance & {
-          CadaraAllowLegacyTopologyEnumerationForTests?: boolean;
-        }
-      ).CadaraAllowLegacyTopologyEnumerationForTests === true
-    ) {
-      return null;
-    }
-
     throw new Error(
       `Loaded OpenCascade build does not expose required native topology payload support for committed body ${input.bodyId}.`,
     );
@@ -1078,21 +996,15 @@ function buildTrackedBodyFromResolvedShape(
         bodyKind,
         solid,
       });
-  const faces = bodyOnlyMesh
-    ? { faceIds: [], facesById: new Map() }
-    : nativePayload
-      ? indexFacesByNativePayload(oc, input.bodyId, solid, nativePayload)
-      : enumerateFaces(oc, input.bodyId, topologyToken, solid);
-  const edges = bodyOnlyMesh
-    ? { edgeIds: [], edgesById: new Map() }
-    : nativePayload
-      ? indexEdgesByNativePayload(oc, input.bodyId, solid, nativePayload)
-      : enumerateEdges(oc, input.bodyId, topologyToken, solid);
-  const vertices = bodyOnlyMesh
-    ? { vertexIds: [], verticesById: new Map() }
-    : nativePayload
-      ? indexVerticesByNativePayload(oc, input.bodyId, solid, nativePayload)
-      : enumerateVertices(oc, input.bodyId, topologyToken, solid);
+  const faces = nativePayload
+    ? indexFacesByNativePayload(oc, input.bodyId, solid, nativePayload)
+    : { faceIds: [], facesById: new Map() };
+  const edges = nativePayload
+    ? indexEdgesByNativePayload(oc, input.bodyId, solid, nativePayload)
+    : { edgeIds: [], edgesById: new Map() };
+  const vertices = nativePayload
+    ? indexVerticesByNativePayload(oc, input.bodyId, solid, nativePayload)
+    : { vertexIds: [], verticesById: new Map() };
 
   const body = {
     bodyId: input.bodyId,
@@ -1301,7 +1213,11 @@ function composeNativeTopologyAliases(input: {
 }): OccNativeTopologyIdAliases | undefined {
   const aliases = input.current.nativeTopologyIdAliases;
   if (!aliases) {
-    return undefined;
+    // Fresh native-tracked bodies have implicit native-to-public identity aliases.
+    // Preserve that bridge when semantic reconciliation changes their public IDs.
+    return input.current.nativeTopologyPayload
+      ? createCurrentToReconciledAliases(input.targetByCurrentKey)
+      : undefined;
   }
 
   const compose = <Id extends FaceId | EdgeId | VertexId>(

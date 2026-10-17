@@ -1,3 +1,5 @@
+import type { PlaneFeatureParameters } from "@/contracts/modeling/schema";
+import { validateSketchPlaneFrameInvariants } from "@/contracts/shared/sketch-plane-frame-invariants";
 import type { FeatureAuthoringDefinition } from "@/core/feature-authoring/definition";
 import {
   createSelectionFilterForRequirement,
@@ -28,6 +30,7 @@ export const planeAuthoringDefinition = {
   },
   hydrateDraft(feature) {
     return {
+      ...(feature.parameters.mode === "explicitFrame" ? { explicitFrame: feature.parameters.frame } : {}),
       referenceTarget:
         feature.parameters.mode === "coplanar"
           ? feature.parameters.reference.target
@@ -36,6 +39,7 @@ export const planeAuthoringDefinition = {
   },
   applyPatch(draft, patch) {
     return {
+      ...(patch.referenceTarget === undefined && draft.explicitFrame ? { explicitFrame: draft.explicitFrame } : {}),
       referenceTarget:
         patch.referenceTarget === undefined
           ? draft.referenceTarget
@@ -70,6 +74,11 @@ export const planeAuthoringDefinition = {
     ];
   },
   buildDefinition(draft) {
+    if (draft.explicitFrame) {
+      return validateSketchPlaneFrameInvariants(draft.explicitFrame).ok
+        ? { kind: "plane", featureTypeVersion: PLANE_FEATURE_SCHEMA_VERSION, parameters: { mode: "explicitFrame", frame: draft.explicitFrame } }
+        : null;
+    }
     return draft.referenceTarget
       ? {
           kind: "plane",
@@ -130,3 +139,14 @@ export const planeAuthoringDefinition = {
     };
   },
 } satisfies FeatureAuthoringDefinition<"plane">;
+
+/** Canonical callers and browser edits use the same preservation and validation. */
+export function preparePlaneFeatureDefinition(parameters: PlaneFeatureParameters) {
+  return planeAuthoringDefinition.buildDefinition(
+    planeAuthoringDefinition.hydrateDraft({
+      kind: "plane",
+      featureTypeVersion: PLANE_FEATURE_SCHEMA_VERSION,
+      parameters,
+    }),
+  );
+}

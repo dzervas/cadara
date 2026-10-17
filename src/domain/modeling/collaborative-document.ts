@@ -152,7 +152,14 @@ export function applyCollaborativeWrites(
     for (const key of change.address.slice(0, -1))
       parent = parent[key] as Fields;
     const key = change.address.at(-1)!;
-    if (!change.after.exists) delete parent[key];
+    if (!change.after.exists) {
+      delete parent[key];
+      // Removing a producer invalidates its derived witness, including on undo.
+      // Redo restores authored intent; the production kernel rebuilds provenance.
+      // Never discard unrelated peer witnesses merely because a view omits them.
+      if (change.address.length === 2 && change.address[0] === "features")
+        delete storage.topologyLineage[key];
+    }
     else if (Array.isArray(parent[key]) && Array.isArray(change.after.value))
       updateSequence(parent[key] as AuthoredValue[], change.after.value);
     else parent[key] = structuredClone(change.after.value);

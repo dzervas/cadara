@@ -11,6 +11,7 @@ import {
   zoomInAbout,
 } from "./helpers/acceptance";
 import { FeatureWorkbenchHarness } from "./helpers/feature-workbench";
+import { saveDocumentCopy } from "./helpers/document-files";
 import {
   FIGURE_EIGHT,
   SPLINE_ANNULUS,
@@ -129,30 +130,26 @@ test("both regions of a spline annulus (the annulus and its spline disk) extrude
 // ---------------------------------------------------------------------------
 // T10j (T10 plan §6.3 items 1, 2, 5; §2.9; routed T10d browser row).
 
-/** The last committed authored position of `pointId` (operation history). */
-async function committedPointPosition(page: Page, pointId: string) {
-  return page.evaluate((id) => {
-    const serialized = window.localStorage.getItem(
-      "cad.modeling.operationHistory.doc_workspace.v1",
-    );
-    const payload = JSON.parse(serialized ?? "{}") as {
-      entries?: {
-        kind: string;
-        payload?: {
-          definition?: {
-            points?: { pointId: string; position: [number, number] }[];
-          };
-        };
-      }[];
-    };
-    return (
-      payload.entries
-        ?.filter((entry) => entry.kind === "commitSketch")
-        .at(-1)
-        ?.payload?.definition?.points?.find((point) => point.pointId === id)
-        ?.position ?? null
-    );
-  }, pointId);
+/** Published document data, not the live draft or an acknowledged replay tail. */
+async function committedPointPosition(
+  page: Page,
+  sketchId: string,
+  pointId: string,
+) {
+  const document = await saveDocumentCopy<{
+    sketches: {
+      sketchId: string;
+      definition: {
+        points: { pointId: string; position: [number, number] }[];
+      };
+    }[];
+  }>(page);
+  return (
+    document.sketches
+      .find((sketch) => sketch.sketchId === sketchId)
+      ?.definition.points.find((point) => point.pointId === pointId)
+      ?.position ?? null
+  );
 }
 
 /**
@@ -312,7 +309,7 @@ test("a figure-eight lobe keeps its region through a fit-point edit, asks for re
     { id: fit(outer), from: FIGURE_EIGHT[outer]!, to: target },
   ]);
   const figureEightMs = await finishAndTimeRegions(workbench, sketchId, 2);
-  const moved = await committedPointPosition(page, fit(outer));
+  const moved = await committedPointPosition(page, sketchId, fit(outer));
   expect(
     Math.hypot(moved![0] - target[0], moved![1] - target[1]),
     `the fit point was dragged to ≈ (${target}): ${moved}`,

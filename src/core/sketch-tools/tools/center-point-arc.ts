@@ -60,7 +60,7 @@ function buildCenterPointArcPreview(
   ];
 }
 
-function validateCenterPointArc(
+export function validateCenterPointArc(
   points: readonly SketchPoint[],
 ): SketchToolValidationResult {
   if (points.length < REQUIRED_POINTS) {
@@ -77,6 +77,12 @@ function validateCenterPointArc(
     return { valid: false, message: "Arc radius must be greater than zero." };
   }
 
+  const terminals = sampleArcPoints(
+    points[0]!, points[1]!, points[2]!, "counterClockwise", 1,
+  );
+  if (!pointsDistinct(terminals[0]!, terminals[1]!)) {
+    return { valid: false, message: "Arc endpoints must define a nonzero sweep." };
+  }
   return { valid: true, message: null };
 }
 

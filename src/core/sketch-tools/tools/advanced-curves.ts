@@ -247,6 +247,16 @@ function createFixedPointTool<
         validationMessage: null,
       });
     },
+    validateContribution(points, settings) {
+      return config.validate(points, {
+        status: "idle",
+        pointerDownPoint: null,
+        livePoint: null,
+        placedPoints: points,
+        settings,
+        validationMessage: null,
+      });
+    },
     getPresentation(state) {
       return buildFixedPointPresentation(state, config);
     },

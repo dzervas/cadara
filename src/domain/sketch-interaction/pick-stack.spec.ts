@@ -26,7 +26,8 @@ import {
   createNewSketchSession,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
-import { getSketchSessionDisplaySolvedSnapshot } from "@/domain/editor/sketch-session/display";
+
+import { getSketchSessionDisplaySolvedSnapshot } from "@/domain/editor/sketch-session/solved-snapshot";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,

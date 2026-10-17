@@ -101,7 +101,7 @@ function buildAlignedRectanglePreview(
   ];
 }
 
-function validateAlignedRectanglePoints(
+export function validateAlignedRectanglePoints(
   points: readonly SketchPoint[],
 ): SketchToolValidationResult {
   if (points.length < REQUIRED_POINTS) {

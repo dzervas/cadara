@@ -1,17 +1,16 @@
 import type { PrimitiveRef } from "@/core/editor/schema";
 import {
   createNewSketchSession,
+  derivePlaneKeyFromTarget,
   createNewSketchSessionFromSupport,
   createSketchSessionFromSnapshot,
-  getSketchSessionDisplayRenderables,
-  type SketchSessionDisplayRenderable,
-  type SketchSessionState,
+  type SketchSessionState
 } from "@/domain/editor/sketch-session";
+
 import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
 import type { RenderableEntityRecord } from "@/contracts/render/schema";
 import type { SketchPlaneDefinition } from "@/contracts/shared/sketch-plane";
 import { getPrimitiveRefKey } from "@/core/editor/schema";
-import type { ViewportRenderableRecord } from "@/core/workspace/viewport-renderables";
 
 type Vec3 = readonly [number, number, number];
 
@@ -59,7 +58,9 @@ function createSketchSessionForSelection(
       return createNewSketchSession(construction.plane, settings);
     }
 
-    return createNewSketchSessionFromSupport(primary, settings);
+    return derivePlaneKeyFromTarget(primary)
+      ? createNewSketchSessionFromSupport(primary, settings)
+      : null;
   }
 
   if (primary.kind === "face") {
@@ -75,7 +76,8 @@ export function canStartSketchFromTarget(
   snapshot: WorkspaceSnapshot | null,
 ) {
   if (target.kind === "construction") {
-    return true;
+    return derivePlaneKeyFromTarget(target) !== null ||
+      !!snapshot?.document.constructions.some(c => c.constructionId === target.constructionId);
   }
 
   if (target.kind === "face" && snapshot) {
@@ -225,44 +227,3 @@ function normalize(vector: Vec3): Vec3 | null {
   return [vector[0] / length, vector[1] / length, vector[2] / length];
 }
 
-export function mergeSketchRenderables<
-  T extends RenderableEntityRecord | ViewportRenderableRecord,
->(documentRenderables: T[], session: SketchSessionState | null) {
-  if (!session) {
-    return {
-      documentRenderables,
-      sketchDisplayRenderables: [],
-    };
-  }
-
-  const activeSketchId = session.sketchId;
-  const visibleDocumentRenderables = activeSketchId
-    ? documentRenderables.filter(
-        (entry) => !isActiveSketchRenderable(entry, activeSketchId),
-      )
-    : documentRenderables;
-
-  return {
-    documentRenderables: visibleDocumentRenderables,
-    sketchDisplayRenderables: getSketchSessionDisplayRenderables(session),
-  };
-}
-
-export type MergedSketchRenderables = {
-  documentRenderables: Array<RenderableEntityRecord | ViewportRenderableRecord>;
-  sketchDisplayRenderables: SketchSessionDisplayRenderable[];
-};
-
-function isActiveSketchRenderable(
-  entry: RenderableEntityRecord | ViewportRenderableRecord,
-  sketchId: NonNullable<SketchSessionState["sketchId"]>,
-) {
-  const renderable = "renderable" in entry ? entry.renderable : entry;
-  const target = renderable.binding.target;
-
-  return (
-    (target.kind === "region" && target.sketchId === sketchId) ||
-    (target.kind === "sketchEntity" && target.sketchId === sketchId) ||
-    (target.kind === "sketchPoint" && target.sketchId === sketchId)
-  );
-}

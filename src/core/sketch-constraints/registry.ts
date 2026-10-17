@@ -3395,6 +3395,10 @@ const sketchConstraintDefinitions = [
       if (!circle?.entity || input.value === null) {
         return {};
       }
+      // The production circleRadius solver owns circles only; arcs use the existing diameter owner.
+      if (circle.entity.kind !== "circle") {
+        return { refusal: "Radius requirements support circles only; use Distance for an arc diameter." };
+      }
 
       return {
         dimensions: [

@@ -422,7 +422,7 @@ function createSnapshotFeatureDefinition(
             ? {
                 resultBodyType: "solid",
                 profiles: definition.parameters.profiles,
-                startExtent: { kind: "profilePlane" },
+                startExtent: definition.parameters.startExtent,
                 extent: definition.parameters.extent,
                 operation: definition.parameters.operation,
                 booleanScope: definition.parameters.booleanScope,
@@ -430,7 +430,7 @@ function createSnapshotFeatureDefinition(
             : {
                 resultBodyType: "surface",
                 profiles: definition.parameters.profiles,
-                startExtent: { kind: "profilePlane" },
+                startExtent: definition.parameters.startExtent,
                 extent: definition.parameters.extent,
               },
       };

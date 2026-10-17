@@ -3,4 +3,5 @@ import UnpluginTypia from "@typia/unplugin/bun";
 
 import { createTypiaPluginOptions } from "./typia-plugin-options";
 
-plugin(UnpluginTypia(createTypiaPluginOptions(process.cwd())));
+// Source CLI invocations reserve stdout for the machine-readable result.
+plugin(UnpluginTypia({ ...createTypiaPluginOptions(process.cwd()), log: false }));

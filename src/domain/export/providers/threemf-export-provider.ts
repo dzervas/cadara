@@ -13,16 +13,10 @@ import type { ExportResult } from "@/contracts/export/result";
 import type { DurableRef } from "@/contracts/shared/references";
 import type { FeatureEditorFormSchema } from "@/core/feature-authoring/form-schema";
 
-export interface ThreeMfMeshAccuracyOptions {
-  chordTolerance: number;
-  angleToleranceRadians: number;
-}
-
-export interface ThreeMfExportOptions {
-  meshAccuracy: ThreeMfMeshAccuracyOptions;
-  unit: "millimeter";
-  includeMetadata: boolean;
-}
+import { requireGeometryExportOptions } from "@/contracts/export/options.runtime-schema";
+import type { ThreeMfExportOptions } from "@/contracts/export/options";
+export type { ThreeMfExportOptions } from "@/contracts/export/options";
+export type ThreeMfMeshAccuracyOptions = import("@/contracts/export/capabilities").MeshExportAccuracy;
 
 function getDefaultThreeMfMeshAccuracy(): ThreeMfMeshAccuracyOptions {
   return { chordTolerance: 0.05, angleToleranceRadians: 0.1 };
@@ -188,6 +182,7 @@ export const threeMfExportProvider: ExportProvider<
   id: "3mf",
   label: "3MF",
   formatId: "3mf",
+  validateOptions: (options) => requireGeometryExportOptions("3mf", options),
   fileExtension: "3mf",
   mimeType: "model/3mf",
   targetKinds: ["body"],

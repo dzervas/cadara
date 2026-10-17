@@ -29,9 +29,9 @@ import {
 import { sketchSnapshotRecordForTest } from "@/contracts/sketch/region-record.fixtures";
 import type { SketchEntityDefinition } from "@/contracts/sketch/schema";
 import {
-  createSketchSessionFromSnapshot,
-  getSketchSessionDisplayRenderables,
+  createSketchSessionFromSnapshot
 } from "@/domain/editor/sketch-session";
+import { getSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session/display";
 import { withLiveSolveBasis } from "@/domain/editor/sketch-session/internals";
 import {
   createStandardPlaneDefinition,

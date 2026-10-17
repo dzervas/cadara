@@ -119,7 +119,7 @@ export function computeSketchOffsetActionState(
       status.status === "blocked" ? [status.dimensionId] : [],
     ),
   ]);
-  const health = offsetHealth(session);
+  const health = getSketchOffsetHealth(session);
   return {
     entries: offsets.map((relationship) => {
       const removal = removeDerivedRelationship(
@@ -178,7 +178,7 @@ export function applySketchOffsetRemoval(
  * the solve itself runs), else its live publication round (pending:
  * checking; not certified: the round's failure on one of its seeds).
  */
-function offsetHealth(session: SketchSessionState) {
+export function getSketchOffsetHealth(session: SketchSessionState) {
   const live = session.liveSolve;
   // T17o (T17g3 ADV-4): without a live solve nothing is judged yet, as in
   // the Mirror panel; the authored definition is never judged instead.

@@ -6041,6 +6041,14 @@ test.skipIf(!existsSync(D3_CAPTURE_FIXTURE))(
       selections: onshapeImportProvider.createDefaultSelections(review),
       capabilities: prepareCapabilities,
     });
+    const splitSupport = actions.commitSketches?.find(action => action.sketchLabel === "Sketch 8")?.plane.support;
+    expect(splitSupport?.kind).toBe("splitInterfaceFaceOf");
+    if (splitSupport?.kind !== "splitInterfaceFaceOf") throw new Error("Missing captured split selector");
+    expect(splitSupport.side).toBe("back");
+    expect(splitSupport.ownerWitness.capturedBodyId).toBe("JZT");
+    expect(splitSupport.ownerWitness.capturedFaceId).toBe("JZW");
+    expect(splitSupport.ownerWitness.orientedNormal[0]).toBeCloseTo(Math.SQRT1_2, 12);
+    expect(splitSupport.ownerWitness.orientedNormal[1]).toBeCloseTo(-Math.SQRT1_2, 12);
     expect(validateImportPreparedActions(actions).success).toBe(true);
     expect(actions.bodyScopeBindings?.length ?? 0).toBeGreaterThan(0);
     for (const binding of actions.bodyScopeBindings ?? []) {

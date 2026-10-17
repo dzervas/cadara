@@ -110,6 +110,7 @@ import {
   cloneDefinition,
   createSessionCommitFactories,
   describeSketchSessionUnsatisfiedRequirements,
+  getSessionSketchId,
   getSketchSessionInvalidFeedback,
   hasAcceptedLiveSolveOfDefinition,
   withLiveSolveBasis,
@@ -558,7 +559,19 @@ export function getOffsetPreview(
     };
   }
 
-  const seedEntityIds = sketchEntityTargets.map((target) => target.entityId);
+  return getSketchOffsetResult(session, sketchEntityTargets.map((target) => target.entityId), activeEditTool.offsetDistance, activeEditTool.offsetSide, plan);
+}
+
+/** Explicit durable offset preparation, also used by the browser preview. */
+export function getSketchOffsetResult(
+  session: SketchSessionState,
+  seedEntityIds: readonly SketchEntityId[],
+  distance: number | null,
+  side: "left" | "right",
+  plan?: OffsetFramePlan,
+): SketchEditOperationResult {
+  const nextSequence = session.sequence + 1;
+  const sketchId = getSessionSketchId(session);
   // T10i (C3): an offset seed (direct, or a G16‴ copy of one) must be
   // accepted geometry.
   const gate = offsetEditInputGate(session, seedEntityIds, "an offset seed");
@@ -567,8 +580,8 @@ export function getOffsetPreview(
   return createSketchOffsetDerivationContribution({
     definition: offsetSeedDefinition(session),
     entityIds: seedEntityIds,
-    distance: activeEditTool.offsetDistance,
-    side: activeEditTool.offsetSide,
+    distance,
+    side,
     sequence: nextSequence,
     factories: createSessionCommitFactories(nextSequence, sketchId),
     modelingTolerance: session.modelingTolerance,
@@ -623,18 +636,7 @@ export function stageOffsetPreviewPublication(
   if (!relationship || !preview.contribution) return rest;
   // The re-solve runs the hint unchanged (keyed by the re-authored
   // relationship), so a second disagreement fails closed in publish.
-  const basis = getSketchSessionPreviewBasis(
-    replan
-      ? {
-          ...session,
-          offsetPlans: [
-            ...(session.offsetPlans ?? []),
-            { derivationId: relationship.derivationId, plan: replan },
-          ],
-        }
-      : session,
-    applySketchContribution(session, preview.contribution).definition,
-  );
+  const basis = getOffsetContributionBasis(session, preview.contribution, replan);
   const offsetPublication: SketchOffsetPreviewPublication = {
     derivationId: relationship.derivationId,
     contribution: preview.contribution,
@@ -703,8 +705,7 @@ function commitOffsetContribution(
       message: gate.message,
     });
   }
-  const nextSequence = session.sequence + 1;
-  const history = applySketchContribution(session, contribution);
+  const committed = applySketchOffsetContribution(session, contribution);
   const tool = withoutOffsetPublication(activeEditTool);
   const nextEditTool = {
     ...tool,
@@ -712,19 +713,61 @@ function commitOffsetContribution(
     selectedTargets: [],
   };
 
-  return withLiveSolveBasis(
-    {
-      ...session,
-      activeEditTool: nextEditTool,
-      toolStagedEntities: [],
-      definition: history.definition,
-      sequence: nextSequence,
-      commitRequest: rebuildSessionCommitRequest(session, history.definition),
-      validationMessage: null,
-      toolPresentation: buildSketchEditToolPresentation(nextEditTool),
-    },
-    history.definition,
-  );
+  return {
+    ...committed,
+    activeEditTool: nextEditTool,
+    toolStagedEntities: [],
+    toolPresentation: buildSketchEditToolPresentation(nextEditTool),
+  };
+}
+
+/** Applies only a contribution whose publication the caller has certified. */
+function applySketchOffsetContribution(
+  session: SketchSessionState,
+  contribution: NonNullable<SketchEditOperationResult["contribution"]>,
+): SketchSessionState {
+  const history = applySketchContribution(session, contribution);
+  return withLiveSolveBasis({ ...session, definition: history.definition, sequence: session.sequence + 1, commitRequest: rebuildSessionCommitRequest(session, history.definition), validationMessage: null }, history.definition);
+}
+
+function getOffsetContributionBasis(
+  session: SketchSessionState,
+  contribution: NonNullable<SketchEditOperationResult["contribution"]>,
+  plan?: OffsetFramePlan,
+) {
+  const relationship = contribution.derivedRelationships?.find(r => r.kind === "offset");
+  if (!relationship) throw new Error("An offset publication must own a durable relationship.");
+  return getSketchSessionPreviewBasis(plan ? { ...session, offsetPlans: [...(session.offsetPlans ?? []), { derivationId: relationship.derivationId, plan }] } : session, applySketchContribution(session, contribution).definition);
+}
+
+export function prepareSketchOffset(
+  session: SketchSessionState,
+  entityIds: readonly SketchEntityId[],
+  distance: number,
+  side: "left" | "right",
+  plan?: OffsetFramePlan,
+) {
+  if (new Set(entityIds).size !== entityIds.length || !Number.isFinite(distance)) return { message: "Offset requires distinct seeds and a finite positive distance." };
+  const result = getSketchOffsetResult(session, entityIds, distance, side, plan);
+  const contribution = result.contribution;
+  if (!result.valid || !contribution) return { message: result.message ?? "Offset could not be prepared." };
+  const relationship = contribution.derivedRelationships?.find(r => r.kind === "offset");
+  if (!relationship) throw new Error("A durable offset must have an offset relationship.");
+  const basis = getOffsetContributionBasis(session, contribution, plan);
+  if (!basis) return { message: OFFSET_PREVIEW_UNACCEPTED_MESSAGE };
+  return { definition: session.definition, generation: session.liveRegions.generation, contribution, derivationId: relationship.derivationId, basis };
+}
+
+export function completeSketchOffset(
+  session: SketchSessionState,
+  prepared: Exclude<ReturnType<typeof prepareSketchOffset>, { message: string }>,
+  record: SketchOffsetPublicationRecord,
+): SketchSessionState {
+  if (session.definition !== prepared.definition || session.liveRegions.generation !== prepared.generation) return { ...session, validationMessage: "Offset source changed while its geometry was being checked." };
+  if (record.derivationId !== prepared.derivationId || record.status !== "certified") return { ...session, validationMessage: record.diagnostic?.message ?? "Offset geometry is not certified." };
+  const gate = offsetEditInputGate(session, prepared.contribution.derivedRelationships!.flatMap(r => r.kind === "offset" ? r.seedEntityIds : []), "an offset seed");
+  if (gate) return { ...session, validationMessage: gate.message };
+  return applySketchOffsetContribution(record.plan ? { ...session, offsetPlans: [...(session.offsetPlans ?? []), { derivationId: prepared.derivationId, plan: record.plan }] } : session, prepared.contribution);
 }
 
 function withOffsetPublication(
@@ -924,6 +967,100 @@ export function getSelectedSketchEntityIds(
 export const MIRROR_DATUM_AXIS_ORDER_MESSAGE =
   "Pick the geometry to mirror first, then the sketch axis as the final mirror axis.";
 
+/** Explicit construction inputs shared with browser preview and commit. */
+export function getSketchCornerSlotResult(
+  session: SketchSessionState,
+  input: { kind: "fillet" | "chamfer" | "slot"; entityIds: readonly SketchEntityId[]; value: number | null },
+): SketchEditOperationResult {
+  const toolId = input.kind === "fillet" ? "sketchFillet" : input.kind === "chamfer" ? "sketchChamfer" : "sketchSlot";
+  const gate = offsetEditInputGate(session, input.entityIds, `a ${getSketchEditToolDefinition(toolId).metadata.name} input`);
+  if (gate) return refusedEditOperation(gate.message);
+  const common = {
+    definition: session.definition,
+    entityIds: input.entityIds,
+    sequence: session.sequence + 1,
+    factories: createSessionCommitFactories(session.sequence + 1, session.sketchId ?? ("sketch_draft" as SketchId)),
+  };
+  return input.kind === "fillet"
+    ? createSketchFilletMutation({ ...common, radius: input.value })
+    : input.kind === "chamfer"
+      ? createSketchChamferMutation({ ...common, distance: input.value })
+      : createSketchSlotContribution({ ...common, width: input.value });
+}
+
+export function buildSketchGeometry(
+  session: SketchSessionState,
+  input: import("@/contracts/semantic/schema").SemanticSketchConstruction,
+): SketchSessionState {
+  if (!input.targets.length || !input.targets.every(t => t.sketchId === getSessionSketchId(session) && session.definition.entities.some(e => e.entityId === t.entityId)) || new Set(input.targets.map(t => t.entityId)).size !== input.targets.length)
+    return { ...session, validationMessage: "Construction targets must be distinct owned sketch entities." };
+  const result = getSketchCornerSlotResult(session, { kind: input.kind, entityIds: input.targets.map(t => t.entityId), value: input.kind === "fillet" ? input.radius : input.kind === "chamfer" ? input.distance : input.width });
+  return completeSketchEditOperation(session, result);
+}
+
+/** Explicit and browser mirrors share the canonical coupled relationship builder. */
+export function getSketchMirrorResult(
+  session: SketchSessionState,
+  entityIds: readonly SketchEntityId[],
+  mirrorDatumAxis: "xAxis" | "yAxis" | null,
+): SketchEditOperationResult {
+  const gate = offsetEditInputGate(session, entityIds, `a ${getSketchEditToolDefinition("sketchMirror").metadata.name} input`);
+  if (gate) return refusedEditOperation(gate.message);
+  const nextSequence = session.sequence + 1;
+  return createSketchDerivedTransformContribution({
+    definition: session.definition, operatorKind: "mirror", entityIds,
+    value: null, sequence: nextSequence,
+    factories: createSessionCommitFactories(nextSequence, getSessionSketchId(session)),
+    modelingTolerance: session.modelingTolerance, mirrorDatumAxis,
+    documentVariables: session.documentVariables,
+  });
+}
+
+export function createSketchMirror(
+  session: SketchSessionState,
+  targets: readonly Extract<import("@/contracts/shared/references").DurableRef, { kind: "sketchEntity" }>[],
+  axis: Extract<import("@/contracts/shared/references").DurableRef, { kind: "sketchEntity" }> | import("@/contracts/shared/references").SketchDatumReferenceRef,
+): SketchSessionState {
+  const ids = targets.map(t => t.entityId);
+  if (!ids.length || new Set(ids).size !== ids.length || [...targets, axis].some(t => t.sketchId !== getSessionSketchId(session)) ||
+      !ids.every(id => session.definition.entities.some(e => e.entityId === id)) ||
+      (axis.kind === "sketchEntity" ? ids.includes(axis.entityId) || !session.definition.entities.some(e => e.entityId === axis.entityId) : axis.datumId === "origin" || axis.geometryKind !== "lineSegment"))
+    return { ...session, validationMessage: "Mirror requires distinct owned seeds and a separate straight axis." };
+  return completeSketchEditOperation(session, getSketchMirrorResult(session,
+    axis.kind === "sketchEntity" ? [...ids, axis.entityId] : ids,
+    axis.kind === "sketchDatumReference" && axis.datumId !== "origin" ? axis.datumId : null));
+}
+
+/** Browser and explicit clients share the production pattern/transform builder and gate. */
+export function getSketchDerivationResult(
+  session: SketchSessionState,
+  kind: "linearPattern" | "circularPattern" | "transform",
+  entityIds: readonly SketchEntityId[],
+  value: number | null,
+): SketchEditOperationResult {
+  const toolId = kind === "linearPattern" ? "sketchLinearPattern" : kind === "circularPattern" ? "sketchCircularPattern" : "sketchTransform";
+  const gate = offsetEditInputGate(session, entityIds, `a ${getSketchEditToolDefinition(toolId).metadata.name} input`);
+  if (gate) return refusedEditOperation(gate.message);
+  const sequence = session.sequence + 1;
+  return createSketchDerivedTransformContribution({
+    definition: session.definition, operatorKind: kind, entityIds, value, sequence,
+    factories: createSessionCommitFactories(sequence, getSessionSketchId(session)),
+    modelingTolerance: session.modelingTolerance,
+    documentVariables: session.documentVariables,
+  });
+}
+
+export function createSketchDerivation(
+  session: SketchSessionState,
+  input: Extract<import("@/contracts/semantic/schema").SemanticCommand, { operation: "sketch.derivation.create" }>,
+): SketchSessionState {
+  const ids = input.targets.map(t => t.entityId);
+  if (!ids.length || new Set(ids).size !== ids.length || input.targets.some(t => t.sketchId !== getSessionSketchId(session)) ||
+      !ids.every(id => session.definition.entities.some(e => e.entityId === id)) || !Number.isFinite(input.value) || input.value <= 0)
+    return { ...session, validationMessage: "A derived pattern or transform requires distinct owned seeds and a finite positive setting." };
+  return completeSketchEditOperation(session, getSketchDerivationResult(session, input.kind, ids, input.value));
+}
+
 export function getSketchEditOperatorResult(
   session: SketchSessionState,
   activeEditTool: SketchEditToolState,
@@ -935,7 +1072,14 @@ export function getSketchEditOperatorResult(
   // (Trim, Extend, Split) gate their clicks themselves.
   if (
     !isSketchEditQueryTool(activeEditTool.toolId) &&
-    activeEditTool.toolId !== "offset"
+    activeEditTool.toolId !== "offset" &&
+    activeEditTool.toolId !== "sketchFillet" &&
+    activeEditTool.toolId !== "sketchChamfer" &&
+    activeEditTool.toolId !== "sketchSlot" &&
+    activeEditTool.toolId !== "sketchMirror" &&
+    activeEditTool.toolId !== "sketchLinearPattern" &&
+    activeEditTool.toolId !== "sketchCircularPattern" &&
+    activeEditTool.toolId !== "sketchTransform"
   ) {
     const gate = offsetEditInputGate(
       session,
@@ -944,35 +1088,13 @@ export function getSketchEditOperatorResult(
     );
     if (gate) return refusedEditOperation(gate.message);
   }
-  const nextSequence = session.sequence + 1;
-  const sketchId = session.sketchId ?? ("sketch_draft" as SketchId);
-  const factories = createSessionCommitFactories(nextSequence, sketchId);
-
   switch (activeEditTool.toolId) {
     case "sketchFillet":
-      return createSketchFilletMutation({
-        definition: session.definition,
-        entityIds,
-        radius: activeEditTool.toolValue,
-        sequence: nextSequence,
-        factories,
-      });
+      return getSketchCornerSlotResult(session, { kind: "fillet", entityIds, value: activeEditTool.toolValue });
     case "sketchChamfer":
-      return createSketchChamferMutation({
-        definition: session.definition,
-        entityIds,
-        distance: activeEditTool.toolValue,
-        sequence: nextSequence,
-        factories,
-      });
+      return getSketchCornerSlotResult(session, { kind: "chamfer", entityIds, value: activeEditTool.toolValue });
     case "sketchSlot":
-      return createSketchSlotContribution({
-        definition: session.definition,
-        entityIds,
-        width: activeEditTool.toolValue,
-        sequence: nextSequence,
-        factories,
-      });
+      return getSketchCornerSlotResult(session, { kind: "slot", entityIds, value: activeEditTool.toolValue });
     case "sketchMirror": {
       // T15b (T-7): a sketch datum axis as the final pick is the axis;
       // review A10: one picked before the seeds is refused, not ignored.
@@ -983,54 +1105,15 @@ export function getSketchEditOperatorResult(
         )
       )
         return refusedEditOperation(MIRROR_DATUM_AXIS_ORDER_MESSAGE);
-      return createSketchDerivedTransformContribution({
-        definition: session.definition,
-        operatorKind: "mirror",
-        entityIds,
-        value: activeEditTool.toolValue,
-        sequence: nextSequence,
-        factories,
-        modelingTolerance: session.modelingTolerance,
-        documentVariables: session.documentVariables,
-        mirrorDatumAxis:
-          last?.kind === "sketchDatumReference" && last.datumId !== "origin"
-            ? last.datumId
-            : null,
-      });
+      return getSketchMirrorResult(session, entityIds,
+        last?.kind === "sketchDatumReference" && last.datumId !== "origin" ? last.datumId : null);
     }
     case "sketchLinearPattern":
-      return createSketchDerivedTransformContribution({
-        definition: session.definition,
-        operatorKind: "linearPattern",
-        entityIds,
-        value: activeEditTool.toolValue,
-        sequence: nextSequence,
-        factories,
-        modelingTolerance: session.modelingTolerance,
-        documentVariables: session.documentVariables,
-      });
+      return getSketchDerivationResult(session, "linearPattern", entityIds, activeEditTool.toolValue);
     case "sketchCircularPattern":
-      return createSketchDerivedTransformContribution({
-        definition: session.definition,
-        operatorKind: "circularPattern",
-        entityIds,
-        value: activeEditTool.toolValue,
-        sequence: nextSequence,
-        factories,
-        modelingTolerance: session.modelingTolerance,
-        documentVariables: session.documentVariables,
-      });
+      return getSketchDerivationResult(session, "circularPattern", entityIds, activeEditTool.toolValue);
     case "sketchTransform":
-      return createSketchDerivedTransformContribution({
-        definition: session.definition,
-        operatorKind: "transform",
-        entityIds,
-        value: activeEditTool.toolValue,
-        sequence: nextSequence,
-        factories,
-        modelingTolerance: session.modelingTolerance,
-        documentVariables: session.documentVariables,
-      });
+      return getSketchDerivationResult(session, "transform", entityIds, activeEditTool.toolValue);
     case "sketchMergePoints":
       return getSketchMergePointsResult(session, activeEditTool);
     case "trim":
@@ -1465,7 +1548,7 @@ export function getSketchMirrorRepairCandidate(
           ok: false,
           message: "Pick the new original: a sketch entity of the copy's kind.",
         };
-  if (target.kind === "sketchDatumReference" && target.datumId !== "origin")
+  if (target.kind === "sketchDatumReference" && target.datumId !== "origin" && target.geometryKind === "lineSegment")
     return replaceMirrorLine(
       session.definition,
       repair.derivationId,
@@ -1928,6 +2011,24 @@ function selectSketchMergePointsTarget(
     : withSketchMergePointsTool(session, tool, pair.message);
 }
 
+/** Apply explicit connectivity through the production merge owner, without picking or UI state. */
+export function prepareSketchPointMerge(session: SketchSessionState, sourcePointId: SketchPointId, destinationPointId: SketchPointId) {
+  const result = createSketchMergePointsMutation({ definition: session.definition, sourcePointId, destinationPointId });
+  if (!result.valid) return { result, session };
+  return {
+    result,
+    session: withLiveSolveBasis({
+      ...session,
+      definition: result.definition,
+      sequence: session.sequence + 1,
+      commitRequest: rebuildSessionCommitRequest(session, result.definition),
+      toolStagedEntities: [],
+      activeEditTarget: null,
+      activeDrag: null,
+    }, result.definition),
+  };
+}
+
 /**
  * T13j (D25): confirm the merge as one definition change. The normal commit
  * solve follows (no solve gate): a conflict is retained and explained with
@@ -1943,11 +2044,8 @@ function commitSketchMergePoints(
     tool.selectedTargets,
   );
   if (!source || !destination) return session;
-  const result = createSketchMergePointsMutation({
-    definition: session.definition,
-    sourcePointId: source,
-    destinationPointId: destination,
-  });
+  const prepared = prepareSketchPointMerge(session, source, destination);
+  const { result } = prepared;
   if (!result.valid)
     return withSketchMergePointsTool(session, tool, result.message);
   const sourceLabel = getSketchMergePoint(session, source)!.label;
@@ -1973,19 +2071,7 @@ function commitSketchMergePoints(
     selectedTargets: [],
     hoverTarget: null,
   };
-  const committed = withLiveSolveBasis(
-    {
-      ...session,
-      definition: result.definition,
-      sequence: session.sequence + 1,
-      commitRequest: rebuildSessionCommitRequest(session, result.definition),
-      activeEditTool: reset,
-      toolStagedEntities: [],
-      activeEditTarget: null,
-      activeDrag: null,
-    },
-    result.definition,
-  );
+  const committed = { ...prepared.session, activeEditTool: reset };
   // The merge is the committed change: the explanation names it (review A-1).
   // T15b (O-1): explained whenever profiles are unavailable (as after Undo/Redo).
   const explanation =
@@ -2332,7 +2418,6 @@ export function advanceSketchEditQueryQueue(
         { ...editQuery, queue },
         message ?? gate?.message ?? null,
       );
-    const liveSolve = session.liveSolve!;
     const operation: SketchEditOperation = head.boundary
       ? {
           kind: kind as "extend" | "split",
@@ -2353,13 +2438,7 @@ export function advanceSketchEditQueryQueue(
           queryId: `${kind}-query-${crypto.randomUUID()}`,
           definition: session.definition,
           generation: session.liveRegions.generation,
-          input: {
-            definition: liveSolve.definition,
-            solvedSnapshot: liveSolve.solvedSnapshot,
-            projectedReferences: liveSolve.projectedReferences,
-            modelingTolerance: session.modelingTolerance,
-            operation,
-          },
+          input: sketchEditIntersectionInput(session, operation),
         },
       },
       message,
@@ -2367,10 +2446,32 @@ export function advanceSketchEditQueryQueue(
   }
 }
 
-/**
- * The builder of the in-flight operation (Trim, Extend or Split) on the
- * snapshot its intersections were certified on.
- */
+/** Shared accepted-basis preparation; clients supply explicit entities, not clicks. */
+export function prepareSketchIntersectionEdit(
+  session: SketchSessionState,
+  operation: SketchEditOperation,
+): { input: SketchEditIntersectionInput; definition: SketchDefinition; generation: number } | { message: string } {
+  const toolId = operation.kind === "trim" ? "trim" : operation.kind === "extend" ? "sketchExtend" : "sketchSplit";
+  const target = editQueryClick(session, operation.targetEntityId, operation.kind === "trim" ? null : operation.boundaryEntityId);
+  if (!target) return { message: "Sketch edit target or boundary is unavailable." };
+  const refusal = editQueryClickRefusal(session, toolId, target);
+  if (refusal) return { message: refusal };
+  const gate = offsetEditInputGate(session, clickEntityIds(target), editQueryInputUse(toolId, true));
+  const offsets = (session.definition.derivedRelationships ?? []).some(r => r.kind === "offset");
+  if (gate || (offsets && session.liveRegions.status === "pending"))
+    return { message: gate?.message ?? "Sketch edit needs current derived geometry." };
+  if (operation.kind === "split" && operation.pick && !operation.pick.every(Number.isFinite))
+    return { message: "Split crossing selection must be finite." };
+  return { input: sketchEditIntersectionInput(session, operation), definition: session.definition, generation: session.liveRegions.generation };
+}
+
+function sketchEditIntersectionInput(session: SketchSessionState, operation: SketchEditOperation): SketchEditIntersectionInput {
+  const liveSolve = session.liveSolve!;
+  return { definition: liveSolve.definition, solvedSnapshot: liveSolve.solvedSnapshot,
+    projectedReferences: liveSolve.projectedReferences, modelingTolerance: session.modelingTolerance, operation };
+}
+
+/** The builder of the operation on the snapshot its intersections were certified on. */
 function buildEditQueryMutation(
   session: SketchSessionState,
   input: SketchEditIntersectionInput,
@@ -2445,64 +2546,38 @@ export function completeSketchEditQuery(
     session.liveSolve?.solvedSnapshot !== inFlight.input.solvedSnapshot
   )
     return advanceSketchEditQueryQueue(withEditQuery(session, cleared, null));
-  const gate = offsetEditInputGate(
-    session,
-    [
-      operation.targetEntityId,
-      ...(operation.kind === "trim" ? [] : [operation.boundaryEntityId]),
-      ...(result.kind === "verified"
-        ? [result.cuts[0]!, result.cuts.at(-1)!].flatMap((cut) =>
-            cut.cutters.map((cutter) => cutter.entityId),
-          )
-        : []),
-      ...result.nonAcceptedNearTarget,
-    ],
-    editQueryInputUse(tool.toolId, false),
-  );
-  if (gate?.pending)
+  const completed = completeSketchIntersectionEdit(session, inFlight, result);
+  if (completed.pending)
     return advanceSketchEditQueryQueue(withEditQuery(session, cleared, null));
-  if (gate)
-    return advanceSketchEditQueryQueue(
-      withEditQuery(session, popped, null),
-      gate.message,
-    );
-  if (result.kind === "failed")
-    return advanceSketchEditQueryQueue(
-      withEditQuery(session, popped, null),
-      result.message,
-    );
-  const nextSequence = session.sequence + 1;
-  const mutation = buildEditQueryMutation(
-    session,
-    inFlight.input,
-    result,
-    nextSequence,
-  );
-  if (!mutation.changed)
-    return advanceSketchEditQueryQueue(
-      withEditQuery(session, popped, null),
-      mutation.message,
-    );
-  const applied = withLiveSolveBasis(
-    {
-      ...withEditQuery(session, popped, null),
-      definition: mutation.definition,
-      toolStagedEntities: [],
-      sequence: nextSequence,
-      commitRequest: rebuildSessionCommitRequest(session, mutation.definition),
-      activeEditTarget: null,
-      activeDrag: null,
-    },
-    mutation.definition,
-  );
   return advanceSketchEditQueryQueue(
-    applied,
-    freedFitPointsMessage(
-      session.definition,
-      mutation.definition,
-      operation.targetEntityId,
-    ),
+    withEditQuery(completed.session, popped, null), completed.session.validationMessage,
   );
+}
+
+/** Shared exact-result gate and authored mutation for browser and explicit edits. */
+export function completeSketchIntersectionEdit(
+  session: SketchSessionState,
+  basis: { definition: SketchDefinition; generation: number; input: SketchEditIntersectionInput },
+  result: SketchEditIntersectionResult,
+): { session: SketchSessionState; pending: boolean } {
+  const { operation } = basis.input;
+  const refuse = (message: string | null, pending = false) => ({ session: { ...session, validationMessage: message }, pending });
+  if (session.definition !== basis.definition || session.liveRegions.generation !== basis.generation || session.liveSolve?.solvedSnapshot !== basis.input.solvedSnapshot)
+    return refuse(editQueryStaleMessage(operation.kind));
+  const gate = offsetEditInputGate(session, [operation.targetEntityId,
+    ...(operation.kind === "trim" ? [] : [operation.boundaryEntityId]),
+    ...(result.kind === "verified" ? [result.cuts[0]!, result.cuts.at(-1)!].flatMap(cut => cut.cutters.map(cutter => cutter.entityId)) : []),
+    ...result.nonAcceptedNearTarget], `a ${editQueryToolName(operation.kind)} input`);
+  if (gate) return refuse(gate.message, gate.pending);
+  if (result.kind === "failed") return refuse(result.message);
+  const nextSequence = session.sequence + 1;
+  const mutation = buildEditQueryMutation(session, basis.input, result, nextSequence);
+  if (!mutation.changed) return refuse(mutation.message);
+  return { pending: false, session: withLiveSolveBasis({ ...session,
+    definition: mutation.definition, toolStagedEntities: [], sequence: nextSequence,
+    commitRequest: rebuildSessionCommitRequest(session, mutation.definition), activeEditTarget: null, activeDrag: null,
+    validationMessage: freedFitPointsMessage(session.definition, mutation.definition, operation.targetEntityId),
+  }, mutation.definition) };
 }
 
 /**
@@ -2660,6 +2735,23 @@ export function applySketchEditOperationResult(
   }
 
   return null;
+}
+
+/** Both semantic construction and browser confirmation use this solve-basis handoff. */
+export function completeSketchEditOperation(
+  session: SketchSessionState,
+  result: SketchEditOperationResult,
+): SketchSessionState {
+  if (!result.valid) return { ...session, validationMessage: result.message };
+  const applied = applySketchEditOperationResult(session, result);
+  return applied ? withLiveSolveBasis({
+    ...session,
+    ...applied,
+    toolStagedEntities: [],
+    validationMessage: null,
+    activeEditTarget: null,
+    activeDrag: null,
+  }, applied.definition) : session;
 }
 
 export function updateSketchEditToolHover(
@@ -3089,30 +3181,17 @@ export function patchSketchEditOperatorValue(
     };
   }
 
-  const applied = applySketchEditOperationResult(session, preview);
-  if (!applied) {
-    return session;
-  }
-
   const nextEditTool = {
     ...activeEditTool,
     selectedTarget: null,
     selectedTargets: [],
   };
 
-  return withLiveSolveBasis(
-    {
-      ...session,
-      ...applied,
-      activeEditTool: nextEditTool,
-      toolStagedEntities: [],
-      validationMessage: null,
-      toolPresentation: buildSketchEditToolPresentation(nextEditTool),
-      activeEditTarget: null,
-      activeDrag: null,
-    },
-    applied.definition,
-  );
+  return {
+    ...completeSketchEditOperation(session, preview),
+    activeEditTool: nextEditTool,
+    toolPresentation: buildSketchEditToolPresentation(nextEditTool),
+  };
 }
 
 export function beginSketchGeometryDrag(
@@ -3177,7 +3256,7 @@ export function beginSketchGeometryDrag(
   // recompiles the session. Cancel restores the original definition.
   let workingDefinition = base.definition;
   if (intent.kind === "tangentVector" && handle.kind === "tangentHandle") {
-    const converted = convertAutomaticTangentToAuthored(
+    const converted = prepareSketchTangentEditDefinition(
       workingDefinition,
       intent.entityId,
       intent.occurrenceId,
@@ -3212,7 +3291,7 @@ export function beginSketchGeometryDrag(
  * the output occurrence authored to match. The drag then targets the
  * output's (driven) vector slot through the coupled solve.
  */
-function convertAutomaticTangentToAuthored(
+export function prepareSketchTangentEditDefinition(
   definition: SketchDefinition,
   entityId: SketchEntityId,
   occurrenceId: string,
@@ -3768,6 +3847,15 @@ export function solveDragEdit(
   interactiveSolveSession: SketchCompiledSolveSession | null = null,
   complete = true,
 ): SolveDragEditResult {
+  if (intent.kind === "radius") {
+    const arc = definition.entities.find(e => e.entityId === intent.entityId && e.kind === "arc");
+    const mirrored = definition.derivedRelationships?.some(r => r.kind === "mirror" && r.outputs.some(o => o.outputEntityId === intent.entityId));
+    // Production arc tools bind endpoints; mirror outputs are coupled through
+    // their owning relationship instead. Unbound native inputs would otherwise
+    // leave authored endpoints untouched while reporting a completed radius edit.
+    if (arc?.kind === "arc" && !mirrored && (!definition.dimensions.some(d => d.kind === "arcStartPointCoincident" && d.entityId === arc.entityId && d.pointId === arc.startPointId) || !definition.dimensions.some(d => d.kind === "arcEndPointCoincident" && d.entityId === arc.entityId && d.pointId === arc.endPointId)))
+      return { kind: "blocked", message: "Arc radius editing requires endpoint bindings." };
+  }
   // Unconstrained fast path: no constraints, dimensions or mirrors (T15d:
   // a mirror drag always solves).
   if (usesUnconstrainedDragFastPath(definition)) {
@@ -4120,8 +4208,7 @@ function applyUnconstrainedDrag(
             if (e.entityId !== intent.entityId) return e;
             if (e.kind === "circle")
               return { ...e, radius: Math.max(1e-9, dragTarget.targetRadius) };
-            // Arcs: the unconstrained path does not modify arc radius
-            // (it's derived from center+endpoints). The solver handles it.
+            // Unsupported non-circle radius targets are not changed.
             return e;
           }),
         },
