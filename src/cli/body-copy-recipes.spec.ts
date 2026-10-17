@@ -1,7 +1,6 @@
 import { expect, test } from "vitest";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { invokeCliRecipe } from "../../test/helpers/cli-recipe-process";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { validateSemanticResult } from "@/contracts/semantic/runtime-schema";
@@ -38,35 +37,16 @@ test("real production Bun recipes create and update body copies through exact bo
       as: "seed",
     },
   ];
-  async function invoke(commands: readonly Record<string, unknown>[]) {
-    const path = resolve(dir, "recipe.json");
-    await writeFile(
-      path,
-      JSON.stringify({
-        version: 1,
-        operations: commands.map((c, i) => ({
-          version: 1,
-          commandId: `copies-${i}`,
-          ...c,
-        })),
-      }),
+  function invoke(commands: readonly Record<string, unknown>[]) {
+    return invokeCliRecipe(
+      dir,
+      commands.map((c, i) => ({ version: 1, commandId: `copies-${i}`, ...c })),
+      {
+        cwd: resolve(import.meta.dirname, "../.."),
+        timeout: 90000,
+        env: { ...process.env, NODE_ENV: "production", TEST: "false" },
+      },
     );
-    try {
-      return {
-        code: 0,
-        ...(await promisify(execFile)(
-          "bun",
-          ["src/cli/main.ts", "document", "recipe", path],
-          {
-            cwd: resolve(import.meta.dirname, "../.."),
-            timeout: 90000,
-            env: { ...process.env, NODE_ENV: "production", TEST: "false" },
-          },
-        )),
-      };
-    } catch (error) {
-      return error as { code: number; stdout: string; stderr: string };
-    }
   }
   try {
     const probe = await invoke(prefix);
