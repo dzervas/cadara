@@ -644,3 +644,51 @@ describe("one-shot request multiplier raise (T08b-f1 [TECH] F12)", () => {
     }
   });
 });
+
+describe("exact integer size metering", () => {
+  test("signed boundary values retain exact maximum sizes across repeated and smaller operands", () => {
+    for (const width of [1, 4, 8, 31, 32, 52, 53, 64, 128, 1024, 16384]) {
+      const limit = 1n << BigInt(width);
+      for (const value of [limit - 1n, -(limit - 1n)]) {
+        const budget = new ExactProofBudget({ integerBits: width });
+        budget.stored(
+          value,
+          value,
+          0n,
+          1n,
+          -1n,
+          ...(width > 1 ? [2n, -2n] : []),
+          value,
+        );
+        expect(budget.snapshot().maxStoredBits).toBe(width);
+      }
+      for (const value of [limit, -limit]) {
+        const budget = new ExactProofBudget({ integerBits: width });
+        expect(() => budget.stored(value)).toThrow(
+          ExactQueryProofBudgetExceeded,
+        );
+        expect(budget.snapshot().maxStoredBits).toBe(width + 1);
+        // A rejected value must never become an accepted size shortcut.
+        expect(() => budget.stored(value)).toThrow(
+          ExactQueryProofBudgetExceeded,
+        );
+      }
+    }
+  });
+
+  test("cached operands still enforce pre-product and shift width ceilings", () => {
+    const value = (1n << 128n) - 1n;
+    const product = new ExactProofBudget({ integerBits: 255 });
+    product.stored(value, value);
+    expect(() => product.product(value, value)).toThrow(
+      ExactQueryProofBudgetExceeded,
+    );
+    expect(product.snapshot().maxPreProductBits).toBe(256);
+    expect(product.snapshot().operations).toBe(1);
+    const shift = new ExactProofBudget({ integerBits: 128 });
+    shift.stored(value, value);
+    expect(() => shift.shift(value, 1)).toThrow(ExactQueryProofBudgetExceeded);
+    expect(shift.snapshot().maxPreProductBits).toBe(129);
+    expect(shift.snapshot().operations).toBe(2);
+  });
+});

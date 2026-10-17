@@ -1543,14 +1543,16 @@ describe("whole-request pair meter (T08b-a, M7)", () => {
     };
   };
 
-  test("D5 cap: two native SS-tiny joint queries exceed one per-query Euclid cap yet fit the (n + 1)-scaled request cap", () => {
+  test("D5 cap: native SS-tiny queries exceed one per-query Euclid cap yet fit the (n + 1)-scaled request cap", () => {
     const single = alone(ssTiny);
     expect(single.result.kind).not.toBe("uncertain");
-    // Premise: together they exceed one production per-query Euclid cap.
-    expect(2 * single.snapshot.euclideanSteps).toBeGreaterThan(1_500_000);
-    const pooled = createCertifiedNeutralCurveRequestQuery().openRequest(2);
-    expect(pooled.queryPair(ssTiny)).toEqual(single.result);
-    expect(pooled.queryPair(ssTiny)).toEqual(single.result);
+    // Preserve the aggregate-cap premise as per-query arithmetic gets cheaper.
+    expect(single.snapshot.euclideanSteps).toBeGreaterThan(0);
+    const count = Math.floor(1_500_000 / single.snapshot.euclideanSteps) + 1;
+    expect(count * single.snapshot.euclideanSteps).toBeGreaterThan(1_500_000);
+    const pooled = createCertifiedNeutralCurveRequestQuery().openRequest(count);
+    for (let index = 0; index < count; index += 1)
+      expect(pooled.queryPair(ssTiny)).toEqual(single.result);
   }, 60_000);
 
   test("a per-value integerBits exhaustion stays sticky for a later low-bit query of the same request", () => {

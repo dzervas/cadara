@@ -213,7 +213,8 @@ describe("exact cubic-pair certification", () => {
       {},
     );
     expect(verified(result).points).toHaveLength(9);
-    expect(budget.determinantTerms).toBe(768);
+    // Sparse expansion omits minors multiplied by identically zero entries.
+    expect(budget.determinantTerms).toBe(104);
   });
 
   test("preserves a symmetric three-pair root set in both argument orders", () => {
