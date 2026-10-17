@@ -3321,6 +3321,15 @@ async function boxBoundaryContacts(
   ];
   const contacts: NeutralCurvePointWitness[] = [];
   for (let side = 0; side < 4; side += 1) {
+    // The same conservative exclusion used by the arrangement broad phase.
+    // Touching boxes still query; this never treats proximity as a contact.
+    if (
+      !boxesOverlap(
+        boxOfPoints([corners[side]!, corners[(side + 1) % 4]!]),
+        branch.box,
+      )
+    )
+      continue;
     const result = await queries.pair({
       modelingTolerance,
       first: {

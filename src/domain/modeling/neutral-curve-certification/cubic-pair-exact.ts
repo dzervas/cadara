@@ -237,6 +237,9 @@ function determinant(
   }
   let result: ExactPolynomial = [ZERO];
   for (let column = 0; column < matrix.length; column += 1) {
+    // A zero coefficient contributes zero regardless of its minor. Sylvester
+    // matrices are sparse: do not recursively expand those dead branches.
+    if (polynomialIsZero(matrix[0]![column]!, budget)) continue;
     const minor = matrix
       .slice(1)
       .map((row) => row.filter((_, index) => index !== column));

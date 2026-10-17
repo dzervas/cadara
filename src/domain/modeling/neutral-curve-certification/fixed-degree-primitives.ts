@@ -66,6 +66,22 @@ export class ExactProofBudget {
   #projectionAttempts = 0;
   #maxStoredBits = 0;
   #maxPreProductBits = 0;
+  #largestStoredMagnitude = -1n;
+  // Pre-product checks often revisit operands. Keep only four sizes per query;
+  // cache hits preserve all arithmetic charges and limits.
+  readonly #recentIntegers: bigint[] = [];
+  readonly #recentBitLengths: number[] = [];
+  #nextInteger = 0;
+
+  #bitLength(value: bigint) {
+    const index = this.#recentIntegers.indexOf(value);
+    if (index >= 0) return this.#recentBitLengths[index]!;
+    const bits = bigintBitLength(value);
+    this.#recentIntegers[this.#nextInteger] = value;
+    this.#recentBitLengths[this.#nextInteger] = bits;
+    this.#nextInteger = (this.#nextInteger + 1) % 4;
+    return bits;
+  }
 
   /**
    * `requestMultiplier` (default 1) scales the additive production ceilings
@@ -152,15 +168,20 @@ export class ExactProofBudget {
 
   stored(...values: bigint[]) {
     for (const value of values) {
-      const bits = bigintBitLength(value);
+      // A smaller magnitude cannot increase the maximum or exceed a limit
+      // already checked for the larger one. GCD mostly visits smaller values.
+      const magnitude = value < 0n ? -value : value;
+      if (magnitude <= this.#largestStoredMagnitude) continue;
+      const bits = this.#bitLength(magnitude);
       this.#maxStoredBits = Math.max(this.#maxStoredBits, bits);
       if (bits > this.#limits.integerBits) this.#fail();
+      this.#largestStoredMagnitude = magnitude;
     }
   }
 
   product(first: bigint, second: bigint) {
     this.operation();
-    const bits = bigintBitLength(first) + bigintBitLength(second);
+    const bits = this.#bitLength(first) + this.#bitLength(second);
     this.#maxPreProductBits = Math.max(this.#maxPreProductBits, bits);
     if (bits > this.#limits.integerBits) this.#fail();
   }
@@ -168,7 +189,7 @@ export class ExactProofBudget {
   shift(value: bigint, shift: number) {
     // Precharge the shift and its optional numeric-to-bigint shift count.
     this.operation(2);
-    const bits = bigintBitLength(value) + shift;
+    const bits = this.#bitLength(value) + shift;
     this.#maxPreProductBits = Math.max(this.#maxPreProductBits, bits);
     if (shift < 0 || bits > this.#limits.integerBits) this.#fail();
   }
@@ -252,7 +273,10 @@ function bigintMagnitude(value: bigint, budget?: ExactProofBudget) {
 
 function bigintBitLength(value: bigint) {
   const magnitude = value < 0n ? -value : value;
-  return magnitude === 0n ? 0 : magnitude.toString(2).length;
+  if (magnitude === 0n) return 0;
+  // Base 16 avoids allocating one character per bit for large exact integers.
+  const hex = magnitude.toString(16);
+  return (hex.length - 1) * 4 + (32 - Math.clz32(parseInt(hex[0]!, 16)));
 }
 
 function gcdBigInt(first: bigint, second: bigint, budget?: ExactProofBudget) {
