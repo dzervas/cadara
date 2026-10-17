@@ -152,10 +152,11 @@ export function assertMutationBase(input: {
 }
 
 export function stripRepositoryMutationBasis<
-  T extends { baseRepositoryHeads?: readonly string[] },
->(input: T): Omit<T, "baseRepositoryHeads"> {
+  T extends { baseRepositoryHeads?: readonly string[]; observePersistence?: unknown },
+>(input: T): Omit<T, "baseRepositoryHeads" | "observePersistence"> {
   const requestInput = { ...input };
   delete requestInput.baseRepositoryHeads;
+  delete requestInput.observePersistence;
   return requestInput;
 }
 
@@ -187,6 +188,7 @@ export function normalizeCommitSketchInput(
   };
   delete requestInput.requestId;
   delete requestInput.publicationBase;
+  delete requestInput.observePublication;
 
   return {
     ...requestInput,

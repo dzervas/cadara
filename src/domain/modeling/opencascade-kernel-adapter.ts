@@ -1,3 +1,4 @@
+import { createRevisionId, parseRevisionSequence } from "./document-revision";
 import type {
   AuthoredDocumentRestoreOptions,
   GeometryAssetResolver,
@@ -121,8 +122,8 @@ import {
   releaseOccAuthoringStateObjects,
 } from "@/domain/modeling/occ/memory";
 import { OCC_CONTRACT_GAP_CODES } from "@/domain/modeling/occ/implementation-policy";
+import { getOpenCascadeInstance } from "@/infrastructure/occ/runtime";
 import {
-  getOpenCascadeInstance,
   probeOpenCascadeNativeTopologyKernelCapabilities,
   type OpenCascadeInstance,
 } from "@/domain/modeling/occ/runtime";
@@ -281,19 +282,6 @@ function assertSupportedModelingRequest(
   }
 }
 
-function parseRevisionSequence(revisionId: RevisionId) {
-  const match = /^rev_(\d+)$/.exec(revisionId);
-
-  if (!match) {
-    throw new Error(`Unsupported revision format ${revisionId}.`);
-  }
-
-  return Number.parseInt(match[1]!, 10);
-}
-
-function createRevisionId(sequence: number) {
-  return `rev_${String(sequence).padStart(4, "0")}` as RevisionId;
-}
 
 function serializeCurrentOccTopologyLineage(state: OccAuthoringState) {
   return serializeOccFeatureTopologyLineage(
@@ -336,10 +324,13 @@ function createAuthoredModelDocumentFromAuthoringState(
     featureOrder: state.features.map((feature) => feature.featureId),
     historyOrder: state.historyOrder.map((item) => ({ ...item })),
     cursor: structuredClone(state.cursor),
-    bodyLabels: state.bodies.map((body) => ({
-      bodyId: body.bodyId,
-      label: body.label,
-    })),
+    // The active cursor's evaluated bodies are only a view. Keep authored
+    // labels for inactive bodies so rollback/restore cannot delete and recreate
+    // them as unrelated document actions (or discard a user's body name).
+    bodyLabels: [...new Map([
+      ...state.bodyLabels,
+      ...state.bodies.map((body) => [body.bodyId, body.label] as const),
+    ])].map(([bodyId, label]) => ({ bodyId, label })),
     assets: structuredClone(state.assets),
     embeddedBinaryAssets: [...structuredClone(state.embeddedBinaryAssets)],
     topologyLineage: serializeCurrentOccTopologyLineage(state),
@@ -2703,6 +2694,8 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
           projectionState = {
             ...projectionState,
             sketches: [...projectionState.sketches, rebuiltSketch],
+            // The next sketch may project any already-restored sketch, not future history.
+            cursor: { kind: "sketch", sketchId: rebuiltSketch.sketchId },
           };
           continue;
         }

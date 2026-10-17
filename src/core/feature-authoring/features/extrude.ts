@@ -1,6 +1,7 @@
 import type {
   ExtrudeEndCondition,
   ExtrudeFeatureExtent,
+  ExtrudeFeatureParameters,
   ExtrudeProfileRef,
   ExtrudeSurfaceProfileRef,
   LinearExtentDirection,
@@ -514,6 +515,7 @@ export const extrudeAuthoringDefinition = {
     return {
       resultBodyType: "solid",
       profileTargets: profileTarget ? [profileTarget] : [],
+      startExtent: { kind: "profilePlane" },
       extentMode: "oneSide",
       firstEnd: DEFAULT_FIRST_END,
       secondEnd: DEFAULT_SECOND_END,
@@ -527,6 +529,7 @@ export const extrudeAuthoringDefinition = {
     return {
       resultBodyType: parameters.resultBodyType,
       profileTargets: parameters.profiles as readonly ExtrudeSurfaceProfileRef[],
+      startExtent: parameters.startExtent,
       extentMode: extent.mode,
       firstEnd: extent.mode === "twoSide" ? extent.firstEnd : extent.end,
       secondEnd:
@@ -719,7 +722,7 @@ export const extrudeAuthoringDefinition = {
             ExtrudeSurfaceProfileRef,
             ...ExtrudeSurfaceProfileRef[],
           ],
-          startExtent: { kind: "profilePlane" },
+          startExtent: draft.startExtent,
           extent,
         },
       };
@@ -733,7 +736,7 @@ export const extrudeAuthoringDefinition = {
           parameters: {
             resultBodyType: "solid",
             profiles: [solidProfiles[0]!, ...solidProfiles.slice(1)],
-            startExtent: { kind: "profilePlane" },
+            startExtent: draft.startExtent,
             extent,
             operation: shared.authoredDefinitionValue(
               draft.operation,
@@ -858,3 +861,20 @@ export const extrudeAuthoringDefinition = {
     };
   },
 } satisfies FeatureAuthoringDefinition<"extrude">;
+
+/** Prepare canonical parameters through the same draft/builder as browser edits. */
+export function prepareExtrudeFeatureDefinition(parameters: ExtrudeFeatureParameters) {
+  const ends = parameters.extent.mode === "twoSide"
+    ? [parameters.extent.firstEnd, parameters.extent.secondEnd]
+    : [parameters.extent.end];
+  // The browser surface form omits draft controls; a semantic caller must not
+  // have an explicitly requested unsupported draft silently stripped instead.
+  if (parameters.resultBodyType === "surface" && ends.some(end => end.draftAngle !== undefined)) return null;
+  return extrudeAuthoringDefinition.buildDefinition(
+    extrudeAuthoringDefinition.hydrateDraft({
+      kind: "extrude",
+      featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+      parameters,
+    }),
+  );
+}

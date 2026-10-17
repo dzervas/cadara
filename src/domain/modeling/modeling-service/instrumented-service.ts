@@ -117,10 +117,10 @@ class InstrumentedModelingService implements ModelingService {
     );
   }
 
-  createNewDocument() {
+  createNewDocument(input?: Parameters<ModelingService["createNewDocument"]>[0]) {
     return this.measure(
       "createNewDocument",
-      () => this.inner.createNewDocument(),
+      () => input ? this.inner.createNewDocument(input) : this.inner.createNewDocument(),
       okDiagnosticAttributes,
     );
   }
@@ -141,10 +141,10 @@ class InstrumentedModelingService implements ModelingService {
     );
   }
 
-  exportCurrentDocument() {
+  exportCurrentDocument(input?: Parameters<ModelingService["exportCurrentDocument"]>[0]) {
     return this.measure(
       "exportCurrentDocument",
-      () => this.inner.exportCurrentDocument(),
+      () => this.inner.exportCurrentDocument(input),
       okDiagnosticAttributes,
     );
   }

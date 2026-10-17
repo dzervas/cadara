@@ -1,3 +1,4 @@
+import { getSketchSessionDisplaySolvedSnapshot, getStableSketchSessionDisplayKey } from "./solved-snapshot";
 import type { SketchPoint } from "@/contracts/modeling/schema";
 import type { ReferenceImageOperationState } from "@/contracts/reference-image/schema";
 import type {
@@ -70,7 +71,6 @@ import {
   getSketchSessionDisplayProjectedReferences,
   getSketchSessionDerivedValidity,
   mapDefinitionEntityToDraftEntity,
-  SKETCH_NOT_SOLVED_YET,
 } from "./internals";
 import { mapSketchPointToWorld } from "./state";
 import {
@@ -88,8 +88,6 @@ export function sketchSessionHasReferenceImage(
 
 let stableDisplayCacheKey: string | null = null;
 let stableDisplayCacheRenderables: SketchSessionDisplayRenderable[] = [];
-const stableDisplayObjectIds = new WeakMap<object, number>();
-let nextStableDisplayObjectId = 1;
 
 export function getSketchSessionDisplayRenderables(
   session: SketchSessionState,
@@ -741,19 +739,6 @@ export function getSketchToolMarkerPointIds(
   );
 }
 
-/**
- * The solved snapshot the session displays: its live solve. Display, pick
- * and snap read the shells' spans from this one snapshot (T08b-g5b). Every
- * editor sketch entry establishes the live solve (T11a); before it (the
- * opened session, T17g3 review G-1) this is `SKETCH_NOT_SOLVED_YET`: the
- * authored geometry is drawn, with no solved shells and nothing certified.
- */
-export function getSketchSessionDisplaySolvedSnapshot(
-  session: SketchSessionState,
-): SolvedSketchSnapshot {
-  return session.liveSolve?.solvedSnapshot ?? SKETCH_NOT_SOLVED_YET;
-}
-
 export function getTransientSketchSessionDisplayRenderables(
   session: SketchSessionState,
 ): SketchSessionDisplayRenderable[] {
@@ -836,47 +821,6 @@ function getDegenerateSplineDraft(
       isConstruction: spline.isConstruction,
     },
   ];
-}
-
-export function getStableSketchSessionDisplayKey(
-  session: SketchSessionState,
-): string {
-  return [
-    "sketch",
-    session.sketchId ?? "draft",
-    objectIdentity(session.plane),
-    objectIdentity(session.definition),
-    objectIdentity(session.projectedReferences),
-    objectIdentity(session.projectionDiagnostics),
-    objectIdentity(session.liveRegions),
-    session.liveSolve ? objectIdentity(session.liveSolve) : "no-live-solve",
-    session.activeSpecialMode
-      ? [
-          session.activeSpecialMode.modeId,
-          objectIdentity(session.activeSpecialMode.operationTarget),
-          unknownIdentity(session.activeSpecialMode.state),
-          session.activeSpecialMode.generation,
-        ].join(":")
-      : "no-special-mode",
-  ].join("|");
-}
-
-function unknownIdentity(value: unknown): string {
-  return value !== null && typeof value === "object"
-    ? String(objectIdentity(value))
-    : String(value);
-}
-
-function objectIdentity(value: object): number {
-  const existing = stableDisplayObjectIds.get(value);
-  if (existing !== undefined) {
-    return existing;
-  }
-
-  const nextId = nextStableDisplayObjectId;
-  nextStableDisplayObjectId += 1;
-  stableDisplayObjectIds.set(value, nextId);
-  return nextId;
 }
 
 export function shouldRenderProjectedReference(

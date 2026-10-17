@@ -383,6 +383,7 @@ async function evaluateHistoryProbeInKernelSession(
   input: HistoryProbeInput,
   execution: KernelHistoryProbeExecution,
 ): Promise<{ result: HistoryProbeResult; reusable: boolean }> {
+  execution.materializer.registerBodyScopeBindings(input.actions.bodyScopeBindings ?? []);
   execution.materializer.registerHistoricalSelectors(input.actions);
   execution.materializer.registerSplitInterfaceSelectors(input.actions);
   for (const selector of splitInterfaceSelectorsOf(input.actions)) {
@@ -437,6 +438,7 @@ async function evaluateHistoryProbeInKernelSession(
       if (applyResult.ok) {
         await execution.materializer.bindSplitInterfaceToolFacesAtAction(orderedPosition);
         await execution.materializer.bindSplitInterfaceOutputFacesAtAction(orderedPosition);
+        await execution.materializer.advanceSplitInterfaceSelectorsAtAction(orderedPosition);
       }
     } catch (error) {
       if (isTopologyApplyRematchError(error)) {
@@ -661,6 +663,7 @@ async function applyProbeAction(
       const materialized = await materializer.materializeCommitSketchRequest(
         request,
         actionRef,
+        orderedPosition,
       );
       const result = await service.commitSketch({ ...materialized, ...basis });
       if (result.isOk()) {
@@ -678,6 +681,7 @@ async function applyProbeAction(
       const materialized = await materializer.materializeFeatureRequest(
         request,
         actionRef,
+        orderedPosition,
       );
       const result = await service.createFeature({ ...materialized, ...basis });
       // Apply rejects a feature whose result carries an error diagnostic or a

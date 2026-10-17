@@ -150,6 +150,78 @@ describe("T17c6 D-2: a withheld region is explained on the status line", () => {
     expect(f.session.validationMessage).toBe(ZERO_JOIN_TEXT);
   });
 
+  test.each([
+    "changed Stroke",
+    "repeated Stroke",
+    "unchanged sketch label",
+    "changed sketch label",
+    "unchanged item label",
+  ] as const)(
+    "%s keeps the exact withheld status without a replacement region result",
+    async (operation) => {
+      const drawn = drawnMixedOutlineSession();
+      const f = await createSketchActionOwnerFixture(
+        rebuildSessionForDefinition(drawn, {
+          definition: withZeroStartTangent(drawn.definition),
+        }),
+      );
+      const regions = f.session.liveRegions;
+      const diagnostics = regions.diagnostics;
+      expect(regions.status).toBe("current");
+      expect(regions.regions).toEqual([]);
+      expect(f.session.validationMessage).toBe(ZERO_JOIN_TEXT);
+      const entity = f.session.definition.entities[0]!;
+      const stroke = () =>
+        f.dispatch({
+          type: "sketch.styleAuthored",
+          targets: [entity.target],
+          patch: { field: "strokeWidth", value: 3 },
+        });
+      if (operation === "repeated Stroke") stroke();
+      const definition = f.session.definition;
+      const labels = f.undoLabels();
+      if (operation.endsWith("Stroke")) {
+        stroke();
+        expect(f.session.definition.entities[0]!.style?.strokeWidth).toBe(3);
+        expect(f.session.liveSolve?.sourceDefinition).toBe(
+          f.session.definition,
+        );
+      } else {
+        f.dispatch({
+          type: "sketch.labelSet",
+          target:
+            operation === "unchanged item label"
+              ? entity.target
+              : {
+                  kind: "sketch",
+                  sketchId: entity.target.sketchId,
+                },
+          label:
+            operation === "unchanged item label"
+              ? entity.label
+              : operation === "changed sketch label"
+                ? "Withheld outline"
+                : f.session.sketchLabel,
+        });
+      }
+      expect(f.session.validationMessage).toBe(ZERO_JOIN_TEXT);
+      expect(f.state.pendingRegionRequest).toBeNull();
+      await f.settle();
+      expect(f.session.liveRegions).toBe(regions);
+      expect(f.session.liveRegions.diagnostics).toBe(diagnostics);
+      expect(f.session.validationMessage).toBe(ZERO_JOIN_TEXT);
+      if (
+        operation.startsWith("unchanged") ||
+        operation === "repeated Stroke"
+      ) {
+        expect(f.session.definition).toBe(definition);
+        expect(f.undoLabels()).toEqual(labels);
+      } else {
+        expect(f.undoLabels()).toHaveLength(labels.length + 1);
+      }
+    },
+  );
+
   test("calm: the same uncertain join on an open chain (no line, so no closed outline and no region to lose) stays in the preview label, off the status line", async () => {
     const drawn = drawnMixedOutlineSession({ withLine: false });
     const f = await createSketchActionOwnerFixture(

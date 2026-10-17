@@ -139,6 +139,69 @@ export interface AdvancedSolidFeatureParameters {
   options?: Record<string, unknown>;
 }
 
+/** Explicit body sets; retention is a native literal boolean, not an expression. */
+export interface CombineFeatureParameters {
+  participants: readonly (
+    | { role: "targetBody"; targets: readonly Extract<DurableRef, { kind: "body" }>[] }
+    | { role: "toolBody"; targets: readonly Extract<DurableRef, { kind: "body" }>[] }
+  )[];
+  operationIntent: AuthoredValue<Exclude<AdvancedSolidOperationIntent, "create">>;
+  options?: { keepTools?: boolean };
+}
+
+export interface SplitFeatureParameters {
+  participants: readonly (
+    | { role: "targetBody"; targets: readonly Extract<DurableRef, { kind: "body" }>[] }
+    | { role: "toolBody"; targets: readonly Extract<DurableRef, { kind: "body" }>[] }
+  )[];
+  options?: { keepTools?: boolean };
+}
+
+export type BodyOperationAxis = Extract<DurableRef, { kind: "construction" | "face" | "edge" | "sketchEntity" }>;
+type BodyOperationParticipant = { role: "body"; targets: readonly Extract<DurableRef, { kind: "body" }>[] };
+
+export interface MirrorFeatureParameters {
+  participants: readonly (BodyOperationParticipant
+    | { role: "plane"; targets: readonly Extract<DurableRef, { kind: "construction" | "face" }>[] }
+    | { role: "targetBody"; targets: readonly Extract<DurableRef, { kind: "body" }>[] })[];
+  operationIntent?: AuthoredValue<"add">;
+  options: { copy: MaybeAuthoredValue<boolean> };
+}
+
+/** Rotation angles are literal degrees; only reference distance resolves expressions. */
+export interface TransformFeatureParameters {
+  participants: readonly (BodyOperationParticipant
+    | { role: "transformReference"; targets: readonly Extract<DurableRef, { kind: "construction" | "face" }>[] }
+    | { role: "axis"; targets: readonly BodyOperationAxis[] })[];
+  options:
+    | { transformType?: "translation"; vector: readonly [number, number, number] }
+    | { transformType?: "translation"; distance: MaybeAuthoredValue<number>; direction?: "positive" | "negative" }
+    | { transformType: "rotation"; angle: number | { source: "literal"; value: number } };
+}
+
+export interface LinearPatternFeatureParameters {
+  participants: readonly (BodyOperationParticipant | { role: "direction"; targets: readonly BodyOperationAxis[] })[];
+  options: {
+    instanceCount: MaybeAuthoredValue<number>;
+    spacing: MaybeAuthoredValue<number>;
+    oppositeDirection: MaybeAuthoredValue<boolean>;
+  };
+}
+
+export interface CircularPatternFeatureParameters {
+  participants: readonly (BodyOperationParticipant | { role: "axis"; targets: readonly BodyOperationAxis[] })[];
+  options: {
+    instanceCount: MaybeAuthoredValue<number>;
+    angleDegrees: MaybeAuthoredValue<number>;
+    equalSpace: MaybeAuthoredValue<boolean>;
+    oppositeDirection: MaybeAuthoredValue<boolean>;
+  };
+}
+
+export interface DeleteSolidFeatureParameters {
+  participants: readonly [{ role: "body"; targets: readonly Extract<DurableRef, { kind: "body" }>[] }];
+}
+
 export interface AdvancedSolidFeatureDefinition {
   kind: AdvancedSolidFeatureKind;
   featureTypeVersion: typeof ADVANCED_SOLID_FEATURE_SCHEMA_VERSION;
@@ -201,6 +264,17 @@ export interface LoftAdvancedOptions extends Record<string, unknown> {
   matchConnections?: readonly LoftMatchConnection[];
 }
 
+/** Supported loft input. Guide/endpoint/connection controls are inert in the
+ * native owner, so they are deliberately not part of this executable contract. */
+export interface LoftFeatureParameters {
+  participants: readonly (
+    | { role: "profile"; targets: readonly Extract<DurableRef, { kind: "region" | "face" }>[] }
+    | { role: "path"; targets: readonly Extract<DurableRef, { kind: "edge" }>[] }
+  )[];
+  operationIntent?: AuthoredValue<AdvancedSolidOperationIntent>;
+  options?: Pick<LoftAdvancedOptions, "path">;
+}
+
 export type ChamferWidthForm =
   | "equalOffsets"
   | "twoOffsets"
@@ -222,6 +296,26 @@ export type ChamferWidthOptions =
       /** Degrees; executor converts to OCC radians. Valid executable range is (0, 90). */
       angle: MaybeAuthoredValue<number>;
     };
+
+/** Canonical supported chamfer input; no unrelated roles or inactive width fields. */
+export interface ChamferFeatureParameters {
+  participants: readonly [{ role: "edge"; targets: readonly Extract<DurableRef, { kind: "edge" }>[] }];
+  options: ChamferWidthOptions;
+}
+
+/** Thicken sources are faces OR exactly one sheet body, never a mixed set. */
+export interface ThickenFeatureParameters {
+  participants: readonly [
+    { role: "face"; targets: readonly Extract<DurableRef, { kind: "face" }>[] | readonly [Extract<DurableRef, { kind: "body" }>] },
+    ...{ role: "targetBody"; targets: readonly Extract<DurableRef, { kind: "body" }>[] }[],
+  ];
+  operationIntent?: AuthoredValue<AdvancedSolidOperationIntent>;
+  options: {
+    thickness: AuthoredValue<number>;
+    side: AuthoredValue<"oneSide" | "symmetric">;
+    direction: "positive" | "negative";
+  };
+}
 
 export interface ChamferAdvancedOptions extends Record<string, unknown> {
   widthForm?: MaybeAuthoredValue<ChamferWidthForm>;
@@ -272,6 +366,24 @@ export type HoleAdvancedOptions =
       counterboreDiameter?: never;
       counterboreDepth?: never;
     };
+
+// Distribute over existing styles without intersecting authored scalar unions.
+// Overlapping MaybeAuthoredValue fields otherwise create nonsensical intersections.
+type HoleWithExplicitTermination<Options> = Options extends unknown
+  ? Omit<Options, "termination" | "depth"> & (
+      | { termination: MaybeAuthoredValue<"blind">; depth: MaybeAuthoredValue<number> }
+      | { termination: MaybeAuthoredValue<"throughAll">; depth?: never }
+    )
+  : never;
+
+/** Canonical hole inputs retain existing style options and explicit subtractive scope. */
+export interface HoleFeatureParameters {
+  participants: readonly [
+    { role: "location"; targets: readonly Extract<DurableRef, { kind: "sketchPoint" }>[] },
+    { role: "body"; targets: readonly Extract<DurableRef, { kind: "body" }>[] },
+  ];
+  options: HoleWithExplicitTermination<HoleAdvancedOptions>;
+}
 
 /** Copy-only body pattern: selected seed bodies remain and each instance produces a new body. */
 
@@ -687,6 +799,19 @@ export interface SweepAdvancedOptions extends Record<string, unknown> {
   profileControl: MaybeAuthoredValue<SweepProfileControl>;
   twist: SweepTwistOption;
   endScale: MaybeAuthoredValue<number>;
+}
+
+/** Canonical sweep request uses the existing controls, not a client options model. */
+export interface SweepFeatureParameters {
+  participants: readonly (
+    | { role: "profile"; targets: readonly Extract<DurableRef, { kind: "region" | "face" }>[] }
+    | { role: "path" | "guideCurve"; targets: readonly Extract<DurableRef, { kind: "edge" | "sketchEntity" }>[] }
+    | { role: "lockProfileFace"; targets: readonly Extract<DurableRef, { kind: "face" }>[] }
+    | { role: "lockProfileDirection"; targets: readonly Extract<DurableRef, { kind: "edge" | "construction" }>[] }
+    | { role: "targetBody"; targets: readonly Extract<DurableRef, { kind: "body" }>[] }
+  )[];
+  operationIntent?: AuthoredValue<AdvancedSolidOperationIntent>;
+  options: Pick<SweepAdvancedOptions, "profileControl" | "twist" | "endScale">;
 }
 
 export const SWEEP_ADVANCED_OPTION_DESCRIPTORS = [

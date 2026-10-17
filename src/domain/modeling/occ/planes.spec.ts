@@ -15,7 +15,7 @@ import {
   toGpPlane,
   toGpPnt,
 } from "@/domain/modeling/occ/planes";
-import { getDefaultOpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import { getDefaultOpenCascadeInstance } from "@/infrastructure/occ/runtime";
 
 test("src/domain/modeling/occ/planes.spec.ts", async () => {
   function assertClose(

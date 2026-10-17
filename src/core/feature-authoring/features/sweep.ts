@@ -334,6 +334,47 @@ function getSweepValidationDiagnostics(draft: SweepFeatureParameterDraft) {
   return diagnostics;
 }
 
+/** Refuse requests hydration would coerce, truncate or drop before using the browser builder. */
+export function prepareSweepFeatureDefinition(
+  parameters: import("@/contracts/modeling/advanced-solid").SweepFeatureParameters,
+) {
+  const seen = new Set<string>();
+  for (const participant of parameters.participants) {
+    const descriptor = sweepParticipants.find(d => d.role === participant.role);
+    if (!descriptor || seen.has(participant.role) ||
+        participant.targets.some(t => !(descriptor.acceptedKinds as readonly string[]).includes(t.kind)) ||
+        (descriptor.cardinality.max !== null && participant.targets.length > descriptor.cardinality.max))
+      return null;
+    seen.add(participant.role);
+  }
+  // The native owner supports one profile. Do not let draft collection defaults
+  // turn an unsupported or incomplete canonical request into another request.
+  if (parameters.participants.find(p => p.role === "profile")?.targets.length !== 1 ||
+      parameters.participants.find(p => p.role === "path")?.targets.length !== 1)
+    return null;
+  const control = getAuthoredLiteralValue(parameters.options.profileControl);
+  if (!isSweepProfileControl(control) || !isSweepTwistType(parameters.options.twist.type))
+    return null;
+  // Native MakePipe receives GeomFill_IsFixed for this setting, but OCC's
+  // pipe accepts only Frenet/corrected/discrete and silently defaults it.
+  // Refuse the inert control; implementing fixed orientation is a separate engine fix.
+  if (control === "keepProfileOrientation") return null;
+  const intent = getAuthoredLiteralValue(parameters.operationIntent ?? "create");
+  if (!isAdvancedOperationIntent(intent)) return null;
+  if (parameters.participants.some(p =>
+    (p.role === "lockProfileFace" && control !== "lockProfileFaces" ||
+     p.role === "lockProfileDirection" && control !== "lockProfileDirection" ||
+     p.role === "targetBody" && intent === "create") && p.targets.length > 0))
+    return null;
+  return sweepAuthoringDefinition.buildDefinition(
+    sweepAuthoringDefinition.hydrateDraft({
+      kind: "sweep",
+      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+      parameters,
+    }),
+  );
+}
+
 export const sweepAuthoringDefinition = {
   metadata: {
     kind: "sweep",

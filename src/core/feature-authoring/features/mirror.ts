@@ -1,3 +1,4 @@
+import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
 import {
   ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
   validateAdvancedSolidFeatureDefinition,
@@ -19,6 +20,7 @@ import {
   authoredDefinitionValue,
   authoredBooleanLiteral,
   createMissingInputDiagnostic,
+  hasExactBodyOperationParticipants,
 } from "@/core/feature-authoring/features/shared";
 
 export const mirrorParticipants = [
@@ -61,7 +63,9 @@ function buildMirrorDefinition(draft: MirrorFeatureParameterDraft) {
     kind: "mirror" as const,
     featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
     parameters: {
+      ...(draft.operationIntent === undefined ? {} : { operationIntent: draft.operationIntent }),
       participants: [
+        ...(draft.targetBodyTargets?.length ? [{ role: "targetBody" as const, targets: draft.targetBodyTargets }] : []),
         ...(draft.bodyTargets.length > 0
           ? [{ role: "body" as const, targets: draft.bodyTargets }]
           : []),
@@ -76,10 +80,29 @@ function buildMirrorDefinition(draft: MirrorFeatureParameterDraft) {
   };
 }
 
+export function prepareMirrorFeatureDefinition(
+  parameters: import("@/contracts/modeling/advanced-solid").MirrorFeatureParameters,
+) {
+  if (!hasExactBodyOperationParticipants(parameters, "plane", ["construction", "face"], true, true)) return null;
+  if (Object.keys(parameters.options).some(k => k !== "copy")) return null;
+  const intent = parameters.operationIntent;
+  if (intent !== undefined && getAuthoredLiteralValue(intent) !== "add") return null;
+  const bodies = parameters.participants.find(p => p.role === "body")!.targets;
+  const targets = parameters.participants.find(p => p.role === "targetBody")?.targets ?? [];
+  if (intent === undefined ? targets.length !== 0 : bodies.length !== 1 || targets.length !== 1 || bodies[0]!.kind !== "body" || targets[0]!.kind !== "body" || bodies[0]!.bodyId !== targets[0]!.bodyId) return null;
+  // Expression copy is resolved by the existing shared authored-value owner.
+  const copy = getAuthoredLiteralValue(parameters.options.copy);
+  if (copy !== true && copy !== null) return null;
+  return mirrorAuthoringDefinition.buildDefinition(mirrorAuthoringDefinition.hydrateDraft({
+    kind: "mirror", featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION, parameters,
+  }));
+}
+
 function getMirrorValidationDiagnostics(draft: MirrorFeatureParameterDraft) {
   return validateAdvancedSolidFeatureDefinition(buildMirrorDefinition(draft), {
     featureKind: "mirror",
-    participants: mirrorParticipants,
+    participants: [...mirrorParticipants, { role: "targetBody", label: "Merge target", required: false, cardinality: { min: 0, max: 1 }, acceptedKinds: ["body"] }],
+    operationIntent: { supportedIntents: ["add"] },
     options: mirrorOptions,
   });
 }
@@ -119,6 +142,8 @@ export const mirrorAuthoringDefinition = {
         )?.targets ?? [],
       ),
       planeTarget,
+      ...(feature.parameters.operationIntent === undefined ? {} : { operationIntent: feature.parameters.operationIntent as MirrorFeatureParameterDraft["operationIntent"] }),
+      targetBodyTargets: filterBodyTargets(feature.parameters.participants.find(p => p.role === "targetBody")?.targets ?? []),
       copy: (feature.parameters.options?.copy ??
         true) as MirrorFeatureParameterDraft["copy"],
     };

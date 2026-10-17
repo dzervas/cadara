@@ -96,17 +96,28 @@ export function computeSketchMirrorActionState(
     session.activeAnnotationEdit
   )
     return null;
+  const participantIds = selectedMirrorIds(session, selection);
+  const entries = getSketchMirrorActionEntries(session, selection);
+  const listed = [
+    ...entries.filter(entry => participantIds.has(entry.derivationId)),
+    ...entries.filter(entry => entry.brokenReason !== null && !participantIds.has(entry.derivationId)),
+  ];
+  return listed.length ? { entries: listed } : null;
+}
+
+/** All relationship health and removal consequences, independent of panel visibility. */
+export function getSketchMirrorActionEntries(
+  session: SketchSessionState,
+  selection: readonly PrimitiveRef[] = [],
+): SketchMirrorActionEntry[] {
   const definition = session.definition;
   const mirrors = (definition.derivedRelationships ?? []).filter(
     (relationship): relationship is MirrorRelationship =>
       relationship.kind === "mirror",
   );
-  if (mirrors.length === 0) return null;
-
+  if (mirrors.length === 0) return [];
   const liveSnapshot = session.liveSolve?.solvedSnapshot;
-  if (!liveSnapshot) return null;
-
-  const participantIds = selectedMirrorIds(session, selection);
+  if (!liveSnapshot) return [];
   // The owner's evaluation, through the evaluation seam the solve uses
   // (one failure per relationship, unresolved order included).
   const settings = getSketchSessionDerivationSettings(session);
@@ -162,16 +173,6 @@ export function computeSketchMirrorActionState(
         ? "original is an offset spline curve"
         : null,
   }));
-  const listed = [
-    ...entries.filter(({ relationship }) =>
-      participantIds.has(relationship.derivationId),
-    ),
-    ...entries.filter(
-      ({ relationship, brokenReason }) =>
-        brokenReason !== null && !participantIds.has(relationship.derivationId),
-    ),
-  ];
-  if (listed.length === 0) return null;
   const selectedEntityIds = new Set(
     selection.flatMap((ref) =>
       ref.kind === "sketchEntity" &&
@@ -183,8 +184,7 @@ export function computeSketchMirrorActionState(
   const entityIds = new Set(
     definition.entities.map((entity) => entity.entityId as string),
   );
-  return {
-    entries: listed.map(({ relationship, brokenReason }) => {
+  return entries.map(({ relationship, brokenReason }) => {
       const removal = removeMirrorRelationship(
         definition,
         relationship.derivationId,
@@ -213,8 +213,7 @@ export function computeSketchMirrorActionState(
           entityIds,
         ),
       };
-    }),
-  };
+    });
 }
 
 /**
@@ -313,16 +312,20 @@ export function applySketchMirrorRepair(
   const tool = session.activeEditTool;
   const picked = tool?.selectedTargets[0];
   if (!tool?.repair || !picked) return session;
-  const candidate = getSketchMirrorRepairCandidate(
-    session,
-    tool.repair,
-    picked,
-  );
+  return completeSketchMirrorRepair(session, tool.repair, picked, true);
+}
+
+/** Explicit repair and browser confirmation apply the same judged candidate. */
+export function completeSketchMirrorRepair(
+  session: SketchSessionState,
+  repair: SketchMirrorRepairState,
+  target: PrimitiveRef,
+  clearTool = false,
+): SketchSessionState {
+  const candidate = getSketchMirrorRepairCandidate(session, repair, target);
   return candidate.ok
-    ? rebuildSessionForDefinition(clearActiveSketchTool(session), {
-        definition: candidate.definition,
-      })
-    : session;
+    ? rebuildSessionForDefinition(clearTool ? clearActiveSketchTool(session) : session, { definition: candidate.definition })
+    : clearTool ? session : { ...session, validationMessage: candidate.message };
 }
 
 /** Mirrors a selected seed, copy (held included) or axis line takes part in. */

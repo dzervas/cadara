@@ -176,6 +176,52 @@ function actionLabel(event: EditorEvent, before: EditorState) {
     return "Create Sketch Geometry";
   }
   switch (event.type) {
+    case "sketch.intersectionEditCompleted":
+      return event.basis.input.operation.kind === "extend" ? "Extend" : event.basis.input.operation.kind === "split" ? "Split" : "Trim";
+    case "sketch.imageEdited":
+      return event.edit.kind === "replace" ? "Replace Reference Image" : "Edit Reference Image";
+    case "sketch.imageRemoved":
+      return "Remove Reference Image";
+    case "sketch.imageAuthored":
+      return getToolById("importImage").name;
+    case "sketch.styleAuthored":
+      return before.kind === "editingSketch"
+        ? getToolById(getSketchStylePatchToolId(before.session, { intent: SKETCH_STYLE_PATCH_INTENT, ...event.patch })).name : "Style";
+    case "sketch.referenceAuthored":
+      return getToolById("projectReference").name;
+    case "sketch.derivationCreated":
+      return event.input.kind === "linearPattern" ? "Sketch Linear Pattern" : event.input.kind === "circularPattern" ? "Sketch Circular Pattern" : "Sketch Transform";
+    case "sketch.mirrorRemoved":
+      return "Remove Mirror";
+    case "sketch.mirrorRepaired":
+      return event.repair.target === "axis" ? "Replace Mirror Line" : "Replace Mirror Original";
+    case "sketch.mirrorCreated":
+      return "Mirror";
+    case "sketch.offsetCompleted":
+      return "Commit Offset";
+    case "sketch.offsetRemoved":
+      return "Remove Offset";
+    case "sketch.geometryBuilt":
+      return event.input.kind === "fillet" ? "Fillet" : event.input.kind === "chamfer" ? "Chamfer" : "Slot";
+    case "sketch.geometryUpdated":
+      return event.edit.kind === "point" || event.edit.kind === "translate"
+        ? "Move Sketch Geometry" : event.edit.kind === "mergePoints" ? "Merge Points" : "Edit Sketch Geometry";
+    case "sketch.geometryDeleted":
+      return "Delete Sketch Geometry";
+    case "sketch.labelSet":
+      return "Label Sketch Item";
+    case "sketch.constructionSet":
+      return getToolById("construction").name;
+    case "sketch.requirementRemoved":
+      return "Remove Sketch Requirement";
+    case "sketch.requirementAuthored":
+      return getToolById(event.input.tool).name;
+    case "sketch.dimensionAuthored":
+      return getToolById("dimension").name;
+    case "sketch.dimensionMadeReference":
+      return "Make Reference";
+    case "sketch.dimensionUpdated":
+      return "Update Sketch Dimension";
     case "sketch.geometryDragEnded":
       return "Move Sketch Geometry";
     case "sketch.annotationDeleteRequested":
@@ -200,6 +246,7 @@ function actionLabel(event: EditorEvent, before: EditorState) {
       );
     }
     // A committing Escape or Enter is a finalized spline (T11-D10).
+    case "sketch.primitiveAuthored":
     case "sketch.pointerReleased":
     case "sketch.escapeRequested":
     case "sketch.confirmRequested":
@@ -402,6 +449,8 @@ export class SketchAuthoredActions {
     }
     const leavesGesture =
       event.type === "command.cancelled" ||
+      event.type === "sketch.publishRequested" ||
+      event.type === "sketch.discardRequested" ||
       event.type === "command.commitRequested" ||
       event.type === "tool.activated" ||
       event.type === "sketch.activeToolCleared" ||
@@ -467,8 +516,7 @@ export class SketchAuthoredActions {
     if (
       before.kind === "editingSketch" &&
       beforeKey &&
-      event.type === "tool.activated" &&
-      event.toolId === "finishSketch"
+      result.effects.some((effect) => effect.type === "sketch.commit")
     ) {
       const publicationBase = this.publicationBases.get(beforeKey);
       result.effects = result.effects.map((effect) =>

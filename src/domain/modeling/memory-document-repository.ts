@@ -1,3 +1,4 @@
+import { stableJsonValue } from "@/contracts/modeling/authored-document-serialization";
 import { parseAuthoredModelDocument } from "@/contracts/modeling/authored-document.runtime-schema";
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
 
@@ -24,6 +25,7 @@ import {
 } from "@/domain/modeling/geometry-asset-store";
 
 import { AuthoredActionHistory } from "./authored-action-history";
+import { createRevisionId, parseRevisionSequence } from "./document-revision";
 import {
   createCollaborativeDocument,
   materializeCollaborativeDocument,
@@ -40,6 +42,8 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
   private readonly actorId = crypto.randomUUID();
   private readonly actions = new Map<DocumentId, AuthoredActionHistory>();
   private readonly queues = new Map<DocumentId, Promise<unknown>>();
+  private stateSequence = 0;
+  private readonly stateHeads = new Map<DocumentId, { content: string; head: string }>();
 
   private enqueue<T>(
     documentId: DocumentId,
@@ -81,7 +85,7 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
       });
       this.metadata.set(
         document.documentId,
-        createMemoryMetadata(
+        this.createMemoryMetadata(
           this.actorId,
           document.documentId,
           document,
@@ -106,7 +110,7 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
         kind: "restored" as const,
         documentId: input.documentId,
       };
-      const metadata = createMemoryMetadata(
+      const metadata = this.createMemoryMetadata(
         this.actorId,
         input.documentId,
         result.document,
@@ -149,7 +153,7 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
       createCollaborativeDocument(result.document),
     );
     const status = { kind: "seeded" as const, documentId: input.documentId };
-    const metadata = createMemoryMetadata(
+    const metadata = this.createMemoryMetadata(
       this.actorId,
       input.documentId,
       result.document,
@@ -299,7 +303,7 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
     this.savedDocuments.push(structuredClone(result.document));
     this.actions.set(input.documentId, staged);
     const status = { kind: "restored" as const, documentId: input.documentId };
-    const metadata = createMemoryMetadata(
+    const metadata = this.createMemoryMetadata(
       this.actorId,
       input.documentId,
       result.document,
@@ -382,7 +386,7 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
       result.document.assets.records,
     );
     const metadata = {
-      ...createMemoryMetadata(
+      ...this.createMemoryMetadata(
         this.actorId,
         document.documentId,
         result.document,
@@ -431,6 +435,7 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
     documentId: DocumentId,
   ): Promise<DocumentRepositoryRestoreStatus> {
     this.documents.delete(documentId);
+    this.stateHeads.delete(documentId);
     this.actions.delete(documentId);
     const status = { kind: "reset" as const, documentId };
     this.statuses.set(documentId, status);
@@ -592,6 +597,10 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
       });
     const storage = structuredClone(this.documents.get(documentId)!);
     applyCollaborativeWrites(storage, action.writes);
+    // Compensation is a new intent, not a return to an older revision. Distinct
+    // heads/revisions also prevent old recipe bases and replayed notifications
+    // from certifying the newly compensated state.
+    storage.revisionId = createRevisionId(parseRevisionSequence(current.revisionId) + 1);
     const document = materializeCollaborativeDocument(storage);
     this.documents.set(documentId, storage);
     this.actions.set(documentId, staged);
@@ -609,7 +618,7 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
       document.assets.records,
     );
     const metadata = {
-      ...createMemoryMetadata(this.actorId, documentId, document, source),
+      ...this.createMemoryMetadata(this.actorId, documentId, document, source),
       assetAvailability: assets.availability,
     };
     this.statuses.set(documentId, status);
@@ -650,6 +659,27 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
       });
     }
   }
+  private createMemoryMetadata(
+    actorId: string,
+    documentId: DocumentId,
+    document: AuthoredModelDocument,
+    source: DocumentRepositoryMetadata["source"],
+  ): DocumentRepositoryMetadata {
+    // A stored revision can be reused by a peer. Heads identify complete state,
+    // not that revision; unchanged synchronization must retain the same head.
+    const content = JSON.stringify(stableJsonValue(document));
+    let state = this.stateHeads.get(documentId);
+    if (state?.content !== content) {
+      state = { content, head: `memory:${actorId}:${++this.stateSequence}` };
+      this.stateHeads.set(documentId, state);
+    }
+    return {
+      documentId,
+      actorId,
+      heads: [state.head],
+      source,
+    };
+  }
 }
 
 export function createMemoryDocumentRepository(
@@ -657,18 +687,4 @@ export function createMemoryDocumentRepository(
   assetStore?: GeometryAssetStore,
 ) {
   return new MemoryDocumentRepository(initialDocuments, assetStore);
-}
-
-function createMemoryMetadata(
-  actorId: string,
-  documentId: DocumentId,
-  document: AuthoredModelDocument,
-  source: DocumentRepositoryMetadata["source"],
-): DocumentRepositoryMetadata {
-  return {
-    documentId,
-    actorId,
-    heads: [`memory:${document.revisionId}`],
-    source,
-  };
 }

@@ -26,10 +26,10 @@ import {
   OCC_KERNEL_SETTINGS,
 } from "@/domain/modeling/opencascade-kernel-seed";
 import {
-  createNewSketchSession,
-  getSketchSessionDisplayRenderables,
+  createNewSketchSession
 } from "@/domain/editor/sketch-session";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import { getSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session/display";
 import { buildOccRenderExport } from "@/domain/modeling/occ/snapshot";
 import { createOccAuthoringState } from "@/domain/modeling/occ/authoring-state";
 import type { SketchSnapshotRecord } from "@/contracts/modeling/schema";

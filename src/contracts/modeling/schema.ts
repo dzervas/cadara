@@ -55,6 +55,8 @@ import type {
 } from "@/contracts/modeling/geometry-assets";
 
 export interface DocumentSnapshotProvenance {
+  /** Stored basis represented by this live snapshot; restores may renumber it. */
+  repositoryRevisionId?: RevisionId;
   /** Actual editing actor when the snapshot is repository-backed. */
   actorId?: string;
   repositoryHeads: readonly string[];

@@ -1,3 +1,4 @@
+import { createIndexedDbGeometryAssetStore } from "@/infrastructure/persistence/indexeddb-geometry-asset-store";
 import { initializeBase64Wasm, Repo } from "@automerge/automerge-repo/slim";
 import type { AutomergeUrl } from "@automerge/automerge-repo/slim";
 import { getActorId } from "@automerge/automerge/slim";
@@ -27,7 +28,6 @@ import type {
 } from "@/domain/modeling/document-repository";
 import {
   collectAssetAvailability,
-  createIndexedDbGeometryAssetStore,
   storeGeometryAssetInputsForManifest,
   type GeometryAssetStore,
 } from "@/domain/modeling/geometry-asset-store";

@@ -725,6 +725,33 @@ export interface SnapshotFailedEvent {
  * through `effect.*` result events.
  */
 export type EditorEvent =
+  | { type: "sketchPlaneEdit.supportCommitted"; target: import("@/contracts/shared/sketch-plane").SketchPlaneSupportRef }
+  | { type: "sketch.beginRequested"; target: import("@/contracts/shared/sketch-plane").SketchPlaneSupportRef | import("@/contracts/shared/references").SketchRef }
+  | { type: "sketch.offsetCompleted"; prepared: Exclude<ReturnType<typeof import("@/domain/editor/sketch-session/editing").prepareSketchOffset>, { message: string }>; record: import("@/contracts/solver/schema").SketchOffsetPublicationRecord }
+  | { type: "sketch.imageEdited"; target: Extract<import("@/contracts/shared/references").DurableRef, { kind: "sketchOperation" }>; edit: import("@/contracts/semantic/schema").SemanticReferenceImageEdit | { kind: "replace"; image: import("@/contracts/reference-image/schema").ReferenceImagePayload } }
+  | { type: "sketch.imageRemoved"; target: Extract<import("@/contracts/shared/references").DurableRef, { kind: "sketchOperation" }> }
+  | { type: "sketch.imageAuthored"; payload: import("@/contracts/reference-image/schema").ReferenceImagePayload }
+  | { type: "sketch.styleAuthored"; targets: Extract<import("@/contracts/semantic/schema").SemanticSketchCommand, { operation: "sketch.style.patch" }>["targets"]; patch: import("@/contracts/semantic/schema").SemanticSketchStylePatch }
+  | { type: "sketch.referenceAuthored"; target: Extract<import("@/contracts/semantic/schema").SemanticSketchCommand, { operation: "sketch.reference.add" }>["target"] }
+  | { type: "sketch.derivationCreated"; input: Extract<import("@/contracts/semantic/schema").SemanticCommand, { operation: "sketch.derivation.create" }> }
+  | { type: "sketch.mirrorRemoved"; derivationId: string }
+  | { type: "sketch.mirrorRepaired"; repair: import("@/domain/editor/sketch-session/types").SketchMirrorRepairState; target: import("@/core/editor/schema").PrimitiveRef }
+  | { type: "sketch.mirrorCreated"; targets: readonly Extract<import("@/contracts/shared/references").DurableRef, { kind: "sketchEntity" }>[]; axis: Extract<import("@/contracts/shared/references").DurableRef, { kind: "sketchEntity" }> | import("@/contracts/shared/references").SketchDatumReferenceRef }
+  | { type: "sketch.offsetRemoved"; derivationId: string }
+  | { type: "sketch.geometryBuilt"; input: import("@/contracts/semantic/schema").SemanticSketchConstruction }
+  | { type: "sketch.geometryUpdated"; edit: import("@/contracts/semantic/schema").SemanticSketchGeometryEdit }
+  | { type: "sketch.intersectionEditCompleted"; basis: { definition: SketchSessionState["definition"]; generation: number; input: import("@/contracts/sketch/edit-intersections").SketchEditIntersectionInput }; result: import("@/contracts/sketch/edit-intersections").SketchEditIntersectionResult }
+  | { type: "sketch.geometryDeleted"; targets: readonly import("@/contracts/semantic/schema").SemanticSketchGeometryTarget[] }
+  | { type: "sketch.labelSet"; target: import("@/contracts/semantic/schema").SemanticSketchLabelTarget; label: string }
+  | { type: "sketch.constructionSet"; target: Extract<import("@/contracts/shared/references").DurableRef, { kind: "sketchEntity" | "sketchPoint" }>; construction: boolean }
+  | { type: "sketch.primitiveAuthored"; primitive: import("@/contracts/semantic/schema").SemanticSketchPrimitive; construction: boolean }
+  | { type: "sketch.requirementRemoved"; targets: readonly Extract<import("@/contracts/shared/references").DurableRef, { kind: "dimension" | "constraint" }>[] }
+  | { type: "sketch.requirementAuthored"; input: import("@/contracts/semantic/schema").SemanticRequirementInput }
+  | { type: "sketch.dimensionAuthored"; input: import("@/contracts/semantic/schema").SemanticDimensionInput }
+  | { type: "sketch.dimensionMadeReference"; dimensionId: import("@/contracts/shared/ids").DimensionId }
+  | { type: "sketch.dimensionUpdated"; dimensionId: import("@/contracts/shared/ids").DimensionId; value: number | string }
+  | { type: "sketch.publishRequested" }
+  | { type: "sketch.discardRequested" }
   | SessionStartedEvent
   | ToolActivatedEvent
   | CommandCancelledEvent
@@ -924,6 +951,7 @@ export type EditorEvent =
       actualRevisionId?: RevisionId;
       /** Kernel-normalized identity used to retain private history across publication. */
       publishedSketchId?: SketchId;
+      solverCorrelation?: { solveRequestId: RequestId; regionRequestId: RequestId } | null;
       /** Publication reached the live shared CRDT but its durability flush is pending. */
       durabilityPending?: boolean;
       /** Structured error context preserved when `accepted` is false. */
@@ -1378,6 +1406,7 @@ export interface EditorEffectRuntime {
     diagnostics: ModelingDiagnostic[];
     actualRevisionId?: RevisionId;
     publishedSketchId?: SketchId;
+    solverCorrelation?: { solveRequestId: RequestId; regionRequestId: RequestId } | null;
     durabilityPending?: boolean;
     errorContext?: AppErrorContextEntry[];
   } | null>;

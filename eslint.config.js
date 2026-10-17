@@ -9,6 +9,7 @@ export default defineConfig([
   globalIgnores([
     "node_modules",
     "dist",
+    "dist-cli",
     "build",
     "coverage",
     "*.min.js",

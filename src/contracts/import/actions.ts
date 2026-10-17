@@ -95,7 +95,9 @@ export interface ImportBodyScopeBinding {
   source: ImportTopologySelectorSource;
   /** Exact earlier prepared action whose accepted result produced candidate bodies. */
   producerActionIndex: number;
-  /** Captured sibling-face evidence that must vote unanimously for one live output body. */
+  /** Existing exact bodyOf witness when one source action produces exactly one captured body. */
+  ownerRef?: Extract<ImportDeferredValue, { kind: "bodyOf" }>;
+  /** Captured sibling-face evidence that must vote unanimously absent an exact ownerRef. */
   siblingSignatures: readonly OnshapeGeometricSignature[];
 }
 
@@ -138,6 +140,17 @@ export interface ImportDeferredHistoricalTopologyRef {
   source: ImportTopologySelectorSource;
 }
 
+/** Source-only authority; never persisted as kernel body/face identity. */
+export interface ImportSplitInterfaceOwnerWitness {
+  capturedBodyId: string;
+  capturedFaceId: string;
+  capturedSignature: OnshapeGeometricSignature;
+  /** Oriented captured owner boundary, not the reconstructed tool's surface normal. */
+  orientedNormal: [number, number, number];
+  /** Complete polygonal trim boundary in document millimeters, including holes. */
+  boundary: readonly (readonly [readonly [number, number, number], readonly [number, number, number]])[];
+}
+
 export interface ImportDeferredSplitInterfaceFaceRef {
   kind: "splitInterfaceFaceOf";
   toolExtrudeActionIndex: number;
@@ -146,6 +159,10 @@ export interface ImportDeferredSplitInterfaceFaceRef {
   /** Authored id of the profile sketch entity whose side face the tool extrude generated. */
   profileEntityId: SketchEntityId;
   endRole: "one-side-end" | "combined-ends";
+  /** Only the existing recognized isFromBackBodyT leaf is supported. */
+  side: "back";
+  ownerWitness: ImportSplitInterfaceOwnerWitness;
+  successorActionIndexes: readonly number[];
   source: ImportTopologySelectorSource;
 }
 

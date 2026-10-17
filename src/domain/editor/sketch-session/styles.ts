@@ -1,11 +1,12 @@
+import { keptSketchWithheldRegionText } from "./region-feedback";
 import type {
   SketchDefinition,
   SketchStyleDefinition,
 } from "@/contracts/sketch/schema";
 import { type PrimitiveRef, primitiveRefEquals } from "@/core/editor/schema";
 import {
-  type SketchStylePatch,
   type SketchStyleToolId,
+  type SketchStylePatch,
   isSketchStyleTarget,
   parseSketchStylePatch,
 } from "@/domain/sketch-styles/definition";
@@ -217,25 +218,52 @@ export function patchSketchStyleValue(
     return session;
   }
 
+  return applySketchStylePatch(session, localTargets, parsedPatch, toolId);
+}
+
+/** Explicit authored targets share browser style application without activating a tool. */
+export function authorSketchStyle(
+  session: SketchSessionState,
+  targets: readonly Extract<PrimitiveRef, { kind: "region" | "sketchEntity" }>[],
+  patch: import("@/contracts/semantic/schema").SemanticSketchStylePatch,
+): SketchSessionState {
+  const parsedPatch = parseSketchStylePatch({ ...patch, intent: "patchSketchStyle" });
+  if (!parsedPatch) return { ...session, validationMessage: "Invalid sketch style value." };
+  const toolId = isFillStylePatch(parsedPatch) ? "fill" : "stroke";
+  if (!targets.length || !targets.every(target => getFirstSketchStyleTarget(session, [target], toolId)))
+    return { ...session, validationMessage: "Sketch style targets must be current owned regions or entities of the selected style kind." };
+  return applySketchStylePatch(session, targets, parsedPatch, toolId);
+}
+
+function applySketchStylePatch(
+  session: SketchSessionState,
+  targets: readonly Extract<PrimitiveRef, { kind: "region" | "sketchEntity" }>[],
+  patch: SketchStylePatch,
+  toolId: SketchStyleToolId,
+): SketchSessionState {
   const nextFullDefinition = applyStylePatchToDefinition(
     session.definition,
     session.liveRegions.regions,
-    localTargets,
-    parsedPatch,
+    targets,
+    patch,
     toolId,
   );
 
   if (nextFullDefinition === session.definition) {
-    return session;
+    return { ...session, validationMessage: keptSketchWithheldRegionText(session) };
   }
 
   const nextDefinition = nextFullDefinition;
 
-  // Styles never affect the solve or region records (T09b review A6(a)), so
-  // the live solve basis and the published live regions stay as they are.
+  // Style-only changes preserve geometry certificates, but their authored
+  // source identity must advance too. Never promote an already stale solve.
   return {
     ...session,
     definition: nextDefinition,
+    validationMessage: keptSketchWithheldRegionText(session),
+    liveSolve: session.liveSolve?.sourceDefinition === session.definition
+      ? { ...session.liveSolve, sourceDefinition: nextDefinition }
+      : session.liveSolve,
     commitRequest: rebuildSessionCommitRequest(session, nextDefinition),
   };
 }

@@ -1,4 +1,13 @@
 import { getPeerDeletedSketchNotice } from "./selectors";
+import { authorSketchDimension, authorSketchRequirement } from "@/domain/editor/sketch-session/constraints";
+import { updateSketchDimensionValue, deleteSelectedSketchAnnotation, makeSketchAnnotationReference } from "@/domain/editor/sketch-session/annotations";
+import { updateSketchGeometry, setSketchItemLabel } from "@/domain/editor/sketch-session/geometry-actions";
+import { applySketchMirrorRemoval, completeSketchMirrorRepair } from "@/domain/editor/sketch-session/mirror-actions";
+import { applySketchOffsetRemoval } from "@/domain/editor/sketch-session/offset-actions";
+import { createSketchDerivation, createSketchMirror, completeSketchOffset, buildSketchGeometry, completeSketchIntersectionEdit, deleteSelectedSketchGeometry } from "@/domain/editor/sketch-session/editing";
+import { authorReferenceImage, editReferenceImage } from "@/domain/editor/sketch-session/references";
+import { authorSketchStyle } from "@/domain/editor/sketch-session/styles";
+import { authorSketchReference, setSketchConstructionTarget, authorSketchPrimitive } from "@/domain/editor/sketch-session/tools";
 import { isRegisteredSketchToolId } from "@/core/sketch-tools/registry";
 import { isRegisteredSketchConstraintToolId } from "@/core/sketch-constraints/registry";
 import { isRegisteredSketchEditToolId } from "@/core/sketch-edit-tools/registry";
@@ -31,6 +40,7 @@ import type {
 import type { EditorExtensionDependencies } from "./dependencies";
 import {
   emitSketchCommit,
+  emitSketchReferenceProjection,
   emitSketchSpecialModeEffect,
   emitEditSessionCursorRestore,
 } from "./effect-emitters";
@@ -215,6 +225,64 @@ export function reduceSketchWorkflow(
   ) => EditorTransitionResult,
 ): EditorTransitionResult | null {
   switch (event.type) {
+    case "sketch.beginRequested":
+      return { state, effects: [] };
+    case "sketch.imageEdited":
+      return { state: createSketchPreviewState(state, editReferenceImage(state.session, event.target.operationId, event.edit)), effects: [] };
+    case "sketch.imageRemoved":
+      return { state: createSketchPreviewState(state, deleteSelectedSketchGeometry(state.session, [event.target])), effects: [] };
+    case "sketch.imageAuthored":
+      return { state: createSketchPreviewState(state, authorReferenceImage(state.session, event.payload)), effects: [] };
+    case "sketch.styleAuthored":
+      return { state: createSketchPreviewState(state, authorSketchStyle(state.session, event.targets, event.patch)), effects: [] };
+    case "sketch.referenceAuthored": {
+      const session = authorSketchReference(state.session, event.target);
+      return session.definition === state.session.definition
+        ? { state: createSketchPreviewState(state, session), effects: [] }
+        : emitSketchReferenceProjection(createSketchPreviewState(state, session), session);
+    }
+    case "sketch.intersectionEditCompleted":
+      return { state: createSketchPreviewState(state, completeSketchIntersectionEdit(state.session, event.basis, event.result).session), effects: [] };
+    case "sketch.offsetCompleted":
+      return { state: createSketchPreviewState(state, completeSketchOffset(state.session, event.prepared, event.record)), effects: [] };
+    case "sketch.derivationCreated":
+      return { state: createSketchPreviewState(state, createSketchDerivation(state.session, event.input)), effects: [] };
+    case "sketch.mirrorRemoved":
+      return { state: createSketchPreviewState(state, applySketchMirrorRemoval(state.session, event.derivationId)), effects: [] };
+    case "sketch.mirrorRepaired":
+      return { state: createSketchPreviewState(state, completeSketchMirrorRepair(state.session, event.repair, event.target)), effects: [] };
+    case "sketch.mirrorCreated":
+      return { state: createSketchPreviewState(state, createSketchMirror(state.session, event.targets, event.axis)), effects: [] };
+    case "sketch.offsetRemoved":
+      return { state: createSketchPreviewState(state, applySketchOffsetRemoval(state.session, event.derivationId)), effects: [] };
+    case "sketch.geometryBuilt":
+      return { state: createSketchPreviewState(state, buildSketchGeometry(state.session, event.input)), effects: [] };
+    case "sketch.geometryUpdated":
+      return { state: createSketchPreviewState(state, updateSketchGeometry(state.session, event.edit)), effects: [] };
+    case "sketch.geometryDeleted":
+      return { state: createSketchPreviewState(state, deleteSelectedSketchGeometry(state.session, event.targets)), effects: [] };
+    case "sketch.labelSet":
+      return { state: createSketchPreviewState(state, setSketchItemLabel(state.session, event.target, event.label)), effects: [] };
+    case "sketch.constructionSet":
+      return { state: createSketchPreviewState(state, setSketchConstructionTarget(state.session, event.target, event.construction)), effects: [] };
+    case "sketch.primitiveAuthored":
+      return { state: createSketchPreviewState(state, authorSketchPrimitive(state.session, event.primitive, event.construction)), effects: [] };
+    case "sketch.requirementRemoved":
+      return { state: createSketchPreviewState(state, event.targets.reduce((session, target) => deleteSelectedSketchAnnotation(session, [target]), state.session)), effects: [] };
+    case "sketch.requirementAuthored":
+      return { state: createSketchPreviewState(state, authorSketchRequirement(state.session, event.input)), effects: [] };
+    case "sketch.dimensionAuthored":
+      return { state: createSketchPreviewState(state, authorSketchDimension(state.session, event.input)), effects: [] };
+    case "sketch.dimensionMadeReference":
+      return { state: createSketchPreviewState(state, makeSketchAnnotationReference(state.session, { target: { kind: "dimension", sketchId: state.session.sketchId ?? state.session.actionContextId, dimensionId: event.dimensionId }, pendingValue: null })), effects: [] };
+    case "sketch.dimensionUpdated":
+      return { state: createSketchPreviewState(state, updateSketchDimensionValue(state.session, event.dimensionId, event.value)), effects: [] };
+    case "sketch.publishRequested":
+      return finishSketchSession(state);
+    case "sketch.discardRequested":
+      return state.editSessionCursorContext?.phase === "active"
+        ? emitEditSessionCursorRestore(toIdleState(state, "part"))
+        : { state: toIdleState(state, "part"), effects: [] };
     case "tool.activated": {
       // T14c: activating any sketch tool drops the annotation context.
       const result = handleEditingSketchToolActivation(state, event);

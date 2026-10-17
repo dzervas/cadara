@@ -14,6 +14,20 @@ export interface ExportProviderRegistry {
   getCompatibleFormats(target: DurableRef): readonly string[];
 }
 
+/** Registry-owned discovery, shared by composition rather than a client format list. */
+export function describeExportProviders(
+  registry: ExportProviderRegistry,
+): import("@/contracts/export/options").ExportProviderDescription[] {
+  return registry.getAll().map((provider) => ({
+    format: provider.formatId,
+    label: provider.label,
+    extension: provider.fileExtension,
+    mimeType: provider.mimeType,
+    targetKinds: provider.targetKinds,
+    defaultOptions: provider.getDefaultOptions(),
+  }));
+}
+
 export function createExportProviderRegistry(
   providers: readonly ExportProvider<unknown, FeatureEditorFormSchema>[],
 ): ExportProviderRegistry {

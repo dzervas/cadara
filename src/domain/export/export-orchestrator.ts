@@ -66,6 +66,23 @@ export async function orchestrateGeometryExport(
     return failure;
   }
 
+  try {
+    provider.validateOptions?.(input.options);
+  } catch (error) {
+    return {
+      ok: false,
+      format: input.format,
+      diagnostics: [
+        {
+          code: `invalid-${input.format}-options`,
+          severity: "error",
+          message: error instanceof Error ? error.message : String(error),
+          target: input.target,
+        },
+      ],
+    };
+  }
+
   const result = await provider.export({
     target: input.target,
     targetLabel: input.targetLabel,

@@ -18,10 +18,8 @@
 import type { DocumentId } from "@/contracts/shared/ids";
 import { getVersionedOpenCascadeRuntimeAssetUrls } from "@/domain/modeling/occ/assets";
 import { createOpenCascadeNeutralCurveQueryCapability } from "@/domain/modeling/occ/neutral-curve-query";
-import {
-  loadDefaultOpenCascadeFactory,
-  type OpenCascadeInstance,
-} from "@/domain/modeling/occ/runtime";
+import { loadDefaultOpenCascadeFactory } from "@/infrastructure/occ/runtime";
+import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import {
   normalizeOccWorkerFailure,
   validateOccWorkerRequestEnvelope,

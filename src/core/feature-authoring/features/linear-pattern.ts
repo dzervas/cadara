@@ -22,6 +22,7 @@ import {
   authoredNumberFormValue,
   authoredNumberLiteral,
   createMissingInputDiagnostic,
+  hasExactBodyOperationParticipants,
   expressionCapableAuthoredValue,
   isPositiveAuthoredNumber,
   toFeaturePhaseDiagnostics,
@@ -118,6 +119,16 @@ function getLinearPatternValidationDiagnostics(
     participants: linearPatternParticipants,
     options: linearPatternOptions,
   });
+}
+
+export function prepareLinearPatternFeatureDefinition(
+  parameters: import("@/contracts/modeling/advanced-solid").LinearPatternFeatureParameters,
+) {
+  if ("operationIntent" in parameters || !hasExactBodyOperationParticipants(parameters, "direction", ["construction", "face", "edge", "sketchEntity"])) return null;
+  if (Object.keys(parameters.options).some(k => !["instanceCount","spacing","oppositeDirection"].includes(k))) return null;
+  return linearPatternAuthoringDefinition.buildDefinition(linearPatternAuthoringDefinition.hydrateDraft({
+    kind: "linearPattern", featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION, parameters,
+  }));
 }
 
 export const linearPatternAuthoringDefinition = {

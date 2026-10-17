@@ -10,10 +10,10 @@ import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import {
   createSketchSessionFromSnapshot,
-  getSketchSessionDisplayRenderables,
   type SketchSessionDisplayRenderable,
-  type SketchSessionState,
+  type SketchSessionState
 } from "@/domain/editor/sketch-session";
+import { getSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session/display";
 import {
   getSketchRevealedHandleEntityIds,
   getSketchRevealedPointIds,

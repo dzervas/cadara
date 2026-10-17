@@ -14,6 +14,7 @@ import {
 import {
   asBodyRef,
   createMissingInputDiagnostic,
+  hasExactBodyParticipants,
 } from "@/core/feature-authoring/features/shared";
 
 export const splitParticipants = [
@@ -38,6 +39,7 @@ function buildSplitDefinition(draft: SplitFeatureParameterDraft) {
     kind: "split" as const,
     featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
     parameters: {
+      ...(draft.keepTools === undefined ? {} : { options: { keepTools: draft.keepTools } }),
       participants: [
         ...(draft.targetBodyTarget
           ? [{ role: "targetBody" as const, targets: [draft.targetBodyTarget] }]
@@ -55,6 +57,22 @@ function getSplitValidationDiagnostics(draft: SplitFeatureParameterDraft) {
     featureKind: "split",
     participants: splitParticipants,
   });
+}
+
+export function prepareSplitFeatureDefinition(
+  parameters: import("@/contracts/modeling/advanced-solid").SplitFeatureParameters,
+) {
+  if (!hasExactBodyParticipants(parameters, ["targetBody", "toolBody"], 1)) return null;
+  if ("operationIntent" in parameters) return null;
+  if (parameters.options && (Object.keys(parameters.options).some(k => k !== "keepTools") ||
+    (parameters.options.keepTools !== undefined && typeof parameters.options.keepTools !== "boolean"))) return null;
+  return splitAuthoringDefinition.buildDefinition(
+    splitAuthoringDefinition.hydrateDraft({
+      kind: "split",
+      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+      parameters,
+    }),
+  );
 }
 
 export const splitAuthoringDefinition = {
@@ -85,6 +103,7 @@ export const splitAuthoringDefinition = {
       );
 
     return {
+      ...(typeof feature.parameters.options?.keepTools === "boolean" ? { keepTools: feature.parameters.options.keepTools } : {}),
       targetBodyTarget: getParticipantTarget("targetBody"),
       toolBodyTarget: getParticipantTarget("toolBody"),
     };
@@ -92,6 +111,7 @@ export const splitAuthoringDefinition = {
   applyPatch(draft, patch) {
     return {
       ...draft,
+      ...(typeof patch.keepTools === "boolean" ? { keepTools: patch.keepTools } : {}),
       targetBodyTarget:
         patch.targetBodyTarget === undefined
           ? draft.targetBodyTarget

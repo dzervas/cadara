@@ -40,7 +40,7 @@ import {
 } from "@/domain/modeling/occ/sketch-profile";
 import { resolveRegionBoundaryCurve } from "@/contracts/sketch/region-boundary-curves";
 import { requireSketchRecord } from "@/contracts/sketch/runtime-schema";
-import { getDefaultOpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import { getDefaultOpenCascadeInstance } from "@/infrastructure/occ/runtime";
 
 test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
   function assertClose(

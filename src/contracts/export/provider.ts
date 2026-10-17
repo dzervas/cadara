@@ -19,6 +19,7 @@ export interface ExportProvider<TOptions = unknown, TFormSchema = unknown> {
   fileExtension: string;
   mimeType: string;
   targetKinds: readonly ExportTargetKind[];
+  validateOptions?(options: unknown): void;
   getDefaultOptions(): TOptions;
   getOptionFormSchema(options: TOptions): TFormSchema;
   applyOptionPatch(options: TOptions, patch: Record<string, unknown>): TOptions;

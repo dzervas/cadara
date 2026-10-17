@@ -37,7 +37,6 @@ import {
   createNewSketchSession,
   createSketchSessionFromSnapshot,
   finalizeSketchDraw,
-  getSketchSessionDisplayRenderables,
   getSketchSessionPreviewLabel,
   patchSketchEditToolValue,
   selectSketchEditTarget,
@@ -45,6 +44,7 @@ import {
   startSketchDraw,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
+import { getSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session/display";
 import {
   getSketchDegenerateSplineSpans,
   getSketchSessionInvalidFeedback,

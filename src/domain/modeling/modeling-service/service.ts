@@ -23,6 +23,7 @@ import type {
 } from "@/contracts/modeling/geometry-assets";
 import {
   encodeGeometryAssetData,
+  getEmbeddedGeometryAssetBytes,
   createGeometryAssetDiagnostic,
 } from "@/contracts/modeling/geometry-assets";
 import { requireCadaraExportOptions } from "@/contracts/modeling/export.runtime-schema";
@@ -56,8 +57,9 @@ import {
   isGeometryAssetDocumentRepository,
   type DocumentRepositoryChangeEvent,
   type DocumentRepositoryMetadata,
+  type DocumentRepositoryMutationResult,
 } from "@/domain/modeling/document-repository";
-import { createLocalAuthoredDocumentPayload } from "@/lib/local-file-system-access";
+import { serializeAuthoredDocumentJson as createLocalAuthoredDocumentPayload } from "@/contracts/modeling/authored-document-serialization";
 import { hashGeometryAssetBytes } from "@/domain/modeling/geometry-asset-store";
 import type {
   ModelingService,
@@ -119,12 +121,11 @@ import {
   getAdapterReplayCursor,
   replayHistoryEntry,
 } from "./operation-history";
+import { createRevisionId, parseRevisionSequence } from "../document-revision";
 
-/** A feature kind as a history label: "extrude" → "Extrude", "deleteSolid" → "Delete Solid". */
+/** A feature kind as a history label. */
 function featureKindLabel(kind: string) {
-  return kind
-    .replace(/([A-Z])/g, " $1")
-    .replace(/^./, (value) => value.toUpperCase());
+  return kind.replace(/([A-Z])/g, " $1").replace(/^./, (value) => value.toUpperCase());
 }
 
 export function createModelingService(
@@ -156,6 +157,20 @@ export function createModelingService(
   let latestDocumentChangeEvent: ModelingServiceDocumentChangeEvent | null =
     null;
   let seedAuthoredDocument: AuthoredModelDocument | null = null;
+  let restoredMutationPredecessor: { document: AuthoredModelDocument; runtimeRevisionId: RevisionId } | null = null;
+  let repositorySnapshotBasis: {
+    runtimeRevisionId: RevisionId;
+    repositoryRevisionId: RevisionId;
+    metadata: DocumentRepositoryMetadata;
+  } | null = null;
+  let stateGeneration = 0;
+  let runtimeGeneration = 0;
+
+  function beginRuntimeChange() {
+    repositorySnapshotBasis = null;
+    stateGeneration += 1;
+    return ++runtimeGeneration;
+  }
   let repositoryChangePromise = Promise.resolve();
   let repositoryPersistencePromise = Promise.resolve();
   // T17k3 (A-1): local mutations in flight, and the newest repository state seen.
@@ -173,14 +188,26 @@ export function createModelingService(
   >();
 
   function rememberRepositoryMetadata(metadata: DocumentRepositoryMetadata) {
+    stateGeneration += 1;
     currentRepositoryMetadata = {
       ...metadata,
       heads: [...metadata.heads],
     };
   }
 
-  function markRepositorySnapshotFresh(metadata: DocumentRepositoryMetadata) {
+  function markRepositorySnapshotFresh(
+    metadata: DocumentRepositoryMetadata,
+    document?: AuthoredModelDocument,
+    runtimeRevisionId = document?.revisionId,
+  ) {
     rememberRepositoryMetadata(metadata);
+    if (document && runtimeRevisionId) {
+      repositorySnapshotBasis = {
+        runtimeRevisionId,
+        repositoryRevisionId: document.revisionId,
+        metadata: { ...metadata, heads: [...metadata.heads] },
+      };
+    }
   }
 
   function createEmptyOperationHistoryForCurrentRepository() {
@@ -245,23 +272,17 @@ export function createModelingService(
   function attachRepositoryProvenance(
     snapshot: WorkspaceSnapshot,
   ): WorkspaceSnapshot {
-    const metadata = documentRepository
-      ? (currentRepositoryMetadata ??
-        documentRepository.getMetadata(currentDocumentId))
-      : null;
-    if (!metadata) {
-      return {
-        ...snapshot,
-        provenance: null,
-      };
+    const basis = repositorySnapshotBasis;
+    if (!documentRepository || !basis || basis.runtimeRevisionId !== snapshot.document.revisionId) {
+      return { ...snapshot, provenance: null };
     }
-
     return {
       ...snapshot,
       provenance: {
-        actorId: metadata.actorId,
-        repositoryHeads: [...metadata.heads],
-        repositorySource: metadata.source,
+        actorId: basis.metadata.actorId,
+        repositoryHeads: [...basis.metadata.heads],
+        repositoryRevisionId: basis.repositoryRevisionId,
+        repositorySource: basis.metadata.source,
       },
     };
   }
@@ -316,13 +337,24 @@ export function createModelingService(
     diagnostics: ModelingDiagnostic[] = [],
     assets: readonly GeometryAssetBlobInput[] = [],
     options?: AuthoredDocumentRestoreOptions,
+    metadata?: DocumentRepositoryMetadata,
   ) {
-    await adapter.restoreAuthoredModelDocument?.(
+    const generation = beginRuntimeChange();
+    restoredMutationPredecessor = null;
+    if (!adapter.restoreAuthoredModelDocument) {
+      throw new Error("The active modeling adapter cannot restore authored repository documents.");
+    }
+    await adapter.restoreAuthoredModelDocument(
       document,
       diagnostics,
       createLocalAssetResolver(document, assets),
       options,
     );
+    const runtimeRevisionId = await currentRevisionId();
+    // A later runtime operation cannot supply evidence for this restore.
+    if (generation !== runtimeGeneration) return;
+    restoredMutationPredecessor = { document: structuredClone(document), runtimeRevisionId };
+    if (metadata) markRepositorySnapshotFresh(metadata, document, runtimeRevisionId);
   }
 
   /** T17k3 (K3): the repository's current state, which may hold changes this
@@ -331,10 +363,11 @@ export function createModelingService(
   function restoreRepositoryState(
     document: AuthoredModelDocument,
     diagnostics: ModelingDiagnostic[] = [],
+    metadata?: DocumentRepositoryMetadata,
   ) {
     return restoreAuthoredRepositoryDocument(document, diagnostics, [], {
       newRevision: true,
-    });
+    }, metadata);
   }
 
   /** T17k3 (A-1): a document mutation runs after the repository changes
@@ -349,7 +382,16 @@ export function createModelingService(
         const run = (async () => {
           await ensureInitialized();
           await changesBefore;
-          return input.action();
+          const previousBasis = repositorySnapshotBasis;
+          const generation = beginRuntimeChange();
+          const result = await input.action();
+          // A refusal leaves the runtime untouched. Its previous verified basis
+          // remains valid unless another runtime operation has intervened.
+          if (result.revisionState.kind !== "accepted" && generation === runtimeGeneration && !repositorySnapshotBasis && previousBasis) {
+            repositorySnapshotBasis = previousBasis;
+            stateGeneration += 1;
+          }
+          return result;
         })();
         // Ordering only: the caller still receives `run`'s rejection.
         localMutations = Promise.all([
@@ -407,6 +449,16 @@ export function createModelingService(
     return createAuthoredModelDocumentFromSnapshot(snapshot);
   }
 
+  async function getMutationPredecessor() {
+    const kernelBase = await exportAuthoredDocumentForRepository();
+    // Restore/compensation rebuilds native witnesses, while the repository keeps
+    // its exact previous stored basis. That basis applies only until the runtime
+    // advances: later writes may be queued ahead of background persistence.
+    return restoredMutationPredecessor?.runtimeRevisionId === kernelBase.revisionId
+      ? structuredClone(restoredMutationPredecessor.document)
+      : kernelBase;
+  }
+
   function createDocumentFileDiagnostic(
     code: string,
     message: string,
@@ -425,6 +477,12 @@ export function createModelingService(
     assets: readonly GeometryAssetBlobInput[],
   ): GeometryAssetResolver | undefined {
     const transientAssetBytesByHash = new Map<GeometryAssetHash, Uint8Array>();
+    // Import validation restores before repository initialization; embedded native
+    // inputs must be resolvable during that restore, not only after persistence.
+    for (const asset of document.assets.records) {
+      const bytes = getEmbeddedGeometryAssetBytes(asset);
+      if (bytes) transientAssetBytesByHash.set(asset.hash, bytes);
+    }
     const transientAssetsById = new Map(
       assets.map((asset) => {
         transientAssetBytesByHash.set(asset.asset.hash, asset.bytes.slice());
@@ -438,7 +496,7 @@ export function createModelingService(
       ? documentRepository
       : undefined;
 
-    if (transientAssetsById.size === 0 && !repositoryResolver) {
+    if (transientAssetBytesByHash.size === 0 && !repositoryResolver) {
       return undefined;
     }
 
@@ -455,11 +513,9 @@ export function createModelingService(
         const record = document.assets.records.find(
           (asset) => asset.assetId === reference.assetId,
         );
-        if (!record || !repositoryResolver) {
-          return null;
-        }
-
-        const bytes = await repositoryResolver.getGeometryAssetRecord(record);
+        if (!record) return null;
+        const bytes = transientAssetBytesByHash.get(record.hash) ??
+          await repositoryResolver?.getGeometryAssetRecord(record);
         return bytes ? { bytes: bytes.slice(), format: record.format } : null;
       },
       async getGeometryAssetBytes(hash) {
@@ -482,6 +538,33 @@ export function createModelingService(
       assets.map((asset) => [asset.asset.assetId, asset]),
     );
 
+    // Current native files must carry the retained inputs they reference;
+    // resolving an old session's store copy would make reopening non-repeatable.
+    const manifestById = new Map(
+      document.assets.records.map((asset) => [asset.assetId, asset]),
+    );
+    for (const feature of document.features) {
+      if (feature.definition.kind !== "bakedBody") continue;
+      const reference = feature.definition.parameters;
+      const asset = manifestById.get(reference.assetId);
+      if (
+        !asset ||
+        asset.format !== reference.format ||
+        asset.hash !== reference.hash ||
+        asset.byteLength !== reference.byteLength
+      ) {
+        diagnostics.push(
+          {
+            ...createDocumentFileDiagnostic(
+              "document-import-asset-missing",
+              `Retained geometry for ‘${feature.label || "Imported feature"}’ is missing or does not match its recorded input.`,
+            ),
+            target: { kind: "feature", featureId: feature.featureId },
+          },
+        );
+      }
+    }
+
     for (const asset of document.assets.records) {
       if (asset.format !== "cadara-brep" && asset.format !== "baked-mesh") {
         continue;
@@ -492,7 +575,7 @@ export function createModelingService(
           createGeometryAssetDiagnostic(
             "geometry-asset-corrupt",
             asset,
-            `Geometry asset ${asset.assetId} is missing embedded authored geometry data.`,
+            "Retained geometry is missing embedded authored geometry data.",
           ),
         );
         continue;
@@ -508,7 +591,7 @@ export function createModelingService(
           createGeometryAssetDiagnostic(
             "geometry-asset-corrupt",
             asset,
-            `Geometry asset ${asset.assetId} embedded data does not match its recorded hash or byte length.`,
+            "Retained geometry does not match its recorded hash or byte length.",
           ),
         );
       }
@@ -526,7 +609,7 @@ export function createModelingService(
             createGeometryAssetDiagnostic(
               "geometry-asset-corrupt",
               asset,
-              `Geometry asset ${asset.assetId} prepared bytes do not match its embedded authored geometry data.`,
+              "Prepared geometry does not match its embedded authored geometry data.",
             ),
           );
         }
@@ -573,6 +656,8 @@ export function createModelingService(
       fetchSnapshot?: boolean;
       validateBeforePersist?: boolean;
       validateEmbeddedAssetsBeforePersist?: boolean;
+      observeTransaction?: (transaction: import("@/domain/modeling/document-repository").DocumentRepositoryMutationResult) => void;
+      authoredAction?: { expected: AuthoredModelDocument; label: string };
     } = {},
   ): Promise<ModelingDocumentFileMutationResult> {
     if (!adapter.restoreAuthoredModelDocument) {
@@ -592,7 +677,10 @@ export function createModelingService(
       return normalized;
     }
 
-    const activeDocument = normalized.document;
+    let activeDocument = normalized.document;
+    let activeMetadata: DocumentRepositoryMetadata | undefined;
+    let activeRuntimeRevisionId: RevisionId | undefined;
+    const rollbackMetadata = currentRepositoryMetadata ?? undefined;
     let restoreDiagnostics: ModelingDiagnostic[] = [];
     const rollbackDocument =
       options.validateBeforePersist && documentRepository
@@ -604,10 +692,13 @@ export function createModelingService(
         activeDocument,
         restoreDiagnostics,
         assets,
+        undefined,
+        activeMetadata,
       );
     };
 
     const validateActiveDocument = async () => {
+      beginRuntimeChange();
       await (adapter.validateAuthoredModelDocument?.(
         activeDocument,
         restoreDiagnostics,
@@ -615,9 +706,22 @@ export function createModelingService(
       ) ?? restoreActiveDocument());
     };
 
+    if (options.validateEmbeddedAssetsBeforePersist) {
+      const diagnostics = await validateEmbeddedGeometryAssetsForPersistence(
+        activeDocument,
+        assets,
+      );
+      if (diagnostics.length > 0) return { ok: false, diagnostics };
+    }
+
     if (options.validateBeforePersist) {
       try {
         await validateActiveDocument();
+        // Restore regenerates runtime topology witnesses. Persist that actual
+        // restored basis, not file-era tokens that the next write would
+        // legitimately reject as different from its own runtime predecessor.
+        activeDocument = await exportAuthoredDocumentForRepository();
+        activeRuntimeRevisionId = activeDocument.revisionId;
       } catch (error: unknown) {
         return {
           ok: false,
@@ -633,30 +737,29 @@ export function createModelingService(
       }
     }
 
-    if (options.validateEmbeddedAssetsBeforePersist) {
-      const diagnostics = await validateEmbeddedGeometryAssetsForPersistence(
-        activeDocument,
-        assets,
-      );
-      if (diagnostics.length > 0) {
-        return {
-          ok: false,
-          diagnostics,
-        };
-      }
-    }
-
     if (documentRepository) {
-      const writeResult = await documentRepository.initialize({
-        documentId: currentDocumentId,
-        document: activeDocument,
-        assets,
-      });
+      const writeResult = options.authoredAction
+        ? await documentRepository.mutate({
+            documentId: currentDocumentId,
+            document: activeDocument,
+            expected: options.authoredAction.expected,
+            label: options.authoredAction.label,
+            assets,
+          })
+        : await documentRepository.initialize({
+            documentId: currentDocumentId,
+            document: activeDocument,
+            assets,
+          });
 
+      options.observeTransaction?.(writeResult);
       if (!writeResult.ok) {
         canPersistAuthoredDocument = false;
-        if (rollbackDocument) {
-          await restoreAuthoredRepositoryDocument(rollbackDocument);
+        if (writeResult.appliedLive) {
+          markRepositorySnapshotFresh(writeResult.appliedLive.metadata);
+          await restoreAuthoredRepositoryDocument(writeResult.appliedLive.document, writeResult.appliedLive.diagnostics ?? [], assets, undefined, writeResult.appliedLive.metadata);
+        } else if (rollbackDocument) {
+          await restoreAuthoredRepositoryDocument(rollbackDocument, [], [], undefined, rollbackMetadata);
         }
         return {
           ok: false,
@@ -664,7 +767,15 @@ export function createModelingService(
         };
       }
 
-      markRepositorySnapshotFresh(writeResult.metadata);
+      activeMetadata = writeResult.metadata;
+      const persistedValidatedState = authoredDocumentsEqual(activeDocument, writeResult.document);
+      activeDocument = writeResult.document;
+      markRepositorySnapshotFresh(writeResult.metadata,
+        options.validateBeforePersist && persistedValidatedState ? activeDocument : undefined,
+        activeRuntimeRevisionId);
+      if (options.validateBeforePersist && persistedValidatedState && activeRuntimeRevisionId) restoredMutationPredecessor = {
+        document: structuredClone(activeDocument), runtimeRevisionId: activeRuntimeRevisionId,
+      };
       restoreDiagnostics = writeResult.diagnostics ?? [];
     }
 
@@ -781,6 +892,7 @@ export function createModelingService(
     latestShared: AuthoredModelDocument;
     normalizedCandidate: AuthoredModelDocument;
     expectedSketch: AuthoredModelDocument["sketches"][number] | null;
+    observe?: import("./types").ModelingCommitSketchInput["observePublication"];
     result: T;
   }): Promise<T & { durabilityPending?: boolean }> {
     if (!documentRepository || input.result.revisionState.kind !== "accepted") {
@@ -829,16 +941,18 @@ export function createModelingService(
       document: candidate,
       label: "Publish Sketch",
     });
+    input.observe?.(write);
     // T17k3 (R-1): the write is a three-way commit onto the current shared
     // state; when that state held a peer change, the merged document is not
     // the published candidate and gets a new revision.
     const restorePublished = async (
       document: AuthoredModelDocument,
       diagnostics: ModelingDiagnostic[] = [],
+      metadata?: DocumentRepositoryMetadata,
     ) => {
       await (authoredDocumentsEqual(document, candidate)
-        ? restoreAuthoredRepositoryDocument(document, diagnostics)
-        : restoreRepositoryState(document, diagnostics));
+        ? restoreAuthoredRepositoryDocument(document, diagnostics, [], undefined, metadata)
+        : restoreRepositoryState(document, diagnostics, metadata));
       // A peer change queued during the write needs no second restore when
       // this is already the newest repository state.
       if (
@@ -849,7 +963,7 @@ export function createModelingService(
     };
     if (write.ok) {
       markRepositorySnapshotFresh(write.metadata);
-      await restorePublished(write.document, write.diagnostics);
+      await restorePublished(write.document, write.diagnostics, write.metadata);
       return { ...input.result, revisionId: await currentRevisionId() };
     }
     if (write.appliedLive) {
@@ -858,6 +972,7 @@ export function createModelingService(
       await restorePublished(
         write.appliedLive.document,
         write.appliedLive.diagnostics,
+        write.appliedLive.metadata,
       );
       return {
         ...input.result,
@@ -876,7 +991,7 @@ export function createModelingService(
     });
     if (restored.ok) {
       markRepositorySnapshotFresh(restored.metadata);
-      await restoreRepositoryState(restored.document, restored.diagnostics);
+      await restoreRepositoryState(restored.document, restored.diagnostics, restored.metadata);
     } else {
       await restoreRepositoryState(input.latestShared, [
         createDocumentRepositoryDiagnostic(restored.status),
@@ -919,7 +1034,7 @@ export function createModelingService(
     expected: AuthoredModelDocument,
     response: ModelingOperationResult,
     result: T,
-    input: { baseRepositoryHeads?: readonly string[] },
+    input: { baseRepositoryHeads?: readonly string[]; observePersistence?: (transaction: DocumentRepositoryMutationResult) => void },
     createHistoryEntry: (() => ModelingOperationHistoryEntry) | null,
     /** The document history entry's label (the repository default otherwise). */
     label?: string,
@@ -940,15 +1055,15 @@ export function createModelingService(
     if (createHistoryEntry) {
       appendOperationHistoryEntry(createHistoryEntry());
       if (documentRepositoryPersistence === "background") {
-        await enqueueAcceptedAuthoredDocumentPersistence(expected, label);
+        await enqueueAcceptedAuthoredDocumentPersistence(expected, label, input.observePersistence);
         return freshResult;
       }
     } else if (documentRepositoryPersistence === "background") {
-      await enqueueAcceptedAuthoredDocumentPersistence(expected, label);
+      await enqueueAcceptedAuthoredDocumentPersistence(expected, label, input.observePersistence);
       return freshResult;
     }
 
-    return persistAcceptedAuthoredDocument(freshResult, expected, label);
+    return persistAcceptedAuthoredDocument(freshResult, expected, label, input.observePersistence);
   }
 
   function notifyModelingDocumentChange(event: DocumentRepositoryChangeEvent) {
@@ -1006,7 +1121,7 @@ export function createModelingService(
           if (latest !== restoredRepositoryEvent) {
             restoredRepositoryEvent = latest;
             rememberRepositoryMetadata(latest.metadata);
-            await restoreRepositoryState(latest.document, latest.diagnostics);
+            await restoreRepositoryState(latest.document, latest.diagnostics, latest.metadata);
           }
           if (!disposed) notifyModelingDocumentChange(event);
         });
@@ -1022,6 +1137,7 @@ export function createModelingService(
   async function replayOperationHistoryPayload(
     loadResultPayload: ModelingOperationHistoryPayload,
   ) {
+    beginRuntimeChange();
     operationHistoryPayload = structuredClone(loadResultPayload);
     let replayCursor = await getAdapterReplayCursor(adapter, currentDocumentId);
 
@@ -1122,6 +1238,9 @@ export function createModelingService(
     }
 
     rememberRepositoryMetadata(loadResult.metadata);
+    if (loadResult.status.kind === "seeded" && authoredDocumentsEqual(loadResult.document, seedDocument)) {
+      markRepositorySnapshotFresh(loadResult.metadata, loadResult.document, seedDocument.revisionId);
+    }
 
     const historyLoadResult = operationHistoryStore?.load();
 
@@ -1129,6 +1248,7 @@ export function createModelingService(
       await restoreAuthoredRepositoryDocument(
         loadResult.document,
         loadResult.diagnostics,
+        [], undefined, loadResult.metadata,
       );
       if (
         historyLoadResult?.ok &&
@@ -1163,7 +1283,7 @@ export function createModelingService(
           return;
         }
 
-        markRepositorySnapshotFresh(writeResult.metadata);
+        markRepositorySnapshotFresh(writeResult.metadata, writeResult.document);
         operationHistoryStore?.clear();
         resetOperationHistoryPayloadForCurrentRepository();
         return;
@@ -1228,7 +1348,7 @@ export function createModelingService(
         );
       }
       if (writeResult.ok) {
-        markRepositorySnapshotFresh(writeResult.metadata);
+        markRepositorySnapshotFresh(writeResult.metadata, writeResult.document);
         operationHistoryStore?.clear();
         resetOperationHistoryPayloadForCurrentRepository();
       }
@@ -1329,7 +1449,7 @@ export function createModelingService(
 
   async function persistAcceptedAuthoredDocument<
     T extends { diagnostics: ModelingDiagnostic[] },
-  >(result: T, expected: AuthoredModelDocument, label?: string): Promise<T> {
+  >(result: T, expected: AuthoredModelDocument, label?: string, observe?: (transaction: DocumentRepositoryMutationResult) => void): Promise<T> {
     if (!documentRepository) {
       return result;
     }
@@ -1347,18 +1467,27 @@ export function createModelingService(
         : result;
     }
 
+    const document = await exportAuthoredDocumentForRepository();
     const writeResult = await documentRepository.mutate({
       documentId: currentDocumentId,
       expected,
-      document: await exportAuthoredDocumentForRepository(),
+      document,
       ...(label === undefined ? {} : { label }),
     });
+    observe?.(writeResult);
 
     if (writeResult.ok) {
-      markRepositorySnapshotFresh(writeResult.metadata);
+      markRepositorySnapshotFresh(writeResult.metadata,
+        authoredDocumentsEqual(document, writeResult.document) ? writeResult.document : undefined,
+        document.revisionId);
       return result;
     }
 
+    if (writeResult.appliedLive) {
+      markRepositorySnapshotFresh(writeResult.appliedLive.metadata,
+        authoredDocumentsEqual(document, writeResult.appliedLive.document) ? writeResult.appliedLive.document : undefined,
+        document.revisionId);
+    }
     canPersistAuthoredDocument = false;
     return {
       ...result,
@@ -1410,6 +1539,7 @@ export function createModelingService(
   async function enqueueAcceptedAuthoredDocumentPersistence(
     expected: AuthoredModelDocument,
     label?: string,
+    observe?: (transaction: DocumentRepositoryMutationResult) => void,
   ) {
     if (!documentRepository || !canPersistAuthoredDocument) {
       return;
@@ -1431,13 +1561,21 @@ export function createModelingService(
           document,
           ...(label === undefined ? {} : { label }),
         });
+        observe?.(writeResult);
 
         if (writeResult.ok) {
-          markRepositorySnapshotFresh(writeResult.metadata);
+          markRepositorySnapshotFresh(writeResult.metadata,
+            authoredDocumentsEqual(document, writeResult.document) ? writeResult.document : undefined,
+            document.revisionId);
           reconcileOperationHistoryAfterRepositoryWrite(persistedHistory);
           return;
         }
 
+        if (writeResult.appliedLive) {
+          markRepositorySnapshotFresh(writeResult.appliedLive.metadata,
+            authoredDocumentsEqual(document, writeResult.appliedLive.document) ? writeResult.appliedLive.document : undefined,
+            document.revisionId);
+        }
         canPersistAuthoredDocument = false;
         historyRestoreState = createRestoreFailure(
           writeResult.status.diagnostic.reasonCode,
@@ -1457,6 +1595,8 @@ export function createModelingService(
           historyRestoreState.entriesReplayed,
         );
       });
+    // A semantic caller awaits this exact candidate's write, not a fulfilled global drain.
+    if (observe) await repositoryPersistencePromise;
   }
 
   return {
@@ -1515,13 +1655,16 @@ export function createModelingService(
     },
     async getCurrentDocumentSnapshot() {
       await ensureInitialized();
-      await repositoryChangePromise;
-      const response = await adapter.getDocumentSnapshot(
-        buildDocumentRequest(currentDocumentId),
-      );
-      return attachRepositoryProvenance(
-        validateSnapshotResponse(response, currentDocumentId),
-      );
+      for (;;) {
+        const changes = repositoryChangePromise;
+        await changes;
+        const generation = stateGeneration;
+        const response = await adapter.getDocumentSnapshot(buildDocumentRequest(currentDocumentId));
+        // An adapter read can capture the old runtime while a peer event queues
+        // a restore. Retry against that queue, never stamp its new heads on it.
+        if (generation !== stateGeneration || changes !== repositoryChangePromise) continue;
+        return attachRepositoryProvenance(validateSnapshotResponse(response, currentDocumentId));
+      }
     },
     async buildNativeExactBrepPayload(input) {
       await ensureInitialized();
@@ -1546,10 +1689,29 @@ export function createModelingService(
       );
       return result as OccNativeTopologyWorkerResult<OccNativeExactBrepPayload>;
     },
-    async createNewDocument() {
+    async createNewDocument(input) {
       await ensureInitialized();
       await repositoryChangePromise;
-      return replaceCurrentAuthoredDocument(await getSeedAuthoredDocument());
+      const current = validateSnapshotResponse(
+        await adapter.getDocumentSnapshot(
+          buildDocumentRequest(currentDocumentId),
+        ),
+        currentDocumentId,
+      );
+      const seed = await getSeedAuthoredDocument();
+      // A reset is a new authoritative revision, not a replay of the cached seed.
+      // Reuse the kernel's allocator so subsequent modeling revisions stay ordered.
+      return replaceCurrentAuthoredDocument(
+        {
+          ...seed,
+          name: input?.name ?? seed.name,
+          revisionId: createRevisionId(
+            parseRevisionSequence(current.document.revisionId) + 1,
+          ),
+        },
+        [],
+        { observeTransaction: input?.observe },
+      );
     },
     async importDocument(input) {
       await ensureInitialized();
@@ -1559,9 +1721,27 @@ export function createModelingService(
         return normalized;
       }
 
+      const current = validateSnapshotResponse(
+        await adapter.getDocumentSnapshot(buildDocumentRequest(currentDocumentId)),
+        currentDocumentId,
+      );
+      // Fresh editing contexts cannot reuse a saved basis from an earlier owner.
       return replaceCurrentAuthoredDocument(
-        normalized.document,
+        {
+          ...normalized.document,
+          revisionId: createRevisionId(
+            Math.max(
+              parseRevisionSequence(current.document.revisionId),
+              parseRevisionSequence(normalized.document.revisionId),
+            ) + 1,
+          ),
+        },
         input.assets ?? [],
+        {
+          validateEmbeddedAssetsBeforePersist: true,
+          validateBeforePersist: true,
+          observeTransaction: input.observe,
+        },
       );
     },
     async renameDocument(input) {
@@ -1582,10 +1762,15 @@ export function createModelingService(
         };
       }
 
-      return replaceCurrentAuthoredDocument({
-        ...document,
-        name: input.name,
-      });
+      return replaceCurrentAuthoredDocument(
+        {
+          ...document,
+          name: input.name,
+          revisionId: createRevisionId(parseRevisionSequence(document.revisionId) + 1),
+        },
+        [],
+        { observeTransaction: input.observe, authoredAction: { expected: document, label: "Rename document" } },
+      );
     },
     async bindLocalFile(input) {
       await ensureInitialized();
@@ -1658,10 +1843,29 @@ export function createModelingService(
         }
       });
     },
-    async exportCurrentDocument() {
+    async exportCurrentDocument(input) {
       await ensureInitialized();
       await repositoryChangePromise;
-      const document = await exportAuthoredDocumentForRepository();
+      // Saving is not a new authored mutation. A rebuilt restore may carry
+      // different native witnesses and a fresh live id; synchronize and export
+      // the exact stored basis it still represents, not a phantom new action.
+      const document = await getMutationPredecessor();
+      if (input && documentRepository) {
+        // Explicit native save observes its own synchronization transaction;
+        // a fulfilled global persistence tail cannot certify durability.
+        const receipt = await documentRepository.mutate({
+          documentId: currentDocumentId,
+          document,
+          expected: document,
+        });
+        input.observe(receipt);
+        if (!receipt.ok) throw new Error(receipt.status.diagnostic.message);
+        const liveRevisionId = restoredMutationPredecessor && authoredDocumentsEqual(restoredMutationPredecessor.document, document)
+          ? restoredMutationPredecessor.runtimeRevisionId : document.revisionId;
+        markRepositorySnapshotFresh(receipt.metadata,
+          authoredDocumentsEqual(document, receipt.document) ? receipt.document : undefined,
+          liveRevisionId);
+      }
 
       return {
         ok: true,
@@ -1700,6 +1904,7 @@ export function createModelingService(
               latestShared,
               normalizedCandidate,
               expectedSketch: input.publicationBase.expectedSketch,
+              observe: input.observePublication,
               result,
             });
             if (published.revisionState.kind === "accepted") {
@@ -1740,7 +1945,7 @@ export function createModelingService(
             input,
             currentDocumentId,
           );
-          const expected = await exportAuthoredDocumentForRepository();
+          const expected = await getMutationPredecessor();
           const response = await adapter.addDocumentVariable(request);
           return finalizeMutationResult(
             expected,
@@ -1770,7 +1975,7 @@ export function createModelingService(
             input,
             currentDocumentId,
           );
-          const expected = await exportAuthoredDocumentForRepository();
+          const expected = await getMutationPredecessor();
           const response = await adapter.updateDocumentVariable(request);
           return finalizeMutationResult(
             expected,
@@ -1790,7 +1995,7 @@ export function createModelingService(
         context: [{ key: "baseRevisionId", value: input.baseRevisionId }],
         action: async () => {
           const request = normalizeCreateFeatureInput(input, currentDocumentId);
-          const expected = await exportAuthoredDocumentForRepository();
+          const expected = await getMutationPredecessor();
           const response = await adapter.createFeature(request);
           return finalizeMutationResult(
             expected,
@@ -1815,7 +2020,7 @@ export function createModelingService(
         ],
         action: async () => {
           const request = normalizeUpdateFeatureInput(input, currentDocumentId);
-          const expected = await exportAuthoredDocumentForRepository();
+          const expected = await getMutationPredecessor();
           const response = await adapter.updateFeature(request);
           return finalizeMutationResult(
             expected,
@@ -1843,7 +2048,7 @@ export function createModelingService(
             input,
             currentDocumentId,
           );
-          const expected = await exportAuthoredDocumentForRepository();
+          const expected = await getMutationPredecessor();
           const response = await adapter.setFeatureSuppression(request);
           return finalizeMutationResult(
             expected,
@@ -1866,7 +2071,7 @@ export function createModelingService(
         ],
         action: async () => {
           const request = normalizeDeleteFeatureInput(input, currentDocumentId);
-          const expected = await exportAuthoredDocumentForRepository();
+          const expected = await getMutationPredecessor();
           const response = await adapter.deleteFeature(request);
           return finalizeMutationResult(
             expected,
@@ -1889,7 +2094,7 @@ export function createModelingService(
         ],
         action: async () => {
           const request = normalizeDeleteTargetInput(input, currentDocumentId);
-          const expected = await exportAuthoredDocumentForRepository();
+          const expected = await getMutationPredecessor();
           const response = await adapter.deleteTarget(request);
           return finalizeMutationResult(
             expected,
@@ -1918,7 +2123,7 @@ export function createModelingService(
         ],
         action: async () => {
           const request = normalizeRenameBodyInput(input, currentDocumentId);
-          const expected = await exportAuthoredDocumentForRepository();
+          const expected = await getMutationPredecessor();
           const response = await adapter.renameBody(request);
           return finalizeMutationResult(
             expected,
@@ -1944,7 +2149,7 @@ export function createModelingService(
             input,
             currentDocumentId,
           );
-          const expected = await exportAuthoredDocumentForRepository();
+          const expected = await getMutationPredecessor();
           const response = await adapter.reorderFeature(request);
           return finalizeMutationResult(
             expected,
@@ -1976,7 +2181,7 @@ export function createModelingService(
             input,
             currentDocumentId,
           );
-          const expected = await exportAuthoredDocumentForRepository();
+          const expected = await getMutationPredecessor();
           const response = await adapter.reorderDocumentHistory(request);
           return finalizeMutationResult(
             expected,
@@ -1999,7 +2204,7 @@ export function createModelingService(
             input,
             currentDocumentId,
           );
-          const expected = await exportAuthoredDocumentForRepository();
+          const expected = await getMutationPredecessor();
           const response = await adapter.setFeatureCursor(request);
           return finalizeMutationResult(
             expected,

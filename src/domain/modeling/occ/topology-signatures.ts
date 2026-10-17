@@ -219,6 +219,10 @@ function definingDataForSurface(surface: CadaraBrepSurfaceRecord) {
 
 function definingDataForCurve(curve: CadaraBrepCurve3Record) {
   switch (curve.kind) {
+    case "bSpline":
+      // Expose the existing exact native curve, not sampled/render geometry.
+      // End vertices alone cannot distinguish path-loft interiors.
+      return { ...curve };
     case "line":
       return {
         origin: curve.origin,

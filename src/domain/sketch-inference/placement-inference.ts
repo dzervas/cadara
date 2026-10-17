@@ -299,7 +299,7 @@ function getStructuralTangentSourceEntityId(
     );
     const ending = definition.entities.flatMap((entity) =>
       (entity.kind === "lineSegment" || entity.kind === "arc") &&
-      !entity.isConstruction &&
+      canUseTangentArcSourceAtPoint(definition, entity.entityId, candidate.point) &&
       (pointIds.has(entity.startPointId) || pointIds.has(entity.endPointId))
         ? [entity.entityId]
         : [],
@@ -315,12 +315,30 @@ function getStructuralTangentSourceEntityId(
   const source = candidate.sources.find(
     (entry) =>
       entry.kind === "localEntity" &&
-      (entry.geometryKind === "lineSegment" ||
-        entry.geometryKind === "circle" ||
-        entry.geometryKind === "arc"),
+      canUseTangentArcSourceAtPoint(definition, entry.entityId, candidate.point),
   );
 
   return source?.kind === "localEntity" ? source.entityId : null;
+}
+
+/** Explicit source authoring uses the same local-curve and endpoint restrictions as picking. */
+export function canUseTangentArcSourceAtPoint(
+  definition: SketchDefinition,
+  entityId: SketchEntityId,
+  position: SketchPoint,
+): boolean {
+  const entity = definition.entities.find(e => e.entityId === entityId);
+  if (!entity) return false;
+  const centerId = getEntityCenterPointId(definition, entityId);
+  const center = definition.points.find(p => p.pointId === centerId);
+  if (
+    center &&
+    Math.hypot(center.position[0] - position[0], center.position[1] - position[1]) <= POINT_TOLERANCE
+  ) return false;
+  const atEndpoint = getEntityEndpointAtPoint(definition, entityId, position) !== null;
+  return atEndpoint
+    ? (entity.kind === "lineSegment" || entity.kind === "arc") && !entity.isConstruction
+    : entity.kind === "lineSegment" || entity.kind === "circle" || entity.kind === "arc";
 }
 
 type RequirementDraft = InferredRequirement;

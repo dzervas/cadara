@@ -138,7 +138,7 @@ function buildThickenDefinition(draft: ThickenFeatureParameterDraft) {
 
 function getThickenValidationDiagnostics(draft: ThickenFeatureParameterDraft) {
   const diagnostics = validateAdvancedSolidFeatureDefinition(
-    buildThickenDefinition(draft) as never,
+    buildThickenDefinition(draft),
     {
       featureKind: "thicken",
       participants: thickenParticipants,
@@ -178,6 +178,26 @@ function getThickenValidationDiagnostics(draft: ThickenFeatureParameterDraft) {
   }
 
   return diagnostics;
+}
+
+/** Validate canonical participants before browser hydration can discard them. */
+export function prepareThickenFeatureDefinition(parameters: import("@/contracts/modeling/advanced-solid").ThickenFeatureParameters) {
+  const sources = parameters.participants.filter(p => p.role === "face");
+  const targets = parameters.participants.filter(p => p.role === "targetBody");
+  if (sources.length !== 1 || targets.length > 1 || sources.length + targets.length !== parameters.participants.length) return null;
+  const source = sources[0]!.targets;
+  if (!source.length || !(source.every(t => t.kind === "face") || (source.length === 1 && source[0]!.kind === "body"))) return null;
+  if (targets.some(p => p.targets.some(t => t.kind !== "body"))) return null;
+  if (!isNormalDirection(parameters.options.direction)) return null;
+  const intent = authoredStringLiteral(parameters.operationIntent ?? "create", "");
+  if (!isOperationIntent(intent) || (intent === "create" && targets.some(p => p.targets.length > 0))) return null;
+  return thickenAuthoringDefinition.buildDefinition(
+    thickenAuthoringDefinition.hydrateDraft({
+      kind: "thicken",
+      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+      parameters,
+    }),
+  );
 }
 
 export const thickenAuthoringDefinition = {
@@ -378,7 +398,7 @@ export const thickenAuthoringDefinition = {
   },
   buildDefinition(draft) {
     return getThickenValidationDiagnostics(draft).length === 0
-      ? (buildThickenDefinition(draft) as never)
+      ? buildThickenDefinition(draft)
       : null;
   },
   getFormSchema(session) {

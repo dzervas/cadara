@@ -33,7 +33,8 @@ import {
   isAcceptedSketchSolve,
 } from "@/domain/editor/sketch-session/internals";
 import { getSketchDatumGuideExtent } from "@/domain/editor/sketch-session/definition-patches";
-import { getSketchSessionDisplaySolvedSnapshot } from "@/domain/editor/sketch-session/display";
+
+import { getSketchSessionDisplaySolvedSnapshot } from "@/domain/editor/sketch-session/solved-snapshot";
 import type { SketchSessionState } from "@/domain/editor/sketch-session";
 
 const TURN = Math.PI * 2;

@@ -15,10 +15,8 @@ import {
 } from "@/domain/modeling/occ/features/boolean-operations";
 import type { OpenCascadeNativeTopologyKernelHost } from "@/domain/modeling/occ/native-topology-payload";
 import { toGpPnt } from "@/domain/modeling/occ/planes";
-import {
-  getDefaultOpenCascadeInstance,
-  type OpenCascadeInstance,
-} from "@/domain/modeling/occ/runtime";
+import { getDefaultOpenCascadeInstance } from "@/infrastructure/occ/runtime";
+import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
 import {
   getOccDurableRefKey,

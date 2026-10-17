@@ -126,6 +126,13 @@ print(json.dumps(summary))
 if failures:
   sys.exit("Regeneration acceptance failed")
 
+# Retain only the recipe-bound STEP return enum for the next independent ABI audit.
+# Acceptance above requires this non-destructor binding to remain byte-identical.
+if "IFSelect_ReturnStatus" in targets:
+  rel = targets["IFSelect_ReturnStatus"]
+  shutil.copyfile(os.path.join(original_root, rel), receipts + "/IFSelect_ReturnStatus.original.cpp")
+  shutil.copyfile(os.path.join(regenerated_root, rel), receipts + "/IFSelect_ReturnStatus.regenerated.cpp")
+
 # Reproduction control: the image toolchain/flags must rebuild unchanged sources
 # byte-identically in place, so recompiled objects differ only by source changes.
 compile = functools.partial(c.buildOneFile, {"threading": os.environ["threading"]})
@@ -165,6 +172,9 @@ PY
 (cd "$receipts" && sha256sum bindings.py.before.sha256 bindings.py.after.sha256 generator-scripts.sha256 \
   regenerated-sources.tsv generated-diff.patch regeneration-summary.json compile-reproduction-control.tsv \
   recompiled-objects.tsv > receipts.sha256)
+if [[ -f "$receipts/IFSelect_ReturnStatus.original.cpp" ]]; then
+  (cd "$receipts" && sha256sum IFSelect_ReturnStatus.original.cpp IFSelect_ReturnStatus.regenerated.cpp >> receipts.sha256)
+fi
 
 echo "=== unchanged buildFromYaml ==="
 exec /opencascade.js/src/buildFromYaml.py "$@"
