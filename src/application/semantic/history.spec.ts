@@ -1,35 +1,14 @@
 import { expect, it } from "vitest";
-import { createHeadlessSessionFactory } from "@/composition/headless";
+import { createSemanticSessionWorkflow } from "../../../test/helpers/semantic-session-workflow";
 import { validateSemanticResult } from "@/contracts/semantic/runtime-schema";
-import type {
-  SemanticCommand,
-  SemanticResult,
-} from "@/contracts/semantic/schema";
+import type { SemanticResult } from "@/contracts/semantic/schema";
 import { MemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";
 
 async function historyFixture(
-  options: Parameters<typeof createHeadlessSessionFactory>[0] = {},
+  options: Parameters<typeof createSemanticSessionWorkflow>[1] = {},
 ) {
-  const opened = await createHeadlessSessionFactory(options).open();
-  if (opened.kind !== "ready") throw new Error(JSON.stringify(opened));
-  const session = opened.session;
-  let current: SemanticResult | undefined;
-  let sequence = 0;
-  const run = async (
-    input: Record<string, unknown>,
-    options?: { signal?: AbortSignal },
-  ) => {
-    current = await session.execute(
-      {
-        version: 1,
-        commandId: `history-${++sequence}`,
-        basis: current?.completion.live.state ?? opened.initialization.state,
-        ...input,
-      } as unknown as SemanticCommand,
-      options,
-    );
-    return current;
-  };
+  const fixture = await createSemanticSessionWorkflow("history", options);
+  const { run } = fixture;
   const execute = async (input: Record<string, unknown>) => {
     const result = await run(input);
     expect(result.outcome.kind, JSON.stringify(result)).toBe("completed");
@@ -40,8 +19,8 @@ async function historyFixture(
   return {
     execute,
     run,
-    current: () => current!,
-    close: () => session.close(),
+    current: fixture.current,
+    close: fixture.close,
   };
 }
 

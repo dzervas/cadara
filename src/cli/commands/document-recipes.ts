@@ -233,7 +233,7 @@ function parseRecipe(input: unknown): RecipeOperation[] {
     }
     if ((command.operation === "plane.create" || command.operation === "plane.update") && command.parameters && typeof command.parameters === "object" && "reference" in command.parameters && command.parameters.reference && typeof command.parameters.reference === "object" && "target" in command.parameters.reference && isAlias(command.parameters.reference.target)) {
       validateTarget(command.parameters.reference.target, "construction_validation");
-      validationCommand.parameters = { ...command.parameters, reference: { target: { kind: "construction", constructionId: "construction_validation" } } };
+      validationCommand.parameters = { ...command.parameters, reference: { ...command.parameters.reference, target: { kind: "construction", constructionId: "construction_validation" } } };
     }
     if ((command.operation === "fillet.create" || command.operation === "fillet.update" || command.operation === "chamfer.create" || command.operation === "chamfer.update") && command.parameters && typeof command.parameters === "object") {
       const parameters = command.parameters as Record<string, unknown>;
@@ -744,7 +744,7 @@ export const documentRecipesCommand: CommandModule = {
         if ((command.operation === "plane.create" || command.operation === "plane.update") && command.parameters.mode === "coplanar") {
           const target = resolveSketchTarget(command.parameters.reference.target, ["construction", "face"]);
           if (target.kind !== "construction" && target.kind !== "face") throw new Error("Invalid plane reference.");
-          command.parameters = { ...command.parameters, reference: { target } };
+          command.parameters = { ...command.parameters, reference: { ...command.parameters.reference, target } };
         }
         if (command.operation === "revolve.create" || command.operation === "revolve.update") {
           const axis = resolveSketchTarget(command.parameters.axis, ["edge", "sketchEntity", "construction"]);

@@ -1,7 +1,6 @@
 import { expect, test } from "vitest";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { invokeCliRecipe } from "../../test/helpers/cli-recipe-process";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { validateSemanticResult } from "@/contracts/semantic/runtime-schema";
@@ -45,25 +44,16 @@ test("real Bun plane recipes discover frames, resolve construction/feature alias
       intent: "fulfill",
     },
   ].map((c, i) => ({ version: 1, commandId: `plane-${i}`, ...c }));
-  async function invoke(operations: readonly Record<string, unknown>[]) {
-    const path = resolve(dir, "recipe.json");
-    await writeFile(path, JSON.stringify({ version: 1, operations }));
-    try {
-      return {
-        code: 0,
-        ...(await promisify(execFile)(
-          "bun",
-          ["src/cli/main.ts", "document", "recipe", path],
-          {
-            cwd: resolve(import.meta.dirname, "../.."),
-            timeout: 90000,
-            env: { ...process.env, NODE_ENV: "production", TEST: "false" },
-          },
-        )),
-      };
-    } catch (error) {
-      return error as { code: number; stdout: string; stderr: string };
-    }
+  function invoke(operations: readonly Record<string, unknown>[]) {
+    return invokeCliRecipe(
+      dir,
+      operations,
+      {
+        cwd: resolve(import.meta.dirname, "../.."),
+        timeout: 90000,
+        env: { ...process.env, NODE_ENV: "production", TEST: "false" },
+      },
+    );
   }
   try {
     // Discover the production construction label rather than inventing an ID policy.
@@ -112,6 +102,32 @@ test("real Bun plane recipes discover frames, resolve construction/feature alias
         )
         .map((c) => c.frame),
     ).toEqual([moved, moved]);
+    // Alias substitution must preserve unknown siblings for exact validation,
+    // not silently turn a requested offset into an unoffset coplanar plane.
+    for (const operation of ["plane.create", "plane.update"]) {
+      for (const target of [{ alias: "datum", label }, produced]) {
+        const malformed = await invoke([
+          ...commands.slice(0, 2),
+          {
+            version: 1,
+            commandId: "unknown-reference-field",
+            operation,
+            basis: { alias: "datum" },
+            ...(operation === "plane.update"
+              ? { featureId: { alias: "datum", label: "Plane 1" } }
+              : {}),
+            parameters: {
+              mode: "coplanar",
+              reference: { target, offset: 123 },
+            },
+            intent: "fulfill",
+          },
+        ]);
+        expect(malformed.code, malformed.stderr + malformed.stdout).toBe(2);
+        expect(malformed.stdout).toBe("");
+        expect(malformed.stderr).toBe("Invalid semantic operation.\n");
+      }
+    }
     const missing = await invoke(
       complete.map((c, i) =>
         i === 2

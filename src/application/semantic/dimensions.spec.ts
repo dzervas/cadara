@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { createHeadlessSessionFactory } from "@/composition/headless";
+import { createSemanticSessionWorkflow } from "../../../test/helpers/semantic-session-workflow";
 import { createSemanticSessionFactory, createSemanticResult } from "./session";
 import type { SemanticDocumentPort } from "./document-port";
 import type {
@@ -14,26 +14,15 @@ type Input<T = DraftCommand> = T extends DraftCommand
   : never;
 
 async function rectangle() {
-  const opened = await createHeadlessSessionFactory().open();
-  if (opened.kind !== "ready") throw new Error(JSON.stringify(opened));
-  const session = opened.session;
-  let current: SemanticResult = await session.execute({
-    version: 1,
+  const fixture = await createSemanticSessionWorkflow("edit");
+  await fixture.run({
     commandId: "begin",
     operation: "sketch.begin",
-    basis: opened.initialization.state,
     plane: "xy",
   });
-  let sequence = 0;
   async function execute(input: Input) {
-    current = await session.execute({
-      ...input,
-      version: 1,
-      commandId: `edit-${++sequence}`,
-      basis: current.discovery!.state,
-      draft: current.discovery!.state.draft!,
-    } as SemanticCommand);
-    return current;
+    const state = fixture.current().discovery!.state;
+    return fixture.run({ ...input, basis: state, draft: state.draft! });
   }
   await execute({
     operation: "sketch.author",
@@ -41,7 +30,7 @@ async function rectangle() {
     construction: false,
     intent: "fulfill",
   });
-  return { execute, initial: current, close: () => session.close() };
+  return { execute, initial: fixture.current(), close: fixture.close };
 }
 
 it("drives rectangle width through semantic point targets and returns the measured requirement identity", async () => {

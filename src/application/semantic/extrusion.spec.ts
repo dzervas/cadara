@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { createHeadlessSessionFactory } from "@/composition/headless";
+import { createSemanticSessionWorkflow } from "../../../test/helpers/semantic-session-workflow";
 import type {
   SemanticCommand,
   SemanticResult,
@@ -12,25 +12,16 @@ type Input<T = SemanticCommand> = T extends SemanticCommand
   : never;
 
 async function plate(
-  options: Parameters<typeof createHeadlessSessionFactory>[0] = {},
+  options: Parameters<typeof createSemanticSessionWorkflow>[1] = {},
 ) {
-  const opened = await createHeadlessSessionFactory(options).open();
-  if (opened.kind !== "ready") throw new Error(JSON.stringify(opened));
-  const session = opened.session;
-  let current = await session.execute({
-    version: 1,
+  const fixture = await createSemanticSessionWorkflow("step", options);
+  const { session } = fixture;
+  let current = await fixture.run({
     commandId: "inspect",
     operation: "document.inspect",
-    basis: opened.initialization.state,
   });
-  let sequence = 0;
   async function execute(input: Input) {
-    current = await session.execute({
-      version: 1,
-      commandId: `step-${++sequence}`,
-      basis: current.discovery!.state,
-      ...input,
-    } as SemanticCommand);
+    current = await fixture.run({ basis: current.discovery!.state, ...input });
     return current;
   }
   await execute({ operation: "sketch.begin", plane: "xy" });
@@ -81,7 +72,7 @@ async function plate(
     profile,
     current: () => current,
     session,
-    close: () => session.close(),
+    close: fixture.close,
   };
 }
 
