@@ -2138,6 +2138,11 @@ export function refreshSketchEditToolAfterOffsetRound(
     };
   }
   if (!tool || tool.selectedTargets.length === 0) return session;
+  // Parsing collapses nonnumeric text to null, so retain that specific error.
+  // Other errors are recomputed: a failed round must replace a pending gate.
+  const parseMessage = `Enter a number for the ${getSketchEditToolValueLabel(tool.toolId).toLowerCase()}.`;
+  const retainedValueMessage =
+    session.validationMessage === parseMessage ? parseMessage : null;
   if (tool.toolId === "offset") {
     if (tool.offsetPublication) return session;
     const preview = getOffsetPreview(session, tool);
@@ -2145,7 +2150,7 @@ export function refreshSketchEditToolAfterOffsetRound(
       return withInvalidSketchEditValue(
         session,
         tool,
-        session.validationMessage ?? preview.message,
+        retainedValueMessage ?? preview.message,
       );
     return {
       ...session,
@@ -2164,7 +2169,7 @@ export function refreshSketchEditToolAfterOffsetRound(
     return withInvalidSketchEditValue(
       session,
       tool,
-      session.validationMessage ?? preview.message,
+      retainedValueMessage ?? preview.message,
     );
   return {
     ...session,
