@@ -8,7 +8,8 @@ import { createSketchWorkflow } from "../../../test/helpers/semantic-sketch-work
 // Migrated from e2e/acceptance-history.spec.ts ("§5 E2E-5 invalid by
 // deletion"): deleting an offset's seed and a mirror's original leaves both
 // relationships broken, not removed, through publication, re-entry and native
-// save/open. Panel and status-line wording stays with the editor/domain specs.
+// save/open. The Offset panel wording and the no-internal-id scan stay in that
+// file's trimmed "invalid by deletion, workbench surface" row.
 it("an offset's seed and a mirror's original deleted (one action each) leave both relationships broken, not removed; publication, re-entry and save → open keep the same diagnostics and validity", async () => {
   const directory = await mkdtemp(
     resolve(tmpdir(), "cadara-deletion-invalid-"),

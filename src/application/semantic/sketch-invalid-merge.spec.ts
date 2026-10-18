@@ -6,9 +6,11 @@ import type { AuthoredModelDocument } from "@/contracts/modeling/authored-docume
 import { createSketchWorkflow } from "../../../test/helpers/semantic-sketch-workflow";
 
 // Migrated from e2e/acceptance-history.spec.ts ("§5 E2E-5 invalid by merge").
-// The status-line wording stays covered by the editor/domain specs; this row
-// proves the authored and model contract: retained requirements, validity,
-// the waiting downstream extrude and native save/open.
+// The workbench surface (status line after Escape, problem count, repair
+// entry, no internal ids) stays in that file's trimmed "invalid by merge,
+// workbench surface" row; this row proves the authored and model contract:
+// retained requirements, validity, the waiting downstream extrude and native
+// save/open.
 it("an endpoint merge retaining two disagreeing Fix requirements blocks the profiles; the published extrude waits; re-entry and save → open keep the same diagnostics; deleting one Fix rebuilds the extrude", async () => {
   const directory = await mkdtemp(resolve(tmpdir(), "cadara-merge-invalid-"));
   const f = await createSketchWorkflow();
