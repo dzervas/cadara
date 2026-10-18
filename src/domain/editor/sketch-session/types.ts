@@ -354,7 +354,9 @@ export interface SketchEditQueryClick {
   entity: SketchEntityDefinition;
   /** Extend/Split: the boundary and its entity object at click time. */
   boundary?: { entityId: SketchEntityId; entity: SketchEntityDefinition };
-  /** T13m: Split's boundary click (the last sketch pointer), when known. */
+  /** O14: hover queries stage the removed piece without authoring a mutation. */
+  preview?: boolean;
+  /** Trim target / Split boundary click (the last sketch pointer), when known. */
   pick?: SketchPoint;
 }
 

@@ -27,7 +27,6 @@ import {
   orderedSplinePointIds,
   reconstructSplineAggregate,
   splineAggregatePiece,
-  trimSplineAggregate,
   type SolvedCubicSpan,
   type SplineCut,
   type SplinePiece,
@@ -741,6 +740,20 @@ export function createSketchTrimMutation(input: {
     "trim",
   );
   if (mirrorRefusal) return fail(mirrorRefusal, definition);
+  if (intersections.trimInterval && intersections.trimInterval.from === null && intersections.trimInterval.to === null) {
+    // O14: no bounded piece (or fewer than two contacts on a loop) means
+    // delete the curve. Keep its fit points free, as for a partial trim.
+    const removed = new Set([entity.entityId]);
+    const points = new Set<SketchPointId>();
+    const constraints = definition.constraints.filter(c => !constraintReferencesSketchGeometry(c, points, removed));
+    const dimensions = definition.dimensions.filter(d => !dimensionReferencesSketchGeometry(d, points, removed));
+    return { changed: true, message: null, definition: { ...definition,
+      entityIds: definition.entityIds.filter(id => !removed.has(id)),
+      entities: definition.entities.filter(e => !removed.has(e.entityId)),
+      constraints, constraintIds: constraints.map(c => c.constraintId),
+      dimensions, dimensionIds: dimensions.map(d => d.dimensionId),
+    } };
+  }
   if (entity.kind === "spline")
     return createSplineTrimMutation({ ...input, entity });
   if (
@@ -754,12 +767,17 @@ export function createSketchTrimMutation(input: {
     );
   const { cuts } = intersections;
   const last = cuts.length - 1;
+  const interval = intersections.trimInterval;
+  // For a circle the kept arc runs from the removed interval's end to its start.
+  const from = interval ? (interval.from === null ? null : cuts[interval.from]!) : cuts[0]!;
+  const to = interval ? (interval.to === null ? null : cuts[interval.to]!) : cuts[last]!;
   const ends = [
-    { cut: cuts[0]!, tag: "start" },
-    { cut: cuts[last]!, tag: "end" },
-  ].map(({ cut, tag }) => {
+    { cut: entity.kind === "circle" ? to : from, tag: "start" },
+    { cut: entity.kind === "circle" ? from : to, tag: "end" },
+  ].flatMap(({ cut, tag }) => {
+    if (!cut) return [];
     const pointId = factories.createPointId(`trim-${tag}`);
-    return {
+    return [{
       cut,
       tag,
       pointId,
@@ -768,9 +786,10 @@ export function createSketchTrimMutation(input: {
         pointId,
         cut.position,
       ),
-    };
+    }];
   });
-  const [start, end] = ends as [(typeof ends)[0], (typeof ends)[0]];
+  const start = ends.find(end => end.tag === "start");
+  const end = ends.find(end => end.tag === "end");
   const ties = ends.flatMap(({ cut, tag, pointId }) =>
     cutTies({
       definition,
@@ -790,13 +809,16 @@ export function createSketchTrimMutation(input: {
         entity.label,
         entity.entityId,
         entity.centerPointId,
-        start.pointId,
-        end.pointId,
+        start!.pointId,
+        end!.pointId,
         "counterClockwise",
       ),
       isConstruction: entity.isConstruction,
       style: entity.style,
     };
+  } else if (!start || !end) {
+    updated = start ? { ...entity, endPointId: start.pointId }
+      : { ...entity, startPointId: end!.pointId };
   } else {
     updated = { ...entity, endPointId: start.pointId };
     const pieceId = factories.createEntityId("trim-split");
@@ -805,14 +827,14 @@ export function createSketchTrimMutation(input: {
         ? factories.createLineEntity(
             `${entity.label} trimmed`,
             pieceId,
-            end.pointId,
+            end!.pointId,
             entity.endPointId,
           )
         : factories.createArcEntity(
             `${entity.label} trimmed`,
             pieceId,
             entity.centerPointId,
-            end.pointId,
+            end!.pointId,
             entity.endPointId,
             entity.sweepDirection,
           )),
@@ -865,7 +887,7 @@ export function createSketchTrimMutation(input: {
     message: null,
     definition: {
       ...definition,
-      ...withAppendedTrimPoints(definition, [start.point, end.point]),
+      ...withAppendedTrimPoints(definition, ends.map(end => end.point)),
       dimensionIds: [
         ...definition.dimensionIds,
         ...added.map((dimension) => dimension.dimensionId),
@@ -1001,27 +1023,10 @@ function solvedSplineEditInput(
 }
 
 /**
- * The exact spline Trim (T10g design §3.1/§4.3–§4.5, option B; T10g-3b).
- * The pieces come from `trimSplineAggregate` on the SOLVED input the cuts
- * were certified on (T10g-3a review A-1): solved fit-point positions, the
- * solved handle of every authored occurrence, and the field.
- * - An open spline keeps [start, c₁] on the original id and [c₂, end] on a
- *   new `trim-split` spline that reuses the original occurrence ids (§4.4);
- *   a smooth or positional closure becomes one open spline (same id) over
- *   [c₁, c₂], which never crosses its seam or corner (circle precedent).
- * - A cut inside a span is a new fit point Q at the cut's `position`; the
- *   owner's Q must equal it bitwise, else the Trim fails closed
- *   (`splineTrimCutMismatchMessage`). A knot cut adds no point: the fit
- *   point there becomes the end.
- * - Q1b ties go on each cut's end point (a new Q, or the knot's fit point,
- *   where a tie onto itself or one that already exists is skipped).
- * - Review R-3 retargets the target's `pointOnCurve` constraints as for a
- *   line (open: to the new piece; closed: one piece, nothing moves).
- * - Fit points only the removed part used stay as free points with their
- *   constraints (user decision Q-g2).
- * - Kept occurrences whose tangent the owner leaves unchanged keep their
- *   authored tangent; re-expressed ones (next to a cut, or a new end) take
- *   the owner's authored handle.
+ * O14: rebuild only the complement of the clicked interval from the SOLVED
+ * aggregate. Open ends need one piece; smooth loops may wrap their seam;
+ * a positional seam remains a corner between two open pieces. Cut positions
+ * must match the owner's evaluation bitwise. Removed fit points stay free.
  */
 function createSplineTrimMutation(input: {
   definition: SketchDefinition;
@@ -1036,20 +1041,28 @@ function createSplineTrimMutation(input: {
     return fail(splineTrimCutMismatchMessage(entity.label), definition);
   const { ordered, solvedEntity, positions } = solvedInput;
   const { cuts } = intersections;
+  const interval = intersections.trimInterval;
+  const from = interval ? (interval.from === null ? null : cuts[interval.from]!) : cuts[0]!;
+  const to = interval ? (interval.to === null ? null : cuts[interval.to]!) : cuts.at(-1)!;
   const ends = [
-    { cut: cuts[0]!, tag: "start" },
-    { cut: cuts.at(-1)!, tag: "end" },
-  ] as const;
-  const trim = trimSplineAggregate(
-    solvedEntity,
-    positions,
-    ends.map(({ cut }) => ({
-      representative: cut.representative,
-      knotOccurrenceIndex: cut.knotOccurrenceIndex,
-    })) as [SplineCut, SplineCut],
-  );
-  if (!trim)
+    { cut: from, tag: "start" }, { cut: to, tag: "end" },
+  ].flatMap(end => end.cut ? [{ ...end, cut: end.cut }] : [])
+    .sort((a, b) => a.cut.representative - b.cut.representative);
+  const asCut = (cut: SketchEditCut | null): SplineCut | null => cut && ({
+    representative: cut.representative, knotOccurrenceIndex: cut.knotOccurrenceIndex,
+  });
+  const pieceOf = (a: SketchEditCut | null, b: SketchEditCut | null) =>
+    splineAggregatePiece(solvedEntity, positions, asCut(a), asCut(b));
+  const pieces = entity.closure === "open"
+    ? [...(from ? [pieceOf(null, from)] : []), ...(to ? [pieceOf(to, null)] : [])]
+    : entity.closure === "positional" && to!.representative > from!.representative
+      // A positional seam is a corner: keep it as two open pieces, not a
+      // smooth interior occurrence that would reshape the retained curve.
+      ? [pieceOf(null, from), pieceOf(to, null)]
+      : [pieceOf(to, from)];
+  if (pieces.some(piece => !piece))
     return fail(splineTrimCutMismatchMessage(entity.label), definition);
+  const trim = { pieces: pieces as SplinePiece<SketchPointId>[] };
 
   // Each cut's end point: a new Q, or the fit point of its knot.
   const cutEnds = ends.map(({ cut, tag }) => {
@@ -1073,20 +1086,10 @@ function createSplineTrimMutation(input: {
     };
   });
   const newEnds = cutEnds.filter((end) => end.point !== null);
-  const cutOccurrences = trim.pieces.flatMap((piece) =>
-    piece.occurrences.filter((occurrence) => occurrence.kind === "cut"),
-  );
-  // Review A-1: Q is the owner's evaluation on the solved input; it must be
-  // the service's evaluator position bitwise (no tolerance).
-  if (
-    cutOccurrences.length !== newEnds.length ||
-    cutOccurrences.some(
-      (occurrence, index) =>
-        occurrence.kind !== "cut" ||
-        occurrence.position[0] !== newEnds[index]!.cut.position[0] ||
-        occurrence.position[1] !== newEnds[index]!.cut.position[1],
-    )
-  )
+  const cutOccurrences = trim.pieces.flatMap(piece => piece.occurrences.filter(o => o.kind === "cut"));
+  const cutEndAt = (position: readonly [number, number]) => newEnds.find(end =>
+    end.cut.position[0] === position[0] && end.cut.position[1] === position[1]);
+  if (cutOccurrences.length !== newEnds.length || cutOccurrences.some(o => o.kind === "cut" && !cutEndAt(o.position)))
     return fail(splineTrimCutMismatchMessage(entity.label), definition);
 
   const authoredTangent = new Map(
@@ -1101,7 +1104,6 @@ function createSplineTrimMutation(input: {
       occurrence.tangent,
     ]),
   );
-  let nextNew = 0;
   const splineOf = (
     base: Extract<SketchEntityDefinition, { kind: "spline" }>,
     piece: (typeof trim.pieces)[number],
@@ -1110,7 +1112,7 @@ function createSplineTrimMutation(input: {
       if (occurrence.kind === "cut")
         return {
           occurrenceId: `spline_occurrence_${crypto.randomUUID()}`,
-          pointId: newEnds[nextNew++]!.pointId,
+          pointId: cutEndAt(occurrence.position)!.pointId,
           tangent: occurrence.tangent,
         };
       return {
