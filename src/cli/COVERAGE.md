@@ -46,19 +46,23 @@ From any writable directory with Bun installed:
 ```sh
 bun /absolute/path/to/cadara-cli/main.js document recipe /absolute/path/to/cadara-cli/examples/plate.json
 bun /absolute/path/to/cadara-cli/main.js document recipe /absolute/path/to/cadara-cli/examples/sketch.json
+bun /absolute/path/to/cadara-cli/main.js document recipe /absolute/path/to/cadara-cli/examples/scoped-profiles.json
 ```
 
 `plate.json` authors a 20 × 10 × 7 mm solid, edits depth to 9, undoes/redoes,
 restores depth to 7, inspects history, saves `plate.cadara` and inspects the model.
 `sketch.json` authors and publishes a radius-5 circle, saves `sketch.cadara`,
-reopens it and inspects the fresh context. Output paths are relative to the
+reopens it and inspects the fresh context. `scoped-profiles.json` extrudes the
+`Outer region` of an xy and a yz sketch selected by owning sketch
+(`src/cli/sketch-owner-recipes.spec.ts`). Output paths are relative to the
 caller's working directory. These examples execute during the extracted-package
 workflow test. The README gives the remaining bounded-family input recipes;
 family-specific executable examples/assertions live at the exact test paths in
 the table, not in a second release-only modeling harness.
 
-References are exact and unique within the named result alias. Examples use
-labels whose uniqueness follows from their single-profile/single-feature setup;
+References are exact and unique within the named result alias (and owning
+sketch, when qualified). Examples use labels whose uniqueness follows from their
+single-profile/single-feature setup or sketch qualification;
 for your own documents discover references, never guess generated IDs or take
 the first face/body. Refresh the basis after each change.
 

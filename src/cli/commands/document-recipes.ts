@@ -11,9 +11,10 @@ import {
 } from "@/contracts/semantic/runtime-schema";
 
 import { semanticCommandCorrelation } from "@/contracts/semantic/correlation";
+import { isValidSketchOwner, scopeSketchOwners } from "./sketch-owner-targets";
 
 type Alias = { alias: string };
-type TargetAlias = Alias & { label: string };
+type TargetAlias = Alias & { label: string; sketch?: string };
 type RecipeGeometryEdit<T = import("@/contracts/semantic/schema").SemanticSketchGeometryEdit> = T extends { target: infer R } ? Omit<T, "target" | "destination" | "boundary"> & { target: R | TargetAlias } & (T extends { destination: infer D } ? { destination: D | TargetAlias } : unknown) & (T extends { boundary: infer B } ? { boundary: B | TargetAlias } : unknown) : never;
 type RecipePrimitive<T = import("@/contracts/semantic/schema").SemanticSketchPrimitive> = T extends { source: infer S } ? Omit<T, "source"> & { source: S | TargetAlias } : T;
 type RecipeBooleanScope<T> = T extends { bodyId: infer B } ? Omit<T, "bodyId"> & { bodyId: B | TargetAlias } : T;
@@ -185,7 +186,7 @@ function parseRecipe(input: unknown): RecipeOperation[] {
     }
     function validateTarget(value: unknown, placeholder: string) {
       if (!isAlias(value)) return value;
-      if (Object.keys(value).length !== 2 || typeof value.alias !== "string" || !aliases.has(value.alias) || !("label" in value) || typeof value.label !== "string" || !value.label)
+      if (Object.keys(value).length !== ("sketch" in value ? 3 : 2) || !isValidSketchOwner(value, aliases) || typeof value.alias !== "string" || !aliases.has(value.alias) || !("label" in value) || typeof value.label !== "string" || !value.label)
         throw new Error("Unknown or ambiguous target alias.");
       return placeholder;
     }
@@ -394,11 +395,11 @@ export const documentRecipesCommand: CommandModule = {
       };
     }
     const results: SemanticResult[] = [];
-    const aliases = new Map<string, SemanticDiscovery>();
+    const snapshots = new Map<string, SemanticDiscovery>();
     let succeeded = true;
     try {
       for (const operation of operations) {
-        const command = { ...operation.command };
+        const { command, aliases } = scopeSketchOwners({ ...operation.command }, snapshots);
         if (isAlias(command.basis)) {
           const state = aliases.get(command.basis.alias)?.state;
           if (!state)
@@ -791,7 +792,7 @@ export const documentRecipesCommand: CommandModule = {
           break;
         }
         if (operation.alias && terminal.discovery) {
-          aliases.set(operation.alias, terminal.discovery);
+          snapshots.set(operation.alias, terminal.discovery);
         }
       }
     } finally {

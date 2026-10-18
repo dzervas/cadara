@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "operations": [
+    {
+      "version": 1,
+      "commandId": "create",
+      "operation": "document.create",
+      "label": "Scoped profiles",
+      "basis": null,
+      "as": "part"
+    },
+    {
+      "version": 1,
+      "commandId": "base-begin",
+      "operation": "sketch.begin",
+      "plane": "xy",
+      "basis": { "alias": "part" },
+      "as": "baseDraft"
+    },
+    {
+      "version": 1,
+      "commandId": "base-rectangle",
+      "operation": "sketch.author",
+      "basis": { "alias": "baseDraft" },
+      "draft": { "alias": "baseDraft" },
+      "primitive": { "kind": "rectangle", "start": [-10, -10], "end": [10, 10] },
+      "construction": false,
+      "intent": "fulfill",
+      "as": "baseRectangle"
+    },
+    {
+      "version": 1,
+      "commandId": "base-publish",
+      "operation": "sketch.publish",
+      "basis": { "alias": "baseRectangle" },
+      "draft": { "alias": "baseRectangle" },
+      "requireProfiles": true,
+      "as": "base"
+    },
+    {
+      "version": 1,
+      "commandId": "post-begin",
+      "operation": "sketch.begin",
+      "plane": "yz",
+      "basis": { "alias": "base" },
+      "as": "postDraft"
+    },
+    {
+      "version": 1,
+      "commandId": "post-rectangle",
+      "operation": "sketch.author",
+      "basis": { "alias": "postDraft" },
+      "draft": { "alias": "postDraft" },
+      "primitive": { "kind": "rectangle", "start": [30, 0], "end": [36, 8] },
+      "construction": false,
+      "intent": "fulfill",
+      "as": "postRectangle"
+    },
+    {
+      "version": 1,
+      "commandId": "post-publish",
+      "operation": "sketch.publish",
+      "basis": { "alias": "postRectangle" },
+      "draft": { "alias": "postRectangle" },
+      "requireProfiles": true,
+      "as": "post"
+    },
+    {
+      "version": 1,
+      "commandId": "post-extrude",
+      "operation": "extrude.create",
+      "basis": { "alias": "post" },
+      "profile": { "alias": "post", "label": "Outer region", "sketch": "post" },
+      "depth": 12,
+      "intent": "fulfill",
+      "as": "postSolid"
+    },
+    {
+      "version": 1,
+      "commandId": "base-extrude",
+      "operation": "extrude.create",
+      "basis": { "alias": "postSolid" },
+      "profile": { "alias": "postSolid", "label": "Outer region", "sketch": "base" },
+      "depth": 5,
+      "intent": "fulfill",
+      "as": "baseSolid"
+    }
+  ]
+}
