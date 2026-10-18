@@ -5,12 +5,10 @@ import { transitionEditorState } from "./reducer-root";
 import { getEditorViewState } from "./selectors";
 import type { EditorEvent, EditorState, SketchEditorState } from "./types";
 
-// Logic lane (editor transition seam `transitionEditorState`): T17h, found
-// by the Category 1 flow. A constraint or dimension commit disarms its tool
-// (the session's `activeTool` becomes null; Dimension re-arm is a T18 feel
-// question); the command must follow, or the toolbar keeps the disarmed
-// tool pressed and Escape has nothing to leave. Before T17h the command
-// kept the tool id ("constraintHorizontal", "dimensionDistance").
+// Logic lane (editor transition seam `transitionEditorState`): T17h and
+// O3/D2 (cadara-b3k.4). Non-value constraints return to Select; value tools
+// restart with an empty pick and stay armed until Escape. F-1 still requires
+// clearing the committed pick on both annotation-placement paths.
 
 function apply(state: EditorState, event: EditorEvent) {
   const next = transitionEditorState(state, event).state;
@@ -23,7 +21,7 @@ function apply(state: EditorState, event: EditorEvent) {
 const activeCommand = (state: EditorState) =>
   getEditorViewState(state).activeCommand;
 
-describe("T17h a committing constraint tool hands the command back to Select", () => {
+describe("T17h / D2: constraint commands follow their commit lifecycle", () => {
   test("Horizontal: the last pick commits; the command is Select again", async () => {
     const { state, h } = await makeAnnotationLifecycleState();
     const armed = apply(state, {
@@ -58,7 +56,7 @@ describe("T17h a committing constraint tool hands the command back to Select", (
     expect(activeCommand(committed)?.toolId).toBe("sketch");
   });
 
-  test("Distance: the value commit disarms; the command is Select again", async () => {
+  test("Distance: the value commit re-arms with an empty pick; Escape returns to Select", async () => {
     const { state, h } = await makeAnnotationLifecycleState();
     let current = apply(state, {
       type: "tool.activated",
@@ -86,11 +84,21 @@ describe("T17h a committing constraint tool hands the command back to Select", (
       committed.session.definition.dimensions,
       "premise: one dimension is committed",
     ).toHaveLength(1);
-    expect(committed.session.activeTool).toBe(null);
+    expect(committed.session.activeTool).toBe("dimensionDistance");
+    expect(committed.session.status).toBe("collectingTargets");
+    expect(committed.session.constraintAuthoring?.selectedTargets).toEqual([]);
+    expect(committed.session.constraintAuthoring?.isPreviewPinned).toBe(false);
+    expect(committed.session.toolPresentation?.floatingInput).toBeNull();
     expect(committed.command).toMatchObject({
-      toolId: "sketch",
-      phase: "editing",
+      toolId: "dimensionDistance",
+      phase: "collecting",
     });
+    expect(activeCommand(committed)?.toolId).toBe("dimensionDistance");
+    const escaped = apply(committed, { type: "sketch.escapeRequested" });
+    expect(escaped.session.activeTool).toBeNull();
+    expect(escaped.session.constraintAuthoring).toBeNull();
+    expect(escaped.command).toMatchObject({ toolId: "sketch", phase: "editing" });
+    expect(activeCommand(escaped)?.toolId).toBe("sketch");
   });
 
   test("T17j3 F-1: the Distance value commit leaves the pick unselected whether the placement press hit the canvas or the preview's dimension-line handle", async () => {
@@ -156,8 +164,16 @@ describe("T17h a committing constraint tool hands the command back to Select", (
       selection: [],
       hoverTarget: null,
       annotationContext: null,
-      command: "sketch",
+      command: "dimensionDistance",
     });
+    for (const committed of [fromCanvas, fromHandle]) {
+      expect(committed.session.activeTool).toBe("dimensionDistance");
+      expect(committed.session.status).toBe("collectingTargets");
+      expect(committed.session.constraintAuthoring?.selectedTargets).toEqual([]);
+      const escaped = apply(committed, { type: "sketch.escapeRequested" });
+      expect(escaped.session.activeTool).toBeNull();
+      expect(escaped.command.toolId).toBe("sketch");
+    }
   });
 
   test("control: a refused duplicate restarts the tool, which stays armed", async () => {
