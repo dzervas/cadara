@@ -2,6 +2,67 @@ import { test, expect } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { SketchDragFeedbackCue } from "@/components/cad/sketch-drag-feedback-cue";
+import {
+  acceptSketchDraw,
+  beginSketchGeometryDrag,
+  beginSketchTool,
+  createNewSketchSessionFromSupport,
+  finishSketchGeometryDrag,
+  clearActiveSketchTool,
+  startSketchDraw,
+  updateSketchGeometryDrag,
+} from "@/domain/editor/sketch-session";
+import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
+import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+
+// UI lane: the local refusal must not turn into a second global status on release.
+test("a fixed-point refusal stays local instead of repeating on release", () => {
+  const drawn = acceptSketchDraw(
+    startSketchDraw(
+      beginSketchTool(
+        enterSketchSession(
+          createNewSketchSessionFromSupport(
+            { kind: "construction", constructionId: "construction_plane-xy" },
+            OCC_KERNEL_SETTINGS,
+          ),
+        ),
+        "line",
+      ),
+      [0, 0],
+    ),
+    [4, 0],
+  );
+  const point = drawn.definition.points[0]!;
+  const session = rebuildSessionForDefinition(clearActiveSketchTool(drawn), {
+    definition: {
+      ...drawn.definition,
+      constraintIds: ["fixed_point"],
+      constraints: [
+        {
+          constraintId: "fixed_point",
+          kind: "fixPoint",
+          label: "Fix",
+          pointId: point.pointId,
+          position: point.position,
+        },
+      ],
+    },
+  });
+  const dragging = updateSketchGeometryDrag(
+    beginSketchGeometryDrag(session, point.target, point.position),
+    [3, 3],
+  );
+  const feedback = dragging.activeDrag?.feedback;
+  expect(feedback?.kind).toBe("constrained");
+  const markup = renderToStaticMarkup(
+    <SketchDragFeedbackCue cue={{ x: 200, y: 150, text: feedback!.text }} />,
+  );
+  expect(markup.split(feedback!.text)).toHaveLength(2);
+  expect(
+    finishSketchGeometryDrag(dragging, [3, 3]).validationMessage,
+  ).toBeNull();
+});
 
 /**
  * T12f UI-lane test for the sketch drag feedback cue.

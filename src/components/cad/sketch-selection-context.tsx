@@ -7,6 +7,7 @@
 
 import { Paper } from "@mantine/core";
 import type { ReactNode } from "react";
+import type { SketchToolPresentationSchema } from "@/core/sketch-tools/editor-schema";
 
 import {
   VIEWPORT_FLOATING_PANEL_LEFT_PX,
@@ -35,7 +36,26 @@ export function SketchSelectionContextStack({
 }
 
 /** The sketch session's validation message, the first item of the column. */
-export function SketchValidationStatus({ message }: { message: string }) {
+export function SketchValidationStatus({
+  message,
+  toolPresentation,
+}: {
+  message: string;
+  toolPresentation?: SketchToolPresentationSchema | null;
+}) {
+  // O16: tool refusals already belong beneath the target prompt. Only
+  // session-wide status should be forwarded to this separate floating panel.
+  const viewportDrawingFeedback =
+    !toolPresentation?.selectionGuide &&
+    toolPresentation?.overlays?.some(
+      (overlay) => overlay.kind === "measurement" || overlay.kind === "completionCue",
+    );
+  if (
+    !viewportDrawingFeedback &&
+    toolPresentation?.validation?.some((entry) => entry.message === message)
+  ) {
+    return null;
+  }
   return (
     <div
       role="status"

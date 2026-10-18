@@ -3659,9 +3659,10 @@ export function applySketchGeometryDrag(
             message: edit.message,
             feedback: edit.feedback ?? null,
           },
-      // Only show validationMessage on the final (release) frame or when
-      // the drag is complete, so the cue is the primary drag-time feedback.
-      validationMessage: complete ? edit.message : null,
+      // O26: do not repeat the local drag refusal in the global status on
+      // release. Failures without a previously displayed cue still need status.
+      validationMessage:
+        complete && drag.feedback?.text !== edit.message ? edit.message : null,
     };
   }
 
