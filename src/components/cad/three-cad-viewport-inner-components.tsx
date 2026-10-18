@@ -13,6 +13,8 @@ import * as THREE from "three";
 import { flushSync } from "react-dom";
 
 import { getMeasurementWitnessStyleConfig } from "@/components/cad/measurement-witness-style";
+import { ScreenSpacePointMarker } from "@/components/cad/screen-space-point-marker";
+import { ACTIVE_SKETCH_FEEDBACK_PIXEL_BOUNDS } from "@/components/cad/sketch-display-style";
 import type { MeasurementWitness } from "@/domain/measure/measurement";
 import {
   MARKER_SPHERE_GEOMETRY,
@@ -535,6 +537,11 @@ export function FirstNonEmptyGeometryFrameSignal({
 }
 
 export function WorkspaceSceneScaffold() {
+  const originMaterial = useMemo(
+    () => new THREE.MeshBasicMaterial({ color: 0xffffff, depthWrite: false }),
+    [],
+  );
+  useEffect(() => () => originMaterial.dispose(), [originMaterial]);
   const grid = useMemo(() => {
     const helper = new THREE.GridHelper(100, 100, 0x5a7594, 0x34465a);
     helper.rotation.x = Math.PI / 2;
@@ -572,16 +579,12 @@ export function WorkspaceSceneScaffold() {
     <>
       <primitive object={grid} />
       <primitive object={axes} />
-      <mesh>
-        <sphereGeometry args={[0.24, 18, 18]} />
-        <meshStandardMaterial
-          color={0xffffff}
-          emissive={0x2f6fd2}
-          emissiveIntensity={0.72}
-          roughness={0.28}
-          metalness={0.14}
-        />
-      </mesh>
+      <ScreenSpacePointMarker
+        position={[0, 0, 0]}
+        radiusPixels={ACTIVE_SKETCH_FEEDBACK_PIXEL_BOUNDS.marker.default.min}
+        material={originMaterial}
+        renderOrder={4}
+      />
     </>
   );
 }

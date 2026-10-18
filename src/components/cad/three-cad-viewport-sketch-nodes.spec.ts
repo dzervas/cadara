@@ -33,6 +33,10 @@ import {
 } from "@/components/cad/three-cad-viewport-pick-candidates";
 import {
   getSketchDisplayMarkerPresentation,
+  getActiveSketchMarkerWorldRadii,
+  ACTIVE_SKETCH_FEEDBACK_PIXEL_BOUNDS,
+  createScreenSpacePointMarkerGeometry,
+  updateScreenSpacePointMarker,
   SKETCH_POINT_HOVER_MARKER_SCALE,
   type SketchMarkerDisplayContext,
 } from "@/components/cad/sketch-display-style";
@@ -259,4 +263,103 @@ test("T11f: a hovered point's marker is drawn larger than its curve's other poin
     ),
     "Hovering the line draws its end points at their normal size.",
   ).toEqual({ visible: true, radiusScale: 1 });
+});
+
+test("standalone Point surrounds an endpoint-sized fill with a separate screen-space ring", () => {
+  const session = markerSession();
+  const target = entityRef("standalone");
+  if (target.kind !== "sketchEntity") throw new Error("Expected entity ref.");
+  const definition = {
+    ...session.definition,
+    entities: [
+      ...session.definition.entities,
+      {
+        kind: "point" as const,
+        entityId: target.entityId,
+        target,
+        label: "Standalone point",
+        pointId: pointId("free"),
+        isConstruction: false,
+      },
+    ],
+  };
+  const renderables = getSketchSessionDisplayRenderables({
+    ...session,
+    definition,
+  });
+  const ring = renderables.find(
+    (entry) =>
+      entry.target?.kind === "sketchEntity" &&
+      entry.target.entityId === target.entityId,
+  )!;
+  expect(ring.markerShape).toBe("ring");
+  expect(ring.geometry.kind).toBe("marker");
+  const camera = new THREE.OrthographicCamera(-10, 10, 10, -10, 0.1, 1000);
+  for (const zoom of [0.25, 1, 20]) {
+    camera.zoom = zoom;
+    camera.updateProjectionMatrix();
+    const fill = getActiveSketchMarkerWorldRadii(
+      marker(renderables, "free"),
+      camera,
+      1000,
+    );
+    const endpoint = getActiveSketchMarkerWorldRadii(
+      marker(renderables, "la"),
+      camera,
+      1000,
+    );
+    const outline = getActiveSketchMarkerWorldRadii(ring, camera, 1000);
+    expect(fill.visiblePixelRadius).toBe(endpoint.visiblePixelRadius);
+    expect(outline.visiblePixelRadius).toBe(fill.visiblePixelRadius);
+    const geometry = createScreenSpacePointMarkerGeometry(
+      outline.visiblePixelRadius,
+      true,
+    );
+    expect(geometry).toBeInstanceOf(THREE.RingGeometry);
+    expect(
+      (geometry as THREE.RingGeometry).parameters.innerRadius,
+    ).toBeGreaterThan(fill.visiblePixelRadius);
+    geometry.dispose();
+  }
+});
+
+test("origin markers are flat and retain compact pixel radii through zoom and oblique views", () => {
+  const renderables = getSketchSessionDisplayRenderables(markerSession());
+  const origin = renderables.find(
+    (entry) =>
+      entry.target?.kind === "sketchDatumReference" &&
+      entry.target.datumId === "origin",
+  )!;
+  const camera = new THREE.OrthographicCamera(-10, 10, 10, -10, 0.1, 1000);
+  camera.position.set(10, -10, 10);
+  camera.lookAt(0, 0, 0);
+  camera.updateMatrixWorld(true);
+  const endpoint = getActiveSketchMarkerWorldRadii(
+    marker(renderables, "la"),
+    camera,
+    1000,
+  );
+  const datum = getActiveSketchMarkerWorldRadii(origin, camera, 1000);
+  expect(datum.visiblePixelRadius).toBe(endpoint.visiblePixelRadius);
+  for (const radius of [
+    ACTIVE_SKETCH_FEEDBACK_PIXEL_BOUNDS.marker.default.min,
+    datum.visiblePixelRadius,
+  ]) {
+    const geometry = createScreenSpacePointMarkerGeometry(radius, false);
+    expect(geometry).toBeInstanceOf(THREE.CircleGeometry);
+    geometry.computeBoundingBox();
+    expect(geometry.boundingBox!.min.z).toBe(0);
+    expect(geometry.boundingBox!.max.z).toBe(0);
+    const mesh = new THREE.Mesh(geometry);
+    for (const zoom of [0.25, 1, 20]) {
+      camera.zoom = zoom;
+      camera.updateProjectionMatrix();
+      updateScreenSpacePointMarker(mesh, camera, 1000, [0, 0, 0], 1);
+      expect(mesh.quaternion.equals(camera.quaternion)).toBe(true);
+      const pixelsPerUnit = (1000 * zoom) / (camera.top - camera.bottom);
+      expect(radius * mesh.scale.x * pixelsPerUnit).toBeCloseTo(radius);
+    }
+    geometry.dispose();
+    (mesh.material as THREE.Material).dispose();
+  }
 });

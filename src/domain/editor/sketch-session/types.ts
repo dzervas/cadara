@@ -566,6 +566,8 @@ export interface SketchSessionDisplayRenderable {
     | "sketchReference"
     | "sketchImage";
   markerLayer?: "default" | "overlay";
+  /** Standalone Point entities surround their point marker with a screen-space ring. */
+  markerShape?: "ring";
   /**
    * A sketch point marker's display rule (T11-D8): `always` (no owning
    * curve), or `contextual` (shown only near or on its owning curves;
