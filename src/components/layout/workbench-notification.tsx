@@ -64,12 +64,13 @@ export function WorkbenchNotification({
       data-notification-type={type}
       className={[
         getPlacementClassName(placement),
-        "z-30 flex min-w-0 max-w-sm items-stretch overflow-hidden border text-xs shadow-[var(--cad-panel-shadow)]",
+        "z-30 flex min-w-0 max-w-sm items-stretch overflow-hidden border text-xs",
         className,
       ]
         .filter(Boolean)
         .join(" ")}
       style={{
+        boxShadow: "var(--workbench-shell-elevation-md)",
         ...getNotificationStyle(type),
         ...style,
       }}
