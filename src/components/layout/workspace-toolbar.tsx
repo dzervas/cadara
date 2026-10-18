@@ -28,6 +28,7 @@ import { ToolButton } from "@/components/layout/tool-button";
 import { ToolDropdownButton } from "@/components/layout/tool-dropdown-button";
 import { ToolbarTooltipContent } from "@/components/layout/toolbar-tooltip-content";
 import { getNextToolSearchHighlightIndex } from "@/components/layout/workspace-toolbar.a11y";
+import { toolLeavesSketch } from "@/core/tools/activation-policy";
 import {
   getToolById,
   getToolbarSectionsForMode,
@@ -55,6 +56,8 @@ const DISCORD_URL = "https://discord.gg/T2dBRp4SAQ";
 const TOOLBAR_GAP_PX = 8;
 const TOOLBAR_SHADOW_GUTTER_PX = 32;
 const TOOLBAR_SEARCH_SHADOW_RESERVE_PX = 32;
+const PART_TOOL_DURING_SKETCH_REASON =
+  "Part tools are unavailable while sketching. Finish Sketch first.";
 type VisibleToolbarSection = ReturnType<
   typeof getToolbarSectionsForMode
 >[number];
@@ -154,7 +157,9 @@ export function WorkspaceToolbar({
         activeSketchPlaneEditSession !== null ||
         activeImportSession !== null)) ||
     (tool.id === "importImage" && !canImportReferenceImage) ||
-    (isSketchStyleToolId(tool.id) && (!sketchSession || !svgRenderingEnabled));
+    (isSketchStyleToolId(tool.id) &&
+      (!sketchSession || !svgRenderingEnabled)) ||
+    (mode === "sketch" && toolLeavesSketch(tool.id));
 
   const closeSearchPopover = () => {
     setSearchPopoverOpen(false);
@@ -544,6 +549,11 @@ export function WorkspaceToolbar({
                         active={activeCommand?.toolId === tool.id}
                         selected={isHighlighted}
                         disabled={isToolDisabled(tool)}
+                        disabledReason={
+                          mode === "sketch" && toolLeavesSketch(tool.id)
+                            ? PART_TOOL_DURING_SKETCH_REASON
+                            : undefined
+                        }
                         onButtonFocus={() =>
                           setHighlightedSearchResultIndex(index)
                         }
