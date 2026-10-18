@@ -50,6 +50,97 @@ it("authors a circle through the production contribution owner and extrudes its 
   }
 }, 30000);
 
+// Migrated from e2e/sketch-arc-profile-extrude.spec.ts: the headless session
+// loads the shipped `public/cadara-occ` build, so the production arc-edge route
+// (open problem 8) no longer needs the browser worker to be proven.
+it("closes a three-point arc with a line through endpoint requirements and extrudes the one region into its expected native bounds", async () => {
+  const f = await createSketchWorkflow();
+  try {
+    const arc = await f.execute({
+      operation: "sketch.author",
+      draft: f.current().discovery!.state.draft,
+      primitive: {
+        kind: "threePointArc",
+        points: [
+          [-10, 0],
+          [0, 10],
+          [10, 0],
+        ],
+      },
+      construction: false,
+      intent: "fulfill",
+    });
+    const line = await f.execute({
+      operation: "sketch.author",
+      draft: arc.discovery!.state.draft,
+      primitive: { kind: "line", start: [10, 0], end: [-10, 0] },
+      construction: false,
+      intent: "fulfill",
+    });
+    const drafted = line.discovery!.sketch!;
+    expect(drafted.entities.map((e) => e.kind)).toEqual(["arc", "lineSegment"]);
+    // Equal coordinates alone share no identity: the open chain has no region.
+    expect(drafted.profiles).toEqual([]);
+    const [arcEntity, lineEntity] = drafted.entities;
+    const pointRef = (pointId: string) =>
+      line.discovery!.references.find(
+        (r) => r.target.kind === "sketchPoint" && r.target.pointId === pointId,
+      )!.target;
+    // Arc points are [start, end, center]; the line runs arc end → arc start.
+    for (const [linePoint, arcPoint] of [
+      [lineEntity!.pointIds[0]!, arcEntity!.pointIds[1]!],
+      [lineEntity!.pointIds[1]!, arcEntity!.pointIds[0]!],
+    ])
+      await f.execute({
+        operation: "sketch.requirement.add",
+        draft: f.current().discovery!.state.draft,
+        tool: "constraintCoincident",
+        targets: [pointRef(linePoint), pointRef(arcPoint)],
+        mode: "driving",
+        value: null,
+        intent: "fulfill",
+      });
+    const closed = f.current().discovery!.sketch!;
+    expect(
+      closed.constraints.filter((c) => c.kind === "coincident"),
+    ).toMatchObject([{ status: "satisfied" }, { status: "satisfied" }]);
+    const published = await f.execute({
+      operation: "sketch.publish",
+      draft: f.current().discovery!.state.draft,
+      requireProfiles: true,
+    });
+    const sketch = published.discovery!.sketch!;
+    expect(
+      sketch.profiles,
+      "The arc and its closing line publish exactly one region.",
+    ).toHaveLength(1);
+    const solid = await f.execute({
+      operation: "extrude.create",
+      profile: {
+        kind: "region",
+        sketchId: sketch.sketchId,
+        regionId: sketch.profiles[0]!.regionId,
+      },
+      depth: 5,
+      intent: "fulfill",
+    });
+    expect(solid.completion.geometry.kind).toBe("current");
+    // Upper half-disc of radius 10 about the origin, extruded 5 along +Z: the
+    // y extent of 10 exists only if the arc bulge, not its chord, bounds it.
+    expect(solid.discovery!.model!.bodies).toHaveLength(1);
+    const bounds = solid.discovery!.model!.bodies[0]!.bounds!;
+    for (const [actual, expected] of [
+      [bounds.min, [-10, 0, 0]],
+      [bounds.max, [10, 10, 5]],
+    ] as const)
+      expected.forEach((value, axis) =>
+        expect(actual[axis]).toBeCloseTo(value, 6),
+      );
+  } finally {
+    await f.close();
+  }
+}, 30000);
+
 it("authors a three-point circle with structural perimeter requirements and a real closed profile", async () => {
   const f = await createSketchWorkflow();
   try {
