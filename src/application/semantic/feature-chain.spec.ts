@@ -59,16 +59,10 @@ function expectFilletedCorner(result: SemanticResult, context: string) {
 test("feature chain carries durable context across extrude, fillet and plane steps", async () => {
   const w = await createSketchWorkflow();
   try {
-    await w.execute({
-      operation: "sketch.author",
-      draft: w.current().discovery!.state.draft,
-      primitive: { kind: "rectangle", start: [-15.5, -5], end: [-5, 4.5] },
-      construction: false,
-      intent: "fulfill",
-    });
+    await w.author({ kind: "rectangle", start: [-15.5, -5], end: [-5, 4.5] });
     const published = await w.execute({
       operation: "sketch.publish",
-      draft: w.current().discovery!.state.draft,
+      draft: w.draft(),
       requireProfiles: true,
     });
     const sketch = published.discovery!.sketch!;

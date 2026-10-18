@@ -14,17 +14,6 @@ import { createSketchWorkflow } from "../../../test/helpers/semantic-sketch-work
 it("an endpoint merge retaining two disagreeing Fix requirements blocks the profiles; the published extrude waits; re-entry and save → open keep the same diagnostics; deleting one Fix rebuilds the extrude", async () => {
   const directory = await mkdtemp(resolve(tmpdir(), "cadara-merge-invalid-"));
   const f = await createSketchWorkflow();
-  const draft = () => f.current().discovery!.state.draft;
-  const ref = (kind: "sketchPoint" | "constraint", id: string) =>
-    f
-      .current()
-      .discovery!.references.find(
-        ({ target }) =>
-          target.kind === kind &&
-          (kind === "sketchPoint"
-            ? "pointId" in target && target.pointId === id
-            : "constraintId" in target && target.constraintId === id),
-      )!.target;
   const fixes = () =>
     f
       .current()
@@ -44,13 +33,7 @@ it("an endpoint merge retaining two disagreeing Fix requirements blocks the prof
     };
   };
   try {
-    await f.execute({
-      operation: "sketch.author",
-      draft: draft(),
-      primitive: { kind: "rectangle", start: [-20, 0], end: [0, 15] },
-      construction: false,
-      intent: "fulfill",
-    });
+    await f.author({ kind: "rectangle", start: [-20, 0], end: [0, 15] });
     // Two lines whose facing ends are a real near gap apart (not shared).
     for (const [start, end] of [
       [
@@ -62,13 +45,7 @@ it("an endpoint merge retaining two disagreeing Fix requirements blocks the prof
         [22, -8],
       ],
     ])
-      await f.execute({
-        operation: "sketch.author",
-        draft: draft(),
-        primitive: { kind: "line", start, end },
-        construction: false,
-        intent: "fulfill",
-      });
+      await f.author({ kind: "line", start, end });
     const [, , , , gapA, gapB] = f.current().discovery!.sketch!.entities;
     const destination = gapA!.pointIds[1]!;
     const source = gapB!.pointIds[0]!;
@@ -76,9 +53,9 @@ it("an endpoint merge retaining two disagreeing Fix requirements blocks the prof
     for (const pointId of [destination, source])
       await f.execute({
         operation: "sketch.requirement.add",
-        draft: draft(),
+        draft: f.draft(),
         tool: "constraintFix",
-        targets: [ref("sketchPoint", pointId)],
+        targets: [f.ref(pointId)],
         mode: "driving",
         value: null,
         intent: "fulfill",
@@ -89,7 +66,7 @@ it("an endpoint merge retaining two disagreeing Fix requirements blocks the prof
     ]);
     const published = await f.execute({
       operation: "sketch.publish",
-      draft: draft(),
+      draft: f.draft(),
       requireProfiles: true,
     });
     const sketch = published.discovery!.sketch!;
@@ -116,11 +93,11 @@ it("an endpoint merge retaining two disagreeing Fix requirements blocks the prof
     await f.execute({ operation: "sketch.open", sketchId: sketch.sketchId });
     const merged = await f.run({
       operation: "sketch.geometry.update",
-      draft: draft(),
+      draft: f.draft(),
       edit: {
         kind: "mergePoints",
-        target: ref("sketchPoint", source),
-        destination: ref("sketchPoint", destination),
+        target: f.ref(source),
+        destination: f.ref(destination),
       },
       intent: "author-invalid",
     });
@@ -161,7 +138,7 @@ it("an endpoint merge retaining two disagreeing Fix requirements blocks the prof
     // Finish: the publication applies, and the extrude waits for its sketch.
     const finished = await f.run({
       operation: "sketch.publish",
-      draft: draft(),
+      draft: f.draft(),
       requireProfiles: false,
     });
     expect(finished.outcome).toEqual({
@@ -187,7 +164,7 @@ it("an endpoint merge retaining two disagreeing Fix requirements blocks the prof
     // Re-entered: the same diagnostics (Finish ≡ re-entry).
     await f.run({ operation: "sketch.open", sketchId: sketch.sketchId });
     expect(sketchState()).toEqual(conflict);
-    await f.execute({ operation: "sketch.discard", draft: draft() });
+    await f.execute({ operation: "sketch.discard", draft: f.draft() });
 
     // Save → open: a new history, the same diagnostics and validity in the
     // document and after re-entry.
@@ -230,8 +207,8 @@ it("an endpoint merge retaining two disagreeing Fix requirements blocks the prof
       .discovery!.sketch!.constraints.find((c) => c.label === "Fix 4")!;
     const corrected = await f.execute({
       operation: "sketch.requirement.remove",
-      draft: draft(),
-      targets: [ref("constraint", fix4.constraintId)],
+      draft: f.draft(),
+      targets: [f.ref(fix4.constraintId)],
       intent: "fulfill",
     });
     expect(
@@ -245,7 +222,7 @@ it("an endpoint merge retaining two disagreeing Fix requirements blocks the prof
     expect(corrected.discovery!.sketch!.profiles).toHaveLength(1);
     await f.execute({
       operation: "sketch.publish",
-      draft: draft(),
+      draft: f.draft(),
       requireProfiles: true,
     });
     expect(await documentState(), "the extrude is current again").toEqual(

@@ -8,16 +8,6 @@ import { createSketchWorkflow } from "../../../test/helpers/semantic-sketch-work
 
 type Workflow = Awaited<ReturnType<typeof createSketchWorkflow>>;
 
-async function author(f: Workflow, primitive: Record<string, unknown>) {
-  return f.execute({
-    operation: "sketch.author",
-    draft: f.current().discovery!.state.draft,
-    primitive,
-    construction: false,
-    intent: "fulfill",
-  });
-}
-
 function lastEntityRef(f: Workflow) {
   return f
     .current()
@@ -28,7 +18,7 @@ function lastEntityRef(f: Workflow) {
 it("trims a spline arch between two crossing lines into two spline pieces as one 'Trim' action, replays it with Undo/Redo, and leaves the two outer regions", async () => {
   const f = await createSketchWorkflow();
   try {
-    await author(f, {
+    await f.author({
       kind: "spline",
       fitPoints: [
         [-20, 0],
@@ -38,7 +28,7 @@ it("trims a spline arch between two crossing lines into two spline pieces as one
     });
     const arch = lastEntityRef(f);
     const archId = f.current().discovery!.sketch!.entities[0]!.entityId;
-    await author(f, { kind: "line", start: [20, 0], end: [-20, 0] });
+    await f.author({ kind: "line", start: [20, 0], end: [-20, 0] });
     // Share the arch's end identities, as the browser's endpoint snap does.
     const ref = (label: string) =>
       f.current().discovery!.references.find((r) => r.label === label)!.target;
@@ -48,7 +38,7 @@ it("trims a spline arch between two crossing lines into two spline pieces as one
     ])
       await f.execute({
         operation: "sketch.geometry.update",
-        draft: f.current().discovery!.state.draft,
+        draft: f.draft(),
         edit: {
           kind: "mergePoints",
           target: ref(target),
@@ -57,7 +47,7 @@ it("trims a spline arch between two crossing lines into two spline pieces as one
         intent: "fulfill",
       });
     for (const x of [-10, 10])
-      await author(f, { kind: "line", start: [x, -5], end: [x, 25] });
+      await f.author({ kind: "line", start: [x, -5], end: [x, 25] });
     const before = f.current();
     expect(before.discovery!.sketch!.entities).toHaveLength(4);
     expect(
@@ -128,8 +118,8 @@ it("trims a spline arch between two crossing lines into two spline pieces as one
 it("trims a line crossing a rectangle down to its two outside pieces as one 'Trim' action, replays it with Undo/Redo, and leaves the rectangle one region", async () => {
   const f = await createSketchWorkflow();
   try {
-    await author(f, { kind: "rectangle", start: [0, 0], end: [20, 10] });
-    await author(f, { kind: "line", start: [15, -5], end: [15, 15] });
+    await f.author({ kind: "rectangle", start: [0, 0], end: [20, 10] });
+    await f.author({ kind: "line", start: [15, -5], end: [15, 15] });
     const crossing = lastEntityRef(f);
     const crossingId = f.current().discovery!.sketch!.entities.at(-1)!.entityId;
     const before = f.current();

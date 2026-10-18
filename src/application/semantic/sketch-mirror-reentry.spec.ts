@@ -95,17 +95,9 @@ const geometryOf = (sketch: Sketch) => ({
 test("Finish → re-enter keeps the mirrored sketch identical after a copy edit", async () => {
   const w = await createSketchWorkflow();
   try {
-    const author = (primitive: Record<string, unknown>, construction = false) =>
-      w.execute({
-        operation: "sketch.author",
-        draft: w.current().discovery!.state.draft,
-        primitive,
-        construction,
-        intent: "fulfill",
-      });
-    await author({ kind: "line", start: [-10, 6], end: [-6, 9] });
-    await author({ kind: "circle", center: [-3, 7], radius: 1.5 });
-    await author({
+    await w.author({ kind: "line", start: [-10, 6], end: [-6, 9] });
+    await w.author({ kind: "circle", center: [-3, 7], radius: 1.5 });
+    await w.author({
       kind: "threePointArc",
       points: [
         [0, 5],
@@ -113,7 +105,7 @@ test("Finish → re-enter keeps the mirrored sketch identical after a copy edit"
         [4, 5],
       ],
     });
-    await author({
+    await w.author({
       kind: "spline",
       fitPoints: [
         [6, 5],
@@ -121,7 +113,7 @@ test("Finish → re-enter keeps the mirrored sketch identical after a copy edit"
         [11, 5],
       ],
     });
-    const drawn = await author(
+    const drawn = await w.author(
       {
         kind: "line",
         start: [-14, 2],
@@ -150,11 +142,7 @@ test("Finish → re-enter keeps the mirrored sketch identical after a copy edit"
     const seedStart = entityOf(created, created.mirrors[0]!.seedEntityIds[0]!)
       .pointIds[0]!;
     expect(positionOf(created, copyLine.pointIds[0]!)).toEqual([-10, -2]);
-    const copyStart = mirrored.discovery!.references.find(
-      (r) =>
-        r.target.kind === "sketchPoint" &&
-        r.target.pointId === copyLine.pointIds[0],
-    )!.target;
+    const copyStart = w.ref(copyLine.pointIds[0]!);
     const edited = await w.execute({
       operation: "sketch.geometry.update",
       draft: mirrored.discovery!.state.draft,
