@@ -6,6 +6,7 @@ import {
 } from "@playwright/test";
 
 import { SketchWorkbenchHarness } from "./sketch-workbench";
+import { glidePress } from "./mirror-workbench";
 
 /**
  * Shared acceptance harness (T17b). Every pointer path glides (several
@@ -255,12 +256,7 @@ export async function activateProfileSlot(page: Page) {
   const add = page.getByRole("button", { name: "+ Add Profile" });
   await expect(add).toBeVisible({ timeout: 15_000 });
   if ((await add.getAttribute("aria-pressed")) === "true") return;
-  const box = (await add.boundingBox())!;
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, {
-    steps: 10,
-  });
-  await page.mouse.down();
-  await page.mouse.up();
+  await glidePress(page, add);
   await expect(add).toHaveAttribute("aria-pressed", "true", {
     timeout: 10_000,
   });
@@ -288,12 +284,7 @@ export async function toggleVisibility(
   await expect(toggle, `${action} ${label}`).toHaveCount(1, {
     timeout: 15_000,
   });
-  const box = (await toggle.boundingBox())!;
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, {
-    steps: 10,
-  });
-  await page.mouse.down();
-  await page.mouse.up();
+  await glidePress(page, toggle);
 }
 
 export const showInViewport = (page: Page, label: string | RegExp) =>
@@ -322,12 +313,17 @@ export async function glideDrag(
 /** Glides onto `target` (e.g. a timeline entry) and double-clicks it. */
 export async function glideDoubleClick(page: Page, target: Locator) {
   await expect(target).toBeVisible({ timeout: 30_000 });
+  // "active" is set before the timeline's 200 ms translation finishes.
+  // Trial hover waits for native stability (two frames) without moving the pointer.
+  await target.hover({ trial: true });
   const box = await target.boundingBox();
   if (!box) throw new Error("The double-click target is not visible.");
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, {
     steps: 10,
   });
-  await page.mouse.dblclick(box.x + box.width / 2, box.y + box.height / 2);
+  // The glide can itself move a control; remeasure at action time through the
+  // locator's native stability/hit-target checks, never reuse the pre-glide box.
+  await target.dblclick();
 }
 
 export type HistoryEntry = { sequence: number; label: string };

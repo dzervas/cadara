@@ -82,12 +82,14 @@ export async function glideClick(
 /** A gliding press on a DOM control's centre. */
 export async function glidePress(page: Page, control: Locator) {
   await expect(control).toBeVisible({ timeout: 15_000 });
+  // Wait for animated DOM controls to be stable before starting the glide.
+  await control.hover({ trial: true });
   const box = (await control.boundingBox())!;
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, {
     steps: 10,
   });
-  await page.mouse.down();
-  await page.mouse.up();
+  // Locator actions remeasure after the glide and check stability/hit testing.
+  await control.click();
 }
 
 /**
