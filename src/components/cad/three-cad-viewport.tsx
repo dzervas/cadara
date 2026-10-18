@@ -3667,6 +3667,8 @@ function ThreeCadViewportScene({
           cameraRef={cameraRef}
           controlsRef={controlsRef}
           controlsReadyVersion={controlsReadyVersion}
+          sketchSessionActive={Boolean(sketchSession)}
+          cameraTransitionVersion={viewportTransitionVersion}
         />
         <ViewportCameraTransitionDriver
           cameraRef={cameraRef}

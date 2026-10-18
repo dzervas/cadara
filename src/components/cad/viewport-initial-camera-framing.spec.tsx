@@ -84,13 +84,20 @@ async function cameraSeam(mode: ViewportProjectionMode, aspect: number) {
   const cameraRef = { current: camera };
   const controlsRef = createRef<ViewportCameraControls>();
   let updates = 0;
+  const changeListeners = new Set<() => void>();
+  const emitChange = () => changeListeners.forEach((listener) => listener());
   const controls: ViewportCameraControls = {
     target: new THREE.Vector3(0, 0, 4),
     update() {
       updates += 1;
+      emitChange();
     },
-    addEventListener() {},
-    removeEventListener() {},
+    addEventListener(_type, listener) {
+      changeListeners.add(listener);
+    },
+    removeEventListener(_type, listener) {
+      changeListeners.delete(listener);
+    },
   };
   await root.configure({
     gl: gl as never,
@@ -104,10 +111,13 @@ async function cameraSeam(mode: ViewportProjectionMode, aspect: number) {
     controls,
     controlsRef,
     updates: () => updates,
+    emitChange,
     render: (
       documentId: DocumentId | null,
       renderables: ViewportRenderableRecord[],
       controlsReadyVersion = 0,
+      sketchSessionActive = false,
+      cameraTransitionVersion = 0,
     ) =>
       act(async () => {
         root.render(
@@ -117,6 +127,8 @@ async function cameraSeam(mode: ViewportProjectionMode, aspect: number) {
             cameraRef={cameraRef}
             controlsRef={controlsRef}
             controlsReadyVersion={controlsReadyVersion}
+            sketchSessionActive={sketchSessionActive}
+            cameraTransitionVersion={cameraTransitionVersion}
           />,
         );
       }),
@@ -241,3 +253,78 @@ test("initial framing accepts a large tessellation without spreading vertices in
     await seam.dispose();
   }
 });
+
+for (const takeover of ["sketch", "transition", "orbit", "pan", "zoom"] as const) {
+  test(`deferred initial fit stands down after ${takeover} takes the camera`, async () => {
+    const seam = await cameraSeam("orthographic", 16 / 9);
+    seam.controlsRef.current = seam.controls;
+    try {
+      await seam.render("doc_delayed", []);
+      let transitionVersion = 0;
+      if (takeover === "sketch") {
+        // Sketch entry takes ownership before its animated frame is applied.
+        await seam.render("doc_delayed", [], 0, true);
+        await seam.render("doc_delayed", [], 0, false);
+      } else if (takeover === "transition") {
+        transitionVersion = 1;
+        await seam.render("doc_delayed", [], 0, false, transitionVersion);
+      } else {
+        if (takeover === "zoom") seam.camera.zoom *= 2;
+        else seam.camera.position.add(new THREE.Vector3(12, 34, 56));
+        if (takeover === "pan") {
+          seam.controls.target.add(new THREE.Vector3(12, 34, 56));
+        }
+        seam.emitChange();
+      }
+      const ownedFrame = captureViewportCameraFrame(seam.camera, seam.controls);
+      await seam.render(
+        "doc_delayed",
+        [body(largePart)],
+        0,
+        false,
+        transitionVersion,
+      );
+      expect(seam.updates()).toBe(0);
+      expect(captureViewportCameraFrame(seam.camera, seam.controls)).toEqual(
+        ownedFrame,
+      );
+
+      // Returning to this document must not re-arm the forfeited fit.
+      await seam.render("doc_other", [], 0, false, transitionVersion);
+      await seam.render(
+        "doc_delayed",
+        [body(largePart)],
+        0,
+        false,
+        transitionVersion,
+      );
+      expect(seam.updates()).toBe(0);
+    } finally {
+      await seam.dispose();
+    }
+  });
+}
+
+for (const takeover of ["sketch", "transition"] as const) {
+  test(`${takeover} takes priority when the first bounds arrive in the same render`, async () => {
+    const seam = await cameraSeam("orthographic", 16 / 9);
+    seam.controlsRef.current = seam.controls;
+    try {
+      await seam.render("doc_delayed", []);
+      const before = captureViewportCameraFrame(seam.camera, seam.controls);
+      await seam.render(
+        "doc_delayed",
+        [body(largePart)],
+        0,
+        takeover === "sketch",
+        takeover === "transition" ? 1 : 0,
+      );
+      expect(seam.updates()).toBe(0);
+      expect(captureViewportCameraFrame(seam.camera, seam.controls)).toEqual(
+        before,
+      );
+    } finally {
+      await seam.dispose();
+    }
+  });
+}
