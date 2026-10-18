@@ -196,6 +196,10 @@ it("an endpoint merge retaining two disagreeing Fix requirements blocks the prof
       undoEntries: [],
       redoEntries: [],
     });
+    expect(
+      reopened.diagnostics.map(({ code, message }) => ({ code, message })),
+      "open reports the waiting extrude once, just like inspect",
+    ).toEqual(waiting.diagnostics);
     expect(await documentState()).toEqual(waiting);
     await f.run({ operation: "sketch.open", sketchId: sketch.sketchId });
     expect(sketchState()).toEqual(conflict);
