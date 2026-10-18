@@ -5,7 +5,7 @@ import {
   type HTMLAttributes,
   type ReactNode,
 } from "react";
-import { ActionIcon } from "@mantine/core";
+import { ActionIcon, ScrollArea } from "@mantine/core";
 
 import {
   WorkbenchContextMenu,
@@ -75,17 +75,19 @@ export function FloatingPartsTree({
   return (
     <aside
       aria-label="Parts and objects"
-      className="pointer-events-auto absolute select-none"
+      className="pointer-events-auto absolute flex flex-col select-none"
       style={{
         left: VIEWPORT_OVERLAY_INSET_PX,
         top: VIEWPORT_OVERLAY_TOP_INSET_STYLE,
+        // Clear the bottom history, document tabs, and collapsed debugger.
+        maxHeight: `calc(100% - ${VIEWPORT_OVERLAY_TOP_INSET_STYLE} - 208px)`,
         width: FLOATING_PARTS_TREE_WIDTH_PX,
         zIndex: 15,
         color: "var(--workbench-shell-text)",
       }}
     >
       <header
-        className="px-2.5 pb-2 text-[11px] font-semibold uppercase"
+        className="shrink-0 px-2.5 pb-2 text-[11px] font-semibold uppercase"
         style={{
           letterSpacing: "0.18em",
           color: "var(--workbench-shell-text-dim)",
@@ -94,7 +96,7 @@ export function FloatingPartsTree({
       >
         Parts &amp; Objects
       </header>
-      <div className="flex flex-col">
+      <ScrollArea.Autosize className="min-h-0" type="auto" scrollbars="y">
         {objects.map((item) => {
           const target = item.target;
           const targetKey = getPrimitiveRefKey(target);
@@ -163,7 +165,7 @@ export function FloatingPartsTree({
             </WorkbenchContextMenu>
           );
         })}
-      </div>
+      </ScrollArea.Autosize>
     </aside>
   );
 }
