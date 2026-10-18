@@ -172,6 +172,18 @@ export function createModelingService(
     return ++runtimeGeneration;
   }
   let repositoryChangePromise = Promise.resolve();
+  let pendingPublicationRestore: (() => Promise<void>) | null = null;
+  let publicationRecovery: Promise<void> | null = null;
+
+  async function recoverPublishedDocument() {
+    const restore = pendingPublicationRestore;
+    if (!restore) return;
+    // Concurrent snapshot readers share the handoff; a rejection remains retryable.
+    publicationRecovery ??= restore().then(() => {
+      if (pendingPublicationRestore === restore) pendingPublicationRestore = null;
+    }).finally(() => { publicationRecovery = null; });
+    await publicationRecovery;
+  }
   let repositoryPersistencePromise = Promise.resolve();
   // T17k3 (A-1): local mutations in flight, and the newest repository state seen.
   let localMutations: Promise<unknown> = Promise.resolve();
@@ -382,6 +394,7 @@ export function createModelingService(
         const run = (async () => {
           await ensureInitialized();
           await changesBefore;
+          await recoverPublishedDocument();
           const previousBasis = repositorySnapshotBasis;
           const generation = beginRuntimeChange();
           const result = await input.action();
@@ -961,28 +974,49 @@ export function createModelingService(
       )
         restoredRepositoryEvent = latestRepositoryEvent;
     };
-    if (write.ok) {
-      markRepositorySnapshotFresh(write.metadata);
-      await restorePublished(write.document, write.diagnostics, write.metadata);
-      return { ...input.result, revisionId: await currentRevisionId() };
-    }
-    if (write.appliedLive) {
-      canPersistAuthoredDocument = false;
-      markRepositorySnapshotFresh(write.appliedLive.metadata);
-      await restorePublished(
-        write.appliedLive.document,
-        write.appliedLive.diagnostics,
-        write.appliedLive.metadata,
-      );
+    if (write.ok || write.appliedLive) {
+      const committed = write.ok ? write : write.appliedLive!;
+      const publicationEvent = latestRepositoryEvent;
+      const diagnostics = [
+        ...input.result.diagnostics,
+        ...(committed.diagnostics ?? []),
+        ...(!write.ok ? [createDocumentRepositoryDiagnostic(write.status)] : []),
+      ];
+      if (!write.ok) canPersistAuthoredDocument = false;
+      markRepositorySnapshotFresh(committed.metadata);
+      let revisionId = committed.document.revisionId;
+      try {
+        // T17k3: keep awaiting the merged restore so a successful handoff names
+        // the actual runtime revision, not the candidate's pre-merge revision.
+        await restorePublished(committed.document, committed.diagnostics, committed.metadata);
+        revisionId = await currentRevisionId();
+      } catch (error) {
+        // The authored write is already committed. Reporting an unapplied edit
+        // retains the editor's old private baseline and poisons every Finish.
+        // Return its receipt, and retry runtime recovery (never publication)
+        // before a snapshot or the next mutation can use the incomplete runtime.
+        const diagnostic: ModelingDiagnostic = {
+          code: "sketch-publication-restore-failed",
+          severity: "warning",
+          message: `Sketch published, but the document refresh failed: ${error instanceof Error ? error.message : String(error)}`,
+          target: { kind: "sketch", sketchId: input.result.sketchId },
+          detail: null,
+        };
+        diagnostics.push(diagnostic);
+        pendingPublicationRestore = async () => {
+          // A peer may have arrived after the write; recovery must not restore
+          // the older publication over the newer authoritative repository state.
+          const latest = latestRepositoryEvent !== publicationEvent
+            ? latestRepositoryEvent ?? committed
+            : committed;
+          await restorePublished(latest.document, [...(latest.diagnostics ?? []), ...diagnostics], latest.metadata);
+        };
+      }
       return {
         ...input.result,
-        revisionId: await currentRevisionId(),
-        durabilityPending: true,
-        diagnostics: [
-          ...input.result.diagnostics,
-          ...(write.appliedLive.diagnostics ?? []),
-          createDocumentRepositoryDiagnostic(write.status),
-        ],
+        revisionId,
+        ...(!write.ok ? { durabilityPending: true } : {}),
+        diagnostics,
       };
     }
     const restored = await documentRepository.load({
@@ -1658,6 +1692,7 @@ export function createModelingService(
       for (;;) {
         const changes = repositoryChangePromise;
         await changes;
+        await recoverPublishedDocument();
         const generation = stateGeneration;
         const response = await adapter.getDocumentSnapshot(buildDocumentRequest(currentDocumentId));
         // An adapter read can capture the old runtime while a peer event queues

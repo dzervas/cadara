@@ -11,6 +11,8 @@ import {
   OCC_KERNEL_SETTINGS,
 } from "@/domain/modeling/opencascade-kernel-seed";
 import { createModelingService } from "./service";
+import { createAuthoredModelDocumentFromSnapshot } from "@/contracts/modeling/authored-document";
+import { createSketchPublicationFailureFixture } from "./sketch-publication.fixtures";
 
 // Logic seam: exact repository publication observation, not geometric conformance.
 class FailedPublicationRepository extends MemoryDocumentRepository {
@@ -97,6 +99,82 @@ it("observes the failed publication transaction with its actual applied live ske
     service.dispose();
   }
 });
+
+it.each([false, true])(
+  "a post-write restore failure preserves the publication receipt and recovers without another write (appliedLive=%s)",
+  async (appliedLive) => {
+    const { service, repository, receipts } =
+      createSketchPublicationFailureFixture(appliedLive);
+    try {
+      const before = createAuthoredModelDocumentFromSnapshot(
+        await service.getCurrentDocumentSnapshot(),
+      );
+      const sketch = before.sketches[0]!;
+      const definition = structuredClone(sketch.definition);
+      definition.points[0] = { ...definition.points[0]!, position: [41, 17] };
+      const result = await service.commitSketch({
+        baseRevisionId: before.revisionId,
+        sketchId: sketch.sketchId,
+        sketchLabel: sketch.label,
+        plane: sketch.plane,
+        definition,
+        solverCorrelation: {
+          requestId: "request_restore_failure",
+          projectionRequestId: "request_restore_failure:project",
+          validationRequestId: "request_restore_failure:validate",
+          solveRequestId: "request_restore_failure:solve",
+          regionRequestId: "request_restore_failure:regions",
+        },
+        publicationBase: {
+          actionContextId: sketch.sketchId,
+          expectedSketch: sketch,
+        },
+      });
+      expect(
+        result.isOk(),
+        "The authored write committed even though its runtime restore failed.",
+      ).toBe(true);
+      if (result.isErr()) throw result.error;
+      expect(result.value.revisionState.kind).toBe("accepted");
+      expect(result.value.sketchId).toBe(sketch.sketchId);
+      expect(result.value.revisionId).not.toBe(before.revisionId);
+      expect(result.value.durabilityPending ?? false).toBe(appliedLive);
+      expect(result.value.diagnostics).toContainEqual(
+        expect.objectContaining({
+          code: "sketch-publication-restore-failed",
+          message: expect.stringContaining(
+            "Injected post-publication restore failure",
+          ),
+        }),
+      );
+      const receipt = receipts[0]!;
+      const written = receipt.ok
+        ? receipt.document
+        : receipt.appliedLive!.document;
+      expect(result.value.revisionId).toBe(written.revisionId);
+      const recovered = await service.getCurrentDocumentSnapshot();
+      expect(recovered.document.revisionId).toBe(written.revisionId);
+      expect(
+        recovered.document.sketches[0]!.sketch.definition.points[0]!.position,
+      ).toEqual([41, 17]);
+      expect(recovered.document.diagnostics).toContainEqual(
+        expect.objectContaining({ code: "sketch-publication-restore-failed" }),
+      );
+      expect(receipts).toHaveLength(1);
+      const stored = await repository.load({
+        documentId: before.documentId,
+        seedDocument: before,
+      });
+      expect(stored.ok && stored.document.revisionId).toBe(written.revisionId);
+      expect(
+        (await repository.getDurableHistoryAvailability(before.documentId))
+          .undoEntries,
+      ).toHaveLength(1);
+    } finally {
+      service.dispose();
+    }
+  },
+);
 
 it("cursor restoration clears acknowledged replay history without dropping the committed point", async () => {
   const adapter = new MockKernelAdapter();
