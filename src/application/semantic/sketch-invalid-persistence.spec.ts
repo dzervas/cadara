@@ -57,7 +57,7 @@ function expectRetainedConflict(opened: SemanticResult, sketchId: string) {
   );
 }
 
-// Migrated from e2e/sketch-invalid-persistence.spec.ts: the browser Finish,
+// Formerly e2e/sketch-invalid-persistence.spec.ts: the browser Finish,
 // Save As/Open and re-entry are the semantic sketch.publish, document.save/open
 // and sketch.open over the same native file.
 it("nonconverged authored sketch finishes, saves, reopens and re-enters with diagnostics intact", async () => {

@@ -8,8 +8,10 @@ test.use({ viewport: { width: 1440, height: 960 } });
 // Lane: e2e (docs/testing.md). Seam: the Split tool in the real workbench →
 // pointer picking of the target and of the boundary crossing → one labelled
 // authored action → Undo/Redo of selectable pieces. The line-by-line Extend
-// and Split rows (no picking contract) live in the semantic session:
-// src/application/semantic/sketch-extend-split.spec.ts (cadara-d17.6).
+// and Split rows moved to the semantic session
+// (src/application/semantic/sketch-extend-split.spec.ts, cadara-d17.6), which
+// proves the authored result only: the hover-picking of a target line and its
+// boundary line is now unproven in the browser.
 
 async function expectStaged(
   workbench: FeatureWorkbenchHarness,
