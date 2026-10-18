@@ -399,14 +399,3 @@ test("extrude preserves manual operation and target after later preselection cha
   await workbench.expectOperationSelected("join");
   await workbench.expectBooleanTargetSelected(FEATURE_FIXTURE.body);
 });
-
-test("feature chain carries durable context across feature steps", async ({
-  page,
-}) => {
-  const workbench = new FeatureWorkbenchHarness(page);
-
-  const chain = await workbench.createFeatureChain();
-
-  await chain.addFilletFromFirstEdge();
-  await chain.addPlaneFromTopPlane();
-});

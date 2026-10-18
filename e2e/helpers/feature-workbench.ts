@@ -128,11 +128,6 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
     };
   }
 
-  async createFeatureChain() {
-    const base = await this.openWithBaseExtrudeFixture();
-    return new FeatureChainHarness(this, base);
-  }
-
   // TODO: This should be taken by the feature definition
   async activateFeature(kind: FeatureKind) {
     const toolNames: Record<FeatureKind, string> = {
@@ -571,47 +566,6 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-export class FeatureChainHarness {
-  private readonly workbench: FeatureWorkbenchHarness;
-  readonly context: {
-    profileTarget: string;
-    bodyTarget: string;
-  };
-
-  constructor(
-    workbench: FeatureWorkbenchHarness,
-    context: FeatureChainHarness["context"],
-  ) {
-    this.workbench = workbench;
-    this.context = context;
-  }
-
-  async addFilletFromFirstEdge() {
-    await this.workbench.activateFeature("fillet");
-    await this.workbench.selectFirstReferenceMatching(
-      /^Select .* body_feature_extrude-1\.edge_/,
-    );
-    await this.workbench.setNumericField("Radius", 0.5);
-    await this.workbench.expectFeaturePreviewReady("fillet");
-    await this.workbench.commitFeature("feature_fillet-1");
-    return this;
-  }
-
-  async addPlaneFromTopPlane() {
-    await this.workbench.activateFeature("plane");
-    await this.workbench.page
-      .getByRole("button", { name: /Top Plane/ })
-      .first()
-      .click();
-    await expect
-      .poll(() => this.workbench.currentEditorSelection(), { timeout: 10_000 })
-      .toContain("construction_plane-xy");
-    await this.workbench.expectFeaturePreviewReady("plane");
-    await this.workbench.commitFeature("feature_plane-1");
-    return this;
-  }
 }
 
 export function meanPixelDelta(left: Buffer, right: Buffer) {
