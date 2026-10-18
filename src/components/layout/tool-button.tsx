@@ -24,6 +24,8 @@ interface ToolButtonProps {
   onTrigger?: () => void;
   active?: boolean;
   disabled?: boolean;
+  /** Shown as the tooltip of a disabled tool. */
+  disabledReason?: string;
   selected?: boolean;
   buttonId?: string;
   buttonRole?: string;
@@ -41,6 +43,7 @@ export const ToolButton = memo(function ToolButton({
   onTrigger,
   active = false,
   disabled = false,
+  disabledReason,
   selected = false,
   buttonId,
   buttonRole,
@@ -98,7 +101,10 @@ export const ToolButton = memo(function ToolButton({
       onClick={handleClick}
       aria-label={tool.name}
       aria-selected={ariaSelected}
-      disabled={disabled}
+      // A natively disabled button gets no pointer events, so its tooltip
+      // would never open; handleClick already ignores disabled tools.
+      disabled={disabled && !disabledReason}
+      aria-disabled={disabled || undefined}
       id={buttonId}
       role={buttonRole}
       tabIndex={buttonTabIndex}
@@ -198,7 +204,20 @@ export const ToolButton = memo(function ToolButton({
   );
 
   if (inline) {
-    return content;
+    return disabled && disabledReason ? (
+      <Tooltip
+        label={
+          <ToolbarTooltipContent
+            title={tool.name}
+            description={disabledReason}
+          />
+        }
+      >
+        {content}
+      </Tooltip>
+    ) : (
+      content
+    );
   }
 
   return (

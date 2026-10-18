@@ -12,7 +12,10 @@ import {
   createModelingServiceEditorEffectRuntime,
 } from "./state-machine";
 import { createEditorEventLoop } from "@/application/editor/editor-event-loop";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import {
+  enterSketchSession,
+  enterSketchSessionState,
+} from "@/domain/editor/sketch-entry.fixtures";
 import {
   deriveSketchRegionsForTest,
   replayEditorEvents,
@@ -3998,6 +4001,38 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     }
   }
 
+  // O23 (PR 7): a part tool reached during a sketch (toolbar search, any
+  // dispatcher) must not drop the private draft; only Finish ends a sketch.
+  function testPartToolActivationDuringSketchKeepsTheDraft() {
+    const entered = enterSketchSessionState(
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
+    );
+    const partToolIds = [
+      "measure",
+      "sectionView",
+      "extrude",
+      "linearPattern",
+      "moveFace",
+      "split",
+      "import",
+      "sketch",
+    ] as const satisfies readonly ToolId[];
+
+    for (const toolId of partToolIds) {
+      const result = transitionEditorState(entered, {
+        type: "tool.activated",
+        toolId,
+      });
+      expect(result.state, `${toolId} leaves the open sketch untouched.`).toBe(
+        entered,
+      );
+      expect(result.effects, `${toolId} emits nothing.`).toEqual([]);
+    }
+  }
+
   function testSketchEditToolActivationReusesCompatibleSelectionAndClearsInvalidSelection() {
     const session = createOffsetFixtureSketchSession();
     const selectedTargets = session.definition.entities.map(
@@ -5807,6 +5842,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
   testSelectionClearEventClearsSelectionAndPreservesActiveState();
   testSketchToolClearStaysInSketchEditing();
   testRemainingSketchToolsActivateWithoutDroppingSketchSession();
+  testPartToolActivationDuringSketchKeepsTheDraft();
   testSketchEditToolActivationReusesCompatibleSelectionAndClearsInvalidSelection();
   testPassiveSketchStyleToolsDoNotDropSketchSession();
   testConstraintAuthoringReceivesViewportHoverAndSelection();

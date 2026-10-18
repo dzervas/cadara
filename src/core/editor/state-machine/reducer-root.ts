@@ -1,5 +1,8 @@
 import { isRegisteredSketchConstraintToolId } from "@/core/sketch-constraints/registry";
-import { getToolCommandBehavior } from "@/core/tools/activation-policy";
+import {
+  getToolCommandBehavior,
+  toolLeavesSketch,
+} from "@/core/tools/activation-policy";
 import {
   getSelectionFilterForCommand,
   selectionFilterAllowsTarget,
@@ -426,6 +429,12 @@ function handleSharedToolActivated(
 
   if (commandBehavior === "sketchReferenceImageImport") {
     return handleImportImageToolActivation(state);
+  }
+
+  // O23: a part tool must not discard the open sketch; the toolbar search
+  // shows these tools disabled while sketching.
+  if (state.mode === "sketch" && toolLeavesSketch(event.toolId)) {
+    return { state, effects: [] };
   }
 
   if (event.toolId === "sketch") {

@@ -31,3 +31,11 @@ export function resolveToolActivationMode(
 
   return currentMode;
 }
+
+/**
+ * A part-mode tool activated during a sketch would leave sketch mode and drop
+ * the private draft (O23). Only Finish Sketch may end a sketch.
+ */
+export function toolLeavesSketch(toolId: ToolId) {
+  return resolveToolActivationMode(toolId, "sketch") === "part";
+}
