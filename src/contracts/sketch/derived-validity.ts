@@ -1,6 +1,7 @@
 import { DERIVED_FAILURE_CODES } from "@/contracts/sketch/mirror-requirements";
 import {
   SOLVED_SKETCH_SCHEMA_VERSION,
+  type DerivableSketchDefinition,
   type RegionRecord,
   type SketchDerivedValidity,
   type SketchRecord,
@@ -51,6 +52,24 @@ export function sketchProfileGateFailures(
   solvedSnapshot: Pick<SolvedSketchSnapshot, "failedDerivationIds">,
 ): readonly string[] {
   return solvedSnapshot.failedDerivationIds ?? [];
+}
+
+/** Empty/image-only metadata owes no geometry evaluation or region derivation.
+ * Consumers retain their own diagnostic and publication gates.
+ */
+export function isUnevaluatedMetadataOnlySketch(
+  definition: DerivableSketchDefinition,
+  snapshot: SolvedSketchSnapshot,
+): boolean {
+  return (
+    snapshot.status.solveState === "notEvaluated" &&
+    definition.entities.length === 0 &&
+    definition.points.length === 0 &&
+    definition.constraints.length === 0 &&
+    definition.dimensions.length === 0 &&
+    definition.references.length === 0 &&
+    (definition.derivedRelationships?.length ?? 0) === 0
+  );
 }
 
 export function deriveSketchValidity(input: {

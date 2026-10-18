@@ -72,6 +72,7 @@ import {
 } from "@/contracts/sketch/mirror-requirements";
 import {
   deriveSketchValidity,
+  isUnevaluatedMetadataOnlySketch,
   mergeSketchSolveDiagnostics,
   sketchProfileGateFailures,
   withRelationshipScopedDiagnostics,
@@ -554,13 +555,7 @@ function isUnevaluatedEmptySketch(
   snapshot: SolvedSketchSnapshot,
 ) {
   return (
-    snapshot.status.solveState === "notEvaluated" &&
-    definition.entities.length === 0 &&
-    definition.points.length === 0 &&
-    definition.constraints.length === 0 &&
-    definition.dimensions.length === 0 &&
-    definition.references.length === 0 &&
-    (definition.derivedRelationships?.length ?? 0) === 0 &&
+    isUnevaluatedMetadataOnlySketch(definition, snapshot) &&
     sketchProfileGateFailures(snapshot).length === 0 &&
     !snapshot.diagnostics.some((diagnostic) => diagnostic.severity === "error")
   );
