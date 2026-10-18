@@ -10,15 +10,11 @@ import {
   waitForUndoneAction,
   type CanvasPoint,
 } from "./helpers/acceptance";
-import { openDocumentCopy, saveDocumentCopy } from "./helpers/document-files";
 import { FeatureWorkbenchHarness } from "./helpers/feature-workbench";
 import { DIMENSION_TOOL, floatingInput } from "./helpers/mechanical-part";
 import {
-  entityTarget,
   glideClick,
   glidePress,
-  hoverUntil,
-  openSearchTool,
   openTopSketch,
 } from "./helpers/mirror-workbench";
 
@@ -30,15 +26,14 @@ test.use({ viewport: { width: 1440, height: 960 } });
 // label move, delete) committed by pointer and keyboard, each undone and
 // redone by the keyboard against the session's authored definition; a
 // cancelled draft; Finish, re-entry and the retained private history; the
-// document-level Undo/Redo of the publication; and (row 2) invalid
-// sketches through Finish and the File menu's Save As / Open. The
-// invalid-by-merge row moved to the semantic session
-// (src/application/semantic/sketch-invalid-merge.spec.ts). Every pointer
-// path glides (several `mouse.move` steps); waits are on committed history
-// entries (sequence-based, T17-17), machine state and revisions, never a
-// frame count. Debug reads (the session's authored definition, live
-// regions, the document diagnostic count) are assertions only. Step → row
-// map and discrimination (mutants): T17k.md.
+// document-level Undo/Redo of the publication. The invalid-by-merge and
+// invalid-by-deletion rows (invalid sketches through Finish, re-entry and
+// Save As / Open) moved to the semantic session:
+// src/application/semantic/sketch-invalid-{merge,deletion}.spec.ts. Every
+// pointer path glides (several `mouse.move` steps); waits are on committed
+// history entries (sequence-based, T17-17), machine state and revisions,
+// never a frame count. Debug reads (the session's authored definition) are
+// assertions only. Step → row map and discrimination (mutants): T17k.md.
 
 const LINE_TOOL = "Create line geometry.";
 const CIRCLE_TOOL = "Create circular geometry.";
@@ -437,206 +432,4 @@ test("§5 E2E-5 history: create, drag, dimension, construction, style, label mov
     timeout: 30_000,
   });
   expect(await published.getAttribute("data-history-sketch-id")).toBe(sketchId);
-});
-
-const liveRegions = (page: Page) =>
-  page.evaluate(
-    () => window.__cadaraDebug?.getSketchSnapshot()?.liveRegions ?? null,
-  );
-/** No internal id in the page's text or accessible labels (T17e). */
-async function expectNoInternalIds(page: Page, when: string) {
-  const text = await page.evaluate(() => {
-    const labels = Array.from(
-      document.querySelectorAll("[aria-label]"),
-      (element) => element.getAttribute("aria-label") ?? "",
-    );
-    return [document.body.innerText, ...labels].join("\n");
-  });
-  expect(text, `${when}: no internal id`).not.toMatch(
-    /sketch_|derivation_|constraint_|dimension_/,
-  );
-}
-
-const reopenButton = (page: Page) =>
-  page.getByRole("button", {
-    name: "Select Sketch Draft. Double-click to reopen.",
-  });
-
-async function reenter(workbench: FeatureWorkbenchHarness) {
-  await glideDoubleClick(workbench.page, reopenButton(workbench.page));
-  await workbench.expectSketchSessionActive();
-}
-
-async function finish(workbench: FeatureWorkbenchHarness) {
-  await workbench.activateTool(FINISH_TOOL);
-  await workbench.expectMachine("idle", 60_000);
-}
-
-const OFFSET_TOOL =
-  "Offset a connected chain with a durable offset relationship.";
-/** Two Shift-placed lines with a corner: the offset's seeds. */
-const CHAIN = [
-  { x: 560, y: 560 },
-  { x: 840, y: 560 },
-  { x: 840, y: 340 },
-] as const;
-/** A Shift-placed circle left of the sketch Y axis, mirrored about it. */
-const MIRRORED = { centre: { x: 420, y: 300 }, rim: { x: 460, y: 300 } };
-const MIRROR_BROKEN =
-  "Mirror ‘mirror 5’ is broken: the original of ‘Circle 4 mirror’ was deleted. Its copies stay where they were last solved and can't be used; profiles from this sketch are blocked. Undo, replace the original, or remove the mirror from the Mirror panel.";
-const OFFSET_BROKEN =
-  "Broken: an original was deleted or can't be offset. Undo, or remove the offset.";
-
-test("§5 E2E-5 invalid by deletion: an offset's seed and a mirror's original deleted (each one action) leave the relationships broken, not removed; Finish, re-entry and Save As → Open show the same diagnostics and validity", async ({
-  page,
-}) => {
-  test.setTimeout(420_000);
-  const workbench = new FeatureWorkbenchHarness(page);
-  await workbench.openWithRepository();
-  await openTopSketch(workbench);
-  await workbench.activateTool(LINE_TOOL);
-  await shiftClick(workbench, CHAIN[0]);
-  await shiftClick(workbench, CHAIN[1]);
-  await waitForCommittedAction(page, "Create Sketch Geometry", () =>
-    shiftClick(workbench, CHAIN[2]),
-  );
-  await toSelect(page);
-  const [seed, corner] = (await definition(page)).entityIds;
-
-  // The offset: both lines picked (gliding hover), distance 0.5 on the
-  // outer side, Create: one "Commit Offset".
-  await workbench.activateTool(OFFSET_TOOL);
-  for (const [around, entityId] of [
-    [{ x: 840, y: 450 }, corner],
-    [{ x: 650, y: 560 }, seed],
-  ] as const)
-    await glideClick(
-      workbench,
-      await hoverUntil(workbench, around, entityTarget(entityId!)),
-    );
-  await page.getByRole("textbox", { name: "Distance" }).fill("0.5");
-  const canvas = (await workbench.viewport().boundingBox())!;
-  await page.mouse.move(canvas.x + 880, canvas.y + 600, { steps: 8 });
-  await expect(floatingInput(page)).toBeVisible({ timeout: 15_000 });
-  await waitForCommittedAction(
-    page,
-    "Commit Offset",
-    () =>
-      glidePress(
-        page,
-        floatingInput(page).getByRole("button", { name: "Create" }),
-      ),
-    { timeout: 60_000 },
-  );
-  await toSelect(page);
-
-  // The mirror: a circle about the sketch Y axis: one "Mirror".
-  await workbench.activateTool(CIRCLE_TOOL);
-  await shiftClick(workbench, MIRRORED.centre);
-  await waitForCommittedAction(page, "Create Sketch Geometry", () =>
-    shiftClick(workbench, MIRRORED.rim),
-  );
-  await toSelect(page);
-  const original = (await definition(page)).entities.at(-1)!.entityId;
-  await openSearchTool(page, "Sketch Mirror");
-  await glideClick(
-    workbench,
-    await hoverUntil(
-      workbench,
-      { x: MIRRORED.centre.x, y: MIRRORED.centre.y - 40 },
-      entityTarget(original),
-    ),
-  );
-  await glideClick(
-    workbench,
-    await hoverUntil(workbench, { x: 720, y: 720 }, /\.yAxis$/, 6),
-  );
-  await waitForCommittedAction(page, "Mirror", () =>
-    page.keyboard.press("Enter"),
-  );
-  await toSelect(page);
-  const built = await definition(page);
-  expect(
-    built.derivedRelationships?.map((relationship) => relationship.kind),
-  ).toEqual(["offset", "mirror"]);
-  await expect
-    .poll(() => liveRegions(page), { timeout: 30_000 })
-    .toEqual({ status: "current", count: 2 });
-
-  // Delete the offset's horizontal seed, then the mirror's original: one
-  // "Delete Sketch Item" each; both relationships stay, broken.
-  await glideClick(
-    workbench,
-    await hoverUntil(workbench, { x: 650, y: 560 }, entityTarget(seed!)),
-  );
-  await waitForCommittedAction(page, "Delete Sketch Item", () =>
-    page.keyboard.press("Delete"),
-  );
-  await glideClick(
-    workbench,
-    await hoverUntil(
-      workbench,
-      { x: MIRRORED.centre.x, y: MIRRORED.centre.y - 40 },
-      entityTarget(original),
-    ),
-  );
-  await waitForCommittedAction(page, "Delete Sketch Item", () =>
-    page.keyboard.press("Delete"),
-  );
-  const broken = await definition(page);
-  expect(broken.entityIds).not.toContain(seed);
-  expect(broken.entityIds).not.toContain(original);
-  expect(
-    broken.derivedRelationships,
-    "both relationships stay as authored",
-  ).toEqual(built.derivedRelationships);
-
-  const mirrorStatus = page
-    .getByRole("status")
-    .filter({ hasText: /^Mirror ‘mirror \d+’ is broken/ });
-  const offsetPanel = page.getByRole("region", { name: "Offset" });
-  /** The visible diagnostics (status, the Offset panel of an output) and the live regions. */
-  const diagnostics = async () => {
-    await glidePress(
-      page,
-      page.getByRole("button", { name: "Select Line 1 offset." }),
-    );
-    await expect(offsetPanel).toContainText("Broken", { timeout: 15_000 });
-    const result = {
-      mirror: await mirrorStatus.allTextContents(),
-      offset: await offsetPanel.textContent(),
-      regions: await liveRegions(page),
-    };
-    await page.keyboard.press("Escape");
-    return result;
-  };
-  const before = await diagnostics();
-  expect(before.offset).toContain(OFFSET_BROKEN);
-  expect(before.mirror).toEqual([MIRROR_BROKEN]);
-  expect(before.regions).toEqual({ status: "unavailable", count: 0 });
-  await expectNoInternalIds(page, "broken");
-
-  // Finish; re-entry; Save As → Open (fresh history); re-entry: the same
-  // diagnostics and validity each time; the file keeps both relationships.
-  // (No downstream feature here: part mode has no read of a sketch's
-  // validity besides its consumers, sketch-invalid-merge.spec.ts, and its tint,
-  // `sketch-invalid-part-mode-display.spec.ts`.)
-  await finish(workbench);
-  await reenter(workbench);
-  await expect.poll(diagnostics, { timeout: 30_000 }).toEqual(before);
-  await finish(workbench);
-  const saved = await saveDocumentCopy<{
-    sketches: { definition: SketchDefinition }[];
-  }>(page);
-  expect(
-    saved.sketches[0]!.definition.derivedRelationships,
-    "the file keeps both broken relationships",
-  ).toEqual(built.derivedRelationships);
-  await openDocumentCopy(page, saved, "deletion-invalid.cadara");
-  await expect
-    .poll(() => readHistoryStrip(page), { timeout: 15_000 })
-    .toEqual({ undo: [], redo: [] });
-  await reenter(workbench);
-  await expect.poll(diagnostics, { timeout: 30_000 }).toEqual(before);
-  await expectNoInternalIds(page, "reopened and re-entered");
 });
