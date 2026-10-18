@@ -90,6 +90,8 @@ export interface SketchToolActivationResult {
 }
 
 export interface SketchToolPointerInput {
+  /** Structural source direction at a tangent arc's first placement. */
+  tangentSource?: { direction: SketchPoint; center: SketchPoint | null } | null;
   state: SketchToolRuntimeState;
   point: SketchPoint | null;
 }

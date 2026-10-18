@@ -18,7 +18,19 @@ import {
   sampleArcPoints,
 } from "@/core/sketch-tools/geometry";
 
-const REQUIRED_POINTS = 3;
+const REQUIRED_POINTS = 2;
+
+// The browser stores only the two real placements. Semantic callers can still
+// provide the explicit start/direction/end geometry contract.
+function geometryPoints(state: SketchToolRuntimeState): readonly SketchPoint[] {
+  const points = state.livePoint && state.status === "drawing"
+    ? [...getPlacedPoints(state), state.livePoint] : getPlacedPoints(state);
+  const start = points[0];
+  const x = state.settings?.tangentDirectionX;
+  const y = state.settings?.tangentDirectionY;
+  return start && typeof x === "number" && typeof y === "number" && points[1]
+    ? [start, [start[0] + x, start[1] + y], points[1]] : [];
+}
 
 function getPlacedPoints(
   state: SketchToolRuntimeState,
@@ -75,10 +87,10 @@ function buildTangentArcPreview(
 export function validateTangentArc(
   points: readonly SketchPoint[],
 ): SketchToolValidationResult {
-  if (points.length < REQUIRED_POINTS) {
+  if (points.length < 3) {
     return {
       valid: false,
-      message: `Tangent arc requires ${REQUIRED_POINTS} points.`,
+      message: "Pick a curve end, then place the arc end.",
     };
   }
 
@@ -103,10 +115,7 @@ export function validateTangentArc(
 function buildTangentArcPresentation(
   state: SketchToolRuntimeState,
 ): SketchToolPresentationSchema {
-  const points =
-    state.livePoint && state.status === "drawing"
-      ? [...getPlacedPoints(state), state.livePoint]
-      : getPlacedPoints(state);
+  const points = getPlacedPoints(state);
   const validation = state.validationMessage
     ? [
         {
@@ -116,15 +125,15 @@ function buildTangentArcPresentation(
         },
       ]
     : [];
-  const ready = validateTangentArc(points).valid;
+  const ready = validateTangentArc(geometryPoints(state)).valid;
 
   return {
     prompts: [
       {
         id: "tangent-arc-prompt",
         text:
-          points.length < 2
-            ? "Pick tangent start and direction"
+          points.length < 1
+            ? "Pick a curve end"
             : "Place arc end",
         tone: validation.length > 0 ? "warning" : "neutral",
       },
@@ -140,7 +149,7 @@ function buildTangentArcPresentation(
         id: "tangent-arc-completion",
         text: ready
           ? "Click to accept the tangent arc"
-          : `Place ${REQUIRED_POINTS - Math.min(points.length, REQUIRED_POINTS)} more point${REQUIRED_POINTS - Math.min(points.length, REQUIRED_POINTS) === 1 ? "" : "s"}`,
+          : (points.length === 0 ? "Click a line, arc or spline endpoint" : "Click to place the arc end"),
         ready,
       },
     ],
@@ -157,7 +166,7 @@ function buildTangentArcPresentation(
               id: "tangent-arc-cue",
               kind: "completionCue" as const,
               label: ready ? "Accept arc" : "Add point",
-              point: points.at(-1)!,
+              point: state.status === "drawing" ? state.livePoint ?? points.at(-1)! : points.at(-1)!,
               ready,
             },
           ]
@@ -173,7 +182,7 @@ export const tangentArcSketchToolDefinition: SketchToolDefinition<"tangentArc"> 
       id: "tangentArc",
       group: "drawing",
       name: "Tangent Arc",
-      tooltip: "Create an arc tangent to a picked direction or source curve.",
+      tooltip: "Start on a curve endpoint, then place the tangent arc end.",
       icon: "circle",
       modes: ["sketch"],
     },
@@ -194,71 +203,55 @@ export const tangentArcSketchToolDefinition: SketchToolDefinition<"tangentArc"> 
       };
     },
     pointerMove({ state, point }) {
-      const nextState = { ...state, livePoint: point };
-      const previewPoints =
-        point && state.status === "drawing"
-          ? [...getPlacedPoints(state), point]
-          : getPlacedPoints(state);
-
+      const nextState = { ...state, livePoint: point, validationMessage: null };
       return {
         state: nextState,
-        stagedEntities: buildTangentArcPreview(previewPoints),
+        stagedEntities: buildTangentArcPreview(geometryPoints(nextState)),
         presentation: buildTangentArcPresentation(nextState),
       };
     },
-    pointerRelease({ state, point }) {
-      if (!point) {
-        return {
-          state,
-          stagedEntities: buildTangentArcPreview(getPlacedPoints(state)),
-          presentation: buildTangentArcPresentation(state),
-        };
+    pointerRelease({ state, point, tangentSource }) {
+      if (!point) return { state, stagedEntities: [], presentation: buildTangentArcPresentation(state) };
+      if (getPlacedPoints(state).length === 0) {
+        const nextState: SketchToolRuntimeState = tangentSource ? {
+          ...state, status: "drawing", pointerDownPoint: point, livePoint: null,
+          placedPoints: [point], validationMessage: null,
+          settings: { ...state.settings, tangentDirectionX: tangentSource.direction[0], tangentDirectionY: tangentSource.direction[1],
+            ...(tangentSource.center ? { tangentSourceCenterX: tangentSource.center[0], tangentSourceCenterY: tangentSource.center[1] } : {}),
+          },
+        } : { ...state, validationMessage: "Pick a curve end (line, arc or spline)." };
+        return { state: nextState, stagedEntities: [], presentation: buildTangentArcPresentation(nextState) };
       }
-
-      const nextPoints = [...getPlacedPoints(state), point];
-      const validation = validateTangentArc(nextPoints);
-      const complete = nextPoints.length >= REQUIRED_POINTS && validation.valid;
-      const nextState = {
-        status: complete ? "idle" : "drawing",
-        pointerDownPoint: nextPoints[0] ?? point,
-        livePoint: point,
-        placedPoints: nextPoints,
-        validationMessage:
-          complete || nextPoints.length < REQUIRED_POINTS
-            ? null
-            : validation.message,
-      } satisfies SketchToolRuntimeState;
-
-      return {
-        state: nextState,
-        stagedEntities: complete ? [] : buildTangentArcPreview(nextPoints),
-        presentation: buildTangentArcPresentation(nextState),
-      };
+      const validation = validateTangentArc(geometryPoints({ ...state, livePoint: point }));
+      const nextState: SketchToolRuntimeState = validation.valid ? {
+        ...state, status: "idle", livePoint: point,
+        placedPoints: [getPlacedPoints(state)[0]!, point], validationMessage: null,
+      } : { ...state, livePoint: point, validationMessage: validation.message };
+      return { state: nextState, stagedEntities: [], presentation: buildTangentArcPresentation(nextState) };
     },
     getStagedEntities(state) {
-      const points =
-        state.livePoint && state.status === "drawing"
-          ? [...getPlacedPoints(state), state.livePoint]
-          : getPlacedPoints(state);
-
-      return buildTangentArcPreview(points);
+      return buildTangentArcPreview(geometryPoints(state));
     },
     validate(start, end) {
       return validateTangentArc([start, end]);
     },
     getPresentation: buildTangentArcPresentation,
-    // Start, tangent direction (shape only), end.
-    placementRole: (index) => (index === 1 ? "shape" : "point"),
+    placementRole: () => "point",
     structuralTangentSource: true,
     createCommitContribution({
       sequence,
       points,
       tangentSourceEntityId,
+      settings,
       factories,
     }): SketchToolDrawContribution {
-      const arcPoints = (points ?? []).slice(0, REQUIRED_POINTS);
+      const start = points?.[0];
+      const x = settings?.tangentDirectionX, y = settings?.tangentDirectionY;
+      const arcPoints = start && points?.length === 2 && typeof x === "number" && typeof y === "number"
+        ? [start, [start[0] + x, start[1] + y] as SketchPoint, points[1]!]
+        : (points ?? []).slice(0, 3);
       const circle =
-        arcPoints.length === REQUIRED_POINTS
+        arcPoints.length === 3
           ? getTangentArcCircle(arcPoints[0]!, arcPoints[1]!, arcPoints[2]!)
           : null;
       if (!circle) {
@@ -303,10 +296,15 @@ export const tangentArcSketchToolDefinition: SketchToolDefinition<"tangentArc"> 
           ...(tangentSourceEntityId
             ? [
                 createTangentConstraint({
-                  constraintId:
-                    factories.createConstraintId("tangent-arc-source"),
-                  label: `Tangent arc ${sequence} tangent`,
-                  entityIds: [entityId, tangentSourceEntityId],
+                    constraintId: factories.createConstraintId("tangent-arc-source"),
+                    label: `Tangent arc ${sequence} tangent`,
+                    entityIds: [entityId, tangentSourceEntityId],
+                  // Same-side radii mean internal circle tangency; forcing
+                  // external tangency would move the source arc on creation.
+                  relation: typeof settings?.tangentSourceCenterX === "number" && typeof settings?.tangentSourceCenterY === "number" &&
+                    (arcPoints[0]![0] - circle.center[0]) * (arcPoints[0]![0] - settings.tangentSourceCenterX) +
+                    (arcPoints[0]![1] - circle.center[1]) * (arcPoints[0]![1] - settings.tangentSourceCenterY) > 0
+                    ? "internal" : "external",
                 }),
                 createPointOnCurveConstraint({
                   constraintId: factories.createConstraintId(
@@ -326,7 +324,7 @@ export const tangentArcSketchToolDefinition: SketchToolDefinition<"tangentArc"> 
           startPointId,
           endPointId,
         }),
-        placementPointIds: [startPointId, null, endPointId],
+        placementPointIds: points?.length === 2 ? [startPointId, endPointId] : [startPointId, null, endPointId],
       };
     },
   };

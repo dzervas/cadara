@@ -556,33 +556,14 @@ describe("T13g shown == authored: tool × placement role × candidate kind", () 
     );
   });
 
-  test("R-7 — Tangent arc records its tangent source at the first click; the commit keeps it", () => {
-    const { session, line1, entityLabel } = fixture();
-    // Line 1 passes through (4.5, 2.625).
-    let draft = beginSketchTool(session, "tangentArc");
-    draft = startSketchDraw(
-      updateSketchPointer(draft, [4.5, 2.64]),
-      [4.5, 2.64],
-    );
-    expect(
-      draft.toolTangentSourceEntityId,
-      "the tangent source is tool state, not a snap",
-    ).toBe(line1.entityId);
-
-    const result = drawAndCompare(session, "tangentArc", [
-      [4.5, 2.64],
-      [6.5, 3.5],
-      [7, 6],
-    ]);
-    // T13h: the pre-click text also names the structural tangent source.
-    expect(result.shown[0]!.detail).toBe(
-      `On ${entityLabel(line1.entityId)}, Tangent to ${entityLabel(line1.entityId)}`,
-    );
-    expect(result.requirements).toEqual([`pointOnCurve:${line1.entityId}`]);
-    expect(
-      result.authored,
-      "the shown on-curve relation plus the structural tangency",
-    ).toEqual([`pointOnCurve:${line1.entityId}`, `tangent:${line1.entityId}`]);
+  test("O25: tangent source is recorded at the endpoint and survives the end placement", () => {
+    const { session, line1 } = fixture();
+    const draft = startSketchDraw(beginSketchTool(session, "tangentArc"), [6.02, 3.01]);
+    expect(draft.toolTangentSourceEntityId).toBe(line1.entityId);
+    const after = acceptSketchDraw(draft, [9, 6]);
+    expect(after.definition.constraints).toContainEqual(expect.objectContaining({
+      kind: "tangent", entityIds: [after.definition.entities.at(-1)!.entityId, line1.entityId],
+    }));
   });
 
   test("D20 — a chain continues structurally from its last end; closing onto its start is an endpoint inference", () => {
@@ -993,22 +974,21 @@ describe("T13h placement inference suppression (D22) and the Tangent arc source"
     const before = session.definition;
     // The end click would be on Circle 2 without suppression.
     const { session: after, shown } = draw(held(session), "tangentArc", [
-      [4.5, 2.64],
-      [6.5, 3.5],
+      [6.02, 3.01],
       [12.02, 10],
     ]);
     expect(shown[0]!.label, "the source pick is shown as usual").toBe(
-      `On ${line1.label}, Tangent to ${line1.label}`,
+      `Coincident · ${session.definition.points.find(p => p.pointId === line1.endPointId)!.label}, On ${line1.label}, Tangent to ${line1.label}`,
     );
     let beforeEnd = beginSketchTool(held(session), "tangentArc");
-    beforeEnd = startSketchDraw(beforeEnd, [4.5, 2.64]);
-    beforeEnd = acceptSketchDraw(beforeEnd, [6.5, 3.5]);
+    beforeEnd = startSketchDraw(beforeEnd, [6.02, 3.01]);
     expect(
       activeText(updateSketchPointer(beforeEnd, [12.02, 10])),
       "the end click is free",
     ).toBe(FREE);
     const authored = authoredRelations(before, after.definition).constraints;
     expect(authored.sort()).toEqual([
+      `coincident:${line1.endPointId}`,
       `pointOnCurve:${line1.entityId}`,
       `tangent:${line1.entityId}`,
     ]);
@@ -1031,7 +1011,7 @@ describe("T13h placement inference suppression (D22) and the Tangent arc source"
       [14, 12],
     ],
   ] as const)(
-    "with Shift held a Tangent arc started at %s is free: raw position, nothing authored",
+    "O25: with Shift held a Tangent arc started at %s is refused",
     (_where, start, through, end) => {
       const { session } = fixture();
       const before = session.definition;
@@ -1051,8 +1031,10 @@ describe("T13h placement inference suppression (D22) and the Tangent arc source"
           entity.kind === "arc" &&
           !before.entities.some((old) => old.entityId === entity.entityId),
       );
-      if (arc?.kind !== "arc") throw new Error("expected the arc");
-      expect(positionOf(after.definition, arc.startPointId)).toEqual(start);
+      expect(arc).toBeUndefined();
+      const refused = startSketchDraw(hovered, start);
+      expect(refused.status).toBe("idle");
+      expect(refused.validationMessage).toMatch(/curve end/i);
     },
   );
 
@@ -1110,7 +1092,6 @@ describe("T13h placement inference suppression (D22) and the Tangent arc source"
     const { session, line1, pointLabel } = fixture();
     const result = drawAndCompare(session, "tangentArc", [
       [6.02, 3.01],
-      [8, 3.6],
       [9, 6],
     ]);
     expect(result.shown[0]!.detail).toBe(
@@ -1173,15 +1154,15 @@ describe("T13h placement inference suppression (D22) and the Tangent arc source"
   });
 
   test("Tangent arc (b): started on a circle centre, the circle is not a tangent source", () => {
-    const { session, circle } = fixture();
+    const { session } = fixture();
     const result = drawAndCompare(session, "tangentArc", [
       [10.02, 10.02],
       [12, 9],
       [14, 12],
     ]);
-    expect(result.authored, "only the shown centre coincident").toEqual([
-      `coincident:${circle.centerPointId}`,
-    ]);
+    expect(result.authored, "a centre cannot start a tangent arc").toEqual([]);
+    const refused = startSketchDraw(beginSketchTool(session, "tangentArc"), [10.02, 10.02]);
+    expect(refused.validationMessage).toMatch(/curve end/i);
     expect(result.shown[0]!.detail).toBe(`Coincident with Circle 2 centre`);
   });
 

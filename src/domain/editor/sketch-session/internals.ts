@@ -1,3 +1,4 @@
+import { getTangentArcSourceDirection } from "@/domain/sketch-inference/tangent-arc-source";
 import type {
   DocumentVariableRecord,
   SketchPoint,
@@ -2157,6 +2158,24 @@ function reinferSketchToolPlacements(
       suppressed: placement.suppressed,
     }),
   );
+  // O25: restored source geometry owns the direction too, not just the
+  // endpoint badge. Losing the source cancels the draft rather than authoring
+  // a dangling tangent or reusing the removed curve's old direction.
+  if (toolDefinition.structuralTangentSource) {
+    const source = recomputed[0] && getTangentArcSourceDirection(session.definition,
+      recomputed[0].tangentSourceEntityId ?? null, recomputed[0].position, solvedSnapshot);
+    if (!source) {
+      const state: import("@/core/sketch-tools/definition").SketchToolRuntimeState = { status: "idle", pointerDownPoint: null, livePoint: null,
+        placedPoints: [], settings: {}, validationMessage: "Pick a curve end (line, arc or spline)." };
+      return { status: "idle", pointerDownPoint: null, livePoint: null, toolPlacedPoints: [],
+        toolSettings: {}, toolPlacements: [], toolStagedEntities: [], toolTangentSourceEntityId: null,
+        validationMessage: state.validationMessage, toolPresentation: toolDefinition.getPresentation(state) };
+    }
+    session = { ...session, toolSettings: { ...session.toolSettings,
+      tangentDirectionX: source.direction[0], tangentDirectionY: source.direction[1],
+      tangentSourceCenterX: source.center?.[0] ?? null, tangentSourceCenterY: source.center?.[1] ?? null,
+    } };
+  }
   const positions = recomputed.map((placement) => placement.position);
   const pointerDownPoint = positions[0] ?? session.pointerDownPoint;
   const toolPlacedPoints =
@@ -2184,6 +2203,7 @@ function reinferSketchToolPlacements(
       ? {
           toolTangentSourceEntityId:
             recomputed[0]?.tangentSourceEntityId ?? null,
+          toolSettings: session.toolSettings,
         }
       : {}),
   };

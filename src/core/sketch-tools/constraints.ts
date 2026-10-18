@@ -94,13 +94,14 @@ export function createTangentConstraint(input: {
   constraintId: ConstraintId;
   label: string;
   entityIds: readonly [SketchEntityId, SketchEntityId];
+  relation?: "external" | "internal";
 }): ConstraintDefinition {
   return {
     constraintId: input.constraintId,
     kind: "tangent",
     label: input.label,
     entityIds: input.entityIds,
-    relation: "external",
+    relation: input.relation ?? "external",
   };
 }
 

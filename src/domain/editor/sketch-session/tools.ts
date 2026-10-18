@@ -1,3 +1,4 @@
+import { getTangentArcSourceDirection } from "@/domain/sketch-inference/tangent-arc-source";
 import type { SketchPoint } from "@/contracts/modeling/schema";
 import { sketchPrimitiveContributionInput } from "@/core/sketch-tools/semantic-primitive";
 import type {
@@ -1707,6 +1708,9 @@ export function startSketchDraw(
       validationMessage: null,
     } satisfies SketchToolRuntimeState,
     point: startPoint,
+    tangentSource: toolDefinition.structuralTangentSource
+      ? getTangentArcSourceDirection(session.definition, inference.tangentSourceEntityId ?? null, startPoint, getSketchSessionDisplaySolvedSnapshot(session))
+      : null,
   });
   // A draft started from idle never continues a chain (review R-1).
   const fresh: SketchSessionState = {
