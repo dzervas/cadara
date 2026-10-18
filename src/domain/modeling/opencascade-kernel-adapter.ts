@@ -231,7 +231,6 @@ interface CachedNativeTopologyBodyPayload {
   bodyId: BodyId;
   topologyToken: string;
   lodTierId: OccTessellationTierId;
-  transactionMode: "snapshot" | "committedShape";
   nativePayload: OccNativeShimPayload;
 }
 
@@ -2876,10 +2875,8 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     bodyId: BodyId;
     topologyToken: string;
     lodTierId: OccTessellationTierId;
-    transactionMode: CachedNativeTopologyBodyPayload["transactionMode"];
   }) {
     return [
-      input.transactionMode,
       input.lodTierId,
       input.bodyId,
       input.topologyToken,
@@ -3438,7 +3435,6 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   private buildNativeTopologyPayloadForState(
     state: OccAuthoringState,
     lodTierId: OccTessellationTierId | undefined,
-    options: { useCommittedShapeTransaction?: boolean } = {},
   ): OccNativeTopologyWorkerResult<OccNativeTopologyPayload> {
     const nativeHost =
       this.getNativeTopologyHost<OccNativeTopologyPayload>(state);
@@ -3447,10 +3443,10 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       return nativeHost.result;
     }
 
-    const builder = options.useCommittedShapeTransaction
-      ? nativeHost.host.CadaraExecuteNativeFeatureTransaction
-          ?.BuildCommittedShapePayload
-      : nativeHost.host.CadaraBuildNativeTopologyPayload?.BuildJson;
+    // This is a display read, even after a feature transaction. The committed
+    // builder prepares/unifies the shape again and can merge tracked faces;
+    // snapshot meshing must enumerate the exact, already-owned topology instead.
+    const builder = nativeHost.host.CadaraBuildNativeTopologyPayload?.BuildJson;
     if (!builder) {
       return this.createNativeTopologyUnavailableResult<OccNativeTopologyPayload>(
         state,
@@ -3458,9 +3454,6 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     }
 
     const tier = getOccTessellationTier(lodTierId ?? this.snapshotLodTierId);
-    const transactionMode = options.useCommittedShapeTransaction
-      ? "committedShape"
-      : "snapshot";
     const nativeBodies = state.bodies
       .filter((body) => body.topologyPresentation !== "bodyOnlyMesh")
       .map((body) => {
@@ -3468,27 +3461,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
           bodyId: body.bodyId,
           topologyToken: body.topologyToken,
           lodTierId: tier.id,
-          transactionMode,
         });
-        const bodyNativePayload = options.useCommittedShapeTransaction
-          ? body.nativeTopologyPayload
-          : undefined;
-
-        if (bodyNativePayload) {
-          this.nativeTopologyBodyPayloadCache.set(cacheKey, {
-            bodyId: body.bodyId,
-            topologyToken: body.topologyToken,
-            lodTierId: tier.id,
-            transactionMode,
-            nativePayload: bodyNativePayload,
-          });
-
-          return {
-            bodyId: body.bodyId,
-            nativePayload: bodyNativePayload,
-          };
-        }
-
         const cached = this.nativeTopologyBodyPayloadCache.get(cacheKey);
 
         if (cached) {
@@ -3498,7 +3471,13 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
           };
         }
 
-        const nativePayload = parseNativeShimPayloadJson(
+        // The committed identity payload has its own mesh budget, not this
+        // display tier. OCCT also reuses triangulations when the angular budget
+        // tightens, so discard only display polygons before the native builder's
+        // BRepMesh_IncrementalMesh (absolute tier deflections). Exact shapes and
+        // naming owners stay intact; immutable payload arrays are cached per tier.
+        state.oc.BRepTools.Clean(body.shape, true);
+        const parsedNativePayload = parseNativeShimPayloadJson(
           builder(
             body.shape,
             body.bodyId,
@@ -3507,12 +3486,22 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
             tier.angularDeflectionRadians,
           ),
         );
+        // A remesh must keep semantic/history-preserved face bindings rather
+        // than exposing the builder's canonical native ids as new public ids.
+        const nativePayload = rewriteNativeTopologyPayloadIds(
+          body.bodyId,
+          parsedNativePayload,
+          buildNativeTopologyIdAliasesForTrackedBody(
+            state.oc,
+            body,
+            parsedNativePayload,
+          ),
+        );
 
         this.nativeTopologyBodyPayloadCache.set(cacheKey, {
           bodyId: body.bodyId,
           topologyToken: body.topologyToken,
           lodTierId: tier.id,
-          transactionMode,
           nativePayload,
         });
 
@@ -3646,7 +3635,6 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     return this.buildNativeTopologyPayloadForState(
       runtimeState.authoringState,
       lodTierId,
-      { useCommittedShapeTransaction: true },
     );
   }
 
@@ -3667,7 +3655,6 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     return this.buildNativeTopologyPayloadForState(
       runtimeState.authoringState,
       lodTierId,
-      { useCommittedShapeTransaction: true },
     );
   }
 
