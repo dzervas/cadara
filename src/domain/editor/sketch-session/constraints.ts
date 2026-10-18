@@ -1027,11 +1027,17 @@ export function prepareSketchConstraintCommit(
     solvedDefinition.solvedSnapshot,
   );
 
+  // O3/D2: value tools start a fresh dimension pick cycle after every commit.
+  // Keep non-value constraint tools' lifecycle and the commit feedback unchanged.
+  const next = definition.valueSpec
+    ? activateSketchConstraintTool(committed, authoring.toolId)
+    : committed;
+
   // T13c (D7): a commit that leaves requirements unsatisfied is retained and
   // explained (the new requirement named first); otherwise no message.
   return {
     session: {
-      ...committed,
+      ...next,
       // T15b (O-1): explained whenever profiles are unavailable (as after Undo/Redo).
       validationMessage:
         committed.liveRegions.status !== "unavailable"

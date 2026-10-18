@@ -4,6 +4,7 @@ import {
   beginSketchAnnotationEdit,
   beginSketchTool,
   createNewSketchSession,
+  clearActiveSketchTool,
   createNewSketchSessionFromSupport,
   deleteSelectedSketchAnnotation,
   getSketchAnnotationDescriptors,
@@ -2313,6 +2314,8 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
         diameter.annotationPlacement?.kind === "dimensionLine",
       "Diameter authoring should commit a durable diameter dimension with annotation placement.",
     ).toBeTruthy();
+    // O3/D2: Dimension stays armed; leave it before checking idle overlays.
+    circleSession = clearActiveSketchTool(circleSession);
     expect(
       getSketchToolPresentation(circleSession)?.overlays?.some(
         (overlay) =>
@@ -2628,6 +2631,8 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
         Math.abs(editedAngle.valueRadians.value - Math.PI / 2) < 1e-9,
       "Committed angle dimension edits should accept degree input and preserve durable radians.",
     ).toBeTruthy();
+    // O3/D2: inspect committed arcs after leaving the fresh pick cycle.
+    angleSession = clearActiveSketchTool(angleSession);
     const committedAngleOverlay = getSketchToolPresentation(
       angleSession,
     )?.overlays?.find((overlay) => overlay.kind === "angleArc");
@@ -2738,6 +2743,8 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     session = patchSketchConstraintValue(session, {
       intent: "commitConstraintValue",
     });
+    // O3/D2: leave Dimension before reading the idle committed overlays.
+    session = clearActiveSketchTool(session);
     const committed = getSketchToolPresentation(session)?.overlays?.find(
       (overlay) => overlay.kind === "angleArc",
     );
