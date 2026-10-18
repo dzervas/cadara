@@ -23,7 +23,9 @@ const NEAR_LINE = { x: 742, y: 462 };
 
 async function badgeTexts(workbench: SketchWorkbenchHarness) {
   return workbench.page
-    .locator('[data-sketch-viewport-overlay="snapIndicator"]')
+    .locator(
+      '[data-sketch-viewport-overlay="constraintPreview"] > span:last-child',
+    )
     .allInnerTexts();
 }
 
