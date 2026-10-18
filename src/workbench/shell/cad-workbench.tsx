@@ -1525,6 +1525,7 @@ export function CadWorkbench({
                   {sketchSession?.validationMessage ? (
                     <SketchValidationStatus
                       message={sketchSession.validationMessage}
+                      toolPresentation={sketchToolPresentation}
                     />
                   ) : null}
                   {sketchMirrorActionState ? (
