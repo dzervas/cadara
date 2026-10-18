@@ -5,6 +5,7 @@ import {
   glideDoubleClick,
   glideDrag,
   readHistoryStrip,
+  selectRegionInViewport,
   waitForCommittedAction,
   waitForRedoneAction,
   waitForUndoneAction,
@@ -13,8 +14,10 @@ import {
 import { FeatureWorkbenchHarness } from "./helpers/feature-workbench";
 import { DIMENSION_TOOL, floatingInput } from "./helpers/mechanical-part";
 import {
+  entityTarget,
   glideClick,
   glidePress,
+  hoverUntil,
   openTopSketch,
 } from "./helpers/mirror-workbench";
 
@@ -26,14 +29,16 @@ test.use({ viewport: { width: 1440, height: 960 } });
 // label move, delete) committed by pointer and keyboard, each undone and
 // redone by the keyboard against the session's authored definition; a
 // cancelled draft; Finish, re-entry and the retained private history; the
-// document-level Undo/Redo of the publication. The invalid-by-merge and
-// invalid-by-deletion rows (invalid sketches through Finish, re-entry and
-// Save As / Open) moved to the semantic session:
+// document-level Undo/Redo of the publication; and (rows 2–3) what only the
+// workbench shows of an invalid sketch: the status line, problem count,
+// feature-tree repair entry, Offset panel and no internal id on the page.
+// Their model semantics (retained requirements, validity, the waiting
+// extrude, re-entry and Save As / Open) are proven in the semantic session:
 // src/application/semantic/sketch-invalid-{merge,deletion}.spec.ts. Every
 // pointer path glides (several `mouse.move` steps); waits are on committed
 // history entries (sequence-based, T17-17), machine state and revisions,
-// never a frame count. Debug reads (the session's authored definition) are
-// assertions only. Step → row map and discrimination (mutants): T17k.md.
+// never a frame count. Debug reads (the session's authored definition, the
+// selectable regions) are assertions only. Step → row map and discrimination (mutants): T17k.md.
 
 const LINE_TOOL = "Create line geometry.";
 const CIRCLE_TOOL = "Create circular geometry.";
@@ -432,4 +437,251 @@ test("§5 E2E-5 history: create, drag, dimension, construction, style, label mov
     timeout: 30_000,
   });
   expect(await published.getAttribute("data-history-sketch-id")).toBe(sketchId);
+});
+
+/** Canvas point of a live sketch point (re-entry frames the sketch anew). */
+async function pointOnCanvas(
+  workbench: FeatureWorkbenchHarness,
+  pointId: string,
+) {
+  const page = workbench.page;
+  const sketch = await definition(page);
+  const sketchId = sketch.points[0]!.target.sketchId;
+  const surface = (await workbench.viewportSurface().boundingBox())!;
+  const canvas = (await workbench.viewport().boundingBox())!;
+  const at = await page.evaluate(
+    (id) => window.__cadProjectToScreen?.(id) ?? null,
+    `${sketchId}.${pointId}`,
+  );
+  if (!at) throw new Error(`${pointId} has no projected screen point.`);
+  return { x: at.x + surface.x - canvas.x, y: at.y + surface.y - canvas.y };
+}
+
+const regionTargets = (page: Page) =>
+  page.evaluate(
+    () =>
+      window.__cadaraDebug
+        ?.getState()
+        ?.selectableTargets.filter((target) =>
+          /^sketch_.+\.region_[0-9a-f]{32}$/.test(target),
+        ) ?? [],
+  );
+
+/** No internal id in the page's text or accessible labels (T17e). */
+async function expectNoInternalIds(page: Page, when: string) {
+  const text = await page.evaluate(() => {
+    const labels = Array.from(
+      document.querySelectorAll("[aria-label]"),
+      (element) => element.getAttribute("aria-label") ?? "",
+    );
+    return [document.body.innerText, ...labels].join("\n");
+  });
+  expect(text, `${when}: no internal id`).not.toMatch(
+    /sketch_|derivation_|constraint_|dimension_/,
+  );
+}
+
+async function reenter(workbench: FeatureWorkbenchHarness) {
+  await glideDoubleClick(
+    workbench.page,
+    workbench.page.getByRole("button", {
+      name: "Select Sketch Draft. Double-click to reopen.",
+    }),
+  );
+  await workbench.expectSketchSessionActive();
+}
+
+async function finish(workbench: FeatureWorkbenchHarness) {
+  await workbench.activateTool(FINISH_TOOL);
+  await workbench.expectMachine("idle", 60_000);
+}
+
+const RECTANGLE_TOOL = "Create rectangle geometry.";
+const MERGE_TOOL =
+  "Merge two sketch points: the first into the second (the destination).";
+const FIX_TOOL = "Fix Geometry";
+const RECTANGLE = [
+  { x: 420, y: 300 },
+  { x: 700, y: 520 },
+] as const;
+/** Two Shift-placed lines whose ends are 6 px apart: a real near gap. */
+const GAP_LINES = [
+  [
+    { x: 1100, y: 300 },
+    { x: 900, y: 360 },
+  ],
+  [
+    { x: 894, y: 354 },
+    { x: 1050, y: 600 },
+  ],
+] as const;
+const CONFLICT =
+  "Fix 4, Fix 5 conflict. The sketch is invalid; profiles from it are blocked. Change or delete one of them, or Undo.";
+const EXTRUDE_WAITING =
+  "Repair Extrude 1. Correct Sketch Draft; the profile will resolve again.";
+
+test("§5 E2E-5 invalid by merge, workbench surface: after an endpoint merge retains two disagreeing Fix requirements, the conflict explanation outlives the tool, the Constraints list counts 2 problems, Finish shows a repair entry for the waiting extrude, and no internal id reaches the page", async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  const workbench = new FeatureWorkbenchHarness(page);
+  await workbench.openWithRepository();
+  await openTopSketch(workbench);
+  await workbench.activateTool(RECTANGLE_TOOL);
+  await glidePress(
+    page,
+    page.locator('[role="menuitem"][data-tool-id="rectangle"]'),
+  );
+  await glideClick(workbench, RECTANGLE[0]);
+  await waitForCommittedAction(page, "Create Sketch Geometry", () =>
+    glideClick(workbench, RECTANGLE[1]),
+  );
+  await toSelect(page);
+  for (const [start, end] of GAP_LINES) {
+    await workbench.activateTool(LINE_TOOL);
+    await shiftClick(workbench, start);
+    await waitForCommittedAction(page, "Create Sketch Geometry", () =>
+      shiftClick(workbench, end),
+    );
+    await toSelect(page);
+  }
+  const [, , , , gapA, gapB] = (await definition(page)).entities;
+  const destination = (gapA as { endPointId: string }).endPointId;
+  const source = (gapB as { startPointId: string }).startPointId;
+  // Each gap end Fixed where it is.
+  for (const at of [GAP_LINES[0][1], GAP_LINES[1][0]]) {
+    await glidePress(
+      page,
+      page.getByRole("button", { name: FIX_TOOL, exact: true }),
+    );
+    await waitForCommittedAction(page, FIX_TOOL, () =>
+      glideClick(workbench, at),
+    );
+    await toSelect(page);
+  }
+
+  // The rectangle extruded, its region picked in the viewport.
+  await finish(workbench);
+  await workbench.activateFeature("extrude");
+  await expect
+    .poll(() => regionTargets(page), { timeout: 30_000 })
+    .toHaveLength(1);
+  await selectRegionInViewport(workbench, (await regionTargets(page))[0]!);
+  await workbench.expectFeaturePreviewReady("extrude");
+  await workbench.commitFeature();
+  await expect(
+    page.getByRole("button", {
+      name: "Select Extrude 1. Double-click to reopen.",
+    }),
+  ).toHaveCount(1, { timeout: 30_000 });
+
+  // Re-enter; Merge Points (the source, then the destination).
+  await reenter(workbench);
+  await workbench.activateTool(MERGE_TOOL);
+  await glideClick(workbench, await pointOnCanvas(workbench, source));
+  await glideClick(workbench, await pointOnCanvas(workbench, destination));
+  await expect(
+    page
+      .locator('[data-sketch-viewport-floating-input="merge-points-confirm"]')
+      .getByRole("button", { name: "Merge" }),
+  ).toBeVisible({ timeout: 15_000 });
+  await waitForCommittedAction(page, "Merge Points", () =>
+    page.keyboard.press("Enter"),
+  );
+  await toSelect(page);
+  // T17k2 (T17k F-1): leaving the tool keeps the invalid sketch's
+  // explanation on the status line (base: Escape cleared it).
+  await expect(
+    page.getByRole("status").filter({ hasText: CONFLICT }),
+    "the explanation outlives the tool",
+  ).toHaveText(CONFLICT, { timeout: 15_000 });
+  await expect(
+    page.locator("[data-sketch-constraint-problem-count]"),
+    "the Constraints list counts both conflicting requirements",
+  ).toHaveAttribute("data-sketch-constraint-problem-count", "2", {
+    timeout: 30_000,
+  });
+  await expectNoInternalIds(page, "merged");
+
+  // Finish: the feature tree says how to repair the waiting extrude.
+  await finish(workbench);
+  await expect(
+    page.getByRole("button", { name: EXTRUDE_WAITING }),
+    "the extrude waits for its invalid sketch",
+  ).toHaveCount(1, { timeout: 30_000 });
+  await expectNoInternalIds(page, "finished");
+});
+
+const OFFSET_TOOL =
+  "Offset a connected chain with a durable offset relationship.";
+/** Two Shift-placed lines with a corner: the offset's seeds. */
+const CHAIN = [
+  { x: 560, y: 560 },
+  { x: 840, y: 560 },
+  { x: 840, y: 340 },
+] as const;
+const OFFSET_BROKEN =
+  "Broken: an original was deleted or can't be offset. Undo, or remove the offset.";
+
+test("§5 E2E-5 invalid by deletion, workbench surface: after an offset's seed is deleted, the Offset panel of an output says it is broken and how to recover, and no internal id reaches the page", async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  const workbench = new FeatureWorkbenchHarness(page);
+  await workbench.openWithRepository();
+  await openTopSketch(workbench);
+  await workbench.activateTool(LINE_TOOL);
+  await shiftClick(workbench, CHAIN[0]);
+  await shiftClick(workbench, CHAIN[1]);
+  await waitForCommittedAction(page, "Create Sketch Geometry", () =>
+    shiftClick(workbench, CHAIN[2]),
+  );
+  await toSelect(page);
+  const [seed, corner] = (await definition(page)).entityIds;
+
+  // The offset: both lines picked (gliding hover), distance 0.5 on the
+  // outer side, Create: one "Commit Offset".
+  await workbench.activateTool(OFFSET_TOOL);
+  for (const [around, entityId] of [
+    [{ x: 840, y: 450 }, corner],
+    [{ x: 650, y: 560 }, seed],
+  ] as const)
+    await glideClick(
+      workbench,
+      await hoverUntil(workbench, around, entityTarget(entityId!)),
+    );
+  await page.getByRole("textbox", { name: "Distance" }).fill("0.5");
+  const canvas = (await workbench.viewport().boundingBox())!;
+  await page.mouse.move(canvas.x + 880, canvas.y + 600, { steps: 8 });
+  await expect(floatingInput(page)).toBeVisible({ timeout: 15_000 });
+  await waitForCommittedAction(
+    page,
+    "Commit Offset",
+    () =>
+      glidePress(
+        page,
+        floatingInput(page).getByRole("button", { name: "Create" }),
+      ),
+    { timeout: 60_000 },
+  );
+  await toSelect(page);
+
+  // Delete the offset's horizontal seed: one "Delete Sketch Item".
+  await glideClick(
+    workbench,
+    await hoverUntil(workbench, { x: 650, y: 560 }, entityTarget(seed!)),
+  );
+  await waitForCommittedAction(page, "Delete Sketch Item", () =>
+    page.keyboard.press("Delete"),
+  );
+
+  await glidePress(
+    page,
+    page.getByRole("button", { name: "Select Line 1 offset." }),
+  );
+  await expect(
+    page.getByRole("region", { name: "Offset" }),
+    "the Offset panel says the offset is broken and how to recover",
+  ).toContainText(OFFSET_BROKEN, { timeout: 15_000 });
+  await expectNoInternalIds(page, "broken");
 });
