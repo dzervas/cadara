@@ -1,0 +1,1319 @@
+{
+  "version": 1,
+  "operations": [
+    {
+      "version": 1,
+      "commandId": "o",
+      "operation": "document.open",
+      "basis": null,
+      "path": "stage3.cadara",
+      "as": "o"
+    },
+    {
+      "version": 1,
+      "commandId": "del",
+      "operation": "deleteSolid.create",
+      "basis": {
+        "alias": "o"
+      },
+      "intent": "fulfill",
+      "parameters": {
+        "participants": [
+          {
+            "role": "body",
+            "targets": [
+              {
+                "kind": "body",
+                "bodyId": "body_feature_extrude-1"
+              }
+            ]
+          }
+        ]
+      },
+      "as": "del"
+    },
+    {
+      "version": 1,
+      "commandId": "bbegin",
+      "operation": "sketch.begin",
+      "basis": {
+        "alias": "del"
+      },
+      "plane": "xy",
+      "as": "bbegin"
+    },
+    {
+      "version": 1,
+      "commandId": "bc0",
+      "operation": "sketch.author",
+      "basis": {
+        "alias": "bbegin"
+      },
+      "draft": {
+        "alias": "bbegin"
+      },
+      "primitive": {
+        "kind": "circle",
+        "center": [6, 6],
+        "radius": 3.0
+      },
+      "construction": false,
+      "intent": "fulfill",
+      "as": "bc0"
+    },
+    {
+      "version": 1,
+      "commandId": "bc1",
+      "operation": "sketch.author",
+      "basis": {
+        "alias": "bc0"
+      },
+      "draft": {
+        "alias": "bc0"
+      },
+      "primitive": {
+        "kind": "circle",
+        "center": [54, 6],
+        "radius": 3.0
+      },
+      "construction": false,
+      "intent": "fulfill",
+      "as": "bc1"
+    },
+    {
+      "version": 1,
+      "commandId": "bc2",
+      "operation": "sketch.author",
+      "basis": {
+        "alias": "bc1"
+      },
+      "draft": {
+        "alias": "bc1"
+      },
+      "primitive": {
+        "kind": "circle",
+        "center": [54, 34],
+        "radius": 3.0
+      },
+      "construction": false,
+      "intent": "fulfill",
+      "as": "bc2"
+    },
+    {
+      "version": 1,
+      "commandId": "bc3",
+      "operation": "sketch.author",
+      "basis": {
+        "alias": "bc2"
+      },
+      "draft": {
+        "alias": "bc2"
+      },
+      "primitive": {
+        "kind": "circle",
+        "center": [6, 34],
+        "radius": 3.0
+      },
+      "construction": false,
+      "intent": "fulfill",
+      "as": "bc3"
+    },
+    {
+      "version": 1,
+      "commandId": "bh0",
+      "operation": "sketch.requirement.add",
+      "basis": {
+        "alias": "bc3"
+      },
+      "draft": {
+        "alias": "bc3"
+      },
+      "targets": [
+        {
+          "alias": "bc3",
+          "label": "Sketch origin",
+          "sketch": "bc3"
+        },
+        {
+          "alias": "bc3",
+          "label": "Circle 1 center",
+          "sketch": "bc3"
+        }
+      ],
+      "tool": "dimensionHorizontal",
+      "mode": "driving",
+      "value": 6,
+      "intent": "fulfill",
+      "as": "bh0"
+    },
+    {
+      "version": 1,
+      "commandId": "bv0",
+      "operation": "sketch.requirement.add",
+      "basis": {
+        "alias": "bh0"
+      },
+      "draft": {
+        "alias": "bh0"
+      },
+      "targets": [
+        {
+          "alias": "bc3",
+          "label": "Sketch origin",
+          "sketch": "bc3"
+        },
+        {
+          "alias": "bc3",
+          "label": "Circle 1 center",
+          "sketch": "bc3"
+        }
+      ],
+      "tool": "dimensionVertical",
+      "mode": "driving",
+      "value": 6,
+      "intent": "fulfill",
+      "as": "bv0"
+    },
+    {
+      "version": 1,
+      "commandId": "bd0",
+      "operation": "sketch.requirement.add",
+      "basis": {
+        "alias": "bv0"
+      },
+      "draft": {
+        "alias": "bv0"
+      },
+      "targets": [
+        {
+          "alias": "bc3",
+          "label": "Circle 1",
+          "sketch": "bc3"
+        }
+      ],
+      "tool": "dimensionDistance",
+      "mode": "driving",
+      "value": 6,
+      "intent": "fulfill",
+      "as": "bd0"
+    },
+    {
+      "version": 1,
+      "commandId": "bh1",
+      "operation": "sketch.requirement.add",
+      "basis": {
+        "alias": "bd0"
+      },
+      "draft": {
+        "alias": "bd0"
+      },
+      "targets": [
+        {
+          "alias": "bc3",
+          "label": "Sketch origin",
+          "sketch": "bc3"
+        },
+        {
+          "alias": "bc3",
+          "label": "Circle 2 center",
+          "sketch": "bc3"
+        }
+      ],
+      "tool": "dimensionHorizontal",
+      "mode": "driving",
+      "value": 54,
+      "intent": "fulfill",
+      "as": "bh1"
+    },
+    {
+      "version": 1,
+      "commandId": "bv1",
+      "operation": "sketch.requirement.add",
+      "basis": {
+        "alias": "bh1"
+      },
+      "draft": {
+        "alias": "bh1"
+      },
+      "targets": [
+        {
+          "alias": "bc3",
+          "label": "Sketch origin",
+          "sketch": "bc3"
+        },
+        {
+          "alias": "bc3",
+          "label": "Circle 2 center",
+          "sketch": "bc3"
+        }
+      ],
+      "tool": "dimensionVertical",
+      "mode": "driving",
+      "value": 6,
+      "intent": "fulfill",
+      "as": "bv1"
+    },
+    {
+      "version": 1,
+      "commandId": "bd1",
+      "operation": "sketch.requirement.add",
+      "basis": {
+        "alias": "bv1"
+      },
+      "draft": {
+        "alias": "bv1"
+      },
+      "targets": [
+        {
+          "alias": "bc3",
+          "label": "Circle 2",
+          "sketch": "bc3"
+        }
+      ],
+      "tool": "dimensionDistance",
+      "mode": "driving",
+      "value": 6,
+      "intent": "fulfill",
+      "as": "bd1"
+    },
+    {
+      "version": 1,
+      "commandId": "bh2",
+      "operation": "sketch.requirement.add",
+      "basis": {
+        "alias": "bd1"
+      },
+      "draft": {
+        "alias": "bd1"
+      },
+      "targets": [
+        {
+          "alias": "bc3",
+          "label": "Sketch origin",
+          "sketch": "bc3"
+        },
+        {
+          "alias": "bc3",
+          "label": "Circle 3 center",
+          "sketch": "bc3"
+        }
+      ],
+      "tool": "dimensionHorizontal",
+      "mode": "driving",
+      "value": 54,
+      "intent": "fulfill",
+      "as": "bh2"
+    },
+    {
+      "version": 1,
+      "commandId": "bv2",
+      "operation": "sketch.requirement.add",
+      "basis": {
+        "alias": "bh2"
+      },
+      "draft": {
+        "alias": "bh2"
+      },
+      "targets": [
+        {
+          "alias": "bc3",
+          "label": "Sketch origin",
+          "sketch": "bc3"
+        },
+        {
+          "alias": "bc3",
+          "label": "Circle 3 center",
+          "sketch": "bc3"
+        }
+      ],
+      "tool": "dimensionVertical",
+      "mode": "driving",
+      "value": 34,
+      "intent": "fulfill",
+      "as": "bv2"
+    },
+    {
+      "version": 1,
+      "commandId": "bd2",
+      "operation": "sketch.requirement.add",
+      "basis": {
+        "alias": "bv2"
+      },
+      "draft": {
+        "alias": "bv2"
+      },
+      "targets": [
+        {
+          "alias": "bc3",
+          "label": "Circle 3",
+          "sketch": "bc3"
+        }
+      ],
+      "tool": "dimensionDistance",
+      "mode": "driving",
+      "value": 6,
+      "intent": "fulfill",
+      "as": "bd2"
+    },
+    {
+      "version": 1,
+      "commandId": "bh3",
+      "operation": "sketch.requirement.add",
+      "basis": {
+        "alias": "bd2"
+      },
+      "draft": {
+        "alias": "bd2"
+      },
+      "targets": [
+        {
+          "alias": "bc3",
+          "label": "Sketch origin",
+          "sketch": "bc3"
+        },
+        {
+          "alias": "bc3",
+          "label": "Circle 4 center",
+          "sketch": "bc3"
+        }
+      ],
+      "tool": "dimensionHorizontal",
+      "mode": "driving",
+      "value": 6,
+      "intent": "fulfill",
+      "as": "bh3"
+    },
+    {
+      "version": 1,
+      "commandId": "bv3",
+      "operation": "sketch.requirement.add",
+      "basis": {
+        "alias": "bh3"
+      },
+      "draft": {
+        "alias": "bh3"
+      },
+      "targets": [
+        {
+          "alias": "bc3",
+          "label": "Sketch origin",
+          "sketch": "bc3"
+        },
+        {
+          "alias": "bc3",
+          "label": "Circle 4 center",
+          "sketch": "bc3"
+        }
+      ],
+      "tool": "dimensionVertical",
+      "mode": "driving",
+      "value": 34,
+      "intent": "fulfill",
+      "as": "bv3"
+    },
+    {
+      "version": 1,
+      "commandId": "bd3",
+      "operation": "sketch.requirement.add",
+      "basis": {
+        "alias": "bv3"
+      },
+      "draft": {
+        "alias": "bv3"
+      },
+      "targets": [
+        {
+          "alias": "bc3",
+          "label": "Circle 4",
+          "sketch": "bc3"
+        }
+      ],
+      "tool": "dimensionDistance",
+      "mode": "driving",
+      "value": 6,
+      "intent": "fulfill",
+      "as": "bd3"
+    },
+    {
+      "version": 1,
+      "commandId": "buh0",
+      "operation": "sketch.dimension.update",
+      "basis": {
+        "alias": "bd3"
+      },
+      "draft": {
+        "alias": "bd3"
+      },
+      "dimensionId": {
+        "alias": "bd3",
+        "label": "Horizontal distance 5"
+      },
+      "value": "bossInset",
+      "intent": "fulfill",
+      "as": "buh0"
+    },
+    {
+      "version": 1,
+      "commandId": "buv0",
+      "operation": "sketch.dimension.update",
+      "basis": {
+        "alias": "buh0"
+      },
+      "draft": {
+        "alias": "buh0"
+      },
+      "dimensionId": {
+        "alias": "buh0",
+        "label": "Vertical distance 6"
+      },
+      "value": "bossInset",
+      "intent": "fulfill",
+      "as": "buv0"
+    },
+    {
+      "version": 1,
+      "commandId": "buh1",
+      "operation": "sketch.dimension.update",
+      "basis": {
+        "alias": "buv0"
+      },
+      "draft": {
+        "alias": "buv0"
+      },
+      "dimensionId": {
+        "alias": "buv0",
+        "label": "Horizontal distance 8"
+      },
+      "value": "width - bossInset",
+      "intent": "fulfill",
+      "as": "buh1"
+    },
+    {
+      "version": 1,
+      "commandId": "buv1",
+      "operation": "sketch.dimension.update",
+      "basis": {
+        "alias": "buh1"
+      },
+      "draft": {
+        "alias": "buh1"
+      },
+      "dimensionId": {
+        "alias": "buh1",
+        "label": "Vertical distance 9"
+      },
+      "value": "bossInset",
+      "intent": "fulfill",
+      "as": "buv1"
+    },
+    {
+      "version": 1,
+      "commandId": "buh2",
+      "operation": "sketch.dimension.update",
+      "basis": {
+        "alias": "buv1"
+      },
+      "draft": {
+        "alias": "buv1"
+      },
+      "dimensionId": {
+        "alias": "buv1",
+        "label": "Horizontal distance 11"
+      },
+      "value": "width - bossInset",
+      "intent": "fulfill",
+      "as": "buh2"
+    },
+    {
+      "version": 1,
+      "commandId": "buv2",
+      "operation": "sketch.dimension.update",
+      "basis": {
+        "alias": "buh2"
+      },
+      "draft": {
+        "alias": "buh2"
+      },
+      "dimensionId": {
+        "alias": "buh2",
+        "label": "Vertical distance 12"
+      },
+      "value": "depth - bossInset",
+      "intent": "fulfill",
+      "as": "buv2"
+    },
+    {
+      "version": 1,
+      "commandId": "buh3",
+      "operation": "sketch.dimension.update",
+      "basis": {
+        "alias": "buv2"
+      },
+      "draft": {
+        "alias": "buv2"
+      },
+      "dimensionId": {
+        "alias": "buv2",
+        "label": "Horizontal distance 14"
+      },
+      "value": "bossInset",
+      "intent": "fulfill",
+      "as": "buh3"
+    },
+    {
+      "version": 1,
+      "commandId": "buv3",
+      "operation": "sketch.dimension.update",
+      "basis": {
+        "alias": "buh3"
+      },
+      "draft": {
+        "alias": "buh3"
+      },
+      "dimensionId": {
+        "alias": "buh3",
+        "label": "Vertical distance 15"
+      },
+      "value": "depth - bossInset",
+      "intent": "fulfill",
+      "as": "buv3"
+    },
+    {
+      "version": 1,
+      "commandId": "blbl",
+      "operation": "sketch.label.set",
+      "basis": {
+        "alias": "buv3"
+      },
+      "draft": {
+        "alias": "buv3"
+      },
+      "target": {
+        "alias": "buv3",
+        "label": "Sketch Draft"
+      },
+      "label": "Screw boss layout",
+      "intent": "fulfill",
+      "as": "blbl"
+    },
+    {
+      "version": 1,
+      "commandId": "bpub",
+      "operation": "sketch.publish",
+      "basis": {
+        "alias": "blbl"
+      },
+      "draft": {
+        "alias": "blbl"
+      },
+      "requireProfiles": true,
+      "as": "bpub"
+    },
+    {
+      "version": 1,
+      "commandId": "bossx",
+      "operation": "extrude.create",
+      "basis": {
+        "alias": "bpub"
+      },
+      "intent": "fulfill",
+      "parameters": {
+        "resultBodyType": "solid",
+        "profiles": [
+          {
+            "alias": "bpub",
+            "label": "Outer region",
+            "sketch": "bpub"
+          },
+          {
+            "alias": "bpub",
+            "label": "Loop region 2",
+            "sketch": "bpub"
+          },
+          {
+            "alias": "bpub",
+            "label": "Loop region 3",
+            "sketch": "bpub"
+          },
+          {
+            "alias": "bpub",
+            "label": "Loop region 4",
+            "sketch": "bpub"
+          }
+        ],
+        "startExtent": {
+          "kind": "blindOffset",
+          "distance": {
+            "source": "expression",
+            "valueText": "wall"
+          },
+          "direction": "positive"
+        },
+        "extent": {
+          "mode": "oneSide",
+          "end": {
+            "kind": "blind",
+            "direction": "positive",
+            "distance": {
+              "source": "literal",
+              "value": 8
+            }
+          }
+        },
+        "operation": {
+          "source": "literal",
+          "value": "join"
+        },
+        "booleanScope": {
+          "kind": "targetBody",
+          "bodyId": "body_feature_shell-1"
+        }
+      },
+      "as": "bossx"
+    },
+    {
+      "version": 1,
+      "commandId": "hbegin",
+      "operation": "sketch.begin",
+      "basis": {
+        "alias": "bossx"
+      },
+      "plane": "xy",
+      "as": "hbegin"
+    },
+    {
+      "version": 1,
+      "commandId": "hc0",
+      "operation": "sketch.author",
+      "basis": {
+        "alias": "hbegin"
+      },
+      "draft": {
+        "alias": "hbegin"
+      },
+      "primitive": {
+        "kind": "circle",
+        "center": [6, 6],
+        "radius": 1.25
+      },
+      "construction": false,
+      "intent": "fulfill",
+      "as": "hc0"
+    },
+    {
+      "version": 1,
+      "commandId": "hc1",
+      "operation": "sketch.author",
+      "basis": {
+        "alias": "hc0"
+      },
+      "draft": {
+        "alias": "hc0"
+      },
+      "primitive": {
+        "kind": "circle",
+        "center": [54, 6],
+        "radius": 1.25
+      },
+      "construction": false,
+      "intent": "fulfill",
+      "as": "hc1"
+    },
+    {
+      "version": 1,
+      "commandId": "hc2",
+      "operation": "sketch.author",
+      "basis": {
+        "alias": "hc1"
+      },
+      "draft": {
+        "alias": "hc1"
+      },
+      "primitive": {
+        "kind": "circle",
+        "center": [54, 34],
+        "radius": 1.25
+      },
+      "construction": false,
+      "intent": "fulfill",
+      "as": "hc2"
+    },
+    {
+      "version": 1,
+      "commandId": "hc3",
+      "operation": "sketch.author",
+      "basis": {
+        "alias": "hc2"
+      },
+      "draft": {
+        "alias": "hc2"
+      },
+      "primitive": {
+        "kind": "circle",
+        "center": [6, 34],
+        "radius": 1.25
+      },
+      "construction": false,
+      "intent": "fulfill",
+      "as": "hc3"
+    },
+    {
+      "version": 1,
+      "commandId": "hh0",
+      "operation": "sketch.requirement.add",
+      "basis": {
+        "alias": "hc3"
+      },
+      "draft": {
+        "alias": "hc3"
+      },
+      "targets": [
+        {
+          "alias": "hc3",
+          "label": "Sketch origin",
+          "sketch": "hc3"
+        },
+        {
+          "alias": "hc3",
+          "label": "Circle 1 center",
+          "sketch": "hc3"
+        }
+      ],
+      "tool": "dimensionHorizontal",
+      "mode": "driving",
+      "value": 6,
+      "intent": "fulfill",
+      "as": "hh0"
+    },
+    {
+      "version": 1,
+      "commandId": "hv0",
+      "operation": "sketch.requirement.add",
+      "basis": {
+        "alias": "hh0"
+      },
+      "draft": {
+        "alias": "hh0"
+      },
+      "targets": [
+        {
+          "alias": "hc3",
+          "label": "Sketch origin",
+          "sketch": "hc3"
+        },
+        {
+          "alias": "hc3",
+          "label": "Circle 1 center",
+          "sketch": "hc3"
+        }
+      ],
+      "tool": "dimensionVertical",
+      "mode": "driving",
+      "value": 6,
+      "intent": "fulfill",
+      "as": "hv0"
+    },
+    {
+      "version": 1,
+      "commandId": "hd0",
+      "operation": "sketch.requirement.add",
+      "basis": {
+        "alias": "hv0"
+      },
+      "draft": {
+        "alias": "hv0"
+      },
+      "targets": [
+        {
+          "alias": "hc3",
+          "label": "Circle 1",
+          "sketch": "hc3"
+        }
+      ],
+      "tool": "dimensionDistance",
+      "mode": "driving",
+      "value": 2.5,
+      "intent": "fulfill",
+      "as": "hd0"
+    },
+    {
+      "version": 1,
+      "commandId": "hh1",
+      "operation": "sketch.requirement.add",
+      "basis": {
+        "alias": "hd0"
+      },
+      "draft": {
+        "alias": "hd0"
+      },
+      "targets": [
+        {
+          "alias": "hc3",
+          "label": "Sketch origin",
+          "sketch": "hc3"
+        },
+        {
+          "alias": "hc3",
+          "label": "Circle 2 center",
+          "sketch": "hc3"
+        }
+      ],
+      "tool": "dimensionHorizontal",
+      "mode": "driving",
+      "value": 54,
+      "intent": "fulfill",
+      "as": "hh1"
+    },
+    {
+      "version": 1,
+      "commandId": "hv1",
+      "operation": "sketch.requirement.add",
+      "basis": {
+        "alias": "hh1"
+      },
+      "draft": {
+        "alias": "hh1"
+      },
+      "targets": [
+        {
+          "alias": "hc3",
+          "label": "Sketch origin",
+          "sketch": "hc3"
+        },
+        {
+          "alias": "hc3",
+          "label": "Circle 2 center",
+          "sketch": "hc3"
+        }
+      ],
+      "tool": "dimensionVertical",
+      "mode": "driving",
+      "value": 6,
+      "intent": "fulfill",
+      "as": "hv1"
+    },
+    {
+      "version": 1,
+      "commandId": "hd1",
+      "operation": "sketch.requirement.add",
+      "basis": {
+        "alias": "hv1"
+      },
+      "draft": {
+        "alias": "hv1"
+      },
+      "targets": [
+        {
+          "alias": "hc3",
+          "label": "Circle 2",
+          "sketch": "hc3"
+        }
+      ],
+      "tool": "dimensionDistance",
+      "mode": "driving",
+      "value": 2.5,
+      "intent": "fulfill",
+      "as": "hd1"
+    },
+    {
+      "version": 1,
+      "commandId": "hh2",
+      "operation": "sketch.requirement.add",
+      "basis": {
+        "alias": "hd1"
+      },
+      "draft": {
+        "alias": "hd1"
+      },
+      "targets": [
+        {
+          "alias": "hc3",
+          "label": "Sketch origin",
+          "sketch": "hc3"
+        },
+        {
+          "alias": "hc3",
+          "label": "Circle 3 center",
+          "sketch": "hc3"
+        }
+      ],
+      "tool": "dimensionHorizontal",
+      "mode": "driving",
+      "value": 54,
+      "intent": "fulfill",
+      "as": "hh2"
+    },
+    {
+      "version": 1,
+      "commandId": "hv2",
+      "operation": "sketch.requirement.add",
+      "basis": {
+        "alias": "hh2"
+      },
+      "draft": {
+        "alias": "hh2"
+      },
+      "targets": [
+        {
+          "alias": "hc3",
+          "label": "Sketch origin",
+          "sketch": "hc3"
+        },
+        {
+          "alias": "hc3",
+          "label": "Circle 3 center",
+          "sketch": "hc3"
+        }
+      ],
+      "tool": "dimensionVertical",
+      "mode": "driving",
+      "value": 34,
+      "intent": "fulfill",
+      "as": "hv2"
+    },
+    {
+      "version": 1,
+      "commandId": "hd2",
+      "operation": "sketch.requirement.add",
+      "basis": {
+        "alias": "hv2"
+      },
+      "draft": {
+        "alias": "hv2"
+      },
+      "targets": [
+        {
+          "alias": "hc3",
+          "label": "Circle 3",
+          "sketch": "hc3"
+        }
+      ],
+      "tool": "dimensionDistance",
+      "mode": "driving",
+      "value": 2.5,
+      "intent": "fulfill",
+      "as": "hd2"
+    },
+    {
+      "version": 1,
+      "commandId": "hh3",
+      "operation": "sketch.requirement.add",
+      "basis": {
+        "alias": "hd2"
+      },
+      "draft": {
+        "alias": "hd2"
+      },
+      "targets": [
+        {
+          "alias": "hc3",
+          "label": "Sketch origin",
+          "sketch": "hc3"
+        },
+        {
+          "alias": "hc3",
+          "label": "Circle 4 center",
+          "sketch": "hc3"
+        }
+      ],
+      "tool": "dimensionHorizontal",
+      "mode": "driving",
+      "value": 6,
+      "intent": "fulfill",
+      "as": "hh3"
+    },
+    {
+      "version": 1,
+      "commandId": "hv3",
+      "operation": "sketch.requirement.add",
+      "basis": {
+        "alias": "hh3"
+      },
+      "draft": {
+        "alias": "hh3"
+      },
+      "targets": [
+        {
+          "alias": "hc3",
+          "label": "Sketch origin",
+          "sketch": "hc3"
+        },
+        {
+          "alias": "hc3",
+          "label": "Circle 4 center",
+          "sketch": "hc3"
+        }
+      ],
+      "tool": "dimensionVertical",
+      "mode": "driving",
+      "value": 34,
+      "intent": "fulfill",
+      "as": "hv3"
+    },
+    {
+      "version": 1,
+      "commandId": "hd3",
+      "operation": "sketch.requirement.add",
+      "basis": {
+        "alias": "hv3"
+      },
+      "draft": {
+        "alias": "hv3"
+      },
+      "targets": [
+        {
+          "alias": "hc3",
+          "label": "Circle 4",
+          "sketch": "hc3"
+        }
+      ],
+      "tool": "dimensionDistance",
+      "mode": "driving",
+      "value": 2.5,
+      "intent": "fulfill",
+      "as": "hd3"
+    },
+    {
+      "version": 1,
+      "commandId": "huh0",
+      "operation": "sketch.dimension.update",
+      "basis": {
+        "alias": "hd3"
+      },
+      "draft": {
+        "alias": "hd3"
+      },
+      "dimensionId": {
+        "alias": "hd3",
+        "label": "Horizontal distance 5"
+      },
+      "value": "bossInset",
+      "intent": "fulfill",
+      "as": "huh0"
+    },
+    {
+      "version": 1,
+      "commandId": "huv0",
+      "operation": "sketch.dimension.update",
+      "basis": {
+        "alias": "huh0"
+      },
+      "draft": {
+        "alias": "huh0"
+      },
+      "dimensionId": {
+        "alias": "huh0",
+        "label": "Vertical distance 6"
+      },
+      "value": "bossInset",
+      "intent": "fulfill",
+      "as": "huv0"
+    },
+    {
+      "version": 1,
+      "commandId": "huh1",
+      "operation": "sketch.dimension.update",
+      "basis": {
+        "alias": "huv0"
+      },
+      "draft": {
+        "alias": "huv0"
+      },
+      "dimensionId": {
+        "alias": "huv0",
+        "label": "Horizontal distance 8"
+      },
+      "value": "width - bossInset",
+      "intent": "fulfill",
+      "as": "huh1"
+    },
+    {
+      "version": 1,
+      "commandId": "huv1",
+      "operation": "sketch.dimension.update",
+      "basis": {
+        "alias": "huh1"
+      },
+      "draft": {
+        "alias": "huh1"
+      },
+      "dimensionId": {
+        "alias": "huh1",
+        "label": "Vertical distance 9"
+      },
+      "value": "bossInset",
+      "intent": "fulfill",
+      "as": "huv1"
+    },
+    {
+      "version": 1,
+      "commandId": "huh2",
+      "operation": "sketch.dimension.update",
+      "basis": {
+        "alias": "huv1"
+      },
+      "draft": {
+        "alias": "huv1"
+      },
+      "dimensionId": {
+        "alias": "huv1",
+        "label": "Horizontal distance 11"
+      },
+      "value": "width - bossInset",
+      "intent": "fulfill",
+      "as": "huh2"
+    },
+    {
+      "version": 1,
+      "commandId": "huv2",
+      "operation": "sketch.dimension.update",
+      "basis": {
+        "alias": "huh2"
+      },
+      "draft": {
+        "alias": "huh2"
+      },
+      "dimensionId": {
+        "alias": "huh2",
+        "label": "Vertical distance 12"
+      },
+      "value": "depth - bossInset",
+      "intent": "fulfill",
+      "as": "huv2"
+    },
+    {
+      "version": 1,
+      "commandId": "huh3",
+      "operation": "sketch.dimension.update",
+      "basis": {
+        "alias": "huv2"
+      },
+      "draft": {
+        "alias": "huv2"
+      },
+      "dimensionId": {
+        "alias": "huv2",
+        "label": "Horizontal distance 14"
+      },
+      "value": "bossInset",
+      "intent": "fulfill",
+      "as": "huh3"
+    },
+    {
+      "version": 1,
+      "commandId": "huv3",
+      "operation": "sketch.dimension.update",
+      "basis": {
+        "alias": "huh3"
+      },
+      "draft": {
+        "alias": "huh3"
+      },
+      "dimensionId": {
+        "alias": "huh3",
+        "label": "Vertical distance 15"
+      },
+      "value": "depth - bossInset",
+      "intent": "fulfill",
+      "as": "huv3"
+    },
+    {
+      "version": 1,
+      "commandId": "hlbl",
+      "operation": "sketch.label.set",
+      "basis": {
+        "alias": "huv3"
+      },
+      "draft": {
+        "alias": "huv3"
+      },
+      "target": {
+        "alias": "huv3",
+        "label": "Sketch Draft"
+      },
+      "label": "Screw hole layout",
+      "intent": "fulfill",
+      "as": "hlbl"
+    },
+    {
+      "version": 1,
+      "commandId": "hpub",
+      "operation": "sketch.publish",
+      "basis": {
+        "alias": "hlbl"
+      },
+      "draft": {
+        "alias": "hlbl"
+      },
+      "requireProfiles": true,
+      "as": "hpub"
+    },
+    {
+      "version": 1,
+      "commandId": "holex",
+      "operation": "extrude.create",
+      "basis": {
+        "alias": "hpub"
+      },
+      "intent": "fulfill",
+      "parameters": {
+        "resultBodyType": "solid",
+        "profiles": [
+          {
+            "alias": "hpub",
+            "label": "Outer region",
+            "sketch": "hpub"
+          },
+          {
+            "alias": "hpub",
+            "label": "Loop region 2",
+            "sketch": "hpub"
+          },
+          {
+            "alias": "hpub",
+            "label": "Loop region 3",
+            "sketch": "hpub"
+          },
+          {
+            "alias": "hpub",
+            "label": "Loop region 4",
+            "sketch": "hpub"
+          }
+        ],
+        "startExtent": {
+          "kind": "profilePlane"
+        },
+        "extent": {
+          "mode": "oneSide",
+          "end": {
+            "kind": "blind",
+            "direction": "positive",
+            "distance": {
+              "source": "expression",
+              "valueText": "height"
+            }
+          }
+        },
+        "operation": {
+          "source": "literal",
+          "value": "cut"
+        },
+        "booleanScope": {
+          "kind": "targetBody",
+          "bodyId": "body_feature_shell-1"
+        }
+      },
+      "as": "holex"
+    },
+    {
+      "version": 1,
+      "commandId": "save",
+      "operation": "document.save",
+      "basis": {
+        "alias": "holex"
+      },
+      "path": "enclosure.cadara",
+      "as": "save"
+    }
+  ]
+}

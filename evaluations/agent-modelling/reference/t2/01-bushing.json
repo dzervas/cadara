@@ -1,0 +1,262 @@
+{
+  "version": 1,
+  "operations": [
+    {
+      "version": 1,
+      "commandId": "create",
+      "operation": "document.create",
+      "label": "Flanged bushing",
+      "basis": null,
+      "as": "part"
+    },
+    {
+      "version": 1,
+      "commandId": "begin",
+      "operation": "sketch.begin",
+      "plane": "xz",
+      "basis": {
+        "alias": "part"
+      },
+      "as": "d0"
+    },
+    {
+      "version": 1,
+      "commandId": "l0",
+      "operation": "sketch.author",
+      "basis": {
+        "alias": "d0"
+      },
+      "draft": {
+        "alias": "d0"
+      },
+      "primitive": {
+        "kind": "line",
+        "start": [5, 0],
+        "end": [14, 0]
+      },
+      "construction": false,
+      "intent": "fulfill",
+      "as": "l0"
+    },
+    {
+      "version": 1,
+      "commandId": "l1",
+      "operation": "sketch.author",
+      "basis": {
+        "alias": "l0"
+      },
+      "draft": {
+        "alias": "l0"
+      },
+      "primitive": {
+        "kind": "line",
+        "start": [14, 0],
+        "end": [14, 3]
+      },
+      "construction": false,
+      "intent": "fulfill",
+      "as": "l1"
+    },
+    {
+      "version": 1,
+      "commandId": "l2",
+      "operation": "sketch.author",
+      "basis": {
+        "alias": "l1"
+      },
+      "draft": {
+        "alias": "l1"
+      },
+      "primitive": {
+        "kind": "line",
+        "start": [14, 3],
+        "end": [8, 3]
+      },
+      "construction": false,
+      "intent": "fulfill",
+      "as": "l2"
+    },
+    {
+      "version": 1,
+      "commandId": "l3",
+      "operation": "sketch.author",
+      "basis": {
+        "alias": "l2"
+      },
+      "draft": {
+        "alias": "l2"
+      },
+      "primitive": {
+        "kind": "line",
+        "start": [8, 3],
+        "end": [8, 20]
+      },
+      "construction": false,
+      "intent": "fulfill",
+      "as": "l3"
+    },
+    {
+      "version": 1,
+      "commandId": "l4",
+      "operation": "sketch.author",
+      "basis": {
+        "alias": "l3"
+      },
+      "draft": {
+        "alias": "l3"
+      },
+      "primitive": {
+        "kind": "line",
+        "start": [8, 20],
+        "end": [5, 20]
+      },
+      "construction": false,
+      "intent": "fulfill",
+      "as": "l4"
+    },
+    {
+      "version": 1,
+      "commandId": "l5",
+      "operation": "sketch.author",
+      "basis": {
+        "alias": "l4"
+      },
+      "draft": {
+        "alias": "l4"
+      },
+      "primitive": {
+        "kind": "line",
+        "start": [5, 20],
+        "end": [5, 0]
+      },
+      "construction": false,
+      "intent": "fulfill",
+      "as": "l5"
+    },
+    {
+      "version": 1,
+      "commandId": "l9",
+      "operation": "sketch.author",
+      "basis": {
+        "alias": "l5"
+      },
+      "draft": {
+        "alias": "l5"
+      },
+      "primitive": {
+        "kind": "line",
+        "start": [0, 0],
+        "end": [0, 20]
+      },
+      "construction": true,
+      "intent": "fulfill",
+      "as": "l9"
+    },
+    {
+      "version": 1,
+      "commandId": "pub",
+      "operation": "sketch.publish",
+      "basis": {
+        "alias": "l9"
+      },
+      "draft": {
+        "alias": "l9"
+      },
+      "requireProfiles": true,
+      "as": "pub"
+    },
+    {
+      "version": 1,
+      "commandId": "rev",
+      "operation": "revolve.create",
+      "basis": {
+        "alias": "pub"
+      },
+      "intent": "fulfill",
+      "as": "rev",
+      "parameters": {
+        "resultBodyType": "solid",
+        "profiles": [
+          {
+            "alias": "pub",
+            "label": "Outer region",
+            "sketch": "pub"
+          }
+        ],
+        "axis": {
+          "alias": "pub",
+          "label": "Line 7"
+        },
+        "startAngle": {
+          "source": "literal",
+          "value": 0
+        },
+        "extent": {
+          "mode": "oneSide",
+          "end": {
+            "kind": "full"
+          }
+        },
+        "operation": {
+          "source": "literal",
+          "value": "newBody"
+        },
+        "booleanScope": {
+          "kind": "standalone"
+        }
+      }
+    },
+    {
+      "version": 1,
+      "commandId": "name",
+      "operation": "body.rename",
+      "basis": {
+        "alias": "rev"
+      },
+      "bodyId": {
+        "alias": "rev",
+        "label": "Revolve 1"
+      },
+      "label": "Flanged bushing",
+      "intent": "fulfill",
+      "as": "named"
+    },
+    {
+      "version": 1,
+      "commandId": "save",
+      "operation": "document.save",
+      "basis": {
+        "alias": "named"
+      },
+      "path": "bushing.cadara"
+    },
+    {
+      "version": 1,
+      "commandId": "reopen",
+      "operation": "document.open",
+      "basis": null,
+      "path": "bushing.cadara",
+      "as": "re"
+    },
+    {
+      "version": 1,
+      "commandId": "stl",
+      "operation": "export.stl",
+      "basis": {
+        "alias": "re"
+      },
+      "target": {
+        "alias": "re",
+        "label": "Flanged bushing"
+      },
+      "path": "bushing.stl",
+      "options": {
+        "meshAccuracy": {
+          "chordTolerance": 0.02,
+          "angleToleranceRadians": 0.1
+        },
+        "encoding": "binary"
+      }
+    }
+  ]
+}
