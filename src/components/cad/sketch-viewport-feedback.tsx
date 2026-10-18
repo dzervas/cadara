@@ -671,6 +671,7 @@ function ViewportFloatingInput({
           list={variableNames.length > 0 ? suggestionsId : undefined}
           defaultValue={descriptor.value ?? ""}
           readOnly={descriptor.readOnly}
+          disabled={descriptor.hideSubmit && descriptor.readOnly}
           aria-readonly={descriptor.readOnly}
           // T13e: toggling Reference mode remounts the input on its value.
           key={`${descriptor.id}:${descriptor.readOnly ? "reference" : "value"}`}
@@ -714,13 +715,15 @@ function ViewportFloatingInput({
         >
           {descriptor.cancelLabel}
         </button>
-        <button
-          type="button"
-          className="flex-1 rounded-md border border-[var(--cad-border-strong)] bg-[var(--cad-surface-elevated)] px-2 py-1 text-[var(--cad-foreground)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--cad-accent)]"
-          onClick={() => onPatch(descriptor.submitAction.patch)}
-        >
-          {descriptor.confirmLabel}
-        </button>
+        {descriptor.hideSubmit ? null : (
+          <button
+            type="button"
+            className="flex-1 rounded-md border border-[var(--cad-border-strong)] bg-[var(--cad-surface-elevated)] px-2 py-1 text-[var(--cad-foreground)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--cad-accent)]"
+            onClick={() => onPatch(descriptor.submitAction.patch)}
+          >
+            {descriptor.confirmLabel}
+          </button>
+        )}
       </div>
       {descriptor.secondaryAction ? (
         <Button

@@ -255,6 +255,8 @@ export interface SketchToolFloatingInputDescriptor {
   value: string | null;
   unit?: string;
   confirmLabel: string;
+  /** Existing reference measurements have no value to save until made driving. */
+  hideSubmit?: true;
   cancelLabel: string;
   min?: number;
   /**

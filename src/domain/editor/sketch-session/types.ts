@@ -103,6 +103,8 @@ export interface SketchConstraintAuthoringState {
 }
 
 export interface SketchAnnotationEditState {
+  /** Staged conversion; the authored reference stays untouched until Save. */
+  driving?: true;
   target: SketchConstraintRef | SketchDimensionRef;
   pendingValue: AuthoredValue<number> | null;
   /**
