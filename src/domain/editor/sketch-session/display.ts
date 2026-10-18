@@ -87,6 +87,8 @@ export function sketchSessionHasReferenceImage(
   return collectActiveReferenceImageOperations(session.definition).length > 0;
 }
 
+export const DEFAULT_SKETCH_POINT_DISPLAY_RADIUS = 0.16;
+
 let stableDisplayCacheKey: string | null = null;
 let stableDisplayCacheRenderables: SketchSessionDisplayRenderable[] = [];
 
@@ -207,7 +209,7 @@ export function getStableSketchSessionDisplayRenderables(
           position: mapSketchPointToWorld(session.plane, point.position),
           displayRadius: isVisibleReferenceImageAnchor
             ? REFERENCE_IMAGE_ANCHOR_MARKER_RADIUS
-            : 0.16,
+            : DEFAULT_SKETCH_POINT_DISPLAY_RADIUS,
         },
         linePattern: "solid" as const,
         role: "local" as const,
@@ -1090,6 +1092,36 @@ export function createDisplayRenderableForEntity(
   index: number,
   style: SketchEntityDisplayStyle | undefined,
 ): SketchSessionDisplayRenderable {
+  // Point entities arrive as draft circles for interaction, not model circles.
+  // Keep their outline outside the same filled marker used by curve endpoints.
+  if (
+    entity.kind === "circle" &&
+    session.definition.entities.some(
+      (entry) => entry.entityId === entity.entityId && entry.kind === "point",
+    )
+  ) {
+    return {
+      id: `renderable_sketch_point_ring_${index}` as RenderableId,
+      label: entity.label,
+      target: entity.entityId
+        ? createSketchEntityRef(
+            session.sketchId ?? ("sketch_draft" as SketchId),
+            entity.entityId,
+          )
+        : null,
+      geometry: {
+        kind: "marker",
+        position: mapSketchPointToWorld(session.plane, entity.center),
+        displayRadius: DEFAULT_SKETCH_POINT_DISPLAY_RADIUS,
+      },
+      markerShape: "ring",
+      linePattern: entity.isConstruction ? "dash-dot" : "solid",
+      role: "local",
+      paintStyle: style?.paintStyle,
+      strokeStyle: style?.strokeStyle,
+    };
+  }
+
   if (entity.kind === "line") {
     return {
       id: `renderable_sketch_line_${index}` as RenderableId,
@@ -1695,7 +1727,7 @@ export function createDisplayRenderableForSketchDatum(
       geometry: {
         kind: "marker",
         position: mapSketchPointToWorld(session.plane, [0, 0]),
-        displayRadius: 0.18,
+        displayRadius: DEFAULT_SKETCH_POINT_DISPLAY_RADIUS,
       },
       linePattern: "solid",
       role: "reference",

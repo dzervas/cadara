@@ -354,6 +354,34 @@ export function getSketchDisplayPolylineHandleVisibility(
   return getSketchHandleVisibility(renderable, context.revealedHandleEntityIds);
 }
 
+export function createScreenSpacePointMarkerGeometry(
+  radiusPixels: number,
+  ring: boolean,
+) {
+  const stroke = ACTIVE_SKETCH_FEEDBACK_PIXEL_BOUNDS.stroke.default.min;
+  return ring
+    ? new THREE.RingGeometry(
+        radiusPixels + stroke,
+        radiusPixels + stroke * 2,
+        32,
+      )
+    : new THREE.CircleGeometry(radiusPixels, 32);
+}
+
+export function updateScreenSpacePointMarker(
+  mesh: THREE.Mesh,
+  camera: THREE.Camera,
+  viewportHeight: number,
+  position: readonly [number, number, number],
+  radiusScale: number,
+) {
+  mesh.quaternion.copy(camera.quaternion);
+  mesh.scale.setScalar(
+    getSketchFeedbackWorldUnitsPerPixel(camera, viewportHeight, [position]) *
+      radiusScale,
+  );
+}
+
 export function getActiveSketchMarkerWorldRadii(
   renderable: SketchSessionDisplayRenderable,
   camera: THREE.Camera,

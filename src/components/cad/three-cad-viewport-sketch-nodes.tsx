@@ -20,11 +20,11 @@ import {
   updateSketchGradientMaterialFrame,
 } from "@/components/cad/sketch-display-style";
 import type { SketchRenderingPalette } from "@/components/cad/sketch-rendering-palette";
+import { ScreenSpacePointMarker } from "@/components/cad/screen-space-point-marker";
 import { isProjectedSketchDisplayPointTarget } from "@/components/cad/three-cad-viewport-pick-candidates";
 import { createReferenceImageDataUrl } from "@/domain/reference-image/rendering";
 import type { SketchSessionDisplayRenderable } from "@/domain/editor/sketch-session";
 import {
-  MARKER_SPHERE_GEOMETRY,
   applyWireMaterialDepthPolicy,
   bindRenderableObject,
   createMarkerPickProxy,
@@ -550,13 +550,12 @@ export function SketchDisplayMarkerNode({
     [materialConfig, renderable],
   );
   const { camera, size } = useThree();
-  const visibleMeshRef = useRef<THREE.Mesh | null>(null);
   const pickProxy = useMemo(() => {
     const proxy = createMarkerPickProxy([0, 0, 0], geometryData.displayRadius);
     proxy.userData.highlightExcluded = true;
     return proxy;
   }, [geometryData.displayRadius]);
-  const initialRadii = getActiveSketchMarkerWorldRadii(
+  const radii = getActiveSketchMarkerWorldRadii(
     renderable,
     camera,
     size.height,
@@ -568,19 +567,16 @@ export function SketchDisplayMarkerNode({
       geometryData.position[1],
       geometryData.position[2],
     );
-    updateActiveSketchMarkerScales(
-      visibleMeshRef.current,
+    updateActiveSketchMarkerPickScale(
       pickProxy,
       renderable,
       camera,
       size.height,
-      radiusScale,
     );
   }, [
     camera,
     geometryData.position,
     pickProxy,
-    radiusScale,
     renderable,
     size.height,
   ]);
@@ -612,13 +608,13 @@ export function SketchDisplayMarkerNode({
         }
       }}
     >
-      <mesh
-        ref={visibleMeshRef}
+      <ScreenSpacePointMarker
         visible={visible}
-        geometry={MARKER_SPHERE_GEOMETRY}
         material={material}
         position={geometryData.position}
-        scale={initialRadii.visibleRadius * radiusScale}
+        radiusPixels={radii.visiblePixelRadius}
+        radiusScale={radiusScale}
+        ring={renderable.markerShape === "ring"}
         renderOrder={getSketchDisplayMarkerRenderOrder(renderable)}
       />
       <primitive object={pickProxy} />
@@ -626,19 +622,16 @@ export function SketchDisplayMarkerNode({
   );
 }
 
-function updateActiveSketchMarkerScales(
-  visibleMesh: THREE.Mesh | null,
+function updateActiveSketchMarkerPickScale(
   pickProxy: THREE.Mesh,
   renderable: SketchSessionDisplayRenderable,
   camera: THREE.Camera,
   viewportHeight: number,
-  radiusScale: number,
 ) {
   const radii = getActiveSketchMarkerWorldRadii(
     renderable,
     camera,
     viewportHeight,
   );
-  visibleMesh?.scale.setScalar(radii.visibleRadius * radiusScale);
   pickProxy.scale.setScalar(radii.pickRadius);
 }
