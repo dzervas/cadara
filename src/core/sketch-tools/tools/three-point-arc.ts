@@ -64,12 +64,13 @@ function buildThreePointArcPreview(
     {
       id: "preview-three-point-arc",
       kind: "polyline",
-      points: sampleArcPoints(
-        circle.center,
-        points[0]!,
-        points[2]!,
-        sweepDirection,
-      ),
+      // Keep B on the displayed curve as C moves, including near-collinear
+      // arcs where a uniformly sampled chord can miss B by a visible distance.
+      points: [
+        ...sampleArcPoints(circle.center, points[0]!, points[1]!, sweepDirection).slice(0, -1),
+        points[1]!,
+        ...sampleArcPoints(circle.center, points[1]!, points[2]!, sweepDirection).slice(1),
+      ],
       isClosed: false,
       entityId: null,
       status: "preview",
