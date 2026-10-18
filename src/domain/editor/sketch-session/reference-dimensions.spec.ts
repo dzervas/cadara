@@ -1,6 +1,6 @@
 // T13d (logic lane, sketch-session annotation seam): Make reference / Make
 // driving from the dimension's edit popup, the reference's "(value)" label
-// following the geometry under a drag, reference/driving editing,
+// following the geometry under a drag, refusal of redundant Make driving,
 // and Finish → publish → reopen through the mock and
 // OCC kernel adapters. Every row runs in a rectangle + circle sketch.
 import { expect, test } from "vitest";
@@ -289,41 +289,59 @@ test("O5: reference input ignores typing; Make driving stages editing and switch
   expect(saved.liveSolve?.accepted).toBe(true);
 });
 
-test("T13d: Make driving with a conflicting typed value is retained as an invalid edit and explained", () => {
+test("O6: redundant Make driving refuses without mutation and offers atomic replacement of only conflicting dimensions", () => {
   let session = dimensioned();
-  // A second length on the top side, made a reference: it is determined by
-  // the bottom width through the rectangle's relationships.
   session = dimensionWith(
     session,
     "dimensionDistance",
     [entity(session, "Rectangle 1 top").target],
     [3, 5],
   );
-  // T13e (D11): the determined top length is offered, and committed, as a
-  // reference already (no Make reference step).
-  expect(
-    isReferenceDimension(session.definition.dimensions[2]!),
-    "premise: the top length is a reference",
-  ).toBe(true);
-  expect(session.liveSolve?.accepted, "premise: solved").toBe(true);
   const top = session.definition.dimensions[2]!;
-  const editing = patchSketchConstraintValue(patchSketchConstraintValue(openEdit(session, top), { intent: "makeAnnotationDriving" }), {
-    value: "6",
+  const editing = openEdit(session, top);
+  const refused = patchSketchConstraintValue(editing, {
+    intent: "makeAnnotationDriving",
   });
-  const committed = patchSketchConstraintValue(editing, {
+  expect(refused.definition).toBe(session.definition);
+  expect(refused.commitRequest).toBe(session.commitRequest);
+  expect(refused.validationMessage).toContain(
+    session.definition.dimensions[1]!.label,
+  );
+  expect(refused.validationMessage).not.toContain(
+    session.definition.dimensions[0]!.label,
+  );
+  expect(refused.toolPresentation?.floatingInput?.readOnly).toBe(true);
+  const offer = refused.toolPresentation?.floatingInput?.secondaryAction;
+  expect(offer?.label).toBe("Make those references");
+  const replaced = patchSketchConstraintValue(refused, offer!.action.patch);
+  expect(isReferenceDimension(replaced.definition.dimensions[0]!)).toBe(false);
+  expect(isReferenceDimension(replaced.definition.dimensions[1]!)).toBe(true);
+  expect(isReferenceDimension(replaced.definition.dimensions[2]!)).toBe(false);
+  expect(replaced.liveSolve?.accepted).toBe(true);
+  expect(replaced.validationMessage).toBeNull();
+});
+
+test("O6: direct value conversion also refuses redundancy; cancelling the offer preserves every requirement", () => {
+  let session = dimensioned();
+  session = dimensionWith(
+    session,
+    "dimensionDistance",
+    [entity(session, "Rectangle 1 top").target],
+    [3, 5],
+  );
+  const editing = openEdit(session, session.definition.dimensions[2]!);
+  const refused = patchSketchConstraintValue(editing, {
     intent: "commitAnnotationValue",
   });
-  const edited = committed.definition.dimensions[2]!;
-  expect(isReferenceDimension(edited)).toBe(false);
-  expect(edited.kind === "lineLength" && edited.value).toEqual({
-    source: "literal",
-    value: 6,
-  });
-  expect(committed.activeAnnotationEdit, "the popup closes").toBeNull();
-  expect(committed.liveSolve?.accepted, "the sketch is invalid").toBe(false);
-  expect(committed.validationMessage).toMatch(
-    new RegExp(`^${top.label} \\(6 mm\\) conflicts with `),
+  expect(refused.definition).toBe(session.definition);
+  expect(refused.toolPresentation?.floatingInput?.secondaryAction?.label).toBe(
+    "Make those references",
   );
+  const cancelled = patchSketchConstraintValue(refused, {
+    intent: "cancelAnnotationValue",
+  });
+  expect(cancelled.definition).toBe(session.definition);
+  expect(cancelled.activeAnnotationEdit).toBeNull();
 });
 
 test("T13d: an arc endpoint binding opens no edit popup, so it can never be made a reference", () => {

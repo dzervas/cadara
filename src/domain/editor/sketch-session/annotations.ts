@@ -16,6 +16,7 @@ import {
   type AuthoredValue,
 } from "@/contracts/modeling/authored-values";
 import type {
+  DimensionId,
   SketchEntityId,
   SketchId,
   SketchPointId,
@@ -44,6 +45,7 @@ import {
   type SolvedCubicSpan,
 } from "@/contracts/sketch/spline-geometry";
 import {
+  probeSketchDimensionRedundancy,
   solveSketchDefinitionCore,
 } from "@/contracts/sketch/solver-core";
 import { linkedMirrorRefs } from "@/contracts/sketch/mirror-requirements";
@@ -190,8 +192,38 @@ export function patchSketchAnnotationEditValue(
     };
   }
 
-  if (intent === "makeAnnotationDriving") {
-    const nextEdit = { ...edit, driving: true as const };
+  if (
+    intent === "makeAnnotationDriving" ||
+    intent === "replaceAnnotationDrivers"
+  ) {
+    const conflicts = getDrivingConversionConflicts(session, edit);
+    if (conflicts !== null) {
+      if (intent !== "replaceAnnotationDrivers" || conflicts.length === 0) {
+        return refuseDrivingConversion(session, edit, conflicts);
+      }
+      // Recompute at confirmation: never apply a stale list after another edit.
+      const definition = {
+        ...session.definition,
+        dimensions: session.definition.dimensions.map((d) =>
+          conflicts.includes(d.dimensionId)
+            ? { ...d, reference: true as const }
+            : d,
+        ),
+      };
+      if (edit.pendingValue === null) return session;
+      const replaced = commitSketchAnnotationEditValue(
+        { ...session, definition },
+        { ...edit, pendingValue: edit.pendingValue },
+      );
+      return replaced.activeAnnotationEdit || !replaced.liveSolve?.accepted
+        ? refuseDrivingConversion(session, edit, conflicts)
+        : replaced;
+    }
+    const nextEdit = {
+      ...edit,
+      driving: true as const,
+      drivingConflicts: undefined,
+    };
     return {
       ...session,
       activeAnnotationEdit: nextEdit,
@@ -628,6 +660,98 @@ export function makeSketchAnnotationReference(
   return commitEditedAnnotationDefinition(session, edit, definition);
 }
 
+/**
+ * O6: use the creation-time solver probe, not constraintState (a consistent
+ * redundant driver can still be "satisfied"). Find a sufficient, irreducible
+ * set of existing dimensions to release; unrelated drivers are reintroduced.
+ * All trials are detached definitions: neither refusal nor preview authors edits.
+ */
+function getDrivingConversionConflicts(
+  session: SketchSessionState,
+  edit: SketchAnnotationEditState,
+): readonly DimensionId[] | null {
+  const target = edit.target;
+  if (target.kind !== "dimension") return null;
+  const candidate = session.definition.dimensions.find(
+    (d) => d.dimensionId === target.dimensionId,
+  );
+  if (!candidate || !isReferenceDimension(candidate)) return null;
+  const settings = getSketchSessionDerivationSettings(session);
+  if (!session.liveSolve?.accepted) return [];
+  const authoredBasis = applySolvedSketchToDefinition(
+    session.definition,
+    session.liveSolve.solvedSnapshot,
+    settings,
+  );
+  const resolved = resolveSketchDimensionValues({
+    definition: authoredBasis,
+    variables: session.documentVariables,
+  });
+  if (!resolved.ok) return [];
+  const basis = resolved.definition;
+  const others = basis.dimensions.filter(
+    (d) => d.dimensionId !== candidate.dimensionId,
+  );
+  const determined = (released: ReadonlySet<string>) => {
+    const dimensions = others.filter((d) => !released.has(d.dimensionId));
+    return (
+      probeSketchDimensionRedundancy({
+        definition: {
+          ...basis,
+          dimensions,
+          dimensionIds: dimensions.map((d) => d.dimensionId),
+        },
+        candidate,
+        projectedReferences: session.projectedReferences,
+        tolerances: session.solverTolerances,
+        ...settings,
+      }).kind !== "independent"
+    );
+  };
+  if (!determined(new Set())) return null;
+  const released = new Set(
+    others
+      .filter(
+        (d) =>
+          !isReferenceDimension(d) &&
+          d.kind !== "arcStartPointCoincident" &&
+          d.kind !== "arcEndPointCoincident",
+      )
+      .map((d) => d.dimensionId),
+  );
+  if (determined(released)) return [];
+  for (const id of [...released]) {
+    released.delete(id);
+    if (determined(released)) released.add(id);
+  }
+  return [...released];
+}
+
+function refuseDrivingConversion(
+  session: SketchSessionState,
+  edit: SketchAnnotationEditState,
+  conflicts: readonly DimensionId[],
+): SketchSessionState {
+  const labels = conflicts.map(
+    (id) =>
+      session.definition.dimensions.find((d) => d.dimensionId === id)!.label,
+  );
+  const message = conflicts.length
+    ? `Cannot make driving: conflicts with ${labels.join(", ")}. Make those dimensions references instead?`
+    : "Cannot make driving: the sketch is invalid or this quantity is determined by other constraints. Change those requirements first.";
+  const nextEdit = { ...edit, driving: undefined, drivingConflicts: conflicts };
+  return {
+    ...session,
+    activeAnnotationEdit: nextEdit,
+    validationMessage: message,
+    toolPresentation: buildAnnotationEditPresentation(
+      session,
+      nextEdit,
+      message,
+    ),
+  };
+}
+
 /** Updates share browser annotation conversion, conflict retention and solve preparation. */
 export function updateSketchDimensionValue(
   session: SketchSessionState,
@@ -657,6 +781,11 @@ export function commitSketchAnnotationEditValue(
             isReferenceDimension(dimension),
         )
       : undefined;
+  if (madeDriving) {
+    const conflicts = getDrivingConversionConflicts(session, edit);
+    if (conflicts !== null)
+      return refuseDrivingConversion(session, edit, conflicts);
+  }
   // T16f ([TECH] T16-12/A-9): making a reference driving when a
   // corresponding driver exists would add a second driver of one mirrored
   // quantity: refused here, in the domain commit path, and that driver's
@@ -1365,6 +1494,17 @@ export function buildAnnotationEditPresentation(
                 patch: { intent: "makeAnnotationDriving" },
               },
             },
+            ...(edit.drivingConflicts?.length
+              ? {
+                  secondaryAction: {
+                    label: "Make those references",
+                    action: {
+                      type: "patch" as const,
+                      patch: { intent: "replaceAnnotationDrivers" },
+                    },
+                  },
+                }
+              : {}),
           }
         : (sharedPresentation ??
           (editable?.canBeReference || edit.driving
