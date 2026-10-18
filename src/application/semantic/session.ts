@@ -358,6 +358,13 @@ class DocumentSession implements SemanticSession {
         if (terminal.completion.live.kind === "unchanged")
           terminal.completion.live.state = this.state;
         terminal.discovery = current.discovery;
+        // A successful open already returned the imported snapshot diagnostics.
+        // Use the authoritative handoff once, but retain mutation failures.
+        terminal.diagnostics =
+          command.operation === "document.open" &&
+          terminal.outcome.kind === "completed"
+            ? current.diagnostics
+            : [...terminal.diagnostics, ...current.diagnostics];
         if (
           command.operation === "document.open" &&
           terminal.completion.live.kind === "applied"
@@ -384,10 +391,6 @@ class DocumentSession implements SemanticSession {
               ],
             };
         }
-        terminal.diagnostics = [
-          ...terminal.diagnostics,
-          ...current.diagnostics,
-        ];
       } catch (error) {
         terminal.completion.handoff = { kind: "failed" };
         terminal.outcome = {
