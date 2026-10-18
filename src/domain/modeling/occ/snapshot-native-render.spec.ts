@@ -25,7 +25,10 @@ import { createModelingService } from "@/domain/modeling/modeling-service";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 import { EXTRUDE_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
 import { toGpPnt } from "@/domain/modeling/occ/planes";
-import { trackNewSolidBody } from "@/domain/modeling/occ/topology";
+import {
+  rewriteNativeTopologyPayloadIds,
+  trackNewSolidBody,
+} from "@/domain/modeling/occ/topology";
 import {
   createOccNativeTopologyPayloadFromShimPayloads,
   parseNativeShimPayloadJson,
@@ -433,7 +436,7 @@ test("src/domain/modeling/occ/snapshot-native-render.spec.ts", async () => {
     }
   }
 
-  async function testNativeRenderMapsMeshBindingsThroughPreservedDurableFaceIds() {
+  async function testNativeRenderConsumesAdapterNormalizedDurableFaceIds() {
     const oc = await loadCustomOpenCascadeForTest();
     const builder = new oc.BRepPrimAPI_MakeBox_3(
       toGpPnt(oc, [0, 0, 0]),
@@ -491,7 +494,13 @@ test("src/domain/modeling/occ/snapshot-native-render.spec.ts", async () => {
         bodies: [
           {
             bodyId: body.bodyId,
-            nativePayload,
+            // Match the adapter boundary: raw native IDs never enter the
+            // snapshot renderer, even when the body retains native aliases.
+            nativePayload: rewriteNativeTopologyPayloadIds(
+              body.bodyId,
+              nativePayload,
+              { faceIdsByNativeId: durableFaceIdsByNativeId },
+            ),
           },
         ],
       });
@@ -515,12 +524,66 @@ test("src/domain/modeling/occ/snapshot-native-render.spec.ts", async () => {
 
     expect(
       faceMeshRecords.length,
-      "Native render export should keep preserved durable face ids visible when mesh bindings use fresh native ids.",
+      "Native render export should consume preserved durable bindings without aliasing again.",
     ).toBe(6);
     expect(
       triangleCount,
-      "Native render export should not drop triangles whose native face binding aliases to a preserved durable face id.",
+      "Native render export should not drop triangles with adapter-normalized durable face bindings.",
     ).toBe(12);
+
+    const boundFaceId =
+      nativeTopologyPayload.bodies[0]!.renderMeshSummary!
+        .triangleFaceBindings![0];
+    expect(() =>
+      buildOccWorkspaceSnapshot(state, [], {
+        nativeTopologyPayload: {
+          ...nativeTopologyPayload,
+          bodies: nativeTopologyPayload.bodies.map((payload) => ({
+            ...payload,
+            topology: payload.topology.filter(
+              (record) => record.id !== boundFaceId,
+            ),
+          })),
+        },
+      }),
+    ).toThrow(/unmatched durable face ID/);
+    for (const triangleFaceBindings of [undefined, []]) {
+      expect(() =>
+        buildOccWorkspaceSnapshot(state, [], {
+          nativeTopologyPayload: {
+            ...nativeTopologyPayload,
+            bodies: nativeTopologyPayload.bodies.map((payload) => ({
+              ...payload,
+              renderMeshSummary: {
+                ...payload.renderMeshSummary!,
+                triangleFaceBindings,
+              },
+            })),
+          },
+        }),
+      ).toThrow(/one durable face binding per triangle/);
+    }
+
+    for (const incomplete of [
+      { positions: undefined },
+      { triangleIndices: undefined },
+      { triangleIndices: [] },
+    ]) {
+      expect(() =>
+        buildOccWorkspaceSnapshot(state, [], {
+          nativeTopologyPayload: {
+            ...nativeTopologyPayload,
+            bodies: nativeTopologyPayload.bodies.map((payload) => ({
+              ...payload,
+              renderMeshSummary: {
+                ...payload.renderMeshSummary!,
+                ...incomplete,
+              },
+            })),
+          },
+        }),
+      ).toThrow(/missing triangle geometry/);
+    }
 
     builder.delete?.();
   }
@@ -1188,7 +1251,7 @@ test("src/domain/modeling/occ/snapshot-native-render.spec.ts", async () => {
 
   testProfileResultReleaseDeduplicatesAndRetriesFailedOwners();
   await testBodyRenderExportConsumesNativeMeshPayload();
-  await testNativeRenderMapsMeshBindingsThroughPreservedDurableFaceIds();
+  await testNativeRenderConsumesAdapterNormalizedDurableFaceIds();
   await testRepeatedServiceSnapshotsReleaseRegionProfileOwnership();
   await testServiceSnapshotReadsReleaseSnapshotTemporaries();
   await testPreviewSnapshotReleasesMeshedFaceMapAndEdgeTemporaries();
