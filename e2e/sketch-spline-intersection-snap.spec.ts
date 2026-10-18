@@ -63,7 +63,9 @@ test("T13i: hovering where a spline crosses a line shows the intersection; a Lin
           // The line also crosses the sketch X axis: only the spline's
           // crossing counts.
           const [label = ""] = await page
-            .locator('[data-sketch-viewport-overlay="snapIndicator"]')
+            .locator(
+              '[data-sketch-viewport-overlay="constraintPreview"] > span:last-child',
+            )
             .allInnerTexts();
           if ((await badge.count()) > 0 && label.includes("Spline")) {
             hovered = { x: 646, y };
@@ -83,7 +85,9 @@ test("T13i: hovering where a spline crosses a line shows the intersection; a Lin
   });
   // The rendered label of the live snap badge (the only one before a click).
   const [text = ""] = await page
-    .locator('[data-sketch-viewport-overlay="snapIndicator"]')
+    .locator(
+      '[data-sketch-viewport-overlay="constraintPreview"] > span:last-child',
+    )
     .allInnerTexts();
   expect(
     text.trim().split(", ").sort(),

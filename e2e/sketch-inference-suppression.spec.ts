@@ -40,11 +40,11 @@ async function expectStaged(workbench: SketchWorkbenchHarness, count: number) {
     .toContain(`${count} entities staged`);
 }
 
-/** The live placement text at the pointer: the snap badge or the free label. */
+/** The live placement text: the offset inference detail or the free label. */
 function pointerText(workbench: SketchWorkbenchHarness) {
   return workbench.page.evaluate(() => {
     const snap = document.querySelector(
-      '[data-sketch-viewport-overlay="snapIndicator"]',
+      '[data-sketch-viewport-overlay="constraintPreview"] > span:last-child',
     );
     if (snap) return snap.textContent;
     const free = [
