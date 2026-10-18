@@ -1,6 +1,8 @@
 import { expect, test } from "vitest";
 import { makeSketchFixture } from "@/contracts/sketch/region-extraction.fixtures";
 import { sketchSnapshotRecordForTest } from "@/contracts/sketch/region-record.fixtures";
+import { OFFSET_DIAGNOSTIC_CODES } from "@/contracts/sketch/offset-geometry";
+import { offsetSession } from "@/domain/editor/sketch-offset.fixtures";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
@@ -12,6 +14,7 @@ import {
   selectSketchEditToolTarget,
   updateSketchEditToolHover,
   refreshSketchEditToolAfterOffsetRound,
+  publishSketchLiveRegions,
 } from "@/domain/editor/sketch-session";
 
 // Logic lane: session patches must preserve the last valid preview/anchor
@@ -73,5 +76,61 @@ test.each(["offset", "sketchFillet", "sketchChamfer"] as const)(
     expect(recovered.toolPresentation!.validation).toEqual([]);
     expect(recovered.toolStagedEntities.length).toBeGreaterThan(0);
     expect(recovered.toolStagedEntities).not.toEqual(valid.toolStagedEntities);
+    const nonNumeric = patchSketchEditToolValue(recovered, { value: "-" });
+    expect(nonNumeric.validationMessage).toMatch(/^Enter a number for the /);
+    const refreshedNonNumeric =
+      refreshSketchEditToolAfterOffsetRound(nonNumeric);
+    expect(refreshedNonNumeric.validationMessage).toBe(
+      nonNumeric.validationMessage,
+    );
+    expect(refreshedNonNumeric.toolStagedEntities).toBe(
+      recovered.toolStagedEntities,
+    );
+    expect(refreshedNonNumeric.toolPresentation!.floatingInput!.anchor).toEqual(
+      recovered.toolPresentation!.floatingInput!.anchor,
+    );
+  },
+);
+
+test.each(["offset", "sketchSlot"] as const)(
+  "O29: %s replaces an earlier pending message with the failed round gate for a valid value",
+  (toolId) => {
+    const { session, relationship } = offsetSession("singleLine");
+    const output = session.definition.entities.find(
+      (entity) => entity.entityId === relationship.outputs[0]!.outputEntityId,
+    )!;
+    const selected = patchSketchEditToolValue(
+      selectSketchEditToolTarget(
+        beginSketchTool(session, toolId),
+        output.target,
+      ),
+      { value: "0.2" },
+    );
+    expect(selected.validationMessage).toContain("still being checked");
+    const failed = publishSketchLiveRegions(
+      selected,
+      [],
+      [],
+      [
+        {
+          derivationId: relationship.derivationId,
+          status: "failed",
+          diagnostic: {
+            code: OFFSET_DIAGNOSTIC_CODES.topologyUncertain,
+            severity: "error",
+            message: "round failed",
+            target: null,
+          },
+        },
+      ],
+    );
+    const refreshed = refreshSketchEditToolAfterOffsetRound(failed);
+    expect(refreshed.validationMessage).toContain("which is not certified");
+    expect(refreshed.validationMessage).not.toContain("still being checked");
+    expect(refreshed.toolPresentation!.validation![0]!.message).toBe(
+      refreshed.validationMessage,
+    );
+    expect(refreshed.definition).toBe(selected.definition);
+    expect(refreshed.activeEditTool!.offsetPublication).toBeUndefined();
   },
 );
