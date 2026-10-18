@@ -142,8 +142,11 @@ export function HistoryTimelineShell({
           </ActionIcon>
         </Tooltip>
       </div>
-      {!collapsed ? (
-        <div className="pointer-events-auto absolute bottom-16 right-7 z-20 max-w-[70vw] overflow-x-auto">
+      {/* Keep Actions in flow with the same side margins as the timeline;
+          fixed bottom offsets overlap the taller document timeline. */}
+      {!collapsed &&
+      (actionHistory.undo.length > 0 || actionHistory.redo.length > 0) ? (
+        <div className="pointer-events-auto mx-4 mb-1 overflow-x-auto">
           <HistoryActionStrip
             undo={actionHistory.undo}
             redo={actionHistory.redo}
@@ -154,7 +157,7 @@ export function HistoryTimelineShell({
         </div>
       ) : null}
       <div
-        className={`motion-reduce:transition-none ${collapsed ? "pointer-events-none" : ""}`}
+        className={`relative motion-reduce:transition-none ${collapsed ? "pointer-events-none" : ""}`}
         aria-hidden={panelMotion.ariaHidden}
         data-history-motion="timeline-panel"
         data-transition-state={panelMotion.transitionState}
@@ -163,7 +166,7 @@ export function HistoryTimelineShell({
         <div
           className={`transition-transform duration-200 motion-reduce:transition-none ${
             sketchSession
-              ? "pointer-events-none translate-y-16 opacity-0"
+              ? "pointer-events-none absolute inset-0 translate-y-16 opacity-0"
               : "translate-y-0 opacity-100"
           }`}
           aria-hidden={sketchSession ? true : undefined}
@@ -189,7 +192,7 @@ export function HistoryTimelineShell({
         </div>
         {sketchSession ? (
           <div
-            className="absolute inset-0 translate-y-0 opacity-100 transition-transform duration-200 motion-reduce:transition-none"
+            className="relative translate-y-0 opacity-100 transition-transform duration-200 motion-reduce:transition-none"
             data-history-panel="sketch"
             data-transition-state="active"
           >

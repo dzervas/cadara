@@ -11,11 +11,13 @@ const CHIP_STYLE = {
   background: "var(--workbench-shell-surface-panel-elev)",
   boxShadow: "var(--workbench-shell-elevation-md)",
 };
+// Paper's unlayered display rule overrides Tailwind's layered flex utility.
+// Set display through Mantine so truncation leaves room for the action button.
 // T14d re-review RR-2: one line per chip (the label truncates with an
 // ellipsis, its full text in `title`), so the hint column always fits the
 // slot the annotation layout reserves for it.
 const CHIP_CLASS =
-  "flex max-w-full items-center gap-2 rounded-[6px] px-2.5 py-1 text-xs whitespace-nowrap text-[var(--workbench-shell-text-muted)]";
+  "max-w-full items-center gap-2 rounded-[6px] px-2.5 py-1 text-xs whitespace-nowrap text-[var(--workbench-shell-text-muted)]";
 const LABEL_CLASS = "min-w-0 truncate";
 
 /**
@@ -42,6 +44,7 @@ export function SketchPickHint({
       {hint ? (
         <Paper
           component="div"
+          display="flex"
           role="status"
           data-testid="sketch-pick-hint"
           className={`${onChoose ? "pointer-events-auto" : "pointer-events-none"} ${CHIP_CLASS}`}
@@ -65,6 +68,7 @@ export function SketchPickHint({
       {nearGap ? (
         <Paper
           component="div"
+          display="flex"
           role="status"
           data-testid="sketch-near-gap-hint"
           className={`pointer-events-auto ${CHIP_CLASS}`}
