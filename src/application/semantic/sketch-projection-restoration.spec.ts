@@ -38,7 +38,7 @@ const supports = [
 ] as const;
 
 for (const support of supports) {
-  it(`reopens and republishes a ${support.name} circle centered on a projected solid vertex, then saves and opens it cleanly`, async () => {
+  it(`reopens and republishes a ${support.name} circle centered on a projected solid vertex, then saves, opens, reopens and republishes it cleanly`, async () => {
     const directory = await mkdtemp(resolve(tmpdir(), "cadara-vertex-circle-"));
     const w = await createPlateWorkflow();
     try {
@@ -67,45 +67,50 @@ for (const support of supports) {
       expect(opened.discovery!.model!.timeline).toContainEqual(
         expect.objectContaining({ target: { kind: "sketch", sketchId } }),
       );
+
+      const restored = await w.execute({ operation: "sketch.open", sketchId });
+      expectRestoredCircle(restored, support);
+      expectRestoredCircle(
+        await w.execute({
+          operation: "sketch.publish",
+          draft: restored.discovery!.state.draft,
+          requireProfiles: true,
+        }),
+        support,
+      );
     } finally {
       await w.close();
       await rm(directory, { recursive: true, force: true });
     }
   }, 60_000);
 
-  // Known defect cadara-phk: after document.open, sketch.open reports the
-  // reference as missingSource (missing-model-vertex-source). Flip to `it`
-  // once the bug is fixed; these are the assertions that must hold.
-  it.fails(
-    `save/open then reopen and republish keeps a ${support.name} circle on its projected solid vertex`,
-    async () => {
-      const directory = await mkdtemp(
-        resolve(tmpdir(), "cadara-vertex-circle-"),
-      );
-      const w = await createPlateWorkflow();
-      try {
-        const sketchId = await publishCircleOnProjectedVertex(w, support);
-        const path = resolve(directory, "vertex-circle.cadara");
-        await w.execute({ operation: "document.save", path });
-        await w.execute({ operation: "document.open", basis: null, path });
+  // Regression cadara-phk: native save/open reorders the persisted vertex
+  // reference's keys, and a key-order-sensitive target comparison then made
+  // sketch.open report the present vertex as missing-model-vertex-source.
+  it(`save/open then reopen and republish keeps a ${support.name} circle on its projected solid vertex`, async () => {
+    const directory = await mkdtemp(resolve(tmpdir(), "cadara-vertex-circle-"));
+    const w = await createPlateWorkflow();
+    try {
+      const sketchId = await publishCircleOnProjectedVertex(w, support);
+      const path = resolve(directory, "vertex-circle.cadara");
+      await w.execute({ operation: "document.save", path });
+      await w.execute({ operation: "document.open", basis: null, path });
 
-        const reopened = await w.run({ operation: "sketch.open", sketchId });
-        expect(reopened.outcome.kind).toBe("completed");
-        expectRestoredCircle(reopened, support);
-        const finished = await w.run({
-          operation: "sketch.publish",
-          draft: reopened.discovery!.state.draft,
-          requireProfiles: true,
-        });
-        expect(finished.outcome.kind).toBe("completed");
-        expectRestoredCircle(finished, support);
-      } finally {
-        await w.close();
-        await rm(directory, { recursive: true, force: true });
-      }
-    },
-    60_000,
-  );
+      const reopened = await w.run({ operation: "sketch.open", sketchId });
+      expect(reopened.outcome.kind).toBe("completed");
+      expectRestoredCircle(reopened, support);
+      const finished = await w.run({
+        operation: "sketch.publish",
+        draft: reopened.discovery!.state.draft,
+        requireProfiles: true,
+      });
+      expect(finished.outcome.kind).toBe("completed");
+      expectRestoredCircle(finished, support);
+    } finally {
+      await w.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 60_000);
 }
 
 type Workflow = Awaited<ReturnType<typeof createPlateWorkflow>>;

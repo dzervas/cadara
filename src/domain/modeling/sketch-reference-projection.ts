@@ -1,3 +1,4 @@
+import { stableJsonValue } from "@/contracts/modeling/authored-document-serialization";
 import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
 import type {
   RenderableEntityRecord,
@@ -248,7 +249,12 @@ function sameTarget(left: DurableRef, right: DurableRef) {
     return false;
   }
 
-  return JSON.stringify(left) === JSON.stringify(right);
+  // cadara-phk: compare canonical key order. A native save/open reorders a
+  // persisted reference's keys, so raw JSON text misses a present target.
+  return (
+    JSON.stringify(stableJsonValue(left)) ===
+    JSON.stringify(stableJsonValue(right))
+  );
 }
 
 function findRenderRecords(snapshot: WorkspaceSnapshot, target: DurableRef) {
