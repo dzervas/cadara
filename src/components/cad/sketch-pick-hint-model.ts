@@ -82,6 +82,21 @@ export interface SketchNearGapHintModel {
   readonly mergeRefusal: string | null;
 }
 
+/** Viewport target priority for D26: hover first, then latest selection. */
+export function getSketchNearGapHintPointIds(
+  hoverTarget: PrimitiveRef | null,
+  selection: readonly PrimitiveRef[],
+  sketchId: string | null,
+): SketchPointId[] {
+  // Selection is deliberate: empty-space hover must not start linger while
+  // a selected endpoint still names a gap (T13k, D26).
+  return [hoverTarget, ...[...selection].reverse()].flatMap((target) =>
+    target?.kind === "sketchPoint" && target.sketchId === sketchId
+      ? [target.pointId]
+      : [],
+  );
+}
+
 /**
  * The near-gap hint for the first of `pointIds` (the hovered end, then the
  * selected ones) that is an end of a near gap; null when none is.

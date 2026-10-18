@@ -74,6 +74,7 @@ import {
 import { useDwellHint } from "@/hooks/dwell-hint";
 import {
   createSketchNearGapHint,
+  getSketchNearGapHintPointIds,
   createSketchPickChooserItems,
   createSketchPickHint,
   handleSketchPickChooserKeyDown,
@@ -1199,15 +1200,10 @@ export function ThreeCadViewport({
       sketchDefinition && sketchActiveTool === null
         ? createSketchNearGapHint({
             gaps: sketchNearGaps,
-            // Empty space starts linger even if an endpoint is selected.
-            pointIds: (hoverTarget
-              ? [hoverTarget, ...[...selection].reverse()]
-              : []
-            ).flatMap((target) =>
-              target?.kind === "sketchPoint" &&
-              target.sketchId === sketchHoverScope
-                ? [target.pointId]
-                : [],
+            pointIds: getSketchNearGapHintPointIds(
+              hoverTarget,
+              selection,
+              sketchHoverScope,
             ),
             definition: sketchDefinition,
           })
