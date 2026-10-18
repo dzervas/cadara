@@ -100,6 +100,7 @@ it("Split a line by a line: one 'Split' action leaves two pieces; Undo and Redo 
       edit: { kind: "split", target, boundary, pick: [15, 0] },
       intent: "fulfill",
     });
+    if (target.kind !== "sketchEntity") throw new Error("Missing target");
     const pieces = lines(split);
     expect(pieces, "two line pieces and the boundary").toHaveLength(3);
     expect(pieces).toEqual(
@@ -121,7 +122,7 @@ it("Split a line by a line: one 'Split' action leaves two pieces; Undo and Redo 
     expect(
       split.discovery!.sketch!.entities.map((e) => e.entityId),
       "the split line keeps its identity on one piece",
-    ).toContain(target.kind === "sketchEntity" ? target.entityId : null);
+    ).toContain(target.entityId);
     expect(labels(split)).toEqual({
       undo: [...labels(before).undo, "Split"],
       redo: [],

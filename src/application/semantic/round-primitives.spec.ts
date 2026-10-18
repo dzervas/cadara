@@ -50,7 +50,7 @@ it("authors a circle through the production contribution owner and extrudes its 
   }
 }, 30000);
 
-// Migrated from e2e/sketch-arc-profile-extrude.spec.ts: the headless session
+// Formerly e2e/sketch-arc-profile-extrude.spec.ts: the headless session
 // loads the shipped `public/cadara-occ` build, so the production arc-edge route
 // (open problem 8) no longer needs the browser worker to be proven.
 it("closes a three-point arc with a line through endpoint requirements and extrudes the one region into its expected native bounds", async () => {
