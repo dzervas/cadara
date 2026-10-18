@@ -3,16 +3,8 @@
  * of the stdout envelope. These describe CLI encoding/selection problems for a
  * command that did NOT execute; they never stand in for a SemanticResult.
  */
-import type { SemanticDiscovery } from "@/contracts/semantic/schema";
+import type { SelectionCandidate } from "@/application/semantic/selection-error";
 import type { JsonSchema } from "@/cli/commands/recipe-catalog";
-
-export interface SelectionCandidate {
-  label: string;
-  /** The canonical typed value that would have been substituted. */
-  target: unknown;
-  /** The sketch or body that owns the candidate, when it has one. */
-  owner: { kind: "sketch"; sketchId: string; label: string | null } | { kind: "body"; bodyId: string; label: string | null } | null;
-}
 
 export interface RecipeCliError {
   code: "usage" | "recipe-unreadable" | "invalid-recipe" | "unknown-operation" | "selection-unresolved" | "selection-ambiguous" | "initialization";
@@ -57,41 +49,6 @@ export function recipeError(code: RecipeCliError["code"], phase: RecipeCliError[
 
 export function invalidRecipe(message: string, fields: ErrorFields = {}) {
   return recipeError("invalid-recipe", "preflight", message, fields);
-}
-
-type Reference = { label: string; target: unknown };
-
-function owner(target: unknown, discovery: SemanticDiscovery | undefined): SelectionCandidate["owner"] {
-  if (!target || typeof target !== "object" || !("kind" in target)) return null;
-  const label = (kind: string, key: string, id: string) =>
-    discovery?.references.find((r) => r.target.kind === kind && (r.target as unknown as Record<string, unknown>)[key] === id)?.label ?? null;
-  if ("sketchId" in target && typeof target.sketchId === "string" && target.kind !== "sketch")
-    return { kind: "sketch", sketchId: target.sketchId, label: label("sketch", "sketchId", target.sketchId) };
-  if ("bodyId" in target && typeof target.bodyId === "string" && target.kind !== "body")
-    return { kind: "body", bodyId: target.bodyId, label: label("body", "bodyId", target.bodyId) };
-  return null;
-}
-
-/**
- * A selector that matched zero or several eligible values. `eligible` lists the
- * snapshot's values of the field's eligible kinds, used when nothing matched.
- */
-export function selectionError(
-  message: string,
-  selector: unknown,
-  eligibleKinds: readonly string[],
-  matches: readonly Reference[],
-  discovery: SemanticDiscovery | undefined,
-  eligible: readonly Reference[] = discovery?.references.filter((r) => eligibleKinds.includes(r.target.kind)) ?? [],
-) {
-  const describe = (r: Reference): SelectionCandidate => ({ label: r.label, target: r.target, owner: owner(r.target, discovery) });
-  const summary = matches.length > 1 ? ` ${matches.length} eligible candidates match; choose one from error.candidates.` : eligible.length ? ` No eligible match; error.available lists ${eligible.length} eligible values.` : "";
-  return recipeError(matches.length > 1 ? "selection-ambiguous" : "selection-unresolved", "resolution", message + summary, {
-    selector,
-    eligibleKinds,
-    candidates: matches.map(describe),
-    ...(matches.length ? {} : { available: eligible.slice(0, 50).map(describe), availableCount: eligible.length }),
-  });
 }
 
 /** Path (Typia notation, relative to `root`) of the exact object `needle`. */
