@@ -9,7 +9,7 @@ import { cliEntry, invokeCliDocumentRecipe, copyCliRuntimeWithoutAssets } from "
 
 const exec = promisify(execFile);
 
-test("built package runs an SDK script, exports types, and replays its failed-step trace through the CLI", async () => {
+test("built package runs an SDK script, exports types, and replays its catch-and-continue trace through the CLI", async () => {
   const directory = await mkdtemp(join(tmpdir(), "cadara-sdk-script-"));
   try {
     const installed = join(directory, "node_modules/cadara-cli");
@@ -34,7 +34,8 @@ export default async function (doc: SemanticDocument) {
   const facts = doc.inspect(["bounds", "features"]);
   try { await doc.ops.sketch.open({ sketchId: "sketch_missing" }); }
   catch (error) { if (!(error instanceof SemanticOperationError)) throw error; }
-  return { facts, probe: probe.facts.bounds };
+  await doc.ops.document.rename({ label: "Recovered SDK" });
+  return { facts, probe: probe.facts.bounds, label: doc.current!.discovery!.document!.label };
 }`);
     const run = await exec("bun", [join(installed, "main.js"), "script", script, "--trace", "trace.json"], { cwd: directory, timeout: 60_000, maxBuffer: 4 * 1024 * 1024 });
     const output = JSON.parse(run.stdout);
@@ -43,12 +44,16 @@ export default async function (doc: SemanticDocument) {
     expect(output.cleanup.kind).toBe("closed");
     expect(output.results.some((r: { completion: { file: { kind: string } } }) => r.completion.file.kind === "written")).toBe(true);
     const trace = JSON.parse(await readFile(join(directory, "trace.json"), "utf8"));
-    expect(trace.operations.at(-1).operation).toBe("sketch.open");
+    expect(trace.operations.some((operation: { operation: string }) => operation.operation === "sketch.open")).toBe(false);
+    expect(trace.operations.at(-1).operation).toBe("document.rename");
+    expect(output.results.at(-2).outcome.kind).toBe("rejected");
     const replay = await invokeCliDocumentRecipe(["trace.json"], { cwd: directory, entry: join(installed, "main.js"), timeout: 60_000, maxBuffer: 4 * 1024 * 1024 });
-    expect(replay.code).toBe(1);
+    expect(replay.code, replay.stderr).toBe(0);
     const results = JSON.parse(replay.stdout).results;
-    expect(results.at(-1).outcome.kind).toBe("rejected");
-    expect(results.at(-2).discovery.model.bodies[0].bounds).toEqual(output.value.facts.bounds[0]);
+    expect(results.at(-1).outcome.kind).toBe("completed");
+    expect(results.at(-1).discovery.model.bodies[0].bounds).toEqual(output.value.facts.bounds[0]);
+    expect(results.at(-1).discovery.document.label).toBe(output.value.label);
+    expect(output.value.label).toBe("Recovered SDK");
     const direct = await exec("bun", ["-e", `import { openCadara } from "cadara-cli/sdk";
 const doc = await openCadara({path:"model.cadara"});
 try { console.log(JSON.stringify(doc.inspect(["bounds"]))); }
@@ -68,7 +73,7 @@ finally { const cleanup = await doc.close(); if (cleanup.kind !== "closed") thro
   } finally { await rm(directory, { recursive: true, force: true }); }
 }, 120_000);
 
-test("script failures preserve semantic evidence, failed-step traces and cleanup; initialization stays structured", async () => {
+test("script failures preserve semantic evidence and cleanup but omit failed recipe steps; initialization stays structured", async () => {
   const directory = await mkdtemp(join(tmpdir(), "cadara-sdk-errors-"));
   try {
     const script = join(directory, "failure.ts");
@@ -83,7 +88,9 @@ test("script failures preserve semantic evidence, failed-step traces and cleanup
     expect(envelope.error).toMatchObject({ name: "SemanticOperationError", result: { outcome: { kind: "rejected" } } });
     expect(envelope.cleanup).toMatchObject({ kind: "closed", resourcesReleased: true });
     const trace = JSON.parse(await readFile(join(directory, "trace.json"), "utf8"));
-    expect(trace.operations.at(-1)).toMatchObject({ operation: "sketch.open", commandId: envelope.error.result.correlation.commandId });
+    expect(trace.operations).toHaveLength(1);
+    expect(trace.operations[0]).toMatchObject({ operation: "document.create" });
+    expect(trace.operations.some((operation: { commandId: string }) => operation.commandId === envelope.error.result.correlation.commandId)).toBe(false);
 
     await writeFile(script, 'export default async (doc) => { await doc.ops.document.rename({label:"Before crash"}); throw new TypeError("broken script"); };');
     const programming = await run(cliEntry());

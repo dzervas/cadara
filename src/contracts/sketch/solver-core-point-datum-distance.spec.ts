@@ -109,5 +109,12 @@ test.each([
       2,
       5,
     );
+    const resizedEnd = result.solvedSnapshot.solvedPoints.find(
+      (p) => p.pointId === points[1]!.pointId,
+    )!;
+    expect(Math.hypot(
+      resizedEnd.solvedPosition[0] - corner.solvedPosition[0],
+      resizedEnd.solvedPosition[1] - corner.solvedPosition[1],
+    )).toBeCloseTo(76, 5);
   },
 );

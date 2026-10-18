@@ -9,6 +9,7 @@ import {
 } from "@/contracts/semantic/runtime-schema";
 
 import { SemanticDocument } from "@/application/semantic/sdk";
+import { mapProfileExtentTargets } from "@/application/semantic/target-resolution";
 import {
   isDiscoveryAlias as isAlias,
   type SelectableCommand as RecipeCommand,
@@ -220,21 +221,18 @@ function parseRecipe(input: unknown, position: { index: number }): RecipeOperati
     }
     if ((command.operation === "extrude.create" || command.operation === "extrude.update" || command.operation === "revolve.create" || command.operation === "revolve.update") && command.parameters && typeof command.parameters === "object") {
       const parameters = command.parameters as Record<string, unknown>;
-      const validateBound = (value: unknown) => {
-        if (!value || typeof value !== "object" || !("target" in value) || !isAlias(value.target)) return value;
-        validateTarget(value.target, "extent_validation");
-        const kind = "kind" in value ? value.kind : undefined;
-        const target = kind === "sketchPointOffset" ? { kind: "sketchPoint", sketchId: "sketch_validation", pointId: "sketch_point_validation" }
-          : kind === "entityOffset" || kind === "upToFace" ? { kind: "face", bodyId: "body_validation", faceId: "face_validation" }
-          : kind === "upToPart" ? { kind: "body", bodyId: "body_validation" }
-          : { kind: "vertex", bodyId: "body_validation", vertexId: "vertex_validation" };
-        return { ...value, target };
-      };
-      const extent = parameters.extent;
-      validationCommand.parameters = { ...validationCommand.parameters as object,
-        ...("startExtent" in parameters ? { startExtent: validateBound(parameters.startExtent) } : {}),
-        ...(extent && typeof extent === "object" ? { extent: Object.fromEntries(Object.entries(extent).map(([key, value]) => [key, ["end", "firstEnd", "secondEnd"].includes(key) ? validateBound(value) : value])) } : {}),
-      };
+      validationCommand.parameters = mapProfileExtentTargets(validationCommand.parameters as Record<string, unknown>, command.operation.startsWith("revolve."), (target, kinds) => {
+        if (!isAlias(target)) return target;
+        validateTarget(target, "extent_validation");
+        const placeholders = {
+          sketchPoint: { kind: "sketchPoint", sketchId: "sketch_validation", pointId: "sketch_point_validation" },
+          edge: { kind: "edge", bodyId: "body_validation", edgeId: "edge_validation" },
+          face: { kind: "face", bodyId: "body_validation", faceId: "face_validation" },
+          body: { kind: "body", bodyId: "body_validation" },
+          vertex: { kind: "vertex", bodyId: "body_validation", vertexId: "vertex_validation" },
+        };
+        return kinds[0] ? placeholders[kinds[0]] : target;
+      });
       const scope = parameters.booleanScope;
       if (scope && typeof scope === "object" && "bodyIds" in scope && Array.isArray(scope.bodyIds))
         validationCommand.parameters = { ...validationCommand.parameters as object, booleanScope: { ...scope, bodyIds: scope.bodyIds.map((value) => validateTarget(value, "body_validation")) } };

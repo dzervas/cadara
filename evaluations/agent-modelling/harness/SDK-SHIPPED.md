@@ -16,6 +16,8 @@ For TypeScript imports, install/link the built package as `cadara-cli` in the ru
 
 `../verify-sdk-references.sh` qualifies the same saved reference parts through the shipped SDK `replay` and script seams. This is a deterministic SDK/package qualification, not an agent performance measurement or evidence that a generated-ops agent script was used.
 
+Trace recipes contain completed commands (including writes/inspection), explicit author-invalid accepted-invalid commands, and any command with `completion.live.kind === "applied"`. Calls that neither succeed nor apply state, and selection errors, remain failure evidence in typed errors/terminal results, not recipe steps. Scripts that catch not-applied errors therefore replay to their final model and remain eligible for disposable probes. Failed-but-live-applied edits stay in document history and stop replay/probes at that genuinely failed state; script control flow is not replayed. V1 still refuses recorded references that are not uniquely label-selectable (`cadara-kkl.17`); retain input assets and inspect replay output paths.
+
 ## Reproduce the original trial procedure
 
 - Materialize `runs/<task>-sdk-shipped-<model>/TASK.md` with `prompt-template.md`: substitute the unchanged task title/text from `tasks.json`, `arms.json["sdk-shipped"].instructions`, the document list and absolute run directory / `{BIN}`. Use `t1`–`t5` and duplicate the t5 prompt as `t6` (the checker already aliases t6 to t5), for each of `gpt-6.1-sol` and `claude-sonnet-5-5`: 12 runs. Give t4 an independent reference `plate.cadara` from the unchanged t1 reference recipe, not an agent-generated seed.

@@ -57,6 +57,33 @@ function copyInput<T>(value: T): T {
   ) as T;
 }
 
+type ExtentTargetKind = "sketchPoint" | "edge" | "face" | "body" | "vertex";
+
+/** Shared traversal for raw recipe preflight and canonical extent target resolution. */
+export function mapProfileExtentTargets<T extends { startExtent?: unknown; extent?: unknown }>(
+  parameters: T,
+  revolve: boolean,
+  mapTarget: (target: unknown, kinds: readonly ExtentTargetKind[]) => unknown,
+): T {
+  const mapBound = (bound: unknown) => {
+    if (!bound || typeof bound !== "object" || !("target" in bound)) return bound;
+    const kind = "kind" in bound ? bound.kind : undefined;
+    const kinds: readonly ExtentTargetKind[] = kind === "sketchPointOffset" ? ["sketchPoint"]
+      : kind === "entityOffset" ? ["edge", "face"]
+      : kind === "upToFace" ? ["face"]
+      : kind === "upToPart" ? ["body"]
+      : kind === "upToVertex" ? revolve ? ["vertex"] : ["vertex", "sketchPoint"] : [];
+    return { ...bound, target: mapTarget(bound.target, kinds) };
+  };
+  const extent = parameters.extent;
+  return {
+    ...parameters,
+    ...("startExtent" in parameters ? { startExtent: mapBound(parameters.startExtent) } : {}),
+    ...(extent && typeof extent === "object" ? { extent: Object.fromEntries(Object.entries(extent).map(([key, value]) =>
+      [key, ["end", "firstEnd", "secondEnd"].includes(key) ? mapBound(value) : value])) } : {}),
+  };
+}
+
 /** Resolve all command selectors using only discovery supplied for this call. */
 export function resolveSemanticCommand(
   input: SelectableCommand,
@@ -681,23 +708,13 @@ export function resolveSemanticCommand(
           };
   }
   if ((command.operation === "extrude.create" || command.operation === "extrude.update" || command.operation === "revolve.create" || command.operation === "revolve.update") && "parameters" in command && command.parameters !== undefined) {
-    const revolve = command.operation.startsWith("revolve.");
-    function resolveBound(bound: { kind: string; target?: import("@/contracts/shared/references").DurableRef | TargetSelector }) {
-      if (!isTargetSelector(bound.target)) return;
-      const kinds = bound.kind === "sketchPointOffset" ? ["sketchPoint"]
-        : bound.kind === "entityOffset" ? ["edge", "face"]
-        : bound.kind === "upToFace" ? ["face"]
-        : bound.kind === "upToPart" ? ["body"]
-        : bound.kind === "upToVertex" ? revolve ? ["vertex"] : ["vertex", "sketchPoint"] : [];
-      const target = resolveSketchTarget(bound.target, kinds);
+    command.parameters = mapProfileExtentTargets(command.parameters, command.operation.startsWith("revolve."), (value, kinds) => {
+      if (!isTargetSelector(value)) return value;
+      const target = resolveSketchTarget(value, kinds);
       if (target.kind === "sketchTangentHandle") throw new Error("Invalid extent target.");
-      bound.target = target;
-    }
+      return target;
+    });
     const parameters = command.parameters;
-    if ("startExtent" in parameters) resolveBound(parameters.startExtent);
-    const extent = parameters.extent;
-    if (extent.mode === "twoSide") { resolveBound(extent.firstEnd); resolveBound(extent.secondEnd); }
-    else resolveBound(extent.end);
     if (parameters.resultBodyType === "solid" && parameters.booleanScope.kind === "targetBodies") {
       parameters.booleanScope = { kind: "targetBodies", bodyIds: parameters.booleanScope.bodyIds.map((value) => {
         if (!isTargetSelector(value)) return value;

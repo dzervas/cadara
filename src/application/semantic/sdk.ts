@@ -145,8 +145,6 @@ export class SemanticDocument {
     const command = resolveSemanticCommand(input, { discovery: this.current?.discovery ?? undefined, aliases: new Map([...this.handleAliases, ...this.replayAliases]), ...context });
     const checked = validateSemanticCommand(command);
     if (!checked.success) throw new Error(`Invalid semantic command: ${JSON.stringify(checked.issues)}`);
-    // Record the attempt BEFORE execution: semantic failures and thrown programming errors retain their step.
-    const alias = this.recorder.record(checked.data);
     this.commandIds.add(checked.data.commandId);
     const result = await this.session.execute(checked.data, options);
     const validated = validateSemanticResult(semanticCommandCorrelation(checked.data), result);
@@ -155,14 +153,18 @@ export class SemanticDocument {
     this.state = result.completion.live.state ?? this.state;
     const selectorAlias = `handle${this.terminals.length}`;
     this.latest = new SemanticHandle(this, result, selectorAlias);
-    this.recorder.publish(alias, result.discovery);
+    // A failed edit that committed live state is still document history.
+    if (result.outcome.kind === "completed" || (result.outcome.kind === "accepted-invalid" && "intent" in checked.data && checked.data.intent === "author-invalid") || result.completion.live.kind === "applied") {
+      const alias = this.recorder.record(checked.data);
+      this.recorder.publish(alias, result.discovery);
+    }
     if (result.discovery) this.handleAliases.set(selectorAlias, result.discovery);
     return result;
   }
   results(): readonly SemanticResult[] { return [...this.terminals]; }
   commands() { return this.recorder.executed(); }
   trace(): RecipeTrace { return this.recorder.recipe(); }
-  /** Same stop-first-failure policy as CLI recipes. The failing command remains in the trace. */
+  /** Same stop-first-failure policy as CLI recipes, including failed-but-applied history. */
   async replay(recipe: RecipeTrace, options: { omitFileWrites?: boolean } = {}): Promise<SemanticResult[]> {
     if (recipe.version !== 1) throw new Error("Unsupported recipe trace version.");
     const aliases = new Map<string, NonNullable<SemanticResult["discovery"]>>();
@@ -195,7 +197,16 @@ export class SemanticDocument {
       if (replayResults.some((r) => r.outcome.kind !== "completed" && r.outcome.kind !== "accepted-invalid"))
         throw new SemanticOperationError(replayResults.at(-1)!);
       for (const original of edits) {
-        const edit = this.recorder.encode(original) as ProbeEdit;
+        // Resolve source handle aliases before replay's omitted writes can shift copy handle numbers.
+        const command = resolveSemanticCommand({
+          version: 1, commandId: "probe", basis: basis(this.state), draft: this.state?.draft ?? null,
+          intent: "fulfill", ...original.fields, operation: original.operation,
+        } as SelectableCommand, { discovery: this.current?.discovery ?? undefined, aliases: new Map([...this.handleAliases, ...this.replayAliases]) });
+        const edit = this.recorder.encode({ ...original, fields: {
+          ...original.fields,
+          ...(command.operation === "variable.update" ? { variableId: command.variableId } : {}),
+          ...(command.operation === "sketch.dimension.update" ? { dimensionId: command.dimensionId } : {}),
+        } }) as ProbeEdit;
         const attempted = edit.operation === "variable.update"
           ? await copy.tryOp(edit.operation, edit.fields)
           : await copy.tryOp(edit.operation, edit.fields);
@@ -213,6 +224,8 @@ export class SemanticDocument {
   /** Capability poll only, not a promise that targets/options or current context will be accepted. */
   canRun(id: OperationId): boolean {
     if (this.closing || !semanticOperationMetadata.has(id)) return false;
+    if (id.startsWith("export."))
+      return this.current?.discovery?.exportProviders?.some((provider) => provider.format === id.slice("export.".length)) ?? false;
     const capabilities = this.current?.discovery?.model?.capabilities;
     if (!capabilities) return false;
     const family = id.split(".")[0] as ModelingFeatureKind;
