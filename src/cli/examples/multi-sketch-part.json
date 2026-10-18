@@ -1,0 +1,242 @@
+{
+  "version": 1,
+  "operations": [
+    {
+      "version": 1,
+      "commandId": "create",
+      "operation": "document.create",
+      "label": "L bracket",
+      "basis": null,
+      "as": "part"
+    },
+    {
+      "version": 1,
+      "commandId": "base-begin",
+      "operation": "sketch.begin",
+      "plane": "xy",
+      "basis": {
+        "alias": "part"
+      },
+      "as": "baseDraft"
+    },
+    {
+      "version": 1,
+      "commandId": "base-rectangle",
+      "operation": "sketch.author",
+      "basis": {
+        "alias": "baseDraft"
+      },
+      "draft": {
+        "alias": "baseDraft"
+      },
+      "primitive": {
+        "kind": "rectangle",
+        "start": [0, 0],
+        "end": [40, 20]
+      },
+      "construction": false,
+      "intent": "fulfill",
+      "as": "baseRectangle"
+    },
+    {
+      "version": 1,
+      "commandId": "base-publish",
+      "operation": "sketch.publish",
+      "basis": {
+        "alias": "baseRectangle"
+      },
+      "draft": {
+        "alias": "baseRectangle"
+      },
+      "requireProfiles": true,
+      "as": "base"
+    },
+    {
+      "version": 1,
+      "commandId": "base-extrude",
+      "operation": "extrude.create",
+      "basis": {
+        "alias": "base"
+      },
+      "profile": {
+        "alias": "base",
+        "label": "Outer region",
+        "sketch": "base"
+      },
+      "depth": 4,
+      "intent": "fulfill",
+      "as": "plate"
+    },
+    {
+      "version": 1,
+      "commandId": "wall-begin",
+      "operation": "sketch.begin",
+      "plane": "yz",
+      "basis": {
+        "alias": "plate"
+      },
+      "as": "wallDraft"
+    },
+    {
+      "version": 1,
+      "commandId": "wall-rectangle",
+      "operation": "sketch.author",
+      "basis": {
+        "alias": "wallDraft"
+      },
+      "draft": {
+        "alias": "wallDraft"
+      },
+      "primitive": {
+        "kind": "rectangle",
+        "start": [0, 0],
+        "end": [20, 30]
+      },
+      "construction": false,
+      "intent": "fulfill",
+      "as": "wallRectangle"
+    },
+    {
+      "version": 1,
+      "commandId": "wall-publish",
+      "operation": "sketch.publish",
+      "basis": {
+        "alias": "wallRectangle"
+      },
+      "draft": {
+        "alias": "wallRectangle"
+      },
+      "requireProfiles": true,
+      "as": "wall"
+    },
+    {
+      "version": 1,
+      "commandId": "wall-extrude",
+      "operation": "extrude.create",
+      "basis": {
+        "alias": "wall"
+      },
+      "intent": "fulfill",
+      "as": "joined",
+      "parameters": {
+        "resultBodyType": "solid",
+        "profiles": [
+          {
+            "alias": "wall",
+            "label": "Outer region",
+            "sketch": "wall"
+          }
+        ],
+        "startExtent": {
+          "kind": "profilePlane"
+        },
+        "extent": {
+          "mode": "oneSide",
+          "end": {
+            "kind": "blind",
+            "direction": "positive",
+            "distance": {
+              "source": "literal",
+              "value": 4
+            }
+          }
+        },
+        "operation": {
+          "source": "literal",
+          "value": "join"
+        },
+        "booleanScope": {
+          "kind": "targetBody",
+          "bodyId": {
+            "alias": "wall",
+            "label": "Extrude 1"
+          }
+        }
+      }
+    },
+    {
+      "version": 1,
+      "commandId": "thicken-wall",
+      "operation": "extrude.update",
+      "basis": {
+        "alias": "joined"
+      },
+      "featureId": {
+        "alias": "joined",
+        "label": "Extrude 2"
+      },
+      "depth": 6,
+      "intent": "fulfill",
+      "as": "thicker"
+    },
+    {
+      "version": 1,
+      "commandId": "name-body",
+      "operation": "body.rename",
+      "basis": {
+        "alias": "thicker"
+      },
+      "bodyId": {
+        "alias": "thicker",
+        "label": "Extrude 1"
+      },
+      "label": "L bracket",
+      "intent": "fulfill",
+      "as": "named"
+    },
+    {
+      "version": 1,
+      "commandId": "save",
+      "operation": "document.save",
+      "basis": {
+        "alias": "named"
+      },
+      "path": "l-bracket.cadara"
+    },
+    {
+      "version": 1,
+      "commandId": "reopen",
+      "operation": "document.open",
+      "basis": null,
+      "path": "l-bracket.cadara",
+      "as": "reopened"
+    },
+    {
+      "version": 1,
+      "commandId": "export-step",
+      "operation": "export.step",
+      "basis": {
+        "alias": "reopened"
+      },
+      "target": {
+        "alias": "reopened",
+        "label": "L bracket"
+      },
+      "path": "l-bracket.step",
+      "options": {
+        "schema": "AP242",
+        "unit": "millimeter"
+      }
+    },
+    {
+      "version": 1,
+      "commandId": "export-stl",
+      "operation": "export.stl",
+      "basis": {
+        "alias": "reopened"
+      },
+      "target": {
+        "alias": "reopened",
+        "label": "L bracket"
+      },
+      "path": "l-bracket.stl",
+      "options": {
+        "meshAccuracy": {
+          "chordTolerance": 0.05,
+          "angleToleranceRadians": 0.1
+        },
+        "encoding": "binary"
+      }
+    }
+  ]
+}
