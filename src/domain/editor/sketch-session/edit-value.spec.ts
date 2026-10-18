@@ -1,0 +1,77 @@
+import { expect, test } from "vitest";
+import { makeSketchFixture } from "@/contracts/sketch/region-extraction.fixtures";
+import { sketchSnapshotRecordForTest } from "@/contracts/sketch/region-record.fixtures";
+import {
+  createStandardPlaneDefinition,
+  OCC_KERNEL_SETTINGS,
+} from "@/domain/modeling/opencascade-kernel-seed";
+import {
+  beginSketchTool,
+  createSketchSessionFromSnapshot,
+  patchSketchEditToolValue,
+  selectSketchEditToolTarget,
+  updateSketchEditToolHover,
+  refreshSketchEditToolAfterOffsetRound,
+} from "@/domain/editor/sketch-session";
+
+// Logic lane: session patches must preserve the last valid preview/anchor
+// while an operation parameter is incomplete, including a refused Enter.
+test.each(["offset", "sketchFillet", "sketchChamfer"] as const)(
+  "O29: %s keeps its preview and input through zero, refuses Enter, then recovers",
+  (toolId) => {
+    const f = makeSketchFixture();
+    f.point("a", 0, 0);
+    f.point("b", 10, 0);
+    f.point("c", 10, 10);
+    f.line("ab", "a", "b");
+    f.line("bc", "b", "c");
+    let selected = beginSketchTool(
+      createSketchSessionFromSnapshot(
+        sketchSnapshotRecordForTest(
+          f.build(),
+          [],
+          createStandardPlaneDefinition("xy"),
+        ),
+        OCC_KERNEL_SETTINGS,
+      ),
+      toolId,
+    );
+    for (const entity of selected.definition.entities.slice(
+      0,
+      toolId === "offset" ? 1 : 2,
+    ))
+      selected = selectSketchEditToolTarget(selected, entity.target);
+    const valid = patchSketchEditToolValue(selected, { value: "1" });
+    expect(valid.validationMessage).toBeNull();
+    expect(valid.toolStagedEntities.length).toBeGreaterThan(0);
+    const anchor = valid.toolPresentation!.floatingInput!.anchor;
+    expect(anchor).toBeTruthy();
+    const zero = patchSketchEditToolValue(valid, { value: "0" });
+    expect(zero.validationMessage).toMatch(/greater than zero/);
+    expect(zero.activeTool).toBe(toolId);
+    expect(zero.activeEditTool!.selectedTargets).toEqual(
+      valid.activeEditTool!.selectedTargets,
+    );
+    expect(zero.toolStagedEntities).toBe(valid.toolStagedEntities);
+    expect(zero.toolPresentation!.floatingInput!.anchor).toEqual(anchor);
+    // Pointer hover and a background solve can arrive between keystrokes.
+    const hovered = updateSketchEditToolHover(zero, null);
+    expect(hovered.toolPresentation!.floatingInput!.anchor).toEqual(anchor);
+    const refreshed = refreshSketchEditToolAfterOffsetRound(hovered);
+    expect(refreshed.toolPresentation!.floatingInput!.anchor).toEqual(anchor);
+    expect(refreshed.toolStagedEntities).toBe(valid.toolStagedEntities);
+    expect(refreshed.validationMessage).toMatch(/greater than zero/);
+    const refused = patchSketchEditToolValue(zero, {
+      intent: toolId === "offset" ? "commitOffset" : "commitSketchEditOperator",
+    });
+    expect(refused.definition).toBe(valid.definition);
+    expect(refused.validationMessage).toMatch(/greater than zero/);
+    expect(refused.toolPresentation!.floatingInput!.anchor).toEqual(anchor);
+    expect(refused.toolStagedEntities).toBe(valid.toolStagedEntities);
+    const recovered = patchSketchEditToolValue(refused, { value: "0.5" });
+    expect(recovered.validationMessage).toBeNull();
+    expect(recovered.toolPresentation!.validation).toEqual([]);
+    expect(recovered.toolStagedEntities.length).toBeGreaterThan(0);
+    expect(recovered.toolStagedEntities).not.toEqual(valid.toolStagedEntities);
+  },
+);

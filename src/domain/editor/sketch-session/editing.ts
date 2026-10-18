@@ -2141,6 +2141,12 @@ export function refreshSketchEditToolAfterOffsetRound(
   if (tool.toolId === "offset") {
     if (tool.offsetPublication) return session;
     const preview = getOffsetPreview(session, tool);
+    if (!preview.valid)
+      return withInvalidSketchEditValue(
+        session,
+        tool,
+        session.validationMessage ?? preview.message,
+      );
     return {
       ...session,
       activeEditTool: stageOffsetPreviewPublication(session, tool, preview),
@@ -2154,6 +2160,12 @@ export function refreshSketchEditToolAfterOffsetRound(
     };
   }
   const preview = getSketchEditOperatorResult(session, tool);
+  if (!preview.valid && tool.toolId !== "sketchMirror")
+    return withInvalidSketchEditValue(
+      session,
+      tool,
+      session.validationMessage ?? preview.message,
+    );
   return {
     ...session,
     toolStagedEntities: preview.previewEntities,
@@ -2840,7 +2852,9 @@ export function updateSketchEditToolHover(
         : buildSketchEditToolPresentation(
             activeEditTool,
             session.validationMessage,
-            preview?.previewEntities ?? [],
+            preview?.valid === false
+              ? session.toolStagedEntities
+              : preview?.previewEntities ?? [],
           ),
   };
 }
@@ -3013,6 +3027,28 @@ export function selectSketchEditToolTarget(
   };
 }
 
+// An invalid intermediate number must not remove the preview: its anchor
+// keeps the focused floating input on screen while the user types (O29).
+// Keep the invalid parameter for commit validation, but discard any old
+// offset publication so it cannot certify/commit the previous valid value.
+function withInvalidSketchEditValue(
+  session: SketchSessionState,
+  tool: SketchEditToolState,
+  message: string | null,
+): SketchSessionState {
+  const nextEditTool = withoutOffsetPublication(tool);
+  return {
+    ...session,
+    activeEditTool: nextEditTool,
+    validationMessage: message,
+    toolPresentation: buildSketchEditToolPresentation(
+      nextEditTool,
+      message,
+      session.toolStagedEntities,
+    ),
+  };
+}
+
 export function patchSketchEditToolValue(
   session: SketchSessionState,
   patch: Record<string, unknown>,
@@ -3061,6 +3097,12 @@ export function patchSketchEditToolValue(
           : activeEditTool.offsetSide,
     };
     const preview = getOffsetPreview(session, nextEditTool);
+    if (distance?.message || !preview.valid)
+      return withInvalidSketchEditValue(
+        session,
+        nextEditTool,
+        distance?.message ?? preview.message,
+      );
     const stagedEditTool = stageOffsetPreviewPublication(
       session,
       nextEditTool,
@@ -3102,15 +3144,7 @@ export function patchSketchEditToolValue(
 
   const preview = getOffsetPreview(session, activeEditTool);
   if (!preview.valid || !preview.contribution) {
-    return {
-      ...session,
-      validationMessage: preview.message,
-      toolPresentation: buildSketchEditToolPresentation(
-        activeEditTool,
-        preview.message,
-        preview.previewEntities,
-      ),
-    };
+    return withInvalidSketchEditValue(session, activeEditTool, preview.message);
   }
 
   const stagedEditTool = stageOffsetPreviewPublication(
@@ -3182,6 +3216,12 @@ export function patchSketchEditOperatorValue(
     );
     const nextEditTool = { ...activeEditTool, toolValue: value.value };
     const preview = getSketchEditOperatorResult(session, nextEditTool);
+    if (value.message || !preview.valid)
+      return withInvalidSketchEditValue(
+        session,
+        nextEditTool,
+        value.message ?? preview.message,
+      );
 
     return {
       ...session,
@@ -3210,15 +3250,7 @@ export function patchSketchEditOperatorValue(
 
   const preview = getSketchEditOperatorResult(session, activeEditTool);
   if (!preview.valid) {
-    return {
-      ...session,
-      validationMessage: preview.message,
-      toolPresentation: buildSketchEditToolPresentation(
-        activeEditTool,
-        preview.message,
-        preview.previewEntities,
-      ),
-    };
+    return withInvalidSketchEditValue(session, activeEditTool, preview.message);
   }
 
   const nextEditTool = {
