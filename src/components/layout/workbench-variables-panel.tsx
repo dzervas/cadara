@@ -5,7 +5,7 @@ import {
   useState,
   type CSSProperties,
 } from "react";
-import { ActionIcon, Tooltip } from "@mantine/core";
+import { ActionIcon, Text } from "@mantine/core";
 
 import { shouldStartVariableKeyboardEdit } from "@/components/layout/feature-sidebar.a11y";
 import {
@@ -171,18 +171,6 @@ export function WorkbenchVariablesPanel({
       ),
     [variables, invalidVariableValueIds, invalidVariableValueMessages],
   );
-  const autoOpenedInvalidVariableId = useMemo(() => {
-    for (const variable of variables) {
-      const variableResult = variableResultPresentations.get(
-        variable.variableId,
-      );
-      if (variableResult?.kind === "error") {
-        return variable.variableId;
-      }
-    }
-    return null;
-  }, [variables, variableResultPresentations]);
-
   useEffect(() => {
     if (!snapshot) {
       previousVariableIdsRef.current = null;
@@ -293,9 +281,6 @@ export function WorkbenchVariablesPanel({
           const isEditingVariable =
             editingVariableId === variable.variableId ||
             variable.valueText === "";
-          const autoOpenErrorTooltip =
-            variableResult.kind === "error" &&
-            autoOpenedInvalidVariableId === variable.variableId;
           const variableResultChip = (
             <span
               className="inline-block max-w-full shrink-0 truncate rounded border px-2 py-1 text-right font-mono text-[12px] leading-4"
@@ -419,21 +404,22 @@ export function WorkbenchVariablesPanel({
                     >
                       =
                     </span>
-                    {variableResult.kind === "error" ? (
-                      <Tooltip
-                        label={variableResult.message}
-                        opened={autoOpenErrorTooltip ? true : undefined}
-                        multiline
-                        position="left"
-                        w={240}
-                      >
-                        {variableResultChip}
-                      </Tooltip>
-                    ) : (
-                      variableResultChip
-                    )}
+                    {variableResultChip}
                   </span>
                 </button>
+              )}
+              {variableResult.kind === "error" && (
+                <Text
+                  component="p"
+                  size="xs"
+                  c="var(--workbench-shell-danger-text)"
+                  mx="xs"
+                  mt={4}
+                  role="alert"
+                  style={{ overflowWrap: "anywhere" }}
+                >
+                  {variableResult.message}
+                </Text>
               )}
             </div>
           );
