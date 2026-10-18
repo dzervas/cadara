@@ -1,5 +1,7 @@
 # cadara CLI
 
+For TypeScript modelling, see [SDK.md](SDK.md): `cadara script <script.ts> [--trace <recipe.json>]` runs the shipped `cadara-cli/sdk` over the same session and resolver. Scripts are trusted Bun code, not sandboxed.
+
 `cadara` is the general-purpose command-line tool for the CADara project. It
 runs under Bun (never in the browser; Node runs the repository test harness) and shares contract and domain code
 with the app but never imports browser-bound modules.
@@ -34,9 +36,10 @@ bun /absolute/path/to/cadara-cli/main.js document recipe --help
 bun /absolute/path/to/cadara-cli/main.js document recipe /absolute/path/to/cadara-cli/examples/plate.json
 ```
 
-The three runtime files are `main.js`, `occ/cadara-occ.js` and
-`occ/cadara-occ.wasm`. Assets resolve relative to `main.js`, not your working
-directory. Typia is transformed at build time. Both native files are copied
+Runtime files include `main.js`, `sdk.js`, shared `chunk-*.js` modules and
+`occ/cadara-occ.js` / `occ/cadara-occ.wasm`. Keep them together. Assets resolve
+relative to the built modules, not your working directory. TypeScript consumers
+also need the package declarations and its declared Typia type dependency. Typia is transformed at build time. Both native files are copied
 unchanged from the production custom build; there is no native build or fallback.
 The reachable memory repository has no Automerge WASM runtime dependency.
 Metadata, license, this guide, [coverage matrix](./COVERAGE.md) and runnable
@@ -101,8 +104,8 @@ bodies and construction planes belong to their producing feature. Sketch and
 feature roots own themselves. Document construction planes have `owner: null`.
 `discovery.sketch.sketchId` identifies a draft immediately, before publication.
 
-`document.inspect` accepts an optional typed `owner` (`sketch`, `feature` or
-`body`). It returns references with that exact owner plus the owner's own target
+`document.inspect` accepts an optional `owner`: a typed `sketch`, `feature` or
+`body`, or the same `{alias,label,sketch?}` selector used for other target fields. It returns references with that exact owner plus the owner's own target
 (so a body includes itself). It filters **only** `discovery.references`, not
 `model`, draft details, history or other metadata. Omit it for document-wide
 references. For example, after copying a sketch target from discovery:
@@ -114,6 +117,8 @@ references. For example, after copying a sketch target from discovery:
 New point primitives generate distinct `Point N` (point) and `Point entity N`
 (entity) labels. Authored duplicate labels are still allowed and ambiguous
 selection still refuses; existing saved labels are not rewritten.
+
+Extrude/revolve `booleanScope.targetBodies.bodyIds`, extrude `startExtent.target`, and reference-bound `extent.end` / `firstEnd` / `secondEnd` targets accept the same labelled selectors as other target fields. Each reference is resolved using its bounded kind (body, face, vertex, sketch point or start edge); native extent semantics are unchanged.
 
 ### Sketch-owner-qualified target selectors
 
@@ -192,7 +197,9 @@ and diagnostics; it is not a CLI error. `recipe` documents the CLI-only
 encoding (`as`, `{ alias }` basis/draft selectors and `{ alias, label }` target
 selectors). `--help` and `--schema` never start the modelling kernel.
 
-### Errors and exit codes
+#`document.inspect.owner` accepts a discovered typed sketch/feature/body owner or the same `{alias,label,sketch?}` recipe selector as other target fields. Resolution is shared with the SDK; ambiguous owners report candidates rather than choosing an owner.
+
+## Errors and exit codes
 
 A run that starts the kernel prints exactly one JSON envelope on stdout,
 `{ version: 1, results, ... }`, plus a human summary on stderr when it fails.

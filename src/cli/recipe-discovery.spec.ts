@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { copyFile, mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import ts from "typescript";
-import { cliEntry, invokeCliDocumentRecipe, invokeCliRecipe } from "../../test/helpers/cli-recipe-process";
+import { copyCliRuntimeWithoutAssets, invokeCliDocumentRecipe, invokeCliRecipe } from "../../test/helpers/cli-recipe-process";
 
 const root = resolve(import.meta.dirname, "../..");
 const options = { cwd: root, timeout: 90000, maxBuffer: 64 * 1024 * 1024 };
@@ -163,11 +163,11 @@ function plate(overrides: Record<number, Record<string, unknown>> = {}) {
 
 describe("recipe preflight diagnostics", () => {
   it("locates invalid fields by command and path with the expected contract shape, without starting the kernel", async () => {
-    // Only the JS entry: no native assets, so any kernel start would fail initialization.
+    // Only the JS runtime: no native assets, so any kernel start would fail initialization.
     const directory = await mkdtemp(resolve(tmpdir(), "cadara-preflight-"));
     try {
       const entry = resolve(directory, "main.js");
-      await copyFile(cliEntry(), entry);
+      await copyCliRuntimeWithoutAssets(directory);
       const run = (operations: readonly Record<string, unknown>[]) =>
         invokeCliRecipe(directory, operations, { ...options, cwd: directory, entry });
 

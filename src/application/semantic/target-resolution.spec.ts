@@ -921,6 +921,27 @@ function selectionFailure(run: () => unknown) {
   throw new Error("Expected selection failure before execution");
 }
 
+const vertex = { kind: "vertex", bodyId: "body_test", vertexId: "vertex_test" } as const;
+const revolveParameters = {
+  resultBodyType: "solid", profiles: [region], axis: entity, startAngle: literal(0),
+  extent: { mode: "oneSide", end: { kind: "full" } }, operation: literal("newBody"), booleanScope: { kind: "standalone" },
+} as const;
+for (const operation of ["extrude.create", "revolve.create"] as const) {
+  const parameters = operation === "extrude.create" ? extrude : revolveParameters;
+  cases.push({ name: `${operation} exact body list`, command: { ...common, operation, parameters: { ...parameters, booleanScope: { kind: "targetBodies", bodyIds: [body.bodyId] } } } as SemanticCommand, path: "parameters.booleanScope.bodyIds.0", target: body });
+  for (const location of ["end", "firstEnd", "secondEnd"] as const) {
+    const ends = operation === "extrude.create" ? [["upToFace", face], ["upToPart", body], ["upToVertex", vertex], ["upToVertex", point]] as const : [["upToFace", face], ["upToPart", body], ["upToVertex", vertex]] as const;
+    for (const [kind, target] of ends) {
+      const end = { kind, target, direction: operation === "extrude.create" ? "positive" : "clockwise" };
+      const extent = location === "end" ? { mode: "oneSide", end } : { mode: "twoSide", firstEnd: end, secondEnd: end };
+      cases.push({ name: `${operation} ${location} ${kind} ${target.kind}`, command: { ...common, operation, parameters: { ...parameters, extent } } as SemanticCommand, path: `parameters.extent.${location}.target`, target });
+    }
+  }
+}
+for (const [kind, target] of [["sketchPointOffset", point], ["entityOffset", edge], ["entityOffset", face]] as const) {
+  cases.push({ name: `extrude start ${kind} ${target.kind}`, command: { ...common, operation: "extrude.create", parameters: { ...extrude, startExtent: { kind, target } } } as SemanticCommand, path: "parameters.startExtent.target", target });
+}
+
 describe.each(cases)("$name", ({ command, path, target }) => {
   it("resolves a unique label from current discovery without mutating input", () => {
     const selector = { label: "Chosen" };
@@ -1003,6 +1024,7 @@ describe.each(cases)("$name", ({ command, path, target }) => {
         "sketchId",
         "points.0",
         "parameters.booleanScope.bodyId",
+        "parameters.booleanScope.bodyIds.0",
         "parameters.sourceFeatureIds.0",
       ].includes(path)
     ) {
@@ -1554,4 +1576,17 @@ it("accepts mixed label and typed point inputs in the same command", () => {
   expect(
     resolveSemanticCommand(command, { discovery: withTarget(point) }),
   ).toEqual({ ...command, points: ["sketch_point_test", point] });
+});
+
+describe("document inspection owners", () => {
+  for (const target of [sketch, feature, body]) {
+    it(`resolves typed and labelled ${target.kind} owners`, () => {
+      const snapshot = { ...discovery, references: [{ label: "Owner", target, owner: null }] };
+      const command = { version: 1, commandId: "owner-inspect", operation: "document.inspect", basis: common.basis } as const;
+      expect(resolveSemanticCommand({ ...command, owner: target }, { discovery: snapshot })).toEqual({ ...command, owner: target });
+      expect(resolveSemanticCommand({ ...command, owner: { label: "Owner" } }, { discovery: snapshot })).toEqual({ ...command, owner: target });
+      expect(() => resolveSemanticCommand({ ...command, owner: { label: "Missing" } }, { discovery: snapshot })).toThrow(SelectionError);
+      expect(() => resolveSemanticCommand({ ...command, owner: { label: "Owner" } }, { discovery: { ...snapshot, references: [...snapshot.references, { label: "Owner", target: { kind: "body", bodyId: "body_other" }, owner: null }] } })).toThrow(SelectionError);
+    });
+  }
 });

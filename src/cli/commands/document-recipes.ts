@@ -6,11 +6,9 @@ import type {
 } from "@/contracts/semantic/schema";
 import {
   validateSemanticCommand,
-  validateSemanticResult,
 } from "@/contracts/semantic/runtime-schema";
 
-import { semanticCommandCorrelation } from "@/contracts/semantic/correlation";
-import { resolveSemanticCommand } from "@/application/semantic/target-resolution";
+import { SemanticDocument } from "@/application/semantic/sdk";
 import {
   isDiscoveryAlias as isAlias,
   type SelectableCommand as RecipeCommand,
@@ -220,6 +218,27 @@ function parseRecipe(input: unknown, position: { index: number }): RecipeOperati
         return { kind: "region", sketchId: "sketch_validation", regionId: "region_validation" };
       }) };
     }
+    if ((command.operation === "extrude.create" || command.operation === "extrude.update" || command.operation === "revolve.create" || command.operation === "revolve.update") && command.parameters && typeof command.parameters === "object") {
+      const parameters = command.parameters as Record<string, unknown>;
+      const validateBound = (value: unknown) => {
+        if (!value || typeof value !== "object" || !("target" in value) || !isAlias(value.target)) return value;
+        validateTarget(value.target, "extent_validation");
+        const kind = "kind" in value ? value.kind : undefined;
+        const target = kind === "sketchPointOffset" ? { kind: "sketchPoint", sketchId: "sketch_validation", pointId: "sketch_point_validation" }
+          : kind === "entityOffset" || kind === "upToFace" ? { kind: "face", bodyId: "body_validation", faceId: "face_validation" }
+          : kind === "upToPart" ? { kind: "body", bodyId: "body_validation" }
+          : { kind: "vertex", bodyId: "body_validation", vertexId: "vertex_validation" };
+        return { ...value, target };
+      };
+      const extent = parameters.extent;
+      validationCommand.parameters = { ...validationCommand.parameters as object,
+        ...("startExtent" in parameters ? { startExtent: validateBound(parameters.startExtent) } : {}),
+        ...(extent && typeof extent === "object" ? { extent: Object.fromEntries(Object.entries(extent).map(([key, value]) => [key, ["end", "firstEnd", "secondEnd"].includes(key) ? validateBound(value) : value])) } : {}),
+      };
+      const scope = parameters.booleanScope;
+      if (scope && typeof scope === "object" && "bodyIds" in scope && Array.isArray(scope.bodyIds))
+        validationCommand.parameters = { ...validationCommand.parameters as object, booleanScope: { ...scope, bodyIds: scope.bodyIds.map((value) => validateTarget(value, "body_validation")) } };
+    }
     if ((command.operation === "extrude.create" || command.operation === "extrude.update" || command.operation === "revolve.create" || command.operation === "revolve.update") && command.parameters && typeof command.parameters === "object" && "booleanScope" in command.parameters) {
       const scope = command.parameters.booleanScope;
       if (scope && typeof scope === "object" && "bodyId" in scope && isAlias(scope.bodyId)) {
@@ -284,6 +303,10 @@ function parseRecipe(input: unknown, position: { index: number }): RecipeOperati
           }
         }) };
       }) };
+    }
+    if (command.operation === "document.inspect" && isAlias(command.owner)) {
+      validateTarget(command.owner, "sketch_validation");
+      validationCommand.owner = { kind: "sketch", sketchId: "sketch_validation" };
     }
     if (isAlias(command.profile)) {
       validateTarget(command.profile, "region_validation");
@@ -497,6 +520,7 @@ export const documentRecipesCommand: CommandModule = {
         message: error.message,
       };
     }
+    const sdk = new SemanticDocument(opened.session, opened.initialization.state);
     const results: SemanticResult[] = [];
     const snapshots = new Map<string, SemanticDiscovery>();
     let succeeded = true;
@@ -504,21 +528,7 @@ export const documentRecipesCommand: CommandModule = {
     let failure: { error: unknown } | undefined;
     try {
       for (const [index, operation] of operations.entries()) try {
-        const command = resolveSemanticCommand(operation.command, {
-          aliases: snapshots,
-        });
-        const validated = validateSemanticCommand(command);
-        if (!validated.success)
-          throw new Error("Resolved operation is invalid.");
-        const terminal = await opened.session.execute(validated.data);
-        const checked = validateSemanticResult(
-          semanticCommandCorrelation(validated.data),
-          terminal,
-        );
-        if (!checked.success)
-          throw new Error(
-            "Application returned an invalid completion certificate.",
-          );
+        const terminal = await sdk.execute(operation.command, { aliases: snapshots });
         results.push(terminal);
         if (
           terminal.outcome.kind !== "completed" &&

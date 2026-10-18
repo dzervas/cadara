@@ -1,6 +1,6 @@
 import { execFile, type ExecFileOptions } from "node:child_process";
-import { writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { writeFile, readdir, copyFile } from "node:fs/promises";
+import { resolve, dirname } from "node:path";
 import { promisify } from "node:util";
 import { inject } from "vitest";
 
@@ -14,6 +14,14 @@ declare module "vitest" {
 /** The CLI entry the recipe specs spawn; see `cli-bundle-global-setup.ts`. */
 export function cliEntry() {
   return inject("cliEntry");
+}
+
+/** Complete executable JS runtime, deliberately omitting OCC assets for preflight/startup tests. */
+export async function copyCliRuntimeWithoutAssets(directory: string) {
+  const source = dirname(cliEntry());
+  for (const name of await readdir(source)) {
+    if (name.endsWith(".js")) await copyFile(resolve(source, name), resolve(directory, name));
+  }
 }
 
 type CliProcessOptions = Pick<ExecFileOptions, "cwd" | "timeout" | "env" | "maxBuffer"> & {

@@ -26,7 +26,7 @@ test("semantic extrusion reuses canonical parameters and the browser feature bui
   expect(owner).toContain("startExtent: parameters.startExtent");
   expect(owner).toContain("startExtent: draft.startExtent");
   const cli = read("src/cli/commands/document-recipes.ts");
-  expect(cli).toContain("opened.session.execute(validated.data)");
+  expect(cli).toContain("sdk.execute(operation.command,");
   expect(cli).not.toMatch(
     /prepareExtrudeFeatureDefinition|patchFeatureEditSession|BRepPrimAPI|createFeature\(|updateFeature\(/,
   );

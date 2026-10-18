@@ -1,6 +1,6 @@
 import { afterEach, expect, it } from "vitest";
 import { execFile } from "node:child_process";
-import { copyFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -14,6 +14,7 @@ import {
   type CompactRecipeOutput,
 } from "@/cli/commands/compact-output";
 import {
+  copyCliRuntimeWithoutAssets,
   cliEntry,
   invokeCliRecipe,
 } from "../../test/helpers/cli-recipe-process";
@@ -369,8 +370,8 @@ it("refuses unknown output modes as usage errors before starting the runtime", a
 
 it("reports initialization failure as a compact envelope when native assets are missing", async () => {
   const directory = await workspace();
-  // main.js resolves its native assets relative to itself; omit them.
-  await copyFile(cliEntry(), join(directory, "main.js"));
+  // The JS runtime resolves its native assets module-relatively; omit them.
+  await copyCliRuntimeWithoutAssets(directory);
   await writeFile(join(directory, "recipe.json"), JSON.stringify(plate));
   const failure = await promisify(execFile)(
     "bun",

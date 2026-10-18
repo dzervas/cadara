@@ -66,8 +66,8 @@ function runtimeImports(file: string): RuntimeImport[] {
   visit(ast);
   return imports;
 }
-// Computed edges remain visible. Only the two existing production artifact
-// loaders may cross this boundary, with their URL binding and validation intact.
+// Computed edges remain visible. Only qualified artifact loaders and the explicit
+// SDK user-script adapter may cross this boundary with their URL bindings intact.
 function qualifiedAssetImport(file: string, call: ts.CallExpression): boolean {
   let scope: ts.Node | undefined = call.parent;
   while (scope && !ts.isFunctionLike(scope)) scope = scope.parent;
@@ -209,6 +209,11 @@ function qualifiedAssetImport(file: string, call: ts.CallExpression): boolean {
       validated("customMainJS") &&
       wrapped("customMainJS")
     );
+  }
+  if (from === "src/cli/commands/script.ts" && scope.name?.text === "loadSdkScript" && identifier(argument, "scriptUrl")) {
+    const url = constants.get("scriptUrl");
+    return property(url, "href") && namedCall(url.expression, "pathToFileURL", ["resolve(scriptPath)"]) &&
+      nodes.some((node) => ts.isIfStatement(node) && node.expression.getText() === 'typeof module.default !== "function"' && ts.isThrowStatement(node.thenStatement));
   }
   return false;
 }
@@ -558,6 +563,9 @@ describe("headless transitive runtime boundary", () => {
   it.each([
     "src/application/editor/editor-event-loop.ts",
     "src/application/semantic/target-resolution.ts",
+    "src/application/semantic/sdk.ts",
+    "src/sdk.ts",
+    "src/cli/commands/script.ts",
     "src/composition/headless.ts",
     "src/cli/commands/document-recipes.ts",
   ])(

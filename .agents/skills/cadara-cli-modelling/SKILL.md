@@ -74,6 +74,8 @@ Execution stops at the first failure. Earlier changes are not rolled back, and s
 
 ## Reference
 
+**Scoped inspection.** `document.inspect.owner` accepts a typed sketch/feature/body owner or the same `{alias,label,sketch?}` selector as other target fields. Use it when you need references for one owner; ambiguous labels still require disambiguation.
+
 **Ownership.** Each invocation owns one private document. Processes share nothing except the files you save or open. `document.open` gives a fresh editing context with empty undo history. A sketch is a private draft until `sketch.publish` (or `sketch.discard`). Feature, variable, save and export operations run in document context, so publish first. `requireProfiles: true` makes publication prove that a consumable profile exists.
 
 **Basis and generation.** `document.create` and `document.open` take `basis: null`; every later operation takes `basis`: `{ "alias": "<as of the latest result>" }`. Draft operations also take `draft`, the latest draft alias, because each private edit advances the draft generation even when the document revision does not change. An older alias gives `conflicted` and is never rebased automatically.

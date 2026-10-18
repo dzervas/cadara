@@ -35,7 +35,7 @@ test("body operations share browser preparation, native capabilities and exact m
     read("src/infrastructure/modeling/semantic-model-inspection.ts"),
   ).toContain("capabilities: snapshot.document.capabilities");
   const cli = read("src/cli/commands/document-recipes.ts");
-  expect(cli).toContain("opened.session.execute(validated.data)");
+  expect(cli).toContain("sdk.execute(operation.command,");
   expect(cli).not.toMatch(
     /OCC_KERNEL_CAPABILITIES|supportedFeatureKinds|previewableFeatureKinds|gp_Trsf|Math\.cos|prepareMirrorFeatureDefinition/,
   );
