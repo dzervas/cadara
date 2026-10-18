@@ -1,5 +1,7 @@
 import { test, expect } from "vitest";
 import * as THREE from "three";
+import { bindRenderableObject, updateWorkspaceHighlight } from "@/infrastructure/viewport/render-picking";
+import type { PrimitiveRef } from "@/core/editor/schema";
 
 import {
   ACTIVE_SKETCH_FEEDBACK_PIXEL_BOUNDS,
@@ -1015,4 +1017,185 @@ test("T08b-g5c [TECH] G19: a non-accepted offset LINE output takes the same tint
     ).color,
     "Part mode: stale geometry keeps its normal colour, as in sketch mode (U-A).",
   ).toBe(palette.constrained);
+});
+
+// Lane: ui. Real stroke triangles must leave visible gaps, not just carry a
+// dashed material flag. Round caps used to bridge the 0.14-pixel default gap.
+test.each(["dash-dot", "dashed"] as const)(
+  "O1/O12: %s semantic strokes leave pixel-sized gaps through highlighting",
+  (linePattern) => {
+    const palette = resolveSketchRenderingPalette(() => "");
+    const renderable = {
+      id: "renderable_line_pattern",
+      label: "Pattern",
+      target: null,
+      geometry: {
+        kind: "polyline",
+        points: [
+          [0, 0, 0],
+          [100, 0, 0],
+        ],
+        isClosed: false,
+      },
+      linePattern,
+      role: "local",
+      // Automatic handles have a tint, but no authored dash dimensions.
+      strokeStyle:
+        linePattern === "dashed"
+          ? { color: 0x888888, opacity: 0.6 }
+          : undefined,
+    } as const;
+    const config = getSketchDisplayPolylineMaterialConfig(
+      renderable,
+      true,
+      palette,
+    );
+    const stroke = getActiveSketchPolylineStrokeGeometryConfig(
+      renderable,
+      config,
+      true,
+    );
+    expect(config.linePattern).toBe(linePattern);
+    if (linePattern === "dashed") {
+      const authoredHandleConfig = getSketchDisplayPolylineMaterialConfig(
+        { ...renderable, linePattern: "solid", strokeStyle: undefined },
+        true,
+        palette,
+      );
+      expect(authoredHandleConfig.linePattern).toBe("solid");
+    }
+    const paths = [
+      {
+        points: [new THREE.Vector2(0, 0), new THREE.Vector2(100, 0)],
+        isClosed: false,
+      },
+      {
+        points: new THREE.EllipseCurve(0, 0, 40, 40, 0, Math.PI * 2).getPoints(
+          128,
+        ),
+        isClosed: true,
+      },
+      {
+        points: new THREE.EllipseCurve(0, 0, 40, 40, 0, Math.PI).getPoints(64),
+        isClosed: false,
+      },
+      {
+        points: new THREE.CubicBezierCurve(
+          new THREE.Vector2(0, 0),
+          new THREE.Vector2(30, 40),
+          new THREE.Vector2(70, -40),
+          new THREE.Vector2(100, 0),
+        ).getPoints(128),
+        isClosed: false,
+      },
+    ];
+    for (const path of paths) {
+      for (const worldUnitsPerPixel of [1, 0.1]) {
+        const geometry = buildSketchPolylineStrokeGeometry({
+          points: path.points.map((p) => [
+            p.x * worldUnitsPerPixel,
+            p.y * worldUnitsPerPixel,
+            0,
+          ]),
+          isClosed: path.isClosed,
+          materialConfig: stroke,
+          worldUnitsPerPixel,
+        });
+        // Test triangle interiors, not merely vertex counts: subpixel gaps can
+        // generate many triangles while still drawing a continuous-looking line.
+        const mesh = new THREE.Mesh(
+          geometry,
+          new THREE.MeshBasicMaterial({
+            color: config.color,
+            side: THREE.DoubleSide,
+          }),
+        );
+        const target: PrimitiveRef = {
+          kind: "sketchEntity",
+          sketchId: "sketch_primary",
+          entityId: "sketch_entity_pattern",
+        };
+        bindRenderableObject(mesh, null, target, "sketchCurve", "document");
+        const objects = new Map([["pattern", [mesh]]]);
+        const covered = (pathDistance: number) => {
+          let remaining = pathDistance;
+          for (let i = 1; i < path.points.length; i++) {
+            const start = path.points[i - 1]!;
+            const end = path.points[i]!;
+            const length = start.distanceTo(end);
+            if (remaining <= length) {
+              const point = start.clone().lerp(end, remaining / length);
+              return (
+                new THREE.Raycaster(
+                  new THREE.Vector3(
+                    point.x * worldUnitsPerPixel,
+                    point.y * worldUnitsPerPixel,
+                    1,
+                  ),
+                  new THREE.Vector3(0, 0, -1),
+                ).intersectObject(mesh).length > 0
+              );
+            }
+            remaining -= length;
+          }
+          throw new Error("Pattern probe is outside the fixture path.");
+        };
+        for (const state of ["normal", "selected", "hovered"] as const) {
+          updateWorkspaceHighlight(
+            objects,
+            state === "selected" ? [target] : [],
+            state === "hovered" ? target : null,
+          );
+          expect(covered(linePattern === "dash-dot" ? 6 : 3)).toBe(true);
+          expect(covered(linePattern === "dash-dot" ? 14.5 : 8)).toBe(false);
+          if (linePattern === "dash-dot") {
+            expect(covered(17.5)).toBe(true); // dot
+            expect(covered(20.5)).toBe(false); // second gap
+            expect(covered(25)).toBe(true); // next long dash
+          }
+        }
+        mesh.material.dispose();
+        geometry.dispose();
+      }
+    }
+    expect([config.dashSize, config.gapSize]).toEqual(
+      linePattern === "dash-dot" ? [12, 5] : [6, 4],
+    );
+  },
+);
+
+test("O1: construction dash-dot wins over an authored dashed stroke", () => {
+  const renderable = {
+    id: "renderable_construction_style",
+    label: "Construction with an authored stroke",
+    geometry: {
+      kind: "polyline",
+      points: [
+        [0, 0, 0],
+        [100, 0, 0],
+      ],
+      isClosed: false,
+    },
+    target: null,
+    linePattern: "dash-dot",
+    role: "local",
+    strokeStyle: {
+      color: 0x1864ab,
+      opacity: 0.95,
+      width: 3,
+      dashSize: 2,
+      gapSize: 1,
+    },
+  } as const;
+  const config = getSketchDisplayPolylineMaterialConfig(
+    renderable,
+    true,
+    resolveSketchRenderingPalette(() => ""),
+  );
+  expect(config.linePattern).toBe("dash-dot");
+  expect([config.dashSize, config.gapSize]).toEqual([12, 5]);
+  expect(config.lineWidth).toBe(3);
+  expect(shouldUseSketchStrokeMeshGeometry(renderable, config, false)).toBe(
+    true,
+  );
 });

@@ -553,7 +553,7 @@ export interface SketchSessionDisplayRenderable {
   label: string;
   geometry: RenderableEntityRecord["geometry"];
   target: PrimitiveRef | null;
-  linePattern: "solid" | "dashed";
+  linePattern: "solid" | "dashed" | "dash-dot";
   role: "local" | "reference";
   semanticClass?:
     | RenderableEntityRecord["binding"]["semanticClass"]

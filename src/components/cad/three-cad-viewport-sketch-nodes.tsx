@@ -495,6 +495,7 @@ function createStrokeGeometryStaticToken(
     pattern: materialConfig.linePattern,
     dashSize: materialConfig.dashSize,
     gapSize: materialConfig.gapSize,
+    dotSize: materialConfig.dotSize,
   });
 }
 

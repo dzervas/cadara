@@ -53,6 +53,7 @@ export interface SketchDisplayPolylineMaterialConfig {
   miterLimit: number;
   dashSize: number;
   gapSize: number;
+  dotSize?: number;
 }
 
 export interface SketchDisplayMarkerMaterialConfig {
@@ -182,9 +183,33 @@ export function getSketchDisplayPolylineMaterialConfig(
     (renderable.strokeStyle?.gapSize ?? 0) > 0;
   const linePattern = isDiagnostic
     ? "solid"
-    : hasAuthoredDash
-      ? "dashed"
-      : renderable.linePattern;
+    : renderable.linePattern === "dash-dot"
+      ? "dash-dot"
+      : hasAuthoredDash
+        ? "dashed"
+        : renderable.linePattern;
+  // O1/O12: the stroke mesh measures dash lengths in pixels. The former
+  // 0.24 / 0.14 defaults were subpixel, with round caps bridging every gap.
+  // Prototype B: long dash / gap / dot / gap = 12 / 5 / 1 / 5 px.
+  // Its distinct dot survives curves without A's density or C's subdued contrast.
+  // Construction semantics win over an authored dashed stroke; references
+  // and automatic handles keep an ordinary dashed pattern.
+  const dashSize =
+    linePattern === "dash-dot"
+      ? 12
+      : hasAuthoredDash
+        ? renderable.strokeStyle!.dashSize!
+        : applyStyles
+          ? 6
+          : 0.24;
+  const gapSize =
+    linePattern === "dash-dot"
+      ? 5
+      : hasAuthoredDash
+        ? renderable.strokeStyle!.gapSize!
+        : applyStyles
+          ? 4
+          : 0.14;
   const defaultOpacity =
     linePattern === "dashed"
       ? renderable.role === "reference"
@@ -225,16 +250,9 @@ export function getSketchDisplayPolylineMaterialConfig(
       : applyStyles
         ? (renderable.strokeStyle?.miterLimit ?? 4)
         : 4,
-    dashSize: isDiagnostic
-      ? 0.24
-      : applyStyles
-        ? (renderable.strokeStyle?.dashSize ?? 0.24)
-        : 0.24,
-    gapSize: isDiagnostic
-      ? 0.14
-      : applyStyles
-        ? (renderable.strokeStyle?.gapSize ?? 0.14)
-        : 0.14,
+    dashSize,
+    gapSize,
+    dotSize: linePattern === "dash-dot" ? 1 : undefined,
   };
 }
 
@@ -244,7 +262,7 @@ export function shouldUseSketchStrokeMeshGeometry(
   applyStyles: boolean,
 ) {
   return (
-    applyStyles &&
+    (applyStyles || materialConfig.linePattern === "dash-dot") &&
     renderable.geometry.kind === "polyline" &&
     materialConfig.lineWidth > 0
   );
@@ -396,7 +414,7 @@ function getActiveSketchStrokePixelBounds(
     return ACTIVE_SKETCH_FEEDBACK_PIXEL_BOUNDS.stroke.authored;
   }
 
-  if (materialConfig.linePattern === "dashed") {
+  if (materialConfig.linePattern === "dash-dot") {
     return ACTIVE_SKETCH_FEEDBACK_PIXEL_BOUNDS.stroke.construction;
   }
 
@@ -445,14 +463,18 @@ export function buildSketchPolylineStrokeGeometry(
     dashSize,
     gapSize,
     input.isClosed,
+    input.materialConfig.dotSize === undefined
+      ? undefined
+      : input.materialConfig.dotSize * input.worldUnitsPerPixel,
   );
   const strokeSegments =
-    input.materialConfig.linePattern === "dashed" && cappedDashPattern
+    input.materialConfig.linePattern !== "solid" && cappedDashPattern
       ? splitSketchPolylineDashSegments(
           projectedPoints,
           cappedDashPattern.dashSize,
           cappedDashPattern.gapSize,
           input.isClosed,
+          cappedDashPattern.dotSize,
         )
       : [getSvgStrokePathPoints(projectedPoints, input.isClosed)];
   const positions: number[] = [];
@@ -501,6 +523,7 @@ function getCappedSketchStrokeDashPattern(
   dashSize: number,
   gapSize: number,
   isClosed: boolean,
+  dotSize?: number,
 ) {
   if (dashSize <= 0 || gapSize <= 0) {
     return null;
@@ -512,16 +535,19 @@ function getCappedSketchStrokeDashPattern(
     pathLength += pathPoints[index - 1]!.distanceTo(pathPoints[index]!);
   }
 
-  const patternLength = dashSize + gapSize;
-  const estimatedDashCount = Math.ceil(pathLength / patternLength);
+  const patternLength =
+    dashSize + gapSize + (dotSize === undefined ? 0 : dotSize + gapSize);
+  const estimatedDashCount =
+    Math.ceil(pathLength / patternLength) * (dotSize === undefined ? 1 : 2);
   if (estimatedDashCount <= MAX_SKETCH_STROKE_DASH_SEGMENTS) {
-    return { dashSize, gapSize };
+    return { dashSize, gapSize, dotSize };
   }
 
   const scale = estimatedDashCount / MAX_SKETCH_STROKE_DASH_SEGMENTS;
   return {
     dashSize: dashSize * scale,
     gapSize: gapSize * scale,
+    dotSize: dotSize === undefined ? undefined : dotSize * scale,
   };
 }
 
@@ -530,6 +556,7 @@ export function splitSketchPolylineDashSegments(
   dashSize: number,
   gapSize: number,
   isClosed: boolean,
+  dotSize?: number,
 ): THREE.Vector2[][] {
   const pathPoints = getSvgStrokePathPoints(points, isClosed);
   if (pathPoints.length < 2 || dashSize <= 0 || gapSize <= 0) {
@@ -537,6 +564,11 @@ export function splitSketchPolylineDashSegments(
   }
 
   const dashSegments: THREE.Vector2[][] = [];
+  const pattern =
+    dotSize === undefined
+      ? [dashSize, gapSize]
+      : [dashSize, gapSize, dotSize, gapSize];
+  let patternIndex = 0;
   let isDash = true;
   let remainingPatternLength = dashSize;
   let activeDash: THREE.Vector2[] = [pathPoints[0]!.clone()];
@@ -573,8 +605,9 @@ export function splitSketchPolylineDashSegments(
         if (isDash && activeDash.length >= 2) {
           dashSegments.push(activeDash);
         }
-        isDash = !isDash;
-        remainingPatternLength = isDash ? dashSize : gapSize;
+        patternIndex = (patternIndex + 1) % pattern.length;
+        isDash = patternIndex % 2 === 0;
+        remainingPatternLength = pattern[patternIndex]!;
         activeDash = isDash ? [cursor.clone()] : [];
       }
     }
