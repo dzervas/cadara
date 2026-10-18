@@ -4,6 +4,10 @@ import { createSketchActionOwnerFixture } from "@/application/editor/sketch-acti
 import { prepareSketchIntersectionEdit } from "@/domain/editor/sketch-session/editing";
 import { runEditorEffect } from "@/application/editor/effect-registry";
 import { SketchRegionDerivationSupersededError } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchRegionDerivationWorkerPool } from "@/domain/modeling/occ/sketch-derivation-worker-client";
+import { FakeDerivationWorker } from "@/domain/modeling/occ/sketch-derivation-worker.fixtures";
+import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
+import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import {
   acceptSketchDraw,
   beginSketchTool,
@@ -176,6 +180,156 @@ describe("T10g-1 Trim edit query (editor loop)", () => {
     expect(applied.session.toolStagedEntities).toEqual([]);
     const left = updateSketchEditToolHover(right.session, null);
     expect(left.toolStagedEntities).toEqual([]);
+  });
+
+  test("b3k.29: an overdue hover timer cannot supersede the newer Trim click; gliding while clicks wait emits no hover query", async () => {
+    const { state, target } = await trimState();
+    const ref = {
+      kind: "sketchEntity" as const,
+      sketchId: state.session.actionContextId,
+      entityId: target,
+    };
+    const workers: FakeDerivationWorker[] = [];
+    const timers: { run: () => void; cancelled: boolean }[] = [];
+    let clock = 0;
+    const pool = new SketchRegionDerivationWorkerPool({
+      createWorker: () => {
+        const worker = new FakeDerivationWorker();
+        workers.push(worker);
+        return worker;
+      },
+      minimumSupersedeAgeMs: 250,
+      now: () => clock,
+      schedule: (run) => {
+        const timer = { run, cancelled: false };
+        timers.push(timer);
+        return () => {
+          timer.cancelled = true;
+        };
+      },
+    });
+    const workerRuntime = {
+      querySketchEditIntersections: async (input) =>
+        (
+          await pool.querySketchEditIntersections({
+            contractVersion: CONTRACT_VERSION,
+            solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+            requestId: input.requestId,
+            documentId: input.documentId,
+            revisionId: input.baseRevisionId,
+            sketchId: input.sketchId,
+            ...input.input,
+          })
+        ).result,
+    } satisfies Pick<EditorEffectRuntime, "querySketchEditIntersections">;
+    const pending: Promise<EditorEvent>[] = [];
+    const execute = (effect: QueryEffect) => {
+      const promise = runEditorEffect(
+        effect,
+        workerRuntime as EditorEffectRuntime,
+      );
+      pending.push(promise);
+      return promise;
+    };
+    try {
+      const hovered = emitPendingSketchEditQuery({
+        state: {
+          ...state,
+          session: updateSketchEditToolHover(
+            updateSketchPointer(state.session, [0.5, 0]),
+            ref,
+          ),
+        },
+        effects: [],
+      });
+      const firstHover = queryEffects(hovered.effects)[0]!;
+      const firstDone = execute(firstHover);
+      clock = 100;
+      const moved = emitPendingSketchEditQuery({
+        state: {
+          ...sketchState(hovered),
+          session: updateSketchPointer(sketchState(hovered).session, [0.4, 0]),
+        },
+        effects: [],
+      });
+      const waitingHover = queryEffects(moved.effects)[0]!;
+      const waitingDone = execute(waitingHover);
+      expect(workers).toHaveLength(1);
+      expect(timers).toHaveLength(1);
+
+      // The main thread can process the press after the guard age but before
+      // the due timer gets its turn. The older hover is still waiting here.
+      clock = 250;
+      const clicked = click(sketchState(moved), target);
+      const clickEffect = queryEffects(clicked.effects)[0]!;
+      const clickedDone = execute(clickEffect);
+      expect(workers).toHaveLength(2);
+      const cutter = state.session.definition.entities[1]!.entityId;
+      const queued = click(sketchState(clicked), cutter);
+      expect(queryEffects(queued.effects)).toEqual([]);
+      const gliding = emitPendingSketchEditQuery({
+        state: {
+          ...sketchState(queued),
+          session: updateSketchEditToolHover(
+            updateSketchPointer(sketchState(queued).session, [3.5, 0]),
+            ref,
+          ),
+        },
+        effects: [],
+      });
+      expect(queryEffects(gliding.effects)).toEqual([]);
+      expect(
+        sketchState(gliding).session.activeEditTool?.editQuery?.queue.map(
+          (entry) => entry.preview ?? false,
+        ),
+      ).toEqual([false, false]);
+      for (const timer of timers) if (!timer.cancelled) timer.run();
+      const result = await querySketchEditIntersectionsForTest({
+        requestId: clickEffect.requestId,
+        documentId: clickEffect.documentId,
+        baseRevisionId: clickEffect.baseRevisionId,
+        sketchId: clickEffect.sketchId,
+        input: clickEffect.input,
+      });
+      workers[1]!.respond({
+        contractVersion: CONTRACT_VERSION,
+        solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+        requestId: clickEffect.requestId,
+        documentId: clickEffect.documentId,
+        revisionId: clickEffect.baseRevisionId,
+        sketchId: clickEffect.sketchId,
+        result,
+      });
+      const appliedTransition = transitionEditorState(
+        sketchState(gliding),
+        await clickedDone,
+      );
+      const applied = sketchState(appliedTransition);
+      expect(applied.session.validationMessage).toBeNull();
+      expect(
+        applied.session.liveSolve!.solvedSnapshot.solvedEntities.find(
+          (entity) => entity.entityId === target,
+        ),
+      ).toMatchObject({
+        kind: "lineSegment",
+        startPosition: [1, 0],
+        endPosition: [4, 0],
+      });
+      expect(
+        queryEffects(appliedTransition.effects)[0]?.input.operation
+          .targetEntityId,
+      ).toBe(cutter);
+      for (const late of [await waitingDone, await firstDone]) {
+        const ignored = sketchState(transitionEditorState(applied, late));
+        expect(ignored.session).toBe(applied.session);
+        expect(ignored.pendingEditQueryRequest).toBe(
+          applied.pendingEditQueryRequest,
+        );
+      }
+    } finally {
+      pool.dispose();
+      await Promise.allSettled(pending);
+    }
   });
 
   test("a click emits one background query (idempotent) and authors nothing; its result applies once; a result of another request is dropped", async () => {

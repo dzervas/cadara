@@ -23,67 +23,9 @@ import {
   SketchRegionDerivationDisposedError,
   SketchRegionDerivationWorkerPool,
 } from "@/domain/modeling/occ/sketch-derivation-worker-client";
-import type { OccWorkerLike } from "@/domain/modeling/occ/worker-client";
-import {
-  normalizeOccWorkerFailure,
-  validateOccWorkerRequestEnvelope,
-  type OccWorkerRequest,
-  type OccWorkerResponse,
-} from "@/domain/modeling/occ/worker-protocol";
+import { FakeDerivationWorker } from "./sketch-derivation-worker.fixtures";
+import { validateOccWorkerRequestEnvelope } from "@/domain/modeling/occ/worker-protocol";
 import { SketchRegionDerivationSupersededError } from "@/domain/solver/sketch-constraint-solver-adapter";
-
-class FakeDerivationWorker implements OccWorkerLike {
-  readonly posted: OccWorkerRequest[] = [];
-  terminated = false;
-  postMessageError: Error | null = null;
-  private listener: ((event: MessageEvent<OccWorkerResponse>) => void) | null =
-    null;
-
-  postMessage(message: OccWorkerRequest) {
-    if (this.postMessageError) throw this.postMessageError;
-    this.posted.push(message);
-  }
-  addEventListener(type: string, listener: unknown) {
-    if (type === "message")
-      this.listener = listener as (
-        event: MessageEvent<OccWorkerResponse>,
-      ) => void;
-  }
-  removeEventListener(type: string, listener: unknown) {
-    if (type === "message" && this.listener === listener) this.listener = null;
-  }
-  terminate() {
-    this.terminated = true;
-  }
-  respond(
-    payload:
-      | DeriveSketchRegionsResponse
-      | QuerySketchEditIntersectionsResponse
-      | QuerySketchSnapIntersectionsResponse,
-    index = 0,
-  ) {
-    const posted = this.posted[index]!;
-    this.listener?.({
-      data: {
-        kind: "invoked",
-        requestId: posted.requestId,
-        operation:
-          posted.kind === "invoke"
-            ? posted.operation.kind
-            : "deriveSketchRegions",
-        payload,
-      },
-    } as MessageEvent<OccWorkerResponse>);
-  }
-  fail(message: string, index = 0) {
-    this.listener?.({
-      data: normalizeOccWorkerFailure(
-        this.posted[index]!.requestId,
-        new Error(message),
-      ),
-    } as MessageEvent<OccWorkerResponse>);
-  }
-}
 
 function makePool(firstWorkerPostMessageError: Error | null = null) {
   const workers: FakeDerivationWorker[] = [];
@@ -337,6 +279,69 @@ test("T08b-g5 respawn guard: a young derivation is given the minimum age before 
     requestId: fifth.requestId,
   });
 });
+
+test.each(["overdue timer", "successor settles"] as const)(
+  "b3k.29: a request started after the guard age cancels the older waiter before %s",
+  async (release) => {
+    const workers: FakeDerivationWorker[] = [];
+    const timers: { run: () => void; cancelled: boolean }[] = [];
+    let clock = 0;
+    const pool = new SketchRegionDerivationWorkerPool({
+      createWorker: () => {
+        const worker = new FakeDerivationWorker();
+        workers.push(worker);
+        return worker;
+      },
+      minimumSupersedeAgeMs: 250,
+      now: () => clock,
+      schedule: (run) => {
+        const timer = { run, cancelled: false };
+        timers.push(timer);
+        return () => {
+          timer.cancelled = true;
+        };
+      },
+    });
+    const first = makeRequest("request_running_1");
+    const waiting = makeRequest("request_waiting_2");
+    const latest = makeRequest("request_latest_3");
+    const firstDone = pool
+      .deriveSketchRegions(first)
+      .catch((error: unknown) => error);
+    clock = 100;
+    const waitingDone = pool
+      .deriveSketchRegions(waiting)
+      .catch((error: unknown) => error);
+    clock = 250;
+    const latestDone = pool
+      .deriveSketchRegions(latest)
+      .catch((error: unknown) => error);
+    try {
+      const response = responseFor(latest);
+      if (release === "overdue timer") {
+        for (const timer of timers) if (!timer.cancelled) timer.run();
+      }
+      workers[1]!.respond(response);
+      expect(await latestDone).toBe(response);
+      expect(workers).toHaveLength(2);
+      expect(workers[1]!.terminated).toBe(false);
+      expect(workers[1]!.posted).toHaveLength(1);
+      expect(timers[0]!.cancelled).toBe(true);
+      expect(await waitingDone).toMatchObject({
+        name: "SketchRegionDerivationSupersededError",
+        requestId: waiting.requestId,
+        supersededBy: latest.requestId,
+      });
+      expect(await firstDone).toMatchObject({ supersededBy: latest.requestId });
+      // Even a callback already taken off the timer queue cannot restart it.
+      timers[0]!.run();
+      expect(workers).toHaveLength(2);
+    } finally {
+      pool.dispose();
+      await Promise.all([firstDone, waitingDone, latestDone]);
+    }
+  },
+);
 
 test("T08b-g5 U-G3: an offset preview publication runs in its own lane and never supersedes the live derivation", async () => {
   const { pool, workers } = makePool();

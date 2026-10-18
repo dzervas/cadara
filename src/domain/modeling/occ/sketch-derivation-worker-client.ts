@@ -142,20 +142,22 @@ export class SketchRegionDerivationWorkerPool implements SketchRegionDerivationD
     request: DerivationRequest,
     call: DerivationCall,
   ): Promise<unknown> {
+    // b3k.29: the guard age can pass before its timer gets a turn. Every
+    // new submission must forget the older waiter, even when starting now;
+    // otherwise that hover's timer (or the successor settling) starts it
+    // after the click and supersedes the newer request with the older one.
+    const previous = this.waiting.get(lane);
+    if (previous) {
+      this.waiting.delete(lane);
+      previous.cancelTimer();
+      previous.reject(
+        new SketchRegionDerivationSupersededError(previous.request, request),
+      );
+    }
     const running = this.slots.get(lane)?.inFlight;
     const age = running ? this.now() - running.startedAt : 0;
     if (running && age < this.minimumSupersedeAgeMs) {
       return new Promise<unknown>((resolve, reject) => {
-        const previous = this.waiting.get(lane);
-        if (previous) {
-          previous.cancelTimer();
-          previous.reject(
-            new SketchRegionDerivationSupersededError(
-              previous.request,
-              request,
-            ),
-          );
-        }
         const entry: WaitingRequest = {
           request,
           call,
