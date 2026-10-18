@@ -124,3 +124,75 @@ it("trims a spline arch between two crossing lines into two spline pieces as one
     await f.close();
   }
 }, 30000);
+
+it("trims a line crossing a rectangle down to its two outside pieces as one 'Trim' action, replays it with Undo/Redo, and leaves the rectangle one region", async () => {
+  const f = await createSketchWorkflow();
+  try {
+    await author(f, { kind: "rectangle", start: [0, 0], end: [20, 10] });
+    await author(f, { kind: "line", start: [15, -5], end: [15, 15] });
+    const crossing = lastEntityRef(f);
+    const crossingId = f.current().discovery!.sketch!.entities.at(-1)!.entityId;
+    const before = f.current();
+    expect(before.discovery!.sketch!.entities).toHaveLength(5);
+    expect(
+      before.discovery!.sketch!.profiles,
+      "The crossing line splits the rectangle in two.",
+    ).toHaveLength(2);
+
+    const trimmed = await f.execute({
+      operation: "sketch.geometry.update",
+      draft: before.discovery!.state.draft,
+      edit: { kind: "trim", target: crossing },
+      intent: "fulfill",
+    });
+    const sketch = trimmed.discovery!.sketch!;
+    const at = (id: string) =>
+      sketch.points.find((p) => p.pointId === id)!.position;
+    expect(sketch.entities).toHaveLength(6);
+    const pieces = sketch.entities.slice(4);
+    expect(pieces[0]!.entityId).toBe(crossingId);
+    expect(pieces.map((e) => e.pointIds.map(at))).toEqual([
+      [
+        [15, -5],
+        [15, 0],
+      ],
+      [
+        [15, 10],
+        [15, 15],
+      ],
+    ]);
+    expect(trimmed.discovery!.history!.undoEntries!.at(-1)!.label).toBe("Trim");
+    expect(trimmed.discovery!.history!.undoEntries).toHaveLength(
+      before.discovery!.history!.undoEntries!.length + 1,
+    );
+    expect(
+      sketch.profiles,
+      "After the Trim the rectangle is one region.",
+    ).toHaveLength(1);
+
+    const undone = await f.execute({
+      operation: "history.undo",
+      draft: trimmed.discovery!.state.draft,
+    });
+    expect(undone.discovery!.sketch!.entities).toEqual(
+      before.discovery!.sketch!.entities,
+    );
+    expect(undone.discovery!.sketch!.profiles).toHaveLength(2);
+    const redone = await f.execute({
+      operation: "history.redo",
+      draft: undone.discovery!.state.draft,
+    });
+    expect(redone.discovery!.sketch!.entities).toEqual(sketch.entities);
+    expect(redone.discovery!.sketch!.points).toEqual(sketch.points);
+    expect(redone.discovery!.sketch!.profiles).toHaveLength(1);
+
+    const published = await f.execute({
+      operation: "sketch.publish",
+      draft: redone.discovery!.state.draft,
+      requireProfiles: true,
+    });
+    expect(published.discovery!.sketch!.profiles).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+}, 30000);
