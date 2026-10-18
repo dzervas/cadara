@@ -4,7 +4,11 @@ import {
   createAuthoredModelDocumentFromSnapshot,
   type AuthoredModelDocument,
 } from "@/contracts/modeling/authored-document";
-import { createSeedAuthoredModelDocument } from "./modeling-test-fixtures";
+import {
+  createRebuiltTopologyLineage,
+  createSeedAuthoredModelDocument,
+} from "./modeling-test-fixtures";
+import { authoredModelDocumentsEqual } from "@/contracts/modeling/authored-document-equality";
 import { createMemoryDocumentRepository } from "./memory-document-repository";
 import {
   IndexedDbAutomergeDocumentRepository,
@@ -172,6 +176,71 @@ for (const [name, make] of [
     expect(await repository.getGeometryAssetRecord(asset.asset)).toEqual(
       asset.bytes,
     );
+  });
+  test(`${name}: keyed topology-lineage membership and order changes keep the stored document certifying the candidate`, async () => {
+    const seed = await createSeedAuthoredModelDocument(),
+      repository = make();
+    const lineage = createRebuiltTopologyLineage(seed);
+    const original = { ...seed, topologyLineage: lineage.original };
+    // Automerge also reorders authored sketch records on a plain round trip,
+    // outside this lineage seam, so it is held to lineage certification only.
+    const certifies = (
+      candidate: AuthoredModelDocument,
+      stored: AuthoredModelDocument,
+    ) =>
+      authoredModelDocumentsEqual(
+        name === "memory"
+          ? candidate
+          : { ...stored, topologyLineage: candidate.topologyLineage },
+        stored,
+      );
+    const initialized = await repository.initialize({
+      documentId: seed.documentId,
+      document: original,
+    });
+    expect(initialized.ok).toBe(true);
+    const loaded = await repository.load({
+      documentId: seed.documentId,
+      seedDocument: seed,
+    });
+    expect(
+      loaded.ok && certifies(original, loaded.document),
+      "A stored round trip certifies the document it was initialized from.",
+    ).toBe(true);
+    // A body rename whose native rebuild replaced a fallback source key.
+    const candidate = {
+      ...original,
+      revisionId: "rev_0002" as RevisionId,
+      bodyLabels: [{ ...seed.bodyLabels[0]!, label: "Renamed body" }],
+      topologyLineage: lineage.rebuilt,
+    };
+    const written = await repository.mutate({
+      documentId: seed.documentId,
+      expected: original,
+      document: candidate,
+    });
+    if (!written.ok) throw new Error(JSON.stringify(written.status));
+    expect(
+      certifies(candidate, written.document),
+      "The write receipt certifies the exact keyed lineage it stored.",
+    ).toBe(true);
+    const output = written.document.topologyLineage?.find(
+      (record) => record.featureId === seed.featureOrder[0],
+    )?.outputs[0];
+    expect(
+      Object.fromEntries(
+        output!.sourceTargets.map((source) => [
+          source.sourceKey,
+          source.targets.map((target) =>
+            target.kind === "edge" ? target.edgeId : null,
+          ),
+        ]),
+      ),
+    ).toEqual({
+      "source:a": ["edge_stable_a"],
+      "source:b": ["edge_stable_b"],
+      "source:fallback:g9": ["edge_fallback_g9"],
+    });
   });
 }
 
