@@ -49,6 +49,7 @@ test("browser and explicit offsets share canonical construction, expression-reso
 test("offset CLI and semantic adapter own neither offset algorithms, uncertified geometry nor pointer choreography", () => {
   for (const path of [
     "src/infrastructure/modeling/semantic-sketch-port.ts",
+    "src/application/semantic/target-resolution.ts",
     "src/cli/commands/document-recipes.ts",
   ]) {
     const source = read(path);
@@ -69,25 +70,21 @@ test("offset CLI and semantic adapter own neither offset algorithms, uncertified
   expect(discovery).not.toContain("getSketchSessionDisplayDefinition(");
 });
 
-test("relationship label aliases resolve only in the terminal client, not shared offset owners", () => {
+test("relationship label aliases delegate to the application resolver, not terminal or offset owners", () => {
   const client = read("src/cli/commands/document-recipes.ts");
+  // The terminal still validates encoding before opening the model.
   expect(client).toContain(
     'validateTarget(command.derivationId, "derivation_validation")',
   );
-  expect(client).toContain(
-    "offset => ({ label: offset.label, target: offset.derivationId })",
-  );
-  expect(client).toContain(
-    'resolveLabelled("Offset target alias is missing or ambiguous.", target, "offset", offsets)',
-  );
-  expect(client).toContain(
-    "const matches = records.filter(record => record.label === target.label);\n  if (matches.length !== 1) throw selectionError(message, target, [kind], matches, undefined, records);",
-  );
+  expect(client).toContain('from "@/application/semantic/target-resolution"');
+  expect(client).toContain("resolveSemanticCommand(operation.command,");
   for (const path of [
+    "src/cli/commands/document-recipes.ts",
     "src/domain/editor/sketch-session/editing.ts",
     "src/infrastructure/modeling/semantic-sketch-port.ts",
   ]) {
     expect(read(path)).not.toContain("TargetAlias");
     expect(read(path)).not.toContain("aliases.get(");
+    expect(read(path)).not.toContain("function resolveLabelled");
   }
 });

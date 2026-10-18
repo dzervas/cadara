@@ -228,6 +228,9 @@ function target(file: string, specifier: string) {
   );
 }
 function violations(entry: string) {
+  const resolver =
+    resolve(root, entry) ===
+    resolve(root, "src/application/semantic/target-resolution.ts");
   const pending = [resolve(root, entry)];
   const seen = new Set<string>();
   const failures: string[] = [];
@@ -333,10 +336,22 @@ function violations(entry: string) {
         failures.push(`${from} -> ${to}`);
       if (nativeFilePolicyViolation(from, specifier))
         failures.push(`${from} -> filesystem adapter ${specifier}`);
+      if (terminalPolicyViolation(from, specifier, resolver))
+        failures.push(`${from} -> terminal adapter ${specifier}`);
       if (resolved) pending.push(resolved);
     }
   }
   return failures;
+}
+function terminalPolicyViolation(
+  from: string,
+  specifier: string,
+  resolver: boolean,
+): boolean {
+  return (
+    (resolver || /^src\/application\/semantic\//.test(from)) &&
+    /^(?:node:)?(?:readline|tty|console|process)(?:\/|$)/.test(specifier)
+  );
 }
 function nativeFilePolicyViolation(from: string, specifier: string): boolean {
   return (
@@ -359,6 +374,25 @@ function sharedCliViolations(file: string) {
   });
 }
 describe("headless transitive runtime boundary", () => {
+  it.each(["readline", "readline/promises", "tty", "console", "process"])(
+    "keeps semantic selection and its transitive dependencies independent of %s",
+    (specifier) => {
+      for (const terminal of [specifier, `node:${specifier}`]) {
+        expect(
+          terminalPolicyViolation("src/application/semantic/target-resolution.ts", terminal, false),
+        ).toBe(true);
+        expect(
+          terminalPolicyViolation("src/contracts/selection.ts", terminal, true),
+        ).toBe(true);
+        expect(
+          terminalPolicyViolation("src/cli/main.ts", terminal, false),
+        ).toBe(false);
+      }
+      expect(
+        terminalPolicyViolation("src/application/semantic/target-resolution.ts", "./selection-error", true),
+      ).toBe(false);
+    },
+  );
   it("keeps filesystem bytes and operations in adapters, not semantic application owners", () => {
     const directory = mkdtempSync(
       resolve(root, "src/application/semantic/.native-file-policy-"),
@@ -523,6 +557,7 @@ describe("headless transitive runtime boundary", () => {
   });
   it.each([
     "src/application/editor/editor-event-loop.ts",
+    "src/application/semantic/target-resolution.ts",
     "src/composition/headless.ts",
     "src/cli/commands/document-recipes.ts",
   ])(
