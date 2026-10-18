@@ -40,6 +40,7 @@ import {
   patchSketchEditToolValue,
   selectSketchEditToolTarget,
   startSketchDraw,
+  toggleSketchConstructionTarget,
   type SketchSessionDisplayRenderable,
   type SketchSessionState
 } from "@/domain/editor/sketch-session";
@@ -976,4 +977,70 @@ describe("T16b: held copies of a broken mirror always draw invalid", () => {
       "Mirror ‘mirror 1’ is broken: its mirror line was deleted. Its copies stay where they were last solved and can't be used; profiles from this sketch are blocked. Undo, replace the mirror line, or remove the mirror from the Mirror panel.",
     );
   });
+});
+
+// Lane: logic. Construction is a display semantic, not an authored stroke style.
+test.each(["line", "arc", "circle", "spline"])(
+  "O1: toggling selected %s construction publishes dash-dot, not reference dashes",
+  (name) => {
+    const original = markerSession({ conflict: false });
+    const session = toggleSketchConstructionTarget(
+      beginSketchTool(original, "construction"),
+      entityRef(name),
+    );
+    expect(
+      session.definition.entities.find((e) => e.entityId === entityId(name))
+        ?.isConstruction,
+    ).toBe(true);
+    const curve = getSketchSessionDisplayRenderables(session).find(
+      (r) =>
+        r.geometry.kind === "polyline" &&
+        r.target?.kind === "sketchEntity" &&
+        r.target.entityId === entityId(name),
+    );
+    expect(curve?.linePattern).toBe("dash-dot");
+    expect(
+      getSketchSessionDisplayRenderables(session)
+        .filter((r) => r.role === "reference" && r.geometry.kind === "polyline")
+        .every((r) => r.linePattern === "dashed"),
+    ).toBe(true);
+  },
+);
+
+test("O1: a construction edit mid-Line-chain changes that segment's display, not its neighbour", () => {
+  let session = beginSketchTool(
+    enterSketchSession(
+      createNewSketchSessionFromSupport(
+        { kind: "construction", constructionId: "construction_plane-xy" },
+        OCC_KERNEL_SETTINGS,
+      ),
+    ),
+    "line",
+  );
+  session = acceptSketchDraw(startSketchDraw(session, [0, 0]), [3, 0]);
+  session = acceptSketchDraw(session, [3, 3]);
+  expect(session.toolChain).not.toBeNull();
+  expect(session.definition.entities).toHaveLength(2);
+  const segment = session.definition.entities[1]!;
+  session = toggleSketchConstructionTarget(
+    beginSketchTool(session, "construction"),
+    segment.target,
+  );
+  const curves = getSketchSessionDisplayRenderables(session).filter(
+    (r) => r.geometry.kind === "polyline" && r.target?.kind === "sketchEntity",
+  );
+  expect(
+    curves.find(
+      (r) =>
+        r.target?.kind === "sketchEntity" &&
+        r.target.entityId === segment.entityId,
+    )?.linePattern,
+  ).toBe("dash-dot");
+  expect(
+    curves.find(
+      (r) =>
+        r.target?.kind === "sketchEntity" &&
+        r.target.entityId === session.definition.entities[0]!.entityId,
+    )?.linePattern,
+  ).toBe("solid");
 });
