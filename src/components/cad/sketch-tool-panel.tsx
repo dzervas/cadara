@@ -128,7 +128,10 @@ export function SketchToolPanel({ schema, onPatch }: SketchToolPanelProps) {
               color: "var(--workbench-shell-danger-text)",
             }}
           >
-            {message.message}
+            {/* O32: select diagnostics without capturing the panel's empty canvas area. */}
+            <span style={{ pointerEvents: "auto", userSelect: "text" }}>
+              {message.message}
+            </span>
           </div>
         ))}
         {controlGroups.length > 0 ? (
