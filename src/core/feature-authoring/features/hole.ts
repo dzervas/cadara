@@ -323,7 +323,7 @@ export function prepareHoleFeatureDefinition(parameters: import("@/contracts/mod
     holeAuthoringDefinition.hydrateDraft({
       kind: "hole",
       featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
-      parameters,
+      parameters: { ...parameters, options: { ...parameters.options } },
     }),
   );
 }

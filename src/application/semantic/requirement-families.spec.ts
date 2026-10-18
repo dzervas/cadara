@@ -138,6 +138,7 @@ it.each(families)(
       expect(requirement).toMatchObject({ kind, status: "satisfied" });
       expect(added.discovery!.references).toContainEqual({
         label: requirement!.label,
+        owner: { kind: "sketch", sketchId: added.discovery!.sketch!.sketchId },
         target: {
           kind: "constraint",
           sketchId:

@@ -39,6 +39,7 @@ test("feature suppression and restoration rebuild actual geometry and preserve t
     expect(renamed.discovery!.references).toContainEqual({
       label: "Sleeve",
       target: { kind: "body", bodyId },
+      owner: { kind: "feature", featureId },
     });
     expect(renamed.discovery!.model!.bodies[0]!.bounds!.max).toEqual([2, 2, 7]);
     expect(renamed.changedTargets).toEqual([{ kind: "body", bodyId }]);
@@ -71,6 +72,7 @@ test("feature suppression and restoration rebuild actual geometry and preserve t
     expect(restored.discovery!.references).toContainEqual({
       label: "Sleeve",
       target: { kind: "body", bodyId },
+      owner: { kind: "feature", featureId },
     });
     const deleted = await w.execute({
       operation: "feature.delete",

@@ -169,13 +169,15 @@ export function createSemanticSketchPort(input: {
       state,
       references: [
         ...base.references.filter(r => !("sketchId" in r.target && r.target.sketchId === (s.sketchId ?? s.actionContextId))),
-        { label: s.sketchLabel, target: { kind: "sketch", sketchId: s.sketchId ?? s.actionContextId } },
-        ...s.definition.points.map(p => ({ label: p.label, target: { kind: "sketchPoint" as const, sketchId: s.sketchId ?? s.actionContextId, pointId: p.pointId } })),
-        ...s.definition.entities.map(e => ({ label: e.label, target: { kind: "sketchEntity" as const, sketchId: s.sketchId ?? s.actionContextId, entityId: e.entityId } })),
-        ...(s.definition.referenceImages ?? []).map(r => ({ label: r.label, target: { kind: "sketchOperation" as const, sketchId: s.sketchId ?? s.actionContextId, operationId: r.operationId } })),
-        ...s.definition.dimensions.map(d => ({ label: d.label, target: { kind: "dimension" as const, sketchId: s.sketchId ?? s.actionContextId, dimensionId: d.dimensionId } })),
-        ...s.definition.constraints.map(c => ({ label: c.label, target: { kind: "constraint" as const, sketchId: s.sketchId ?? s.actionContextId, constraintId: c.constraintId } })),
-        ...(usable ? s.liveRegions.regions.filter(r => r.isClosed).map(r => ({ label: r.label, target: { kind: "region" as const, sketchId: s.sketchId ?? s.actionContextId, regionId: r.regionId } })) : []),
+        ...[
+          { label: s.sketchLabel, target: { kind: "sketch" as const, sketchId: s.sketchId ?? s.actionContextId } },
+          ...s.definition.points.map(p => ({ label: p.label, target: { kind: "sketchPoint" as const, sketchId: s.sketchId ?? s.actionContextId, pointId: p.pointId } })),
+          ...s.definition.entities.map(e => ({ label: e.label, target: { kind: "sketchEntity" as const, sketchId: s.sketchId ?? s.actionContextId, entityId: e.entityId } })),
+          ...(s.definition.referenceImages ?? []).map(r => ({ label: r.label, target: { kind: "sketchOperation" as const, sketchId: s.sketchId ?? s.actionContextId, operationId: r.operationId } })),
+          ...s.definition.dimensions.map(d => ({ label: d.label, target: { kind: "dimension" as const, sketchId: s.sketchId ?? s.actionContextId, dimensionId: d.dimensionId } })),
+          ...s.definition.constraints.map(c => ({ label: c.label, target: { kind: "constraint" as const, sketchId: s.sketchId ?? s.actionContextId, constraintId: c.constraintId } })),
+          ...(usable ? s.liveRegions.regions.filter(r => r.isClosed).map(r => ({ label: r.label, target: { kind: "region" as const, sketchId: s.sketchId ?? s.actionContextId, regionId: r.regionId } })) : []),
+        ].map(reference => ({ ...reference, owner: { kind: "sketch" as const, sketchId: s.sketchId ?? s.actionContextId } })),
       ],
       history: {
         canUndo: s.actionAvailability?.canUndo ?? false,
@@ -197,7 +199,7 @@ export function createSemanticSketchPort(input: {
             }));
           }),
         ],
-        sketchId: s.sketchId,
+        sketchId: s.sketchId ?? s.actionContextId,
         plane: s.plane.key,
         support: s.plane,
         references: s.definition.references.map(definition => {

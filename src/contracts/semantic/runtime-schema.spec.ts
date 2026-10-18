@@ -55,7 +55,7 @@ function completedResult(): SemanticResult {
     discovery: {
       state,
       references: [
-        { label: "Body", target: { kind: "body", bodyId: "body_part" } },
+        { label: "Body", target: { kind: "body", bodyId: "body_part" }, owner: null },
       ],
       history: null,
     },

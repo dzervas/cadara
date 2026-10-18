@@ -76,6 +76,17 @@ export function createSemanticDocumentPort(input: {
     if ((loop.getState().kind === "editingSketch" ? loop.getState().snapshot?.document.revisionId !== snapshot.document.revisionId : loop.getState().snapshot !== snapshot))
       throw new Error("Authoritative editor snapshot handoff failed.");
     replacementPending = false;
+    function referenceOwner(target: import("@/contracts/shared/references").DurableRef): import("@/contracts/semantic/schema").SemanticReferenceOwner | null {
+      if ("sketchId" in target) return { kind: "sketch", sketchId: target.sketchId };
+      if (target.kind === "feature") return target;
+      if ("bodyId" in target && target.kind !== "body") return { kind: "body", bodyId: target.bodyId };
+      const ownerFeatureId = target.kind === "body"
+        ? snapshot.document.bodies.find(body => body.bodyId === target.bodyId)?.ownerFeatureId
+        : target.kind === "construction"
+          ? snapshot.document.constructions.find(construction => construction.constructionId === target.constructionId)?.ownerFeatureId
+          : null;
+      return ownerFeatureId ? { kind: "feature", featureId: ownerFeatureId } : null;
+    }
     const discovery: SemanticDiscovery = {
       state: state(
         snapshot.document.revisionId,
@@ -89,8 +100,8 @@ export function createSemanticDocumentPort(input: {
       variables: snapshot.document.variables,
       settings: snapshot.document.settings,
       references: [
-        ...snapshot.presentation.entities.map((entity) => ({ label: entity.label, target: entity.target })),
-        ...snapshot.document.features.map(f => ({ label: f.label, target: { kind: "feature" as const, featureId: f.featureId } })),
+        ...snapshot.presentation.entities.map((entity) => ({ label: entity.label, target: entity.target, owner: referenceOwner(entity.target) })),
+        ...snapshot.document.features.map(f => ({ label: f.label, target: { kind: "feature" as const, featureId: f.featureId }, owner: { kind: "feature" as const, featureId: f.featureId } })),
       ],
       history: await repository.getDurableHistoryAvailability(documentId),
       model: await inspectSemanticModel(service, snapshot),

@@ -66,6 +66,7 @@ it("retains requirement identities through private removal undo, publication, na
     const publishedRefs = refs.map((r) => ({
       ...r,
       target: { ...r.target, sketchId },
+      owner: { kind: "sketch", sketchId },
     }));
     // Published discovery retains requirement IDs in its sketch data; scoped annotation references are discovered again when reopened.
     expect(published.discovery!.sketch!.constraints).toEqual(

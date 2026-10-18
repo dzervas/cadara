@@ -336,8 +336,10 @@ export type SemanticExportCommand = CommandIdentity & {
   | { operation: "export.svg" | "export.dxf"; options: import("@/contracts/export/options").SketchVectorExportOptions }
 );
 
-/** Implemented slices. Later tickets extend this closed union. */
-export type SemanticCommand =
+/** Adapter command form: the session normalizes public target inputs to scalar
+ * selector IDs before dispatching this closed union to existing owners.
+ */
+export type CanonicalSemanticCommand =
   | SemanticSketchCommand
   | SemanticExtrudeCommand
   | SemanticRevolveCommand
@@ -357,11 +359,61 @@ export type SemanticCommand =
   | (CommandIdentity &
       (
         | { operation: "document.create"; label: string; basis: null }
-        | { operation: "document.inspect"; basis: SemanticBasis }
+        | { operation: "document.inspect"; basis: SemanticBasis; owner?: SemanticReferenceOwner }
         | { operation: "document.open"; path: string; basis: null }
         | { operation: "document.rename"; label: string; basis: SemanticBasis }
         | { operation: "document.save"; path: string; basis: SemanticBasis }
       ));
+
+type SemanticBooleanScope =
+  | { kind: "standalone" }
+  | { kind: "targetBody"; bodyId: import("@/contracts/shared/ids").BodyId | Extract<DurableRef, { kind: "body" }> }
+  | { kind: "targetBodies"; bodyIds: readonly (import("@/contracts/shared/ids").BodyId | Extract<DurableRef, { kind: "body" }>)[] };
+
+// Named selector-aware inputs retain useful component names in generated schemas.
+export interface SemanticExtrudeSolidParameters extends Omit<import("@/contracts/modeling/schema").ExtrudeSolidFeatureParameters, "booleanScope"> {
+  booleanScope: SemanticBooleanScope;
+}
+export interface SemanticRevolveSolidParameters extends Omit<import("@/contracts/modeling/schema").RevolveSolidFeatureParameters, "booleanScope"> {
+  booleanScope: SemanticBooleanScope;
+}
+export interface SemanticShellOpenFacesParameters extends Omit<import("@/contracts/modeling/schema").ShellOpenFacesFeatureParameters, "booleanScope"> {
+  booleanScope: SemanticBooleanScope;
+}
+export interface SemanticShellClosedHollowParameters extends Omit<import("@/contracts/modeling/schema").ShellClosedHollowFeatureParameters, "booleanScope"> {
+  booleanScope: SemanticBooleanScope;
+}
+export interface SemanticShellOffsetAllFacesParameters extends Omit<import("@/contracts/modeling/schema").ShellOffsetAllFacesFeatureParameters, "booleanScope"> {
+  booleanScope: SemanticBooleanScope;
+}
+export interface SemanticFeatureReplayParameters extends Omit<import("@/contracts/modeling/feature-replay").FeatureReplayFeatureParameters, "sourceFeatureIds"> {
+  sourceFeatureIds: readonly (import("@/contracts/shared/ids").FeatureId | Extract<DurableRef, { kind: "feature" }>)[];
+}
+
+type SemanticParameterInputs<T> = T extends import("@/contracts/modeling/schema").ExtrudeSolidFeatureParameters ? SemanticExtrudeSolidParameters
+  : T extends import("@/contracts/modeling/schema").RevolveSolidFeatureParameters ? SemanticRevolveSolidParameters
+  : T extends import("@/contracts/modeling/schema").ShellOpenFacesFeatureParameters ? SemanticShellOpenFacesParameters
+  : T extends import("@/contracts/modeling/schema").ShellClosedHollowFeatureParameters ? SemanticShellClosedHollowParameters
+  : T extends import("@/contracts/modeling/schema").ShellOffsetAllFacesFeatureParameters ? SemanticShellOffsetAllFacesParameters
+  : T extends import("@/contracts/modeling/feature-replay").FeatureReplayFeatureParameters ? SemanticFeatureReplayParameters
+  : T;
+
+/** ID selectors also accept their canonical discovered target. Reference
+ * identities themselves, basis and draft certificates remain unchanged.
+ */
+type SemanticTargetInputs<T> = T extends CanonicalSemanticCommand
+  ? { [K in keyof T]: K extends "featureId" | "beforeFeatureId" ? T[K] | Extract<DurableRef, { kind: "feature" }>
+      : K extends "sketchId" ? T[K] | Extract<DurableRef, { kind: "sketch" }>
+      : K extends "bodyId" ? T[K] | Extract<DurableRef, { kind: "body" }>
+      : K extends "dimensionId" ? T[K] | Extract<DurableRef, { kind: "dimension" }>
+      : K extends "parameters" ? SemanticParameterInputs<T[K]>
+      : K extends "points" ? T extends { operation: "sketch.dimension.add" }
+        ? readonly [SketchPointId | Extract<DurableRef, { kind: "sketchPoint" }>, SketchPointId | Extract<DurableRef, { kind: "sketchPoint" }>]
+        : T[K]
+      : T[K] }
+  : never;
+
+export type SemanticCommand = SemanticTargetInputs<CanonicalSemanticCommand>;
 
 export type SemanticFamily =
   | "document"
@@ -458,6 +510,13 @@ export interface SemanticCompletion {
   file: SemanticFileReceipt;
 }
 
+/** Sketch geometry belongs to its sketch; body topology to its body; produced
+ * bodies/constructions to their producing feature. Sketch/feature roots own
+ * themselves; document construction planes have no owner. Inspection matches
+ * this exact owner plus the owner's own target (so a body includes itself).
+ */
+export type SemanticReferenceOwner = Extract<DurableRef, { kind: "sketch" | "feature" | "body" }>;
+
 /**
  * Discovery is evaluated at one exact state, with canonical identities only.
  * Labels may aid presentation but cannot select the first of multiple matches.
@@ -471,7 +530,7 @@ export interface SemanticDiscovery {
   document?: { label: string };
   variables?: readonly import("@/contracts/modeling/schema").DocumentVariableRecord[];
   settings?: import("@/contracts/modeling/schema").ModelingDocumentSettings;
-  references: readonly { label: string; target: DurableRef }[];
+  references: readonly { label: string; target: DurableRef; owner: SemanticReferenceOwner | null }[];
   history: DurableHistoryAvailability | null;
   model?: {
     capabilities?: import("@/contracts/modeling/schema").ModelingKernelCapabilities;
